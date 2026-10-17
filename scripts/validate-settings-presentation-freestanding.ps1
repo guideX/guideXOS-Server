@@ -36,6 +36,7 @@ $ProductionFlags = @(
 )
 
 $CoreObject = Join-Path $Output "settings_presentation_core.o"
+$LayoutObject = Join-Path $Output "settings_native_layout.o"
 $RefreshObject = Join-Path $Output "settings_display_refresh.o"
 $HarnessObject = Join-Path $Output "settings_presentation_freestanding_harness.o"
 $LinkedObject = Join-Path $Output "settings_presentation_freestanding_linked.o"
@@ -43,6 +44,10 @@ $LinkedObject = Join-Path $Output "settings_presentation_freestanding_linked.o"
 Write-Host "Compiling shared core with production AMD64 freestanding flags."
 & $Compiler.Source @ProductionFlags -c settings_presentation_core.cpp -o $CoreObject
 if ($LASTEXITCODE -ne 0) { throw "Freestanding core compilation failed with exit code $LASTEXITCODE." }
+
+Write-Host "Compiling the native Settings layout helper with production flags."
+& $Compiler.Source @ProductionFlags -c kernel/core/settings_native_layout.cpp -o $LayoutObject
+if ($LASTEXITCODE -ne 0) { throw "Freestanding native layout compilation failed with exit code $LASTEXITCODE." }
 
 Write-Host "Compiling the bounded Display refresh helper with production flags."
 & $Compiler.Source @ProductionFlags -c kernel/core/settings_display_refresh.cpp -o $RefreshObject
@@ -53,10 +58,10 @@ Write-Host "Compiling bounded contract and link harness with production flags."
 if ($LASTEXITCODE -ne 0) { throw "Freestanding harness compilation failed with exit code $LASTEXITCODE." }
 
 Write-Host "Linking core and bounded harness as a freestanding relocatable object."
-& $Linker -r $CoreObject $HarnessObject -o $LinkedObject
+& $Linker -r $CoreObject $LayoutObject $HarnessObject -o $LinkedObject
 if ($LASTEXITCODE -ne 0) { throw "Freestanding relocatable link failed with exit code $LASTEXITCODE." }
 
-foreach ($Object in @($CoreObject, $LinkedObject)) {
+foreach ($Object in @($CoreObject, $LayoutObject, $LinkedObject)) {
     $Undefined = @(& $Nm -u $Object)
     if ($LASTEXITCODE -ne 0) { throw "Could not inspect symbols in $Object." }
     $Unresolved = @($Undefined | Where-Object { $_ -match "\S" })
@@ -70,13 +75,18 @@ if ($LASTEXITCODE -ne 0) { throw "Could not inspect the core symbol table." }
 if ($CoreSymbols -match "ProcessTable|Compositor|ipc::|std::|operator new|__cxa|malloc") {
     throw "A hosted or heap-runtime symbol was found in the freestanding core object."
 }
+$LayoutSymbols = @(& $Nm $LayoutObject)
+if ($LASTEXITCODE -ne 0) { throw "Could not inspect the native Settings layout symbol table." }
+if ($LayoutSymbols -match "std::|operator new|__cxa|malloc|ProcessTable|ipc::") {
+    throw "A hosted or heap-runtime symbol was found in the native Settings layout object."
+}
 $RefreshSymbols = @(& $Nm $RefreshObject)
 if ($LASTEXITCODE -ne 0) { throw "Could not inspect the Display refresh symbol table." }
 if ($RefreshSymbols -match "std::|operator new|__cxa|malloc|ProcessTable|ipc::") {
     throw "A hosted or heap-runtime symbol was found in the freestanding Display refresh object."
 }
 
-Get-Item $CoreObject, $RefreshObject, $HarnessObject, $LinkedObject |
+Get-Item $CoreObject, $LayoutObject, $RefreshObject, $HarnessObject, $LinkedObject |
     Select-Object Name, Length |
     Format-Table -AutoSize
 Write-Host "Freestanding compile, bounded link, and unresolved-symbol checks PASS."

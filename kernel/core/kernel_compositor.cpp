@@ -562,8 +562,27 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
             if (s_dragState.isResize) {
                 int newW = s_dragState.resizeStartW + (mx - s_dragState.startX);
                 int newH = s_dragState.resizeStartH + (my - s_dragState.startY);
-                if (newW < MIN_WINDOW_WIDTH) newW = MIN_WINDOW_WIDTH;
-                if (newH < MIN_WINDOW_HEIGHT) newH = MIN_WINDOW_HEIGHT;
+                int minimumWidth = win->minimumWidth > MIN_WINDOW_WIDTH
+                    ? win->minimumWidth : MIN_WINDOW_WIDTH;
+                int minimumHeight = win->minimumHeight > MIN_WINDOW_HEIGHT
+                    ? win->minimumHeight : MIN_WINDOW_HEIGHT;
+                int maximumWidth = win->maximumWidth;
+                int maximumHeight = win->maximumHeight;
+                const int availableWidth = static_cast<int>(s_workX + s_workW) - win->x;
+                const int availableHeight = static_cast<int>(s_workY + s_workH) - win->y;
+                if (maximumWidth > 0 && availableWidth >= minimumWidth &&
+                    maximumWidth > availableWidth) maximumWidth = availableWidth;
+                if (maximumHeight > 0 && availableHeight >= minimumHeight &&
+                    maximumHeight > availableHeight) maximumHeight = availableHeight;
+                if (maximumWidth > 0 && maximumWidth < minimumWidth)
+                    maximumWidth = minimumWidth;
+                if (maximumHeight > 0 && maximumHeight < minimumHeight)
+                    maximumHeight = minimumHeight;
+
+                if (newW < minimumWidth) newW = minimumWidth;
+                if (newH < minimumHeight) newH = minimumHeight;
+                if (maximumWidth > 0 && newW > maximumWidth) newW = maximumWidth;
+                if (maximumHeight > 0 && newH > maximumHeight) newH = maximumHeight;
                 win->w = newW;
                 win->h = newH;
             } else {

@@ -1,0 +1,24 @@
+# S19 production build identity
+
+Date: 2026-10-17
+Branch: `main`
+Starting commit: `5099c8a8a81e3592730c0155ef248c5b3349779a`
+
+Command:
+
+```powershell
+mingw32-make -B -C kernel ARCH=amd64 BUILD_DIR=build/s19-native-ui-polish-20261017-final2 -j4
+```
+
+Result: exit 0; 257 compile commands; 0 compiler-error diagnostics; 463 warning diagnostic lines. The S18 reference log has 232 warning lines. Comparing normalized file-plus-warning-text signatures finds 224 in each build (zero additions/removals). The final ELF has 21 undefined symbol names, matching S18 exactly. PE import, bound-import, and delay-import directories are zero-sized.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| S18 reference `kernel.elf` | 2,754,008 | `4802680CEFF51C6A372786FDCF0DCA4E16B3B28F705B2DB680EFFFCA3F168CFD` |
+| S18 reference `kernel.pe` | 2,870,645 | `D352F92A0275A2CBF5577832B5D15ACC424DDA219EBAE12746C810F3CF02B983` |
+| S19 `kernel.elf` | 2,760,592 | `5145DA9BD3053CA88CE3A8A7B63E221E67419FC7FF4F9A8A6E903B8627F53082` |
+| S19 `kernel.pe` | 2,880,556 | `F9741C2F2BF90D0C3448C922516AAA7763CE8329820FA4F28835EFA39033079C` |
+| Isolated S19 raw test media (not booted) | 134,249,984 | `2D0D9C2A326551B7055ECA4D8BAEFD70E584AA9B16BD20565E7A406D2C57FB63` |
+| Isolated OVMF copy | 3,653,632 | `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792` |
+
+The raw image derives from the accepted S18 image and contains the final S19 ELF. Its 237-byte `/desktop.cfg` fixture was unchanged during staging (SHA-256 `B3098D72195A16ED553B12EFF7DB9092A056222783A448ABDBBC092448D1273F`). Staging is not guest acceptance.

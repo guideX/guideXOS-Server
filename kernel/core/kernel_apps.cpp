@@ -28,6 +28,7 @@
 #include "include/kernel/settings_native_provider.h"
 #include "include/kernel/settings_display_refresh.h"
 #include "../../built_in_app_metadata.h"
+#include "../../settings_native_layout.h"
 #include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
@@ -42,6 +43,7 @@ namespace kernel {
 namespace apps {
 
 namespace settings = gxos::apps::settings;
+namespace settings_layout = gxos::apps::settings::native_layout;
 
 static bool s_kernelLastDnsUsed = false;
 static char s_kernelLastDnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
@@ -893,6 +895,17 @@ static void appDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color
         drawChar(cx, y, *text, color);
         cx += kGlyphW + kGlyphSpacing;
         text++;
+    }
+}
+
+static void appDrawStrongText(uint32_t x, uint32_t y, const char* text, uint32_t color)
+{
+    uint32_t cx = x;
+    while (text && *text) {
+        drawChar(cx, y, *text, color);
+        drawChar(cx + 1u, y, *text, color);
+        cx += kGlyphW + kGlyphSpacing + 1u;
+        ++text;
     }
 }
 
@@ -16534,7 +16547,8 @@ void NavigatorApp::updateScrollViewport()
 class SettingsNativeApp : public app::KernelApp {
 public:
     SettingsNativeApp()
-        : m_hoverCategory(settings::CategoryId::Count), m_windowFocused(false),
+        : m_hoverCategory(settings::CategoryId::Count),
+          m_hoverPersonalizationControl(-1), m_windowFocused(false),
           m_providerStatus(settings_native::SnapshotStatus::Unavailable),
           m_displayProviderStatus(settings_native::SnapshotStatus::Unavailable),
           m_appearanceProviderStatus(settings_native::SnapshotStatus::Unavailable),
@@ -16573,6 +16587,7 @@ public:
         m_presentation.selectCategory(settings::CategoryId::System);
         m_presentation.setFocusedControl(settings::FocusControl::SystemAbout);
         m_hoverCategory = settings::CategoryId::Count;
+        m_hoverPersonalizationControl = -1;
         m_windowFocused = false;
         m_queueHead = 0;
         m_queueCount = 0;
@@ -16613,6 +16628,10 @@ public:
         m_window->y = 70;
         m_window->w = static_cast<int>(constraints.preferredWidth);
         m_window->h = static_cast<int>(constraints.preferredHeight);
+        m_window->minimumWidth = static_cast<int>(constraints.minimumWidth);
+        m_window->minimumHeight = static_cast<int>(constraints.minimumHeight);
+        m_window->maximumWidth = static_cast<int>(constraints.maximumWidth);
+        m_window->maximumHeight = static_cast<int>(constraints.maximumHeight);
         m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE;
         strcopy(m_window->title, "Settings", app::MAX_TITLE_LEN);
 
@@ -16816,6 +16835,7 @@ public:
     void onWindowBlur() override
     {
         m_windowFocused = false;
+        m_hoverPersonalizationControl = -1;
         m_presentation.setFocusedControl(settings::FocusControl::None);
         serial::puts("[settings-native] focus=lost source=KernelCompositor\n");
         invalidate();
@@ -16831,6 +16851,7 @@ private:
     settings_native::DisplaySnapshotRefreshState m_displayRefreshState;
     settings_native::DisplayConfigurationChangeSignal m_displayRefreshSignal;
     settings::CategoryId m_hoverCategory;
+    int m_hoverPersonalizationControl;
     bool m_windowFocused;
     settings_native::SnapshotStatus m_providerStatus;
     settings_native::SnapshotStatus m_displayProviderStatus;
@@ -16870,8 +16891,8 @@ private:
     static bool getWindowConstraints(void*, settings::SettingsWindowConstraints* output)
     {
         if (!output) return false;
-        output->minimumWidth = 660;
-        output->minimumHeight = 440;
+        output->minimumWidth = settings_layout::kMinimumWindowWidth;
+        output->minimumHeight = settings_layout::kMinimumWindowHeight;
         output->preferredWidth = 760;
         output->preferredHeight = 560;
         output->maximumWidth = 1180;
@@ -17018,6 +17039,8 @@ private:
             category != settings::CategoryId::Display &&
             category != settings::CategoryId::Personalization &&
             category != settings::CategoryId::About) return false;
+        if (category != settings::CategoryId::Personalization)
+            m_hoverPersonalizationControl = -1;
         if (!m_presentation.selectCategory(category)) return false;
         if (category == settings::CategoryId::Display) refreshDisplaySnapshot();
         if (category == settings::CategoryId::Personalization) {
@@ -17668,56 +17691,60 @@ private:
         serial::putc('\n');
     }
 
+    int personalizationControlAt(int x, int y) const
+    {
+        if (m_presentation.selectedCategory() != settings::CategoryId::Personalization ||
+            x < 0 || y < 0) return -1;
+        settings_layout::PageLayout page{};
+        if (!settings_layout::calculatePageLayout(m_drawW, m_drawH, &page)) return -1;
+        settings_layout::PersonalizationLayout geometry{};
+        settings_layout::calculatePersonalizationLayout(page, &geometry);
+        for (uint32_t index = 0u; index < 3u; ++index) {
+            if (settings_layout::contains(geometry.tabs[index], x, y))
+                return static_cast<int>(index);
+        }
+        if (m_showDesktopIconChoices) {
+            for (uint32_t index = 0u; index < 3u; ++index) {
+                if (settings_layout::contains(geometry.iconOptions[index], x, y))
+                    return 10 + static_cast<int>(index);
+            }
+        } else if (m_showWallpaperChoices) {
+            for (uint32_t index = 0u; index < 4u; ++index) {
+                if (settings_layout::contains(geometry.wallpaperOptions[index], x, y))
+                    return 20 + static_cast<int>(index);
+            }
+            if (settings_layout::contains(geometry.previousPage, x, y)) return 30;
+            if (settings_layout::contains(geometry.nextPage, x, y)) return 31;
+        } else {
+            for (uint32_t index = 0u; index < 8u; ++index) {
+                if (settings_layout::contains(geometry.gradientOptions[index], x, y))
+                    return 40 + static_cast<int>(index);
+            }
+        }
+        if (settings_layout::contains(geometry.apply, x, y)) return 50;
+        if (settings_layout::contains(geometry.cancel, x, y)) return 51;
+        return -1;
+    }
+
     bool handlePersonalizationClick(int x, int y)
     {
         if (x < 0 || y < 0) return false;
-        const uint32_t sidebarWidth = m_drawW < 500u ? m_drawW / 3u : 182u;
-        const uint32_t contentX = sidebarWidth + 24u;
-        const uint32_t contentW = m_drawW > sidebarWidth + 44u
-            ? m_drawW - sidebarWidth - 44u : 1u;
-        const uint32_t gridX = contentX + 16u;
-        const uint32_t gridW = contentW > 32u ? contentW - 32u : 1u;
-        const uint32_t tabY = 96u + 151u;
-        const uint32_t tabGap = 5u;
-        const uint32_t tabW = gridW > tabGap * 2u
-            ? (gridW - tabGap * 2u) / 3u : 1u;
-        if (static_cast<uint32_t>(y) >= tabY &&
-            static_cast<uint32_t>(y) < tabY + 24u &&
-            static_cast<uint32_t>(x) >= gridX &&
-            static_cast<uint32_t>(x) < gridX + gridW) {
-            const uint32_t relativeX = static_cast<uint32_t>(x) - gridX;
-            if (relativeX < tabW) {
-                m_showWallpaperChoices = false;
-                m_showDesktopIconChoices = false;
-                m_presentation.setFocusedControl(
-                    settings::FocusControl::PersonalizationChooseBackground);
-            } else if (relativeX < tabW * 2u + tabGap) {
-                m_showWallpaperChoices = true;
-                m_showDesktopIconChoices = false;
-                m_presentation.setFocusedControl(
-                    settings::FocusControl::PersonalizationChooseBackground);
-            } else {
-                m_showWallpaperChoices = false;
-                m_showDesktopIconChoices = true;
-                m_presentation.setFocusedControl(
-                    settings::FocusControl::PersonalizationIconTrash);
-            }
+        settings_layout::PageLayout page{};
+        if (!settings_layout::calculatePageLayout(m_drawW, m_drawH, &page)) return false;
+        settings_layout::PersonalizationLayout geometry{};
+        settings_layout::calculatePersonalizationLayout(page, &geometry);
+
+        for (uint32_t index = 0u; index < 3u; ++index) {
+            if (!settings_layout::contains(geometry.tabs[index], x, y)) continue;
+            m_showWallpaperChoices = index == 1u;
+            m_showDesktopIconChoices = index == 2u;
+            m_presentation.setFocusedControl(m_showDesktopIconChoices
+                ? settings::FocusControl::PersonalizationIconTrash
+                : settings::FocusControl::PersonalizationChooseBackground);
             return true;
         }
 
-        const uint32_t gridY = 96u + 179u;
-        if (m_showDesktopIconChoices &&
-            static_cast<uint32_t>(x) >= gridX &&
-            static_cast<uint32_t>(x) < gridX + gridW &&
-            static_cast<uint32_t>(y) >= gridY + 38u &&
-            static_cast<uint32_t>(y) < gridY + 66u) {
-            const uint32_t iconGap = 4u;
-            const uint32_t iconButtonW = gridW > iconGap * 2u
-                ? (gridW - iconGap * 2u) / 3u : 1u;
-            const uint32_t relativeX = static_cast<uint32_t>(x) - gridX;
-            const uint32_t column = relativeX / (iconButtonW + iconGap);
-            const uint32_t inCellX = relativeX % (iconButtonW + iconGap);
-            if (column >= 3u || inCellX >= iconButtonW) return false;
+        if (m_showDesktopIconChoices) {
             const uint32_t targets[3] = {
                 settings_native::kDesktopIconTargetTrash,
                 settings_native::kDesktopIconTargetFileExplorer,
@@ -17728,70 +17755,51 @@ private:
                 settings::FocusControl::PersonalizationIconFileExplorer,
                 settings::FocusControl::PersonalizationIconSystemSettings
             };
-            m_presentation.setFocusedControl(iconFocus[column]);
-            togglePendingDesktopIconVisibility(targets[column]);
-            return true;
-        }
-        const uint32_t gap = 5u;
-        const uint32_t columns = m_showWallpaperChoices ? 2u : 4u;
-        const uint32_t cellW = gridW > gap * (columns - 1u)
-            ? (gridW - gap * (columns - 1u)) / columns : 1u;
-        if (static_cast<uint32_t>(x) >= gridX &&
-            static_cast<uint32_t>(x) < gridX + gridW &&
-            static_cast<uint32_t>(y) >= gridY &&
-            static_cast<uint32_t>(y) < gridY + 64u &&
-            !m_showDesktopIconChoices &&
-            (m_showWallpaperChoices ? m_wallpaperPresetCount != 0u : m_gradientPresetCount != 0u)) {
-            const uint32_t column = (static_cast<uint32_t>(x) - gridX) / (cellW + gap);
-            const uint32_t rowY = static_cast<uint32_t>(y) - gridY;
-            const uint32_t row = rowY / 34u;
-            const uint32_t inCellX = (static_cast<uint32_t>(x) - gridX) % (cellW + gap);
-            if (column >= columns || row >= 2u || inCellX >= cellW ||
-                rowY % 34u >= 30u) return false;
-            if (m_showWallpaperChoices) {
-                const size_t index = m_wallpaperPage * 4u + row * 2u + column;
+            for (uint32_t index = 0u; index < 3u; ++index) {
+                if (!settings_layout::contains(geometry.iconOptions[index], x, y)) continue;
+                m_presentation.setFocusedControl(iconFocus[index]);
+                togglePendingDesktopIconVisibility(targets[index]);
+                return true;
+            }
+        } else if (m_showWallpaperChoices && m_wallpaperPresetCount != 0u) {
+            for (size_t slot = 0u; slot < 4u; ++slot) {
+                if (!settings_layout::contains(geometry.wallpaperOptions[slot], x, y)) continue;
+                const size_t index = m_wallpaperPage * 4u + slot;
                 if (index >= m_wallpaperPresetCount) return false;
                 choosePendingWallpaper(static_cast<int>(index));
-            } else {
-                const size_t index = static_cast<size_t>(row * 4u + column);
-                if (index >= m_gradientPresetCount) return false;
-                choosePendingGradient(static_cast<int>(index));
+                m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationChooseBackground);
+                return true;
             }
-            m_presentation.setFocusedControl(settings::FocusControl::PersonalizationChooseBackground);
-            return true;
+        } else if (!m_showWallpaperChoices && m_gradientPresetCount != 0u) {
+            for (size_t index = 0u; index < m_gradientPresetCount && index < 8u; ++index) {
+                if (!settings_layout::contains(geometry.gradientOptions[index], x, y)) continue;
+                choosePendingGradient(static_cast<int>(index));
+                m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationChooseBackground);
+                return true;
+            }
         }
 
-        const uint32_t pageY = 96u + 244u;
-        if (m_showWallpaperChoices &&
-            static_cast<uint32_t>(y) >= pageY &&
-            static_cast<uint32_t>(y) < pageY + 18u &&
-            static_cast<uint32_t>(x) >= gridX &&
-            static_cast<uint32_t>(x) < gridX + gridW) {
+        if (m_showWallpaperChoices && m_wallpaperPresetCount != 0u) {
             const size_t pageCount = (m_wallpaperPresetCount + 3u) / 4u;
-            const uint32_t relativeX = static_cast<uint32_t>(x) - gridX;
-            if (relativeX < 72u && m_wallpaperPage > 0u) --m_wallpaperPage;
-            else if (relativeX >= gridW - (gridW < 72u ? gridW : 72u) &&
-                     m_wallpaperPage + 1u < pageCount) ++m_wallpaperPage;
-            return true;
+            if (settings_layout::contains(geometry.previousPage, x, y)) {
+                if (m_wallpaperPage > 0u) --m_wallpaperPage;
+                return true;
+            }
+            if (settings_layout::contains(geometry.nextPage, x, y)) {
+                if (m_wallpaperPage + 1u < pageCount) ++m_wallpaperPage;
+                return true;
+            }
         }
 
-        const uint32_t buttonsY = 96u + 264u;
-        const uint32_t buttonGap = 8u;
-        const uint32_t buttonW = contentW > 32u
-            ? (contentW - 32u - buttonGap) / 2u : 1u;
-        if (static_cast<uint32_t>(y) >= buttonsY &&
-            static_cast<uint32_t>(y) < buttonsY + 28u &&
-            static_cast<uint32_t>(x) >= contentX + 16u &&
-            static_cast<uint32_t>(x) < contentX + 16u + buttonW) {
+        if (settings_layout::contains(geometry.apply, x, y)) {
             m_presentation.setFocusedControl(settings::FocusControl::PersonalizationApply);
             if (m_showDesktopIconChoices) applyPendingDesktopIcons();
             else applyPendingBackground();
             return true;
         }
-        if (static_cast<uint32_t>(y) >= buttonsY &&
-            static_cast<uint32_t>(y) < buttonsY + 28u &&
-            static_cast<uint32_t>(x) >= contentX + 16u + buttonW + buttonGap &&
-            static_cast<uint32_t>(x) < contentX + contentW - 16u) {
+        if (settings_layout::contains(geometry.cancel, x, y)) {
             m_presentation.setFocusedControl(settings::FocusControl::PersonalizationCancel);
             if (m_showDesktopIconChoices) cancelPendingDesktopIcons();
             else cancelPendingGradient();
@@ -17826,10 +17834,13 @@ private:
             if (key == 'p') return selectSupportedCategory(settings::CategoryId::Personalization, "keyboard");
         } else if (event.kind == settings::SettingsInputKind::PointerMove) {
             const settings::CategoryId hovered = categoryAt(event.x, event.y);
-            if (hovered != m_hoverCategory) {
-                m_hoverCategory = hovered;
-                return true;
-            }
+            const int hoveredPersonalization = hovered == settings::CategoryId::Count
+                ? personalizationControlAt(event.x, event.y) : -1;
+            const bool changed = hovered != m_hoverCategory ||
+                hoveredPersonalization != m_hoverPersonalizationControl;
+            m_hoverCategory = hovered;
+            m_hoverPersonalizationControl = hoveredPersonalization;
+            if (changed) return true;
         } else if (event.kind == settings::SettingsInputKind::PointerButton &&
                    event.action == settings::SettingsInputAction::Down) {
             const settings::CategoryId selected = categoryAt(event.x, event.y);
@@ -17842,14 +17853,12 @@ private:
         return false;
     }
 
-    static settings::CategoryId categoryAt(int x, int y)
+    settings::CategoryId categoryAt(int x, int y) const
     {
-        if (x < 12 || x >= 174) return settings::CategoryId::Count;
-        if (y >= 60 && y < 98) return settings::CategoryId::System;
-        if (y >= 106 && y < 144) return settings::CategoryId::Display;
-        if (y >= 152 && y < 190) return settings::CategoryId::Personalization;
-        if (y >= 198 && y < 236) return settings::CategoryId::About;
-        return settings::CategoryId::Count;
+        settings_layout::PageLayout page{};
+        if (!settings_layout::calculatePageLayout(m_drawW, m_drawH, &page))
+            return settings::CategoryId::Count;
+        return settings_layout::categoryAt(page, x, y);
     }
 
     static void appendText(char* output, size_t capacity, const char* value)
@@ -17909,14 +17918,46 @@ private:
         }
     }
 
+    static size_t drawWrappedSettingsValue(uint32_t x, uint32_t y,
+                                          const char* value, uint32_t maxWidth,
+                                          uint32_t color, bool strong)
+    {
+        const uint32_t glyphAdvance = static_cast<uint32_t>(
+            kGlyphW + kGlyphSpacing + (strong ? 1 : 0));
+        uint32_t maxCharacters = glyphAdvance != 0u ? maxWidth / glyphAdvance : 0u;
+        if (maxCharacters == 0u) maxCharacters = 1u;
+        if (maxCharacters > settings_layout::kWrappedTextMaxLength)
+            maxCharacters = settings_layout::kWrappedTextMaxLength;
+
+        settings_layout::TextLineSpan spans[settings_layout::kWrappedTextMaxLines]{};
+        const size_t lineCount = settings_layout::wrapText(
+            value, static_cast<uint16_t>(maxCharacters), spans,
+            settings_layout::kWrappedTextMaxLines);
+        const size_t maxDrawCount = static_cast<size_t>(
+            settings_layout::kWrappedTextMaxLines);
+        const size_t drawCount = lineCount < maxDrawCount
+            ? lineCount : maxDrawCount;
+        for (size_t lineIndex = 0u; lineIndex < drawCount; ++lineIndex) {
+            char line[settings_layout::kWrappedTextMaxLength + 1u] = {};
+            const settings_layout::TextLineSpan& span = spans[lineIndex];
+            for (uint16_t character = 0u; character < span.length; ++character)
+                line[character] = value[span.offset + character];
+            line[span.length] = '\0';
+            const uint32_t lineY = y + static_cast<uint32_t>(lineIndex) * 10u;
+            if (strong) appDrawStrongText(x, lineY, line, color);
+            else appDrawText(x, lineY, line, color);
+        }
+        return lineCount;
+    }
+
     void drawDisplayInformation(uint32_t contentX, uint32_t contentW, uint32_t cardY)
     {
         const settings_native::DisplaySnapshotV1& displaySnapshot =
             m_displayRefreshState.snapshot();
         if (!m_displayRefreshState.hasSnapshot() ||
             displaySnapshot.status != settings_native::DisplayInformationStatus::Available) {
-            appDrawText(contentX + 16u, cardY + 58u,
-                "Active framebuffer information is unavailable.", rgb(236, 174, 122));
+            appDrawText(contentX + 16u, cardY + 48u,
+                "Framebuffer information is unavailable.", rgb(168, 176, 190));
             return;
         }
 
@@ -17937,7 +17978,7 @@ private:
         }
 
         const char* labels[7] = {
-            "Framebuffer size", "Color depth", "Pixel format", "Framebuffer pitch",
+            "Active dimensions", "Color depth", "Pixel format", "Scanline pitch",
             "Logical desktop", "Display layout", "Primary output mode"
         };
         const char* values[7] = {
@@ -17961,16 +18002,39 @@ private:
             appendUnsigned(logicalDesktop, sizeof(logicalDesktop), displaySnapshot.logicalDesktopHeight);
             values[4] = logicalDesktop;
         }
-        const bool stacked = contentW < 420u;
-        const uint32_t rowStart = 50u;
-        const uint32_t rowStep = stacked ? 26u : 34u;
-        const uint32_t valueX = contentX + (contentW > 420u ? 190u : 150u);
-        for (size_t row = 0; row < 7u; ++row) {
-            const uint32_t rowY = cardY + rowStart + rowStep * static_cast<uint32_t>(row);
-            appDrawText(contentX + 16u, rowY, labels[row], rgb(146, 157, 176));
-            appDrawText(stacked ? contentX + 16u : valueX,
-                        stacked ? rowY + 13u : rowY,
-                        values[row], rgb(238, 240, 246));
+
+        const bool available[7] = {
+            (displaySnapshot.flags & settings_native::kDisplayFramebufferWidthAvailable) != 0u,
+            (displaySnapshot.flags & settings_native::kDisplayBitsPerPixelAvailable) != 0u,
+            (displaySnapshot.flags & settings_native::kDisplayPixelFormatAvailable) != 0u,
+            (displaySnapshot.flags & settings_native::kDisplayPitchAvailable) != 0u,
+            (displaySnapshot.flags & settings_native::kDisplayLogicalDesktopWidthAvailable) != 0u,
+            (displaySnapshot.flags & settings_native::kDisplayActiveLayoutModeAvailable) != 0u,
+            (displaySnapshot.flags & settings_native::kDisplayPrimaryModeIdAvailable) != 0u
+        };
+        const uint32_t valueX = contentX + 174u;
+        const uint32_t valueWidth = contentW > 190u ? contentW - 190u : 1u;
+        const uint32_t labelColor = rgb(150, 162, 181);
+        const uint32_t valueColor = rgb(242, 244, 249);
+        const uint32_t unavailableColor = rgb(157, 165, 179);
+
+        appDrawStrongText(contentX + 16u, cardY + 42u, "Framebuffer", rgb(212, 223, 241));
+        for (size_t row = 0u; row < 4u; ++row) {
+            const uint32_t rowY = cardY + 61u + static_cast<uint32_t>(row) * 24u;
+            appDrawText(contentX + 16u, rowY, labels[row], labelColor);
+            drawWrappedSettingsValue(valueX, rowY, values[row], valueWidth,
+                available[row] ? valueColor : unavailableColor, true);
+        }
+
+        framebuffer::fill_rect(contentX + 16u, cardY + 161u,
+            contentW > 32u ? contentW - 32u : 1u, 1u, rgb(67, 74, 88));
+        appDrawStrongText(contentX + 16u, cardY + 171u,
+            "Display topology", rgb(212, 223, 241));
+        for (size_t row = 4u; row < 7u; ++row) {
+            const uint32_t rowY = cardY + 191u + static_cast<uint32_t>(row - 4u) * 25u;
+            appDrawText(contentX + 16u, rowY, labels[row], labelColor);
+            drawWrappedSettingsValue(valueX, rowY, values[row], valueWidth,
+                available[row] ? valueColor : unavailableColor, true);
         }
     }
 
@@ -17991,7 +18055,8 @@ private:
     }
 
     void drawPersonalizationInformation(
-        uint32_t contentX, uint32_t contentW, uint32_t cardY, uint32_t cardH)
+        uint32_t contentX, uint32_t contentW, uint32_t cardY,
+        const settings_layout::PersonalizationLayout& geometry)
     {
         const bool available = m_appearanceSnapshotAvailable &&
             settings_native::validDesktopAppearanceSnapshot(m_appearanceSnapshot);
@@ -18000,22 +18065,20 @@ private:
                 settings_native::DesktopBackgroundKind::Gradient;
 
         if (!available) {
-            appDrawText(contentX + 16u, cardY + 47u,
-                "Desktop appearance information is unavailable.", rgb(236, 174, 122));
+            appDrawText(contentX + 16u, cardY + 42u,
+                "Appearance information is unavailable.", rgb(168, 176, 190));
         } else {
             char line[192] = {};
             strcopy(line,
-                gradient ? "Current: Gradient / " : "Current: Wallpaper image / ",
+                gradient ? "Active background: Gradient / " : "Active background: Wallpaper / ",
                 static_cast<int>(sizeof(line)));
             appendText(line, sizeof(line), m_appearanceSnapshot.backgroundName);
-            appDrawText(contentX + 16u, cardY + 46u, line, rgb(238, 240, 246));
+            appDrawStrongText(contentX + 16u, cardY + 42u, line, rgb(243, 245, 250));
 
             line[0] = '\0';
-            strcopy(line, "ID: ", static_cast<int>(sizeof(line)));
-            appendText(line, sizeof(line), m_appearanceSnapshot.backgroundId);
-            appendText(line, sizeof(line), "   Scale: ");
+            strcopy(line, "Scale mode: ", static_cast<int>(sizeof(line)));
             appendText(line, sizeof(line), m_appearanceSnapshot.backgroundScaleMode);
-            appDrawText(contentX + 16u, cardY + 62u, line, rgb(216, 221, 232));
+            appDrawText(contentX + 16u, cardY + 58u, line, rgb(206, 216, 232));
 
             char topColor[10] = {};
             char bottomColor[10] = {};
@@ -18025,60 +18088,41 @@ private:
             appendHexColor(accentColor, sizeof(accentColor), m_appearanceSnapshot.gradientAccentColor);
             line[0] = '\0';
             if (gradient) {
-                strcopy(line, "Gradient top: ", static_cast<int>(sizeof(line)));
+                strcopy(line, "Colors: Top ", static_cast<int>(sizeof(line)));
                 appendText(line, sizeof(line), topColor);
-                appendText(line, sizeof(line), "   bottom: ");
+                appendText(line, sizeof(line), "  Bottom ");
                 appendText(line, sizeof(line), bottomColor);
-            } else {
-                strcopy(line, "Gradient colors: unavailable for this background.",
-                        static_cast<int>(sizeof(line)));
-            }
-            appDrawText(contentX + 16u, cardY + 78u, line, rgb(216, 221, 232));
-
-            line[0] = '\0';
-            if (gradient) {
-                strcopy(line, "Gradient accent: ", static_cast<int>(sizeof(line)));
+                appendText(line, sizeof(line), "  Accent ");
                 appendText(line, sizeof(line), accentColor);
             } else {
-                strcopy(line, "Built-in gradient selection is available below.",
+                strcopy(line, "Gradient colors: not applicable to this wallpaper.",
                         static_cast<int>(sizeof(line)));
             }
-            appDrawText(contentX + 16u, cardY + 94u, line, rgb(216, 221, 232));
+            appDrawText(contentX + 16u, cardY + 74u, line, rgb(206, 216, 232));
 
             line[0] = '\0';
-            strcopy(line, "Trash: ", static_cast<int>(sizeof(line)));
+            strcopy(line, "Desktop icons: Trash ", static_cast<int>(sizeof(line)));
             appendText(line, sizeof(line),
                 (m_appearanceSnapshot.flags & settings_native::kDesktopAppearanceIconTrashVisible) != 0u
-                    ? "Shown" : "Hidden");
-            appendText(line, sizeof(line), "   This System: ");
+                    ? "Shown; This System " : "Hidden; This System ");
             appendText(line, sizeof(line),
                 (m_appearanceSnapshot.flags & settings_native::kDesktopAppearanceIconThisSystemVisible) != 0u
                     ? "Shown" : "Hidden");
-            appDrawText(contentX + 16u, cardY + 110u, line, rgb(216, 221, 232));
+            appDrawText(contentX + 16u, cardY + 90u, line, rgb(206, 216, 232));
 
             line[0] = '\0';
-            strcopy(line, "File Manager: ", static_cast<int>(sizeof(line)));
+            strcopy(line, "File Explorer ", static_cast<int>(sizeof(line)));
             appendText(line, sizeof(line),
                 (m_appearanceSnapshot.flags & settings_native::kDesktopAppearanceIconFileManagerVisible) != 0u
-                    ? "Shown" : "Hidden");
-            appendText(line, sizeof(line), "   Settings: ");
+                    ? "Shown; System Settings " : "Hidden; System Settings ");
             appendText(line, sizeof(line),
                 (m_appearanceSnapshot.flags & settings_native::kDesktopAppearanceIconSystemSettingsVisible) != 0u
                     ? "Shown" : "Hidden");
-            appDrawText(contentX + 16u, cardY + 126u, line, rgb(216, 221, 232));
+            appDrawText(contentX + 16u, cardY + 106u, line, rgb(206, 216, 232));
         }
 
         const uint32_t gridX = contentX + 16u;
-        const uint32_t gridW = contentW > 32u ? contentW - 32u : 1u;
-        const uint32_t tabGap = 5u;
-        const uint32_t tabW = gridW > tabGap * 2u
-            ? (gridW - tabGap * 2u) / 3u : 1u;
-        const uint32_t tabY = cardY + 151u;
-        const uint32_t gridY = cardY + 179u;
-        const uint32_t gap = 5u;
-        const uint32_t columns = m_showWallpaperChoices ? 2u : 4u;
-        const uint32_t cellW = gridW > gap * (columns - 1u)
-            ? (gridW - gap * (columns - 1u)) / columns : 1u;
+        const uint32_t gridY = m_drawY + geometry.gradientOptions[0].y;
         const int currentGradient = currentGradientPresetIndex();
         const int currentWallpaper = currentWallpaperPresetIndex();
 
@@ -18095,43 +18139,37 @@ private:
             strcopy(pendingLine, m_pendingGradientDirty ? "Pending: " : "Selected: ",
                     static_cast<int>(sizeof(pendingLine)));
             appendText(pendingLine, sizeof(pendingLine), pendingName);
-            appDrawText(contentX + 16u, cardY + 137u, pendingLine,
+            appDrawText(contentX + 16u, cardY + 121u, pendingLine,
                         m_pendingGradientDirty ? rgb(167, 199, 250) : rgb(182, 198, 220));
         }
 
-        const uint32_t wallpaperTabX = gridX + tabW + tabGap;
-        const uint32_t iconsTabX = wallpaperTabX + tabW + tabGap;
-        const uint32_t tabHeight = 22u;
-        framebuffer::fill_rect(gridX, tabY, tabW, tabHeight,
-            !m_showWallpaperChoices && !m_showDesktopIconChoices
-                ? rgb(55, 82, 123) : rgb(43, 47, 58));
-        framebuffer::fill_rect(wallpaperTabX, tabY, tabW, tabHeight,
-            m_showWallpaperChoices ? rgb(55, 82, 123) : rgb(43, 47, 58));
-        framebuffer::fill_rect(iconsTabX, tabY, tabW, tabHeight,
-            m_showDesktopIconChoices ? rgb(55, 82, 123) : rgb(43, 47, 58));
-        appDrawRect(gridX, tabY, tabW, tabHeight,
-            !m_showWallpaperChoices && !m_showDesktopIconChoices
-                ? rgb(115, 166, 245) : rgb(67, 74, 88));
-        appDrawRect(wallpaperTabX, tabY, tabW, tabHeight,
-            m_showWallpaperChoices ? rgb(115, 166, 245) : rgb(67, 74, 88));
-        appDrawRect(iconsTabX, tabY, tabW, tabHeight,
-            m_showDesktopIconChoices ? rgb(115, 166, 245) : rgb(67, 74, 88));
-        appDrawText(gridX + (tabW > 72u ? tabW / 2u - 36u : 3u),
-                    tabY + 8u, "Gradients [G]", rgb(238, 240, 246));
-        appDrawText(wallpaperTabX + (tabW > 76u ? tabW / 2u - 38u : 3u),
-                    tabY + 8u, "Wallpapers [W]", rgb(238, 240, 246));
-        appDrawText(iconsTabX + (tabW > 62u ? tabW / 2u - 31u : 3u),
-                    tabY + 8u, "Icons [I]", rgb(238, 240, 246));
+        const char* tabLabels[3] = { "Gradients [G]", "Wallpapers [W]", "Desktop icons [I]" };
+        const bool tabActive[3] = {
+            !m_showWallpaperChoices && !m_showDesktopIconChoices,
+            m_showWallpaperChoices,
+            m_showDesktopIconChoices
+        };
+        for (uint32_t index = 0u; index < 3u; ++index) {
+            const settings_layout::Rect& tab = geometry.tabs[index];
+            const uint32_t tabX = m_drawX + tab.x;
+            const uint32_t tabY = m_drawY + tab.y;
+            const bool hovered = m_hoverPersonalizationControl == static_cast<int>(index);
+            framebuffer::fill_rect(tabX, tabY, tab.width, tab.height,
+                    tabActive[index] ? rgb(55, 82, 123) :
+                        (hovered ? rgb(52, 58, 70) : rgb(43, 47, 58)));
+            appDrawRect(tabX, tabY, tab.width, tab.height,
+                    tabActive[index] ? rgb(115, 166, 245) :
+                        (hovered ? rgb(147, 165, 194) : rgb(67, 74, 88)));
+            const uint32_t textWidth = index == 2u ? 108u : 84u;
+            const uint32_t textX = tabX + (tab.width > textWidth
+                ? (tab.width - textWidth) / 2u : 3u);
+            appDrawText(textX, tabY + 10u, tabLabels[index], rgb(238, 240, 246));
+        }
 
         if (m_showDesktopIconChoices) {
-            appDrawText(gridX, gridY + 8u, "Desktop Icons", rgb(224, 229, 239));
-            appDrawText(gridX, gridY + 23u,
-                "Auto-arrange is session-only and is not saved by Settings.",
-                rgb(145, 151, 163));
-            const uint32_t iconGap = 4u;
-            const uint32_t iconButtonW = gridW > iconGap * 2u
-                ? (gridW - iconGap * 2u) / 3u : 1u;
-            const uint32_t iconButtonY = gridY + 38u;
+            appDrawText(gridX, gridY + 4u,
+                "Auto-arrange remains session-only and is not saved.",
+                rgb(155, 165, 181));
             const uint32_t targets[3] = {
                 settings_native::kDesktopIconTargetTrash,
                 settings_native::kDesktopIconTargetFileExplorer,
@@ -18145,30 +18183,36 @@ private:
             const char* iconLabels[3] = { "Trash", "File Explorer", "System Settings" };
             const uint32_t currentVisibility = currentDesktopIconVisibility();
             for (uint32_t index = 0u; index < 3u; ++index) {
-                const uint32_t buttonX = gridX + index * (iconButtonW + iconGap);
+                const settings_layout::Rect& control = geometry.iconOptions[index];
+                const uint32_t buttonX = m_drawX + control.x;
+                const uint32_t buttonY = m_drawY + control.y;
+                const uint32_t buttonW = control.width;
+                const uint32_t buttonH = control.height;
                 const bool visible =
                     (m_pendingDesktopIconVisibility & targets[index]) != 0u;
                 const bool currentVisible =
                     (currentVisibility & targets[index]) != 0u;
                 const bool focused = m_windowFocused &&
                     m_presentation.focusedControl() == iconFocus[index];
+                const bool hovered = m_hoverPersonalizationControl == 10 + static_cast<int>(index);
                 const bool enabled = available;
-                framebuffer::fill_rect(buttonX, iconButtonY, iconButtonW, 28u,
+                framebuffer::fill_rect(buttonX, buttonY, buttonW, buttonH,
                     !enabled ? rgb(48, 49, 54) :
-                    (visible != currentVisible ? rgb(47, 70, 100) : rgb(43, 47, 58)));
-                appDrawRect(buttonX, iconButtonY, iconButtonW, 28u,
-                    focused ? rgb(255, 214, 110) :
-                    (enabled ? rgb(96, 130, 178) : rgb(69, 71, 76)));
-                const uint32_t checkX = buttonX + 7u;
-                const uint32_t checkY = iconButtonY + 7u;
-                framebuffer::fill_rect(checkX, checkY, 14u, 14u,
+                    (visible != currentVisible ? rgb(47, 70, 100) :
+                        (hovered ? rgb(53, 58, 70) : rgb(43, 47, 58))));
+                appDrawRect(buttonX, buttonY, buttonW, buttonH,
+                    focused ? rgb(255, 214, 110) : (hovered ? rgb(174, 194, 225) :
+                    (enabled ? rgb(96, 130, 178) : rgb(69, 71, 76))));
+                const uint32_t checkX = buttonX + 8u;
+                const uint32_t checkY = buttonY + (buttonH - 16u) / 2u;
+                framebuffer::fill_rect(checkX, checkY, 16u, 16u,
                     !enabled ? rgb(47, 48, 52) :
                     (visible ? rgb(70, 110, 180) : rgb(30, 32, 37)));
-                appDrawRect(checkX, checkY, 14u, 14u,
+                appDrawRect(checkX, checkY, 16u, 16u,
                     enabled ? rgb(130, 135, 150) : rgb(69, 71, 76));
-                if (visible) appDrawText(checkX + 3u, checkY + 2u, "x",
+                if (visible) appDrawText(checkX + 4u, checkY + 5u, "x",
                     enabled ? rgb(245, 245, 250) : rgb(138, 141, 148));
-                appDrawText(buttonX + 27u, iconButtonY + 14u, iconLabels[index],
+                appDrawText(buttonX + 32u, buttonY + (buttonH - kGlyphH) / 2u, iconLabels[index],
                     enabled ? rgb(238, 240, 246) : rgb(138, 141, 148));
             }
         } else if (m_showWallpaperChoices) {
@@ -18180,38 +18224,38 @@ private:
                 for (size_t slot = 0u; slot < 4u; ++slot) {
                     const size_t index = pageStart + slot;
                     if (index >= m_wallpaperPresetCount) break;
-                    const uint32_t column = static_cast<uint32_t>(slot % 2u);
-                    const uint32_t row = static_cast<uint32_t>(slot / 2u);
-                    const uint32_t cellX = gridX + column * (cellW + gap);
-                    const uint32_t cellY = gridY + row * 34u;
+                    const settings_layout::Rect& cell = geometry.wallpaperOptions[slot];
+                    const uint32_t cellX = m_drawX + cell.x;
+                    const uint32_t cellY = m_drawY + cell.y;
                     const settings_native::BuiltInWallpaperPresetV1& preset =
                         m_wallpaperPresets[index];
                     const bool assetPresent =
                         (preset.flags & settings_native::kBuiltInWallpaperAssetPresent) != 0u;
-                    framebuffer::fill_rect(cellX, cellY, cellW, 30u,
+                    framebuffer::fill_rect(cellX, cellY, cell.width, cell.height,
                         assetPresent ? rgb(43, 47, 58) : rgb(48, 45, 44));
                     const bool thumbDrawn = assetPresent &&
                         desktop::draw_wallpaper_thumbnail_by_id(
-                            preset.id, cellX + 3u, cellY + 4u, 54u, 22u);
+                            preset.id, cellX + 4u, cellY + 5u, 54u, 22u);
                     if (!thumbDrawn) {
-                        framebuffer::fill_rect(cellX + 3u, cellY + 4u, 54u, 22u,
+                        framebuffer::fill_rect(cellX + 4u, cellY + 5u, 54u, 22u,
                             rgb(59, 62, 69));
-                        appDrawText(cellX + 7u, cellY + 15u,
+                        appDrawText(cellX + 8u, cellY + 15u,
                             assetPresent ? "Preview" : "Missing", rgb(190, 195, 205));
                     }
                     const bool pending = static_cast<int>(index) == m_pendingWallpaperIndex;
                     const bool focused = pending && m_windowFocused &&
                         m_presentation.focusedControl() ==
                             settings::FocusControl::PersonalizationChooseBackground;
-                    appDrawRect(cellX, cellY, cellW, 30u,
-                        focused ? rgb(255, 214, 110) :
+                    const bool hovered = m_hoverPersonalizationControl == 20 + static_cast<int>(slot);
+                    appDrawRect(cellX, cellY, cell.width, cell.height,
+                        focused ? rgb(255, 214, 110) : (hovered ? rgb(190, 211, 242) :
                         (pending ? rgb(115, 166, 245) :
                          (static_cast<int>(index) == currentWallpaper
-                            ? rgb(100, 160, 122) : rgb(67, 74, 88))));
+                            ? rgb(100, 160, 122) : rgb(67, 74, 88)))));
                     char label[48] = {};
                     strcopy(label, preset.displayName, static_cast<int>(sizeof(label)));
                     if (static_cast<int>(index) == currentWallpaper) appendText(label, sizeof(label), " *");
-                    appDrawText(cellX + 62u, cellY + 15u, label,
+                    appDrawText(cellX + 64u, cellY + 13u, label,
                         assetPresent ? rgb(238, 240, 246) : rgb(172, 165, 160));
                 }
             }
@@ -18220,26 +18264,26 @@ private:
                 "Built-in gradient presets are unavailable.", rgb(236, 174, 122));
         } else {
             for (size_t index = 0u; index < m_gradientPresetCount; ++index) {
-                const uint32_t column = static_cast<uint32_t>(index % 4u);
-                const uint32_t row = static_cast<uint32_t>(index / 4u);
-                const uint32_t cellX = gridX + column * (cellW + gap);
-                const uint32_t cellY = gridY + row * 34u;
+                const settings_layout::Rect& cell = geometry.gradientOptions[index];
+                const uint32_t cellX = m_drawX + cell.x;
+                const uint32_t cellY = m_drawY + cell.y;
                 const settings_native::BuiltInGradientPresetV1& preset = m_gradientPresets[index];
-                framebuffer::fill_rect(cellX, cellY, cellW, 30u, rgb(43, 47, 58));
-                framebuffer::fill_rect(cellX + 3u, cellY + 5u, 14u, 20u, preset.accentColor);
+                framebuffer::fill_rect(cellX, cellY, cell.width, cell.height, rgb(43, 47, 58));
+                framebuffer::fill_rect(cellX + 4u, cellY + 6u, 16u, 20u, preset.accentColor);
                 const bool pending = static_cast<int>(index) == m_pendingGradientIndex;
                 const bool focused = pending && m_windowFocused &&
                     m_presentation.focusedControl() ==
                         settings::FocusControl::PersonalizationChooseBackground;
-                appDrawRect(cellX, cellY, cellW, 30u,
-                    focused ? rgb(255, 214, 110) :
+                const bool hovered = m_hoverPersonalizationControl == 40 + static_cast<int>(index);
+                appDrawRect(cellX, cellY, cell.width, cell.height,
+                    focused ? rgb(255, 214, 110) : (hovered ? rgb(190, 211, 242) :
                     (pending ? rgb(115, 166, 245) :
                      (static_cast<int>(index) == currentGradient
-                        ? rgb(100, 160, 122) : rgb(67, 74, 88))));
+                        ? rgb(100, 160, 122) : rgb(67, 74, 88)))));
                 char label[40] = {};
                 strcopy(label, preset.displayName, static_cast<int>(sizeof(label)));
                 if (static_cast<int>(index) == currentGradient) appendText(label, sizeof(label), " *");
-                appDrawText(cellX + 21u, cellY + 12u, label, rgb(238, 240, 246));
+                appDrawText(cellX + 25u, cellY + 13u, label, rgb(238, 240, 246));
             }
         }
 
@@ -18249,17 +18293,43 @@ private:
             appendUnsigned(pageLabel, sizeof(pageLabel), static_cast<uint32_t>(m_wallpaperPage + 1u));
             appendText(pageLabel, sizeof(pageLabel), " / ");
             appendUnsigned(pageLabel, sizeof(pageLabel), static_cast<uint32_t>(pageCount));
-            const uint32_t pageY = cardY + 244u;
-            appDrawText(gridX, pageY + 10u, "< Previous", rgb(190, 205, 230));
-            appDrawText(gridX + gridW / 2u - 18u, pageY + 10u,
-                        pageLabel, rgb(182, 198, 220));
-            appDrawText(gridX + gridW - 66u, pageY + 10u, "Next >", rgb(190, 205, 230));
+            const settings_layout::Rect& previous = geometry.previousPage;
+            const settings_layout::Rect& next = geometry.nextPage;
+            const uint32_t previousX = m_drawX + previous.x;
+            const uint32_t previousY = m_drawY + previous.y;
+            const uint32_t nextX = m_drawX + next.x;
+            const uint32_t nextY = m_drawY + next.y;
+            const bool previousEnabled = m_wallpaperPage > 0u;
+            const bool nextEnabled = m_wallpaperPage + 1u < pageCount;
+            const bool previousHovered = m_hoverPersonalizationControl == 30;
+            const bool nextHovered = m_hoverPersonalizationControl == 31;
+            framebuffer::fill_rect(previousX, previousY, previous.width, previous.height,
+                !previousEnabled ? rgb(39, 41, 47) :
+                    (previousHovered ? rgb(53, 59, 72) : rgb(43, 47, 58)));
+            framebuffer::fill_rect(nextX, nextY, next.width, next.height,
+                !nextEnabled ? rgb(39, 41, 47) :
+                    (nextHovered ? rgb(53, 59, 72) : rgb(43, 47, 58)));
+            appDrawRect(previousX, previousY, previous.width, previous.height,
+                previousHovered ? rgb(147, 165, 194) : rgb(67, 74, 88));
+            appDrawRect(nextX, nextY, next.width, next.height,
+                nextHovered ? rgb(147, 165, 194) : rgb(67, 74, 88));
+            appDrawText(previousX + 10u, previousY + 8u, "< Previous",
+                previousEnabled ? rgb(205, 215, 232) : rgb(125, 132, 145));
+            const uint32_t pageLabelWidth = 10u * (kGlyphW + kGlyphSpacing);
+            const uint32_t pageLabelX = contentX + (contentW > pageLabelWidth
+                ? contentW / 2u - pageLabelWidth / 2u : 0u);
+            appDrawText(pageLabelX, previousY + 8u, pageLabel, rgb(182, 198, 220));
+            appDrawText(nextX + 21u, nextY + 8u, "Next >",
+                nextEnabled ? rgb(205, 215, 232) : rgb(125, 132, 145));
         }
 
-        const uint32_t buttonsY = cardY + 264u;
-        const uint32_t buttonGap = 8u;
-        const uint32_t buttonW = contentW > 32u
-            ? (contentW - 32u - buttonGap) / 2u : 1u;
+        const settings_layout::Rect& applyRect = geometry.apply;
+        const settings_layout::Rect& cancelRect = geometry.cancel;
+        const uint32_t buttonsY = m_drawY + applyRect.y;
+        const uint32_t applyX = m_drawX + applyRect.x;
+        const uint32_t cancelX = m_drawX + cancelRect.x;
+        const uint32_t buttonW = applyRect.width;
+        const uint32_t buttonH = applyRect.height;
         const bool canApply = available && (m_showDesktopIconChoices
             ? (m_pendingDesktopIconsDirty && !m_pendingDesktopIconsStale)
             : (!m_pendingGradientStale &&
@@ -18271,19 +18341,25 @@ private:
             m_presentation.focusedControl() == settings::FocusControl::PersonalizationApply;
         const bool cancelFocused = m_windowFocused &&
             m_presentation.focusedControl() == settings::FocusControl::PersonalizationCancel;
-        const uint32_t applyX = contentX + 16u;
-        const uint32_t cancelX = applyX + buttonW + buttonGap;
-        framebuffer::fill_rect(applyX, buttonsY, buttonW, 28u,
-            canApply ? rgb(49, 91, 145) : rgb(55, 57, 64));
-        framebuffer::fill_rect(cancelX, buttonsY, buttonW, 28u, rgb(64, 68, 78));
-        appDrawRect(applyX, buttonsY, buttonW, 28u,
-            applyFocused ? rgb(255, 214, 110) : rgb(96, 130, 178));
-        appDrawRect(cancelX, buttonsY, buttonW, 28u,
-            cancelFocused ? rgb(255, 214, 110) : rgb(96, 102, 116));
-        appDrawText(applyX + (buttonW > 42u ? buttonW / 2u - 18u : 3u),
-                    buttonsY + 11u, "Apply", rgb(245, 247, 252));
-        appDrawText(cancelX + (buttonW > 42u ? buttonW / 2u - 22u : 3u),
-                    buttonsY + 11u, "Cancel", rgb(245, 247, 252));
+        const bool applyHovered = m_hoverPersonalizationControl == 50;
+        const bool cancelHovered = m_hoverPersonalizationControl == 51;
+        framebuffer::fill_rect(applyX, buttonsY, buttonW, buttonH,
+            canApply ? (applyHovered ? rgb(57, 101, 159) : rgb(49, 91, 145)) :
+                (applyHovered ? rgb(63, 66, 75) : rgb(55, 57, 64)));
+        framebuffer::fill_rect(cancelX, m_drawY + cancelRect.y,
+            cancelRect.width, cancelRect.height,
+            cancelHovered ? rgb(78, 83, 95) : rgb(64, 68, 78));
+        appDrawRect(applyX, buttonsY, buttonW, buttonH,
+            applyFocused ? rgb(255, 214, 110) :
+                (applyHovered ? rgb(168, 194, 229) : rgb(96, 130, 178)));
+        appDrawRect(cancelX, m_drawY + cancelRect.y, cancelRect.width, cancelRect.height,
+            cancelFocused ? rgb(255, 214, 110) :
+                (cancelHovered ? rgb(168, 181, 204) : rgb(96, 102, 116)));
+        appDrawText(applyX + (buttonW > 30u ? buttonW / 2u - 15u : 3u),
+                    buttonsY + (buttonH - kGlyphH) / 2u, "Apply", rgb(245, 247, 252));
+        appDrawText(cancelX + (cancelRect.width > 36u ? cancelRect.width / 2u - 18u : 3u),
+                    m_drawY + cancelRect.y + (cancelRect.height - kGlyphH) / 2u,
+                    "Cancel", rgb(245, 247, 252));
 
         const bool personalizationStale = m_showDesktopIconChoices
             ? m_pendingDesktopIconsStale : m_pendingGradientStale;
@@ -18292,13 +18368,70 @@ private:
                 ? "Desktop changed. Re-select icon visibility before applying."
                 : "Desktop changed. Re-select the background before applying.")
             : (m_showDesktopIconChoices ? m_iconStatus : m_gradientStatus);
-        appDrawText(contentX + 16u, cardY + 296u, status,
+        appDrawText(m_drawX + geometry.status.x, m_drawY + geometry.status.y, status,
                     personalizationStale ? rgb(255, 204, 112) : rgb(182, 198, 220));
-        if (!m_showDesktopIconChoices && cardH >= 330u && m_gradientStatusExtra[0]) {
-            appDrawText(contentX + 16u, cardY + 311u, m_gradientStatusExtra,
+        if (!m_showDesktopIconChoices && m_gradientStatusExtra[0]) {
+            appDrawText(m_drawX + geometry.secondaryStatus.x,
+                        m_drawY + geometry.secondaryStatus.y, m_gradientStatusExtra,
                         rgb(255, 175, 148));
         }
-        (void)cardH;
+    }
+
+    void drawSystemAboutInformation(uint32_t contentX, uint32_t contentW,
+                                    uint32_t cardY, bool about)
+    {
+        if (!m_snapshotAvailable) {
+            appDrawText(contentX + 16u, cardY + 50u,
+                "System information is unavailable.", rgb(168, 176, 190));
+            return;
+        }
+
+        const char* releaseVersion =
+            (m_snapshot.flags & settings_native::kSystemAboutOsReleaseVersionAvailable) != 0u
+                ? m_snapshot.osReleaseVersion : "Not defined by this build";
+        const char* systemLabels[3] = { "Product", "Kernel version", "Architecture" };
+        const char* systemValues[3] = {
+            m_snapshot.productName, m_snapshot.kernelVersion, m_snapshot.architecture
+        };
+        const bool systemAvailable[3] = {
+            (m_snapshot.flags & settings_native::kSystemAboutProductNameAvailable) != 0u,
+            (m_snapshot.flags & settings_native::kSystemAboutKernelVersionAvailable) != 0u,
+            (m_snapshot.flags & settings_native::kSystemAboutArchitectureAvailable) != 0u
+        };
+        const char* aboutLabels[4] = {
+            "Product", "OS release version", "Kernel version", "Architecture"
+        };
+        const char* aboutValues[4] = {
+            m_snapshot.productName, releaseVersion, m_snapshot.kernelVersion,
+            m_snapshot.architecture
+        };
+        const bool aboutAvailable[4] = {
+            systemAvailable[0],
+            (m_snapshot.flags & settings_native::kSystemAboutOsReleaseVersionAvailable) != 0u,
+            systemAvailable[1], systemAvailable[2]
+        };
+        const size_t rowCount = about ? 4u : 3u;
+        const uint32_t valueOffset = about ? 194u : 166u;
+        const uint32_t valueX = contentX + valueOffset;
+        const uint32_t valueWidth = contentW > valueOffset + 16u
+            ? contentW - valueOffset - 16u : 1u;
+        const uint32_t labelColor = rgb(150, 162, 181);
+        const uint32_t valueColor = rgb(243, 245, 250);
+        const uint32_t unavailableColor = rgb(165, 173, 187);
+
+        for (size_t row = 0u; row < rowCount; ++row) {
+            const char* label = about ? aboutLabels[row] : systemLabels[row];
+            const char* value = about ? aboutValues[row] : systemValues[row];
+            const bool valueAvailable = about ? aboutAvailable[row] : systemAvailable[row];
+            const uint32_t rowY = cardY + 50u + static_cast<uint32_t>(row) * 42u;
+            appDrawText(contentX + 16u, rowY, label, labelColor);
+            drawWrappedSettingsValue(valueX, rowY, value, valueWidth,
+                valueAvailable ? valueColor : unavailableColor, true);
+            if (row + 1u < rowCount) {
+                framebuffer::fill_rect(contentX + 16u, rowY + 28u,
+                    contentW > 32u ? contentW - 32u : 1u, 1u, rgb(55, 61, 74));
+            }
+        }
     }
 
     void drawPresentation(const settings::SettingsPresentationCore& presentation)
@@ -18308,101 +18441,93 @@ private:
         const uint32_t w = m_drawW;
         const uint32_t h = m_drawH;
         const settings::CategoryId selected = presentation.selectedCategory();
-        const uint32_t sidebarWidth = w < 500u ? w / 3u : 182u;
-        framebuffer::fill_rect(x, y, w, h, rgb(27, 30, 38));
-        framebuffer::fill_rect(x, y, sidebarWidth, h, rgb(34, 37, 46));
-        framebuffer::fill_rect(x + sidebarWidth - 1u, y, 1u, h, rgb(67, 72, 84));
-        appDrawText(x + 18u, y + 20u, "Settings", rgb(238, 240, 246));
-        appDrawText(x + 18u, y + 42u, "System", rgb(160, 174, 194));
-
-        const settings::CategoryId items[4] = {
-            settings::CategoryId::System, settings::CategoryId::Display,
-            settings::CategoryId::Personalization, settings::CategoryId::About
-        };
-        const char* labels[4] = { "System", "Display", "Personalization", "About" };
-        const uint32_t itemY[4] = { y + 60u, y + 106u, y + 152u, y + 198u };
-        for (int i = 0; i < 4; ++i) {
-            const bool active = selected == items[i];
-            const bool hovered = m_hoverCategory == items[i];
-            const uint32_t fill = active ? rgb(62, 79, 112) : (hovered ? rgb(47, 52, 64) : rgb(34, 37, 46));
-            framebuffer::fill_rect(x + 12u, itemY[i], sidebarWidth > 24u ? sidebarWidth - 24u : sidebarWidth, 36u, fill);
-            if (active && m_windowFocused) {
-                appDrawRect(x + 12u, itemY[i], sidebarWidth > 24u ? sidebarWidth - 24u : sidebarWidth, 36u, rgb(115, 166, 245));
-            }
-            appDrawText(x + 24u, itemY[i] + 14u, labels[i], active ? rgb(245, 247, 252) : rgb(190, 195, 205));
+        settings_layout::PageLayout page{};
+        if (!settings_layout::calculatePageLayout(w, h, &page)) {
+            framebuffer::fill_rect(x, y, w, h, rgb(27, 30, 38));
+            appDrawStrongText(x + 18u, y + 18u, "Settings needs a larger window",
+                rgb(238, 240, 246));
+            appDrawText(x + 18u, y + 36u,
+                "Minimum size: 660 x 440", rgb(165, 177, 196));
+            return;
         }
 
-        const uint32_t contentX = x + sidebarWidth + 24u;
-        const uint32_t contentW = w > sidebarWidth + 44u ? w - sidebarWidth - 44u : 1u;
+        framebuffer::fill_rect(x, y, w, h, rgb(27, 30, 38));
+        framebuffer::fill_rect(x + page.sidebar.x, y + page.sidebar.y,
+            page.sidebar.width, page.sidebar.height, rgb(34, 37, 46));
+        framebuffer::fill_rect(x + page.sidebar.width - 1u, y, 1u, h, rgb(67, 72, 84));
+        appDrawStrongText(x + 16u, y + 20u, "PAGES", rgb(176, 190, 212));
+        appDrawText(x + 16u, y + 32u, "Dim pages are deferred",
+            rgb(132, 140, 153));
+
+        for (size_t index = 0u; index < settings::kCategoryCount; ++index) {
+            const settings::CategoryId category = static_cast<settings::CategoryId>(index);
+            const settings::CategoryInfo& info = settings::kCategories[index];
+            const settings_layout::Rect& row = page.categories[index];
+            const bool available = settings_layout::isCategoryAvailable(category);
+            const bool active = selected == category;
+            const bool hovered = m_hoverCategory == category;
+            const uint32_t rowX = x + row.x;
+            const uint32_t rowY = y + row.y;
+            const uint32_t fill = active ? rgb(62, 79, 112) :
+                (hovered ? (available ? rgb(47, 52, 64) : rgb(39, 42, 49))
+                         : rgb(34, 37, 46));
+            framebuffer::fill_rect(rowX, rowY, row.width, row.height, fill);
+            if (active && m_windowFocused) {
+                appDrawRect(rowX, rowY, row.width, row.height, rgb(115, 166, 245));
+                framebuffer::fill_rect(rowX + 1u, rowY + 3u, 2u,
+                    row.height - 6u, rgb(129, 177, 248));
+            }
+            const uint32_t textColor = active ? rgb(245, 247, 252) :
+                (available ? rgb(190, 198, 211) : rgb(125, 132, 145));
+            appDrawText(rowX + 10u, rowY + (row.height - kGlyphH) / 2u,
+                info.label, textColor);
+            if (!available) {
+                framebuffer::fill_rect(rowX + row.width - 8u, rowY + 11u,
+                    4u, 4u, rgb(101, 108, 121));
+            }
+        }
+
+        const uint32_t contentX = x + page.content.x;
+        const uint32_t contentW = page.content.width;
         const bool display = selected == settings::CategoryId::Display;
         const bool personalization = selected == settings::CategoryId::Personalization;
-        const char* pageName = selected == settings::CategoryId::About ? "About" :
-            (personalization ? "Personalization" : (display ? "Display" : "System overview"));
-        appDrawText(contentX, y + 24u, pageName, rgb(243, 245, 250));
-        appDrawText(contentX, y + 47u,
-            selected == settings::CategoryId::About ? "Product and version details" :
-            (personalization ? "Current desktop background and icon settings" :
-             (display ? "Active framebuffer information" : "Read-only information reported by the kernel")),
-            rgb(165, 177, 196));
-        appDrawText(contentX, y + 70u, getRuntimeAppId(), rgb(135, 159, 197));
+        const settings::CategoryInfo* selectedInfo = settings::categoryInfo(selected);
+        const char* pageName = selectedInfo ? selectedInfo->label : "Settings";
+        const char* pageDescription = selected == settings::CategoryId::About
+            ? "Product release and kernel version"
+            : (personalization ? "Desktop appearance and visibility"
+                : (display ? "Active framebuffer; read-only snapshot"
+                           : "Product and hardware details from the kernel"));
+        const uint32_t titleX = x + page.title.x;
+        const uint32_t titleY = y + page.title.y;
+        appDrawStrongText(titleX, titleY, pageName, rgb(245, 247, 252));
+        appDrawText(x + page.subtitle.x, y + page.subtitle.y,
+            pageDescription, rgb(166, 181, 201));
 
-        const uint32_t cardY = y + 96u;
-        const uint32_t cardH = h > 140u ? h - 122u : 1u;
-        framebuffer::fill_rect(contentX, cardY, contentW, cardH, rgb(36, 40, 50));
-        appDrawRect(contentX, cardY, contentW, cardH, rgb(67, 74, 88));
-        appDrawText(contentX + 16u, cardY + 20u,
-            selected == settings::CategoryId::About ? "About this system" :
-                (personalization ? "Background and desktop icons" :
-                 (display ? "Active display information" : "System information")),
-            rgb(224, 229, 239));
+        const uint32_t cardX = x + page.card.x;
+        const uint32_t cardY = y + page.card.y;
+        framebuffer::fill_rect(cardX, cardY, page.card.width, page.card.height,
+            rgb(36, 40, 50));
+        appDrawRect(cardX, cardY, page.card.width, page.card.height, rgb(67, 74, 88));
+        const char* cardTitle = selected == settings::CategoryId::About
+            ? "Product and version details"
+            : (personalization ? "Desktop appearance"
+                : (display ? "Framebuffer and topology" : "System details"));
+        appDrawStrongText(cardX + 16u, cardY + 16u, cardTitle, rgb(225, 233, 245));
         if (display) {
             drawDisplayInformation(contentX, contentW, cardY);
         } else if (personalization) {
-            drawPersonalizationInformation(contentX, contentW, cardY, cardH);
-        } else if (m_snapshotAvailable) {
-            const bool about = selected == settings::CategoryId::About;
-            const uint32_t rowStart = about ? 52u : 58u;
-            const uint32_t rowStep = 40u;
-            const char* releaseVersion =
-                (m_snapshot.flags & settings_native::kSystemAboutOsReleaseVersionAvailable) != 0
-                    ? m_snapshot.osReleaseVersion
-                    : "Not defined by this build";
-            const char* systemLabels[3] = { "Product", "Kernel version", "Architecture" };
-            const char* systemValues[3] = {
-                m_snapshot.productName, m_snapshot.kernelVersion, m_snapshot.architecture
-            };
-            const char* aboutLabels[4] = {
-                "Product", "OS release version", "Kernel version", "Architecture"
-            };
-            const char* aboutValues[4] = {
-                m_snapshot.productName, releaseVersion, m_snapshot.kernelVersion,
-                m_snapshot.architecture
-            };
-            const size_t rowCount = about ? 4u : 3u;
-            const uint32_t valueX = contentX + (about ? 210u : 160u);
-            for (size_t row = 0; row < rowCount; ++row) {
-                const char* label = about ? aboutLabels[row] : systemLabels[row];
-                const char* value = about ? aboutValues[row] : systemValues[row];
-                const uint32_t rowY = cardY + rowStart + rowStep * static_cast<uint32_t>(row);
-                appDrawText(contentX + 16u, rowY, label, rgb(146, 157, 176));
-                if (about && row == 1u &&
-                    (m_snapshot.flags & settings_native::kSystemAboutOsReleaseVersionAvailable) == 0) {
-                    appDrawText(valueX, rowY, value, rgb(171, 177, 189));
-                } else if (about ||
-                           (row == 0u && (m_snapshot.flags & settings_native::kSystemAboutProductNameAvailable) != 0) ||
-                           (row == 1u && (m_snapshot.flags & settings_native::kSystemAboutKernelVersionAvailable) != 0) ||
-                           (row == 2u && (m_snapshot.flags & settings_native::kSystemAboutArchitectureAvailable) != 0)) {
-                    appDrawText(valueX, rowY, value, rgb(238, 240, 246));
-                } else {
-                    appDrawText(valueX, rowY, "Unavailable", rgb(236, 174, 122));
-                }
-            }
+            settings_layout::PersonalizationLayout personalizationLayout{};
+            settings_layout::calculatePersonalizationLayout(page, &personalizationLayout);
+            drawPersonalizationInformation(contentX, contentW, cardY,
+                personalizationLayout);
         } else {
-            appDrawText(contentX + 16u, cardY + 58u, "System information is unavailable.", rgb(236, 174, 122));
+            drawSystemAboutInformation(contentX, contentW, cardY,
+                selected == settings::CategoryId::About);
         }
-        appDrawText(contentX + 12u, y + h - 20u,
+        appDrawText(contentX + 12u, y + page.footer.y,
             personalization
-                ? "Tab: focus   Arrows: choose   Enter: activate"
+                ? "Tab focus   Arrows select   Enter activate   G/W/I sections"
                 : "S System   D Display   P Personalization   A About",
             rgb(145, 151, 163));
     }

@@ -1,0 +1,15 @@
+# S19 QEMU availability checks
+
+All checks were process/command-line inspection only. No VNC, QMP, guest console, process signaling, or termination was performed.
+
+| Observed (local time) | PID | Started (local time) | Identified checkout/media |
+| --- | ---: | --- | --- |
+| 2026-10-17 16:02:41 -07:00 | 35836 | 2026-10-17 15:48:30 -07:00 | `C:\Users\guideX\.codex\visualizations\…\font11r`; VNC `127.0.0.1:14`, QMP `58203` |
+| 2026-10-17 16:05:57 -07:00 | 35836 | 2026-10-17 15:48:30 -07:00 | Same foreign guest remains active |
+| 2026-10-17 16:05:57 -07:00 | 24768 | 2026-10-17 16:03:15 -07:00 | Separate `rx12-native-guest` checkout/media |
+| 2026-10-17 16:05:57 -07:00 | 30460 | 2026-10-17 16:04:36 -07:00 | Sibling `guideXOSServerV1.1_DOTNET_SUPPORT` checkout/media |
+| 2026-10-17 16:09:07 -07:00 | 35836, 24768 | As above | Both remain active; PID 30460 was no longer present. No signal was sent to any process. |
+| 2026-10-17 16:11:38 -07:00 | 35836, 24768, 22780 | 15:48:30, 16:03:15, 16:08:02 | Foreign visualization guest, RX12 guest, and `guideXOSServerV1.1_DOTNET_SUPPORT` guest all active. |
+| 2026-10-17 16:14:08 -07:00 | 35836, 24768, 13004 | 15:48:30, 16:03:15, 16:12:03 | Same visualization and RX12 guests, plus a restarted `guideXOSServerV1.1_DOTNET_SUPPORT` guest. |
+
+The passive recheck window ran from 16:02:41 to 16:14:08 (11 minutes, 27 seconds); QEMU remained occupied. The isolated S19 raw image and OVMF copy were prepared under `out/validation/settings-s19-native-ui-polish-20261017/guest/`. They were not booted because QEMU remained occupied by other workspaces. The S19 guest sequence, screenshots, interaction checks, and `/desktop.cfg` no-write/apply verification remain outstanding.
