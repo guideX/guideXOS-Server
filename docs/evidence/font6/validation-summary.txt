@@ -1,0 +1,9 @@
+FONT6 build and verification summary
+Full AMD64 release build: PASS (no FONT proof macros; full compile and link).
+Full AMD64 proof build: PASS (GXOS_FONT5_QEMU_PROOF and GXOS_FONT6_QEMU_PROOF; full compile and link).
+Release kernel SHA-256: B0336ADA1243974810799D491C2EB4EAF72041864B1D3A0C88364902CFAA6D19
+Proof kernel SHA-256: 7ABF52F4A1F1642F6338CE3CC373C941B0C1E391D309CB21A210F7FB9C0C21E5
+Production object import scan: no std::, exception, RTTI, allocation, or hosted runtime imports in the modified selection/render objects.
+Native presentation validation: PASS (freestanding compile, bounded link, unresolved-symbol check).
+FONT2: 196 checks passed; FONT3: 1150 checks passed; FONT4: 4454 checks passed; FONT5: 228 checks passed; FONT6: 173 checks passed.
+Settings presentation core 2647; Center 89; Users 32; Device/Storage 45; Default Apps 48 plus 100 lifecycle cycles; S6 42; S7 58; native runtime 828 checks passed.

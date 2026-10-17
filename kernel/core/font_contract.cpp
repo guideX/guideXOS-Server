@@ -1,5 +1,6 @@
 #include "include/kernel/font_contract.h"
 #include "include/kernel/font_truetype.h"
+#include "font_contract_internal.h"
 #include "font_glyph_cache_internal.h"
 
 namespace gxos {
@@ -568,6 +569,25 @@ FontStatus FontManagerSetDefaultFont(FontHandle handle)
 	if ((ignored->definition.backend->capabilities & FontCapabilityMetadataOnly) != 0u)
 		return FontStatus::MetadataOnly;
 	if ((ignored->definition.backend->capabilities & FontCapabilityNoDefaultSelection) != 0u)
+		return FontStatus::FontNotSelectable;
+	if (handle.slot == s_defaultHandle.slot && handle.generation == s_defaultHandle.generation)
+		return FontStatus::Ok;
+	if (s_managerGeneration == 0xffffffffu) return FontStatus::GenerationExhausted;
+	s_defaultHandle = handle;
+	++s_managerGeneration;
+	return FontStatus::Ok;
+}
+
+FontStatus internal::fontManagerSetSystemDefaultFont(FontHandle handle)
+{
+	ManagerGuard guard;
+	FontSlot* slot = nullptr;
+	const FontStatus status = validateHandle(handle, &slot);
+	if (status != FontStatus::Ok) return status;
+	if ((slot->definition.backend->capabilities & FontCapabilityMetadataOnly) != 0u)
+		return FontStatus::MetadataOnly;
+	if ((slot->definition.backend->capabilities & FontCapabilityNoDefaultSelection) != 0u &&
+		!slot->definition.trueTypeMetadata)
 		return FontStatus::FontNotSelectable;
 	if (handle.slot == s_defaultHandle.slot && handle.generation == s_defaultHandle.generation)
 		return FontStatus::Ok;

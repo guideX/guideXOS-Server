@@ -1,0 +1,49 @@
+{
+  "formatVersion": 1,
+  "evidence": "FONT6 three-process restart proof; all runs use the same isolated writable ESP directory",
+  "guest": {
+    "machine": "pc,accel=whpx",
+    "memoryMiB": 1024,
+    "networking": "disabled",
+    "persistentStorage": "private directory-backed FAT ESP"
+  },
+  "ownership": {
+    "freshCensusBeforeEachLaunch": true,
+    "foreignQemuProcessesInFinalRun": 0,
+    "onlyPrivateGuestPidsWereStopped": true,
+    "privateEvidenceDirectory": "out/font6-qemu-20261016-fontsupport-final3"
+  },
+  "boots": [
+    {
+      "name": "boot1-live-selection",
+      "result": "PASS",
+      "processId": 27356,
+      "qmpPort": 57901,
+      "freeMemoryMiB": 43052,
+      "kernelSha256": "7ABF52F4A1F1642F6338CE3CC373C941B0C1E391D309CB21A210F7FB9C0C21E5",
+      "screenshotPpmSha256": "FAB258A0E36A28EF9F917705CD75173A325381196A8151C76B2FF1A6F772C5CF",
+      "completedUtc": "2026-10-17T02:03:12.4349226Z"
+    },
+    {
+      "name": "boot2-restored",
+      "result": "PASS",
+      "processId": 26644,
+      "qmpPort": 64794,
+      "freeMemoryMiB": 42795,
+      "kernelSha256": "7ABF52F4A1F1642F6338CE3CC373C941B0C1E391D309CB21A210F7FB9C0C21E5",
+      "screenshotPpmSha256": "B1988F8978F75211A95AD8E7128229244403DEBA8072DCA7E80670CBA3ABF206",
+      "completedUtc": "2026-10-17T02:03:31.0735491Z"
+    },
+    {
+      "name": "boot3-missing-font-fallback",
+      "result": "PASS",
+      "processId": 24388,
+      "qmpPort": 64810,
+      "freeMemoryMiB": 43027,
+      "kernelSha256": "7ABF52F4A1F1642F6338CE3CC373C941B0C1E391D309CB21A210F7FB9C0C21E5",
+      "screenshotPpmSha256": "2A71E516AF7227ED7E84D1401E6822C6F2378318CAF1BD6165C4EC6C5B1F084D",
+      "completedUtc": "2026-10-17T02:03:47.8955207Z"
+    }
+  ],
+  "preliminaryCensus": "A separate preliminary run observed an unrelated QEMU guest in another checkout and left it untouched."
+}

@@ -51,6 +51,11 @@ void init();
 // Draws background, icons, taskbar, menus, and all GUI app windows
 void draw();
 
+#if defined(GXOS_FONT6_QEMU_PROOF)
+// Opens the production Control Panel surface for isolated FONT6 guest proof.
+void open_font6_proof_surface();
+#endif
+
 // Update tick counter for timing (call from main loop, e.g., every 10ms)
 // Also updates IPC, running apps, and taskbar
 void tick();

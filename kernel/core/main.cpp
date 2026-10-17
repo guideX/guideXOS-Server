@@ -13,6 +13,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/process.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/system_font_selection.h"
 #include "include/kernel/kernel_apps.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_compositor.h"
@@ -32,6 +33,109 @@
 #include "display_configuration_service.h"
 #include "include/kernel/file_clipboard.h"
 #include "include/kernel/native_elf_baremetal.h"
+
+#ifdef GXOS_FONT6_QEMU_PROOF
+static bool s_font6SelectedThisBoot = false;
+
+static void font6_qemu_prepare_surface()
+{
+    gxos::gui::SystemFontSelectionSnapshot active = {};
+    gxos::gui::SystemFontConfiguredPreference configured = {};
+    const gxos::gui::SystemFontSelectionStatus activeStatus =
+        gxos::gui::SystemFontSelectionGetActive(&active);
+    const gxos::gui::SystemFontSelectionStatus configuredStatus =
+        gxos::gui::SystemFontSelectionGetConfigured(&configured);
+    kernel::desktop::open_font6_proof_surface();
+
+    if (activeStatus == gxos::gui::SystemFontSelectionStatus::Ok &&
+        configuredStatus == gxos::gui::SystemFontSelectionStatus::Ok &&
+        !configured.isPersisted &&
+        configured.identity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap) {
+        gxos::gui::SystemFontFaceInfo faces[gxos::gui::kSystemFontMaxAvailableFonts] = {};
+        uint32_t count = 0;
+        const gxos::gui::SystemFontSelectionStatus listStatus =
+            gxos::gui::SystemFontSelectionGetAvailable(faces,
+                gxos::gui::kSystemFontMaxAvailableFonts, &count);
+        gxos::gui::SystemFontCandidate candidate = {};
+        gxos::gui::SystemFontSelectionStatus status = listStatus;
+        if (status == gxos::gui::SystemFontSelectionStatus::Ok && count != 0)
+            status = gxos::gui::SystemFontSelectionPrepare(&faces[0].identity, 18, &candidate);
+        else if (status == gxos::gui::SystemFontSelectionStatus::Ok)
+            status = gxos::gui::SystemFontSelectionStatus::NotFound;
+        if (status == gxos::gui::SystemFontSelectionStatus::Ok)
+            status = gxos::gui::SystemFontSelectionApply(&candidate);
+        s_font6SelectedThisBoot = status == gxos::gui::SystemFontSelectionStatus::Ok;
+        kernel::serial::puts("[FONT6] live-apply=");
+        kernel::serial::puts(s_font6SelectedThisBoot ? "PASS" : "FAIL");
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(gxos::gui::SystemFontSelectionStatusName(status));
+        kernel::serial::puts(" size=18\n");
+    } else if (activeStatus == gxos::gui::SystemFontSelectionStatus::Ok &&
+        configuredStatus == gxos::gui::SystemFontSelectionStatus::Ok &&
+        configured.isPersisted && active.isPersisted &&
+        active.identity.kind == gxos::gui::SystemFontIdentityKind::TrueType &&
+        active.identity.stableId == configured.identity.stableId &&
+        active.pixelSize == configured.pixelSize) {
+        kernel::serial::puts("[FONT6] reboot-restore=PASS size=");
+        kernel::serial::put_hex32(active.pixelSize);
+        kernel::serial::puts(" generation=");
+        kernel::serial::put_hex32(active.selectionGeneration);
+        kernel::serial::puts("\n");
+    } else if (activeStatus == gxos::gui::SystemFontSelectionStatus::Ok &&
+        configuredStatus == gxos::gui::SystemFontSelectionStatus::NotFound &&
+        configured.identity.kind == gxos::gui::SystemFontIdentityKind::TrueType &&
+        active.identity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap) {
+        kernel::serial::puts("[FONT6] missing-source-fallback=PASS bitmap=yes configured-font-retained=yes\n");
+    } else {
+        kernel::serial::puts("[FONT6] boot-state=UNEXPECTED configured=");
+        kernel::serial::puts(gxos::gui::SystemFontSelectionStatusName(configuredStatus));
+        kernel::serial::puts(" active=");
+        kernel::serial::puts(gxos::gui::SystemFontSelectionStatusName(activeStatus));
+        kernel::serial::puts("\n");
+    }
+}
+
+static void font6_qemu_finish_surface_draw()
+{
+    gxos::gui::FontGlyphCacheStatistics before = {};
+    const bool haveBefore = gxos::gui::FontGlyphCacheGetStatistics(&before) ==
+        gxos::gui::FontStatus::Ok;
+    kernel::serial::puts("[FONT6] control-panel-system-settings-draw=PASS cache-misses=");
+    kernel::serial::put_hex32(haveBefore ? static_cast<uint32_t>(before.misses) : 0u);
+    kernel::serial::puts(" rasterizations=");
+    kernel::serial::put_hex32(haveBefore ? static_cast<uint32_t>(before.rasterizations) : 0u);
+    kernel::serial::puts("\n");
+    if (!s_font6SelectedThisBoot) return;
+
+    gxos::gui::SystemFontSelectionSnapshot beforeSize = {};
+    gxos::gui::SystemFontSelectionGetActive(&beforeSize);
+    gxos::gui::SystemFontCandidate candidate = {};
+    gxos::gui::SystemFontSelectionStatus status =
+        gxos::gui::SystemFontSelectionPrepareActiveSize(22, &candidate);
+    if (status == gxos::gui::SystemFontSelectionStatus::Ok)
+        status = gxos::gui::SystemFontSelectionApply(&candidate);
+    if (status == gxos::gui::SystemFontSelectionStatus::Ok)
+        kernel::desktop::draw();
+    gxos::gui::SystemFontSelectionSnapshot afterSize = {};
+    gxos::gui::SystemFontSelectionGetActive(&afterSize);
+    gxos::gui::FontGlyphCacheStatistics after = {};
+    const bool haveAfter = gxos::gui::FontGlyphCacheGetStatistics(&after) ==
+        gxos::gui::FontStatus::Ok;
+    const bool generationChanged = afterSize.selectionGeneration > beforeSize.selectionGeneration;
+    kernel::serial::puts("[FONT6] live-size-change=");
+    kernel::serial::puts(status == gxos::gui::SystemFontSelectionStatus::Ok &&
+        afterSize.pixelSize == 22 && generationChanged ? "PASS" : "FAIL");
+    kernel::serial::puts(" size=");
+    kernel::serial::put_hex32(afterSize.pixelSize);
+    kernel::serial::puts(" generation=");
+    kernel::serial::put_hex32(afterSize.selectionGeneration);
+    kernel::serial::puts(" cache-misses=");
+    kernel::serial::put_hex32(haveAfter ? static_cast<uint32_t>(after.misses) : 0u);
+    kernel::serial::puts(" rasterizations=");
+    kernel::serial::put_hex32(haveAfter ? static_cast<uint32_t>(after.rasterizations) : 0u);
+    kernel::serial::puts("\n");
+}
+#endif
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -1002,6 +1106,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::putc('\n');
         
         const bool mounted = mount_persistent_storage();
+        const gxos::gui::SystemFontSelectionStatus fontSelectionStatus =
+            gxos::gui::SystemFontSelectionInitialize();
+        kernel::serial::puts("[FONT6] system selection init=");
+        kernel::serial::puts(gxos::gui::SystemFontSelectionStatusName(fontSelectionStatus));
+        kernel::serial::puts(" active-font fallback-available=yes\n");
 #ifdef GXOS_FONT5_QEMU_PROOF
         font5_qemu_report_mounts("after-persistent-mount");
 #endif
@@ -1024,9 +1133,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #ifdef GXOS_FONT5_QEMU_PROOF
         font5_qemu_report_mounts("after-native-discovery");
 #endif
+#ifdef GXOS_FONT6_QEMU_PROOF
+        font6_qemu_prepare_surface();
+#endif
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
+#ifdef GXOS_FONT6_QEMU_PROOF
+        font6_qemu_finish_surface_draw();
+#endif
 #ifdef GXOS_FONT5_QEMU_PROOF
         font5_qemu_report_mounts("after-desktop-draw");
 #endif

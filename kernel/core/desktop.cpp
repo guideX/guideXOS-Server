@@ -7796,7 +7796,7 @@ static void draw_control_panel()
     framebuffer::fill_rect(dlgX + 8, contentY, kControlPanelW - 16, contentH, rgb(30, 30, 38));
 
     // Draw header text
-    draw_text(dlgX + 20, contentY + 12, "System Settings", rgb(200, 200, 220), 1);
+    draw_system_text(dlgX + 20, contentY + 12, "System Settings", rgb(200, 200, 220));
 
     // Draw icons
     for (int i = 0; i < kControlPanelItemCount; i++) {
@@ -9184,6 +9184,14 @@ void draw()
     // to the back buffer, then copied to the screen in one operation
     framebuffer::present();
 }
+
+#if defined(GXOS_FONT6_QEMU_PROOF)
+void open_font6_proof_surface()
+{
+    s_controlPanelOpen = true;
+    request_redraw();
+}
+#endif
 
 
 
