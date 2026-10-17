@@ -1,12 +1,13 @@
 # Settings S17 — Built-in Wallpaper Mutation Acceptance
 
-**Outcome: B — Partial.** S17 implementation, automated tests, freestanding checks, and the production AMD64 build are complete. The real guest selection UI and asset thumbnails work, but a wallpaper Apply did not pass configuration readback. The transaction reported rollback to Forest, while the QEMU host-backed FAT directory retained a longer file with unexpected trailing bytes after shutdown. No successful wallpaper commit or same-ESP wallpaper persistence is claimed.
+**Outcome: A — Accepted.** The native Settings wallpaper transaction succeeded on an isolated writable raw FAT32 ESP using the production AMD64 kernel. `legacy_guidexos_space` was visibly applied, verified from canonical `/desktop.cfg`, survived a cold QEMU relaunch from the same ESP, and was recognized by native Settings and legacy Display Options. Cancel performed no write. The existing native gradient path also committed `gradient_midnight` afterward. The earlier QEMU `fat:rw` host-directory run remains a separate backend discrepancy and is not treated as production raw-device persistence evidence.
 
 ## Repository and scope
 
 - Repository: `D:\dev\guideXOSServer`
 - Branch: `main`
-- Starting HEAD: `30bf2c9a608adfa7dae18d0b1f4251e5596c435f`
+- Expected starting HEAD from the brief: `30bf2c9a608adfa7dae18d0b1f4251e5596c435f`
+- Actual starting HEAD: `c11a97da4a70702ee8f57964a17a90317705dd86` (the repository had advanced; no branch or history changes were made)
 - Scope: built-in wallpaper selection and shared desktop appearance mutation; no custom imports, arbitrary paths, or new image formats.
 - The existing S16/S16R acceptance artifacts were preserved. S17 validation media is a fresh writable clone of the S16R repaired ESP.
 
@@ -40,6 +41,8 @@ The provider returns only descriptors whose built-in asset is available through 
 
 Personalization now presents the existing gradient controls beside a Wallpapers tab, four wallpaper choices per page, the current background and scale, pending selection, Apply and Cancel, and operation feedback. Selection is separate from the active desktop state. Keyboard navigation and mouse selection were both exercised; selecting Dinos by keyboard and guideXOS Space by mouse changed the pending choice while Forest remained active.
 
+Production acceptance exposed a focus-input mismatch: the PS/2 keyboard path supplies Tab as ASCII `0x09`, while Settings previously recognized only `shell::KEY_TAB`. `kernel/core/kernel_apps.cpp` now accepts both forms. In the raw-FAT guest, Tab focused Apply, and two Tabs focused Cancel, so the normal keyboard transaction path was exercised end to end.
+
 The versioned `ApplyBuiltInWallpaper` request carries an exact structure size, version, bounded built-in ID, and expected appearance revision. The provider authorizes using the runtime-owned Settings application identity assigned by AppManager; it does not trust an identity supplied by the caller. Invalid size/version/ID, unauthorized calls, missing assets, and stale revisions are rejected. A stale revision refreshes authoritative state and clears pending confirmation.
 
 Wallpaper and gradient requests use the same desktop transaction owner. It checks the current revision and asset, captures the current canonical config bytes, applies the requested built-in background, verifies active state, updates only the wallpaper identity in `/desktop.cfg`, and verifies exact saved bytes by readback. On write/readback failure it attempts to restore the prior bytes and runtime background and reports the resulting state. It emits the authoritative appearance change only after a verified commit. The existing gradient API remains a wrapper over the shared persistence path.
@@ -65,69 +68,72 @@ All results below were run during S17, separate from historical S16/S16R counts.
 | Display configuration persistence source smoke | Passed |
 | Settings presentation freestanding compile/link/symbol checks | Passed |
 
-The native runtime suite includes built-in catalog enumeration, request validation and authorization, revision conflicts, no-op and apply flows, persistence failures, readback mismatch, rollback reporting, and repeated failure/commit coverage. The hosted VFS suite checks host-backed reads; it does not qualify the production FAT write path.
+The native runtime suite includes built-in catalog enumeration, request validation and authorization, revision conflicts, no-op and apply flows, persistence failures, readback mismatch, rollback reporting, and repeated failure/commit coverage. The hosted VFS suite checks host-backed reads; it does not qualify the production FAT write path. The production raw-FAT guest run below qualifies the production writer for the exercised wallpaper and gradient commits. One native runtime test compile emitted the existing unused-function warning for `current_stack_pointer()` in `app_launch_target_resolver.cpp`.
 
 ## Production build
 
 Command:
 
 ```powershell
-mingw32-make -B -C kernel ARCH=amd64 BUILD_DIR=build/s17-clean-amd64-20261017
+mingw32-make -B -C kernel ARCH=amd64 BUILD_DIR=build/s17r-clean-amd64-20261017
 ```
 
-The clean AMD64 build compiled 255 units and linked the ELF and PE boot kernels with zero errors. The build log contains 232 unique warning lines, one fewer than the 233 unique warning lines in the accepted S16 comparison; no new warning category or unresolved symbol was introduced. The only unmatched symbols in the comparison were existing platform/runtime hooks (`__dso_handle` and `mainCRTStartup`).
+The clean AMD64 build completed with zero compiler errors. Its log has 463 warning occurrences across 232 unique warning lines; comparison with the previous S17 production log found no added or removed warning lines. The 1,289-test native runtime build emitted the one existing unused-function warning noted above. The freestanding Settings presentation compile/link/symbol script passed with four object files. `nm -u` reports the same 21 undefined symbols as the prior S17 kernel (zero added or removed), and `nm -C` found no `std::` symbols.
 
 | Artifact | Size | SHA-256 |
 | --- | ---: | --- |
-| `kernel/build/s17-clean-amd64-20261017/bin/kernel.elf` | 2,740,176 | `274612CF9DF401460FCF21EA8DC276BA76862893439DA426A8AA90532B0C6EB2` |
-| `kernel/build/s17-clean-amd64-20261017/bin/kernel.pe` | 2,855,932 | `DE22F5E806944BAEFE6C40EE6E704435878B1313F6F552C00122A449EB331B6` |
+| `kernel/build/s17r-clean-amd64-20261017/bin/kernel.elf` | 2,740,176 | `362B3213D1600AA854BA31E718E437A28FC74E49D5C59747E6DCBBBEF1362515` |
+| `kernel/build/s17r-clean-amd64-20261017/bin/kernel.pe` | 2,855,932 | `FFCB1AA4C3F24F7726772583E0B88DAD470FA985DAD5AAD03B9CDA8F62486512` |
 | Isolated ESP bootloader `EFI/BOOT/BOOTX64.EFI` | 56,832 | `E2FDB6AD78E0416AF250BEBBC6541640E3CCDC7DD9A14453C08143B7F4DA48AA` |
 | Isolated ESP wallpaper ramdisk | 67,108,864 | `5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD` |
 
-The S17 ESP manifest is preserved at `docs/evidence/settings-s17-20261017/esp-after.sha256`; build and guest artifact hashes are in `artifact-hashes.txt`.
+The production build log SHA-256 is `80CA6F0DBC216E8E686E7865E58C7CD836701E9F38C12DD4E02450E8A6DB08C9`. The final raw guest image is 134,249,984 bytes with SHA-256 `36FB48547B67BF9B908D986C682CE7499AC74F2AB5802EAB0EAE89DAC3A73303`; this is the same isolated image used for wallpaper Apply, cold relaunch, Cancel, and the later gradient regression. Its initial pre-guest image hash was `7AD2F44C8B02A88B99A5F27FCA450224BF5D8D33508DD0B180AC099FA6DFCDE4`. Hash details and the exact build identity are in `docs/evidence/settings-s17r-20261017/artifact-hashes.txt` and `build-identity.txt`.
 
 ## QEMU evidence and result
 
-The guest used the clean production AMD64 kernel on a fresh writable S16R ESP clone, WHPX, 2 GiB RAM, 1280×800 display, disabled networking, and task-specific QMP port 62022. Other QEMU processes were identified and left untouched. The 2 GiB profile was required for the kernel to mount the wallpaper pack; the guest then displayed actual thumbnails.
+The guest used the final ordinary AMD64 production kernel on a fresh writable raw FAT32 image cloned from the S16R-repaired ESP. The image has a single FAT32 LBA partition beginning at LBA 63, 128 MiB volume, and 134,249,984-byte raw media. QEMU used TCG, 2 GiB RAM, a 1280×800 VGA display, disabled networking, and isolated QMP ports 62319–62322. Before boot, the only foreign QEMU process found used `D:\dev\guideXOSServer_FONT_SUPPORT\out\font9-validation`; it was left untouched and later exited. The separate DM36 QMP console/port was also left untouched. Every S17R guest was shut down through its own QMP `quit` command.
+
+The clean writable test image was made from `ESP-production-seed` with the production `kernel.elf`; the untouched development/release media and sibling repositories were not used. The raw image passed `desktop.cfg` writes, flush, exact readback, a fresh process cold relaunch, Cancel/no-write, and a subsequent gradient commit.
 
 Observed workflow:
 
-1. Initial active state was Forest gradient (`gradient_forest`). The wallpaper page showed real Blue Flower, Dinos, Flower, and guideXOS Space thumbnails.
-2. Keyboard selection of Dinos and mouse selection of guideXOS Space changed the pending selection. The desktop and active identity remained Forest before Apply.
-3. Apply for `legacy_guidexos_space` returned status 8 (`ReadbackFailedRolledBack`). The native UI said “Save failed; previous state was restored.” Serial output reported `active=gradient_forest persisted=gradient_forest`; no wallpaper commit notification was accepted as success.
-4. Cancel cleared a subsequent pending Dinos selection and left Forest active. Legacy Control Panel → Display Options also showed Forest as current.
-5. The S17 host-backed FAT directory’s `desktop.cfg` was 257 bytes before Apply and 263 bytes after the first guest was shut down. The wallpaper ID remained `gradient_forest`, but the 263-byte file ended with unexpected trailing bytes (`autoArrangeDesktopIconurce-b`). The guest serial trace reported successful FAT write calls for 263-byte commit and 257-byte rollback, but commit readback failed. This mismatch between guest rollback verification and the QEMU host directory mirror remains unresolved.
-6. To isolate the second cold boot, the test ESP’s config was restored from the untouched S16R clone’s original 257-byte file. A fresh QEMU process booted from the same isolated ESP and again loaded `gradient_forest`. This verifies the original state loads after relaunch; it does **not** prove wallpaper persistence.
+1. The initial state was `gradient_forest`; Personalization showed the real built-in wallpaper thumbnails. Keyboard arrows selected `legacy_guidexos_space` while Settings continued to report `Current: Gradient / Forest` and `Pending: guideXOS Space`.
+2. The Tab focus fix moved focus to Apply. Enter committed the selection. Serial reports `background.apply status=0 active=legacy_guidexos_space persisted=legacy_guidexos_space`; the FAT writer wrote and flushed `0x107` (263) bytes with `FAT_FILE_WRITE_OK` / `VFS_OK`, then the desktop rendered `/system/wall/gspace.gxi`. The wallpaper is visible around the Settings window and on an unobstructed desktop screenshot.
+3. Settings navigated Display→Personalization with the committed wallpaper intact. Settings was closed; a new QEMU process booted from the same raw image and the serial trace rendered `legacy_guidexos_space` during startup. The unobstructed post-relaunch desktop and reopened Settings both show guideXOS Space as current.
+4. After Apply, Control Panel→Display Options displayed the same wallpaper catalog and highlighted guideXOS Space. The desktop wallpaper remained visible behind the legacy window.
+5. On the cold-relaunch guest, Flower was selected as pending, Tab twice moved focus to Cancel, and Enter cleared the pending selection. UI status was “Background selection cancelled”; Space stayed active. After QEMU shutdown, `/desktop.cfg` was byte-identical to the post-Apply snapshot.
+6. A separate boot of the same isolated image applied `gradient_midnight` through native Settings. Serial reports `background.apply status=0 active=gradient_midnight persisted=gradient_midnight`; the final desktop was stable and showed the gradient. This regression write happened after the wallpaper cold-relaunch proof.
 
-The baseline config itself is 257 bytes and ends with the inherited truncated key `autoArrangeDesktopIcon`. Its SHA-256 is `3E4773874A2E14FBC4D539FF79D3ADF41F87A6909A72AEBE83207D4ECEA6688F`. The post-rollback host-mirror copy is preserved separately with its 263-byte hash. The config restored for the second boot is byte-for-byte equal to baseline. No claim is made that S17 preserved all config bytes through the failed host-backed transaction.
+The baseline `/desktop.cfg` was 257 bytes and had SHA-256 `3E4773874A2E14FBC4D539FF79D3ADF41F87A6909A72AEBE83207D4ECEA6688F`. It contains the inherited incomplete final key `autoArrangeDesktopIcon`; the mutation kept that legacy data unchanged.
 
 | Config snapshot | Bytes | SHA-256 | Difference |
 | --- | ---: | --- | --- |
-| Before guest run | 257 | `3E4773874A2E14FBC4D539FF79D3ADF41F87A6909A72AEBE83207D4ECEA6688F` | Baseline; final key is truncated |
-| Host directory after failed apply/rollback | 263 | `B6D6CA321F6B60FC14F44490C4AE34A99DBE4448A8D082B4EA910AFFFE842536` | Same wallpaper identity and preceding fields; six unexpected trailing bytes |
-| Test ESP after restoring baseline and cold relaunch | 257 | `3E4773874A2E14FBC4D539FF79D3ADF41F87A6909A72AEBE83207D4ECEA6688F` | Byte-for-byte baseline copy |
+| Before guest run | 257 | `3E4773874A2E14FBC4D539FF79D3ADF41F87A6909A72AEBE83207D4ECEA6688F` | Baseline; final key is inherited/truncated |
+| After wallpaper Apply | 263 | `9C54C9CCBA5C4B74833B800E7CA01E21246FD35EA41C79FAAFD1FB27321BD727` | Only `wallpaperId` changed to `legacy_guidexos_space`; remaining bytes identical |
+| After Cancel | 263 | `9C54C9CCBA5C4B74833B800E7CA01E21246FD35EA41C79FAAFD1FB27321BD727` | Byte-identical to post-Apply; Cancel did not write |
+| After gradient regression | 259 | `1AD536A4F2138461C0165AA480C92D15A5E5390429DB8F2732D1CB7D7E4CA19B` | Only `wallpaperId` changed to `gradient_midnight`; remaining bytes identical |
 
-Selected evidence:
+The final raw image’s non-config contents match the seed for 11 of 12 files; the only content difference is the ESP `NvVars` firmware-state file. The exact file-content hash comparison is preserved in `docs/evidence/settings-s17r-20261017/esp-file-content-comparison.txt`. The QEMU `fat:rw` host-directory run previously recorded in the S17 evidence still has its separate 257→263 readback/mirror discrepancy; raw FAT production media succeeds, so that earlier host-directory behavior remains a follow-up rather than a production raw-device failure.
 
-- `docs/evidence/settings-s17-20261017/desktop-whpx2g-initial.png` — initial desktop.
-- `docs/evidence/settings-s17-20261017/wallpapers-tab.png` — populated built-in wallpaper catalog.
-- `docs/evidence/settings-s17-20261017/wallpaper-pending-keyboard.png` and `wallpaper-pending-mouse.png` — pending selection while Forest stays active.
-- `docs/evidence/settings-s17-20261017/wallpaper-applied.png` — apply failure and rollback feedback.
-- `docs/evidence/settings-s17-20261017/cancel-after.png` and `desktop-after-cancel.png` — Cancel result and unchanged desktop.
-- `docs/evidence/settings-s17-20261017/legacy-display-open.png` — legacy Display Options showing Forest as current.
-- `docs/evidence/settings-s17-20261017/desktop-relaunch3-initial.png` — same isolated ESP cold relaunch, still Forest.
-- `docs/evidence/settings-s17-20261017/serial-apply-failure.zip`, `serial-cold-relaunch.zip`, and `qmp-transcript.log` — raw guest serial and input/boot transcripts.
-- `docs/evidence/settings-s17-20261017/desktop.cfg.before`, `desktop.cfg.after-rollback-host`, and `desktop.cfg.after-cold-relaunch` — config copies for byte-level comparison.
+Selected committed evidence:
+
+- `docs/evidence/settings-s17r-20261017/desktop-initial.png`, `wallpaper-pending-space.png`, `wallpaper-applied-settings.png`, and `desktop-applied-space.png` — initial, pending, applied, and unobstructed desktop states.
+- `docs/evidence/settings-s17r-20261017/desktop-cold-relaunch.png` and `settings-after-cold-relaunch.png` — same-image cold relaunch and authoritative Settings state.
+- `docs/evidence/settings-s17r-20261017/legacy-display-options-after-apply.png` — legacy gallery after commit.
+- `docs/evidence/settings-s17r-20261017/wallpaper-pending-cancel.png`, `cancel-focus.png`, and `cancel-result.png` — pending, Cancel focus, and no-pending state.
+- `docs/evidence/settings-s17r-20261017/gradient-applied-settings.png` and `desktop-final-gradient.png` — retained gradient path.
+- `docs/evidence/settings-s17r-20261017/serial-*.log.gz` and `qmp-*.log` — byte-preserved guest traces and input/boot transcripts.
+- `docs/evidence/settings-s17r-20261017/desktop.cfg.before`, `desktop.cfg.after-wallpaper`, `desktop.cfg.after-cancel`, and `desktop.cfg.after-gradient` — raw FAT config snapshots.
 
 ## Limitations and readiness
 
-S17 is not accepted because native wallpaper Apply did not complete a verified persistent commit. The guest did not prove visible image application, Settings close/reopen after a successful commit, image recognition through legacy Display Options, or wallpaper restoration after a same-ESP cold boot. The underlying host-backed FAT readback/mirror discrepancy must be resolved before claiming exact config preservation. No VFS defect was repaired in S17, and no crash-atomic write behavior is claimed.
+S17 is accepted for built-in wallpaper selection and persistence on the production raw FAT device path. This evidence does not qualify QEMU’s `fat:rw` host-directory mirror after the earlier readback anomaly, and it does not establish crash/power-loss atomicity. The baseline’s incomplete `autoArrangeDesktopIcon` key remains unchanged. One diagnostic serial label on Cancel still says `gradient.pending cancelled` even when the pending item was a wallpaper; the visible UI status is correct. No broad VFS rewrite was made.
 
 This result does not advance S9, Settings 1.0, or server v0.3 acceptance.
 
 ## Recommended S18 scope
 
-1. Reproduce the 257→263→257 config mutation on a raw FAT image as well as the QEMU `fat:rw` directory backend, recording guest-sector data, FAT directory length, and host mirror independently.
-2. Correct the demonstrated persistence/readback mismatch at the narrowest layer and add exact-byte FAT overwrite/shortening tests for the production config writer.
-3. Re-run wallpaper commit, full unrelated-field comparison, cancel/no-write verification, legacy Display Options state, Settings close/reopen, and same-ESP cold relaunch using the committed production kernel.
-4. Re-qualify gradient→wallpaper, wallpaper→gradient, two-image switching, rollback, and VFS mount-loss behavior without broad filesystem changes.
+1. Isolate the earlier `fat:rw` host-directory readback/mirror discrepancy from raw FAT behavior, inspecting guest sectors, FAT directory length, and host mirror independently.
+2. Add focused exact-byte FAT overwrite/shortening coverage for the production config writer, including the inherited truncated trailing key.
+3. Re-qualify failed commit/rollback and the misleading `gradient.pending cancelled` serial label for both wallpaper and gradient paths.
+4. Continue bounded cross-application coverage for wallpaper→gradient, two-image switching, conflict refresh, and VFS mount-loss behavior without broad filesystem changes.

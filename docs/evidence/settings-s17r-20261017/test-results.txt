@@ -1,0 +1,19 @@
+S17R fresh regression run summary (2026-10-17)
+
+All commands wrote outputs under out/validation/settings-s17r-20261017. These counts are newly executed for this continuation, not historical S16 counts.
+
+- Native Settings runtime/provider/persistence: 1,289/1,289 passed; lifecycle 100, refresh 250, notification/state transitions 1,000.
+- Settings presentation core: 2,649/2,649 passed.
+- Hosted Settings Center: 89/89 passed.
+- Settings inventory: device 21/21, storage 24/24 passed.
+- Settings users: model 11/11, navigation 8/8, interaction/layout 13/13 passed.
+- Default Apps: model 39/39, interaction 9/9, lifecycle 100/100 passed.
+- App Model identity: 25/25 passed.
+- App Model file activation: 60/60 passed.
+- Hosted VFS reads: 4/4 passed.
+- Compositor pointer buttons: passed.
+- Display configuration persistence source smoke: passed.
+- Freestanding Settings presentation compile/link/unresolved-symbol validation: passed; four objects generated.
+- Clean AMD64 production build: passed with zero compiler errors.
+
+The runtime test build emitted one existing unused-function warning in app_launch_target_resolver.cpp (`current_stack_pointer`). Production build warning inventory was 463 occurrences / 232 unique warning lines, unchanged from the prior S17 warning-line set. No warning suppression was added.

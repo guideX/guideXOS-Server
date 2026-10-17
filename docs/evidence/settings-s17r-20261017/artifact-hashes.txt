@@ -1,0 +1,27 @@
+S17R production and persistence hashes (SHA-256)
+
+Repository source before acceptance fix: c11a97da4a70702ee8f57964a17a90317705dd86
+Branch: main
+Final source change: kernel/core/kernel_apps.cpp recognizes PS/2 ASCII TAB (0x09) as well as shell::KEY_TAB.
+
+Production AMD64 build
+- kernel.elf: 2,740,176 bytes 362B3213D1600AA854BA31E718E437A28FC74E49D5C59747E6DCBBBEF1362515
+- kernel.pe: 2,855,932 bytes FFCB1AA4C3F24F7726772583E0B88DAD470FA985DAD5AAD03B9CDA8F62486512
+- build log: 80CA6F0DBC216E8E686E7865E58C7CD836701E9F38C12DD4E02450E8A6DB08C9
+- EFI/BOOT/BOOTX64.EFI: 56,832 bytes E2FDB6AD78E0416AF250BEBBC6541640E3CCDC7DD9A14453C08143B7F4DA48AA
+- ramdisk.img: 67,108,864 bytes 5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD
+
+Isolated raw FAT32 ESP, out/validation/settings-s17r-20261017/guest/guideXOS-S17R-production.raw
+- Pre-guest image: 134,249,984 bytes 7AD2F44C8B02A88B99A5F27FCA450224BF5D8D33508DD0B180AC099FA6DFCDE4
+- Final image after wallpaper Apply, same-image cold relaunch, Cancel, and gradient regression: 134,249,984 bytes 36FB48547B67BF9B908D986C682CE7499AC74F2AB5802EAB0EAE89DAC3A73303
+- Partition: MBR FAT32 LBA, start 63, volume 128 MiB
+- Kernel identity in ESP: 362B3213D1600AA854BA31E718E437A28FC74E49D5C59747E6DCBBBEF1362515
+
+Canonical /desktop.cfg snapshots
+- before: 257 bytes 3E4773874A2E14FBC4D539FF79D3ADF41F87A6909A72AEBE83207D4ECEA6688F
+- after wallpaper Apply: 263 bytes 9C54C9CCBA5C4B74833B800E7CA01E21246FD35EA41C79FAAFD1FB27321BD727
+- after Cancel: 263 bytes 9C54C9CCBA5C4B74833B800E7CA01E21246FD35EA41C79FAAFD1FB27321BD727 (byte-identical to after Apply)
+- after gradient regression: 259 bytes 1AD536A4F2138461C0165AA480C92D15A5E5390429DB8F2732D1CB7D7E4CA19B
+- baseline→wallpaper and baseline→gradient comparisons: all bytes outside wallpaperId are identical
+- baseline final field autoArrangeDesktopIcon is incomplete/truncated and preserved unchanged
+- 11 of 12 non-config ESP file contents match the seed; only NvVars (OVMF firmware state) changed

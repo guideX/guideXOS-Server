@@ -1,0 +1,7 @@
+phase=S17R
+repository=D:\dev\guideXOSServer
+branch=main
+source_HEAD=c11a97da4a70702ee8f57964a17a90317705dd86
+working_tree_change=kernel/core/kernel_apps.cpp accepts PS/2 ASCII TAB and shell KEY_TAB
+kernel_elf_sha256=362B3213D1600AA854BA31E718E437A28FC74E49D5C59747E6DCBBBEF1362515
+storage=isolated raw FAT32 ESP; partition_start_lba=63

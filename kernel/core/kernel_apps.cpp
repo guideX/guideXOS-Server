@@ -16738,7 +16738,7 @@ public:
     {
         if (key == 0x1Bu) requestClose();
         else if (m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
-            if (key == shell::KEY_TAB) cyclePersonalizationFocus();
+            if (key == '\t' || key == shell::KEY_TAB) cyclePersonalizationFocus();
             else if (key == shell::KEY_LEFT || key == shell::KEY_RIGHT ||
                      key == shell::KEY_UP || key == shell::KEY_DOWN) {
                 if (m_presentation.focusedControl() ==
