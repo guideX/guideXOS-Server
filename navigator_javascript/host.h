@@ -10,6 +10,7 @@ namespace gxos {
 namespace javascript {
 
 class RuntimeContext;
+enum class RuntimeErrorCode : std::uint8_t;
 
 using HostGenerationId = std::uint32_t;
 constexpr HostGenerationId kInvalidHostGenerationId = 0u;
@@ -144,6 +145,20 @@ struct HostValue {
     }
 };
 
+// A synchronous, same-realm callback capability supplied only for the
+// duration of a runtime-aware host call. The embedding host may invoke a
+// JavaScript function without reparsing source or creating another evaluator.
+// Host values are converted by the active evaluator before callback entry.
+class HostFunctionInvoker {
+public:
+    virtual ~HostFunctionInvoker() = default;
+
+    virtual bool invoke(const HostValue& function,
+        const HostValue* arguments, std::size_t argumentCount,
+        const HostValue& thisArgument, Value& result,
+        RuntimeErrorCode& error) = 0;
+};
+
 enum class HostResultCode : std::uint8_t {
     Success = 0,
     PropertyNotFound,
@@ -194,11 +209,15 @@ public:
     // synchronously through RuntimeContext. Existing adapters retain the
     // original call contract by default.
     virtual HostResult callWithRuntime(RuntimeContext& runtime,
+        HostFunctionInvoker& functionInvoker,
+        RuntimeErrorCode& callbackError,
         const HostObjectReference* receiver, std::uint32_t methodId,
         const HostValue* arguments, std::size_t argumentCount,
         HostValue& result)
     {
         (void)runtime;
+        (void)functionInvoker;
+        (void)callbackError;
         return call(receiver, methodId, arguments, argumentCount, result);
     }
 

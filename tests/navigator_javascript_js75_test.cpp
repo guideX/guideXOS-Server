@@ -467,7 +467,11 @@ void testJs75ReadPerformance()
 
 } // namespace
 
+#ifdef GXOS_JS75_TEST_MAIN
+int GXOS_JS75_TEST_MAIN(int argc, char** argv)
+#else
 int main(int argc, char** argv)
+#endif
 {
 #if defined(GXOS_JS74_STACK_INSTRUMENTED) && defined(_WIN32)
     if (argc > 1 && std::string(argv[1]) == "--stack-only")

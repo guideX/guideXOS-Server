@@ -5195,6 +5195,56 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("loaded=") + yesNo(js75MissingLoaded) + ",text=" +
         summarizeText(js75MissingText, 800) + ",error=" + js75MissingError);
 
+    const std::string js76FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js76.html";
+    const bool js76Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js76FixtureUrl);
+    const std::string js76InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS76 bounded collection forEach fixture passes on the hosted server",
+        js76Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js76FixtureUrl &&
+        contains(js76InitialText, "Navigator JavaScript JS76") &&
+        contains(js76InitialText,
+            "JS76:initial:assertions=") &&
+        contains(js76InitialText, ":failures=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js76Loaded) + ",text=" +
+        summarizeText(js76InitialText, 3200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS76 live mutation, callback arguments, thisArg, scopes, adapters, and bounded growth pass",
+        js76Loaded && contains(js76InitialText,
+            "JS76:initial:assertions=") &&
+        contains(js76InitialText, ":failures=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted assertions cover canonical Elements, zero-based indices, the original collection, undefined return, explicit and omitted thisArg, removal, growth, shrinkage, nested forEach, scoped roots, filtered positions, and tag/class adapters");
+    const bool js76Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js76AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS76 nested Event callbacks preserve collection and Event state",
+        js76Click && contains(js76AfterClick,
+            "JS76:event=true:nested=true:inner=true:metadata=true:depth=3:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js76Click) + ",text=" +
+        summarizeText(js76AfterClick, 1600) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const std::string js76InvalidFixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js76-invalid.html";
+    const bool js76InvalidLoaded =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js76InvalidFixtureUrl);
+    const std::string js76InvalidText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js76InvalidError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS76 non-callable callback reports TypeError in the hosted runtime",
+        js76InvalidLoaded && contains(js76InvalidText,
+            "JS76:invalid:calling") &&
+        contains(js76InvalidError, "TypeError"),
+        std::string("loaded=") + yesNo(js76InvalidLoaded) + ",text=" +
+        summarizeText(js76InvalidText, 800) + ",error=" + js76InvalidError);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -2203,7 +2203,8 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorHasAttributeMethod ||
         methodId == kNavigatorSetAttributeMethod ||
         methodId == kNavigatorRemoveAttributeMethod ||
-        methodId == kNavigatorSelectorCollectionItemMethod;
+        methodId == kNavigatorSelectorCollectionItemMethod ||
+        methodId == kNavigatorSelectorCollectionForEachMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -6958,6 +6959,11 @@ HostResult NavigatorScriptHostAdapter::getProperty(
                 kNavigatorSelectorCollectionItemMethod, true, true);
             return HostResult();
         }
+        if (textEquals(property, "forEach")) {
+            result = HostValue::method(
+                kNavigatorSelectorCollectionForEachMethod, true, true);
+            return HostResult();
+        }
         if (textEquals(property, "length")) {
             result = HostValue::number(static_cast<double>(
                 selectorMatchCount(*record)));
@@ -7620,6 +7626,15 @@ HostResult NavigatorScriptHostAdapter::call(
     const HostObjectReference* receiver, std::uint32_t methodId,
     const HostValue* arguments, std::size_t argumentCount, HostValue& result)
 {
+    if (methodId == kNavigatorSelectorCollectionForEachMethod) {
+        if (argumentCount == 0u || arguments == nullptr ||
+            arguments[0].type != HostValueType::Function ||
+            arguments[0].functionId == kInvalidRuntimeFunctionId)
+            return HostResult{HostResultCode::TypeError};
+        // Direct adapter calls have no active evaluator to invoke a JavaScript
+        // callback. Runtime-backed calls use callWithRuntime below.
+        return HostResult{HostResultCode::ReentryUnsupported};
+    }
     if ((methodId == kNavigatorAddEventListenerMethod ||
             methodId == kNavigatorRemoveEventListenerMethod) &&
         argumentCount == 3u) {
@@ -7642,10 +7657,17 @@ HostResult NavigatorScriptHostAdapter::call(
 }
 
 HostResult NavigatorScriptHostAdapter::callWithRuntime(
-    RuntimeContext& runtime, const HostObjectReference* receiver,
+    RuntimeContext& runtime, HostFunctionInvoker& functionInvoker,
+    RuntimeErrorCode& callbackError,
+    const HostObjectReference* receiver,
     std::uint32_t methodId, const HostValue* arguments,
     std::size_t argumentCount, HostValue& result)
 {
+    callbackError = RuntimeErrorCode::None;
+    if (methodId == kNavigatorSelectorCollectionForEachMethod)
+        return selectorCollectionForEach(functionInvoker, callbackError,
+            receiver, arguments, argumentCount, result);
+
     bool optionsSupplied = false;
     bool once = false;
     bool capture = false;
@@ -7698,6 +7720,77 @@ HostResult NavigatorScriptHostAdapter::callWithRuntime(
     }
     return callInternal(receiver, methodId, arguments, argumentCount, result,
         once, capture, optionsSupplied, &runtime);
+}
+
+HostResult NavigatorScriptHostAdapter::selectorCollectionForEach(
+    HostFunctionInvoker& functionInvoker, RuntimeErrorCode& callbackError,
+    const HostObjectReference* receiver, const HostValue* arguments,
+    std::size_t argumentCount, HostValue& result)
+{
+    callbackError = RuntimeErrorCode::None;
+    if (receiver == nullptr ||
+        receiver->kind != kNavigatorSelectorCollectionHostKind)
+        return HostResult{HostResultCode::InvalidObject};
+    const HostResult receiverValidation = validate(*receiver);
+    if (!receiverValidation.succeeded()) return receiverValidation;
+    if (argumentCount == 0u || arguments == nullptr ||
+        arguments[0].type != HostValueType::Function ||
+        arguments[0].functionId == kInvalidRuntimeFunctionId)
+        return HostResult{HostResultCode::TypeError};
+    if (receiver->generation != generation_ || document_ == nullptr)
+        return HostResult{HostResultCode::StaleObject};
+
+    const HostGenerationId entryGeneration = generation_;
+    const SelectorCollectionRecord* record =
+        selectorCollectionFor(receiver->instanceId);
+    if (record == nullptr) return HostResult{HostResultCode::InvalidObject};
+
+    // The bound is captured once. Every permitted index below is resolved
+    // again against the live retained descriptor after the previous callback.
+    const std::size_t initialLength = selectorMatchCount(*record);
+    if (initialLength > kNavigatorScriptMaxDocumentNodes ||
+        document_->structuralElements.size() > limits_.maxDocumentNodes)
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+
+    for (std::size_t index = 0u; index < initialLength; ++index) {
+        if (generation_ != entryGeneration ||
+            receiver->generation != generation_ || document_ == nullptr)
+            return HostResult{HostResultCode::StaleObject};
+        record = selectorCollectionFor(receiver->instanceId);
+        if (record == nullptr) return HostResult{HostResultCode::StaleObject};
+
+        const SelectorCollectionLookup lookup =
+            selectorCollectionLookup(*record, index);
+        if (!lookup.found || lookup.serial == 0u) continue;
+
+        const HostValue callbackArguments[3u] = {
+            HostValue::fromHostObject(HostObjectReference{
+                lookup.serial, entryGeneration, kNavigatorElementHostKind}),
+            HostValue::number(static_cast<double>(index)),
+            HostValue::fromHostObject(*receiver),
+        };
+        const HostValue thisArgument = argumentCount > 1u
+            ? arguments[1] : HostValue::undefined();
+        Value ignored;
+        if (!functionInvoker.invoke(arguments[0], callbackArguments, 3u,
+                thisArgument, ignored, callbackError))
+            return HostResult{HostResultCode::CallFailed};
+
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (selectorCollectionForEachProbe_ != nullptr)
+            selectorCollectionForEachProbe_(
+                selectorCollectionForEachProbeContext_, index);
+#endif
+
+        // Callback code may navigate or otherwise replace the document.
+        // Check even after the final invocation so a stale outer operation
+        // cannot report success after crossing a generation boundary.
+        if (generation_ != entryGeneration ||
+            receiver->generation != generation_ || document_ == nullptr)
+            return HostResult{HostResultCode::StaleObject};
+    }
+    result = HostValue::undefined();
+    return HostResult();
 }
 
 HostResult NavigatorScriptHostAdapter::callInternal(

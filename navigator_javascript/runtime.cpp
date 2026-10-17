@@ -220,16 +220,18 @@ bool parseBoundedArrayIndex(const std::string& key, std::size_t maximum,
 
 } // namespace
 
-class RuntimeContext::Evaluator {
+class RuntimeContext::Evaluator : public HostFunctionInvoker {
 public:
-    explicit Evaluator(RuntimeContext& context) : context_(context) {}
+    explicit Evaluator(RuntimeContext& context)
+        : context_(context),
+          initialActiveCallFrames_(context.activeCallFrames_) {}
 
     ~Evaluator()
     {
         // The evaluator owns the transient call-frame vector.  Clear the
         // public diagnostic counter even if a bounded allocation failure
         // interrupts a call before its normal unwind path runs.
-        context_.activeCallFrames_ = 0;
+        context_.activeCallFrames_ = initialActiveCallFrames_;
     }
 
     bool run()
@@ -259,6 +261,56 @@ public:
         }
         const bool succeeded = invokeFunction(function, arguments,
             SourceLocation(), result);
+        error = context_.result_.runtimeError.code;
+        return succeeded;
+    }
+
+    bool invoke(const HostValue& function, const HostValue* arguments,
+        std::size_t argumentCount, const HostValue& thisArgument,
+        Value& result, RuntimeErrorCode& error) override
+    {
+        error = RuntimeErrorCode::None;
+        if (function.type != HostValueType::Function ||
+            function.functionId == kInvalidRuntimeFunctionId ||
+            context_.functionAt(function.functionId) == nullptr) {
+            error = RuntimeErrorCode::NotCallable;
+            context_.setRuntimeError(error, SourceLocation());
+            return false;
+        }
+        if (argumentCount != 0u && arguments == nullptr) {
+            error = RuntimeErrorCode::InvalidHostReturn;
+            context_.setRuntimeError(error, SourceLocation());
+            return false;
+        }
+
+        std::vector<Value> callbackArguments;
+        try {
+            callbackArguments.reserve(argumentCount);
+            for (std::size_t index = 0; index < argumentCount; ++index) {
+                Value value;
+                if (!context_.convertHostValue(arguments[index],
+                        kInvalidRuntimeHostObjectId, value, error,
+                        SourceLocation())) {
+                    context_.setRuntimeError(error, SourceLocation());
+                    return false;
+                }
+                callbackArguments.push_back(value);
+            }
+        } catch (const std::bad_alloc&) {
+            error = RuntimeErrorCode::AllocationFailure;
+            context_.setRuntimeError(error, SourceLocation());
+            return false;
+        }
+
+        Value receiver;
+        if (!context_.convertHostValue(thisArgument,
+                kInvalidRuntimeHostObjectId, receiver, error,
+                SourceLocation())) {
+            context_.setRuntimeError(error, SourceLocation());
+            return false;
+        }
+        const bool succeeded = invokeFunction(function.functionId,
+            callbackArguments, SourceLocation(), result, receiver);
         error = context_.result_.runtimeError.code;
         return succeeded;
     }
@@ -981,14 +1033,15 @@ private:
     }
 
     void unwindFrame(EnvironmentId callerEnvironment,
-        Value callerThis, std::size_t previousFrameCount)
+        Value callerThis, std::size_t previousFrameCount,
+        std::size_t previousActiveCallFrames)
     {
         currentEnvironment_ = callerEnvironment;
         currentThis_ = callerThis;
         if (frames_.size() > previousFrameCount) {
             frames_.resize(previousFrameCount);
         }
-        context_.activeCallFrames_ = frames_.size();
+        context_.activeCallFrames_ = previousActiveCallFrames;
     }
 
     bool invokeFunction(RuntimeFunctionId functionId,
@@ -1006,7 +1059,7 @@ private:
         }
         if (function->kind == RuntimeContext::FunctionRecord::Kind::Host) {
             return context_.invokeHostMethod(*function, arguments, receiver,
-                callSite, result);
+                callSite, result, *this);
         }
         if (function->declaration == kInvalidAstNodeId ||
             function->closureEnvironment == kInvalidEnvironmentId) {
@@ -1020,7 +1073,7 @@ private:
             fail(RuntimeErrorCode::InvalidFunction, callSite);
             return false;
         }
-        if (frames_.size() >= context_.limits_.maxCallDepth) {
+        if (context_.activeCallFrames_ >= context_.limits_.maxCallDepth) {
             fail(RuntimeErrorCode::CallDepthExceeded, callSite);
             return false;
         }
@@ -1036,6 +1089,8 @@ private:
         const EnvironmentId callerEnvironment = currentEnvironment_;
         const Value callerThis = currentThis_;
         const std::size_t previousFrameCount = frames_.size();
+        const std::size_t previousActiveCallFrames =
+            context_.activeCallFrames_;
         try {
             CallFrame frame;
             frame.function = functionId;
@@ -1048,7 +1103,7 @@ private:
             fail(RuntimeErrorCode::AllocationFailure, callSite);
             return false;
         }
-        context_.activeCallFrames_ = frames_.size();
+        context_.activeCallFrames_ = previousActiveCallFrames + 1u;
         currentEnvironment_ = callEnvironment;
         currentThis_ = receiver;
 
@@ -1057,27 +1112,31 @@ private:
                 function->declaration, index);
             SourceView name;
             if (!identifierName(parameterId, name)) {
-                unwindFrame(callerEnvironment, callerThis, previousFrameCount);
+                unwindFrame(callerEnvironment, callerThis, previousFrameCount,
+                    previousActiveCallFrames);
                 return false;
             }
             const Value argument = index < arguments.size()
                 ? arguments[index] : Value::undefined();
             if (!declareIn(callEnvironment, name, argument,
                 context_.ast_.node(parameterId).location)) {
-                unwindFrame(callerEnvironment, callerThis, previousFrameCount);
+                unwindFrame(callerEnvironment, callerThis, previousFrameCount,
+                    previousActiveCallFrames);
                 return false;
             }
             Environment* target = context_.environmentAt(callEnvironment);
             if (target == nullptr || !target->assign(name, argument)) {
                 fail(RuntimeErrorCode::InvalidAstState,
                     context_.ast_.node(parameterId).location);
-                unwindFrame(callerEnvironment, callerThis, previousFrameCount);
+                unwindFrame(callerEnvironment, callerThis, previousFrameCount,
+                    previousActiveCallFrames);
                 return false;
             }
         }
 
         if (!instantiateDeclarations(declaration.body, callEnvironment)) {
-            unwindFrame(callerEnvironment, callerThis, previousFrameCount);
+            unwindFrame(callerEnvironment, callerThis, previousFrameCount,
+                previousActiveCallFrames);
             return false;
         }
 
@@ -1085,7 +1144,8 @@ private:
         const bool executed = executeStatement(declaration.body, false, true,
             control);
         if (!executed) {
-            unwindFrame(callerEnvironment, callerThis, previousFrameCount);
+            unwindFrame(callerEnvironment, callerThis, previousFrameCount,
+                previousActiveCallFrames);
             return false;
         }
         if (control.kind == ControlKind::Return) {
@@ -1094,10 +1154,12 @@ private:
             result = Value::undefined();
         } else {
             fail(RuntimeErrorCode::InvalidAstState, declaration.location);
-            unwindFrame(callerEnvironment, callerThis, previousFrameCount);
+            unwindFrame(callerEnvironment, callerThis, previousFrameCount,
+                previousActiveCallFrames);
             return false;
         }
-        unwindFrame(callerEnvironment, callerThis, previousFrameCount);
+        unwindFrame(callerEnvironment, callerThis, previousFrameCount,
+            previousActiveCallFrames);
         return true;
     }
 
@@ -1126,7 +1188,7 @@ private:
         const std::vector<Value>& arguments, SourceLocation callSite,
         Value receiver, Value& result)
     {
-        if (frames_.size() >= context_.limits_.maxCallDepth) {
+        if (context_.activeCallFrames_ >= context_.limits_.maxCallDepth) {
             fail(RuntimeErrorCode::CallDepthExceeded, callSite);
             return false;
         }
@@ -1134,6 +1196,8 @@ private:
 
         const Value callerThis = currentThis_;
         const std::size_t previousFrameCount = frames_.size();
+        const std::size_t previousActiveCallFrames =
+            context_.activeCallFrames_;
         try {
             CallFrame frame;
             frame.function = static_cast<RuntimeFunctionId>(
@@ -1146,7 +1210,7 @@ private:
             fail(RuntimeErrorCode::AllocationFailure, callSite);
             return false;
         }
-        context_.activeCallFrames_ = frames_.size();
+        context_.activeCallFrames_ = previousActiveCallFrames + 1u;
         currentThis_ = receiver;
 
         bool succeeded = true;
@@ -1331,7 +1395,8 @@ private:
             break;
         }
 
-        unwindFrame(currentEnvironment_, callerThis, previousFrameCount);
+        unwindFrame(currentEnvironment_, callerThis, previousFrameCount,
+            previousActiveCallFrames);
         return succeeded;
     }
 
@@ -1966,6 +2031,7 @@ private:
     }
 
     RuntimeContext& context_;
+    std::size_t initialActiveCallFrames_ = 0u;
     EnvironmentId currentEnvironment_ = kGlobalEnvironmentId;
     Value currentThis_ = Value::undefined();
     std::vector<CallFrame> frames_;
@@ -1990,11 +2056,8 @@ bool RuntimeContext::invokeFunctionInSameRealm(const Value& function,
 {
     result_ = ScriptResult();
     finalValue_ = Value::undefined();
-    const std::size_t previousActiveCallFrames = activeCallFrames_;
-    activeCallFrames_ = 0;
     const bool succeeded = invokeFunctionForTesting(function, arguments, result,
         error);
-    activeCallFrames_ = previousActiveCallFrames;
     if (!succeeded) result_.status = ScriptStatus::RuntimeFailure;
     return succeeded;
 }
@@ -3362,7 +3425,8 @@ bool RuntimeContext::convertHostValue(const HostValue& value,
 
 bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
     const std::vector<Value>& arguments, Value receiver,
-    SourceLocation location, Value& result)
+    SourceLocation location, Value& result,
+    HostFunctionInvoker& functionInvoker)
 {
     if (activeCallFrames_ >= limits_.maxCallDepth) {
         setRuntimeError(RuntimeErrorCode::CallDepthExceeded, location);
@@ -3445,6 +3509,7 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
     HostResult validation;
     HostResult operation;
     HostValue hostResult;
+    RuntimeErrorCode callbackError = RuntimeErrorCode::None;
     const bool previousHostCallActive = hostCallActive_;
     const bool previousHostReentryAllowed = hostReentryAllowed_;
     hostCallActive_ = true;
@@ -3455,8 +3520,8 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
         validation = stalePureMethod ? HostResult() :
             hostAdapter_->validate(target);
         if (validation.succeeded()) {
-            operation = hostAdapter_->callWithRuntime(*this, receiverReference,
-                function.hostMethod,
+            operation = hostAdapter_->callWithRuntime(*this, functionInvoker,
+                callbackError, receiverReference, function.hostMethod,
                 hostArguments.empty() ? nullptr : hostArguments.data(),
                 hostArguments.size(), hostResult);
         }
@@ -3482,7 +3547,8 @@ bool RuntimeContext::invokeHostMethod(const FunctionRecord& function,
     }
     if (!operation.succeeded()) {
         --activeCallFrames_;
-        setRuntimeError(mapHostResult(operation.code), location);
+        setRuntimeError(callbackError == RuntimeErrorCode::None
+            ? mapHostResult(operation.code) : callbackError, location);
         return false;
     }
     const bool converted = convertHostValue(hostResult, function.hostObject,

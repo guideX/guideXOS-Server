@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS76</title></head>
+<body>
+<h1>Navigator JavaScript JS76</h1>
+<pre id="result">JS76:pending</pre>
+<section id="base-root">
+  <i id="a" class="row"></i><i id="b" class="row"></i>
+</section>
+<section id="remove-root">
+  <i id="rma" class="remove-row"></i>
+  <i id="rmb" class="remove-row"></i>
+  <i id="rmc" class="remove-row"></i>
+</section>
+<section id="grow-root">
+  <i id="g1" class="grow-row"></i><i id="g2" class="grow-row"></i>
+  <i id="g3" class="candidate"></i><i id="g4" class="candidate"></i>
+</section>
+<section id="shrink-root">
+  <i id="s0" class="shrink-row"></i><i id="s1" class="shrink-row"></i>
+  <i id="s2" class="shrink-row"></i><i id="s3" class="shrink-row"></i>
+</section>
+<section id="outer-root">
+  <i id="o0" class="outer-row"></i><i id="o1" class="outer-row"></i>
+  <i id="i0" class="inner-row"></i><i id="i1" class="inner-row"></i>
+</section>
+<section id="left-root"><i id="la" class="scope-row"></i></section>
+<section id="right-root"><i id="ra" class="scope-row"></i></section>
+<section id="position-root">
+  <li id="p0" class="pos selected"></li>
+  <li id="p1" class="pos selected"></li>
+  <li id="p2" class="pos selected"></li>
+  <li id="p3" class="pos selected"></li>
+</section>
+<b id="tag0" class="by-class"></b><b id="tag1" class="by-class"></b>
+<button id="event-a" type="button">Run nested collection events</button>
+<button id="event-b" type="button">Nested event B</button>
+<button id="event-c" type="button">Nested event C</button>
+<section id="event-rows">
+  <i id="ea0" class="event-a-row"></i><i id="ea1" class="event-a-row"></i>
+  <i id="eb0" class="event-b-row"></i><i id="eb1" class="event-b-row"></i>
+  <i id="ec0" class="event-c-row"></i>
+</section>
+<script>
+var assertions = 0;
+var failures = 0;
+var failureAt = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) {
+    failures++;
+    if (failureAt === 0) failureAt = assertions;
+  }
+}
+
+var rows = document.querySelectorAll('.row');
+var a = document.getElementById('a');
+var b = document.getElementById('b');
+var visited = '';
+var visitIndices = '';
+var thirdArgumentOk = true;
+var returned = rows.forEach(function(element, index, collection) {
+  visited = visited + element.id;
+  visitIndices = visitIndices + index;
+  thirdArgumentOk = thirdArgumentOk && collection === rows &&
+    collection[index] === element && collection.item(index) === element;
+  element.setAttribute('data-visited', 'yes');
+  return index + 10;
+});
+verify(returned === undefined);
+verify(visited === 'ab' && visitIndices === '01');
+verify(thirdArgumentOk && rows[0] === a && rows.item(1) === b);
+verify(a.getAttribute('data-visited') === 'yes' &&
+  b.getAttribute('data-visited') === 'yes');
+var emptyCalls = 0;
+var emptyResult = document.querySelectorAll('.absent').forEach(function() {
+  emptyCalls++;
+});
+verify(emptyResult === undefined && emptyCalls === 0);
+var oneResult = document.querySelectorAll('#a').forEach(function(element,
+    index, collection) {
+  verify(element === a && index === 0 && collection.length === 1);
+});
+verify(oneResult === undefined);
+
+var receiver = {tag: 'receiver'};
+var explicitThisOk = true;
+rows.forEach(function(element, index, collection) {
+  explicitThisOk = explicitThisOk && this.tag === 'receiver' &&
+    collection === rows;
+}, receiver);
+var omittedThisOk = false;
+rows.forEach(function() { omittedThisOk = this === undefined; });
+verify(explicitThisOk && omittedThisOk);
+
+var removeRows = document.querySelectorAll('.remove-row');
+var removeIds = '';
+var removeIndices = '';
+var removeCount = 0;
+removeRows.forEach(function(element, index, collection) {
+  removeCount++;
+  removeIds = removeIds + element.id;
+  removeIndices = removeIndices + index;
+  if (index === 0) document.querySelectorAll('#rma').item(0).removeAttribute('class');
+  verify(collection === removeRows);
+});
+verify(removeCount === 2 && removeIds === 'rmarmc' &&
+  removeIndices === '01');
+
+var growRows = document.querySelectorAll('.grow-row');
+var growIds = '';
+var growIndices = '';
+var growCount = 0;
+var lateThree = document.getElementById('g3');
+var lateFour = document.getElementById('g4');
+growRows.forEach(function(element, index, collection) {
+  growCount++;
+  growIds = growIds + element.id;
+  growIndices = growIndices + index;
+  if (index === 0) lateThree.setAttribute('class', 'grow-row');
+  if (index === 1) lateFour.setAttribute('class', 'grow-row');
+  verify(collection === growRows);
+});
+verify(growCount === 2 && growIds === 'g1g2' && growIndices === '01');
+verify(growRows.length === 4 && growRows[2] === lateThree &&
+  growRows[3] === lateFour);
+
+var shrinkRows = document.querySelectorAll('.shrink-row');
+var shrinkCount = 0;
+var shrinkIndices = '';
+shrinkRows.forEach(function(element, index) {
+  shrinkCount++;
+  shrinkIndices = shrinkIndices + index;
+  if (index === 0) {
+    document.querySelectorAll('#s1').item(0).removeAttribute('class');
+    document.querySelectorAll('#s2').item(0).removeAttribute('class');
+    document.querySelectorAll('#s3').item(0).removeAttribute('class');
+  }
+});
+verify(shrinkCount === 1 && shrinkIndices === '0');
+
+var outerRows = document.querySelectorAll('.outer-row');
+var innerRows = document.querySelectorAll('.inner-row');
+var outerCount = 0;
+var innerCount = 0;
+var outerIndices = '';
+var innerIndices = '';
+var nestedListsOk = true;
+outerRows.forEach(function(element, index, collection) {
+  outerCount++;
+  outerIndices = outerIndices + index;
+  nestedListsOk = nestedListsOk && collection === outerRows;
+  innerRows.forEach(function(inner, innerIndex, innerCollection) {
+    innerCount++;
+    innerIndices = innerIndices + innerIndex;
+    nestedListsOk = nestedListsOk && innerCollection === innerRows &&
+      innerCollection[innerIndex] === inner;
+  });
+});
+verify(outerCount === 2 && outerIndices === '01');
+verify(innerCount === 4 && innerIndices === '0101' && nestedListsOk);
+
+var leftRoot = document.getElementById('left-root');
+var rightRoot = document.getElementById('right-root');
+var leftRows = leftRoot.querySelectorAll('.scope-row');
+var rightRows = rightRoot.querySelectorAll('.scope-row');
+var scopeOk = true;
+leftRows.forEach(function(element, index, collection) {
+  scopeOk = scopeOk && index === 0 && element.id === 'la' &&
+    collection === leftRows;
+});
+rightRows.forEach(function(element, index, collection) {
+  scopeOk = scopeOk && index === 0 && element.id === 'ra' &&
+    collection === rightRows;
+});
+verify(scopeOk && leftRows.length === 1 && rightRows.length === 1);
+
+var filtered = document.querySelectorAll('.pos:nth-child(odd of .selected)');
+var filteredIds = '';
+var filteredIndices = '';
+filtered.forEach(function(element, index, collection) {
+  filteredIds = filteredIds + element.id;
+  filteredIndices = filteredIndices + index;
+  if (index === 0) document.querySelectorAll('#p0').item(0).setAttribute('class', 'pos');
+  verify(collection === filtered);
+});
+verify(filteredIds === 'p0p3' && filteredIndices === '01');
+verify(filtered.length === 2 && filtered[0].id === 'p1' &&
+  filtered[1].id === 'p3');
+
+var tags = document.getElementsByTagName('b');
+var tagCount = 0;
+var tagIndices = '';
+tags.forEach(function(element, index, collection) {
+  tagCount++;
+  tagIndices = tagIndices + index;
+  verify(collection === tags && element.tagName === 'B');
+});
+var classes = document.getElementsByClassName('by-class');
+var classCount = 0;
+classes.forEach(function(element, index, collection) {
+  classCount++;
+  verify(collection === classes && index === classCount - 1);
+});
+verify(tagCount === 2 && tagIndices === '01' && classCount === 2);
+
+document.getElementById('result').textContent =
+  'JS76:initial:assertions=' + assertions + ':failures=' + failures +
+  ':malformed=true';
+
+var eventA = document.getElementById('event-a');
+var eventB = document.getElementById('event-b');
+var eventC = document.getElementById('event-c');
+var resultElement = document.getElementById('result');
+var outerEvent;
+var middleEvent;
+var outerResult = false;
+var middleResult = false;
+var innerResult = false;
+var metadataResult = false;
+var eventAIds = '';
+var eventBIds = '';
+var eventCIds = '';
+eventA.addEventListener('click', function(event) {
+  outerEvent = event;
+  var eventRows = document.querySelectorAll('.event-a-row');
+  var callbackIndices = '';
+  eventRows.forEach(function(element, index, collection) {
+    eventAIds = eventAIds + element.id;
+    callbackIndices = callbackIndices + index;
+    element.setAttribute('data-event', 'a');
+    outerResult = outerResult || collection === eventRows;
+  });
+  event.preventDefault();
+  eventB.click();
+  var metadata = event.target === eventA &&
+    event.currentTarget === eventA && event.eventPhase === 2 &&
+    event.defaultPrevented;
+  outerResult = outerResult && callbackIndices === '01' && metadata;
+  metadataResult = metadata && middleMetadata && innerMetadata;
+  resultElement.textContent = 'JS76:event=' + outerResult + ':nested=' +
+    middleResult + ':inner=' + innerResult + ':metadata=' + metadataResult +
+    ':depth=3:failures=' + failures;
+});
+var middleMetadata = false;
+var innerMetadata = false;
+eventB.addEventListener('click', function(event) {
+  middleEvent = event;
+  var eventRows = document.querySelectorAll('.event-b-row');
+  var callbackIndices = '';
+  eventRows.forEach(function(element, index, collection) {
+    eventBIds = eventBIds + element.id;
+    callbackIndices = callbackIndices + index;
+    element.setAttribute('data-event', 'b');
+    middleResult = middleResult || collection === eventRows;
+  });
+  eventC.click();
+  var metadata = event.target === eventB &&
+    event.currentTarget === eventB && event.eventPhase === 2 &&
+    !event.defaultPrevented && event !== outerEvent;
+  middleResult = middleResult && callbackIndices === '01' && metadata;
+  middleMetadata = metadata;
+});
+eventC.addEventListener('click', function(event) {
+  var eventRows = document.querySelectorAll('.event-c-row');
+  eventRows.forEach(function(element, index, collection) {
+    eventCIds = eventCIds + element.id;
+    element.setAttribute('data-event', 'c');
+    innerResult = collection === eventRows && index === 0;
+  });
+  var distinct = event !== outerEvent && event !== middleEvent;
+  innerMetadata = event.target === eventC &&
+    event.currentTarget === eventC && event.eventPhase === 2 &&
+    !event.defaultPrevented && distinct;
+  innerResult = innerResult && innerMetadata;
+});
+</script>
+</body>
+</html>

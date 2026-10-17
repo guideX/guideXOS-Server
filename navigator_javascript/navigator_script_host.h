@@ -45,6 +45,7 @@ constexpr std::uint32_t kNavigatorHasAttributeMethod = 17u;
 constexpr std::uint32_t kNavigatorSetAttributeMethod = 18u;
 constexpr std::uint32_t kNavigatorRemoveAttributeMethod = 19u;
 constexpr std::uint32_t kNavigatorSelectorCollectionItemMethod = 20u;
+constexpr std::uint32_t kNavigatorSelectorCollectionForEachMethod = 21u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -369,11 +370,19 @@ public:
     using RelativeSelectorDispatchProbe = void (*)(void* context,
         NavigatorScriptHostAdapter& adapter, RuntimeContext& runtime,
         const Value& event, bool beforeListener);
+    using SelectorCollectionForEachProbe = void (*)(void* context,
+        std::size_t completedIndex);
     void setRelativeSelectorDispatchProbe(
         RelativeSelectorDispatchProbe probe, void* context)
     {
         relativeSelectorDispatchProbe_ = probe;
         relativeSelectorDispatchProbeContext_ = context;
+    }
+    void setSelectorCollectionForEachProbe(
+        SelectorCollectionForEachProbe probe, void* context)
+    {
+        selectorCollectionForEachProbe_ = probe;
+        selectorCollectionForEachProbeContext_ = context;
     }
 #endif
 
@@ -407,6 +416,8 @@ public:
         std::uint32_t methodId, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result) override;
     HostResult callWithRuntime(RuntimeContext& runtime,
+        HostFunctionInvoker& functionInvoker,
+        RuntimeErrorCode& callbackError,
         const HostObjectReference* receiver, std::uint32_t methodId,
         const HostValue* arguments, std::size_t argumentCount,
         HostValue& result) override;
@@ -838,6 +849,10 @@ private:
         std::size_t index, HostInstanceId& serial) const;
     SelectorCollectionLookup selectorCollectionLookup(
         const SelectorCollectionRecord& record, std::size_t index) const;
+    HostResult selectorCollectionForEach(HostFunctionInvoker& functionInvoker,
+        RuntimeErrorCode& callbackError,
+        const HostObjectReference* receiver, const HostValue* arguments,
+        std::size_t argumentCount, HostValue& result);
     std::size_t selectorMatchCountInternal(
         const SelectorCollectionRecord& record,
         FilteredNthQueryScratch* filteredNthScratch) const;
@@ -921,6 +936,8 @@ private:
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     RelativeSelectorDispatchProbe relativeSelectorDispatchProbe_ = nullptr;
     void* relativeSelectorDispatchProbeContext_ = nullptr;
+    SelectorCollectionForEachProbe selectorCollectionForEachProbe_ = nullptr;
+    void* selectorCollectionForEachProbeContext_ = nullptr;
 #endif
     std::size_t activationDepth_ = 0;
     std::size_t resetDepth_ = 0;

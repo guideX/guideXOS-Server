@@ -9378,6 +9378,201 @@ does not establish bare-metal stack safety.
 
 The result is **Outcome A — JS75 collection item(index) support fully
 qualified**. This record is committed locally as
-`navigator: add JS75 collection item method`; it was not pushed. The next
-useful phase is JS76 focused on any separately requested collection behavior;
+`navigator: add JS75 collection item method`; it was not pushed. JS76 builds
+on that retained collection API with bounded `forEach()` callback support;
 JS75 itself adds no iterator or broader collection API.
+
+### JS76 bounded collection `forEach()`
+
+JS76 adds the synchronous method `collection.forEach(callback[, thisArg])` to
+the retained selector collection used by `querySelectorAll()` and the
+`getElementsByTagName()` / `getElementsByClassName()` adapters when they reuse
+that collection. The callback receives the canonical live Element at the
+current index, the zero-based index, and the original retained collection.
+Callback return values are discarded; successful traversal returns JavaScript
+`undefined`. Missing or non-callable callbacks report `TypeError` through the
+runtime result. Since this interpreter has no `try`/`catch` or catchable error
+objects, those errors stop script execution rather than becoming catchable
+JavaScript exceptions.
+
+The host method dispatch receives a short-lived `HostFunctionInvoker`
+capability from the active evaluator. It validates and invokes the existing
+runtime function value in that same evaluator and realm. The callback path
+does not build source strings, reparse JavaScript, create a second
+interpreter, or keep callback state in a global. Invocation state and the
+callback argument array are local to each call. The Element argument resolves
+to the same generation-checked canonical host handle used by bracket and
+`item()` reads. The third argument is the same collection receiver, so its
+`length`, bracket, and `item()` reads keep their established live behavior.
+
+The runtime forwards a supplied `thisArg` as the callback's `this` value.
+When the argument is omitted, it forwards `undefined`. The fixture verifies
+both cases, including an explicit object receiver. This does not add browser
+strict/sloppy `this` normalization, receiver coercion, or general object
+coercion beyond the runtime's existing value conversions; it is the documented
+Navigator subset rather than full `NodeList.prototype.forEach()` conformance.
+
+At entry, `forEach()` reads the current live collection length once and uses
+that value as the fixed upper bound, limited by the existing 1,024-Element
+structural capacity. For each index below that bound it resolves the
+collection again through the existing generation-safe indexed lookup. If an
+index no longer resolves after mutation, the loop skips it and continues to
+the next bounded index; it does not fabricate a `null` or `undefined`
+callback Element, and it does not early-stop on a missing index. Each lookup
+sees current selector and structural state. Growth can therefore change what
+later bounded indices identify, but never adds indices past the entry bound.
+Removal or reordering can cause an original Element to be skipped or another
+current Element to be visited; the method does not promise snapshot identity
+or exactly-once delivery of the entry Elements. A later independent read sees
+all current matches.
+
+After every callback, including the last one, the implementation validates
+the collection generation before it can report success. The JS76 native probe
+replaces the document from the first callback with a document that reuses
+Element serials. The outer `forEach()` stops with the runtime's stale-host
+error after one callback; it neither restarts on the new document nor passes a
+reused serial as an old-generation Element. Separate scoped collections keep
+their original scope. Nested query and nested `forEach()` tests confirm that
+the outer callback index, collection handle, and live selector scratch remain
+independent.
+
+The selector limits remain unchanged: 256-byte selector input, four outer
+selector members, 24 relative-core entries, two `:has()` alternatives, two
+relative steps, two logical-list members, a 128-record collection registry,
+and 1,024 structural Elements. Selector descriptor, collection record, and
+full registry sizes remain 1,918 B, 1,936 B, and 247,808 B. JS76 traverses a
+full 1,024-result collection and also fills the collection registry, then
+checks traversal and preserved handles at saturation. It adds no per-callback
+collection record, persistent result cache, or heap-backed selector storage.
+The bounded JavaScript environment and host-object pools are increased to
+2,048 so a full callback pass can retain call environments and canonical
+Element handles without exhausting the prior 256-environment / 1,024-host
+object limits.
+
+The fixture `navigator-smoke/javascript-js76.html` checks callback execution,
+arguments, identity, `thisArg`, `undefined`, empty/single/multiple results,
+attribute mutation, live removal, repeated growth under a fixed bound,
+shrinkage, nested traversal, Element scopes, filtered positional selectors,
+tag/class adapters, and nested Event dispatch with target, currentTarget,
+phase, and default-prevented metadata. Visible buttons drive the nested Event
+case. The invalid-callback fixture checks hosted `TypeError`. Both inline
+scripts avoid a literal `<` in JavaScript source to preserve the hosted
+HTML-subset integrity safeguard.
+
+The focused native suite includes the JS75 compatibility checks and adds
+invalid callbacks, ignored callback returns, callback error containment,
+in-callback document replacement, 128-record registry saturation, maximum
+capacity, hosted fixture integrity, and five-sample timing runs. Strict
+compilation uses `-Wall -Wextra -Werror -pedantic`. The selected JS76 timing
+workload performs one initial length read and one live indexed lookup per
+permitted index; filtered positional lookup rebuilds its invocation-local
+rank scratch for each index read, preserving JS72–JS73 behavior. Measurements
+and the final matrix, hosted aggregate, fresh executable identity, stack
+frames/high-water, and artifact manifest are recorded in the JS76 closeout
+below after qualification.
+
+### JS76 native and regression closeout
+
+The JS76 focused runner passed **106/106 checks**, including its inherited
+JS75 compatibility run (**39/39**), strict compilation with
+`-Wall -Wextra -Werror -pedantic`, the 1,024-Element traversal, registry
+saturation, callback error containment, and document replacement during the
+callback boundary. The same-run JS75 focused lane passed **61/61**; the focused
+JS73 and JS74 lanes passed **77/77** and **25/25**. The full JavaScript matrix
+passed **78/78 lanes** and reported **13,527/13,527 assertions across 37
+assertion-reporting lanes**. The JS75 script's static `.su` compile loop now
+temporarily handles compiler warnings as non-terminating PowerShell output
+while still failing on a nonzero compiler exit code; no assertions or test
+expectations changed.
+
+JS76's five-run median timings from the final native matrix run were:
+
+| Selector / matching count | `forEach()` median |
+|---|---:|
+| `.absent` / 0 | 334 µs |
+| `.r1` / 1 | 269 µs |
+| `.r16` / 16 | 490 µs |
+| `.r128` / 128 | 865 µs |
+| `.r512` / 512 | 13,154 µs |
+| `.r1024` / 1,024 | 95,932 µs |
+| Filtered positional / 257 | 14,733 µs |
+
+A separate same-harness comparison captured the length once and made one live
+indexed read per index in both cases. At 1,024 ordinary matches,
+`forEach()` measured 88,168 µs versus 107,252 µs for the `.item()` loop. At
+257 filtered matches, `forEach()` measured 15,420 µs versus 25,899 µs for the
+`.item()` loop. Each result is the median of five runs; system load caused
+noticeable variation between runs, so these are local comparison evidence,
+not stable performance promises. The 1,024-element check visited exactly
+1,024 callbacks through index 1,023, retained one collection record, and
+allocated no collection record per callback. JS73's filtered-selector
+operation counters remained unchanged at 8,192 structural inspections,
+4,092 filter evaluations, four rank builds, 12 parent resolutions, and 2,564
+rank lookups for four indexed reads.
+
+The instrumented JS76 stack run passed ordinary, filtered, nested
+`forEach()`, mutation plus nested query, `forEach()` from an Event, a
+depth-16 nested Event chain with one `forEach()` in each handler, and
+1,024-result capacity workloads. Their maximum observed stack watermark was
+**331,729 B**, with **335,872 B committed** from the **1,048,576 B** hosted
+reserve and **712,704 B reserve headroom**. The depth-16 chain measures Event
+reentrancy with `forEach()` in each event handler; it is not a qualification
+for 16 recursively nested `forEach()` calls. These Windows measurements do
+not establish bare-metal stack safety.
+
+Production `-O2 -fstack-usage` reports: `selectorCollectionForEach()` 8 B,
+`Evaluator::invoke()` 368 B, `Evaluator::invokeFunction()` 528 B,
+`RuntimeContext::invokeHostMethod()` 576 B, and
+`selectorCollectionLookup()` 80 B. The existing one/four/eight-slot filtered
+lookup frames remain 4,336 / 10,480 / 18,672 B. The JS76 selector descriptor,
+collection record, and 128-record registry remain 1,918 B, 1,936 B, and
+247,808 B. The runtime's bounded environment pool is now 2,048 (was 256),
+and its bounded host-object pool is 2,048 (was 1,024), to hold escaping
+callback environments and canonical Element references through a maximum
+traversal.
+
+The fresh production build and final hosted/artifact qualification follow.
+
+### JS76 hosted, artifact, and repository closeout
+
+The duplicate/stale gate found no existing JS76 implementation. Work began on
+branch `NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`69876f0743fc5cec0b42e5cdd12025e52afed0e7`
+(`navigator: add JS75 collection item method`) with a clean tracked worktree;
+the live local tracking refs showed 0 ahead / 0 behind. `.phase` was absent
+and left absent.
+
+The production command `build.bat` succeeded from that source revision. The
+fresh executable was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,548,902
+bytes, SHA-256
+`42B8AC522CF70B16FAF111C630C64645BE1710724AC9981B53F9D33E4D977F58`. The
+final hosted process was PID 16816 and ran that exact executable path and
+hash. All JS9 checks passed; all four JS76 hosted checks passed, covering
+callback behavior, mutations and arguments, collection scopes and adapters,
+nested Event metadata, and invalid-callback TypeError.
+
+The final hosted aggregate reported **658 passed / 7 failed / 665 total**.
+Its only failures match the historical CSS baseline: CSS 3C, CSS 3G, CSS 6A,
+three CSS 6B checks, and CSS 6C. No new JavaScript failure was observed. The
+raw output is
+`C:\Users\guideX\AppData\Local\Temp\guidex-js76-hosted-final.log`.
+
+The final ignored-file manifest matched the JS76 preflight manifest exactly:
+**1,349 files / 89,350,840 bytes; 0 changed, 0 missing, 0 extra**. The
+pre-existing executable, four desktop settings files, and 42 generated
+fixtures were restored byte-for-byte. The 18 logs created by JS76 hosted runs
+were archived outside the checkout at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js76-hosted-log-archive-20261016`;
+pre-existing logs were preserved. The hosted evidence came from the fresh
+build before the original ignored executable was restored. No kernel or QEMU
+run was performed because this is hosted runtime qualification; the Windows
+stack measurements above do not establish bare-metal safety.
+
+The source and qualification record passed `git diff --check`. This result is
+**Outcome A — JS76 bounded collection forEach support fully qualified**. It
+was committed locally as `navigator: add JS76 bounded collection forEach`
+and was not pushed. A focused next phase could qualify one short-circuiting
+predicate such as `some()`, including its early-termination and mutation
+contract. Iterator protocols, `Symbol.iterator`, and `for...of` remain
+outside the supported collection API.

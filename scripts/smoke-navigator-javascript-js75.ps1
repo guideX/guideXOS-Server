@@ -75,9 +75,13 @@ $stackDir = Join-Path $outputDir "stack-usage"
 New-Item -ItemType Directory -Path $stackDir | Out-Null
 foreach ($source in $sources) {
     $objectName = [System.IO.Path]::GetFileNameWithoutExtension($source) + ".o"
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     $stackOutput = & g++ -std=c++17 -Wall -Wextra -O2 -iquote . `
         -fstack-usage -c $source -o (Join-Path $stackDir $objectName) 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $stackExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
+    if ($stackExitCode -ne 0) {
         $stackOutput | Write-Output
         throw "JS75 stack-usage compilation failed for $source."
     }

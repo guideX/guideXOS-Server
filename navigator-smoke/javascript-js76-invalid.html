@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS76 invalid callback</title></head>
+<body>
+<h1>Navigator JavaScript JS76 invalid callback</h1>
+<pre id="result">JS76:invalid:pending</pre>
+<div class="row">Row</div>
+<script>
+var rows = document.querySelectorAll('.row');
+document.getElementById('result').textContent = 'JS76:invalid:calling';
+rows.forEach(null);
+document.getElementById('result').textContent = 'JS76:invalid:returned';
+</script>
+</body>
+</html>

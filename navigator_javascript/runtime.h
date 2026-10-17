@@ -107,7 +107,10 @@ constexpr std::size_t kDefaultMaxJavaScriptRuntimeStringBytes = 256u * 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptRuntimeStringValues = 4096u;
 constexpr std::size_t kDefaultJavaScriptExecutionSteps = 100000u;
 constexpr std::size_t kDefaultMaxJavaScriptCallDepth = 64u;
-constexpr std::size_t kDefaultMaxJavaScriptEnvironments = 256u;
+// Call frames retain their lexical environments so escaped closures remain
+// valid. The larger bounded pool also permits one maximum-capacity Navigator
+// collection callback pass in a long-lived realm.
+constexpr std::size_t kDefaultMaxJavaScriptEnvironments = 2048u;
 constexpr std::size_t kDefaultMaxJavaScriptFunctionValues = 4096u;
 constexpr std::size_t kDefaultMaxJavaScriptRuntimeObjects = 1024u;
 constexpr std::size_t kDefaultMaxJavaScriptPropertiesPerObject = 256u;
@@ -119,7 +122,9 @@ constexpr std::size_t kDefaultMaxJavaScriptArrayElementCount = 4096u;
 constexpr std::size_t kDefaultMaxJavaScriptArrayIndex = 1023u;
 constexpr std::size_t kDefaultMaxJavaScriptNativeFunctionValues = 64u;
 constexpr std::size_t kDefaultMaxJavaScriptPrototypeDepth = 32u;
-constexpr std::size_t kDefaultMaxJavaScriptHostObjects = 1024u;
+// Canonical per-Element handles plus document and retained-collection handles
+// must fit during a full-capacity Navigator collection callback traversal.
+constexpr std::size_t kDefaultMaxJavaScriptHostObjects = 2048u;
 constexpr std::size_t kDefaultMaxJavaScriptHostPropertyNameLength = 256u;
 constexpr std::size_t kDefaultMaxJavaScriptHostOperations = 10000u;
 constexpr std::size_t kDefaultMaxJavaScriptHostGenerations = 4096u;
@@ -412,7 +417,8 @@ private:
         Value value, RuntimeErrorCode& error, SourceLocation location);
     bool invokeHostMethod(const FunctionRecord& function,
         const std::vector<Value>& arguments, Value receiver,
-        SourceLocation location, Value& result);
+        SourceLocation location, Value& result,
+        HostFunctionInvoker& functionInvoker);
     bool convertValueToHost(const Value& value, HostValue& result,
         RuntimeErrorCode& error, SourceLocation location);
     bool convertHostValue(const HostValue& value, RuntimeHostObjectId methodOwner,
