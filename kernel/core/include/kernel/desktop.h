@@ -59,6 +59,8 @@ struct DesktopAppearanceConfigurationV1 {
 static const uint32_t kDesktopBuiltInGradientPresetVersion = 1u;
 static const uint32_t kDesktopBuiltInGradientPresetCapacity = 16u;
 static const uint32_t kDesktopGradientApplyResultVersion = 1u;
+static const uint32_t kDesktopBuiltInWallpaperPresetVersion = 1u;
+static const uint32_t kDesktopBuiltInWallpaperPresetCapacity = 16u;
 
 struct DesktopBuiltInGradientPresetV1 {
     uint32_t structureSize;
@@ -66,6 +68,20 @@ struct DesktopBuiltInGradientPresetV1 {
     uint32_t topColor;
     uint32_t bottomColor;
     uint32_t accentColor;
+    char id[96];
+    char displayName[32];
+};
+
+enum : uint32_t {
+    // The fixed image-pack path exists. Apply still performs a full bounded
+    // GXIMG read/decode before changing active desktop state.
+    kDesktopBuiltInWallpaperAssetPresent = 1u << 0
+};
+
+struct DesktopBuiltInWallpaperPresetV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    uint32_t flags;
     char id[96];
     char displayName[32];
 };
@@ -80,7 +96,8 @@ enum class DesktopGradientApplyStatus : uint32_t {
     ApplyFailed = 6,
     SaveFailedRolledBack = 7,
     ReadbackFailedRolledBack = 8,
-    RollbackFailed = 9
+    RollbackFailed = 9,
+    AssetUnavailable = 10
 };
 
 enum : uint32_t {
@@ -229,8 +246,14 @@ const char* get_wallpaper_id();
 uint32_t get_builtin_gradient_preset_count();
 bool get_builtin_gradient_preset(
     uint32_t index, DesktopBuiltInGradientPresetV1* output);
+uint32_t get_builtin_wallpaper_preset_count();
+bool get_builtin_wallpaper_preset(
+    uint32_t index, DesktopBuiltInWallpaperPresetV1* output);
 DesktopGradientApplyStatus apply_builtin_gradient_preset(
     const char* presetId, uint64_t expectedRevision,
+    DesktopGradientApplyResultV1* output);
+DesktopGradientApplyStatus apply_builtin_wallpaper(
+    const char* wallpaperId, uint64_t expectedRevision,
     DesktopGradientApplyResultV1* output);
 
 // Copy the active appearance values used by the desktop renderer. Settings

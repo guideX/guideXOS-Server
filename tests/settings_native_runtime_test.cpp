@@ -21,6 +21,11 @@
 namespace settings = gxos::apps::settings;
 namespace settings_native = kernel::settings_native;
 
+namespace kernel { namespace arch { namespace amd64 {
+uint8_t inb(uint16_t) { return 0x20u; }
+void outb(uint16_t, uint8_t) {}
+} } }
+
 namespace {
 
 int g_checks = 0;
@@ -65,8 +70,14 @@ kernel::desktop::DesktopGradientApplyStatus g_testGradientApplyStatus =
 int g_testGradientApplyCalls = 0;
 bool g_testGradientApplyMutatesOnCommit = true;
 char g_testGradientPersistedId[96] = "legacy_ameobagx";
+kernel::desktop::DesktopGradientApplyStatus g_testWallpaperApplyStatus =
+    kernel::desktop::DesktopGradientApplyStatus::Committed;
+int g_testWallpaperApplyCalls = 0;
+bool g_testWallpaperApplyMutatesOnCommit = true;
 bool g_testConfigMounted = false;
 bool g_testConfigReadOnly = false;
+bool g_testMountRestoreAllowed = false;
+int g_testMountCalls = 0;
 char g_testConfigBytes[kernel::desktop::kGradientConfigTextCapacity] = {};
 size_t g_testConfigLength = 0u;
 int g_testConfigWriteCount = 0;
@@ -425,6 +436,51 @@ bool get_builtin_gradient_preset(uint32_t index, DesktopBuiltInGradientPresetV1*
     return true;
 }
 
+static const DesktopBuiltInWallpaperPresetV1 kTestWallpapers[] = {
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_blue_flower", "Blue Flower" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      0u, "legacy_dinos", "Dinos" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_flower", "Flower" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_guidexos_space", "guideXOS Space" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_guidexos_space2", "guideXOS Space 2" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_red_flower", "Red Flower" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_ameoba", "Ameoba" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_ameobagx", "Ameoba GX" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_tron_porsche", "Tron Porsche" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_wallpaper2", "Wallpaper 2" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_merlin", "Merlin" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_merlin2", "Merlin 2" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_green_meadow", "Green Meadow" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_cpu", "CPU" },
+    { sizeof(DesktopBuiltInWallpaperPresetV1), kDesktopBuiltInWallpaperPresetVersion,
+      kDesktopBuiltInWallpaperAssetPresent, "legacy_mountains", "Mountains" }
+};
+
+uint32_t get_builtin_wallpaper_preset_count()
+{
+    return static_cast<uint32_t>(sizeof(kTestWallpapers) / sizeof(kTestWallpapers[0]));
+}
+
+bool get_builtin_wallpaper_preset(uint32_t index, DesktopBuiltInWallpaperPresetV1* output)
+{
+    if (!output || index >= get_builtin_wallpaper_preset_count()) return false;
+    *output = kTestWallpapers[index];
+    return true;
+}
+
 DesktopGradientApplyStatus apply_builtin_gradient_preset(
     const char* presetId, uint64_t expectedRevision,
     DesktopGradientApplyResultV1* output)
@@ -489,6 +545,70 @@ DesktopGradientApplyStatus apply_builtin_gradient_preset(
     *output = result;
     return result.status;
 }
+
+DesktopGradientApplyStatus apply_builtin_wallpaper(
+    const char* wallpaperId, uint64_t expectedRevision,
+    DesktopGradientApplyResultV1* output)
+{
+    ++g_testWallpaperApplyCalls;
+    if (!output) return DesktopGradientApplyStatus::ApplyFailed;
+    DesktopGradientApplyResultV1 result{};
+    result.structureSize = sizeof(result);
+    result.version = kDesktopGradientApplyResultVersion;
+    result.revision = g_testAppearanceConfiguration.revision;
+    result.status = DesktopGradientApplyStatus::InvalidPreset;
+    if (expectedRevision == 0u ||
+        expectedRevision != g_testAppearanceConfiguration.revision) {
+        result.status = DesktopGradientApplyStatus::StaleRevision;
+    } else {
+        const DesktopBuiltInWallpaperPresetV1* selected = nullptr;
+        for (uint32_t index = 0u; index < get_builtin_wallpaper_preset_count(); ++index) {
+            if (wallpaperId && std::string(kTestWallpapers[index].id) == wallpaperId) {
+                selected = &kTestWallpapers[index];
+                break;
+            }
+        }
+        if (!selected) {
+            result.status = DesktopGradientApplyStatus::InvalidPreset;
+        } else if ((selected->flags & kDesktopBuiltInWallpaperAssetPresent) == 0u) {
+            result.status = DesktopGradientApplyStatus::AssetUnavailable;
+        } else {
+            result.status = g_testWallpaperApplyStatus;
+            if (result.status == DesktopGradientApplyStatus::Committed &&
+                g_testWallpaperApplyMutatesOnCommit) {
+                g_testAppearanceConfiguration.backgroundKind =
+                    kDesktopAppearanceBackgroundWallpaper;
+                copyText(g_testAppearanceConfiguration.backgroundId, selected->id,
+                         sizeof(g_testAppearanceConfiguration.backgroundId));
+                copyText(g_testAppearanceConfiguration.backgroundName,
+                         selected->displayName,
+                         sizeof(g_testAppearanceConfiguration.backgroundName));
+                g_testAppearanceConfiguration.gradientTopColor = 0u;
+                g_testAppearanceConfiguration.gradientBottomColor = 0u;
+                g_testAppearanceConfiguration.gradientAccentColor = 0u;
+                ++g_testAppearanceConfiguration.revision;
+                copyText(g_testGradientPersistedId, selected->id,
+                         sizeof(g_testGradientPersistedId));
+            }
+        }
+    }
+
+    result.revision = g_testAppearanceConfiguration.revision;
+    result.flags = kDesktopGradientApplyActiveAvailable;
+    copyText(result.appliedId, g_testAppearanceConfiguration.backgroundId,
+             sizeof(result.appliedId));
+    if (g_testGradientPersistedId[0]) {
+        result.flags |= kDesktopGradientApplyPersistedAvailable;
+        copyText(result.persistedId, g_testGradientPersistedId,
+                 sizeof(result.persistedId));
+    }
+    if (result.status == DesktopGradientApplyStatus::SaveFailedRolledBack ||
+        result.status == DesktopGradientApplyStatus::ReadbackFailedRolledBack) {
+        result.flags |= kDesktopGradientApplyRollbackVerified;
+    }
+    *output = result;
+    return result.status;
+}
 } // namespace desktop
 
 namespace vfs {
@@ -498,6 +618,18 @@ const MountPoint* get_mount(const char*)
     g_testConfigMount.active = true;
     g_testConfigMount.readOnly = g_testConfigReadOnly;
     return &g_testConfigMount;
+}
+
+uint8_t mount(const char*, uint8_t blockDevIndex)
+{
+    ++g_testMountCalls;
+    if (!g_testMountRestoreAllowed) return 0xFFu;
+    g_testConfigMounted = true;
+    g_testConfigMount.active = true;
+    g_testConfigMount.alias = false;
+    g_testConfigMount.readOnly = g_testConfigReadOnly;
+    g_testConfigMount.blockDevIndex = blockDevIndex;
+    return 0u;
 }
 
 Status stat(const char*, FileInfo* output)
@@ -622,6 +754,21 @@ static void testGradientConfigPersistence()
            "canonical update preserves unrelated keys, values, and line endings");
 
     setTestDesktopConfig(original);
+    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
+                                      &persistence) == GradientPersistenceStatus::Ok &&
+               std::string(persistence.persistedId) == "legacy_ameobagx" &&
+               testDesktopConfigText().find("backgroundScaleMode=fit\r\n") != std::string::npos &&
+               testDesktopConfigText().find("futureAppearanceKey=keep-this-value\r\n") != std::string::npos,
+           "wallpaper apply uses the shared canonical writer and preserves unrelated desktop fields");
+    expect(persistBuiltInBackgroundId("legacy_ameobagx", "legacy_wallpaper2",
+                                      &persistence) == GradientPersistenceStatus::Ok &&
+               std::string(persistence.persistedId) == "legacy_wallpaper2" &&
+               persistBuiltInBackgroundId("legacy_wallpaper2", "gradient_forest",
+                                          &persistence) == GradientPersistenceStatus::Ok &&
+               std::string(persistence.persistedId) == "gradient_forest",
+           "image-to-image and image-to-gradient changes share the same verified writer");
+
+    setTestDesktopConfig(original);
     expect(persistBuiltInGradientId("gradient_violet", "gradient_ocean",
                                     &persistence) == GradientPersistenceStatus::Conflict &&
                g_testConfigWriteCount == 0 &&
@@ -630,10 +777,25 @@ static void testGradientConfigPersistence()
 
     setTestDesktopConfig(original);
     g_testConfigMounted = false;
+    g_testMountRestoreAllowed = false;
     expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
                                     &persistence) == GradientPersistenceStatus::Unavailable &&
                g_testConfigWriteCount == 0,
            "unavailable configuration storage rejects a gradient commit");
+
+    setTestDesktopConfig(original);
+    g_testConfigMount.blockDevIndex = 3u;
+    rememberDesktopGradientStorageDevice();
+    g_testConfigMounted = false;
+    const int mountCallsBeforeRestore = g_testMountCalls;
+    g_testMountRestoreAllowed = true;
+    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
+                                      &persistence) == GradientPersistenceStatus::Ok &&
+               g_testMountCalls == mountCallsBeforeRestore + 1 &&
+               g_testConfigMount.blockDevIndex == 3u &&
+               std::string(persistence.persistedId) == "legacy_ameobagx",
+           "cached writable root ownership restores the same VFS device before wallpaper persistence");
+    g_testMountRestoreAllowed = false;
     setTestDesktopConfig(original);
     g_testConfigReadOnly = true;
     expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
@@ -647,6 +809,17 @@ static void testGradientConfigPersistence()
                                     &persistence) == GradientPersistenceStatus::InvalidConfiguration &&
                g_testConfigWriteCount == 0,
            "ambiguous duplicate wallpaper keys are rejected before writing");
+
+    setTestDesktopConfig(original);
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWritePartial = true;
+    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
+                                      &persistence) ==
+               GradientPersistenceStatus::WriteFailedRolledBack &&
+               (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
+               std::string(persistence.persistedId) == "gradient_sunset" &&
+               testDesktopConfigText() == original,
+           "short wallpaper write restores the exact prior desktop configuration");
 
     setTestDesktopConfig(original);
     g_testConfigFailWriteNumber = 1;
@@ -669,6 +842,15 @@ static void testGradientConfigPersistence()
            "readback mismatch restores the exact previous canonical file");
 
     setTestDesktopConfig(original);
+    g_testConfigCorruptOnWriteNumber = 1;
+    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
+                                      &persistence) ==
+               GradientPersistenceStatus::ReadbackFailedRolledBack &&
+               (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
+               testDesktopConfigText() == original,
+           "wallpaper readback mismatch restores the exact prior canonical file");
+
+    setTestDesktopConfig(original);
     g_testConfigFailWriteNumber = 1;
     g_testConfigFailWritePartial = true;
     g_testConfigCorruptOnWriteNumber = 2;
@@ -680,6 +862,17 @@ static void testGradientConfigPersistence()
                (persistence.flags & kGradientPersistenceRollbackAttempted) != 0u &&
                (persistence.flags & kGradientPersistenceRollbackVerified) == 0u,
            "rollback failure is returned distinctly and is never reported as restored");
+
+    setTestDesktopConfig(original);
+    g_testConfigFailWriteNumber = 1;
+    g_testConfigFailWritePartial = true;
+    g_testConfigCorruptOnWriteNumber = 2;
+    expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
+                                      &persistence) ==
+               GradientPersistenceStatus::RollbackFailed &&
+               (persistence.flags & kGradientPersistenceRollbackAttempted) != 0u &&
+               (persistence.flags & kGradientPersistenceRollbackVerified) == 0u,
+           "wallpaper rollback failure remains distinct and never reports restoration");
 
     const char* alternatingIds[2] = { "gradient_sunset", "gradient_ocean" };
     for (int cycle = 0; cycle < 100; ++cycle) {
@@ -694,6 +887,19 @@ static void testGradientConfigPersistence()
                    std::string(persistence.persistedId) == to,
                "repeated gradient commit cycle completes with verified state");
     }
+    const char* wallpaperIds[2] = { "legacy_ameobagx", "legacy_wallpaper2" };
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        const char* from = wallpaperIds[cycle % 2];
+        const char* to = wallpaperIds[(cycle + 1) % 2];
+        std::string source = original;
+        source.replace(source.find("gradient_sunset"),
+                       std::string("gradient_sunset").size(), from);
+        setTestDesktopConfig(source.c_str());
+        expect(persistBuiltInBackgroundId(from, to, &persistence) ==
+                   GradientPersistenceStatus::Ok &&
+                   std::string(persistence.persistedId) == to,
+               "repeated built-in wallpaper writes complete with verified readback");
+    }
     for (int cycle = 0; cycle < 100; ++cycle) {
         setTestDesktopConfig(original);
         g_testConfigFailWriteNumber = 1;
@@ -704,6 +910,17 @@ static void testGradientConfigPersistence()
                    (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
                    testDesktopConfigText() == original,
                "repeated injected write failure preserves the previous config");
+    }
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        setTestDesktopConfig(original);
+        g_testConfigFailWriteNumber = 1;
+        g_testConfigFailWritePartial = true;
+        expect(persistBuiltInBackgroundId("gradient_sunset", "legacy_ameobagx",
+                                          &persistence) ==
+                   GradientPersistenceStatus::WriteFailedRolledBack &&
+                   (persistence.flags & kGradientPersistenceRollbackVerified) != 0u &&
+                   testDesktopConfigText() == original,
+               "repeated injected wallpaper write failures restore the canonical config");
     }
 
     g_testConfigMounted = false;
@@ -1035,6 +1252,24 @@ int main()
                gradientPresetCount == 8u,
            "gradient list reports its bounded required capacity");
 
+    BuiltInWallpaperPresetV1 wallpaperPresets[kBuiltInWallpaperPresetCapacity]{};
+    size_t wallpaperPresetCount = 0u;
+    expect(readBuiltInWallpaperPresets(settingsApp, wallpaperPresets,
+                                       kBuiltInWallpaperPresetCapacity,
+                                       &wallpaperPresetCount) == SnapshotStatus::Ok &&
+               wallpaperPresetCount == 15u &&
+               std::string(wallpaperPresets[7].id) == "legacy_ameobagx" &&
+               std::string(wallpaperPresets[7].displayName) == "Ameoba GX" &&
+               (wallpaperPresets[7].flags & kBuiltInWallpaperAssetPresent) != 0u,
+           "Settings receives all 15 fixed wallpaper entries and their display names from the desktop owner");
+    expect(std::string(wallpaperPresets[1].id) == "legacy_dinos" &&
+               (wallpaperPresets[1].flags & kBuiltInWallpaperAssetPresent) == 0u,
+           "wallpaper catalog reports a missing fixed asset without hiding its stable identity");
+    expect(readBuiltInWallpaperPresets(settingsApp, wallpaperPresets, 2u,
+                                       &wallpaperPresetCount) == SnapshotStatus::BufferTooSmall &&
+               wallpaperPresetCount == 15u,
+           "wallpaper list reports the bounded required capacity");
+
     g_testAppearanceConfiguration.backgroundKind =
         kernel::desktop::kDesktopAppearanceBackgroundGradient;
     g_testAppearanceConfiguration.revision = 4u;
@@ -1147,6 +1382,101 @@ int main()
     g_testGradientApplyStatus =
         kernel::desktop::DesktopGradientApplyStatus::Committed;
     copyText(g_testGradientPersistedId, "gradient_ocean",
+             sizeof(g_testGradientPersistedId));
+
+    g_testWallpaperApplyCalls = 0;
+    g_testWallpaperApplyStatus = kernel::desktop::DesktopGradientApplyStatus::Committed;
+    g_testWallpaperApplyMutatesOnCommit = true;
+    ApplyBuiltInWallpaperRequestV1 wallpaperRequest{};
+    wallpaperRequest.structureSize = sizeof(wallpaperRequest);
+    wallpaperRequest.version = kApplyBuiltInWallpaperVersion;
+    wallpaperRequest.expectedRevision = 5u;
+    copyText(wallpaperRequest.wallpaperId, "legacy_ameobagx",
+             sizeof(wallpaperRequest.wallpaperId));
+    ApplyBuiltInWallpaperResultV1 wallpaperResult{};
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::Committed &&
+               (wallpaperResult.flags & kGradientOperationActiveAvailable) != 0u &&
+               (wallpaperResult.flags & kGradientOperationPersistedAvailable) != 0u &&
+               std::string(wallpaperResult.appliedId) == "legacy_ameobagx" &&
+               std::string(wallpaperResult.persistedId) == "legacy_ameobagx" &&
+               wallpaperResult.revision == 6u &&
+               g_testAppearanceConfiguration.backgroundKind ==
+                   kernel::desktop::kDesktopAppearanceBackgroundWallpaper,
+           "trusted Settings request commits a built-in image and returns active, persisted, and revised state");
+
+    wallpaperRequest.expectedRevision = 6u;
+    g_testWallpaperApplyStatus = kernel::desktop::DesktopGradientApplyStatus::NoChange;
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::NoChange &&
+               wallpaperResult.revision == 6u &&
+               std::string(wallpaperResult.appliedId) == "legacy_ameobagx",
+           "same wallpaper selection is reported as a no-op without advancing its revision");
+    g_testWallpaperApplyStatus = kernel::desktop::DesktopGradientApplyStatus::Committed;
+
+    const int wallpaperCallsBeforeStale = g_testWallpaperApplyCalls;
+    wallpaperRequest.expectedRevision = 5u;
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::StaleRevision &&
+               g_testWallpaperApplyCalls == wallpaperCallsBeforeStale + 1,
+           "wallpaper mutation rejects an interleaved appearance revision");
+
+    wallpaperRequest.expectedRevision = 6u;
+    copyText(wallpaperRequest.wallpaperId, "unknown_wallpaper",
+             sizeof(wallpaperRequest.wallpaperId));
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::InvalidPreset,
+           "unknown wallpaper identifiers are rejected by the shared desktop catalog");
+    copyText(wallpaperRequest.wallpaperId, "legacy!ameobagx",
+             sizeof(wallpaperRequest.wallpaperId));
+    const int wallpaperCallsBeforeMalformed = g_testWallpaperApplyCalls;
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::InvalidPreset &&
+               g_testWallpaperApplyCalls == wallpaperCallsBeforeMalformed,
+           "malformed wallpaper IDs are rejected before desktop access");
+
+    copyText(wallpaperRequest.wallpaperId, "legacy_ameobagx",
+             sizeof(wallpaperRequest.wallpaperId));
+    wallpaperRequest.version = kApplyBuiltInWallpaperVersion + 1u;
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::UnsupportedVersion &&
+               g_testWallpaperApplyCalls == wallpaperCallsBeforeMalformed,
+           "unsupported wallpaper request version is rejected without desktop access");
+    wallpaperRequest.version = kApplyBuiltInWallpaperVersion;
+    wallpaperRequest.structureSize = sizeof(wallpaperRequest) - 1u;
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::InvalidArgument &&
+               g_testWallpaperApplyCalls == wallpaperCallsBeforeMalformed,
+           "invalid wallpaper request size is rejected without desktop access");
+    wallpaperRequest.structureSize = sizeof(wallpaperRequest);
+    copyText(wallpaperRequest.wallpaperId, "legacy_dinos",
+             sizeof(wallpaperRequest.wallpaperId));
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::AssetUnavailable &&
+               g_testWallpaperApplyCalls == wallpaperCallsBeforeMalformed + 1,
+           "unavailable wallpaper assets fail without claiming a commit");
+
+    copyText(wallpaperRequest.wallpaperId, "legacy_wallpaper2",
+             sizeof(wallpaperRequest.wallpaperId));
+    g_testWallpaperApplyStatus =
+        kernel::desktop::DesktopGradientApplyStatus::SaveFailedRolledBack;
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::SaveFailedRolledBack &&
+               (wallpaperResult.flags & kGradientOperationRollbackVerified) != 0u &&
+               std::string(wallpaperResult.appliedId) == "legacy_ameobagx",
+           "wallpaper save failure reports verified runtime restoration");
+    g_testWallpaperApplyStatus =
+        kernel::desktop::DesktopGradientApplyStatus::RollbackFailed;
+    copyText(g_testGradientPersistedId, "legacy_wallpaper2",
+             sizeof(g_testGradientPersistedId));
+    expect(applyBuiltInWallpaper(settingsApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::RollbackFailed &&
+               (wallpaperResult.flags & kGradientOperationRollbackVerified) == 0u &&
+               std::string(wallpaperResult.appliedId) == "legacy_ameobagx" &&
+               std::string(wallpaperResult.persistedId) == "legacy_wallpaper2",
+           "wallpaper rollback failure reports actual active and saved identities separately");
+    g_testWallpaperApplyStatus = kernel::desktop::DesktopGradientApplyStatus::Committed;
+    copyText(g_testGradientPersistedId, "legacy_ameobagx",
              sizeof(g_testGradientPersistedId));
 
     DisplaySnapshotV1 displaySnapshot{};
@@ -1635,12 +1965,21 @@ int main()
                                       kBuiltInGradientPresetCapacity,
                                       &gradientPresetCount) == SnapshotStatus::Unauthorized,
            "preset list provider denies a non-Settings runtime identity");
+    expect(readBuiltInWallpaperPresets(otherApp, wallpaperPresets,
+                                      kBuiltInWallpaperPresetCapacity,
+                                      &wallpaperPresetCount) == SnapshotStatus::Unauthorized,
+           "wallpaper catalog provider denies a non-Settings runtime identity");
     const int applyCallsBeforeSpoofedRequest = g_testGradientApplyCalls;
     expect(applyBuiltInGradientPreset(otherApp, &gradientRequest,
                                       &gradientResult) ==
                GradientOperationStatus::Unauthorized &&
                g_testGradientApplyCalls == applyCallsBeforeSpoofedRequest,
            "identity-like launch argument cannot authorize a spoofed gradient request");
+    const int wallpaperCallsBeforeSpoofedRequest = g_testWallpaperApplyCalls;
+    expect(applyBuiltInWallpaper(otherApp, &wallpaperRequest,
+                                 &wallpaperResult) == WallpaperOperationStatus::Unauthorized &&
+               g_testWallpaperApplyCalls == wallpaperCallsBeforeSpoofedRequest,
+           "identity-like launch data cannot authorize a spoofed wallpaper request");
     const int appearanceNotificationsBefore = g_runtimeAppearanceChanged;
     AppManager::notifyDesktopAppearanceChanged(9u);
     expect(g_runtimeAppearanceChanged == appearanceNotificationsBefore + 2,

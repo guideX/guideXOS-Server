@@ -35,6 +35,12 @@ enum : uint32_t {
 // Update only wallpaperId in the canonical /desktop.cfg while retaining every
 // other byte and key. On a failed write or readback, restore the previous
 // bounded file image and report whether that restoration was verified.
+GradientPersistenceStatus persistBuiltInBackgroundId(
+    const char* expectedCurrentId,
+    const char* requestedId,
+    GradientPersistenceResult* output);
+
+// Kept as a source-compatible name for the accepted S16 gradient operation.
 GradientPersistenceStatus persistBuiltInGradientId(
     const char* expectedCurrentId,
     const char* requestedId,

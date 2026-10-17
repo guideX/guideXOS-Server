@@ -18,6 +18,9 @@ static const uint32_t kDesktopAppearanceSnapshotVersion = 1;
 static const uint32_t kBuiltInGradientPresetListVersion = 1;
 static const uint32_t kApplyBuiltInGradientPresetVersion = 1;
 static const size_t kBuiltInGradientPresetCapacity = 16u;
+static const uint32_t kBuiltInWallpaperPresetListVersion = 1;
+static const uint32_t kApplyBuiltInWallpaperVersion = 1;
+static const size_t kBuiltInWallpaperPresetCapacity = 16u;
 // Reserved revision for the zero/unavailable active-configuration generation.
 static const uint64_t kDisplaySnapshotRevision = 1;
 static const char kSettingsRuntimeAppId[] = "gxos.builtin.settings";
@@ -197,6 +200,18 @@ struct BuiltInGradientPresetV1 {
     char displayName[kDesktopAppearanceNameCapacity];
 };
 
+enum : uint32_t {
+    kBuiltInWallpaperAssetPresent = 1u << 0
+};
+
+struct BuiltInWallpaperPresetV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    uint32_t flags;
+    char id[kDesktopAppearanceIdCapacity];
+    char displayName[kDesktopAppearanceNameCapacity];
+};
+
 enum class GradientOperationStatus : uint32_t {
     Committed = 0,
     NoChange = 1,
@@ -210,8 +225,11 @@ enum class GradientOperationStatus : uint32_t {
     RollbackFailed = 9,
     Unauthorized = 10,
     InvalidArgument = 11,
-    UnsupportedVersion = 12
+    UnsupportedVersion = 12,
+    AssetUnavailable = 13
 };
+
+typedef GradientOperationStatus WallpaperOperationStatus;
 
 enum : uint32_t {
     kGradientOperationActiveAvailable = 1u << 0,
@@ -230,6 +248,23 @@ struct ApplyBuiltInGradientPresetResultV1 {
     uint32_t structureSize;
     uint32_t version;
     GradientOperationStatus status;
+    uint32_t flags;
+    uint64_t revision;
+    char appliedId[kDesktopAppearanceIdCapacity];
+    char persistedId[kDesktopAppearanceIdCapacity];
+};
+
+struct ApplyBuiltInWallpaperRequestV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    uint64_t expectedRevision;
+    char wallpaperId[kDesktopAppearanceIdCapacity];
+};
+
+struct ApplyBuiltInWallpaperResultV1 {
+    uint32_t structureSize;
+    uint32_t version;
+    WallpaperOperationStatus status;
     uint32_t flags;
     uint64_t revision;
     char appliedId[kDesktopAppearanceIdCapacity];
@@ -268,12 +303,28 @@ SnapshotStatus readBuiltInGradientPresets(
     size_t capacity,
     size_t* outCount);
 
+// Copies the fixed built-in image catalog owned by the desktop renderer.
+// AssetPresent means the fixed image path is present in the mounted pack;
+// Apply still verifies the full GXIMG decode before mutating desktop state.
+SnapshotStatus readBuiltInWallpaperPresets(
+    const app::KernelApp* caller,
+    BuiltInWallpaperPresetV1* output,
+    size_t capacity,
+    size_t* outCount);
+
 // The caller identity is read from the AppManager-assigned KernelApp field.
 // No application-supplied identity string is part of this request.
 GradientOperationStatus applyBuiltInGradientPreset(
     const app::KernelApp* caller,
     const ApplyBuiltInGradientPresetRequestV1* request,
     ApplyBuiltInGradientPresetResultV1* output);
+
+// Applies one fixed built-in image through the shared desktop appearance
+// transaction. Caller identity comes only from the runtime-owned KernelApp.
+WallpaperOperationStatus applyBuiltInWallpaper(
+    const app::KernelApp* caller,
+    const ApplyBuiltInWallpaperRequestV1* request,
+    ApplyBuiltInWallpaperResultV1* output);
 
 // The native adapter exposes no Settings write operation. This callback deliberately
 // rejects every operation request from the S10 adapter contract.

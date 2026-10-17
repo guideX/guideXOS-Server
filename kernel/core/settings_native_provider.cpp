@@ -46,6 +46,17 @@ static bool copyOptionalBoundedText(char (&destination)[Capacity], const char* s
     return copyBoundedText(destination, source);
 }
 
+static bool copyBoundedBuffer(char* destination, size_t destinationCapacity,
+                              const char* source, size_t sourceCapacity)
+{
+    if (!destination || destinationCapacity == 0u || !source || sourceCapacity == 0u) return false;
+    size_t length = 0u;
+    while (length < sourceCapacity && source[length]) ++length;
+    if (length == 0u || length == sourceCapacity || length >= destinationCapacity) return false;
+    for (size_t index = 0u; index <= length; ++index) destination[index] = source[index];
+    return true;
+}
+
 template <size_t Capacity>
 static bool validOptionalText(const char (&text)[Capacity], bool available)
 {
@@ -74,6 +85,51 @@ static bool validPresetIdentifier(const char* value, size_t capacity)
         ++length;
     }
     return length != 0u && length < capacity;
+}
+
+static GradientOperationStatus copyDesktopApplyResult(
+    const desktop::DesktopGradientApplyResultV1& source,
+    uint32_t* flags,
+    uint64_t* revision,
+    char* appliedId,
+    size_t appliedCapacity,
+    char* persistedId,
+    size_t persistedCapacity)
+{
+    if (flags) *flags = 0u;
+    if (revision) *revision = source.revision;
+    if ((source.flags & desktop::kDesktopGradientApplyActiveAvailable) != 0u) {
+        if (flags) *flags |= kGradientOperationActiveAvailable;
+        if (!copyBoundedBuffer(appliedId, appliedCapacity,
+                               source.appliedId, sizeof(source.appliedId)))
+            return GradientOperationStatus::ApplyFailed;
+    }
+    if ((source.flags & desktop::kDesktopGradientApplyPersistedAvailable) != 0u) {
+        if (flags) *flags |= kGradientOperationPersistedAvailable;
+        if (!persistedId || persistedCapacity == 0u) {
+            return GradientOperationStatus::ApplyFailed;
+        }
+        if (!copyBoundedBuffer(persistedId, persistedCapacity,
+                               source.persistedId, sizeof(source.persistedId)))
+            return GradientOperationStatus::ApplyFailed;
+    }
+    if ((source.flags & desktop::kDesktopGradientApplyRollbackVerified) != 0u && flags) {
+        *flags |= kGradientOperationRollbackVerified;
+    }
+    switch (source.status) {
+        case desktop::DesktopGradientApplyStatus::Committed: return GradientOperationStatus::Committed;
+        case desktop::DesktopGradientApplyStatus::NoChange: return GradientOperationStatus::NoChange;
+        case desktop::DesktopGradientApplyStatus::InvalidPreset: return GradientOperationStatus::InvalidPreset;
+        case desktop::DesktopGradientApplyStatus::StaleRevision: return GradientOperationStatus::StaleRevision;
+        case desktop::DesktopGradientApplyStatus::PersistenceUnavailable: return GradientOperationStatus::PersistenceUnavailable;
+        case desktop::DesktopGradientApplyStatus::PersistenceConflict: return GradientOperationStatus::PersistenceConflict;
+        case desktop::DesktopGradientApplyStatus::ApplyFailed: return GradientOperationStatus::ApplyFailed;
+        case desktop::DesktopGradientApplyStatus::SaveFailedRolledBack: return GradientOperationStatus::SaveFailedRolledBack;
+        case desktop::DesktopGradientApplyStatus::ReadbackFailedRolledBack: return GradientOperationStatus::ReadbackFailedRolledBack;
+        case desktop::DesktopGradientApplyStatus::RollbackFailed: return GradientOperationStatus::RollbackFailed;
+        case desktop::DesktopGradientApplyStatus::AssetUnavailable: return GradientOperationStatus::AssetUnavailable;
+        default: return GradientOperationStatus::ApplyFailed;
+    }
 }
 
 } // namespace
@@ -709,6 +765,53 @@ SnapshotStatus readBuiltInGradientPresets(
     return SnapshotStatus::Ok;
 }
 
+SnapshotStatus readBuiltInWallpaperPresets(
+    const app::KernelApp* caller,
+    BuiltInWallpaperPresetV1* output,
+    size_t capacity,
+    size_t* outCount)
+{
+    if (outCount) *outCount = 0u;
+    if (!caller || !outCount || (!output && capacity != 0u)) {
+        return SnapshotStatus::InvalidArgument;
+    }
+    if (!textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId)) {
+        return SnapshotStatus::Unauthorized;
+    }
+
+    const uint32_t count = desktop::get_builtin_wallpaper_preset_count();
+    if (count > kBuiltInWallpaperPresetCapacity) return SnapshotStatus::Unavailable;
+    *outCount = count;
+    if (capacity < count) return SnapshotStatus::BufferTooSmall;
+    if (count != 0u && !output) return SnapshotStatus::InvalidArgument;
+
+    for (uint32_t index = 0u; index < count; ++index) {
+        desktop::DesktopBuiltInWallpaperPresetV1 source{};
+        if (!desktop::get_builtin_wallpaper_preset(index, &source) ||
+            source.structureSize != sizeof(source) ||
+            source.version != desktop::kDesktopBuiltInWallpaperPresetVersion ||
+            (source.flags & ~desktop::kDesktopBuiltInWallpaperAssetPresent) != 0u ||
+            !validPresetIdentifier(source.id, sizeof(source.id)) ||
+            !validText(source.displayName)) {
+            *outCount = 0u;
+            return SnapshotStatus::Unavailable;
+        }
+        BuiltInWallpaperPresetV1 preset{};
+        preset.structureSize = sizeof(preset);
+        preset.version = kBuiltInWallpaperPresetListVersion;
+        if ((source.flags & desktop::kDesktopBuiltInWallpaperAssetPresent) != 0u) {
+            preset.flags |= kBuiltInWallpaperAssetPresent;
+        }
+        if (!copyBoundedText(preset.id, source.id) ||
+            !copyBoundedText(preset.displayName, source.displayName)) {
+            *outCount = 0u;
+            return SnapshotStatus::Unavailable;
+        }
+        output[index] = preset;
+    }
+    return SnapshotStatus::Ok;
+}
+
 GradientOperationStatus applyBuiltInGradientPreset(
     const app::KernelApp* caller,
     const ApplyBuiltInGradientPresetRequestV1* request,
@@ -750,53 +853,57 @@ GradientOperationStatus applyBuiltInGradientPreset(
     desktop::DesktopGradientApplyResultV1 desktopResult{};
     (void)desktop::apply_builtin_gradient_preset(
         request->presetId, request->expectedRevision, &desktopResult);
-    result.revision = desktopResult.revision;
-    if ((desktopResult.flags & desktop::kDesktopGradientApplyActiveAvailable) != 0u) {
-        result.flags |= kGradientOperationActiveAvailable;
-        copyBoundedText(result.appliedId, desktopResult.appliedId);
+    result.status = copyDesktopApplyResult(
+        desktopResult, &result.flags, &result.revision,
+        result.appliedId, sizeof(result.appliedId),
+        result.persistedId, sizeof(result.persistedId));
+    *output = result;
+    return result.status;
+}
+
+WallpaperOperationStatus applyBuiltInWallpaper(
+    const app::KernelApp* caller,
+    const ApplyBuiltInWallpaperRequestV1* request,
+    ApplyBuiltInWallpaperResultV1* output)
+{
+    if (!output) return WallpaperOperationStatus::InvalidArgument;
+    ApplyBuiltInWallpaperResultV1 result{};
+    result.structureSize = sizeof(result);
+    result.version = kApplyBuiltInWallpaperVersion;
+    result.status = WallpaperOperationStatus::InvalidArgument;
+
+    if (!caller) {
+        *output = result;
+        return result.status;
     }
-    if ((desktopResult.flags & desktop::kDesktopGradientApplyPersistedAvailable) != 0u) {
-        result.flags |= kGradientOperationPersistedAvailable;
-        copyBoundedText(result.persistedId, desktopResult.persistedId);
+    if (!textEquals(caller->getRuntimeAppId(), kSettingsRuntimeAppId)) {
+        result.status = WallpaperOperationStatus::Unauthorized;
+        *output = result;
+        return result.status;
     }
-    if ((desktopResult.flags & desktop::kDesktopGradientApplyRollbackVerified) != 0u) {
-        result.flags |= kGradientOperationRollbackVerified;
+    if (!request || request->structureSize != sizeof(*request)) {
+        *output = result;
+        return result.status;
     }
-    switch (desktopResult.status) {
-        case desktop::DesktopGradientApplyStatus::Committed:
-            result.status = GradientOperationStatus::Committed;
-            break;
-        case desktop::DesktopGradientApplyStatus::NoChange:
-            result.status = GradientOperationStatus::NoChange;
-            break;
-        case desktop::DesktopGradientApplyStatus::InvalidPreset:
-            result.status = GradientOperationStatus::InvalidPreset;
-            break;
-        case desktop::DesktopGradientApplyStatus::StaleRevision:
-            result.status = GradientOperationStatus::StaleRevision;
-            break;
-        case desktop::DesktopGradientApplyStatus::PersistenceUnavailable:
-            result.status = GradientOperationStatus::PersistenceUnavailable;
-            break;
-        case desktop::DesktopGradientApplyStatus::PersistenceConflict:
-            result.status = GradientOperationStatus::PersistenceConflict;
-            break;
-        case desktop::DesktopGradientApplyStatus::ApplyFailed:
-            result.status = GradientOperationStatus::ApplyFailed;
-            break;
-        case desktop::DesktopGradientApplyStatus::SaveFailedRolledBack:
-            result.status = GradientOperationStatus::SaveFailedRolledBack;
-            break;
-        case desktop::DesktopGradientApplyStatus::ReadbackFailedRolledBack:
-            result.status = GradientOperationStatus::ReadbackFailedRolledBack;
-            break;
-        case desktop::DesktopGradientApplyStatus::RollbackFailed:
-            result.status = GradientOperationStatus::RollbackFailed;
-            break;
-        default:
-            result.status = GradientOperationStatus::ApplyFailed;
-            break;
+    if (request->version != kApplyBuiltInWallpaperVersion) {
+        result.status = WallpaperOperationStatus::UnsupportedVersion;
+        *output = result;
+        return result.status;
     }
+    if (!validPresetIdentifier(request->wallpaperId, sizeof(request->wallpaperId)) ||
+        request->expectedRevision == 0u) {
+        result.status = WallpaperOperationStatus::InvalidPreset;
+        *output = result;
+        return result.status;
+    }
+
+    desktop::DesktopGradientApplyResultV1 desktopResult{};
+    (void)desktop::apply_builtin_wallpaper(
+        request->wallpaperId, request->expectedRevision, &desktopResult);
+    result.status = copyDesktopApplyResult(
+        desktopResult, &result.flags, &result.revision,
+        result.appliedId, sizeof(result.appliedId),
+        result.persistedId, sizeof(result.persistedId));
     *output = result;
     return result.status;
 }

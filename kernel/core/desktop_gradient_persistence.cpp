@@ -250,7 +250,7 @@ bool readCanonicalWallpaperId(char* output, size_t outputCapacity)
     return validPresetId(output);
 }
 
-GradientPersistenceStatus persistBuiltInGradientId(
+GradientPersistenceStatus persistBuiltInBackgroundId(
     const char* expectedCurrentId,
     const char* requestedId,
     GradientPersistenceResult* output)
@@ -309,6 +309,14 @@ GradientPersistenceStatus persistBuiltInGradientId(
         ? GradientPersistenceStatus::WriteFailedRolledBack
         : GradientPersistenceStatus::ReadbackFailedRolledBack;
     return output->status;
+}
+
+GradientPersistenceStatus persistBuiltInGradientId(
+    const char* expectedCurrentId,
+    const char* requestedId,
+    GradientPersistenceResult* output)
+{
+    return persistBuiltInBackgroundId(expectedCurrentId, requestedId, output);
 }
 
 } // namespace desktop

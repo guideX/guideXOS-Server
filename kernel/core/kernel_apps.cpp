@@ -16541,7 +16541,11 @@ public:
           m_snapshotAvailable(false),
           m_appearanceSnapshotAvailable(false),
           m_gradientPresetCount(0u),
+          m_wallpaperPresetCount(0u),
+          m_showWallpaperChoices(false),
+          m_wallpaperPage(0u),
           m_pendingGradientIndex(-1),
+          m_pendingWallpaperIndex(-1),
           m_pendingGradientRevision(0u),
           m_pendingGradientDirty(false),
           m_pendingGradientStale(false),
@@ -16574,7 +16578,11 @@ public:
         m_appearanceSnapshot = settings_native::DesktopAppearanceSnapshotV1{};
         m_appearanceSnapshotAvailable = false;
         m_gradientPresetCount = 0u;
+        m_wallpaperPresetCount = 0u;
+        m_showWallpaperChoices = false;
+        m_wallpaperPage = 0u;
         m_pendingGradientIndex = -1;
+        m_pendingWallpaperIndex = -1;
         m_pendingGradientRevision = 0u;
         m_pendingGradientDirty = false;
         m_pendingGradientStale = false;
@@ -16618,6 +16626,7 @@ public:
         settings_native::refreshDisplaySnapshot(
             &m_adapter, m_displayRefreshState, m_presentation);
         refreshGradientPresets();
+        refreshWallpaperPresets();
         refreshPersonalizationSnapshot();
 
         for (size_t i = 0; i < settings::kCapabilityCount; ++i) {
@@ -16652,7 +16661,10 @@ public:
         m_appearanceSnapshot = settings_native::DesktopAppearanceSnapshotV1{};
         m_appearanceSnapshotAvailable = false;
         m_gradientPresetCount = 0u;
+        m_wallpaperPresetCount = 0u;
+        m_wallpaperPage = 0u;
         m_pendingGradientIndex = -1;
+        m_pendingWallpaperIndex = -1;
         m_pendingGradientRevision = 0u;
         m_pendingGradientDirty = false;
         m_pendingGradientStale = false;
@@ -16731,7 +16743,7 @@ public:
                      key == shell::KEY_UP || key == shell::KEY_DOWN) {
                 if (m_presentation.focusedControl() ==
                     settings::FocusControl::PersonalizationChooseBackground) {
-                    movePendingGradient(key);
+                    movePendingBackground(key);
                     invalidate();
                 }
             } else if (key == '\r' || key == '\n' || key == ' ') {
@@ -16810,7 +16822,13 @@ private:
     settings_native::BuiltInGradientPresetV1 m_gradientPresets[
         settings_native::kBuiltInGradientPresetCapacity]{};
     size_t m_gradientPresetCount;
+    settings_native::BuiltInWallpaperPresetV1 m_wallpaperPresets[
+        settings_native::kBuiltInWallpaperPresetCapacity]{};
+    size_t m_wallpaperPresetCount;
+    bool m_showWallpaperChoices;
+    size_t m_wallpaperPage;
     int m_pendingGradientIndex;
+    int m_pendingWallpaperIndex;
     uint64_t m_pendingGradientRevision;
     bool m_pendingGradientDirty;
     bool m_pendingGradientStale;
@@ -16978,6 +16996,7 @@ private:
         if (category == settings::CategoryId::Display) refreshDisplaySnapshot();
         if (category == settings::CategoryId::Personalization) {
             refreshGradientPresets();
+            refreshWallpaperPresets();
             refreshPersonalizationSnapshot();
         }
         updateCoreFocus();
@@ -17018,6 +17037,7 @@ private:
 
         if (!available) {
             m_pendingGradientIndex = -1;
+            m_pendingWallpaperIndex = -1;
             m_pendingGradientDirty = false;
             m_pendingGradientStale = false;
             setGradientStatus("Desktop appearance is unavailable.", nullptr);
@@ -17074,11 +17094,50 @@ private:
         return true;
     }
 
+    bool refreshWallpaperPresets()
+    {
+        size_t count = 0u;
+        const settings_native::SnapshotStatus status =
+            settings_native::readBuiltInWallpaperPresets(
+                this, m_wallpaperPresets,
+                settings_native::kBuiltInWallpaperPresetCapacity, &count);
+        if (status != settings_native::SnapshotStatus::Ok ||
+            count > settings_native::kBuiltInWallpaperPresetCapacity) {
+            m_wallpaperPresetCount = 0u;
+            return false;
+        }
+        for (size_t index = 0u; index < count; ++index) {
+            const settings_native::BuiltInWallpaperPresetV1& preset =
+                m_wallpaperPresets[index];
+            if (preset.structureSize != sizeof(preset) ||
+                preset.version != settings_native::kBuiltInWallpaperPresetListVersion ||
+                (preset.flags & ~settings_native::kBuiltInWallpaperAssetPresent) != 0u ||
+                !validUiText(preset.id, sizeof(preset.id)) ||
+                !validUiText(preset.displayName, sizeof(preset.displayName))) {
+                m_wallpaperPresetCount = 0u;
+                return false;
+            }
+        }
+        m_wallpaperPresetCount = count;
+        return true;
+    }
+
     int findGradientPreset(const char* id) const
     {
         if (!id) return -1;
         for (size_t index = 0u; index < m_gradientPresetCount; ++index) {
             if (streq_local(m_gradientPresets[index].id, id)) {
+                return static_cast<int>(index);
+            }
+        }
+        return -1;
+    }
+
+    int findWallpaperPreset(const char* id) const
+    {
+        if (!id) return -1;
+        for (size_t index = 0u; index < m_wallpaperPresetCount; ++index) {
+            if (streq_local(m_wallpaperPresets[index].id, id)) {
                 return static_cast<int>(index);
             }
         }
@@ -17094,12 +17153,21 @@ private:
 
     void resetPendingGradientToCurrent(const char* status)
     {
-        m_pendingGradientIndex = m_appearanceSnapshotAvailable
+        m_pendingGradientIndex = m_appearanceSnapshotAvailable &&
+            m_appearanceSnapshot.backgroundKind ==
+                settings_native::DesktopBackgroundKind::Gradient
             ? findGradientPreset(m_appearanceSnapshot.backgroundId) : -1;
+        m_pendingWallpaperIndex = m_appearanceSnapshotAvailable &&
+            m_appearanceSnapshot.backgroundKind ==
+                settings_native::DesktopBackgroundKind::Wallpaper
+            ? findWallpaperPreset(m_appearanceSnapshot.backgroundId) : -1;
         m_pendingGradientRevision = m_appearanceSnapshotAvailable
             ? m_appearanceSnapshot.revision : 0u;
         m_pendingGradientDirty = false;
         m_pendingGradientStale = false;
+        m_wallpaperPage = m_pendingWallpaperIndex >= 0
+            ? static_cast<size_t>(m_pendingWallpaperIndex) / 4u : 0u;
+        m_showWallpaperChoices = m_pendingWallpaperIndex >= 0;
         if (status) setGradientStatus(status, nullptr);
         else if (m_appearanceSnapshotAvailable) {
             setGradientStatus("Select a preset, then choose Apply.", nullptr);
@@ -17112,6 +17180,7 @@ private:
             !m_appearanceSnapshotAvailable) return;
         m_pendingGradientRevision = m_appearanceSnapshot.revision;
         m_pendingGradientIndex = index;
+        m_pendingWallpaperIndex = -1;
         m_pendingGradientStale = false;
         const int current = findGradientPreset(m_appearanceSnapshot.backgroundId);
         m_pendingGradientDirty = current != index;
@@ -17122,6 +17191,38 @@ private:
             nullptr);
         serial::puts("[settings-native] gradient.pending id=");
         serial::puts(m_gradientPresets[index].id);
+        serial::puts(" revision=");
+        serial_put_dec(static_cast<uint32_t>(m_pendingGradientRevision));
+        serial::putc('\n');
+    }
+
+    void choosePendingWallpaper(int index)
+    {
+        if (index < 0 || static_cast<size_t>(index) >= m_wallpaperPresetCount ||
+            !m_appearanceSnapshotAvailable) return;
+        const settings_native::BuiltInWallpaperPresetV1& preset =
+            m_wallpaperPresets[index];
+        if ((preset.flags & settings_native::kBuiltInWallpaperAssetPresent) == 0u) {
+            setGradientStatus("This built-in wallpaper asset is unavailable.", nullptr);
+            return;
+        }
+        m_pendingGradientRevision = m_appearanceSnapshot.revision;
+        m_pendingGradientIndex = -1;
+        m_pendingWallpaperIndex = index;
+        m_pendingGradientStale = false;
+        const int current =
+            m_appearanceSnapshot.backgroundKind ==
+                settings_native::DesktopBackgroundKind::Wallpaper
+            ? findWallpaperPreset(m_appearanceSnapshot.backgroundId) : -1;
+        m_pendingGradientDirty = current != index;
+        setGradientStatus(
+            m_pendingGradientDirty
+                ? "Pending wallpaper. Apply to change the desktop."
+                : "Current wallpaper selected. Apply makes no change.",
+            nullptr);
+        m_wallpaperPage = static_cast<size_t>(index) / 4u;
+        serial::puts("[settings-native] wallpaper.pending id=");
+        serial::puts(preset.id);
         serial::puts(" revision=");
         serial_put_dec(static_cast<uint32_t>(m_pendingGradientRevision));
         serial::putc('\n');
@@ -17141,6 +17242,32 @@ private:
         choosePendingGradient(index);
     }
 
+    void movePendingWallpaper(uint32_t key)
+    {
+        if (m_wallpaperPresetCount == 0u) return;
+        int index = m_pendingWallpaperIndex;
+        if (index < 0) {
+            index = m_appearanceSnapshotAvailable &&
+                m_appearanceSnapshot.backgroundKind ==
+                    settings_native::DesktopBackgroundKind::Wallpaper
+                ? findWallpaperPreset(m_appearanceSnapshot.backgroundId) : 0;
+        }
+        if (index < 0) index = 0;
+        if (key == shell::KEY_LEFT && index > 0) --index;
+        else if (key == shell::KEY_RIGHT &&
+                 static_cast<size_t>(index + 1) < m_wallpaperPresetCount) ++index;
+        else if (key == shell::KEY_UP && index >= 2) index -= 2;
+        else if (key == shell::KEY_DOWN &&
+                 static_cast<size_t>(index + 2) < m_wallpaperPresetCount) index += 2;
+        choosePendingWallpaper(index);
+    }
+
+    void movePendingBackground(uint32_t key)
+    {
+        if (m_showWallpaperChoices) movePendingWallpaper(key);
+        else movePendingGradient(key);
+    }
+
     void cyclePersonalizationFocus()
     {
         settings::FocusControl current = m_presentation.focusedControl();
@@ -17157,7 +17284,7 @@ private:
     {
         const settings::FocusControl focus = m_presentation.focusedControl();
         if (focus == settings::FocusControl::PersonalizationApply) {
-            applyPendingGradient();
+            applyPendingBackground();
         } else if (focus == settings::FocusControl::PersonalizationCancel) {
             cancelPendingGradient();
         }
@@ -17171,12 +17298,14 @@ private:
         serial::puts("[settings-native] gradient.pending cancelled\n");
     }
 
-    void applyPendingGradient()
+    void applyPendingBackground()
     {
-        if (!m_appearanceSnapshotAvailable ||
-            m_pendingGradientIndex < 0 ||
-            static_cast<size_t>(m_pendingGradientIndex) >= m_gradientPresetCount) {
-            setGradientStatus("Select an available gradient first.", nullptr);
+        const bool gradient = m_pendingGradientIndex >= 0 &&
+            static_cast<size_t>(m_pendingGradientIndex) < m_gradientPresetCount;
+        const bool wallpaper = m_pendingWallpaperIndex >= 0 &&
+            static_cast<size_t>(m_pendingWallpaperIndex) < m_wallpaperPresetCount;
+        if (!m_appearanceSnapshotAvailable || (!gradient && !wallpaper)) {
+            setGradientStatus("Select an available background first.", nullptr);
             return;
         }
         if (m_pendingGradientStale ||
@@ -17184,20 +17313,47 @@ private:
             m_pendingGradientDirty = false;
             refreshPersonalizationSnapshot();
             resetPendingGradientToCurrent(
-                "Desktop changed. Select the gradient again before applying.");
+                "Desktop changed. Select the background again before applying.");
             return;
         }
 
-        settings_native::ApplyBuiltInGradientPresetRequestV1 request{};
-        request.structureSize = sizeof(request);
-        request.version = settings_native::kApplyBuiltInGradientPresetVersion;
-        request.expectedRevision = m_pendingGradientRevision;
-        strcopy(request.presetId, m_gradientPresets[m_pendingGradientIndex].id,
-                static_cast<int>(sizeof(request.presetId)));
+        const char* requestedId = gradient
+            ? m_gradientPresets[m_pendingGradientIndex].id
+            : m_wallpaperPresets[m_pendingWallpaperIndex].id;
+        settings_native::GradientOperationStatus status =
+            settings_native::GradientOperationStatus::InvalidArgument;
+        uint32_t resultFlags = 0u;
+        uint64_t resultRevision = 0u;
+        char appliedId[settings_native::kDesktopAppearanceIdCapacity] = {};
+        char persistedId[settings_native::kDesktopAppearanceIdCapacity] = {};
+        if (gradient) {
+            settings_native::ApplyBuiltInGradientPresetRequestV1 request{};
+            request.structureSize = sizeof(request);
+            request.version = settings_native::kApplyBuiltInGradientPresetVersion;
+            request.expectedRevision = m_pendingGradientRevision;
+            strcopy(request.presetId, requestedId,
+                    static_cast<int>(sizeof(request.presetId)));
+            settings_native::ApplyBuiltInGradientPresetResultV1 result{};
+            status = settings_native::applyBuiltInGradientPreset(this, &request, &result);
+            resultFlags = result.flags;
+            resultRevision = result.revision;
+            strcopy(appliedId, result.appliedId, static_cast<int>(sizeof(appliedId)));
+            strcopy(persistedId, result.persistedId, static_cast<int>(sizeof(persistedId)));
+        } else {
+            settings_native::ApplyBuiltInWallpaperRequestV1 request{};
+            request.structureSize = sizeof(request);
+            request.version = settings_native::kApplyBuiltInWallpaperVersion;
+            request.expectedRevision = m_pendingGradientRevision;
+            strcopy(request.wallpaperId, requestedId,
+                    static_cast<int>(sizeof(request.wallpaperId)));
+            settings_native::ApplyBuiltInWallpaperResultV1 result{};
+            status = settings_native::applyBuiltInWallpaper(this, &request, &result);
+            resultFlags = result.flags;
+            resultRevision = result.revision;
+            strcopy(appliedId, result.appliedId, static_cast<int>(sizeof(appliedId)));
+            strcopy(persistedId, result.persistedId, static_cast<int>(sizeof(persistedId)));
+        }
 
-        settings_native::ApplyBuiltInGradientPresetResultV1 result{};
-        const settings_native::GradientOperationStatus status =
-            settings_native::applyBuiltInGradientPreset(this, &request, &result);
         m_pendingGradientDirty = false;
         m_pendingGradientStale = false;
         const bool refreshed = refreshPersonalizationSnapshot();
@@ -17205,62 +17361,60 @@ private:
 
         if (status == settings_native::GradientOperationStatus::Committed) {
             const bool verified = refreshed &&
-                (result.flags & settings_native::kGradientOperationActiveAvailable) != 0u &&
-                (result.flags & settings_native::kGradientOperationPersistedAvailable) != 0u &&
-                streq_local(result.appliedId, request.presetId) &&
-                streq_local(result.persistedId, request.presetId) &&
-                streq_local(m_appearanceSnapshot.backgroundId, request.presetId) &&
-                m_appearanceSnapshot.revision == result.revision;
-            setGradientStatus(
-                verified ? "Gradient applied and saved." :
-                    "Commit could not be verified; current state was refreshed.",
-                nullptr);
+                (resultFlags & settings_native::kGradientOperationActiveAvailable) != 0u &&
+                (resultFlags & settings_native::kGradientOperationPersistedAvailable) != 0u &&
+                streq_local(appliedId, requestedId) &&
+                streq_local(persistedId, requestedId) &&
+                streq_local(m_appearanceSnapshot.backgroundId, requestedId) &&
+                m_appearanceSnapshot.revision == resultRevision;
+            setGradientStatus(verified
+                ? (gradient ? "Gradient applied and saved." : "Wallpaper applied and saved.")
+                : "Commit could not be verified; current state was refreshed.", nullptr);
         } else if (status == settings_native::GradientOperationStatus::NoChange) {
             setGradientStatus(
-                refreshed && streq_local(m_appearanceSnapshot.backgroundId, request.presetId)
-                    ? "That gradient is already current."
-                    : "Current state refreshed; no change was confirmed.",
-                nullptr);
+                refreshed && streq_local(m_appearanceSnapshot.backgroundId, requestedId)
+                    ? (gradient ? "That gradient is already current." : "That wallpaper is already current.")
+                    : "Current state refreshed; no change was confirmed.", nullptr);
         } else if (status == settings_native::GradientOperationStatus::StaleRevision) {
-            setGradientStatus("Desktop changed. Select the gradient again before applying.", nullptr);
+            setGradientStatus("Desktop changed. Select the background again before applying.", nullptr);
         } else if (status == settings_native::GradientOperationStatus::SaveFailedRolledBack ||
                    status == settings_native::GradientOperationStatus::ReadbackFailedRolledBack) {
             const bool restored =
-                (result.flags & settings_native::kGradientOperationRollbackVerified) != 0u &&
-                refreshed && (result.flags & settings_native::kGradientOperationActiveAvailable) != 0u &&
-                (result.flags & settings_native::kGradientOperationPersistedAvailable) != 0u &&
-                streq_local(result.appliedId, m_appearanceSnapshot.backgroundId) &&
-                streq_local(result.persistedId, m_appearanceSnapshot.backgroundId);
+                (resultFlags & settings_native::kGradientOperationRollbackVerified) != 0u &&
+                refreshed && (resultFlags & settings_native::kGradientOperationActiveAvailable) != 0u &&
+                (resultFlags & settings_native::kGradientOperationPersistedAvailable) != 0u &&
+                streq_local(appliedId, m_appearanceSnapshot.backgroundId) &&
+                streq_local(persistedId, m_appearanceSnapshot.backgroundId);
             setGradientStatus(
                 restored ? "Save failed; previous state was restored." :
-                    "Save failed; inspect the refreshed current state.",
-                nullptr);
+                    "Save failed; inspect the refreshed current state.", nullptr);
         } else if (status == settings_native::GradientOperationStatus::RollbackFailed) {
             char extra[96] = {};
             strcopy(extra, "Saved: ", static_cast<int>(sizeof(extra)));
-            const char* persisted = (result.flags &
-                settings_native::kGradientOperationPersistedAvailable) != 0u
-                ? result.persistedId : "unavailable";
-            appendText(extra, sizeof(extra), persisted);
+            appendText(extra, sizeof(extra),
+                (resultFlags & settings_native::kGradientOperationPersistedAvailable) != 0u
+                    ? persistedId : "unavailable");
             setGradientStatus("Rollback failed. Active state was refreshed.", extra);
         } else if (status == settings_native::GradientOperationStatus::PersistenceUnavailable) {
             setGradientStatus("Configuration storage is unavailable.", nullptr);
         } else if (status == settings_native::GradientOperationStatus::PersistenceConflict) {
             setGradientStatus("Saved configuration changed. Select again to retry.", nullptr);
+        } else if (status == settings_native::GradientOperationStatus::AssetUnavailable) {
+            setGradientStatus("The built-in wallpaper image could not be loaded.", nullptr);
         } else if (status == settings_native::GradientOperationStatus::Unauthorized) {
             setGradientStatus("Settings is not authorized to apply this change.", nullptr);
         } else if (status == settings_native::GradientOperationStatus::InvalidPreset) {
-            setGradientStatus("The selected preset is not supported.", nullptr);
+            setGradientStatus("The selected background is not supported.", nullptr);
         } else {
-            setGradientStatus("Gradient apply failed; current state was refreshed.", nullptr);
+            setGradientStatus("Background apply failed; current state was refreshed.", nullptr);
         }
 
-        serial::puts("[settings-native] gradient.apply status=");
+        serial::puts("[settings-native] background.apply status=");
         serial_put_dec(static_cast<uint32_t>(status));
         serial::puts(" active=");
-        serial::puts(result.appliedId[0] ? result.appliedId : "(unavailable)");
+        serial::puts(appliedId[0] ? appliedId : "(unavailable)");
         serial::puts(" persisted=");
-        serial::puts(result.persistedId[0] ? result.persistedId : "(unavailable)");
+        serial::puts(persistedId[0] ? persistedId : "(unavailable)");
         serial::putc('\n');
     }
 
@@ -17272,29 +17426,65 @@ private:
         const uint32_t contentW = m_drawW > sidebarWidth + 44u
             ? m_drawW - sidebarWidth - 44u : 1u;
         const uint32_t gridX = contentX + 16u;
-        const uint32_t gridY = 96u + 148u;
         const uint32_t gridW = contentW > 32u ? contentW - 32u : 1u;
+        const uint32_t tabY = 96u + 151u;
+        const uint32_t tabGap = 8u;
+        const uint32_t tabW = gridW > tabGap ? (gridW - tabGap) / 2u : 1u;
+        if (static_cast<uint32_t>(y) >= tabY &&
+            static_cast<uint32_t>(y) < tabY + 24u &&
+            static_cast<uint32_t>(x) >= gridX &&
+            static_cast<uint32_t>(x) < gridX + gridW) {
+            const uint32_t relativeX = static_cast<uint32_t>(x) - gridX;
+            m_showWallpaperChoices = relativeX >= tabW + tabGap;
+            m_presentation.setFocusedControl(
+                settings::FocusControl::PersonalizationChooseBackground);
+            return true;
+        }
+
+        const uint32_t gridY = 96u + 179u;
         const uint32_t gap = 5u;
-        const uint32_t cellW = gridW > gap * 3u ? (gridW - gap * 3u) / 4u : 1u;
+        const uint32_t columns = m_showWallpaperChoices ? 2u : 4u;
+        const uint32_t cellW = gridW > gap * (columns - 1u)
+            ? (gridW - gap * (columns - 1u)) / columns : 1u;
         if (static_cast<uint32_t>(x) >= gridX &&
             static_cast<uint32_t>(x) < gridX + gridW &&
             static_cast<uint32_t>(y) >= gridY &&
             static_cast<uint32_t>(y) < gridY + 64u &&
-            m_gradientPresetCount != 0u) {
+            (m_showWallpaperChoices ? m_wallpaperPresetCount != 0u : m_gradientPresetCount != 0u)) {
             const uint32_t column = (static_cast<uint32_t>(x) - gridX) / (cellW + gap);
             const uint32_t rowY = static_cast<uint32_t>(y) - gridY;
             const uint32_t row = rowY / 34u;
             const uint32_t inCellX = (static_cast<uint32_t>(x) - gridX) % (cellW + gap);
-            if (column >= 4u || row >= 2u || inCellX >= cellW ||
+            if (column >= columns || row >= 2u || inCellX >= cellW ||
                 rowY % 34u >= 30u) return false;
-            const size_t index = static_cast<size_t>(row * 4u + column);
-            if (index >= m_gradientPresetCount) return false;
-            choosePendingGradient(static_cast<int>(index));
+            if (m_showWallpaperChoices) {
+                const size_t index = m_wallpaperPage * 4u + row * 2u + column;
+                if (index >= m_wallpaperPresetCount) return false;
+                choosePendingWallpaper(static_cast<int>(index));
+            } else {
+                const size_t index = static_cast<size_t>(row * 4u + column);
+                if (index >= m_gradientPresetCount) return false;
+                choosePendingGradient(static_cast<int>(index));
+            }
             m_presentation.setFocusedControl(settings::FocusControl::PersonalizationChooseBackground);
             return true;
         }
 
-        const uint32_t buttonsY = 96u + 224u;
+        const uint32_t pageY = 96u + 244u;
+        if (m_showWallpaperChoices &&
+            static_cast<uint32_t>(y) >= pageY &&
+            static_cast<uint32_t>(y) < pageY + 18u &&
+            static_cast<uint32_t>(x) >= gridX &&
+            static_cast<uint32_t>(x) < gridX + gridW) {
+            const size_t pageCount = (m_wallpaperPresetCount + 3u) / 4u;
+            const uint32_t relativeX = static_cast<uint32_t>(x) - gridX;
+            if (relativeX < 72u && m_wallpaperPage > 0u) --m_wallpaperPage;
+            else if (relativeX >= gridW - (gridW < 72u ? gridW : 72u) &&
+                     m_wallpaperPage + 1u < pageCount) ++m_wallpaperPage;
+            return true;
+        }
+
+        const uint32_t buttonsY = 96u + 264u;
         const uint32_t buttonGap = 8u;
         const uint32_t buttonW = contentW > 32u
             ? (contentW - 32u - buttonGap) / 2u : 1u;
@@ -17303,7 +17493,7 @@ private:
             static_cast<uint32_t>(x) >= contentX + 16u &&
             static_cast<uint32_t>(x) < contentX + 16u + buttonW) {
             m_presentation.setFocusedControl(settings::FocusControl::PersonalizationApply);
-            applyPendingGradient();
+            applyPendingBackground();
             return true;
         }
         if (static_cast<uint32_t>(y) >= buttonsY &&
@@ -17326,6 +17516,13 @@ private:
             if (key == ' ' &&
                 m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
                 activateFocusedPersonalizationControl();
+                return true;
+            }
+            if (m_presentation.selectedCategory() == settings::CategoryId::Personalization &&
+                (key == 'w' || key == 'g')) {
+                m_showWallpaperChoices = key == 'w';
+                m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationChooseBackground);
                 return true;
             }
             if (key == 'a') return selectSupportedCategory(settings::CategoryId::About, "keyboard");
@@ -17484,8 +17681,18 @@ private:
 
     int currentGradientPresetIndex() const
     {
-        return m_appearanceSnapshotAvailable
+        return m_appearanceSnapshotAvailable &&
+            m_appearanceSnapshot.backgroundKind ==
+                settings_native::DesktopBackgroundKind::Gradient
             ? findGradientPreset(m_appearanceSnapshot.backgroundId) : -1;
+    }
+
+    int currentWallpaperPresetIndex() const
+    {
+        return m_appearanceSnapshotAvailable &&
+            m_appearanceSnapshot.backgroundKind ==
+                settings_native::DesktopBackgroundKind::Wallpaper
+            ? findWallpaperPreset(m_appearanceSnapshot.backgroundId) : -1;
     }
 
     void drawPersonalizationInformation(
@@ -17566,48 +17773,145 @@ private:
             appDrawText(contentX + 16u, cardY + 126u, line, rgb(216, 221, 232));
         }
 
-        if (m_gradientPresetCount == 0u) {
-            appDrawText(contentX + 16u, cardY + 157u,
-                "Built-in gradient presets are unavailable.", rgb(236, 174, 122));
-            return;
-        }
-
         const uint32_t gridX = contentX + 16u;
-        const uint32_t gridY = cardY + 148u;
         const uint32_t gridW = contentW > 32u ? contentW - 32u : 1u;
+        const uint32_t tabGap = 8u;
+        const uint32_t tabW = gridW > tabGap ? (gridW - tabGap) / 2u : 1u;
+        const uint32_t tabY = cardY + 151u;
+        const uint32_t gridY = cardY + 179u;
         const uint32_t gap = 5u;
-        const uint32_t cellW = gridW > gap * 3u ? (gridW - gap * 3u) / 4u : 1u;
-        const int currentIndex = currentGradientPresetIndex();
-        for (size_t index = 0u; index < m_gradientPresetCount; ++index) {
-            const uint32_t column = static_cast<uint32_t>(index % 4u);
-            const uint32_t row = static_cast<uint32_t>(index / 4u);
-            const uint32_t cellX = gridX + column * (cellW + gap);
-            const uint32_t cellY = gridY + row * 34u;
-            const settings_native::BuiltInGradientPresetV1& preset = m_gradientPresets[index];
-            framebuffer::fill_rect(cellX, cellY, cellW, 30u, rgb(43, 47, 58));
-            framebuffer::fill_rect(cellX + 3u, cellY + 5u, 14u, 20u, preset.accentColor);
-            const bool pending = static_cast<int>(index) == m_pendingGradientIndex;
-            const bool focused = pending && m_windowFocused &&
-                m_presentation.focusedControl() ==
-                    settings::FocusControl::PersonalizationChooseBackground;
-            appDrawRect(cellX, cellY, cellW, 30u,
-                focused ? rgb(255, 214, 110) :
-                (pending ? rgb(115, 166, 245) :
-                 (static_cast<int>(index) == currentIndex
-                    ? rgb(100, 160, 122) : rgb(67, 74, 88))));
-            char label[40] = {};
-            strcopy(label, preset.displayName, static_cast<int>(sizeof(label)));
-            if (static_cast<int>(index) == currentIndex) appendText(label, sizeof(label), " *");
-            appDrawText(cellX + 21u, cellY + 12u, label, rgb(238, 240, 246));
+        const uint32_t columns = m_showWallpaperChoices ? 2u : 4u;
+        const uint32_t cellW = gridW > gap * (columns - 1u)
+            ? (gridW - gap * (columns - 1u)) / columns : 1u;
+        const int currentGradient = currentGradientPresetIndex();
+        const int currentWallpaper = currentWallpaperPresetIndex();
+
+        const char* pendingName = nullptr;
+        if (m_pendingGradientIndex >= 0 &&
+            static_cast<size_t>(m_pendingGradientIndex) < m_gradientPresetCount) {
+            pendingName = m_gradientPresets[m_pendingGradientIndex].displayName;
+        } else if (m_pendingWallpaperIndex >= 0 &&
+                   static_cast<size_t>(m_pendingWallpaperIndex) < m_wallpaperPresetCount) {
+            pendingName = m_wallpaperPresets[m_pendingWallpaperIndex].displayName;
+        }
+        if (pendingName) {
+            char pendingLine[96] = {};
+            strcopy(pendingLine, m_pendingGradientDirty ? "Pending: " : "Selected: ",
+                    static_cast<int>(sizeof(pendingLine)));
+            appendText(pendingLine, sizeof(pendingLine), pendingName);
+            appDrawText(contentX + 16u, cardY + 137u, pendingLine,
+                        m_pendingGradientDirty ? rgb(167, 199, 250) : rgb(182, 198, 220));
         }
 
-        const uint32_t buttonsY = cardY + 224u;
+        const uint32_t wallpaperTabX = gridX + tabW + tabGap;
+        const uint32_t tabHeight = 22u;
+        framebuffer::fill_rect(gridX, tabY, tabW, tabHeight,
+            m_showWallpaperChoices ? rgb(43, 47, 58) : rgb(55, 82, 123));
+        framebuffer::fill_rect(wallpaperTabX, tabY, tabW, tabHeight,
+            m_showWallpaperChoices ? rgb(55, 82, 123) : rgb(43, 47, 58));
+        appDrawRect(gridX, tabY, tabW, tabHeight,
+            !m_showWallpaperChoices ? rgb(115, 166, 245) : rgb(67, 74, 88));
+        appDrawRect(wallpaperTabX, tabY, tabW, tabHeight,
+            m_showWallpaperChoices ? rgb(115, 166, 245) : rgb(67, 74, 88));
+        appDrawText(gridX + (tabW > 61u ? tabW / 2u - 30u : 3u),
+                    tabY + 8u, "Gradients [G]", rgb(238, 240, 246));
+        appDrawText(wallpaperTabX + (tabW > 65u ? tabW / 2u - 32u : 3u),
+                    tabY + 8u, "Wallpapers [W]", rgb(238, 240, 246));
+
+        if (m_showWallpaperChoices) {
+            if (m_wallpaperPresetCount == 0u) {
+                appDrawText(gridX, gridY + 14u,
+                    "Built-in wallpapers are unavailable.", rgb(236, 174, 122));
+            } else {
+                const size_t pageStart = m_wallpaperPage * 4u;
+                for (size_t slot = 0u; slot < 4u; ++slot) {
+                    const size_t index = pageStart + slot;
+                    if (index >= m_wallpaperPresetCount) break;
+                    const uint32_t column = static_cast<uint32_t>(slot % 2u);
+                    const uint32_t row = static_cast<uint32_t>(slot / 2u);
+                    const uint32_t cellX = gridX + column * (cellW + gap);
+                    const uint32_t cellY = gridY + row * 34u;
+                    const settings_native::BuiltInWallpaperPresetV1& preset =
+                        m_wallpaperPresets[index];
+                    const bool assetPresent =
+                        (preset.flags & settings_native::kBuiltInWallpaperAssetPresent) != 0u;
+                    framebuffer::fill_rect(cellX, cellY, cellW, 30u,
+                        assetPresent ? rgb(43, 47, 58) : rgb(48, 45, 44));
+                    const bool thumbDrawn = assetPresent &&
+                        desktop::draw_wallpaper_thumbnail_by_id(
+                            preset.id, cellX + 3u, cellY + 4u, 54u, 22u);
+                    if (!thumbDrawn) {
+                        framebuffer::fill_rect(cellX + 3u, cellY + 4u, 54u, 22u,
+                            rgb(59, 62, 69));
+                        appDrawText(cellX + 7u, cellY + 15u,
+                            assetPresent ? "Preview" : "Missing", rgb(190, 195, 205));
+                    }
+                    const bool pending = static_cast<int>(index) == m_pendingWallpaperIndex;
+                    const bool focused = pending && m_windowFocused &&
+                        m_presentation.focusedControl() ==
+                            settings::FocusControl::PersonalizationChooseBackground;
+                    appDrawRect(cellX, cellY, cellW, 30u,
+                        focused ? rgb(255, 214, 110) :
+                        (pending ? rgb(115, 166, 245) :
+                         (static_cast<int>(index) == currentWallpaper
+                            ? rgb(100, 160, 122) : rgb(67, 74, 88))));
+                    char label[48] = {};
+                    strcopy(label, preset.displayName, static_cast<int>(sizeof(label)));
+                    if (static_cast<int>(index) == currentWallpaper) appendText(label, sizeof(label), " *");
+                    appDrawText(cellX + 62u, cellY + 15u, label,
+                        assetPresent ? rgb(238, 240, 246) : rgb(172, 165, 160));
+                }
+            }
+        } else if (m_gradientPresetCount == 0u) {
+            appDrawText(gridX, gridY + 14u,
+                "Built-in gradient presets are unavailable.", rgb(236, 174, 122));
+        } else {
+            for (size_t index = 0u; index < m_gradientPresetCount; ++index) {
+                const uint32_t column = static_cast<uint32_t>(index % 4u);
+                const uint32_t row = static_cast<uint32_t>(index / 4u);
+                const uint32_t cellX = gridX + column * (cellW + gap);
+                const uint32_t cellY = gridY + row * 34u;
+                const settings_native::BuiltInGradientPresetV1& preset = m_gradientPresets[index];
+                framebuffer::fill_rect(cellX, cellY, cellW, 30u, rgb(43, 47, 58));
+                framebuffer::fill_rect(cellX + 3u, cellY + 5u, 14u, 20u, preset.accentColor);
+                const bool pending = static_cast<int>(index) == m_pendingGradientIndex;
+                const bool focused = pending && m_windowFocused &&
+                    m_presentation.focusedControl() ==
+                        settings::FocusControl::PersonalizationChooseBackground;
+                appDrawRect(cellX, cellY, cellW, 30u,
+                    focused ? rgb(255, 214, 110) :
+                    (pending ? rgb(115, 166, 245) :
+                     (static_cast<int>(index) == currentGradient
+                        ? rgb(100, 160, 122) : rgb(67, 74, 88))));
+                char label[40] = {};
+                strcopy(label, preset.displayName, static_cast<int>(sizeof(label)));
+                if (static_cast<int>(index) == currentGradient) appendText(label, sizeof(label), " *");
+                appDrawText(cellX + 21u, cellY + 12u, label, rgb(238, 240, 246));
+            }
+        }
+
+        if (m_showWallpaperChoices && m_wallpaperPresetCount != 0u) {
+            const size_t pageCount = (m_wallpaperPresetCount + 3u) / 4u;
+            char pageLabel[40] = "Page ";
+            appendUnsigned(pageLabel, sizeof(pageLabel), static_cast<uint32_t>(m_wallpaperPage + 1u));
+            appendText(pageLabel, sizeof(pageLabel), " / ");
+            appendUnsigned(pageLabel, sizeof(pageLabel), static_cast<uint32_t>(pageCount));
+            const uint32_t pageY = cardY + 244u;
+            appDrawText(gridX, pageY + 10u, "< Previous", rgb(190, 205, 230));
+            appDrawText(gridX + gridW / 2u - 18u, pageY + 10u,
+                        pageLabel, rgb(182, 198, 220));
+            appDrawText(gridX + gridW - 66u, pageY + 10u, "Next >", rgb(190, 205, 230));
+        }
+
+        const uint32_t buttonsY = cardY + 264u;
         const uint32_t buttonGap = 8u;
         const uint32_t buttonW = contentW > 32u
             ? (contentW - 32u - buttonGap) / 2u : 1u;
-        const bool canApply = available && m_pendingGradientIndex >= 0 &&
-            static_cast<size_t>(m_pendingGradientIndex) < m_gradientPresetCount &&
-            !m_pendingGradientStale;
+        const bool canApply = available && !m_pendingGradientStale &&
+            ((m_pendingGradientIndex >= 0 &&
+              static_cast<size_t>(m_pendingGradientIndex) < m_gradientPresetCount) ||
+             (m_pendingWallpaperIndex >= 0 &&
+              static_cast<size_t>(m_pendingWallpaperIndex) < m_wallpaperPresetCount));
         const bool applyFocused = m_windowFocused &&
             m_presentation.focusedControl() == settings::FocusControl::PersonalizationApply;
         const bool cancelFocused = m_windowFocused &&
@@ -17627,12 +17931,12 @@ private:
                     buttonsY + 11u, "Cancel", rgb(245, 247, 252));
 
         const char* status = m_pendingGradientStale
-            ? "Desktop changed. Re-select a preset before applying."
+            ? "Desktop changed. Re-select the background before applying."
             : m_gradientStatus;
-        appDrawText(contentX + 16u, cardY + 258u, status,
+        appDrawText(contentX + 16u, cardY + 296u, status,
                     m_pendingGradientStale ? rgb(255, 204, 112) : rgb(182, 198, 220));
-        if (m_gradientStatusExtra[0]) {
-            appDrawText(contentX + 16u, cardY + 274u, m_gradientStatusExtra,
+        if (cardH >= 330u && m_gradientStatusExtra[0]) {
+            appDrawText(contentX + 16u, cardY + 311u, m_gradientStatusExtra,
                         rgb(255, 175, 148));
         }
         (void)cardH;

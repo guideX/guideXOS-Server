@@ -5671,6 +5671,33 @@ bool get_builtin_gradient_preset(
     return true;
 }
 
+uint32_t get_builtin_wallpaper_preset_count()
+{
+    return static_cast<uint32_t>(kBuiltInWallpaperCount);
+}
+
+bool get_builtin_wallpaper_preset(
+    uint32_t index, DesktopBuiltInWallpaperPresetV1* output)
+{
+    if (!output || index >= static_cast<uint32_t>(kBuiltInWallpaperCount)) return false;
+    const BuiltInWallpaperPalette& wallpaper = s_builtInWallpapers[index];
+    DesktopBuiltInWallpaperPresetV1 snapshot{};
+    snapshot.structureSize = sizeof(snapshot);
+    snapshot.version = kDesktopBuiltInWallpaperPresetVersion;
+    desktop_str_copy(snapshot.id, wallpaper.id, (int)sizeof(snapshot.id));
+    desktop_str_copy(snapshot.displayName, wallpaper.displayName,
+                     (int)sizeof(snapshot.displayName));
+    if (s_wallpaperPackMounted) {
+        kernel::vfs::FileInfo info{};
+        if (kernel::vfs::stat(wallpaper.fullImagePath, &info) == kernel::vfs::VFS_OK &&
+            info.type == kernel::vfs::FILE_TYPE_REGULAR && info.size >= sizeof(GximgHeader)) {
+            snapshot.flags |= kDesktopBuiltInWallpaperAssetPresent;
+        }
+    }
+    *output = snapshot;
+    return true;
+}
+
 static void set_gradient_apply_actual_state(
     DesktopGradientApplyResultV1* output,
     const GradientPersistenceResult* persistence)
@@ -5686,9 +5713,9 @@ static void set_gradient_apply_actual_state(
     }
 }
 
-DesktopGradientApplyStatus apply_builtin_gradient_preset(
-    const char* presetId, uint64_t expectedRevision,
-    DesktopGradientApplyResultV1* output)
+static DesktopGradientApplyStatus apply_builtin_background(
+    const char* backgroundId, uint64_t expectedRevision,
+    bool gradientSelection, DesktopGradientApplyResultV1* output)
 {
     if (!output) return DesktopGradientApplyStatus::ApplyFailed;
     DesktopGradientApplyResultV1 result{};
@@ -5697,8 +5724,11 @@ DesktopGradientApplyStatus apply_builtin_gradient_preset(
     result.status = DesktopGradientApplyStatus::InvalidPreset;
     result.revision = s_desktopAppearanceRevision;
 
-    const BuiltInGradientPalette* gradient = find_builtin_gradient(presetId);
-    if (!gradient) {
+    const BuiltInGradientPalette* gradient = gradientSelection
+        ? find_builtin_gradient(backgroundId) : nullptr;
+    const BuiltInWallpaperPalette* wallpaper = gradientSelection
+        ? nullptr : find_builtin_wallpaper(backgroundId);
+    if ((!gradientSelection && !wallpaper) || (gradientSelection && !gradient)) {
         *output = result;
         return result.status;
     }
@@ -5721,14 +5751,27 @@ DesktopGradientApplyStatus apply_builtin_gradient_preset(
         return result.status;
     }
 
-    if (before.backgroundKind == kDesktopAppearanceBackgroundGradient &&
-        desktop_str_eq(before.backgroundId, gradient->id)) {
+    const uint32_t targetKind = gradientSelection
+        ? kDesktopAppearanceBackgroundGradient : kDesktopAppearanceBackgroundWallpaper;
+    const char* targetId = gradientSelection ? gradient->id : wallpaper->id;
+
+    // Do not switch the authoritative image cache or active configuration to
+    // an image whose full bounded GXIMG read/decode has not succeeded.
+    if (!gradientSelection &&
+        (!s_wallpaperPackMounted || !load_wallpaper_full_cache(wallpaper->id))) {
+        result.status = DesktopGradientApplyStatus::AssetUnavailable;
+        *output = result;
+        return result.status;
+    }
+
+    if (before.backgroundKind == targetKind &&
+        desktop_str_eq(before.backgroundId, targetId)) {
         char persistedId[kGradientPresetIdCapacity] = {};
         if (readCanonicalWallpaperId(persistedId, sizeof(persistedId))) {
             desktop_str_copy(result.persistedId, persistedId,
                              (int)sizeof(result.persistedId));
             result.flags |= kDesktopGradientApplyPersistedAvailable;
-            if (!desktop_str_eq(persistedId, gradient->id)) {
+            if (!desktop_str_eq(persistedId, targetId)) {
                 result.status = DesktopGradientApplyStatus::PersistenceConflict;
                 *output = result;
                 return result.status;
@@ -5740,11 +5783,25 @@ DesktopGradientApplyStatus apply_builtin_gradient_preset(
     }
 
     const WallpaperConfig previousWallpaper = s_wallpaperConfig;
-    apply_wallpaper_gradient_selection(gradient);
+    if (gradientSelection) apply_wallpaper_gradient_selection(gradient);
+    else apply_wallpaper_builtin_selection(wallpaper);
+
+    DesktopAppearanceConfigurationV1 appliedConfiguration{};
+    if (!get_appearance_configuration(&appliedConfiguration) ||
+        appliedConfiguration.backgroundKind != targetKind ||
+        !desktop_str_eq(appliedConfiguration.backgroundId, targetId)) {
+        s_wallpaperConfig = previousWallpaper;
+        s_needsRedraw = true;
+        result.revision = s_desktopAppearanceRevision;
+        result.status = DesktopGradientApplyStatus::ApplyFailed;
+        set_gradient_apply_actual_state(&result, nullptr);
+        *output = result;
+        return result.status;
+    }
 
     GradientPersistenceResult persistence{};
     const GradientPersistenceStatus persistenceStatus =
-        persistBuiltInGradientId(before.backgroundId, gradient->id, &persistence);
+        persistBuiltInBackgroundId(before.backgroundId, targetId, &persistence);
     if (persistenceStatus != GradientPersistenceStatus::Ok) {
         s_wallpaperConfig = previousWallpaper;
         s_needsRedraw = true;
@@ -5786,6 +5843,20 @@ DesktopGradientApplyStatus apply_builtin_gradient_preset(
     app::AppManager::notifyDesktopAppearanceChanged(result.revision);
     *output = result;
     return result.status;
+}
+
+DesktopGradientApplyStatus apply_builtin_gradient_preset(
+    const char* presetId, uint64_t expectedRevision,
+    DesktopGradientApplyResultV1* output)
+{
+    return apply_builtin_background(presetId, expectedRevision, true, output);
+}
+
+DesktopGradientApplyStatus apply_builtin_wallpaper(
+    const char* wallpaperId, uint64_t expectedRevision,
+    DesktopGradientApplyResultV1* output)
+{
+    return apply_builtin_background(wallpaperId, expectedRevision, false, output);
 }
 
 bool get_appearance_configuration(DesktopAppearanceConfigurationV1* output)
