@@ -8,7 +8,7 @@
  * inspected. AST nodes themselves are allocated by this module and released
  * with rexx_parser_free_ast(). The grammar covers labels, assignments,
  * command expressions, ADDRESS, PARSE, SAY/CALL/RETURN/EXIT/NOP/LEAVE/ITERATE,
- * and the IF, DO, and SELECT control forms; other lexer keywords currently
+ * INTERPRET, and the IF, DO, and SELECT control forms; other lexer keywords currently
  * produce a syntax error because they do not yet have dedicated AST forms.
  */
 
@@ -132,7 +132,8 @@ typedef enum RexxAstClauseKind {
     REXX_AST_CLAUSE_PROCEDURE,
     REXX_AST_CLAUSE_DROP,
     REXX_AST_CLAUSE_SIGNAL,
-    REXX_AST_CLAUSE_CONDITION
+    REXX_AST_CLAUSE_CONDITION,
+    REXX_AST_CLAUSE_INTERPRET
 } RexxAstClauseKind;
 
 typedef enum RexxAstConditionAction {

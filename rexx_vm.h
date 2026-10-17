@@ -30,6 +30,12 @@ extern "C" {
 #define REXX_VM_MAX_EXPOSES ((size_t)4096u)
 #define REXX_VM_MAX_EXPOSED_NAME_BYTES ((size_t)1048576u)
 #define REXX_VM_MAX_SUBSIDIARY_LIST_LENGTH ((size_t)65536u)
+#define REXX_VM_MAX_INTERPRET_SOURCE_LENGTH ((size_t)65536u)
+#define REXX_VM_MAX_INTERPRET_DEPTH ((size_t)16u)
+#define REXX_VM_MAX_DYNAMIC_SOURCE_BYTES ((size_t)262144u)
+#define REXX_VM_MAX_DYNAMIC_BYTECODE_BYTES ((size_t)4194304u)
+#define REXX_VM_MAX_DYNAMIC_INSTRUCTIONS ((size_t)65536u)
+#define REXX_VM_DEFAULT_INTERPRET_COMPILE_BUDGET ((size_t)8388608u)
 
 typedef enum RexxValueType {
     REXX_VALUE_UNSET = 0,
@@ -77,7 +83,8 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_UNKNOWN_LABEL,
     REXX_VM_STATUS_INVALID_LABEL,
     REXX_VM_STATUS_INVALID_EXPOSE_LIST,
-    REXX_VM_STATUS_CONTROL_TRANSFER
+    REXX_VM_STATUS_CONTROL_TRANSFER,
+    REXX_VM_STATUS_DYNAMIC_SYNTAX
 } RexxVMStatus;
 
 typedef enum RexxNumericForm {
@@ -125,6 +132,7 @@ typedef struct RexxVM {
     size_t pc;            /* Current bytecode instruction index. */
     size_t current_source_line; /* Source line of the active instruction. */
     const RexxBytecodeChunk *active_chunk; /* Valid only during execute. */
+    const RexxBytecodeChunk *root_chunk; /* Original program; owns label space. */
     size_t instruction_budget; /* Maximum dispatches allowed by one execute. */
     uint32_t numeric_digits; /* Per-VM NUMERIC DIGITS context. */
     uint32_t numeric_fuzz;   /* Per-VM NUMERIC FUZZ context. */
@@ -139,6 +147,14 @@ typedef struct RexxVM {
     void *routine_frames;
     size_t routine_depth;
     size_t routine_frame_capacity;
+    void *interpret_frames; /* Private bounded dynamic-code continuations. */
+    size_t interpret_depth;
+    size_t interpret_frame_capacity;
+    size_t dynamic_source_bytes;
+    size_t dynamic_bytecode_bytes;
+    size_t dynamic_instruction_count;
+    size_t interpret_compile_budget;
+    size_t interpret_compile_remaining;
     void *do_frames; /* Private bounded storage for active DO instructions. */
     size_t do_depth;
     size_t do_frame_capacity;
@@ -151,6 +167,8 @@ typedef struct RexxVM {
     uint8_t condition_states[REXX_CONDITION_COUNT];
     uint8_t condition_actions[REXX_CONDITION_COUNT];
     uint32_t condition_targets[REXX_CONDITION_COUNT];
+    char *condition_target_names[REXX_CONDITION_COUNT];
+    size_t condition_target_name_lengths[REXX_CONDITION_COUNT];
     uint32_t current_condition;
     uint8_t condition_invocation;
     char *condition_description;

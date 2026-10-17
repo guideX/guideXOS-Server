@@ -96,7 +96,8 @@ static const char *const vm_messages[] = {
     "PROCEDURE is invalid here",
     "internal function returned without a result",
     "unknown SIGNAL label", "invalid SIGNAL destination label",
-    "invalid subsidiary PROCEDURE EXPOSE list", "condition control transfer"
+    "invalid subsidiary PROCEDURE EXPOSE list", "condition control transfer",
+    "syntax error in interpreted source"
 };
 
 typedef struct RexxVMEnvironment RexxVMEnvironment;
@@ -149,6 +150,8 @@ struct RexxVMDoFrame {
 
 struct RexxVMCallFrame {
     size_t return_pc;
+    const RexxBytecodeChunk *return_chunk;
+    size_t return_interpret_depth;
     size_t stack_base;
     size_t do_depth;
     int function_call;
@@ -170,6 +173,8 @@ struct RexxVMCallFrame {
     uint8_t condition_states[REXX_CONDITION_COUNT];
     uint8_t condition_actions[REXX_CONDITION_COUNT];
     uint32_t condition_targets[REXX_CONDITION_COUNT];
+    char *condition_target_names[REXX_CONDITION_COUNT];
+    size_t condition_target_name_lengths[REXX_CONDITION_COUNT];
     uint32_t current_condition;
     uint8_t condition_invocation;
     char *condition_description;
@@ -177,6 +182,20 @@ struct RexxVMCallFrame {
     int condition_information_active;
     int condition_call;
 };
+
+typedef struct RexxVMInterpretFrame {
+    const RexxBytecodeChunk *parent_chunk;
+    size_t parent_pc;
+    RexxBytecodeChunk *chunk;
+    char *source;
+    size_t source_length;
+    size_t source_line;
+    size_t routine_depth;
+    size_t stack_base;
+    size_t do_depth;
+    size_t bytecode_bytes;
+    size_t instruction_count;
+} RexxVMInterpretFrame;
 
 enum {
     REXX_CONDITION_STATE_OFF = 0,
@@ -243,6 +262,25 @@ static RexxVMStatus execute_condition_builtin(
     RexxVM *vm, const RexxValue *arguments, size_t argument_count,
     RexxValue *result);
 static void unwind_routines(RexxVM *vm);
+static void truncate_interpret_contexts(RexxVM *vm, size_t minimum_routine_depth,
+                                       int restore_parent);
+static void copy_saved_condition_context(RexxVMCallFrame *destination,
+                                         RexxVMCallFrame *source);
+
+static size_t physical_source_line(const RexxVM *vm,
+                                   const RexxBytecodeChunk *chunk,
+                                   size_t source_line)
+{
+    const RexxVMInterpretFrame *frames;
+    size_t index;
+    if (vm == NULL || chunk == vm->root_chunk) return source_line;
+    frames = (const RexxVMInterpretFrame *)vm->interpret_frames;
+    for (index = vm->interpret_depth; index != 0u; --index) {
+        const RexxVMInterpretFrame *frame = &frames[index - 1u];
+        if (frame->chunk == chunk) return frame->source_line;
+    }
+    return source_line;
+}
 
 static char *copy_name(const char *name, size_t length)
 {
@@ -270,9 +308,29 @@ static char *copy_text(const char *text, size_t length)
     return copy;
 }
 
+static void free_condition_target_names(char **names)
+{
+    size_t index;
+    if (names == NULL) return;
+    for (index = 0u; index < REXX_CONDITION_COUNT; ++index) {
+        vm_free(names[index]);
+        names[index] = NULL;
+    }
+}
+
+static void free_condition_snapshot(RexxVMCallFrame *frame)
+{
+    if (frame == NULL) return;
+    free_condition_target_names(frame->condition_target_names);
+    vm_free(frame->condition_description);
+    frame->condition_description = NULL;
+    frame->condition_description_length = 0u;
+}
+
 static RexxVMStatus save_condition_context(RexxVM *vm,
                                            RexxVMCallFrame *frame)
 {
+    size_t index;
     if (vm == NULL || frame == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
     memcpy(frame->condition_states, vm->condition_states,
            sizeof(frame->condition_states));
@@ -280,6 +338,19 @@ static RexxVMStatus save_condition_context(RexxVM *vm,
            sizeof(frame->condition_actions));
     memcpy(frame->condition_targets, vm->condition_targets,
            sizeof(frame->condition_targets));
+    for (index = 0u; index < REXX_CONDITION_COUNT; ++index) {
+        frame->condition_target_name_lengths[index] =
+            vm->condition_target_name_lengths[index];
+        if (vm->condition_target_names[index] != NULL) {
+            frame->condition_target_names[index] = copy_text(
+                vm->condition_target_names[index],
+                vm->condition_target_name_lengths[index]);
+            if (frame->condition_target_names[index] == NULL) {
+                free_condition_snapshot(frame);
+                return REXX_VM_STATUS_OUT_OF_MEMORY;
+            }
+        }
+    }
     frame->current_condition = vm->current_condition;
     frame->condition_invocation = vm->condition_invocation;
     frame->condition_information_active = vm->condition_information_active;
@@ -287,21 +358,33 @@ static RexxVMStatus save_condition_context(RexxVM *vm,
     if (vm->condition_description_length != 0u) {
         frame->condition_description = copy_text(
             vm->condition_description, vm->condition_description_length);
-        if (frame->condition_description == NULL)
+        if (frame->condition_description == NULL) {
+            free_condition_snapshot(frame);
             return REXX_VM_STATUS_OUT_OF_MEMORY;
+        }
     }
     return REXX_VM_STATUS_OK;
 }
 
 static void restore_condition_context(RexxVM *vm, RexxVMCallFrame *frame)
 {
+    size_t index;
     vm_free(vm->condition_description);
+    free_condition_target_names(vm->condition_target_names);
     memcpy(vm->condition_states, frame->condition_states,
            sizeof(vm->condition_states));
     memcpy(vm->condition_actions, frame->condition_actions,
            sizeof(vm->condition_actions));
     memcpy(vm->condition_targets, frame->condition_targets,
            sizeof(vm->condition_targets));
+    for (index = 0u; index < REXX_CONDITION_COUNT; ++index) {
+        vm->condition_target_names[index] =
+            frame->condition_target_names[index];
+        vm->condition_target_name_lengths[index] =
+            frame->condition_target_name_lengths[index];
+        frame->condition_target_names[index] = NULL;
+        frame->condition_target_name_lengths[index] = 0u;
+    }
     vm->current_condition = frame->current_condition;
     vm->condition_invocation = frame->condition_invocation;
     vm->condition_information_active =
@@ -382,7 +465,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_CONTROL_TRANSFER
+                            status <= REXX_VM_STATUS_DYNAMIC_SYNTAX
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -1129,6 +1212,9 @@ RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity)
     vm->numeric_form = REXX_NUMERIC_FORM_SCIENTIFIC;
     vm->numeric_work_budget = REXX_VM_DEFAULT_NUMERIC_WORK_BUDGET;
     vm->numeric_work_remaining = vm->numeric_work_budget;
+    vm->interpret_compile_budget =
+        REXX_VM_DEFAULT_INTERPRET_COMPILE_BUDGET;
+    vm->interpret_compile_remaining = vm->interpret_compile_budget;
     vm->initialized = 1;
     vm->root_environment = environment_new(vm, NULL, 1);
     if (vm->root_environment == NULL) {
@@ -1191,7 +1277,7 @@ void rexx_vm_free(RexxVM *vm)
             vm_free(frames[i].arguments[argument].bytes);
         vm_free(frames[i].arguments);
         vm_free(frames[i].address_environment);
-        vm_free(frames[i].condition_description);
+        free_condition_snapshot(&frames[i]);
         if (frames[i].owns_environment)
             environment_free(frames[i].callee_environment);
     }
@@ -1201,10 +1287,21 @@ void rexx_vm_free(RexxVM *vm)
     vm_free(vm->stack);
     vm_free(vm->globals);
     vm_free(vm->routine_frames);
+    {
+        RexxVMInterpretFrame *interpret_frames =
+            (RexxVMInterpretFrame *)vm->interpret_frames;
+        for (i = 0u; interpret_frames != NULL &&
+                    i < vm->interpret_depth; ++i) {
+            rexx_bytecode_chunk_free(interpret_frames[i].chunk);
+            vm_free(interpret_frames[i].source);
+        }
+    }
+    vm_free(vm->interpret_frames);
     vm_free(vm->do_frames);
     vm_free(vm->address_environment);
     vm_free(vm->argument_string);
     vm_free(vm->condition_description);
+    free_condition_target_names(vm->condition_target_names);
     memset(vm, 0, sizeof(*vm));
 }
 
@@ -2932,7 +3029,9 @@ static RexxVMStatus copy_routine_arguments(RexxVM *vm,
 static RexxVMStatus execute_call(RexxVM *vm,
                                  const RexxBytecodeChunk *chunk,
                                  const RexxInstruction *instruction,
-                                 RexxValue *result)
+                                 RexxValue *result,
+                                 const char *forced_name,
+                                 size_t forced_name_length)
 {
     const RexxSymbol *routine_symbol = NULL;
     const char *name = NULL;
@@ -2951,7 +3050,11 @@ static RexxVMStatus execute_call(RexxVM *vm,
                                          REXX_INSTRUCTION_CALL_QUOTED)) != 0u ||
         argument_count > vm->sp) return REXX_VM_STATUS_INVALID_BYTECODE;
     argument_start = vm->sp - argument_count;
-    if (quoted) {
+    if (forced_name != NULL) {
+        name = forced_name;
+        name_length = forced_name_length;
+        quoted = 0;
+    } else if (quoted) {
         char *owned_name = NULL;
         if (instruction->operand >= chunk->constant_count ||
             chunk->constants[instruction->operand].kind != REXX_CONSTANT_STRING)
@@ -2974,7 +3077,9 @@ static RexxVMStatus execute_call(RexxVM *vm,
     }
 
     if (!quoted) {
-        status = find_internal_label(chunk, name, name_length, 1,
+        const RexxBytecodeChunk *label_chunk = vm->root_chunk != NULL
+            ? vm->root_chunk : chunk;
+        status = find_internal_label(label_chunk, name, name_length, 1,
                                      &target, &found);
         if (status != REXX_VM_STATUS_OK) goto cleanup;
     }
@@ -3015,17 +3120,20 @@ static RexxVMStatus execute_call(RexxVM *vm,
         }
         status = set_sigl(
             vm, (RexxVMEnvironment *)vm->current_environment,
-            instruction->source_line);
+            physical_source_line(vm, chunk, instruction->source_line));
         if (status != REXX_VM_STATUS_OK) {
             free_arguments(arguments, argument_count);
             vm_free(saved_address);
-            vm_free(condition_snapshot.condition_description);
+            free_condition_snapshot(&condition_snapshot);
             goto cleanup;
         }
         frames = (RexxVMCallFrame *)vm->routine_frames;
         frame = &frames[vm->routine_depth];
         memset(frame, 0, sizeof(*frame));
         frame->return_pc = vm->pc;
+        frame->return_chunk = vm->active_chunk != NULL
+            ? (const RexxBytecodeChunk *)vm->active_chunk : chunk;
+        frame->return_interpret_depth = vm->interpret_depth;
         frame->stack_base = argument_start;
         frame->do_depth = vm->do_depth;
         frame->function_call = !subroutine;
@@ -3043,26 +3151,13 @@ static RexxVMStatus execute_call(RexxVM *vm,
         frame->address_environment_length = vm->address_environment_length;
         frame->first_instruction = 1;
         frame->condition_call = vm->condition_call_pending;
-        memcpy(frame->condition_states, condition_snapshot.condition_states,
-               sizeof(frame->condition_states));
-        memcpy(frame->condition_actions, condition_snapshot.condition_actions,
-               sizeof(frame->condition_actions));
-        memcpy(frame->condition_targets, condition_snapshot.condition_targets,
-               sizeof(frame->condition_targets));
-        frame->current_condition = condition_snapshot.current_condition;
-        frame->condition_invocation = condition_snapshot.condition_invocation;
-        frame->condition_information_active =
-            condition_snapshot.condition_information_active;
-        frame->condition_description =
-            condition_snapshot.condition_description;
-        frame->condition_description_length =
-            condition_snapshot.condition_description_length;
-        condition_snapshot.condition_description = NULL;
+        copy_saved_condition_context(frame, &condition_snapshot);
         ++vm->routine_depth;
         while (vm->sp > argument_start)
             rexx_value_clear(&vm->stack[--vm->sp]);
         vm->current_arguments = arguments;
         vm->current_argument_count = argument_count;
+        vm->active_chunk = vm->root_chunk != NULL ? vm->root_chunk : chunk;
         vm->pc = target;
         vm->procedure_pending = 1;
         status = REXX_VM_STATUS_OK;
@@ -3140,9 +3235,356 @@ static void truncate_do_frames(RexxVM *vm, size_t base)
     }
 }
 
+static RexxVMStatus ensure_interpret_frame(RexxVM *vm)
+{
+    size_t next;
+    RexxVMInterpretFrame *grown;
+    if (vm->interpret_depth >= REXX_VM_MAX_INTERPRET_DEPTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (vm->interpret_depth < vm->interpret_frame_capacity)
+        return REXX_VM_STATUS_OK;
+    next = vm->interpret_frame_capacity == 0u ? 4u :
+           vm->interpret_frame_capacity * 2u;
+    if (next > REXX_VM_MAX_INTERPRET_DEPTH)
+        next = REXX_VM_MAX_INTERPRET_DEPTH;
+    if (next <= vm->interpret_frame_capacity ||
+        next > SIZE_MAX / sizeof(*grown))
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    grown = (RexxVMInterpretFrame *)vm_realloc(
+        vm->interpret_frames, next * sizeof(*grown));
+    if (grown == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
+    memset(grown + vm->interpret_frame_capacity, 0,
+           (next - vm->interpret_frame_capacity) * sizeof(*grown));
+    vm->interpret_frames = grown;
+    vm->interpret_frame_capacity = next;
+    return REXX_VM_STATUS_OK;
+}
+
+static void pop_interpret_context(RexxVM *vm, int restore_parent)
+{
+    RexxVMInterpretFrame *frames;
+    RexxVMInterpretFrame *frame;
+    if (vm == NULL || vm->interpret_depth == 0u) return;
+    frames = (RexxVMInterpretFrame *)vm->interpret_frames;
+    frame = &frames[vm->interpret_depth - 1u];
+    if (restore_parent) {
+        while (vm->sp > frame->stack_base)
+            rexx_value_clear(&vm->stack[--vm->sp]);
+        vm->do_depth = frame->do_depth;
+        vm->active_chunk = frame->parent_chunk;
+        vm->pc = frame->parent_pc;
+    }
+    vm->dynamic_source_bytes =
+        frame->source_length + 1u <= vm->dynamic_source_bytes
+            ? vm->dynamic_source_bytes - (frame->source_length + 1u) : 0u;
+    vm->dynamic_bytecode_bytes = frame->bytecode_bytes <=
+        vm->dynamic_bytecode_bytes
+            ? vm->dynamic_bytecode_bytes - frame->bytecode_bytes : 0u;
+    vm->dynamic_instruction_count = frame->instruction_count <=
+        vm->dynamic_instruction_count
+            ? vm->dynamic_instruction_count - frame->instruction_count : 0u;
+    rexx_bytecode_chunk_free(frame->chunk);
+    vm_free(frame->source);
+    memset(frame, 0, sizeof(*frame));
+    --vm->interpret_depth;
+}
+
+static void truncate_interpret_contexts(RexxVM *vm,
+                                        size_t minimum_routine_depth,
+                                        int restore_parent)
+{
+    RexxVMInterpretFrame *frames;
+    if (vm == NULL || vm->interpret_depth == 0u) return;
+    frames = (RexxVMInterpretFrame *)vm->interpret_frames;
+    while (vm->interpret_depth != 0u &&
+           frames[vm->interpret_depth - 1u].routine_depth >=
+               minimum_routine_depth) {
+        pop_interpret_context(vm, restore_parent);
+        frames = (RexxVMInterpretFrame *)vm->interpret_frames;
+    }
+}
+
+static int ast_clause_list_has_label(const RexxAstClause *clauses)
+{
+    const RexxAstClause *clause;
+    for (clause = clauses; clause != NULL; clause = clause->next) {
+        if (clause->kind == REXX_AST_CLAUSE_LABEL) return 1;
+        switch (clause->kind) {
+        case REXX_AST_CLAUSE_IF:
+            if (ast_clause_list_has_label(clause->as.if_clause.then_clause) ||
+                ast_clause_list_has_label(clause->as.if_clause.else_clause))
+                return 1;
+            break;
+        case REXX_AST_CLAUSE_DO:
+            if (ast_clause_list_has_label(clause->as.do_clause.body)) return 1;
+            break;
+        case REXX_AST_CLAUSE_SELECT: {
+            const RexxAstWhen *when_clause;
+            for (when_clause = clause->as.select_clause.when_clauses;
+                 when_clause != NULL; when_clause = when_clause->next) {
+                if (ast_clause_list_has_label(when_clause->body)) return 1;
+            }
+            if (ast_clause_list_has_label(
+                    clause->as.select_clause.otherwise_clause)) return 1;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return 0;
+}
+
+static int checked_size_add(size_t *total, size_t amount)
+{
+    if (total == NULL || amount > SIZE_MAX - *total) return 0;
+    *total += amount;
+    return 1;
+}
+
+static int checked_size_array(size_t *total, size_t count, size_t element_size)
+{
+    if (element_size != 0u && count > SIZE_MAX / element_size) return 0;
+    return checked_size_add(total, count * element_size);
+}
+
+static int bytecode_storage_size(const RexxBytecodeChunk *chunk,
+                                size_t *size_out)
+{
+    size_t total = sizeof(*chunk);
+    size_t index;
+    if (chunk == NULL || size_out == NULL ||
+        !checked_size_array(&total, chunk->instruction_capacity,
+                            sizeof(*chunk->instructions)) ||
+        !checked_size_array(&total, chunk->constant_capacity,
+                            sizeof(*chunk->constants)) ||
+        !checked_size_array(&total, chunk->symbol_capacity,
+                            sizeof(*chunk->symbols)) ||
+        !checked_size_array(&total, chunk->parse_item_capacity,
+                            sizeof(*chunk->parse_items)) ||
+        !checked_size_array(&total, chunk->parse_template_capacity,
+                            sizeof(*chunk->parse_templates)) ||
+        !checked_size_array(&total, chunk->parse_plan_capacity,
+                            sizeof(*chunk->parse_plans)))
+        return 0;
+    for (index = 0u; index < chunk->constant_count; ++index) {
+        if (chunk->constants[index].length == SIZE_MAX ||
+            !checked_size_add(&total, chunk->constants[index].length + 1u))
+            return 0;
+    }
+    for (index = 0u; index < chunk->symbol_count; ++index) {
+        if (chunk->symbols[index].length == SIZE_MAX ||
+            !checked_size_add(&total, chunk->symbols[index].length + 1u))
+            return 0;
+    }
+    *size_out = total;
+    return 1;
+}
+
+static RexxVMStatus charge_interpret_compile_work(RexxVM *vm, size_t amount)
+{
+    if (amount > vm->interpret_compile_remaining)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    vm->interpret_compile_remaining -= amount;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus compile_interpret_source(
+    RexxVM *vm, const char *source, size_t source_length,
+    RexxBytecodeChunk **chunk_out, const char **syntax_message)
+{
+    RexxLexer lexer;
+    RexxParser parser;
+    RexxAstProgram *program = NULL;
+    RexxBytecodeChunk *chunk = NULL;
+    RexxCompilerError compiler_error;
+    RexxParserStatus parser_status;
+    RexxCompilerStatus compiler_status;
+    const RexxParserError *parser_error;
+    RexxVMStatus status;
+
+    if (chunk_out == NULL || syntax_message == NULL || vm == NULL ||
+        (source == NULL && source_length != 0u))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    *chunk_out = NULL;
+    *syntax_message = NULL;
+    if (source_length > REXX_VM_MAX_INTERPRET_SOURCE_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    status = charge_interpret_compile_work(vm,
+                                           source_length == SIZE_MAX
+                                               ? SIZE_MAX : source_length + 1u);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (rexx_lexer_init(&lexer, source, source_length) !=
+        REXX_LEXER_STATUS_OK)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (rexx_parser_init(&parser, &lexer) != REXX_PARSER_STATUS_OK)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    parser_status = rexx_parser_parse(&parser, &program);
+    if (parser_status != REXX_PARSER_STATUS_OK) {
+        parser_error = rexx_parser_get_error(&parser);
+        if (parser_status == REXX_PARSER_STATUS_OUT_OF_MEMORY)
+            return REXX_VM_STATUS_OUT_OF_MEMORY;
+        if (parser_status == REXX_PARSER_STATUS_RESOURCE_LIMIT)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        if (parser_status == REXX_PARSER_STATUS_SYNTAX_ERROR ||
+            parser_status == REXX_PARSER_STATUS_LEXER_ERROR) {
+            *syntax_message = parser_error != NULL &&
+                parser_error->message != NULL
+                    ? parser_error->message : "invalid interpreted source";
+            return REXX_VM_STATUS_DYNAMIC_SYNTAX;
+        }
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    }
+    status = charge_interpret_compile_work(vm, parser.allocated_nodes);
+    if (status != REXX_VM_STATUS_OK) {
+        rexx_parser_free_ast(program);
+        return status;
+    }
+    if (ast_clause_list_has_label(program->clauses)) {
+        rexx_parser_free_ast(program);
+        *syntax_message = "labels are not permitted in INTERPRET source";
+        return REXX_VM_STATUS_DYNAMIC_SYNTAX;
+    }
+    compiler_status = rexx_compiler_compile(program, &chunk,
+                                             &compiler_error);
+    rexx_parser_free_ast(program);
+    if (compiler_status != REXX_COMPILER_STATUS_OK) {
+        if (compiler_status == REXX_COMPILER_STATUS_OUT_OF_MEMORY)
+            return REXX_VM_STATUS_OUT_OF_MEMORY;
+        if (compiler_status == REXX_COMPILER_STATUS_RESOURCE_LIMIT)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        if (compiler_status == REXX_COMPILER_STATUS_MALFORMED_AST ||
+            compiler_status == REXX_COMPILER_STATUS_UNSUPPORTED_AST) {
+            *syntax_message = compiler_error.message != NULL
+                ? compiler_error.message : "invalid interpreted source";
+            return REXX_VM_STATUS_DYNAMIC_SYNTAX;
+        }
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    }
+    status = charge_interpret_compile_work(vm, chunk->instruction_count);
+    if (status != REXX_VM_STATUS_OK) {
+        rexx_bytecode_chunk_free(chunk);
+        return status;
+    }
+    *chunk_out = chunk;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus execute_interpret(RexxVM *vm,
+                                     const RexxBytecodeChunk *parent_chunk)
+{
+    RexxValue expression = REXX_VALUE_INIT;
+    RexxBytecodeChunk *dynamic_chunk = NULL;
+    const char *syntax_message = NULL;
+    char *source = NULL;
+    size_t source_length = 0u;
+    size_t bytecode_bytes = 0u;
+    size_t source_allocation;
+    size_t next_total;
+    size_t pc = vm->pc;
+    int transferred = 0;
+    RexxVMStatus status;
+
+    status = pop_move(vm, &expression);
+    if (status == REXX_VM_STATUS_OK)
+        status = value_string(&expression, &source, &source_length);
+    rexx_value_clear(&expression);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (source_length > REXX_VM_MAX_INTERPRET_SOURCE_LENGTH ||
+        source_length == SIZE_MAX) {
+        vm_free(source);
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    }
+    source_allocation = source_length + 1u;
+    if (vm->interpret_depth >= REXX_VM_MAX_INTERPRET_DEPTH ||
+        source_allocation > REXX_VM_MAX_DYNAMIC_SOURCE_BYTES ||
+        vm->dynamic_source_bytes > REXX_VM_MAX_DYNAMIC_SOURCE_BYTES ||
+        source_allocation > REXX_VM_MAX_DYNAMIC_SOURCE_BYTES -
+                                vm->dynamic_source_bytes) {
+        vm_free(source);
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    }
+    status = ensure_interpret_frame(vm);
+    if (status != REXX_VM_STATUS_OK) {
+        vm_free(source);
+        return status;
+    }
+    status = compile_interpret_source(vm, source, source_length,
+                                      &dynamic_chunk, &syntax_message);
+    if (status == REXX_VM_STATUS_DYNAMIC_SYNTAX) {
+        RexxVMStatus trap_status = raise_condition(
+            vm, parent_chunk, REXX_CONDITION_SYNTAX,
+            syntax_message != NULL ? syntax_message :
+                "invalid interpreted source",
+            strlen(syntax_message != NULL ? syntax_message :
+                   "invalid interpreted source"),
+            vm->current_source_line, 40, &transferred);
+        vm_free(source);
+        if (trap_status == REXX_VM_STATUS_CONTROL_TRANSFER && transferred)
+            return REXX_VM_STATUS_OK;
+        if (trap_status != REXX_VM_STATUS_OK) return trap_status;
+        return REXX_VM_STATUS_DYNAMIC_SYNTAX;
+    }
+    if (status != REXX_VM_STATUS_OK) {
+        vm_free(source);
+        return status;
+    }
+    if (!bytecode_storage_size(dynamic_chunk, &bytecode_bytes) ||
+        bytecode_bytes > REXX_VM_MAX_DYNAMIC_BYTECODE_BYTES ||
+        bytecode_bytes > REXX_VM_MAX_DYNAMIC_BYTECODE_BYTES -
+                             vm->dynamic_bytecode_bytes ||
+        dynamic_chunk->instruction_count >
+            REXX_VM_MAX_DYNAMIC_INSTRUCTIONS ||
+        dynamic_chunk->instruction_count >
+            REXX_VM_MAX_DYNAMIC_INSTRUCTIONS -
+                vm->dynamic_instruction_count) {
+        rexx_bytecode_chunk_free(dynamic_chunk);
+        vm_free(source);
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    }
+    if (source_allocation > SIZE_MAX - vm->dynamic_source_bytes) {
+        rexx_bytecode_chunk_free(dynamic_chunk);
+        vm_free(source);
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    }
+    next_total = vm->dynamic_source_bytes + source_allocation;
+    if (next_total > REXX_VM_MAX_DYNAMIC_SOURCE_BYTES) {
+        rexx_bytecode_chunk_free(dynamic_chunk);
+        vm_free(source);
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    }
+
+    {
+        RexxVMInterpretFrame *frames =
+            (RexxVMInterpretFrame *)vm->interpret_frames;
+        RexxVMInterpretFrame *frame = &frames[vm->interpret_depth];
+        memset(frame, 0, sizeof(*frame));
+        frame->parent_chunk = parent_chunk;
+        frame->parent_pc = pc;
+        frame->chunk = dynamic_chunk;
+        frame->source = source;
+        frame->source_length = source_length;
+        frame->source_line = vm->current_source_line;
+        frame->routine_depth = vm->routine_depth;
+        frame->stack_base = vm->sp;
+        frame->do_depth = vm->do_depth;
+        frame->bytecode_bytes = bytecode_bytes;
+        frame->instruction_count = dynamic_chunk->instruction_count;
+        ++vm->interpret_depth;
+    }
+    vm->dynamic_source_bytes = next_total;
+    vm->dynamic_bytecode_bytes += bytecode_bytes;
+    vm->dynamic_instruction_count += dynamic_chunk->instruction_count;
+    vm->active_chunk = dynamic_chunk;
+    vm->pc = 0u;
+    return REXX_VM_STATUS_OK;
+}
+
 static RexxVMStatus execute_signal(RexxVM *vm,
                                    const RexxBytecodeChunk *chunk,
-                                   const RexxInstruction *instruction)
+                                   const RexxInstruction *instruction,
+                                   const char *forced_name,
+                                   size_t forced_name_length)
 {
     const char *name = NULL;
     size_t name_length = 0u;
@@ -3157,7 +3599,11 @@ static RexxVMStatus execute_signal(RexxVM *vm,
 
     if (instruction->auxiliary != 0u || instruction->source_line == 0u)
         return REXX_VM_STATUS_INVALID_BYTECODE;
-    if (instruction->flags == REXX_INSTRUCTION_SIGNAL_LABEL) {
+    if (forced_name != NULL) {
+        name = forced_name;
+        name_length = forced_name_length;
+        case_insensitive = 1;
+    } else if (instruction->flags == REXX_INSTRUCTION_SIGNAL_LABEL) {
         const RexxSymbol *label = NULL;
         status = get_symbol(chunk, instruction->operand, REXX_SYMBOL_LABEL,
                             &label);
@@ -3185,7 +3631,9 @@ static RexxVMStatus execute_signal(RexxVM *vm,
         return REXX_VM_STATUS_INVALID_BYTECODE;
     }
 
-    status = find_internal_label(chunk, name, name_length,
+    status = find_internal_label(vm->root_chunk != NULL
+                                     ? vm->root_chunk : chunk,
+                                 name, name_length,
                                  case_insensitive, &target, &found);
     if (status != REXX_VM_STATUS_OK) goto cleanup;
     if (!found) {
@@ -3207,13 +3655,16 @@ static RexxVMStatus execute_signal(RexxVM *vm,
         goto cleanup;
     }
     status = set_sigl(vm, (RexxVMEnvironment *)vm->current_environment,
-                      instruction->source_line);
+                      physical_source_line(vm, chunk,
+                                           instruction->source_line));
     if (status != REXX_VM_STATUS_OK) goto cleanup;
 
     /* Abandon pending expressions and DO loops in the current routine only.
        Caller stack values and loops remain suspended in their CALL frame. */
     clear_stack_to(vm, stack_base);
     truncate_do_frames(vm, do_base);
+    truncate_interpret_contexts(vm, vm->routine_depth, 0);
+    vm->active_chunk = vm->root_chunk != NULL ? vm->root_chunk : chunk;
     vm->pc = target;
     status = REXX_VM_STATUS_OK;
 
@@ -3267,12 +3718,21 @@ static RexxVMStatus replace_condition_information_owned(
 static void copy_saved_condition_context(RexxVMCallFrame *destination,
                                          RexxVMCallFrame *source)
 {
+    size_t index;
     memcpy(destination->condition_states, source->condition_states,
            sizeof(destination->condition_states));
     memcpy(destination->condition_actions, source->condition_actions,
            sizeof(destination->condition_actions));
     memcpy(destination->condition_targets, source->condition_targets,
            sizeof(destination->condition_targets));
+    for (index = 0u; index < REXX_CONDITION_COUNT; ++index) {
+        destination->condition_target_names[index] =
+            source->condition_target_names[index];
+        destination->condition_target_name_lengths[index] =
+            source->condition_target_name_lengths[index];
+        source->condition_target_names[index] = NULL;
+        source->condition_target_name_lengths[index] = 0u;
+    }
     destination->current_condition = source->current_condition;
     destination->condition_invocation = source->condition_invocation;
     destination->condition_information_active =
@@ -3313,7 +3773,13 @@ static RexxVMStatus raise_condition(RexxVM *vm,
     if (vm->condition_actions[condition] ==
         REXX_CONDITION_ACTION_SIGNAL) {
         RexxInstruction signal_instruction;
-        uint32_t target_symbol = vm->condition_targets[condition];
+        const char *target_name = vm->condition_target_names[condition];
+        size_t target_name_length =
+            vm->condition_target_name_lengths[condition];
+        if (target_name == NULL || target_name_length == 0u) {
+            vm_free(owned_description);
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+        }
         if (condition == REXX_CONDITION_SYNTAX) {
             status = set_condition_rc(vm, syntax_code);
             if (status != REXX_VM_STATUS_OK) {
@@ -3324,10 +3790,11 @@ static RexxVMStatus raise_condition(RexxVM *vm,
         memset(&signal_instruction, 0, sizeof(signal_instruction));
         signal_instruction.opcode = OP_SIGNAL;
         signal_instruction.flags = REXX_INSTRUCTION_SIGNAL_LABEL;
-        signal_instruction.operand = target_symbol;
+        signal_instruction.operand = 0u;
         signal_instruction.source_line = source_line;
         vm->condition_states[condition] = REXX_CONDITION_STATE_OFF;
-        status = execute_signal(vm, chunk, &signal_instruction);
+        status = execute_signal(vm, chunk, &signal_instruction,
+                                target_name, target_name_length);
         (void)replace_condition_information_owned(
             vm, condition, REXX_CONDITION_INVOKED_SIGNAL,
             owned_description, description_length);
@@ -3343,7 +3810,13 @@ static RexxVMStatus raise_condition(RexxVM *vm,
         RexxVMCallFrame previous_context;
         RexxInstruction call_instruction;
         size_t previous_depth = vm->routine_depth;
-        uint32_t target_symbol = vm->condition_targets[condition];
+        const char *target_name = vm->condition_target_names[condition];
+        size_t target_name_length =
+            vm->condition_target_name_lengths[condition];
+        if (target_name == NULL || target_name_length == 0u) {
+            vm_free(owned_description);
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+        }
         memset(&previous_context, 0, sizeof(previous_context));
         status = save_condition_context(vm, &previous_context);
         if (status != REXX_VM_STATUS_OK) {
@@ -3358,28 +3831,28 @@ static RexxVMStatus raise_condition(RexxVM *vm,
         memset(&call_instruction, 0, sizeof(call_instruction));
         call_instruction.opcode = OP_CALL;
         call_instruction.flags = REXX_INSTRUCTION_CALL_SUBROUTINE;
-        call_instruction.operand = target_symbol;
+        call_instruction.operand = 0u;
         call_instruction.source_line = source_line;
         vm->condition_call_pending = 1;
         status = execute_call(vm, chunk, &call_instruction,
-                              &(RexxValue){0});
+                              &(RexxValue){0}, target_name,
+                              target_name_length);
         vm->condition_call_pending = 0;
         if (status != REXX_VM_STATUS_OK) {
             restore_condition_context(vm, &previous_context);
-            vm_free(previous_context.condition_description);
+            free_condition_snapshot(&previous_context);
             return status;
         }
         if (vm->routine_depth > previous_depth) {
             RexxVMCallFrame *frames = (RexxVMCallFrame *)vm->routine_frames;
             RexxVMCallFrame *frame = &frames[previous_depth];
-            vm_free(frame->condition_description);
-            frame->condition_description = NULL;
+            free_condition_snapshot(frame);
             copy_saved_condition_context(frame, &previous_context);
             frame->condition_call = 1;
         } else {
             restore_condition_context(vm, &previous_context);
         }
-        vm_free(previous_context.condition_description);
+        free_condition_snapshot(&previous_context);
         vm->condition_control_transfer = 1;
         if (transferred != NULL) *transferred = 1;
         return REXX_VM_STATUS_CONTROL_TRANSFER;
@@ -3409,6 +3882,7 @@ static RexxVMStatus execute_condition_registration(
     RexxConditionType condition;
     RexxSymbolKind target_kind;
     const RexxSymbol *target = NULL;
+    char *target_name = NULL;
     int enable;
     int call_action;
     if ((instruction->flags & (uint8_t)~allowed) != 0u ||
@@ -3430,15 +3904,20 @@ static RexxVMStatus execute_condition_registration(
         if (get_symbol(chunk, instruction->auxiliary, target_kind,
                        &target) != REXX_VM_STATUS_OK)
             return REXX_VM_STATUS_INVALID_BYTECODE;
+        target_name = copy_text(target->name, target->length);
+        if (target_name == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
     } else if (instruction->auxiliary != REXX_NO_SYMBOL) {
         return REXX_VM_STATUS_INVALID_BYTECODE;
     }
+    vm_free(vm->condition_target_names[condition]);
+    vm->condition_target_names[condition] = target_name;
+    vm->condition_target_name_lengths[condition] = enable
+        ? target->length : 0u;
     vm->condition_states[condition] = enable
         ? REXX_CONDITION_STATE_ON : REXX_CONDITION_STATE_OFF;
     vm->condition_actions[condition] = call_action
         ? REXX_CONDITION_ACTION_CALL : REXX_CONDITION_ACTION_SIGNAL;
-    vm->condition_targets[condition] = enable
-        ? instruction->auxiliary : REXX_NO_SYMBOL;
+    vm->condition_targets[condition] = REXX_NO_SYMBOL;
     (void)target;
     return REXX_VM_STATUS_OK;
 }
@@ -3819,6 +4298,7 @@ static RexxVMStatus return_from_routine(RexxVM *vm, int has_value,
                                         RexxValue *returned)
 {
     RexxValue result = REXX_VALUE_INIT;
+    truncate_interpret_contexts(vm, vm->routine_depth, 0);
     if (vm->routine_depth == 0u) {
         vm->exit_has_value = has_value;
         if (has_value && returned != NULL) {
@@ -3838,6 +4318,7 @@ static RexxVMStatus return_from_routine(RexxVM *vm, int has_value,
         size_t stack_base = frame->stack_base;
         size_t do_depth = frame->do_depth;
         size_t return_pc = frame->return_pc;
+        const RexxBytecodeChunk *return_chunk = frame->return_chunk;
         int function_call = frame->function_call;
         int condition_call = frame->condition_call;
         int owns_environment = frame->owns_environment;
@@ -3868,6 +4349,7 @@ static RexxVMStatus return_from_routine(RexxVM *vm, int has_value,
         vm_free(vm->address_environment);
         vm->address_environment = saved_address;
         vm->address_environment_length = saved_address_length;
+        vm->active_chunk = return_chunk;
         vm->pc = return_pc;
         free_arguments(arguments, argument_count);
         frame->arguments = NULL;
@@ -3936,6 +4418,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         return vm_fail(vm, REXX_VM_STATUS_INVALID_BYTECODE, 0);
 
     vm->active_chunk = chunk;
+    vm->root_chunk = chunk;
     vm->active_parse_overlay = NULL;
 
     if (vm->routine_depth != 0u) unwind_routines(vm);
@@ -3956,6 +4439,9 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
            sizeof(vm->condition_states));
     memset(vm->condition_actions, REXX_CONDITION_ACTION_SIGNAL,
            sizeof(vm->condition_actions));
+    free_condition_target_names(vm->condition_target_names);
+    memset(vm->condition_target_name_lengths, 0,
+           sizeof(vm->condition_target_name_lengths));
     {
         size_t condition_index;
         for (condition_index = 0u;
@@ -3964,6 +4450,11 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
     }
 
     vm->numeric_work_remaining = vm->numeric_work_budget;
+    vm->interpret_compile_remaining = vm->interpret_compile_budget;
+    vm->dynamic_source_bytes = 0u;
+    vm->dynamic_bytecode_bytes = 0u;
+    vm->dynamic_instruction_count = 0u;
+    truncate_interpret_contexts(vm, 0u, 0);
 
     /* Each call starts with an empty evaluation stack; variable tables persist. */
     clear_stack(vm);
@@ -3976,23 +4467,29 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
     vm->error.pc = 0;
     vm->error.message = "ok";
 
-    while (vm->pc < chunk->instruction_count) {
+    while (vm->active_chunk != NULL &&
+           vm->pc < ((const RexxBytecodeChunk *)vm->active_chunk)
+                         ->instruction_count) {
         if (dispatched >= vm->instruction_budget) {
             size_t exhausted_pc = vm->pc;
             unwind_routines(vm);
+            truncate_interpret_contexts(vm, 0u, 0);
             vm->do_depth = 0u;
             clear_stack(vm);
             vm->active_chunk = NULL;
+            vm->root_chunk = NULL;
             return vm_fail(vm, REXX_VM_STATUS_INSTRUCTION_LIMIT,
                            exhausted_pc);
         }
         ++dispatched;
 
+        chunk = (const RexxBytecodeChunk *)vm->active_chunk;
         size_t current_pc = vm->pc;
         const RexxInstruction *ins = &chunk->instructions[vm->pc++];
         RexxVMStatus status = REXX_VM_STATUS_OK;
         RexxValue value;
-        vm->current_source_line = ins->source_line;
+        vm->current_source_line = physical_source_line(vm, chunk,
+                                                        ins->source_line);
         if (vm->routine_depth != 0u) {
             RexxVMCallFrame *frames = (RexxVMCallFrame *)vm->routine_frames;
             RexxVMCallFrame *frame = &frames[vm->routine_depth - 1u];
@@ -4007,16 +4504,27 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
         switch ((RexxOpcode)ins->opcode) {
         case OP_HALT:
+            if (vm->interpret_depth != 0u) {
+                RexxVMInterpretFrame *frames =
+                    (RexxVMInterpretFrame *)vm->interpret_frames;
+                if (frames[vm->interpret_depth - 1u].chunk == chunk) {
+                    pop_interpret_context(vm, 1);
+                    break;
+                }
+            }
             if (vm->routine_depth != 0u) {
                 status = return_from_routine(vm, 0, NULL);
                 break;
             }
             unwind_routines(vm);
+            truncate_interpret_contexts(vm, 0u, 0);
             clear_stack(vm);
             vm->status = REXX_VM_STATUS_OK;
             vm->error.status = REXX_VM_STATUS_OK;
             vm->error.pc = current_pc;
             vm->error.message = "ok";
+            vm->active_chunk = NULL;
+            vm->root_chunk = NULL;
             return REXX_VM_STATUS_OK;
 
         case OP_NOP:
@@ -4170,14 +4678,23 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                 if (status == REXX_VM_STATUS_OK)
                     status = raise_command_condition(
                         vm, chunk, command, command_length,
-                        ins->source_line);
+                        vm->current_source_line);
             }
             vm_free(command);
             break;
         }
 
         case OP_CALL:
-            status = execute_call(vm, chunk, ins, &value);
+            status = execute_call(vm, chunk, ins, &value, NULL, 0u);
+            break;
+
+        case OP_INTERPRET:
+            if (ins->flags != 0u || ins->operand != 0u ||
+                ins->auxiliary != 0u) {
+                status = REXX_VM_STATUS_INVALID_BYTECODE;
+            } else {
+                status = execute_interpret(vm, chunk);
+            }
             break;
 
         case OP_RETURN:
@@ -4249,7 +4766,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         }
 
         case OP_SIGNAL:
-            status = execute_signal(vm, chunk, ins);
+            status = execute_signal(vm, chunk, ins, NULL, 0u);
             break;
 
         case OP_CONDITION:
@@ -4420,7 +4937,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                     if (status == REXX_VM_STATUS_OK)
                         status = raise_command_condition(
                             vm, chunk, command, command_length,
-                            ins->source_line);
+                            vm->current_source_line);
                 }
                 vm_free(command);
                 rexx_value_clear(&value);
@@ -4454,7 +4971,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                     status, syntax_code);
                 RexxVMStatus trap_status = raise_condition(
                     vm, chunk, REXX_CONDITION_SYNTAX,
-                    description, strlen(description), ins->source_line,
+                    description, strlen(description), vm->current_source_line,
                     syntax_code, &transferred);
                 if (trap_status == REXX_VM_STATUS_CONTROL_TRANSFER &&
                     transferred) {
@@ -4468,9 +4985,11 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         if (status != REXX_VM_STATUS_OK) {
             vm->pc = current_pc;
             unwind_routines(vm);
+            truncate_interpret_contexts(vm, 0u, 0);
             vm->do_depth = 0u;
             clear_stack(vm);
             vm->active_chunk = NULL;
+            vm->root_chunk = NULL;
             return vm_fail(vm, status, current_pc);
         }
 
@@ -4479,8 +4998,10 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             continue;
         }
 
-        if ((RexxOpcode)ins->opcode == OP_EXIT && vm->exit_requested)
+        if ((RexxOpcode)ins->opcode == OP_EXIT && vm->exit_requested) {
             unwind_routines(vm);
+            truncate_interpret_contexts(vm, 0u, 0);
+        }
         if (((RexxOpcode)ins->opcode == OP_EXIT ||
              (RexxOpcode)ins->opcode == OP_RETURN) && vm->exit_requested) {
             vm->do_depth = 0u;
@@ -4490,22 +5011,25 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             vm->error.pc = vm->pc;
             vm->error.message = "ok";
             vm->active_chunk = NULL;
+            vm->root_chunk = NULL;
             return REXX_VM_STATUS_OK;
         }
     }
+    truncate_interpret_contexts(vm, 0u, 0);
     clear_stack(vm);
     vm->status = REXX_VM_STATUS_OK;
     vm->error.status = REXX_VM_STATUS_OK;
     vm->error.pc = vm->pc;
     vm->error.message = "ok";
     vm->active_chunk = NULL;
+    vm->root_chunk = NULL;
     return REXX_VM_STATUS_OK;
 }
 
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_CONTROL_TRANSFER)
+        status > REXX_VM_STATUS_DYNAMIC_SYNTAX)
         return "unknown VM status";
     return vm_messages[status];
 }

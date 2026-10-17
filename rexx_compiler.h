@@ -88,7 +88,8 @@ typedef enum RexxOpcode {
     OP_EXPOSE_SUBSIDIARY,
     OP_DROP_SUBSIDIARY,
     OP_SIGNAL,
-    OP_CONDITION
+    OP_CONDITION,
+    OP_INTERPRET
 } RexxOpcode;
 
 typedef enum RexxConditionType {
@@ -211,6 +212,13 @@ typedef struct RexxBytecodeChunk {
     size_t parse_template_count;
     RexxParsePlan *parse_plans;
     size_t parse_plan_count;
+    /* Retained allocation sizes support bounded dynamic-code accounting. */
+    size_t instruction_capacity;
+    size_t constant_capacity;
+    size_t symbol_capacity;
+    size_t parse_item_capacity;
+    size_t parse_template_capacity;
+    size_t parse_plan_capacity;
 } RexxBytecodeChunk;
 
 typedef enum RexxDoFlags {

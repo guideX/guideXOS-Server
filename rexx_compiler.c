@@ -1245,6 +1245,13 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
                                  clause->as.simple.expression != NULL ? 1u : 0u,
                                  0u, 0u, &clause->token);
         break;
+    case REXX_AST_CLAUSE_INTERPRET:
+        if (clause->as.simple.expression == NULL ||
+            !rexx_compiler_compile_expression(
+                compiler, clause->as.simple.expression)) return 0;
+        (void)rexx_compiler_emit(compiler, OP_INTERPRET, 0u, 0u, 0u,
+                                 &clause->token);
+        break;
     case REXX_AST_CLAUSE_NUMERIC_DIGITS:
         if (clause->as.simple.expression != NULL &&
             !rexx_compiler_compile_expression(
@@ -1585,6 +1592,12 @@ RexxCompilerStatus rexx_compiler_compile(const RexxAstProgram *program,
         rexx_bytecode_chunk_free(result);
         return compiler.status;
     }
+    result->instruction_capacity = compiler.instruction_capacity;
+    result->constant_capacity = compiler.constant_capacity;
+    result->symbol_capacity = compiler.symbol_capacity;
+    result->parse_item_capacity = compiler.parse_item_capacity;
+    result->parse_template_capacity = compiler.parse_template_capacity;
+    result->parse_plan_capacity = compiler.parse_plan_capacity;
     *chunk = result;
     return REXX_COMPILER_STATUS_OK;
 }

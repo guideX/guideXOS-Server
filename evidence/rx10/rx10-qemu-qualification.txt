@@ -1,0 +1,36 @@
+RX10 native QEMU qualification record
+====================================
+
+Guest: QEMU 11.0.0, qemu-system-x86_64.exe
+Boot mode: UEFI using firmware copied into the disposable RX10 staging directory
+Machine: pc, USB disabled
+CPU/acceleration: one vCPU, TCG, single-threaded
+Memory: 1024 MiB
+Networking: disabled (-net none); no host forwarding
+Display: QEMU display disabled for capture; guest UI recorded as screenshots
+Serial: dedicated file capture, rx10-qemu-serial.log / rx10-qemu-status-serial.log
+QMP: 127.0.0.1:58391, reused sequentially by RX10-owned guest runs
+Media: copied disposable ESP and copied firmware under tmp/rexx-rx10-native-qualification-20261017-final-guest
+Booted kernel ELF SHA-256: CF2970BDAEE9B5A45C456229787F03FC3F9C752C22E02B5AD30ADD8BABB4D117
+Booted kernel PE SHA-256: 08B4A3C871EC49F8BB360ECE199031CC44D0FE38DBD11128F1838A1120A88D42
+
+The one-time census observed foreign QEMU PIDs 25376 and 22708. Neither was
+signaled or otherwise touched. RX10's own guest processes used the dedicated
+QMP endpoint and were shut down through that endpoint after evidence capture.
+The native guest was booted from the copied ESP; production ESP/disk media were
+not used as writable guest media.
+
+Captured evidence:
+- rx10-qemu-serial.log
+- rx10-qemu-status-serial.log
+- rx10_basic.png
+- rx10_interpret_smoke_final.png
+- rx10_conditions_final.png
+- rx10_call_on_error_final.png
+- rx10_invalid_final.png
+- rx10_recovery_final.png
+- rx10_resource_final.png
+- rx10_recovery_after_limit_final.png
+- rx10_status_exit0.png
+- rx10_status_exit1.png
+- rx10_status_recovery_exit0.png
