@@ -1,0 +1,53 @@
+{
+  "image": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\font9-writable-fat.img",
+  "files": [
+    {
+      "path": "/fontsel0.cfg",
+      "exists": false
+    },
+    {
+      "path": "/fontsel1.cfg",
+      "exists": true,
+      "length": 1024,
+      "sha256": "1fb1a0dace212ffec90d02540aff29b54581e048ee4d10f8c6f1c1cf1d48e194",
+      "lines": [
+        "format=1",
+        "sequence=000000000000001a",
+        "kind=bitmap",
+        "pixelSize=00000007",
+        "pathHex=",
+        "familyHex=6775696465584f53204269746d6170",
+        "styleHex=526567756c6172",
+        "fileBytes=00000000",
+        "fingerprint=0000000000000000",
+        "identity=47584249544d4150",
+        "checksum=5f9519ed"
+      ],
+      "format": 1,
+      "sequence": 26,
+      "kind": "bitmap",
+      "pixelSize": 7
+    },
+    {
+      "path": "/fontsel.tmp",
+      "exists": false
+    }
+  ],
+  "root_entries": [
+    "Apps",
+    "build-identity.txt",
+    "desktop",
+    "desktop.cfg",
+    "EFI",
+    "FONTSEL0.CFG",
+    "fontsel1.cfg",
+    "kernel.elf",
+    "music",
+    "network",
+    "NvVars",
+    "pictures",
+    "ramdisk.img",
+    "startup.nsh",
+    "system"
+  ]
+}

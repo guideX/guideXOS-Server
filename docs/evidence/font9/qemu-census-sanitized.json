@@ -1,0 +1,12 @@
+{
+  "censusSummary": "Sanitized; foreign process command lines, PIDs, and media paths intentionally omitted",
+  "privateResources": "Unique FONT9 raw image, ESP/firmware copies, QMP/VNC ports 61210/5911; network disabled",
+  "blockImageRuns": [
+    { "run": 1, "capturedUtc": "2026-10-17T16:13:39Z", "privateQemuPresentBeforeLaunch": false, "plannedPortsFree": true, "foreignQemuObserved": 1, "action": "left untouched" },
+    { "run": 2, "capturedUtc": "2026-10-17T16:34:44Z", "privateQemuPresentBeforeLaunch": false, "plannedPortsFree": true, "foreignQemuObserved": 0 },
+    { "run": 3, "capturedUtc": "2026-10-17T16:38:14Z", "privateQemuPresentBeforeLaunch": false, "plannedPortsFree": true, "foreignQemuObserved": 1, "action": "left untouched" },
+    { "run": 4, "capturedUtc": "2026-10-17T16:39:49Z", "privateQemuPresentBeforeLaunch": false, "plannedPortsFree": true, "foreignQemuObserved": 1, "action": "left untouched" }
+  ],
+  "folderProbe": { "capturedUtc": "2026-10-17T17:40:54Z", "privateQemuPresentBeforeLaunch": false, "plannedPortsFree": true, "foreignQemuObserved": 0 },
+  "finalCheck": { "privateFont9QemuProcessesRunning": 0, "foreignProcessesModified": 0 }
+}

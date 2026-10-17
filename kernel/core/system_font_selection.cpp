@@ -722,7 +722,10 @@ PreferenceRead readBestPreference()
 	const PreferenceRead a = readPreferenceSlot(0u);
 	const PreferenceRead b = readPreferenceSlot(1u);
 	if (a.slot >= 0 && b.slot >= 0) {
-		if (b.preference.sequence > a.preference.sequence) return b;
+		// Sequence numbers use serial-number arithmetic. The writer skips zero,
+		// so UINT64_MAX -> 1 is an ordinary forward step across wraparound.
+		const uint64_t distance = b.preference.sequence - a.preference.sequence;
+		if (distance != 0u && distance < 0x8000000000000000ull) return b;
 		return a;
 	}
 	if (a.slot >= 0) return a;
@@ -735,46 +738,84 @@ PreferenceRead readBestPreference()
 	return result;
 }
 
+bool verifyPreferenceFile(const char* path, const char* serialized,
+	const SystemFontConfiguredPreference& expected, uint64_t sequence)
+{
+	kernel::vfs::FileInfo info = {};
+	if (kernel::vfs::stat(path, &info) != kernel::vfs::VFS_OK ||
+		info.type != kernel::vfs::FILE_TYPE_REGULAR || info.size != kPreferenceStorageBytes)
+		return false;
+	const int32_t read = kernel::vfs::read_file(path, s_preferenceText, kPreferenceTextBytes);
+	if (read != static_cast<int32_t>(kPreferenceStorageBytes)) return false;
+	for (uint32_t i = 0u; i < kPreferenceStorageBytes; ++i)
+		if (s_preferenceText[i] != serialized[i]) return false;
+	SystemFontConfiguredPreference verified = {};
+	bool unsupported = false;
+	return parsePreferenceText(s_preferenceText, kPreferenceStorageBytes, &verified, &unsupported) &&
+		identityEquals(verified.identity, expected.identity) &&
+		verified.pixelSize == expected.pixelSize && verified.sequence == sequence;
+}
+
+void cleanupPreferenceScratch()
+{
+	// The fixed scratch path is never authoritative. If an interrupted attempt
+	// left it behind, reclaim it best-effort; failure remains bounded to this
+	// one known path and the next save can retry cleanup.
+	const kernel::vfs::Status status = kernel::vfs::unlink(kPreferenceTempPath);
+	(void)status;
+}
+
 bool persistPreference(const SystemFontConfiguredPreference& preference,
 	uint32_t* outSlot, uint64_t* outSequence)
 {
-	const uint64_t sequence = s_configured.sequence == 0xffffffffffffffffull ? 0u : s_configured.sequence + 1u;
-	if (sequence == 0u) return false;
+	const uint64_t sequence = s_configured.sequence == 0xffffffffffffffffull
+		? 1u : (s_configured.sequence + 1u);
 	const uint32_t targetSlot = s_preferenceSlot == 0 ? 1u : 0u;
 	if (!serializePreference(preference, sequence, s_preferenceSerialized,
 		sizeof(s_preferenceSerialized))) return false;
 	int32_t written = kernel::vfs::write_file(kPreferenceTempPath, s_preferenceSerialized,
 		kPreferenceStorageBytes);
 	if (written != static_cast<int32_t>(kPreferenceStorageBytes)) {
-		// The scratch path is never authoritative. Recreate it at the fixed
-		// record size when an earlier interrupted write left a short file.
-		if (written == kernel::vfs::VFS_ERR_NO_SPACE &&
-			kernel::vfs::unlink(kPreferenceTempPath) == kernel::vfs::VFS_OK) {
-			written = kernel::vfs::create_file(kPreferenceTempPath,
-				s_preferenceSerialized, kPreferenceStorageBytes);
+		// Recreate only when a stale, undersized scratch file cannot hold this
+		// fixed-size record. The scratch path is never authoritative.
+		if (written == kernel::vfs::VFS_ERR_NO_SPACE) {
+			const kernel::vfs::Status removeScratch = kernel::vfs::unlink(kPreferenceTempPath);
+			if (removeScratch == kernel::vfs::VFS_OK || removeScratch == kernel::vfs::VFS_ERR_NOT_FOUND)
+				written = kernel::vfs::create_file(kPreferenceTempPath,
+					s_preferenceSerialized, kPreferenceStorageBytes);
 		}
 	}
 	if (written != static_cast<int32_t>(kPreferenceStorageBytes)) return false;
-	kernel::vfs::FileInfo info = {};
-	if (kernel::vfs::stat(kPreferenceTempPath, &info) != kernel::vfs::VFS_OK ||
-		info.type != kernel::vfs::FILE_TYPE_REGULAR || info.size != kPreferenceStorageBytes) return false;
-	const int32_t read = kernel::vfs::read_file(kPreferenceTempPath, s_preferenceText,
-		kPreferenceTextBytes);
-	if (read != static_cast<int32_t>(kPreferenceStorageBytes)) return false;
-	for (uint32_t i = 0u; i < kPreferenceStorageBytes; ++i)
-		if (s_preferenceText[i] != s_preferenceSerialized[i]) return false;
-	SystemFontConfiguredPreference verified = {};
-	bool unsupported = false;
-	if (!parsePreferenceText(s_preferenceText, kPreferenceStorageBytes, &verified, &unsupported) ||
-		!identityEquals(verified.identity, preference.identity) ||
-		verified.pixelSize != preference.pixelSize || verified.sequence != sequence) return false;
-	const kernel::vfs::Status removeStatus = kernel::vfs::unlink(kPreferencePaths[targetSlot]);
-	if (removeStatus != kernel::vfs::VFS_OK && removeStatus != kernel::vfs::VFS_ERR_NOT_FOUND)
+	if (!verifyPreferenceFile(kPreferenceTempPath, s_preferenceSerialized, preference, sequence))
 		return false;
-	// FAT rename is same-volume and flushes the directory update. The old
-	// committed slot remains authoritative until this final commit point.
-	if (kernel::vfs::rename(kPreferenceTempPath, kPreferencePaths[targetSlot]) != kernel::vfs::VFS_OK)
+
+	// Publish by overwriting only the inactive slot. FAT's VFS rename path is
+	// not consistently supported by folder-backed implementations. In-place
+	// writes may leave this target incomplete, but the currently selected slot
+	// remains untouched and is still the recovery record.
+	const char* targetPath = kPreferencePaths[targetSlot];
+	written = kernel::vfs::write_file(targetPath, s_preferenceSerialized,
+		kPreferenceStorageBytes);
+	if (written == kernel::vfs::VFS_ERR_NO_SPACE) {
+		// A corrupt/short inactive slot may have too few allocated clusters for
+		// an in-place rewrite. Reclaiming it is safe because the selected slot
+		// remains intact; then create the replacement at the empty path.
+		kernel::vfs::FileInfo targetInfo = {};
+		const kernel::vfs::Status statStatus = kernel::vfs::stat(targetPath, &targetInfo);
+		if (statStatus == kernel::vfs::VFS_OK &&
+			kernel::vfs::unlink(targetPath) == kernel::vfs::VFS_OK)
+			written = kernel::vfs::create_file(targetPath, s_preferenceSerialized,
+				kPreferenceStorageBytes);
+	}
+	if (written != static_cast<int32_t>(kPreferenceStorageBytes)) return false;
+	if (!verifyPreferenceFile(targetPath, s_preferenceSerialized, preference, sequence)) {
+		// The slot is inactive until verified. Best-effort removal prevents a
+		// fully-written but unreadable candidate from superseding the prior
+		// configured value after a restart.
+		kernel::vfs::unlink(targetPath);
 		return false;
+	}
+	cleanupPreferenceScratch();
 	if (outSlot) *outSlot = targetSlot;
 	if (outSequence) *outSequence = sequence;
 	return true;
@@ -783,6 +824,7 @@ bool persistPreference(const SystemFontConfiguredPreference& preference,
 SystemFontSelectionStatus loadAndApplyPreference()
 {
 	const PreferenceRead persisted = readBestPreference();
+	cleanupPreferenceScratch();
 	s_preferenceSlot = persisted.slot < 0 ? -1 : static_cast<int8_t>(persisted.slot);
 	if (persisted.slot >= 0) {
 		s_configured = persisted.preference;

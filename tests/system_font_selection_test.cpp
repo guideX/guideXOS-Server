@@ -25,9 +25,17 @@ std::map<std::string, TestFile> g_files;
 std::vector<kernel::vfs::DirEntry> g_directoryEntries;
 uint32_t g_directoryCursor = 0;
 bool g_directoryPresent = true;
+bool g_caseSensitiveFiles = false;
 bool g_failWrite = false;
 bool g_failRead = false;
 bool g_failRename = false;
+std::string g_failReadPath;
+std::string g_failNoSpacePath;
+std::string g_partialWritePath;
+std::string g_failDeletePath;
+uint32_t g_partialWriteBytes = 0u;
+int g_renameCount = 0;
+std::map<std::string, uint32_t> g_writeCounts;
 int g_redrawCount = 0;
 int g_checks = 0;
 int g_failures = 0;
@@ -51,6 +59,12 @@ std::string lowerPath(const char* path)
 	return result;
 }
 
+std::string storeKey(const char* path)
+{
+	if (g_caseSensitiveFiles) return path ? std::string(path) : std::string();
+	return lowerPath(path);
+}
+
 std::vector<uint8_t> readFixture()
 {
 	std::ifstream input("assets/Fonts/roboto/Roboto-Regular.ttf", std::ios::binary);
@@ -67,7 +81,14 @@ void addFile(const char* name, const std::vector<uint8_t>& bytes)
 {
 	TestFile file;
 	file.bytes = bytes;
-	g_files[lowerPath((std::string("/system/fonts/") + name).c_str())] = file;
+	g_files[storeKey((std::string("/system/fonts/") + name).c_str())] = file;
+}
+
+void addFileExact(const char* name, const std::vector<uint8_t>& bytes)
+{
+	TestFile file;
+	file.bytes = bytes;
+	g_files[std::string("/system/fonts/") + name] = file;
 }
 
 void addInvalidFile(const char* name)
@@ -87,7 +108,8 @@ void rebuildDirectoryEntries()
 		const size_t amount = name.size() < sizeof(entry.name) - 1u ? name.size() : sizeof(entry.name) - 1u;
 		for (size_t i = 0u; i < amount; ++i) {
 			const char c = name[i];
-			entry.name[i] = c >= 'a' && c <= 'z' ? static_cast<char>(c - ('a' - 'A')) : c;
+			entry.name[i] = !g_caseSensitiveFiles && c >= 'a' && c <= 'z'
+				? static_cast<char>(c - ('a' - 'A')) : c;
 		}
 		entry.name[amount] = '\0';
 		entry.type = pair.second.type;
@@ -101,9 +123,17 @@ void resetFixtureStore()
 {
 	g_files.clear();
 	g_directoryPresent = true;
+	g_caseSensitiveFiles = false;
 	g_failWrite = false;
 	g_failRead = false;
 	g_failRename = false;
+	g_failReadPath.clear();
+	g_failNoSpacePath.clear();
+	g_partialWritePath.clear();
+	g_failDeletePath.clear();
+	g_partialWriteBytes = 0u;
+	g_renameCount = 0;
+	g_writeCounts.clear();
 	g_redrawCount = 0;
 	g_directoryCursor = 0u;
 }
@@ -135,13 +165,19 @@ std::string encodeHex32(uint32_t value)
 	return output;
 }
 
-void markPreferenceVersionUnsupported(const std::string& path)
+std::string encodeHex64(uint64_t value)
 {
-	auto found = g_files.find(lowerPath(path.c_str()));
-	if (found == g_files.end() || found->second.bytes.size() != 1024u) return;
-	std::vector<uint8_t>& bytes = found->second.bytes;
-	const char version[] = "format=2";
-	for (uint32_t i = 0u; i < sizeof(version) - 1u; ++i) bytes[i] = static_cast<uint8_t>(version[i]);
+	static const char digits[] = "0123456789abcdef";
+	std::string output(16u, '0');
+	for (int32_t i = 15; i >= 0; --i) {
+		output[static_cast<size_t>(i)] = digits[value & 0xfu];
+		value >>= 4;
+	}
+	return output;
+}
+
+void rewritePreferenceChecksum(std::vector<uint8_t>& bytes)
+{
 	uint32_t checksumOffset = 0u;
 	while (checksumOffset + 9u < bytes.size() &&
 		std::memcmp(bytes.data() + checksumOffset, "checksum=", 9u) != 0) ++checksumOffset;
@@ -153,6 +189,29 @@ void markPreferenceVersionUnsupported(const std::string& path)
 	}
 	const std::string hex = encodeHex32(checksum);
 	for (uint32_t i = 0u; i < 8u; ++i) bytes[checksumOffset + 9u + i] = static_cast<uint8_t>(hex[i]);
+}
+
+void setPreferenceSequence(const char* path, uint64_t sequence)
+{
+	auto found = g_files.find(storeKey(path));
+	if (found == g_files.end() || found->second.bytes.size() != 1024u) return;
+	std::vector<uint8_t>& bytes = found->second.bytes;
+	uint32_t offset = 0u;
+	while (offset + 9u < bytes.size() && std::memcmp(bytes.data() + offset, "sequence=", 9u) != 0) ++offset;
+	if (offset + 25u > bytes.size()) return;
+	const std::string hex = encodeHex64(sequence);
+	for (uint32_t i = 0u; i < 16u; ++i) bytes[offset + 9u + i] = static_cast<uint8_t>(hex[i]);
+	rewritePreferenceChecksum(bytes);
+}
+
+void markPreferenceVersionUnsupported(const std::string& path)
+{
+	auto found = g_files.find(storeKey(path.c_str()));
+	if (found == g_files.end() || found->second.bytes.size() != 1024u) return;
+	std::vector<uint8_t>& bytes = found->second.bytes;
+	const char version[] = "format=2";
+	for (uint32_t i = 0u; i < sizeof(version) - 1u; ++i) bytes[i] = static_cast<uint8_t>(version[i]);
+	rewritePreferenceChecksum(bytes);
 }
 
 void checkActiveAndConfigured(const SystemFontIdentity& identity, uint32_t size)
@@ -241,9 +300,11 @@ void testDiscoverySelectionAndRollback()
 
 	CHECK(SystemFontSelectionPrepare(&second, 20u, &candidate) == SystemFontSelectionStatus::Ok);
 	g_failRename = true;
-	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::PersistenceFailed);
+	const int renameCallsBeforeSave = g_renameCount;
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
 	g_failRename = false;
-	checkActiveAndConfigured(first, 16u);
+	CHECK(g_renameCount == renameCallsBeforeSave);
+	checkActiveAndConfigured(second, 20u);
 
 	FontGlyphCacheStatistics beforeFontSwitch{};
 	CHECK(FontGlyphCacheGetStatistics(&beforeFontSwitch) == FontStatus::Ok);
@@ -265,10 +326,10 @@ void testDiscoverySelectionAndRollback()
 
 	// A replacement at the same path gets a new fingerprint and cannot reuse
 	// the prepared identity or runtime generation.
-	const std::vector<uint8_t> original = g_files[lowerPath("/system/fonts/a-regular.ttf")].bytes;
-	g_files[lowerPath("/system/fonts/a-regular.ttf")].bytes = g_replacementFixture;
+	const std::vector<uint8_t> original = g_files[storeKey("/system/fonts/a-regular.ttf")].bytes;
+	g_files[storeKey("/system/fonts/a-regular.ttf")].bytes = g_replacementFixture;
 	CHECK(SystemFontSelectionPrepare(&first, 16u, &candidate) == SystemFontSelectionStatus::StaleIdentity);
-	g_files[lowerPath("/system/fonts/a-regular.ttf")].bytes = original;
+	g_files[storeKey("/system/fonts/a-regular.ttf")].bytes = original;
 
 	CHECK(SystemFontSelectionResetToBuiltin() == SystemFontSelectionStatus::Ok);
 	FontHandle secondHandle = handleFor(second);
@@ -309,7 +370,7 @@ void testRestoreAndMissingFontFallback()
 	// file does not invalidate a draw in this boot, while a restart falls back.
 	FontHandle activeHandle = handleFor(identity);
 	CHECK(drawToBuffer(activeHandle, 18u) == static_cast<int32_t>(FontStatus::Ok));
-	g_files.erase(lowerPath("/system/fonts/roboto-regular.ttf"));
+	g_files.erase(storeKey("/system/fonts/roboto-regular.ttf"));
 	rebuildDirectoryEntries();
 	CHECK(SystemFontSelectionRefreshCatalog() == SystemFontSelectionStatus::Ok);
 	CHECK(drawToBuffer(activeHandle, 18u) == static_cast<int32_t>(FontStatus::Ok));
@@ -354,7 +415,7 @@ void testCorruptAndUnsupportedPreferences()
 	for (const char* path : {"/fontsel0.cfg", "/fontsel1.cfg"}) {
 		TestFile corrupted;
 		corrupted.bytes.assign(1024u, static_cast<uint8_t>('x'));
-		g_files[lowerPath(path)] = corrupted;
+		g_files[storeKey(path)] = corrupted;
 	}
 	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
 	CHECK(SystemFontSelectionPreferenceStatus() == SystemFontSelectionStatus::PreferenceCorrupt);
@@ -383,7 +444,7 @@ void testReplacementCapacityAndLegacyFallback()
 	CHECK(SystemFontSelectionPrepare(&identity, 16u, &candidate) == SystemFontSelectionStatus::Ok);
 	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
 
-	g_files[lowerPath("/system/fonts/a.ttf")].bytes = g_replacementFixture;
+	g_files[storeKey("/system/fonts/a.ttf")].bytes = g_replacementFixture;
 	CHECK(SystemFontSelectionPrepare(&identity, 16u, &candidate) == SystemFontSelectionStatus::StaleIdentity);
 	const SystemFontSelectionStatus activeReplacementStatus = SystemFontSelectionRefreshCatalog();
 	CHECK(activeReplacementStatus == SystemFontSelectionStatus::StaleIdentity ||
@@ -524,7 +585,7 @@ void testPreviewIsolationAndBitmapPixels()
 		64u * sizeof(uint32_t), 64u, 32u, 2, 3, "A?", 2u, 0xffffffffu, nullptr) == FontStatus::Ok);
 	CHECK(std::memcmp(bitmapPreview, bitmapExpected, sizeof(bitmapPreview)) == 0);
 
-	g_files.erase(lowerPath("/system/fonts/roboto-regular.ttf"));
+	g_files.erase(storeKey("/system/fonts/roboto-regular.ttf"));
 	rebuildDirectoryEntries();
 	for (uint32_t i = 0u; i < 96u * 48u; ++i) preview[i] = 0xff101820u;
 	CHECK(SystemFontSelectionDrawPreview(&faces[0].identity, 18u, preview, sizeof(preview),
@@ -533,6 +594,199 @@ void testPreviewIsolationAndBitmapPixels()
 	CHECK(SystemFontSelectionGetActive(&activeAfter) == SystemFontSelectionStatus::Ok);
 	CHECK(activeAfter.identity.kind == SystemFontIdentityKind::BuiltinBitmap &&
 		activeAfter.selectionGeneration == activeBefore.selectionGeneration);
+	SystemFontSelectionShutdown();
+}
+
+void testPreferenceRecoveryOrderingAndScratchCleanup()
+{
+	SystemFontSelectionShutdown();
+	resetFixtureStore();
+	addFile("Roboto-Regular.ttf", g_fixture);
+	rebuildDirectoryEntries();
+	TestFile orphan;
+	orphan.bytes.assign(73u, static_cast<uint8_t>('x'));
+	g_files[storeKey("/fontsel.tmp")] = orphan;
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	CHECK(g_files.find(storeKey("/fontsel.tmp")) == g_files.end());
+	SystemFontFaceInfo faces[kSystemFontMaxAvailableFonts]{};
+	uint32_t count = 0u;
+	CHECK(SystemFontSelectionGetAvailable(faces, kSystemFontMaxAvailableFonts, &count) ==
+		SystemFontSelectionStatus::Ok);
+	SystemFontCandidate candidate{};
+	CHECK(SystemFontSelectionPrepare(&faces[0].identity, 18u, &candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionPrepareActiveSize(20u, &candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionSnapshot active{};
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.pixelSize == 20u); // Both valid records: newest sequence wins.
+	SystemFontSelectionShutdown();
+
+	// A newer record with a bad checksum cannot displace the older valid slot.
+	auto newer = g_files.find(storeKey("/fontsel1.cfg"));
+	CHECK(newer != g_files.end());
+	if (newer != g_files.end() && !newer->second.bytes.empty()) newer->second.bytes[0] ^= 1u;
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.pixelSize == 18u);
+	CHECK(SystemFontSelectionPreferenceStatus() == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionShutdown();
+}
+
+void testPublicationFailuresPreservePreviousPreference()
+{
+	SystemFontSelectionShutdown();
+	resetFixtureStore();
+	addFile("Roboto-Regular.ttf", g_fixture);
+	rebuildDirectoryEntries();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontFaceInfo faces[kSystemFontMaxAvailableFonts]{};
+	uint32_t count = 0u;
+	CHECK(SystemFontSelectionGetAvailable(faces, kSystemFontMaxAvailableFonts, &count) ==
+		SystemFontSelectionStatus::Ok);
+	SystemFontCandidate candidate{};
+	CHECK(SystemFontSelectionPrepare(&faces[0].identity, 18u, &candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
+
+	// An interrupted target overwrite leaves the selected slot intact.
+	CHECK(SystemFontSelectionPrepareActiveSize(22u, &candidate) == SystemFontSelectionStatus::Ok);
+	g_partialWritePath = storeKey("/fontsel1.cfg");
+	g_partialWriteBytes = 29u;
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::PersistenceFailed);
+	g_partialWritePath.clear();
+	checkActiveAndConfigured(faces[0].identity, 18u);
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionSnapshot active{};
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.pixelSize == 18u);
+
+	// A read-after-write verification error invalidates only the inactive slot.
+	CHECK(SystemFontSelectionPrepareActiveSize(24u, &candidate) == SystemFontSelectionStatus::Ok);
+	g_failReadPath = storeKey("/fontsel1.cfg");
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::PersistenceFailed);
+	g_failReadPath.clear();
+	checkActiveAndConfigured(faces[0].identity, 18u);
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.pixelSize == 18u);
+
+	// Full storage at the scratch path cannot publish a new selection.
+	CHECK(SystemFontSelectionPrepareActiveSize(26u, &candidate) == SystemFontSelectionStatus::Ok);
+	g_failNoSpacePath = storeKey("/fontsel.tmp");
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::PersistenceFailed);
+	g_failNoSpacePath.clear();
+	checkActiveAndConfigured(faces[0].identity, 18u);
+
+	// A failed deletion of a short inactive slot keeps the active record valid.
+	TestFile shortSlot;
+	shortSlot.bytes.assign(12u, 0xa5u);
+	g_files[storeKey("/fontsel1.cfg")] = shortSlot;
+	CHECK(SystemFontSelectionPrepareActiveSize(28u, &candidate) == SystemFontSelectionStatus::Ok);
+	g_failNoSpacePath = storeKey("/fontsel1.cfg");
+	g_failDeletePath = storeKey("/fontsel1.cfg");
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::PersistenceFailed);
+	g_failNoSpacePath.clear();
+	g_failDeletePath.clear();
+	checkActiveAndConfigured(faces[0].identity, 18u);
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.pixelSize == 18u);
+	SystemFontSelectionShutdown();
+}
+
+void testRepeatedPreferenceSlotReuseAndRollover()
+{
+	SystemFontSelectionShutdown();
+	resetFixtureStore();
+	addFile("Roboto-Regular.ttf", g_fixture);
+	rebuildDirectoryEntries();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontFaceInfo faces[kSystemFontMaxAvailableFonts]{};
+	uint32_t count = 0u;
+	CHECK(SystemFontSelectionGetAvailable(faces, kSystemFontMaxAvailableFonts, &count) ==
+		SystemFontSelectionStatus::Ok);
+	SystemFontCandidate candidate{};
+	CHECK(SystemFontSelectionPrepare(&faces[0].identity, 18u, &candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
+	g_failRename = true;
+	for (uint32_t i = 0u; i < 24u; ++i) {
+		const uint32_t size = 8u + (i % (kSystemFontMaxSelectablePixelSize -
+			kSystemFontMinSelectablePixelSize + 1u));
+		CHECK(SystemFontSelectionPrepareActiveSize(size, &candidate) == SystemFontSelectionStatus::Ok);
+		CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
+	}
+	g_failRename = false;
+	CHECK(g_renameCount == 0);
+	CHECK(g_writeCounts[storeKey("/fontsel0.cfg")] >= 11u);
+	CHECK(g_writeCounts[storeKey("/fontsel1.cfg")] >= 11u);
+	CHECK(g_writeCounts[storeKey("/fontsel.tmp")] >= 20u);
+	CHECK(g_files[storeKey("/fontsel0.cfg")].bytes.size() == 1024u);
+	CHECK(g_files[storeKey("/fontsel1.cfg")].bytes.size() == 1024u);
+	CHECK(g_files.find(storeKey("/fontsel.tmp")) == g_files.end());
+	const uint32_t expectedFinalSize = 8u + (23u % 41u);
+	checkActiveAndConfigured(faces[0].identity, expectedFinalSize);
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionSnapshot active{};
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.identity.stableId == faces[0].identity.stableId);
+	CHECK(active.pixelSize == expectedFinalSize);
+	CHECK(active.isPersisted == 1u);
+
+	// Force the two records to the adjacent values before wrap, then verify
+	// that sequence 1 is considered newer than UINT64_MAX after the next apply.
+	SystemFontSelectionShutdown();
+	setPreferenceSequence("/fontsel0.cfg", 0xfffffffffffffffeull);
+	setPreferenceSequence("/fontsel1.cfg", 0xffffffffffffffffull);
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	SystemFontConfiguredPreference configured{};
+	CHECK(SystemFontSelectionGetConfigured(&configured) == SystemFontSelectionStatus::Ok);
+	CHECK(configured.sequence == 0xffffffffffffffffull);
+	CHECK(SystemFontSelectionPrepareActiveSize(47u, &candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetConfigured(&configured) == SystemFontSelectionStatus::Ok);
+	CHECK(configured.sequence == 1u);
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.pixelSize == 47u);
+	CHECK(SystemFontSelectionGetConfigured(&configured) == SystemFontSelectionStatus::Ok);
+	CHECK(configured.sequence == 1u);
+	SystemFontSelectionShutdown();
+}
+
+void testCaseSensitiveFontIdentity()
+{
+	SystemFontSelectionShutdown();
+	resetFixtureStore();
+	g_caseSensitiveFiles = true;
+	addFileExact("CamelCase.ttf", g_fixture);
+	addFileExact("camelcase.ttf", g_replacementFixture);
+	rebuildDirectoryEntries();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontFaceInfo faces[kSystemFontMaxAvailableFonts]{};
+	uint32_t count = 0u;
+	CHECK(SystemFontSelectionGetAvailable(faces, kSystemFontMaxAvailableFonts, &count) ==
+		SystemFontSelectionStatus::Ok);
+	CHECK(count == 2u);
+	CHECK(std::strcmp(faces[0].identity.familyName, faces[1].identity.familyName) == 0);
+	CHECK(faces[0].identity.stableId != faces[1].identity.stableId);
+	CHECK(std::strcmp(faces[0].identity.canonicalPath, faces[1].identity.canonicalPath) != 0);
+	SystemFontCandidate candidate{};
+	CHECK(SystemFontSelectionPrepare(&faces[0].identity, 18u, &candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionSnapshot active{};
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(std::strcmp(active.identity.canonicalPath, faces[0].identity.canonicalPath) == 0);
+	CHECK(active.identity.stableId == faces[0].identity.stableId);
 	SystemFontSelectionShutdown();
 }
 
@@ -547,7 +801,7 @@ namespace vfs {
 Status stat(const char* path, FileInfo* info)
 {
 	if (!path || !info) return VFS_ERR_INVALID;
-	const std::string normalized = lowerPath(path);
+	const std::string normalized = storeKey(path);
 	if (normalized == "/system/fonts" || normalized == "/system/fonts/") {
 		if (!g_directoryPresent) return VFS_ERR_NOT_FOUND;
 		info->type = FILE_TYPE_DIRECTORY;
@@ -563,8 +817,9 @@ Status stat(const char* path, FileInfo* info)
 
 int32_t read_file(const char* path, void* buffer, uint32_t maxSize)
 {
-	if (!path || (!buffer && maxSize != 0u) || g_failRead) return VFS_ERR_IO;
-	const auto found = g_files.find(lowerPath(path));
+	if (!path || (!buffer && maxSize != 0u) || g_failRead ||
+		(!g_failReadPath.empty() && storeKey(path) == g_failReadPath)) return VFS_ERR_IO;
+	const auto found = g_files.find(storeKey(path));
 	if (found == g_files.end()) return VFS_ERR_NOT_FOUND;
 	if (found->second.bytes.size() > maxSize) return VFS_ERR_INVALID;
 	if (!found->second.bytes.empty())
@@ -576,34 +831,47 @@ int32_t write_file(const char* path, const void* buffer, uint32_t size)
 {
 	if (!path || (!buffer && size != 0u)) return VFS_ERR_INVALID;
 	if (g_failWrite) return VFS_ERR_IO;
+	const std::string key = storeKey(path);
+	++g_writeCounts[key];
+	if (!g_failNoSpacePath.empty() && key == g_failNoSpacePath) return VFS_ERR_NO_SPACE;
 	TestFile file;
 	const uint8_t* bytes = static_cast<const uint8_t*>(buffer);
+	if (!g_partialWritePath.empty() && key == g_partialWritePath) {
+		const uint32_t amount = g_partialWriteBytes < size ? g_partialWriteBytes : size;
+		file.bytes.assign(bytes, bytes + amount);
+		g_files[key] = file;
+		return VFS_ERR_IO;
+	}
 	file.bytes.assign(bytes, bytes + size);
-	g_files[lowerPath(path)] = file;
+	g_files[key] = file;
 	return static_cast<int32_t>(size);
 }
 
 int32_t create_file(const char* path, const void* buffer, uint32_t size)
 {
 	if (!path || (!buffer && size != 0u)) return VFS_ERR_INVALID;
-	const std::string normalized = lowerPath(path);
+	const std::string normalized = storeKey(path);
 	if (g_files.find(normalized) != g_files.end()) return VFS_ERR_EXISTS;
+	if (!g_failNoSpacePath.empty() && normalized == g_failNoSpacePath) return VFS_ERR_NO_SPACE;
 	return write_file(path, buffer, size);
 }
 
 Status unlink(const char* path)
 {
 	if (!path) return VFS_ERR_INVALID;
-	const Status result = g_files.erase(lowerPath(path)) ? VFS_OK : VFS_ERR_NOT_FOUND;
+	const std::string key = storeKey(path);
+	if (!g_failDeletePath.empty() && key == g_failDeletePath) return VFS_ERR_IO;
+	const Status result = g_files.erase(key) ? VFS_OK : VFS_ERR_NOT_FOUND;
 	return result;
 }
 
 Status rename(const char* oldPath, const char* newPath)
 {
 	if (!oldPath || !newPath) return VFS_ERR_INVALID;
+	++g_renameCount;
 	if (g_failRename) return VFS_ERR_IO;
-	const std::string oldName = lowerPath(oldPath);
-	const std::string newName = lowerPath(newPath);
+	const std::string oldName = storeKey(oldPath);
+	const std::string newName = storeKey(newPath);
 	const auto old = g_files.find(oldName);
 	if (old == g_files.end()) return VFS_ERR_NOT_FOUND;
 	if (g_files.find(newName) != g_files.end()) return VFS_ERR_EXISTS;
@@ -651,6 +919,10 @@ int main()
 	testDiscoverySelectionAndRollback();
 	testRestoreAndMissingFontFallback();
 	testCorruptAndUnsupportedPreferences();
+	testPreferenceRecoveryOrderingAndScratchCleanup();
+	testPublicationFailuresPreservePreviousPreference();
+	testRepeatedPreferenceSlotReuseAndRollover();
+	testCaseSensitiveFontIdentity();
 	testReplacementCapacityAndLegacyFallback();
 	testDirectoryTraversalBound();
 	testPreviewIsolationAndBitmapPixels();

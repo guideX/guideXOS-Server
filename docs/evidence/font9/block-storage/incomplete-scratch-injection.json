@@ -1,0 +1,23 @@
+{
+  "injectedUtc": "2026-10-17T16:39:42.303584+00:00",
+  "image": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\font9-writable-fat.img",
+  "injection": {
+    "path": "/fontsel.tmp",
+    "length": 49,
+    "sha256": "0df63a1052d3a5a4de527d649971dbfaac5b493c3a5aac6beafc56c4c141e1b2",
+    "bytesHex": "666f726d61743d310a73657175656e63653d303030303030303030303030303031630a6b696e643d74727565747970650a",
+    "reason": "controlled incomplete scratch publication; persistent slots untouched"
+  },
+  "validSlotsBefore": {
+    "FONTSEL0.CFG": {
+      "length": 1024,
+      "sha256": "360d1e9fb33d335bb07a9f41d3464a21823d2d3476e32472e91ae3f0ab71c0f6",
+      "record_prefix": "format=1\nsequence=000000000000001b\nkind=truetype\npixelSize=00000011\npathHex=2f73797374656d2f666f6e74"
+    },
+    "fontsel1.cfg": {
+      "length": 1024,
+      "sha256": "1fb1a0dace212ffec90d02540aff29b54581e048ee4d10f8c6f1c1cf1d48e194",
+      "record_prefix": "format=1\nsequence=000000000000001a\nkind=bitmap\npixelSize=00000007\npathHex=\nfamilyHex=6775696465584f5"
+    }
+  }
+}

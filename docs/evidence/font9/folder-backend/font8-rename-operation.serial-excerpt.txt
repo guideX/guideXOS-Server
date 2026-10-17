@@ -1,0 +1,9 @@
+Source: out/font8-qemu-20261017-fontsupport/post-apply-pre-reboot.serial.log
+Observed around the failing rename: (line numbers shown)
+1416: LFPASTE_FLUSH_BEGIN stage=create
+1417: LFPASTE_FLUSH_END status=0x00
+1418: [VFS_WRITE_FILE] path=/fontsel.tmp operation=create bytes=0000000000000400 fatStatus=FAT_FILE_WRITE_OK blockStatus=0x00 vfsStatus=VFS_OK
+1419: [VFS] Opened: /fontsel.tmp
+1420: LFPASTE_RENAME_BEGIN old=/fontsel.tmp new=/fontsel0.cfg
+1421: LFPASTE_FLUSH_END status=0x00
+1422: [desktop] wallpaper image fallback to gradient

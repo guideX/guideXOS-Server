@@ -1,0 +1,46 @@
+{
+  "image": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\font9-writable-fat.img",
+  "paths": [
+    {
+      "path": "/FONTSEL0.CFG",
+      "exists": true,
+      "length": 1024,
+      "sha256": "360d1e9fb33d335bb07a9f41d3464a21823d2d3476e32472e91ae3f0ab71c0f6",
+      "record": "format=1\nsequence=000000000000001b\nkind=truetype\npixelSize=00000011\npathHex=2f73797374656d2f666f6e74732f526f626f746f2d426f6c642e747466\nfamilyHex=526f626f746f\nstyleHex=426f6c64\nfileBytes=00023d50\nfingerprint=d3a00d5e4a8f1de7\nidentity=3d90e9fa85436469\nchecksum=f1e5fba1\n            ",
+      "format": 1,
+      "sequence": 27,
+      "kind": "truetype",
+      "pixelSize": 17
+    },
+    {
+      "path": "/fontsel0.cfg",
+      "exists": false
+    },
+    {
+      "path": "/fontsel1.cfg",
+      "exists": true,
+      "length": 1024,
+      "sha256": "1fb1a0dace212ffec90d02540aff29b54581e048ee4d10f8c6f1c1cf1d48e194",
+      "record": "format=1\nsequence=000000000000001a\nkind=bitmap\npixelSize=00000007\npathHex=\nfamilyHex=6775696465584f53204269746d6170\nstyleHex=526567756c6172\nfileBytes=00000000\nfingerprint=0000000000000000\nidentity=47584249544d4150\nchecksum=5f9519ed\n                                                ",
+      "format": 1,
+      "sequence": 26,
+      "kind": "bitmap",
+      "pixelSize": 7
+    },
+    {
+      "path": "/FONTSEL1.CFG",
+      "exists": true,
+      "length": 1024,
+      "sha256": "1fb1a0dace212ffec90d02540aff29b54581e048ee4d10f8c6f1c1cf1d48e194",
+      "record": "format=1\nsequence=000000000000001a\nkind=bitmap\npixelSize=00000007\npathHex=\nfamilyHex=6775696465584f53204269746d6170\nstyleHex=526567756c6172\nfileBytes=00000000\nfingerprint=0000000000000000\nidentity=47584249544d4150\nchecksum=5f9519ed\n                                                ",
+      "format": 1,
+      "sequence": 26,
+      "kind": "bitmap",
+      "pixelSize": 7
+    },
+    {
+      "path": "/fontsel.tmp",
+      "exists": false
+    }
+  ]
+}

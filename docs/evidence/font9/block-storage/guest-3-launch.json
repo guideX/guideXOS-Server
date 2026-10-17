@@ -1,0 +1,15 @@
+{
+  "startedUtc": "2026-10-17T16:38:20.8817161Z",
+  "processId": 7184,
+  "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmp": "127.0.0.1:61210",
+  "vnc": "127.0.0.1:5911",
+  "firmware": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\OVMF.fd",
+  "disk": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\font9-writable-fat.img",
+  "serial": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\guest-block-acceptance-3.serial.log",
+  "stdout": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\qemu-acceptance-3.stdout.log",
+  "stderr": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\qemu-acceptance-3.stderr.log",
+  "memory": "1024M",
+  "network": "disabled",
+  "commandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc,accel=whpx -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -smp 2 -m 1024M -vga std -display vnc=127.0.0.1:11 -drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\OVMF.fd -drive file=D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\font9-writable-fat.img,format=raw,if=ide,index=0 -serial file:D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font9-validation\\qemu-disk\\guest-block-acceptance-3.serial.log -qmp tcp:127.0.0.1:61210,server=on,wait=off -monitor none -rtc base=utc,clock=host -net none"
+}
