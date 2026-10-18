@@ -1616,6 +1616,7 @@ struct I219PcieTxSnoopDiagnostics {
 // a source/ring/buffer fault from a driver-side timeout without replaying DMA.
 struct I219IommuDiagnostics {
     bool attempted;
+    bool submitted;
     bool singleAttempt;
     bool freshStateRequired;
     bool freshStateValid;
@@ -1632,7 +1633,17 @@ struct I219IommuDiagnostics {
     bool bufferAddressFault;
     bool poisonPreserved;
     bool noRetry;
+    bool preflightPassed;
+    bool environmentConfirmed;
+    bool probeConsumed;
+    bool ringIdle;
+    bool dmaMappingValid;
+    bool hardwareReady;
+    bool competingTxAbsent;
+    bool descriptorRetired;
+    bool timedOut;
     Status result;
+    const char* outcome;
     vtd::Classification classification;
     const char* failure;
     const char* iommuUnavailableReason;
@@ -1649,7 +1660,115 @@ struct I219IommuDiagnostics {
     uint16_t faultSourceId;
     uint8_t faultReason;
     uint64_t faultAddress;
+    uint32_t txAttemptsBefore;
+    uint32_t txSubmissionsBefore;
+    uint32_t txCompletionsBefore;
+    uint32_t txErrorsBefore;
+    uint64_t descriptorVirtualAddressBefore;
+    uint64_t descriptorDmaAddressBefore;
+    uint64_t bufferVirtualAddressBefore;
+    uint64_t bufferDmaAddressBefore;
+    bool descriptorDmaAddressValidBefore;
+    bool bufferDmaAddressValidBefore;
 };
+
+enum class I219Phase27Outcome : uint8_t {
+    PrerequisiteNotMet = 0,
+    ANoProgress,
+    BProgressNoCompletion,
+    CCompletionNotRetired,
+    DCompletionRetired,
+    Inconclusive,
+};
+
+struct I219Phase27GateState {
+    bool deviceIdentity;
+    bool familyPath;
+    bool driverReady;
+    bool initializationPassed;
+    bool linkUp;
+    bool dmaRegionValid;
+    bool dmaRingValid;
+    bool dmaBufferValid;
+    bool iommuMappingKnown;
+    bool txEngineReady;
+    bool ringIdle;
+    bool descriptorAvailable;
+    bool noCompetingTx;
+    bool notRecovering;
+    bool isolatedNetworkConfirmed;
+    bool notAlreadyAttempted;
+};
+
+inline const char* i219_phase27_gate_failure(
+    const I219Phase27GateState& gates)
+{
+    if (!gates.deviceIdentity) return "unsupported PCI identity; expected 8086:156F";
+    if (!gates.familyPath) return "expected I219/PCH hardware-family path is not active";
+    if (!gates.driverReady) return "driver is not ready and registered";
+    if (!gates.initializationPassed) return "hardware initialization did not pass";
+    if (!gates.linkUp) return "link is not UP";
+    if (!gates.dmaRegionValid) return "TX DMA handoff ownership or geometry is invalid";
+    if (!gates.dmaRingValid) return "TX descriptor ring DMA mapping/alignment/length is invalid";
+    if (!gates.dmaBufferValid) return "TX packet buffer DMA mapping is invalid";
+    if (!gates.iommuMappingKnown) return "active or unknown IOMMU mapping cannot be proven safe";
+    if (!gates.txEngineReady) return "TX engine or PCI DMA registers are invalid";
+    if (!gates.ringIdle) return "TX ring head/tail ownership is not idle";
+    if (!gates.descriptorAvailable) return "intended TX descriptor slot is not available";
+    if (!gates.noCompetingTx) return "TX activity was already observed this boot";
+    if (!gates.notRecovering) return "hardware recovery or poisoned TX ring is active";
+    if (!gates.notAlreadyAttempted) return "Phase 27 probe already attempted; cold boot before another probe";
+    if (!gates.isolatedNetworkConfirmed) return "operator must confirm isolated test network with iommu isolated";
+    return nullptr;
+}
+
+struct I219Phase27Evidence {
+    bool submitted;
+    bool headBeforeValid;
+    bool headAfterValid;
+    uint16_t headBefore;
+    uint16_t headAfter;
+    bool descriptorStatusValid;
+    uint8_t descriptorStatus;
+    bool descriptorChanged;
+    bool softwareRetired;
+    bool timedOut;
+};
+
+inline I219Phase27Outcome i219_phase27_classify(
+    const I219Phase27Evidence& evidence)
+{
+    if (!evidence.submitted) return I219Phase27Outcome::PrerequisiteNotMet;
+    if (evidence.descriptorStatusValid &&
+        (evidence.descriptorStatus & E1000_TXD_STAT_DD) != 0u) {
+        return evidence.softwareRetired
+            ? I219Phase27Outcome::DCompletionRetired
+            : I219Phase27Outcome::CCompletionNotRetired;
+    }
+    if (!evidence.headBeforeValid || !evidence.headAfterValid ||
+        !evidence.descriptorStatusValid) {
+        return I219Phase27Outcome::Inconclusive;
+    }
+    if (evidence.headBefore != evidence.headAfter || evidence.descriptorChanged) {
+        return I219Phase27Outcome::BProgressNoCompletion;
+    }
+    if (evidence.timedOut) {
+        return I219Phase27Outcome::ANoProgress;
+    }
+    return I219Phase27Outcome::Inconclusive;
+}
+
+inline const char* i219_phase27_outcome_name(I219Phase27Outcome outcome)
+{
+    switch (outcome) {
+        case I219Phase27Outcome::PrerequisiteNotMet: return "PREREQUISITE_NOT_MET";
+        case I219Phase27Outcome::ANoProgress: return "A_NO_DEMONSTRATED_CONSUMPTION";
+        case I219Phase27Outcome::BProgressNoCompletion: return "B_PROGRESS_NO_COMPLETION";
+        case I219Phase27Outcome::CCompletionNotRetired: return "C_COMPLETION_NOT_RETIRED";
+        case I219Phase27Outcome::DCompletionRetired: return "D_DESCRIPTOR_COMPLETION_SUCCESS";
+        default: return "INCONCLUSIVE";
+    }
+}
 
 inline bool tx_ring_registers_match(const TxRegisterSnapshot& snapshot,
                                     uint64_t ringPhysicalAddress,
@@ -2068,9 +2187,11 @@ Status send_raw_diagnostic_frame(TxRawPath path);
 bool run_i219_reset_and_rearm();
 bool run_i219_post_reset_rearm();
 
-// Perform one explicit, read-only VT-d audit around one existing normal raw
-// TX attempt. Refuses to run unless the caller has completed the Phase 20
-// reset/rearm boundary; never retries a poisoned or timed-out descriptor.
+// Perform a read-only preflight by default. A single normal raw-TX attempt is
+// permitted only when the caller explicitly confirms the isolated test
+// network. The Phase 27 attempt is one-shot per boot and never retries or
+// repairs failed prerequisites.
+void set_i219_phase27_environment_confirmation(bool confirmed);
 bool run_i219_iommu_tx_observation();
 
 // Apply the single Phase 25 TX DMA snoop-policy experiment and publish one

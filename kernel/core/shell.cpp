@@ -3173,9 +3173,10 @@ static void nicinfo_print_tx_vtd_sample(
     output_string("\n");
 }
 
-static void cmd_nicinfo_tx_iommu()
+static void cmd_nicinfo_tx_iommu(bool confirmIsolatedNetwork)
 {
     output_string("NIC TX IOMMU observation\n");
+    nic::set_i219_phase27_environment_confirmation(confirmIsolatedNetwork);
     const bool executed = nic::run_i219_iommu_tx_observation();
     const nic::NICDevice* dev = nic::get_device();
     const nic::I219IommuDiagnostics empty = {};
@@ -3202,38 +3203,54 @@ static void cmd_nicinfo_tx_iommu()
     const bool bufferIdentityMapped = tx.dmaRegionMappingValid &&
         tx.lastBufferVirtualAddress != 0u &&
         tx.lastBufferVirtualAddress == tx.lastBufferAddress;
-    const bool headBeforeValid = tx.preDoorbellRegisters.valid;
-    const bool headFinalValid = diagnostic.txAfter.valid;
-    const uint32_t headBefore = tx.preDoorbellRegisters.tdh & 0xFFFFu;
-    const uint32_t headFinal = diagnostic.txAfter.tdh & 0xFFFFu;
-    const bool headMoved = headBeforeValid && headFinalValid &&
-                           headBefore != headFinal;
     const bool doorbellReadbackMatches = tx.afterDoorbellRegisters.valid &&
         (tx.afterDoorbellRegisters.tdt & 0xFFFFu) == (tx.tdtWritten & 0xFFFFu);
-    const bool descriptorChanged =
-        tx.lastDescriptorRaw0PreTdt != tx.lastDescriptorRaw0Final ||
-        tx.lastDescriptorRaw1PreTdt != tx.lastDescriptorRaw1Final;
-    const bool descriptorDone =
+    const uint8_t descriptorStatusBefore = diagnostic.attempted
+        ? tx.lastDescriptorStatusBefore
+        : static_cast<uint8_t>(diagnostic.descriptorRaw1Before >> 32);
+    const bool descriptorStatusAfterValid = diagnostic.submitted &&
+        tx.lastDescriptorStatus != 0xFFu;
+    const bool descriptorDone = descriptorStatusAfterValid &&
         (tx.lastDescriptorStatus & nic::E1000_TXD_STAT_DD) != 0u;
-    const char* outcome = "INCONCLUSIVE";
-    if (!diagnostic.attempted) {
-        outcome = "NO_ATTEMPT";
-    } else if (tx.preDoorbellRegisters.valid && !tdbaMatchesRing) {
-        outcome = "A_TDBA_MISMATCH";
-    } else if (descriptorDone) {
-        outcome = "C_DESCRIPTOR_DD_SET";
-    } else if (headMoved) {
-        outcome = "HEAD_ADVANCED_DD_CLEAR";
-    } else if (tx.preDoorbellRegisters.valid && descriptorChanged) {
-        outcome = "D_DESCRIPTOR_CHANGED_HEAD_STATIONARY";
-    } else if (doorbellReadbackMatches && headBeforeValid && headFinalValid) {
-        outcome = "B_TDT_PUBLISHED_TDH_STATIONARY_DD_CLEAR";
-    }
 
     output_string("fresh-reset-rearm-required=yes valid=");
     output_string(diagnostic.freshStateValid ? "yes\n" : "no\n");
+    output_string("preflight=");
+    output_string(diagnostic.preflightPassed ? "PASS" : "REFUSED");
+    output_string(" environment-confirmed=");
+    output_string(diagnostic.environmentConfirmed ? "yes" : "no");
+    output_string(" probe-consumed=");
+    output_string(diagnostic.probeConsumed ? "yes\n" : "no\n");
+    output_string("gates hardware-ready=");
+    output_string(diagnostic.hardwareReady ? "yes" : "no");
+    output_string(" link=");
+    output_string(dev ? nic::link_state_name(dev->link) : "unknown");
+    output_string(" DMA-mapping=");
+    output_string(diagnostic.dmaMappingValid ? "valid" : "invalid");
+    output_string(" ring-idle=");
+    output_string(diagnostic.ringIdle ? "yes" : "no");
+    output_string(" no-competing-TX=");
+    output_string(diagnostic.competingTxAbsent ? "yes\n" : "no\n");
+    output_string("TX-counters-before attempted/submitted/completed/errors=");
+    uint_to_str(diagnostic.txAttemptsBefore, numStr);
+    output_string(numStr);
+    output_string("/");
+    uint_to_str(diagnostic.txSubmissionsBefore, numStr);
+    output_string(numStr);
+    output_string("/");
+    uint_to_str(diagnostic.txCompletionsBefore, numStr);
+    output_string(numStr);
+    output_string("/");
+    uint_to_str(diagnostic.txErrorsBefore, numStr);
+    output_string(numStr);
+    output_string("\nprobe-bound descriptors<=1 packets<=1 retries=0 resets=0 poll-limit=");
+    uint_to_str(tx.completionPollLimit, numStr);
+    output_string(numStr);
+    output_string("\n");
     output_string("attempt=");
     output_string(diagnostic.attempted ? "one" : "none");
+    output_string(" descriptor-submitted=");
+    output_string(diagnostic.submitted ? "yes" : "no");
     output_string(" executed=");
     output_string(executed ? "yes" : "no");
     output_string(" result=");
@@ -3243,11 +3260,15 @@ static void cmd_nicinfo_tx_iommu()
     output_string(" no-retry=");
     output_string(diagnostic.noRetry ? "yes\n" : "no\n");
     output_string("outcome=");
-    output_string(outcome);
+    output_string(diagnostic.outcome ? diagnostic.outcome : "INCONCLUSIVE");
     output_string(" classification=");
     output_string(vtd::classification_name(diagnostic.classification));
     output_string(" poison-preserved=");
     output_string(diagnostic.poisonPreserved ? "yes\n" : "no\n");
+    output_string("descriptor-retired=");
+    output_string(diagnostic.descriptorRetired ? "yes" : "no");
+    output_string(" timeout=");
+    output_string(diagnostic.timedOut ? "yes\n" : "no\n");
     output_string("failure=");
     output_string(diagnostic.failure ? diagnostic.failure : "unknown");
     output_string("\n");
@@ -3304,9 +3325,35 @@ static void cmd_nicinfo_tx_iommu()
     nicinfo_print_tx_descriptor_bytes("descriptor-before-TX-raw16=",
                                       diagnostic.descriptorRaw0Before,
                                       diagnostic.descriptorRaw1Before);
+    output_string("descriptor-status-before=0x");
+    uint_hex_to_str(descriptorStatusBefore, 2, hexStr);
+    output_string(hexStr);
+    output_string(" available-DD=");
+    if (descriptorStatusBefore == 0xFFu) {
+        output_string("unknown\n");
+    } else {
+        output_string((descriptorStatusBefore & nic::E1000_TXD_STAT_DD)
+                          ? "yes\n" : "no\n");
+    }
     nicinfo_print_tx_dma_registers("pre-TDT", tx.preDoorbellRegisters);
     output_string("TDBA == TX_RING_DMA_ADDRESS: ");
     output_string(tdbaMatchesRing ? "YES\n" : "NO\n");
+    output_string("descriptor DMA preflight VA=0x");
+    uint_hex64_to_str(diagnostic.descriptorVirtualAddressBefore, hex64Str);
+    output_string(hex64Str);
+    output_string(" PA=0x");
+    uint_hex64_to_str(diagnostic.descriptorDmaAddressBefore, hex64Str);
+    output_string(hex64Str);
+    output_string(" valid=");
+    output_string(diagnostic.descriptorDmaAddressValidBefore ? "yes\n" : "no\n");
+    output_string("buffer DMA preflight VA=0x");
+    uint_hex64_to_str(diagnostic.bufferVirtualAddressBefore, hex64Str);
+    output_string(hex64Str);
+    output_string(" PA=0x");
+    uint_hex64_to_str(diagnostic.bufferDmaAddressBefore, hex64Str);
+    output_string(hex64Str);
+    output_string(" valid=");
+    output_string(diagnostic.bufferDmaAddressValidBefore ? "yes\n" : "no\n");
     output_string("TDT-write=");
     output_string(tx.publishBarrierBeforeTdt ? "once" : "not-reached");
     output_string(" value=");
@@ -3417,7 +3464,32 @@ static void cmd_nicinfo_tx_iommu()
                                       tx.lastDescriptorRaw0Final,
                                       tx.lastDescriptorRaw1Final);
     output_string("descriptor-final-DD=");
-    output_string(descriptorDone ? "yes\n" : "no\n");
+    if (!diagnostic.submitted) {
+        output_string("not-submitted\n");
+    } else if (!descriptorStatusAfterValid) {
+        output_string("unknown\n");
+    } else {
+        output_string(descriptorDone ? "yes\n" : "no\n");
+    }
+
+    output_string("TX-timeout-error-snapshot=");
+    if (tx.i219TimeoutRegisters.valid) {
+        output_string("valid ICR=0x");
+        uint_hex_to_str(tx.i219TimeoutRegisters.icr, 8, hexStr);
+        output_string(hexStr);
+        output_string(" IMS=0x");
+        uint_hex_to_str(tx.i219TimeoutRegisters.ims, 8, hexStr);
+        output_string(hexStr);
+        output_string(" STATUS=0x");
+        uint_hex_to_str(tx.i219TimeoutRegisters.status, 8, hexStr);
+        output_string(hexStr);
+        output_string(" CTRL=0x");
+        uint_hex_to_str(tx.i219TimeoutRegisters.ctrl, 8, hexStr);
+        output_string(hexStr);
+        output_string("\n");
+    } else {
+        output_string("not-captured\n");
+    }
 
     if (diagnostic.afterValid) {
         output_string("fault-comparison SID=0x");
@@ -6522,13 +6594,15 @@ static void execute_command(const char* cmd) {
         } else if (nicInfoMode == NICINFO_MODE_DMA_BRIEF) {
             cmd_nicinfo_dma_brief();
         } else if (nicInfoMode == NICINFO_MODE_TX_IOMMU) {
-            cmd_nicinfo_tx_iommu();
+            cmd_nicinfo_tx_iommu(false);
+        } else if (nicInfoMode == NICINFO_MODE_TX_IOMMU_ISOLATED) {
+            cmd_nicinfo_tx_iommu(true);
         } else if (nicInfoMode == NICINFO_MODE_TX_PHASE25) {
             cmd_nicinfo_tx_phase25();
         } else if (nicInfoMode == NICINFO_MODE_LANINIT) {
             cmd_nicinfo_laninit();
         } else {
-            output_string("Usage: nicinfo [brief|link|laninit|dma [brief]|tx [brief|owner|iommu|phase25|reset [brief|run]|rearm|lifecycle|raw [direct|status]]]\n");
+            output_string("Usage: nicinfo [brief|link|laninit|dma [brief]|tx [brief|owner|iommu [isolated]|phase25|reset [brief|run]|rearm|lifecycle|raw [direct|status]]]\n");
             output_string("  brief: recorded NIC initialization/link state only\n");
             output_string("  laninit: retained read-only Phase 26 LAN_INIT_DONE samples\n");
             output_string("  link: one bounded, read-only current link refresh\n");
@@ -6536,7 +6610,8 @@ static void execute_command(const char* cmd) {
             output_string("  dma brief: compact read-only VT-d state\n");
             output_string("  tx: one TX descriptor and bounded register snapshot\n");
             output_string("  tx brief: compact one-screen TX evidence\n");
-            output_string("  tx iommu: one normal raw-TX attempt with VT-d fault capture; never retries\n");
+            output_string("  tx iommu: read-only Phase 27 preflight; no transmission\n");
+            output_string("  tx iommu isolated: one bounded probe after isolated-network confirmation\n");
             output_string("  tx phase25: one I219 TX snoop-policy experiment; never retries\n");
             output_string("  tx owner: CTRL_EXT.DRV_LOAD ownership evidence\n");
             output_string("  tx reset: I219/SPT pre-reset flush audit; retained/latest (READ-ONLY; does not reset)\n");

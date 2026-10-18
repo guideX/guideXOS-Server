@@ -90,6 +90,8 @@ static TxFailureReason s_txDmaRegionFailure =
 static uint16_t s_rxCur = 0;
 static uint16_t s_txCur = 0;
 static bool s_txPoisoned = false;
+static bool s_phase27TxProbeConsumed = false;
+static bool s_phase27EnvironmentConfirmation = false;
 static const uint32_t TX_COMPLETION_POLL_LIMIT = 1000000u;
 
 // Hardware waits in the I219 path are deliberately iteration-bounded.  The
@@ -4185,21 +4187,60 @@ Status send_raw_diagnostic_frame(TxRawPath path)
     return result;
 }
 
+void set_i219_phase27_environment_confirmation(bool confirmed)
+{
+    // The shell sets this only for the exact `iommu isolated` token. Consume
+    // it synchronously in the following diagnostic call.
+    s_phase27EnvironmentConfirmation = confirmed;
+}
+
 bool run_i219_iommu_tx_observation()
 {
+    const bool isolatedNetworkConfirmed = s_phase27EnvironmentConfirmation;
+    s_phase27EnvironmentConfirmation = false;
     I219IommuDiagnostics& diagnostics = s_device.iommu;
     diagnostics = {};
     diagnostics.freshStateRequired = true;
     diagnostics.noRetry = true;
+    diagnostics.probeConsumed = s_phase27TxProbeConsumed;
+    diagnostics.environmentConfirmed = isolatedNetworkConfirmed;
     diagnostics.classification = vtd::Classification::Unavailable;
-    diagnostics.failure = "TX_IOMMU_DIAGNOSTIC_UNAVAILABLE";
     diagnostics.iommuUnavailableReason = "VT-d discovery has not run";
+    diagnostics.failure = "TX diagnostic preflight has not run";
+    diagnostics.outcome = i219_phase27_outcome_name(
+        I219Phase27Outcome::PrerequisiteNotMet);
 
-    if (!s_initialised || !s_device.active ||
-        !is_i219_device(s_device.deviceId) || !s_device.mmioMapped ||
-        s_device.mmioBase == 0u) {
-        diagnostics.failure = "I219 device is not active and ready";
+    I219Phase27GateState gates = {};
+    gates.notAlreadyAttempted = !s_phase27TxProbeConsumed;
+    // Environmental confirmation is checked after all inspectable software
+    // gates so the bare command can report a completed, read-only preflight.
+    gates.isolatedNetworkConfirmed = true;
+
+    gates.deviceIdentity = s_device.vendorId == PCI_VENDOR_INTEL &&
+                           s_device.deviceId == PCI_DEVICE_I219_LM;
+    gates.familyPath = device_family_for(s_device.vendorId, s_device.deviceId) ==
+                       DeviceFamily::I219Pch;
+    if (!s_initialised || !s_device.active || !s_device.mmioMapped ||
+        s_device.mmioBase == 0u || !gates.deviceIdentity ||
+        !gates.familyPath) {
+        diagnostics.failure = i219_phase27_gate_failure(gates);
+        if (!diagnostics.failure) {
+            diagnostics.failure = "I219 MMIO device is not active";
+        }
         return false;
+    }
+
+    // Capture the untouched queue state before descriptor or payload writes.
+    diagnostics.txBefore = read_tx_registers();
+    diagnostics.freshStateValid = diagnostics.txBefore.valid;
+    diagnostics.txAttemptsBefore = s_device.stats.txAttempted;
+    diagnostics.txSubmissionsBefore = s_device.stats.txFramesSubmitted;
+    diagnostics.txCompletionsBefore = s_device.stats.txFrames;
+    diagnostics.txErrorsBefore = s_device.stats.txErrors;
+    if (s_txDescs && s_txCur < NUM_TX_DESC) {
+        capture_tx_descriptor_raw(
+            s_txDescs[s_txCur], &diagnostics.descriptorRaw0Before,
+            &diagnostics.descriptorRaw1Before);
     }
 
     const vtd::PciBdf target = { 0u, s_device.pciBus, s_device.pciSlot,
@@ -4213,66 +4254,189 @@ bool run_i219_iommu_tx_observation()
     diagnostics.iommuApplicable = audit && audit->dmarTablePresent &&
         audit->matchingDrhdFound;
     if (audit) diagnostics.classification = audit->classification;
-    if (!diagnostics.dmarPresent) {
-        diagnostics.iommuUnavailableReason = audit && audit->failure
-            ? audit->failure : "ACPI DMAR table presence is unknown";
+    if (!diagnostics.dmarPresent && diagnostics.dmarStatusKnown && audit &&
+        audit->classification == vtd::Classification::NoDmar) {
+        diagnostics.iommuUnavailableReason = audit->failure
+            ? audit->failure : "ACPI DMAR table is not present";
+        gates.iommuMappingKnown = true;
     } else if (!diagnostics.iommuApplicable) {
         diagnostics.iommuUnavailableReason = audit && audit->failure
-            ? audit->failure : "no DRHD covers the I219 PCI segment/BDF";
+            ? audit->failure : "matching DRHD coverage is unknown";
+        gates.iommuMappingKnown = false;
     } else if (!vtdDiscovered || !audit->registersReadable) {
         diagnostics.iommuUnavailableReason = audit && audit->failure
             ? audit->failure : "matching VT-d DRHD registers are unreadable";
+        gates.iommuMappingKnown = false;
     } else {
         diagnostics.iommuUnavailableReason = "none";
         diagnostics.beforeVtd = audit->registers;
         diagnostics.beforeValid = diagnostics.beforeVtd.valid;
         diagnostics.translationEnabledBefore =
             diagnostics.beforeVtd.translationEnabled;
+        // Active translation is refused because this kernel cannot inspect
+        // the I219 context entry or establish an identity IOVA mapping.
+        gates.iommuMappingKnown = diagnostics.beforeValid &&
+            !diagnostics.translationEnabledBefore;
+        if (!diagnostics.beforeValid) {
+            diagnostics.iommuUnavailableReason =
+                "matching VT-d preflight snapshot is invalid";
+        } else if (diagnostics.translationEnabledBefore) {
+            diagnostics.iommuUnavailableReason =
+                "translation is active and the I219 context mapping is unknown";
+        }
     }
 
-    if (!tx_dma_experiment_active(s_txDmaMode) ||
-        !s_txDmaRegionHandoffValid || !s_device.txRingInitialized ||
-        !s_device.resetDiagnostics.resetCompleted ||
-        !s_device.resetDiagnostics.rearmCompleted) {
+    gates.driverReady = is_driver_ready(s_device);
+    gates.initializationPassed = hardware_init_complete(s_device) &&
+        s_device.initStage == NIC_INIT_READY &&
+        s_device.resetDiagnostics.resetCompleted &&
+        s_device.resetDiagnostics.rearmCompleted;
+    gates.linkUp = diagnostics.txBefore.valid &&
+        s_device.link == NIC_LINK_UP &&
+        (diagnostics.txBefore.status & E1000_STATUS_LU) != 0u;
+
+    const uint32_t requiredDmaFlags = TX_DMA_REGION_FLAG_VALID |
+        TX_DMA_REGION_FLAG_OWNED | TX_DMA_REGION_FLAG_CONTIGUOUS |
+        TX_DMA_REGION_FLAG_IDENTITY | TX_DMA_REGION_FLAG_BELOW_4G |
+        TX_DMA_REGION_FLAG_CACHEABLE;
+    gates.dmaRegionValid = tx_dma_experiment_active(s_txDmaMode) &&
+        s_txDmaRegionHandoffValid &&
+        s_txDmaRegionSize == TX_DMA_REGION_SIZE &&
+        s_txDmaRegionMemoryType == TX_DMA_EFI_LOADER_DATA_TYPE &&
+        (s_txDmaRegionFlags & requiredDmaFlags) == requiredDmaFlags &&
+        (s_txDmaRegionPhysicalBase % TX_DMA_REGION_PAGE_SIZE) == 0u &&
+        s_txDmaRegionPhysicalBase < TX_DMA_REGION_MAX_EXCLUSIVE &&
+        TX_DMA_REGION_SIZE <= TX_DMA_REGION_MAX_EXCLUSIVE -
+            s_txDmaRegionPhysicalBase &&
+        s_device.tx.dmaRegionGeometryValid &&
+        s_device.tx.dmaRegionOwnershipValid &&
+        s_device.tx.dmaRegionMappingValid &&
+        s_device.tx.dmaRegionContiguous && s_device.tx.dmaRegionCacheable &&
+        s_device.tx.dmaRegionBelow4G;
+
+    uint64_t ringPhysical = 0u;
+    uint64_t bufferPhysical = 0u;
+    uint64_t descriptorPhysical = 0u;
+    uint64_t expectedDescriptorPhysical = 0u;
+    TxFailureReason dmaFailure = TxFailureReason::None;
+    const bool layoutValid = validate_tx_dma_layout(&dmaFailure);
+    const bool ringAddressValid = s_txDescs && dma_address_range(
+        s_txDescs, tx_ring_length_bytes(NUM_TX_DESC), 0u, &ringPhysical);
+    const bool bufferAddressValid = s_txBuffer && dma_address_range(
+        s_txBuffer, ETH_FRAME_MAX, 16u, &bufferPhysical);
+    const bool descriptorAddressValid = ringAddressValid && s_txDescs &&
+        s_txCur < NUM_TX_DESC &&
+        dma_address_range(&s_txDescs[s_txCur], sizeof(TxDescriptor), 0u,
+                          &descriptorPhysical) &&
+        tx_descriptor_physical_address(ringPhysical, s_txCur,
+                                       &expectedDescriptorPhysical) &&
+        descriptorPhysical == expectedDescriptorPhysical;
+    diagnostics.descriptorVirtualAddressBefore = s_txDescs &&
+        s_txCur < NUM_TX_DESC
+        ? reinterpret_cast<uint64_t>(&s_txDescs[s_txCur]) : 0u;
+    diagnostics.descriptorDmaAddressBefore = descriptorPhysical;
+    diagnostics.descriptorDmaAddressValidBefore = gates.dmaRegionValid &&
+        ringAddressValid && descriptorAddressValid &&
+        ringPhysical == s_device.tx.descriptorRingAddress &&
+        ringPhysical == s_txDmaRegionPhysicalBase;
+    diagnostics.bufferVirtualAddressBefore = s_txBuffer
+        ? reinterpret_cast<uint64_t>(s_txBuffer) : 0u;
+    diagnostics.bufferDmaAddressBefore = bufferPhysical;
+    diagnostics.bufferDmaAddressValidBefore = gates.dmaRegionValid &&
+        bufferAddressValid &&
+        bufferPhysical == s_txDmaRegionPhysicalBase +
+            TX_DMA_REGION_BUFFER_OFFSET &&
+        dma_range_contains(s_txDmaRegionPhysicalBase, s_txDmaRegionSize,
+                           bufferPhysical, ETH_FRAME_MAX);
+    gates.dmaRingValid = gates.dmaRegionValid && layoutValid &&
+        ringAddressValid && diagnostics.descriptorDmaAddressValidBefore &&
+        s_device.tx.dmaTranslationValid &&
+        s_device.tx.ringAlignmentValid && s_device.tx.ringLengthValid &&
+        ringPhysical == s_device.tx.descriptorRingAddress &&
+        ringPhysical == s_txDmaRegionPhysicalBase &&
+        tx_ring_configuration_valid(NUM_TX_DESC, ringPhysical);
+    gates.dmaBufferValid = gates.dmaRegionValid &&
+        diagnostics.bufferDmaAddressValidBefore;
+    diagnostics.dmaMappingValid = gates.dmaRegionValid &&
+        gates.dmaRingValid && gates.dmaBufferValid;
+
+    const TxRegisterSnapshot& before = diagnostics.txBefore;
+    gates.txEngineReady = before.valid &&
+        pci_dma_access_enabled(before.pciCommand) &&
+        tx_ring_registers_match(before, s_device.tx.descriptorRingAddress,
+                                tx_ring_length_bytes(NUM_TX_DESC)) &&
+        tx_engine_enabled(before.tctl) &&
+        i219_spt_txdctl_configuration_valid(before.txdctl) &&
+        i219_spt_txdctl_configuration_valid(before.txdctl1) &&
+        before.tipg == E1000_TIPG_DEFAULT;
+    gates.ringIdle = before.valid && s_txCur < NUM_TX_DESC &&
+        (before.tdh & 0xFFFFu) == s_txCur &&
+        (before.tdt & 0xFFFFu) == s_txCur;
+    const uint8_t descriptorStatusBefore = s_txDescs && s_txCur < NUM_TX_DESC
+        ? s_txDescs[s_txCur].status : 0xFFu;
+    gates.descriptorAvailable = descriptorStatusBefore != 0xFFu &&
+        (descriptorStatusBefore & E1000_TXD_STAT_DD) != 0u;
+    gates.noCompetingTx = s_device.stats.txAttempted == 0u &&
+        s_device.stats.txFramesSubmitted == 0u &&
+        s_device.stats.txFrames == 0u &&
+        s_device.tx.descriptorSubmissions == 0u &&
+        s_device.tx.descriptorPublications == 0u;
+    gates.notRecovering = !s_txPoisoned && !s_device.tx.ringPoisoned &&
+        !s_device.resetDiagnostics.resetTimedOut &&
+        !s_device.resetDiagnostics.strongerRecoveryRequired;
+    diagnostics.ringIdle = gates.ringIdle;
+    diagnostics.hardwareReady = gates.driverReady &&
+        gates.initializationPassed && gates.txEngineReady;
+    diagnostics.competingTxAbsent = gates.noCompetingTx;
+
+    const char* gateFailure = i219_phase27_gate_failure(gates);
+    if (gateFailure) {
+        diagnostics.failure = gateFailure;
+        diagnostics.outcome = i219_phase27_outcome_name(
+            I219Phase27Outcome::PrerequisiteNotMet);
+        return false;
+    }
+    diagnostics.preflightPassed = true;
+
+    // Bare `nicinfo tx iommu` is a read-only preflight. A separately typed
+    // confirmation is required before any payload or descriptor is changed.
+    if (!isolatedNetworkConfirmed) {
         diagnostics.failure =
-            "Phase 20 reset/rearm and constrained-low TX prerequisites are incomplete";
-        if (audit) diagnostics.classification = audit->classification;
-        return false;
-    }
-    if (s_txPoisoned || s_device.tx.ringPoisoned) {
-        diagnostics.failure = "TX ring is already poisoned; no retry permitted";
-        if (audit) diagnostics.classification = audit->classification;
+            "operator must confirm isolated test network with iommu isolated";
         return false;
     }
 
-    diagnostics.freshStateValid = true;
-    diagnostics.txBefore = read_tx_registers();
-    if (s_txDescs && s_txCur < NUM_TX_DESC) {
-        capture_tx_descriptor_raw(
-            s_txDescs[s_txCur], &diagnostics.descriptorRaw0Before,
-            &diagnostics.descriptorRaw1Before);
-    }
-
-    // This is intentionally the one existing normal raw-TX boundary. The
-    // experiment never calls it again after a timeout or any other failure.
+    // Latch before entering the established submit path so even a late
+    // validation failure cannot be retried on the same boot.
+    s_phase27TxProbeConsumed = true;
+    diagnostics.probeConsumed = true;
     diagnostics.singleAttempt = true;
+    diagnostics.attempted = true;
+    const uint32_t submissionsBefore = s_device.tx.descriptorSubmissions;
+    const uint32_t timeoutsBefore = s_device.tx.hardwareTimeouts;
     const Status result = send_raw_diagnostic_frame(TxRawPath::Normal);
     diagnostics.attempted = true;
     diagnostics.result = result;
+    diagnostics.submitted = s_device.tx.descriptorPublications != 0u &&
+        s_device.tx.publishBarrierBeforeTdt;
     diagnostics.poisonPreserved = result != NIC_OK
         ? s_txPoisoned && s_device.tx.ringPoisoned
         : !s_txPoisoned;
+    if (diagnostics.submitted && s_device.tx.lastDescriptor < NUM_TX_DESC) {
+        dma_completion_barrier();
+        s_device.tx.lastDescriptorStatus =
+            s_txDescs[s_device.tx.lastDescriptor].status;
+        capture_tx_descriptor_raw(
+            s_txDescs[s_device.tx.lastDescriptor],
+            &s_device.tx.lastDescriptorRaw0Final,
+            &s_device.tx.lastDescriptorRaw1Final);
+    }
     diagnostics.txAfter = read_tx_registers();
     diagnostics.afterValid = diagnostics.iommuApplicable &&
         vtd::capture_registers(&diagnostics.afterVtd);
     if (diagnostics.iommuApplicable && !diagnostics.afterValid) {
-        diagnostics.iommuUnavailableReason = diagnostics.attempted
-            ? "post-attempt VT-d register capture is unavailable"
-            : "TX attempt did not reach the post-attempt VT-d capture";
-    } else if (diagnostics.iommuApplicable &&
-               !diagnostics.beforeValid && diagnostics.afterValid) {
         diagnostics.iommuUnavailableReason =
-            "pre-attempt VT-d register snapshot is unavailable";
+            "post-attempt VT-d register capture is unavailable";
     }
     if (diagnostics.afterValid) {
         diagnostics.translationEnabledAfter =
@@ -4294,23 +4458,19 @@ bool run_i219_iommu_tx_observation()
              (!diagnostics.beforeVtd.primaryFaultPending &&
               diagnostics.afterVtd.primaryFaultPending));
         diagnostics.newFault = faultChanged;
-        diagnostics.ringAddressFault =
-            vtd::classify_fault_address(
-                diagnostics.afterVtd.faultAddress,
-                s_device.tx.descriptorRingAddress,
-                tx_ring_length_bytes(NUM_TX_DESC),
-                s_device.tx.lastBufferAddress,
-                s_device.tx.raw.frameLength != 0u
-                    ? s_device.tx.raw.frameLength : TX_RAW_FRAME_LENGTH)
+        diagnostics.ringAddressFault = vtd::classify_fault_address(
+            diagnostics.afterVtd.faultAddress,
+            s_device.tx.descriptorRingAddress,
+            tx_ring_length_bytes(NUM_TX_DESC), s_device.tx.lastBufferAddress,
+            s_device.tx.raw.frameLength != 0u
+                ? s_device.tx.raw.frameLength : TX_RAW_FRAME_LENGTH)
             == vtd::FaultAddressClass::Ring;
-        diagnostics.bufferAddressFault =
-            vtd::classify_fault_address(
-                diagnostics.afterVtd.faultAddress,
-                s_device.tx.descriptorRingAddress,
-                tx_ring_length_bytes(NUM_TX_DESC),
-                s_device.tx.lastBufferAddress,
-                s_device.tx.raw.frameLength != 0u
-                    ? s_device.tx.raw.frameLength : TX_RAW_FRAME_LENGTH)
+        diagnostics.bufferAddressFault = vtd::classify_fault_address(
+            diagnostics.afterVtd.faultAddress,
+            s_device.tx.descriptorRingAddress,
+            tx_ring_length_bytes(NUM_TX_DESC), s_device.tx.lastBufferAddress,
+            s_device.tx.raw.frameLength != 0u
+                ? s_device.tx.raw.frameLength : TX_RAW_FRAME_LENGTH)
             == vtd::FaultAddressClass::Buffer;
     }
 
@@ -4318,6 +4478,12 @@ bool run_i219_iommu_tx_observation()
     diagnostics.descriptorRaw1After = s_device.tx.raw.descriptorRaw1AfterTdt;
     diagnostics.descriptorRaw0Final = s_device.tx.raw.descriptorRaw0Final;
     diagnostics.descriptorRaw1Final = s_device.tx.raw.descriptorRaw1Final;
+    diagnostics.timedOut =
+        s_device.tx.hardwareTimeouts > timeoutsBefore;
+    diagnostics.descriptorRetired = result == NIC_OK &&
+        (s_device.tx.lastDescriptorStatus & E1000_TXD_STAT_DD) != 0u &&
+        s_device.tx.descriptorCompletions > 0u && !s_txPoisoned &&
+        !s_device.tx.ringPoisoned;
 
     if (diagnostics.newFault && diagnostics.sourceIdMatches &&
         diagnostics.ringAddressFault) {
@@ -4343,6 +4509,26 @@ bool run_i219_iommu_tx_observation()
     } else {
         diagnostics.classification = vtd::Classification::Unavailable;
     }
+
+    I219Phase27Evidence evidence = {};
+    evidence.submitted = diagnostics.submitted;
+    evidence.headBeforeValid = diagnostics.txBefore.valid;
+    evidence.headAfterValid = diagnostics.txAfter.valid;
+    evidence.headBefore = static_cast<uint16_t>(
+        diagnostics.txBefore.tdh & 0xFFFFu);
+    evidence.headAfter = static_cast<uint16_t>(
+        diagnostics.txAfter.tdh & 0xFFFFu);
+    evidence.descriptorStatusValid = diagnostics.submitted &&
+        s_device.tx.lastDescriptorStatus != 0xFFu;
+    evidence.descriptorStatus = s_device.tx.lastDescriptorStatus;
+    evidence.descriptorChanged =
+        diagnostics.descriptorRaw0Final != s_device.tx.lastDescriptorRaw0PreTdt ||
+        diagnostics.descriptorRaw1Final != s_device.tx.lastDescriptorRaw1PreTdt;
+    evidence.softwareRetired = diagnostics.descriptorRetired &&
+        s_device.tx.descriptorSubmissions > submissionsBefore;
+    evidence.timedOut = diagnostics.timedOut;
+    diagnostics.outcome = i219_phase27_outcome_name(
+        i219_phase27_classify(evidence));
     diagnostics.failure = result == NIC_OK
         ? "none" : tx_failure_reason_name(s_device.tx.failureReason);
     return true;

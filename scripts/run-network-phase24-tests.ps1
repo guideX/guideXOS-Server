@@ -62,8 +62,10 @@ Require $shell 'buffer-pre-TDT-first32=' 'pre-TDT packet bytes are missing'
 Require $shell 'immediate-readback=' 'immediate TDT readback is missing'
 Require $shell 'final-TX' 'post-poll TX register snapshot is missing'
 Require $shell 'descriptor-final-DD=' 'final descriptor DD state is missing'
-Require $shell 'A_TDBA_MISMATCH|B_TDT_PUBLISHED_TDH_STATIONARY_DD_CLEAR|C_DESCRIPTOR_DD_SET|D_DESCRIPTOR_CHANGED_HEAD_STATIONARY' `
-    'the report does not distinguish the required TX outcomes'
+Require $header 'A_NO_DEMONSTRATED_CONSUMPTION|B_PROGRESS_NO_COMPLETION|C_COMPLETION_NOT_RETIRED|D_DESCRIPTOR_COMPLETION_SUCCESS|PREREQUISITE_NOT_MET|INCONCLUSIVE' `
+    'the report does not distinguish the Phase 27 TX outcomes'
+Require $shell 'diagnostic\.outcome' `
+    'the Phase 27 classification is not included in the report'
 Require $shell 'unavailable \(no readable matching VT-d unit\)' `
     'invalid VT-d snapshots could print zero placeholders as evidence'
 

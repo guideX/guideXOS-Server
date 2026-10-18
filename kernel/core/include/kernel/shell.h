@@ -47,8 +47,8 @@ static const uint32_t NICINFO_DMA_MAX_LINES = 32;
 static const uint32_t NICINFO_DMA_EXPECTED_LINES = 24;
 static const uint32_t NICINFO_DMA_BRIEF_MAX_LINES = 20;
 static const uint32_t NICINFO_DMA_BRIEF_EXPECTED_LINES = 12;
-static const uint32_t NICINFO_TX_IOMMU_MAX_LINES = 64;
-static const uint32_t NICINFO_TX_IOMMU_EXPECTED_LINES = 47;
+static const uint32_t NICINFO_TX_IOMMU_MAX_LINES = 80;
+static const uint32_t NICINFO_TX_IOMMU_EXPECTED_LINES = 56;
 static const uint32_t NICINFO_TX_PHASE25_MAX_LINES = 80;
 static const uint32_t NICINFO_TX_PHASE25_EXPECTED_LINES = 54;
 static const uint32_t NICINFO_LANINIT_MAX_LINES = 12;
@@ -94,6 +94,7 @@ enum NicInfoMode : uint8_t {
     NICINFO_MODE_DMA,
     NICINFO_MODE_DMA_BRIEF,
     NICINFO_MODE_TX_IOMMU,
+    NICINFO_MODE_TX_IOMMU_ISOLATED,
     NICINFO_MODE_TX_PHASE25,
     NICINFO_MODE_LANINIT,
     NICINFO_MODE_INVALID,
@@ -171,8 +172,9 @@ inline NicInfoMode nicinfo_mode_from_args(const char* arg1,
         return NICINFO_MODE_INVALID;
     }
     if (nicinfo_token_equals(arg2, "iommu")) {
-        return (!arg3 || *arg3 == '\0')
-            ? NICINFO_MODE_TX_IOMMU : NICINFO_MODE_INVALID;
+        if (!arg3 || *arg3 == '\0') return NICINFO_MODE_TX_IOMMU;
+        return nicinfo_token_equals(arg3, "isolated")
+            ? NICINFO_MODE_TX_IOMMU_ISOLATED : NICINFO_MODE_INVALID;
     }
     if (nicinfo_token_equals(arg2, "phase25")) {
         return (!arg3 || *arg3 == '\0')
