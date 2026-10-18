@@ -229,5 +229,38 @@ Do not begin Phase 28 automatically.
 
 ## Artifact addendum
 
-To be completed after the Phase 27 source commit is packaged and the image
-passes structural and QEMU readiness checks.
+The Phase 27 implementation source commit is
+`0d2dfb15be27eb8a31179dbe927787f3e289bd5d` on
+`NAVIGATOR_GENERAL_IMPROVEMENTS`.
+
+- ISO: `D:\dev\guideXOSServer_NAVIGATOR_IMPROVEMENTS\dist\guideXOS-Server-v0.1.0-navgen-phase27-i219-tx-consumption-amd64.iso`
+- Size: `91,293,696` bytes.
+- SHA-256: `c8efccec1fd471a1a4f799bdd728f04a8c1720d28c74ff60ed4bc1b08e860a87`.
+- Checksum sidecar: `dist/guideXOS-Server-v0.1.0-navgen-phase27-i219-tx-consumption-amd64.iso.sha256`; its digest matches the ISO.
+- Manifest: `dist/guideXOS-Server-v0.1.0-navgen-phase27-i219-tx-consumption-amd64.manifest.json`; `sourceGitCommit` is the implementation commit above.
+- Build: AMD64 UEFI, Phase 5 stage 8, Phase 6 stage 0, Phase 7 stage 4 (`register`), constrained-low I219 TX DMA placement enabled, LAN_INIT diagnostics enabled, PacMan package rebuild skipped/reused, PyCdlib backend.
+- Packaged kernel SHA-256: `d99e73466c081ad474b17dbc826791ff0d6fe8b0010ff849273b4afaaf3e1d48`.
+- Packaged `BOOTX64.EFI` SHA-256: `5104d62c2a7616545729553f9a62e5f56767aafddd2877348b2e49953094a07d`.
+
+The release verifier passed. It recorded a bootable UEFI El Torito image with
+platform ID `0xEF`, no-emulation media, a `91,226,112`-byte EFI boot image, and
+the expected ISO size. The isolated QEMU readiness test booted this exact ISO
+using QEMU's generic `e1000` device. Its serial log contained the firmware DVD
+boot entry, guideXOS UEFI bootloader, kernel load, 64 MiB ramdisk load, desktop
+event loop ready marker, and kernel main-loop marker. QEMU was stopped after
+the required bounded readiness grace period. This is boot/package evidence;
+the generic virtual NIC does not emulate or qualify the physical I219-LM.
+
+At packaging start, the release manifest reported a dirty worktree containing
+only `M ESP/build-identity.txt`. The canonical build had regenerated this
+tracked file with the Phase 27 build flags, unique build ID, timestamp, and
+UEFI/kernel hashes; the file was restored to its original committed content
+after packaging. The manifest records the exact generated identity file hash
+inside the ISO and the clean implementation source commit. No implementation
+source was uncommitted at packaging time.
+
+No AIDA_LPT physical transmission was performed. There is no descriptor
+consumption, DD completion, external frame capture, or peer-receipt evidence;
+the audit's phase tracker remains `last_completed=PHASE26` and
+`next_expected=PHASE27` until the physical procedure above is run and evidence
+is supplied.
