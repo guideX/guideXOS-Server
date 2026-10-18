@@ -1,0 +1,23 @@
+{
+  "capturedAtUtc": "2026-10-18T23:01:35.364829+00:00",
+  "image": "D:\\dev\\guideXOSServer\\docs\\evidence\\settings-s22-v03-package-20261018\\guest\\writable\\ESP-validation.img",
+  "imageBytes": 91226112,
+  "imageSha256": "950537cb16f8589535a96fbf9bdb0df7e3b5a3753259d66a2144938da99984ea",
+  "fatOffsetBytes": 0,
+  "rootEntries": [
+    "Apps",
+    "EFI",
+    "build-identity.txt",
+    "desktop.cfg",
+    "kernel.elf",
+    "ramdisk.img",
+    "startup.nsh"
+  ],
+  "desktopCfg": {
+    "path": "/desktop.cfg",
+    "bytes": 257,
+    "sha256": "95b274e39e9dde431286f4eb00fd2175888430744e60ffdec3ba49375ba52947",
+    "snapshot": "desktop.cfg.before",
+    "text": "version=1\r\nwallpaperId=\r\nbackgroundScaleMode=fill\r\ndesktopThemeId=classic\r\ntaskbarPosition=bottom\r\nshowDesktopTrash=1\r\nshowDesktopThisSystem=1\r\nshowDesktopFileManager=1\r\nshowDesktopSystemSettings=0\r\nsmallLiveDesktopFolderIcons=1\r\nautoArrangeDesktopIcons=0\r\n"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "capturedAtUtc": "2026-10-18T23:17:05.156781+00:00",
+  "bytes": 257,
+  "sha256": "95b274e39e9dde431286f4eb00fd2175888430744e60ffdec3ba49375ba52947",
+  "beforeSha256": "95b274e39e9dde431286f4eb00fd2175888430744e60ffdec3ba49375ba52947",
+  "sameAsBefore": true,
+  "text": "version=1\r\nwallpaperId=\r\nbackgroundScaleMode=fill\r\ndesktopThemeId=classic\r\ntaskbarPosition=bottom\r\nshowDesktopTrash=1\r\nshowDesktopThisSystem=1\r\nshowDesktopFileManager=1\r\nshowDesktopSystemSettings=0\r\nsmallLiveDesktopFolderIcons=1\r\nautoArrangeDesktopIcons=0\r\n"
+}

@@ -1,0 +1,3 @@
+command=powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/create-release-iso.ps1 -Version 0.3.0-s22.20261018 -Arch amd64 -PythonPath D:\dev\guideXOSServer\out\release-tools\venv\Scripts\python.exe -RequireCleanWorktree
+source=eac07e130f439b91d328558f286fa51266b9c7a0
+exit_code=0

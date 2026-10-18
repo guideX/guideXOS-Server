@@ -1,0 +1,52 @@
+Kernel artifact audit
+kernel.elf bytes=2771240
+kernel.elf sha256=F5AA964DA871DEAD7259D766DBAA4F67BE5485AF9DF3AFCD7812FE559ECA9AEF
+kernel.pe bytes=2888634
+kernel.pe sha256=F9D7D13E177D9BC728E2529148D9F5E1AB19195E69CB73F153547285EEC113B3
+kernel.pe is a build output and is not packaged; ISO consumes kernel.elf.
+ELF header:
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x100000
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          2770152 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         2
+  Size of section headers:           64 (bytes)
+  Number of section headers:         17
+  Section header string table index: 16
+Relocation table:
+
+There are no relocations in this file.
+nm -u distinct undefined names (21):
+U __dso_handle
+U _ZN4gxos16network_settings17validateCandidateERKNS0_29NetworkConfigurationCandidateE
+U _ZN4gxos18settings_inventory20validStorageSnapshotERKNS0_15StorageSnapshotE
+U _ZN6kernel3app9KernelApp11onMouseDownEiih
+U _ZN6kernel3app9KernelApp11onMouseMoveEii
+U _ZN6kernel3app9KernelApp12onMouseWheelEiii
+U _ZN6kernel3app9KernelApp13initWithParamEPKc
+U _ZN6kernel3app9KernelApp13onWidgetClickEi
+U _ZN6kernel3app9KernelApp13onWindowCloseEv
+U _ZN6kernel3app9KernelApp26onDesktopAppearanceChangedEy
+U _ZN6kernel3app9KernelApp29onDisplayConfigurationChangedEj
+U _ZN6kernel3app9KernelApp6updateEv
+U _ZN6kernel3app9KernelApp7onKeyUpEj
+U _ZN6kernel3app9KernelApp9onKeyCharEc
+U _ZN6kernel3app9KernelApp9onKeyDownEj
+U _ZN6kernel3app9KernelApp9onMouseUpEiih
+U _ZN6kernel6serial4putcEc
+U _ZN6kernel6serial4putsEPKc
+U _ZN6kernel6serial8put_hex8Eh
+U _ZN6kernel6serial9put_hex32Ej
+U mainCRTStartup

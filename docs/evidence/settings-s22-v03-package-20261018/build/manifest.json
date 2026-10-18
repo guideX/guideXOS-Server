@@ -1,0 +1,181 @@
+{
+    "schemaVersion":  1,
+    "product":  "guideXOS Server",
+    "version":  "0.3.0-s22.20261018",
+    "architecture":  "amd64",
+    "artifactType":  "bootable-uefi-iso",
+    "isoBackend":  "PyCdlib",
+    "isoFilename":  "guideXOS-Server-v0.3.0-s22.20261018-amd64.iso",
+    "isoByteSize":  91293696,
+    "sha256":  "b303c4c1a1cd31e500353cbd2dd7e11a8fd438b81ac9306285a6cd20ea1b1a3f",
+    "sourceGitCommit":  "eac07e130f439b91d328558f286fa51266b9c7a0",
+    "sourceGitBranch":  "main",
+    "worktreeCleanAtPackagingStart":  true,
+    "worktreeStatusAtPackagingStart":  [
+
+                                       ],
+    "buildTimestampUtc":  "2026-10-18T22:42:06.4930675Z",
+    "requiredInputFiles":  [
+                               {
+                                   "path":  "ESP/EFI/BOOT/BOOTX64.EFI",
+                                   "size":  56832,
+                                   "sha256":  "041dd60ed036528bb392e6539fd1843f4a6f6ffe0283d4dcc939d2ee04a1e2cd"
+                               },
+                               {
+                                   "path":  "ESP/kernel.elf",
+                                   "size":  2771240,
+                                   "sha256":  "f5aa964da871dead7259d766dbaa4f67be5485af9df3afcd7812fe559eca9aef"
+                               },
+                               {
+                                   "path":  "ESP/ramdisk.img",
+                                   "size":  67108864,
+                                   "sha256":  "1603ed0e7606476e21e3e05038f937beae311a95c93933257e99b610f0af92b3"
+                               }
+                           ],
+    "inputFiles":  [
+                       {
+                           "path":  "ESP/Apps/DeveloperStudio/app.json",
+                           "size":  1176,
+                           "sha256":  "7af95d35f068c44f4529420922e0f4bec5f705568514688d160e2790022acb09"
+                       },
+                       {
+                           "path":  "ESP/Apps/DeveloperStudio/bin/amd64/developerstudio.elf",
+                           "size":  1015064,
+                           "sha256":  "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/app.json",
+                           "size":  956,
+                           "sha256":  "3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/bin/amd64/pacman.elf",
+                           "size":  63640,
+                           "sha256":  "eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/audio/EatPill.wav",
+                           "size":  7156,
+                           "sha256":  "510a52e5776573197aef14d77e393185b6c7148d1b59dac535d45c5ca0498686"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/audio/extralife.wav",
+                           "size":  21248,
+                           "sha256":  "767db1552130e676398c121ec605f90f20c89bbbab272305bc781adc8e91d1cd"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/audio/fruiteat.wav",
+                           "size":  5120,
+                           "sha256":  "82c96a997ac2e837de4e418f29f4f4fa6142dd2a0c38f764b6d989d8bd98605d"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/audio/ghosteat.wav",
+                           "size":  9090,
+                           "sha256":  "225168072b38671c89c1fc775d513ca86fbb899e3e82c8032445f6a6dc5e1b95"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/audio/killed.wav",
+                           "size":  17008,
+                           "sha256":  "1c3e91df8e19041ea5783185c5a8a9f2321993b43481c215d8caf3df590290de"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/audio/StartMusic.wav",
+                           "size":  68318,
+                           "sha256":  "062cdc7196c54033f8bf11878d6659fd5b0ba11cd6945640ec8fac4376919421"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/audio/startmusicold.wav",
+                           "size":  46592,
+                           "sha256":  "a6e1c14f6cbc59cb5244c0119c728d412252370eea48bc574c1307a774c83caf"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/level1.gximg",
+                           "size":  888860,
+                           "sha256":  "535b37e66d7159078df8a16ce059a6f7ab038588cc9875e152033d046ff47fe1"
+                       },
+                       {
+                           "path":  "ESP/Apps/PacMan/resources/pacpics.gximg",
+                           "size":  360476,
+                           "sha256":  "57a605df8f24ac9641ff6c9d39df551a17ffbcd68466a561adf5f045de259d50"
+                       },
+                       {
+                           "path":  "ESP/build-identity.txt",
+                           "size":  942,
+                           "sha256":  "61f5d5c95f932fdf7099a0c53464c411c0d9cd2fd0675fdd1ba83f514448ca70"
+                       },
+                       {
+                           "path":  "ESP/desktop.cfg",
+                           "size":  257,
+                           "sha256":  "95b274e39e9dde431286f4eb00fd2175888430744e60ffdec3ba49375ba52947"
+                       },
+                       {
+                           "path":  "ESP/EFI/BOOT/BOOTX64.EFI",
+                           "size":  56832,
+                           "sha256":  "041dd60ed036528bb392e6539fd1843f4a6f6ffe0283d4dcc939d2ee04a1e2cd"
+                       },
+                       {
+                           "path":  "ESP/kernel.elf",
+                           "size":  2771240,
+                           "sha256":  "f5aa964da871dead7259d766dbaa4f67be5485af9df3afcd7812fe559eca9aef"
+                       },
+                       {
+                           "path":  "ESP/ramdisk.img",
+                           "size":  67108864,
+                           "sha256":  "1603ed0e7606476e21e3e05038f937beae311a95c93933257e99b610f0af92b3"
+                       },
+                       {
+                           "path":  "ESP/startup.nsh",
+                           "size":  27,
+                           "sha256":  "770ee22afb0dda892f78cc06a3d2879a146adcd7160ba833ea7cab0a2f2bf47d"
+                       }
+                   ],
+    "efiImage":  {
+                     "filename":  "EFI-BOOT.IMG",
+                     "isoPath":  "UEFI_BOOT.IMG",
+                     "byteSize":  91226112,
+                     "sha256":  "950537cb16f8589535a96fbf9bdb0df7e3b5a3753259d66a2144938da99984ea",
+                     "calculatedCapacityBytes":  91226112,
+                     "calculatedPayloadBytes":  72442866,
+                     "safetyReserveBytes":  18114813,
+                     "fatType":  "FAT32"
+                 },
+    "isoVerification":  {
+                            "format":  "guideXOS-iso-verification",
+                            "isoBytes":  91293696,
+                            "primaryVolumeDescriptorLba":  16,
+                            "bootRecordLba":  17,
+                            "bootCatalogLba":  31,
+                            "uefiPlatformId":  "0xEF",
+                            "bootable":  true,
+                            "mediaType":  "no-emulation",
+                            "bootImageLba":  32,
+                            "bootImageDataEndLba":  44576,
+                            "bootImageSectorCount512":  0,
+                            "bootImagePath":  "UEFI_BOOT.IMG",
+                            "bootImageBytes":  91226112,
+                            "bootImageSha256":  "950537cb16f8589535a96fbf9bdb0df7e3b5a3753259d66a2144938da99984ea",
+                            "files":  [
+                                          {
+                                              "path":  "README.TXT",
+                                              "size":  272,
+                                              "sha256":  "5faa20b732052062a8cde0fc448c15763c84d3c2563606149de2b585051023a9",
+                                              "lba":  44576
+                                          }
+                                      ]
+                        },
+    "tools":  {
+                  "git":  "git version 2.54.0.windows.1",
+                  "powershell":  "5.1.26100.9711",
+                  "python":  "Python 3.12.14",
+                  "pyfatfs":  "1.1.0",
+                  "fs":  "2.4.16",
+                  "pycdlib":  "1.16.0",
+                  "isoBackend":  "PyCdlib",
+                  "canonicalBuild":  "build.ps1 -Arch amd64"
+              },
+    "notes":  [
+                  "AMD64 UEFI only; no legacy BIOS El Torito entry is generated.",
+                  "The ISO and EFI image are read-only release media.",
+                  "Persistent user data must live on separate writable storage; this script never writes physical USB media."
+              ]
+}

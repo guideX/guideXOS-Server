@@ -1,0 +1,369 @@
+[release-iso] "C:\Program Files\Git\cmd\git.exe" -C C:\Users\guideX\AppData\Local\Temp\s22eac13\source status --porcelain=v1 --untracked-files=all
+[release-iso] "C:\Program Files\Git\cmd\git.exe" -C C:\Users\guideX\AppData\Local\Temp\s22eac13\source rev-parse HEAD
+eac07e130f439b91d328558f286fa51266b9c7a0
+[release-iso] "C:\Program Files\Git\cmd\git.exe" -C C:\Users\guideX\AppData\Local\Temp\s22eac13\source branch --show-current
+main
+[release-iso] "D:\dev\guideXOSServer\out\release-tools\venv\Scripts\python.exe" -c "import importlib.metadata as m; assert m.version('pyfatfs') == '1.1.0'; assert m.version('fs') == '2.4.16'; assert m.version('pycdlib') == '1.16.0'; print('pyfatfs=' + m.version('pyfatfs')); print('fs=' + m.version('fs')); print('pycdlib=' + m.version('pycdlib'))"
+pyfatfs=1.1.0
+fs=2.4.16
+pycdlib=1.16.0
+[release-iso] invoking canonical build.ps1 with supported arguments
+[release-iso] "C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build.ps1 -Arch amd64
+====================================
+  guideXOS Complete Build System
+====================================
+  Build identity: GXOS-LARGE-FILE-PASTE-TRACE-V1
+  Build probe ID: GXOS-LFPASTE-20260726-02
+
+[1c/6] Building PacMan Native ELF package...
+      Building PacMan AMD64 Native ELF package...
+      PacMan pinned revision: 8fc2aedd603ddc57e492bdc02c99442bb165109b
+      PacMan repository HEAD: 8fc2aedd603ddc57e492bdc02c99442bb165109b
+      Exporting committed PacMan source to: C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b
+      Compiling PacMan main.cpp
+        C:\Program Files\LLVM\bin\clang++.exe --target=x86_64-unknown-elf -std=c++11 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\sdk\include -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src -DPACMAN_ENABLE_DIAGNOSTICS=0 -DPACMAN_HOSTED_DANGER_TEST=0 -DPACMAN_HOSTED_RED_MOVEMENT_TEST=0 -DPACMAN_HOSTED_PINK_MOVEMENT_TEST=0 -DPACMAN_HOSTED_CYAN_MOVEMENT_TEST=0 -DPACMAN_HOSTED_ORANGE_MOVEMENT_TEST=0 -DPACMAN_HOSTED_POWER_PILL_TEST=0 -c C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src\main.cpp -o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\main.o
+      Compiling PacMan game.cpp
+        C:\Program Files\LLVM\bin\clang++.exe --target=x86_64-unknown-elf -std=c++11 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\sdk\include -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src -c C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src\game.cpp -o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\game.o
+      Compiling PacMan level.cpp
+        C:\Program Files\LLVM\bin\clang++.exe --target=x86_64-unknown-elf -std=c++11 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\sdk\include -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src -c C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src\level.cpp -o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\level.o
+      Compiling PacMan level_rules.cpp
+        C:\Program Files\LLVM\bin\clang++.exe --target=x86_64-unknown-elf -std=c++11 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\sdk\include -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src -c C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src\level_rules.cpp -o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\level_rules.o
+      Compiling PacMan renderer.cpp
+        C:\Program Files\LLVM\bin\clang++.exe --target=x86_64-unknown-elf -std=c++11 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\sdk\include -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src -c C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src\renderer.cpp -o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\renderer.o
+      Compiling PacMan bitmap_loader.cpp
+        C:\Program Files\LLVM\bin\clang++.exe --target=x86_64-unknown-elf -std=c++11 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\sdk\include -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src -c C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src\bitmap_loader.cpp -o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\bitmap_loader.o
+      Compiling PacMan pacman_audio.cpp
+        C:\Program Files\LLVM\bin\clang++.exe --target=x86_64-unknown-elf -std=c++11 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -mno-red-zone -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\sdk\include -IC:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src -c C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\source-8fc2aedd603ddc57e492bdc02c99442bb165109b\guidexos\src\pacman_audio.cpp -o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\pacman_audio.o
+      Linking genuine static AMD64 Native ELF
+        C:\Program Files\LLVM\bin\ld.lld.exe -m elf_x86_64 -static -e gx_main C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\main.o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\game.o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\level.o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\level_rules.o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\renderer.o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\bitmap_loader.o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\objects\pacman_audio.o -o C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\pacman.elf
+      PacMan package staged: C:\Users\guideX\AppData\Local\Temp\s22eac13\source\Apps\PacMan
+      PacMan source revision: 8fc2aedd603ddc57e492bdc02c99442bb165109b
+      PacMan registered sources: main, game, level, level_rules, renderer, bitmap_loader, pacman_audio
+      PacMan audio resource set included: True
+      ELF bytes=63640 sha256=EEB544BBB2E2574EEAED7BB7F0BAD61EA24F6945231B7757223A225B30B8E1CC
+      manifest sha256=3F3592E6C76053E323F16D48073E98C67D7F5702B8E47F0B507D6BFB3D126449
+      build evidence: C:\Users\guideX\AppData\Local\Temp\s22eac13\source\build\pacman-native\amd64\run-20261018-154216-942\build-evidence.json
+
+[1b/6] Building wallpaper and native-app runtime image...
+      Building wallpaper filesystem image...
+      staged /Apps/PacMan/app.json in ramdisk
+      staged /Apps/PacMan/bin/amd64/pacman.elf in ramdisk
+      staged /Apps/PacMan/resources/level1.gximg in ramdisk
+      staged /Apps/PacMan/resources/pacpics.gximg in ramdisk
+      staged /Apps/PacMan/resources/audio/EatPill.wav in ramdisk
+      staged /Apps/PacMan/resources/audio/extralife.wav in ramdisk
+      staged /Apps/PacMan/resources/audio/fruiteat.wav in ramdisk
+      staged /Apps/PacMan/resources/audio/ghosteat.wav in ramdisk
+      staged /Apps/PacMan/resources/audio/killed.wav in ramdisk
+      staged /Apps/PacMan/resources/audio/StartMusic.wav in ramdisk
+      staged /Apps/PacMan/resources/audio/startmusicold.wav in ramdisk
+      staged /Apps/DeveloperStudio/app.json in ramdisk
+      staged /Apps/DeveloperStudio/bin/amd64/developerstudio.elf in ramdisk
+      staged production CA bundle at /certs/ca-bundle.pem
+      staged CA manifest at /certs/ca-bundle.manifest (type=shipped-public, production_ready=yes, test_only=no)
+      defaulting bundled Navigator HTTPS policy to ProductionValidated
+      staged HTTPS policy config at /config/navigator/https-policy.txt (production-validated)
+      staged large Image Viewer smoke PNG fixture at /system/wall/arrowbgx.png (padded valid PNG)
+      staged Image Viewer smoke PNG fixture at /system/wall/ivsmoke.png
+      Building wallpaper runtime filesystem: C:\Users\guideX\AppData\Local\Temp\s22eac13\source\ESP\ramdisk.img
+      added /wall/amebgx_t.gxi (41.4 KB)
+      added /wall/ameoba.gxi (1665.6 KB)
+      added /wall/ameoba.png (2093.5 KB)
+      added /wall/ameoba_t.gxi (41.4 KB)
+      added /wall/ameoba_thumb.png (17 KB)
+      added /wall/ameobagx.gxi (1665.6 KB)
+      added /wall/ameobagx.png (2251.7 KB)
+      added /wall/ameobagx_thumb.png (17.3 KB)
+      added /Apps/DeveloperStudio/app.json (2 KB)
+      added /Apps/PacMan/app.json (0.9 KB)
+      added /wall/arrowbgx.png (700.8 KB)
+      added /wall/bluef_t.gxi (41.4 KB)
+      added /wall/blueflower.png (1867.6 KB)
+      added /wall/blueflower_thumb.png (15.3 KB)
+      added /wall/blueflwr.gxi (1665.6 KB)
+      added /certs/CABUNDLE.MAN (1 KB)
+      added /certs/ca-bundle.manifest (1 KB)
+      added /certs/ca-bundle.pem (187.4 KB)
+      added /wall/cpu.gxi (1406.3 KB)
+      added /wall/cpu.png (841.7 KB)
+      added /wall/cpu_t.gxi (41.4 KB)
+      added /wall/cpu_thumb.png (22.1 KB)
+      added /Apps/DeveloperStudio/bin/amd64/developerstudio.elf (1078.8 KB)
+      added /wall/dinos.gxi (1665.6 KB)
+      added /wall/dinos.png (3221.3 KB)
+      added /wall/dinos_t.gxi (41.4 KB)
+      added /wall/dinos_thumb.png (24.4 KB)
+      added /Apps/PacMan/resources/audio/EatPill.wav (7 KB)
+      added /Apps/PacMan/resources/audio/extralife.wav (20.8 KB)
+      added /wall/flower.gxi (1665.6 KB)
+      added /wall/flower.png (2094.3 KB)
+      added /wall/flower_t.gxi (41.4 KB)
+      added /wall/flower_thumb.png (22.5 KB)
+      added /Apps/PacMan/resources/audio/fruiteat.wav (5 KB)
+      added /Apps/PacMan/resources/audio/ghosteat.wav (8.9 KB)
+      added /wall/greenmedow.gxi (1396.9 KB)
+      added /wall/greenmedow.png (2091.2 KB)
+      added /wall/greenmedow_t.gxi (41.4 KB)
+      added /wall/greenmedow_thumb.png (47.6 KB)
+      added /wall/gspac2_t.gxi (41.4 KB)
+      added /wall/gspace.gxi (1665.6 KB)
+      added /wall/gspace_t.gxi (41.9 KB)
+      added /wall/gspace2.gxi (1665.6 KB)
+      added /wall/guidexosspace.png (2629.7 KB)
+      added /wall/guidexosspace_thumb.png (20.3 KB)
+      added /wall/guidexosspace3.png (1472.8 KB)
+      added /wall/guidexosspace3_thumb.png (13 KB)
+      added /config/navigator/HTTPSPOL.TXT (0 KB)
+      added /config/navigator/https-policy.txt (0 KB)
+      added /wall/ivsmoke.png (0.8 KB)
+      added /Apps/PacMan/resources/audio/killed.wav (16.6 KB)
+      added /Apps/PacMan/resources/level1.gximg (868 KB)
+      added /config/navigator/marks.png (1.5 KB)
+      added /wall/merlin.gxi (1406.3 KB)
+      added /wall/merlin.png (2606.9 KB)
+      added /wall/merlin_t.gxi (41.4 KB)
+      added /wall/merlin_thumb.png (58 KB)
+      added /wall/merlin2.gxi (1406.3 KB)
+      added /wall/merlin2.png (2580.7 KB)
+      added /wall/merlin2_t.gxi (56.3 KB)
+      added /wall/merlin2_thumb.png (47.1 KB)
+      added /wall/mountains.gxi (1396.9 KB)
+      added /wall/mountains.png (1974.1 KB)
+      added /wall/mountains_t.gxi (41.4 KB)
+      added /wall/mountains_thumb.png (38.8 KB)
+      added /config/navigator/nav-add.png (1.5 KB)
+      added /config/navigator/nav-back.png (1.6 KB)
+      added /config/navigator/nav-home.png (1.5 KB)
+      added /config/navigator/nav-next.png (1.6 KB)
+      added /Apps/PacMan/bin/amd64/pacman.elf (62.1 KB)
+      added /Apps/PacMan/resources/pacpics.gximg (352 KB)
+      added /wall/redf_t.gxi (41.4 KB)
+      added /wall/redflower.png (1581.9 KB)
+      added /wall/redflower_thumb.png (11.2 KB)
+      added /wall/redflwr.gxi (1665.6 KB)
+      added /config/navigator/reload.png (1.5 KB)
+      added /Apps/PacMan/resources/audio/StartMusic.wav (66.7 KB)
+      added /Apps/PacMan/resources/audio/startmusicold.wav (45.5 KB)
+      added /config/navigator/surfer-00.png (5.5 KB)
+      added /config/navigator/surfer-01.png (5.3 KB)
+      added /config/navigator/surfer-02.png (5.3 KB)
+      added /config/navigator/surfer-03.png (5.3 KB)
+      added /config/navigator/surfer-04.png (5.2 KB)
+      added /config/navigator/surfer-05.png (5.3 KB)
+      added /config/navigator/surfer-06.png (5.1 KB)
+      added /config/navigator/surfer-07.png (5.1 KB)
+      added /config/navigator/surfer-08.png (4.9 KB)
+      added /config/navigator/surfer-09.png (5.1 KB)
+      added /config/navigator/surfer-10.png (5.1 KB)
+      added /config/navigator/surfer-11.png (5.2 KB)
+      added /wall/tronp_t.gxi (47.3 KB)
+      added /wall/tronpor.gxi (1875 KB)
+      added /wall/tronporche.png (1149.5 KB)
+      added /wall/tronporche_thumb.png (26.3 KB)
+      added /wall/wallp2.gxi (1575 KB)
+      added /wall/wallp2_t.gxi (56.1 KB)
+      added /wall/Wallpaper2.png (1310.9 KB)
+      added /wall/Wallpaper2_thumb.png (28.1 KB)
+      Wallpaper runtime filesystem ready at /system/wall/
+
+[2/6] Building UEFI Bootloader...
+      Building with Visual Studio...
+
+C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v170\Microsoft.CppBuild.targets(548,5): warning MSB8029: The Intermediate directory or Output directory cannot reside under the Temporary directory as it could lead to issues with incremental build. [C:\Users\guideX\AppData\Local\Temp\s22eac13\source\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+cl : command line  warning D9025: overriding '/sdl' with '/GS-' [C:\Users\guideX\AppData\Local\Temp\s22eac13\source\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  elf.cpp
+  main.cpp
+  fb_console.cpp
+  guidexOSBootInfo_validation.cpp
+  pci.cpp
+  trampoline_msvc.cpp
+  uefi_guids.cpp
+  paging.cpp
+  Generating Code...
+cl : command line  warning D9025: overriding '/sdl' with '/GS-' [C:\Users\guideX\AppData\Local\Temp\s22eac13\source\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+cl : command line  warning D9025: overriding '/Oi' with '/Oi-' [C:\Users\guideX\AppData\Local\Temp\s22eac13\source\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  intrinsics.cpp
+  guideXOSBootLoader.vcxproj -> C:\Users\guideX\AppData\Local\Temp\s22eac13\source\guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe
+      Bootloader built successfully
+
+[3/6] Building Kernel (amd64)...
+      Using: mingw32-make
+      Kernel built successfully
+
+[4/6] Setting up ESP directory...
+      Copied: BOOTX64.EFI (55.5 KB)
+      Copied: kernel.elf (2706.3 KB)
+      Wrote: build-identity.txt
+      Staged /Apps/PacMan App Model package (app.json, bin/amd64/pacman.elf, resources/audio/EatPill.wav, resources/audio/extralife.wav, resources/audio/fruiteat.wav, resources/audio/ghosteat.wav, resources/audio/killed.wav, resources/audio/StartMusic.wav, resources/audio/startmusicold.wav, resources/level1.gximg, resources/pacpics.gximg)
+      PacMan ELF bytes=63640 sha256=EEB544BBB2E2574EEAED7BB7F0BAD61EA24F6945231B7757223A225B30B8E1CC
+      PacMan manifest bytes=956 sha256=3F3592E6C76053E323F16D48073E98C67D7F5702B8E47F0B507D6BFB3D126449
+      ERROR: DeveloperStudio signed-off ELF size/hash changed; refusing to stage it
+[release-iso] "D:\dev\guideXOSServer\out\release-tools\venv\Scripts\python.exe" C:\Users\guideX\AppData\Local\Temp\s22eac13\source\tools\release_esp.py create --source C:\Users\guideX\AppData\Local\Temp\s22eac13\source\ESP --image C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\EFI-BOOT.IMG --size 91226112 --expected C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\esp-expected.json --report C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\fat-report.json --volume-id eac07e13
+{
+  "format": "guideXOS-fat32-esp",
+  "fatType": "FAT32",
+  "imageBytes": 91226112,
+  "files": [
+    {
+      "path": "Apps/DeveloperStudio/app.json",
+      "size": 1176,
+      "sha256": "7af95d35f068c44f4529420922e0f4bec5f705568514688d160e2790022acb09"
+    },
+    {
+      "path": "Apps/DeveloperStudio/bin/amd64/developerstudio.elf",
+      "size": 1015064,
+      "sha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7"
+    },
+    {
+      "path": "Apps/PacMan/app.json",
+      "size": 956,
+      "sha256": "3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449"
+    },
+    {
+      "path": "Apps/PacMan/bin/amd64/pacman.elf",
+      "size": 63640,
+      "sha256": "eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/EatPill.wav",
+      "size": 7156,
+      "sha256": "510a52e5776573197aef14d77e393185b6c7148d1b59dac535d45c5ca0498686"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/extralife.wav",
+      "size": 21248,
+      "sha256": "767db1552130e676398c121ec605f90f20c89bbbab272305bc781adc8e91d1cd"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/fruiteat.wav",
+      "size": 5120,
+      "sha256": "82c96a997ac2e837de4e418f29f4f4fa6142dd2a0c38f764b6d989d8bd98605d"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/ghosteat.wav",
+      "size": 9090,
+      "sha256": "225168072b38671c89c1fc775d513ca86fbb899e3e82c8032445f6a6dc5e1b95"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/killed.wav",
+      "size": 17008,
+      "sha256": "1c3e91df8e19041ea5783185c5a8a9f2321993b43481c215d8caf3df590290de"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/StartMusic.wav",
+      "size": 68318,
+      "sha256": "062cdc7196c54033f8bf11878d6659fd5b0ba11cd6945640ec8fac4376919421"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/startmusicold.wav",
+      "size": 46592,
+      "sha256": "a6e1c14f6cbc59cb5244c0119c728d412252370eea48bc574c1307a774c83caf"
+    },
+    {
+      "path": "Apps/PacMan/resources/level1.gximg",
+      "size": 888860,
+      "sha256": "535b37e66d7159078df8a16ce059a6f7ab038588cc9875e152033d046ff47fe1"
+    },
+    {
+      "path": "Apps/PacMan/resources/pacpics.gximg",
+      "size": 360476,
+      "sha256": "57a605df8f24ac9641ff6c9d39df551a17ffbcd68466a561adf5f045de259d50"
+    },
+    {
+      "path": "build-identity.txt",
+      "size": 942,
+      "sha256": "61f5d5c95f932fdf7099a0c53464c411c0d9cd2fd0675fdd1ba83f514448ca70"
+    },
+    {
+      "path": "desktop.cfg",
+      "size": 257,
+      "sha256": "95b274e39e9dde431286f4eb00fd2175888430744e60ffdec3ba49375ba52947"
+    },
+    {
+      "path": "EFI/BOOT/BOOTX64.EFI",
+      "size": 56832,
+      "sha256": "041dd60ed036528bb392e6539fd1843f4a6f6ffe0283d4dcc939d2ee04a1e2cd"
+    },
+    {
+      "path": "kernel.elf",
+      "size": 2771240,
+      "sha256": "f5aa964da871dead7259d766dbaa4f67be5485af9df3afcd7812fe559eca9aef"
+    },
+    {
+      "path": "ramdisk.img",
+      "size": 67108864,
+      "sha256": "1603ed0e7606476e21e3e05038f937beae311a95c93933257e99b610f0af92b3"
+    },
+    {
+      "path": "startup.nsh",
+      "size": 27,
+      "sha256": "770ee22afb0dda892f78cc06a3d2879a146adcd7160ba833ea7cab0a2f2bf47d"
+    }
+  ]
+}
+[release-iso] "D:\dev\guideXOSServer\out\release-tools\venv\Scripts\python.exe" C:\Users\guideX\AppData\Local\Temp\s22eac13\source\tools\release_iso.py create --boot-image C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\EFI-BOOT.IMG --readme C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\release-readme.txt --output C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\artifact.iso --expected C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\iso-expected.json --report C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\iso-report.json --volume-id GUIDEXOS --oversized-sentinel 0
+{
+  "format": "guideXOS-iso-verification",
+  "isoBytes": 91293696,
+  "primaryVolumeDescriptorLba": 16,
+  "bootRecordLba": 17,
+  "bootCatalogLba": 31,
+  "uefiPlatformId": "0xEF",
+  "bootable": true,
+  "mediaType": "no-emulation",
+  "bootImageLba": 32,
+  "bootImageDataEndLba": 44576,
+  "bootImageSectorCount512": 0,
+  "bootImagePath": "UEFI_BOOT.IMG",
+  "bootImageBytes": 91226112,
+  "bootImageSha256": "950537cb16f8589535a96fbf9bdb0df7e3b5a3753259d66a2144938da99984ea",
+  "files": [
+    {
+      "path": "README.TXT",
+      "size": 272,
+      "sha256": "5faa20b732052062a8cde0fc448c15763c84d3c2563606149de2b585051023a9",
+      "lba": 44576
+    }
+  ]
+}
+[release-iso] "D:\dev\guideXOSServer\out\release-tools\venv\Scripts\python.exe" C:\Users\guideX\AppData\Local\Temp\s22eac13\source\tools\release_iso.py verify --iso C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\artifact.iso --expected C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\iso-expected.json --report C:\Users\guideX\AppData\Local\Temp\s22eac13\source\out\release-iso\guideXOS-Server-v0.3.0-s22.20261018-amd64-da2553f5199c42918bdd71760b24b683\iso-report.json
+{
+  "format": "guideXOS-iso-verification",
+  "isoBytes": 91293696,
+  "primaryVolumeDescriptorLba": 16,
+  "bootRecordLba": 17,
+  "bootCatalogLba": 31,
+  "uefiPlatformId": "0xEF",
+  "bootable": true,
+  "mediaType": "no-emulation",
+  "bootImageLba": 32,
+  "bootImageDataEndLba": 44576,
+  "bootImageSectorCount512": 0,
+  "bootImagePath": "UEFI_BOOT.IMG",
+  "bootImageBytes": 91226112,
+  "bootImageSha256": "950537cb16f8589535a96fbf9bdb0df7e3b5a3753259d66a2144938da99984ea",
+  "files": [
+    {
+      "path": "README.TXT",
+      "size": 272,
+      "sha256": "5faa20b732052062a8cde0fc448c15763c84d3c2563606149de2b585051023a9",
+      "lba": 44576
+    }
+  ]
+}
+[release-iso] "C:\Program Files\Git\cmd\git.exe" -C C:\Users\guideX\AppData\Local\Temp\s22eac13\source --version
+git version 2.54.0.windows.1
+[release-iso] "D:\dev\guideXOSServer\out\release-tools\venv\Scripts\python.exe" --version
+Python 3.12.14
+
+[release-iso] release artifact created and structurally verified.
+  ISO:      C:\Users\guideX\AppData\Local\Temp\s22eac13\source\dist\guideXOS-Server-v0.3.0-s22.20261018-amd64.iso
+  SHA-256:  C:\Users\guideX\AppData\Local\Temp\s22eac13\source\dist\guideXOS-Server-v0.3.0-s22.20261018-amd64.iso.sha256
+  Manifest: C:\Users\guideX\AppData\Local\Temp\s22eac13\source\dist\guideXOS-Server-v0.3.0-s22.20261018-amd64.manifest.json
+  Size:     91293696 bytes
+  SHA-256:  b303c4c1a1cd31e500353cbd2dd7e11a8fd438b81ac9306285a6cd20ea1b1a3f
+
+Verify the checksum:
+  $expected = (Get-Content -LiteralPath 'C:\Users\guideX\AppData\Local\Temp\s22eac13\source\dist\guideXOS-Server-v0.3.0-s22.20261018-amd64.iso.sha256').Split()[0]; $actual = (Get-FileHash -LiteralPath 'C:\Users\guideX\AppData\Local\Temp\s22eac13\source\dist\guideXOS-Server-v0.3.0-s22.20261018-amd64.iso' -Algorithm SHA256).Hash; if ($expected -ne $actual) { throw 'SHA-256 mismatch' } else { 'SHA-256 OK' }
+Test the exact ISO in QEMU:
+  .\scripts\test-release-iso.ps1 -IsoPath '.\dist\guideXOS-Server-v0.3.0-s22.20261018-amd64.iso'

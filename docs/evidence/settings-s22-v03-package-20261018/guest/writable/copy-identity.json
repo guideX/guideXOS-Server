@@ -1,0 +1,10 @@
+{
+  "source": "D:\\dev\\guideXOSServer\\out\\s22-v03-candidate-20261018\\UEFI_BOOT.IMG",
+  "sourceBytes": 91226112,
+  "sourceSha256": "950537cb16f8589535a96fbf9bdb0df7e3b5a3753259d66a2144938da99984ea",
+  "copy": "D:\\dev\\guideXOSServer\\docs\\evidence\\settings-s22-v03-package-20261018\\guest\\writable\\ESP-validation.img",
+  "copyBytes": 91226112,
+  "copySha256": "950537cb16f8589535a96fbf9bdb0df7e3b5a3753259d66a2144938da99984ea",
+  "identical": true,
+  "madeAtUtc": "2026-10-18T23:01:03.4723721+00:00"
+}
