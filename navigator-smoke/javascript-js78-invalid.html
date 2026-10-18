@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS78 invalid callback</title></head>
+<body>
+<pre id="result">JS78:invalid:pending</pre>
+<script>
+var missing = document.querySelectorAll('.absent');
+document.getElementById('result').textContent = 'JS78:invalid:calling';
+missing.every(null);
+document.getElementById('result').textContent = 'JS78:invalid:returned';
+</script>
+</body>
+</html>

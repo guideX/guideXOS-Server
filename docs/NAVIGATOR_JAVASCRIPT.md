@@ -9787,3 +9787,151 @@ does not establish bare-metal stack safety.
 A sensible separate JS78 phase is bounded collection `every(callback[,
 thisArg])`, with first-falsy short-circuit tests and its own mutation, scope,
 generation, and Event qualification. Iterator protocols remain deferred.
+
+### JS78 bounded collection `every()`
+
+JS78 adds `every(callback[, thisArg])` to the same retained selector
+collections supported by JS75–JS77, including the retained tag-name and
+class-name adapters. This is a Navigator-specific method on those retained
+collection objects; it does not claim support on standard browser `NodeList`
+or `HTMLCollection` objects. The method is registered through the native
+collection host-method table and does not add parser-only syntax, Array
+methods, iterators, `filter()`, or `map()`.
+
+`forEach()`, `some()`, and `every()` now use one bounded callback traversal
+with operation-specific completion behavior. `forEach()` ignores callback
+results and returns `undefined`; `some()` stops at the first truthy result
+and otherwise returns `false`; `every()` stops at the first falsy result and
+otherwise returns `true`. The traversal uses the existing active evaluator
+and realm, canonical Element handles, callback error path, and shared
+generation and scope checks. It passes `(element, index, collection)` with
+the original retained collection and forwards an optional `thisArg`; an
+omitted receiver remains `undefined` under the runtime's existing rules.
+
+Callback validation happens before the live entry length is counted, so
+`empty.every()` and `empty.every(null)` report the existing TypeError instead
+of returning the empty result. A valid callback is not called for an empty
+collection, and that invocation returns `true`. For nonempty collections,
+callback results use the same JavaScript truthiness conversion qualified by
+JS77: false, both zero signs, NaN, the empty string, null, and undefined are
+falsy; nonzero numbers, nonempty strings, objects, functions, and supported
+host values are truthy. Callback errors propagate through the runtime error
+path; they do not become falsy results.
+
+As in JS76 and JS77, the traversal captures the live collection length once
+after validation and does not increase that bound after callback mutations.
+Each permitted index is resolved against the current retained descriptor.
+Missing indices after shrinkage are skipped; changed membership can change
+the Element at a later original index. `every()` returns `false` as soon as a
+callback result is falsy, after the normal generation check, and makes no
+later indexed lookup or callback. If the fixed bound is exhausted with all
+invoked results truthy, it returns `true`, including after shrinkage. This
+does not promise a snapshot or exactly-once visitation during mutation.
+
+The method adds no per-callback collection record, persistent result cache,
+snapshot storage, selector grammar, or pool-capacity increase. Filtered
+positional collection reads continue to use the JS72/JS73 rank path and
+invocation-local scratch. JS9's established Event reentry policy remains
+unchanged; the runtime does not broaden `getElementById()` reentrancy.
+
+#### JS78 qualification closeout
+
+The JS78 focused native suite passed **102/102 checks** under strict
+compilation (`-Wall -Wextra -Werror -pedantic`) with MinGW GCC 15.2.0,
+target `x86_64-w64-mingw32`. It covers empty valid and invalid calls,
+supported truthiness, callback identity and receiver, first/middle/last
+falsy results, 1,024-element all-true traversal, live mutation and bound
+enforcement, filtered positional collections, adapters and scopes, nested
+callbacks and Events, callback errors, document-generation replacement with
+serial reuse, collection registry capacity, and JS75 compatibility. The
+100-element/index-three false case asserts exactly **four callbacks and four
+indexed lookups**; the near-capacity all-true case asserts **1,024 callbacks
+and 1,024 indexed lookups**. Empty collections record one entry-length
+calculation and no indexed lookup or callback. The existing runtime pools
+remain 2,048 environment and 2,048 host-object records; the full-capacity
+case used 1,025 environments and 1,026 host-object records. Descriptor,
+collection record, and 128-record registry sizes remain 1,918 B, 1,936 B,
+and 247,808 B; structural capacity remains 1,024 Elements.
+
+Three-run native execution medians and ranges (µs) included empty/1/16/128/
+512/1,024-element collections. In the full matrix's 1,024-element run,
+first-falsy `every()` measured 287 (281–353), middle-falsy 13,084
+(12,973–13,128), last-falsy 94,649 (94,430–97,643), and all-true 87,057
+(86,193–89,663). The corresponding 1,024-element comparison medians were
+87,395 (86,806–91,272) for `forEach()` and 84,270 (82,709–88,943) for
+all-false `some()`. At 512 Elements, all-true `every()` measured 12,847
+(12,644–13,066), compared with 12,658 (12,604–14,409) for `forEach()` and
+12,845 (12,585–13,051) for all-false `some()`. These local interpreter
+measurements vary with system load; the exact operation-count gates provide
+the stable short-circuit evidence. Entry-length calculation still scans the
+collection before early termination, so first-falsy execution is not a claim
+that the full method is O(1).
+
+The Windows instrumented stack suite passed for empty, first-falsy,
+all-true, filtered, nested `every()`, `every()` inside `some()`, `some()`
+inside `every()`, and nested Event dispatch combining `every()`, `some()`,
+and `forEach()`. The full-matrix stack lane's maximum observed stack
+watermark was **118,257 B**; maximum TEB commitment was **233,472 B** from a
+**1,048,576 B** reserve.
+Production `-O2 -fstack-usage` reported 80 B for `selectorCollectionEvery`,
+544 B for shared callback traversal, 80 B for `selectorCollectionLookup`,
+528 B for evaluator function invocation, 368 B for evaluator callback
+invocation, and 576 B for host-method invocation. Filtered rank frames remain
+4,336 / 10,480 / 18,672 B for one / four / eight slots. These Windows
+measurements do not establish bare-metal stack safety.
+
+The JS78 starting repository was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT`, branch
+`NAVIGATOR_JAVASCRIPT_SUPPORT`, at
+`f139c42dad8571beb622a5e5180656c19b7a6940` (`navigator: add JS77 collection
+predicate foundation`), with live upstream divergence **0 ahead / 0 behind**.
+This is authoritative even though the request listed an expected 1-ahead
+state. Tracked, staged, unstaged, and untracked work was clean. `.phase` was
+absent. The duplicate/stale gate found no JS78 or superseding implementation.
+The initial ignored manifest contained **1,355 files / 89,847,082 bytes**,
+including the six JS77 hosted logs already listed in the JS77 closeout and
+42 generated Navigator fixtures. Those six logs are carried as pre-existing
+JS78 artifacts. The initial ignored executable was 8,398,274 B with SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+The manifest and backups of the executable, generated fixtures, and five
+settings files were saved before the production build under
+`%TEMP%\guidex-js78-artifact-baseline-20261017-205731`.
+
+The full historical JavaScript matrix completed with **80/80 lanes passed**
+and **13,764/13,764 reported assertions across 39 lanes**. The JS78 lane
+passed **102/102**, strict compilation, and all eight instrumented stack
+cases. The matrix used MinGW GCC 15.2.0 targeting `x86_64-w64-mingw32`.
+
+The fresh `cmd /c build.bat` production build succeeded. Its output was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,567,721 B,
+SHA-256 `745F03BEAE6BB6E3EE35FDE2FE1AFE6EF6F340B85AD32689C33F31B37B6115B0`.
+The hosted aggregate verified that exact path and hash in the launched server
+(process ID 12612). It reported **666 passing checks and seven failing CSS
+baseline checks**. All four JS78 checks passed, including the initial fixture
+marker (`11` assertions, zero failures), nested Event metadata, and TypeError
+for a non-callable callback on an empty collection. All four JS77 checks also
+passed. The aggregate's seven failures were the existing CSS checks for phase
+3C baselines/clipping/focus, phase 3G parser/containing-block diagnostics,
+phase 6A nested scrolling, phase 6B typed sticky diagnostics, phase 6B local
+and nested sticky scrollports, phase 6B fixed-descendant invariance, and phase
+6C sticky/fixed/clipping/flex/extent neutrality. The aggregate therefore
+exited with status 1; no JS76–JS78 hosted check failed.
+
+The hosted run wrote six new ignored logs under `logs/`, archived at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js78-artifact-baseline-20261017-205731\hosted-run-20261017-220454`.
+The executable, 42 generated Navigator fixtures, and five saved config files
+were restored from the preflight backups. Final ignored-file comparison found
+**0 changed** and **0 missing** baseline files; the only delta is the six
+archived hosted logs (**497,695 B**), giving 1,361 files / 90,344,777 B versus
+the 1,355 / 89,847,082 B baseline. The shell command policy rejected removal
+of those six specifically named logs, so exact ignored-manifest restoration
+was not possible. The result is **Outcome B — useful partial JS78 bounded
+collection `every()` support** under the artifact-restoration gate. The source,
+tests, fixtures, integration, and this evidence are committed locally as
+`navigator: add JS78 bounded collection every`; no push was made. The final
+branch remains `NAVIGATOR_JAVASCRIPT_SUPPORT`, one commit ahead / zero behind
+its upstream. `.phase` remains absent. No kernel or QEMU run was performed;
+hosted Windows stack evidence does not establish bare-metal stack safety.
+
+JS79 can consider the next collection method independently; iterator protocols
+remain deferred.

@@ -2205,7 +2205,8 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorRemoveAttributeMethod ||
         methodId == kNavigatorSelectorCollectionItemMethod ||
         methodId == kNavigatorSelectorCollectionForEachMethod ||
-        methodId == kNavigatorSelectorCollectionSomeMethod;
+        methodId == kNavigatorSelectorCollectionSomeMethod ||
+        methodId == kNavigatorSelectorCollectionEveryMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -6970,6 +6971,11 @@ HostResult NavigatorScriptHostAdapter::getProperty(
                 kNavigatorSelectorCollectionSomeMethod, true, true);
             return HostResult();
         }
+        if (textEquals(property, "every")) {
+            result = HostValue::method(
+                kNavigatorSelectorCollectionEveryMethod, true, true);
+            return HostResult();
+        }
         if (textEquals(property, "length")) {
             result = HostValue::number(static_cast<double>(
                 selectorMatchCount(*record)));
@@ -7633,7 +7639,8 @@ HostResult NavigatorScriptHostAdapter::call(
     const HostValue* arguments, std::size_t argumentCount, HostValue& result)
 {
     if (methodId == kNavigatorSelectorCollectionForEachMethod ||
-        methodId == kNavigatorSelectorCollectionSomeMethod) {
+        methodId == kNavigatorSelectorCollectionSomeMethod ||
+        methodId == kNavigatorSelectorCollectionEveryMethod) {
         if (argumentCount == 0u || arguments == nullptr ||
             arguments[0].type != HostValueType::Function ||
             arguments[0].functionId == kInvalidRuntimeFunctionId)
@@ -7676,6 +7683,9 @@ HostResult NavigatorScriptHostAdapter::callWithRuntime(
             receiver, arguments, argumentCount, result);
     if (methodId == kNavigatorSelectorCollectionSomeMethod)
         return selectorCollectionSome(functionInvoker, callbackError,
+            receiver, arguments, argumentCount, result);
+    if (methodId == kNavigatorSelectorCollectionEveryMethod)
+        return selectorCollectionEvery(functionInvoker, callbackError,
             receiver, arguments, argumentCount, result);
 
     bool optionsSupplied = false;
@@ -7738,7 +7748,8 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionForEach(
     std::size_t argumentCount, HostValue& result)
 {
     return selectorCollectionCallbackTraversal(functionInvoker,
-        callbackError, receiver, arguments, argumentCount, result, false);
+        callbackError, receiver, arguments, argumentCount, result,
+        SelectorCollectionCallbackMode::ForEach);
 }
 
 HostResult NavigatorScriptHostAdapter::selectorCollectionSome(
@@ -7747,13 +7758,25 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionSome(
     std::size_t argumentCount, HostValue& result)
 {
     return selectorCollectionCallbackTraversal(functionInvoker,
-        callbackError, receiver, arguments, argumentCount, result, true);
+        callbackError, receiver, arguments, argumentCount, result,
+        SelectorCollectionCallbackMode::Some);
+}
+
+HostResult NavigatorScriptHostAdapter::selectorCollectionEvery(
+    HostFunctionInvoker& functionInvoker, RuntimeErrorCode& callbackError,
+    const HostObjectReference* receiver, const HostValue* arguments,
+    std::size_t argumentCount, HostValue& result)
+{
+    return selectorCollectionCallbackTraversal(functionInvoker,
+        callbackError, receiver, arguments, argumentCount, result,
+        SelectorCollectionCallbackMode::Every);
 }
 
 HostResult NavigatorScriptHostAdapter::selectorCollectionCallbackTraversal(
     HostFunctionInvoker& functionInvoker, RuntimeErrorCode& callbackError,
     const HostObjectReference* receiver, const HostValue* arguments,
-    std::size_t argumentCount, HostValue& result, bool stopOnTruthy)
+    std::size_t argumentCount, HostValue& result,
+    SelectorCollectionCallbackMode mode)
 {
     callbackError = RuntimeErrorCode::None;
     if (receiver == nullptr ||
@@ -7779,6 +7802,12 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionCallbackTraversal(
     if (initialLength > kNavigatorScriptMaxDocumentNodes ||
         document_->structuralElements.size() > limits_.maxDocumentNodes)
         return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    if (mode == SelectorCollectionCallbackMode::Every &&
+        selectorCollectionEveryLengthProbe_ != nullptr)
+        selectorCollectionEveryLengthProbe_(
+            selectorCollectionEveryLengthProbeContext_, initialLength);
+#endif
 
     for (std::size_t index = 0u; index < initialLength; ++index) {
         if (generation_ != entryGeneration ||
@@ -7788,9 +7817,14 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionCallbackTraversal(
         if (record == nullptr) return HostResult{HostResultCode::StaleObject};
 
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
-        if (stopOnTruthy && selectorCollectionSomeLookupProbe_ != nullptr)
+        if (mode == SelectorCollectionCallbackMode::Some &&
+            selectorCollectionSomeLookupProbe_ != nullptr)
             selectorCollectionSomeLookupProbe_(
                 selectorCollectionSomeLookupProbeContext_, index);
+        if (mode == SelectorCollectionCallbackMode::Every &&
+            selectorCollectionEveryLookupProbe_ != nullptr)
+            selectorCollectionEveryLookupProbe_(
+                selectorCollectionEveryLookupProbeContext_, index);
 #endif
         const SelectorCollectionLookup lookup =
             selectorCollectionLookup(*record, index);
@@ -7810,10 +7844,16 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionCallbackTraversal(
             return HostResult{HostResultCode::CallFailed};
 
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
-        if (stopOnTruthy && selectorCollectionSomeCallbackProbe_ != nullptr)
+        if (mode == SelectorCollectionCallbackMode::Some &&
+            selectorCollectionSomeCallbackProbe_ != nullptr)
             selectorCollectionSomeCallbackProbe_(
                 selectorCollectionSomeCallbackProbeContext_, index);
-        if (!stopOnTruthy && selectorCollectionForEachProbe_ != nullptr)
+        if (mode == SelectorCollectionCallbackMode::Every &&
+            selectorCollectionEveryCallbackProbe_ != nullptr)
+            selectorCollectionEveryCallbackProbe_(
+                selectorCollectionEveryCallbackProbeContext_, index);
+        if (mode == SelectorCollectionCallbackMode::ForEach &&
+            selectorCollectionForEachProbe_ != nullptr)
             selectorCollectionForEachProbe_(
                 selectorCollectionForEachProbeContext_, index);
 #endif
@@ -7825,12 +7865,22 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionCallbackTraversal(
             receiver->generation != generation_ || document_ == nullptr)
             return HostResult{HostResultCode::StaleObject};
 
-        if (stopOnTruthy && functionInvoker.isTruthy(callbackResult)) {
+        const bool callbackTruthy =
+            mode == SelectorCollectionCallbackMode::ForEach
+                ? false : functionInvoker.isTruthy(callbackResult);
+        if (mode == SelectorCollectionCallbackMode::Some && callbackTruthy) {
             result = HostValue::boolean(true);
             return HostResult();
         }
+        if (mode == SelectorCollectionCallbackMode::Every &&
+            !callbackTruthy) {
+            result = HostValue::boolean(false);
+            return HostResult();
+        }
     }
-    result = stopOnTruthy ? HostValue::boolean(false) : HostValue::undefined();
+    result = mode == SelectorCollectionCallbackMode::ForEach
+        ? HostValue::undefined()
+        : HostValue::boolean(mode == SelectorCollectionCallbackMode::Every);
     return HostResult();
 }
 

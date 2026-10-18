@@ -5293,6 +5293,53 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("loaded=") + yesNo(js77InvalidLoaded) + ",text=" +
         summarizeText(js77InvalidText, 800) + ",error=" + js77InvalidError);
 
+    const std::string js78FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js78.html";
+    const bool js78Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js78FixtureUrl);
+    const std::string js78InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS78 bounded collection every fixture passes on the hosted server",
+        js78Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js78FixtureUrl &&
+        contains(js78InitialText, "Navigator JavaScript JS78") &&
+        contains(js78InitialText, "JS78:initial:assertions=") &&
+        contains(js78InitialText, ":failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js78Loaded) + ",text=" +
+        summarizeText(js78InitialText, 2400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS78 empty, all-truthy, first-falsy, and exact short-circuit checks pass",
+        js78Loaded && contains(js78InitialText,
+            ":first=1:middle=3:last=5:empty=0:malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted checks cover empty true, no callback on empty, truthiness, canonical arguments, thisArg, mutation, and adapter collections");
+    const bool js78Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js78AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS78 nested Event every/some/forEach callbacks preserve Event state",
+        js78Click && contains(js78AfterClick,
+            "JS78:event=every:true:some=true:forEach=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js78Click) + ",text=" +
+        summarizeText(js78AfterClick, 1600) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const std::string js78InvalidFixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js78-invalid.html";
+    const bool js78InvalidLoaded =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js78InvalidFixtureUrl);
+    const std::string js78InvalidText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js78InvalidError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS78 invalid callback on an empty collection reports TypeError",
+        js78InvalidLoaded && contains(js78InvalidText,
+            "JS78:invalid:calling") &&
+        contains(js78InvalidError, "TypeError"),
+        std::string("loaded=") + yesNo(js78InvalidLoaded) + ",text=" +
+        summarizeText(js78InvalidText, 800) + ",error=" + js78InvalidError);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
