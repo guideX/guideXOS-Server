@@ -1,0 +1,6 @@
+say c2x('414243'X)
+say c2x('414243'x)
+say c2x("41 42 43"X)
+say c2x('F'X)
+say c2x('00FF80'X)
+say length(''X)

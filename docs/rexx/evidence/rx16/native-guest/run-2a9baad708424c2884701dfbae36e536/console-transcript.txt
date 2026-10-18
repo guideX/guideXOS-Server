@@ -1,0 +1,8 @@
+RX16 isolated QEMU Console transcript
+Kernel SHA-256: 61787f771b1e19076bdd90a99ec36fa1e94992a777023b34248b9e6698267d20
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx16\qemu-2a9baad708424c2884701dfbae36e536\guest\esp
+COMMAND: rexx /rx16-literals.rex | expected visible marker/status: RX16_NATIVE_LITERALS_DONE
+COMMAND: rexx /rx16-literal-error.rex | expected visible marker/status: invalid hexadecimal string literal
+COMMAND: rexx /rx16-recovery.rex | expected visible marker/status: RX16_NATIVE_GUEST_RESPONSIVE: 4142
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=32
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

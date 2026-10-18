@@ -1,0 +1,25 @@
+{
+  "schema": "guidexos.rexx.rx16.qemu-process-reconciliation.v1",
+  "captured_at_utc": "2026-10-18T22:16:06.3919035Z",
+  "owned_qemu_pid": 18116,
+  "qmp_shutdown_acknowledged": true,
+  "owned_process_present_after": false,
+  "foreign_processes_before": [
+    1872,
+    27808,
+    7468
+  ],
+  "foreign_processes_after": [
+    1872,
+    27808
+  ],
+  "preexisting_processes_absent_after_run": [
+    7468
+  ],
+  "final_live_qemu_pids": [
+    1872,
+    27808
+  ],
+  "process_control_scope": "Only owned PID 18116 was addressed, through QMP after executable path, unique QMP port, and disposable ESP identity checks; no foreign process received input or shutdown commands.",
+  "unexplained_census_change": "One pre-existing PID was present before and absent after; no action was sent to it and its exit cause was not determined."
+}

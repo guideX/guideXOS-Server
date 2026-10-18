@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16')]
     [string]$Phase = 'RX12R1',
     [ValidateSet('Address', 'Undefined', 'Both')]
     [string]$Sanitizer = 'Both',
@@ -18,7 +18,9 @@ $phaseOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX15') {
+$guardManifest = if ($Phase -eq 'RX16') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx16\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX15') {
     Join-Path $rootDir 'docs\rexx\evidence\rx15\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX14') {
     Join-Path $rootDir 'docs\rexx\evidence\rx14\protected-artifacts-start.json'
@@ -208,7 +210,8 @@ function Invoke-OneSanitizer {
         [PSCustomObject]@{ Name = 'rx12_builtins'; Driver = 'tests\rexx_rx12_builtins_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx13_string_editing'; Driver = 'tests\rexx_rx13_string_editing_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx14_numeric_inspection'; Driver = 'tests\rexx_rx14_numeric_inspection_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') },
-        [PSCustomObject]@{ Name = 'rx15_conversion'; Driver = 'tests\rexx_rx15_conversion_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') }
+        [PSCustomObject]@{ Name = 'rx15_conversion'; Driver = 'tests\rexx_rx15_conversion_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') },
+        [PSCustomObject]@{ Name = 'rx16_literals'; Driver = 'tests\rexx_rx16_literal_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') }
     )
 
     $buildDir = Join-Path $runDir 'bin'
@@ -256,6 +259,9 @@ function Invoke-OneSanitizer {
             $compilerArgs += @('/TP', '/std:c++14', '/EHsc', ('/I' + (Join-Path $rootDir 'kernel\core\include')))
         } else {
             $compilerArgs += @('/TC', '/std:c11', '/D_CRT_SECURE_NO_WARNINGS')
+            if ($plan.Name -eq 'rx16_literals') {
+                $compilerArgs += '/I' + $rootDir
+            }
         }
         $compilerArgs += @('/MD', '/Zi', '/Od')
         # All cl.exe and linker outputs are explicit and confined to this unique plan directory.

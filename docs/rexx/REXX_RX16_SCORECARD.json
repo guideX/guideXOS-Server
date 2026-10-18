@@ -1,0 +1,213 @@
+{
+  "schema": "guidexos.rexx.rx16-scorecard.v1",
+  "phase": "RX16",
+  "outcome": "A — Accepted",
+  "completed_at_utc": "2026-10-18T22:18:03.1856139Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "428ea89739962841822a54318f3107b995fd8d24",
+  "qualification_head_before_local_commit": "428ea89739962841822a54318f3107b995fd8d24",
+  "root_phase_file_present": false,
+  "accepted_prior_phase_not_duplicated": true,
+  "implemented_built_in_functions": [],
+  "syntax": {
+    "hexadecimal": [
+      "'payload'X",
+      "'payload'x",
+      "\"payload\"X",
+      "\"payload\"x"
+    ],
+    "binary": [
+      "'payload'B",
+      "'payload'b",
+      "\"payload\"B",
+      "\"payload\"b"
+    ],
+    "suffix_boundary": "One adjacent X/x or B/b suffix; suffix is not accepted as a prefix of a longer symbol.",
+    "hex_semantics": "ASCII hex digits, ASCII blanks at byte boundaries, odd first nibble gets a leading zero, empty allowed, raw bytes preserved.",
+    "binary_semantics": "Only 0/1, ASCII blanks at nibble or byte boundaries after left alignment, leading zero bits pad to whole bytes, empty allowed, most-significant bit first.",
+    "packed_size_limit_bytes": 250,
+    "limit_applies_to": [
+      "RX16 suffix X literals",
+      "RX16 suffix B literals"
+    ],
+    "limit_note": "IBM documents a 250-byte packed maximum for hex. The same deterministic limit is a guideXOS choice for binary."
+  },
+  "lexer_parser": {
+    "lexer": "String scanner recognizes eligible adjacent suffixes after closing quote; validates payload and grouping without allocation; preserves token span and never consumes the following token.",
+    "parser": "Uses existing TOKEN_HEX_STRING/TOKEN_BINARY_STRING and literal grammar; operator precedence, implicit/explicit concatenation and quoted function-name handling preserved.",
+    "vm_value": "Existing constant decoder packs into length-bearing binary-safe RexxValue strings, including NUL and high-bit bytes.",
+    "normal_string_behavior": "Existing quoting and doubled-quote behavior retained.",
+    "syntax_error_source_location": "Opening quote location retained for token errors.",
+    "resource_behavior": "Over-250 packed-byte suffix literal rejected deterministically in lexer."
+  },
+  "hosted": {
+    "status": "PASS",
+    "command": "tests/run_rexx_tests.ps1 -Phase RX16",
+    "rx16_direct_assertions": 104,
+    "rx16_direct_failures": 0,
+    "rx16_literal_fixtures": {
+      "passed": 10,
+      "total": 10
+    },
+    "inherited_fixtures_rx3_through_rx15": {
+      "passed": 259,
+      "total": 259
+    },
+    "all_fixtures_rx3_through_rx16": {
+      "passed": 269,
+      "total": 269
+    },
+    "inherited_resource_cases": {
+      "passed": 3,
+      "total": 3
+    },
+    "cli_regressions": {
+      "passed": 20,
+      "total": 20
+    },
+    "rx1_runtime_integration_cases": {
+      "passed": 11,
+      "total": 11
+    },
+    "reported_c_assertions_rx2_through_rx16": 3780,
+    "failures": 0,
+    "transient_build_attempt": "One initial hosted fixture expectation was corrected to classic abuttal output; subsequent full run passed. One initial ASan build lacked RX16 include path; fixed and both sanitizer suites passed.",
+    "evidence": "docs/rexx/evidence/rx16/hosted-qualification.log",
+    "allocation_failure_injection": "PASS — parser, compiler and VM allocation failures report deterministically, release partial state and recover.",
+    "binary_safety": "PASS — embedded NUL, high-bit bytes, empty values, leading zeroes and X2B/C2X round trips checked.",
+    "parser_integrity_cases": [
+      "assignments",
+      "function arguments",
+      "comparisons",
+      "conditional expressions",
+      "explicit and implicit concatenation",
+      "interpreted source",
+      "comments",
+      "consecutive literals",
+      "suffix whitespace and symbol boundaries",
+      "quoted function-name ambiguity",
+      "syntax error location and recovery"
+    ]
+  },
+  "portable_compatibility": {
+    "status": "PASS local expected results",
+    "cases": 183,
+    "guideXOS_expected_exit": 183,
+    "regina": "NOT_RUN",
+    "regina_reason": "No verified Regina executable found in PATH; no system-wide installation attempted.",
+    "independent_compatibility_percentage": null,
+    "evidence": "docs/rexx/evidence/rx16/differential-results.json",
+    "summary": "docs/rexx/evidence/rx16/differential-summary.json"
+  },
+  "sanitizers": {
+    "status": "PASS",
+    "address": {
+      "targets_built_and_run": 18,
+      "failures": 0,
+      "findings": 0
+    },
+    "undefined_behavior": {
+      "targets_built_and_run": 18,
+      "failures": 0,
+      "findings": 0
+    },
+    "local_corpus_cases_each": 183,
+    "regina_differential": "NOT_RUN",
+    "evidence": "docs/rexx/evidence/rx16/sanitizers-qualification.json"
+  },
+  "freestanding_amd64": {
+    "status": "PASS — compilation and link",
+    "rexx_c_objects_linked": 9,
+    "freestanding_flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "kernel_elf": "build/rexx/rx16/native-amd64-8cff9ec69c64419f9344e906acc59784/amd64/bin/kernel.elf",
+    "kernel_sha256": "61787f771b1e19076bdd90a99ec36fa1e94992a777023b34248b9e6698267d20",
+    "link_evidence": "docs/rexx/evidence/rx16/native-build/native-link-evidence-8cff9ec69c64419f9344e906acc59784.json"
+  },
+  "qemu_guest": {
+    "status": "PASS",
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "run_id": "2a9baad708424c2884701dfbae36e536",
+    "guest_evidence": "docs/rexx/evidence/rx16/native-guest/run-2a9baad708424c2884701dfbae36e536",
+    "commands_demonstrated": 3,
+    "native_literals": "PASS — X/B literals and byte conversions displayed",
+    "malformed_literal": "PASS — invalid hexadecimal literal diagnostic displayed",
+    "post_error_responsiveness": "PASS — RX16_NATIVE_GUEST_RESPONSIVE: 4142",
+    "network_disabled": true,
+    "disposable_media": true,
+    "staged_kernel_hash_matches": true,
+    "heartbeat_count": {
+      "before_suite": 1,
+      "after_suite": 32
+    },
+    "owned_qemu_pid": 18116,
+    "qmp_shutdown_acknowledged": true,
+    "owned_qemu_process_remaining": false,
+    "foreign_process_census": {
+      "before": [
+        1872,
+        27808,
+        7468
+      ],
+      "after": [
+        1872,
+        27808
+      ],
+      "vanished_preexisting_pid": 7468,
+      "control_sent_to_foreign_processes": false,
+      "cause": "Not determined; no input or shutdown command was sent to PID 7468.",
+      "evidence": "docs/rexx/evidence/rx16/native-guest/run-2a9baad708424c2884701dfbae36e536/qemu-process-reconciliation.json"
+    }
+  },
+  "protected_artifacts": {
+    "status": "PASS",
+    "root_obj_pdb_count": 31,
+    "hashes_unchanged": 31,
+    "missing": 0,
+    "unexpected": 0,
+    "modified": 0,
+    "final_comparison": "docs/rexx/evidence/rx16/protected-artifacts-final-comparison.json",
+    "baseline": "docs/rexx/evidence/rx16/protected-artifacts-start.json"
+  },
+  "inventory": {
+    "rows": 75,
+    "rx16_builtin_implementations": 0,
+    "implemented_total": 44,
+    "not_implemented": 29,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "reconciliation": "Historical implementation_status values are preserved. normalized_inventory_status is derived uniformly from those recorded claims; no BIF status or implementation count was added by RX16.",
+    "path": "docs/rexx/REXX_RX16_BUILTIN_INVENTORY.csv"
+  },
+  "recommended_rx17_scope": {
+    "family": "Bytewise bitwise string built-ins",
+    "functions": [
+      "BITAND",
+      "BITOR",
+      "BITXOR"
+    ],
+    "size": "3 related built-ins",
+    "rationale": "Portable classic REXX functions over binary-safe byte strings, including pad and unequal-length behavior; useful for masks, packed flags and protocol/system scripting; deterministic with low host dependencies and direct byte-level tests.",
+    "official_references": [
+      "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-bitand-bit-by-bit",
+      "https://www.ibm.com/docs/en/z-netview/6.3.0?topic=functions-bitor",
+      "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-bitxor-bit-by-bit-exclusive"
+    ]
+  },
+  "limits_and_deferred": [
+    "Regina differential comparison unavailable; no independent compatibility percentage calculated.",
+    "Character byte interpretation follows guideXOS ASCII and is not transcoded to IBM EBCDIC.",
+    "The 250-byte binary suffix bound is a guideXOS deterministic resource limit; IBM documents the corresponding bound for hexadecimal literals.",
+    "Only ASCII space is accepted for encoded literal grouping; tabs and other whitespace are invalid.",
+    "RX16 changes syntax only; no built-in functions or inventory implementation totals changed."
+  ],
+  "evidence_directory": "docs/rexx/evidence/rx16/",
+  "preexisting_untracked_status_entries_preserved": 59,
+  "generated_build_outputs": "Confined under build/rexx/rx16 and excluded from the local commit."
+}

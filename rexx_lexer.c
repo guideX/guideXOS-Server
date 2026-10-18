@@ -205,6 +205,77 @@ static RexxTokenType rexx_keyword_type(const char *source, size_t length)
     return TOKEN_SYMBOL;
 }
 
+static int rexx_ascii_is_hex_digit(unsigned char ch);
+
+static RexxLexerError rexx_validate_encoded_payload(const RexxLexer *lexer,
+                                                    size_t start,
+                                                    size_t end,
+                                                    int is_hex)
+{
+    size_t digits = 0u;
+    size_t index;
+    size_t packed_bytes;
+    size_t padding;
+    size_t digits_before_separator = 0u;
+    size_t boundary = is_hex ? 2u : 4u;
+    int saw_digit = 0;
+    int previous_was_space = 0;
+
+    for (index = start; index < end; ++index) {
+        unsigned char current = (unsigned char)lexer->source[index];
+        int valid_digit = is_hex
+            ? rexx_ascii_is_hex_digit(current)
+            : (current == (unsigned char)'0' || current == (unsigned char)'1');
+        if (current == (unsigned char)' ') {
+            continue;
+        }
+        if (!valid_digit) {
+            return is_hex ? REXX_LEXER_ERROR_INVALID_HEX_STRING
+                          : REXX_LEXER_ERROR_INVALID_BINARY_STRING;
+        }
+        if (digits == (size_t)-1) {
+            return REXX_LEXER_ERROR_ENCODED_STRING_TOO_LONG;
+        }
+        ++digits;
+    }
+
+    packed_bytes = is_hex ? digits / 2u + digits % 2u
+                          : digits / 8u + (digits % 8u != 0u ? 1u : 0u);
+    if (packed_bytes > REXX_LEXER_MAX_ENCODED_BYTES) {
+        return REXX_LEXER_ERROR_ENCODED_STRING_TOO_LONG;
+    }
+    padding = is_hex ? digits % 2u
+                     : (8u - digits % 8u) % 8u;
+
+    for (index = start; index < end; ++index) {
+        unsigned char current = (unsigned char)lexer->source[index];
+        if (current == (unsigned char)' ') {
+            if (!saw_digit) {
+                return is_hex ? REXX_LEXER_ERROR_INVALID_HEX_STRING
+                              : REXX_LEXER_ERROR_INVALID_BINARY_STRING;
+            }
+            if (!previous_was_space) {
+                size_t position = digits_before_separator % boundary;
+                if ((position + padding % boundary) % boundary != 0u) {
+                    return is_hex ? REXX_LEXER_ERROR_INVALID_HEX_STRING
+                                  : REXX_LEXER_ERROR_INVALID_BINARY_STRING;
+                }
+            }
+            previous_was_space = 1;
+            continue;
+        }
+        saw_digit = 1;
+        previous_was_space = 0;
+        ++digits_before_separator;
+    }
+
+    if (previous_was_space) {
+        return is_hex ? REXX_LEXER_ERROR_INVALID_HEX_STRING
+                      : REXX_LEXER_ERROR_INVALID_BINARY_STRING;
+    }
+    return REXX_LEXER_ERROR_NONE;
+}
+
 static RexxToken rexx_scan_string(RexxLexer *lexer,
                                  size_t start_offset,
                                  size_t start_line,
@@ -222,7 +293,37 @@ static RexxToken rexx_scan_string(RexxLexer *lexer,
                 rexx_consume_regular(lexer);
                 continue;
             }
-            rexx_consume_regular(lexer); /* Closing quote. */
+            {
+                size_t closing_offset = lexer->offset;
+                RexxLexerError encoded_error;
+                int is_hex = 0;
+                int is_encoded = 0;
+
+                rexx_consume_regular(lexer); /* Closing quote. */
+                if (lexer->offset < lexer->length) {
+                    unsigned char suffix = (unsigned char)lexer->source[lexer->offset];
+                    if ((suffix == (unsigned char)'X' || suffix == (unsigned char)'x' ||
+                         suffix == (unsigned char)'B' || suffix == (unsigned char)'b') &&
+                        (lexer->offset + 1u >= lexer->length ||
+                         !rexx_ascii_is_symbol_part(
+                             (unsigned char)lexer->source[lexer->offset + 1u]))) {
+                        is_encoded = 1;
+                        is_hex = suffix == (unsigned char)'X' ||
+                                 suffix == (unsigned char)'x';
+                    }
+                }
+                if (is_encoded) {
+                    encoded_error = rexx_validate_encoded_payload(
+                        lexer, start_offset + 1u, closing_offset, is_hex);
+                    rexx_consume_regular(lexer); /* One-character suffix. */
+                    return rexx_make_token(
+                        lexer,
+                        encoded_error == REXX_LEXER_ERROR_NONE
+                            ? (is_hex ? TOKEN_HEX_STRING : TOKEN_BINARY_STRING)
+                            : TOKEN_ERROR,
+                        start_offset, start_line, start_column, encoded_error);
+                }
+            }
             return rexx_make_token(lexer, TOKEN_STRING, start_offset,
                                    start_line, start_column,
                                    REXX_LEXER_ERROR_NONE);
@@ -720,6 +821,7 @@ const char *rexx_lexer_error_message(RexxLexerError error)
     case REXX_LEXER_ERROR_UNTERMINATED_COMMENT: return "unterminated block comment";
     case REXX_LEXER_ERROR_INVALID_HEX_STRING: return "invalid hexadecimal string literal";
     case REXX_LEXER_ERROR_INVALID_BINARY_STRING: return "invalid binary string literal";
+    case REXX_LEXER_ERROR_ENCODED_STRING_TOO_LONG: return "encoded string literal exceeds the packed size limit";
     case REXX_LEXER_ERROR_COMMENT_NESTING_OVERFLOW: return "block comment nesting is too deep";
     default: return "unknown lexer error";
     }

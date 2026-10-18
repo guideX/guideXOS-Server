@@ -1,0 +1,16 @@
+{
+  "schema": "guidexos.rexx.rx16.differential-evidence.v1",
+  "generated_at_utc": "2026-10-18T22:07:35Z",
+  "git_head": "428ea89739962841822a54318f3107b995fd8d24",
+  "portable_cases": 183,
+  "guideXOS_expected_exit": 183,
+  "regina": {
+    "available": false,
+    "executable": null,
+    "version_text": null,
+    "availability_reason": "No regina executable found in PATH and no valid --regina/GUIDEXOS_REGINA path was supplied."
+  },
+  "independent_comparison": "NOT_RUN — no verified Regina executable found in PATH; no installation attempted",
+  "result_file": "differential-results.json",
+  "result_file_sha256": "9bc34f01d097167396dbc305df754989d277f7dad69a6daa9f9d2f5591b0f78d"
+}

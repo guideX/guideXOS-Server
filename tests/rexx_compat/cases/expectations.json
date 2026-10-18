@@ -42,5 +42,21 @@
   "numeric_inspection/bad_numeric.rex": {
     "exit_code": 1,
     "reason": "ABS rejects an argument that is not a finite decimal value."
+  },
+  "literals/invalid_hex_grouping.rex": {
+    "exit_code": 1,
+    "reason": "Classic hexadecimal literal grouping is rejected at a non-byte boundary."
+  },
+  "literals/invalid_hex_digit.rex": {
+    "exit_code": 1,
+    "reason": "Classic hexadecimal literals accept only hexadecimal digits."
+  },
+  "literals/invalid_binary_grouping.rex": {
+    "exit_code": 1,
+    "reason": "Classic binary literal grouping is rejected away from a nibble boundary."
+  },
+  "literals/invalid_binary_digit.rex": {
+    "exit_code": 1,
+    "reason": "Classic binary literals accept only zero and one."
   }
 }

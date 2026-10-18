@@ -81,8 +81,12 @@ typedef enum RexxLexerError {
     REXX_LEXER_ERROR_UNTERMINATED_COMMENT,
     REXX_LEXER_ERROR_INVALID_HEX_STRING,
     REXX_LEXER_ERROR_INVALID_BINARY_STRING,
+    REXX_LEXER_ERROR_ENCODED_STRING_TOO_LONG,
     REXX_LEXER_ERROR_COMMENT_NESTING_OVERFLOW
 } RexxLexerError;
+
+/* Encoded literals have a deterministic, bounded packed size. */
+#define REXX_LEXER_MAX_ENCODED_BYTES ((size_t)250u)
 
 typedef enum RexxLexerStatus {
     REXX_LEXER_STATUS_OK = 0,

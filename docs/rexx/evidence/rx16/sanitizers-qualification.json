@@ -1,0 +1,28 @@
+{
+  "schema": "guidexos.rexx.rx16.sanitizer-qualification.v1",
+  "outcome": "PASS",
+  "address": {
+    "kind": "Address",
+    "status": "PASS",
+    "targets_built_and_run": 18,
+    "target_failures": 0,
+    "matching_sanitizer_findings": 0,
+    "corpus_cases": 183,
+    "corpus_local_expected_results": 183,
+    "regina_differential": "NOT_RUN — unavailable",
+    "evidence_directory": "docs\\rexx\\evidence\\rx16\\sanitizer-address-f349684b7ef44512b7b224d76744cb8f"
+  },
+  "undefined_behavior": {
+    "kind": "Undefined",
+    "status": "PASS",
+    "targets_built_and_run": 18,
+    "target_failures": 0,
+    "matching_sanitizer_findings": 0,
+    "corpus_cases": 183,
+    "corpus_local_expected_results": 183,
+    "regina_differential": "NOT_RUN — unavailable",
+    "evidence_directory": "docs\\rexx\\evidence\\rx16\\sanitizer-undefined-01abcf4d0ee046bd99eee165b9b2e9b2"
+  },
+  "initial_attempt": "BUILD_FAILED — sanitizer plan lacked repository include path for rx16_literals; fixed and rerun successfully; logs preserved as sanitizers-attempt-1.log",
+  "successful_run_log": "sanitizers-attempt-2.log"
+}

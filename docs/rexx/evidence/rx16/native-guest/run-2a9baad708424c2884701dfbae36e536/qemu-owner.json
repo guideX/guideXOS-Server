@@ -1,0 +1,14 @@
+﻿{
+    "pid":  18116,
+    "qemuPath":  "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "qmpPort":  63381,
+    "espPath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx16\\qemu-2a9baad708424c2884701dfbae36e536\\guest\\esp",
+    "firmwarePath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx16\\qemu-2a9baad708424c2884701dfbae36e536\\guest\\firmware-code.fd",
+    "serialPath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx16\\qemu-2a9baad708424c2884701dfbae36e536\\serial.log",
+    "rawCaptureDir":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx16\\qemu-2a9baad708424c2884701dfbae36e536\\screenshots-raw",
+    "kernelPath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx16\\native-amd64-8cff9ec69c64419f9344e906acc59784\\amd64\\bin\\kernel.elf",
+    "kernelSha256":  "61787f771b1e19076bdd90a99ec36fa1e94992a777023b34248b9e6698267d20",
+    "stagedKernelSha256":  "61787f771b1e19076bdd90a99ec36fa1e94992a777023b34248b9e6698267d20",
+    "network":  "disabled (-net none)",
+    "runRoot":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx16\\qemu-2a9baad708424c2884701dfbae36e536"
+}

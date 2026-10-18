@@ -1,0 +1,6 @@
+say c2x('01000001'B)
+say c2x('1'B)
+say c2x('101 1101'B)
+say c2x('11110000'b)
+say length(''B)
+say x2b(c2x('0001FF80'X))

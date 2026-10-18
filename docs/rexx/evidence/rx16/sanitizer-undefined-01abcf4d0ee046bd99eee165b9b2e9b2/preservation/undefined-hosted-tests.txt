@@ -1,0 +1,5 @@
+RX16 artifact preservation: PASS
+Stage: undefined-hosted-tests
+Verified UTC: 2026-10-18T22:10:47.1642831Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

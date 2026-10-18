@@ -1,0 +1,14 @@
+﻿{
+    "exit_code":  0,
+    "pid":  26184,
+    "started_at_utc":  "2026-10-18T22:11:05.2884975Z",
+    "finished_at_utc":  "2026-10-18T22:14:22.3908733Z",
+    "arguments":  [
+                      "-C",
+                      "D:\\dev\\guideXOSServer_REXX\\kernel",
+                      "-B",
+                      "ARCH=amd64",
+                      "BUILD_ROOT=../build/rexx/rx16/native-amd64-8cff9ec69c64419f9344e906acc59784",
+                      "all"
+                  ]
+}

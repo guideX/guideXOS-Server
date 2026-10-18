@@ -1644,14 +1644,28 @@ static RexxVMStatus decode_constant(const RexxConstant *constant, RexxValue *val
     case REXX_CONSTANT_HEX_STRING:
     case REXX_CONSTANT_BINARY_STRING: {
         int is_hex = constant->kind == REXX_CONSTANT_HEX_STRING;
-        size_t start = 2, end, digits = 0, out_length, out = 0;
+        size_t start, end, digits = 0, out_length, out = 0;
+        char quote;
         char *decoded;
-        if (constant->length < 3 ||
-            ascii_upper((unsigned char)constant->text[0]) != (is_hex ? 'X' : 'B') ||
-            (constant->text[1] != '\'' && constant->text[1] != '"') ||
-            constant->text[constant->length - 1] != constant->text[1])
-            return REXX_VM_STATUS_INVALID_BYTECODE;
-        end = constant->length - 1;
+        if (constant->length < 3) return REXX_VM_STATUS_INVALID_BYTECODE;
+        if (constant->text[0] == '\'' || constant->text[0] == '"') {
+            quote = constant->text[0];
+            if (constant->text[constant->length - 2] != quote ||
+                ascii_upper((unsigned char)constant->text[constant->length - 1]) !=
+                    (is_hex ? 'X' : 'B'))
+                return REXX_VM_STATUS_INVALID_BYTECODE;
+            start = 1u;
+            end = constant->length - 2u;
+        } else {
+            if (ascii_upper((unsigned char)constant->text[0]) !=
+                    (is_hex ? 'X' : 'B') ||
+                (constant->text[1] != '\'' && constant->text[1] != '"') ||
+                constant->text[constant->length - 1] != constant->text[1])
+                return REXX_VM_STATUS_INVALID_BYTECODE;
+            quote = constant->text[1];
+            start = 2u;
+            end = constant->length - 1u;
+        }
         for (i = start; i < end; ++i)
             if (!ascii_space((unsigned char)constant->text[i])) ++digits;
         if (is_hex) {

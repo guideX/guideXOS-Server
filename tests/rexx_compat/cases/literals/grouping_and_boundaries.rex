@@ -1,0 +1,7 @@
+say c2x('1 d8'X)
+say c2x('10000 10101010'B)
+say c2x('41' X)
+say c2x('41'XY)
+say c2x('41'BETA)
+say c2x('41'X || '42'X)
+say c2x('41'X '42'X)

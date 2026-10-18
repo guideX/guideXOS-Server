@@ -1,0 +1,6 @@
+[2026-10-18T22:14:58.4770487Z] rexx /rx16-literals.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx16\qemu-2a9baad708424c2884701dfbae36e536\screenshots-raw\rx16-01-native-literals.ppm
+[2026-10-18T22:15:07.5850444Z] rexx /rx16-literal-error.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx16\qemu-2a9baad708424c2884701dfbae36e536\screenshots-raw\rx16-02-malformed-literal.ppm
+[2026-10-18T22:15:16.1360412Z] rexx /rx16-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx16\qemu-2a9baad708424c2884701dfbae36e536\screenshots-raw\rx16-03-post-error-command.ppm

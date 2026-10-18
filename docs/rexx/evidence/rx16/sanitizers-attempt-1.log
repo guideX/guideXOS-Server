@@ -1,0 +1,48 @@
+RX16 Address sanitizer: C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\HostX64\x64\cl.exe
+[BUILD PASS] rx1_runtime
+[BUILD PASS] rx1_cli
+[BUILD PASS] rx2_vfs
+[BUILD PASS] rx3_decimal
+[BUILD PASS] rx3_alloc
+[BUILD PASS] rx4_arithmetic
+[BUILD PASS] rx5_numeric_context
+[BUILD PASS] rx6_parse_alloc
+[BUILD PASS] rx7_routines
+[BUILD PASS] rx7_alloc
+[BUILD PASS] rx8_semantics_alloc
+[BUILD PASS] rx9_conditions
+[BUILD PASS] rx10_interpret
+[BUILD PASS] rx12_builtins
+[BUILD PASS] rx13_string_editing
+[BUILD PASS] rx14_numeric_inspection
+[BUILD PASS] rx15_conversion
+Address sanitizer build failed for rx16_literals. See 
+D:\dev\guideXOSServer_REXX\build\rexx\rx16\sanitizer-address-21ebd5c54f6b47e4b1aa603efd6d82f7\logs. 
+rexx_rx16_literal_test.c
+D:\dev\guideXOSServer_REXX\tests\rexx_rx16_literal_test.c(1): fatal error C1083: Cannot open include file: 
+'rexx_lexer.h': No such file or directory
+rexx_lexer.c
+rexx_parser.c
+rexx_compiler.c
+rexx_vm.c
+rexx_builtin.c
+rexx_numeric.c
+Generating Code...
+At D:\dev\guideXOSServer_REXX\tests\run_rexx_sanitizers.ps1:280 char:13
++             throw "$Kind sanitizer build failed for $($plan.Name). Se ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Address sanitiz...ting Code...
+:String) [], RuntimeException
+    + FullyQualifiedErrorId : Address sanitizer build failed for rx16_literals. See D:\dev\guideXOSServer_REXX\build\r 
+   exx\rx16\sanitizer-address-21ebd5c54f6b47e4b1aa603efd6d82f7\logs. 
+rexx_rx16_literal_test.c
+    D:\dev\guideXOSServer_REXX\tests\rexx_rx16_literal_test.c(1): fatal error C1083: Cannot open include file: 'rexx_l 
+   exer.h': No such file or directory
+rexx_lexer.c
+rexx_parser.c
+rexx_compiler.c
+rexx_vm.c
+rexx_builtin.c
+rexx_numeric.c
+Generating Code...
+ 
