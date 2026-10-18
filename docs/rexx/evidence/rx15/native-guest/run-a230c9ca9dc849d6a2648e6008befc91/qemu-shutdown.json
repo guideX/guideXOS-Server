@@ -1,0 +1,10 @@
+﻿{
+    "requestedAtUtc":  "2026-10-18T17:32:33.8159520Z",
+    "action":  "QMP quit for the verified owned QEMU process only",
+    "pid":  22156,
+    "qmpPort":  64255,
+    "qemuPath":  "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "espPath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx15\\qemu-a230c9ca9dc849d6a2648e6008befc91\\guest\\esp",
+    "request":  "{\"execute\":\"quit\"}",
+    "acknowledgement":  "{\"timestamp\": {\"seconds\": 1792344753, \"microseconds\": 815952}, \"event\": \"SHUTDOWN\", \"data\": {\"guest\": false, \"reason\": \"host-qmp-quit\"}}"
+}

@@ -1,0 +1,8 @@
+[2026-10-18T17:31:58.9128754Z] rexx /rx15-portable-conversions.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx15\qemu-a230c9ca9dc849d6a2648e6008befc91\screenshots-raw\rx15-01-portable-conversions.ppm
+[2026-10-18T17:32:08.3123048Z] rexx /rx15-conversion-error.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx15\qemu-a230c9ca9dc849d6a2648e6008befc91\screenshots-raw\rx15-02-invalid-conversion.ppm
+[2026-10-18T17:32:18.7699659Z] rexx /rx15-conversion-resource-limit.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx15\qemu-a230c9ca9dc849d6a2648e6008befc91\screenshots-raw\rx15-03-resource-limit.ppm
+[2026-10-18T17:32:29.9004742Z] rexx /rx15-conversion-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx15\qemu-a230c9ca9dc849d6a2648e6008befc91\screenshots-raw\rx15-04-post-error-command.ppm

@@ -1,0 +1,122 @@
+{
+  "schema": "guidexos.rexx.rx15-scorecard.v1",
+  "phase": "RX15",
+  "outcome": "A — Accepted",
+  "completed_at_utc": "2026-10-18T17:34:00Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "53673cfc58ccf4e3017954abb87893fa59e881a0",
+  "qualification_head_before_local_commit": "53673cfc58ccf4e3017954abb87893fa59e881a0",
+  "root_phase_file_present": false,
+  "implemented_functions": ["C2D", "C2X", "D2C", "D2X", "X2C", "X2D", "B2X", "X2B"],
+  "hosted": {
+    "status": "PASS",
+    "command": "tests/run_rexx_tests.ps1 -Phase RX15",
+    "rx15_direct": {
+      "assertions": 211,
+      "cases": 60,
+      "expected_error_cases": 15,
+      "allocation_failure_functions": 8,
+      "failures": 0
+    },
+    "rx15_conversion_fixtures": {"passed": 3, "total": 3},
+    "all_inherited_phase_fixtures_and_resource_cases": {"passed": 259, "total": 259},
+    "cli_regressions": {"passed": 20, "total": 20},
+    "rx1_runtime_integration_cases": {"passed": 11, "total": 11},
+    "reported_c_assertions_rx2_through_rx15": 3676,
+    "failures": 0,
+    "suite_assertions": [
+      {"suite": "RX2 VFS and output", "assertions": 45},
+      {"suite": "RX2 freestanding numeric adapter", "assertions": 18},
+      {"suite": "RX3 decimal arithmetic", "assertions": 26},
+      {"suite": "RX3 allocation failures", "assertions": 570},
+      {"suite": "RX4 arithmetic", "assertions": 53},
+      {"suite": "RX5 numeric context", "assertions": 35},
+      {"suite": "RX6 PARSE allocation failures", "assertions": 439},
+      {"suite": "RX7 routine semantics", "assertions": 13},
+      {"suite": "RX7 parser allocation failures", "assertions": 46},
+      {"suite": "RX7 compiler allocation failures", "assertions": 28},
+      {"suite": "RX7 VM allocation failures", "assertions": 111},
+      {"suite": "RX8 semantics, allocation, and recovery", "assertions": 279},
+      {"suite": "RX9 condition and allocation", "assertions": 467},
+      {"suite": "RX10 INTERPRET and allocation", "assertions": 257},
+      {"suite": "RX12 string and word built-ins", "assertions": 320},
+      {"suite": "RX13 string editing and word utilities", "assertions": 418},
+      {"suite": "RX14 numeric and inspection built-ins", "assertions": 333},
+      {"suite": "RX15 portable conversions", "assertions": 211},
+      {"suite": "RX2 shell bridge", "assertions": 7}
+    ],
+    "evidence": "docs/rexx/evidence/rx15/hosted-qualification.log"
+  },
+  "sanitizers": {
+    "status": "PASS",
+    "address": {"targets_built_and_run": 17, "rx15_conversion": "PASS", "findings": 0},
+    "undefined_behavior": {"targets_built_and_run": 17, "rx15_conversion": "PASS", "findings": 0},
+    "local_compatibility_corpus_cases": 173,
+    "local_expected_results_passed": 173,
+    "regina_differential": "NOT_RUN — Regina unavailable"
+  },
+  "numeric_and_binary_safety": {
+    "wider_than_native_word": "PASS — exact 2^64 conversion and round trips at NUMERIC DIGITS 20",
+    "numeric_digits_error_and_recovery": "PASS — insufficient precision rejected; subsequent call succeeds",
+    "numeric_settings_preserved": "PASS — DIGITS and FUZZ unchanged across successful and failed calls",
+    "fuzz_based_integer_comparison": "NOT_USED",
+    "raw_byte_round_trips": "PASS — NUL, high-bit, and nonprintable bytes preserved",
+    "output_width_limit_bytes": 16777216,
+    "allocation_failure_injection": "PASS — all eight built-ins fail repeatedly, clear output, and recover"
+  },
+  "freestanding_amd64": {
+    "status": "PASS — compilation and link validation",
+    "rexx_c_objects_linked": 9,
+    "freestanding_flags_checked": ["-ffreestanding", "-nostdlib", "-nostdinc++", "-fno-exceptions", "-fno-rtti"],
+    "kernel_elf": "build/rexx/rx15/native-amd64-681c3b3b8b3f43189d03ba2379a2807f/amd64/bin/kernel.elf",
+    "kernel_sha256": "7da4bec8532d3b2c14de0ecbf6c65087655f915b0fb64f32f01a3817abafbe81",
+    "link_evidence": "docs/rexx/evidence/rx15/native-build/native-link-evidence-681c3b3b8b3f43189d03ba2379a2807f.json"
+  },
+  "qemu_guest": {
+    "status": "PASS",
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "run_id": "a230c9ca9dc849d6a2648e6008befc91",
+    "guest_evidence": "docs/rexx/evidence/rx15/native-guest/run-a230c9ca9dc849d6a2648e6008befc91",
+    "conversion_functions_demonstrated": 8,
+    "invalid_conversion_recovery": "PASS",
+    "oversized_width_rejection": "PASS",
+    "post_error_command_responsiveness": "PASS",
+    "network_disabled": true,
+    "copied_disposable_media": true,
+    "kernel_sha256_matched_staged_copy": true,
+    "heartbeat_count": {"before_suite": 1, "after_suite": 31},
+    "qmp_shutdown_acknowledged": true,
+    "rx15_owned_qemu_process_remaining": false,
+    "final_external_qemu_process_count": 1,
+    "process_inventory": "docs/rexx/evidence/rx15/qemu-process-inventory-final.json"
+  },
+  "protected_artifacts": {
+    "status": "PASS",
+    "root_obj_pdb_count": 31,
+    "hashes_unchanged": 31,
+    "missing": 0,
+    "unexpected": 0,
+    "modified": 0,
+    "final_comparison": "docs/rexx/evidence/rx15/protected-artifacts-final-comparison.json"
+  },
+  "inventory": {
+    "rows": 75,
+    "implemented_in_rx15": 8,
+    "implemented_total": 44,
+    "not_implemented": 29,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "path": "docs/rexx/REXX_RX15_BUILTIN_INVENTORY.csv"
+  },
+  "remaining_limits": [
+    "Regina differential comparison was unavailable and remains NOT_RUN.",
+    "Classic suffix X/B literal spelling is not supported by the current lexer; existing prefixed X'...' and B'...' literal syntax works.",
+    "Character-byte conversion follows guideXOS ASCII bytes and does not transcode EBCDIC.",
+    "Conversion output and explicit widths are bounded by the 16 MiB runtime result limit and existing numeric precision/work limits."
+  ],
+  "recommended_rx16_scope": [
+    "Add and test classic suffix hexadecimal and binary literal syntax in the lexer/parser.",
+    "Run the shared portable conversion corpus against Regina when available and record versioned diffs.",
+    "Prioritize remaining classic built-ins from the 29-function unsupported inventory using portable specifications and per-function resource tests."
+  ]
+}

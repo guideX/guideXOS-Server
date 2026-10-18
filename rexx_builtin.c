@@ -2136,6 +2136,593 @@ static RexxVMStatus rexx_builtin_xrange(RexxVM *vm,
     return REXX_VM_STATUS_OK;
 }
 
+/* RX15 conversion helpers operate on bytes and decimal digit strings only.
+ * No integer conversion routes a REXX value through a host machine word. */
+static const char rexx_builtin_hex_digits[] = "0123456789ABCDEF";
+
+static int rexx_builtin_hex_value(unsigned char byte)
+{
+    if (byte >= (unsigned char)'0' && byte <= (unsigned char)'9')
+        return (int)(byte - (unsigned char)'0');
+    if (byte >= (unsigned char)'a' && byte <= (unsigned char)'f')
+        return (int)(byte - (unsigned char)'a') + 10;
+    if (byte >= (unsigned char)'A' && byte <= (unsigned char)'F')
+        return (int)(byte - (unsigned char)'A') + 10;
+    return -1;
+}
+
+/* The first hex group can be odd because an implied leading zero belongs to
+ * it. Every group after the first ends at a byte boundary. */
+static RexxVMStatus rexx_builtin_scan_hex(const RexxBuiltinStringView *input,
+                                         size_t *digit_count)
+{
+    size_t index, count = 0u, group_length = 0u, groups = 0u;
+    int saw_blank = 0;
+    if (input == NULL || digit_count == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    for (index = 0u; index < input->length; ++index) {
+        unsigned char byte = (unsigned char)input->bytes[index];
+        if (byte == (unsigned char)' ') {
+            if (group_length == 0u) {
+                if (groups == 0u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+                continue;
+            }
+            if (groups != 0u && (group_length & 1u) != 0u)
+                return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+            ++groups;
+            group_length = 0u;
+            saw_blank = 1;
+            continue;
+        }
+        if (rexx_builtin_hex_value(byte) < 0)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (count == SIZE_MAX || group_length == SIZE_MAX)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        ++count;
+        ++group_length;
+    }
+    if (saw_blank && group_length == 0u)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (groups != 0u && (group_length & 1u) != 0u)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    *digit_count = count;
+    return REXX_VM_STATUS_OK;
+}
+
+/* In B2X, groups after the first must contain whole nibbles. */
+static RexxVMStatus rexx_builtin_scan_binary(const RexxBuiltinStringView *input,
+                                            size_t *digit_count)
+{
+    size_t index, count = 0u, group_length = 0u, groups = 0u;
+    int saw_blank = 0;
+    if (input == NULL || digit_count == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    for (index = 0u; index < input->length; ++index) {
+        unsigned char byte = (unsigned char)input->bytes[index];
+        if (byte == (unsigned char)' ') {
+            if (group_length == 0u) {
+                if (groups == 0u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+                continue;
+            }
+            if (groups != 0u && (group_length & 3u) != 0u)
+                return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+            ++groups;
+            group_length = 0u;
+            saw_blank = 1;
+            continue;
+        }
+        if (byte != (unsigned char)'0' && byte != (unsigned char)'1')
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (count == SIZE_MAX || group_length == SIZE_MAX)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        ++count;
+        ++group_length;
+    }
+    if (saw_blank && group_length == 0u)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (groups != 0u && (group_length & 3u) != 0u)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    *digit_count = count;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_conversion_width(RexxVM *vm,
+                                                  const RexxValue *argument,
+                                                  size_t *width)
+{
+    RexxVMStatus status;
+    if (argument == NULL || width == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    status = rexx_builtin_size_exact(vm, argument, width);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (*width > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    return REXX_VM_STATUS_OK;
+}
+
+typedef struct RexxBuiltinDecimalAccumulator {
+    char digits[REXX_NUMERIC_MAX_DIGITS + 1u]; /* Least-significant first. */
+    size_t length;
+    size_t precision;
+} RexxBuiltinDecimalAccumulator;
+
+static void rexx_builtin_decimal_accumulator_init(
+    RexxBuiltinDecimalAccumulator *value, size_t precision)
+{
+    value->digits[0] = '0';
+    value->digits[1] = '\0';
+    value->length = 1u;
+    value->precision = precision;
+}
+
+static RexxVMStatus rexx_builtin_decimal_accumulate(
+    RexxVM *vm, RexxBuiltinDecimalAccumulator *value, unsigned int radix,
+    unsigned int digit)
+{
+    size_t index;
+    unsigned int carry = digit;
+    RexxVMStatus status;
+    if (value == NULL || radix < 2u || radix > 256u || digit >= radix)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (value->precision == 0u || value->precision > REXX_NUMERIC_MAX_DIGITS)
+        return REXX_VM_STATUS_INVALID_NUMERIC_SETTING;
+    status = rexx_builtin_charge_numeric_work(vm, value->length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    for (index = 0u; index < value->length; ++index) {
+        unsigned int product =
+            (unsigned int)(value->digits[index] - '0') * radix + carry;
+        value->digits[index] = (char)('0' + product % 10u);
+        carry = product / 10u;
+    }
+    while (carry != 0u) {
+        if (value->length >= value->precision ||
+            value->length >= REXX_NUMERIC_MAX_DIGITS)
+            return REXX_VM_STATUS_NUMERIC_ERROR;
+        value->digits[value->length++] = (char)('0' + carry % 10u);
+        carry /= 10u;
+    }
+    if (value->length > value->precision)
+        return REXX_VM_STATUS_NUMERIC_ERROR;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_return_accumulated_decimal(
+    RexxVM *vm, const RexxBuiltinDecimalAccumulator *magnitude, int negative,
+    RexxValue *result)
+{
+    RexxDecimal decimal;
+    size_t index;
+    if (magnitude == NULL || magnitude->length == 0u || result == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    memset(&decimal, 0, sizeof(decimal));
+    decimal.length = magnitude->length;
+    decimal.scale = 0;
+    decimal.sign = negative &&
+                           !(magnitude->length == 1u &&
+                             magnitude->digits[0] == '0')
+                       ? -1 : 1;
+    for (index = 0u; index < magnitude->length; ++index)
+        decimal.digits[index] = magnitude->digits[magnitude->length - index - 1u];
+    decimal.digits[decimal.length] = '\0';
+    return rexx_builtin_return_decimal(vm, &decimal, result);
+}
+
+/* Normalize a whole numeric argument without narrowing its integer value. */
+static RexxVMStatus rexx_builtin_whole_decimal(
+    RexxVM *vm, const RexxValue *argument,
+    char digits[REXX_DECIMAL_MAX_DIGITS + 1u], size_t *length, int *negative)
+{
+    RexxDecimal parsed;
+    RexxVMStatus status;
+    size_t index, whole_length;
+    int64_t zeroes;
+    status = rexx_builtin_prepare_decimal(vm, argument, &parsed);
+    if (status != REXX_VM_STATUS_OK) return status;
+    *negative = parsed.sign < 0;
+    if (parsed.sign == 0) {
+        digits[0] = '0';
+        digits[1] = '\0';
+        *length = 1u;
+        *negative = 0;
+        return REXX_VM_STATUS_OK;
+    }
+    if (parsed.scale > 0) {
+        size_t fractional = (size_t)parsed.scale;
+        if (fractional >= parsed.length)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        for (index = parsed.length - fractional; index < parsed.length; ++index)
+            if (parsed.digits[index] != '0')
+                return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        whole_length = parsed.length - fractional;
+        memcpy(digits, parsed.digits, whole_length);
+    } else {
+        zeroes = -(int64_t)parsed.scale;
+        if ((uint64_t)zeroes >
+            (uint64_t)REXX_DECIMAL_MAX_DIGITS - (uint64_t)parsed.length)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        whole_length = parsed.length + (size_t)zeroes;
+        memcpy(digits, parsed.digits, parsed.length);
+        memset(digits + parsed.length, '0', (size_t)zeroes);
+    }
+    if (whole_length == 0u || whole_length > REXX_DECIMAL_MAX_DIGITS)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    digits[whole_length] = '\0';
+    *length = whole_length;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_decimal_to_radix_string(
+    RexxVM *vm, const RexxValue *arguments, size_t argument_count,
+    RexxValue *result, unsigned int radix, int character_output)
+{
+    char decimal_digits[REXX_DECIMAL_MAX_DIGITS + 1u];
+    char reversed[REXX_DECIMAL_MAX_DIGITS + 1u];
+    size_t decimal_length, digit_count = 0u, width = 0u, output_length, index;
+    size_t work_length;
+    int negative;
+    int explicit_width = argument_count > 1u &&
+                         arguments[1].type != REXX_VALUE_UNSET;
+    RexxVMStatus status;
+    char *output = NULL;
+
+    if (radix != 16u && radix != 256u)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    status = rexx_builtin_whole_decimal(vm, &arguments[0], decimal_digits,
+                                        &decimal_length, &negative);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (negative && !explicit_width)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (explicit_width) {
+        status = rexx_builtin_conversion_width(vm, &arguments[1], &width);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+
+    work_length = decimal_length;
+    while (work_length != 0u &&
+           !(work_length == 1u && decimal_digits[0] == '0')) {
+        unsigned int remainder = 0u;
+        size_t write = 0u;
+        for (index = 0u; index < work_length; ++index) {
+            unsigned int dividend =
+                remainder * 10u + (unsigned int)(decimal_digits[index] - '0');
+            unsigned int quotient = dividend / radix;
+            remainder = dividend % radix;
+            if (write != 0u || quotient != 0u)
+                decimal_digits[write++] = (char)('0' + quotient);
+        }
+        if (digit_count >= sizeof(reversed))
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        reversed[digit_count++] = radix == 16u
+                                      ? rexx_builtin_hex_digits[remainder]
+                                      : (char)remainder;
+        if (write == 0u) {
+            work_length = 1u;
+            decimal_digits[0] = '0';
+        } else {
+            work_length = write;
+            decimal_digits[work_length] = '\0';
+        }
+    }
+    if (digit_count == 0u)
+        reversed[digit_count++] = radix == 16u ? '0' : 0;
+    output_length = explicit_width ? width : digit_count;
+    status = rexx_builtin_allocate_result(result, output_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (character_output) {
+        size_t copy_count = digit_count < output_length ? digit_count : output_length;
+        size_t pad_count = output_length - copy_count;
+        if (pad_count != 0u) memset(output, 0, pad_count);
+        for (index = 0u; index < copy_count; ++index)
+            output[output_length - index - 1u] = reversed[index];
+        if (negative) {
+            unsigned int carry = 1u;
+            for (index = output_length; index != 0u; --index) {
+                unsigned int value =
+                    (unsigned int)(unsigned char)output[index - 1u];
+                unsigned int twos = 255u - value + carry;
+                output[index - 1u] = (char)(twos & 255u);
+                carry = twos >> 8;
+            }
+        }
+    } else {
+        size_t copy_count = digit_count < output_length ? digit_count : output_length;
+        size_t pad_count = output_length - copy_count;
+        if (pad_count != 0u) memset(output, '0', pad_count);
+        for (index = 0u; index < copy_count; ++index)
+            output[output_length - index - 1u] = reversed[index];
+        if (negative) {
+            unsigned int carry = 1u;
+            for (index = output_length; index != 0u; --index) {
+                int digit = rexx_builtin_hex_value((unsigned char)output[index - 1u]);
+                unsigned int twos;
+                if (digit < 0) return REXX_VM_STATUS_INVALID_ARGUMENT;
+                twos = 15u - (unsigned int)digit + carry;
+                output[index - 1u] = rexx_builtin_hex_digits[twos & 15u];
+                carry = twos >> 4;
+            }
+        }
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_d2c(RexxVM *vm, const RexxValue *arguments,
+                                     size_t argument_count, RexxValue *result)
+{
+    return rexx_builtin_decimal_to_radix_string(vm, arguments, argument_count,
+                                                result, 256u, 1);
+}
+
+static RexxVMStatus rexx_builtin_d2x(RexxVM *vm, const RexxValue *arguments,
+                                     size_t argument_count, RexxValue *result)
+{
+    return rexx_builtin_decimal_to_radix_string(vm, arguments, argument_count,
+                                                result, 16u, 0);
+}
+
+static RexxVMStatus rexx_builtin_c2x(const RexxValue *arguments,
+                                     size_t argument_count, RexxValue *result)
+{
+    RexxBuiltinStringView input;
+    RexxVMStatus status;
+    char *output = NULL;
+    size_t output_length, index;
+    (void)argument_count;
+    status = rexx_builtin_string_view(&arguments[0], &input);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (input.length > REXX_BUILTIN_MAX_RESULT_LENGTH / 2u)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    output_length = input.length * 2u;
+    status = rexx_builtin_allocate_result(result, output_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    for (index = 0u; index < input.length; ++index) {
+        unsigned int byte = (unsigned char)input.bytes[index];
+        output[index * 2u] = rexx_builtin_hex_digits[byte >> 4];
+        output[index * 2u + 1u] = rexx_builtin_hex_digits[byte & 15u];
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_x2c(const RexxValue *arguments,
+                                     size_t argument_count, RexxValue *result)
+{
+    RexxBuiltinStringView input;
+    RexxVMStatus status;
+    char *output = NULL;
+    size_t digit_count, output_length, output_index = 0u, input_index;
+    int high = -1;
+    (void)argument_count;
+    status = rexx_builtin_string_view(&arguments[0], &input);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_scan_hex(&input, &digit_count);
+    if (status != REXX_VM_STATUS_OK) return status;
+    output_length = digit_count / 2u + (digit_count & 1u);
+    status = rexx_builtin_allocate_result(result, output_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    for (input_index = 0u; input_index < input.length; ++input_index) {
+        unsigned char byte = (unsigned char)input.bytes[input_index];
+        int nibble;
+        if (byte == (unsigned char)' ') continue;
+        nibble = rexx_builtin_hex_value(byte);
+        if ((digit_count & 1u) != 0u && output_index == 0u && high < 0) {
+            output[output_index++] = (char)nibble;
+            continue;
+        }
+        if (high < 0) high = nibble;
+        else {
+            output[output_index++] = (char)((high << 4) | nibble);
+            high = -1;
+        }
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_hex_to_decimal(
+    RexxVM *vm, const RexxValue *arguments, size_t argument_count,
+    RexxValue *result)
+{
+    RexxBuiltinStringView input;
+    RexxBuiltinDecimalAccumulator magnitude;
+    RexxVMStatus status;
+    size_t digit_count, width = 0u, skipped, selected, logical_index, source_index;
+    size_t last_nonzero = SIZE_MAX, precision = rexx_builtin_digits(vm);
+    int explicit_width = argument_count > 1u &&
+                         arguments[1].type != REXX_VALUE_UNSET;
+    int negative = 0;
+
+    status = rexx_builtin_string_view(&arguments[0], &input);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_scan_hex(&input, &digit_count);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (explicit_width) {
+        status = rexx_builtin_conversion_width(vm, &arguments[1], &width);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (width == 0u) {
+            rexx_builtin_decimal_accumulator_init(&magnitude, precision);
+            return rexx_builtin_return_accumulated_decimal(vm, &magnitude, 0,
+                                                            result);
+        }
+        selected = digit_count < width ? digit_count : width;
+        skipped = digit_count - selected;
+        if (digit_count >= width) {
+            logical_index = 0u;
+            for (source_index = 0u; source_index < input.length; ++source_index) {
+                int nibble = rexx_builtin_hex_value(
+                    (unsigned char)input.bytes[source_index]);
+                if (nibble < 0) continue;
+                if (logical_index == skipped) {
+                    negative = (nibble & 8) != 0;
+                    break;
+                }
+                ++logical_index;
+            }
+        }
+    } else {
+        selected = digit_count;
+        skipped = 0u;
+    }
+    if (negative) {
+        logical_index = 0u;
+        for (source_index = 0u; source_index < input.length; ++source_index) {
+            int nibble = rexx_builtin_hex_value(
+                (unsigned char)input.bytes[source_index]);
+            if (nibble < 0) continue;
+            if (logical_index >= skipped && logical_index - skipped < selected &&
+                nibble != 0)
+                last_nonzero = logical_index - skipped;
+            ++logical_index;
+        }
+    }
+    if (precision == 0u || precision > REXX_NUMERIC_MAX_DIGITS)
+        return REXX_VM_STATUS_INVALID_NUMERIC_SETTING;
+    rexx_builtin_decimal_accumulator_init(&magnitude, precision);
+    if (selected == 0u)
+        return rexx_builtin_return_accumulated_decimal(vm, &magnitude, 0,
+                                                        result);
+    logical_index = 0u;
+    for (source_index = 0u; source_index < input.length; ++source_index) {
+        unsigned char byte = (unsigned char)input.bytes[source_index];
+        int nibble;
+        unsigned int value;
+        if (byte == (unsigned char)' ') continue;
+        nibble = rexx_builtin_hex_value(byte);
+        if (logical_index < skipped) {
+            ++logical_index;
+            continue;
+        }
+        if (logical_index - skipped >= selected) break;
+        value = (unsigned int)nibble;
+        if (negative) {
+            size_t position = logical_index - skipped;
+            if (position < last_nonzero) value = 15u - value;
+            else if (position == last_nonzero) value = 16u - value;
+            else value = 0u;
+        }
+        status = rexx_builtin_decimal_accumulate(vm, &magnitude, 16u, value);
+        if (status != REXX_VM_STATUS_OK) return status;
+        ++logical_index;
+    }
+    return rexx_builtin_return_accumulated_decimal(vm, &magnitude, negative,
+                                                    result);
+}
+
+static RexxVMStatus rexx_builtin_c2d(RexxVM *vm, const RexxValue *arguments,
+                                     size_t argument_count, RexxValue *result)
+{
+    RexxBuiltinStringView input;
+    RexxBuiltinDecimalAccumulator magnitude;
+    RexxVMStatus status;
+    size_t width = 0u, start, selected, index, last_nonzero = SIZE_MAX;
+    size_t precision = rexx_builtin_digits(vm);
+    int explicit_width = argument_count > 1u &&
+                         arguments[1].type != REXX_VALUE_UNSET;
+    int negative = 0;
+    status = rexx_builtin_string_view(&arguments[0], &input);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (explicit_width) {
+        status = rexx_builtin_conversion_width(vm, &arguments[1], &width);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (width == 0u) {
+            rexx_builtin_decimal_accumulator_init(&magnitude, precision);
+            return rexx_builtin_return_accumulated_decimal(vm, &magnitude, 0,
+                                                            result);
+        }
+        selected = input.length < width ? input.length : width;
+        start = input.length - selected;
+        if (input.length >= width && selected != 0u)
+            negative = (((unsigned char)input.bytes[start]) & 0x80u) != 0u;
+    } else {
+        start = 0u;
+        selected = input.length;
+    }
+    if (precision == 0u || precision > REXX_NUMERIC_MAX_DIGITS)
+        return REXX_VM_STATUS_INVALID_NUMERIC_SETTING;
+    if (negative) {
+        for (index = start + selected; index != start; --index)
+            if ((unsigned char)input.bytes[index - 1u] != 0u) {
+                last_nonzero = index - start - 1u;
+                break;
+            }
+    }
+    rexx_builtin_decimal_accumulator_init(&magnitude, precision);
+    for (index = 0u; index < selected; ++index) {
+        unsigned int byte = (unsigned char)input.bytes[start + index];
+        if (negative) {
+            if (index < last_nonzero) byte = 255u - byte;
+            else if (index == last_nonzero) byte = 256u - byte;
+            else byte = 0u;
+        }
+        status = rexx_builtin_decimal_accumulate(vm, &magnitude, 256u, byte);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    return rexx_builtin_return_accumulated_decimal(vm, &magnitude, negative,
+                                                    result);
+}
+
+static RexxVMStatus rexx_builtin_b2x(const RexxValue *arguments,
+                                     size_t argument_count, RexxValue *result)
+{
+    RexxBuiltinStringView input;
+    RexxVMStatus status;
+    char *output = NULL;
+    size_t bit_count, output_length, padding, input_index, output_index = 0u;
+    unsigned int nibble = 0u, nibble_bits;
+    (void)argument_count;
+    status = rexx_builtin_string_view(&arguments[0], &input);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_scan_binary(&input, &bit_count);
+    if (status != REXX_VM_STATUS_OK) return status;
+    output_length = bit_count / 4u + ((bit_count & 3u) != 0u);
+    status = rexx_builtin_allocate_result(result, output_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (bit_count == 0u) return REXX_VM_STATUS_OK;
+    padding = output_length * 4u - bit_count;
+    nibble_bits = (unsigned int)padding;
+    for (input_index = 0u; input_index < input.length; ++input_index) {
+        unsigned char byte = (unsigned char)input.bytes[input_index];
+        if (byte == (unsigned char)' ') continue;
+        nibble = (nibble << 1) | (unsigned int)(byte - (unsigned char)'0');
+        ++nibble_bits;
+        if (nibble_bits == 4u) {
+            output[output_index++] = rexx_builtin_hex_digits[nibble];
+            nibble = 0u;
+            nibble_bits = 0u;
+        }
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_x2b(const RexxValue *arguments,
+                                     size_t argument_count, RexxValue *result)
+{
+    static const char binary[16][5] = {
+        "0000", "0001", "0010", "0011", "0100", "0101", "0110", "0111",
+        "1000", "1001", "1010", "1011", "1100", "1101", "1110", "1111"
+    };
+    RexxBuiltinStringView input;
+    RexxVMStatus status;
+    char *output = NULL;
+    size_t digit_count, output_length, input_index, output_index = 0u;
+    (void)argument_count;
+    status = rexx_builtin_string_view(&arguments[0], &input);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_scan_hex(&input, &digit_count);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (digit_count > REXX_BUILTIN_MAX_RESULT_LENGTH / 4u)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    output_length = digit_count * 4u;
+    status = rexx_builtin_allocate_result(result, output_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    for (input_index = 0u; input_index < input.length; ++input_index) {
+        int nibble;
+        unsigned char byte = (unsigned char)input.bytes[input_index];
+        if (byte == (unsigned char)' ') continue;
+        nibble = rexx_builtin_hex_value(byte);
+        memcpy(output + output_index, binary[nibble], 4u);
+        output_index += 4u;
+    }
+    return REXX_VM_STATUS_OK;
+}
+
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "LENGTH", 1u, 1u, rexx_builtin_length, NULL },
     { "LEFT", 2u, 3u, rexx_builtin_left, NULL },
@@ -2167,7 +2754,15 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "FORMAT", 1u, 5u, NULL, rexx_builtin_format },
     { "DATATYPE", 1u, 2u, NULL, rexx_builtin_datatype },
     { "SYMBOL", 1u, 1u, NULL, rexx_builtin_symbol },
-    { "XRANGE", 0u, 2u, NULL, rexx_builtin_xrange }
+    { "XRANGE", 0u, 2u, NULL, rexx_builtin_xrange },
+    { "C2D", 1u, 2u, NULL, rexx_builtin_c2d },
+    { "C2X", 1u, 1u, rexx_builtin_c2x, NULL },
+    { "D2C", 1u, 2u, NULL, rexx_builtin_d2c },
+    { "D2X", 1u, 2u, NULL, rexx_builtin_d2x },
+    { "X2C", 1u, 1u, rexx_builtin_x2c, NULL },
+    { "X2D", 1u, 2u, NULL, rexx_builtin_hex_to_decimal },
+    { "B2X", 1u, 1u, rexx_builtin_b2x, NULL },
+    { "X2B", 1u, 1u, rexx_builtin_x2b, NULL }
 };
 
 const RexxBuiltinDescriptor *rexx_builtin_lookup(const char *name,

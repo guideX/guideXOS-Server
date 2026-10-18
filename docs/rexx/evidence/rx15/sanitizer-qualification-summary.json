@@ -1,0 +1,27 @@
+{
+  "schema": "guidexos.rexx.rx15.sanitizer-summary.v1",
+  "phase": "RX15",
+  "command": "tests/run_rexx_sanitizers.ps1 -Phase RX15 -Sanitizer Both",
+  "overall": "PASS",
+  "address_sanitizer": {
+    "status": "PASS",
+    "compiler": "Microsoft C/C++ Optimizing Compiler 19.51.36260 for x64",
+    "targets_built_and_run": 17,
+    "rx15_conversion_test": "PASS",
+    "sanitizer_findings": 0,
+    "durable_evidence": "docs/rexx/evidence/rx15/sanitizer-address-02be437a663d4bce996044f3921f924a"
+  },
+  "undefined_behavior_sanitizer": {
+    "status": "PASS",
+    "compiler": "clang version 22.1.8",
+    "targets_built_and_run": 17,
+    "rx15_conversion_test": "PASS",
+    "sanitizer_findings": 0,
+    "durable_evidence": "docs/rexx/evidence/rx15/sanitizer-undefined-8f94609c00b34c43b6a5cdc3dc42dda6"
+  },
+  "portable_corpus": {
+    "cases": 173,
+    "local_expected_results": "173/173 PASS",
+    "regina_differential": "NOT_RUN — Regina unavailable"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schema": "guidexos.rexx.rx15.qemu-final-inventory.v1",
+  "captured_at_utc": "2026-10-18T17:34:04.2908702Z",
+  "rx15_run_id": "a230c9ca9dc849d6a2648e6008befc91",
+  "rx15_owner_pid": 22156,
+  "rx15_owner_process_still_running": false,
+  "qemu_process_count": 1,
+  "processes": [
+    {
+      "pid": 34980,
+      "image": "qemu-system-x86_64.exe",
+      "rx15_owned": false,
+      "command_line_redacted": true
+    }
+  ],
+  "runner_before_after_census_same": true,
+  "runner_census_count": 2,
+  "shutdown_acknowledged": true,
+  "external_processes_terminated_by_rx15": 0
+}

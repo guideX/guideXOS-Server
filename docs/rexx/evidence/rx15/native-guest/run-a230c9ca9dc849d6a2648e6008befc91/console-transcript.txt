@@ -1,0 +1,9 @@
+RX15 isolated QEMU Console transcript
+Kernel SHA-256: 7da4bec8532d3b2c14de0ecbf6c65087655f915b0fb64f32f01a3817abafbe81
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx15\qemu-a230c9ca9dc849d6a2648e6008befc91\guest\esp
+COMMAND: rexx /rx15-portable-conversions.rex | expected visible marker/status: RX15_NATIVE_CONVERSIONS_DONE
+COMMAND: rexx /rx15-conversion-error.rex | expected visible marker/status: invalid arguments to REXX built-in function
+COMMAND: rexx /rx15-conversion-resource-limit.rex | expected visible marker/status: VM resource limit exceeded
+COMMAND: rexx /rx15-conversion-recovery.rex | expected visible marker/status: RX15_NATIVE_GUEST_RESPONSIVE: FFFFFFFF
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=31
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.
