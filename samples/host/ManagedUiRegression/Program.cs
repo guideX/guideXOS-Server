@@ -123,5 +123,15 @@ bool c175StressPassed = RunSuite("C175-NotesResizeStress",
 allPassed &= c175StressPassed;
 Console.WriteLine($"C175-STRESS layout={GuideXosManagedWindowResizeC175Tests.StressLayoutUpdates} alternating={GuideXosManagedWindowResizeC175Tests.StressAlternatingResizes} failed={GuideXosManagedWindowResizeC175Tests.StressFailedGeometryRequests} rollback={GuideXosManagedWindowResizeC175Tests.StressRollbackCount} lifecycles={GuideXosManagedWindowResizeC175Tests.StressLifecycleCount} allocationBytes={GuideXosManagedWindowResizeC175Tests.StressAllocationBytes} drift={GuideXosManagedWindowResizeC175Tests.StressDriftCount} result={(c175StressPassed ? "PASS" : "FAIL")}");
 
+allPassed &= RunSuite("C176-NotesNavigation",
+    GuideXosTextAreaC176Tests.CaseCount,
+    () => GuideXosTextAreaC176Tests.Run(null));
+Console.WriteLine($"C176-NOTES-NAVIGATION-DETAIL firstFailedCase={GuideXosTextAreaC176Tests.FirstFailedCase}");
+bool c176StressPassed = RunSuite("C176-NotesNavigationStress",
+    GuideXosTextAreaC176Tests.StressCaseCount,
+    () => GuideXosTextAreaC176Tests.RunStress(null));
+allPassed &= c176StressPassed;
+Console.WriteLine($"C176-STRESS navigation={GuideXosTextAreaC176Tests.NavigationOperationCount} alternating={GuideXosTextAreaC176Tests.AlternatingResizeCount} navigationResize={GuideXosTextAreaC176Tests.NavigationResizeCount} rejected={GuideXosTextAreaC176Tests.RejectedGeometryCount} lifecycles={GuideXosTextAreaC176Tests.LifecycleCount} allocationBytes={GuideXosTextAreaC176Tests.ResizeAllocationBytes} drift={GuideXosTextAreaC176Tests.DriftCount} result={(c176StressPassed ? "PASS" : "FAIL")}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

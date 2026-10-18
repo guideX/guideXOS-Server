@@ -585,6 +585,11 @@ public static class GuideXosManagedWindowResizeC175Tests
         return document.TryHydrate(area, path, content);
     }
 
+    internal static bool TryResizeForC176(GuideXosTextArea area,
+        GuideXosNotesDocumentState document, ref int width, ref int height,
+        int nextWidth, int nextHeight) =>
+        TryResize(area, document, ref width, ref height, nextWidth, nextHeight);
+
     private static bool TryResize(GuideXosTextArea area,
         GuideXosNotesDocumentState document, ref int width, ref int height,
         int nextWidth, int nextHeight)

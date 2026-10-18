@@ -16,8 +16,9 @@ public enum GuideXosTextAreaEditResult
 
 /// <summary>
 /// A bounded, platform-neutral multiline editor. The document is stored as
-/// one fixed UTF-16 buffer with LF line separators. No application-specific
-/// keyboard or compositor state is kept by the control.
+/// one fixed UTF-16 buffer with LF or CRLF line separators. CRLF pairs are
+/// preserved as two physical bytes but exposed as one logical line break.
+/// No application-specific keyboard or compositor state is kept by the control.
 /// </summary>
 public sealed class GuideXosTextArea
 {
@@ -196,7 +197,8 @@ public sealed class GuideXosTextArea
 
     /// <summary>
     /// Replaces the whole document atomically. Supported content is bounded
-    /// printable ASCII plus LF; CR and other control characters are rejected.
+    /// printable ASCII plus LF or CRLF. CR-only and other control characters
+    /// are rejected.
     /// </summary>
     public bool SetText(string value)
     {
@@ -273,7 +275,8 @@ public sealed class GuideXosTextArea
         for (int index = 0; index < written; index++)
         {
             char value = _buffer[start + index];
-            if (value != '\n' && !IsSupportedCharacter(value)) return false;
+            if (value is not ('\n' or '\r') && !IsSupportedCharacter(value))
+                return false;
             destination[index] = (byte)value;
         }
         return true;
@@ -350,8 +353,8 @@ public sealed class GuideXosTextArea
     public void RestoreSessionPosition(int caretIndex, int anchorIndex,
         int firstVisibleLine)
     {
-        _caretIndex = Math.Clamp(caretIndex, 0, _length);
-        _anchorIndex = Math.Clamp(anchorIndex, 0, _length);
+        _caretIndex = NormalizeCaretIndex(caretIndex);
+        _anchorIndex = NormalizeCaretIndex(anchorIndex);
         _preferredColumn = -1;
         _viewport.SetOffset(firstVisibleLine);
         EnsureCaretVisible();
@@ -581,6 +584,11 @@ public sealed class GuideXosTextArea
         if (HasSelection) return DeleteSelection();
         if (_caretIndex == 0) return GuideXosTextAreaEditResult.Ignored;
         int target = _caretIndex - 1;
+        if (_buffer[target] == '\n' && target > 0 &&
+            _buffer[target - 1] == '\r')
+        {
+            --target;
+        }
         RemoveRange(target, _caretIndex);
         _caretIndex = target;
         _anchorIndex = target;
@@ -592,7 +600,13 @@ public sealed class GuideXosTextArea
     {
         if (HasSelection) return DeleteSelection();
         if (_caretIndex >= _length) return GuideXosTextAreaEditResult.Ignored;
-        RemoveRange(_caretIndex, _caretIndex + 1);
+        int end = _caretIndex + 1;
+        if (_buffer[_caretIndex] == '\r' && end < _length &&
+            _buffer[end] == '\n')
+        {
+            ++end;
+        }
+        RemoveRange(_caretIndex, end);
         RecordContentMutation();
         return GuideXosTextAreaEditResult.Changed;
     }
@@ -644,6 +658,17 @@ public sealed class GuideXosTextArea
         {
             target = _caretIndex + direction;
             if (target < 0 || target > _length) return GuideXosTextAreaEditResult.Ignored;
+            if (direction < 0 && target > 0 &&
+                _buffer[target - 1] == '\r' && _buffer[target] == '\n')
+            {
+                --target;
+            }
+            else if (direction > 0 && _caretIndex < _length - 1 &&
+                _buffer[_caretIndex] == '\r' &&
+                _buffer[_caretIndex + 1] == '\n')
+            {
+                ++target;
+            }
         }
         _caretIndex = target;
         if (!shift) _anchorIndex = target;
@@ -759,8 +784,8 @@ public sealed class GuideXosTextArea
         {
             if (_buffer[index] == '\n') ++_lineCount;
         }
-        _caretIndex = Math.Clamp(caret, 0, _length);
-        _anchorIndex = Math.Clamp(anchor, 0, _length);
+        _caretIndex = NormalizeCaretIndex(caret);
+        _anchorIndex = NormalizeCaretIndex(anchor);
         _preferredColumn = -1;
         _viewport.ContentExtent = _lineCount;
         EnsureCaretVisible();
@@ -807,7 +832,8 @@ public sealed class GuideXosTextArea
     {
         int start = GetLineStart(line);
         int index = start;
-        while (index < _length && _buffer[index] != '\n') ++index;
+        while (index < _length && _buffer[index] is not ('\n' or '\r'))
+            ++index;
         return index - start;
     }
 
@@ -828,6 +854,11 @@ public sealed class GuideXosTextArea
         {
             char character = value[index];
             if (character == '\n') ++lineCount;
+            else if (character == '\r')
+            {
+                if (index + 1 >= value.Length || value[index + 1] != '\n')
+                    return false;
+            }
             else if (!IsSupportedCharacter(character)) return false;
         }
         return true;
@@ -840,6 +871,14 @@ public sealed class GuideXosTextArea
         {
             byte character = value[index];
             if (character == (byte)'\n') ++lineCount;
+            else if (character == (byte)'\r')
+            {
+                if (index + 1 >= value.Length ||
+                    value[index + 1] != (byte)'\n')
+                {
+                    return false;
+                }
+            }
             else if (character < 0x20 || character > 0x7E) return false;
         }
         return true;
@@ -848,6 +887,15 @@ public sealed class GuideXosTextArea
     private static bool IsSupportedCharacter(char value)
     {
         return value >= 0x20 && value <= 0x7E;
+    }
+
+    private int NormalizeCaretIndex(int index)
+    {
+        index = Math.Clamp(index, 0, _length);
+        return index > 0 && index < _length &&
+            _buffer[index - 1] == '\r' && _buffer[index] == '\n'
+            ? index + 1
+            : index;
     }
 
     private static bool AppendByte(Span<byte> destination, ref int position, byte value)

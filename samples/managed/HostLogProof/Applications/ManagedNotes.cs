@@ -1981,6 +1981,26 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
         }
 #endif
+#if HOSTLOGPROOF_C176_MANAGED_NOTES_NAVIGATION
+        if (!s_c176NavigationTestsRun)
+        {
+            s_c176NavigationTestsRun = true;
+            bool navigation = GuideXosTextAreaC176Tests.Run(host);
+            bool stress = true;
+#if !HOSTLOGPROOF_C167_UI_FOCUSED_BUILD && !HOSTLOGPROOF_C166_ORDINARY_BUILD
+            stress = GuideXosTextAreaC176Tests.RunStress(host);
+#endif
+            if (!navigation || !stress)
+            {
+                host.TryLog("C176-NOTES-NAVIGATION-TESTS result=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+#if GUIDEXOS_PROOF_CONTROL
+            GC.Collect();
+            host.TryLog("C176-PROOF-FIXTURE-COLLECTION result=PASS"u8);
+#endif
+        }
+#endif
         if (!TryInitializeC175Layout())
         {
             return GuideXosResult.InvalidArgument;

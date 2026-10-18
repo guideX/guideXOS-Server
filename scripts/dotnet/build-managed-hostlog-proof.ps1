@@ -545,6 +545,7 @@ try {
             throw "C175 focused proof requires a proof-controlled production C160 or C167 composite."
         }
         $publishProperties += "-p:HostLogProofC175IncludeFocusedTests=true"
+        $publishProperties += "-p:HostLogProofC176IncludeFocusedTests=true"
     }
     if ($C164FileActivationProof) {
         $publishProperties += "-p:HostLogProofC164FileActivationProof=true"
@@ -628,6 +629,9 @@ if ($C173ManagedFileExplorerResize -and $ProofControl) {
     }
     if ($C175ManagedNotesResize -and -not $artifactText.Contains('C175-MANAGED-GEOMETRY')) {
         throw "C175 focused composite is missing managed proof-control marker 'C175-MANAGED-GEOMETRY'."
+    }
+    if ($C175ManagedNotesResize -and -not $artifactText.Contains('C176-NOTES-NAVIGATION')) {
+        throw "C176 focused composite is missing managed navigation marker 'C176-NOTES-NAVIGATION'."
     }
 }
 

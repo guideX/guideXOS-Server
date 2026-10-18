@@ -1267,6 +1267,49 @@ if ($C164FileActivation) {
         [byte[]]@(0xC2))
     $staged += @(Get-ChildItem -LiteralPath $c164Dir -File -Force)
     Write-Host "      staged C164 activation fixtures: exact, mixed-case, unsupported, dotfile, empty, and capacity cases" -ForegroundColor Yellow
+
+    $lfLines = @(
+        "00 short",
+        "01 preferred column",
+        "02 x",
+        "03 medium",
+        "04 another",
+        "05",
+        "06 very long line wider than editor viewport",
+        "07 short",
+        "08 eight",
+        "09 x",
+        "10 longer row",
+        "11 ",
+        "12 twelve",
+        "13 x",
+        "14 longer",
+        "15 short",
+        "16 final scroll row",
+        "17 end"
+    )
+    $crlfLines = @(
+        "00 CRLF short",
+        "",
+        "02 preferred column line",
+        "03 x",
+        "04 medium",
+        "05 very long line wider than editor viewport",
+        "06 short",
+        "07 seven",
+        "08 x",
+        "09 longer neighbor",
+        "10 short",
+        "11 end",
+        ""
+    )
+    $lfBytes = [System.Text.Encoding]::ASCII.GetBytes(($lfLines -join "`n"))
+    $crlfBytes = [System.Text.Encoding]::ASCII.GetBytes(($crlfLines -join "`r`n"))
+    [System.IO.File]::WriteAllBytes((Join-Path $appsDir "zzzzcr.txt"), $crlfBytes)
+    [System.IO.File]::WriteAllBytes((Join-Path $appsDir "zzzzlf.txt"), $lfBytes)
+    $staged += @(Get-Item -LiteralPath (Join-Path $appsDir "zzzzcr.txt"))
+    $staged += @(Get-Item -LiteralPath (Join-Path $appsDir "zzzzlf.txt"))
+    Write-Host "      staged C176 long LF/CRLF documents for Notes UI and association boots" -ForegroundColor Yellow
 }
 
 if ($C156ControlModifierShortcuts -and -not $C155ManagedNotesSession) {
