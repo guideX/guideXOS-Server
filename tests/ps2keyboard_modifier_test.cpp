@@ -164,6 +164,41 @@ int main()
     check(!kernel::ps2keyboard::has_key(),
           "unknown scancode does not manufacture a printable key event");
 
+    // Fault-inject a missing physical Shift break by ending the stream after
+    // its make.  The next ordinary key sees the still-authoritative modifier;
+    // a later press/release of that same physical Shift supplies a fresh break
+    // and restores ordinary keyboard input without reinitializing the driver.
+    kernel::ps2keyboard::init();
+    feed(0x12u); // left Shift make; intentionally omit its break
+    feed(0x0Du); // Tab while the missed break is outstanding
+    readKey('\t', kernel::ps2keyboard::KEY_MOD_SHIFT,
+            "missing Shift break is reflected in the next ordinary key snapshot");
+    feed(0x0Du); // another ordinary key before a matching break arrives
+    readKey('\t', kernel::ps2keyboard::KEY_MOD_SHIFT,
+            "a missing Shift break remains active until a matching break arrives");
+    feed(0x12u); // user taps the same physical Shift key again
+    feed(0xF0u); feed(0x12u); // fresh break clears its state
+    check(!kernel::ps2keyboard::is_shift_down(),
+          "a fresh break from the same Shift key recovers a missed key-up");
+    feed(0x0Du);
+    readKey('\t', 0u,
+            "ordinary Tab resumes after missed-key-up recovery");
+    feed(0x1Cu); // A
+    readKey('a', 0u,
+            "ordinary character input remains usable after modifier recovery");
+
+    // Driver initialization also resets state, but production calls init only
+    // during kernel startup; it is not an exposed runtime recovery control.
+    feed(0x59u); // right Shift make; intentionally omit its break
+    check(kernel::ps2keyboard::is_shift_down(),
+          "right Shift can be left active by an omitted key-up");
+    kernel::ps2keyboard::init();
+    check(!kernel::ps2keyboard::is_shift_down(),
+          "keyboard driver initialization clears stale modifier state");
+    feed(0x0Du);
+    readKey('\t', 0u,
+            "ordinary Tab is neutral after driver reinitialization");
+
     std::cout << "PS/2 keyboard modifier tests: " << (checks - failures)
               << "/" << checks << " passed\n";
     return failures == 0 ? 0 : 1;

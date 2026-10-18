@@ -1,0 +1,10 @@
+Running: C:\mingw64\bin\g++.exe -std=c++14 -Wall -Wextra -O2 -fno-exceptions -fno-rtti -DGXOS_BARE_METAL -iquote . -idirafter kernel/core/include -I kernel/arch/amd64/include tests/ps2keyboard_modifier_test.cpp kernel/core/ps2keyboard.cpp -o C:\Users\guideX\AppData\Local\Temp\guidexos-settings-s21\ps2keyboard_modifier_test.exe
+kernel/core/ps2keyboard.cpp: In function 'void kernel::ps2keyboard::irq_handler()':
+kernel/core/ps2keyboard.cpp:339:30: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  339 |                 if (scancode < 256) {
+      |                     ~~~~~~~~~^~~~~
+PS/2 keyboard modifier tests: 39/39 passed
+PS/2 keyboard modifier build and test PASS.
+
+exit_code=0
+test_binary_sha256=63F8AB50BBC5147DAEA59AC5929F14164AA26C7711FE022D3539654D61A066C6
