@@ -1,0 +1,31 @@
+{
+  "compile_commands": 257,
+  "compiler_errors": 0,
+  "warning_diagnostic_lines": 463,
+  "normalized_file_warning_signatures": 224,
+  "elf": {
+    "path": "kernel\\build\\s20-modifier-focus-20261018\\bin\\kernel.elf",
+    "bytes": 2770944,
+    "sha256": "9495CCB3670C94F4C2AEAA321113858DC57C53C79876E89B56C191D1002BB9B3"
+  },
+  "pe": {
+    "path": "kernel\\build\\s20-modifier-focus-20261018\\bin\\kernel.pe",
+    "bytes": 2887206,
+    "sha256": "4042D82FF7B6100D0B0843FD3679D2A745A6DA94227CC0E412A027F702D47E22",
+    "import_directories": [
+      {
+        "index": 1,
+        "name": "Import Directory [parts of .idata]",
+        "rva": 0,
+        "size": 0
+      }
+    ]
+  },
+  "undefined_symbols": {
+    "current_count": 21,
+    "baseline_s19_count": 21,
+    "new": [],
+    "removed": []
+  },
+  "freestanding_flags_present": true
+}

@@ -1191,9 +1191,12 @@ static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outE
                 keyEvent.key == ps2keyboard::KEY_EVENT_RIGHT ? GX_KEY_RIGHT :
                 keyEvent.key == ps2keyboard::KEY_EVENT_DOWN ? GX_KEY_DOWN : keyEvent.key);
             outEvent->param2 = keyEvent.action == ps2keyboard::KeyAction::Down ? GX_KEY_ACTION_DOWN : GX_KEY_ACTION_UP;
-            outEvent->param3 = (ps2keyboard::is_shift_down() ? GX_KEY_MOD_SHIFT : 0) |
-                (ps2keyboard::is_ctrl_down() ? GX_KEY_MOD_CTRL : 0) |
-                (ps2keyboard::is_alt_down() ? GX_KEY_MOD_ALT : 0);
+            outEvent->param3 = ((keyEvent.modifiers & ps2keyboard::KEY_MOD_SHIFT)
+                    ? static_cast<uint32_t>(GX_KEY_MOD_SHIFT) : 0u) |
+                ((keyEvent.modifiers & ps2keyboard::KEY_MOD_CTRL)
+                    ? static_cast<uint32_t>(GX_KEY_MOD_CTRL) : 0u) |
+                ((keyEvent.modifiers & ps2keyboard::KEY_MOD_ALT)
+                    ? static_cast<uint32_t>(GX_KEY_MOD_ALT) : 0u);
             return abi_result(runtime, NativeAbiOperation::PollEvent, GX_OK);
         }
 

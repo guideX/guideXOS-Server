@@ -1305,14 +1305,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             
             // Process buffered keyboard input from PS/2 IRQ handler
             if (kernel::ps2keyboard::has_key()) {
-                uint32_t key = kernel::ps2keyboard::get_key();
+                uint32_t modifiers = 0u;
+                uint32_t key = kernel::ps2keyboard::get_key_with_modifiers(&modifiers);
                 if (key != 0) {
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
                     if (handle_manual_topology_control_key(key)) {
                         kernel::desktop::request_redraw();
                     } else
 #endif
-                    kernel::desktop::handle_key(key);
+                    kernel::desktop::handle_key_with_modifiers(key, modifiers);
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
                     // handle_key() redraws the software canvas directly, but
                     // the live VirtIO-GPU presenter must also observe an

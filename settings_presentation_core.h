@@ -181,7 +181,15 @@ enum class FocusControl : unsigned char {
     UsersSessionDetails,
     UsersSecurityDetails,
     UsersDeveloperServices,
-    UsersBack
+    UsersBack,
+    // Appended to preserve the existing ordinal values of shared focus ids.
+    PersonalizationGradientTab,
+    PersonalizationWallpaperTab,
+    PersonalizationIconsTab,
+    PersonalizationGradientPreset,
+    PersonalizationWallpaperPreset,
+    PersonalizationPreviousPage,
+    PersonalizationNextPage
 };
 
 CategoryId focusControlCategory(FocusControl control);
@@ -254,6 +262,12 @@ struct OperationResult {
 
 class SettingsPresentationCore {
 public:
+    using FocusControlCount = size_t (*)(void* context, FocusControl control);
+
+    enum : size_t {
+        kFocusControlIndexCapacity = 16u
+    };
+
     SettingsPresentationCore();
 
     void reset();
@@ -264,8 +278,12 @@ public:
     bool previousCategory();
     bool navigate(const SettingsRoute& route);
     bool canFocus(FocusControl control) const;
-    bool setFocusedControl(FocusControl control);
+    bool setFocusedControl(FocusControl control, size_t index = 0u);
     FocusControl focusedControl() const;
+    size_t focusedControlIndex() const;
+    // Uses the core-owned focus order and caller-provided bounded eligibility
+    // counts for controls that are dynamic or unavailable in a given view.
+    bool moveFocus(bool reverse, FocusControlCount eligibleCount, void* context);
 
     bool setSearchQuery(const char* query);
     bool appendSearchCharacter(char character);
@@ -287,6 +305,7 @@ public:
 private:
     SettingsRoute m_route;
     FocusControl m_focusedControl;
+    size_t m_focusedControlIndex;
     char m_searchQuery[kSearchQueryBufferSize];
     size_t m_searchQueryLength;
     CapabilityPresentation m_capabilities[kCapabilityCount];

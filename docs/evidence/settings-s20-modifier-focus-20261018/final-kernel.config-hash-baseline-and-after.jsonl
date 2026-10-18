@@ -1,0 +1,2 @@
+{"file": "DESKTOP.CFG", "image": "out\\validation\\settings-s19r3-native-ui-20261017\\guest\\S19R3-private.raw", "partition_lba": 63, "sha256": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249", "size_bytes": 234}
+{"file": "DESKTOP.CFG", "image": "out\\validation\\settings-s20-modifier-focus-20261018\\guest\\S20-private.raw", "partition_lba": 63, "sha256": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249", "size_bytes": 234}

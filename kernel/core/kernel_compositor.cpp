@@ -780,9 +780,13 @@ void KernelCompositor::handleMouseWheel(int32_t mx, int32_t my, int8_t wheelDelt
 }
 
 void KernelCompositor::handleKeyDown(uint32_t keyCode) {
+    handleKeyDownWithModifiers(keyCode, 0u);
+}
+
+void KernelCompositor::handleKeyDownWithModifiers(uint32_t keyCode, uint32_t modifiers) {
     app::KernelWindow* focused = getFocusedWindow();
     if (focused && focused->owner) {
-        focused->owner->onKeyDown(keyCode);
+        focused->owner->onKeyDownWithModifiers(keyCode, modifiers);
     }
 }
 

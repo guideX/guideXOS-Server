@@ -16775,15 +16775,26 @@ public:
 
     void onKeyDown(uint32_t key) override
     {
+        onKeyDownWithModifiers(key, 0u);
+    }
+
+    void onKeyDownWithModifiers(uint32_t key, uint32_t modifiers) override
+    {
         if (key == 0x1Bu) requestClose();
         else if (m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
-            if (key == '\t' || key == shell::KEY_TAB) cyclePersonalizationFocus();
+            if (key == '\t' || key == shell::KEY_TAB) {
+                if (m_presentation.moveFocus(
+                        (modifiers & ps2keyboard::KEY_MOD_SHIFT) != 0u,
+                        focusControlCount, this)) invalidate();
+            }
             else if (key == shell::KEY_LEFT || key == shell::KEY_RIGHT ||
                      key == shell::KEY_UP || key == shell::KEY_DOWN) {
                 if (m_showDesktopIconChoices) {
                     moveDesktopIconFocus(key);
                 } else if (m_presentation.focusedControl() ==
-                    settings::FocusControl::PersonalizationChooseBackground) {
+                               settings::FocusControl::PersonalizationGradientPreset ||
+                           m_presentation.focusedControl() ==
+                               settings::FocusControl::PersonalizationWallpaperPreset) {
                     movePendingBackground(key);
                     invalidate();
                 }
@@ -17029,9 +17040,7 @@ private:
         } else if (m_presentation.selectedCategory() == settings::CategoryId::System) {
             m_presentation.setFocusedControl(settings::FocusControl::SystemAbout);
         } else if (m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
-            m_presentation.setFocusedControl(m_showDesktopIconChoices
-                ? settings::FocusControl::PersonalizationIconTrash
-                : settings::FocusControl::PersonalizationChooseBackground);
+            setInitialPersonalizationFocus();
         } else {
             m_presentation.setFocusedControl(settings::FocusControl::None);
         }
@@ -17360,6 +17369,11 @@ private:
         else if (key == shell::KEY_DOWN &&
                  static_cast<size_t>(index + 4) < m_gradientPresetCount) index += 4;
         choosePendingGradient(index);
+        if (index >= 0 && index < 8) {
+            (void)m_presentation.setFocusedControl(
+                settings::FocusControl::PersonalizationGradientPreset,
+                static_cast<size_t>(index));
+        }
     }
 
     void movePendingWallpaper(uint32_t key)
@@ -17380,6 +17394,11 @@ private:
         else if (key == shell::KEY_DOWN &&
                  static_cast<size_t>(index + 2) < m_wallpaperPresetCount) index += 2;
         choosePendingWallpaper(index);
+        if (index >= 0 && static_cast<size_t>(index) < m_wallpaperPresetCount) {
+            (void)m_presentation.setFocusedControl(
+                settings::FocusControl::PersonalizationWallpaperPreset,
+                static_cast<size_t>(index) % 4u);
+        }
     }
 
     void movePendingBackground(uint32_t key)
@@ -17388,33 +17407,36 @@ private:
         else movePendingGradient(key);
     }
 
-    void cyclePersonalizationFocus()
-    {
-        settings::FocusControl current = m_presentation.focusedControl();
-        settings::FocusControl next = settings::FocusControl::PersonalizationChooseBackground;
-        if (m_showDesktopIconChoices) {
-            next = settings::FocusControl::PersonalizationIconTrash;
-            if (current == settings::FocusControl::PersonalizationIconTrash)
-                next = settings::FocusControl::PersonalizationIconFileExplorer;
-            else if (current == settings::FocusControl::PersonalizationIconFileExplorer)
-                next = settings::FocusControl::PersonalizationIconSystemSettings;
-            else if (current == settings::FocusControl::PersonalizationIconSystemSettings)
-                next = settings::FocusControl::PersonalizationApply;
-            else if (current == settings::FocusControl::PersonalizationApply)
-                next = settings::FocusControl::PersonalizationCancel;
-        } else {
-            if (current == settings::FocusControl::PersonalizationChooseBackground)
-                next = settings::FocusControl::PersonalizationApply;
-            else if (current == settings::FocusControl::PersonalizationApply)
-                next = settings::FocusControl::PersonalizationCancel;
-        }
-        m_presentation.setFocusedControl(next);
-        invalidate();
-    }
-
     void activateFocusedPersonalizationControl()
     {
         const settings::FocusControl focus = m_presentation.focusedControl();
+        if (focus == settings::FocusControl::PersonalizationGradientTab) {
+            m_showWallpaperChoices = false;
+            m_showDesktopIconChoices = false;
+            setInitialPersonalizationFocus();
+        } else if (focus == settings::FocusControl::PersonalizationWallpaperTab) {
+            m_showWallpaperChoices = true;
+            m_showDesktopIconChoices = false;
+            setInitialPersonalizationFocus();
+        } else if (focus == settings::FocusControl::PersonalizationIconsTab) {
+            m_showWallpaperChoices = false;
+            m_showDesktopIconChoices = true;
+            setInitialPersonalizationFocus();
+        } else if (focus == settings::FocusControl::PersonalizationGradientPreset) {
+            choosePendingGradient(static_cast<int>(m_presentation.focusedControlIndex()));
+        } else if (focus == settings::FocusControl::PersonalizationWallpaperPreset) {
+            const size_t index = m_wallpaperPage * 4u + m_presentation.focusedControlIndex();
+            if (index < m_wallpaperPresetCount) choosePendingWallpaper(static_cast<int>(index));
+        } else if (focus == settings::FocusControl::PersonalizationPreviousPage) {
+            if (m_wallpaperPage > 0u) --m_wallpaperPage;
+            (void)m_presentation.setFocusedControl(
+                settings::FocusControl::PersonalizationWallpaperPreset, 0u);
+        } else if (focus == settings::FocusControl::PersonalizationNextPage) {
+            const size_t pageCount = (m_wallpaperPresetCount + 3u) / 4u;
+            if (m_wallpaperPage + 1u < pageCount) ++m_wallpaperPage;
+            (void)m_presentation.setFocusedControl(
+                settings::FocusControl::PersonalizationWallpaperPreset, 0u);
+        }
         if (m_showDesktopIconChoices) {
             if (focus == settings::FocusControl::PersonalizationIconTrash) {
                 togglePendingDesktopIconVisibility(settings_native::kDesktopIconTargetTrash);
@@ -17433,6 +17455,86 @@ private:
             cancelPendingGradient();
         }
         invalidate();
+    }
+
+    static size_t focusControlCount(void* context, settings::FocusControl control)
+    {
+        SettingsNativeApp* self = static_cast<SettingsNativeApp*>(context);
+        return self ? self->eligibleFocusCount(control) : 0u;
+    }
+
+    size_t eligibleFocusCount(settings::FocusControl control) const
+    {
+        switch (control) {
+        case settings::FocusControl::PersonalizationGradientTab:
+        case settings::FocusControl::PersonalizationWallpaperTab:
+        case settings::FocusControl::PersonalizationIconsTab:
+        case settings::FocusControl::PersonalizationCancel:
+            return 1u;
+        case settings::FocusControl::PersonalizationGradientPreset:
+            return !m_showWallpaperChoices && !m_showDesktopIconChoices &&
+                m_appearanceSnapshotAvailable
+                ? (m_gradientPresetCount < 8u ? m_gradientPresetCount : 8u) : 0u;
+        case settings::FocusControl::PersonalizationWallpaperPreset: {
+            if (!m_showWallpaperChoices || m_showDesktopIconChoices ||
+                !m_appearanceSnapshotAvailable) return 0u;
+            const size_t pageStart = m_wallpaperPage * 4u;
+            size_t count = 0u;
+            while (count < 4u && pageStart + count < m_wallpaperPresetCount &&
+                   (m_wallpaperPresets[pageStart + count].flags &
+                    settings_native::kBuiltInWallpaperAssetPresent) != 0u) ++count;
+            return count;
+        }
+        case settings::FocusControl::PersonalizationPreviousPage:
+            return m_showWallpaperChoices && m_wallpaperPage > 0u ? 1u : 0u;
+        case settings::FocusControl::PersonalizationNextPage: {
+            const size_t pageCount = (m_wallpaperPresetCount + 3u) / 4u;
+            return m_showWallpaperChoices && m_wallpaperPage + 1u < pageCount ? 1u : 0u;
+        }
+        case settings::FocusControl::PersonalizationIconTrash:
+        case settings::FocusControl::PersonalizationIconFileExplorer:
+        case settings::FocusControl::PersonalizationIconSystemSettings:
+            return m_showDesktopIconChoices && m_appearanceSnapshotAvailable ? 1u : 0u;
+        case settings::FocusControl::PersonalizationApply:
+            return canApplyPendingSelection() ? 1u : 0u;
+        default:
+            return 0u;
+        }
+    }
+
+    bool canApplyPendingSelection() const
+    {
+        return m_appearanceSnapshotAvailable && (m_showDesktopIconChoices
+            ? (m_pendingDesktopIconsDirty && !m_pendingDesktopIconsStale)
+            : (!m_pendingGradientStale &&
+                ((m_pendingGradientIndex >= 0 &&
+                  static_cast<size_t>(m_pendingGradientIndex) < m_gradientPresetCount) ||
+                 (m_pendingWallpaperIndex >= 0 &&
+                  static_cast<size_t>(m_pendingWallpaperIndex) < m_wallpaperPresetCount))));
+    }
+
+    void setInitialPersonalizationFocus()
+    {
+        if (m_showDesktopIconChoices && m_appearanceSnapshotAvailable) {
+            (void)m_presentation.setFocusedControl(
+                settings::FocusControl::PersonalizationIconTrash);
+        } else if (m_showWallpaperChoices && m_wallpaperPresetCount != 0u) {
+            (void)m_presentation.setFocusedControl(
+                settings::FocusControl::PersonalizationWallpaperPreset, 0u);
+        } else if (!m_showWallpaperChoices && !m_showDesktopIconChoices &&
+                   m_gradientPresetCount != 0u) {
+            const int pending = m_pendingGradientIndex >= 0
+                ? m_pendingGradientIndex : currentGradientPresetIndex();
+            const size_t index = pending >= 0 && static_cast<size_t>(pending) < m_gradientPresetCount
+                ? static_cast<size_t>(pending) : 0u;
+            (void)m_presentation.setFocusedControl(
+                settings::FocusControl::PersonalizationGradientPreset, index);
+        } else {
+            (void)m_presentation.setFocusedControl(
+                m_showDesktopIconChoices ? settings::FocusControl::PersonalizationIconsTab
+                    : (m_showWallpaperChoices ? settings::FocusControl::PersonalizationWallpaperTab
+                                              : settings::FocusControl::PersonalizationGradientTab));
+        }
     }
 
     void moveDesktopIconFocus(uint32_t key)
@@ -17742,9 +17844,12 @@ private:
             if (!settings_layout::contains(geometry.tabs[index], x, y)) continue;
             m_showWallpaperChoices = index == 1u;
             m_showDesktopIconChoices = index == 2u;
-            m_presentation.setFocusedControl(m_showDesktopIconChoices
-                ? settings::FocusControl::PersonalizationIconTrash
-                : settings::FocusControl::PersonalizationChooseBackground);
+            const settings::FocusControl tabFocus[3] = {
+                settings::FocusControl::PersonalizationGradientTab,
+                settings::FocusControl::PersonalizationWallpaperTab,
+                settings::FocusControl::PersonalizationIconsTab
+            };
+            (void)m_presentation.setFocusedControl(tabFocus[index]);
             return true;
         }
 
@@ -17770,17 +17875,17 @@ private:
                 if (!settings_layout::contains(geometry.wallpaperOptions[slot], x, y)) continue;
                 const size_t index = m_wallpaperPage * 4u + slot;
                 if (index >= m_wallpaperPresetCount) return false;
+                (void)m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationWallpaperPreset, slot);
                 choosePendingWallpaper(static_cast<int>(index));
-                m_presentation.setFocusedControl(
-                    settings::FocusControl::PersonalizationChooseBackground);
                 return true;
             }
         } else if (!m_showWallpaperChoices && m_gradientPresetCount != 0u) {
             for (size_t index = 0u; index < m_gradientPresetCount && index < 8u; ++index) {
                 if (!settings_layout::contains(geometry.gradientOptions[index], x, y)) continue;
                 choosePendingGradient(static_cast<int>(index));
-                m_presentation.setFocusedControl(
-                    settings::FocusControl::PersonalizationChooseBackground);
+                (void)m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationGradientPreset, index);
                 return true;
             }
         }
@@ -17789,10 +17894,14 @@ private:
             const size_t pageCount = (m_wallpaperPresetCount + 3u) / 4u;
             if (settings_layout::contains(geometry.previousPage, x, y)) {
                 if (m_wallpaperPage > 0u) --m_wallpaperPage;
+                (void)m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationWallpaperPreset, 0u);
                 return true;
             }
             if (settings_layout::contains(geometry.nextPage, x, y)) {
                 if (m_wallpaperPage + 1u < pageCount) ++m_wallpaperPage;
+                (void)m_presentation.setFocusedControl(
+                    settings::FocusControl::PersonalizationWallpaperPreset, 0u);
                 return true;
             }
         }
@@ -17827,9 +17936,7 @@ private:
                 (key == 'w' || key == 'g' || key == 'i')) {
                 m_showWallpaperChoices = key == 'w';
                 m_showDesktopIconChoices = key == 'i';
-                m_presentation.setFocusedControl(m_showDesktopIconChoices
-                    ? settings::FocusControl::PersonalizationIconTrash
-                    : settings::FocusControl::PersonalizationChooseBackground);
+                setInitialPersonalizationFocus();
                 return true;
             }
             if (key == 'a') return selectSupportedCategory(settings::CategoryId::About, "keyboard");
@@ -18153,17 +18260,24 @@ private:
             m_showWallpaperChoices,
             m_showDesktopIconChoices
         };
+        const settings::FocusControl tabFocus[3] = {
+            settings::FocusControl::PersonalizationGradientTab,
+            settings::FocusControl::PersonalizationWallpaperTab,
+            settings::FocusControl::PersonalizationIconsTab
+        };
         for (uint32_t index = 0u; index < 3u; ++index) {
             const settings_layout::Rect& tab = geometry.tabs[index];
             const uint32_t tabX = m_drawX + tab.x;
             const uint32_t tabY = m_drawY + tab.y;
             const bool hovered = m_hoverPersonalizationControl == static_cast<int>(index);
+            const bool focused = m_windowFocused &&
+                m_presentation.focusedControl() == tabFocus[index];
             framebuffer::fill_rect(tabX, tabY, tab.width, tab.height,
                     tabActive[index] ? rgb(55, 82, 123) :
                         (hovered ? rgb(52, 58, 70) : rgb(43, 47, 58)));
             appDrawRect(tabX, tabY, tab.width, tab.height,
-                    tabActive[index] ? rgb(115, 166, 245) :
-                        (hovered ? rgb(147, 165, 194) : rgb(67, 74, 88)));
+                    focused ? rgb(255, 214, 110) : (tabActive[index] ? rgb(115, 166, 245) :
+                        (hovered ? rgb(147, 165, 194) : rgb(67, 74, 88))));
             const uint32_t textWidth = index == 2u ? 108u : 84u;
             const uint32_t textX = tabX + (tab.width > textWidth
                 ? (tab.width - textWidth) / 2u : 3u);
@@ -18247,9 +18361,10 @@ private:
                             assetPresent ? "Preview" : "Missing", rgb(190, 195, 205));
                     }
                     const bool pending = static_cast<int>(index) == m_pendingWallpaperIndex;
-                    const bool focused = pending && m_windowFocused &&
+                    const bool focused = m_windowFocused &&
                         m_presentation.focusedControl() ==
-                            settings::FocusControl::PersonalizationChooseBackground;
+                            settings::FocusControl::PersonalizationWallpaperPreset &&
+                        m_presentation.focusedControlIndex() == slot;
                     const bool hovered = m_hoverPersonalizationControl == 20 + static_cast<int>(slot);
                     appDrawRect(cellX, cellY, cell.width, cell.height,
                         focused ? rgb(255, 214, 110) : (hovered ? rgb(190, 211, 242) :
@@ -18267,7 +18382,7 @@ private:
             appDrawText(gridX, gridY + 14u,
                 "Built-in gradient presets are unavailable.", rgb(236, 174, 122));
         } else {
-            for (size_t index = 0u; index < m_gradientPresetCount; ++index) {
+            for (size_t index = 0u; index < m_gradientPresetCount && index < 8u; ++index) {
                 const settings_layout::Rect& cell = geometry.gradientOptions[index];
                 const uint32_t cellX = m_drawX + cell.x;
                 const uint32_t cellY = m_drawY + cell.y;
@@ -18275,9 +18390,10 @@ private:
                 framebuffer::fill_rect(cellX, cellY, cell.width, cell.height, rgb(43, 47, 58));
                 framebuffer::fill_rect(cellX + 4u, cellY + 6u, 16u, 20u, preset.accentColor);
                 const bool pending = static_cast<int>(index) == m_pendingGradientIndex;
-                const bool focused = pending && m_windowFocused &&
+                const bool focused = m_windowFocused &&
                     m_presentation.focusedControl() ==
-                        settings::FocusControl::PersonalizationChooseBackground;
+                        settings::FocusControl::PersonalizationGradientPreset &&
+                    m_presentation.focusedControlIndex() == index;
                 const bool hovered = m_hoverPersonalizationControl == 40 + static_cast<int>(index);
                 appDrawRect(cellX, cellY, cell.width, cell.height,
                     focused ? rgb(255, 214, 110) : (hovered ? rgb(190, 211, 242) :
@@ -18307,6 +18423,10 @@ private:
             const bool nextEnabled = m_wallpaperPage + 1u < pageCount;
             const bool previousHovered = m_hoverPersonalizationControl == 30;
             const bool nextHovered = m_hoverPersonalizationControl == 31;
+            const bool previousFocused = m_windowFocused &&
+                m_presentation.focusedControl() == settings::FocusControl::PersonalizationPreviousPage;
+            const bool nextFocused = m_windowFocused &&
+                m_presentation.focusedControl() == settings::FocusControl::PersonalizationNextPage;
             framebuffer::fill_rect(previousX, previousY, previous.width, previous.height,
                 !previousEnabled ? rgb(39, 41, 47) :
                     (previousHovered ? rgb(53, 59, 72) : rgb(43, 47, 58)));
@@ -18314,9 +18434,11 @@ private:
                 !nextEnabled ? rgb(39, 41, 47) :
                     (nextHovered ? rgb(53, 59, 72) : rgb(43, 47, 58)));
             appDrawRect(previousX, previousY, previous.width, previous.height,
-                previousHovered ? rgb(147, 165, 194) : rgb(67, 74, 88));
+                previousFocused ? rgb(255, 214, 110) :
+                    (previousHovered ? rgb(147, 165, 194) : rgb(67, 74, 88)));
             appDrawRect(nextX, nextY, next.width, next.height,
-                nextHovered ? rgb(147, 165, 194) : rgb(67, 74, 88));
+                nextFocused ? rgb(255, 214, 110) :
+                    (nextHovered ? rgb(147, 165, 194) : rgb(67, 74, 88)));
             appDrawText(previousX + 10u, previousY + 8u, "< Previous",
                 previousEnabled ? rgb(205, 215, 232) : rgb(125, 132, 145));
             const uint32_t pageLabelWidth = 10u * (kGlyphW + kGlyphSpacing);
@@ -18334,13 +18456,7 @@ private:
         const uint32_t cancelX = m_drawX + cancelRect.x;
         const uint32_t buttonW = applyRect.width;
         const uint32_t buttonH = applyRect.height;
-        const bool canApply = available && (m_showDesktopIconChoices
-            ? (m_pendingDesktopIconsDirty && !m_pendingDesktopIconsStale)
-            : (!m_pendingGradientStale &&
-                ((m_pendingGradientIndex >= 0 &&
-                  static_cast<size_t>(m_pendingGradientIndex) < m_gradientPresetCount) ||
-                 (m_pendingWallpaperIndex >= 0 &&
-                  static_cast<size_t>(m_pendingWallpaperIndex) < m_wallpaperPresetCount))));
+        const bool canApply = canApplyPendingSelection();
         const bool applyFocused = m_windowFocused &&
             m_presentation.focusedControl() == settings::FocusControl::PersonalizationApply;
         const bool cancelFocused = m_windowFocused &&

@@ -179,6 +179,9 @@ void handle_mouse_wheel(int32_t mx, int32_t my, int8_t wheelDelta);
 // Routes to focused GUI app, shell, or desktop shortcuts
 // Special keys use codes from shell.h (KEY_UP, KEY_DOWN, etc.)
 void handle_key(uint32_t key);
+// Production PS/2 delivery path carrying the modifier snapshot captured with
+// the key-down event. The original overload remains for compatibility.
+void handle_key_with_modifiers(uint32_t key, uint32_t modifiers);
 
 // Draw the mouse cursor at the given position (overlay on framebuffer)
 void draw_cursor(int32_t mx, int32_t my);

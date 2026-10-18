@@ -73,6 +73,11 @@ void KernelApp::onWindowFocus() {}
 
 void KernelApp::onWindowBlur() {}
 
+void KernelApp::onKeyDownWithModifiers(uint32_t key, uint32_t modifiers) {
+    (void)modifiers;
+    onKeyDown(key);
+}
+
 void KernelApp::setTitle(const char* title) {
     if (m_window && title) {
         strcopy(m_window->title, title, MAX_TITLE_LEN);

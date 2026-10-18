@@ -13,6 +13,7 @@
 #include "kernel/vfs.h"
 #include "kernel/version.h"
 #include "kernel/arch.h"
+#include "kernel/ps2keyboard.h"
 #include "app_launch_target.h"
 #include "built_in_app_metadata.h"
 
@@ -44,6 +45,10 @@ int g_appShutdown = 0;
 int g_runtimeFocusAcquired = 0;
 int g_runtimeFocusLost = 0;
 int g_runtimeAppearanceChanged = 0;
+int g_modifierAwareKeyCallbacks = 0;
+int g_legacyKeyCallbacks = 0;
+uint32_t g_lastKeyboardKey = 0u;
+uint32_t g_lastKeyboardModifiers = 0u;
 char g_lastParameter[64] = {};
 bool g_testFramebufferAvailable = false;
 uint32_t g_testFramebufferWidth = 0;
@@ -163,6 +168,20 @@ public:
     void onDesktopAppearanceChanged(uint64_t revision) override
     {
         if (revision != 0u) ++g_runtimeAppearanceChanged;
+    }
+
+    void onKeyDown(uint32_t key) override
+    {
+        ++g_legacyKeyCallbacks;
+        g_lastKeyboardKey = key;
+    }
+
+    void onKeyDownWithModifiers(uint32_t key, uint32_t modifiers) override
+    {
+        ++g_modifierAwareKeyCallbacks;
+        g_lastKeyboardKey = key;
+        g_lastKeyboardModifiers = modifiers;
+        kernel::app::KernelApp::onKeyDownWithModifiers(key, modifiers);
     }
 };
 
@@ -397,6 +416,17 @@ void KernelCompositor::setFocus(uint32_t windowId)
     if (g_focusedWindow && g_focusedWindow->owner) g_focusedWindow->owner->onWindowBlur();
     g_focusedWindowId = windowId;
     g_focusedWindow = nullptr;
+}
+
+void KernelCompositor::handleKeyDown(uint32_t keyCode)
+{
+    handleKeyDownWithModifiers(keyCode, 0u);
+}
+
+void KernelCompositor::handleKeyDownWithModifiers(uint32_t keyCode, uint32_t modifiers)
+{
+    if (g_focusedWindow && g_focusedWindow->owner)
+        g_focusedWindow->owner->onKeyDownWithModifiers(keyCode, modifiers);
 }
 
 void KernelCompositor::handleKeyChar(char) {}
@@ -1282,6 +1312,16 @@ int main()
     expect(settingsApp && settingsApp->getWindow() &&
                settingsApp->getWindow()->owner == settingsApp,
            "Settings window owner matches its running application");
+    kernel::compositor::KernelCompositor::handleKeyDownWithModifiers(
+        '\t', kernel::ps2keyboard::KEY_MOD_SHIFT);
+    expect(g_modifierAwareKeyCallbacks == 1 && g_lastKeyboardKey == '\t' &&
+               g_lastKeyboardModifiers == kernel::ps2keyboard::KEY_MOD_SHIFT &&
+               g_legacyKeyCallbacks == 1,
+           "compositor preserves modifiers and falls back through the legacy key callback");
+    kernel::compositor::KernelCompositor::handleKeyDown('\t');
+    expect(g_modifierAwareKeyCallbacks == 2 && g_lastKeyboardModifiers == 0u &&
+               g_legacyKeyCallbacks == 2,
+           "legacy compositor key delivery remains modifier-neutral and compatible");
     SettingsRefreshProbeApp* settingsRefreshApp =
         static_cast<SettingsRefreshProbeApp*>(settingsApp);
     expect(settingsRefreshApp && settingsRefreshApp->refreshState().hasSnapshot() &&

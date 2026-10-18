@@ -21,8 +21,9 @@ static const uint16_t kStatusPort  = 0x64;
 
 // Key state
 static uint32_t s_lastKey = 0;
+static uint32_t s_lastKeyModifiers = 0;
 static bool s_hasKey = false;
-static bool s_shiftDown = false;
+static ShiftState s_shiftState;
 static bool s_ctrlDown = false;
 static bool s_altDown = false;
 static bool s_rightAltDown = false;
@@ -39,15 +40,29 @@ static KeyEvent s_nativeEventQueue[kEventQueueCapacity];
 static volatile uint8_t s_nativeEventHead = 0;
 static volatile uint8_t s_nativeEventTail = 0;
 
+static bool shift_down()
+{
+    return s_shiftState.isDown();
+}
+
+static uint32_t modifier_state()
+{
+    return (shift_down() ? KEY_MOD_SHIFT : 0u) |
+        (s_ctrlDown ? KEY_MOD_CTRL : 0u) |
+        ((s_altDown || s_rightAltDown) ? KEY_MOD_ALT : 0u);
+}
+
 static void enqueue_event(uint32_t key, bool keyUp)
 {
     if (key == 0) return;
     const KeyAction action = keyUp ? KeyAction::Up : KeyAction::Down;
+    const uint32_t modifiers = modifier_state();
 
     const uint8_t legacyNext = static_cast<uint8_t>((s_eventHead + 1u) % kEventQueueCapacity);
     if (legacyNext != s_eventTail) {
         s_eventQueue[s_eventHead].key = key;
         s_eventQueue[s_eventHead].action = action;
+        s_eventQueue[s_eventHead].modifiers = modifiers;
         s_eventHead = legacyNext;
     }
 
@@ -58,6 +73,7 @@ static void enqueue_event(uint32_t key, bool keyUp)
     if (nativeNext != s_nativeEventTail) {
         s_nativeEventQueue[s_nativeEventHead].key = key;
         s_nativeEventQueue[s_nativeEventHead].action = action;
+        s_nativeEventQueue[s_nativeEventHead].modifiers = modifiers;
         s_nativeEventHead = nativeNext;
     }
 }
@@ -169,8 +185,9 @@ void init()
     }
     
     s_lastKey = 0;
+    s_lastKeyModifiers = 0;
     s_hasKey = false;
-    s_shiftDown = false;
+    s_shiftState = ShiftState();
     s_ctrlDown = false;
     s_altDown = false;
     s_rightAltDown = false;
@@ -222,7 +239,8 @@ void irq_handler()
     
     // Handle modifier keys (scancode set 2 values)
     if (scancode == SC2_LSHIFT || scancode == SC2_RSHIFT) {
-        s_shiftDown = !keyUp;
+        if (scancode == SC2_LSHIFT) s_shiftState.setLeftDown(!keyUp);
+        else s_shiftState.setRightDown(!keyUp);
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         log_key_transition(scancode == SC2_LSHIFT ? "shift-left" : "shift-right", scancode, keyUp, s_extendedKey);
 #endif
@@ -319,7 +337,7 @@ void irq_handler()
             default:
                 // Regular ASCII keys
                 if (scancode < 256) {
-                    bool shift = s_shiftDown;
+                    bool shift = shift_down();
                     char c = s_scancodeToAscii[scancode];
                     if (s_capsLock && c >= 'a' && c <= 'z') {
                         shift = !shift;
@@ -334,6 +352,7 @@ void irq_handler()
         enqueue_event(key, keyUp);
         if (keyUp) return;
         s_lastKey = key;
+        s_lastKeyModifiers = modifier_state();
         s_hasKey = true;
         s_lastKeyAltF4Candidate = altF4Candidate;
         s_lastKeyAltLeftDown = altF4LeftDown;
@@ -359,6 +378,24 @@ uint32_t get_key()
         if (event.action == KeyAction::Down) break;
     }
     return s_lastKey;
+}
+
+uint32_t get_key_with_modifiers(uint32_t* outModifiers)
+{
+    if (!s_hasKey) {
+        if (outModifiers) *outModifiers = 0u;
+        return 0u;
+    }
+    const uint32_t key = s_lastKey;
+    const uint32_t modifiers = s_lastKeyModifiers;
+    s_hasKey = false;
+    while (s_eventTail != s_eventHead) {
+        const KeyEvent event = s_eventQueue[s_eventTail];
+        s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
+        if (event.action == KeyAction::Down) break;
+    }
+    if (outModifiers) *outModifiers = modifiers;
+    return key;
 }
 
 bool has_event()
@@ -394,7 +431,7 @@ bool is_ctrl_down()
 
 bool is_shift_down()
 {
-    return s_shiftDown;
+    return shift_down();
 }
 
 bool is_alt_down()
@@ -438,6 +475,7 @@ void init() {}
 void irq_handler() {}
 bool has_key() { return false; }
 uint32_t get_key() { return 0; }
+uint32_t get_key_with_modifiers(uint32_t* outModifiers) { if (outModifiers) *outModifiers = 0u; return 0; }
 bool has_event() { return false; }
 bool get_event(KeyEvent*) { return false; }
 void clear() {}

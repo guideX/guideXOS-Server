@@ -9446,8 +9446,9 @@ void cooperative_yield()
     }
 
     if (ps2keyboard::has_key()) {
-        uint32_t key = ps2keyboard::get_key();
-        if (key != 0) handle_key(key);
+        uint32_t modifiers = 0u;
+        uint32_t key = ps2keyboard::get_key_with_modifiers(&modifiers);
+        if (key != 0) handle_key_with_modifiers(key, modifiers);
     }
 
     const uint32_t now = (uint32_t)pit::ticks();
@@ -11390,6 +11391,11 @@ int get_running_app_count()
 
 void handle_key(uint32_t key)
 {
+    handle_key_with_modifiers(key, 0u);
+}
+
+void handle_key_with_modifiers(uint32_t key, uint32_t modifiers)
+{
     if (file_clipboard::operation_active()) return;
     reset_alt_f4_shortcut_state();
 
@@ -11498,7 +11504,7 @@ void handle_key(uint32_t key)
             // Route control characters and special keys to handleKeyDown
             // This includes Enter ('\n'=10), Backspace ('\b'=8), Tab ('\t'=9),
             // arrow keys (0x100+), and all other non-printable keys.
-            compositor::KernelCompositor::handleKeyDown(key);
+            compositor::KernelCompositor::handleKeyDownWithModifiers(key, modifiers);
             draw();
             return;
         }

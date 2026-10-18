@@ -216,6 +216,9 @@ public:
     virtual void onMouseUp(int, int, uint8_t) {}
     virtual void onMouseWheel(int, int, int) {}
     virtual void onKeyDown(uint32_t) {}
+    // Modifier-aware desktop delivery. Existing apps keep their original
+    // callback semantics unless they explicitly opt in.
+    virtual void onKeyDownWithModifiers(uint32_t key, uint32_t modifiers);
     virtual void onKeyUp(uint32_t) {}
     virtual void onKeyChar(char) {}
     virtual void onWidgetClick(int) {}

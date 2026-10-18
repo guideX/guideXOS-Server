@@ -65,6 +65,68 @@ const FixedTable<PageElementDescriptor, kPageElementCount> kPageElements = {{
 
 namespace {
 
+static const FocusControl kFocusTraversalOrder[] = {
+    FocusControl::SystemDisplay, FocusControl::SystemNetwork,
+    FocusControl::SystemStorage, FocusControl::SystemAbout,
+    FocusControl::SystemDevices, FocusControl::SystemControlPanel,
+    FocusControl::NetworkAdapter, FocusControl::NetworkAdvanced,
+    FocusControl::DisplayResolution, FocusControl::DisplayMode,
+    FocusControl::DisplayApply, FocusControl::DisplayCancel,
+    FocusControl::DisplayAdvanced,
+    FocusControl::PersonalizationGradientTab,
+    FocusControl::PersonalizationWallpaperTab,
+    FocusControl::PersonalizationIconsTab,
+    FocusControl::PersonalizationGradientPreset,
+    FocusControl::PersonalizationPreviousPage,
+    FocusControl::PersonalizationWallpaperPreset,
+    FocusControl::PersonalizationNextPage,
+    FocusControl::PersonalizationIconTrash,
+    FocusControl::PersonalizationIconFileExplorer,
+    FocusControl::PersonalizationIconSystemSettings,
+    FocusControl::PersonalizationApply, FocusControl::PersonalizationCancel,
+    FocusControl::PersonalizationAdvanced,
+    FocusControl::PersonalizationChooseBackground,
+    FocusControl::DateTimeAdvanced, FocusControl::StorageDiskManager,
+    FocusControl::DeviceEntry, FocusControl::DeviceDetailBack,
+    FocusControl::DeviceDetailNetwork, FocusControl::DeviceDetailDisplay,
+    FocusControl::DeviceDetailStorage, FocusControl::StorageDiskEntry,
+    FocusControl::StorageVolumeEntry, FocusControl::StorageDetailBack,
+    FocusControl::DeveloperConsole, FocusControl::DeveloperStudio,
+    FocusControl::DeveloperApps, FocusControl::DeveloperServices,
+    FocusControl::DeveloperDiagnostics, FocusControl::DeveloperRefresh,
+    FocusControl::DeveloperBack, FocusControl::AccessibilityKeyboard,
+    FocusControl::AccessibilityEnhancedFocus, FocusControl::AppEntry,
+    FocusControl::AppsInstalledTab, FocusControl::AppsDefaultTab,
+    FocusControl::DefaultAppEntry, FocusControl::DefaultAppHandler,
+    FocusControl::DefaultAppRestore, FocusControl::DefaultAppCancel,
+    FocusControl::AppsDetailBack, FocusControl::AppsOpen,
+    FocusControl::UsersSessionDetails, FocusControl::UsersSecurityDetails,
+    FocusControl::UsersDeveloperServices, FocusControl::UsersBack
+};
+
+static const size_t kFocusTraversalOrderCount =
+    sizeof(kFocusTraversalOrder) / sizeof(kFocusTraversalOrder[0]);
+
+bool indexedFocusControl(FocusControl control)
+{
+    return control == FocusControl::PersonalizationGradientPreset ||
+        control == FocusControl::PersonalizationWallpaperPreset;
+}
+
+size_t eligibleFocusCount(const SettingsPresentationCore& core,
+                          FocusControl control,
+                          SettingsPresentationCore::FocusControlCount callback,
+                          void* context)
+{
+    if (!core.canFocus(control)) return 0u;
+    if (!callback) return 1u;
+    size_t count = callback(context, control);
+    const size_t capacity = indexedFocusControl(control)
+        ? SettingsPresentationCore::kFocusControlIndexCapacity : static_cast<size_t>(1u);
+    if (count > capacity) count = capacity;
+    return count;
+}
+
 bool asciiWhitespace(char value)
 {
     return value == ' ' || (value >= '\t' && value <= '\r');
@@ -320,6 +382,13 @@ CategoryId focusControlCategory(FocusControl control)
     case FocusControl::DisplayAdvanced: return CategoryId::Display;
     case FocusControl::PersonalizationAdvanced:
     case FocusControl::PersonalizationChooseBackground:
+    case FocusControl::PersonalizationGradientTab:
+    case FocusControl::PersonalizationWallpaperTab:
+    case FocusControl::PersonalizationIconsTab:
+    case FocusControl::PersonalizationGradientPreset:
+    case FocusControl::PersonalizationWallpaperPreset:
+    case FocusControl::PersonalizationPreviousPage:
+    case FocusControl::PersonalizationNextPage:
     case FocusControl::PersonalizationApply:
     case FocusControl::PersonalizationCancel:
     case FocusControl::PersonalizationIconTrash:
@@ -364,7 +433,7 @@ CategoryId focusControlCategory(FocusControl control)
 }
 
 SettingsPresentationCore::SettingsPresentationCore()
-    : m_nextRequestId(1)
+    : m_focusedControlIndex(0u), m_nextRequestId(1)
 {
     reset();
 }
@@ -373,6 +442,7 @@ void SettingsPresentationCore::reset()
 {
     m_route = SettingsRoute{ CategoryId::System, TargetId::Page };
     m_focusedControl = FocusControl::None;
+    m_focusedControlIndex = 0u;
     m_searchQuery[0] = '\0';
     m_searchQueryLength = 0;
     for (size_t i = 0; i < kCapabilityCount; ++i) {
@@ -416,6 +486,7 @@ bool SettingsPresentationCore::navigate(const SettingsRoute& route)
     if (!validRoute(route)) return false;
     m_route = route;
     m_focusedControl = FocusControl::None;
+    m_focusedControlIndex = 0u;
     clearSearch();
     return true;
 }
@@ -426,20 +497,76 @@ bool SettingsPresentationCore::canFocus(FocusControl control) const
         focusControlCategory(control) == m_route.category;
 }
 
-bool SettingsPresentationCore::setFocusedControl(FocusControl control)
+bool SettingsPresentationCore::setFocusedControl(FocusControl control, size_t index)
 {
     if (control == FocusControl::None) {
+        if (index != 0u) return false;
         m_focusedControl = FocusControl::None;
+        m_focusedControlIndex = 0u;
         return true;
     }
     if (!canFocus(control)) return false;
+    if (indexedFocusControl(control)) {
+        if (index >= kFocusControlIndexCapacity) return false;
+    } else if (index != 0u) {
+        return false;
+    }
     m_focusedControl = control;
+    m_focusedControlIndex = index;
     return true;
 }
 
 FocusControl SettingsPresentationCore::focusedControl() const
 {
     return m_focusedControl;
+}
+
+size_t SettingsPresentationCore::focusedControlIndex() const
+{
+    return m_focusedControlIndex;
+}
+
+bool SettingsPresentationCore::moveFocus(bool reverse,
+                                         FocusControlCount eligibleCount,
+                                         void* context)
+{
+    size_t total = 0u;
+    size_t currentOrdinal = static_cast<size_t>(-1);
+    for (size_t controlIndex = 0u; controlIndex < kFocusTraversalOrderCount; ++controlIndex) {
+        const FocusControl control = kFocusTraversalOrder[controlIndex];
+        const size_t count = eligibleFocusCount(*this, control, eligibleCount, context);
+        for (size_t index = 0u; index < count; ++index) {
+            if (control == m_focusedControl && index == m_focusedControlIndex)
+                currentOrdinal = total;
+            ++total;
+        }
+    }
+
+    if (total == 0u) {
+        m_focusedControl = FocusControl::None;
+        m_focusedControlIndex = 0u;
+        return false;
+    }
+
+    size_t targetOrdinal = 0u;
+    if (currentOrdinal != static_cast<size_t>(-1)) {
+        targetOrdinal = reverse
+            ? (currentOrdinal == 0u ? total - 1u : currentOrdinal - 1u)
+            : (currentOrdinal + 1u == total ? 0u : currentOrdinal + 1u);
+    } else if (reverse) {
+        targetOrdinal = total - 1u;
+    }
+
+    size_t ordinal = 0u;
+    for (size_t controlIndex = 0u; controlIndex < kFocusTraversalOrderCount; ++controlIndex) {
+        const FocusControl control = kFocusTraversalOrder[controlIndex];
+        const size_t count = eligibleFocusCount(*this, control, eligibleCount, context);
+        for (size_t index = 0u; index < count; ++index) {
+            if (ordinal == targetOrdinal) return setFocusedControl(control, index);
+            ++ordinal;
+        }
+    }
+    return false;
 }
 
 bool SettingsPresentationCore::setSearchQuery(const char* query)

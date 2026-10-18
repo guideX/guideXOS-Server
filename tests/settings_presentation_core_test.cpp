@@ -27,6 +27,38 @@ bool submitOperation(void*, const OperationRequest*) { return false; }
 bool pollOperationResult(void*, OperationResult*) { return false; }
 bool present(void*, const SettingsPresentationCore*) { return true; }
 
+struct FocusAvailability {
+    size_t gradientPresets;
+    size_t wallpaperPresets;
+    bool gradientTab;
+    bool wallpaperTab;
+    bool iconsTab;
+    bool previousPage;
+    bool nextPage;
+    bool icons;
+    bool apply;
+    bool cancel;
+};
+
+size_t focusCount(void* context, FocusControl control)
+{
+    const FocusAvailability* available = static_cast<const FocusAvailability*>(context);
+    if (!available) return 0u;
+    switch (control) {
+    case FocusControl::PersonalizationGradientTab: return available->gradientTab ? 1u : 0u;
+    case FocusControl::PersonalizationWallpaperTab: return available->wallpaperTab ? 1u : 0u;
+    case FocusControl::PersonalizationIconsTab: return available->iconsTab ? 1u : 0u;
+    case FocusControl::PersonalizationGradientPreset: return available->gradientPresets;
+    case FocusControl::PersonalizationWallpaperPreset: return available->wallpaperPresets;
+    case FocusControl::PersonalizationPreviousPage: return available->previousPage ? 1u : 0u;
+    case FocusControl::PersonalizationNextPage: return available->nextPage ? 1u : 0u;
+    case FocusControl::PersonalizationIconTrash: return available->icons ? 1u : 0u;
+    case FocusControl::PersonalizationApply: return available->apply ? 1u : 0u;
+    case FocusControl::PersonalizationCancel: return available->cancel ? 1u : 0u;
+    default: return 0u;
+    }
+}
+
 } // namespace
 
 int main()
@@ -88,6 +120,60 @@ int main()
     check(!core.setFocusedControl(FocusControl::DisplayApply) &&
           core.focusedControl() == FocusControl::PersonalizationIconSystemSettings,
           "Personalization focus rejects a control from another page");
+
+    check(core.selectCategory(CategoryId::Personalization),
+          "focus traversal tests select the native Personalization route");
+    FocusAvailability focusAvailability{ 2u, 0u, true, true, true, false, false, false, true, true };
+    check(core.setFocusedControl(FocusControl::PersonalizationGradientPreset, 0u) &&
+          core.moveFocus(false, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationGradientPreset &&
+          core.focusedControlIndex() == 1u &&
+          core.moveFocus(true, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationGradientPreset &&
+          core.focusedControlIndex() == 0u,
+          "forward Tab followed by Shift+Tab restores the indexed gradient focus");
+    check(core.setFocusedControl(FocusControl::PersonalizationWallpaperTab) &&
+          core.moveFocus(true, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationGradientTab &&
+          core.moveFocus(false, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationWallpaperTab,
+          "Shift+Tab followed by Tab restores section focus");
+    check(core.setFocusedControl(FocusControl::PersonalizationCancel) &&
+          core.moveFocus(false, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationGradientTab &&
+          core.moveFocus(true, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationCancel,
+          "focus traversal wraps symmetrically across the eligible controls");
+    check(!core.setFocusedControl(FocusControl::PersonalizationGradientPreset, 16u),
+          "indexed focus targets reject values outside the fixed focus capacity");
+
+    focusAvailability.gradientPresets = 0u;
+    check(core.setFocusedControl(FocusControl::PersonalizationGradientTab) &&
+          core.moveFocus(false, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationWallpaperTab,
+          "unavailable gradient controls are skipped without leaving the page");
+    focusAvailability = FocusAvailability{};
+    core.setFocusedControl(FocusControl::PersonalizationGradientTab);
+    check(!core.moveFocus(false, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::None,
+          "an empty eligible focus set clears focus deterministically");
+    focusAvailability.cancel = true;
+    check(core.moveFocus(true, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationCancel &&
+          core.moveFocus(false, focusCount, &focusAvailability) &&
+          core.focusedControl() == FocusControl::PersonalizationCancel,
+          "a single focusable control remains stable in either direction");
+
+    focusAvailability = FocusAvailability{ 8u, 4u, true, true, true, true, true, true, true, true };
+    check(core.setFocusedControl(FocusControl::PersonalizationGradientTab),
+          "long traversal begins at the first visible section target");
+    for (size_t transition = 0u; transition < 1000u; ++transition) {
+        check(core.moveFocus((transition % 2u) != 0u, focusCount, &focusAvailability) &&
+              core.canFocus(core.focusedControl()) &&
+              core.focusedControlIndex() < SettingsPresentationCore::kFocusControlIndexCapacity,
+              "1,000 mixed focus transitions remain valid and bounded");
+    }
+
     check(core.selectCategory(CategoryId::Display) &&
           core.route() == SettingsRoute{ CategoryId::Display, TargetId::Page } &&
           core.focusedControl() == FocusControl::None,

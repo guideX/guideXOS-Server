@@ -1,0 +1,16 @@
+{
+  "processId": 26392,
+  "repository": "D:\\dev\\guideXOSServer",
+  "branch": "main",
+  "kernel": "D:\\dev\\guideXOSServer\\kernel\\build\\s20-modifier-focus-20261018\\bin\\kernel.elf",
+  "kernelSha256": "9495CCB3670C94F4C2AEAA321113858DC57C53C79876E89B56C191D1002BB9B3",
+  "bootMedia": "D:\\dev\\guideXOSServer\\out\\validation\\settings-s20-modifier-focus-20261018\\guest\\S20-final-private.raw",
+  "bootMediaSha256BeforeRun": "7071C7F711009D674F740989AB2A41BF45DA4C4A08BA6FCAB7FBA10407ED8475",
+  "firmware": "D:\\dev\\guideXOSServer\\out\\validation\\settings-s19r3-native-ui-20261017\\guest\\OVMF-s19r3-readonly.fd",
+  "firmwareSha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792",
+  "qmpEndpoint": "127.0.0.1:60272",
+  "serialLog": "D:\\dev\\guideXOSServer\\out\\validation\\settings-s20-modifier-focus-20261018\\guest\\final\\production-guest.serial.log",
+  "qemuPath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "launchFaultAndCleanRetry": "first private image open hit a transient Windows sharing error; exclusive-open check was clear and retry started successfully.",
+  "bootMediaSha256AfterRun": "16774805ADC462AD88E3FBDC8988103855B883E13C9D01B92A05A6DA924F9AC6"
+}
