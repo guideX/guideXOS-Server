@@ -1,0 +1,81 @@
+{
+  "phase": "S19R3 native Settings production acceptance",
+  "repository": "D:\\dev\\guideXOSServer",
+  "branch": "main",
+  "startingHead": "dbea5f183e399f712da5d8a15db01fb9c751e49e",
+  "sourceChanges": false,
+  "productionKernel": {
+    "sourceProvenance": "accepted S19R2 ordinary AMD64 production artifact; reused without rebuilding",
+    "pathInGuest": "/kernel.elf",
+    "bytes": 2760592,
+    "sha256": "1D2C119CB947B170B0529D9444F7B8F8BF7FE0904E6EC42CE4916165257FAE3F"
+  },
+  "firmware": {
+    "type": "OVMF read-only code image",
+    "bytes": 3653632,
+    "sha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792"
+  },
+  "guestProfile": {
+    "architecture": "AMD64",
+    "acceleration": "TCG",
+    "network": "disabled",
+    "display": "QEMU VGA",
+    "pointer": "guest PS/2 mouse; QMP query-mice reported absolute=false",
+    "settingsLimits": {
+      "minimum": "660x440",
+      "preferred": "760x560",
+      "maximum": "1180x820"
+    }
+  },
+  "primaryLifecycleGuest": {
+    "purpose": "minimum-size qualification and uninterrupted legacy close/reopen lifecycle",
+    "processId": 29328,
+    "qmpEndpoint": "127.0.0.1:60119",
+    "startedUtc": "2026-10-18T03:46:55.4105985+00:00",
+    "mediaBytes": 134249984,
+    "mediaSha256BeforeBoot": "F2367870BE3A86EB290DCBE2A529AFFAF31E58A868A1D91C69347EDEE5BBF926",
+    "mediaSha256AfterShutdown": "01452B639BC810BB5DD677E4C3F9A71594562E4E03D2C49AF2CACA9B370AE236",
+    "launchRecord": "production-guest-launch.json",
+    "qmpLog": "production-guest.qmp.log",
+    "serialLog": "production-guest.serial.log",
+    "lifecycleWasUninterrupted": true,
+    "settingsGeometry": ["760x560", "720x560", "660x440"],
+    "belowMinimumProposalClampedTo": "660x440"
+  },
+  "supplementalResizebackGuest": {
+    "purpose": "separate-boot confirmation of live resize-back after minimum-size acceptance",
+    "processId": 32216,
+    "qmpEndpoint": "127.0.0.1:60120",
+    "startTimeEvidence": "first successful QMP handshake at 2026-10-18T04:01:47.2064636+00:00; full process launch timestamp was not retained",
+    "sourceMedia": "private clone of the primary task-owned guest media after its run; same kernel, firmware, and configuration",
+    "mediaBytes": 134249984,
+    "mediaSha256AfterShutdown": "EF3EE1A50EC172F785E9736F7EB58F3186D5907D2B8842B44CC26E3D4711C298",
+    "launchRecord": "resizeback-guest-launch.json",
+    "qmpLog": "resizeback-guest.qmp.log",
+    "serialLog": "resizeback-guest.serial.log",
+    "separateFromPrimaryLifecycleGuest": true,
+    "settingsGeometry": ["760x560", "720x560", "660x440", "700x440", "760x560"]
+  },
+  "desktopConfiguration": {
+    "guestPath": "/desktop.cfg",
+    "bytes": 234,
+    "sha256": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249",
+    "beforeAndAfterByteIdentical": true,
+    "snapshots": ["desktop.cfg.before", "desktop.cfg.after", "desktop.cfg.resizeback-after"]
+  },
+  "focusedRegressionResults": {
+    "nativeLayout": "1037/1037 passed; includes 1000 geometry transitions",
+    "nativeRuntime": "1417/1417 passed; lifecycle=100, refresh=250, notification/state=1000",
+    "sharedPresentationCore": "2650/2650 passed",
+    "settingsCenterModel": "89/89 passed",
+    "compositorPointerButtons": "passed",
+    "compositorResizeNotification": "passed",
+    "productionBuild": "not rerun; source unchanged; reused verified S19R2 kernel"
+  },
+  "finalOutcome": "A — S19 accepted after S19R3",
+  "limitations": [
+    "Legacy Display Options Displays tab reports that its display backend is unavailable.",
+    "Shift+Tab remains unsupported because the existing key callback has no modifier state; this is S20 scope.",
+    "Apply focus/reachability was captured at minimum size; Apply was not activated there. Cancel was activated and configuration remained unchanged."
+  ]
+}

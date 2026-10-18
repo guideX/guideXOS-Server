@@ -1,0 +1,2401 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+guideXOS UEFI Bootloader
+ACPI RSDP found at 0x000000007F77E000, rev 0
+ELF: vaddr range 0x100000 - 0x22b6ea60 (size 0x22a6ea60)
+ELF: Allocated 141935 pages at 0x590fe000
+ELF: Loading seg 0: vaddr=0x100000 -> phys=0x590fe000 (filesz=0x22503c)
+ELF: Loading seg 1: vaddr=0x326000 -> phys=0x59324000 (filesz=0x12048)
+ELF: Entry point in segment 0 (vaddr 0x100000)
+ELF: Entry vaddr=0x100000, offset=0x0, physEntry=0x590fe000
+Kernel entry phys: 0x00000000590FE000 virt: 0x0000000000100000
+Kernel loaded at: 0x00000000590FE000 - 0x000000007BB6CA60
+Ramdisk size: 67108864 bytes
+Ramdisk loaded at 0x00000000550FE000
+[BOOT] GOP handles discovered: 2
+[BOOT] GOP FramebufferCount=2 UniqueFramebufferCount=1 DuplicateFramebufferCount=1 SuspiciousFramebufferCount=0
+[BOOT] FB[0] status=canonical primary selected src=UEFI GOP base=0x0000000080000000 size=4096000 geometry=1280x800 pitch=5120 bpp=32 format=B8G8R8A8
+[BOOT] FB[1] status=duplicate alias same-as-primary src=UEFI GOP base=0x0000000080000000 size=4096000 geometry=1280x800 pitch=5120 bpp=32 format=B8G8R8A8
+[BOOT] Diagnostic framebuffer array exported 2 raw GOP framebuffer descriptor(s); primary remains render target
+Stack allocated at 0x0000000000200000, top at 0x0000000000210000 (below kernel)
+
+=== PCI Enumeration ===
+Found 0 network controller(s)
+
+No supported NIC found for MMIO mapping
+=========================
+
+No HDA audio controller found for MMIO mapping
+Mapping stack: 0x0000000000200000 size 65536
+Mapping framebuffer: 0x0000000080000000 size 4096000
+Mapping ramdisk: 0x00000000550FE000 size 67108864
+Mapping ACPI RSDP region: 0x000000007F77E000
+Mapping bootloader: 0x000000007DDD9000 size 77824
+Mapping allocator region: 0x4000000 size 64MB
+Mapping low memory stack region: 0x100000 size 2MB
+Building identity page tables with 12 ranges...
+Page tables built at PML4: 0x000000007DEF8000
+Pre-EBS marker drawn (green square top-left)
+Exiting boot services...
+
+
+=== GuideXOS Boot (Post-ExitBootServices) ===
+
+=== CPU State Check ===
+CR0 = 0x0000000080010033
+CR3 = 0x000000007F801000
+CR4 = 0x0000000000000668
+EFER = 0x0000000000000D00
+  [OK] CR0.PG (Paging) enabled
+  [OK] CR0.PE (Protected Mode) enabled
+  [OK] CR4.PAE enabled
+  [OK] EFER.LME (Long Mode Enable) set
+  [OK] EFER.LMA (Long Mode Active) set
+
+=== BootInfo ===
+Magic: 0x49425847
+Framebuffer: 0x0000000080000000 (0x00000500x0x00000320)
+
+=== Kernel Entry Validation ===
+Entry point: 0x00000000590FE000
+First 16 bytes at entry:
+  FA 66 31 C0 8E D8 8E C0 8E E0 8E E8 8E D0 48 BC 
+  [INFO] Unknown prologue pattern
+
+=== Jumping to Kernel (Trampoline) ===
+
+========================================
+=== PRE-HANDOFF VALIDATION ===
+========================================
+
+--- Parameters ---
+Kernel Entry: 0x00000000590FE000
+BootInfo:     0x000000007DF00000
+Stack Top:    0x0000000000210000
+PML4 Phys:    0x000000007DEF8000
+
+--- Validating Mappings ---
+
+[1] Kernel Entry:
+Checking mapping for: 0x00000000590FE000
+  PML4[0x00000000] = 0x000000007DE09003
+  PDPT[0x00000001] = 0x000000007DDF7003
+  PD[0x000000C8] = 0x000000007DDF6003
+  PT[0x000000FE] = 0x00000000590FE003
+  [OK] Maps to physical: 0x00000000590FE000
+
+[2] BootInfo:
+Checking mapping for: 0x000000007DF00000
+  PML4[0x00000000] = 0x000000007DE09003
+  PDPT[0x00000001] = 0x000000007DDF7003
+  PD[0x000001EF] = 0x000000007DC8C003
+  PT[0x00000100] = 0x000000007DF00003
+  [OK] Maps to physical: 0x000000007DF00000
+
+[3] Stack (top - 0x1000):
+Checking mapping for: 0x000000000020F000
+  PML4[0x00000000] = 0x000000007DE09003
+  PDPT[0x00000000] = 0x000000007DDF9003
+  PD[0x00000001] = 0x000000007DC8D003
+  PT[0x0000000F] = 0x000000005920D003
+  [OK] Maps to physical: 0x000000005920D000
+
+[4] PML4 self-mapping:
+Checking mapping for: 0x000000007DEF8000
+  PML4[0x00000000] = 0x000000007DE09003
+  PDPT[0x00000001] = 0x000000007DDF7003
+  PD[0x000001EF] = 0x000000007DC8C003
+  PT[0x000000F8] = 0x000000007DEF8003
+  [OK] Maps to physical: 0x000000007DEF8000
+
+[5] Framebuffer:
+Checking mapping for: 0x0000000080000000
+  PML4[0x00000000] = 0x000000007DE09003
+  PDPT[0x00000002] = 0x000000007DC8A003
+  PD[0x00000000] = 0x000000007DC89003
+  PT[0x00000000] = 0x0000000080000003
+  [OK] Maps to physical: 0x0000000080000000
+
+========================================
+=== VALIDATION COMPLETE ===
+========================================
+
+
+[BOOT] Validating VIRTUAL kernel entry mapping:
+Checking mapping for: 0x0000000000100000
+  PML4[0x00000000] = 0x000000007DE09003
+  PDPT[0x00000000] = 0x000000007DDF9003
+  PD[0x00000000] = 0x000000007DDF8003
+  PT[0x00000100] = 0x00000000590FE003
+  [OK] Maps to physical: 0x00000000590FE000
+[BOOT] About to handoff via trampoline...
+[BOOT] Trampoline at: 0x000000007DEF9000
+[BOOT] Kernel entry: 0x00000000590FE000
+[BOOT] BootInfo at: 0x000000007DF00000
+[BOOT] Stack top: 0x0000000000210000
+[BOOT] PML4: 0x000000007DEF8000
+
+[BOOT] Validating trampoline mapping:
+Checking mapping for: 0x000000007DEF9000
+  PML4[0x00000000] = 0x000000007DE09003
+  PDPT[0x00000001] = 0x000000007DDF7003
+  PD[0x000001EF] = 0x000000007DC8C003
+  PT[0x000000F9] = 0x000000007DEF9003
+  [OK] Maps to physical: 0x000000007DEF9000
+
+[BOOT] === CALLING TRAMPOLINE NOW ===
+[GXOS-BUILD] identity=GXOS-LARGE-FILE-PASTE-TRACE-V1 probe=GXOS-LFPASTE-20260726-02
+[KERNEL] guideXOS kernel_main entered
+[KERNEL] Boot method: UEFI BootInfo
+[KERNEL] FramebufferCount=2 UniqueFramebufferCount=1 DuplicateFramebufferCount=1 SuspiciousFramebufferCount=0 ActiveFramebufferTargetCount=1 DisabledDiagnosticFramebufferCandidateCount=0
+[KERNEL] Framebuffer source=UEFI BootInfo framebufferCount=2 index=0 status=canonical primary selected base=0000000080000000 size=00000000003E8000 geometry=1280x800 pitch=5120 bpp=32 format=B8G8R8A8
+[KERNEL] Framebuffer source=UEFI BootInfo framebufferCount=2 index=1 status=duplicate alias same-as-primary base=0000000080000000 size=00000000003E8000 geometry=1280x800 pitch=5120 bpp=32 format=B8G8R8A8
+[KERNEL] Framebuffer ready
+[desktop] system desktop icon settings loaded
+[VFS] ERROR: No mount point for path: /desktop.shortcuts
+[desktop] Shortcut loaded: none persisted
+[VFS] ERROR: No mount point for path: /.startmenu_recent
+[desktop] Start menu recent programs loaded: none persisted
+[desktop] bare-metal desktop icon init starting
+[desktop] system icon visibility decision: Trash enabled
+[desktop] system icon visibility decision: File Explorer enabled
+[desktop] system icon visibility decision: System Settings hidden
+[desktop] bare-metal desktop backing path chosen: /Desktop
+[VFS] ERROR: No mount point for path: /.desktop_icons
+[desktop] allocating desktop icon slot occupied=00000002 columns=0000000F rows=00000008
+[desktop] desktop icon slot selected x=00000018 y=00000018
+[desktop] allocating desktop icon slot occupied=00000002 columns=0000000F rows=00000008
+[desktop] desktop icon slot selected x=00000068 y=00000018
+[desktop] bare-metal desktop icon init completed
+[desktop] wallpaper load path=/desktop.cfg backend=unmounted
+[desktop] wallpaper load deferred reason=settings-volume-not-mounted
+[desktop] wallpaper load path=/desktop.cfg backend=unmounted
+[desktop] wallpaper load deferred reason=settings-volume-not-mounted
+[desktop] Framebuffer candidate[0] enabled=true primary=true source=UEFI GOP base=0000000080000000 size=00000000003E8000 geometry=1280x800 pitch=5120 bpp=32 format=B8G8R8A8
+Taskbar: SearchWidget hidden, search provider unavailable
+Taskbar: ClockWidget enabled, RTC/CMOS time available
+Taskbar: NetworkWidget hidden, no network provider available
+Taskbar: VolumeWidget hidden, audio provider unavailable
+Taskbar: BatteryWidget hidden, no battery provider available
+[DESKTOP CAP] begin
+[DESKTOP CAP] architecture=AMD64 (x86-64)
+[DESKTOP CAP] framebuffer_available=true
+[DESKTOP CAP] framebuffer_width=0x00000500
+[DESKTOP CAP] framebuffer_height=0x00000320
+[DESKTOP CAP] framebuffer_pitch=0x00001400
+[DESKTOP CAP] framebuffer_bpp=0x00000020
+[DESKTOP CAP] framebuffer_pixel_format_supported=true
+[DESKTOP CAP] double_buffering_enabled=true
+[DESKTOP CAP] mouse_available=true
+[DESKTOP CAP] keyboard_available=true
+[DESKTOP CAP] timer_tick_available=true
+[DESKTOP CAP] desktop_event_loop_active=false
+[DESKTOP CAP] cursor_rendering_active=false
+[DESKTOP CAP] taskbar_enabled=true
+[DESKTOP CAP] start_menu_enabled=true
+[DESKTOP CAP] window_move_enabled=true
+[DESKTOP CAP] window_resize_enabled=true
+[DESKTOP CAP] desktop_icons_enabled=true
+[DESKTOP CAP] icon_persistence_available=false
+[DESKTOP CAP] shutdown_supported=true
+[DESKTOP CAP] restart_supported=true
+[DESKTOP CAP] end
+[desktop] wallpaper image lookup path=/system/wall/blueflwr.gxi
+[desktop] gximg stat failed: /system/wall/blueflwr.gxi
+[desktop] wallpaper image fallback to gradient
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL] Desktop drawn
+[GDT] GDT loaded with code/data/TSS entries, segments reloaded
+[IRQ] IDT loaded, PIC remapped, interrupts enabled
+[IRQ] Master PIC mask: 0xFF Slave PIC mask: 0xFF
+[KERNEL] IDT + PIC initialized, interrupts enabled
+[PIT] Timer configured at ~00000064 Hz (divisor=0x00002E9B)
+[IRQ] register_irq called for IRQ 00
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 00 Master mask: 0xFE Slave mask: 0xFF
+[KERNEL] PIT timer initialized, IRQ0 registered
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[KERNEL] Audio controllers detected: 00
+[KERNEL] Initializing storage subsystem...
+[KERNEL] Block device layer initialized
+[NTFS] Initializing NTFS filesystem driver...
+[NTFS] NTFS driver initialized
+[XFS] Initializing XFS filesystem driver...
+[XFS] XFS driver initialized
+[KERNEL] Filesystem drivers initialized (FAT32, ext2/4, NTFS, XFS)
+[MSI] Initializing MSI/MSI-X subsystem...
+[MSI] MSI subsystem initialized
+[KERNEL] MSI/MSI-X subsystem initialized
+[VIRTIO-RNG] Device present=no; no virtio-rng PCI device detected
+[KERNEL] VirtIO subsystem initialized
+[ATA] Initializing ATA driver...
+[ATA] Probing channel pri (ioBase=0x01F0)
+[ATA]   Checking master...
+[ATA]   Found device!
+[ATA]   Checking [IRQ] dispatch irq=00
+slave...
+[ATA]   No device
+[ATA] Probing channel sec (ioBase=0x0170)
+[ATA]   Checking master...
+[ATA]   No device
+[ATA]   Checking slave...
+[ATA]   No device
+[ATA] PCI scan found IDE controller
+[ATA] Init complete. Devices: 1
+[KERNEL] ATA/SATA driver initialized, 00000001 drive(s) found
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[KERNEL] NVMe driver initialized, 00000000 namespace(s) found
+[RAMDISK] Initialized with 00004000 KB pool
+[RAMDISK] Created 'ram0' with 00002000 sectors (00001000 KB)
+[KERNEL] Created 4MB RAM disk 'ram0'
+[VFS] Initialized
+[KERNEL] VFS layer initialized
+[KERNEL] Total block devices: 00000002
+[KERNEL] Trying persistent storage device ata0m at /
+[IRQ] dispatch irq=00
+[VFS] detect_fs: Read sector 0 OK
+[VFS]   Bytes 510-511: 0x55 0xAA
+[VFS]   Found 0x55AA boot signature
+[VFS]   BPB: bps=0x0000 spf16=0x0000 spf32=0x00000000
+[VFS]   MBR partition type: 0x0C
+[VFS]   FAT partition at LBA 0x0000003F - deferring to partition-aware FAT mount
+[VFS] Mounted FAT32 at '/'
+[KERNEL] Successfully mounted persistent storage from ata0m
+[KERNEL] Boot wallpaper pack found in ramdisk.img
+[RAMDISK] Attached read-only image 'wallimg' with 00020000 sectors
+[VFS] Mounted FAT32 at '/system'
+[desktop] mounted wallpaper image pack at /system; wallpapers live at /system/wall
+[IRQ] dispatch irq=00
+[VFS] Mounted alias '/certs' -> '/system/certs'
+[KERNEL] Navigator mounted /certs from boot ramdisk path /system/certs
+[VFS] Mounted alias '/config' -> '/system/config'
+[KERNEL] Navigator mounted /config from boot ramdisk path /system/config
+[KERNEL] Navigator boot config certs directory unavailable at /system/config/certs
+[VFS] Mounted alias '/config/navigator' -> '/system/config/navigator'
+[KERNEL] Navigator mounted /config/navigator from boot ramdisk path /system/config/navigator
+[desktop] wallpaper load path=/desktop.cfg backend=FAT32 mount=/ device=00 readonly=0 alias=0
+[VFS] Opened: /desktop.cfg
+[desktop] loaded background scale mode=fill source=primary
+[VFS] ERROR: File not found: /wallpaper.id
+[VFS] ERROR: File not found: /desktop.wallpaper.id
+[desktop] wallpaper load path=/desktop.cfg backend=FAT32 mount=/ device=00 readonly=0 alias=0
+[IRQ] dispatch irq=00
+[VFS] Opened: /desktop.cfg
+[desktop] wallpaper load id=gradient_ocean source=primary-config
+[desktop] wallpaper resolve result=ok id=gradient_ocean
+[desktop] wallpaper apply source=persisted id=gradient_ocean
+[VFS] Opened: /desktop.cfg
+[desktop] system desktop icon settings loaded
+[desktop] Desktop folder enumeration started
+[desktop] Desktop folder enumeration completed discovered=00000000 added=00000000 skippedDuplicates=00000000
+[desktop] system icon visibility decision: Trash enabled
+[desktop] system icon visibility decision: File Explorer enabled
+[desktop] system icon visibility decision: System Settings hidden
+[VFS] ERROR: File not found: /.desktop_icons
+[desktop] allocating desktop icon slot occupied=00000002 columns=0000000F rows=00000008
+[desktop] desktop icon slot selected x=00000018 y=00000018
+[desktop] allocating desktop icon slot occupied=00000002 columns=0000000F rows=00000008
+[desktop] desktop icon slot selected x=00000068 y=00000018
+[desktop] desktop backing directory resolved after VFS ready: /Desktop
+[VFS_MKDIR] path=/Documents fs=FAT32 fatStatus=FAT_CREATE_INVALID_NAME blockStatus=0x00(BLOCK_OK) vfsStatus=VFS_ERR_INVALID
+[desktop] warning: one or more standard user folders could not be created
+[desktop] bare-metal startup desktop folder scan requested
+[desktop] Desktop folder enumeration started
+[desktop] Desktop folder enumeration completed discovered=00000000 added=00000000 skippedDuplicates=00000000
+[desktop] system icon visibility decision: Trash enabled
+[desktop] system icon visibility decision: File Explorer enabled
+[desktop] system icon visibility decision: System Settings hidden
+[desktop] bare-metal startup desktop folder scan completed
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[VFS] Opened: /Apps/DeveloperStudio/app.json
+[NATIVE-ELF] App Model package discovered package=DeveloperStudio id=com.guidexos.developerstudio displayName=guideXOS Developer Studio
+PACBM 01 DISCOVERED runtime=0000000000000000 window=0x0000000000000000
+[NATIVE-ELF] kind=NativeElf arch=amd64 entryPoint=gx_main abi=guidexos-c-abi-v1 executable=/Apps/DeveloperStudio/bin/amd64/developerstudio.elf bytes=0x00000000000F7D18 resources=package-relative VFS
+[VFS] Opened: /Apps/PacMan/app.json
+[NATIVE-ELF] App Model package discovered package=PacMan id=com.guidexos.pacman displayName=Nexgen PacMan
+PACBM 01 DISCOVERED runtime=0000000000000000 window=0x0000000000000000
+[NATIVE-ELF] kind=NativeElf arch=amd64 entryPoint=gx_main abi=guidexos-c-abi-v1 executable=/Apps/PacMan/bin/amd64/pacman.elf bytes=0x000000000000D0B8 resources=package-relative VFS
+[NATIVE-ELF] discovery result packages=0x00000002
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL] Initializing NIC driver...
+[KERNEL] NIC not found in BootInfo (flags=00000000), falling back to PCI scan
+[KERNEL] Falling back to PCI scan...
+[NIC] Scanning PCI bus for network controllers...
+[NIC] No supported NIC found
+[SettingsNetwork] result=00 state=01 adapters=00000000
+[IRQ] register_irq called for IRQ 03
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 03 Master mask: 0xF6 Slave mask: 0xFF
+[SYSBRIDGE] initialized transport=uart-com2 protocol=1 max-response=110C
+[KERNEL] Initializing PS/2 mouse...
+[PS2] Starting PS/2 mouse init
+[PS2] Controller config before: 0x77
+[PS2] Controller config after: 0x17
+[PS2] Sending mouse reset (0xFF)...
+[PS2] Reset ACK: 0xFA
+[PS2] Self-test result: 0xAA
+[PS2] Device ID: 0x00
+[PS2] IntelliMouse (scroll wheel): yes
+[PS2] Mouse init complete
+[KERNEL] PS/2 mouse init complete
+[IRQ] register_irq called for IRQ 0C
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 0C Master mask: 0xF2 Slave mask: 0xEF
+[KERNEL] IRQ12 handler registered and unmasked
+[KERNEL] Initializing PS/2 keyboard...
+[PS2KB] Initializing PS/2 keyboard...
+[PS2KB] Keyboard initialized (scancode set 2)
+[IRQ] register_irq called for IRQ 01
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 01 Master mask: 0xF0 Slave mask: 0xEF
+[KERNEL] IRQ1 (keyboard) handler registered
+[KERNEL] Initializing input manager...
+[INPUT] Initializing input manager
+[INPUT] PS/2 mouse available
+[INPUT] Active mouse source: PS/2
+[INPUT] Input manager initialized
+[KERNEL] Input manager initialized
+
+============================================================
+           guideXOS Hardware Feature Report
+============================================================
+
+--- CPU ---
+[OK]   AMD64 (x86-64)
+
+--- Storage ---
+[N/A]  ATA (PIO mode)
+[N/A]  AHCI/SATA
+[N/A]  NVMe
+[N/A]  USB Mass Storage
+[N/A]  VirtIO Block
+[N/A]  RAM Disk
+
+--- Filesystem ---
+[OK]   FAT32
+[N/A]  exFAT
+[OK]   ext2
+[OK]   ext4
+[OK]   NTFS
+[OK]   XFS
+[N/A]  UFS
+
+--- Network ---
+[N/A]  Intel E1000
+[N/A]  VirtIO Network
+[N/A]  IPv4 Stack
+[N/A]  IPv6 Stack
+[N/A]  TCP Protocol
+[N/A]  UDP Protocol
+[N/A]  DHCP Client
+[N/A]  DNS Client
+
+--- Graphics ---
+[N/A]  VGA Text Mode
+[N/A]  VESA/VBE
+[N/A]  UEFI GOP
+[N/A]  VirtIO GPU
+[N/A]  QEMU ramfb
+
+--- Input ---
+[OK]   PS/2 Keyboard
+[OK]   PS/2 Mouse
+[N/A]  USB HID
+[N/A]  VirtIO Input
+[N/A]  Serial Console
+
+--- VirtIO ---
+[N/A]  VirtIO Block
+[N/A]  VirtIO Network
+[N/A]  VirtIO GPU
+[N/A]  VirtIO Input
+[N/A]  VirtIO Console
+[N/A]  VirtIO RNG (not detected)
+
+--- Interrupts ---
+[OK]   8259 PIC
+[N/A]  Local APIC
+[N/A]  I/O APIC
+[OK]   MSI
+[N/A]  MSI-X
+[N/A]  ARM GIC
+[N/A]  RISC-V PLIC
+
+--- Summary ---
+Total features:  0000002D
+Active:          0000000A
+Present:         00000000
+Errors:          00000000
+Disabled:        00000000
+Not present:     00000023
+
+============================================================
+
+[DESKTOP CAP] begin
+[DESKTOP CAP] architecture=AMD64 (x86-64)
+[DESKTOP CAP] framebuffer_available=true
+[DESKTOP CAP] framebuffer_width=0x00000500
+[DESKTOP CAP] framebuffer_height=0x00000320
+[DESKTOP CAP] framebuffer_pitch=0x00001400
+[DESKTOP CAP] framebuffer_bpp=0x00000020
+[DESKTOP CAP] framebuffer_pixel_format_supported=true
+[DESKTOP CAP] double_buffering_enabled=true
+[DESKTOP CAP] mouse_available=true
+[DESKTOP CAP] keyboard_available=true
+[DESKTOP CAP] timer_tick_available=true
+[DESKTOP CAP] desktop_event_loop_active=true
+[DESKTOP CAP] cursor_rendering_active=true
+[DESKTOP CAP] taskbar_enabled=true
+[DESKTOP CAP] start_menu_enabled=true
+[DESKTOP CAP] window_move_enabled=true
+[DESKTOP CAP] window_resize_enabled=true
+[DESKTOP CAP] desktop_icons_enabled=true
+[DESKTOP CAP] icon_persistence_available=false
+[DESKTOP CAP] shutdown_supported=true
+[DESKTOP CAP] restart_supported=true
+[DESKTOP CAP] end
+[VFS] Opened: /config/navigator/https-policy.txt
+[VFS] Opened: /certs/ca-bundle.pem
+[VFS] Opened: /certs/ca-bundle.manifest
+[VFS] Opened: /certs/ca-bundle.pem
+[NAVIGATOR-SMOKE] BEGIN
+[NAVIGATOR-SMOKE] build_mode=bare-metal/kernel
+[NAVIGATOR-SMOKE] registered=true
+[NAVIGATOR-SMOKE] runtime.mode=bare-metal/kernel
+[NAVIGATOR-SMOKE] launch.path=AppManager::registerApp -> NavigatorApp::create
+[NAVIGATOR-SMOKE] current.url=about:navigator-runtime
+[NAVIGATOR-SMOKE] stale.placeholder=not active
+[NAVIGATOR-SMOKE] toolbar.icon_resources=6/6
+[NAVIGATOR-SMOKE] toolbar.icon_size=16x16 fallback=label-only cache=init-once
+[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS
+[NAVIGATOR-SMOKE] capability.local_png=enabled through shared ImageAdapter where VFS image data exists
+[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.1 GET/POST with redirects/chunked
+[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records
+[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5
+[NAVIGATOR-SMOKE] capability.http_chunked=enabled
+[NAVIGATOR-SMOKE] capability.https_tls=controlled local smoke remains enabled for guidexos.test:8443/navigator-smoke/; ProductionValidated trust-store policy enables arbitrary-origin IPv4 HTTPS with CA, SNI, and hostname checks and no plaintext fallback
+[NAVIGATOR-SMOKE] capability.tls_backend=Mbed TLS transport ready with CA and hostname validation
+[NAVIGATOR-SMOKE] capability.tls_smoke_local=enabled wrong-host and direct hook diagnostics remain available
+[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps + PolicyValidatedTlsHttps)
+[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; production trust enables arbitrary-origin HTTPS, plaintext fallback stays disabled, and policy stays fail-closed by default
+[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered
+[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered
+[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=local allowlist, validated fixture HTTPS, and controlled public HTTPS pilot redirect policy are covered
+[NAVIGATOR-SMOKE] coverage.real_public_https_probe=opt-in only; sha256.badssl.com production-public HTTPS probe reports pass, skip, or fail without weakening validation
+[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images
+[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1
+[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks
+[NAVIGATOR-SMOKE] capability.forms_lite=enabled interactive GET/POST document controls
+[NAVIGATOR-SMOKE] capability.forms_post_hosted=enabled in authoritative hosted Navigator path
+[NAVIGATOR-SMOKE] capability.forms_post_bare_metal=enabled-basic application/x-www-form-urlencoded
+[NAVIGATOR-SMOKE] capability.forms_post_interactive=enabled through document controls
+[NAVIGATOR-SMOKE] capability.forms_post_redirect_policy=303 becomes GET; 301/302/307/308 preserve POST
+[NAVIGATOR-SMOKE] page_info.forms_post_bare_metal=enabled-basic
+[NAVIGATOR-SMOKE] capability.forms_controls=text, checkbox, radio, textarea, select, submit
+[NAVIGATOR-SMOKE] capability.forms_focus_navigation=Tab, Enter, Space in bare-metal document controls
+[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter
+[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported
+[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only
+[NAVIGATOR-SMOKE] vfs.root_mount=/
+[NAVIGATOR-SMOKE] vfs.root_fs_type=FAT32
+[NAVIGATOR-SMOKE] vfs.root_block_device=0
+[NAVIGATOR-SMOKE] vfs.system_mount=/system
+[NAVIGATOR-SMOKE] vfs.system_fs_type=FAT32
+[NAVIGATOR-SMOKE] vfs.system_block_device=2
+[NAVIGATOR-SMOKE] vfs.system_source_prefix=/
+[NAVIGATOR-SMOKE] vfs.certs_mount=/certs
+[NAVIGATOR-SMOKE] vfs.certs_fs_type=FAT32
+[NAVIGATOR-SMOKE] vfs.certs_block_device=2
+[NAVIGATOR-SMOKE] vfs.certs_source_prefix=/certs
+[NAVIGATOR-SMOKE] vfs.certs_exists=yes
+[NAVIGATOR-SMOKE] vfs.certs_file_exists=yes
+[NAVIGATOR-SMOKE] vfs.certs_file_read_status=success
+[NAVIGATOR-SMOKE] vfs.certs_file_read_bytes=256
+[NAVIGATOR-SMOKE] vfs.certs_file_pem_header=absent
+[NAVIGATOR-SMOKE] tls_prereq.rng_quality=Unavailable
+[NAVIGATOR-SMOKE] tls_prereq.rng_backend=none (virtio-rng PCI device not found)
+[NAVIGATOR-SMOKE] tls_prereq.virtio_rng_detected=no
+[NAVIGATOR-SMOKE] tls_prereq.virtio_rng_status=device-not-found
+[NAVIGATOR-SMOKE] tls_prereq.random_read_1=FAIL
+[NAVIGATOR-SMOKE] tls_prereq.random_read_2=FAIL
+[NAVIGATOR-SMOKE] tls_prereq.random_reads_identical=unknown
+[NAVIGATOR-SMOKE] tls_prereq.rng_fail_closed=true
+[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible
+[NAVIGATOR-SMOKE] tls_prereq.wall_clock_backend=CMOS RTC (interpreted as UTC)
+[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=1792296115
+[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=2026-10-18T04:01:55Z
+[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=RngCallbackUnavailable
+[NAVIGATOR-SMOKE] tls_prereq.tls_backend_name=Mbed TLS bare-metal scaffold
+[NAVIGATOR-SMOKE] tls_prereq.tls_backend_version=Mbed TLS 4.1.0
+[NAVIGATOR-SMOKE] tls_prereq.tls_backend_error=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_path=third_party/mbedtls
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_config_path=guidexos/mbedtls_config.h
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_crypto_config_path=guidexos/crypto_config.h
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_tf_psa_path=third_party/mbedtls/tf-psa-crypto
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_build_plan_path=guidexos/mbedtls_sources.mk
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_expected_version=official Mbed TLS 4.1.0 source tree with populated TF-PSA-Crypto dependency
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_detected_version=Mbed TLS 4.1.0
+[NAVIGATOR-SMOKE] tls_prereq.tf_psa_detected_version=TF-PSA-Crypto 1.1.0
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_planned_source_count=55
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_planned_subset=runtime-linked Mbed TLS 4.1.0 TLS/X.509 subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, one-shot CA parsing, smoke-only local handshake coverage, and explicit-policy validated HTTPS enablement.
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_source_present=yes
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_source_compile_ready=yes
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_config_present=yes
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_crypto_config_present=yes
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_tf_psa_present=yes
+[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_detail=Official Mbed TLS 4.1.0 source, generated runtime helpers, and the guideXOS split config are present; the freestanding runtime-linked subset can build while general Navigator https:// remains gated.
+[NAVIGATOR-SMOKE] tls_prereq.allocator_hook_status=Ready
+[NAVIGATOR-SMOKE] tls_prereq.allocator_hook_detail=Bounded Mbed TLS memory_buffer_alloc arena is active for bare-metal TLS prerequisites.
+[NAVIGATOR-SMOKE] tls_prereq.rng_callback_status=Unavailable
+[NAVIGATOR-SMOKE] tls_prereq.rng_callback_detail=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-SMOKE] tls_prereq.time_callback_status=Ready
+[NAVIGATOR-SMOKE] tls_prereq.time_callback_detail=mbedtls_time() and UTC gmtime_r() are wired to the guideXOS wall clock and fail closed when time is implausible.
+[NAVIGATOR-SMOKE] tls_prereq.psa_init_status=Pending
+[NAVIGATOR-SMOKE] tls_prereq.psa_init_detail=psa_crypto_init() is deferred until CA parsing starts.
+[NAVIGATOR-SMOKE] tls_prereq.tls_arena_status=Ready
+[NAVIGATOR-SMOKE] tls_prereq.tls_arena_capacity=1048576
+[NAVIGATOR-SMOKE] tls_prereq.tls_arena_used=0
+[NAVIGATOR-SMOKE] tls_prereq.tls_arena_high_water=0
+[NAVIGATOR-SMOKE] tls_prereq.tls_arena_detail=Bounded TLS arena is initialized; live usage counters stay disabled in the freestanding build.
+[NAVIGATOR-SMOKE] tls_prereq.user_ca_path=/config/certs/ca-bundle.pem
+[NAVIGATOR-SMOKE] tls_prereq.production_ca_path=/certs/ca-bundle.pem
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Loaded
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=ParseError
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=191850
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_pem_blocks=121
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=0
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_path=/certs/ca-bundle.manifest
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=yes
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_schema=guidexos.navigator.ca-bundle-manifest.v0.1
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_bundle_type=shipped-public
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_rotation_id=mozilla-2026-08-13
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_sha256=303daa9461b9617eb8e6209b272613fcf2923959ff32e9422eaaae195c55c780
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_computed_sha256=(none)
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=no
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_root_count=121
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_pem_bytes=191850
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_production_ready=yes
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_test_only=no
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_error=(none)
+[NAVIGATOR-SMOKE] tls_prereq.trust_store_policy=TrustStoreMalformed
+[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore
+[NAVIGATOR-SMOKE] tls_prereq.trust_store_source_detail=Production root store loaded from /certs/ca-bundle.pem.
+[NAVIGATOR-SMOKE] tls_prereq.trust_store_production_ready=no
+[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no
+[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_status=Missing
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_detail=Smoke-only missing CA probe correctly fails closed.
+[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_policy=ProductionTrustStoreUnavailable
+[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=yes
+[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_sni=yes
+[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_original_host=yes
+[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_numeric_ip=no
+[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_policy=scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and bare-metal hostname enforcement stays gated outside the controlled local-only HTTPS path
+[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=production-selected but not effective; broader validated bare-metal https:// remains fail-closed until the production CA bundle and TLS prerequisites are complete
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_state=Disabled
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_path=/config/navigator/https-policy.txt
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_source=VFS config file /config/navigator/https-policy.txt
+[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_error=(none)
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_ready=no
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_blocker=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_reason=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=no
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=no
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-SMOKE] tls_readiness=no
+[NAVIGATOR-SMOKE] tls_readiness_blocker=PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.
+[NAVIGATOR-PARSER] begin bytes=779
+[NAVIGATOR-PARSER] css_complete rules=7 style_bytes=265
+[NAVIGATOR-PARSER] metadata_complete blocks=8
+[NAVIGATOR-PARSER] resources_complete
+[NAVIGATOR-RESOURCE] aggregate refs=0 attempted=0 loaded=0 failed=0 skipped=0 png_refs=0 png_loads=0 jpeg_refs=0 jpeg_loads=0 redirects=0 http4xx=0 http5xx=0 size_bound=0 decode=0 network_tls=0 unsupported_mime=0 duplicate=0 resource_limit=0 duplicate_urls=0 duplicate_network_fetches=0 duplicate_decoded_images=0 references_discovered=0 unique_references=0 duplicate_references=0 scheduler_candidates=0 pending=0 fetch_started=0 fetch_completed=0 decode_started=0 decoded=0 attached=0 budget_denied=0 resource_cap_denied=0 unsupported_skipped=0 references_capacity_denied=0 active_count=0 active_bytes=0 peak_active_bytes=0 peak_encoded_resource_bytes=0 peak_temporary_decode_bytes=0 denied_allocation_bytes=0 released_decoded_bytes=0 total_loaded_decoded_bytes=0 total_denied_requested_bytes=0 viewport_top=62 viewport_bottom=448 viewport_width=576 viewport_height=386 initial_scroll=0 preload_margin=386 visible_refs=0 near_refs=0 far_refs=0 unknown_viewport_refs=0 visible_loaded=0 visible_budget_denied=0 near_loaded=0 near_budget_denied=0 far_loaded=0 far_budget_denied=0 visible_priority_admissions=0 offscreen_budget_denied=0 decoded_bytes_visible=0 decoded_bytes_near=0 decoded_bytes_far=0
+[NAVIGATOR-RESOURCE] size_bucket=0 loaded=0 denied=0
+[NAVIGATOR-RESOURCE] size_bucket=1 loaded=0 denied=0
+[NAVIGATOR-RESOURCE] size_bucket=2 loaded=0 denied=0
+[NAVIGATOR-RESOURCE] size_bucket=3 loaded=0 denied=0
+[NAVIGATOR-RESOURCE] size_bucket=4 loaded=0 denied=0
+[NAVIGATOR-RESOURCE] size_bucket=5 loaded=0 denied=0
+[NAVIGATOR-PARSER] complete blocks=8
+[NAVIGATOR-SMOKE] typography.phase7a.roboto_available=yes
+[NAVIGATOR-SMOKE] typography.phase7a.font_initialization=process-lifetime
+[NAVIGATOR-SMOKE] typography.phase7a.normal_width=26
+[NAVIGATOR-SMOKE] typography.phase7a.monospace_width=24
+[NAVIGATOR-SMOKE] typography.phase7a.normal_line_height=16
+[NAVIGATOR-SMOKE] typography.phase7a.measurement_paint_agreement=yes
+[NAVIGATOR-SMOKE] typography.phase7a.monospace_distinct=yes
+[NAVIGATOR-SMOKE] typography.phase7a.link_geometry=yes
+[NAVIGATOR-SMOKE] typography.phase7a.result=PASS
+[NAVIGATOR-SMOKE] http.active_cases=skipped
+[NAVIGATOR-SMOKE] result=PASS
+[NAVIGATOR-SMOKE] END
+[KERNEL] Entering main loop (waiting for input)...
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000000064 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000000C8 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=000000000000012C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000190 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000001F4 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000000258 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000002BC source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000320 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000384 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000003E8 source=PIT_IRQ0
+[PS2] IRQ12 #00000001 status=0x3D
+[PS2] IRQ12 #00000002 status=0x3D
+[PS2] IRQ12 #00000003 status=0x3D
+[PS2] IRQ12 #00000004 status=0x3D
+[PS2] IRQ12 #00000005 status=0x3D
+[KERNEL-HEARTBEAT] ticks=000000000000044C source=PIT_IRQ0
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[desktop] Start Menu app list refreshed from built-ins and validated packages
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[KERNEL-HEARTBEAT] ticks=00000000000004B0 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000514 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000578 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000005DC source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000640 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000006A4 source=PIT_IRQ0
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps [KERNEL-HEARTBEAT] ticks=0000000000000708 source=PIT_IRQ0
+source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS
+[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY
+[LaunchDispatch] source=BareMetalKernelApp target=Settings resolvedType=BuiltInApp appId=gxos.builtin.settings usage=typed-dispatch selectedDispatch=Settings behaviorPreserved=true reason=Resolver classified target as typed-dispatch ready
+[settings-native] focus=acquired source=KernelCompositor
+Display config command: request=1 origin=UserApply type=2 accepted=yes
+Display configuration bridge: request=1 query=active result=failed backend= mode=Mirror primary=1 outputs=0 virtualDesktop=0x0
+Display config response: request=1 success=no activeMode=Mirror logicalDesktop=0x0 persisted=no rollback=no
+[settings-native] launch identity=gxos.builtin.settings snapshot=ready revision=1 shared-core=system
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=000000000000076C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000007D0 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000834 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000898 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000008FC source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000960 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000009C4 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000A28 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000000A8C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000AF0 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000B54 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000BB8 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000C1C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000C80 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000000CE4 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000D48 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000DAC source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000E10 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000E74 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000ED8 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000F3C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000000FA0 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000001004 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000001068 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000010CC source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001130 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001194 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000011F8 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=000000000000125C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000012C0 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001324 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000001388 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=00000000000013EC source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001450 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000014B4 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001518 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=000000000000157C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000015E0 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000001644 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=00000000000016A8 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=000000000000170C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001770 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000017D4 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001838 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=000000000000189C source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001900 source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000001964 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=00000000000019C8 source=PIT_IRQ0
+[KERNEL-HEARTBEAT] ticks=0000000000001A2C source=PIT_IRQ0
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[settings-native] input source=keyboard category=personalization shared-core=true repaint=pending
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000001A90 source=PIT_IRQ0
+[settings-native] shutdown identity=gxos.builtin.settings
+[settings-native] focus=lost source=KernelCompositor
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL-HEARTBEAT] ticks=0000000000001AF4 source=PIT_IRQ0

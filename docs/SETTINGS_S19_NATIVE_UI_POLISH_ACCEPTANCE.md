@@ -1,6 +1,6 @@
 # guideXOS Server — S19 Native Settings UI Polish Acceptance
 
-**Current S19 status — Outcome B (Partial).** S19R completed production AMD64 guest review at the normal Settings size, exercised the information and Personalization pages, verified Cancel and Apply persistence, and checked the legacy Control Panel. It also repaired a reproduced stale applied marker in legacy Display Options. S19R2 visibly reconfirmed the legacy applied marker and native Settings reopening after legacy closure. Minimum-size production guest qualification remains unverified; the current status and evidence are recorded in the S19R2 closeout below.
+**Current S19 status — Outcome A (Accepted after S19R3).** S19R3 diagnosed the failed resize attempts as QMP gesture/calibration errors, demonstrated real production Settings resizing to the enforced 660×440 minimum and back to 760×560, qualified the minimum-size pages and controls, and completed the legacy close/reopen lifecycle in one uninterrupted guest. See the S19R3 closeout at the end. Earlier Outcome B sections remain historical records of the gaps at those checkpoints.
 
 The earlier S19 implementation report is retained as historical evidence. Its initial Outcome B was due to missing production guest review; S19R supplied that review. S19R2 verified the post-legacy Settings reopen, while the current Outcome B reflects the unqualified minimum-size resize behavior.
 
@@ -152,6 +152,55 @@ After the legacy surfaces closed, the guest returned to the desktop. A subsequen
 S20 should address modifier-aware focus traversal and complete minimum-size production guest qualification after a working resize interaction is established. Preserve the current category/navigation model and bitmap fallback; review any separate font-renderer integration independently.
 
 S19R was committed locally on `main`. The final commit SHA is reported in the task closeout. No push was performed.
+
+## S19R3 closeout — 2026-10-18
+
+### Starting state and scope
+
+S19R3 started from **Outcome B** at `dbea5f183e399f712da5d8a15db01fb9c751e49e`, on branch `main` in `D:\dev\guideXOSServer`. The pre-existing worktree contained 582 untracked paths; they were inventoried and preserved. No tracked source changes were present. The work stayed on `main`; no branch or worktree changes, resets, cleanup, stashing, fetches, pulls, or pushes were performed. The two foreign QEMU guests identified during preflight were left untouched. Only this closeout and its dedicated evidence directory are included in the S19R3 commit.
+
+### Resize diagnosis and production result
+
+The resize feature is implemented in the production compositor. Settings registers as resizable with a lower-right resize grip, an 8-pixel hit margin, minimum 660×440, preferred 760×560, and maximum 1180×820. The compositor retains drag state while the primary button is held, applies constraints, commits window geometry, and redraws the window using its current dimensions; Settings receives those dimensions for relayout. No code defect was found in that path, and no source repair or diagnostic logging was needed.
+
+The failed S19R/S19R2 QMP attempts moved to the grip, sent a standalone button-down and then button-up, but sent no pointer motion while the button was held. The subsequent pointer-loss probes also used large relative-only motions. QMP reported the active PS/2 mouse as relative (`absolute: false`); the guest PS/2 parser clamps each axis to ±50 and discards a packet when both axes reach that bound. Those procedures could miss the hit region or lose the intended motion. This classifies the original failure as **A — harness/input error**. S19R3 used an explicit down → several bounded held-motion steps → up sequence at the actual lower-right grip. The current live guest accepted it, so no stuck button, capture, or compositor-ownership defect was reproduced.
+
+In the primary production guest (PID 29328, QMP `127.0.0.1:60119`), Settings opened at 760×560 and a held drag changed it to 720×560 and then exactly 660×440. A further attempted reduction was clamped at 660×440. The minimum window bounds measured from the guest screenshot were 660×440. The initial minimum-size review and the entire legacy lifecycle below ran in this same guest process without reboot. The first attempt to restore size in that process did not produce an expansion; it is not treated as restoration evidence.
+
+A supplemental private clone was booted specifically to verify resize-back. In that separate guest (PID 32216, QMP `127.0.0.1:60120`), Settings again reached 660×440, then a held drag expanded it to 700×440 and 760×560. The release screenshot remained 760×560. Pixel bounds independently measured 660×440, 700×440, and 760×560. This is valid live restore evidence, but it is explicitly a separate boot and is not represented as part of the primary lifecycle process. The restored Personalization page still showed Ocean; no redraw corruption or stale layout was visible.
+
+### Minimum-size pages and controls
+
+At the actual 660×440 minimum, System, Display, About, and Personalization were inspected. The content remained readable and the page navigation remained available. All four wallpaper pages were visited. Gradient selection, wallpaper controls, and desktop icon controls were reachable. Apply and Cancel focus states were captured; Cancel was activated for pending appearance/icon changes and returned to the prior state. The primary guest `/desktop.cfg` before and after this review remained byte-identical, so Cancel did not persist pending changes. The minimum-size run did not activate Apply; Apply focus/reachability is demonstrated, while its successful persistence behavior remains covered by the prior S19/S19R production acceptance. No essential content was hidden outside the supported page and gallery navigation in the states reviewed.
+
+### Legacy close/reopen lifecycle and input
+
+In the uninterrupted primary guest, Settings opened, reached Personalization, and closed. Start opened the legacy Control Panel, then Display Options opened and its Displays tab was exercised. The legacy Displays page reported that its display backend was unavailable and made no configuration change. Escape closed Display Options and Control Panel. After closure, a QMP pointer move produced a visible cursor change; the keyboard `Meta+L` opened Start. Settings then reopened through Start, serial output recorded the native Settings identity and focus acquisition, System showed the expected provider content, and `P` navigated to Personalization with the existing Ocean appearance and desktop icon state. Escape closed Settings to a stable desktop. Serial heartbeat ticks advanced throughout this sequence under PID 29328. This meets the requested single-session legacy/native lifecycle; it does not rely on the supplemental resize-back boot.
+
+The observations show working pointer and keyboard input after legacy teardown, with no reproduced lost-input or window-ownership failure. The prior “pointer loss” was consistent with the malformed relative QMP probes rather than a guest teardown bug. No internal capture-state diagnostic was added, so the evidence establishes user-visible input recovery and lifecycle behavior rather than a trace of private ownership fields. Shift+Tab remains unsupported because the existing key callback carries no modifier state; this remains S20 scope.
+
+### Artifact identity and configuration
+
+No source code changed, so the verified S19R2 ordinary AMD64 kernel was reused; no production build was rerun and no fresh kernel is claimed. The extracted `/kernel.elf` in the S19R3 evidence is 2,760,592 bytes, SHA-256 `1D2C119CB947B170B0529D9444F7B8F8BF7FE0904E6EC42CE4916165257FAE3F`, matching the accepted S19R2 artifact. Read-only OVMF is 3,653,632 bytes, SHA-256 `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`. Both private raw images are 134,249,984 bytes. The primary image hash was `F2367870BE3A86EB290DCBE2A529AFFAF31E58A868A1D91C69347EDEE5BBF926` before boot and `01452B639BC810BB5DD677E4C3F9A71594562E4E03D2C49AF2CACA9B370AE236` after; the supplemental image post-run hash was `EF3EE1A50EC172F785E9736F7EB58F3186D5907D2B8842B44CC26E3D4711C298`. Whole-media hashes changed during boot. The embedded `/desktop.cfg` remained byte-identical in both guests at 234 bytes, SHA-256 `CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249`.
+
+### Focused regression results
+
+The following suites were rerun for this closeout; the full logs are included under `docs/evidence/settings-s19r3-native-ui-20261017/tests/`:
+
+- Native layout: **1,037/1,037 passed**, including 1,000 geometry transitions.
+- Native runtime: **1,417/1,417 passed** (lifecycle 100, refresh 250, notification/state 1,000).
+- Shared presentation core: **2,650/2,650 passed**.
+- Settings Center model: **89/89 passed**.
+- Compositor pointer buttons: **passed**.
+- Compositor resize notification: **passed**.
+
+The native runtime runner emitted one existing unused-function warning for `text_ends_with` in `app_launch_target_resolver.cpp`; no test errors occurred. No source changed, so there was no reason to rebuild the production kernel. The ordinary production guests booted the verified S19R2 artifact, not a diagnostic build.
+
+### Outcome and follow-up
+
+**S19 — Outcome A: Accepted.** A legitimate production drag changed Settings geometry, the actual 660×440 minimum was reached and enforced, all implemented pages and essential Personalization controls were reviewed at minimum, and the supplemental production guest demonstrated resize-back with intact state and rendering. The primary uninterrupted guest retained pointer and keyboard input through legacy window closure, reopened Settings with focus and provider content, and returned to a stable desktop. Focused regressions passed. Evidence, QMP/serial logs, artifact provenance, config snapshots, screenshots, and `SHA256SUMS.txt` are in [the S19R3 evidence directory](evidence/settings-s19r3-native-ui-20261017/README.md).
+
+Remaining limitations are the unavailable legacy display topology backend and unsupported Shift+Tab modifier handling. They do not invalidate the S19 resize and lifecycle acceptance. No S20 keyboard-modifier work was started. Recommended S20 scope remains modifier-aware focus traversal and any separately planned follow-up for the existing limitations. Do not advance S9, Settings 1.0, or Server v0.3 acceptance automatically.
 
 ## S19R2 closeout — 2026-10-17
 

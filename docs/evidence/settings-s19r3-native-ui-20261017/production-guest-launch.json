@@ -1,0 +1,54 @@
+{
+  "phase": "S19R3 production guest validation",
+  "qmpEndpoint": "127.0.0.1:60119",
+  "privateWritableMedia": "D:\\dev\\guideXOSServer\\out\\validation\\settings-s19r3-native-ui-20261017\\guest\\S19R3-private.raw",
+  "mediaSha256BeforeBoot": "F2367870BE3A86EB290DCBE2A529AFFAF31E58A868A1D91C69347EDEE5BBF926",
+  "firmware": "D:\\dev\\guideXOSServer\\out\\validation\\settings-s19r3-native-ui-20261017\\guest\\OVMF-s19r3-readonly.fd",
+  "firmwareSha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792",
+  "qemuPath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "arguments": [
+    "-accel",
+    "tcg",
+    "-machine",
+    "pc",
+    "-drive",
+    "if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer\\out\\validation\\settings-s19r3-native-ui-20261017\\guest\\OVMF-s19r3-readonly.fd",
+    "-drive",
+    "file=D:\\dev\\guideXOSServer\\out\\validation\\settings-s19r3-native-ui-20261017\\guest\\S19R3-private.raw,format=raw,if=ide,index=0",
+    "-m",
+    "2048M",
+    "-smp",
+    "2",
+    "-device",
+    "VGA,id=s19r3vga",
+    "-display",
+    "none",
+    "-nic",
+    "none",
+    "-serial",
+    "file:D:\\dev\\guideXOSServer\\out\\validation\\settings-s19r3-native-ui-20261017\\guest\\production-guest.serial.log",
+    "-qmp",
+    "tcp:127.0.0.1:60119,server=on,wait=off",
+    "-rtc",
+    "base=utc,clock=host",
+    "-no-reboot",
+    "-monitor",
+    "none",
+    "-name",
+    "guideXOS-S19R3-production-acceptance"
+  ],
+  "startedUtc": "2026-10-18T03:46:55.4105985+00:00",
+  "foreignQemuProcesses": [
+    {
+      "processId": 34980,
+      "name": "qemu-system-x86_64.exe",
+      "commandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc-q35-8.2 -drive if=pflash,format=raw,readonly=on,file=C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/ovmf-code.fd -drive if=pflash,format=raw,file=C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/ovmf-vars.fd -drive if=none,id=esp,format=raw,file=fat:rw:ESP -device ide-hd,drive=esp -m 1280M -serial file:C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/serial.log -no-reboot -no-shutdown -boot menu=off,splash-time=0 -name guideXOS-R2-C -display none -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -d guest_errors,cpu_reset -D C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/qemu-debug.log -qmp tcp:127.0.0.1:64047,server=on,wait=off"
+    },
+    {
+      "processId": 37264,
+      "name": "qemu-system-x86_64.exe",
+      "commandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel tcg,thread=single -machine pc -smp 1 -drive if=pflash,format=raw,readonly=on,file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\OVMF.fd\" -drive file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c176-managed-notes-navigation\\c167\\settings-ui-proof-runs\\20261018-034501-b48d8625\\shared-writable-esp.img\",format=raw,if=ide,index=0 -m 1024M -vga std -display none -serial file:\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c176-managed-notes-navigation\\c167\\settings-ui-proof-runs\\20261018-034501-b48d8625\\boot1\\serial.log\" -qmp tcp:127.0.0.1:59932,server,nowait -boot order=c -no-reboot -no-shutdown -rtc base=utc,clock=host "
+    }
+  ],
+  "processId": 29328
+}

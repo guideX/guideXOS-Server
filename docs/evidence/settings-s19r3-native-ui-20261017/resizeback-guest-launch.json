@@ -1,0 +1,22 @@
+{
+  "phase": "S19R3 supplemental live resize-back production guest",
+  "processId": 32216,
+  "qmpEndpoint": "127.0.0.1:60120",
+  "qmpHandshakeUtc": "2026-10-18T04:01:47.2064636+00:00",
+  "processLaunchTimestampRetained": false,
+  "privateWritableMedia": "D:\\dev\\guideXOSServer\\out\\validation\\settings-s19r3-native-ui-20261017\\guest\\S19R3-resizeback-private.raw",
+  "mediaBytes": 134249984,
+  "sourceMediaSha256": "01452B639BC810BB5DD677E4C3F9A71594562E4E03D2C49AF2CACA9B370AE236",
+  "mediaSha256AfterShutdown": "EF3EE1A50EC172F785E9736F7EB58F3186D5907D2B8842B44CC26E3D4711C298",
+  "firmware": "D:\\dev\\guideXOSServer\\out\\validation\\settings-s19r3-native-ui-20261017\\guest\\OVMF-s19r3-readonly.fd",
+  "firmwareSha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792",
+  "kernelPathInGuest": "/kernel.elf",
+  "kernelBytes": 2760592,
+  "kernelSha256": "1D2C119CB947B170B0529D9444F7B8F8BF7FE0904E6EC42CE4916165257FAE3F",
+  "guestProfile": "Same TCG, no-network, VGA plus guest PS/2 production profile as primary guest; private clone and unique QMP endpoint. Exact process argument vector was not retained in this supplemental launch record.",
+  "serialLog": "resizeback-guest.serial.log",
+  "qmpLog": "resizeback-guest.qmp.log",
+  "separateBoot": true,
+  "settingsGeometry": ["760x560", "720x560", "660x440", "700x440", "760x560"],
+  "desktopCfgSha256After": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249"
+}
