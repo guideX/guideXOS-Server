@@ -6,7 +6,7 @@
   "branch": "REXX_SUPPORT",
   "starting_head": "4fa3a945690dc1b51ef507be5eb34f328f9fde13",
   "qualification_head_before_local_commit": "4fa3a945690dc1b51ef507be5eb34f328f9fde13",
-  "local_implementation_commit_sha": null,
+  "local_implementation_commit_sha": "afcedb7086bd27838db68fe24a87e18399021011",
   "root_phase_file_present": false,
   "accepted_prior_phase_not_duplicated": true,
   "implemented_built_in_functions": [
@@ -151,12 +151,29 @@
     "qmp_shutdown_acknowledged": true,
     "owned_qemu_process_remaining": false,
     "process_censuses": {
-      "preflight": [1872, 20384, 29712],
-      "pre_run": [1872],
-      "immediate_post_shutdown": [1872, 10556],
-      "final": [1872, 10556],
-      "preflight_pids_absent_before_launch": [20384, 29712],
-      "additional_foreign_pids_seen_after_launch": [10556],
+      "preflight": [
+        1872,
+        20384,
+        29712
+      ],
+      "pre_run": [
+        1872
+      ],
+      "immediate_post_shutdown": [
+        1872,
+        10556
+      ],
+      "final": [
+        1872,
+        10556
+      ],
+      "preflight_pids_absent_before_launch": [
+        20384,
+        29712
+      ],
+      "additional_foreign_pids_seen_after_launch": [
+        10556
+      ],
       "control_sent_to_foreign_processes": false,
       "foreign_process_changes_cause": "Unknown. No control was sent to any foreign QEMU process.",
       "evidence": "docs/rexx/evidence/rx17/native-guest/run-c27ae0c99a9e4e8e81a039c0e024eebb/qemu-process-reconciliation.json"
@@ -202,5 +219,6 @@
   ],
   "evidence_directory": "docs/rexx/evidence/rx17/",
   "preexisting_untracked_status_entries_preserved": 59,
-  "generated_build_outputs": "Build products remain under build/rexx/rx17 and are excluded from the local commit."
+  "generated_build_outputs": "Build products remain under build/rexx/rx17 and are excluded from the local commit.",
+  "ending_head_after_implementation_commit": "afcedb7086bd27838db68fe24a87e18399021011"
 }
