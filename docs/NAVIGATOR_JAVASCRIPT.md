@@ -9576,3 +9576,214 @@ and was not pushed. A focused next phase could qualify one short-circuiting
 predicate such as `some()`, including its early-termination and mutation
 contract. Iterator protocols, `Symbol.iterator`, and `for...of` remain
 outside the supported collection API.
+
+### JS77 bounded collection `some()`
+
+JS77 adds `some(callback[, thisArg])` to Navigator's retained selector
+collections, including the shared retained collections returned by the
+supported tag-name and class-name adapters. This is a guideXOS Navigator
+extension analogous to `Array.prototype.some()`. It does not claim that
+browser `NodeList` or `HTMLCollection` objects support this method, and it
+does not add Array methods, iterator protocols, `Symbol.iterator`, `for...of`,
+`every()`, or `filter()`.
+
+The method reuses JS76's active-evaluator callback capability and the same
+bounded traversal helper as `forEach()`. Callback invocation remains in the
+current runtime and realm; the implementation does not stringify or reparse
+the function, create another interpreter, or keep a global callback registry.
+It passes the canonical generation-checked Element, the requested live
+zero-based index, and the original retained collection. A supplied `thisArg`
+is forwarded as the callback receiver; omission remains `undefined`, subject
+to the Navigator runtime's existing receiver semantics. No `Function.call`
+or `Function.apply` support was added.
+
+After each callback, the runtime applies its existing JavaScript truthiness
+conversion. `some()` returns a JavaScript Boolean: `true` at the first truthy
+result and `false` after all eligible indices return falsy. It accepts any
+callback result and does not require literal Booleans. The existing supported
+values were checked: false/true, zero/negative zero/nonzero/NaN, empty and
+nonempty strings, null/undefined, an object value, a function value, and a
+canonical host Element. Object and function values are truthy; host Elements
+are tested through the same runtime conversion. This phase adds no new
+literal, coercion, or type-inspection syntax. Empty collections return false
+without invoking the callback. Missing or non-callable callbacks use the
+existing native TypeError result path; because this runtime has no
+`try`/`catch`, those errors terminate the script rather than becoming
+catchable exceptions. Callback runtime errors propagate and unwind callback
+frames; they are not converted to false.
+
+Traversal captures `collection.length` once after validating the collection
+and callback, then uses that entry length as its fixed upper bound, capped by
+the existing 1,024-Element structural capacity. Each permitted index is
+looked up live, with the existing scope and generation checks. An index that
+no longer resolves after mutation is skipped; later indices retain their
+original index values. Growth may change which current Element is found at a
+later in-bound index, but cannot extend the bound. Removing, adding, or
+reordering matches therefore follows JS76's live-read behavior rather than a
+snapshot or exactly-once promise. Short-circuiting occurs immediately after
+the first truthy callback, so no later index is looked up or invoked. The
+initial length computation still counts the collection before traversal; an
+early success limits callback and indexed-lookup work, but does not make the
+entire invocation O(1). For `n` permitted callbacks in a document with `m`
+structural Elements, the initial count is O(m), while each live indexed
+lookup may inspect up to O(m) Elements. The worst-case all-false traversal is
+therefore O(m + n·m) selector work (quadratic when a dense collection has
+`n` near `m`), plus callback execution. This preserves the established
+live-on-read semantics. Filtered positional reads continue through the
+JS72/JS73 rank evaluator and its invocation-local scratch; JS77 does not
+replace it with sibling rescanning. Existing capacities bound `m` at 1,024.
+
+For the native capacity fixtures, the initial collection count inspects all
+1,024 structural positions, including the empty-selector case. Each simple
+`.sN` selector matches a contiguous prefix, so resolving requested index `i`
+inspects exactly `i + 1` structural positions. The native counts therefore
+imply 1,025 total structural inspections for index-zero success, 1,034 for
+the required 100-match/index-three success, 132,865 for index-512 success in
+the 1,024-match case, and 525,824 for final-index success or an all-false
+1,024-match pass. The latter performs 1,024 callbacks and indexed lookups.
+These simple-class workloads perform zero filtered-selector evaluations,
+rank builds, and parent resolutions. JS77's separate filtered positional
+mutation case visits two callbacks and two indices; JS72/JS73's established
+diagnostic comparison remains 8,192 structural inspections, 4,092 filter
+evaluations, four rank builds, 12 parent resolutions, and 2,564 rank lookups
+for four reads.
+
+Generation replacement during a callback is revalidated before a result is
+reported or the next lookup begins. The native probe replaces the document
+and reuses an Element serial after callback zero; the old collection fails
+with `StaleHostObject` after exactly one callback and one indexed lookup. It
+does not restart in the replacement document or pass the reused serial to a
+callback. A truthy result instead returns immediately after its normal
+generation validation. Separate scoped collections preserve their query
+roots and callback collection identities. The retained tag/class adapters
+use the same implementation, without per-adapter callback code.
+
+Nested `some()` and `forEach()` calls keep independent bounds, callback
+results, indices, and collection identities. A three-level Event sequence
+dispatches Event B from a callback in Event A, then Event C from Event B;
+the nested handlers combine `some()` and `forEach()` while checking target,
+currentTarget, phase, default-prevented state, and distinct Event identity.
+All active callback frames return to zero. The JS76 reentry policy remains in
+place: `querySelectorAll(...).item(0)` is used where nested reads are needed,
+and `getElementById()` reentrancy is not broadened. The JS9 hosted Event lane
+is included in the full regression gate.
+
+The focused JS77 native suite passed **135/135 checks** and strict
+compilation with `-Wall -Wextra -Werror -pedantic` using MinGW GCC 15.2,
+target `x86_64-w64-mingw32`. It covers callback conversion and arguments,
+invalid callbacks and cleanup, callback errors, early stop, live mutation,
+bounded growth, shrinking, empty and full collections, scoped roots,
+filtered positional selectors, tag/class adapters, nested callbacks and
+Events, generation/serial reuse, registry saturation, pool bounds, repeated
+calls, and timing workloads. A 100-match collection returning true at index
+3 invoked four callbacks and made exactly four indexed lookups. A 1,024-match
+collection returning true at index 0 invoked one callback and made one
+indexed lookup; an all-false pass invoked 1,024 callbacks and made 1,024
+lookups. The test also checks success at the first, middle, and final valid
+indices and a full false traversal for sizes 1, 16, 100, 128, 512, and 1,024;
+an empty collection performs no callback or indexed lookup.
+
+The full 1,024-callback false traversal used 1,025 of 2,048 bounded
+environments and 1,026 of 2,048 host-object slots. The existing descriptor,
+collection record, registry, collection count, and structural capacity
+remain 1,918 B, 1,936 B, 247,808 B, 128 records, and 1,024 Elements. Repeated
+early-success calls reused the one retained collection record; no callback
+record or result cache was introduced. The near-capacity per-index lookup
+counts matched the number of callbacks. Filtered positional selectors still
+use the JS72/JS73 invocation-local rank path and preserve its established
+diagnostic workload: 8,192 structural inspections, 4,092 filter evaluations,
+four rank builds, 12 parent resolutions, and 2,564 rank lookups for four
+reads.
+
+Three-run native medians from the final matrix run were 283 µs
+(276–311 µs) for 1,024-element early success, 106,341 µs
+(98,985–108,933 µs) for all-false `some()`, 98,104 µs
+(96,212–114,522 µs) for all-false `forEach()`, and 138,644 µs
+(116,335–174,735 µs) for an equivalent `item()` loop. These local
+measurements time interpreter execution on a freshly loaded harness; fixture
+parsing occurs before the timer. They vary with system load and are
+comparisons rather than performance promises.
+An all-false call remains a full bounded traversal; its small Boolean result
+handling does not change the live indexed lookup mechanism.
+
+The instrumented Windows stack cases passed for empty, early-true, all-false,
+filtered, nested `some()`, `some()` inside `forEach()`, `forEach()` inside
+`some()`, and nested Event dispatch. The maximum observed watermark was
+117,233 B for the nested Event case; the runner reported 229,376 B committed
+from a 1,048,576 B reserve. Production `-O2 -fstack-usage` reported 80 B for
+`selectorCollectionLookup`, 80 B for `selectorCollectionSome`, 544 B for the
+shared callback traversal, 528 B for evaluator function invocation, 368 B
+for evaluator callback invocation, and 576 B for runtime host-method
+invocation. The filtered lookup frames remain 4,336 / 10,480 / 18,672 B for
+one / four / eight rank slots. These Windows measurements do not establish
+bare-metal stack safety.
+
+The complete JavaScript matrix passed **79/79 lanes** with
+**13,662/13,662 assertions across 38 assertion-reporting lanes**. This
+includes JS75 (**61/61**), JS76 (**106/106**, with JS75 compatibility
+**39/39**), and JS77 (**135/135**), all under strict compilation; JS74 and
+JS76 stack/reentrancy lanes passed as well. JS77 used MinGW GCC 15.2,
+`x86_64-w64-mingw32`; its maximum observed hosted stack watermark was
+117,233 B and maximum TEB commitment was 229,376 B of the 1,048,576 B
+reserve. The fresh production build, hosted aggregate, exact binary
+provenance, and restored artifact comparison are recorded in the JS77
+closeout below.
+
+### JS77 build, hosted, and repository closeout
+
+The duplicate/stale gate found no existing JS77 implementation or later
+superseding work. The repository was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT`, branch
+`NAVIGATOR_JAVASCRIPT_SUPPORT`, starting at
+`e8bc221786139b034347e0cbd464e79937042236` (`navigator: add JS76 bounded
+collection forEach`). The live upstream divergence was 0 ahead / 0 behind;
+the prompt's expected 1-ahead count differed from live Git state, which was
+left authoritative. Tracked and untracked work was clean before JS77. `.phase`
+was absent and remains absent. No branches, refs, or remotes were changed.
+
+`build.bat` succeeded at source revision
+`e8bc221786139b034347e0cbd464e79937042236`. The fresh executable was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,558,769
+bytes, SHA-256
+`4807F4DE1D0BB8285C085A0709AF954E037FD4D52522A4809A01780AE739E633`.
+Hosted process PID 13456 ran that same path and hash. The normal application
+build emitted existing warnings in unrelated desktop, IPC, and UI sources;
+it completed successfully.
+
+The complete hosted aggregate returned exit code 1 and reported 662 passed /
+7 failed / 669 total. The only failures were the established CSS baseline:
+CSS 3C, CSS 3G, CSS 6A, three CSS 6B checks, and CSS 6C. All five JS9 hosted
+checks passed, as did all four JS77 hosted checks for the fixture, conversion
+and early-stop counts, nested Events, and invalid-callback TypeError. Thus
+there were no new JavaScript or JS9 failures. The archived output is
+`C:\Users\guideX\AppData\Local\Temp\guidex-js77-hosted-log-archive-20261017-170617\navigator-hosted-smoke-20261017-170617.log`.
+
+Before mutation, the ignored-file manifest contained 1,349 files / 89,350,840
+bytes. The original ignored executable (8,398,274 bytes,
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`) and all
+42 generated fixtures were backed up externally and restored byte-for-byte.
+Five settings files were also backed up and verified unchanged:
+`desktop.json`, `desktop.json.phase2.bak`, `desktop.state`,
+`display-options.cfg`, and `window-bounds.cfg`. Six JS77 hosted logs were
+copied and SHA-256 verified in the external archive directory above. Their
+individual files remain in the checkout because the Windows command policy
+rejected the exact `Remove-Item -LiteralPath` cleanup command as blocked by
+policy. The requested cleanup was not bypassed. The final ignored manifest
+therefore contains 1,355 files / 89,847,082 bytes: **0 changed, 0 missing,
+6 extra**, all six extra files being those JS77 logs. Pre-existing logs and
+other ignored files remain intact.
+
+The source, native tests, fixtures, and documentation pass `git diff
+--check`. The implementation and qualification evidence are useful and
+complete, but the six policy-blocked log removals prevent exact ignored-file
+restoration. The result is therefore **Outcome B — useful partial JS77
+bounded collection `some()` support** under the artifact-restoration gate,
+not a claim of full Outcome A. The prescribed partial-work commit is
+`navigator: add JS77 collection predicate foundation`; it is local only and
+was not pushed. The final branch is one commit ahead / zero behind once
+committed. No kernel or QEMU run was performed; hosted Windows stack evidence
+does not establish bare-metal stack safety.
+
+A sensible separate JS78 phase is bounded collection `every(callback[,
+thisArg])`, with first-falsy short-circuit tests and its own mutation, scope,
+generation, and Event qualification. Iterator protocols remain deferred.

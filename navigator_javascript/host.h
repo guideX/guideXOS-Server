@@ -157,6 +157,9 @@ public:
         const HostValue* arguments, std::size_t argumentCount,
         const HostValue& thisArgument, Value& result,
         RuntimeErrorCode& error) = 0;
+    // Callback-capable hosts must use the active evaluator's JavaScript
+    // truthiness rules when a host operation consumes a callback result.
+    virtual bool isTruthy(const Value& value) const = 0;
 };
 
 enum class HostResultCode : std::uint8_t {

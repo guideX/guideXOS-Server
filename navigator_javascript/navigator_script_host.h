@@ -46,6 +46,7 @@ constexpr std::uint32_t kNavigatorSetAttributeMethod = 18u;
 constexpr std::uint32_t kNavigatorRemoveAttributeMethod = 19u;
 constexpr std::uint32_t kNavigatorSelectorCollectionItemMethod = 20u;
 constexpr std::uint32_t kNavigatorSelectorCollectionForEachMethod = 21u;
+constexpr std::uint32_t kNavigatorSelectorCollectionSomeMethod = 22u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -372,6 +373,10 @@ public:
         const Value& event, bool beforeListener);
     using SelectorCollectionForEachProbe = void (*)(void* context,
         std::size_t completedIndex);
+    using SelectorCollectionSomeLookupProbe = void (*)(void* context,
+        std::size_t requestedIndex);
+    using SelectorCollectionSomeCallbackProbe = void (*)(void* context,
+        std::size_t completedIndex);
     void setRelativeSelectorDispatchProbe(
         RelativeSelectorDispatchProbe probe, void* context)
     {
@@ -383,6 +388,18 @@ public:
     {
         selectorCollectionForEachProbe_ = probe;
         selectorCollectionForEachProbeContext_ = context;
+    }
+    void setSelectorCollectionSomeLookupProbe(
+        SelectorCollectionSomeLookupProbe probe, void* context)
+    {
+        selectorCollectionSomeLookupProbe_ = probe;
+        selectorCollectionSomeLookupProbeContext_ = context;
+    }
+    void setSelectorCollectionSomeCallbackProbe(
+        SelectorCollectionSomeCallbackProbe probe, void* context)
+    {
+        selectorCollectionSomeCallbackProbe_ = probe;
+        selectorCollectionSomeCallbackProbeContext_ = context;
     }
 #endif
 
@@ -853,6 +870,15 @@ private:
         RuntimeErrorCode& callbackError,
         const HostObjectReference* receiver, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result);
+    HostResult selectorCollectionSome(HostFunctionInvoker& functionInvoker,
+        RuntimeErrorCode& callbackError,
+        const HostObjectReference* receiver, const HostValue* arguments,
+        std::size_t argumentCount, HostValue& result);
+    HostResult selectorCollectionCallbackTraversal(
+        HostFunctionInvoker& functionInvoker,
+        RuntimeErrorCode& callbackError,
+        const HostObjectReference* receiver, const HostValue* arguments,
+        std::size_t argumentCount, HostValue& result, bool stopOnTruthy);
     std::size_t selectorMatchCountInternal(
         const SelectorCollectionRecord& record,
         FilteredNthQueryScratch* filteredNthScratch) const;
@@ -938,6 +964,10 @@ private:
     void* relativeSelectorDispatchProbeContext_ = nullptr;
     SelectorCollectionForEachProbe selectorCollectionForEachProbe_ = nullptr;
     void* selectorCollectionForEachProbeContext_ = nullptr;
+    SelectorCollectionSomeLookupProbe selectorCollectionSomeLookupProbe_ = nullptr;
+    void* selectorCollectionSomeLookupProbeContext_ = nullptr;
+    SelectorCollectionSomeCallbackProbe selectorCollectionSomeCallbackProbe_ = nullptr;
+    void* selectorCollectionSomeCallbackProbeContext_ = nullptr;
 #endif
     std::size_t activationDepth_ = 0;
     std::size_t resetDepth_ = 0;

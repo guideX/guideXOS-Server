@@ -5245,6 +5245,54 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("loaded=") + yesNo(js76InvalidLoaded) + ",text=" +
         summarizeText(js76InvalidText, 800) + ",error=" + js76InvalidError);
 
+    const std::string js77FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js77.html";
+    const bool js77Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js77FixtureUrl);
+    const std::string js77InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS77 bounded collection some fixture passes on the hosted server",
+        js77Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js77FixtureUrl &&
+        contains(js77InitialText, "Navigator JavaScript JS77") &&
+        contains(js77InitialText, "JS77:initial:assertions=") &&
+        contains(js77InitialText, ":failures=0") &&
+        contains(js77InitialText, ":malformed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js77Loaded) + ",text=" +
+        summarizeText(js77InitialText, 2400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS77 hosted callback conversion and early termination counts pass",
+        js77Loaded && contains(js77InitialText, ":early=1:middle=4:empty=0:") &&
+        contains(js77InitialText, ":allFalse=2:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted checks cover empty and all-false collections, truthy and falsy non-Boolean values, the index-3 four-call stop, arguments, identity, thisArg, mutation, and adapters");
+    const bool js77Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js77AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS77 nested Event some/forEach callbacks preserve Event state",
+        js77Click && contains(js77AfterClick,
+            "JS77:event=outer:true:middle=true:inner=true:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js77Click) + ",text=" +
+        summarizeText(js77AfterClick, 1600) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const std::string js77InvalidFixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js77-invalid.html";
+    const bool js77InvalidLoaded =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js77InvalidFixtureUrl);
+    const std::string js77InvalidText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js77InvalidError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS77 non-callable callback reports TypeError in the hosted runtime",
+        js77InvalidLoaded && contains(js77InvalidText,
+            "JS77:invalid:calling") &&
+        contains(js77InvalidError, "TypeError"),
+        std::string("loaded=") + yesNo(js77InvalidLoaded) + ",text=" +
+        summarizeText(js77InvalidText, 800) + ",error=" + js77InvalidError);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

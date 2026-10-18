@@ -315,6 +315,11 @@ public:
         return succeeded;
     }
 
+    bool isTruthy(const Value& value) const override
+    {
+        return truthy(value);
+    }
+
 private:
     enum class ControlKind : std::uint8_t {
         Normal = 0,

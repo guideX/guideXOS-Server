@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS77</title></head>
+<body>
+<h1>Navigator JavaScript JS77</h1>
+<pre id="result">JS77:pending</pre>
+<section id="rows">
+  <i id="a" class="row"></i><i id="b" class="row selected"></i>
+</section>
+<section id="early-root">
+  <i class="early"></i><i class="early"></i><i class="early"></i>
+  <i class="early"></i><i class="early"></i><i class="early"></i>
+</section>
+<section id="grow-root">
+  <i id="g0" class="grow"></i><i id="g1" class="grow"></i>
+  <i id="g2" class="candidate"></i><i id="g3" class="candidate"></i>
+</section>
+<section id="shrink-root">
+  <i id="s0" class="shrink"></i><i id="s1" class="shrink"></i>
+  <i id="s2" class="shrink"></i>
+</section>
+<section id="position-root">
+  <li id="p0" class="pos selected"></li><li id="p1" class="pos selected"></li>
+  <li id="p2" class="pos selected"></li><li id="p3" class="pos selected"></li>
+</section>
+<section id="adapter-root"><b id="tag0" class="target"></b>
+  <b id="tag1" class="target"></b></section>
+<button id="event-a" type="button">Run JS77 nested callback events</button>
+<button id="event-b" type="button">Nested event B</button>
+<button id="event-c" type="button">Nested event C</button>
+<section id="event-rows">
+  <i id="ea0" class="event-a-row"></i><i id="ea1" class="event-a-row"></i>
+  <i id="eb0" class="event-b-row"></i><i id="eb1" class="event-b-row"></i>
+  <i id="ec0" class="event-c-row"></i>
+</section>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var rows = document.querySelectorAll('.row');
+var calls = 0;
+var found = rows.some(function(element, index, collection) {
+  calls++;
+  return element.matches('.selected') && index === 1 &&
+    collection === rows && collection[index] === element;
+});
+verify(found === true && calls === 2);
+var allFalseCalls = 0;
+var allFalse = rows.some(function() { allFalseCalls++; return false; });
+verify(allFalse === false && allFalseCalls === 2);
+var emptyCalls = 0;
+var empty = document.querySelectorAll('.absent');
+var emptyResult = empty.some(function() { emptyCalls++; return true; });
+verify(emptyResult === false && emptyCalls === 0);
+var oneResult = document.querySelectorAll('#a').some(function(element,
+    index, collection) {
+  return element === rows[0] && index === 0 && collection.length === 1;
+});
+verify(oneResult === true);
+var earlyCalls = 0;
+var early = rows.some(function() { earlyCalls++; return 'found'; });
+verify(early === true && earlyCalls === 1);
+var emptyString = rows.some(function() { return ''; });
+verify(emptyString === false);
+function truthyFunction() {}
+var conversionOk = rows.some(function() { return 0; }) === false &&
+  rows.some(function() { return -0; }) === false &&
+  rows.some(function() { return 0/0; }) === false &&
+  rows.some(function() { return 'found'; }) === true &&
+  rows.some(function() { return null; }) === false &&
+  rows.some(function() { return undefined; }) === false &&
+  rows.some(function() { return {}; }) === true &&
+  rows.some(function() { return truthyFunction; }) === true;
+verify(conversionOk);
+var earlyRows = document.querySelectorAll('.early');
+var middleCalls = 0;
+var middle = earlyRows.some(function(element, index) {
+  middleCalls++;
+  return index === 3;
+});
+verify(middle === true && middleCalls === 4);
+var methodStable = rows.some === rows.some;
+var savedSome = rows.some;
+verify(methodStable && savedSome === rows.some);
+
+var receiver = {tag: 'receiver'};
+var receiverResult = rows.some(function(element, index, collection) {
+  return this.tag === 'receiver' && element === rows[0] && index === 0 &&
+    collection === rows;
+}, receiver);
+var omittedReceiver = rows.some(function() { return this === undefined; });
+verify(receiverResult === true && omittedReceiver === true);
+
+var grow = document.querySelectorAll('.grow');
+var growIds = '';
+var growCount = 0;
+var grewResult = grow.some(function(element, index) {
+  growCount++;
+  growIds = growIds + element.id;
+  if (index === 0) document.querySelectorAll('#g2').item(0).setAttribute('class', 'grow');
+  if (index === 1) document.querySelectorAll('#g3').item(0).setAttribute('class', 'grow');
+  return false;
+});
+verify(grewResult === false && growCount === 2 && growIds === 'g0g1');
+verify(grow.length === 4);
+
+var shrink = document.querySelectorAll('.shrink');
+var shrinkIds = '';
+var shrinkIndices = '';
+var shrinkCount = 0;
+var shrinkResult = shrink.some(function(element, index) {
+  shrinkCount++;
+  shrinkIds = shrinkIds + element.id;
+  shrinkIndices = shrinkIndices + index;
+  if (index === 0) {
+    element.removeAttribute('class');
+    document.querySelectorAll('#s1').item(0).removeAttribute('class');
+    document.querySelectorAll('#s2').item(0).removeAttribute('class');
+  }
+  return false;
+});
+verify(shrinkResult === false && shrinkCount === 1 && shrinkIds === 's0' &&
+  shrinkIndices === '0' && shrink.length === 0);
+
+var filtered = document.querySelectorAll('.pos:nth-child(odd of .selected)');
+var filteredIds = '';
+var filteredIndices = '';
+var filteredCalls = 0;
+var filteredResult = filtered.some(function(element, index, collection) {
+  filteredCalls++;
+  filteredIds = filteredIds + element.id;
+  filteredIndices = filteredIndices + index;
+  if (index === 0) document.querySelectorAll('#p0').item(0).removeAttribute('class');
+  return element.id === 'p3' && collection === filtered;
+});
+verify(filteredResult === true && filteredIds === 'p0p3' &&
+  filteredIndices === '01' && filteredCalls === 2);
+
+var adapterRoot = document.getElementById('adapter-root');
+var tags = adapterRoot.getElementsByTagName('b');
+var tagFound = tags.some(function(element, index, collection) {
+  return element.id === 'tag1' && index === 1 && collection === tags;
+});
+var classes = adapterRoot.getElementsByClassName('target');
+var classFound = classes.some(function(element, index, collection) {
+  return element === classes[0] && index === 0 && collection === classes;
+});
+verify(tagFound === true && classFound === true);
+
+var outer = document.querySelectorAll('.row');
+var inner = document.querySelectorAll('.target');
+var nestedCalls = 0;
+var innerCalls = 0;
+var nestedResult = outer.some(function(element, index, collection) {
+  nestedCalls++;
+  var innerResult = inner.some(function(item, innerIndex, list) {
+    innerCalls++;
+    return innerIndex === 1 && list === inner;
+  });
+  inner.forEach(function() {});
+  return index === 1 && collection === outer && innerResult;
+});
+verify(nestedResult === true && nestedCalls === 2 && innerCalls === 4);
+
+var eventA = document.querySelectorAll('#event-a').item(0);
+var eventB = document.querySelectorAll('#event-b').item(0);
+var eventC = document.querySelectorAll('#event-c').item(0);
+var outerEvent;
+var middleEvent;
+var outerResult = false;
+var middleResult = false;
+var innerResult = false;
+var metadataResult = false;
+var eventMarker = '';
+var eventAIds = '';
+var eventBIds = '';
+var eventCIds = '';
+var middleMetadata = false;
+var innerMetadata = false;
+eventA.addEventListener('click', function(event) {
+  outerEvent = event;
+  var eventRows = document.querySelectorAll('.event-a-row');
+  outerResult = eventRows.some(function(element, index, collection) {
+    eventAIds = eventAIds + element.id;
+    if (index === 0) eventB.click();
+    return index === 1 && collection === eventRows;
+  });
+  event.preventDefault();
+  var metadata = event.target === eventA && event.currentTarget === eventA &&
+    event.eventPhase === 2 && event.defaultPrevented;
+  outerResult = outerResult && metadata;
+  metadataResult = metadata && middleMetadata && innerMetadata;
+  eventMarker = 'JS77:event=outer:' + outerResult + ':middle=' +
+    middleResult + ':inner=' + innerResult + ':metadata=' + metadataResult;
+  document.getElementById('result').textContent = eventMarker;
+});
+eventB.addEventListener('click', function(event) {
+  middleEvent = event;
+  var eventRows = document.querySelectorAll('.event-b-row');
+  middleResult = eventRows.forEach(function(element, index, collection) {
+    eventBIds = eventBIds + element.id;
+    if (index === 0) eventC.click();
+    middleResult = collection === eventRows;
+  });
+  var metadata = event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2 && !event.defaultPrevented && event !== outerEvent;
+  middleResult = metadata;
+  middleMetadata = metadata;
+});
+eventC.addEventListener('click', function(event) {
+  var eventRows = document.querySelectorAll('.event-c-row');
+  innerResult = eventRows.some(function(element, index, collection) {
+    eventCIds = eventCIds + element.id;
+    return index === 0 && collection === eventRows;
+  });
+  innerMetadata = event.target === eventC && event.currentTarget === eventC &&
+    event.eventPhase === 2 && !event.defaultPrevented && event !== outerEvent &&
+    event !== middleEvent;
+  innerResult = innerResult && innerMetadata;
+});
+
+var initialMarker = 'JS77:initial:assertions=' + assertions +
+  ':failures=' + failures + ':early=' + earlyCalls + ':middle=' +
+  middleCalls + ':empty=' + emptyCalls + ':allFalse=' + allFalseCalls +
+  ':malformed=true';
+document.getElementById('result').textContent = initialMarker;
+</script>
+</body>
+</html>

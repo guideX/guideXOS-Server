@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS77 invalid callback</title></head>
+<body>
+<h1>Navigator JavaScript JS77 invalid callback</h1>
+<pre id="result">JS77:invalid:pending</pre>
+<i class="row"></i>
+<script>
+document.getElementById('result').textContent = 'JS77:invalid:calling';
+var rows = document.querySelectorAll('.row');
+rows.some(null);
+document.getElementById('result').textContent = 'JS77:invalid:returned';
+</script>
+</body>
+</html>
