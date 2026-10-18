@@ -45,7 +45,7 @@ function Get-PacManSourceRegistration {
         $sources += @{ Name = "pacman_audio"; Path = $audioSourcePath }
     }
 
-    $duplicateNames = @($sources | Group-Object -Property Name | Where-Object { $_.Count -gt 1 })
+    $duplicateNames = @($sources | Group-Object -Property { $_.Name } | Where-Object { $_.Count -gt 1 })
     if ($duplicateNames.Count -gt 0) {
         throw "PacMan source registration contains duplicate object names: $(($duplicateNames | ForEach-Object { $_.Name }) -join ', ')"
     }
