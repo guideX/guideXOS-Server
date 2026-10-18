@@ -163,7 +163,31 @@
       "control_sent_to_foreign_processes": false,
       "cause": "Not determined; no input or shutdown command was sent to PID 7468.",
       "evidence": "docs/rexx/evidence/rx16/native-guest/run-2a9baad708424c2884701dfbae36e536/qemu-process-reconciliation.json"
-    }
+    },
+    "followup_process_census": {
+      "schema": "guidexos.rexx.rx16.qemu-post-run-census.v1",
+      "captured_at_utc": "2026-10-18T22:20:26.5101397Z",
+      "initial_foreign_pids": [
+        1872,
+        27808,
+        7468
+      ],
+      "immediate_post_shutdown_foreign_pids": [
+        1872,
+        27808
+      ],
+      "followup_live_qemu_pids": [
+        1872
+      ],
+      "rx16_owned_pid": 18116,
+      "rx16_owned_pid_present": false,
+      "additional_preexisting_pids_absent_at_followup": [
+        27808
+      ],
+      "process_control_sent_after_qemu_run": false,
+      "cause": "Unknown; no process control was sent to any pre-existing QEMU process."
+    },
+    "followup_process_census_evidence": "docs\\rexx\\evidence\\rx16\\native-guest\\run-2a9baad708424c2884701dfbae36e536\\qemu-post-run-census.json"
   },
   "protected_artifacts": {
     "status": "PASS",
