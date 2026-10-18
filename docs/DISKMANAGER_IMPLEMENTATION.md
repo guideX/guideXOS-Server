@@ -331,3 +331,31 @@ UEFI x64 Release pass; freestanding AMD64 kernel build uses
 used. Full implementation evidence and any remaining build qualification are
 in the [DM37 safe-dismount phase report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md).
 `.phase` remains DM36→DM37; guest acceptance is a later DM37 continuation.
+
+## DM37 continuation 3 — mounted guest reached; input and foreign-QEMU gate
+remain open
+
+The exact `c40efd34eb67aa71b23e4f48f5243d8f18d11771` source built into a
+private AMD64 kernel and UEFI x64 Release bootloader. A private ESP and seven
+600 MiB FAT32 raw USB fixtures were prepared under
+`out/dm37/dismount-guest/`; NVMe write and Flush proof flags stayed zero. The
+owned QEMU guest booted normally, Disk Manager launched through Start Menu,
+and the `DM37IDLE01` partition mounted at `/mnt/disk1-part1`. Its Dismount
+Volume button did not activate despite verified hover and paced input, so no
+confirmation, VFS dismount, Unmounted state, or dismount I/O result was
+observed. The idle image retained its pristine SHA-256 after the owned guest
+exited and QMP closed. The six unattached fixtures and preserved sources also
+remain byte-identical.
+
+A process census found another project's active QEMU during the guest run; a
+later census identified its replacement process. No foreign QMP endpoint or
+media was contacted. Only the owned DM37 guest was shut down, and no additional
+guest was launched. QMP showed zero target writes and no Flush increase during
+the input attempts; accumulated reads cannot be scoped to a dismount. Thus
+this is **Outcome B — `DM37_GUEST_EVIDENCE_INCOMPLETE`**. Gate A stops before
+confirmation; Gates B–H remain open in the guest, and Gate I is only partially
+verified. Existing 1,491/1,491 host qualification and prior build evidence are
+retained because production source did not change. `.phase` remains
+DM36→DM37; DM38 has not started. See the [DM37 phase report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md)
+for runtime and fixture hashes, ownership censuses, screenshots, counters, and
+the full gate-by-gate reconciliation.
