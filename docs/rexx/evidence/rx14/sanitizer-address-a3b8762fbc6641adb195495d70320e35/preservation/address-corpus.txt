@@ -1,0 +1,5 @@
+RX14 artifact preservation: PASS
+Stage: address-corpus
+Verified UTC: 2026-10-18T16:36:58.2700384Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

@@ -1318,29 +1318,856 @@ static RexxVMStatus rexx_builtin_translate(const RexxValue *arguments,
     return REXX_VM_STATUS_OK;
 }
 
+/* RX14 numeric functions deliberately accept decimal text, never the legacy
+ * RexxValue double adapter. Source-language values reach this layer as byte
+ * strings, so every numeric operation stays in RexxDecimal. */
+static RexxVMStatus rexx_builtin_charge_numeric_work(RexxVM *vm, size_t cost)
+{
+    if (vm == NULL) return REXX_VM_STATUS_OK;
+    if (cost > vm->numeric_work_remaining)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    vm->numeric_work_remaining -= cost;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_decimal_exact(const RexxValue *value,
+                                               RexxDecimal *number,
+                                               size_t *source_length)
+{
+    static const char one[] = "1";
+    static const char zero[] = "0";
+    const char *bytes;
+    size_t length;
+    RexxNumericStatus status;
+
+    if (value == NULL || number == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (value->type == REXX_VALUE_STRING) {
+        if (value->as.string.bytes == NULL && value->as.string.length != 0u)
+            return REXX_VM_STATUS_INVALID_ARGUMENT;
+        bytes = value->as.string.bytes != NULL
+                    ? value->as.string.bytes : rexx_builtin_empty;
+        length = value->as.string.length;
+    } else if (value->type == REXX_VALUE_BOOLEAN) {
+        bytes = value->as.boolean != 0 ? one : zero;
+        length = 1u;
+    } else {
+        /* In particular, do not serialize REXX_VALUE_NUMBER through double. */
+        return value->type == REXX_VALUE_UNSET
+                   ? REXX_VM_STATUS_NUMERIC_ERROR
+                   : REXX_VM_STATUS_NUMERIC_ERROR;
+    }
+    status = rexx_decimal_parse(bytes, length, number);
+    if (source_length != NULL) *source_length = length;
+    if (status == REXX_NUMERIC_OK) return REXX_VM_STATUS_OK;
+    if (status == REXX_NUMERIC_RESOURCE_LIMIT || status == REXX_NUMERIC_RANGE)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    return REXX_VM_STATUS_NUMERIC_ERROR;
+}
+
+static size_t rexx_builtin_digits(const RexxVM *vm)
+{
+    return vm != NULL ? (size_t)vm->numeric_digits : 9u;
+}
+
+static RexxVMStatus rexx_builtin_prepare_decimal(RexxVM *vm,
+                                                 const RexxValue *value,
+                                                 RexxDecimal *number)
+{
+    size_t source_length = 0u;
+    RexxNumericStatus numeric_status;
+    RexxVMStatus status;
+    size_t precision = rexx_builtin_digits(vm);
+
+    if (precision == 0u || precision > REXX_NUMERIC_MAX_DIGITS)
+        return REXX_VM_STATUS_INVALID_NUMERIC_SETTING;
+    status = rexx_builtin_decimal_exact(value, number, &source_length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_charge_numeric_work(vm,
+                                              source_length + number->length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    numeric_status = rexx_decimal_round(number, precision);
+    if (numeric_status == REXX_NUMERIC_RESOURCE_LIMIT ||
+        numeric_status == REXX_NUMERIC_RANGE)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (numeric_status != REXX_NUMERIC_OK)
+        return REXX_VM_STATUS_NUMERIC_ERROR;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_size_exact(RexxVM *vm,
+                                           const RexxValue *value,
+                                           size_t *number)
+{
+    RexxDecimal parsed;
+    uint32_t converted;
+    RexxNumericStatus numeric_status;
+    RexxVMStatus status;
+
+    if (number == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+    status = rexx_builtin_prepare_decimal(vm, value, &parsed);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (parsed.sign < 0) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    numeric_status = rexx_decimal_to_uint32(&parsed, &converted);
+    if (numeric_status == REXX_NUMERIC_RANGE)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (numeric_status != REXX_NUMERIC_OK)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    *number = (size_t)converted;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxDecimalFormat rexx_builtin_decimal_form(const RexxVM *vm)
+{
+    return vm != NULL && vm->numeric_form == REXX_NUMERIC_FORM_ENGINEERING
+               ? REXX_DECIMAL_FORMAT_ENGINEERING
+               : REXX_DECIMAL_FORMAT_SCIENTIFIC;
+}
+
+static RexxVMStatus rexx_builtin_return_decimal(RexxVM *vm,
+                                                const RexxDecimal *number,
+                                                RexxValue *result)
+{
+    char output[REXX_DECIMAL_MAX_DIGITS +
+                2u * REXX_NUMERIC_MAX_DIGITS + 32u];
+    int length = rexx_decimal_format_with_form(
+        output, sizeof(output), number, rexx_builtin_digits(vm),
+        rexx_builtin_decimal_form(vm));
+    RexxVMStatus status;
+
+    if (length < 0) return REXX_VM_STATUS_RESOURCE_LIMIT;
+    status = rexx_builtin_charge_numeric_work(vm, (size_t)length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    return rexx_value_set_string(result, output, (size_t)length);
+}
+
+static RexxVMStatus rexx_builtin_abs(RexxVM *vm,
+                                     const RexxValue *arguments,
+                                     size_t argument_count,
+                                     RexxValue *result)
+{
+    RexxDecimal number;
+    RexxVMStatus status;
+    (void)argument_count;
+    status = rexx_builtin_prepare_decimal(vm, &arguments[0], &number);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (number.sign < 0) number.sign = (int8_t)-number.sign;
+    return rexx_builtin_return_decimal(vm, &number, result);
+}
+
+static RexxVMStatus rexx_builtin_sign(RexxVM *vm,
+                                      const RexxValue *arguments,
+                                      size_t argument_count,
+                                      RexxValue *result)
+{
+    static const char negative[] = "-1";
+    static const char zero[] = "0";
+    static const char positive[] = "1";
+    RexxDecimal number;
+    RexxVMStatus status;
+    (void)argument_count;
+    status = rexx_builtin_prepare_decimal(vm, &arguments[0], &number);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (number.sign < 0)
+        return rexx_value_set_string(result, negative, sizeof(negative) - 1u);
+    if (number.sign > 0)
+        return rexx_value_set_string(result, positive, sizeof(positive) - 1u);
+    return rexx_value_set_string(result, zero, sizeof(zero) - 1u);
+}
+
+static RexxVMStatus rexx_builtin_extreme(RexxVM *vm,
+                                         const RexxValue *arguments,
+                                         size_t argument_count,
+                                         RexxValue *result,
+                                         int select_minimum)
+{
+    RexxDecimal best;
+    size_t index;
+    RexxVMStatus status;
+
+    if (arguments == NULL || argument_count < 2u || argument_count > 20u)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    status = rexx_builtin_prepare_decimal(vm, &arguments[0], &best);
+    for (index = 1u; status == REXX_VM_STATUS_OK && index < argument_count;
+         ++index) {
+        RexxDecimal candidate;
+        status = rexx_builtin_prepare_decimal(vm, &arguments[index],
+                                              &candidate);
+        if (status == REXX_VM_STATUS_OK) {
+            size_t compare_cost = best.length + candidate.length;
+            status = rexx_builtin_charge_numeric_work(vm, compare_cost);
+            if (status == REXX_VM_STATUS_OK) {
+                int comparison = rexx_decimal_compare(&candidate, &best);
+                if ((select_minimum && comparison < 0) ||
+                    (!select_minimum && comparison > 0))
+                    best = candidate;
+            }
+        }
+    }
+    if (status != REXX_VM_STATUS_OK) return status;
+    return rexx_builtin_return_decimal(vm, &best, result);
+}
+
+static RexxVMStatus rexx_builtin_max(RexxVM *vm,
+                                     const RexxValue *arguments,
+                                     size_t argument_count,
+                                     RexxValue *result)
+{
+    return rexx_builtin_extreme(vm, arguments, argument_count, result, 0);
+}
+
+static RexxVMStatus rexx_builtin_min(RexxVM *vm,
+                                     const RexxValue *arguments,
+                                     size_t argument_count,
+                                     RexxValue *result)
+{
+    return rexx_builtin_extreme(vm, arguments, argument_count, result, 1);
+}
+
+static RexxNumericStatus rexx_builtin_round_to_scale(RexxDecimal *number,
+                                                      int64_t target_scale)
+{
+    int64_t drop_signed;
+    size_t drop, retained, index;
+    int carry;
+
+    if (number == NULL || number->length == 0u)
+        return REXX_NUMERIC_INVALID;
+    if (number->sign == 0 || target_scale >= number->scale)
+        return REXX_NUMERIC_OK;
+    drop_signed = (int64_t)number->scale - target_scale;
+    if (drop_signed <= 0 || (uint64_t)drop_signed > SIZE_MAX)
+        return REXX_NUMERIC_RESOURCE_LIMIT;
+    drop = (size_t)drop_signed;
+    if (drop > number->length) {
+        memset(number, 0, sizeof(*number));
+        number->digits[0] = '0';
+        number->length = 1u;
+        return REXX_NUMERIC_OK;
+    }
+    retained = number->length - drop;
+    carry = number->digits[retained] >= '5';
+    if (target_scale < -REXX_DECIMAL_MAX_EXPONENT ||
+        target_scale > REXX_DECIMAL_MAX_EXPONENT)
+        return REXX_NUMERIC_RANGE;
+    if (retained == 0u) {
+        if (!carry) {
+            memset(number, 0, sizeof(*number));
+            number->digits[0] = '0';
+            number->length = 1u;
+            return REXX_NUMERIC_OK;
+        }
+        number->digits[0] = '1';
+        number->digits[1] = '\0';
+        number->length = 1u;
+        number->scale = (int32_t)target_scale;
+        return REXX_NUMERIC_OK;
+    }
+    number->length = retained;
+    number->digits[retained] = '\0';
+    number->scale = (int32_t)target_scale;
+    for (index = retained; carry && index != 0u; --index) {
+        size_t digit_index = index - 1u;
+        if (number->digits[digit_index] == '9')
+            number->digits[digit_index] = '0';
+        else {
+            ++number->digits[digit_index];
+            carry = 0;
+        }
+    }
+    if (carry) {
+        number->digits[0] = '1';
+        for (index = 1u; index <= retained; ++index)
+            number->digits[index] = '0';
+        ++number->length;
+        number->digits[number->length] = '\0';
+    }
+    return REXX_NUMERIC_OK;
+}
+
+static int64_t rexx_builtin_adjusted_exponent(const RexxDecimal *number)
+{
+    return number->sign == 0
+               ? 0
+               : (int64_t)number->length - (int64_t)number->scale - 1;
+}
+
+static size_t rexx_builtin_integer_places(const RexxDecimal *number,
+                                          int64_t display_exponent)
+{
+    int64_t point;
+    if (number->sign == 0) return 1u;
+    point = (int64_t)number->length - (int64_t)number->scale -
+            display_exponent;
+    return point > 0 ? (size_t)point : 1u;
+}
+
+static char rexx_builtin_decimal_digit(const RexxDecimal *number,
+                                       int64_t point,
+                                       size_t fractional_index)
+{
+    int64_t source = point + (int64_t)fractional_index;
+    if (number->sign == 0 || source < 0 ||
+        (uint64_t)source >= (uint64_t)number->length)
+        return '0';
+    return number->digits[(size_t)source];
+}
+
+static char rexx_builtin_integer_digit(const RexxDecimal *number,
+                                       size_t index,
+                                       int64_t point)
+{
+    if (number->sign == 0 || point <= 0 || (int64_t)index >= point ||
+        index >= number->length)
+        return '0';
+    return number->digits[index];
+}
+
+static RexxVMStatus rexx_builtin_trunc(RexxVM *vm,
+                                       const RexxValue *arguments,
+                                       size_t argument_count,
+                                       RexxValue *result)
+{
+    RexxDecimal number;
+    size_t places = 0u;
+    size_t integer_places, sign_length, total, index, cursor = 0u;
+    int64_t point;
+    char *output = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_prepare_decimal(vm, &arguments[0], &number);
+    if (status == REXX_VM_STATUS_OK && argument_count > 1u &&
+        arguments[1].type != REXX_VALUE_UNSET)
+        status = rexx_builtin_size_exact(vm, &arguments[1], &places);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (number.sign != 0 && (int64_t)number.scale > (int64_t)places) {
+        size_t drop = (size_t)((int64_t)number.scale - (int64_t)places);
+        if (drop >= number.length) {
+            memset(&number, 0, sizeof(number));
+            number.digits[0] = '0';
+            number.length = 1u;
+        } else {
+            number.length -= drop;
+            number.scale = (int32_t)places;
+            number.digits[number.length] = '\0';
+        }
+    }
+    point = (int64_t)number.length - (int64_t)number.scale;
+    integer_places = number.sign == 0 || point <= 0
+                         ? 1u : (size_t)point;
+    sign_length = number.sign < 0 ? 1u : 0u;
+    if (integer_places > SIZE_MAX - sign_length ||
+        (places != 0u && integer_places + sign_length > SIZE_MAX - places - 1u))
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    total = integer_places + sign_length;
+    if (places != 0u) total += 1u + places;
+    if (total > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    status = rexx_builtin_charge_numeric_work(vm, total);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_value_allocate_string(result, total, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (number.sign < 0) output[cursor++] = '-';
+    for (index = 0u; index < integer_places; ++index) {
+        output[cursor++] = rexx_builtin_integer_digit(&number, index,
+                                                      point);
+    }
+    if (places != 0u) {
+        output[cursor++] = '.';
+        for (index = 0u; index < places; ++index)
+            output[cursor++] = rexx_builtin_decimal_digit(
+                &number, point, index);
+    }
+    (void)output[cursor];
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_format(RexxVM *vm,
+                                        const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    RexxDecimal original;
+    size_t before = 0u, after = 0u, expp = 0u, expt;
+    int has_before = 0, has_after = 0, has_expp = 0, has_expt = 0;
+    int exponent_form = 0, blank_exponent = 0;
+    int64_t adjusted, display_exponent = 0, point;
+    size_t integer_places, required_before, before_width, fractional_width;
+    size_t suffix_length = 0u, total, cursor = 0u, index;
+    size_t natural_fraction;
+    size_t exponent_digit_count = 0u;
+    RexxDecimal number;
+    char *output = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_prepare_decimal(vm, &arguments[0], &original);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (argument_count > 1u && arguments[1].type != REXX_VALUE_UNSET) {
+        has_before = 1;
+        status = rexx_builtin_size_exact(vm, &arguments[1], &before);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    if (argument_count > 2u && arguments[2].type != REXX_VALUE_UNSET) {
+        has_after = 1;
+        status = rexx_builtin_size_exact(vm, &arguments[2], &after);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    if (argument_count > 3u && arguments[3].type != REXX_VALUE_UNSET) {
+        has_expp = 1;
+        status = rexx_builtin_size_exact(vm, &arguments[3], &expp);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (expp >= 10u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    if (argument_count > 4u && arguments[4].type != REXX_VALUE_UNSET) {
+        has_expt = 1;
+        status = rexx_builtin_size_exact(vm, &arguments[4], &expt);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    if (!has_before && !has_after && !has_expp && !has_expt)
+        return rexx_builtin_return_decimal(vm, &original, result);
+
+    expt = has_expt ? expt : rexx_builtin_digits(vm);
+    adjusted = rexx_builtin_adjusted_exponent(&original);
+    if (original.sign != 0 && !(has_expp && expp == 0u)) {
+        size_t integer_need = rexx_builtin_integer_places(&original, 0);
+        size_t fraction_need = has_after
+            ? after : (original.scale > 0 ? (size_t)original.scale : 0u);
+        uint64_t twice_expt = (uint64_t)expt * UINT64_C(2);
+        int trigger = expt == 0u
+            ? adjusted != 0
+            : (uint64_t)integer_need > (uint64_t)expt ||
+                  (uint64_t)fraction_need > twice_expt;
+        exponent_form = trigger && adjusted != 0;
+        if (exponent_form) {
+            display_exponent = rexx_builtin_decimal_form(vm) ==
+                                       REXX_DECIMAL_FORMAT_ENGINEERING
+                                   ? (adjusted >= 0
+                                          ? (adjusted / 3) * 3
+                                          : -(((-adjusted + 2) / 3) * 3))
+                                   : adjusted;
+        } else if ((trigger || expt == 0u) && adjusted == 0 &&
+                   has_expp && expp != 0u) {
+            blank_exponent = 1;
+        }
+    }
+
+    number = original;
+    if (has_after && number.sign != 0) {
+        int64_t target_scale = (int64_t)after -
+                              (exponent_form ? display_exponent : 0);
+        RexxNumericStatus numeric_status = rexx_builtin_round_to_scale(
+            &number, target_scale);
+        if (numeric_status == REXX_NUMERIC_RESOURCE_LIMIT ||
+            numeric_status == REXX_NUMERIC_RANGE)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        if (numeric_status != REXX_NUMERIC_OK)
+            return REXX_VM_STATUS_NUMERIC_ERROR;
+        if (exponent_form && number.sign != 0) {
+            int64_t next_adjusted = rexx_builtin_adjusted_exponent(&number);
+            int64_t next_display = rexx_builtin_decimal_form(vm) ==
+                                           REXX_DECIMAL_FORMAT_ENGINEERING
+                                       ? (next_adjusted >= 0
+                                              ? (next_adjusted / 3) * 3
+                                              : -(((-next_adjusted + 2) / 3) * 3))
+                                       : next_adjusted;
+            if (next_display != display_exponent) {
+                number = original;
+                target_scale = (int64_t)after - next_display;
+                numeric_status = rexx_builtin_round_to_scale(&number,
+                                                              target_scale);
+                if (numeric_status == REXX_NUMERIC_RESOURCE_LIMIT ||
+                    numeric_status == REXX_NUMERIC_RANGE)
+                    return REXX_VM_STATUS_RESOURCE_LIMIT;
+                if (numeric_status != REXX_NUMERIC_OK)
+                    return REXX_VM_STATUS_NUMERIC_ERROR;
+                display_exponent = next_display;
+            }
+        }
+    }
+    if (number.sign == 0) {
+        exponent_form = 0;
+        blank_exponent = 0;
+        display_exponent = 0;
+    }
+
+    point = (int64_t)number.length - (int64_t)number.scale -
+            (exponent_form ? display_exponent : 0);
+    integer_places = point > 0 ? (size_t)point : 1u;
+    if (exponent_form) {
+        int64_t mantissa_scale = (int64_t)number.scale + display_exponent;
+        natural_fraction = mantissa_scale > 0 ? (size_t)mantissa_scale : 0u;
+    } else {
+        natural_fraction = number.scale > 0 ? (size_t)number.scale : 0u;
+    }
+    fractional_width = has_after ? after : natural_fraction;
+    required_before = integer_places + (number.sign < 0 ? 1u : 0u);
+    before_width = has_before ? before : required_before;
+    if (before_width < required_before)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (blank_exponent) {
+        suffix_length = expp + 2u;
+    } else if (exponent_form) {
+        size_t magnitude = (size_t)(display_exponent < 0
+                                         ? -display_exponent
+                                         : display_exponent);
+        do {
+            ++exponent_digit_count;
+            magnitude /= 10u;
+        } while (magnitude != 0u && exponent_digit_count < 16u);
+        if (has_expp && exponent_digit_count > expp)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (has_expp && expp > exponent_digit_count)
+            exponent_digit_count = expp;
+        suffix_length = 2u + exponent_digit_count;
+    }
+    if (before_width > REXX_BUILTIN_MAX_RESULT_LENGTH ||
+        fractional_width > REXX_BUILTIN_MAX_RESULT_LENGTH ||
+        before_width > SIZE_MAX - suffix_length ||
+        (fractional_width != 0u &&
+         before_width + suffix_length >
+             SIZE_MAX - fractional_width - 1u))
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    total = before_width + suffix_length;
+    if (fractional_width != 0u) total += 1u + fractional_width;
+    if (total > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    status = rexx_builtin_charge_numeric_work(vm,
+                                              number.length + total);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_value_allocate_string(result, total, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    for (index = 0u; index < before_width - required_before; ++index)
+        output[cursor++] = ' ';
+    if (number.sign < 0) output[cursor++] = '-';
+    for (index = 0u; index < integer_places; ++index)
+        output[cursor++] = rexx_builtin_integer_digit(&number, index, point);
+    if (fractional_width != 0u) {
+        output[cursor++] = '.';
+        for (index = 0u; index < fractional_width; ++index)
+            output[cursor++] = rexx_builtin_decimal_digit(
+                &number, point, index);
+    }
+    if (blank_exponent) {
+        for (index = 0u; index < suffix_length; ++index)
+            output[cursor++] = ' ';
+    } else if (exponent_form) {
+        size_t actual_digits = 0u;
+        size_t magnitude = (size_t)(display_exponent < 0
+                                         ? -display_exponent
+                                         : display_exponent);
+        char reverse[16];
+        do {
+            reverse[actual_digits++] = (char)('0' + magnitude % 10u);
+            magnitude /= 10u;
+        } while (magnitude != 0u && actual_digits < sizeof(reverse));
+        output[cursor++] = 'E';
+        output[cursor++] = display_exponent < 0 ? '-' : '+';
+        for (index = 0u; index < exponent_digit_count - actual_digits; ++index)
+            output[cursor++] = '0';
+        while (actual_digits != 0u)
+            output[cursor++] = reverse[--actual_digits];
+    }
+    (void)output[cursor];
+    return REXX_VM_STATUS_OK;
+}
+
+static int rexx_builtin_is_digit(unsigned char byte)
+{
+    return byte >= (unsigned char)'0' && byte <= (unsigned char)'9';
+}
+
+static int rexx_builtin_is_hex(unsigned char byte)
+{
+    return rexx_builtin_is_digit(byte) ||
+           (byte >= (unsigned char)'a' && byte <= (unsigned char)'f') ||
+           (byte >= (unsigned char)'A' && byte <= (unsigned char)'F');
+}
+
+static int rexx_builtin_symbol_start(unsigned char byte)
+{
+    return (byte >= (unsigned char)'A' && byte <= (unsigned char)'Z') ||
+           (byte >= (unsigned char)'a' && byte <= (unsigned char)'z') ||
+           byte == (unsigned char)'!' || byte == (unsigned char)'?' ||
+           byte == (unsigned char)'_' || byte == (unsigned char)'@' ||
+           byte == (unsigned char)'#' || byte == (unsigned char)'$';
+}
+
+static int rexx_builtin_symbol_part(unsigned char byte)
+{
+    return rexx_builtin_symbol_start(byte) || rexx_builtin_is_digit(byte) ||
+           byte == (unsigned char)'.';
+}
+
+static int rexx_builtin_datatype_symbol_chars(const char *bytes,
+                                              size_t length)
+{
+    size_t index;
+    if (length == 0u ||
+        !rexx_builtin_symbol_start((unsigned char)bytes[0]))
+        return 0;
+    for (index = 1u; index < length; ++index)
+        if (!rexx_builtin_symbol_part((unsigned char)bytes[index])) return 0;
+    return 1;
+}
+
+static RexxVMStatus rexx_builtin_text_view(const RexxValue *value,
+                                           const char **bytes,
+                                           size_t *length)
+{
+    static const char one[] = "1";
+    static const char zero[] = "0";
+    if (value == NULL || bytes == NULL || length == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (value->type == REXX_VALUE_STRING) {
+        if (value->as.string.bytes == NULL && value->as.string.length != 0u)
+            return REXX_VM_STATUS_INVALID_ARGUMENT;
+        *bytes = value->as.string.bytes != NULL
+                     ? value->as.string.bytes : rexx_builtin_empty;
+        *length = value->as.string.length;
+        return REXX_VM_STATUS_OK;
+    }
+    if (value->type == REXX_VALUE_BOOLEAN) {
+        *bytes = value->as.boolean != 0 ? one : zero;
+        *length = 1u;
+        return REXX_VM_STATUS_OK;
+    }
+    return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+}
+
+static int rexx_builtin_datatype_hex(const char *bytes, size_t length)
+{
+    size_t index, digits = 0u;
+    if (length == 0u) return 1;
+    for (index = 0u; index < length; ++index) {
+        unsigned char byte = (unsigned char)bytes[index];
+        if (rexx_builtin_is_hex(byte)) {
+            ++digits;
+        } else if (byte == (unsigned char)' ') {
+            if (digits == 0u || (digits & 1u) != 0u ||
+                index + 1u == length ||
+                !rexx_builtin_is_hex((unsigned char)bytes[index + 1u]))
+                return 0;
+        } else {
+            return 0;
+        }
+    }
+    return (digits & 1u) == 0u;
+}
+
+static RexxVMStatus rexx_builtin_datatype(RexxVM *vm,
+                                          const RexxValue *arguments,
+                                          size_t argument_count,
+                                          RexxValue *result)
+{
+    const char *bytes;
+    size_t length, index;
+    unsigned char option = 0u;
+    int matched = 1;
+    RexxVMStatus status;
+
+    status = rexx_builtin_text_view(&arguments[0], &bytes, &length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_charge_numeric_work(vm, length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (argument_count > 1u && arguments[1].type != REXX_VALUE_UNSET) {
+        const char *option_bytes;
+        size_t option_length;
+        status = rexx_builtin_text_view(&arguments[1], &option_bytes,
+                                        &option_length);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (option_length == 0u)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        option = rexx_builtin_ascii_upper((unsigned char)option_bytes[0]);
+    }
+
+    if (option == 0u) {
+        RexxDecimal numeric;
+        status = rexx_builtin_prepare_decimal(vm, &arguments[0], &numeric);
+        if (status == REXX_VM_STATUS_OK)
+            return rexx_value_set_string(result, "NUM", 3u);
+        if (status == REXX_VM_STATUS_NUMERIC_ERROR)
+            return rexx_value_set_string(result, "CHAR", 4u);
+        return status;
+    }
+
+    if (option == (unsigned char)'N' || option == (unsigned char)'W') {
+        RexxDecimal numeric;
+        status = rexx_builtin_prepare_decimal(vm, &arguments[0], &numeric);
+        if (status == REXX_VM_STATUS_NUMERIC_ERROR) matched = 0;
+        else if (status != REXX_VM_STATUS_OK) return status;
+        else if (option == (unsigned char)'W' && numeric.sign != 0) {
+            size_t integer_digits;
+            if (numeric.scale > 0) {
+                size_t fractional = (size_t)numeric.scale;
+                if (fractional >= numeric.length) matched = 0;
+                else {
+                    for (index = numeric.length - fractional;
+                         index < numeric.length; ++index)
+                        if (numeric.digits[index] != '0') matched = 0;
+                }
+            }
+            integer_digits = numeric.scale <= 0
+                ? numeric.length + (size_t)(-(int64_t)numeric.scale)
+                : numeric.length > (size_t)numeric.scale
+                      ? numeric.length - (size_t)numeric.scale : 1u;
+            if (integer_digits > rexx_builtin_digits(vm)) matched = 0;
+        }
+    } else if (option == (unsigned char)'X') {
+        matched = rexx_builtin_datatype_hex(bytes, length);
+    } else if (option == (unsigned char)'S') {
+        matched = rexx_builtin_datatype_symbol_chars(bytes, length);
+    } else {
+        if (option != (unsigned char)'A' && option != (unsigned char)'B' &&
+            option != (unsigned char)'L' && option != (unsigned char)'M' &&
+            option != (unsigned char)'U')
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (length == 0u) matched = 0;
+        for (index = 0u; matched && index < length; ++index) {
+            unsigned char byte = (unsigned char)bytes[index];
+            int upper = byte >= (unsigned char)'A' &&
+                        byte <= (unsigned char)'Z';
+            int lower = byte >= (unsigned char)'a' &&
+                        byte <= (unsigned char)'z';
+            int digit = rexx_builtin_is_digit(byte);
+            if (option == (unsigned char)'A') matched = upper || lower || digit;
+            else if (option == (unsigned char)'B')
+                matched = byte == (unsigned char)'0' ||
+                          byte == (unsigned char)'1';
+            else if (option == (unsigned char)'L') matched = lower;
+            else if (option == (unsigned char)'M') matched = upper || lower;
+            else matched = upper;
+        }
+    }
+    return rexx_value_set_string(result, matched ? "1" : "0", 1u);
+}
+
+static int rexx_builtin_symbol_name(const char *bytes, size_t length,
+                                    int *constant)
+{
+    size_t index;
+    int has_whitespace = 0;
+    RexxDecimal numeric;
+    RexxNumericStatus numeric_status;
+
+    if (constant != NULL) *constant = 0;
+    if (length == 0u || length > (size_t)65535u) return 0;
+    for (index = 0u; index < length; ++index) {
+        unsigned char byte = (unsigned char)bytes[index];
+        if (byte == (unsigned char)' ' || byte == (unsigned char)'\t' ||
+            byte == (unsigned char)'\n' || byte == (unsigned char)'\r' ||
+            byte == (unsigned char)'\f' || byte == (unsigned char)'\v') {
+            has_whitespace = 1;
+            break;
+        }
+    }
+    if (!has_whitespace) {
+        numeric_status = rexx_decimal_parse(bytes, length, &numeric);
+        if (numeric_status == REXX_NUMERIC_OK) {
+            if (constant != NULL) *constant = 1;
+            return 1;
+        }
+    }
+    if (!rexx_builtin_symbol_start((unsigned char)bytes[0])) return 0;
+    for (index = 1u; index < length; ++index)
+        if (!rexx_builtin_symbol_part((unsigned char)bytes[index])) return 0;
+    return 1;
+}
+
+static RexxVMStatus rexx_builtin_symbol(RexxVM *vm,
+                                        const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    const char *bytes;
+    size_t length;
+    int constant = 0, initialized = 0;
+    RexxVMStatus status;
+
+    (void)argument_count;
+    status = rexx_builtin_text_view(&arguments[0], &bytes, &length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_charge_numeric_work(vm, length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (!rexx_builtin_symbol_name(bytes, length, &constant))
+        return rexx_value_set_string(result, "BAD", 3u);
+    if (constant)
+        return rexx_value_set_string(result, "LIT", 3u);
+    if (vm != NULL) {
+        status = rexx_vm_symbol_is_initialized(vm, bytes, length,
+                                               &initialized);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    return rexx_value_set_string(result, initialized ? "VAR" : "LIT", 3u);
+}
+
+static RexxVMStatus rexx_builtin_xrange(RexxVM *vm,
+                                        const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    const char *start_bytes = NULL, *end_bytes = NULL;
+    size_t start_length = 0u, end_length = 0u;
+    size_t start = 0u, end = 255u, output_length, index;
+    char *output = NULL;
+    RexxVMStatus status;
+
+    if (argument_count > 0u && arguments[0].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_text_view(&arguments[0], &start_bytes,
+                                        &start_length);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (start_length != 1u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        start = (unsigned char)start_bytes[0];
+    }
+    if (argument_count > 1u && arguments[1].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_text_view(&arguments[1], &end_bytes,
+                                        &end_length);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (end_length != 1u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        end = (unsigned char)end_bytes[0];
+    }
+    output_length = start <= end ? end - start + 1u
+                                 : 256u - start + end + 1u;
+    status = rexx_builtin_charge_numeric_work(vm, output_length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_value_allocate_string(result, output_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    for (index = 0u; index < output_length; ++index)
+        output[index] = (char)(unsigned char)((start + index) & 0xffu);
+    return REXX_VM_STATUS_OK;
+}
+
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
-    { "LENGTH", 1u, 1u, rexx_builtin_length },
-    { "LEFT", 2u, 3u, rexx_builtin_left },
-    { "RIGHT", 2u, 3u, rexx_builtin_right },
-    { "INSERT", 2u, 5u, rexx_builtin_insert },
-    { "OVERLAY", 2u, 5u, rexx_builtin_overlay },
-    { "DELSTR", 2u, 3u, rexx_builtin_delstr },
-    { "DELWORD", 2u, 3u, rexx_builtin_delword },
-    { "SUBWORD", 2u, 3u, rexx_builtin_subword },
-    { "WORDINDEX", 2u, 2u, rexx_builtin_wordindex },
-    { "WORDLENGTH", 2u, 2u, rexx_builtin_wordlength },
-    { "LASTPOS", 2u, 3u, rexx_builtin_lastpos },
-    { "SUBSTR", 2u, 4u, rexx_builtin_substr },
-    { "WORD", 2u, 2u, rexx_builtin_word },
-    { "WORDS", 1u, 1u, rexx_builtin_words },
-    { "STRIP", 1u, 3u, rexx_builtin_strip },
-    { "POS", 2u, 3u, rexx_builtin_pos },
-    { "TRANSLATE", 1u, 4u, rexx_builtin_translate },
-    { "WORDPOS", 2u, 3u, rexx_builtin_wordpos },
-    { "SPACE", 1u, 3u, rexx_builtin_space },
-    { "COPIES", 2u, 2u, rexx_builtin_copies },
-    { "COMPARE", 2u, 3u, rexx_builtin_compare },
-    { "VERIFY", 2u, 4u, rexx_builtin_verify }
+    { "LENGTH", 1u, 1u, rexx_builtin_length, NULL },
+    { "LEFT", 2u, 3u, rexx_builtin_left, NULL },
+    { "RIGHT", 2u, 3u, rexx_builtin_right, NULL },
+    { "INSERT", 2u, 5u, rexx_builtin_insert, NULL },
+    { "OVERLAY", 2u, 5u, rexx_builtin_overlay, NULL },
+    { "DELSTR", 2u, 3u, rexx_builtin_delstr, NULL },
+    { "DELWORD", 2u, 3u, rexx_builtin_delword, NULL },
+    { "SUBWORD", 2u, 3u, rexx_builtin_subword, NULL },
+    { "WORDINDEX", 2u, 2u, rexx_builtin_wordindex, NULL },
+    { "WORDLENGTH", 2u, 2u, rexx_builtin_wordlength, NULL },
+    { "LASTPOS", 2u, 3u, rexx_builtin_lastpos, NULL },
+    { "SUBSTR", 2u, 4u, rexx_builtin_substr, NULL },
+    { "WORD", 2u, 2u, rexx_builtin_word, NULL },
+    { "WORDS", 1u, 1u, rexx_builtin_words, NULL },
+    { "STRIP", 1u, 3u, rexx_builtin_strip, NULL },
+    { "POS", 2u, 3u, rexx_builtin_pos, NULL },
+    { "TRANSLATE", 1u, 4u, rexx_builtin_translate, NULL },
+    { "WORDPOS", 2u, 3u, rexx_builtin_wordpos, NULL },
+    { "SPACE", 1u, 3u, rexx_builtin_space, NULL },
+    { "COPIES", 2u, 2u, rexx_builtin_copies, NULL },
+    { "COMPARE", 2u, 3u, rexx_builtin_compare, NULL },
+    { "VERIFY", 2u, 4u, rexx_builtin_verify, NULL },
+    { "ABS", 1u, 1u, NULL, rexx_builtin_abs },
+    { "SIGN", 1u, 1u, NULL, rexx_builtin_sign },
+    { "MAX", 2u, 20u, NULL, rexx_builtin_max },
+    { "MIN", 2u, 20u, NULL, rexx_builtin_min },
+    { "TRUNC", 1u, 2u, NULL, rexx_builtin_trunc },
+    { "FORMAT", 1u, 5u, NULL, rexx_builtin_format },
+    { "DATATYPE", 1u, 2u, NULL, rexx_builtin_datatype },
+    { "SYMBOL", 1u, 1u, NULL, rexx_builtin_symbol },
+    { "XRANGE", 0u, 2u, NULL, rexx_builtin_xrange }
 };
 
 const RexxBuiltinDescriptor *rexx_builtin_lookup(const char *name,
@@ -1369,6 +2196,17 @@ RexxVMStatus rexx_builtin_dispatch(const char *name,
                                    size_t argument_count,
                                    RexxValue *result)
 {
+    return rexx_builtin_dispatch_with_vm(NULL, name, name_length, arguments,
+                                         argument_count, result);
+}
+
+RexxVMStatus rexx_builtin_dispatch_with_vm(RexxVM *vm,
+                                          const char *name,
+                                          size_t name_length,
+                                          const RexxValue *arguments,
+                                          size_t argument_count,
+                                          RexxValue *result)
+{
     const RexxBuiltinDescriptor *descriptor;
     RexxVMStatus status;
 
@@ -1392,7 +2230,13 @@ RexxVMStatus rexx_builtin_dispatch(const char *name,
             }
         }
     }
-    status = descriptor->function(arguments, argument_count, result);
+    if (descriptor->context_function != NULL)
+        status = descriptor->context_function(vm, arguments, argument_count,
+                                              result);
+    else if (descriptor->function != NULL)
+        status = descriptor->function(arguments, argument_count, result);
+    else
+        status = REXX_VM_STATUS_INVALID_ARGUMENT;
     if (status != REXX_VM_STATUS_OK) {
         rexx_value_clear(result);
     }

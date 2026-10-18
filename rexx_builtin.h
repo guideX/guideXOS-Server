@@ -25,12 +25,16 @@ extern "C" {
 typedef RexxVMStatus (*RexxBuiltinFunction)(const RexxValue *arguments,
                                             size_t argument_count,
                                             RexxValue *result);
+typedef RexxVMStatus (*RexxBuiltinContextFunction)(
+    RexxVM *vm, const RexxValue *arguments, size_t argument_count,
+    RexxValue *result);
 
 typedef struct RexxBuiltinDescriptor {
     const char *name; /* Uppercase, NUL-terminated canonical spelling. */
     size_t minimum_arguments;
     size_t maximum_arguments;
     RexxBuiltinFunction function;
+    RexxBuiltinContextFunction context_function;
 } RexxBuiltinDescriptor;
 
 /* Case-insensitive lookup over an explicit-length function name. */
@@ -46,6 +50,13 @@ RexxVMStatus rexx_builtin_dispatch(const char *name,
                                    const RexxValue *arguments,
                                    size_t argument_count,
                                    RexxValue *result);
+
+/* VM-aware entry used by the interpreter for functions that depend on the
+ * active numeric context or variable generation. Standalone callers may use
+ * rexx_builtin_dispatch(), which supplies default numeric settings. */
+RexxVMStatus rexx_builtin_dispatch_with_vm(
+    RexxVM *vm, const char *name, size_t name_length,
+    const RexxValue *arguments, size_t argument_count, RexxValue *result);
 
 #ifdef __cplusplus
 }

@@ -34,5 +34,13 @@
   "interpret/interpret_exit_status.rex": {
     "exit_code": 5,
     "reason": "The fixture exercises EXIT's process status through generated INTERPRET source."
+  },
+  "numeric_inspection/bad_format.rex": {
+    "exit_code": 1,
+    "reason": "FORMAT rejects a before width that cannot contain the integer part."
+  },
+  "numeric_inspection/bad_numeric.rex": {
+    "exit_code": 1,
+    "reason": "ABS rejects an argument that is not a finite decimal value."
   }
 }

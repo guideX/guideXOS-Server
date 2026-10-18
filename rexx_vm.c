@@ -1872,6 +1872,34 @@ static int environment_has_variable(RexxVM *vm,
     return 0;
 }
 
+RexxVMStatus rexx_vm_symbol_is_initialized(RexxVM *vm,
+                                           const char *name,
+                                           size_t name_length,
+                                           int *initialized)
+{
+    RexxVMEnvironment *environment;
+    const char *resolved_name = name;
+    size_t resolved_length = name_length;
+    char *owned_resolved_name = NULL;
+    RexxVMStatus status = REXX_VM_STATUS_OK;
+
+    if (vm == NULL || name == NULL || name_length == 0u ||
+        initialized == NULL || vm->current_environment == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    environment = (RexxVMEnvironment *)vm->current_environment;
+    if (expose_name_has_dynamic_tail(name, name_length)) {
+        status = resolve_expose_name(vm, environment, name, name_length,
+                                     &owned_resolved_name,
+                                     &resolved_length);
+        if (status != REXX_VM_STATUS_OK) return status;
+        resolved_name = owned_resolved_name;
+    }
+    *initialized = environment_has_variable(vm, environment, resolved_name,
+                                            resolved_length);
+    vm_free(owned_resolved_name);
+    return REXX_VM_STATUS_OK;
+}
+
 static RexxVMStatus load_variable_value(RexxVM *vm,
                                         RexxVMEnvironment *environment,
                                         const RexxSymbol *symbol,
@@ -3307,8 +3335,8 @@ static RexxVMStatus execute_call(RexxVM *vm,
         else status = rexx_value_set_string(result, scientific,
                                             sizeof(scientific) - 1u);
     } else {
-        status = rexx_builtin_dispatch(
-            name, name_length,
+        status = rexx_builtin_dispatch_with_vm(
+            vm, name, name_length,
             argument_count == 0u ? NULL : &vm->stack[argument_start],
             argument_count, result);
         if (status == REXX_VM_STATUS_UNKNOWN_FUNCTION &&

@@ -293,6 +293,14 @@ RexxVMStatus rexx_vm_set_global(RexxVM *vm,
                                 size_t name_length,
                                 const RexxValue *value);
 
+/* Read-only SYMBOL() support. The name must already be lexically valid.
+ * Compound tails are resolved in the active variable generation without
+ * creating variables or raising NOVALUE. */
+RexxVMStatus rexx_vm_symbol_is_initialized(RexxVM *vm,
+                                           const char *name,
+                                           size_t name_length,
+                                           int *initialized);
+
 const char *rexx_vm_status_name(RexxVMStatus status);
 
 #ifdef __cplusplus

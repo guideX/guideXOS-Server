@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,11 @@ if ($null -eq $gxxCommand) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
+$guardManifest = if ($Phase -eq 'RX14') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx14\protected-artifacts-start.json'
+} else {
+    Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
+}
 $runId = [Guid]::NewGuid().ToString('N')
 $runRoot = Join-Path $rootDir ("build\rexx\$($Phase.ToLowerInvariant())\hosted-$runId")
 $workingDirectory = Join-Path $runRoot 'temp'
@@ -31,7 +35,8 @@ $plannedOutputs = @(
     'rexx_rx7_routines_tests.exe', 'rexx_rx7_alloc_failure_tests.exe',
     'rexx_rx8_semantics_alloc_tests.exe', 'rexx_rx9_condition_tests.exe',
     'rexx_rx10_interpret_tests.exe', 'rexx_rx12_builtins_tests.exe',
-    'rexx_rx13_string_editing_tests.exe', 'rexx_rx2_shell_bridge_tests.exe'
+    'rexx_rx13_string_editing_tests.exe', 'rexx_rx14_numeric_inspection_tests.exe',
+    'rexx_rx2_shell_bridge_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
@@ -57,6 +62,7 @@ $rx9Test = Join-Path $buildDirectory "rexx_rx9_condition_tests.exe"
 $rx10Test = Join-Path $buildDirectory "rexx_rx10_interpret_tests.exe"
 $rx12Test = Join-Path $buildDirectory "rexx_rx12_builtins_tests.exe"
 $rx13Test = Join-Path $buildDirectory "rexx_rx13_string_editing_tests.exe"
+$rx14Test = Join-Path $buildDirectory "rexx_rx14_numeric_inspection_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -212,6 +218,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX13 string editing test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX14 numeric and inspection built-in assertions"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx14_numeric_inspection_test.c") `
+    @commonSources -lm -o $rx14Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX14 numeric/inspection test build failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Building RX2 C++ shell bridge integration tests"
 & $gxxCommand.Source -std=c++14 -Wall -Wextra -Wpedantic -Werror `
     (Join-Path $PSScriptRoot "rexx_rx2_shell_bridge_test.cpp") `
@@ -312,6 +327,12 @@ Write-Host "Running RX13 string editing and word utility assertions"
 & $rx13Test
 if ($LASTEXITCODE -ne 0) {
     throw "RX13 string editing assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX14 numeric and inspection assertions"
+& $rx14Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX14 numeric/inspection assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
@@ -876,6 +897,32 @@ foreach ($fixture in Get-ChildItem -LiteralPath $rx13FixtureDirectory -Filter "*
     Write-Host "[PASS] RX13 fixture $($fixture.Name)"
 }
 
+$rx14FixtureDirectory = Join-Path $PSScriptRoot "rexx_compat\cases\numeric_inspection"
+$script:rx14FixturePassed = 0
+foreach ($fixture in Get-ChildItem -LiteralPath $rx14FixtureDirectory -Filter "*.rex" | Sort-Object Name) {
+    $diagnosticPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".diag")
+    $outputPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".out")
+    $actual = Invoke-CapturedProcess $cliTest @($fixture.FullName)
+    $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if (Test-Path -LiteralPath $diagnosticPath) {
+        $expectedDiagnostic = (Get-Content -Raw -LiteralPath $diagnosticPath).Trim()
+        if ($actual.ExitCode -ne 1 -or $actual.Stdout.Length -ne 0 -or -not $actualText.Contains($expectedDiagnostic)) {
+            throw "RX14 fixture $($fixture.Name) failed its expected diagnostic. Exit=$($actual.ExitCode) Output=$actualText"
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $outputPath)) {
+            throw "RX14 fixture $($fixture.Name) has no .out expectation."
+        }
+        $expectedOutput = ((Get-Content -Raw -LiteralPath $outputPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        $stdoutText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        if ($actual.ExitCode -ne 0 -or $stdoutText -cne $expectedOutput -or $actual.Stderr.Length -ne 0) {
+            throw "RX14 fixture $($fixture.Name) output mismatch. Expected '$expectedOutput'; got '$actualText'/$($actual.ExitCode)."
+        }
+    }
+    ++$script:rx14FixturePassed
+    Write-Host "[PASS] RX14 fixture $($fixture.Name)"
+}
+
 $parserLimitPath = Join-Path $buildDirectory "parse_template_node_limit.rex"
 $parserLimitSource = "parse value '' with " + ((@('.') * 65540) -join ' ')
 [System.IO.File]::WriteAllText(
@@ -948,6 +995,7 @@ Write-Host "RX9 condition fixtures passed: $script:rx9Passed/$script:rx9Passed"
 Write-Host "RX10 INTERPRET fixtures passed: $script:rx10Passed/$script:rx10Passed"
 Write-Host "RX12 classic built-in fixtures passed: $script:rx12FixturePassed/$script:rx12FixturePassed"
 Write-Host "RX13 string editing fixtures passed: $script:rx13FixturePassed/$script:rx13FixturePassed"
+Write-Host "RX14 numeric and inspection fixtures passed: $script:rx14FixturePassed/$script:rx14FixturePassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"
 Write-Host "RX5 compatibility fixtures passed: $script:rx5Passed/$script:rx5Passed"

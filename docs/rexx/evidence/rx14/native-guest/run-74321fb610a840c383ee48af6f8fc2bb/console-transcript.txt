@@ -1,0 +1,14 @@
+RX14 isolated QEMU Console transcript
+Kernel SHA-256: a50c6ba5813537a5cd368c32ca2edb88f5ea3fd3819ac175fa93358469a8587d
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx14\qemu-74321fb610a840c383ee48af6f8fc2bb\guest\esp
+COMMAND: rexx /rx14-numeric-builtins.rex | expected visible marker/status: RX14_NATIVE_NUMERIC_DONE
+COMMAND: rexx /rx14-symbol-scope.rex | expected visible marker/status: RX14_NATIVE_SYMBOL_DONE
+COMMAND: rexx /rx14-xrange-bytes.rex | expected visible marker/status: XRANGE_BYTES_EQUAL: 1
+COMMAND: rexx /rx14-interpret.rex | expected visible marker/status: RX14_NATIVE_INTERPRET_DONE
+COMMAND: rexx /rx14-syntax-recovery.rex | expected visible marker/status: RX14_NATIVE_SYNTAX_RECOVERED: 2
+COMMAND: rexx /rx14-resource-limit.rex | expected visible marker/status: VM resource limit exceeded
+COMMAND: rexx /rx14-recovery.rex | expected visible marker/status: RX14_NATIVE_GUEST_RESPONSIVE: 5
+COMMAND: rexx /rx14-exit-status.rex | expected visible marker/status: RX14_NATIVE_EXIT_STATUS_SCRIPT
+COMMAND: echo $? | expected visible marker/status: 23
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=68
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

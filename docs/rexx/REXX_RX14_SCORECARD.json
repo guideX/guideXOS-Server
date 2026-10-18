@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "phase": "RX14",
+  "qualification_status": "Outcome A - RX14 accepted",
+  "repository": {
+    "branch": "REXX_SUPPORT",
+    "starting_head": "0d67ef1130d11902deea41edecd19dd7dbc24baa",
+    "qualification_head_before_local_commit": "0d67ef1130d11902deea41edecd19dd7dbc24baa",
+    "root_phase_file": "absent",
+    "local_commit": true,
+    "pushed": false,
+    "commit_sha": "See final report; the committed scorecard cannot contain its own commit SHA."
+  },
+  "historical_snapshots": {
+    "rx11_inventory": "REXX_RX11_BUILTIN_INVENTORY.csv",
+    "rx12_inventory": "REXX_RX12_BUILTIN_INVENTORY.csv",
+    "rx13_inventory": "REXX_RX13_BUILTIN_INVENTORY.csv",
+    "rx12_scorecard": "REXX_RX12_SCORECARD.json",
+    "rx13_scorecard": "REXX_RX13_SCORECARD.json",
+    "rx12r1_artifact_incident": "evidence/rx12r1/protected-artifacts-baseline.json",
+    "incident_note": "RX14 preserved the recorded RX12R1 post-incident current state; it does not claim recovery of earlier bytes."
+  },
+  "preflight": {
+    "required_repository": "D:\\dev\\guideXOSServer_REXX",
+    "required_branch": "REXX_SUPPORT",
+    "required_starting_head_matched": true,
+    "prior_rx14_work_found": false,
+    "tracked_rx13_changes_found": false,
+    "initial_root_phase_file_absent": true,
+    "protected_artifact_count": 31,
+    "protected_untracked_count": 28,
+    "matched_rx12r1_current_state_manifest": true,
+    "starting_manifest": "evidence/rx14/protected-artifacts-start.json"
+  },
+  "rx14_implementation": {
+    "new_bifs": [
+      "ABS",
+      "SIGN",
+      "MAX",
+      "MIN",
+      "TRUNC",
+      "FORMAT",
+      "DATATYPE",
+      "SYMBOL",
+      "XRANGE"
+    ],
+    "decimal_engine": "Existing RexxDecimal sign/coefficient/scale path; no source numeric conversion through binary floating point.",
+    "default_numeric_digits": 9,
+    "maximum_numeric_digits": 254,
+    "maximum_decimal_input_and_coefficient_digits": 512,
+    "maximum_decimal_exponent_magnitude": 1000000,
+    "maximum_builtin_result_bytes": 16777216,
+    "maximum_max_min_arguments": 20,
+    "numeric_digits": "Numeric operands are rounded under active DIGITS before the operation.",
+    "numeric_form": "Decimal results follow active FORM; FORMAT follows SCIENTIFIC/ENGINEERING exponent rules.",
+    "numeric_fuzz": "MAX/MIN extrema use exact decimal ordering after DIGITS rounding, including while FUZZ is active.",
+    "allocation_failure_bifs_exercised": 9,
+    "format_five_argument_support": true,
+    "format_zero_exponent_explicit_expp_spacing": true,
+    "datatype_portable_options": ["A", "B", "L", "M", "N", "S", "U", "W", "X"],
+    "symbol_lookup_read_only": true,
+    "xrange_byte_wrap": true
+  },
+  "hosted_regressions": {
+    "all_passed": true,
+    "rx14_direct_assertions": 333,
+    "rx14_direct_cases": 88,
+    "rx14_argument_error_cases": 16,
+    "rx14_fixture_count": 29,
+    "suite_fixture_counts": {
+      "cli": 20,
+      "rx3": 13,
+      "rx4": 11,
+      "rx5": 13,
+      "rx6": 25,
+      "rx7": 33,
+      "rx8": 26,
+      "rx9": 24,
+      "rx10": 19,
+      "rx12": 30,
+      "rx13": 33,
+      "rx14": 29
+    },
+    "inherited_c_assertions": {
+      "rx2_vfs_output": 45,
+      "rx2_freestanding_numeric": 18,
+      "rx3_decimal": 26,
+      "rx3_allocator_failure": 570,
+      "rx4_arithmetic": 53,
+      "rx5_numeric_context": 35,
+      "rx6_parse_allocator_failure": 439,
+      "rx7_routine": 13,
+      "rx7_parser_compiler_vm_allocation": {
+        "parser": 46,
+        "compiler": 28,
+        "vm": 111
+      },
+      "rx8_semantics_allocation_recovery": 279,
+      "rx8_parser_compiler_vm_allocation": {
+        "parser": 38,
+        "compiler": 21,
+        "vm": 50
+      },
+      "rx9_conditions": 467,
+      "rx9_parser_compiler_vm_allocation": {
+        "parser": 41,
+        "compiler": 37,
+        "vm": 78
+      },
+      "rx10_interpret": 257,
+      "rx10_allocation_failpoints": {
+        "nested_vm": 33,
+        "syntax_vm": 14,
+        "parser": 8,
+        "compiler": 11
+      },
+      "rx12_bifs": 320,
+      "rx13_bifs": 418,
+      "rx2_shell_bridge": 7
+    },
+    "artifact_guard_stages": [
+      "hosted-builds",
+      "hosted-c-assertions",
+      "hosted-fixtures",
+      "hosted-final"
+    ]
+  },
+  "sanitizers": {
+    "address": {
+      "status": "PASS",
+      "compiler": "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for x64",
+      "run_id": "sanitizer-address-a3b8762fbc6641adb195495d70320e35",
+      "build_and_test_targets": 17,
+      "corpus_cases": 170,
+      "guideXOS_expected_exit": 170,
+      "Regina_not_run": 170,
+      "findings": 0
+    },
+    "undefined_behavior": {
+      "status": "PASS",
+      "compiler": "clang version 22.1.8",
+      "run_id": "sanitizer-undefined-5bd7cfb4fb0d4fb99716f6cb65b2b496",
+      "build_and_test_targets": 17,
+      "corpus_cases": 170,
+      "guideXOS_expected_exit": 170,
+      "Regina_not_run": 170,
+      "findings": 0
+    }
+  },
+  "reference_comparison": {
+    "interpreter": "Regina REXX",
+    "available": false,
+    "portable_corpus_cases": 170,
+    "guideXOS_expected_exit": 170,
+    "Regina_not_run": 170,
+    "compatibility_percentage": "not reported"
+  },
+  "native_build": {
+    "status": "PASS",
+    "architecture": "AMD64",
+    "freestanding": true,
+    "rexx_c_translation_units": 9,
+    "rexx_c_objects": [
+      "rexx_builtin.o",
+      "rexx_cli.o",
+      "rexx_compiler.o",
+      "rexx_lexer.o",
+      "rexx_numeric.o",
+      "rexx_os_io.o",
+      "rexx_output.o",
+      "rexx_parser.o",
+      "rexx_vm.o"
+    ],
+    "kernel_elf_sha256": "a50c6ba5813537a5cd368c32ca2edb88f5ea3fd3819ac175fa93358469a8587d",
+    "kernel_pe_sha256": "5be451c14cabb4ad33a8750aa4e58f04aff104222f9246b67d2d9c8c19d65219",
+    "output_root": "build/rexx/rx14/native-amd64-0c17bf77d8644b46a9d34abaa9481760",
+    "output_audit": "evidence/rx14/native-build/output-audit-0c17bf77d8644b46a9d34abaa9481760.json",
+    "link_evidence": "evidence/rx14/native-build/native-link-evidence-0c17bf77d8644b46a9d34abaa9481760.json",
+    "matches_rx13_elf": false
+  },
+  "native_guest": {
+    "status": "PASS",
+    "run_id": "run-74321fb610a840c383ee48af6f8fc2bb",
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "kernel_sha256": "a50c6ba5813537a5cd368c32ca2edb88f5ea3fd3819ac175fa93358469a8587d",
+    "network_disabled": true,
+    "disposable_media_copied": true,
+    "production_media_used": false,
+    "commands": 9,
+    "screenshots": 9,
+    "syntax_recovery": true,
+    "resource_limit_rejection": true,
+    "post_error_guest_recovery": true,
+    "exit_status_check": 23,
+    "heartbeat_records_before_after": [1, 68],
+    "qmp_shutdown_acknowledged": true,
+    "owned_qemu_pid": 33372,
+    "evidence_directory": "evidence/rx14/native-guest/run-74321fb610a840c383ee48af6f8fc2bb"
+  },
+  "root_artifact_preservation": {
+    "status": "PASS",
+    "protected_artifacts": 31,
+    "protected_untracked": 28,
+    "matched_rx14_start_manifest": 31,
+    "matched_rx12r1_current_state": 31,
+    "root_phase_file_absent": true,
+    "final_evidence": "evidence/rx14/protected-artifacts-final.json",
+    "historical_incident_preserved": true
+  },
+  "built_in_inventory": {
+    "file": "REXX_RX14_BUILTIN_INVENTORY.csv",
+    "total_rows": 75,
+    "classic_saa_candidates": 67,
+    "implemented_before_rx14": 27,
+    "implemented_after_rx14": 36,
+    "unimplemented_classic_candidates": 31,
+    "ibm_tsoe_non_saa_candidates": 6,
+    "regina_extension_set": "Not assessed",
+    "future_guidexos_functions": "None proposed; classic namespace unchanged."
+  },
+  "remaining_limits": [
+    "Regina was unavailable; independent differential comparison is NOT_RUN for all 170 portable corpus cases.",
+    "IBM DBCS-specific DATATYPE C/D options are not implemented because the runtime has no DBCS character model.",
+    "Symbol and alphabetic classification follow the current ASCII and byte-oriented lexical model; multibyte character classification is outside RX14.",
+    "RX14 numeric BIFs reject legacy embedding RexxValue double inputs rather than round-tripping through binary floating point; source REXX numeric values use decimal strings.",
+    "The preserved RX12R1 post-incident baseline is not a recovery of unavailable pre-RX12 bytes."
+  ],
+  "recommended_rx15_direction": "Implement portable byte/numeric conversion BIFs C2D, C2X, D2C, D2X, X2C, X2D, B2X, and X2B with byte-exact and numeric-boundary coverage.",
+  "qualification_evidence": {
+    "hosted_output_root": "build/rexx/rx14/hosted-b628d4ea86904cbdbab52821e2810b3d",
+    "sanitizers_summary": "evidence/rx14/sanitizers-summary.json",
+    "native_guest_transcript": "evidence/rx14/native-guest/run-74321fb610a840c383ee48af6f8fc2bb/console-transcript.txt",
+    "artifact_start_manifest": "evidence/rx14/protected-artifacts-start.json",
+    "artifact_final_comparison": "evidence/rx14/protected-artifacts-final.json"
+  }
+}

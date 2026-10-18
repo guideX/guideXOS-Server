@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13')]
+    [ValidateSet('RX12R1','RX13','RX14')]
     [string]$Phase = 'RX12R1',
     [string]$MakeExecutable = '',
     [string]$OutputEvidenceRoot = ''
@@ -12,7 +12,11 @@ if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
 }
 $kernelDir = Join-Path $rootDir 'kernel'
 $phaseRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())"
-$guardManifest = Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
+$guardManifest = if ($Phase -eq 'RX14') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx14\protected-artifacts-start.json'
+} else {
+    Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
+}
 Import-Module -Name (Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1') -Force
 
 if ([string]::IsNullOrWhiteSpace($MakeExecutable)) {
@@ -144,6 +148,23 @@ if ($elfHash -ne $elfHashSecond) { throw 'kernel.elf changed during its recorded
 $rexxObjectDirectory = Join-Path (Join-Path $buildDir 'obj') 'rexx'
 $rexxObjectCount = @(Get-ChildItem -LiteralPath $rexxObjectDirectory -Filter '*.o' -File).Count
 if ($rexxObjectCount -ne 9) { throw "Expected nine REXX C object files; found $rexxObjectCount in $rexxObjectDirectory." }
+$previousPhaseReference = $null
+if ($Phase -eq 'RX14') {
+    $previousEvidenceDirectory = Join-Path $rootDir 'docs\rexx\evidence\rx13\native-build'
+    $previousEvidenceFile = Get-ChildItem -LiteralPath $previousEvidenceDirectory `
+        -Filter 'native-link-evidence-*.json' -File |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($null -eq $previousEvidenceFile) {
+        throw "RX13 native-link evidence is required to record the RX14 successor comparison: $previousEvidenceDirectory"
+    }
+    $previousEvidence = Get-Content -Raw -LiteralPath $previousEvidenceFile.FullName | ConvertFrom-Json
+    $previousPhaseReference = [PSCustomObject]@{
+        phase = 'RX13'
+        evidence = $previousEvidenceFile.FullName
+        kernel_elf_sha256 = [string]$previousEvidence.kernel_elf_sha256
+        matches_previous_phase = $elfHash -eq [string]$previousEvidence.kernel_elf_sha256
+    }
+}
 $linkEvidence = [PSCustomObject]@{
     schema = 'guidexos.rexx.native-link-evidence.v1'
     built_at_utc = [DateTime]::UtcNow.ToString('o')
@@ -157,6 +178,7 @@ $linkEvidence = [PSCustomObject]@{
     freestanding_flags = @('-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-exceptions','-fno-rtti')
     historical_rx12_elf_sha256 = 'ce835ef3b77aa066db46f9cb9964b6bb0d7c589b4202a2b1965129854fd80dee'
     matches_historical_rx12 = $elfHash -eq 'ce835ef3b77aa066db46f9cb9964b6bb0d7c589b4202a2b1965129854fd80dee'
+    previous_phase_reference = $previousPhaseReference
     build_output_root = $runRoot
     build_succeeded = $true
 }
