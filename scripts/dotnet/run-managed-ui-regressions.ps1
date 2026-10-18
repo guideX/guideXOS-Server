@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = Join-Path $RepoRoot 'out\dotnet\c174-shared-managed-resize\host'
+    $EvidenceRoot = Join-Path $RepoRoot 'out\dotnet\c175-managed-notes-resize\host'
 }
 $EvidenceRoot = [System.IO.Path]::GetFullPath($EvidenceRoot)
 $allowedRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot 'out\dotnet')).TrimEnd('\', '/') + '\'
@@ -129,6 +129,10 @@ $c174WindowResizeDetailMatch = [regex]::Match($hostGate.output,
     '(?m)^C174-WINDOW-RESIZE-DETAIL firstFailedCase=(\d+)\s*$')
 $c174StressMatch = [regex]::Match($hostGate.output,
     '(?m)^C174-STRESS geometry=(\d+) alternating=(\d+) isolation=(\d+) rollback=(\d+) allocationBytes=(\d+) drift=(\d+) result=(PASS|FAIL)\s*$')
+$c175WindowResizeDetailMatch = [regex]::Match($hostGate.output,
+    '(?m)^C175-NOTES-RESIZE-DETAIL firstFailedCase=(\d+)\s*$')
+$c175StressMatch = [regex]::Match($hostGate.output,
+    '(?m)^C175-STRESS layout=(\d+) alternating=(\d+) failed=(\d+) rollback=(\d+) lifecycles=(\d+) allocationBytes=(-?\d+) drift=(\d+) result=(PASS|FAIL)\s*$')
 $c167Match = [regex]::Match($settingsGate.output,
     'C167 host UI/state cases=(\d+) stress=(\d+) result=(PASS|FAIL)')
 $c168Match = [regex]::Match($settingsGate.output,
@@ -139,19 +143,20 @@ $baselineSuiteNames = @(
     'C135-PopupMenuHost', 'C137-Wheel', 'C139-SharedViewport',
     'C140-ScrollView', 'C141-VerticalStack', 'C142-MarginsAlignment',
     'C145-Dialogs', 'C146-Settings', 'C146-StoreFormat',
+    'C170-ControlRendering', 'C170-Stress',
     'C169-ListBoxRendering', 'C169-Stress',
     'C171-WindowLayout', 'C171-Stress', 'C172-WindowResize', 'C172-Stress',
     'C173-ExplorerResize', 'C173-ExplorerStress',
-    'C174-SharedResize', 'C174-Stress')
+    'C174-SharedResize', 'C174-Stress',
+    'C175-NotesResize', 'C175-NotesResizeStress')
 $suiteNames = @($suites | ForEach-Object { $_.name })
 $hostSummaryValid = $summaryMatch.Success -and $summaryMatch.Groups[5].Value -eq 'PASS' -and
-    [int]$summaryMatch.Groups[1].Value -eq 24 -and $suites.Count -eq 24 -and
-    [int]$summaryMatch.Groups[2].Value -eq 24 -and
+    [int]$summaryMatch.Groups[1].Value -eq 26 -and $suites.Count -eq 26 -and
+    [int]$summaryMatch.Groups[2].Value -eq 26 -and
     [int]$summaryMatch.Groups[3].Value -eq 0 -and
-    [int]$summaryMatch.Groups[4].Value -eq 736 -and
+    [int]$summaryMatch.Groups[4].Value -eq 765 -and
     @($baselineSuiteNames | Where-Object { $suiteNames -notcontains $_ }).Count -eq 0 -and
-    @($suiteNames | Where-Object { $_ -notin $baselineSuiteNames -and
-        $_ -notin @('C170-ControlRendering', 'C170-Stress') }).Count -eq 0 -and
+    @($suiteNames | Where-Object { $_ -notin $baselineSuiteNames }).Count -eq 0 -and
     @($suites | Where-Object result -ne 'PASS').Count -eq 0
 $renderingSuite = @($suites | Where-Object name -eq 'C170-ControlRendering')
 $renderingSuitePass = $renderingSuite.Count -eq 1 -and
@@ -191,6 +196,12 @@ $sharedResizeSuitePass = $sharedResizeSuite.Count -eq 1 -and
 $sharedResizeStressSuitePass = $sharedResizeStressSuite.Count -eq 1 -and
     $sharedResizeStressSuite[0].cases -eq 4 -and
     $sharedResizeStressSuite[0].result -eq 'PASS'
+$notesResizeSuite = @($suites | Where-Object name -eq 'C175-NotesResize')
+$notesResizeStressSuite = @($suites | Where-Object name -eq 'C175-NotesResizeStress')
+$notesResizeSuitePass = $notesResizeSuite.Count -eq 1 -and
+    $notesResizeSuite[0].cases -eq 22 -and $notesResizeSuite[0].result -eq 'PASS'
+$notesResizeStressSuitePass = $notesResizeStressSuite.Count -eq 1 -and
+    $notesResizeStressSuite[0].cases -eq 7 -and $notesResizeStressSuite[0].result -eq 'PASS'
 $c135Pass = $c135Build.status -eq 'PASS'
 $c168Pass = $settingsGate.status -eq 'PASS' -and $c167Match.Success -and
     $c167Match.Groups[3].Value -eq 'PASS' -and $c168Match.Success -and
@@ -266,10 +277,22 @@ $c174StressPass = $c174StressMatch.Success -and
     [int]$c174StressMatch.Groups[5].Value -eq 0 -and
     [int]$c174StressMatch.Groups[6].Value -eq 0 -and
     $sharedResizeSuitePass -and $sharedResizeStressSuitePass
+$c175StressPass = $c175StressMatch.Success -and
+    $c175WindowResizeDetailMatch.Success -and
+    [int]$c175WindowResizeDetailMatch.Groups[1].Value -eq 0 -and
+    $c175StressMatch.Groups[8].Value -eq 'PASS' -and
+    [int]$c175StressMatch.Groups[1].Value -eq 1000 -and
+    [int]$c175StressMatch.Groups[2].Value -eq 500 -and
+    [int]$c175StressMatch.Groups[3].Value -eq 250 -and
+    [int]$c175StressMatch.Groups[4].Value -eq 250 -and
+    [int]$c175StressMatch.Groups[5].Value -eq 100 -and
+    [int]$c175StressMatch.Groups[6].Value -eq 0 -and
+    [int]$c175StressMatch.Groups[7].Value -eq 0 -and
+    $notesResizeSuitePass -and $notesResizeStressSuitePass
 $gatePassed = $c135Pass -and $hostGate.status -eq 'PASS' -and
     $hostSummaryValid -and $c168Pass -and $stressPass -and $c170StressPass -and
     $c171StressPass -and $c172StressPass -and $c173StressPass -and
-    $c174StressPass
+    $c174StressPass -and $c175StressPass
 
 $artifactRecords = @(
     foreach ($step in $script:steps) {
@@ -309,7 +332,7 @@ $manifestStatus = if ($gatePassed -and $integrityErrors.Count -eq 0) { 'PASS' } 
 
 $manifest = [ordered]@{
     schemaVersion = 1
-    phase = 'C174-shared-managed-resize-host-regression'
+    phase = 'C175-managed-notes-resize-host-regression'
     sourceHead = $sourceHead
     runId = $runId
     status = $manifestStatus
@@ -416,6 +439,18 @@ $manifest = [ordered]@{
         firstFailedCase = if ($c174WindowResizeDetailMatch.Success) { [int]$c174WindowResizeDetailMatch.Groups[1].Value } else { -1 }
         result = if ($c174StressPass) { 'PASS' } else { 'FAIL' }
     }
+    c175ManagedNotesResize = [ordered]@{
+        focusedCases = if ($notesResizeSuite.Count -eq 1) { $notesResizeSuite[0].cases } else { 0 }
+        layoutUpdates = if ($c175StressMatch.Success) { [int]$c175StressMatch.Groups[1].Value } else { 0 }
+        alternatingResizes = if ($c175StressMatch.Success) { [int]$c175StressMatch.Groups[2].Value } else { 0 }
+        rejectedGeometryRequests = if ($c175StressMatch.Success) { [int]$c175StressMatch.Groups[3].Value } else { 0 }
+        rollbackChecks = if ($c175StressMatch.Success) { [int]$c175StressMatch.Groups[4].Value } else { 0 }
+        lifecycleCycles = if ($c175StressMatch.Success) { [int]$c175StressMatch.Groups[5].Value } else { 0 }
+        hotPathAllocationBytes = if ($c175StressMatch.Success) { [int]$c175StressMatch.Groups[6].Value } else { -1 }
+        driftCount = if ($c175StressMatch.Success) { [int]$c175StressMatch.Groups[7].Value } else { -1 }
+        firstFailedCase = if ($c175WindowResizeDetailMatch.Success) { [int]$c175WindowResizeDetailMatch.Groups[1].Value } else { -1 }
+        result = if ($c175StressPass) { 'PASS' } else { 'FAIL' }
+    }
     c167 = if ($c167Match.Success) {
         [ordered]@{ focusedCases = [int]$c167Match.Groups[1].Value; stressIterations = [int]$c167Match.Groups[2].Value; result = $c167Match.Groups[3].Value }
     } else { [ordered]@{ result = 'FAIL' } }
@@ -437,13 +472,13 @@ $manifestJson = $manifest | ConvertTo-Json -Depth 12
 Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding utf8
 $parsedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
 $manifestValid = $parsedManifest.schemaVersion -eq 1 -and
-    $parsedManifest.phase -eq 'C174-shared-managed-resize-host-regression' -and
+    $parsedManifest.phase -eq 'C175-managed-notes-resize-host-regression' -and
     $parsedManifest.sourceHead -eq $sourceHead -and
     $parsedManifest.status -eq $manifestStatus -and
     $parsedManifest.artifactIntegrity.referencedFiles.Count -eq $artifactRecords.Count -and
     $parsedManifest.artifactIntegrity.result -eq 'PASS'
 if (-not $manifestValid) {
-    Write-Error "Generated C174 host manifest failed schema or reference validation: $manifestPath"
+    Write-Error "Generated C175 host manifest failed schema or reference validation: $manifestPath"
 }
 Write-Host "Managed UI Regression Gate result=$($manifest.status) suites=$($suites.Count) cases=$($summaryMatch.Groups[4].Value) manifest=$manifestPath"
 if (-not $gatePassed -or -not $manifestValid) { exit 1 }

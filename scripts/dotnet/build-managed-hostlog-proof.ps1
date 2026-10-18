@@ -33,6 +33,7 @@ param(
     [switch]$C166FileAssociationProof,
     [switch]$C166OrdinaryBuild,
     [switch]$C173ManagedFileExplorerResize,
+    [switch]$C175ManagedNotesResize,
     [switch]$C167DefaultAppsProof,
     [switch]$ProofControl,
     [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite", "C167ProofComposite")]
@@ -54,6 +55,9 @@ if ($C163FileExplorerProof) {
 if ($C164FileActivationProof) {
     $C163FileExplorerProof = $true
     $C163ManagedFileExplorer = $true
+}
+if ($C175ManagedNotesResize -and -not $C173ManagedFileExplorerResize) {
+    throw 'C175 Managed Notes resizing requires the shared C172/C173 compositor resize support.'
 }
 if ($C162ManagedTaskManagerClose) {
     $C161ManagedTaskManager = $true
@@ -535,6 +539,13 @@ try {
         }
         $publishProperties += "-p:HostLogProofC173IncludeFocusedTests=true"
     }
+    if ($C175ManagedNotesResize) {
+        if (-not $ProofControl -or -not $ProductionApplication -or
+            $managedProjectMode -notin @("C160Composite", "C167ProofComposite")) {
+            throw "C175 focused proof requires a proof-controlled production C160 or C167 composite."
+        }
+        $publishProperties += "-p:HostLogProofC175IncludeFocusedTests=true"
+    }
     if ($C164FileActivationProof) {
         $publishProperties += "-p:HostLogProofC164FileActivationProof=true"
     }
@@ -614,6 +625,9 @@ if ($C173ManagedFileExplorerResize -and $ProofControl) {
         if (-not $artifactText.Contains($requiredMarker)) {
             throw "C173 focused composite is missing managed proof-control marker '$requiredMarker'."
         }
+    }
+    if ($C175ManagedNotesResize -and -not $artifactText.Contains('C175-MANAGED-GEOMETRY')) {
+        throw "C175 focused composite is missing managed proof-control marker 'C175-MANAGED-GEOMETRY'."
     }
 }
 

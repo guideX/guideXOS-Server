@@ -541,7 +541,8 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
     private readonly GuideXosLabel _pathLabel =
-        new(20, 66, 480, string.Empty, GuideXosLabel.DefaultMaximumTextLength);
+        new(20, GuideXosManagedNotesLayoutC175.PathLabelY, 480,
+            string.Empty, GuideXosLabel.DefaultMaximumTextLength);
     private bool _c122ProofContext;
     private bool _c122LabelTestContext;
     private bool _c122LabelHostTestContext;
@@ -1959,6 +1960,31 @@ public sealed partial class ManagedNotes : GuideXosApplication
             "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
         if (result != GuideXosResult.Success || surface == null) return result;
         _window = surface.Handle;
+#if HOSTLOGPROOF_C175_MANAGED_NOTES_RESIZE
+        if (!s_c175ResizeTestsRun)
+        {
+            s_c175ResizeTestsRun = true;
+            bool focused = GuideXosManagedWindowResizeC175Tests.Run(host);
+            bool stress = GuideXosManagedWindowResizeC175Tests.RunStress(host);
+            if (!focused || !stress)
+            {
+                host.TryLog("C175-NOTES-RESIZE-TESTS result=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+#if GUIDEXOS_PROOF_CONTROL
+            // The proof-only fixtures create short-lived editor and history
+            // graphs. Collect them before the guest exercises other resident
+            // managed applications; the live Notes instance and its document
+            // remain rooted by the application dispatcher.
+            GC.Collect();
+            host.TryLog("C175-PROOF-FIXTURE-COLLECTION result=PASS"u8);
+#endif
+        }
+#endif
+        if (!TryInitializeC175Layout())
+        {
+            return GuideXosResult.InvalidArgument;
+        }
 #if !HOSTLOGPROOF_C167_UI_FOCUSED_BUILD && !HOSTLOGPROOF_C166_ORDINARY_BUILD
 #if HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS
         bool c156Modifiers = GuideXosInputTransportC156Tests.Run(host);
@@ -4485,7 +4511,11 @@ public sealed partial class ManagedNotes : GuideXosApplication
         if (input.Kind == GuideXosInputKind.PointerDown)
         {
             GuideXosTextAreaEditResult focus = _textArea.HandlePointerDown(
-                input.X, input.Y, 20, 72, 8, 18);
+                input.X, input.Y,
+                GuideXosManagedNotesLayoutC175.EditorX,
+                GuideXosManagedNotesLayoutC175.EditorY,
+                GuideXosManagedNotesLayoutC175.EditorCharacterWidth,
+                GuideXosManagedNotesLayoutC175.EditorLineHeight);
             if (focus == GuideXosTextAreaEditResult.Focused)
             {
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
@@ -4650,6 +4680,11 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 GuideXosResult.Success || surface == null)
         {
             return GuideXosResult.SurfaceCreationFailed;
+        }
+        if (GuideXosManagedWindowGeometryC172.TryDecodeAction(actionId,
+                out int outerWidth, out int outerHeight))
+        {
+            return HandleC175LiveGeometry(host, outerWidth, outerHeight);
         }
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
         if (_c152Enabled && TryHandleC152Action(
@@ -5050,7 +5085,8 @@ public sealed partial class ManagedNotes : GuideXosApplication
             path[^2] = (byte)'.';
             path[^1] = (byte)'.';
         }
-        return GuideXosText.Line(surface, 66, "Path: "u8, path);
+        return GuideXosText.Line(surface,
+            GuideXosManagedNotesLayoutC175.PathLabelY, "Path: "u8, path);
     }
 
     private static void LogC151Wheel(
@@ -5643,7 +5679,22 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (!SyncDocumentUsage()) return false;
 #endif
-        bool rendered = surface.TryFillRect(10, 10, 560, 300, 0x007A5A9Au) ==
+        Span<byte> pathBuffer = stackalloc byte[512];
+        Span<byte> statusBuffer = stackalloc byte[128];
+        int pathByteCount = Encoding.UTF8.GetByteCount(_currentPath.AsSpan());
+        int statusByteCount = Encoding.UTF8.GetByteCount(_status.AsSpan());
+        if (pathByteCount > pathBuffer.Length ||
+            statusByteCount > statusBuffer.Length)
+        {
+            return false;
+        }
+        pathBuffer = pathBuffer[..Encoding.UTF8.GetBytes(
+            _currentPath.AsSpan(), pathBuffer)];
+        statusBuffer = statusBuffer[..Encoding.UTF8.GetBytes(
+            _status.AsSpan(), statusBuffer)];
+        bool rendered = surface.TryFillRect(10, 10,
+                Math.Max(0, _c175Layout.ClientWidth - 20),
+                Math.Max(0, _c175Layout.ClientHeight - 20), 0x007A5A9Au) ==
                 GuideXosResult.Success &&
             GuideXosText.Line(surface, 24, "Managed Notes | "u8, "multiline text area"u8) &&
             GuideXosText.CountLine(surface, 48, "Launches: "u8, launchCount) &&
@@ -5652,19 +5703,26 @@ public sealed partial class ManagedNotes : GuideXosApplication
             (!_c122ProofContext || RenderPathLabel(surface)) &&
 #else
             (!_c121ProofContext || !_showPathCheckBox.Checked ||
-                GuideXosText.Line(surface, 66, "Path: "u8,
-                    Encoding.UTF8.GetBytes(_currentPath))) &&
+                GuideXosText.Line(surface,
+                    GuideXosManagedNotesLayoutC175.PathLabelY, "Path: "u8,
+                    pathBuffer)) &&
 #endif
 #else
-            GuideXosText.Line(surface, 66, "Path: "u8, Encoding.UTF8.GetBytes(_currentPath)) &&
+            GuideXosText.Line(surface,
+                GuideXosManagedNotesLayoutC175.PathLabelY, "Path: "u8,
+                pathBuffer) &&
 #endif
-            _textArea.Render(surface, 20, 72, 18) == GuideXosResult.Success &&
+            _textArea.Render(surface,
+                GuideXosManagedNotesLayoutC175.EditorX,
+                GuideXosManagedNotesLayoutC175.EditorY,
+                GuideXosManagedNotesLayoutC175.EditorLineHeight) ==
+                GuideXosResult.Success &&
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
             (!(_c137ProofContext
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
                 || _c147RuntimeConsumerContext
 #endif
-            ) || _c137ListBox.Render(surface, 300, 72, 18) ==
+            ) || _c137ListBox.Render(surface, _c175Layout.ListX, 72, 18) ==
                 GuideXosResult.Success) &&
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
             (!_c138ProofContext || _c138TextScrollBar.Render(surface) ==
@@ -5675,18 +5733,20 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
             (!_c131ProofContext || _showStatusVisible
-                ? GuideXosText.Line(surface, 150, "Status: "u8,
-                    Encoding.UTF8.GetBytes(_status))
+                ? GuideXosText.Line(surface, _c175Layout.StatusY, "Status: "u8,
+                    statusBuffer)
                 : true) &&
 #else
-            GuideXosText.Line(surface, 150, "Status: "u8,
-                Encoding.UTF8.GetBytes(_status)) &&
+            GuideXosText.Line(surface, _c175Layout.StatusY, "Status: "u8,
+                statusBuffer) &&
 #endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
-            GuideXosText.Line(surface, 174, "Document usage: "u8, ReadOnlySpan<byte>.Empty) &&
+            GuideXosText.Line(surface, _c175Layout.EditorInfoY,
+                "Document usage: "u8, ReadOnlySpan<byte>.Empty) &&
             _documentUsage.Render(surface) == GuideXosResult.Success &&
 #else
-            GuideXosText.Line(surface, 174, "Editor: "u8, "bounded ASCII; [] selection; | caret"u8) &&
+            GuideXosText.Line(surface, _c175Layout.EditorInfoY,
+                "Editor: "u8, "bounded ASCII; [] selection; | caret"u8) &&
 #endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
             RenderC149KeyboardTips(surface) &&
@@ -5752,7 +5812,7 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
             (!_c135ProofContext || surface.TryAddButton(
-                420, 250, 100, 28,
+                420, _c175Layout.OptionsY, 100, 28,
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
                 _c151ProofContext ? "File"u8 :
 #endif
@@ -5762,23 +5822,23 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 GuideXosResult.Success) &&
 #endif
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
-            surface.TryAddButton(430, 280, 90, 28, "Settings"u8,
+            surface.TryAddButton(430, _c175Layout.SettingsY, 90, 28, "Settings"u8,
                 C150SettingsActionId, out _) == GuideXosResult.Success &&
 #endif
 #endif
 #else
-            surface.TryAddButton(20, 220, 90, 28, "Open"u8, 20u, out _) == GuideXosResult.Success &&
-            surface.TryAddButton(120, 220, 90, 28, "Save"u8, 22u, out _) == GuideXosResult.Success &&
-            surface.TryAddButton(220, 220, 100, 28, "Save As"u8, 21u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(20, _c175Layout.MainButtonsY, 90, 28, "Open"u8, 20u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(120, _c175Layout.MainButtonsY, 90, 28, "Save"u8, 22u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(220, _c175Layout.MainButtonsY, 100, 28, "Save As"u8, 21u, out _) == GuideXosResult.Success &&
 #endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             (_c121ProofContext
-                ? surface.TryAddButton(468, 220, 90, 28, "Reload"u8,
+                ? surface.TryAddButton(468, _c175Layout.MainButtonsY, 90, 28, "Reload"u8,
                     3u, out _)
-                : surface.TryAddButton(330, 220, 90, 28, "Reload"u8,
+                : surface.TryAddButton(330, _c175Layout.MainButtonsY, 90, 28, "Reload"u8,
                     3u, out _)) == GuideXosResult.Success;
 #else
-            surface.TryAddButton(330, 220, 90, 28, "Reload"u8, 3u, out _) == GuideXosResult.Success;
+            surface.TryAddButton(330, _c175Layout.MainButtonsY, 90, 28, "Reload"u8, 3u, out _) == GuideXosResult.Success;
 #endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
         if (rendered && _c151ProofContext && _c151OpenFileDialog.IsOpen)
@@ -5812,9 +5872,12 @@ public sealed partial class ManagedNotes : GuideXosApplication
     {
         bool showTips = GuideXosRuntimeSettings.Current.ShowKeyboardTips;
         ReadOnlySpan<byte> text = KeyboardTipsText(showTips);
-        if (surface.TryFillRect(18, 196, 520, 20, 0x007A5A9Au) !=
+        if (surface.TryFillRect(18, _c175Layout.KeyboardTipsY,
+                Math.Max(0, _c175Layout.ClientWidth - 36), 20,
+                0x007A5A9Au) !=
                 GuideXosResult.Success ||
-            surface.TrySetText(20, 198, text) != GuideXosResult.Success)
+            surface.TrySetText(20, _c175Layout.KeyboardTipsY + 2, text) !=
+                GuideXosResult.Success)
             return false;
         _c149LastRenderedKeyboardTips = showTips;
         _c149LastRenderedKeyboardTipLength = text.Length;

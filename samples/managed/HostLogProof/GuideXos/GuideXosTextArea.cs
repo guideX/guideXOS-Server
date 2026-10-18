@@ -33,8 +33,8 @@ public sealed class GuideXosTextArea
 
     private readonly char[] _buffer;
     private readonly int _maximumLines;
-    private readonly int _maximumRenderableColumns;
-    private readonly int _visibleLineCount;
+    private int _maximumRenderableColumns;
+    private int _visibleLineCount;
     private readonly GuideXosVerticalViewport _viewport;
     private readonly GuideXosTextHistory _history;
     private int _length;
@@ -392,6 +392,28 @@ public sealed class GuideXosTextArea
     public bool SetFirstVisibleLine(int line)
     {
         return _viewport.SetOffset(line);
+    }
+
+    /// <summary>
+    /// Updates the visible editor rectangle without changing document, caret,
+    /// selection, focus, or edit history. The existing non-wrapping renderer
+    /// clips each logical line to the requested column count.
+    /// </summary>
+    public bool TrySetViewportDimensions(int maximumRenderableColumns,
+        int visibleLineCount)
+    {
+        if (maximumRenderableColumns < 1 ||
+            maximumRenderableColumns > MaximumSupportedRenderableColumns ||
+            visibleLineCount < 1 || visibleLineCount > MaximumVisibleLineCount)
+        {
+            return false;
+        }
+
+        _maximumRenderableColumns = maximumRenderableColumns;
+        _visibleLineCount = visibleLineCount;
+        _viewport.VisibleExtent = visibleLineCount;
+        EnsureCaretVisible();
+        return true;
     }
 
     /// <summary>

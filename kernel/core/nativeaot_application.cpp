@@ -980,7 +980,10 @@ public:
             isManagedSettingsCenterTitle(m_window->title);
         const bool fileExplorerWindow = m_selector == 8u && m_window &&
             isManagedFileExplorerTitle(m_window->title);
-        if (!m_window || (!settingsWindow && !fileExplorerWindow)) {
+        const bool managedNotesWindow = m_selector == 4u && m_window &&
+            isManagedNotesTitle(m_window->title);
+        if (!m_window || (!settingsWindow && !fileExplorerWindow &&
+                !managedNotesWindow)) {
             return true;
         }
         if (newWidth <= 0 || newHeight <= 0 ||
@@ -997,9 +1000,13 @@ public:
         const int32_t result = invokeManagedAction(m_selector, actionId);
         g_c116InputDispatchActive = priorInputDispatch;
 #if defined(GUIDEXOS_PROOF_CONTROL)
-        serial::puts(settingsWindow
-            ? "[C172-NATIVE-GEOMETRY] app=ManagedSettings instance="
-            : "[C173-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.fileexplorer instance=");
+        if (settingsWindow) {
+            serial::puts("[C172-NATIVE-GEOMETRY] app=ManagedSettings instance=");
+        } else if (fileExplorerWindow) {
+            serial::puts("[C173-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.fileexplorer instance=");
+        } else {
+            serial::puts("[C175-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.notes instance=");
+        }
         serial::put_hex64(m_snapshotInstanceId);
         serial::puts(" generation=");
         serial::put_hex32(m_surfaceGeneration);
@@ -1385,7 +1392,10 @@ public:
             }
             const app::Widget& widget = m_window->widgets[binding.widgetId];
             return widget.type == app::WidgetType::Button &&
-                widget.x == 430 && widget.y == 280 &&
+                widget.x == 430 && widget.x + widget.w <= m_window->w &&
+                widget.y >= 0 &&
+                widget.y + widget.h <=
+                    m_window->h - compositor::TITLEBAR_HEIGHT &&
                 widget.w == 90 && widget.h == 28 &&
                 widget.visible && widget.enabled;
         }
@@ -1481,6 +1491,15 @@ private:
 
     static bool isManagedFileExplorerTitle(const char* title) {
         static const char expected[] = "Managed File Explorer";
+        if (!title) return false;
+        for (size_t index = 0; index < sizeof(expected); ++index) {
+            if (title[index] != expected[index]) return false;
+        }
+        return true;
+    }
+
+    static bool isManagedNotesTitle(const char* title) {
+        static const char expected[] = "Managed Notes";
         if (!title) return false;
         for (size_t index = 0; index < sizeof(expected); ++index) {
             if (title[index] != expected[index]) return false;

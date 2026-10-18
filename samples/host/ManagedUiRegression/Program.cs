@@ -113,5 +113,15 @@ bool c174StressPassed = RunSuite("C174-Stress",
 allPassed &= c174StressPassed;
 Console.WriteLine($"C174-STRESS geometry={GuideXosManagedWindowResizeC174Tests.StressGeometryTransitions} alternating={GuideXosManagedWindowResizeC174Tests.StressAlternatingCycles} isolation={GuideXosManagedWindowResizeC174Tests.StressIsolationTransitions} rollback={GuideXosManagedWindowResizeC174Tests.StressRollbackCount} allocationBytes={GuideXosManagedWindowResizeC174Tests.StressAllocationBytes} drift={GuideXosManagedWindowResizeC174Tests.StressDriftCount} result={(c174StressPassed ? "PASS" : "FAIL")}");
 
+allPassed &= RunSuite("C175-NotesResize",
+    GuideXosManagedWindowResizeC175Tests.CaseCount,
+    () => GuideXosManagedWindowResizeC175Tests.Run(null));
+Console.WriteLine($"C175-NOTES-RESIZE-DETAIL firstFailedCase={GuideXosManagedWindowResizeC175Tests.FirstFailedCase}");
+bool c175StressPassed = RunSuite("C175-NotesResizeStress",
+    GuideXosManagedWindowResizeC175Tests.StressCaseCount,
+    () => GuideXosManagedWindowResizeC175Tests.RunStress(null));
+allPassed &= c175StressPassed;
+Console.WriteLine($"C175-STRESS layout={GuideXosManagedWindowResizeC175Tests.StressLayoutUpdates} alternating={GuideXosManagedWindowResizeC175Tests.StressAlternatingResizes} failed={GuideXosManagedWindowResizeC175Tests.StressFailedGeometryRequests} rollback={GuideXosManagedWindowResizeC175Tests.StressRollbackCount} lifecycles={GuideXosManagedWindowResizeC175Tests.StressLifecycleCount} allocationBytes={GuideXosManagedWindowResizeC175Tests.StressAllocationBytes} drift={GuideXosManagedWindowResizeC175Tests.StressDriftCount} result={(c175StressPassed ? "PASS" : "FAIL")}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

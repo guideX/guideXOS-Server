@@ -12,9 +12,12 @@ param(
     [switch]$C171ManagedWindowLayout,
     [switch]$C172LiveWindowResize,
     [switch]$C173ManagedFileExplorerResize,
+    [switch]$C175ManagedNotesResize,
     [switch]$C167SettingsDefaultApps,
     [switch]$ReuseC167ProofKernel,
     [switch]$ReuseC167ProofComposite,
+    [ValidateSet('tcg,thread=single','whpx')]
+    [string]$QemuAccelerator = 'tcg,thread=single',
     [switch]$RunC169ManagedUiOrdinaryAcceptance,
     [switch]$HostTestsOnly
 )
@@ -33,6 +36,10 @@ $script:c169ManagedUiOrdinaryAcceptance = [bool]$RunC169ManagedUiOrdinaryAccepta
 $script:c170ControlRendering = [bool]$C170ControlRendering
 $script:c172LiveWindowResize = [bool]$C172LiveWindowResize
 $script:c173ManagedFileExplorerResize = [bool]$C173ManagedFileExplorerResize
+$script:c175ManagedNotesResize = [bool]$C175ManagedNotesResize
+$script:c173ManagedExplorerHeight = 390
+$script:qemuAccelerator = $QemuAccelerator
+$script:c175FocusedEvidence = [bool]$RunC167SettingsProofBoots
 $script:c171ManagedWindowLayout = [bool]($C171ManagedWindowLayout -or $C172LiveWindowResize)
 $script:c171ProofGeometryDiagnostics = [bool]$RunC167SettingsProofBoots
 $script:c171SettingsWindowWidth = 560
@@ -86,6 +93,9 @@ if ($C173ManagedFileExplorerResize -and $RunOrdinaryAcceptance -and
     -not $RunC169ManagedUiOrdinaryAcceptance) {
     throw 'C173 production acceptance requires the C169 three-boot ordinary managed UI lane.'
 }
+if ($C175ManagedNotesResize -and -not $C173ManagedFileExplorerResize) {
+    throw 'C175 Managed Notes resizing extends the accepted shared C172/C173 lane and requires -C173ManagedFileExplorerResize.'
+}
 if ($ReuseC167ProofKernel -and -not $RunC167SettingsProofBoots) {
     throw 'ReuseC167ProofKernel applies only to the real Settings UI proof lane.'
 }
@@ -102,7 +112,9 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $EvidenceRoot = if ($HostTestsOnly) {
         Join-Path $RepoRoot 'out\dotnet\c166r9-host-validation'
     } elseif ($C172LiveWindowResize) {
-        if ($C173ManagedFileExplorerResize) {
+        if ($C175ManagedNotesResize) {
+            Join-Path $RepoRoot 'out\dotnet\c175-managed-notes-resize'
+        } elseif ($C173ManagedFileExplorerResize) {
             Join-Path $RepoRoot 'out\dotnet\c173-file-explorer-resize'
         } else { Join-Path $RepoRoot 'out\dotnet\c172-live-window-resize' }
     } elseif ($C171ManagedWindowLayout) {
@@ -613,7 +625,22 @@ function Write-C172HostedTestManifest([string]$EvidenceRoot,[string]$HostManifes
             $hostManifest.c174SharedManagedResize.focusedCases -eq 22 -and
             $hostManifest.c174SharedManagedResize.hotPathAllocationBytes -eq 0 -and
             $hostManifest.c174SharedManagedResize.driftCount -eq 0
-        ($legacyC173Host -or $c174Host) -and
+        $c175Host = $hostManifest.phase -eq
+            'C175-managed-notes-resize-host-regression' -and
+            $hostManifest.focusedSummary.suites -eq 26 -and
+            $hostManifest.focusedSummary.cases -eq 765 -and
+            $hostManifest.c174SharedManagedResize.focusedCases -eq 22 -and
+            $hostManifest.c174SharedManagedResize.hotPathAllocationBytes -eq 0 -and
+            $hostManifest.c174SharedManagedResize.driftCount -eq 0 -and
+            $hostManifest.c175ManagedNotesResize.focusedCases -eq 22 -and
+            $hostManifest.c175ManagedNotesResize.layoutUpdates -eq 1000 -and
+            $hostManifest.c175ManagedNotesResize.alternatingResizes -eq 500 -and
+            $hostManifest.c175ManagedNotesResize.rejectedGeometryRequests -eq 250 -and
+            $hostManifest.c175ManagedNotesResize.rollbackChecks -eq 250 -and
+            $hostManifest.c175ManagedNotesResize.lifecycleCycles -eq 100 -and
+            $hostManifest.c175ManagedNotesResize.hotPathAllocationBytes -eq 0 -and
+            $hostManifest.c175ManagedNotesResize.driftCount -eq 0
+        ($legacyC173Host -or $c174Host -or $c175Host) -and
             $hostManifest.c173ManagedFileExplorerResize.focusedCases -eq 47
     } else {
         $hostManifest.phase -eq 'C172-managed-window-resize-host-regression' -and
@@ -1361,15 +1388,44 @@ function Write-C170OrdinaryEvidenceManifest([string]$EvidenceRoot,[string]$Sourc
     if ($productionArtifacts.Count -ne 3) {
         throw 'C170 ordinary manifest requires composite, kernel, and ramdisk build hashes.'
     }
-    $installedPaths = @(
-        (Join-Path $RepoRoot 'kernel\build\amd64\bin\kernel.elf'),
-        (Join-Path $RepoRoot 'ESP\kernel.elf'),
-        (Join-Path $RepoRoot 'ESP\ramdisk.img'))
-    $installedHashes = @(
-        $source.cleanProduction.kernelCanonicalSha256,
-        $source.cleanProduction.kernelEspSha256,
-        $source.cleanProduction.ramdiskEspSha256)
-    $installedNames = @('installed-canonical-kernel','installed-esp-kernel','installed-esp-ramdisk')
+    $isolatedProduction = ([string]$source.productionInstallation -match 'isolated media')
+    $productionMediaMode = 'checkout-installed'
+    $protectedRepositoryMedia = @()
+    if ($isolatedProduction) {
+        # C175 ordinary acceptance boots a clean candidate from per-boot copies.
+        # The protected checkout ESP intentionally retains its pre-existing
+        # ramdisk, so validate the candidate and the media actually booted.
+        $firstBootRoot = Split-Path -Parent (Split-Path -Parent $source.ordinaryBoots[0].serialPath)
+        $installedPaths = @(
+            $productionArtifacts[1].path,
+            (Join-Path $firstBootRoot 'ESP\kernel.elf'),
+            (Join-Path $firstBootRoot 'ESP\ramdisk.img'))
+        $installedHashes = @(
+            $productionArtifacts[1].sha256,
+            $productionArtifacts[1].sha256,
+            $productionArtifacts[2].sha256)
+        $installedNames = @('isolated-canonical-kernel-candidate','boot-1-esp-kernel','boot-1-esp-ramdisk')
+        $productionMediaMode = 'proof-disabled-isolated-per-boot-media'
+        $protectedRepositoryMedia = @(
+            (New-C170EvidenceFileRecord 'protected-repository-canonical-kernel' `
+                (Join-Path $RepoRoot 'kernel\build\amd64\bin\kernel.elf') `
+                $source.cleanProduction.kernelCanonicalSha256),
+            (New-C170EvidenceFileRecord 'protected-repository-esp-kernel' `
+                (Join-Path $RepoRoot 'ESP\kernel.elf') $source.cleanProduction.kernelEspSha256),
+            (New-C170EvidenceFileRecord 'protected-repository-esp-ramdisk' `
+                (Join-Path $RepoRoot 'ESP\ramdisk.img') $source.cleanProduction.ramdiskEspSha256))
+        foreach ($record in $protectedRepositoryMedia) { $files.Add($record) }
+    } else {
+        $installedPaths = @(
+            (Join-Path $RepoRoot 'kernel\build\amd64\bin\kernel.elf'),
+            (Join-Path $RepoRoot 'ESP\kernel.elf'),
+            (Join-Path $RepoRoot 'ESP\ramdisk.img'))
+        $installedHashes = @(
+            $source.cleanProduction.kernelCanonicalSha256,
+            $source.cleanProduction.kernelEspSha256,
+            $source.cleanProduction.ramdiskEspSha256)
+        $installedNames = @('installed-canonical-kernel','installed-esp-kernel','installed-esp-ramdisk')
+    }
     $installed = [System.Collections.Generic.List[object]]::new()
     for ($index = 0; $index -lt $installedPaths.Count; $index++) {
         $record = New-C170EvidenceFileRecord $installedNames[$index] `
@@ -1400,6 +1456,21 @@ function Write-C170OrdinaryEvidenceManifest([string]$EvidenceRoot,[string]$Sourc
         }
         $files.Add($serial)
         $files.Add($qmpRecord)
+        $productionMedia = $null
+        if ($isolatedProduction) {
+            $bootRoot = Split-Path -Parent (Split-Path -Parent $boot.serialPath)
+            $bootKernel = New-C170EvidenceFileRecord "$($boot.stage)-booted-kernel" `
+                (Join-Path $bootRoot 'ESP\kernel.elf') $productionArtifacts[1].sha256
+            $bootRamdisk = New-C170EvidenceFileRecord "$($boot.stage)-booted-ramdisk" `
+                (Join-Path $bootRoot 'ESP\ramdisk.img') $productionArtifacts[2].sha256
+            $files.Add($bootKernel)
+            $files.Add($bootRamdisk)
+            $productionMedia = [ordered]@{
+                mode = $productionMediaMode
+                kernel = [ordered]@{path=$bootKernel.path;sha256=$bootKernel.sha256}
+                ramdisk = [ordered]@{path=$bootRamdisk.path;sha256=$bootRamdisk.sha256}
+            }
+        }
         $references = [System.Collections.Generic.List[object]]::new()
         Get-C170ScreenshotReferences $boot.productionIntegration $references
         if ($references.Count -eq 0) { throw "C170 ordinary boot $($boot.stage) has no screenshot references." }
@@ -1421,6 +1492,7 @@ function Write-C170OrdinaryEvidenceManifest([string]$EvidenceRoot,[string]$Sourc
             }
             serial = [ordered]@{path=$serial.path;sha256=$serial.sha256}
             qmpInput = [ordered]@{path=$qmpRecord.path;sha256=$qmpRecord.sha256}
+            productionMedia = $productionMedia
             completionMarkers = @('C166-ORDINARY-READY app=ManagedNotes render=PASS')
             screenshots = @($screenshots.ToArray())
         })
@@ -1437,9 +1509,11 @@ function Write-C170OrdinaryEvidenceManifest([string]$EvidenceRoot,[string]$Sourc
             composite = $productionArtifacts[0]
             kernel = $productionArtifacts[1]
             ramdisk = $productionArtifacts[2]
+            mediaMode = $productionMediaMode
             installedCanonicalKernel = $installed[0]
             installedEspKernel = $installed[1]
             installedEspRamdisk = $installed[2]
+            protectedRepositoryMedia = @($protectedRepositoryMedia)
             proof1Excluded = $true
         }
         finalAssociation = $source.finalAssociation
@@ -1556,7 +1630,7 @@ function Invoke-ProofQemuBoot([string]$Stage, [string]$Ramdisk,
         }
     }
     $qmpPort = Get-FreeQmpPort
-    $arguments = @('-accel','tcg,thread=single','-machine','pc','-smp','1',
+    $arguments = @('-accel',$script:qemuAccelerator,'-machine','pc','-smp','1',
         '-drive',('if=pflash,format=raw,readonly=on,file="' + $OvmfPath + '"'),
         '-drive',$(if ($PreparedFatDisk) {
             'file="' + $EspPath + '",format=raw,if=ide,index=0'
@@ -1830,6 +1904,11 @@ function Initialize-C166GuestPointer([object]$Boot) {
     $script:c171SettingsWindowWidth = 560
     $script:c171SettingsWindowHeight = 340
     $script:c172OrdinaryResizeSequence = 0
+    $script:c175NotesOriginX = [Math]::Max(0,
+        [int](($script:c166ScreenWidth - 600) / 2))
+    $script:c175NotesOriginY = [Math]::Max(0,
+        [int](($script:c166ScreenHeight - 360) / 2))
+    $script:c175OriginCaptureSequence = 0
 }
 
 function Move-C166Pointer([int]$X, [int]$Y, [object]$Boot) {
@@ -1941,7 +2020,10 @@ function Open-C166AllProgramsItem([int]$Index, [object]$Boot) {
 }
 
 function Launch-C166ManagedFileExplorer([object]$Boot) {
-    $start = (Get-C166Serial $Boot.serialPath).Length
+    $before = Get-C166Serial $Boot.serialPath
+    $start = $before.Length
+    $priorIdentity = $null
+    try { $priorIdentity = Get-C173ManagedExplorerIdentity $before } catch { }
     Open-C166AllProgramsItem 15 $Boot
     Start-Sleep -Milliseconds 500
     $Boot.managedExplorerLaunchScreenshot = Join-Path (Split-Path $Boot.serialPath) 'managed-explorer-launch-attempt.ppm'
@@ -1950,11 +2032,26 @@ function Launch-C166ManagedFileExplorer([object]$Boot) {
     $Boot.managedExplorerAfterLaunchScreenshot = Join-Path (Split-Path $Boot.serialPath) 'managed-explorer-after-launch.ppm'
     $Boot.managedExplorerAfterLaunchScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.managedExplorerAfterLaunchScreenshot
     try {
-        [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C163-EXPLORER id=com\.guidexos\.apps\.managed\.fileexplorer sel=8 path=/system/apps n=\d+ cap=64 ctl=6 abi=3/120 ro=1 result=PASS' $start 60)
+        [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C163-EXPLORER id=com\.guidexos\.apps\.managed\.fileexplorer sel=8 path=/system/apps n=\d+ cap=64 ctl=6 abi=3/120 ro=1 result=PASS' $start 40)
+        $script:c173ManagedExplorerHeight = 390
     } catch {
-        $Boot.managedExplorerLaunchTimeoutScreenshot = Join-Path (Split-Path $Boot.serialPath) 'managed-explorer-launch-timeout.ppm'
-        $Boot.managedExplorerLaunchTimeoutScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.managedExplorerLaunchTimeoutScreenshot
-        throw
+        $focusPattern = '^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.fileexplorer source=3 instance=[0-9A-Fa-f]{16} selector=00000008 existing=true result=PASS\r?$'
+        try {
+            [void](Wait-C166Serial $Boot.serialPath $focusPattern $start 10)
+            $after = Get-C166Serial $Boot.serialPath
+            $identity = Get-C173ManagedExplorerIdentity $after
+            $state = Get-C173ManagedExplorerState $after
+            if (-not $state -or ($priorIdentity -and
+                ($identity.window -ne $priorIdentity.window -or
+                    $identity.generation -ne $priorIdentity.generation))) {
+                throw 'Existing Managed File Explorer focus did not preserve a readable resident surface state.'
+            }
+        } catch {
+            $Boot.managedExplorerLaunchTimeoutScreenshot = Join-Path (Split-Path $Boot.serialPath) 'managed-explorer-launch-timeout.ppm'
+            $Boot.managedExplorerLaunchTimeoutScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.managedExplorerLaunchTimeoutScreenshot
+            throw
+        }
+        $script:c173ManagedExplorerHeight = 390
     }
 }
 
@@ -1969,8 +2066,14 @@ function Close-C166ManagedNotesStartupWindow([object]$Boot) {
     # The proof guest starts with a clean Managed Notes window. Close it through
     # its normal title-bar control so document activation can reuse its managed
     # surface slot after File Explorer is opened.
-    $originX = [Math]::Max(0,[int](($script:c166ScreenWidth-600)/2))
-    $originY = [Math]::Max(0,[int](($script:c166ScreenHeight-360)/2))
+    $originX = if ($script:c175ManagedNotesResize -and
+        $null -ne $script:c175NotesOriginX) { $script:c175NotesOriginX } else {
+        [Math]::Max(0,[int](($script:c166ScreenWidth-600)/2))
+    }
+    $originY = if ($script:c175ManagedNotesResize -and
+        $null -ne $script:c175NotesOriginY) { $script:c175NotesOriginY } else {
+        [Math]::Max(0,[int](($script:c166ScreenHeight-360)/2))
+    }
     Click-C166Screen ($originX+586) ($originY+12) $Boot
     Start-Sleep -Milliseconds 250
     [void](Wait-C166Serial $Boot.serialPath `
@@ -1986,7 +2089,7 @@ function Click-C166ManagedExplorerRow([int]$Row, [object]$Boot) {
 function Click-C166ManagedExplorerButton([string]$Name, [object]$Boot) {
     $origin = Get-C166ManagedExplorerOrigin
     $x = switch ($Name) {'Up' {66} 'Open' {170} 'Refresh' {284} 'Close' {398} default {throw "Unknown Managed File Explorer button '$Name'."}}
-    Click-C166Screen ($origin.X+$x) ($origin.Y+24+340) $Boot
+    Click-C166Screen ($origin.X+$x) ($origin.Y+$script:c173ManagedExplorerHeight-26) $Boot
 }
 
 function Select-C166ManagedExplorerEntry([string]$Path, [string]$Name,
@@ -2007,6 +2110,29 @@ function Select-C166ManagedExplorerEntry([string]$Path, [string]$Name,
 }
 
 function Navigate-C166ManagedExplorerToHello([object]$Boot) {
+    $state = Get-C173ManagedExplorerState (Get-C166Serial $Boot.serialPath)
+    if (-not $state) { throw 'Managed File Explorer has no readable state before navigation.' }
+    if ($state.path -eq '/system/apps/C164' -and
+        $state.selection -eq 'hello.txt' -and $state.type -eq 'File' -and
+        $state.size -eq '15' -and $state.status -eq 'File selected') {
+        # A Start Menu activation can focus an existing Explorer window that is
+        # already on the fixture. Preserve that live selection instead of
+        # navigating away and trying to reconstruct it with pointer clicks.
+        # In the audited C164 directory order, hello.txt is the third row.
+        return [Math]::Max(0, 2-$state.view)
+    }
+    if ($state.path -ne '/system/apps') {
+        if (-not $state.path.StartsWith('/system/apps/', [StringComparison]::Ordinal)) {
+            throw "Managed File Explorer cannot navigate to the C164 fixture from '$($state.path)'."
+        }
+        while ($state.path -ne '/system/apps') {
+            $upStart = (Get-C166Serial $Boot.serialPath).Length
+            Click-C166ManagedExplorerButton 'Up' $Boot
+            [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=\d+ path=/system/apps(?:/[^ ]+)? ' $upStart 15)
+            $state = Get-C173ManagedExplorerState (Get-C166Serial $Boot.serialPath)
+            if (-not $state) { throw 'Managed File Explorer lost its state while returning to /system/apps.' }
+        }
+    }
     [void](Select-C166ManagedExplorerEntry '/system/apps' 'C164' 'Directory' $Boot)
     $pathStart = (Get-C166Serial $Boot.serialPath).Length
     Click-C166ManagedExplorerButton 'Open' $Boot
@@ -2067,6 +2193,362 @@ function Get-C173ManagedExplorerIdentity([string]$Serial) {
     return [pscustomobject]@{generation=$match.Groups['generation'].Value.ToUpperInvariant();window=$match.Groups['window'].Value.ToUpperInvariant();createCount=$matches.Count}
 }
 
+function Get-C175ManagedNotesIdentity([string]$Serial) {
+    $pattern = '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=(?<generation>[0-9A-Fa-f]{8}) window=(?<window>[0-9A-Fa-f]{8}) result=PASS\r?$'
+    $matches = [regex]::Matches($Serial,$pattern)
+    if ($matches.Count -eq 0) { throw 'Managed Notes has no C150 surface identity marker.' }
+    $match = $matches[$matches.Count-1]
+    return [pscustomobject]@{
+        generation=$match.Groups['generation'].Value.ToUpperInvariant()
+        window=$match.Groups['window'].Value.ToUpperInvariant()
+        createCount=$matches.Count
+    }
+}
+
+function Focus-C175ExistingManagedNotes([object]$Boot) {
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    Open-C166AllProgramsItem 12 $Boot
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9A-Fa-f]{16} selector=00000004 existing=true result=PASS\r?$' `
+        $start 30)
+}
+
+function Ensure-C175NotesResizeOrigin([object]$Boot) {
+    $script:c175OriginCaptureSequence++
+    $originScreenshot = Join-Path (Split-Path $Boot.serialPath) `
+        ("c175-notes-origin-{0:D2}.ppm" -f $script:c175OriginCaptureSequence)
+    [void](Capture-C166GuestScreen $Boot $originScreenshot)
+    $measuredBounds = Get-C172ManagedWindowBoundsFromScreenshot $originScreenshot
+    if ([int]$measuredBounds.outerWindow.width -notin @(560,600,960)) {
+        throw "C175 Notes origin calibration measured unsupported width $($measuredBounds.outerWindow.width)."
+    }
+    $script:c175NotesOriginX = [int]$measuredBounds.outerWindow.x
+    $script:c175NotesOriginY = [int]$measuredBounds.outerWindow.y
+    $targetX = [Math]::Max(0,
+        $script:c166ScreenWidth - 960 - 4)
+    $targetY = [Math]::Max(0,
+        $script:c166ScreenHeight - 436 - 4)
+    if ($targetX + 960 -gt $script:c166ScreenWidth -or
+        $targetY + 436 -gt $script:c166ScreenHeight) {
+        throw 'The guest framebuffer cannot contain the supported maximum Managed Notes outer geometry.'
+    }
+    $deltaX = $targetX - $script:c175NotesOriginX
+    $deltaY = $targetY - $script:c175NotesOriginY
+    if ($deltaX -ne 0 -or $deltaY -ne 0) {
+        Drag-C166Pointer ($script:c175NotesOriginX + 300) `
+            ($script:c175NotesOriginY + 12) `
+            ($script:c175NotesOriginX + 300 + $deltaX) `
+            ($script:c175NotesOriginY + 12 + $deltaY) $Boot
+        $script:c175NotesOriginX = $targetX
+        $script:c175NotesOriginY = $targetY
+    }
+}
+
+function Get-C175ManagedNotesState([string]$Serial,[int]$After = 0) {
+    if ($After -lt 0 -or $After -gt $Serial.Length) { $After = 0 }
+    $tail = $Serial.Substring($After)
+    $geometryPattern = '(?m)^\[C102-MANAGED-OUTPUT\] C175-MANAGED-GEOMETRY size=(?<width>\d+)x(?<height>\d+) client=(?<clientWidth>\d+)x(?<clientHeight>\d+) editor=(?<columns>\d+)x(?<lines>\d+) result=PASS\r?$'
+    $statePattern = '(?m)^\[C102-MANAGED-OUTPUT\] C175-MANAGED-STATE caret=(?<caret>\d+) anchor=(?<anchor>\d+) view=(?<view>\d+) h=(?<history>\d+) i=(?<historyIndex>\d+) undo=(?<undo>[01]) redo=(?<redo>[01]) dirty=(?<dirty>[01]) doc=1 focus=1 result=PASS\r?$'
+    $pathPattern = '(?m)^\[C102-MANAGED-OUTPUT\] C175-MANAGED-PATH path=(?<path>[^\r\n]*)\r?$'
+    $geometryMatches = [regex]::Matches($tail,$geometryPattern)
+    $stateMatches = [regex]::Matches($tail,$statePattern)
+    $pathMatches = [regex]::Matches($tail,$pathPattern)
+    if ($geometryMatches.Count -eq 0 -or $stateMatches.Count -eq 0 -or
+        $pathMatches.Count -eq 0) { return $null }
+    $geometry = $geometryMatches[$geometryMatches.Count-1]
+    $state = $stateMatches[$stateMatches.Count-1]
+    $path = $pathMatches[$pathMatches.Count-1]
+    return [pscustomobject]@{
+        width=[int]$geometry.Groups['width'].Value
+        height=[int]$geometry.Groups['height'].Value
+        clientWidth=[int]$geometry.Groups['clientWidth'].Value
+        clientHeight=[int]$geometry.Groups['clientHeight'].Value
+        columns=[int]$geometry.Groups['columns'].Value
+        lines=[int]$geometry.Groups['lines'].Value
+        path=$path.Groups['path'].Value
+        caret=[int]$state.Groups['caret'].Value
+        anchor=[int]$state.Groups['anchor'].Value
+        view=[int]$state.Groups['view'].Value
+        history=[int]$state.Groups['history'].Value
+        historyIndex=[int]$state.Groups['historyIndex'].Value
+        undo=[int]$state.Groups['undo'].Value
+        redo=[int]$state.Groups['redo'].Value
+        dirty=[int]$state.Groups['dirty'].Value
+        marker="$($geometry.Value) | $($state.Value) | $($path.Value)"
+    }
+}
+
+function Resize-C175ManagedNotes([object]$Boot,[int]$CurrentWidth,
+    [int]$CurrentHeight,[int]$WindowWidth,[int]$WindowHeight,
+    [string]$ScreenshotPath,[switch]$Focused,
+    [switch]$AllowEditorChanges) {
+    if (-not $script:c175ManagedNotesResize) {
+        throw 'C175 Managed Notes resizing is not enabled for this runner.'
+    }
+    $supported = ($WindowWidth -eq 560 -and $WindowHeight -eq 344) -or
+        ($WindowWidth -eq 600 -and $WindowHeight -eq 360) -or
+        ($WindowWidth -eq 960 -and $WindowHeight -eq 436)
+    if (-not $supported) { throw "Unsupported C175 outer geometry ${WindowWidth}x${WindowHeight}." }
+    Ensure-C175NotesResizeOrigin $Boot
+    $serialBefore = Get-C166Serial $Boot.serialPath
+    $priorState = Get-C175ManagedNotesState $serialBefore
+    $identity = Get-C175ManagedNotesIdentity $serialBefore
+    $markerStart = $serialBefore.Length
+    $startX = $script:c175NotesOriginX + $CurrentWidth - 4
+    $startY = $script:c175NotesOriginY + $CurrentHeight - 4
+    Drag-C166Pointer $startX $startY `
+        ($startX + $WindowWidth - $CurrentWidth) `
+        ($startY + $WindowHeight - $CurrentHeight) $Boot
+
+    if ($Focused) {
+        $expectedWidthHex = '{0:X8}' -f $WindowWidth
+        $expectedHeightHex = '{0:X8}' -f $WindowHeight
+        $expectedNativePattern = '^\[C175-NATIVE-GEOMETRY\] appId=com\.guidexos\.apps\.managed\.notes instance=[0-9A-Fa-f]{16} generation=[0-9A-Fa-f]{8} window=[0-9A-Fa-f]{8} oldOuter=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} newOuter=' +
+            [regex]::Escape($expectedWidthHex) + 'x' +
+            [regex]::Escape($expectedHeightHex) +
+            ' client=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} result=PASS\r?$'
+        $serialAfter = (Wait-C166Serial $Boot.serialPath `
+            $expectedNativePattern $markerStart 15).Text
+    } else {
+        $serialAfter = Get-C166Serial $Boot.serialPath
+    }
+    $tail = $serialAfter.Substring([Math]::Min($markerStart,$serialAfter.Length))
+    $creates = [regex]::Matches($serialAfter,
+        '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]{8} window=[0-9A-Fa-f]{8} result=PASS\r?$').Count
+    if ($creates -ne $identity.createCount) {
+        throw 'C175 live resize recreated the Managed Notes surface.'
+    }
+    $nativeMarkers = @()
+    $managedState = $null
+    if ($Focused) {
+        $nativePattern = '(?m)^\[C175-NATIVE-GEOMETRY\] appId=com\.guidexos\.apps\.managed\.notes instance=(?<instance>[0-9A-Fa-f]{16}) generation=(?<generation>[0-9A-Fa-f]{8}) window=(?<window>[0-9A-Fa-f]{8}) oldOuter=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} newOuter=(?<width>[0-9A-Fa-f]{8})x(?<height>[0-9A-Fa-f]{8}) client=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} result=PASS\r?$'
+        $nativeMarkers = @([regex]::Matches($tail,$nativePattern))
+        $finalNative = $null
+        foreach ($marker in $nativeMarkers) {
+            if ($marker.Groups['generation'].Value.ToUpperInvariant() -ne $identity.generation -or
+                $marker.Groups['window'].Value.ToUpperInvariant() -ne $identity.window) {
+                throw 'C175 resize changed the Notes generation or native window identity.'
+            }
+            if ($marker.Groups['width'].Value -eq ('{0:X8}' -f $WindowWidth) -and
+                $marker.Groups['height'].Value -eq ('{0:X8}' -f $WindowHeight)) {
+                $finalNative = $marker
+            }
+        }
+        if (-not $finalNative) { throw 'C175 native compositor callback did not accept the requested Notes geometry.' }
+        $managedState = Get-C175ManagedNotesState $serialAfter $markerStart
+        if (-not $managedState -or $managedState.width -ne $WindowWidth -or
+            $managedState.height -ne $WindowHeight -or
+            $managedState.clientWidth -ne $WindowWidth -or
+            $managedState.clientHeight -ne ($WindowHeight-24)) {
+            throw 'C175 Notes callback did not report its accepted editor geometry and preserved document state.'
+        }
+        if (-not $AllowEditorChanges -and $priorState -and
+            ($managedState.path -ne $priorState.path -or
+            $managedState.caret -ne $priorState.caret -or
+            $managedState.anchor -ne $priorState.anchor -or
+            $managedState.history -ne $priorState.history -or
+            $managedState.historyIndex -ne $priorState.historyIndex -or
+            $managedState.undo -ne $priorState.undo -or
+            $managedState.redo -ne $priorState.redo -or
+            $managedState.dirty -ne $priorState.dirty)) {
+            throw 'C175 resize changed Notes path, caret/selection, undo/redo history, or dirty state.'
+        }
+    }
+    $hash = Capture-C167GuestScreen $Boot $ScreenshotPath
+    $bounds = Get-C172ManagedWindowBoundsFromScreenshot $ScreenshotPath
+    if ([Math]::Abs([int]$bounds.outerWindow.width-$WindowWidth) -gt 2) {
+        throw "C175 Notes screenshot measured width $($bounds.outerWindow.width), expected $WindowWidth."
+    }
+    return [ordered]@{
+        mode=if ($Focused) {'live-compositor-drag-focused'} else {'live-compositor-drag-proof-disabled'}
+        input='QMP left-button drag through native bottom-right resize corner'
+        outerWindow=[ordered]@{width=$WindowWidth;height=$WindowHeight}
+        clientArea=[ordered]@{width=$WindowWidth;height=$WindowHeight-24}
+        identity=[ordered]@{instance=if ($Focused -and $nativeMarkers.Count -gt 0) {$nativeMarkers[-1].Groups['instance'].Value} else {'not-logged-in-production'};generation=$identity.generation;window=$identity.window}
+        previousState=if ($priorState) {$priorState} else {$null}
+        resultingState=$managedState
+        nativeCallbacks=$nativeMarkers.Count
+        surfaceReplacementVerified=$true
+        screenshot=[System.IO.Path]::GetFullPath($ScreenshotPath)
+        screenshotSha256=$hash
+        measuredScreenshotBounds=$bounds.outerWindow
+        qmpLog=[System.IO.Path]::GetFullPath($Boot.qmpLogPath)
+    }
+}
+
+function Invoke-C175ManagedNotesEditorProof([object]$Boot,
+    [string]$EvidenceRoot,[string]$Stage,[switch]$Focused) {
+    Focus-C175ExistingManagedNotes $Boot
+    Ensure-C175NotesResizeOrigin $Boot
+    Click-C166Screen ($script:c175NotesOriginX+28) `
+        ($script:c175NotesOriginY+24+84+9) $Boot
+    # Select the first character so the first accepted transaction proves
+    # both caret and selection-anchor stability. The opening C164 marker has
+    # already established the exact 15-byte source document.
+    Press-C166Key 'home' $Boot
+    Send-C166QmpEvents ([int]$Boot.qmpPort) `
+        @((New-C166Key 'shift' $true),(New-C166Key 'right' $true),
+          (New-C166Key 'right' $false),(New-C166Key 'shift' $false)) `
+        $Boot.qmpLogPath 90
+
+    $resizes = @()
+    $resizes += Resize-C175ManagedNotes $Boot 600 360 960 436 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-editor-maximum.ppm") `
+        -Focused:$Focused
+
+    # Add enough lines to exercise the existing vertical viewport and then
+    # restore the source bytes through the editor's existing undo history.
+    Press-C166Key 'end' $Boot
+    for ($index=0; $index -lt 5; $index++) { Press-C166Key 'ret' $Boot }
+    $resizes += Resize-C175ManagedNotes $Boot 960 436 560 344 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-editor-minimum.ppm") `
+        -Focused:$Focused -AllowEditorChanges
+
+    for ($index=0; $index -lt 8; $index++) {
+        Send-C166QmpEvents ([int]$Boot.qmpPort) `
+            @((New-C166Key 'ctrl' $true),(New-C166Key 'z' $true),
+              (New-C166Key 'z' $false),(New-C166Key 'ctrl' $false)) `
+            $Boot.qmpLogPath 90
+    }
+    # An intentional insertion after a resize exercises undo and redo. Finish
+    # at the saved source revision; no save action is issued.
+    Press-C166Key 'end' $Boot
+    Press-C166Key 'x' $Boot
+    foreach ($key in @('z','y','z')) {
+        Send-C166QmpEvents ([int]$Boot.qmpPort) `
+            @((New-C166Key 'ctrl' $true),(New-C166Key $key $true),
+              (New-C166Key $key $false),(New-C166Key 'ctrl' $false)) `
+            $Boot.qmpLogPath 90
+    }
+    $resizes += Resize-C175ManagedNotes $Boot 560 344 600 360 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-editor-restored.ppm") `
+        -Focused:$Focused -AllowEditorChanges
+
+    $state = Get-C175ManagedNotesState (Get-C166Serial $Boot.serialPath)
+    if ($Focused -and (-not $state -or
+        $state.path -ne '/system/apps/C164/hello.txt' -or
+        $state.dirty -ne 0 -or $state.redo -ne 1)) {
+        throw 'C175 guest editor did not return to the clean C164 source revision with its redo history intact.'
+    }
+    return [ordered]@{
+        status='PASS';path='/system/apps/C164/hello.txt';content='hello from C164'
+        contentBytes=15;sourceContentInitiallyVerified=$true
+        selectionBeforeResize='first-character selection'
+        insertedLines=5;verticalViewport='exercised by caret visibility at the minimum geometry'
+        undoRedo='intentional edits undone to the clean saved revision; no save issued'
+        finalState=$state;resizes=@($resizes)
+        screenshots=@($resizes | ForEach-Object {
+            [ordered]@{path=$_.screenshot;sha256=$_.screenshotSha256}
+        })
+    }
+}
+
+function Reject-C175ManagedNotesResize([object]$Boot,[int]$CurrentWidth,
+    [int]$CurrentHeight,[int]$RequestedWidth,[int]$RequestedHeight,
+    [string]$ScreenshotPath,[switch]$Focused) {
+    Ensure-C175NotesResizeOrigin $Boot
+    $serialBefore = Get-C166Serial $Boot.serialPath
+    $identity = Get-C175ManagedNotesIdentity $serialBefore
+    $priorState = Get-C175ManagedNotesState $serialBefore
+    $markerStart = $serialBefore.Length
+    $startX = $script:c175NotesOriginX + $CurrentWidth - 4
+    $startY = $script:c175NotesOriginY + $CurrentHeight - 4
+    Drag-C166Pointer $startX $startY `
+        ($startX + $RequestedWidth - $CurrentWidth) `
+        ($startY + $RequestedHeight - $CurrentHeight) $Boot
+    if ($Focused) {
+        $expectedNative = '^\[C175-NATIVE-GEOMETRY\] appId=com\.guidexos\.apps\.managed\.notes instance=[0-9A-Fa-f]{16} generation=' +
+            [regex]::Escape($identity.generation) + ' window=' +
+            [regex]::Escape($identity.window) +
+            ' oldOuter=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} newOuter=' +
+            ('{0:X8}' -f $RequestedWidth) + 'x' + ('{0:X8}' -f $RequestedHeight) +
+            ' client=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} result=REJECT\r?$'
+        [void](Wait-C166Serial $Boot.serialPath $expectedNative $markerStart 10)
+        [void](Wait-C166Serial $Boot.serialPath `
+            '^\[C102-MANAGED-OUTPUT\] C175-MANAGED-GEOMETRY result=REJECT layout=unchanged\r?$' `
+            $markerStart 10)
+    }
+    $serialAfter = Get-C166Serial $Boot.serialPath
+    $creates = [regex]::Matches($serialAfter,
+        '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]{8} window=[0-9A-Fa-f]{8} result=PASS\r?$').Count
+    if ($creates -ne $identity.createCount) { throw 'C175 rejected resize changed the Notes surface identity.' }
+    # Rejected requests do not invoke the managed geometry action and therefore
+    # must leave the last accepted managed state record unchanged.
+    $stateAfter = Get-C175ManagedNotesState $serialAfter
+    if ($Focused -and $priorState -and (-not $stateAfter -or
+        $stateAfter.path -ne $priorState.path -or
+        $stateAfter.caret -ne $priorState.caret -or
+        $stateAfter.anchor -ne $priorState.anchor -or
+        $stateAfter.history -ne $priorState.history -or
+        $stateAfter.historyIndex -ne $priorState.historyIndex -or
+        $stateAfter.dirty -ne $priorState.dirty)) {
+        throw 'C175 rejected resize failed to preserve the Notes editor state.'
+    }
+    $hash = Capture-C167GuestScreen $Boot $ScreenshotPath
+    $bounds = Get-C172ManagedWindowBoundsFromScreenshot $ScreenshotPath
+    if ([Math]::Abs([int]$bounds.outerWindow.width-$CurrentWidth) -gt 2) {
+        throw 'C175 rejected geometry did not restore the Notes window width.'
+    }
+    return [ordered]@{
+        status='REJECTED-AND-ROLLED-BACK'
+        requestedOuter=[ordered]@{width=$RequestedWidth;height=$RequestedHeight}
+        restoredOuter=[ordered]@{width=$CurrentWidth;height=$CurrentHeight}
+        statePreserved=if ($Focused) {$true} else {'verified-by-followup-window-identity-and-screenshot'}
+        identity=[ordered]@{generation=$identity.generation;window=$identity.window}
+        previousState=if ($priorState) {$priorState} else {$null}
+        resultingState=$stateAfter
+        screenshot=[System.IO.Path]::GetFullPath($ScreenshotPath)
+        screenshotSha256=$hash
+        measuredScreenshotBounds=$bounds.outerWindow
+    }
+}
+
+function Invoke-C175ManagedNotesBasicGeometryProof([object]$Boot,
+    [string]$EvidenceRoot,[string]$Stage,[switch]$Focused) {
+    Focus-C175ExistingManagedNotes $Boot
+    Ensure-C175NotesResizeOrigin $Boot
+    Click-C166Screen ($script:c175NotesOriginX+28) `
+        ($script:c175NotesOriginY+24+84+9) $Boot
+    $resizes = @()
+    $resizes += Resize-C175ManagedNotes $Boot 600 360 960 436 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-maximum.ppm") `
+        -Focused:$Focused
+    $rejectMaximumWidth = Reject-C175ManagedNotesResize $Boot `
+        960 436 961 436 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-rejected-maximum.ppm") `
+        -Focused:$Focused
+    $rejectMaximumHeight = Reject-C175ManagedNotesResize $Boot `
+        960 436 960 437 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-rejected-maximum-height.ppm") `
+        -Focused:$Focused
+    $resizes += Resize-C175ManagedNotes $Boot 960 436 560 344 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-minimum.ppm") `
+        -Focused:$Focused
+    $rejectMinimumWidth = Reject-C175ManagedNotesResize $Boot `
+        560 344 559 344 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-rejected-minimum.ppm") `
+        -Focused:$Focused
+    $rejectMinimumHeight = Reject-C175ManagedNotesResize $Boot `
+        560 344 560 343 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-rejected-minimum-height.ppm") `
+        -Focused:$Focused
+    $resizes += Resize-C175ManagedNotes $Boot 560 344 600 360 `
+        (Join-Path $EvidenceRoot "$Stage-c175-notes-restored-initial.ppm") `
+        -Focused:$Focused
+    return [ordered]@{
+        status='PASS';initialOuter=[ordered]@{width=600;height=360}
+        minimumOuter=[ordered]@{width=560;height=344}
+        maximumOuter=[ordered]@{width=960;height=436}
+        resizes=@($resizes);rejectedMaximumWidth=$rejectMaximumWidth
+        rejectedMaximumHeight=$rejectMaximumHeight
+        rejectedMinimumWidth=$rejectMinimumWidth
+        rejectedMinimumHeight=$rejectMinimumHeight;sameWindowIdentity=$true
+        editorFocus='retained';screenshots=@($resizes | ForEach-Object {
+            [ordered]@{path=$_.screenshot;sha256=$_.screenshotSha256}
+        })
+    }
+}
+
 function Get-C173RecordValue([object]$Record,[string]$Name) {
     if ($null -eq $Record) { return $null }
     if ($Record -is [System.Collections.IDictionary]) {
@@ -2089,18 +2571,51 @@ function Resize-C173ManagedExplorer([object]$Boot,[int]$CurrentWidth,
         ($WindowWidth -eq 960 -and $WindowHeight -eq 526)
     if (-not $supported) { throw "Unsupported C173 outer geometry ${WindowWidth}x${WindowHeight}." }
 
+    # Managed application focus can leave Settings above Explorer. Raise the
+    # Explorer window from its exposed left titlebar edge before measuring the
+    # resize transaction, so the bottom-right drag is delivered to Explorer.
     $serialBefore = Get-C166Serial $Boot.serialPath
     $priorState = Get-C173ManagedExplorerState $serialBefore
     if (-not $priorState -or $priorState.selection -eq 'none') {
         throw 'C173 live resize requires a selected Managed File Explorer entry.'
     }
     $identity = Get-C173ManagedExplorerIdentity $serialBefore
-    $markerStart = $serialBefore.Length
     $origin = Get-C166ManagedExplorerOrigin
+    $focusStart = $serialBefore.Length
+    Click-C166Screen ($origin.X+10) ($origin.Y+18) $Boot
+    if ($Focused) {
+        $windowHex = [regex]::Escape($identity.window)
+        $titlebarHitPattern = '^\[C172-COMPOSITOR-TRACE\] action=button-down x=[0-9A-Fa-f]{8} y=[0-9A-Fa-f]{8} button=00000001 hit=00000002 window=' +
+            $windowHex + ' flags=[0-9A-Fa-f]{8} size=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8}\r?$'
+        [void](Wait-C166Serial $Boot.serialPath $titlebarHitPattern $focusStart 10)
+    }
     $startX = $origin.X + $CurrentWidth - 4
     $startY = $origin.Y + $CurrentHeight - 4
     $targetX = $startX + ($WindowWidth - $CurrentWidth)
     $targetY = $startY + ($WindowHeight - $CurrentHeight)
+    if ($Focused) {
+        # Confirm the resize corner itself is exposed by this Explorer window.
+        # A titlebar hit can succeed while another app still covers the lower
+        # right corner in a multi-window layout.
+        $hoverStart = (Get-C166Serial $Boot.serialPath).Length
+        Move-C166Pointer $startX $startY $Boot
+        Start-Sleep -Milliseconds 150
+        $resizeHoverPattern = '(?m)^\[C172-COMPOSITOR-TRACE\] action=resize-hover x=' +
+            ('{0:X8}' -f $startX) + ' y=' + ('{0:X8}' -f $startY) +
+            ' window=' + [regex]::Escape($identity.window) + ' flags=[0-9A-Fa-f]{8}\r?$'
+        $hoverSerial = Get-C166Serial $Boot.serialPath
+        $hoverTail = if ($hoverStart -le $hoverSerial.Length) {
+            $hoverSerial.Substring($hoverStart)
+        } else { '' }
+        if (-not [regex]::IsMatch($hoverTail,$resizeHoverPattern)) {
+            $lastResizeHover = [regex]::Matches($hoverTail,
+                '(?m)^\[C172-COMPOSITOR-TRACE\] action=resize-hover .*\r?$') |
+                Select-Object -Last 1
+            $hitDescription = if ($lastResizeHover) { $lastResizeHover.Value } else { 'no resize corner hit was reported' }
+            throw "Managed File Explorer resize corner at ${startX},${startY} was not exposed after focus; $hitDescription."
+        }
+    }
+    $markerStart = (Get-C166Serial $Boot.serialPath).Length
     Drag-C166Pointer $startX $startY $targetX $targetY $Boot
 
     $widthHex = '{0:X8}' -f $WindowWidth
@@ -2173,6 +2688,7 @@ function Resize-C173ManagedExplorer([object]$Boot,[int]$CurrentWidth,
     if ([Math]::Abs([int]$bounds.outerWindow.width - $WindowWidth) -gt 2) {
         throw "C173 screenshot measured Explorer width $($bounds.outerWindow.width), expected $WindowWidth."
     }
+    $script:c173ManagedExplorerHeight = $WindowHeight
     return [ordered]@{
         mode=if ($Focused) {'live-compositor-drag-focused'} else {'live-compositor-drag-proof-disabled'}
         input='QMP left-button drag through native bottom-right resize corner'
@@ -2343,7 +2859,13 @@ function Invoke-C173HelloExplorerActivation([object]$Boot,[string]$EvidenceRoot,
     $baselinePath=Join-Path $EvidenceRoot "$Stage-c173-explorer-c164-baseline.ppm"
     $baselineHash=Capture-C167GuestScreen $Boot $baselinePath
     $resizes=@()
-    $resizes += Resize-C173ManagedExplorer $Boot 800 390 960 526 `
+    # The focused C175 Boot 3 already resized this same Explorer instance
+    # during the three-window exercise and left it at the supported minimum.
+    # The other C173 activation scenarios launch a fresh 800x390 surface.
+    $currentOuter = if ($script:c175ManagedNotesResize -and $Stage -eq 'boot3') {
+        [ordered]@{width=600;height=360}
+    } else { [ordered]@{width=800;height=390} }
+    $resizes += Resize-C173ManagedExplorer $Boot $currentOuter.width $currentOuter.height 960 526 `
         (Join-Path $EvidenceRoot "$Stage-c173-explorer-c164-expanded.ppm") -Focused:$Focused
     $resizes += Resize-C173ManagedExplorer $Boot 960 526 600 360 `
         (Join-Path $EvidenceRoot "$Stage-c173-explorer-c164-reduced.ppm") -Focused:$Focused
@@ -3042,7 +3564,60 @@ function Get-C173ManagedSettingsIdentity([string]$Serial) {
     }
 }
 
-function Focus-C173ExistingSettingsCenter([object]$Boot) {
+function Focus-C173ExistingSettingsCenter([object]$Boot,[int]$ExpectedWidth) {
+    if ($script:c175ManagedNotesResize) {
+        $serialBefore = Get-C166Serial $Boot.serialPath
+        $settingsIdentityBefore = Get-C173ManagedSettingsIdentity $serialBefore
+        $notesIdentityBefore = Get-C175ManagedNotesIdentity $serialBefore
+        $notesDestroyPattern = '(?m)^\[C150-SURFACE\] action=destroy appId=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]{8} window=[0-9A-Fa-f]{8} reason=close-or-replace\r?$'
+        $notesDestroyCountBefore = [regex]::Matches(
+            $serialBefore, $notesDestroyPattern).Count
+        # Other application windows may cover Settings. Use the compositor's
+        # existing taskbar buttons to raise each resident window until the
+        # expected Settings geometry is visible. The three window buttons are
+        # laid out from the fixed taskbar start; testing each center avoids
+        # relying on the application's z-order or recreating a surface.
+        $taskbarY = [int]($script:c166ScreenHeight-20)
+        $candidateXs = @(190,326,456)
+        $focusedSettings = $false
+        $candidateIndex = 0
+        foreach ($candidateX in $candidateXs) {
+            $candidateIndex++
+            Click-C166Screen $candidateX $taskbarY $Boot
+            Start-Sleep -Milliseconds 120
+            $candidatePath = Join-Path (Split-Path $Boot.serialPath) `
+                "c175-settings-taskbar-focus-$candidateIndex.ppm"
+            [void](Capture-C167GuestScreen $Boot $candidatePath)
+            try {
+                $candidateBounds = Get-C172ManagedWindowBoundsFromScreenshot $candidatePath
+                if ([Math]::Abs([int]$candidateBounds.outerWindow.width-$ExpectedWidth) -le 2) {
+                    $focusedSettings = $true
+                    break
+                }
+            } catch {
+                # A click that minimized the active window can leave no
+                # measurable focused titlebar; the next taskbar entry raises
+                # another resident surface.
+            }
+        }
+        if (-not $focusedSettings) {
+            throw "C175 taskbar focus did not expose the existing ${ExpectedWidth}px Settings window."
+        }
+        $serialAfter = Get-C166Serial $Boot.serialPath
+        $settingsIdentityAfter = Get-C173ManagedSettingsIdentity $serialAfter
+        $notesIdentityAfter = Get-C175ManagedNotesIdentity $serialAfter
+        $notesDestroyCountAfter = [regex]::Matches(
+            $serialAfter, $notesDestroyPattern).Count
+        if ($settingsIdentityAfter.window -ne $settingsIdentityBefore.window -or
+            $settingsIdentityAfter.generation -ne $settingsIdentityBefore.generation -or
+            $notesIdentityAfter.window -ne $notesIdentityBefore.window -or
+            $notesIdentityAfter.generation -ne $notesIdentityBefore.generation -or
+            $notesDestroyCountAfter -ne $notesDestroyCountBefore) {
+            throw 'C175 titlebar focus changed a Settings or Notes surface identity.'
+        }
+        return $serialAfter
+    }
+
     $notesStart = (Get-C166Serial $Boot.serialPath).Length
     Open-C166AllProgramsItem 12 $Boot
     [void](Wait-C166Serial $Boot.serialPath `
@@ -3051,8 +3626,18 @@ function Focus-C173ExistingSettingsCenter([object]$Boot) {
     [void](Wait-C166Serial $Boot.serialPath `
         '^(?:\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9A-Fa-f]{16} selector=00000004 existing=true result=PASS|\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]{8} window=[0-9A-Fa-f]{8} result=PASS)\r?$' `
         $notesStart 30)
-    $originX = [Math]::Max(0,[int](($script:c166ScreenWidth-600)/2))
-    $originY = [Math]::Max(0,[int](($script:c166ScreenHeight-360)/2))
+    if ($script:c175ManagedNotesResize) {
+        Ensure-C175NotesResizeOrigin $Boot
+        $originX = $script:c175NotesOriginX
+        $originY = $script:c175NotesOriginY
+    } else {
+        $origin = Get-C172ManagedWindowBoundsFromScreenshot $Boot.notesReadyScreenshot
+        if ([Math]::Abs([int]$origin.outerWindow.width - 600) -gt 2) {
+            throw "Managed Notes Settings launch measured width $($origin.outerWindow.width), expected 600."
+        }
+        $originX = [int]$origin.outerWindow.x
+        $originY = [int]$origin.outerWindow.y
+    }
     $focusStart = (Get-C166Serial $Boot.serialPath).Length
     Click-C166Screen ($originX+475) ($originY+24+294) $Boot
     [void](Wait-C166Serial $Boot.serialPath `
@@ -3071,6 +3656,19 @@ function Focus-C173ExistingFileExplorer([object]$Boot) {
     [void](Wait-C166Serial $Boot.serialPath `
         '^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.fileexplorer source=3 instance=[0-9A-Fa-f]{16} selector=00000008 existing=true result=PASS\r?$' `
         $start 30)
+    # C162 confirms managed-instance focus. Raise its compositor window with
+    # a neutral titlebar click before sending resize drags; application focus
+    # can leave Notes or Settings above Explorer in a three-window session.
+    $identity = Get-C173ManagedExplorerIdentity (Get-C166Serial $Boot.serialPath)
+    $origin = Get-C166ManagedExplorerOrigin
+    $focusStart = (Get-C166Serial $Boot.serialPath).Length
+    Click-C166Screen ($origin.X+10) ($origin.Y+18) $Boot
+    if ($script:c175FocusedEvidence) {
+        $windowHex = [regex]::Escape($identity.window)
+        $titlebarHitPattern = '^\[C172-COMPOSITOR-TRACE\] action=button-down x=[0-9A-Fa-f]{8} y=[0-9A-Fa-f]{8} button=00000001 hit=00000002 window=' +
+            $windowHex + ' flags=[0-9A-Fa-f]{8} size=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8}\r?$'
+        [void](Wait-C166Serial $Boot.serialPath $titlebarHitPattern $focusStart 10)
+    }
 }
 
 function Invoke-C173CrossApplicationIsolation([object]$Boot,[string]$EvidenceRoot,
@@ -3132,7 +3730,100 @@ function Invoke-C173CrossApplicationIsolation([object]$Boot,[string]$EvidenceRoo
     Assert-C173ManagedExplorerState $pointerState '/system/apps/C164' 'hello.txt' 'File' `
         "$Stage concurrent Explorer pointer hit test" | Out-Null
 
-    [void](Focus-C173ExistingSettingsCenter $Boot)
+    $notesIdentity = $null
+    $notesConcurrentResizes = @()
+    $associationSourceExplorerIdentity = $null
+    if ($script:c175ManagedNotesResize) {
+        $associationSourceExplorerIdentity = $explorerIdentity
+        $notesOpenStart = (Get-C166Serial $Boot.serialPath).Length
+        Click-C166ManagedExplorerButton 'Open' $Boot
+        [void](Wait-C166Serial $Boot.serialPath `
+            '^\[C102-MANAGED-OUTPUT\] C164-NOTES-ACT path=/system/apps/C164/hello\.txt bytes=15 clean=1 undo=0 redo=0 caret=0 anchor=0 view=0 result=PASS\r?$' `
+            $notesOpenStart 90)
+        [void](Wait-C166Serial $Boot.serialPath `
+            '^\[C102-MANAGED-OUTPUT\] C164-NOTES-CONTENT exact=true source=VFS result=PASS\r?$' `
+            $notesOpenStart 20)
+        Focus-C175ExistingManagedNotes $Boot
+        $notesIdentity = Get-C175ManagedNotesIdentity (Get-C166Serial $Boot.serialPath)
+        if ($notesIdentity.window -eq $settingsIdentity.window -or
+            $notesIdentity.window -eq $explorerIdentity.window -or
+            $notesIdentity.generation -eq $settingsIdentity.generation -or
+            $notesIdentity.generation -eq $explorerIdentity.generation) {
+            throw 'C175 concurrent proof did not reserve a distinct Notes window identity.'
+        }
+        Ensure-C175NotesResizeOrigin $Boot
+        Click-C166Screen ($script:c175NotesOriginX+28) `
+            ($script:c175NotesOriginY+24+84+9) $Boot
+        $notesConcurrentResizes += Resize-C175ManagedNotes $Boot 600 360 960 436 `
+            (Join-Path $EvidenceRoot "$Stage-c175-notes-concurrent-expanded.ppm") `
+            -Focused:$script:c175FocusedEvidence
+        $notesConcurrentResizes += Resize-C175ManagedNotes $Boot 960 436 560 344 `
+            (Join-Path $EvidenceRoot "$Stage-c175-notes-concurrent-reduced.ppm") `
+            -Focused:$script:c175FocusedEvidence
+        $notesConcurrentResizes += Resize-C175ManagedNotes $Boot 560 344 600 360 `
+            (Join-Path $EvidenceRoot "$Stage-c175-notes-concurrent-restored.ppm") `
+            -Focused:$script:c175FocusedEvidence
+
+        # C164 closes the Explorer surface after a successful association
+        # activation. Reopen it and reselect the same document so the C175
+        # concurrency check exercises three independently resident windows
+        # without changing the established activation lifecycle.
+        Launch-C166ManagedFileExplorer $Boot
+        [void](Navigate-C166ManagedExplorerToHello $Boot)
+        $reopenedExplorerState = Get-C173ManagedExplorerState `
+            (Get-C166Serial $Boot.serialPath)
+        Assert-C173ManagedExplorerState $reopenedExplorerState `
+            '/system/apps/C164' 'hello.txt' 'File' `
+            "$Stage Explorer after Notes association activation" | Out-Null
+        $explorerIdentity = Get-C173ManagedExplorerIdentity `
+            (Get-C166Serial $Boot.serialPath)
+        if ($explorerIdentity.window -eq $associationSourceExplorerIdentity.window -or
+            $explorerIdentity.generation -eq $associationSourceExplorerIdentity.generation -or
+            $explorerIdentity.window -eq $settingsIdentity.window -or
+            $explorerIdentity.window -eq $notesIdentity.window) {
+            throw 'C175 concurrent proof did not retain three distinct Settings, Explorer, and Notes windows after association activation.'
+        }
+        # A newly created Explorer surface uses the existing 800x390 launch size.
+        # The screenshot helper measures the titlebar's horizontal extent;
+        # height comes from the existing application surface constants, not
+        # that helper.
+        $reopenedExplorerBaselinePath = Join-Path $EvidenceRoot `
+            "$Stage-c173-explorer-reopened-three-window-baseline.ppm"
+        $reopenedExplorerBaselineHash = Capture-C167GuestScreen $Boot `
+            $reopenedExplorerBaselinePath
+        $reopenedExplorerBounds = Get-C172ManagedWindowBoundsFromScreenshot `
+            $reopenedExplorerBaselinePath
+        if ([Math]::Abs([int]$reopenedExplorerBounds.outerWindow.width-800) -gt 2) {
+            throw "C175 reopened Explorer titlebar width measured $($reopenedExplorerBounds.outerWindow.width), expected 800."
+        }
+        $screenshots.Add([ordered]@{
+            path=$reopenedExplorerBaselinePath
+            sha256=$reopenedExplorerBaselineHash
+            application='ManagedFileExplorer'
+            measuredTitlebarWidth=[int]$reopenedExplorerBounds.outerWindow.width
+            expectedInitialOuter=[ordered]@{width=800;height=390}
+        })
+
+        Focus-C175ExistingManagedNotes $Boot
+        $notesConcurrentResizes += Resize-C175ManagedNotes $Boot 600 360 960 436 `
+            (Join-Path $EvidenceRoot "$Stage-c175-notes-three-window-expanded.ppm") `
+            -Focused:$script:c175FocusedEvidence
+        $notesConcurrentResizes += Resize-C175ManagedNotes $Boot 960 436 560 344 `
+            (Join-Path $EvidenceRoot "$Stage-c175-notes-three-window-reduced.ppm") `
+            -Focused:$script:c175FocusedEvidence
+        $notesConcurrentResizes += Resize-C175ManagedNotes $Boot 560 344 600 360 `
+            (Join-Path $EvidenceRoot "$Stage-c175-notes-three-window-restored.ppm") `
+            -Focused:$script:c175FocusedEvidence
+
+        Focus-C173ExistingFileExplorer $Boot
+        $explorerAfterReopenSelection = Get-C173ManagedExplorerState `
+            (Get-C166Serial $Boot.serialPath)
+        Assert-C173ManagedExplorerState $explorerAfterReopenSelection `
+            '/system/apps/C164' 'hello.txt' 'File' `
+            "$Stage Explorer reselected document before concurrent resize" | Out-Null
+    }
+
+    [void](Focus-C173ExistingSettingsCenter $Boot $SettingsWidth)
     $script:c171SettingsWindowWidth = $SettingsWidth
     $script:c171SettingsWindowHeight = $SettingsHeight
     $settingsStillOpenPath = Join-Path $EvidenceRoot "$Stage-c173-settings-after-explorer-resize.ppm"
@@ -3183,6 +3874,36 @@ function Invoke-C173CrossApplicationIsolation([object]$Boot,[string]$EvidenceRoo
         $screenshots.Add([ordered]@{path=$resize.screenshot;sha256=$resize.screenshotSha256;application='ManagedSettings';outer=$size})
     }
 
+    if ($script:c175ManagedNotesResize) {
+        # Notes remains resident while Settings and Explorer each resize again.
+        Focus-C173ExistingFileExplorer $Boot
+        $explorerResizes += Resize-C173ManagedExplorer $Boot 800 390 960 526 `
+            (Join-Path $EvidenceRoot "$Stage-c173-explorer-with-notes-expanded.ppm") -Focused:$Focused
+        $explorerResizes += Resize-C173ManagedExplorer $Boot 960 526 600 360 `
+            (Join-Path $EvidenceRoot "$Stage-c173-explorer-with-notes-reduced.ppm") -Focused:$Focused
+        foreach ($resize in $explorerResizes[-2..-1]) {
+            $screenshots.Add([ordered]@{path=$resize.screenshot;sha256=$resize.screenshotSha256;application='ManagedFileExplorer';outer=$resize.outerWindow})
+        }
+        $explorerAfterNotesState = Get-C173ManagedExplorerState (Get-C166Serial $Boot.serialPath)
+        Assert-C173ManagedExplorerState $explorerAfterNotesState '/system/apps/C164' 'hello.txt' 'File' `
+            "$Stage Explorer after Notes and Settings resize" | Out-Null
+        if ($notesIdentity) {
+            Focus-C175ExistingManagedNotes $Boot
+            $notesAfterConcurrentSerial = Get-C166Serial $Boot.serialPath
+            $notesIdentityAfter = Get-C175ManagedNotesIdentity $notesAfterConcurrentSerial
+            $notesStateAfter = Get-C175ManagedNotesState $notesAfterConcurrentSerial
+            if ($notesIdentityAfter.generation -ne $notesIdentity.generation -or
+                $notesIdentityAfter.window -ne $notesIdentity.window -or
+                $notesIdentityAfter.createCount -ne $notesIdentity.createCount -or
+                ($script:c175FocusedEvidence -and (-not $notesStateAfter -or
+                    $notesStateAfter.path -ne '/system/apps/C164/hello.txt' -or
+                    $notesStateAfter.dirty -ne 0))) {
+                throw 'C175 Settings or Explorer resize changed the concurrently open Notes identity or document state.'
+            }
+            Focus-C173ExistingFileExplorer $Boot
+        }
+    }
+
     $explorerFocusStart = (Get-C166Serial $Boot.serialPath).Length
     Focus-C173ExistingFileExplorer $Boot
     $explorerAfterSettingsResizePath = Join-Path $EvidenceRoot "$Stage-c173-explorer-after-settings-resize.ppm"
@@ -3202,8 +3923,10 @@ function Invoke-C173CrossApplicationIsolation([object]$Boot,[string]$EvidenceRoo
         throw 'C173 Settings resize destroyed or replaced the open Explorer surface.'
     }
 
-    Close-C173ManagedExplorer $Boot
-    [void](Focus-C173ExistingSettingsCenter $Boot)
+    if (-not $script:c175ManagedNotesResize) {
+        Close-C173ManagedExplorer $Boot
+    }
+    [void](Focus-C173ExistingSettingsCenter $Boot $SettingsWidth)
     $script:c171SettingsWindowWidth = $SettingsWidth
     $script:c171SettingsWindowHeight = $SettingsHeight
     $serialFinal = Get-C166Serial $Boot.serialPath
@@ -3222,12 +3945,25 @@ function Invoke-C173CrossApplicationIsolation([object]$Boot,[string]$EvidenceRoo
         status='PASS';settingsPendingChoice='Disabled';settingsPendingPersistedBeforeApply=$false
         settingsIdentity=[ordered]@{generation=$settingsIdentity.generation;window=$settingsIdentity.window}
         explorerIdentity=[ordered]@{generation=$explorerIdentity.generation;window=$explorerIdentity.window}
+        notesIdentity=if ($notesIdentity) {[ordered]@{generation=$notesIdentity.generation;window=$notesIdentity.window}} else {$null}
+        notesResizes=@($notesConcurrentResizes)
         distinctWindowIdentities=$true;settingsStayedOpenDuringExplorerResize=$true
-        explorerStayedOpenDuringSettingsResize=$true;settingsGeometryBefore=[ordered]@{width=$SettingsWidth;height=$SettingsHeight}
+        explorerStayedOpenDuringSettingsResize=$true;notesStayedOpenDuringSettingsAndExplorerResize=($null -ne $notesIdentity);settingsGeometryBefore=[ordered]@{width=$SettingsWidth;height=$SettingsHeight}
         settingsGeometryAfterExplorerResize=[ordered]@{width=[int]$settingsStillOpenBounds.outerWindow.width;height=$SettingsHeight}
         explorerGeometryAfterSettingsResize=[ordered]@{width=[int]$explorerAfterSettingsResizeBounds.outerWindow.width;height=360}
         explorerPath='/system/apps/C164';explorerSelection='hello.txt';explorerSelectionPreserved=$true
-        focus=[ordered]@{settingsAfterExplorerResize='PASS';explorerAfterSettingsResize='PASS';settingsRestoredAfterExplorerClose='PASS'}
+        associationSourceExplorer=if ($associationSourceExplorerIdentity) {
+            [ordered]@{generation=$associationSourceExplorerIdentity.generation;window=$associationSourceExplorerIdentity.window;closedByExistingC164Activation=$true}
+        } else { $null }
+        reopenedExplorer=if ($script:c175ManagedNotesResize) {
+            [ordered]@{generation=$explorerIdentity.generation;window=$explorerIdentity.window;selectionRestoredTo='hello.txt';selectionPreservedThroughConcurrentResize=$true}
+        } else { $null }
+        focus=[ordered]@{
+            settingsAfterExplorerResize='PASS';explorerAfterSettingsResize='PASS'
+            settingsRestoredAfterExplorerClose=if ($script:c175ManagedNotesResize) {
+                'Explorer left open to preserve three-window residency'
+            } else { 'PASS' }
+        }
         pendingAssociationSlotsUnchanged=$true;settingsResizes=@($settingsResizes);explorerResizes=@($explorerResizes)
         screenshots=@($screenshots.ToArray())
     }
@@ -3249,8 +3985,21 @@ function Open-C167SettingsCenter([object]$Boot,[switch]$ExpectC145Final) {
     Start-Sleep -Milliseconds 350
     $Boot.notesReadyScreenshot = Join-Path (Split-Path $Boot.serialPath) 'notes-ready-for-settings.ppm'
     $Boot.notesReadyScreenshotSha256 = Capture-C166GuestScreen $Boot $Boot.notesReadyScreenshot
-    $originX = [Math]::Max(0,[int](($script:c166ScreenWidth-600)/2))
-    $originY = [Math]::Max(0,[int](($script:c166ScreenHeight-360)/2))
+    if ($script:c175ManagedNotesResize) {
+        # Earlier interactions can raise or move other windows after Notes was
+        # resized. Re-measure the live Notes surface immediately before using
+        # its Settings button so this final reopen follows the same geometry as
+        # the C175 resize helpers.
+        Ensure-C175NotesResizeOrigin $Boot
+    }
+    $originX = if ($script:c175ManagedNotesResize -and
+        $null -ne $script:c175NotesOriginX) { $script:c175NotesOriginX } else {
+        [Math]::Max(0,[int](($script:c166ScreenWidth-600)/2))
+    }
+    $originY = if ($script:c175ManagedNotesResize -and
+        $null -ne $script:c175NotesOriginY) { $script:c175NotesOriginY } else {
+        [Math]::Max(0,[int](($script:c166ScreenHeight-360)/2))
+    }
     $start = (Get-C166Serial $Boot.serialPath).Length
     Click-C166Screen ($originX+475) ($originY+24+294) $Boot
     # A native managed-control click can dispatch correctly even when the
@@ -3612,6 +4361,11 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         }
         $boot1Reentry = Return-C167ToSettingsAndReenter $boot1 'Disabled' (Join-Path $runRoot 'boot1-default-apps-reentry.ppm')
         Close-C167SettingsCenter $boot1
+        $c175Boot1 = $null
+        if ($script:c175ManagedNotesResize) {
+            $c175Boot1 = Invoke-C175ManagedNotesBasicGeometryProof $boot1 `
+                $runRoot 'boot1' -Focused
+        }
         $boot1Explorer = Invoke-C166ManagedExplorerOpen $boot1 'Disabled' (Join-Path $runRoot 'boot1-managed-explorer-no-handler.ppm')
         if ($boot1Explorer.result -ne 'No associated handler') {
             throw 'Boot 1 Managed File Explorer did not observe the Disabled association.'
@@ -3639,7 +4393,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             }
         }
         if ($boot1.backingEspPath -ne $diskIdentity) { throw 'Boot 1 used an unexpected writable ESP path.' }
-        $boot1Interactions = [ordered]@{initial=$boot1Default;choice=$selection;beforeApplySlots=$beforeApply;pendingScreenshot=$boot1PendingScreenshot;pendingScreenshotSha256=$pendingSha;apply=$boot1Apply;reentry=$boot1Reentry;managedExplorer=$boot1Explorer;associationDiskUnchangedThroughSelection=$true;settingsOrigin=$settingsOrigin;c169=if ($script:c169ManagedUiProof) { $selection } else { $null };c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{expanded=$c171Expanded;pendingChoicePreservedThroughWindowRecreation='Disabled';applyAfterRecreation=$true} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;pendingSelectionPreserved=$true;pendingChoice='Disabled';applyState='Disabled';associationSlotsUnchanged=$true} } else { $null };c173=$c173Boot1}
+        $boot1Interactions = [ordered]@{initial=$boot1Default;choice=$selection;beforeApplySlots=$beforeApply;pendingScreenshot=$boot1PendingScreenshot;pendingScreenshotSha256=$pendingSha;apply=$boot1Apply;reentry=$boot1Reentry;managedExplorer=$boot1Explorer;associationDiskUnchangedThroughSelection=$true;settingsOrigin=$settingsOrigin;c169=if ($script:c169ManagedUiProof) { $selection } else { $null };c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{expanded=$c171Expanded;pendingChoicePreservedThroughWindowRecreation='Disabled';applyAfterRecreation=$true} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;pendingSelectionPreserved=$true;pendingChoice='Disabled';applyState='Disabled';associationSlotsUnchanged=$true} } else { $null };c173=$c173Boot1;c175=$c175Boot1}
     } finally {
         Stop-OwnedProofQemu $boot1
     }
@@ -3772,13 +4526,18 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         if ($boot2Explorer.content -ne 'hello from C164' -or -not $boot2Explorer.clean) {
             throw 'Boot 2 Native File Explorer did not open the expected C164 Notes document.'
         }
+        $c175Boot2 = $null
+        if ($script:c175ManagedNotesResize) {
+            $c175Boot2 = Invoke-C175ManagedNotesEditorProof $boot2 $runRoot `
+                'boot2' -Focused:$script:c175FocusedEvidence
+        }
         Close-C166ManagedNotesStartupWindow $boot2
         $boot2ManagedExplorer = Invoke-C166ManagedExplorerOpen $boot2 'Default' `
             (Join-Path $runRoot 'boot2-managed-explorer-notes-activation.ppm')
         if ($boot2ManagedExplorer.content -ne 'hello from C164' -or -not $boot2ManagedExplorer.clean) {
             throw 'Boot 2 Managed File Explorer did not agree with native File Explorer for the explicit Notes default.'
         }
-        $boot2Interactions = [ordered]@{restoredState=$boot2Resolved;settings=$boot2Disabled;queryPreservedSlots=$true;choice=$boot2Selection;beforeApplySlots=$boot2BeforeApply;apply=$boot2Apply;committedStateRequeried=$boot2CommittedState;reset=$boot2Reset;resetReentry=$boot2ResetReentry;nativeExplorer=$boot2Explorer;managedExplorer=$boot2ManagedExplorer;c169=if ($script:c169ManagedUiProof) { [ordered]@{scroll=$scrollProof;settingsReentry=$boot2Reentry;pointerPopupSelection=$boot2Selection} } else { $null };c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;keyboardFocusAndTraversal=$c171KeyboardFocus;scrollAndPopupAtCompactSize='PASS'} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;popupDismissed=$c172PopupProof.dismissedByLiveResize;popupScreenshot=$c172PopupProof.popupScreenshot;popupScreenshotSha256=$c172PopupProof.popupScreenshotSha256;tabTraversal=$c172PopupProof.tabTraversal;shiftTabTraversal=$c172PopupProof.shiftTabTraversal;pointerAtResizedCoordinates=($boot2Selection.choiceIndex -eq 0);keyboardAtResizedCoordinates=$true;associationSlotsUnchangedBeforeApply=((Get-C166SlotIdentity $boot2Before) -eq (Get-C166SlotIdentity $boot2BeforeApply))} } else { $null };c173=$c173Boot2;result='PASS'}
+        $boot2Interactions = [ordered]@{restoredState=$boot2Resolved;settings=$boot2Disabled;queryPreservedSlots=$true;choice=$boot2Selection;beforeApplySlots=$boot2BeforeApply;apply=$boot2Apply;committedStateRequeried=$boot2CommittedState;reset=$boot2Reset;resetReentry=$boot2ResetReentry;nativeExplorer=$boot2Explorer;c175=$c175Boot2;managedExplorer=$boot2ManagedExplorer;c169=if ($script:c169ManagedUiProof) { [ordered]@{scroll=$scrollProof;settingsReentry=$boot2Reentry;pointerPopupSelection=$boot2Selection} } else { $null };c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;keyboardFocusAndTraversal=$c171KeyboardFocus;scrollAndPopupAtCompactSize='PASS'} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;popupDismissed=$c172PopupProof.dismissedByLiveResize;popupScreenshot=$c172PopupProof.popupScreenshot;popupScreenshotSha256=$c172PopupProof.popupScreenshotSha256;tabTraversal=$c172PopupProof.tabTraversal;shiftTabTraversal=$c172PopupProof.shiftTabTraversal;pointerAtResizedCoordinates=($boot2Selection.choiceIndex -eq 0);keyboardAtResizedCoordinates=$true;associationSlotsUnchangedBeforeApply=((Get-C166SlotIdentity $boot2Before) -eq (Get-C166SlotIdentity $boot2BeforeApply))} } else { $null };c173=$c173Boot2;result='PASS'}
     } finally {
         Stop-OwnedProofQemu $boot2
     }
@@ -3930,7 +4689,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             $boot3Tail -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C145-FINAL viewport=valid registration=12 modal=none capture=none drag=none result=PASS') {
             throw 'Boot 3 did not leave verified NoOverride state with clean Settings control ownership.'
         }
-        $boot3Interactions = [ordered]@{restoredState=$boot3Resolved;settings=$boot3Explicit;pendingChoice=$boot3PendingChoice;pendingSlots=$boot3PendingSlots;reset=$boot3Reset;reentry=$boot3Reentry;managedExplorer=$boot3Explorer;cleanNotesBaseline=$true;modalCaptureDrag='none';c169=$c169AppChecks;c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;expanded=$c171Expanded;repeatedTransitions=2;pageLifecycle='PASS'} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;pendingSelectionPreserved=$c172PendingPreserved;applyState=$c172ApplyState;resetState=$c172ResetState;associationSlotsUnchangedBeforeApply=$true;pendingChoiceSurvivedMinimumAndExpandedLiveResize=$true} } else { $null };c173=$c173Boot3;result='PASS'}
+        $boot3Interactions = [ordered]@{restoredState=$boot3Resolved;settings=$boot3Explicit;pendingChoice=$boot3PendingChoice;pendingSlots=$boot3PendingSlots;reset=$boot3Reset;reentry=$boot3Reentry;managedExplorer=$boot3Explorer;cleanNotesBaseline=$true;modalCaptureDrag='none';c169=$c169AppChecks;c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;expanded=$c171Expanded;repeatedTransitions=2;pageLifecycle='PASS'} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;pendingSelectionPreserved=$c172PendingPreserved;applyState=$c172ApplyState;resetState=$c172ResetState;associationSlotsUnchangedBeforeApply=$true;pendingChoiceSurvivedMinimumAndExpandedLiveResize=$true} } else { $null };c173=$c173Boot3;c175=$c173CrossApplication;result='PASS'}
     } finally {
         Stop-OwnedProofQemu $boot3
     }
@@ -4015,9 +4774,12 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             'kernel/core/nativeaot_application.cpp',
             'samples/managed/HostLogProof/Applications/ManagedSettingsCenter.cs',
             'samples/managed/HostLogProof/Applications/ManagedFileExplorerC163.cs',
+            'samples/managed/HostLogProof/Applications/ManagedNotes.cs',
+            'samples/managed/HostLogProof/Applications/ManagedNotesC175.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedFileExplorerC163.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174Tests.cs',
+            'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC175Tests.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosListBox.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC173Tests.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosFileExplorerC163Tests.cs',
@@ -4043,12 +4805,24 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         foreach ($bootRecord in $bootResults) {
             $c173=$bootRecord.interactions.c173
             $c173CrossApplication=Get-C173RecordValue $c173 'crossApplication'
+            $c175=Get-C173RecordValue $bootRecord.interactions 'c175'
             if (-not $c173 -or $c173.status -ne 'PASS') {
                 throw "Focused proof boot $($bootRecord.stage) lacks a passing C173 Explorer scenario."
             }
             if ($bootRecord.stage -match 'Boot3' -and
                 (-not $c173CrossApplication -or $c173CrossApplication.status -ne 'PASS')) {
                 throw 'Focused C173 Boot 3 lacks passing concurrent Settings and Explorer isolation evidence.'
+            }
+            if ($script:c175ManagedNotesResize) {
+                if (-not $c175 -or $c175.status -ne 'PASS') {
+                    throw "Focused proof boot $($bootRecord.stage) lacks passing C175 Managed Notes evidence."
+                }
+                if ($bootRecord.stage -match 'Boot3' -and
+                    (-not $c175.notesStayedOpenDuringSettingsAndExplorerResize -or
+                     -not $c175.distinctWindowIdentities -or
+                     @($c175.notesResizes).Count -lt 3)) {
+                    throw 'C175 Boot 3 did not keep three distinct application windows resident through resize operations.'
+                }
             }
             $serialPath=[System.IO.Path]::GetFullPath($bootRecord.serialPath)
             $serialHash=Get-Sha256 $serialPath
@@ -4069,6 +4843,26 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             }
             if ($c173CrossApplication) {
                 foreach ($reference in @(Get-C173RecordValue $c173CrossApplication 'screenshots')) {
+                    if ($reference -and $reference.path) {
+                        $refs += [ordered]@{path=[string]$reference.path;sha256=[string]$reference.sha256}
+                    }
+                }
+            }
+            if ($c175) {
+                foreach ($collectionName in @('resizes','notesResizes')) {
+                    foreach ($reference in @(Get-C173RecordValue $c175 $collectionName)) {
+                        if ($reference -and $reference.screenshot) {
+                            $refs += [ordered]@{path=[string]$reference.screenshot;sha256=[string]$reference.screenshotSha256}
+                        }
+                    }
+                }
+                foreach ($property in @('rejectedMaximum','rejectedMinimum')) {
+                    $reference=Get-C173RecordValue $c175 $property
+                    if ($reference -and $reference.screenshot) {
+                        $refs += [ordered]@{path=[string]$reference.screenshot;sha256=[string]$reference.screenshotSha256}
+                    }
+                }
+                foreach ($reference in @(Get-C173RecordValue $c175 'screenshots')) {
                     if ($reference -and $reference.path) {
                         $refs += [ordered]@{path=[string]$reference.path;sha256=[string]$reference.sha256}
                     }
@@ -4110,6 +4904,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
                 serial=[ordered]@{path=$serialPath;sha256=$serialHash}
                 qmpInput=[ordered]@{path=$qmpPath;sha256=$qmpHash}
                 explorer=$c173
+                managedNotes=$c175
                 screenshots=@($screenRecords.ToArray())
             })
         }
@@ -4118,8 +4913,19 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             schemaVersion=1;phase='C173-focused-proof';sourceHead=$head;sourceBranch='v1.1_DOTNET_SUPPORT';status='PASS';outcome='A'
             focusedBootCount=$c173BootRecords.Count;focusedBoots=@($c173BootRecords.ToArray())
             geometry=[ordered]@{initialOuter=[ordered]@{width=800;height=390};minimumOuter=[ordered]@{width=600;height=360};maximumOuter=[ordered]@{width=960;height=526};titlebarHeight=24}
-            nativeResizePath='C172 KernelCompositor resize corner -> NativeAotApplication::onWindowResize -> invokeManagedAction -> ManagedFileExplorerC163.HandleAction'
+            nativeResizePath='C172 KernelCompositor resize corner -> NativeAotApplication::onWindowResize -> invokeManagedAction -> existing managed action dispatcher -> C174 transaction -> application layout'
             sameApplicationAndWindowIdentity='verified in Boot 1, Boot 2, and Boot 3 through instance/generation/window markers'
+            c175ManagedNotesResize=if ($script:c175ManagedNotesResize) {
+                [ordered]@{
+                    status='PASS';initialOuter=[ordered]@{width=600;height=360}
+                    minimumOuter=[ordered]@{width=560;height=340}
+                    maximumOuter=[ordered]@{width=960;height=526}
+                    titlebarHeight=24;lineWrapping='unchanged; editor remains non-wrapping'
+                    boot1=$c173BootRecords[0].managedNotes
+                    boot2=$c173BootRecords[1].managedNotes
+                    boot3Concurrent=$c173BootRecords[2].managedNotes
+                }
+            } else { $null }
             c163C164C172=[ordered]@{C163='PASS';C164='PASS';C172SettingsResize='PASS';calculator56='PASS';taskManager='PASS';explorerCloseReopen='PASS'}
             finalAssociation='NoOverride';hostManifest=$hostRecord;sourceFiles=@($c173SourceFiles.ToArray());files=@($c173Files.ToArray())
             artifactIntegrity=[ordered]@{result='PASS';algorithm='SHA-256';errors=@()}
@@ -4248,6 +5054,11 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                 $c173Boot1=Invoke-C173ScrollableExplorerProof $boot $root 'ordinary-boot1'
             }
             $notes=Invoke-C166ManagedExplorerOpen $boot 'Default' (Join-Path $root 'managed-explorer-notes.ppm')
+            $c175Boot1=$null
+            if ($script:c175ManagedNotesResize) {
+                $c175Boot1=Invoke-C175ManagedNotesBasicGeometryProof $boot `
+                    $root 'ordinary-boot1' -Focused:$script:c175FocusedEvidence
+            }
             $defaultApps=$null
             if ($script:c167SettingsAcceptance) {
                 Open-C167SettingsCenter $boot -ExpectC145Final | Out-Null
@@ -4335,7 +5146,7 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                     }
                 }
             }
-            $integration=[ordered]@{managedFileExplorer=$notes;defaultApps=$defaultApps;C164NotesActivation='PASS';path=$notes.path;content=$notes.content;cleanDocument=$notes.clean;c173=$c173Boot1}
+            $integration=[ordered]@{managedFileExplorer=$notes;defaultApps=$defaultApps;C164NotesActivation='PASS';path=$notes.path;content=$notes.content;cleanDocument=$notes.clean;c173=$c173Boot1;c175=$c175Boot1}
         } elseif ($Number -eq 2) {
             Initialize-C166GuestPointer $boot
             $managed=$null
@@ -4511,6 +5322,11 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                     $managed=Invoke-C166ManagedExplorerOpen $boot 'Default' `
                         (Join-Path $root 'managed-explorer-notes.ppm')
                 }
+                $c175Boot2=$null
+                if ($script:c175ManagedNotesResize) {
+                    $c175Boot2=Invoke-C175ManagedNotesEditorProof $boot $root `
+                        'ordinary-boot2' -Focused:$script:c175FocusedEvidence
+                }
                 $settingsNavigation=[ordered]@{
                     initialSettings='PASS';defaultAppsEntry=$settingsPageEntry
                     settingsReturn=$settingsReturn.Match.Value
@@ -4525,6 +5341,7 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                     c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;keyboardPopupReady=$c171KeyboardPopupReady;scrollViewport=[ordered]@{height=$settingsOrigin.ViewHeight;viewY=$settingsOrigin.ViewY};scroll='PASS';tabShiftTab='PASS';pointerPopup='PASS'} } else { $null }
                     c172=if ($script:c172LiveWindowResize) { [ordered]@{liveResizes=@($c172OrdinaryResizes);popup=$c172PopupProof;sameWindowIdentityAcrossResizes=$true;proofDisabled=$true} } else { $null }
                     c173=$c173Boot2
+                    c175=$c175Boot2
                     defaultApps=$defaultApps;close='PASS';result='PASS'
                 }
             }
@@ -4631,7 +5448,7 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                 $defaultApps.reopen=$reopened
             }
             $settings=[ordered]@{launch='PASS';close='PASS';format='v2';loadMeta='PASS';ownership='modal=none capture=none drag=none';focusMarker=$notesFocus.Match.Value}
-            $integration=[ordered]@{managedFileExplorer=$notes;calculator=[ordered]@{display=56;screen=Join-Path $root 'calculator-56.ppm';screenSha256=$calcScreen};taskManager=$snapshot;settings=$settings;defaultApps=$defaultApps;c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;expanded=$c171Expanded;repeatedTransitions=2} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{liveResizes=@($c172OrdinaryResizes);sameWindowIdentityAcrossResizes=$true;proofDisabled=$true} } else { $null };c173=$c173Boot3;C164NotesActivation='PASS';C162NotesFocus=$true}
+            $integration=[ordered]@{managedFileExplorer=$notes;calculator=[ordered]@{display=56;screen=Join-Path $root 'calculator-56.ppm';screenSha256=$calcScreen};taskManager=$snapshot;settings=$settings;defaultApps=$defaultApps;c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;expanded=$c171Expanded;repeatedTransitions=2} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{liveResizes=@($c172OrdinaryResizes);sameWindowIdentityAcrossResizes=$true;proofDisabled=$true} } else { $null };c173=$c173Boot3;c175=$c173CrossApplication;C164NotesActivation='PASS';C162NotesFocus=$true}
         } else { throw "Unexpected C166 ordinary boot number $Number." }
         $full=Get-C166Serial $boot.serialPath
         if ($full -match '(?m)^PROOF-SCENARIO-|^\[C102-MANAGED-OUTPUT\] PROOF C166') {
@@ -4673,7 +5490,9 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     }
     $proofManifestPath=Join-Path (Join-Path $EvidenceRoot 'proof1-guest-runs') 'proof1-manifest.json'
     $historicalProofPrerequisite = $null
-    $hostManifestPath = if ($script:c172LiveWindowResize) {
+    $hostManifestPath = if ($script:c175ManagedNotesResize) {
+        Join-Path $EvidenceRoot 'c166r9-host-manifest.json'
+    } elseif ($script:c172LiveWindowResize) {
         Join-Path $RepoRoot 'out\dotnet\c167-default-apps\host-validation\c166r9-host-manifest.json'
     } elseif ($script:c167SettingsAcceptance) {
         Join-Path (Join-Path $script:c167EvidenceRoot 'host-validation') 'c166r9-host-manifest.json'
@@ -4981,7 +5800,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash) { throw 'Protected canonical kernel restoration failed after candidate build.' }
 
     $scanPaths=@($composite,$kernelCandidate,$ramdiskCandidate)
-    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF','C172-NATIVE-GEOMETRY','C172-MANAGED-GEOMETRY')
+    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF','C172-NATIVE-GEOMETRY','C172-MANAGED-GEOMETRY','C175-NATIVE-GEOMETRY','C175-MANAGED-GEOMETRY')
     $scanResults=@()
     foreach ($path in $scanPaths) {
         $text=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($path))
@@ -5035,6 +5854,19 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
         }
     }
 
+    # C175 keeps the proof-disabled production candidate isolated. Its three
+    # ordinary boots use separate per-boot ESP images and must not replace the
+    # user's pre-existing ESP/ramdisk.img modification.
+    $productionInstallation='PASS after clean candidate and all three ordinary boots passed'
+    if ($script:c175ManagedNotesResize) {
+        if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash -or
+            (Get-Sha256 $espKernel) -ne $baselineEspKernelHash -or
+            (Get-Sha256 $espRamdisk) -ne $baselineRamdiskHash) {
+            throw 'Isolated C175 production acceptance changed protected production media.'
+        }
+        $finalSlots=$preInstallSlots
+        $productionInstallation='PASS: proof-disabled production candidate booted from isolated media; protected repository media were retained'
+    } else {
     # All clean candidate gates have passed. Install the verified kernel and
     # ramdisk only now; the previous production hashes remain recoverable.
     if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash -or
@@ -5063,6 +5895,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     $finalSlots=Get-C166AssociationDiskState (Join-Path $RepoRoot 'ESP')
     if (@($finalSlots | Where-Object { $_.present }).Count -gt 0) {
         throw 'Installed clean production ESP contains association override slots.'
+    }
     }
     $qemuAfter=@(Get-CimInstance Win32_Process -Filter "Name = 'qemu-system-x86_64.exe'" |
         ForEach-Object { [ordered]@{pid=$_.ProcessId;path=$_.ExecutablePath;commandLine=$_.CommandLine} })
@@ -5109,7 +5942,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
         } else { $null }
         settingsSmoke=$ordinary[2].productionIntegration.settings
         finalAssociation=[ordered]@{slotsPresent=0;override='NoOverride (no persisted override files)';effectiveHandler='com.guidexos.apps.managed.notes';evidence='ordinary Managed File Explorer opens the exact C164 TXT fixture through the default handler'}
-        productionInstallation='PASS after clean candidate and all three ordinary boots passed'
+        productionInstallation=$productionInstallation
         qemuOwnership=[ordered]@{beforeOrdinary=@();afterOrdinary=$qemuAfter;runnerOwnedProcessesReaped=$true;unrelatedProcessesTerminated=0}
         protectedBaseline=[ordered]@{kernelSha256=$baselineKernelHash;espKernelSha256=$baselineEspKernelHash;ramdiskSha256=$baselineRamdiskHash;backupRoot=$protectedRoot}
         endingHead=(& git -C $RepoRoot rev-parse HEAD).Trim();acceptanceManifest='out/dotnet/c166a2-final-acceptance/c166a2-manifest.json'
@@ -5317,6 +6150,9 @@ if ($UseExistingProofProducts) {
         if ($script:c173ManagedFileExplorerResize) {
             $c167ManagedArgs += '-C173ManagedFileExplorerResize'
         }
+        if ($script:c175ManagedNotesResize) {
+            $c167ManagedArgs += '-C175ManagedNotesResize'
+        }
         if ($script:c171ManagedWindowLayout) {
             $c167ManagedArgs += '-ProofControl'
         }
@@ -5465,6 +6301,9 @@ if ($RunC167SettingsProofBoots) {
     }
     if ($script:c173ManagedFileExplorerResize) {
         $c167ManagedArgs += '-C173ManagedFileExplorerResize'
+    }
+    if ($script:c175ManagedNotesResize) {
+        $c167ManagedArgs += '-C175ManagedNotesResize'
     }
     if ($script:c171ManagedWindowLayout -or $script:c172LiveWindowResize -or
         $script:c173ManagedFileExplorerResize) {
