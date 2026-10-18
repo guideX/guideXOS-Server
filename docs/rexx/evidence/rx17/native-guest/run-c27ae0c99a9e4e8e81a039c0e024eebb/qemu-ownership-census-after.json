@@ -1,0 +1,17 @@
+﻿{
+    "captured_at_utc":  "2026-10-18T22:49:32.1996374Z",
+    "count":  2,
+    "processes":  [
+                      {
+                          "pid":  1872,
+                          "image":  "qemu-system-x86_64.exe",
+                          "command_line":  "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc-q35-8.2 -drive if=pflash,format=raw,readonly=on,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/ovmf-code.fd -drive if=pflash,format=raw,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/ovmf-vars.fd -drive if=none,id=esp,format=raw,file=fat:rw:ESP -device ide-hd,drive=esp -m 1280M -serial file:C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/serial.log -no-reboot -no-shutdown -boot menu=off,splash-time=0 -name guideXOS-R2-allocator-locator-interlifetime-gap-20261018 -display none -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -d guest_errors,cpu_reset -D C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/qemu-debug.log -qmp tcp:127.0.0.1:50620,server=on,wait=off"
+                      },
+                      {
+                          "pid":  10556,
+                          "image":  "qemu-system-x86_64.exe",
+                          "command_line":  "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc-q35-8.2 -drive if=pflash,format=raw,readonly=on,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/production-idle-01-20261018/A/ovmf-code.fd -drive if=pflash,format=raw,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/production-idle-01-20261018/A/ovmf-vars.fd -drive if=none,id=esp,format=raw,file=fat:rw:ESP -device ide-hd,drive=esp -m 1280M -serial file:C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/production-idle-01-20261018/A/serial.log -no-reboot -no-shutdown -boot menu=off,splash-time=0 -name guideXOS-R2-A -display none -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -d guest_errors,cpu_reset -D C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/production-idle-01-20261018/A/qemu-debug.log -qmp tcp:127.0.0.1:52782,server=on,wait=off"
+                      }
+                  ],
+    "command_lines_redacted":  false
+}

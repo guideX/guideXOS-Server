@@ -1,0 +1,7 @@
+RX17 isolated QEMU Console transcript
+Kernel SHA-256: 80b52591422fc1b322ab1f7c74e3bb255f79c9bedbf8b973f9a368d68bf26231
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx17\qemu-c27ae0c99a9e4e8e81a039c0e024eebb\guest\esp
+COMMAND: rexx /rx17-bitwise.rex | expected visible marker/status: RX17_NATIVE_BITWISE_DONE
+COMMAND: rexx /rx17-error-recovery.rex | expected visible marker/status: RX17_NATIVE_POST_ERROR_RESPONSIVE: 007F7F
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=23
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

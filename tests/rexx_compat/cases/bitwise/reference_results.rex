@@ -1,0 +1,25 @@
+if c2x(bitand('73'x,'27'x)) <> '23' then exit 1
+if c2x(bitand('13'x,'5555'x)) <> '1155' then exit 2
+if c2x(bitand('13'x,'5555'x,'74'x)) <> '1154' then exit 3
+if c2x(bitor('15'x,'24'x)) <> '35' then exit 4
+if c2x(bitor('15'x,'2456'x)) <> '3556' then exit 5
+if c2x(bitor('15'x,'2456'x,'f0'x)) <> '35F6' then exit 6
+if c2x(bitxor('12'x,'22'x)) <> '30' then exit 7
+if c2x(bitxor('1211'x,'22'x)) <> '3011' then exit 8
+if c2x(bitxor('1111'x,'444444'x)) <> '555544' then exit 9
+if c2x(bitxor('1111'x,'444444'x,'40'x)) <> '555504' then exit 10
+if c2x(bitand('13'x)) <> '13' then exit 11
+if c2x(bitor('13'x)) <> '13' then exit 12
+if c2x(bitxor('13'x)) <> '13' then exit 13
+if c2x(bitand('13'x,,'00'x)) <> '00' then exit 14
+if c2x(bitor('13'x,,'80'x)) <> '93' then exit 15
+if c2x(bitxor('13'x,,'ff'x)) <> 'EC' then exit 16
+if c2x(bitand(''x,'aabb'x)) <> 'AABB' then exit 17
+if length(bitor(''x,''x)) <> 0 then exit 18
+if length(bitxor(''x,''x)) <> 0 then exit 19
+if c2x(bitxor('00ff80'x,'0080ff'x)) <> '007F7F' then exit 20
+if c2x(bitand('','1234')) <> '31323334' then exit 21
+if c2x(bitxor('1234','')) <> '31323334' then exit 22
+if c2x(bitor('0013','')) <> '30303133' then exit 23
+if c2x(bitor(13)) <> '3133' then exit 24
+say 'RX17_BITWISE_REFERENCE_DONE'

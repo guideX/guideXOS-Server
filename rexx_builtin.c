@@ -2723,6 +2723,121 @@ static RexxVMStatus rexx_builtin_x2b(const RexxValue *arguments,
     return REXX_VM_STATUS_OK;
 }
 
+typedef enum RexxBuiltinBitwiseOperation {
+    REXX_BUILTIN_BITWISE_AND,
+    REXX_BUILTIN_BITWISE_OR,
+    REXX_BUILTIN_BITWISE_XOR
+} RexxBuiltinBitwiseOperation;
+
+/* Apply a classic REXX byte-string operation without interpreting bytes as
+ * numbers. The result is built once, with the longer operand's exact length. */
+static RexxVMStatus rexx_builtin_bitwise_string(
+    const RexxValue *arguments, size_t argument_count, RexxValue *result,
+    RexxBuiltinBitwiseOperation operation)
+{
+    RexxBuiltinStringView first, second, pad;
+    size_t output_length, overlap, index;
+    int has_pad;
+    char *output = NULL;
+    RexxVMStatus status;
+
+    if (arguments == NULL || argument_count == 0u || argument_count > 3u ||
+        arguments[0].type == REXX_VALUE_UNSET) {
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    if (operation != REXX_BUILTIN_BITWISE_AND &&
+        operation != REXX_BUILTIN_BITWISE_OR &&
+        operation != REXX_BUILTIN_BITWISE_XOR) {
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    }
+    status = rexx_builtin_string_view(&arguments[0], &first);
+    if (status != REXX_VM_STATUS_OK) return status;
+
+    second.bytes = rexx_builtin_empty;
+    second.length = 0u;
+    if (argument_count >= 2u &&
+        arguments[1].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_string_view(&arguments[1], &second);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+
+    has_pad = argument_count >= 3u &&
+              arguments[2].type != REXX_VALUE_UNSET;
+    pad.bytes = rexx_builtin_empty;
+    pad.length = 0u;
+    if (has_pad) {
+        status = rexx_builtin_string_view(&arguments[2], &pad);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (pad.length != 1u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+
+    output_length = first.length > second.length
+                        ? first.length : second.length;
+    if (output_length > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    status = rexx_builtin_allocate_result(result, output_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+
+    overlap = first.length < second.length ? first.length : second.length;
+    for (index = 0u; index < output_length; ++index) {
+        unsigned char left_byte, right_byte, combined;
+        if (index < first.length) {
+            left_byte = (unsigned char)first.bytes[index];
+        } else if (has_pad) {
+            left_byte = (unsigned char)pad.bytes[0];
+        } else {
+            left_byte = 0u;
+        }
+        if (index < second.length) {
+            right_byte = (unsigned char)second.bytes[index];
+        } else if (has_pad) {
+            right_byte = (unsigned char)pad.bytes[0];
+        } else {
+            right_byte = 0u;
+        }
+
+        if (index >= overlap && !has_pad) {
+            /* Without a pad classic REXX leaves the longer tail untouched. */
+            output[index] = first.length > second.length
+                                ? first.bytes[index] : second.bytes[index];
+            continue;
+        }
+        if (operation == REXX_BUILTIN_BITWISE_AND) {
+            combined = (unsigned char)(left_byte & right_byte);
+        } else if (operation == REXX_BUILTIN_BITWISE_OR) {
+            combined = (unsigned char)(left_byte | right_byte);
+        } else {
+            combined = (unsigned char)(left_byte ^ right_byte);
+        }
+        output[index] = (char)combined;
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_bitand(const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    return rexx_builtin_bitwise_string(arguments, argument_count, result,
+                                       REXX_BUILTIN_BITWISE_AND);
+}
+
+static RexxVMStatus rexx_builtin_bitor(const RexxValue *arguments,
+                                       size_t argument_count,
+                                       RexxValue *result)
+{
+    return rexx_builtin_bitwise_string(arguments, argument_count, result,
+                                       REXX_BUILTIN_BITWISE_OR);
+}
+
+static RexxVMStatus rexx_builtin_bitxor(const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    return rexx_builtin_bitwise_string(arguments, argument_count, result,
+                                       REXX_BUILTIN_BITWISE_XOR);
+}
+
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "LENGTH", 1u, 1u, rexx_builtin_length, NULL },
     { "LEFT", 2u, 3u, rexx_builtin_left, NULL },
@@ -2762,7 +2877,10 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "X2C", 1u, 1u, rexx_builtin_x2c, NULL },
     { "X2D", 1u, 2u, NULL, rexx_builtin_hex_to_decimal },
     { "B2X", 1u, 1u, rexx_builtin_b2x, NULL },
-    { "X2B", 1u, 1u, rexx_builtin_x2b, NULL }
+    { "X2B", 1u, 1u, rexx_builtin_x2b, NULL },
+    { "BITAND", 1u, 3u, rexx_builtin_bitand, NULL },
+    { "BITOR", 1u, 3u, rexx_builtin_bitor, NULL },
+    { "BITXOR", 1u, 3u, rexx_builtin_bitxor, NULL }
 };
 
 const RexxBuiltinDescriptor *rexx_builtin_lookup(const char *name,

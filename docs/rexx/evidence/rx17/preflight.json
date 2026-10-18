@@ -1,0 +1,35 @@
+{
+  "schema": "guidexos.rexx.rx17-preflight.v1",
+  "recorded_at_utc": "2026-10-18T22:38:42.5058376Z",
+  "branch": "REXX_SUPPORT",
+  "head": "4fa3a945690dc1b51ef507be5eb34f328f9fde13",
+  "accepted_rx16_head": "4fa3a945690dc1b51ef507be5eb34f328f9fde13",
+  "tracked_changes_before_rx17": 0,
+  "index_changes_before_rx17": 0,
+  "preexisting_untracked_status_entries": 59,
+  "current_status_entries_at_capture": 65,
+  "protected_root_artifact_count": 31,
+  "rx16_artifact_baseline_match": true,
+  "root_phase_file_present": false,
+  "stale_prompt_guard_hits": 0,
+  "rx17_equivalent_commit_found": false,
+  "rx17_dispatch_implementation_found": false,
+  "regina_executable": "NOT_FOUND",
+  "qemu_process_census": [
+    {
+      "pid": 1872,
+      "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "command_line": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc-q35-8.2 -drive if=pflash,format=raw,readonly=on,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/ovmf-code.fd -drive if=pflash,format=raw,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/ovmf-vars.fd -drive if=none,id=esp,format=raw,file=fat:rw:ESP -device ide-hd,drive=esp -m 1280M -serial file:C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/serial.log -no-reboot -no-shutdown -boot menu=off,splash-time=0 -name guideXOS-R2-allocator-locator-interlifetime-gap-20261018 -display none -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -d guest_errors,cpu_reset -D C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/qemu-debug.log -qmp tcp:127.0.0.1:50620,server=on,wait=off"
+    },
+    {
+      "pid": 20384,
+      "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "command_line": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc-q35-8.2 -drive if=pflash,format=raw,readonly=on,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/production-postfix-20261018/E/ovmf-code.fd -drive if=pflash,format=raw,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/production-postfix-20261018/E/ovmf-vars.fd -drive if=none,id=esp,format=raw,file=fat:rw:ESP -device ide-hd,drive=esp -m 1280M -serial file:C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/production-postfix-20261018/E/serial.log -no-reboot -no-shutdown -boot menu=off,splash-time=0 -name guideXOS-R2-E -display none -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -d guest_errors,cpu_reset -D C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/production-postfix-20261018/E/qemu-debug.log -qmp tcp:127.0.0.1:62449,server=on,wait=off"
+    },
+    {
+      "pid": 29712,
+      "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "command_line": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel tcg,thread=single -machine pc -smp 1 -drive if=pflash,format=raw,readonly=on,file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\OVMF.fd\" -drive file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c178-managed-calculator-resize\\settings-ui-proof-runs\\20261018-223231-5cb117de\\shared-writable-esp.img\",format=raw,if=ide,index=0 -m 1024M -vga std -display none -serial file:\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c178-managed-calculator-resize\\settings-ui-proof-runs\\20261018-223231-5cb117de\\boot2\\serial.log\" -qmp tcp:127.0.0.1:62470,server,nowait -boot order=c -no-reboot -no-shutdown -rtc base=utc,clock=host "
+    }
+  ]
+}

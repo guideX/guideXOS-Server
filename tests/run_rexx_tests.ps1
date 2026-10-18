@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,9 @@ if ($null -eq $gxxCommand) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX16') {
+$guardManifest = if ($Phase -eq 'RX17') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx17\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX16') {
     Join-Path $rootDir 'docs\rexx\evidence\rx16\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX15') {
     Join-Path $rootDir 'docs\rexx\evidence\rx15\protected-artifacts-start.json'
@@ -41,6 +43,7 @@ $plannedOutputs = @(
     'rexx_rx10_interpret_tests.exe', 'rexx_rx12_builtins_tests.exe',
     'rexx_rx13_string_editing_tests.exe', 'rexx_rx14_numeric_inspection_tests.exe',
     'rexx_rx15_conversion_tests.exe', 'rexx_rx16_literal_tests.exe',
+    'rexx_rx17_bitwise_tests.exe',
     'rexx_rx2_shell_bridge_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
@@ -70,6 +73,7 @@ $rx13Test = Join-Path $buildDirectory "rexx_rx13_string_editing_tests.exe"
 $rx14Test = Join-Path $buildDirectory "rexx_rx14_numeric_inspection_tests.exe"
 $rx15Test = Join-Path $buildDirectory "rexx_rx15_conversion_tests.exe"
 $rx16Test = Join-Path $buildDirectory "rexx_rx16_literal_tests.exe"
+$rx17Test = Join-Path $buildDirectory "rexx_rx17_bitwise_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -253,6 +257,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX16 literal test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX17 bitwise string built-in assertions and properties"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
+    (Join-Path $PSScriptRoot "rexx_rx17_bitwise_test.c") `
+    @commonSources -lm -o $rx17Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX17 bitwise test build failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Building RX2 C++ shell bridge integration tests"
 & $gxxCommand.Source -std=c++14 -Wall -Wextra -Wpedantic -Werror `
     (Join-Path $PSScriptRoot "rexx_rx2_shell_bridge_test.cpp") `
@@ -371,6 +384,12 @@ Write-Host "Running RX16 hexadecimal/binary literal assertions"
 & $rx16Test
 if ($LASTEXITCODE -ne 0) {
     throw "RX16 literal assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX17 bitwise string assertions and properties"
+& $rx17Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX17 bitwise assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
@@ -1013,6 +1032,32 @@ foreach ($fixture in Get-ChildItem -LiteralPath $rx16FixtureDirectory -Filter "*
     Write-Host "[PASS] RX16 fixture $($fixture.Name)"
 }
 
+$rx17FixtureDirectory = Join-Path $PSScriptRoot "rexx_compat\cases\bitwise"
+$script:rx17FixturePassed = 0
+foreach ($fixture in Get-ChildItem -LiteralPath $rx17FixtureDirectory -Filter "*.rex" | Sort-Object Name) {
+    $diagnosticPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".diag")
+    $outputPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".out")
+    $actual = Invoke-CapturedProcess $cliTest @($fixture.FullName)
+    $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if (Test-Path -LiteralPath $diagnosticPath) {
+        $expectedDiagnostic = (Get-Content -Raw -LiteralPath $diagnosticPath).Trim()
+        if ($actual.ExitCode -ne 1 -or $actual.Stdout.Length -ne 0 -or -not $actualText.Contains($expectedDiagnostic)) {
+            throw "RX17 fixture $($fixture.Name) failed its expected diagnostic. Exit=$($actual.ExitCode) Output=$actualText"
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $outputPath)) {
+            throw "RX17 fixture $($fixture.Name) has no .out expectation."
+        }
+        $expectedOutput = ((Get-Content -Raw -LiteralPath $outputPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        $stdoutText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        if ($actual.ExitCode -ne 0 -or $stdoutText -cne $expectedOutput -or $actual.Stderr.Length -ne 0) {
+            throw "RX17 fixture $($fixture.Name) output mismatch. Expected '$expectedOutput'; got '$actualText'/$($actual.ExitCode)."
+        }
+    }
+    ++$script:rx17FixturePassed
+    Write-Host "[PASS] RX17 fixture $($fixture.Name)"
+}
+
 $parserLimitPath = Join-Path $buildDirectory "parse_template_node_limit.rex"
 $parserLimitSource = "parse value '' with " + ((@('.') * 65540) -join ' ')
 [System.IO.File]::WriteAllText(
@@ -1088,6 +1133,7 @@ Write-Host "RX13 string editing fixtures passed: $script:rx13FixturePassed/$scri
 Write-Host "RX14 numeric and inspection fixtures passed: $script:rx14FixturePassed/$script:rx14FixturePassed"
 Write-Host "RX15 conversion fixtures passed: $script:rx15FixturePassed/$script:rx15FixturePassed"
 Write-Host "RX16 hexadecimal/binary literal fixtures passed: $script:rx16FixturePassed/$script:rx16FixturePassed"
+Write-Host "RX17 bitwise string fixtures passed: $script:rx17FixturePassed/$script:rx17FixturePassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"
 Write-Host "RX5 compatibility fixtures passed: $script:rx5Passed/$script:rx5Passed"

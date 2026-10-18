@@ -58,5 +58,41 @@
   "literals/invalid_binary_digit.rex": {
     "exit_code": 1,
     "reason": "Classic binary literals accept only zero and one."
+  },
+  "bitwise/bitand_empty_pad.rex": {
+    "exit_code": 1,
+    "reason": "BITAND rejects an explicitly supplied zero-length pad."
+  },
+  "bitwise/bitand_multibyte_pad.rex": {
+    "exit_code": 1,
+    "reason": "BITAND requires exactly one pad byte."
+  },
+  "bitwise/bitor_empty_pad.rex": {
+    "exit_code": 1,
+    "reason": "BITOR rejects an explicitly supplied zero-length pad."
+  },
+  "bitwise/bitor_multibyte_pad.rex": {
+    "exit_code": 1,
+    "reason": "BITOR requires exactly one pad byte."
+  },
+  "bitwise/bitxor_empty_pad.rex": {
+    "exit_code": 1,
+    "reason": "BITXOR rejects an explicitly supplied zero-length pad."
+  },
+  "bitwise/bitxor_multibyte_pad.rex": {
+    "exit_code": 1,
+    "reason": "BITXOR requires exactly one pad byte."
+  },
+  "bitwise/bitand_missing_first.rex": {
+    "exit_code": 1,
+    "reason": "BITAND requires string1."
+  },
+  "bitwise/bitor_missing_first.rex": {
+    "exit_code": 1,
+    "reason": "BITOR requires string1."
+  },
+  "bitwise/bitxor_missing_first.rex": {
+    "exit_code": 1,
+    "reason": "BITXOR requires string1."
   }
 }

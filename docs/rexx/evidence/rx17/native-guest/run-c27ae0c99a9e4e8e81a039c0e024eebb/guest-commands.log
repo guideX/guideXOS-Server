@@ -1,0 +1,4 @@
+[2026-10-18T22:49:16.9600252Z] rexx /rx17-bitwise.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx17\qemu-c27ae0c99a9e4e8e81a039c0e024eebb\screenshots-raw\rx17-01-bitwise-builtins.ppm
+[2026-10-18T22:49:26.0315980Z] rexx /rx17-error-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx17\qemu-c27ae0c99a9e4e8e81a039c0e024eebb\screenshots-raw\rx17-02-handled-error-and-recovery.ppm

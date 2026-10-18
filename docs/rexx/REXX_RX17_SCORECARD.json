@@ -1,0 +1,206 @@
+{
+  "schema": "guidexos.rexx.rx17-scorecard.v1",
+  "phase": "RX17",
+  "outcome": "A — Accepted",
+  "completed_at_utc": "2026-10-18T22:52:10Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "4fa3a945690dc1b51ef507be5eb34f328f9fde13",
+  "qualification_head_before_local_commit": "4fa3a945690dc1b51ef507be5eb34f328f9fde13",
+  "local_implementation_commit_sha": null,
+  "root_phase_file_present": false,
+  "accepted_prior_phase_not_duplicated": true,
+  "implemented_built_in_functions": [
+    {
+      "name": "BITAND",
+      "signature": "BITAND(string1[, string2[, pad]])",
+      "operation": "Bytewise AND"
+    },
+    {
+      "name": "BITOR",
+      "signature": "BITOR(string1[, string2[, pad]])",
+      "operation": "Bytewise inclusive OR"
+    },
+    {
+      "name": "BITXOR",
+      "signature": "BITXOR(string1[, string2[, pad]])",
+      "operation": "Bytewise exclusive OR"
+    }
+  ],
+  "semantics": {
+    "required_first_argument": "string1 is required and may be explicitly empty; a missing value raises the existing built-in argument error.",
+    "second_argument": "string2 defaults to the empty string; omitted middle arguments are retained by the call frame.",
+    "omitted_pad": "Combine through the shorter operand and copy the longer operand's unmatched tail unchanged.",
+    "explicit_pad": "Must contain exactly one byte; values 00 through FF extend the shorter operand on the right before applying the operation.",
+    "result": "Binary-safe length-bearing string; result length is the longer operand length.",
+    "numeric_values": "Existing REXX argument string conversion is used; raw byte strings are not rounded or processed through NUMERIC DIGITS.",
+    "runtime_result_limit_bytes": 16777216,
+    "rx16_packed_literal_limit_bytes_applies_to_runtime_strings": false,
+    "implementation": "Three BIFs share one internal bytewise helper and the existing result allocator; input buffers are preserved and output owns its allocation."
+  },
+  "hosted": {
+    "status": "PASS",
+    "command": "tests/run_rexx_tests.ps1 -Phase RX17",
+    "rx17_direct_assertions": 15843,
+    "rx17_direct_dispatch_cases": 2339,
+    "rx17_property_checks": 2304,
+    "rx17_property_seed": "0x52583137",
+    "rx17_direct_failures": 0,
+    "rx17_fixtures": {
+      "passed": 10,
+      "total": 10
+    },
+    "inherited_fixtures_rx3_through_rx16": {
+      "passed": 269,
+      "total": 269
+    },
+    "all_fixtures_rx3_through_rx17": {
+      "passed": 279,
+      "total": 279
+    },
+    "cli_regressions": {
+      "passed": 20,
+      "total": 20
+    },
+    "rx1_runtime_integration_cases": {
+      "passed": 11,
+      "total": 11
+    },
+    "resource_limit_checks": {
+      "passed": 3,
+      "total": 3
+    },
+    "reported_direct_c_assertions_rx2_through_rx17": 19623,
+    "failures": 0,
+    "allocation_failure_injection": "PASS — each BIF returned out-of-memory without publishing a result, preserved inputs, recovered on the next call, and left no live allocator blocks.",
+    "property_method": "Independent bytewise oracle over unequal-length and padded cases; equal-length identities, commutativity, and De Morgan relationships checked with the fixed seed and hand-built boundary vectors.",
+    "evidence": "docs/rexx/evidence/rx17/hosted-qualification.log"
+  },
+  "portable_compatibility": {
+    "status": "PASS local expected results",
+    "cases": 193,
+    "guideXOS_expected_exit": 193,
+    "regina": "NOT_RUN",
+    "regina_reason": "No Regina executable was found in PATH; no system-wide installation was attempted.",
+    "independent_compatibility_percentage": null,
+    "evidence": "docs/rexx/evidence/rx17/differential/results.json",
+    "summary": "All 193 local expected-result corpus cases completed with their expected exit status under guideXOS."
+  },
+  "sanitizers": {
+    "status": "PASS",
+    "address": {
+      "targets_built_and_run": 20,
+      "failures": 0,
+      "findings": 0,
+      "rx17_assertions": 15843,
+      "rx17_reported_property_cases": 1792,
+      "rx17_property_seed": "0x52583137",
+      "evidence": "docs/rexx/evidence/rx17/sanitizer-address-5ee0129c847245a295aebb30d37320b2"
+    },
+    "undefined_behavior": {
+      "targets_built_and_run": 20,
+      "failures": 0,
+      "findings": 0,
+      "rx17_assertions": 15843,
+      "rx17_reported_property_cases": 1792,
+      "rx17_property_seed": "0x52583137",
+      "evidence": "docs/rexx/evidence/rx17/sanitizer-undefined-f349f0baae0445ff845c9d68a7b05ce8"
+    },
+    "counter_note": "The sanitizer runs preceded a test-counter-only correction; their 1,792 count is retained as recorded. The property checks already ran in those binaries; the later hosted run reports the corrected 2,304 total.",
+    "local_corpus_cases_each": 193,
+    "regina_differential": "NOT_RUN"
+  },
+  "freestanding_amd64": {
+    "status": "PASS — compilation and link",
+    "rexx_c_objects_linked": 9,
+    "freestanding_flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "kernel_elf": "build/rexx/rx17/native-amd64-6423d52cdd294d888d37d981c33c128c/amd64/bin/kernel.elf",
+    "kernel_sha256": "80b52591422fc1b322ab1f7c74e3bb255f79c9bedbf8b973f9a368d68bf26231",
+    "link_evidence": "docs/rexx/evidence/rx17/native-build/native-link-evidence-6423d52cdd294d888d37d981c33c128c.json"
+  },
+  "qemu_guest": {
+    "status": "PASS",
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "run_id": "c27ae0c99a9e4e8e81a039c0e024eebb",
+    "guest_evidence": "docs/rexx/evidence/rx17/native-guest/run-c27ae0c99a9e4e8e81a039c0e024eebb",
+    "commands_demonstrated": [
+      "rx17-bitwise.rex",
+      "rx17-error-recovery.rex"
+    ],
+    "functions_demonstrated": [
+      "BITAND",
+      "BITOR",
+      "BITXOR"
+    ],
+    "explicit_padding": "PASS",
+    "binary_safe_nul_and_high_bit_result": "PASS",
+    "handled_error": "PASS",
+    "post_error_responsiveness": "PASS — guest displayed RX17_NATIVE_POST_ERROR_RESPONSIVE: 007F7F",
+    "network_disabled": true,
+    "disposable_media": true,
+    "production_media_used": false,
+    "staged_kernel_hash_matches": true,
+    "owned_qemu_pid": 3124,
+    "qmp_port": 52772,
+    "qmp_shutdown_acknowledged": true,
+    "owned_qemu_process_remaining": false,
+    "process_censuses": {
+      "preflight": [1872, 20384, 29712],
+      "pre_run": [1872],
+      "immediate_post_shutdown": [1872, 10556],
+      "final": [1872, 10556],
+      "preflight_pids_absent_before_launch": [20384, 29712],
+      "additional_foreign_pids_seen_after_launch": [10556],
+      "control_sent_to_foreign_processes": false,
+      "foreign_process_changes_cause": "Unknown. No control was sent to any foreign QEMU process.",
+      "evidence": "docs/rexx/evidence/rx17/native-guest/run-c27ae0c99a9e4e8e81a039c0e024eebb/qemu-process-reconciliation.json"
+    }
+  },
+  "protected_artifacts": {
+    "status": "PASS",
+    "root_obj_pdb_count": 31,
+    "hashes_unchanged": 31,
+    "missing": 0,
+    "modified": 0,
+    "final_comparison": "docs/rexx/evidence/rx17/protected-artifacts-final.json",
+    "baseline": "docs/rexx/evidence/rx17/protected-artifacts-start.json"
+  },
+  "inventory": {
+    "rows": 75,
+    "implemented_total": 47,
+    "not_implemented": 26,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "rx17_implementations": 3,
+    "path": "docs/rexx/REXX_RX17_BUILTIN_INVENTORY.csv"
+  },
+  "recommended_rx18_scope": {
+    "family": "Classic string built-ins",
+    "functions": [
+      "ABBREV",
+      "CENTER",
+      "CENTRE"
+    ],
+    "rationale": "A portable, closely related string-function group that extends RX12/RX13 behavior with documented argument handling and byte-preserving output, without host dependencies."
+  },
+  "limits_and_deferred": [
+    "Regina differential comparison unavailable; no independent compatibility percentage calculated.",
+    "Byte semantics follow the target character representation; no ASCII/EBCDIC transcoding is performed.",
+    "General runtime strings remain limited to 16 MiB by the existing runtime cap; RX16's 250-byte packed literal limit does not apply to runtime operands.",
+    "The sanitizer run's property counter predates the reporting-only correction and is recorded as 1,792; the final hosted run reports 2,304."
+  ],
+  "official_references": [
+    "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-bitand-bit-by-bit",
+    "https://www.ibm.com/docs/en/zvm/7.2?topic=functions-bitor-bit-by-bit",
+    "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-bitxor-bit-by-bit-exclusive"
+  ],
+  "evidence_directory": "docs/rexx/evidence/rx17/",
+  "preexisting_untracked_status_entries_preserved": 59,
+  "generated_build_outputs": "Build products remain under build/rexx/rx17 and are excluded from the local commit."
+}

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17')]
     [string]$Phase = 'RX12R1',
     [string]$MakeExecutable = '',
     [string]$OutputEvidenceRoot = ''
@@ -12,7 +12,9 @@ if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
 }
 $kernelDir = Join-Path $rootDir 'kernel'
 $phaseRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())"
-$guardManifest = if ($Phase -eq 'RX16') {
+$guardManifest = if ($Phase -eq 'RX17') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx17\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX16') {
     Join-Path $rootDir 'docs\rexx\evidence\rx16\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX15') {
     Join-Path $rootDir 'docs\rexx\evidence\rx15\protected-artifacts-start.json'

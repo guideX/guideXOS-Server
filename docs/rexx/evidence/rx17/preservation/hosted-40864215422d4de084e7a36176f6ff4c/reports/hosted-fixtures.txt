@@ -1,0 +1,5 @@
+RX17 artifact preservation: PASS
+Stage: hosted-fixtures
+Verified UTC: 2026-10-18T22:41:49.8864563Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
