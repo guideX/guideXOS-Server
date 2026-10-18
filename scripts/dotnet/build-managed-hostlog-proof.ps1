@@ -34,6 +34,7 @@ param(
     [switch]$C166OrdinaryBuild,
     [switch]$C173ManagedFileExplorerResize,
     [switch]$C175ManagedNotesResize,
+    [switch]$C177ManagedNotesNewlineSave,
     [switch]$C167DefaultAppsProof,
     [switch]$ProofControl,
     [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite", "C167ProofComposite")]
@@ -58,6 +59,9 @@ if ($C164FileActivationProof) {
 }
 if ($C175ManagedNotesResize -and -not $C173ManagedFileExplorerResize) {
     throw 'C175 Managed Notes resizing requires the shared C172/C173 compositor resize support.'
+}
+if ($C177ManagedNotesNewlineSave -and -not $C175ManagedNotesResize) {
+    throw 'C177 Managed Notes newline/save proof requires the C175 Notes application lane.'
 }
 if ($C162ManagedTaskManagerClose) {
     $C161ManagedTaskManager = $true
@@ -546,6 +550,9 @@ try {
         }
         $publishProperties += "-p:HostLogProofC175IncludeFocusedTests=true"
         $publishProperties += "-p:HostLogProofC176IncludeFocusedTests=true"
+        if ($C177ManagedNotesNewlineSave) {
+            $publishProperties += "-p:HostLogProofC177IncludeFocusedTests=true"
+        }
     }
     if ($C164FileActivationProof) {
         $publishProperties += "-p:HostLogProofC164FileActivationProof=true"
@@ -632,6 +639,13 @@ if ($C173ManagedFileExplorerResize -and $ProofControl) {
     }
     if ($C175ManagedNotesResize -and -not $artifactText.Contains('C176-NOTES-NAVIGATION')) {
         throw "C176 focused composite is missing managed navigation marker 'C176-NOTES-NAVIGATION'."
+    }
+    if ($C177ManagedNotesNewlineSave) {
+        foreach ($requiredMarker in @('C177-NOTES-NEWLINE', 'C177-SAVE-PROOF')) {
+            if (-not $artifactText.Contains($requiredMarker)) {
+                throw "C177 focused composite is missing required newline/save marker '$requiredMarker'."
+            }
+        }
     }
 }
 

@@ -470,8 +470,8 @@ public static class GuideXosTextAreaC176Tests
         if (!MoveRight(area, 2) ||
             area.HandleKey(GuideXosTextInputKey.Enter) !=
                 GuideXosTextAreaEditResult.Changed ||
-            !area.ToUtf8().AsSpan().SequenceEqual("ab\n\r\ncd"u8) ||
-            !IsValidCaretBoundary("ab\n\r\ncd"u8, area.CaretIndex))
+            !area.ToUtf8().AsSpan().SequenceEqual("ab\r\n\r\ncd"u8) ||
+            !IsValidCaretBoundary("ab\r\n\r\ncd"u8, area.CaretIndex))
         {
             return false;
         }
@@ -480,7 +480,7 @@ public static class GuideXosTextAreaC176Tests
             area.ToUtf8().AsSpan().SequenceEqual("ab\r\ncd"u8) &&
             !document.Dirty && area.Redo() ==
                 GuideXosTextAreaEditResult.Changed &&
-            area.ToUtf8().AsSpan().SequenceEqual("ab\n\r\ncd"u8) &&
+            area.ToUtf8().AsSpan().SequenceEqual("ab\r\n\r\ncd"u8) &&
             document.Dirty;
     }
 

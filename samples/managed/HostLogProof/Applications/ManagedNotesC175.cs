@@ -131,6 +131,9 @@ public sealed partial class ManagedNotes
 #if HOSTLOGPROOF_C176_MANAGED_NOTES_NAVIGATION
     private static bool s_c176NavigationTestsRun;
 #endif
+#if HOSTLOGPROOF_C177_MANAGED_NOTES_NEWLINE_SAVE
+    private static bool s_c177NewlineSaveTestsRun;
+#endif
 
     internal int C175WindowWidth => _c175WindowWidth;
     internal int C175WindowHeight => _c175WindowHeight;

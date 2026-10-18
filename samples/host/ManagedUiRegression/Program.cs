@@ -133,5 +133,15 @@ bool c176StressPassed = RunSuite("C176-NotesNavigationStress",
 allPassed &= c176StressPassed;
 Console.WriteLine($"C176-STRESS navigation={GuideXosTextAreaC176Tests.NavigationOperationCount} alternating={GuideXosTextAreaC176Tests.AlternatingResizeCount} navigationResize={GuideXosTextAreaC176Tests.NavigationResizeCount} rejected={GuideXosTextAreaC176Tests.RejectedGeometryCount} lifecycles={GuideXosTextAreaC176Tests.LifecycleCount} allocationBytes={GuideXosTextAreaC176Tests.ResizeAllocationBytes} drift={GuideXosTextAreaC176Tests.DriftCount} result={(c176StressPassed ? "PASS" : "FAIL")}");
 
+allPassed &= RunSuite("C177-NotesNewline",
+    GuideXosTextAreaC177Tests.CaseCount,
+    () => GuideXosTextAreaC177Tests.Run(null));
+Console.WriteLine($"C177-NOTES-NEWLINE-DETAIL firstFailedCase={GuideXosTextAreaC177Tests.FirstFailedCase}");
+bool c177StressPassed = RunSuite("C177-NotesNewlineStress",
+    GuideXosTextAreaC177Tests.StressCaseCount,
+    () => GuideXosTextAreaC177Tests.RunStress(null));
+allPassed &= c177StressPassed;
+Console.WriteLine($"C177-STRESS operations={GuideXosTextAreaC177Tests.EditingNavigationOperationCount} mixedInsertions={GuideXosTextAreaC177Tests.MixedInsertionCount} mixedRemovals={GuideXosTextAreaC177Tests.MixedRemovalCount} capacityRejected={GuideXosTextAreaC177Tests.CapacityRejectionCount} alternatingResizes={GuideXosTextAreaC177Tests.AlternatingResizeCount} rejectedGeometry={GuideXosTextAreaC177Tests.RejectedGeometryCount} lifecycles={GuideXosTextAreaC177Tests.LifecycleCount} roundTrips={GuideXosTextAreaC177Tests.RoundTripCount} resizeAllocationBytes={GuideXosTextAreaC177Tests.ResizeAllocationBytes} geometryDrift={GuideXosTextAreaC177Tests.GeometryDriftCount} result={(c177StressPassed ? "PASS" : "FAIL")}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

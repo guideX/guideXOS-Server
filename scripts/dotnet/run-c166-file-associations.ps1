@@ -14,6 +14,7 @@ param(
     [switch]$C173ManagedFileExplorerResize,
     [switch]$C175ManagedNotesResize,
     [switch]$C176ManagedNotesNavigation,
+    [switch]$C177ManagedNotesNewlineSave,
     [switch]$C167SettingsDefaultApps,
     [switch]$ReuseC167ProofKernel,
     [switch]$ReuseC167ProofComposite,
@@ -39,6 +40,7 @@ $script:c172LiveWindowResize = [bool]$C172LiveWindowResize
 $script:c173ManagedFileExplorerResize = [bool]$C173ManagedFileExplorerResize
 $script:c175ManagedNotesResize = [bool]$C175ManagedNotesResize
 $script:c176ManagedNotesNavigation = [bool]$C176ManagedNotesNavigation
+$script:c177ManagedNotesNewlineSave = [bool]$C177ManagedNotesNewlineSave
 $script:c173ManagedExplorerHeight = 390
 $script:qemuAccelerator = $QemuAccelerator
 $script:c175FocusedEvidence = [bool]$RunC167SettingsProofBoots
@@ -101,6 +103,9 @@ if ($C175ManagedNotesResize -and -not $C173ManagedFileExplorerResize) {
 if ($C176ManagedNotesNavigation -and -not $C175ManagedNotesResize) {
     throw 'C176 Notes navigation evidence reuses the accepted C175 Managed Notes resize lane and requires -C175ManagedNotesResize.'
 }
+if ($C177ManagedNotesNewlineSave -and -not $C176ManagedNotesNavigation) {
+    throw 'C177 newline/save evidence extends the existing Notes navigation lane and requires -C176ManagedNotesNavigation.'
+}
 if ($ReuseC167ProofKernel -and -not $RunC167SettingsProofBoots) {
     throw 'ReuseC167ProofKernel applies only to the real Settings UI proof lane.'
 }
@@ -118,7 +123,9 @@ if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
         Join-Path $RepoRoot 'out\dotnet\c166r9-host-validation'
     } elseif ($C172LiveWindowResize) {
         if ($C175ManagedNotesResize) {
-            if ($C176ManagedNotesNavigation) {
+            if ($C177ManagedNotesNewlineSave) {
+                Join-Path $RepoRoot 'out\dotnet\c177-managed-notes-newline-save-policy'
+            } elseif ($C176ManagedNotesNavigation) {
                 Join-Path $RepoRoot 'out\dotnet\c176-managed-notes-navigation'
             } else { Join-Path $RepoRoot 'out\dotnet\c175-managed-notes-resize' }
         } elseif ($C173ManagedFileExplorerResize) {
@@ -670,7 +677,33 @@ function Write-C172HostedTestManifest([string]$EvidenceRoot,[string]$HostManifes
             $hostManifest.c176ManagedNotesNavigation.lifecycleCycles -eq 100 -and
             $hostManifest.c176ManagedNotesNavigation.hotPathAllocationBytes -eq 0 -and
             $hostManifest.c176ManagedNotesNavigation.driftCount -eq 0
-        ($legacyC173Host -or $c174Host -or $c175Host -or $c176Host) -and
+        $c177Host = $hostManifest.phase -eq
+            'C177-managed-notes-newline-save-policy-host-regression' -and
+            $hostManifest.focusedSummary.suites -eq 30 -and
+            $hostManifest.focusedSummary.cases -eq 823 -and
+            $hostManifest.c174SharedManagedResize.focusedCases -eq 22 -and
+            $hostManifest.c174SharedManagedResize.hotPathAllocationBytes -eq 0 -and
+            $hostManifest.c174SharedManagedResize.driftCount -eq 0 -and
+            $hostManifest.c175ManagedNotesResize.focusedCases -eq 22 -and
+            $hostManifest.c175ManagedNotesResize.hotPathAllocationBytes -eq 0 -and
+            $hostManifest.c175ManagedNotesResize.driftCount -eq 0 -and
+            $hostManifest.c176ManagedNotesNavigation.focusedCases -eq 20 -and
+            $hostManifest.c176ManagedNotesNavigation.hotPathAllocationBytes -eq 0 -and
+            $hostManifest.c176ManagedNotesNavigation.driftCount -eq 0 -and
+            $hostManifest.c177ManagedNotesNewlineSave.focusedCases -eq 23 -and
+            $hostManifest.c177ManagedNotesNewlineSave.editingNavigationOperations -eq 1000 -and
+            $hostManifest.c177ManagedNotesNewlineSave.mixedDelimiterInsertions -eq 250 -and
+            $hostManifest.c177ManagedNotesNewlineSave.mixedDelimiterRemovals -eq 250 -and
+            $hostManifest.c177ManagedNotesNewlineSave.capacityRejections -eq 250 -and
+            $hostManifest.c177ManagedNotesNewlineSave.alternatingResizes -eq 500 -and
+            $hostManifest.c177ManagedNotesNewlineSave.rejectedGeometryRequests -eq 250 -and
+            $hostManifest.c177ManagedNotesNewlineSave.lifecycleCycles -eq 100 -and
+            $hostManifest.c177ManagedNotesNewlineSave.serializationRoundTrips -eq 100 -and
+            $hostManifest.c177ManagedNotesNewlineSave.resizeAllocationBytes -eq 0 -and
+            $hostManifest.c177ManagedNotesNewlineSave.geometryDriftCount -eq 0 -and
+            $hostManifest.c177ManagedNotesNewlineSave.firstFailedCase -eq 0 -and
+            $hostManifest.c177ManagedNotesNewlineSave.result -eq 'PASS'
+        ($legacyC173Host -or $c174Host -or $c175Host -or $c176Host -or $c177Host) -and
             $hostManifest.c173ManagedFileExplorerResize.focusedCases -eq 47
     } else {
         $hostManifest.phase -eq 'C172-managed-window-resize-host-regression' -and
@@ -2350,10 +2383,16 @@ function Focus-C175ExistingManagedNotes(
     }
     if ($script:c175FocusedEvidence -and -not $SkipC176ResultCheck) {
         $serial = Get-C166Serial $Boot.serialPath
-        foreach ($marker in @(
-            '^\[C102-MANAGED-OUTPUT\] C176-NOTES-NAVIGATION focused=20 result=PASS\r?$')) {
+        $requiredMarkers = @(
+            '^\[C102-MANAGED-OUTPUT\] C176-NOTES-NAVIGATION focused=20 result=PASS\r?$')
+        if ($script:c177ManagedNotesNewlineSave) {
+            $requiredMarkers += @(
+                '^\[C102-MANAGED-OUTPUT\] C177-NOTES-NEWLINE focused=23 result=PASS\r?$',
+                '^\[C102-MANAGED-OUTPUT\] C177-SAVE-PROOF unchanged=exact modified=exact reopen=exact failure=preserved invalid=explicit capacity=no-file result=PASS\r?$')
+        }
+        foreach ($marker in $requiredMarkers) {
             if ($serial -notmatch "(?m)$marker") {
-                throw "Focused C176 guest proof is missing required in-guest result: $marker"
+                throw "Focused Notes guest proof is missing required in-guest result: $marker"
             }
         }
     }
@@ -2815,7 +2854,7 @@ function Press-C176NotesKey([string]$Code,[object]$Boot) {
 }
 
 function Press-C176NotesControlKey([string]$Code,[object]$Boot) {
-    if ($Code -notin @('z','y')) { throw "Unsupported C176 history key '$Code'." }
+    if ($Code -notin @('z','y','s','o')) { throw "Unsupported C176 control key '$Code'." }
     $markerStart = (Get-C166Serial $Boot.serialPath).Length
     Send-C166QmpEvents ([int]$Boot.qmpPort) `
         @((New-C166Key 'ctrl' $true),(New-C166Key $Code $true),
@@ -2823,6 +2862,93 @@ function Press-C176NotesControlKey([string]$Code,[object]$Boot) {
         $Boot.qmpLogPath 90
     Wait-C176NotesKey $Boot $markerStart `
         ('{0:X8}' -f [int][char]$Code) 0 1
+}
+
+function Invoke-C177ManagedNotesNewlineSave([object]$Boot,
+    [string]$EvidenceRoot,[string]$Stage,[string]$Format) {
+    $lines = Get-C176FixtureLines $Format
+    $separator = if ($Format -eq 'crlf') { "`r`n" } else { "`n" }
+    $sourceText = $lines -join $separator
+    $sourceBytes = [System.Text.Encoding]::ASCII.GetByteCount($sourceText)
+    $newlineBytes = if ($Format -eq 'crlf') { 2 } else { 1 }
+    $expectedBytes = $sourceBytes + $newlineBytes
+    $path = if ($Format -eq 'crlf') {
+        '/system/apps/zzzzcr.txt'
+    } else {
+        '/system/apps/zzzzlf.txt'
+    }
+
+    Ensure-C175NotesResizeOrigin $Boot
+    Click-C166Screen ($script:c175NotesOriginX+28) `
+        ($script:c175NotesOriginY+24+84+9) $Boot
+    Press-C176NotesKey 'home' $Boot
+    for ($line = 1; $line -lt $lines.Count; $line++) {
+        Press-C176NotesKey 'up' $Boot
+    }
+    for ($line = 1; $line -lt $lines.Count; $line++) {
+        Press-C176NotesKey 'down' $Boot
+    }
+    Press-C176NotesKey 'end' $Boot
+    Press-C176NotesKey 'ret' $Boot
+    $enterScreenshot = Join-Path $EvidenceRoot `
+        "$Stage-c177-notes-$Format-enter.ppm"
+    $enterScreenshotSha256 = Capture-C167GuestScreen $Boot $enterScreenshot
+
+    foreach ($key in @('z','y')) {
+        Press-C176NotesControlKey $key $Boot
+    }
+    $redoScreenshot = Join-Path $EvidenceRoot `
+        "$Stage-c177-notes-$Format-redo.ppm"
+    $redoScreenshotSha256 = Capture-C167GuestScreen $Boot $redoScreenshot
+
+    $saveStart = (Get-C166Serial $Boot.serialPath).Length
+    Press-C176NotesControlKey 's' $Boot
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C102-MANAGED-OUTPUT\] C152-SAVE result=PASS verify=read-back exact=true bytes=bounded dirty=false\r?$' `
+        $saveStart 15)
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C102-MANAGED-OUTPUT\] C156-SHORTCUT key=s command=Save shift=false enabled=true consumed=true keychar=none text-leak=false result=PASS' `
+        $saveStart 15)
+
+    Ensure-C175NotesResizeOrigin $Boot
+    $openStart = (Get-C166Serial $Boot.serialPath).Length
+    Click-C166Screen ($script:c175NotesOriginX+65) `
+        ($script:c175NotesOriginY+24+220+14) $Boot
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C102-MANAGED-OUTPUT\] C151-DIALOG open=PASS modal=active member-registration=3 popup=closed capture=none drag=none result=PASS\r?$' `
+        $openStart 15)
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C102-MANAGED-OUTPUT\] C151-DIRECTORY path=/system/apps entries=\d+ rows=\d+\r?$' `
+        $openStart 15)
+    Press-C166Key 'end' $Boot
+    if ($Format -eq 'crlf') { Press-C166Key 'up' $Boot }
+    $tabStart = (Get-C166Serial $Boot.serialPath).Length
+    Press-C166Key 'tab' $Boot
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C102-MANAGED-OUTPUT\] C151-KEYBOARD key=Tab focus=2 modal=true result=PASS\r?$' `
+        $tabStart 10)
+    Press-C166Key 'ret' $Boot
+    $detailPattern = '^\[C102-MANAGED-OUTPUT\] C151-LOAD-DETAIL bytes=' +
+        $expectedBytes + ' path=' + [regex]::Escape($path) + '\r?$'
+    [void](Wait-C166Serial $Boot.serialPath $detailPattern $openStart 20)
+    $firstLine = [regex]::Escape([string]$lines[0])
+    [void](Wait-C166Serial $Boot.serialPath `
+        ('^\[C102-MANAGED-OUTPUT\] C151-CONTENT first-line=' +
+            $firstLine + '(?:\r? visible=Notes result=PASS)?\r?$') $openStart 15)
+    $reopenScreenshot = Join-Path $EvidenceRoot `
+        "$Stage-c177-notes-$Format-reopened.ppm"
+    $reopenScreenshotSha256 = Capture-C167GuestScreen $Boot $reopenScreenshot
+
+    return [ordered]@{
+        status='PASS';format=$Format;path=$path;sourceBytes=$sourceBytes
+        expectedSavedBytes=$expectedBytes;reopenedBytes=$expectedBytes
+        newlineStyle=if ($Format -eq 'crlf') { 'CRLF (2 bytes)' } else { 'LF (1 byte)' }
+        realVfsSave='C152 read-back exact; Ctrl+S'
+        reopenedThrough='C151 Open dialog; exact saved byte count and first line observed'
+        enterScreenshot=[ordered]@{path=$enterScreenshot;sha256=$enterScreenshotSha256}
+        redoScreenshot=[ordered]@{path=$redoScreenshot;sha256=$redoScreenshotSha256}
+        reopenedScreenshot=[ordered]@{path=$reopenScreenshot;sha256=$reopenScreenshotSha256}
+    }
 }
 
 function Open-C176ManagedNotesDocument([object]$Boot,[string]$EvidenceRoot,
@@ -3008,6 +3134,25 @@ function Invoke-C176ManagedNotesNavigationProof([object]$Boot,
         "$Stage-c176-notes-$Format-after-navigation.ppm"
     $afterContinueScreenshotSha256 = Capture-C167GuestScreen $Boot `
         $afterContinueScreenshot
+    $c177NewlineSave = $null
+    if ($script:c177ManagedNotesNewlineSave) {
+        $c177NewlineSave = Invoke-C177ManagedNotesNewlineSave $Boot `
+            $EvidenceRoot $Stage $Format
+        if ($Concurrent) {
+            $afterSave = Get-C166Serial $Boot.serialPath
+            $notesIdentitySaved = Get-C175ManagedNotesIdentity $afterSave
+            $settingsIdentitySaved = Get-C173ManagedSettingsIdentity $afterSave
+            $explorerIdentitySaved = Get-C173ManagedExplorerIdentity $afterSave
+            if ($notesIdentitySaved.generation -ne $notesIdentity.generation -or
+                $notesIdentitySaved.window -ne $notesIdentity.window -or
+                $settingsIdentitySaved.generation -ne $settingsIdentity.generation -or
+                $settingsIdentitySaved.window -ne $settingsIdentity.window -or
+                $explorerIdentitySaved.generation -ne $explorerIdentity.generation -or
+                $explorerIdentitySaved.window -ne $explorerIdentity.window) {
+                throw "$Stage C177 Notes save/reopen changed a concurrent application identity."
+            }
+        }
+    }
 
     return [ordered]@{
         status='PASS';format=$Format;document=$opened
@@ -3020,6 +3165,7 @@ function Invoke-C176ManagedNotesNavigationProof([object]$Boot,
         } else { 'no text edits' }
         concurrentWindowIdentitiesPreserved=if ($Concurrent) {$true} else {$null}
         returnedToNotesAndContinuedNavigation=$continuedNavigation
+        c177NewlineSave=$c177NewlineSave
         navigationScreenshot=[ordered]@{path=$navigationScreenshot;sha256=$navigationScreenshotSha256}
         afterNavigationScreenshot=[ordered]@{path=$afterContinueScreenshot;sha256=$afterContinueScreenshotSha256}
     }
@@ -5408,6 +5554,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             'samples/managed/HostLogProof/Applications/ManagedNotesC175.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosTextArea.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosTextAreaC176Tests.cs',
+            'samples/managed/HostLogProof/GuideXos/GuideXosTextAreaC177Tests.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedFileExplorerC163.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174.cs',
             'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174Tests.cs',
@@ -5467,6 +5614,15 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
                 (-not $c176.returnedToNotesAndContinuedNavigation -or
                  -not $c176.concurrentWindowIdentitiesPreserved)) {
                 throw 'C176 Boot 3 did not preserve concurrent application identities and continue Notes navigation.'
+            }
+            $c177 = if ($c176) {
+                Get-C173RecordValue $c176 'c177NewlineSave'
+            } else { $null }
+            if ($script:c177ManagedNotesNewlineSave -and
+                (-not $c177 -or $c177.status -ne 'PASS' -or
+                 $c177.reopenedBytes -ne $c177.expectedSavedBytes -or
+                 $c177.path -notmatch '^/system/apps/zzzz(?:lf|cr)\.txt$')) {
+                throw "Focused proof boot $($bootRecord.stage) lacks passing C177 Enter/save/reopen evidence."
             }
             $serialPath=[System.IO.Path]::GetFullPath($bootRecord.serialPath)
             $serialHash=Get-Sha256 $serialPath
@@ -5530,6 +5686,13 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
                 if ($reference -and $reference.screenshot) {
                     $refs += [ordered]@{path=[string]$reference.screenshot;sha256=[string]$reference.screenshotSha256}
                 }
+                $c177 = Get-C173RecordValue $c176 'c177NewlineSave'
+                if ($c177) {
+                    foreach ($property in @('enterScreenshot','redoScreenshot','reopenedScreenshot')) {
+                        $reference = Get-C173RecordValue $c177 $property
+                        if ($reference -and $reference.path) { $refs += $reference }
+                    }
+                }
             }
             foreach ($reference in @($c173.resizes)) {
                 if ($reference.screenshot) { $refs += [ordered]@{path=$reference.screenshot;sha256=$reference.screenshotSha256} }
@@ -5580,6 +5743,17 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             @($c176Boots | Where-Object { -not $_ -or $_.status -ne 'PASS' }).Count -gt 0) {
             throw 'C176 focused proof did not record passing LF, CRLF, and concurrent Notes scenarios.'
         }
+        $c177Boot1 = Get-C173RecordValue $c176Boot1 'c177NewlineSave'
+        $c177Boot2 = Get-C173RecordValue $c176Boot2 'c177NewlineSave'
+        $c177Boot3 = Get-C173RecordValue $c176Boot3 'c177NewlineSave'
+        $c177Boots = @($c177Boot1,$c177Boot2,$c177Boot3)
+        if ($script:c177ManagedNotesNewlineSave -and
+            (@($c177Boots | Where-Object { -not $_ -or $_.status -ne 'PASS' }).Count -gt 0 -or
+             $c177Boot1.format -ne 'lf' -or $c177Boot2.format -ne 'crlf' -or
+             $c177Boot3.format -ne 'lf' -or
+             -not $c176Boot3.concurrentWindowIdentitiesPreserved)) {
+            throw 'C177 focused proof did not record LF, CRLF, and concurrent save/reopen evidence across all three boots.'
+        }
         $c173Manifest=[ordered]@{
             schemaVersion=1;phase='C173-focused-proof';sourceHead=$head;sourceBranch='v1.1_DOTNET_SUPPORT';status='PASS';outcome='A'
             focusedBootCount=$c173BootRecords.Count;focusedBoots=@($c173BootRecords.ToArray())
@@ -5605,6 +5779,14 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
                     boot3ConcurrentNavigation=$c176Boot3
                     lineEndingBytesPreservedByC175ResizeTransaction=$true
                     realNotesOpenUi=$true
+                }
+            } else { $null }
+            c177ManagedNotesNewlineSave=if ($script:c177ManagedNotesNewlineSave) {
+                [ordered]@{
+                    status='PASS';focusedBootCount=3
+                    boot1Lf=$c177Boot1;boot2Crlf=$c177Boot2;boot3ConcurrentLf=$c177Boot3
+                    proofDiagnostics='23 focused cases and guest VFS read-back proof passed in each fresh focused boot'
+                    localDelimiterRule='nearest preceding LF/CRLF at caret; otherwise first following; otherwise LF'
                 }
             } else { $null }
             c163C164C172=[ordered]@{C163='PASS';C164='PASS';C172SettingsResize='PASS';calculator56='PASS';taskManager='PASS';explorerCloseReopen='PASS'}
@@ -6133,7 +6315,7 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                     $slotsAfterApply $applyState 'Apply'
                 $reset=Reset-C167DefaultApps $boot (Join-Path $root 'default-apps-reset-system-default.ppm')
                 $reentry=Return-C167ToSettingsAndReenter $boot 'NoOverride' (Join-Path $root 'default-apps-reset-reentry.ppm')
-                $defaultApps=[ordered]@{initial=$defaultApps;apply=$apply;reset=$reset;reentry=$reentry;slotsBeforeApply=$slotsBeforeApply;slotsAfterApply=$slotsAfterApply;applyDiskRead=$applyDiskObservation;c169PopupSelection=$c169PopupSelection;slotVerification='guest service queries during Apply/Reset and host disk read after QEMU shutdown';result='PASS'}
+                $defaultApps=[ordered]@{initial=$defaultApps;apply=$apply;reset=$reset;reentry=$reentry;slotsBeforeApply=$slotsBeforeApply;slotsAfterApply=$slotsAfterApply;applyDiskRead=$applyDiskObservation;c169PopupSelection=$c169PopupSelection;slotVerification='guest service queries during Apply/Reset; isolated proof-disabled boot media does not qualify cross-boot association persistence';result='PASS'}
             }
             $settingsCloseStart=(Get-C166Serial $boot.serialPath).Length
             Send-C166QmpEvents ([int]$boot.qmpPort) `
@@ -6499,7 +6681,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash) { throw 'Protected canonical kernel restoration failed after candidate build.' }
 
     $scanPaths=@($composite,$kernelCandidate,$ramdiskCandidate)
-    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF','C172-NATIVE-GEOMETRY','C172-MANAGED-GEOMETRY','C175-NATIVE-GEOMETRY','C175-MANAGED-GEOMETRY')
+    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF','C172-NATIVE-GEOMETRY','C172-MANAGED-GEOMETRY','C175-NATIVE-GEOMETRY','C175-MANAGED-GEOMETRY','C177-NOTES-NEWLINE','C177-SAVE-PROOF','C177-STRESS','C177-PROOF-FIXTURE-COLLECTION')
     $scanResults=@()
     foreach ($path in $scanPaths) {
         $text=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($path))
@@ -6535,6 +6717,9 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     $ordinaryC176Boot2 = Get-C173RecordValue $ordinary[1].productionIntegration.settingsNavigation 'c176'
     $ordinaryC176Cross = Get-C173RecordValue $ordinary[2].productionIntegration 'c175'
     $ordinaryC176Boot3 = Get-C173RecordValue $ordinaryC176Cross 'c176ManagedNotesNavigation'
+    $ordinaryC177Boot1 = Get-C173RecordValue $ordinaryC176Boot1 'c177NewlineSave'
+    $ordinaryC177Boot2 = Get-C173RecordValue $ordinaryC176Boot2 'c177NewlineSave'
+    $ordinaryC177Boot3 = Get-C173RecordValue $ordinaryC176Boot3 'c177NewlineSave'
     if ($script:c176ManagedNotesNavigation) {
         $ordinaryC176Boots = @($ordinaryC176Boot1,$ordinaryC176Boot2,$ordinaryC176Boot3)
         if (@($ordinaryC176Boots | Where-Object { -not $_ -or $_.status -ne 'PASS' }).Count -gt 0 -or
@@ -6545,9 +6730,33 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
             throw 'Proof-disabled production C176 did not complete LF, CRLF, and concurrent Notes qualification across all three boots.'
         }
     }
+    if ($script:c177ManagedNotesNewlineSave) {
+        $ordinaryC177Boots = @($ordinaryC177Boot1,$ordinaryC177Boot2,$ordinaryC177Boot3)
+        if (@($ordinaryC177Boots | Where-Object {
+                -not $_ -or $_.status -ne 'PASS' -or
+                $_.reopenedBytes -ne $_.expectedSavedBytes
+            }).Count -gt 0 -or
+            $ordinaryC177Boot1.format -ne 'lf' -or
+            $ordinaryC177Boot1.newlineStyle -ne 'LF (1 byte)' -or
+            $ordinaryC177Boot1.expectedSavedBytes -ne ($ordinaryC177Boot1.sourceBytes + 1) -or
+            $ordinaryC177Boot2.format -ne 'crlf' -or
+            $ordinaryC177Boot2.newlineStyle -ne 'CRLF (2 bytes)' -or
+            $ordinaryC177Boot2.expectedSavedBytes -ne ($ordinaryC177Boot2.sourceBytes + 2) -or
+            $ordinaryC177Boot3.format -ne 'lf' -or
+            $ordinaryC177Boot3.expectedSavedBytes -ne ($ordinaryC177Boot3.sourceBytes + 1) -or
+            -not $ordinaryC176Boot3.concurrentWindowIdentitiesPreserved) {
+            throw 'Proof-disabled production C177 did not save and reopen exact LF/CRLF bytes across all three boots.'
+        }
+    }
     if ($script:c167SettingsAcceptance) {
         for ($index=0; $index -lt 3; $index++) {
-            $mustHaveNoOverrideRecord = $index -eq 2
+            # The C175+ proof-disabled lane boots each production candidate
+            # from an isolated per-boot ESP and RAM disk. Its host-side ESP
+            # snapshot is not the C167 shared writable FAT proof disk, so the
+            # ordinary lane validates the guest's NoOverride state without
+            # claiming a durable slot record from that snapshot. C167's
+            # focused shared-disk proof remains the persistence qualification.
+            $mustHaveNoOverrideRecord = ($index -eq 2) -and -not $script:c175ManagedNotesResize
             [void](Assert-C167DiskState $ordinary[$index].associationSlots 'NoOverride' $mustHaveNoOverrideRecord)
         }
     } elseif (@($ordinary[0].associationSlots | Where-Object { $_.present }).Count -gt 0 -or
@@ -6651,6 +6860,16 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
                 boot2CrlfEditing=$ordinaryC176Boot2
                 boot3ConcurrentNavigation=$ordinaryC176Boot3
                 source='real Notes Open UI and existing managed/native resize path'
+            }
+        } else { $null }
+        c177ManagedNotesNewlineSave=if ($script:c177ManagedNotesNewlineSave) {
+            [ordered]@{
+                status='PASS';proofDisabledProductionCandidate=$true
+                startupProofDiagnosticsAbsent=$true
+                boot1Lf=$ordinaryC177Boot1;boot2Crlf=$ordinaryC177Boot2;boot3ConcurrentLf=$ordinaryC177Boot3
+                savePath='real Ctrl+S through C152 bounded VFS write and exact read-back verification'
+                reopenPath='real Ctrl+O/C151 load with exact serialized byte count and first-line confirmation'
+                crashDurability='not asserted; RAMdisk changes are volatile and FAT write API is in-place'
             }
         } else { $null }
         c169ManagedUiOrdinaryAcceptance=if ($script:c169ManagedUiOrdinaryAcceptance) {
@@ -6876,6 +7095,9 @@ if ($UseExistingProofProducts) {
         if ($script:c175ManagedNotesResize) {
             $c167ManagedArgs += '-C175ManagedNotesResize'
         }
+        if ($script:c177ManagedNotesNewlineSave) {
+            $c167ManagedArgs += '-C177ManagedNotesNewlineSave'
+        }
         if ($script:c171ManagedWindowLayout) {
             $c167ManagedArgs += '-ProofControl'
         }
@@ -7027,6 +7249,9 @@ if ($RunC167SettingsProofBoots) {
     }
     if ($script:c175ManagedNotesResize) {
         $c167ManagedArgs += '-C175ManagedNotesResize'
+    }
+    if ($script:c177ManagedNotesNewlineSave) {
+        $c167ManagedArgs += '-C177ManagedNotesNewlineSave'
     }
     if ($script:c171ManagedWindowLayout -or $script:c172LiveWindowResize -or
         $script:c173ManagedFileExplorerResize) {

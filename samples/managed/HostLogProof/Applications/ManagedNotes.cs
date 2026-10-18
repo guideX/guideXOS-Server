@@ -2001,6 +2001,26 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
         }
 #endif
+#if HOSTLOGPROOF_C177_MANAGED_NOTES_NEWLINE_SAVE
+        if (!s_c177NewlineSaveTestsRun)
+        {
+            s_c177NewlineSaveTestsRun = true;
+            bool newlinePolicy = GuideXosTextAreaC177Tests.Run(host);
+            bool stress = true;
+#if !HOSTLOGPROOF_C167_UI_FOCUSED_BUILD && !HOSTLOGPROOF_C166_ORDINARY_BUILD
+            stress = GuideXosTextAreaC177Tests.RunStress(host);
+#endif
+            if (!newlinePolicy || !stress)
+            {
+                host.TryLog("C177-NOTES-NEWLINE-TESTS result=FAIL"u8);
+                return GuideXosResult.InvalidArgument;
+            }
+#if GUIDEXOS_PROOF_CONTROL
+            GC.Collect();
+            host.TryLog("C177-PROOF-FIXTURE-COLLECTION result=PASS"u8);
+#endif
+        }
+#endif
         if (!TryInitializeC175Layout())
         {
             return GuideXosResult.InvalidArgument;

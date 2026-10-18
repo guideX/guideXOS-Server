@@ -22,6 +22,12 @@ public enum GuideXosTextAreaEditResult
 /// </summary>
 public sealed class GuideXosTextArea
 {
+    private enum NewlineStyle : byte
+    {
+        LF,
+        CRLF,
+    }
+
     public const int DefaultMaximumCharacters = 256;
     public const int MaximumSupportedCharacters = 1024;
     public const int DefaultMaximumLines = 32;
@@ -474,7 +480,7 @@ public sealed class GuideXosTextArea
             case GuideXosTextInputKey.Delete:
                 return DeleteForward();
             case GuideXosTextInputKey.Enter:
-                return ReplaceSelection('\n');
+                return InsertNewline();
             case GuideXosTextInputKey.Left:
                 return MoveHorizontal(-1, shift);
             case GuideXosTextInputKey.Right:
@@ -616,6 +622,45 @@ public sealed class GuideXosTextArea
         Span<byte> character = stackalloc byte[1];
         character[0] = (byte)value;
         return PasteText(character);
+    }
+
+    private GuideXosTextAreaEditResult InsertNewline()
+    {
+        // Pick the delimiter from the pre-edit document at the replacement
+        // start, then pass the complete serialized sequence through the same
+        // bounded, single-revision edit path used by paste and selection edits.
+        NewlineStyle style = SelectNewlineStyle(SelectionStart);
+        Span<byte> newline = stackalloc byte[2];
+        if (style == NewlineStyle.CRLF)
+        {
+            newline[0] = (byte)'\r';
+            newline[1] = (byte)'\n';
+            return PasteText(newline);
+        }
+
+        newline[0] = (byte)'\n';
+        return PasteText(newline[..1]);
+    }
+
+    private NewlineStyle SelectNewlineStyle(int insertionIndex)
+    {
+        // A CRLF pair is identified by its LF byte. Caret and selection
+        // endpoints are already normalized so this scan never splits a pair.
+        for (int index = insertionIndex - 1; index >= 0; index--)
+        {
+            if (_buffer[index] != '\n') continue;
+            return index > 0 && _buffer[index - 1] == '\r'
+                ? NewlineStyle.CRLF : NewlineStyle.LF;
+        }
+
+        for (int index = insertionIndex; index < _length; index++)
+        {
+            if (_buffer[index] != '\n') continue;
+            return index > 0 && _buffer[index - 1] == '\r'
+                ? NewlineStyle.CRLF : NewlineStyle.LF;
+        }
+
+        return NewlineStyle.LF;
     }
 
     private GuideXosTextAreaEditResult DeleteSelection()
