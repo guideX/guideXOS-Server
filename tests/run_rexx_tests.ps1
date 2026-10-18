@@ -1,13 +1,42 @@
 $ErrorActionPreference = "Stop"
 
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
+    throw 'RX12R1 hosted qualification requires branch REXX_SUPPORT.'
+}
 $gccCommand = Get-Command gcc -ErrorAction SilentlyContinue
 if ($null -eq $gccCommand) {
     throw "gcc is required; this checkout documents a C11 cc/gcc hosted build."
 }
 
-$buildDirectory = Join-Path $rootDir ("tmp\rexx-rx1-tests-" + [Guid]::NewGuid().ToString("N"))
+$gxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
+if ($null -eq $gxxCommand) {
+    throw "g++ is required for the RX2 shell bridge integration test."
+}
+$guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
+Import-Module -Name $guardModule -Force
+$guardManifest = Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
+$runId = [Guid]::NewGuid().ToString('N')
+$runRoot = Join-Path $rootDir ("build\rexx\rx12r1\hosted-$runId")
+$workingDirectory = Join-Path $runRoot 'temp'
+$plannedOutputs = @(
+    'rexx_runtime_tests.exe', 'rexx_cli.exe', 'rexx_rx2_tests.exe',
+    'rexx_rx2_native_numeric_tests.exe', 'rexx_rx3_decimal_tests.exe',
+    'rexx_rx3_alloc_failure_tests.exe', 'rexx_rx4_arithmetic_tests.exe',
+    'rexx_rx5_numeric_context_tests.exe', 'rexx_rx6_parse_alloc_failure_tests.exe',
+    'rexx_rx7_routines_tests.exe', 'rexx_rx7_alloc_failure_tests.exe',
+    'rexx_rx8_semantics_alloc_tests.exe', 'rexx_rx9_condition_tests.exe',
+    'rexx_rx10_interpret_tests.exe', 'rexx_rx12_builtins_tests.exe',
+    'rexx_rx2_shell_bridge_tests.exe'
+) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
+$null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
+    -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs
+$buildDirectory = Join-Path $runRoot 'bin'
 New-Item -ItemType Directory -Path $buildDirectory | Out-Null
+$env:TEMP = $workingDirectory
+$env:TMP = $workingDirectory
+$env:TMPDIR = $workingDirectory
+Set-Location -LiteralPath $workingDirectory
 $runtimeTest = Join-Path $buildDirectory "rexx_runtime_tests.exe"
 $cliTest = Join-Path $buildDirectory "rexx_cli.exe"
 $rx2Test = Join-Path $buildDirectory "rexx_rx2_tests.exe"
@@ -169,10 +198,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX12 built-in test build failed with exit code $LASTEXITCODE."
 }
 
-$gxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
-if ($null -eq $gxxCommand) {
-    throw "g++ is required for the RX2 shell bridge integration test."
-}
 Write-Host "Building RX2 C++ shell bridge integration tests"
 & $gxxCommand.Source -std=c++14 -Wall -Wextra -Wpedantic -Werror `
     (Join-Path $PSScriptRoot "rexx_rx2_shell_bridge_test.cpp") `
@@ -182,6 +207,8 @@ Write-Host "Building RX2 C++ shell bridge integration tests"
 if ($LASTEXITCODE -ne 0) {
     throw "RX2 shell bridge integration test build failed with exit code $LASTEXITCODE."
 }
+
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-builds' | Out-Null
 
 Write-Host "Running hosted runtime assertions"
 & $runtimeTest
@@ -272,6 +299,8 @@ Write-Host "Running RX2 shell bridge assertions"
 if ($LASTEXITCODE -ne 0) {
     throw "RX2 shell bridge assertions failed with exit code $LASTEXITCODE."
 }
+
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-c-assertions' | Out-Null
 
 $script:cliPassed = 0
 $script:reginaPassed = 0
@@ -379,6 +408,7 @@ function Invoke-CapturedProcess {
         $startInfo.Arguments = [string]::Join(' ', [string[]]$quotedArguments)
     }
     $startInfo.UseShellExecute = $false
+    $startInfo.WorkingDirectory = $workingDirectory
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
@@ -853,6 +883,12 @@ if ($limitExit -ne 1 -or
 }
 $script:cliPassed++
 Write-Host "[PASS] CLI source-size memory limit"
+
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-fixtures' | Out-Null
+$durablePreservation = Join-Path $rootDir ("docs\rexx\evidence\rx12r1\preservation\hosted-$runId")
+New-Item -ItemType Directory -Path $durablePreservation -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $runRoot 'preservation') -Destination (Join-Path $durablePreservation 'reports') -Recurse
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-final' | Out-Null
 
 $regina = $script:reginaCommand
 if ($null -eq $regina) {

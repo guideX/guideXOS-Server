@@ -1,0 +1,23 @@
+{
+  "schema": "guidexos.rexx.rx12r1.qemu-smoke.v1",
+  "completed_at_utc": "2026-10-18T01:15:42.3952546Z",
+  "passed": true,
+  "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+  "kernel_sha256": "ce835ef3b77aa066db46f9cb9964b6bb0d7c589b4202a2b1965129854fd80dee",
+  "staged_kernel_sha256": "ce835ef3b77aa066db46f9cb9964b6bb0d7c589b4202a2b1965129854fd80dee",
+  "network_disabled": true,
+  "copied_disposable_media": true,
+  "production_media_used": false,
+  "script_accesses_in_serial": [
+    "rx12-string-builtins.rex",
+    "rx12-arg.rex",
+    "rx12-syntax-recovery.rex",
+    "rx12-oversized-output.rex",
+    "rx12-recovery.rex",
+    "rx12-exit-status.rex"
+  ],
+  "heartbeat_count_before_suite": 1,
+  "heartbeat_count_after_suite": 43,
+  "qmp_shutdown_acknowledged": true,
+  "evidence_directory": "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx12r1\\native-guest\\run-9936ea4ad4744f05b24b8d5855529793"
+}

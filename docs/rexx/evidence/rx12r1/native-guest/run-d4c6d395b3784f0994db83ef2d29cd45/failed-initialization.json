@@ -1,0 +1,10 @@
+{
+  "schema": "guidexos.rexx.rx12r1.qemu-attempt.v1",
+  "outcome": "ABORTED_BEFORE_GUEST_COMMANDS",
+  "reason": "Wrapper wrote qemu-owner.json in the run root while the existing QMP input helper expects it in the helper directory.",
+  "started_qemu_pid": 13964,
+  "qmp_quit_acknowledged": true,
+  "foreign_qemu_processes_terminated": 0,
+  "boot_reached_kernel_heartbeat": true,
+  "evidence_directory": "docs/rexx/evidence/rx12r1/native-guest/run-d4c6d395b3784f0994db83ef2d29cd45"
+}

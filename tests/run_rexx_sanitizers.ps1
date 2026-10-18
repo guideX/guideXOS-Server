@@ -6,12 +6,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$repoTmp = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
-    Join-Path $rootDir 'tmp'
+if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
+    throw 'RX12R1 sanitizer qualification requires branch REXX_SUPPORT.'
+}
+$phaseOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    Join-Path $rootDir 'build\rexx\rx12r1'
 } else {
     [System.IO.Path]::GetFullPath($OutputRoot)
 }
-New-Item -ItemType Directory -Path $repoTmp -Force | Out-Null
+$guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
+Import-Module -Name $guardModule -Force
+$guardManifest = Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
+$script:workingDirectory = ''
 
 function Import-VisualStudioEnvironment {
     $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
@@ -54,6 +60,9 @@ function Invoke-Captured {
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo.FileName = $Executable
     $process.StartInfo.UseShellExecute = $false
+    if (-not [string]::IsNullOrWhiteSpace($script:workingDirectory)) {
+        $process.StartInfo.WorkingDirectory = $script:workingDirectory
+    }
     $process.StartInfo.CreateNoWindow = $true
     $process.StartInfo.RedirectStandardOutput = $true
     $process.StartInfo.RedirectStandardError = $true
@@ -125,10 +134,8 @@ function Invoke-OneSanitizer {
     param([ValidateSet('Address', 'Undefined')][string]$Kind)
 
     $runId = [Guid]::NewGuid().ToString('N')
-    $runDir = Join-Path $repoTmp "rexx-rx12-sanitizer-$($Kind.ToLowerInvariant())-$runId"
-    New-Item -ItemType Directory -Path $runDir | Out-Null
+    $runDir = Join-Path $phaseOutputRoot "sanitizer-$($Kind.ToLowerInvariant())-$runId"
     $evidenceDir = Join-Path $runDir 'logs'
-    New-Item -ItemType Directory -Path $evidenceDir | Out-Null
 
     $installationPath = Import-VisualStudioEnvironment
     $vcToolsVersion = $env:VCToolsVersion
@@ -194,7 +201,27 @@ function Invoke-OneSanitizer {
     )
 
     $buildDir = Join-Path $runDir 'bin'
-    New-Item -ItemType Directory -Path $buildDir | Out-Null
+    $workingDirectory = Join-Path $runDir 'temp'
+    $plannedOutputs = [System.Collections.Generic.List[string]]::new()
+    foreach ($plan in $plans) {
+        $planOutputDir = Join-Path $buildDir $plan.Name
+        $exePath = Join-Path $planOutputDir ($plan.Name + '.exe')
+        $null = $plannedOutputs.Add($exePath)
+        $null = $plannedOutputs.Add((Join-Path $planOutputDir ($plan.Name + '.compiler.pdb')))
+        $null = $plannedOutputs.Add((Join-Path $planOutputDir ($plan.Name + '.link.pdb')))
+        $sourcePaths = @((Join-Path $rootDir $plan.Driver)) + @($plan.Sources)
+        foreach ($sourcePath in $sourcePaths) {
+            $null = $plannedOutputs.Add((Join-Path $planOutputDir ([System.IO.Path]::GetFileNameWithoutExtension($sourcePath) + '.obj')))
+        }
+    }
+    $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir `
+        -WorkingDirectory $workingDirectory -PlannedOutputs @($plannedOutputs)
+    New-Item -ItemType Directory -Path $evidenceDir | Out-Null
+    $env:TEMP = $workingDirectory
+    $env:TMP = $workingDirectory
+    $env:TMPDIR = $workingDirectory
+    $script:workingDirectory = $workingDirectory
+
     $compilerVersion = if ($Kind -eq 'Address') {
         $clVersion = Invoke-Captured -Executable $compiler -Arguments @('/Bv') -TimeoutSeconds 20
         $clVersion.Stdout + $clVersion.Stderr
@@ -208,9 +235,11 @@ function Invoke-OneSanitizer {
     $built = @{}
     foreach ($plan in $plans) {
         $isCpp = $plan.PSObject.Properties.Name -contains 'Cpp' -and $plan.Cpp
+        $planOutputDir = Join-Path $buildDir $plan.Name
+        New-Item -ItemType Directory -Path $planOutputDir | Out-Null
         $sourcePaths = @((Join-Path $rootDir $plan.Driver)) + @($plan.Sources)
         $exeName = $plan.Name + '.exe'
-        $exePath = Join-Path $buildDir $exeName
+        $exePath = Join-Path $planOutputDir $exeName
         $compilerArgs = @('/nologo')
         if ($isCpp) {
             $compilerArgs += @('/TP', '/std:c++14', '/EHsc', ('/I' + (Join-Path $rootDir 'kernel\core\include')))
@@ -218,10 +247,9 @@ function Invoke-OneSanitizer {
             $compilerArgs += @('/TC', '/std:c11', '/D_CRT_SECURE_NO_WARNINGS')
         }
         $compilerArgs += @('/MD', '/Zi', '/Od')
-        # Keep MSVC intermediates in the isolated run directory; without these,
-        # cl.exe writes .obj/.pdb files into the caller's current directory.
-        $compilerArgs += '/Fo:' + $buildDir + [System.IO.Path]::DirectorySeparatorChar
-        $compilerArgs += '/Fd:' + (Join-Path $buildDir ($plan.Name + '.pdb'))
+        # All cl.exe and linker outputs are explicit and confined to this unique plan directory.
+        $compilerArgs += '/Fo:' + $planOutputDir + [System.IO.Path]::DirectorySeparatorChar
+        $compilerArgs += '/Fd:' + (Join-Path $planOutputDir ($plan.Name + '.compiler.pdb'))
         if ($Kind -eq 'Address') {
             $compilerArgs += '/fsanitize=address'
         } else {
@@ -230,6 +258,7 @@ function Invoke-OneSanitizer {
         foreach ($define in $plan.Defines) { $compilerArgs += '/D' + $define }
         $compilerArgs += $sourcePaths
         $compilerArgs += '/Fe:' + $exePath
+        $compilerArgs += @('/link', '/INCREMENTAL:NO', ('/PDB:' + (Join-Path $planOutputDir ($plan.Name + '.link.pdb'))))
 
         $compileResult = Invoke-Captured -Executable $compiler -Arguments $compilerArgs -TimeoutSeconds 180
         Write-ProcessLog -BasePath (Join-Path $evidenceDir ($plan.Name + '.build')) -Result $compileResult
@@ -240,6 +269,8 @@ function Invoke-OneSanitizer {
         Write-Host "[BUILD PASS] $($plan.Name)"
     }
 
+    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-builds" | Out-Null
+
     foreach ($plan in $plans) {
         $runArguments = if ($plan.PSObject.Properties.Name -contains 'RunArgs') { $plan.RunArgs } else { @() }
         $runResult = Invoke-Captured -Executable $built[$plan.Name] -Arguments $runArguments -TimeoutSeconds 90
@@ -249,6 +280,8 @@ function Invoke-OneSanitizer {
         }
         Write-Host "[TEST PASS] $($plan.Name)"
     }
+
+    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-hosted-tests" | Out-Null
 
     $python = Get-Command python -ErrorAction Stop
     $differentialDir = Join-Path $runDir 'differential'
@@ -263,13 +296,22 @@ function Invoke-OneSanitizer {
         throw "$Kind sanitizer differential corpus execution failed. See $differentialDir and $evidenceDir. `n$($diffResult.Stdout)`n$($diffResult.Stderr)"
     }
     Write-Host $diffResult.Stdout.TrimEnd()
+    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-corpus" | Out-Null
+
+    $durableEvidence = Join-Path $rootDir ("docs\rexx\evidence\rx12r1\sanitizer-$($Kind.ToLowerInvariant())-$runId")
+    New-Item -ItemType Directory -Path $durableEvidence | Out-Null
+    Copy-Item -LiteralPath $evidenceDir -Destination (Join-Path $durableEvidence 'logs') -Recurse
+    Copy-Item -LiteralPath (Join-Path $runDir 'preservation') -Destination (Join-Path $durableEvidence 'preservation') -Recurse
+    Copy-Item -LiteralPath (Join-Path $differentialDir 'results.json') -Destination $durableEvidence
     Write-Host "Evidence: $evidenceDir"
     Write-Host "Builds: $buildDir"
-    return [PSCustomObject]@{ Kind = $Kind; Compiler = $compiler; CompilerVersion = $compilerVersion.Split("`n")[0].Trim(); EvidenceDir = $evidenceDir; BuildDir = $buildDir; InstallationPath = $installationPath; VCToolsVersion = $vcToolsVersion }
+    Write-Host "Durable evidence: $durableEvidence"
+    return [PSCustomObject]@{ Kind = $Kind; Compiler = $compiler; CompilerVersion = $compilerVersion.Split("`n")[0].Trim(); EvidenceDir = $evidenceDir; BuildDir = $buildDir; RunDir = $runDir; DurableEvidence = $durableEvidence; InstallationPath = $installationPath; VCToolsVersion = $vcToolsVersion }
 }
 
 $selected = if ($Sanitizer -eq 'Both') { @('Address', 'Undefined') } else { @($Sanitizer) }
 $summaries = foreach ($kind in $selected) { Invoke-OneSanitizer -Kind $kind }
-$summaryPath = Join-Path $repoTmp ('rexx-rx12-sanitizer-summary-' + [Guid]::NewGuid().ToString('N') + '.json')
+$summaryPath = Join-Path $summaries[-1].RunDir 'sanitizer-summary.json'
 $summaries | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $summaryPath -Encoding utf8
+Copy-Item -LiteralPath $summaryPath -Destination (Join-Path $rootDir 'docs\rexx\evidence\rx12r1\sanitizers-summary.json') -Force
 Write-Output "Sanitizer summary: $summaryPath"

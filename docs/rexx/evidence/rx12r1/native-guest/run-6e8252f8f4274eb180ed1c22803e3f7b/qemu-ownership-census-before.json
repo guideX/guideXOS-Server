@@ -1,0 +1,15 @@
+{
+  "captured_at_utc": "2026-10-18T01:08:59.0147037Z",
+  "count": 2,
+  "processes": [
+    {
+      "pid": 13204,
+      "image": "qemu-system-x86_64.exe"
+    },
+    {
+      "pid": 27240,
+      "image": "qemu-system-x86_64.exe"
+    }
+  ],
+  "command_lines_redacted": true
+}

@@ -1,0 +1,5 @@
+RX12R1 artifact preservation: PASS
+Stage: address-hosted-tests
+Verified UTC: 2026-10-18T01:03:19.2765467Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

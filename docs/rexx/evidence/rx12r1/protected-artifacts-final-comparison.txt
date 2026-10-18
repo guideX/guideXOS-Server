@@ -1,0 +1,9 @@
+RX12R1 final protected-artifact SHA-256 comparison
+Verified UTC: 2026-10-18T01:18:02.2812085Z
+Branch: REXX_SUPPORT
+HEAD at comparison: 6245bedcf0ca57814fb1fc9cee6db3103d407333
+Artifacts preserved: 31/31
+Protected untracked files preserved: 28/28
+Missing: 0
+Modified hashes or sizes: 0
+Unexpected root .obj/.pdb files: checked by preservation guard; none reported.

@@ -1,0 +1,12 @@
+{
+  "schema": "guidexos.rexx.artifact-guard-selftest.v1",
+  "ran_at_utc": "2026-10-18T00:59:09.7151736Z",
+  "synthetic_only": true,
+  "protected_fixture": "protected.obj",
+  "protected_fixture_initial_sha256": "6e869bccd6b408e71e1574bd20a20af6b6b0c2e27f0d8ea791f2b22a9e4fd3c4",
+  "explicit_protected_output_rejected": true,
+  "unsafe_implicit_output_working_directory_rejected": true,
+  "post_run_protected_mutation_detected": true,
+  "passed": true,
+  "details": "All cases used a disposable synthetic fixture in the system temporary directory. No repository artifact was opened for writing."
+}

@@ -41,8 +41,10 @@ ifeq ($(filter $(ARCH),$(VALID_ARCHS)),)
     $(error Invalid ARCH: $(ARCH). Valid options: $(VALID_ARCHS))
 endif
 
-# Output directories
-BUILD_DIR := build/$(ARCH)
+# Output directories. BUILD_ROOT can point a qualification build at a unique,
+# phase-owned location while preserving the established default for regular builds.
+BUILD_ROOT ?= build
+BUILD_DIR := $(BUILD_ROOT)/$(ARCH)
 OBJ_DIR := $(BUILD_DIR)/obj
 BIN_DIR := $(BUILD_DIR)/bin
 

@@ -1,0 +1,14 @@
+[2026-10-18T01:14:47.1003436Z] rexx /rx12-string-builtins.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\screenshots-raw\rx12r1-01-string-builtins.ppm
+[2026-10-18T01:14:55.0655644Z] rexx /rx12-arg.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\screenshots-raw\rx12r1-02-arg-omissions.ppm
+[2026-10-18T01:15:04.4184616Z] rexx /rx12-syntax-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\screenshots-raw\rx12r1-03-syntax-recovery.ppm
+[2026-10-18T01:15:13.8188303Z] rexx /rx12-oversized-output.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\screenshots-raw\rx12r1-04-resource-recovery.ppm
+[2026-10-18T01:15:22.5596144Z] rexx /rx12-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\screenshots-raw\rx12r1-05-post-error-command.ppm
+[2026-10-18T01:15:31.3649424Z] rexx /rx12-exit-status.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\screenshots-raw\rx12r1-06-exit-status-script.ppm
+[2026-10-18T01:15:38.0471895Z] echo $?
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\screenshots-raw\rx12r1-07-exit-status-check.ppm

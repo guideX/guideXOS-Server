@@ -1,0 +1,7 @@
+RX12R1 artifact guard synthetic self-test: PASS
+Ran UTC: 2026-10-18T00:59:09.7151736Z
+Explicit protected output collision: rejected
+Unsafe implicit-output working directory: rejected
+Changed protected bytes: detected; nonzero failure returned
+Synthetic fixture SHA-256: 6e869bccd6b408e71e1574bd20a20af6b6b0c2e27f0d8ea791f2b22a9e4fd3c4
+No real repository artifact was used as a fixture.

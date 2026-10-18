@@ -202,7 +202,9 @@ def compile_cli(output_dir: Path, cc_arg: str | None) -> tuple[Path, list[str], 
         "-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror",
         *[str(source) for source in sources], "-lm", "-o", str(cli_path),
     ]
-    result = run_process(command, cwd=ROOT, timeout=BUILD_TIMEOUT_SECONDS)
+    # All paths in the command are absolute and -o is explicit. Keep the
+    # compiler working directory in its caller-owned run directory as well.
+    result = run_process(command, cwd=output_dir, timeout=BUILD_TIMEOUT_SECONDS)
     if result["launch_error"] or result["timed_out"] or result["output_limited"] or result["exit_code"] != 0:
         raise RuntimeError(
             "guideXOS CLI build failed: "

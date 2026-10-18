@@ -1,0 +1,25 @@
+
+FullName
+--------                                                                                                               
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\helper\rx12r1-01-string-builtins.png
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\helper\rx12r1-02-arg-omissions.png  
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\helper\rx12r1-03-syntax-recovery.png
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\helper\rx12r1-04-resource-recovery.…
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\helper\rx12r1-05-post-error-command…
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\helper\rx12r1-06-exit-status-script…
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-9936ea4ad4744f05b24b8d5855529793\helper\rx12r1-07-exit-status-check.…
+RX12R1 artifact preservation: PASS
+Stage: qemu-smoke-guest
+Verified UTC: 2026-10-18T01:15:41.6377733Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Requested QMP shutdown for RX12 QEMU PID 27964 on port 59414.
+RX12R1 artifact preservation: PASS
+Stage: qemu-smoke-final
+Verified UTC: 2026-10-18T01:15:42.4545338Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Isolated QEMU smoke passed.
+Kernel SHA-256: ce835ef3b77aa066db46f9cb9964b6bb0d7c589b4202a2b1965129854fd80dee
+Guest evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx12r1\native-guest\run-9936ea4ad4744f05b24b8d5855529793
+

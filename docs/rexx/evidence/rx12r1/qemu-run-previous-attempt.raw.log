@@ -1,0 +1,17 @@
+
+FullName
+--------                                                                                                               
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-74731e3db7004631aadeac67a53e6e32\helper\rx12r1-01-string-builtins.png
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-74731e3db7004631aadeac67a53e6e32\helper\rx12r1-02-arg-omissions.png  
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-74731e3db7004631aadeac67a53e6e32\helper\rx12r1-03-syntax-recovery.png
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-74731e3db7004631aadeac67a53e6e32\helper\rx12r1-04-resource-recovery.…
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-74731e3db7004631aadeac67a53e6e32\helper\rx12r1-05-post-error-command…
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-74731e3db7004631aadeac67a53e6e32\helper\rx12r1-06-exit-status-script…
+D:\dev\guideXOSServer_REXX\build\rexx\rx12r1\qemu-74731e3db7004631aadeac67a53e6e32\helper\rx12r1-07-exit-status-check.…
+Requested QMP shutdown for RX12 QEMU PID 13996 on port 59259.
+Write-Error: D:\dev\guideXOSServer_REXX\tests\run_rexx_qemu_smoke.ps1:216
+Line |
+ 216 |  … d before completion: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+     |                                                    ~~~~~~~~~~~~~~~~~~~
+     | RX12R1 QEMU smoke stopped before completion: Serial log did not record guest script access:
+     | rx12-string-builtins.rex at <ScriptBlock>, D:\dev\guideXOSServer_REXX\tests\run_rexx_qemu_smoke.ps1: line 208
