@@ -1,112 +1,123 @@
 # guideXOS Server — Phase S20 Modifier-Aware Focus Acceptance
 
-**Status: Outcome B — Partial.** The modifier-aware input path, shared reverse traversal, regression suites, freestanding production build, and real guest Shift+Tab checks pass. The complete ordered lifecycle was exercised on the immediately preceding S20 ELF; the corrected final ELF received the focused Tab/Shift+Tab/release/boundary checks but not the entire lifecycle sequence. A 660×440 production guest focus run was also not qualified because the calibrated QMP resize gesture did not change the window size. These evidence gaps keep S20 at Outcome B; no S9, Settings 1.0, or Server v0.3 acceptance is inferred.
+**Status: Outcome A — Accepted.** The final ordinary AMD64 production kernel passed modifier-aware input, bidirectional focus, Personalization, lifecycle, configuration-safety, regression, freestanding build, and real QEMU guest checks on 2026-10-18. S19 remains the accepted baseline. This acceptance does not advance S9, Settings 1.0, or Server v0.3.
 
-## Repository and scope
+## Repository and preserved state
 
-- Repository: `D:\dev\guideXOSServer`
-- Branch: `main`; starting HEAD: `492c10542c50281cf1ddc5b671d8eeae987e45fc`.
-- Work stayed on `main`. No push was performed. Existing unrelated untracked evidence and output artifacts were preserved.
-- S19R3 remains the accepted Settings UI baseline. S20 changes keyboard modifier delivery and Personalization focus traversal only; it does not enable deferred Settings categories or change configuration policy.
+- Repository: D:\dev\guideXOSServer
+- Branch: main
+- Prompt baseline HEAD: 492c10542c50281cf1ddc5b671d8eeae987e45fc.
+- The S20 implementation commit 9d155a5119c81fe855fa4c7023121a71d7e70b60 was present on main when the final acceptance work resumed. Its implementation and earlier Outcome B report were inspected; the remaining final-kernel lifecycle and minimum-size evidence gaps were completed here.
+- Work remained on main. No branch, worktree, remote, reset, cleanup, stash, or sibling repository operation was performed. Existing untracked evidence and out artifacts were preserved.
+- The earlier Outcome B in this report history was a checkpoint only. Its final-kernel full-lifecycle and minimum-size gaps are resolved by the final-recheck1 evidence below.
 
-## 1. Existing keyboard architecture and exact loss point
+## 1. Existing keyboard architecture and modifier loss
 
-The production PS/2 decoder consumes set-2 make and break sequences (`0xF0` is the break prefix), tracks Ctrl and Alt, translates ordinary scancodes to the legacy ASCII/special-key values, and queues Native ELF key transitions. Before S20, Shift used one boolean for both physical keys. It affected shifted ASCII, but Tab remained the same logical `\t` key. The legacy desktop API returned only the translated key value.
+The production PS/2 decoder receives set-2 make and break sequences, with 0xF0 as the break prefix and 0xE0 for extended keys. It already translated ASCII and special keys and tracked Control, Alt, and Shift. Before S20, both physical Shift keys shared one boolean, so releasing either Shift cleared the effective Shift state even if the other remained held.
 
-The loss occurred on the legacy path at `ps2keyboard::get_key()` → `desktop::handle_key(key)` → `KernelCompositor::handleKeyDown(key)` → `KernelApp::onKeyDown(key)`: the app callback had no modifier argument, and ASCII Tab alone cannot distinguish Tab from Shift+Tab. Native ELF already represented key identity and Down/Up in an internal queue, and its existing `gx_event` parameters already had room for modifiers; however, the bridge sampled current modifier globals while dequeuing instead of carrying the event-time snapshot. S20 fixes both paths at the decoder boundary.
+On the desktop path, modifiers were discarded when callers used ps2keyboard::get_key() and passed only the logical key through desktop::handle_key, KernelCompositor::handleKeyDown, and KernelApp::onKeyDown(uint32_t). That app callback had no modifier parameter. ASCII Tab therefore carried no evidence of whether Shift was held. The Native ELF bridge retained key identity and Down/Up action, and its existing gx_event param3 already represented modifier flags, but it sampled global modifier state at dequeue time rather than recording the state at the physical key transition.
 
-The logical special keys (arrows and function keys) retain their existing values. Printable keys continue to use the existing Shift/Caps translation. The desktop legacy path still dispatches key-downs only; Native ELF continues to receive key-down and key-up transitions. Typematic repeat is represented as repeated key-down makes; there is no separate repeat bit.
+The S20 fix snapshots modifiers in the existing PS/2 event queues and sends the snapshot with production desktop key-down delivery. The production Settings diagnostic records the key, modifier mask, focus before and after, and whether traversal moved. It is bounded to the first 16 Tab events per Settings instance.
 
-## 2. S20 modifier and callback contract
+## 2. Modifier event contract and compatibility
 
-- `ShiftState` stores independent left- and right-Shift make/break state. Effective Shift is true while either side remains held.
-- Modifier make/break codes update decoder state and do not enqueue ordinary printable characters.
-- Each queued non-modifier `KeyEvent` contains the existing logical `key`, `KeyAction` (`Down` or `Up`), and a Shift/Ctrl/Alt bit snapshot. The legacy key queue snapshots modifiers on key-down so the desktop cannot observe a later state after the key has already been consumed.
-- The compatibility accessor `get_key()` and old `onKeyDown(uint32_t)` callback remain available. `get_key_with_modifiers()` adds a snapshot; `KernelCompositor::handleKeyDownWithModifiers()` reaches the new virtual `KernelApp::onKeyDownWithModifiers(key, modifiers)` callback. Its base implementation calls the old callback, so existing applications keep their behavior. The old compositor entry point forwards a zero modifier mask.
-- Native ELF still maps key, action, and modifiers to the existing `gx_event` fields (`param1`, `param2`, `param3`). The public ABI structure, field sizes, and ABI revision are unchanged.
-- No app-local Shift flag, Settings keyboard polling, heap-backed input queue, or parallel focus list was added.
+The existing bounded keyboard event now carries logical key identity, KeyAction Down or Up, and a Shift/Ctrl/Alt snapshot. It does not carry raw scancodes or a separate repeat flag. Typematic makes remain repeated key-down events. Shift make/break state is held independently for left and right Shift; effective Shift remains active while either is down. Modifier transitions do not become printable events.
+
+The existing get_key() and onKeyDown(uint32_t) paths remain available. Production uses get_key_with_modifiers() and KernelCompositor::handleKeyDownWithModifiers(); the base KernelApp callback forwards to the old onKeyDown callback for applications that do not opt in. The new virtual is appended after the old KernelApp virtual slots. Existing internal virtual ordering is preserved and all kernel apps are rebuilt together.
+
+The Native ELF public gx_event structure and ABI revision are unchanged. Its existing fields still carry logical key, action, and modifier bits; param3 now comes from the transition-time snapshot. No public Native ELF ABI break was introduced. The legacy desktop route continues to dispatch key-down events only; Native ELF retains its existing key-up delivery.
 
 ## 3. Modifier ownership, focus, and lifecycle
 
-The IRQ decoder is the authoritative owner of physical modifier state. Window focus changes, app destruction/reopen, and legacy app activation do not clear it. This avoids a stale per-app state and lets a held modifier remain visible across focus routing. `ps2keyboard::init()` resets the state during driver initialization. A missed hardware break can leave a modifier held until its break is received or the driver is reinitialized; S20 adds no timeout or focus-based reset that could incorrectly discard a physically held Shift.
+The PS/2 decoder owns authoritative hardware modifier state. Focus changes, application destruction and reopening, legacy application activation, or having no focused app do not clear or duplicate the state. Each event receives a snapshot at decode time, and no app-local modifier flag can outlive an instance. Driver initialization resets the physical state.
 
-Left/right Shift overlap and release ordering are directly exercised through the production decoder test. Control and Alt state semantics remain in the existing decoder and are included in event snapshots. Left/right Alt behavior and Alt+F4 shortcut state remain as before.
+A duplicate Shift break is idempotent. If a hardware key-up is lost, Shift may remain active until its break is observed or the keyboard driver is reinitialized; S20 adds no focus-based reset that could erase a genuinely held modifier. There is no timeout-based recovery for a lost physical break.
 
-## 4. Shared bidirectional focus policy
+## 4. Shared focus traversal
 
-The Settings adapter passes the Shift snapshot to `SettingsPresentationCore::moveFocus(reverse, eligibleCount, context)`. The shared core walks its existing fixed traversal order, counts only controls eligible in the current page/capability state, skips disabled or absent controls, wraps at either end, and sets focus to the last eligible entry for an initial reverse traversal. An empty eligible set clears focus. The existing focus state and indexed preset control remain authoritative.
+The native Settings adapter passes the event Shift bit to SettingsPresentationCore::moveFocus(reverse, eligibleCount, context). The S10 shared core remains the sole focus owner and uses its bounded traversal order. It skips disabled, absent, and unsupported controls, wraps in both directions, sets initial reverse focus to the last eligible control, and clears focus for an empty eligible set.
 
-Tab still accepts both ASCII `0x09` and `shell::KEY_TAB`; Shift+Tab uses the same core with `reverse=true`. Focus rings are repainted after traversal. The active Personalization sub-tab remains separate from keyboard focus, and committed appearance remains separate from a pending selection. Enter/Space activation, arrows, Escape, category navigation, and existing desktop shortcuts retain their existing handling.
+Both ASCII Tab 0x09 and shell::KEY_TAB continue to move forward. Shift+Tab calls the same core with reverse=true. Focus repaint follows a successful movement. The active Personalization section, active choice, pending choice, and committed configuration remain separate. Enter and Space activate; arrows, Escape, category shortcuts, and desktop shortcuts keep their previous behavior.
 
-## 5. Compatibility and production UI behavior
+## 5. Personalization and other Settings pages
 
-- Existing apps that only implement `onKeyDown(uint32_t)` continue through the base compatibility callback.
-- The existing `gx_event` ABI layout and version are unchanged; Native ELF receives the event-time modifier snapshot through a field already used for modifier flags.
-- Personalization supports keyboard focus movement among gradients, wallpaper paging/presets, and desktop icon controls. Disabled wallpaper Previous is skipped. Keyboard focus does not apply gradients, wallpapers, or icon changes by itself; Apply remains an explicit activation and Cancel discards pending state.
-- Supported categories remain System, Display, Personalization, and About. Deferred categories remain unavailable and do not accept new configuration operations.
+On Personalization, keyboard focus reached gradient sections and swatches, wallpaper sections, presets and paging controls, desktop icon visibility controls, Apply, and Cancel. Disabled Previous paging was skipped. Reverse traversal across the wallpaper section boundary reached the preceding eligible Desktop icons control. Apply and Cancel remained visible at preferred and minimum size; both were keyboard-reached at preferred size, and the minimum-size focus pair demonstrated the section control and Cancel.
 
-## 6. Tests and regression results
+Focus movement did not activate a control or apply pending appearance changes. Aurora was made pending while Ocean remained active, the user navigated to other Settings categories and back, then Cancel discarded the pending gradient. The desktop icon visibility control was toggled pending and Cancel discarded it. Apply and Cancel were reached with Tab and reversed with Shift+Tab; Apply was not activated in the keyboard-only no-write run.
 
-The focused PS/2 test links the production `ps2keyboard.cpp` IRQ decoder and checks left/right Shift independently, overlap/release ordering, repeated makes and breaks, Shift+Tab snapshots, key-up snapshot state, ordinary Tab after release, Enter, Space, Escape, arrows, F12, and unknown scancodes. The shared core suite covers wrap and reverse symmetry, ineligible controls, empty/single/indexed controls, and 1,000 mixed focus transitions. The native runtime suite retains 100 lifecycle repetitions, 250 provider refresh cycles, and 1,000 event/state transitions.
+System, Display, Personalization, and About were exercised in the final guest. System, Display, and About currently expose no page operation as a keyboard focus target; Tab and Shift+Tab left their page state unchanged while category navigation continued to work. Sidebar navigation remained functional. Deferred categories stayed visibly unavailable and no new categories or configuration operations were enabled.
+
+The Settings adapter uses Shift only to choose the direction of Tab traversal. Modifier bits do not change provider snapshots, authorization, or pending configuration; a supported activation remains required before an operation can be submitted.
+
+## 6. Automated tests and regressions
+
+Focused tests exercise the production PS/2 decoder, shared Settings core, native runtime/layout, Settings Center model, App Model dispatch, and compositor interactions.
 
 | Suite | Result |
 |---|---:|
-| PS/2 production decoder modifier test | 28/28 passed |
+| PS/2 decoder and modifier delivery | 31/31 passed |
 | S10 Settings presentation core | 3,659/3,659 passed |
-| Native Settings runtime | 1,419/1,419 passed |
-| Native Settings layout | 1,037/1,037 passed; 1,000 resize geometry transitions |
+| Native Settings runtime | 1,421/1,421 passed |
+| Native Settings layout | 1,037/1,037 passed; includes 1,000 geometry transitions |
 | Hosted Settings Center model | 89/89 passed |
+| App Model identity | 25/25 passed |
+| App Model file activation | 60/60 passed |
 | Compositor pointer buttons | Passed |
 | Compositor resize notifications | Passed |
+| Freestanding presentation/layout/refresh compile, relocatable link, and symbol checks | Passed |
 
-The individual executable transcripts are committed in [the S20 evidence directory](evidence/settings-s20-modifier-focus-20261018/README.md). Existing compiler warnings were inspected: the normalized file-plus-warning signature count is unchanged from the S19 comparison (224 before and 224 after), with zero added or removed signatures; no new S20 warning signature was found.
+The runtime suite includes 100 application lifecycle repetitions, 250 provider refresh cycles, and 1,000 notification/state transitions. The shared core includes 1,000 deterministic navigation transitions and reverse/forward focus symmetry checks. The PS/2 suite covers independent left/right Shift, overlap and release ordering, repeated Tab makes, duplicate Shift breaks, modifier snapshots on down/up, neutral Tab after release, Enter, Space, Escape, arrows, F12, and unknown scancodes. Runtime tests also verify modifier-aware delivery with no focused app and ordinary Tab after reopening.
 
-## 7. Production build and symbol audit
+The PS/2 host test reported the existing always-true uint8 scancode comparison warning, and the runtime suite reported an existing unused helper warning. The normalized production-build warning signatures match the accepted S19 set exactly: 224 before and 224 after, with no additions or removals.
 
-The ordinary AMD64 production kernel was built with freestanding settings, including `-ffreestanding`, `-fno-exceptions`, `-fno-rtti`, `-nostdlib`, and `-nostdinc++`.
+Detailed outputs are in [the S20 evidence folder](evidence/settings-s20-modifier-focus-20261018/README.md).
 
-- Compile commands: 257; compiler errors: 0; warning diagnostic lines: 463.
-- Normalized file/warning signatures: 224, matching the S19 baseline count.
-- Final ELF: 2,770,944 bytes; SHA-256 `9495CCB3670C94F4C2AEAA321113858DC57C53C79876E89B56C191D1002BB9B3`.
-- Final PE: 2,887,206 bytes; SHA-256 `4042D82FF7B6100D0B0843FD3679D2A745A6DA94227CC0E412A027F702D47E22`.
-- ELF undefined symbols: 21, equal to the S19 baseline; no added or removed undefined symbols.
-- PE import directory, bound-import, IAT, and delay-import sizes are zero.
+## 7. Freestanding and production AMD64 build
 
-The final build summary and full compiler log are in the evidence directory. The production kernel and private guest boot media remain in the preserved `out/validation` build/output tree.
+The normal AMD64 production kernel build passed with freestanding flags including -ffreestanding, -fno-exceptions, -fno-rtti, -nostdlib, and -nostdinc++.
 
-## 8. Production guest evidence
+- Compile commands: 257.
+- Compiler errors: 0.
+- Warning diagnostic lines: 463; normalized warning signatures: 224, with no change from S19 or the prior S20 build.
+- Kernel ELF: 2,771,240 bytes; SHA-256 F5AA964DA871DEAD7259D766DBAA4F67BE5485AF9DF3AFCD7812FE559ECA9AEF.
+- Kernel PE: 2,888,634 bytes; SHA-256 159D82DADE3B2BF3EEE607FA6C286B561BC9128D4048F1A4096C6DAE17552589.
+- ELF undefined symbols: 21, unchanged from the S19 baseline.
+- PE import directory: zero RVA and zero size.
+- No hosted runtime or standard library dependency was added.
 
-QEMU processes were inspected before launch. The foreign guest owned by `C:\gxR2` was left untouched. S20 used a private writable raw FAT image, the accepted read-only OVMF image, and private QMP endpoints. Both task-owned guests were stopped through their QMP endpoints. The final corrected-kernel launch record contains the kernel/media identities and pre/post media hashes.
+The build log and machine-readable summary are in the evidence folder. The ELF, PE, private raw images, and test executables remain preserved in out/validation.
 
-The complete ordered guest interaction ran on the immediately preceding S20 kernel build. It demonstrated Start → Settings, Personalization, forward and reverse focus, disabled wallpaper Previous skip, wallpaper paging, icon controls and Apply/Cancel focus, System/Display/About, close/reopen, legacy Control Panel, Alt+F4 close, and return to desktop. That kernel differed from the final ELF only by a follow-up change moving the default compatibility callback out of line to remove one new unresolved symbol. The corrected final ELF was then booted and visibly checked for Tab, Shift+Tab returning focus, ordinary Tab advancing after Shift release, reverse traversal across the wallpaper disabled-control boundary, and a stable desktop.
+## 8. Production QEMU guest
 
-The final-kernel screenshots show the yellow focus ring advancing and returning after a real QMP `sendkey shift-tab`; the QMP transcript records the injection and subsequent ordinary Tab. The decoder test independently verifies the make/break snapshot semantics. QMP text alone is not treated as proof of delivery.
+The final production kernel booted in a private writable raw-FAT ESP with a private QMP endpoint and the accepted read-only OVMF firmware. The patched pre-run media was 134,249,984 bytes, used FAT32 partition LBA 63 and 512-byte clusters, and retained matching FAT mirrors. The reconstructed pre-run patch image hash is 0C26C66C25457A127E3512355058D27D588EB3CB368D5FE4293115D9CDB78C96; it matches the unrun sibling clone generated from the same source media and kernel. The task-owned QEMU run used PID 29636 and QMP 127.0.0.1:60322, then exited through its private QMP quit command. The post-run raw media hash is 4A51FF256BB6E0E463365B66CA1137227553829E11B866FF10C7C0FF95AAC5B2. OVMF SHA-256 is 2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792.
 
-| Evidence | What it demonstrates |
+Foreign QEMU guests owned by C:\gxR2 and D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT were identified and left running with their media and QMP endpoints untouched. Only the S20-owned process was stopped.
+
+The guest booted to the graphical desktop, opened native Settings through Start, and completed the Personalization sequence on the final ELF. The QMP log includes real sendkey shift-tab injection. At the native Settings callback, the serial log records a Tab event with modifiers 0, the corresponding Shift+Tab event with modifiers 1 returning focus to the prior eligible control, and an ordinary Tab with modifiers 0 after Shift release. This confirms guest delivery and modifier state at the production app boundary.
+
+Settings was resized from 760×560 to 660×440 using the S19R3 calibrated lower-right held-button gesture. Forward and reverse traversal were captured at minimum size. Escape closed Settings, Start reopened it, and ordinary Tab after the instance reopened arrived with a zero modifier mask. Settings was closed again, the legacy Control Panel opened, and Alt+F4 closed it using the existing desktop shortcut. Meta+L opened and closed Start and the run ended on a stable desktop. System, Display, and About were also visited on this final ELF.
+
+| Evidence | Result |
 |---|---|
-| [Final-kernel Tab](evidence/settings-s20-modifier-focus-20261018/final-kernel.focus-tab.png) | Forward focus reaches Aurora. |
-| [Final-kernel Shift+Tab](evidence/settings-s20-modifier-focus-20261018/final-kernel.focus-shift-tab.png) | Reverse focus returns to Ocean through production input and callback routing. |
-| [Tab after Shift release](evidence/settings-s20-modifier-focus-20261018/final-kernel.focus-tab-after-shift-release.png) | Normal forward traversal resumes. |
-| [Wallpaper reverse boundary](evidence/settings-s20-modifier-focus-20261018/final-kernel.wallpaper-reverse-boundary.png) | Reverse traversal skips disabled Previous and reaches the preceding eligible section. |
-| [Apply and Cancel focus sequence](evidence/settings-s20-modifier-focus-20261018/production-sequence.icons-apply-focus.png), [reverse](evidence/settings-s20-modifier-focus-20261018/production-sequence.icons-apply-reverse.png) | Keyboard can reach Apply/Cancel and reverse between them. |
-| [Reopened Settings](evidence/settings-s20-modifier-focus-20261018/production-sequence.settings-reopened.png), [legacy Control Panel](evidence/settings-s20-modifier-focus-20261018/production-sequence.legacy-control-panel.png), [stable desktop](evidence/settings-s20-modifier-focus-20261018/final-kernel.stable-desktop.png) | Lifecycle evidence from the preceding build and final-kernel desktop finish. |
+| [Initial Settings](evidence/settings-s20-modifier-focus-20261018/final-recheck1.settings-initial.png) | Native window at preferred 760×560. |
+| [Forward Tab](evidence/settings-s20-modifier-focus-20261018/final-recheck1.focus-forward-tab.png), [Shift+Tab](evidence/settings-s20-modifier-focus-20261018/final-recheck1.focus-reverse-shift-tab.png), [Tab after release](evidence/settings-s20-modifier-focus-20261018/final-recheck1.focus-tab-after-shift-release.png) | Aurora focus, reverse to Ocean, then ordinary forward movement after Shift release. |
+| [Pending gradient](evidence/settings-s20-modifier-focus-20261018/final-recheck1.gradient-pending-aurora.png), [Cancel result](evidence/settings-s20-modifier-focus-20261018/final-recheck1.gradient-cancel-result.png) | Pending choice stayed separate from active Ocean and Cancel discarded it. |
+| [Wallpaper reverse focus](evidence/settings-s20-modifier-focus-20261018/final-recheck1.wallpaper-focus-reverse.png), [page change](evidence/settings-s20-modifier-focus-20261018/final-recheck1.wallpaper-page-2-after-enter.png), [reverse section boundary](evidence/settings-s20-modifier-focus-20261018/final-recheck1.wallpaper-reverse-section-boundary.png) | Wallpaper grid and paging stayed keyboard reachable; reverse traversal crossed back to Desktop icons. |
+| [Icon pending](evidence/settings-s20-modifier-focus-20261018/final-recheck1.desktop-icons-pending.png), [Apply focus](evidence/settings-s20-modifier-focus-20261018/final-recheck1.desktop-icons-apply-focus.png), [Cancel focus](evidence/settings-s20-modifier-focus-20261018/final-recheck1.desktop-icons-cancel-focus.png), [reverse to Apply](evidence/settings-s20-modifier-focus-20261018/final-recheck1.desktop-icons-apply-reverse.png), [Cancel result](evidence/settings-s20-modifier-focus-20261018/final-recheck1.desktop-icons-cancel-result.png) | Apply/Cancel focus and reverse movement; pending icon selection was discarded. |
+| [Minimum-size window](evidence/settings-s20-modifier-focus-20261018/final-recheck1.minimum-660x440.png), [minimum forward focus](evidence/settings-s20-modifier-focus-20261018/final-recheck1.minimum-focus-forward.png), [minimum reverse focus](evidence/settings-s20-modifier-focus-20261018/final-recheck1.minimum-focus-reverse.png) | The actual 660×440 layout kept the section control and Cancel focus visible. |
+| [Reopened Settings](evidence/settings-s20-modifier-focus-20261018/final-recheck1.settings-reopened.png), [reopened ordinary Tab](evidence/settings-s20-modifier-focus-20261018/final-recheck1.reopened-ordinary-tab.png) | Fresh app instance received unmodified forward Tab. |
+| [Legacy Control Panel](evidence/settings-s20-modifier-focus-20261018/final-recheck1.legacy-control-panel.png), [closed by Alt+F4](evidence/settings-s20-modifier-focus-20261018/final-recheck1.legacy-control-panel-closed.png), [final stable desktop](evidence/settings-s20-modifier-focus-20261018/final-recheck1.final-stable-desktop.png) | Existing legacy and desktop keyboard behavior remained usable. |
 
-![Final production guest Shift+Tab focus result](evidence/settings-s20-modifier-focus-20261018/final-kernel.focus-shift-tab.png)
+The complete QMP transcript and final guest serial log are committed beside these screenshots. The screenshot set includes the initial desktop and Start path, Settings focus states, category pages, minimum-size focus, reopen, legacy Control Panel, and final desktop.
 
 ## 9. Configuration safety
 
-Keyboard navigation and focus did not apply pending Personalization choices. The final launch's `DESKTOP.CFG` pre-run and post-run records both report 234 bytes and SHA-256 `CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249`. The extracted 234-byte snapshots from the prior S20 private image and final image also compare byte-for-byte equal. This is a file-level comparison, not an inference from the whole ESP hash.
+The pre-run 234-byte DESKTOP.CFG and post-run 234-byte DESKTOP.CFG compare byte-for-byte equal. Both SHA-256 values are CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249. The explicit comparison record is final-recheck1.desktop-cfg-comparison.json. Focus changes, Tab, Shift+Tab, pending gradient selection, and Cancel did not write configuration. Whole-media hashes were not used as a substitute for this file comparison.
 
-## 10. Resize qualification and limits
+## 10. Remaining limits
 
-The S20 QMP run attempted the calibrated lower-right held-button resize gesture at the ordinary 760×560 Settings size. Screenshots captured the target, held attempt, and final state; the window stayed at 760×560. The S20 guest therefore did not establish focus or clipping at the accepted 660×440 minimum. This result is a harness/guest qualification limit, not evidence of a resize code regression. S19R3's accepted minimum-size evidence remains historical and was not reused as S20 keyboard evidence.
+No lost PS/2 break recovery timeout is implemented; the driver remains the owner of physical state until a break or reinitialization. Desktop KernelApp keyboard callbacks remain key-down oriented for compatibility, while Native ELF receives its existing Down/Up events. Key repeat is represented by repeated make events without a distinct repeat flag. These limits do not prevent the accepted Settings Shift+Tab flow.
 
-The full multi-page and lifecycle guest sequence was not repeated on the corrected final ELF. The final ELF did receive focused real guest modifier and traversal checks, and all regressions and the production build used the corrected source.
+## 11. S21 recommendation
 
-## 11. Recommended S21 follow-up
-
-1. Qualify the QMP held-button resize procedure or another guest-observable pointer path, reach 660×440, and repeat representative Personalization Tab/Shift+Tab and enabled-control traversal there.
-2. Repeat the full ordered keyboard, Personalization, close/reopen, and legacy Control Panel sequence on the exact final production ELF, capturing its config pre/post record.
-3. If future diagnostics need to prove physical break ordering beyond the current real focus result plus decoder test, add narrowly scoped PS/2 make/break telemetry and preserve that transcript.
-
-No new Settings category or unrelated policy work is recommended for S21.
+Keep S21 bounded to missed key-up recovery: detect keyboard-controller reset or input-stream loss where the hardware exposes it, resynchronize stuck modifiers without focus-based clearing, and add decoder fault-injection and QEMU evidence for duplicate and missing break sequences. Do not expand Settings categories or appearance operations as part of that input-reliability work.

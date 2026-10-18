@@ -1,21 +1,27 @@
 # S20 modifier-aware focus evidence
 
-This folder contains reviewable evidence for [the S20 acceptance report](../../SETTINGS_S20_MODIFIER_AWARE_FOCUS_ACCEPTANCE.md). It was copied from task-owned validation outputs; the originals under `out/validation` were preserved.
+This directory contains the committed acceptance artifacts for [the S20 report](../../SETTINGS_S20_MODIFIER_AWARE_FOCUS_ACCEPTANCE.md). Raw validation images, build outputs, test executables, and QEMU working files remain preserved under out/validation.
 
 ## Evidence groups
 
-- `final-kernel.*` records the corrected production ELF run. It contains the actual Tab, `sendkey shift-tab`, post-Shift-release Tab, disabled-wallpaper-Previous reverse boundary, and final desktop screenshots, with its QMP/serial logs and launch identity.
-- `production-sequence.*` records the longer Settings, Personalization, lifecycle, and legacy Control Panel interaction from the preceding S20 ELF. That kernel differed from the corrected ELF by the later out-of-line compatibility fallback definition. The corrected ELF's focused modifier sequence is kept separate above.
-- `resize-attempt.*` preserves the attempted minimum-size drag screenshots. The window remained at 760×560, so these are evidence of an unqualified attempt, not a 660×440 result.
-- `tests/` contains output from the acceptance executables. `production-build.log` and `production-build-summary.json` preserve the final production build record.
-- `desktop.cfg-before.bin` and `desktop.cfg-after.bin` are the extracted 234-byte `DESKTOP.CFG` snapshots from the first S20 private image before the corrected final-ELF run and from the final image after that run. They compare byte-for-byte equal. The final launch's explicit pre-run and post-run per-file records are also preserved as JSON; both report SHA-256 `CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249` and size 234 bytes.
+- final-recheck1.* records the corrected production ELF completing the full guest lifecycle, including a real QMP Shift+Tab, ordinary Tab after Shift release and app reopening, actual 660×440 resize and focus review, Settings cancellation, legacy Control Panel Alt+F4, and the stable desktop.
+- final-recheck1.retry1.qmp.log and final-recheck1.serial.log contain the actual guest input transcript and final kernel/application diagnostics. The Settings Tab diagnostic is bounded to 16 events per app instance.
+- final-recheck1.retry1.launch.json and final-recheck1-retry1.media-staging.json identify the corrected ELF, private raw image, OVMF firmware, QMP endpoint, process termination, and image hashes. The pre-run patch image hash 0C26C66C... was independently reproduced from the recorded source raw image and final kernel, matching the unrun sibling image. The guest raw media post-run hash is 4A51FF25....
+- final-recheck1.desktop-cfg-before and final-recheck1.desktop-cfg-after.bin are extracted 234-byte DESKTOP.CFG snapshots. They compare byte-for-byte equal and both have SHA-256 CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249. final-recheck1.desktop-cfg-comparison.json records the comparison.
+- final-kernel.* contains the earlier focused real modifier sequence. production-sequence.* contains the ordered Settings and legacy interactions from the immediately preceding S20 build; the corrected final-recheck1.* now repeats that lifecycle on the final ELF.
+- resize-attempt.* preserves an earlier non-effective resize attempt for history. final-recheck1.minimum-660x440.png and its focus screenshots record the successful minimum-size qualification.
+- tests/ contains the acceptance executables, regression transcripts, freestanding validation, and final production build log and summary.
 
-## Artifact identity
+## Final artifact identity
 
-- Final kernel ELF: 2,770,944 bytes, SHA-256 `9495CCB3670C94F4C2AEAA321113858DC57C53C79876E89B56C191D1002BB9B3`.
-- Final kernel PE: 2,887,206 bytes, SHA-256 `4042D82FF7B6100D0B0843FD3679D2A745A6DA94227CC0E412A027F702D47E22`.
-- Private final boot media before guest run: SHA-256 `7071C7F711009D674F740989AB2A41BF45DA4C4A08BA6FCAB7FBA10407ED8475`.
-- Private final boot media after guest run: SHA-256 `16774805ADC462AD88E3FBDC8988103855B883E13C9D01B92A05A6DA924F9AC6`.
-- Read-only OVMF firmware: SHA-256 `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`.
+- Kernel ELF: 2,771,240 bytes, SHA-256 F5AA964DA871DEAD7259D766DBAA4F67BE5485AF9DF3AFCD7812FE559ECA9AEF.
+- Kernel PE: 2,888,634 bytes, SHA-256 159D82DADE3B2BF3EEE607FA6C286B561BC9128D4048F1A4096C6DAE17552589.
+- Final private raw image: pre-run patch identity 0C26C66C25457A127E3512355058D27D588EB3CB368D5FE4293115D9CDB78C96; post-run identity 4A51FF256BB6E0E463365B66CA1137227553829E11B866FF10C7C0FF95AAC5B2.
+- Read-only OVMF firmware: SHA-256 2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792.
 
-Trailing alignment spaces were removed from the committed text-log copies; the original task outputs remain preserved under `out/validation`. `SHA256SUMS.txt` covers every file in this evidence folder other than the manifest itself.
+SHA256SUMS.txt covers every file in this folder other than the manifest itself.
+
+Trailing alignment whitespace was removed from the committed serial and compiler text-log copies; their original task outputs remain preserved under out/validation.
+
+Evidence text and extracted DESKTOP.CFG snapshots are stored without Git line-ending conversion so the checksum manifest stays reproducible across checkouts.
+tests/production-build-final-recheck2.log is a clean successful serial production build transcript; production-build-final-recheck1.json records the tested final ELF and PE identities plus warning comparison.

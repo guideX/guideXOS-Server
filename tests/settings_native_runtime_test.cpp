@@ -2395,6 +2395,11 @@ int main()
     AppManager::update();
     expect(g_testAdapterDisplayReads == readsBeforeLateNotification,
            "pending, during-close, and post-destruction notifications cannot call a stale Settings instance");
+    const int callbacksBeforeUnfocusedKey = g_modifierAwareKeyCallbacks;
+    kernel::compositor::KernelCompositor::handleKeyDownWithModifiers(
+        '\t', kernel::ps2keyboard::KEY_MOD_SHIFT);
+    expect(g_modifierAwareKeyCallbacks == callbacksBeforeUnfocusedKey,
+           "modifier-aware keyboard delivery is ignored when no application owns focus");
 
     const int createdBeforeCycles = g_appCreated;
     const int destroyedBeforeCycles = g_appDestroyed;
@@ -2408,6 +2413,13 @@ int main()
         KernelApp* current = AppManager::getRunningApp(0);
         expect(current && std::string(current->getRuntimeAppId()) == kSettingsRuntimeAppId,
                "reopened instance receives a fresh runtime identity");
+        if (i == 0) {
+            const int callbacksBeforeReopenedKey = g_modifierAwareKeyCallbacks;
+            kernel::compositor::KernelCompositor::handleKeyDownWithModifiers('\t', 0u);
+            expect(g_modifierAwareKeyCallbacks == callbacksBeforeReopenedKey + 1 &&
+                       g_lastKeyboardKey == '\t' && g_lastKeyboardModifiers == 0u,
+                   "a reopened app receives ordinary Tab without stale instance modifier state");
+        }
         DisplaySnapshotV1 lifecycleDisplay{};
         size_t lifecycleDisplaySize = 0;
         uint64_t lifecycleDisplayRevision = 0;

@@ -1,0 +1,3 @@
+Running: C:\mingw64\bin\g++.exe -std=c++14 -Wall -Wextra -Werror -O2 -iquote . tests/settings_native_layout_test.cpp kernel/core/settings_native_layout.cpp settings_presentation_core.cpp -o D:\dev\guideXOSServer\out\validation\settings-s20-modifier-focus-20261018-recheck1\native-layout\settings_native_layout_test.exe
+Settings native layout checks: 1037/1037 passed; resize geometry transitions: 1000
+Settings native layout build and test PASS.

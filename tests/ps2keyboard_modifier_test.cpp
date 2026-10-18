@@ -140,6 +140,22 @@ int main()
     feed(0x5Au); readKey('\n', 0u, "Enter keeps its existing translated key value");
     feed(0x29u); readKey(' ', 0u, "Space keeps its existing translated key value");
     feed(0x76u); readKey(27u, 0u, "Escape keeps its existing translated key value");
+    feed(0x12u); // left Shift make
+    feed(0x14u); // left Control make
+    feed(0x11u); // left Alt make
+    feed(0x0Du); // Tab while Control, Alt, and Shift are all active
+    readKey('\t', kernel::ps2keyboard::KEY_MOD_SHIFT |
+                    kernel::ps2keyboard::KEY_MOD_CTRL |
+                    kernel::ps2keyboard::KEY_MOD_ALT,
+            "Tab snapshots all supported modifiers without changing key identity");
+    feed(0xF0u); feed(0x14u);
+    feed(0xF0u); feed(0x11u);
+    feed(0xF0u); feed(0x12u);
+    check(!kernel::ps2keyboard::is_ctrl_down() && !kernel::ps2keyboard::is_alt_down() &&
+              !kernel::ps2keyboard::is_shift_down(),
+          "releasing modifiers independently restores the neutral state");
+    feed(0x0Du);
+    readKey('\t', 0u, "modifier release restores ordinary Tab dispatch");
     feed(0xE0u); feed(0x75u);
     readKey(kernel::ps2keyboard::KEY_EVENT_UP, 0u,
             "extended arrow identity remains available to desktop input");

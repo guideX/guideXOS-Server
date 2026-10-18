@@ -1,0 +1,7 @@
+Running: C:\mingw64\bin\g++.exe -std=c++14 -Wall -Wextra -O2 -fno-exceptions -fno-rtti -DGXOS_BARE_METAL -iquote . -idirafter kernel/core/include -I kernel/arch/amd64/include tests/ps2keyboard_modifier_test.cpp kernel/core/ps2keyboard.cpp -o D:\dev\guideXOSServer\out\validation\settings-s20-modifier-focus-20261018-recheck1\ps2keyboard_modifier_test.exe
+kernel/core/ps2keyboard.cpp: In function 'void kernel::ps2keyboard::irq_handler()':
+kernel/core/ps2keyboard.cpp:339:30: warning: comparison is always true due to limited range of data type [-Wtype-limits]
+  339 |                 if (scancode < 256) {
+      |                     ~~~~~~~~~^~~~~
+PS/2 keyboard modifier tests: 31/31 passed
+PS/2 keyboard modifier build and test PASS.

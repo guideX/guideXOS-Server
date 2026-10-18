@@ -1,0 +1,8 @@
+*.bin -text
+*.log -text
+*.md -text
+*.json -text
+*.jsonl -text
+*.txt -text
+.gitattributes -text
+final-recheck1.desktop-cfg-before -text

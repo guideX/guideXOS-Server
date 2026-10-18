@@ -1,0 +1,28 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . tests/app_model_identity_test.cpp app_registry.cpp app_default_handler_store.cpp app_manifest.cpp app_manifest_loader.cpp app_manifest_validator.cpp fs.cpp -o D:\dev\guideXOSServer\out\validation\settings-s20-modifier-focus-20261018-recheck1\app_model_identity_test.exe
+PASS: valid manifest loads
+PASS: over-limit manifest text is rejected
+PASS: maximum-length manifest entry path is accepted
+PASS: overlength manifest entry path is rejected
+PASS: maximum manifest entry count is accepted
+PASS: over-capacity manifest entry count is rejected
+PASS: temporary registration accepted
+PASS: registry owns a copy of registration identity strings
+PASS: exact duplicate ID is rejected with a deterministic error
+PASS: duplicate rejection preserves the existing registration
+PASS: maximum-length App Model ID is accepted
+PASS: overlength App Model ID is rejected
+PASS: ID matching preserves the existing case-sensitive contract
+PASS: generation test registration accepted
+PASS: wrong generation cannot unregister a live registration
+PASS: matching owner and generation unregister the registration
+PASS: same ID can be registered again under a new generation
+PASS: stale generation cannot remove the reused ID
+PASS: reused ID still resolves only to the current generation
+PASS: registry accepts exactly its configured capacity
+PASS: registry capacity overflow fails without replacing an entry
+PASS: duplicate manifest fixtures written
+PASS: CRLF manifest file is read using its full byte length
+PASS: same-source duplicate ID is reported rather than silently ignored
+PASS: same-source duplicate winner is independent of directory iteration order
+appModelIdentityChecks=25/25
+App Model identity build and test PASS.

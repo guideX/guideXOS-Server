@@ -1,0 +1,7 @@
+{
+  "image": "out\\validation\\settings-s20-modifier-focus-20261018-recheck1\\guest\\S20-final-instrumented-private.raw",
+  "snapshot": "docs\\evidence\\settings-s20-modifier-focus-20261018\\final-recheck1.desktop-cfg-before",
+  "partition_lba": 63,
+  "size_bytes": 234,
+  "sha256": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249"
+}

@@ -1,0 +1,16 @@
+{
+  "source_media": "out\\validation\\settings-s20-modifier-focus-20261018\\guest\\S20-final-private.raw",
+  "source_media_sha256_before_patch": "16774805ADC462AD88E3FBDC8988103855B883E13C9D01B92A05A6DA924F9AC6",
+  "destination_media": "out\\validation\\settings-s20-modifier-focus-20261018-recheck1\\guest\\S20-final-instrumented-private-retry1.raw",
+  "destination_bytes": 134249984,
+  "partition_lba": 63,
+  "cluster_bytes": 512,
+  "old_kernel_bytes": 2770944,
+  "old_kernel_sha256": "9495CCB3670C94F4C2AEAA321113858DC57C53C79876E89B56C191D1002BB9B3",
+  "new_kernel_bytes": 2771240,
+  "new_kernel_sha256": "F5AA964DA871DEAD7259D766DBAA4F67BE5485AF9DF3AFCD7812FE559ECA9AEF",
+  "clusters_old": 5412,
+  "clusters_new": 5413,
+  "fat_copies": 2,
+  "fat_mirrors_match": true
+}

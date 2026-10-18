@@ -1,0 +1,3 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . tests/settings_presentation_core_test.cpp settings_presentation_core.cpp -o D:\dev\guideXOSServer\out\validation\settings-s20-modifier-focus-20261018-recheck1\settings_presentation_core_test.exe
+Settings presentation core tests: 3659/3659 passed
+Settings presentation core build and test PASS.

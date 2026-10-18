@@ -16576,7 +16576,8 @@ public:
           m_gradientStatus("Select a preset, then choose Apply."),
           m_iconStatus("Select icon visibility, then choose Apply."),
           m_queueHead(0), m_queueCount(0),
-          m_drawX(0), m_drawY(0), m_drawW(0), m_drawH(0)
+          m_drawX(0), m_drawY(0), m_drawW(0), m_drawH(0),
+          m_tabDiagnosticCount(0u)
     {
         strcopy(m_name, "Settings", app::MAX_APP_NAME);
         initializeAdapter();
@@ -16593,6 +16594,7 @@ public:
         m_hoverCategory = settings::CategoryId::Count;
         m_hoverPersonalizationControl = -1;
         m_windowFocused = false;
+        m_tabDiagnosticCount = 0u;
         m_queueHead = 0;
         m_queueCount = 0;
         m_snapshotAvailable = false;
@@ -16783,9 +16785,28 @@ public:
         if (key == 0x1Bu) requestClose();
         else if (m_presentation.selectedCategory() == settings::CategoryId::Personalization) {
             if (key == '\t' || key == shell::KEY_TAB) {
-                if (m_presentation.moveFocus(
+                if (m_tabDiagnosticCount < kTabDiagnosticLimit) {
+                    serial::puts("[settings-native] keyboard.tab key=");
+                    serial::put_hex32(key);
+                    serial::puts(" modifiers=");
+                    serial::put_hex32(modifiers);
+                    serial::puts(" before=");
+                    serial::put_hex32(static_cast<uint32_t>(m_presentation.focusedControl()));
+                    serial::putc(':');
+                    serial::put_hex32(static_cast<uint32_t>(m_presentation.focusedControlIndex()));
+                }
+                const bool moved = m_presentation.moveFocus(
                         (modifiers & ps2keyboard::KEY_MOD_SHIFT) != 0u,
-                        focusControlCount, this)) invalidate();
+                        focusControlCount, this);
+                if (m_tabDiagnosticCount < kTabDiagnosticLimit) {
+                    serial::puts(" after=");
+                    serial::put_hex32(static_cast<uint32_t>(m_presentation.focusedControl()));
+                    serial::putc(':');
+                    serial::put_hex32(static_cast<uint32_t>(m_presentation.focusedControlIndex()));
+                    serial::puts(moved ? " moved=1\n" : " moved=0\n");
+                    ++m_tabDiagnosticCount;
+                }
+                if (moved) invalidate();
             }
             else if (key == shell::KEY_LEFT || key == shell::KEY_RIGHT ||
                      key == shell::KEY_UP || key == shell::KEY_DOWN) {
@@ -16858,6 +16879,7 @@ public:
 
 private:
     static const uint32_t kInputQueueCapacity = 12;
+    static const uint32_t kTabDiagnosticLimit = 16u;
 
     settings::SettingsPresentationCore m_presentation;
     settings::SettingsPresentationAdapterV1 m_adapter;
@@ -16902,6 +16924,7 @@ private:
     uint32_t m_drawY;
     uint32_t m_drawW;
     uint32_t m_drawH;
+    uint32_t m_tabDiagnosticCount;
 
     static bool getWindowConstraints(void*, settings::SettingsWindowConstraints* output)
     {

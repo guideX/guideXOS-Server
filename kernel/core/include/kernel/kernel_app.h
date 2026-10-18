@@ -216,9 +216,6 @@ public:
     virtual void onMouseUp(int, int, uint8_t) {}
     virtual void onMouseWheel(int, int, int) {}
     virtual void onKeyDown(uint32_t) {}
-    // Modifier-aware desktop delivery. Existing apps keep their original
-    // callback semantics unless they explicitly opt in.
-    virtual void onKeyDownWithModifiers(uint32_t key, uint32_t modifiers);
     virtual void onKeyUp(uint32_t) {}
     virtual void onKeyChar(char) {}
     virtual void onWidgetClick(int) {}
@@ -233,6 +230,10 @@ public:
     
     // Drawing (called by compositor to render app content)
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) = 0;
+
+    // Appended after existing virtual slots so the modifier-aware desktop
+    // extension preserves the established KernelApp vtable ordering.
+    virtual void onKeyDownWithModifiers(uint32_t key, uint32_t modifiers);
     
     // State
     AppState getState() const { return m_state; }

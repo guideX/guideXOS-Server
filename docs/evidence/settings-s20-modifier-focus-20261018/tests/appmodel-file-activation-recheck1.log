@@ -1,0 +1,67 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . tests/app_model_file_activation_test.cpp app_registry.cpp app_default_handler_store.cpp app_manifest.cpp app_manifest_loader.cpp app_manifest_validator.cpp fs.cpp -o D:\dev\guideXOSServer\out\validation\settings-s20-modifier-focus-20261018-recheck1\app_model_file_activation_test.exe
+PASS: ImageViewer declares only PNG and JPEG, so BMP and GIF resolve to no handler
+PASS: unsupported BMP and GIF do not appear in the AppRegistry known-capability set
+PASS: explicit ImageViewer activation rejects a BMP path without bypassing capability validation
+PASS: manifest loader retains explicit activation capability and extension declarations
+PASS: built-in Notepad publishes exactly four bounded associations
+PASS: extension matching is ASCII case-insensitive and uses the final suffix
+PASS: slash paths resolve through the canonical built-in App ID
+PASS: backslash paths resolve through the AppRegistry index
+PASS: normalized handler enumeration retains Notepad as the built-in default by canonical App ID
+PASS: existing path traversal spelling is preserved exactly for the VFS to interpret
+PASS: unknown extension does not acquire an incidental handler
+PASS: extensionless names remain unresolved
+PASS: dotfiles without a suffix remain extensionless
+PASS: trailing dot is rejected as a malformed extension
+PASS: spaces in the filename do not prevent a registered final suffix from resolving
+PASS: overlong suffix is rejected
+PASS: empty paths are rejected before extension lookup
+PASS: extension exactly at the configured byte limit is accepted
+PASS: path longer than the configured bound is rejected before routing
+PASS: control characters are rejected from document paths
+PASS: documented extension alphabet accepts ASCII letters, digits, underscore, and hyphen
+PASS: manifest validator rejects multi-dot association declarations
+PASS: per-app association count accepts its configured maximum
+PASS: per-app association count rejects one over the configured maximum
+PASS: two capable registrations with duplicate labels register with extension normalization
+PASS: duplicate display labels remain distinct and deterministically ordered by canonical ID
+PASS: default resolution selects the first stable capable handler without making declarations ambiguous
+PASS: one-time explicit choice opens with Beta and does not mutate the normal default
+PASS: unknown canonical app ID fails closed
+PASS: capable application cannot be explicitly chosen for an undeclared extension
+PASS: explicit activation rejects an overlong path before dispatch
+PASS: explicit activation rejects an extensionless document
+PASS: explicit activation rejects malformed document paths
+PASS: empty handler results and malformed normalized extensions are represented safely
+PASS: available and unavailable capability declarations register together
+PASS: unavailable declarations remain distinguishable while default selection picks a launchable handler
+PASS: explicit activation rejects a declared handler without a current backend
+PASS: duplicate extension declarations from one application collapse to one capable handler
+PASS: handler without declared document capability is not launchable
+PASS: handler without a current runtime backend is not launchable
+PASS: association index accepts exactly its configured record capacity
+PASS: association index caps retained records and reports overflow
+PASS: extension omitted by capacity cap fails closed with explicit status
+PASS: handler enumeration has a fixed capacity and reports omitted declarations
+PASS: bounded enumeration never truncates away the deterministic effective default
+PASS: owned activation handler registers
+PASS: resolved target owns the exact path, canonical ID, owner, and generation
+PASS: activation path is an owned copy and validates while its registration is current
+PASS: activation remains intact after its temporary source string is destroyed
+PASS: wrong owner or generation cannot remove the association handler
+PASS: matching owner and generation can unregister the handler
+PASS: unregister removes the association instead of leaving a dangling handler ID
+PASS: same App ID can be reused with a fresh generation
+PASS: handler reference captured by an old menu cannot target a reused registration generation
+PASS: old owned activation cannot survive unregister and same-ID generation reuse
+PASS: fresh resolution selects only the current registration generation
+PASS: maximum-length document path is accepted at the value boundary
+PASS: maximum-length associated path resolves without truncation
+PASS: one byte over the document path bound is rejected
+PASS: malformed document activation context is never current
+associationRegistryChecks=27/27
+documentTargetOwnershipChecks=15/15
+handlerEnumerationChecks=10/10
+explicitActivationChecks=8/8
+appModelFileActivationChecks=60/60
+App Model file activation build and test PASS.
