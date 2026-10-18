@@ -222,6 +222,21 @@ static void serial_put_u32_decimal(uint32_t value)
     kernel::serial::puts(&buffer[index]);
 }
 
+static void record_input3d_boot_milestone(
+    kernel::modern_input_diagnostics::BootStage stage)
+{
+    kernel::modern_input_diagnostics::record_boot_milestone(stage);
+    kernel::modern_input_diagnostics::Snapshot snapshot = {};
+    kernel::modern_input_diagnostics::copy_snapshot(&snapshot);
+    kernel::serial::puts("BOOT: ");
+    kernel::serial::puts(kernel::modern_input_diagnostics::boot_stage_name(stage));
+    kernel::serial::puts(" sequence=");
+    kernel::serial::put_hex64(snapshot.bootSequence);
+    kernel::serial::puts(" snapshot=");
+    kernel::serial::put_hex64(snapshot.snapshotSequence);
+    kernel::serial::putc('\n');
+}
+
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
 static bool manual_logical_mode_supported(int32_t width, int32_t height)
 {
@@ -726,6 +741,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // Initialize serial debug output early
     kernel::serial::init();
     kernel::modern_input_diagnostics::initialize();
+    record_input3d_boot_milestone(
+        kernel::modern_input_diagnostics::BootStage::KernelEntry);
     kernel::serial::puts("[GXOS-BUILD] identity=");
     kernel::serial::puts(GXOS_BUILD_IDENTITY);
     kernel::serial::puts(" probe=");
@@ -763,6 +780,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] ERROR: No valid boot method detected, halting\n");
         while(1) { }
     }
+
+    // Paging, the kernel image, the boot stack, and the boot environment are
+    // established by the UEFI loader or Multiboot handoff before _start.
+    // This milestone records that the kernel accepted that memory context;
+    // there is no separate AMD64 physical-memory allocator initialization here.
+    record_input3d_boot_milestone(
+        kernel::modern_input_diagnostics::BootStage::MemoryInitialized);
     
     // Initialize framebuffer for graphics mode
     bool has_fb = false;
@@ -775,6 +799,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         has_fb = kernel::framebuffer::init_from_bootinfo(bootinfo);
     } else {
         has_fb = kernel::framebuffer::init(multiboot_info);
+    }
+    if (has_fb) {
+        record_input3d_boot_milestone(
+            kernel::modern_input_diagnostics::BootStage::FramebufferReady);
     }
 
     // Diagnostic-only virtio-gpu probe runs regardless of framebuffer
@@ -873,6 +901,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         // Initialize desktop and draw immediately (skip boot splash)
         kernel::desktop::init();
+        record_input3d_boot_milestone(
+            kernel::modern_input_diagnostics::BootStage::DesktopInitialized);
         kernel::desktop::draw();
         kernel::serial::puts("[KERNEL] Desktop drawn\n");
         
@@ -899,7 +929,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::native_elf::audio_set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::usb::xhci::controller::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
         }
+        record_input3d_boot_milestone(
+            kernel::modern_input_diagnostics::BootStage::PciDiscoveryEntered);
+        kernel::desktop::draw();
         kernel::pci_audio::init();
+        record_input3d_boot_milestone(
+            kernel::modern_input_diagnostics::BootStage::PciDiscoveryCompleted);
         kernel::serial::puts("[KERNEL] Audio controllers detected: ");
         kernel::serial::put_hex8(kernel::pci_audio::controller_count());
         kernel::serial::puts("\n");
@@ -909,13 +944,27 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // This is read-only and makes the bare-metal input failure frontier
         // visible even before a controller driver exists.  See
         // docs/MODERN_INPUT_INPUT1.md.
+        // This safe desktop paint precedes the scanner call. PCI remains
+        // NOT INVOKED until scan_host_controllers records its own entry.
+        kernel::desktop::draw();
         kernel::usb::diagnostics::scan_host_controllers();
+        // The first desktop frame predates hardware discovery. Publish the
+        // completed PCI result now so later storage/network startup cannot
+        // leave the visible diagnostics overlay on its initial state.
+        kernel::desktop::draw();
 
         // xHCI controller bring-up: validate BAR, acquire ownership, reset,
         // configure rings, start the controller, and observe root-port state.
         // This is INPUT2 scope: no USB device enumeration or HID activation.
         // See docs/MODERN_INPUT_INPUT2.md.
-        kernel::usb::xhci::controller::init();
+        const bool xhciInitSucceeded = kernel::usb::xhci::controller::init();
+        record_input3d_boot_milestone(
+            kernel::modern_input_diagnostics::BootStage::XhciInitCompleted);
+        kernel::serial::puts("BOOT: XHCI_INIT_RESULT=");
+        kernel::serial::puts(xhciInitSucceeded ? "PASS\n" : "FAIL\n");
+        // Refresh the framebuffer at the xHCI failure frontier as well. The
+        // main event loop starts only after the remaining boot services.
+        kernel::desktop::draw();
 
         // xHCI first device enumeration: port reset, Enable Slot, Address
         // Device, GET_DESCRIPTOR(Device).  This is INPUT3 scope.  See
@@ -1281,8 +1330,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         
-        // Main kernel loop â€” poll input and redraw cursor
+        // Main kernel loop — poll input and redraw cursor
+        bool mainLoopMilestoneRecorded = false;
         while (1) {
+            if (!mainLoopMilestoneRecorded) {
+                record_input3d_boot_milestone(
+                    kernel::modern_input_diagnostics::BootStage::MainLoopEntered);
+                mainLoopMilestoneRecorded = true;
+            }
             uint64_t workStartTicks = kernel::pit::ticks();
 
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
@@ -1380,6 +1435,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             // the DMA ring would loop stale content instead of decaying to
             // silence. Bounded, non-blocking, never sleeps.
             kernel::native_elf::app_audio_pump();
+
+            // Diagnostic writers only publish bounded state. Observe their
+            // generation from the normal desktop context and repaint once per
+            // actual change, even when no input devices generate events.
+            if (kernel::modern_input_diagnostics::presentation_pending()) {
+                kernel::desktop::request_redraw();
+            }
 
             // Check if any other source triggered a redraw
             if (kernel::desktop::needs_redraw()) {

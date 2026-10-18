@@ -19,6 +19,29 @@ enum class Status : uint8_t {
     Blocked
 };
 
+enum class PciScanState : uint8_t {
+    NotInvoked = 0,
+    EntryReached,
+    ScanComplete,
+    NoControllers,
+    Failure
+};
+
+enum class BootStage : uint8_t {
+    Unknown = 0,
+    KernelEntry,
+    MemoryInitialized,
+    FramebufferReady,
+    PciDiscoveryEntered,
+    PciDiscoveryCompleted,
+    UsbDiscoveryEntered,
+    UsbDiscoveryCompleted,
+    XhciInitEntered,
+    XhciInitCompleted,
+    DesktopInitialized,
+    MainLoopEntered
+};
+
 enum class ControllerKind : uint8_t {
     Other = 0,
     UHCI,
@@ -143,7 +166,13 @@ struct FirstFailure {
 };
 
 struct Snapshot {
+    BootStage bootStage;
+    uint64_t bootSequence;
+    uint64_t snapshotSequence;
+    uint64_t displayedSequence;
     Status pciEnumeration;
+    PciScanState pciScanState;
+    const char* pciScanFailure;
     uint32_t usbControllerCount;
     uint32_t xhciControllerCount;
     uint32_t storedControllerCount;
@@ -169,8 +198,11 @@ struct PanelLayout {
 // Called once at kernel entry. All diagnostic updates happen at boot or from
 // the kernel main loop; interrupt handlers never publish diagnostic state.
 void initialize();
+void record_boot_milestone(BootStage stage);
+bool presentation_pending();
+bool record_panel_presented(uint64_t snapshotSequence);
 void begin_pci_enumeration();
-void complete_pci_enumeration(Status status);
+void complete_pci_enumeration(Status status, const char* failureReason = nullptr);
 
 // Returns the deterministic PCI discovery index, or -1 when the bounded
 // per-controller snapshot is full. Aggregate counts still include omitted
@@ -211,6 +243,8 @@ void increment_counter(int32_t controllerIndex, Counter counter);
 void copy_snapshot(Snapshot* outSnapshot);
 
 const char* status_name(Status status);
+const char* boot_stage_name(BootStage stage);
+const char* pci_scan_state_name(PciScanState state);
 const char* stage_name(Stage stage);
 const char* controller_kind_name(ControllerKind kind);
 uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capacity);

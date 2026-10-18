@@ -67,6 +67,118 @@ void test_concurrent_publication()
             "concurrent readers never observe a torn stage result");
 }
 
+void test_boot_progress_and_presentation()
+{
+    initialize();
+    Snapshot snapshot;
+    copy_snapshot(&snapshot);
+    require(snapshot.bootStage == BootStage::Unknown && snapshot.bootSequence == 0u,
+            "boot progress starts without claiming a milestone");
+    require(snapshot.snapshotSequence == 1u && snapshot.displayedSequence == 0u &&
+            presentation_pending(),
+            "initial snapshot is published and awaits a first presentation");
+
+    record_boot_milestone(BootStage::KernelEntry);
+    copy_snapshot(&snapshot);
+    const uint64_t entrySequence = snapshot.snapshotSequence;
+    require(snapshot.bootStage == BootStage::KernelEntry && snapshot.bootSequence == 1u,
+            "kernel entry milestone is an executed, sequenced transition");
+    record_panel_presented(entrySequence);
+    require(!presentation_pending(), "presented snapshot clears the stale-display state");
+
+    record_boot_milestone(BootStage::MemoryInitialized);
+    record_boot_milestone(BootStage::FramebufferReady);
+    record_boot_milestone(BootStage::PciDiscoveryEntered);
+    copy_snapshot(&snapshot);
+    const uint64_t earlyPaintSequence = snapshot.snapshotSequence;
+    require(snapshot.bootStage == BootStage::PciDiscoveryEntered && snapshot.bootSequence == 4u,
+            "boot milestones preserve the observed execution order");
+    record_panel_presented(earlyPaintSequence);
+
+    // Model a completed xHCI initialization arriving after the first desktop
+    // paint. It must stay unpublished to the visible panel until the normal
+    // renderer acknowledges the new sequence.
+    const int32_t controller = add_xhci(0u, 20u, 0u, 0x8086u, 0x06EDu);
+    require(controller == 0, "late xHCI result gets its bounded controller slot");
+    record_boot_milestone(BootStage::XhciInitEntered);
+    record_stage(controller, Stage::ControllerRunning, Status::Pass, 0u, false,
+                 0u, false, 0u, 0u, 0u, 0u, false);
+    record_boot_milestone(BootStage::XhciInitCompleted);
+    require(presentation_pending(),
+            "controller completion published after early paint is detected as stale");
+    copy_snapshot(&snapshot);
+    const uint64_t latestSequence = snapshot.snapshotSequence;
+    require(snapshot.latestStage == Stage::ControllerRunning &&
+            snapshot.latestStatus.status == Status::Pass && !snapshot.firstFailure.present,
+            "successful controller completion remains distinct from a failure");
+    record_panel_presented(earlyPaintSequence);
+    require(presentation_pending(), "acknowledging an older frame cannot hide newer state");
+    record_panel_presented(latestSequence);
+    require(!presentation_pending(), "newly presented frame catches up to publication");
+
+    record_stage(controller, Stage::BarMmio, Status::Fail, 7u, true,
+                 0u, false, 0u, 0u, 0u, 0u, false, "synthetic late failure");
+    require(presentation_pending(),
+            "controller failure published after the early paint requests a repaint");
+
+    const uint64_t beforeRepeatedPublish = latestSequence;
+    record_stage(controller, Stage::BarMmio, Status::Fail, 7u, true,
+                 0u, false, 0u, 0u, 0u, 0u, false, "synthetic pre-desktop failure");
+    copy_snapshot(&snapshot);
+    require(snapshot.snapshotSequence > beforeRepeatedPublish && presentation_pending(),
+            "repeated state publication advances version and requests another repaint");
+
+    require(std::strcmp(boot_stage_name(BootStage::KernelEntry), "KERNEL_ENTRY") == 0 &&
+            std::strcmp(boot_stage_name(BootStage::XhciInitCompleted), "XHCI_INIT_COMPLETED") == 0 &&
+            std::strcmp(boot_stage_name(BootStage::MainLoopEntered), "MAIN_LOOP_ENTERED") == 0 &&
+            std::strcmp(boot_stage_name(static_cast<BootStage>(0xFFu)), "UNKNOWN") == 0,
+            "boot milestone formatting handles known and malformed stages");
+}
+
+void test_failure_before_desktop_initialization()
+{
+    initialize();
+    const int32_t controller = add_xhci(0u, 20u, 0u, 0x8086u, 0x06EDu);
+    record_stage(controller, Stage::BarMmio, Status::Fail, 3u, true,
+                 0u, false, 0u, 0u, 0u, 0u, false,
+                 "synthetic failure before desktop initialization");
+    Snapshot snapshot;
+    copy_snapshot(&snapshot);
+    require(snapshot.firstFailure.present &&
+            snapshot.firstFailure.stage == Stage::BarMmio &&
+            snapshot.bootStage == BootStage::Unknown,
+            "controller failure can be retained before desktop initialization");
+
+    record_boot_milestone(BootStage::DesktopInitialized);
+    copy_snapshot(&snapshot);
+    require(snapshot.firstFailure.present && snapshot.latestStage == Stage::BarMmio &&
+            snapshot.latestStatus.status == Status::Fail,
+            "desktop initialization does not erase a prior controller failure");
+}
+
+void test_snapshot_reset()
+{
+    initialize();
+    record_boot_milestone(BootStage::KernelEntry);
+    const int32_t controller = add_xhci(0u, 20u, 0u, 0x8086u, 0x06EDu);
+    record_stage(controller, Stage::BarMmio, Status::Fail, 1u, true,
+                 0u, false, 0u, 0u, 0u, 0u, false);
+    Snapshot beforeReset;
+    copy_snapshot(&beforeReset);
+    record_panel_presented(beforeReset.snapshotSequence);
+    require(!presentation_pending(), "fixture frame is acknowledged before reset");
+
+    initialize();
+    Snapshot afterReset;
+    copy_snapshot(&afterReset);
+    require(afterReset.snapshotSequence == 1u && afterReset.displayedSequence == 0u &&
+            afterReset.bootStage == BootStage::Unknown && afterReset.bootSequence == 0u,
+            "initialization resets generation and boot progress deterministically");
+    require(!afterReset.firstFailure.present && afterReset.usbControllerCount == 0u &&
+            afterReset.pciScanState == PciScanState::NotInvoked && presentation_pending(),
+            "initialization clears prior hardware evidence and requires a fresh paint");
+}
+
 } // namespace
 
 int main()
@@ -74,24 +186,42 @@ int main()
     initialize();
     Snapshot snapshot;
     copy_snapshot(&snapshot);
+    require(snapshot.bootStage == BootStage::Unknown && snapshot.bootSequence == 0u,
+            "initial boot stage does not infer execution");
     require(snapshot.pciEnumeration == Status::NotAttempted,
             "initial PCI scan is not attempted");
+    require(snapshot.pciScanState == PciScanState::NotInvoked,
+            "initial PCI scan execution state is not invoked");
     require(snapshot.usbControllerCount == 0u && snapshot.xhciControllerCount == 0u,
             "initial controller counts are zero");
     require(snapshot.selectedControllerIndex == -1 && !snapshot.firstFailure.present,
             "initial selection and first failure are empty");
+    require(snapshot.snapshotSequence == 1u && snapshot.displayedSequence == 0u &&
+            presentation_pending(),
+            "initial diagnostic snapshot version is awaiting presentation");
 
     begin_pci_enumeration();
+    copy_snapshot(&snapshot);
+    require(snapshot.pciScanState == PciScanState::EntryReached,
+            "PCI scan entry is published before discovery starts");
     complete_pci_enumeration(Status::Pass);
     copy_snapshot(&snapshot);
     require(snapshot.pciEnumeration == Status::Pass,
             "no-controller PCI scan can complete successfully");
+    require(snapshot.pciScanState == PciScanState::NoControllers &&
+            snapshot.latestStage == Stage::PciDiscovery &&
+            snapshot.latestStatus.status == Status::Pass,
+            "completed empty PCI scan is distinct from not invoked");
     require(snapshot.usbControllerCount == 0u && snapshot.xhciControllerCount == 0u,
             "no-controller scan preserves actual zero counts");
 
     begin_pci_enumeration();
     const int32_t first = add_xhci(0u, 20u, 0u, 0x8086u, 0x06EDu);
     require(first == 0, "first controller gets deterministic index zero");
+    complete_pci_enumeration(Status::Pass);
+    copy_snapshot(&snapshot);
+    require(snapshot.pciScanState == PciScanState::ScanComplete,
+            "PCI scan with a controller reports scan complete");
     record_stage(first, Stage::PciDiscovery, Status::Pass, 0u, false,
                  0u, false, 0u, 0u, 0u, 0u, false);
     record_mmio_base(first, 0xFEDC0000u);
@@ -193,6 +323,15 @@ int main()
             std::strcmp(status_name(Status::NotAttempted), "NOT ATTEMPTED") == 0 &&
             std::strcmp(status_name(static_cast<Status>(0xFFu)), "UNKNOWN") == 0,
             "unsupported, not-attempted, and malformed status values stay distinct");
+    require(std::strcmp(pci_scan_state_name(PciScanState::NotInvoked), "NOT INVOKED") == 0 &&
+            std::strcmp(pci_scan_state_name(PciScanState::EntryReached), "ENTRY REACHED") == 0 &&
+            std::strcmp(pci_scan_state_name(PciScanState::ScanComplete), "SCAN COMPLETE") == 0 &&
+            std::strcmp(pci_scan_state_name(PciScanState::NoControllers), "NO CONTROLLERS") == 0 &&
+            std::strcmp(pci_scan_state_name(PciScanState::Failure), "FAILURE") == 0,
+            "PCI scan execution states have deterministic names");
+    require(std::strcmp(boot_stage_name(BootStage::PciDiscoveryCompleted),
+                        "PCI_DISCOVERY_COMPLETED") == 0,
+            "PCI boot milestone has a deterministic display name");
     require(std::strcmp(stage_name(static_cast<Stage>(0xFFu)), "unknown stage") == 0,
             "malformed stage names are bounded and explicit");
 
@@ -212,11 +351,22 @@ int main()
     require(snapshot.firstFailure.stage == Stage::AddressDevice,
             "later controller failure does not replace the first failure");
 
+    complete_pci_enumeration(Status::Fail, "synthetic PCI scan failure");
+    copy_snapshot(&snapshot);
+    require(snapshot.pciScanState == PciScanState::Failure &&
+            snapshot.pciScanFailure != nullptr &&
+            std::strcmp(snapshot.pciScanFailure, "synthetic PCI scan failure") == 0,
+            "PCI scan failure includes a stable reason");
+    require(snapshot.firstFailure.stage == Stage::AddressDevice,
+            "PCI scan failure does not overwrite earlier first-failure evidence");
+
     begin_pci_enumeration();
     copy_snapshot(&snapshot);
-    require(snapshot.firstFailure.present && snapshot.firstFailure.stage == Stage::AddressDevice &&
+    require(snapshot.pciScanState == PciScanState::EntryReached &&
+            snapshot.pciScanFailure == nullptr &&
+            snapshot.firstFailure.present && snapshot.firstFailure.stage == Stage::AddressDevice &&
             snapshot.firstFailure.vendorId == 0x8086u && snapshot.firstFailure.deviceId == 0x06EDu,
-            "first failure and controller identity survive later enumeration");
+            "new enumeration clears its prior scan error but preserves first failure");
     for (uint32_t i = 0u; i < MAX_CONTROLLERS + 1u; ++i) {
         record_controller(0u, static_cast<uint8_t>(i), 0u, 0x8086u,
                           static_cast<uint16_t>(0x1000u + i), 0x0Cu, 0x03u,
@@ -245,6 +395,9 @@ int main()
             layout.width <= 560u && layout.height <= 500u && layout.rowCapacity >= 33u,
             "common-screen panel stays bounded instead of covering the desktop");
 
+    test_boot_progress_and_presentation();
+    test_failure_before_desktop_initialization();
+    test_snapshot_reset();
     test_concurrent_publication();
     std::printf("Modern input diagnostics tests PASS (%d assertions).\n", g_assertions);
     return 0;

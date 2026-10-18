@@ -96,7 +96,6 @@ static uint32_t scan_port_io()
     uint32_t xhciCount   = 0u;
 
     kernel::serial::puts("[USB] host-controller scan begin\n");
-    kernel::modern_input_diagnostics::begin_pci_enumeration();
 
     for (uint16_t bus = 0u; bus < 256u; ++bus) {
         for (uint8_t dev = 0u; dev < 32u; ++dev) {
@@ -212,14 +211,16 @@ static uint32_t scan_port_io()
         }
     }
 
+    kernel::modern_input_diagnostics::complete_pci_enumeration(
+        kernel::modern_input_diagnostics::Status::Pass);
+
     kernel::serial::puts("[USB] host-controller scan end controllers=");
     serial_u32_dec(controllers);
     kernel::serial::puts(" xhci=");
     serial_u32_dec(xhciCount);
+    kernel::serial::puts(" state=");
+    kernel::serial::puts(controllers == 0u ? "NO CONTROLLERS" : "SCAN COMPLETE");
     kernel::serial::putc('\n');
-
-    kernel::modern_input_diagnostics::complete_pci_enumeration(
-        kernel::modern_input_diagnostics::Status::Pass);
 
     return controllers;
 }
@@ -230,16 +231,37 @@ static uint32_t scan_port_io()
 
 uint32_t scan_host_controllers()
 {
+    kernel::modern_input_diagnostics::begin_pci_enumeration();
+    kernel::modern_input_diagnostics::record_boot_milestone(
+        kernel::modern_input_diagnostics::BootStage::UsbDiscoveryEntered);
+    kernel::modern_input_diagnostics::Snapshot snapshot = {};
+    kernel::modern_input_diagnostics::copy_snapshot(&snapshot);
+    kernel::serial::puts("BOOT: USB_DISCOVERY_ENTERED sequence=");
+    kernel::serial::put_hex64(snapshot.bootSequence);
+    kernel::serial::puts(" snapshot=");
+    kernel::serial::put_hex64(snapshot.snapshotSequence);
+    kernel::serial::putc('\n');
+    kernel::serial::puts("[USB] PCI discovery ENTRY REACHED\n");
+    uint32_t controllers = 0u;
 #if ARCH_HAS_PORT_IO
-    return scan_port_io();
+    controllers = scan_port_io();
 #else
     // Pure classification/parsing remains available; PCI config access is
     // not present on this architecture yet.
-    kernel::modern_input_diagnostics::begin_pci_enumeration();
     kernel::modern_input_diagnostics::complete_pci_enumeration(
-        kernel::modern_input_diagnostics::Status::Unsupported);
-    return 0u;
+        kernel::modern_input_diagnostics::Status::Unsupported,
+        "PCI configuration access is unavailable on this architecture");
+    kernel::serial::puts("[USB] PCI discovery FAILURE: configuration access unsupported\n");
 #endif
+    kernel::modern_input_diagnostics::record_boot_milestone(
+        kernel::modern_input_diagnostics::BootStage::UsbDiscoveryCompleted);
+    kernel::modern_input_diagnostics::copy_snapshot(&snapshot);
+    kernel::serial::puts("BOOT: USB_DISCOVERY_COMPLETED sequence=");
+    kernel::serial::put_hex64(snapshot.bootSequence);
+    kernel::serial::puts(" snapshot=");
+    kernel::serial::put_hex64(snapshot.snapshotSequence);
+    kernel::serial::putc('\n');
+    return controllers;
 }
 
 } // namespace diagnostics

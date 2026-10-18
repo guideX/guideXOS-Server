@@ -1637,6 +1637,15 @@ static bool enumerate_first_device(EnumeratedDevice* out)
 
 bool init()
 {
+    modern_input_diagnostics::record_boot_milestone(
+        modern_input_diagnostics::BootStage::XhciInitEntered);
+    modern_input_diagnostics::Snapshot bootSnapshot = {};
+    modern_input_diagnostics::copy_snapshot(&bootSnapshot);
+    serial_puts("BOOT: XHCI_INIT_ENTERED sequence=");
+    kernel::serial::put_hex64(bootSnapshot.bootSequence);
+    serial_puts(" snapshot=");
+    kernel::serial::put_hex64(bootSnapshot.snapshotSequence);
+    serial_puts("\n");
     if (s_initialized) {
         return s_running;
     }

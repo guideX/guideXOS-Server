@@ -9169,6 +9169,20 @@ static uint32_t input3d_panel_decimal(char* out, uint32_t capacity,
     return position;
 }
 
+static uint32_t input3d_panel_decimal64(char* out, uint32_t capacity,
+                                        uint32_t position, uint64_t value)
+{
+    char digits[20];
+    uint32_t count = 0u;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10u);
+        value /= 10u;
+    } while (value != 0u && count < sizeof(digits));
+    while (count != 0u && position + 1u < capacity) out[position++] = digits[--count];
+    if (capacity != 0u) out[position < capacity ? position : capacity - 1u] = '\0';
+    return position;
+}
+
 static uint32_t input3d_panel_hex(char* out, uint32_t capacity,
                                  uint32_t position, uint32_t value,
                                  uint32_t digits)
@@ -9446,7 +9460,7 @@ static void input3d_panel_draw_controller_details(
         controller.stages[static_cast<uint32_t>(Stage::InputRouting)]);
 }
 
-static void draw_input3d_diagnostics_panel()
+static uint64_t draw_input3d_diagnostics_panel()
 {
     using modern_input_diagnostics::Status;
     modern_input_diagnostics::Snapshot snapshot;
@@ -9455,7 +9469,7 @@ static void draw_input3d_diagnostics_panel()
     if (!modern_input_diagnostics::calculate_panel_layout(
             framebuffer::get_width(), framebuffer::get_height(), &layout) ||
         layout.width < 1u || layout.height < 1u) {
-        return;
+        return 0u;
     }
 
     framebuffer::fill_rect(layout.x, layout.y, layout.width, layout.height,
@@ -9480,14 +9494,44 @@ static void draw_input3d_diagnostics_panel()
     input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
 
     line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "Boot: ");
+    input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::boot_stage_name(snapshot.bootStage));
+    input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "Boot sequence: ");
+    input3d_panel_decimal64(line, sizeof(line), position, snapshot.bootSequence);
+    input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "Snapshot: ");
+    position = input3d_panel_decimal64(line, sizeof(line), position,
+                                       snapshot.snapshotSequence);
+    position = input3d_panel_append(line, sizeof(line), position, " displayed: ");
+    input3d_panel_decimal64(line, sizeof(line), position,
+                            snapshot.snapshotSequence);
+    input3d_panel_draw_line(&writer, line, rgb(196, 213, 234));
+
+    line[0] = '\0';
     position = input3d_panel_append(line, sizeof(line), 0u, "PCI: ");
     position = input3d_panel_append(line, sizeof(line), position,
         modern_input_diagnostics::status_name(snapshot.pciEnumeration));
+    position = input3d_panel_append(line, sizeof(line), position, " scan=");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::pci_scan_state_name(snapshot.pciScanState));
     position = input3d_panel_append(line, sizeof(line), position, " USB=");
     position = input3d_panel_decimal(line, sizeof(line), position, snapshot.usbControllerCount);
     position = input3d_panel_append(line, sizeof(line), position, " xHCI=");
     position = input3d_panel_decimal(line, sizeof(line), position, snapshot.xhciControllerCount);
     input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+
+    if (snapshot.pciScanFailure != nullptr) {
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "PCI scan failure: ");
+        input3d_panel_append(line, sizeof(line), position, snapshot.pciScanFailure);
+        input3d_panel_draw_line(&writer, line, rgb(255, 185, 135));
+    }
 
     char failure[112];
     modern_input_diagnostics::format_first_failure(snapshot, failure, sizeof(failure));
@@ -9692,9 +9736,16 @@ static void draw_input3d_diagnostics_panel()
     position = input3d_panel_append(line, sizeof(line), position,
         modern_input_diagnostics::stage_name(snapshot.latestStage));
     position = input3d_panel_append(line, sizeof(line), position, " ");
-    input3d_panel_append(line, sizeof(line), position,
-        modern_input_diagnostics::status_name(snapshot.latestStatus.status));
+    if (snapshot.latestStage == modern_input_diagnostics::Stage::PciDiscovery &&
+        snapshot.pciScanState == modern_input_diagnostics::PciScanState::EntryReached) {
+        input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::pci_scan_state_name(snapshot.pciScanState));
+    } else {
+        input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::status_name(snapshot.latestStatus.status));
+    }
     input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
+    return snapshot.snapshotSequence;
 }
 
 } // namespace
@@ -9703,6 +9754,8 @@ static void draw_input3d_diagnostics_panel()
 void draw()
 {
     if (!s_initialized || !framebuffer::is_available()) return;
+
+    uint64_t input3dSnapshotSequence = 0u;
 
     forget_cursor_save();
 
@@ -9746,13 +9799,20 @@ void draw()
 #if defined(GXOS_INPUT3D_DIAGNOSTICS) && defined(GXOS_BARE_METAL)
     // This read-only panel is rendered by the existing desktop framebuffer
     // pass, so it remains visible after later redraws without owning hardware.
-    draw_input3d_diagnostics_panel();
+    input3dSnapshotSequence = draw_input3d_diagnostics_panel();
 #endif
     
     // Present the back buffer to the screen (swap buffers)
     // This is the key to preventing flickering - all drawing is done
     // to the back buffer, then copied to the screen in one operation
     framebuffer::present();
+#if defined(GXOS_INPUT3D_DIAGNOSTICS) && defined(GXOS_BARE_METAL)
+    if (modern_input_diagnostics::record_panel_presented(input3dSnapshotSequence)) {
+        serial::puts("INPUT3D: panel presented snapshot sequence=");
+        serial::put_hex64(input3dSnapshotSequence);
+        serial::putc('\n');
+    }
+#endif
 }
 
 

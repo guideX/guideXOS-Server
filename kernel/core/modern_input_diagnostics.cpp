@@ -7,6 +7,11 @@ namespace {
 static Snapshot s_snapshot = {};
 static uint8_t s_snapshotLock = 0u;
 
+static void publish_snapshot_change_locked()
+{
+    if (s_snapshot.snapshotSequence != UINT64_MAX) ++s_snapshot.snapshotSequence;
+}
+
 static void lock_snapshot()
 {
     while (__atomic_exchange_n(&s_snapshotLock, 1u, __ATOMIC_ACQUIRE) != 0u) {
@@ -149,7 +154,13 @@ void initialize()
 {
     lock_snapshot();
     s_snapshot = {};
+    s_snapshot.bootStage = BootStage::Unknown;
+    s_snapshot.bootSequence = 0u;
+    s_snapshot.snapshotSequence = 1u;
+    s_snapshot.displayedSequence = 0u;
     s_snapshot.pciEnumeration = Status::NotAttempted;
+    s_snapshot.pciScanState = PciScanState::NotInvoked;
+    s_snapshot.pciScanFailure = nullptr;
     s_snapshot.selectedControllerIndex = -1;
     s_snapshot.latestControllerIndex = -1;
     s_snapshot.latestStage = Stage::PciDiscovery;
@@ -163,26 +174,94 @@ void initialize()
     unlock_snapshot();
 }
 
+void record_boot_milestone(BootStage stage)
+{
+    if (stage <= BootStage::Unknown || stage > BootStage::MainLoopEntered) return;
+
+    lock_snapshot();
+    if (s_snapshot.bootSequence != UINT64_MAX) ++s_snapshot.bootSequence;
+    s_snapshot.bootStage = stage;
+    publish_snapshot_change_locked();
+    unlock_snapshot();
+}
+
+bool presentation_pending()
+{
+    lock_snapshot();
+    const bool pending = s_snapshot.snapshotSequence > s_snapshot.displayedSequence;
+    unlock_snapshot();
+    return pending;
+}
+
+bool record_panel_presented(uint64_t snapshotSequence)
+{
+    if (snapshotSequence == 0u) return false;
+    bool advanced = false;
+    lock_snapshot();
+    if (snapshotSequence > s_snapshot.displayedSequence) {
+        s_snapshot.displayedSequence = snapshotSequence;
+        advanced = true;
+    }
+    unlock_snapshot();
+
+    return advanced;
+}
+
 void begin_pci_enumeration()
 {
     lock_snapshot();
     s_snapshot.pciEnumeration = Status::NotAttempted;
+    s_snapshot.pciScanState = PciScanState::EntryReached;
+    s_snapshot.pciScanFailure = nullptr;
     s_snapshot.usbControllerCount = 0u;
     s_snapshot.xhciControllerCount = 0u;
     s_snapshot.storedControllerCount = 0u;
     s_snapshot.controllersOmitted = 0u;
     s_snapshot.selectedControllerIndex = -1;
+    s_snapshot.latestControllerIndex = -1;
+    s_snapshot.latestStage = Stage::PciDiscovery;
+    s_snapshot.latestStatus = {};
+    s_snapshot.latestStatus.status = Status::NotAttempted;
     for (uint32_t i = 0u; i < MAX_CONTROLLERS; ++i) {
         initialize_controller(&s_snapshot.controllers[i]);
     }
+    publish_snapshot_change_locked();
     unlock_snapshot();
 }
 
-void complete_pci_enumeration(Status status)
+void complete_pci_enumeration(Status status, const char* failureReason)
 {
+    const bool failed = status == Status::Fail || status == Status::Timeout;
+    const char* resolvedFailure = failureReason;
+    if (resolvedFailure == nullptr && status == Status::Unsupported) {
+        resolvedFailure = "PCI configuration access is unsupported on this architecture";
+    } else if (resolvedFailure == nullptr && status != Status::Pass) {
+        resolvedFailure = "PCI discovery did not complete successfully";
+    }
+
     lock_snapshot();
     s_snapshot.pciEnumeration = status;
+    if (status == Status::Pass) {
+        s_snapshot.pciScanState = s_snapshot.usbControllerCount == 0u
+            ? PciScanState::NoControllers : PciScanState::ScanComplete;
+        s_snapshot.pciScanFailure = nullptr;
+    } else {
+        s_snapshot.pciScanState = PciScanState::Failure;
+        s_snapshot.pciScanFailure = resolvedFailure;
+    }
+    s_snapshot.latestControllerIndex = -1;
+    s_snapshot.latestStage = Stage::PciDiscovery;
+    s_snapshot.latestStatus = {};
+    s_snapshot.latestStatus.status = status;
+    s_snapshot.latestStatus.detail = resolvedFailure;
+    publish_snapshot_change_locked();
     unlock_snapshot();
+
+    if (failed) {
+        record_stage(-1, Stage::PciDiscovery, status, 0u, false,
+                     0u, false, 0u, 0u, 0u, 0u, false,
+                     resolvedFailure);
+    }
 }
 
 int32_t record_controller(uint8_t bus, uint8_t device, uint8_t function,
@@ -198,6 +277,7 @@ int32_t record_controller(uint8_t bus, uint8_t device, uint8_t function,
     }
     if (index >= MAX_CONTROLLERS) {
         if (s_snapshot.controllersOmitted != 0xFFFFFFFFu) ++s_snapshot.controllersOmitted;
+        publish_snapshot_change_locked();
         unlock_snapshot();
         return -1;
     }
@@ -216,6 +296,7 @@ int32_t record_controller(uint8_t bus, uint8_t device, uint8_t function,
     controller->progIf = progIf;
     controller->kind = kind;
     s_snapshot.storedControllerCount = index + 1u;
+    publish_snapshot_change_locked();
     unlock_snapshot();
     return static_cast<int32_t>(index);
 }
@@ -241,6 +322,7 @@ void select_controller(int32_t controllerIndex)
     lock_snapshot();
     if (controller_for_index(controllerIndex) != nullptr) {
         s_snapshot.selectedControllerIndex = controllerIndex;
+        publish_snapshot_change_locked();
     }
     unlock_snapshot();
 }
@@ -249,7 +331,10 @@ void record_mmio_base(int32_t controllerIndex, uint64_t base)
 {
     lock_snapshot();
     ControllerSnapshot* controller = controller_for_index(controllerIndex);
-    if (controller != nullptr) controller->mmioBase = base;
+    if (controller != nullptr) {
+        controller->mmioBase = base;
+        publish_snapshot_change_locked();
+    }
     unlock_snapshot();
 }
 
@@ -272,6 +357,7 @@ void record_mmio_configuration(int32_t controllerIndex, uint32_t bar0,
         controller->pciBarIsIo = barIsIo;
         controller->pciBarIs64 = barIs64;
         controller->pciBarPrefetchable = barPrefetchable;
+        publish_snapshot_change_locked();
     }
     unlock_snapshot();
 }
@@ -290,6 +376,7 @@ void record_mmio_mapping(int32_t controllerIndex, const char* substage,
         controller->mmioMappedLength = mappedLength;
         controller->mmioValidationSubstage = substage;
         controller->mmioMappingReason = reason;
+        publish_snapshot_change_locked();
     }
     unlock_snapshot();
 }
@@ -298,7 +385,10 @@ void record_ownership_status(int32_t controllerIndex, OwnershipStatus status)
 {
     lock_snapshot();
     ControllerSnapshot* controller = controller_for_index(controllerIndex);
-    if (controller != nullptr) controller->ownership = status;
+    if (controller != nullptr) {
+        controller->ownership = status;
+        publish_snapshot_change_locked();
+    }
     unlock_snapshot();
 }
 
@@ -321,6 +411,7 @@ void record_capabilities(int32_t controllerIndex, uint8_t capLength,
             controller->supportedProtocolCount = supportedProtocolCount;
         }
         controller->scratchpadBuffersRequired = scratchpadBuffersRequired;
+        publish_snapshot_change_locked();
     }
     unlock_snapshot();
 }
@@ -334,6 +425,7 @@ void record_root_ports(int32_t controllerIndex, uint32_t rootPortCount,
         controller->rootPortCount = rootPortCount;
         controller->connectedPortCount = connectedPortCount;
         controller->selectedPort = selectedPort;
+        publish_snapshot_change_locked();
     }
     unlock_snapshot();
 }
@@ -353,6 +445,7 @@ void record_device_descriptor(int32_t controllerIndex, bool transferSucceeded,
             controller->vendorDescriptor = vendorId;
             controller->productDescriptor = productId;
         }
+        publish_snapshot_change_locked();
     }
     unlock_snapshot();
 }
@@ -400,6 +493,7 @@ void record_stage(int32_t controllerIndex, Stage stage, Status status,
         s_snapshot.firstFailure.stage = stage;
         s_snapshot.firstFailure.result = result;
     }
+    publish_snapshot_change_locked();
     unlock_snapshot();
 }
 
@@ -411,6 +505,7 @@ void increment_counter(int32_t controllerIndex, Counter counter)
     ControllerSnapshot* controller = controller_for_index(controllerIndex);
     if (controller != nullptr && controller->inputCounters[counterIndex] != 0xFFFFFFFFu) {
         ++controller->inputCounters[counterIndex];
+        publish_snapshot_change_locked();
     }
     unlock_snapshot();
 }
@@ -432,6 +527,36 @@ const char* status_name(Status status)
         case Status::Fail: return "FAIL";
         case Status::Timeout: return "TIMEOUT";
         case Status::Blocked: return "BLOCKED";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* boot_stage_name(BootStage stage)
+{
+    switch (stage) {
+        case BootStage::KernelEntry: return "KERNEL_ENTRY";
+        case BootStage::MemoryInitialized: return "MEMORY_INITIALIZED";
+        case BootStage::FramebufferReady: return "FRAMEBUFFER_READY";
+        case BootStage::PciDiscoveryEntered: return "PCI_DISCOVERY_ENTERED";
+        case BootStage::PciDiscoveryCompleted: return "PCI_DISCOVERY_COMPLETED";
+        case BootStage::UsbDiscoveryEntered: return "USB_DISCOVERY_ENTERED";
+        case BootStage::UsbDiscoveryCompleted: return "USB_DISCOVERY_COMPLETED";
+        case BootStage::XhciInitEntered: return "XHCI_INIT_ENTERED";
+        case BootStage::XhciInitCompleted: return "XHCI_INIT_COMPLETED";
+        case BootStage::DesktopInitialized: return "DESKTOP_INITIALIZED";
+        case BootStage::MainLoopEntered: return "MAIN_LOOP_ENTERED";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* pci_scan_state_name(PciScanState state)
+{
+    switch (state) {
+        case PciScanState::NotInvoked: return "NOT INVOKED";
+        case PciScanState::EntryReached: return "ENTRY REACHED";
+        case PciScanState::ScanComplete: return "SCAN COMPLETE";
+        case PciScanState::NoControllers: return "NO CONTROLLERS";
+        case PciScanState::Failure: return "FAILURE";
         default: return "UNKNOWN";
     }
 }
