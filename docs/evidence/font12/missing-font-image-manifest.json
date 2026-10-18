@@ -1,0 +1,14 @@
+{
+  "createdUtc": "2026-10-18T01:36:34.636164+00:00",
+  "image": "C:\\Users\\guideX\\.codex\\visualizations\\2026\\10\\18\\01a14c6c-a952-7b43-b491-ba19c79d8a17\\FONT12-guest\\font12-missing-font.raw",
+  "imageSha256": "7500a44ff6ae22781c821c887c4ca729d54eddfb35f2fa0bac3c1ad904a8c016",
+  "removedFont": "/system/fonts/Roboto-Regular.ttf",
+  "removedFontBytes": 146004,
+  "preferencePath": "/FONTSEL0.CFG",
+  "preferenceSequence": "0000000000000021",
+  "preferenceKind": "truetype",
+  "preferenceSelectedPath": "/system/fonts/Roboto-Regular.ttf",
+  "preferenceSha256Preserved": "d0496348454048045e4a239590391ad0a6a3e83e1d612771702213be87eb1e8e",
+  "purpose": "fresh guest boot with the currently selected TrueType file missing, verifying fallback to built-in bitmap face",
+  "volume": "private FAT32 raw block-image clone on PIIX IDE primary master"
+}

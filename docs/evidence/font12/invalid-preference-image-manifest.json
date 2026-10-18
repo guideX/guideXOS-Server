@@ -1,0 +1,31 @@
+{
+  "createdUtc": "2026-10-18T00:48:52.389274+00:00",
+  "source_image": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font11r-validation\\continuation\\font11r-font9-baseline-clone-boot3.img",
+  "private_image": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font12-validation\\guest\\font12-primary.img",
+  "purpose": "fresh boot with invalid newest TTF record and older valid bitmap preference; verify recovery to bitmap",
+  "records": [
+    {
+      "path": "/FONTSEL0.CFG",
+      "sequence": 31,
+      "kind": "truetype",
+      "size": 1024,
+      "sha256_before": "c98ba834373c470b453c8edebe5102a1f246aea3dd403dd4257de508a8fa2bf6",
+      "sha256_after": "10b47589c3dfaba3987870b1922f488e360a1a34517fda289c17166d06e1a5ad",
+      "changed": true
+    },
+    {
+      "path": "/fontsel1.cfg",
+      "sequence": 30,
+      "kind": "bitmap",
+      "size": 1024,
+      "sha256_before": "61c937587ddd5e8b605e60ab28e6827997666eda6a3b2bb390a610d20aaf18d2",
+      "sha256_after": "61c937587ddd5e8b605e60ab28e6827997666eda6a3b2bb390a610d20aaf18d2",
+      "changed": false
+    }
+  ],
+  "corrupted_record": "/FONTSEL0.CFG",
+  "corrupted_checksum_before": "fae28b08",
+  "corrupted_checksum_after": "0ae28b08",
+  "only_newest_record_mutated": true,
+  "volume": "FAT32 raw block image; tested on PIIX IDE primary master"
+}

@@ -1,0 +1,69 @@
+{
+  "image": "C:\\Users\\guideX\\.codex\\visualizations\\2026\\10\\18\\01a14c6c-a952-7b43-b491-ba19c79d8a17\\FONT12-guest\\font12-primary-after-fonts.raw",
+  "entries": [
+    {
+      "path": "/kernel.elf",
+      "exists": true,
+      "bytes": 2819272,
+      "sha256": "beb5b612af370ba411d270e2c438863a92726e20a01fd73937d78f6a20e0acee"
+    },
+    {
+      "path": "/system/fonts/Roboto-Regular.ttf",
+      "exists": true,
+      "bytes": 146004,
+      "sha256": "dbd285b518e398832f6f4a736109c355ce25a49546bfce41bab256c9ef7e56eb"
+    },
+    {
+      "path": "/system/fonts/Roboto-Bold.ttf",
+      "exists": true,
+      "bytes": 146768,
+      "sha256": "27467020febce4c0ac8482ea8e8d6f32bf8c5721fb9c301344d0e3f4d93a0119"
+    },
+    {
+      "path": "/system/fonts/Roboto-Italic.ttf",
+      "exists": true,
+      "bytes": 152208,
+      "sha256": "5a2f18bddbe3ac07f14d38817d1fd22df4e8e3b74f661f7ae7b29cc8140092bc"
+    },
+    {
+      "path": "/FONTSEL0.CFG",
+      "exists": true,
+      "bytes": 1024,
+      "sha256": "d0496348454048045e4a239590391ad0a6a3e83e1d612771702213be87eb1e8e",
+      "lines": [
+        "format=1",
+        "sequence=0000000000000021",
+        "kind=truetype",
+        "pixelSize=00000010",
+        "pathHex=2f73797374656d2f666f6e74732f526f626f746f2d526567756c61722e747466",
+        "familyHex=526f626f746f",
+        "styleHex=526567756c6172",
+        "fileBytes=00023a54",
+        "fingerprint=4349647431a75e97",
+        "identity=b41267c88a22a7d6",
+        "checksum=82bdbbc2",
+        "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        "
+      ]
+    },
+    {
+      "path": "/fontsel1.cfg",
+      "exists": true,
+      "bytes": 1024,
+      "sha256": "86f7f4ea886b0628147ee32f4abb2b661d44545912774fe78627180fa0746e32",
+      "lines": [
+        "format=1",
+        "sequence=0000000000000020",
+        "kind=bitmap",
+        "pixelSize=00000007",
+        "pathHex=",
+        "familyHex=6775696465584f53204269746d6170",
+        "styleHex=526567756c6172",
+        "fileBytes=00000000",
+        "fingerprint=0000000000000000",
+        "identity=47584249544d4150",
+        "checksum=e3f7a835",
+        "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        "
+      ]
+    }
+  ]
+}
