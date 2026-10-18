@@ -1,0 +1,73 @@
+{
+  "phase": "S19R2 final native Settings visual acceptance",
+  "repository": "D:\\dev\\guideXOSServer",
+  "branch": "main",
+  "startingHead": "88a94eb8cba415d69a835eab28cd1a6b681eae95",
+  "productionSourceChanged": false,
+  "productionArtifact": {
+    "guestPath": "/kernel.elf",
+    "bytes": 2760592,
+    "sha256": "1D2C119CB947B170B0529D9444F7B8F8BF7FE0904E6EC42CE4916165257FAE3F"
+  },
+  "firmware": {
+    "guestPath": "OVMF-s19r2-readonly.fd",
+    "bytes": 3653632,
+    "sha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792"
+  },
+  "privateWritableMedia": {
+    "path": "out/validation/settings-s19r2-native-ui-20261017/guest/S19R2-vnc-private.raw",
+    "bytes": 134249984,
+    "sha256BeforeFirstBoot": "C87101F84DFFCB7523D16527AE1BE3F2E53C775DED433E902F2C3764F5C07A81",
+    "sha256AfterRuns": "F2367870BE3A86EB290DCBE2A529AFFAF31E58A868A1D91C69347EDEE5BBF926"
+  },
+  "desktopConfig": {
+    "path": "/desktop.cfg",
+    "bytesBefore": 234,
+    "sha256Before": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249",
+    "bytesAfter": 234,
+    "sha256After": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249"
+  },
+  "productionWindow": {
+    "screen": "1280x800",
+    "preferred": "760x560",
+    "minimum": "660x440",
+    "maximum": "1180x820",
+    "minimumGuestQualified": false
+  },
+  "qemuRuns": [
+    {
+      "purpose": "Ordered initial Settings and legacy UI review",
+      "processId": 36032,
+      "qmp": "127.0.0.1:62462",
+      "vnc": "127.0.0.1:5902",
+      "acceleration": "TCG",
+      "memoryMiB": 2048,
+      "vcpus": 2,
+      "network": "none",
+      "firmware": "read-only OVMF",
+      "media": "private writable copy",
+      "device": "standard VGA and PS/2 mouse",
+      "end": "QMP system_reset emitted host-qmp-system-reset shutdown; process was no longer present"
+    },
+    {
+      "purpose": "Legacy close then native Settings reopen",
+      "processId": 24108,
+      "qmp": "127.0.0.1:62461",
+      "vnc": "127.0.0.1:6001",
+      "acceleration": "TCG",
+      "memoryMiB": 2048,
+      "vcpus": 2,
+      "network": "none",
+      "firmware": "read-only OVMF",
+      "media": "same private writable copy",
+      "device": "standard VGA and PS/2 mouse",
+      "end": "QMP quit completed; task-owned process exited"
+    }
+  ],
+  "validation": {
+    "newTestsRun": false,
+    "newBuildRun": false,
+    "historicalNativeRuntime": "1417/1417 from S19R, retained as historical evidence",
+    "historicalNativeLayout": "1037/1037 from S19, retained as hosted geometry evidence; does not qualify guest minimum-size rendering"
+  }
+}

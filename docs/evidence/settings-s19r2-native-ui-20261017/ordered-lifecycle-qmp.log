@@ -1,0 +1,587 @@
+2026-10-18T01:24:48.140295+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:24:48.140295+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:24:48.140295+00:00 RX {"return":{}}
+2026-10-18T01:24:48.142301+00:00 TX {"execute":"query-status"}
+2026-10-18T01:24:48.142301+00:00 RX {"return":{"status":"running","running":true}}
+2026-10-18T01:24:51.705319+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:24:51.705319+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:24:51.707326+00:00 RX {"return":{}}
+2026-10-18T01:24:51.707326+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-boot-desktop.ppm"}}
+2026-10-18T01:24:51.721121+00:00 RX {"return":""}
+2026-10-18T01:25:03.779830+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:25:03.779830+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:25:03.779830+00:00 RX {"return":{}}
+2026-10-18T01:25:03.779830+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-button-hover.ppm"}}
+2026-10-18T01:25:03.794261+00:00 RX {"return":""}
+2026-10-18T01:25:09.415158+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:25:09.415158+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:25:09.417166+00:00 RX {"return":{}}
+2026-10-18T01:25:09.417166+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-menu.ppm"}}
+2026-10-18T01:25:09.417166+00:00 RX {"return":""}
+2026-10-18T01:25:19.263957+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:25:19.263957+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:25:19.264956+00:00 RX {"return":{}}
+2026-10-18T01:25:19.264956+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -600 0"}}
+2026-10-18T01:25:19.265960+00:00 RX {"return":""}
+2026-10-18T01:25:19.366563+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 300"}}
+2026-10-18T01:25:19.366563+00:00 RX {"return":""}
+2026-10-18T01:25:19.468614+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-step1.ppm"}}
+2026-10-18T01:25:19.480631+00:00 RX {"return":""}
+2026-10-18T01:25:25.814607+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:25:25.814607+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:25:25.814607+00:00 RX {"return":{}}
+2026-10-18T01:25:25.814607+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -1000 0"}}
+2026-10-18T01:25:25.814607+00:00 RX {"return":""}
+2026-10-18T01:25:25.917565+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 850"}}
+2026-10-18T01:25:25.917565+00:00 RX {"return":""}
+2026-10-18T01:25:26.018546+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-step2.ppm"}}
+2026-10-18T01:25:26.024983+00:00 RX {"return":""}
+2026-10-18T01:25:33.340019+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:25:33.340019+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:25:33.340019+00:00 RX {"return":{}}
+2026-10-18T01:25:33.340019+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -940 0"}}
+2026-10-18T01:25:33.340019+00:00 RX {"return":""}
+2026-10-18T01:25:33.442708+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 760"}}
+2026-10-18T01:25:33.442708+00:00 RX {"return":""}
+2026-10-18T01:25:33.543781+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-step3.ppm"}}
+2026-10-18T01:25:33.543781+00:00 RX {"return":""}
+2026-10-18T01:25:48.071913+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:25:48.071913+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:25:48.071913+00:00 RX {"return":{}}
+2026-10-18T01:25:48.071913+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey ctrl-esc"}}
+2026-10-18T01:25:48.071913+00:00 RX {"return":""}
+2026-10-18T01:25:48.177301+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-ctrl-esc.ppm"}}
+2026-10-18T01:25:48.189867+00:00 RX {"return":""}
+2026-10-18T01:25:54.368078+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:25:54.368078+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:25:54.368078+00:00 RX {"return":{}}
+2026-10-18T01:25:54.368078+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -150 0"}}
+2026-10-18T01:25:54.370226+00:00 RX {"return":""}
+2026-10-18T01:25:54.471173+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 150"}}
+2026-10-18T01:25:54.471173+00:00 RX {"return":""}
+2026-10-18T01:25:54.572570+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-step4.ppm"}}
+2026-10-18T01:25:54.574512+00:00 RX {"return":""}
+2026-10-18T01:26:00.946774+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:00.946774+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:00.946774+00:00 RX {"return":{}}
+2026-10-18T01:26:00.946774+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -150 0"}}
+2026-10-18T01:26:00.946774+00:00 RX {"return":""}
+2026-10-18T01:26:01.056384+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -150 0"}}
+2026-10-18T01:26:01.056384+00:00 RX {"return":""}
+2026-10-18T01:26:01.157798+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -150 0"}}
+2026-10-18T01:26:01.157798+00:00 RX {"return":""}
+2026-10-18T01:26:01.259069+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -150 0"}}
+2026-10-18T01:26:01.259069+00:00 RX {"return":""}
+2026-10-18T01:26:01.360581+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -150 0"}}
+2026-10-18T01:26:01.360581+00:00 RX {"return":""}
+2026-10-18T01:26:01.461816+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 180"}}
+2026-10-18T01:26:01.461816+00:00 RX {"return":""}
+2026-10-18T01:26:01.563307+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-step5.ppm"}}
+2026-10-18T01:26:01.573314+00:00 RX {"return":""}
+2026-10-18T01:26:07.181667+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:07.181667+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:07.181667+00:00 RX {"return":{}}
+2026-10-18T01:26:07.181667+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 300 0"}}
+2026-10-18T01:26:07.181667+00:00 RX {"return":""}
+2026-10-18T01:26:07.284542+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 90"}}
+2026-10-18T01:26:07.284542+00:00 RX {"return":""}
+2026-10-18T01:26:07.385614+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-start-hover.ppm"}}
+2026-10-18T01:26:07.395009+00:00 RX {"return":""}
+2026-10-18T01:26:11.840755+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:11.840755+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:11.840755+00:00 RX {"return":{}}
+2026-10-18T01:26:11.840755+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -200 0"}}
+2026-10-18T01:26:11.840755+00:00 RX {"return":""}
+2026-10-18T01:26:11.943762+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-start-hover-2.ppm"}}
+2026-10-18T01:26:11.954069+00:00 RX {"return":""}
+2026-10-18T01:26:16.929051+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:16.929051+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:16.929051+00:00 RX {"return":{}}
+2026-10-18T01:26:16.929051+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:26:16.931200+00:00 RX {"return":""}
+2026-10-18T01:26:17.031690+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:26:17.031690+00:00 RX {"return":""}
+2026-10-18T01:26:17.758095+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:17.758095+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:17.758095+00:00 RX {"return":{}}
+2026-10-18T01:26:17.758095+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-menu-2.ppm"}}
+2026-10-18T01:26:17.773783+00:00 RX {"return":""}
+2026-10-18T01:26:23.647498+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:23.647498+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:23.648499+00:00 RX {"return":{}}
+2026-10-18T01:26:23.648499+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 550 0"}}
+2026-10-18T01:26:23.648499+00:00 RX {"return":""}
+2026-10-18T01:26:23.749696+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -390"}}
+2026-10-18T01:26:23.750202+00:00 RX {"return":""}
+2026-10-18T01:26:23.850967+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-entry-hover.ppm"}}
+2026-10-18T01:26:23.862082+00:00 RX {"return":""}
+2026-10-18T01:26:28.258503+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:28.258503+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:28.258503+00:00 RX {"return":{}}
+2026-10-18T01:26:28.258503+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 50 0"}}
+2026-10-18T01:26:28.258503+00:00 RX {"return":""}
+2026-10-18T01:26:28.362701+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -140"}}
+2026-10-18T01:26:28.362701+00:00 RX {"return":""}
+2026-10-18T01:26:28.464175+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-entry-hover-2.ppm"}}
+2026-10-18T01:26:28.464175+00:00 RX {"return":""}
+2026-10-18T01:26:33.805015+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:33.805015+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:33.815226+00:00 RX {"return":{}}
+2026-10-18T01:26:33.815226+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 40"}}
+2026-10-18T01:26:33.815226+00:00 RX {"return":""}
+2026-10-18T01:26:33.916431+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-entry-hover-3.ppm"}}
+2026-10-18T01:26:33.918341+00:00 RX {"return":""}
+2026-10-18T01:26:38.136929+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:38.136929+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:38.137928+00:00 RX {"return":{}}
+2026-10-18T01:26:38.137928+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -30"}}
+2026-10-18T01:26:38.138928+00:00 RX {"return":""}
+2026-10-18T01:26:38.239777+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-entry-hover-4.ppm"}}
+2026-10-18T01:26:38.248391+00:00 RX {"return":""}
+2026-10-18T01:26:42.536185+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:42.536185+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:42.537186+00:00 RX {"return":{}}
+2026-10-18T01:26:42.537186+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:26:42.537186+00:00 RX {"return":""}
+2026-10-18T01:26:42.638122+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:26:42.638122+00:00 RX {"return":""}
+2026-10-18T01:26:43.784067+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:43.784067+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:43.784067+00:00 RX {"return":{}}
+2026-10-18T01:26:43.784067+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-initial-system.ppm"}}
+2026-10-18T01:26:43.789279+00:00 RX {"return":""}
+2026-10-18T01:26:52.601643+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:52.601643+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:52.601643+00:00 RX {"return":{}}
+2026-10-18T01:26:52.601643+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey p"}}
+2026-10-18T01:26:52.601643+00:00 RX {"return":""}
+2026-10-18T01:26:53.321913+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:26:53.321913+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:26:53.321913+00:00 RX {"return":{}}
+2026-10-18T01:26:53.321913+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-initial-personalization.ppm"}}
+2026-10-18T01:26:53.321913+00:00 RX {"return":""}
+2026-10-18T01:27:01.772230+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:01.772230+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:01.772230+00:00 RX {"return":{}}
+2026-10-18T01:27:01.772230+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 1100 0"}}
+2026-10-18T01:27:01.773967+00:00 RX {"return":""}
+2026-10-18T01:27:01.874546+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -1100"}}
+2026-10-18T01:27:01.874546+00:00 RX {"return":""}
+2026-10-18T01:27:01.976082+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-close-move-1.ppm"}}
+2026-10-18T01:27:01.985184+00:00 RX {"return":""}
+2026-10-18T01:27:11.383106+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:11.383106+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:11.383106+00:00 RX {"return":{}}
+2026-10-18T01:27:11.383106+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 1100 0"}}
+2026-10-18T01:27:11.383106+00:00 RX {"return":""}
+2026-10-18T01:27:11.487728+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -400"}}
+2026-10-18T01:27:11.488734+00:00 RX {"return":""}
+2026-10-18T01:27:11.589091+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-close-move-2.ppm"}}
+2026-10-18T01:27:11.599215+00:00 RX {"return":""}
+2026-10-18T01:27:23.547891+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:23.547891+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:23.547891+00:00 RX {"return":{}}
+2026-10-18T01:27:23.547891+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey esc"}}
+2026-10-18T01:27:23.549897+00:00 RX {"return":""}
+2026-10-18T01:27:24.546026+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:24.546026+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:24.548035+00:00 RX {"return":{}}
+2026-10-18T01:27:24.548035+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-initial-closed.ppm"}}
+2026-10-18T01:27:24.607825+00:00 RX {"return":""}
+2026-10-18T01:27:31.351852+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:31.351852+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:31.351852+00:00 RX {"return":{}}
+2026-10-18T01:27:31.351852+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -1200 0"}}
+2026-10-18T01:27:31.351852+00:00 RX {"return":""}
+2026-10-18T01:27:31.459001+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -1200 0"}}
+2026-10-18T01:27:31.459001+00:00 RX {"return":""}
+2026-10-18T01:27:31.560108+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 180"}}
+2026-10-18T01:27:31.560108+00:00 RX {"return":""}
+2026-10-18T01:27:31.661477+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 180"}}
+2026-10-18T01:27:31.661985+00:00 RX {"return":""}
+2026-10-18T01:27:31.762804+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-hover-prelegacy.ppm"}}
+2026-10-18T01:27:31.770827+00:00 RX {"return":""}
+2026-10-18T01:27:40.080458+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:40.080458+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:40.080458+00:00 RX {"return":{}}
+2026-10-18T01:27:40.080458+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey meta_l"}}
+2026-10-18T01:27:40.081458+00:00 RX {"return":""}
+2026-10-18T01:27:40.182513+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-meta-l.ppm"}}
+2026-10-18T01:27:40.190532+00:00 RX {"return":""}
+2026-10-18T01:27:48.292808+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:48.292808+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:48.292808+00:00 RX {"return":{}}
+2026-10-18T01:27:48.292808+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 720 0"}}
+2026-10-18T01:27:48.292808+00:00 RX {"return":""}
+2026-10-18T01:27:48.396440+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -15"}}
+2026-10-18T01:27:48.396440+00:00 RX {"return":""}
+2026-10-18T01:27:48.497556+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-entry-hover-prelegacy.ppm"}}
+2026-10-18T01:27:48.497556+00:00 RX {"return":""}
+2026-10-18T01:27:53.586265+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:53.586265+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:53.586265+00:00 RX {"return":{}}
+2026-10-18T01:27:53.586265+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 330 0"}}
+2026-10-18T01:27:53.586265+00:00 RX {"return":""}
+2026-10-18T01:27:53.690188+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 8"}}
+2026-10-18T01:27:53.690697+00:00 RX {"return":""}
+2026-10-18T01:27:53.791567+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-entry-hover-prelegacy-2.ppm"}}
+2026-10-18T01:27:53.800574+00:00 RX {"return":""}
+2026-10-18T01:27:59.929897+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:27:59.929897+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:27:59.929897+00:00 RX {"return":{}}
+2026-10-18T01:27:59.929897+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:27:59.929897+00:00 RX {"return":""}
+2026-10-18T01:28:00.045422+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:28:00.045422+00:00 RX {"return":""}
+2026-10-18T01:28:00.977990+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:00.977990+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:00.977990+00:00 RX {"return":{}}
+2026-10-18T01:28:00.977990+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-settings-system-reopen-check.ppm"}}
+2026-10-18T01:28:00.996094+00:00 RX {"return":""}
+2026-10-18T01:28:10.809498+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:10.809498+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:10.809498+00:00 RX {"return":{}}
+2026-10-18T01:28:10.809498+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey esc"}}
+2026-10-18T01:28:10.809498+00:00 RX {"return":""}
+2026-10-18T01:28:10.917540+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey meta_l"}}
+2026-10-18T01:28:10.917540+00:00 RX {"return":""}
+2026-10-18T01:28:11.018953+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -700 0"}}
+2026-10-18T01:28:11.018953+00:00 RX {"return":""}
+2026-10-18T01:28:11.120024+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -160"}}
+2026-10-18T01:28:11.120024+00:00 RX {"return":""}
+2026-10-18T01:28:11.221384+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-controlpanel-entry-hover.ppm"}}
+2026-10-18T01:28:11.226752+00:00 RX {"return":""}
+2026-10-18T01:28:17.202661+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:17.202661+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:17.204669+00:00 RX {"return":{}}
+2026-10-18T01:28:17.204669+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -90 0"}}
+2026-10-18T01:28:17.204669+00:00 RX {"return":""}
+2026-10-18T01:28:17.305909+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -90"}}
+2026-10-18T01:28:17.305909+00:00 RX {"return":""}
+2026-10-18T01:28:17.407190+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-controlpanel-entry-hover-2.ppm"}}
+2026-10-18T01:28:17.415438+00:00 RX {"return":""}
+2026-10-18T01:28:23.354032+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:23.354032+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:23.354032+00:00 RX {"return":{}}
+2026-10-18T01:28:23.354032+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 30 0"}}
+2026-10-18T01:28:23.356043+00:00 RX {"return":""}
+2026-10-18T01:28:23.456419+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 40"}}
+2026-10-18T01:28:23.458426+00:00 RX {"return":""}
+2026-10-18T01:28:23.558665+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-controlpanel-entry-hover-3.ppm"}}
+2026-10-18T01:28:23.560672+00:00 RX {"return":""}
+2026-10-18T01:28:30.758582+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:30.758582+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:30.763624+00:00 RX {"return":{}}
+2026-10-18T01:28:30.763624+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -20"}}
+2026-10-18T01:28:30.763624+00:00 RX {"return":""}
+2026-10-18T01:28:30.865379+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-controlpanel-entry-hover-4.ppm"}}
+2026-10-18T01:28:30.868131+00:00 RX {"return":""}
+2026-10-18T01:28:35.867651+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:35.867651+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:35.867651+00:00 RX {"return":{}}
+2026-10-18T01:28:35.867651+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:28:35.867651+00:00 RX {"return":""}
+2026-10-18T01:28:35.973202+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:28:35.973202+00:00 RX {"return":""}
+2026-10-18T01:28:37.020492+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:37.020492+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:37.020492+00:00 RX {"return":{}}
+2026-10-18T01:28:37.020492+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-controlpanel-open.ppm"}}
+2026-10-18T01:28:37.036177+00:00 RX {"return":""}
+2026-10-18T01:28:47.011540+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:47.011540+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:47.011540+00:00 RX {"return":{}}
+2026-10-18T01:28:47.011540+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey meta_l"}}
+2026-10-18T01:28:47.011540+00:00 RX {"return":""}
+2026-10-18T01:28:47.115142+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 500 0"}}
+2026-10-18T01:28:47.115142+00:00 RX {"return":""}
+2026-10-18T01:28:47.216272+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 60"}}
+2026-10-18T01:28:47.216272+00:00 RX {"return":""}
+2026-10-18T01:28:47.321424+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-controlpanel-menu-hover.ppm"}}
+2026-10-18T01:28:47.324360+00:00 RX {"return":""}
+2026-10-18T01:28:52.331353+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:52.336767+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:52.336767+00:00 RX {"return":{}}
+2026-10-18T01:28:52.336767+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:28:52.336767+00:00 RX {"return":""}
+2026-10-18T01:28:52.438847+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:28:52.438847+00:00 RX {"return":""}
+2026-10-18T01:28:53.577833+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:53.577833+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:53.577833+00:00 RX {"return":{}}
+2026-10-18T01:28:53.581439+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-controlpanel-right-launch.ppm"}}
+2026-10-18T01:28:53.591180+00:00 RX {"return":""}
+2026-10-18T01:28:59.187052+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:28:59.187052+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:28:59.187052+00:00 RX {"return":{}}
+2026-10-18T01:28:59.187052+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 450 0"}}
+2026-10-18T01:28:59.187052+00:00 RX {"return":""}
+2026-10-18T01:28:59.289638+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -470"}}
+2026-10-18T01:28:59.289638+00:00 RX {"return":""}
+2026-10-18T01:28:59.390933+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-display-icon-hover.ppm"}}
+2026-10-18T01:28:59.399257+00:00 RX {"return":""}
+2026-10-18T01:29:04.261413+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:04.261413+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:04.263324+00:00 RX {"return":{}}
+2026-10-18T01:29:04.263324+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:29:04.263324+00:00 RX {"return":""}
+2026-10-18T01:29:04.364741+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:29:04.365747+00:00 RX {"return":""}
+2026-10-18T01:29:05.464782+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:05.465789+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:05.465789+00:00 RX {"return":{}}
+2026-10-18T01:29:05.465789+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-display-options-open.ppm"}}
+2026-10-18T01:29:05.479169+00:00 RX {"return":""}
+2026-10-18T01:29:11.146131+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:11.146131+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:11.147131+00:00 RX {"return":{}}
+2026-10-18T01:29:11.147131+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -750 0"}}
+2026-10-18T01:29:11.148130+00:00 RX {"return":""}
+2026-10-18T01:29:11.249101+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -550"}}
+2026-10-18T01:29:11.249607+00:00 RX {"return":""}
+2026-10-18T01:29:11.350822+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-backgrounds-tab-hover.ppm"}}
+2026-10-18T01:29:11.361848+00:00 RX {"return":""}
+2026-10-18T01:29:18.969540+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:18.969540+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:18.969540+00:00 RX {"return":{}}
+2026-10-18T01:29:18.969540+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -300"}}
+2026-10-18T01:29:18.969540+00:00 RX {"return":""}
+2026-10-18T01:29:19.071646+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-backgrounds-tab-hover-2.ppm"}}
+2026-10-18T01:29:19.081588+00:00 RX {"return":""}
+2026-10-18T01:29:24.957351+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:24.957351+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:24.957351+00:00 RX {"return":{}}
+2026-10-18T01:29:24.957351+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -525 0"}}
+2026-10-18T01:29:24.957351+00:00 RX {"return":""}
+2026-10-18T01:29:25.060295+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -500"}}
+2026-10-18T01:29:25.060799+00:00 RX {"return":""}
+2026-10-18T01:29:25.161756+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-backgrounds-tab-hover-3.ppm"}}
+2026-10-18T01:29:25.174586+00:00 RX {"return":""}
+2026-10-18T01:29:35.438007+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:35.438007+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:35.438007+00:00 RX {"return":{}}
+2026-10-18T01:29:35.438007+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 210 0"}}
+2026-10-18T01:29:35.438007+00:00 RX {"return":""}
+2026-10-18T01:29:35.540853+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 200"}}
+2026-10-18T01:29:35.540853+00:00 RX {"return":""}
+2026-10-18T01:29:35.642191+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-backgrounds-tab-hover-4.ppm"}}
+2026-10-18T01:29:35.655515+00:00 RX {"return":""}
+2026-10-18T01:29:40.881422+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:40.881422+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:40.882440+00:00 RX {"return":{}}
+2026-10-18T01:29:40.882440+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:29:40.883455+00:00 RX {"return":""}
+2026-10-18T01:29:40.984050+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:29:40.984050+00:00 RX {"return":""}
+2026-10-18T01:29:41.916021+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:41.916021+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:41.916021+00:00 RX {"return":{}}
+2026-10-18T01:29:41.916021+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-backgrounds-tab.ppm"}}
+2026-10-18T01:29:41.916021+00:00 RX {"return":""}
+2026-10-18T01:29:47.906421+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:47.906421+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:47.906421+00:00 RX {"return":{}}
+2026-10-18T01:29:47.906421+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 250 0"}}
+2026-10-18T01:29:47.911875+00:00 RX {"return":""}
+2026-10-18T01:29:48.012942+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-desktop-icons-tab-hover.ppm"}}
+2026-10-18T01:29:48.022613+00:00 RX {"return":""}
+2026-10-18T01:29:57.182202+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:57.182202+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:57.183196+00:00 RX {"return":{}}
+2026-10-18T01:29:57.183196+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:29:57.184195+00:00 RX {"return":""}
+2026-10-18T01:29:57.321236+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:29:57.331236+00:00 RX {"return":""}
+2026-10-18T01:29:59.276220+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:29:59.276220+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:29:59.288228+00:00 RX {"return":{}}
+2026-10-18T01:29:59.289228+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-desktop-icons-tab.ppm"}}
+2026-10-18T01:29:59.302746+00:00 RX {"return":""}
+2026-10-18T01:30:06.915147+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:06.915147+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:06.915147+00:00 RX {"return":{}}
+2026-10-18T01:30:06.915147+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 1100 0"}}
+2026-10-18T01:30:06.916147+00:00 RX {"return":""}
+2026-10-18T01:30:07.016672+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -80"}}
+2026-10-18T01:30:07.016672+00:00 RX {"return":""}
+2026-10-18T01:30:07.117710+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-display-options-close-hover.ppm"}}
+2026-10-18T01:30:07.128218+00:00 RX {"return":""}
+2026-10-18T01:30:12.259582+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:12.259582+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:12.260587+00:00 RX {"return":{}}
+2026-10-18T01:30:12.260587+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 470 0"}}
+2026-10-18T01:30:12.261582+00:00 RX {"return":""}
+2026-10-18T01:30:12.362196+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 -120"}}
+2026-10-18T01:30:12.362196+00:00 RX {"return":""}
+2026-10-18T01:30:12.463374+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-display-options-close-hover-2.ppm"}}
+2026-10-18T01:30:12.472449+00:00 RX {"return":""}
+2026-10-18T01:30:18.016911+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:18.017903+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:18.017903+00:00 RX {"return":{}}
+2026-10-18T01:30:18.017903+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -180 0"}}
+2026-10-18T01:30:18.018904+00:00 RX {"return":""}
+2026-10-18T01:30:18.119679+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-display-options-close-hover-3.ppm"}}
+2026-10-18T01:30:18.128253+00:00 RX {"return":""}
+2026-10-18T01:30:23.640369+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:23.640369+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:23.640369+00:00 RX {"return":{}}
+2026-10-18T01:30:23.640369+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"}}
+2026-10-18T01:30:23.641369+00:00 RX {"return":""}
+2026-10-18T01:30:23.741924+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"}}
+2026-10-18T01:30:23.741924+00:00 RX {"return":""}
+2026-10-18T01:30:24.579255+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:24.579255+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:24.579255+00:00 RX {"return":{}}
+2026-10-18T01:30:24.580252+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-display-options-closed.ppm"}}
+2026-10-18T01:30:24.595768+00:00 RX {"return":""}
+2026-10-18T01:30:34.197104+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:34.197104+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:34.198103+00:00 RX {"return":{}}
+2026-10-18T01:30:34.198103+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey esc"}}
+2026-10-18T01:30:34.198609+00:00 RX {"return":""}
+2026-10-18T01:30:34.886823+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:34.886823+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:34.887822+00:00 RX {"return":{}}
+2026-10-18T01:30:34.887822+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-display-options-closed-escape.ppm"}}
+2026-10-18T01:30:34.896860+00:00 RX {"return":""}
+2026-10-18T01:30:45.389506+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:45.389506+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:45.389506+00:00 RX {"return":{}}
+2026-10-18T01:30:45.389506+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey meta_l"}}
+2026-10-18T01:30:45.390508+00:00 RX {"return":""}
+2026-10-18T01:30:45.491082+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-postlegacy.ppm"}}
+2026-10-18T01:30:45.503105+00:00 RX {"return":""}
+2026-10-18T01:30:58.610873+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:30:58.610873+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:30:58.611873+00:00 RX {"return":{}}
+2026-10-18T01:30:58.611873+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey tab"}}
+2026-10-18T01:30:58.612873+00:00 RX {"return":""}
+2026-10-18T01:30:58.713411+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-tab.ppm"}}
+2026-10-18T01:30:58.724933+00:00 RX {"return":""}
+2026-10-18T01:31:05.679052+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:05.679052+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:05.679052+00:00 RX {"return":{}}
+2026-10-18T01:31:05.679052+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 1 1"}}
+2026-10-18T01:31:05.680052+00:00 RX {"return":""}
+2026-10-18T01:31:05.781199+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-pointer-location.ppm"}}
+2026-10-18T01:31:05.790459+00:00 RX {"return":""}
+2026-10-18T01:31:12.541212+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:12.541212+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:12.542210+00:00 RX {"return":{}}
+2026-10-18T01:31:12.542210+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -1100 0"}}
+2026-10-18T01:31:12.543210+00:00 RX {"return":""}
+2026-10-18T01:31:12.665781+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 1200"}}
+2026-10-18T01:31:12.667288+00:00 RX {"return":""}
+2026-10-18T01:31:12.768342+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-all-programs-hover.ppm"}}
+2026-10-18T01:31:12.778553+00:00 RX {"return":""}
+2026-10-18T01:31:20.234797+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:20.234797+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:20.235796+00:00 RX {"return":{}}
+2026-10-18T01:31:20.235796+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 300"}}
+2026-10-18T01:31:20.236796+00:00 RX {"return":""}
+2026-10-18T01:31:20.337423+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 300"}}
+2026-10-18T01:31:20.337423+00:00 RX {"return":""}
+2026-10-18T01:31:20.438700+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 300"}}
+2026-10-18T01:31:20.439236+00:00 RX {"return":""}
+2026-10-18T01:31:20.540001+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 300"}}
+2026-10-18T01:31:20.540001+00:00 RX {"return":""}
+2026-10-18T01:31:20.641233+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 300"}}
+2026-10-18T01:31:20.641233+00:00 RX {"return":""}
+2026-10-18T01:31:20.742708+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 300"}}
+2026-10-18T01:31:20.743714+00:00 RX {"return":""}
+2026-10-18T01:31:20.844024+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 300"}}
+2026-10-18T01:31:20.844024+00:00 RX {"return":""}
+2026-10-18T01:31:20.945259+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -2500 0"}}
+2026-10-18T01:31:20.945769+00:00 RX {"return":""}
+2026-10-18T01:31:21.046572+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-all-programs-hover-2.ppm"}}
+2026-10-18T01:31:21.055594+00:00 RX {"return":""}
+2026-10-18T01:31:28.976757+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:28.976757+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:28.976757+00:00 RX {"return":{}}
+2026-10-18T01:31:28.976757+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey right"}}
+2026-10-18T01:31:28.977733+00:00 RX {"return":""}
+2026-10-18T01:31:29.078882+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-right.ppm"}}
+2026-10-18T01:31:29.088426+00:00 RX {"return":""}
+2026-10-18T01:31:34.649100+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:34.649100+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:34.649100+00:00 RX {"return":{}}
+2026-10-18T01:31:34.649100+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 80 742"}}
+2026-10-18T01:31:34.650074+00:00 RX {"return":""}
+2026-10-18T01:31:34.751132+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-all-programs-target-test.ppm"}}
+2026-10-18T01:31:34.759671+00:00 RX {"return":""}
+2026-10-18T01:31:43.958669+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:43.958669+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:43.959669+00:00 RX {"return":{}}
+2026-10-18T01:31:43.959669+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 1 1"}}
+2026-10-18T01:31:43.959669+00:00 RX {"return":""}
+2026-10-18T01:31:44.060697+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-last.ppm"}}
+2026-10-18T01:31:44.070732+00:00 RX {"return":""}
+2026-10-18T01:31:50.362301+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:50.362301+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:50.363298+00:00 RX {"return":{}}
+2026-10-18T01:31:50.363298+00:00 TX {"execute":"query-mice"}
+2026-10-18T01:31:50.364299+00:00 RX {"return":[{"index":2,"name":"QEMU PS/2 Mouse","current":true,"absolute":false}]}
+2026-10-18T01:31:50.508845+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:50.508845+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:50.509847+00:00 RX {"return":{}}
+2026-10-18T01:31:50.509847+00:00 TX {"execute":"query-status"}
+2026-10-18T01:31:50.510850+00:00 RX {"return":{"status":"running","running":true}}
+2026-10-18T01:31:54.576882+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:31:54.576882+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:31:54.577884+00:00 RX {"return":{}}
+2026-10-18T01:31:54.577884+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_set 2"}}
+2026-10-18T01:31:54.578877+00:00 RX {"return":""}
+2026-10-18T01:31:54.679478+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 200 200"}}
+2026-10-18T01:31:54.680485+00:00 RX {"return":""}
+2026-10-18T01:31:54.781043+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-mouse-reset.ppm"}}
+2026-10-18T01:31:54.879139+00:00 RX {"return":""}
+2026-10-18T01:32:10.396572+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:32:10.396572+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:32:10.397574+00:00 RX {"return":{}}
+2026-10-18T01:32:10.397574+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey down"}}
+2026-10-18T01:32:10.397574+00:00 RX {"return":""}
+2026-10-18T01:32:10.498651+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-down.ppm"}}
+2026-10-18T01:32:10.539688+00:00 RX {"return":""}
+2026-10-18T01:32:15.651939+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:32:15.651939+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:32:15.652938+00:00 RX {"return":{}}
+2026-10-18T01:32:15.652938+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 1 1"}}
+2026-10-18T01:32:15.653939+00:00 RX {"return":""}
+2026-10-18T01:32:15.754485+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-pointer-probe2.ppm"}}
+2026-10-18T01:32:15.763497+00:00 RX {"return":""}
+2026-10-18T01:32:25.773652+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:32:25.773652+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:32:25.774648+00:00 RX {"return":{}}
+2026-10-18T01:32:25.774648+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"help mouse_move"}}
+2026-10-18T01:32:25.776646+00:00 RX {"return":"mouse_move dx dy [dz] -- send mouse move events\r\n"}
+2026-10-18T01:32:25.877178+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"info mice"}}
+2026-10-18T01:32:25.877684+00:00 RX {"return":"* Mouse #2: QEMU PS/2 Mouse\r\n"}
+2026-10-18T01:32:35.860089+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:32:35.860089+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:32:35.861087+00:00 RX {"return":{}}
+2026-10-18T01:32:35.861087+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 2000 2000"}}
+2026-10-18T01:32:35.862087+00:00 RX {"return":""}
+2026-10-18T01:32:35.962631+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-recover.ppm"}}
+2026-10-18T01:32:36.102673+00:00 RX {"return":""}
+2026-10-18T01:32:43.389619+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:32:43.389619+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:32:43.390608+00:00 RX {"return":{}}
+2026-10-18T01:32:43.390608+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey esc"}}
+2026-10-18T01:32:43.391595+00:00 RX {"return":""}
+2026-10-18T01:32:43.491854+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 250 250"}}
+2026-10-18T01:32:43.492391+00:00 RX {"return":""}
+2026-10-18T01:32:43.593148+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-pointer-outside-menu.ppm"}}
+2026-10-18T01:32:43.602166+00:00 RX {"return":""}
+2026-10-18T01:32:48.640514+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:32:48.641514+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:32:48.641514+00:00 RX {"return":{}}
+2026-10-18T01:32:48.641514+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey meta_l"}}
+2026-10-18T01:32:48.642514+00:00 RX {"return":""}
+2026-10-18T01:32:48.743084+00:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump out/validation/settings-s19r2-native-ui-20261017/guest/lifecycle-start-menu-toggled.ppm"}}
+2026-10-18T01:32:48.752089+00:00 RX {"return":""}
+2026-10-18T01:33:09.769014+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T01:33:09.769014+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T01:33:09.770016+00:00 RX {"return":{}}
+2026-10-18T01:33:09.770016+00:00 TX {"execute":"system_reset"}
+2026-10-18T01:33:09.771015+00:00 RX {"timestamp":{"seconds":1792287189,"microseconds":771015},"event":"SHUTDOWN","data":{"guest":false,"reason":"host-qmp-system-reset"}}
+2026-10-18T01:33:09.773016+00:00 RX {"return":{}}

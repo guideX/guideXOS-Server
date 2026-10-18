@@ -1,0 +1,111 @@
+{
+  "algorithm": "SHA-256",
+  "generatedUtc": "2026-10-18T01:35:51.4884458Z",
+  "files": [
+    {
+      "path": "desktop.cfg.after",
+      "bytes": 234,
+      "sha256": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249"
+    },
+    {
+      "path": "desktop.cfg.before",
+      "bytes": 234,
+      "sha256": "CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249"
+    },
+    {
+      "path": "legacy-control-panel.png",
+      "bytes": 29213,
+      "sha256": "AAA0057A621F45DF85890137BF8F0C9BC00D3F18E36DE0CCF31F90659799516B"
+    },
+    {
+      "path": "legacy-display-options-backgrounds.png",
+      "bytes": 142949,
+      "sha256": "FE55C6C6F8FFC82B75E5E7A33B062570119AEB39367FBDAC96D9CDCCFD41FEF4"
+    },
+    {
+      "path": "legacy-display-options-desktop-icons.png",
+      "bytes": 23855,
+      "sha256": "68F6A77F45A2E722351B2A263EB5B5F5CC78FA9A8C1C60AE4A292037D3F05D97"
+    },
+    {
+      "path": "legacy-display-options-gradients-ocean-applied.png",
+      "bytes": 26804,
+      "sha256": "F689B276EBDF2A829CC4EBB6B1B1FAED10A7B6EDE5D4A6215E5124B5B3B6BAE0"
+    },
+    {
+      "path": "legacy-surfaces-closed-clean-desktop.png",
+      "bytes": 25883,
+      "sha256": "835B3FCEC1A7B6D6199495F3732564631D3CDF420A7BA90BC562EA07FD7FAB1A"
+    },
+    {
+      "path": "ordered-lifecycle-qmp.log",
+      "bytes": 57242,
+      "sha256": "9F885B3D482363B3EDDDD46853789961127FFF5A2E1A2DB744F63ACF804A6C87"
+    },
+    {
+      "path": "ordered-lifecycle.serial.log",
+      "bytes": 497475,
+      "sha256": "F9F9A9923B1F89181D6B9F36E37EF14B004D72462EF47115B07667B56BD1D73B"
+    },
+    {
+      "path": "post-legacy-reopen-qmp.log",
+      "bytes": 14415,
+      "sha256": "9C7370FD791D4D7E9EFA3ABF8E8435A0982C22F83C982BE27EE5CEC5BC098514"
+    },
+    {
+      "path": "post-legacy-reopen.serial.log",
+      "bytes": 301544,
+      "sha256": "3B2F8F7E60C231EBDDD8787F85B0ACCB4E83781848118B2AF6461C40316E4F89"
+    },
+    {
+      "path": "post-legacy-settings-personalization.png",
+      "bytes": 30774,
+      "sha256": "2F651ED1C0696EA50A225DBC57EA340D64B22C7A33EE2441F8A6B0DFA88FE4AA"
+    },
+    {
+      "path": "post-legacy-settings-system.png",
+      "bytes": 27445,
+      "sha256": "F3DC2EE9961406BC9A35A74F774F2289487D8E72ABA1D802EC951740CA517A87"
+    },
+    {
+      "path": "post-settings-close-clean-desktop.png",
+      "bytes": 25966,
+      "sha256": "33CFB891D01C1478A98DFACD453625290D95961FFE6E19D23EE13B2529508706"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4684,
+      "sha256": "F1570440ED1F2E4650C8A746F20570EC9CC868B32876C778B0E501075E7A5363"
+    },
+    {
+      "path": "runtime-identity.json",
+      "bytes": 2669,
+      "sha256": "A93EB88858ADA6D4FD848C8C79B92BDEEC1A0AAA9B2E289BEFE8356E13677135"
+    },
+    {
+      "path": "settings-initial-closed.png",
+      "bytes": 25939,
+      "sha256": "20F75D5C11343CE35FFEB2F74556A5C6D17344142C63CA4BABE2541A0C3D2AB8"
+    },
+    {
+      "path": "settings-initial-personalization.png",
+      "bytes": 30788,
+      "sha256": "A6F98CF0F2DF28CF9502C2A706C88976154278B0C3BB9296D17D2F4684EF8CE3"
+    },
+    {
+      "path": "settings-initial-system.png",
+      "bytes": 27461,
+      "sha256": "DC5BD7E2E948EC79017AE6423C828092D7BA7943AB3ACC3C61076A61617B405E"
+    },
+    {
+      "path": "settings-resize-default.png",
+      "bytes": 27254,
+      "sha256": "0252FD9B0232973E8006F42B9F40E51BF1C3F72A66EEC8EAA1759782BF32866F"
+    },
+    {
+      "path": "settings-resize-unqualified-attempt.png",
+      "bytes": 27254,
+      "sha256": "B936EE20DDE04FBFF73281CF38A7126CAE274DE30826FD86386152AD1008B7E8"
+    }
+  ]
+}

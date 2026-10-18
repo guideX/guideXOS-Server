@@ -1,8 +1,8 @@
 # guideXOS Server — S19 Native Settings UI Polish Acceptance
 
-**Current S19 status — Outcome B (Partial).** S19R completed production AMD64 guest review at the normal Settings size, exercised the information and Personalization pages, verified Cancel and Apply persistence, and checked the legacy Control Panel. It also repaired a reproduced stale applied marker in legacy Display Options. Minimum-size guest qualification and reopening native Settings after closing the legacy surfaces remain unverified. The remaining limitations and evidence are recorded in the S19R closeout below.
+**Current S19 status — Outcome B (Partial).** S19R completed production AMD64 guest review at the normal Settings size, exercised the information and Personalization pages, verified Cancel and Apply persistence, and checked the legacy Control Panel. It also repaired a reproduced stale applied marker in legacy Display Options. S19R2 visibly reconfirmed the legacy applied marker and native Settings reopening after legacy closure. Minimum-size production guest qualification remains unverified; the current status and evidence are recorded in the S19R2 closeout below.
 
-The earlier S19 implementation report is retained as historical evidence. Its initial Outcome B was due to missing production guest review; S19R has since supplied that review. The current Outcome B reflects the unqualified minimum-size resize behavior and the unverified post-legacy Settings relaunch.
+The earlier S19 implementation report is retained as historical evidence. Its initial Outcome B was due to missing production guest review; S19R supplied that review. S19R2 verified the post-legacy Settings reopen, while the current Outcome B reflects the unqualified minimum-size resize behavior.
 
 ## Historical S19 implementation report
 
@@ -152,3 +152,41 @@ After the legacy surfaces closed, the guest returned to the desktop. A subsequen
 S20 should address modifier-aware focus traversal and complete minimum-size production guest qualification after a working resize interaction is established. Preserve the current category/navigation model and bitmap fallback; review any separate font-renderer integration independently.
 
 S19R was committed locally on `main`. The final commit SHA is reported in the task closeout. No push was performed.
+
+## S19R2 closeout — 2026-10-17
+
+### Starting state and scope
+
+S19R2 began at **Outcome B** with two recorded gaps: minimum-size guest rendering and a post-legacy Settings reopen. The repository was `D:\dev\guideXOSServer`, branch `main`, starting HEAD `88a94eb8cba415d69a835eab28cd1a6b681eae95`. The tracked worktree was clean at preflight. The existing untracked evidence, build outputs, and release candidates were inventoried and preserved. Work stayed on `main`; no branch, worktree, reset, clean, stash, fetch, pull, or push was used. No S20 work was started.
+
+### Resize capability and minimum-size result
+
+Settings **does support interactive resizing** in the production source. `SettingsNativeApp` registers `WF_RESIZABLE` and supplies minimum 660×440, preferred 760×560, and maximum 1180×820 in `kernel/core/kernel_apps.cpp` (lines 16625–16640 and 16895–16904); the minimum constants are in `settings_native_layout.h` (lines 13–18). The compositor recognizes the lower-right resize corner when the pointer is within its 8-pixel `RESIZE_MARGIN`, starts a resize drag, clamps width and height, and stores the new geometry in `kernel/core/kernel_compositor.cpp` (lines 540–545, 555–587, and 661–668). `drawWindow` passes the current client width and height into the app draw callback (lines 865–895), and Settings records those dimensions before presenting its layout (`kernel/core/kernel_apps.cpp`, lines 16764–16770). This establishes a real supported feature; it is not classified as fixed-size or non-applicable.
+
+The production guest showed the ordinary 760×560 Settings window on a 1280×800 desktop. QMP/PS/2 and visible GTK/tablet attempts at the lower-right grip did not produce a new geometry. The screenshots `settings-resize-default.png` and `settings-resize-unqualified-attempt.png` show the default bounds and an attempt that remained at that size. The input path did not provide reliable proof that the intended compositor hit region received a complete drag, so this does not establish a compositor defect or rejection of resize. No code repair was justified. Minimum-size guest rendering, reachability, wrapping, clipping, and hit targets therefore remain unqualified.
+
+The historical hosted layout suite result of 1,037/1,037 includes bounded geometry transitions, but it does not substitute for the requested production guest review at 660×440.
+
+### Guest visual and lifecycle results
+
+In the ordered private AMD64 guest run, native Settings opened to System and showed guideXOS, kernel version 0.1.0, and AMD64 (x86-64). Personalization showed `Active background: Gradient / Ocean`. Settings closed with Escape and the desktop returned cleanly. The right-column **Control Panel** menu item opened the legacy Control Panel; its Display icon opened Display Options. The separate left-column `ControlPanel` program shortcut produced a “Not available in bare-metal mode” notice and was not used for the legacy surface.
+
+Display Options showed Ocean with the applied star on Gradients. Backgrounds showed no applied star beside Blue Flower, and the Desktop Icons tab opened and displayed its current controls. Escape closed Display Options and returned to a clean desktop. These S19R2 screenshots are in [the S19R2 evidence directory](evidence/settings-s19r2-native-ui-20261017/README.md). The existing S19R post-fix Backgrounds screenshot remains preserved in the earlier S19R evidence directory.
+
+The initial Settings-to-legacy portion and the post-legacy reopen were captured in separate task-owned boots of the same private writable image, kernel, and firmware. In the second run, after legacy Control Panel and Display Options were closed, native Settings reopened visibly to System, then Personalization showed the same Ocean state; closing Settings returned to a stable desktop. I do not represent the separately captured images as one uninterrupted QEMU process. In the ordered run, pointer input stopped responding after the clean desktop following legacy closure; the second run directly demonstrated the requested post-legacy reopen and clean close.
+
+At the supported normal size, no essential text clipping or overlap was observed in the reviewed System and Personalization states. The final reopen confirms the native application identity in serial output (`gxos.builtin.settings`, snapshot ready) as well as the visible System provider values. Keyboard `P` navigation and Escape close worked; mouse clicks opened the legacy and native surfaces and selected Backgrounds and Desktop Icons. Shift+Tab remains unsupported because the existing `KernelApp::onKeyDown(uint32_t key)` callback has no modifier state.
+
+### Applied marker, configuration, and artifacts
+
+The authoritative guest `/desktop.cfg` was 234 bytes with SHA-256 `CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249` before and after S19R2. It still identified `gradient_ocean`; the new UI review performed no Settings mutation. The before/after byte snapshots and their identity are preserved in the S19R2 evidence directory.
+
+The private guest kernel was 2,760,592 bytes with SHA-256 `1D2C119CB947B170B0529D9444F7B8F8BF7FE0904E6EC42CE4916165257FAE3F`. Read-only OVMF was 3,653,632 bytes with SHA-256 `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`. The private writable raw image was 134,249,984 bytes; its post-run whole-media SHA-256 was `F2367870BE3A86EB290DCBE2A529AFFAF31E58A868A1D91C69347EDEE5BBF926`. The embedded `/desktop.cfg` stayed byte-identical; whole-media changes do not indicate a configuration mutation. The original S19R media and foreign QEMU processes were left untouched. Task-owned guests were stopped through their QMP endpoints.
+
+QMP transcripts, serial logs, screenshots, runtime identity, and per-file SHA-256 values are retained in `docs/evidence/settings-s19r2-native-ui-20261017/`. No production source changed, so no production build or new tests were run. The S19R native runtime 1,417/1,417 and S19 layout 1,037/1,037 remain historical validation results, not newly executed S19R2 results.
+
+### Final outcome and follow-up
+
+**S19 — Outcome B: Partial.** The legacy applied marker is correct, and the native Settings reopen after legacy closure is visually demonstrated. The supported production resize feature still lacks a verified minimum-size guest pass, so S19 cannot be accepted as Outcome A. No source defect was demonstrated or repaired in S19R2.
+
+S20 should retain the existing modifier-aware focus traversal work and continue minimum-size production guest qualification once a reliable pointer/drag route is available. Keep any font-renderer integration separate. Do not advance S9, Settings 1.0, or Server v0.3 readiness from this closeout.
