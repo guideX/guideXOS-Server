@@ -359,3 +359,31 @@ retained because production source did not change. `.phase` remains
 DM36→DM37; DM38 has not started. See the [DM37 phase report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md)
 for runtime and fixture hashes, ownership censuses, screenshots, counters, and
 the full gate-by-gate reconciliation.
+
+## DM37 continuation 4 — activation boundary reviewed; QEMU lane occupied
+
+Host-side review confirmed that mount refresh preserves the selected partition
+and that the visible Dismount button is enabled by the same predicate requiring
+one valid mounted identity. The saved guest screenshot shows the selected
+partition, one mounted volume, and pointer hover on Dismount. Recorded clicks
+left the status unchanged, so the confirmation capture path did not run. The
+available trace narrows the first failure to the handoff from pointer
+press/release to the production confirmation handler; it cannot tell whether
+the guest missed the activation event or the compositor failed to dispatch it.
+The previous guest used `-display none`, and its Tab-only keyboard evidence
+left the first action focused; no Dismount arrow-navigation plus Enter/Space
+sequence was captured. No VFS dismount or confirmation/Cancel behavior was
+observed.
+
+A fresh census found three foreign QEMU guests, including an active sibling
+`guideXOSServerV1.1_DOTNET_SUPPORT` guest. No foreign endpoint or media was
+contacted, and no new guest was launched. This continuation is **Outcome B —
+`BLOCKED_BY_FOREIGN_QEMU`**. The existing source-matched fixture remains
+byte-identical at SHA-256
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`.
+Source, `.phase`, and host qualification are unchanged; the 1,491/1,491
+storage baseline and prior builds remain retained. The exact input/dispatch
+boundary, Gate A, the DM36 Check/Remount workflow, and remaining DM37 guest
+gates still require a clear owned QEMU lane. See the [DM37 phase report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md)
+for process identities, source paths, input evidence, runtime hashes, target
+identity, I/O counters, and remaining gates.

@@ -380,3 +380,116 @@ clear owned QEMU lane with verified production input delivery. It must complete
 Gate A first, then Gate E and the remaining B–I evidence in the prescribed
 order. Keep `.phase` at DM36→DM37 until every mandatory guest and host
 acceptance requirement is satisfied.
+
+## DM37 Continuation 4 — activation boundary review; foreign QEMU owns the lane
+
+**Outcome B — `BLOCKED_BY_FOREIGN_QEMU` for this continuation.** The required
+repository gate still matched branch `DISK_MANAGER_IMPROVEMENTS`, starting
+HEAD `e2e47c3c85463c92ef586ab3ef71ea23aa4eac4f`, and `.phase`
+`last_completed=DM36`, `next_expected=DM37`. The tracked worktree had no source
+changes. The pre-existing untracked
+`scripts/__pycache__/dm34_qmp_gui_input.cpython-312.pyc` remains at SHA-256
+`B25DA7AB48CCDCDA8A9AE4AC6856770F0D1353B78F39F2EC5A0134D426ED28D5`.
+
+A fresh process census found three active QEMU guests from other projects:
+PID 1872 in `gxR3work/.../taskmanager-memorydetails-qualification-r3` with
+QMP port 50620, PID 20384 in another run of that project with QMP port 62449,
+and PID 12116 in the sibling `D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT`
+project with QMP port 54569. Their process metadata showed separate project
+outputs and `-display none` guest configurations. No foreign QMP endpoint was
+contacted and no foreign media was inspected or changed. Following the prior
+DM36/DM37 exclusive-lane gate, no new DM37 guest was launched. This is an
+environmental stop, not a dismount result.
+
+### Host-side reconstruction of the first failed transition
+
+The already-preserved guest run used source revision
+`c40efd34eb67aa71b23e4f48f5243d8f18d11771`. Source review and its saved
+screenshots narrow the earlier failure to the activation handoff:
+
+1. `confirmPartitionMount()` closes the mount dialog and calls `scanDisks()`.
+   `scanDisks()` saves the selected disk incarnation and selected partition,
+   refreshes the inventory, then restores that partition when its identity
+   still matches. The saved post-mount screenshot shows the same GPT partition
+   selected and one mounted partition at `/mnt/disk1-part1`.
+2. Inventory population matches the active mount to the exact partition and
+   captures its mount identity. `Dismount Volume` visibility and enabled state
+   use the same predicate: the selected partition is mounted, has exactly one
+   mount identity, and that identity is valid. The button is visible in the
+   post-mount screenshot; the code therefore makes it enabled for that frame.
+   The saved hover screenshot also places the cursor over the Dismount button
+   and shows its hover highlight.
+3. Recorded click attempts left the main window and its `Mounted at
+   /mnt/disk1-part1 (Read/Write)` status unchanged. No confirmation dialog or
+   stale-target status appeared. The production path would call
+   `beginDismountConfirmation()` from widget 6; a rejected target capture would
+   update the status. The evidence therefore places the first unobserved
+   transition between the pointer activation attempt and that confirmation
+   handler. It does not separate a lost PS/2 press/release from a compositor
+   widget-dispatch failure because the guest had no bounded app-side input or
+   dispatch trace. QMP/HMP acknowledgments alone do not settle that boundary.
+
+The old guest used `-display none`, a standard VGA framebuffer, and the
+implicit relative PS/2 mouse and keyboard. Its screenshots record guest cursor
+movement and hover, but there was no QEMU window to foreground and no visible
+window pointer-grab state to qualify. The prior input files record Tab presses
+and clicks, but no Right-arrow navigation to the Dismount action followed by
+Enter or Space. Disk Manager cycles Tab through panes; the Actions pane uses
+left/right arrows to move among enabled controls, and Enter or Space dispatches
+the focused action. The prior keyboard captures leave Refresh highlighted, so
+they do not prove that Dismount received a keyboard activation.
+
+Mount identity capture and the confirmation path were not reached. The guest
+serial log reports widget IDs Mount 5, Dismount 6, Confirm 11, and
+Cancel/result dismissal 12. There is no confirmation snapshot of mount
+generation, no Cancel/Escape exercise, no `vfs::dismount(capturedIdentity)`
+call, no Dismount result, and no `Unmounted` transition. No dismount storage
+lease was acquired, and no Gate A Flush can be attributed to this action.
+
+### Preserved runtime, target, and I/O evidence
+
+The run used source revision `c40efd34eb67aa71b23e4f48f5243d8f18d11771`;
+`kernel/core/kernel_apps.cpp` is SHA-256
+`D93BBD2C1B966F74D5ADC1EFE3B3F20DF506151A533CE24F82BBDB6781A4E812`, and
+`kernel/core/kernel_compositor.cpp` is
+`AF0E078B905ACDC564ED4C26A5EF84F795EDDE31F1F9001752DED85DB14214C0`. The
+source-matched AMD64 kernel SHA-256 is
+`6D8DF6E65656B38DEA37F3704EC2639910C074EB448644FDB19FED5B47B7A29B`; the
+private ESP contains the same kernel, UEFI x64 Release `BOOTX64.EFI`
+`736F0532DC491403ECAE3CC75A5F9815F03CAEFDD6D11CF853EE8483E81A53A7`, and
+`ramdisk.img` `5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD`.
+OVMF SHA-256 is
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`. QEMU
+was 11.0.0 (`v11.0.0-12122-ga4bb4b10c9`), binary SHA-256
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`.
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`; no physical host storage was
+attached.
+
+The selected disposable target was USB serial `DM37IDLE01`, QEMU device
+`dm37idle01`, 629,145,600 bytes / 600 MiB, with 512-byte sectors and 1,228,800
+disk sectors. GPT partition 1, `DM9 QEMU Proof`, starts at LBA 2,048 and spans
+1,226,719 sectors through LBA 1,228,766; its partition GUID is
+`829681EB-8BBF-45B1-814A-C54A926DB193`. FAT32 geometry is 16 sectors per
+cluster, 32 reserved sectors, two 599-sector FATs, 76,593 clusters, root
+cluster 2, FSInfo sector 1, backup boot sector 6, volume ID `6A699895`, and
+label `DM9PROOF`. The mount path was `/mnt/disk1-part1`; the inventory showed
+parent block identity 1, registration 2, and partition view slot 1 / generation
+2. The confirmation-only mount generation was never captured.
+
+For the prior run's final input-attempt window, the target counter snapshot
+rose from 35,477 reads / 18,356,224 bytes to 39,987 reads / 20,665,344 bytes.
+Writes stayed at zero; Flush stayed at one, already present from startup and
+registration. Failed read/write/Flush counts were zero, but QMP marked its
+accounting metadata invalid and failed, and the accumulated reads are not
+operation-scoped. The current idle fixture hash is still
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`, matching
+the recorded initial and final hashes. The previous owned QEMU exited, QMP
+port 58951 closed, and exclusive host access was verified.
+
+No source was changed, so this continuation did not rerun the host suite or
+builds. The retained source-linked result is 1,491/1,491 storage checks, plus
+the previously recorded widget activation and DM37-related suites. The prior
+freestanding AMD64 kernel, `build.bat`, and UEFI x64 Release builds passed with
+the NVMe proof flags above. Gate A and the separate DM36 Check/Remount workflow
+remain unqualified; Gates B–I remain open. Keep `.phase` at DM36→DM37 and do
+not begin DM38.
