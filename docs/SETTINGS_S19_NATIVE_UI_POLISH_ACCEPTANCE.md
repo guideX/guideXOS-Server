@@ -1,6 +1,12 @@
 # guideXOS Server — S19 Native Settings UI Polish Acceptance
 
-**Outcome B — Partial.** The bounded implementation, hosted regressions, freestanding proof, and production build are complete. Mandatory final production QEMU guest acceptance could not be performed because three QEMU guests owned by other checkouts were active during passive rechecks. None was contacted, altered, or stopped. No S19 guest screenshot or visual pass is claimed.
+**Current S19 status — Outcome B (Partial).** S19R completed production AMD64 guest review at the normal Settings size, exercised the information and Personalization pages, verified Cancel and Apply persistence, and checked the legacy Control Panel. It also repaired a reproduced stale applied marker in legacy Display Options. Minimum-size guest qualification and reopening native Settings after closing the legacy surfaces remain unverified. The remaining limitations and evidence are recorded in the S19R closeout below.
+
+The earlier S19 implementation report is retained as historical evidence. Its initial Outcome B was due to missing production guest review; S19R has since supplied that review. The current Outcome B reflects the unqualified minimum-size resize behavior and the unverified post-legacy Settings relaunch.
+
+## Historical S19 implementation report
+
+Sections below preserve the original S19 implementation report and its evidence as written. Read the S19R closeout at the end of this document for the current acceptance status.
 
 ## Repository and starting state
 
@@ -85,3 +91,64 @@ No S19 guest screenshot, input exercise, provider persistence check, or legacy C
 ## Recommended S20 scope
 
 Add modifier-aware focus traversal across the category list and all currently supported page controls, including reverse Tab, tabs, wallpaper pagination, and action buttons. Preserve the shared S10 category/navigation model and bitmap fallback. Review the separate TrueType renderer's measurement/drawing interface independently before any integration; add minimum-size and focus-contrast guest acceptance for the resulting path.
+
+## S19R closeout — 2026-10-17
+
+### Previous Outcome B and repository state
+
+The previous S19 report had no production guest screenshots because QEMU was occupied during its passive availability checks. S19R booted the candidate in private isolated QEMU instances while leaving the other guests untouched.
+
+- Repository: `D:\dev\guideXOSServer`; branch: `main`; starting HEAD: `57fabe72a32441cfaff6a2ab9b1b5bfcd276948c`.
+- The tracked worktree was clean at start. The 582 pre-existing untracked paths were preserved. Work stayed on `main`; no branch, worktree, sibling checkout, or remote operation was used.
+- The original S19 raw candidate remained byte-identical at SHA-256 `2D0D9C2A326551B7055ECA4D8BAEFD70E584AA9B16BD20565E7A406D2C57FB63`.
+- A private rebuilt test image was made from the candidate with the S19R kernel ELF replacing `/kernel.elf`. It was `3FA1B971CAD4CDD65E73B459625333F14DD2C28222806DE892D540E9FE197D6A` before guest writes and `A89FA4465FD1DF84BC6BC5961D32268855BEB30D37D587F9A808E392B4D99C34` after acceptance. The rebuilt ELF is 2,760,592 bytes with SHA-256 `1D2C119CB947B170B0529D9444F7B8F8BF7FE0904E6EC42CE4916165257FAE3F`.
+- The original staged ELF was `5145DA9BD3053CA88CE3A8A7B63E221E67419FC7FF4F9A8A6E903B8627F53082`; the recorded PE identity discrepancy remains documented above. The EFI loader SHA-256 is `E2FDB6AD78E0416AF250BEBBC6541640E3CCDC7DD9A14453C08143B7F4DA48AA`; read-only OVMF SHA-256 is `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`.
+- Every guest session used QEMU TCG, `-nic none`, private writable raw media, read-only firmware, and the task's own QMP endpoint `127.0.0.1:62455`. The S19 and rebuilt guest processes were closed through that endpoint. Foreign QEMU processes, including PIDs 27876 and 34608, were not contacted or stopped.
+
+Artifact identities, launch parameters, QMP activity, serial output, and configuration snapshots are in [the S19R evidence directory](evidence/settings-s19r-native-ui-20261017/). The original S19 candidate is preserved separately from both writable test copies.
+
+### Production guest visual review
+
+The guest booted to a stable 1280×800 desktop. Start launched the native app as `gxos.builtin.settings`. At the normal 760×560 window size, the System, About, Display, and Personalization pages rendered with visible boundaries, readable labels, distinct current and pending appearance states, and no observed essential-value clipping or overlap.
+
+- System showed guideXOS, kernel version 0.1.0, and AMD64 (x86-64).
+- About kept OS release separate from kernel version and displayed “Not defined by this build.”
+- Display showed 1280×800, 32 bpp, B8G8R8A8, and 5120-byte pitch. Display topology remained unavailable.
+- Personalization exposed all eight gradient swatches, all four wallpaper pages (16 choices), the supported desktop icon controls, the session-only auto-arrange notice, status feedback, and Apply/Cancel. Focus and pending selection were visible in the captured states.
+- Keyboard checks covered category shortcuts and arrow navigation, wallpaper page navigation, icon toggling, Tab focus, Space/Enter activation, and Escape close. Mouse selection and hover were also exercised. Shift+Tab remains unsupported because `KernelApp::onKeyDown(uint32_t key)` has no modifier state.
+
+The screenshot set includes System, About, Display, Personalization, gradients, wallpaper pages 1–4, icon controls, pending selections, Cancel and Apply focus/results, Control Panel, Display Options, and the final stable desktop. The rebuilt evidence includes [Settings System](evidence/settings-s19r-native-ui-20261017/rebuilt-settings-initial.png), [Apply result](evidence/settings-s19r-native-ui-20261017/rebuilt-apply-result.png), [legacy Gradients](evidence/settings-s19r-native-ui-20261017/rebuilt-legacy-display-options.png), [legacy Backgrounds after repair](evidence/settings-s19r-native-ui-20261017/rebuilt-legacy-backgrounds-after-fix.png), and [stable desktop after Escape](evidence/settings-s19r-native-ui-20261017/rebuilt-after-legacy-escape.png). The complete QMP and serial logs are retained alongside them.
+
+### Resize qualification
+
+The implemented limits are minimum 660×440, preferred 760×560, and maximum 1180×820. The guest reported resize support. The Settings window opened at the expected normal 760×560 size, but repeated QMP mouse drags at the visible lower-right resize grip did not change its geometry. The minimum-size page review therefore was not completed, and the attempted drag is not evidence that the compositor rejects resizing. The historical deterministic native layout suite passed 1,037/1,037 checks, including bounded size transitions; that hosted result does not qualify the minimum-size guest rendering.
+
+This is the remaining acceptance gate and keeps S19 at Outcome B. Minimum-size guest behavior, control reachability, and hit regions still need a successful interactive resize review.
+
+### Cancel, Apply, and persistence
+
+Before the first guest run, `/desktop.cfg` was 237 bytes with SHA-256 `B3098D72195A16ED553B12EFF7DB9092A056222783A448ABDBBC092448D1273F`. Selecting Ocean and cancelling left the saved file byte-for-byte identical; the before and after-cancel evidence files match. The rebuilt run also logged `gradient.pending cancelled` with no `/desktop.cfg` write before the subsequent Apply.
+
+Applying Ocean in the rebuilt guest produced a successful `/desktop.cfg` write and `[settings-native] background.apply status=0 active=gradient_ocean persisted=gradient_ocean`. The readback file is 234 bytes with SHA-256 `CF310FEA3047F36350F99DB5E2FF458A20E85E6AAE9449F320BFE57F14967249`. Comparing it with the initial fixture shows only `wallpaperId` changed to `gradient_ocean`; scale mode, theme, taskbar position, icon visibility, and other fields remained unchanged. In the first guest run, cold relaunch and reopening native Settings showed Ocean still active.
+
+### Legacy Display Options defect and repair
+
+With Ocean active, the legacy Display Options Backgrounds tab initially drew an applied star beside Blue Flower. The selected outline could remain on Blue Flower, but the applied marker was wrong for the active gradient. The defect and its reproduction were captured in the initial [Backgrounds screenshot](evidence/settings-s19r-native-ui-20261017/legacy-display-options-backgrounds.png).
+
+The bounded repair compares each legacy gallery option ID with the current desktop appearance ID when drawing the applied marker. It changes no selection, persistence, or Apply behavior. Three focused assertions cover missing IDs and active gradient/wallpaper cases. The repaired kernel was rebuilt and booted in a fresh private image; the rebuilt guest showed Ocean starred under Gradients and no applied star under Backgrounds. The post-fix screenshots and serial evidence are retained in the S19R evidence directory.
+
+After the legacy surfaces closed, the guest returned to the desktop. A subsequent Start-menu attempt did not confirm a native Settings relaunch, so the post-legacy return step remains unverified. The first guest had separately confirmed cold relaunch and reopening Settings before the legacy regression check.
+
+### Regression and build results
+
+- Newly run affected native runtime suite: **1,417/1,417 passed**. The previous S19 count of 1,414/1,414 and all other counts in the historical section were not rerun and remain historical evidence.
+- The ordinary AMD64 kernel build completed successfully in the isolated output directory `out/validation/settings-s19r-native-ui-20261017/kernel-build`. The rebuilt ELF was staged byte-identically in the private test image. The original candidate was not overwritten.
+- The final rebuilt guest repeated Cancel, Apply, and the repaired legacy marker review. No full test matrix was rerun because the source change was limited to the legacy applied marker.
+
+### Current S19 outcome and follow-up
+
+**S19 — Outcome B: Partial.** Actual production guest review and the persistence/legacy checks are complete at normal size, and the reproduced legacy marker defect is repaired. Minimum-size guest resize qualification and the post-legacy Settings relaunch remain unverified. The existing Shift+Tab input limitation and unavailable display topology are recorded above. Do not advance S9, Settings 1.0, or Server v0.3 readiness based on this acceptance run.
+
+S20 should address modifier-aware focus traversal and complete minimum-size production guest qualification after a working resize interaction is established. Preserve the current category/navigation model and bitmap fallback; review any separate font-renderer integration independently.
+
+S19R was committed locally on `main`. The final commit SHA is reported in the task closeout. No push was performed.

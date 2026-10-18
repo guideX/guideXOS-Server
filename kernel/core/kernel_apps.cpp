@@ -25,6 +25,7 @@
 #include "include/kernel/virtio_rng.h"
 #include "include/kernel/virtio_gpu.h"
 #include "include/kernel/kernel_text_guard.h"
+#include "include/kernel/display_options_state.h"
 #include "include/kernel/settings_native_provider.h"
 #include "include/kernel/settings_display_refresh.h"
 #include "../../built_in_app_metadata.h"
@@ -3158,7 +3159,10 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             const uint32_t tx = x + layout.galleryX + col * (kTileW + kTileGap);
             const uint32_t ty = y + layout.galleryY + (row - startRow) * (kTileH + kTileGap);
             const bool selected = showWallpapers ? (i == m_selectedBackgroundIndex) : (i == m_selectedGradientIndex);
-            const bool applied = showWallpapers ? (i == m_appliedBackgroundIndex) : (i == m_appliedGradientIndex);
+            const char* currentAppearanceId = kernel::desktop::get_wallpaper_id();
+            const char* optionId = showWallpapers ? s_kernelWallpapers[i].id : s_kernelGradients[i].id;
+            const bool applied = display_options::isCurrentAppearanceOption(
+                currentAppearanceId, optionId);
 
             if (selected) {
                 framebuffer::fill_rect(tx - 4, ty - 4, kTileW + 8, kTileH + 8, rgb(72, 110, 180));

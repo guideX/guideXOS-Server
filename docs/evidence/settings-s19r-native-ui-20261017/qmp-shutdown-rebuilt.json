@@ -1,0 +1,6 @@
+2026-10-18T00:34:29.985169+00:00 RX {"QMP":{"version":{"qemu":{"micro":0,"minor":0,"major":11},"package":"v11.0.0-12122-ga4bb4b10c9"},"capabilities":["oob"]}}
+2026-10-18T00:34:29.986137+00:00 TX {"execute":"qmp_capabilities"}
+2026-10-18T00:34:29.987155+00:00 RX {"return":{}}
+2026-10-18T00:34:29.987155+00:00 TX {"execute":"quit"}
+2026-10-18T00:34:29.988136+00:00 RX {"timestamp":{"seconds":1792283669,"microseconds":988136},"event":"SHUTDOWN","data":{"guest":false,"reason":"host-qmp-quit"}}
+2026-10-18T00:34:29.989136+00:00 RX {"return":{}}

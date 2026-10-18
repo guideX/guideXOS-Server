@@ -1,5 +1,6 @@
 #include "kernel/app_launch_target_resolver.h"
 #include "kernel/kernel_app.h"
+#include "kernel/display_options_state.h"
 #include "kernel/kernel_compositor.h"
 #include "kernel/framebuffer.h"
 #include "kernel/desktop.h"
@@ -1158,6 +1159,20 @@ int main()
     using namespace kernel;
     using namespace kernel::app;
     using namespace kernel::settings_native;
+
+    expect(!kernel::apps::display_options::isCurrentAppearanceOption(
+               nullptr, "gradient_ocean"),
+           "legacy display marker rejects a missing current appearance");
+    expect(kernel::apps::display_options::isCurrentAppearanceOption(
+               "gradient_ocean", "gradient_ocean") &&
+               !kernel::apps::display_options::isCurrentAppearanceOption(
+                   "gradient_ocean", "legacy_blue_flower"),
+           "legacy Backgrounds tab does not mark a wallpaper active while a gradient is current");
+    expect(kernel::apps::display_options::isCurrentAppearanceOption(
+               "legacy_blue_flower", "legacy_blue_flower") &&
+               !kernel::apps::display_options::isCurrentAppearanceOption(
+                   "legacy_blue_flower", "gradient_ocean"),
+           "legacy applied marker follows an active wallpaper rather than a gradient");
 
     AppManager::init();
     AppLogger::init();
