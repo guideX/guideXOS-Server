@@ -1,0 +1,109 @@
+**********************
+PowerShell transcript start
+Start time: 20261017204615
+Username: LEON2_RDT\guideX
+RunAs User: LEON2_RDT\guideX
+Configuration Name: 
+Machine: LEON2_RDT (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Users\guideX\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.dll -Command try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}
+$ErrorActionPreference='Stop'
+$paths = @('tests\rexx_artifact_guard.psm1','tests\run_rexx_tests.ps1')
+foreach ($path in $paths) {
+  $tokens=$null; $parseErrors=$null
+  [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) $path),[ref]$tokens,[ref]$parseErrors)
+  if ($parseErrors.Count) { throw ('PowerShell parse failed for {0}: {1}' -f $path,($parseErrors | Out-String)) }
+}
+$runId=[Guid]::NewGuid().ToString('N')
+$log=Join-Path (Join-Path (Get-Location) 'docs\rexx\evidence\rx13') "hosted-rx13-$runId.log"
+Start-Transcript -LiteralPath $log | Out-Null
+try {
+  & (Join-Path (Get-Location) 'tests\run_rexx_tests.ps1') -Phase RX13
+} finally {
+  Stop-Transcript | Out-Null
+}
+Write-Output "RX13 hosted log: $log"
+Process ID: 25896
+PSVersion: 7.6.5
+PSEdition: Core
+GitCommitId: 7.6.5
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Building hosted REXX runtime tests with C:\mingw64\bin\gcc.exe
+
+Building hosted REXX CLI test driver
+
+Building RX2 VFS and output integration tests
+
+Building RX2 freestanding numeric adapter tests
+
+Building RX3 decimal arithmetic assertions
+
+Building RX3 hosted allocation-failure qualification tests
+
+Building RX4 decimal arithmetic tests
+
+Building RX5 numeric-context tests
+
+Building RX6 PARSE allocation-failure tests
+
+Building RX7 internal routine C-level tests
+
+Building RX7 parser/compiler/VM allocation-failure tests
+
+Building RX8 SIGNAL, subsidiary EXPOSE, and allocation tests
+
+Building RX9 condition-trap and allocation tests
+
+Building RX10 INTERPRET and allocation tests
+
+Building RX12 classic string and word built-in assertions
+
+Building RX13 string editing and word utility assertions
+
+Building RX2 C++ shell bridge integration tests
+
+RX13 artifact preservation: PASS
+Stage: hosted-builds
+Verified UTC: 2026-10-18T03:46:45.0130665Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Running hosted runtime assertions
+
+Running RX2 VFS and output assertions
+
+Running RX2 freestanding numeric assertions
+
+Running RX3 decimal arithmetic assertions
+
+Running RX3 allocation-failure assertions
+
+Running RX4 decimal arithmetic assertions
+
+Running RX5 numeric-context assertions
+
+Running RX6 PARSE allocation-failure assertions
+
+Running RX7 internal routine assertions
+
+Running RX7 allocation-failure assertions
+
+Running RX8 semantic, allocation-failure, and recovery assertions
+
+Running RX9 condition-trap and allocation assertions
+
+Running RX10 INTERPRET and allocation assertions
+
+Running RX12 classic string and word built-in assertions
+
+Running RX13 string editing and word utility assertions
+
+PS>TerminatingError(): "RX13 string editing assertions failed with exit code 1."
+**********************
+PowerShell transcript end
+End time: 20261017204645
+**********************

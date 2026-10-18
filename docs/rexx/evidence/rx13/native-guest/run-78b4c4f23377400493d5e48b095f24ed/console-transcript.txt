@@ -1,0 +1,12 @@
+RX13 isolated QEMU Console transcript
+Kernel SHA-256: 56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\guest\esp
+COMMAND: rexx /rx13-string-builtins.rex | expected visible marker/status: RX13_NATIVE_STRINGS_DONE
+COMMAND: rexx /rx13-word-utilities.rex | expected visible marker/status: RX13_NATIVE_WORDS_DONE
+COMMAND: rexx /rx13-syntax-recovery.rex | expected visible marker/status: RX13_NATIVE_SYNTAX_RECOVERED: 2
+COMMAND: rexx /rx13-oversized-output.rex | expected visible marker/status: VM resource limit exceeded
+COMMAND: rexx /rx13-recovery.rex | expected visible marker/status: RX13_NATIVE_GUEST_RESPONSIVE: 5
+COMMAND: rexx /rx13-exit-status.rex | expected visible marker/status: RX13_NATIVE_EXIT_STATUS_SCRIPT
+COMMAND: echo $? | expected visible marker/status: 23
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=62
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

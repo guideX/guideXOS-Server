@@ -1,0 +1,16 @@
+RX13 artifact preservation: PASS
+Stage: native-amd64-build
+Verified UTC: 2026-10-18T03:59:54.9252108Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+RX13 artifact preservation: PASS
+Stage: native-amd64-final
+Verified UTC: 2026-10-18T03:59:55.0642438Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+AMD64 native build passed.
+ELF SHA-256: 56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95
+REXX C object files: 9
+Output audit: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx13\native-build\output-audit-ac2a66e250084abd97de33022bf6b2a1.json
+Link evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx13\native-build\native-link-evidence-ac2a66e250084abd97de33022bf6b2a1.json
+Preservation evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx13\native-build\preservation-ac2a66e250084abd97de33022bf6b2a1

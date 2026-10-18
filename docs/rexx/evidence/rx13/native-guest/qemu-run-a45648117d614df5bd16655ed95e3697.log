@@ -1,0 +1,27 @@
+
+FullName                                                                                                            Len
+                                                                                                                    gth
+--------                                                                                                            ---
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\helper\rx13-01-string-builtins.png 457
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\helper\rx13-02-word-utilities.png  428
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\helper\rx13-03-syntax-recovery.png 093
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\helper\rx13-04-resource-recover... 706
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\helper\rx13-05-post-error-comma... 938
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\helper\rx13-06-exit-status-scri... 641
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\helper\rx13-07-exit-status-chec... 536
+RX13 artifact preservation: PASS
+Stage: qemu-smoke-guest
+Verified UTC: 2026-10-18T04:34:54.7873292Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Requested QMP shutdown for owned QEMU PID 2880 on port 62631.
+RX13 artifact preservation: PASS
+Stage: qemu-smoke-final
+Verified UTC: 2026-10-18T04:34:55.7603283Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Isolated QEMU smoke passed.
+Kernel SHA-256: 56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95
+Guest evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx13\native-guest\run-78b4c4f23377400493d5e48b095f24ed
+
+

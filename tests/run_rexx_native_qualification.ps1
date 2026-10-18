@@ -1,4 +1,6 @@
 param(
+    [ValidateSet('RX12R1','RX13')]
+    [string]$Phase = 'RX12R1',
     [string]$MakeExecutable = '',
     [string]$OutputEvidenceRoot = ''
 )
@@ -6,10 +8,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
-    throw 'RX12R1 native qualification requires branch REXX_SUPPORT.'
+    throw "$Phase native qualification requires branch REXX_SUPPORT."
 }
 $kernelDir = Join-Path $rootDir 'kernel'
-$phaseRoot = Join-Path $rootDir 'build\rexx\rx12r1'
+$phaseRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())"
 $guardManifest = Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
 Import-Module -Name (Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1') -Force
 
@@ -38,7 +40,7 @@ $runId = [Guid]::NewGuid().ToString('N')
 $runName = "native-amd64-$runId"
 $runRoot = Join-Path $phaseRoot $runName
 $workDir = Join-Path $runRoot 'temp'
-$buildRootArgument = "../build/rexx/rx12r1/$runName"
+$buildRootArgument = "../build/rexx/$($Phase.ToLowerInvariant())/$runName"
 $buildDir = Join-Path $runRoot 'amd64'
 $plannedOutputs = [System.Collections.Generic.List[string]]::new()
 $runPrefix = $runRoot.TrimEnd([char[]]@('\','/')) + [System.IO.Path]::DirectorySeparatorChar
@@ -68,8 +70,9 @@ foreach ($source in Get-ChildItem -LiteralPath (Join-Path $kernelDir 'shell') -F
 foreach ($source in Get-ChildItem -LiteralPath (Join-Path $kernelDir 'arch\amd64') -File | Where-Object { $_.Extension -in '.cpp','.asm','.s' } | Sort-Object FullName) {
     Add-NativeSourceOutputs $source.FullName (Join-Path 'obj\arch' ($source.BaseName + '.o')) ($source.Extension -eq '.cpp')
 }
+$thirdPartyRoot = [System.IO.Path]::GetFullPath((Join-Path $rootDir 'third_party')).TrimEnd([char[]]@('\','/')) + [System.IO.Path]::DirectorySeparatorChar
 foreach ($source in Get-ChildItem -LiteralPath (Join-Path $rootDir 'third_party\mbedtls') -Filter '*.c' -File -Recurse | Sort-Object FullName) {
-    $relative = [System.IO.Path]::GetRelativePath((Join-Path $rootDir 'third_party'), $source.FullName)
+    $relative = [System.IO.Path]::GetFullPath($source.FullName).Substring($thirdPartyRoot.Length)
     Add-NativeSourceOutputs $source.FullName (Join-Path 'obj\third_party' ([System.IO.Path]::ChangeExtension($relative, '.o'))) $true
 }
 foreach ($sourceName in @('rexx_lexer.c','rexx_parser.c','rexx_compiler.c','rexx_vm.c','rexx_builtin.c','rexx_numeric.c','rexx_output.c','rexx_os_io.c','rexx_cli.c')) {
@@ -80,14 +83,14 @@ $null = $plannedOutputs.Add((Join-Path (Join-Path $buildDir 'bin') 'kernel.elf')
 $plannedOutputs = @($plannedOutputs | Sort-Object -Unique)
 
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
-    -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs
+    -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs -Phase $Phase
 $env:TEMP = $workDir
 $env:TMP = $workDir
 $env:TMPDIR = $workDir
 Set-Location -LiteralPath $workDir
 
 $evidenceRoot = if ([string]::IsNullOrWhiteSpace($OutputEvidenceRoot)) {
-    Join-Path $rootDir 'docs\rexx\evidence\rx12r1\native-build'
+    Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\native-build"
 } else {
     [System.IO.Path]::GetFullPath($OutputEvidenceRoot)
 }
@@ -129,7 +132,7 @@ $status = [PSCustomObject]@{
 $status | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $statusPath -Encoding utf8
 if ($process.ExitCode -ne 0) { throw "Isolated AMD64 make failed with exit code $($process.ExitCode). Raw logs: $stdoutPath and $stderrPath" }
 
-Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'native-amd64-build' | Out-Null
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'native-amd64-build' -Phase $Phase | Out-Null
 $kernelElf = Join-Path (Join-Path $buildDir 'bin') 'kernel.elf'
 $kernelPe = Join-Path (Join-Path $buildDir 'bin') 'kernel.pe'
 if (-not (Test-Path -LiteralPath $kernelElf -PathType Leaf) -or -not (Test-Path -LiteralPath $kernelPe -PathType Leaf)) {
@@ -159,7 +162,7 @@ $linkEvidence = [PSCustomObject]@{
 }
 $linkEvidencePath = Join-Path $evidenceRoot ("native-link-evidence-$runId.json")
 $linkEvidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $linkEvidencePath -Encoding utf8
-Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'native-amd64-final' | Out-Null
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'native-amd64-final' -Phase $Phase | Out-Null
 $preservationEvidence = Join-Path $evidenceRoot ("preservation-$runId")
 New-Item -ItemType Directory -Path $preservationEvidence | Out-Null
 Copy-Item -LiteralPath (Join-Path $runRoot 'preservation') -Destination (Join-Path $preservationEvidence 'reports') -Recurse

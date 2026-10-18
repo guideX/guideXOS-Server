@@ -1,4 +1,6 @@
 param(
+    [ValidateSet('RX12R1','RX13')]
+    [string]$Phase = 'RX12R1',
     [ValidateSet('Address', 'Undefined', 'Both')]
     [string]$Sanitizer = 'Both',
     [string]$OutputRoot = ''
@@ -7,10 +9,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
-    throw 'RX12R1 sanitizer qualification requires branch REXX_SUPPORT.'
+    throw "$Phase sanitizer qualification requires branch REXX_SUPPORT."
 }
 $phaseOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
-    Join-Path $rootDir 'build\rexx\rx12r1'
+    Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())"
 } else {
     [System.IO.Path]::GetFullPath($OutputRoot)
 }
@@ -197,7 +199,8 @@ function Invoke-OneSanitizer {
         [PSCustomObject]@{ Name = 'rx8_semantics_alloc'; Driver = 'tests\rexx_rx8_semantics_alloc_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx9_conditions'; Driver = 'tests\rexx_rx9_condition_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx10_interpret'; Driver = 'tests\rexx_rx10_interpret_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') },
-        [PSCustomObject]@{ Name = 'rx12_builtins'; Driver = 'tests\rexx_rx12_builtins_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') }
+        [PSCustomObject]@{ Name = 'rx12_builtins'; Driver = 'tests\rexx_rx12_builtins_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') },
+        [PSCustomObject]@{ Name = 'rx13_string_editing'; Driver = 'tests\rexx_rx13_string_editing_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') }
     )
 
     $buildDir = Join-Path $runDir 'bin'
@@ -215,7 +218,7 @@ function Invoke-OneSanitizer {
         }
     }
     $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir `
-        -WorkingDirectory $workingDirectory -PlannedOutputs @($plannedOutputs)
+        -WorkingDirectory $workingDirectory -PlannedOutputs @($plannedOutputs) -Phase $Phase
     New-Item -ItemType Directory -Path $evidenceDir | Out-Null
     $env:TEMP = $workingDirectory
     $env:TMP = $workingDirectory
@@ -230,7 +233,7 @@ function Invoke-OneSanitizer {
         $clangVersion.Stdout + $clangVersion.Stderr
     }
     [System.IO.File]::WriteAllText((Join-Path $evidenceDir 'compiler-version.log'), $compilerVersion, [System.Text.UTF8Encoding]::new($false))
-    Write-Host "RX12 $Kind sanitizer: $compiler"
+    Write-Host "$Phase $Kind sanitizer: $compiler"
 
     $built = @{}
     foreach ($plan in $plans) {
@@ -269,7 +272,7 @@ function Invoke-OneSanitizer {
         Write-Host "[BUILD PASS] $($plan.Name)"
     }
 
-    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-builds" | Out-Null
+    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-builds" -Phase $Phase | Out-Null
 
     foreach ($plan in $plans) {
         $runArguments = if ($plan.PSObject.Properties.Name -contains 'RunArgs') { $plan.RunArgs } else { @() }
@@ -281,7 +284,7 @@ function Invoke-OneSanitizer {
         Write-Host "[TEST PASS] $($plan.Name)"
     }
 
-    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-hosted-tests" | Out-Null
+    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-hosted-tests" -Phase $Phase | Out-Null
 
     $python = Get-Command python -ErrorAction Stop
     $differentialDir = Join-Path $runDir 'differential'
@@ -296,13 +299,14 @@ function Invoke-OneSanitizer {
         throw "$Kind sanitizer differential corpus execution failed. See $differentialDir and $evidenceDir. `n$($diffResult.Stdout)`n$($diffResult.Stderr)"
     }
     Write-Host $diffResult.Stdout.TrimEnd()
-    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-corpus" | Out-Null
+    Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runDir -Stage "$($Kind.ToLowerInvariant())-corpus" -Phase $Phase | Out-Null
 
-    $durableEvidence = Join-Path $rootDir ("docs\rexx\evidence\rx12r1\sanitizer-$($Kind.ToLowerInvariant())-$runId")
+    $durableEvidence = Join-Path $rootDir ("docs\rexx\evidence\$($Phase.ToLowerInvariant())\sanitizer-$($Kind.ToLowerInvariant())-$runId")
     New-Item -ItemType Directory -Path $durableEvidence | Out-Null
     Copy-Item -LiteralPath $evidenceDir -Destination (Join-Path $durableEvidence 'logs') -Recurse
     Copy-Item -LiteralPath (Join-Path $runDir 'preservation') -Destination (Join-Path $durableEvidence 'preservation') -Recurse
     Copy-Item -LiteralPath (Join-Path $differentialDir 'results.json') -Destination $durableEvidence
+    Copy-Item -LiteralPath (Join-Path $differentialDir 'raw') -Destination $durableEvidence -Recurse
     Write-Host "Evidence: $evidenceDir"
     Write-Host "Builds: $buildDir"
     Write-Host "Durable evidence: $durableEvidence"
@@ -313,5 +317,5 @@ $selected = if ($Sanitizer -eq 'Both') { @('Address', 'Undefined') } else { @($S
 $summaries = foreach ($kind in $selected) { Invoke-OneSanitizer -Kind $kind }
 $summaryPath = Join-Path $summaries[-1].RunDir 'sanitizer-summary.json'
 $summaries | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $summaryPath -Encoding utf8
-Copy-Item -LiteralPath $summaryPath -Destination (Join-Path $rootDir 'docs\rexx\evidence\rx12r1\sanitizers-summary.json') -Force
+Copy-Item -LiteralPath $summaryPath -Destination (Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\sanitizers-summary.json") -Force
 Write-Output "Sanitizer summary: $summaryPath"

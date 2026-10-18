@@ -1,0 +1,33 @@
+﻿{
+    "schema":  "guidexos.rexx.native-link-evidence.v1",
+    "built_at_utc":  "2026-10-18T03:59:54.9617264Z",
+    "kernel_elf":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx13\\native-amd64-ac2a66e250084abd97de33022bf6b2a1\\amd64\\bin\\kernel.elf",
+    "kernel_elf_sha256":  "56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95",
+    "kernel_elf_sha256_reverified":  "56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95",
+    "kernel_pe":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx13\\native-amd64-ac2a66e250084abd97de33022bf6b2a1\\amd64\\bin\\kernel.pe",
+    "kernel_pe_sha256":  "d5d97e9f44a859df79c5fa513e8c915c9d30e3e557e6c10d6aa375fa2c60775c",
+    "rexx_c_object_count":  9,
+    "rexx_c_objects":  [
+                           "rexx_builtin.o",
+                           "rexx_cli.o",
+                           "rexx_compiler.o",
+                           "rexx_lexer.o",
+                           "rexx_numeric.o",
+                           "rexx_os_io.o",
+                           "rexx_output.o",
+                           "rexx_parser.o",
+                           "rexx_vm.o"
+                       ],
+    "freestanding_flags":  [
+                               "-ffreestanding",
+                               "-nostdlib",
+                               "-nostdinc++",
+                               "-fno-builtin",
+                               "-fno-exceptions",
+                               "-fno-rtti"
+                           ],
+    "historical_rx12_elf_sha256":  "ce835ef3b77aa066db46f9cb9964b6bb0d7c589b4202a2b1965129854fd80dee",
+    "matches_historical_rx12":  false,
+    "build_output_root":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx13\\native-amd64-ac2a66e250084abd97de33022bf6b2a1",
+    "build_succeeded":  true
+}

@@ -1,0 +1,2 @@
+say lastpos("ab","abxxab")
+

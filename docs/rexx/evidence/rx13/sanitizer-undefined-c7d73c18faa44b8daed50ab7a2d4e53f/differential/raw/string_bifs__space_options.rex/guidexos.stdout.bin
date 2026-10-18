@@ -1,0 +1,6 @@
+[abc def]
+[abc   def]
+[abcdef]
+[abc++def]
+[a..b]
+[]

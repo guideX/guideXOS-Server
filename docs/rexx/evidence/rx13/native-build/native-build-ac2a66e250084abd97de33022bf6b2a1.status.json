@@ -1,0 +1,14 @@
+﻿{
+    "exit_code":  0,
+    "pid":  21676,
+    "started_at_utc":  "2026-10-18T03:56:42.0625021Z",
+    "finished_at_utc":  "2026-10-18T03:59:54.0212850Z",
+    "arguments":  [
+                      "-C",
+                      "D:\\dev\\guideXOSServer_REXX\\kernel",
+                      "-B",
+                      "ARCH=amd64",
+                      "BUILD_ROOT=../build/rexx/rx13/native-amd64-ac2a66e250084abd97de33022bf6b2a1",
+                      "all"
+                  ]
+}

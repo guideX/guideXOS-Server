@@ -55,7 +55,7 @@ function Get-ReXXRootArtifactState {
 }
 
 function Write-ReXXGuardReport {
-    param([string]$RunRoot, [string]$Stage, $State, [bool]$Passed)
+    param([string]$RunRoot, [string]$Stage, $State, [bool]$Passed, [string]$Phase = 'RX12R1')
     $reports = Join-Path $RunRoot 'preservation'
     New-Item -ItemType Directory -Path $reports -Force | Out-Null
     $safeStage = $Stage -replace '[^A-Za-z0-9_.-]','_'
@@ -75,7 +75,7 @@ function Write-ReXXGuardReport {
     $textPath = Join-Path $reports ($safeStage + '.txt')
     $report | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $jsonPath -Encoding utf8
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("RX12R1 artifact preservation: $(if ($Passed) {'PASS'} else {'FAIL'})")
+    $lines.Add("$Phase artifact preservation: $(if ($Passed) {'PASS'} else {'FAIL'})")
     $lines.Add("Stage: $Stage")
     $lines.Add("Verified UTC: $($report.verified_at_utc)")
     $lines.Add("Artifacts: $($report.actual_artifact_count)/$($report.expected_artifact_count)")
@@ -92,30 +92,31 @@ function Start-ReXXArtifactRun {
         [Parameter(Mandatory)][string]$ManifestPath,
         [Parameter(Mandatory)][string]$RunRoot,
         [Parameter(Mandatory)][string]$WorkingDirectory,
-        [string[]]$PlannedOutputs = @()
+        [string[]]$PlannedOutputs = @(),
+        [ValidateSet('RX12R1','RX13')][string]$Phase = 'RX12R1'
     )
     $manifest = Get-ReXXGuardManifest -ManifestPath $ManifestPath
     $repoRoot = [System.IO.Path]::GetFullPath([string]$manifest.repository)
-    $approvedParent = Join-Path $repoRoot 'build\rexx\rx12r1'
+    $approvedParent = Join-Path $repoRoot ("build\rexx\" + $Phase.ToLowerInvariant())
     $runFull = [System.IO.Path]::GetFullPath($RunRoot)
     $workFull = [System.IO.Path]::GetFullPath($WorkingDirectory)
 
     if (-not (Test-ReXXPathWithin -Path $runFull -Parent $approvedParent) -or $runFull.Equals($approvedParent, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "RX12R1 fail-closed preflight: run root must be a new child of $approvedParent; got $runFull"
+        throw "$Phase fail-closed preflight: run root must be a new child of $approvedParent; got $runFull"
     }
     if (Test-Path -LiteralPath $runFull) {
-        throw "RX12R1 fail-closed preflight: owned run root already exists: $runFull"
+        throw "$Phase fail-closed preflight: owned run root already exists: $runFull"
     }
     if (-not (Test-ReXXPathWithin -Path $workFull -Parent $runFull)) {
-        throw "RX12R1 fail-closed preflight: compiler working directory is outside the owned run root: $workFull"
+        throw "$Phase fail-closed preflight: compiler working directory is outside the owned run root: $workFull"
     }
     foreach ($output in $PlannedOutputs) {
         $outputFull = [System.IO.Path]::GetFullPath($output)
         if (-not (Test-ReXXPathWithin -Path $outputFull -Parent $runFull)) {
-            throw "RX12R1 fail-closed preflight: planned output is outside the owned run root: $outputFull"
+            throw "$Phase fail-closed preflight: planned output is outside the owned run root: $outputFull"
         }
         if (Test-Path -LiteralPath $outputFull) {
-            throw "RX12R1 fail-closed preflight: planned output already exists: $outputFull"
+            throw "$Phase fail-closed preflight: planned output already exists: $outputFull"
         }
     }
 
@@ -123,8 +124,8 @@ function Start-ReXXArtifactRun {
     if ($state.missing.Count -or $state.modified.Count -or $state.unexpected.Count) {
         $null = New-Item -ItemType Directory -Path $runFull
         $state | Add-Member -NotePropertyName expected_count -NotePropertyValue @($manifest.artifacts).Count
-        $reportPaths = Write-ReXXGuardReport -RunRoot $runFull -Stage 'preflight-failed' -State $state -Passed $false
-        throw "RX12R1 fail-closed preflight: protected root artifacts differ from the baseline. See $($reportPaths.Text)"
+        $reportPaths = Write-ReXXGuardReport -RunRoot $runFull -Stage 'preflight-failed' -State $state -Passed $false -Phase $Phase
+        throw "$Phase fail-closed preflight: protected root artifacts differ from the baseline. See $($reportPaths.Text)"
     }
     $state | Add-Member -NotePropertyName expected_count -NotePropertyValue @($manifest.artifacts).Count
 
@@ -142,7 +143,7 @@ function Start-ReXXArtifactRun {
         planned_outputs = @($PlannedOutputs | ForEach-Object { [System.IO.Path]::GetFullPath($_) })
         artifacts = @($state.actual)
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $beforePath -Encoding utf8
-    $null = Write-ReXXGuardReport -RunRoot $runFull -Stage 'preflight' -State $state -Passed $true
+    $null = Write-ReXXGuardReport -RunRoot $runFull -Stage 'preflight' -State $state -Passed $true -Phase $Phase
     return [PSCustomObject]@{ RunRoot = $runFull; WorkingDirectory = $workFull; Manifest = $manifest }
 }
 
@@ -150,22 +151,23 @@ function Test-ReXXArtifactRun {
     param(
         [Parameter(Mandatory)][string]$ManifestPath,
         [Parameter(Mandatory)][string]$RunRoot,
-        [Parameter(Mandatory)][string]$Stage
+        [Parameter(Mandatory)][string]$Stage,
+        [ValidateSet('RX12R1','RX13')][string]$Phase = 'RX12R1'
     )
     $manifest = Get-ReXXGuardManifest -ManifestPath $ManifestPath
     $runFull = [System.IO.Path]::GetFullPath($RunRoot)
-    if (-not (Test-ReXXPathWithin -Path $runFull -Parent (Join-Path $manifest.repository 'build\rexx\rx12r1'))) {
-        throw "RX12R1 guard refuses to verify a path outside phase-owned output: $runFull"
+    if (-not (Test-ReXXPathWithin -Path $runFull -Parent (Join-Path $manifest.repository ("build\rexx\" + $Phase.ToLowerInvariant())))) {
+        throw "$Phase guard refuses to verify a path outside phase-owned output: $runFull"
     }
     if (-not (Test-Path -LiteralPath (Join-Path $runFull 'protected-artifacts-before.json'))) {
-        throw "RX12R1 guard has no before-run snapshot for $runFull"
+        throw "$Phase guard has no before-run snapshot for $runFull"
     }
     $state = Get-ReXXRootArtifactState -Manifest $manifest
     $state | Add-Member -NotePropertyName expected_count -NotePropertyValue @($manifest.artifacts).Count
     $passed = -not ($state.missing.Count -or $state.modified.Count -or $state.unexpected.Count)
-    $reportPaths = Write-ReXXGuardReport -RunRoot $runFull -Stage $Stage -State $state -Passed $passed
+    $reportPaths = Write-ReXXGuardReport -RunRoot $runFull -Stage $Stage -State $state -Passed $passed -Phase $Phase
     Write-Host (Get-Content -Raw -LiteralPath $reportPaths.Text).TrimEnd()
-    if (-not $passed) { throw "RX12R1 artifact preservation failed after '$Stage'. No automatic restoration was attempted. See $($reportPaths.Json)" }
+    if (-not $passed) { throw "$Phase artifact preservation failed after '$Stage'. No automatic restoration was attempted. See $($reportPaths.Json)" }
     return $reportPaths
 }
 

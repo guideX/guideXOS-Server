@@ -1,0 +1,22 @@
+﻿{
+    "schema":  "guidexos.rexx.rx13.qemu-smoke.v1",
+    "completed_at_utc":  "2026-10-18T04:01:24.2625031Z",
+    "passed":  true,
+    "qemu_version":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "kernel_sha256":  "56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95",
+    "staged_kernel_sha256":  "56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95",
+    "network_disabled":  true,
+    "copied_disposable_media":  true,
+    "production_media_used":  false,
+    "script_accesses_in_serial":  [
+                                      "rx13-exit-status.rex",
+                                      "rx13-oversized-output.rex",
+                                      "rx13-recovery.rex",
+                                      "rx13-string-builtins.rex",
+                                      "rx13-syntax-recovery.rex"
+                                  ],
+    "heartbeat_count_before_suite":  1,
+    "heartbeat_count_after_suite":  59,
+    "qmp_shutdown_acknowledged":  true,
+    "evidence_directory":  "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx13\\native-guest\\run-edec88197ca64c419bb50b5a4c417d8a"
+}

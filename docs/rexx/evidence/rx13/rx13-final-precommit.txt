@@ -1,0 +1,5 @@
+RX13 artifact preservation: PASS
+Stage: rx13-final-precommit
+Verified UTC: 2026-10-18T04:46:14.6263395Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

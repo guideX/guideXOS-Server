@@ -310,6 +310,489 @@ static RexxVMStatus rexx_builtin_substr(const RexxValue *arguments,
     }
 }
 
+static RexxVMStatus rexx_builtin_optional_size(const RexxValue *arguments,
+                                               size_t argument_count,
+                                               size_t argument_index,
+                                               size_t default_value,
+                                               size_t *value)
+{
+    if (value == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+    *value = default_value;
+    if (argument_count <= argument_index ||
+        arguments[argument_index].type == REXX_VALUE_UNSET) {
+        return REXX_VM_STATUS_OK;
+    }
+    return rexx_builtin_size(&arguments[argument_index], value);
+}
+
+static RexxVMStatus rexx_builtin_optional_pad(const RexxValue *arguments,
+                                               size_t argument_count,
+                                               size_t argument_index,
+                                               char *pad_byte)
+{
+    RexxBuiltinStringView pad;
+    RexxVMStatus status;
+
+    if (pad_byte == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+    *pad_byte = ' ';
+    if (argument_count <= argument_index ||
+        arguments[argument_index].type == REXX_VALUE_UNSET) {
+        return REXX_VM_STATUS_OK;
+    }
+    status = rexx_builtin_string_view(&arguments[argument_index], &pad);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (pad.length != 1u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    *pad_byte = pad.bytes[0];
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_add_output_length(size_t *total,
+                                                   size_t addition)
+{
+    if (total == NULL || *total > REXX_BUILTIN_MAX_RESULT_LENGTH ||
+        addition > REXX_BUILTIN_MAX_RESULT_LENGTH - *total) {
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    }
+    *total += addition;
+    return REXX_VM_STATUS_OK;
+}
+
+static void rexx_builtin_write_padded(const RexxBuiltinStringView *source,
+                                      char *destination,
+                                      size_t length,
+                                      char pad_byte)
+{
+    size_t copied = source->length < length ? source->length : length;
+    if (copied != 0u) memcpy(destination, source->bytes, copied);
+    if (length > copied) {
+        memset(destination + copied, (unsigned char)pad_byte, length - copied);
+    }
+}
+
+static RexxVMStatus rexx_builtin_left(const RexxValue *arguments,
+                                      size_t argument_count,
+                                      RexxValue *result)
+{
+    RexxBuiltinStringView string;
+    size_t requested_length;
+    size_t copied;
+    char pad_byte;
+    char *buffer = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &string);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_size(&arguments[1], &requested_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_optional_pad(arguments, argument_count, 2u,
+                                           &pad_byte);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (requested_length > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+
+    copied = string.length < requested_length ? string.length : requested_length;
+    status = rexx_builtin_allocate_result(result, requested_length, &buffer);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (copied != 0u) memcpy(buffer, string.bytes, copied);
+    if (requested_length > copied) {
+        memset(buffer + copied, (unsigned char)pad_byte,
+               requested_length - copied);
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_right(const RexxValue *arguments,
+                                       size_t argument_count,
+                                       RexxValue *result)
+{
+    RexxBuiltinStringView string;
+    size_t requested_length;
+    size_t copied;
+    size_t padding;
+    char pad_byte;
+    char *buffer = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &string);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_size(&arguments[1], &requested_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_optional_pad(arguments, argument_count, 2u,
+                                           &pad_byte);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (requested_length > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+
+    copied = string.length < requested_length ? string.length : requested_length;
+    padding = requested_length - copied;
+    status = rexx_builtin_allocate_result(result, requested_length, &buffer);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (padding != 0u) memset(buffer, (unsigned char)pad_byte, padding);
+    if (copied != 0u) {
+        memcpy(buffer + padding, string.bytes + (string.length - copied), copied);
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_insert(const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    RexxBuiltinStringView inserted;
+    RexxBuiltinStringView target;
+    size_t position = 0u;
+    size_t inserted_length;
+    size_t prefix_length;
+    size_t gap_length;
+    size_t suffix_start;
+    size_t suffix_length;
+    size_t output_length = 0u;
+    size_t offset = 0u;
+    char pad_byte;
+    char *buffer = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &inserted);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_string_view(&arguments[1], &target);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_optional_size(arguments, argument_count, 2u,
+                                            0u, &position);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_optional_size(arguments, argument_count, 3u,
+                                            inserted.length, &inserted_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_optional_pad(arguments, argument_count, 4u,
+                                           &pad_byte);
+    if (status != REXX_VM_STATUS_OK) return status;
+
+    prefix_length = position < target.length ? position : target.length;
+    gap_length = position > target.length ? position - target.length : 0u;
+    suffix_start = position < target.length ? position : target.length;
+    suffix_length = position < target.length ? target.length - position : 0u;
+    status = rexx_builtin_add_output_length(&output_length, prefix_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_add_output_length(&output_length, gap_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_add_output_length(&output_length, inserted_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_add_output_length(&output_length, suffix_length);
+    if (status != REXX_VM_STATUS_OK) return status;
+
+    status = rexx_builtin_allocate_result(result, output_length, &buffer);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (prefix_length != 0u) {
+        memcpy(buffer + offset, target.bytes, prefix_length);
+        offset += prefix_length;
+    }
+    if (gap_length != 0u) {
+        memset(buffer + offset, (unsigned char)pad_byte, gap_length);
+        offset += gap_length;
+    }
+    rexx_builtin_write_padded(&inserted, buffer + offset, inserted_length,
+                              pad_byte);
+    offset += inserted_length;
+    if (suffix_length != 0u) {
+        memcpy(buffer + offset, target.bytes + suffix_start, suffix_length);
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_overlay(const RexxValue *arguments,
+                                         size_t argument_count,
+                                         RexxValue *result)
+{
+    RexxBuiltinStringView inserted;
+    RexxBuiltinStringView target;
+    size_t position = 1u;
+    size_t start;
+    size_t overlay_length;
+    size_t overlay_end;
+    size_t prefix_length;
+    size_t gap_length;
+    size_t suffix_start;
+    size_t suffix_length;
+    size_t output_length;
+    size_t offset = 0u;
+    char pad_byte;
+    char *buffer = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &inserted);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_string_view(&arguments[1], &target);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_optional_size(arguments, argument_count, 2u,
+                                            1u, &position);
+    if (status == REXX_VM_STATUS_OK && position == 0u)
+        status = REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_optional_size(arguments, argument_count, 3u,
+                                            inserted.length, &overlay_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_optional_pad(arguments, argument_count, 4u,
+                                           &pad_byte);
+    if (status != REXX_VM_STATUS_OK) return status;
+    start = position - 1u;
+    status = rexx_builtin_add_output_length(&start, overlay_length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    overlay_end = start;
+    start = position - 1u;
+    prefix_length = start < target.length ? start : target.length;
+    gap_length = start > target.length ? start - target.length : 0u;
+    suffix_start = overlay_end < target.length ? overlay_end : target.length;
+    suffix_length = target.length - suffix_start;
+    output_length = target.length > overlay_end ? target.length : overlay_end;
+    if (output_length > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+
+    status = rexx_builtin_allocate_result(result, output_length, &buffer);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (prefix_length != 0u) {
+        memcpy(buffer + offset, target.bytes, prefix_length);
+        offset += prefix_length;
+    }
+    if (gap_length != 0u) {
+        memset(buffer + offset, (unsigned char)pad_byte, gap_length);
+        offset += gap_length;
+    }
+    rexx_builtin_write_padded(&inserted, buffer + offset, overlay_length,
+                              pad_byte);
+    offset += overlay_length;
+    if (suffix_length != 0u) {
+        memcpy(buffer + offset, target.bytes + suffix_start, suffix_length);
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_delstr(const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    RexxBuiltinStringView string;
+    size_t start;
+    size_t delete_length;
+    size_t available;
+    size_t suffix_start;
+    size_t suffix_length;
+    size_t output_length;
+    char *buffer = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &string);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_word_number(&arguments[1], &start);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (argument_count < 3u || arguments[2].type == REXX_VALUE_UNSET) {
+        delete_length = string.length;
+    } else {
+        status = rexx_builtin_size(&arguments[2], &delete_length);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    if (start > string.length || delete_length == 0u)
+        return rexx_value_set_string(result, string.bytes, string.length);
+
+    available = string.length - (start - 1u);
+    if (delete_length > available) delete_length = available;
+    suffix_start = start - 1u + delete_length;
+    suffix_length = string.length - suffix_start;
+    output_length = (start - 1u) + suffix_length;
+    status = rexx_builtin_allocate_result(result, output_length, &buffer);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (start > 1u) memcpy(buffer, string.bytes, start - 1u);
+    if (suffix_length != 0u) {
+        memcpy(buffer + (start - 1u), string.bytes + suffix_start,
+               suffix_length);
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_delword(const RexxValue *arguments,
+                                         size_t argument_count,
+                                         RexxValue *result)
+{
+    RexxBuiltinStringView string;
+    RexxBuiltinWord word;
+    size_t first_word_number;
+    size_t delete_count;
+    size_t current_word_number = 0u;
+    size_t cursor = 0u;
+    size_t delete_start = 0u;
+    size_t delete_end = 0u;
+    size_t selected = 0u;
+    size_t output_length;
+    char *buffer = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &string);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_word_number(&arguments[1], &first_word_number);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (argument_count < 3u || arguments[2].type == REXX_VALUE_UNSET) {
+        delete_count = string.length;
+    } else {
+        status = rexx_builtin_size(&arguments[2], &delete_count);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    if (delete_count == 0u)
+        return rexx_value_set_string(result, string.bytes, string.length);
+
+    while (rexx_builtin_next_word(&string, &cursor, &word)) {
+        ++current_word_number;
+        if (current_word_number == first_word_number) {
+            delete_start = word.start;
+            delete_end = word.start + word.length;
+            selected = 1u;
+            break;
+        }
+    }
+    if (selected == 0u)
+        return rexx_value_set_string(result, string.bytes, string.length);
+
+    while (selected < delete_count &&
+           rexx_builtin_next_word(&string, &cursor, &word)) {
+        delete_end = word.start + word.length;
+        ++selected;
+    }
+    while (delete_end < string.length &&
+           rexx_builtin_ascii_space((unsigned char)string.bytes[delete_end])) {
+        ++delete_end;
+    }
+    output_length = delete_start + (string.length - delete_end);
+    status = rexx_builtin_allocate_result(result, output_length, &buffer);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (delete_start != 0u) memcpy(buffer, string.bytes, delete_start);
+    if (delete_end < string.length) {
+        memcpy(buffer + delete_start, string.bytes + delete_end,
+               string.length - delete_end);
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_subword(const RexxValue *arguments,
+                                         size_t argument_count,
+                                         RexxValue *result)
+{
+    RexxBuiltinStringView string;
+    RexxBuiltinWord word;
+    size_t first_word_number;
+    size_t requested_words;
+    size_t current_word_number = 0u;
+    size_t cursor = 0u;
+    size_t selection_start = 0u;
+    size_t selection_end = 0u;
+    size_t selected = 0u;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &string);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_word_number(&arguments[1], &first_word_number);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (argument_count < 3u || arguments[2].type == REXX_VALUE_UNSET) {
+        requested_words = string.length;
+    } else {
+        status = rexx_builtin_size(&arguments[2], &requested_words);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+    if (requested_words == 0u) return rexx_builtin_set_empty(result);
+
+    while (rexx_builtin_next_word(&string, &cursor, &word)) {
+        ++current_word_number;
+        if (current_word_number < first_word_number) continue;
+        if (selected == 0u) selection_start = word.start;
+        selection_end = word.start + word.length;
+        ++selected;
+        if (selected == requested_words) break;
+    }
+    if (selected == 0u) return rexx_builtin_set_empty(result);
+    return rexx_value_set_string(result, string.bytes + selection_start,
+                                 selection_end - selection_start);
+}
+
+static RexxVMStatus rexx_builtin_wordindex(const RexxValue *arguments,
+                                           size_t argument_count,
+                                           RexxValue *result)
+{
+    RexxBuiltinStringView string;
+    RexxBuiltinWord word;
+    size_t requested_word;
+    size_t current_word = 0u;
+    size_t cursor = 0u;
+    RexxVMStatus status;
+
+    (void)argument_count;
+    status = rexx_builtin_string_view(&arguments[0], &string);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_word_number(&arguments[1], &requested_word);
+    if (status != REXX_VM_STATUS_OK) return status;
+    while (rexx_builtin_next_word(&string, &cursor, &word)) {
+        ++current_word;
+        if (current_word == requested_word)
+            return rexx_builtin_set_size(result, word.start + 1u);
+    }
+    return rexx_builtin_set_size(result, 0u);
+}
+
+static RexxVMStatus rexx_builtin_wordlength(const RexxValue *arguments,
+                                            size_t argument_count,
+                                            RexxValue *result)
+{
+    RexxBuiltinStringView string;
+    RexxBuiltinWord word;
+    size_t requested_word;
+    size_t current_word = 0u;
+    size_t cursor = 0u;
+    RexxVMStatus status;
+
+    (void)argument_count;
+    status = rexx_builtin_string_view(&arguments[0], &string);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_word_number(&arguments[1], &requested_word);
+    if (status != REXX_VM_STATUS_OK) return status;
+    while (rexx_builtin_next_word(&string, &cursor, &word)) {
+        ++current_word;
+        if (current_word == requested_word)
+            return rexx_builtin_set_size(result, word.length);
+    }
+    return rexx_builtin_set_size(result, 0u);
+}
+
+static RexxVMStatus rexx_builtin_lastpos(const RexxValue *arguments,
+                                          size_t argument_count,
+                                          RexxValue *result)
+{
+    RexxBuiltinStringView needle;
+    RexxBuiltinStringView haystack;
+    size_t start;
+    size_t candidate;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &needle);
+    if (status == REXX_VM_STATUS_OK)
+        status = rexx_builtin_string_view(&arguments[1], &haystack);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (argument_count < 3u || arguments[2].type == REXX_VALUE_UNSET) {
+        start = haystack.length;
+    } else {
+        status = rexx_builtin_word_number(&arguments[2], &start);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (start > haystack.length) start = haystack.length;
+    }
+    if (needle.length == 0u || needle.length > start)
+        return rexx_builtin_set_size(result, 0u);
+
+    candidate = start - needle.length + 1u;
+    while (candidate != 0u) {
+        size_t byte_start = candidate - 1u;
+        if (memcmp(haystack.bytes + byte_start, needle.bytes,
+                   needle.length) == 0) {
+            return rexx_builtin_set_size(result, candidate);
+        }
+        --candidate;
+    }
+    return rexx_builtin_set_size(result, 0u);
+}
+
 static RexxVMStatus rexx_builtin_word(const RexxValue *arguments,
                                       size_t argument_count,
                                       RexxValue *result)
@@ -837,6 +1320,16 @@ static RexxVMStatus rexx_builtin_translate(const RexxValue *arguments,
 
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "LENGTH", 1u, 1u, rexx_builtin_length },
+    { "LEFT", 2u, 3u, rexx_builtin_left },
+    { "RIGHT", 2u, 3u, rexx_builtin_right },
+    { "INSERT", 2u, 5u, rexx_builtin_insert },
+    { "OVERLAY", 2u, 5u, rexx_builtin_overlay },
+    { "DELSTR", 2u, 3u, rexx_builtin_delstr },
+    { "DELWORD", 2u, 3u, rexx_builtin_delword },
+    { "SUBWORD", 2u, 3u, rexx_builtin_subword },
+    { "WORDINDEX", 2u, 2u, rexx_builtin_wordindex },
+    { "WORDLENGTH", 2u, 2u, rexx_builtin_wordlength },
+    { "LASTPOS", 2u, 3u, rexx_builtin_lastpos },
     { "SUBSTR", 2u, 4u, rexx_builtin_substr },
     { "WORD", 2u, 2u, rexx_builtin_word },
     { "WORDS", 1u, 1u, rexx_builtin_words },

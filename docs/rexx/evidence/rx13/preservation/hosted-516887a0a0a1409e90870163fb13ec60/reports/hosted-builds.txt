@@ -1,0 +1,5 @@
+RX13 artifact preservation: PASS
+Stage: hosted-builds
+Verified UTC: 2026-10-18T03:42:03.2969440Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

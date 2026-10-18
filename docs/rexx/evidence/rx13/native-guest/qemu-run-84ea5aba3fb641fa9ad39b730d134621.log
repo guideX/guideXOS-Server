@@ -1,0 +1,21 @@
+
+FullName                                                                                                            Len
+                                                                                                                    gth
+--------                                                                                                            ---
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-ee0983f9e0764bec86db4036d67a65cc\helper\rx13-01-string-builtins.png 446
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-ee0983f9e0764bec86db4036d67a65cc\helper\rx13-02-word-utilities.png  419
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-ee0983f9e0764bec86db4036d67a65cc\helper\rx13-03-syntax-recovery.png 082
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-ee0983f9e0764bec86db4036d67a65cc\helper\rx13-04-resource-recover... 075
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-ee0983f9e0764bec86db4036d67a65cc\helper\rx13-05-post-error-comma... 934
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-ee0983f9e0764bec86db4036d67a65cc\helper\rx13-06-exit-status-scri... 633
+D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-ee0983f9e0764bec86db4036d67a65cc\helper\rx13-07-exit-status-chec... 466
+Requested QMP shutdown for RX12 QEMU PID 32316 on port 53973.
+D:\dev\guideXOSServer_REXX\tests\run_rexx_qemu_smoke.ps1 : RX12R1 QEMU smoke stopped before completion: Serial log did 
+not record guest script access: rx13-oversized-output.rex
+at <ScriptBlock>, D:\dev\guideXOSServer_REXX\tests\run_rexx_qemu_smoke.ps1: line 243
+At D:\dev\guideXOSServer_REXX\tests\run_rexx_qemu_smoke.ps1:251 char:90
++ ... d before completion: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
++                                                     ~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,run_rexx_qemu_smoke.ps1
+ 

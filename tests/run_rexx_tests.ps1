@@ -1,8 +1,12 @@
+param(
+    [ValidateSet('RX12R1','RX13')][string]$Phase = 'RX12R1'
+)
+
 $ErrorActionPreference = "Stop"
 
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
-    throw 'RX12R1 hosted qualification requires branch REXX_SUPPORT.'
+    throw "$Phase hosted qualification requires branch REXX_SUPPORT."
 }
 $gccCommand = Get-Command gcc -ErrorAction SilentlyContinue
 if ($null -eq $gccCommand) {
@@ -17,7 +21,7 @@ $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
 $guardManifest = Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
 $runId = [Guid]::NewGuid().ToString('N')
-$runRoot = Join-Path $rootDir ("build\rexx\rx12r1\hosted-$runId")
+$runRoot = Join-Path $rootDir ("build\rexx\$($Phase.ToLowerInvariant())\hosted-$runId")
 $workingDirectory = Join-Path $runRoot 'temp'
 $plannedOutputs = @(
     'rexx_runtime_tests.exe', 'rexx_cli.exe', 'rexx_rx2_tests.exe',
@@ -27,10 +31,10 @@ $plannedOutputs = @(
     'rexx_rx7_routines_tests.exe', 'rexx_rx7_alloc_failure_tests.exe',
     'rexx_rx8_semantics_alloc_tests.exe', 'rexx_rx9_condition_tests.exe',
     'rexx_rx10_interpret_tests.exe', 'rexx_rx12_builtins_tests.exe',
-    'rexx_rx2_shell_bridge_tests.exe'
+    'rexx_rx13_string_editing_tests.exe', 'rexx_rx2_shell_bridge_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
-    -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs
+    -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
 $buildDirectory = Join-Path $runRoot 'bin'
 New-Item -ItemType Directory -Path $buildDirectory | Out-Null
 $env:TEMP = $workingDirectory
@@ -52,6 +56,7 @@ $rx8Test = Join-Path $buildDirectory "rexx_rx8_semantics_alloc_tests.exe"
 $rx9Test = Join-Path $buildDirectory "rexx_rx9_condition_tests.exe"
 $rx10Test = Join-Path $buildDirectory "rexx_rx10_interpret_tests.exe"
 $rx12Test = Join-Path $buildDirectory "rexx_rx12_builtins_tests.exe"
+$rx13Test = Join-Path $buildDirectory "rexx_rx13_string_editing_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -198,6 +203,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX12 built-in test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX13 string editing and word utility assertions"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx13_string_editing_test.c") `
+    @commonSources -lm -o $rx13Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX13 string editing test build failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Building RX2 C++ shell bridge integration tests"
 & $gxxCommand.Source -std=c++14 -Wall -Wextra -Wpedantic -Werror `
     (Join-Path $PSScriptRoot "rexx_rx2_shell_bridge_test.cpp") `
@@ -208,7 +222,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX2 shell bridge integration test build failed with exit code $LASTEXITCODE."
 }
 
-Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-builds' | Out-Null
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-builds' -Phase $Phase | Out-Null
 
 Write-Host "Running hosted runtime assertions"
 & $runtimeTest
@@ -294,13 +308,19 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX12 built-in assertions failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Running RX13 string editing and word utility assertions"
+& $rx13Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX13 string editing assertions failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Running RX2 shell bridge assertions"
 & $rx2ShellBridgeTest
 if ($LASTEXITCODE -ne 0) {
     throw "RX2 shell bridge assertions failed with exit code $LASTEXITCODE."
 }
 
-Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-c-assertions' | Out-Null
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-c-assertions' -Phase $Phase | Out-Null
 
 $script:cliPassed = 0
 $script:reginaPassed = 0
@@ -830,6 +850,32 @@ foreach ($fixture in Get-ChildItem -LiteralPath $rx12FixtureDirectory -Filter "*
     Write-Host "[PASS] RX12 fixture $($fixture.Name)"
 }
 
+$rx13FixtureDirectory = Join-Path $PSScriptRoot "rexx_compat\cases\string_editing"
+$script:rx13FixturePassed = 0
+foreach ($fixture in Get-ChildItem -LiteralPath $rx13FixtureDirectory -Filter "*.rex" | Sort-Object Name) {
+    $diagnosticPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".diag")
+    $outputPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".out")
+    $actual = Invoke-CapturedProcess $cliTest @($fixture.FullName)
+    $actualText = (($actual.Stdout + $actual.Stderr) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if (Test-Path -LiteralPath $diagnosticPath) {
+        $expectedDiagnostic = (Get-Content -Raw -LiteralPath $diagnosticPath).Trim()
+        if ($actual.ExitCode -ne 1 -or $actual.Stdout.Length -ne 0 -or -not $actualText.Contains($expectedDiagnostic)) {
+            throw "RX13 fixture $($fixture.Name) failed its expected diagnostic. Exit=$($actual.ExitCode) Output=$actualText"
+        }
+    } else {
+        if (-not (Test-Path -LiteralPath $outputPath)) {
+            throw "RX13 fixture $($fixture.Name) has no .out expectation."
+        }
+        $expectedOutput = ((Get-Content -Raw -LiteralPath $outputPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        $stdoutText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+        if ($actual.ExitCode -ne 0 -or $stdoutText -cne $expectedOutput -or $actual.Stderr.Length -ne 0) {
+            throw "RX13 fixture $($fixture.Name) output mismatch. Expected '$expectedOutput'; got '$actualText'/$($actual.ExitCode)."
+        }
+    }
+    ++$script:rx13FixturePassed
+    Write-Host "[PASS] RX13 fixture $($fixture.Name)"
+}
+
 $parserLimitPath = Join-Path $buildDirectory "parse_template_node_limit.rex"
 $parserLimitSource = "parse value '' with " + ((@('.') * 65540) -join ' ')
 [System.IO.File]::WriteAllText(
@@ -884,11 +930,11 @@ if ($limitExit -ne 1 -or
 $script:cliPassed++
 Write-Host "[PASS] CLI source-size memory limit"
 
-Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-fixtures' | Out-Null
-$durablePreservation = Join-Path $rootDir ("docs\rexx\evidence\rx12r1\preservation\hosted-$runId")
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-fixtures' -Phase $Phase | Out-Null
+$durablePreservation = Join-Path $rootDir ("docs\rexx\evidence\$($Phase.ToLowerInvariant())\preservation\hosted-$runId")
 New-Item -ItemType Directory -Path $durablePreservation -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $runRoot 'preservation') -Destination (Join-Path $durablePreservation 'reports') -Recurse
-Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-final' | Out-Null
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-final' -Phase $Phase | Out-Null
 
 $regina = $script:reginaCommand
 if ($null -eq $regina) {
@@ -901,6 +947,7 @@ Write-Host "Hosted CLI cases passed: $script:cliPassed/$script:cliPassed"
 Write-Host "RX9 condition fixtures passed: $script:rx9Passed/$script:rx9Passed"
 Write-Host "RX10 INTERPRET fixtures passed: $script:rx10Passed/$script:rx10Passed"
 Write-Host "RX12 classic built-in fixtures passed: $script:rx12FixturePassed/$script:rx12FixturePassed"
+Write-Host "RX13 string editing fixtures passed: $script:rx13FixturePassed/$script:rx13FixturePassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"
 Write-Host "RX5 compatibility fixtures passed: $script:rx5Passed/$script:rx5Passed"

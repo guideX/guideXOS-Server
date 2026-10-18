@@ -1,0 +1,14 @@
+[2026-10-18T04:33:58.3816939Z] rexx /rx13-string-builtins.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\screenshots-raw\rx13-01-string-builtins.ppm
+[2026-10-18T04:34:07.4168175Z] rexx /rx13-word-utilities.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\screenshots-raw\rx13-02-word-utilities.ppm
+[2026-10-18T04:34:16.7867194Z] rexx /rx13-syntax-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\screenshots-raw\rx13-03-syntax-recovery.ppm
+[2026-10-18T04:34:26.3976717Z] rexx /rx13-oversized-output.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\screenshots-raw\rx13-04-resource-recovery.ppm
+[2026-10-18T04:34:34.8257357Z] rexx /rx13-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\screenshots-raw\rx13-05-post-error-command.ppm
+[2026-10-18T04:34:44.0733502Z] rexx /rx13-exit-status.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\screenshots-raw\rx13-06-exit-status-script.ppm
+[2026-10-18T04:34:51.0226688Z] echo $?
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx13\qemu-78b4c4f23377400493d5e48b095f24ed\screenshots-raw\rx13-07-exit-status-check.ppm

@@ -1,0 +1,5 @@
+RX13 artifact preservation: PASS
+Stage: hosted-c-assertions
+Verified UTC: 2026-10-18T04:45:03.4592060Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

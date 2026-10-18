@@ -1,0 +1,5 @@
+RX13 artifact preservation: PASS
+Stage: preflight
+Verified UTC: 2026-10-18T04:43:22.3075956Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

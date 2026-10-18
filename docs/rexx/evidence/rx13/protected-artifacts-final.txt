@@ -1,0 +1,10 @@
+RX13 protected-artifact final comparison: PASS
+Verified UTC: 2026-10-18T04:48:16.490257+00:00
+Branch: REXX_SUPPORT
+Head at verification: d3dec615a8ed2df59342769970f19dcdc1d9a803
+Root .phase present: False
+Artifacts matched RX13 start manifest: 31/31
+Artifacts matched RX12R1 baseline: 31/31
+Missing/unexpected/start hash mismatch counts: 0/0/0
+Protected untracked files: 28/28
+Historical baseline caveat: RX12R1 post-incident current baseline; these hashes do not represent unavailable pre-RX12 bytes

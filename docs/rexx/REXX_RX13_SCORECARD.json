@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "phase": "RX13",
+  "qualification_status": "Outcome A - RX13 accepted",
+  "repository": {
+    "branch": "REXX_SUPPORT",
+    "starting_head": "d3dec615a8ed2df59342769970f19dcdc1d9a803",
+    "head_at_final_artifact_verification": "d3dec615a8ed2df59342769970f19dcdc1d9a803",
+    "root_phase_file": "absent",
+    "local_commit": true,
+    "pushed": false
+  },
+  "historical_snapshots": {
+    "rx12_inventory": "REXX_RX12_BUILTIN_INVENTORY.csv",
+    "rx12_scorecard": "REXX_RX12_SCORECARD.json",
+    "rx12r1_artifact_incident": "evidence/rx12r1/protected-artifacts-baseline.json",
+    "incident_note": "The preserved RX12R1 post-incident baseline is current-state evidence; it does not restore or claim pre-RX12 bytes."
+  },
+  "rx13_implementation": {
+    "new_bifs": [
+      "LEFT",
+      "RIGHT",
+      "INSERT",
+      "OVERLAY",
+      "DELSTR",
+      "DELWORD",
+      "SUBWORD",
+      "WORDINDEX",
+      "WORDLENGTH",
+      "LASTPOS"
+    ],
+    "direct_assertions": 418,
+    "direct_function_cases": 116,
+    "argument_error_cases": 32,
+    "allocation_failure_bifs_exercised": 10,
+    "fixture_count": 33,
+    "max_builtin_result_length_bytes": 16777216,
+    "numeric_index_limit": "exact nonnegative decimal integer up to uint32; positive where required",
+    "case_counts_by_function": {
+      "LEFT": 10,
+      "RIGHT": 10,
+      "INSERT": 15,
+      "OVERLAY": 14,
+      "DELSTR": 13,
+      "DELWORD": 13,
+      "SUBWORD": 12,
+      "WORDINDEX": 8,
+      "WORDLENGTH": 8,
+      "LASTPOS": 13
+    },
+    "insert_default_position": 0,
+    "overlay_default_position": 1,
+    "shared_word_scanner": "Bounded byte scanner; ASCII space and HT through CR delimit words; internal bytes between selected words are retained.",
+    "condition_trap_and_interpret": "PASS"
+  },
+  "hosted_regressions": {
+    "all_passed": true,
+    "suite_fixture_counts": {
+      "cli": 20,
+      "rx3_fixtures": 13,
+      "rx4_fixtures": 11,
+      "rx5_fixtures": 13,
+      "rx6_fixtures": 25,
+      "rx7_fixtures": 33,
+      "rx8_fixtures": 26,
+      "rx9_fixtures": 24,
+      "rx10_fixtures": 19,
+      "rx12_fixtures": 30,
+      "rx13_fixtures": 33
+    },
+    "c_assertions": {
+      "rx2_vfs_output": 45,
+      "rx2_freestanding_numeric": 18,
+      "rx3_decimal": 26,
+      "rx3_allocator_failure": 570,
+      "rx4_arithmetic": 53,
+      "rx5_numeric_context": 35,
+      "rx6_parse_allocator_failure": 439,
+      "rx7_routine": 13,
+      "rx7_parser_compiler_vm_allocation": {
+        "parser": 46,
+        "compiler": 28,
+        "vm": 111
+      },
+      "rx8_semantics_allocation_recovery": 279,
+      "rx8_parser_compiler_vm_allocation": {
+        "parser": 38,
+        "compiler": 21,
+        "vm": 50
+      },
+      "rx9_conditions": 467,
+      "rx9_parser_compiler_vm_allocation": {
+        "parser": 41,
+        "compiler": 37,
+        "vm": 78
+      },
+      "rx10_interpret": 257,
+      "rx10_allocation_failpoints": {
+        "nested_vm": 33,
+        "syntax_vm": 14,
+        "parser": 8,
+        "compiler": 11
+      },
+      "rx12_bifs": 320,
+      "rx13_bifs": 418,
+      "rx2_shell_bridge": 7
+    },
+    "artifact_guard_stages": [
+      "hosted-builds",
+      "hosted-c-assertions",
+      "hosted-fixtures",
+      "hosted-final"
+    ]
+  },
+  "sanitizers": {
+    "address": {
+      "status": "PASS",
+      "compiler": "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for x64",
+      "run_id": "sanitizer-address-0457061232f24644b28ac2ed0b90641f",
+      "executables": 15,
+      "corpus_cases": 141,
+      "guideXOS_expected_exit": 141,
+      "Regina": {
+        "NOT_RUN": 141
+      },
+      "findings": 0
+    },
+    "undefined_behavior": {
+      "status": "PASS",
+      "compiler": "clang version 22.1.8 (https://github.com/llvm/llvm-project ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)",
+      "run_id": "sanitizer-undefined-714d727fd12244da931215e97fb44723",
+      "executables": 15,
+      "corpus_cases": 141,
+      "guideXOS_expected_exit": 141,
+      "Regina": {
+        "NOT_RUN": 141
+      },
+      "findings": 0
+    }
+  },
+  "reference_comparison": {
+    "interpreter": "Regina REXX",
+    "available": false,
+    "portable_corpus_cases": 141,
+    "guideXOS_expected_exit": 141,
+    "Regina_not_run": 141,
+    "compatibility_percentage": "not reported"
+  },
+  "native_build": {
+    "status": "PASS",
+    "architecture": "AMD64",
+    "freestanding": true,
+    "rexx_c_translation_units": 9,
+    "rexx_c_objects": [
+      "rexx_builtin.o",
+      "rexx_cli.o",
+      "rexx_compiler.o",
+      "rexx_lexer.o",
+      "rexx_numeric.o",
+      "rexx_os_io.o",
+      "rexx_output.o",
+      "rexx_parser.o",
+      "rexx_vm.o"
+    ],
+    "kernel_elf_sha256": "56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95",
+    "kernel_pe_sha256": "d5d97e9f44a859df79c5fa513e8c915c9d30e3e557e6c10d6aa375fa2c60775c",
+    "output_root": "build/rexx/rx13/native-amd64-ac2a66e250084abd97de33022bf6b2a1",
+    "output_audit": "evidence/rx13/native-build/output-audit-ac2a66e250084abd97de33022bf6b2a1.json",
+    "link_evidence": "evidence/rx13/native-build/native-link-evidence-ac2a66e250084abd97de33022bf6b2a1.json"
+  },
+  "native_guest": {
+    "status": "PASS",
+    "run_id": "run-78b4c4f23377400493d5e48b095f24ed",
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "kernel_sha256": "56c5137b4450cadcb8ca906dadecf4e6d5888773c3fc7e54c47bb0aa6a792b95",
+    "network_disabled": true,
+    "production_media_used": false,
+    "commands": 7,
+    "screenshots": 7,
+    "syntax_recovery": true,
+    "resource_limit_rejection": true,
+    "post_error_guest_recovery": true,
+    "exit_status_check": 23,
+    "heartbeat_records_before_after": [
+      1,
+      62
+    ],
+    "qmp_shutdown_acknowledged": true,
+    "owned_qemu_pid": 2880,
+    "evidence_directory": "evidence/rx13/native-guest/run-78b4c4f23377400493d5e48b095f24ed"
+  },
+  "root_artifact_preservation": {
+    "status": "PASS",
+    "protected_artifacts": 31,
+    "protected_untracked": 28,
+    "matched_rx13_start_manifest": 31,
+    "matched_rx12r1_baseline": 31,
+    "root_phase_file_absent": true,
+    "final_evidence": "evidence/rx13/protected-artifacts-final.json",
+    "historical_incident_preserved": true
+  },
+  "built_in_inventory": {
+    "file": "REXX_RX13_BUILTIN_INVENTORY.csv",
+    "total_rows": 75,
+    "classic_saa_candidates": 67,
+    "implemented_before_rx13": 17,
+    "implemented_after_rx13": 27,
+    "unimplemented_classic_candidates": 40,
+    "ibm_tsoe_non_saa_candidates": 6,
+    "regina_extension_set": "Not assessed",
+    "future_guidexos_functions": "None proposed; classic namespace unchanged."
+  },
+  "remaining_limits": [
+    "Regina was unavailable, so independent differential compatibility remains NOT_RUN for all 141 portable corpus cases.",
+    "The shared byte-oriented word scanner treats ASCII space and HT through CR as separators; multibyte character indexing is outside this implementation.",
+    "The RX12R1 post-incident root artifact baseline is not a recovery of the unavailable pre-RX12 bytes.",
+    "Forty listed classic/SAA built-in candidates remain unimplemented; six TSO/E functions remain a separate non-SAA category."
+  ],
+  "recommended_rx14_direction": "Audit and implement the portable conversion BIF family (C2D, C2X, D2C, D2X, X2C, X2D, B2X, X2B) with exact byte and numeric-boundary fixtures.",
+  "qualification_evidence": {
+    "hosted_log": "evidence/rx13/hosted-final-92ca8692368a45ebbee5a9967f6f1cd0.log",
+    "sanitizer_summary": "evidence/rx13/sanitizers-summary.json",
+    "native_guest_transcript": "evidence/rx13/native-guest/run-78b4c4f23377400493d5e48b095f24ed/console-transcript.txt",
+    "artifact_final_comparison": "evidence/rx13/protected-artifacts-final.json"
+  }
+}

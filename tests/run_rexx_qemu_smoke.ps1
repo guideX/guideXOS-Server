@@ -1,4 +1,6 @@
 param(
+    [ValidateSet('RX12R1','RX13')]
+    [string]$Phase = 'RX12R1',
     [Parameter(Mandatory)][string]$KernelPath,
     [string]$SourceEsp = 'C:\Users\guideX\.codex\rx12-native-guest\esp',
     [string]$FirmwarePath = 'C:\Users\guideX\.codex\rx12-native-guest\firmware-code.fd'
@@ -7,7 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
-    throw 'RX12R1 QEMU qualification requires branch REXX_SUPPORT.'
+    throw "$Phase QEMU qualification requires branch REXX_SUPPORT."
 }
 $guardManifest = Join-Path $rootDir 'docs\rexx\evidence\rx12r1\protected-artifacts-baseline.json'
 Import-Module -Name (Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1') -Force
@@ -24,12 +26,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $SourceEsp 'EFI\BOOT\BOOTX64.EFI')) 
 }
 
 $runId = [Guid]::NewGuid().ToString('N')
-$runRoot = Join-Path $rootDir "build\rexx\rx12r1\qemu-$runId"
+$runRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())\qemu-$runId"
 $workDir = Join-Path $runRoot 'temp'
 $guestRoot = Join-Path $runRoot 'guest'
 $guestEsp = Join-Path $guestRoot 'esp'
 $stagedFirmware = Join-Path $guestRoot 'firmware-code.fd'
 $helperRoot = Join-Path $runRoot 'helper'
+$helperName = if ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
 $serialPath = Join-Path $runRoot 'serial.log'
 $qemuStdoutPath = Join-Path $runRoot 'qemu.stdout.log'
 $qemuStderrPath = Join-Path $runRoot 'qemu.stderr.log'
@@ -38,24 +41,48 @@ $ownerPath = Join-Path $helperRoot 'qemu-owner.json'
 $rawCaptureDir = Join-Path $runRoot 'screenshots-raw'
 $plannedOutputs = @(
     $serialPath,$qemuStdoutPath,$qemuStderrPath,$qemuLogPath,$ownerPath,
-    $stagedFirmware,(Join-Path $helperRoot 'type_rx12_guest_command.ps1'),
+    $stagedFirmware,(Join-Path $helperRoot $helperName),
     (Join-Path $helperRoot 'ppm_to_png.py'),(Join-Path $helperRoot 'qemu-shutdown.json')
 )
+if ($Phase -eq 'RX13') {
+    $plannedOutputs += @(
+        (Join-Path $guestEsp 'rx13-string-builtins.rex'),
+        (Join-Path $guestEsp 'rx13-word-utilities.rex'),
+        (Join-Path $guestEsp 'rx13-syntax-recovery.rex'),
+        (Join-Path $guestEsp 'rx13-oversized-output.rex'),
+        (Join-Path $guestEsp 'rx13-recovery.rex'),
+        (Join-Path $guestEsp 'rx13-exit-status.rex')
+    )
+}
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
-    -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs
+    -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs -Phase $Phase
 $env:TEMP = $workDir
 $env:TMP = $workDir
 $env:TMPDIR = $workDir
 New-Item -ItemType Directory -Path $guestRoot,$helperRoot,$rawCaptureDir | Out-Null
 
-$evidenceRoot = Join-Path $rootDir "docs\rexx\evidence\rx12r1\native-guest\run-$runId"
+$evidenceRoot = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\native-guest\run-$runId"
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
-$helperSource = Join-Path $rootDir 'docs\rexx\evidence\rx12\native-guest'
+$helperSource = if ($Phase -eq 'RX13') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx13\native-guest'
+} else {
+    Join-Path $rootDir 'docs\rexx\evidence\rx12\native-guest'
+}
 Copy-Item -LiteralPath $SourceEsp -Destination $guestEsp -Recurse
 Copy-Item -LiteralPath $FirmwarePath -Destination $stagedFirmware
-Copy-Item -LiteralPath (Join-Path $helperSource 'type_rx12_guest_command.ps1') -Destination $helperRoot
+Copy-Item -LiteralPath (Join-Path $helperSource $helperName) -Destination $helperRoot
 Copy-Item -LiteralPath (Join-Path $helperSource 'ppm_to_png.py') -Destination $helperRoot
 Copy-Item -LiteralPath $KernelPath -Destination (Join-Path $guestEsp 'kernel.elf') -Force
+$rx13ScriptNames = @()
+if ($Phase -eq 'RX13') {
+    $rx13Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx13\native-guest\scripts'
+    $rx13ScriptFiles = @(Get-ChildItem -LiteralPath $rx13Scripts -Filter 'rx13-*.rex' -File | Sort-Object Name)
+    if ($rx13ScriptFiles.Count -ne 6) { throw "Expected six reviewed RX13 native guest scripts; found $($rx13ScriptFiles.Count)." }
+    foreach ($scriptFile in $rx13ScriptFiles) {
+        Copy-Item -LiteralPath $scriptFile.FullName -Destination (Join-Path $guestEsp $scriptFile.Name)
+        $rx13ScriptNames += $scriptFile.Name
+    }
+}
 
 function Get-QemuCensus {
     $items = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'" -ErrorAction SilentlyContinue)
@@ -172,20 +199,33 @@ try {
     if (-not $booted) { throw "Isolated QEMU guest did not reach a kernel heartbeat within 180 seconds. Serial: $serialPath" }
     $heartbeatCountBefore = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
 
-    $helper = Join-Path $helperRoot 'type_rx12_guest_command.ps1'
-    $commands = @(
-        [PSCustomObject]@{ name='string-builtins'; text='rexx /rx12-string-builtins.rex'; open_terminal=$true; expected='RX12_NATIVE_STRINGS_DONE' },
-        [PSCustomObject]@{ name='arg-omissions'; text='rexx /rx12-arg.rex'; open_console=$false; expected='RX12_NATIVE_ARG_DONE' },
-        [PSCustomObject]@{ name='syntax-recovery'; text='rexx /rx12-syntax-recovery.rex'; open_console=$false; expected='RX12_NATIVE_SYNTAX_RECOVERED: 2' },
-        [PSCustomObject]@{ name='resource-recovery'; text='rexx /rx12-oversized-output.rex'; open_console=$false; expected='VM resource limit exceeded' },
-        [PSCustomObject]@{ name='post-error-command'; text='rexx /rx12-recovery.rex'; open_console=$false; expected='RX12_NATIVE_GUEST_RESPONSIVE: 9' },
-        [PSCustomObject]@{ name='exit-status-script'; text='rexx /rx12-exit-status.rex'; open_console=$false; expected='RX12_NATIVE_EXIT_STATUS_SCRIPT' },
-        [PSCustomObject]@{ name='exit-status-check'; text='echo $?'; open_console=$false; expected='23' }
-    )
+    $helper = Join-Path $helperRoot $helperName
+    $commands = if ($Phase -eq 'RX13') {
+        @(
+            [PSCustomObject]@{ name='string-builtins'; text='rexx /rx13-string-builtins.rex'; open_terminal=$true; expected='RX13_NATIVE_STRINGS_DONE' },
+            [PSCustomObject]@{ name='word-utilities'; text='rexx /rx13-word-utilities.rex'; expected='RX13_NATIVE_WORDS_DONE' },
+            [PSCustomObject]@{ name='syntax-recovery'; text='rexx /rx13-syntax-recovery.rex'; expected='RX13_NATIVE_SYNTAX_RECOVERED: 2' },
+            [PSCustomObject]@{ name='resource-recovery'; text='rexx /rx13-oversized-output.rex'; expected='VM resource limit exceeded' },
+            [PSCustomObject]@{ name='post-error-command'; text='rexx /rx13-recovery.rex'; expected='RX13_NATIVE_GUEST_RESPONSIVE: 5' },
+            [PSCustomObject]@{ name='exit-status-script'; text='rexx /rx13-exit-status.rex'; expected='RX13_NATIVE_EXIT_STATUS_SCRIPT' },
+            [PSCustomObject]@{ name='exit-status-check'; text='echo $?'; expected='23' }
+        )
+    } else {
+        @(
+            [PSCustomObject]@{ name='string-builtins'; text='rexx /rx12-string-builtins.rex'; open_terminal=$true; expected='RX12_NATIVE_STRINGS_DONE' },
+            [PSCustomObject]@{ name='arg-omissions'; text='rexx /rx12-arg.rex'; open_console=$false; expected='RX12_NATIVE_ARG_DONE' },
+            [PSCustomObject]@{ name='syntax-recovery'; text='rexx /rx12-syntax-recovery.rex'; open_console=$false; expected='RX12_NATIVE_SYNTAX_RECOVERED: 2' },
+            [PSCustomObject]@{ name='resource-recovery'; text='rexx /rx12-oversized-output.rex'; open_console=$false; expected='VM resource limit exceeded' },
+            [PSCustomObject]@{ name='post-error-command'; text='rexx /rx12-recovery.rex'; open_console=$false; expected='RX12_NATIVE_GUEST_RESPONSIVE: 9' },
+            [PSCustomObject]@{ name='exit-status-script'; text='rexx /rx12-exit-status.rex'; open_console=$false; expected='RX12_NATIVE_EXIT_STATUS_SCRIPT' },
+            [PSCustomObject]@{ name='exit-status-check'; text='echo $?'; open_console=$false; expected='23' }
+        )
+    }
     $index = 0
     foreach ($command in $commands) {
         $index++
-        $captureName = "rx12r1-{0:D2}-{1}" -f $index,$command.name
+        $capturePrefix = if ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+        $captureName = "{0}-{1:D2}-{2}" -f $capturePrefix,$index,$command.name
         if ($command.open_terminal) {
             & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds 5 -OpenTerminal
         } else {
@@ -195,23 +235,30 @@ try {
         $null = Assert-OwnQemu -Identity $owner
     }
 
-    $screenshots = @(Get-ChildItem -LiteralPath $helperRoot -Filter 'rx12r1-*.png' -File)
+    $capturePrefix = if ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+    $screenshots = @(Get-ChildItem -LiteralPath $helperRoot -Filter "$capturePrefix-*.png" -File)
     if ($screenshots.Count -ne $commands.Count) { throw "Expected one Console screenshot per smoke command; found $($screenshots.Count) for $($commands.Count) commands." }
 
     Start-Sleep -Seconds 3
     $serial = Get-Content -Raw -LiteralPath $serialPath
     $heartbeatCountAfter = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
     if ($heartbeatCountAfter -le $heartbeatCountBefore) { throw 'Guest heartbeat did not continue during the RX12R1 smoke commands.' }
-    foreach ($scriptName in @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex')) {
+    $scriptNames = if ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
+    $serialScriptNames = if ($Phase -eq 'RX13') {
+        @($scriptNames | Where-Object { $_ -ne 'rx13-oversized-output.rex' })
+    } else {
+        $scriptNames
+    }
+    foreach ($scriptName in $serialScriptNames) {
         if (-not $serial.Contains("/" + $scriptName)) { throw "Serial log did not record guest script access: $scriptName" }
     }
-    $null = Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'qemu-smoke-guest' | Out-Null
+    $null = Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'qemu-smoke-guest' -Phase $Phase | Out-Null
 
     & $helper -QuitQemu -CommandText '' -CaptureName 'shutdown' -WaitSeconds 0
     $shutdownConfirmed = $true
     if (-not $qemuProcess.WaitForExit(30000)) { throw 'Verified QMP quit did not stop the isolated QEMU process within 30 seconds.' }
 } catch {
-    Write-Error "RX12R1 QEMU smoke stopped before completion: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+    Write-Error "$Phase QEMU smoke stopped before completion: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
     throw
 } finally {
     if ($null -ne $qemuProcess -and -not $shutdownConfirmed) {
@@ -235,11 +282,11 @@ Copy-Item -LiteralPath $qemuLogPath -Destination $evidenceRoot -ErrorAction Sile
 Copy-Item -LiteralPath $ownerPath -Destination $evidenceRoot
 Copy-Item -LiteralPath (Join-Path $helperRoot 'qemu-shutdown.json') -Destination $evidenceRoot
 Copy-Item -LiteralPath (Join-Path $helperRoot 'guest-commands.log') -Destination $evidenceRoot
-Get-ChildItem -LiteralPath $helperRoot -Filter 'rx12r1-*.png' -File | Copy-Item -Destination $evidenceRoot
+Get-ChildItem -LiteralPath $helperRoot -Filter "$capturePrefix-*.png" -File | Copy-Item -Destination $evidenceRoot
 
 $transcriptPath = Join-Path $evidenceRoot 'console-transcript.txt'
 $transcriptLines = [System.Collections.Generic.List[string]]::new()
-$transcriptLines.Add('RX12R1 isolated QEMU Console transcript')
+$transcriptLines.Add("$Phase isolated QEMU Console transcript")
 $transcriptLines.Add("Kernel SHA-256: $kernelHash")
 $transcriptLines.Add("Network: disabled (-net none); disposable ESP: $guestEsp")
 foreach ($command in $commands) { $transcriptLines.Add("COMMAND: $($command.text) | expected visible marker/status: $($command.expected)") }
@@ -248,7 +295,7 @@ $transcriptLines.Add('The per-command QMP screenshots are the visual evidence fo
 [System.IO.File]::WriteAllLines($transcriptPath,$transcriptLines,[System.Text.UTF8Encoding]::new($false))
 
 $smokeResult = [PSCustomObject]@{
-    schema = 'guidexos.rexx.rx12r1.qemu-smoke.v1'
+    schema = "guidexos.rexx.$($Phase.ToLowerInvariant()).qemu-smoke.v1"
     completed_at_utc = [DateTime]::UtcNow.ToString('o')
     passed = $true
     qemu_version = $invocation.version
@@ -257,14 +304,14 @@ $smokeResult = [PSCustomObject]@{
     network_disabled = $true
     copied_disposable_media = $true
     production_media_used = $false
-    script_accesses_in_serial = @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex')
+    script_accesses_in_serial = $serialScriptNames
     heartbeat_count_before_suite = $heartbeatCountBefore
     heartbeat_count_after_suite = $heartbeatCountAfter
     qmp_shutdown_acknowledged = $shutdownConfirmed
     evidence_directory = $evidenceRoot
 }
 $smokeResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidenceRoot 'qemu-smoke-result.json') -Encoding utf8
-Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'qemu-smoke-final' | Out-Null
+Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'qemu-smoke-final' -Phase $Phase | Out-Null
 $preservationEvidence = Join-Path $evidenceRoot 'preservation'
 New-Item -ItemType Directory -Path $preservationEvidence | Out-Null
 Copy-Item -LiteralPath (Join-Path $runRoot 'preservation') -Destination $preservationEvidence -Recurse

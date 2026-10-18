@@ -1,0 +1,7 @@
+Method invocation failed because [System.IO.Path] does not contain a method named 'GetRelativePath'.
+At D:\dev\guideXOSServer_REXX\tests\run_rexx_native_qualification.ps1:74 char:5
++     $relative = [System.IO.Path]::GetRelativePath((Join-Path $rootDir ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MethodNotFound
+ 
