@@ -30,6 +30,8 @@ Write-Host "  Build probe ID: GXOS-LFPASTE-20260726-02" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
+Import-Module -Name (Join-Path $RootDir 'scripts\release-build-integrity.psm1') -Force
+$DeveloperStudioSignedOffIdentity = Get-DeveloperStudioSignedOffIdentity
 $ProcessEnvironmentScript = Join-Path $RootDir "scripts\process_environment.ps1"
 . $ProcessEnvironmentScript
 Normalize-ProcessEnvironment
@@ -42,6 +44,68 @@ $DiskDir = Join-Path $RootDir "disks"
 $KernelBuildSkipped = $false
 $WallpaperRuntimeImageBuilt = $false
 $SkipWallpaperRuntimeImageBuild = $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD -eq "1"
+$BuildId = if ([string]::IsNullOrWhiteSpace($env:GXOS_RELEASE_BUILD_ID)) {
+    [Guid]::NewGuid().ToString('D')
+} else {
+    try { [Guid]::Parse($env:GXOS_RELEASE_BUILD_ID).ToString('D') } catch { throw "ERROR: GXOS_RELEASE_BUILD_ID is not a valid GUID." }
+}
+$sourceCommitOutput = & git -C $RootDir rev-parse HEAD 2>$null
+$sourceCommitExitCode = $LASTEXITCODE
+if ($sourceCommitExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($sourceCommitOutput)) {
+    throw "ERROR: Could not record the source Git commit for this build."
+}
+$BuildSourceCommit = ([string]$sourceCommitOutput).Trim()
+$BuildStartedAtUtc = [DateTime]::UtcNow.ToString('o')
+$BuildIdentityPath = Join-Path $ESPDir "build-identity.txt"
+$script:BuildIdentity = [ordered]@{
+    schemaVersion = '2'
+    buildId = $BuildId
+    buildStatus = 'in_progress'
+    sourceCommit = $BuildSourceCommit
+    architecture = $Arch
+    startedAtUtc = $BuildStartedAtUtc
+    identity = 'GXOS-LARGE-FILE-PASTE-TRACE-V1'
+    probe = 'GXOS-LFPASTE-20260726-02'
+    imageKind = 'ESP-directory-used-as-QEMU-FAT-media'
+    'stage.bootloader' = 'pending'
+    'stage.kernel' = 'pending'
+    'stage.symbolAudit' = 'pending'
+    'stage.ramdisk' = 'pending'
+    'stage.pacman' = 'pending'
+    'stage.developerStudio' = 'pending'
+    'stage.appPackages' = 'pending'
+}
+
+function Write-BuildIdentity {
+    if (!(Test-Path -LiteralPath $ESPDir -PathType Container)) { return }
+    $temporaryIdentityPath = "$BuildIdentityPath.tmp"
+    $identityLines = @($script:BuildIdentity.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
+    [IO.File]::WriteAllLines($temporaryIdentityPath, $identityLines, [Text.Encoding]::ASCII)
+    Move-Item -LiteralPath $temporaryIdentityPath -Destination $BuildIdentityPath -Force
+}
+
+function Set-BuildIdentityValue([string]$Key, [string]$Value) {
+    $script:BuildIdentity[$Key] = $Value
+    Write-BuildIdentity
+}
+
+function Set-BuildArtifact([string]$Name, [string]$RelativePath) {
+    $path = Join-Path $ESPDir ($RelativePath.Replace('/', '\'))
+    if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "ERROR: Required staged artifact is missing: $RelativePath" }
+    $item = Get-Item -LiteralPath $path
+    $prefix = "artifact.$Name"
+    $script:BuildIdentity["$prefix.path"] = $RelativePath.Replace('\', '/')
+    $script:BuildIdentity["$prefix.bytes"] = [string]$item.Length
+    $script:BuildIdentity["$prefix.sha256"] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-BuildIdentity
+}
+
+function Fail-Build([string]$Message, [string]$Stage) {
+    if ($Stage) { $script:BuildIdentity["stage.$Stage"] = 'failed' }
+    $script:BuildIdentity['buildStatus'] = 'failed'
+    Write-BuildIdentity
+    throw "ERROR: $Message"
+}
 
 function Build-WallpaperRuntimeImage {
     if ($script:WallpaperRuntimeImageBuilt) {
@@ -53,6 +117,8 @@ function Build-WallpaperRuntimeImage {
         if (Test-Path $Ramdisk) {
             Write-Host "      Reusing existing wallpaper runtime image..." -ForegroundColor DarkGray
             $script:WallpaperRuntimeImageBuilt = $true
+            Set-BuildIdentityValue 'stage.ramdisk' 'skipped'
+            Set-BuildIdentityValue 'ramdiskDisposition' 'reused-existing-output'
             return
         }
     }
@@ -66,17 +132,47 @@ function Build-WallpaperRuntimeImage {
     if (Test-Path $WallpaperPackScript) {
         Write-Host "      Building wallpaper filesystem image..." -ForegroundColor Cyan
         $smokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1"
+        $runtimeStageRoot = Join-Path $RootDir ("out\build-staging\" + $BuildId)
+        $wallpaperOutputDir = Join-Path $runtimeStageRoot 'wallpaper-pack'
+        $stagedRamdisk = Join-Path $runtimeStageRoot 'ramdisk.img'
+        New-Item -ItemType Directory -Path $runtimeStageRoot -Force | Out-Null
+        $nativePackageDirs = @((Join-Path $ESPDir "Apps\PacMan"), (Join-Path $ESPDir "Apps\DeveloperStudio"))
         if ($smokeCaFixture) {
-            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDirs @((Join-Path $RootDir "Apps\PacMan"), (Join-Path $RootDir "Apps\DeveloperStudio")) -SmokeCaFixture
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir $wallpaperOutputDir -OutputImage $stagedRamdisk -NativePackageDirs $nativePackageDirs -SmokeCaFixture
         } else {
-            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDirs @((Join-Path $RootDir "Apps\PacMan"), (Join-Path $RootDir "Apps\DeveloperStudio"))
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir $wallpaperOutputDir -OutputImage $stagedRamdisk -NativePackageDirs $nativePackageDirs
         }
+        if (!(Test-Path -LiteralPath $stagedRamdisk -PathType Leaf) -or (Get-Item -LiteralPath $stagedRamdisk).Length -le 0) {
+            Fail-Build 'wallpaper runtime packer reported completion but produced no ramdisk image.' 'ramdisk'
+        }
+        foreach ($packageName in @('PacMan', 'DeveloperStudio')) {
+            $stagedRoot = Join-Path $ESPDir "Apps\$packageName"
+            $runtimeRoot = Join-Path (Join-Path $wallpaperOutputDir 'Apps') $packageName
+            if (!(Test-Path -LiteralPath $runtimeRoot -PathType Container)) {
+                Fail-Build "runtime image staging is missing /Apps/$packageName." 'ramdisk'
+            }
+            $sourceFiles = @(Get-ChildItem -LiteralPath $stagedRoot -Recurse -File | Sort-Object FullName)
+            $runtimeFiles = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -File | Sort-Object FullName)
+            if ($sourceFiles.Count -ne $runtimeFiles.Count) {
+                Fail-Build "runtime /Apps/$packageName file count differs from the verified ESP package." 'ramdisk'
+            }
+            foreach ($sourceFile in $sourceFiles) {
+                $relative = $sourceFile.FullName.Substring($stagedRoot.Length + 1)
+                $runtimeFile = Join-Path $runtimeRoot $relative
+                if (!(Test-Path -LiteralPath $runtimeFile -PathType Leaf) -or
+                    (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash -ne
+                    (Get-FileHash -LiteralPath $runtimeFile -Algorithm SHA256).Hash) {
+                    Fail-Build "runtime /Apps/$packageName does not match the verified ESP package at $relative." 'ramdisk'
+                }
+            }
+        }
+        Copy-Item -LiteralPath $stagedRamdisk -Destination $Ramdisk -Force
         $script:WallpaperRuntimeImageBuilt = $true
-    } elseif (!(Test-Path $Ramdisk)) {
-        $emptyRamdisk = New-Object byte[] 1048576
-        [System.IO.File]::WriteAllBytes($Ramdisk, $emptyRamdisk)
-        Write-Host "      WARNING: Wallpaper pack script missing; created empty ramdisk.img" -ForegroundColor Yellow
-        $script:WallpaperRuntimeImageBuilt = $true
+        Set-BuildIdentityValue 'ramdiskDisposition' 'built-from-verified-esp-packages'
+        Set-BuildIdentityValue 'stage.ramdisk' 'passed'
+        Set-BuildArtifact 'ramdisk' 'ramdisk.img'
+    } else {
+        Fail-Build 'wallpaper pack script is missing; an existing ramdisk cannot satisfy the required production stage.' 'ramdisk'
     }
 }
 
@@ -88,8 +184,7 @@ function Build-PacmanPackage {
 
     $pacmanBuildScript = Join-Path $RootDir "scripts\build-pacman-package.ps1"
     if (!(Test-Path -LiteralPath $pacmanBuildScript -PathType Leaf)) {
-        Write-Host "      ERROR: PacMan build script not found at: $pacmanBuildScript" -ForegroundColor Red
-        exit 1
+        throw "ERROR: PacMan build script not found at: $pacmanBuildScript"
     }
 
     $pacmanBuildArgs = @{
@@ -99,10 +194,35 @@ function Build-PacmanPackage {
     Write-Host "      Building PacMan AMD64 Native ELF package..." -ForegroundColor Cyan
     & $pacmanBuildScript @pacmanBuildArgs
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "      ERROR: PacMan Native ELF package build failed" -ForegroundColor Red
-        exit 1
+        throw "ERROR: PacMan Native ELF package build failed with exit code $LASTEXITCODE"
     }
 }
+
+function Assert-DeveloperStudioSignedOffSource {
+    $packageRoot = Join-Path $RootDir 'Apps\DeveloperStudio'
+    $manifestPath = Join-Path $packageRoot 'app.json'
+    $elfPath = Join-Path $packageRoot 'bin\amd64\developerstudio.elf'
+    $expected = $DeveloperStudioSignedOffIdentity
+
+    if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf) -or !(Test-Path -LiteralPath $elfPath -PathType Leaf)) {
+        throw 'ERROR: The required signed-off DeveloperStudio manifest or ELF is missing from Apps/DeveloperStudio.'
+    }
+    $actualManifestBytes = (Get-Item -LiteralPath $manifestPath).Length
+    $actualManifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $actualElfBytes = (Get-Item -LiteralPath $elfPath).Length
+    $actualElfHash = (Get-FileHash -LiteralPath $elfPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($actualManifestBytes -ne $expected.ManifestBytes -or $actualManifestHash -ne $expected.ManifestSha256 -or
+        $actualElfBytes -ne $expected.ElfBytes -or $actualElfHash -ne $expected.ElfSha256) {
+        throw ("ERROR: DeveloperStudio source package does not match the exact Phase 25 signed-off manifest+ELF pair. " +
+            "Current manifest=${actualManifestBytes}/$actualManifestHash, ELF=${actualElfBytes}/$actualElfHash. " +
+            'Owner acceptance is required before a different package can be included.')
+    }
+}
+
+# Check the pinned package before any build output is cleaned or replaced. The
+# current Apps tree is newer than the signed-off pair, so release integration
+# must stop until the package owner approves its exact manifest and ELF.
+Assert-DeveloperStudioSignedOffSource
 
 # Step 1: Clean if requested
 if ($Clean) {
@@ -146,12 +266,6 @@ if ($Clean) {
 
 Write-Host "[1c/6] Building PacMan Native ELF package..." -ForegroundColor Yellow
 Build-PacmanPackage
-Write-Host ""
-
-# Build the boot-time runtime filesystem after the package build so a clean
-# build cannot embed stale PacMan metadata or executable bytes in ramdisk.img.
-Write-Host "[1b/6] Building wallpaper and native-app runtime image..." -ForegroundColor Yellow
-Build-WallpaperRuntimeImage
 Write-Host ""
 
 # Step 2: Build UEFI Bootloader
@@ -403,6 +517,7 @@ $ESPEfiBootDir = Join-Path $ESPDir "EFI\BOOT"
 if (!(Test-Path $ESPEfiBootDir)) {
     New-Item -ItemType Directory -Path $ESPEfiBootDir -Force | Out-Null
 }
+Write-BuildIdentity
 
 # Copy bootloader
 $BootloaderBin = Join-Path $BootloaderDir "x64\Release\guideXOSBootLoader.exe"
@@ -410,9 +525,10 @@ if (Test-Path $BootloaderBin) {
     $TargetBootloader = Join-Path $ESPEfiBootDir "BOOTX64.EFI"
     Copy-Item $BootloaderBin $TargetBootloader -Force
     Write-Host "      Copied: BOOTX64.EFI ($(((Get-Item $TargetBootloader).Length / 1KB).ToString('0.0')) KB)" -ForegroundColor Cyan
+    Set-BuildIdentityValue 'stage.bootloader' 'passed'
+    Set-BuildArtifact 'bootloader' 'EFI/BOOT/BOOTX64.EFI'
 } else {
-    Write-Host "      ERROR: Bootloader binary not found at: $BootloaderBin" -ForegroundColor Red
-    exit 1
+    Fail-Build "Bootloader binary not found at: $BootloaderBin" 'bootloader'
 }
 
 # Copy kernel if it exists
@@ -420,6 +536,8 @@ $KernelBin = Join-Path $KernelDir "build\$Arch\bin\kernel.elf"
 if ($KernelBuildSkipped) {
     Write-Host "      WARNING: Kernel build was skipped; not copying existing kernel.elf." -ForegroundColor Yellow
     Write-Host "               Run with a working AMD64 MinGW/GNU make toolchain to update ESP." -ForegroundColor Yellow
+    Set-BuildIdentityValue 'stage.kernel' 'skipped'
+    Set-BuildIdentityValue 'stage.symbolAudit' 'skipped'
 }
 elseif (Test-Path $KernelBin) {
     $TargetKernel = Join-Path $ESPDir "kernel.elf"
@@ -432,29 +550,24 @@ elseif (Test-Path $KernelBin) {
     }
     Copy-Item $KernelBin $TargetKernel -Force
     Write-Host "      Copied: kernel.elf ($(((Get-Item $TargetKernel).Length / 1KB).ToString('0.0')) KB)" -ForegroundColor Cyan
-    $identityPath = Join-Path $ESPDir "build-identity.txt"
-    @(
-        "identity=GXOS-LARGE-FILE-PASTE-TRACE-V1"
-        "probe=GXOS-LFPASTE-20260726-02"
-        "imageKind=ESP-directory-used-as-QEMU-FAT-media"
-        "imageRoot=$ESPDir"
-        "bootloaderSource=$BootloaderBin"
-        "bootloaderSha256=$((Get-FileHash -LiteralPath $TargetBootloader -Algorithm SHA256).Hash)"
-        "kernelSource=$KernelBin"
-        "kernelSha256=$((Get-FileHash -LiteralPath $KernelBin -Algorithm SHA256).Hash)"
-        "espKernelSha256=$((Get-FileHash -LiteralPath $TargetKernel -Algorithm SHA256).Hash)"
-        "builtAtUtc=$([DateTime]::UtcNow.ToString('o'))"
-    ) | Set-Content -LiteralPath $identityPath -Encoding ascii
-    Write-Host "      Wrote: build-identity.txt" -ForegroundColor Cyan
-} else {
-    Write-Host "      WARNING: Kernel binary not found at: $KernelBin" -ForegroundColor Yellow
-    Write-Host "      ESP will boot but needs a kernel to run" -ForegroundColor Gray
-}
+    Set-BuildIdentityValue 'stage.kernel' 'passed'
+    Set-BuildArtifact 'kernel' 'kernel.elf'
 
-# Ensure the boot-time runtime filesystem image exists in ESP. The bootloader
-# loads this as ramdisk.img; the kernel mounts it at /system when a persistent
-# root exists, or at / when booting from a release ISO without one.
-Build-WallpaperRuntimeImage
+    $symbolAuditScript = Join-Path $RootDir 'scripts\audit-kernel-symbols.ps1'
+    $kernelPeBin = Join-Path $KernelDir "build\$Arch\bin\kernel.pe"
+    $kernelObjectRoot = Join-Path $KernelDir "build\$Arch\obj"
+    $kernelAuditPath = Join-Path $ESPDir 'kernel-symbol-audit.txt'
+    try {
+        if (!(Test-Path -LiteralPath $symbolAuditScript -PathType Leaf)) { throw 'symbol audit script is missing' }
+        & $symbolAuditScript -ElfPath $TargetKernel -PePath $kernelPeBin -ReportPath $kernelAuditPath -ObjectRoot $kernelObjectRoot
+        Set-BuildIdentityValue 'stage.symbolAudit' 'passed'
+        Set-BuildArtifact 'kernelSymbolAudit' 'kernel-symbol-audit.txt'
+    } catch {
+        Fail-Build "Kernel symbol audit failed: $($_.Exception.Message)" 'symbolAudit'
+    }
+} else {
+    Fail-Build "Built kernel binary not found at: $KernelBin" 'kernel'
+}
 
 # Stage the validated App Model package in the ESP root as well. The normal
 # QEMU path exposes the ESP FAT volume at /, while the release ISO uses the
@@ -462,13 +575,12 @@ Build-WallpaperRuntimeImage
 function Stage-AppModelPackages {
     $packageSpecs = @(
         @{ Name = "PacMan"; Id = "com.guidexos.pacman"; Elf = "bin\amd64\pacman.elf" },
-        @{ Name = "DeveloperStudio"; Id = "com.guidexos.developerstudio"; Elf = "bin\amd64\developerstudio.elf"; ExpectedElfBytes = 1015064; ExpectedElfHash = "5343F5DF0EDFE423542348C0AF8C9F8690CE339D197DEB4737DD05A27348CAC7" }
+        @{ Name = "DeveloperStudio"; Id = "com.guidexos.developerstudio"; Elf = "bin\amd64\developerstudio.elf"; ExpectedManifestBytes = $DeveloperStudioSignedOffIdentity.ManifestBytes; ExpectedManifestHash = $DeveloperStudioSignedOffIdentity.ManifestSha256; ExpectedElfBytes = $DeveloperStudioSignedOffIdentity.ElfBytes; ExpectedElfHash = $DeveloperStudioSignedOffIdentity.ElfSha256 }
     )
     $appsRoot = Join-Path $ESPDir "Apps"
     New-Item -ItemType Directory -Path $appsRoot -Force | Out-Null
-    $identityPath = Join-Path $ESPDir "build-identity.txt"
-
     foreach ($spec in $packageSpecs) {
+        $stageIdentityName = if ($spec.Name -eq 'DeveloperStudio') { 'developerStudio' } else { 'pacman' }
         $packageRoot = Join-Path $RootDir ("Apps\" + $spec.Name)
         $manifestPath = Join-Path $packageRoot "app.json"
         $elfPath = Join-Path $packageRoot $spec.Elf
@@ -477,8 +589,7 @@ function Stage-AppModelPackages {
             @{ Path = $elfPath; Name = "$($spec.Name) AMD64 Native ELF" }
         )) {
             if (!(Test-Path -LiteralPath $required.Path -PathType Leaf)) {
-                Write-Host "      ERROR: Missing $($required.Name): $($required.Path)" -ForegroundColor Red
-                exit 1
+                Fail-Build "Missing $($required.Name): $($required.Path)" $stageIdentityName
             }
         }
 
@@ -492,21 +603,24 @@ function Stage-AppModelPackages {
                 throw "manifest identity, kind, architecture, path, entry point, ABI, or runtime is invalid"
             }
         } catch {
-            Write-Host "      ERROR: $($spec.Name) App Model manifest validation failed: $($_.Exception.Message)" -ForegroundColor Red
-            exit 1
+            Fail-Build "$($spec.Name) App Model manifest validation failed: $($_.Exception.Message)" $stageIdentityName
+        }
+
+        $sourceManifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($spec.ExpectedManifestBytes -and
+            ((Get-Item -LiteralPath $manifestPath).Length -ne $spec.ExpectedManifestBytes -or $sourceManifestHash -ne $spec.ExpectedManifestHash)) {
+            Fail-Build 'DeveloperStudio manifest is not the exact accepted signed-off package manifest; current package acceptance is unresolved.' 'developerStudio'
         }
 
         $elfBytes = [IO.File]::ReadAllBytes($elfPath)
         if ($elfBytes.Length -lt 20 -or $elfBytes[0] -ne 0x7f -or $elfBytes[1] -ne 0x45 -or
             $elfBytes[2] -ne 0x4c -or $elfBytes[3] -ne 0x46 -or $elfBytes[4] -ne 2 -or
             $elfBytes[5] -ne 1 -or $elfBytes[18] -ne 0x3e -or $elfBytes[19] -ne 0) {
-            Write-Host "      ERROR: $($spec.Name) executable is not a little-endian AMD64 ELF64" -ForegroundColor Red
-            exit 1
+            Fail-Build "$($spec.Name) executable is not a little-endian AMD64 ELF64" $stageIdentityName
         }
         $sourceElfHash = (Get-FileHash -LiteralPath $elfPath -Algorithm SHA256).Hash.ToUpperInvariant()
         if ($spec.ExpectedElfBytes -and ($elfBytes.Length -ne $spec.ExpectedElfBytes -or $sourceElfHash -ne $spec.ExpectedElfHash)) {
-            Write-Host "      ERROR: $($spec.Name) signed-off ELF size/hash changed; refusing to stage it" -ForegroundColor Red
-            exit 1
+            Fail-Build "$($spec.Name) signed-off ELF size/hash changed; refusing to stage it" 'developerStudio'
         }
 
         $stageRoot = Join-Path $appsRoot $spec.Name
@@ -514,8 +628,7 @@ function Stage-AppModelPackages {
             $resolvedAppsRoot = (Resolve-Path -LiteralPath $appsRoot).Path.TrimEnd('\')
             $resolvedStageRoot = (Resolve-Path -LiteralPath $stageRoot).Path
             if (!$resolvedStageRoot.StartsWith($resolvedAppsRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-                Write-Host "      ERROR: refusing to remove package stage outside ESP\Apps: $resolvedStageRoot" -ForegroundColor Red
-                exit 1
+                Fail-Build "refusing to remove package stage outside ESP\Apps: $resolvedStageRoot" $stageIdentityName
             }
             Remove-Item -LiteralPath $resolvedStageRoot -Recurse -Force
         }
@@ -535,30 +648,41 @@ function Stage-AppModelPackages {
             $_.FullName.Substring($packageRoot.Length + 1).Replace('\', '/')
         } | Sort-Object)
         if ((Compare-Object $expectedFiles $actualFiles).Count -ne 0) {
-            Write-Host "      ERROR: staged $($spec.Name) package tree is not exact: $($actualFiles -join ', ')" -ForegroundColor Red
-            exit 1
+            Fail-Build "staged $($spec.Name) package tree is not exact: $($actualFiles -join ', ')" $stageIdentityName
         }
 
         $stagedElf = Join-Path $stageRoot $spec.Elf
         $stagedManifest = Join-Path $stageRoot "app.json"
         $elfHash = (Get-FileHash -LiteralPath $stagedElf -Algorithm SHA256).Hash
         $manifestHash = (Get-FileHash -LiteralPath $stagedManifest -Algorithm SHA256).Hash
+        $sourceManifestHashAfterCopy = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
+        $sourceElfHashAfterCopy = (Get-FileHash -LiteralPath $elfPath -Algorithm SHA256).Hash
+        if ($elfHash -ne $sourceElfHashAfterCopy -or $manifestHash -ne $sourceManifestHashAfterCopy) {
+            Fail-Build "staged $($spec.Name) package hashes differ from the validated source package." $stageIdentityName
+        }
         Write-Host "      Staged /Apps/$($spec.Name) App Model package ($($actualFiles -join ', '))" -ForegroundColor Green
         Write-Host "      $($spec.Name) ELF bytes=$((Get-Item -LiteralPath $stagedElf).Length) sha256=$elfHash" -ForegroundColor Cyan
         Write-Host "      $($spec.Name) manifest bytes=$((Get-Item -LiteralPath $stagedManifest).Length) sha256=$manifestHash" -ForegroundColor Cyan
-        if (Test-Path -LiteralPath $identityPath) {
-            $identityPrefix = $spec.Name.ToLowerInvariant()
-            Add-Content -LiteralPath $identityPath -Value @(
-                "${identityPrefix}PackageRoot=/Apps/$($spec.Name)"
-                "${identityPrefix}ElfSha256=$elfHash"
-                "${identityPrefix}ManifestSha256=$manifestHash"
-                "${identityPrefix}ElfBytes=$((Get-Item -LiteralPath $stagedElf).Length)"
-                "${identityPrefix}ManifestBytes=$((Get-Item -LiteralPath $stagedManifest).Length)"
-            )
-        }
+        $identityPrefix = $stageIdentityName
+        Set-BuildIdentityValue "stage.$identityPrefix" 'passed'
+        Set-BuildArtifact "$identityPrefix.manifest" "Apps/$($spec.Name)/app.json"
+        Set-BuildArtifact "$identityPrefix.elf" "Apps/$($spec.Name)/$($spec.Elf.Replace('\', '/'))"
     }
+    Set-BuildIdentityValue 'stage.appPackages' 'passed'
 }
 Stage-AppModelPackages
+
+# Build the boot-time runtime filesystem from the verified ESP package bytes.
+Build-WallpaperRuntimeImage
+
+$requiredBuildStages = @('bootloader', 'kernel', 'symbolAudit', 'ramdisk', 'pacman', 'developerStudio', 'appPackages')
+$allRequiredStagesPassed = @($requiredBuildStages | Where-Object { $script:BuildIdentity["stage.$_"] -ne 'passed' }).Count -eq 0
+if ($allRequiredStagesPassed) {
+    Set-BuildIdentityValue 'buildStatus' 'success'
+} else {
+    Set-BuildIdentityValue 'buildStatus' 'not_release_ready'
+    throw 'ERROR: One or more required production build stages were skipped or did not pass; refusing build success.'
+}
 
 Write-Host "      ESP directory ready" -ForegroundColor Green
 Write-Host ""

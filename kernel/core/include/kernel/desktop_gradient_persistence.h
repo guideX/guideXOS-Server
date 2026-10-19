@@ -9,6 +9,7 @@ namespace desktop {
 
 static const size_t kGradientConfigTextCapacity = 512u;
 static const size_t kGradientPresetIdCapacity = 96u;
+static const char kDesktopDefaultWallpaperId[] = "legacy_blue_flower";
 
 enum class GradientPersistenceStatus : uint32_t {
     Ok = 0,

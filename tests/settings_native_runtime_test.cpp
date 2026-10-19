@@ -823,6 +823,52 @@ static void testGradientConfigPersistence()
            "canonical desktop configuration exposes its current wallpaper id");
 
     GradientPersistenceResult persistence{};
+    const char* shippedDefault =
+        "version=1\r\n"
+        "wallpaperId=\r\n"
+        "backgroundScaleMode=fill\r\n"
+        "desktopThemeId=classic\r\n"
+        "taskbarPosition=bottom\r\n"
+        "showDesktopTrash=1\r\n"
+        "showDesktopThisSystem=1\r\n"
+        "showDesktopFileManager=1\r\n"
+        "showDesktopSystemSettings=0\r\n"
+        "smallLiveDesktopFolderIcons=1\r\n"
+        "autoArrangeDesktopIcons=0\r\n";
+    setTestDesktopConfig(shippedDefault);
+    const int defaultReadWriteCount = g_testConfigWriteCount;
+    expect(!readCanonicalWallpaperId(persistedId, sizeof(persistedId)) &&
+               g_testConfigWriteCount == defaultReadWriteCount &&
+               testDesktopConfigText() == shippedDefault,
+           "reading the literal empty default stays read-only and preserves its bytes");
+    const GradientPersistenceStatus defaultApplyStatus =
+        persistBuiltInBackgroundId("legacy_blue_flower", "legacy_dinos",
+                                   &persistence);
+    std::string expectedDefaultApply = shippedDefault;
+    expectedDefaultApply.replace(expectedDefaultApply.find("wallpaperId=\r\n") +
+                                     std::string("wallpaperId=").size(),
+                                 0u, "legacy_dinos");
+    expect(defaultApplyStatus == GradientPersistenceStatus::Ok &&
+               std::string(persistence.persistedId) == "legacy_dinos" &&
+               testDesktopConfigText() == expectedDefaultApply,
+           "Dinos Apply commits from the untouched shipped empty wallpaper default");
+
+    setTestDesktopConfig(shippedDefault);
+    expect(persistBuiltInBackgroundId(kDesktopDefaultWallpaperId, "gradient_ocean",
+                                      &persistence) == GradientPersistenceStatus::Ok &&
+               std::string(persistence.persistedId) == "gradient_ocean" &&
+               testDesktopConfigText().find("wallpaperId=gradient_ocean\r\n") != std::string::npos,
+           "the effective empty default also permits a valid gradient mutation");
+
+    const char* unknownStoredConfig = "version=1\r\nwallpaperId=removed_wallpaper\r\n";
+    setTestDesktopConfig(unknownStoredConfig);
+    expect(persistBuiltInBackgroundId(kDesktopDefaultWallpaperId, "legacy_dinos",
+                                      &persistence) == GradientPersistenceStatus::Conflict &&
+               g_testConfigWriteCount == 0 &&
+               testDesktopConfigText() == unknownStoredConfig,
+           "an unknown stored wallpaper remains a conflict rather than the empty default");
+
+    setTestDesktopConfig(original);
     expect(persistBuiltInGradientId("gradient_sunset", "gradient_ocean",
                                     &persistence) == GradientPersistenceStatus::Ok &&
                std::string(persistence.persistedId) == "gradient_ocean" &&
@@ -1442,6 +1488,15 @@ int main()
                (appearanceSnapshot.flags & kDesktopAppearanceIconFileManagerVisible) != 0u &&
                (appearanceSnapshot.flags & kDesktopAppearanceIconThisSystemVisible) == 0u,
            "appearance snapshot preserves wallpaper identity, scale, and each supported icon visibility");
+    expect(buildDesktopAppearanceSnapshot(
+               kernel::desktop::kDesktopDefaultWallpaperId, "Blue Flower", "fill",
+               kernel::desktop::kDesktopAppearanceBackgroundWallpaper,
+               0u, 0u, 0u, 0u, 3u, &appearanceSnapshot) == SnapshotStatus::Ok &&
+               validDesktopAppearanceSnapshot(appearanceSnapshot) &&
+               std::string(appearanceSnapshot.backgroundId) ==
+                   kernel::desktop::kDesktopDefaultWallpaperId &&
+               std::string(appearanceSnapshot.backgroundName) == "Blue Flower",
+           "provider presents the effective empty-config default as Blue Flower");
     expect(buildDesktopAppearanceSnapshot(
                "gradient_aurora", "Aurora", "fit",
                kernel::desktop::kDesktopAppearanceBackgroundGradient,

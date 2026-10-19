@@ -111,3 +111,85 @@ Evidence directory: `docs/evidence/settings-s22-v03-package-20261018/`.
 - Persistence smoke: `guest/writable/desktop.cfg.before`, `desktop.cfg.after-pending-selection`, `desktop.cfg.after-cancel`, `desktop.cfg.after-apply`, their JSON comparisons, and `applied-dinos-settings.png`.
 
 The ISO and ESP image are not committed; their exact paths and hashes are recorded in the report and manifest. The qualification report and curated evidence are committed locally on `main`; nothing was pushed.
+
+---
+
+# S22R — Default Appearance Conflict Repair and v0.3 Build Integrity
+
+**Date:** 2026-10-19
+
+**Outcome:** **B — Partial.** The shipped-default appearance conflict is repaired and covered by the native runtime regression suite. Release-stage failure propagation and artifact checks now fail closed. The 21 kernel undefined names are classified against a fresh isolated AMD64 kernel build. A fresh v0.3 production package and exact-package guest qualification could not proceed because the current DeveloperStudio source package has no matching signed-off manifest+ELF identity. Native Settings therefore remains **unqualified for v0.3 Limited/Alpha inclusion** until a release owner approves the exact package to ship and the package-level gates pass.
+
+S22R does not accept Server v0.3 as a whole, publish a release, begin S23, accept S9 or Settings 1.0, or change a sibling repository.
+
+## 1. Starting state and preserved artifacts
+
+- Repository: `D:\dev\guideXOSServer`; branch: `main`.
+- Starting HEAD: `0513a65643f98b8c78ef709dfa7d6ea771677517`; its parent is the S22 report commit `655fe1f67c1d79d2b2c97aae01dd6267609ba84f`.
+- No accepted S22R repair existed at preflight. S22 defects remained applicable.
+- The tracked worktree was clean before S22R edits. The preflight inventoried 851 pre-existing untracked paths and retained their exact status/path lists under [preflight evidence](evidence/settings-s22r-v03-package-20261019/preflight/). No unrelated path was staged or removed.
+- The original S22 ISO remains unchanged at `out/s22-v03-candidate-20261018/guideXOS-Server-v0.3.0-s22.20261018-amd64.iso`: 91,293,696 bytes, SHA-256 `b303c4c1a1cd31e500353cbd2dd7e11a8fd438b81ac9306285a6cd20ea1b1a3f`.
+- The tracked ESP contains the old signed-off ELF but a different historical manifest. The preflight verified both file hashes before and after the build check; neither ESP file was used as a new package source.
+
+## 2. Appearance failure and correction
+
+The shipped `/desktop.cfg` contains `wallpaperId=` as an intentional legacy representation of the default. Desktop loading resolves the empty value to the built-in `legacy_blue_flower` wallpaper (Blue Flower). The native Settings provider reads the desktop’s effective state and reports Blue Flower, while the persistence helper compared the expected effective ID against the literal empty stored value. That comparison returned `Conflict` on a normal Dinos Apply from the fresh default. The S22 guest had already shown Blue Flower before Apply and preserved the original 257-byte config after the failed attempt.
+
+The fix shares the Blue Flower default ID between desktop initialization/fallback and persistence. Persistence now considers the empty value equal to the expected current value only when that expected value is exactly `legacy_blue_flower`. Revision checks still run first; an explicit unknown stored ID remains a conflict. Reading the literal empty default stays byte-identical and performs no write. Desktop fallback resolves the named default from the wallpaper catalog instead of assuming array element zero.
+
+The comparison is in the shared wallpaper persistence helper. It also covers valid gradient Apply from the default because that path uses the same background ID writer. Icon visibility uses a separate persistence helper and is unaffected. Legacy Display Options continues to use the same desktop default interpretation; its repaired behavior was not rechecked in a new guest because there is no S22R ISO.
+
+Before the fix, the focused runtime test reproduced the failure: **1,422/1,423** checks passed and `Dinos Apply commits from the untouched shipped empty wallpaper default` failed. After the fix, the full affected native runtime suite passed **1,426/1,426**, including lifecycle repetitions, provider refresh cycles, configuration preservation, malformed/write/readback/rollback cases, and existing revision conflict protection. The regression log also records 100 lifecycle repetitions, 250 provider refresh cycles, and 1,000 notification/state transitions.
+
+The exact shipped default bytes and the expected unit-test bytes after changing only the wallpaper field are in [appearance evidence](evidence/settings-s22r-v03-package-20261019/appearance/). The post-Apply file is explicitly a unit-test fixture, not guest evidence. The earlier S16–S18 raw-FAT durability evidence remains historical; no crash-atomic persistence claim is made.
+
+## 3. DeveloperStudio package contract and build failure
+
+The existing Server build has a signed-off DeveloperStudio ELF hash pin, but does not pin the corresponding manifest. The Phase 25 DeveloperStudio release record identifies the accepted pair as:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Phase 25 `app.json` | 1,112 | `d59c12267d360c4e31b70dec7f9c1b0689fb5816011d681b38ee9cdef0d2f53b` |
+| Phase 25 AMD64 ELF | 1,015,064 | `5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7` |
+
+The Phase 25 status document prints a 63-hex-character manifest digest, which is not a complete SHA-256 value. The manifest blob in the paired Server commit `fb71e36c77866cdabf20873e6ad3de0ddc3bbe02` is 1,112 bytes; its exact bytes independently hash to the 64-character value above. S22R pins those verified bytes and records the transcription discrepancy.
+
+The current `Apps/DeveloperStudio` package is a legitimate later source change but has no matching release acceptance in the inspected record: its manifest is 2,011 bytes / `ab1db7c63a3dc49c06098b7a9341c33dbcf6fecbd8163460f62bcf907e7488e9`, and its ELF is 1,104,652 bytes / `f07270eacbd62f9ab67f1f38856a326981280e43d0a4d44f8ed1d17c777f01a6`. The ESP contains the old signed-off ELF but a different 1,176-byte manifest (`7af95d35f068c44f4529420922e0f4bec5f705568514688d160e2790022acb09`); that ESP directory is not the exact Phase 25 package pair and is not an authorized replacement source. Restoring its manifest into a new package would also roll back document-activation metadata without an owner decision.
+
+The S22 log proves the required DeveloperStudio stage emitted an error, then later ISO packaging proceeded with stale ESP files. The retained combined log does not identify the exact PowerShell process boundary that caused the nonzero stage result to be lost. The observable wrapper defect was that a required app-stage receipt/provenance postcondition was absent: later packaging checked for bootloader, kernel, ramdisk, and timestamps, then accepted the older app files. S22R closes that path with an early exact manifest+ELF preflight, terminating stage errors, child-output error scanning, a build-ID-bound stage receipt, exact artifact hash/size checks, and required-stage validation before ISO input enumeration.
+
+The new `build.ps1 -Arch amd64` preflight was exercised against the actual current source. It returned **exit code 1** on the DeveloperStudio mismatch before cleanup or output replacement. The original S22 ISO and existing ESP bootloader, kernel, ramdisk, and DeveloperStudio file hashes were unchanged. The ESP's old ELF plus mismatched manifest were not copied into `Apps` or a new ramdisk. A full canonical build and `create-release-iso.ps1` therefore did not run.
+
+The release integrity harness passed **13 assertions** using isolated fixtures. It rejects a required command returning nonzero, a child reporting `ERROR:` while returning zero, a missing/incomplete or earlier build receipt, wrong source/build identity, absent required files including either signed-off DeveloperStudio file, post-receipt hash mutation, and a newer unapproved DeveloperStudio pair even when its receipt matches. Its passing fixture uses the exact 1,112-byte Phase 25 manifest from paired Server commit `fb71e36c77866cdabf20873e6ad3de0ddc3bbe02` and the signed-off ELF; the historical ESP manifest is not used as the accepted fixture. The wrapper now requires a current successful receipt and records the actual DeveloperStudio hashes and kernel audit in any future release manifest.
+
+The next release step is an explicit DeveloperStudio owner decision: either qualify and accept the current manifest+ELF pair, or select the complete prior signed-off pair as the intended Server dependency, including the capability rollback decision. Until that identity and provenance are authorized, the package gate stays closed.
+
+## 4. Kernel symbol audit
+
+A fresh non-instrumented freestanding AMD64 build was produced in isolated `kernel/build/s22r-20261019/` using `mingw32-make -j2 ARCH=amd64 BUILD_DIR=build/s22r-20261019`. MinGW-W64 g++ was 15.2.0; GNU ld, nm, readelf, and objdump were Binutils 2.46.0.20260210. The build log contains 232 compiler warning lines and zero compiler/linker error lines. A subsequent no-op make returned 0. The new kernel files were not copied into ESP or packaged.
+
+The complete audit in [undefined-symbol-classification.md](evidence/settings-s22r-v03-package-20261019/kernel/undefined-symbol-classification.md) covers all 21 distinct names (45 ELF `.symtab` rows) and all 159 input objects. Nineteen strong names have final PE definitions; those COFF `UND` rows are linker-resolved table entries with no remaining relocation. `__dso_handle` is weak in its only input-object reference and maps to MinGW weak ABI guard storage. `mainCRTStartup` is absent from input-object undefined references; the custom linker script selects `_start`, making the row unused/non-loadable. The ELF has no dynamic table/segment or relocation records; the PE has no imports or COFF symbol relocations. No required unresolved production dependency remains for this exact ELF/PE/object set. This is a symbol classification, not guest boot evidence.
+
+## 5. Production package and guest qualification
+
+The full production build stopped at the DeveloperStudio source pin preflight. No new bootloader, ramdisk, package manifest, release ISO, firmware copy, QMP transcript, serial log, or screenshot was produced. The isolated kernel build is not a substitute for the full build. No QEMU process was launched, so no ownership inventory or guest smoke was needed for this attempt.
+
+Consequently, S22R does not claim a fresh ISO boot, Blue Flower guest default, Settings UI Apply, Dinos desktop change, provider guest readback, cold-boot persistence, reopen state, or legacy Display Options guest check. The historical S22 UI and legacy Control Panel results remain S22 evidence only. The exact-package QEMU gate remains open.
+
+## 6. Focused validation and evidence
+
+- Native appearance/provider runtime: **1,426/1,426 passed**; the pre-fix reproduction is also retained.
+- Build-integrity fixture harness: **13 assertions passed**.
+- Fresh normal-target freestanding AMD64 kernel ELF/PE build: passed; 232 warning lines, zero error lines. Follow-up no-op make exit code 0.
+- Undefined-symbol audit: 21/21 distinct names classified; no unexplained required unresolved symbol.
+- PowerShell parser checks for `build.ps1`, `create-release-iso.ps1`, and the new integrity scripts passed. `git diff --check` reported no whitespace errors; Git printed only configured line-ending normalization warnings.
+- Actual DeveloperStudio preflight: exit code 1, correct owner-boundary diagnostic, protected S22/ESP hashes unchanged.
+- New S22R evidence index and SHA-256 list: [README](evidence/settings-s22r-v03-package-20261019/README.md), [manifest](evidence/settings-s22r-v03-package-20261019/manifest.json), and [checksum manifest](evidence/settings-s22r-v03-package-20261019/evidence-manifest.sha256).
+
+## 7. Qualification decision and next step
+
+**Outcome B — Partial. Native Settings is not qualified for inclusion in guideXOS Server v0.3 at this checkpoint.** The repaired default-to-Dinos persistence contract passes the native runtime suite, and the build and kernel audits now fail closed or classify their findings. The exact DeveloperStudio package for a release candidate remains unapproved, so no new production package exists to boot or qualify. The required production-stage and exact-package QEMU gates remain open.
+
+After the DeveloperStudio owner approves exact manifest and ELF hashes and package provenance, rerun the canonical AMD64 build into isolated output paths. Require every receipt stage to pass, verify the package manifest and embedded App Model bytes, then boot that exact new ISO on isolated writable media and perform the default-to-Dinos Apply/readback/reopen and legacy Display Options smoke. Only after those gates pass can the component be recorded as **Native Settings — Qualified for guideXOS Server v0.3 Limited/Alpha inclusion**. This remains component-level qualification only and does not accept the whole Server release.
+
+S22R changes and curated evidence are committed locally on `main`; nothing was pushed or published. The final local commit SHA is included in the task closeout.

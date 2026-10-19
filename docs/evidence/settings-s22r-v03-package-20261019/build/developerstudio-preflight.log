@@ -1,0 +1,30 @@
+Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build.ps1 -Arch amd64
+Exit code: 1
+Owner-acceptance diagnostic present: True
+Protected ESP and original S22 ISO hashes unchanged: True
+Protected hashes:
+ESP\kernel.elf f5aa964da871dead7259d766dbaa4f67be5485af9df3afcd7812fe559eca9aef
+ESP\ramdisk.img 5c9b3c5302e72f845448688a4c57da91fd95f111946f5fca4c30e452449555fd
+ESP\EFI\BOOT\BOOTX64.EFI f93ddaa55ad52ca719ea8b925cc7cda3ffb2251c57db8b757b0a92dd6fb15ac8
+ESP\Apps\DeveloperStudio\app.json 7af95d35f068c44f4529420922e0f4bec5f705568514688d160e2790022acb09
+ESP\Apps\DeveloperStudio\bin\amd64\developerstudio.elf 5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7
+out\s22-v03-candidate-20261018\guideXOS-Server-v0.3.0-s22.20261018-amd64.iso b303c4c1a1cd31e500353cbd2dd7e11a8fd438b81ac9306285a6cd20ea1b1a3f
+Build output:
+====================================
+  guideXOS Complete Build System
+====================================
+  Build identity: GXOS-LARGE-FILE-PASTE-TRACE-V1
+  Build probe ID: GXOS-LFPASTE-20260726-02
+
+ERROR: DeveloperStudio source package does not match the exact Phase 25 signed-off manifest+ELF pair. Current
+manifest=2011/AB1DB7C63A3DC49C06098B7A9341C33DBCF6FECBD8163460F62BCF907E7488E9,
+ELF=1104652/F07270EACBD62F9AB67F1F38856A326981280E43D0A4D44F8ED1D17C777F01A6. Owner acceptance is required before a
+different package can be included.
+At D:\dev\guideXOSServer\build.ps1:216 char:9
++         throw ("ERROR: DeveloperStudio source package does not match  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (ERROR: Develope...an be included.:String) [], RuntimeException
+    + FullyQualifiedErrorId : ERROR: DeveloperStudio source package does not match the exact Phase 25 signed-off manif
+   est+ELF pair. Current manifest=2011/AB1DB7C63A3DC49C06098B7A9341C33DBCF6FECBD8163460F62BCF907E7488E9, ELF=1104652/
+  F07270EACBD62F9AB67F1F38856A326981280E43D0A4D44F8ED1D17C777F01A6. Owner acceptance is required before a different
+ package can be included.

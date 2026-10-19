@@ -18,6 +18,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module -Name (Join-Path $PSScriptRoot 'release-build-integrity.psm1') -Force
 
 $ScriptRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $ScriptRoot '..')).Path
@@ -418,7 +419,17 @@ function Invoke-CanonicalBuild {
     $buildArgs = @('-Arch', $Arch)
     if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch) }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
-    Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs) | Out-Null
+    $buildId = [Guid]::NewGuid().ToString('D')
+    $previousBuildId = $env:GXOS_RELEASE_BUILD_ID
+    try {
+        $env:GXOS_RELEASE_BUILD_ID = $buildId
+        $result = Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs)
+        Assert-ReleaseCommandCompleted -Command 'canonical build.ps1' -ExitCode $result.ExitCode -Output $result.Output
+    } finally {
+        if ($null -eq $previousBuildId) { Remove-Item Env:\GXOS_RELEASE_BUILD_ID -ErrorAction SilentlyContinue }
+        else { $env:GXOS_RELEASE_BUILD_ID = $previousBuildId }
+    }
+    return $buildId
 }
 
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
@@ -437,6 +448,7 @@ if (-not $worktreeClean) {
     Write-Host 'WARNING: worktree is dirty; the release manifest will record this and the artifact is not reproducible from HEAD alone.' -ForegroundColor Yellow
     if ($RequireCleanWorktree) { Fail 'worktree is dirty and -RequireCleanWorktree was supplied.' }
 }
+if ($SkipBuild -and -not $worktreeClean) { Fail '-SkipBuild requires a clean worktree so the ESP receipt cannot describe a different source tree.' }
 
 $artifactBase = "guideXOS-Server-v$Version-$Arch"
 $isoName = "$artifactBase.iso"
@@ -472,8 +484,22 @@ try {
     if (-not (Test-UnderRoot $WorkDirectory $ReleaseWorkRoot)) { Fail 'internal work directory escaped the approved release work root.' }
     New-Item -ItemType Directory -Path $WorkDirectory -Force | Out-Null
 
-    if (-not $SkipBuild) { Invoke-CanonicalBuild }
+    $expectedBuildId = $null
+    if (-not $SkipBuild) { $expectedBuildId = Invoke-CanonicalBuild }
+    $releaseIdentity = Assert-ReleaseBuildIdentity `
+        -IdentityPath (Join-Path $EspRoot 'build-identity.txt') `
+        -EspRoot $EspRoot `
+        -ExpectedSourceCommit $sourceCommit `
+        -ExpectedBuildId $expectedBuildId `
+        -Architecture $Arch
     $esp = Get-EspContents
+
+    $devStudioManifestRecord = @($esp.Files | Where-Object { $_.path -eq 'ESP/Apps/DeveloperStudio/app.json' }) | Select-Object -First 1
+    $devStudioElfRecord = @($esp.Files | Where-Object { $_.path -eq 'ESP/Apps/DeveloperStudio/bin/amd64/developerstudio.elf' }) | Select-Object -First 1
+    $symbolAuditRecord = @($esp.Files | Where-Object { $_.path -eq 'ESP/kernel-symbol-audit.txt' }) | Select-Object -First 1
+    if ($null -eq $devStudioManifestRecord -or $null -eq $devStudioElfRecord -or $null -eq $symbolAuditRecord) {
+        Fail 'required DeveloperStudio package records or kernel symbol audit are missing from the ESP inventory.'
+    }
 
     $bootloader = Get-Item -LiteralPath (Join-Path $EspRoot 'EFI\BOOT\BOOTX64.EFI')
     $kernel = Get-Item -LiteralPath (Join-Path $EspRoot 'kernel.elf')
@@ -576,6 +602,7 @@ try {
         architecture = $Arch
         artifactType = 'bootable-uefi-iso'
         isoBackend = $IsoBackend
+        buildMode = $(if ($SkipBuild) { 'reused-validated-ESP' } else { 'canonical-build' })
         isoFilename = $isoName
         isoByteSize = [int64]$isoInfo.Length
         sha256 = $isoHash
@@ -584,6 +611,28 @@ try {
         worktreeCleanAtPackagingStart = [bool]$worktreeClean
         worktreeStatusAtPackagingStart = @($sourceStatusLines)
         buildTimestampUtc = $PackageStartUtc.ToString('o')
+        buildIdentity = [ordered]@{
+            buildId = $releaseIdentity['buildId']
+            buildStatus = $releaseIdentity['buildStatus']
+            sourceCommit = $releaseIdentity['sourceCommit']
+            startedAtUtc = $releaseIdentity['startedAtUtc']
+            stages = [ordered]@{
+                bootloader = $releaseIdentity['stage.bootloader']
+                kernel = $releaseIdentity['stage.kernel']
+                symbolAudit = $releaseIdentity['stage.symbolAudit']
+                ramdisk = $releaseIdentity['stage.ramdisk']
+                pacman = $releaseIdentity['stage.pacman']
+                developerStudio = $releaseIdentity['stage.developerStudio']
+                appPackages = $releaseIdentity['stage.appPackages']
+            }
+        }
+        developerStudio = [ordered]@{
+            contract = 'Phase 25 signed-off package pin; manifest and ELF both exact-hash verified'
+            provenance = 'DeveloperStudio Phase 25 release-candidate record; sign-off bb66e11c38dffae21514384f73b1920b53ac64fe; paired Server commit fb71e36c77866cdabf20873e6ad3de0ddc3bbe02'
+            manifest = $devStudioManifestRecord
+            elf = $devStudioElfRecord
+        }
+        kernelSymbolAudit = $symbolAuditRecord
         requiredInputFiles = @($esp.Required)
         inputFiles = @($esp.Files)
         efiImage = [ordered]@{

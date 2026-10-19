@@ -2181,7 +2181,7 @@ struct WallpaperConfig {
           showGrid(false),
           gridColor(0xFF192337),
           gridSpacing(100),
-          wallpaperId("legacy_blue_flower"),
+          wallpaperId(kernel::desktop::kDesktopDefaultWallpaperId),
           scaleMode(WallpaperScaleMode::Fill) {}
 };
 
@@ -5226,6 +5226,11 @@ static const BuiltInWallpaperPalette* find_builtin_wallpaper(const char* id)
     return nullptr;
 }
 
+static const BuiltInWallpaperPalette* default_builtin_wallpaper()
+{
+    return find_builtin_wallpaper(kernel::desktop::kDesktopDefaultWallpaperId);
+}
+
 static const BuiltInGradientPalette* find_builtin_gradient(const char* id)
 {
     if (!id) return nullptr;
@@ -5691,10 +5696,15 @@ static void load_persisted_wallpaper_id()
     }
 
     if (!wallpaperId || !wallpaperId[0]) {
+        const BuiltInWallpaperPalette* defaultWallpaper = default_builtin_wallpaper();
+        if (!defaultWallpaper) {
+            serial::puts("[desktop] wallpaper default id is absent from the built-in catalog\n");
+            return;
+        }
         serial::puts("[desktop] wallpaper fallback reason=missing-or-empty\n");
-        apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
+        apply_wallpaper_builtin_selection(defaultWallpaper);
         serial::puts("[desktop] wallpaper apply source=default id=");
-        serial::puts(s_builtInWallpapers[0].id);
+        serial::puts(defaultWallpaper->id);
         serial::puts("\n");
         return;
     }
@@ -5740,12 +5750,17 @@ static void load_persisted_wallpaper_id()
         serial::puts(entry->id);
         serial::puts("\n");
     } else {
+        const BuiltInWallpaperPalette* defaultWallpaper = default_builtin_wallpaper();
+        if (!defaultWallpaper) {
+            serial::puts("[desktop] wallpaper default id is absent from the built-in catalog\n");
+            return;
+        }
         serial::puts("[desktop] wallpaper fallback reason=invalid-id id=");
         serial::puts(wallpaperId);
         serial::puts("\n");
-        apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
+        apply_wallpaper_builtin_selection(defaultWallpaper);
         serial::puts("[desktop] wallpaper apply source=default id=");
-        serial::puts(s_builtInWallpapers[0].id);
+        serial::puts(defaultWallpaper->id);
         serial::puts("\n");
     }
 }
@@ -5769,7 +5784,8 @@ void set_wallpaper_by_id(const char* wallpaperId)
     const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(wallpaperId);
     if (!entry) {
         serial::puts("[desktop] Wallpaper id not found, falling back to default\n");
-        entry = &s_builtInWallpapers[0];
+        entry = default_builtin_wallpaper();
+        if (!entry) return;
     }
     if (s_wallpaperConfig.type == WallpaperType::BuiltIn && desktop_str_eq(s_wallpaperConfig.wallpaperId, entry->id)) {
         persist_wallpaper_selection(entry->id);
@@ -5788,7 +5804,9 @@ void set_wallpaper_by_id(const char* wallpaperId)
 
 const char* get_wallpaper_id()
 {
-    return s_wallpaperConfig.wallpaperId ? s_wallpaperConfig.wallpaperId : s_builtInWallpapers[0].id;
+    return s_wallpaperConfig.wallpaperId
+        ? s_wallpaperConfig.wallpaperId
+        : kernel::desktop::kDesktopDefaultWallpaperId;
 }
 
 uint32_t get_builtin_gradient_preset_count()
@@ -9270,7 +9288,7 @@ void init()
     s_wallpaperConfig.showGrid = false;
     s_wallpaperConfig.gridColor = 0xFF192337;
     s_wallpaperConfig.gridSpacing = 100;
-    s_wallpaperConfig.wallpaperId = "legacy_blue_flower";
+    s_wallpaperConfig.wallpaperId = kernel::desktop::kDesktopDefaultWallpaperId;
     s_wallpaperConfig.scaleMode = WallpaperScaleMode::Fill;
     load_persisted_wallpaper_scale_mode();
     load_persisted_wallpaper_id();

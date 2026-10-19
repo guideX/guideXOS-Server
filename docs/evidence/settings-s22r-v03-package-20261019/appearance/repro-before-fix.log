@@ -1,0 +1,11 @@
+kernel/core/app_launch_target_resolver.cpp:48:13: warning: 'bool kernel::appmodel::text_ends_with(const char*, const char*)' defined but not used [-Wunused-function]
+   48 | static bool text_ends_with(const char* text, const char* suffix)
+      |             ^~~~~~~~~~~~~~
+FAIL: Dinos Apply commits from the untouched shipped empty wallpaper default
+Settings native runtime tests: 1422/1423 passed; lifecycle repetitions=100; provider refresh cycles=250; notification/state transitions=1000
+Native Settings runtime tests failed with exit code 1.
+At D:\dev\guideXOSServer\scripts\run-settings-native-runtime-test.ps1:33 char:28
++ ... DE -ne 0) { throw "Native Settings runtime tests failed with exit cod ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Native Settings...th exit code 1.:String) [], RuntimeException
+    + FullyQualifiedErrorId : Native Settings runtime tests failed with exit code 1.

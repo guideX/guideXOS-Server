@@ -471,7 +471,10 @@ GradientPersistenceStatus persistBuiltInBackgroundId(
         output->status = GradientPersistenceStatus::InvalidConfiguration;
         return output->status;
     }
-    if (oldCount == 1u && !equalText(oldId, expectedCurrentId)) {
+    const bool emptyDefaultMatches = oldCount == 1u && oldId[0] == '\0' &&
+        equalText(expectedCurrentId, kDesktopDefaultWallpaperId);
+    if (oldCount == 1u && !equalText(oldId, expectedCurrentId) &&
+        !emptyDefaultMatches) {
         output->status = GradientPersistenceStatus::Conflict;
         updateActualId(output);
         return output->status;

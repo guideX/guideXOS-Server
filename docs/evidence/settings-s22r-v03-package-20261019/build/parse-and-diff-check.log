@@ -1,0 +1,8 @@
+PowerShell parser: 5/5 scripts passed.
+git diff --check exit code: 0
+git diff --check diagnostics:
+warning: in the working copy of 'docs/SETTINGS_S22_V03_PACKAGE_QUALIFICATION.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'kernel/core/desktop_gradient_persistence.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'kernel/core/include/kernel/desktop_gradient_persistence.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/create-release-iso.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/settings_native_runtime_test.cpp', LF will be replaced by CRLF the next time Git touches it

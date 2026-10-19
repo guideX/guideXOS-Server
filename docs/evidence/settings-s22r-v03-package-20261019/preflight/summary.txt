@@ -1,0 +1,7 @@
+repository=D:\dev\guideXOSServer
+branch=main
+head=0513a65643f98b8c78ef709dfa7d6ea771677517
+statusEntries=851
+s22IsoSha256=b303c4c1a1cd31e500353cbd2dd7e11a8fd438b81ac9306285a6cd20ea1b1a3f
+DFreeBytes=11235942400
+EFreeBytes=6902912348160

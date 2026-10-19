@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "phase": "S22R",
+  "date": "2026-10-19",
+  "outcome": "B — Partial",
+  "repository": {
+    "path": "D:\\dev\\guideXOSServer",
+    "branch": "main",
+    "startingHead": "0513a65643f98b8c78ef709dfa7d6ea771677517",
+    "sourceHeadForValidation": "0513a65643f98b8c78ef709dfa7d6ea771677517",
+    "trackedWorktreeWasModifiedDuringValidation": true,
+    "preexistingUntrackedPathCount": 851
+  },
+  "appearance": {
+    "rootCause": "The runtime effective wallpaper ID is legacy_blue_flower while the shipped persisted value is empty; persistence compared the normalized effective value to the literal empty value and returned Conflict.",
+    "repair": "Treat the empty stored wallpaper ID as the default only when expectedCurrentId is legacy_blue_flower; keep revision validation and explicit unknown IDs conflicting.",
+    "defaultConfig": {
+      "path": "docs/evidence/settings-s22r-v03-package-20261019/appearance/desktop.cfg.shipped-default",
+      "bytes": 257,
+      "sha256": "95b274e39e9dde431286f4eb00fd2175888430744e60ffdec3ba49375ba52947"
+    },
+    "expectedAfterDinosUnitFixture": {
+      "path": "docs/evidence/settings-s22r-v03-package-20261019/appearance/desktop.cfg.after-dinos.expected",
+      "bytes": 269,
+      "sha256": "4d0fd4edba2739122fde40ac3046e4a63f3adf871f4dcc3e752eb644967d5244"
+    },
+    "regression": {
+      "status": "pass",
+      "assertions": "1426/1426",
+      "lifecycleRepetitions": 100,
+      "providerRefreshCycles": 250,
+      "notificationStateTransitions": 1000,
+      "guestApply": "not run; no new ISO",
+      "legacyGuestSmoke": "not run; no new ISO"
+    }
+  },
+  "releaseBuild": {
+    "status": "blocked-before-production-build",
+    "buildCommand": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File build.ps1 -Arch amd64",
+    "buildExitCode": 1,
+    "blockedStage": "DeveloperStudio source pin preflight",
+    "error": "The current Apps/DeveloperStudio manifest+ELF pair does not match the exact Phase 25 signed-off package pair; owner acceptance is required.",
+    "outputsCleanedOrReplaced": false,
+    "releaseIsoCreated": false,
+    "buildIntegrityTests": "pass: 13 assertions",
+    "s22OriginalIsoPreserved": {
+      "path": "out/s22-v03-candidate-20261018/guideXOS-Server-v0.3.0-s22.20261018-amd64.iso",
+      "bytes": 91293696,
+      "sha256": "b303c4c1a1cd31e500353cbd2dd7e11a8fd438b81ac9306285a6cd20ea1b1a3f"
+    }
+  },
+  "developerStudio": {
+    "contract": "The existing build pin and Phase 25 acceptance identify an exact signed-off manifest+ELF pair. Current Apps source is not that pair.",
+    "signedOffManifest": {
+      "bytes": 1112,
+      "sha256": "d59c12267d360c4e31b70dec7f9c1b0689fb5816011d681b38ee9cdef0d2f53b"
+    },
+    "signedOffElf": {
+      "bytes": 1015064,
+      "sha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7"
+    },
+    "currentSourceManifest": {
+      "bytes": 2011,
+      "sha256": "ab1db7c63a3dc49c06098b7a9341c33dbcf6fecbd8163460f62bcf907e7488e9"
+    },
+    "currentSourceElf": {
+      "bytes": 1104652,
+      "sha256": "f07270eacbd62f9ab67f1f38856a326981280e43d0a4d44f8ed1d17c777f01a6"
+    },
+    "espHistoricalCopy": "ESP retains the signed-off ELF (1,015,064 bytes, SHA-256 5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7) but has a different 1,176-byte manifest (SHA-256 7af95d35f068c44f4529420922e0f4bec5f705568514688d160e2790022acb09); neither file was used as source.",
+    "provenance": "DeveloperStudio Phase 25 release-candidate record; sign-off bb66e11c38dffae21514384f73b1920b53ac64fe; paired Server commit fb71e36c77866cdabf20873e6ad3de0ddc3bbe02",
+    "signedOffManifestBlob": "f105a984555ffd0d399009355ec5ded7bc9d6b98",
+    "hashTranscriptionNote": "The Phase 25 status text contains a 63-hex-character digest ending F53; the exact raw manifest blob at the paired Server commit hashes to the 64-character value ending F53B.",
+    "testManifestFixture": "tests/fixtures/developerstudio-phase25-app.json"
+  },
+  "kernel": {
+    "status": "fresh isolated freestanding build passed; not integrated into an ISO",
+    "command": "C:\\mingw64\\bin\\mingw32-make.exe -j2 ARCH=amd64 BUILD_DIR=build/s22r-20261019",
+    "targetBuildLog": "kernel/kernel-build.log",
+    "makeNoOpExitCode": 0,
+    "warningLines": 232,
+    "errorLines": 0,
+    "elf": {
+      "path": "kernel/build/s22r-20261019/bin/kernel.elf",
+      "bytes": 2771408,
+      "sha256": "533997c618dc6c3dcdd0d6f6603a8eebbb2db726bdc01d2ff04d8657d310e90e"
+    },
+    "pe": {
+      "path": "kernel/build/s22r-20261019/bin/kernel.pe",
+      "bytes": 2889318,
+      "sha256": "d6e8338f8be90b58aafaa877e30eba38d3f563f8ba797893650e43b2a667c6e2"
+    },
+    "pePackaged": false
+  },
+  "symbolAudit": {
+    "status": "pass",
+    "report": "kernel/undefined-symbol-classification.md",
+    "distinctUndefinedNames": 21,
+    "elfUndefinedRows": 45,
+    "peCoffUndefinedRows": 45,
+    "finalPeDefinitions": 19,
+    "weakAbiBookkeeping": [
+      "__dso_handle"
+    ],
+    "unusedNonLoadableEntries": [
+      "mainCRTStartup"
+    ],
+    "unresolvedRequiredProductionDependencies": 0,
+    "elfRelocations": 0,
+    "peCoffSymbolRelocations": 0,
+    "peImports": 0,
+    "inputObjectsInspected": 159,
+    "scope": "Exact isolated kernel ELF/PE pair and complete input-object set."
+  },
+  "productionArtifacts": {
+    "bootloader": null,
+    "ramdisk": null,
+    "developerStudio": null,
+    "iso": null,
+    "firmware": null,
+    "qemu": "not run; no S22R ISO was produced"
+  },
+  "limitations": [
+    "No fresh production ISO, QEMU boot, guest Apply/readback, close/reopen, screenshots, or legacy Display Options smoke.",
+    "No current DeveloperStudio release-owner acceptance was available in this checkout.",
+    "Kernel output is a fresh normal-target build and symbol audit, but it is not packaged or guest-tested."
+  ],
+  "evidence": "docs/evidence/settings-s22r-v03-package-20261019/"
+}

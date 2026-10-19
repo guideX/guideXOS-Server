@@ -1,0 +1,5 @@
+kernel/core/app_launch_target_resolver.cpp:48:13: warning: 'bool kernel::appmodel::text_ends_with(const char*, const char*)' defined but not used [-Wunused-function]
+   48 | static bool text_ends_with(const char* text, const char* suffix)
+      |             ^~~~~~~~~~~~~~
+Settings native runtime tests: 1426/1426 passed; lifecycle repetitions=100; provider refresh cycles=250; notification/state transitions=1000
+Native Settings runtime build and tests PASS. Output: D:\dev\guideXOSServer\out\validation\settings-s22r-20261019-default-fix\settings_native_runtime_test.exe
