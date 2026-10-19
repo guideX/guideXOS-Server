@@ -32,6 +32,7 @@
     <ProjectReference Include="..\Astronomy.Ephemeris\Astronomy.Ephemeris.csproj" />
     <ProjectReference Include="..\Astronomy.Time\Astronomy.Time.csproj" />
     <ProjectReference Include="..\Navigation.Core\Navigation.Core.csproj" />
+    <ProjectReference Include="..\StellarNavigator.Scene\StellarNavigator.Scene.csproj" />
   </ItemGroup>
 
 </Project>

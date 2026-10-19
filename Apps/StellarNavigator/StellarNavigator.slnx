@@ -4,7 +4,9 @@
   <Project Path="Astronomy.Ephemeris/Astronomy.Ephemeris.csproj" />
   <Project Path="Astronomy.Time/Astronomy.Time.csproj" />
   <Project Path="Navigation.Core/Navigation.Core.csproj" />
+  <Project Path="StellarNavigator.Scene/StellarNavigator.Scene.csproj" />
   <Project Path="StellarNavigator.App/StellarNavigator.App.csproj" />
+  <Project Path="StellarNavigator.Gui/StellarNavigator.Gui.csproj" />
   <Project Path="StellarNavigator.Benchmarks/StellarNavigator.Benchmarks.csproj" />
   <Project Path="StellarNavigator.Tests/StellarNavigator.Tests.csproj" />
 </Solution>
