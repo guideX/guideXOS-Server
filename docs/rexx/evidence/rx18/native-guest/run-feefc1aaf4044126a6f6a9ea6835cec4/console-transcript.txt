@@ -1,0 +1,7 @@
+RX18 isolated QEMU Console transcript
+Kernel SHA-256: 76687c3289a7b60a186453c806c4c633b5f679b1e15e2e04f9b20e927a0c4d32
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx18\qemu-feefc1aaf4044126a6f6a9ea6835cec4\guest\esp
+COMMAND: rexx /rx18-string-builtins.rex | expected visible marker/status: RX18_NATIVE_ABBREV_CENTER_DONE
+COMMAND: rexx /rx18-error-recovery.rex | expected visible marker/status: RX18_NATIVE_POST_ERROR_RESPONSIVE: 20206162632020
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=17
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

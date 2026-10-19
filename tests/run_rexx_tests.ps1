@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,9 @@ if ($null -eq $gxxCommand) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX17') {
+$guardManifest = if ($Phase -eq 'RX18') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx18\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX17') {
     Join-Path $rootDir 'docs\rexx\evidence\rx17\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX16') {
     Join-Path $rootDir 'docs\rexx\evidence\rx16\protected-artifacts-start.json'
@@ -43,7 +45,7 @@ $plannedOutputs = @(
     'rexx_rx10_interpret_tests.exe', 'rexx_rx12_builtins_tests.exe',
     'rexx_rx13_string_editing_tests.exe', 'rexx_rx14_numeric_inspection_tests.exe',
     'rexx_rx15_conversion_tests.exe', 'rexx_rx16_literal_tests.exe',
-    'rexx_rx17_bitwise_tests.exe',
+    'rexx_rx17_bitwise_tests.exe', 'rexx_rx18_string_builtins_tests.exe',
     'rexx_rx2_shell_bridge_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
@@ -74,6 +76,7 @@ $rx14Test = Join-Path $buildDirectory "rexx_rx14_numeric_inspection_tests.exe"
 $rx15Test = Join-Path $buildDirectory "rexx_rx15_conversion_tests.exe"
 $rx16Test = Join-Path $buildDirectory "rexx_rx16_literal_tests.exe"
 $rx17Test = Join-Path $buildDirectory "rexx_rx17_bitwise_tests.exe"
+$rx18Test = Join-Path $buildDirectory "rexx_rx18_string_builtins_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -266,6 +269,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX17 bitwise test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX18 ABBREV/CENTER/CENTRE assertions and properties"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
+    (Join-Path $PSScriptRoot "rexx_rx18_string_builtins_test.c") `
+    @commonSources -lm -o $rx18Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX18 string built-in test build failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Building RX2 C++ shell bridge integration tests"
 & $gxxCommand.Source -std=c++14 -Wall -Wextra -Wpedantic -Werror `
     (Join-Path $PSScriptRoot "rexx_rx2_shell_bridge_test.cpp") `
@@ -390,6 +402,12 @@ Write-Host "Running RX17 bitwise string assertions and properties"
 & $rx17Test
 if ($LASTEXITCODE -ne 0) {
     throw "RX17 bitwise assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX18 ABBREV/CENTER/CENTRE assertions and properties"
+& $rx18Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX18 string built-in assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
@@ -563,6 +581,28 @@ say pos("two", "one two")
 say translate("abc")
 '@
 Assert-CliCase "builtin_string_functions" $builtinSource @("4", "XOS", "two", "3", "trim", "5", "ABC") 0 -CompareRegina
+
+$rx18SourcePath = Join-Path $rootDir 'tests\rexx_compat\cases\string_bifs\rx18_abbrev_center.rex'
+$rx18ExpectedPath = Join-Path $rootDir 'tests\rexx_compat\cases\string_bifs\rx18_abbrev_center.out'
+$rx18Source = Get-Content -Raw -LiteralPath $rx18SourcePath
+$rx18Expected = @(Get-Content -LiteralPath $rx18ExpectedPath)
+Assert-CliCase "rx18_abbrev_center" $rx18Source $rx18Expected 0 -CompareRegina
+
+$rx18RecoverySource = @'
+signal on syntax name invalid_length
+value = center('x',-1)
+signal off syntax
+say 'RX18_NATIVE_ERROR_NOT_CAUGHT'
+exit 1
+invalid_length:
+signal off syntax
+say 'RX18_NATIVE_INVALID_ARGUMENT_CAUGHT'
+say 'RX18_NATIVE_POST_ERROR_RESPONSIVE:' c2x(centre('abc',7))
+'@
+Assert-CliCase "rx18_invalid_recovery" $rx18RecoverySource @(
+    "RX18_NATIVE_INVALID_ARGUMENT_CAUGHT",
+    "RX18_NATIVE_POST_ERROR_RESPONSIVE: 20206162632020"
+) 0 -CompareRegina
 
 $saySource = @'
 say "done"

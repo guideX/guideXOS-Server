@@ -1,0 +1,4 @@
+[2026-10-19T04:20:37.8793906Z] rexx /rx18-string-builtins.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx18\qemu-feefc1aaf4044126a6f6a9ea6835cec4\screenshots-raw\rx18-01-classic-string-builtins.ppm
+[2026-10-19T04:20:47.2108150Z] rexx /rx18-error-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx18\qemu-feefc1aaf4044126a6f6a9ea6835cec4\screenshots-raw\rx18-02-invalid-argument-recovery.ppm

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18')]
     [string]$Phase = 'RX12R1',
     [Parameter(Mandatory)][string]$KernelPath,
     [string]$SourceEsp = 'C:\Users\guideX\.codex\rx12-native-guest\esp',
@@ -11,7 +11,9 @@ $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
     throw "$Phase QEMU qualification requires branch REXX_SUPPORT."
 }
-$guardManifest = if ($Phase -eq 'RX17') {
+$guardManifest = if ($Phase -eq 'RX18') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx18\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX17') {
     Join-Path $rootDir 'docs\rexx\evidence\rx17\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX16') {
     Join-Path $rootDir 'docs\rexx\evidence\rx16\protected-artifacts-start.json'
@@ -42,7 +44,7 @@ $guestRoot = Join-Path $runRoot 'guest'
 $guestEsp = Join-Path $guestRoot 'esp'
 $stagedFirmware = Join-Path $guestRoot 'firmware-code.fd'
 $helperRoot = Join-Path $runRoot 'helper'
-$helperName = if ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
+$helperName = if ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
 $serialPath = Join-Path $runRoot 'serial.log'
 $qemuStdoutPath = Join-Path $runRoot 'qemu.stdout.log'
 $qemuStderrPath = Join-Path $runRoot 'qemu.stderr.log'
@@ -97,6 +99,12 @@ if ($Phase -eq 'RX17') {
         (Join-Path $guestEsp 'rx17-error-recovery.rex')
     )
 }
+if ($Phase -eq 'RX18') {
+    $plannedOutputs += @(
+        (Join-Path $guestEsp 'rx18-string-builtins.rex'),
+        (Join-Path $guestEsp 'rx18-error-recovery.rex')
+    )
+}
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs -Phase $Phase
 $env:TEMP = $workDir
@@ -106,7 +114,9 @@ New-Item -ItemType Directory -Path $guestRoot,$helperRoot,$rawCaptureDir | Out-N
 
 $evidenceRoot = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\native-guest\run-$runId"
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
-$helperSource = if ($Phase -eq 'RX17') {
+$helperSource = if ($Phase -eq 'RX18') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx18\native-guest'
+} elseif ($Phase -eq 'RX17') {
     Join-Path $rootDir 'docs\rexx\evidence\rx17\native-guest'
 } elseif ($Phase -eq 'RX16') {
     Join-Path $rootDir 'docs\rexx\evidence\rx16\native-guest'
@@ -172,6 +182,16 @@ if ($Phase -eq 'RX17') {
     foreach ($scriptFile in $rx17ScriptFiles) {
         Copy-Item -LiteralPath $scriptFile.FullName -Destination (Join-Path $guestEsp $scriptFile.Name)
         $rx17ScriptNames += $scriptFile.Name
+    }
+}
+$rx18ScriptNames = @()
+if ($Phase -eq 'RX18') {
+    $rx18Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx18\native-guest\scripts'
+    $rx18ScriptFiles = @(Get-ChildItem -LiteralPath $rx18Scripts -Filter 'rx18-*.rex' -File | Sort-Object Name)
+    if ($rx18ScriptFiles.Count -ne 2) { throw "Expected two reviewed RX18 native guest scripts; found $($rx18ScriptFiles.Count)." }
+    foreach ($scriptFile in $rx18ScriptFiles) {
+        Copy-Item -LiteralPath $scriptFile.FullName -Destination (Join-Path $guestEsp $scriptFile.Name)
+        $rx18ScriptNames += $scriptFile.Name
     }
 }
 
@@ -291,7 +311,12 @@ try {
     $heartbeatCountBefore = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
 
     $helper = Join-Path $helperRoot $helperName
-    $commands = if ($Phase -eq 'RX17') {
+    $commands = if ($Phase -eq 'RX18') {
+        @(
+            [PSCustomObject]@{ name='classic-string-builtins'; text='rexx /rx18-string-builtins.rex'; open_terminal=$true; expected='RX18_NATIVE_ABBREV_CENTER_DONE' },
+            [PSCustomObject]@{ name='invalid-argument-recovery'; text='rexx /rx18-error-recovery.rex'; expected='RX18_NATIVE_POST_ERROR_RESPONSIVE: 20206162632020' }
+        )
+    } elseif ($Phase -eq 'RX17') {
         @(
             [PSCustomObject]@{ name='bitwise-builtins'; text='rexx /rx17-bitwise.rex'; open_terminal=$true; expected='RX17_NATIVE_BITWISE_DONE' },
             [PSCustomObject]@{ name='handled-error-and-recovery'; text='rexx /rx17-error-recovery.rex'; expected='RX17_NATIVE_POST_ERROR_RESPONSIVE: 007F7F' }
@@ -345,7 +370,7 @@ try {
     $index = 0
     foreach ($command in $commands) {
         $index++
-        $capturePrefix = if ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+        $capturePrefix = if ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
         $captureName = "{0}-{1:D2}-{2}" -f $capturePrefix,$index,$command.name
         if ($command.open_terminal) {
             & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds 5 -OpenTerminal
@@ -356,7 +381,7 @@ try {
         $null = Assert-OwnQemu -Identity $owner
     }
 
-    $capturePrefix = if ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+    $capturePrefix = if ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
     $screenshots = @(Get-ChildItem -LiteralPath $helperRoot -Filter "$capturePrefix-*.png" -File)
     if ($screenshots.Count -ne $commands.Count) { throw "Expected one Console screenshot per smoke command; found $($screenshots.Count) for $($commands.Count) commands." }
 
@@ -364,8 +389,8 @@ try {
     $serial = Get-Content -Raw -LiteralPath $serialPath
     $heartbeatCountAfter = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
     if ($heartbeatCountAfter -le $heartbeatCountBefore) { throw "Guest heartbeat did not continue during the $Phase smoke commands." }
-    $scriptNames = if ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
-    $serialScriptNames = if ($Phase -in @('RX17','RX16')) {
+    $scriptNames = if ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
+    $serialScriptNames = if ($Phase -in @('RX18','RX17','RX16')) {
         $scriptNames
     } elseif ($Phase -eq 'RX15') {
         @($scriptNames | Where-Object { $_ -ne 'rx15-conversion-resource-limit.rex' })
@@ -442,7 +467,7 @@ $processReconciliation = [PSCustomObject]@{
     preexisting_foreign_pids_absent_at_final = $foreignAbsentFinal
     additional_foreign_pids_seen_after_launch = $additionalForeignPids
     control_sent_to_any_foreign_pid = $false
-    foreign_process_changes_cause = 'Unknown; RX17 sent no process control to any pre-existing or newly observed foreign QEMU process.'
+    foreign_process_changes_cause = "Unknown; $Phase sent no process control to any pre-existing or newly observed foreign QEMU process."
 }
 $processReconciliation | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidenceRoot 'qemu-process-reconciliation.json') -Encoding utf8
 Copy-Item -LiteralPath $serialPath -Destination $evidenceRoot

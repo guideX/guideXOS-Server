@@ -1,0 +1,17 @@
+﻿{
+    "captured_at_utc":  "2026-10-19T04:20:10.4389444Z",
+    "count":  2,
+    "processes":  [
+                      {
+                          "pid":  1872,
+                          "image":  "qemu-system-x86_64.exe",
+                          "command_line":  "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc-q35-8.2 -drive if=pflash,format=raw,readonly=on,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/ovmf-code.fd -drive if=pflash,format=raw,file=C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/ovmf-vars.fd -drive if=none,id=esp,format=raw,file=fat:rw:ESP -device ide-hd,drive=esp -m 1280M -serial file:C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/serial.log -no-reboot -no-shutdown -boot menu=off,splash-time=0 -name guideXOS-R2-allocator-locator-interlifetime-gap-20261018 -display none -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -d guest_errors,cpu_reset -D C:/gxR3work/out/taskmanager-memorydetails-qualification-r3/allocator-locator-interlifetime-gap-20261018/qemu-debug.log -qmp tcp:127.0.0.1:50620,server=on,wait=off"
+                      },
+                      {
+                          "pid":  31564,
+                          "image":  "qemu-system-x86_64.exe",
+                          "command_line":  "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel tcg,thread=single -machine pc -smp 1 -drive if=pflash,format=raw,readonly=on,file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\OVMF.fd\" -drive file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c178-managed-calculator-resize-final\\settings-ui-proof-runs\\20261019-041717-979027e2\\shared-writable-esp.img\",format=raw,if=ide,index=0 -m 1024M -vga std -display none -serial file:\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c178-managed-calculator-resize-final\\settings-ui-proof-runs\\20261019-041717-979027e2\\boot1\\serial.log\" -qmp tcp:127.0.0.1:61830,server,nowait -boot order=c -no-reboot -no-shutdown -rtc base=utc,clock=host "
+                      }
+                  ],
+    "command_lines_redacted":  false
+}

@@ -1,0 +1,236 @@
+{
+  "schema": "guidexos.rexx.rx18-scorecard.v1",
+  "phase": "RX18",
+  "outcome": "A — Accepted",
+  "completed_at_utc": "2026-10-19T04:28:51Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "c7d5c6757da58506507dd9c5b015409aad9186c7",
+  "qualification_head_before_local_commit": "c7d5c6757da58506507dd9c5b015409aad9186c7",
+  "local_implementation_commit_sha": null,
+  "ending_head_after_implementation_commit": null,
+  "root_phase_file_present": false,
+  "accepted_prior_phase_not_duplicated": true,
+  "implemented_built_in_functions": [
+    {
+      "name": "ABBREV",
+      "signature": "ABBREV(information,info[,length])",
+      "operation": "Exact case-sensitive byte-prefix/minimum-length predicate; returns 1 or 0."
+    },
+    {
+      "name": "CENTER",
+      "signature": "CENTER(string,length[,pad])",
+      "operation": "Fixed-length byte centering and symmetric truncation."
+    },
+    {
+      "name": "CENTRE",
+      "signature": "CENTRE(string,length[,pad])",
+      "operation": "Alias using the same implementation as CENTER."
+    }
+  ],
+  "semantics": {
+    "abbrev": "Explicit-length, case-sensitive byte comparison; omitted minimum defaults to info byte length; explicit minimum is a nonnegative whole number; empty info matches when minimum is zero; NUL and high-bit bytes are significant.",
+    "center": "Output has exactly the requested byte length; default pad is ASCII space 20 hex; explicit pad must be one byte; padding and truncation are centered with an odd extra byte on the right.",
+    "argument_behavior": "Required arguments must be present; invalid negative, fractional, empty, or nonnumeric lengths use the existing invalid built-in argument error path. Inputs and numeric settings are preserved.",
+    "result_limit_bytes": 16777216,
+    "rx16_packed_literal_limit_applies_to_runtime_strings": false,
+    "implementation": "Bounded existing allocator and length-bearing views; CENTER and CENTRE point to one function."
+  },
+  "hosted": {
+    "status": "PASS",
+    "command": "tests/run_rexx_tests.ps1 -Phase RX18",
+    "rx18_direct_assertions": 99315,
+    "rx18_dispatch_cases": 14633,
+    "rx18_property_cases": 13935,
+    "rx18_property_seed": "0x52583138",
+    "rx18_failures": 0,
+    "rx17_direct_assertions": 15843,
+    "reported_direct_c_assertions_rx2_through_rx18": 118938,
+    "allocation_failure_injection": "PASS — ABBREV and CENTER allocation failures returned the existing resource error without publishing a partial result; arguments stayed intact and subsequent calls recovered.",
+    "rx18_portable_fixture": {
+      "passed": 1,
+      "total": 1,
+      "included_in_rx12_fixture_family": {
+        "passed": 31,
+        "total": 31
+      }
+    },
+    "inherited_fixture_families": {
+      "passed": 280,
+      "total": 280,
+      "families": "RX3–RX17 including separately reported RX9 conditions and RX10 INTERPRET families"
+    },
+    "cli_regressions": {
+      "passed": 22,
+      "total": 22
+    },
+    "resource_and_runtime": "Hosted runtime, resource, C assertion, and interpreter integration targets passed; see hosted-qualification.log.",
+    "property_method": "Fixed-seed independent byte-position oracle over prefix behavior, minimum-length monotonicity, padding/truncation distribution, alias identity, preserved input subsequences, and NUL bytes.",
+    "evidence": "docs/rexx/evidence/rx18/hosted-qualification.log"
+  },
+  "portable_compatibility": {
+    "local_expected_result_cases": 194,
+    "local_expected_exit": 194,
+    "regina": "NOT_RUN",
+    "regina_reason": "No Regina executable was found in PATH; no system-wide installation was attempted.",
+    "independent_compatibility_percentage": null,
+    "evidence": "docs/rexx/evidence/rx18/sanitizer-address-85337204a7b34db4aba2df519e0b0528/results.json",
+    "summary": "All 194 cases completed with expected local exit status in each sanitizer differential-corpus pass; cross-interpreter comparison was unavailable."
+  },
+  "sanitizers": {
+    "status": "PASS",
+    "address": {
+      "targets_built_and_run": 21,
+      "failures": 0,
+      "findings": 0,
+      "rx18_assertions": 99315,
+      "property_cases": 13935,
+      "property_seed": "0x52583138",
+      "evidence": "docs/rexx/evidence/rx18/sanitizer-address-85337204a7b34db4aba2df519e0b0528"
+    },
+    "undefined_behavior": {
+      "targets_built_and_run": 21,
+      "failures": 0,
+      "findings": 0,
+      "rx18_assertions": 99315,
+      "property_cases": 13935,
+      "property_seed": "0x52583138",
+      "evidence": "docs/rexx/evidence/rx18/sanitizer-undefined-2b83dd405c204d1983717afa75b00fbd"
+    },
+    "corpus_cases_each": 194,
+    "regina_differential": "NOT_RUN"
+  },
+  "freestanding_amd64": {
+    "status": "PASS — compilation and link",
+    "rexx_c_objects_linked": 9,
+    "freestanding_flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "kernel_elf": "build/rexx/rx18/native-amd64-3dcebde9dc284c5c87684ac495725e92/amd64/bin/kernel.elf",
+    "kernel_sha256": "76687c3289a7b60a186453c806c4c633b5f679b1e15e2e04f9b20e927a0c4d32",
+    "link_evidence": "docs/rexx/evidence/rx18/native-build/native-link-evidence-3dcebde9dc284c5c87684ac495725e92.json"
+  },
+  "qemu_guest": {
+    "status": "PASS",
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "run_id": "feefc1aaf4044126a6f6a9ea6835cec4",
+    "guest_evidence": "docs/rexx/evidence/rx18/native-guest/run-feefc1aaf4044126a6f6a9ea6835cec4",
+    "commands_demonstrated": [
+      "rx18-string-builtins.rex",
+      "rx18-error-recovery.rex"
+    ],
+    "functions_demonstrated": [
+      "ABBREV",
+      "CENTER",
+      "CENTRE"
+    ],
+    "binary_safe_nul_and_high_bit_output": "PASS",
+    "invalid_argument_handling": "PASS",
+    "post_error_responsiveness": "PASS — guest produced the expected CENTER result after a trapped invalid length",
+    "network_disabled": true,
+    "disposable_media": true,
+    "production_media_used": false,
+    "staged_kernel_hash_matches": true,
+    "owned_qemu_pid": 10024,
+    "qmp_port": 59799,
+    "qmp_shutdown_acknowledged": true,
+    "owned_qemu_process_remaining": false,
+    "process_censuses": {
+      "preflight": [
+        1872,
+        31564
+      ],
+      "pre_run": [
+        1872,
+        31564
+      ],
+      "immediate_post_shutdown": [
+        1872,
+        31564
+      ],
+      "final": [
+        1872,
+        31564
+      ],
+      "preexisting_foreign_pids_absent_before_launch": [],
+      "additional_foreign_pids_seen_after_launch": [],
+      "control_sent_to_foreign_processes": false,
+      "foreign_process_changes_cause": "Unknown. No control was sent to either pre-existing foreign QEMU process.",
+      "evidence": "docs/rexx/evidence/rx18/native-guest/run-feefc1aaf4044126a6f6a9ea6835cec4/qemu-process-reconciliation.json"
+    }
+  },
+  "protected_artifacts": {
+    "status": "PASS",
+    "root_obj_pdb_count": 31,
+    "hashes_unchanged": 31,
+    "missing": 0,
+    "modified": 0,
+    "unexpected": 0,
+    "final_comparison": "docs/rexx/evidence/rx18/protected-artifacts-final.json",
+    "baseline": "docs/rexx/evidence/rx18/protected-artifacts-start.json"
+  },
+  "inventory": {
+    "rows": 75,
+    "implemented_total": 50,
+    "not_implemented": 23,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "rx18_implementations": 3,
+    "path": "docs/rexx/REXX_RX18_BUILTIN_INVENTORY.csv"
+  },
+  "preflight": {
+    "declared_initial_untracked_status_entries": 63,
+    "captured_array_entries": 65,
+    "preexisting_entries_reconciled": 63,
+    "preexisting_entries_preserved": 63,
+    "missing_preexisting_entries": 0,
+    "count_discrepancy": "Captured array included two phase-generated entries; see untracked-preservation-reconciliation.json.",
+    "tracked_and_index_clean_before_edits": true,
+    "branch_and_start_head_verified": true,
+    "evidence": "docs/rexx/evidence/rx18/preflight.json"
+  },
+  "recommended_rx19_scope": {
+    "family": "DATE and TIME",
+    "dependency": "Kernel-native clock source with documented UTC/local-time behavior and stable formatting rules.",
+    "rationale": "A cohesive classic built-in pair remains in the inventory; implementing it after a portable runtime clock service avoids embedding host-specific clock behavior.",
+    "fallback": "If the clock service is not ready, defer DATE/TIME and prioritize a dependency-free portable string built-in such as REVERSE.",
+    "environment_specific_deferred": [
+      "ADDRESS",
+      "CHARIN",
+      "CHAROUT",
+      "CHARS",
+      "LINEIN",
+      "LINEOUT",
+      "LINES",
+      "QUEUED",
+      "STREAM",
+      "SOURCELINE",
+      "TRACE",
+      "VALUE",
+      "EXTERNALS",
+      "FIND",
+      "INDEX",
+      "JUSTIFY",
+      "LINESIZE",
+      "USERID"
+    ]
+  },
+  "limits_and_deferred": [
+    "Regina comparison unavailable; no cross-interpreter compatibility percentage calculated.",
+    "Byte semantics use target character representation; no ASCII/EBCDIC transcoding.",
+    "General runtime strings remain limited to 16 MiB; RX16 packed-literal limit does not apply to runtime operands.",
+    "Environment-dependent stream, source, data-stack, and TSO/E-only functions remain outside RX18."
+  ],
+  "official_references": [
+    "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-abbrev-abbreviation",
+    "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-centercentre"
+  ],
+  "evidence_directory": "docs/rexx/evidence/rx18/",
+  "generated_build_outputs": "Build products remain under build/rexx/rx18 and are excluded from the local commit.",
+  "preexisting_untracked_status_entries_preserved": 63,
+  "commit_policy": "Local commit only; no push."
+}

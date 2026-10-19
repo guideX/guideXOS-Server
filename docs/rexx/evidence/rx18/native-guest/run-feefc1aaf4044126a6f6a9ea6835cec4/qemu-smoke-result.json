@@ -1,0 +1,23 @@
+﻿{
+    "schema":  "guidexos.rexx.rx18.qemu-smoke.v1",
+    "completed_at_utc":  "2026-10-19T04:20:53.9409878Z",
+    "passed":  true,
+    "qemu_version":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "kernel_sha256":  "76687c3289a7b60a186453c806c4c633b5f679b1e15e2e04f9b20e927a0c4d32",
+    "staged_kernel_sha256":  "76687c3289a7b60a186453c806c4c633b5f679b1e15e2e04f9b20e927a0c4d32",
+    "network_disabled":  true,
+    "copied_disposable_media":  true,
+    "production_media_used":  false,
+    "script_accesses_in_serial":  [
+                                      "rx18-error-recovery.rex",
+                                      "rx18-string-builtins.rex"
+                                  ],
+    "heartbeat_count_before_suite":  1,
+    "heartbeat_count_after_suite":  17,
+    "qmp_shutdown_acknowledged":  true,
+    "qemu_pre_run_census":  "qemu-ownership-census-before.json",
+    "qemu_immediate_post_shutdown_census":  "qemu-immediate-post-shutdown-census.json",
+    "qemu_final_census":  "qemu-final-census.json",
+    "qemu_process_reconciliation":  "qemu-process-reconciliation.json",
+    "evidence_directory":  "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx18\\native-guest\\run-feefc1aaf4044126a6f6a9ea6835cec4"
+}

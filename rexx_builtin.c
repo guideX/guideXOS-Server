@@ -346,6 +346,133 @@ static RexxVMStatus rexx_builtin_optional_pad(const RexxValue *arguments,
     return REXX_VM_STATUS_OK;
 }
 
+/* Length operands in these classic string functions must be present numeric
+ * values. The general built-in size helper intentionally treats the empty
+ * string as zero for inherited functions, so keep the stricter RX18 rule
+ * local to the new functions. */
+static RexxVMStatus rexx_builtin_required_length(const RexxValue *value,
+                                                 size_t *length)
+{
+    RexxBuiltinStringView view;
+    if (value == NULL || length == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (value->type == REXX_VALUE_UNSET)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (value->type == REXX_VALUE_STRING) {
+        RexxVMStatus status = rexx_builtin_string_view(value, &view);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (view.length == 0u)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    return rexx_builtin_size(value, length);
+}
+
+static RexxVMStatus rexx_builtin_abbrev(const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    RexxBuiltinStringView information, info;
+    RexxDecimal minimum_decimal;
+    uint32_t minimum_value;
+    size_t minimum_length;
+    RexxNumericStatus numeric_status;
+    RexxVMStatus status;
+    int matched = 0;
+
+    if (arguments == NULL || argument_count < 2u || argument_count > 3u ||
+        arguments[0].type == REXX_VALUE_UNSET ||
+        arguments[1].type == REXX_VALUE_UNSET) {
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    status = rexx_builtin_string_view(&arguments[0], &information);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_string_view(&arguments[1], &info);
+    if (status != REXX_VM_STATUS_OK) return status;
+
+    minimum_length = info.length;
+    if (argument_count == 3u &&
+        arguments[2].type != REXX_VALUE_UNSET) {
+        RexxBuiltinStringView minimum_view;
+        if (arguments[2].type == REXX_VALUE_STRING) {
+            status = rexx_builtin_string_view(&arguments[2], &minimum_view);
+            if (status != REXX_VM_STATUS_OK) return status;
+            if (minimum_view.length == 0u)
+                return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        }
+        status = rexx_builtin_decimal(&arguments[2], &minimum_decimal);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (minimum_decimal.sign < 0)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        numeric_status = rexx_decimal_to_uint32(&minimum_decimal,
+                                                &minimum_value);
+        if (numeric_status == REXX_NUMERIC_INVALID)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (numeric_status == REXX_NUMERIC_RANGE) {
+            /* Every representable input string is far shorter than UINT32_MAX. */
+            return rexx_value_set_string(result, rexx_builtin_false, 1u);
+        }
+        if (numeric_status != REXX_NUMERIC_OK)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        minimum_length = (size_t)minimum_value;
+    }
+
+    if (info.length <= information.length &&
+        info.length >= minimum_length &&
+        (info.length == 0u ||
+         memcmp(information.bytes, info.bytes, info.length) == 0)) {
+        matched = 1;
+    }
+    return rexx_value_set_string(result,
+                                 matched ? rexx_builtin_true : rexx_builtin_false,
+                                 1u);
+}
+
+/* CENTER and CENTRE are aliases for this single allocation and byte-copy path. */
+static RexxVMStatus rexx_builtin_center(const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    RexxBuiltinStringView source;
+    size_t requested_length;
+    size_t offset;
+    size_t padding;
+    char pad_byte;
+    char *output = NULL;
+    RexxVMStatus status;
+
+    if (arguments == NULL || argument_count < 2u || argument_count > 3u ||
+        arguments[0].type == REXX_VALUE_UNSET ||
+        arguments[1].type == REXX_VALUE_UNSET) {
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    status = rexx_builtin_string_view(&arguments[0], &source);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_required_length(&arguments[1], &requested_length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_optional_pad(arguments, argument_count, 2u,
+                                       &pad_byte);
+    if (status != REXX_VM_STATUS_OK) return status;
+
+    status = rexx_builtin_allocate_result(result, requested_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (requested_length > source.length) {
+        padding = requested_length - source.length;
+        offset = padding / 2u;
+        if (offset != 0u)
+            memset(output, (unsigned char)pad_byte, offset);
+        if (source.length != 0u)
+            memcpy(output + offset, source.bytes, source.length);
+        if (padding != offset)
+            memset(output + offset + source.length,
+                   (unsigned char)pad_byte, padding - offset);
+    } else {
+        offset = (source.length - requested_length) / 2u;
+        if (requested_length != 0u)
+            memcpy(output, source.bytes + offset, requested_length);
+    }
+    return REXX_VM_STATUS_OK;
+}
+
 static RexxVMStatus rexx_builtin_add_output_length(size_t *total,
                                                    size_t addition)
 {
@@ -2840,6 +2967,9 @@ static RexxVMStatus rexx_builtin_bitxor(const RexxValue *arguments,
 
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "LENGTH", 1u, 1u, rexx_builtin_length, NULL },
+    { "ABBREV", 2u, 3u, rexx_builtin_abbrev, NULL },
+    { "CENTER", 2u, 3u, rexx_builtin_center, NULL },
+    { "CENTRE", 2u, 3u, rexx_builtin_center, NULL },
     { "LEFT", 2u, 3u, rexx_builtin_left, NULL },
     { "RIGHT", 2u, 3u, rexx_builtin_right, NULL },
     { "INSERT", 2u, 5u, rexx_builtin_insert, NULL },
