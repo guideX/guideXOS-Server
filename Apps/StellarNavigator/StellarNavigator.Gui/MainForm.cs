@@ -26,11 +26,13 @@ internal sealed class MainForm : Form
     private readonly CheckBox _allowProvisional = new() { Text = "Allow provisional future UTC", AutoSize = true };
     private readonly ComboBox _originMode = NewCombo(190);
     private readonly ComboBox _orientation = NewCombo(190);
+    private readonly ComboBox _analysisTarget = NewCombo(205);
     private readonly CheckBox _trails = new() { Text = "Sampled geometric trails", AutoSize = true };
     private readonly CheckBox _showTrajectory = new() { Text = "SN8 simulated trajectory", AutoSize = true, Checked = true };
     private readonly CheckBox _showManeuvers = new() { Text = "Maneuver markers", AutoSize = true, Checked = true };
     private readonly ListBox _objects = new() { Dock = DockStyle.Top, Height = 220, IntegralHeight = false };
     private readonly ListBox _maneuverList = new() { Width = 315, Height = 76, IntegralHeight = false };
+    private readonly ListBox _missionEvents = new() { Width = 410, Height = 190, IntegralHeight = false, HorizontalScrollbar = true };
     private readonly Label _trajectoryInfo = new() { AutoSize = true, MaximumSize = new Size(315, 0) };
     private readonly TextBox _initialEt = NewInput(200);
     private readonly TextBox _initialX = NewInput(76);
@@ -69,6 +71,7 @@ internal sealed class MainForm : Form
     private bool _buildInFlight;
     private bool _hasFitted;
     private bool _syncingSelection;
+    private bool _syncingAnalysisTarget;
     private long _lastInteractionTicks;
     private bool _isPlaying;
     private SimulatedTrajectoryScenario? _trajectoryScenario;
@@ -116,6 +119,10 @@ internal sealed class MainForm : Form
         _originMode.SelectedIndex = 0;
         _orientation.Items.AddRange(["J2000 inertial axes", "IAU_EARTH axes (low precision)"]);
         _orientation.SelectedIndex = 0;
+        _analysisTarget.Items.AddRange(SceneBuilder.Definitions
+            .Select(definition => new AnalysisTargetEntry(definition.Id, definition.Name)).ToArray());
+        _analysisTarget.DisplayMember = nameof(AnalysisTargetEntry.Name);
+        _analysisTarget.SelectedIndex = SceneBuilder.Definitions.ToList().FindIndex(item => item.Id == "earth");
         _orientation.Enabled = orientationStatus.StartsWith("IAU_EARTH enabled", StringComparison.Ordinal);
         _allowProvisional.Enabled = timeConverter is not null;
         _allowProvisional.Checked = false;
@@ -134,7 +141,13 @@ internal sealed class MainForm : Form
         _maneuverList.BackColor = Color.FromArgb(17, 25, 39);
         _maneuverList.ForeColor = Color.FromArgb(225, 233, 245);
         _maneuverList.BorderStyle = BorderStyle.FixedSingle;
+        _analysisTarget.ForeColor = Color.FromArgb(225, 233, 245);
+        _missionEvents.BackColor = Color.FromArgb(17, 25, 39);
+        _missionEvents.ForeColor = Color.FromArgb(225, 233, 245);
+        _missionEvents.BorderStyle = BorderStyle.FixedSingle;
         _maneuverList.SelectedIndexChanged += OnManeuverListSelectionChanged;
+        _analysisTarget.SelectedIndexChanged += OnAnalysisTargetChanged;
+        _missionEvents.SelectedIndexChanged += OnMissionEventSelected;
         _map.ShowTrajectory = _showTrajectory.Checked;
         _map.ShowManeuvers = _showManeuvers.Checked;
         _showTrajectory.CheckedChanged += (_, _) => { _map.ShowTrajectory = _showTrajectory.Checked; _map.Invalidate(); };
@@ -315,10 +328,29 @@ internal sealed class MainForm : Form
         maneuverRows.Controls.Add(maneuverButtons);
         maneuverGroup.Controls.Add(maneuverRows);
 
+        var eventsGroup = new GroupBox
+        {
+            Text = "Mission events · ET/TDB seconds past J2000",
+            Width = 440,
+            Height = 258,
+            ForeColor = Color.FromArgb(190, 211, 238),
+            Enabled = available,
+        };
+        var eventRows = NewVerticalRows();
+        var targetRow = NewInputRow();
+        targetRow.Controls.Add(MiniLabel("Closest approach to", 118));
+        _analysisTarget.Width = 284;
+        targetRow.Controls.Add(_analysisTarget);
+        eventRows.Controls.Add(targetRow);
+        _missionEvents.Width = 410;
+        eventRows.Controls.Add(_missionEvents);
+        eventsGroup.Controls.Add(eventRows);
+
         var stack = NewVerticalRows();
         stack.Controls.Add(_trajectoryInfo);
         stack.Controls.Add(initialGroup);
         stack.Controls.Add(maneuverGroup);
+        stack.Controls.Add(eventsGroup);
         var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(12, 18, 29) };
         panel.Controls.Add(stack);
         return panel;
@@ -493,7 +525,8 @@ internal sealed class MainForm : Form
             EpochRepresentation: resolution.RepresentationPrecision,
             IncludeSimulatedTrajectory: includeTrajectory,
             TrajectoryScenario: includeTrajectory ? scenario : null,
-            Maneuvers: includeTrajectory ? maneuvers : null);
+            Maneuvers: includeTrajectory ? maneuvers : null,
+            TrajectoryAnalysisTargetBodyId: (_analysisTarget.SelectedItem as AnalysisTargetEntry)?.Id ?? "earth");
         long ticket = _generationGate.BeginRequest();
         var cancellation = new CancellationTokenSource();
         var prior = _buildCancellation;
@@ -530,6 +563,7 @@ internal sealed class MainForm : Form
             if (_originMode.SelectedIndex != (int)result.OriginMode)
                 _originMode.SelectedIndex = (int)result.OriginMode;
             RefreshObjectList(result);
+            RefreshMissionEvents(result);
             UpdateTimeStatus();
             _status.Text = $"Scene ready · {result.Objects.Count - 1} ephemeris objects · " +
                 (result.Trajectory is null ? "SN8 trajectory unavailable" : "SN8 two-body trajectory") +
@@ -619,6 +653,19 @@ internal sealed class MainForm : Form
         UpdateDetails(item);
         if (item is null || _syncingSelection)
             return;
+        if (item.Definition is { } definition)
+        {
+            int targetIndex = _analysisTarget.Items.Cast<AnalysisTargetEntry>()
+                .ToList().FindIndex(entry => entry.Id == definition.Id);
+            if (targetIndex >= 0 && _analysisTarget.SelectedIndex != targetIndex)
+            {
+                _syncingAnalysisTarget = true;
+                _analysisTarget.SelectedIndex = targetIndex;
+                _syncingAnalysisTarget = false;
+                if (_scene is not null)
+                    RequestSceneBuild();
+            }
+        }
         if (item.ManeuverSelection is { } maneuver)
         {
             _map.SetSelectedManeuver(maneuver.Id);
@@ -655,6 +702,80 @@ internal sealed class MainForm : Form
         LoadManeuverIntoEditor(selected.Maneuver);
         _map.SetSelectedManeuver(selected.Maneuver.Id);
         _map.Select($"maneuver:{selected.Maneuver.Id}");
+    }
+
+    private void OnAnalysisTargetChanged(object? sender, EventArgs e)
+    {
+        if (_syncingAnalysisTarget || _analysisTarget.SelectedItem is not AnalysisTargetEntry selected)
+            return;
+        if (_scene is not null)
+        {
+            _map.Select(selected.Id);
+            RequestSceneBuild();
+        }
+    }
+
+    private void OnMissionEventSelected(object? sender, EventArgs e)
+    {
+        if (_missionEvents.SelectedItem is not MissionEventListEntry selected || !double.IsFinite(selected.Event.EtSeconds))
+            return;
+        _epochKind.SelectedIndex = 0;
+        _epochText.Text = selected.Event.EtSeconds.ToString("R", CultureInfo.InvariantCulture);
+        _currentEpochResolution = _epochResolver.Resolve(EpochInputKind.EtSeconds, _epochText.Text);
+        if (!_currentEpochResolution.Success)
+        {
+            ShowDiagnostic(_currentEpochResolution.Error ?? "The selected event epoch could not be accepted.");
+            return;
+        }
+        UpdateTimeStatus();
+        RequestSceneBuild();
+    }
+
+    private void RefreshMissionEvents(NavigationScene scene)
+    {
+        _missionEvents.BeginUpdate();
+        try
+        {
+            _missionEvents.Items.Clear();
+            if (scene.Trajectory?.MissionEvents is { } timeline)
+            {
+                foreach (var item in timeline.Events)
+                    _missionEvents.Items.Add(new MissionEventListEntry(item, FormatMissionEvent(item)));
+                _missionEvents.DisplayMember = nameof(MissionEventListEntry.Text);
+            }
+        }
+        finally
+        {
+            _missionEvents.EndUpdate();
+        }
+    }
+
+    private static string FormatMissionEvent(MissionEvent item)
+    {
+        string epoch = $"ET {item.EtSeconds.ToString("R", CultureInfo.InvariantCulture)} s TDB";
+        if (item.Type == MissionEventType.ClosestApproach)
+        {
+            string targetName = SceneBuilder.Definitions.FirstOrDefault(definition => definition.Id == item.ObjectId)?.Name
+                ?? item.ObjectId ?? "unknown target";
+            string distance = item.DistanceMeters.HasValue
+                ? (item.DistanceMeters.Value / 1000.0).ToString("G6", CultureInfo.InvariantCulture)
+                : "n/a";
+            string relativeSpeed = item.RelativeSpeedMetersPerSecond.HasValue
+                ? $" · {item.RelativeSpeedMetersPerSecond.Value.ToString("G5", CultureInfo.InvariantCulture)} m/s rel."
+                : string.Empty;
+            return $"Closest to {targetName} · {distance} km · " +
+                $"{(item.IsRefined == true ? "refined" : "sampled")}{relativeSpeed} · {epoch}";
+        }
+        if (item.Type == MissionEventType.Maneuver)
+        {
+            string magnitude = item.DeltaVMagnitudeMetersPerSecond.HasValue
+                ? item.DeltaVMagnitudeMetersPerSecond.Value.ToString("G5", CultureInfo.InvariantCulture)
+                : "n/a";
+            return $"{item.Name} · {item.ManeuverStatus} · |Δv| {magnitude} m/s · {epoch}";
+        }
+        return item.Type == MissionEventType.Warning
+            ? $"WARNING · {item.Warning} · {epoch}"
+            : $"{item.Name} · {epoch}";
     }
 
     private int FindManeuverListIndex(string id)
@@ -1104,4 +1225,6 @@ internal sealed class MainForm : Form
     };
 
     private sealed record ManeuverListEntry(ImpulsiveManeuver Maneuver, string Text);
+    private sealed record AnalysisTargetEntry(string Id, string Name);
+    private sealed record MissionEventListEntry(MissionEvent Event, string Text);
 }

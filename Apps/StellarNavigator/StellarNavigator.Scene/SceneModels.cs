@@ -55,7 +55,8 @@ public sealed record SceneBuildRequest(
     SimulatedTrajectoryScenario? TrajectoryScenario = null,
     IReadOnlyList<ImpulsiveManeuver>? Maneuvers = null,
     double? TrajectoryWindowHalfSpanSeconds = null,
-    int TrajectorySampleCount = 49);
+    int TrajectorySampleCount = 49,
+    string TrajectoryAnalysisTargetBodyId = "earth");
 
 public sealed record TrajectoryRenderSample(
     string Id,
@@ -83,7 +84,10 @@ public sealed record TrajectoryVisualization(
     SceneObject VehicleMarker,
     IReadOnlyList<TrajectoryRenderSample> Samples,
     IReadOnlyList<TrajectoryManeuverMarker> ManeuverMarkers,
-    TimeSpan CompositionDuration);
+    TimeSpan CompositionDuration)
+{
+    public MissionEventTimeline? MissionEvents { get; init; }
+}
 
 public sealed record NavigationScene(
     EtSeconds Epoch,

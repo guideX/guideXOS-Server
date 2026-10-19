@@ -42,6 +42,7 @@ public sealed class SceneBuilder
     private readonly IauEarthOrientation? _orientationModel;
     private readonly SunGravitationalParameter? _solarGm;
     private readonly TrajectoryGenerator? _trajectoryGenerator;
+    private readonly MissionEventAnalyzer? _missionEventAnalyzer;
 
     public SceneBuilder(IEphemerisProvider provider, IauEarthOrientation? orientationModel = null,
         SunGravitationalParameter? solarGm = null)
@@ -53,7 +54,12 @@ public sealed class SceneBuilder
                 nameof(provider));
         _orientationModel = orientationModel is { IsAuthenticated: true } ? orientationModel : null;
         _solarGm = solarGm;
-        _trajectoryGenerator = solarGm is null ? null : new TrajectoryGenerator(new TwoBodyPropagator(solarGm));
+        if (solarGm is not null)
+        {
+            var propagator = new TwoBodyPropagator(solarGm);
+            _trajectoryGenerator = new TrajectoryGenerator(propagator);
+            _missionEventAnalyzer = new MissionEventAnalyzer(propagator, provider);
+        }
         _framedStates = new FramedStateService(provider, _orientationModel);
     }
 
@@ -156,7 +162,11 @@ public sealed class SceneBuilder
                     request.TimeQuality == TimeConversionQuality.ProvisionalStaleTable), cancellationToken);
             if (!generated.IsSuccess)
                 throw new SceneBuildException($"SN8 trajectory unavailable [{generated.Status}]: {generated.Error}");
-            trajectory = BuildTrajectoryVisualization(generated.Trajectory!, request, cancellationToken);
+            trajectory = BuildTrajectoryVisualization(generated.Trajectory!, request, cancellationToken) with
+            {
+                MissionEvents = _missionEventAnalyzer!.Analyze(generated.Trajectory!,
+                    request.TrajectoryAnalysisTargetBodyId, cancellationToken),
+            };
         }
 
         cancellationToken.ThrowIfCancellationRequested();
