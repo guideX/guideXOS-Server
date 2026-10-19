@@ -493,3 +493,133 @@ freestanding AMD64 kernel, `build.bat`, and UEFI x64 Release builds passed with
 the NVMe proof flags above. Gate A and the separate DM36 Check/Remount workflow
 remain unqualified; Gates B–I remain open. Keep `.phase` at DM36→DM37 and do
 not begin DM38.
+
+## DM37 Continuation 5 — visible QEMU Gate A verified
+
+**Outcome B — DM37_GATE_A_VERIFIED.** The repository gate started on branch
+DISK_MANAGER_IMPROVEMENTS at HEAD
+f4eb7180063f8a43fa4ac38e4bd140b96b761ca1. The phase marker remains
+last_completed=DM36, next_expected=DM37. No production source changed. The
+pre-existing untracked Python cache remains at SHA-256
+B25DA7AB48CCDCDA8A9AE4AC6856770F0D1353B78F39F2EC5A0134D426ED28D5.
+
+### Owned visible guest and target
+
+A fresh initial QEMU census found no QEMU process. One source-matched private
+guest ran in a visible, foreground GTK window; it did not use -display none.
+The owned process was PID 16368 (parent PID 9468), QEMU 11.0.0
+(v11.0.0-12122-ga4bb4b10c9), QMP 127.0.0.1:58953. The runtime manifest records
+ordinary production startup, no test-only hooks, and no physical host storage.
+Both NVMe proof flags remained zero.
+
+The production source revision was
+c40efd34eb67aa71b23e4f48f5243d8f18d11771. Runtime hashes were: kernel
+6D8DF6E65656B38DEA37F3704EC2639910C074EB448644FDB19FED5B47B7A29B,
+kernel_apps.cpp D93BBD2C1B966F74D5ADC1EFE3B3F20DF506151A533CE24F82BBDB6781A4E812,
+kernel_compositor.cpp AF0E078B905ACDC564ED4C26A5EF84F795EDDE31F1F9001752DED85DB14214C0,
+UEFI x64 Release bootloader 736F0532DC491403ECAE3CC75A5F9815F03CAEFDD6D11CF853EE8483E81A53A7,
+ramdisk 5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD,
+OVMF 2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792, and
+QEMU binary A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02.
+The private ESP canonical file-tree SHA-256 is
+4FEDDBE35800ADE1DAE72590453BE352369CE66E1C18D7AEB99EBA66FB75B0BF; it hashes
+sorted relative POSIX paths, NUL separators, each file SHA-256, its decimal
+length, and LF. Its desktop.cfg hash is
+4AAF37B7847D0002997AE18824694E5B2538225FEFC8D41635D5AE343DC7A07C.
+
+The attached disposable target was USB serial DM37IDLE01, shown by Disk
+Manager as usb-46F4:0001-00-0-10. It was GPT partition 1, named DM9 QEMU Proof,
+FAT32 volume label DM9PROOF, partition GUID
+829681EB-8BBF-45B1-814A-C54A926DB193, start LBA 2048, 1,226,719 sectors,
+ending at LBA 1,228,766, with 512-byte sectors. The full image length is
+629,145,600 bytes. QEMU attached the raw fixture with readonly=on.
+
+### Activation boundary and confirmation
+
+The earlier non-activation is explained by the pane sequence, not by a
+reproduced production defect. Disk Manager cycles Tab through Disks,
+Partitions, Actions, and Details. Left/Right only moves action focus in
+Actions; a Right press while Details was selected correctly did not select a
+button. After reaching Actions, paced Right presses visibly moved focus from
+Properties to Diagnostics, Verify Partition, Check FAT32, and Mount. The focus
+captures are in the run folder. After the normal Mount action, Disk Manager
+kept the same partition selected, reported Mounted at /mnt/disk1-part1
+(Read Only), and focused Dismount Volume.
+
+Mouse press and release were delivered as separate QMP PS/2 transitions to
+the guest Start button, Disk Manager menu item, and USB disk row. Each changed
+the visible guest UI. This run did not send a mouse click to the Dismount
+button because the keyboard action path opened the production confirmation.
+
+The confirmation identified the selected USB device, GPT partition 1, mount
+path /mnt/disk1-part1, device registration 2 and registry generation 5,
+extent LBA 2048 through 1,228,766, and sector size 512. It showed zero open
+files, zero open directories, zero active I/O, read-only durability, and
+“Ready to dismount the captured volume.” The numeric mountGeneration is not
+rendered by the dialog. The production capture and revalidation compare the
+full MountIdentity, including mount index and mountGeneration, device
+registration, partition identity, and partition-view generation.
+Storage diagnostics reported “Definitely not boot device”; the production
+admission path retained root, boot, and system protection checks.
+
+Escape was tested first. After the guest processed it, the confirmation
+closed, the selected volume remained Mounted at /mnt/disk1-part1, and the
+partition remained available. QMP showed zero writes and no Flush increase;
+the ready confirmation and post-cancel screen show no dismount result or
+active operation. The confirmation was reopened through the same GUI action.
+One Tab moved focus from Cancel to the green Dismount button. Enter was sent
+while that button was visibly focused. The screen remained on the ready
+confirmation during synchronous identity and partition-table revalidation.
+A later Space probe was sent while the previous frame still showed Ready; the
+guest exposes no per-key dispatch trace, so the exact consumption time of
+that follow-on key cannot be recovered. No mouse button event was sent to the
+confirmation.
+
+The production path captures and revalidates the target, then
+runDismountOperation calls vfs::dismount with the captured MountIdentity. Its
+VFS_OK branch displayed “Volume Dismounted.” After the production scan, the
+main view showed Unmounted and Mount path Unknown, the original mount was no
+longer enumerated, the selected FAT32 partition remained available, and the
+Mount action returned. Disk Manager repainted the successful state and kept
+the block device registered; it did not eject or safely remove it. No
+automatic FAT32 check, repair, or remount ran.
+
+### Media I/O and shutdown
+
+QMP target counters are cumulative and include boot, registration, GUI
+refresh, identity validation, and the post-operation scan:
+
+| Snapshot | Reads / bytes | Writes / bytes | Flushes |
+| --- | ---: | ---: | ---: |
+| Boot baseline | 31 / 207,872 | 0 / 0 | 1 |
+| Before mount | 163 / 275,456 | 0 / 0 | 1 |
+| After mount and scan | 2,866 / 1,659,392 | 0 / 0 | 1 |
+| Settled after Cancel | 6,080 / 3,304,960 | 0 / 0 | 1 |
+| Before explicit dismount | 12,521 / 6,602,752 | 0 / 0 | 1 |
+| Settled Gate A result | 13,694 / 7,203,328 | 0 / 0 | 1 |
+
+No failed read, write, or Flush operation was reported. QEMU marked
+account_invalid and account_failed on the block counters, so the read totals
+cannot be attributed to individual calls. The read-only confirmation required
+no write Flush, and the single Flush was already present at the boot
+snapshot. The intermediate confirmation and Cancel snapshots are retained
+alongside the table in the run folder.
+
+The full fixture SHA-256 was
+C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2 both before
+launch and after dismount and QEMU shutdown. The owned process was stopped
+through its own QMP endpoint. A fresh final census found no QEMU process,
+port 58953 was closed, and an exclusive read-only host open succeeded for the
+629,145,600-byte fixture.
+
+No source changed, so host tests and builds were not rerun. The retained
+baseline remains 1,491/1,491 storage checks, plus accepted DM36 checker/GUI,
+AMD64 kernel, build.bat, and UEFI x64 Release results. The DM36
+Dismount → Check FAT32 → Remount workflow was not run. Guest Gates B–G and
+the remaining pointer/Close parts of Gate H remain open; this run verified
+Gate I ownership and media integrity for the clean fixture. Keep .phase at
+DM36→DM37 and do not begin DM38.
+
+Screenshots, QMP snapshots, input transition notes, serial output, ownership
+manifest, and gate-a-evidence.json are retained in
+out/dm37/dismount-guest/runs/A-idle-dismount-cont5-20261019-visible/.

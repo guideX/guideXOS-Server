@@ -387,3 +387,33 @@ boundary, Gate A, the DM36 Check/Remount workflow, and remaining DM37 guest
 gates still require a clear owned QEMU lane. See the [DM37 phase report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md)
 for process identities, source paths, input evidence, runtime hashes, target
 identity, I/O counters, and remaining gates.
+
+## DM37 continuation 5 — visible QEMU Gate A verified
+
+The visible, source-matched GTK QEMU run resolved the prior activation
+qualification gap. Keyboard focus followed the actual pane order—Disks,
+Partitions, Actions, Details—and Left/Right moved among enabled actions once
+Actions was selected. Normal production Mount selected USB serial
+DM37IDLE01 at /mnt/disk1-part1; after mount refresh, Dismount Volume opened
+the production confirmation for GPT partition 1, LBA 2048–1,228,766. Escape
+first closed the confirmation while leaving the mount intact. Reopening it,
+Tab focused the green Dismount button and Enter was sent through the ordinary
+focused-button path. The production result showed VFS success and refreshed
+the GUI to Unmounted with the partition still available. The block device
+remained registered; no automatic check or remount ran.
+
+The QEMU-owned fixture backend was read-only. The full 629,145,600-byte
+DM37IDLE01 image matched its original SHA-256 after dismount and after QEMU
+exited. Cumulative QMP counters show zero writes and no Flush increase; QEMU
+marked its accounting metadata invalid, so reads cannot be isolated to
+individual calls. The owned process and QMP port closed, the final QEMU
+census was empty, and exclusive host access to the fixture succeeded.
+
+No production source changed. The accepted 1,491/1,491 storage result and
+AMD64 kernel, build.bat, and UEFI x64 Release build results remain retained.
+Gate A is verified; the busy, protection, durability, DM36
+Check/Remount, removal/replacement, and failure-injection guest gates remain
+open. .phase remains DM36→DM37, and DM38 has not started. Exact provenance,
+identity, activation/cancel evidence, screenshots, counters, hashes, and
+ownership shutdown are in the [DM37 continuation 5 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md)
+and ignored run folder out/dm37/dismount-guest/runs/A-idle-dismount-cont5-20261019-visible/.
