@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS79</title></head>
+<body>
+<h1>Navigator JavaScript JS79</h1>
+<pre id="result">JS79:pending</pre>
+<section id="rows">
+  <i id="r0" class="row"></i><i id="r1" class="row"></i>
+  <i id="r2" class="row"></i>
+</section>
+<section id="live-root">
+  <i id="l0" class="live"></i><i id="l1" class="live"></i>
+  <i id="l2" class="live"></i>
+</section>
+<section id="grow-root">
+  <i id="g0" class="grow"></i><i id="g1" class="grow"></i>
+  <i id="g2" class="candidate"></i><i id="g3" class="future"></i>
+</section>
+<section id="shrink-root">
+  <i id="s0" class="shrink"></i><i id="s1" class="shrink"></i>
+  <i id="s2" class="shrink"></i>
+</section>
+<ul id="filtered-root">
+  <li id="p0" class="pos selected"></li>
+  <li id="p1" class="pos selected"></li>
+  <li id="p2" class="pos selected"></li>
+  <li id="p3" class="pos selected"></li>
+</ul>
+<section id="adapter-root">
+  <b id="tag0" class="target"></b><b id="tag1" class="target"></b>
+</section>
+<section id="scope-left"><i id="left0" class="scope-row"></i></section>
+<section id="scope-right"><i id="right0" class="scope-row"></i></section>
+<button id="event-a" type="button">Run JS79 nested iterator events</button>
+<button id="event-b" type="button">Nested event B</button>
+<section id="event-rows">
+  <i id="ea0" class="event-a-row"></i>
+  <i id="ea1" class="event-a-row"></i>
+  <i id="ea2" class="event-a-row"></i>
+  <i id="eb0" class="event-b-row"></i>
+</section>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var rows = document.querySelectorAll('.row');
+var cursor = rows.values();
+var first = cursor.next();
+var second = cursor.next();
+var third = cursor.next();
+var terminal = cursor.next();
+var terminalAgain = cursor.next();
+verify(rows.values === rows.values && cursor.next === cursor.next);
+verify(first !== second && second !== third && terminal !== terminalAgain);
+verify(first.done === false && second.done === false && third.done === false);
+verify(first.value === rows.item(0) && first.value === rows[0] &&
+  second.value === rows[1] && third.value === rows[2]);
+verify(terminal.value === undefined && terminal.done === true &&
+  terminalAgain.value === undefined && terminalAgain.done === true);
+verify(first.value === rows[0] && first.done === false);
+var singleCursor = document.querySelectorAll('#r0').values();
+var singleFirst = singleCursor.next();
+var singleTerminal = singleCursor.next();
+verify(singleFirst.value === rows[0] && singleFirst.done === false &&
+  singleTerminal.value === undefined && singleTerminal.done === true);
+
+var empty = document.querySelectorAll('.absent');
+var emptyCursor = empty.values();
+var emptyFirst = emptyCursor.next();
+var emptyAgain = emptyCursor.next();
+verify(emptyFirst.value === undefined && emptyFirst.done === true &&
+  emptyAgain.value === undefined && emptyAgain.done === true &&
+  emptyFirst !== emptyAgain);
+
+var a = rows.values();
+var b = rows.values();
+var a0 = a.next();
+var a1 = a.next();
+var b0 = b.next();
+var a2 = a.next();
+var b1 = b.next();
+verify(a0.value === rows[0] && a1.value === rows[1] &&
+  b0.value === rows[0] && a2.value === rows[2] && b1.value === rows[1]);
+verify(a0 !== a1 && a1 !== b0 && b0 !== a2 && a0.done === false);
+
+var live = document.querySelectorAll('.live');
+var liveCursor = live.values();
+var liveFirst = liveCursor.next();
+liveFirst.value.removeAttribute('class');
+var liveSecond = liveCursor.next();
+var liveTerminal = liveCursor.next();
+verify(liveFirst.value.id === 'l0' && liveSecond.value.id === 'l2' &&
+  liveTerminal.value === undefined && liveTerminal.done === true);
+
+var grow = document.querySelectorAll('.grow');
+var growCursor = grow.values();
+document.querySelectorAll('#g2').item(0).setAttribute('class', 'grow');
+var growFirst = growCursor.next();
+var growSecond = growCursor.next();
+var growTerminal = growCursor.next();
+document.querySelectorAll('#g3').item(0).setAttribute('class', 'grow');
+var growTerminalAgain = growCursor.next();
+var growNewCursor = grow.values();
+var growNewFirst = growNewCursor.next();
+var growNewSecond = growNewCursor.next();
+var growNewThird = growNewCursor.next();
+var growNewFourth = growNewCursor.next();
+var growNewTerminal = growNewCursor.next();
+verify(growFirst.value.id === 'g0' && growSecond.value.id === 'g1' &&
+  growTerminal.done === true && growTerminalAgain.value === undefined &&
+  growTerminalAgain.done === true && growNewFirst.value.id === 'g0' &&
+  growNewSecond.value.id === 'g1' && growNewThird.value.id === 'g2' &&
+  growNewFourth.value.id === 'g3' && growNewTerminal.done === true);
+
+var shrink = document.querySelectorAll('.shrink');
+var shrinkCursor = shrink.values();
+document.querySelectorAll('#s0').item(0).removeAttribute('class');
+document.querySelectorAll('#s1').item(0).removeAttribute('class');
+document.querySelectorAll('#s2').item(0).removeAttribute('class');
+var shrinkResult = shrinkCursor.next();
+verify(shrinkResult.value === undefined && shrinkResult.done === true);
+
+var filtered = document.querySelectorAll('.pos:nth-child(odd of .selected)');
+var filteredCursor = filtered.values();
+var filteredFirst = filteredCursor.next();
+filteredFirst.value.removeAttribute('class');
+var filteredSecond = filteredCursor.next();
+verify(filteredFirst.value.id === 'p0' && filteredSecond.value.id === 'p3');
+
+var root = document.getElementById('adapter-root');
+var tags = root.getElementsByTagName('b');
+var classes = root.getElementsByClassName('target');
+var tagCursor = tags.values();
+var classCursor = classes.values();
+verify(tagCursor.next().value === tags[0] &&
+  classCursor.next().value === classes[0]);
+var left = document.getElementById('scope-left').querySelectorAll('.scope-row');
+var right = document.getElementById('scope-right').querySelectorAll('.scope-row');
+verify(left.values().next().value.id === 'left0' &&
+  right.values().next().value.id === 'right0');
+
+var eventA = document.getElementById('event-a');
+var eventB = document.getElementById('event-b');
+var eventCursorA;
+var eventValues = false;
+var eventMetadata = false;
+var eventAMetadata = false;
+var eventBMetadata = false;
+eventB.addEventListener('click', function(event) {
+  var bRows = document.querySelectorAll('.event-b-row');
+  var bCursor = bRows.values();
+  var bFirst = bCursor.next();
+  var some = bRows.some(function(element, index, collection) {
+    return element === bRows[index] && collection === bRows && index === 0;
+  });
+  var nestedA = eventCursorA.next();
+  eventValues = bFirst.value.id === 'eb0' && bFirst.done === false && some &&
+    nestedA.value.id === 'ea1' && nestedA.done === false;
+  eventBMetadata = event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2 && event.defaultPrevented === false;
+});
+eventA.addEventListener('click', function(event) {
+  var aRows = document.querySelectorAll('.event-a-row');
+  eventCursorA = aRows.values();
+  var outerFirst = eventCursorA.next();
+  eventB.click();
+  var outerThird = eventCursorA.next();
+  event.preventDefault();
+  eventAMetadata = event.target === eventA && event.currentTarget === eventA &&
+    event.eventPhase === 2 && event.defaultPrevented === true;
+  eventMetadata = eventAMetadata && eventBMetadata;
+  document.getElementById('result').textContent =
+    'JS79:event=outer:' + outerFirst.value.id + ':nested=' +
+    eventValues + ':outer=' + outerThird.value.id + ':metadata=' +
+    eventMetadata;
+});
+
+var initialMarker = 'JS79:initial:assertions=' + assertions +
+  ':failures=' + failures + ':empty=true:mutation=true:scope=true';
+document.getElementById('result').textContent = initialMarker;
+</script>
+</body>
+</html>

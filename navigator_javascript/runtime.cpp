@@ -2733,6 +2733,41 @@ bool RuntimeContext::readObjectPropertyForHost(RuntimeObjectId object,
     return readProperty(object, key, value, error, SourceLocation());
 }
 
+bool RuntimeContext::createCollectionIteratorResult(const HostValue& value,
+    bool done, Value& result, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    result = Value::undefined();
+    const std::vector<Value> noElements;
+    RuntimeObjectId object = kInvalidRuntimeObjectId;
+    if (!createObject(false, noElements, object, error)) return false;
+
+    Value convertedValue;
+    if (!convertHostValue(value, kInvalidRuntimeHostObjectId, convertedValue,
+            error, SourceLocation())) {
+        objects_.pop_back();
+        return false;
+    }
+
+    if (!writeProperty(object, "value", convertedValue, error) ||
+        !writeProperty(object, "done", Value::boolean(done), error)) {
+        RuntimeObject* record = objectAt(object);
+        if (record != nullptr) {
+            for (const RuntimeProperty& property : record->properties) {
+                if (totalPropertyCount_ > 0u) --totalPropertyCount_;
+                if (totalPropertyKeyBytes_ >= property.key.size())
+                    totalPropertyKeyBytes_ -= property.key.size();
+                else
+                    totalPropertyKeyBytes_ = 0u;
+            }
+        }
+        objects_.pop_back();
+        return false;
+    }
+    result = Value::object(object);
+    return true;
+}
+
 bool RuntimeContext::toNumberForHostArgument(const HostValue& input,
     double& number)
 {
@@ -2949,6 +2984,8 @@ RuntimeErrorCode RuntimeContext::mapHostResult(HostResultCode code) const
     case HostResultCode::DocumentMutationLimitExceeded:
         return RuntimeErrorCode::DocumentMutationLimitExceeded;
     case HostResultCode::CallbackLimitExceeded:
+        return RuntimeErrorCode::HostCallbackLimitExceeded;
+    case HostResultCode::IteratorLimitExceeded:
         return RuntimeErrorCode::HostCallbackLimitExceeded;
     }
     return RuntimeErrorCode::HostCallFailed;

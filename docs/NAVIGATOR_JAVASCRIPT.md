@@ -9935,3 +9935,159 @@ hosted Windows stack evidence does not establish bare-metal stack safety.
 
 JS79 can consider the next collection method independently; iterator protocols
 remain deferred.
+
+### JS79 bounded collection `values()` iterator foundation
+
+JS79 adds a bounded `values()` method to the retained selector collections
+introduced by JS75 and the tag-name and class-name adapters. Each call returns
+an independent host iterator object whose `next()` method returns a fresh
+ordinary JavaScript-visible object with `value` and `done` properties. `done`
+is a JavaScript Boolean. For a live Element lookup, `value` is the canonical
+Element host reference; on exhaustion, `value` is `undefined` and `done` is
+`true`. Empty collections return the terminal result on the first call.
+
+This is Navigator's bounded `values()` / `next()` interface. It is not a full
+ECMAScript iterator protocol: JS79 adds no `Symbol.iterator`, `for...of`, spread,
+destructuring, generator, or async-iterator support.
+
+Each iterator record stores the original collection token and document
+generation, its next logical index, the entry-length bound, and active and
+exhausted state. It references the existing retained collection record rather
+than copying a selector descriptor or storing Element identities. The fixed
+iterator registry has 128 records of 24 bytes each (3,072 bytes total); a full
+registry rejects another iterator without replacing any active cursor. The
+existing collection registry remains 128 records of 1,936 bytes each (247,808
+bytes total), and the selector descriptor remains 1,918 bytes.
+
+`values()` captures the collection length once when it creates the cursor.
+Each permitted index is looked up live when `next()` runs, so membership changes
+within the original bound can affect later results. Growth cannot extend the
+cursor. If shrinkage makes an index disappear, `next()` advances past that
+index and continues only within the captured bound; it never returns a missing
+Element as `value` with `done: false`. Independent cursors have separate indices
+and can be interleaved. Once exhausted, a cursor remains exhausted even if the
+collection later grows. Repeated terminal calls first pass the normal receiver
+and generation validation, then do no collection lookup and return newly
+allocated terminal result records. Collection growth within the same document
+cannot reopen the cursor. Replacing the document invalidates the old iterator
+handle through the stale-host path, including a cursor that had already reached
+exhaustion.
+
+The runtime creates result records directly through its ordinary object and
+property pools; it does not generate JavaScript source or require `eval` or
+object-literal parsing. Every successful call gets a distinct result object, so
+retaining an earlier result preserves its `value` and `done` properties after
+later calls. In the result-pool capacity test, 1,019 retained results filled
+the available ordinary object pool and the next call failed through the host
+callback limit error path. The cursor index did not commit for that failed
+result, so no Element is skipped if capacity later becomes available. Partial
+result allocation is rolled back on property-pool failure.
+
+Iterator method dispatch validates the host-object kind, iterator handle,
+collection token, and generation before accessing the collection. Invalid or
+stale receivers fail through the existing host TypeError or stale-host error
+path. Document replacement with reused structural serials cannot leak new
+generation Elements through an old cursor. An exhausted cursor remains
+terminal within its original document generation; a later generation
+invalidates its handle. Scoped collections, tag/class adapters, and filtered
+positional selectors use the same retained collection lookup and preserve
+canonical Element identity.
+The JS9 Event reentry policy remains intact; `getElementById()` was not added
+to the reentry allowlist. Nested Event and callback use of `values()` / `next()`
+was covered by the hosted and native qualification.
+
+#### JS79 native and resource qualification
+
+The focused JS79 native suite passed **202/202 checks**, including result
+object type and Boolean representation, stable retained results, empty and
+exhausted cursors, independent interleaving, exact live lookup indices,
+growth bounds, terminal stability after later growth, shrinkage,
+filtered/adapted/scoped collections, generation and serial reuse including
+stale exhausted cursors, invalid receivers, full iterator and collection registries,
+result-pool failure behavior, Event reentry, and performance probes. Strict
+compilation passed with `-Wall -Wextra -Werror -pedantic` using MinGW GCC
+15.2.0 targeting `x86_64-w64-mingw32`.
+
+The near-capacity result test retained 1,019 distinct results. It used 1,024 of
+1,024 runtime objects and 2,051 of 4,096 properties. The result records account
+for 220,104 bytes of object/property payload; the runtime's property vectors
+reserved 163,040 bytes and object vector reserved 57,344 bytes. Host-object
+usage was 1,022 of 2,048 records, with 24-byte records and 24,576 bytes of
+allocated vector capacity. The environment pool remained at 1 of 2,048, and
+the method pool used 3 records (24 bytes per record; 96 bytes allocated).
+
+The JS79 native probe measured the collection record at 1,936 bytes and the
+128-record collection registry at 247,808 bytes. Iterator records were 24
+bytes each and the 128-record iterator registry was 3,072 bytes. Production
+`-O2 -fstack-usage` reported static frames of 160 bytes for collection
+`values()`, 80 bytes for iterator `next()`, 368 bytes for evaluator host-value
+invocation, 448 bytes for result-object creation, and 576 bytes for runtime
+host-method invocation. Filtered rank frames were 4,352 / 10,496 / 18,688
+bytes for one / four / eight slots, respectively. These compiler-reported
+hosted frames are not bare-metal stack qualification.
+
+Seven-sample timings included parsing and evaluation. For the 64-element
+probe, medians in microseconds were 11 for cursor creation, 5 for the first
+read, 8 for a middle read, 24 for the last read, 21 for first exhaustion, and
+23 for a repeated exhausted read. Complete `values()` traversal measured 342,
+an `item()` loop 340, `forEach()` 137, filtered traversal 317, interleaved
+cursors 141, and the mutation probe 16 microseconds. These interpreter timings
+vary with system load and are recorded as measurements, not a speed claim.
+
+The full JavaScript regression matrix, JS75–JS78 focused runs, production
+build, and fresh-executable hosted aggregate are recorded in the JS79
+qualification closeout below.
+
+#### JS79 qualification closeout
+
+The full JavaScript regression matrix passed **81/81 lanes**, with
+**13,966/13,966 reported assertions across 40 assertion-bearing lanes**. It
+included JS9 and the JS75–JS79 regression suites. Focused native results were
+JS75 **61/61**, JS76 **106/106**, JS77 **135/135**, JS78 **102/102**, and JS79
+**202/202**; all focused strict-compilation lanes passed. The JS76 and JS78
+instrumented hosted stack probes also passed. JS79's `-O2 -fstack-usage`
+measurements above are compiler-reported hosted frames, not a bare-metal stack
+claim.
+
+The production `build.bat` completed with exit code 0 and printed
+`Build successful: guideXOSServer.exe`. The fresh executable used by the hosted
+smoke was
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,580,271
+bytes, SHA256
+`5C37ACE711911DF3CC68FB4C5F67BD5FF44252FBED1DFAC4C060969ED72527FC`. The
+hosted runner recorded PID **9044**, the same executable path and hash, and
+passed all four JS79 hosted checks: the primary fixture, result and mutation
+coverage, nested Event cursor use, and invalid unbound `next()` receiver.
+
+The hosted aggregate reported **670 checks passed** and **7 checks failed**.
+The seven failures were the established CSS cases: CSS 3C, CSS 3G, CSS 6A,
+CSS 6B (three checks), and CSS 6C. No hosted JavaScript check failed. The
+aggregate returned exit code 1 because of those CSS failures.
+
+The initial ignored-file baseline had **1,361 files / 90,344,777 bytes**. After
+hosted validation, every baseline file was present and hash-identical except
+for the production executable, which was restored from the verified external
+backup and then matched its original 8,398,274-byte SHA256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. The
+final comparison found **0 changed** and **0 missing** baseline files. Six
+JS79-created hosted logs totaling **499,155 bytes** were archived with matching
+hashes at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js79-hosted-logs-20261018`, but
+the normal per-file removal command was rejected by Windows command policy.
+The six logs remain in the checkout; the final ignored manifest therefore has
+**1,367 files / 90,843,932 bytes**. Inherited JS77/JS78 logs remain untouched.
+
+The starting repository was branch `NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`f7ebcd19b67df424d2d1f160ff969f8a1984922e`, with upstream divergence 0 ahead /
+0 behind and a clean tracked worktree. JS79 was not already implemented, and
+`.phase` was absent and remains absent. No branch switch, reset, clean, stash,
+or push was performed. Kernel/QEMU qualification was not run; it is not
+required by the established native and production-hosted acceptance model.
+
+**Outcome B — useful JS79 implementation and qualification, with six archived
+hosted logs retained because Windows command policy rejected their removal.**
+The local commit records the implementation, tests, hosted integration, and
+this qualification evidence; it was not pushed. The tracked worktree is clean
+after commit. Future JS80 work can consider `keys()` or `entries()` using the
+bounded cursor and result-object foundations; `Symbol.iterator` and
+`for...of` remain separate protocol work.

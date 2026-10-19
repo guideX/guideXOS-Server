@@ -23,6 +23,8 @@ constexpr HostObjectKind kNavigatorOptionsCollectionHostKind = 0x4A530804u;
 constexpr HostObjectKind kNavigatorDocumentFormsCollectionHostKind = 0x4A530805u;
 constexpr HostObjectKind kNavigatorSelectorCollectionHostKind = 0x4A530806u;
 constexpr HostObjectKind kNavigatorElementChildrenCollectionHostKind = 0x4A530807u;
+constexpr HostObjectKind kNavigatorSelectorCollectionIteratorHostKind =
+    0x4A530808u;
 constexpr HostInstanceId kNavigatorDocumentHostInstance = 1u;
 
 constexpr std::uint32_t kNavigatorGetElementByIdMethod = 1u;
@@ -48,6 +50,8 @@ constexpr std::uint32_t kNavigatorSelectorCollectionItemMethod = 20u;
 constexpr std::uint32_t kNavigatorSelectorCollectionForEachMethod = 21u;
 constexpr std::uint32_t kNavigatorSelectorCollectionSomeMethod = 22u;
 constexpr std::uint32_t kNavigatorSelectorCollectionEveryMethod = 23u;
+constexpr std::uint32_t kNavigatorSelectorCollectionValuesMethod = 24u;
+constexpr std::uint32_t kNavigatorSelectorCollectionIteratorNextMethod = 25u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -68,6 +72,7 @@ constexpr std::size_t kNavigatorScriptMaxSelectorAttributeNameLength = 64u;
 constexpr std::size_t kNavigatorScriptMaxSelectorAttributeValueLength = 128u;
 constexpr std::size_t kNavigatorScriptMaxClassQueryTokens = 8u;
 constexpr std::size_t kNavigatorScriptMaxSelectorCollections = 128u;
+constexpr std::size_t kNavigatorScriptMaxCollectionIterators = 128u;
 constexpr std::size_t kNavigatorScriptMaxNthArgumentLength = 32u;
 constexpr std::int16_t kNavigatorScriptMaxNthMagnitude = 32767;
 constexpr std::size_t kNavigatorScriptMaxFormValueBytes = 256u;
@@ -384,6 +389,10 @@ public:
         std::size_t completedIndex);
     using SelectorCollectionEveryLengthProbe = void (*)(void* context,
         std::size_t entryLength);
+    using SelectorCollectionIteratorLengthProbe = void (*)(void* context,
+        std::size_t entryLength);
+    using SelectorCollectionIteratorLookupProbe = void (*)(void* context,
+        std::size_t requestedIndex);
     void setRelativeSelectorDispatchProbe(
         RelativeSelectorDispatchProbe probe, void* context)
     {
@@ -425,6 +434,18 @@ public:
     {
         selectorCollectionEveryLengthProbe_ = probe;
         selectorCollectionEveryLengthProbeContext_ = context;
+    }
+    void setSelectorCollectionIteratorLengthProbe(
+        SelectorCollectionIteratorLengthProbe probe, void* context)
+    {
+        selectorCollectionIteratorLengthProbe_ = probe;
+        selectorCollectionIteratorLengthProbeContext_ = context;
+    }
+    void setSelectorCollectionIteratorLookupProbe(
+        SelectorCollectionIteratorLookupProbe probe, void* context)
+    {
+        selectorCollectionIteratorLookupProbe_ = probe;
+        selectorCollectionIteratorLookupProbeContext_ = context;
     }
 #endif
 
@@ -524,6 +545,7 @@ public:
 private:
     friend struct NavigatorScriptRelativeSelectorTestAccess;
     friend struct NavigatorScriptScopeSelectorTestAccess;
+    friend struct NavigatorScriptIteratorTestAccess;
     struct ClickHandlerRecord {
         HostInstanceId serial = 0;
         RuntimeFunctionId onclickFunction = kInvalidRuntimeFunctionId;
@@ -556,6 +578,17 @@ private:
         HostInstanceId scopeSerial = 0;
         NavigatorScriptSelectorDescriptor selector;
     };
+
+    struct SelectorCollectionIteratorRecord {
+        HostInstanceId collectionToken = 0u;
+        HostGenerationId generation = 0u;
+        std::uint32_t nextIndex = 0u;
+        std::uint32_t entryLength = 0u;
+        bool active = false;
+        bool exhausted = false;
+    };
+    static_assert(sizeof(SelectorCollectionIteratorRecord) == 24u,
+        "JS79 bounded iterator records must remain 24 bytes");
 
     struct SelectorCollectionLookup {
         bool found = false;
@@ -891,6 +924,17 @@ private:
         std::size_t index, HostInstanceId& serial) const;
     SelectorCollectionLookup selectorCollectionLookup(
         const SelectorCollectionRecord& record, std::size_t index) const;
+    SelectorCollectionIteratorRecord* selectorCollectionIteratorFor(
+        HostInstanceId token);
+    const SelectorCollectionIteratorRecord* selectorCollectionIteratorFor(
+        HostInstanceId token) const;
+    bool allocateSelectorCollectionIterator(HostInstanceId collectionToken,
+        std::size_t entryLength, HostInstanceId& iteratorToken);
+    HostResult selectorCollectionValues(
+        const HostObjectReference* receiver, HostValue& result);
+    HostResult selectorCollectionIteratorNext(RuntimeContext& runtime,
+        RuntimeErrorCode& callbackError,
+        const HostObjectReference* receiver, HostValue& result);
     HostResult selectorCollectionForEach(HostFunctionInvoker& functionInvoker,
         RuntimeErrorCode& callbackError,
         const HostObjectReference* receiver, const HostValue* arguments,
@@ -987,6 +1031,9 @@ private:
         clickListeners_{};
     std::array<SelectorCollectionRecord,
         kNavigatorScriptMaxSelectorCollections> selectorCollections_{};
+    std::array<SelectorCollectionIteratorRecord,
+        kNavigatorScriptMaxCollectionIterators>
+        selectorCollectionIterators_{};
     // Number of Elements represented by either table, retained for the
     // historical clickHandlerCount() diagnostic.
     std::size_t clickHandlerCount_ = 0;
@@ -1009,6 +1056,12 @@ private:
     void* selectorCollectionEveryCallbackProbeContext_ = nullptr;
     SelectorCollectionEveryLengthProbe selectorCollectionEveryLengthProbe_ = nullptr;
     void* selectorCollectionEveryLengthProbeContext_ = nullptr;
+    SelectorCollectionIteratorLengthProbe
+        selectorCollectionIteratorLengthProbe_ = nullptr;
+    void* selectorCollectionIteratorLengthProbeContext_ = nullptr;
+    SelectorCollectionIteratorLookupProbe
+        selectorCollectionIteratorLookupProbe_ = nullptr;
+    void* selectorCollectionIteratorLookupProbeContext_ = nullptr;
 #endif
     std::size_t activationDepth_ = 0;
     std::size_t resetDepth_ = 0;

@@ -2143,6 +2143,7 @@ void NavigatorScriptHostAdapter::attachDocument(
     generation_ = generation;
     clearClickHandlers();
     selectorCollections_ = {};
+    selectorCollectionIterators_ = {};
     returnBuffer_.clear();
 }
 
@@ -2151,6 +2152,7 @@ void NavigatorScriptHostAdapter::detachDocument()
     document_ = nullptr;
     clearClickHandlers();
     selectorCollections_ = {};
+    selectorCollectionIterators_ = {};
     returnBuffer_.clear();
 }
 
@@ -2159,6 +2161,7 @@ void NavigatorScriptHostAdapter::setGeneration(HostGenerationId generation)
     if (generation_ != generation) {
         clearClickHandlers();
         selectorCollections_ = {};
+        selectorCollectionIterators_ = {};
     }
     generation_ = generation;
 }
@@ -2206,7 +2209,9 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorSelectorCollectionItemMethod ||
         methodId == kNavigatorSelectorCollectionForEachMethod ||
         methodId == kNavigatorSelectorCollectionSomeMethod ||
-        methodId == kNavigatorSelectorCollectionEveryMethod;
+        methodId == kNavigatorSelectorCollectionEveryMethod ||
+        methodId == kNavigatorSelectorCollectionValuesMethod ||
+        methodId == kNavigatorSelectorCollectionIteratorNextMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -4347,6 +4352,52 @@ NavigatorScriptHostAdapter::selectorCollectionFor(HostInstanceId token) const
         selectorCollections_.size());
     if (index >= limit || !selectorCollections_[index].active) return nullptr;
     return &selectorCollections_[index];
+}
+
+NavigatorScriptHostAdapter::SelectorCollectionIteratorRecord*
+NavigatorScriptHostAdapter::selectorCollectionIteratorFor(HostInstanceId token)
+{
+    if (token == 0u) return nullptr;
+    const std::size_t index = static_cast<std::size_t>(token - 1u);
+    if (index >= selectorCollectionIterators_.size() ||
+        !selectorCollectionIterators_[index].active) return nullptr;
+    return &selectorCollectionIterators_[index];
+}
+
+const NavigatorScriptHostAdapter::SelectorCollectionIteratorRecord*
+NavigatorScriptHostAdapter::selectorCollectionIteratorFor(
+    HostInstanceId token) const
+{
+    if (token == 0u) return nullptr;
+    const std::size_t index = static_cast<std::size_t>(token - 1u);
+    if (index >= selectorCollectionIterators_.size() ||
+        !selectorCollectionIterators_[index].active) return nullptr;
+    return &selectorCollectionIterators_[index];
+}
+
+bool NavigatorScriptHostAdapter::allocateSelectorCollectionIterator(
+    HostInstanceId collectionToken, std::size_t entryLength,
+    HostInstanceId& iteratorToken)
+{
+    iteratorToken = 0u;
+    if (collectionToken == 0u ||
+        entryLength > static_cast<std::size_t>(
+            (std::numeric_limits<std::uint32_t>::max)())) return false;
+    for (std::size_t index = 0u;
+        index < selectorCollectionIterators_.size(); ++index) {
+        SelectorCollectionIteratorRecord& record =
+            selectorCollectionIterators_[index];
+        if (record.active) continue;
+        record.collectionToken = collectionToken;
+        record.generation = generation_;
+        record.nextIndex = 0u;
+        record.entryLength = static_cast<std::uint32_t>(entryLength);
+        record.active = true;
+        record.exhausted = false;
+        iteratorToken = static_cast<HostInstanceId>(index + 1u);
+        return true;
+    }
+    return false;
 }
 
 NavigatorScriptHostAdapter::SelectorCollectionRecord*
@@ -6740,6 +6791,12 @@ HostResult NavigatorScriptHostAdapter::validate(
         selectorCollectionFor(object.instanceId) != nullptr) {
         return HostResult();
     }
+    if (object.kind == kNavigatorSelectorCollectionIteratorHostKind) {
+        const SelectorCollectionIteratorRecord* iterator =
+            selectorCollectionIteratorFor(object.instanceId);
+        if (iterator != nullptr && iterator->generation == generation_)
+            return HostResult();
+    }
     return HostResult{HostResultCode::InvalidObject};
 }
 
@@ -6976,6 +7033,11 @@ HostResult NavigatorScriptHostAdapter::getProperty(
                 kNavigatorSelectorCollectionEveryMethod, true, true);
             return HostResult();
         }
+        if (textEquals(property, "values")) {
+            result = HostValue::method(
+                kNavigatorSelectorCollectionValuesMethod, true, true);
+            return HostResult();
+        }
         if (textEquals(property, "length")) {
             result = HostValue::number(static_cast<double>(
                 selectorMatchCount(*record)));
@@ -6993,6 +7055,17 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         result = HostValue::fromHostObject(HostObjectReference{
             lookup.serial, generation_, kNavigatorElementHostKind});
         return HostResult();
+    }
+
+    if (object.kind == kNavigatorSelectorCollectionIteratorHostKind) {
+        if (selectorCollectionIteratorFor(object.instanceId) == nullptr)
+            return HostResult{HostResultCode::InvalidObject};
+        if (textEquals(property, "next")) {
+            result = HostValue::method(
+                kNavigatorSelectorCollectionIteratorNextMethod, true, true);
+            return HostResult();
+        }
+        return HostResult{HostResultCode::PropertyNotFound};
     }
 
     const gxos::web::HtmlElementRef* element = findElement(object.instanceId);
@@ -7638,6 +7711,8 @@ HostResult NavigatorScriptHostAdapter::call(
     const HostObjectReference* receiver, std::uint32_t methodId,
     const HostValue* arguments, std::size_t argumentCount, HostValue& result)
 {
+    if (methodId == kNavigatorSelectorCollectionIteratorNextMethod)
+        return HostResult{HostResultCode::ReentryUnsupported};
     if (methodId == kNavigatorSelectorCollectionForEachMethod ||
         methodId == kNavigatorSelectorCollectionSomeMethod ||
         methodId == kNavigatorSelectorCollectionEveryMethod) {
@@ -7678,6 +7753,9 @@ HostResult NavigatorScriptHostAdapter::callWithRuntime(
     std::size_t argumentCount, HostValue& result)
 {
     callbackError = RuntimeErrorCode::None;
+    if (methodId == kNavigatorSelectorCollectionIteratorNextMethod)
+        return selectorCollectionIteratorNext(runtime, callbackError,
+            receiver, result);
     if (methodId == kNavigatorSelectorCollectionForEachMethod)
         return selectorCollectionForEach(functionInvoker, callbackError,
             receiver, arguments, argumentCount, result);
@@ -7770,6 +7848,115 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionEvery(
     return selectorCollectionCallbackTraversal(functionInvoker,
         callbackError, receiver, arguments, argumentCount, result,
         SelectorCollectionCallbackMode::Every);
+}
+
+HostResult NavigatorScriptHostAdapter::selectorCollectionValues(
+    const HostObjectReference* receiver, HostValue& result)
+{
+    if (receiver == nullptr ||
+        receiver->kind != kNavigatorSelectorCollectionHostKind)
+        return HostResult{HostResultCode::InvalidObject};
+    const HostResult receiverValidation = validate(*receiver);
+    if (!receiverValidation.succeeded()) return receiverValidation;
+    if (receiver->generation != generation_ || document_ == nullptr)
+        return HostResult{HostResultCode::StaleObject};
+    const SelectorCollectionRecord* collection =
+        selectorCollectionFor(receiver->instanceId);
+    if (collection == nullptr) return HostResult{HostResultCode::InvalidObject};
+    if (document_->structuralElements.size() > limits_.maxDocumentNodes)
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+
+    const std::size_t entryLength = selectorMatchCount(*collection);
+    if (entryLength > limits_.maxDocumentNodes ||
+        entryLength > static_cast<std::size_t>(
+            (std::numeric_limits<std::uint32_t>::max)()))
+        return HostResult{HostResultCode::DocumentLookupLimitExceeded};
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+    if (selectorCollectionIteratorLengthProbe_ != nullptr)
+        selectorCollectionIteratorLengthProbe_(
+            selectorCollectionIteratorLengthProbeContext_, entryLength);
+#endif
+
+    HostInstanceId iteratorToken = 0u;
+    if (!allocateSelectorCollectionIterator(receiver->instanceId,
+            entryLength, iteratorToken))
+        return HostResult{HostResultCode::IteratorLimitExceeded};
+    result = HostValue::fromHostObject(HostObjectReference{
+        iteratorToken, generation_,
+        kNavigatorSelectorCollectionIteratorHostKind});
+    return HostResult();
+}
+
+HostResult NavigatorScriptHostAdapter::selectorCollectionIteratorNext(
+    RuntimeContext& runtime, RuntimeErrorCode& callbackError,
+    const HostObjectReference* receiver, HostValue& result)
+{
+    callbackError = RuntimeErrorCode::None;
+    if (receiver == nullptr ||
+        receiver->kind != kNavigatorSelectorCollectionIteratorHostKind)
+        return HostResult{HostResultCode::InvalidObject};
+    const HostResult receiverValidation = validate(*receiver);
+    if (!receiverValidation.succeeded()) return receiverValidation;
+    if (receiver->generation != generation_ || document_ == nullptr)
+        return HostResult{HostResultCode::StaleObject};
+
+    SelectorCollectionIteratorRecord* iterator =
+        selectorCollectionIteratorFor(receiver->instanceId);
+    if (iterator == nullptr)
+        return HostResult{HostResultCode::InvalidObject};
+    if (iterator->generation != generation_)
+        return HostResult{HostResultCode::StaleObject};
+
+    const auto makeResult = [&runtime, &callbackError, &result](
+        const HostValue& value, bool done) {
+        Value resultValue;
+        if (!runtime.createCollectionIteratorResult(value, done,
+                resultValue, callbackError))
+            return HostResult{HostResultCode::CallFailed};
+        result = HostValue::object(resultValue.objectId());
+        return HostResult();
+    };
+
+    if (iterator->exhausted)
+        return makeResult(HostValue::undefined(), true);
+
+    const std::uint32_t bound = iterator->entryLength;
+    std::uint32_t index = iterator->nextIndex;
+    while (index < bound) {
+        if (iterator->generation != generation_ ||
+            receiver->generation != generation_ || document_ == nullptr)
+            return HostResult{HostResultCode::StaleObject};
+        const SelectorCollectionRecord* collection =
+            selectorCollectionFor(iterator->collectionToken);
+        if (collection == nullptr)
+            return HostResult{HostResultCode::StaleObject};
+#ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
+        if (selectorCollectionIteratorLookupProbe_ != nullptr)
+            selectorCollectionIteratorLookupProbe_(
+                selectorCollectionIteratorLookupProbeContext_, index);
+#endif
+        const SelectorCollectionLookup lookup =
+            selectorCollectionLookup(*collection,
+                static_cast<std::size_t>(index));
+        if (!lookup.found || lookup.serial == 0u) {
+            ++index;
+            continue;
+        }
+
+        const HostValue element = HostValue::fromHostObject(
+            HostObjectReference{lookup.serial, iterator->generation,
+                kNavigatorElementHostKind});
+        const HostResult resultStatus = makeResult(element, false);
+        if (!resultStatus.succeeded()) return resultStatus;
+        iterator->nextIndex = index + 1u;
+        return HostResult();
+    }
+
+    const HostResult resultStatus = makeResult(HostValue::undefined(), true);
+    if (!resultStatus.succeeded()) return resultStatus;
+    iterator->nextIndex = bound;
+    iterator->exhausted = true;
+    return HostResult();
 }
 
 HostResult NavigatorScriptHostAdapter::selectorCollectionCallbackTraversal(
@@ -7918,6 +8105,8 @@ HostResult NavigatorScriptHostAdapter::callInternal(
     }
     const HostResult receiverResult = validate(*receiver);
     if (!receiverResult.succeeded()) return receiverResult;
+    if (methodId == kNavigatorSelectorCollectionValuesMethod)
+        return selectorCollectionValues(receiver, result);
     if (methodId == kNavigatorSelectorCollectionItemMethod) {
         if (receiver->kind != kNavigatorSelectorCollectionHostKind)
             return HostResult{HostResultCode::InvalidValue};

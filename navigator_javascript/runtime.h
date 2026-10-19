@@ -237,6 +237,11 @@ public:
     // while validating a host call. Missing properties return Undefined.
     bool readObjectPropertyForHost(RuntimeObjectId object,
         const std::string& key, Value& value, RuntimeErrorCode& error);
+    // Creates one fresh ordinary result object for the bounded collection
+    // iterator host API. The value is converted through the active realm's
+    // normal host-value path so Element handles retain canonical identity.
+    bool createCollectionIteratorResult(const HostValue& value, bool done,
+        Value& result, RuntimeErrorCode& error);
     // Primitive ToNumber conversion for Web IDL host arguments. Objects and
     // callable values are rejected because this bounded runtime does not
     // implement ToPrimitive for host-call coercion.
@@ -308,6 +313,7 @@ public:
 private:
     class Evaluator;
     friend class Evaluator;
+    friend struct NavigatorScriptRuntimeTestAccess;
 
     struct FunctionRecord {
         enum class Kind : std::uint8_t {
