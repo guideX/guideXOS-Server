@@ -1,16 +1,22 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
-    [string]$EvidenceRoot = ""
+    [string]$EvidenceRoot = "",
+    [string]$ArtifactsRoot = ""
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
-    $EvidenceRoot = Join-Path $RepoRoot 'out\dotnet\c177-managed-notes-newline-save-policy\host'
+    $EvidenceRoot = Join-Path $RepoRoot 'out\dotnet\c179-managed-task-manager-resize\host'
 }
 $EvidenceRoot = [System.IO.Path]::GetFullPath($EvidenceRoot)
+if (-not [string]::IsNullOrWhiteSpace($ArtifactsRoot)) {
+    $ArtifactsRoot = [System.IO.Path]::GetFullPath($ArtifactsRoot)
+} else {
+    $ArtifactsRoot = $EvidenceRoot
+}
 $allowedRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot 'out\dotnet')).TrimEnd('\', '/') + '\'
 if (-not $EvidenceRoot.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "C169 host evidence must remain under $allowedRoot"
@@ -74,7 +80,7 @@ if (-not $dotnet) {
     $hostProject = Join-Path $RepoRoot 'samples\host\ManagedUiRegression\ManagedUiRegression.csproj'
     $hostGate = Invoke-C169Step 'managed-ui-host-suites' {
         & $dotnet.Source run --project $hostProject --configuration Release `
-            --artifacts-path (Join-Path $EvidenceRoot "dotnet-artifacts-$runId")
+            --artifacts-path (Join-Path $ArtifactsRoot "dotnet-artifacts-$runId")
     } (Join-Path $EvidenceRoot 'managed-ui-host-suites.txt')
 }
 
@@ -85,7 +91,7 @@ if (-not $powershell) {
 } else {
     $settingsArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $settingsRunner,
         '-RepoRoot', $RepoRoot, '-EvidenceRoot', (Join-Path $EvidenceRoot 'c168-settings'),
-        '-ArtifactsRoot', (Join-Path $EvidenceRoot "c168-settings\dotnet-artifacts-$runId"))
+        '-ArtifactsRoot', (Join-Path $ArtifactsRoot "c168-settings\dotnet-artifacts-$runId"))
     $settingsGate = Invoke-C169Step 'c167-c168-settings-host-suites' {
         & $powershell.Source @settingsArgs
     } (Join-Path $EvidenceRoot 'c167-c168-settings-host-suites.txt')
@@ -149,6 +155,14 @@ $c178StressMatch = [regex]::Match($hostGate.output,
     '(?m)^C178-STRESS layout=(\d+) alternating=(\d+) arithmetic=(\d+) lifecycles=(\d+) allocationBytes=(-?\d+) drift=(\d+) result=(PASS|FAIL)\s*$')
 $c178StressDetailMatch = [regex]::Match($hostGate.output,
     '(?m)^C178-STRESS-DETAIL firstFailedCase=([^\s]*)\s*$')
+$c179ResizeSuite = @($suites | Where-Object name -eq 'C179-TaskManagerResize')
+$c179ResizeStressSuite = @($suites | Where-Object name -eq 'C179-TaskManagerResizeStress')
+$c179ResizeDetailMatch = [regex]::Match($hostGate.output,
+    '(?m)^C179-TASK-MANAGER-RESIZE-DETAIL firstFailedCase=([^\s]*)\s*$')
+$c179StressMatch = [regex]::Match($hostGate.output,
+    '(?m)^C179-STRESS layout=(\d+) alternating=(\d+) refreshResize=(\d+) rejected=(\d+) lifecycles=(\d+) resizeAllocationBytes=(-?\d+) refreshAllocationBytes=(-?\d+) drift=(\d+) result=(PASS|FAIL)\s*$')
+$c179StressDetailMatch = [regex]::Match($hostGate.output,
+    '(?m)^C179-STRESS-DETAIL firstFailedCase=([^\s]*)\s*$')
 $c167Match = [regex]::Match($settingsGate.output,
     'C167 host UI/state cases=(\d+) stress=(\d+) result=(PASS|FAIL)')
 $c168Match = [regex]::Match($settingsGate.output,
@@ -167,13 +181,14 @@ $baselineSuiteNames = @(
     'C175-NotesResize', 'C175-NotesResizeStress',
     'C176-NotesNavigation', 'C176-NotesNavigationStress',
     'C177-NotesNewline', 'C177-NotesNewlineStress',
-    'C178-CalculatorResize', 'C178-CalculatorResizeStress')
+    'C178-CalculatorResize', 'C178-CalculatorResizeStress',
+    'C179-TaskManagerResize', 'C179-TaskManagerResizeStress')
 $suiteNames = @($suites | ForEach-Object { $_.name })
 $hostSummaryValid = $summaryMatch.Success -and $summaryMatch.Groups[5].Value -eq 'PASS' -and
-    [int]$summaryMatch.Groups[1].Value -eq 32 -and $suites.Count -eq 32 -and
-    [int]$summaryMatch.Groups[2].Value -eq 32 -and
+    [int]$summaryMatch.Groups[1].Value -eq 34 -and $suites.Count -eq 34 -and
+    [int]$summaryMatch.Groups[2].Value -eq 34 -and
     [int]$summaryMatch.Groups[3].Value -eq 0 -and
-    [int]$summaryMatch.Groups[4].Value -eq 846 -and
+    [int]$summaryMatch.Groups[4].Value -eq 871 -and
     @($baselineSuiteNames | Where-Object { $suiteNames -notcontains $_ }).Count -eq 0 -and
     @($suiteNames | Where-Object { $_ -notin $baselineSuiteNames }).Count -eq 0 -and
     @($suites | Where-Object result -ne 'PASS').Count -eq 0
@@ -368,11 +383,29 @@ $c178StressPass = $c178StressMatch.Success -and
     [int]$c178StressMatch.Groups[5].Value -eq 0 -and
     [int]$c178StressMatch.Groups[6].Value -eq 0 -and
     $c178ResizeSuitePass -and $c178ResizeStressSuitePass
+$c179ResizeSuitePass = $c179ResizeSuite.Count -eq 1 -and
+    $c179ResizeSuite[0].cases -eq 20 -and
+    $c179ResizeSuite[0].result -eq 'PASS'
+$c179ResizeStressSuitePass = $c179ResizeStressSuite.Count -eq 1 -and
+    $c179ResizeStressSuite[0].cases -eq 5 -and
+    $c179ResizeStressSuite[0].result -eq 'PASS'
+$c179StressPass = $c179StressMatch.Success -and
+    $c179ResizeDetailMatch.Success -and $c179ResizeDetailMatch.Groups[1].Value -eq '' -and
+    $c179StressDetailMatch.Success -and $c179StressDetailMatch.Groups[1].Value -eq '' -and
+    $c179StressMatch.Groups[9].Value -eq 'PASS' -and
+    [int]$c179StressMatch.Groups[1].Value -eq 1000 -and
+    [int]$c179StressMatch.Groups[2].Value -eq 500 -and
+    [int]$c179StressMatch.Groups[3].Value -eq 250 -and
+    [int]$c179StressMatch.Groups[4].Value -eq 250 -and
+    [int]$c179StressMatch.Groups[5].Value -eq 100 -and
+    [long]$c179StressMatch.Groups[6].Value -eq 0 -and
+    [int]$c179StressMatch.Groups[8].Value -eq 0 -and
+    $c179ResizeSuitePass -and $c179ResizeStressSuitePass
 $gatePassed = $c135Pass -and $hostGate.status -eq 'PASS' -and
     $hostSummaryValid -and $c168Pass -and $stressPass -and $c170StressPass -and
     $c171StressPass -and $c172StressPass -and $c173StressPass -and
     $c174StressPass -and $c175StressPass -and $c176StressPass -and
-    $c177StressPass -and $c178StressPass
+    $c177StressPass -and $c178StressPass -and $c179StressPass
 
 $artifactRecords = @(
     foreach ($step in $script:steps) {
@@ -412,7 +445,7 @@ $manifestStatus = if ($gatePassed -and $integrityErrors.Count -eq 0) { 'PASS' } 
 
 $manifest = [ordered]@{
     schemaVersion = 1
-    phase = 'C178-managed-calculator-resize-host-regression'
+    phase = 'C179-managed-task-manager-resize-host-regression'
     sourceHead = $sourceHead
     runId = $runId
     status = $manifestStatus
@@ -571,6 +604,21 @@ $manifest = [ordered]@{
         stressFirstFailedCase = if ($c178StressDetailMatch.Success) { $c178StressDetailMatch.Groups[1].Value } else { 'missing' }
         result = if ($c178StressPass) { 'PASS' } else { 'FAIL' }
     }
+    c179ManagedTaskManagerResize = [ordered]@{
+        focusedCases = if ($c179ResizeSuite.Count -eq 1) { $c179ResizeSuite[0].cases } else { 0 }
+        stressCases = if ($c179ResizeStressSuite.Count -eq 1) { $c179ResizeStressSuite[0].cases } else { 0 }
+        layoutUpdates = if ($c179StressMatch.Success) { [int]$c179StressMatch.Groups[1].Value } else { 0 }
+        alternatingResizes = if ($c179StressMatch.Success) { [int]$c179StressMatch.Groups[2].Value } else { 0 }
+        refreshResizeCycles = if ($c179StressMatch.Success) { [int]$c179StressMatch.Groups[3].Value } else { 0 }
+        rejectedGeometryChecks = if ($c179StressMatch.Success) { [int]$c179StressMatch.Groups[4].Value } else { 0 }
+        lifecycleCycles = if ($c179StressMatch.Success) { [int]$c179StressMatch.Groups[5].Value } else { 0 }
+        resizeAllocationBytes = if ($c179StressMatch.Success) { [long]$c179StressMatch.Groups[6].Value } else { -1 }
+        refreshAllocationBytes = if ($c179StressMatch.Success) { [long]$c179StressMatch.Groups[7].Value } else { -1 }
+        geometryDriftCount = if ($c179StressMatch.Success) { [int]$c179StressMatch.Groups[8].Value } else { -1 }
+        firstFailedCase = if ($c179ResizeDetailMatch.Success) { $c179ResizeDetailMatch.Groups[1].Value } else { 'missing' }
+        stressFirstFailedCase = if ($c179StressDetailMatch.Success) { $c179StressDetailMatch.Groups[1].Value } else { 'missing' }
+        result = if ($c179StressPass) { 'PASS' } else { 'FAIL' }
+    }
     c167 = if ($c167Match.Success) {
         [ordered]@{ focusedCases = [int]$c167Match.Groups[1].Value; stressIterations = [int]$c167Match.Groups[2].Value; result = $c167Match.Groups[3].Value }
     } else { [ordered]@{ result = 'FAIL' } }
@@ -592,7 +640,7 @@ $manifestJson = $manifest | ConvertTo-Json -Depth 12
 Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding utf8
 $parsedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
 $manifestValid = $parsedManifest.schemaVersion -eq 1 -and
-    $parsedManifest.phase -eq 'C178-managed-calculator-resize-host-regression' -and
+    $parsedManifest.phase -eq 'C179-managed-task-manager-resize-host-regression' -and
     $parsedManifest.sourceHead -eq $sourceHead -and
     $parsedManifest.status -eq $manifestStatus -and
     $parsedManifest.artifactIntegrity.referencedFiles.Count -eq $artifactRecords.Count -and

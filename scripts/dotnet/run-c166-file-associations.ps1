@@ -16,6 +16,8 @@ param(
     [switch]$C176ManagedNotesNavigation,
     [switch]$C177ManagedNotesNewlineSave,
     [switch]$C178ManagedCalculatorResize,
+    [switch]$C179ManagedTaskManagerResize,
+    [switch]$FinalizeC179ProductionManifestOnly,
     [switch]$C167SettingsDefaultApps,
     [switch]$ReuseC167ProofKernel,
     [switch]$ReuseC167ProofComposite,
@@ -43,6 +45,7 @@ $script:c175ManagedNotesResize = [bool]$C175ManagedNotesResize
 $script:c176ManagedNotesNavigation = [bool]$C176ManagedNotesNavigation
 $script:c177ManagedNotesNewlineSave = [bool]$C177ManagedNotesNewlineSave
 $script:c178ManagedCalculatorResize = [bool]$C178ManagedCalculatorResize
+$script:c179ManagedTaskManagerResize = [bool]$C179ManagedTaskManagerResize
 $script:c173ManagedExplorerHeight = 390
 $script:c166ManagedExplorerOriginX = -1
 $script:c166ManagedExplorerOriginY = -1
@@ -120,6 +123,16 @@ if ($C178ManagedCalculatorResize -and
      -not $C176ManagedNotesNavigation)) {
     throw 'C178 requires the accepted C173-C176 managed application regression lane.'
 }
+if ($C179ManagedTaskManagerResize -and
+    (-not $C178ManagedCalculatorResize -or -not $C173ManagedFileExplorerResize -or
+     -not $C175ManagedNotesResize -or -not $C176ManagedNotesNavigation -or
+     -not $C177ManagedNotesNewlineSave)) {
+    throw 'C179 requires the accepted C173-C178 managed application regression lane.'
+}
+if ($C179ManagedTaskManagerResize -and
+    -not ($RunC169ManagedUiProofBoots -or $RunC169ManagedUiOrdinaryAcceptance)) {
+    throw 'C179 requires three focused or three proof-disabled managed UI boots.'
+}
 if ($ReuseC167ProofKernel -and -not $RunC167SettingsProofBoots) {
     throw 'ReuseC167ProofKernel applies only to the real Settings UI proof lane.'
 }
@@ -135,6 +148,8 @@ if ($RunC169ManagedUiOrdinaryAcceptance -and
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $EvidenceRoot = if ($HostTestsOnly) {
         Join-Path $RepoRoot 'out\dotnet\c166r9-host-validation'
+    } elseif ($C179ManagedTaskManagerResize) {
+        Join-Path $RepoRoot 'out\dotnet\c179-managed-task-manager-resize'
     } elseif ($C172LiveWindowResize) {
         if ($C178ManagedCalculatorResize) {
             Join-Path $RepoRoot 'out\dotnet\c178-managed-calculator-resize'
@@ -732,7 +747,22 @@ function Write-C172HostedTestManifest([string]$EvidenceRoot,[string]$HostManifes
             $hostManifest.c178ManagedCalculatorResize.hotPathAllocationBytes -eq 0 -and
             $hostManifest.c178ManagedCalculatorResize.driftCount -eq 0 -and
             $hostManifest.c178ManagedCalculatorResize.result -eq 'PASS'
-        ($legacyC173Host -or $c174Host -or $c175Host -or $c176Host -or $c177Host -or $c178Host) -and
+        $c179Host = $hostManifest.phase -eq
+            'C179-managed-task-manager-resize-host-regression' -and
+            $hostManifest.focusedSummary.suites -eq 34 -and
+            $hostManifest.focusedSummary.cases -eq 871 -and
+            $hostManifest.c179ManagedTaskManagerResize.focusedCases -eq 20 -and
+            $hostManifest.c179ManagedTaskManagerResize.stressCases -eq 5 -and
+            $hostManifest.c179ManagedTaskManagerResize.layoutUpdates -eq 1000 -and
+            $hostManifest.c179ManagedTaskManagerResize.alternatingResizes -eq 500 -and
+            $hostManifest.c179ManagedTaskManagerResize.refreshResizeCycles -eq 250 -and
+            $hostManifest.c179ManagedTaskManagerResize.rejectedGeometryChecks -eq 250 -and
+            $hostManifest.c179ManagedTaskManagerResize.lifecycleCycles -eq 100 -and
+            $hostManifest.c179ManagedTaskManagerResize.resizeAllocationBytes -eq 0 -and
+            $hostManifest.c179ManagedTaskManagerResize.refreshAllocationBytes -eq 0 -and
+            $hostManifest.c179ManagedTaskManagerResize.geometryDriftCount -eq 0 -and
+            $hostManifest.c179ManagedTaskManagerResize.result -eq 'PASS'
+        ($legacyC173Host -or $c174Host -or $c175Host -or $c176Host -or $c177Host -or $c178Host -or $c179Host) -and
             $hostManifest.c173ManagedFileExplorerResize.focusedCases -eq 47
     } else {
         $hostManifest.phase -eq 'C172-managed-window-resize-host-regression' -and
@@ -1462,6 +1492,189 @@ function Write-C173ProductionAcceptanceManifest([string]$EvidenceRoot,
         }
     }
     Write-Host "C173 production acceptance manifest PASS: $manifestPath"
+}
+
+function Write-C179ProductionAcceptanceManifest([string]$EvidenceRoot,
+    [string]$SourceManifestPath,[string]$FocusedManifestPath,
+    [string]$HostManifestPath,[string]$RepoRoot,[string]$SourceHead) {
+    $source = Get-Content -LiteralPath $SourceManifestPath -Raw | ConvertFrom-Json
+    $focused = Get-Content -LiteralPath $FocusedManifestPath -Raw | ConvertFrom-Json
+    $hostManifest = Get-Content -LiteralPath $HostManifestPath -Raw | ConvertFrom-Json
+    if ($source.outcome -ne 'A' -or $source.sourceHead -ne $SourceHead -or
+        @($source.ordinaryBoots).Count -ne 3 -or
+        -not $source.cleanProduction.proof1Excluded -or
+        $focused.status -ne 'PASS' -or $focused.outcome -ne 'A' -or
+        $focused.sourceHead -ne $SourceHead -or $focused.focusedBootCount -ne 3 -or
+        $hostManifest.status -ne 'PASS' -or
+        $hostManifest.c179ManagedTaskManagerResize.result -ne 'PASS' -or
+        $hostManifest.c179ManagedTaskManagerResize.resizeAllocationBytes -ne 0 -or
+        $hostManifest.c179ManagedTaskManagerResize.geometryDriftCount -ne 0) {
+        throw 'C179 proof-disabled production acceptance prerequisites are incomplete or stale.'
+    }
+    foreach ($sourceFile in $focused.sourceFiles) {
+        # This orchestration script is the test harness, not a runtime source.
+        # The ordinary lane may receive narrow harness fixes after focused
+        # proof; the focused manifest retains its original hash below.
+        if ([string]$sourceFile.path -eq 'scripts/dotnet/run-c166-file-associations.ps1') {
+            continue
+        }
+        $path = Join-Path $RepoRoot ([string]$sourceFile.path -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+            (Get-Sha256 $path) -ne [string]$sourceFile.sha256) {
+            throw "C179 source changed after focused guest proof: $($sourceFile.path)"
+        }
+    }
+    $c179 = @(
+        $source.ordinaryBoots[0].productionIntegration.c179,
+        $source.ordinaryBoots[1].productionIntegration.taskManagerResize,
+        $source.ordinaryBoots[2].productionIntegration.taskManagerResize)
+    if (@($c179 | Where-Object { -not $_ -or $_.status -ne 'PASS' -or
+        $_.focusedProofControlled -or $_.identity.stableThroughResize -ne $true }).Count -gt 0 -or
+        $c179[0].scenario -ne 'geometry' -or $c179[1].scenario -ne 'refresh' -or
+        $c179[2].scenario -ne 'concurrent' -or
+        -not $c179[1].refreshSelectionPreserved -or -not $c179[1].focusReturn -or
+        -not $c179[2].concurrentExplorer -or -not $c179[2].concurrentNotes) {
+        throw 'C179 ordinary acceptance requires three proof-disabled geometry, refresh/state, and concurrent application scenarios.'
+    }
+
+    $files = [System.Collections.Generic.List[object]]::new()
+    $files.Add((New-C170EvidenceFileRecord 'ordinary-acceptance-source-manifest' `
+        $SourceManifestPath (Get-Sha256 $SourceManifestPath)))
+    $files.Add((New-C170EvidenceFileRecord 'focused-C179-proof-manifest' `
+        $FocusedManifestPath (Get-Sha256 $FocusedManifestPath)))
+    $files.Add((New-C170EvidenceFileRecord 'C179-host-regression-manifest' `
+        ([string]$hostManifestPath) (Get-Sha256 $HostManifestPath)))
+    $bootRecords = [System.Collections.Generic.List[object]]::new()
+    for ($index=0; $index -lt 3; $index++) {
+        $boot = $source.ordinaryBoots[$index]
+        $scenario = $c179[$index]
+        $serialPath = [string]$boot.serialPath
+        if (-not (Test-Path -LiteralPath $serialPath -PathType Leaf) -or
+            (Get-Sha256 $serialPath) -ne [string]$boot.serialSha256) {
+            throw "C179 ordinary boot $($index+1) serial log is missing or mismatched."
+        }
+        $serialText = Get-Content -LiteralPath $serialPath -Raw
+        if ($serialText -match 'C179-(?:NATIVE-GEOMETRY|TM-GEOMETRY|TM-LAUNCH)') {
+            throw "C179 proof-only diagnostics appeared in ordinary production boot $($index+1)."
+        }
+        $serialRecord = New-C170EvidenceFileRecord "ordinary-boot-$($index+1)-serial" `
+            $serialPath (Get-Sha256 $serialPath)
+        $files.Add($serialRecord)
+        $qmpPath = [string]$scenario.qmpLog
+        if (-not (Test-Path -LiteralPath $qmpPath -PathType Leaf)) {
+            throw "C179 ordinary boot $($index+1) QMP evidence is missing: $qmpPath"
+        }
+        $qmpRecord = New-C170EvidenceFileRecord "ordinary-boot-$($index+1)-qmp-input" `
+            $qmpPath (Get-Sha256 $qmpPath)
+        $files.Add($qmpRecord)
+        $screenshots = [System.Collections.Generic.List[object]]::new()
+        $imageRefs = [System.Collections.Generic.List[object]]::new()
+        if ($scenario.initialSnapshot.screenshot) {
+            $imageRefs.Add($scenario.initialSnapshot.screenshot)
+        }
+        if ($scenario.finalScreenshot) { $imageRefs.Add($scenario.finalScreenshot) }
+        foreach ($resize in $scenario.resizeTransitions) {
+            if ($resize.screenshot) { $imageRefs.Add($resize) }
+        }
+        foreach ($imageRef in $imageRefs) {
+            if ($imageRef.PSObject.Properties['path']) {
+                $imagePath = [string]$imageRef.path
+                $imageHash = [string]$imageRef.sha256
+            } else {
+                $imagePath = [string]$imageRef.screenshot
+                $imageHash = [string]$imageRef.screenshotSha256
+            }
+            if (-not $imagePath -or -not (Test-Path -LiteralPath $imagePath -PathType Leaf) -or
+                (Get-Sha256 $imagePath) -ne $imageHash) {
+                throw "C179 ordinary boot $($index+1) screenshot is missing or mismatched: $imagePath"
+            }
+            $record = New-C170EvidenceFileRecord "ordinary-boot-$($index+1)-task-manager-screenshot" `
+                $imagePath $imageHash
+            $files.Add($record)
+            $screenshots.Add([ordered]@{path=$record.path;sha256=$record.sha256})
+        }
+        $bootRecords.Add([ordered]@{
+            stage=[string]$boot.stage;status='PASS';scenario=$scenario
+            serial=[ordered]@{path=$serialRecord.path;sha256=$serialRecord.sha256}
+            qmpInput=[ordered]@{path=$qmpRecord.path;sha256=$qmpRecord.sha256}
+            kernelSha256=[string]$boot.kernelSha256;ramdiskSha256=[string]$boot.ramdiskSha256
+            proofDiagnosticMarkers='absent';screenshots=@($screenshots.ToArray())
+        })
+    }
+    $candidateRecords = [System.Collections.Generic.List[object]]::new()
+    $forbiddenProductionMarkers = @('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS',
+        'PROOF-SCENARIO-FAIL','PROOF C166','GXPF','C179-NATIVE-GEOMETRY',
+        'C179-TM-GEOMETRY','C179-TM-LAUNCH')
+    foreach ($candidate in $source.cleanProduction.allCandidateStrings) {
+        $path = [string]$candidate.path
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+            (Get-Sha256 $path) -ne [string]$candidate.sha256) {
+            throw "C179 production candidate is missing or mismatched: $path"
+        }
+        $candidateAscii = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($path))
+        foreach ($marker in $forbiddenProductionMarkers) {
+            if ($candidateAscii.IndexOf($marker,[StringComparison]::Ordinal) -ge 0) {
+                throw "C179 proof-only marker '$marker' remains in clean production candidate $path"
+            }
+        }
+        $record = New-C170EvidenceFileRecord "production-candidate-$([IO.Path]::GetFileName($path))" `
+            $path ([string]$candidate.sha256)
+        $files.Add($record)
+        $candidateRecords.Add([ordered]@{path=$record.path;sha256=$record.sha256})
+    }
+    if ($candidateRecords.Count -lt 3) {
+        throw 'C179 production manifest requires composite, kernel, and ramdisk candidate hashes.'
+    }
+    $manifest = [ordered]@{
+        schemaVersion=1;phase='C179-proof-disabled-managed-task-manager-resize'
+        sourceHead=$SourceHead;sourceBranch='v1.1_DOTNET_SUPPORT'
+        status='PASS';outcome='A';ordinaryBootCount=$bootRecords.Count
+        proofControl='absent from production candidate';proof1Excluded=[bool]$source.cleanProduction.proof1Excluded
+        scenarios=@('geometry','refresh','concurrent')
+        bounds=[ordered]@{initial=[ordered]@{width=800;height=370};minimum=[ordered]@{width=800;height=344};maximum=[ordered]@{width=960;height=452};titlebarHeight=24}
+        hostRegression=[ordered]@{manifest=[System.IO.Path]::GetFullPath($HostManifestPath);suites=[int]$hostManifest.focusedSummary.suites;cases=[int]$hostManifest.focusedSummary.cases;status='PASS'}
+        productionCandidates=@($candidateRecords.ToArray())
+        ordinaryBoots=@($bootRecords.ToArray())
+        proofMarkerScan=[ordered]@{forbidden=$forbiddenProductionMarkers;candidateStrings='absent';guestSerialLogs='absent';result='PASS'}
+        sourceFiles=@($focused.sourceFiles)
+        postFocusedHarnessChange=[ordered]@{
+            path='scripts/dotnet/run-c166-file-associations.ps1'
+            focusedProofSha256=[string](@($focused.sourceFiles | Where-Object {
+                $_.path -eq 'scripts/dotnet/run-c166-file-associations.ps1'
+            })[0].sha256)
+            productionAcceptanceSha256=(Get-Sha256 (Join-Path $RepoRoot 'scripts/dotnet/run-c166-file-associations.ps1'))
+            scope='ordinary acceptance harness only; all managed application, kernel, ABI, and host regression sources remain hash-verified against focused proof'
+        }
+        remainingUserVisibleLimitations=@('No guest snapshot exceeded the 16-row viewport; host tests exercised 20-row storage and scroll clamping.')
+        qemuOwnership='only runner-owned QEMU processes stopped; no unrelated process terminated'
+        files=@($files.ToArray());artifactIntegrity=[ordered]@{result='PASS';algorithm='SHA-256';errors=@()}
+    }
+    $manifestPath = Join-Path $EvidenceRoot 'c179-production-acceptance-manifest.json'
+    $manifest | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+    $verified = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($verified.status -ne 'PASS' -or $verified.outcome -ne 'A' -or
+        @($verified.ordinaryBoots).Count -ne 3 -or @($verified.productionCandidates).Count -lt 3) {
+        throw 'C179 ordinary production manifest failed JSON/schema validation.'
+    }
+    foreach ($record in $verified.files) {
+        if (-not (Test-Path -LiteralPath $record.path -PathType Leaf) -or
+            (Get-Sha256 $record.path) -ne $record.sha256) {
+            throw "C179 production manifest references a missing or mismatched artifact: $($record.path)"
+        }
+    }
+    Write-Host "C179 production acceptance manifest PASS: $manifestPath"
+}
+
+if ($FinalizeC179ProductionManifestOnly) {
+    if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
+        throw 'C179 manifest-only finalization requires an explicit evidence root.'
+    }
+    $sourceManifestPath = Join-Path (Join-Path $EvidenceRoot 'production-acceptance') 'c166a2-manifest.json'
+    $focusedManifestPath = Join-Path $EvidenceRoot 'c179-focused-proof-manifest.json'
+    $hostManifestPath = Join-Path (Join-Path $EvidenceRoot 'host') 'managed-ui-host-manifest.json'
+    Write-C179ProductionAcceptanceManifest $EvidenceRoot $sourceManifestPath `
+        $focusedManifestPath $hostManifestPath $RepoRoot $head
+    return
 }
 
 function Write-C170IncompleteEvidenceManifest([string]$Path,[string]$Phase,
@@ -2523,15 +2736,29 @@ function Ensure-C175NotesResizeOrigin([object]$Boot) {
         $targetY + 436 -gt $script:c166ScreenHeight) {
         throw 'The guest framebuffer cannot contain the supported maximum Managed Notes outer geometry.'
     }
-    $deltaX = $targetX - $script:c175NotesOriginX
-    $deltaY = $targetY - $script:c175NotesOriginY
-    if ($deltaX -ne 0 -or $deltaY -ne 0) {
+    for ($attempt=0; $attempt -lt 2; $attempt++) {
+        $deltaX = $targetX - $script:c175NotesOriginX
+        $deltaY = $targetY - $script:c175NotesOriginY
+        if ($deltaX -eq 0 -and $deltaY -eq 0) { break }
         Drag-C166Pointer ($script:c175NotesOriginX + 300) `
             ($script:c175NotesOriginY + 12) `
             ($script:c175NotesOriginX + 300 + $deltaX) `
             ($script:c175NotesOriginY + 12 + $deltaY) $Boot
-        $script:c175NotesOriginX = $targetX
-        $script:c175NotesOriginY = $targetY
+        Start-Sleep -Milliseconds 200
+        $verifyScreenshot = Join-Path (Split-Path $Boot.serialPath) `
+            ("c175-notes-origin-verified-{0:D2}.ppm" -f $script:c175OriginCaptureSequence)
+        [void](Capture-C166GuestScreen $Boot $verifyScreenshot)
+        $verifiedBounds = Get-C175ManagedNotesWindowBoundsFromScreenshot $verifyScreenshot
+        if (-not (Test-C175NotesTitlebarBounds $verifiedBounds $expectedNotesWidth)) {
+            throw 'C175 Notes origin verification did not find the expected window after moving it.'
+        }
+        $script:c175NotesOriginX = [int]$verifiedBounds.outerWindow.x
+        $script:c175NotesOriginY = [int]$verifiedBounds.outerWindow.y
+        $script:c175NotesWidth = [int]$verifiedBounds.outerWindow.width
+    }
+    if ($script:c175NotesOriginX -ne $targetX -or
+        $script:c175NotesOriginY -ne $targetY) {
+        throw "C175 Notes window did not settle at the resize test origin ${targetX},${targetY}; measured $($script:c175NotesOriginX),$($script:c175NotesOriginY)."
     }
 }
 
@@ -2549,6 +2776,16 @@ function Get-C175ManagedNotesState([string]$Serial,[int]$After = 0) {
     $geometry = $geometryMatches[$geometryMatches.Count-1]
     $state = $stateMatches[$stateMatches.Count-1]
     $path = $pathMatches[$pathMatches.Count-1]
+    # A newly reopened Notes surface has no C175 state snapshot until its
+    # first managed layout action. In that interval, the latest state marker
+    # belongs to the previous surface and must not be used as a resize baseline.
+    $latestStateIndex = $After + $state.Index
+    $latestNotesSurface = [regex]::Matches($Serial,
+        '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]{8} window=[0-9A-Fa-f]{8} result=PASS\r?$')
+    if ($latestNotesSurface.Count -gt 0 -and
+        $latestNotesSurface[$latestNotesSurface.Count-1].Index -gt $latestStateIndex) {
+        return $null
+    }
     return [pscustomobject]@{
         width=[int]$geometry.Groups['width'].Value
         height=[int]$geometry.Groups['height'].Value
@@ -3311,11 +3548,20 @@ function Resize-C173ManagedExplorer([object]$Boot,[int]$CurrentWidth,
         # right corner in a multi-window layout.
         $hoverStart = (Get-C166Serial $Boot.serialPath).Length
         Move-C166Pointer $startX $startY $Boot
-        Start-Sleep -Milliseconds 150
         $resizeHoverPattern = '(?m)^\[C172-COMPOSITOR-TRACE\] action=resize-hover x=' +
             ('{0:X8}' -f $startX) + ' y=' + ('{0:X8}' -f $startY) +
             ' window=' + [regex]::Escape($identity.window) + ' flags=[0-9A-Fa-f]{8}\r?$'
-        $hoverSerial = Get-C166Serial $Boot.serialPath
+        $hoverSerial = $null
+        try {
+            $hoverSerial = (Wait-C166Serial $Boot.serialPath `
+                $resizeHoverPattern $hoverStart 5).Text
+        } catch {
+            $hoverSerial = Get-C166Serial $Boot.serialPath
+        }
+        # The compositor can publish the corner hit before it drains the full
+        # relative-move batch. Let the pointer settle on the verified corner
+        # before beginning the single-connection QMP drag sequence.
+        Start-Sleep -Milliseconds 300
         $hoverTail = if ($hoverStart -le $hoverSerial.Length) {
             $hoverSerial.Substring($hoverStart)
         } else { '' }
@@ -5826,6 +6072,11 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             $c178Boot1 = Invoke-C178ManagedCalculatorProof $boot1 $runRoot `
                 'boot1' 'geometry' -Focused
         }
+        $c179Boot1 = $null
+        if ($script:c179ManagedTaskManagerResize) {
+            $c179Boot1 = Invoke-C179ManagedTaskManagerProof $boot1 $runRoot `
+                'boot1' 'geometry' -Focused
+        }
         $c176Boot1 = $null
         if ($script:c176ManagedNotesNavigation) {
             $c176Boot1 = Invoke-C176ManagedNotesNavigationProof $boot1 `
@@ -5833,7 +6084,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             if ($c175Boot1) { $c175Boot1.c176ManagedNotesNavigation = $c176Boot1 }
         }
         if ($boot1.backingEspPath -ne $diskIdentity) { throw 'Boot 1 used an unexpected writable ESP path.' }
-        $boot1Interactions = [ordered]@{initial=$boot1Default;choice=$selection;beforeApplySlots=$beforeApply;pendingScreenshot=$boot1PendingScreenshot;pendingScreenshotSha256=$pendingSha;apply=$boot1Apply;reentry=$boot1Reentry;managedExplorer=$boot1Explorer;associationDiskUnchangedThroughSelection=$true;settingsOrigin=$settingsOrigin;c169=if ($script:c169ManagedUiProof) { $selection } else { $null };c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{expanded=$c171Expanded;pendingChoicePreservedThroughWindowRecreation='Disabled';applyAfterRecreation=$true} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;pendingSelectionPreserved=$true;pendingChoice='Disabled';applyState='Disabled';associationSlotsUnchanged=$true} } else { $null };c173=$c173Boot1;c175=$c175Boot1;c176=$c176Boot1;c178=$c178Boot1}
+        $boot1Interactions = [ordered]@{initial=$boot1Default;choice=$selection;beforeApplySlots=$beforeApply;pendingScreenshot=$boot1PendingScreenshot;pendingScreenshotSha256=$pendingSha;apply=$boot1Apply;reentry=$boot1Reentry;managedExplorer=$boot1Explorer;associationDiskUnchangedThroughSelection=$true;settingsOrigin=$settingsOrigin;c169=if ($script:c169ManagedUiProof) { $selection } else { $null };c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{expanded=$c171Expanded;pendingChoicePreservedThroughWindowRecreation='Disabled';applyAfterRecreation=$true} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;pendingSelectionPreserved=$true;pendingChoice='Disabled';applyState='Disabled';associationSlotsUnchanged=$true} } else { $null };c173=$c173Boot1;c175=$c175Boot1;c176=$c176Boot1;c178=$c178Boot1;c179=$c179Boot1}
     } finally {
         Stop-OwnedProofQemu $boot1
     }
@@ -5988,7 +6239,12 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             $c178Boot2 = Invoke-C178ManagedCalculatorProof $boot2 $runRoot `
                 'boot2' 'arithmetic' -Focused
         }
-        $boot2Interactions = [ordered]@{restoredState=$boot2Resolved;settings=$boot2Disabled;queryPreservedSlots=$true;choice=$boot2Selection;beforeApplySlots=$boot2BeforeApply;apply=$boot2Apply;committedStateRequeried=$boot2CommittedState;reset=$boot2Reset;resetReentry=$boot2ResetReentry;nativeExplorer=$boot2Explorer;c175=$c175Boot2;c176=$c176Boot2;managedExplorer=$boot2ManagedExplorer;c169=if ($script:c169ManagedUiProof) { [ordered]@{scroll=$scrollProof;settingsReentry=$boot2Reentry;pointerPopupSelection=$boot2Selection} } else { $null };c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;keyboardFocusAndTraversal=$c171KeyboardFocus;scrollAndPopupAtCompactSize='PASS'} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;popupDismissed=$c172PopupProof.dismissedByLiveResize;popupScreenshot=$c172PopupProof.popupScreenshot;popupScreenshotSha256=$c172PopupProof.popupScreenshotSha256;tabTraversal=$c172PopupProof.tabTraversal;shiftTabTraversal=$c172PopupProof.shiftTabTraversal;pointerAtResizedCoordinates=($boot2Selection.choiceIndex -eq 0);keyboardAtResizedCoordinates=$true;associationSlotsUnchangedBeforeApply=((Get-C166SlotIdentity $boot2Before) -eq (Get-C166SlotIdentity $boot2BeforeApply))} } else { $null };c173=$c173Boot2;c178=$c178Boot2;result='PASS'}
+        $c179Boot2 = $null
+        if ($script:c179ManagedTaskManagerResize) {
+            $c179Boot2 = Invoke-C179ManagedTaskManagerProof $boot2 $runRoot `
+                'boot2' 'refresh' -Focused
+        }
+        $boot2Interactions = [ordered]@{restoredState=$boot2Resolved;settings=$boot2Disabled;queryPreservedSlots=$true;choice=$boot2Selection;beforeApplySlots=$boot2BeforeApply;apply=$boot2Apply;committedStateRequeried=$boot2CommittedState;reset=$boot2Reset;resetReentry=$boot2ResetReentry;nativeExplorer=$boot2Explorer;c175=$c175Boot2;c176=$c176Boot2;managedExplorer=$boot2ManagedExplorer;c169=if ($script:c169ManagedUiProof) { [ordered]@{scroll=$scrollProof;settingsReentry=$boot2Reentry;pointerPopupSelection=$boot2Selection} } else { $null };c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;keyboardFocusAndTraversal=$c171KeyboardFocus;scrollAndPopupAtCompactSize='PASS'} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{resizes=@($c172Resizes);sameWindowIdentityAcrossResizes=$true;popupDismissed=$c172PopupProof.dismissedByLiveResize;popupScreenshot=$c172PopupProof.popupScreenshot;popupScreenshotSha256=$c172PopupProof.popupScreenshotSha256;tabTraversal=$c172PopupProof.tabTraversal;shiftTabTraversal=$c172PopupProof.shiftTabTraversal;pointerAtResizedCoordinates=($boot2Selection.choiceIndex -eq 0);keyboardAtResizedCoordinates=$true;associationSlotsUnchangedBeforeApply=((Get-C166SlotIdentity $boot2Before) -eq (Get-C166SlotIdentity $boot2BeforeApply))} } else { $null };c173=$c173Boot2;c178=$c178Boot2;c179=$c179Boot2;result='PASS'}
     } finally {
         Stop-OwnedProofQemu $boot2
     }
@@ -6105,7 +6361,12 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         $c169AppChecks = $null
         if ($script:c169ManagedUiProof) {
             $c169Calculator = Invoke-C169CalculatorSmoke $boot3 (Join-Path $runRoot 'boot3')
-            $c169TaskManager = Invoke-C169TaskManagerSmoke $boot3 (Join-Path $runRoot 'boot3')
+            if ($script:c179ManagedTaskManagerResize) {
+                $c169TaskManager = Invoke-C179ManagedTaskManagerProof $boot3 $runRoot `
+                    'boot3' 'concurrent' -Focused
+            } else {
+                $c169TaskManager = Invoke-C169TaskManagerSmoke $boot3 (Join-Path $runRoot 'boot3')
+            }
             $reopenedSettings = Open-C167SettingsCenter $boot3
             $reopenedDefaultApps = Enter-C167DefaultAppsPage $boot3 'NoOverride' (Join-Path $runRoot 'boot3-c169-settings-reopened.ppm')
             Close-C167SettingsCenter $boot3
@@ -6217,6 +6478,48 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
         $c178FocusedPath = Join-Path $EvidenceRoot 'c178-focused-proof-manifest.json'
         $c178FocusedManifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $c178FocusedPath -Encoding utf8
     }
+    if ($script:c179ManagedTaskManagerResize) {
+        $c179Boot3 = $c169TaskManager
+        $c179Boots = @($c179Boot1,$c179Boot2,$c179Boot3)
+        if (@($c179Boots | Where-Object { -not $_ -or $_.status -ne 'PASS' }).Count -gt 0 -or
+            $c179Boot1.scenario -ne 'geometry' -or
+            $c179Boot2.scenario -ne 'refresh' -or
+            $c179Boot3.scenario -ne 'concurrent') {
+            throw 'C179 focused guest acceptance requires geometry, refresh/state, and concurrent-application boots.'
+        }
+        $c179SourceFiles = @(
+            'kernel/core/nativeaot_application.cpp',
+            'samples/managed/HostLogProof/Applications/ManagedTaskManagerC161.cs',
+            'samples/managed/HostLogProof/GuideXos/GuideXosTaskManagerC161.cs',
+            'samples/managed/HostLogProof/GuideXos/GuideXosManagedTaskManagerResizeC179Tests.cs',
+            'samples/managed/HostLogProof/HostLogProof.csproj',
+            'samples/host/ManagedUiRegression/ManagedUiRegression.csproj',
+            'samples/host/ManagedUiRegression/Program.cs',
+            'scripts/dotnet/build-managed-hostlog-proof.ps1',
+            'scripts/dotnet/run-managed-ui-regressions.ps1',
+            'scripts/dotnet/run-c166-file-associations.ps1') | ForEach-Object {
+                $path = Join-Path $RepoRoot $_
+                [ordered]@{path=$_;sha256=(Get-Sha256 $path)}
+            }
+        $c179FocusedManifest = [ordered]@{
+            schemaVersion=1;phase='C179-focused-managed-task-manager-resize'
+            sourceHead=$head;sourceBranch='v1.1_DOTNET_SUPPORT'
+            status='PASS';outcome='A';focusedBootCount=3
+            scenarios=@('geometry','refresh','concurrent')
+            architecture=[ordered]@{applicationId='com.guidexos.apps.managed.taskmanager';selector=7;title='Managed Task Manager';sharedResize='C174';nativeAction='existing tagged managed action dispatcher';abi='v4/128 unchanged'}
+            bounds=[ordered]@{initial=[ordered]@{width=800;height=370};minimum=[ordered]@{width=800;height=344};maximum=[ordered]@{width=960;height=452};titlebarHeight=24}
+            focusedBoots=@(
+                [ordered]@{stage=$bootResults[0].stage;scenario=$c179Boot1;serial=[ordered]@{path=$bootResults[0].serialPath;sha256=$bootResults[0].serialSha256};qmpInput=[ordered]@{path=$c179Boot1.qmpLog;sha256=$bootResults[0].qmpInputSha256}},
+                [ordered]@{stage=$bootResults[1].stage;scenario=$c179Boot2;serial=[ordered]@{path=$bootResults[1].serialPath;sha256=$bootResults[1].serialSha256};qmpInput=[ordered]@{path=$c179Boot2.qmpLog;sha256=$bootResults[1].qmpInputSha256}},
+                [ordered]@{stage=$bootResults[2].stage;scenario=$c179Boot3;serial=[ordered]@{path=$bootResults[2].serialPath;sha256=$bootResults[2].serialSha256};qmpInput=[ordered]@{path=$c179Boot3.qmpLog;sha256=(Get-Sha256 $c179Boot3.qmpLog)}})
+            proofCompositeSha256=Get-Sha256 $Composite;proofKernelSha256=Get-Sha256 $Kernel;neutralRamdiskSha256=Get-Sha256 $NeutralRamdisk
+            hostManifest=[ordered]@{path=[System.IO.Path]::GetFullPath((Join-Path $EvidenceRoot 'host\managed-ui-host-manifest.json'));sha256=(Get-Sha256 (Join-Path $EvidenceRoot 'host\managed-ui-host-manifest.json'))}
+            sourceFiles=$c179SourceFiles
+            qemuOwnership='only runner-owned processes stopped; no unrelated QEMU process terminated'
+        }
+        $c179FocusedPath = Join-Path $EvidenceRoot 'c179-focused-proof-manifest.json'
+        $c179FocusedManifest | ConvertTo-Json -Depth 35 | Set-Content -LiteralPath $c179FocusedPath -Encoding utf8
+    }
     $manifest = [ordered]@{
         phase='C167-real-Settings-proof';status='PASS';sourceHead=$head;sourceBranch='v1.1_DOTNET_SUPPORT'
         protectedMedia=$ProtectedMedia;proofCompositeSha256=Get-Sha256 $Composite;proofKernelSha256=Get-Sha256 $Kernel;neutralRamdiskSha256=Get-Sha256 $NeutralRamdisk
@@ -6233,6 +6536,7 @@ function Invoke-C167SettingsProofBoots([string]$RepoRoot,[string]$EvidenceRoot,
             [ordered]@{status='PASS';input='QMP pointer drag from the native bottom-right resize corner';surfaceLifecycle='one Settings surface identity retained through accepted geometry callbacks';minimumOuter=[ordered]@{width=512;height=222};expandedOuter=[ordered]@{width=720;height=420};managedGeometryCallback='existing application action dispatch; host ABI v4/128 bytes unchanged'}
         } else { $null }
         c178ManagedCalculatorResize=if ($script:c178ManagedCalculatorResize) { [ordered]@{status='PASS';manifest='c178-focused-proof-manifest.json';boot1=$c178Boot1;boot2=$c178Boot2;boot3Concurrent=$c178Boot3} } else { $null }
+        c179ManagedTaskManagerResize=if ($script:c179ManagedTaskManagerResize) { [ordered]@{status='PASS';manifest='c179-focused-proof-manifest.json';boot1=$c179Boot1;boot2=$c179Boot2;boot3Concurrent=$c179Boot3} } else { $null }
         qemuOwnership='only runner-created processes were stopped; unrelated processes were not terminated'
     }
     $manifestPath = Join-Path $runRoot 'c167-settings-ui-proof-manifest.json'
@@ -6546,6 +6850,25 @@ function Close-C166TaskManager([object]$Boot) {
     [void](Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-CLOSE controls=0 selection=none result=PASS' $start 15)
 }
 
+function Close-C179ManagedTaskManager([object]$Boot,[int]$CloseButtonY=384) {
+    $start = (Get-C166Serial $Boot.serialPath).Length
+    $origin = Get-C166TaskManagerOrigin
+    # The final geometry keeps Task Manager at 960x452. The close/reopen check
+    # uses a newly created 800x370 surface and passes its initial button row.
+    Click-C166Screen ($origin.X+390) ($origin.Y+24+$CloseButtonY+14) $Boot
+    $identity = Get-C179TaskManagerIdentity (Get-C166Serial $Boot.serialPath)
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C161-TM-CLOSE-DISPATCH\] selector=7 controls=0 result=PASS\r?$' `
+        $start 20)
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[C102-MANAGED-OUTPUT\] C161-TM-CLOSE controls=0 selection=none result=PASS\r?$' `
+        $start 15)
+    [void](Wait-C166Serial $Boot.serialPath `
+        ('^\[C150-SURFACE\] action=destroy appId=com\.guidexos\.apps\.managed\.taskmanager generation=' +
+         [regex]::Escape($identity.generation) + ' window=' +
+         [regex]::Escape($identity.window) + ' reason=close-or-replace\r?$') $start 15)
+}
+
 function Invoke-C166TaskManagerSnapshot([object]$Boot) {
     $start=(Get-C166Serial $Boot.serialPath).Length
     Open-C166AllProgramsItem 14 $Boot
@@ -6559,6 +6882,458 @@ function Invoke-C166TaskManagerSnapshot([object]$Boot) {
           (New-C166Key 'r' $false),(New-C166Key 'ctrl' $false)) $Boot.qmpLogPath 60
     $refresh=Wait-C166Serial $Boot.serialPath '^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=(\d+) sel=([^ ]+) v=\d+ ap=true self=(\d+) active=1 result=PASS' $refreshStart 20
     return [ordered]@{launch=$launch.Match.Value;refresh=$refresh.Match.Value;rowCount=[int]$refresh.Match.Groups[1].Value;active=$true}
+}
+
+function Get-C179TaskManagerIdentity([string]$Serial,[switch]$OnlyIfLive) {
+    $pattern = '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.taskmanager generation=(?<generation>[0-9A-Fa-f]{8}) window=(?<window>[0-9A-Fa-f]{8}) result=PASS\r?$'
+    $matches = [regex]::Matches($Serial,$pattern)
+    if ($matches.Count -eq 0) { throw 'C179 Task Manager has no managed surface identity.' }
+    $match = $matches[$matches.Count-1]
+    if ($OnlyIfLive) {
+        $destroyPattern = '(?m)^\[C150-SURFACE\] action=destroy appId=com\.guidexos\.apps\.managed\.taskmanager generation=(?<generation>[0-9A-Fa-f]{8}) window=(?<window>[0-9A-Fa-f]{8}) reason=close-or-replace\r?$'
+        foreach ($destroy in [regex]::Matches($Serial,$destroyPattern)) {
+            if ($destroy.Index -gt $match.Index -and
+                $destroy.Groups['generation'].Value -eq $match.Groups['generation'].Value -and
+                $destroy.Groups['window'].Value -eq $match.Groups['window'].Value) {
+                return $null
+            }
+        }
+    }
+    return [pscustomobject]@{
+        generation=$match.Groups['generation'].Value.ToUpperInvariant()
+        window=$match.Groups['window'].Value.ToUpperInvariant()
+        createCount=$matches.Count
+    }
+}
+
+function Measure-C179TaskManagerScreenshot([string]$Path) {
+    $bounds = Get-C172ManagedWindowBoundsFromScreenshot -Path $Path `
+        -TitlebarColorRgb '43,80,111' -MinimumTitlebarRunPixels 500
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $cursor = 0
+    $tokens = [System.Collections.Generic.List[string]]::new()
+    while ($tokens.Count -lt 4) {
+        while ($cursor -lt $bytes.Length -and $bytes[$cursor] -in @(9,10,13,32)) { $cursor++ }
+        $start = $cursor
+        while ($cursor -lt $bytes.Length -and $bytes[$cursor] -notin @(9,10,13,32)) { $cursor++ }
+        if ($start -eq $cursor) { throw "Malformed C179 PPM header: $Path" }
+        $tokens.Add([System.Text.Encoding]::ASCII.GetString($bytes,$start,$cursor-$start))
+    }
+    if ($tokens[0] -ne 'P6') { throw "C179 screenshot is not a binary PPM: $Path" }
+    while ($cursor -lt $bytes.Length -and $bytes[$cursor] -in @(9,10,13,32)) { $cursor++ }
+    $pixelStart = $cursor
+    $width = [int]$tokens[1]; $height = [int]$tokens[2]
+    $rgb = @($bounds.clientSampleRgb.Split(',') | ForEach-Object { [int]$_ })
+    $title = @(43,80,111)
+    $longest = 0; $titleX = -1; $titleY = -1
+    for ($y=0; $y -lt $height; $y++) {
+        $x=0
+        while ($x -lt $width) {
+            $pixel=$pixelStart+(($y*$width+$x)*3)
+            if ($bytes[$pixel] -eq $title[0] -and $bytes[$pixel+1] -eq $title[1] -and $bytes[$pixel+2] -eq $title[2]) {
+                $runStart=$x
+                do {
+                    $x++
+                    if ($x -ge $width) { break }
+                    $pixel=$pixelStart+(($y*$width+$x)*3)
+                } while ($bytes[$pixel] -eq $title[0] -and $bytes[$pixel+1] -eq $title[1] -and $bytes[$pixel+2] -eq $title[2])
+                if ($x-$runStart -gt $longest) { $longest=$x-$runStart; $titleX=$runStart; $titleY=$y }
+            } else { $x++ }
+        }
+    }
+    if ($longest -lt 500 -or $titleX -lt 0) { throw "C179 Task Manager titlebar is not visible in $Path" }
+    $sampleX = [Math]::Min($width-1,$titleX+10)
+    $bodyStart = -1; $bodyEnd = -1; $runStart = -1
+    for ($y=$titleY+1; $y -lt $height; $y++) {
+        $pixel=$pixelStart+(($y*$width+$sampleX)*3)
+        $matchesBody = $bytes[$pixel] -eq $rgb[0] -and $bytes[$pixel+1] -eq $rgb[1] -and $bytes[$pixel+2] -eq $rgb[2]
+        if ($matchesBody) {
+            if ($runStart -lt 0) { $runStart=$y }
+            $bodyEnd=$y
+        } elseif ($runStart -ge 0) {
+            if ($bodyEnd-$runStart -ge 100) { $bodyStart=$runStart; break }
+            $runStart=-1; $bodyEnd=-1
+        }
+    }
+    if ($bodyStart -lt 0 -or $bodyEnd -lt $bodyStart) {
+        throw "C179 Task Manager client background did not form a measurable vertical run in $Path"
+    }
+    $outerTop = $titleY - 1
+    $bottomBorder = @(85,136,170)
+    $outerBottom = -1
+    $scanLeft = [Math]::Max(0,$titleX-2)
+    $scanRight = [Math]::Min($width-1,$titleX+$longest+2)
+    for ($y=$titleY+60; $y -lt $height -and $outerBottom -lt 0; $y++) {
+        $runStart = -1
+        for ($x=$scanLeft; $x -le $scanRight; $x++) {
+            $pixel=$pixelStart+(($y*$width+$x)*3)
+            $matchesBorder = $bytes[$pixel] -eq $bottomBorder[0] -and
+                $bytes[$pixel+1] -eq $bottomBorder[1] -and
+                $bytes[$pixel+2] -eq $bottomBorder[2]
+            if ($matchesBorder) {
+                if ($runStart -lt 0) { $runStart=$x }
+            } elseif ($runStart -ge 0) {
+                if ($x-$runStart -ge ($longest-3) -and
+                    [Math]::Abs($runStart-($titleX-1)) -le 1) {
+                    $outerBottom=$y
+                    break
+                }
+                $runStart=-1
+            }
+        }
+        if ($outerBottom -lt 0 -and $runStart -ge 0 -and
+            ($scanRight+1)-$runStart -ge ($longest-3) -and
+            [Math]::Abs($runStart-($titleX-1)) -le 1) {
+            $outerBottom=$y
+        }
+    }
+    if ($outerBottom -lt $outerTop) {
+        throw "C179 Task Manager bottom frame was not measurable in $Path"
+    }
+    $measuredHeight = $outerBottom - $outerTop + 1
+    if ($measuredHeight -lt 200 -or $measuredHeight -gt 600) {
+        throw "C179 Task Manager screenshot produced invalid measured height $measuredHeight."
+    }
+    return [ordered]@{
+        outerWindow=[ordered]@{x=$titleX-1;y=$outerTop;width=$longest+2;height=$measuredHeight}
+        titlebarRunPixels=$longest;titlebarY=$titleY;clientBackgroundRgb=$bounds.clientSampleRgb
+    }
+}
+
+function Resize-C179ManagedTaskManager([object]$Boot,[int]$CurrentWidth,
+    [int]$CurrentHeight,[int]$WindowWidth,[int]$WindowHeight,
+    [string]$ScreenshotPath,[switch]$Focused,[switch]$ExpectReject) {
+    if (-not $script:c179ManagedTaskManagerResize) {
+        throw 'C179 Task Manager resizing is not enabled for this runner.'
+    }
+    if (($WindowWidth -lt 799 -or $WindowWidth -gt 960) -or
+        ($WindowHeight -lt 344 -or $WindowHeight -gt 452)) {
+        throw "C179 drag target is outside the tested geometry envelope ${WindowWidth}x${WindowHeight}."
+    }
+    $identity = Get-C179TaskManagerIdentity (Get-C166Serial $Boot.serialPath)
+    $script:c179TaskManagerInstanceId = $null
+    $origin = Get-C166TaskManagerOrigin
+    $startX = $origin.X + $CurrentWidth - 4
+    $startY = $origin.Y + $CurrentHeight - 4
+    $markerStart = (Get-C166Serial $Boot.serialPath).Length
+    Move-C166Pointer ($startX-4) ($startY-4) $Boot
+    Start-Sleep -Milliseconds 80
+    Move-C166Pointer $startX $startY $Boot
+    Start-Sleep -Milliseconds 150
+    if ($Focused) {
+        $hoverPattern = '(?m)^\[C172-COMPOSITOR-TRACE\] action=resize-hover x=' +
+            ('{0:X8}' -f $startX) + ' y=' + ('{0:X8}' -f $startY) +
+            ' window=' + [regex]::Escape($identity.window) + ' flags=[0-9A-Fa-f]{8}\r?$'
+        $hoverSerial = Get-C166Serial $Boot.serialPath
+        $hoverTail = $hoverSerial.Substring([Math]::Min($markerStart,$hoverSerial.Length))
+        if (-not [regex]::IsMatch($hoverTail,$hoverPattern)) {
+            throw "C179 Task Manager resize corner at ${startX},${startY} was not exposed after pointer settle."
+        }
+    }
+    Drag-C166Pointer $startX $startY `
+        ($startX + $WindowWidth - $CurrentWidth) `
+        ($startY + $WindowHeight - $CurrentHeight) $Boot
+
+    $native = $null
+    if ($Focused) {
+        $widthHex = '{0:X8}' -f $WindowWidth
+        $heightHex = '{0:X8}' -f $WindowHeight
+        $result = if ($ExpectReject) {'REJECT'} else {'PASS'}
+        $nativePattern = '^\[C179-NATIVE-GEOMETRY\] appId=com\.guidexos\.apps\.managed\.taskmanager instance=(?<instance>[0-9A-Fa-f]{16}) generation=(?<generation>[0-9A-Fa-f]{8}) window=(?<window>[0-9A-Fa-f]{8}) oldOuter=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} newOuter=' +
+            [regex]::Escape($widthHex) + 'x' + [regex]::Escape($heightHex) +
+            ' client=' + [regex]::Escape($widthHex) + 'x' +
+            ('{0:X8}' -f ($WindowHeight-24)) + ' result=' + $result + '\r?$'
+        $native = Wait-C166Serial $Boot.serialPath $nativePattern $markerStart 15
+        if ($native.Match.Groups['generation'].Value.ToUpperInvariant() -ne $identity.generation -or
+            $native.Match.Groups['window'].Value.ToUpperInvariant() -ne $identity.window) {
+            throw 'C179 resize callback changed Task Manager surface identity.'
+        }
+        $instanceId = $native.Match.Groups['instance'].Value.ToUpperInvariant()
+        if ($null -eq $script:c179TaskManagerInstanceId) {
+            $script:c179TaskManagerInstanceId = $instanceId
+        } elseif ($script:c179TaskManagerInstanceId -ne $instanceId) {
+            throw 'C179 resize callback changed the Task Manager application instance identity.'
+        }
+        if (-not $ExpectReject) {
+            $layoutPattern = '^\[C102-MANAGED-OUTPUT\] C179-TM-GEOMETRY outer=' +
+                $WindowWidth + 'x' + $WindowHeight + ' client=' + $WindowWidth + 'x' +
+                ($WindowHeight-24) + ' list=' + $(if ($WindowWidth -eq 960) {'48x16'} else {'45x10'}) +
+                ' rows=\d+ sel=\S+ scroll=\d+ focus=\d+ snap=1 id=1 result=PASS\r?$'
+            [void](Wait-C166Serial $Boot.serialPath $layoutPattern $markerStart 15)
+        }
+    }
+    $surfaceAfter = Get-C179TaskManagerIdentity (Get-C166Serial $Boot.serialPath)
+    if ($surfaceAfter.createCount -ne $identity.createCount -or
+        $surfaceAfter.generation -ne $identity.generation -or
+        $surfaceAfter.window -ne $identity.window) {
+        throw 'C179 live resize recreated Task Manager.'
+    }
+    $screenshotHash = Capture-C167GuestScreen $Boot $ScreenshotPath
+    $bounds = Measure-C179TaskManagerScreenshot $ScreenshotPath
+    $expectedWidth = if ($ExpectReject) {$CurrentWidth} else {$WindowWidth}
+    if ([Math]::Abs([int]$bounds.outerWindow.width-$expectedWidth) -gt 2) {
+        throw "C179 Task Manager screenshot measured width $($bounds.outerWindow.width), expected $expectedWidth after resize."
+    }
+    $expectedHeight = if ($ExpectReject) {$CurrentHeight} else {$WindowHeight}
+    if ([Math]::Abs([int]$bounds.outerWindow.height-$expectedHeight) -gt 2) {
+        throw "C179 Task Manager screenshot measured height $($bounds.outerWindow.height), expected $expectedHeight after resize."
+    }
+    if ($Focused -and $ExpectReject -and
+        (Get-C166Serial $Boot.serialPath) -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C179-TM-GEOMETRY outer=800x344 ') {
+        throw 'C179 rejected geometry did not retain the previous minimum layout.'
+    }
+    return [ordered]@{
+        mode=if ($Focused) {'focused-proof-controlled'} else {'proof-disabled-production'}
+        requestedOuter=[ordered]@{width=$WindowWidth;height=$WindowHeight}
+        accepted=(-not $ExpectReject)
+        identity=[ordered]@{generation=$identity.generation;window=$identity.window}
+        nativeMarker=if ($native) {$native.Match.Value} else {$null}
+        screenshot=[System.IO.Path]::GetFullPath($ScreenshotPath)
+        screenshotSha256=$screenshotHash;measuredOuter=$bounds.outerWindow
+        qmpLog=[System.IO.Path]::GetFullPath($Boot.qmpLogPath)
+    }
+}
+
+function Invoke-C179ManagedTaskManagerProof([object]$Boot,[string]$EvidenceRoot,
+    [string]$Stage,[ValidateSet('geometry','refresh','concurrent')][string]$Scenario,
+    [switch]$Focused) {
+    $script:c179TaskManagerInstanceId = $null
+    if ($Scenario -eq 'concurrent') {
+        # Earlier lifecycle regressions in Boot 3 intentionally close and reopen
+        # Explorer and Notes. Re-establish both live surfaces before launching
+        # Task Manager so the concurrency assertions measure three resident
+        # applications rather than relying on historical identity markers.
+        $explorerStart = (Get-C166Serial $Boot.serialPath).Length
+        Open-C166AllProgramsItem 15 $Boot
+        [void](Wait-C166Serial $Boot.serialPath `
+            '^\[APPMODEL-MANAGED-RESULT\] appId=com\.guidexos\.apps\.managed\.fileexplorer status=success result=PASS\r?$' `
+            $explorerStart 35)
+        # Boot 3 may reopen Explorer through Start Menu after earlier tests
+        # closed a resized instance; this newly created surface starts at 390 px.
+        $script:c173ManagedExplorerHeight = 390
+        [void](Navigate-C166ManagedExplorerToHello $Boot)
+        $explorerBaseline = Get-C173ManagedExplorerState (Get-C166Serial $Boot.serialPath)
+        Assert-C173ManagedExplorerState $explorerBaseline '/system/apps/C164' `
+            'hello.txt' 'File' 'C179 concurrent Explorer baseline' | Out-Null
+        [void](Resize-C173ManagedExplorer $Boot 800 390 600 360 `
+            (Join-Path $EvidenceRoot "$Stage-c179-explorer-concurrency-baseline.ppm") -Focused:$Focused)
+        $notesStart = (Get-C166Serial $Boot.serialPath).Length
+        Open-C166AllProgramsItem 12 $Boot
+        [void](Wait-C166Serial $Boot.serialPath `
+            '^\[APPMODEL-MANAGED-RESULT\] appId=com\.guidexos\.apps\.managed\.notes status=success result=PASS\r?$' `
+            $notesStart 35)
+        [void](Get-C173ManagedExplorerIdentity (Get-C166Serial $Boot.serialPath))
+        [void](Get-C175ManagedNotesIdentity (Get-C166Serial $Boot.serialPath))
+    }
+    $priorSerial = Get-C166Serial $Boot.serialPath
+    $priorIdentity = $null
+    try { $priorIdentity = Get-C179TaskManagerIdentity $priorSerial -OnlyIfLive } catch { }
+    $launchStart = $priorSerial.Length
+    Open-C166AllProgramsItem 14 $Boot
+    [void](Wait-C166Serial $Boot.serialPath `
+        '^\[APPMODEL-MANAGED-LAUNCH\] source=StartMenu appId=com\.guidexos\.apps\.managed\.taskmanager selector=00000007 image=/system/apps/GXOSAPP\.ELF metadata=valid\r?$' `
+        $launchStart 35)
+    $launch = Wait-C166Serial $Boot.serialPath `
+        '^\[C102-MANAGED-OUTPUT\] C161-TM-LAUNCH id=7 reg=\d+ ctr=4 cap=4 max=20 snap=\d+ n=(?<rows>\d+) self=\d+ active=1 result=PASS\r?$' `
+        $launchStart 35
+    $identity = Get-C179TaskManagerIdentity (Get-C166Serial $Boot.serialPath)
+    if ($priorIdentity -and ($identity.createCount -ne $priorIdentity.createCount -or
+        $identity.window -ne $priorIdentity.window -or
+        $identity.generation -ne $priorIdentity.generation)) {
+        throw 'C179 AppModel activation replaced the existing Task Manager instance.'
+    }
+    if ($Focused) {
+        [void](Wait-C166Serial $Boot.serialPath `
+            '^\[C102-MANAGED-OUTPUT\] C179-TM-LAUNCH resize=enabled initial=800x370 bounds=800x344-960x452 rows=10-16 action=C172 shared=C174 result=PASS\r?$' `
+            $launchStart 10)
+    } elseif ((Get-C166Serial $Boot.serialPath) -match 'C179-(?:TM-|NATIVE-)') {
+        throw 'Proof-disabled C179 Task Manager emitted a focused diagnostic marker.'
+    }
+    $initialScreenshot = Join-Path $EvidenceRoot "$Stage-c179-task-manager-initial.ppm"
+    $initialScreenshotHash = Capture-C166GuestScreen $Boot $initialScreenshot
+    $initialBounds = Measure-C179TaskManagerScreenshot $initialScreenshot
+    if ([Math]::Abs([int]$initialBounds.outerWindow.width-800) -gt 2 -or
+        [Math]::Abs([int]$initialBounds.outerWindow.height-370) -gt 2) {
+        throw "C179 initial Task Manager geometry measured $($initialBounds.outerWindow.width)x$($initialBounds.outerWindow.height), expected 800x370."
+    }
+
+    $startIdentity = [ordered]@{generation=$identity.generation;window=$identity.window}
+    $resizeResults = @()
+    $selectedTaskManagerIdentity = $null
+    $resizeResults += Resize-C179ManagedTaskManager $Boot 800 370 960 452 `
+        (Join-Path $EvidenceRoot "$Stage-c179-task-manager-maximum.ppm") -Focused:$Focused
+    if ($Scenario -eq 'geometry') {
+        $resizeResults += Resize-C179ManagedTaskManager $Boot 960 452 800 344 `
+            (Join-Path $EvidenceRoot "$Stage-c179-task-manager-minimum.ppm") -Focused:$Focused
+        $resizeResults += Resize-C179ManagedTaskManager $Boot 800 344 799 344 `
+            (Join-Path $EvidenceRoot "$Stage-c179-task-manager-rejected-width.ppm") -Focused:$Focused -ExpectReject
+        $resizeResults += Resize-C179ManagedTaskManager $Boot 800 344 960 452 `
+            (Join-Path $EvidenceRoot "$Stage-c179-task-manager-restored-maximum.ppm") -Focused:$Focused
+    } else {
+        if ($Scenario -eq 'refresh') {
+            $origin = Get-C166TaskManagerOrigin
+            Click-C166Screen ($origin.X+30) ($origin.Y+24+67) $Boot
+            [void](Wait-C166Serial $Boot.serialPath `
+                '^\[C102-MANAGED-OUTPUT\] C161-TM-SELECT source=pointer row=0 identity=\d+:\d+ on=[01] result=PASS\r?$' `
+                $launchStart 15)
+            $selected = [regex]::Matches((Get-C166Serial $Boot.serialPath),
+                '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-SELECT source=pointer row=0 identity=(?<identity>\d+:\d+) on=[01] result=PASS\r?$') |
+                Select-Object -Last 1
+            if (-not $selected) { throw 'C179 pointer selection did not identify a row.' }
+            $selectedTaskManagerIdentity = $selected.Groups['identity'].Value
+            if ([int]$launch.Match.Groups['rows'].Value -gt 1) {
+                $endStart = (Get-C166Serial $Boot.serialPath).Length
+                Press-C166Key 'end' $Boot
+                [void](Wait-C166Serial $Boot.serialPath `
+                    ('^\[C102-MANAGED-OUTPUT\] C161-TM-SELECT source=keyboard row=' +
+                     ([int]$launch.Match.Groups['rows'].Value-1) + ' identity=\d+:\d+ on=[01] result=PASS\r?$') $endStart 12)
+                $homeStart = (Get-C166Serial $Boot.serialPath).Length
+                Press-C166Key 'home' $Boot
+                $homeSelection = Wait-C166Serial $Boot.serialPath `
+                    '^\[C102-MANAGED-OUTPUT\] C161-TM-SELECT source=keyboard row=0 identity=(?<identity>\d+:\d+) on=[01] result=PASS\r?$' $homeStart 12
+                $selectedTaskManagerIdentity = $homeSelection.Match.Groups['identity'].Value
+            }
+            $tabStart = (Get-C166Serial $Boot.serialPath).Length
+            Press-C166Key 'tab' $Boot
+            [void](Wait-C166Serial $Boot.serialPath `
+                '^\[C102-MANAGED-OUTPUT\] C161-TM-FOCUS control=2 shift=false result=PASS\r?$' $tabStart 12)
+            $shiftTabStart = (Get-C166Serial $Boot.serialPath).Length
+            Send-C166QmpEvents ([int]$Boot.qmpPort) `
+                @((New-C166Key 'shift' $true),(New-C166Key 'tab' $true),
+                  (New-C166Key 'tab' $false),(New-C166Key 'shift' $false)) $Boot.qmpLogPath 60
+            [void](Wait-C166Serial $Boot.serialPath `
+                '^\[C102-MANAGED-OUTPUT\] C161-TM-FOCUS control=1 shift=true result=PASS\r?$' $shiftTabStart 12)
+            $beforeRefreshGeometry = [regex]::Matches((Get-C166Serial $Boot.serialPath),
+                '(?m)^\[C102-MANAGED-OUTPUT\] C179-TM-GEOMETRY outer=960x452 .*result=PASS\r?$') | Select-Object -Last 1
+            if ($Focused -and -not $beforeRefreshGeometry) { throw 'C179 maximum layout marker was missing before refresh.' }
+            $refreshStart = (Get-C166Serial $Boot.serialPath).Length
+            Click-C166Screen ($origin.X+30) ($origin.Y+24+384+12) $Boot
+            [void](Wait-C166Serial $Boot.serialPath `
+                '^\[C102-MANAGED-OUTPUT\] C161-TM-R s=button/keyboard st=\d+ n=\d+ sel=([^ ]+) v=\d+ ap=true self=\d+ active=1 result=PASS\r?$' `
+                $refreshStart 20)
+            $refreshStart = (Get-C166Serial $Boot.serialPath).Length
+            Send-C166QmpEvents ([int]$Boot.qmpPort) `
+                @((New-C166Key 'ctrl' $true),(New-C166Key 'r' $true),
+                  (New-C166Key 'r' $false),(New-C166Key 'ctrl' $false)) $Boot.qmpLogPath 60
+            [void](Wait-C166Serial $Boot.serialPath `
+                '^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=\d+ sel=(?<selection>[^ ]+) v=\d+ ap=true self=\d+ active=1 result=PASS\r?$' `
+                $refreshStart 20)
+            $refreshLine = [regex]::Matches((Get-C166Serial $Boot.serialPath),
+                '(?m)^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=\d+ sel=(?<selection>[^ ]+) v=\d+ ap=true self=\d+ active=1 result=PASS\r?$') | Select-Object -Last 1
+            if ($refreshLine.Groups['selection'].Value -ne $selectedTaskManagerIdentity) {
+                throw 'C179 refresh did not preserve the selected Task Manager identity.'
+            }
+            if ($Focused -and (Get-C166Serial $Boot.serialPath) -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C179-TM-GEOMETRY outer=960x452 ') {
+                throw 'C179 refresh restored stale Task Manager geometry.'
+            }
+            $resizeResults += Resize-C179ManagedTaskManager $Boot 960 452 800 344 `
+                (Join-Path $EvidenceRoot "$Stage-c179-task-manager-after-refresh-minimum.ppm") -Focused:$Focused
+            $resizeResults += Resize-C179ManagedTaskManager $Boot 800 344 960 452 `
+                (Join-Path $EvidenceRoot "$Stage-c179-task-manager-after-refresh-maximum.ppm") -Focused:$Focused
+            # Switch focus to the already resident Explorer through its existing
+            # AppModel entry, then return to the existing Task Manager and refresh.
+            Open-C166AllProgramsItem 15 $Boot
+            Open-C166AllProgramsItem 14 $Boot
+            $returnStart = (Get-C166Serial $Boot.serialPath).Length
+            Send-C166QmpEvents ([int]$Boot.qmpPort) `
+                @((New-C166Key 'ctrl' $true),(New-C166Key 'r' $true),
+                  (New-C166Key 'r' $false),(New-C166Key 'ctrl' $false)) $Boot.qmpLogPath 60
+            $returnRefresh = Wait-C166Serial $Boot.serialPath `
+                '^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=\d+ sel=([^ ]+) v=\d+ ap=true self=\d+ active=1 result=PASS\r?$' `
+                $returnStart 20
+            if ($returnRefresh.Match.Groups[1].Value -ne $selectedTaskManagerIdentity) {
+                throw 'C179 focus return changed the selected Task Manager identity.'
+            }
+            $selectedAfterResize = [regex]::Matches((Get-C166Serial $Boot.serialPath),
+                '(?m)^\[C102-MANAGED-OUTPUT\] C179-TM-GEOMETRY outer=960x452 .* sel=(?<selection>\S+) .*result=PASS\r?$') | Select-Object -Last 1
+            if ($Focused -and (-not $selectedAfterResize -or
+                $selectedAfterResize.Groups['selection'].Value -ne $selectedTaskManagerIdentity)) {
+                throw 'C179 resize after refresh changed the selected Task Manager identity.'
+            }
+        }
+        if ($Scenario -eq 'concurrent') {
+            $explorerIdentity = Get-C173ManagedExplorerIdentity (Get-C166Serial $Boot.serialPath)
+            $notesIdentity = Get-C175ManagedNotesIdentity (Get-C166Serial $Boot.serialPath)
+            $explorerState = Get-C173ManagedExplorerState (Get-C166Serial $Boot.serialPath)
+            $notesState = Get-C175ManagedNotesState (Get-C166Serial $Boot.serialPath)
+            [void](Focus-C173ExistingFileExplorer $Boot)
+            $explorerResize = Resize-C173ManagedExplorer $Boot 600 360 800 390 `
+                (Join-Path $EvidenceRoot "$Stage-c179-explorer-with-task-manager.ppm") -Focused:$Focused
+            [void](Focus-C175ExistingManagedNotes $Boot)
+            $notesResize = Resize-C175ManagedNotes $Boot 600 360 960 436 `
+                (Join-Path $EvidenceRoot "$Stage-c179-notes-with-task-manager.ppm") -Focused:$Focused
+            $notesState = Get-C175ManagedNotesState (Get-C166Serial $Boot.serialPath)
+            if ($Focused -and (-not $notesState -or
+                $notesState.path -ne '/system/apps/C164/hello.txt')) {
+                throw 'C179 could not establish the live Notes document state after its first concurrent resize.'
+            }
+            $notesResizeBack = Resize-C175ManagedNotes $Boot 960 436 600 360 `
+                (Join-Path $EvidenceRoot "$Stage-c179-notes-return-with-task-manager.ppm") -Focused:$Focused
+            [void](Focus-C173ExistingFileExplorer $Boot)
+            $explorerAfter = Get-C173ManagedExplorerState (Get-C166Serial $Boot.serialPath)
+            if ($explorerIdentity.window -ne (Get-C173ManagedExplorerIdentity (Get-C166Serial $Boot.serialPath)).window -or
+                $explorerState.selection -ne $explorerAfter.selection -or
+                $explorerState.path -ne $explorerAfter.path) {
+                throw 'C179 concurrent Task Manager resize changed Explorer selection or path.'
+            }
+            [void](Focus-C175ExistingManagedNotes $Boot)
+            $notesAfter = Get-C175ManagedNotesState (Get-C166Serial $Boot.serialPath)
+            $notesIdentityAfter = Get-C175ManagedNotesIdentity (Get-C166Serial $Boot.serialPath)
+            if ($notesIdentity.window -ne $notesIdentityAfter.window -or
+                ($notesState -and $notesAfter -and
+                 ($notesState.path -ne $notesAfter.path -or
+                  $notesState.caret -ne $notesAfter.caret -or
+                  $notesState.anchor -ne $notesAfter.anchor -or
+                  $notesState.view -ne $notesAfter.view -or
+                  $notesState.history -ne $notesAfter.history -or
+                  $notesState.historyIndex -ne $notesAfter.historyIndex -or
+                  $notesState.undo -ne $notesAfter.undo -or
+                  $notesState.redo -ne $notesAfter.redo -or
+                  $notesState.dirty -ne $notesAfter.dirty))) {
+                throw 'C179 concurrent Task Manager resize changed Notes identity or document state.'
+            }
+            Open-C166AllProgramsItem 14 $Boot
+            $resizeResults += $explorerResize
+            $resizeResults += $notesResize
+            $resizeResults += $notesResizeBack
+        }
+    }
+    $identityAfter = Get-C179TaskManagerIdentity (Get-C166Serial $Boot.serialPath)
+    if ($identityAfter.generation -ne $startIdentity.generation -or
+        $identityAfter.window -ne $startIdentity.window -or
+        $identityAfter.createCount -ne $identity.createCount) {
+        throw 'C179 accepted/rejected geometry or refresh replaced the Task Manager surface.'
+    }
+    $finalScreenshot = Join-Path $EvidenceRoot "$Stage-c179-task-manager-final.ppm"
+    $finalSha256 = Capture-C166GuestScreen $Boot $finalScreenshot
+    $finalSerial = Get-C166Serial $Boot.serialPath
+    if ($Focused -and $finalSerial -notmatch '(?m)^\[C102-MANAGED-OUTPUT\] C179-TM-GEOMETRY outer=960x452 ') {
+        throw 'C179 final Task Manager layout did not remain at the accepted maximum geometry.'
+    }
+    Close-C179ManagedTaskManager $Boot
+    if ($Scenario -eq 'geometry') {
+        $reopenStart = (Get-C166Serial $Boot.serialPath).Length
+        Open-C166AllProgramsItem 14 $Boot
+        [void](Wait-C166Serial $Boot.serialPath `
+            '^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.taskmanager generation=[0-9A-Fa-f]{8} window=[0-9A-Fa-f]{8} result=PASS\r?$' `
+            $reopenStart 15)
+        $reopenedIdentity = Get-C179TaskManagerIdentity (Get-C166Serial $Boot.serialPath)
+        if ($reopenedIdentity.createCount -ne $identity.createCount+1 -or
+            $reopenedIdentity.generation -eq $identity.generation -or
+            $reopenedIdentity.window -eq $identity.window) {
+            throw 'C179 Task Manager close/reopen did not create a fresh surface identity.'
+        }
+        Close-C179ManagedTaskManager $Boot 276
+    }
+    return [ordered]@{
+        status='PASS';scenario=$Scenario;focusedProofControlled=[bool]$Focused
+        launch=$launch.Match.Value;initialSnapshot=[ordered]@{rows=[int]$launch.Match.Groups['rows'].Value;initialOuter=[ordered]@{width=800;height=370};screenshot=[ordered]@{path=$initialScreenshot;sha256=$initialScreenshotHash}}
+        identity=[ordered]@{generation=$startIdentity.generation;window=$startIdentity.window;stableThroughResize=$true}
+        resizeTransitions=@($resizeResults);finalScreenshot=[ordered]@{path=$finalScreenshot;sha256=$finalSha256}
+        refreshSelectionPreserved=($Scenario -eq 'refresh');focusReturn=($Scenario -eq 'refresh')
+        concurrentExplorer=($Scenario -eq 'concurrent');concurrentNotes=($Scenario -eq 'concurrent')
+        closeReopen=($Scenario -eq 'geometry');qmpLog=[System.IO.Path]::GetFullPath($Boot.qmpLogPath)
+    }
 }
 
 function Invoke-C169CalculatorSmoke([object]$Boot,[string]$ScreenshotRoot) {
@@ -6741,7 +7516,12 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                 $c178Boot1=Invoke-C178ManagedCalculatorProof $boot $root `
                     'ordinary-boot1' 'geometry'
             }
-            $integration=[ordered]@{managedFileExplorer=$notes;defaultApps=$defaultApps;C164NotesActivation='PASS';path=$notes.path;content=$notes.content;cleanDocument=$notes.clean;c173=$c173Boot1;c175=$c175Boot1;c176=$c176Boot1;c178=$c178Boot1}
+            $c179Boot1=$null
+            if ($script:c179ManagedTaskManagerResize) {
+                $c179Boot1=Invoke-C179ManagedTaskManagerProof $boot $root `
+                    'ordinary-boot1' 'geometry'
+            }
+            $integration=[ordered]@{managedFileExplorer=$notes;defaultApps=$defaultApps;C164NotesActivation='PASS';path=$notes.path;content=$notes.content;cleanDocument=$notes.clean;c173=$c173Boot1;c175=$c175Boot1;c176=$c176Boot1;c178=$c178Boot1;c179=$c179Boot1}
         } elseif ($Number -eq 2) {
             Initialize-C166GuestPointer $boot
             $managed=$null
@@ -6962,7 +7742,12 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
             $snapshot=Invoke-C166TaskManagerSnapshot $boot
             $nativeClose=Close-C166NativeExplorerThroughTaskManager $boot $snapshot.rowCount
             Close-C166TaskManager $boot
-            $integration=[ordered]@{settingsNavigation=$settingsNavigation;managedFileExplorer=$managed;nativeFileExplorer=$native;taskManager=$snapshot;nativeFileExplorerClose=$nativeClose;taskManagerClose='PASS';C164NotesActivation='PASS'}
+            $c179Boot2=$null
+            if ($script:c179ManagedTaskManagerResize) {
+                $c179Boot2=Invoke-C179ManagedTaskManagerProof $boot $root `
+                    'ordinary-boot2' 'refresh'
+            }
+            $integration=[ordered]@{settingsNavigation=$settingsNavigation;managedFileExplorer=$managed;nativeFileExplorer=$native;taskManager=$snapshot;taskManagerResize=$c179Boot2;nativeFileExplorerClose=$nativeClose;taskManagerClose='PASS';C164NotesActivation='PASS'}
         } elseif ($Number -eq 3) {
             Initialize-C166GuestPointer $boot
             Close-C166ManagedNotesStartupWindow $boot
@@ -6989,12 +7774,31 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                 @((New-C166Key 'alt' $true),(New-C166Key 'f4' $true),
                   (New-C166Key 'f4' $false),(New-C166Key 'alt' $false)) $boot.qmpLogPath 90
             [void](Wait-C166Serial $boot.serialPath '^\[C102-MANAGED-OUTPUT\] C158-CALC-CLOSE controls=0 active=none modal=none popup=none drag=none result=PASS' $calcCloseStart 30)
-            $snapshot=Invoke-C166TaskManagerSnapshot $boot
-            Close-C166TaskManager $boot
+            $c179Boot3=$null
+            if ($script:c179ManagedTaskManagerResize) {
+                $c179Boot3=Invoke-C179ManagedTaskManagerProof $boot $root `
+                    'ordinary-boot3' 'concurrent'
+                $snapshot=[ordered]@{launch='PASS';refresh='PASS';rowCount='dynamic';close='PASS'}
+            } else {
+                $snapshot=Invoke-C166TaskManagerSnapshot $boot
+                Close-C166TaskManager $boot
+            }
             $notesFocusStart=(Get-C166Serial $boot.serialPath).Length
             Open-C166AllProgramsItem 12 $boot
             $notesFocus=Wait-C166Serial $boot.serialPath '^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.notes source=3 instance=[0-9A-Fa-f]{16} selector=00000004 existing=true result=PASS' $notesFocusStart 25
             $origin=[pscustomobject]@{X=[Math]::Max(0,[int](($script:c166ScreenWidth-600)/2));Y=[Math]::Max(0,[int](($script:c166ScreenHeight-360)/2))}
+            if ($script:c175ManagedNotesResize) {
+                # C179 may have moved Notes to the shared bottom-right resize
+                # origin. Recalibrate its live window before clicking the
+                # existing Settings action instead of assuming a centered
+                # launch position.
+                Focus-C175ExistingManagedNotes $boot
+                Ensure-C175NotesResizeOrigin $boot
+                $origin=[pscustomobject]@{
+                    X=$script:c175NotesOriginX
+                    Y=$script:c175NotesOriginY
+                }
+            }
             $settingsStart=(Get-C166Serial $boot.serialPath).Length
             Click-C166Screen ($origin.X+475) ($origin.Y+24+294) $boot
             [void](Wait-C166Serial $boot.serialPath '^\[C150-SETTINGS-LAUNCH\] source=Notes path=AppModel result=PASS' $settingsStart 90)
@@ -7061,7 +7865,7 @@ function Invoke-C166OrdinaryBoot([int]$Number,[string]$Kernel,[string]$Ramdisk,
                 $defaultApps.reopen=$reopened
             }
             $settings=[ordered]@{launch='PASS';close='PASS';format='v2';loadMeta='PASS';ownership='modal=none capture=none drag=none';focusMarker=$notesFocus.Match.Value}
-            $integration=[ordered]@{managedFileExplorer=$notes;calculator=[ordered]@{display=56;screen=Join-Path $root 'calculator-56.ppm';screenSha256=$calcScreen};taskManager=$snapshot;settings=$settings;defaultApps=$defaultApps;c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;expanded=$c171Expanded;repeatedTransitions=2} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{liveResizes=@($c172OrdinaryResizes);sameWindowIdentityAcrossResizes=$true;proofDisabled=$true} } else { $null };c173=$c173Boot3;c175=$c173CrossApplication;c178=if ($c173CrossApplication) {$c173CrossApplication.c178ManagedCalculator} else {$null};C164NotesActivation='PASS';C162NotesFocus=$true}
+            $integration=[ordered]@{managedFileExplorer=$notes;calculator=[ordered]@{display=56;screen=Join-Path $root 'calculator-56.ppm';screenSha256=$calcScreen};taskManager=$snapshot;taskManagerResize=$c179Boot3;settings=$settings;defaultApps=$defaultApps;c171=if ($script:c171ManagedWindowLayout -and -not $script:c172LiveWindowResize) { [ordered]@{compact=$c171Compact;expanded=$c171Expanded;repeatedTransitions=2} } else { $null };c172=if ($script:c172LiveWindowResize) { [ordered]@{liveResizes=@($c172OrdinaryResizes);sameWindowIdentityAcrossResizes=$true;proofDisabled=$true} } else { $null };c173=$c173Boot3;c175=$c173CrossApplication;c178=if ($c173CrossApplication) {$c173CrossApplication.c178ManagedCalculator} else {$null};C164NotesActivation='PASS';C162NotesFocus=$true}
         } else { throw "Unexpected C166 ordinary boot number $Number." }
         $full=Get-C166Serial $boot.serialPath
         if ($full -match '(?m)^PROOF-SCENARIO-|^\[C102-MANAGED-OUTPUT\] PROOF C166') {
@@ -7112,7 +7916,16 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     } else {
         Join-Path (Join-Path $acceptanceRoot 'host-validation') 'c166r9-host-manifest.json'
     }
-    if (-not (Test-Path -LiteralPath $proofManifestPath -PathType Leaf) -or
+    $proofManifestAvailable = Test-Path -LiteralPath $proofManifestPath -PathType Leaf
+    if (-not $proofManifestAvailable -and $script:c170ControlRendering) {
+        # C170 deliberately links the accepted C166A2 run from the C167
+        # evidence root below. Do not require a duplicate of that historical
+        # manifest inside the current phase's evidence directory.
+        $historicalProofCandidate = Join-Path $RepoRoot `
+            'out\dotnet\c167-default-apps\proof1-guest-runs\proof1-manifest.json'
+        $proofManifestAvailable = Test-Path -LiteralPath $historicalProofCandidate -PathType Leaf
+    }
+    if (-not $proofManifestAvailable -or
         -not (Test-Path -LiteralPath $hostManifestPath -PathType Leaf)) {
         throw 'C166 ordinary acceptance requires preserved C166A2 proof and fresh host validation manifests.'
     }
@@ -7450,7 +8263,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash) { throw 'Protected canonical kernel restoration failed after candidate build.' }
 
     $scanPaths=@($composite,$kernelCandidate,$ramdiskCandidate)
-    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF','C172-NATIVE-GEOMETRY','C172-MANAGED-GEOMETRY','C175-NATIVE-GEOMETRY','C175-MANAGED-GEOMETRY','C177-NOTES-NEWLINE','C177-SAVE-PROOF','C177-STRESS','C177-PROOF-FIXTURE-COLLECTION','C178-NATIVE-GEOMETRY','C178-CALCULATOR-LAUNCH','C178-CALC-GEOMETRY','C178-CALC-STATE','C178-CALCULATOR-RESIZE')
+    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF','C172-NATIVE-GEOMETRY','C172-MANAGED-GEOMETRY','C175-NATIVE-GEOMETRY','C175-MANAGED-GEOMETRY','C177-NOTES-NEWLINE','C177-SAVE-PROOF','C177-STRESS','C177-PROOF-FIXTURE-COLLECTION','C178-NATIVE-GEOMETRY','C178-CALCULATOR-LAUNCH','C178-CALC-GEOMETRY','C178-CALC-STATE','C178-CALCULATOR-RESIZE','C179-NATIVE-GEOMETRY','C179-TM-LAUNCH','C179-TM-GEOMETRY')
     $scanResults=@()
     foreach ($path in $scanPaths) {
         $text=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($path))
@@ -7688,6 +8501,15 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
             }
         } else { $null }
         c178ManagedCalculatorResize=if ($script:c178ManagedCalculatorResize) { [ordered]@{status='PASS';manifest='c178-production-acceptance-manifest.json';boot1=$c178OrdinaryBoot1;boot2=$c178OrdinaryBoot2;boot3Concurrent=$c178OrdinaryBoot3;proofDisabledProduction='PASS'} } else { $null }
+        c179ManagedTaskManagerResize=if ($script:c179ManagedTaskManagerResize) {
+            [ordered]@{
+                status='PASS';manifest='c179-production-acceptance-manifest.json'
+                boot1=$ordinary[0].productionIntegration.c179
+                boot2=$ordinary[1].productionIntegration.taskManagerResize
+                boot3Concurrent=$ordinary[2].productionIntegration.taskManagerResize
+                proofDisabledProduction='PASS'
+            }
+        } else { $null }
         c169ManagedUiOrdinaryAcceptance=if ($script:c169ManagedUiOrdinaryAcceptance) {
             [ordered]@{
                 status='PASS'
@@ -7917,6 +8739,10 @@ if ($UseExistingProofProducts) {
         if ($script:c178ManagedCalculatorResize) {
             $c167ManagedArgs += '-C178ManagedCalculatorResize'
         }
+        if ($script:c179ManagedTaskManagerResize) {
+            $c167ManagedArgs += @('-C161TaskManagerProof',
+                '-C179ManagedTaskManagerResize')
+        }
         if ($script:c171ManagedWindowLayout) {
             $c167ManagedArgs += '-ProofControl'
         }
@@ -8074,6 +8900,10 @@ if ($RunC167SettingsProofBoots) {
     }
     if ($script:c178ManagedCalculatorResize) {
         $c167ManagedArgs += '-C178ManagedCalculatorResize'
+    }
+    if ($script:c179ManagedTaskManagerResize) {
+        $c167ManagedArgs += @('-C161TaskManagerProof',
+            '-C179ManagedTaskManagerResize')
     }
     if ($script:c171ManagedWindowLayout -or $script:c172LiveWindowResize -or
         $script:c173ManagedFileExplorerResize) {
@@ -8304,6 +9134,14 @@ if ($RunOrdinaryAcceptance) {
         $hostManifestPath = Join-Path $EvidenceRoot 'host\managed-ui-host-manifest.json'
         Write-C173ProductionAcceptanceManifest $EvidenceRoot $ordinaryAcceptancePath `
             $focusedManifestPath $c172ProductionManifestPath $hostManifestPath $RepoRoot $head
+    }
+    if ($script:c179ManagedTaskManagerResize) {
+        $ordinaryAcceptancePath = Join-Path `
+            (Join-Path $EvidenceRoot 'production-acceptance') 'c166a2-manifest.json'
+        $focusedManifestPath = Join-Path $EvidenceRoot 'c179-focused-proof-manifest.json'
+        $hostManifestPath = Join-Path $EvidenceRoot 'host\managed-ui-host-manifest.json'
+        Write-C179ProductionAcceptanceManifest $EvidenceRoot $ordinaryAcceptancePath `
+            $focusedManifestPath $hostManifestPath $RepoRoot $head
     }
     return
 }

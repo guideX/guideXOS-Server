@@ -36,6 +36,7 @@ param(
     [switch]$C175ManagedNotesResize,
     [switch]$C177ManagedNotesNewlineSave,
     [switch]$C178ManagedCalculatorResize,
+    [switch]$C179ManagedTaskManagerResize,
     [switch]$C167DefaultAppsProof,
     [switch]$ProofControl,
     [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite", "C167ProofComposite")]
@@ -68,6 +69,11 @@ if ($C178ManagedCalculatorResize -and
     (-not $C158ManagedCalculator -or -not $C173ManagedFileExplorerResize -or
      -not $C175ManagedNotesResize -or -not $ProofControl)) {
     throw 'C178 managed Calculator proof requires the existing C158 Calculator, shared C173/C175 resize lane, and proof control.'
+}
+if ($C179ManagedTaskManagerResize -and
+    (-not $C161ManagedTaskManager -or -not $C161TaskManagerProof -or
+     -not $C173ManagedFileExplorerResize -or -not $ProofControl)) {
+    throw 'C179 managed Task Manager proof requires the existing C161 application, shared C173 resize lane, and proof control.'
 }
 if ($C162ManagedTaskManagerClose) {
     $C161ManagedTaskManager = $true
@@ -503,9 +509,9 @@ try {
         $publishProperties += "-p:HostLogProofC161ManagedTaskManager=true"
     }
     if ($C161TaskManagerProof) {
-        if ($managedProjectMode -ne "C160Composite" -or -not $ProductionApplication -or
+        if ($managedProjectMode -notin @("C160Composite", "C167ProofComposite") -or -not $ProductionApplication -or
             -not $C161ManagedTaskManager) {
-            throw "C161 Task Manager proof requires a ProductionApplication C160Composite build with the C161 app enabled."
+            throw "C161 Task Manager proof requires a production C160 or C167 proof composite with the C161 app enabled."
         }
         $publishProperties += "-p:HostLogProofC161TaskManagerProof=true"
     }
@@ -566,6 +572,13 @@ try {
             throw 'C178 focused proof requires a production C167 proof composite.'
         }
         $publishProperties += "-p:HostLogProofC178IncludeFocusedTests=true"
+    }
+    if ($C179ManagedTaskManagerResize) {
+        if (-not $ProductionApplication -or
+            $managedProjectMode -ne 'C167ProofComposite') {
+            throw 'C179 focused proof requires a production C167 proof composite.'
+        }
+        $publishProperties += "-p:HostLogProofC179IncludeFocusedTests=true"
     }
     if ($C164FileActivationProof) {
         $publishProperties += "-p:HostLogProofC164FileActivationProof=true"
@@ -664,6 +677,13 @@ if ($C173ManagedFileExplorerResize -and $ProofControl) {
         foreach ($requiredMarker in @('C178-CALCULATOR-LAUNCH', 'C178-CALC-GEOMETRY')) {
             if (-not $artifactText.Contains($requiredMarker)) {
                 throw "C178 focused composite is missing required Calculator marker '$requiredMarker'."
+            }
+        }
+    }
+    if ($C179ManagedTaskManagerResize) {
+        foreach ($requiredMarker in @('C179-TM-LAUNCH', 'C179-TM-GEOMETRY')) {
+            if (-not $artifactText.Contains($requiredMarker)) {
+                throw "C179 focused composite is missing required Task Manager marker '$requiredMarker'."
             }
         }
     }

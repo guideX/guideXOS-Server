@@ -984,8 +984,11 @@ public:
             isManagedNotesTitle(m_window->title);
         const bool managedCalculatorWindow = m_selector == 6u && m_window &&
             isManagedCalculatorTitle(m_window->title);
+        const bool managedTaskManagerWindow = m_selector == 7u && m_window &&
+            isManagedTaskManagerTitle(m_window->title);
         if (!m_window || (!settingsWindow && !fileExplorerWindow &&
-                !managedNotesWindow && !managedCalculatorWindow)) {
+                !managedNotesWindow && !managedCalculatorWindow &&
+                !managedTaskManagerWindow)) {
             return true;
         }
         if (newWidth <= 0 || newHeight <= 0 ||
@@ -1008,8 +1011,10 @@ public:
             serial::puts("[C173-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.fileexplorer instance=");
         } else if (managedNotesWindow) {
             serial::puts("[C175-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.notes instance=");
-        } else {
+        } else if (managedCalculatorWindow) {
             serial::puts("[C178-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.calculator instance=");
+        } else {
+            serial::puts("[C179-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.taskmanager instance=");
         }
         serial::put_hex64(m_snapshotInstanceId);
         serial::puts(" generation=");
@@ -1513,6 +1518,15 @@ private:
 
     static bool isManagedCalculatorTitle(const char* title) {
         static const char expected[] = "Managed Calculator";
+        if (!title) return false;
+        for (size_t index = 0; index < sizeof(expected); ++index) {
+            if (title[index] != expected[index]) return false;
+        }
+        return true;
+    }
+
+    static bool isManagedTaskManagerTitle(const char* title) {
+        static const char expected[] = "Managed Task Manager";
         if (!title) return false;
         for (size_t index = 0; index < sizeof(expected); ++index) {
             if (title[index] != expected[index]) return false;

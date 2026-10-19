@@ -1,5 +1,6 @@
 #if HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
 using System;
+using HostLogProof.Applications;
 
 namespace HostLogProof;
 
@@ -66,10 +67,21 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
     public const int ListY = 58;
     public const int ListWidthCharacters = 45;
     public const int ListVisibleRows = 10;
+    public const int MaximumListWidthCharactersC179 = 48;
+    public const int MaximumListVisibleRowsC179 = 16;
     public const int RefreshX = 20;
     public const int CloseApplicationX = 156;
     public const int CloseX = 324;
     public const int ButtonY = 276;
+    private const int DetailGap = 20;
+    private const int DetailWidth = 400;
+    private const int SnapshotStatusGap = 10;
+    private const int StatusButtonGap = 10;
+    private const int ClientBottomMargin = 16;
+    private const int ClientWidthMinimumC179 = 800;
+    private const int ClientHeightMinimumC179 = 320;
+    private const int ClientHeightInitialC179 = 346;
+    private const int ClientHeightMaximumC179 = 428;
 
     private readonly GuideXosListBox _list = new(
         ApplicationCapacity, 48, ListVisibleRows, ListWidthCharacters,
@@ -81,19 +93,19 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
     private readonly GuideXosButton _closeButton = new(
         CloseX, ButtonY, 132, 28, "Close Task Manager");
     private readonly GuideXosControlHost _controls = new(ControlCapacity);
-    private readonly GuideXosLabel _name = new(400, 60, 400, "", 50);
-    private readonly GuideXosLabel _applicationId = new(400, 78, 400, "", 50);
+    private readonly GuideXosLabel _name = new(400, 60, DetailWidth, "", 50);
+    private readonly GuideXosLabel _applicationId = new(400, 78, DetailWidth, "", 50);
     private readonly GuideXosLabel _applicationIdContinuation =
-        new(400, 96, 400, "", 50);
+        new(400, 96, DetailWidth, "", 50);
     private readonly GuideXosLabel _applicationIdContinuation2 =
-        new(400, 114, 400, "", 50);
-    private readonly GuideXosLabel _lifetime = new(400, 132, 400, "", 56);
-    private readonly GuideXosLabel _state = new(400, 150, 400, "", 56);
-    private readonly GuideXosLabel _active = new(400, 168, 400, "", 56);
-    private readonly GuideXosLabel _source = new(400, 186, 400, "", 56);
+        new(400, 114, DetailWidth, "", 50);
+    private readonly GuideXosLabel _lifetime = new(400, 132, DetailWidth, "", 56);
+    private readonly GuideXosLabel _state = new(400, 150, DetailWidth, "", 56);
+    private readonly GuideXosLabel _active = new(400, 168, DetailWidth, "", 56);
+    private readonly GuideXosLabel _source = new(400, 186, DetailWidth, "", 56);
     private readonly GuideXosLabel _snapshotStatus = new(20, 248, 760, "", 56);
     private readonly GuideXosLabel _emptyDetails =
-        new(400, 60, 400, "No application selected", 56);
+        new(400, 60, DetailWidth, "No application selected", 56);
     private GuideXosApplicationSnapshot _snapshot;
     private GuideXosApplicationInstanceId _selectedIdentity;
     private GuideXosApplicationSnapshotResult _lastResult =
@@ -101,6 +113,14 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
     private bool _hasSnapshot;
     private bool _hasSelectedIdentity;
     private bool _suppressControlRCharacter;
+    private int _outerWidth = ClientWidthMinimumC179;
+    private int _outerHeight = 370;
+    private int _clientWidth = ClientWidthMinimumC179;
+    private int _clientHeight = ClientHeightInitialC179;
+    private int _detailsX = 400;
+    private int _statusY = 248;
+    private int _buttonY = ButtonY;
+    private uint _snapshotGeneration;
 
     public GuideXosTaskManagerControllerC161()
     {
@@ -120,6 +140,14 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
     public int RowCount => _list.ItemCount;
     public int FirstVisibleIndex => _list.FirstVisibleIndex;
     public int SelectedIndex => _list.SelectedIndex;
+    public int OuterWidth => _outerWidth;
+    public int OuterHeight => _outerHeight;
+    public int ClientWidth => _clientWidth;
+    public int ClientHeight => _clientHeight;
+    public int DetailsX => _detailsX;
+    public int StatusY => _statusY;
+    public int ButtonRowY => _buttonY;
+    public uint SnapshotGeneration => _snapshotGeneration;
     public bool HasSnapshot => _hasSnapshot;
     public bool HasSelection => _hasSelectedIdentity && _list.HasSelection;
     public GuideXosApplicationInstanceId SelectedIdentity =>
@@ -158,7 +186,84 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
             _controls.TryFocus(ListControlId) ==
                 GuideXosControlHostResult.Focused;
         if (!registered) _controls.Reset();
-        return registered && _controls.RegistrationCount == ControlCapacity;
+        return registered && _controls.RegistrationCount == ControlCapacity &&
+            TryRecomputeLayout(800, 370);
+    }
+
+    /// <summary>
+    /// Reflows only the existing Task Manager controls. The list keeps its
+    /// fixed storage, selected identity, focus, and scroll position while the
+    /// viewport exposes more rows and a few more rendered characters.
+    /// </summary>
+    public bool TryRecomputeLayout(
+        in GuideXosManagedWindowResizeCandidateC174 geometry)
+    {
+        if (!geometry.IsValid || geometry.ClientWidth < ClientWidthMinimumC179 ||
+            geometry.ClientHeight < ClientHeightMinimumC179 ||
+            geometry.ClientHeight > ClientHeightMaximumC179)
+            return false;
+
+        int listWidth = Math.Clamp(ListWidthCharacters +
+            (geometry.ClientWidth - ClientWidthMinimumC179) /
+                GuideXosLabel.CharacterWidth,
+            ListWidthCharacters, MaximumListWidthCharactersC179);
+        int detailX = ListX + listWidth * GuideXosLabel.CharacterWidth +
+            DetailGap;
+        int availableHeight = Math.Max(0,
+            geometry.ClientHeight - ClientHeightInitialC179);
+        int visibleRows = ListVisibleRows +
+            availableHeight *
+                (MaximumListVisibleRowsC179 - ListVisibleRows) /
+                (ClientHeightMaximumC179 - ClientHeightInitialC179);
+        visibleRows = Math.Clamp(visibleRows, ListVisibleRows,
+            MaximumListVisibleRowsC179);
+        int statusY = ListY + visibleRows * _list.LineHeight +
+            SnapshotStatusGap;
+        int buttonY = statusY + GuideXosLabel.TextRowHeight + StatusButtonGap;
+        int contentBottom = buttonY + _refreshButton.Height;
+        int statusWidth = Math.Min(geometry.ClientWidth - 40,
+            GuideXosLabel.MaximumRenderWidth * GuideXosLabel.CharacterWidth);
+        statusWidth -= statusWidth % GuideXosLabel.CharacterWidth;
+        if (detailX + DetailWidth > geometry.ClientWidth ||
+            contentBottom + ClientBottomMargin > geometry.ClientHeight)
+            return false;
+
+        if (!_list.TrySetLayout(listWidth, visibleRows, ListX, ListY) ||
+            !_name.TrySetBounds(detailX, 60, DetailWidth) ||
+            !_applicationId.TrySetBounds(detailX, 78, DetailWidth) ||
+            !_applicationIdContinuation.TrySetBounds(detailX, 96, DetailWidth) ||
+            !_applicationIdContinuation2.TrySetBounds(detailX, 114, DetailWidth) ||
+            !_lifetime.TrySetBounds(detailX, 132, DetailWidth) ||
+            !_state.TrySetBounds(detailX, 150, DetailWidth) ||
+            !_active.TrySetBounds(detailX, 168, DetailWidth) ||
+            !_source.TrySetBounds(detailX, 186, DetailWidth) ||
+            !_emptyDetails.TrySetBounds(detailX, 60, DetailWidth) ||
+            !_snapshotStatus.TrySetBounds(20, statusY, statusWidth) ||
+            !_refreshButton.TrySetBounds(RefreshX, buttonY,
+                _refreshButton.Width, _refreshButton.Height) ||
+            !_closeApplicationButton.TrySetBounds(CloseApplicationX, buttonY,
+                _closeApplicationButton.Width, _closeApplicationButton.Height) ||
+            !_closeButton.TrySetBounds(CloseX, buttonY,
+                _closeButton.Width, _closeButton.Height))
+            return false;
+
+        _outerWidth = geometry.OuterWidth;
+        _outerHeight = geometry.OuterHeight;
+        _clientWidth = geometry.ClientWidth;
+        _clientHeight = geometry.ClientHeight;
+        _detailsX = detailX;
+        _statusY = statusY;
+        _buttonY = buttonY;
+        return true;
+    }
+
+    public bool TryRecomputeLayout(int outerWidth, int outerHeight)
+    {
+        GuideXosManagedWindowResizeBoundsC174 bounds =
+            ManagedTaskManagerC161.ResizeBoundsC179;
+        return bounds.TryCreateCandidate(outerWidth, outerHeight,
+                out GuideXosManagedWindowResizeCandidateC174 candidate) &&
+            TryRecomputeLayout(in candidate);
     }
 
     /// <summary>Accepts only a complete C160 wrapper result or its truncation.</summary>
@@ -276,6 +381,7 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
         SyncDetails();
         SetSnapshotStatus(snapshot);
         UpdateCloseApplicationEnabled();
+        ++_snapshotGeneration;
         return true;
     }
 
@@ -338,21 +444,21 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
                     input.X, input.Y, ListX, ListY,
                     GuideXosLabel.CharacterWidth, _list.LineHeight);
             }
-            else if (Inside(input.X, input.Y, RefreshX, ButtonY,
+            else if (Inside(input.X, input.Y, RefreshX, _buttonY,
                     _refreshButton.Width, _refreshButton.Height))
             {
                 target = RefreshControlId;
                 result = _controls.FocusAndRoutePointer(target,
                     input.X, input.Y);
             }
-            else if (Inside(input.X, input.Y, CloseX, ButtonY,
+            else if (Inside(input.X, input.Y, CloseX, _buttonY,
                     _closeButton.Width, _closeButton.Height))
             {
                 target = CloseControlId;
                 result = _controls.FocusAndRoutePointer(target,
                     input.X, input.Y);
             }
-            else if (Inside(input.X, input.Y, CloseApplicationX, ButtonY,
+            else if (Inside(input.X, input.Y, CloseApplicationX, _buttonY,
                     _closeApplicationButton.Width,
                     _closeApplicationButton.Height))
             {
@@ -397,20 +503,23 @@ internal sealed unsafe class GuideXosTaskManagerControllerC161
         _hasSnapshot = false;
         _hasSelectedIdentity = false;
         _suppressControlRCharacter = false;
+        _snapshotGeneration = 0u;
         _lastResult = GuideXosApplicationSnapshotResult.NotSupported;
         SetNoSelectionDetails();
         SetStatus("Application snapshot not loaded".AsSpan());
+        _ = TryRecomputeLayout(800, 370);
     }
 
     public GuideXosResult Render(GuideXosSurface surface)
     {
-        if (surface.TryFillRect(8, 8, 784, 354, 0x001D2733u) !=
+        if (surface.TryFillRect(8, 8, _clientWidth - 16,
+                _clientHeight - 16, 0x001D2733u) !=
                 GuideXosResult.Success ||
             surface.TrySetText(20, 16, "Managed Task Manager | Applications"u8) !=
                 GuideXosResult.Success ||
             surface.TrySetText(20, 38, "Applications | C160 snapshot order"u8) !=
                 GuideXosResult.Success ||
-            surface.TrySetText(400, 38, "Selected Application"u8) !=
+            surface.TrySetText(_detailsX, 38, "Selected Application"u8) !=
                 GuideXosResult.Success ||
             _list.Render(surface, ListX, ListY) != GuideXosResult.Success ||
             RenderDetails(surface) != GuideXosResult.Success ||

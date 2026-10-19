@@ -154,5 +154,17 @@ allPassed &= c178StressPassed;
 Console.WriteLine($"C178-STRESS layout={GuideXosManagedCalculatorResizeC178Tests.LayoutUpdates} alternating={GuideXosManagedCalculatorResizeC178Tests.AlternatingResizes} arithmetic={GuideXosManagedCalculatorResizeC178Tests.ArithmeticResizeCycles} lifecycles={GuideXosManagedCalculatorResizeC178Tests.LifecycleCycles} allocationBytes={GuideXosManagedCalculatorResizeC178Tests.ResizeAllocationBytes} drift={GuideXosManagedCalculatorResizeC178Tests.GeometryDriftCount} result={(c178StressPassed ? "PASS" : "FAIL")}");
 Console.WriteLine($"C178-STRESS-DETAIL firstFailedCase={GuideXosManagedCalculatorResizeC178Tests.FirstFailedCase}");
 
+allPassed &= RunSuite("C179-TaskManagerResize",
+    GuideXosManagedTaskManagerResizeC179Tests.CaseCount,
+    () => GuideXosManagedTaskManagerResizeC179Tests.Run(null));
+Console.WriteLine($"C179-TASK-MANAGER-RESIZE-DETAIL firstFailedCase={GuideXosManagedTaskManagerResizeC179Tests.FirstFailedCase}");
+Console.WriteLine($"C179-REFRESH-DETAIL {GuideXosManagedTaskManagerResizeC179Tests.RefreshDetail}");
+bool c179StressPassed = RunSuite("C179-TaskManagerResizeStress",
+    GuideXosManagedTaskManagerResizeC179Tests.StressCaseCount,
+    () => GuideXosManagedTaskManagerResizeC179Tests.RunStress(null));
+allPassed &= c179StressPassed;
+Console.WriteLine($"C179-STRESS layout={GuideXosManagedTaskManagerResizeC179Tests.LayoutUpdates} alternating={GuideXosManagedTaskManagerResizeC179Tests.AlternatingResizes} refreshResize={GuideXosManagedTaskManagerResizeC179Tests.RefreshResizeCycles} rejected={GuideXosManagedTaskManagerResizeC179Tests.RejectedGeometryChecks} lifecycles={GuideXosManagedTaskManagerResizeC179Tests.LifecycleCycles} resizeAllocationBytes={GuideXosManagedTaskManagerResizeC179Tests.ResizeAllocationBytes} refreshAllocationBytes={GuideXosManagedTaskManagerResizeC179Tests.RefreshAllocationBytes} drift={GuideXosManagedTaskManagerResizeC179Tests.GeometryDriftCount} result={(c179StressPassed ? "PASS" : "FAIL")}");
+Console.WriteLine($"C179-STRESS-DETAIL firstFailedCase={GuideXosManagedTaskManagerResizeC179Tests.FirstFailedCase}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

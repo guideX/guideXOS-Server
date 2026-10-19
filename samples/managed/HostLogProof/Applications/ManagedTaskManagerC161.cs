@@ -15,6 +15,13 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
     public const uint CloseCompletedActionId = 0x01620001u;
     public const int SurfaceWidth = 800;
     public const int SurfaceHeight = 370;
+    public const int MinimumWindowWidthC179 = 800;
+    public const int MinimumWindowHeightC179 = 344;
+    public const int MaximumWindowWidthC179 = 960;
+    public const int MaximumWindowHeightC179 = 452;
+    internal static readonly GuideXosManagedWindowResizeBoundsC174 ResizeBoundsC179 =
+        new(MinimumWindowWidthC179, MinimumWindowHeightC179,
+            MaximumWindowWidthC179, MaximumWindowHeightC179);
 
 #if HOSTLOGPROOF_C161_TASK_MANAGER_PROOF
     private static bool s_proofTestsRun;
@@ -35,6 +42,19 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
 
     internal int ControlCount => _controller.ControlCount;
     internal GuideXosTaskManagerControllerC161 Controller => _controller;
+    internal int WindowWidth => _controller.OuterWidth;
+    internal int WindowHeight => _controller.OuterHeight;
+    internal ulong WindowHandle => _window;
+
+    internal bool InitializeForC179Tests()
+    {
+        _window = 0xC179u;
+        return _controller.InitializeControls();
+    }
+
+    internal bool TryApplyResizeForTests(int outerWidth, int outerHeight) =>
+        ApplyLiveGeometry(null, null, outerWidth, outerHeight,
+            render: false) == GuideXosResult.Success;
 
     public override GuideXosResult Launch(GuideXosHost host)
     {
@@ -114,6 +134,9 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
 
         LogLaunch(host, snapshotResult, in snapshot);
         LogSelectedDetail(host);
+#if HOSTLOGPROOF_C179_MANAGED_TASK_MANAGER_RESIZE && GUIDEXOS_PROOF_CONTROL
+        host.TryLog("C179-TM-LAUNCH resize=enabled initial=800x370 bounds=800x344-960x452 rows=10-16 action=C172 shared=C174 result=PASS"u8);
+#endif
         return GuideXosResult.Success;
     }
 
@@ -211,6 +234,12 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
                 return GuideXosResult.SurfaceCreationFailed;
             PollPendingCloseApplication(host);
             return _controller.Render(surface);
+        }
+
+        if (GuideXosManagedWindowGeometryC172.TryDecodeAction(
+                actionId, out int outerWidth, out int outerHeight))
+        {
+            return HandleLiveGeometry(host, outerWidth, outerHeight);
         }
 
         if (actionId != CloseActionId) return GuideXosResult.InvalidAction;
@@ -489,6 +518,178 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
         LogRefresh(host, result, applied, inputSource);
         LogSelectedDetail(host);
     }
+
+    private GuideXosResult HandleLiveGeometry(GuideXosHost host,
+        int outerWidth, int outerHeight)
+    {
+        if (host == null || _window == 0u ||
+            host.TryGetSurface(_window, out GuideXosSurface surface) !=
+                GuideXosResult.Success || surface == null)
+            return GuideXosResult.SurfaceCreationFailed;
+        return ApplyLiveGeometry(host, surface, outerWidth, outerHeight,
+            render: true);
+    }
+
+    private GuideXosResult ApplyLiveGeometry(GuideXosHost host,
+        GuideXosSurface surface, int outerWidth, int outerHeight, bool render)
+    {
+        if (_window == 0u || (render && surface == null))
+            return GuideXosResult.SurfaceCreationFailed;
+
+        GuideXosManagedWindowResizeTransactionC174 transaction = new(
+            in ResizeBoundsC179, _controller.OuterWidth,
+            _controller.OuterHeight, outerWidth, outerHeight);
+        if (!transaction.IsValid) return transaction.Result;
+        if (!transaction.IsChanged) return GuideXosResult.Success;
+
+        int priorOffset = _controller.FirstVisibleIndex;
+        int priorSelectedIndex = _controller.SelectedIndex;
+        GuideXosApplicationInstanceId priorSelectedIdentity =
+            _controller.SelectedIdentity;
+        bool priorHasSelection = _controller.HasSelection;
+        int priorFocus = _controller.Controls.ActiveControlId;
+        int priorControlCount = _controller.ControlCount;
+        uint priorSnapshotGeneration = _controller.SnapshotGeneration;
+        ulong priorWindow = _window;
+        bool priorModal = _closeDialog.IsOpen;
+        GuideXosDialogResult priorDialogResult = _closeDialog.Result;
+        bool priorClosePending = _closePending;
+        bool priorCloseTarget = _pendingCloseTarget.HasTarget;
+        GuideXosApplicationInstanceId priorCloseIdentity =
+            _pendingCloseTarget.Identity;
+        bool priorTransientCapture =
+            _controller.Controls.HasTransientInputCapture;
+        bool priorPointerCapture =
+            _controller.Controls.HasPointerDragCapture;
+        GuideXosManagedWindowResizeCandidateC174 candidate =
+            transaction.Candidate;
+
+        bool layoutAccepted = _controller.TryRecomputeLayout(in candidate);
+        if (!layoutAccepted)
+        {
+            _ = transaction.Complete(layoutAccepted: false,
+                renderResult: GuideXosResult.Success, stateAccepted: false);
+            RollbackLiveGeometry(surface, in transaction, priorOffset, render);
+            return transaction.Result;
+        }
+
+        GuideXosResult renderResult = GuideXosResult.Success;
+        if (render)
+            renderResult = RenderWithDialog(surface);
+
+        int expectedOffset = ExpectedFirstVisibleIndex(priorOffset,
+            priorSelectedIndex);
+        bool stateAccepted = _window == priorWindow &&
+            _controller.OuterWidth == candidate.OuterWidth &&
+            _controller.OuterHeight == candidate.OuterHeight &&
+            _controller.SnapshotGeneration == priorSnapshotGeneration &&
+            _controller.ControlCount == priorControlCount &&
+            _controller.Controls.ActiveControlId == priorFocus &&
+            _controller.HasSelection == priorHasSelection &&
+            _controller.SelectedIndex == priorSelectedIndex &&
+            _controller.SelectedIdentity == priorSelectedIdentity &&
+            _controller.FirstVisibleIndex == expectedOffset &&
+            _closeDialog.IsOpen == priorModal &&
+            _closeDialog.Result == priorDialogResult &&
+            _closePending == priorClosePending &&
+            _pendingCloseTarget.HasTarget == priorCloseTarget &&
+            _pendingCloseTarget.Identity == priorCloseIdentity &&
+            _controller.Controls.HasTransientInputCapture ==
+                priorTransientCapture &&
+            _controller.Controls.HasPointerDragCapture == priorPointerCapture;
+
+        if (!transaction.Complete(layoutAccepted, renderResult, stateAccepted))
+        {
+            RollbackLiveGeometry(surface, in transaction, priorOffset, render);
+            return transaction.Result;
+        }
+
+#if HOSTLOGPROOF_C179_MANAGED_TASK_MANAGER_RESIZE && GUIDEXOS_PROOF_CONTROL
+        if (host != null) LogC179Geometry(host, in candidate);
+#endif
+        return GuideXosResult.Success;
+    }
+
+    private int ExpectedFirstVisibleIndex(int priorOffset,
+        int selectedIndex)
+    {
+        int firstVisible = Math.Clamp(priorOffset, 0,
+            _controller.List.MaximumFirstVisibleIndex);
+        if (selectedIndex >= 0)
+        {
+            if (selectedIndex < firstVisible)
+                firstVisible = selectedIndex;
+            else if (selectedIndex >= firstVisible +
+                     _controller.List.VisibleRowCount)
+                firstVisible = selectedIndex -
+                    _controller.List.VisibleRowCount + 1;
+        }
+        return Math.Clamp(firstVisible, 0,
+            _controller.List.MaximumFirstVisibleIndex);
+    }
+
+    private void RollbackLiveGeometry(GuideXosSurface surface,
+        in GuideXosManagedWindowResizeTransactionC174 transaction,
+        int priorOffset, bool render)
+    {
+        if (!transaction.RequiresRollback) return;
+        _controller.TryRecomputeLayout(transaction.PriorOuterWidth,
+            transaction.PriorOuterHeight);
+        _controller.List.SetFirstVisibleIndex(priorOffset);
+        if (render && surface != null) _ = RenderWithDialog(surface);
+    }
+
+#if HOSTLOGPROOF_C179_MANAGED_TASK_MANAGER_RESIZE && GUIDEXOS_PROOF_CONTROL
+    private void LogC179Geometry(GuideXosHost host,
+        in GuideXosManagedWindowResizeCandidateC174 geometry)
+    {
+        Span<byte> line = stackalloc byte[192];
+        int position = 0;
+        GuideXosText.Append(line, ref position, "C179-TM-GEOMETRY outer="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)geometry.OuterWidth);
+        GuideXosText.Append(line, ref position, "x"u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)geometry.OuterHeight);
+        GuideXosText.Append(line, ref position, " client="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)geometry.ClientWidth);
+        GuideXosText.Append(line, ref position, "x"u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)geometry.ClientHeight);
+        GuideXosText.Append(line, ref position, " list="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)_controller.List.RenderWidth);
+        GuideXosText.Append(line, ref position, "x"u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)_controller.List.VisibleRowCount);
+        GuideXosText.Append(line, ref position, " rows="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)_controller.RowCount);
+        GuideXosText.Append(line, ref position, " sel="u8);
+        if (_controller.HasSelection)
+        {
+            GuideXosText.AppendUnsigned(line, ref position,
+                (uint)_controller.SelectedIdentity.Source);
+            GuideXosText.Append(line, ref position, ":"u8);
+            AppendIdentityValue(line, ref position,
+                _controller.SelectedIdentity.Value);
+        }
+        else
+        {
+            GuideXosText.Append(line, ref position, "none"u8);
+        }
+        GuideXosText.Append(line, ref position, " scroll="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)_controller.FirstVisibleIndex);
+        GuideXosText.Append(line, ref position, " focus="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)_controller.Controls.ActiveControlId);
+        GuideXosText.Append(line, ref position,
+            " snap=1 id=1 result=PASS"u8);
+        host.TryLog(line[..position]);
+    }
+#endif
 
     private void LogLaunch(GuideXosHost host,
         GuideXosApplicationSnapshotResult result,

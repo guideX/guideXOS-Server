@@ -386,6 +386,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C178_MANAGED_CALCULATOR_RESIZE</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofC179IncludeFocusedTests)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C179_MANAGED_TASK_MANAGER_RESIZE</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup Condition="'$(HostLogProofC134IncludeFocusedTests)' != 'true' and '$(HostLogProofC135IncludeFocusedTests)' != 'true' and '$(HostLogProofC136IncludeFocusedTests)' != 'true' and '$(HostLogProofMode)' != 'C137Composite' and '$(HostLogProofMode)' != 'C138Composite' and '$(HostLogProofMode)' != 'C139Composite' and '$(HostLogProofMode)' != 'C140Composite' and '$(HostLogProofMode)' != 'C141Composite' and '$(HostLogProofMode)' != 'C142Composite' and '$(HostLogProofMode)' != 'C143Composite' and '$(HostLogProofMode)' != 'C144Composite' and '$(HostLogProofMode)' != 'C145Composite' and '$(HostLogProofMode)' != 'C146Composite' and '$(HostLogProofMode)' != 'C147Composite' and '$(HostLogProofMode)' != 'C148Composite' and '$(HostLogProofMode)' != 'C149Composite' and '$(HostLogProofMode)' != 'C150Composite' and '$(HostLogProofMode)' != 'C151Composite' and '$(HostLogProofMode)' != 'C152Composite' and '$(HostLogProofMode)' != 'C153Composite' and '$(HostLogProofMode)' != 'C154Composite' and '$(HostLogProofMode)' != 'C160Composite' and '$(HostLogProofMode)' != 'C167ProofComposite'">
     <Compile Remove="GuideXos\GuideXosComboBoxC134HostTests.cs" />
   </ItemGroup>
