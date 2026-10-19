@@ -35,6 +35,7 @@ param(
     [switch]$C173ManagedFileExplorerResize,
     [switch]$C175ManagedNotesResize,
     [switch]$C177ManagedNotesNewlineSave,
+    [switch]$C178ManagedCalculatorResize,
     [switch]$C167DefaultAppsProof,
     [switch]$ProofControl,
     [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite", "C167ProofComposite")]
@@ -62,6 +63,11 @@ if ($C175ManagedNotesResize -and -not $C173ManagedFileExplorerResize) {
 }
 if ($C177ManagedNotesNewlineSave -and -not $C175ManagedNotesResize) {
     throw 'C177 Managed Notes newline/save proof requires the C175 Notes application lane.'
+}
+if ($C178ManagedCalculatorResize -and
+    (-not $C158ManagedCalculator -or -not $C173ManagedFileExplorerResize -or
+     -not $C175ManagedNotesResize -or -not $ProofControl)) {
+    throw 'C178 managed Calculator proof requires the existing C158 Calculator, shared C173/C175 resize lane, and proof control.'
 }
 if ($C162ManagedTaskManagerClose) {
     $C161ManagedTaskManager = $true
@@ -554,6 +560,13 @@ try {
             $publishProperties += "-p:HostLogProofC177IncludeFocusedTests=true"
         }
     }
+    if ($C178ManagedCalculatorResize) {
+        if (-not $ProductionApplication -or
+            $managedProjectMode -ne 'C167ProofComposite') {
+            throw 'C178 focused proof requires a production C167 proof composite.'
+        }
+        $publishProperties += "-p:HostLogProofC178IncludeFocusedTests=true"
+    }
     if ($C164FileActivationProof) {
         $publishProperties += "-p:HostLogProofC164FileActivationProof=true"
     }
@@ -644,6 +657,13 @@ if ($C173ManagedFileExplorerResize -and $ProofControl) {
         foreach ($requiredMarker in @('C177-NOTES-NEWLINE', 'C177-SAVE-PROOF')) {
             if (-not $artifactText.Contains($requiredMarker)) {
                 throw "C177 focused composite is missing required newline/save marker '$requiredMarker'."
+            }
+        }
+    }
+    if ($C178ManagedCalculatorResize) {
+        foreach ($requiredMarker in @('C178-CALCULATOR-LAUNCH', 'C178-CALC-GEOMETRY')) {
+            if (-not $artifactText.Contains($requiredMarker)) {
+                throw "C178 focused composite is missing required Calculator marker '$requiredMarker'."
             }
         }
     }

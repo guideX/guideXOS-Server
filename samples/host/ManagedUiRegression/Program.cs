@@ -143,5 +143,16 @@ bool c177StressPassed = RunSuite("C177-NotesNewlineStress",
 allPassed &= c177StressPassed;
 Console.WriteLine($"C177-STRESS operations={GuideXosTextAreaC177Tests.EditingNavigationOperationCount} mixedInsertions={GuideXosTextAreaC177Tests.MixedInsertionCount} mixedRemovals={GuideXosTextAreaC177Tests.MixedRemovalCount} capacityRejected={GuideXosTextAreaC177Tests.CapacityRejectionCount} alternatingResizes={GuideXosTextAreaC177Tests.AlternatingResizeCount} rejectedGeometry={GuideXosTextAreaC177Tests.RejectedGeometryCount} lifecycles={GuideXosTextAreaC177Tests.LifecycleCount} roundTrips={GuideXosTextAreaC177Tests.RoundTripCount} resizeAllocationBytes={GuideXosTextAreaC177Tests.ResizeAllocationBytes} geometryDrift={GuideXosTextAreaC177Tests.GeometryDriftCount} result={(c177StressPassed ? "PASS" : "FAIL")}");
 
+allPassed &= RunSuite("C178-CalculatorResize",
+    GuideXosManagedCalculatorResizeC178Tests.CaseCount,
+    () => GuideXosManagedCalculatorResizeC178Tests.Run(null));
+Console.WriteLine($"C178-CALCULATOR-RESIZE-DETAIL firstFailedCase={GuideXosManagedCalculatorResizeC178Tests.FirstFailedCase}");
+bool c178StressPassed = RunSuite("C178-CalculatorResizeStress",
+    GuideXosManagedCalculatorResizeC178Tests.StressCaseCount,
+    () => GuideXosManagedCalculatorResizeC178Tests.RunStress(null));
+allPassed &= c178StressPassed;
+Console.WriteLine($"C178-STRESS layout={GuideXosManagedCalculatorResizeC178Tests.LayoutUpdates} alternating={GuideXosManagedCalculatorResizeC178Tests.AlternatingResizes} arithmetic={GuideXosManagedCalculatorResizeC178Tests.ArithmeticResizeCycles} lifecycles={GuideXosManagedCalculatorResizeC178Tests.LifecycleCycles} allocationBytes={GuideXosManagedCalculatorResizeC178Tests.ResizeAllocationBytes} drift={GuideXosManagedCalculatorResizeC178Tests.GeometryDriftCount} result={(c178StressPassed ? "PASS" : "FAIL")}");
+Console.WriteLine($"C178-STRESS-DETAIL firstFailedCase={GuideXosManagedCalculatorResizeC178Tests.FirstFailedCase}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

@@ -29,6 +29,45 @@ internal enum GuideXosCalculatorErrorC158 : byte
     DivideByZero = 2,
 }
 
+internal readonly struct GuideXosCalculatorStateC178 : IEquatable<GuideXosCalculatorStateC178>
+{
+    public GuideXosCalculatorStateC178(long leftOperand, ulong entryMagnitude,
+        GuideXosCalculatorOperatorC158 pendingOperator,
+        GuideXosCalculatorPhaseC158 phase, byte entryLength,
+        byte entryNegative, GuideXosCalculatorErrorC158 error)
+    {
+        LeftOperand = leftOperand;
+        EntryMagnitude = entryMagnitude;
+        PendingOperator = pendingOperator;
+        Phase = phase;
+        EntryLength = entryLength;
+        EntryNegative = entryNegative;
+        Error = error;
+    }
+
+    public long LeftOperand { get; }
+    public ulong EntryMagnitude { get; }
+    public GuideXosCalculatorOperatorC158 PendingOperator { get; }
+    public GuideXosCalculatorPhaseC158 Phase { get; }
+    public byte EntryLength { get; }
+    public byte EntryNegative { get; }
+    public GuideXosCalculatorErrorC158 Error { get; }
+
+    public bool Equals(GuideXosCalculatorStateC178 other) =>
+        LeftOperand == other.LeftOperand &&
+        EntryMagnitude == other.EntryMagnitude &&
+        PendingOperator == other.PendingOperator && Phase == other.Phase &&
+        EntryLength == other.EntryLength && EntryNegative == other.EntryNegative &&
+        Error == other.Error;
+
+    public override bool Equals(object value) =>
+        value is GuideXosCalculatorStateC178 other && Equals(other);
+
+    public override int GetHashCode() =>
+        HashCode.Combine(LeftOperand, EntryMagnitude, PendingOperator, Phase,
+            EntryLength, EntryNegative, Error);
+}
+
 /// <summary>
 /// Fixed-size signed Int64 calculator state. EntryMagnitude is unsigned so
 /// the magnitude of Int64.MinValue can be accumulated without wrapping.
@@ -63,6 +102,10 @@ internal sealed unsafe class GuideXosCalculatorCoreC158
     public GuideXosCalculatorErrorC158 Error => _state.Error;
     public int EntryLength => _state.EntryLength;
     public long LeftOperand => _state.LeftOperand;
+
+    public GuideXosCalculatorStateC178 CaptureStateC178() => new(
+        _state.LeftOperand, _state.EntryMagnitude, _state.PendingOperator,
+        _state.Phase, _state.EntryLength, _state.EntryNegative, _state.Error);
 
     public bool InputDigit(byte digit)
     {
@@ -413,6 +456,8 @@ internal sealed class GuideXosCalculatorControllerC158
         new(ControlCapacity);
     private readonly GuideXosCalculatorCoreC158 _core = new();
     private uint _commandCount;
+    private int _layoutOffsetX;
+    private int _layoutOffsetY;
 
     public GuideXosCalculatorControllerC158()
     {
@@ -426,6 +471,10 @@ internal sealed class GuideXosCalculatorControllerC158
     public int ActiveIndex => _controlHost.ActiveIndex;
     public int ActiveControlId => _controlHost.ActiveControlId;
     public uint CommandCount => _commandCount;
+    public int LayoutOffsetX => _layoutOffsetX;
+    public int LayoutOffsetY => _layoutOffsetY;
+    public GuideXosCalculatorStateC178 CalculatorState =>
+        _core.CaptureStateC178();
     public GuideXosButton ButtonAt(int index) =>
         index >= 0 && index < _buttons.Length ? _buttons[index] : null;
 
@@ -448,6 +497,51 @@ internal sealed class GuideXosCalculatorControllerC158
         // row order and wraps from the final button back to Clear.
         return _controlHost.TryFocus(EqualsControlId) ==
             GuideXosControlHostResult.Focused;
+    }
+
+    public bool TryRecomputeLayout(int outerWidth, int outerHeight)
+    {
+        if (!ManagedCalculatorC158.ResizeBoundsC178.TryCreateCandidate(
+                outerWidth, outerHeight,
+                out GuideXosManagedWindowResizeCandidateC174 candidate))
+            return false;
+        return TryRecomputeLayout(in candidate);
+    }
+
+    public bool TryRecomputeLayout(
+        in GuideXosManagedWindowResizeCandidateC174 candidate)
+    {
+        if (!candidate.IsValid) return false;
+        int offsetX = (candidate.ClientWidth - ManagedCalculatorC158.SurfaceWidth) / 2;
+        int baseClientHeight = ManagedCalculatorC158.SurfaceHeight -
+            GuideXosManagedWindowResizeBoundsC174.NativeTitlebarHeight;
+        int offsetY = (candidate.ClientHeight - baseClientHeight) / 2;
+        for (int index = 0; index < _buttons.Length; index++)
+        {
+            int row = index / 4;
+            int column = index % 4;
+            int width = index == EqualsIndex ? 200 : 64;
+            if (!_buttons[index].TrySetBounds(
+                    s_columnX[column] + offsetX, 66 + row * 36 + offsetY,
+                    width, 28))
+                return false;
+        }
+        _layoutOffsetX = offsetX;
+        _layoutOffsetY = offsetY;
+        return true;
+    }
+
+    public bool ControlsFit(int clientWidth, int clientHeight)
+    {
+        for (int index = 0; index < _buttons.Length; index++)
+        {
+            GuideXosButton button = _buttons[index];
+            if (button.X < 0 || button.Y < 0 ||
+                button.X + button.Width > clientWidth ||
+                button.Y + button.Height > clientHeight)
+                return false;
+        }
+        return true;
     }
 
     public void Teardown()
@@ -659,13 +753,39 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
     public const uint CloseActionId = 0x01580001u;
     public const int SurfaceWidth = 292;
     public const int SurfaceHeight = 270;
+    public const int MinimumWindowWidthC178 = 284;
+    public const int MinimumWindowHeightC178 = 262;
+    public const int MaximumWindowWidthC178 = 512;
+    public const int MaximumWindowHeightC178 = 420;
+    private const int NativeTitlebarHeight =
+        GuideXosManagedWindowResizeBoundsC174.NativeTitlebarHeight;
+    internal static readonly GuideXosManagedWindowResizeBoundsC174 ResizeBoundsC178 =
+        new(MinimumWindowWidthC178, MinimumWindowHeightC178,
+            MaximumWindowWidthC178, MaximumWindowHeightC178);
 
     private static bool s_testsRun;
     private readonly GuideXosCalculatorControllerC158 _controller = new();
     private ulong _window;
+    private GuideXosSurface _surface;
+    private int _windowWidth = SurfaceWidth;
+    private int _windowHeight = SurfaceHeight;
 
     internal int RegistrationCount => _controller.RegistrationCount;
     internal bool DisplayIsZero => DisplayIs("0");
+    internal GuideXosCalculatorControllerC158 Controller => _controller;
+    internal int WindowWidth => _windowWidth;
+    internal int WindowHeight => _windowHeight;
+    internal int DisplayX => _displayLabel.X;
+    internal int DisplayY => _displayLabel.Y;
+    internal ulong WindowHandle => _window;
+
+    internal bool TryApplyResizeForTests(int outerWidth, int outerHeight)
+    {
+        if (!ResizeBoundsC178.TryCreateCandidate(outerWidth, outerHeight,
+                out GuideXosManagedWindowResizeCandidateC174 candidate))
+            return false;
+        return TryRecomputeLayout(in candidate);
+    }
 
     private bool DisplayIs(string expected)
     {
@@ -688,9 +808,13 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
             out GuideXosSurface surface);
         if (created != GuideXosResult.Success || surface == null) return created;
         _window = surface.Handle;
+        _surface = surface;
         if (!_controller.StartFresh() || !Render(surface))
             return GuideXosResult.InvalidArgument;
         host.TryLog("C158-CALC-LAUNCH id=managed-calculator selector=6 controls=18 capacity=18 focus=18 fresh=PASS result=PASS"u8);
+#if HOSTLOGPROOF_C178_MANAGED_CALCULATOR_RESIZE && GUIDEXOS_PROOF_CONTROL
+        host.TryLog("C178-CALCULATOR-LAUNCH resize=enabled bounds=284x262-512x420 default=292x270 result=PASS"u8);
+#endif
         LogDisplay(host);
         return GuideXosResult.Success;
     }
@@ -698,8 +822,8 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
     public override GuideXosResult HandleInput(
         GuideXosHost host, GuideXosInputEvent input)
     {
-        if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
-                GuideXosResult.Success || surface == null)
+        GuideXosSurface surface = _surface;
+        if (_window == 0u || surface == null || surface.Handle != _window)
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
@@ -726,15 +850,20 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
 
     public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
     {
+        if (GuideXosManagedWindowGeometryC172.TryDecodeAction(actionId,
+                out int outerWidth, out int outerHeight))
+            return HandleLiveGeometry(host, outerWidth, outerHeight);
+
         if (actionId == CloseActionId)
         {
             _controller.Teardown();
             _window = 0u;
+            _surface = null;
             host.TryLog("C158-CALC-CLOSE controls=0 active=none modal=none popup=none drag=none result=PASS"u8);
             return GuideXosResult.Success;
         }
-        if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
-                GuideXosResult.Success || surface == null)
+        GuideXosSurface surface = _surface;
+        if (_window == 0u || surface == null || surface.Handle != _window)
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
@@ -750,13 +879,17 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
     {
         _controller.Teardown();
         _window = 0u;
+        _surface = null;
     }
 
     private bool Render(GuideXosSurface surface)
     {
-        if (surface.TryFillRect(8, 8, 276, 250, 0x001D2733u) !=
+        if (surface.TryFillRect(_controller.LayoutOffsetX + 8,
+                _controller.LayoutOffsetY + 8, 276, 250, 0x001D2733u) !=
                 GuideXosResult.Success ||
-            surface.TrySetText(20, 16, "Calculator | signed Int64"u8) !=
+            surface.TrySetText(_controller.LayoutOffsetX + 20,
+                _controller.LayoutOffsetY + 16,
+                "Calculator | signed Int64"u8) !=
                 GuideXosResult.Success)
         {
             return false;
@@ -777,6 +910,141 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
     }
 
     private readonly GuideXosLabel _displayLabel = new(20, 38, 240, "0", 20);
+
+    private GuideXosResult HandleLiveGeometry(GuideXosHost host,
+        int outerWidth, int outerHeight)
+    {
+        GuideXosSurface surface = _surface;
+        if (host == null || _window == 0u || surface == null ||
+            surface.Handle != _window)
+            return GuideXosResult.SurfaceCreationFailed;
+
+        GuideXosManagedWindowResizeTransactionC174 transaction = new(
+            in ResizeBoundsC178, _windowWidth, _windowHeight,
+            outerWidth, outerHeight);
+        if (!transaction.IsValid) return transaction.Result;
+        if (!transaction.IsChanged) return GuideXosResult.Success;
+
+        int priorFocusId = _controller.ActiveControlId;
+        int priorRegistrationCount = _controller.RegistrationCount;
+        uint priorCommandCount = _controller.CommandCount;
+        ulong priorWindow = _window;
+        GuideXosCalculatorStateC178 priorState = _controller.CalculatorState;
+        GuideXosManagedWindowResizeCandidateC174 candidate =
+            transaction.Candidate;
+        bool layoutAccepted = TryRecomputeLayout(in candidate);
+        if (!layoutAccepted)
+        {
+            _ = transaction.Complete(layoutAccepted: false,
+                renderResult: GuideXosResult.Success, stateAccepted: false);
+            RollbackLiveGeometry(surface, in transaction);
+            return transaction.Result;
+        }
+
+        GuideXosResult rendered = Render(surface)
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+        bool stateAccepted = priorState.Equals(_controller.CalculatorState) &&
+            priorFocusId == _controller.ActiveControlId &&
+            priorCommandCount == _controller.CommandCount &&
+            priorRegistrationCount == _controller.RegistrationCount &&
+            priorRegistrationCount == GuideXosCalculatorControllerC158.ControlCount &&
+            priorWindow == _window &&
+            !_controller.ControlHost.IsModalActive &&
+            !_controller.ControlHost.HasTransientInputCapture &&
+            !_controller.ControlHost.HasPointerDragCapture &&
+            _controller.ControlsFit(candidate.ClientWidth,
+                candidate.ClientHeight) &&
+            _displayLabel.X >= 0 && _displayLabel.Y >= 0 &&
+            _displayLabel.X + _displayLabel.Width <= candidate.ClientWidth &&
+            _displayLabel.Y + _displayLabel.Height <= candidate.ClientHeight;
+        if (!transaction.Complete(layoutAccepted, rendered, stateAccepted))
+        {
+            RollbackLiveGeometry(surface, in transaction);
+            return transaction.Result;
+        }
+#if GUIDEXOS_PROOF_CONTROL
+        LogC178Geometry(host, candidate);
+#endif
+        return transaction.Result;
+    }
+
+#if GUIDEXOS_PROOF_CONTROL
+    private void LogC178Geometry(GuideXosHost host,
+        in GuideXosManagedWindowResizeCandidateC174 geometry)
+    {
+        Span<byte> geometryLine = stackalloc byte[128];
+        Span<byte> stateLine = stackalloc byte[128];
+        Span<char> display = stackalloc char[20];
+        if (!_controller.TryFormatDisplay(display, out int displayLength)) return;
+        int position = 0;
+        GuideXosText.Append(geometryLine, ref position,
+            "C178-CALC-GEOMETRY outer="u8);
+        GuideXosText.AppendUnsigned(geometryLine, ref position,
+            (uint)geometry.OuterWidth);
+        GuideXosText.Append(geometryLine, ref position, "x"u8);
+        GuideXosText.AppendUnsigned(geometryLine, ref position,
+            (uint)geometry.OuterHeight);
+        GuideXosText.Append(geometryLine, ref position, " client="u8);
+        GuideXosText.AppendUnsigned(geometryLine, ref position,
+            (uint)geometry.ClientWidth);
+        GuideXosText.Append(geometryLine, ref position, "x"u8);
+        GuideXosText.AppendUnsigned(geometryLine, ref position,
+            (uint)geometry.ClientHeight);
+        GuideXosText.Append(geometryLine, ref position, " disp="u8);
+        for (int index = 0; index < displayLength; index++)
+            geometryLine[position++] = (byte)display[index];
+        GuideXosCalculatorStateC178 state = _controller.CalculatorState;
+        GuideXosText.Append(geometryLine, ref position, " phase="u8);
+        GuideXosText.AppendUnsigned(geometryLine, ref position,
+            (uint)state.Phase);
+        GuideXosText.Append(geometryLine, ref position, " op="u8);
+        GuideXosText.AppendUnsigned(geometryLine, ref position,
+            (uint)state.PendingOperator);
+        GuideXosText.Append(geometryLine, ref position, " len="u8);
+        GuideXosText.AppendUnsigned(geometryLine, ref position, state.EntryLength);
+        GuideXosText.Append(geometryLine, ref position, " focus="u8);
+        GuideXosText.AppendUnsigned(geometryLine, ref position,
+            (uint)_controller.ActiveControlId);
+        GuideXosText.Append(geometryLine, ref position, " result=PASS"u8);
+        host.TryLog(geometryLine[..position]);
+
+        position = 0;
+        GuideXosText.Append(stateLine, ref position,
+            "C178-CALC-STATE controls="u8);
+        GuideXosText.AppendUnsigned(stateLine, ref position,
+            (uint)_controller.RegistrationCount);
+        GuideXosText.Append(stateLine, ref position, " commands="u8);
+        GuideXosText.AppendUnsigned(stateLine, ref position,
+            _controller.CommandCount);
+        GuideXosText.Append(stateLine, ref position,
+            " state=preserved capture=none result=PASS"u8);
+        host.TryLog(stateLine[..position]);
+    }
+#endif
+
+    private bool TryRecomputeLayout(
+        in GuideXosManagedWindowResizeCandidateC174 geometry)
+    {
+        if (!geometry.IsValid ||
+            !_controller.TryRecomputeLayout(in geometry)) return false;
+        int x = _controller.LayoutOffsetX + 20;
+        int y = _controller.LayoutOffsetY + 38;
+        if (!_displayLabel.TrySetBounds(x, y, 240)) return false;
+        _windowWidth = geometry.OuterWidth;
+        _windowHeight = geometry.OuterHeight;
+        return true;
+    }
+
+    private void RollbackLiveGeometry(GuideXosSurface surface,
+        in GuideXosManagedWindowResizeTransactionC174 transaction)
+    {
+        if (!transaction.RequiresRollback ||
+            !ResizeBoundsC178.TryCreateCandidate(transaction.PriorOuterWidth,
+                transaction.PriorOuterHeight,
+                out GuideXosManagedWindowResizeCandidateC174 priorGeometry))
+            return;
+        if (TryRecomputeLayout(in priorGeometry)) _ = Render(surface);
+    }
 
     private void LogDisplay(GuideXosHost host)
     {

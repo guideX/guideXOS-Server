@@ -982,8 +982,10 @@ public:
             isManagedFileExplorerTitle(m_window->title);
         const bool managedNotesWindow = m_selector == 4u && m_window &&
             isManagedNotesTitle(m_window->title);
+        const bool managedCalculatorWindow = m_selector == 6u && m_window &&
+            isManagedCalculatorTitle(m_window->title);
         if (!m_window || (!settingsWindow && !fileExplorerWindow &&
-                !managedNotesWindow)) {
+                !managedNotesWindow && !managedCalculatorWindow)) {
             return true;
         }
         if (newWidth <= 0 || newHeight <= 0 ||
@@ -1004,8 +1006,10 @@ public:
             serial::puts("[C172-NATIVE-GEOMETRY] app=ManagedSettings instance=");
         } else if (fileExplorerWindow) {
             serial::puts("[C173-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.fileexplorer instance=");
-        } else {
+        } else if (managedNotesWindow) {
             serial::puts("[C175-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.notes instance=");
+        } else {
+            serial::puts("[C178-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.calculator instance=");
         }
         serial::put_hex64(m_snapshotInstanceId);
         serial::puts(" generation=");
@@ -1500,6 +1504,15 @@ private:
 
     static bool isManagedNotesTitle(const char* title) {
         static const char expected[] = "Managed Notes";
+        if (!title) return false;
+        for (size_t index = 0; index < sizeof(expected); ++index) {
+            if (title[index] != expected[index]) return false;
+        }
+        return true;
+    }
+
+    static bool isManagedCalculatorTitle(const char* title) {
+        static const char expected[] = "Managed Calculator";
         if (!title) return false;
         for (size_t index = 0; index < sizeof(expected); ++index) {
             if (title[index] != expected[index]) return false;
