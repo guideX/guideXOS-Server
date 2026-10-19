@@ -21,6 +21,13 @@ internal sealed class SolarMapControl : Control
         ["neptune"] = Color.FromArgb(92, 124, 246),
         ["spacecraft"] = Color.FromArgb(255, 255, 255),
     };
+    private static readonly Color[] SegmentColors =
+    [
+        Color.FromArgb(93, 205, 255), Color.FromArgb(248, 194, 88),
+        Color.FromArgb(196, 150, 255), Color.FromArgb(120, 228, 175),
+        Color.FromArgb(255, 143, 133), Color.FromArgb(119, 180, 255),
+        Color.FromArgb(255, 185, 224), Color.FromArgb(225, 232, 135),
+    ];
 
     private readonly Dictionary<string, Pen> _trailPens = new(StringComparer.Ordinal);
     private readonly Font _labelFont = new("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
@@ -32,6 +39,7 @@ internal sealed class SolarMapControl : Control
     private Point _lastMouse;
     private Point _dragStart;
     private string? _selectedId;
+    private string? _selectedManeuverId;
 
     public Camera2D Camera { get; } = new();
     public string? Diagnostic { get; private set; }
@@ -56,6 +64,13 @@ internal sealed class SolarMapControl : Control
 
     public NavigationScene? Scene => _scene;
     public string? SelectedId => _selectedId;
+    internal void SetSelectedManeuver(string? id)
+    {
+        _selectedManeuverId = id;
+        Invalidate();
+    }
+    internal bool ShowTrajectory = true;
+    internal bool ShowManeuvers = true;
 
     public Viewport MapViewport => new(58, 46, Math.Max(1, ClientSize.Width - 82), Math.Max(1, ClientSize.Height - 90));
 
@@ -86,7 +101,12 @@ internal sealed class SolarMapControl : Control
     {
         if (_scene is null)
             return;
-        Camera.Fit(_scene.Objects.Select(o => o.State.Position), MapViewport);
+        IEnumerable<Vector3D> positions = _scene.Objects.Select(o => o.State.Position);
+        if (_scene.Trajectory is { } trajectory)
+            positions = positions.Concat(trajectory.Samples.Select(p => p.State.Position))
+                .Append(trajectory.VehicleMarker.State.Position)
+                .Concat(trajectory.ManeuverMarkers.Select(m => m.PostState.Position));
+        Camera.Fit(positions, MapViewport);
         Invalidate();
     }
 
@@ -143,6 +163,7 @@ internal sealed class SolarMapControl : Control
         if (_scene is not null)
         {
             DrawTrails(g, viewport, _scene);
+            DrawTrajectory(g, viewport, _scene);
             DrawObjects(g, viewport, _scene);
         }
         g.ResetClip();
@@ -161,8 +182,8 @@ internal sealed class SolarMapControl : Control
     private void DrawHeader(Graphics g)
     {
         string title = _scene is null
-            ? "STELLAR NAVIGATOR  /  SN7"
-            : $"STELLAR NAVIGATOR  /  {_scene.Orientation} X/Y PLANE  /  ORIGIN {_scene.ScientificOriginId.ToUpperInvariant()}";
+            ? "STELLAR NAVIGATOR  /  SN8"
+            : $"STELLAR NAVIGATOR  /  SN8 · {_scene.Orientation} X/Y PLANE  /  ORIGIN {_scene.ScientificOriginId.ToUpperInvariant()}";
         TextRenderer.DrawText(g, title, _headingFont, new Point(16, 13), Color.FromArgb(192, 213, 241));
         TextRenderer.DrawText(g, _scene is null
                 ? "Camera is presentation-only; it does not represent spacecraft position"
@@ -227,6 +248,81 @@ internal sealed class SolarMapControl : Control
                     continue;
                 g.DrawLine(pen, clipped0, clipped1);
             }
+        }
+    }
+
+    private void DrawTrajectory(Graphics g, Viewport viewport, NavigationScene scene)
+    {
+        if (scene.Trajectory is not { } trajectory)
+            return;
+        if (ShowTrajectory)
+        {
+            for (int i = 1; i < trajectory.Samples.Count; i++)
+            {
+                var before = trajectory.Samples[i - 1];
+                var after = trajectory.Samples[i];
+                if (before.State.EtSeconds == after.State.EtSeconds &&
+                    before.State.Position.Equals(after.State.Position))
+                    continue;
+                if (!Camera.TryWorldToScreen(before.State.Position.X, before.State.Position.Y, viewport, out var p0) ||
+                    !Camera.TryWorldToScreen(after.State.Position.X, after.State.Position.Y, viewport, out var p1) ||
+                    !TryClipLine(p0, p1, viewport, out var clipped0, out var clipped1))
+                    continue;
+                Color color = SegmentColors[Math.Clamp(after.SegmentIndex, 0, SegmentColors.Length - 1)];
+                using var pen = new Pen(Color.FromArgb(222, color), 2.1F);
+                g.DrawLine(pen, clipped0, clipped1);
+            }
+            foreach (var sample in trajectory.Samples)
+            {
+                if (!Camera.TryWorldToScreen(sample.State.Position.X, sample.State.Position.Y, viewport, out var point) ||
+                    point.X < viewport.X - 4 || point.X > viewport.X + viewport.Width + 4 ||
+                    point.Y < viewport.Y - 4 || point.Y > viewport.Y + viewport.Height + 4)
+                    continue;
+                using var brush = new SolidBrush(Color.FromArgb(198, 139, 222, 248));
+                g.FillEllipse(brush, (float)point.X - 1.6F, (float)point.Y - 1.6F, 3.2F, 3.2F);
+            }
+        }
+
+        if (ShowManeuvers)
+        {
+            foreach (var marker in trajectory.ManeuverMarkers)
+            {
+                if (!Camera.TryWorldToScreen(marker.PostState.Position.X, marker.PostState.Position.Y,
+                        viewport, out var point) ||
+                    point.X < viewport.X - 12 || point.X > viewport.X + viewport.Width + 12 ||
+                    point.Y < viewport.Y - 12 || point.Y > viewport.Y + viewport.Height + 12)
+                    continue;
+                float radius = marker.Id == _selectedManeuverId ? 8F : 5.5F;
+                var diamond = new PointF[]
+                {
+                    new((float)point.X, (float)point.Y - radius),
+                    new((float)point.X + radius, (float)point.Y),
+                    new((float)point.X, (float)point.Y + radius),
+                    new((float)point.X - radius, (float)point.Y),
+                };
+                using var brush = new SolidBrush(marker.Enabled ? Color.FromArgb(255, 188, 92) : Color.Gray);
+                using var pen = new Pen(marker.Id == _selectedManeuverId ? Color.White : Color.FromArgb(255, 225, 171),
+                    marker.Id == _selectedManeuverId ? 2.2F : 1.2F);
+                g.FillPolygon(brush, diamond);
+                g.DrawPolygon(pen, diamond);
+            }
+        }
+
+        if (ShowTrajectory && Camera.TryWorldToScreen(trajectory.VehicleMarker.State.Position.X,
+                trajectory.VehicleMarker.State.Position.Y, viewport, out var current) &&
+            current.X >= viewport.X - 12 && current.X <= viewport.X + viewport.Width + 12 &&
+            current.Y >= viewport.Y - 12 && current.Y <= viewport.Y + viewport.Height + 12)
+        {
+            using var brush = new SolidBrush(Color.FromArgb(106, 238, 255));
+            using var pen = new Pen(Color.White, 1.5F);
+            var triangle = new PointF[]
+            {
+                new((float)current.X, (float)current.Y - 8),
+                new((float)current.X + 7, (float)current.Y + 6),
+                new((float)current.X - 7, (float)current.Y + 6),
+            };
+            g.FillPolygon(brush, triangle);
+            g.DrawPolygon(pen, triangle);
         }
     }
 

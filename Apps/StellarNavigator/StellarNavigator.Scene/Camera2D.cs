@@ -149,7 +149,15 @@ public sealed class Camera2D
             return null;
         SceneObject? hit = null;
         double bestDistanceSquared = minimumRadiusPixels * minimumRadiusPixels;
-        foreach (var item in scene.Objects)
+        IEnumerable<SceneObject> candidates = scene.Objects;
+        if (scene.Trajectory is { } trajectory)
+        {
+            candidates = candidates
+                .Concat(trajectory.Samples.Select(sample => scene.FindObject(sample.Id)!).Where(x => x is not null))
+                .Concat(trajectory.ManeuverMarkers.Select(marker => scene.FindObject($"maneuver:{marker.Id}")!).Where(x => x is not null))
+                .Append(trajectory.VehicleMarker);
+        }
+        foreach (var item in candidates)
         {
             if (!camera.TryWorldToScreen(item.State.Position.X, item.State.Position.Y, viewport, out var p))
                 continue;

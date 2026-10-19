@@ -21,6 +21,7 @@
     <None Include="..\Astronomy.Ephemeris\Data\ephemeris_de440s_chebyshev.sn4bin" Link="Data\ephemeris_de440s_chebyshev.sn4bin" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Astronomy.Time\Data\leap_seconds.sn5json" Link="Data\leap_seconds.sn5json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Astronomy.Core\Data\earth_orientation.sn6json" Link="Data\earth_orientation.sn6json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Navigation.Core\Data\sun_gm_de440.sn8json" Link="Data\sun_gm_de440.sn8json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

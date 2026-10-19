@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Astronomy.Core;
 using Astronomy.Ephemeris;
 using Astronomy.Time;
+using Navigation.Core;
 
 namespace StellarNavigator.Gui;
 
@@ -15,6 +16,8 @@ internal static class Program
         IndexedChebyshevEphemerisProvider? ephemeris = null;
         TimeConverter? timeConverter = null;
         IauEarthOrientation? orientation = null;
+        SunGravitationalParameter? solarGm = null;
+        string trajectoryStatus;
         string? ephemerisError = null;
         string timeStatus;
         string orientationStatus;
@@ -43,19 +46,29 @@ internal static class Program
             {
                 orientationStatus = $"IAU_EARTH disabled: {ex.Message}";
             }
+            try
+            {
+                solarGm = SunGravitationalParameter.Load(Path.Combine(dataDirectory, SunGravitationalParameter.RuntimeAssetName));
+                trajectoryStatus = $"SN8 idealized trajectory enabled: {solarGm.Identity}";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+            {
+                trajectoryStatus = $"SN8 trajectory disabled: authenticated solar GM data unavailable ({ex.Message})";
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
         {
             ephemerisError = $"The DE440s ephemeris could not be loaded: {ex.Message}";
             timeStatus = "UTC status unavailable until the ephemeris data loads.";
             orientationStatus = "IAU_EARTH status unavailable until the ephemeris data loads.";
+            trajectoryStatus = "SN8 trajectory unavailable until the ephemeris data loads.";
         }
 
-        Scene.SceneBuilder? sceneBuilder = ephemeris is null ? null : new Scene.SceneBuilder(ephemeris, orientation);
+        Scene.SceneBuilder? sceneBuilder = ephemeris is null ? null : new Scene.SceneBuilder(ephemeris, orientation, solarGm);
         try
         {
             Application.Run(new MainForm(sceneBuilder, ephemeris, timeConverter,
-                ephemerisError, timeStatus, orientationStatus, startup));
+                ephemerisError, timeStatus, orientationStatus, trajectoryStatus, startup));
         }
         finally
         {

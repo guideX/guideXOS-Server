@@ -1,0 +1,9 @@
+{
+  "identity": "SN8-SUN-GM-DE440-v1",
+  "centralBody": "Sun",
+  "naifId": 10,
+  "gmKm3PerSecond2": 132712440041.27942,
+  "sourceFilename": "gm_de440.tpc",
+  "sourceUrl": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc",
+  "sourceSha256": "924ddf4fb9ead9fe8a1aa55780bcabde40b09d00065d58226e24b68d8092f140"
+}

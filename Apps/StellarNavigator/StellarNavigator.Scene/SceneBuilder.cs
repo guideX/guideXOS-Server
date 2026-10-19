@@ -40,8 +40,11 @@ public sealed class SceneBuilder
     private readonly IEphemerisProvider _provider;
     private readonly FramedStateService _framedStates;
     private readonly IauEarthOrientation? _orientationModel;
+    private readonly SunGravitationalParameter? _solarGm;
+    private readonly TrajectoryGenerator? _trajectoryGenerator;
 
-    public SceneBuilder(IEphemerisProvider provider, IauEarthOrientation? orientationModel = null)
+    public SceneBuilder(IEphemerisProvider provider, IauEarthOrientation? orientationModel = null,
+        SunGravitationalParameter? solarGm = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         if (provider is not IEtEphemerisProvider)
@@ -49,10 +52,19 @@ public sealed class SceneBuilder
                 "SN7 scenes require IEtEphemerisProvider so requested ET is evaluated without JD reconstruction.",
                 nameof(provider));
         _orientationModel = orientationModel is { IsAuthenticated: true } ? orientationModel : null;
+        _solarGm = solarGm;
+        _trajectoryGenerator = solarGm is null ? null : new TrajectoryGenerator(new TwoBodyPropagator(solarGm));
         _framedStates = new FramedStateService(provider, _orientationModel);
     }
 
     public static IReadOnlyList<CelestialObjectDefinition> Definitions => CelestialObjects;
+    public bool IsTrajectoryModelAvailable => _trajectoryGenerator is not null;
+    public string TrajectoryUnavailableReason => _solarGm is null
+        ? "Authenticated DE440 solar GM runtime data did not load. No fallback gravitational parameter is used."
+        : string.Empty;
+    public SimulatedTrajectoryScenario? CreateDemonstrationTrajectoryScenario() => _solarGm is null
+        ? null
+        : SimulatedTrajectoryScenario.CreateDemonstration(_solarGm);
 
     public NavigationScene Build(SceneBuildRequest request, CancellationToken cancellationToken = default)
     {
@@ -124,13 +136,146 @@ public sealed class SceneBuilder
             DemonstrationSpacecraftDescription, ApplyTimeQuality(spacecraftSceneState, request.TimeQuality),
             Array.Empty<TrailSample>()));
 
+        TrajectoryVisualization? trajectory = null;
+        if (request.IncludeSimulatedTrajectory)
+        {
+            if (_trajectoryGenerator is null || _solarGm is null)
+                throw new SceneBuildException(TrajectoryUnavailableReason);
+            SimulatedTrajectoryScenario scenario = request.TrajectoryScenario ??
+                SimulatedTrajectoryScenario.CreateDemonstration(_solarGm);
+            double halfSpan = request.TrajectoryWindowHalfSpanSeconds ?? GetDefaultTrajectoryHalfSpan(scenario);
+            if (!double.IsFinite(halfSpan) || halfSpan <= 0)
+                throw new SceneBuildException("Trajectory display half-span must be finite and positive.");
+            double startEt = Math.Max(scenario.InitialState.EtSeconds - scenario.MaximumHorizonSeconds,
+                request.Epoch.Value - halfSpan);
+            double endEt = Math.Min(scenario.InitialState.EtSeconds + scenario.MaximumHorizonSeconds,
+                request.Epoch.Value + halfSpan);
+            var generated = _trajectoryGenerator.Generate(scenario, request.Maneuvers ?? Array.Empty<ImpulsiveManeuver>(),
+                new TrajectorySamplingRequest(request.Epoch.Value, startEt, endEt,
+                    request.TrajectorySampleCount, TrajectoryGenerator.DefaultMaximumSamples,
+                    request.TimeQuality == TimeConversionQuality.ProvisionalStaleTable), cancellationToken);
+            if (!generated.IsSuccess)
+                throw new SceneBuildException($"SN8 trajectory unavailable [{generated.Status}]: {generated.Error}");
+            trajectory = BuildTrajectoryVisualization(generated.Trajectory!, request, cancellationToken);
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         if (trailSamples > MaximumTotalTrailSamples)
             throw new SceneBuildException("Internal trail-sampling bound was exceeded.");
         timer.Stop();
         return new NavigationScene(request.Epoch, request.OriginMode, originId,
             request.Orientation, sceneObjects, request.TimeQuality, request.EpochRepresentation,
-            timer.Elapsed, trailSamples, _provider.DataSource);
+            timer.Elapsed, trailSamples, _provider.DataSource) { Trajectory = trajectory };
+    }
+
+    private double GetDefaultTrajectoryHalfSpan(SimulatedTrajectoryScenario scenario)
+    {
+        OrbitState initial = scenario.InitialState;
+        double radius = initial.PositionMeters.Magnitude;
+        double speedSquared = initial.VelocityMetersPerSecond.X * initial.VelocityMetersPerSecond.X +
+            initial.VelocityMetersPerSecond.Y * initial.VelocityMetersPerSecond.Y +
+            initial.VelocityMetersPerSecond.Z * initial.VelocityMetersPerSecond.Z;
+        double energy = speedSquared * 0.5 - _solarGm!.MuMeters3PerSecond2 / radius;
+        if (energy < 0)
+        {
+            double semiMajor = -_solarGm.MuMeters3PerSecond2 / (2.0 * energy);
+            double period = 2.0 * Math.PI * Math.Sqrt(semiMajor * semiMajor * semiMajor /
+                _solarGm.MuMeters3PerSecond2);
+            if (double.IsFinite(period) && period > 0)
+                return Math.Min(period * 0.5, 20.0 * TwoBodyPropagator.SecondsPerJulianYear);
+        }
+        return 14.0 * 86_400.0;
+    }
+
+    private TrajectoryVisualization BuildTrajectoryVisualization(SimulatedTrajectory trajectory,
+        SceneBuildRequest request, CancellationToken cancellationToken)
+    {
+        var timer = Stopwatch.StartNew();
+        var stateCache = new Dictionary<(double Et, string Origin, FrameOrientation Orientation), CartesianState>();
+        CartesianState Place(OrbitState orbit)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string outputOrigin = request.OriginMode switch
+            {
+                SceneOriginMode.SolarSystemBarycenter => "ssb",
+                SceneOriginMode.Earth => "earth",
+                SceneOriginMode.SimulatedSpacecraft => $"spacecraft:{DemonstrationSpacecraftId}",
+                _ => throw new SceneBuildException("Unsupported trajectory visualization origin."),
+            };
+            var cacheKey = (orbit.EtSeconds, outputOrigin, request.Orientation);
+            if (stateCache.TryGetValue(cacheKey, out var cached))
+                return cached;
+
+            var sunResult = _framedStates.GetStateAtEt("sun", new EtSeconds(orbit.EtSeconds),
+                FrameOrientation.J2000, "ssb");
+            if (!sunResult.IsSuccess)
+                throw new SceneBuildException($"Sun DE440s placement failed at ET {orbit.EtSeconds:R}s [{sunResult.Status}]: {sunResult.ErrorMessage}");
+            var sun = ApplyTimeQuality(sunResult.Value!, request.TimeQuality);
+            var ssb = new CartesianState
+            {
+                Position = sun.Position + orbit.PositionMeters,
+                Velocity = sun.Velocity + orbit.VelocityMetersPerSecond,
+                Orientation = FrameOrientation.J2000,
+                OriginId = "ssb",
+                Epoch = new AstroTime(new EtSeconds(orbit.EtSeconds).ToJulianDateTdb(), TimeScale.Tdb),
+                EtSeconds = orbit.EtSeconds,
+                Provenance = trajectory.Provenance +
+                    $" | placement convention: DE440s Sun SSB state at ET {orbit.EtSeconds:R}s plus Sun-relative two-body state",
+                IsSimulated = true,
+                Quality = request.TimeQuality == TimeConversionQuality.ProvisionalStaleTable
+                    ? NavigationResultStatus.StaleData
+                    : NavigationResultStatus.ApproximateOrSimulated,
+            };
+
+            CartesianState placed = ssb;
+            if (request.OriginMode == SceneOriginMode.Earth)
+            {
+                var earthResult = _framedStates.GetStateAtEt("earth", new EtSeconds(orbit.EtSeconds),
+                    FrameOrientation.J2000, "ssb");
+                if (!earthResult.IsSuccess)
+                    throw new SceneBuildException($"Earth-relative trajectory placement failed at ET {orbit.EtSeconds:R}s: {earthResult.ErrorMessage}");
+                var earth = ApplyTimeQuality(earthResult.Value!, request.TimeQuality);
+                placed = OriginTranslation.ExpressRelativeTo(ssb, earth, "earth");
+            }
+            else if (request.OriginMode == SceneOriginMode.SimulatedSpacecraft)
+            {
+                var reference = CreateDemonstrationSpacecraft(new EtSeconds(orbit.EtSeconds), cancellationToken);
+                reference = ApplyTimeQuality(reference, request.TimeQuality);
+                placed = OriginTranslation.ExpressRelativeTo(ssb, reference,
+                    $"spacecraft:{DemonstrationSpacecraftId}");
+            }
+            if (request.Orientation == FrameOrientation.IauEarth)
+                placed = TransformToIauEarth(placed);
+            stateCache.Add(cacheKey, placed);
+            return placed;
+        }
+
+        var renderSamples = trajectory.Samples.Select(sample =>
+        {
+            var state = Place(sample.State);
+            var renderSample = new TrajectoryRenderSample(sample.Id, state,
+                sample.State, sample.SegmentIndex, sample.Kind);
+            return renderSample;
+        }).ToArray();
+        var currentState = Place(trajectory.CurrentState);
+        var vehicleMarker = new SceneObject(null, "sn8-spacecraft", "SN8 simulated spacecraft", null,
+            "Idealized Sun-centered two-body simulation; not observed spacecraft motion", currentState,
+            Array.Empty<TrailSample>());
+        var maneuvers = new List<TrajectoryManeuverMarker>(trajectory.Maneuvers.Count);
+        foreach (var execution in trajectory.Maneuvers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            maneuvers.Add(new TrajectoryManeuverMarker(execution.Maneuver.Id,
+                execution.Maneuver.Label, execution.Maneuver.EtSeconds,
+                execution.PreManeuverState, execution.PostManeuverState,
+                Place(execution.PreManeuverState), Place(execution.PostManeuverState),
+                execution.Maneuver.DeltaVelocityMetersPerSecond,
+                execution.MagnitudeMetersPerSecond, execution.Maneuver.Enabled,
+                execution.SegmentBefore, execution.SegmentAfter));
+        }
+        timer.Stop();
+        return new TrajectoryVisualization(trajectory, vehicleMarker, renderSamples,
+            maneuvers, timer.Elapsed);
     }
 
     private NavigationResult<CartesianState> QueryState(string bodyId, SceneBuildRequest request,
