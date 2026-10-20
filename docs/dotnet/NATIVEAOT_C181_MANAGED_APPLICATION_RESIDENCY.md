@@ -2,8 +2,8 @@
 
 **Repository:** D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT
 **Branch:** v1.1_DOTNET_SUPPORT
-**Starting HEAD:** e8c1c3ecc25f801a3bb69240dd1b3c8d2f82f633
-**Current classification:** Outcome B while focused and proof-disabled guest sequences remain incomplete.
+**Starting HEAD:** e3b2457c047481be30255c4be2a6c5a4a9a35e77
+**Current classification:** Outcome D after C181R1 found QAC acceptance unavailable because a verified reservation remained active. QAC also reported a transient unmanaged/foreign QEMU process during the wait. The focused and proof-disabled production guest gates remain unrun after the runner correction.
 
 ## Decision
 
@@ -108,3 +108,13 @@ Before treating five-instance support as accepted, finish focused boot 1 capacit
 ## Recommended C182 direction
 
 Keep the bounded five-app model. Follow with an acceptance-focused C182 pass that adds a stable guest-side five-instance census to Task Manager evidence, tests one accepted and one rejected resize while all five surfaces are resident, and records bounded runtime content allocations. Do not add process/thread semantics, dynamic registration, or a second runtime.
+
+## C181R1 continuation
+
+The investigation and runner corrections are recorded in [NATIVEAOT_C181R1_RESET_AND_GUEST_QUALIFICATION.md](NATIVEAOT_C181R1_RESET_AND_GUEST_QUALIFICATION.md). The preserved attempt-13 QMP trace establishes that the previous `system_reset` did not reboot the VM: QEMU was launched with `-no-reboot`, accepted the command, reported host-QMP reset `SHUTDOWN` and `STOP`, and never emitted `RESET` or a second guest readiness sequence. C181R1 removes that runner flag and now requires an observed `RESET`, a running QEMU status, and fresh readiness after reset. No kernel or product source was changed.
+
+C181R1's proof-disabled production plan uses three independent QAC-launched cold boots, each from a hash-verified isolated copy. It records each reservation's exact release and permits a later unrelated managed reservation to exist after release. Focused same-process reset behavior is still evaluated by the focused lane; cold-boot results will not be represented as warm-reset evidence.
+
+Boot 3 now exercises Notes edit/save on each freshly reopened generation and checks that no stale-generation dispatch or close rejection was emitted. The guest UI exposes only the five established managed applications, so a sixth live guest launch is unavailable; capacity rejection and recovery remain directly covered by the preserved C181 host suite, while the guest lane measures five residents and verifies 4-to-5 recovery after close/reopen.
+
+The final C181R1 outcome and evidence identifiers are in [NATIVEAOT_C181R1_RESET_AND_GUEST_QUALIFICATION.md](NATIVEAOT_C181R1_RESET_AND_GUEST_QUALIFICATION.md). At 16:00:25 UTC, QAC still showed a verified `guideXOSServer` acceptance reservation (child PID 18800), so the empty preflight required for a new guest run was not met. QAC had reported unmanaged/foreign QEMU PID 26740 at 15:58:57 UTC; that process disappeared from the later census without being touched. C181R1 did not launch a guest.

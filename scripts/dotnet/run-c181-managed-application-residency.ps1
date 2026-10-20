@@ -1,10 +1,15 @@
 param(
     [Parameter(Mandatory=$true)][ValidateSet('focused','production')][string]$Lane,
     [Parameter()][ValidatePattern('^[a-z0-9-]+$')][string]$RunLabel = 'attempt-01',
-    [Parameter()][string]$EvidenceRoot
+    [Parameter()][string]$EvidenceRoot,
+    [Parameter()][ValidateRange(0,3)][int]$SingleBootNumber = 0
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+if ($SingleBootNumber -ne 0 -and $Lane -ne 'production') {
+    throw 'SingleBootNumber is reserved for independent ordinary production boots.'
+}
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $artifactRoot = Join-Path $repo 'out/dotnet/c181-managed-application-residency'
@@ -23,6 +28,18 @@ $qacStderrPath = Join-Path $laneRoot 'qac.stderr.log'
 $qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $ovmf = Join-Path $repo 'OVMF.fd'
+Import-Module (Join-Path $PSScriptRoot 'c181-qmp.psm1') -Force -ErrorAction Stop
+
+function Get-MediaHashes([string]$EspPath) {
+    $relativePaths = @('kernel.elf','ramdisk.img','EFI/BOOT/BOOTX64.EFI')
+    $hashes = [ordered]@{}
+    foreach ($relativePath in $relativePaths) {
+        $path = Join-Path $EspPath $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Candidate media is missing $relativePath in $EspPath." }
+        $hashes[$relativePath] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    }
+    return $hashes
+}
 
 if (-not (Test-Path -LiteralPath $baseEsp -PathType Container)) { throw "Missing staged ESP: $baseEsp" }
 if (-not (Test-Path -LiteralPath $qacCli -PathType Leaf)) { throw "QAC CLI is unavailable: $qacCli" }
@@ -33,7 +50,14 @@ if (-not (Test-Path -LiteralPath $root -PathType Container)) {
     New-Item -ItemType Directory -Force -Path $root | Out-Null
 }
 New-Item -ItemType Directory -Force -Path $laneRoot | Out-Null
+$candidateMediaHashes = Get-MediaHashes $baseEsp
 Copy-Item -LiteralPath $baseEsp -Destination $esp -Recurse
+$copiedMediaHashes = Get-MediaHashes $esp
+foreach ($relativePath in $candidateMediaHashes.Keys) {
+    if ($candidateMediaHashes[$relativePath] -ne $copiedMediaHashes[$relativePath]) {
+        throw "Staged media hash mismatch for $relativePath."
+    }
+}
 
 function Read-Serial {
     if (-not (Test-Path -LiteralPath $serial -PathType Leaf)) { return '' }
@@ -71,28 +95,21 @@ function Wait-Pattern([string]$Pattern,[int]$After,[int]$TimeoutSeconds,[string]
     throw "Timed out waiting for $Description; pattern=$Pattern"
 }
 
-function Wait-ReadyCount([int]$Count,[int]$TimeoutSeconds) {
+function Wait-ReadyCount([int]$Count,[int]$TimeoutSeconds,[int]$After=0) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $readyPattern = '(?m)^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.\r?$'
     $inputPattern = '(?m)^\[KERNEL\] Input manager initialized'
     do {
         $text = Read-Serial
-        if ((Count-Matches $text $readyPattern) -ge $Count -and
-            (Count-Matches $text $inputPattern) -ge $Count) { return }
+        $tail = if ($After -le $text.Length) { $text.Substring($After) } else { '' }
+        if ((Count-Matches $tail $readyPattern) -ge 1 -and
+            (Count-Matches $tail $inputPattern) -ge 1) { return }
         if ($script:qacProcess -and $script:qacProcess.HasExited) {
             throw "QAC/QEMU exited before guest boot $Count became ready; QAC exit=$($script:qacProcess.ExitCode)."
         }
         Start-Sleep -Milliseconds 150
     } while ((Get-Date) -lt $deadline)
     throw "Guest boot $Count did not reach the input loop."
-}
-
-function Read-QmpResponse([System.IO.StreamReader]$Reader) {
-    while ($true) {
-        $line = $Reader.ReadLine()
-        if ($null -eq $line) { throw 'QMP closed its connection.' }
-        if ($line -match '"return"|"error"') { return $line }
-    }
 }
 
 function Invoke-Qmp([string]$Command,[object]$Arguments=$null) {
@@ -106,13 +123,13 @@ function Invoke-Qmp([string]$Command,[object]$Arguments=$null) {
         $writer.AutoFlush = $true
         $greeting = $reader.ReadLine()
         $writer.WriteLine('{"execute":"qmp_capabilities"}')
-        $capabilities = Read-QmpResponse $reader
+        $capabilities = Read-C181QmpResponse -Reader $reader -LogPath $qmpLog -Command 'qmp_capabilities'
         if ($capabilities -match '"error"') { throw "QMP capability negotiation failed: $capabilities" }
         $payload = [ordered]@{execute=$Command}
         if ($null -ne $Arguments) { $payload.arguments = $Arguments }
         $request = $payload | ConvertTo-Json -Compress -Depth 10
         $writer.WriteLine($request)
-        $response = Read-QmpResponse $reader
+        $response = Read-C181QmpResponse -Reader $reader -LogPath $qmpLog -Command $Command
         Add-Content -LiteralPath $qmpLog -Encoding ascii -Value ("command="+$request+"`ngreeting="+$greeting+"`ncapabilities="+$capabilities+"`nresponse="+$response+"`n")
         if ($response -match '"error"') { throw "QMP $Command failed: $response" }
         return $response
@@ -131,12 +148,12 @@ function Send-QmpEvents([object[]]$Events,[int]$DelayMilliseconds=35) {
         $writer.AutoFlush = $true
         $greeting = $reader.ReadLine()
         $writer.WriteLine('{"execute":"qmp_capabilities"}')
-        $capabilities = Read-QmpResponse $reader
+        $capabilities = Read-C181QmpResponse -Reader $reader -LogPath $qmpLog -Command 'qmp_capabilities'
         if ($capabilities -match '"error"') { throw "QMP capability negotiation failed: $capabilities" }
         foreach ($event in $Events) {
             $request = [ordered]@{execute='input-send-event';arguments=[ordered]@{events=@($event)}} | ConvertTo-Json -Compress -Depth 10
             $writer.WriteLine($request)
-            $response = Read-QmpResponse $reader
+            $response = Read-C181QmpResponse -Reader $reader -LogPath $qmpLog -Command 'input-send-event'
             Add-Content -LiteralPath $qmpLog -Encoding ascii -Value ("event="+$request+"`ngreeting="+$greeting+"`ncapabilities="+$capabilities+"`nresponse="+$response+"`n")
             if ($response -match '"error"') { throw "QMP input event failed: $response" }
             if ($DelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $DelayMilliseconds }
@@ -187,6 +204,27 @@ function Send-ControlChord([string]$Code) {
         [ordered]@{type='key';data=[ordered]@{down=$true;key=[ordered]@{type='qcode';data=$Code}}},
         [ordered]@{type='key';data=[ordered]@{down=$false;key=[ordered]@{type='qcode';data=$Code}}},
         [ordered]@{type='key';data=[ordered]@{down=$false;key=[ordered]@{type='qcode';data='ctrl'}}}) 90
+}
+
+function Send-ShiftKey([string]$Code) {
+    Send-QmpEvents @(
+        [ordered]@{type='key';data=[ordered]@{down=$true;key=[ordered]@{type='qcode';data='shift'}}},
+        [ordered]@{type='key';data=[ordered]@{down=$true;key=[ordered]@{type='qcode';data=$Code}}},
+        [ordered]@{type='key';data=[ordered]@{down=$false;key=[ordered]@{type='qcode';data=$Code}}},
+        [ordered]@{type='key';data=[ordered]@{down=$false;key=[ordered]@{type='qcode';data='shift'}}}) 90
+}
+
+function Drag-Pointer([int]$StartX,[int]$StartY,[int]$EndX,[int]$EndY) {
+    Move-Pointer $StartX $StartY
+    $events = [System.Collections.Generic.List[object]]::new()
+    $events.Add([ordered]@{type='btn';data=[ordered]@{button='left';down=$true}})
+    foreach ($event in (New-RelativeMove ($EndX-$StartX) ($EndY-$StartY))) {
+        $events.Add($event)
+    }
+    $events.Add([ordered]@{type='btn';data=[ordered]@{button='left';down=$false}})
+    # Keep button-down, pointer movement, and release on one QMP connection.
+    Send-QmpEvents $events.ToArray() 90
+    $script:cursor = [pscustomobject]@{X=$EndX;Y=$EndY}
 }
 
 function Capture([string]$Name,[string]$BootPath) {
@@ -244,7 +282,7 @@ function Open-StartMenu {
     Start-Sleep -Milliseconds 300
 }
 
-function Open-AppMenuItem([string]$Name,[int]$BootNumber) {
+function Open-AppMenuItem([string]$Name,[int]$BootNumber,[switch]$NoFocusFallback) {
     if ($Name -eq 'settings') { throw 'Managed Settings Center opens through the resident Notes Settings action.' }
     $app = Get-App $Name
     Open-StartMenu
@@ -263,6 +301,16 @@ function Open-AppMenuItem([string]$Name,[int]$BootNumber) {
     $id = [System.Text.RegularExpressions.Regex]::Escape($app.Id)
     $selector = switch ($Name) { notes {'00000004'} calculator {'00000006'} taskmanager {'00000007'} explorer {'00000008'} }
     $pattern = '^(?:\[C150-APP-LAUNCH\] id=' + $id + ' generation=[0-9A-Fa-f]+ selector=' + $selector + ' kind=normal|\[C162-MANAGED-FOCUS\] appId=' + $id + ' source=3 instance=[0-9A-Fa-f]{16} selector=' + $selector + ' existing=true result=PASS)$'
+    if ($Lane -eq 'production') {
+        Start-Sleep -Milliseconds 500
+        $productionText = Read-Serial
+        if (-not $NoFocusFallback -and -not [System.Text.RegularExpressions.Regex]::IsMatch($productionText.Substring($start),$pattern,[System.Text.RegularExpressions.RegexOptions]::Multiline)) {
+            # The proof-disabled image may omit internal focus logs. Use the
+            # ordinary taskbar path and a visible titlebar capture instead.
+            [void](Focus-ResidentApp $Name $BootNumber)
+        }
+        return $app
+    }
     try {
         [void](Wait-Pattern $pattern $start 12 ("$Name pointer activation in boot $BootNumber"))
     } catch {
@@ -328,16 +376,284 @@ function Launch-AllFive([int]$BootNumber,[int]$SerialOffset) {
             throw "Boot $BootNumber is missing managed app launch evidence for $name."
         }
     }
+    foreach ($name in @('settings','explorer','notes','calculator','taskmanager')) {
+        [void](Focus-ResidentApp $name $BootNumber)
+    }
 }
-function Refresh-TaskManager([int]$BootNumber) {
+function Refresh-TaskManager([int]$BootNumber,[string]$CaptureName='task-manager-five-residents',[int]$ExpectedCount=5) {
     $app = Open-AppMenuItem 'taskmanager' $BootNumber
     $start = (Read-Serial).Length
     Send-ControlChord 'r'
     $marker = Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C161-TM-R s=Ctrl\+R st=\d+ n=(?<count>\d+).*ap=true.*$' $start 20 ("Task Manager refresh in boot $BootNumber")
     $count = [int]$marker.Groups['count'].Value
-    if ($count -lt 5) { throw "Task Manager reported only $count snapshot rows in boot $BootNumber." }
-    [void](Capture 'task-manager-five-residents' (Join-Path $laneRoot ('boot' + $BootNumber)))
+    if ($count -ne $ExpectedCount) { throw "Task Manager reported $count snapshot rows in boot $BootNumber; expected $ExpectedCount." }
+    [void](Capture $CaptureName (Join-Path $laneRoot ('boot' + $BootNumber)))
     return $count
+}
+
+function Get-ResidentResizeSpec([string]$Name) {
+    switch ($Name) {
+        'settings' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.settingscenter';Selector='00000005';TaskbarX=193;Width=560;Height=340;TargetWidth=720;TargetHeight=420;NativeLabel='C172-NATIVE-GEOMETRY';NativeOwner='app=ManagedSettings';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C172-MANAGED-GEOMETRY layout=recomputed popup=dismissed capture=none focus=retained result=PASS\r?$';TitlebarRgb='43,80,111'} }
+        'explorer' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.fileexplorer';Selector='00000008';TaskbarX=351;Width=800;Height=390;TargetWidth=600;TargetHeight=360;NativeLabel='C173-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.fileexplorer';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C173-MANAGED-GEOMETRY size=600x360 path=1 selection=1 scroll=\d+ focus=1 popup=0 result=PASS\r?$';TitlebarRgb='43,80,111'} }
+        'notes' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.notes';Selector='00000004';TaskbarX=617;Width=600;Height=360;TargetWidth=560;TargetHeight=344;NativeLabel='C175-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.notes';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C175-MANAGED-GEOMETRY size=560x344 client=560x320 editor=\d+x\d+ result=PASS\r?$';TitlebarRgb='85,136,170'} }
+        'calculator' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.calculator';Selector='00000006';TaskbarX=497;Width=292;Height=270;TargetWidth=512;TargetHeight=420;NativeLabel='C178-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.calculator';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C178-CALC-GEOMETRY outer=512x420 client=512x396 disp=56 phase=3 op=3 len=2 focus=18 result=PASS\r?$';TitlebarRgb='43,80,111'} }
+        'taskmanager' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.taskmanager';Selector='00000007';TaskbarX=741;Width=800;Height=370;TargetWidth=800;TargetHeight=344;NativeLabel='C179-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.taskmanager';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C179-TM-GEOMETRY outer=800x344 client=800x320 list=45x10 rows=\d+ sel=\S+ scroll=\d+ focus=\d+ snap=1 id=1 result=PASS\r?$';TitlebarRgb='43,80,111'} }
+        default { throw "Unknown resident app resize target: $Name" }
+    }
+}
+
+function Get-PpmTitlebarWidth([string]$Path,[string]$Rgb) {
+    $channels = @($Rgb.Split(',') | ForEach-Object { [int]$_ })
+    if ($channels.Count -ne 3) { throw "Invalid titlebar RGB triplet: $Rgb" }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $cursor = 0
+    $tokens = [System.Collections.Generic.List[string]]::new()
+    while ($tokens.Count -lt 4) {
+        while ($cursor -lt $bytes.Length) {
+            $value = $bytes[$cursor]
+            if ($value -eq 35) {
+                while ($cursor -lt $bytes.Length -and $bytes[$cursor] -ne 10) { $cursor++ }
+                continue
+            }
+            if ($value -in @(9,10,13,32)) { $cursor++; continue }
+            break
+        }
+        $start = $cursor
+        while ($cursor -lt $bytes.Length -and $bytes[$cursor] -notin @(9,10,13,32)) { $cursor++ }
+        if ($start -eq $cursor) { throw "Malformed PPM screenshot: $Path" }
+        $tokens.Add([System.Text.Encoding]::ASCII.GetString($bytes,$start,$cursor-$start))
+    }
+    if ($tokens[0] -ne 'P6' -or [int]$tokens[3] -ne 255) { throw "Unsupported PPM screenshot: $Path" }
+    $width = [int]$tokens[1]
+    $height = [int]$tokens[2]
+    if ($cursor -ge $bytes.Length -or $bytes[$cursor] -notin @(9,10,13,32)) { throw "PPM screenshot has no pixel separator: $Path" }
+    if ($bytes[$cursor] -eq 13 -and $cursor+1 -lt $bytes.Length -and $bytes[$cursor+1] -eq 10) { $cursor += 2 }
+    else { $cursor++ }
+    $pixelStart = $cursor
+    if ($bytes.Length -lt $pixelStart + ($width*$height*3)) { throw "Truncated PPM screenshot: $Path" }
+    $longest = 0
+    for ($y=0; $y -lt $height; $y++) {
+        $run = 0
+        for ($x=0; $x -lt $width; $x++) {
+            $pixel = $pixelStart + (($y*$width+$x)*3)
+            if ($bytes[$pixel] -eq $channels[0] -and $bytes[$pixel+1] -eq $channels[1] -and $bytes[$pixel+2] -eq $channels[2]) {
+                $run++
+                if ($run -gt $longest) { $longest = $run }
+            } else { $run = 0 }
+        }
+    }
+    if ($longest -lt 250) { throw "Focused resident window titlebar was not measurable in $Path (longest run $longest)." }
+    return $longest + 2
+}
+
+function Focus-ResidentApp([string]$Name,[int]$BootNumber,[int]$ExpectedWidth=0) {
+    $spec = Get-ResidentResizeSpec $Name
+    if ($ExpectedWidth -le 0) { $ExpectedWidth = $spec.Width }
+    $before = Read-Serial
+    $surfacePattern = '(?m)^\[C150-SURFACE\] action=create appId=' + [regex]::Escape($spec.Id) + ' generation=(?<generation>[0-9A-Fa-f]{8}) window=(?<window>[0-9A-Fa-f]{8}) result=PASS\r?$'
+    $surfaces = [System.Text.RegularExpressions.Regex]::Matches($before,$surfacePattern)
+    if ($surfaces.Count -eq 0) { throw "No resident surface identity exists for $Name." }
+    $surface = $surfaces[$surfaces.Count-1]
+    $focusPattern = '(?m)^\[C162-MANAGED-FOCUS\] appId=' + [regex]::Escape($spec.Id) + ' source=3 instance=(?<instance>[0-9A-Fa-f]{16}) selector=' + $spec.Selector + ' existing=true result=PASS\r?$'
+    $bootPath = Join-Path $laneRoot ('boot'+$BootNumber)
+    $focusRoute = if ($Lane -eq 'focused') {'start-menu-existing-instance'} else {'start-menu-visible-window'}
+    if ($Name -eq 'settings') {
+        $focusStart = $before.Length
+        Click $spec.TaskbarX ($script:screenHeight-13)
+        $focus = [System.Text.RegularExpressions.Regex]::Match((Read-Serial).Substring($focusStart),$focusPattern)
+        $focusRoute = 'taskbar-visible-window'
+    } else {
+        $focusStart = (Read-Serial).Length
+        [void](Open-AppMenuItem $Name $BootNumber -NoFocusFallback)
+        $focus = [System.Text.RegularExpressions.Regex]::Match((Read-Serial).Substring($focusStart),$focusPattern)
+        if ($Lane -eq 'focused' -and -not $focus.Success) {
+            $focus = Wait-Pattern $focusPattern $focusStart 12 "$Name managed instance focus identity"
+        }
+    }
+    $focusScreenshot = Capture ("focus-"+$Name+"-"+([guid]::NewGuid().ToString('N').Substring(0,8))) $bootPath
+    $measuredWidth = Get-PpmTitlebarWidth $focusScreenshot $spec.TitlebarRgb
+    if ([Math]::Abs($measuredWidth-$ExpectedWidth) -gt 2) { throw "$Name focus screenshot measured width $measuredWidth; expected $ExpectedWidth." }
+    return [pscustomobject]@{
+        identity=[ordered]@{
+            instance=if ($focus.Success) {$focus.Groups['instance'].Value} else {$null}
+            instanceSource=if ($focus.Success) {'C162-MANAGED-FOCUS'} else {'surface-generation-window'}
+            generation=$surface.Groups['generation'].Value.ToUpperInvariant()
+            window=$surface.Groups['window'].Value.ToUpperInvariant()
+        }
+        createCount=$surfaces.Count
+        screenshot=$focusScreenshot;screenshotSha256=(Get-FileHash -LiteralPath $focusScreenshot -Algorithm SHA256).Hash
+        measuredTitlebarWidth=$measuredWidth;focusRoute=$focusRoute;focusMarker=if ($focus.Success) {$focus.Value} else {$null}
+    }
+}
+
+function Resize-ResidentApp([string]$Name,[int]$BootNumber) {
+    $spec = Get-ResidentResizeSpec $Name
+    $residentCount = Refresh-TaskManager $BootNumber ("five-residents-before-resize-"+$Name)
+    if ($residentCount -ne 5) { throw "Task Manager reported $residentCount residents before resizing $Name; expected exactly five." }
+    $identity = Focus-ResidentApp $Name $BootNumber $spec.Width
+    $originX = [Math]::Max(0,[int](($script:screenWidth-$spec.Width)/2))
+    $originY = [Math]::Max(0,[int](($script:screenHeight-$spec.Height)/2))
+    $startX = $originX + $spec.Width - 4
+    $startY = $originY + $spec.Height - 4
+    $targetX = $startX + ($spec.TargetWidth-$spec.Width)
+    $targetY = $startY + ($spec.TargetHeight-$spec.Height)
+    $hoverStart = (Read-Serial).Length
+    Move-Pointer $startX $startY
+    $hoverPattern = '(?m)^\[C172-COMPOSITOR-TRACE\] action=resize-hover x=' + ('{0:X8}' -f $startX) + ' y=' + ('{0:X8}' -f $startY) + ' window=' + [regex]::Escape($identity.identity.window) + ' flags=[0-9A-Fa-f]{8}\r?$'
+    if ($Lane -eq 'focused') { [void](Wait-Pattern $hoverPattern $hoverStart 8 "$Name resize-corner hit test") }
+    Start-Sleep -Milliseconds 250
+    $markerStart = (Read-Serial).Length
+    Drag-Pointer $startX $startY $targetX $targetY
+    $nativePattern = '(?m)^\[' + $spec.NativeLabel + '\] ' + $spec.NativeOwner + ' instance=(?<instance>[0-9A-Fa-f]{16}) generation=(?<generation>[0-9A-Fa-f]{8}) window=(?<window>[0-9A-Fa-f]{8}) oldOuter=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} newOuter=' + ('{0:X8}' -f $spec.TargetWidth) + 'x' + ('{0:X8}' -f $spec.TargetHeight) + ' client=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} result=PASS\r?$'
+    $native = $null
+    if ($Lane -eq 'focused') {
+        $native = Wait-Pattern $nativePattern $markerStart 20 "$Name native resize callback"
+        if ($native.Groups['generation'].Value.ToUpperInvariant() -ne $identity.identity.generation -or
+            $native.Groups['window'].Value.ToUpperInvariant() -ne $identity.identity.window) {
+            throw "$Name resize changed its surface generation or native window identity."
+        }
+        if ($identity.identity.instance) {
+            if ($native.Groups['instance'].Value -ne $identity.identity.instance) {
+                throw "$Name resize changed its native application instance."
+            }
+        } else {
+            $identity.identity.instance = $native.Groups['instance'].Value
+            $identity.identity.instanceSource = 'native-resize-callback'
+        }
+        [void](Wait-Pattern $spec.ManagedPattern $markerStart 15 "$Name managed resize layout callback")
+        if ($Name -eq 'notes') {
+            [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C175-MANAGED-STATE caret=\d+ anchor=\d+ view=\d+ h=\d+ i=\d+ undo=[01] redo=[01] dirty=0 doc=1 focus=1 result=PASS\r?$' $markerStart 10 'Notes document state preservation after resize')
+        } elseif ($Name -eq 'calculator') {
+            [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C178-CALC-STATE controls=18 commands=\d+ state=preserved capture=none result=PASS\r?$' $markerStart 10 'Calculator state preservation after resize')
+        }
+    } else {
+        Start-Sleep -Milliseconds 500
+    }
+    $screenshot = Capture ("resize-"+$Name+"-"+$spec.TargetWidth+"x"+$spec.TargetHeight) (Join-Path $laneRoot ('boot'+$BootNumber))
+    $measuredWidth = Get-PpmTitlebarWidth $screenshot $spec.TitlebarRgb
+    if ([Math]::Abs($measuredWidth-$spec.TargetWidth) -gt 2) {
+        throw "$Name screenshot measured width $measuredWidth after resize; expected $($spec.TargetWidth)."
+    }
+    $script:resizeEvidence.Add([ordered]@{
+        app=$Name;residentCountBefore=$residentCount;identity=$identity.identity
+        resize=[ordered]@{from=('{0}x{1}' -f $spec.Width,$spec.Height);to=('{0}x{1}' -f $spec.TargetWidth,$spec.TargetHeight);nativeMarker=if ($native) {$native.Value} else {'not-visible-in-production'};managedLayout=if ($Lane -eq 'focused') {'PASS'} else {'visible-screenshot-only'}}
+        resizeCornerHitTest=if ($Lane -eq 'focused') {'PASS'} else {'not-visible-in-production'}
+        taskbarFocusReturn='PASS'
+        screenshot=$screenshot;screenshotSha256=(Get-FileHash -LiteralPath $screenshot -Algorithm SHA256).Hash
+        measuredTitlebarWidth=$measuredWidth
+    })
+}
+
+function Reject-NotesGeometry([int]$BootNumber) {
+    $spec = Get-ResidentResizeSpec 'notes'
+    $residentCount = Refresh-TaskManager $BootNumber 'five-residents-before-rejected-notes-geometry' 5
+    $identity = Focus-ResidentApp 'notes' $BootNumber $spec.TargetWidth
+    $currentWidth = $spec.TargetWidth
+    $currentHeight = $spec.TargetHeight
+    $startX = [Math]::Max(0,[int](($script:screenWidth-$spec.Width)/2)) + $currentWidth - 4
+    $startY = [Math]::Max(0,[int](($script:screenHeight-$spec.Height)/2)) + $currentHeight - 4
+    $hoverStart = (Read-Serial).Length
+    Move-Pointer $startX $startY
+    if ($Lane -eq 'focused') {
+        $hoverPattern = '(?m)^\[C172-COMPOSITOR-TRACE\] action=resize-hover x=' + ('{0:X8}' -f $startX) + ' y=' + ('{0:X8}' -f $startY) + ' window=' + [regex]::Escape($identity.identity.window) + ' flags=[0-9A-Fa-f]{8}\r?$'
+        [void](Wait-Pattern $hoverPattern $hoverStart 8 'Notes rejected-geometry resize-corner hit test')
+    }
+    $markerStart = (Read-Serial).Length
+    Drag-Pointer $startX $startY ($startX-1) ($startY-1)
+    $rejected = $null
+    if ($Lane -eq 'focused') {
+        $nativePattern = '(?m)^\[C175-NATIVE-GEOMETRY\] appId=com\.guidexos\.apps\.managed\.notes instance=' + [regex]::Escape($identity.identity.instance) + ' generation=' + [regex]::Escape($identity.identity.generation) + ' window=' + [regex]::Escape($identity.identity.window) + ' oldOuter=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} newOuter=0000022Fx00000157 client=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} result=REJECT\r?$'
+        $rejected = Wait-Pattern $nativePattern $markerStart 15 'Notes rejected minimum geometry request'
+        [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C180-MANAGED-GEOMETRY result=REJECT layout=unchanged\r?$' $markerStart 10 'Notes rejected geometry rollback')
+    } else {
+        Start-Sleep -Milliseconds 500
+    }
+    $screenshot = Capture 'notes-rejected-geometry-rollback' (Join-Path $laneRoot ('boot'+$BootNumber))
+    $measuredWidth = Get-PpmTitlebarWidth $screenshot $spec.TitlebarRgb
+    if ([Math]::Abs($measuredWidth-$currentWidth) -gt 2) { throw "Notes rejected geometry changed screenshot width to $measuredWidth; expected rollback to $currentWidth." }
+    $script:resizeEvidence.Add([ordered]@{
+        app='notes';identity=$identity.identity;residentCountBefore=$residentCount;requested='559x343';result=if ($Lane -eq 'focused') {'REJECT'} else {'screenshot-rollback-pass'}
+        rollbackGeometry=('{0}x{1}' -f $currentWidth,$currentHeight);layout='unchanged'
+        nativeMarker=if ($rejected) {$rejected.Value} else {'not-visible-in-production'};screenshot=$screenshot
+        screenshotSha256=(Get-FileHash -LiteralPath $screenshot -Algorithm SHA256).Hash
+        measuredTitlebarWidth=$measuredWidth
+    })
+}
+
+function Exercise-BootThreeLifecycle([int]$BootNumber) {
+    Launch-AllFive $BootNumber $serialOffset
+    [void](Capture 'five-apps-resident' (Join-Path $laneRoot ('boot'+$BootNumber)))
+    Resize-ResidentApp 'notes' $BootNumber
+
+    # Interleave an edit/save with focus transitions and two close/reopen
+    # cycles. Each close frees one resident slot; reopening must create a new
+    # Notes generation and return the actual resident count to five.
+    [void](Open-AppMenuItem 'notes' $BootNumber)
+    $editStart = (Read-Serial).Length
+    Click 380 338
+    Send-Key 'z'
+    Send-ControlChord 's'
+    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C156-SHORTCUT key=s command=Save .*result=PASS.*$' $editStart 20 'Boot 3 Notes edit/save')
+
+    $originX = [Math]::Max(0,[int](($script:screenWidth-600)/2))
+    $originY = [Math]::Max(0,[int](($script:screenHeight-360)/2))
+    $currentWidth = 560
+    for ($cycle=1; $cycle -le 2; $cycle++) {
+        $before = Focus-ResidentApp 'notes' $BootNumber $currentWidth
+        $closeStart = (Read-Serial).Length
+        Click ($originX+$currentWidth-14) ($originY+12)
+        $destroyPattern = '(?m)^\[C150-SURFACE\] action=destroy appId=com\.guidexos\.apps\.managed\.notes generation=' + [regex]::Escape($before.identity.generation) + ' window=' + [regex]::Escape($before.identity.window) + ' reason=close-or-replace\r?$'
+        [void](Wait-Pattern $destroyPattern $closeStart 15 "Boot 3 Notes close cycle $cycle")
+        $closedCount = Refresh-TaskManager $BootNumber ("boot3-notes-closed-"+$cycle) 4
+
+        $launchStart = (Read-Serial).Length
+        [void](Open-AppMenuItem 'notes' $BootNumber)
+        $afterClose = Read-Serial
+        $surfacePattern = '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=(?<generation>[0-9A-Fa-f]{8}) window=(?<window>[0-9A-Fa-f]{8}) result=PASS\r?$'
+        $surfaces = [System.Text.RegularExpressions.Regex]::Matches($afterClose,$surfacePattern)
+        if ($surfaces.Count -lt ($before.createCount+1)) { throw "Boot 3 Notes reopen cycle $cycle did not create a fresh surface." }
+        $created = $surfaces[$surfaces.Count-1]
+        $newGeneration = $created.Groups['generation'].Value.ToUpperInvariant()
+        $newWindow = $created.Groups['window'].Value.ToUpperInvariant()
+        if ($newGeneration -eq $before.identity.generation) {
+            throw "Boot 3 Notes reopen cycle $cycle reused its closed generation."
+        }
+        $after = Focus-ResidentApp 'notes' $BootNumber 600
+        if ($Lane -eq 'focused' -and $after.identity.instance -eq $before.identity.instance) {
+            throw "Boot 3 Notes reopen cycle $cycle reused its closed native instance."
+        }
+        # Dispatch a real edit/save through the newly opened Notes generation
+        # before accepting recovery. This exercises the slot owner after each
+        # close, rather than relying on surface creation alone.
+        $reopenedNotesStart = (Read-Serial).Length
+        Click 380 338
+        $reopenKey = if ($cycle -eq 1) {'y'} else {'x'}
+        Send-Key $reopenKey
+        Send-ControlChord 's'
+        [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C156-SHORTCUT key=s command=Save .*result=PASS.*$' $reopenedNotesStart 20 "Boot 3 Notes generation $cycle edit/save")
+        $restoredCount = Refresh-TaskManager $BootNumber ("boot3-notes-restored-"+$cycle) 5
+        $script:lifecycleEvidence.Add([ordered]@{
+            app='notes';cycle=$cycle;closed=[ordered]@{instance=$before.identity.instance;generation=$before.identity.generation;window=$before.identity.window}
+            fresh=[ordered]@{instance=$after.identity.instance;generation=$after.identity.generation;window=$after.identity.window}
+            concurrentCountAfterClose=$closedCount;concurrentCountAfterReopen=$restoredCount
+            generationChanged=($after.identity.generation -ne $before.identity.generation)
+            nativeInstanceChanged=if ($Lane -eq 'focused') {$after.identity.instance -ne $before.identity.instance} else {'not-visible-in-production'}
+        })
+        $currentWidth = 600
+    }
+
+    # The resident Explorer remains active through the Notes lifecycle and
+    # continues navigation after Notes has been recreated twice.
+    [void](Open-AppMenuItem 'explorer' $BootNumber)
+    $explorerStart = (Read-Serial).Length
+    Click 306 569
+    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=0 path=/system n=\d+ sel=none .*' $explorerStart 15 'Boot 3 Explorer parent navigation')
+    [void](Refresh-TaskManager $BootNumber 'boot3-final-five-residents' 5)
+    $bootText = Read-Serial
+    $bootTail = if ($serialOffset -le $bootText.Length) { $bootText.Substring($serialOffset) } else { $bootText }
+    if ($bootTail -match 'C150-DISPATCH rejected=stale-application result=FAIL|C150-LIFETIME-CLOSE result=REJECT stale-generation=true') {
+        throw 'Boot 3 emitted a stale-generation dispatch or close rejection.'
+    }
 }
 
 function Exercise-BootTwoActions([int]$BootNumber) {
@@ -370,7 +686,7 @@ function Exercise-BootTwoActions([int]$BootNumber) {
     Click 524 569
     [void](Capture 'explorer-navigation-selection' (Join-Path $laneRoot 'boot2'))
 
-    # Notes: edit the resident document, save it, then close and reopen it.
+    # Notes: edit the resident document and save the updated document.
     [void](Open-AppMenuItem 'notes' $BootNumber)
     $notesStart = (Read-Serial).Length
     Click 380 338
@@ -379,18 +695,26 @@ function Exercise-BootTwoActions([int]$BootNumber) {
     [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C156-SHORTCUT key=s command=Save .*result=PASS.*$' $notesStart 20 'Notes save shortcut')
     [void](Capture 'notes-edited-and-saved' (Join-Path $laneRoot 'boot2'))
 
-    # Calculator: 1 + 2 = using its visible keypad.
+    # Calculator: use the keyboard path to calculate 7 * 8 = 56.
     [void](Open-AppMenuItem 'calculator' $BootNumber)
     $calculatorStart = (Read-Serial).Length
-    Click 534 477
-    Click 774 477
-    Click 614 477
-    Click 682 513
-    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C158-CALC-DISPLAY .*result=PASS$' $calculatorStart 15 'Calculator arithmetic')
-    [void](Capture 'calculator-arithmetic' (Join-Path $laneRoot 'boot2'))
+    Send-Key '7'
+    Send-ShiftKey '8'
+    Send-Key '8'
+    Send-Key 'ret'
+    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C158-CALC-STATE display=56 phase=3 commands=4 result=PASS\r?$' $calculatorStart 15 'Calculator 7*8=56')
+    [void](Capture 'calculator-7x8-56' (Join-Path $laneRoot 'boot2'))
 
     # Task Manager refreshes after the interaction and confirms five rows.
     [void](Refresh-TaskManager 2)
+
+    # Keep all five surfaces resident while exercising each application's
+    # existing bottom-right resize path. Refreshing Task Manager immediately
+    # before every resize records the actual simultaneous resident count.
+    foreach ($name in @('settings','explorer','notes','calculator','taskmanager')) {
+        Resize-ResidentApp $name $BootNumber
+    }
+    Reject-NotesGeometry $BootNumber
 }
 
 function Save-BootEvidence([int]$BootNumber,[int]$SerialOffset,[int]$QmpOffset) {
@@ -408,6 +732,21 @@ function Save-BootEvidence([int]$BootNumber,[int]$SerialOffset,[int]$QmpOffset) 
     $matches = [System.Text.RegularExpressions.Regex]::Matches($text.Substring($SerialOffset),$launchPattern)
     $launches = @($matches | ForEach-Object { [pscustomobject]@{AppId=$_.Groups[1].Value;Generation=$_.Groups[2].Value;Selector=$_.Groups[3].Value} })
     $launches | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootPath 'instance-identities.json') -Encoding utf8
+    $bootText = $text.Substring($SerialOffset)
+    $surfacePattern = '(?m)^\[C150-SURFACE\] action=(create|destroy) appId=([^ ]+) generation=([0-9A-Fa-f]{8}) window=([0-9A-Fa-f]{8})(?: result=PASS| reason=close-or-replace)\r?$'
+    $surfaces = @([System.Text.RegularExpressions.Regex]::Matches($bootText,$surfacePattern) | ForEach-Object {
+        [pscustomobject]@{Action=$_.Groups[1].Value;AppId=$_.Groups[2].Value;Generation=$_.Groups[3].Value;Window=$_.Groups[4].Value;Marker=$_.Value}
+    })
+    $focusPattern = '(?m)^\[C162-MANAGED-FOCUS\] appId=([^ ]+) source=3 instance=([0-9A-Fa-f]{16}) selector=([0-9A-Fa-f]{8}) existing=true result=PASS\r?$'
+    $focuses = @([System.Text.RegularExpressions.Regex]::Matches($bootText,$focusPattern) | ForEach-Object {
+        [pscustomobject]@{AppId=$_.Groups[1].Value;Instance=$_.Groups[2].Value;Selector=$_.Groups[3].Value;Marker=$_.Value}
+    })
+    [ordered]@{Surfaces=$surfaces;ExistingInstanceFocuses=$focuses} |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $bootPath 'managed-identities.json') -Encoding utf8
+    @($script:resizeEvidence) | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath (Join-Path $bootPath 'resize-evidence.json') -Encoding utf8
+    @($script:lifecycleEvidence) | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath (Join-Path $bootPath 'lifecycle-evidence.json') -Encoding utf8
 }
 
 $statusBefore = (& $qacCli status 2>&1 | Out-String)
@@ -426,6 +765,9 @@ $script:screenWidth = 0
 $script:screenHeight = 0
 $script:startMenuAllPrograms = $false
 $script:notesMenuCapture = 0
+$script:focusCaptureSequence = 0
+$script:resizeEvidence = [System.Collections.Generic.List[object]]::new()
+$script:lifecycleEvidence = [System.Collections.Generic.List[object]]::new()
 $stdoutTask = $null
 $stderrTask = $null
 $qemuArgs = @(
@@ -435,7 +777,10 @@ $qemuArgs = @(
     '-m','1024M','-vga','std','-display','none',
     '-serial',('file:'+ $serial),
     '-qmp',('tcp:127.0.0.1:{0},server,nowait' -f 0),
-    '-boot','order=c','-no-reboot','-no-shutdown','-rtc','base=utc,clock=host')
+    # Keep QEMU available after guest shutdown for QMP cleanup. Omitting
+    # -no-reboot lets QMP system_reset perform a guest reset instead of
+    # turning it into the SHUTDOWN/STOP state recorded during C181 attempt 13.
+    '-boot','order=c','-no-shutdown','-rtc','base=utc,clock=host')
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,0)
 $listener.Start()
 $script:qmpPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
@@ -459,20 +804,38 @@ $stderrTask = $script:qacProcess.StandardError.ReadToEndAsync()
 $serialOffset = 0
 $qmpOffset = 0
 try {
-    for ($boot = 1; $boot -le 3; $boot++) {
+    $bootNumbers = if ($SingleBootNumber -ne 0) { @($SingleBootNumber) } else { @(1,2,3) }
+    foreach ($boot in $bootNumbers) {
+        $script:resizeEvidence = [System.Collections.Generic.List[object]]::new()
+        $script:lifecycleEvidence = [System.Collections.Generic.List[object]]::new()
         $bootPath = Join-Path $laneRoot ('boot' + $boot)
         New-Item -ItemType Directory -Force -Path $bootPath | Out-Null
-        if ($boot -gt 1) {
+        if ($boot -gt 1 -and $SingleBootNumber -eq 0) {
             $beforeReset = Read-Serial
             $serialOffset = $beforeReset.Length
             if (Test-Path -LiteralPath $qmpLog) { $qmpOffset = ([System.IO.File]::ReadAllText($qmpLog)).Length }
-            [void](Invoke-Qmp 'system_reset')
+            $resetResponse = Invoke-Qmp 'system_reset'
+            $resetQmp = [System.IO.File]::ReadAllText($qmpLog).Substring($qmpOffset)
+            if ($resetQmp -notmatch '(?m)^reset-event-observation=RESET_SEEN\r?$') {
+                throw "QMP did not emit a RESET event for focused guest boot $boot."
+            }
+            $resetRequestStatus = Invoke-Qmp 'query-status'
+            Set-Content -LiteralPath (Join-Path (Join-Path $laneRoot ('boot' + $boot)) 'reset-request-qmp-status.json') -Value $resetRequestStatus -Encoding utf8
+            if ($resetRequestStatus -notmatch '"status"\s*:\s*"running"') {
+                throw "QEMU was not running after system_reset for guest boot ${boot}: $resetRequestStatus"
+            }
+            [ordered]@{
+                systemResetResponse=$resetResponse
+                resetEventObserved=$true
+                queryStatus=$resetRequestStatus
+                serialOffsetBeforeReset=$serialOffset
+            } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path (Join-Path $laneRoot ('boot' + $boot)) 'reset-evidence.json') -Encoding utf8
             $script:cursor = $null
         }
-        Wait-ReadyCount $boot 180
+        Wait-ReadyCount $boot 180 $serialOffset
         Calibrate-Pointer $boot
         $text = Read-Serial
-        if ($boot -eq 1) {
+        if ($boot -eq 1 -or $SingleBootNumber -ne 0) {
             $qacLive = (& $qacCli list 2>&1 | Out-String)
             Set-Content -LiteralPath (Join-Path $laneRoot 'qac-during.status.txt') -Value ((& $qacCli status 2>&1 | Out-String)) -Encoding utf8
             Set-Content -LiteralPath (Join-Path $laneRoot 'qac-during.list.txt') -Value $qacLive -Encoding utf8
@@ -485,14 +848,17 @@ try {
             Launch-AllFive $boot $serialOffset
             [void](Refresh-TaskManager $boot)
             [void](Capture 'five-apps-resident' $bootPath)
-            $notes = Open-AppMenuItem 'notes' $boot
+            $notesBefore = Focus-ResidentApp 'notes' $boot
             $closeStart = (Read-Serial).Length
             Click 926 232
             Start-Sleep -Milliseconds 700
             [void](Capture 'after-notes-close' $bootPath)
             $afterClose = Read-Serial
+            $destroyPattern = '(?m)^\[C150-SURFACE\] action=destroy appId=com\.guidexos\.apps\.managed\.notes generation=' + [regex]::Escape($notesBefore.identity.generation) + ' window=' + [regex]::Escape($notesBefore.identity.window) + ' reason=close-or-replace\r?$'
+            [void](Wait-Pattern $destroyPattern $closeStart 15 'Boot 1 Notes surface close')
+            $closedCount = Refresh-TaskManager $boot 'boot1-notes-closed' 4
             $normalBefore = Count-Matches $afterClose '^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes .*kind=normal$'
-            $notes = Open-AppMenuItem 'notes' $boot
+            [void](Open-AppMenuItem 'notes' $boot)
             $deadline = (Get-Date).AddSeconds(15)
             do {
                 $afterReopen = Read-Serial
@@ -501,25 +867,26 @@ try {
                 Start-Sleep -Milliseconds 100
             } while ((Get-Date) -lt $deadline)
             if ($normalAfter -le $normalBefore) { throw 'Notes did not relaunch after the close/reopen lifecycle check.' }
-            [void](Refresh-TaskManager $boot)
+            $notesAfter = Focus-ResidentApp 'notes' $boot
+            if ($notesAfter.identity.generation -eq $notesBefore.identity.generation) { throw 'Boot 1 Notes reopen reused the closed surface generation.' }
+            $restoredCount = Refresh-TaskManager $boot 'boot1-notes-restored' 5
+            $script:lifecycleEvidence.Add([ordered]@{
+                app='notes';cycle=1;closed=[ordered]@{instance=$notesBefore.identity.instance;generation=$notesBefore.identity.generation;window=$notesBefore.identity.window}
+                fresh=[ordered]@{instance=$notesAfter.identity.instance;generation=$notesAfter.identity.generation;window=$notesAfter.identity.window}
+                concurrentCountAfterClose=$closedCount;concurrentCountAfterReopen=$restoredCount
+                generationChanged=($notesAfter.identity.generation -ne $notesBefore.identity.generation)
+            })
         } elseif ($boot -eq 2) {
             Launch-AllFive $boot $serialOffset
             [void](Capture 'five-apps-resident' $bootPath)
             Exercise-BootTwoActions $boot
         } else {
-            Launch-AllFive $boot $serialOffset
-            [void](Capture 'five-apps-resident' $bootPath)
-            [void](Refresh-TaskManager $boot)
-            for ($cycle = 0; $cycle -lt 2; $cycle++) {
-                [void](Open-AppMenuItem 'notes' $boot)
-                Click 926 232
-                Start-Sleep -Milliseconds 350
-                [void](Open-AppMenuItem 'notes' $boot)
-            }
+            Exercise-BootThreeLifecycle $boot
             [void](Capture 'stress-recovery' $bootPath)
         }
         $current = Read-Serial
-        if ((Count-Matches $current '^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes .*kind=normal$') -lt $boot) {
+        $minimumNotesLaunches = if ($SingleBootNumber -ne 0) { 1 } else { $boot }
+        if ((Count-Matches $current '^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.notes .*kind=normal$') -lt $minimumNotesLaunches) {
             throw "Boot $boot did not launch Managed Notes."
         }
         Save-BootEvidence $boot $serialOffset $qmpOffset
@@ -531,13 +898,17 @@ try {
     }
 } catch {
     if ($script:qacProcess -and -not $script:qacProcess.HasExited) {
-        if ($boot -gt 1) {
+        if ($boot -gt 1 -and $SingleBootNumber -eq 0) {
             $bootPath = Join-Path $laneRoot ('boot' + $boot)
             try {
                 $resetStatus = Invoke-Qmp 'query-status'
                 Set-Content -LiteralPath (Join-Path $bootPath 'reset-timeout-qmp-status.json') -Value $resetStatus -Encoding utf8
             } catch { }
-            try { [void](Capture ("reset-timeout-boot" + $boot) $bootPath) } catch { }
+        }
+        if ($boot -ge 1 -and $boot -le 3) {
+            $bootPath = Join-Path $laneRoot ('boot' + $boot)
+            try { [void](Capture ("failure-boot" + $boot) $bootPath) } catch { }
+            try { Save-BootEvidence $boot $serialOffset $qmpOffset } catch { }
         }
         try { [void](Invoke-Qmp 'quit') } catch { }
         [void]$script:qacProcess.WaitForExit(90000)
@@ -559,27 +930,55 @@ $statusAfter = (& $qacCli status 2>&1 | Out-String)
 $listAfter = (& $qacCli list 2>&1 | Out-String)
 Set-Content -LiteralPath (Join-Path $laneRoot 'qac-after.status.txt') -Value $statusAfter -Encoding utf8
 Set-Content -LiteralPath (Join-Path $laneRoot 'qac-after.list.txt') -Value $listAfter -Encoding utf8
+$qacStderr = if (Test-Path -LiteralPath $qacStderrPath) { [System.IO.File]::ReadAllText($qacStderrPath) } else { '' }
+$reservationMatch = [System.Text.RegularExpressions.Regex]::Match($qacStderr,'QAC reservation requested: id=([0-9a-f]+)')
+$releasedMatch = [System.Text.RegularExpressions.Regex]::Match($qacStderr,'QAC reservation released: id=([0-9a-f]+)')
+$qemuExitMatch = [System.Text.RegularExpressions.Regex]::Match($qacStderr,'QAC QEMU exited: reservation=([0-9a-f]+) pid=(\d+) exitCode=(\d+)')
+$qemuPidMatch = [System.Text.RegularExpressions.Regex]::Match($qacStderr,'QAC QEMU launched: reservation=[0-9a-f]+ pid=(\d+)')
+$qacReleaseVerified = $reservationMatch.Success -and
+    $releasedMatch.Success -and
+    $qemuExitMatch.Success -and
+    $reservationMatch.Groups[1].Value -eq $releasedMatch.Groups[1].Value -and
+    $reservationMatch.Groups[1].Value -eq $qemuExitMatch.Groups[1].Value -and
+    [int]$qemuExitMatch.Groups[3].Value -eq $script:qacProcess.ExitCode -and
+    $listAfter -notmatch [System.Text.RegularExpressions.Regex]::Escape($reservationMatch.Groups[1].Value)
 if ($script:qacProcess.ExitCode -ne 0) { throw "QAC run returned QEMU exit code $($script:qacProcess.ExitCode)." }
-if ($statusAfter -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
-    $listAfter -notmatch 'Reservations:\s+0') {
-    throw 'QAC did not confirm reservation release and an empty post-run census.'
+if ($statusAfter -notmatch 'QEMU processes:\s+\d+ \(0 foreign\)') {
+    throw 'QAC post-run census found a foreign QEMU process.'
+}
+if (-not $qacReleaseVerified) {
+    throw 'QAC did not confirm the run reservation and child QEMU release.'
 }
 
 $fullSerial = Read-Serial
 Set-Content -LiteralPath (Join-Path $laneRoot 'serial-all-boots.log') -Value $fullSerial -Encoding utf8
+$fullQmp = if (Test-Path -LiteralPath $qmpLog) { [System.IO.File]::ReadAllText($qmpLog) } else { '' }
+$bootedMediaHashes = Get-MediaHashes $esp
+foreach ($relativePath in $candidateMediaHashes.Keys) {
+    if ($candidateMediaHashes[$relativePath] -ne $bootedMediaHashes[$relativePath]) {
+        throw "The isolated ESP changed $relativePath during the QAC run."
+    }
+}
 $manifest = [ordered]@{
     lane=$Lane
     runLabel=$RunLabel
     evidenceRoot=$root
-    boots=3
+    boots=$bootNumbers.Count
+    scenarioBootNumber=if ($SingleBootNumber -ne 0) {$SingleBootNumber} else {$null}
     qacMode='acceptance'
     qacProject='guideXOSServer'
     qacCli=$qacCli
     qacRunArguments=$argsEvidence
+    qacReservationId=if ($reservationMatch.Success) {$reservationMatch.Groups[1].Value} else {$null}
+    qemuPid=if ($qemuPidMatch.Success) {[int]$qemuPidMatch.Groups[1].Value} else {$null}
     qacExitCode=$script:qacProcess.ExitCode
-    qacReleaseVerified=($statusAfter -match 'QEMU processes:\s+0 \(0 foreign\)' -and $listAfter -match 'Reservations:\s+0')
+    qacReleaseVerified=$qacReleaseVerified
     bootReadyMarkers=(Count-Matches $fullSerial '(?m)^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.\r?$')
     normalAppLaunches=(Count-Matches $fullSerial '(?m)^\[C150-APP-LAUNCH\] id=[^ ]+ generation=([0-9A-Fa-f]+) selector=([0-9A-Fa-f]+) kind=normal\r?$')
+    qmpResetEvents=(Count-Matches $fullQmp '(?m)^qmp-event=.*"event"\s*:\s*"RESET"')
+    qmpResetEventsMissing=(Count-Matches $fullQmp '(?m)^reset-event-observation=RESET_NOT_OBSERVED\r?$')
+    candidateMediaHashes=$candidateMediaHashes
+    isolatedBootedMediaHashes=$bootedMediaHashes
     qemuArguments=$qemuArgs
     serialLog=(Join-Path $laneRoot 'serial-all-boots.log')
 }
