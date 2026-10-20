@@ -30,53 +30,13 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [Step 2/2] Launching QEMU...
+echo [Step 2/2] Requesting QAC admission and launching QEMU...
 echo.
 
-REM Check if QEMU is installed
-set "QEMU_PATH=C:\Program Files\qemu\qemu-system-i386.exe"
-
-if not exist "%QEMU_PATH%" (
-    echo [ERROR] QEMU not found at: %QEMU_PATH%
-    echo.
-    echo Please install QEMU from: https://www.qemu.org/download/#windows
-    echo.
-    pause
-    exit /b 1
-)
-
-REM Check if kernel was built
-if not exist "build\x86\bin\kernel.elf" (
-    echo [ERROR] Kernel not found at: build\x86\bin\kernel.elf
-    echo.
-    pause
-    exit /b 1
-)
-
-
-echo Starting QEMU...
 echo Kernel: build\x86\bin\kernel.elf
-echo Framebuffer display: QEMU window shows the desktop directly
-echo VNC secondary viewer: connect to localhost:5900
-echo.
-echo Press Ctrl+C to stop QEMU
+echo QAC will launch QEMU as its direct child after development admission.
 echo ==========================================
 echo.
 
-REM Launch QEMU with native framebuffer display (primary) and VNC (secondary viewer)
-REM usb=off ensures mouse events route to PS/2 (IRQ12) since the
-REM kernel does not yet have a USB HID driver.
-"%QEMU_PATH%" ^
-    -machine pc,usb=off ^
-    -kernel "build\x86\bin\kernel.elf" ^
-    -m 128M ^
-    -vga std ^
-    -serial stdio ^
-    -display gtk ^
-    -vnc :0 ^
-    -no-reboot ^
-    -no-shutdown
-
-echo.
-echo QEMU closed.
-echo.
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-qemu-x86-qac.ps1"
+exit /b %ERRORLEVEL%

@@ -48,7 +48,7 @@ Your Visual Studio project is now configured to **build and run your kernel in Q
 |--------|----------|
 | **Build and Run** | **F5** or **Ctrl+F5** |
 | Build Only | Ctrl+Shift+B |
-| Stop QEMU | Ctrl+C in QEMU window |
+| Stop QEMU | Close the QEMU window or press Ctrl+C |
 
 ---
 
@@ -67,10 +67,12 @@ Your Visual Studio project is now configured to **build and run your kernel in Q
    ?
 4. Script checks: build\x86\bin\kernel.elf exists
    ?
-5. Script launches QEMU with kernel
+5. Script requests QAC development admission; QAC launches QEMU as its direct child
    ?
 6. QEMU window appears showing boot screen!
 ```
+
+The F5 build-and-run launcher requires the interactive QAC coordinator to be online. It reserves `guideXOSServer` in development mode and launches QEMU as QAC's direct child. See [QAC development launcher integration](QAC-DEVELOPMENT.md) for CLI setup, queue behavior, and cancellation.
 
 ---
 
