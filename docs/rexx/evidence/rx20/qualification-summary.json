@@ -1,0 +1,72 @@
+{
+  "schema": "guidexos.rexx.rx20.qualification-summary.v1",
+  "phase": "RX20",
+  "outcome": "A — Clock contract accepted",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "14edc305919c706f29723875bc1685e619cf525f",
+  "finished_at_utc": "2026-10-20T23:21:17.6148597Z",
+  "scorecard": "docs/rexx/REXX_RX20_SCORECARD.json",
+  "qualification_runs": {
+    "direct_clock_contract": {
+      "status": "PASS",
+      "run_id": "88943545f7664d69a056014428229ec1",
+      "checks": 123
+    },
+    "hosted_regressions": {
+      "status": "PASS",
+      "run_id": "hosted-d45b3e65e2c340a59b1e7bffa8d7cb4c",
+      "rx19_direct_assertions": 8275,
+      "rx19_dispatch_cases": 4112,
+      "rx19_calendar_properties": 2048,
+      "cli_cases": "24/24",
+      "regina": "NOT_RUN"
+    },
+    "address_sanitizer": {
+      "status": "PASS",
+      "hosted_targets": "22/22",
+      "local_expected_result_cases": "195/195",
+      "regina": "NOT_RUN",
+      "evidence": "docs/rexx/evidence/rx20/sanitizer-address-11e43736f6ee499695b7d18b62dd0981"
+    },
+    "undefined_behavior_sanitizer": {
+      "status": "PASS",
+      "hosted_targets": "22/22",
+      "local_expected_result_cases": "195/195",
+      "regina": "NOT_RUN",
+      "evidence": "docs/rexx/evidence/rx20/sanitizer-undefined-f69f680fe7114027952e0c82a902a189"
+    },
+    "freestanding_amd64": {
+      "status": "PASS",
+      "run_id": "bbee5f77763a429699a093eac934cbfe",
+      "rexx_c_objects_linked": 9,
+      "kernel_elf_sha256": "a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80"
+    },
+    "isolated_qemu_guest": {
+      "status": "PASS",
+      "run_id": "0506436b9bbf43f683684baded0e460f",
+      "kernel_elf_sha256": "a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80",
+      "evidence": "docs/rexx/evidence/rx20/native-guest/run-0506436b9bbf43f683684baded0e460f",
+      "qmp_shutdown_acknowledged": true,
+      "owned_process_absent_after_shutdown": true
+    }
+  },
+  "protected_artifact_reconciliation": {
+    "root_obj_pdb": {
+      "expected": 31,
+      "matched_paths_sizes_and_sha256": 31
+    },
+    "rx19r1_baseline_untracked_entries": {
+      "expected": 63,
+      "present_at_preflight": 63,
+      "missing_at_preflight": 0
+    },
+    "root_phase": "Absent"
+  },
+  "rexx_inventory": {
+    "builtins": 75,
+    "DATE": "Partial",
+    "TIME": "Partial",
+    "external_compatibility_percentage": "NOT_CLAIMED"
+  },
+  "commit_policy": "Local commit on the existing REXX_SUPPORT branch; no push or branch-topology change."
+}

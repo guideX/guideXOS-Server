@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20')]
     [string]$Phase = 'RX12R1',
     [Parameter(Mandatory)][string]$KernelPath,
     [string]$SourceEsp = 'C:\Users\guideX\.codex\rx12-native-guest\esp',
@@ -13,6 +13,8 @@ if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
 }
 $guardManifest = if ($Phase -eq 'RX19') {
     Join-Path $rootDir 'docs\rexx\evidence\rx19\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX20') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx20\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX18') {
     Join-Path $rootDir 'docs\rexx\evidence\rx18\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX17') {
@@ -46,7 +48,7 @@ $guestRoot = Join-Path $runRoot 'guest'
 $guestEsp = Join-Path $guestRoot 'esp'
 $stagedFirmware = Join-Path $guestRoot 'firmware-code.fd'
 $helperRoot = Join-Path $runRoot 'helper'
-$helperName = if ($Phase -eq 'RX19') { 'type_rx19_guest_command.ps1' } elseif ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
+$helperName = if ($Phase -eq 'RX20') { 'type_rx20_guest_command.ps1' } elseif ($Phase -eq 'RX19') { 'type_rx19_guest_command.ps1' } elseif ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
 $serialPath = Join-Path $runRoot 'serial.log'
 $qemuStdoutPath = Join-Path $runRoot 'qemu.stdout.log'
 $qemuStderrPath = Join-Path $runRoot 'qemu.stderr.log'
@@ -113,6 +115,12 @@ if ($Phase -eq 'RX19') {
         (Join-Path $guestEsp 'rx19-clock-error-recovery.rex')
     )
 }
+if ($Phase -eq 'RX20') {
+    $plannedOutputs += @(
+        (Join-Path $guestEsp 'rx20clk.rex'),
+        (Join-Path $guestEsp 'rx20rcv.rex')
+    )
+}
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs -Phase $Phase
 $env:TEMP = $workDir
@@ -124,6 +132,8 @@ $evidenceRoot = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
 $helperSource = if ($Phase -eq 'RX19') {
     Join-Path $rootDir 'docs\rexx\evidence\rx19\native-guest'
+} elseif ($Phase -eq 'RX20') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx20\native-guest'
 } elseif ($Phase -eq 'RX18') {
     Join-Path $rootDir 'docs\rexx\evidence\rx18\native-guest'
 } elseif ($Phase -eq 'RX17') {
@@ -212,6 +222,16 @@ if ($Phase -eq 'RX19') {
     foreach ($scriptFile in $rx19ScriptFiles) {
         Copy-Item -LiteralPath $scriptFile.FullName -Destination (Join-Path $guestEsp $scriptFile.Name)
         $rx19ScriptNames += $scriptFile.Name
+    }
+}
+$rx20ScriptNames = @()
+if ($Phase -eq 'RX20') {
+    $rx20Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx20\native-guest\scripts'
+    $rx20ScriptFiles = @(Get-ChildItem -LiteralPath $rx20Scripts -Filter 'rx20*.rex' -File | Sort-Object Name)
+    if ($rx20ScriptFiles.Count -ne 2) { throw "Expected two reviewed RX20 native guest scripts; found $($rx20ScriptFiles.Count)." }
+    foreach ($scriptFile in $rx20ScriptFiles) {
+        Copy-Item -LiteralPath $scriptFile.FullName -Destination (Join-Path $guestEsp $scriptFile.Name)
+        $rx20ScriptNames += $scriptFile.Name
     }
 }
 
@@ -331,7 +351,12 @@ try {
     $heartbeatCountBefore = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
 
     $helper = Join-Path $helperRoot $helperName
-    $commands = if ($Phase -eq 'RX19') {
+    $commands = if ($Phase -eq 'RX20') {
+        @(
+            [PSCustomObject]@{ name='clock-capabilities-and-monotonic'; text='rexx /rx20clk.rex'; open_terminal=$true; expected='RX20_NATIVE_CLOCK_CAPABILITY_DONE' },
+            [PSCustomObject]@{ name='post-error-date-recovery'; text='rexx /rx20rcv.rex'; expected='RX20_NATIVE_GUEST_RESPONSIVE' }
+        )
+    } elseif ($Phase -eq 'RX19') {
         @(
             [PSCustomObject]@{ name='deterministic-date-conversions'; text='rexx /rx19-date-conversions.rex'; open_terminal=$true; expected='RX19_NATIVE_DATE_CONVERSIONS_DONE' },
             [PSCustomObject]@{ name='clock-capability-and-error-recovery'; text='rexx /rx19-clock-error-recovery.rex'; expected='RX19_NATIVE_GUEST_RESPONSIVE' }
@@ -395,18 +420,19 @@ try {
     $index = 0
     foreach ($command in $commands) {
         $index++
-        $capturePrefix = if ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+        $capturePrefix = if ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
         $captureName = "{0}-{1:D2}-{2}" -f $capturePrefix,$index,$command.name
+        $commandWaitSeconds = if ($Phase -eq 'RX20') { 15 } else { 5 }
         if ($command.open_terminal) {
-            & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds 5 -OpenTerminal
+            & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds $commandWaitSeconds -OpenTerminal
         } else {
-            & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds 5
+            & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds $commandWaitSeconds
         }
         if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Guest input/screenshot helper failed for $($command.name) with exit code $LASTEXITCODE." }
         $null = Assert-OwnQemu -Identity $owner
     }
 
-    $capturePrefix = if ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+    $capturePrefix = if ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
     $screenshots = @(Get-ChildItem -LiteralPath $helperRoot -Filter "$capturePrefix-*.png" -File)
     if ($screenshots.Count -ne $commands.Count) { throw "Expected one Console screenshot per smoke command; found $($screenshots.Count) for $($commands.Count) commands." }
 
@@ -414,8 +440,8 @@ try {
     $serial = Get-Content -Raw -LiteralPath $serialPath
     $heartbeatCountAfter = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
     if ($heartbeatCountAfter -le $heartbeatCountBefore) { throw "Guest heartbeat did not continue during the $Phase smoke commands." }
-    $scriptNames = if ($Phase -eq 'RX19') { $rx19ScriptNames } elseif ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
-    $serialScriptNames = if ($Phase -in @('RX19','RX18','RX17','RX16')) {
+    $scriptNames = if ($Phase -eq 'RX20') { $rx20ScriptNames } elseif ($Phase -eq 'RX19') { $rx19ScriptNames } elseif ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
+    $serialScriptNames = if ($Phase -in @('RX20','RX19','RX18','RX17','RX16')) {
         $scriptNames
     } elseif ($Phase -eq 'RX15') {
         @($scriptNames | Where-Object { $_ -ne 'rx15-conversion-resource-limit.rex' })
@@ -428,6 +454,16 @@ try {
     }
     foreach ($scriptName in $serialScriptNames) {
         if (-not $serial.Contains("/" + $scriptName)) { throw "Serial log did not record guest script access: $scriptName" }
+    }
+    if ($Phase -eq 'RX20') {
+        if ($serial -notmatch '\[REXX-CLOCK\] source=CMOS_RTC read=ok raw=1 local=0 utc=0 offset=unknown resolution_ns=3B9ACA00 accuracy=unknown monotonic=PIT') {
+            throw 'RX20 guest did not report a successful CMOS raw reading with unknown interpretation and PIT monotonic capability.'
+        }
+        if ($serial -notmatch '\[NAVIGATOR-SMOKE\] tls_prereq.wall_clock_backend=CMOS RTC \(interpretation unknown; UTC unavailable\)' -or
+            $serial -notmatch '\[NAVIGATOR-SMOKE\] tls_prereq.wall_clock_status=Unavailable' -or
+            $serial -match 'CMOS RTC \(interpreted as UTC\)') {
+            throw 'RX20 guest TLS prerequisites did not preserve unknown CMOS interpretation and unavailable UTC status.'
+        }
     }
     $null = Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'qemu-smoke-guest' -Phase $Phase | Out-Null
 

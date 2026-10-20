@@ -12,26 +12,6 @@ namespace {
 
 bool s_entropyReadMarkerEmitted = false;
 
-bool is_leap_year(uint16_t year)
-{
-    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-}
-
-uint8_t days_in_month(uint16_t year, uint8_t month)
-{
-    static const uint8_t days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    if (month == 2 && is_leap_year(year)) return 29;
-    return days[month - 1];
-}
-
-bool plausible_datetime(const kernel::time::DateTime& dt)
-{
-    return dt.year >= 2024 && dt.year <= 2100 &&
-        dt.month >= 1 && dt.month <= 12 &&
-        dt.day >= 1 && dt.day <= days_in_month(dt.year, dt.month) &&
-        dt.hour <= 23 && dt.minute <= 59 && dt.second <= 59;
-}
-
 void put_two_digits(char* out, uint8_t value)
 {
     out[0] = static_cast<char>('0' + ((value / 10) % 10));
@@ -114,20 +94,18 @@ bool gxos_wall_clock_unix_seconds(int64_t* out)
 {
     if (!out) return false;
 
-    kernel::time::DateTime dt{};
-    if (!kernel::time::get_current_datetime(dt) || !plausible_datetime(dt)) return false;
+    kernel::time::ClockReading reading{};
+    if (!kernel::time::get_clock_reading(reading) ||
+        reading.status != kernel::time::ClockReadStatus::Ok ||
+        !reading.utc_available) return false;
 
-    int64_t days = 0;
-    for (uint16_t year = 1970; year < dt.year; ++year) {
-        days += is_leap_year(year) ? 366 : 365;
-    }
-    for (uint8_t month = 1; month < dt.month; ++month) {
-        days += days_in_month(dt.year, month);
-    }
-    days += static_cast<int64_t>(dt.day - 1);
-
-    const int64_t seconds = (((days * 24) + dt.hour) * 60 + dt.minute) * 60 + dt.second;
-    if (seconds <= 0) return false;
+    int64_t seconds = 0;
+    if (!kernel::time::calendar_to_unix_seconds(reading.utc_calendar, seconds))
+        return false;
+    constexpr int64_t kPlausibleMinimum = 1704067200ll; // 2024-01-01T00:00:00Z
+    constexpr int64_t kPlausibleMaximum = 4133980800ll; // 2101-01-01T00:00:00Z
+    if (seconds < kPlausibleMinimum || seconds >= kPlausibleMaximum)
+        return false;
     *out = seconds;
     return true;
 }
@@ -143,7 +121,7 @@ GxosClockStatus gxos_wall_clock_status()
 const char* gxos_wall_clock_backend()
 {
 #if ARCH_HAS_PORT_IO
-    return "CMOS RTC (interpreted as UTC)";
+    return "CMOS RTC (interpretation unknown; UTC unavailable)";
 #else
     return "none (unsupported architecture)";
 #endif
@@ -153,23 +131,31 @@ bool gxos_wall_clock_utc_text(char* out, size_t out_size)
 {
     if (!out || out_size < 21) return false;
 
-    kernel::time::DateTime dt{};
-    if (!kernel::time::get_current_datetime(dt) || !plausible_datetime(dt)) return false;
+    kernel::time::ClockReading reading{};
+    if (!kernel::time::get_clock_reading(reading) ||
+        reading.status != kernel::time::ClockReadStatus::Ok ||
+        !reading.utc_available) return false;
 
-    out[0] = static_cast<char>('0' + ((dt.year / 1000) % 10));
-    out[1] = static_cast<char>('0' + ((dt.year / 100) % 10));
-    out[2] = static_cast<char>('0' + ((dt.year / 10) % 10));
-    out[3] = static_cast<char>('0' + (dt.year % 10));
+    int64_t seconds = 0;
+    kernel::time::DateTime utc{};
+    if (!kernel::time::calendar_to_unix_seconds(reading.utc_calendar, seconds) ||
+        !kernel::time::unix_seconds_to_calendar(seconds, utc) ||
+        utc.year < 2024u || utc.year > 2100u) return false;
+
+    out[0] = static_cast<char>('0' + ((utc.year / 1000) % 10));
+    out[1] = static_cast<char>('0' + ((utc.year / 100) % 10));
+    out[2] = static_cast<char>('0' + ((utc.year / 10) % 10));
+    out[3] = static_cast<char>('0' + (utc.year % 10));
     out[4] = '-';
-    put_two_digits(out + 5, dt.month);
+    put_two_digits(out + 5, utc.month);
     out[7] = '-';
-    put_two_digits(out + 8, dt.day);
+    put_two_digits(out + 8, utc.day);
     out[10] = 'T';
-    put_two_digits(out + 11, dt.hour);
+    put_two_digits(out + 11, utc.hour);
     out[13] = ':';
-    put_two_digits(out + 14, dt.minute);
+    put_two_digits(out + 14, utc.minute);
     out[16] = ':';
-    put_two_digits(out + 17, dt.second);
+    put_two_digits(out + 17, utc.second);
     out[19] = 'Z';
     out[20] = '\0';
     return true;

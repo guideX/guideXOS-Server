@@ -1,153 +1,170 @@
 #include "include/kernel/time.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace time {
+namespace {
 
-static const uint16_t CMOS_ADDR_PORT = 0x70;
-static const uint16_t CMOS_DATA_PORT = 0x71;
-
-static const uint8_t RTC_REG_SECONDS = 0x00;
-static const uint8_t RTC_REG_MINUTES = 0x02;
-static const uint8_t RTC_REG_HOURS = 0x04;
-static const uint8_t RTC_REG_DAY = 0x07;
-static const uint8_t RTC_REG_MONTH = 0x08;
-static const uint8_t RTC_REG_YEAR = 0x09;
-static const uint8_t RTC_REG_STATUS_A = 0x0A;
-static const uint8_t RTC_REG_STATUS_B = 0x0B;
-static const uint8_t RTC_UIP = 0x80;
-static const uint8_t RTC_24_HOUR = 0x02;
-static const uint8_t RTC_BINARY = 0x04;
-
-static uint8_t bcd_to_binary(uint8_t value)
-{
-    return static_cast<uint8_t>((value & 0x0F) + ((value >> 4) * 10));
-}
+static const uint16_t kCmosAddressPort = 0x70;
+static const uint16_t kCmosDataPort = 0x71;
+static const uint8_t kRtcRegSeconds = 0x00;
+static const uint8_t kRtcRegMinutes = 0x02;
+static const uint8_t kRtcRegHours = 0x04;
+static const uint8_t kRtcRegDay = 0x07;
+static const uint8_t kRtcRegMonth = 0x08;
+static const uint8_t kRtcRegYear = 0x09;
+static const uint8_t kRtcRegStatusA = 0x0A;
+static const uint8_t kRtcRegStatusB = 0x0B;
+static const uint8_t kRtcRegStatusD = 0x0D;
+static const uint8_t kRtcUpdateInProgress = 0x80;
+static bool s_clock_source_reported = false;
 
 #if ARCH_HAS_PORT_IO
-static bool is_leap_year(uint16_t year)
-{
-    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-}
-
-static uint8_t days_in_month(uint16_t year, uint8_t month)
-{
-    static const uint8_t days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    if (month == 2 && is_leap_year(year)) return 29;
-    return days[month - 1];
-}
-
 static uint8_t read_cmos(uint8_t reg)
 {
-    arch::outb(CMOS_ADDR_PORT, static_cast<uint8_t>(0x80 | reg));
-    return arch::inb(CMOS_DATA_PORT);
+    // Keep NMI enabled. The index/data pair is protected against maskable
+    // interrupt re-entry below; no current NMI handler accesses CMOS.
+    arch::outb(kCmosAddressPort, static_cast<uint8_t>(reg & 0x7Fu));
+    return arch::inb(kCmosDataPort);
 }
 
-static bool rtc_update_in_progress()
+static CmosRegisterSnapshot read_register_set()
 {
-    return (read_cmos(RTC_REG_STATUS_A) & RTC_UIP) != 0;
+    CmosRegisterSnapshot value{};
+    value.seconds = read_cmos(kRtcRegSeconds);
+    value.minutes = read_cmos(kRtcRegMinutes);
+    value.hours = read_cmos(kRtcRegHours);
+    value.day = read_cmos(kRtcRegDay);
+    value.month = read_cmos(kRtcRegMonth);
+    value.year = read_cmos(kRtcRegYear);
+    value.status_b = read_cmos(kRtcRegStatusB);
+    value.status_d = read_cmos(kRtcRegStatusD);
+    return value;
 }
 
-static bool valid_datetime(const DateTime& dt)
+static bool wait_until_cmos_ready()
 {
-    if (dt.year < 2024 || dt.year > 2100) return false;
-    if (dt.month < 1 || dt.month > 12) return false;
-    if (dt.day < 1 || dt.day > days_in_month(dt.year, dt.month)) return false;
-    if (dt.hour > 23) return false;
-    if (dt.minute > 59) return false;
-    if (dt.second > 59) return false;
-    return true;
-}
-
-bool get_current_datetime(DateTime& out)
-{
-    for (int i = 0; i < 100000 && rtc_update_in_progress(); i++) {}
-    if (rtc_update_in_progress()) return false;
-
-    uint8_t second = read_cmos(RTC_REG_SECONDS);
-    uint8_t minute = read_cmos(RTC_REG_MINUTES);
-    uint8_t hour = read_cmos(RTC_REG_HOURS);
-    uint8_t day = read_cmos(RTC_REG_DAY);
-    uint8_t month = read_cmos(RTC_REG_MONTH);
-    uint8_t year = read_cmos(RTC_REG_YEAR);
-    uint8_t statusB = read_cmos(RTC_REG_STATUS_B);
-    bool stable = false;
-
-    for (int attempt = 0; attempt < 3; attempt++) {
-        for (int i = 0; i < 100000 && rtc_update_in_progress(); i++) {}
-        if (rtc_update_in_progress()) return false;
-
-        uint8_t second2 = read_cmos(RTC_REG_SECONDS);
-        uint8_t minute2 = read_cmos(RTC_REG_MINUTES);
-        uint8_t hour2 = read_cmos(RTC_REG_HOURS);
-        uint8_t day2 = read_cmos(RTC_REG_DAY);
-        uint8_t month2 = read_cmos(RTC_REG_MONTH);
-        uint8_t year2 = read_cmos(RTC_REG_YEAR);
-        uint8_t statusB2 = read_cmos(RTC_REG_STATUS_B);
-
-        if (second == second2 && minute == minute2 && hour == hour2 &&
-            day == day2 && month == month2 && year == year2 && statusB == statusB2) {
-            stable = true;
-            break;
-        }
-
-        second = second2;
-        minute = minute2;
-        hour = hour2;
-        day = day2;
-        month = month2;
-        year = year2;
-        statusB = statusB2;
+    for (uint32_t attempt = 0; attempt < 100000u; ++attempt) {
+        const uint64_t interrupt_flags = arch::save_and_disable_interrupts();
+        const uint8_t status_a = read_cmos(kRtcRegStatusA);
+        arch::restore_interrupts(interrupt_flags);
+        if ((status_a & kRtcUpdateInProgress) == 0u) return true;
     }
-    if (!stable) {
-        serial::puts("[TIME] RTC did not stabilize\n");
-        return false;
-    }
-
-    bool binary = (statusB & RTC_BINARY) != 0;
-    bool hour24 = (statusB & RTC_24_HOUR) != 0;
-    bool pm = !hour24 && (hour & 0x80) != 0;
-
-    hour = static_cast<uint8_t>(hour & 0x7F);
-
-    if (!binary) {
-        second = bcd_to_binary(second);
-        minute = bcd_to_binary(minute);
-        hour = bcd_to_binary(hour);
-        day = bcd_to_binary(day);
-        month = bcd_to_binary(month);
-        year = bcd_to_binary(year);
-    }
-
-    if (!hour24) {
-        if (pm && hour < 12) hour = static_cast<uint8_t>(hour + 12);
-        if (!pm && hour == 12) hour = 0;
-    }
-
-    DateTime dt{};
-    dt.year = static_cast<uint16_t>(2000 + year);
-    dt.month = month;
-    dt.day = day;
-    dt.hour = hour;
-    dt.minute = minute;
-    dt.second = second;
-
-    if (!valid_datetime(dt)) {
-        serial::puts("[TIME] RTC returned invalid date/time\n");
-        return false;
-    }
-
-    out = dt;
-    return true;
-}
-#else
-bool get_current_datetime(DateTime& out)
-{
-    (void)out;
     return false;
 }
+
+static ClockReadStatus read_cmos_calendar(DateTime& out)
+{
+    out = DateTime{};
+    for (uint32_t attempt = 0; attempt < 3u; ++attempt) {
+        if (!wait_until_cmos_ready()) return ClockReadStatus::Unavailable;
+
+        const uint64_t interrupt_flags = arch::save_and_disable_interrupts();
+        const uint8_t before = read_cmos(kRtcRegStatusA);
+        if ((before & kRtcUpdateInProgress) != 0u) {
+            arch::restore_interrupts(interrupt_flags);
+            continue;
+        }
+        CmosRegisterSnapshot first = read_register_set();
+        const uint8_t between = read_cmos(kRtcRegStatusA);
+        CmosRegisterSnapshot second = read_register_set();
+        const uint8_t after = read_cmos(kRtcRegStatusA);
+        arch::restore_interrupts(interrupt_flags);
+
+        if ((between & kRtcUpdateInProgress) != 0u ||
+            (after & kRtcUpdateInProgress) != 0u) continue;
+        first.status_a = before;
+        second.status_a = after;
+        if (first.seconds != second.seconds || first.minutes != second.minutes ||
+            first.hours != second.hours || first.day != second.day ||
+            first.month != second.month || first.year != second.year ||
+            first.status_b != second.status_b || first.status_d != second.status_d)
+            continue;
+
+        const CmosDecodeStatus decode = decode_cmos_snapshot(second, out);
+        if (decode == CmosDecodeStatus::Ok) return ClockReadStatus::Ok;
+        out = DateTime{};
+        return ClockReadStatus::Invalid;
+    }
+    return ClockReadStatus::Invalid;
+}
+
+static ClockReadStatus read_cmos_observation(void*, ClockObservation& out)
+{
+    out = ClockObservation{};
+    out.source = ClockSource::CmosRtc;
+    out.provenance = ClockProvenance::Unknown;
+    out.resolution_known = true;
+    out.resolution_nanoseconds = UINT32_C(1000000000);
+    out.accuracy = ClockAccuracy::Unknown;
+    return read_cmos_calendar(out.calendar);
+}
 #endif
+
+static void add_pit_monotonic(ClockReading& reading)
+{
+    uint64_t nanoseconds = 0u;
+    uint32_t resolution_nanoseconds = 0u;
+    if (!pit::get_monotonic_nanoseconds(nanoseconds,
+                                       resolution_nanoseconds)) return;
+    reading.monotonic_available = true;
+    reading.monotonic_source = ClockSource::Pit;
+    reading.monotonic_nanoseconds = nanoseconds;
+    reading.monotonic_resolution_nanoseconds = resolution_nanoseconds;
+}
+
+static void report_clock_source_once(const ClockReading& reading)
+{
+    if (s_clock_source_reported) return;
+    s_clock_source_reported = true;
+    serial::puts("[REXX-CLOCK] source=CMOS_RTC read=");
+    serial::puts(reading.status == ClockReadStatus::Ok ? "ok" :
+        (reading.status == ClockReadStatus::Invalid ? "invalid" :
+         (reading.status == ClockReadStatus::Unsupported ? "unsupported" :
+          "unavailable")));
+    serial::puts(" raw=");
+    serial::puts(reading.raw_available ? "1" : "0");
+    serial::puts(" local=");
+    serial::puts(reading.local_available ? "1" : "0");
+    serial::puts(" utc=");
+    serial::puts(reading.utc_available ? "1" : "0");
+    serial::puts(" offset=");
+    serial::puts(reading.utc_offset_known ? "known" : "unknown");
+    serial::puts(" resolution_ns=");
+    serial::put_hex32(reading.resolution_nanoseconds);
+    serial::puts(" accuracy=unknown monotonic=");
+    serial::puts(reading.monotonic_available ? "PIT" : "unavailable");
+    serial::puts("\n");
+}
+
+} // namespace
+
+bool get_clock_reading(ClockReading& out)
+{
+#if ARCH_HAS_PORT_IO
+    read_clock_from_source(read_cmos_observation, NULL, out);
+#else
+    out = ClockReading{};
+    out.source = ClockSource::CmosRtc;
+    out.status = ClockReadStatus::Unsupported;
+    out.interpretation_status = InterpretationStatus::Unsupported;
+#endif
+    add_pit_monotonic(out);
+    report_clock_source_once(out);
+    return out.status == ClockReadStatus::Ok || out.monotonic_available;
+}
+
+bool get_current_datetime(DateTime& out)
+{
+    out = DateTime{};
+#if ARCH_HAS_PORT_IO
+    return read_cmos_calendar(out) == ClockReadStatus::Ok;
+#else
+    return false;
+#endif
+}
 
 } // namespace time
 } // namespace kernel

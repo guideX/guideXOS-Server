@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20')]
     [string]$Phase = 'RX12R1',
     [string]$MakeExecutable = '',
     [string]$OutputEvidenceRoot = ''
@@ -14,6 +14,8 @@ $kernelDir = Join-Path $rootDir 'kernel'
 $phaseRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())"
 $guardManifest = if ($Phase -eq 'RX19') {
     Join-Path $rootDir 'docs\rexx\evidence\rx19\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX20') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx20\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX18') {
     Join-Path $rootDir 'docs\rexx\evidence\rx18\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX17') {

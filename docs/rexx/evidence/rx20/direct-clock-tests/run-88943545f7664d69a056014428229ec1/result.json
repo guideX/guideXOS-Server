@@ -1,0 +1,26 @@
+{
+  "schema": "guidexos.rexx.rx20.clock-contract-test.v1",
+  "run_id": "88943545f7664d69a056014428229ec1",
+  "branch": "REXX_SUPPORT",
+  "head": "14edc305919c706f29723875bc1685e619cf525f",
+  "compiler": "C:\\mingw64\\bin\\g++.exe",
+  "compiler_version": "g++.exe (MinGW-W64 x86_64-msvcrt-posix-seh, built by Brecht Sanders, r7) 15.2.0",
+  "command": [
+    "-std=c++14",
+    "-Wall",
+    "-Wextra",
+    "-Wpedantic",
+    "-Werror",
+    "-pthread",
+    "D:\\dev\\guideXOSServer_REXX\\tests\\kernel_clock_contract_test.cpp",
+    "D:\\dev\\guideXOSServer_REXX\\kernel\\core\\clock_contract.cpp",
+    "-o",
+    "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx20\\direct-88943545f7664d69a056014428229ec1\\kernel_clock_contract_test.exe"
+  ],
+  "build_exit_code": 0,
+  "run_exit_code": 0,
+  "test_output": "RX20 clock contract: PASS (123 checks)",
+  "executable_sha256": "12c1a7ea2c40acd5117f0d42d9f5615baee62e870086805d634ada917bb781b0",
+  "executable": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx20\\direct-88943545f7664d69a056014428229ec1\\kernel_clock_contract_test.exe",
+  "status": "PASS"
+}

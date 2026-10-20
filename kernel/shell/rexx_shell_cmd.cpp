@@ -54,30 +54,38 @@ static RexxVMClockReadStatus shell_rexx_clock_reader(
     *reading = RexxVMClockReading{};
 
 #if defined(GXOS_BARE_METAL)
-    kernel::time::DateTime rtc{};
-    if (kernel::time::get_current_datetime(rtc)) {
+    kernel::time::ClockReading clock{};
+    kernel::time::get_clock_reading(clock);
+    if (clock.raw_available && clock.resolution_known) {
         reading->capabilities |= REXX_CLOCK_CAP_WALL_CIVIL;
-        // The CMOS reader exposes civil fields but guideXOS has no established
-        // UTC/local or timezone contract, so these fields remain unusable by
-        // DATE/TIME's local-civil operations.
-        reading->wall_interpretation = REXX_CLOCK_WALL_UNSPECIFIED;
-        reading->wall_resolution_nanoseconds = 1000000000u;
-        reading->year = rtc.year;
-        reading->month = rtc.month;
-        reading->day = rtc.day;
-        reading->hour = rtc.hour;
-        reading->minute = rtc.minute;
-        reading->second = rtc.second;
+        reading->wall_resolution_nanoseconds = clock.resolution_nanoseconds;
+        const kernel::time::DateTime* rexx_calendar = &clock.raw_calendar;
+        if (clock.local_available) {
+            // REXX currently formats local wall time only. The kernel service
+            // must supply that capability before the provider enables it.
+            reading->wall_interpretation = REXX_CLOCK_WALL_LOCAL_CIVIL;
+            rexx_calendar = &clock.local_calendar;
+        } else {
+            // Raw RTC fields remain observable to the provider but cannot
+            // satisfy a current DATE/TIME wall-clock request.
+            reading->wall_interpretation = REXX_CLOCK_WALL_UNSPECIFIED;
+        }
+        reading->year = rexx_calendar->year;
+        reading->month = rexx_calendar->month;
+        reading->day = rexx_calendar->day;
+        reading->hour = rexx_calendar->hour;
+        reading->minute = rexx_calendar->minute;
+        reading->second = rexx_calendar->second;
+        reading->fractional_nanoseconds = rexx_calendar->nanosecond;
     }
 
-    uint64_t monotonic_nanoseconds = 0u;
-    uint32_t resolution_nanoseconds = 0u;
-    if (kernel::pit::get_monotonic_nanoseconds(
-            monotonic_nanoseconds, resolution_nanoseconds)) {
+    if (clock.monotonic_available) {
         reading->capabilities |= REXX_CLOCK_CAP_MONOTONIC;
-        reading->monotonic_nanoseconds = monotonic_nanoseconds;
-        reading->monotonic_resolution_nanoseconds = resolution_nanoseconds;
+        reading->monotonic_nanoseconds = clock.monotonic_nanoseconds;
+        reading->monotonic_resolution_nanoseconds =
+            clock.monotonic_resolution_nanoseconds;
     }
+
     return reading->capabilities != 0u ? REXX_VM_CLOCK_READ_OK
                                        : REXX_VM_CLOCK_READ_UNAVAILABLE;
 #else

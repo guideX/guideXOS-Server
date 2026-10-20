@@ -1,0 +1,7 @@
+RX20 isolated QEMU Console transcript
+Kernel SHA-256: a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx20\qemu-0506436b9bbf43f683684baded0e460f\guest\esp
+COMMAND: rexx /rx20clk.rex | expected visible marker/status: RX20_NATIVE_CLOCK_CAPABILITY_DONE
+COMMAND: rexx /rx20rcv.rex | expected visible marker/status: RX20_NATIVE_GUEST_RESPONSIVE
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=27
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20')]
     [string]$Phase = 'RX12R1',
     [ValidateSet('Address', 'Undefined', 'Both')]
     [string]$Sanitizer = 'Both',
@@ -20,6 +20,8 @@ $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
 $guardManifest = if ($Phase -eq 'RX19') {
     Join-Path $rootDir 'docs\rexx\evidence\rx19\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX20') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx20\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX18') {
     Join-Path $rootDir 'docs\rexx\evidence\rx18\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX17') {
@@ -222,6 +224,16 @@ function Invoke-OneSanitizer {
         [PSCustomObject]@{ Name = 'rx18_string_builtins'; Driver = 'tests\rexx_rx18_string_builtins_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx19_date_time'; Driver = 'tests\rexx_rx19_date_time_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') }
     )
+    if ($Phase -eq 'RX20') {
+        $plans += [PSCustomObject]@{
+            Name = 'rx20_clock_contract'
+            Driver = 'tests\kernel_clock_contract_test.cpp'
+            Sources = @((Join-Path $rootDir 'kernel\core\clock_contract.cpp'))
+            Defines = @()
+            Cpp = $true
+            NoKernelInclude = $true
+        }
+    }
 
     $buildDir = Join-Path $runDir 'bin'
     $workingDirectory = Join-Path $runDir 'temp'
@@ -265,14 +277,18 @@ function Invoke-OneSanitizer {
         $exePath = Join-Path $planOutputDir $exeName
         $compilerArgs = @('/nologo')
         if ($isCpp) {
-            $compilerArgs += @('/TP', '/std:c++14', '/EHsc', ('/I' + (Join-Path $rootDir 'kernel\core\include')))
+            $compilerArgs += @('/TP', '/std:c++14', '/EHsc')
+            if (-not ($plan.PSObject.Properties.Name -contains 'NoKernelInclude' -and $plan.NoKernelInclude)) {
+                $compilerArgs += '/I' + (Join-Path $rootDir 'kernel\core\include')
+            }
         } else {
             $compilerArgs += @('/TC', '/std:c11', '/D_CRT_SECURE_NO_WARNINGS')
             if ($plan.Name -in @('rx16_literals','rx17_bitwise')) {
                 $compilerArgs += '/I' + $rootDir
             }
         }
-        $compilerArgs += @('/MD', '/Zi', '/Od')
+        $runtimeModel = if ($Kind -eq 'Undefined' -and $isCpp) { '/MT' } else { '/MD' }
+        $compilerArgs += @($runtimeModel, '/Zi', '/Od')
         # All cl.exe and linker outputs are explicit and confined to this unique plan directory.
         $compilerArgs += '/Fo:' + $planOutputDir + [System.IO.Path]::DirectorySeparatorChar
         $compilerArgs += '/Fd:' + (Join-Path $planOutputDir ($plan.Name + '.compiler.pdb'))

@@ -42,6 +42,25 @@ void disable_interrupts()
 #endif
 }
 
+uint64_t save_and_disable_interrupts()
+{
+#if defined(_MSC_VER)
+    const uint64_t flags = __readeflags();
+    _disable();
+    return flags;
+#else
+    uint64_t flags;
+    asm volatile ("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
+    return flags;
+#endif
+}
+
+void restore_interrupts(uint64_t flags)
+{
+    if ((flags & UINT64_C(0x200)) != 0u) enable_interrupts();
+    else disable_interrupts();
+}
+
 uint8_t inb(uint16_t port)
 {
 #if defined(_MSC_VER)

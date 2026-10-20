@@ -8,6 +8,7 @@
 //
 
 #include "include/kernel/pit.h"
+#include "include/kernel/time.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
 
@@ -83,34 +84,9 @@ bool get_monotonic_nanoseconds(uint64_t& nanoseconds,
 {
     if (!s_initialized || !s_heartbeatSeen || s_divisor == 0u) return false;
     const uint64_t tick_count = s_ticks;
-    const uint64_t whole_groups = tick_count / kBaseFrequency;
-    const uint64_t remainder_ticks = tick_count % kBaseFrequency;
-    if (whole_groups > UINT64_MAX / s_divisor) return false;
-    const uint64_t remaining_whole_seconds =
-        (remainder_ticks * s_divisor) / kBaseFrequency;
-    const uint64_t whole_group_seconds = whole_groups * s_divisor;
-    if (remaining_whole_seconds > UINT64_MAX - whole_group_seconds)
-        return false;
-    const uint64_t whole_seconds =
-        whole_group_seconds + remaining_whole_seconds;
-    const uint64_t remaining_cycles =
-        (remainder_ticks * s_divisor) % kBaseFrequency;
-    const uint64_t fractional_nanoseconds =
-        (remaining_cycles * UINT64_C(1000000000)) / kBaseFrequency;
-    if (whole_seconds > (UINT64_MAX - fractional_nanoseconds) /
-                            UINT64_C(1000000000)) return false;
-    const uint64_t relative_nanoseconds =
-        whole_seconds * UINT64_C(1000000000) + fractional_nanoseconds;
-    if (s_monotonic_base_nanoseconds >
-        UINT64_MAX - relative_nanoseconds) return false;
-    const uint64_t divisor_nanoseconds =
-        ((uint64_t)s_divisor * UINT64_C(1000000000) +
-         kBaseFrequency / 2u) / kBaseFrequency;
-    if (divisor_nanoseconds == 0u || divisor_nanoseconds > UINT32_MAX)
-        return false;
-    nanoseconds = s_monotonic_base_nanoseconds + relative_nanoseconds;
-    resolution_nanoseconds = (uint32_t)divisor_nanoseconds;
-    return true;
+    return time::pit_ticks_to_monotonic_nanoseconds(
+        tick_count, s_divisor, s_monotonic_base_nanoseconds, nanoseconds,
+        resolution_nanoseconds);
 }
 
 bool heartbeat_seen()

@@ -1,0 +1,5 @@
+RX20 artifact preservation: PASS
+Stage: preflight
+Verified UTC: 2026-10-20T23:20:19.1377161Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

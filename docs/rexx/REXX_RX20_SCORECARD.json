@@ -1,0 +1,133 @@
+{
+  "schema": "guidexos.rexx.rx20.scorecard.v1",
+  "phase": "RX20",
+  "outcome": "A — Clock contract accepted",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "14edc305919c706f29723875bc1685e619cf525f",
+  "tested_source_parent_head": "14edc305919c706f29723875bc1685e619cf525f",
+  "local_commit_includes_scorecard": true,
+  "clock_source": {
+    "production_source": "CMOS RTC at x86/AMD64 ports 0x70/0x71",
+    "raw_calendar": "Available after stable sampling and calendar validation",
+    "provenance": "Unknown interpretation by default",
+    "local_civil_time": false,
+    "utc": false,
+    "utc_offset": "Unknown",
+    "resolution": "1 second",
+    "accuracy": "Unknown",
+    "year_policy": "2000 + two-digit RTC year; accepted calendar range is 2024–2099",
+    "source_limitations": [
+      "No century register is consumed",
+      "Stable and plausible fields do not establish physical correctness",
+      "No kernel RTC interpretation setting exists"
+    ]
+  },
+  "provenance_contract": {
+    "source_and_status_separate": true,
+    "raw_local_utc_offset_and_accuracy_are_separate": true,
+    "configured_interpretation_marks_physical_setting_unverified": true,
+    "capabilities_derived_from_source_and_provenance": true,
+    "public_kernel_abi_added": false,
+    "uefi_adapter": "Pure UEFI-shaped fixture adapter only; no production GetTime or SetTime call"
+  },
+  "uefi_compatibility": {
+    "timezone_equation": "Localtime = UTC - TimeZone",
+    "kernel_offset_convention": "local = UTC + utc_offset_minutes; utc_offset_minutes = -TimeZone",
+    "unspecified_timezone_0x07ff_distinguished_from_zero": true,
+    "timezone_range_minutes": "-1440 through +1440",
+    "daylight_flags_validated_without_double_adjustment": true,
+    "timezone_transition_rules_claimed": false
+  },
+  "monotonic": {
+    "production_source": "PIT IRQ0 tick counter",
+    "independent_from_wall_clock": true,
+    "resolution": "Programmed divisor interval; approximately 10 ms at the normal heartbeat",
+    "overflow": "Checked and fails closed",
+    "time_e_and_r": "Preserved and qualified"
+  },
+  "rexx": {
+    "DATE": "Partial; clock-free conversions supported; current-date forms unavailable",
+    "TIME": "Partial; PIT elapsed/reset forms supported; current wall forms unavailable",
+    "provider_contract": "Consumes kernel capability flags; raw-only CMOS cannot enable current wall operations",
+    "regina_differential": "NOT_RUN — executable unavailable",
+    "external_compatibility_percentage": "NOT_CLAIMED"
+  },
+  "qualification": {
+    "direct_clock_contract": {
+      "status": "PASS",
+      "checks": 123,
+      "run_id": "88943545f7664d69a056014428229ec1",
+      "evidence": "evidence/rx20/direct-clock-tests/run-88943545f7664d69a056014428229ec1"
+    },
+    "hosted_inherited_regressions": {
+      "status": "PASS",
+      "rx19_direct_assertions": 8275,
+      "rx19_dispatch_cases": 4112,
+      "rx19_calendar_properties": 2048,
+      "cli": "24/24",
+      "inherited_fixture_groups": "PASS",
+      "rx20_date_time_inventory_status": "Partial"
+    },
+    "sanitizers": {
+      "address": {
+        "status": "PASS",
+        "hosted_targets": "22/22",
+        "local_expected_result_cases": "195/195",
+        "regina": "NOT_RUN"
+      },
+      "undefined_behavior": {
+        "status": "PASS",
+        "hosted_targets": "22/22",
+        "local_expected_result_cases": "195/195",
+        "regina": "NOT_RUN"
+      },
+      "address_evidence": "evidence/rx20/sanitizer-address-11e43736f6ee499695b7d18b62dd0981",
+      "undefined_evidence": "evidence/rx20/sanitizer-undefined-f69f680fe7114027952e0c82a902a189"
+    },
+    "freestanding_amd64": {
+      "status": "PASS",
+      "rexx_c_objects_linked": 9,
+      "kernel_elf_sha256": "a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80",
+      "run_id": "bbee5f77763a429699a093eac934cbfe",
+      "link_evidence": "evidence/rx20/native-build/native-link-evidence-bbee5f77763a429699a093eac934cbfe.json"
+    },
+    "native_guest": {
+      "status": "PASS",
+      "run_id": "0506436b9bbf43f683684baded0e460f",
+      "kernel_elf_sha256": "a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80",
+      "rtc": "CMOS read succeeded; raw=true, local=false, UTC=false, offset unknown",
+      "tls_clock": "Unavailable; backend identifies unknown CMOS interpretation",
+      "date_conversion": "Passed independently of live wall time",
+      "time_e_guest_values": "0.000000 to 0.099993",
+      "time_r_guest_values": "0.099993 to 0.199992",
+      "post_error_recovery": "Passed; DATE conversion and shell remained responsive",
+      "networking": "Disabled",
+      "media": "Disposable copied guest media; production media not used",
+      "qmp_shutdown_acknowledged": true,
+      "owned_qemu_absent_after_shutdown": true,
+      "evidence": "evidence/rx20/native-guest/run-0506436b9bbf43f683684baded0e460f"
+    }
+  },
+  "protected_integrity": {
+    "root_object_and_pdb_files": "31/31 original paths, sizes, and SHA-256 hashes matched at all guarded gates",
+    "rx19r1_baseline_untracked_entries": "63/63 present at RX20 preflight; no missing entries",
+    "additional_preexisting_untracked_entries": "Captured in RX20 preflight and preserved",
+    "historical_rx19_and_rx19r1_evidence": "Preserved unchanged",
+    "root_phase": "Absent"
+  },
+  "inventory": {
+    "builtin_rows": 75,
+    "date_status": "Partial",
+    "time_status": "Partial",
+    "implemented_builtin_count_inflated": false,
+    "file": "REXX_RX20_BUILTIN_INVENTORY.csv"
+  },
+  "remaining_limits": [
+    "No persisted RTC UTC/local interpretation setting",
+    "Physical CMOS configuration correctness and synchronization remain unverified",
+    "No production UEFI Runtime Services handoff or GetTime caller",
+    "No timezone-rule source or daylight-saving transition support",
+    "Clock accuracy is unknown even though CMOS resolution is one second"
+  ],
+  "recommendation": "RX21 should add an explicit RTC interpretation policy only through a suitable persisted setting or a source contract, keep configured intent distinct from verified physical correctness, and separately qualify any UEFI runtime handoff. DATE/TIME completion remains a separate live-source acceptance gate."
+}

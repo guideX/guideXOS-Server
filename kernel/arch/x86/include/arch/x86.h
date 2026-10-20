@@ -16,6 +16,8 @@ namespace x86 {
 void halt();
 void enable_interrupts();
 void disable_interrupts();
+uint32_t save_and_disable_interrupts();
+void restore_interrupts(uint32_t flags);
 
 // Port I/O
 uint8_t inb(uint16_t port);
