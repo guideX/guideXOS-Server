@@ -38,6 +38,15 @@ int main()
     assert(shell::NICINFO_TX_IOMMU_EXPECTED_LINES <=
            shell::NICINFO_TX_IOMMU_MAX_LINES);
 
+    assert(!nic::i219_phase27_iommu_mapping_proven_safe(
+        true, false, false, false, false, false));
+    assert(!nic::i219_phase27_iommu_mapping_proven_safe(
+        true, true, true, true, true, true));
+    assert(nic::i219_phase27_iommu_mapping_proven_safe(
+        true, true, true, true, true, false));
+    assert(!nic::i219_phase27_iommu_mapping_proven_safe(
+        false, true, true, true, true, false));
+
     nic::I219Phase27GateState gates = passing_gates();
     assert(nic::i219_phase27_gate_failure(gates) == nullptr);
 

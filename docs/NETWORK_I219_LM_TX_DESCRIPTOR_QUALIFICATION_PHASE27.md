@@ -99,11 +99,12 @@ The probe refuses unless all inspectable conditions pass:
   DD set before reuse;
 - no prior software TX attempt/publication/completion during this boot, no
   poisoned ring, and no prior Phase 27 attempt;
-- known DMA translation behavior: DMAR absent, or a readable matching DRHD with
-  translation disabled. Active translation, an unknown matching-unit state, an
-  unreadable register snapshot, or unknown DRHD coverage refuses transmission
-  because this kernel cannot inspect the I219 context entry or prove its IOVA
-  mapping.
+- proven non-remapped DMA behavior: a readable matching DRHD with translation
+  disabled. An absent or malformed DMAR table, unknown DRHD coverage, an
+  unreadable/invalid register snapshot, or active translation refuses
+  transmission because this kernel cannot inspect the I219 context entry or
+  prove its IOVA mapping. DMAR absence is diagnostic evidence, not proof that
+  translation is disabled or that DMA addresses are identity mapped.
 
 The typed `isolated` token records the operator confirmation for the external
 network condition. Software counters can establish that guideXOS has not
@@ -173,13 +174,19 @@ addendum.
 QEMU's generic e1000 boot is a readiness and packaging check only. It is not
 evidence of physical I219 descriptor consumption.
 
-## AIDA_LPT handoff
+## Original AIDA_LPT handoff (superseded by PHASE27R)
 
-The physical test remains pending. Boot the Phase 27 ISO named in the artifact
-addendum on AIDA_LPT with the Ethernet link up. Use a passive tap or isolated
-managed-switch mirror if available. An external capture should identify the
-single broadcast destination, source MAC, EtherType `0x88B5`, marker
-`GXOS-I219-P17`, frame count and timestamp.
+The read-only preflight and isolated command were executed on AIDA_LPT as
+recorded below. Do not repeat the isolated command using the original Phase 27
+ISO. Its no-DMAR handling is superseded by the PHASE27R safety correction.
+After producing an image with the corrected source, the next useful physical
+check is read-only `nicinfo tx iommu` output to confirm the unknown-mapping
+gate. No physical transmission is authorized by this audit update.
+
+The historical Phase 27 procedure was to boot the ISO named in the artifact
+addendum on AIDA_LPT with the Ethernet link up, use a passive tap or isolated
+managed-switch mirror if available, and capture the broadcast fixture with
+EtherType `0x88B5` and marker `GXOS-I219-P17`.
 
 Run these read-only commands first and photograph the complete output:
 
@@ -196,8 +203,10 @@ nicinfo tx iommu
 Abort if any safety gate is not met, if another TX attempt has occurred, if the
 ring is poisoned/not idle, if the link is down, or if active/unknown IOMMU
 translation is reported. Do not run a reset, rearm, raw TX, DHCP, or another
-network sender to repair a failed gate. If the preflight passes and the segment
-is isolated with no competing sender, run exactly once:
+network sender to repair a failed gate. The historical procedure then allowed
+a single isolated probe after preflight passed. That step is suspended pending
+qualification of the corrected unknown-IOMMU gate and an independently
+justified DMA-translation safety model:
 
 ```text
 nicinfo tx iommu isolated
@@ -213,12 +222,81 @@ transmission as unverified unless a passive external capture sees the exact
 fixture; descriptor completion alone does not prove DHCP/TCP/HTTPS
 functionality.
 
+## PHASE27R operator evidence and command-path reconciliation
+
+On 2026-10-20 the operator confirmed running the complete Phase 27 command
+sequence, including both `nicinfo tx iommu` and
+`nicinfo tx iommu isolated`. The supplied observation summary reports
+`descriptor-final-DD=not-submitted`, no TX timeout/error snapshot, and the
+IOMMU reason `ACPI DMAR table is not present`. No independent frame emission
+was demonstrated.
+
+The two command paths are distinct. `nicinfo tx iommu` dispatches to the
+read-only Phase 27 preflight; `nicinfo tx iommu isolated` dispatches to the
+same function with the isolated-network confirmation flag set. The shell
+parser distinguishes the exact third token `isolated`. Both reports call the
+same `vtd::discover` audit used by `nicinfo dma brief`, so the ACPI/DMAR
+classification and failure reason can look similar, but the TX IOMMU command
+has its own output and safety gate path.
+
+When the validated root has no DMAR entry, the audit leaves DRHD count at zero
+and matching-DRHD false; those are consequences of the missing table. In
+`nicinfo dma brief`, the audit reason is printed as `failure=ACPI DMAR table is
+not present`. In the Phase 27 report, that reason is printed as
+`IOMMU evidence-unavailable`; its `failure=` field reports a probe gate or TX
+helper result. This label difference distinguishes overlapping audit data
+from an accidentally shared command handler.
+
+The UEFI loader selects an RSDP pointer from the ACPI 2.0/1.0 EFI configuration
+table and passes it in BootInfo. The kernel validates the RSDP and selected
+RSDT/XSDT checksums and bounds, then scans the root entries. The exact
+`ACPI DMAR table is not present` result is emitted only after that traversal
+completes without finding a DMAR signature. This supports “no DMAR in the
+firmware-supplied root table,” rather than an RSDP/root discovery or validation
+failure; it does not establish the hardware translation state.
+
+In the original Phase 27 source, a validated ACPI root with no DMAR entry was
+marked as a known DMA-mapping state. That did not prove translation was
+disabled or that the active device context was identity mapped. The gate now
+requires a readable matching DRHD and a valid snapshot showing translation
+disabled. Missing DMAR remains a diagnostic limitation and now fails the
+unknown-mapping safety gate; a separate, independently justified no-remapping
+proof could support a future safe path.
+
+`descriptor-final-DD=not-submitted` means the Phase 27 software path did not
+record its publication fence and descriptor-publication counter together, so
+it did not reach its TDT publication point. This establishes no Phase 27
+descriptor publication; it does not identify the earlier gate or report
+whether the one-shot latch was consumed. The summary supplied here omits the
+isolated output's `failure=`, `probe-consumed=`, `preflight=`, and `attempt=`
+values. In the original implementation the latch was set after preflight and
+operator confirmation, immediately before entering the TX helper, so a late
+pre-publication refusal could consume the latch while still reporting
+`not-submitted`. An early safety-gate refusal leaves it unconsumed.
+
+The phrase `ACPI DMAR table is not present` is the VT-d audit reason, not the
+Phase 27 safety-gate string. If earlier gates pass, the tightened IOMMU gate
+reports `active or unknown IOMMU mapping cannot be proven safe`; the exact
+gate reported by the already-run isolated command cannot be recovered from the
+summary alone. Keep the phase open and do not repeat a physical probe to
+recover the omitted output.
+
+The PHASE27R hosted Phase 11–27 regression chain passed. The AMD64 freestanding
+kernel and UEFI loader built successfully with the Phase 27 I219 diagnostic
+configuration enabled. A second AMD64 kernel/UEFI build also passed with TX
+DMA placement and LAN_INIT diagnostics disabled. Existing unrelated compiler
+warnings remain. No replacement physical ISO was packaged; the artifact in the
+addendum contains the original Phase 27 behavior and must not be used for a
+repeat probe.
+
 ## Physical status and phase tracking
 
-No AIDA_LPT physical experiment has been performed for Phase 27. No outcome A,
-B, C or D is claimed. Descriptor consumption, external frame emission and peer
-receipt are all unverified. Do not advance this state until the requested
-physical evidence satisfies the Phase 27 acceptance criteria:
+The Phase 27 command sequence was run on AIDA_LPT, but the isolated probe
+reported no descriptor submission. No outcome A, B, C or D is claimed because
+the probe did not publish a descriptor. Descriptor consumption, external frame
+emission and peer receipt are all unverified. Do not advance this state until
+the safety path is qualified and physical evidence satisfies the Phase 27
+acceptance criteria:
 
 ```text
 last_completed=PHASE26

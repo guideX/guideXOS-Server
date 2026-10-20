@@ -41,6 +41,8 @@ Require $probe 'i219_phase27_gate_failure\(gates\)' `
     'the physical probe does not refuse failed pre-transmission gates'
 Require $probe 'translation is active and the I219 context mapping is unknown' `
     'active VT-d translation with an unknown I219 context is not refused'
+Require $probe 'i219_phase27_iommu_mapping_proven_safe' `
+    'missing DMAR is not handled as unknown IOMMU translation state'
 Require $probe 's_phase27TxProbeConsumed\s*=\s*true' `
     'the physical probe is not latched to one attempt per boot'
 Require $probe 'send_raw_diagnostic_frame\(TxRawPath::Normal\)' `

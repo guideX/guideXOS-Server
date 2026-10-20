@@ -1700,6 +1700,21 @@ struct I219Phase27GateState {
     bool notAlreadyAttempted;
 };
 
+// A valid ACPI root with no DMAR table does not reveal whether firmware left
+// hardware translation enabled, and therefore cannot prove an identity DMA
+// mapping. TX requires a readable matching unit with translation disabled.
+inline bool i219_phase27_iommu_mapping_proven_safe(
+    bool dmarStatusKnown,
+    bool dmarPresent,
+    bool matchingDrhdFound,
+    bool registersReadable,
+    bool registersValid,
+    bool translationEnabled)
+{
+    return dmarStatusKnown && dmarPresent && matchingDrhdFound &&
+           registersReadable && registersValid && !translationEnabled;
+}
+
 inline const char* i219_phase27_gate_failure(
     const I219Phase27GateState& gates)
 {

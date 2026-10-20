@@ -4258,25 +4258,18 @@ bool run_i219_iommu_tx_observation()
         audit->classification == vtd::Classification::NoDmar) {
         diagnostics.iommuUnavailableReason = audit->failure
             ? audit->failure : "ACPI DMAR table is not present";
-        gates.iommuMappingKnown = true;
     } else if (!diagnostics.iommuApplicable) {
         diagnostics.iommuUnavailableReason = audit && audit->failure
             ? audit->failure : "matching DRHD coverage is unknown";
-        gates.iommuMappingKnown = false;
     } else if (!vtdDiscovered || !audit->registersReadable) {
         diagnostics.iommuUnavailableReason = audit && audit->failure
             ? audit->failure : "matching VT-d DRHD registers are unreadable";
-        gates.iommuMappingKnown = false;
     } else {
         diagnostics.iommuUnavailableReason = "none";
         diagnostics.beforeVtd = audit->registers;
         diagnostics.beforeValid = diagnostics.beforeVtd.valid;
         diagnostics.translationEnabledBefore =
             diagnostics.beforeVtd.translationEnabled;
-        // Active translation is refused because this kernel cannot inspect
-        // the I219 context entry or establish an identity IOVA mapping.
-        gates.iommuMappingKnown = diagnostics.beforeValid &&
-            !diagnostics.translationEnabledBefore;
         if (!diagnostics.beforeValid) {
             diagnostics.iommuUnavailableReason =
                 "matching VT-d preflight snapshot is invalid";
@@ -4285,6 +4278,15 @@ bool run_i219_iommu_tx_observation()
                 "translation is active and the I219 context mapping is unknown";
         }
     }
+    // Missing or malformed discovery data is unknown, not evidence of an
+    // identity mapping. With active translation this kernel also cannot
+    // inspect the I219 context entry or establish the device's IOVA mapping.
+    gates.iommuMappingKnown = i219_phase27_iommu_mapping_proven_safe(
+        diagnostics.dmarStatusKnown, diagnostics.dmarPresent,
+        audit && audit->matchingDrhdFound,
+        vtdDiscovered && audit && audit->registersReadable,
+        diagnostics.beforeValid,
+        diagnostics.translationEnabledBefore);
 
     gates.driverReady = is_driver_ready(s_device);
     gates.initializationPassed = hardware_init_complete(s_device) &&
