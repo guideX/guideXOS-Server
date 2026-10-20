@@ -193,3 +193,53 @@ Consequently, S22R does not claim a fresh ISO boot, Blue Flower guest default, S
 After the DeveloperStudio owner approves exact manifest and ELF hashes and package provenance, rerun the canonical AMD64 build into isolated output paths. Require every receipt stage to pass, verify the package manifest and embedded App Model bytes, then boot that exact new ISO on isolated writable media and perform the default-to-Dinos Apply/readback/reopen and legacy Display Options smoke. Only after those gates pass can the component be recorded as **Native Settings — Qualified for guideXOS Server v0.3 Limited/Alpha inclusion**. This remains component-level qualification only and does not accept the whole Server release.
 
 S22R changes and curated evidence are committed locally on `main`; nothing was pushed or published. The final local commit SHA is included in the task closeout.
+
+## S22R2 — DeveloperStudio release contract resolution
+
+**Date:** 2026-10-19
+**Starting source HEAD:** `bce4145843a8c93a4b253116e374341b51f11655` on `main`.
+**Outcome:** **C — Blocked at the release-policy and compatibility boundary.**
+
+S22R Outcome B remained unresolved at the start: its source repair and integrity work passed, but the exact DeveloperStudio package for a new production ISO was not authorized. No S22R2 acceptance record or evidence directory already existed. The starting worktree had 0 staged paths, 0 tracked unstaged paths, and 853 pre-existing untracked paths. The separate unstaged DeveloperStudio compatibility note and all prior evidence/output were preserved.
+
+### DeveloperStudio artifact decision
+
+The exact Phase 25 pair was verified:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Phase 25 `app.json` | 1,112 | `D59C12267D360C4E31B70DEC7F9C1B0689FB5816011D681B38EE9CDEF0D2F53B` |
+| Phase 25 AMD64 ELF | 1,015,064 | `5343F5DF0EDFE423542348C0AF8C9F8690CE339D197DEB4737DD05A27348CAC7` |
+
+The pair is present in paired Server commit `fb71e36c77866cdabf20873e6ad3de0ddc3bbe02`; the original Phase 25 sign-off record is the DeveloperStudio release-candidate status dated 2026-08-23, sign-off commit `bb66e11c38dffae21514384f73b1920b53ac64fe`. That record documents a successful distribution rehearsal for DeveloperStudio 0.1.0 in its paired Server v0.5 checkout. It does not authorize that pair for Server v0.3. The exact manifest declares `minGuideXOSVersion: 0.5.0`, so its stated minimum exceeds the v0.3 target. The Phase 25 status text has an incomplete 63-character digest; the full manifest digest above was measured from the paired Server commit bytes and matches the 1,112-byte fixture.
+
+The current source pair was measured as:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Current `Apps/DeveloperStudio/app.json` | 2,011 | `AB1DB7C63A3DC49C06098B7A9341C33DBCF6FECBD8163460F62BCF907E7488E9` |
+| Current AMD64 ELF | 1,104,652 | `F07270EACBD62F9AB67F1F38856A326981280E43D0A4D44F8ED1D17C777F01A6` |
+
+No matching release approval was found for this newer candidate. The source/package pairing is reconstructed from DeveloperStudio commit `18c093dcb9c4fc0daf5a019d82283aba0ac319a4` and Server package update commit `81565ee227ed784862ecc04fc692cbd1904deef4`; the ELF has no immutable build identity. Its manifest enables document activation and nine source/text associations that are absent from Phase 25. Server can boot without DeveloperStudio, but selecting Phase 25 removes those currently advertised document routes. The preserved ESP contains the Phase 25 ELF but a different 1,176-byte manifest (`7AF95D35F068C44F4529420922E0F4BEC5F705568514688D160E2790022ACB09`); it is not the accepted Phase 25 pair.
+
+### Compatibility and selection policy
+
+The Phase 25 package matches the current loader's basic AMD64 Native ELF identity: package ID `com.guidexos.developerstudio`, entry point `gx_main`, and base ABI `guidexos-c-abi-v1`. Its ELF is static and the historical host-call offsets remain stable. This is structural ABI compatibility only. Static review found that the current Server v0.3 runtime lacks the workspace filesystem, build, Run, and debugger host services required by Phase 25 DeveloperStudio. The minimum-version declaration is also unresolved. A package discovery or window launch would not establish compatibility for the app's intended development workflows.
+
+The existing build pin and preflight select from `Apps/DeveloperStudio` and verify the exact Phase 25 pair before cleanup. There is no independent selector for a pinned artifact. The preserved S22R preflight against the current source pair exited 1 with the owner-acceptance diagnostic before replacing outputs. The 13-assertion S22R integrity harness passed historically; its exact Phase 25 fixture proves identity verification, not Server v0.3 authorization. No preflight check was weakened and no selection logic was changed.
+
+The separate compatibility assessment recommends deferring DeveloperStudio from v0.3. It states that exact Phase 25 inclusion requires approval by both the DeveloperStudio and Server v0.3 release owners, resolution of the 0.5.0 minimum-version contract, and a runtime-owner decision on the absent services. The current pair also remains unapproved. Therefore Gate A did not authorize either candidate. No build, staging correction, ISO assembly, or QEMU launch was performed.
+
+### Package, kernel, and Settings status
+
+The preserved S22 ISO was rehashed at 91,293,696 bytes and SHA-256 `B303C4C1A1CD31E500353CBD2DD7E11A8FD438B81AC9306285A6CD20EA1B1A3F`, matching its recorded identity. S22R's source repair and fail-closed integrity changes are in starting commit `bce4145843a8c93a4b253116e374341b51f11655`; no S22R2 code or test changes were made. S22R historical checks remain: native appearance/provider runtime 1,426/1,426, release-integrity harness 13 assertions, and a successful isolated AMD64 kernel build with 232 warning lines and zero compiler/linker errors. The symbol report covers 21 distinct names (45 ELF symbol-table rows): 19 strong names have final PE definitions, __dso_handle is only a weak ABI guard reference, and mainCRTStartup is absent from input-object undefined references while the linker selects _start. The ELF had no dynamic segment or relocations; the PE had no imports or COFF symbol relocations. This classification applies to that exact S22R kernel; no new kernel was built, so there is no new symbol comparison. No new manifest, kernel, bootloader, ramdisk, ISO, package-content audit, QEMU logs, screenshots, or guest configuration readback exists for S22R2.
+
+The empty shipped wallpaper default repair remains in source and its historical runtime suite passed. Settings page, legacy Control Panel, and DeveloperStudio guest checks were not repeated; S22/S22R records remain historical only.
+
+### S22R2 closeout
+
+The exact decision packet and validation boundary are recorded in [S22R2 evidence](evidence/settings-s22r2-v03-package-20261019/README.md), including the Phase 25 acceptance provenance, both candidate identities, compatibility findings, preflight result, and required owner decision.
+
+**Final Outcome C — Blocked. Native Settings remains unqualified for Server v0.3 Limited/Alpha inclusion.** The required production ISO and exact-package guest acceptance were not performed because neither the current source pair nor the Phase 25 pair is authorized and compatible for the intended v0.3 package on the evidence available. This component result does not determine overall Server v0.3 release readiness.
+
+**Recommended next action:** the Server v0.3 release owner should authorize an explicit package decision. The compatibility evidence recommends deferring DeveloperStudio from v0.3; that requires a narrow package-inventory change and validation. Retaining Phase 25 instead requires the stated owner approvals, resolution of its minimum-version and runtime-service gaps, and a bounded current-Server smoke before package assembly.
