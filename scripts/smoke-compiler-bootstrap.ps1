@@ -76,6 +76,9 @@ param(
     [switch]$Phase29LFullAcceptance,
     [switch]$Phase29YUseStagedDeveloperStudioPackage,
     [switch]$QemuExceptionTrace,
+    [switch]$QacDeveloperStudioAcceptance,
+    [string]$QacCliPath = '',
+    [int]$QacAdmissionTimeoutSeconds = 1800,
     [switch]$Phase29ISentinelOnly,
     [switch]$Phase29EManifestOnly
 )
@@ -83,6 +86,7 @@ param(
 $ErrorActionPreference = "Stop"
 Import-Module (Join-Path $PSScriptRoot "Phase29J.BootEvidence.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "Phase29L.OwnershipEvidence.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "DeveloperStudio.QacAcceptance.psm1") -Force
 # Phase 27G includes the complete earlier integration chain.  The focused M
 # mode deliberately keeps only the baseline C/D route plus the M smoke so a
 # flaky optional earlier IDE repeat cannot mask the recursion proof.
@@ -97,6 +101,18 @@ if ($Phase29FDebugStartOnly) { $Phase28QOnly = $true }
 if ($Phase29ISentinelOnly) { $Phase28QOnly = $true }
 if ($Phase29COnly) { $Phase28QOnly = $true }
 $Phase29LOwnershipGate = $Phase29LOwnershipOnly -or $Phase29LFullAcceptance
+$qacAcceptanceEnabled = [bool]$QacDeveloperStudioAcceptance
+$qacCliResolved = ''
+$script:qacRecoveryRequired = $false
+if ($qacAcceptanceEnabled) {
+    if (-not ($Phase28QOnly -or $Phase28OOnly)) {
+        throw '-QacDeveloperStudioAcceptance is supported only by the focused Developer Studio Phase 28Q and Phase 28O guest acceptance launchers.'
+    }
+    if ($QacAdmissionTimeoutSeconds -lt 1 -or $QacAdmissionTimeoutSeconds -gt 86400) {
+        throw 'QacAdmissionTimeoutSeconds must be between 1 and 86400 seconds.'
+    }
+    $qacCliResolved = Resolve-QacAcceptanceCliPath -Path $QacCliPath
+}
 $phase29yQualifiedDeveloperStudioSha256 = '7605FE1BC4BDF82833032E9381D4678672641F906510290DB99B92D0E744A0DE'
 if ($Phase28QOnly) {
     $Phase27E = $false; $Phase27F = $false; $Phase27G = $false; $Phase27H = $false
@@ -476,6 +492,92 @@ function Quote-ProcessArgument([string]$value) {
 function Read-SerialText([string]$path) {
     if (!(Test-Path $path)) { return "" }
     return [System.IO.File]::ReadAllText($path)
+}
+
+function Register-QacOutputLine([string]$Line, [string]$StreamName, [System.Text.StringBuilder]$Buffer,
+    [hashtable]$QacState, [string]$HostTracePath, [int]$RunNumber) {
+    [void]$Buffer.AppendLine($Line)
+    if ($StreamName -eq 'stderr') {
+        if ($Line -match '^QAC reservation requested: id=([^ ]+)') { $QacState.ReservationId = $Matches[1]; $QacState.AdmissionRecorded = $true }
+        if ($Line -match '^QAC queued for exclusive acceptance:') { $QacState.Pending = $true }
+        if ($Line -match '^QAC blocked by foreign QEMU:|^QAC acceptance admission blocked:') { $QacState.Pending = $true }
+        if ($Line -match '^QAC exclusive reservation granted:') { $QacState.Pending = $false; $QacState.Granted = $true }
+        if ($Line -match '^QAC QEMU launched: reservation=([^ ]+) pid=(\d+)') {
+            $QacState.ReservationId = $Matches[1]
+            $QacState.ChildProcessId = [int]$Matches[2]
+            $QacState.Launched = $true
+            if ($null -eq $QacState.RunStartedAtUtc) { $QacState.RunStartedAtUtc = [DateTime]::UtcNow }
+        }
+        if ($Line -match '^QAC could not verify QEMU registration for reservation ([^: ]+)') {
+            $QacState.ReservationId = $Matches[1]
+            $QacState.Launched = $true
+            $QacState.RegistrationUnverified = $true
+            if ($null -eq $QacState.RunStartedAtUtc) { $QacState.RunStartedAtUtc = [DateTime]::UtcNow }
+        }
+        if ($Line -match '^QAC QEMU exited: .*exitCode=(-?\d+)') { $QacState.QemuExitCode = [int]$Matches[1]; $QacState.QemuExited = $true }
+        if ($Line -match '^QAC reservation released:') { $QacState.Released = $true }
+        if ($Line -match '^QAC Recovery Required|^QAC reservation release is not verified:') { $QacState.RecoveryRequired = $true }
+        if ($Line -match '^Coordinator unavailable:') { $QacState.CoordinatorUnavailable = $true }
+        if ($Line -match '^QAC queued reservation cancelled:|^QAC reservation cancelled before launch:') { $QacState.Cancelled = $true; $QacState.QueueCancellationConfirmed = $true }
+    }
+
+    if ($Line.StartsWith('{', [StringComparison]::Ordinal)) {
+        try {
+            $event = $Line | ConvertFrom-Json -ErrorAction Stop
+            if ($event.reservationId) { $QacState.ReservationId = [string]$event.reservationId }
+            if ($event.state -eq 'Running' -and $event.childProcessId) {
+                $QacState.ChildProcessId = [int]$event.childProcessId
+                $QacState.ProcessIdentity = [string]$event.processIdentity
+                $QacState.Launched = $true
+                if ($null -eq $QacState.RunStartedAtUtc) { $QacState.RunStartedAtUtc = [DateTime]::UtcNow }
+            }
+        } catch { }
+    }
+
+    if ($StreamName -eq 'stderr' -and ($Line.StartsWith('QAC ', [StringComparison]::Ordinal) -or
+        $Line.StartsWith('Coordinator unavailable:', [StringComparison]::Ordinal) -or
+        $Line.StartsWith('Could not start child process:', [StringComparison]::Ordinal))) {
+        Write-Host $Line -ForegroundColor DarkCyan
+        Write-P29JHostTrace $HostTracePath 'QAC STATUS' ("boot={0} {1}" -f $RunNumber, $Line)
+    }
+}
+
+function Receive-QacProcessOutputLine([System.Threading.Tasks.Task[string]]$PendingLine,
+    [System.IO.StreamReader]$Reader, [System.Text.StringBuilder]$Buffer, [hashtable]$QacState,
+    [string]$StreamName, [string]$HostTracePath, [int]$RunNumber) {
+    if ($null -eq $PendingLine) {
+        return [pscustomobject]@{ PendingLine = $null; Finished = $true }
+    }
+    if (-not $PendingLine.IsCompleted) {
+        return [pscustomobject]@{ PendingLine = $PendingLine; Finished = $false }
+    }
+    $line = $PendingLine.GetAwaiter().GetResult()
+    if ($null -eq $line) { return [pscustomobject]@{ PendingLine = $null; Finished = $true } }
+    Register-QacOutputLine -Line $line -StreamName $StreamName -Buffer $Buffer -QacState $QacState `
+        -HostTracePath $HostTracePath -RunNumber $RunNumber
+    return [pscustomobject]@{ PendingLine = $Reader.ReadLineAsync(); Finished = $false }
+}
+
+function Request-QacGuestShutdown([hashtable]$QacState, [Diagnostics.Process]$QacProcess,
+    [int]$QmpPort, [string]$Reason, [string]$HostTracePath, [int]$RunNumber) {
+    if (-not $QacState.ShutdownRequested) {
+        $QacState.ShutdownRequested = $true
+        $QacState.ShutdownRequestedAtUtc = [DateTime]::UtcNow
+        $QacState.GracefulDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        Write-Host "QAC: Requesting graceful QEMU shutdown for boot $RunNumber ($Reason)." -ForegroundColor DarkCyan
+        Write-P29JHostTrace $HostTracePath 'QAC SHUTDOWN REQUEST' ("boot={0} reason={1} pid={2}" -f $RunNumber, $Reason, $QacState.ChildProcessId)
+    }
+    if ($QacState.QmpQuitSent -or $QacProcess.HasExited) { return }
+    $QacState.LastQmpAttemptAtUtc = [DateTime]::UtcNow
+    try {
+        [void](Send-QacQmpQuit -Port $QmpPort -TimeoutSeconds 3)
+        $QacState.QmpQuitSent = $true
+        Write-P29JHostTrace $HostTracePath 'QAC QMP QUIT SENT' ("boot={0} pid={1}" -f $RunNumber, $QacState.ChildProcessId)
+    } catch {
+        $QacState.QmpFailure = $_.Exception.Message
+        Write-Host "QAC: Graceful QMP shutdown request failed; reservation remains active while QAC verifies the child." -ForegroundColor Yellow
+        Write-P29JHostTrace $HostTracePath 'QAC QMP QUIT FAILED' ("boot={0} pid={1} error={2}" -f $RunNumber, $QacState.ChildProcessId, $_.Exception.GetType().Name)
+    }
 }
 
 function Get-Phase28ZHash([string]$path, [string]$label) {
@@ -919,21 +1021,36 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             "-no-shutdown"
         )
     }
+    $qacQmpPort = $null
+    if ($qacAcceptanceEnabled) {
+        $qacQmpPort = New-QacLoopbackQmpPort
+        $qemuArguments += @('-qmp', "tcp:127.0.0.1:$qacQmpPort,server=on,wait=off")
+    }
     if ($Phase28QOnly) {
         Write-Host ("P29I QEMU_ATTACH boot={0} qemu={1} drive0_backend=fat-rw-directory drive0_path={2} drive0_format=raw drive0_if=ide index=0" -f
             $runNumber, [IO.Path]::GetFullPath($qemu), [IO.Path]::GetFullPath($activeEspDirectory)) -ForegroundColor DarkCyan
     }
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $qemu
-    $startInfo.Arguments = (($qemuArguments | ForEach-Object { Quote-ProcessArgument $_ }) -join " ")
+    if ($qacAcceptanceEnabled) {
+        $startInfo.FileName = $qacCliResolved
+        $startInfo.Arguments = New-QacManagedRunArgumentString -Project 'DeveloperStudio' -Mode acceptance `
+            -QemuExecutable $qemu -QemuArguments $qemuArguments
+    } else {
+        $startInfo.FileName = $qemu
+        $startInfo.Arguments = (($qemuArguments | ForEach-Object { Quote-ProcessArgument $_ }) -join " ")
+    }
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
 
-    $commandLine = '"{0}" {1}' -f [IO.Path]::GetFullPath($qemu), $startInfo.Arguments
-    if ($finalEspAudit) {
+    $commandLine = if ($qacAcceptanceEnabled) {
+        '[QAC run: QEMU arguments redacted; argument_count={0}]' -f $qemuArguments.Count
+    } else {
+        '"{0}" {1}' -f [IO.Path]::GetFullPath($qemu), $startInfo.Arguments
+    }
+    if ($finalEspAudit -or $qacAcceptanceEnabled) {
         Write-P29JHostTrace $hostTracePath 'P29J HOST 03 qemu_spawn_begin' ("boot={0} qemu={1} command_line={2}" -f
             $runNumber, [IO.Path]::GetFullPath($qemu), $commandLine)
     }
@@ -951,21 +1068,68 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         throw
     }
     if (!$spawnSucceeded) {
-        if ($finalEspAudit) {
+        if ($finalEspAudit -or $qacAcceptanceEnabled) {
             Write-P29JHostTrace $hostTracePath 'P29J HOST 08 qemu_spawn_failed' ("boot={0} error=Process.Start returned false" -f $runNumber)
             Write-P29JHostTrace $hostTracePath 'P29J HOST 12 classification' 'QEMU_SPAWN_FAILED'
         }
-        throw "QEMU did not start for boot $runNumber"
+        throw "QEMU launcher did not start for boot $runNumber"
     }
-    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-    $stderrTask = $process.StandardError.ReadToEndAsync()
-    if ($finalEspAudit) {
+    $qacState = @{
+        ReservationId = ''
+        ChildProcessId = $null
+        ProcessIdentity = ''
+        Pending = $false
+        AdmissionRecorded = $false
+        Granted = $false
+        Launched = $false
+        Released = $false
+        RecoveryRequired = $false
+        CoordinatorUnavailable = $false
+        Cancelled = $false
+        CancelRequested = $false
+        CancelHandled = $false
+        QueueCancellationConfirmed = $false
+        CancelVerificationDeadline = $null
+        AdmissionTimedOut = $false
+        RuntimeTimedOut = $false
+        ShutdownRequested = $false
+        RegistrationUnverified = $false
+        ShutdownRequestedAtUtc = $null
+        GracefulDeadline = $null
+        LastQmpAttemptAtUtc = $null
+        QmpQuitSent = $false
+        QmpFailure = ''
+        RunStartedAtUtc = $null
+        RunDeadline = $null
+        QemuExited = $false
+        QemuExitCode = $null
+        ManagedSuccess = $false
+    }
+    $cancelHandler = $null
+    if ($qacAcceptanceEnabled) {
+        $stdoutBuffer = New-Object System.Text.StringBuilder
+        $stderrBuffer = New-Object System.Text.StringBuilder
+        $stdoutLine = $process.StandardOutput.ReadLineAsync()
+        $stderrLine = $process.StandardError.ReadLineAsync()
+        $stdoutFinished = $false
+        $stderrFinished = $false
+        $cancelHandler = Register-QacConsoleCancellation -State $qacState
+        Write-Host "QAC: Waiting for coordinator admission for DeveloperStudio acceptance (boot $runNumber)." -ForegroundColor DarkCyan
+        Write-P29JHostTrace $hostTracePath 'QAC REQUEST' ("boot={0} project=DeveloperStudio mode=acceptance wait_timeout_seconds={1} qac_cli_pid={2}" -f
+            $runNumber, $QacAdmissionTimeoutSeconds, $process.Id)
+    } else {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+    }
+    if ($finalEspAudit -or $qacAcceptanceEnabled) {
         Write-P29JHostTrace $hostTracePath 'P29J HOST 04 qemu_spawned' ("boot={0} pid={1} launch_utc={2} process_state=running" -f
-            $runNumber, $process.Id, [DateTime]::UtcNow.ToString('o'))
+            $runNumber, $(if ($qacAcceptanceEnabled) { 'qac_cli:' + $process.Id } else { $process.Id }), [DateTime]::UtcNow.ToString('o'))
         Write-P29JHostTrace $hostTracePath 'P29J HOST 06 serial_attached' ("boot={0} destination={1} backend=file expected_boot_disk={2} firmware={3}" -f
             $runNumber, [IO.Path]::GetFullPath($serialPath), $resolvedEspPath, [IO.Path]::GetFullPath($ovmfCodePath))
     }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $admissionDeadline = [DateTime]::UtcNow.AddSeconds($QacAdmissionTimeoutSeconds)
+    $releaseVerificationDeadline = $null
     $aliveAtDeadline = $false
     $exitedBeforeHarnessStop = $false
     $harnessStopReason = 'none'
@@ -975,6 +1139,162 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
     $sawLoaderMarker = $false
 
     try {
+        if ($qacAcceptanceEnabled) {
+            while ($true) {
+                $stdoutResult = Receive-QacProcessOutputLine -PendingLine $stdoutLine -Reader $process.StandardOutput `
+                    -Buffer $stdoutBuffer -QacState $qacState -StreamName 'stdout' -HostTracePath $hostTracePath -RunNumber $runNumber
+                $stdoutLine = $stdoutResult.PendingLine
+                $stdoutFinished = $stdoutResult.Finished
+                $stderrResult = Receive-QacProcessOutputLine -PendingLine $stderrLine -Reader $process.StandardError `
+                    -Buffer $stderrBuffer -QacState $qacState -StreamName 'stderr' -HostTracePath $hostTracePath -RunNumber $runNumber
+                $stderrLine = $stderrResult.PendingLine
+                $stderrFinished = $stderrResult.Finished
+
+                if ($qacState.Launched -and $null -eq $qacState.RunDeadline) {
+                    $qacState.RunDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+                    Write-P29JHostTrace $hostTracePath 'QAC QEMU RUNTIME START' ("boot={0} reservation={1} pid={2} timeout_seconds={3} process_identity={4} registration_unverified={5}" -f
+                        $runNumber, $qacState.ReservationId, $qacState.ChildProcessId, $TimeoutSeconds, $qacState.ProcessIdentity, [int]$qacState.RegistrationUnverified)
+                }
+
+                if ($qacState.Launched -and -not $qacState.ShutdownRequested -and
+                    (Test-Path -LiteralPath $serialPath)) {
+                    try {
+                        $qacSerialProbe = [IO.File]::ReadAllText($serialPath)
+                        $qacRequiredMarker = if ($Phase28QOnly) {
+                            $qacSerialProbe.Contains('DEVELOPER_STUDIO_PHASE28Q_PASS')
+                        } else {
+                            $qacSerialProbe.Contains('[KERNEL] Entering main loop (waiting for input)...')
+                        }
+                        if ($qacRequiredMarker) {
+                            $harnessStopReason = 'required_marker_observed'
+                            Request-QacGuestShutdown -QacState $qacState -QacProcess $process -QmpPort $qacQmpPort `
+                                -Reason $harnessStopReason -HostTracePath $hostTracePath -RunNumber $runNumber
+                        }
+                    } catch [IO.IOException] { }
+                }
+
+                if ($qacState.CancelRequested -and -not $qacState.CancelHandled) {
+                    if ($qacState.Launched) {
+                        Request-QacGuestShutdown -QacState $qacState -QacProcess $process -QmpPort $qacQmpPort `
+                            -Reason 'user cancellation' -HostTracePath $hostTracePath -RunNumber $runNumber
+                        $harnessStopReason = 'cancelled'
+                    } elseif ($qacState.ReservationId) {
+                        $qacState.CancelHandled = $true
+                        Write-Host "QAC: Cancelling queued acceptance request for boot $runNumber." -ForegroundColor DarkCyan
+                        Write-P29JHostTrace $hostTracePath 'QAC QUEUE CANCEL REQUEST' ("boot={0} reservation={1}" -f $runNumber, $qacState.ReservationId)
+                        $cancelResult = Invoke-QacCancelReservation -QacCliPath $qacCliResolved -ReservationId $qacState.ReservationId -TimeoutSeconds 10
+                        $qacState.CancelVerificationDeadline = [DateTime]::UtcNow.AddSeconds(15)
+                        if ($cancelResult.Output) {
+                            try {
+                                $cancelState = $cancelResult.Output | ConvertFrom-Json -ErrorAction Stop
+                                if ($cancelState.state -eq 'Cancelled') { $qacState.QueueCancellationConfirmed = $true; $qacState.Cancelled = $true }
+                                if ($cancelState.childProcessId) {
+                                    $qacState.ChildProcessId = [int]$cancelState.childProcessId
+                                    $qacState.ProcessIdentity = [string]$cancelState.processIdentity
+                                    $qacState.Launched = $true
+                                }
+                            } catch { }
+                        }
+                        Write-P29JHostTrace $hostTracePath 'QAC QUEUE CANCEL RESULT' ("boot={0} reservation={1} exit_code={2} completed={3} cancelled_confirmed={4}" -f
+                            $runNumber, $qacState.ReservationId, $cancelResult.ExitCode, [int]$cancelResult.Completed, [int]$qacState.QueueCancellationConfirmed)
+                        if ($qacState.Launched) {
+                            Request-QacGuestShutdown -QacState $qacState -QacProcess $process -QmpPort $qacQmpPort `
+                                -Reason 'cancellation raced with admission' -HostTracePath $hostTracePath -RunNumber $runNumber
+                            $harnessStopReason = 'cancelled'
+                        }
+                    }
+                }
+
+                if ($qacState.ShutdownRequested -and -not $qacState.QmpQuitSent -and -not $qacState.QemuExited -and
+                    -not $process.HasExited -and $null -ne $qacState.GracefulDeadline -and
+                    [DateTime]::UtcNow -lt $qacState.GracefulDeadline -and
+                    ($null -eq $qacState.LastQmpAttemptAtUtc -or
+                     ([DateTime]::UtcNow - $qacState.LastQmpAttemptAtUtc).TotalSeconds -ge 2)) {
+                    Request-QacGuestShutdown -QacState $qacState -QacProcess $process -QmpPort $qacQmpPort `
+                        -Reason 'retry graceful QMP connection' -HostTracePath $hostTracePath -RunNumber $runNumber
+                }
+
+                if ($qacState.CancelHandled -and -not $qacState.QueueCancellationConfirmed -and
+                    -not $qacState.ChildProcessId -and $null -ne $qacState.CancelVerificationDeadline -and
+                    [DateTime]::UtcNow -ge $qacState.CancelVerificationDeadline -and -not $process.HasExited) {
+                    $qacState.RecoveryRequired = $true
+                    $script:qacRecoveryRequired = $true
+                    Write-Host "QAC: Queued cancellation could not be verified; leaving the QAC launcher and reservation intact." -ForegroundColor Red
+                    Write-P29JHostTrace $hostTracePath 'QAC RECOVERY REQUIRED' ("boot={0} reservation={1} reason=queued_cancellation_unverified" -f
+                        $runNumber, $qacState.ReservationId)
+                    break
+                }
+
+                if (-not $qacState.Launched -and [DateTime]::UtcNow -ge $admissionDeadline -and -not $qacState.AdmissionTimedOut) {
+                    $qacState.AdmissionTimedOut = $true
+                    $aliveAtDeadline = $true
+                    $harnessStopReason = 'admission_timeout'
+                    $qacState.CancelRequested = $true
+                    Write-Host "QAC: Admission timed out after $QacAdmissionTimeoutSeconds seconds; cancelling the queued request." -ForegroundColor Yellow
+                    Write-P29JHostTrace $hostTracePath 'QAC ADMISSION TIMEOUT' ("boot={0} reservation={1} timeout_seconds={2}" -f
+                        $runNumber, $qacState.ReservationId, $QacAdmissionTimeoutSeconds)
+                    continue
+                }
+
+                if ($qacState.Launched -and $null -ne $qacState.RunDeadline -and
+                    [DateTime]::UtcNow -ge $qacState.RunDeadline -and -not $qacState.ShutdownRequested) {
+                    $aliveAtDeadline = $true
+                    $qacState.RuntimeTimedOut = $true
+                    $harnessStopReason = 'timeout'
+                    Request-QacGuestShutdown -QacState $qacState -QacProcess $process -QmpPort $qacQmpPort `
+                        -Reason 'QEMU runtime timeout' -HostTracePath $hostTracePath -RunNumber $runNumber
+                }
+
+                if ($qacState.ShutdownRequested -and -not $qacState.QemuExited -and
+                    [DateTime]::UtcNow -ge $qacState.GracefulDeadline -and -not $process.HasExited) {
+                    $qacState.RecoveryRequired = $true
+                    $script:qacRecoveryRequired = $true
+                    Write-Host "QAC: QEMU exit is unverified after graceful shutdown; leaving the managed process and reservation intact." -ForegroundColor Red
+                    Write-P29JHostTrace $hostTracePath 'QAC RECOVERY REQUIRED' ("boot={0} reservation={1} pid={2} reason=graceful_shutdown_unverified" -f
+                        $runNumber, $qacState.ReservationId, $qacState.ChildProcessId)
+                    break
+                }
+
+                if ($process.HasExited -and $null -eq $releaseVerificationDeadline -and $qacState.Launched -and -not $qacState.Released) {
+                    $releaseVerificationDeadline = [DateTime]::UtcNow.AddSeconds(30)
+                }
+                if ($process.HasExited -and $qacState.Launched -and -not $qacState.Released -and
+                    $null -ne $releaseVerificationDeadline -and [DateTime]::UtcNow -ge $releaseVerificationDeadline) {
+                    $qacState.RecoveryRequired = $true
+                    $script:qacRecoveryRequired = $true
+                    Write-Host "QAC: Coordinator release was not verified; preserving recovery state and evidence." -ForegroundColor Red
+                    Write-P29JHostTrace $hostTracePath 'QAC RECOVERY REQUIRED' ("boot={0} reservation={1} pid={2} reason=release_verification_timeout" -f
+                        $runNumber, $qacState.ReservationId, $qacState.ChildProcessId)
+                    break
+                }
+
+                if ($process.HasExited -and $stdoutFinished -and $stderrFinished) { break }
+                Start-Sleep -Milliseconds 125
+            }
+
+            if (-not $qacState.RecoveryRequired -and $process.HasExited) {
+                $process.WaitForExit()
+            }
+            $stdout = $stdoutBuffer.ToString()
+            $stderr = $stderrBuffer.ToString()
+            if ($process.HasExited) {
+                $qacCliExitCode = $process.ExitCode
+                $exitedBeforeHarnessStop = $harnessStopReason -eq 'none'
+            } else {
+                $qacCliExitCode = $null
+                $script:qacRecoveryRequired = $true
+            }
+            $qemuExitCode = $qacState.QemuExitCode
+            $qacState.ManagedSuccess = ($null -ne $qacCliExitCode -and $null -ne $qemuExitCode -and
+                (Test-QacManagedAcceptanceSuccess -CliExitCode $qacCliExitCode -QemuExitCode $qemuExitCode -ReservationReleased $qacState.Released `
+                    -RunTimedOut $qacState.RuntimeTimedOut -CancellationRequested $qacState.CancelRequested `
+                    -RecoveryRequired $qacState.RecoveryRequired -CoordinatorUnavailable $qacState.CoordinatorUnavailable) -and
+                -not $qacState.AdmissionTimedOut)
+            Write-P29JHostTrace $hostTracePath 'QAC RESULT' ("boot={0} reservation={1} qac_cli_exit_code={2} qemu_pid={3} qemu_exit_code={4} released={5} cancelled={6} admission_timeout={7} runtime_timeout={8} recovery_required={9} managed_success={10}" -f
+                $runNumber, $qacState.ReservationId, $qacCliExitCode, $qacState.ChildProcessId, $qemuExitCode,
+                [int]$qacState.Released, [int]$qacState.CancelRequested, [int]$qacState.AdmissionTimedOut, [int]$qacState.RuntimeTimedOut,
+                [int]$qacState.RecoveryRequired, [int]$qacState.ManagedSuccess)
+        } else {
         while (!$process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
             Start-Sleep -Milliseconds 250
             if (!$process.HasExited -and !$sawAlive) {
@@ -1057,6 +1377,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         $process.WaitForExit()
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
+        }
         # QEMU can close its serial file handle slightly after WaitForExit;
         # allow the final guest flush to become visible before auditing it.
         Start-Sleep -Milliseconds 1000
@@ -1065,8 +1386,10 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         $qemuDebug = Read-SerialText $qemuDebugPath
         [System.IO.File]::WriteAllText($stdoutPath, $stdout)
         [System.IO.File]::WriteAllText($stderrPath, $stderr)
-        $qemuExitCode = $null
-        if ($process.HasExited) { $qemuExitCode = $process.ExitCode }
+        if (-not $qacAcceptanceEnabled) {
+            $qemuExitCode = $null
+            if ($process.HasExited) { $qemuExitCode = $process.ExitCode }
+        }
         $serialBytes = if (Test-Path -LiteralPath $serialPath) { (Get-Item -LiteralPath $serialPath).Length } else { 0 }
         $debugconBytes = if (Test-Path -LiteralPath $debugconPath) { (Get-Item -LiteralPath $debugconPath).Length } else { 0 }
         $cpuResetCount = [regex]::Matches($qemuDebug, '(?m)^CPU Reset').Count
@@ -3152,6 +3475,9 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 }
             }
         }
+        if ($qacAcceptanceEnabled -and -not $qacState.ManagedSuccess) {
+            $missingMarkers += 'QAC acceptance lifecycle did not verify QEMU exit and reservation release'
+        }
         if ($missingMarkers.Count -ne 0) {
             if ($Phase29LOwnershipGate) {
                 $phase29lFailureDomain = if ($serial -match 'invalid_project_root') {
@@ -3257,7 +3583,8 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             }
             if (-not $Phase27U -and -not $Phase28FOnly -and -not $Phase28HOnly -and -not $Phase28IOnly -and -not $Phase28JOnly -and -not $Phase28KOnly -and -not $Phase28LOnly -and -not $Phase28MOnly -and -not $Phase28OOnly -and -not $Phase28POnly -and -not $Phase28QOnly -and $serial) { Write-Host $serial }
             if ($stderr) { Write-Host $stderr }
-            throw "QEMU compiler/IDE proof failed on boot $runNumber (exit $($process.ExitCode))"
+            $reportedExitCode = if ($qacAcceptanceEnabled) { $qemuExitCode } elseif ($process.HasExited) { $process.ExitCode } else { 'unverified' }
+            throw "QEMU compiler/IDE proof failed on boot $runNumber (exit $reportedExitCode)"
         }
 
         Write-Host "--- QEMU bare-metal compiler proof boot $runNumber ---" -ForegroundColor Cyan
@@ -3307,7 +3634,15 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         }
     }
     finally {
-        if (!$process.HasExited) { $process.Kill() }
+        if ($qacAcceptanceEnabled -and !$process.HasExited) {
+            $script:qacRecoveryRequired = $true
+            Write-P29JHostTrace $hostTracePath 'QAC RECOVERY REQUIRED' ("boot={0} qac_cli_pid={1} reason=launcher_still_active_during_cleanup" -f $runNumber, $process.Id)
+        } elseif (!$qacAcceptanceEnabled -and !$process.HasExited) {
+            $process.Kill()
+        }
+        if ($qacAcceptanceEnabled -and $cancelHandler) {
+            Unregister-QacConsoleCancellation -Handler $cancelHandler
+        }
         $process.Dispose()
         # The directory-backed FAT drive can release its last handle slightly
         # after QEMU exits. Let the host-side reset/restage below observe a
@@ -5112,6 +5447,9 @@ finally {
     if ($null -eq $oldExtraCFlags) { Remove-Item Env:EXTRA_CFLAGS -ErrorAction SilentlyContinue }
     else { $env:EXTRA_CFLAGS = $oldExtraCFlags }
 
+    if ($script:qacRecoveryRequired) {
+        Write-Host "QAC recovery is required; leaving the staged ESP untouched and preserving evidence at: $tempDirectory" -ForegroundColor Red
+    } else {
     # QEMU may release the FAT image handles just after it exits. Retry the
     # exact generated paths so a proof run never leaves build artifacts in ESP.
     Start-Sleep -Milliseconds 250
@@ -5521,6 +5859,7 @@ finally {
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
             Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
         }
+    }
     }
     if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29LOwnershipOnly -or $Phase29LFullAcceptance -or $Phase29ISentinelOnly -or $Phase29EManifestOnly) {
         $proofLabel = if ($Phase29LOwnershipOnly -or $Phase29LFullAcceptance) { "Phase 29L ownership" } elseif ($Phase29EManifestOnly) { "Phase 29E manifest identity" } elseif ($Phase29ISentinelOnly) { "Phase 29I sentinel" } elseif ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }
