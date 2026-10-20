@@ -359,6 +359,15 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal GuideXosControlHost ControlHost => _controlHost;
     internal int WindowWidth => _windowWidth;
     internal int WindowHeight => _windowHeight;
+    internal override bool TryGetManagedResizeGeometryC180(
+        out GuideXosManagedWindowResizeBoundsC174 bounds,
+        out int outerWidth, out int outerHeight)
+    {
+        bounds = ResizeBounds;
+        outerWidth = _windowWidth;
+        outerHeight = _windowHeight;
+        return true;
+    }
     internal int ClientWidth => _clientWidth;
     internal int ClientHeight => _clientHeight;
     internal int FooterY => _clientHeight - GuideXosLabel.TextRowHeight;
@@ -966,27 +975,19 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         return RenderC167Frame(host, surface);
     }
 
-    public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
-    {
-        if (!GuideXosManagedWindowGeometryC172.TryDecodeAction(
-                actionId, out int outerWidth, out int outerHeight))
-            return base.HandleAction(host, actionId);
+    internal override GuideXosResult HandleManagedResizeC180(
+        GuideXosHost host,
+        ref GuideXosManagedWindowResizeTransactionC174 transaction) =>
+        HandleLiveGeometry(host, ref transaction);
 
+    private GuideXosResult HandleLiveGeometry(GuideXosHost host,
+        ref GuideXosManagedWindowResizeTransactionC174 transaction)
+    {
         if (_surfaceClosing || host == null ||
             host.TryGetSurface(_window, out GuideXosSurface surface) !=
                 GuideXosResult.Success || surface == null)
             return GuideXosResult.SurfaceCreationFailed;
-
-        GuideXosManagedWindowResizeTransactionC174 transaction = new(
-            in ResizeBounds, _windowWidth, _windowHeight, outerWidth,
-            outerHeight);
-        if (!transaction.IsValid)
-        {
-#if GUIDEXOS_PROOF_CONTROL
-            host.TryLog("C172-MANAGED-GEOMETRY result=REJECT layout=unchanged"u8);
-#endif
-            return transaction.Result;
-        }
+        if (!transaction.IsValid) return transaction.Result;
         if (!transaction.IsChanged) return GuideXosResult.Success;
 
         int priorFocusId = _controlHost.ActiveControlId;

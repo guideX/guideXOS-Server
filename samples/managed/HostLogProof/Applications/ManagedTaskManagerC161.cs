@@ -45,6 +45,15 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
     internal int WindowWidth => _controller.OuterWidth;
     internal int WindowHeight => _controller.OuterHeight;
     internal ulong WindowHandle => _window;
+    internal override bool TryGetManagedResizeGeometryC180(
+        out GuideXosManagedWindowResizeBoundsC174 bounds,
+        out int outerWidth, out int outerHeight)
+    {
+        bounds = ResizeBoundsC179;
+        outerWidth = _controller.OuterWidth;
+        outerHeight = _controller.OuterHeight;
+        return true;
+    }
 
     internal bool InitializeForC179Tests()
     {
@@ -234,12 +243,6 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
                 return GuideXosResult.SurfaceCreationFailed;
             PollPendingCloseApplication(host);
             return _controller.Render(surface);
-        }
-
-        if (GuideXosManagedWindowGeometryC172.TryDecodeAction(
-                actionId, out int outerWidth, out int outerHeight))
-        {
-            return HandleLiveGeometry(host, outerWidth, outerHeight);
         }
 
         if (actionId != CloseActionId) return GuideXosResult.InvalidAction;
@@ -519,26 +522,35 @@ public sealed unsafe class ManagedTaskManagerC161 : GuideXosApplication
         LogSelectedDetail(host);
     }
 
-    private GuideXosResult HandleLiveGeometry(GuideXosHost host,
-        int outerWidth, int outerHeight)
+    internal override GuideXosResult HandleManagedResizeC180(
+        GuideXosHost host,
+        ref GuideXosManagedWindowResizeTransactionC174 transaction)
     {
         if (host == null || _window == 0u ||
             host.TryGetSurface(_window, out GuideXosSurface surface) !=
                 GuideXosResult.Success || surface == null)
             return GuideXosResult.SurfaceCreationFailed;
-        return ApplyLiveGeometry(host, surface, outerWidth, outerHeight,
+        return ApplyLiveGeometry(host, surface, ref transaction,
             render: true);
     }
 
     private GuideXosResult ApplyLiveGeometry(GuideXosHost host,
         GuideXosSurface surface, int outerWidth, int outerHeight, bool render)
     {
-        if (_window == 0u || (render && surface == null))
-            return GuideXosResult.SurfaceCreationFailed;
-
         GuideXosManagedWindowResizeTransactionC174 transaction = new(
             in ResizeBoundsC179, _controller.OuterWidth,
             _controller.OuterHeight, outerWidth, outerHeight);
+        return ApplyLiveGeometry(host, surface, ref transaction, render);
+    }
+
+    private GuideXosResult ApplyLiveGeometry(GuideXosHost host,
+        GuideXosSurface surface,
+        ref GuideXosManagedWindowResizeTransactionC174 transaction,
+        bool render)
+    {
+        if (_window == 0u || (render && surface == null))
+            return GuideXosResult.SurfaceCreationFailed;
+
         if (!transaction.IsValid) return transaction.Result;
         if (!transaction.IsChanged) return GuideXosResult.Success;
 

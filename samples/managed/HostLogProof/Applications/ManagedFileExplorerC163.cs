@@ -44,6 +44,15 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
     internal int WindowWidth => _controller.WindowWidth;
     internal int WindowHeight => _controller.WindowHeight;
     internal ulong WindowHandle => _window;
+    internal override bool TryGetManagedResizeGeometryC180(
+        out GuideXosManagedWindowResizeBoundsC174 bounds,
+        out int outerWidth, out int outerHeight)
+    {
+        bounds = ResizeBounds;
+        outerWidth = _controller.WindowWidth;
+        outerHeight = _controller.WindowHeight;
+        return true;
+    }
 
     internal bool ApplyLiveGeometryForTests(int outerWidth, int outerHeight) =>
         _controller.TryRecomputeLayout(outerWidth, outerHeight);
@@ -189,10 +198,6 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
     public override GuideXosResult HandleAction(GuideXosHost host,
         uint actionId)
     {
-        if (GuideXosManagedWindowGeometryC172.TryDecodeAction(
-                actionId, out int outerWidth, out int outerHeight))
-            return HandleLiveGeometry(host, outerWidth, outerHeight);
-
         if (actionId == CloseActionId)
         {
             _closeRequested = true;
@@ -210,18 +215,19 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
         return GuideXosResult.Success;
     }
 
+    internal override GuideXosResult HandleManagedResizeC180(
+        GuideXosHost host,
+        ref GuideXosManagedWindowResizeTransactionC174 transaction) =>
+        HandleLiveGeometry(host, ref transaction);
+
     private GuideXosResult HandleLiveGeometry(GuideXosHost host,
-        int outerWidth, int outerHeight)
+        ref GuideXosManagedWindowResizeTransactionC174 transaction)
     {
         if (host == null || _window == 0u || _closeRequested ||
             host.TryGetSurface(_window, out GuideXosSurface surface) !=
                 GuideXosResult.Success || surface == null)
             return GuideXosResult.SurfaceCreationFailed;
 
-        int priorWidth = _controller.WindowWidth;
-        int priorHeight = _controller.WindowHeight;
-        GuideXosManagedWindowResizeTransactionC174 transaction = new(
-            in ResizeBounds, priorWidth, priorHeight, outerWidth, outerHeight);
         if (!transaction.IsValid)
         {
 #if GUIDEXOS_PROOF_CONTROL
@@ -279,9 +285,11 @@ public sealed class ManagedFileExplorerC163 : GuideXosApplication
         int position = 0;
         GuideXosText.Append(line, ref position,
             "C173-MANAGED-GEOMETRY size="u8);
-        GuideXosText.AppendUnsigned(line, ref position, (uint)outerWidth);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)transaction.Candidate.OuterWidth);
         GuideXosText.Append(line, ref position, "x"u8);
-        GuideXosText.AppendUnsigned(line, ref position, (uint)outerHeight);
+        GuideXosText.AppendUnsigned(line, ref position,
+            (uint)transaction.Candidate.OuterHeight);
         GuideXosText.Append(line, ref position,
             directoryStateRetained
                 ? " path=1 selection=1 scroll="u8

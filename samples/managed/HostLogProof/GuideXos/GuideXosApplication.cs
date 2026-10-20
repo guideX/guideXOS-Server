@@ -10,6 +10,25 @@ public abstract unsafe class GuideXosApplication
     {
         return GuideXosResult.InvalidAction;
     }
+    /// <summary>
+    /// Explicit opt-in for C180 compositor resize actions. Applications
+    /// provide their own bounds and current outer size; the registry owns
+    /// candidate validation and transaction coordination.
+    /// </summary>
+    internal virtual bool TryGetManagedResizeGeometryC180(
+        out GuideXosManagedWindowResizeBoundsC174 bounds,
+        out int outerWidth, out int outerHeight)
+    {
+        bounds = default;
+        outerWidth = 0;
+        outerHeight = 0;
+        return false;
+    }
+    internal virtual GuideXosResult HandleManagedResizeC180(
+        GuideXosHost host,
+        ref GuideXosManagedWindowResizeTransactionC174 transaction) =>
+        GuideXosResult.InvalidAction;
+
     public virtual GuideXosResult HandleInput(
         GuideXosHost host, GuideXosInputEvent input)
     {
@@ -290,7 +309,8 @@ public static unsafe class GuideXosApplicationRegistry
         GuideXosResult result = host.LaunchContext.IsInput
             ? application.HandleInput(host, input)
             : host.IsAction
-                ? application.HandleAction(host, host.LaunchContext.ActionId)
+                ? GuideXosManagedWindowResizeDispatchC180.DispatchAction(
+                    application, host, host.LaunchContext.ActionId)
                 : application.Launch(host);
 #if HOSTLOGPROOF_C160_APPLICATION_SNAPSHOT_PROOF
         if (result == GuideXosResult.Success && isNewLaunch &&
@@ -359,7 +379,9 @@ public static unsafe class GuideXosApplicationRegistry
         GuideXosResult result = host.LaunchContext.IsInput
             ? descriptor.Application.HandleInput(host, input)
             : host.IsAction
-                ? descriptor.Application.HandleAction(host, host.LaunchContext.ActionId)
+                ? GuideXosManagedWindowResizeDispatchC180.DispatchAction(
+                    descriptor.Application, host,
+                    host.LaunchContext.ActionId)
                 : descriptor.Application.Launch(host);
 #endif
         return (int)result;

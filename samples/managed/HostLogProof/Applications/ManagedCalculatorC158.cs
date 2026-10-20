@@ -778,6 +778,15 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
     internal int DisplayX => _displayLabel.X;
     internal int DisplayY => _displayLabel.Y;
     internal ulong WindowHandle => _window;
+    internal override bool TryGetManagedResizeGeometryC180(
+        out GuideXosManagedWindowResizeBoundsC174 bounds,
+        out int outerWidth, out int outerHeight)
+    {
+        bounds = ResizeBoundsC178;
+        outerWidth = _windowWidth;
+        outerHeight = _windowHeight;
+        return true;
+    }
 
     internal bool TryApplyResizeForTests(int outerWidth, int outerHeight)
     {
@@ -850,10 +859,6 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
 
     public override GuideXosResult HandleAction(GuideXosHost host, uint actionId)
     {
-        if (GuideXosManagedWindowGeometryC172.TryDecodeAction(actionId,
-                out int outerWidth, out int outerHeight))
-            return HandleLiveGeometry(host, outerWidth, outerHeight);
-
         if (actionId == CloseActionId)
         {
             _controller.Teardown();
@@ -911,17 +916,19 @@ public sealed class ManagedCalculatorC158 : GuideXosApplication
 
     private readonly GuideXosLabel _displayLabel = new(20, 38, 240, "0", 20);
 
+    internal override GuideXosResult HandleManagedResizeC180(
+        GuideXosHost host,
+        ref GuideXosManagedWindowResizeTransactionC174 transaction) =>
+        HandleLiveGeometry(host, ref transaction);
+
     private GuideXosResult HandleLiveGeometry(GuideXosHost host,
-        int outerWidth, int outerHeight)
+        ref GuideXosManagedWindowResizeTransactionC174 transaction)
     {
         GuideXosSurface surface = _surface;
         if (host == null || _window == 0u || surface == null ||
             surface.Handle != _window)
             return GuideXosResult.SurfaceCreationFailed;
 
-        GuideXosManagedWindowResizeTransactionC174 transaction = new(
-            in ResizeBoundsC178, _windowWidth, _windowHeight,
-            outerWidth, outerHeight);
         if (!transaction.IsValid) return transaction.Result;
         if (!transaction.IsChanged) return GuideXosResult.Success;
 

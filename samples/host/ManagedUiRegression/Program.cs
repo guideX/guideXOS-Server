@@ -166,5 +166,16 @@ allPassed &= c179StressPassed;
 Console.WriteLine($"C179-STRESS layout={GuideXosManagedTaskManagerResizeC179Tests.LayoutUpdates} alternating={GuideXosManagedTaskManagerResizeC179Tests.AlternatingResizes} refreshResize={GuideXosManagedTaskManagerResizeC179Tests.RefreshResizeCycles} rejected={GuideXosManagedTaskManagerResizeC179Tests.RejectedGeometryChecks} lifecycles={GuideXosManagedTaskManagerResizeC179Tests.LifecycleCycles} resizeAllocationBytes={GuideXosManagedTaskManagerResizeC179Tests.ResizeAllocationBytes} refreshAllocationBytes={GuideXosManagedTaskManagerResizeC179Tests.RefreshAllocationBytes} drift={GuideXosManagedTaskManagerResizeC179Tests.GeometryDriftCount} result={(c179StressPassed ? "PASS" : "FAIL")}");
 Console.WriteLine($"C179-STRESS-DETAIL firstFailedCase={GuideXosManagedTaskManagerResizeC179Tests.FirstFailedCase}");
 
+allPassed &= RunSuite("C180-ResizeContract",
+    GuideXosManagedWindowResizeC180Tests.CaseCount,
+    () => GuideXosManagedWindowResizeC180Tests.Run(null));
+Console.WriteLine($"C180-RESIZE-CONTRACT-DETAIL firstFailedCase={GuideXosManagedWindowResizeC180Tests.FirstFailedCase}");
+bool c180StressPassed = RunSuite("C180-ResizeContractStress",
+    GuideXosManagedWindowResizeC180Tests.StressCaseCount,
+    () => GuideXosManagedWindowResizeC180Tests.RunStress(null));
+allPassed &= c180StressPassed;
+Console.WriteLine($"C180-STRESS transactions={GuideXosManagedWindowResizeC180Tests.StressTransactionCount} alternating={GuideXosManagedWindowResizeC180Tests.StressAlternatingCount} rejected={GuideXosManagedWindowResizeC180Tests.StressRejectedCount} crossApplication={GuideXosManagedWindowResizeC180Tests.StressCrossApplicationCount} lifecycles={GuideXosManagedWindowResizeC180Tests.StressLifecycleCount} allocationBytes={GuideXosManagedWindowResizeC180Tests.StressAllocationBytes} drift={GuideXosManagedWindowResizeC180Tests.StressDriftCount} result={(c180StressPassed ? "PASS" : "FAIL")}");
+Console.WriteLine($"C180-STRESS-DETAIL {GuideXosManagedWindowResizeC180Tests.StressFailureDetail}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

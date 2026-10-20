@@ -139,6 +139,20 @@ public sealed partial class ManagedNotes
     internal int C175WindowHeight => _c175WindowHeight;
     internal int C175EditorColumns => _c175Layout.EditorColumns;
     internal int C175EditorLines => _c175Layout.EditorLines;
+    internal override bool TryGetManagedResizeGeometryC180(
+        out GuideXosManagedWindowResizeBoundsC174 bounds,
+        out int outerWidth, out int outerHeight)
+    {
+        bounds = ResizeBoundsC175;
+        outerWidth = _c175WindowWidth;
+        outerHeight = _c175WindowHeight;
+        return true;
+    }
+
+    internal override GuideXosResult HandleManagedResizeC180(
+        GuideXosHost host,
+        ref GuideXosManagedWindowResizeTransactionC174 transaction) =>
+        HandleC175LiveGeometry(host, ref transaction);
 
     private bool TryInitializeC175Layout()
     {
@@ -255,7 +269,7 @@ public sealed partial class ManagedNotes
     }
 
     private GuideXosResult HandleC175LiveGeometry(GuideXosHost host,
-        int outerWidth, int outerHeight)
+        ref GuideXosManagedWindowResizeTransactionC174 transaction)
     {
         if (host == null || _window == 0u ||
             host.TryGetSurface(_window, out GuideXosSurface surface) !=
@@ -264,9 +278,6 @@ public sealed partial class ManagedNotes
             return GuideXosResult.SurfaceCreationFailed;
         }
 
-        GuideXosManagedWindowResizeTransactionC174 transaction = new(
-            in ResizeBoundsC175, _c175WindowWidth, _c175WindowHeight,
-            outerWidth, outerHeight);
         if (!transaction.IsValid)
         {
 #if GUIDEXOS_PROOF_CONTROL
@@ -422,10 +433,10 @@ public sealed partial class ManagedNotes
         GuideXosText.Append(line, ref position,
             "C175-MANAGED-GEOMETRY size="u8);
         GuideXosText.AppendUnsigned(line, ref position,
-            (uint)outerWidth);
+            (uint)candidate.OuterWidth);
         GuideXosText.Append(line, ref position, "x"u8);
         GuideXosText.AppendUnsigned(line, ref position,
-            (uint)outerHeight);
+            (uint)candidate.OuterHeight);
         GuideXosText.Append(line, ref position,
             " client="u8);
         GuideXosText.AppendUnsigned(line, ref position,

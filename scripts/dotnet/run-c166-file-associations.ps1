@@ -762,7 +762,33 @@ function Write-C172HostedTestManifest([string]$EvidenceRoot,[string]$HostManifes
             $hostManifest.c179ManagedTaskManagerResize.refreshAllocationBytes -eq 0 -and
             $hostManifest.c179ManagedTaskManagerResize.geometryDriftCount -eq 0 -and
             $hostManifest.c179ManagedTaskManagerResize.result -eq 'PASS'
-        ($legacyC173Host -or $c174Host -or $c175Host -or $c176Host -or $c177Host -or $c178Host -or $c179Host) -and
+        $c180Host = $hostManifest.phase -eq
+            'C180-managed-resize-contract-host-regression' -and
+            $hostManifest.focusedSummary.suites -eq 36 -and
+            $hostManifest.focusedSummary.cases -eq 899 -and
+            $hostManifest.c179ManagedTaskManagerResize.focusedCases -eq 20 -and
+            $hostManifest.c179ManagedTaskManagerResize.stressCases -eq 5 -and
+            $hostManifest.c179ManagedTaskManagerResize.layoutUpdates -eq 1000 -and
+            $hostManifest.c179ManagedTaskManagerResize.alternatingResizes -eq 500 -and
+            $hostManifest.c179ManagedTaskManagerResize.refreshResizeCycles -eq 250 -and
+            $hostManifest.c179ManagedTaskManagerResize.rejectedGeometryChecks -eq 250 -and
+            $hostManifest.c179ManagedTaskManagerResize.lifecycleCycles -eq 100 -and
+            $hostManifest.c179ManagedTaskManagerResize.resizeAllocationBytes -eq 0 -and
+            $hostManifest.c179ManagedTaskManagerResize.refreshAllocationBytes -eq 0 -and
+            $hostManifest.c179ManagedTaskManagerResize.geometryDriftCount -eq 0 -and
+            $hostManifest.c179ManagedTaskManagerResize.result -eq 'PASS' -and
+            $hostManifest.c180ManagedResizeContract.focusedCases -eq 21 -and
+            $hostManifest.c180ManagedResizeContract.stressCases -eq 7 -and
+            $hostManifest.c180ManagedResizeContract.sharedTransactions -eq 1000 -and
+            $hostManifest.c180ManagedResizeContract.alternatingRequests -eq 500 -and
+            $hostManifest.c180ManagedResizeContract.rejectedGeometryRequests -eq 250 -and
+            $hostManifest.c180ManagedResizeContract.crossApplicationStateCombinations -eq 250 -and
+            $hostManifest.c180ManagedResizeContract.lifecycleCycles -eq 100 -and
+            $hostManifest.c180ManagedResizeContract.hotPathAllocationBytes -eq 0 -and
+            $hostManifest.c180ManagedResizeContract.geometryDriftCount -eq 0 -and
+            $hostManifest.c180ManagedResizeContract.firstFailedCase -eq 0 -and
+            $hostManifest.c180ManagedResizeContract.result -eq 'PASS'
+        ($legacyC173Host -or $c174Host -or $c175Host -or $c176Host -or $c177Host -or $c178Host -or $c179Host -or $c180Host) -and
             $hostManifest.c173ManagedFileExplorerResize.focusedCases -eq 47
     } else {
         $hostManifest.phase -eq 'C172-managed-window-resize-host-regression' -and
@@ -1604,7 +1630,7 @@ function Write-C179ProductionAcceptanceManifest([string]$EvidenceRoot,
     $candidateRecords = [System.Collections.Generic.List[object]]::new()
     $forbiddenProductionMarkers = @('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS',
         'PROOF-SCENARIO-FAIL','PROOF C166','GXPF','C179-NATIVE-GEOMETRY',
-        'C179-TM-GEOMETRY','C179-TM-LAUNCH')
+        'C179-TM-GEOMETRY','C179-TM-LAUNCH','C180-MANAGED-GEOMETRY')
     foreach ($candidate in $source.cleanProduction.allCandidateStrings) {
         $path = [string]$candidate.path
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
@@ -1766,6 +1792,8 @@ function Write-C170OrdinaryEvidenceManifest([string]$EvidenceRoot,[string]$Sourc
             guestBootCount = [int]$prerequisite.guestBootCount
             successfulManagedMutationCount = [int]$prerequisite.successfulManagedMutationCount
             serials = @($proofSerials.ToArray())
+            rawProofSerialsAvailable = [bool]$prerequisite.rawProofSerialsAvailable
+            originalProofManifestPath = [string]$prerequisite.originalProofManifestPath
             failedC170Refresh = $refreshDiagnostic
         }
     }
@@ -3031,7 +3059,7 @@ function Reject-C175ManagedNotesResize([object]$Boot,[int]$CurrentWidth,
             ' client=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} result=REJECT\r?$'
         [void](Wait-C166Serial $Boot.serialPath $expectedNative $markerStart 10)
         [void](Wait-C166Serial $Boot.serialPath `
-            '^\[C102-MANAGED-OUTPUT\] C175-MANAGED-GEOMETRY result=REJECT layout=unchanged\r?$' `
+            '^\[C102-MANAGED-OUTPUT\] C180-MANAGED-GEOMETRY result=REJECT layout=unchanged\r?$' `
             $markerStart 10)
     }
     $serialAfter = Get-C166Serial $Boot.serialPath
@@ -3680,7 +3708,7 @@ function Reject-C173ManagedExplorerResize([object]$Boot,[string]$ScreenshotPath,
             '^\[C173-NATIVE-GEOMETRY\] appId=com\.guidexos\.apps\.managed\.fileexplorer instance=[0-9A-Fa-f]{16} generation=[0-9A-Fa-f]{8} window=[0-9A-Fa-f]{8} oldOuter=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} newOuter=(?<width>00000257|00000258)x(?<height>00000167) client=[0-9A-Fa-f]{8}x[0-9A-Fa-f]{8} result=REJECT\r?$' `
             $markerStart 10
         [void](Wait-C166Serial $Boot.serialPath `
-            '^\[C102-MANAGED-OUTPUT\] C173-MANAGED-GEOMETRY result=REJECT layout=unchanged\r?$' `
+            '^\[C102-MANAGED-OUTPUT\] C180-MANAGED-GEOMETRY result=REJECT layout=unchanged\r?$' `
             $markerStart 10)
         $observedRejectedWidth = [Convert]::ToInt32(
             $rejectedGeometry.Match.Groups['width'].Value, 16)
@@ -3691,10 +3719,23 @@ function Reject-C173ManagedExplorerResize([object]$Boot,[string]$ScreenshotPath,
         }
     }
     $after = Get-C166Serial $Boot.serialPath
-    $stateAfter = Get-C173ManagedExplorerState $after $markerStart
     if ($Focused) {
+        # Shared C180 validation rejects the out-of-bounds candidate before
+        # calling Explorer. Re-read its state with a no-change click on the
+        # already selected hello.txt row so the focused record proves the
+        # app-owned path and selection survived the rejection.
+        $stateProbeStart = $after.Length
+        $helloRow = [Math]::Max(0, 2 - $stateBefore.view)
+        Click-C166ManagedExplorerRow $helloRow $Boot
+        [void](Wait-C166Serial $Boot.serialPath `
+            '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=\d+ path=/system/apps/C164 n=\d+ sel=hello\.txt type=File size=15 view=\d+ status=File selected\r?$' `
+            $stateProbeStart 10)
+        $after = Get-C166Serial $Boot.serialPath
+        $stateAfter = Get-C173ManagedExplorerState $after $stateProbeStart
         [void](Assert-C173ManagedExplorerState $stateAfter $stateBefore.path `
             $stateBefore.selection $stateBefore.type 'C173 rejected resize')
+    } else {
+        $stateAfter = Get-C173ManagedExplorerState $after $markerStart
     }
     $hash = Capture-C167GuestScreen $Boot $ScreenshotPath
     $bounds = Get-C172ManagedWindowBoundsFromScreenshot $ScreenshotPath
@@ -8024,6 +8065,83 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
             'out\dotnet\c167-default-apps\proof1-guest-runs\proof1-manifest.json'
         $historicalAcceptancePath = Join-Path $RepoRoot `
             'out\dotnet\c167-default-apps\production-acceptance\c166a2-manifest.json'
+        if (-not (Test-Path -LiteralPath $historicalProofManifestPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $historicalAcceptancePath -PathType Leaf)) {
+            # Some workspaces retain the accepted C166A2 chain in a later phase
+            # manifest while pruning its original proof serials. Reuse only the
+            # accepted record itself and state clearly that raw serials are absent.
+            $acceptedC179Path = Join-Path $RepoRoot `
+                'out\dotnet\c179-managed-task-manager-resize\production-acceptance\c166a2-manifest.json'
+            if (-not (Test-Path -LiteralPath $acceptedC179Path -PathType Leaf)) {
+                throw "C170 historical C166 proof prerequisite is missing: $historicalProofManifestPath"
+            }
+            $acceptedC179 = Get-Content -LiteralPath $acceptedC179Path -Raw | ConvertFrom-Json
+            $acceptedC179Boots = @($acceptedC179.proofBoots)
+            $acceptedC179Mutations = @($acceptedC179.successfulManagedMutations)
+            if ($acceptedC179.outcome -ne 'A' -or -not $acceptedC179.c166Accepted -or
+                $acceptedC179.sourceBranch -ne 'v1.1_DOTNET_SUPPORT' -or
+                $acceptedC179.hostValidation.status -ne 'PASS' -or
+                $acceptedC179Boots.Count -ne 3 -or $acceptedC179Mutations.Count -lt 25 -or
+                @($acceptedC179Mutations | Where-Object { [int]$_.status -ne 0 }).Count -gt 0 -or
+                @($acceptedC179Boots | Where-Object {
+                    [string]::IsNullOrWhiteSpace([string]$_.serialSha256) -or
+                    [string]$_.serialSha256 -notmatch '^[A-Fa-f0-9]{64}$'
+                }).Count -gt 0) {
+                throw 'C170 preserved C179 C166A2 baseline is incomplete or was not accepted.'
+            }
+            $referencePath = Join-Path $script:c170EvidenceOutputRoot 'c166-accepted-baseline-reference.json'
+            $reference = [ordered]@{
+                schemaVersion=1
+                phase='C180-historical-C166A2-accepted-baseline-reference'
+                status='REFERENCE'
+                sourceHead=[string]$acceptedC179.sourceHead
+                acceptanceOutcome=[string]$acceptedC179.outcome
+                c166Accepted=[bool]$acceptedC179.c166Accepted
+                acceptedManifestPath=[System.IO.Path]::GetFullPath($acceptedC179Path)
+                acceptedManifestSha256=Get-Sha256 $acceptedC179Path
+                originalProofManifestPath=[string]$acceptedC179.proofManifest
+                originalProofManifestAvailable=(Test-Path -LiteralPath ([string]$acceptedC179.proofManifest) -PathType Leaf)
+                proofBoots=$acceptedC179Boots
+                successfulManagedMutationCount=$acceptedC179Mutations.Count
+                rawProofSerialsAvailable=$false
+                reuseScope='Historical C166A2 prerequisite only; current C180 proof and production runs are recorded separately.'
+            }
+            $reference | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $referencePath -Encoding utf8
+            $historicalAcceptance=$acceptedC179
+            $historicalAcceptancePath=$acceptedC179Path
+            $historicalProofCanonical=[System.IO.Path]::GetFullPath($referencePath)
+            $historicalProof=[ordered]@{
+                sourceHead=[string]$acceptedC179.sourceHead
+                scenarioMedia=$acceptedC179.proofProducts.scenarioMedia
+                guestBoots=$acceptedC179Boots
+                crossBootStatePath=$null
+                boot2DisabledExplorerParity=$acceptedC179.disabledExplorerParity
+                boot3ReloadedDiagnostic=$acceptedC179.boot3DirectRebootComparison
+                successfulManagedMutations=$acceptedC179Mutations
+                mutationSummary=$acceptedC179.mutationSummary
+                boot3RestoredExplorerParity=$acceptedC179.restoredDefaultExplorerParity
+            }
+            $historicalSerials=@()
+            $proofManifest=$historicalProof
+            $proofManifestPath=$historicalProofCanonical
+            $proofReady=$true
+            $historicalProofPrerequisite=[ordered]@{
+                kind='accepted-historical-C166A2-baseline-reference'
+                sourceHead=[string]$acceptedC179.sourceHead
+                acceptanceSourceHead=[string]$acceptedC179.sourceHead
+                proofManifestPath=$historicalProofCanonical
+                proofManifestSha256=Get-Sha256 $historicalProofCanonical
+                acceptanceManifestPath=[System.IO.Path]::GetFullPath($acceptedC179Path)
+                acceptanceManifestSha256=Get-Sha256 $acceptedC179Path
+                guestBootCount=$acceptedC179Boots.Count
+                successfulManagedMutationCount=$acceptedC179Mutations.Count
+                serials=@()
+                rawProofSerialsAvailable=$false
+                originalProofManifestPath=[string]$acceptedC179.proofManifest
+                refreshDiagnosticPath=$null
+                refreshDiagnosticSha256=$null
+            }
+        } else {
         foreach ($path in @($historicalProofManifestPath,$historicalAcceptancePath)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 throw "C170 historical C166 proof prerequisite is missing: $path"
@@ -8133,8 +8251,11 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
             guestBootCount=@($historicalProof.guestBoots).Count
             successfulManagedMutationCount=@($historicalProof.successfulManagedMutations).Count
             serials=@($historicalSerials.ToArray())
+            rawProofSerialsAvailable=$true
+            originalProofManifestPath=$historicalProofCanonical
             refreshDiagnosticPath=[System.IO.Path]::GetFullPath($refreshDiagnosticPath)
             refreshDiagnosticSha256=Get-Sha256 $refreshDiagnosticPath
+        }
         }
     }
     if (-not $proofReady -or -not $hostManifest.hostValidationComplete) {
@@ -8263,7 +8384,7 @@ function Invoke-C166OrdinaryAcceptance([string]$RepoRoot,[string]$EvidenceRoot,
     if ((Get-Sha256 $kernelPath) -ne $baselineKernelHash) { throw 'Protected canonical kernel restoration failed after candidate build.' }
 
     $scanPaths=@($composite,$kernelCandidate,$ramdiskCandidate)
-    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF','C172-NATIVE-GEOMETRY','C172-MANAGED-GEOMETRY','C175-NATIVE-GEOMETRY','C175-MANAGED-GEOMETRY','C177-NOTES-NEWLINE','C177-SAVE-PROOF','C177-STRESS','C177-PROOF-FIXTURE-COLLECTION','C178-NATIVE-GEOMETRY','C178-CALCULATOR-LAUNCH','C178-CALC-GEOMETRY','C178-CALC-STATE','C178-CALCULATOR-RESIZE','C179-NATIVE-GEOMETRY','C179-TM-LAUNCH','C179-TM-GEOMETRY')
+    $forbidden=@('GUIDEXOS_PROOF_CONTROL','PROOF-SCENARIO-PASS','PROOF-SCENARIO-FAIL','PROOF C166','proof1.bin','GXPF','C172-NATIVE-GEOMETRY','C172-MANAGED-GEOMETRY','C175-NATIVE-GEOMETRY','C175-MANAGED-GEOMETRY','C177-NOTES-NEWLINE','C177-SAVE-PROOF','C177-STRESS','C177-PROOF-FIXTURE-COLLECTION','C178-NATIVE-GEOMETRY','C178-CALCULATOR-LAUNCH','C178-CALC-GEOMETRY','C178-CALC-STATE','C178-CALCULATOR-RESIZE','C179-NATIVE-GEOMETRY','C179-TM-LAUNCH','C179-TM-GEOMETRY','C180-MANAGED-GEOMETRY')
     $scanResults=@()
     foreach ($path in $scanPaths) {
         $text=[System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($path))

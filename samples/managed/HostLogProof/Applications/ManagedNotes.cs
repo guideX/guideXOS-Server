@@ -4721,11 +4721,6 @@ public sealed partial class ManagedNotes : GuideXosApplication
         {
             return GuideXosResult.SurfaceCreationFailed;
         }
-        if (GuideXosManagedWindowGeometryC172.TryDecodeAction(actionId,
-                out int outerWidth, out int outerHeight))
-        {
-            return HandleC175LiveGeometry(host, outerWidth, outerHeight);
-        }
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
         if (_c152Enabled && TryHandleC152Action(
                 host, surface, actionId, out GuideXosResult c152Result))

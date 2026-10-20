@@ -976,6 +976,7 @@ public:
 
     bool onWindowResize(int oldWidth, int oldHeight,
                         int newWidth, int newHeight) override {
+#if defined(GUIDEXOS_PROOF_CONTROL)
         const bool settingsWindow = m_selector == 5u && m_window &&
             isManagedSettingsCenterTitle(m_window->title);
         const bool fileExplorerWindow = m_selector == 8u && m_window &&
@@ -986,9 +987,11 @@ public:
             isManagedCalculatorTitle(m_window->title);
         const bool managedTaskManagerWindow = m_selector == 7u && m_window &&
             isManagedTaskManagerTitle(m_window->title);
-        if (!m_window || (!settingsWindow && !fileExplorerWindow &&
-                !managedNotesWindow && !managedCalculatorWindow &&
-                !managedTaskManagerWindow)) {
+#endif
+        // All NativeAOT managed windows use the existing managed action
+        // channel. Each managed application explicitly opts into C172 geometry
+        // through the default-deny C180 hooks on GuideXosApplication.
+        if (!m_window || m_selector == 0u) {
             return true;
         }
         if (newWidth <= 0 || newHeight <= 0 ||
@@ -1013,8 +1016,12 @@ public:
             serial::puts("[C175-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.notes instance=");
         } else if (managedCalculatorWindow) {
             serial::puts("[C178-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.calculator instance=");
-        } else {
+        } else if (managedTaskManagerWindow) {
             serial::puts("[C179-NATIVE-GEOMETRY] appId=com.guidexos.apps.managed.taskmanager instance=");
+        } else {
+            serial::puts("[C180-NATIVE-GEOMETRY] selector=");
+            serial::put_hex32(m_selector);
+            serial::puts(" instance=");
         }
         serial::put_hex64(m_snapshotInstanceId);
         serial::puts(" generation=");
