@@ -20,7 +20,11 @@ static_assert(offsetof(gx_event, param4) == 28, "gx_event.param4 offset changed"
 //     every historical slot keeps its offset (pinned individually below) and
 //     that growth happens only by appending (pinned by ordering asserts).
 //   workspace/build/dev-run/dev-debug eras: 120 -> 240 bytes.
-//   MC5 audio era: play_pcm appended at 240 -> 248 bytes.
+//   MC5 audio era: play_pcm appended at 240.
+//   MC6 App Model era: document activation appended at 248 -> 256 bytes.
+static_assert(offsetof(gx_host_calls, size) == 0, "host-call table size field moved");
+static_assert(offsetof(gx_host_calls, version) == 4, "host-call table version field moved");
+static_assert(alignof(gx_host_calls) == 8, "host-call table alignment changed on amd64");
 static_assert(offsetof(gx_host_calls, get_ticks_ms) > offsetof(gx_host_calls, present_frame),
               "get_ticks_ms must be appended to the ABI table");
 static_assert(sizeof(uint64_t) == 8, "Native ABI ticks must remain 64-bit");
@@ -79,7 +83,9 @@ static_assert(offsetof(gx_host_calls, development_debug) == 232, "development de
 static_assert(offsetof(gx_host_calls, play_pcm) > offsetof(gx_host_calls, development_debug),
               "play_pcm must be appended after development_debug");
 static_assert(offsetof(gx_host_calls, play_pcm) == 240, "play_pcm slot changed");
-static_assert(sizeof(gx_host_calls) == 248, "gx_host_calls size changed");
+static_assert(offsetof(gx_host_calls, get_document_activation_path) == 248,
+              "document activation slot changed");
+static_assert(sizeof(gx_host_calls) == 256, "v0.3 gx_host_calls prefix size changed");
 static_assert(sizeof(gx_development_run_request) == 72, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");
