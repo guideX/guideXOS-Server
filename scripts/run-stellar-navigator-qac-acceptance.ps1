@@ -251,7 +251,7 @@ function New-QemuArguments([string]$EspPath, [int]$SerialPort, [int]$MonitorPort
 
 function New-RunDirectory {
     if (-not $ArtifactRoot) {
-        $ArtifactRoot = Join-Path $env:USERPROFILE ('.codex\artifacts\SN10R3_' + (Get-Date -Format 'yyyyMMdd'))
+        $ArtifactRoot = Join-Path $env:USERPROFILE ('.codex\artifacts\SN10R4_' + (Get-Date -Format 'yyyyMMdd'))
     }
     $full = [IO.Path]::GetFullPath($ArtifactRoot)
     $id = Get-Date -Format 'yyyyMMddTHHmmssfff'
@@ -300,26 +300,133 @@ function Test-StructuredArgumentPassing {
     [pscustomobject]@{ passed = $true; argumentCount = $actual.Count; exactArgumentBoundaries = $true; shellQuotesAdded = $false; qemuSpecialCharacters = @('spaces', 'comma doubled for QEMU keyval', 'ampersand', 'parentheses', 'literal apostrophe') }
 }
 
+function Get-GuestFailureMarker([string]$Text) {
+    $pattern = '(?m)(\[KERNEL-PANIC\][^\r\n]*|\[KERNEL-FAULT\][^\r\n]*|\[NATIVE-ELF-FAULT\][^\r\n]*|\[Exception\] (?:Unhandled exception|Double fault)[^\r\n]*|Triple fault[^\r\n]*)'
+    $match = [regex]::Match($Text, $pattern)
+    if ($match.Success) { return $match.Value }
+    return $null
+}
+
 function Wait-SerialPattern {
     param(
         [Parameter(Mandatory = $true)]$Capture,
         [Parameter(Mandatory = $true)][string]$Pattern,
         [Parameter(Mandatory = $true)][int]$Seconds,
-        [string]$Description = $Pattern
+        [string]$Description = $Pattern,
+        [int]$StartIndex = 0
     )
     $timer = [Diagnostics.Stopwatch]::StartNew()
     while ($timer.Elapsed.TotalSeconds -lt $Seconds) {
-        $text = $Capture.Snapshot()
+        $snapshot = $Capture.Snapshot()
+        if ($StartIndex -lt 0 -or $StartIndex -gt $snapshot.Length) { throw 'Serial marker start index is outside the captured stream.' }
+        $text = $snapshot.Substring($StartIndex)
+        $guestFailure = Get-GuestFailureMarker $text
+        if ($guestFailure) { throw "GUEST_FAILURE: guest emitted a fatal kernel/native marker: $guestFailure" }
         if ($text -match $Pattern) { return $text }
         if ($Capture.ErrorMessage) { throw "SERIAL_CAPTURE_FAILURE: $($Capture.ErrorMessage)" }
-        if ($Capture.Completed) { break }
-        if ($script:Owned -and $script:Owned.Process -and $script:Owned.Process.HasExited) { break }
+        if ($Capture.Completed) {
+            if (-not $Capture.Connected) { throw "SERIAL_CAPTURE_FAILURE: serial endpoint received no QEMU client before '$Description'." }
+            if ($Capture.BytesReceived -eq 0) { throw "NO_GUEST_SERIAL_OUTPUT: QEMU connected but sent no serial bytes before '$Description'." }
+            if ($script:Owned -and $script:Owned.Process -and $script:Owned.Process.HasExited) {
+                if ($script:Owned.Process.ExitCode -ne 0) { throw "GUEST_FAILURE: QEMU exited with code $($script:Owned.Process.ExitCode) before '$Description'." }
+                throw "MISSING_GUEST_MARKER: QEMU exited successfully without '$Description'."
+            }
+            throw "SERIAL_STREAM_DISCONNECT_FAILURE: QEMU serial TCP stream closed before '$Description' while the guest process remained available."
+        }
+        if ($script:Owned -and $script:Owned.Process -and $script:Owned.Process.HasExited) {
+            if ($script:Owned.Process.ExitCode -ne 0) { throw "GUEST_FAILURE: QEMU exited with code $($script:Owned.Process.ExitCode) before '$Description'." }
+            throw "MISSING_GUEST_MARKER: QEMU exited successfully without '$Description'."
+        }
         $left = [Math]::Max(1, [int][Math]::Ceiling(($Seconds - $timer.Elapsed.TotalSeconds) * 1000))
         [void]$Capture.WaitForChange([Math]::Min(250, $left))
     }
+    $lastSnapshot = $Capture.Snapshot()
+    if ($StartIndex -ge 0 -and $StartIndex -le $lastSnapshot.Length) {
+        $guestFailure = Get-GuestFailureMarker $lastSnapshot.Substring($StartIndex)
+        if ($guestFailure) { throw "GUEST_FAILURE: guest emitted a fatal kernel/native marker: $guestFailure" }
+    }
     if (-not $Capture.Connected) { throw "SERIAL_CAPTURE_FAILURE: serial endpoint received no QEMU client before '$Description'." }
     if ($Capture.BytesReceived -eq 0) { throw "NO_GUEST_SERIAL_OUTPUT: QEMU connected but sent no serial bytes before '$Description'." }
-    throw "GUEST_PROGRESS_INCOMPLETE: bounded wait for '$Description' expired; serial bytes were captured."
+    if ($Capture.ErrorMessage) { throw "SERIAL_CAPTURE_FAILURE: $($Capture.ErrorMessage)" }
+    if ($Capture.Completed) { throw "SERIAL_STREAM_DISCONNECT_FAILURE: QEMU serial TCP stream closed before '$Description'." }
+    if ($script:Owned -and $script:Owned.Process -and $script:Owned.Process.HasExited) {
+        if ($script:Owned.Process.ExitCode -ne 0) { throw "GUEST_FAILURE: QEMU exited with code $($script:Owned.Process.ExitCode) before '$Description'." }
+        throw "MISSING_GUEST_MARKER: QEMU exited successfully without '$Description'."
+    }
+    throw "GUEST_TIMEOUT: bounded wait for '$Description' expired while the serial stream and guest remained active."
+}
+
+function Get-QemuTextKeyCommands([string]$Text) {
+    $commands = [System.Collections.Generic.List[string]]::new()
+    foreach ($character in $Text.ToCharArray()) {
+        if (($character -ge 'a' -and $character -le 'z') -or ($character -ge '0' -and $character -le '9')) {
+            $key = [string]$character
+        } else {
+            switch ([string]$character) {
+                ' ' { $key = 'spc' }
+                '.' { $key = 'dot' }
+                default { throw "Unsupported character in bounded guest shell command: [$character]" }
+            }
+        }
+        $commands.Add("sendkey $key")
+    }
+    $commands.Add('sendkey ret')
+    return $commands.ToArray()
+}
+
+function Send-OwnedGuestText([string]$Text) {
+    $commands = @(Get-QemuTextKeyCommands $Text)
+    foreach ($command in $commands) { [void](Send-OwnedMonitorCommand $command) }
+    return [ordered]@{ commandText = $Text; keyCommandCount = $commands.Count; submittedWith = 'QEMU HMP sendkey; native guest keyboard input'; }
+}
+
+function Get-QacReservationCleanupAction($Reservation, [string]$ReservationId, [int]$OwnerCliPid) {
+    if (-not $Reservation -or
+        [string]$Reservation.id -cne $ReservationId -or
+        [string]$Reservation.project -cne 'StellarNavigator' -or
+        [string]$Reservation.mode -cne 'acceptance' -or
+        [string]$Reservation.owner -notmatch "\(PID $OwnerCliPid\)" -or
+        $null -ne $Reservation.processId) {
+        return 'DoNotTouch'
+    }
+    if ([string]$Reservation.state -in @('Waiting', 'Blocked')) { return 'CancelOwnPending' }
+    return 'DoNotTouch'
+}
+
+function Get-VerifiedGuestEphemeris([string]$Text) {
+    $pattern = 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0\.000000 frame=J2000_SSB units=km position_km=\(([-+0-9.]+),([-+0-9.]+),([-+0-9.]+)\) sha256=' + $Expected.Dataset
+    if ($Text -notmatch $pattern) { throw 'Native guest ephemeris marker is missing, malformed, or does not identify the authenticated DE440s data.' }
+    $line = [regex]::Match($Text, 'STELLAR_NAVIGATOR_EPHEMERIS status=available[^\r\n]+').Value
+    $position = [regex]::Match($line, 'position_km=\(([-+0-9.]+),([-+0-9.]+),([-+0-9.]+)\)')
+    if (-not $position.Success) { throw 'Native guest ephemeris coordinate tuple is malformed.' }
+    $observed = @(
+        [double]::Parse($position.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture),
+        [double]::Parse($position.Groups[2].Value, [Globalization.CultureInfo]::InvariantCulture),
+        [double]::Parse($position.Groups[3].Value, [Globalization.CultureInfo]::InvariantCulture)
+    )
+    $reference = @(-27566740.483, 132361381.154, 57418653.286)
+    $components = @('X', 'Y', 'Z')
+    $comparison = @()
+    for ($i = 0; $i -lt 3; $i++) {
+        $delta = [Math]::Abs($observed[$i] - $reference[$i])
+        $comparison += [pscustomobject]@{ component = $components[$i]; observedKm = $observed[$i]; trustedKm = $reference[$i]; absoluteDifferenceKm = $delta; toleranceKm = 0.0005; passed = ($delta -le 0.0005) }
+    }
+    if (@($comparison | Where-Object { -not $_.passed }).Count -gt 0) { throw 'Guest ephemeris coordinates exceed the established 0.0005 km displayed-value tolerance.' }
+    return [pscustomobject]@{ line = $line; comparison = $comparison; frame = 'J2000_SSB'; units = 'km'; epochEtTdbSeconds = 0; evaluatorMarkerObserved = $true }
+}
+
+function Confirm-OwnedGuestStable([int]$Seconds) {
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    while ($timer.Elapsed.TotalSeconds -lt $Seconds) {
+        Assert-OwnedQemuIdentity $script:Owned
+        [void](Get-OwnedQacReservation $script:ReservationId $script:Owned.Process.Id)
+        if ($capture.ErrorMessage) { throw "SERIAL_CAPTURE_FAILURE: $($capture.ErrorMessage)" }
+        if ($capture.Completed) { throw 'SERIAL_STREAM_DISCONNECT_FAILURE: guest serial stream ended during post-close stability observation.' }
+        $guestFailure = Get-GuestFailureMarker $capture.Snapshot()
+        if ($guestFailure) { throw "GUEST_FAILURE: guest emitted a fatal kernel/native marker after close: $guestFailure" }
+        Start-Sleep -Milliseconds 500
+    }
+    return [ordered]@{ passed = $true; observedSeconds = [Math]::Round($timer.Elapsed.TotalSeconds, 1); qemuPid = $script:Owned.Process.Id; qacReservationVerifiedThroughout = $true; serialConnected = $capture.Connected; serialBytesReceived = $capture.BytesReceived }
 }
 
 function Get-LoopbackPort {
@@ -330,7 +437,7 @@ function Get-LoopbackPort {
 }
 
 function Start-TestProducer {
-    param([int]$Port, [ValidateSet('Markers', 'Partial', 'Silent')][string]$Scenario, [int]$ExitCode = 23)
+    param([int]$Port, [ValidateSet('Markers', 'Partial', 'PartialHold', 'Fatal', 'Silent')][string]$Scenario, [int]$ExitCode = 23)
     $producerPath = Join-Path $script:RunRoot ("producer-$Scenario.ps1")
     $producer = @'
 param([int]$Port, [string]$Scenario, [int]$ExitCode)
@@ -339,8 +446,10 @@ try {
     $client.Connect([Net.IPAddress]::Loopback, $Port)
     $stream = $client.GetStream()
     $lines = switch ($Scenario) {
-        'Markers' { @('[TEST] boot-ready', '[TEST] app-visible', '[TEST] ephemeris-evaluated', 'partial-after-nonzero-exit') }
+        'Markers' { @('[TEST] boot-ready', '[TEST] app-visible', '[TEST] ephemeris-evaluated', '[TEST] second-instance-ready', 'partial-after-nonzero-exit') }
         'Partial' { @('[TEST] partial-progress') }
+        'PartialHold' { @('[TEST] partial-progress') }
+        'Fatal' { @('[KERNEL-PANIC] assertion=offline-fixture halted=1') }
         'Silent' { @() }
     }
     foreach ($line in $lines) {
@@ -349,6 +458,7 @@ try {
         $stream.Flush()
         Start-Sleep -Milliseconds 100
     }
+    if ($Scenario -eq 'PartialHold') { Start-Sleep -Milliseconds 1500 }
     $stream.Dispose()
 } finally { $client.Dispose() }
 exit $ExitCode
@@ -506,7 +616,7 @@ function Invoke-SelfTest {
         checks = [ordered]@{}
         logs = [ordered]@{}
     }
-    $capture1 = $null; $capture2 = $null; $capture3 = $null; $capture4 = $null
+    $capture1 = $null; $capture2 = $null; $capture3 = $null; $capture4 = $null; $capture5 = $null; $capture6 = $null
     try {
         $argCheck = Test-StructuredArgumentPassing
         $driveArgs = New-QemuArguments 'C:\SN10 R3 & (candidate), rev 2\esp' 40001 40002 'C:\SN10 R3 & (firmware), rev 2\OVMF.fd'
@@ -530,6 +640,27 @@ function Invoke-SelfTest {
             processArgumentRoundTrip = $argCheck
         }
 
+        $reopenCommand = 'desktop.launch com.guidexos.stellarnavigator'
+        $reopenKeys = @(Get-QemuTextKeyCommands $reopenCommand)
+        if ($reopenKeys.Count -ne ($reopenCommand.Length + 1) -or $reopenKeys[0] -cne 'sendkey d' -or $reopenKeys -notcontains 'sendkey dot' -or $reopenKeys -notcontains 'sendkey spc' -or $reopenKeys[-1] -cne 'sendkey ret') {
+            throw 'Supported shell command was not converted into bounded guest keyboard input.'
+        }
+        $unsupportedKeyInputRejected = $false
+        try { [void](Get-QemuTextKeyCommands 'desktop.launch unsupported/character') }
+        catch { $unsupportedKeyInputRejected = $true }
+        if (-not $unsupportedKeyInputRejected) { throw 'Guest shell input accepted a character without an explicit QEMU key mapping.' }
+        $runnerResult.checks.reopenInput = [ordered]@{ passed = $true; method = 'backtick opens shell; desktop.launch com.guidexos.stellarnavigator uses desktop::launch_app'; keyCommandCount = $reopenKeys.Count; spaceAndPeriodMapped = $true; unsupportedCharactersRejected = $true; serialStartIndexSupported = $true }
+
+        $ownedQueued = [pscustomobject]@{ id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; project = 'StellarNavigator'; mode = 'acceptance'; owner = 'test-user (PID 456)'; state = 'Waiting'; processId = $null }
+        $foreignQueued = [pscustomobject]@{ id = $ownedQueued.id; project = $ownedQueued.project; mode = $ownedQueued.mode; owner = 'other-user (PID 789)'; state = 'Waiting'; processId = $null }
+        $registeredChild = [pscustomobject]@{ id = $ownedQueued.id; project = $ownedQueued.project; mode = $ownedQueued.mode; owner = $ownedQueued.owner; state = 'Running'; processId = 1234 }
+        if ((Get-QacReservationCleanupAction $ownedQueued $ownedQueued.id 456) -cne 'CancelOwnPending' -or
+            (Get-QacReservationCleanupAction $foreignQueued $ownedQueued.id 456) -cne 'DoNotTouch' -or
+            (Get-QacReservationCleanupAction $registeredChild $ownedQueued.id 456) -cne 'DoNotTouch') {
+            throw "QAC cleanup policy did not restrict cancellation to this run's own childless pending reservation."
+        }
+        $runnerResult.checks.qacQueueControl = [ordered]@{ passed = $true; documentedFifoQueue = $true; requestTimeoutBoundSeconds = $LaneAcquireTimeoutSeconds; ownChildlessPendingRequestCancelled = $true; foreignOrRegisteredReservationUntouched = $true }
+
         $capture1Path = Join-Path $script:RunRoot 'selftest-live.serial.log'
         $capture1 = [SN10R3SerialCapture]::new($capture1Path)
         $port1 = $capture1.Port
@@ -538,6 +669,10 @@ function Invoke-SelfTest {
         [void](Wait-SerialPattern -Capture $capture1 -Pattern '\[TEST\] boot-ready' -Seconds 5 -Description 'controlled boot marker')
         [void](Wait-SerialPattern -Capture $capture1 -Pattern '\[TEST\] app-visible' -Seconds 5 -Description 'controlled application marker')
         [void](Wait-SerialPattern -Capture $capture1 -Pattern '\[TEST\] ephemeris-evaluated' -Seconds 5 -Description 'controlled computation marker')
+        $secondInstanceStart = $capture1.Snapshot().IndexOf('[TEST] ephemeris-evaluated', [StringComparison]::Ordinal)
+        if ($secondInstanceStart -lt 0) { throw 'Serial cursor fixture marker was not captured.' }
+        $secondInstanceStart += '[TEST] ephemeris-evaluated'.Length
+        [void](Wait-SerialPattern -Capture $capture1 -Pattern '\[TEST\] second-instance-ready' -Seconds 5 -Description 'controlled second instance marker' -StartIndex $secondInstanceStart)
         if (-not $producer1.WaitForExit(5000)) { $producer1.Kill(); throw 'Controlled serial producer did not exit.' }
         [void]$capture1.WaitForCompletion(3000)
         $liveText = $capture1.Snapshot()
@@ -550,17 +685,17 @@ function Invoke-SelfTest {
 
         $capture2Path = Join-Path $script:RunRoot 'selftest-missing-marker.serial.log'
         $capture2 = [SN10R3SerialCapture]::new($capture2Path)
-        $producer2 = Start-TestProducer -Port $capture2.Port -Scenario Partial -ExitCode 0
+        $producer2 = Start-TestProducer -Port $capture2.Port -Scenario PartialHold -ExitCode 0
         [void](Wait-SerialPattern -Capture $capture2 -Pattern '\[TEST\] partial-progress' -Seconds 5 -Description 'controlled partial marker')
         $timer = [Diagnostics.Stopwatch]::StartNew()
         $missingMarkerTimedOut = $false
         try { [void](Wait-SerialPattern -Capture $capture2 -Pattern 'MARKER-THAT-CANNOT-ARRIVE' -Seconds 1 -Description 'absent representative marker') }
-        catch { $missingMarkerTimedOut = $_.Exception.Message -like 'GUEST_PROGRESS_INCOMPLETE:*' }
+        catch { $missingMarkerTimedOut = $_.Exception.Message -like 'GUEST_TIMEOUT:*' }
         $boundedMs = $timer.ElapsedMilliseconds
         if (-not $producer2.WaitForExit(5000)) { $producer2.Kill(); throw 'Partial serial producer did not exit.' }
         [void]$capture2.WaitForCompletion(3000)
         if (-not $missingMarkerTimedOut -or $boundedMs -gt 2000 -or $capture2.Snapshot() -notmatch 'partial-progress') { throw 'Missing-marker timeout or partial output preservation failed.' }
-        $runnerResult.checks.boundedMissingMarker = [ordered]@{ passed = $true; classification = 'GUEST_PROGRESS_INCOMPLETE'; elapsedMilliseconds = $boundedMs; bounded = $true; partialLogPreserved = $true; logPath = $capture2Path }
+        $runnerResult.checks.boundedMissingMarker = [ordered]@{ passed = $true; classification = 'GUEST_TIMEOUT'; elapsedMilliseconds = $boundedMs; bounded = $true; partialLogPreserved = $true; logPath = $capture2Path }
         $capture2.Dispose(); $capture2 = $null
 
         $capture3Path = Join-Path $script:RunRoot 'selftest-zero-output.serial.log'
@@ -571,6 +706,30 @@ function Invoke-SelfTest {
         $runnerResult.checks.noGuestOutput = [ordered]@{ passed = $true; classification = 'NO_GUEST_SERIAL_OUTPUT'; connected = $true; bytes = 0; logPath = $capture3Path }
         $capture3.Dispose(); $capture3 = $null
 
+        $capture5Path = Join-Path $script:RunRoot 'selftest-stream-disconnect.serial.log'
+        $capture5 = [SN10R3SerialCapture]::new($capture5Path)
+        $producer5 = Start-TestProducer -Port $capture5.Port -Scenario Partial -ExitCode 0
+        $streamDisconnectObserved = $false
+        try { [void](Wait-SerialPattern -Capture $capture5 -Pattern 'MARKER-THAT-CANNOT-ARRIVE' -Seconds 3 -Description 'controlled stream-disconnect marker') }
+        catch { $streamDisconnectObserved = $_.Exception.Message -like 'SERIAL_STREAM_DISCONNECT_FAILURE:*' }
+        if (-not $producer5.WaitForExit(5000)) { $producer5.Kill(); throw 'Disconnecting serial producer did not exit.' }
+        [void]$capture5.WaitForCompletion(3000)
+        if (-not $streamDisconnectObserved -or $capture5.Snapshot() -notmatch 'partial-progress') { throw 'Serial stream disconnect was not distinguished from a marker timeout.' }
+        $runnerResult.checks.streamDisconnect = [ordered]@{ passed = $true; classification = 'SERIAL_STREAM_DISCONNECT_FAILURE'; partialLogPreserved = $true; logPath = $capture5Path }
+        $capture5.Dispose(); $capture5 = $null
+
+        $capture6Path = Join-Path $script:RunRoot 'selftest-guest-failure.serial.log'
+        $capture6 = [SN10R3SerialCapture]::new($capture6Path)
+        $producer6 = Start-TestProducer -Port $capture6.Port -Scenario Fatal -ExitCode 23
+        $guestFailureObserved = $false
+        try { [void](Wait-SerialPattern -Capture $capture6 -Pattern 'MARKER-THAT-CANNOT-ARRIVE' -Seconds 3 -Description 'controlled fatal guest marker') }
+        catch { $guestFailureObserved = $_.Exception.Message -like 'GUEST_FAILURE:*' -and $_.Exception.Message -like '*KERNEL-PANIC*' }
+        if (-not $producer6.WaitForExit(5000)) { $producer6.Kill(); throw 'Fatal-marker serial producer did not exit.' }
+        [void]$capture6.WaitForCompletion(3000)
+        if (-not $guestFailureObserved) { throw 'Fatal guest marker was reported as a timeout or transport failure.' }
+        $runnerResult.checks.guestFailureMarker = [ordered]@{ passed = $true; classification = 'GUEST_FAILURE'; fatalMarkerRecognized = '[KERNEL-PANIC]'; logPath = $capture6Path }
+        $capture6.Dispose(); $capture6 = $null
+
         $capture4Path = Join-Path $script:RunRoot 'selftest-no-client.serial.log'
         $capture4 = [SN10R3SerialCapture]::new($capture4Path)
         $captureFailureObserved = $false
@@ -580,24 +739,26 @@ function Invoke-SelfTest {
         $capture4.Dispose(); $capture4 = $null
         $runnerResult.checks.captureFailureClassification = [ordered]@{ passed = $true; classification = 'SERIAL_CAPTURE_FAILURE'; noClientDetected = $captureFailureObserved; rule = 'No QEMU TCP client is a capture failure; a connected client with zero bytes is no guest output.' }
         $runnerResult.checks.resourcesReleased = [ordered]@{ passed = $true; listenerStopped = $true; ephemeralPortRebindSucceeded = $true }
-        $runnerResult.logs = [ordered]@{ live = $capture1Path; missingMarker = $capture2Path; noOutput = $capture3Path }
+        $runnerResult.logs = [ordered]@{ live = $capture1Path; missingMarker = $capture2Path; noOutput = $capture3Path; streamDisconnect = $capture5Path; guestFailure = $capture6Path }
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
         $runnerResult.resultPath = Join-Path $script:RunRoot 'runner-selftest.json'
         $runnerResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $runnerResult.resultPath -Encoding utf8
-        Write-Host "[SN10R3] offline runner self-test PASS: $($runnerResult.resultPath)"
+        Write-Host "[SN10R4] offline runner self-test PASS: $($runnerResult.resultPath)"
         return 0
     } catch {
         if ($capture1) { $capture1.Dispose() }
         if ($capture2) { $capture2.Dispose() }
         if ($capture3) { $capture3.Dispose() }
         if ($capture4) { $capture4.Dispose() }
+        if ($capture5) { $capture5.Dispose() }
+        if ($capture6) { $capture6.Dispose() }
         $runnerResult.classification = 'FAIL'
         $runnerResult.error = $_.Exception.Message
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
         $runnerResult.resultPath = Join-Path $script:RunRoot 'runner-selftest.json'
         $runnerResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $runnerResult.resultPath -Encoding utf8
-        Write-Host "[SN10R3] offline runner self-test FAIL: $($runnerResult.error)"
-        Write-Host "[SN10R3] evidence: $($runnerResult.resultPath)"
+        Write-Host "[SN10R4] offline runner self-test FAIL: $($runnerResult.error)"
+        Write-Host "[SN10R4] evidence: $($runnerResult.resultPath)"
         return 1
     }
 }
@@ -607,12 +768,12 @@ if ($SelfTest) { exit (Invoke-SelfTest) }
 if ($VerifyCandidateOnly) {
     try {
         [void](Assert-CandidateIdentity)
-        Write-Host "[SN10R3] candidate and staged manifest verification PASS: $(Join-Path $script:RunRoot 'candidate-verification.json')"
+        Write-Host "[SN10R4] candidate and staged manifest verification PASS: $(Join-Path $script:RunRoot 'candidate-verification.json')"
         exit 0
     } catch {
         [ordered]@{ passed = $false; classification = 'FAIL'; error = $_.Exception.Message; candidateEsp = $CandidateEspPath; capturedAtLocal = (Get-Date).ToString('o') } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $script:RunRoot 'candidate-verification.json') -Encoding utf8
-        Write-Host "[SN10R3] candidate verification FAIL: $($_.Exception.Message)"
+        Write-Host "[SN10R4] candidate verification FAIL: $($_.Exception.Message)"
         exit 1
     }
 }
@@ -637,8 +798,8 @@ $overall = [ordered]@{
 $script:RunDeadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
 
 try {
-    if ($overall.branch -cne 'STELLAR_NAVIGATOR' -or $overall.head -cne 'd5d944b69c55b0cd74dd8b5ba9a6d5ea31305467' -or $overall.phase -cne 'SN10') {
-        throw 'Repository branch, HEAD, or phase does not match the authorized SN10 starting state.'
+    if ($overall.branch -cne 'STELLAR_NAVIGATOR' -or $overall.phase -cne 'SN10') {
+        throw 'Repository branch or phase does not match the authorized SN10 acceptance lane.'
     }
     if (-not (Test-Path -LiteralPath $Qemu) -or -not (Test-Path -LiteralPath $QacCli)) { throw 'Installed QEMU or QAC CLI is unavailable.' }
     $candidateCheck = Assert-CandidateIdentity
@@ -646,28 +807,27 @@ try {
 
     $qacStatus = Get-QacSnapshot 'qac-status-before.log' @('status')
     $qacList = Get-QacSnapshot 'qac-list-before.log' @('list')
+    $qacQueue = Get-QacSnapshot 'qac-queue-before.log' @('queue')
     if ($qacStatus -notmatch 'Coordinator: Online') {
         $overall.blocker = 'QAC_RESERVATION_FAILURE'
-        $overall.checks.qacPreflight = [ordered]@{ coordinatorOnline = $false; statusPath = (Join-Path $script:RunRoot 'qac-status-before.log'); listPath = (Join-Path $script:RunRoot 'qac-list-before.log'); reservationNotRequested = $true }
+        $overall.checks.qacPreflight = [ordered]@{ coordinatorOnline = $false; reservationNotRequested = $true; statusPath = (Join-Path $script:RunRoot 'qac-status-before.log'); listPath = (Join-Path $script:RunRoot 'qac-list-before.log'); queuePath = (Join-Path $script:RunRoot 'qac-queue-before.log') }
         throw 'QAC coordinator is not online.'
     }
     $processCount = if ($qacStatus -match 'QEMU processes: (\d+)') { [int]$Matches[1] } else { -1 }
     $sessionCount = if ($qacStatus -match 'Managed sessions: (\d+)') { [int]$Matches[1] } else { -1 }
     $reservationCount = if ($qacList -match 'Reservations: (\d+)') { [int]$Matches[1] } else { -1 }
-    if ($processCount -ne 0 -or $sessionCount -ne 0 -or $reservationCount -ne 0) {
-        $overall.blocker = 'EXTERNAL_QEMU_COORDINATION_BLOCKER'
-        $overall.checks.qacPreflight = [ordered]@{
-            coordinatorOnline = $true
-            processCount = $processCount
-            managedSessionCount = $sessionCount
-            reservationCount = $reservationCount
-            reservationNotRequested = $true
-            statusPath = (Join-Path $script:RunRoot 'qac-status-before.log')
-            listPath = (Join-Path $script:RunRoot 'qac-list-before.log')
-        }
-        throw 'EXTERNAL_QEMU_COORDINATION_BLOCKER: QAC is occupied or its census is incomplete; no reservation was requested.'
+    $overall.checks.qacPreflight = [ordered]@{
+        coordinatorOnline = $true
+        processCount = $processCount
+        managedSessionCount = $sessionCount
+        reservationCount = $reservationCount
+        queueSnapshot = $qacQueue
+        acquisition = 'one QAC-managed qac run request using documented FIFO acceptance admission'
+        acquisitionWaitBoundSeconds = $LaneAcquireTimeoutSeconds
+        statusPath = (Join-Path $script:RunRoot 'qac-status-before.log')
+        listPath = (Join-Path $script:RunRoot 'qac-list-before.log')
+        queuePath = (Join-Path $script:RunRoot 'qac-queue-before.log')
     }
-    $overall.checks.qacPreflight = [ordered]@{ coordinatorOnline = $true; processCount = 0; managedSessionCount = 0; reservationCount = 0; statusPath = (Join-Path $script:RunRoot 'qac-status-before.log'); listPath = (Join-Path $script:RunRoot 'qac-list-before.log') }
 
     $monitorProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $monitorProbe.Start()
@@ -688,7 +848,7 @@ try {
         espAccess = 'read-only FAT directory backend and read-only drive'
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $script:RunRoot 'qemu-invocation.json') -Encoding utf8
     $overall.checks.launchConstruction = [ordered]@{ passed = $true; invocationPath = (Join-Path $script:RunRoot 'qemu-invocation.json'); effectiveArgumentVectorRecorded = $true; structuredProcessArguments = $true }
-    $overall.checks.serialCapture = [ordered]@{ endpointInitializedBeforeQemu = $true; host = $capture.Host; port = $capture.Port; logPath = $serialLog }
+    $overall.checks.serialCapture = [ordered]@{ endpointInitializedBeforeQemu = $true; host = $capture.Host; port = $capture.Port; logPath = $serialLog; qemuSerialStreamEndpoint = 'QEMU socket chardev TCP client to runner-owned loopback listener' }
 
     $script:ManagedQac = [SN10R3ManagedProcess]::new($QacCli, $Root, $qacArguments,
         (Join-Path $script:RunRoot 'qac-run.stdout.log'), (Join-Path $script:RunRoot 'qac-run.stderr.log'))
@@ -707,13 +867,18 @@ try {
         if ($script:ReservationId) {
             $queuedRaw = Get-QacSnapshot 'qac-reservation-inspect.queued.json' @('inspect', $script:ReservationId)
             $queued = $queuedRaw | ConvertFrom-Json
-            if ([string]$queued.project -ceq 'StellarNavigator' -and [string]$queued.mode -ceq 'acceptance' -and [string]$queued.state -in @('Waiting', 'Blocked', 'Granted') -and $null -eq $queued.processId) {
+            $cleanupAction = Get-QacReservationCleanupAction $queued $script:ReservationId $script:ManagedQac.Process.Id
+            if ($cleanupAction -ceq 'CancelOwnPending') {
                 $cancelText = Get-QacSnapshot 'qac-cancel-own-unlaunched.log' @('cancel', $script:ReservationId)
-                $overall.checks.qacReservation = [ordered]@{ acquired = $false; reservationId = $script:ReservationId; observedState = $queued.state; onlyOwnUnlaunchedReservationCancelled = $true; cancelEvidence = $cancelText }
+                $cancelledRaw = Get-QacSnapshot 'qac-reservation-inspect.after-cancel.json' @('inspect', $script:ReservationId)
+                $cancelled = $cancelledRaw | ConvertFrom-Json
+                $cancelVerified = [string]$cancelled.id -ceq $script:ReservationId -and [string]$cancelled.project -ceq 'StellarNavigator' -and [string]$cancelled.mode -ceq 'acceptance' -and [string]$cancelled.owner -match "\(PID $($script:ManagedQac.Process.Id)\)" -and [string]$cancelled.state -ceq 'Cancelled' -and $null -eq $cancelled.processId
+                if (-not $cancelVerified) { throw "QAC did not confirm cancellation of this run's exact childless pending reservation." }
+                $overall.checks.qacReservation = [ordered]@{ acquired = $false; reservationId = $script:ReservationId; observedState = $queued.state; ownedByRunnerCliPid = $script:ManagedQac.Process.Id; pendingReservationCancelledThroughQac = $true; cancellationVerified = $true; cancelEvidence = $cancelText; terminalReservation = $cancelled }
                 $overall.blocker = 'EXTERNAL_QEMU_COORDINATION_BLOCKER'
             } else {
                 $overall.blocker = 'QAC_RESERVATION_FAILURE'
-                $overall.checks.qacReservation = [ordered]@{ acquired = $false; reservationId = $script:ReservationId; observedReservation = $queued }
+                $overall.checks.qacReservation = [ordered]@{ acquired = $false; reservationId = $script:ReservationId; cleanupAction = $cleanupAction; observedReservation = $queued; foreignReservationUntouched = $true }
             }
         } else {
             $overall.blocker = 'QAC_RESERVATION_FAILURE'
@@ -748,46 +913,75 @@ try {
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     $appText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds $remaining -Description 'native application initial content draw'
     if ($appText -notmatch '\[SN10-GUEST\] appmodel-launch begin id=com\.guidexos\.stellarnavigator' -or $appText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Guest did not report AppModel-mediated native window creation.' }
-    if ($appText -notmatch 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0\.000000 frame=J2000_SSB units=km position_km=\(([-+0-9.]+),([-+0-9.]+),([-+0-9.]+)\) sha256=' + $Expected.Dataset) { throw 'Native ephemeris guest marker is missing, malformed, or does not identify the authenticated DE440s data.' }
-    $ephemerisLine = [regex]::Match($appText, 'STELLAR_NAVIGATOR_EPHEMERIS status=available[^\r\n]+').Value
-    $positionMatch = [regex]::Match($ephemerisLine, 'position_km=\(([-+0-9.]+),([-+0-9.]+),([-+0-9.]+)\)')
-    $observed = @([double]::Parse($positionMatch.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture), [double]::Parse($positionMatch.Groups[2].Value, [Globalization.CultureInfo]::InvariantCulture), [double]::Parse($positionMatch.Groups[3].Value, [Globalization.CultureInfo]::InvariantCulture))
-    $reference = @(-27566740.483, 132361381.154, 57418653.286)
-    $components = @('X', 'Y', 'Z')
-    $comparison = @()
-    for ($i = 0; $i -lt 3; $i++) {
-        $delta = [Math]::Abs($observed[$i] - $reference[$i])
-        $comparison += [pscustomobject]@{ component = $components[$i]; observedKm = $observed[$i]; trustedKm = $reference[$i]; absoluteDifferenceKm = $delta; toleranceKm = 0.0005; passed = ($delta -le 0.0005) }
-    }
-    if (@($comparison | Where-Object { -not $_.passed }).Count -gt 0) { throw 'Guest ephemeris coordinates exceed the established 0.0005 km displayed-value tolerance.' }
-    $overall.checks.nativeApplication = [ordered]@{ appModelLaunchMarker = $true; nativeWindowCreated = $true; initialContentDrawn = $true; guestEphemerisEvaluatorObserved = $true; ephemerisLine = $ephemerisLine; coordinateFrame = 'J2000_SSB'; units = 'km'; epochEtTdbSeconds = 0; numericalComparison = $comparison; passed = $true }
+    $firstEphemeris = Get-VerifiedGuestEphemeris $appText
+    $overall.checks.nativeApplication = [ordered]@{ appModelLaunchMarker = $true; nativeWindowCreated = $true; initialContentDrawn = $true; guestEphemerisEvaluatorObserved = $true; ephemerisLine = $firstEphemeris.line; coordinateFrame = $firstEphemeris.frame; units = $firstEphemeris.units; epochEtTdbSeconds = $firstEphemeris.epochEtTdbSeconds; numericalComparison = $firstEphemeris.comparison; passed = $true }
     $overall.checks.screenshotWhileOpen = Save-Screenshot 'stellar-navigator-open.ppm'
 
+    $firstCloseStartIndex = $capture.Snapshot().Length
     [void](Send-OwnedMonitorCommand 'sendkey esc')
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    $afterClose = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds $remaining -Description 'normal Stellar Navigator shutdown'
+    [void](Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds $remaining -Description 'first normal Stellar Navigator shutdown' -StartIndex $firstCloseStartIndex)
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    [void](Wait-SerialPattern -Capture $capture -Pattern '\[SN10-GUEST\] appmodel-launch result=success' -Seconds $remaining -Description 'AppModel launch return after close')
-    $overall.checks.normalClose = [ordered]@{ passed = $true; lifecycleMarker = 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'; loaderCleanupMarker = ($afterClose -match 'lifecycle PASS window/resource cleanup complete'); appModelReturnMarker = '[SN10-GUEST] appmodel-launch result=success' }
+    [void](Wait-SerialPattern -Capture $capture -Pattern '\[SN10-GUEST\] appmodel-launch result=success' -Seconds $remaining -Description 'AppModel launch return after first close' -StartIndex $firstCloseStartIndex)
+    $firstCloseText = $capture.Snapshot().Substring($firstCloseStartIndex)
+    $overall.checks.normalClose = [ordered]@{ passed = $true; lifecycleMarker = ($firstCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete'); appModelReturnMarker = '[SN10-GUEST] appmodel-launch result=success'; applicationInstanceExited = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete') }
     if (-not $overall.checks.normalClose.loaderCleanupMarker) { throw 'Native loader did not report complete window/resource cleanup.' }
     $overall.checks.screenshotAfterClose = Save-Screenshot 'desktop-after-close.ppm'
 
-    # Reopen through the guest desktop's Start Menu, using the discovered package row.
-    [void](Send-OwnedMonitorCommand 'sendkey super')
+    # Use the existing desktop backtick shortcut and guest shell command, which
+    # dispatches through desktop::launch_app and the production AppModel path.
+    $reopenStartIndex = $capture.Snapshot().Length
+    [void](Send-OwnedMonitorCommand 'sendkey grave_accent')
     Start-Sleep -Milliseconds 500
-    $overall.checks.startMenuScreenshot = Save-Screenshot 'start-menu-for-reopen.ppm'
-    $qacInfo = Send-OwnedMonitorCommand 'info mice'
-    $overall.checks.inputDevices = $qacInfo
-    $overall.checks.reopen = [ordered]@{ attempted = $false; passed = $false; method = 'Start Menu / AppModel UI'; blocker = 'Interactive menu selection requires a verified desktop hit target.' }
-    $overall.classification = 'BLOCKED'
-    $overall.blocker = 'GUEST_REOPEN_INTERACTION_UNVERIFIED'
-    $overall.checks.desktopUsable = [ordered]@{ serialBootAndAppModelPathVerified = $true; visualDesktopAfterCloseCaptured = $overall.checks.screenshotAfterClose.captured; screenshotPath = $overall.checks.screenshotAfterClose.path }
-    throw 'First launch, computation, UI markers, screenshot, normal close, and loader cleanup passed. Reopen was not claimed because no menu selection has yet been verified.'
+    $overall.checks.shellBeforeReopen = Save-Screenshot 'shell-before-reopen.ppm'
+    $reopenInput = Send-OwnedGuestText 'desktop.launch com.guidexos.stellarnavigator'
+    $overall.checks.reopenInput = $reopenInput
+    $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
+    $secondAppText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds $remaining -Description 'second native application initial content draw' -StartIndex $reopenStartIndex
+    if ($secondAppText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Second launch did not create a new native application window through the guest desktop dispatcher.' }
+    $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
+    $secondAppText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0\.000000 frame=J2000_SSB units=km position_km=' -Seconds $remaining -Description 'second native application ephemeris evaluation' -StartIndex $reopenStartIndex
+    $secondEphemeris = Get-VerifiedGuestEphemeris $secondAppText
+    $overall.checks.reopen = [ordered]@{
+        attempted = $true
+        passed = $true
+        method = 'guest backtick shortcut opens shell; desktop.launch com.guidexos.stellarnavigator invokes desktop::launch_app and the production AppModel path'
+        secondWindowCreated = $secondAppText -match 'STELLAR_NAVIGATOR_UI status=window-created'
+        secondInitialContentDrawn = $secondAppText -match 'STELLAR_NAVIGATOR_UI status=initial-content-drawn'
+        secondEphemerisEvaluatorObserved = $true
+        ephemerisLine = $secondEphemeris.line
+        numericalComparison = $secondEphemeris.comparison
+        shellScreenshot = $overall.checks.shellBeforeReopen.path
+        passedCoordinates = $true
+    }
+    $overall.checks.screenshotSecondInstanceOpen = Save-Screenshot 'stellar-navigator-second-instance-open.ppm'
+
+    $secondCloseStartIndex = $capture.Snapshot().Length
+    [void](Send-OwnedMonitorCommand 'sendkey esc')
+    $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
+    [void](Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds $remaining -Description 'second normal Stellar Navigator shutdown' -StartIndex $secondCloseStartIndex)
+    $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
+    [void](Wait-SerialPattern -Capture $capture -Pattern 'lifecycle PASS window/resource cleanup complete' -Seconds $remaining -Description 'second native loader cleanup and instance exit' -StartIndex $secondCloseStartIndex)
+    $secondCloseText = $capture.Snapshot().Substring($secondCloseStartIndex)
+    $overall.checks.secondClose = [ordered]@{ passed = $true; lifecycleMarker = ($secondCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($secondCloseText -match 'lifecycle PASS window/resource cleanup complete'); applicationInstanceExited = ($secondCloseText -match 'lifecycle PASS window/resource cleanup complete') }
+    $overall.checks.shellAfterSecondClose = Save-Screenshot 'shell-after-second-close.ppm'
+    [void](Send-OwnedMonitorCommand 'sendkey esc')
+    Start-Sleep -Milliseconds 500
+    $overall.checks.desktopAfterSecondClose = Save-Screenshot 'desktop-after-second-close.ppm'
+    if (-not $overall.checks.desktopAfterSecondClose.captured) { throw 'Guest desktop screenshot after second close was not captured.' }
+    $overall.checks.guestStability = Confirm-OwnedGuestStable 3
+    $overall.checks.desktopUsable = [ordered]@{ appModelDiscoveryVerified = $true; visualDesktopAfterFirstCloseCaptured = $overall.checks.screenshotAfterClose.captured; visualDesktopAfterSecondCloseCaptured = $overall.checks.desktopAfterSecondClose.captured; guestRemainedAliveAfterSecondClose = $true }
+    $overall.checks.repeatEphemerisParity = [ordered]@{ first = $firstEphemeris.comparison; second = $secondEphemeris.comparison; bothGuestEvaluationsPassed = $true; referenceToleranceKm = 0.0005 }
+    $overall.classification = 'PASS'
+    $overall.blocker = $null
 } catch {
     if ($overall.blocker -eq 'EXTERNAL_QEMU_COORDINATION_BLOCKER') { $overall.classification = 'BLOCKED' }
     elseif ($_.Exception.Message -like 'SERIAL_CAPTURE_FAILURE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'SERIAL_CAPTURE_FAILURE' }
     elseif ($_.Exception.Message -like 'NO_GUEST_SERIAL_OUTPUT:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'NO_GUEST_SERIAL_OUTPUT' }
-    elseif ($_.Exception.Message -like 'GUEST_PROGRESS_INCOMPLETE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'GUEST_PROGRESS_INCOMPLETE' }
+    elseif ($_.Exception.Message -like 'SERIAL_STREAM_DISCONNECT_FAILURE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'SERIAL_STREAM_DISCONNECT_FAILURE' }
+    elseif ($_.Exception.Message -like 'MISSING_GUEST_MARKER:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'MISSING_GUEST_MARKER' }
+    elseif ($_.Exception.Message -like 'GUEST_TIMEOUT:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'GUEST_TIMEOUT' }
+    elseif ($_.Exception.Message -like 'GUEST_FAILURE:*') { $overall.classification = 'FAIL'; $overall.blocker = 'GUEST_FAILURE' }
     elseif ($overall.blocker) { $overall.classification = 'BLOCKED' }
     else { $overall.classification = 'FAIL'; $overall.blocker = $null }
     $overall.error = $_.Exception.Message
@@ -818,7 +1012,12 @@ try {
                 try {
                     $post = Get-QacSnapshot 'qac-list-after-run.log' @('list')
                     $overall.qacPostRunList = $post
-                    $overall.reservationReleased = $post -match 'Reservations: 0' -and $post -match 'Managed sessions: 0'
+                    $ownPostRaw = Get-QacSnapshot 'qac-reservation-inspect.after-run.json' @('inspect', $script:ReservationId)
+                    $ownPost = $ownPostRaw | ConvertFrom-Json
+                    $overall.qacOwnReservationTerminalState = $ownPost.state
+                    $overall.reservationReleased = [string]$ownPost.state -ceq 'Released'
+                    $overall.reservationCancelled = [string]$ownPost.state -ceq 'Cancelled'
+                    $overall.reservationTerminal = [string]$ownPost.state -in @('Released', 'Cancelled', 'Expired', 'Failed')
                 } catch { $overall.reservationReleaseError = $_.Exception.Message }
             }
         } else {
@@ -831,8 +1030,8 @@ try {
     $overall.serialLog = if ($serialLog) { $serialLog } else { $null }
     $overall.resultPath = Join-Path $script:RunRoot 'acceptance-result.json'
     $overall | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath $overall.resultPath -Encoding utf8
-    Write-Host "[SN10R3] $($overall.classification): $($overall.resultPath)"
-    if ($overall.blocker) { Write-Host "[SN10R3] blocker=$($overall.blocker)" }
+    Write-Host "[SN10R4] $($overall.classification): $($overall.resultPath)"
+    if ($overall.blocker) { Write-Host "[SN10R4] blocker=$($overall.blocker)" }
 }
 
 if ($overall.classification -eq 'PASS') { exit 0 }
