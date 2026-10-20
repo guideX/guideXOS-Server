@@ -1,13 +1,14 @@
 # Disk Manager: Current Implementation Status
 
 **Latest DM37 guest status (2026-10-20): Outcome B —
-`BLOCKED_BY_FOREIGN_QEMU`.** Gate A remains accepted, but the new Gate E
-Mount → Dismount → Check FAT32 → Remount workflow did not begin. The guest
-fixture remained read-only and byte-identical. QAC detected an unmanaged
-QEMU belonging to `guideXOSServerV0.5_DEVELOPER_STUDIO`; that guest was left
-untouched. `.phase` remains DM36→DM37. See the [DM37 continuation 6 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-6--workflow-attempt-blocked-by-foreign-qemu)
-for QAC lifecycle details, runtime and fixture hashes, guest observations,
-I/O counters, evidence paths, and remaining gates.
+`DM37_PARTIAL_GUEST_ACCEPTANCE`.** A retry under QAC's exclusive acceptance
+lease found zero foreign QEMU, mounted `DM37WORKFLOW01` read-only, and read a
+fixture file through guest VFS. Explicit Dismount could not be activated, so
+Check FAT32 and Remount remain unqualified. `.phase` remains DM36→DM37. See
+the [DM37 continuation 7 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-7--retry-with-clear-qac-census-partial-guest-evidence)
+for QAC lifecycle details, the runtime and fixture hashes, guest observations,
+I/O counters, evidence paths, and remaining gates. Continuation 6's foreign
+QEMU finding remains historical for its earlier census.
 
 DM36 is accepted at source revision `a2afa18a56c95b00491f9b1ca2a26acde7669567` on `DISK_MANAGER_IMPROVEMENTS`. The source-matched QEMU guest passed the remaining lifecycle gates: dedicated Stop, active-check Close, removal/replacement, an actual checker read error, unchanged read-only fixture images, and mounted-target admission rejection. B1/B2 numeric findings were displayed correctly; Previous/Next were activated on the single-finding guest fixture, while existing production-linked host tests cover zero and multiple findings. The owned guest was visible during testing and safely shut down after all checks; a later foreign QEMU from a sibling project was left untouched, and no second guest was launched. `.phase` records DM36 complete and DM37 next. DM37 now has a host-qualified safe dismount foundation; GUI and guest acceptance remain deferred. Full DM36 provenance, runtime captures, counters, hashes, regression counts, and build logs are in the [DM36 phase report](DISK_MANAGER_PHASE_DM36_FAT32_INTEGRITY.md). The DM37 audit, API contract, regressions, and deferred work are in the [DM37 safe-dismount report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md).
 
@@ -449,3 +450,17 @@ injection, and remaining GUI input/Close cases remain open. `.phase` stays
 DM36→DM37, and DM38 has not started. The [DM37 continuation 6 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-6--workflow-attempt-blocked-by-foreign-qemu)
 contains the full launch record, fixture identity, runtime provenance,
 counters, shutdown details, and evidence paths.
+
+## DM37 continuation 7 — retry under clear QAC census
+
+The retry ran in QAC exclusive acceptance reservation
+`2f7a382acfad442db1975cc3069af0e4` with QAC online. A fresh census showed one
+managed QEMU and zero foreign. The read-only `DM37WORKFLOW01` FAT32 target
+mounted at `/mnt/disk1-part1`; `DM9/PROOF.BIN` was read through the guest VFS.
+The Dismount confirmation could not be opened despite further guest input
+attempts, so the workflow did not reach dismount, check, or remount. QAC
+released the lease through `qac run` after its child exited. The fixture's
+final SHA-256 matched its starting hash. This is partial guest evidence, not
+Gate E or DM37 acceptance; `.phase` remains DM36→DM37. See the [DM37
+continuation 7 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-7--retry-with-clear-qac-census-partial-guest-evidence)
+and `out/dm37/dismount-guest/runs/E-workflow-qac-20261020-r5/`.
