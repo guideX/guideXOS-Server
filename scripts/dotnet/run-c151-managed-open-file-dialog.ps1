@@ -284,7 +284,7 @@ function Start-ProofBoot([int]$BootNumber, [string]$Scenario,
         Write-Host ("C151 boot {0}/3 waiting for focused regression marker." -f $BootNumber)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C151-REGRESSIONS C145=49/49 C151-core=10/10 result=PASS' 0 $TimeoutSeconds)
         Write-Host ("C151 boot {0}/3 waiting for application lifetime marker." -f $BootNumber)
-        [void](Wait-Serial $serial '^\[C150-MANAGED-OUTPUT\] C150-MANAGED-LIFECYCLE-TESTS cases=8 fresh=PASS active=one result=PASS' 0 $TimeoutSeconds)
+        [void](Wait-Serial $serial '^\[C150-MANAGED-OUTPUT\] C150-MANAGED-LIFECYCLE-TESTS cases=8 (fresh=PASS active=one|coexist=true capacity=5) result=PASS' 0 $TimeoutSeconds)
         Write-Host ("C151 boot {0}/3 waiting for return-target marker." -f $BootNumber)
         [void](Wait-Serial $serial '^\[C150-RETURN-TARGET-TESTS\] cases=10 capacity=1 identity=canonical self=reject invalid=reject result=PASS' 0 $TimeoutSeconds)
         Write-Host ("C151 boot {0}/3 waiting for wheel-host marker." -f $BootNumber)

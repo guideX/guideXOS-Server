@@ -253,12 +253,18 @@ public static unsafe class GuideXosManagedTaskManagerResizeC179Tests
             ManagedTaskManagerC161.MaximumWindowWidthC179,
             ManagedTaskManagerC161.MaximumWindowHeightC179);
         int expandedOffset = scroll.FirstVisibleIndex;
+        int expandedVisibleRows = scroll.List.VisibleRowCount;
         bool scrollMin = scroll.TryRecomputeLayout(
             ManagedTaskManagerC161.MinimumWindowWidthC179,
             ManagedTaskManagerC161.MinimumWindowHeightC179);
+        int expectedExpandedOffset = Math.Max(0,
+            GuideXosTaskManagerControllerC161.ApplicationCapacity -
+                expandedVisibleRows);
+        int expectedMinimumOffset = Math.Max(0,
+            scroll.SelectedIndex - scroll.List.VisibleRowCount + 1);
         passed &= Case(ref cases, "scroll-and-selected-row-clamp-across-resize",
-            scrollMax && expandedOffset == 4 && scrollMin &&
-            scroll.FirstVisibleIndex == 9 && scroll.HasSelection &&
+            scrollMax && expandedOffset == expectedExpandedOffset && scrollMin &&
+            scroll.FirstVisibleIndex == expectedMinimumOffset && scroll.HasSelection &&
             scroll.SelectedIdentity == scrollSelection &&
             scroll.SelectedIndex ==
                 GuideXosTaskManagerControllerC161.ApplicationCapacity - 2 &&

@@ -32,7 +32,7 @@ public static class GxAbi
     public const uint AssociationServiceOffset = 120u;
     public const uint ApplicationSnapshotRecordVersion = 1u;
     public const uint ApplicationSnapshotRecordSize = 168u;
-    public const uint ApplicationSnapshotCapacity = 20u;
+    public const uint ApplicationSnapshotCapacity = 22u;
     public const uint ApplicationSnapshotDisplayNameBytes = 32u;
     public const uint ApplicationSnapshotApplicationIdBytes = 96u;
     public const uint ApplicationSnapshotBufferBytes =

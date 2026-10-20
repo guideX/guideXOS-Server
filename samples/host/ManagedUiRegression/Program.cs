@@ -177,5 +177,16 @@ allPassed &= c180StressPassed;
 Console.WriteLine($"C180-STRESS transactions={GuideXosManagedWindowResizeC180Tests.StressTransactionCount} alternating={GuideXosManagedWindowResizeC180Tests.StressAlternatingCount} rejected={GuideXosManagedWindowResizeC180Tests.StressRejectedCount} crossApplication={GuideXosManagedWindowResizeC180Tests.StressCrossApplicationCount} lifecycles={GuideXosManagedWindowResizeC180Tests.StressLifecycleCount} allocationBytes={GuideXosManagedWindowResizeC180Tests.StressAllocationBytes} drift={GuideXosManagedWindowResizeC180Tests.StressDriftCount} result={(c180StressPassed ? "PASS" : "FAIL")}");
 Console.WriteLine($"C180-STRESS-DETAIL {GuideXosManagedWindowResizeC180Tests.StressFailureDetail}");
 
+allPassed &= RunSuite("C181-ManagedResidency",
+    GuideXosManagedApplicationResidencyC181Tests.CaseCount,
+    () => GuideXosManagedApplicationResidencyC181Tests.Run(null));
+Console.WriteLine($"C181-RESIDENCY-DETAIL firstFailedCase={GuideXosManagedApplicationResidencyC181Tests.FirstFailedCase} fiveAppAllocationBytes={GuideXosManagedApplicationResidencyC181Tests.FiveApplicationConstructorAllocationBytes} fourthAndFifthAllocationBytes={GuideXosManagedApplicationResidencyC181Tests.FourthAndFifthConstructorAllocationBytes}");
+bool c181StressPassed = RunSuite("C181-ManagedResidencyStress",
+    GuideXosManagedApplicationResidencyC181Tests.StressCaseCount,
+    () => GuideXosManagedApplicationResidencyC181Tests.RunStress(null));
+allPassed &= c181StressPassed;
+Console.WriteLine($"C181-STRESS slotOperations={GuideXosManagedApplicationResidencyC181Tests.AllocationReleaseOperationCount} crossApplicationResize={GuideXosManagedApplicationResidencyC181Tests.CrossApplicationResizeCount} exhaustionRecovery={GuideXosManagedApplicationResidencyC181Tests.ExhaustionRecoveryCount} staleGenerationRejects={GuideXosManagedApplicationResidencyC181Tests.StaleGenerationRejectionCount} fullLifecycles={GuideXosManagedApplicationResidencyC181Tests.FullLifecycleCount} resizeAllocationBytes={GuideXosManagedApplicationResidencyC181Tests.ResizeHotPathAllocationBytes} geometryDrift={GuideXosManagedApplicationResidencyC181Tests.GeometryDriftCount} result={(c181StressPassed ? "PASS" : "FAIL")}");
+Console.WriteLine($"C181-STRESS-DETAIL {GuideXosManagedApplicationResidencyC181Tests.StressFailureDetail}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

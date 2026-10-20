@@ -1279,6 +1279,7 @@ public:
         if (returnPending) completeManagedReturnIfPending();
         m_surfaceApplicationId[0] = '\0';
         m_snapshotInstanceId = 0u;
+        m_applicationGeneration = 0u;
         m_selector = 0u;
 #endif
     }
@@ -1288,6 +1289,9 @@ public:
             height < compositor::MIN_WINDOW_HEIGHT) {
             return false;
         }
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+        if (g_managedSurfaceGeneration == UINT32_MAX) return false;
+#endif
         if (m_window) {
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
             m_replacingSurface = true;
@@ -1363,10 +1367,18 @@ public:
         return true;
     }
 
+    bool setApplicationGeneration(uint32_t generation) {
+        if (!hasApplication() || generation == 0u ||
+            m_applicationGeneration != 0u) return false;
+        m_applicationGeneration = generation;
+        return true;
+    }
+
     void abandonPreparedApplication() {
         if (m_window) return;
         m_surfaceApplicationId[0] = '\0';
         m_snapshotInstanceId = 0u;
+        m_applicationGeneration = 0u;
         m_selector = 0u;
     }
 
@@ -1377,6 +1389,7 @@ public:
     }
     const char* applicationId() const { return m_surfaceApplicationId; }
     uint64_t snapshotInstanceId() const { return m_snapshotInstanceId; }
+    uint32_t applicationGeneration() const { return m_applicationGeneration; }
 #endif
 
     uint32_t selector() const { return m_selector; }
@@ -1569,6 +1582,7 @@ private:
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
     char m_surfaceApplicationId[kManagedApplicationIdentityCapacity] = {};
     uint32_t m_surfaceGeneration = 0u;
+    uint32_t m_applicationGeneration = 0u;
     uint64_t m_snapshotInstanceId = 0u;
     bool m_replacingSurface = false;
 #endif
@@ -1636,6 +1650,19 @@ NativeAotManagedSurface* managedSurfaceForApplication(const char* identity) {
     (void)identity;
 #endif
     return nullptr;
+}
+
+uintptr_t managedApplicationUserData(uint32_t selector,
+                                     const NativeAotManagedSurface* surface) {
+    uint64_t token = selector;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    if (surface) {
+        token |= static_cast<uint64_t>(surface->applicationGeneration()) << 32;
+    }
+#else
+    (void)surface;
+#endif
+    return static_cast<uintptr_t>(token);
 }
 
 NativeAotManagedSurface* reserveManagedSurface(
@@ -2597,9 +2624,24 @@ uint32_t boundedCStringLength(const uint8_t* text, uint32_t maximum) {
 }
 
 bool activeSurfaceContext(NativeGxAppContext* context) {
-    return context != nullptr && context == g_activeManagedContext &&
+    const bool valid = context != nullptr && context == g_activeManagedContext &&
         context->size >= sizeof(NativeGxAppContext) && context->host != nullptr &&
         context->host->size >= kManagedHostTableV2Size;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+    if (!valid) return false;
+    const uint64_t token = static_cast<uint64_t>(
+        reinterpret_cast<uintptr_t>(context->userData));
+    const uint32_t selector = static_cast<uint32_t>(token);
+    const uint32_t generation = static_cast<uint32_t>(token >> 32);
+    // Legacy host-service probes run without an application surface. Real
+    // managed callbacks carry the generation of their owning logical app.
+    if (generation == 0u && g_managedInvocationSurface == nullptr) return true;
+    return g_managedInvocationSurface != nullptr && generation != 0u &&
+        g_managedInvocationSurface->selector() == selector &&
+        g_managedInvocationSurface->applicationGeneration() == generation;
+#else
+    return valid;
+#endif
 }
 
 constexpr int32_t kSnapshotResultSuccess = 0;
@@ -3319,7 +3361,8 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileWriteAll(
     const char* vfsPath = resolveManagedFileVfsPath(validatedPath);
 
 #if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW)
-    if (reinterpret_cast<uintptr_t>(context->userData) == 4u) {
+    if (static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+            context->userData)) == 4u) {
         constexpr uint32_t kNotesDocumentMaxBytes = 256u;
         if (length > kNotesDocumentMaxBytes) return kManagedFileTooLarge;
         const bool injectNotesWriteFailure = g_c152FailNextNotesWrite;
@@ -4260,9 +4303,12 @@ int32_t invokeManagedWithHostMetadata(
             ? managedCloseApplication : nullptr,
         (capabilities & kManagedCapabilityAssociationService) != 0u
             ? managedAssociationService : nullptr };
+    NativeAotManagedSurface* invocationSurface =
+        managedSurfaceForSelector(selector);
     NativeGxAppContext context{
         sizeof(NativeGxAppContext), 0u, &host,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(selector)),
+        reinterpret_cast<void*>(managedApplicationUserData(
+            selector, invocationSurface)),
         nullptr, 0u, launchFlags, kManagedActivationKindNone,
         fileActivationRequest,
         fileActivationRequest && selector == 8u
@@ -4281,7 +4327,7 @@ int32_t invokeManagedWithHostMetadata(
     const uint32_t previousLastSelector = g_managedLastSelector;
     NativeAotManagedSurface* previousInvocationSurface =
         g_managedInvocationSurface;
-    g_managedInvocationSurface = managedSurfaceForSelector(selector);
+    g_managedInvocationSurface = invocationSurface;
     if (g_managedInvocationSurface)
         g_managedInvocationSurface->endManagedFrame();
     g_managedLastSelector = selector;
@@ -4499,7 +4545,8 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     serial::puts(" result=PASS\n");
     NativeGxAppContext app{
         sizeof(NativeGxAppContext), 0u, &host,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId)),
+        reinterpret_cast<void*>(managedApplicationUserData(
+            logicalAppId, g_managedInvocationSurface)),
         reinterpret_cast<const uint8_t*>(launchContext), launchContextLength,
         0u, activationKind, nullptr, nullptr};
     NativeAotStartupContext startup{
@@ -4731,7 +4778,8 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
     serial::puts(" result=PASS\n");
     NativeGxAppContext app{
         sizeof(NativeGxAppContext), 0u, &host,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(logicalAppId)),
+        reinterpret_cast<void*>(managedApplicationUserData(
+            logicalAppId, g_managedInvocationSurface)),
         reinterpret_cast<const uint8_t*>(
             launchContextLength == 0u ? nullptr : launchContextCopy),
         launchContextLength, 0u, activationKind, nullptr, nullptr};
@@ -5000,6 +5048,15 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
         serial::puts(" status=managed-surface-capacity\n");
         return LaunchStatus::ManagedFailed;
     }
+    if (g_managedApplicationLaunchGeneration == UINT32_MAX) {
+        targetSurface->abandonPreparedApplication();
+        return LaunchStatus::ManagedFailed;
+    }
+    const uint32_t launchGeneration = ++g_managedApplicationLaunchGeneration;
+    if (!targetSurface->setApplicationGeneration(launchGeneration)) {
+        targetSurface->abandonPreparedApplication();
+        return LaunchStatus::ManagedFailed;
+    }
     if (!g_managedLaunchingSettingsFromNotes && !g_managedReturnLaunchActive)
         g_managedReturnTarget.clear();
     if (!copyManagedIdentity(metadata->appId, g_managedActiveApplicationId,
@@ -5009,7 +5066,6 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
     }
     g_managedActiveSnapshotInstanceId = nextSnapshotInstanceId;
 #if defined(GXOS_NATIVEAOT_C150_MANAGED_APP_RETURN)
-    const uint32_t launchGeneration = ++g_managedApplicationLaunchGeneration;
     serial::puts("[C150-APP-LAUNCH] id=");
     serial::puts(metadata->appId);
     serial::puts(" generation=");
@@ -5020,7 +5076,7 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
         ? " kind=document\n"
         : g_managedReturnLaunchActive ? " kind=return\n" : " kind=normal\n");
 #else
-    ++g_managedApplicationLaunchGeneration;
+    (void)launchGeneration;
 #endif
 #endif
 

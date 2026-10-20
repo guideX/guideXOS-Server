@@ -1196,7 +1196,7 @@ function Start-ProofBoot([int]$BootNumber, [string]$Scenario,
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C152-EMPTY-SAVE create=read-back=PASS bytes=0 result=PASS' 0 $TimeoutSeconds)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C152-MAX-SAVE bytes=256 read-back=exact result=PASS' 0 $TimeoutSeconds)
         Write-Host ("C155 boot {0}/3 waiting for application lifetime marker." -f $BootNumber)
-        [void](Wait-Serial $serial '^\[C150-MANAGED-OUTPUT\] C150-MANAGED-LIFECYCLE-TESTS cases=8 fresh=PASS active=one result=PASS' 0 $TimeoutSeconds)
+        [void](Wait-Serial $serial '^\[C150-MANAGED-OUTPUT\] C150-MANAGED-LIFECYCLE-TESTS cases=8 (fresh=PASS active=one|coexist=true capacity=5) result=PASS' 0 $TimeoutSeconds)
         Write-Host ("C155 boot {0}/3 waiting for return-target marker." -f $BootNumber)
         [void](Wait-Serial $serial '^\[C150-RETURN-TARGET-TESTS\] cases=10 capacity=1 identity=canonical self=reject invalid=reject result=PASS' 0 $TimeoutSeconds)
         Write-Host ("C155 boot {0}/3 waiting for wheel-host marker." -f $BootNumber)

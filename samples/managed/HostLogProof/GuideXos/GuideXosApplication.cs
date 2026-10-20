@@ -233,9 +233,13 @@ public static unsafe class GuideXosApplicationRegistry
         if (host.IsAction && host.LaunchContext.ActionId ==
                 LifetimeCloseActionId)
         {
-            s_lifetime.Clear(selector);
-            host.TryLog("C150-LIFETIME-CLOSE result=PASS"u8);
-            return (int)GuideXosResult.Success;
+            bool cleared = s_lifetime.Clear(selector,
+                host.LaunchContext.ApplicationGeneration);
+            host.TryLog(cleared
+                ? "C150-LIFETIME-CLOSE result=PASS"u8
+                : "C150-LIFETIME-CLOSE result=REJECT stale-generation=true"u8);
+            return cleared ? (int)GuideXosResult.Success :
+                GxAbi.ErrorInvalidApplicationId;
         }
 #endif
 
@@ -266,7 +270,7 @@ public static unsafe class GuideXosApplicationRegistry
             s_lifecycleTestsRun = true;
             bool lifecycleTests = GuideXosManagedApplicationC150Tests.Run();
             host.TryLog(lifecycleTests
-                ? "C150-MANAGED-LIFECYCLE-TESTS cases=8 coexist=true capacity=3 result=PASS"u8
+                ? "C150-MANAGED-LIFECYCLE-TESTS cases=8 coexist=true capacity=5 result=PASS"u8
                 : "C150-MANAGED-LIFECYCLE-TESTS result=FAIL"u8);
             if (!lifecycleTests) return GxAbi.ErrorInvalidArgument;
         }
@@ -275,14 +279,16 @@ public static unsafe class GuideXosApplicationRegistry
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
         GuideXosApplication application;
         bool isNewLaunch = !host.LaunchContext.IsInput && !host.IsAction;
+        uint applicationGeneration = host.LaunchContext.ApplicationGeneration;
         if (isNewLaunch)
         {
-            if (!s_lifetime.TryStart(descriptor, out application,
-                    out uint generation))
+            if (!s_lifetime.TryStart(descriptor, applicationGeneration,
+                    out application, out uint generation))
             {
-                host.TryLog("C150-LIFETIME-START result=FAIL capacity=3"u8);
+                host.TryLog("C150-LIFETIME-START result=FAIL capacity=5"u8);
                 return GxAbi.ErrorInvalidApplicationId;
             }
+            applicationGeneration = generation;
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
             Span<byte> instanceMarker = stackalloc byte[96];
             int markerLength = 0;
@@ -295,7 +301,8 @@ public static unsafe class GuideXosApplicationRegistry
             host.TryLog(instanceMarker[..markerLength]);
 #endif
         }
-        else if (s_lifetime.TryGet(selector, out application))
+        else if (s_lifetime.TryGet(selector, applicationGeneration,
+                out application))
         {
         }
         else
@@ -350,7 +357,12 @@ public static unsafe class GuideXosApplicationRegistry
                 host.TryLog("C160-SNAPSHOT result=FAIL"u8);
                 return GxAbi.ErrorInvalidArgument;
             }
-            if (fileExplorerClosed) s_lifetime.Clear(selector);
+            if (fileExplorerClosed &&
+                !s_lifetime.Clear(selector, applicationGeneration))
+            {
+                host.TryLog("C150-LIFETIME-CLOSE result=REJECT stale-generation=true"u8);
+                return GxAbi.ErrorInvalidApplicationId;
+            }
         }
 #endif
 #if HOSTLOGPROOF_C158_MANAGED_CALCULATOR
@@ -359,7 +371,8 @@ public static unsafe class GuideXosApplicationRegistry
                 Applications.ManagedCalculatorC158.CloseActionId &&
             result == GuideXosResult.Success)
         {
-            s_lifetime.Clear(selector);
+            if (!s_lifetime.Clear(selector, applicationGeneration))
+                return GxAbi.ErrorInvalidApplicationId;
         }
 #endif
 #if HOSTLOGPROOF_C161_MANAGED_TASK_MANAGER
@@ -368,12 +381,13 @@ public static unsafe class GuideXosApplicationRegistry
                 Applications.ManagedTaskManagerC161.CloseActionId &&
             result == GuideXosResult.Success)
         {
-            s_lifetime.Clear(selector);
+            if (!s_lifetime.Clear(selector, applicationGeneration))
+                return GxAbi.ErrorInvalidApplicationId;
         }
 #endif
         if (isNewLaunch && result != GuideXosResult.Success)
         {
-            s_lifetime.Clear(selector);
+            _ = s_lifetime.Clear(selector, applicationGeneration);
         }
 #else
         GuideXosResult result = host.LaunchContext.IsInput

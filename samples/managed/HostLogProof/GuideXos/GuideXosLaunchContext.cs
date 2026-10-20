@@ -13,6 +13,7 @@ public sealed unsafe class GuideXosLaunchContext
         new byte[(int)GxAbi.MaxLaunchContextBytes];
     private int _length;
     private uint _selector;
+    private uint _applicationGeneration;
     private uint _flags;
     private uint _activationKind;
 
@@ -21,6 +22,7 @@ public sealed unsafe class GuideXosLaunchContext
     }
 
     public uint Selector => _selector;
+    internal uint ApplicationGeneration => _applicationGeneration;
     public uint Flags => _flags;
     public bool HasText => _length != 0;
     public int Length => _length;
@@ -110,6 +112,9 @@ public sealed unsafe class GuideXosLaunchContext
         }
 
         _selector = selector;
+        _applicationGeneration = context->size >= GxAbi.AppContextLaunchPrefixSize
+            ? (uint)((ulong)(nuint)context->userData >> 32)
+            : 0u;
         _flags = context->launchFlags;
         _activationKind = activationKind;
         _length = (int)context->launchContextLength;

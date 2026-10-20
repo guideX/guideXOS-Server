@@ -430,7 +430,7 @@ function Launch-ManagedFileExplorer([int]$ScreenWidth, [int]$ScreenHeight,
     # C163 appears at fixed All Programs index 15 after Task Manager.
     Click-Screen 115 ($contentY + 15 * 22 + 11)
     [void](Wait-Serial $SerialPath '^\[APPMODEL-MANAGED-LAUNCH\] source=StartMenu appId=com\.guidexos\.apps\.managed\.fileexplorer selector=00000008 image=/system/apps/GXOSAPP\.ELF metadata=valid' $before 35)
-    $activation = Wait-Serial $SerialPath ('^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.fileexplorer generation=([0-9A-Fa-f]+) selector=00000008 kind=normal|^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.fileexplorer source=3 instance=[0-9A-Fa-f]{16} selector=00000008 existing=true result=PASS|^\[C150-LIFETIME-START\] result=FAIL capacity=3') $before 45
+    $activation = Wait-Serial $SerialPath ('^\[C150-APP-LAUNCH\] id=com\.guidexos\.apps\.managed\.fileexplorer generation=([0-9A-Fa-f]+) selector=00000008 kind=normal|^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.fileexplorer source=3 instance=[0-9A-Fa-f]{16} selector=00000008 existing=true result=PASS|^\[C150-LIFETIME-START\] result=FAIL capacity=5') $before 45
     if ($activation.Match.Value.StartsWith('[C150-LIFETIME-START]', [System.StringComparison]::Ordinal)) {
         throw 'Managed File Explorer launch was rejected because the bounded App Model lifetime table is full.'
     }
@@ -1466,7 +1466,7 @@ function Invoke-ProductionBoot([int]$Number, [string]$Scenario,
         [void](Wait-Serial $serial '^\[C158-CALC-APP-REGISTRY\] identity=com\.guidexos\.apps\.managed\.calculator selector=6 display=Managed-Calculator native-calculator=preserved result=PASS' 0 $TimeoutSeconds)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C156-MODIFIER-DECODE cases=10 .*result=PASS' 0 $TimeoutSeconds)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C156-SHORTCUT-ROUTING cases=15 .*result=PASS' 0 $TimeoutSeconds)
-        [void](Wait-Serial $serial '^\[C150-MANAGED-OUTPUT\] C150-MANAGED-LIFECYCLE-TESTS cases=8 coexist=true capacity=3 result=PASS' 0 $TimeoutSeconds)
+        [void](Wait-Serial $serial '^\[C150-MANAGED-OUTPUT\] C150-MANAGED-LIFECYCLE-TESTS cases=8 coexist=true capacity=5 result=PASS' 0 $TimeoutSeconds)
         [void](Wait-Serial $serial '^\[C150-RETURN-TARGET-TESTS\] cases=10 capacity=1 identity=canonical self=reject invalid=reject result=PASS' 0 $TimeoutSeconds)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C157-NEW-TESTS cases=\d+ result=PASS' 0 $TimeoutSeconds)
         [void](Wait-Serial $serial '^\[C102-MANAGED-OUTPUT\] C154-REGRESSIONS clipboard=PASS result=PASS' 0 $TimeoutSeconds)

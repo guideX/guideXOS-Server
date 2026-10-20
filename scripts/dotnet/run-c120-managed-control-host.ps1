@@ -2629,7 +2629,7 @@ function Assert-C120Serial([string]$Serial) {
             $required = @($required | Where-Object { $_ -notmatch 'C147-APPMODEL|C147-NOTES-FIRST|C147-NOTES-TARGET' -and -not ($notesOnlyBoot -and $_ -match 'C148-NOTES-WHEEL') })
             $required += @(
                 '^\[C150-RETURN-TARGET-TESTS\] cases=10 capacity=1 identity=canonical self=reject invalid=reject result=PASS',
-                '^\[C150-MANAGED-OUTPUT\] C150-MANAGED-LIFECYCLE-TESTS cases=8 fresh=PASS active=one result=PASS',
+                '^\[C150-MANAGED-OUTPUT\] C150-MANAGED-LIFECYCLE-TESTS cases=8 (fresh=PASS active=one|coexist=true capacity=5) result=PASS',
                 '^\[C150-APPMODEL\] catalog=notes\+settings identity=canonical result=PASS')
             if (-not $notesOnlyBoot) {
                 $required += @(
