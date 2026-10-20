@@ -19,6 +19,9 @@ global _start
 _start:
     ; Disable interrupts
     cli
+
+    ; Preserve the Multiboot magic before loading the data-segment selector into AX.
+    mov ecx, eax
     
     ; Set up segment registers
     mov ax, 0x10
@@ -36,7 +39,7 @@ _start:
     
     ; kernel_main(boot_environment, boot_magic) uses cdecl argument order.
     ; Push the second argument first, then the first argument.
-    push eax                    ; boot_magic
+    push ecx                    ; boot_magic
     push ebx                    ; boot_environment
     
     ; Jump to kernel main
