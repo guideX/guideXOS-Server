@@ -477,6 +477,16 @@ function Write-P29JHostTrace([string]$path, [string]$stage, [string]$details) {
     [IO.File]::AppendAllText($path, $line + [Environment]::NewLine, [Text.Encoding]::UTF8)
 }
 
+function ConvertFrom-QacTimestamp([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    try {
+        return [DateTime]::Parse($Value, [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    } catch {
+        return $null
+    }
+}
+
 function Get-RequiredTool([string]$name, [string]$fallback) {
     $command = Get-Command $name -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
@@ -506,7 +516,11 @@ function Register-QacOutputLine([string]$Line, [string]$StreamName, [System.Text
             $QacState.ReservationId = $Matches[1]
             $QacState.ChildProcessId = [int]$Matches[2]
             $QacState.Launched = $true
-            if ($null -eq $QacState.RunStartedAtUtc) { $QacState.RunStartedAtUtc = [DateTime]::UtcNow }
+            if ($null -eq $QacState.RunStartedAtUtc) {
+                $launchTimeMatch = [regex]::Match($Line, ' launch_utc=(?<timestamp>[^ ]+)')
+                $QacState.RunStartedAtUtc = ConvertFrom-QacTimestamp $launchTimeMatch.Groups['timestamp'].Value
+                if ($null -eq $QacState.RunStartedAtUtc) { $QacState.RunStartedAtUtc = [DateTime]::UtcNow }
+            }
         }
         if ($Line -match '^QAC could not verify QEMU registration for reservation ([^: ]+)') {
             $QacState.ReservationId = $Matches[1]
@@ -514,7 +528,13 @@ function Register-QacOutputLine([string]$Line, [string]$StreamName, [System.Text
             $QacState.RegistrationUnverified = $true
             if ($null -eq $QacState.RunStartedAtUtc) { $QacState.RunStartedAtUtc = [DateTime]::UtcNow }
         }
-        if ($Line -match '^QAC QEMU exited: .*exitCode=(-?\d+)') { $QacState.QemuExitCode = [int]$Matches[1]; $QacState.QemuExited = $true }
+        if ($Line -match '^QAC QEMU exited: .*exitCode=(-?\d+)') {
+            $QacState.QemuExitCode = [int]$Matches[1]
+            $exitTimeMatch = [regex]::Match($Line, ' exit_utc=(?<timestamp>[^ ]+)')
+            $QacState.QemuExitedAtUtc = ConvertFrom-QacTimestamp $exitTimeMatch.Groups['timestamp'].Value
+            if ($null -eq $QacState.QemuExitedAtUtc) { $QacState.QemuExitedAtUtc = [DateTime]::UtcNow }
+            $QacState.QemuExited = $true
+        }
         if ($Line -match '^QAC reservation released:') { $QacState.Released = $true }
         if ($Line -match '^QAC Recovery Required|^QAC reservation release is not verified:') { $QacState.RecoveryRequired = $true }
         if ($Line -match '^Coordinator unavailable:') { $QacState.CoordinatorUnavailable = $true }
@@ -529,7 +549,10 @@ function Register-QacOutputLine([string]$Line, [string]$StreamName, [System.Text
                 $QacState.ChildProcessId = [int]$event.childProcessId
                 $QacState.ProcessIdentity = [string]$event.processIdentity
                 $QacState.Launched = $true
-                if ($null -eq $QacState.RunStartedAtUtc) { $QacState.RunStartedAtUtc = [DateTime]::UtcNow }
+                if ($null -eq $QacState.RunStartedAtUtc) {
+                    $QacState.RunStartedAtUtc = ConvertFrom-QacTimestamp ([string]$event.processStartTimeUtc)
+                    if ($null -eq $QacState.RunStartedAtUtc) { $QacState.RunStartedAtUtc = [DateTime]::UtcNow }
+                }
             }
         } catch { }
     }
@@ -1102,8 +1125,15 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         RunStartedAtUtc = $null
         RunDeadline = $null
         QemuExited = $false
+        QemuExitedAtUtc = $null
         QemuExitCode = $null
         ManagedSuccess = $false
+        RequiredMarkerObserved = $false
+        RequiredMarkerObservedAtUtc = $null
+        RequiredMarkerObservedWithinDeadline = $false
+        SerialReaderState = @{ Offset = [long]0; Carry = '' }
+        SerialProbeIOExceptionCount = 0
+        SerialBytesObserved = [long]0
     }
     $cancelHandler = $null
     if ($qacAcceptanceEnabled) {
@@ -1151,26 +1181,49 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 $stderrFinished = $stderrResult.Finished
 
                 if ($qacState.Launched -and $null -eq $qacState.RunDeadline) {
-                    $qacState.RunDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-                    Write-P29JHostTrace $hostTracePath 'QAC QEMU RUNTIME START' ("boot={0} reservation={1} pid={2} timeout_seconds={3} process_identity={4} registration_unverified={5}" -f
-                        $runNumber, $qacState.ReservationId, $qacState.ChildProcessId, $TimeoutSeconds, $qacState.ProcessIdentity, [int]$qacState.RegistrationUnverified)
+                    if ($null -eq $qacState.RunStartedAtUtc) { $qacState.RunStartedAtUtc = [DateTime]::UtcNow }
+                    $qacState.RunDeadline = $qacState.RunStartedAtUtc.AddSeconds($TimeoutSeconds)
+                    Write-P29JHostTrace $hostTracePath 'QAC QEMU RUNTIME START' ("boot={0} reservation={1} pid={2} started_utc={3} deadline_utc={4} timeout_seconds={5} process_identity={6} registration_unverified={7}" -f
+                        $runNumber, $qacState.ReservationId, $qacState.ChildProcessId, $qacState.RunStartedAtUtc.ToString('o'),
+                        $qacState.RunDeadline.ToString('o'), $TimeoutSeconds, $qacState.ProcessIdentity, [int]$qacState.RegistrationUnverified)
                 }
 
-                if ($qacState.Launched -and -not $qacState.ShutdownRequested -and
+                if ($qacState.Launched -and -not $qacState.RequiredMarkerObserved -and
                     (Test-Path -LiteralPath $serialPath)) {
                     try {
-                        $qacSerialProbe = [IO.File]::ReadAllText($serialPath)
-                        $qacRequiredMarker = if ($Phase28QOnly) {
-                            $qacSerialProbe.Contains('DEVELOPER_STUDIO_PHASE28Q_PASS')
-                        } else {
-                            $qacSerialProbe.Contains('[KERNEL] Entering main loop (waiting for input)...')
+                        $qacRequiredMarker = Get-QacAcceptancePassMarker -Phase $(if ($Phase28QOnly) { '28Q' } else { '28O' })
+                        $qacSerialObservation = Read-QacSerialMarker -Path $serialPath -Marker $qacRequiredMarker `
+                            -State $qacState.SerialReaderState
+                        $qacState.SerialBytesObserved = $qacSerialObservation.TotalBytes
+                        if ($qacSerialObservation.Found) {
+                            $qacMarkerObservedAtUtc = [DateTime]::UtcNow
+                            $qacState.RequiredMarkerObserved = $true
+                            $qacState.RequiredMarkerObservedAtUtc = $qacMarkerObservedAtUtc
+                            $qacMarkerWithinDeadline = Test-QacMarkerObservedWithinDeadline `
+                                -ObservedAtUtc $qacMarkerObservedAtUtc -DeadlineUtc $qacState.RunDeadline
+                            $qacMarkerBeforeChildExit = $null -eq $qacState.QemuExitedAtUtc -or
+                                (Test-QacMarkerObservedBeforeChildExit -ObservedAtUtc $qacMarkerObservedAtUtc `
+                                    -ChildExitAtUtc $qacState.QemuExitedAtUtc)
+                            $qacState.RequiredMarkerObservedWithinDeadline = $qacMarkerWithinDeadline -and $qacMarkerBeforeChildExit
+                            $qacElapsedMilliseconds = [Math]::Round(($qacMarkerObservedAtUtc - $qacState.RunStartedAtUtc).TotalMilliseconds, 1)
+                            Write-P29JHostTrace $hostTracePath 'QAC PASS MARKER OBSERVED' ("boot={0} phase={1} observed_utc={2} elapsed_ms={3} within_deadline={4} before_child_exit={5} deadline_utc={6} child_exit_utc={7} serial_bytes={8} read_io_errors={9}" -f
+                                $runNumber, $(if ($Phase28QOnly) { '28Q' } else { '28O' }), $qacMarkerObservedAtUtc.ToString('o'),
+                                $qacElapsedMilliseconds, [int]$qacMarkerWithinDeadline, [int]$qacMarkerBeforeChildExit,
+                                $qacState.RunDeadline.ToString('o'), $(if ($qacState.QemuExitedAtUtc) { $qacState.QemuExitedAtUtc.ToString('o') } else { 'not-reported' }),
+                                $qacState.SerialBytesObserved, $qacState.SerialProbeIOExceptionCount)
                         }
-                        if ($qacRequiredMarker) {
+                        if ($qacState.RequiredMarkerObservedWithinDeadline -and -not $qacState.ShutdownRequested) {
                             $harnessStopReason = 'required_marker_observed'
                             Request-QacGuestShutdown -QacState $qacState -QacProcess $process -QmpPort $qacQmpPort `
                                 -Reason $harnessStopReason -HostTracePath $hostTracePath -RunNumber $runNumber
                         }
-                    } catch [IO.IOException] { }
+                    } catch [IO.IOException] {
+                        $qacState.SerialProbeIOExceptionCount++
+                        if ($qacState.SerialProbeIOExceptionCount -eq 1) {
+                            Write-P29JHostTrace $hostTracePath 'QAC SERIAL READ DEFERRED' ("boot={0} error={1} offset={2}" -f
+                                $runNumber, $_.Exception.GetType().Name, $qacState.SerialReaderState.Offset)
+                        }
+                    }
                 }
 
                 if ($qacState.CancelRequested -and -not $qacState.CancelHandled) {
@@ -1241,6 +1294,10 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                     $aliveAtDeadline = $true
                     $qacState.RuntimeTimedOut = $true
                     $harnessStopReason = 'timeout'
+                    Write-P29JHostTrace $hostTracePath 'QAC RUNTIME DEADLINE' ("boot={0} observed_utc={1} elapsed_ms={2} timeout_seconds={3} qemu_pid={4} serial_bytes={5} serial_read_io_errors={6} marker_observed={7} marker_observed_utc={8}" -f
+                        $runNumber, [DateTime]::UtcNow.ToString('o'), [Math]::Round(([DateTime]::UtcNow - $qacState.RunStartedAtUtc).TotalMilliseconds, 1),
+                        $TimeoutSeconds, $qacState.ChildProcessId, $qacState.SerialBytesObserved, $qacState.SerialProbeIOExceptionCount,
+                        [int]$qacState.RequiredMarkerObserved, $(if ($qacState.RequiredMarkerObservedAtUtc) { $qacState.RequiredMarkerObservedAtUtc.ToString('o') } else { 'not-observed' }))
                     Request-QacGuestShutdown -QacState $qacState -QacProcess $process -QmpPort $qacQmpPort `
                         -Reason 'QEMU runtime timeout' -HostTracePath $hostTracePath -RunNumber $runNumber
                 }
@@ -1285,8 +1342,13 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 $script:qacRecoveryRequired = $true
             }
             $qemuExitCode = $qacState.QemuExitCode
+            $qacMarkerEligible = $qacState.RequiredMarkerObservedWithinDeadline -and
+                $null -ne $qacState.RequiredMarkerObservedAtUtc -and $null -ne $qacState.QemuExitedAtUtc -and
+                (Test-QacMarkerObservedBeforeChildExit -ObservedAtUtc $qacState.RequiredMarkerObservedAtUtc `
+                    -ChildExitAtUtc $qacState.QemuExitedAtUtc)
             $qacState.ManagedSuccess = ($null -ne $qacCliExitCode -and $null -ne $qemuExitCode -and
                 (Test-QacManagedAcceptanceSuccess -CliExitCode $qacCliExitCode -QemuExitCode $qemuExitCode -ReservationReleased $qacState.Released `
+                    -MarkerObservedWithinDeadline $qacMarkerEligible -AdmissionTimedOut $qacState.AdmissionTimedOut `
                     -RunTimedOut $qacState.RuntimeTimedOut -CancellationRequested $qacState.CancelRequested `
                     -RecoveryRequired $qacState.RecoveryRequired -CoordinatorUnavailable $qacState.CoordinatorUnavailable) -and
                 -not $qacState.AdmissionTimedOut)
@@ -1384,6 +1446,15 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         $serial = Read-SerialText $serialPath
         $debugcon = Read-SerialText $debugconPath
         $qemuDebug = Read-SerialText $qemuDebugPath
+        if ($qacAcceptanceEnabled -and -not $qacState.RequiredMarkerObserved) {
+            $qacFinalMarker = if ($Phase28QOnly) { 'DEVELOPER_STUDIO_PHASE28Q_PASS' } else { '[KERNEL] Entering main loop (waiting for input)...' }
+            if ($serial.Contains($qacFinalMarker)) {
+                Write-P29JHostTrace $hostTracePath 'QAC PASS MARKER FINAL-ONLY' ("boot={0} phase={1} inspected_utc={2} qemu_exit_utc={3} runtime_timeout={4} serial_bytes={5} read_io_errors={6} acceptance=0" -f
+                    $runNumber, $(if ($Phase28QOnly) { '28Q' } else { '28O' }), [DateTime]::UtcNow.ToString('o'),
+                    $(if ($qacState.QemuExitedAtUtc) { $qacState.QemuExitedAtUtc.ToString('o') } else { 'not-reported' }),
+                    [int]$qacState.RuntimeTimedOut, $qacState.SerialReaderState.Offset, $qacState.SerialProbeIOExceptionCount)
+            }
+        }
         [System.IO.File]::WriteAllText($stdoutPath, $stdout)
         [System.IO.File]::WriteAllText($stderrPath, $stderr)
         if (-not $qacAcceptanceEnabled) {

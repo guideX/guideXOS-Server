@@ -19,6 +19,15 @@ function Resolve-QacAcceptanceCliPath {
     return [IO.Path]::GetFullPath($candidate)
 }
 
+function Get-QacAcceptancePassMarker {
+    param([Parameter(Mandatory = $true)][ValidateSet('28Q', '28O')][string]$Phase)
+
+    switch ($Phase) {
+        '28Q' { return 'DEVELOPER_STUDIO_PHASE28Q_PASS' }
+        '28O' { return 'DEVELOPER_STUDIO_PHASE28O_PASS' }
+    }
+}
+
 function ConvertTo-QacWindowsCommandLineArgument {
     param([AllowEmptyString()][Parameter(Mandatory = $true)][string]$Value)
 
@@ -62,6 +71,66 @@ function New-QacCliArgumentString {
     return (($Arguments | ForEach-Object { ConvertTo-QacWindowsCommandLineArgument -Value $_ }) -join ' ')
 }
 
+function Read-QacSerialMarker {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Marker,
+        [Parameter(Mandatory = $true)][hashtable]$State
+    )
+
+    if (-not $State.ContainsKey('Offset')) { $State.Offset = [long]0 }
+    if (-not $State.ContainsKey('Carry')) { $State.Carry = '' }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [pscustomobject]@{ Found = $false; NewBytes = [long]0; TotalBytes = [long]$State.Offset }
+    }
+
+    $share = [IO.FileShare]([int][IO.FileShare]::ReadWrite -bor [int][IO.FileShare]::Delete)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+    try {
+        if ($stream.Length -lt [long]$State.Offset) {
+            $State.Offset = [long]0
+            $State.Carry = ''
+        }
+        $stream.Position = [long]$State.Offset
+        $buffer = New-Object byte[] 16384
+        $text = New-Object Text.StringBuilder
+        $newBytes = [long]0
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            [void]$text.Append([Text.Encoding]::ASCII.GetString($buffer, 0, $read))
+            $newBytes += $read
+        }
+        $State.Offset = $stream.Position
+        $combined = [string]$State.Carry + $text.ToString()
+        $found = $combined.IndexOf($Marker, [StringComparison]::Ordinal) -ge 0
+        $carryLength = [Math]::Min($Marker.Length - 1, $combined.Length)
+        $State.Carry = if ($carryLength -gt 0) { $combined.Substring($combined.Length - $carryLength, $carryLength) } else { '' }
+        return [pscustomobject]@{ Found = $found; NewBytes = $newBytes; TotalBytes = [long]$State.Offset }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Test-QacMarkerObservedWithinDeadline {
+    param(
+        [Parameter(Mandatory = $true)][DateTime]$ObservedAtUtc,
+        [Parameter(Mandatory = $true)][DateTime]$DeadlineUtc
+    )
+    return $ObservedAtUtc.ToUniversalTime() -le $DeadlineUtc.ToUniversalTime()
+}
+
+function Test-QacMarkerObservedBeforeChildExit {
+    param(
+        [Parameter(Mandatory = $true)][DateTime]$ObservedAtUtc,
+        [Parameter(Mandatory = $true)][DateTime]$ChildExitAtUtc
+    )
+    return $ObservedAtUtc.ToUniversalTime() -lt $ChildExitAtUtc.ToUniversalTime()
+}
+
+function Request-QacCancellation {
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+    $State.CancelRequested = $true
+}
+
 function Invoke-QacCancelReservation {
     param(
         [Parameter(Mandatory = $true)][string]$QacCliPath,
@@ -102,7 +171,7 @@ function Register-QacConsoleCancellation {
     $callback = {
         param($sender, $eventArgs)
         $eventArgs.Cancel = $true
-        $State.CancelRequested = $true
+        Request-QacCancellation -State $State
     }.GetNewClosure()
     $handler = [ConsoleCancelEventHandler]$callback
     [Console]::add_CancelKeyPress($handler)
@@ -175,16 +244,21 @@ function Test-QacManagedAcceptanceSuccess {
         [Parameter(Mandatory = $true)][int]$CliExitCode,
         [Parameter(Mandatory = $true)][int]$QemuExitCode,
         [Parameter(Mandatory = $true)][bool]$ReservationReleased,
+        [bool]$MarkerObservedWithinDeadline = $false,
         [bool]$RunTimedOut = $false,
         [bool]$CancellationRequested = $false,
+        [bool]$AdmissionTimedOut = $false,
         [bool]$RecoveryRequired = $false,
         [bool]$CoordinatorUnavailable = $false
     )
-    return $ReservationReleased -and $CliExitCode -eq $QemuExitCode -and
-        -not $RunTimedOut -and -not $CancellationRequested -and -not $RecoveryRequired -and -not $CoordinatorUnavailable
+    return $ReservationReleased -and $CliExitCode -eq 0 -and $QemuExitCode -eq 0 -and
+        $MarkerObservedWithinDeadline -and -not $RunTimedOut -and -not $CancellationRequested -and
+        -not $AdmissionTimedOut -and -not $RecoveryRequired -and -not $CoordinatorUnavailable
 }
 
-Export-ModuleMember -Function Resolve-QacAcceptanceCliPath, ConvertTo-QacWindowsCommandLineArgument,
+Export-ModuleMember -Function Resolve-QacAcceptanceCliPath, Get-QacAcceptancePassMarker, ConvertTo-QacWindowsCommandLineArgument,
     New-QacManagedRunArgumentString, New-QacCliArgumentString, Invoke-QacCancelReservation,
     Register-QacConsoleCancellation, Unregister-QacConsoleCancellation, New-QacLoopbackQmpPort,
-    Send-QacQmpQuit, Test-QacManagedAcceptanceSuccess
+    Send-QacQmpQuit, Read-QacSerialMarker, Test-QacMarkerObservedWithinDeadline,
+    Test-QacMarkerObservedBeforeChildExit,
+    Request-QacCancellation, Test-QacManagedAcceptanceSuccess
