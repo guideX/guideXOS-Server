@@ -170,7 +170,7 @@ static bool branch_skips_needle(const uint8_t* bytes, uint32_t count,
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
     const char* literal = "int gx_main(void* ctx) { return 42; }";
     static FunctionIR literalFunction = {};
@@ -620,6 +620,61 @@ int main()
                  logs.stringDataBytes == 19 && logsCodeBytes > 40,
                  "multiple logs use separate deterministic string slots")) return 1;
 
+    const char* comp1HelloMessage = "Hello from Developer Studio COMP1!";
+    const char* comp1HelloSource =
+        "int gx_main(gx_app_context* ctx) {\n"
+        "    log(ctx, \"Hello from Developer Studio COMP1!\");\n"
+        "    return 42;\n"
+        "}\n";
+    static FunctionIR comp1Hello = {};
+    uint8_t comp1HelloCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint8_t comp1HelloElf[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    uint32_t comp1HelloCodeBytes = 0;
+    uint32_t comp1HelloElfBytes = 0;
+    if (!require(compile_text(comp1HelloSource, &comp1Hello, comp1HelloCode,
+                              &comp1HelloCodeBytes, comp1HelloElf, &comp1HelloElfBytes),
+                 "COMP1 gx_app_context logging source compiles through AMD64 ELF writer")) return 1;
+    if (!require(comp1Hello.hasHostLog && comp1Hello.stringCount == 1 &&
+                 comp1Hello.strings[0].bytes == std::strlen(comp1HelloMessage) &&
+                 std::memcmp(comp1Hello.strings[0].data, comp1HelloMessage,
+                             std::strlen(comp1HelloMessage)) == 0,
+                 "COMP1 message is an application host-log string")) return 1;
+
+    const char* comp1RebuildSource =
+        "int gx_main(gx_app_context* ctx) {\n"
+        "    log(ctx, \"Developer Studio COMP1 rebuild works!\");\n"
+        "    return 42;\n"
+        "}\n";
+    static FunctionIR comp1Rebuild = {};
+    uint8_t comp1RebuildCode[COMPILER_MAX_CODE_BYTES] = {};
+    uint8_t comp1RebuildElf[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    uint32_t comp1RebuildCodeBytes = 0;
+    uint32_t comp1RebuildElfBytes = 0;
+    if (!require(compile_text(comp1RebuildSource, &comp1Rebuild, comp1RebuildCode,
+                              &comp1RebuildCodeBytes, comp1RebuildElf, &comp1RebuildElfBytes),
+                 "COMP1 edited logging source recompiles through AMD64 ELF writer")) return 1;
+    const uint32_t sharedComp1ElfBytes = comp1RebuildElfBytes < comp1HelloElfBytes
+        ? comp1RebuildElfBytes : comp1HelloElfBytes;
+    if (!require(comp1Rebuild.hasHostLog && comp1Rebuild.stringCount == 1 &&
+                 (comp1RebuildElfBytes != comp1HelloElfBytes ||
+                  std::memcmp(comp1RebuildElf, comp1HelloElf, sharedComp1ElfBytes) != 0),
+                 "COMP1 edited message produces different executable bytes")) return 1;
+
+    const char* comp1InvalidSource =
+        "int gx_main(gx_app_context* ctx) {\n"
+        "    log(ctx, \"Hello from Developer Studio COMP1!\");\n"
+        "    return missing + 1;\n"
+        "}\n";
+    static FunctionIR comp1Invalid = {};
+    Diagnostics comp1InvalidDiagnostics;
+    if (!require(!parse_text(comp1InvalidSource, &comp1Invalid, &comp1InvalidDiagnostics) &&
+                 comp1InvalidDiagnostics.count() != 0 &&
+                 comp1InvalidDiagnostics.at(0).location.line == 3 &&
+                 comp1InvalidDiagnostics.at(0).location.column == 12 &&
+                 std::strstr(comp1InvalidDiagnostics.at(0).message,
+                             "unknown identifier 'missing'") != nullptr,
+                 "COMP1 syntax error is rejected with an actionable source location")) return 1;
+
     const char* unknown = "int gx_main(gx_app_context* ctx) { return missing + 1; }";
     static FunctionIR unknownFunction = {};
     Diagnostics unknownDiagnostics;
@@ -850,6 +905,46 @@ int main()
                  !amd64::emit_function(tooManyLogicalFunction, tooManyLogicalCode,
                                         sizeof(tooManyLogicalCode), &tooManyLogicalCodeBytes),
                  "logical branch/fixup capacity is bounded")) return 1;
+
+    if (argc > 2) {
+        std::fprintf(stderr, "FAIL: at most one generated project source path may be supplied\n");
+        return 1;
+    }
+    if (argc == 2) {
+        FILE* generatedSourceFile = std::fopen(argv[1], "rb");
+        if (!require(generatedSourceFile != nullptr, "generated bare-metal project source is readable")) return 1;
+        std::string generatedSource;
+        char generatedSourceChunk[1024] = {};
+        size_t generatedSourceBytes = 0;
+        bool generatedSourceTooLarge = false;
+        while ((generatedSourceBytes = std::fread(generatedSourceChunk, 1,
+                                                  sizeof(generatedSourceChunk), generatedSourceFile)) != 0) {
+            if (generatedSource.size() + generatedSourceBytes > 64U * 1024U) {
+                generatedSourceTooLarge = true;
+                break;
+            }
+            generatedSource.append(generatedSourceChunk, generatedSourceBytes);
+        }
+        const bool generatedSourceRead = !generatedSourceTooLarge && std::ferror(generatedSourceFile) == 0;
+        std::fclose(generatedSourceFile);
+        if (!require(generatedSourceRead, "generated bare-metal project source reads completely")) return 1;
+        const char* expectedGeneratedSource =
+            "// Bare-metal bootstrap compiler source.\n"
+            "int gx_main(void* ctx) {\n"
+            "    return 42;\n"
+            "}\n";
+        if (!require(generatedSource == expectedGeneratedSource,
+                     "generated bare-metal project retains the supported gx_main starter")) return 1;
+        static FunctionIR generatedFunction = {};
+        uint8_t generatedCode[COMPILER_MAX_CODE_BYTES] = {};
+        uint8_t generatedElf[BOOTSTRAP_MAX_ELF_BYTES] = {};
+        uint32_t generatedCodeBytes = 0;
+        uint32_t generatedElfBytes = 0;
+        if (!require(compile_text(generatedSource.c_str(), &generatedFunction, generatedCode,
+                                  &generatedCodeBytes, generatedElf, &generatedElfBytes),
+                     "source emitted by CreateNativeGuiProject compiles with the guest frontend and AMD64 writer")) return 1;
+        std::puts("compiler_bootstrap_host_test: generated_project_source=PASS");
+    }
 
     std::puts("compiler_bootstrap_host_test: PASS");
     return 0;
