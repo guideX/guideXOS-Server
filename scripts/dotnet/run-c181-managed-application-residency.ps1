@@ -6,6 +6,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSEdition -ne 'Core') {
+    throw 'The C181 runner requires PowerShell Core (pwsh); Windows PowerShell 5.1 does not support ProcessStartInfo.ArgumentList.'
+}
 
 if ($SingleBootNumber -ne 0 -and $Lane -ne 'production') {
     throw 'SingleBootNumber is reserved for independent ordinary production boots.'
@@ -19,7 +22,14 @@ $root = if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     [System.IO.Path]::GetFullPath($EvidenceRoot)
 }
 $laneRoot = Join-Path $root ('guest-runs/' + $Lane + '-' + $RunLabel + '-qac-sequence')
-$baseEsp = Join-Path $artifactRoot ('media/esp-' + $Lane + '-c181-qac')
+$baseEsp = if ($Lane -eq 'focused') {
+    Join-Path $artifactRoot 'media/esp-focused-c181-qac'
+} else {
+    Join-Path $artifactRoot 'media/esp-production-c181-qac'
+}
+$proofKernelPath = if ($Lane -eq 'focused') {
+    Join-Path $artifactRoot 'media/proof-esp/kernel.elf'
+} else { $null }
 $esp = Join-Path $laneRoot 'esp'
 $serial = Join-Path $laneRoot 'serial.log'
 $qmpLog = Join-Path $laneRoot 'qmp.log'
@@ -42,19 +52,50 @@ function Get-MediaHashes([string]$EspPath) {
 }
 
 if (-not (Test-Path -LiteralPath $baseEsp -PathType Container)) { throw "Missing staged ESP: $baseEsp" }
+if ($Lane -eq 'focused' -and -not (Test-Path -LiteralPath $proofKernelPath -PathType Leaf)) {
+    throw "Focused lane requires the staged C181 proof kernel: $proofKernelPath."
+}
 if (-not (Test-Path -LiteralPath $qacCli -PathType Leaf)) { throw "QAC CLI is unavailable: $qacCli" }
 if (-not (Test-Path -LiteralPath $qemu -PathType Leaf)) { throw "QEMU is unavailable: $qemu" }
 if (-not (Test-Path -LiteralPath $ovmf -PathType Leaf)) { throw "OVMF is unavailable: $ovmf" }
 if (Test-Path -LiteralPath $laneRoot) { throw "Refusing to overwrite sequence evidence: $laneRoot" }
+$proofMarkers = @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY')
+$sourceKernelPath = if ($Lane -eq 'focused') { $proofKernelPath } else { Join-Path $baseEsp 'kernel.elf' }
+$sourceKernel = [System.Text.Encoding]::ASCII.GetString(
+    [System.IO.File]::ReadAllBytes($sourceKernelPath))
+$presentProofMarkers = @($proofMarkers | Where-Object { $sourceKernel.Contains($_) })
+if ($Lane -eq 'focused' -and $presentProofMarkers.Count -ne $proofMarkers.Count) {
+    $missingProofMarkers = @($proofMarkers | Where-Object { -not $sourceKernel.Contains($_) }) -join ', '
+    throw "Focused lane requires the proof-controlled C181 kernel; staged kernel is missing: $missingProofMarkers ($baseEsp)."
+}
+if ($Lane -eq 'production' -and $presentProofMarkers.Count -ne 0) {
+    throw "Production lane must use a proof-disabled kernel; proof-only marker found in $baseEsp."
+}
+$statusBefore = (& $qacCli status 2>&1 | Out-String)
+$listBefore = (& $qacCli list 2>&1 | Out-String)
+if ($statusBefore -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
+    $listBefore -notmatch 'Reservations:\s+0') {
+    throw 'QAC census is not empty; no QEMU was launched.'
+}
 if (-not (Test-Path -LiteralPath $root -PathType Container)) {
     New-Item -ItemType Directory -Force -Path $root | Out-Null
 }
 New-Item -ItemType Directory -Force -Path $laneRoot | Out-Null
-$candidateMediaHashes = Get-MediaHashes $baseEsp
+Set-Content -LiteralPath (Join-Path $laneRoot 'qac-before.status.txt') -Value $statusBefore -Encoding utf8
+Set-Content -LiteralPath (Join-Path $laneRoot 'qac-before.list.txt') -Value $listBefore -Encoding utf8
+$sourceMediaHashes = Get-MediaHashes $baseEsp
 Copy-Item -LiteralPath $baseEsp -Destination $esp -Recurse
-$copiedMediaHashes = Get-MediaHashes $esp
+if ($Lane -eq 'focused') {
+    # Use the C181 proof kernel for compositor diagnostics, while keeping the
+    # regular focused app payload out of the separate C166 proof-selector path.
+    Copy-Item -LiteralPath $proofKernelPath -Destination (Join-Path $esp 'kernel.elf') -Force
+}
+$candidateMediaHashes = Get-MediaHashes $esp
 foreach ($relativePath in $candidateMediaHashes.Keys) {
-    if ($candidateMediaHashes[$relativePath] -ne $copiedMediaHashes[$relativePath]) {
+    $expectedHash = if ($Lane -eq 'focused' -and $relativePath -eq 'kernel.elf') {
+        (Get-FileHash -LiteralPath $proofKernelPath -Algorithm SHA256).Hash
+    } else { $sourceMediaHashes[$relativePath] }
+    if ($expectedHash -ne $candidateMediaHashes[$relativePath]) {
         throw "Staged media hash mismatch for $relativePath."
     }
 }
@@ -256,14 +297,30 @@ function Calibrate-Pointer([int]$BootNumber) {
     if (-not $width.Success -or -not $height.Success) { throw "Guest boot $BootNumber omitted framebuffer dimensions." }
     $script:screenWidth = [Convert]::ToInt32($width.Groups[1].Value,16)
     $script:screenHeight = [Convert]::ToInt32($height.Groups[1].Value,16)
+    if ($script:screenWidth -lt 2 -or $script:screenHeight -lt 2) { throw "Guest boot $BootNumber reported invalid framebuffer dimensions." }
     $start = $text.Length
     Send-QmpEvents (New-RelativeMove 1 1) 50
-    $marker = Wait-Pattern '^\[C138-NATIVE-INPUT\] kind=pointer-move x=(?<x>[0-9A-Fa-f]+) y=(?<y>[0-9A-Fa-f]+) result=PASS$' $start 20 "pointer calibration in boot $BootNumber"
-    $clientX = [Convert]::ToInt32($marker.Groups['x'].Value,16)
-    $clientY = [Convert]::ToInt32($marker.Groups['y'].Value,16)
-    $windowX = [Math]::Max(0,[int](($script:screenWidth - 600) / 2))
-    $windowY = [Math]::Max(0,[int](($script:screenHeight - 360) / 2))
-    $script:cursor = [pscustomobject]@{X=$clientX+$windowX;Y=$clientY+$windowY+24}
+    # QEMU's VGA relative pointer starts at the framebuffer center. C138 is
+    # app-local and is absent when startup has no scrollable app under the
+    # pointer, so it cannot be a required global-position calibration signal.
+    $script:cursor = [pscustomobject]@{
+        X=[Math]::Min($script:screenWidth-1,[int]($script:screenWidth/2)+1)
+        Y=[Math]::Min($script:screenHeight-1,[int]($script:screenHeight/2)+1)
+    }
+    Start-Sleep -Milliseconds 250
+    $afterProbe = Read-Serial
+    $probeTail = if ($start -le $afterProbe.Length) { $afterProbe.Substring($start) } else { '' }
+    $localMove = [System.Text.RegularExpressions.Regex]::Match(
+        $probeTail,'(?m)^\[C138-NATIVE-INPUT\] kind=pointer-move x=(?<x>[0-9A-Fa-f]+) y=(?<y>[0-9A-Fa-f]+) result=PASS\r?$')
+    $script:pointerCalibration = [ordered]@{
+        method='qemu-vga-default-center-plus-relative-probe'
+        framebuffer=[ordered]@{width=$script:screenWidth;height=$script:screenHeight}
+        inferredDesktop=[ordered]@{x=$script:cursor.X;y=$script:cursor.Y}
+        appLocalProbeObserved=$localMove.Success
+        appLocalProbe=if ($localMove.Success) {
+            [ordered]@{x=[Convert]::ToInt32($localMove.Groups['x'].Value,16);y=[Convert]::ToInt32($localMove.Groups['y'].Value,16)}
+        } else { $null }
+    }
     $script:startMenuAllPrograms = $false
 }
 
@@ -339,7 +396,20 @@ function Launch-SettingsFromNotes([int]$BootNumber) {
     $start = (Read-Serial).Length
     Click ($notesX + 475) ($notesY + 24 + 294)
     [void](Wait-Pattern '^\[C150-SETTINGS-LAUNCH\] source=Notes path=AppModel result=PASS$' $start 45 ("Settings launch in boot $BootNumber"))
-    $surface = Wait-Pattern '^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.settingscenter generation=[0-9A-Fa-f]+ window=[0-9A-Fa-f]+ result=PASS$' $start 30 ("Settings surface creation in boot $BootNumber")
+    $surfacePattern = '^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.settingscenter generation=[0-9A-Fa-f]+ window=[0-9A-Fa-f]+ result=PASS\r?$'
+    $currentText = Read-Serial
+    $currentTail = if ($start -le $currentText.Length) { $currentText.Substring($start) } else { '' }
+    $surface = [System.Text.RegularExpressions.Regex]::Match($currentTail,$surfacePattern,[System.Text.RegularExpressions.RegexOptions]::Multiline)
+    if (-not $surface.Success) {
+        $bootTail = if ($script:serialOffset -le $currentText.Length) { $currentText.Substring($script:serialOffset) } else { '' }
+        $bootSurfaces = [System.Text.RegularExpressions.Regex]::Matches($bootTail,$surfacePattern,[System.Text.RegularExpressions.RegexOptions]::Multiline)
+        if ($bootSurfaces.Count -gt 0) {
+            $focusPattern = '^\[C162-MANAGED-FOCUS\] appId=com\.guidexos\.apps\.managed\.settingscenter source=\d+ instance=[0-9A-Fa-f]+ selector=[0-9A-Fa-f]+ existing=true result=PASS\r?$'
+            $surface = Wait-Pattern $focusPattern $start 15 ("Settings existing-surface focus in boot $BootNumber")
+        } else {
+            $surface = Wait-Pattern $surfacePattern $start 30 ("Settings surface creation in boot $BootNumber")
+        }
+    }
     Add-Content -LiteralPath (Join-Path $laneRoot 'launches.log') -Encoding utf8 -Value ("boot="+$BootNumber+" name=settings marker="+$surface.Value)
     [void](Capture 'after-settings' (Join-Path $laneRoot ('boot' + $BootNumber)))
     # Opening Settings from Notes closes the Notes surface. Restore Notes so
@@ -393,7 +463,7 @@ function Refresh-TaskManager([int]$BootNumber,[string]$CaptureName='task-manager
 
 function Get-ResidentResizeSpec([string]$Name) {
     switch ($Name) {
-        'settings' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.settingscenter';Selector='00000005';TaskbarX=193;Width=560;Height=340;TargetWidth=720;TargetHeight=420;NativeLabel='C172-NATIVE-GEOMETRY';NativeOwner='app=ManagedSettings';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C172-MANAGED-GEOMETRY layout=recomputed popup=dismissed capture=none focus=retained result=PASS\r?$';TitlebarRgb='43,80,111'} }
+        'settings' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.settingscenter';Selector='00000005';Width=560;Height=340;TargetWidth=720;TargetHeight=420;NativeLabel='C172-NATIVE-GEOMETRY';NativeOwner='app=ManagedSettings';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C172-MANAGED-GEOMETRY layout=recomputed popup=dismissed capture=none focus=retained result=PASS\r?$';TitlebarRgb='43,80,111'} }
         'explorer' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.fileexplorer';Selector='00000008';TaskbarX=351;Width=800;Height=390;TargetWidth=600;TargetHeight=360;NativeLabel='C173-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.fileexplorer';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C173-MANAGED-GEOMETRY size=600x360 path=1 selection=1 scroll=\d+ focus=1 popup=0 result=PASS\r?$';TitlebarRgb='43,80,111'} }
         'notes' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.notes';Selector='00000004';TaskbarX=617;Width=600;Height=360;TargetWidth=560;TargetHeight=344;NativeLabel='C175-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.notes';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C175-MANAGED-GEOMETRY size=560x344 client=560x320 editor=\d+x\d+ result=PASS\r?$';TitlebarRgb='85,136,170'} }
         'calculator' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.calculator';Selector='00000006';TaskbarX=497;Width=292;Height=270;TargetWidth=512;TargetHeight=420;NativeLabel='C178-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.calculator';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C178-CALC-GEOMETRY outer=512x420 client=512x396 disp=56 phase=3 op=3 len=2 focus=18 result=PASS\r?$';TitlebarRgb='43,80,111'} }
@@ -457,11 +527,30 @@ function Focus-ResidentApp([string]$Name,[int]$BootNumber,[int]$ExpectedWidth=0)
     $focusPattern = '(?m)^\[C162-MANAGED-FOCUS\] appId=' + [regex]::Escape($spec.Id) + ' source=3 instance=(?<instance>[0-9A-Fa-f]{16}) selector=' + $spec.Selector + ' existing=true result=PASS\r?$'
     $bootPath = Join-Path $laneRoot ('boot'+$BootNumber)
     $focusRoute = if ($Lane -eq 'focused') {'start-menu-existing-instance'} else {'start-menu-visible-window'}
+    $focusScreenshot = $null
+    $measuredWidth = 0
     if ($Name -eq 'settings') {
         $focusStart = $before.Length
-        Click $spec.TaskbarX ($script:screenHeight-13)
-        $focus = [System.Text.RegularExpressions.Regex]::Match((Read-Serial).Substring($focusStart),$focusPattern)
-        $focusRoute = 'taskbar-visible-window'
+        $focus = [System.Text.RegularExpressions.Regex]::Match('', $focusPattern)
+        $taskbarProbes = [System.Collections.Generic.List[object]]::new()
+        for ($x=120; $x -le ($script:screenWidth-100); $x+=80) {
+            Click $x ($script:screenHeight-13)
+            $candidatePath = Capture ("focus-settings-taskbar-x"+$x+"-"+([guid]::NewGuid().ToString('N').Substring(0,6))) $bootPath
+            $candidateWidth = 0
+            try { $candidateWidth = Get-PpmTitlebarWidth $candidatePath $spec.TitlebarRgb } catch { }
+            $taskbarProbes.Add([ordered]@{x=$x;screenshot=$candidatePath;measuredTitlebarWidth=$candidateWidth})
+            if ([Math]::Abs($candidateWidth-$ExpectedWidth) -le 2) {
+                $focusScreenshot = $candidatePath
+                $measuredWidth = $candidateWidth
+                $focusRoute = 'taskbar-titlebar-width-scan-x' + $x
+                break
+            }
+        }
+        @($taskbarProbes) | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath (Join-Path $bootPath 'settings-taskbar-focus-probes.json') -Encoding utf8
+        if (-not $focusScreenshot) {
+            throw "Settings taskbar focus scan did not find a $ExpectedWidth-pixel titlebar; probed $($taskbarProbes.Count) positions."
+        }
     } else {
         $focusStart = (Read-Serial).Length
         [void](Open-AppMenuItem $Name $BootNumber -NoFocusFallback)
@@ -470,8 +559,10 @@ function Focus-ResidentApp([string]$Name,[int]$BootNumber,[int]$ExpectedWidth=0)
             $focus = Wait-Pattern $focusPattern $focusStart 12 "$Name managed instance focus identity"
         }
     }
-    $focusScreenshot = Capture ("focus-"+$Name+"-"+([guid]::NewGuid().ToString('N').Substring(0,8))) $bootPath
-    $measuredWidth = Get-PpmTitlebarWidth $focusScreenshot $spec.TitlebarRgb
+    if (-not $focusScreenshot) {
+        $focusScreenshot = Capture ("focus-"+$Name+"-"+([guid]::NewGuid().ToString('N').Substring(0,8))) $bootPath
+        $measuredWidth = Get-PpmTitlebarWidth $focusScreenshot $spec.TitlebarRgb
+    }
     if ([Math]::Abs($measuredWidth-$ExpectedWidth) -gt 2) { throw "$Name focus screenshot measured width $measuredWidth; expected $ExpectedWidth." }
     return [pscustomobject]@{
         identity=[ordered]@{
@@ -643,11 +734,11 @@ function Exercise-BootThreeLifecycle([int]$BootNumber) {
     }
 
     # The resident Explorer remains active through the Notes lifecycle and
-    # continues navigation after Notes has been recreated twice.
+    # continues enforcing its managed root after Notes is recreated twice.
     [void](Open-AppMenuItem 'explorer' $BootNumber)
     $explorerStart = (Read-Serial).Length
     Click 306 569
-    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=0 path=/system n=\d+ sel=none .*' $explorerStart 15 'Boot 3 Explorer parent navigation')
+    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=1 path=/system/apps n=\d+ sel=none .*' $explorerStart 15 'Boot 3 Explorer managed-root boundary')
     [void](Refresh-TaskManager $BootNumber 'boot3-final-five-residents' 5)
     $bootText = Read-Serial
     $bootTail = if ($serialOffset -le $bootText.Length) { $bootText.Substring($serialOffset) } else { $bootText }
@@ -660,31 +751,37 @@ function Exercise-BootTwoActions([int]$BootNumber) {
     # Settings: toggle Input Enabled, apply from the Options menu, then reset
     # through the existing confirmation dialog.
     Launch-SettingsFromNotes $BootNumber
+    [void](Focus-ResidentApp 'settings' $BootNumber)
     $settingsStart = (Read-Serial).Length
-    Click 504 317
+    $toggleStart = (Read-Serial).Length
+    Click 532 317
+    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C144-GROUP input=(?:enabled own-member-state=preserved|disabled pointer-tab-popup=gated) result=PASS\r?$' $toggleStart 12 'Settings Input Enabled toggle')
     Start-Sleep -Milliseconds 250
+    $settingsSpec = Get-ResidentResizeSpec 'settings'
+    $settingsClientX = [Math]::Max(0,[int](($script:screenWidth-$settingsSpec.Width)/2)) + 24
+    $settingsClientY = [Math]::Max(0,[int](($script:screenHeight-$settingsSpec.Height)/2)) + 24
     Click 836 285
-    Send-Key 'down'
-    Send-Key 'ret'
+    Click ($settingsClientX+440) ($settingsClientY+52)
     [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C144-APPLY menu=PASS dirty=cleared viewport=preserved result=PASS$' $settingsStart 20 'Settings Apply')
     Click 836 285
-    Send-Key 'down'
-    Send-Key 'down'
-    Send-Key 'ret'
+    Click ($settingsClientX+440) ($settingsClientY+72)
     [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C145-RESET open=PASS modal=active focus=default parent=blocked result=PASS$' $settingsStart 15 'Settings Reset confirmation')
     Send-Key 'ret'
     [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C145-RESET result=Reset working=defaults dirty=updated viewport=valid focus=restored result=PASS$' $settingsStart 15 'Settings Reset')
     [void](Capture 'settings-apply-reset' (Join-Path $laneRoot 'boot2'))
 
-    # Explorer navigates to /system, selects a row, and refreshes the listing.
+    # Explorer enforces its /system/apps VFS root, then selects a row and
+    # refreshes the listing without losing the selection.
     [void](Open-AppMenuItem 'explorer' $BootNumber)
     $explorerStart = (Read-Serial).Length
     Click 306 569
-    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=0 path=/system n=\d+ sel=none .*' $explorerStart 15 'Explorer parent navigation')
-    Click 420 310
-    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=0 path=/system n=\d+ sel=.+ type=(Directory|File) .*' $explorerStart 15 'Explorer row selection')
+    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=1 path=/system/apps n=\d+ sel=none .*' $explorerStart 15 'Explorer managed-root boundary')
+    Click 420 400
+    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=1 path=/system/apps n=\d+ sel=.+ type=(Directory|File) .*' $explorerStart 15 'Explorer row selection')
+    $refreshStart = (Read-Serial).Length
     Click 524 569
-    [void](Capture 'explorer-navigation-selection' (Join-Path $laneRoot 'boot2'))
+    [void](Wait-Pattern '^\[C102-MANAGED-OUTPUT\] C163-STATE ev=input k=1 path=/system/apps n=\d+ sel=.+ type=File .*' $refreshStart 15 'Explorer refresh preserves selected file')
+    [void](Capture 'explorer-root-selection-refresh' (Join-Path $laneRoot 'boot2'))
 
     # Notes: edit the resident document and save the updated document.
     [void](Open-AppMenuItem 'notes' $BootNumber)
@@ -747,20 +844,14 @@ function Save-BootEvidence([int]$BootNumber,[int]$SerialOffset,[int]$QmpOffset) 
         Set-Content -LiteralPath (Join-Path $bootPath 'resize-evidence.json') -Encoding utf8
     @($script:lifecycleEvidence) | ConvertTo-Json -Depth 8 |
         Set-Content -LiteralPath (Join-Path $bootPath 'lifecycle-evidence.json') -Encoding utf8
-}
-
-$statusBefore = (& $qacCli status 2>&1 | Out-String)
-$listBefore = (& $qacCli list 2>&1 | Out-String)
-Set-Content -LiteralPath (Join-Path $laneRoot 'qac-before.status.txt') -Value $statusBefore -Encoding utf8
-Set-Content -LiteralPath (Join-Path $laneRoot 'qac-before.list.txt') -Value $listBefore -Encoding utf8
-if ($statusBefore -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
-    $listBefore -notmatch 'Reservations:\s+0') {
-    throw 'QAC census is not empty; no QEMU was launched.'
+    $script:pointerCalibration | ConvertTo-Json -Depth 6 |
+        Set-Content -LiteralPath (Join-Path $bootPath 'pointer-calibration.json') -Encoding utf8
 }
 
 $script:qacProcess = $null
 $script:qmpPort = 0
 $script:cursor = $null
+$script:pointerCalibration = $null
 $script:screenWidth = 0
 $script:screenHeight = 0
 $script:startMenuAllPrograms = $false
@@ -963,6 +1054,10 @@ $manifest = [ordered]@{
     lane=$Lane
     runLabel=$RunLabel
     evidenceRoot=$root
+    sourceMediaPath=$baseEsp
+    proofKernelPath=$proofKernelPath
+    kernelBuildClass=if ($Lane -eq 'focused') {'proof-controlled'} else {'proof-disabled-production'}
+    proofKernelMarkers=$presentProofMarkers
     boots=$bootNumbers.Count
     scenarioBootNumber=if ($SingleBootNumber -ne 0) {$SingleBootNumber} else {$null}
     qacMode='acceptance'

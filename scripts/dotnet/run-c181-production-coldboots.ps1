@@ -4,6 +4,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSEdition -ne 'Core') {
+    throw 'The C181 production orchestrator requires PowerShell Core (pwsh).'
+}
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $root = [System.IO.Path]::GetFullPath($EvidenceRoot)
@@ -79,7 +82,7 @@ foreach ($relativePath in @('kernel.elf','ramdisk.img','EFI/BOOT/BOOTX64.EFI')) 
     }
 }
 
-$powershell = (Get-Command powershell.exe -ErrorAction Stop).Source
+$powershell = (Get-Command pwsh.exe -ErrorAction Stop).Source
 $bootResults = [System.Collections.Generic.List[object]]::new()
 $candidateHashes = $null
 $failure = $null

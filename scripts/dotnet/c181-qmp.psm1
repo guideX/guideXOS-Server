@@ -24,25 +24,31 @@ function Read-C181QmpResponse {
         Add-Content -LiteralPath $LogPath -Encoding ascii -Value ("qmp-unclassified=" + $line)
     }
 
-    if ($Command -eq 'system_reset' -and -not $resetObserved) {
-        $deadline = [DateTime]::UtcNow.AddMilliseconds([Math]::Max(0,$ResetEventWaitMilliseconds))
-        $pendingRead = $Reader.ReadLineAsync()
-        while ([DateTime]::UtcNow -lt $deadline) {
-            try {
-                if (-not $pendingRead.Wait(100)) { continue }
-                $line = $pendingRead.GetAwaiter().GetResult()
-            } catch {
-                Add-Content -LiteralPath $LogPath -Encoding ascii -Value ("reset-event-observation=STREAM_ERROR " + $_.Exception.GetType().Name)
-                break
-            }
-            if ($null -eq $line) { break }
-            if ($line -match '"event"\s*:') {
-                Add-Content -LiteralPath $LogPath -Encoding ascii -Value ("qmp-event=" + $line)
-                if ($line -match '"event"\s*:\s*"RESET"') { $resetObserved = $true; break }
-            } else {
-                Add-Content -LiteralPath $LogPath -Encoding ascii -Value ("qmp-unclassified=" + $line)
-            }
+    if ($Command -eq 'system_reset') {
+        $streamError = $null
+        if (-not $resetObserved) {
+            $deadline = [DateTime]::UtcNow.AddMilliseconds([Math]::Max(0,$ResetEventWaitMilliseconds))
             $pendingRead = $Reader.ReadLineAsync()
+            while ([DateTime]::UtcNow -lt $deadline) {
+                try {
+                    if (-not $pendingRead.Wait(100)) { continue }
+                    $line = $pendingRead.GetAwaiter().GetResult()
+                } catch {
+                    $streamError = $_.Exception.GetType().Name
+                    break
+                }
+                if ($null -eq $line) { break }
+                if ($line -match '"event"\s*:') {
+                    Add-Content -LiteralPath $LogPath -Encoding ascii -Value ("qmp-event=" + $line)
+                    if ($line -match '"event"\s*:\s*"RESET"') { $resetObserved = $true; break }
+                } else {
+                    Add-Content -LiteralPath $LogPath -Encoding ascii -Value ("qmp-unclassified=" + $line)
+                }
+                $pendingRead = $Reader.ReadLineAsync()
+            }
+        }
+        if ($streamError) {
+            Add-Content -LiteralPath $LogPath -Encoding ascii -Value ("reset-event-stream-error=" + $streamError)
         }
         $observation = if ($resetObserved) { 'RESET_SEEN' } else { 'RESET_NOT_OBSERVED' }
         Add-Content -LiteralPath $LogPath -Encoding ascii -Value ("reset-event-observation=" + $observation)

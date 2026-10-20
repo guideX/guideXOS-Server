@@ -3,9 +3,20 @@ Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'c181-qmp.psm1') -Force -ErrorAction Stop
 $tempBase = Join-Path ([System.IO.Path]::GetTempPath()) ('c181-qmp-' + [Guid]::NewGuid().ToString('N'))
+$beforePath = $tempBase + '-before.log'
 $seenPath = $tempBase + '-seen.log'
 $missingPath = $tempBase + '-missing.log'
 try {
+    $beforeResponse = '{"timestamp":{"seconds":1,"microseconds":1},"event":"RESET","data":{"guest":false}}' + "`n" + '{"return": {}}' + "`n"
+    $memory = [System.IO.MemoryStream]::new([System.Text.Encoding]::ASCII.GetBytes($beforeResponse))
+    $reader = [System.IO.StreamReader]::new($memory,[System.Text.Encoding]::ASCII,$false,1024,$true)
+    try {
+        [void](Read-C181QmpResponse -Reader $reader -LogPath $beforePath -Command 'system_reset' -ResetEventWaitMilliseconds 500)
+    } finally { $reader.Dispose(); $memory.Dispose() }
+    $beforeLog = Get-Content -LiteralPath $beforePath -Raw
+    if ($beforeLog -notmatch 'qmp-event=.*"event":"RESET"') { throw 'A RESET event before the response was not written to the QMP evidence log.' }
+    if ($beforeLog -notmatch 'reset-event-observation=RESET_SEEN') { throw 'A RESET event before the response was not marked as observed.' }
+
     $afterResponse = '{"return": {}}' + "`n" + '{"timestamp":{"seconds":1,"microseconds":2},"event":"RESET","data":{"guest":false}}' + "`n"
     $memory = [System.IO.MemoryStream]::new([System.Text.Encoding]::ASCII.GetBytes($afterResponse))
     $reader = [System.IO.StreamReader]::new($memory,[System.Text.Encoding]::ASCII,$false,1024,$true)
@@ -27,5 +38,5 @@ try {
     if ($missingLog -notmatch 'reset-event-observation=RESET_NOT_OBSERVED') { throw 'Missing RESET event was not reported explicitly.' }
     Write-Output 'C181 QMP event capture: PASS (RESET events are logged; missing events remain explicit).'
 } finally {
-    Remove-Item -LiteralPath $seenPath,$missingPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $beforePath,$seenPath,$missingPath -Force -ErrorAction SilentlyContinue
 }
