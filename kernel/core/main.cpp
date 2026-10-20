@@ -996,6 +996,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();
 
+#if defined(GXOS_STELLAR_NAVIGATOR_SN10_GUEST_PROOF)
+        // SN10 acceptance-only driver: launch through the real Desktop/App
+        // Model dispatcher after package discovery and VFS mounting. The
+        // Native ELF app exits when the proof runner sends Escape over QEMU.
+        kernel::serial::puts("[SN10-GUEST] appmodel-launch begin id=com.guidexos.stellarnavigator\n");
+        const bool stellarNavigatorLaunched =
+            kernel::desktop::launch_app("com.guidexos.stellarnavigator");
+        kernel::serial::puts(stellarNavigatorLaunched
+            ? "[SN10-GUEST] appmodel-launch result=success\n"
+            : "[SN10-GUEST] appmodel-launch result=failed\n");
+#endif
+
 #if defined(GXOS_QEMU_VIRTIO_GPU_MANUAL_VALIDATION_ACTIVE)
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
         manualPersistenceReady = mounted;
