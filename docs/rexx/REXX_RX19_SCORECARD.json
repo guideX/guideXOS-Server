@@ -6,8 +6,8 @@
   "branch": "REXX_SUPPORT",
   "starting_head": "faaab1b9737be47eac411ae0cf2895aa083e5fcf",
   "qualification_head_before_local_commit": "faaab1b9737be47eac411ae0cf2895aa083e5fcf",
-  "local_implementation_commit_sha": null,
-  "ending_head_after_implementation_commit": null,
+  "local_implementation_commit_sha": "9be232e84966076eadc7b98f30f4a097cb976583",
+  "ending_head_after_implementation_commit": "9be232e84966076eadc7b98f30f4a097cb976583",
   "root_phase_file_present": false,
   "prior_phase": {
     "phase": "RX18",
