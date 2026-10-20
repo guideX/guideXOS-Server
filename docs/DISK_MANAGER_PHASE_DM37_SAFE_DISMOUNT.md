@@ -5,6 +5,15 @@ VFS lifecycle.** `.phase` remains `last_completed=DM36` and
 `next_expected=DM37`. The Disk Manager GUI flow and guest/QEMU acceptance are
 future work.
 
+**Latest continuation status (2026-10-20): Outcome B —
+`BLOCKED_BY_FOREIGN_QEMU`.** Gate A remains accepted from continuation 5;
+this continuation did not repeat it. The new workflow fixture booted in a
+QAC-coordinated read-only guest, but the Mount → Dismount → Check FAT32 →
+Remount sequence did not begin. QAC detected one unmanaged QEMU from
+`guideXOSServerV0.5_DEVELOPER_STUDIO`; no foreign endpoint or media was
+contacted. Full details and the evidence index are in the continuation 6
+report at the end of this document.
+
 ## Scope and repository gate
 
 The authoritative roadmap and history had no competing approved DM37 scope.
@@ -623,3 +632,124 @@ DM36→DM37 and do not begin DM38.
 Screenshots, QMP snapshots, input transition notes, serial output, ownership
 manifest, and gate-a-evidence.json are retained in
 out/dm37/dismount-guest/runs/A-idle-dismount-cont5-20261019-visible/.
+
+## DM37 continuation 6 — workflow attempt blocked by foreign QEMU
+
+**Outcome B — `BLOCKED_BY_FOREIGN_QEMU`.** Gate A remains accepted from
+continuation 5. This run did not repeat Gate A as a standalone campaign and
+did not reach Gate E. DM37 remains active; `.phase` is still
+`last_completed=DM36` / `next_expected=DM37`, and DM38 has not started.
+
+### Repository and runtime provenance
+
+The run started at `7b477fc2ce61e2d5632c6cc72bdc3f1049d691de`
+(`docs: record DM37 Gate A guest dismount`) on
+`DISK_MANAGER_IMPROVEMENTS`. The repository source revision recorded by the
+private production runtime is `c40efd34eb67aa71b23e4f48f5243d8f18d11771`;
+ordinary production startup was used, test-only hooks were false, no physical
+host storage was attached, and `NVME_WRITE_PROVEN=0` /
+`NVME_FLUSH_PROVEN=0`.
+
+Runtime evidence is in
+`out/dm37/dismount-guest/runtime/runtime-manifest.json`. Recorded SHA-256s:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Production and staged kernel | `6D8DF6E65656B38DEA37F3704EC2639910C074EB448644FDB19FED5B47B7A29B` |
+| UEFI bootloader and staged `BOOTX64.EFI` | `736F0532DC491403ECAE3CC75A5F9815F03CAEFDD6D11CF853EE8483E81A53A7` |
+| OVMF firmware | `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792` |
+| QEMU executable | `A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02` |
+| Staged ESP `ramdisk.img` | `5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD` |
+
+The runtime manifest also records the source ESP inputs and private ESP
+artifacts. The manifest is the authoritative full provenance record.
+
+### QAC ownership and launch
+
+QAC was found and verified operational at
+`D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe`
+(version 2.0.0). Reservation `3e8f7054c5a94cdba2fa112764ade7f9` for project
+`guideXOSServer` queued at position 1, then received the exclusive
+`acceptance` lease before QEMU launch. The launch used:
+
+```text
+qac run --project guideXOSServer --mode acceptance -- "C:\Program Files\qemu\qemu-system-x86_64.exe" [captured QEMU arguments] -name dm37-cont6-workflow
+```
+
+The complete child command line and process identities are preserved in
+`out/dm37/dismount-guest/runs/E-workflow-qac-20261020-r1/qac-process-ownership.json`.
+There is no checked-in DM37 guest runner script; the full production QEMU
+invocation was the runner command, with the visible UI/QMP probes performed
+while that QAC-owned child remained alive. Its original QEMU arguments and
+child exit code are preserved in the process record and QAC log.
+QEMU child PID 23008 used QMP `127.0.0.1:58954`. QAC logged two warnings that
+its exclusive conditions were compromised by one unmanaged QEMU process.
+The run was not continued into storage operations. The owned child exited
+with code 0; QAC released the reservation through its `qac run` lifecycle
+with reason `Registered child process exited.` No separate release command
+or private lock was used.
+
+A one-time read-only post-run census identified foreign PID 2464, parent PID
+27840, executable `C:\Program Files\qemu\qemu-system-x86_64.exe`, workspace
+`D:\dev\guideXOSServerV0.5_DEVELOPER_STUDIO`, and QMP endpoint
+`127.0.0.1:56898`. This foreign guest was not contacted, stopped, or queried
+for attached media. Its census record is
+`out/dm37/dismount-guest/runs/E-workflow-qac-20261020-r1/postrun-qemu-census.json`.
+
+### Fixture and guest observations
+
+The disposable fixture was `DM37WORKFLOW01.raw`, serial `DM37WORKFLOW01`,
+QEMU block device `dm37workflow_drive`, 629,145,600 bytes, attached
+read-only. It contains GPT partition 1, partition GUID
+`829681EB-8BBF-45B1-814A-C54A926DB193`, starting at LBA 2048 for 1,226,719
+sectors. Its FAT32 volume label is `DM9PROOF`, with 512-byte logical sectors,
+16 sectors per cluster, 2 FATs, 599 sectors per FAT, and root cluster 2. The
+initial and final full-image SHA-256 were both
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`.
+The guest boot log records the workflow device as read-only USB mass storage
+and mounts only persistent ATA device `ata0m` at `/`. The workflow target's
+mount state was not explicitly verified through Disk Manager; no target
+mount identity was recorded and no mount operation was issued. The preflight
+and fixture manifest are in
+`out/dm37/dismount-guest/runs/E-workflow-qac-20261020-r1/preflight.json` and
+`out/dm37/dismount-guest/fixtures/fixture-manifest.json`.
+
+The guest booted to the desktop. Pointer attempts produced a view containing
+the Disk Manager window and a desktop context menu, but the exact launch
+event was ambiguous. In a later Start-menu probe, Disk Manager was visibly
+highlighted; Enter opened File Explorer instead. Escape closed File Explorer.
+These observations do not establish a delayed-key defect or qualify normal
+Disk Manager activation. The host computer-use bridge also timed out through
+its documented retry sequence, so no further host UI automation was
+available. The screenshots are `menu-diskmanager-context.png`,
+`start-menu-meta-key.png`, `diskmanager-enter-launch.png`, and
+`file-explorer-escape-close.png` in the run folder.
+
+No mounted target was identified and no Mount, explicit Dismount, Check FAT32,
+or Remount action ran. There is no VFS mount identity or generation, checker
+result, post-remount filesystem access, or Gate E completion evidence. Busy
+volume Gate B, protected-volume Gate C, Close behavior, and the remaining
+keyboard/input Gate H cases were not qualified. No production source changed;
+the prior 1,491/1,491 storage result and previously accepted AMD64 kernel,
+`build.bat`, and UEFI x64 Release results remain the applicable validation.
+
+### I/O, shutdown, and remaining work
+
+The workflow fixture QMP counters were cumulative: boot baseline 31 reads /
+207,872 bytes, 0 writes / 0 bytes, and 1 Flush; final pre-exit count was 163
+reads / 275,456 bytes, 0 writes / 0 bytes, and 1 Flush. Failed reads, writes,
+Flushes, and unmaps were all zero. QEMU marked `account_invalid` and
+`account_failed`, so reads cannot be attributed to individual guest actions.
+The single Flush was present at boot and is not attributable to a workflow
+operation. The read-only fixture hash remained unchanged. ACPI powerdown was
+requested but the guest stayed running; after confirming there was no active
+storage operation, the owned QEMU child was closed with QMP `quit`. QMP then
+closed and QAC observed child exit and released its lease. The process and
+counter evidence, including `guest.serial.log`, is in the run folder above.
+
+Continue only after a future fresh QAC ownership check grants a usable
+acceptance lane. Retry the UI activation path, then qualify the full
+Mount → explicit Dismount → completed FAT32 Check → explicit Remount workflow
+with accessible files and current mount identity. Gate E and Gates B, C, D,
+F, G, and the remaining Gate H cases remain open; Gate I applies to every
+future guest. Do not start DM38 before DM37 Outcome A.

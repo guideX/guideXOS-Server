@@ -1,5 +1,14 @@
 # Disk Manager: Current Implementation Status
 
+**Latest DM37 guest status (2026-10-20): Outcome B —
+`BLOCKED_BY_FOREIGN_QEMU`.** Gate A remains accepted, but the new Gate E
+Mount → Dismount → Check FAT32 → Remount workflow did not begin. The guest
+fixture remained read-only and byte-identical. QAC detected an unmanaged
+QEMU belonging to `guideXOSServerV0.5_DEVELOPER_STUDIO`; that guest was left
+untouched. `.phase` remains DM36→DM37. See the [DM37 continuation 6 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-6--workflow-attempt-blocked-by-foreign-qemu)
+for QAC lifecycle details, runtime and fixture hashes, guest observations,
+I/O counters, evidence paths, and remaining gates.
+
 DM36 is accepted at source revision `a2afa18a56c95b00491f9b1ca2a26acde7669567` on `DISK_MANAGER_IMPROVEMENTS`. The source-matched QEMU guest passed the remaining lifecycle gates: dedicated Stop, active-check Close, removal/replacement, an actual checker read error, unchanged read-only fixture images, and mounted-target admission rejection. B1/B2 numeric findings were displayed correctly; Previous/Next were activated on the single-finding guest fixture, while existing production-linked host tests cover zero and multiple findings. The owned guest was visible during testing and safely shut down after all checks; a later foreign QEMU from a sibling project was left untouched, and no second guest was launched. `.phase` records DM36 complete and DM37 next. DM37 now has a host-qualified safe dismount foundation; GUI and guest acceptance remain deferred. Full DM36 provenance, runtime captures, counters, hashes, regression counts, and build logs are in the [DM36 phase report](DISK_MANAGER_PHASE_DM36_FAT32_INTEGRITY.md). The DM37 audit, API contract, regressions, and deferred work are in the [DM37 safe-dismount report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md).
 
 Historical phase details are in the [DM1 audit](DISK_MANAGER_PHASE_DM1_AUDIT.md), [DM2 safety foundation report](DISK_MANAGER_PHASE_DM2_SAFETY_FOUNDATION.md), [DM3 initialization report](DISK_MANAGER_PHASE_DM3_INITIALIZE_DISK.md), [DM4 boot provenance and transport safety report](DISK_MANAGER_PHASE_DM4_BOOT_PROVENANCE.md), [DM5 UI and diagnostics report](DISK_MANAGER_PHASE_DM5_UI_AND_DIAGNOSTICS.md), [DM6 safe partition-creation report](DISK_MANAGER_PHASE_DM6_CREATE_PARTITION.md), [DM7 safe FAT32-formatting report](DISK_MANAGER_PHASE_DM7_FAT32_FORMAT.md), [DM8 partition-mounting report](DISK_MANAGER_PHASE_DM8_PARTITION_MOUNTING.md), [DM9 runtime/removable-device report](DISK_MANAGER_PHASE_DM9_RUNTIME_AND_REMOVABLE_HARDENING.md), [DM10 transport-reliability report](DISK_MANAGER_PHASE_DM10_TRANSPORT_RELIABILITY.md), [DM11 USB Mass Storage report](DISK_MANAGER_PHASE_DM11_USB_MASS_STORAGE.md), [DM12 UHCI runtime USB proof](DISK_MANAGER_PHASE_DM12_UHCI_RUNTIME_USB.md), [DM13 USB write/durability report](DISK_MANAGER_PHASE_DM13_USB_WRITE_DURABILITY.md), [DM14 USB hotplug hardening](DISK_MANAGER_PHASE_DM14_USB_HOTPLUG_HARDENING.md), [DM15 AHCI/SATA storage](DISK_MANAGER_PHASE_DM15_AHCI_STORAGE.md), [DM16 NVMe durability](DISK_MANAGER_PHASE_DM16_NVME_DURABILITY.md), [DM17 NVMe data integrity](DISK_MANAGER_PHASE_DM17_NVME_DATA_INTEGRITY.md), [DM18 NVMe production graduation](DISK_MANAGER_PHASE_DM18_NVME_PRODUCTION_GRADUATION.md), [DM19 USB regression recovery](DISK_MANAGER_PHASE_DM19_USB_REGRESSION_RECOVERY.md), [DM20 USB CSW timeout classification](DISK_MANAGER_PHASE_DM20_USB_CSW_CLASSIFICATION.md), [DM21 WRITE(10) CSW capture and root-cause report](DISK_MANAGER_PHASE_DM21_USB_WRITE_CSW_ROOT_CAUSE.md), the [DM22 FAT32 scalability report](DISK_MANAGER_PHASE_DM22_FAT32_SCALABILITY.md), the [DM23 blank-scan scalability report](DISK_MANAGER_PHASE_DM23_BLANK_MEDIA_SCAN_SCALABILITY.md), the [DM24 4Kn FAT32 report](DISK_MANAGER_PHASE_DM24_4KN_FAT32.md), [DM25 safe partition deletion](DISK_MANAGER_PHASE_DM25_PARTITION_DELETE.md), the [DM26 Quick Reformat report](DISK_MANAGER_PHASE_DM26_QUICK_REFORMAT.md), the [DM27 runtime report](DISK_MANAGER_PHASE_DM27_QUICK_REFORMAT_RUNTIME.md), the [DM28 recovery report](DISK_MANAGER_PHASE_DM28_QUICK_REFORMAT_RECOVERY.md), the [DM29 GPT repair report](DISK_MANAGER_PHASE_DM29_GPT_REPAIR.md), and the [DM30 operational polish report](DISK_MANAGER_PHASE_DM30_OPERATIONAL_POLISH.md).
@@ -417,3 +426,26 @@ open. .phase remains DM36→DM37, and DM38 has not started. Exact provenance,
 identity, activation/cancel evidence, screenshots, counters, hashes, and
 ownership shutdown are in the [DM37 continuation 5 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md)
 and ignored run folder out/dm37/dismount-guest/runs/A-idle-dismount-cont5-20261019-visible/.
+
+## DM37 continuation 6 — workflow attempt blocked by foreign QEMU
+
+Gate A remains accepted. The new workflow run booted `DM37WORKFLOW01.raw` in
+a read-only QAC acceptance guest but did not reach target identification or
+any storage operation. QAC granted exclusive acceptance reservation
+`3e8f7054c5a94cdba2fa112764ade7f9`, then logged that its exclusivity was
+compromised by one unmanaged QEMU. A post-run census identified PID 2464 from
+`guideXOSServerV0.5_DEVELOPER_STUDIO`; we did not contact its QMP endpoint,
+inspect media, or stop it. Our child exited code 0 and QAC released its lease
+through `qac run`. The fixture remained byte-identical; cumulative counters
+showed zero fixture writes and one boot-time Flush. Start-menu Enter opened
+File Explorer while Disk Manager was highlighted, leaving the activation
+path uncertain. No production source changed and no new host tests or builds
+were run.
+
+**Outcome B — `BLOCKED_BY_FOREIGN_QEMU`.** The complete primary
+Mount → explicit Dismount → Check FAT32 → explicit Remount workflow remains
+unqualified. Busy, protected, durability, removal/replacement, fault
+injection, and remaining GUI input/Close cases remain open. `.phase` stays
+DM36→DM37, and DM38 has not started. The [DM37 continuation 6 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-6--workflow-attempt-blocked-by-foreign-qemu)
+contains the full launch record, fixture identity, runtime provenance,
+counters, shutdown details, and evidence paths.
