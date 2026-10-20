@@ -29,6 +29,7 @@
 #include "include/kernel/kernel_text_guard.h"
 #include "include/kernel/settings_native_provider.h"
 #include "include/kernel/settings_display_refresh.h"
+#include "include/kernel/settings_fonts_layout.h"
 #include "include/kernel/system_font_settings_ui.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_foundation.h"
@@ -45,6 +46,7 @@ namespace kernel {
 namespace apps {
 
 namespace settings = gxos::apps::settings;
+namespace settingsfonts = kernel::apps::settings_fonts;
 namespace fontsettings = kernel::apps::font_settings;
 
 #if defined(GXOS_FONT11_QEMU_PROOF)
@@ -17232,13 +17234,21 @@ private:
     bool processInput(const settings::SettingsInputEvent& event)
     {
         if (event.kind == settings::SettingsInputKind::Scroll && isFontsRoute()) {
-            const uint32_t previewTop = 96u + 160u;
-            const uint32_t previewBottom = m_drawH > 69u ? m_drawH - 69u : 0u;
-            if (event.y >= static_cast<int32_t>(previewTop) &&
-                event.y < static_cast<int32_t>(previewBottom)) {
+            settingsfonts::Layout layout = {};
+            if (settingsfonts::CalculateLayout(m_drawW, m_drawH,
+                    fontChoiceCount(), &layout) &&
+                settingsfonts::Contains(layout.preview, event.x, event.y)) {
                 const int step = event.delta > 0 ? 12 : -12;
                 const int next = m_fontPreviewScroll + step;
-                m_fontPreviewScroll = next < 0 ? 0 : (next > 320 ? 320 : next);
+                const bool bitmapFace = m_fontPendingIdentity.kind ==
+                    gxos::gui::SystemFontIdentityKind::BuiltinBitmap;
+                const uint32_t sampleStep = settingsfonts::PreviewSampleStepPx(
+                    m_fontPendingSize, bitmapFace);
+                const uint32_t maximumScroll = settingsfonts::MaximumPreviewScrollPx(
+                    layout.preview, sampleStep);
+                m_fontPreviewScroll = next < 0 ? 0 :
+                    (static_cast<uint32_t>(next) > maximumScroll
+                        ? static_cast<int>(maximumScroll) : next);
                 return true;
             }
         } else if (event.kind == settings::SettingsInputKind::Text &&
@@ -17296,72 +17306,70 @@ private:
                 return selectSupportedCategory(selected, "mouse");
             }
             if (m_presentation.selectedCategory() == settings::CategoryId::Personalization &&
-                m_presentation.route().target == settings::TargetId::Page &&
-                event.x >= 200 && event.y >= 146 && event.y < 212)
-                return openFontsPage("mouse");
+                m_presentation.route().target == settings::TargetId::Page) {
+                settingsfonts::Layout layout = {};
+                if (settingsfonts::CalculateLayout(m_drawW, m_drawH,
+                        fontChoiceCount(), &layout) &&
+                    settingsfonts::Contains(layout.personalizationFontsTile,
+                        event.x, event.y)) return openFontsPage("mouse");
+            }
             if (isFontsRoute()) return handleFontPointer(event.x, event.y);
         }
         return false;
     }
 
-    static settings::CategoryId categoryAt(int x, int y)
+    settings::CategoryId categoryAt(int x, int y) const
     {
-        if (x < 12 || x >= 174) return settings::CategoryId::Count;
-        if (y >= 60 && y < 98) return settings::CategoryId::System;
-        if (y >= 106 && y < 144) return settings::CategoryId::Display;
-        if (y >= 152 && y < 190) return settings::CategoryId::Personalization;
-        if (y >= 198 && y < 236) return settings::CategoryId::About;
-        return settings::CategoryId::Count;
+        settingsfonts::Layout layout = {};
+        if (!settingsfonts::CalculateLayout(m_drawW, m_drawH,
+                fontChoiceCount(), &layout)) return settings::CategoryId::Count;
+        switch (settingsfonts::HitTestNavigation(layout, x, y)) {
+        case 0: return settings::CategoryId::System;
+        case 1: return settings::CategoryId::Display;
+        case 2: return settings::CategoryId::Personalization;
+        case 3: return settings::CategoryId::About;
+        default: return settings::CategoryId::Count;
+        }
     }
 
     bool handleFontPointer(int x, int y)
     {
-        const uint32_t sidebarWidth = m_drawW < 500u ? m_drawW / 3u : 182u;
-        const uint32_t contentX = sidebarWidth + 24u;
-        const uint32_t cardY = 96u;
-        const uint32_t rowsY = cardY + 42u;
-        const uint32_t rowH = 16u;
-        if (x >= static_cast<int>(contentX + 12u) &&
-            x < static_cast<int>(m_drawW > 20u ? m_drawW - 20u : m_drawW) &&
-            y >= static_cast<int>(rowsY) &&
-            y < static_cast<int>(rowsY + fontChoiceCount() * rowH)) {
-            const uint32_t index = static_cast<uint32_t>(y - static_cast<int>(rowsY)) / rowH;
-            chooseFontIndex(index);
+        settingsfonts::Layout layout = {};
+        if (!settingsfonts::CalculateLayout(m_drawW, m_drawH,
+                fontChoiceCount(), &layout)) return false;
+        uint32_t choiceIndex = 0xffffffffu;
+        const bool sizeControlsVisible =
+            m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType;
+        switch (settingsfonts::HitTestFonts(layout, x, y,
+                    sizeControlsVisible, &choiceIndex)) {
+        case settingsfonts::FontControlHit::FontChoice:
+            chooseFontIndex(choiceIndex);
             return true;
-        }
-        const int sizeY = static_cast<int>(cardY + 126u);
-        if (y >= sizeY && y < sizeY + 24 &&
-            m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType) {
-            if (x >= static_cast<int>(contentX + 64u) && x < static_cast<int>(contentX + 88u)) {
-                if (m_fontPendingSize > gxos::gui::kSystemFontMinSelectablePixelSize) --m_fontPendingSize;
-                return true;
-            }
-            if (x >= static_cast<int>(contentX + 94u) && x < static_cast<int>(contentX + 118u)) {
-                if (m_fontPendingSize < gxos::gui::kSystemFontMaxSelectablePixelSize) ++m_fontPendingSize;
-                return true;
-            }
-        }
-        const int buttonY = static_cast<int>(m_drawH) - 52;
-        if (y >= buttonY && y < buttonY + 22) {
-            if (x >= static_cast<int>(contentX + 12u) && x < static_cast<int>(contentX + 72u)) {
-                applyFontEdits();
-                return true;
-            }
-            if (x >= static_cast<int>(contentX + 78u) && x < static_cast<int>(contentX + 138u)) {
-                cancelFontEdits();
-                return true;
-            }
-            if (x >= static_cast<int>(contentX + 144u) && x < static_cast<int>(contentX + 246u)) {
-                chooseFontIndex(0u);
-                return true;
-            }
-        }
-        if (y >= 68 && y < 92 && x >= static_cast<int>(contentX + 12u) &&
-            x < static_cast<int>(contentX + 100u)) {
+        case settingsfonts::FontControlHit::DecreaseSize:
+            if (m_fontPendingSize > gxos::gui::kSystemFontMinSelectablePixelSize)
+                --m_fontPendingSize;
+            return true;
+        case settingsfonts::FontControlHit::IncreaseSize:
+            if (m_fontPendingSize < gxos::gui::kSystemFontMaxSelectablePixelSize)
+                ++m_fontPendingSize;
+            return true;
+        case settingsfonts::FontControlHit::Apply:
+            applyFontEdits();
+            return true;
+        case settingsfonts::FontControlHit::Cancel:
+            cancelFontEdits();
+            return true;
+        case settingsfonts::FontControlHit::RestoreDefault:
+            chooseFontIndex(0u);
+            return true;
+        case settingsfonts::FontControlHit::Back:
             (void)m_presentation.navigate({settings::CategoryId::Personalization, settings::TargetId::Page});
             m_fontPageLoaded = false;
             updateCoreFocus();
             return true;
+        case settingsfonts::FontControlHit::None:
+        default:
+            break;
         }
         return false;
     }
@@ -17509,11 +17517,10 @@ private:
         output[out] = '\0';
     }
 
-    void drawFontPage(uint32_t contentX, uint32_t contentW, uint32_t cardY, uint32_t cardH)
+    void drawFontPage(uint32_t originX, uint32_t originY,
+                      const settingsfonts::Layout& layout)
     {
-        const uint32_t left = contentX + 12u;
-        const uint32_t availableW = contentW > 28u ? contentW - 28u : 1u;
-        const uint32_t activeClipY = cardY + 14u;
+        const uint32_t left = originX + layout.currentSelection.x;
         char currentLabel[180] = {};
         appendText(currentLabel, sizeof(currentLabel), "Current: ");
         appendText(currentLabel, sizeof(currentLabel), m_fontActive.identity.familyName);
@@ -17522,23 +17529,25 @@ private:
         appendText(currentLabel, sizeof(currentLabel), "  ");
         appendUnsigned(currentLabel, sizeof(currentLabel), m_fontActive.pixelSize);
         appendText(currentLabel, sizeof(currentLabel), " px");
-        drawActiveFittedText(left, activeClipY, availableW, 16u,
+        drawActiveFittedText(left, originY + layout.currentSelection.y,
+            layout.currentSelection.width, layout.currentSelection.height,
             currentLabel, rgb(231, 235, 243));
 
-        drawActiveFittedText(left, cardY + 30u, availableW, 12u,
-            "Available validated fonts", rgb(146, 157, 176));
-        const uint32_t rowsY = cardY + 42u;
-        const uint32_t rowH = 16u;
-        for (uint32_t index = 0u; index < fontChoiceCount(); ++index) {
-            const uint32_t rowY = rowsY + index * rowH;
-            const bool selected = sameFont(m_fontPendingIdentity,
-                index == 0u ? m_fontPendingIdentity : m_fontFaces[index - 1u].identity) &&
-                ((index == 0u && m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap) ||
-                 (index != 0u && m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType));
-            if (selected) framebuffer::fill_rect(left, rowY, availableW, rowH, rgb(54, 67, 91));
+        drawActiveFittedText(originX + layout.fontListLabel.x,
+            originY + layout.fontListLabel.y, layout.fontListLabel.width,
+            layout.fontListLabel.height, "Available validated fonts", rgb(146, 157, 176));
+        for (uint32_t index = 0u; index < layout.fontChoiceCount; ++index) {
+            const settingsfonts::Rect& row = layout.fontRows[index];
+            const bool selected = index == 0u
+                ? m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap
+                : m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType &&
+                    sameFont(m_fontPendingIdentity, m_fontFaces[index - 1u].identity);
+            const uint32_t rowX = originX + row.x;
+            const uint32_t rowY = originY + row.y;
+            if (selected) framebuffer::fill_rect(rowX, rowY, row.width, row.height, rgb(54, 67, 91));
             if (index == 0u) {
-                drawActiveFittedText(left + 4u, rowY, availableW - 8u, rowH,
-                    "Built-in Bitmap | 7 px",
+                drawActiveFittedText(rowX + 4u, rowY, row.width > 8u ? row.width - 8u : 1u,
+                    row.height, "Built-in Bitmap | 7 px",
                     selected ? rgb(245, 247, 252) : rgb(190, 195, 205));
                 continue;
             }
@@ -17547,8 +17556,8 @@ private:
             appendText(label, sizeof(label), face.metadata.familyName);
             appendText(label, sizeof(label), " | ");
             appendText(label, sizeof(label), face.metadata.styleName);
-            drawActiveFittedText(left + 4u, rowY, availableW - 8u, rowH,
-                label, selected ? rgb(245, 247, 252) : rgb(190, 195, 205));
+            drawActiveFittedText(rowX + 4u, rowY, row.width > 8u ? row.width - 8u : 1u,
+                row.height, label, selected ? rgb(245, 247, 252) : rgb(190, 195, 205));
         }
 
         char sourceLine[192] = {};
@@ -17560,55 +17569,76 @@ private:
         } else {
             appendText(sourceLine, sizeof(sourceLine), "Selected source: built-in bitmap face");
         }
-        drawActiveFittedText(left, cardY + 108u, availableW, 16u,
-            sourceLine, rgb(165, 177, 196));
+        drawActiveFittedText(originX + layout.selectedSource.x,
+            originY + layout.selectedSource.y, layout.selectedSource.width,
+            layout.selectedSource.height, sourceLine, rgb(165, 177, 196));
 
-        const uint32_t sizeY = cardY + 126u;
-        drawActiveFittedText(left, sizeY, 44u, 22u, "Size", rgb(146, 157, 176));
+        drawActiveFittedText(originX + layout.sizeLabel.x,
+            originY + layout.sizeLabel.y, layout.sizeLabel.width,
+            layout.sizeLabel.height, "Size", rgb(146, 157, 176));
         if (m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::TrueType) {
-            framebuffer::fill_rect(left + 52u, sizeY, 24u, 22u, rgb(55, 61, 73));
-            appDrawRect(left + 52u, sizeY, 24u, 22u, rgb(93, 103, 122));
-            framebuffer::fill_rect(left + 82u, sizeY, 24u, 22u, rgb(55, 61, 73));
-            appDrawRect(left + 82u, sizeY, 24u, 22u, rgb(93, 103, 122));
-            drawActiveFittedText(left + 52u, sizeY, 24u, 22u, "-", rgb(240, 243, 249));
-            drawActiveFittedText(left + 82u, sizeY, 24u, 22u, "+", rgb(240, 243, 249));
+            const settingsfonts::Rect* sizeButtons[2] = {
+                &layout.decreaseSize, &layout.increaseSize
+            };
+            const char* sizeLabels[2] = {"-", "+"};
+            for (uint32_t i = 0u; i < 2u; ++i) {
+                const settingsfonts::Rect& button = *sizeButtons[i];
+                const uint32_t buttonX = originX + button.x;
+                const uint32_t buttonY = originY + button.y;
+                framebuffer::fill_rect(buttonX, buttonY, button.width, button.height, rgb(55, 61, 73));
+                appDrawRect(buttonX, buttonY, button.width, button.height, rgb(93, 103, 122));
+                drawActiveFittedText(buttonX, buttonY, button.width, button.height,
+                    sizeLabels[i], rgb(240, 243, 249));
+            }
             char sizeLabel[24] = {};
             appendUnsigned(sizeLabel, sizeof(sizeLabel), m_fontPendingSize);
             appendText(sizeLabel, sizeof(sizeLabel), " px  (8-48)");
-            drawActiveFittedText(left + 114u, sizeY, availableW - 114u, 22u,
-                sizeLabel, rgb(220, 225, 235));
+            drawActiveFittedText(originX + layout.sizeValue.x + 62u,
+                originY + layout.sizeValue.y, layout.sizeValue.width - 62u,
+                layout.sizeValue.height, sizeLabel, rgb(220, 225, 235));
         } else {
-            drawActiveFittedText(left + 52u, sizeY, availableW - 52u, 22u,
-                "7 px (fixed)", rgb(220, 225, 235));
+            drawActiveFittedText(originX + layout.sizeValue.x,
+                originY + layout.sizeValue.y, layout.sizeValue.width,
+                layout.sizeValue.height, "7 px (fixed)", rgb(220, 225, 235));
         }
 
-        const uint32_t previewLabelY = cardY + 150u;
-        const uint32_t previewY = cardY + 162u;
-        const uint32_t statusY = cardY + cardH - 43u;
-        const uint32_t previewBottom = statusY > previewY + 4u ? statusY - 4u : previewY + 4u;
-        const uint32_t previewH = previewBottom - previewY;
-        drawActiveFittedText(left, previewLabelY, availableW, 12u,
-            "Preview  |  scroll here to inspect all samples", rgb(146, 157, 176));
-        framebuffer::fill_rect(left, previewY, availableW, previewH, rgb(30, 34, 43));
-        appDrawRect(left, previewY, availableW, previewH, rgb(58, 65, 78));
+        drawActiveFittedText(originX + layout.previewLabel.x,
+            originY + layout.previewLabel.y, layout.previewLabel.width,
+            layout.previewLabel.height, "Preview  |  scroll here to inspect all samples",
+            rgb(146, 157, 176));
+        const uint32_t previewX = originX + layout.preview.x;
+        const uint32_t previewY = originY + layout.preview.y;
+        framebuffer::fill_rect(previewX, previewY, layout.preview.width,
+            layout.preview.height, rgb(30, 34, 43));
+        appDrawRect(previewX, previewY, layout.preview.width,
+            layout.preview.height, rgb(58, 65, 78));
         const char* samples[3] = {
             "The quick brown fox jumps over the lazy dog.",
             "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
             "abcdefghijklmnopqrstuvwxyz 0123456789"
         };
-        const uint32_t step = m_fontPendingSize == gxos::gui::kSystemFontBuiltinBitmapPixelHeight
-            ? 10u : (m_fontPendingSize * 5u) / 4u + 3u;
+        const bool bitmapPreview = m_fontPendingIdentity.kind ==
+            gxos::gui::SystemFontIdentityKind::BuiltinBitmap;
+        const uint32_t step = settingsfonts::PreviewSampleStepPx(
+            m_fontPendingSize, bitmapPreview);
+        const uint32_t maximumScroll = settingsfonts::MaximumPreviewScrollPx(
+            layout.preview, step);
+        if (m_fontPreviewScroll < 0) m_fontPreviewScroll = 0;
+        if (static_cast<uint32_t>(m_fontPreviewScroll) > maximumScroll)
+            m_fontPreviewScroll = static_cast<int>(maximumScroll);
+        const uint32_t previewBottom = layout.preview.y + layout.preview.height;
         for (uint32_t i = 0u; i < 3u; ++i) {
-            const int64_t sampleY = static_cast<int64_t>(previewY) +
+            const int64_t sampleY = static_cast<int64_t>(layout.preview.y) +
                 static_cast<int64_t>(i * step) - m_fontPreviewScroll;
-            if (sampleY < static_cast<int64_t>(previewY) - 128 ||
+            if (sampleY < static_cast<int64_t>(layout.preview.y) - 128 ||
                 sampleY >= static_cast<int64_t>(previewBottom)) continue;
             const uint32_t previewSize =
                 m_fontPendingIdentity.kind == gxos::gui::SystemFontIdentityKind::BuiltinBitmap
                     ? gxos::gui::kSystemFontBuiltinBitmapPixelHeight : m_fontPendingSize;
             const uint32_t result = drawFontText(m_fontPendingIdentity, previewSize,
-                left + 5u, static_cast<uint32_t>(sampleY), left + 2u, previewY + 2u,
-                availableW - 4u, previewH > 4u ? previewH - 4u : 1u,
+                previewX + 5u, originY + static_cast<uint32_t>(sampleY),
+                originX + layout.previewClip.x, originY + layout.previewClip.y,
+                layout.previewClip.width, layout.previewClip.height,
                 samples[i], rgb(238, 240, 246));
             if (result != static_cast<uint32_t>(gxos::gui::SystemFontSelectionStatus::Ok)) {
                 updateFontStatus(static_cast<gxos::gui::SystemFontSelectionStatus>(result));
@@ -17622,21 +17652,23 @@ private:
             refreshFontCatalogAfterPreviewError();
         }
 
-        framebuffer::fill_rect(left, statusY, availableW, 15u, rgb(36, 40, 50));
-        drawActiveFittedText(left, statusY, availableW, 15u, m_fontStatusText,
+        framebuffer::fill_rect(originX + layout.status.x, originY + layout.status.y,
+            layout.status.width, layout.status.height, rgb(36, 40, 50));
+        drawActiveFittedText(originX + layout.status.x, originY + layout.status.y,
+            layout.status.width, layout.status.height, m_fontStatusText,
             m_fontStatus == gxos::gui::SystemFontSelectionStatus::Ok ||
             m_fontStatus == gxos::gui::SystemFontSelectionStatus::PersistenceFailed
                 ? rgb(220, 225, 235) : rgb(236, 174, 122));
-        const uint32_t buttonY = cardY + cardH - 25u;
-        const uint32_t buttonWidths[3] = {60u, 60u, 102u};
         const char* buttonLabels[3] = {"Apply", "Cancel", "Restore Defaults"};
-        const uint32_t buttonX[3] = {left, left + 66u, left + 132u};
         for (uint32_t i = 0u; i < 3u; ++i) {
-            framebuffer::fill_rect(buttonX[i], buttonY, buttonWidths[i], 20u,
+            const settingsfonts::Rect& button = layout.actions[i];
+            const uint32_t buttonX = originX + button.x;
+            const uint32_t buttonY = originY + button.y;
+            framebuffer::fill_rect(buttonX, buttonY, button.width, button.height,
                 i == 0u ? rgb(52, 76, 112) : rgb(55, 61, 73));
-            appDrawRect(buttonX[i], buttonY, buttonWidths[i], 20u, rgb(93, 103, 122));
-            drawActiveFittedText(buttonX[i] + 3u, buttonY, buttonWidths[i] - 6u, 20u,
-                buttonLabels[i], rgb(240, 243, 249));
+            appDrawRect(buttonX, buttonY, button.width, button.height, rgb(93, 103, 122));
+            drawActiveFittedText(buttonX + 3u, buttonY, button.width - 6u,
+                button.height, buttonLabels[i], rgb(240, 243, 249));
         }
     }
 
@@ -17711,14 +17743,15 @@ private:
         const uint32_t y = m_drawY;
         const uint32_t w = m_drawW;
         const uint32_t h = m_drawH;
+        settingsfonts::Layout layout = {};
+        if (!settingsfonts::CalculateLayout(w, h, fontChoiceCount(), &layout)) return;
         const settings::CategoryId selected = presentation.selectedCategory();
-        const uint32_t sidebarWidth = w < 500u ? w / 3u : 182u;
         framebuffer::fill_rect(x, y, w, h, rgb(27, 30, 38));
-        framebuffer::fill_rect(x, y, sidebarWidth, h, rgb(34, 37, 46));
-        framebuffer::fill_rect(x + sidebarWidth - 1u, y, 1u, h, rgb(67, 72, 84));
-        drawActiveFittedText(x + 18u, y + 16u, sidebarWidth - 36u, 22u,
+        framebuffer::fill_rect(x, y, layout.sidebarWidth, h, rgb(34, 37, 46));
+        framebuffer::fill_rect(x + layout.sidebarWidth - 1u, y, 1u, h, rgb(67, 72, 84));
+        drawActiveFittedText(x + 18u, y + 16u, layout.sidebarWidth - 36u, 22u,
             "Settings", rgb(238, 240, 246));
-        drawActiveFittedText(x + 18u, y + 40u, sidebarWidth - 36u, 16u,
+        drawActiveFittedText(x + 18u, y + 40u, layout.sidebarWidth - 36u, 16u,
             "System", rgb(160, 174, 194));
 
         const settings::CategoryId items[4] = {
@@ -17726,26 +17759,29 @@ private:
             settings::CategoryId::Personalization, settings::CategoryId::About
         };
         const char* labels[4] = { "System", "Display", "Personalization", "About" };
-        const uint32_t itemY[4] = { y + 60u, y + 106u, y + 152u, y + 198u };
         for (int i = 0; i < 4; ++i) {
             const bool active = selected == items[i];
             const bool hovered = m_hoverCategory == items[i];
             const uint32_t fill = active ? rgb(62, 79, 112) : (hovered ? rgb(47, 52, 64) : rgb(34, 37, 46));
-            framebuffer::fill_rect(x + 12u, itemY[i], sidebarWidth > 24u ? sidebarWidth - 24u : sidebarWidth, 36u, fill);
+            const settingsfonts::Rect& nav = layout.navigation[i];
+            const uint32_t navX = x + nav.x;
+            const uint32_t navY = y + nav.y;
+            framebuffer::fill_rect(navX, navY, nav.width, nav.height, fill);
             if (active && m_windowFocused) {
-                appDrawRect(x + 12u, itemY[i], sidebarWidth > 24u ? sidebarWidth - 24u : sidebarWidth, 36u, rgb(115, 166, 245));
+                appDrawRect(navX, navY, nav.width, nav.height, rgb(115, 166, 245));
             }
-            drawActiveFittedText(x + 24u, itemY[i], sidebarWidth - 48u, 36u,
+            drawActiveFittedText(navX + 12u, navY,
+                nav.width > 24u ? nav.width - 24u : 1u, nav.height,
                 labels[i], active ? rgb(245, 247, 252) : rgb(190, 195, 205));
         }
 
-        drawActiveFittedText(x + 14u, y + 250u, sidebarWidth - 28u, 14u,
+        drawActiveFittedText(x + 14u, y + 250u, layout.sidebarWidth - 28u, 14u,
             "More settings", rgb(145, 151, 163));
-        drawActiveFittedText(x + 14u, y + 264u, sidebarWidth - 28u, 14u,
+        drawActiveFittedText(x + 14u, y + 264u, layout.sidebarWidth - 28u, 14u,
             "are in progress.", rgb(145, 151, 163));
 
-        const uint32_t contentX = x + sidebarWidth + 24u;
-        const uint32_t contentW = w > sidebarWidth + 44u ? w - sidebarWidth - 44u : 1u;
+        const uint32_t contentX = x + layout.content.x;
+        const uint32_t contentW = layout.content.width;
         const bool display = selected == settings::CategoryId::Display;
         const bool personalization = selected == settings::CategoryId::Personalization;
         const bool fonts = personalization && presentation.route().target ==
@@ -17754,38 +17790,43 @@ private:
             (personalization ? "Personalization" :
             (selected == settings::CategoryId::About ? "About" :
             (display ? "Display" : "System overview")));
-        drawActiveFittedText(contentX, y + 18u, contentW, 22u,
+        drawActiveFittedText(contentX, y + layout.pageTitle.y, layout.pageTitle.width,
+            layout.pageTitle.height,
             pageName, rgb(243, 245, 250));
         const char* pageDescription = fonts ? "Select a validated typeface and preview its size" :
             (personalization ? "Desktop background and text appearance" :
             (selected == settings::CategoryId::About ? "Product and version details" :
             (display ? "Active framebuffer information" : "Read-only information reported by the kernel")));
-        drawActiveFittedText(contentX, y + 42u, contentW, 18u,
+        drawActiveFittedText(contentX, y + layout.pageDescription.y,
+            layout.pageDescription.width, layout.pageDescription.height,
             pageDescription, rgb(165, 177, 196));
         if (fonts) {
-            framebuffer::fill_rect(contentX + 12u, y + 68u, 92u, 20u, rgb(55, 61, 73));
-            appDrawRect(contentX + 12u, y + 68u, 92u, 20u, rgb(93, 103, 122));
-            drawActiveFittedText(contentX + 14u, y + 68u, 88u, 20u,
+            const settingsfonts::Rect& back = layout.backButton;
+            framebuffer::fill_rect(x + back.x, y + back.y, back.width, back.height, rgb(55, 61, 73));
+            appDrawRect(x + back.x, y + back.y, back.width, back.height, rgb(93, 103, 122));
+            drawActiveFittedText(x + back.x + 2u, y + back.y,
+                back.width - 4u, back.height,
                 "Back to Personalization", rgb(240, 243, 249));
         } else {
             appDrawText(contentX, y + 70u, getRuntimeAppId(), rgb(135, 159, 197));
         }
 
-        const uint32_t cardY = y + 96u;
-        const uint32_t cardH = h > 140u ? h - 122u : 1u;
-        framebuffer::fill_rect(contentX, cardY, contentW, cardH, rgb(36, 40, 50));
-        appDrawRect(contentX, cardY, contentW, cardH, rgb(67, 74, 88));
+        const settingsfonts::Rect& card = layout.card;
+        const uint32_t cardX = x + card.x;
+        const uint32_t cardY = y + card.y;
+        framebuffer::fill_rect(cardX, cardY, card.width, card.height, rgb(36, 40, 50));
+        appDrawRect(cardX, cardY, card.width, card.height, rgb(67, 74, 88));
         if (fonts) {
-            drawFontPage(contentX, contentW, cardY, cardH);
+            drawFontPage(x, y, layout);
         } else if (personalization) {
             appDrawText(contentX + 16u, cardY + 20u, "Personalization", rgb(224, 229, 239));
-            const uint32_t tileY = cardY + 50u;
-            framebuffer::fill_rect(contentX + 16u, tileY, contentW > 32u ? contentW - 32u : 1u,
-                54u, rgb(48, 54, 66));
-            appDrawRect(contentX + 16u, tileY, contentW > 32u ? contentW - 32u : 1u,
-                54u, rgb(82, 91, 108));
-            appDrawText(contentX + 28u, tileY + 14u, "Fonts", rgb(240, 243, 249));
-            appDrawText(contentX + 28u, tileY + 32u,
+            const settingsfonts::Rect& tile = layout.personalizationFontsTile;
+            const uint32_t tileX = x + tile.x;
+            const uint32_t tileY = y + tile.y;
+            framebuffer::fill_rect(tileX, tileY, tile.width, tile.height, rgb(48, 54, 66));
+            appDrawRect(tileX, tileY, tile.width, tile.height, rgb(82, 91, 108));
+            appDrawText(tileX + 12u, tileY + 14u, "Fonts", rgb(240, 243, 249));
+            appDrawText(tileX + 12u, tileY + 32u,
                 "Choose a system font, size, and live preview", rgb(170, 181, 198));
         } else if (display) {
             appDrawText(contentX + 16u, cardY + 20u, "Active display information", rgb(224, 229, 239));
@@ -17835,8 +17876,8 @@ private:
             appDrawText(contentX + 16u, cardY + 20u, "System information", rgb(224, 229, 239));
             appDrawText(contentX + 16u, cardY + 58u, "System information is unavailable.", rgb(236, 174, 122));
         }
-        drawActiveFittedText(contentX + 12u, y + h - 25u,
-            contentW > 24u ? contentW - 24u : contentW, 18u,
+        drawActiveFittedText(x + layout.footer.x, y + layout.footer.y,
+            layout.footer.width, layout.footer.height,
             fonts ? "J/K Font   +/- Size   A Apply   C Cancel   R Bitmap" :
             (personalization ? "P Personalization   F Fonts" :
             "S System   D Display   P Personalization   A About"), rgb(145, 151, 163));

@@ -10,6 +10,7 @@
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/desktop_font.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/window_geometry.h"
 
 namespace kernel {
 namespace compositor {
@@ -242,12 +243,10 @@ bool KernelCompositor::registerWindow(app::KernelWindow* window) {
     if (!s_initialized || !window) {
         return false;
     }
-	const int minimumWidth = window->minimumWidth > MIN_WINDOW_WIDTH
-		? window->minimumWidth : MIN_WINDOW_WIDTH;
-	const int minimumHeight = window->minimumHeight > MIN_WINDOW_HEIGHT
-		? window->minimumHeight : MIN_WINDOW_HEIGHT;
-	if (window->w < minimumWidth) window->w = minimumWidth;
-	if (window->h < minimumHeight) window->h = minimumHeight;
+	window->w = app::ClampWindowDimensionToMinimum(window->w,
+		window->minimumWidth, MIN_WINDOW_WIDTH);
+	window->h = app::ClampWindowDimensionToMinimum(window->h,
+		window->minimumHeight, MIN_WINDOW_HEIGHT);
     
     // Assign ID if not set
     if (window->id == 0) {
@@ -575,16 +574,10 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
         app::KernelWindow* win = getWindow(s_dragState.windowId);
         if (win) {
             if (s_dragState.isResize) {
-                int newW = s_dragState.resizeStartW + (mx - s_dragState.startX);
-                int newH = s_dragState.resizeStartH + (my - s_dragState.startY);
-                const int minimumWidth = win->minimumWidth > MIN_WINDOW_WIDTH
-                    ? win->minimumWidth : MIN_WINDOW_WIDTH;
-                const int minimumHeight = win->minimumHeight > MIN_WINDOW_HEIGHT
-                    ? win->minimumHeight : MIN_WINDOW_HEIGHT;
-                if (newW < minimumWidth) newW = minimumWidth;
-                if (newH < minimumHeight) newH = minimumHeight;
-                win->w = newW;
-                win->h = newH;
+                win->w = app::WindowDimensionAfterResize(s_dragState.resizeStartW,
+                    mx, s_dragState.startX, win->minimumWidth, MIN_WINDOW_WIDTH);
+                win->h = app::WindowDimensionAfterResize(s_dragState.resizeStartH,
+                    my, s_dragState.startY, win->minimumHeight, MIN_WINDOW_HEIGHT);
             } else {
                 win->x = mx - s_dragState.offsetX;
                 win->y = my - s_dragState.offsetY;
