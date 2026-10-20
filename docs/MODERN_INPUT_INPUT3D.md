@@ -159,6 +159,126 @@ layout. These tests validate snapshot state, not pixels. A post-`present()`
 serial acknowledgment is software render-state evidence; it is not physical
 scan-out or bare-metal USB qualification.
 
+## INPUT3D-R4: PCI startup frontier and controlled audio isolation
+
+The reproduced physical frontier is still the VivoBook report at build
+`27980591f302`: the panel reached `PCI_DISCOVERY_ENTERED`, then remained there
+for about five minutes with USB scan `NOT INVOKED`, zero xHCI controllers, and
+no first failure. That evidence locates the last published broad boot stage;
+it does not identify PCI audio or prove an xHCI fault.
+
+### Audited AMD64 call path
+
+In `kernel/core/main.cpp::kernel_main`, after the first desktop presentation,
+IDT/PIC initialization, PIT setup and IRQ0 registration, startup records
+`PciDiscoveryEntered`. UEFI physical-base setup for PCI audio, native audio,
+and xHCI is immediately before that marker. The kernel paints the panel, then
+calls `kernel::pci_audio::init()`. When that returns, it records
+`PciDiscoveryCompleted`, logs the audio controller count, paints again, and
+calls `kernel::usb::diagnostics::scan_host_controllers()`. After the USB scan
+returns, it paints and calls `kernel::usb::xhci::controller::init()`, then
+continues to storage, networking, input initialization and the main loop.
+
+`PCI_DISCOVERY_ENTERED` is a broad `kernel_main` stage boundary immediately
+before PCI audio initialization. It is not an internal PCI-audio scan marker.
+The original R3 panel therefore could not tell whether execution entered the
+audio function, scanned PCI, probed an HDA controller, or returned from audio.
+
+The relevant source call graph is:
+
+```text
+kernel_main (kernel/core/main.cpp)
+  ├─ set PCI audio / native audio / xHCI physical bases (UEFI path)
+  ├─ record PciDiscoveryEntered; desktop::draw()
+  ├─ pci_audio::init()                         [normal diagnostic variant]
+  │    ├─ scan_pci_audio()                     [pci_audio.cpp]
+  │    │    ├─ 256 buses × 32 devices × 8 functions
+  │    │    ├─ CF8/CFC vendor and class reads
+  │    │    ├─ multimedia class filter: HDA 04/03, AC'97 04/01
+  │    │    ├─ BAR0 and BAR1 (for a 64-bit BAR)
+  │    │    └─ PCI command update: IO, memory, bus master
+  │    └─ each discovered HDA controller:
+  │         ├─ hda_reset()
+  │         ├─ hda_init_corb_rirb()
+  │         └─ hda_enumerate_codecs() → hda_send_verb()
+  ├─ record PciDiscoveryCompleted; desktop::draw()
+  ├─ scan_host_controllers()                    [usb_controller.cpp]
+  ├─ desktop::draw()
+  └─ xhci::controller::init()                   [xhci.cpp]
+```
+
+The PCI audio scan is synchronous and checks 65,536 BDF functions. On AMD64,
+configuration accesses use direct CF8/CFC port I/O. There is no software
+timeout or interrupt wait around a synchronous port instruction. The driver
+does not take a startup lock, register an audio interrupt handler, allocate
+memory, or wait for an audio interrupt during this path. The diagnostic
+snapshot lock is held only while copying or publishing fixed-size state; no
+controller access or framebuffer paint occurs while it is held.
+
+For an audio-class device, the scan reads BAR0 and the upper BAR dword when the
+BAR declares a 64-bit memory resource, then sets PCI command bits `0x0007`.
+HDA BAR access in `pci_audio.cpp` casts the BAR physical value directly to a
+volatile pointer. Unlike the R1 xHCI path, that audio code does not validate a
+mapped virtual span before its first register access. A bad or absent mapping
+can therefore cause a synchronous fault before later USB discovery. The audio
+scan also enables BAR decoding before testing an HDA MMIO register.
+
+The HDA reset has fixed spin delays and a 1,000-read CRST poll. HDA verb
+response polling is capped at 100,000 iterations with a bounded delay per
+iteration. Codec node and widget ranges are checked using 16-bit end
+arithmetic; malformed ranges that exceed the 8-bit node space are rejected,
+and the loops cannot wrap an 8-bit counter indefinitely. Verb response
+failures now propagate to the codec-enumeration and probe result. These
+polling paths can time out and return; raw PCI reads and direct HDA MMIO reads
+cannot safely be declared timed out by checking a clock around them.
+
+### Diagnostic frontier and bypass
+
+Diagnostic builds keep a fixed 16-record startup trace. Each record has a
+monotonic enter sequence, a separate return sequence, operation/status,
+optional BDF, IDs, class, config offset, result and error code. The snapshot
+preserves the most recently entered operation separately from the most
+recently returned operation. `IN PROGRESS` remains distinct from `TIMED OUT`;
+the code only reports a timeout when a bounded polling operation actually
+expires.
+
+PCI config transactions are recorded for the sparse class-filter read of a
+present PCI function and for transactions on a known audio-class function.
+The scan's exhaustive vendor-ID probes (including 65,536 empty BDFs) are not
+written one by one to serial or the bounded trace. A stopped vendor-ID access
+before a PCI identity is known would therefore leave the last visible
+frontier at `PCI_AUDIO_SCAN_ENTER`; the hardware instruction cannot be
+interrupted safely. This keeps ordinary probing from generating unbounded
+text or per-read rendering while still showing the full BDF/ID/class context
+for audio BAR, command, reset, ring and codec boundaries.
+
+Before selected candidate PCI transactions, HDA reset/response boundaries,
+USB scan entry, and xHCI initialization entry, diagnostic code publishes the
+operation and uses the established desktop renderer outside snapshot locks
+and interrupt context. It emits matching COM1 `INPUT3D` breadcrumbs. Completion
+records the returned result/status; the next safe paint exposes it. No main
+loop repaint is needed to show an entry frontier. The panel retains R3 boot,
+snapshot and presentation reporting, sticky first-failure state, and now adds
+the last entered/returned operation, BDF identity, config offset, and audio,
+USB and xHCI status. A static screen is not itself reported as a timeout.
+
+The bypass is safe for this comparison because the USB scan and xHCI driver do
+not consume state created by `pci_audio::init()`. The
+`GXOS_INPUT3D_SKIP_PCI_AUDIO=1` define is rejected unless the diagnostic define
+is also present and AMD64 is selected. It skips only the call to
+`pci_audio::init()` after shared physical-base setup, explicitly records and
+prints `PCI AUDIO: DIAGNOSTICALLY SKIPPED`, and continues through the same USB
+scan and xHCI calls. It is disabled by default; the normal diagnostic and
+production path still calls `pci_audio::init()`.
+
+Variant A is the normal instrumented startup. Variant B is built from the
+same source commit and package inputs with only the diagnostic audio-skip
+define added. The ISO manifest and embedded build identity record the active
+flags and bypass state. Neither variant writes to removable media, and neither
+is physical qualification. The packaging manifests record artifact hashes,
+embedded file identities, source revision and compile flags; the final handoff
+reports those values alongside the QEMU evidence and physical test steps.
+
 ## INPUT3D-R1: BAR/MMIO failure frontier
 
 On the 2026-10-11 physical boot, the recorded result `0xe1020004` was the raw
@@ -196,35 +316,46 @@ input claim.
 
 ## Physical comparison procedure
 
-Use the same INPUT3D ISO on each machine. Do not write it to a USB drive from
-the build procedure; boot it using the machine's normal removable-media path.
+Do not write either ISO to removable media automatically. Boot only with the
+machine's normal removable-media procedure and only when the user is ready to
+authorize that physical boot.
 
-### SARAH_DT
+### Test 1 — ASUS VivoBook, normal R4
 
-1. Boot the ISO and wait for the guideXOS desktop.
-2. Photograph the diagnostic panel and record controller PCI identity, xHCI
-   lifecycle statuses, first failure, connected-port count, and enumeration
-   result.
-3. If safe and practical, move an ordinary wired USB mouse and type on the
-   wired keyboard; report whether the panel or desktop reacts.
+1. Boot `guideXOS-ModernInput-INPUT3D-R4.iso`.
+2. Wait about 60 seconds and photograph the panel. Record the last entered
+   operation, last returned operation, operation sequences, PCI identity,
+   audio status, USB scan status, xHCI status and first failure.
+3. If the frontier is unchanged, leave it for up to five minutes only if that
+   adds useful evidence. Do not repeatedly power-cycle the machine.
+4. Check the built-in keyboard and touchpad independently. If external wired
+   USB devices are available, test them separately; the built-in touchpad may
+   use I2C-HID.
 
-### ASUS VivoBook
+### Test 2 — ASUS VivoBook, audio-bypass R4
 
-1. Boot the same ISO and photograph the same panel fields.
-2. Check the built-in keyboard and touchpad independently.
-3. If an external wired USB keyboard and mouse are available, test them
-   separately. A built-in touchpad may use I2C-HID, so its failure alone does
-   not establish a USB transport failure.
+Run this comparison only if Test 1 remains blocked in the PCI audio stage.
 
-### LEON2_RDT
+1. Boot `guideXOS-ModernInput-INPUT3D-R4-AudioBypass.iso`.
+2. Verify the panel or COM1 explicitly reports
+   `PCI AUDIO: DIAGNOSTICALLY SKIPPED`.
+3. Observe whether USB-host discovery begins; photograph the frontier and any
+   xHCI failure.
 
-When ready, boot the same ISO locally and photograph the same fields. This
-HP ProDesk 600 G6 MT has the known Intel Q470 xHCI controller `8086:06ED` and
-known external USB keyboard and mouse, making it the comparison system. No
-remote reboot is part of this procedure.
+If the bypass reaches USB discovery while normal R4 does not, that strongly
+implicates the skipped audio stage, but additional evidence is needed to name
+the exact defective operation.
 
-Record whether PCI discovery, BAR/capability reads, ownership, halt/reset,
-DMA, ring startup, controller running, port reset, Enable Slot, Address Device,
-and descriptor retrieval reached `PASS`, `FAIL`, `TIMEOUT`, `BLOCKED`,
-`UNSUPPORTED`, or remained `NOT ATTEMPTED`/`UNKNOWN`. Return the panel photo and
-any input observations for the next driver change.
+### Test 3 — SARAH_DT or LEON2_RDT
+
+After the VivoBook comparison, boot the normal R4 ISO on one second machine
+when authorized. LEON2_RDT is the HP ProDesk 600 G6 MT with known Intel Q470
+xHCI controller `8086:06ED` and external wired keyboard and mouse. SARAH_DT is
+the other comparison system from the earlier qualification plan.
+
+For any machine, record whether PCI discovery, BAR/capability reads, ownership,
+halt/reset, DMA, ring startup, controller running, port reset, Enable Slot,
+Address Device and descriptor retrieval reached `PASS`, `FAIL`, `TIMEOUT`,
+`BLOCKED`, `UNSUPPORTED`, or remained `NOT ATTEMPTED`/`UNKNOWN`. Include a
+panel photo and input observations. QEMU results do not replace these physical
+observations.

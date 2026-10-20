@@ -17,6 +17,7 @@ param(
     [switch]$Debug,
     [switch]$WaitGdb,
     [switch]$ModernInputDiagnostics,
+    [switch]$SkipPciAudioForInput3D,
     [string]$Memory = "1024M",
     [string]$Arch = "amd64"
 )
@@ -25,6 +26,9 @@ $ErrorActionPreference = "Stop"
 
 if ($ModernInputDiagnostics -and $Arch -ne "amd64") {
     throw "Modern input hardware diagnostics are currently supported only by the AMD64 boot path."
+}
+if ($SkipPciAudioForInput3D -and (-not $ModernInputDiagnostics -or $Arch -ne "amd64")) {
+    throw "-SkipPciAudioForInput3D requires -ModernInputDiagnostics on AMD64."
 }
 
 Write-Host "====================================" -ForegroundColor Cyan
@@ -339,6 +343,9 @@ if (!$SkipKernel) {
         if ($ModernInputDiagnostics) {
             $KernelExtraCFlags += "-DGXOS_INPUT3D_DIAGNOSTICS=1"
         }
+        if ($SkipPciAudioForInput3D) {
+            $KernelExtraCFlags += "-DGXOS_INPUT3D_SKIP_PCI_AUDIO=1"
+        }
         # Keep the default bare-metal build free of boot-time smoke launches.
         # The kernel makefile does not include CFLAGS in object dependencies. If
         # an opt-in launch-smoke build ran immediately before a normal build,
@@ -352,6 +359,9 @@ if (!$SkipKernel) {
         # Rebuild desktop.cpp on every scripted kernel build to avoid keeping
         # a diagnostic or non-diagnostic object from the preceding build.
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\desktop.o")
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\pci_audio.o")
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\modern_input_diagnostics.o")
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelDir "build\$Arch\obj\core\usb_controller.o")
         # The file-operation runtime smoke adds run_runtime_smoke() to the
         # clipboard translation unit. CFLAGS are not part of the Makefile's
         # object dependency key, so invalidate that object when switching
@@ -458,6 +468,8 @@ elseif (Test-Path $KernelBin) {
         "espKernelSha256=$((Get-FileHash -LiteralPath $TargetKernel -Algorithm SHA256).Hash)"
         "sourceGitCommit=$(& git -C $RootDir rev-parse HEAD)"
         "input3dDiagnostics=$(if ($ModernInputDiagnostics) { 'enabled' } else { 'disabled' })"
+        "input3dSkipPciAudio=$(if ($SkipPciAudioForInput3D) { 'enabled' } else { 'disabled' })"
+        "input3dCompileFlags=$(if ($ModernInputDiagnostics) { 'GXOS_INPUT3D_DIAGNOSTICS=1' } else { 'none' })$(if ($SkipPciAudioForInput3D) { ';GXOS_INPUT3D_SKIP_PCI_AUDIO=1' } else { '' })"
         "builtAtUtc=$([DateTime]::UtcNow.ToString('o'))"
     ) | Set-Content -LiteralPath $identityPath -Encoding ascii
     Write-Host "      Wrote: build-identity.txt" -ForegroundColor Cyan

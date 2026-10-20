@@ -19,6 +19,9 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/modern_input_diagnostics.h"
 #include "include/kernel/serial_debug.h"
+#if defined(GXOS_INPUT3D_DIAGNOSTICS)
+#include "include/kernel/desktop.h"
+#endif
 
 namespace kernel {
 namespace usb {
@@ -242,6 +245,13 @@ uint32_t scan_host_controllers()
     kernel::serial::put_hex64(snapshot.snapshotSequence);
     kernel::serial::putc('\n');
     kernel::serial::puts("[USB] PCI discovery ENTRY REACHED\n");
+#if defined(GXOS_INPUT3D_DIAGNOSTICS)
+    // The scanner is synchronous and starts before the main event loop. Paint
+    // the entry state now so a stopped config-space transaction cannot leave
+    // the user looking at the earlier PCI-audio frame.
+    kernel::desktop::draw();
+    kernel::serial::puts("INPUT3D: USB host scan entry presented\n");
+#endif
     uint32_t controllers = 0u;
 #if ARCH_HAS_PORT_IO
     controllers = scan_port_io();

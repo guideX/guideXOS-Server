@@ -8,13 +8,15 @@ param(
     [switch]$Clean,
     [switch]$SkipBuild,
     [switch]$ModernInputDiagnostics,
+    [switch]$SkipPciAudioForInput3D,
     [switch]$RequireCleanWorktree,
     [switch]$Force,
     [switch]$BootstrapTools,
     [ValidateSet('PyCdlib', 'Oscdimg')]
     [string]$IsoBackend = 'PyCdlib',
     [string]$OscdimgPath,
-    [string]$PythonPath
+    [string]$PythonPath,
+    [string]$OutputBaseName
 )
 
 Set-StrictMode -Version Latest
@@ -419,6 +421,7 @@ function Invoke-CanonicalBuild {
     $buildArgs = @('-Arch', $Arch)
     if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch) }
     if ($ModernInputDiagnostics) { $buildArgs += '-ModernInputDiagnostics' }
+    if ($SkipPciAudioForInput3D) { $buildArgs += '-SkipPciAudioForInput3D' }
     Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
     Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs) | Out-Null
 }
@@ -427,6 +430,9 @@ if ($Version -notmatch '^(0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0
     Fail "invalid version '$Version'. Use a conservative semantic version such as 0.1.0 or 0.1.0-rc1."
 }
 if ($SkipBuild -and $Clean) { Fail '-Clean cannot be combined with -SkipBuild because it removes the existing ESP.' }
+if ($SkipPciAudioForInput3D -and -not $ModernInputDiagnostics) {
+    Fail '-SkipPciAudioForInput3D requires -ModernInputDiagnostics.'
+}
 if ($IsoBackend -eq 'PyCdlib' -and -not [string]::IsNullOrWhiteSpace($OscdimgPath)) {
     Fail '-OscdimgPath is only valid with -IsoBackend Oscdimg. PyCdlib is the default backend and does not require the ADK.'
 }
@@ -441,6 +447,12 @@ if (-not $worktreeClean) {
 }
 
 $artifactBase = "guideXOS-Server-v$Version-$Arch"
+if (-not [string]::IsNullOrWhiteSpace($OutputBaseName)) {
+    if ($OutputBaseName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+        Fail 'OutputBaseName must be a simple filename stem with no path separators.'
+    }
+    $artifactBase = $OutputBaseName
+}
 $isoName = "$artifactBase.iso"
 $shaName = "$isoName.sha256"
 $manifestName = "$artifactBase.manifest.json"
@@ -493,6 +505,18 @@ try {
         $identityKernelHash = [regex]::Match($identity, '(?m)^espKernelSha256=([0-9a-fA-F]{64})\s*$')
         if ($identity -notmatch '(?m)^input3dDiagnostics=enabled\s*$') {
             Fail 'ESP/build-identity.txt does not identify an INPUT3D diagnostic kernel.'
+        }
+        $expectedAudioSkip = if ($SkipPciAudioForInput3D) { 'enabled' } else { 'disabled' }
+        if ($identity -notmatch ("(?m)^input3dSkipPciAudio=" + [regex]::Escape($expectedAudioSkip) + "\s*$")) {
+            Fail "ESP/build-identity.txt does not match the requested PCI audio startup configuration ($expectedAudioSkip)."
+        }
+        $expectedCompileFlags = if ($SkipPciAudioForInput3D) {
+            'GXOS_INPUT3D_DIAGNOSTICS=1;GXOS_INPUT3D_SKIP_PCI_AUDIO=1'
+        } else {
+            'GXOS_INPUT3D_DIAGNOSTICS=1'
+        }
+        if ($identity -notmatch ("(?m)^input3dCompileFlags=" + [regex]::Escape($expectedCompileFlags) + "\s*$")) {
+            Fail 'ESP/build-identity.txt compile flags do not match the requested diagnostic variant.'
         }
         if (-not $identityRevision.Success -or
             $identityRevision.Groups[1].Value.Substring(0, 12).ToLowerInvariant() -ne $expectedRevision.ToLowerInvariant()) {
@@ -597,14 +621,18 @@ try {
         canonicalBuild = if ($SkipBuild) {
             'not invoked (-SkipBuild); prebuilt ESP inputs validated from build-identity.txt'
         } else {
-            'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' }) + $(if ($ModernInputDiagnostics) { ' -ModernInputDiagnostics' } else { '' })
+            'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' }) + $(if ($ModernInputDiagnostics) { ' -ModernInputDiagnostics' } else { '' }) + $(if ($SkipPciAudioForInput3D) { ' -SkipPciAudioForInput3D' } else { '' })
         }
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
     }
     $diagnosticMode = if ($ModernInputDiagnostics) {
-        'INPUT3D hardware diagnostics'
+        if ($SkipPciAudioForInput3D) {
+            'INPUT3D hardware diagnostics; PCI audio startup diagnostically skipped'
+        } else {
+            'INPUT3D hardware diagnostics'
+        }
     } else {
         'standard'
     }
@@ -623,6 +651,12 @@ try {
         worktreeCleanAtPackagingStart = [bool]$worktreeClean
         worktreeStatusAtPackagingStart = @($sourceStatusLines)
         diagnosticMode = $diagnosticMode
+        pciAudioStartupBypass = [bool]$SkipPciAudioForInput3D
+        diagnosticCompileFlags = if ($ModernInputDiagnostics) {
+            'GXOS_INPUT3D_DIAGNOSTICS=1' + $(if ($SkipPciAudioForInput3D) { ';GXOS_INPUT3D_SKIP_PCI_AUDIO=1' } else { '' })
+        } else {
+            'none'
+        }
         buildTimestampUtc = $PackageStartUtc.ToString('o')
         requiredInputFiles = @($esp.Required)
         inputFiles = @($esp.Files)

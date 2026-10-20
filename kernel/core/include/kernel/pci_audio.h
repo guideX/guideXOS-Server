@@ -36,6 +36,19 @@ static const uint8_t PCI_CLASS_MULTIMEDIA  = 0x04;
 static const uint8_t PCI_SUBCLASS_AUDIO    = 0x01;   // Audio device
 static const uint8_t PCI_SUBCLASS_HDA      = 0x03;   // HD Audio
 
+// HDA codec node/widget ranges are reported as 8-bit start/count pairs.
+// Validate their exclusive end in a wider type before iterating; 8-bit loop
+// counters can wrap and spin forever on malformed controller responses.
+inline bool validate_hda_child_range(uint8_t start, uint8_t count,
+                                     uint16_t* outEnd)
+{
+    const uint16_t end = static_cast<uint16_t>(start) +
+                         static_cast<uint16_t>(count);
+    if (end > 256u) return false;
+    if (outEnd != nullptr) *outEnd = end;
+    return true;
+}
+
 // ================================================================
 // Intel HDA controller register offsets (from MMIO BAR0)
 // ================================================================

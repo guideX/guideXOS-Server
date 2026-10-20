@@ -8,6 +8,7 @@ namespace modern_input_diagnostics {
 
 static const uint32_t MAX_CONTROLLERS = 8u;
 static const uint32_t STAGE_COUNT = 19u;
+static const uint32_t MAX_STARTUP_OPERATION_TRACE = 16u;
 
 enum class Status : uint8_t {
     Unknown = 0,
@@ -40,6 +41,81 @@ enum class BootStage : uint8_t {
     XhciInitCompleted,
     DesktopInitialized,
     MainLoopEntered
+};
+
+enum class StartupOperation : uint8_t {
+    None = 0,
+    PciAudioEntry,
+    PciAudioScanEnter,
+    PciConfigAddressSelect,
+    PciConfigDataRead,
+    PciConfigDataWrite,
+    PciAudioDeviceFound,
+    PciDeviceUnsupported,
+    PciAudioProbeEnter,
+    PciAudioProbeExit,
+    HdaResetEnter,
+    HdaResetWaitCrst,
+    HdaCorbRirbInit,
+    HdaCodecEnumeration,
+    HdaVerbResponseWait,
+    PciAudioScanExit,
+    PciAudioComplete,
+    PciAudioSkipped,
+    UsbHostScanEnter,
+    UsbHostScanComplete,
+    XhciInitEnter,
+    XhciInitComplete
+};
+
+enum class StartupOperationStatus : uint8_t {
+    NotInvoked = 0,
+    InProgress,
+    Completed,
+    ReturnedError,
+    TimedOut,
+    Unsupported,
+    Unknown
+};
+
+struct StartupOperationRecord {
+    StartupOperation operation;
+    StartupOperationStatus status;
+    uint64_t enterSequence;
+    uint64_t exitSequence;
+    uint8_t bus;
+    uint8_t device;
+    uint8_t function;
+    uint8_t baseClass;
+    uint8_t subClass;
+    uint8_t progIf;
+    uint8_t configOffset;
+    uint16_t vendorId;
+    uint16_t deviceId;
+    uint32_t result;
+    uint32_t errorCode;
+    bool hasPciAddress;
+    bool hasVendorDevice;
+    bool hasClass;
+    bool hasConfigOffset;
+    bool hasResult;
+    bool hasErrorCode;
+};
+
+struct StartupOperationContext {
+    uint8_t bus;
+    uint8_t device;
+    uint8_t function;
+    uint8_t baseClass;
+    uint8_t subClass;
+    uint8_t progIf;
+    uint8_t configOffset;
+    uint16_t vendorId;
+    uint16_t deviceId;
+    bool hasPciAddress;
+    bool hasVendorDevice;
+    bool hasClass;
+    bool hasConfigOffset;
 };
 
 enum class ControllerKind : uint8_t {
@@ -183,6 +259,17 @@ struct Snapshot {
     int32_t latestControllerIndex;
     Stage latestStage;
     StageResult latestStatus;
+    uint64_t startupOperationSequence;
+    StartupOperationRecord lastStartupOperation;
+    StartupOperationRecord lastCompletedStartupOperation;
+    StartupOperationRecord startupOperationTrace[MAX_STARTUP_OPERATION_TRACE];
+    uint32_t startupOperationTraceCount;
+    uint32_t startupOperationTraceNext;
+    StartupOperationStatus pciAudioStatus;
+    StartupOperationStatus usbHostScanStatus;
+    StartupOperationStatus xhciInitStatus;
+    uint32_t pciAudioDeviceCount;
+    bool pciAudioSkipped;
 };
 
 struct PanelLayout {
@@ -199,6 +286,13 @@ struct PanelLayout {
 // the kernel main loop; interrupt handlers never publish diagnostic state.
 void initialize();
 void record_boot_milestone(BootStage stage);
+uint64_t begin_startup_operation(StartupOperation operation,
+                                 const StartupOperationContext* context = nullptr);
+void complete_startup_operation(uint64_t enterSequence,
+                                StartupOperationStatus status,
+                                uint32_t result = 0u, bool hasResult = false,
+                                uint32_t errorCode = 0u, bool hasErrorCode = false);
+void record_pci_audio_skipped();
 bool presentation_pending();
 bool record_panel_presented(uint64_t snapshotSequence);
 void begin_pci_enumeration();
@@ -244,6 +338,10 @@ void copy_snapshot(Snapshot* outSnapshot);
 
 const char* status_name(Status status);
 const char* boot_stage_name(BootStage stage);
+const char* startup_operation_name(StartupOperation operation);
+const char* startup_operation_status_name(StartupOperationStatus status);
+uint32_t format_startup_operation(const StartupOperationRecord& operation,
+                                 char* out, uint32_t capacity);
 const char* pci_scan_state_name(PciScanState state);
 const char* stage_name(Stage stage);
 const char* controller_kind_name(ControllerKind kind);

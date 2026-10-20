@@ -6,6 +6,64 @@ namespace {
 
 static Snapshot s_snapshot = {};
 static uint8_t s_snapshotLock = 0u;
+#if defined(GXOS_INPUT3D_DIAGNOSTICS)
+static uint64_t s_usbScanOperationSequence = 0u;
+#endif
+
+static void publish_snapshot_change_locked();
+
+static uint64_t next_startup_operation_sequence_locked()
+{
+    if (s_snapshot.startupOperationSequence != UINT64_MAX) {
+        ++s_snapshot.startupOperationSequence;
+    }
+    return s_snapshot.startupOperationSequence;
+}
+
+static uint64_t begin_startup_operation_locked(
+    StartupOperation operation, const StartupOperationContext* context)
+{
+    if (operation == StartupOperation::None) return 0u;
+
+    if (operation == StartupOperation::PciAudioEntry) {
+        s_snapshot.pciAudioStatus = StartupOperationStatus::InProgress;
+    } else if (operation == StartupOperation::UsbHostScanEnter) {
+        s_snapshot.usbHostScanStatus = StartupOperationStatus::InProgress;
+    } else if (operation == StartupOperation::XhciInitEnter) {
+        s_snapshot.xhciInitStatus = StartupOperationStatus::InProgress;
+    }
+
+    StartupOperationRecord record = {};
+    record.operation = operation;
+    record.status = StartupOperationStatus::InProgress;
+    record.enterSequence = next_startup_operation_sequence_locked();
+    if (context != nullptr) {
+        record.bus = context->bus;
+        record.device = context->device;
+        record.function = context->function;
+        record.vendorId = context->vendorId;
+        record.deviceId = context->deviceId;
+        record.baseClass = context->baseClass;
+        record.subClass = context->subClass;
+        record.progIf = context->progIf;
+        record.configOffset = context->configOffset;
+        record.hasPciAddress = context->hasPciAddress;
+        record.hasVendorDevice = context->hasVendorDevice;
+        record.hasClass = context->hasClass;
+        record.hasConfigOffset = context->hasConfigOffset;
+    }
+
+    const uint32_t slot = s_snapshot.startupOperationTraceNext;
+    s_snapshot.startupOperationTrace[slot] = record;
+    s_snapshot.startupOperationTraceNext =
+        (slot + 1u) % MAX_STARTUP_OPERATION_TRACE;
+    if (s_snapshot.startupOperationTraceCount < MAX_STARTUP_OPERATION_TRACE) {
+        ++s_snapshot.startupOperationTraceCount;
+    }
+    s_snapshot.lastStartupOperation = record;
+    publish_snapshot_change_locked();
+    return record.enterSequence;
+}
 
 static void publish_snapshot_change_locked()
 {
@@ -65,6 +123,19 @@ static uint32_t append_decimal(char* out, uint32_t capacity, uint32_t position,
                                uint32_t value)
 {
     char digits[10];
+    uint32_t count = 0u;
+    do {
+        digits[count++] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && count < sizeof(digits));
+    while (count != 0u) position = append_char(out, capacity, position, digits[--count]);
+    return position;
+}
+
+static uint32_t append_decimal64(char* out, uint32_t capacity, uint32_t position,
+                                 uint64_t value)
+{
+    char digits[20];
     uint32_t count = 0u;
     do {
         digits[count++] = static_cast<char>('0' + (value % 10u));
@@ -154,6 +225,9 @@ void initialize()
 {
     lock_snapshot();
     s_snapshot = {};
+#if defined(GXOS_INPUT3D_DIAGNOSTICS)
+    s_usbScanOperationSequence = 0u;
+#endif
     s_snapshot.bootStage = BootStage::Unknown;
     s_snapshot.bootSequence = 0u;
     s_snapshot.snapshotSequence = 1u;
@@ -168,9 +242,103 @@ void initialize()
     s_snapshot.latestStatus.status = Status::NotAttempted;
     s_snapshot.firstFailure = {};
     s_snapshot.firstFailure.controllerIndex = -1;
+    s_snapshot.lastStartupOperation = {};
+    s_snapshot.lastStartupOperation.status = StartupOperationStatus::NotInvoked;
+    s_snapshot.lastCompletedStartupOperation = {};
+    s_snapshot.lastCompletedStartupOperation.status = StartupOperationStatus::NotInvoked;
+    for (uint32_t i = 0u; i < MAX_STARTUP_OPERATION_TRACE; ++i) {
+        s_snapshot.startupOperationTrace[i] = {};
+        s_snapshot.startupOperationTrace[i].status = StartupOperationStatus::NotInvoked;
+    }
     for (uint32_t i = 0u; i < MAX_CONTROLLERS; ++i) {
         initialize_controller(&s_snapshot.controllers[i]);
     }
+    unlock_snapshot();
+}
+
+uint64_t begin_startup_operation(StartupOperation operation,
+                                 const StartupOperationContext* context)
+{
+    lock_snapshot();
+    const uint64_t sequence = begin_startup_operation_locked(operation, context);
+    unlock_snapshot();
+    return sequence;
+}
+
+void complete_startup_operation(uint64_t enterSequence,
+                                StartupOperationStatus status,
+                                uint32_t result, bool hasResult,
+                                uint32_t errorCode, bool hasErrorCode)
+{
+    if (enterSequence == 0u || status == StartupOperationStatus::NotInvoked ||
+        status == StartupOperationStatus::InProgress) return;
+
+    lock_snapshot();
+    StartupOperationRecord* found = nullptr;
+    for (uint32_t i = 0u; i < s_snapshot.startupOperationTraceCount; ++i) {
+        StartupOperationRecord& candidate = s_snapshot.startupOperationTrace[i];
+        if (candidate.enterSequence == enterSequence) {
+            found = &candidate;
+            break;
+        }
+    }
+    if (found == nullptr && s_snapshot.lastStartupOperation.enterSequence == enterSequence) {
+        found = &s_snapshot.lastStartupOperation;
+    }
+    if (found != nullptr && found->exitSequence == 0u) {
+        found->exitSequence = next_startup_operation_sequence_locked();
+        found->status = status;
+        found->result = result;
+        found->hasResult = hasResult;
+        found->errorCode = errorCode;
+        found->hasErrorCode = hasErrorCode;
+        if (found->operation == StartupOperation::PciAudioEntry) {
+            s_snapshot.pciAudioStatus = status;
+        } else if (found->operation == StartupOperation::UsbHostScanEnter ||
+                   found->operation == StartupOperation::UsbHostScanComplete) {
+            s_snapshot.usbHostScanStatus = status;
+        } else if (found->operation == StartupOperation::XhciInitEnter ||
+                   found->operation == StartupOperation::XhciInitComplete) {
+            s_snapshot.xhciInitStatus = status;
+        }
+        if (found->operation == StartupOperation::PciAudioDeviceFound &&
+            status == StartupOperationStatus::Completed &&
+            s_snapshot.pciAudioDeviceCount != UINT32_MAX) {
+            ++s_snapshot.pciAudioDeviceCount;
+        }
+        if (s_snapshot.lastStartupOperation.enterSequence == enterSequence) {
+            s_snapshot.lastStartupOperation = *found;
+        }
+        s_snapshot.lastCompletedStartupOperation = *found;
+        publish_snapshot_change_locked();
+    }
+    unlock_snapshot();
+}
+
+void record_pci_audio_skipped()
+{
+    lock_snapshot();
+    s_snapshot.pciAudioSkipped = true;
+    s_snapshot.pciAudioStatus = StartupOperationStatus::Unsupported;
+    const uint64_t sequence = begin_startup_operation_locked(
+        StartupOperation::PciAudioSkipped, nullptr);
+    if (sequence != 0u) {
+        // This is an explicit diagnostic choice, not audio initialization.
+        StartupOperationRecord* found = nullptr;
+        for (uint32_t i = 0u; i < s_snapshot.startupOperationTraceCount; ++i) {
+            if (s_snapshot.startupOperationTrace[i].enterSequence == sequence) {
+                found = &s_snapshot.startupOperationTrace[i];
+                break;
+            }
+        }
+        if (found != nullptr) {
+            found->exitSequence = next_startup_operation_sequence_locked();
+            found->status = StartupOperationStatus::Unsupported;
+            s_snapshot.lastStartupOperation = *found;
+            s_snapshot.lastCompletedStartupOperation = *found;
+        }
+    }
+    publish_snapshot_change_locked();
     unlock_snapshot();
 }
 
@@ -227,6 +395,11 @@ void begin_pci_enumeration()
     }
     publish_snapshot_change_locked();
     unlock_snapshot();
+
+#if defined(GXOS_INPUT3D_DIAGNOSTICS)
+    s_usbScanOperationSequence = begin_startup_operation(
+        StartupOperation::UsbHostScanEnter, nullptr);
+#endif
 }
 
 void complete_pci_enumeration(Status status, const char* failureReason)
@@ -238,6 +411,19 @@ void complete_pci_enumeration(Status status, const char* failureReason)
     } else if (resolvedFailure == nullptr && status != Status::Pass) {
         resolvedFailure = "PCI discovery did not complete successfully";
     }
+
+#if defined(GXOS_INPUT3D_DIAGNOSTICS)
+    const StartupOperationStatus operationStatus = status == Status::Pass
+        ? StartupOperationStatus::Completed
+        : (status == Status::Timeout ? StartupOperationStatus::TimedOut
+           : (status == Status::Unsupported ? StartupOperationStatus::Unsupported
+                                            : StartupOperationStatus::ReturnedError));
+    complete_startup_operation(s_usbScanOperationSequence, operationStatus);
+    s_usbScanOperationSequence = 0u;
+    const uint64_t completeSequence = begin_startup_operation(
+        StartupOperation::UsbHostScanComplete, nullptr);
+    complete_startup_operation(completeSequence, operationStatus);
+#endif
 
     lock_snapshot();
     s_snapshot.pciEnumeration = status;
@@ -547,6 +733,102 @@ const char* boot_stage_name(BootStage stage)
         case BootStage::MainLoopEntered: return "MAIN_LOOP_ENTERED";
         default: return "UNKNOWN";
     }
+}
+
+const char* startup_operation_name(StartupOperation operation)
+{
+    switch (operation) {
+        case StartupOperation::PciAudioEntry: return "PCI_AUDIO_ENTRY";
+        case StartupOperation::PciAudioScanEnter: return "PCI_AUDIO_SCAN_ENTER";
+        case StartupOperation::PciConfigAddressSelect: return "PCI_CONFIG_ADDRESS_SELECT";
+        case StartupOperation::PciConfigDataRead: return "PCI_CONFIG_DATA_READ";
+        case StartupOperation::PciConfigDataWrite: return "PCI_CONFIG_DATA_WRITE";
+        case StartupOperation::PciAudioDeviceFound: return "PCI_AUDIO_DEVICE_FOUND";
+        case StartupOperation::PciDeviceUnsupported: return "PCI_DEVICE_UNSUPPORTED";
+        case StartupOperation::PciAudioProbeEnter: return "PCI_AUDIO_PROBE_ENTER";
+        case StartupOperation::PciAudioProbeExit: return "PCI_AUDIO_PROBE_EXIT";
+        case StartupOperation::HdaResetEnter: return "HDA_RESET_ENTER";
+        case StartupOperation::HdaResetWaitCrst: return "HDA_RESET_WAIT_CRST";
+        case StartupOperation::HdaCorbRirbInit: return "HDA_CORB_RIRB_INIT";
+        case StartupOperation::HdaCodecEnumeration: return "HDA_CODEC_ENUMERATION";
+        case StartupOperation::HdaVerbResponseWait: return "HDA_VERB_RESPONSE_WAIT";
+        case StartupOperation::PciAudioScanExit: return "PCI_AUDIO_SCAN_EXIT";
+        case StartupOperation::PciAudioComplete: return "PCI_AUDIO_COMPLETE";
+        case StartupOperation::PciAudioSkipped: return "PCI_AUDIO_DIAGNOSTICALLY_SKIPPED";
+        case StartupOperation::UsbHostScanEnter: return "USB_HOST_SCAN_ENTER";
+        case StartupOperation::UsbHostScanComplete: return "USB_HOST_SCAN_COMPLETE";
+        case StartupOperation::XhciInitEnter: return "XHCI_INIT_ENTER";
+        case StartupOperation::XhciInitComplete: return "XHCI_INIT_COMPLETE";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* startup_operation_status_name(StartupOperationStatus status)
+{
+    switch (status) {
+        case StartupOperationStatus::NotInvoked: return "NOT INVOKED";
+        case StartupOperationStatus::InProgress: return "IN PROGRESS";
+        case StartupOperationStatus::Completed: return "COMPLETED";
+        case StartupOperationStatus::ReturnedError: return "RETURNED ERROR";
+        case StartupOperationStatus::TimedOut: return "TIMED OUT";
+        case StartupOperationStatus::Unsupported: return "UNSUPPORTED";
+        default: return "UNABLE TO DETERMINE";
+    }
+}
+
+uint32_t format_startup_operation(const StartupOperationRecord& operation,
+                                  char* out, uint32_t capacity)
+{
+    if (out == nullptr || capacity == 0u) return 0u;
+    out[0] = '\0';
+    uint32_t position = append_text(out, capacity, 0u,
+        startup_operation_name(operation.operation));
+    position = append_text(out, capacity, position, " enter=");
+    position = append_decimal64(out, capacity, position, operation.enterSequence);
+    position = append_text(out, capacity, position, " exit=");
+    if (operation.exitSequence == 0u) {
+        position = append_text(out, capacity, position, "PENDING");
+    } else {
+        position = append_decimal64(out, capacity, position, operation.exitSequence);
+    }
+    position = append_text(out, capacity, position, " status=");
+    position = append_text(out, capacity, position,
+        startup_operation_status_name(operation.status));
+    if (operation.hasPciAddress) {
+        position = append_text(out, capacity, position, " bdf=");
+        position = append_hex(out, capacity, position, operation.bus, 2u);
+        position = append_char(out, capacity, position, ':');
+        position = append_hex(out, capacity, position, operation.device, 2u);
+        position = append_char(out, capacity, position, '.');
+        position = append_decimal(out, capacity, position, operation.function);
+    }
+    if (operation.hasVendorDevice) {
+        position = append_text(out, capacity, position, " id=");
+        position = append_hex(out, capacity, position, operation.vendorId, 4u);
+        position = append_char(out, capacity, position, ':');
+        position = append_hex(out, capacity, position, operation.deviceId, 4u);
+    }
+    if (operation.hasClass) {
+        position = append_text(out, capacity, position, " class=");
+        position = append_hex(out, capacity, position, operation.baseClass, 2u);
+        position = append_char(out, capacity, position, '/');
+        position = append_hex(out, capacity, position, operation.subClass, 2u);
+        position = append_char(out, capacity, position, '/');
+        position = append_hex(out, capacity, position, operation.progIf, 2u);
+    }
+    if (operation.hasConfigOffset) {
+        position = append_text(out, capacity, position, " cfg=");
+        position = append_hex(out, capacity, position, operation.configOffset, 2u);
+    }
+    if (operation.hasResult) {
+        position = append_text(out, capacity, position, " result=0x");
+        position = append_hex(out, capacity, position, operation.result, 8u);
+    }
+    if (operation.hasErrorCode) {
+        position = append_text(out, capacity, position, " error=0x");
+        position = append_hex(out, capacity, position, operation.errorCode, 8u);
+    }
+    return position;
 }
 
 const char* pci_scan_state_name(PciScanState state)

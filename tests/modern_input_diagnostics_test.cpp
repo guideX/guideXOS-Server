@@ -1,4 +1,5 @@
 #include "kernel/modern_input_diagnostics.h"
+#include "kernel/pci_audio.h"
 
 #include <atomic>
 #include <cstdio>
@@ -26,6 +27,215 @@ int32_t add_xhci(uint8_t bus, uint8_t device, uint8_t function,
 {
     return record_controller(bus, device, function, vendor, product,
                              0x0Cu, 0x03u, 0x30u, ControllerKind::XHCI);
+}
+
+StartupOperationContext pci_context(uint8_t bus, uint8_t device, uint8_t function,
+                                   uint16_t vendor, uint16_t product,
+                                   uint8_t baseClass, uint8_t subClass,
+                                   uint8_t configOffset)
+{
+    StartupOperationContext context = {};
+    context.bus = bus;
+    context.device = device;
+    context.function = function;
+    context.vendorId = vendor;
+    context.deviceId = product;
+    context.baseClass = baseClass;
+    context.subClass = subClass;
+    context.progIf = 0x30u;
+    context.configOffset = configOffset;
+    context.hasPciAddress = true;
+    context.hasVendorDevice = true;
+    context.hasClass = true;
+    context.hasConfigOffset = true;
+    return context;
+}
+
+void test_startup_operation_frontier()
+{
+    initialize();
+    const StartupOperationContext context = pci_context(
+        0u, 31u, 3u, 0x8086u, 0xA170u, 0x04u, 0x03u, 0x10u);
+    const uint64_t audioEntry = begin_startup_operation(StartupOperation::PciAudioEntry);
+    const uint64_t scanEntry = begin_startup_operation(
+        StartupOperation::PciAudioScanEnter);
+    const uint64_t vendorRead = begin_startup_operation(
+        StartupOperation::PciConfigDataRead, &context);
+    Snapshot snapshot = {};
+    copy_snapshot(&snapshot);
+    require(snapshot.lastStartupOperation.operation == StartupOperation::PciConfigDataRead &&
+            snapshot.lastStartupOperation.status == StartupOperationStatus::InProgress &&
+            snapshot.lastStartupOperation.exitSequence == 0u &&
+            snapshot.pciAudioStatus == StartupOperationStatus::InProgress,
+            "entered PCI config read remains pending until it returns");
+    require(snapshot.lastStartupOperation.bus == 0u &&
+            snapshot.lastStartupOperation.device == 31u &&
+            snapshot.lastStartupOperation.function == 3u &&
+            snapshot.lastStartupOperation.vendorId == 0x8086u &&
+            snapshot.lastStartupOperation.deviceId == 0xA170u &&
+            snapshot.lastStartupOperation.baseClass == 0x04u &&
+            snapshot.lastStartupOperation.subClass == 0x03u &&
+            snapshot.lastStartupOperation.configOffset == 0x10u,
+            "PCI operation retains BDF, known identity, class, and config offset");
+
+    complete_startup_operation(vendorRead, StartupOperationStatus::Completed,
+                               0xA1708086u, true);
+    complete_startup_operation(scanEntry, StartupOperationStatus::Completed);
+    const uint64_t probe = begin_startup_operation(
+        StartupOperation::PciAudioProbeEnter, &context);
+    copy_snapshot(&snapshot);
+    require(snapshot.lastStartupOperation.operation == StartupOperation::PciAudioProbeEnter &&
+            snapshot.lastStartupOperation.status == StartupOperationStatus::InProgress,
+            "audio probe entry is visible before probe return");
+    complete_startup_operation(probe, StartupOperationStatus::Completed);
+    complete_startup_operation(audioEntry, StartupOperationStatus::Completed);
+    copy_snapshot(&snapshot);
+    require(snapshot.pciAudioStatus == StartupOperationStatus::Completed &&
+            snapshot.lastCompletedStartupOperation.enterSequence == audioEntry,
+            "successful audio initialization completes after its nested probe");
+    require(snapshot.lastCompletedStartupOperation.exitSequence > audioEntry,
+            "operation exit sequence advances independently from entry sequence");
+
+    initialize();
+    const uint64_t failedScan = begin_startup_operation(
+        StartupOperation::PciAudioScanEnter);
+    complete_startup_operation(failedScan,
+        StartupOperationStatus::ReturnedError, 0xFFFFFFFFu, true, 7u, true);
+    copy_snapshot(&snapshot);
+    require(snapshot.lastCompletedStartupOperation.status ==
+                StartupOperationStatus::ReturnedError &&
+            snapshot.lastCompletedStartupOperation.errorCode == 7u &&
+            snapshot.lastCompletedStartupOperation.hasErrorCode,
+            "PCI audio discovery failure preserves its returned diagnostic code");
+
+    initialize();
+    const uint64_t timedOperation = begin_startup_operation(
+        StartupOperation::HdaResetWaitCrst, &context);
+    copy_snapshot(&snapshot);
+    require(snapshot.lastStartupOperation.status == StartupOperationStatus::InProgress &&
+            snapshot.lastStartupOperation.exitSequence == 0u,
+            "a pending hardware wait is not inferred to have timed out");
+    complete_startup_operation(timedOperation, StartupOperationStatus::TimedOut,
+                               0u, false, 1u, true);
+    copy_snapshot(&snapshot);
+    require(snapshot.lastStartupOperation.status == StartupOperationStatus::TimedOut &&
+            snapshot.lastStartupOperation.exitSequence != 0u,
+            "only an explicit bounded-wait return records timeout");
+
+    initialize();
+    const StartupOperationContext unsupported = pci_context(
+        0u, 20u, 0u, 0x10ECu, 0x8168u, 0x02u, 0x00u, 0x08u);
+    const uint64_t unsupportedDevice = begin_startup_operation(
+        StartupOperation::PciDeviceUnsupported, &unsupported);
+    complete_startup_operation(unsupportedDevice,
+        StartupOperationStatus::Unsupported, 0x02000000u, true);
+    copy_snapshot(&snapshot);
+    require(snapshot.lastStartupOperation.status == StartupOperationStatus::Unsupported &&
+            snapshot.lastStartupOperation.vendorId == 0x10ECu &&
+            snapshot.lastStartupOperation.baseClass == 0x02u,
+            "unknown PCI devices keep their class and identity without becoming audio probes");
+
+    char formatted[192];
+    format_startup_operation(snapshot.lastStartupOperation, formatted, sizeof(formatted));
+    require(std::strstr(formatted, "PCI_DEVICE_UNSUPPORTED") != nullptr &&
+            std::strstr(formatted, "bdf=00:14.0") != nullptr &&
+            std::strstr(formatted, "id=10ec:8168") != nullptr &&
+            std::strstr(formatted, "class=02/00/30") != nullptr &&
+            std::strstr(formatted, "cfg=08") != nullptr,
+            "startup operation formatter reports bounded PCI identity details");
+    char truncated[12];
+    format_startup_operation(snapshot.lastStartupOperation, truncated, sizeof(truncated));
+    require(truncated[sizeof(truncated) - 1u] == '\0',
+            "startup operation formatting truncation remains terminated");
+
+    initialize();
+    const uint64_t audio = begin_startup_operation(StartupOperation::PciAudioEntry);
+    complete_startup_operation(audio, StartupOperationStatus::Completed);
+    const StartupOperationContext audio1 = pci_context(
+        0u, 31u, 3u, 0x8086u, 0xA170u, 0x04u, 0x03u, 0x10u);
+    const StartupOperationContext audio2 = pci_context(
+        0u, 27u, 0u, 0x8086u, 0x1C20u, 0x04u, 0x03u, 0x10u);
+    uint64_t found = begin_startup_operation(
+        StartupOperation::PciAudioDeviceFound, &audio1);
+    complete_startup_operation(found, StartupOperationStatus::Completed);
+    found = begin_startup_operation(StartupOperation::PciAudioDeviceFound, &audio2);
+    complete_startup_operation(found, StartupOperationStatus::Completed);
+    copy_snapshot(&snapshot);
+    require(snapshot.pciAudioDeviceCount == 2u,
+            "multiple PCI audio devices are counted independently");
+    const uint64_t beforeUsb = snapshot.startupOperationSequence;
+    begin_pci_enumeration();
+    copy_snapshot(&snapshot);
+    require(snapshot.usbHostScanStatus == StartupOperationStatus::InProgress &&
+            snapshot.lastStartupOperation.operation == StartupOperation::UsbHostScanEnter &&
+            snapshot.lastStartupOperation.enterSequence > beforeUsb,
+            "USB-host scan begins only after audio discovery has completed");
+    complete_pci_enumeration(Status::Pass);
+    copy_snapshot(&snapshot);
+    require(snapshot.usbHostScanStatus == StartupOperationStatus::Completed &&
+            snapshot.lastStartupOperation.operation == StartupOperation::UsbHostScanComplete,
+            "USB scan completion is a distinct recorded boundary");
+
+    initialize();
+    const uint64_t noDeviceAudio = begin_startup_operation(StartupOperation::PciAudioEntry);
+    complete_startup_operation(noDeviceAudio, StartupOperationStatus::Completed);
+    copy_snapshot(&snapshot);
+    require(snapshot.pciAudioDeviceCount == 0u,
+            "audio scan with no audio-class device records a successful empty result");
+
+    initialize();
+    record_pci_audio_skipped();
+    begin_pci_enumeration();
+    complete_pci_enumeration(Status::Pass);
+    copy_snapshot(&snapshot);
+    require(snapshot.pciAudioSkipped &&
+            snapshot.pciAudioStatus == StartupOperationStatus::Unsupported &&
+            snapshot.usbHostScanStatus == StartupOperationStatus::Completed,
+            "safe diagnostic audio bypass still permits the normal USB scan");
+
+    initialize();
+    const uint64_t xhciInit = begin_startup_operation(
+        StartupOperation::XhciInitEnter);
+    copy_snapshot(&snapshot);
+    require(snapshot.xhciInitStatus == StartupOperationStatus::InProgress,
+            "xHCI initialization entry is distinct from an uninvoked controller");
+    complete_startup_operation(xhciInit,
+        StartupOperationStatus::ReturnedError, 0u, false, 9u, true);
+    copy_snapshot(&snapshot);
+    require(snapshot.xhciInitStatus == StartupOperationStatus::ReturnedError,
+            "xHCI return failure is distinguishable from a startup stall");
+
+    initialize();
+    for (uint8_t i = 0u; i < MAX_STARTUP_OPERATION_TRACE + 4u; ++i) {
+        const StartupOperationContext rolling = pci_context(
+            0u, i, 0u, 0x8086u, static_cast<uint16_t>(i), 0x04u, 0x03u, 0x10u);
+        const uint64_t sequence = begin_startup_operation(
+            StartupOperation::PciConfigDataRead, &rolling);
+        complete_startup_operation(sequence, StartupOperationStatus::Completed);
+    }
+    copy_snapshot(&snapshot);
+    require(snapshot.startupOperationTraceCount == MAX_STARTUP_OPERATION_TRACE &&
+            snapshot.startupOperationTraceNext == 4u &&
+            snapshot.lastStartupOperation.device == MAX_STARTUP_OPERATION_TRACE + 3u,
+            "operation history remains fixed-capacity and retains its newest record");
+}
+
+void test_hda_child_range_bounds()
+{
+    uint16_t end = 0u;
+    require(kernel::pci_audio::validate_hda_child_range(0u, 0u, &end) && end == 0u,
+            "empty HDA child ranges are valid and empty");
+    require(kernel::pci_audio::validate_hda_child_range(1u, 1u, &end) && end == 2u,
+            "ordinary HDA child ranges compute their exclusive end");
+    require(kernel::pci_audio::validate_hda_child_range(255u, 1u, &end) && end == 256u,
+            "last representable HDA child ID does not wrap its loop counter");
+    require(!kernel::pci_audio::validate_hda_child_range(255u, 2u, &end),
+            "malformed HDA child range beyond 255 is rejected");
+    require(kernel::pci_audio::validate_hda_child_range(128u, 128u, &end) &&
+            end == 256u,
+            "largest valid HDA child range remains bounded");
+    require(!kernel::pci_audio::validate_hda_child_range(200u, 100u, &end),
+            "overflowing HDA node or widget range cannot create an unbounded loop");
 }
 
 void record_pair(uint32_t value)
@@ -196,6 +406,11 @@ int main()
             "initial controller counts are zero");
     require(snapshot.selectedControllerIndex == -1 && !snapshot.firstFailure.present,
             "initial selection and first failure are empty");
+    require(snapshot.lastStartupOperation.operation == StartupOperation::None &&
+            snapshot.lastStartupOperation.status == StartupOperationStatus::NotInvoked &&
+            snapshot.usbHostScanStatus == StartupOperationStatus::NotInvoked &&
+            snapshot.xhciInitStatus == StartupOperationStatus::NotInvoked,
+            "startup frontier distinguishes uninvoked stages from pending operations");
     require(snapshot.snapshotSequence == 1u && snapshot.displayedSequence == 0u &&
             presentation_pending(),
             "initial diagnostic snapshot version is awaiting presentation");
@@ -395,6 +610,8 @@ int main()
             layout.width <= 560u && layout.height <= 500u && layout.rowCapacity >= 33u,
             "common-screen panel stays bounded instead of covering the desktop");
 
+    test_startup_operation_frontier();
+    test_hda_child_range_bounds();
     test_boot_progress_and_presentation();
     test_failure_before_desktop_initialization();
     test_snapshot_reset();

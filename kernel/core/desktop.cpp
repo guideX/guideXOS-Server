@@ -9489,7 +9489,13 @@ static uint64_t draw_input3d_diagnostics_panel()
 
     char line[128];
     line[0] = '\0';
-    uint32_t position = input3d_panel_append(line, sizeof(line), 0u, "Build: INPUT3D / ");
+#if defined(GXOS_INPUT3D_SKIP_PCI_AUDIO)
+    uint32_t position = input3d_panel_append(line, sizeof(line), 0u,
+        "Build: INPUT3D-R4-AUDIO-BYPASS / ");
+#else
+    uint32_t position = input3d_panel_append(line, sizeof(line), 0u,
+        "Build: INPUT3D-R4 / ");
+#endif
     input3d_panel_append(line, sizeof(line), position, GXOS_BUILD_SOURCE_REVISION);
     input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
 
@@ -9512,6 +9518,91 @@ static uint64_t draw_input3d_diagnostics_panel()
     input3d_panel_decimal64(line, sizeof(line), position,
                             snapshot.snapshotSequence);
     input3d_panel_draw_line(&writer, line, rgb(196, 213, 234));
+
+    input3d_panel_draw_line(&writer, "BOOT STARTUP FRONTIER",
+                            rgb(255, 211, 128));
+
+    const modern_input_diagnostics::StartupOperationRecord& lastOperation =
+        snapshot.lastStartupOperation;
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "Last entered: ");
+    if (lastOperation.operation == modern_input_diagnostics::StartupOperation::None) {
+        input3d_panel_append(line, sizeof(line), position, "NOT INVOKED");
+    } else {
+        position = input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::startup_operation_name(lastOperation.operation));
+        position = input3d_panel_append(line, sizeof(line), position, " #");
+        position = input3d_panel_decimal64(line, sizeof(line), position,
+            lastOperation.enterSequence);
+        position = input3d_panel_append(line, sizeof(line), position, " ");
+        input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::startup_operation_status_name(lastOperation.status));
+    }
+    input3d_panel_draw_line(&writer, line, rgb(244, 226, 188));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "PCI: ");
+    if (lastOperation.hasPciAddress) {
+        position = input3d_panel_hex(line, sizeof(line), position, lastOperation.bus, 2u);
+        position = input3d_panel_append(line, sizeof(line), position, ":");
+        position = input3d_panel_hex(line, sizeof(line), position, lastOperation.device, 2u);
+        position = input3d_panel_append(line, sizeof(line), position, ".");
+        position = input3d_panel_decimal(line, sizeof(line), position, lastOperation.function);
+        if (lastOperation.hasVendorDevice) {
+            position = input3d_panel_append(line, sizeof(line), position, " ");
+            position = input3d_panel_hex(line, sizeof(line), position, lastOperation.vendorId, 4u);
+            position = input3d_panel_append(line, sizeof(line), position, ":");
+            position = input3d_panel_hex(line, sizeof(line), position, lastOperation.deviceId, 4u);
+        }
+        if (lastOperation.hasClass) {
+            position = input3d_panel_append(line, sizeof(line), position, " class=");
+            position = input3d_panel_hex(line, sizeof(line), position, lastOperation.baseClass, 2u);
+            position = input3d_panel_append(line, sizeof(line), position, "/");
+            input3d_panel_hex(line, sizeof(line), position, lastOperation.subClass, 2u);
+            position = input3d_panel_append(line, sizeof(line), position, " ");
+            position = input3d_panel_hex(line, sizeof(line), position, lastOperation.progIf, 2u);
+        }
+        if (lastOperation.hasConfigOffset) {
+            position = input3d_panel_append(line, sizeof(line), position, " cfg=");
+            input3d_panel_hex(line, sizeof(line), position, lastOperation.configOffset, 2u);
+        }
+    } else {
+        input3d_panel_append(line, sizeof(line), position, "NONE / UNABLE TO DETERMINE");
+    }
+    input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+    const modern_input_diagnostics::StartupOperationRecord& lastCompletedOperation =
+        snapshot.lastCompletedStartupOperation;
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "Last returned: ");
+    if (lastCompletedOperation.operation == modern_input_diagnostics::StartupOperation::None) {
+        input3d_panel_append(line, sizeof(line), position, "NONE");
+    } else {
+        position = input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::startup_operation_name(lastCompletedOperation.operation));
+        position = input3d_panel_append(line, sizeof(line), position, " #");
+        position = input3d_panel_decimal64(line, sizeof(line), position,
+            lastCompletedOperation.exitSequence);
+        position = input3d_panel_append(line, sizeof(line), position, " ");
+        input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::startup_operation_status_name(lastCompletedOperation.status));
+    }
+    input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "PCI audio ");
+    position = input3d_panel_append(line, sizeof(line), position, snapshot.pciAudioSkipped
+        ? "DIAGNOSTICALLY SKIPPED"
+        : modern_input_diagnostics::startup_operation_status_name(snapshot.pciAudioStatus));
+    position = input3d_panel_append(line, sizeof(line), position, " count=");
+    position = input3d_panel_decimal(line, sizeof(line), position, snapshot.pciAudioDeviceCount);
+    position = input3d_panel_append(line, sizeof(line), position, " | USB ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::startup_operation_status_name(snapshot.usbHostScanStatus));
+    position = input3d_panel_append(line, sizeof(line), position, " | xHCI ");
+    input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::startup_operation_status_name(snapshot.xhciInitStatus));
+    input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
 
     line[0] = '\0';
     position = input3d_panel_append(line, sizeof(line), 0u, "PCI: ");

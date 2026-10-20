@@ -17,6 +17,7 @@ $Output = [IO.Path]::GetFullPath($OutputPath)
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Output) | Out-Null
 $Arguments = @(
     "-std=c++17", "-Wall", "-Wextra", "-O2", "-pthread",
+    "-DGXOS_INPUT3D_DIAGNOSTICS=1",
     "-iquote", "kernel\core\include",
     "tests\modern_input_diagnostics_test.cpp",
     "kernel\core\modern_input_diagnostics.cpp",

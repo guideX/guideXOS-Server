@@ -36,6 +36,10 @@
 #include "include/kernel/file_clipboard.h"
 #include "include/kernel/native_elf_baremetal.h"
 
+#if defined(GXOS_INPUT3D_SKIP_PCI_AUDIO) && !defined(GXOS_INPUT3D_DIAGNOSTICS)
+#error GXOS_INPUT3D_SKIP_PCI_AUDIO requires GXOS_INPUT3D_DIAGNOSTICS
+#endif
+
 // Storage subsystem
 #include "include/kernel/block_device.h"
 #include "include/kernel/ata.h"
@@ -932,7 +936,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         record_input3d_boot_milestone(
             kernel::modern_input_diagnostics::BootStage::PciDiscoveryEntered);
         kernel::desktop::draw();
+#if defined(GXOS_INPUT3D_SKIP_PCI_AUDIO)
+        kernel::modern_input_diagnostics::record_pci_audio_skipped();
+        kernel::serial::puts("PCI AUDIO: DIAGNOSTICALLY SKIPPED\n");
+        kernel::desktop::draw();
+#else
         kernel::pci_audio::init();
+#endif
         record_input3d_boot_milestone(
             kernel::modern_input_diagnostics::BootStage::PciDiscoveryCompleted);
         kernel::serial::puts("[KERNEL] Audio controllers detected: ");
@@ -957,7 +967,27 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // configure rings, start the controller, and observe root-port state.
         // This is INPUT2 scope: no USB device enumeration or HID activation.
         // See docs/MODERN_INPUT_INPUT2.md.
+#if defined(GXOS_INPUT3D_DIAGNOSTICS)
+        const uint64_t xhciOperationSequence =
+            kernel::modern_input_diagnostics::begin_startup_operation(
+                kernel::modern_input_diagnostics::StartupOperation::XhciInitEnter);
+        kernel::desktop::draw();
+        kernel::serial::puts("INPUT3D: xHCI initialization entry presented\n");
+#endif
         const bool xhciInitSucceeded = kernel::usb::xhci::controller::init();
+#if defined(GXOS_INPUT3D_DIAGNOSTICS)
+        const kernel::modern_input_diagnostics::StartupOperationStatus xhciOperationStatus =
+            xhciInitSucceeded
+                ? kernel::modern_input_diagnostics::StartupOperationStatus::Completed
+                : kernel::modern_input_diagnostics::StartupOperationStatus::ReturnedError;
+        kernel::modern_input_diagnostics::complete_startup_operation(
+            xhciOperationSequence, xhciOperationStatus);
+        const uint64_t xhciCompleteSequence =
+            kernel::modern_input_diagnostics::begin_startup_operation(
+                kernel::modern_input_diagnostics::StartupOperation::XhciInitComplete);
+        kernel::modern_input_diagnostics::complete_startup_operation(
+            xhciCompleteSequence, xhciOperationStatus);
+#endif
         record_input3d_boot_milestone(
             kernel::modern_input_diagnostics::BootStage::XhciInitCompleted);
         kernel::serial::puts("BOOT: XHCI_INIT_RESULT=");
