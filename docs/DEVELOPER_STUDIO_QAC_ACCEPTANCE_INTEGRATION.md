@@ -51,3 +51,25 @@ The single live Phase 28O attempt is preserved at `%LOCALAPPDATA%\Temp\guidexos-
 The final-only post-exit serial check now uses the same exact Q/O PASS marker as live observation. Host trace output-drain fields now record the QAC line readers' actual EOF state; earlier QAC live traces reported zero because they read unused `ReadToEndAsync` task variables, even though the QAC loop had waited for both line readers to finish. This is a diagnostics correction; it does not change an acceptance result and was validated by PowerShell parsing and the helper suite without another guest boot.
 
 Outcome B remains in force. QAC3A is open until Phase 28O completes its original acceptance criteria through QAC within policy. QAC3B and phase-marker advancement remain deferred.
+
+## QAC3A-R2 Phase 28O debugger requalification — October 20, 2026 (Pacific)
+
+**Outcome A for QAC3A.** The focused Phase 28O acceptance wrapper passed through QAC, and the existing Phase 28Q gate remains valid. This repository remained on v0.5_DEVELOPER_STUDIO and started at 99dffc21c01598ae8ef847f66b35eca2ab884533.
+
+### Debugger diagnosis and repair
+
+The old guest log’s step=21 is Phase 28O’s supervisory stage. It waits while the shared Phase 28M debugger flow runs. In that flow, the UI Continue is followed by a wait for the target to pause and the configured logpoint output to appear. The old serial trace reports “Rejected unowned hosted breakpoint trap”; the controller did not receive an owned stop and the guest stayed Running with zero runtime breakpoints and no output. Debugger ownership requires an enabled Studio breakpoint with matching generation-scoped binding ID and mapped address.
+
+The paired Studio repair now routes Continue and instruction-step commands with the backend binding identity and stamps newly added active-session breakpoints with the active generation. Line-based workspace breakpoints materialize at column zero for executable source-map selection while their persisted editor columns remain intact. On the Server side, initial execution release clears the consumed bootstrap hit state. Continue never rearms a disabled or removed current breakpoint, even if a stale UI mirror requests reinstall. The policy helper has dedicated contract assertions. The host harness now prepares the empty Phase 28O compiler output tree on each disposable ESP so this directory-backed FAT fixture can compile on canonical first boot.
+
+These changes preserve the original debugger sequence, acceptance marker set, and runtime limit. The disabled-breakpoint guard was driven by a reproduced later-run trap after the first genuine breakpoint hit; it is Server-authoritative and does not fabricate a stop or acceptance result.
+
+### Checks and live qualification
+
+- Native debug-policy contract and NativeElf debugger runtime checks passed.
+- The Server PowerShell acceptance helper passed 23/23; the modified bootstrap script passed PowerShell parsing.
+- Developer Studio debugger model, source-step, workspace model, related suites, and package build passed. Its new regressions cover Continue/Step Instruction binding IDs, active-session generation, and line-based materialization.
+- Because the shared debugger and bootstrap paths can affect Phase 28Q, the paired wrapper ran three fresh Phase 28Q QAC boots. All three existing guest PASS markers were observed in time and all children exited 0 after QMP quit and verified release.
+- One fresh Phase 28O QAC boot passed the full existing guest workflow. QAC reservation 2d05e3d933124795861aeb0b9032481b launched direct QEMU child PID 20856 at 2026-10-20T15:32:33.5576640Z. The original DEVELOPER_STUDIO_PHASE28O_PASS marker was observed 64.515 seconds later, within the original 360-second deadline. The wrapper exited 0; QMP quit, QEMU exit 0, and reservation release were verified. The serial trace includes the breakpoint hit, Watch reevaluation, log output, reset, terminal, second-generation, bounds, cleanup, and final PASS markers.
+
+QAC source, scheduler policy, and acceptance integration lifecycle were not changed. No unmanaged fallback was used and no foreign QEMU was touched. QAC3A is accepted; overall QAC3 remains open, QAC3B is next, and no QAC3B work has started. The paired QAC validation record contains the reservation IDs, timing, full marker list, and retained evidence directories.

@@ -996,6 +996,14 @@ function Stage-Phase28OProject([string]$target) {
         Remove-Item -LiteralPath $target -Recurse -Force
     }
     Copy-Item $phase28oFixtureDirectory $target -Recurse -Force
+    # The QAC directory-backed FAT fixture rejects the guest compiler's
+    # mkdir for /P28O/build/obj, after creating the preceding output folders.
+    # Stage the empty output tree up front so this debugger acceptance tests
+    # compilation and breakpoint behavior, not guest FAT directory creation.
+    New-Item -ItemType Directory -Force -Path @(
+        (Join-Path $target "build/bin/amd64"),
+        (Join-Path $target "build/obj/amd64")
+    ) | Out-Null
 }
 
 function Stage-Phase28QProject([string]$target) {
@@ -5022,6 +5030,17 @@ try {
             Remove-Item -LiteralPath $activeEspDirectory -Recurse -Force
         }
         Copy-Item $espDirectory $activeEspDirectory -Recurse -Force
+        if ($Phase28OOnly) {
+            $activePhase28OProjectDirectory = Join-Path $activeEspDirectory "P28O"
+            # The Phase 28O fixture is the checked-in source tree on boot 1,
+            # so Stage-Phase28OProject intentionally does not copy or mutate
+            # it. Materialize the empty compiler output tree in each disposable
+            # ESP copy so the guest FAT filesystem does not need nested mkdirs.
+            New-Item -ItemType Directory -Force -Path @(
+                (Join-Path $activePhase28OProjectDirectory "build/bin/amd64"),
+                (Join-Path $activePhase28OProjectDirectory "build/obj/amd64")
+            ) | Out-Null
+        }
         if ($Phase29ISentinelOnly -or $Phase29LOwnershipGate) {
             $hostTracePath = Join-Path $tempDirectory ("boot{0}.host-trace.log" -f $run)
             Write-P29JHostTrace $hostTracePath 'P29J HOST 01 stage_created' ("boot={0} stage_id={1} runner_pid={2} runner_start_utc={3} esp={4} source={5}" -f

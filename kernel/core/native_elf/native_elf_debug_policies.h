@@ -11,6 +11,10 @@ bool native_debug_hit_count_policy_valid(uint32_t policy, uint64_t threshold);
 bool native_debug_hit_count_policy_matches(uint32_t policy, uint64_t threshold,
                                            uint64_t rawHitCount);
 uint64_t native_debug_saturating_increment(uint64_t value);
+bool native_debug_breakpoint_rearm_allowed(bool breakpointEnabled,
+                                          bool breakpointRemoved,
+                                          bool breakpointContinue,
+                                          uint32_t requestFlags);
 
 } // namespace native_elf
 } // namespace kernel

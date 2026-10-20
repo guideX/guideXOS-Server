@@ -6420,6 +6420,10 @@ gx_result debug(const gx_development_debug_request& request,
             return GX_ERROR_BUSY;
         }
         if (request.command == GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION) {
+            // The bootstrap entry breakpoint has been consumed.  Its hit bit
+            // only keeps the initial Paused stop resumable; leaving it set
+            // would make the breakpoint handler reject the first user trap.
+            s_operation.debugBreakpointHit = false;
             s_operation.state = GX_DEVELOPMENT_RUN_RUNNING;
             // Release owns the first real scheduler dispatch. RUNNING is
             // published only after the target has crossed its first
@@ -6493,11 +6497,14 @@ gx_result debug(const gx_development_debug_request& request,
         }
         if (persistentResume) {
             s_operation.debugConditionError = false;
+            // The UI's local mirror can lag a manager-side disable.  The
+            // backend breakpoint state is authoritative: never reinsert an
+            // INT3 for a disabled or removed current breakpoint.
+            const bool rearmBreakpoint = native_debug_breakpoint_rearm_allowed(
+                currentUser->enabled, s_operation.debugPausedBreakpointRemoved,
+                breakpointContinue, request.flags);
             if (!restore_current_breakpoint(s_operation) ||
-                !begin_conditional_instruction_continue(
-                    s_operation, breakpointContinue
-                        ? (request.flags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0
-                        : !s_operation.debugPausedBreakpointRemoved)) {
+                !begin_conditional_instruction_continue(s_operation, rearmBreakpoint)) {
                 if (breakpointContinue)
                     serial::puts("DEVELOPER_STUDIO_PHASE28M_CONTINUE_ARM_FAIL\n");
                 set_debug_error(outSnapshot,

@@ -41,5 +41,15 @@ uint64_t native_debug_saturating_increment(uint64_t value)
     return value == maximum ? maximum : value + 1ULL;
 }
 
+bool native_debug_breakpoint_rearm_allowed(bool breakpointEnabled,
+                                           bool breakpointRemoved,
+                                           bool breakpointContinue,
+                                           uint32_t requestFlags)
+{
+    if (!breakpointEnabled || breakpointRemoved) return false;
+    return !breakpointContinue ||
+        (requestFlags & GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT) != 0;
+}
+
 } // namespace native_elf
 } // namespace kernel

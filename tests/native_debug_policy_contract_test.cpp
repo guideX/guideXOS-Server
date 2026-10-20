@@ -8,6 +8,7 @@
 using kernel::native_elf::native_debug_hit_count_policy_matches;
 using kernel::native_elf::native_debug_hit_count_policy_valid;
 using kernel::native_elf::native_debug_saturating_increment;
+using kernel::native_elf::native_debug_breakpoint_rearm_allowed;
 
 int main()
 {
@@ -52,6 +53,13 @@ int main()
     assert(native_debug_saturating_increment(0) == 1);
     assert(native_debug_saturating_increment(maximum - 1) == maximum);
     assert(native_debug_saturating_increment(maximum) == maximum);
+
+    const uint32_t reinstallFlag = GX_DEVELOPMENT_DEBUG_FLAG_REINSTALL_BREAKPOINT;
+    assert(native_debug_breakpoint_rearm_allowed(true, false, false, 0));
+    assert(native_debug_breakpoint_rearm_allowed(true, false, true, reinstallFlag));
+    assert(!native_debug_breakpoint_rearm_allowed(true, false, true, 0));
+    assert(!native_debug_breakpoint_rearm_allowed(false, false, true, reinstallFlag));
+    assert(!native_debug_breakpoint_rearm_allowed(true, true, true, reinstallFlag));
 
     gx_development_debug_breakpoint record = {};
     record.action = GX_DEVELOPMENT_DEBUG_BREAKPOINT_ACTION_LOG;
