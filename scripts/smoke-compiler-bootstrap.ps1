@@ -1447,7 +1447,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         $debugcon = Read-SerialText $debugconPath
         $qemuDebug = Read-SerialText $qemuDebugPath
         if ($qacAcceptanceEnabled -and -not $qacState.RequiredMarkerObserved) {
-            $qacFinalMarker = if ($Phase28QOnly) { 'DEVELOPER_STUDIO_PHASE28Q_PASS' } else { '[KERNEL] Entering main loop (waiting for input)...' }
+            $qacFinalMarker = Get-QacAcceptancePassMarker -Phase $(if ($Phase28QOnly) { '28Q' } else { '28O' })
             if ($serial.Contains($qacFinalMarker)) {
                 Write-P29JHostTrace $hostTracePath 'QAC PASS MARKER FINAL-ONLY' ("boot={0} phase={1} inspected_utc={2} qemu_exit_utc={3} runtime_timeout={4} serial_bytes={5} read_io_errors={6} acceptance=0" -f
                     $runNumber, $(if ($Phase28QOnly) { '28Q' } else { '28O' }), [DateTime]::UtcNow.ToString('o'),
@@ -1465,9 +1465,11 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         $debugconBytes = if (Test-Path -LiteralPath $debugconPath) { (Get-Item -LiteralPath $debugconPath).Length } else { 0 }
         $cpuResetCount = [regex]::Matches($qemuDebug, '(?m)^CPU Reset').Count
         if ($finalEspAudit) {
+            $stdoutTaskDrained = if ($qacAcceptanceEnabled) { [bool]$stdoutFinished } else { [bool]$stdoutTask.IsCompleted }
+            $stderrTaskDrained = if ($qacAcceptanceEnabled) { [bool]$stderrFinished } else { [bool]$stderrTask.IsCompleted }
             Write-P29JHostTrace $hostTracePath 'P29J HOST 10 process_result' ("boot={0} pid={1} alive_at_timeout={2} exited_before_harness_stop={3} harness_stop={4} exit_code={5} process_reaped={6} stdout_task_drained={7} stderr_task_drained={8} reset_records={9}" -f
                 $runNumber, $process.Id, [int]$aliveAtDeadline, [int]$exitedBeforeHarnessStop, $harnessStopReason, $qemuExitCode,
-                [int]$process.HasExited, [int]$stdoutTask.IsCompleted, [int]$stderrTask.IsCompleted, $cpuResetCount)
+                [int]$process.HasExited, [int]$stdoutTaskDrained, [int]$stderrTaskDrained, $cpuResetCount)
             Write-P29JHostTrace $hostTracePath 'P29J HOST 11 captured_evidence' ("boot={0} serial_exists={1} serial_bytes={2} stdout_bytes={3} stderr_bytes={4} debugcon_exists={5} debugcon_bytes={6} qemu_debug_exists={7}" -f
                 $runNumber, [int](Test-Path -LiteralPath $serialPath), $serialBytes,
                 [Text.Encoding]::UTF8.GetByteCount($stdout), [Text.Encoding]::UTF8.GetByteCount($stderr),
