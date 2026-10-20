@@ -170,3 +170,39 @@ Screenshot captures are actual Windows app captures. The UI code does not provid
 ### Acceptance and phase
 
 **Outcome A — SN9 Windows-hosted functionality accepted.** Automated regression, Windows Release build, and live Windows UI smoke tests pass. Architecture and qualification limits are explicit; native guideXOS integration and guest qualification remain deferred. `.phase` advances to `SN10`.
+
+## Supplemental SN9R3 host validation — 2026-10-19
+
+This run added host-side UI and regression evidence. Its attempt to make guideXOS guest qualification an SN9 acceptance gate was a scope regression: native integration and guest qualification belong to SN10 and do not reopen the accepted SN9 Windows-hosted milestone.
+
+### Baseline and preservation
+
+- The requested expected starting HEAD was `d5984403afe02b9f9ad8a4ff5f76da0924ac22d5`, with `.phase` at `SN9`. The actual checkout started at `c7993bc6bc536a2c673839e20af8c8dd4eb93253`, branch `STELLAR_NAVIGATOR`, `.phase` `SN10`. The actual HEAD is the later `Accept SN9 Windows host qualification` commit; its parent is the requested HEAD and its changes are limited to `.phase` and this report.
+- There were 239 pre-existing status entries at closeout start, consisting of modified build outputs and untracked validation data. They were left in place. The final normal porcelain count is 241: those 239 entries plus this report and `.phase`. No source code was changed, and no branch switch, reset, clean, stash, merge, rebase, cherry-pick, or push was performed.
+- Test and build work ran from a byte-preserving copy under `C:\Users\guideX\.codex\artifacts\SN9R3_20261019\source\Apps\StellarNavigator`; generated output and logs stayed outside the repository.
+
+### Guest candidate and QEMU ownership
+
+- **Guest candidate at the time of this run: none.** `StellarNavigator.Gui` is a Windows Forms application targeting Windows. The repository also had a managed .NET console demonstration, but no Stellar Navigator guideXOS-native frontend or package had yet been started. This was SN10 work, not an unmet SN9 acceptance gate.
+- A read-only census of all Windows processes named `qemu*` found **zero QEMU processes**. No QEMU was launched or changed. The separate guideXOS QAC repository records QAC2 acceptance (88/88 checks, including real QEMU lifecycle qualification), but this host had no `qac` CLI on PATH, coordinator process, QAC named pipe, or QAC service at census time. Direct process ownership checks were therefore used; no reservation was available to request.
+- Structured census: `C:\Users\guideX\.codex\artifacts\SN9R3_20261019\evidence\SN9R3-qemu-census.json`. No guest boot, serial log, guest screenshot, or guest run record exists because there is no candidate to boot.
+
+### Live Windows UI smoke — host only
+
+- The interactive smoke used the staged Windows host executable `C:\Users\guideX\.codex\artifacts\SN9R2_20261019\bin\StellarNavigator.Gui\release\StellarNavigator.Gui.exe`, SHA-256 `8F3E6A297E0CA2D6A8218BC8012F4F4A1C9AF44E2B7F005D31154C5AA003198F`; its DLL SHA-256 is `DA1531C0881B9B9B570288EC28A7A06A9E78859B34E2D42F00A6D0566DEBD4C6`. The host is built from the same application source as the current HEAD; the later commit changes documentation and phase only.
+- Visible Windows UI automation passed these checks: launch and ready 10-object scene; SN8 trajectory rendering; actual Earth-to-Jupiter dropdown selection; rebuilt six-row Jupiter timeline in chronological ET order; distance in km and relative speed in m/s; event selection setting the epoch and displayed state to `3220824.2363945004` ET; an enabled `SN9R3-ui-check` maneuver at ET `1000000` with Δv `(25, 0, 0) m/s` appearing as Applied and changing the refined Jupiter result from about `5.99275E+08 km` / `17471 m/s` to `5.99229E+08 km` / `17457 m/s`; controlled refusal of an ET of `1000000000000` outside DE440s coverage `[-4734072000, 4735368000]`; rejection of `NaN` with a finite-ET diagnostic; and clean close/reopen to a ready scene at ET 0.
+- Existing host screenshots remain available at `C:\Users\guideX\.codex\artifacts\SN9R2_20261019\evidence\SN9R2-host-runtime.jpg`, `SN9R2-host-timeline-maneuver.jpg`, `SN9R2-missing-ephemeris.jpg`, and `SN9R2-invalid-ephemeris.jpg`. The missing-file capture shows an empty scene with a controlled warning; the checksum-invalid capture shows the manifest mismatch warning. New live observations are recorded at `C:\Users\guideX\.codex\artifacts\SN9R3_20261019\evidence\SN9R3-live-ui-observations.log`. The UI helper displayed current screenshots during automation but did not expose a screenshot save operation. All of this is host evidence only.
+
+### Regression and numerical evidence
+
+- Release regression rerun: **323 passed, 0 failed, 0 skipped**. The suite includes the inherited SN8 trajectory/maneuver checks and SN9 analytic closest approach, window and maneuver boundaries, deterministic equal-time ordering, target and maneuver recomputation, ephemeris gaps, invalid/non-finite samples, unsupported target/frame, extreme finite distances, and insufficient-sample handling. No regression was found.
+- The clean test compile emitted the inherited xUnit2002 warning at `StellarNavigator.Tests/EphemerisTests.cs:51` for `Assert.NotNull` on a value tuple. No source change was made for that unrelated warning.
+- Windows GUI Release build passed with **0 warnings and 0 errors**. Logs are `C:\Users\guideX\.codex\artifacts\SN9R3_20261019\test-results\SN9R3-Release.trx` and `C:\Users\guideX\.codex\artifacts\SN9R3_20261019\SN9R3-GUI-Release.log`.
+- Numerical values remain idealized, approximate SN8 simulation results. The analyzer’s sampling, candidate, refinement, and binary64 resolution limits described above still apply; results are not flight-certified navigation predictions.
+
+### SN10 handoff
+
+- Establish the guideXOS-native Stellar Navigator presentation and launch boundary, then build and stage an actual guest candidate.
+- Qualify that candidate in an exclusive managed or directly verified QEMU lane. Guest qualification is an SN10 gate. Host UI and hosted tests remain host evidence.
+- The Computer Use helper supported direct mouse/keyboard automation for the Windows host, so no human interaction was needed for the host smoke. There is no guest window or guest input surface to automate yet.
+- The SN9R3 closeout had proposed setting `.phase` back to `SN9`, despite confirming that its starting HEAD `c7993bc6bc536a2c673839e20af8c8dd4eb93253` already accepted SN9 and set `.phase` to `SN10`. That proposed rollback is superseded; the phase marker remains `SN10`.
