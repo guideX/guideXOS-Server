@@ -1,0 +1,63 @@
+{
+  "audit": "S22R4 DeveloperStudio editor-only feasibility",
+  "date": "2026-10-20",
+  "server": {
+    "path": "D:/dev/guideXOSServer",
+    "branch": "main",
+    "startingHead": "07bd81c7d5d47bade3bbd6d168ded517878784f2",
+    "expectedHeadMatched": true,
+    "aheadOfOriginMain": 2,
+    "trackedPathCount": 5308,
+    "stagedPathCount": 0,
+    "trackedUnstagedPathCount": 0,
+    "preexistingUntrackedPathCount": 853,
+    "inventory": "server-start-porcelain.txt",
+    "existingS22R4Audit": false,
+    "newerReleaseDecisionFound": false
+  },
+  "developerStudio": {
+    "path": "D:/dev/guideXOS_Developer_Studio",
+    "branch": "main",
+    "head": "9b66725990b604d426ef6d2be02e7097a0f9a46e",
+    "aheadOfOriginMain": 1,
+    "trackedOrUntrackedChanges": 0,
+    "phaseMarkerAtCheckoutRoot": false,
+    "sourceManifest": {
+      "path": "app/app.json",
+      "bytes": 2202,
+      "sha256": "5E66BF31978C1EAA78985B50D3EB71966D3AE7EA56BFD553340CE5798D5BEFF5",
+      "minimumServerVersion": "0.5.0"
+    }
+  },
+  "availableServerPackagePair": {
+    "manifest": {
+      "path": "Apps/DeveloperStudio/app.json",
+      "bytes": 2011,
+      "sha256": "AB1DB7C63A3DC49C06098B7A9341C33DBCF6FECBD8163460F62BCF907E7488E9"
+    },
+    "amd64Elf": {
+      "path": "Apps/DeveloperStudio/bin/amd64/developerstudio.elf",
+      "bytes": 1104652,
+      "sha256": "F07270EACBD62F9AB67F1F38856A326981280E43D0A4D44F8ED1D17C777F01A6"
+    },
+    "acceptance": "Not approved for Server v0.3; artifact predates the inspected DeveloperStudio source HEAD"
+  },
+  "observedOtherProcesses": [
+    {
+      "pid": 18800,
+      "process": "qemu-system-x86_64",
+      "checkout": "D:/dev/guideXOSServer_DiskManagerImprovements",
+      "action": "Observed read-only; not attached to or modified"
+    },
+    {
+      "pid": 29276,
+      "process": "g++",
+      "commandPurpose": "Navigator JavaScript test compile",
+      "checkout": "Not DeveloperStudio",
+      "action": "Not interrupted"
+    }
+  ],
+  "mutationsToDeveloperStudio": 0,
+  "releaseArtifactsBuilt": 0,
+  "qemuRunsStarted": 0
+}
