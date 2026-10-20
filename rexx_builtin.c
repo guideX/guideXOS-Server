@@ -2965,6 +2965,591 @@ static RexxVMStatus rexx_builtin_bitxor(const RexxValue *arguments,
                                        REXX_BUILTIN_BITWISE_XOR);
 }
 
+typedef struct RexxBuiltinDate {
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint16_t day_of_year;
+    uint32_t base_day;
+} RexxBuiltinDate;
+
+static int rexx_builtin_is_leap_year(uint16_t year)
+{
+    return (year % 4u == 0u && year % 100u != 0u) || year % 400u == 0u;
+}
+
+static uint8_t rexx_builtin_days_in_month(uint16_t year, uint8_t month)
+{
+    static const uint8_t days[] = {
+        31u, 28u, 31u, 30u, 31u, 30u,
+        31u, 31u, 30u, 31u, 30u, 31u
+    };
+    if (month == 2u && rexx_builtin_is_leap_year(year)) return 29u;
+    return month >= 1u && month <= 12u ? days[month - 1u] : 0u;
+}
+
+static uint32_t rexx_builtin_days_before_year(uint16_t year)
+{
+    uint32_t prior = (uint32_t)year - 1u;
+    return prior * 365u + prior / 4u - prior / 100u + prior / 400u;
+}
+
+static int rexx_builtin_date_from_parts(uint16_t year, uint8_t month,
+                                        uint8_t day, RexxBuiltinDate *date)
+{
+    uint16_t day_of_year = day;
+    uint8_t current_month;
+    if (date == NULL || year < 1u || year > 9999u || month < 1u ||
+        month > 12u || day < 1u ||
+        day > rexx_builtin_days_in_month(year, month)) return 0;
+    for (current_month = 1u; current_month < month; ++current_month)
+        day_of_year = (uint16_t)(day_of_year +
+            rexx_builtin_days_in_month(year, current_month));
+    date->year = year;
+    date->month = month;
+    date->day = day;
+    date->day_of_year = day_of_year;
+    date->base_day = rexx_builtin_days_before_year(year) +
+                     (uint32_t)day_of_year - 1u;
+    return 1;
+}
+
+static int rexx_builtin_date_from_base(uint32_t base_day,
+                                       RexxBuiltinDate *date)
+{
+    uint16_t low = 1u, high = 10000u, year;
+    uint8_t month;
+    uint32_t day_of_year;
+    if (date == NULL || base_day >= rexx_builtin_days_before_year(10000u))
+        return 0;
+    while (low + 1u < high) {
+        uint16_t middle = (uint16_t)(low + (high - low) / 2u);
+        if (rexx_builtin_days_before_year(middle) <= base_day)
+            low = middle;
+        else
+            high = middle;
+    }
+    year = low;
+    day_of_year = base_day - rexx_builtin_days_before_year(year) + 1u;
+    for (month = 1u; month <= 12u; ++month) {
+        uint8_t month_days = rexx_builtin_days_in_month(year, month);
+        if (day_of_year <= month_days)
+            return rexx_builtin_date_from_parts(
+                year, month, (uint8_t)day_of_year, date);
+        day_of_year -= month_days;
+    }
+    return 0;
+}
+
+static int rexx_builtin_fixed_digits(const char *bytes, size_t length,
+                                    size_t offset, size_t count,
+                                    uint32_t *value)
+{
+    size_t index;
+    uint32_t parsed = 0u;
+    if (bytes == NULL || value == NULL || offset > length ||
+        count > length - offset) return 0;
+    for (index = offset; index < offset + count; ++index) {
+        unsigned char byte = (unsigned char)bytes[index];
+        if (byte < (unsigned char)'0' || byte > (unsigned char)'9')
+            return 0;
+        parsed = parsed * 10u + (uint32_t)(byte - (unsigned char)'0');
+    }
+    *value = parsed;
+    return 1;
+}
+
+static int rexx_builtin_variable_digits(const char *bytes, size_t length,
+                                        uint32_t *value)
+{
+    size_t index;
+    uint32_t parsed = 0u;
+    if (bytes == NULL || value == NULL || length == 0u ||
+        (length > 1u && bytes[0] == '0')) return 0;
+    for (index = 0u; index < length; ++index) {
+        unsigned char byte = (unsigned char)bytes[index];
+        if (byte < (unsigned char)'0' || byte > (unsigned char)'9' ||
+            parsed > (UINT32_MAX - 9u) / 10u) return 0;
+        parsed = parsed * 10u + (uint32_t)(byte - (unsigned char)'0');
+    }
+    *value = parsed;
+    return 1;
+}
+
+static int rexx_builtin_year_from_yy(uint32_t year_2, uint16_t current_year,
+                                     uint16_t *year_out)
+{
+    int32_t low = (int32_t)current_year - 50;
+    int32_t high = (int32_t)current_year + 49;
+    int32_t candidate_start = low < 1 ? 1 : low;
+    int32_t remainder = candidate_start % 100;
+    int32_t addition = ((int32_t)year_2 - remainder + 100) % 100;
+    int32_t candidate = candidate_start + addition;
+    if (year_out == NULL || candidate > high || candidate > 9999)
+        return 0;
+    *year_out = (uint16_t)candidate;
+    return 1;
+}
+
+static int rexx_builtin_month_index(const char *bytes, size_t length,
+                                    uint8_t *month)
+{
+    static const char *const names[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    size_t index;
+    if (bytes == NULL || length != 3u || month == NULL) return 0;
+    for (index = 0u; index < 12u; ++index) {
+        if (memcmp(bytes, names[index], 3u) == 0) {
+            *month = (uint8_t)(index + 1u);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static RexxVMStatus rexx_builtin_current_date(RexxVM *vm,
+                                             RexxBuiltinDate *date,
+                                             RexxVMClockReading *reading_out)
+{
+    RexxVMClockReading reading;
+    int64_t seconds_of_day;
+    int64_t day_delta;
+    int64_t base_day;
+    RexxVMStatus status;
+    if (vm == NULL || date == NULL) return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+    status = rexx_vm_clock_read_for_clause(vm, &reading);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if ((reading.capabilities & REXX_CLOCK_CAP_WALL_CIVIL) == 0u ||
+        (reading.wall_interpretation != REXX_CLOCK_WALL_LOCAL_CIVIL &&
+         reading.wall_interpretation != REXX_CLOCK_WALL_UTC_FIXED_OFFSET))
+        return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+    if (reading.wall_interpretation == REXX_CLOCK_WALL_UTC_FIXED_OFFSET) {
+        if (!rexx_builtin_date_from_parts(reading.year, reading.month,
+                                          reading.day, date))
+            return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+        base_day = date->base_day;
+        seconds_of_day = (int64_t)reading.hour * 3600 +
+                         (int64_t)reading.minute * 60 + reading.second +
+                         reading.utc_offset_seconds;
+        day_delta = seconds_of_day / 86400;
+        if (seconds_of_day < 0 && seconds_of_day % 86400 != 0) --day_delta;
+        seconds_of_day -= day_delta * 86400;
+        base_day += day_delta;
+        if (base_day < 0 || base_day >=
+                (int64_t)rexx_builtin_days_before_year(10000u) ||
+            !rexx_builtin_date_from_base((uint32_t)base_day, date))
+            return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+    } else if (!rexx_builtin_date_from_parts(reading.year, reading.month,
+                                              reading.day, date)) {
+        return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+    }
+    if (reading_out != NULL) *reading_out = reading;
+    return REXX_VM_STATUS_OK;
+}
+
+static int rexx_builtin_parse_date(const char *bytes, size_t length,
+                                   char input_option, uint16_t current_year,
+                                   RexxBuiltinDate *date)
+{
+    uint32_t a, b, c;
+    uint16_t year;
+    uint8_t month;
+    switch (input_option) {
+    case 'S':
+        return length == 8u &&
+               rexx_builtin_fixed_digits(bytes, length, 0u, 4u, &a) &&
+               rexx_builtin_fixed_digits(bytes, length, 4u, 2u, &b) &&
+               rexx_builtin_fixed_digits(bytes, length, 6u, 2u, &c) &&
+               rexx_builtin_date_from_parts((uint16_t)a, (uint8_t)b,
+                                             (uint8_t)c, date);
+    case 'E':
+    case 'U':
+        if (length != 8u || bytes[2] != '/' || bytes[5] != '/' ||
+            !rexx_builtin_fixed_digits(bytes, length, 0u, 2u, &a) ||
+            !rexx_builtin_fixed_digits(bytes, length, 3u, 2u, &b) ||
+            !rexx_builtin_fixed_digits(bytes, length, 6u, 2u, &c) ||
+            !rexx_builtin_year_from_yy(c, current_year, &year)) return 0;
+        return input_option == 'E'
+            ? rexx_builtin_date_from_parts(year, (uint8_t)b, (uint8_t)a, date)
+            : rexx_builtin_date_from_parts(year, (uint8_t)a, (uint8_t)b, date);
+    case 'O':
+        if (length != 8u || bytes[2] != '/' || bytes[5] != '/' ||
+            !rexx_builtin_fixed_digits(bytes, length, 0u, 2u, &a) ||
+            !rexx_builtin_fixed_digits(bytes, length, 3u, 2u, &b) ||
+            !rexx_builtin_fixed_digits(bytes, length, 6u, 2u, &c) ||
+            !rexx_builtin_year_from_yy(a, current_year, &year)) return 0;
+        return rexx_builtin_date_from_parts(year, (uint8_t)b, (uint8_t)c,
+                                             date);
+    case 'J':
+        if (length != 5u ||
+            !rexx_builtin_fixed_digits(bytes, length, 0u, 2u, &a) ||
+            !rexx_builtin_fixed_digits(bytes, length, 2u, 3u, &b) ||
+            !rexx_builtin_year_from_yy(a, current_year, &year) || b == 0u ||
+            b > (rexx_builtin_is_leap_year(year) ? 366u : 365u)) return 0;
+        return rexx_builtin_date_from_base(
+            rexx_builtin_days_before_year(year) + b - 1u, date);
+    case 'N': {
+        size_t cursor = 0u;
+        size_t day_length;
+        uint32_t day_value;
+        uint32_t year_value;
+        while (cursor < length && bytes[cursor] >= '0' && bytes[cursor] <= '9')
+            ++cursor;
+        day_length = cursor;
+        if (day_length == 0u || day_length > 2u ||
+            (day_length > 1u && bytes[0] == '0') || cursor >= length ||
+            bytes[cursor++] != ' ' || length - cursor < 8u ||
+            !rexx_builtin_variable_digits(bytes, day_length, &day_value) ||
+            day_value > 31u || !rexx_builtin_month_index(bytes + cursor, 3u,
+                                                         &month)) return 0;
+        cursor += 3u;
+        if (cursor >= length || bytes[cursor++] != ' ' ||
+            length - cursor != 4u ||
+            !rexx_builtin_fixed_digits(bytes, length, cursor, 4u,
+                                       &year_value)) return 0;
+        return rexx_builtin_date_from_parts((uint16_t)year_value, month,
+                                             (uint8_t)day_value, date);
+    }
+    case 'B':
+        if (!rexx_builtin_variable_digits(bytes, length, &a) ||
+            a >= rexx_builtin_days_before_year(10000u)) return 0;
+        return rexx_builtin_date_from_base(a, date);
+    default:
+        return 0;
+    }
+}
+
+static void rexx_builtin_append_char(char *buffer, size_t *length, char value)
+{
+    buffer[(*length)++] = value;
+}
+
+static void rexx_builtin_append_uint(char *buffer, size_t *length,
+                                     uint32_t value)
+{
+    char reversed[10];
+    size_t count = 0u;
+    do {
+        reversed[count++] = (char)('0' + value % 10u);
+        value /= 10u;
+    } while (value != 0u);
+    while (count != 0u) buffer[(*length)++] = reversed[--count];
+}
+
+static void rexx_builtin_append_fixed(char *buffer, size_t *length,
+                                     uint32_t value, size_t width)
+{
+    size_t index = width;
+    while (index != 0u) {
+        buffer[*length + --index] = (char)('0' + value % 10u);
+        value /= 10u;
+    }
+    *length += width;
+}
+
+static RexxVMStatus rexx_builtin_date(RexxVM *vm,
+                                      const RexxValue *arguments,
+                                      size_t argument_count,
+                                      RexxValue *result)
+{
+    static const char *const month_short[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    static const char *const month_full[] = {
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    };
+    static const char *const weekdays[] = {
+        "Monday", "Tuesday", "Wednesday", "Thursday",
+        "Friday", "Saturday", "Sunday"
+    };
+    RexxBuiltinStringView option_view, input_view, input_option_view;
+    RexxBuiltinDate date;
+    RexxVMClockReading reading;
+    char output[40];
+    size_t output_length = 0u;
+    char output_option = 'N';
+    char input_option = 'N';
+    int input_present = argument_count >= 2u &&
+                        arguments[1].type != REXX_VALUE_UNSET;
+    uint16_t current_year = 0u;
+    RexxVMStatus status;
+
+    if (argument_count > 3u || (argument_count >= 3u && !input_present))
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (argument_count >= 1u && arguments[0].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_string_view(&arguments[0], &option_view);
+        if (status != REXX_VM_STATUS_OK) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (option_view.length == 0u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        output_option = (char)rexx_builtin_ascii_upper(
+            (unsigned char)option_view.bytes[0]);
+    }
+    if (argument_count >= 3u && arguments[2].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_string_view(&arguments[2], &input_option_view);
+        if (status != REXX_VM_STATUS_OK) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (input_option_view.length == 0u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        input_option = (char)rexx_builtin_ascii_upper(
+            (unsigned char)input_option_view.bytes[0]);
+    }
+    if (output_option != 'B' && output_option != 'C' && output_option != 'D' &&
+        output_option != 'E' && output_option != 'J' && output_option != 'M' &&
+        output_option != 'N' && output_option != 'O' && output_option != 'S' &&
+        output_option != 'U' && output_option != 'W')
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (input_present && input_option != 'B' && input_option != 'E' &&
+        input_option != 'J' && input_option != 'N' && input_option != 'O' &&
+        input_option != 'S' && input_option != 'U')
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (input_present && (output_option == 'C' || output_option == 'J' ||
+                          output_option == 'M' || output_option == 'W'))
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+
+    if (input_present) {
+        status = rexx_builtin_string_view(&arguments[1], &input_view);
+        if (status != REXX_VM_STATUS_OK || input_view.length == 0u)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (input_option == 'E' || input_option == 'J' ||
+            input_option == 'O' || input_option == 'U') {
+            status = rexx_builtin_current_date(vm, &date, &reading);
+            if (status != REXX_VM_STATUS_OK) return status;
+            current_year = date.year;
+        }
+        if (!rexx_builtin_parse_date(input_view.bytes, input_view.length,
+                                     input_option, current_year, &date))
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    } else {
+        status = rexx_builtin_current_date(vm, &date, &reading);
+        if (status != REXX_VM_STATUS_OK) return status;
+    }
+
+    switch (output_option) {
+    case 'B':
+        rexx_builtin_append_uint(output, &output_length, date.base_day);
+        break;
+    case 'C': {
+        uint16_t century_start = (uint16_t)(((date.year - 1u) / 100u) * 100u);
+        uint32_t start_day = century_start == 0u
+            ? 0u : rexx_builtin_days_before_year(century_start);
+        rexx_builtin_append_uint(output, &output_length,
+                                 date.base_day - start_day + 1u);
+        break;
+    }
+    case 'D':
+        rexx_builtin_append_uint(output, &output_length, date.day_of_year);
+        break;
+    case 'E':
+        rexx_builtin_append_fixed(output, &output_length, date.day, 2u);
+        rexx_builtin_append_char(output, &output_length, '/');
+        rexx_builtin_append_fixed(output, &output_length, date.month, 2u);
+        rexx_builtin_append_char(output, &output_length, '/');
+        rexx_builtin_append_fixed(output, &output_length, date.year % 100u, 2u);
+        break;
+    case 'J':
+        rexx_builtin_append_fixed(output, &output_length, date.year % 100u, 2u);
+        rexx_builtin_append_fixed(output, &output_length, date.day_of_year, 3u);
+        break;
+    case 'M':
+        memcpy(output, month_full[date.month - 1u],
+               strlen(month_full[date.month - 1u]));
+        output_length = strlen(month_full[date.month - 1u]);
+        break;
+    case 'N':
+        rexx_builtin_append_uint(output, &output_length, date.day);
+        rexx_builtin_append_char(output, &output_length, ' ');
+        memcpy(output + output_length, month_short[date.month - 1u], 3u);
+        output_length += 3u;
+        rexx_builtin_append_char(output, &output_length, ' ');
+        rexx_builtin_append_fixed(output, &output_length, date.year, 4u);
+        break;
+    case 'O':
+        rexx_builtin_append_fixed(output, &output_length, date.year % 100u, 2u);
+        rexx_builtin_append_char(output, &output_length, '/');
+        rexx_builtin_append_fixed(output, &output_length, date.month, 2u);
+        rexx_builtin_append_char(output, &output_length, '/');
+        rexx_builtin_append_fixed(output, &output_length, date.day, 2u);
+        break;
+    case 'S':
+        rexx_builtin_append_fixed(output, &output_length, date.year, 4u);
+        rexx_builtin_append_fixed(output, &output_length, date.month, 2u);
+        rexx_builtin_append_fixed(output, &output_length, date.day, 2u);
+        break;
+    case 'U':
+        rexx_builtin_append_fixed(output, &output_length, date.month, 2u);
+        rexx_builtin_append_char(output, &output_length, '/');
+        rexx_builtin_append_fixed(output, &output_length, date.day, 2u);
+        rexx_builtin_append_char(output, &output_length, '/');
+        rexx_builtin_append_fixed(output, &output_length, date.year % 100u, 2u);
+        break;
+    case 'W':
+        memcpy(output, weekdays[date.base_day % 7u],
+               strlen(weekdays[date.base_day % 7u]));
+        output_length = strlen(weekdays[date.base_day % 7u]);
+        break;
+    default:
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    return rexx_value_set_string(result, output, output_length);
+}
+
+static RexxVMStatus rexx_builtin_time(RexxVM *vm,
+                                      const RexxValue *arguments,
+                                      size_t argument_count,
+                                      RexxValue *result)
+{
+    RexxBuiltinStringView option_view;
+    RexxVMClockReading reading;
+    RexxVMClockContext *context;
+    char output[40];
+    size_t output_length = 0u;
+    char option = 'N';
+    uint32_t hour, minute, second, fraction_microseconds;
+    RexxVMStatus status;
+
+    if (argument_count > 1u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (argument_count == 1u && arguments[0].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_string_view(&arguments[0], &option_view);
+        if (status != REXX_VM_STATUS_OK || option_view.length == 0u)
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        option = (char)rexx_builtin_ascii_upper(
+            (unsigned char)option_view.bytes[0]);
+    }
+    if (option != 'C' && option != 'E' && option != 'H' && option != 'L' &&
+        option != 'M' && option != 'N' && option != 'R' && option != 'S')
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (vm == NULL) return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+    status = rexx_vm_clock_read_for_clause(vm, &reading);
+    if (status != REXX_VM_STATUS_OK) return status;
+    context = &vm->clock_context;
+
+    if (option == 'E' || option == 'R') {
+        uint64_t elapsed_nanoseconds;
+        uint64_t elapsed_seconds;
+        uint64_t elapsed_fraction;
+        if ((reading.capabilities & REXX_CLOCK_CAP_MONOTONIC) == 0u)
+            return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+        if (!context->elapsed_started) {
+            context->elapsed_started = 1;
+            context->elapsed_start_nanoseconds =
+                reading.monotonic_nanoseconds;
+            context->elapsed_clause_value_nanoseconds = 0u;
+            context->elapsed_clause_value_valid = 1;
+        } else if (!context->elapsed_clause_value_valid) {
+            if (reading.monotonic_nanoseconds <
+                context->elapsed_start_nanoseconds)
+                return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+            context->elapsed_clause_value_nanoseconds =
+                reading.monotonic_nanoseconds -
+                context->elapsed_start_nanoseconds;
+            context->elapsed_clause_value_valid = 1;
+        }
+        elapsed_nanoseconds = context->elapsed_clause_value_nanoseconds;
+        elapsed_seconds = elapsed_nanoseconds / UINT64_C(1000000000);
+        elapsed_fraction = (elapsed_nanoseconds % UINT64_C(1000000000)) /
+                           UINT64_C(1000);
+        if (elapsed_seconds > UINT64_C(999999999)) {
+            if (option == 'R') {
+                context->elapsed_start_nanoseconds =
+                    reading.monotonic_nanoseconds;
+                context->elapsed_clause_value_nanoseconds = 0u;
+                context->elapsed_clause_value_valid = 1;
+                context->elapsed_clause_reset = 1;
+            }
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        }
+        rexx_builtin_append_uint(output, &output_length,
+                                 (uint32_t)elapsed_seconds);
+        rexx_builtin_append_char(output, &output_length, '.');
+        rexx_builtin_append_fixed(output, &output_length,
+                                  (uint32_t)elapsed_fraction, 6u);
+        if (option == 'R' && !context->elapsed_clause_reset) {
+            context->elapsed_start_nanoseconds =
+                reading.monotonic_nanoseconds;
+            context->elapsed_clause_reset = 1;
+        }
+        return rexx_value_set_string(result, output, output_length);
+    }
+
+    if ((reading.capabilities & REXX_CLOCK_CAP_WALL_CIVIL) == 0u ||
+        (reading.wall_interpretation != REXX_CLOCK_WALL_LOCAL_CIVIL &&
+         reading.wall_interpretation != REXX_CLOCK_WALL_UTC_FIXED_OFFSET))
+        return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+    {
+        RexxBuiltinDate local_date;
+        if (!rexx_builtin_date_from_parts(reading.year, reading.month,
+                                          reading.day, &local_date)) {
+            return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+        }
+        hour = reading.hour;
+        minute = reading.minute;
+        second = reading.second;
+        if (reading.wall_interpretation ==
+            REXX_CLOCK_WALL_UTC_FIXED_OFFSET) {
+            int64_t seconds_of_day = (int64_t)hour * 3600 +
+                (int64_t)minute * 60 + second + reading.utc_offset_seconds;
+            int64_t day_delta = seconds_of_day / 86400;
+            int64_t base_day = local_date.base_day;
+            if (seconds_of_day < 0 && seconds_of_day % 86400 != 0)
+                --day_delta;
+            seconds_of_day -= day_delta * 86400;
+            base_day += day_delta;
+            if (base_day < 0 || base_day >=
+                    (int64_t)rexx_builtin_days_before_year(10000u) ||
+                !rexx_builtin_date_from_base((uint32_t)base_day, &local_date))
+                return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+            hour = (uint32_t)(seconds_of_day / 3600);
+            minute = (uint32_t)((seconds_of_day / 60) % 60);
+            second = (uint32_t)(seconds_of_day % 60);
+        }
+    }
+    fraction_microseconds = reading.fractional_nanoseconds;
+    fraction_microseconds -= fraction_microseconds %
+        reading.wall_resolution_nanoseconds;
+    fraction_microseconds /= 1000u;
+    switch (option) {
+    case 'C':
+        rexx_builtin_append_uint(output, &output_length,
+                                 hour % 12u == 0u ? 12u : hour % 12u);
+        rexx_builtin_append_char(output, &output_length, ':');
+        rexx_builtin_append_fixed(output, &output_length, minute, 2u);
+        memcpy(output + output_length, hour < 12u ? "am" : "pm", 2u);
+        output_length += 2u;
+        break;
+    case 'H':
+        rexx_builtin_append_uint(output, &output_length, hour);
+        break;
+    case 'L':
+        rexx_builtin_append_fixed(output, &output_length, hour, 2u);
+        rexx_builtin_append_char(output, &output_length, ':');
+        rexx_builtin_append_fixed(output, &output_length, minute, 2u);
+        rexx_builtin_append_char(output, &output_length, ':');
+        rexx_builtin_append_fixed(output, &output_length, second, 2u);
+        rexx_builtin_append_char(output, &output_length, '.');
+        rexx_builtin_append_fixed(output, &output_length,
+                                  fraction_microseconds, 6u);
+        break;
+    case 'M':
+        rexx_builtin_append_uint(output, &output_length, hour * 60u + minute);
+        break;
+    case 'N':
+        rexx_builtin_append_fixed(output, &output_length, hour, 2u);
+        rexx_builtin_append_char(output, &output_length, ':');
+        rexx_builtin_append_fixed(output, &output_length, minute, 2u);
+        rexx_builtin_append_char(output, &output_length, ':');
+        rexx_builtin_append_fixed(output, &output_length, second, 2u);
+        break;
+    case 'S':
+        rexx_builtin_append_uint(output, &output_length,
+                                 hour * 3600u + minute * 60u + second);
+        break;
+    default:
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    return rexx_value_set_string(result, output, output_length);
+}
+
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "LENGTH", 1u, 1u, rexx_builtin_length, NULL },
     { "ABBREV", 2u, 3u, rexx_builtin_abbrev, NULL },
@@ -3010,7 +3595,9 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "X2B", 1u, 1u, rexx_builtin_x2b, NULL },
     { "BITAND", 1u, 3u, rexx_builtin_bitand, NULL },
     { "BITOR", 1u, 3u, rexx_builtin_bitor, NULL },
-    { "BITXOR", 1u, 3u, rexx_builtin_bitxor, NULL }
+    { "BITXOR", 1u, 3u, rexx_builtin_bitxor, NULL },
+    { "DATE", 0u, 3u, NULL, rexx_builtin_date },
+    { "TIME", 0u, 1u, NULL, rexx_builtin_time }
 };
 
 const RexxBuiltinDescriptor *rexx_builtin_lookup(const char *name,

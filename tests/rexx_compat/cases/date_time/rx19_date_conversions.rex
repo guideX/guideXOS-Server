@@ -1,0 +1,8 @@
+say date('B', '1 Jan 0001', 'N')
+say date('B', '29 Feb 2000', 'N')
+say date('D', '20240229', 'S')
+say date('E', '20240229', 'S')
+say date('N', '20240229', 'S')
+say date('O', '20240229', 'S')
+say date('S', '730178', 'B')
+say date('U', '20240229', 'S')

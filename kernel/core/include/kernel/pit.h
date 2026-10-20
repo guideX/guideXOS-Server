@@ -27,6 +27,12 @@ void irq_handler();
 // Number of ticks since boot
 uint64_t ticks();
 
+// Returns an approximate nanosecond timestamp from the monotonic IRQ0 tick
+// source after its first interrupt. The reported resolution reflects the
+// programmed PIT divisor; this is not a wall-clock timestamp.
+bool get_monotonic_nanoseconds(uint64_t& nanoseconds,
+                               uint32_t& resolution_nanoseconds);
+
 // Diagnostic-only indication that the independent timer interrupt path is
 // alive. This is intentionally not driven by the desktop event loop.
 bool heartbeat_seen();

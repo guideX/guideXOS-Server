@@ -1,0 +1,215 @@
+{
+  "schema": "guidexos.rexx.rx19-scorecard.v1",
+  "phase": "RX19",
+  "outcome": "B — Partial",
+  "completed_at_utc": "2026-10-20T12:21:48.2446073Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "faaab1b9737be47eac411ae0cf2895aa083e5fcf",
+  "qualification_head_before_local_commit": "faaab1b9737be47eac411ae0cf2895aa083e5fcf",
+  "local_implementation_commit_sha": null,
+  "ending_head_after_implementation_commit": null,
+  "root_phase_file_present": false,
+  "prior_phase": {
+    "phase": "RX18",
+    "outcome": "A — Accepted",
+    "accepted_head": "faaab1b9737be47eac411ae0cf2895aa083e5fcf",
+    "reopened_or_duplicated": false
+  },
+  "disposition": {
+    "implemented": "Classic DATE conversions, TIME option handling with strict provider validation, per-VM elapsed/reset timing, VM clock-provider contract, compiler clause identity, and kernel monotonic PIT integration.",
+    "partial_reason": "The production RTC yields Gregorian fields without a declared local-civil or UTC-offset interpretation. Current DATE/TIME wall outputs therefore report CLOCK_UNAVAILABLE. RX19 does not claim complete DATE/TIME acceptance or trustworthy live wall time.",
+    "accepted_scope": "Clock-free DATE conversion forms; provider-driven current DATE/TIME formatting when an explicit supported wall interpretation is injected; monotonic TIME E/R; deterministic unavailable-clock handling and recovery.",
+    "deferred_scope": [
+      "Trusted production wall-clock policy, century metadata, timezone and UTC-offset configuration, and daylight-saving conversion.",
+      "TIME input-time conversion parameters.",
+      "z/VM DATE separator-character extension.",
+      "Leap-second representation and timezone database rules."
+    ]
+  },
+  "clock_audit": {
+    "rtc_source": "kernel/core/time.cpp",
+    "rtc_findings": [
+      "RTC year is mapped as 2000 + YY and constrained to 2024–2100.",
+      "No RTC trust status, century metadata, local/UTC interpretation, timezone, or UTC offset is supplied.",
+      "BCD digit nibbles are not independently validated."
+    ],
+    "pit_source": "kernel/core/pit.cpp",
+    "pit_findings": [
+      "Monotonic nanoseconds derive from the programmed PIT divisor and 1,193,182 Hz input clock.",
+      "Approximately 10 ms resolution at the normal approximately 100 Hz heartbeat.",
+      "Available after the first interrupt; saturates rather than wrapping; count survives PIT reinitialization.",
+      "Unavailable on targets without the port-I/O PIT implementation."
+    ],
+    "hosted_time_api_used": false
+  },
+  "hosted": {
+    "status": "PASS",
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_rexx_tests.ps1 -Phase RX19",
+    "rx19_direct_assertions": 8263,
+    "rx19_dispatch_cases": 4112,
+    "rx19_calendar_property_cases": 2048,
+    "rx19_property_seed": "0x52583139",
+    "rx19_failures": 0,
+    "cli_cases": {
+      "passed": 24,
+      "total": 24
+    },
+    "rx12_fixture_family": {
+      "passed": 31,
+      "total": 31
+    },
+    "rx13_fixture_family": {
+      "passed": 33,
+      "total": 33
+    },
+    "rx14_fixture_family": {
+      "passed": 29,
+      "total": 29
+    },
+    "rx15_fixture_family": {
+      "passed": 3,
+      "total": 3
+    },
+    "rx16_fixture_family": {
+      "passed": 10,
+      "total": 10
+    },
+    "rx17_fixture_family": {
+      "passed": 10,
+      "total": 10
+    },
+    "rx9_condition_fixtures": {
+      "passed": 24,
+      "total": 24
+    },
+    "rx10_interpret_fixtures": {
+      "passed": 19,
+      "total": 19
+    },
+    "rx2_shell_bridge": "PASS",
+    "regina": "NOT_RUN",
+    "regina_reason": "Regina executable unavailable; no cross-interpreter percentage calculated.",
+    "evidence": "docs/rexx/evidence/rx19/hosted-qualification-summary.json"
+  },
+  "sanitizers": {
+    "status": "PASS",
+    "address": {
+      "targets_built_and_run": 21,
+      "failures": 0,
+      "findings": 0,
+      "evidence_id": "08e4120a82084511a1cc376f485e99bb",
+      "evidence": "docs/rexx/evidence/rx19/sanitizer-address-08e4120a82084511a1cc376f485e99bb"
+    },
+    "undefined_behavior": {
+      "targets_built_and_run": 21,
+      "failures": 0,
+      "findings": 0,
+      "evidence_id": "41031db084284ccd8f9842fd8a5e3de7",
+      "evidence": "docs/rexx/evidence/rx19/sanitizer-undefined-41031db084284ccd8f9842fd8a5e3de7"
+    },
+    "expected_result_corpus_cases_each": 195,
+    "expected_result_corpus_exits_each": 195,
+    "regina_differential": "NOT_RUN",
+    "summary": "docs/rexx/evidence/rx19/sanitizers-summary.json"
+  },
+  "freestanding_amd64": {
+    "status": "PASS — build and link",
+    "rexx_c_objects_linked": 9,
+    "flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "kernel_elf": "build/rexx/rx19/native-amd64-3e6bf1d6b6ec45af8bfc6a6de993e06d/amd64/bin/kernel.elf",
+    "kernel_elf_sha256": "1fe3eaafc7895f46386eecb75fd9f0fc8b385bb2a1c25ef2a833f9d552281bfa",
+    "kernel_pe_sha256": "5f1c6f70c9dc6718a87d91a1b637dc6b5899d7d68cecfd7e09db238d4a1aa62d",
+    "link_evidence": "docs/rexx/evidence/rx19/native-build/native-link-evidence-3e6bf1d6b6ec45af8bfc6a6de993e06d.json",
+    "generated_build_outputs_committed": false
+  },
+  "qemu_guest": {
+    "status": "PASS — corrected, visually reviewed run",
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "run_id": "758845fd006940f2a2263c08f42be306",
+    "evidence": "docs/rexx/evidence/rx19/native-guest/run-758845fd006940f2a2263c08f42be306",
+    "scripts": [
+      "rx19-date-conversions.rex",
+      "rx19-clock-error-recovery.rex"
+    ],
+    "demonstrated": [
+      "Deterministic DATE conversions and Gregorian boundary cases.",
+      "Catchable unavailable wall-clock result followed by a successful clock-free DATE conversion.",
+      "TIME E monotonic start result, malformed DATE handling, post-error responsiveness, and completion markers."
+    ],
+    "current_wall_clock_demonstrated": false,
+    "network_disabled": true,
+    "copied_disposable_media": true,
+    "production_media_used": false,
+    "kernel_hash_matches_staged": true,
+    "owned_qemu_pid": 14300,
+    "qmp_shutdown_acknowledged": true,
+    "owned_qemu_process_absent_after_shutdown": true,
+    "foreign_qemu_process_controlled": false,
+    "foreign_process_reconciliation": "docs/rexx/evidence/rx19/native-guest/run-758845fd006940f2a2263c08f42be306/qemu-process-reconciliation.json",
+    "superseded_run": {
+      "run_id": "2b642a5f72b84b54a59f88e1e61ef6d5",
+      "phase_result": "SUPERSEDED_FAILED",
+      "reason": "Manual screenshot review found DATE('W', explicit_input, 'S'), which is invalid because W is current-date-only in this profile. The fixture was corrected; the failed first run and review note remain preserved.",
+      "evidence": "docs/rexx/evidence/rx19/native-guest/run-2b642a5f72b84b54a59f88e1e61ef6d5"
+    }
+  },
+  "protected_artifacts": {
+    "status": "PASS",
+    "root_obj_pdb_count_at_start": 31,
+    "hashes_unchanged": 31,
+    "missing": 0,
+    "modified": 0,
+    "unexpected": 0,
+    "baseline": "docs/rexx/evidence/rx19/protected-artifacts-start.json",
+    "final_comparison": "docs/rexx/evidence/rx19/protected-artifacts-final.json"
+  },
+  "preservation": {
+    "preexisting_untracked_compact_entries": 63,
+    "preexisting_entries_still_present": 63,
+    "missing": 0,
+    "starting_recursive_leaf_count": null,
+    "starting_recursive_leaf_count_note": "Not recorded before edits; no exact recursive starting count is asserted.",
+    "final_recursive_untracked_leaf_count_at_capture": 20965,
+    "no_cleanup_or_delete_invoked": true,
+    "evidence": {
+      "preflight": "docs/rexx/evidence/rx19/preflight.json",
+      "start": "docs/rexx/evidence/rx19/untracked-start.json",
+      "final": "docs/rexx/evidence/rx19/untracked-final.json"
+    }
+  },
+  "inventory": {
+    "path": "docs/rexx/REXX_RX19_BUILTIN_INVENTORY.csv",
+    "rows": 75,
+    "implemented": 50,
+    "not_implemented_including_normalized_partial_rows": 23,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "rx19_partial_rows": [
+      "DATE",
+      "TIME"
+    ]
+  },
+  "qualification_artifacts": {
+    "integration_report": "docs/rexx/REXX_RX19_DATE_TIME_CLOCK_INTEGRATION.md",
+    "provider_contract": "docs/rexx/REXX_RX19_CLOCK_PROVIDER_CONTRACT.md",
+    "hosted_summary": "docs/rexx/evidence/rx19/hosted-qualification-summary.json",
+    "artifact_guard": "PASS — protected artifacts unchanged and required preexisting untracked entries retained."
+  },
+  "recommended_rx20_scope": {
+    "dependency": "A kernel contract that identifies trustworthy civil time, including century/year policy and UTC/local interpretation or an explicit UTC offset.",
+    "work": [
+      "Validate RTC BCD digits and full year metadata.",
+      "Define trust/failure and UTC/local behavior, timezone/offset configuration, and updates.",
+      "Enable current-wall DATE/TIME only when the chosen contract is explicit.",
+      "Keep monotonic elapsed time independent; decide separately whether TIME input-time conversion is in scope."
+    ]
+  },
+  "commit_policy": "Local commit only; no push."
+}

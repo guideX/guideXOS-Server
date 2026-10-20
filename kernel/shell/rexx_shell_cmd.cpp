@@ -7,6 +7,8 @@
 
 #include "rexx_shell_cmd.h"
 #include "kernel/shell.h"
+#include "kernel/pit.h"
+#include "kernel/time.h"
 #include "../../rexx_cli.h"
 
 #include <stddef.h>
@@ -18,9 +20,15 @@
 #if defined(__GNUC__) || defined(__clang__)
 extern "C" int guide_rexx_main_with_output(
     int argc, char** argv, const RexxOutputHost* host) __attribute__((weak));
+extern "C" int guide_rexx_main_with_services(
+    int argc, char** argv, const RexxOutputHost* host,
+    RexxVMClockReader clock_reader, void* clock_user_data) __attribute__((weak));
 #else
 extern "C" int guide_rexx_main_with_output(
     int argc, char** argv, const RexxOutputHost* host);
+extern "C" int guide_rexx_main_with_services(
+    int argc, char** argv, const RexxOutputHost* host,
+    RexxVMClockReader clock_reader, void* clock_user_data);
 #endif
 
 namespace kernel {
@@ -37,6 +45,44 @@ static int shell_output_writer(void*, RexxOutputStream,
 
 static int shell_output_flush(void*, RexxOutputStream) {
     return 1;
+}
+
+static RexxVMClockReadStatus shell_rexx_clock_reader(
+    void* user_data, RexxVMClockReading* reading) {
+    (void)user_data;
+    if (reading == NULL) return REXX_VM_CLOCK_READ_INVALID;
+    *reading = RexxVMClockReading{};
+
+#if defined(GXOS_BARE_METAL)
+    kernel::time::DateTime rtc{};
+    if (kernel::time::get_current_datetime(rtc)) {
+        reading->capabilities |= REXX_CLOCK_CAP_WALL_CIVIL;
+        // The CMOS reader exposes civil fields but guideXOS has no established
+        // UTC/local or timezone contract, so these fields remain unusable by
+        // DATE/TIME's local-civil operations.
+        reading->wall_interpretation = REXX_CLOCK_WALL_UNSPECIFIED;
+        reading->wall_resolution_nanoseconds = 1000000000u;
+        reading->year = rtc.year;
+        reading->month = rtc.month;
+        reading->day = rtc.day;
+        reading->hour = rtc.hour;
+        reading->minute = rtc.minute;
+        reading->second = rtc.second;
+    }
+
+    uint64_t monotonic_nanoseconds = 0u;
+    uint32_t resolution_nanoseconds = 0u;
+    if (kernel::pit::get_monotonic_nanoseconds(
+            monotonic_nanoseconds, resolution_nanoseconds)) {
+        reading->capabilities |= REXX_CLOCK_CAP_MONOTONIC;
+        reading->monotonic_nanoseconds = monotonic_nanoseconds;
+        reading->monotonic_resolution_nanoseconds = resolution_nanoseconds;
+    }
+    return reading->capabilities != 0u ? REXX_VM_CLOCK_READ_OK
+                                       : REXX_VM_CLOCK_READ_UNAVAILABLE;
+#else
+    return REXX_VM_CLOCK_READ_UNAVAILABLE;
+#endif
 }
 
 static bool is_shell_space(char value) {
@@ -193,7 +239,8 @@ static RexxShellTokenizeStatus tokenize_command_line(const char* input,
 
 bool rexx_cli_available() {
 #if defined(__GNUC__) || defined(__clang__)
-    return guide_rexx_main_with_output != NULL;
+    return guide_rexx_main_with_services != NULL ||
+           guide_rexx_main_with_output != NULL;
 #else
     return true;
 #endif
@@ -237,6 +284,15 @@ int shell_cmd_rexx(int argc, char** argv) {
     host.context = NULL;
     host.max_stdout_bytes = 65536u;
     host.max_stderr_bytes = 4096u;
+#if defined(__GNUC__) || defined(__clang__)
+    if (guide_rexx_main_with_services != NULL) {
+        return guide_rexx_main_with_services(
+            argc, resolved_argv, &host, shell_rexx_clock_reader, NULL);
+    }
+#else
+    return guide_rexx_main_with_services(
+        argc, resolved_argv, &host, shell_rexx_clock_reader, NULL);
+#endif
     return guide_rexx_main_with_output(argc, resolved_argv, &host);
 }
 

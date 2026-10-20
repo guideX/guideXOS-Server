@@ -2,6 +2,7 @@
 #define GUIDEXOS_REXX_CLI_H
 
 #include "rexx_output.h"
+#include "rexx_vm.h"
 
 /*
  * Native command-line front end for the guideXOS REXX interpreter.
@@ -35,6 +36,14 @@ int guide_rexx_main(int argc, char **argv);
 int guide_rexx_main_with_output(int argc,
                                 char **argv,
                                 const RexxOutputHost *host);
+
+/* Extended embedding entry point. The clock reader and its context are
+ * borrowed for the synchronous execution of this one script. */
+int guide_rexx_main_with_services(int argc,
+                                  char **argv,
+                                  const RexxOutputHost *host,
+                                  RexxVMClockReader clock_reader,
+                                  void *clock_user_data);
 
 #ifdef __cplusplus
 }

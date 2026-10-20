@@ -126,6 +126,7 @@ typedef struct RexxInstruction {
     uint16_t reserved;
     uint32_t operand;
     uint32_t auxiliary;
+    uint32_t clause_id; /* Unique AST clause identity within this chunk. */
     size_t source_line; /* One-based source line for transfer instructions. */
 } RexxInstruction;
 

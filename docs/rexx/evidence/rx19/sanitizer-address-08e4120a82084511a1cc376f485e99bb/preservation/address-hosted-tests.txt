@@ -1,0 +1,5 @@
+RX19 artifact preservation: PASS
+Stage: address-hosted-tests
+Verified UTC: 2026-10-20T12:09:00.6223080Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

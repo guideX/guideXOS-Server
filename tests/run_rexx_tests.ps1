@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,9 @@ if ($null -eq $gxxCommand) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX18') {
+$guardManifest = if ($Phase -eq 'RX19') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx19\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX18') {
     Join-Path $rootDir 'docs\rexx\evidence\rx18\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX17') {
     Join-Path $rootDir 'docs\rexx\evidence\rx17\protected-artifacts-start.json'
@@ -46,6 +48,7 @@ $plannedOutputs = @(
     'rexx_rx13_string_editing_tests.exe', 'rexx_rx14_numeric_inspection_tests.exe',
     'rexx_rx15_conversion_tests.exe', 'rexx_rx16_literal_tests.exe',
     'rexx_rx17_bitwise_tests.exe', 'rexx_rx18_string_builtins_tests.exe',
+    'rexx_rx19_date_time_tests.exe',
     'rexx_rx2_shell_bridge_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
@@ -77,6 +80,7 @@ $rx15Test = Join-Path $buildDirectory "rexx_rx15_conversion_tests.exe"
 $rx16Test = Join-Path $buildDirectory "rexx_rx16_literal_tests.exe"
 $rx17Test = Join-Path $buildDirectory "rexx_rx17_bitwise_tests.exe"
 $rx18Test = Join-Path $buildDirectory "rexx_rx18_string_builtins_tests.exe"
+$rx19Test = Join-Path $buildDirectory "rexx_rx19_date_time_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -278,6 +282,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX18 string built-in test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX19 DATE/TIME and injected-clock assertions"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
+    (Join-Path $PSScriptRoot "rexx_rx19_date_time_test.c") `
+    @commonSources -lm -o $rx19Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX19 DATE/TIME test build failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Building RX2 C++ shell bridge integration tests"
 & $gxxCommand.Source -std=c++14 -Wall -Wextra -Wpedantic -Werror `
     (Join-Path $PSScriptRoot "rexx_rx2_shell_bridge_test.cpp") `
@@ -408,6 +421,12 @@ Write-Host "Running RX18 ABBREV/CENTER/CENTRE assertions and properties"
 & $rx18Test
 if ($LASTEXITCODE -ne 0) {
     throw "RX18 string built-in assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX19 DATE/TIME, clock-provider, and calendar property assertions"
+& $rx19Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX19 DATE/TIME assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
@@ -603,6 +622,25 @@ Assert-CliCase "rx18_invalid_recovery" $rx18RecoverySource @(
     "RX18_NATIVE_INVALID_ARGUMENT_CAUGHT",
     "RX18_NATIVE_POST_ERROR_RESPONSIVE: 20206162632020"
 ) 0 -CompareRegina
+
+$rx19DateSourcePath = Join-Path $rootDir 'tests\rexx_compat\cases\date_time\rx19_date_conversions.rex'
+$rx19DateExpectedPath = Join-Path $rootDir 'tests\rexx_compat\cases\date_time\rx19_date_conversions.out'
+$rx19DateSource = Get-Content -Raw -LiteralPath $rx19DateSourcePath
+$rx19DateExpected = @(Get-Content -LiteralPath $rx19DateExpectedPath)
+Assert-CliCase "rx19_date_conversions" $rx19DateSource $rx19DateExpected 0 -CompareRegina
+
+$rx19ClockRecoverySource = @'
+signal on syntax name missing_clock
+say time('N')
+exit 1
+missing_clock:
+signal off syntax
+say 'RX19_CLOCK_UNAVAILABLE_CAUGHT'
+say date('S','20240229','S')
+'@
+Assert-CliCase "rx19_missing_clock_recovery" $rx19ClockRecoverySource @(
+    'RX19_CLOCK_UNAVAILABLE_CAUGHT', '20240229'
+) 0
 
 $saySource = @'
 say "done"

@@ -1,0 +1,12 @@
+﻿{
+    "captured_at_utc":  "2026-10-20T12:17:48.4767168Z",
+    "count":  1,
+    "processes":  [
+                      {
+                          "pid":  23008,
+                          "image":  "qemu-system-x86_64.exe",
+                          "command_line":  "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel whpx -drive if=pflash,format=raw,readonly=on,file=D:/dev/guideXOSServer_DiskManagerImprovements/out/dm37/dismount-guest/runtime/firmware/OVMF.fd -machine pc,usb=off -device piix3-usb-uhci,id=uhci -drive if=none,id=dm37boot,format=raw,file=fat:rw:D:/dev/guideXOSServer_DiskManagerImprovements/out/dm37/dismount-guest/runtime/esp -device ide-hd,drive=dm37boot,bus=ide.0 -drive if=none,id=dm37workflow_drive,file=D:/dev/guideXOSServer_DiskManagerImprovements/out/dm37/dismount-guest/fixtures/DM37WORKFLOW01.raw,format=raw,readonly=on,cache=writeback -device usb-storage,id=dm37workflow_device,bus=uhci.0,drive=dm37workflow_drive,removable=on,serial=DM37WORKFLOW01 -netdev user,id=net0 -device e1000,netdev=net0 -object rng-builtin,id=rng0 -device virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000 -m 1024M -vga std -display gtk -monitor none -serial file:D:/dev/guideXOSServer_DiskManagerImprovements/out/dm37/dismount-guest/runs/E-workflow-qac-20261020-r1/guest.serial.log -qmp tcp:127.0.0.1:58954,server=on,wait=off -rtc base=utc,clock=host -no-reboot -trace events=D:/dev/guideXOSServer_DiskManagerImprovements/out/dm37/dismount-guest/runs/E-workflow-qac-20261020-r1/trace-events.txt,file=D:/dev/guideXOSServer_DiskManagerImprovements/out/dm37/dismount-guest/runs/E-workflow-qac-20261020-r1/qemu.trace -name dm37-cont6-workflow"
+                      }
+                  ],
+    "command_lines_redacted":  false
+}

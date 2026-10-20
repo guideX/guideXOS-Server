@@ -1,0 +1,35 @@
+{
+  "schema": "guidexos.rexx.rx19.hosted-qualification.v1",
+  "phase": "RX19",
+  "command": "powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_rexx_tests.ps1 -Phase RX19",
+  "status": "PASS",
+  "rx19_direct": {
+    "assertions": 8263,
+    "dispatch_cases": 4112,
+    "calendar_property_cases": 2048,
+    "property_seed": "0x52583139",
+    "failures": 0
+  },
+  "cli_cases": {
+    "passed": 24,
+    "total": 24,
+    "coverage": "Pure DATE conversions, explicit missing-clock condition and recovery, and the RX19 conversion fixture."
+  },
+  "inherited_suites": {
+    "rx2_shell_bridge": "PASS",
+    "rx9_condition_fixtures": { "passed": 24, "total": 24 },
+    "rx10_interpret_fixtures": { "passed": 19, "total": 19 },
+    "rx12_fixture_family": { "passed": 31, "total": 31 },
+    "rx13_fixture_family": { "passed": 33, "total": 33 },
+    "rx14_fixture_family": { "passed": 29, "total": 29 },
+    "rx15_fixture_family": { "passed": 3, "total": 3 },
+    "rx16_fixture_family": { "passed": 10, "total": 10 },
+    "rx17_fixture_family": { "passed": 10, "total": 10 }
+  },
+  "regina_differential": {
+    "status": "NOT_RUN",
+    "reason": "Regina executable unavailable."
+  },
+  "artifact_guard": "PASS",
+  "evidence_note": "This durable summary records the completed runner result. Detailed sanitizer, native-build, guest, preservation, and artifact evidence is stored alongside it under docs/rexx/evidence/rx19/."
+}

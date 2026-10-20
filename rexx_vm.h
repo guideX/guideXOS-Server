@@ -84,8 +84,63 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_INVALID_LABEL,
     REXX_VM_STATUS_INVALID_EXPOSE_LIST,
     REXX_VM_STATUS_CONTROL_TRANSFER,
-    REXX_VM_STATUS_DYNAMIC_SYNTAX
+    REXX_VM_STATUS_DYNAMIC_SYNTAX,
+    REXX_VM_STATUS_CLOCK_UNAVAILABLE
 } RexxVMStatus;
+
+enum {
+    REXX_CLOCK_CAP_WALL_CIVIL = 1u << 0,
+    REXX_CLOCK_CAP_MONOTONIC = 1u << 1
+};
+
+typedef enum RexxClockWallInterpretation {
+    REXX_CLOCK_WALL_UNSPECIFIED = 0,
+    REXX_CLOCK_WALL_LOCAL_CIVIL,
+    REXX_CLOCK_WALL_UTC_FIXED_OFFSET
+} RexxClockWallInterpretation;
+
+typedef struct RexxVMClockReading {
+    uint32_t capabilities;
+    RexxClockWallInterpretation wall_interpretation;
+    int32_t utc_offset_seconds;
+    uint32_t wall_resolution_nanoseconds;
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+    uint8_t reserved;
+    uint32_t fractional_nanoseconds;
+    uint64_t monotonic_nanoseconds;
+    uint32_t monotonic_resolution_nanoseconds;
+    uint32_t reserved2;
+} RexxVMClockReading;
+
+typedef enum RexxVMClockReadStatus {
+    REXX_VM_CLOCK_READ_OK = 0,
+    REXX_VM_CLOCK_READ_UNAVAILABLE,
+    REXX_VM_CLOCK_READ_INVALID
+} RexxVMClockReadStatus;
+
+typedef RexxVMClockReadStatus (*RexxVMClockReader)(
+    void *user_data, RexxVMClockReading *reading);
+
+/* Per-VM clock state. A copy is saved in routine frames so internal calls
+ * inherit the timer but cannot change the caller's timer or clause snapshot. */
+typedef struct RexxVMClockContext {
+    const void *clause_chunk;
+    uint32_t clause_id;
+    int clause_identified;
+    int reading_attempted;
+    int reading_valid;
+    RexxVMClockReading reading;
+    int elapsed_started;
+    uint64_t elapsed_start_nanoseconds;
+    int elapsed_clause_value_valid;
+    uint64_t elapsed_clause_value_nanoseconds;
+    int elapsed_clause_reset;
+} RexxVMClockContext;
 
 typedef enum RexxNumericForm {
     REXX_NUMERIC_FORM_SCIENTIFIC = 0,
@@ -155,6 +210,9 @@ typedef struct RexxVM {
     size_t dynamic_instruction_count;
     size_t interpret_compile_budget;
     size_t interpret_compile_remaining;
+    RexxVMClockReader clock_reader;
+    void *clock_reader_user_data;
+    RexxVMClockContext clock_context;
     void *do_frames; /* Private bounded storage for active DO instructions. */
     size_t do_depth;
     size_t do_frame_capacity;
@@ -249,6 +307,16 @@ void rexx_vm_set_address_dispatcher(RexxVM *vm,
 void rexx_vm_set_output_writer(RexxVM *vm,
                                RexxVMOutputWriter writer,
                                void *user_data);
+
+/* Install a clock source for this VM only. Passing NULL restores the
+ * deterministic unavailable-clock behavior. */
+void rexx_vm_set_clock_reader(RexxVM *vm,
+                              RexxVMClockReader reader,
+                              void *user_data);
+
+/* Snapshot access is cached per executed REXX clause. */
+RexxVMStatus rexx_vm_clock_read_for_clause(
+    RexxVM *vm, RexxVMClockReading *reading);
 
 /* The built-in dispatcher never invokes a host shell; it returns RC 127. */
 int32_t rexx_vm_guidexos_command_stub(const char *command,

@@ -214,7 +214,9 @@ static int rexx_cli_execute_source(RexxOutputContext *output,
                                    size_t source_length,
                                    const char *argument_string,
                                    size_t argument_string_length,
-                                   int argument_string_present)
+                                   int argument_string_present,
+                                   RexxVMClockReader clock_reader,
+                                   void *clock_user_data)
 {
     RexxLexer lexer;
     RexxParser parser;
@@ -291,6 +293,7 @@ static int rexx_cli_execute_source(RexxOutputContext *output,
 
     rexx_vm_set_output_writer(&vm, rexx_cli_vm_output, output);
     rexx_vm_set_address_dispatcher(&vm, rexx_os_vm_address_dispatcher, NULL);
+    rexx_vm_set_clock_reader(&vm, clock_reader, clock_user_data);
     vm_status = rexx_vm_execute(&vm, chunk);
     if (vm_status != REXX_VM_STATUS_OK) {
         const RexxVMError *error = &vm.error;
@@ -339,9 +342,11 @@ cleanup:
 }
 
 /* Explicit output host used by a kernel shell or another embedding Console. */
-int guide_rexx_main_with_output(int argc,
-                                char **argv,
-                                const RexxOutputHost *host)
+int guide_rexx_main_with_services(int argc,
+                                  char **argv,
+                                  const RexxOutputHost *host,
+                                  RexxVMClockReader clock_reader,
+                                  void *clock_user_data)
 {
     const char *program_name = "rexx";
     const char *script_path = NULL;
@@ -427,10 +432,18 @@ int guide_rexx_main_with_output(int argc,
     result = rexx_cli_execute_source(&output, script_path, source,
                                      source_length, argument_string,
                                      argument_string_length,
-                                     script_argument_start < argc);
+                                     script_argument_start < argc,
+                                     clock_reader, clock_user_data);
     free(argument_string);
     rexx_os_free_file(source);
     return result;
+}
+
+int guide_rexx_main_with_output(int argc,
+                                char **argv,
+                                const RexxOutputHost *host)
+{
+    return guide_rexx_main_with_services(argc, argv, host, NULL, NULL);
 }
 
 /* Backwards-compatible hosted CLI entry point. Native shells should call

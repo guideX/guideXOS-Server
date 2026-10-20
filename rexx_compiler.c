@@ -108,6 +108,8 @@ typedef struct RexxCompiler {
     size_t visited_nodes;
     size_t expression_depth;
     size_t clause_depth;
+    uint32_t active_clause_id;
+    uint32_t next_clause_id;
     size_t loop_depth;
     RexxLoopContext loops[REXX_COMPILER_MAX_NESTING];
 } RexxCompiler;
@@ -274,6 +276,7 @@ static uint32_t rexx_compiler_emit(RexxCompiler *compiler,
     instruction->reserved = 0u;
     instruction->operand = operand;
     instruction->auxiliary = auxiliary;
+    instruction->clause_id = compiler->active_clause_id;
     instruction->source_line = token != NULL ? token->line : 0u;
     compiler->chunk->instruction_count = index + 1u;
     return (uint32_t)index;
@@ -1214,8 +1217,8 @@ cleanup:
     return compiler->status == REXX_COMPILER_STATUS_OK;
 }
 
-static int rexx_compiler_compile_clause(RexxCompiler *compiler,
-                                        const RexxAstClause *clause)
+static int rexx_compiler_compile_clause_inner(RexxCompiler *compiler,
+                                              const RexxAstClause *clause)
 {
     uint32_t symbol;
     uint32_t jump;
@@ -1477,6 +1480,22 @@ static int rexx_compiler_compile_clause(RexxCompiler *compiler,
         return 0;
     }
     return compiler->status == REXX_COMPILER_STATUS_OK;
+}
+
+static int rexx_compiler_compile_clause(RexxCompiler *compiler,
+                                        const RexxAstClause *clause)
+{
+    uint32_t parent_clause_id;
+    int result;
+    if (compiler->next_clause_id == UINT32_MAX) {
+        rexx_compiler_fail_limit(compiler, clause != NULL ? &clause->token : NULL);
+        return 0;
+    }
+    parent_clause_id = compiler->active_clause_id;
+    compiler->active_clause_id = ++compiler->next_clause_id;
+    result = rexx_compiler_compile_clause_inner(compiler, clause);
+    compiler->active_clause_id = parent_clause_id;
+    return result;
 }
 
 static int rexx_compiler_compile_clause_list(RexxCompiler *compiler,

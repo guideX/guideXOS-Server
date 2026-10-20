@@ -97,7 +97,8 @@ static const char *const vm_messages[] = {
     "internal function returned without a result",
     "unknown SIGNAL label", "invalid SIGNAL destination label",
     "invalid subsidiary PROCEDURE EXPOSE list", "condition control transfer",
-    "syntax error in interpreted source"
+    "syntax error in interpreted source",
+    "clock source unavailable or lacks a required capability"
 };
 
 typedef struct RexxVMEnvironment RexxVMEnvironment;
@@ -164,6 +165,7 @@ struct RexxVMCallFrame {
     uint32_t numeric_digits;
     uint32_t numeric_fuzz;
     RexxNumericForm numeric_form;
+    RexxVMClockContext clock_context;
     char *address_environment;
     size_t address_environment_length;
     int procedure_entered;
@@ -195,6 +197,7 @@ typedef struct RexxVMInterpretFrame {
     size_t do_depth;
     size_t bytecode_bytes;
     size_t instruction_count;
+    RexxVMClockContext clock_context;
 } RexxVMInterpretFrame;
 
 enum {
@@ -266,6 +269,110 @@ static void truncate_interpret_contexts(RexxVM *vm, size_t minimum_routine_depth
                                        int restore_parent);
 static void copy_saved_condition_context(RexxVMCallFrame *destination,
                                          RexxVMCallFrame *source);
+
+static int clock_is_leap_year(uint16_t year)
+{
+    return (year % 4u == 0u && year % 100u != 0u) || year % 400u == 0u;
+}
+
+static uint8_t clock_days_in_month(uint16_t year, uint8_t month)
+{
+    static const uint8_t days[] = {
+        31u, 28u, 31u, 30u, 31u, 30u,
+        31u, 31u, 30u, 31u, 30u, 31u
+    };
+    if (month == 2u && clock_is_leap_year(year)) return 29u;
+    return month >= 1u && month <= 12u ? days[month - 1u] : 0u;
+}
+
+static int clock_reading_is_valid(const RexxVMClockReading *reading)
+{
+    const uint32_t known_capabilities =
+        REXX_CLOCK_CAP_WALL_CIVIL | REXX_CLOCK_CAP_MONOTONIC;
+    if (reading == NULL ||
+        (reading->capabilities & ~known_capabilities) != 0u) return 0;
+    if ((reading->capabilities & REXX_CLOCK_CAP_WALL_CIVIL) != 0u) {
+        if (reading->year < 1u || reading->year > 9999u ||
+            reading->month < 1u ||
+            reading->month > 12u || reading->day < 1u ||
+            reading->day > clock_days_in_month(reading->year, reading->month) ||
+            reading->hour > 23u || reading->minute > 59u ||
+            reading->second > 59u ||
+            reading->fractional_nanoseconds >= UINT32_C(1000000000) ||
+            reading->wall_resolution_nanoseconds == 0u ||
+            reading->wall_resolution_nanoseconds > UINT32_C(1000000000) ||
+            reading->utc_offset_seconds <= -86400 ||
+            reading->utc_offset_seconds >= 86400 ||
+            (reading->wall_interpretation != REXX_CLOCK_WALL_UNSPECIFIED &&
+             reading->wall_interpretation != REXX_CLOCK_WALL_LOCAL_CIVIL &&
+             reading->wall_interpretation !=
+                 REXX_CLOCK_WALL_UTC_FIXED_OFFSET)) return 0;
+    }
+    if ((reading->capabilities & REXX_CLOCK_CAP_MONOTONIC) != 0u &&
+        reading->monotonic_resolution_nanoseconds == 0u) return 0;
+    return 1;
+}
+
+static void clock_reset_clause_values(RexxVMClockContext *context)
+{
+    if (context == NULL) return;
+    context->reading_attempted = 0;
+    context->reading_valid = 0;
+    memset(&context->reading, 0, sizeof(context->reading));
+    context->elapsed_clause_value_valid = 0;
+    context->elapsed_clause_value_nanoseconds = 0u;
+    context->elapsed_clause_reset = 0;
+}
+
+static void clock_begin_clause(RexxVM *vm, const void *chunk,
+                               uint32_t clause_id)
+{
+    RexxVMClockContext *context;
+    if (vm == NULL) return;
+    context = &vm->clock_context;
+    if (!context->clause_identified || context->clause_chunk != chunk ||
+        context->clause_id != clause_id) {
+        clock_reset_clause_values(context);
+        context->clause_chunk = chunk;
+        context->clause_id = clause_id;
+        context->clause_identified = 1;
+    }
+}
+
+static void clock_invalidate_clause(RexxVM *vm)
+{
+    if (vm != NULL) clock_reset_clause_values(&vm->clock_context);
+}
+
+RexxVMStatus rexx_vm_clock_read_for_clause(
+    RexxVM *vm, RexxVMClockReading *reading)
+{
+    RexxVMClockContext *context;
+    RexxVMClockReadStatus read_status;
+    if (vm == NULL || reading == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+    context = &vm->clock_context;
+    if (!context->reading_attempted) {
+        context->reading_attempted = 1;
+        context->reading_valid = 0;
+        memset(&context->reading, 0, sizeof(context->reading));
+        if (vm->clock_reader != NULL) {
+            read_status = vm->clock_reader(vm->clock_reader_user_data,
+                                           &context->reading);
+            if (read_status == REXX_VM_CLOCK_READ_OK &&
+                clock_reading_is_valid(&context->reading)) {
+                context->reading_valid = 1;
+            } else {
+                memset(&context->reading, 0, sizeof(context->reading));
+            }
+        }
+    }
+    if (!context->reading_valid) {
+        memset(reading, 0, sizeof(*reading));
+        return REXX_VM_STATUS_CLOCK_UNAVAILABLE;
+    }
+    *reading = context->reading;
+    return REXX_VM_STATUS_OK;
+}
 
 static size_t physical_source_line(const RexxVM *vm,
                                    const RexxBytecodeChunk *chunk,
@@ -484,7 +591,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_DYNAMIC_SYNTAX
+                            status <= REXX_VM_STATUS_CLOCK_UNAVAILABLE
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -1349,6 +1456,16 @@ void rexx_vm_set_output_writer(RexxVM *vm,
     if (vm == NULL || !vm->initialized) return;
     vm->output_writer = writer;
     vm->output_writer_user_data = writer != NULL ? user_data : NULL;
+}
+
+void rexx_vm_set_clock_reader(RexxVM *vm,
+                              RexxVMClockReader reader,
+                              void *user_data)
+{
+    if (vm == NULL || !vm->initialized) return;
+    vm->clock_reader = reader;
+    vm->clock_reader_user_data = reader != NULL ? user_data : NULL;
+    memset(&vm->clock_context, 0, sizeof(vm->clock_context));
 }
 
 int32_t rexx_vm_guidexos_command_stub(const char *command, size_t command_length)
@@ -3306,6 +3423,7 @@ static RexxVMStatus execute_call(RexxVM *vm,
         frame->numeric_digits = vm->numeric_digits;
         frame->numeric_fuzz = vm->numeric_fuzz;
         frame->numeric_form = vm->numeric_form;
+        frame->clock_context = vm->clock_context;
         frame->address_environment = saved_address;
         frame->address_environment_length = vm->address_environment_length;
         frame->first_instruction = 1;
@@ -3427,11 +3545,18 @@ static void pop_interpret_context(RexxVM *vm, int restore_parent)
     frames = (RexxVMInterpretFrame *)vm->interpret_frames;
     frame = &frames[vm->interpret_depth - 1u];
     if (restore_parent) {
+        int elapsed_started = vm->clock_context.elapsed_started;
+        uint64_t elapsed_start_nanoseconds =
+            vm->clock_context.elapsed_start_nanoseconds;
         while (vm->sp > frame->stack_base)
             rexx_value_clear(&vm->stack[--vm->sp]);
         vm->do_depth = frame->do_depth;
         vm->active_chunk = frame->parent_chunk;
         vm->pc = frame->parent_pc;
+        vm->clock_context = frame->clock_context;
+        vm->clock_context.elapsed_started = elapsed_started;
+        vm->clock_context.elapsed_start_nanoseconds =
+            elapsed_start_nanoseconds;
     }
     vm->dynamic_source_bytes =
         frame->source_length + 1u <= vm->dynamic_source_bytes
@@ -3727,6 +3852,7 @@ static RexxVMStatus execute_interpret(RexxVM *vm,
         frame->routine_depth = vm->routine_depth;
         frame->stack_base = vm->sp;
         frame->do_depth = vm->do_depth;
+        frame->clock_context = vm->clock_context;
         frame->bytecode_bytes = bytecode_bytes;
         frame->instruction_count = dynamic_chunk->instruction_count;
         ++vm->interpret_depth;
@@ -4163,6 +4289,7 @@ static int syntax_error_is_catchable(RexxVMStatus status)
     case REXX_VM_STATUS_UNKNOWN_FUNCTION:
     case REXX_VM_STATUS_UNKNOWN_ROUTINE:
     case REXX_VM_STATUS_MISSING_FUNCTION_RESULT:
+    case REXX_VM_STATUS_CLOCK_UNAVAILABLE:
     case REXX_VM_STATUS_UNKNOWN_LABEL:
     case REXX_VM_STATUS_INVALID_LABEL:
     case REXX_VM_STATUS_INVALID_PROCEDURE:
@@ -4190,6 +4317,8 @@ static int32_t syntax_error_code(RexxVMStatus status, int32_t detail)
         return 43;
     case REXX_VM_STATUS_INVALID_PROCEDURE:
         return 24;
+    case REXX_VM_STATUS_CLOCK_UNAVAILABLE:
+        return 40;
     default:
         return 40;
     }
@@ -4214,6 +4343,8 @@ static const char *syntax_error_description(RexxVMStatus status,
         return "Routine not found";
     case REXX_VM_STATUS_INVALID_PROCEDURE:
         return "Invalid PROCEDURE instruction";
+    case REXX_VM_STATUS_CLOCK_UNAVAILABLE:
+        return "Clock source unavailable or does not provide local civil time";
     default:
         return "Language processing error";
     }
@@ -4484,6 +4615,7 @@ static RexxVMStatus return_from_routine(RexxVM *vm, int has_value,
         uint32_t numeric_digits = frame->numeric_digits;
         uint32_t numeric_fuzz = frame->numeric_fuzz;
         RexxNumericForm numeric_form = frame->numeric_form;
+        RexxVMClockContext clock_context = frame->clock_context;
         char *saved_address = frame->address_environment;
         size_t saved_address_length = frame->address_environment_length;
         RexxVMArgument *arguments = frame->arguments;
@@ -4504,6 +4636,7 @@ static RexxVMStatus return_from_routine(RexxVM *vm, int has_value,
         vm->numeric_digits = numeric_digits;
         vm->numeric_fuzz = numeric_fuzz;
         vm->numeric_form = numeric_form;
+        vm->clock_context = clock_context;
         restore_condition_context(vm, frame);
         vm_free(vm->address_environment);
         vm->address_environment = saved_address;
@@ -4540,6 +4673,7 @@ static void unwind_routines(RexxVM *vm)
         vm->numeric_digits = frame->numeric_digits;
         vm->numeric_fuzz = frame->numeric_fuzz;
         vm->numeric_form = frame->numeric_form;
+        vm->clock_context = frame->clock_context;
         restore_condition_context(vm, frame);
         vm_free(vm->address_environment);
         vm->address_environment = frame->address_environment;
@@ -4621,6 +4755,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
     vm->exit_requested = 0;
     vm->exit_has_value = 0;
     vm->pc = 0;
+    memset(&vm->clock_context, 0, sizeof(vm->clock_context));
     vm->status = REXX_VM_STATUS_OK;
     vm->error.status = REXX_VM_STATUS_OK;
     vm->error.pc = 0;
@@ -4644,10 +4779,13 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
         chunk = (const RexxBytecodeChunk *)vm->active_chunk;
         size_t current_pc = vm->pc;
+        size_t current_routine_depth = vm->routine_depth;
+        size_t current_interpret_depth = vm->interpret_depth;
         /* Dispatch may finish INTERPRET and free its current chunk. Keep the
          * instruction record in this stack frame until post-dispatch checks. */
         RexxInstruction instruction = chunk->instructions[vm->pc++];
         const RexxInstruction *ins = &instruction;
+        clock_begin_clause(vm, chunk, ins->clause_id);
         RexxVMStatus status = REXX_VM_STATUS_OK;
         RexxValue value;
         vm->current_source_line = physical_source_line(vm, chunk,
@@ -5128,6 +5266,10 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         }
 
         rexx_value_clear(&value);
+        if (vm->active_chunk == chunk && vm->routine_depth == current_routine_depth &&
+            vm->interpret_depth == current_interpret_depth &&
+            vm->pc <= current_pc)
+            clock_invalidate_clause(vm);
         if (status == REXX_VM_STATUS_CONTROL_TRANSFER) {
             vm->condition_control_transfer = 0;
             continue;
@@ -5201,7 +5343,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_DYNAMIC_SYNTAX)
+        status > REXX_VM_STATUS_CLOCK_UNAVAILABLE)
         return "unknown VM status";
     return vm_messages[status];
 }
