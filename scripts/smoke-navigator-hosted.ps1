@@ -1,12 +1,21 @@
 param(
     [switch]$Build,
-    [switch]$DisablePaintDefer
+    [switch]$DisablePaintDefer,
+    [string]$LogDirectory
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$LogDir = Join-Path $Root "logs"
+if ([string]::IsNullOrWhiteSpace($LogDirectory)) {
+    $LogDirectory = $env:GXOS_NAVIGATOR_SMOKE_LOG_DIR
+}
+$LogDir = if ([string]::IsNullOrWhiteSpace($LogDirectory)) {
+    Join-Path $Root "logs"
+} else {
+    [System.IO.Path]::GetFullPath($LogDirectory)
+}
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+Write-Host "HOSTED_LOG_DIRECTORY=$LogDir"
 . (Join-Path $Root "scripts\process_environment.ps1")
 Normalize-ProcessEnvironment
 . (Join-Path $Root "scripts\navigator_smoke_repo_hygiene.ps1")

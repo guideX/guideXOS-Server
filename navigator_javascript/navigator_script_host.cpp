@@ -2211,6 +2211,7 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorSelectorCollectionSomeMethod ||
         methodId == kNavigatorSelectorCollectionEveryMethod ||
         methodId == kNavigatorSelectorCollectionValuesMethod ||
+        methodId == kNavigatorSelectorCollectionKeysMethod ||
         methodId == kNavigatorSelectorCollectionIteratorNextMethod;
 }
 
@@ -4377,7 +4378,7 @@ NavigatorScriptHostAdapter::selectorCollectionIteratorFor(
 
 bool NavigatorScriptHostAdapter::allocateSelectorCollectionIterator(
     HostInstanceId collectionToken, std::size_t entryLength,
-    HostInstanceId& iteratorToken)
+    SelectorCollectionIteratorMode mode, HostInstanceId& iteratorToken)
 {
     iteratorToken = 0u;
     if (collectionToken == 0u ||
@@ -4394,6 +4395,7 @@ bool NavigatorScriptHostAdapter::allocateSelectorCollectionIterator(
         record.entryLength = static_cast<std::uint32_t>(entryLength);
         record.active = true;
         record.exhausted = false;
+        record.mode = mode;
         iteratorToken = static_cast<HostInstanceId>(index + 1u);
         return true;
     }
@@ -7038,6 +7040,11 @@ HostResult NavigatorScriptHostAdapter::getProperty(
                 kNavigatorSelectorCollectionValuesMethod, true, true);
             return HostResult();
         }
+        if (textEquals(property, "keys")) {
+            result = HostValue::method(
+                kNavigatorSelectorCollectionKeysMethod, true, true);
+            return HostResult();
+        }
         if (textEquals(property, "length")) {
             result = HostValue::number(static_cast<double>(
                 selectorMatchCount(*record)));
@@ -7853,6 +7860,21 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionEvery(
 HostResult NavigatorScriptHostAdapter::selectorCollectionValues(
     const HostObjectReference* receiver, HostValue& result)
 {
+    return selectorCollectionIteratorCreate(receiver, result,
+        SelectorCollectionIteratorMode::Values);
+}
+
+HostResult NavigatorScriptHostAdapter::selectorCollectionKeys(
+    const HostObjectReference* receiver, HostValue& result)
+{
+    return selectorCollectionIteratorCreate(receiver, result,
+        SelectorCollectionIteratorMode::Keys);
+}
+
+HostResult NavigatorScriptHostAdapter::selectorCollectionIteratorCreate(
+    const HostObjectReference* receiver, HostValue& result,
+    SelectorCollectionIteratorMode mode)
+{
     if (receiver == nullptr ||
         receiver->kind != kNavigatorSelectorCollectionHostKind)
         return HostResult{HostResultCode::InvalidObject};
@@ -7879,7 +7901,7 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionValues(
 
     HostInstanceId iteratorToken = 0u;
     if (!allocateSelectorCollectionIterator(receiver->instanceId,
-            entryLength, iteratorToken))
+            entryLength, mode, iteratorToken))
         return HostResult{HostResultCode::IteratorLimitExceeded};
     result = HostValue::fromHostObject(HostObjectReference{
         iteratorToken, generation_,
@@ -7906,6 +7928,9 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionIteratorNext(
         return HostResult{HostResultCode::InvalidObject};
     if (iterator->generation != generation_)
         return HostResult{HostResultCode::StaleObject};
+    if (iterator->mode != SelectorCollectionIteratorMode::Values &&
+        iterator->mode != SelectorCollectionIteratorMode::Keys)
+        return HostResult{HostResultCode::InvalidObject};
 
     const auto makeResult = [&runtime, &callbackError, &result](
         const HostValue& value, bool done) {
@@ -7943,10 +7968,12 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionIteratorNext(
             continue;
         }
 
-        const HostValue element = HostValue::fromHostObject(
-            HostObjectReference{lookup.serial, iterator->generation,
-                kNavigatorElementHostKind});
-        const HostResult resultStatus = makeResult(element, false);
+        const HostValue value = iterator->mode ==
+                SelectorCollectionIteratorMode::Keys
+            ? HostValue::number(static_cast<double>(index))
+            : HostValue::fromHostObject(HostObjectReference{lookup.serial,
+                iterator->generation, kNavigatorElementHostKind});
+        const HostResult resultStatus = makeResult(value, false);
         if (!resultStatus.succeeded()) return resultStatus;
         iterator->nextIndex = index + 1u;
         return HostResult();
@@ -8107,6 +8134,8 @@ HostResult NavigatorScriptHostAdapter::callInternal(
     if (!receiverResult.succeeded()) return receiverResult;
     if (methodId == kNavigatorSelectorCollectionValuesMethod)
         return selectorCollectionValues(receiver, result);
+    if (methodId == kNavigatorSelectorCollectionKeysMethod)
+        return selectorCollectionKeys(receiver, result);
     if (methodId == kNavigatorSelectorCollectionItemMethod) {
         if (receiver->kind != kNavigatorSelectorCollectionHostKind)
             return HostResult{HostResultCode::InvalidValue};

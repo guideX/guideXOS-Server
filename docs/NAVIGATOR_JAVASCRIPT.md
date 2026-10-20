@@ -10088,6 +10088,154 @@ required by the established native and production-hosted acceptance model.
 hosted logs retained because Windows command policy rejected their removal.**
 The local commit records the implementation, tests, hosted integration, and
 this qualification evidence; it was not pushed. The tracked worktree is clean
-after commit. Future JS80 work can consider `keys()` or `entries()` using the
-bounded cursor and result-object foundations; `Symbol.iterator` and
+after commit. A future JS81 phase can consider `entries()` using the same
+bounded cursor and result-object foundations. `Symbol.iterator` and
 `for...of` remain separate protocol work.
+
+### JS80 bounded collection `keys()`
+
+JS80 adds `collection.keys()` to the retained query collections shared by
+`querySelectorAll()`, `getElementsByTagName()`, and
+`getElementsByClassName()`. It returns a bounded cursor with `next()` result
+objects shaped as `{ value, done }`. A successful `keys()` read stores the
+current zero-based collection index as a genuine JavaScript Number; it does
+not expose an Element serial or structural index. Exhaustion returns
+`value: undefined` and Boolean `done: true`. Every read allocates a fresh
+ordinary result object, preserving earlier result properties after later
+advancement.
+
+Keys and values use the JS79 iterator registry and shared `next()` path. The
+iterator record's mode byte occupies existing padding: record size remains 24
+bytes and the fixed registry remains 128 records / 3,072 bytes. Each cursor
+retains its own collection token, generation, captured entry length, next
+index, exhaustion flag, and yield mode. It does not copy the selector
+descriptor or retain an Element snapshot. The selector descriptor remains
+1,918 bytes, each retained collection remains 1,936 bytes, and the 128-record
+collection registry remains 247,808 bytes.
+
+Creation captures the collection length once. Each `next()` resolves the
+current numeric position against the retained descriptor and original scope.
+Missing positions are skipped; the cursor never fabricates a key for a
+position that no longer resolves to an Element. Growth does not enlarge an
+existing cursor's bound, and exhausted cursors remain terminal without
+additional lookups. If mutation changes which Element occupies the next
+position, the cursor preserves its numeric position. These live-on-read
+collections differ from browser `querySelectorAll()`'s static result list;
+JS80 does not promise snapshot identity or exactly-once visitation under
+arbitrary mutation.
+
+The existing generation, collection-handle, and host-object-kind checks are
+shared with `values()`. Replacing a document invalidates an unexhausted keys
+cursor even if the new document reuses the same structural serials. Invalid
+collection and iterator receivers fail through the existing receiver or
+stale-host error path. Separate scopes, `:scope`, tag/class adapters, and
+filtered positional selectors retain the existing selector descriptor and
+lookup behavior. Keys mode performs no separate selector matching and does
+not add filtered-sibling caching or widen the `getElementById()` reentry
+policy.
+
+Both iterator modes prepare the complete result object before committing the
+next cursor position. If result allocation fails, partial object/property
+allocation is rolled back, earlier results remain unchanged, and the current
+cursor stays at its unreturned index. Mixed keys/values and nested callback or
+Event use share the registry without sharing cursor state. JS9 hosted Event
+coverage passes with its established reentry policy unchanged.
+
+#### JS80 native and resource qualification
+
+The JS80 focused native suite passed **379/379 checks** under strict MinGW
+compilation with `-Wall -Wextra -Werror -pedantic` (target
+`x86_64-w64-mingw32`, GCC 15.2.0). It includes the JS79 values behavior plus
+numeric keys, Boolean completion, empty/single/multiple collections,
+independent and mixed cursors in both creation orders, stable result objects,
+captured bounds, growth/shrinkage/index shifts, missing-index skipping,
+generation replacement and serial reuse, adapter/scope/filter coverage,
+callback and nested Event reentry, registry saturation, result-pool exhaustion,
+and allocation-failure rollback.
+
+The mode addition keeps the record at 24 bytes and the iterator registry at
+3,072 bytes. The near-capacity keys result test retained 1,019 records before
+the existing 1,024-object pool filled. Runtime high-water was 1,024/1,024
+ordinary objects, 2,051/4,096 properties, 1/2,048 environments, and 3/2,048
+host objects. The 1,019 result objects and their properties account for
+220,104 bytes of payload; result property vectors reserved 163,040 bytes and
+the object vector reserved 57,344 bytes. The host-object vector reserved 96
+bytes and the three host-method records reserved 96 bytes. No pool capacity
+was increased.
+
+Production `-O2 -fstack-usage` reports 8-byte `values()` and `keys()` wrapper
+frames, 176 bytes for shared iterator creation, 80 bytes for shared `next()`,
+448 bytes for result-object creation, 368 bytes for evaluator host-value
+invocation, and 576 bytes for runtime host-method invocation. Filtered rank
+scratch frames are unchanged; the eight-slot frame is 18,688 bytes. These are
+host compiler frame measurements, not bare-metal stack qualification.
+
+Seven-sample medians for the 64-Element workload (microseconds, including
+parse/evaluation) in the final matrix run were: values creation / first /
+middle / last / exhaustion / repeated exhaustion = 11 / 5 / 6 / 26 / 27 /
+26; keys = 8 / 6 / 10 / 25 / 25 / 24. Full traversal was 360 µs for values
+and 350 µs for keys. Filtered positional traversal was 550 µs for values and
+329 µs for keys; mixed keys/values advancement was 133 µs. The 512-key
+traversal median was 11,607 µs over seven samples. A 1,019-key traversal,
+near the runtime object-pool limit, measured 93,034 µs over three samples.
+Full-call timing includes creation-time length counting, per-step live
+lookup, and fresh result-object costs; it is not a constant-time per-call
+claim.
+
+#### JS80 full regression, hosted build, and artifact closeout
+
+The complete native JavaScript matrix passed **82/82 lanes**, with
+**14,345/14,345 reported assertions across 41 assertion-bearing lanes**. The
+focused JS75–JS80 checks passed at JS75 **61/61**, JS76 **106/106**, JS77
+**135/135**, JS78 **102/102**, JS79 **202/202**, and JS80 **379/379**. These
+focused lanes passed strict compilation with `-Wall -Wextra -Werror -pedantic`;
+stack and selector diagnostic builds also passed. The first Windows PowerShell 5
+matrix attempt stopped at JS78 during stack-report compilation, with PowerShell
+surfacing `g++` stderr as a `NativeCommandError`. A direct diagnostic compile
+of the reported source exited 0; JS78 independently passed 102/102, including
+runtime and static stack qualification, and the complete matrix then passed
+under PowerShell 7.6.5. No source or historical test assertions were changed
+to accommodate that shell difference.
+
+The fresh production build used source revision
+`87f4cc2d6f1fb970e4b55641124e25cd5a8ad45b`, exited with status 0, and produced
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe` at 8,589,879
+bytes with SHA-256
+`E3D25E44BC811BA85A6971DD9F472BDF2E2F3924D3E31B7418ABAEA466991345`. Hosted
+checks ran with PID **24752**. The process executable path and SHA-256 both
+matched that fresh build. After hosted qualification, the original ignored
+executable was restored from its verified backup.
+
+The hosted runner passed **674 checks** and reported **7 failures**, all from
+the established CSS baseline: CSS 3C, CSS 3G, CSS 6A, CSS 6B (three checks),
+and CSS 6C. JS9 and all hosted JS75–JS80 checks passed, including the JS80
+Number keys, Boolean `done`, mixed cursors, stable result objects, live
+mutation, scopes, adapters, filtered selectors, nested Event behavior, and
+invalid receiver check. The aggregate exited nonzero only because of those
+seven CSS failures.
+
+The hosted-log investigation found that `Logger::write()` writes to stdout,
+and there is no existing server log-path environment variable or command-line
+option. The hosted harness now accepts `-LogDirectory` or
+`GXOS_NAVIGATOR_SMOKE_LOG_DIR` and sends its HTTP/HTTPS server logs, server
+stdin, stdout, and stderr there. With no option, its existing repository
+`logs` behavior is unchanged. JS80 hosted evidence was written under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js80-hosted-evidence`; hosted
+logging stayed outside the checkout without changing production logging or
+suppressing failures.
+
+The ignored-file manifest at JS80 start contained **1,367 files / 90,843,932
+bytes**. The only ignored file changed during build and hosted execution was
+the production executable; it was restored and verified byte-for-byte against
+the starting backup. The final manifest again contained **1,367 files /
+90,843,932 bytes**: **0 changed baseline files, 0 missing baseline files, and
+0 new ignored artifacts**. Pre-existing JS72 and JS77–JS79 logs remained
+untouched. `.phase` remained absent. `git diff --check` passed. The branch
+remained `NAVIGATOR_JAVASCRIPT_SUPPORT`; upstream divergence was 0/0 at JS80
+start and is 1 ahead / 0 behind after the local JS80 commit.
+
+**Outcome A — JS80 bounded collection `keys()` iterator fully qualified.**
+No freestanding kernel runtime code was changed; kernel/QEMU execution was not
+required and was not run. JS81 can consider bounded `entries()` support using
+the same cursor architecture. This phase does not add `entries()`,
+`Symbol.iterator`, or `for...of`.

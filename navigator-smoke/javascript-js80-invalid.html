@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS80 invalid receiver</title></head>
+<body>
+<pre id="result">JS80:invalid:pending</pre>
+<i class="row"></i>
+<script>
+var cursor = document.querySelectorAll('.row').values();
+var next = cursor.next;
+document.getElementById('result').textContent = 'JS80:invalid:calling';
+next();
+document.getElementById('result').textContent = 'JS80:invalid:returned';
+</script>
+</body>
+</html>

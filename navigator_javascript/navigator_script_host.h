@@ -52,6 +52,7 @@ constexpr std::uint32_t kNavigatorSelectorCollectionSomeMethod = 22u;
 constexpr std::uint32_t kNavigatorSelectorCollectionEveryMethod = 23u;
 constexpr std::uint32_t kNavigatorSelectorCollectionValuesMethod = 24u;
 constexpr std::uint32_t kNavigatorSelectorCollectionIteratorNextMethod = 25u;
+constexpr std::uint32_t kNavigatorSelectorCollectionKeysMethod = 26u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -579,6 +580,11 @@ private:
         NavigatorScriptSelectorDescriptor selector;
     };
 
+    enum class SelectorCollectionIteratorMode : std::uint8_t {
+        Values = 0u,
+        Keys = 1u
+    };
+
     struct SelectorCollectionIteratorRecord {
         HostInstanceId collectionToken = 0u;
         HostGenerationId generation = 0u;
@@ -586,9 +592,11 @@ private:
         std::uint32_t entryLength = 0u;
         bool active = false;
         bool exhausted = false;
+        SelectorCollectionIteratorMode mode =
+            SelectorCollectionIteratorMode::Values;
     };
     static_assert(sizeof(SelectorCollectionIteratorRecord) == 24u,
-        "JS79 bounded iterator records must remain 24 bytes");
+        "JS80 bounded iterator records must remain 24 bytes");
 
     struct SelectorCollectionLookup {
         bool found = false;
@@ -929,8 +937,14 @@ private:
     const SelectorCollectionIteratorRecord* selectorCollectionIteratorFor(
         HostInstanceId token) const;
     bool allocateSelectorCollectionIterator(HostInstanceId collectionToken,
-        std::size_t entryLength, HostInstanceId& iteratorToken);
+        std::size_t entryLength, SelectorCollectionIteratorMode mode,
+        HostInstanceId& iteratorToken);
+    HostResult selectorCollectionIteratorCreate(
+        const HostObjectReference* receiver, HostValue& result,
+        SelectorCollectionIteratorMode mode);
     HostResult selectorCollectionValues(
+        const HostObjectReference* receiver, HostValue& result);
+    HostResult selectorCollectionKeys(
         const HostObjectReference* receiver, HostValue& result);
     HostResult selectorCollectionIteratorNext(RuntimeContext& runtime,
         RuntimeErrorCode& callbackError,
