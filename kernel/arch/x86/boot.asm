@@ -34,9 +34,10 @@ _start:
     ; Clear direction flag
     cld
     
-    ; Push multiboot information (EBX contains multiboot info structure)
-    push ebx
-    push eax
+    ; kernel_main(boot_environment, boot_magic) uses cdecl argument order.
+    ; Push the second argument first, then the first argument.
+    push eax                    ; boot_magic
+    push ebx                    ; boot_environment
     
     ; Jump to kernel main
     extern kernel_main

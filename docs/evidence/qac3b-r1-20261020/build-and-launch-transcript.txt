@@ -1,0 +1,46 @@
+**********************
+PowerShell transcript start
+Start time: 20261020144130
+Username: LEON2_RDT\guideX
+RunAs User: LEON2_RDT\guideX
+Configuration Name:
+Machine: LEON2_RDT (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Users\guideX\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.dll -Command try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}
+$logPath='D:\dev\guideXOSServer\docs\evidence\qac3b-r1-20261020\build-and-launch-transcript.txt'; Start-Transcript -LiteralPath $logPath -Force; $launcherExit=1; try { & cmd.exe /d /c 'scripts\run-qemu-x86-with-build.bat'; $launcherExit=$LASTEXITCODE } finally { Stop-Transcript }; exit $launcherExit
+Process ID: 17432
+PSVersion: 7.6.5
+PSEdition: Core
+GitCommitId: 7.6.5
+OS: Microsoft Windows 10.0.26200
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+Transcript started, output file is D:\dev\guideXOSServer\docs\evidence\qac3b-r1-20261020\build-and-launch-transcript.txt
+   78 | static void process_event(const InputEvent* event)
+      |             ^~~~~~~~~~~~~
+  Compiling virtio_net.cpp...
+core\virtio_net.cpp: In member function 'int kernel::virtio::net::NetDevice::sen
+d(const void*, size_t)':
+core\virtio_net.cpp:378:13: warning: comparison of integer expressions of differ
+ent signedness: 'size_t' {aka 'long unsigned int'} and 'int' [-Wsign-compare]
+  378 |     if (len > getMtu() + 14) return -3;  // MTU + ethernet header
+      |         ~~~~^~~~~~~~~~~~~~~
+  Compiling virtio_rng.cpp...
+core\virtio_rng.cpp:107:16: warning: 'uint8_t kernel::virtio::rng::{anonymous}:i
+o_read8(uint16_t, uint16_t)' defined but not used [-Wunused-function]
+  107 | static uint8_t io_read8(uint16_t base, uint16_t offset)
+      |                ^~~~~~~~
+
+[ERROR] One or more files failed to compile
+Press any key to continue . . .
+
+[ERROR] Build failed! Cannot launch QEMU.
+
+Press any key to continue . . .
+**********************
+PowerShell transcript end
+End time: 20261020144340
+**********************

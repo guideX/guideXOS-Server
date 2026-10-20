@@ -38,7 +38,7 @@
   },
   "overlaySha256": {
     "guidexos/mbedtls_config.h": "cbc1a7b06e86e06aae0e976aceb4455b9d7fa8b59e161b90c0b776e4c7244b46",
-    "guidexos/crypto_config.h": "66e4f7225391cf4dd11423a05c46a473a10390fc1912fd02ab1aebb99d6224a6",
+    "guidexos/crypto_config.h": "351ae01287dc9c62962c25d4cbed1682c69fdb5082e8f12533c08b7d90d68d65",
     "guidexos/mbedtls_sources.mk": "738224aba4911c2af721ee1e88527f10398ddb7faf728fc4d3ec730990160cde"
   }
 }
