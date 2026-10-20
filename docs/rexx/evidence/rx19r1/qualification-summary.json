@@ -1,0 +1,103 @@
+{
+  "schema": "guidexos.rexx.rx19r1.qualification.v1",
+  "generated_at_utc": "2026-10-20T16:07:43.6985662Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "2f1f50924c046b9fa104d53c24e63b158fa4a414",
+  "qualification_head": "2f1f50924c046b9fa104d53c24e63b158fa4a414",
+  "outcome": "B — Partial",
+  "production_wall_clock_acceptance": false,
+  "hosted": {
+    "status": "PASS",
+    "runner": "tests/run_rexx_tests.ps1 -Phase RX19",
+    "run_id": "a841a48f80224363bca443ce09d8351a",
+    "rx19_direct_assertions": 8275,
+    "dispatch_cases": 4112,
+    "deterministic_calendar_properties": 2048,
+    "calendar_property_seed": "0x52583139",
+    "inherited_matrix": "RX1–RX19 passed",
+    "cli_cases": "24/24",
+    "phase_case_counts": {
+      "RX9": "24/24",
+      "RX10": "19/19",
+      "RX12": "31/31",
+      "RX13": "33/33",
+      "RX14": "29/29",
+      "RX15": "3/3",
+      "RX16": "10/10",
+      "RX17": "10/10"
+    },
+    "regina": "NOT_RUN — executable unavailable",
+    "artifact_guard": "31/31 protected root .obj/.pdb hashes unchanged",
+    "evidence": "build/rexx/rx19/hosted-a841a48f80224363bca443ce09d8351a"
+  },
+  "sanitizers": [
+    {
+      "name": "AddressSanitizer",
+      "status": "PASS",
+      "run_id": "a14e805923ba49e0b3fba41a0da99c32",
+      "targets_built_and_run": 21,
+      "failures": 0,
+      "findings": 0,
+      "expected_result_cases": 195,
+      "local_expected_exits": 195,
+      "regina": "NOT_RUN",
+      "evidence": "docs/rexx/evidence/rx19r1/sanitizers/address"
+    },
+    {
+      "name": "UndefinedBehaviorSanitizer",
+      "status": "PASS",
+      "run_id": "a9661e7194234fdb9cc2831222d54099",
+      "targets_built_and_run": 21,
+      "failures": 0,
+      "findings": 0,
+      "expected_result_cases": 195,
+      "local_expected_exits": 195,
+      "regina": "NOT_RUN",
+      "evidence": "docs/rexx/evidence/rx19r1/sanitizers/undefined"
+    }
+  ],
+  "firmware": {
+    "uefi_gettime_used": false,
+    "uefi_invalid_timezone_tests": "NOT_APPLICABLE — no GetTime parser or caller",
+    "provider_invalid_offsets_tested": [
+      86400,
+      -86400,
+      86460,
+      -86460
+    ],
+    "unknown_interpretation_fails_closed": true
+  },
+  "native_amd64": {
+    "status": "PASS",
+    "run_id": "b1a4a5adfde242abbf8af629c26d4f2a",
+    "rexx_c_objects_linked": 9,
+    "kernel_elf_sha256": "1fe3eaafc7895f46386eecb75fd9f0fc8b385bb2a1c25ef2a833f9d552281bfa",
+    "evidence": "docs/rexx/evidence/rx19r1/native-build"
+  },
+  "native_guest": {
+    "status": "PASS_FOR_UNAVAILABLE_AND_MONOTONIC_PATHS",
+    "run_id": "21be302f91514f609c3976725cdeed29",
+    "rtc_harness_argument": "-rtc base=utc,clock=host",
+    "network_disabled": true,
+    "disposable_media": true,
+    "date_conversion_marker": "RX19_NATIVE_DATE_CONVERSIONS_DONE",
+    "unavailable_clock_marker": "RX19_NATIVE_CLOCK_UNAVAILABLE_CAUGHT",
+    "monotonic_start": "0.000000",
+    "monotonic_finish": "2.599821",
+    "elapsed_progress_marker": "RX19R1_ELAPSED_TIMER_PROGRESS",
+    "qmp_shutdown_acknowledged": true,
+    "owned_qemu_exited": true,
+    "foreign_qemu_untouched": true,
+    "live_wall_clock_provenance_accepted": false,
+    "evidence": "docs/rexx/evidence/rx19r1/native-guest/run-21be302f91514f609c3976725cdeed29"
+  },
+  "protected_artifacts": {
+    "root_obj_pdb_start_count": 31,
+    "root_obj_pdb_hashes_unchanged": 31,
+    "preexisting_untracked_compact_entry_count": 63,
+    "root_phase_present": false,
+    "historical_rx19_guest_records_modified": false
+  },
+  "source_policy": "CMOS is WALL_UNSPECIFIED; current wall DATE/TIME stays unavailable. Preserve PIT TIME E/R.",
+  "recommendation": "RX20 should provide a kernel-owned, live clock contract with explicit validity, provenance, precision, and distinct local/UTC capabilities before enabling wall forms."
+}

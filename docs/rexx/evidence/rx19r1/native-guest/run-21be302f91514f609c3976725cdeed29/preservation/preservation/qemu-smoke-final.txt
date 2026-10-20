@@ -1,0 +1,5 @@
+RX19 artifact preservation: PASS
+Stage: qemu-smoke-final
+Verified UTC: 2026-10-20T16:00:10.8150575Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

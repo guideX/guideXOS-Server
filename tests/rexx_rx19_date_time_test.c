@@ -515,6 +515,7 @@ static int test_fixed_offset_boundaries(void)
     FakeClock clock;
     OutputBuffer output;
     RexxVMStatus status;
+    char error[128];
     int failed = 0;
     memset(&clock, 0, sizeof(clock));
     fake_clock_push(&clock, reading(2024u, 1u, 1u, 0u, 30u, 0u,
@@ -526,6 +527,46 @@ static int test_fixed_offset_boundaries(void)
                     "RX19 fixed UTC offset reading executes");
     failed += check(strcmp(output.bytes, "20231231 23:30:00\n") == 0,
                     "RX19 fixed offset crosses the year boundary correctly");
+
+    memset(&clock, 0, sizeof(clock));
+    fake_clock_push(&clock, reading(2024u, 12u, 31u, 23u, 30u, 0u,
+        0u, 1000000000u, 0u, 10000000u,
+        REXX_CLOCK_WALL_UTC_FIXED_OFFSET, 3600));
+    status = execute_source(&clock, "say date('S') time('N')\n",
+                            &output, NULL, 0u);
+    failed += check(status == REXX_VM_STATUS_OK,
+                    "RX19 positive fixed UTC offset reading executes");
+    failed += check(strcmp(output.bytes, "20250101 00:30:00\n") == 0,
+                    "RX19 positive fixed offset crosses the year boundary correctly");
+
+    memset(&clock, 0, sizeof(clock));
+    fake_clock_push(&clock, reading(2024u, 2u, 29u, 12u, 0u, 0u,
+        0u, 1000000000u, 0u, 10000000u,
+        REXX_CLOCK_WALL_UNSPECIFIED, 0));
+    status = execute_source(&clock, "say date()\n", &output,
+                            error, sizeof(error));
+    failed += check(status == REXX_VM_STATUS_CLOCK_UNAVAILABLE,
+                    "RX19 valid civil fields with unknown interpretation stay unavailable");
+    failed += check(strstr(error, "clock source unavailable") != NULL ||
+                    strstr(error, "Clock source unavailable") != NULL,
+                    "RX19 unspecified interpretation produces the documented clock error");
+
+    {
+        const int32_t invalid_offsets[] = { 86400, -86400, 86460, -86460 };
+        size_t i;
+        for (i = 0u; i < sizeof(invalid_offsets) / sizeof(invalid_offsets[0]); ++i) {
+            memset(&clock, 0, sizeof(clock));
+            fake_clock_push(&clock, reading(2024u, 2u, 29u, 12u, 0u, 0u,
+                0u, 1000000000u, 0u, 10000000u,
+                REXX_CLOCK_WALL_UTC_FIXED_OFFSET, invalid_offsets[i]));
+            status = execute_source(&clock, "say date()\n", &output,
+                                    error, sizeof(error));
+            failed += check(status == REXX_VM_STATUS_CLOCK_UNAVAILABLE,
+                            "RX19 out-of-range provider offset is rejected deterministically");
+            failed += check(clock.calls == 1u,
+                            "RX19 invalid provider offset is read once for its clause");
+        }
+    }
     return failed;
 }
 

@@ -1,0 +1,81 @@
+{
+  "schema": "guidexos.rexx.rx19r1.scorecard.v1",
+  "phase": "RX19R1",
+  "outcome": "B — Partial",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "2f1f50924c046b9fa104d53c24e63b158fa4a414",
+  "qualification_head": "2f1f50924c046b9fa104d53c24e63b158fa4a414",
+  "local_commit_includes_scorecard": true,
+  "prior_rx19_scorecard": "docs/rexx/REXX_RX19_SCORECARD.json",
+  "provenance_document": "docs/rexx/REXX_RX19R1_CLOCK_PROVENANCE.md",
+  "qualification_evidence": "docs/rexx/evidence/rx19r1/qualification-summary.json",
+  "clock_provenance": {
+    "live_source": "Direct CMOS RTC access through ports 0x70/0x71 on x86/AMD64",
+    "interpretation": "WALL_UNSPECIFIED",
+    "utc_capability": false,
+    "local_wall_capability": false,
+    "timezone_offset_available": false,
+    "source_validity_metadata": "No separate validity/trust state; range checks and stable reads only",
+    "resolution": "1 second",
+    "uefi_gettime": "Not called; not handed off",
+    "pit": "Independent monotonic source for TIME E/R"
+  },
+  "policy": "Outcome B per RX19R1 direction: preserve explicit CLOCK_UNAVAILABLE for current wall forms; preserve clock-free conversions and PIT elapsed/reset timers; do not infer UTC/local or desktop timezone.",
+  "rexx": {
+    "DATE": "Partial; clock-free conversions supported; current-date/current-year-dependent forms unavailable",
+    "TIME": "Partial; E/R monotonic forms supported; C/H/L/M/N/S wall forms unavailable",
+    "external_compatibility_percentage": "NOT_CLAIMED"
+  },
+  "hosted_tests": {
+    "status": "PASS",
+    "rx19_direct_assertions": 8275,
+    "dispatch_cases": 4112,
+    "calendar_properties": 2048,
+    "cli": "24/24",
+    "inherited_phase_counts": [
+      "RX9 24/24",
+      "RX10 19/19",
+      "RX12 31/31",
+      "RX13 33/33",
+      "RX14 29/29",
+      "RX15 3/3",
+      "RX16 10/10",
+      "RX17 10/10"
+    ],
+    "regina": "NOT_RUN"
+  },
+  "sanitizers": {
+    "address": "PASS — 21/21 targets, zero failures/findings; 195/195 local corpus exits",
+    "undefined": "PASS — 21/21 targets, zero failures/findings; 195/195 local corpus exits",
+    "regina": "NOT_RUN"
+  },
+  "native_build": {
+    "status": "PASS",
+    "run_id": "b1a4a5adfde242abbf8af629c26d4f2a",
+    "rexx_c_objects_linked": 9,
+    "kernel_elf_sha256": "1fe3eaafc7895f46386eecb75fd9f0fc8b385bb2a1c25ef2a833f9d552281bfa"
+  },
+  "native_guest": {
+    "status": "PASS for deterministic DATE, fail-closed wall behavior, recovery, responsiveness, and monotonic TIME E",
+    "run_id": "21be302f91514f609c3976725cdeed29",
+    "qmp_shutdown_acknowledged": true,
+    "rtc_harness_setup": "-rtc base=utc,clock=host",
+    "live_wall_acceptance": false
+  },
+  "protected_integrity": {
+    "root_obj_pdb": "31/31 hashes unchanged",
+    "preexisting_untracked_entries": "63/63 preserved",
+    "historical_rx19_records": "unchanged",
+    "root_phase": "absent"
+  },
+  "inventory_changes": "Appended seven RX19R1 fields to cumulative RX19 inventory; DATE/TIME remain Partial; all other built-ins carry no-change entries.",
+  "firmware_timezone_tests": "UEFI-specific invalid timezone values are not applicable: no GetTime parser/caller exists. Injected provider offsets ±86400 and ±86460 seconds are rejected.",
+  "remaining_unknowns": [
+    "Physical CMOS timezone/UTC-local setting",
+    "RTC battery/validity status and BCD-nibble trust",
+    "Century/year source beyond the forced 2000+YY interpretation",
+    "Timezone/DST database or operator RTC policy",
+    "UEFI runtime-service preservation and invocation"
+  ],
+  "recommendation": "RX20: add a kernel-owned clock contract carrying source provenance, validity, precision, local capability, and UTC capability separately; add live firmware GetTime or explicit configuration only through an established safe route; preserve PIT timing."
+}

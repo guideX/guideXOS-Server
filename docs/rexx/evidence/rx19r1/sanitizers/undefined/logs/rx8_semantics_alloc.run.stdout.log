@@ -1,0 +1,5 @@
+RX8 parser allocation failpoints: 38/38
+RX8 compiler allocation failpoints: 21/21
+RX8 VM allocation failpoints: 50/50
+RX8 C assertions passed: 279/279
+RX8 semantic, allocation, and recovery assertions passed

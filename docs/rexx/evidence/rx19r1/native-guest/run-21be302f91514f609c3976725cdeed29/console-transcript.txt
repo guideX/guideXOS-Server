@@ -1,0 +1,8 @@
+RX19 isolated QEMU Console transcript
+Kernel SHA-256: 1fe3eaafc7895f46386eecb75fd9f0fc8b385bb2a1c25ef2a833f9d552281bfa
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx19\qemu-21be302f91514f609c3976725cdeed29\guest\esp
+COMMAND: rexx /rx19-date-conversions.rex | expected visible marker/status: RX19_NATIVE_DATE_CONVERSIONS_DONE
+COMMAND: rexx /rx19-clock-error-recovery.rex | expected visible marker/status: RX19_NATIVE_GUEST_RESPONSIVE
+COMMAND: rexx /rx19r1-monotonic.rex | expected visible marker/status: RX19R1_ELAPSED_TIMER_PROGRESS
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=36
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

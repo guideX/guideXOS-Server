@@ -1,0 +1,11 @@
+{
+  "Kind": "Address",
+  "Compiler": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\cl.exe",
+  "CompilerVersion": "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for x64",
+  "EvidenceDir": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx19\\sanitizer-address-a14e805923ba49e0b3fba41a0da99c32\\logs",
+  "BuildDir": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx19\\sanitizer-address-a14e805923ba49e0b3fba41a0da99c32\\bin",
+  "RunDir": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx19\\sanitizer-address-a14e805923ba49e0b3fba41a0da99c32",
+  "DurableEvidence": "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx19\\sanitizer-address-a14e805923ba49e0b3fba41a0da99c32",
+  "InstallationPath": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community",
+  "VCToolsVersion": "14.51.36231"
+}

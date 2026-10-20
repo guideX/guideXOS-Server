@@ -1,0 +1,6 @@
+[2026-10-20T15:59:29.1602932Z] rexx /rx19-date-conversions.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx19\qemu-21be302f91514f609c3976725cdeed29\screenshots-raw\rx19-01-deterministic-date-conversions.ppm
+[2026-10-20T15:59:44.6770842Z] rexx /rx19-clock-error-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx19\qemu-21be302f91514f609c3976725cdeed29\screenshots-raw\rx19-02-clock-capability-and-error-recovery.ppm
+[2026-10-20T16:00:04.2433673Z] rexx /rx19r1-monotonic.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx19\qemu-21be302f91514f609c3976725cdeed29\screenshots-raw\rx19-03-elapsed-timer-progression.ppm

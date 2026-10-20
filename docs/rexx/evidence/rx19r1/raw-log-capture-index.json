@@ -1,0 +1,19 @@
+{
+  "schema": "guidexos.rexx.rx19r1.raw-log-capture.v1",
+  "archive": "raw-log-captures.zip",
+  "preservation": "Exact captured bytes; archive extraction hashes verified.",
+  "entries": [
+    {
+      "entry": "native-build.stderr.log",
+      "source": "docs\\rexx\\evidence\\rx19r1\\native-build\\native-build-b1a4a5adfde242abbf8af629c26d4f2a.stderr.log",
+      "sha256": "31feee86b571b477337cbb83b46be6ffb1e94c4f0ea25232d8966886302b4d40",
+      "bytes": 236205
+    },
+    {
+      "entry": "native-guest.serial.log",
+      "source": "docs\\rexx\\evidence\\rx19r1\\native-guest\\run-21be302f91514f609c3976725cdeed29\\serial.log",
+      "sha256": "a961e78d2e88f913e3a340f5e428b36158b1aa7c64889d24e758e85f999a86cc",
+      "bytes": 46288
+    }
+  ]
+}
