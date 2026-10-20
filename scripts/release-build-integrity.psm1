@@ -26,6 +26,49 @@ function Assert-ReleaseCommandCompleted {
     }
 }
 
+function Assert-DeveloperStudioMinimumServerVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$ManifestPath,
+        [string]$TargetServerVersion = '0.3.0'
+    )
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        throw "DeveloperStudio manifest is missing for runtime compatibility check: $ManifestPath"
+    }
+
+    try {
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "DeveloperStudio manifest is invalid JSON: $ManifestPath. $($_.Exception.Message)"
+    }
+    if ($manifest.id -ne 'com.guidexos.developerstudio') {
+        throw "Unexpected application ID in DeveloperStudio manifest: $($manifest.id)"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$manifest.minGuideXOSVersion)) {
+        throw 'DeveloperStudio manifest is missing minGuideXOSVersion.'
+    }
+
+    try {
+        $minimumVersion = [Version]::Parse([string]$manifest.minGuideXOSVersion)
+    } catch {
+        throw "DeveloperStudio manifest has an invalid minGuideXOSVersion: $($manifest.minGuideXOSVersion)"
+    }
+    try {
+        $targetVersion = [Version]::Parse($TargetServerVersion)
+    } catch {
+        throw "Invalid target Server version for DeveloperStudio compatibility check: $TargetServerVersion"
+    }
+
+    if ($minimumVersion -gt $targetVersion) {
+        throw "DeveloperStudio requires guideXOS Server $minimumVersion or later; release target $targetVersion is unsupported."
+    }
+
+    return [PSCustomObject]@{
+        MinimumServerVersion = $minimumVersion.ToString()
+        TargetServerVersion = $targetVersion.ToString()
+    }
+}
+
 function Read-ReleaseBuildIdentity {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -52,7 +95,8 @@ function Assert-ReleaseBuildIdentity {
         [Parameter(Mandatory = $true)][string]$EspRoot,
         [Parameter(Mandatory = $true)][string]$ExpectedSourceCommit,
         [string]$ExpectedBuildId,
-        [ValidateSet('amd64')][string]$Architecture = 'amd64'
+        [ValidateSet('amd64')][string]$Architecture = 'amd64',
+        [string]$TargetServerVersion = '0.3.0'
     )
 
     $identity = Read-ReleaseBuildIdentity -Path $IdentityPath
@@ -110,7 +154,9 @@ function Assert-ReleaseBuildIdentity {
             throw 'DeveloperStudio ELF is not the exact Phase 25 signed-off package binary.'
         }
     }
+    $developerStudioManifest = Join-Path $resolvedEspRoot ($identity['artifact.developerStudio.manifest.path'].Replace('/', '\'))
+    [void](Assert-DeveloperStudioMinimumServerVersion -ManifestPath $developerStudioManifest -TargetServerVersion $TargetServerVersion)
     return $identity
 }
 
-Export-ModuleMember -Function Get-DeveloperStudioSignedOffIdentity, Assert-ReleaseCommandCompleted, Read-ReleaseBuildIdentity, Assert-ReleaseBuildIdentity
+Export-ModuleMember -Function Get-DeveloperStudioSignedOffIdentity, Assert-DeveloperStudioMinimumServerVersion, Assert-ReleaseCommandCompleted, Read-ReleaseBuildIdentity, Assert-ReleaseBuildIdentity

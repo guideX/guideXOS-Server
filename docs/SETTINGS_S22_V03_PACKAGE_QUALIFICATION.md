@@ -243,3 +243,19 @@ The exact decision packet and validation boundary are recorded in [S22R2 evidenc
 **Final Outcome C — Blocked. Native Settings remains unqualified for Server v0.3 Limited/Alpha inclusion.** The required production ISO and exact-package guest acceptance were not performed because neither the current source pair nor the Phase 25 pair is authorized and compatible for the intended v0.3 package on the evidence available. This component result does not determine overall Server v0.3 release readiness.
 
 **Recommended next action:** the Server v0.3 release owner should authorize an explicit package decision. The compatibility evidence recommends deferring DeveloperStudio from v0.3; that requires a narrow package-inventory change and validation. Retaining Phase 25 instead requires the stated owner approvals, resolution of its minimum-version and runtime-service gaps, and a bounded current-Server smoke before package assembly.
+
+## S22R3 — v0.2.1 DeveloperStudio compatibility and package qualification
+
+**Date:** 2026-10-19
+
+**Outcome:** **C — Blocked at the v0.3 runtime compatibility boundary.**
+
+The owner-selected historical package was found on the preserved v0.2.1 ISO. Its exact media identity is a 1,175-byte `app.json` (`4DEDC783EFD160A6B13D5AF9A9F87ABB6608004BB10CA8F42ABE6B306EE33701`) and 1,015,064-byte AMD64 ELF (`5343F5DF0EDFE423542348C0AF8C9F8690CE339D197DEB4737DD05A27348CAC7`). The ISO SHA-256 is `985b524a4c281ed3d00060df97adda38c99965c8d03a5d11f69db793e8174c86`; its sidecar identifies source commit `0e6039c0e3f1fd218424ba7367c9e83bd8d73223`. No `v0.2.1` Git tag exists. The on-media manifest is distinct from Phase 25's `D59C…F53B` manifest even though the ELF bytes match the Phase 25 ELF.
+
+The historical manifest declares `minGuideXOSVersion: 0.5.0`. Server v0.3 provides the base Native ELF window/event path but lacks the workspace file, build, Run, and debugger services used by this DeveloperStudio. Backporting those services would exceed bounded release integration. The new release preflight rejects manifests whose declared minimum exceeds v0.3.0, and the current/newer package remains rejected by exact identity. No DeveloperStudio selector or package-inventory deferral was introduced while compatibility remains unresolved.
+
+The release-integrity harness passed 18 assertions. The current newer source pair was rejected before build cleanup; the preserved S22 ISO hash remained unchanged. No production kernel or ISO was built, and no QEMU guest was launched. The existing QEMU process observed during the later ownership census belonged to a separate checkout and was left untouched.
+
+The exact historical and Phase 25 media hashes, compatibility matrix, smoke-test limits, preflight logs, and repository inventory are in [S22R3 evidence](evidence/settings-s22r3-v03-package-20261019/README.md) and [the compatibility report](SETTINGS_S22R3_DEVELOPERSTUDIO_V021_COMPATIBILITY.md).
+
+**S22R3 component decisions:** Native Settings remains unqualified because the exact-package Blue Flower-to-Dinos guest Apply acceptance did not run. DeveloperStudio v0.2.1-compatible edition is not qualified for Server v0.3. Overall Server v0.3 is not approved or published. The recommendation is a separate owner decision to defer DeveloperStudio or start a dedicated compatibility project.

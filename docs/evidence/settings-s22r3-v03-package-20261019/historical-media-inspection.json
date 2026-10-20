@@ -1,0 +1,77 @@
+{
+  "iso": {
+    "path": "D:\\dev\\guideXOSServer\\dist\\guideXOS-Server-v0.2.1-amd64.iso",
+    "bytes": 90245120,
+    "sha256": "985b524a4c281ed3d00060df97adda38c99965c8d03a5d11f69db793e8174c86",
+    "matchesSidecarBytes": true,
+    "matchesSidecarSha256": true,
+    "sourceGitCommit": "0e6039c0e3f1fd218424ba7367c9e83bd8d73223",
+    "releaseVersion": "0.2.1"
+  },
+  "embeddedBootImage": {
+    "path": "UEFI_BOOT.IMG",
+    "bytes": 90177536,
+    "sha256": "2867edb7dde1468c0f8ae2a73d4c09d386184a97a94295fb3e1f2874266b335e",
+    "matchesSidecarBytes": true,
+    "matchesSidecarSha256": true
+  },
+  "isoReadme": "guideXOS Server release media\nVersion: 0.2.1\nArchitecture: amd64\nSource commit: 0e6039c0e3f1fd218424ba7367c9e83bd8d73223\n\nThe bootable UEFI FAT image is UEFI_BOOT.IMG.\nIt contains the complete guideXOS Server EFI payload.\nThis ISO is read-only release media.\n",
+  "developerStudioMediaFiles": [
+    {
+      "path": "Apps/DeveloperStudio/app.json",
+      "bytes": 1175,
+      "sha256": "4dedc783efd160a6b13d5af9a9f87abb6608004bb10ca8f42abe6b306ee33701"
+    },
+    {
+      "path": "Apps/DeveloperStudio/bin/amd64/developerstudio.elf",
+      "bytes": 1015064,
+      "sha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7"
+    }
+  ],
+  "developerStudioMatchesSidecar": [
+    {
+      "path": "Apps/DeveloperStudio/app.json",
+      "matchesSidecarBytes": true,
+      "matchesSidecarSha256": true
+    },
+    {
+      "path": "Apps/DeveloperStudio/bin/amd64/developerstudio.elf",
+      "matchesSidecarBytes": true,
+      "matchesSidecarSha256": true
+    }
+  ],
+  "buildIdentity": "identity=GXOS-LARGE-FILE-PASTE-TRACE-V1\r\nprobe=GXOS-LFPASTE-20260726-02\r\nimageKind=ESP-directory-used-as-QEMU-FAT-media\r\nimageRoot=D:\\dev\\guideXOSServer\\ESP\r\nbootloaderSource=D:\\dev\\guideXOSServer\\guideXOSBootLoader\\x64\\Release\\guideXOSBootLoader.exe\r\nbootloaderSha256=4F7DA7918F7A235832240B9AA7D895C52C82C70451B9624E9819A7C582781AE1\r\nkernelSource=D:\\dev\\guideXOSServer\\kernel\\build\\amd64\\bin\\kernel.elf\r\nkernelSha256=BEEE561AB105AE274ED02F683618A06A76B598584672022D80AEC6A0198C6823\r\nespKernelSha256=BEEE561AB105AE274ED02F683618A06A76B598584672022D80AEC6A0198C6823\r\nbuiltAtUtc=2026-08-27T03:10:17.5513068Z\r\npacmanPackageRoot=/Apps/PacMan\r\npacmanElfSha256=22B5F133DEF27281E992EE9657D7318825872F160C2A77E85F9FD7A609A5B4A7\r\npacmanManifestSha256=EC0F94CD921B338B102E8F13C330DB35EE42F6E42D964FD3211AFFBC8AE1EAFF\r\npacmanElfBytes=53432\r\npacmanManifestBytes=899\r\ndeveloperstudioPackageRoot=/Apps/DeveloperStudio\r\ndeveloperstudioElfSha256=5343F5DF0EDFE423542348C0AF8C9F8690CE339D197DEB4737DD05A27348CAC7\r\ndeveloperstudioManifestSha256=4DEDC783EFD160A6B13D5AF9A9F87ABB6608004BB10CA8F42ABE6B306EE33701\r\ndeveloperstudioElfBytes=1015064\r\ndeveloperstudioManifestBytes=1175\r\n",
+  "readMethod": "PyCdlib and PyFatFS read-only; FAT32 image opened in-place at El Torito LBA 32 (offset 65536); no full ISO/EFI image extraction",
+  "sourceCommitFileComparisons": [
+    {
+      "mediaPath": "/Apps/DeveloperStudio/app.json",
+      "sourceTreePath": "ESP/Apps/DeveloperStudio/app.json",
+      "mediaBytes": 1175,
+      "mediaSha256": "4dedc783efd160a6b13d5af9a9f87abb6608004bb10ca8f42abe6b306ee33701",
+      "sourceTreeBytes": 1131,
+      "sourceTreeSha256": "8787419239c14080a182b347035ea4a44199e4ab6705a67717a310f6e040575e",
+      "mediaEqualsSourceTreeAfterCrlfNormalization": true,
+      "sourceBlob": "8b2b8267a1e9d1fb6720b579eeabb23f2f441109"
+    },
+    {
+      "mediaPath": "/Apps/DeveloperStudio/bin/amd64/developerstudio.elf",
+      "sourceTreePath": "ESP/Apps/DeveloperStudio/bin/amd64/developerstudio.elf",
+      "mediaBytes": 1015064,
+      "mediaSha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7",
+      "sourceTreeBytes": 1015064,
+      "sourceTreeSha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7",
+      "mediaEqualsSourceTreeAfterCrlfNormalization": true,
+      "sourceBlob": "150b4958e569ce4d4e5f9e2c3146de94d94c879d"
+    },
+    {
+      "mediaPath": "/build-identity.txt",
+      "sourceTreePath": "ESP/build-identity.txt",
+      "mediaBytes": 1160,
+      "mediaSha256": "7724708d71a29fe347e6459c1550693a4e90e0bc06a5b385c637d0c116129f9c",
+      "sourceTreeBytes": 1140,
+      "sourceTreeSha256": "7495dc9d629c02d082dcf4d28f8e2d3e60b11a042c2c71084062589073a32ffb",
+      "mediaEqualsSourceTreeAfterCrlfNormalization": true,
+      "sourceBlob": "242ab5d86ed3fe0729e45ad9ab285bcc8c9082e9"
+    }
+  ]
+}

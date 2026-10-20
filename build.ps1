@@ -217,11 +217,12 @@ function Assert-DeveloperStudioSignedOffSource {
             "Current manifest=${actualManifestBytes}/$actualManifestHash, ELF=${actualElfBytes}/$actualElfHash. " +
             'Owner acceptance is required before a different package can be included.')
     }
+    [void](Assert-DeveloperStudioMinimumServerVersion -ManifestPath $manifestPath -TargetServerVersion '0.3.0')
 }
 
-# Check the pinned package before any build output is cleaned or replaced. The
-# current Apps tree is newer than the signed-off pair, so release integration
-# must stop until the package owner approves its exact manifest and ELF.
+# Check the pinned package and its declared runtime requirement before any build
+# output is cleaned or replaced. The Phase 25 pair requires Server 0.5.0, so it
+# cannot qualify for this Server 0.3 build even when its hashes match.
 Assert-DeveloperStudioSignedOffSource
 
 # Step 1: Clean if requested

@@ -1,0 +1,7 @@
+command=build.ps1 -Arch amd64
+exitCode=1
+s22IsoSha256Before=B303C4C1A1CD31E500353CBD2DD7E11A8FD438B81AC9306285A6CD20EA1B1A3F
+s22IsoSha256After=B303C4C1A1CD31E500353CBD2DD7E11A8FD438B81AC9306285A6CD20EA1B1A3F
+s22IsoPreserved=True
+historical v0.2.1 media manifest=REJECTED: DeveloperStudio requires guideXOS Server 0.5.0 or later; release target 0.3.0 is unsupported.
+Phase 25 manifest=REJECTED: DeveloperStudio requires guideXOS Server 0.5.0 or later; release target 0.3.0 is unsupported.

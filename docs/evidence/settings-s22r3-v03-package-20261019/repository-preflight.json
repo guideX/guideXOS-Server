@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-19",
+  "repository": "D:\\dev\\guideXOSServer",
+  "branch": "main",
+  "startingHead": "79e446781b219188831682708cb79d0ceb37a585",
+  "expectedHead": "79e446781b219188831682708cb79d0ceb37a585",
+  "trackedFileCount": 5292,
+  "stagedPathCount": 0,
+  "trackedDirtyPathCount": 0,
+  "preExistingUntrackedPathCount": 853,
+  "relationToOriginMain": "## main...origin/main [ahead 1]",
+  "newerS22R3CommitPresent": false,
+  "initialStatusFile": "initial-path-status.porcelain.txt"
+}

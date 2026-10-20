@@ -20,7 +20,7 @@ function Assert-Throws([scriptblock]$Action, [string]$Description) {
     Assert-True $threw $Description
 }
 
-function Write-TestIdentity([string]$Status = 'success', [bool]$CompleteStages = $true, [bool]$UseCurrentDeveloperStudio = $false) {
+function Write-TestIdentity([string]$Status = 'success', [bool]$CompleteStages = $true, [bool]$UseCurrentDeveloperStudio = $false, [bool]$UseHistoricalV021DeveloperStudio = $false) {
     $lines = @(
         'schemaVersion=2',
         'buildId=2e3a5996-7f24-458d-a5d8-0398b6934f8b',
@@ -47,7 +47,13 @@ function Write-TestIdentity([string]$Status = 'success', [bool]$CompleteStages =
         $artifactPath = Join-Path $EspRoot ($artifact.Path -replace '/', '\')
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $artifactPath) | Out-Null
         if ($artifact.Name -eq 'developerStudio.manifest') {
-            $manifestSource = if ($UseCurrentDeveloperStudio) { Join-Path $PSScriptRoot '..\Apps\DeveloperStudio\app.json' } else { Join-Path $PSScriptRoot '..\tests\fixtures\developerstudio-phase25-app.json' }
+            if ($UseHistoricalV021DeveloperStudio) {
+                $manifestSource = Join-Path $PSScriptRoot '..\docs\evidence\settings-s22r3-v03-package-20261019\historical-v021-DeveloperStudio-app.json'
+            } elseif ($UseCurrentDeveloperStudio) {
+                $manifestSource = Join-Path $PSScriptRoot '..\Apps\DeveloperStudio\app.json'
+            } else {
+                $manifestSource = Join-Path $PSScriptRoot '..\tests\fixtures\developerstudio-phase25-app.json'
+            }
             Copy-Item -LiteralPath $manifestSource -Destination $artifactPath -Force
         } elseif ($artifact.Name -eq 'developerStudio.elf') {
             $elfSource = if ($UseCurrentDeveloperStudio) { Join-Path $PSScriptRoot '..\Apps\DeveloperStudio\bin\amd64\developerstudio.elf' } else { Join-Path $PSScriptRoot '..\ESP\Apps\DeveloperStudio\bin\amd64\developerstudio.elf' }
@@ -69,6 +75,15 @@ try {
     Assert-Throws { Assert-ReleaseCommandCompleted -Command 'required-stage' -ExitCode 7 -Output '' } 'rejects a required command returning nonzero'
     Assert-Throws { Assert-ReleaseCommandCompleted -Command 'required-stage' -ExitCode 0 -Output 'ERROR: stage failed' } 'rejects a child that prints an error but exits zero'
 
+    $historicalV021Manifest = Join-Path $PSScriptRoot '..\docs\evidence\settings-s22r3-v03-package-20261019\historical-v021-DeveloperStudio-app.json'
+    Assert-Throws { Assert-DeveloperStudioMinimumServerVersion -ManifestPath $historicalV021Manifest -TargetServerVersion '0.3.0' } 'rejects the exact v0.2.1 media manifest because it requires Server 0.5.0'
+    $phase25Manifest = Join-Path $PSScriptRoot '..\tests\fixtures\developerstudio-phase25-app.json'
+    Assert-Throws { Assert-DeveloperStudioMinimumServerVersion -ManifestPath $phase25Manifest -TargetServerVersion '0.3.0' } 'rejects the Phase 25 manifest because it requires Server 0.5.0'
+    $compatibleManifest = Join-Path $TestRoot 'developerstudio-v03-compatible.json'
+    [IO.File]::WriteAllText($compatibleManifest, '{"id":"com.guidexos.developerstudio","minGuideXOSVersion":"0.3.0"}')
+    $compatibility = Assert-DeveloperStudioMinimumServerVersion -ManifestPath $compatibleManifest -TargetServerVersion '0.3.0'
+    Assert-True ($compatibility.MinimumServerVersion -eq '0.3.0' -and $compatibility.TargetServerVersion -eq '0.3.0') 'accepts a DeveloperStudio manifest whose declared minimum matches the v0.3 target'
+
     Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) } 'rejects a missing identity receipt'
 
     Write-TestIdentity -Status 'in_progress' -CompleteStages $true
@@ -83,6 +98,9 @@ try {
 
     Write-TestIdentity -UseCurrentDeveloperStudio $true
     Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) } 'rejects a newer unsigned DeveloperStudio package even when its receipt matches its bytes'
+
+    Write-TestIdentity -UseHistoricalV021DeveloperStudio $true
+    Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) } 'rejects the exact v0.2.1 media manifest because the current release selector has no compatible historical pin'
 
     Write-TestIdentity
     Remove-Item -LiteralPath (Join-Path $EspRoot 'Apps\DeveloperStudio\app.json')
@@ -102,8 +120,9 @@ try {
     Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) } 'rejects a staged artifact whose hash changed after receipt creation'
 
     Write-TestIdentity
-    $validated = Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) -ExpectedBuildId '2e3a5996-7f24-458d-a5d8-0398b6934f8b'
-    Assert-True ($validated['buildStatus'] -eq 'success') 'accepts a complete identity whose required stages and artifact hashes match'
+    Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) -ExpectedBuildId '2e3a5996-7f24-458d-a5d8-0398b6934f8b' } 'rejects the exact Phase 25 artifact pair for the Server v0.3 target despite a complete successful receipt'
+    $validated = Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) -ExpectedBuildId '2e3a5996-7f24-458d-a5d8-0398b6934f8b' -TargetServerVersion '0.5.0'
+    Assert-True ($validated['buildStatus'] -eq 'success') 'accepts the exact Phase 25 identity for its declared Server 0.5.0 minimum'
 } finally {
     if (Test-Path -LiteralPath $TestRoot -PathType Container) {
         Remove-Item -LiteralPath $TestRoot -Recurse -Force

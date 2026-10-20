@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-19",
+  "newTaskQemuStarted": false,
+  "observations": [
+    {
+      "processName": "qemu-system-x86_64",
+      "owner": "unresolved before process exited",
+      "disposition": "not attached to or stopped",
+      "processId": 12596,
+      "startTimeLocal": "2026-10-19 19:55:39"
+    },
+    {
+      "startTimeLocal": "2026-10-19 20:01:53",
+      "guestMediaRoot": "out/dotnet/c180-managed-resize-contract/production-acceptance/ordinary-boots/ordinary-run-20261020-025000-7074e473/ordinary-boot-03/ESP",
+      "processId": 25192,
+      "separateCheckout": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT",
+      "disposition": "foreign process; not attached to or stopped",
+      "processName": "qemu-system-x86_64",
+      "owner": "LEON2_RDT\\guideX"
+    }
+  ],
+  "freeSpaceGiB": {
+    "E": 6387.07,
+    "D": 19.2
+  },
+  "preservedCandidateDirectories": [
+    {
+      "originalS22IsoSha256": "b303c4c1a1cd31e500353cbd2dd7e11a8fd438b81ac9306285a6cd20ea1b1a3f",
+      "path": "out/s22-v03-candidate-20261018",
+      "sizeMiB": 174.07
+    },
+    {
+      "sizeMiB": 66.55,
+      "path": "out/v03-amd64-qemu-candidate"
+    },
+    {
+      "sizeMiB": 330.72,
+      "path": "out/v03-amd64-scifi-final-candidate"
+    }
+  ],
+  "fullProductionBuildAttempted": false,
+  "reason": "DeveloperStudio runtime compatibility gate failed before package build"
+}

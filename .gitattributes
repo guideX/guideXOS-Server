@@ -5,3 +5,6 @@ docs/evidence/settings-s18-icon-20261017/desktop.cfg.field-diff.txt text eol=lf
 # Keep guest transcripts byte-for-byte; serial dumps include significant padding.
 docs/evidence/settings-s18-icon-20261017/*.serial.log -text -diff
 docs/evidence/settings-s18-icon-20261017/*.qmp.log -text -diff
+
+# S22R3 media and receipt hashes cover the exact captured bytes.
+docs/evidence/settings-s22r3-v03-package-20261019/* -text -diff

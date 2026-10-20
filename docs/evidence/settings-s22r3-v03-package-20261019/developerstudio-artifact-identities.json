@@ -1,0 +1,56 @@
+{
+  "historicalServerV021Iso": {
+    "path": "dist/guideXOS-Server-v0.2.1-amd64.iso",
+    "bytes": 90245120,
+    "sha256": "985b524a4c281ed3d00060df97adda38c99965c8d03a5d11f69db793e8174c86",
+    "sourceGitCommit": "0e6039c0e3f1fd218424ba7367c9e83bd8d73223",
+    "releaseTag": null
+  },
+  "historicalV021MediaPair": {
+    "manifest": {
+      "bytes": 1175,
+      "sha256": "4dedc783efd160a6b13d5af9a9f87abb6608004bb10ca8f42abe6b306ee33701",
+      "minGuideXOSVersion": "0.5.0"
+    },
+    "elf": {
+      "sha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7",
+      "bytes": 1015064
+    }
+  },
+  "historicalServerSourceTree": {
+    "commit": "0e6039c0e3f1fd218424ba7367c9e83bd8d73223",
+    "manifestBytesAfterGitShow": 1131,
+    "manifestSha256AfterGitShow": "8787419239c14080a182b347035ea4a44199e4ab6705a67717a310f6e040575e",
+    "manifestBlob": "8b2b8267a1e9d1fb6720b579eeabb23f2f441109",
+    "elfBlob": "150b4958e569ce4d4e5f9e2c3146de94d94c879d",
+    "mediaPairMatchesSourceTreeAfterCrlfNormalization": true
+  },
+  "phase25Pair": {
+    "manifestBytes": 1112,
+    "manifestSha256": "d59c12267d360c4e31b70dec7f9c1b0689fb5816011d681b38ee9cdef0d2f53b",
+    "elfBytes": 1015064,
+    "elfSha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7",
+    "declaredMinGuideXOSVersion": "0.5.0",
+    "signoffCommit": "bb66e11c38dffae21514384f73b1920b53ac64fe",
+    "sourceBaseline": "715a29df535103d1d281c7181219b5f986b41f7c",
+    "pairedServerCommit": "fb71e36c77866cdabf20873e6ad3de0ddc3bbe02"
+  },
+  "currentNewerSource": {
+    "manifestBytes": 2011,
+    "manifestSha256": "ab1db7c63a3dc49c06098b7a9341c33dbcf6fecbd8163460f62bcf907e7488e9",
+    "elfBytes": 1104652,
+    "elfSha256": "f07270eacbd62f9ab67f1f38856a326981280e43d0a4d44f8ed1d17c777f01a6"
+  },
+  "existingEspPair": {
+    "manifestBytes": 1176,
+    "manifestSha256": "7af95d35f068c44f4529420922e0f4bec5f705568514688d160e2790022acb09",
+    "elfBytes": 1015064,
+    "elfSha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7",
+    "classification": "stale mismatched ESP pair; not used"
+  },
+  "preservedS22": {
+    "path": "out/s22-v03-candidate-20261018/guideXOS-Server-v0.3.0-s22.20261018-amd64.iso",
+    "bytes": 91293696,
+    "sha256": "b303c4c1a1cd31e500353cbd2dd7e11a8fd438b81ac9306285a6cd20ea1b1a3f"
+  }
+}

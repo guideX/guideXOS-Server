@@ -1,0 +1,18 @@
+====================================
+  guideXOS Complete Build System
+====================================
+  Build identity: GXOS-LARGE-FILE-PASTE-TRACE-V1
+  Build probe ID: GXOS-LFPASTE-20260726-02
+
+ERROR: DeveloperStudio source package does not match the exact Phase 25 signed-off manifest+ELF pair. Current
+manifest=2011/AB1DB7C63A3DC49C06098B7A9341C33DBCF6FECBD8163460F62BCF907E7488E9,
+ELF=1104652/F07270EACBD62F9AB67F1F38856A326981280E43D0A4D44F8ED1D17C777F01A6. Owner acceptance is required before a
+different package can be included.
+At D:\dev\guideXOSServer\build.ps1:216 char:9
++         throw ("ERROR: DeveloperStudio source package does not match  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (ERROR: Develope...an be included.:String) [], RuntimeException
+    + FullyQualifiedErrorId : ERROR: DeveloperStudio source package does not match the exact Phase 25 signed-off manif
+   est+ELF pair. Current manifest=2011/AB1DB7C63A3DC49C06098B7A9341C33DBCF6FECBD8163460F62BCF907E7488E9, ELF=1104652/
+  F07270EACBD62F9AB67F1F38856A326981280E43D0A4D44F8ED1D17C777F01A6. Owner acceptance is required before a different
+ package can be included.

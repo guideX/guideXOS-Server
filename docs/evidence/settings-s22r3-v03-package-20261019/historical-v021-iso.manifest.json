@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "product": "guideXOS Server",
+  "version": "0.2.1",
+  "architecture": "amd64",
+  "artifactType": "bootable-uefi-iso",
+  "isoBackend": "PyCdlib",
+  "isoFilename": "guideXOS-Server-v0.2.1-amd64.iso",
+  "isoByteSize": 90245120,
+  "sha256": "985b524a4c281ed3d00060df97adda38c99965c8d03a5d11f69db793e8174c86",
+  "sourceGitCommit": "0e6039c0e3f1fd218424ba7367c9e83bd8d73223",
+  "sourceGitBranch": "main",
+  "worktreeCleanAtPackagingStart": true,
+  "worktreeStatusAtPackagingStart": [],
+  "buildTimestampUtc": "2026-08-27T03:53:48.7177882Z",
+  "requiredInputFiles": [
+    {
+      "path": "ESP/EFI/BOOT/BOOTX64.EFI",
+      "size": 55296,
+      "sha256": "4f7da7918f7a235832240b9aa7d895c52c82c70451b9624e9819a7c582781ae1"
+    },
+    {
+      "path": "ESP/kernel.elf",
+      "size": 2560280,
+      "sha256": "beee561ab105ae274ed02f683618a06a76b598584672022d80aec6a0198c6823"
+    },
+    {
+      "path": "ESP/ramdisk.img",
+      "size": 67108864,
+      "sha256": "5c9b3c5302e72f845448688a4c57da91fd95f111946f5fca4c30e452449555fd"
+    }
+  ],
+  "inputFiles": [
+    {
+      "path": "ESP/Apps/DeveloperStudio/app.json",
+      "size": 1175,
+      "sha256": "4dedc783efd160a6b13d5af9a9f87abb6608004bb10ca8f42abe6b306ee33701"
+    },
+    {
+      "path": "ESP/Apps/DeveloperStudio/bin/amd64/developerstudio.elf",
+      "size": 1015064,
+      "sha256": "5343f5df0edfe423542348c0af8c9f8690ce339d197deb4737dd05a27348cac7"
+    },
+    {
+      "path": "ESP/Apps/PacMan/app.json",
+      "size": 899,
+      "sha256": "ec0f94cd921b338b102e8f13c330db35ee42f6e42d964fd3211affbc8ae1eaff"
+    },
+    {
+      "path": "ESP/Apps/PacMan/bin/amd64/pacman.elf",
+      "size": 53432,
+      "sha256": "22b5f133def27281e992ee9657d7318825872f160c2a77e85f9fd7a609a5b4a7"
+    },
+    {
+      "path": "ESP/Apps/PacMan/resources/level1.gximg",
+      "size": 888860,
+      "sha256": "535b37e66d7159078df8a16ce059a6f7ab038588cc9875e152033d046ff47fe1"
+    },
+    {
+      "path": "ESP/Apps/PacMan/resources/pacpics.gximg",
+      "size": 360476,
+      "sha256": "57a605df8f24ac9641ff6c9d39df551a17ffbcd68466a561adf5f045de259d50"
+    },
+    {
+      "path": "ESP/build-identity.txt",
+      "size": 1160,
+      "sha256": "7724708d71a29fe347e6459c1550693a4e90e0bc06a5b385c637d0c116129f9c"
+    },
+    {
+      "path": "ESP/desktop.cfg",
+      "size": 246,
+      "sha256": "4aaf37b7847d0002997ae18824694e5b2538225fefc8d41635d5ae343dc7a07c"
+    },
+    {
+      "path": "ESP/EFI/BOOT/BOOTX64.EFI",
+      "size": 55296,
+      "sha256": "4f7da7918f7a235832240b9aa7d895c52c82c70451b9624e9819a7c582781ae1"
+    },
+    {
+      "path": "ESP/kernel.elf",
+      "size": 2560280,
+      "sha256": "beee561ab105ae274ed02f683618a06a76b598584672022d80aec6a0198c6823"
+    },
+    {
+      "path": "ESP/NvVars",
+      "size": 11435,
+      "sha256": "f15ebc133f4673796b2fe62366dfcbb104544e56c33bd9da4dc0426e3e69483a"
+    },
+    {
+      "path": "ESP/ramdisk.img",
+      "size": 67108864,
+      "sha256": "5c9b3c5302e72f845448688a4c57da91fd95f111946f5fca4c30e452449555fd"
+    },
+    {
+      "path": "ESP/startup.nsh",
+      "size": 27,
+      "sha256": "770ee22afb0dda892f78cc06a3d2879a146adcd7160ba833ea7cab0a2f2bf47d"
+    }
+  ],
+  "efiImage": {
+    "filename": "EFI-BOOT.IMG",
+    "isoPath": "UEFI_BOOT.IMG",
+    "byteSize": 90177536,
+    "sha256": "2867edb7dde1468c0f8ae2a73d4c09d386184a97a94295fb3e1f2874266b335e",
+    "calculatedCapacityBytes": 90177536,
+    "calculatedPayloadBytes": 72057214,
+    "safetyReserveBytes": 18018400,
+    "fatType": "FAT32"
+  },
+  "isoVerification": {
+    "format": "guideXOS-iso-verification",
+    "isoBytes": 90245120,
+    "primaryVolumeDescriptorLba": 16,
+    "bootRecordLba": 17,
+    "bootCatalogLba": 31,
+    "uefiPlatformId": "0xEF",
+    "bootable": true,
+    "mediaType": "no-emulation",
+    "bootImageLba": 32,
+    "bootImageDataEndLba": 44064,
+    "bootImageSectorCount512": 0,
+    "bootImagePath": "UEFI_BOOT.IMG",
+    "bootImageBytes": 90177536,
+    "bootImageSha256": "2867edb7dde1468c0f8ae2a73d4c09d386184a97a94295fb3e1f2874266b335e",
+    "files": [
+      {
+        "path": "README.TXT",
+        "size": 259,
+        "sha256": "4f835c0e9173d63d23d370782aaf55212365de78347295214aa9dd9469dfc7da",
+        "lba": 44064
+      }
+    ]
+  },
+  "tools": {
+    "git": "git version 2.54.0.windows.1",
+    "powershell": "7.6.4",
+    "python": "Python 3.12.13",
+    "pyfatfs": "1.1.0",
+    "fs": "2.4.16",
+    "pycdlib": "1.16.0",
+    "isoBackend": "PyCdlib",
+    "canonicalBuild": "build.ps1 -Arch amd64"
+  },
+  "notes": [
+    "AMD64 UEFI only; no legacy BIOS El Torito entry is generated.",
+    "The ISO and EFI image are read-only release media.",
+    "Persistent user data must live on separate writable storage; this script never writes physical USB media."
+  ]
+}
