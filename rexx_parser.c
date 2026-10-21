@@ -2634,6 +2634,8 @@ RexxParserStatus rexx_parser_parse(RexxParser *parser,
     }
     /* Ownership transfers to the returned AST, which is freed structurally. */
     parser->allocation_list = NULL;
+    ast->source_text = parser->lexer->source;
+    ast->source_length = parser->lexer->length;
     *program = ast;
     return REXX_PARSER_STATUS_OK;
 }

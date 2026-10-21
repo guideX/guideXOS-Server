@@ -1,0 +1,8 @@
+RX22 isolated QEMU Console transcript
+Kernel SHA-256: 252ec7776697d3d5265b2f5b54bb7e4abd37cce06336f888010f832b50445807
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx22\qemu-ef133694179041bcaf459d5fc030566f\guest\esp
+COMMAND: rexx /rx22-classic-diagnostic.rex | expected visible marker/status: RX22_NATIVE_CLASSIC_DIAGNOSTIC_DONE
+COMMAND: rexx /rx22-error-recovery.rex | expected visible marker/status: RX22_NATIVE_POST_ERROR_RESPONSIVE: CBA
+COMMAND: rexx /rx22-date-time-clock-guard.rex | expected visible marker/status: RX22_DATE_TIME_FAIL_CLOSED_PIT_ALIVE
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=56
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

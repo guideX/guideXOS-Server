@@ -1,0 +1,6 @@
+[2026-10-21T04:06:57.2836508Z] rexx /rx22-classic-diagnostic.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx22\qemu-ef133694179041bcaf459d5fc030566f\screenshots-raw\rx22-01-classic-and-diagnostic-builtins.ppm
+[2026-10-21T04:07:16.3973935Z] rexx /rx22-error-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx22\qemu-ef133694179041bcaf459d5fc030566f\screenshots-raw\rx22-02-invalid-argument-recovery.ppm
+[2026-10-21T04:07:36.3356082Z] rexx /rx22-date-time-clock-guard.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx22\qemu-ef133694179041bcaf459d5fc030566f\screenshots-raw\rx22-03-date-time-fail-closed-guard.ppm

@@ -1,0 +1,14 @@
+{
+  "exit_code": 0,
+  "pid": 10024,
+  "started_at_utc": "2026-10-21T04:02:49.8382701Z",
+  "finished_at_utc": "2026-10-21T04:06:01.2279506Z",
+  "arguments": [
+    "-C",
+    "D:\\dev\\guideXOSServer_REXX\\kernel",
+    "-B",
+    "ARCH=amd64",
+    "BUILD_ROOT=../build/rexx/rx22/native-amd64-1d10ad3df54a497d9502cf19749936bd",
+    "all"
+  ]
+}

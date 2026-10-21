@@ -282,6 +282,8 @@ struct RexxAstClause {
 
 typedef struct RexxAstProgram {
     RexxAstClause *clauses;
+    const char *source_text; /* Borrowed from the lexer through compilation. */
+    size_t source_length;
 } RexxAstProgram;
 
 /*

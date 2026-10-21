@@ -1,0 +1,5 @@
+RX22 artifact preservation: PASS
+Stage: undefined-hosted-tests
+Verified UTC: 2026-10-21T04:03:47.7322616Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

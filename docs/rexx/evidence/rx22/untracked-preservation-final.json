@@ -1,0 +1,13 @@
+{
+  "schema": "guidexos.rexx.rx22.untracked-preservation.v1",
+  "captured_at_utc": "2026-10-21T04:08:26.6212217Z",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "baseline_source": "untracked-paths-start.txt",
+  "baseline_path_count": 39429,
+  "current_untracked_path_count": 48399,
+  "baseline_paths_present": 39429,
+  "missing_baseline_paths": [],
+  "new_untracked_path_count": 8970,
+  "all_baseline_paths_preserved": true,
+  "comparison": "Every baseline path remains in git ls-files --others --exclude-standard at final pre-commit capture; RX22 outputs and evidence add paths."
+}

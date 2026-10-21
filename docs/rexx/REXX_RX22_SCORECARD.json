@@ -1,0 +1,159 @@
+{
+  "schema": "guidexos.rexx.rx22.scorecard.v1",
+  "phase": "RX22",
+  "outcome": "A — Accepted",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "de2d42f88cf44d08ba0b95f94777dd5a64ea4b7c",
+  "pre_commit_head": "de2d42f88cf44d08ba0b95f94777dd5a64ea4b7c",
+  "local_commit_includes_scorecard": true,
+  "preflight": {
+    "tracked_worktree_clean": true,
+    "index_clean": true,
+    "stale_rx22_prompt_artifacts": "NONE_FOUND",
+    "rx21_inventory_rows": 75,
+    "verified_candidates": {
+      "REVERSE": "Not implemented in inspected runtime dispatch",
+      "SOURCELINE": "Not implemented in inspected runtime dispatch",
+      "ERRORTEXT": "Not implemented in inspected runtime dispatch"
+    },
+    "rx21_reported_untracked_path_count": 37042,
+    "actual_preflight_untracked_path_count": 39429,
+    "untracked_count_difference": "The actual baseline was 2,387 paths higher than RX21's report; the complete RX22 baseline list is retained in evidence/rx22/untracked-paths-start.txt.",
+    "protected_root_artifact_count": 31,
+    "source_ownership_finding": "Lexer and AST source pointers were borrowed; compilation now copies the original source once into each bounded bytecode chunk.",
+    "regina": "NOT_RUN — no Regina executable was available."
+  },
+  "implementation": {
+    "REVERSE": {
+      "status": "Implemented",
+      "semantics": "Bytewise reversal; preserves NULs, high-bit bytes, and spaces; leaves the source unchanged; bounded by the 16 MiB runtime string limit.",
+      "coverage": "Empty, single-byte, odd/even, binary, maximum-size, over-limit, double reversal, fixed-seed oracle, multiset preservation, and allocation failure/recovery."
+    },
+    "SOURCELINE": {
+      "status": "Implemented",
+      "semantics": "No argument returns the final source line count or zero if unavailable. A valid positive whole-number line request returns exact source text; invalid/out-of-range requests fail. LF/CRLF, lone CR content, and trailing-line behavior are covered.",
+      "ownership": "The lexer lends source to the AST only through compilation. Each chunk owns one source snapshot, capped at 16 MiB. VM active-chunk state selects root, internal-routine, and INTERPRET source contexts; per-VM state is isolated. Dynamic bytecode accounting includes the snapshot.",
+      "coverage": "Released caller buffer, blank/comment/high-bit lines, empty program, trailing newline, CRLF, final lone CR content, internal routine, INTERPRET, missing source, VM isolation, and compiler/result allocation failure recovery."
+    },
+    "ERRORTEXT": {
+      "status": "Implemented",
+      "semantics": "Accepts whole-number codes 0–99. IBM z/OS 2.5 TSO/E REXX text is returned for codes 3–49; unassigned in-range codes return the empty string. Negative, fractional, nonnumeric, and above-99 values fail.",
+      "mapping": "Codes 0–2 and 50–99 return empty. Codes 3–49 match the mapping in rexx_builtin.c and REXX_RX22_CLASSIC_DIAGNOSTIC_BUILTINS.md. VM status IDs are not renumbered or exposed."
+    },
+    "DATE": "Partial; unchanged. RX22 guest confirmed current-date form remains fail-closed.",
+    "TIME": "Partial; unchanged. RX22 guest confirmed current-time form remains fail-closed and elapsed TIME advances from PIT monotonic ticks."
+  },
+  "qualification": {
+    "direct_rx22": {
+      "status": "PASS",
+      "assertions": 2282,
+      "failures": 0,
+      "reverse_property_cases": 500,
+      "property_seed": "0x52583232",
+      "reverse_property_max_length": 4096,
+      "runtime_string_boundary_bytes": 16777216,
+      "errortext_codes_checked": "0–99"
+    },
+    "hosted_regressions": {
+      "status": "PASS",
+      "rx22_cli_fixture": "1/1",
+      "hosted_cli_cases": "24/24",
+      "inherited_fixtures": {
+        "RX3": "13/13",
+        "RX4": "11/11",
+        "RX5": "13/13",
+        "RX6": "25/25",
+        "RX7": "33/33",
+        "RX8": "26/26",
+        "RX9": "24/24",
+        "RX10": "19/19",
+        "RX12": "31/31",
+        "RX13": "33/33",
+        "RX14": "29/29",
+        "RX15": "3/3",
+        "RX16": "10/10",
+        "RX17": "10/10"
+      },
+      "evidence": "evidence/rx22/hosted-regressions-final2.log"
+    },
+    "portable_corpus": {
+      "status": "PASS — local expected results",
+      "cases": 196,
+      "address_sanitizer": "196/196 expected exits",
+      "undefined_behavior_sanitizer": "196/196 expected exits",
+      "regina_differential": "NOT_RUN — Regina unavailable; no external percentage claimed."
+    },
+    "address_sanitizer": {
+      "status": "PASS",
+      "targets": "23/23",
+      "findings": 0,
+      "evidence": "evidence/rx22/sanitizer-address-0d76df3b25174fef8427044a87feb9b9"
+    },
+    "undefined_behavior_sanitizer": {
+      "status": "PASS",
+      "targets": "23/23",
+      "findings": 0,
+      "evidence": "evidence/rx22/sanitizer-undefined-6fd14815d9ba4b429ded3a8f0a2489e1"
+    },
+    "freestanding_amd64": {
+      "status": "PASS",
+      "rexx_c_objects": 9,
+      "kernel_elf_sha256": "252ec7776697d3d5265b2f5b54bb7e4abd37cce06336f888010f832b50445807",
+      "evidence": "evidence/rx22/native-build/native-link-evidence-1d10ad3df54a497d9502cf19749936bd.json"
+    },
+    "isolated_qemu_guest": {
+      "status": "PASS",
+      "qac_mode": "exclusive acceptance",
+      "network_disabled": true,
+      "disposable_media": true,
+      "guest_scripts": [
+        "rx22-classic-diagnostic.rex",
+        "rx22-error-recovery.rex",
+        "rx22-date-time-clock-guard.rex"
+      ],
+      "assertions": "REVERSE text and binary results; SOURCELINE count/text; ERRORTEXT(16/60); invalid SOURCELINE and ERRORTEXT recovery; interpreter responsiveness; DATE/TIME fail-closed; TIME(E) PIT elapsed progress; advancing kernel heartbeat.",
+      "qmp_shutdown_acknowledged": true,
+      "qac_reported_child_exit_code": 0,
+      "qac_reservation_released": true,
+      "foreign_qemu_process_controlled": false,
+      "evidence": "evidence/rx22/native-guest/run-ef133694179041bcaf459d5fc030566f"
+    }
+  },
+  "protected_integrity": {
+    "baseline": "evidence/rx22/protected-artifacts-start.json",
+    "final": "evidence/rx22/protected-artifacts-final.json",
+    "root_obj_pdb_hashes_and_sizes": "31/31 match",
+    "rx21_reported_untracked_paths": 37042,
+    "rx22_actual_preflight_untracked_paths": 39429,
+    "preexisting_paths_present_at_final": "39429/39429",
+    "missing_preexisting_paths": 0,
+    "comparison": "evidence/rx22/untracked-preservation-final.json",
+    "root_phase_file": "Absent"
+  },
+  "inventory": {
+    "rows": 75,
+    "fully_implemented": 53,
+    "not_implemented_total_including_preserved_special_classifications": 20,
+    "plain_not_implemented": 18,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "partial": 2,
+    "date_status": "Partial",
+    "time_status": "Partial",
+    "changed_entries": [
+      "REVERSE",
+      "SOURCELINE",
+      "ERRORTEXT"
+    ],
+    "implementation_count_inflated": false,
+    "file": "REXX_RX22_BUILTIN_INVENTORY.csv"
+  },
+  "limitations": [
+    "Regina was unavailable; independent IBM-anchored and local expected-result tests were used, with no external compatibility percentage claimed.",
+    "REVERSE follows guideXOS byte-string semantics and does not reverse Unicode code points or grapheme clusters.",
+    "SOURCELINE retains one bounded source snapshot per compiled chunk; each snapshot can use up to the existing 16 MiB source limit.",
+    "ERRORTEXT uses IBM z/OS 2.5 TSO/E REXX syntax message text; internal guideXOS VM status values remain separate.",
+    "DATE and TIME current wall-clock forms remain unavailable pending supported persistent RTC policy and independently qualified provenance."
+  ],
+  "recommendation": "RX23 should target the next self-contained portable numeric built-in in the verified inventory, RANDOM(min[, max[, seed]]), with deterministic seed, range, rounding, and allocation/error tests. Keep DATE/TIME live-clock work deferred until the settings and clock-provenance gate is satisfied."
+}

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,9 @@ if ($null -eq $gxxCommand) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX21') {
+$guardManifest = if ($Phase -eq 'RX22') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx22\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX21') {
     Join-Path $rootDir 'docs\rexx\evidence\rx21\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX19') {
     Join-Path $rootDir 'docs\rexx\evidence\rx19\protected-artifacts-start.json'
@@ -53,7 +55,7 @@ $plannedOutputs = @(
     'rexx_rx15_conversion_tests.exe', 'rexx_rx16_literal_tests.exe',
     'rexx_rx17_bitwise_tests.exe', 'rexx_rx18_string_builtins_tests.exe',
     'rexx_rx19_date_time_tests.exe',
-    'rexx_rx2_shell_bridge_tests.exe'
+    'rexx_rx2_shell_bridge_tests.exe', 'rexx_rx22_classic_diagnostic_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
@@ -85,6 +87,7 @@ $rx16Test = Join-Path $buildDirectory "rexx_rx16_literal_tests.exe"
 $rx17Test = Join-Path $buildDirectory "rexx_rx17_bitwise_tests.exe"
 $rx18Test = Join-Path $buildDirectory "rexx_rx18_string_builtins_tests.exe"
 $rx19Test = Join-Path $buildDirectory "rexx_rx19_date_time_tests.exe"
+$rx22Test = Join-Path $buildDirectory "rexx_rx22_classic_diagnostic_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -295,6 +298,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX19 DATE/TIME test build failed with exit code $LASTEXITCODE."
 }
 
+Write-Host "Building RX22 REVERSE, SOURCELINE, and ERRORTEXT assertions"
+& $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+    -DREXX_COMPILER_TEST_ALLOCATOR -Wall -Wextra -Wpedantic -Werror `
+    (Join-Path $PSScriptRoot "rexx_rx22_classic_diagnostic_test.c") `
+    @commonSources -lm -o $rx22Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX22 classic/diagnostic built-in test build failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Building RX2 C++ shell bridge integration tests"
 & $gxxCommand.Source -std=c++14 -Wall -Wextra -Wpedantic -Werror `
     (Join-Path $PSScriptRoot "rexx_rx2_shell_bridge_test.cpp") `
@@ -431,6 +443,12 @@ Write-Host "Running RX19 DATE/TIME, clock-provider, and calendar property assert
 & $rx19Test
 if ($LASTEXITCODE -ne 0) {
     throw "RX19 DATE/TIME assertions failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running RX22 classic/diagnostic built-in assertions"
+& $rx22Test
+if ($LASTEXITCODE -ne 0) {
+    throw "RX22 classic/diagnostic built-in assertions failed with exit code $LASTEXITCODE."
 }
 
 Write-Host "Running RX2 shell bridge assertions"
@@ -1140,6 +1158,23 @@ foreach ($fixture in Get-ChildItem -LiteralPath $rx17FixtureDirectory -Filter "*
     Write-Host "[PASS] RX17 fixture $($fixture.Name)"
 }
 
+$rx22FixtureDirectory = Join-Path $PSScriptRoot "rexx_compat\cases\classic_diagnostic"
+$script:rx22FixturePassed = 0
+foreach ($fixture in Get-ChildItem -LiteralPath $rx22FixtureDirectory -Filter "*.rex" | Sort-Object Name) {
+    $outputPath = [System.IO.Path]::ChangeExtension($fixture.FullName, ".out")
+    if (-not (Test-Path -LiteralPath $outputPath)) {
+        throw "RX22 fixture $($fixture.Name) has no .out expectation."
+    }
+    $actual = Invoke-CapturedProcess $cliTest @($fixture.FullName)
+    $stdoutText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    $expectedOutput = ((Get-Content -Raw -LiteralPath $outputPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if ($actual.ExitCode -ne 0 -or $stdoutText -cne $expectedOutput -or $actual.Stderr.Length -ne 0) {
+        throw "RX22 fixture $($fixture.Name) output mismatch. Expected '$expectedOutput'; got '$stdoutText'/$($actual.ExitCode)."
+    }
+    ++$script:rx22FixturePassed
+    Write-Host "[PASS] RX22 fixture $($fixture.Name)"
+}
+
 $parserLimitPath = Join-Path $buildDirectory "parse_template_node_limit.rex"
 $parserLimitSource = "parse value '' with " + ((@('.') * 65540) -join ' ')
 [System.IO.File]::WriteAllText(
@@ -1216,6 +1251,7 @@ Write-Host "RX14 numeric and inspection fixtures passed: $script:rx14FixturePass
 Write-Host "RX15 conversion fixtures passed: $script:rx15FixturePassed/$script:rx15FixturePassed"
 Write-Host "RX16 hexadecimal/binary literal fixtures passed: $script:rx16FixturePassed/$script:rx16FixturePassed"
 Write-Host "RX17 bitwise string fixtures passed: $script:rx17FixturePassed/$script:rx17FixturePassed"
+Write-Host "RX22 classic/diagnostic fixtures passed: $script:rx22FixturePassed/$script:rx22FixturePassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"
 Write-Host "RX5 compatibility fixtures passed: $script:rx5Passed/$script:rx5Passed"

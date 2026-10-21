@@ -178,6 +178,151 @@ static RexxVMStatus rexx_builtin_allocate_result(RexxValue *result,
     return rexx_value_allocate_string(result, length, bytes);
 }
 
+static RexxVMStatus rexx_builtin_reverse(const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    RexxBuiltinStringView source;
+    char *output;
+    size_t index;
+    RexxVMStatus status;
+
+    if (argument_count != 1u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    status = rexx_builtin_string_view(&arguments[0], &source);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_allocate_result(result, source.length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+    for (index = 0u; index < source.length; ++index)
+        output[source.length - index - 1u] = source.bytes[index];
+    return REXX_VM_STATUS_OK;
+}
+
+/* IBM z/OS 2.5 TSO/E REXX error text. These are syntax error numbers, not
+ * guideXOS VM status values; host diagnostics remain in rexx_vm.c. */
+static const char *const rexx_builtin_ibm_error_text[47] = {
+    "Program is unreadable",                         /* 3 */
+    "Program interrupted",                          /* 4 */
+    "Machine storage exhausted",                    /* 5 */
+    "Unmatched \"/*\" or quote",                    /* 6 */
+    "WHEN or OTHERWISE expected",                   /* 7 */
+    "Unexpected THEN or ELSE",                      /* 8 */
+    "Unexpected WHEN or OTHERWISE",                 /* 9 */
+    "Unexpected or unmatched END",                  /* 10 */
+    "Control stack full",                           /* 11 */
+    "Clause too long",                              /* 12 */
+    "Invalid character in program",                 /* 13 */
+    "Incomplete DO/SELECT/IF",                      /* 14 */
+    "Invalid hexadecimal or binary string",         /* 15 */
+    "Label not found",                              /* 16 */
+    "Unexpected PROCEDURE",                         /* 17 */
+    "THEN expected",                                /* 18 */
+    "String or symbol expected",                    /* 19 */
+    "Symbol expected",                              /* 20 */
+    "Invalid data at end of clause",                /* 21 */
+    "Invalid character string",                     /* 22 */
+    "Invalid SBCS/DBCS mixed string",               /* 23 */
+    "Invalid TRACE request",                        /* 24 */
+    "Invalid subkeyword found",                     /* 25 */
+    "Invalid whole number",                         /* 26 */
+    "Invalid DO syntax",                            /* 27 */
+    "Invalid LEAVE or ITERATE",                     /* 28 */
+    "Environment name too long",                    /* 29 */
+    "Name or string > 250 characters",              /* 30 */
+    "Name starts with number or \".\"",           /* 31 */
+    "Invalid use of stem",                          /* 32 */
+    "Invalid expression result",                    /* 33 */
+    "Logical value not 0 or 1",                     /* 34 */
+    "Invalid expression",                           /* 35 */
+    "Unmatched \"(\" in expression",                 /* 36 */
+    "Unexpected \",\" or \")\"",                      /* 37 */
+    "Invalid template or pattern",                  /* 38 */
+    "Evaluation stack overflow",                    /* 39 */
+    "Incorrect call to routine",                    /* 40 */
+    "Bad arithmetic conversion",                    /* 41 */
+    "Arithmetic overflow/underflow",                /* 42 */
+    "Routine not found",                            /* 43 */
+    "Function did not return data",                 /* 44 */
+    "No data specified on function RETURN",         /* 45 */
+    "Invalid variable reference",                   /* 46 */
+    "Unexpected label",                             /* 47 */
+    "Failure in system service",                    /* 48 */
+    "Language processor failure"                    /* 49 */
+};
+
+static RexxVMStatus rexx_builtin_errortext(const RexxValue *arguments,
+                                           size_t argument_count,
+                                           RexxValue *result)
+{
+    size_t error_number;
+    RexxVMStatus status;
+
+    if (argument_count != 1u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    status = rexx_builtin_size(&arguments[0], &error_number);
+    if (status == REXX_VM_STATUS_NUMERIC_ERROR ||
+        status == REXX_VM_STATUS_RESOURCE_LIMIT)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (error_number > 99u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (error_number < 3u || error_number > 49u)
+        return rexx_builtin_set_empty(result);
+    {
+        const char *message =
+            rexx_builtin_ibm_error_text[error_number - 3u];
+        return rexx_value_set_string(result, message, strlen(message));
+    }
+}
+
+static RexxVMStatus rexx_builtin_source_line(const RexxBytecodeChunk *chunk,
+                                            size_t requested,
+                                            RexxValue *result)
+{
+    size_t line;
+    size_t start = 0u;
+    size_t end;
+
+    if (chunk == NULL || chunk->source_text == NULL)
+        return rexx_builtin_set_empty(result);
+    if (requested == 0u || requested > chunk->source_line_count)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    for (line = 1u; line < requested; ++line) {
+        while (start < chunk->source_length &&
+               chunk->source_text[start] != '\n')
+            ++start;
+        if (start < chunk->source_length) ++start;
+    }
+    end = start;
+    while (end < chunk->source_length && chunk->source_text[end] != '\n')
+        ++end;
+    if (end < chunk->source_length && chunk->source_text[end] == '\n' &&
+        end > start && chunk->source_text[end - 1u] == '\r')
+        --end;
+    return rexx_value_set_string(result, chunk->source_text + start,
+                                 end - start);
+}
+
+static RexxVMStatus rexx_builtin_sourceline(RexxVM *vm,
+                                            const RexxValue *arguments,
+                                            size_t argument_count,
+                                            RexxValue *result)
+{
+    const RexxBytecodeChunk *chunk = vm != NULL
+        ? (const RexxBytecodeChunk *)vm->active_chunk : NULL;
+    size_t requested;
+    RexxVMStatus status;
+
+    if (argument_count == 0u)
+        return rexx_builtin_set_size(
+            result, chunk != NULL && chunk->source_text != NULL
+                        ? chunk->source_line_count : 0u);
+    status = rexx_builtin_size(&arguments[0], &requested);
+    if (status == REXX_VM_STATUS_NUMERIC_ERROR ||
+        status == REXX_VM_STATUS_RESOURCE_LIMIT)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (requested == 0u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    return rexx_builtin_source_line(chunk, requested, result);
+}
+
 typedef struct RexxBuiltinWord {
     size_t start;
     size_t length;
@@ -3552,6 +3697,9 @@ static RexxVMStatus rexx_builtin_time(RexxVM *vm,
 
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "LENGTH", 1u, 1u, rexx_builtin_length, NULL },
+    { "REVERSE", 1u, 1u, rexx_builtin_reverse, NULL },
+    { "SOURCELINE", 0u, 1u, NULL, rexx_builtin_sourceline },
+    { "ERRORTEXT", 1u, 1u, rexx_builtin_errortext, NULL },
     { "ABBREV", 2u, 3u, rexx_builtin_abbrev, NULL },
     { "CENTER", 2u, 3u, rexx_builtin_center, NULL },
     { "CENTRE", 2u, 3u, rexx_builtin_center, NULL },

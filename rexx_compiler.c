@@ -1554,7 +1554,20 @@ void rexx_bytecode_chunk_free(RexxBytecodeChunk *chunk)
     rexx_compiler_free(chunk->parse_templates);
     rexx_compiler_free(chunk->parse_plans);
     rexx_compiler_free(chunk->instructions);
+    rexx_compiler_free(chunk->source_text);
     rexx_compiler_free(chunk);
+}
+
+static size_t rexx_compiler_source_line_count(const char *source,
+                                              size_t length)
+{
+    size_t index;
+    size_t lines = 0u;
+    if (source == NULL || length == 0u) return 0u;
+    for (index = 0u; index < length; ++index)
+        if (source[index] == '\n') ++lines;
+    if (source[length - 1u] != '\n') ++lines;
+    return lines;
 }
 
 RexxCompilerStatus rexx_compiler_compile(const RexxAstProgram *program,
@@ -1594,6 +1607,36 @@ RexxCompilerStatus rexx_compiler_compile(const RexxAstProgram *program,
     compiler.chunk = result;
     compiler.error = error;
     compiler.status = REXX_COMPILER_STATUS_OK;
+
+    if (program->source_text != NULL || program->source_length != 0u) {
+        if ((program->source_text == NULL && program->source_length != 0u) ||
+            program->source_length > REXX_COMPILER_MAX_SOURCE_LENGTH ||
+            program->source_length == SIZE_MAX) {
+            if (error != NULL) {
+                error->status = REXX_COMPILER_STATUS_RESOURCE_LIMIT;
+                error->message = rexx_compiler_message_resource_limit;
+            }
+            rexx_bytecode_chunk_free(result);
+            return REXX_COMPILER_STATUS_RESOURCE_LIMIT;
+        }
+        result->source_text = (char *)rexx_compiler_malloc(
+            program->source_length + 1u);
+        if (result->source_text == NULL) {
+            if (error != NULL) {
+                error->status = REXX_COMPILER_STATUS_OUT_OF_MEMORY;
+                error->message = rexx_compiler_message_out_of_memory;
+            }
+            rexx_bytecode_chunk_free(result);
+            return REXX_COMPILER_STATUS_OUT_OF_MEMORY;
+        }
+        if (program->source_length != 0u)
+            memcpy(result->source_text, program->source_text,
+                   program->source_length);
+        result->source_text[program->source_length] = '\0';
+        result->source_length = program->source_length;
+        result->source_line_count = rexx_compiler_source_line_count(
+            result->source_text, result->source_length);
+    }
 
     if (!rexx_compiler_compile_clause_list(&compiler, program->clauses) ||
         compiler.status != REXX_COMPILER_STATUS_OK) {

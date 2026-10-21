@@ -1,0 +1,29 @@
+{
+  "schema": "guidexos.rexx.rx22.qemu-smoke.v1",
+  "completed_at_utc": "2026-10-21T04:07:43.2815790Z",
+  "passed": true,
+  "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+  "kernel_sha256": "252ec7776697d3d5265b2f5b54bb7e4abd37cce06336f888010f832b50445807",
+  "staged_kernel_sha256": "252ec7776697d3d5265b2f5b54bb7e4abd37cce06336f888010f832b50445807",
+  "network_disabled": true,
+  "copied_disposable_media": true,
+  "production_media_used": false,
+  "script_accesses_in_serial": [
+    "rx22-classic-diagnostic.rex",
+    "rx22-date-time-clock-guard.rex",
+    "rx22-error-recovery.rex"
+  ],
+  "heartbeat_count_before_suite": 1,
+  "heartbeat_count_after_suite": 56,
+  "qmp_shutdown_acknowledged": true,
+  "qemu_pre_run_census": "qemu-ownership-census-before.json",
+  "qemu_immediate_post_shutdown_census": "qemu-immediate-post-shutdown-census.json",
+  "qemu_final_census": "qemu-final-census.json",
+  "qemu_process_reconciliation": "qemu-process-reconciliation.json",
+  "qac_acceptance_mode": true,
+  "qac_cli_pid": 27644,
+  "qac_acceptance_released": true,
+  "qac_process_exit_code": 0,
+  "qac_reported_child_exit_code": 0,
+  "evidence_directory": "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx22\\native-guest\\run-ef133694179041bcaf459d5fc030566f"
+}

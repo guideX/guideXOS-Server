@@ -1,0 +1,33 @@
+{
+  "schema": "guidexos.rexx.rx22.preflight.v1",
+  "captured_at_utc": "2026-10-21T03:51:06.1500709Z",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "required_branch": "REXX_SUPPORT",
+  "actual_branch": "REXX_SUPPORT",
+  "required_starting_head": "de2d42f88cf44d08ba0b95f94777dd5a64ea4b7c",
+  "actual_starting_head": "de2d42f88cf44d08ba0b95f94777dd5a64ea4b7c",
+  "tracked_worktree_clean": true,
+  "index_clean": true,
+  "stale_rx22_prompt_artifacts": "NONE_FOUND",
+  "rx21_inventory_rows": 75,
+  "rx21_inventory_classifications": {
+    "by_design": 1,
+    "unassessed": 1,
+    "not_implemented": 23,
+    "partial": [
+      "DATE",
+      "TIME"
+    ],
+    "fully_implemented": 50
+  },
+  "candidates": {
+    "REVERSE": "Not implemented in inspected runtime dispatch",
+    "SOURCELINE": "Not implemented in inspected runtime dispatch",
+    "ERRORTEXT": "Not implemented in inspected runtime dispatch"
+  },
+  "root_protected_artifacts": 31,
+  "preexisting_untracked_path_count": 39429,
+  "preexisting_untracked_paths_file": "untracked-paths-start.txt",
+  "regina": "NOT_RUN — executable unavailable during preflight",
+  "qac_cli_path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe"
+}

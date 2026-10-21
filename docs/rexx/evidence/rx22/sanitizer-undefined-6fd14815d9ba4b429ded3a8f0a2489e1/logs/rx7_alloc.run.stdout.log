@@ -1,0 +1,4 @@
+RX7 parser allocation failures: 46/46
+RX7 compiler allocation failures: 29/29
+RX7 VM allocation failures: 111/111
+RX7 allocator assertions passed

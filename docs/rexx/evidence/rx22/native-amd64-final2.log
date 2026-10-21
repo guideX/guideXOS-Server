@@ -1,0 +1,16 @@
+RX22 artifact preservation: PASS
+Stage: native-amd64-build
+Verified UTC: 2026-10-21T04:06:01.3111383Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+RX22 artifact preservation: PASS
+Stage: native-amd64-final
+Verified UTC: 2026-10-21T04:06:01.4520136Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+AMD64 native build passed.
+ELF SHA-256: 252ec7776697d3d5265b2f5b54bb7e4abd37cce06336f888010f832b50445807
+REXX C object files: 9
+Output audit: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx22\native-build\output-audit-1d10ad3df54a497d9502cf19749936bd.json
+Link evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx22\native-build\native-link-evidence-1d10ad3df54a497d9502cf19749936bd.json
+Preservation evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx22\native-build\preservation-1d10ad3df54a497d9502cf19749936bd

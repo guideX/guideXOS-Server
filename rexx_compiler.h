@@ -22,6 +22,10 @@
 extern "C" {
 #endif
 
+/* The compiler retains source for SOURCELINE in each bytecode chunk. Keep
+ * this snapshot bounded by the runtime's existing 16 MiB source ceiling. */
+#define REXX_COMPILER_MAX_SOURCE_LENGTH ((size_t)16777216u)
+
 typedef enum RexxOpcode {
     OP_HALT = 0,
     OP_NOP,
@@ -213,6 +217,9 @@ typedef struct RexxBytecodeChunk {
     size_t parse_template_count;
     RexxParsePlan *parse_plans;
     size_t parse_plan_count;
+    char *source_text; /* Owned exact source snapshot; may be NULL. */
+    size_t source_length;
+    size_t source_line_count;
     /* Retained allocation sizes support bounded dynamic-code accounting. */
     size_t instruction_capacity;
     size_t constant_capacity;

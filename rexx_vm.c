@@ -3651,6 +3651,14 @@ static int bytecode_storage_size(const RexxBytecodeChunk *chunk,
         !checked_size_array(&total, chunk->parse_plan_capacity,
                             sizeof(*chunk->parse_plans)))
         return 0;
+    if (chunk->source_text != NULL) {
+        if (chunk->source_length == SIZE_MAX ||
+            !checked_size_add(&total, chunk->source_length + 1u))
+            return 0;
+    } else if (chunk->source_length != 0u ||
+               chunk->source_line_count != 0u) {
+        return 0;
+    }
     for (index = 0u; index < chunk->constant_count; ++index) {
         if (chunk->constants[index].length == SIZE_MAX ||
             !checked_size_add(&total, chunk->constants[index].length + 1u))
@@ -4707,7 +4715,11 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
         (chunk->parse_item_count != 0 && chunk->parse_items == NULL) ||
         (chunk->parse_template_count != 0 &&
          chunk->parse_templates == NULL) ||
-        (chunk->parse_plan_count != 0 && chunk->parse_plans == NULL))
+        (chunk->parse_plan_count != 0 && chunk->parse_plans == NULL) ||
+        chunk->source_length > REXX_COMPILER_MAX_SOURCE_LENGTH ||
+        chunk->source_line_count > chunk->source_length ||
+        (chunk->source_text == NULL &&
+         (chunk->source_length != 0u || chunk->source_line_count != 0u)))
         return vm_fail(vm, REXX_VM_STATUS_INVALID_BYTECODE, 0);
 
     vm->active_chunk = chunk;

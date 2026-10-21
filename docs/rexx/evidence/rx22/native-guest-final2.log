@@ -1,0 +1,21 @@
+
+FullName
+--------                                                                                                                
+D:\dev\guideXOSServer_REXX\build\rexx\rx22\qemu-ef133694179041bcaf459d5fc030566f\helper\rx22-01-classic-and-diagnostic-…
+D:\dev\guideXOSServer_REXX\build\rexx\rx22\qemu-ef133694179041bcaf459d5fc030566f\helper\rx22-02-invalid-argument-recove…
+D:\dev\guideXOSServer_REXX\build\rexx\rx22\qemu-ef133694179041bcaf459d5fc030566f\helper\rx22-03-date-time-fail-closed-g…
+RX22 artifact preservation: PASS
+Stage: qemu-smoke-guest
+Verified UTC: 2026-10-21T04:07:40.1248805Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Requested QMP shutdown for owned QEMU PID 25820 on port 52986.
+RX22 artifact preservation: PASS
+Stage: qemu-smoke-final
+Verified UTC: 2026-10-21T04:07:43.3231200Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Isolated QEMU smoke passed.
+Kernel SHA-256: 252ec7776697d3d5265b2f5b54bb7e4abd37cce06336f888010f832b50445807
+Guest evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx22\native-guest\run-ef133694179041bcaf459d5fc030566f
+

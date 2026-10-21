@@ -1,0 +1,8 @@
+CBA
+80FF00
+004241
+[Label not found]
+[]
+8
+say reverse('ABC')
+say sourceline()
