@@ -1,6 +1,39 @@
 # Stellar Navigator SN10 — Native Application Bring-up
 
-**Current result: Outcome C — SN10R7 used its one authorized QAC-managed QEMU launch. The writable raw IDE disk booted UEFI, the AMD64 kernel, and a usable desktop, but the kernel could not mount the GPT/FAT32 disk. App Model discovery returned `NO_APPS_DIRECTORY` and the production dispatcher rejected Stellar Navigator. The native ELF, DE440s evaluation, and application lifecycle were not reached. `.phase` remains `SN10`.**
+**Current result: Outcome B — SN10R8 independently validated an MBR/FAT32 candidate compatible with the current kernel probe and UEFI boot layout. The one authorized additional guest qualification could not start because QAC already held another managed acceptance reservation. The runner recorded `QAC_OCCUPIED` before requesting a reservation; no foreign session was changed. `.phase` remains `SN10`.**
+
+### SN10R8 qualification update (2026-10-20)
+
+**Outcome B — media validated; managed guest qualification blocked by QAC occupancy.** This work started on `STELLAR_NAVIGATOR` at `58ca4fca2c211c13fcad0069d897959e5c26861f`, with `.phase` `SN10` and 239 pre-existing dirty entries (235 modified tracked paths and 4 untracked paths). Those unrelated entries were preserved. The qualification attempt ended at the same HEAD and phase. The validated media builder, runner changes, and focused tests were committed locally as `73e294cfb77e4aa2647a0fa0b6b1a8d8bb0a8e6e`; the report is a separate closeout commit. No kernel or application production source was changed.
+
+#### Boot and mount topology
+
+SN10R7's recorded QEMU vector attached one raw hard disk as `if=ide,index=0`, with OVMF in a separate read-only pflash drive. Serial evidence shows UEFI loaded `EFI/BOOT/BOOTX64.EFI` from that IDE hard disk. The UEFI bootloader then loaded `kernel.elf` from the same EFI filesystem. After kernel startup, ATA enumerated the same raw IDE disk as `ata0m`, and `mount_persistent_storage()` tried that whole block device for `/`. Thus UEFI boot and the kernel root mount used one physical image, but through separate firmware and block-device paths. The old GPT image's protective MBR type `0xEE` did not lead the kernel FAT probe to the GPT EFI partition at LBA 2048.
+
+#### MBR candidate and offline validation
+
+The original GPT source remains unchanged at `E:\bkup\artifacts\SN10R6_20261020\media\stellar-navigator-sn10r6.raw`, SHA-256 `79dc215fb2fd6f4ade3d1a6e56eeed0297ca733adc241769b3b0a76422450b8a` before and after preparation. The distinct SN10R8 candidate is `E:\bkup\artifacts\SN10R8_20261020\media\stellar-navigator-sn10r8-mbr.raw` (270,532,608 bytes), SHA-256 `29d060d068edc81daf720ca314e7b9dd9a3bbd376a053d1c0cb903de0c00a8a5`.
+
+The raw image has a valid `55 AA` MBR signature and two non-overlapping, 1 MiB-aligned primary FAT32 partitions using 512-byte sectors:
+
+- Partition 1: type `0x0C`, LBA 2048, 262,144 sectors. The kernel's current `is_fat_partition_type()` explicitly accepts `0x0C`. The BPB has 512-byte sectors, one sector per cluster, two FAT copies of 2,033 sectors each, 258,046 data clusters, and allocated root cluster 2. Offline FAT traversal found `/Apps/StellarNavigator`, `app.json`, the native AMD64 ELF, and DE440s data.
+- Partition 2: type `0xEF`, LBA 264192, 262,144 sectors. This is the MBR EFI System Partition type used by UEFI. Its FAT32 volume contains `EFI/BOOT/BOOTX64.EFI`, `kernel.elf`, and `ramdisk.img`, which the existing bootloader loads from its own firmware volume.
+
+The accepted staged source tree was checked against `full-tree-expected-files.json`. All 15 payload hashes match, including kernel `3aea5f9f10734dc6f248c6bdc05379d3b69a8d0d4b2ad3ec689f4dc71cb9ea1a`, UEFI bootloader `07e5350656e93e28f30cda66bbb924aef7d3d7053498547b27cc469b88d21783`, Stellar Navigator ELF `6d5f1ca1b04a9ddbaf08e2eed8600ffaf776c06b6e45aab435f61fda9c2e66eb`, manifest `08b43a2e0ddb05550d8ee02733b0ebbcc109556a29f685d6cfe54280b6a8df7c`, and DE440s `d52b91573c29e6a4e5b6dc19c4af4d9747f6da2122f5b3aff4503684a96d2c0a`. The candidate is marked read-only; the acceptance runner only creates a byte-identical writable per-run copy after confirming the QAC lane is empty.
+
+Reproduction uses `scripts/prepare-stellar-navigator-sn10-mbr-media.py` with the pinned `pyfatfs==1.1.0` environment and `tools/release_esp.py`. It preserves the input GPT image, validates each FAT volume, checks the actual kernel partition-type probe, and records hashes and geometry in `stellar-navigator-sn10r8-verification.json`. The focused media regression tests passed (3 tests). The runner self-tests passed, including argument construction, serial capture, writable-copy isolation, and QAC-lane fail-fast behavior. Candidate-only runner preflight passed against the new MBR image.
+
+#### QAC blocker and guest result
+
+The fresh QAC census at 9:41 PM PDT on 2026-10-20 found the coordinator online with one managed QEMU process, one managed session, one active reservation, and no queued requests. The active reservation was `eb86ad86e6614aa497c5718a82910ccc` for project `guideXOSServer`, mode `acceptance`, with QEMU child PID `35140`. It was not owned by this qualification. The acceptance runner recorded `QAC_OCCUPIED` and `reservationNotRequested=true` before creating a per-run disk copy or invoking `qac run`. It left the active session and reservation untouched.
+
+The QEMU argument builder passed its offline vector check, but no guest QEMU command was launched. There is no SN10R8 guest serial, mount marker, AppModel discovery, native launch, ET/TDB 0 evaluation, numerical comparison, lifecycle, screenshot, or stability evidence. Those gates remain unverified; the MBR media checks establish compatibility by structure and source inspection only. Full guest qualification still requires one run after a fresh empty-lane census and exclusive QAC reservation.
+
+#### Closeout
+
+`.phase` remains `SN10`; the phase does not advance while guest qualification is incomplete. The outcome is partial rather than a kernel/filesystem defect: the selected MBR layout is compatible with the existing mount probe, while the authorized guest gate was unavailable because QAC was occupied. The media, runner, and test changes are in implementation commit `73e294cfb77e4aa2647a0fa0b6b1a8d8bb0a8e6e`; this report is recorded in the following local closeout commit. Nothing was pushed.
+
+### SN10R7 qualification update (2026-10-20)
 
 ### SN10R7 qualification update (2026-10-20)
 
