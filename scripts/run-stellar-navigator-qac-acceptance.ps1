@@ -7,8 +7,8 @@ param(
     [string]$ArtifactRoot = '',
     [string]$CandidateEspPath = 'E:\bkup\artifacts\SN10R2_20261020\qemu\20261020T042331758\esp',
     [string]$CandidateVerificationPath = 'E:\bkup\artifacts\SN10R2_20261020\staged-candidate-verification.json',
-    [string]$CandidateDiskPath = 'E:\bkup\artifacts\SN10R6_20261020\media\stellar-navigator-sn10r6.raw',
-    [string]$CandidateDiskVerificationPath = 'E:\bkup\artifacts\SN10R6_20261020\media\stellar-navigator-sn10r6-verification.json',
+    [string]$CandidateDiskPath = 'E:\bkup\artifacts\SN10R8_20261020\media\stellar-navigator-sn10r8-mbr.raw',
+    [string]$CandidateDiskVerificationPath = 'E:\bkup\artifacts\SN10R8_20261020\media\stellar-navigator-sn10r8-verification.json',
     [switch]$VerifyCandidateOnly,
     [switch]$SelfTest
 )
@@ -308,7 +308,7 @@ function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPor
 
 function New-RunDirectory {
     if (-not $ArtifactRoot) {
-        $ArtifactRoot = Join-Path $env:USERPROFILE ('.codex\artifacts\SN10R6_' + (Get-Date -Format 'yyyyMMdd'))
+        $ArtifactRoot = Join-Path $env:USERPROFILE ('.codex\artifacts\SN10R8_' + (Get-Date -Format 'yyyyMMdd'))
     }
     $full = [IO.Path]::GetFullPath($ArtifactRoot)
     $id = Get-Date -Format 'yyyyMMddTHHmmssfff'
@@ -567,19 +567,42 @@ function Assert-CandidateIdentity {
     $diskFull = [IO.Path]::GetFullPath($CandidateDiskPath)
     $recordedDisk = [IO.Path]::GetFullPath([string]$diskVerification.imagePath)
     if ($diskVerification.passed -ne $true -or $recordedDisk -cne $diskFull) { throw 'Candidate raw-disk verification does not identify this validated disk image.' }
-    if ([string]$diskVerification.format -cne 'raw' -or [string]$diskVerification.partitionTable -cne 'GPT' -or [string]$diskVerification.fatType -cne 'FAT32' -or [int]$diskVerification.sectorSizeBytes -ne 512) { throw 'Candidate disk does not have the verified raw/GPT/FAT32/512-byte layout.' }
+    if ([string]$diskVerification.format -cne 'raw' -or [string]$diskVerification.partitionTable -cne 'MBR' -or [string]$diskVerification.fatType -cne 'FAT32' -or [int]$diskVerification.sectorSizeBytes -ne 512) { throw 'Candidate disk does not have the verified raw/MBR/FAT32/512-byte layout.' }
     if ([int64]$diskVerification.imageBytes -ne (Get-Item -LiteralPath $diskFull).Length -or [string]$diskVerification.imageSha256 -notmatch '^[0-9a-f]{64}$') { throw 'Candidate disk geometry or recorded SHA-256 is invalid.' }
     $diskHash = Get-Sha256 $diskFull
     if ($diskHash -cne [string]$diskVerification.imageSha256) { throw 'Candidate raw disk SHA-256 does not match its verification record.' }
     if ([IO.Path]::GetFullPath([string]$diskVerification.sourceEsp).TrimEnd('\') -cne $espFull) { throw 'Candidate disk was not built from the validated staged ESP.' }
-    if ([int64]$diskVerification.partitionStartLba -lt 34 -or [int64]$diskVerification.partitionSectors -le 0 -or [int64]$diskVerification.partitionEndLba -ne ([int64]$diskVerification.partitionStartLba + [int64]$diskVerification.partitionSectors - 1)) { throw 'Candidate disk partition geometry is inconsistent.' }
+    $rootPartition = $diskVerification.rootPartition
+    $efiPartition = $diskVerification.efiPartition
+    if (-not $rootPartition -or -not $efiPartition -or [string]$rootPartition.typeHex -cne '0x0C' -or [string]$efiPartition.typeHex -cne '0xEF' -or [string]$rootPartition.fatType -cne 'FAT32' -or [string]$efiPartition.fatType -cne 'FAT32') { throw 'Candidate must have an MBR 0x0C root FAT32 partition and a separate 0xEF EFI FAT32 partition.' }
+    if ([int64]$rootPartition.index -ne 1 -or [int64]$efiPartition.index -ne 2 -or [int64]$rootPartition.startLba -lt 1 -or [int64]$rootPartition.sectors -le 0 -or [int64]$efiPartition.startLba -lt 1 -or [int64]$efiPartition.sectors -le 0 -or [int64]$rootPartition.endLba -ne ([int64]$rootPartition.startLba + [int64]$rootPartition.sectors - 1) -or [int64]$efiPartition.endLba -ne ([int64]$efiPartition.startLba + [int64]$efiPartition.sectors - 1) -or [int64]$rootPartition.endLba -ge [int64]$efiPartition.startLba) { throw 'Candidate MBR partition geometry is inconsistent or overlapping.' }
+    if ([int64]$diskVerification.partitionStartLba -ne [int64]$rootPartition.startLba -or [int64]$diskVerification.partitionSectors -ne [int64]$rootPartition.sectors -or [int64]$diskVerification.partitionEndLba -ne [int64]$rootPartition.endLba) { throw 'Candidate root partition compatibility fields disagree with its MBR entry.' }
+    $diskStream = [IO.File]::OpenRead($diskFull)
+    try {
+        $mbr = New-Object byte[] 512
+        if ($diskStream.Read($mbr, 0, $mbr.Length) -ne 512 -or $mbr[510] -ne 0x55 -or $mbr[511] -ne 0xAA) { throw 'Candidate raw disk has no valid MBR signature.' }
+        $actualPartitions = @()
+        for ($index = 0; $index -lt 4; $index++) {
+            $entryOffset = 446 + 16 * $index
+            $type = [int]$mbr[$entryOffset + 4]
+            if ($type -eq 0) { continue }
+            $actualPartitions += [pscustomobject]@{ index = $index + 1; type = $type; startLba = [BitConverter]::ToUInt32($mbr, $entryOffset + 8); sectors = [BitConverter]::ToUInt32($mbr, $entryOffset + 12) }
+        }
+        if ($actualPartitions.Count -ne 2 -or $actualPartitions[0].type -ne 0x0C -or $actualPartitions[1].type -ne 0xEF -or [int64]$actualPartitions[0].startLba -ne [int64]$rootPartition.startLba -or [int64]$actualPartitions[0].sectors -ne [int64]$rootPartition.sectors -or [int64]$actualPartitions[1].startLba -ne [int64]$efiPartition.startLba -or [int64]$actualPartitions[1].sectors -ne [int64]$efiPartition.sectors) { throw 'Raw MBR bytes do not match the verified root and EFI partition records.' }
+        foreach ($partition in @($rootPartition, $efiPartition)) {
+            $diskStream.Position = [int64]$partition.startLba * 512
+            $boot = New-Object byte[] 512
+            if ($diskStream.Read($boot, 0, $boot.Length) -ne 512 -or [BitConverter]::ToUInt16($boot, 11) -ne 512 -or $boot[13] -eq 0 -or $boot[510] -ne 0x55 -or $boot[511] -ne 0xAA -or [BitConverter]::ToUInt32($boot, 32) -ne [int64]$partition.sectors -or [Text.Encoding]::ASCII.GetString($boot, 82, 8) -cne 'FAT32   ') { throw "FAT32 BPB at MBR partition $($partition.index) is invalid or has the wrong LBA extent." }
+        }
+    } finally { $diskStream.Dispose() }
+    if ($diskVerification.originalGptUnchanged -ne $true -or $diskVerification.payloadHashesMatchAcceptedManifest -ne $true -or $diskVerification.kernelFatPartitionProbe.rootType0x0cSupported -ne $true -or [string]$diskVerification.kernelFatPartitionProbe.firstMountablePartitionType -cne '0x0C' -or $rootPartition.containsAppsDirectory -ne $true -or $rootPartition.containsNativeAmd64Elf -ne $true -or $rootPartition.containsDE440sData -ne $true -or [string]$efiPartition.firmwareBootPath -cne 'EFI/BOOT/BOOTX64.EFI') { throw 'Candidate verification does not establish kernel mount compatibility, AppModel payload availability, and UEFI fallback boot content.' }
     $diskFiles = @{}
     foreach ($entry in $diskVerification.files) { $diskFiles[[string]$entry.path] = [string]$entry.sha256 }
     foreach ($entry in $verification.stagedInputs) {
         $relative = ([IO.Path]::GetRelativePath($espFull, [IO.Path]::GetFullPath([string]$entry.path))).Replace('\', '/')
         if (-not $diskFiles.ContainsKey($relative) -or $diskFiles[$relative] -cne [string]$entry.sha256) { throw "Candidate disk does not contain verified staged payload $relative." }
     }
-    $diskRecord = [ordered]@{ path = $diskFull; lengthBytes = (Get-Item -LiteralPath $diskFull).Length; sha256 = $diskHash; format = 'raw'; partitionTable = 'GPT'; fatType = 'FAT32'; sectorSizeBytes = 512; partitionStartLba = [int64]$diskVerification.partitionStartLba; partitionSectors = [int64]$diskVerification.partitionSectors; partitionEndLba = [int64]$diskVerification.partitionEndLba; verifiedFiles = $diskFiles.Count; verificationPath = [IO.Path]::GetFullPath($CandidateDiskVerificationPath) }
+    $diskRecord = [ordered]@{ path = $diskFull; lengthBytes = (Get-Item -LiteralPath $diskFull).Length; sha256 = $diskHash; format = 'raw'; partitionTable = 'MBR'; fatType = 'FAT32'; sectorSizeBytes = 512; rootPartitionType = '0x0C'; rootPartitionStartLba = [int64]$rootPartition.startLba; rootPartitionSectors = [int64]$rootPartition.sectors; rootPartitionEndLba = [int64]$rootPartition.endLba; efiPartitionType = '0xEF'; efiPartitionStartLba = [int64]$efiPartition.startLba; efiPartitionSectors = [int64]$efiPartition.sectors; efiPartitionEndLba = [int64]$efiPartition.endLba; partitionStartLba = [int64]$diskVerification.partitionStartLba; partitionSectors = [int64]$diskVerification.partitionSectors; partitionEndLba = [int64]$diskVerification.partitionEndLba; verifiedFiles = $diskFiles.Count; verificationPath = [IO.Path]::GetFullPath($CandidateDiskVerificationPath) }
     $result = [ordered]@{ passed = $true; immutableExistingEspReused = $true; candidateDiskUntouchedByRuntime = $true; sourceArtifacts = $sourceFiles; stagedEsp = $espFull; stagedFiles = $staged; candidateDisk = $diskRecord }
     $result | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $script:RunRoot 'candidate-verification.json') -Encoding utf8
     return $result
@@ -593,6 +616,27 @@ function Get-QacSnapshot([string]$Operation, [string[]]$Arguments) {
     [IO.File]::WriteAllText($path, $text + [Environment]::NewLine, [Text.Encoding]::UTF8)
     if ($exit -ne 0) { throw "QAC $($Arguments[0]) failed with exit code $($exit): $text" }
     return $text
+}
+
+function Get-QacLaneCensus([string]$Status, [string]$List, [string]$Queue) {
+    $processMatch = [regex]::Match($Status, 'QEMU processes:\s*(\d+)')
+    $sessionMatch = [regex]::Match($Status, 'Managed sessions:\s*(\d+)')
+    $reservationMatch = [regex]::Match($List, 'Reservations:\s*(\d+)')
+    $queueMatch = [regex]::Match($Queue, 'Queued reservations:\s*(\d+)')
+    $known = $processMatch.Success -and $sessionMatch.Success -and $reservationMatch.Success -and $queueMatch.Success
+    $processCount = if ($processMatch.Success) { [int]$processMatch.Groups[1].Value } else { -1 }
+    $sessionCount = if ($sessionMatch.Success) { [int]$sessionMatch.Groups[1].Value } else { -1 }
+    $reservationCount = if ($reservationMatch.Success) { [int]$reservationMatch.Groups[1].Value } else { -1 }
+    $queueCount = if ($queueMatch.Success) { [int]$queueMatch.Groups[1].Value } else { -1 }
+    $available = $known -and $processCount -eq 0 -and $sessionCount -eq 0 -and $reservationCount -eq 0 -and $queueCount -eq 0
+    [ordered]@{
+        countsKnown = $known
+        processCount = $processCount
+        managedSessionCount = $sessionCount
+        reservationCount = $reservationCount
+        queuedReservationCount = $queueCount
+        available = $available
+    }
 }
 
 function Get-OwnedQacReservation([string]$ReservationId, [int]$QemuPid) {
@@ -703,13 +747,19 @@ function Invoke-SelfTest {
     }
     $capture1 = $null; $capture2 = $null; $capture3 = $null; $capture4 = $null; $capture5 = $null; $capture6 = $null
     try {
+        $freeLane = Get-QacLaneCensus "Coordinator: Online`nQEMU processes: 0`nManaged sessions: 0; queued: 0" 'Reservations: 0' 'Queued reservations: 0'
+        $busyLane = Get-QacLaneCensus "Coordinator: Online`nQEMU processes: 1 (0 foreign)`nManaged sessions: 1; queued: 0; blocked: 0" 'Reservations: 1' 'Queued reservations: 0'
+        $unknownLane = Get-QacLaneCensus 'Coordinator: Online' 'Reservations: 0' 'Queued reservations: 0'
+        if (-not $freeLane.available -or $busyLane.available -or -not $busyLane.countsKnown -or $unknownLane.countsKnown) { throw 'QAC lane preflight did not fail closed on occupied or incomplete census data.' }
+        $runnerResult.checks.qacLaneFailFast = [ordered]@{ passed = $true; emptyLaneAdmitted = $freeLane.available; occupiedLaneRejected = (-not $busyLane.available); incompleteCensusRejected = (-not $unknownLane.countsKnown); reservationRequestedBySelfTest = $false }
+
         $argCheck = Test-StructuredArgumentPassing
         $driveArgs = New-QemuArguments 'C:\SN10 R3 & (candidate), rev 2\stellar-navigator.raw' 40001 40002 'C:\SN10 R3 & (firmware), rev 2\OVMF.fd'
         $firmwareArg = $driveArgs[3]
         $diskArg = $driveArgs[5]
         $expectedFirmwareArg = 'if=pflash,format=raw,readonly=on,file=' + ('C:\SN10 R3 & (firmware), rev 2\OVMF.fd'.Replace(', ', ',, '))
         if ($firmwareArg -cne $expectedFirmwareArg -or $diskArg -notmatch '^file=(?!fat:).+\.raw,format=raw,if=ide,index=0$' -or $driveArgs[0] -ne '-machine') {
-            throw 'Disposable writable raw GPT/FAT32 disk argument construction failed.'
+            throw 'Disposable writable raw MBR/FAT32 disk argument construction failed.'
         }
         if ($firmwareArg.Contains('"') -or $diskArg.Contains('"') -or $diskArg -notmatch ',, rev 2') { throw 'QEMU drive path escaping or structured quoting is invalid.' }
         $runnerResult.checks.commandConstruction = [ordered]@{
@@ -719,7 +769,7 @@ function Invoke-SelfTest {
             shellQuotesEmbedded = $false
             firmwareAttachment = $firmwareArg
             diskAttachment = $diskArg
-            diskInterface = 'ide index 0, raw GPT disk with FAT32 EFI System Partition, writable disposable copy'
+            diskInterface = 'ide index 0, raw MBR disk with a FAT32 0x0C root partition and FAT32 0xEF EFI partition, writable disposable copy'
             isolation = 'QEMU receives one per-run copy; the verified candidate disk and source ESP remain unchanged'
             argumentVector = $driveArgs
             processArgumentRoundTrip = $argCheck
@@ -851,7 +901,7 @@ function Invoke-SelfTest {
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
         $runnerResult.resultPath = Join-Path $script:RunRoot 'runner-selftest.json'
         $runnerResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $runnerResult.resultPath -Encoding utf8
-        Write-Host "[SN10R6] offline runner self-test PASS: $($runnerResult.resultPath)"
+        Write-Host "[SN10R8] offline runner self-test PASS: $($runnerResult.resultPath)"
         return 0
     } catch {
         if ($capture1) { $capture1.Dispose() }
@@ -865,8 +915,8 @@ function Invoke-SelfTest {
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
         $runnerResult.resultPath = Join-Path $script:RunRoot 'runner-selftest.json'
         $runnerResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $runnerResult.resultPath -Encoding utf8
-        Write-Host "[SN10R6] offline runner self-test FAIL: $($runnerResult.error)"
-        Write-Host "[SN10R6] evidence: $($runnerResult.resultPath)"
+        Write-Host "[SN10R8] offline runner self-test FAIL: $($runnerResult.error)"
+        Write-Host "[SN10R8] evidence: $($runnerResult.resultPath)"
         return 1
     }
 }
@@ -876,12 +926,12 @@ if ($SelfTest) { exit (Invoke-SelfTest) }
 if ($VerifyCandidateOnly) {
     try {
         [void](Assert-CandidateIdentity)
-        Write-Host "[SN10R6] candidate, staged ESP, and raw disk verification PASS: $(Join-Path $script:RunRoot 'candidate-verification.json')"
+        Write-Host "[SN10R8] candidate, staged ESP, and raw disk verification PASS: $(Join-Path $script:RunRoot 'candidate-verification.json')"
         exit 0
     } catch {
         [ordered]@{ passed = $false; classification = 'FAIL'; error = $_.Exception.Message; candidateEsp = $CandidateEspPath; candidateDisk = $CandidateDiskPath; capturedAtLocal = (Get-Date).ToString('o') } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $script:RunRoot 'candidate-verification.json') -Encoding utf8
-        Write-Host "[SN10R6] candidate verification FAIL: $($_.Exception.Message)"
+        Write-Host "[SN10R8] candidate verification FAIL: $($_.Exception.Message)"
         exit 1
     }
 }
@@ -922,20 +972,32 @@ try {
         $overall.checks.qacPreflight = [ordered]@{ coordinatorOnline = $false; reservationNotRequested = $true; statusPath = (Join-Path $script:RunRoot 'qac-status-before.log'); listPath = (Join-Path $script:RunRoot 'qac-list-before.log'); queuePath = (Join-Path $script:RunRoot 'qac-queue-before.log') }
         throw 'QAC coordinator is not online.'
     }
-    $processCount = if ($qacStatus -match 'QEMU processes: (\d+)') { [int]$Matches[1] } else { -1 }
-    $sessionCount = if ($qacStatus -match 'Managed sessions: (\d+)') { [int]$Matches[1] } else { -1 }
-    $reservationCount = if ($qacList -match 'Reservations: (\d+)') { [int]$Matches[1] } else { -1 }
+    $laneCensus = Get-QacLaneCensus $qacStatus $qacList $qacQueue
     $overall.checks.qacPreflight = [ordered]@{
         coordinatorOnline = $true
-        processCount = $processCount
-        managedSessionCount = $sessionCount
-        reservationCount = $reservationCount
+        processCount = $laneCensus.processCount
+        managedSessionCount = $laneCensus.managedSessionCount
+        reservationCount = $laneCensus.reservationCount
+        queuedReservationCount = $laneCensus.queuedReservationCount
+        censusComplete = $laneCensus.countsKnown
+        laneAvailable = $laneCensus.available
+        reservationNotRequested = $true
         queueSnapshot = $qacQueue
-        acquisition = 'one QAC-managed qac run request using documented FIFO acceptance admission'
+        acquisition = 'one QAC-managed acceptance request only after a fresh empty-lane census'
         acquisitionWaitBoundSeconds = $LaneAcquireTimeoutSeconds
         statusPath = (Join-Path $script:RunRoot 'qac-status-before.log')
         listPath = (Join-Path $script:RunRoot 'qac-list-before.log')
         queuePath = (Join-Path $script:RunRoot 'qac-queue-before.log')
+    }
+    if (-not $laneCensus.countsKnown) {
+        $overall.blocker = 'QAC_CENSUS_FAILURE'
+        $overall.checks.qacPreflight.reservationNotRequested = $true
+        throw 'QAC lane census is incomplete; no reservation was requested.'
+    }
+    if (-not $laneCensus.available) {
+        $overall.blocker = 'QAC_OCCUPIED'
+        $overall.checks.qacPreflight.foreignResourcesUntouched = $true
+        throw 'QAC lane is occupied; no reservation was requested and no foreign session was changed.'
     }
 
     $runtimeDiskPath = Join-Path $script:RunRoot 'qac-disposable-disk.raw'
@@ -971,7 +1033,7 @@ try {
         qemuDisposableDiskPath = [IO.Path]::GetFullPath($runtimeDiskPath)
         candidateDiskSha256 = $candidateCheck.candidateDisk.sha256
         qemuDisposableDiskInitialSha256 = $runtimeDiskCopy.initialSha256
-        diskLayout = [ordered]@{ format = 'raw'; partitionTable = 'GPT'; partitionStartLba = $candidateCheck.candidateDisk.partitionStartLba; partitionSectors = $candidateCheck.candidateDisk.partitionSectors; sectorSizeBytes = 512; filesystem = 'FAT32'; interface = 'IDE index 0'; qemuAccess = 'writable isolated per-run clone' }
+        diskLayout = [ordered]@{ format = 'raw'; partitionTable = 'MBR'; rootPartitionType = $candidateCheck.candidateDisk.rootPartitionType; rootPartitionStartLba = $candidateCheck.candidateDisk.rootPartitionStartLba; rootPartitionSectors = $candidateCheck.candidateDisk.rootPartitionSectors; efiPartitionType = $candidateCheck.candidateDisk.efiPartitionType; efiPartitionStartLba = $candidateCheck.candidateDisk.efiPartitionStartLba; efiPartitionSectors = $candidateCheck.candidateDisk.efiPartitionSectors; sectorSizeBytes = 512; filesystem = 'FAT32'; interface = 'IDE index 0'; qemuAccess = 'writable isolated per-run clone' }
         diskAttachment = $ideDriveArguments[0]
         qacChildArgumentPassthroughVerified = $true
         firmwarePflashReadOnly = $true
@@ -1200,8 +1262,8 @@ try {
     $overall.serialLog = if ($serialLog) { $serialLog } else { $null }
     $overall.resultPath = Join-Path $script:RunRoot 'acceptance-result.json'
     $overall | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath $overall.resultPath -Encoding utf8
-    Write-Host "[SN10R6] $($overall.classification): $($overall.resultPath)"
-    if ($overall.blocker) { Write-Host "[SN10R6] blocker=$($overall.blocker)" }
+    Write-Host "[SN10R8] $($overall.classification): $($overall.resultPath)"
+    if ($overall.blocker) { Write-Host "[SN10R8] blocker=$($overall.blocker)" }
 }
 
 if ($overall.classification -eq 'PASS') { exit 0 }
