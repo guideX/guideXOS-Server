@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS81</title></head>
+<body>
+<h1>Navigator JavaScript JS81</h1>
+<pre id="result">JS81:pending</pre>
+<section id="rows">
+  <i id="r0" class="row"></i><i id="r1" class="row"></i>
+  <i id="r2" class="row"></i>
+</section>
+<section id="live-root">
+  <i id="l0" class="live"></i><i id="l1" class="live"></i>
+  <i id="l2" class="live"></i>
+</section>
+<section id="grow-root">
+  <i id="g0" class="grow"></i><i id="g1" class="grow"></i>
+  <i id="g2" class="candidate"></i><i id="g3" class="future"></i>
+</section>
+<section id="shrink-root">
+  <i id="s0" class="shrink"></i><i id="s1" class="shrink"></i>
+  <i id="s2" class="shrink"></i>
+</section>
+<ul id="filtered-root">
+  <li id="p0" class="pos selected"></li>
+  <li id="p1" class="pos selected"></li>
+  <li id="p2" class="pos selected"></li>
+  <li id="p3" class="pos selected"></li>
+</ul>
+<section id="adapter-root">
+  <b id="tag0" class="target"></b><b id="tag1" class="target"></b>
+</section>
+<section id="scope-left"><i id="left0" class="scope-row"></i></section>
+<section id="scope-right"><i id="right0" class="scope-row"></i></section>
+<button id="event-a" type="button">Run JS81 nested iterator events</button>
+<button id="event-b" type="button">Nested event B</button>
+<section id="event-rows">
+  <i id="ea0" class="event-a-row"></i>
+  <i id="ea1" class="event-a-row"></i>
+  <i id="ea2" class="event-a-row"></i>
+  <i id="eb0" class="event-b-row"></i>
+</section>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var rows = document.querySelectorAll('.row');
+var cursor = rows.values();
+var first = cursor.next();
+var second = cursor.next();
+var third = cursor.next();
+var terminal = cursor.next();
+var terminalAgain = cursor.next();
+verify(rows.values === rows.values && cursor.next === cursor.next);
+verify(first !== second && second !== third && terminal !== terminalAgain);
+verify(first.done === false && second.done === false && third.done === false);
+verify(first.value === rows.item(0) && first.value === rows[0] &&
+  second.value === rows[1] && third.value === rows[2]);
+verify(terminal.value === undefined && terminal.done === true &&
+  terminalAgain.value === undefined && terminalAgain.done === true);
+verify(first.value === rows[0] && first.done === false);
+var keyCursor = rows.keys();
+var keyFirst = keyCursor.next();
+var keySecond = keyCursor.next();
+var keyThird = keyCursor.next();
+var keyTerminal = keyCursor.next();
+var keyTerminalAgain = keyCursor.next();
+verify(rows.keys === rows.keys && keyCursor.next === keyCursor.next);
+verify(keyFirst.value === 0 && keySecond.value === 1 &&
+  keyThird.value === 2 && keyFirst.done === false &&
+  keySecond.done === false && keyThird.done === false);
+verify(keyTerminal.value === undefined && keyTerminal.done === true &&
+  keyTerminalAgain.value === undefined && keyTerminalAgain.done === true);
+verify(keyFirst.value === 0 && keyFirst.done === false);
+var singleCursor = document.querySelectorAll('#r0').values();
+var singleFirst = singleCursor.next();
+var singleTerminal = singleCursor.next();
+verify(singleFirst.value === rows[0] && singleFirst.done === false &&
+  singleTerminal.value === undefined && singleTerminal.done === true);
+var singleKeys = document.querySelectorAll('#r0').keys();
+var singleKey = singleKeys.next();
+var singleKeyEnd = singleKeys.next();
+verify(singleKey.value === 0 && singleKey.done === false &&
+  singleKeyEnd.value === undefined && singleKeyEnd.done === true);
+
+var entryCursor = rows.entries();
+var entryFirst = entryCursor.next();
+var entrySecond = entryCursor.next();
+var entryThird = entryCursor.next();
+var entryEnd = entryCursor.next();
+var entryEndAgain = entryCursor.next();
+verify(rows.entries === rows.entries && entryCursor.next === entryCursor.next);
+verify(entryFirst !== entrySecond && entryFirst.value !== entrySecond.value &&
+  entrySecond.value !== entryThird.value);
+verify(entryFirst.done === false && entrySecond.done === false &&
+  entryThird.done === false && entryEnd.done === true &&
+  entryEndAgain.done === true);
+verify(entryFirst.value.length === 2 && entrySecond.value.length === 2 &&
+  entryThird.value.length === 2 && entryFirst.value[0] === 0 &&
+  entrySecond.value[0] === 1 && entryThird.value[0] === 2);
+verify(entryFirst.value[1] === rows.item(0) &&
+  entryFirst.value[1] === rows[0] && entrySecond.value[1] === rows[1] &&
+  entryThird.value[1] === rows[2]);
+verify(entryFirst.value[0] === 0 && entryFirst.value[1] === rows[0] &&
+  entryFirst.done === false && entryEnd.value === undefined &&
+  entryEndAgain.value === undefined);
+
+var empty = document.querySelectorAll('.absent');
+var emptyCursor = empty.values();
+var emptyFirst = emptyCursor.next();
+var emptyAgain = emptyCursor.next();
+verify(emptyFirst.value === undefined && emptyFirst.done === true &&
+  emptyAgain.value === undefined && emptyAgain.done === true &&
+  emptyFirst !== emptyAgain);
+var emptyKeys = empty.keys();
+var emptyKeyFirst = emptyKeys.next();
+var emptyKeyAgain = emptyKeys.next();
+verify(emptyKeyFirst.value === undefined && emptyKeyFirst.done === true &&
+  emptyKeyAgain.value === undefined && emptyKeyAgain.done === true &&
+  emptyKeyFirst !== emptyKeyAgain);
+var emptyEntries = empty.entries();
+var emptyEntryFirst = emptyEntries.next();
+var emptyEntryAgain = emptyEntries.next();
+verify(emptyEntryFirst.value === undefined && emptyEntryFirst.done === true &&
+  emptyEntryAgain.value === undefined && emptyEntryAgain.done === true &&
+  emptyEntryFirst !== emptyEntryAgain);
+
+var a = rows.values();
+var b = rows.values();
+var a0 = a.next();
+var a1 = a.next();
+var b0 = b.next();
+var a2 = a.next();
+var b1 = b.next();
+verify(a0.value === rows[0] && a1.value === rows[1] &&
+  b0.value === rows[0] && a2.value === rows[2] && b1.value === rows[1]);
+verify(a0 !== a1 && a1 !== b0 && b0 !== a2 && a0.done === false);
+var keysA = rows.keys();
+var keysB = rows.keys();
+var keysA0 = keysA.next();
+var keysA1 = keysA.next();
+var keysB0 = keysB.next();
+var mixedKeys = rows.keys();
+var mixedValues = rows.values();
+var mixedEntries = rows.entries();
+var mixedKey0 = mixedKeys.next();
+var mixedValue0 = mixedValues.next();
+var mixedEntry0 = mixedEntries.next();
+var mixedKey1 = mixedKeys.next();
+var mixedValue1 = mixedValues.next();
+var mixedEntry1 = mixedEntries.next();
+var reverseValues = rows.values();
+var reverseKeys = rows.keys();
+var reverseValue0 = reverseValues.next();
+var reverseKey0 = reverseKeys.next();
+verify(keysA0.value === 0 && keysA1.value === 1 && keysB0.value === 0);
+verify(mixedKey0.value === 0 && mixedValue0.value === rows[0] &&
+  mixedKey1.value === 1 && mixedValue1.value === rows[1] &&
+  mixedEntry0.value[0] === 0 && mixedEntry0.value[1] === rows[0] &&
+  mixedEntry1.value[0] === 1 && mixedEntry1.value[1] === rows[1]);
+verify(reverseValue0.value === rows[0] && reverseKey0.value === 0 &&
+  mixedKey0.value === 0 && mixedValue0.value === rows[0]);
+
+var live = document.querySelectorAll('.live');
+var liveCursor = live.values();
+var liveEntries = live.entries();
+var liveFirst = liveCursor.next();
+var liveEntryFirst = liveEntries.next();
+liveFirst.value.removeAttribute('class');
+var liveSecond = liveCursor.next();
+var liveEntrySecond = liveEntries.next();
+var liveTerminal = liveCursor.next();
+verify(liveFirst.value.id === 'l0' && liveSecond.value.id === 'l2' &&
+  liveTerminal.value === undefined && liveTerminal.done === true &&
+  liveEntryFirst.value[0] === 0 && liveEntryFirst.value[1].id === 'l0' &&
+  liveEntrySecond.value[0] === 1 && liveEntrySecond.value[1].id === 'l2');
+
+var grow = document.querySelectorAll('.grow');
+var growCursor = grow.values();
+var growEntries = grow.entries();
+document.querySelectorAll('#g2').item(0).setAttribute('class', 'grow');
+var growFirst = growCursor.next();
+var growSecond = growCursor.next();
+var growTerminal = growCursor.next();
+var growEntryFirst = growEntries.next();
+var growEntrySecond = growEntries.next();
+var growEntryTerminal = growEntries.next();
+document.querySelectorAll('#g3').item(0).setAttribute('class', 'grow');
+var growTerminalAgain = growCursor.next();
+var growEntryTerminalAgain = growEntries.next();
+var growNewCursor = grow.values();
+var growNewFirst = growNewCursor.next();
+var growNewSecond = growNewCursor.next();
+var growNewThird = growNewCursor.next();
+var growNewFourth = growNewCursor.next();
+var growNewTerminal = growNewCursor.next();
+verify(growFirst.value.id === 'g0' && growSecond.value.id === 'g1' &&
+  growTerminal.done === true && growTerminalAgain.value === undefined &&
+  growTerminalAgain.done === true && growNewFirst.value.id === 'g0' &&
+  growNewSecond.value.id === 'g1' && growNewThird.value.id === 'g2' &&
+  growNewFourth.value.id === 'g3' && growNewTerminal.done === true &&
+  growEntryFirst.value[0] === 0 && growEntryFirst.value[1].id === 'g0' &&
+  growEntrySecond.value[0] === 1 && growEntrySecond.value[1].id === 'g1' &&
+  growEntryTerminal.value === undefined && growEntryTerminal.done === true &&
+  growEntryTerminalAgain.value === undefined &&
+  growEntryTerminalAgain.done === true);
+var grownKeys = grow.keys();
+var grownKey0 = grownKeys.next();
+var grownKey1 = grownKeys.next();
+var grownKey2 = grownKeys.next();
+var grownKey3 = grownKeys.next();
+var grownKeyEnd = grownKeys.next();
+verify(grownKey0.value === 0 && grownKey1.value === 1 &&
+  grownKey2.value === 2 && grownKey3.value === 3 &&
+  grownKeyEnd.value === undefined && grownKeyEnd.done === true);
+
+var shrink = document.querySelectorAll('.shrink');
+var shrinkCursor = shrink.values();
+var shrinkEntries = shrink.entries();
+document.querySelectorAll('#s0').item(0).removeAttribute('class');
+document.querySelectorAll('#s1').item(0).removeAttribute('class');
+document.querySelectorAll('#s2').item(0).removeAttribute('class');
+var shrinkResult = shrinkCursor.next();
+var shrinkEntryResult = shrinkEntries.next();
+verify(shrinkResult.value === undefined && shrinkResult.done === true);
+verify(shrinkEntryResult.value === undefined &&
+  shrinkEntryResult.done === true);
+
+var filtered = document.querySelectorAll('.pos:nth-child(odd of .selected)');
+var filteredCursor = filtered.values();
+var filteredEntries = filtered.entries();
+var filteredFirst = filteredCursor.next();
+var filteredEntryFirst = filteredEntries.next();
+filteredFirst.value.removeAttribute('class');
+var filteredSecond = filteredCursor.next();
+var filteredEntrySecond = filteredEntries.next();
+verify(filteredFirst.value.id === 'p0' && filteredSecond.value.id === 'p3');
+verify(filteredEntryFirst.value[0] === 0 &&
+  filteredEntryFirst.value[1].id === 'p0' &&
+  filteredEntrySecond.value[0] === 1 &&
+  filteredEntrySecond.value[1].id === 'p3');
+var filteredKeys = filtered.keys();
+var filteredKey0 = filteredKeys.next();
+var filteredKey1 = filteredKeys.next();
+var filteredKeyEnd = filteredKeys.next();
+verify(filteredKey0.value === 0 && filteredKey1.value === 1 &&
+  filteredKeyEnd.value === undefined && filteredKeyEnd.done === true);
+
+var root = document.getElementById('adapter-root');
+var tags = root.getElementsByTagName('b');
+var classes = root.getElementsByClassName('target');
+var tagCursor = tags.values();
+var classCursor = classes.values();
+verify(tagCursor.next().value === tags[0] &&
+  classCursor.next().value === classes[0]);
+var tagKeys = tags.keys();
+var classKeys = classes.keys();
+verify(tagKeys.next().value === 0 && classKeys.next().value === 0);
+var tagEntry = tags.entries().next();
+var classEntry = classes.entries().next();
+verify(tagEntry.value[0] === 0 && tagEntry.value[1] === tags[0] &&
+  classEntry.value[0] === 0 && classEntry.value[1] === classes[0]);
+var left = document.getElementById('scope-left').querySelectorAll(':scope > .scope-row');
+var right = document.getElementById('scope-right').querySelectorAll(':scope > .scope-row');
+verify(left.values().next().value.id === 'left0' &&
+  right.values().next().value.id === 'right0');
+verify(left.keys().next().value === 0 && right.keys().next().value === 0);
+verify(left.entries().next().value[1].id === 'left0' &&
+  right.entries().next().value[1].id === 'right0');
+
+var eventA = document.getElementById('event-a');
+var eventB = document.getElementById('event-b');
+var eventCursorA;
+var eventValues = false;
+var eventMetadata = false;
+var eventAMetadata = false;
+var eventBMetadata = false;
+eventB.addEventListener('click', function(event) {
+  var bRows = document.querySelectorAll('.event-b-row');
+  var bCursor = bRows.values();
+  var bKeys = bRows.keys();
+  var bEntries = bRows.entries();
+  var bFirst = bCursor.next();
+  var bEntry = bEntries.next();
+  var callbackKeys = bRows.keys();
+  var some = bRows.some(function(element, index, collection) {
+    return element === bRows[index] && collection === bRows && index === 0 &&
+      callbackKeys.next().value === 0;
+  });
+  var nestedA = eventCursorA.next();
+  eventValues = bFirst.value.id === 'eb0' && bFirst.done === false &&
+    bKeys.next().value === 0 && bEntry.value[0] === 0 &&
+    bEntry.value[1] === bFirst.value && some && nestedA.value[0] === 1 &&
+    nestedA.value[1].id === 'ea1' && nestedA.done === false;
+  eventBMetadata = event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2 && event.defaultPrevented === false;
+});
+eventA.addEventListener('click', function(event) {
+  var aRows = document.querySelectorAll('.event-a-row');
+  eventCursorA = aRows.entries();
+  var outerFirst = eventCursorA.next();
+  eventB.click();
+  var outerThird = eventCursorA.next();
+  event.preventDefault();
+  eventAMetadata = event.target === eventA && event.currentTarget === eventA &&
+    event.eventPhase === 2 && event.defaultPrevented === true;
+  eventMetadata = eventAMetadata && eventBMetadata;
+  document.getElementById('result').textContent =
+    'JS81:event=outer:' + outerFirst.value[0] + ':nested=' +
+    eventValues + ':outer=' + outerThird.value[0] + ':metadata=' +
+    eventMetadata;
+});
+
+var initialMarker = 'JS81:initial:assertions=' + assertions +
+  ':failures=' + failures + ':empty=true:mutation=true:scope=true:entries=true';
+document.getElementById('result').textContent = initialMarker;
+</script>
+</body>
+</html>

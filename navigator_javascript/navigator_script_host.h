@@ -53,6 +53,7 @@ constexpr std::uint32_t kNavigatorSelectorCollectionEveryMethod = 23u;
 constexpr std::uint32_t kNavigatorSelectorCollectionValuesMethod = 24u;
 constexpr std::uint32_t kNavigatorSelectorCollectionIteratorNextMethod = 25u;
 constexpr std::uint32_t kNavigatorSelectorCollectionKeysMethod = 26u;
+constexpr std::uint32_t kNavigatorSelectorCollectionEntriesMethod = 27u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -582,7 +583,8 @@ private:
 
     enum class SelectorCollectionIteratorMode : std::uint8_t {
         Values = 0u,
-        Keys = 1u
+        Keys = 1u,
+        Entries = 2u
     };
 
     struct SelectorCollectionIteratorRecord {
@@ -596,7 +598,7 @@ private:
             SelectorCollectionIteratorMode::Values;
     };
     static_assert(sizeof(SelectorCollectionIteratorRecord) == 24u,
-        "JS80 bounded iterator records must remain 24 bytes");
+        "JS81 bounded iterator records must remain 24 bytes");
 
     struct SelectorCollectionLookup {
         bool found = false;
@@ -945,6 +947,8 @@ private:
     HostResult selectorCollectionValues(
         const HostObjectReference* receiver, HostValue& result);
     HostResult selectorCollectionKeys(
+        const HostObjectReference* receiver, HostValue& result);
+    HostResult selectorCollectionEntries(
         const HostObjectReference* receiver, HostValue& result);
     HostResult selectorCollectionIteratorNext(RuntimeContext& runtime,
         RuntimeErrorCode& callbackError,

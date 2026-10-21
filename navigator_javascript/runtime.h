@@ -242,6 +242,11 @@ public:
     // normal host-value path so Element handles retain canonical identity.
     bool createCollectionIteratorResult(const HostValue& value, bool done,
         Value& result, RuntimeErrorCode& error);
+    // Creates a genuine two-element Array and its outer iterator result as
+    // one bounded operation. On failure, newly appended object, property,
+    // Array-element, and host-object records are rolled back before returning.
+    bool createCollectionIteratorEntryResult(std::uint32_t index,
+        const HostValue& element, Value& result, RuntimeErrorCode& error);
     // Primitive ToNumber conversion for Web IDL host arguments. Objects and
     // callable values are rejected because this bounded runtime does not
     // implement ToPrimitive for host-call coercion.

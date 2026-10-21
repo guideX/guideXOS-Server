@@ -2768,6 +2768,88 @@ bool RuntimeContext::createCollectionIteratorResult(const HostValue& value,
     return true;
 }
 
+bool RuntimeContext::createCollectionIteratorEntryResult(
+    std::uint32_t index, const HostValue& element, Value& result,
+    RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    result = Value::undefined();
+
+    const std::size_t objectCountBefore = objects_.size();
+    const std::size_t propertyCountBefore = totalPropertyCount_;
+    const std::size_t propertyKeyBytesBefore = totalPropertyKeyBytes_;
+    const std::size_t arrayElementCountBefore = totalArrayElements_;
+    const std::size_t hostObjectCountBefore = hostObjects_.size();
+    const std::size_t liveHostObjectCountBefore = liveHostObjectCount_;
+
+    std::size_t reusableHostObjectSlot = hostObjects_.size();
+    HostObjectRecord reusableHostObjectBefore;
+    bool elementAlreadyRegistered = false;
+    if (element.type == HostValueType::HostObject) {
+        for (std::size_t slot = 0u; slot < hostObjects_.size(); ++slot) {
+            const HostObjectRecord& record = hostObjects_[slot];
+            if (record.live && record.reference == element.hostObject) {
+                elementAlreadyRegistered = true;
+                break;
+            }
+            if (!record.live && reusableHostObjectSlot == hostObjects_.size()) {
+                reusableHostObjectSlot = slot;
+                reusableHostObjectBefore = record;
+            }
+        }
+    }
+
+    const auto rollback = [this, objectCountBefore, propertyCountBefore,
+        propertyKeyBytesBefore, arrayElementCountBefore, hostObjectCountBefore,
+        liveHostObjectCountBefore, reusableHostObjectSlot,
+        reusableHostObjectBefore, elementAlreadyRegistered]() {
+        objects_.resize(objectCountBefore);
+        totalPropertyCount_ = propertyCountBefore;
+        totalPropertyKeyBytes_ = propertyKeyBytesBefore;
+        totalArrayElements_ = arrayElementCountBefore;
+        if (!elementAlreadyRegistered) {
+            if (reusableHostObjectSlot < hostObjectCountBefore) {
+                hostObjects_[reusableHostObjectSlot] =
+                    reusableHostObjectBefore;
+            } else {
+                hostObjects_.resize(hostObjectCountBefore);
+            }
+            liveHostObjectCount_ = liveHostObjectCountBefore;
+        }
+    };
+
+    Value convertedElement;
+    if (!convertHostValue(element, kInvalidRuntimeHostObjectId,
+            convertedElement, error, SourceLocation())) {
+        rollback();
+        return false;
+    }
+
+    std::vector<Value> pairElements;
+    try {
+        pairElements.reserve(2u);
+        pairElements.push_back(Value::number(static_cast<double>(index)));
+        pairElements.push_back(convertedElement);
+    } catch (const std::bad_alloc&) {
+        error = RuntimeErrorCode::AllocationFailure;
+        rollback();
+        return false;
+    }
+
+    RuntimeObjectId pairObject = kInvalidRuntimeObjectId;
+    if (!createObject(true, pairElements, pairObject, error)) {
+        rollback();
+        return false;
+    }
+
+    if (!createCollectionIteratorResult(HostValue::object(pairObject), false,
+            result, error)) {
+        rollback();
+        return false;
+    }
+    return true;
+}
+
 bool RuntimeContext::toNumberForHostArgument(const HostValue& input,
     double& number)
 {

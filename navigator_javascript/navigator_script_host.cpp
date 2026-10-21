@@ -2212,6 +2212,7 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorSelectorCollectionEveryMethod ||
         methodId == kNavigatorSelectorCollectionValuesMethod ||
         methodId == kNavigatorSelectorCollectionKeysMethod ||
+        methodId == kNavigatorSelectorCollectionEntriesMethod ||
         methodId == kNavigatorSelectorCollectionIteratorNextMethod;
 }
 
@@ -7045,6 +7046,11 @@ HostResult NavigatorScriptHostAdapter::getProperty(
                 kNavigatorSelectorCollectionKeysMethod, true, true);
             return HostResult();
         }
+        if (textEquals(property, "entries")) {
+            result = HostValue::method(
+                kNavigatorSelectorCollectionEntriesMethod, true, true);
+            return HostResult();
+        }
         if (textEquals(property, "length")) {
             result = HostValue::number(static_cast<double>(
                 selectorMatchCount(*record)));
@@ -7871,6 +7877,13 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionKeys(
         SelectorCollectionIteratorMode::Keys);
 }
 
+HostResult NavigatorScriptHostAdapter::selectorCollectionEntries(
+    const HostObjectReference* receiver, HostValue& result)
+{
+    return selectorCollectionIteratorCreate(receiver, result,
+        SelectorCollectionIteratorMode::Entries);
+}
+
 HostResult NavigatorScriptHostAdapter::selectorCollectionIteratorCreate(
     const HostObjectReference* receiver, HostValue& result,
     SelectorCollectionIteratorMode mode)
@@ -7929,7 +7942,8 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionIteratorNext(
     if (iterator->generation != generation_)
         return HostResult{HostResultCode::StaleObject};
     if (iterator->mode != SelectorCollectionIteratorMode::Values &&
-        iterator->mode != SelectorCollectionIteratorMode::Keys)
+        iterator->mode != SelectorCollectionIteratorMode::Keys &&
+        iterator->mode != SelectorCollectionIteratorMode::Entries)
         return HostResult{HostResultCode::InvalidObject};
 
     const auto makeResult = [&runtime, &callbackError, &result](
@@ -7968,12 +7982,23 @@ HostResult NavigatorScriptHostAdapter::selectorCollectionIteratorNext(
             continue;
         }
 
-        const HostValue value = iterator->mode ==
-                SelectorCollectionIteratorMode::Keys
-            ? HostValue::number(static_cast<double>(index))
-            : HostValue::fromHostObject(HostObjectReference{lookup.serial,
-                iterator->generation, kNavigatorElementHostKind});
-        const HostResult resultStatus = makeResult(value, false);
+        const HostValue element = HostValue::fromHostObject(
+            HostObjectReference{lookup.serial, iterator->generation,
+                kNavigatorElementHostKind});
+        HostResult resultStatus;
+        if (iterator->mode == SelectorCollectionIteratorMode::Entries) {
+            Value entryResult;
+            if (!runtime.createCollectionIteratorEntryResult(index, element,
+                    entryResult, callbackError))
+                return HostResult{HostResultCode::CallFailed};
+            result = HostValue::object(entryResult.objectId());
+            resultStatus = HostResult();
+        } else {
+            const HostValue value = iterator->mode ==
+                    SelectorCollectionIteratorMode::Keys
+                ? HostValue::number(static_cast<double>(index)) : element;
+            resultStatus = makeResult(value, false);
+        }
         if (!resultStatus.succeeded()) return resultStatus;
         iterator->nextIndex = index + 1u;
         return HostResult();
@@ -8136,6 +8161,8 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         return selectorCollectionValues(receiver, result);
     if (methodId == kNavigatorSelectorCollectionKeysMethod)
         return selectorCollectionKeys(receiver, result);
+    if (methodId == kNavigatorSelectorCollectionEntriesMethod)
+        return selectorCollectionEntries(receiver, result);
     if (methodId == kNavigatorSelectorCollectionItemMethod) {
         if (receiver->kind != kNavigatorSelectorCollectionHostKind)
             return HostResult{HostResultCode::InvalidValue};

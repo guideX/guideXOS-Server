@@ -5434,6 +5434,54 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("loaded=") + yesNo(js80InvalidLoaded) + ",text=" +
         summarizeText(js80InvalidText, 800) + ",error=" + js80InvalidError);
 
+    const std::string js81FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js81.html";
+    const bool js81Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js81FixtureUrl);
+    const std::string js81InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS81 bounded collection entries fixture passes on the hosted server",
+        js81Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js81FixtureUrl &&
+        contains(js81InitialText, "Navigator JavaScript JS81") &&
+        contains(js81InitialText, "JS81:initial:assertions=") &&
+        contains(js81InitialText, ":failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js81Loaded) + ",text=" +
+        summarizeText(js81InitialText, 2800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS81 indexed pair Arrays, stable results, live bounds, scopes, and filters pass",
+        js81Loaded && contains(js81InitialText,
+            ":empty=true:mutation=true:scope=true:entries=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted checks cover Number indices, canonical Element slots, Array length/indexing, independent mixed cursors, stable results, captured bounds, mutation, adapters, scopes, filtered selectors, and exhaustion");
+    const bool js81Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js81AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS81 nested Event entry cursors preserve Event state",
+        js81Click && contains(js81AfterClick,
+            "JS81:event=outer:0:nested=true:outer=2:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js81Click) + ",text=" +
+        summarizeText(js81AfterClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const std::string js81InvalidFixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js81-invalid.html";
+    const bool js81InvalidLoaded =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js81InvalidFixtureUrl);
+    const std::string js81InvalidText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js81InvalidError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS81 unbound entries method reports InvalidReceiver on the hosted runtime",
+        js81InvalidLoaded && contains(js81InvalidText,
+            "JS81:invalid:calling") &&
+        contains(js81InvalidError, "InvalidReceiver"),
+        std::string("loaded=") + yesNo(js81InvalidLoaded) + ",text=" +
+        summarizeText(js81InvalidText, 800) + ",error=" +
+        js81InvalidError);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

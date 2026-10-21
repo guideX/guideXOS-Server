@@ -10239,3 +10239,201 @@ No freestanding kernel runtime code was changed; kernel/QEMU execution was not
 required and was not run. JS81 can consider bounded `entries()` support using
 the same cursor architecture. This phase does not add `entries()`,
 `Symbol.iterator`, or `for...of`.
+
+### JS81 bounded collection `entries()`
+
+JS81 adds `collection.entries()` to the same retained collections used by
+`querySelectorAll()`, `getElementsByTagName()`, and
+`getElementsByClassName()`. Each successful `next()` yields a fresh ordinary
+JavaScript two-element Array containing the current zero-based numeric index
+and the canonical Element at that position. The fresh outer result has
+`{ value, done }` shape; `done` is a Boolean. Empty and terminal reads return
+`value: undefined`, `done: true`, with no pair allocation. Both the pair and
+outer result identities remain stable after later cursor advancement.
+
+#### Pair representation and shared cursor architecture
+
+The runtime already supports native Arrays, indexed `Value` slots, canonical
+numeric property names, an Array prototype, and a derived `length`. JS81 uses
+that representation directly: the pair is a `RuntimeObject` with its Array
+flag set and the ordinary Array prototype, with slot 0 holding a Number and
+slot 1 holding the host reference for the canonical Element. JavaScript can
+read `pair[0]`, `pair[1]`, `pair.length`, and the own-index checks exercised by
+the fixture. It is not a string or opaque host handle, and no general Array
+API was added.
+
+`VALUES`, `KEYS`, and `ENTRIES` share the JS79/JS80 128-record iterator
+registry, the 24-byte iterator record (3,072 bytes for the registry), and the
+same receiver validation, captured-length setup, generation-safe live lookup,
+and `next()` implementation. The mode occupies existing record padding; no
+second registry, selector parser, or lookup path was introduced. Entry pairs
+reuse the runtime's Array object and slot machinery. The selector descriptor
+remains 1,918 bytes, each collection record remains 1,936 bytes, and the
+128-record collection registry remains 247,808 bytes.
+
+The Element in slot 1 is canonical: host references for the same generation,
+kind, and Element serial resolve to the same runtime host-object identity.
+Native and hosted checks compare the pair slot with both `collection[index]`
+and `collection.item(index)`. Each nonterminal step creates a distinct pair
+and result object. Previously returned indices, Elements, pair objects, and
+outer results survive later steps and DOM mutation. The retained runtime has
+no garbage collector, so these returned objects consume bounded realm pools
+until that realm is reset.
+
+#### Bounds, mutation, and ownership
+
+Iterator creation captures the current collection length. Each step resolves
+the current numeric position against the live collection descriptor and
+original scope. Growth does not extend an existing cursor; a new cursor may
+observe it. Shrinking skips positions which no longer resolve, and index
+shifts are observed at the cursor's next index without rewinding. A cursor
+does not snapshot Element identities and does not promise exactly-once
+visitation under arbitrary mutation. Once terminal, it stays terminal after
+growth and does not perform another indexed lookup. Repeated exhaustion uses
+the existing fresh outer-result policy but never allocates another pair.
+
+The shared path preserves document generation checks, stale host-object
+validation, collection scope, filtered positional selector behavior, and the
+tag/class adapters. Tests cover document replacement with reused structural
+serials and stale Element access through an already returned pair. Separate
+entries cursors and interleaved values/keys/entries cursors have independent
+indices. Invalid or unbound entries and `next()` receivers fail through the
+existing `InvalidReceiver` path. Nested callbacks and Events preserve cursor
+state and Event metadata; JS9's established reentry policy is unchanged.
+
+#### Allocation atomicity and pool limits
+
+An entry needs one Array object with two `Value` slots plus one outer result
+object with its two properties. The runtime prepares both before advancing the
+cursor. Any failure restores the object, property, Array-slot, and newly
+registered host-object counts to their pre-call values, then leaves the
+cursor at its unreturned index. Existing canonical host handles are retained;
+new handles, including a reused free host-object slot, are restored on
+rollback. This behavior is exercised at pair-object exhaustion, outer-result
+object exhaustion, Array-slot quota exhaustion, Element host-handle exhaustion,
+and a property limit which fails after partial outer-result initialization.
+The tests verify that the pair/result are not published, earlier results stay
+intact, active frames return to zero, and logical pool counts are restored.
+The global object and host-object `std::vector` backing capacity may retain a
+grown high-water allocation after rollback until the runtime is reset; it is
+included in the reported vector-capacity figures and remains bounded by the
+existing pool limits. Rolled-back object records, pair slots, result property
+vectors, and newly registered handles themselves are destroyed or removed.
+
+With the default 1,024-object pool and all successful results retained, 509
+entry pairs plus their 509 outer results were produced. A request for 512
+results reaches the runtime object limit on the 510th `next()`; the in-progress
+pair is rolled back, the cursor remains at index 509, and the 509 previous
+results remain valid. No pool capacity was increased. This is the tested
+maximum simultaneous retained entry-result count, not an unbounded traversal
+claim.
+
+At that point the measured pools were 1,023/1,024 runtime objects,
+1,527/4,096 Array slots, 1,031/4,096 properties, 512/2,048 host objects,
+and 1/2,048 environments. The host count includes 509 returned Element
+handles in addition to the three existing runtime handles. A runtime object
+record is 56 bytes, a property record is 80 bytes, and each two-slot pair
+reserves 80 bytes of Array-slot storage. Thus each yielded result has 136
+bytes of pair object/slot payload and 216 bytes of outer object/property
+payload (352 bytes total, before allocator overhead and vector slack). The
+509 pair slot vectors use 40,720 bytes; outer result payload is 109,944 bytes,
+and outer result property-vector capacity is 81,440 bytes. The runtime object
+vector capacity is 57,344 bytes and the host-object vector capacity is
+24,576 bytes. These are measured runtime allocation capacities, not process
+RSS. The existing 24-byte iterator and selector collection sizes are
+unchanged.
+
+#### JS81 native and performance qualification
+
+The final JS81 focused suite passed **600/600 checks** under strict MinGW
+compilation with `-Wall -Wextra -Werror -pedantic` (target
+`x86_64-w64-mingw32`, GCC 15.2.0). It covers genuine Array indexing and
+length, stable pair and result identities, empty/single/multiple collections,
+repeated exhaustion, independent and mixed cursors, captured bounds,
+growth/shrinkage/index shifts, document generation and serial reuse, stale
+Element access, scope, tag/class adapters, filtered selectors, invalid
+receivers, nested callbacks/Events, iterator registry saturation, and the
+allocation-failure cases above. Traversals of 16, 64, 128, and 256 entries
+complete; a 512-result request is attempted and reaches the tested pool bound
+at result 510, after retaining 509.
+
+The latest seven-sample harness medians (microseconds, including
+parse/evaluation) were: 64-entry `entries()` creation 9, first step 7, middle
+step 10, last step 26, exhaustion 26, repeated exhaustion 25, and full
+64-entry traversal 380. The comparable full traversals were 353 for values
+and 351 for keys. Filtered entries traversal was 656; mixed
+entries/keys/values advancement was 129. Mutation between entry reads measured
+20. Traversal medians by size were 16 entries 45, 64 entries 380, 128 entries
+1,555, 256 entries 7,297, and near-capacity 509 entries 11,516 microseconds
+(three samples for the near-capacity case). These full-call measurements
+include parse/evaluation, length counting, live selector lookup, pair allocation, and outer-result
+allocation; traversal is bounded by the existing pool limits and is not
+constant time. The separately measured 512-key and 1,019-key baselines were
+11,467 and 83,503 microseconds.
+
+Production `-O2 -fstack-usage` reports 8-byte entries wrapper frames, 176
+bytes for shared iterator creation, 80 bytes for shared `next()`, 512 bytes
+for pair/result creation (plus a 96-byte rollback lambda frame), 448 bytes for
+ordinary result creation, 368 bytes for evaluator host-value invocation, and
+576 bytes for runtime host-method invocation. The maximum eight-slot filtered
+rank scratch frame remains 18,688 bytes. These host compiler measurements do
+not qualify a bare-metal stack.
+
+#### JS81 regressions, build, and hosted evidence
+
+The complete JavaScript matrix passed **83/83 lanes** with
+**14,945/14,945 reported assertions across 42 assertion-bearing lanes** under
+PowerShell 7.6.5. Focused regressions passed JS9 hosted Event behavior and
+JS75 **61/61**, JS76 **106/106**, JS77 **135/135**, JS78 **102/102**, JS79
+**202/202**, and JS80 **379/379**. JS81 passed **600/600** and strict compilation.
+No historical assertion was weakened.
+
+The production `build.bat` command exited 0 from branch
+`NAVIGATOR_JAVASCRIPT_SUPPORT`, starting HEAD
+`01b02b06c43eb7f91a655c3bf90f7abc27ea21a9` plus the JS81 source changes later
+recorded in the local commit. It produced
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,603,409
+bytes, SHA-256
+`5B73933E3F76267EAB2B377F28DF915953FCDBE7BF0E3D9AABD397D517C58958`. The
+hosted smoke process used that same executable path and hash, with PID 8820.
+After hosted validation, the pre-existing 8,398,274-byte executable was
+restored from its hash-verified backup.
+
+The hosted aggregate passed **678 checks** and reported **7 failures**. JS9
+hosted behavior and JS79, JS80, and JS81 fixture, stability/mixed-mode, nested
+Event, and invalid-receiver checks passed. JS81's initial fixture reported
+40/40 assertions. The only hosted failures were the established CSS 3C, CSS
+3G, CSS 6A, CSS 6B (three checks), and CSS 6C cases; the runner exited 1 only
+for those failures. No CSS files or grammar were changed.
+
+The hosted run used the existing `-LogDirectory` interface to keep its logs
+outside the checkout. The matrix, focused JS81, JS9/JS75–JS80 regression,
+production build, hosted runner, HTTP, HTTPS, and aggregate logs are retained
+under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js81-hosted-evidence\20261020-143710-d1894050f6b34aeabe431c217feb4cba`.
+The final JS81 smoke runner also wrote its focused compiler/test output under
+`C:\Users\guideX\AppData\Local\Temp\guidex-navigator-javascript-js81-test-20261020-165317-94d7602d861f49c8aa9daa6c80ce5c9f`.
+
+The JS81 preflight ignored manifest contained **1,367 files / 90,843,932
+bytes**. Backups were captured for the executable, mutable settings, and 42
+generated fixture files; each source and backup hash was checked before the
+build, and all 48 files were restored and reverified byte-for-byte after
+hosted testing. The final ignored manifest again contains **1,367 files /
+90,843,932 bytes**: **0 changed, 0 missing, and 0 extra**. Hosted logs were
+written externally, so no new ignored repository files remain. `.phase` was
+absent at preflight and remains absent.
+
+At JS81 start the live branch was `NAVIGATOR_JAVASCRIPT_SUPPORT`, HEAD was
+`01b02b06c43eb7f91a655c3bf90f7abc27ea21a9`, upstream divergence was **0 ahead
+/ 0 behind**, and the tracked worktree was clean. The prompt's historical
+expected divergence of 1/0 did not match live Git state; the live state was
+recorded and no synchronization was performed. The duplicate/stale gate found
+no existing JS81 or later implementation. After the local qualification
+commit, divergence is expected to be 1 ahead / 0 behind. `git diff --check`
+passed, and kernel/QEMU qualification was not run.
+
+**Outcome A — JS81 bounded collection `entries()` iterator fully qualified.**
+This qualifies Navigator's bounded collection API, not ECMAScript iterable
+protocols. A subsequent JS82 could evaluate `Symbol.iterator` and `for...of`
+only as a separately bounded language/runtime phase; spread, destructuring,
+and general iterable support remain deferred.
