@@ -69,6 +69,124 @@ function Assert-DeveloperStudioMinimumServerVersion {
     }
 }
 
+function Get-ReleaseNativeAppContract {
+    param([Parameter(Mandatory = $true)][string]$PackageName)
+
+    switch ($PackageName) {
+        'PacMan' {
+            return [PSCustomObject]@{
+                Id = 'com.guidexos.pacman'
+                Elf = 'bin/amd64/pacman.elf'
+            }
+        }
+        'DeveloperStudio' {
+            return [PSCustomObject]@{
+                Id = 'com.guidexos.developerstudio'
+                Elf = 'bin/amd64/developerstudio.elf'
+            }
+        }
+        default { throw "Native app package is not in the Server v0.3 package selection: $PackageName" }
+    }
+}
+
+function Assert-ReleaseNativeAppManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$ManifestPath,
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [ValidateSet('amd64')][string]$Architecture = 'amd64',
+        [string]$TargetServerVersion = '0.3.0'
+    )
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        throw "Native app manifest is missing: $ManifestPath"
+    }
+    try {
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "Native app manifest is invalid JSON: $ManifestPath. $($_.Exception.Message)"
+    }
+
+    $contract = Get-ReleaseNativeAppContract -PackageName $PackageName
+    if ($manifest.id -ne $contract.Id -or $manifest.kind -ne 'NativeElf') {
+        throw "Native app manifest does not match the selected $PackageName v0.3 package contract."
+    }
+    try {
+        $minimumVersion = [Version]::Parse([string]$manifest.minGuideXOSVersion)
+        $targetVersion = [Version]::Parse($TargetServerVersion)
+    } catch {
+        throw "Native app manifest has an invalid minimum Server version or target version: $ManifestPath"
+    }
+    if ($minimumVersion -gt $targetVersion) {
+        throw "$PackageName requires guideXOS Server $minimumVersion or later; release target $targetVersion is unsupported."
+    }
+
+    $supportedArchitectures = @($manifest.supportedArchitectures | ForEach-Object { ([string]$_).ToLowerInvariant() })
+    if ($supportedArchitectures.Count -ne 1 -or $supportedArchitectures[0] -ne $Architecture) {
+        throw "$PackageName must declare only the supported release architecture '$Architecture'."
+    }
+    $entries = @($manifest.entries)
+    if ($entries.Count -ne 1 -or $entries[0].architecture -ne $Architecture -or
+        $entries[0].path -ne $contract.Elf -or $entries[0].entryPoint -ne 'gx_main' -or
+        $entries[0].abi -ne 'guidexos-c-abi-v1' -or $entries[0].runtime -ne 'native-elf') {
+        throw "$PackageName manifest does not declare exactly one compatible $Architecture NativeElf entry."
+    }
+
+    return [PSCustomObject]@{
+        PackageName = $PackageName
+        MinimumServerVersion = $minimumVersion.ToString()
+        TargetServerVersion = $targetVersion.ToString()
+        Architecture = $Architecture
+        EntryPath = $contract.Elf
+    }
+}
+
+function Assert-ReleaseNativeAppShipSet {
+    param(
+        [Parameter(Mandatory = $true)][string]$EspRoot,
+        [string[]]$RequiredPackageNames = @('PacMan', 'DeveloperStudio'),
+        [ValidateSet('amd64')][string]$Architecture = 'amd64',
+        [string]$TargetServerVersion = '0.3.0'
+    )
+
+    if (-not (Test-Path -LiteralPath $EspRoot -PathType Container)) {
+        throw "ESP root is missing: $EspRoot"
+    }
+    $appsRoot = Join-Path $EspRoot 'Apps'
+    if (-not (Test-Path -LiteralPath $appsRoot -PathType Container)) {
+        throw "ESP Native app root is missing: $appsRoot"
+    }
+
+    $packageDirectories = @(Get-ChildItem -LiteralPath $appsRoot -Directory -Force)
+    $selectedNames = @($packageDirectories | ForEach-Object { $_.Name })
+    foreach ($name in $selectedNames) {
+        [void](Get-ReleaseNativeAppContract -PackageName $name)
+    }
+    foreach ($requiredName in $RequiredPackageNames) {
+        if ($selectedNames -notcontains $requiredName) {
+            throw "Required Native app package is missing from the ESP ship-set: $requiredName"
+        }
+    }
+    foreach ($packageDirectory in $packageDirectories) {
+        $contract = Get-ReleaseNativeAppContract -PackageName $packageDirectory.Name
+        $manifestPath = Join-Path $packageDirectory.FullName 'app.json'
+        [void](Assert-ReleaseNativeAppManifest -ManifestPath $manifestPath `
+            -PackageName $packageDirectory.Name -Architecture $Architecture `
+            -TargetServerVersion $TargetServerVersion)
+        $elfPath = Join-Path $packageDirectory.FullName ($contract.Elf -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $elfPath -PathType Leaf)) {
+            throw "Selected Native app package is missing its AMD64 ELF: $($packageDirectory.Name)"
+        }
+        $bytes = [IO.File]::ReadAllBytes($elfPath)
+        if ($bytes.Length -lt 20 -or $bytes[0] -ne 0x7f -or $bytes[1] -ne 0x45 -or
+            $bytes[2] -ne 0x4c -or $bytes[3] -ne 0x46 -or $bytes[4] -ne 2 -or
+            $bytes[5] -ne 1 -or $bytes[18] -ne 0x3e -or $bytes[19] -ne 0) {
+            throw "Selected Native app ELF is not a little-endian AMD64 ELF64 image: $($packageDirectory.Name)"
+        }
+    }
+
+    return [PSCustomObject]@{ PackageNames = $selectedNames; Architecture = $Architecture }
+}
+
 function Read-ReleaseBuildIdentity {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -159,4 +277,4 @@ function Assert-ReleaseBuildIdentity {
     return $identity
 }
 
-Export-ModuleMember -Function Get-DeveloperStudioSignedOffIdentity, Assert-DeveloperStudioMinimumServerVersion, Assert-ReleaseCommandCompleted, Read-ReleaseBuildIdentity, Assert-ReleaseBuildIdentity
+Export-ModuleMember -Function Get-DeveloperStudioSignedOffIdentity, Assert-DeveloperStudioMinimumServerVersion, Assert-ReleaseNativeAppManifest, Assert-ReleaseNativeAppShipSet, Assert-ReleaseCommandCompleted, Read-ReleaseBuildIdentity, Assert-ReleaseBuildIdentity

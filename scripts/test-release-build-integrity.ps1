@@ -79,6 +79,35 @@ try {
     Assert-Throws { Assert-DeveloperStudioMinimumServerVersion -ManifestPath $historicalV021Manifest -TargetServerVersion '0.3.0' } 'rejects the exact v0.2.1 media manifest because it requires Server 0.5.0'
     $phase25Manifest = Join-Path $PSScriptRoot '..\tests\fixtures\developerstudio-phase25-app.json'
     Assert-Throws { Assert-DeveloperStudioMinimumServerVersion -ManifestPath $phase25Manifest -TargetServerVersion '0.3.0' } 'rejects the Phase 25 manifest because it requires Server 0.5.0'
+    $pacmanManifest = Join-Path $PSScriptRoot '..\Apps\PacMan\app.json'
+    $pacmanCompatibility = Assert-ReleaseNativeAppManifest -ManifestPath $pacmanManifest -PackageName 'PacMan' -Architecture 'amd64' -TargetServerVersion '0.3.0'
+    Assert-True ($pacmanCompatibility.MinimumServerVersion -eq '0.1.0' -and $pacmanCompatibility.Architecture -eq 'amd64') 'accepts the qualified PacMan package contract for the v0.3 amd64 target'
+    $modernDeveloperStudioManifest = Join-Path $PSScriptRoot '..\Apps\DeveloperStudio\app.json'
+    Assert-Throws { Assert-ReleaseNativeAppManifest -ManifestPath $modernDeveloperStudioManifest -PackageName 'DeveloperStudio' -Architecture 'amd64' -TargetServerVersion '0.3.0' } 'rejects the unmodified current DeveloperStudio package because its declared minimum is Server 0.5.0'
+
+    $unsupportedArchitectureManifest = Join-Path $TestRoot 'pacman-unsupported-architecture.json'
+    $unsupportedArchitecture = Get-Content -LiteralPath $pacmanManifest -Raw | ConvertFrom-Json
+    $unsupportedArchitecture.supportedArchitectures = @('arm64')
+    $unsupportedArchitecture.entries = @([PSCustomObject]@{
+        architecture = 'arm64'
+        path = 'bin/arm64/pacman.elf'
+        entryPoint = 'gx_main'
+        abi = 'guidexos-c-abi-v1'
+        runtime = 'native-elf'
+    })
+    [IO.File]::WriteAllText($unsupportedArchitectureManifest, ($unsupportedArchitecture | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Assert-ReleaseNativeAppManifest -ManifestPath $unsupportedArchitectureManifest -PackageName 'PacMan' -Architecture 'amd64' -TargetServerVersion '0.3.0' } 'rejects a package that declares only an unsupported architecture'
+
+    $packageSetRoot = Join-Path $TestRoot 'package-set-esp'
+    $packageSetPacman = Join-Path $packageSetRoot 'Apps\PacMan'
+    New-Item -ItemType Directory -Path (Join-Path $packageSetPacman 'bin\amd64') -Force | Out-Null
+    Copy-Item -LiteralPath $pacmanManifest -Destination (Join-Path $packageSetPacman 'app.json')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\Apps\PacMan\bin\amd64\pacman.elf') -Destination (Join-Path $packageSetPacman 'bin\amd64\pacman.elf')
+    $selectedPackageSet = Assert-ReleaseNativeAppShipSet -EspRoot $packageSetRoot -RequiredPackageNames @('PacMan') -Architecture 'amd64' -TargetServerVersion '0.3.0'
+    Assert-True ($selectedPackageSet.PackageNames.Count -eq 1 -and $selectedPackageSet.PackageNames[0] -eq 'PacMan') 'accepts the selected PacMan-only Native ELF ship-set'
+    New-Item -ItemType Directory -Path (Join-Path $packageSetRoot 'Apps\UnlistedPackage') -Force | Out-Null
+    Assert-Throws { Assert-ReleaseNativeAppShipSet -EspRoot $packageSetRoot -RequiredPackageNames @('PacMan') -Architecture 'amd64' -TargetServerVersion '0.3.0' } 'rejects an extra package directory copied into ESP\Apps outside the release selection'
+
     $compatibleManifest = Join-Path $TestRoot 'developerstudio-v03-compatible.json'
     [IO.File]::WriteAllText($compatibleManifest, '{"id":"com.guidexos.developerstudio","minGuideXOSVersion":"0.3.0"}')
     $compatibility = Assert-DeveloperStudioMinimumServerVersion -ManifestPath $compatibleManifest -TargetServerVersion '0.3.0'

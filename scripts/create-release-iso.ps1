@@ -486,6 +486,9 @@ try {
 
     $expectedBuildId = $null
     if (-not $SkipBuild) { $expectedBuildId = Invoke-CanonicalBuild }
+    [void](Assert-ReleaseNativeAppShipSet -EspRoot $EspRoot `
+        -RequiredPackageNames @('PacMan', 'DeveloperStudio') `
+        -Architecture $Arch -TargetServerVersion '0.3.0')
     $releaseIdentity = Assert-ReleaseBuildIdentity `
         -IdentityPath (Join-Path $EspRoot 'build-identity.txt') `
         -EspRoot $EspRoot `

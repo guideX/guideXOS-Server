@@ -596,6 +596,8 @@ function Stage-AppModelPackages {
 
         try {
             $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            [void](Assert-ReleaseNativeAppManifest -ManifestPath $manifestPath `
+                -PackageName $spec.Name -Architecture $Arch -TargetServerVersion '0.3.0')
             $entry = @($manifest.entries | Where-Object { $_.architecture -eq $Arch })
             if ($manifest.id -ne $spec.Id -or $manifest.kind -ne "NativeElf" -or
                 $entry.Count -ne 1 -or $entry[0].path -ne ($spec.Elf.Replace('\', '/')) -or
@@ -672,6 +674,17 @@ function Stage-AppModelPackages {
     Set-BuildIdentityValue 'stage.appPackages' 'passed'
 }
 Stage-AppModelPackages
+
+# Refuse stale or manually copied packages under ESP\Apps. The canonical
+# release ship-set is selected above; the whole ESP tree is later copied to
+# release media, so extra package directories must fail the build.
+try {
+    [void](Assert-ReleaseNativeAppShipSet -EspRoot $ESPDir `
+        -RequiredPackageNames @('PacMan', 'DeveloperStudio') `
+        -Architecture $Arch -TargetServerVersion '0.3.0')
+} catch {
+    Fail-Build "Native app ship-set validation failed: $($_.Exception.Message)" 'appPackages'
+}
 
 # Build the boot-time runtime filesystem from the verified ESP package bytes.
 Build-WallpaperRuntimeImage
