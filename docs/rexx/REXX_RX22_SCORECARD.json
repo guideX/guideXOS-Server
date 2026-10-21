@@ -33,7 +33,7 @@
       "status": "Implemented",
       "semantics": "No argument returns the final source line count or zero if unavailable. A valid positive whole-number line request returns exact source text; invalid/out-of-range requests fail. LF/CRLF, lone CR content, and trailing-line behavior are covered.",
       "ownership": "The lexer lends source to the AST only through compilation. Each chunk owns one source snapshot, capped at 16 MiB. VM active-chunk state selects root, internal-routine, and INTERPRET source contexts; per-VM state is isolated. Dynamic bytecode accounting includes the snapshot.",
-      "coverage": "Released caller buffer, blank/comment/high-bit lines, empty program, trailing newline, CRLF, final lone CR content, internal routine, INTERPRET, missing source, VM isolation, and compiler/result allocation failure recovery."
+      "coverage": "Released caller buffer, blank/comment/quoted binary-literal/high-bit lines, empty program, trailing newline, CRLF, final lone CR content, internal routine, INTERPRET, missing source, VM isolation, and compiler/result allocation failure recovery."
     },
     "ERRORTEXT": {
       "status": "Implemented",
@@ -46,7 +46,7 @@
   "qualification": {
     "direct_rx22": {
       "status": "PASS",
-      "assertions": 2282,
+      "assertions": 2285,
       "failures": 0,
       "reverse_property_cases": 500,
       "property_seed": "0x52583232",
@@ -74,7 +74,7 @@
         "RX16": "10/10",
         "RX17": "10/10"
       },
-      "evidence": "evidence/rx22/hosted-regressions-final2.log"
+      "evidence": "evidence/rx22/hosted-requalification.log"
     },
     "portable_corpus": {
       "status": "PASS — local expected results",
@@ -87,13 +87,13 @@
       "status": "PASS",
       "targets": "23/23",
       "findings": 0,
-      "evidence": "evidence/rx22/sanitizer-address-0d76df3b25174fef8427044a87feb9b9"
+      "evidence": "evidence/rx22/sanitizer-address-2ad592fc763f426684a74fad19cf95ef"
     },
     "undefined_behavior_sanitizer": {
       "status": "PASS",
       "targets": "23/23",
       "findings": 0,
-      "evidence": "evidence/rx22/sanitizer-undefined-6fd14815d9ba4b429ded3a8f0a2489e1"
+      "evidence": "evidence/rx22/sanitizer-undefined-6df6efe4fd224f419d072cf21134f153"
     },
     "freestanding_amd64": {
       "status": "PASS",

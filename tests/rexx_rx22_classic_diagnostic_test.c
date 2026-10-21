@@ -586,6 +586,32 @@ static void test_sourceline_source_ownership_and_boundaries(void)
     }
 
     {
+        static const char quoted_binary_source[] =
+            "line = SOURCELINE(2)\n"
+            "value = '00FF80'X";
+        RexxBytecodeChunk *quoted_binary_chunk = NULL;
+        RexxVM quoted_binary_vm;
+        memset(&quoted_binary_vm, 0, sizeof(quoted_binary_vm));
+        status = compile_bytes(quoted_binary_source,
+                               sizeof(quoted_binary_source) - 1u,
+                               &quoted_binary_chunk);
+        CHECK(status == REXX_VM_STATUS_OK && quoted_binary_chunk != NULL &&
+                  quoted_binary_chunk->source_line_count == 2u,
+              "source containing a quoted binary literal compiles");
+        if (quoted_binary_chunk != NULL) {
+            CHECK(rexx_vm_init(&quoted_binary_vm, 0u) == REXX_VM_STATUS_OK &&
+                      rexx_vm_execute(&quoted_binary_vm, quoted_binary_chunk) ==
+                          REXX_VM_STATUS_OK,
+                  "quoted binary literal source program executes");
+            value = find_local(&quoted_binary_vm, "LINE");
+            CHECK(string_equal(value, "value = '00FF80'X"),
+                  "SOURCELINE preserves quoted binary literal source text");
+            rexx_vm_free(&quoted_binary_vm);
+            rexx_bytecode_chunk_free(quoted_binary_chunk);
+        }
+    }
+
+    {
         RexxBytecodeChunk *empty_chunk = NULL;
         RexxBytecodeChunk *newline_chunk = NULL;
         CHECK(compile_bytes("", 0u, &empty_chunk) == REXX_VM_STATUS_OK &&

@@ -1,0 +1,3 @@
+Usage: D:\dev\guideXOSServer_REXX\build\rexx\rx22\sanitizer-undefined-6df6efe4fd224f419d072cf21134f153\bin\rx1_cli\rx1_cli.exe <script.rx> [arguments...]
+       D:\dev\guideXOSServer_REXX\build\rexx\rx22\sanitizer-undefined-6df6efe4fd224f419d072cf21134f153\bin\rx1_cli\rx1_cli.exe --help
+       D:\dev\guideXOSServer_REXX\build\rexx\rx22\sanitizer-undefined-6df6efe4fd224f419d072cf21134f153\bin\rx1_cli\rx1_cli.exe -- <script-path> [arguments...]

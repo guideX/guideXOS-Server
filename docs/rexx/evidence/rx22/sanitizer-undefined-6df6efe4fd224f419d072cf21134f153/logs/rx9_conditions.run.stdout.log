@@ -1,0 +1,2 @@
+RX9 allocator failpoints: parser 41, compiler 38, VM 78
+RX9 condition assertions: 469 (PASS)

@@ -84,7 +84,7 @@ The implemented IBM mapping is:
 
 ## Qualification
 
-The direct C suite uses an independent expected-message array for all 100 in-range codes. It checks reference examples, invalid arguments, repeated lookups, memory-failure recovery, and separate VM source contexts. `REVERSE` property cases use the fixed seed `0x52583232`, compare against a separately computed byte-reversal oracle, check byte multisets, ensure inputs remain unchanged, and verify double reversal. Source tests cover caller-buffer release, empty and final lines, LF/CRLF, blank lines, high-bit bytes, internal routine calls, `INTERPRET`, missing source, and compiler-allocation failure recovery.
+The direct C suite uses an independent expected-message array for all 100 in-range codes. It checks reference examples, invalid arguments, repeated lookups, memory-failure recovery, and separate VM source contexts. `REVERSE` property cases use the fixed seed `0x52583232`, compare against a separately computed byte-reversal oracle, check byte multisets, ensure inputs remain unchanged, and verify double reversal. Source tests cover caller-buffer release, empty and final lines, LF/CRLF, blank lines, comments, quoted binary literals, high-bit bytes, internal routine calls, `INTERPRET`, missing source, and compiler-allocation failure recovery.
 
 The hosted RX22 runner adds a CLI fixture and reruns the inherited regression suites. Sanitizer, native AMD64, Regina, QAC, guest, protected-file, and untracked-path results are recorded in [the RX22 scorecard](REXX_RX22_SCORECARD.json) and [RX22 evidence](evidence/rx22/).
 
