@@ -225,14 +225,59 @@ function Get-Sha256([string]$Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Confirm-WritableQemuDiskFile([string]$Path) {
+    $attributes = [IO.File]::GetAttributes($Path)
+    if (($attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) {
+        $writableAttributes = [IO.FileAttributes](([int]$attributes) -band (-bnot [int][IO.FileAttributes]::ReadOnly))
+        [IO.File]::SetAttributes($Path, $writableAttributes)
+    }
+    $finalAttributes = [IO.File]::GetAttributes($Path)
+    if (($finalAttributes -band [IO.FileAttributes]::ReadOnly) -ne 0) { throw "Disposable QEMU disk remains marked read-only: $Path" }
+
+    $stream = $null
+    try {
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+    } finally {
+        if ($stream) { $stream.Dispose() }
+    }
+    [ordered]@{
+        passed = $true
+        path = [IO.Path]::GetFullPath($Path)
+        readOnlyAttribute = $false
+        writeOpenSucceeded = $true
+        effectiveWriterIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        aclOwner = (Get-Acl -LiteralPath $Path).Owner
+    }
+}
+
 function New-DisposableQemuDiskCopy([string]$SourcePath, [string]$DestinationPath) {
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "Verified raw disk source is missing: $SourcePath" }
     if (Test-Path -LiteralPath $DestinationPath) { throw "Refusing to replace an existing per-run disk copy: $DestinationPath" }
+    $sourceFullPath = [IO.Path]::GetFullPath($SourcePath)
+    $sourceHash = Get-Sha256 $sourceFullPath
+    $sourceAttributes = [IO.File]::GetAttributes($sourceFullPath)
     [IO.File]::Copy([IO.Path]::GetFullPath($SourcePath), [IO.Path]::GetFullPath($DestinationPath), $false)
-    $sourceHash = Get-Sha256 $SourcePath
-    $copyHash = Get-Sha256 $DestinationPath
+    $copyFullPath = [IO.Path]::GetFullPath($DestinationPath)
+    $writeCheck = Confirm-WritableQemuDiskFile $copyFullPath
+    $copyHash = Get-Sha256 $copyFullPath
     if ($copyHash -cne $sourceHash) { throw 'Disposable QEMU disk copy differs from its verified source image.' }
-    [ordered]@{ path = [IO.Path]::GetFullPath($DestinationPath); lengthBytes = (Get-Item -LiteralPath $DestinationPath).Length; initialSha256 = $copyHash; sourcePath = [IO.Path]::GetFullPath($SourcePath); sourceSha256 = $sourceHash; byteIdenticalAtCreation = $true; sourceModified = $false }
+    $sourceHashAfterCopy = Get-Sha256 $sourceFullPath
+    $sourceAttributesAfterCopy = [IO.File]::GetAttributes($sourceFullPath)
+    if ($sourceHashAfterCopy -cne $sourceHash -or $sourceAttributesAfterCopy -ne $sourceAttributes) { throw 'Creating the disposable QEMU disk copy changed the verified source disk.' }
+    [ordered]@{
+        path = $copyFullPath
+        lengthBytes = (Get-Item -LiteralPath $copyFullPath).Length
+        initialSha256 = $copyHash
+        sourcePath = $sourceFullPath
+        sourceSha256 = $sourceHash
+        sourceSha256AfterCopy = $sourceHashAfterCopy
+        sourceAttributes = [string]$sourceAttributes
+        sourceAttributesAfterCopy = [string]$sourceAttributesAfterCopy
+        byteIdenticalAtCreation = $true
+        destinationReadOnly = $false
+        writeAccess = $writeCheck
+        sourceModified = $false
+    }
 }
 
 function ConvertTo-QemuOptionValue([string]$Value) {
@@ -313,7 +358,7 @@ function Test-StructuredArgumentPassing {
 }
 
 function Get-GuestFailureMarker([string]$Text) {
-    $pattern = '(?m)(\[KERNEL-PANIC\][^\r\n]*|\[KERNEL-FAULT\][^\r\n]*|\[NATIVE-ELF-FAULT\][^\r\n]*|\[Exception\] (?:Unhandled exception|Double fault)[^\r\n]*|Triple fault[^\r\n]*)'
+    $pattern = '(?m)(\[KERNEL-PANIC\][^\r\n]*|\[KERNEL-FAULT\][^\r\n]*|\[NATIVE-ELF-FAULT\][^\r\n]*|\[NATIVE-ELF\] discovery result=NO_APPS_DIRECTORY[^\r\n]*|\[SN10-GUEST\] appmodel-launch result=failed[^\r\n]*|\[Exception\] (?:Unhandled exception|Double fault)[^\r\n]*|Triple fault[^\r\n]*)'
     $match = [regex]::Match($Text, $pattern)
     if ($match.Success) { return $match.Value }
     return $null
@@ -687,9 +732,18 @@ function Invoke-SelfTest {
         $copySource = Join-Path $script:RunRoot 'selftest-source.raw'
         $copyTarget = Join-Path $script:RunRoot 'selftest-disposable.raw'
         [IO.File]::WriteAllBytes($copySource, [Text.Encoding]::UTF8.GetBytes('immutable-candidate-test-bytes'))
+        [IO.File]::SetAttributes($copySource, ([IO.File]::GetAttributes($copySource) -bor [IO.FileAttributes]::ReadOnly))
         $copyEvidence = New-DisposableQemuDiskCopy $copySource $copyTarget
-        if (-not $copyEvidence.byteIdenticalAtCreation -or $copyEvidence.sourceModified -or (Get-Sha256 $copySource) -cne $copyEvidence.sourceSha256) { throw 'Disposable QEMU disk-copy isolation check failed.' }
-        $runnerResult.checks.disposableDiskIsolation = [ordered]@{ passed = $true; sourceRemainsByteIdentical = $true; perRunCopyInitiallyMatches = $true; qemuCanWriteOnlyToCopy = $true; evidence = $copyEvidence }
+        if (-not $copyEvidence.byteIdenticalAtCreation -or $copyEvidence.sourceModified -or $copyEvidence.destinationReadOnly -or -not $copyEvidence.writeAccess.writeOpenSucceeded -or (Get-Sha256 $copySource) -cne $copyEvidence.sourceSha256 -or ([IO.File]::GetAttributes($copySource) -band [IO.FileAttributes]::ReadOnly) -eq 0) { throw 'Disposable QEMU disk-copy isolation or write-access check failed.' }
+        $sourceHashBeforeSimulatedGuestWrite = Get-Sha256 $copySource
+        $simulatedGuestWrite = $null
+        try {
+            $simulatedGuestWrite = [IO.File]::Open($copyTarget, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+            $simulatedGuestWrite.Seek(0, [IO.SeekOrigin]::Begin) | Out-Null
+            $simulatedGuestWrite.WriteByte(0xff)
+        } finally { if ($simulatedGuestWrite) { $simulatedGuestWrite.Dispose() } }
+        if ((Get-Sha256 $copySource) -cne $sourceHashBeforeSimulatedGuestWrite -or (Get-Sha256 $copyTarget) -ceq $copyEvidence.initialSha256) { throw 'Simulated guest disk write did not remain isolated to the writable copy.' }
+        $runnerResult.checks.disposableDiskIsolation = [ordered]@{ passed = $true; sourceRemainsByteIdenticalAfterSimulatedGuestWrite = $true; sourceReadOnlyAttributePreserved = $true; perRunCopyInitiallyMatches = $true; perRunCopyReadOnlyAttributeCleared = $true; hostWriteOpenSucceeded = $true; simulatedGuestWriteChangedOnlyCopy = $true; evidence = $copyEvidence }
 
         $reopenCommand = 'desktop.launch com.guidexos.stellarnavigator'
         $reopenKeys = @(Get-QemuTextKeyCommands $reopenCommand)
@@ -778,7 +832,10 @@ function Invoke-SelfTest {
         if (-not $producer6.WaitForExit(5000)) { $producer6.Kill(); throw 'Fatal-marker serial producer did not exit.' }
         [void]$capture6.WaitForCompletion(3000)
         if (-not $guestFailureObserved) { throw 'Fatal guest marker was reported as a timeout or transport failure.' }
-        $runnerResult.checks.guestFailureMarker = [ordered]@{ passed = $true; classification = 'GUEST_FAILURE'; fatalMarkerRecognized = '[KERNEL-PANIC]'; logPath = $capture6Path }
+        $missingAppsFailure = Get-GuestFailureMarker '[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY'
+        $appModelLaunchFailure = Get-GuestFailureMarker '[SN10-GUEST] appmodel-launch result=failed'
+        if ($missingAppsFailure -notmatch 'NO_APPS_DIRECTORY' -or $appModelLaunchFailure -notmatch 'appmodel-launch result=failed') { throw 'Native AppModel discovery or launch failure was not recognized as a fatal guest acceptance marker.' }
+        $runnerResult.checks.guestFailureMarker = [ordered]@{ passed = $true; classification = 'GUEST_FAILURE'; fatalKernelMarkerRecognized = '[KERNEL-PANIC]'; fatalNativeDiscoveryMarkerRecognized = '[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY'; fatalAppModelLaunchMarkerRecognized = '[SN10-GUEST] appmodel-launch result=failed'; logPath = $capture6Path }
         $capture6.Dispose(); $capture6 = $null
 
         $capture4Path = Join-Path $script:RunRoot 'selftest-no-client.serial.log'
@@ -834,6 +891,7 @@ $script:ManagedQac = $null
 $script:ReservationId = $null
 $script:MonitorPort = 0
 $capture = $null
+$runtimeDiskCopy = $null
 $overall = [ordered]@{
     schemaVersion = 1
     mode = 'native-guest-acceptance'
@@ -883,7 +941,7 @@ try {
     $runtimeDiskPath = Join-Path $script:RunRoot 'qac-disposable-disk.raw'
     $runtimeDiskCopy = New-DisposableQemuDiskCopy $CandidateDiskPath $runtimeDiskPath
     if ($runtimeDiskCopy.initialSha256 -cne $candidateCheck.candidateDisk.sha256) { throw 'Per-run writable QEMU disk copy differs from the verified immutable candidate image.' }
-    $overall.checks.runtimeDiskCopy = [ordered]@{ passed = $true; path = $runtimeDiskCopy.path; initialSha256 = $runtimeDiskCopy.initialSha256; byteLength = $runtimeDiskCopy.lengthBytes; sourceCandidate = $runtimeDiskCopy.sourcePath; sourceCandidateSha256 = $runtimeDiskCopy.sourceSha256; attachedReadWriteForIdeCompatibility = $true; sourceCandidateModified = $false }
+    $overall.checks.runtimeDiskCopy = [ordered]@{ passed = $true; path = $runtimeDiskCopy.path; initialSha256 = $runtimeDiskCopy.initialSha256; byteLength = $runtimeDiskCopy.lengthBytes; sourceCandidate = $runtimeDiskCopy.sourcePath; sourceCandidateSha256 = $runtimeDiskCopy.sourceSha256; sourceCandidateSha256AfterCopy = $runtimeDiskCopy.sourceSha256AfterCopy; sourceCandidateModified = $runtimeDiskCopy.sourceModified; destinationReadOnly = $runtimeDiskCopy.destinationReadOnly; writeAccess = $runtimeDiskCopy.writeAccess; attachedReadWriteForIdeCompatibility = $true }
 
     $monitorProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $monitorProbe.Start()
@@ -892,7 +950,15 @@ try {
     $serialLog = Join-Path $script:RunRoot 'guest-serial.log'
     $capture = [SN10R3SerialCapture]::new($serialLog)
     $qemuArguments = @(New-QemuArguments $runtimeDiskPath $capture.Port $script:MonitorPort)
+    $ideDriveArguments = @()
+    for ($i = 0; $i -lt $qemuArguments.Count - 1; $i++) {
+        if ($qemuArguments[$i] -ceq '-drive' -and $qemuArguments[$i + 1] -match '(^|,)if=ide(,|$)') { $ideDriveArguments += [string]$qemuArguments[$i + 1] }
+    }
+    if ($ideDriveArguments.Count -ne 1 -or $ideDriveArguments[0] -notmatch '^file=.+\.raw,format=raw,if=ide,index=0$' -or $ideDriveArguments[0] -match '(?i)readonly|if=cdrom|fat:') { throw 'Effective QEMU arguments do not attach exactly one writable raw IDE hard disk.' }
     $qacArguments = @('run', '--project', 'StellarNavigator', '--mode', 'acceptance', '--', $Qemu) + $qemuArguments
+    $qacChildArguments = @($qacArguments[7..($qacArguments.Count - 1)])
+    if ($qacChildArguments.Count -ne $qemuArguments.Count) { throw 'QAC launcher argument vector does not preserve the effective QEMU argument boundaries.' }
+    for ($i = 0; $i -lt $qemuArguments.Count; $i++) { if ([string]$qacChildArguments[$i] -cne [string]$qemuArguments[$i]) { throw "QAC launcher changed QEMU argument $i." } }
     [ordered]@{
         qacExecutable = $QacCli
         qacArgumentVector = $qacArguments
@@ -906,6 +972,9 @@ try {
         candidateDiskSha256 = $candidateCheck.candidateDisk.sha256
         qemuDisposableDiskInitialSha256 = $runtimeDiskCopy.initialSha256
         diskLayout = [ordered]@{ format = 'raw'; partitionTable = 'GPT'; partitionStartLba = $candidateCheck.candidateDisk.partitionStartLba; partitionSectors = $candidateCheck.candidateDisk.partitionSectors; sectorSizeBytes = 512; filesystem = 'FAT32'; interface = 'IDE index 0'; qemuAccess = 'writable isolated per-run clone' }
+        diskAttachment = $ideDriveArguments[0]
+        qacChildArgumentPassthroughVerified = $true
+        firmwarePflashReadOnly = $true
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $script:RunRoot 'qemu-invocation.json') -Encoding utf8
     $overall.checks.launchConstruction = [ordered]@{ passed = $true; invocationPath = (Join-Path $script:RunRoot 'qemu-invocation.json'); effectiveArgumentVectorRecorded = $true; structuredProcessArguments = $true }
     $overall.checks.serialCapture = [ordered]@{ endpointInitializedBeforeQemu = $true; host = $capture.Host; port = $capture.Port; logPath = $serialLog; qemuSerialStreamEndpoint = 'QEMU socket chardev TCP client to runner-owned loopback listener' }
@@ -1114,6 +1183,18 @@ try {
             $overall.cleanupWarning = 'QAC wrapper remained alive after the bounded cleanup wait; its reservation was not manually released.'
         }
         $script:ManagedQac.Dispose()
+    }
+    if ($runtimeDiskCopy) {
+        try {
+            $sourceHashAfterAttempt = Get-Sha256 $CandidateDiskPath
+            $sourceUnchanged = $sourceHashAfterAttempt -ceq $candidateCheck.candidateDisk.sha256
+            $overall.checks.sourceDiskAfterAttempt = [ordered]@{ passed = $sourceUnchanged; path = [IO.Path]::GetFullPath($CandidateDiskPath); expectedSha256 = $candidateCheck.candidateDisk.sha256; actualSha256 = $sourceHashAfterAttempt; unchanged = $sourceUnchanged }
+            if (-not $sourceUnchanged) { $overall.classification = 'FAIL'; $overall.blocker = 'SOURCE_DISK_MUTATED' }
+        } catch {
+            $overall.checks.sourceDiskAfterAttempt = [ordered]@{ passed = $false; path = [IO.Path]::GetFullPath($CandidateDiskPath); error = $_.Exception.Message }
+            $overall.classification = 'FAIL'
+            $overall.blocker = 'SOURCE_DISK_HASH_FAILURE'
+        }
     }
     $overall.finishedAtLocal = (Get-Date).ToString('o')
     $overall.serialLog = if ($serialLog) { $serialLog } else { $null }
