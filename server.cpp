@@ -5482,6 +5482,53 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js81InvalidText, 800) + ",error=" +
         js81InvalidError);
 
+    const std::string js82FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js82.html";
+    const bool js82Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js82FixtureUrl);
+    const std::string js82InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS82 typed well-known Symbol iterator fixture passes on the hosted server",
+        js82Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js82FixtureUrl &&
+        contains(js82InitialText, "Navigator JavaScript JS82") &&
+        contains(js82InitialText, "JS82:initial:assertions=") &&
+        contains(js82InitialText, ":failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js82Loaded) + ",text=" +
+        summarizeText(js82InitialText, 2800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS82 keeps Symbol keys distinct and uses values-mode self-iterable cursors",
+        js82Loaded && contains(js82InitialText,
+            ":symbols=true:iterator=true:self=true:mutation=true:scope=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted checks cover string-key separation, shared values callable identity, stable iterator self-return, canonical Elements, captured bounds, scope, adapters, filtered selectors, and exhaustion");
+    const bool js82Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js82AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS82 nested Event default cursors preserve cursor state and Event metadata",
+        js82Click && contains(js82AfterClick,
+            "JS82:event=outer:ea0:nested=true:outer=ea1:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js82Click) + ",text=" +
+        summarizeText(js82AfterClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const std::string js82InvalidFixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js82-invalid.html";
+    const bool js82InvalidLoaded =
+        gxos::apps::Navigator::SmokeNavigateToQuiet(js82InvalidFixtureUrl);
+    const std::string js82InvalidText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js82InvalidError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS82 unbound iterator self method reports InvalidReceiver on the hosted runtime",
+        js82InvalidLoaded && contains(js82InvalidText,
+            "JS82:invalid:calling") &&
+        contains(js82InvalidError, "InvalidReceiver"),
+        std::string("loaded=") + yesNo(js82InvalidLoaded) + ",text=" +
+        summarizeText(js82InvalidText, 800) + ",error=" + js82InvalidError);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

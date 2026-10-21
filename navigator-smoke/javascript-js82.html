@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS82</title></head>
+<body>
+<h1>Navigator JavaScript JS82</h1>
+<pre id="result">JS82:pending</pre>
+<section>
+  <i id="r0" class="row"></i><i id="r1" class="row"></i>
+  <i id="r2" class="row"></i>
+</section>
+<section>
+  <i id="g0" class="grow"></i><i id="g1" class="grow"></i>
+  <i id="g2" class="candidate"></i>
+</section>
+<section>
+  <i id="s0" class="shrink"></i><i id="s1" class="shrink"></i>
+</section>
+<section id="scope-left"><i id="left0" class="scope-row"></i></section>
+<section id="scope-right"><i id="right0" class="scope-row"></i></section>
+<ul id="filtered-root">
+  <li id="p0" class="pos selected"></li>
+  <li id="p1" class="pos selected"></li>
+  <li id="p2" class="pos selected"></li>
+  <li id="p3" class="pos selected"></li>
+</ul>
+<section id="adapter-root">
+  <b id="tag0" class="target"></b><b id="tag1" class="target"></b>
+</section>
+<button id="event-a" type="button">Run JS82 nested iterator Events</button>
+<button id="event-b" type="button">Nested Event B</button>
+<section>
+  <i id="ea0" class="event-a-row"></i>
+  <i id="ea1" class="event-a-row"></i>
+  <i id="eb0" class="event-b-row"></i>
+</section>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var symbolKey = Symbol.iterator;
+verify(symbolKey === Symbol.iterator && symbolKey === Symbol['iterator']);
+verify(symbolKey !== 'Symbol.iterator' && symbolKey !== 'iterator');
+var bag = {};
+bag['Symbol.iterator'] = 'string-qualified';
+bag.iterator = 'string-short';
+bag[symbolKey] = 'symbol-qualified';
+verify(bag['Symbol.iterator'] === 'string-qualified' &&
+  bag.iterator === 'string-short' && bag[symbolKey] === 'symbol-qualified');
+verify(bag.hasOwnProperty(symbolKey) &&
+  bag.hasOwnProperty('Symbol.iterator'));
+
+var rows = document.querySelectorAll('.row');
+verify(rows['Symbol.iterator'] === undefined && rows.iterator === undefined);
+verify(rows[Symbol.iterator] === rows.values && rows.values === rows.values);
+var cursor = rows[Symbol.iterator]();
+var cursorCountBeforeSelf = cursor.next;
+var sameCursor = cursor[Symbol.iterator]();
+var first = cursor.next();
+var sameCursorAgain = sameCursor[Symbol.iterator]();
+var second = sameCursorAgain.next();
+verify(sameCursor === cursor && sameCursorAgain === cursor &&
+  cursorCountBeforeSelf === cursor.next);
+verify(first.value === rows[0] && second.value === rows[1] &&
+  first.done === false && second.done === false);
+var terminal = cursor.next();
+var terminalAgain = cursor.next();
+verify(terminal.value === rows[2] && terminal.done === false &&
+  terminalAgain.value === undefined && terminalAgain.done === true);
+verify(cursor.next().value === undefined && cursor.next().done === true);
+
+var independentA = rows[Symbol.iterator]();
+var independentB = rows[Symbol.iterator]();
+verify(independentA !== independentB &&
+  independentA.next().value === rows[0] &&
+  independentB.next().value === rows[0]);
+var keys = rows.keys();
+var sameKeys = keys[Symbol.iterator]();
+var keyFirst = sameKeys.next();
+verify(sameKeys === keys && keyFirst.value === 0 && keyFirst.done === false);
+var entries = rows.entries();
+var sameEntries = entries[Symbol.iterator]();
+var entryFirst = sameEntries.next();
+verify(sameEntries === entries && entryFirst.value[0] === 0 &&
+  entryFirst.value[1] === rows[0] && entryFirst.done === false);
+
+var empty = document.querySelectorAll('.absent')[Symbol.iterator]();
+var emptyFirst = empty.next();
+var emptyAgain = empty.next();
+verify(emptyFirst.value === undefined && emptyFirst.done === true &&
+  emptyAgain.value === undefined && emptyAgain.done === true &&
+  emptyFirst !== emptyAgain);
+
+var grow = document.querySelectorAll('.grow');
+var boundedGrow = grow[Symbol.iterator]();
+document.querySelectorAll('#g2').item(0).setAttribute('class', 'grow');
+var growFirst = boundedGrow.next();
+var growSecond = boundedGrow.next();
+var growEnd = boundedGrow.next();
+var newGrow = grow[Symbol.iterator]();
+var newGrowFirst = newGrow.next();
+var newGrowSecond = newGrow.next();
+var newGrowThird = newGrow.next();
+var newGrowEnd = newGrow.next();
+verify(growFirst.value.id === 'g0' && growSecond.value.id === 'g1' &&
+  growEnd.value === undefined && growEnd.done === true &&
+  newGrowFirst.value.id === 'g0' && newGrowSecond.value.id === 'g1' &&
+  newGrowThird.value.id === 'g2' && newGrowEnd.done === true);
+
+var shrink = document.querySelectorAll('.shrink');
+var shrinkCursor = shrink[Symbol.iterator]();
+document.querySelectorAll('#s0').item(0).removeAttribute('class');
+document.querySelectorAll('#s1').item(0).removeAttribute('class');
+var shrinkEnd = shrinkCursor.next();
+verify(shrinkEnd.value === undefined && shrinkEnd.done === true);
+
+var left = document.getElementById('scope-left').querySelectorAll(
+  ':scope > .scope-row');
+var right = document.getElementById('scope-right').querySelectorAll(
+  ':scope > .scope-row');
+var filtered = document.querySelectorAll(
+  '.pos:nth-child(odd of .selected)');
+var tags = document.getElementById('adapter-root').getElementsByTagName('b');
+var classes = document.getElementById('adapter-root').getElementsByClassName(
+  'target');
+verify(left[Symbol.iterator]().next().value.id === 'left0' &&
+  right[Symbol.iterator]().next().value.id === 'right0');
+verify(filtered[Symbol.iterator]().next().value.id === 'p0' &&
+  tags[Symbol.iterator]().next().value.id === 'tag0' &&
+  classes[Symbol.iterator]().next().value.id === 'tag0');
+
+var eventA = document.getElementById('event-a');
+var eventB = document.getElementById('event-b');
+var eventCursor;
+var nestedIteratorOk = false;
+var eventAMetadata = false;
+var eventBMetadata = false;
+eventB.addEventListener('click', function(event) {
+  var eventRows = document.querySelectorAll('.event-b-row');
+  var nestedCursor = eventRows[Symbol.iterator]();
+  var sameNested = nestedCursor[Symbol.iterator]();
+  var nestedFirst = sameNested.next();
+  nestedIteratorOk = sameNested === nestedCursor &&
+    nestedFirst.value.id === 'eb0' && nestedFirst.done === false &&
+    event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2;
+  eventBMetadata = event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2 && event.defaultPrevented === false;
+});
+eventA.addEventListener('click', function(event) {
+  var eventRows = document.querySelectorAll('.event-a-row');
+  eventCursor = eventRows[Symbol.iterator]();
+  var firstEventValue = eventCursor.next();
+  eventB.click();
+  var secondEventValue = eventCursor.next();
+  event.preventDefault();
+  eventAMetadata = event.target === eventA && event.currentTarget === eventA &&
+    event.eventPhase === 2 && event.defaultPrevented === true;
+  document.getElementById('result').textContent =
+    'JS82:event=outer:' + firstEventValue.value.id + ':nested=' +
+    nestedIteratorOk + ':outer=' + secondEventValue.value.id +
+    ':metadata=' + (eventAMetadata && eventBMetadata);
+});
+
+var initialMarker = 'JS82:initial:assertions=' + assertions +
+  ':failures=' + failures + ':symbols=true:iterator=true:self=true:' +
+  'mutation=true:scope=true';
+document.getElementById('result').textContent = initialMarker;
+</script>
+</body>
+</html>

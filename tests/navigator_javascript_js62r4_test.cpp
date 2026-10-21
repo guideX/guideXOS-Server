@@ -97,6 +97,9 @@ bool same(const Value& left, const Value& right)
     case ValueType::Function: return left.functionId() == right.functionId();
     case ValueType::Object: return left.objectId() == right.objectId();
     case ValueType::HostObject: return left.hostObjectId() == right.hostObjectId();
+    case ValueType::Symbol:
+        return left.wellKnownSymbolValue() == right.wellKnownSymbolValue();
+    case ValueType::SymbolNamespace: return true;
     }
     return false;
 }

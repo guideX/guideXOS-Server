@@ -200,8 +200,29 @@ public:
     virtual HostResult getProperty(const HostObjectReference& object,
         SourceView property, HostValue& result) = 0;
 
+    // Symbol property keys remain typed across the host boundary. Adapters
+    // that do not expose well-known Symbol properties keep the historical
+    // string-only behavior through this default.
+    virtual HostResult getSymbolProperty(const HostObjectReference& object,
+        WellKnownSymbol property, HostValue& result)
+    {
+        (void)object;
+        (void)property;
+        (void)result;
+        return HostResult{HostResultCode::PropertyNotFound};
+    }
+
     virtual HostResult setProperty(const HostObjectReference& object,
         SourceView property, const HostValue& value) = 0;
+
+    virtual HostResult setSymbolProperty(const HostObjectReference& object,
+        WellKnownSymbol property, const HostValue& value)
+    {
+        (void)object;
+        (void)property;
+        (void)value;
+        return HostResult{HostResultCode::PropertyWriteFailed};
+    }
 
     // receiver is null for receiver-independent methods. method IDs are
     // adapter-owned stable IDs, not JavaScript property-name special cases.

@@ -14,6 +14,15 @@ enum class ValueType : std::uint8_t {
     Function,
     Object,
     HostObject,
+    Symbol,
+    SymbolNamespace,
+};
+
+// Only symbols defined by the runtime itself are currently representable.
+// None is the string-key discriminator used by bounded property records.
+enum class WellKnownSymbol : std::uint8_t {
+    None = 0,
+    Iterator = 1,
 };
 
 using RuntimeStringId = std::uint32_t;
@@ -33,10 +42,11 @@ constexpr RuntimeHostObjectId kInvalidRuntimeHostObjectId =
     0xffffffffffffffffull;
 
 // A Value is a small tagged runtime value. String values contain an index into
-// the owning RuntimeContext string store and function values contain a stable
-// index into that context's function table. Neither points at lexer/parser
-// buffers. Handles are valid only while their owning context remains alive (or
-// until that context is reset).
+// the owning RuntimeContext string store, well-known Symbols carry their
+// bounded identity in that same scalar slot under a distinct type tag, and
+// function values contain an index into that context's function table. None
+// points at lexer/parser buffers. Handles are valid only while their owning
+// context remains alive (or until that context is reset).
 class Value {
 public:
     Value() = default;
@@ -49,6 +59,10 @@ public:
     static Value function(RuntimeFunctionId id);
     static Value object(RuntimeObjectId id);
     static Value hostObject(RuntimeHostObjectId id);
+    static Value wellKnownSymbol(WellKnownSymbol symbol);
+    // The minimal global Symbol intrinsic is a namespace for the supported
+    // well-known identities, not a callable Symbol() constructor.
+    static Value symbolNamespace();
 
     ValueType type() const { return type_; }
     bool isUndefined() const { return type_ == ValueType::Undefined; }
@@ -59,6 +73,11 @@ public:
     bool isFunction() const { return type_ == ValueType::Function; }
     bool isObject() const { return type_ == ValueType::Object; }
     bool isHostObject() const { return type_ == ValueType::HostObject; }
+    bool isSymbol() const { return type_ == ValueType::Symbol; }
+    bool isSymbolNamespace() const
+    {
+        return type_ == ValueType::SymbolNamespace;
+    }
 
     bool booleanValue() const { return booleanValue_; }
     double numberValue() const { return numberValue_; }
@@ -66,6 +85,10 @@ public:
     RuntimeFunctionId functionId() const { return functionId_; }
     RuntimeObjectId objectId() const { return objectId_; }
     RuntimeHostObjectId hostObjectId() const { return hostObjectId_; }
+    WellKnownSymbol wellKnownSymbolValue() const
+    {
+        return static_cast<WellKnownSymbol>(stringId_);
+    }
 
 private:
     ValueType type_ = ValueType::Undefined;

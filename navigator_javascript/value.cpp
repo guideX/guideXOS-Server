@@ -63,6 +63,21 @@ Value Value::hostObject(RuntimeHostObjectId id)
     return value;
 }
 
+Value Value::wellKnownSymbol(WellKnownSymbol symbol)
+{
+    Value value;
+    value.type_ = ValueType::Symbol;
+    value.stringId_ = static_cast<RuntimeStringId>(symbol);
+    return value;
+}
+
+Value Value::symbolNamespace()
+{
+    Value value;
+    value.type_ = ValueType::SymbolNamespace;
+    return value;
+}
+
 const char* valueTypeName(ValueType type)
 {
     switch (type) {
@@ -74,6 +89,8 @@ const char* valueTypeName(ValueType type)
     case ValueType::Function: return "Function";
     case ValueType::Object: return "Object";
     case ValueType::HostObject: return "HostObject";
+    case ValueType::Symbol: return "Symbol";
+    case ValueType::SymbolNamespace: return "SymbolNamespace";
     }
     return "Invalid";
 }

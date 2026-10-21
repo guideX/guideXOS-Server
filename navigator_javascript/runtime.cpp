@@ -347,7 +347,8 @@ private:
         Value receiver = Value::undefined();
         bool stringPrimitive = false;
         bool hostObjectValue = false;
-        std::string key;
+        bool symbolNamespaceValue = false;
+        RuntimeContext::PropertyKey key;
         SourceLocation location;
     };
 
@@ -406,6 +407,12 @@ private:
         // supplies the primitive when it is not shadowed by a var binding.
         if (textEquals(name, "undefined")) {
             value = Value::undefined();
+            return true;
+        }
+        // JS82 exposes only the stable well-known Symbol namespace. It does
+        // not provide the callable Symbol() constructor or dynamic Symbols.
+        if (textEquals(name, "Symbol")) {
+            value = Value::symbolNamespace();
             return true;
         }
         fail(RuntimeErrorCode::UnknownIdentifier,
@@ -717,20 +724,31 @@ private:
         return true;
     }
 
-    bool propertyKeyFromValue(const Value& value, std::string& key,
+    bool propertyKeyFromValue(const Value& value,
+        RuntimeContext::PropertyKey& key,
         SourceLocation location)
     {
+        key = RuntimeContext::PropertyKey();
+        if (value.isSymbol()) {
+            if (value.wellKnownSymbolValue() == WellKnownSymbol::None) {
+                fail(RuntimeErrorCode::InvalidPropertyKey, location);
+                return false;
+            }
+            key.symbol = value.wellKnownSymbolValue();
+            return true;
+        }
         if (value.isObject() || value.isFunction()) {
             fail(RuntimeErrorCode::InvalidPropertyKey, location);
             return false;
         }
-        if (!primitiveString(value, key)) {
+        if (!primitiveString(value, key.string)) {
             if (context_.result_.runtimeError.code == RuntimeErrorCode::None) {
                 fail(RuntimeErrorCode::InvalidPropertyKey, location);
             }
             return false;
         }
-        if (value.isNumber() && value.numberValue() == 0.0) key = "0";
+        if (value.isNumber() && value.numberValue() == 0.0)
+            key.string = "0";
         return true;
     }
 
@@ -747,11 +765,16 @@ private:
         }
         Value object;
         if (!evalExpression(node.object, object)) return false;
-        if (!object.isObject() && !object.isHostObject() && !object.isString()) {
+        if (!object.isObject() && !object.isHostObject() &&
+            !object.isString() && !object.isSymbolNamespace()) {
             fail(object.isNull() || object.isUndefined()
                 ? (forWrite ? RuntimeErrorCode::CannotWriteProperty
                     : RuntimeErrorCode::CannotReadProperty)
                 : RuntimeErrorCode::NotObject, node.location);
+            return false;
+        }
+        if (object.isSymbolNamespace() && forWrite) {
+            fail(RuntimeErrorCode::NotObject, node.location);
             return false;
         }
         if (object.isObject() && context_.objectAt(object.objectId()) == nullptr) {
@@ -759,12 +782,12 @@ private:
             return false;
         }
 
-        std::string key;
+        RuntimeContext::PropertyKey key;
         if (!node.computed) {
             SourceView keyView;
             if (!identifierName(node.property, keyView)) return false;
             try {
-                key.assign(keyView.data, keyView.length);
+                key.string.assign(keyView.data, keyView.length);
             } catch (const std::bad_alloc&) {
                 fail(RuntimeErrorCode::AllocationFailure, node.location);
                 return false;
@@ -785,6 +808,9 @@ private:
             reference.hostObject = object.hostObjectId();
             reference.hostObjectValue = true;
             reference.receiver = object;
+        } else if (object.isSymbolNamespace()) {
+            reference.symbolNamespaceValue = true;
+            reference.receiver = object;
         } else {
             reference.object = object.objectId();
             reference.receiver = object;
@@ -798,9 +824,17 @@ private:
     {
         if (!context_.consumeStep(reference.location)) return false;
         if (reference.stringPrimitive) {
-            value = reference.key == "length"
+            value = !reference.key.isSymbol() &&
+                reference.key.string == "length"
                 ? Value::number(static_cast<double>(
                     context_.stringValue(reference.receiver).size()))
+                : Value::undefined();
+            return true;
+        }
+        if (reference.symbolNamespaceValue) {
+            value = !reference.key.isSymbol() &&
+                reference.key.string == "iterator"
+                ? Value::wellKnownSymbol(WellKnownSymbol::Iterator)
                 : Value::undefined();
             return true;
         }
@@ -1184,7 +1218,35 @@ private:
         }
         for (const RuntimeContext::RuntimeProperty& property :
             object->properties) {
-            if (property.key == key) return true;
+            if (property.symbolKey == WellKnownSymbol::None &&
+                property.key == key) return true;
+        }
+        return false;
+    }
+
+    bool hasOwnProperty(RuntimeObjectId objectId,
+        const RuntimeContext::PropertyKey& key) const
+    {
+        const RuntimeContext::RuntimeObject* object =
+            context_.objectAt(objectId);
+        if (object == nullptr) return false;
+        if (!key.isSymbol()) {
+            if (object->array && key.string == "length") return true;
+            if (object->array && isCanonicalArrayIndexSpelling(key.string)) {
+                std::size_t index = 0;
+                if (parseBoundedArrayIndex(key.string,
+                    context_.limits_.maxArrayIndex, index)) {
+                    return index < object->elements.size();
+                }
+                return false;
+            }
+        }
+        for (const RuntimeContext::RuntimeProperty& property :
+            object->properties) {
+            if (key.isSymbol()
+                    ? property.symbolKey == key.symbol
+                    : property.symbolKey == WellKnownSymbol::None &&
+                        property.key == key.string) return true;
         }
         return false;
     }
@@ -1238,7 +1300,7 @@ private:
                 succeeded = false;
                 break;
             }
-            std::string key;
+            RuntimeContext::PropertyKey key;
             if (!propertyKeyFromValue(argumentOrUndefined(0), key, callSite)) {
                 succeeded = false;
                 break;
@@ -1440,6 +1502,10 @@ private:
         case ValueType::HostObject:
             number = std::numeric_limits<double>::quiet_NaN();
             return true;
+        case ValueType::Symbol:
+        case ValueType::SymbolNamespace:
+            fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
+            return false;
         }
         fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
         return false;
@@ -1476,6 +1542,10 @@ private:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         case ValueType::HostObject:
+            fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
+            return false;
+        case ValueType::Symbol:
+        case ValueType::SymbolNamespace:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         }
@@ -1971,6 +2041,8 @@ private:
         case ValueType::Object:
             return true;
         case ValueType::HostObject:
+        case ValueType::Symbol:
+        case ValueType::SymbolNamespace:
             return true;
         }
         return false;
@@ -2004,6 +2076,11 @@ private:
         case ValueType::HostObject:
             return left.hostObjectId() != kInvalidRuntimeHostObjectId &&
                 left.hostObjectId() == right.hostObjectId();
+        case ValueType::Symbol:
+            return left.wellKnownSymbolValue() != WellKnownSymbol::None &&
+                left.wellKnownSymbolValue() == right.wellKnownSymbolValue();
+        case ValueType::SymbolNamespace:
+            return true;
         }
         return false;
     }
@@ -2738,32 +2815,48 @@ bool RuntimeContext::createCollectionIteratorResult(const HostValue& value,
 {
     error = RuntimeErrorCode::None;
     result = Value::undefined();
+    const std::size_t objectCountBefore = objects_.size();
+    const std::size_t propertyCountBefore = totalPropertyCount_;
+    const std::size_t propertyKeyBytesBefore = totalPropertyKeyBytes_;
+    const std::size_t arrayElementCountBefore = totalArrayElements_;
     const std::vector<Value> noElements;
     RuntimeObjectId object = kInvalidRuntimeObjectId;
     if (!createObject(false, noElements, object, error)) return false;
 
-    Value convertedValue;
-    if (!convertHostValue(value, kInvalidRuntimeHostObjectId, convertedValue,
-            error, SourceLocation())) {
-        objects_.pop_back();
+    const auto rollback = [this, objectCountBefore, propertyCountBefore,
+        propertyKeyBytesBefore, arrayElementCountBefore]() {
+        objects_.resize(objectCountBefore);
+        totalPropertyCount_ = propertyCountBefore;
+        totalPropertyKeyBytes_ = propertyKeyBytesBefore;
+        totalArrayElements_ = arrayElementCountBefore;
+    };
+
+    // Allocate the complete outer shape before converting a possible host
+    // value. A later property-capacity failure must not retain a newly
+    // canonicalized Element handle from this otherwise unpublished result.
+    if (!writeProperty(object, "value", Value::undefined(), error) ||
+        !writeProperty(object, "done", Value::boolean(done), error)) {
+        rollback();
         return false;
     }
 
-    if (!writeProperty(object, "value", convertedValue, error) ||
-        !writeProperty(object, "done", Value::boolean(done), error)) {
-        RuntimeObject* record = objectAt(object);
-        if (record != nullptr) {
-            for (const RuntimeProperty& property : record->properties) {
-                if (totalPropertyCount_ > 0u) --totalPropertyCount_;
-                if (totalPropertyKeyBytes_ >= property.key.size())
-                    totalPropertyKeyBytes_ -= property.key.size();
-                else
-                    totalPropertyKeyBytes_ = 0u;
-            }
-        }
-        objects_.pop_back();
+    Value convertedValue;
+    if (!convertHostValue(value, kInvalidRuntimeHostObjectId, convertedValue,
+            error, SourceLocation())) {
+        rollback();
         return false;
     }
+    RuntimeObject* record = objectAt(object);
+    if (record == nullptr || record->properties.size() != 2u ||
+        record->properties[0].symbolKey != WellKnownSymbol::None ||
+        record->properties[0].key != "value" ||
+        record->properties[1].symbolKey != WellKnownSymbol::None ||
+        record->properties[1].key != "done") {
+        error = RuntimeErrorCode::InvalidAstState;
+        rollback();
+        return false;
+    }
+    record->properties[0].value = convertedValue;
     result = Value::object(object);
     return true;
 }
@@ -2885,8 +2978,21 @@ bool RuntimeContext::readProperty(RuntimeObjectId objectId,
     const std::string& key, Value& value, RuntimeErrorCode& error,
     SourceLocation location)
 {
+    PropertyKey propertyKey;
+    propertyKey.string = key;
+    return readProperty(objectId, propertyKey, value, error, location);
+}
+
+bool RuntimeContext::readProperty(RuntimeObjectId objectId,
+    const PropertyKey& key, Value& value, RuntimeErrorCode& error,
+    SourceLocation location)
+{
     error = RuntimeErrorCode::None;
-    if (key.size() > limits_.maxPropertyNameLength) {
+    if (key.isSymbol() && key.symbol != WellKnownSymbol::Iterator) {
+        error = RuntimeErrorCode::InvalidPropertyKey;
+        return false;
+    }
+    if (!key.isSymbol() && key.string.size() > limits_.maxPropertyNameLength) {
         error = RuntimeErrorCode::PropertyNameTooLong;
         return false;
     }
@@ -2901,13 +3007,15 @@ bool RuntimeContext::readProperty(RuntimeObjectId objectId,
             error = RuntimeErrorCode::CannotReadProperty;
             return false;
         }
-        if (object->array && key == "length") {
+        if (!key.isSymbol() && object->array && key.string == "length") {
             value = Value::number(static_cast<double>(object->elements.size()));
             return true;
         }
-        if (object->array && isCanonicalArrayIndexSpelling(key)) {
+        if (!key.isSymbol() && object->array &&
+            isCanonicalArrayIndexSpelling(key.string)) {
             std::size_t index = 0;
-            if (!parseBoundedArrayIndex(key, limits_.maxArrayIndex, index)) {
+            if (!parseBoundedArrayIndex(key.string, limits_.maxArrayIndex,
+                    index)) {
                 error = RuntimeErrorCode::ArrayIndexOutOfRange;
                 return false;
             }
@@ -2917,7 +3025,11 @@ bool RuntimeContext::readProperty(RuntimeObjectId objectId,
             }
         }
         for (const RuntimeProperty& property : object->properties) {
-            if (property.key == key) {
+            const bool matches = key.isSymbol()
+                ? property.symbolKey == key.symbol
+                : property.symbolKey == WellKnownSymbol::None &&
+                    property.key == key.string;
+            if (matches) {
                 value = property.value;
                 return true;
             }
@@ -2936,23 +3048,37 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
     const std::string& key, Value value, RuntimeErrorCode& error,
     bool readOnly)
 {
+    PropertyKey propertyKey;
+    propertyKey.string = key;
+    return writeProperty(objectId, propertyKey, value, error, readOnly);
+}
+
+bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
+    const PropertyKey& key, Value value, RuntimeErrorCode& error,
+    bool readOnly)
+{
     error = RuntimeErrorCode::None;
+    if (key.isSymbol() && key.symbol != WellKnownSymbol::Iterator) {
+        error = RuntimeErrorCode::InvalidPropertyKey;
+        return false;
+    }
     RuntimeObject* object = objectAt(objectId);
     if (object == nullptr) {
         error = RuntimeErrorCode::CannotWriteProperty;
         return false;
     }
-    if (key.size() > limits_.maxPropertyNameLength) {
+    if (!key.isSymbol() && key.string.size() > limits_.maxPropertyNameLength) {
         error = RuntimeErrorCode::PropertyNameTooLong;
         return false;
     }
-    if (object->array && key == "length") {
+    if (!key.isSymbol() && object->array && key.string == "length") {
         error = RuntimeErrorCode::CannotWriteProperty;
         return false;
     }
-    if (object->array && isCanonicalArrayIndexSpelling(key)) {
+    if (!key.isSymbol() && object->array &&
+        isCanonicalArrayIndexSpelling(key.string)) {
         std::size_t index = 0;
-        if (!parseBoundedArrayIndex(key, limits_.maxArrayIndex, index)) {
+        if (!parseBoundedArrayIndex(key.string, limits_.maxArrayIndex, index)) {
             error = RuntimeErrorCode::ArrayIndexOutOfRange;
             return false;
         }
@@ -2981,7 +3107,11 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
     }
 
     for (RuntimeProperty& property : object->properties) {
-        if (property.key == key) {
+        const bool matches = key.isSymbol()
+            ? property.symbolKey == key.symbol
+            : property.symbolKey == WellKnownSymbol::None &&
+                property.key == key.string;
+        if (matches) {
             // Host-created Event properties are immutable from script. A
             // non-strict assignment is a deterministic no-op; the host can
             // still refresh the cached handle values through the dedicated
@@ -2996,14 +3126,16 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         error = RuntimeErrorCode::PropertyLimitExceeded;
         return false;
     }
-    if (key.size() > limits_.maxTotalPropertyKeyBytes ||
-        totalPropertyKeyBytes_ > limits_.maxTotalPropertyKeyBytes - key.size()) {
+    const std::size_t keyBytes = key.isSymbol() ? 0u : key.string.size();
+    if (keyBytes > limits_.maxTotalPropertyKeyBytes ||
+        totalPropertyKeyBytes_ > limits_.maxTotalPropertyKeyBytes - keyBytes) {
         error = RuntimeErrorCode::PropertyLimitExceeded;
         return false;
     }
     try {
         RuntimeProperty property;
-        property.key = key;
+        if (!key.isSymbol()) property.key = key.string;
+        property.symbolKey = key.symbol;
         property.value = value;
         property.readOnly = readOnly;
         object->properties.push_back(std::move(property));
@@ -3012,7 +3144,7 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         return false;
     }
     ++totalPropertyCount_;
-    totalPropertyKeyBytes_ += key.size();
+    totalPropertyKeyBytes_ += keyBytes;
     return true;
 }
 
@@ -3026,7 +3158,8 @@ bool RuntimeContext::updateExistingProperty(RuntimeObjectId objectId,
         return false;
     }
     for (RuntimeProperty& property : object->properties) {
-        if (property.key == key) {
+        if (property.symbolKey == WellKnownSymbol::None &&
+            property.key == key) {
             property.value = value;
             return true;
         }
@@ -3304,8 +3437,22 @@ bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
     const std::string& key, Value& value, RuntimeErrorCode& error,
     SourceLocation location)
 {
+    PropertyKey propertyKey;
+    propertyKey.string = key;
+    return readHostProperty(object, propertyKey, value, error, location);
+}
+
+bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
+    const PropertyKey& key, Value& value, RuntimeErrorCode& error,
+    SourceLocation location)
+{
     error = RuntimeErrorCode::None;
-    if (key.size() > limits_.maxHostPropertyNameLength) {
+    if (key.isSymbol() && key.symbol != WellKnownSymbol::Iterator) {
+        error = RuntimeErrorCode::InvalidPropertyKey;
+        return false;
+    }
+    if (!key.isSymbol() &&
+        key.string.size() > limits_.maxHostPropertyNameLength) {
         error = RuntimeErrorCode::PropertyNameTooLong;
         return false;
     }
@@ -3322,8 +3469,8 @@ bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
     if (!resolveHostObject(object, reference, error)) {
         if (!resolveHostObjectIgnoringGeneration(object, reference) ||
             reference.generation == hostGeneration_ ||
-            !hostAdapter_->allowsStaleHostProperty(reference,
-                SourceView(key.data(), key.size()))) return false;
+            key.isSymbol() || !hostAdapter_->allowsStaleHostProperty(reference,
+                SourceView(key.string.data(), key.string.size()))) return false;
         stalePureProperty = true;
     }
     if (hostCallActive_ && !hostReentryAllowed_) {
@@ -3340,8 +3487,12 @@ bool RuntimeContext::readHostProperty(RuntimeHostObjectId object,
         validation = stalePureProperty ? HostResult() :
             hostAdapter_->validate(reference);
         if (validation.succeeded()) {
-            operation = hostAdapter_->getProperty(reference,
-                SourceView(key.data(), key.size()), hostValue);
+            operation = key.isSymbol()
+                ? hostAdapter_->getSymbolProperty(reference, key.symbol,
+                    hostValue)
+                : hostAdapter_->getProperty(reference,
+                    SourceView(key.string.data(), key.string.size()),
+                    hostValue);
         }
     } catch (const std::bad_alloc&) {
         hostCallActive_ = previousHostCallActive;
@@ -3372,8 +3523,22 @@ bool RuntimeContext::writeHostProperty(RuntimeHostObjectId object,
     const std::string& key, Value value, RuntimeErrorCode& error,
     SourceLocation location)
 {
+    PropertyKey propertyKey;
+    propertyKey.string = key;
+    return writeHostProperty(object, propertyKey, value, error, location);
+}
+
+bool RuntimeContext::writeHostProperty(RuntimeHostObjectId object,
+    const PropertyKey& key, Value value, RuntimeErrorCode& error,
+    SourceLocation location)
+{
     error = RuntimeErrorCode::None;
-    if (key.size() > limits_.maxHostPropertyNameLength) {
+    if (key.isSymbol() && key.symbol != WellKnownSymbol::Iterator) {
+        error = RuntimeErrorCode::InvalidPropertyKey;
+        return false;
+    }
+    if (!key.isSymbol() &&
+        key.string.size() > limits_.maxHostPropertyNameLength) {
         error = RuntimeErrorCode::PropertyNameTooLong;
         return false;
     }
@@ -3400,8 +3565,12 @@ bool RuntimeContext::writeHostProperty(RuntimeHostObjectId object,
     try {
         validation = hostAdapter_->validate(reference);
         if (validation.succeeded()) {
-            operation = hostAdapter_->setProperty(reference,
-                SourceView(key.data(), key.size()), hostValue);
+            operation = key.isSymbol()
+                ? hostAdapter_->setSymbolProperty(reference, key.symbol,
+                    hostValue)
+                : hostAdapter_->setProperty(reference,
+                    SourceView(key.string.data(), key.string.size()),
+                    hostValue);
         }
     } catch (const std::bad_alloc&) {
         hostCallActive_ = previousHostCallActive;
@@ -3471,6 +3640,11 @@ bool RuntimeContext::convertValueToHost(const Value& value, HostValue& result,
         }
         result = HostValue::function(value.functionId());
         return true;
+    case ValueType::Symbol:
+    case ValueType::SymbolNamespace:
+        error = RuntimeErrorCode::HostInvalidValue;
+        (void)location;
+        return false;
     }
     error = RuntimeErrorCode::HostCallFailed;
     (void)location;

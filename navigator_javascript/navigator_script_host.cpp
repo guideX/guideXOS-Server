@@ -2213,7 +2213,8 @@ bool NavigatorScriptHostAdapter::allowsReentrantCall(
         methodId == kNavigatorSelectorCollectionValuesMethod ||
         methodId == kNavigatorSelectorCollectionKeysMethod ||
         methodId == kNavigatorSelectorCollectionEntriesMethod ||
-        methodId == kNavigatorSelectorCollectionIteratorNextMethod;
+        methodId == kNavigatorSelectorCollectionIteratorNextMethod ||
+        methodId == kNavigatorSelectorCollectionIteratorSymbolMethod;
 }
 
 bool NavigatorScriptHostAdapter::allowsStaleHostProperty(
@@ -7346,6 +7347,33 @@ HostResult NavigatorScriptHostAdapter::getProperty(
     return HostResult{HostResultCode::PropertyNotFound};
 }
 
+HostResult NavigatorScriptHostAdapter::getSymbolProperty(
+    const HostObjectReference& object, WellKnownSymbol property,
+    HostValue& result)
+{
+    if (property != WellKnownSymbol::Iterator)
+        return HostResult{HostResultCode::PropertyNotFound};
+    const HostResult validation = validate(object);
+    if (!validation.succeeded()) return validation;
+    if (object.kind == kNavigatorSelectorCollectionHostKind) {
+        if (selectorCollectionFor(object.instanceId) == nullptr)
+            return HostResult{HostResultCode::InvalidObject};
+        // This is intentionally the same adapter-owned method ID used by
+        // .values(), which gives both lookups the same callable identity.
+        result = HostValue::method(
+            kNavigatorSelectorCollectionValuesMethod, true, true);
+        return HostResult();
+    }
+    if (object.kind == kNavigatorSelectorCollectionIteratorHostKind) {
+        if (selectorCollectionIteratorFor(object.instanceId) == nullptr)
+            return HostResult{HostResultCode::InvalidObject};
+        result = HostValue::method(
+            kNavigatorSelectorCollectionIteratorSymbolMethod, true, true);
+        return HostResult();
+    }
+    return HostResult{HostResultCode::PropertyNotFound};
+}
+
 HostResult NavigatorScriptHostAdapter::convertTextValue(
     const HostValue& value, std::string& result) const
 {
@@ -7718,6 +7746,21 @@ HostResult NavigatorScriptHostAdapter::validateDocumentReceiver(
         receiver->instanceId != kNavigatorDocumentHostInstance)
         return HostResult{HostResultCode::InvalidObject};
     return validate(*receiver);
+}
+
+HostResult NavigatorScriptHostAdapter::setSymbolProperty(
+    const HostObjectReference& object, WellKnownSymbol property,
+    const HostValue& value)
+{
+    (void)value;
+    const HostResult validation = validate(object);
+    if (!validation.succeeded()) return validation;
+    if (property == WellKnownSymbol::Iterator &&
+        (object.kind == kNavigatorSelectorCollectionHostKind ||
+            object.kind == kNavigatorSelectorCollectionIteratorHostKind)) {
+        return HostResult{HostResultCode::PropertyReadOnly};
+    }
+    return HostResult{HostResultCode::PropertyNotFound};
 }
 
 HostResult NavigatorScriptHostAdapter::call(
@@ -8163,6 +8206,16 @@ HostResult NavigatorScriptHostAdapter::callInternal(
         return selectorCollectionKeys(receiver, result);
     if (methodId == kNavigatorSelectorCollectionEntriesMethod)
         return selectorCollectionEntries(receiver, result);
+    if (methodId == kNavigatorSelectorCollectionIteratorSymbolMethod) {
+        if (receiver->kind != kNavigatorSelectorCollectionIteratorHostKind)
+            return HostResult{HostResultCode::InvalidValue};
+        if (selectorCollectionIteratorFor(receiver->instanceId) == nullptr)
+            return HostResult{HostResultCode::InvalidObject};
+        // Returning the original host reference lets RuntimeContext's
+        // canonical host-object registry preserve JavaScript object identity.
+        result = HostValue::fromHostObject(*receiver);
+        return HostResult();
+    }
     if (methodId == kNavigatorSelectorCollectionItemMethod) {
         if (receiver->kind != kNavigatorSelectorCollectionHostKind)
             return HostResult{HostResultCode::InvalidValue};

@@ -10437,3 +10437,206 @@ This qualifies Navigator's bounded collection API, not ECMAScript iterable
 protocols. A subsequent JS82 could evaluate `Symbol.iterator` and `for...of`
 only as a separately bounded language/runtime phase; spread, destructuring,
 and general iterable support remain deferred.
+
+### JS82 well-known `Symbol.iterator` and bounded default iterators
+
+JS82 adds a minimal, genuine well-known `Symbol.iterator` identity and exposes
+the existing selector collection VALUES mode through the iterable protocol
+entry point:
+
+```javascript
+const rows = document.querySelectorAll('.row');
+const cursor = rows[Symbol.iterator]();
+const first = cursor.next();
+```
+
+Before JS82, Navigator had no Symbol primitive, global Symbol namespace,
+well-known Symbol table, or typed Symbol property keys. JS82 adds only the
+single `WellKnownSymbol::Iterator` identity. The global `Symbol` value is a
+small runtime namespace pseudo-intrinsic that supports `.iterator` and
+`['iterator']`; it is not callable and does not provide `Symbol()`, a registry,
+or general Symbol compatibility. Symbol identity is stored as a bounded enum
+value in the already-present scalar value slot under its own `ValueType` tag.
+`Value` remains 40 bytes and constructing this well-known identity performs no
+dynamic allocation.
+
+#### Typed property keys and method identity
+
+Computed member access now carries a typed `PropertyKey` through ordinary
+objects and host-property dispatch. Its Symbol identity is never converted to
+a string. The native and hosted fixtures establish all of the following:
+
+```javascript
+rows['Symbol.iterator'] === undefined
+rows.iterator === undefined
+rows[Symbol.iterator] === rows.values
+rows.values === rows.values
+```
+
+Ordinary object keys `bag['Symbol.iterator']`, `bag.iterator`, and
+`bag[Symbol.iterator]` remain separate properties, and
+`hasOwnProperty(Symbol.iterator)` is supported. The default collection method
+and `values` expose the same cached callable identity. Invoking either with a
+valid collection receiver creates a fresh VALUES cursor through the existing
+128-record registry; no second registry or Element snapshot was added.
+
+An iterator host object exposes a shared self method at its Symbol iterator
+key. It validates the iterator receiver and returns the original host handle.
+Runtime host-object canonicalization therefore preserves JavaScript object
+identity (`cursor[Symbol.iterator]() === cursor`), consumes no iterator record,
+and does not reset or advance the cursor. VALUES, KEYS, and ENTRIES retain
+their mode when self-returned. Missing receivers report the established
+`InvalidReceiver` error; a wrong host kind or forged invalid iterator record
+is rejected before accessing iterator storage.
+
+#### Bounds, live reads, and reentrancy
+
+The default iterator directly reuses the JS79–JS81 VALUES creation and
+advancement path. It captures collection length, retains independent cursor
+state, and resolves each current index against the live collection and
+original query scope. Growth does not extend an existing bound; a newly
+created cursor can observe growth. Shrinkage skips indices that no longer
+resolve. Exhaustion is terminal. Returned Elements are canonical host
+references, not snapshots.
+
+Qualification covers `querySelectorAll`, tag and class adapters, scoped
+queries, and a filtered positional selector. The native fixture also covers
+empty results, independent default cursors, VALUES/KEYS/ENTRIES self-return,
+growth and shrinkage, canonical Elements, string-key separation, nested Event
+dispatch, and preservation of Event metadata. The hosted Event case advances
+an outer default cursor before and after dispatching a nested Event which
+creates and advances a second cursor. Document generation replacement with
+the same structural serial invalidates an old iterator and fails through the
+stale-host path. The established JS9 `getElementById()` reentry policy was not
+broadened.
+
+#### Result lifetime and capacity findings
+
+The runtime has no reachability-based reclamation. Retained and discarded
+`next()` results therefore consume the same bounded object and property
+counts. A temporary read such as `cursor.next().value` keeps the canonical
+Element safe but does not reclaim the outer result. Each successful VALUES
+step, including repeated terminal reads, allocates one distinct result object
+with two properties. In isolated native measurements:
+
+| Scenario | Object delta | Property delta | Other delta |
+|---|---:|---:|---:|
+| Two retained VALUES results | 2 | 4 | — |
+| Two discarded VALUES results | 2 | 4 | — |
+| Temporary `.value` read | 1 | 2 | — |
+| One retained ENTRIES result and pair | 2 | 2 | 2 Array slots |
+| Three results including repeated exhaustion | 3 | 6 | — |
+
+The discarded VALUES traversal produced **1,020 successful results** in its
+measured fixture, then failed deterministically at the fixed 1,024-object
+limit. At failure the cursor remained at index 1,020, with 2,053/4,096
+properties and all 1,024 objects in use. This is a fixture-specific maximum
+under its initial runtime occupancy, not a general traversal guarantee.
+Results remain live until runtime reset. No garbage collection, reference
+counting, or result recycling was introduced. Future reclamation requires
+complete ownership/reachability tracking across bindings, object properties,
+Array slots, active callback/Event frames, and host references. Future
+`for...of` would still inherit bounded result-object consumption until such a
+lifetime design is qualified.
+
+Iterator-result construction now reserves the complete `{ value, done }`
+property shape before converting a yielded host value. If object, property,
+Array-slot, or Element host-handle allocation fails, the partial result and
+newly registered handle are rolled back and the cursor remains at the failed
+index. Tests cover property exhaustion, Element-handle exhaustion, object
+pool saturation, invalid receivers, and repeated exhaustion. The existing
+fixed pools were not increased: 1,024 runtime objects, 4,096 properties,
+4,096 Array slots, 2,048 host objects, 128 collection records, and 128
+iterator records. A terminal result still costs one object and two
+properties; saturation is consequently expected if results are not discarded
+by a future safe lifetime mechanism.
+
+#### Representation, stack, and native qualification
+
+The measured JS82 sizes are: `Value` **40 B**, runtime property **80 B**,
+typed property-key scratch **40 B**, runtime object **56 B**, iterator record
+**24 B**, and iterator registry **3,072 B** (128 × 24 B). The selector
+descriptor remains **1,918 B**, collection record **1,936 B**, and collection
+registry **247,808 B**. Well-known Symbol storage is one enum identity; dynamic
+Symbol allocation is zero. The existing filtered-selector rank scratch
+remains 18,688 B. These are bounded structure and hosted compiler
+measurements, not process RSS.
+
+The production `-O2` hosted stack-usage report measured 128 B for the
+Navigator Symbol-property adapter, 176 B for iterator creation, 80 B for
+iterator advancement, 2,240 B for adapter method dispatch, 384 B for evaluator
+host invocation, 320 B for typed host-property lookup, 576 B for runtime host
+method invocation, 320 B for member resolution, and 144 B for member read.
+The string-key host-property overload was 176 B. These Windows-hosted compiler
+frames do not establish bare-metal stack safety.
+
+The focused JS82 native suite passed **29/29 checks** under strict MinGW
+compilation (`-Wall -Wextra -Werror -pedantic`, GCC 15.2.0,
+`x86_64-w64-mingw32`). It includes the JS82 fixture, nested Events, callable
+identity, self-return, receiver and invalid-handle checks, lifetime accounting,
+allocation rollback, saturation, generation/serial reuse, and representation
+limits. The suite also performs a strict syntax-only compilation and records
+stack-usage output. Full matrix, production build, hosted aggregate, and final
+artifact restoration evidence are recorded in the qualification closeout
+below.
+
+#### JS82 regression, production, hosted, and artifact closeout
+
+The live preflight was branch `NAVIGATOR_JAVASCRIPT_SUPPORT`, HEAD
+`988717e725354a96a36324123f5e8521572b97e5`, upstream divergence **0 ahead /
+0 behind**, and a clean tracked worktree. The prompt's historical 1/0
+divergence did not match live Git state; no synchronization was performed.
+The duplicate/stale gate found no JS82 or later implementation. `.phase` was
+absent and remains absent.
+
+The discovered native matrix contains **84 lanes**. Its first run passed the
+first 63 lanes and stopped at JS62R4 because that historical test helper's
+exhaustive `ValueType` switch did not include the two new tags under
+`-Werror=switch`. The helper now compares well-known Symbols by identity and
+the namespace pseudo-value by type; no existing test assertions changed.
+JS62R4 then passed **113/113**. A resumed run passed JS62R4 through JS82,
+**21/21 lanes**, including JS75 **61/61**, JS76 **106/106**, JS77 **135/135**,
+JS78 **102/102**, JS79 **202/202**, JS80 **379/379**, JS81 **600/600**, and
+JS82 **29/29**. Across the initial successful prefix and resumed run, the
+complete matrix is **84/84 lanes** and **14,974/14,974 reported assertions
+across 43 assertion-bearing lanes**. JS9's hosted Event lane also passed in
+the final aggregate.
+
+`build.bat` passed with `C:\mingw64\bin\g++.exe`. The accepted hosted run
+used `D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`,
+**8,619,457 bytes**, SHA-256
+`320CF4CC97C939509A3E66CE0716CB545F607A2206C8C34F0DFEA74359D00CBD`. Hosted
+process **32932** reported the same executable path and hash. The first
+fresh-build attempt raced Navigator window creation and was not counted; the
+subsequent fresh-build run created the window, passed all four JS82 hosted
+checks (including the initial fixture's 18 assertions and the nested Event
+marker), and completed with **682 checks passed, 7 failed**. Those seven are
+the historical CSS 3C, CSS 3G, CSS 6A, CSS 6B (three checks), and CSS 6C
+failures. No new JavaScript or CSS failure remained. The accepted hosted
+logs, both matrix segments, build log, compiler reports, and executable
+provenance are retained outside the checkout under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js82-hosted-evidence\audit-20261020-204555`.
+
+Before build, the ignored baseline was **1,367 files / 90,843,932 bytes**.
+The original `guideXOSServer.exe` was backed up and hash-verified before build
+qualification; the same verified backup was retained for the rerun. The 42
+ignored generated Navigator fixtures (**458,372 bytes**) were also backed up.
+The original executable was restored to **8,398,274 bytes**,
+SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. The
+generated fixtures match their verified backup. The final ignored manifest
+again contains **1,367 files / 90,843,932 bytes**: **0 changed, 0 missing,
+and 0 extra**. Hosted and matrix logs remain outside the repository.
+
+`git diff --check` passed after qualification. No freestanding kernel runtime
+code changed, and kernel/QEMU execution was not run. JS83 should first define
+how interpreter-driven iteration safely scopes or avoids materializing each
+ordinary `{ value, done }` object under the current fixed object pool. It
+should retain the current lifetime accounting and allocation-failure
+behavior; `for...of` remains deferred until that bounded execution design is
+qualified.
+
+**Outcome A — JS82 bounded default iterator foundation qualified.** This phase
+adds a minimal well-known Symbol identity and the bounded iterable-protocol
+entry points only. It does not add `for...of`, general Symbol compatibility,
+or garbage collection.

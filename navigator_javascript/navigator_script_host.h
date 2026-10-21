@@ -54,6 +54,8 @@ constexpr std::uint32_t kNavigatorSelectorCollectionValuesMethod = 24u;
 constexpr std::uint32_t kNavigatorSelectorCollectionIteratorNextMethod = 25u;
 constexpr std::uint32_t kNavigatorSelectorCollectionKeysMethod = 26u;
 constexpr std::uint32_t kNavigatorSelectorCollectionEntriesMethod = 27u;
+constexpr std::uint32_t kNavigatorSelectorCollectionIteratorSymbolMethod =
+    28u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -475,8 +477,12 @@ public:
     HostResult validate(const HostObjectReference& object) override;
     HostResult getProperty(const HostObjectReference& object,
         SourceView property, HostValue& result) override;
+    HostResult getSymbolProperty(const HostObjectReference& object,
+        WellKnownSymbol property, HostValue& result) override;
     HostResult setProperty(const HostObjectReference& object,
         SourceView property, const HostValue& value) override;
+    HostResult setSymbolProperty(const HostObjectReference& object,
+        WellKnownSymbol property, const HostValue& value) override;
     HostResult call(const HostObjectReference* receiver,
         std::uint32_t methodId, const HostValue* arguments,
         std::size_t argumentCount, HostValue& result) override;

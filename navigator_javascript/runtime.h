@@ -355,6 +355,9 @@ private:
         std::string key;
         Value value;
         bool readOnly = false;
+        // Uses padding after the existing string/value/flag fields so typed
+        // Symbol identity does not enlarge a bounded property record.
+        WellKnownSymbol symbolKey = WellKnownSymbol::None;
     };
 
     struct RuntimeObject {
@@ -374,6 +377,13 @@ private:
         std::uint32_t method = 0;
         bool requiresReceiver = false;
         RuntimeFunctionId function = kInvalidRuntimeFunctionId;
+    };
+
+    struct PropertyKey {
+        std::string string;
+        WellKnownSymbol symbol = WellKnownSymbol::None;
+
+        bool isSymbol() const { return symbol != WellKnownSymbol::None; }
     };
 
     struct HostGlobalSpec {
@@ -407,7 +417,12 @@ private:
     bool readProperty(RuntimeObjectId object, const std::string& key,
         Value& value, RuntimeErrorCode& error,
         SourceLocation location = SourceLocation());
+    bool readProperty(RuntimeObjectId object, const PropertyKey& key,
+        Value& value, RuntimeErrorCode& error,
+        SourceLocation location = SourceLocation());
     bool writeProperty(RuntimeObjectId object, const std::string& key,
+        Value value, RuntimeErrorCode& error, bool readOnly = false);
+    bool writeProperty(RuntimeObjectId object, const PropertyKey& key,
         Value value, RuntimeErrorCode& error, bool readOnly = false);
     bool updateExistingProperty(RuntimeObjectId object, const std::string& key,
         Value value, RuntimeErrorCode& error);
@@ -424,7 +439,11 @@ private:
     bool consumeHostOperation(SourceLocation location);
     bool readHostProperty(RuntimeHostObjectId object, const std::string& key,
         Value& value, RuntimeErrorCode& error, SourceLocation location);
+    bool readHostProperty(RuntimeHostObjectId object, const PropertyKey& key,
+        Value& value, RuntimeErrorCode& error, SourceLocation location);
     bool writeHostProperty(RuntimeHostObjectId object, const std::string& key,
+        Value value, RuntimeErrorCode& error, SourceLocation location);
+    bool writeHostProperty(RuntimeHostObjectId object, const PropertyKey& key,
         Value value, RuntimeErrorCode& error, SourceLocation location);
     bool invokeHostMethod(const FunctionRecord& function,
         const std::vector<Value>& arguments, Value receiver,

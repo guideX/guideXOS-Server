@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS82 invalid receiver</title></head>
+<body>
+<pre id="result">JS82:invalid:pending</pre>
+<i class="row"></i>
+<script>
+var rows = document.querySelectorAll('.row');
+var cursor = rows[Symbol.iterator]();
+var selfMethod = cursor[Symbol.iterator];
+document.getElementById('result').textContent = 'JS82:invalid:calling';
+selfMethod();
+document.getElementById('result').textContent = 'JS82:invalid:returned';
+</script>
+</body>
+</html>
