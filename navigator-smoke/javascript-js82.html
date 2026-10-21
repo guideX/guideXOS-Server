@@ -77,6 +77,46 @@ var independentB = rows[Symbol.iterator]();
 verify(independentA !== independentB &&
   independentA.next().value === rows[0] &&
   independentB.next().value === rows[0]);
+
+var callbackOuter = rows[Symbol.iterator]();
+var callbackOuterFirst = callbackOuter.next();
+var forEachIteratorOk = true;
+var forEachCalls = 0;
+rows.forEach(function(row) {
+  var nested = rows[Symbol.iterator]();
+  var nestedFirst = nested.next();
+  forEachIteratorOk = forEachIteratorOk && nested !== callbackOuter &&
+    nestedFirst.value === rows[0] && nestedFirst.done === false;
+  forEachCalls++;
+});
+var someIteratorOk = true;
+var someCalls = 0;
+var someFound = rows.some(function(row) {
+  var nested = rows[Symbol.iterator]();
+  var nestedFirst = nested.next();
+  someIteratorOk = someIteratorOk && nested !== callbackOuter &&
+    nestedFirst.value === rows[0] && nestedFirst.done === false;
+  someCalls++;
+  return row === rows[1];
+});
+var everyIteratorOk = true;
+var everyCalls = 0;
+var everyRows = rows.every(function(row) {
+  var nested = rows[Symbol.iterator]();
+  var nestedFirst = nested.next();
+  everyIteratorOk = everyIteratorOk && nested !== callbackOuter &&
+    nestedFirst.value === rows[0] && nestedFirst.done === false;
+  everyCalls++;
+  return row === rows[0] || row === rows[1] || row === rows[2];
+});
+var callbackOuterSecond = callbackOuter.next();
+var callbacksOk = callbackOuterFirst.value === rows[0] &&
+  callbackOuterFirst.done === false && callbackOuterSecond.value === rows[1] &&
+  callbackOuterSecond.done === false && forEachIteratorOk && forEachCalls === 3 &&
+  someIteratorOk && someFound === true && someCalls === 2 && everyIteratorOk &&
+  everyRows === true && everyCalls === 3;
+verify(callbacksOk);
+
 var keys = rows.keys();
 var sameKeys = keys[Symbol.iterator]();
 var keyFirst = sameKeys.next();
@@ -167,7 +207,7 @@ eventA.addEventListener('click', function(event) {
 
 var initialMarker = 'JS82:initial:assertions=' + assertions +
   ':failures=' + failures + ':symbols=true:iterator=true:self=true:' +
-  'mutation=true:scope=true';
+  'mutation=true:scope=true:callbacks=' + callbacksOk;
 document.getElementById('result').textContent = initialMarker;
 </script>
 </body>

@@ -194,8 +194,10 @@ void testHostedFixtureAndNestedEvents()
     expect(result.succeeded() && numberIs(harness, "assertions") >= 17.0 &&
         numberIs(harness, "failures") == 0.0 &&
         stringIs(harness, "initialMarker").find(
-            "JS82:initial:assertions=") == 0u,
-        "JS82 fixture qualifies typed keys, default values iteration, self identity, bounds, scopes, adapters, and filtered selectors");
+            "JS82:initial:assertions=") == 0u &&
+        stringIs(harness, "initialMarker").find(":callbacks=true") !=
+            std::string::npos,
+        "JS82 fixture qualifies typed keys, default values iteration, callback reentrancy, self identity, bounds, scopes, adapters, and filtered selectors");
 
     const bool clicked = harness.dispatchClick(elementSerial(harness,
         "event-a"), error);

@@ -10502,10 +10502,12 @@ references, not snapshots.
 Qualification covers `querySelectorAll`, tag and class adapters, scoped
 queries, and a filtered positional selector. The native fixture also covers
 empty results, independent default cursors, VALUES/KEYS/ENTRIES self-return,
-growth and shrinkage, canonical Elements, string-key separation, nested Event
-dispatch, and preservation of Event metadata. The hosted Event case advances
-an outer default cursor before and after dispatching a nested Event which
-creates and advances a second cursor. Document generation replacement with
+growth and shrinkage, canonical Elements, string-key separation, and iterator
+creation and advancement inside `forEach()`, `some()`, and `every()` callbacks.
+These callback cases verify that the outer default cursor retains its position.
+The nested Event case advances an outer default cursor before and after
+dispatching a nested Event which creates and advances a second cursor.
+Document generation replacement with
 the same structural serial invalidates an old iterator and fails through the
 stale-host path. The established JS9 `getElementById()` reentry policy was not
 broadened.
@@ -10600,22 +10602,26 @@ JS78 **102/102**, JS79 **202/202**, JS80 **379/379**, JS81 **600/600**, and
 JS82 **29/29**. Across the initial successful prefix and resumed run, the
 complete matrix is **84/84 lanes** and **14,974/14,974 reported assertions
 across 43 assertion-bearing lanes**. JS9's hosted Event lane also passed in
-the final aggregate.
+the final aggregate. After adding direct default-iterator reentrancy checks
+inside the JS82 fixture's `forEach()`, `some()`, and `every()` callbacks, the
+focused JS82 native lane was rerun and passed **29/29 checks**; its inline
+fixture now reports **19 assertions**.
 
 `build.bat` passed with `C:\mingw64\bin\g++.exe`. The accepted hosted run
 used `D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`,
 **8,619,457 bytes**, SHA-256
 `320CF4CC97C939509A3E66CE0716CB545F607A2206C8C34F0DFEA74359D00CBD`. Hosted
-process **32932** reported the same executable path and hash. The first
-fresh-build attempt raced Navigator window creation and was not counted; the
-subsequent fresh-build run created the window, passed all four JS82 hosted
-checks (including the initial fixture's 18 assertions and the nested Event
-marker), and completed with **682 checks passed, 7 failed**. Those seven are
-the historical CSS 3C, CSS 3G, CSS 6A, CSS 6B (three checks), and CSS 6C
-failures. No new JavaScript or CSS failure remained. The accepted hosted
-logs, both matrix segments, build log, compiler reports, and executable
-provenance are retained outside the checkout under
-`C:\Users\guideX\AppData\Local\Temp\guidex-js82-hosted-evidence\audit-20261020-204555`.
+process **32932** in the initial accepted run reported the same executable
+path and hash. After adding the callback reentrancy cases, a final hosted
+rerun used that same hash-verified fresh build; process **35208** reported the
+same executable path and hash. All four JS82 hosted checks passed, including
+the **19-assertion** initial fixture with `callbacks=true`, nested Event
+marker, and invalid self-method receiver check. The aggregate again completed
+with **682 checks passed, 7 failed**. Those seven are the historical CSS 3C,
+CSS 3G, CSS 6A, CSS 6B (three checks), and CSS 6C failures. No JavaScript
+failure remained. The final callback-rerun logs are retained outside the
+checkout under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js82-hosted-evidence\audit-20261020-204555\hosted-final-callbacks-js82`; the earlier hosted logs, both matrix segments, build log, compiler reports, and executable provenance remain under the parent audit directory.
 
 Before build, the ignored baseline was **1,367 files / 90,843,932 bytes**.
 The original `guideXOSServer.exe` was backed up and hash-verified before build
