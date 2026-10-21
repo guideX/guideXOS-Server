@@ -1,0 +1,14 @@
+﻿{
+    "exit_code":  0,
+    "pid":  29796,
+    "started_at_utc":  "2026-10-21T02:51:43.6533522Z",
+    "finished_at_utc":  "2026-10-21T02:54:23.1661195Z",
+    "arguments":  [
+                      "-C",
+                      "D:\\dev\\guideXOSServer_REXX\\kernel",
+                      "-B",
+                      "ARCH=amd64",
+                      "BUILD_ROOT=../build/rexx/rx21/native-amd64-0987bc56bb9e4233ba82f16cf1604d67",
+                      "all"
+                  ]
+}

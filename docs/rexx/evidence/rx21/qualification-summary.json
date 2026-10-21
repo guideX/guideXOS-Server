@@ -1,0 +1,83 @@
+{
+  "schema": "guidexos.rexx.rx21.qualification-summary.v1",
+  "phase": "RX21",
+  "outcome": "B — Partial",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "0d8fd1d52c941df962cfa94d0d55b48f560bc895",
+  "production_clock_or_settings_changes": false,
+  "settings_policy_gate": {
+    "status": "NOT_IMPLEMENTED",
+    "reason": "No existing versioned system-settings service can safely persist policy and make it available to the kernel before clock consumers initialize.",
+    "policy_test_status": "NOT_RUN",
+    "persistence_reload_status": "NOT_RUN"
+  },
+  "regressions": {
+    "rx20_clock_contract": {
+      "status": "PASS",
+      "checks": 123,
+      "result": "direct-clock-tests/run-31d34ab706ad4adca41760f31ebcfd3f/result.json"
+    },
+    "hosted_cli_and_fixture_cases": {
+      "status": "PASS",
+      "passed": 304,
+      "regina": "NOT_RUN; unavailable"
+    },
+    "address_sanitizer": {
+      "status": "PASS",
+      "targets": "22/22",
+      "local_expected_exit_cases": "195/195",
+      "regina_differential": "NOT_RUN; unavailable"
+    },
+    "undefined_behavior_sanitizer": {
+      "status": "PASS",
+      "targets": "22/22",
+      "local_expected_exit_cases": "195/195",
+      "regina_differential": "NOT_RUN; unavailable"
+    }
+  },
+  "freestanding_amd64": {
+    "status": "PASS",
+    "rexx_c_objects": 9,
+    "kernel_elf_sha256": "a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80",
+    "evidence": "native-build/native-link-evidence-0987bc56bb9e4233ba82f16cf1604d67.json"
+  },
+  "native_guest": {
+    "status": "PASS",
+    "run": "native-guest/run-bcab174960604782b05c37a02dea8091",
+    "qac_mode": "exclusive acceptance",
+    "qac_reported_child_exit_code": 0,
+    "qac_process_exit_code_property": null,
+    "qac_process_exit_code_note": "PowerShell did not expose the exited QAC process ExitCode property; QAC diagnostics reported child exitCode=0 and reservation release, and the post-run coordinator status showed zero sessions, queued work, and blocked work.",
+    "qac_reservation_released": true,
+    "qmp_shutdown_acknowledged": true,
+    "network_disabled": true,
+    "preexisting_foreign_qemu_processes": 0,
+    "qemu_processes_after_shutdown": 0,
+    "guest_observations": {
+      "raw_cmos": "available; interpretation Unknown; local and UTC capabilities unavailable",
+      "current_date_and_time": "fail closed",
+      "date_conversions": "Base(1 Jan 0001)=0; Base(29 Feb 2000)=730178; day-of-year(2024-02-29)=060; reverse Base=20000229",
+      "time_elapsed": "advanced from 0.000000 to 0.199986 seconds",
+      "time_reset": "returned 0.199986 before reset and 0.099993 after reset",
+      "post_error_recovery": "current DATE error was caught; DATE conversion and guest responsiveness confirmed",
+      "guest_clock_script_exit_status": 0
+    },
+    "screenshots": [
+      "native-guest/run-bcab174960604782b05c37a02dea8091/rx21-01-raw-clock-capabilities-and-monotonic.png",
+      "native-guest/run-bcab174960604782b05c37a02dea8091/rx21-02-clock-script-exit-status.png",
+      "native-guest/run-bcab174960604782b05c37a02dea8091/rx21-03-post-error-date-recovery.png"
+    ]
+  },
+  "protected_integrity": {
+    "root_obj_pdb": "31/31 hashes and sizes match",
+    "preexisting_untracked_paths": "37042/37042 still present",
+    "root_phase_marker": "absent",
+    "evidence": "protected-artifacts-final.json"
+  },
+  "inventory": {
+    "builtin_rows": 75,
+    "date": "Partial",
+    "time": "Partial"
+  },
+  "recommendation": "Do not schedule further RTC-only phases automatically. Return to independent classic REXX built-ins in RX22 and keep RTC policy as a gated future integration with a supported settings service."
+}

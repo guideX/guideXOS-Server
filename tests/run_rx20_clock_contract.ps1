@@ -1,9 +1,11 @@
-param()
+param(
+    [ValidateSet('RX20','RX21')][string]$Phase = 'RX20'
+)
 
 $ErrorActionPreference = 'Stop'
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
-    throw 'RX20 clock contract qualification requires branch REXX_SUPPORT.'
+    throw "$Phase clock contract qualification requires branch REXX_SUPPORT."
 }
 
 $compiler = Get-Command g++ -ErrorAction SilentlyContinue
@@ -11,9 +13,9 @@ if ($null -eq $compiler) { throw 'g++ is required for the RX20 clock contract ho
 
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$manifest = Join-Path $rootDir 'docs\rexx\evidence\rx20\protected-artifacts-start.json'
+$manifest = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\protected-artifacts-start.json"
 $runId = [Guid]::NewGuid().ToString('N')
-$runRoot = Join-Path $rootDir "build\rexx\rx20\direct-$runId"
+$runRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())\direct-$runId"
 $workingDirectory = Join-Path $runRoot 'temp'
 $exePath = Join-Path $runRoot 'kernel_clock_contract_test.exe'
 $buildStdout = Join-Path $runRoot 'build.stdout.log'
@@ -23,7 +25,7 @@ $runStderr = Join-Path $runRoot 'run.stderr.log'
 $plannedOutputs = @($exePath,$buildStdout,$buildStderr,$runStdout,$runStderr)
 
 $null = Start-ReXXArtifactRun -ManifestPath $manifest -RunRoot $runRoot `
-    -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase RX20
+    -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
 $env:TEMP = $workingDirectory
 $env:TMP = $workingDirectory
 $env:TMPDIR = $workingDirectory
@@ -44,7 +46,7 @@ if ($runExit -ne 0) { throw "RX20 clock contract tests failed ($runExit). See $r
 
 $hash = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $result = [PSCustomObject]@{
-    schema = 'guidexos.rexx.rx20.clock-contract-test.v1'
+    schema = "guidexos.rexx.$($Phase.ToLowerInvariant()).clock-contract-test.v1"
     run_id = $runId
     branch = (git -C $rootDir branch --show-current).Trim()
     head = (git -C $rootDir rev-parse HEAD).Trim()
@@ -60,8 +62,8 @@ $result = [PSCustomObject]@{
 }
 
 Test-ReXXArtifactRun -ManifestPath $manifest -RunRoot $runRoot `
-    -Stage 'rx20-clock-contract-test' -Phase RX20 | Out-Null
-$durable = Join-Path $rootDir "docs\rexx\evidence\rx20\direct-clock-tests\run-$runId"
+    -Stage "$($Phase.ToLowerInvariant())-clock-contract-test" -Phase $Phase | Out-Null
+$durable = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\direct-clock-tests\run-$runId"
 New-Item -ItemType Directory -Path $durable -Force | Out-Null
 Copy-Item -LiteralPath $runStdout,$runStderr,$buildStdout,$buildStderr -Destination $durable
 $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $durable 'result.json') -Encoding utf8

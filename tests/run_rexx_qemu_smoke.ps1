@@ -1,9 +1,10 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21')]
     [string]$Phase = 'RX12R1',
     [Parameter(Mandatory)][string]$KernelPath,
     [string]$SourceEsp = 'C:\Users\guideX\.codex\rx12-native-guest\esp',
-    [string]$FirmwarePath = 'C:\Users\guideX\.codex\rx12-native-guest\firmware-code.fd'
+    [string]$FirmwarePath = 'C:\Users\guideX\.codex\rx12-native-guest\firmware-code.fd',
+    [string]$QacCliPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,9 @@ $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
     throw "$Phase QEMU qualification requires branch REXX_SUPPORT."
 }
-$guardManifest = if ($Phase -eq 'RX19') {
+$guardManifest = if ($Phase -eq 'RX21') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx21\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX19') {
     Join-Path $rootDir 'docs\rexx\evidence\rx19\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX20') {
     Join-Path $rootDir 'docs\rexx\evidence\rx20\protected-artifacts-start.json'
@@ -30,6 +33,17 @@ $guardManifest = if ($Phase -eq 'RX19') {
 }
 Import-Module -Name (Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1') -Force
 $qemuPath = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
+$useQac = $Phase -eq 'RX21'
+if ($useQac) {
+    if ([string]::IsNullOrWhiteSpace($QacCliPath)) { $QacCliPath = $env:GUIDEXOS_QAC_CLI }
+    if ([string]::IsNullOrWhiteSpace($QacCliPath)) {
+        $qacCommand = Get-Command qac.exe -ErrorAction SilentlyContinue
+        if ($null -ne $qacCommand) { $QacCliPath = $qacCommand.Source }
+    }
+    if ([string]::IsNullOrWhiteSpace($QacCliPath)) { throw 'RX21 native acceptance requires the QAC CLI path; direct QEMU launch is not permitted for this run.' }
+    $QacCliPath = [System.IO.Path]::GetFullPath($QacCliPath)
+    if (-not (Test-Path -LiteralPath $QacCliPath -PathType Leaf)) { throw "QAC CLI executable not found: $QacCliPath" }
+}
 $KernelPath = [System.IO.Path]::GetFullPath($KernelPath)
 $SourceEsp = [System.IO.Path]::GetFullPath($SourceEsp)
 $FirmwarePath = [System.IO.Path]::GetFullPath($FirmwarePath)
@@ -48,7 +62,7 @@ $guestRoot = Join-Path $runRoot 'guest'
 $guestEsp = Join-Path $guestRoot 'esp'
 $stagedFirmware = Join-Path $guestRoot 'firmware-code.fd'
 $helperRoot = Join-Path $runRoot 'helper'
-$helperName = if ($Phase -eq 'RX20') { 'type_rx20_guest_command.ps1' } elseif ($Phase -eq 'RX19') { 'type_rx19_guest_command.ps1' } elseif ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
+$helperName = if ($Phase -eq 'RX21') { 'type_rx21_guest_command.ps1' } elseif ($Phase -eq 'RX20') { 'type_rx20_guest_command.ps1' } elseif ($Phase -eq 'RX19') { 'type_rx19_guest_command.ps1' } elseif ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
 $serialPath = Join-Path $runRoot 'serial.log'
 $qemuStdoutPath = Join-Path $runRoot 'qemu.stdout.log'
 $qemuStderrPath = Join-Path $runRoot 'qemu.stderr.log'
@@ -121,6 +135,12 @@ if ($Phase -eq 'RX20') {
         (Join-Path $guestEsp 'rx20rcv.rex')
     )
 }
+if ($Phase -eq 'RX21') {
+    $plannedOutputs += @(
+        (Join-Path $guestEsp 'rx21clk.rex'),
+        (Join-Path $guestEsp 'rx21rcv.rex')
+    )
+}
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs -Phase $Phase
 $env:TEMP = $workDir
@@ -132,6 +152,8 @@ $evidenceRoot = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
 $helperSource = if ($Phase -eq 'RX19') {
     Join-Path $rootDir 'docs\rexx\evidence\rx19\native-guest'
+} elseif ($Phase -eq 'RX21') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx21\native-guest'
 } elseif ($Phase -eq 'RX20') {
     Join-Path $rootDir 'docs\rexx\evidence\rx20\native-guest'
 } elseif ($Phase -eq 'RX18') {
@@ -234,6 +256,16 @@ if ($Phase -eq 'RX20') {
         $rx20ScriptNames += $scriptFile.Name
     }
 }
+$rx21ScriptNames = @()
+if ($Phase -eq 'RX21') {
+    $rx21Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx21\native-guest\scripts'
+    $rx21ScriptFiles = @(Get-ChildItem -LiteralPath $rx21Scripts -Filter 'rx21*.rex' -File | Sort-Object Name)
+    if ($rx21ScriptFiles.Count -ne 2) { throw "Expected two reviewed RX21 native guest scripts; found $($rx21ScriptFiles.Count)." }
+    foreach ($scriptFile in $rx21ScriptFiles) {
+        Copy-Item -LiteralPath $scriptFile.FullName -Destination (Join-Path $guestEsp $scriptFile.Name)
+        $rx21ScriptNames += $scriptFile.Name
+    }
+}
 
 function Get-QemuCensus {
     $items = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'" -ErrorAction SilentlyContinue)
@@ -259,6 +291,31 @@ function Read-QemuSerialLog([string]$Path) {
     }
 }
 
+function ConvertTo-WindowsProcessArgument([string]$Argument) {
+    if ($Argument.Length -gt 0 -and $Argument -notmatch '[\s"]') { return $Argument }
+    $builder = [System.Text.StringBuilder]::new()
+    [void]$builder.Append([char]0x22)
+    $backslashCount = 0
+    foreach ($character in $Argument.ToCharArray()) {
+        if ($character -eq [char]0x5c) {
+            ++$backslashCount
+        } elseif ($character -eq [char]0x22) {
+            [void]$builder.Append(('\' * (($backslashCount * 2) + 1)))
+            [void]$builder.Append([char]0x22)
+            $backslashCount = 0
+        } else {
+            if ($backslashCount -gt 0) {
+                [void]$builder.Append(('\' * $backslashCount))
+                $backslashCount = 0
+            }
+            [void]$builder.Append($character)
+        }
+    }
+    if ($backslashCount -gt 0) { [void]$builder.Append(('\' * ($backslashCount * 2))) }
+    [void]$builder.Append([char]0x22)
+    return $builder.ToString()
+}
+
 function Assert-OwnQemu {
     param($Identity)
     $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($Identity.pid)" -ErrorAction SilentlyContinue
@@ -278,6 +335,12 @@ function Assert-OwnQemu {
 
 $beforeCensus = Get-QemuCensus
 $beforeCensus | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidenceRoot 'qemu-ownership-census-before.json') -Encoding utf8
+if ($useQac) {
+    $qacBefore = & $QacCliPath status 2>&1
+    [System.IO.File]::WriteAllText((Join-Path $evidenceRoot 'qac-status-before.txt'),(@($qacBefore) -join "`n")+"`n",[System.Text.UTF8Encoding]::new($false))
+    $qacListBefore = & $QacCliPath list 2>&1
+    [System.IO.File]::WriteAllText((Join-Path $evidenceRoot 'qac-list-before.txt'),(@($qacListBefore) -join "`n")+"`n",[System.Text.UTF8Encoding]::new($false))
+}
 $portProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
 $portProbe.Start()
 $qmpPort = ([System.Net.IPEndPoint]$portProbe.LocalEndpoint).Port
@@ -287,6 +350,10 @@ $stagedKernelHash = (Get-FileHash -LiteralPath (Join-Path $guestEsp 'kernel.elf'
 if ($kernelHash -ne $stagedKernelHash) { throw 'Staged disposable guest kernel hash does not match the isolated native build.' }
 $owner = [PSCustomObject]@{
     pid = $null
+    qacPid = $null
+    qacProject = $null
+    qacMode = $null
+    qacCliPath = $null
     qemuPath = $qemuPath
     qmpPort = $qmpPort
     espPath = $guestEsp
@@ -315,6 +382,9 @@ $invocation = [PSCustomObject]@{
     qemu = $qemuPath
     version = ((& $qemuPath --version 2>&1 | Select-Object -First 1).ToString())
     arguments = $qemuArguments
+    qac_cli = if ($useQac) { $QacCliPath } else { $null }
+    qac_project = if ($useQac) { 'guideXOSServer' } else { $null }
+    qac_mode = if ($useQac) { 'acceptance' } else { $null }
     qmp_port = $qmpPort
     disposable_esp = $guestEsp
     source_esp = $SourceEsp
@@ -330,10 +400,42 @@ $invocationPath = Join-Path $evidenceRoot 'qemu-invocation.json'
 $invocation | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $invocationPath -Encoding utf8
 
 $qemuProcess = $null
+$qacProcess = $null
+$qacProcessExitCode = $null
+$qacReportedChildExitCode = $null
+$qacReservationReleased = $false
 $shutdownConfirmed = $false
 try {
-    $qemuProcess = Start-Process -FilePath $qemuPath -ArgumentList $qemuArguments -WorkingDirectory $workDir `
-        -WindowStyle Hidden -PassThru -RedirectStandardOutput $qemuStdoutPath -RedirectStandardError $qemuStderrPath
+    if ($useQac) {
+        $qacArguments = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemuPath) + $qemuArguments
+        $qacArgumentLine = [string]::Join(' ',[string[]]@($qacArguments | ForEach-Object { ConvertTo-WindowsProcessArgument ([string]$_) }))
+        $qacProcess = Start-Process -FilePath $QacCliPath -ArgumentList $qacArgumentLine -WorkingDirectory $workDir `
+            -WindowStyle Hidden -PassThru -RedirectStandardOutput $qemuStdoutPath -RedirectStandardError $qemuStderrPath
+        $childDeadline = [DateTime]::UtcNow.AddSeconds(60)
+        $qemuIdentity = $null
+        while ([DateTime]::UtcNow -lt $childDeadline) {
+            $qemuIdentity = Get-CimInstance Win32_Process -Filter "ParentProcessId = $($qacProcess.Id)" -ErrorAction SilentlyContinue |
+                Where-Object { [System.IO.Path]::GetFullPath([string]$_.ExecutablePath) -ieq [System.IO.Path]::GetFullPath($qemuPath) -and
+                    $_.CommandLine -like "*127.0.0.1:$qmpPort,*" -and $_.CommandLine -like "*$guestEsp*" } |
+                Select-Object -First 1
+            if ($qemuIdentity) { break }
+            if ($qacProcess.HasExited) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not $qemuIdentity) {
+            $qacOutput = if (Test-Path -LiteralPath $qemuStdoutPath) { Get-Content -Raw -LiteralPath $qemuStdoutPath } else { '' }
+            $qacError = if (Test-Path -LiteralPath $qemuStderrPath) { Get-Content -Raw -LiteralPath $qemuStderrPath } else { '' }
+            throw "QAC did not start the expected direct QEMU child. stdout=$qacOutput stderr=$qacError"
+        }
+        $qemuProcess = Get-Process -Id ([int]$qemuIdentity.ProcessId) -ErrorAction Stop
+        $owner.qacPid = $qacProcess.Id
+        $owner.qacMode = 'acceptance'
+        $owner.qacProject = 'guideXOSServer'
+        $owner.qacCliPath = $QacCliPath
+    } else {
+        $qemuProcess = Start-Process -FilePath $qemuPath -ArgumentList $qemuArguments -WorkingDirectory $workDir `
+            -WindowStyle Hidden -PassThru -RedirectStandardOutput $qemuStdoutPath -RedirectStandardError $qemuStderrPath
+    }
     $owner.pid = $qemuProcess.Id
     $owner | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ownerPath -Encoding utf8
 
@@ -351,7 +453,13 @@ try {
     $heartbeatCountBefore = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
 
     $helper = Join-Path $helperRoot $helperName
-    $commands = if ($Phase -eq 'RX20') {
+    $commands = if ($Phase -eq 'RX21') {
+        @(
+            [PSCustomObject]@{ name='raw-clock-capabilities-and-monotonic'; text='rexx /rx21clk.rex'; open_terminal=$true; expected='RX21_NATIVE_CLOCK_CAPABILITY_DONE' },
+            [PSCustomObject]@{ name='clock-script-exit-status'; text='echo $?'; expected='0' },
+            [PSCustomObject]@{ name='post-error-date-recovery'; text='rexx /rx21rcv.rex'; expected='RX21_NATIVE_GUEST_RESPONSIVE' }
+        )
+    } elseif ($Phase -eq 'RX20') {
         @(
             [PSCustomObject]@{ name='clock-capabilities-and-monotonic'; text='rexx /rx20clk.rex'; open_terminal=$true; expected='RX20_NATIVE_CLOCK_CAPABILITY_DONE' },
             [PSCustomObject]@{ name='post-error-date-recovery'; text='rexx /rx20rcv.rex'; expected='RX20_NATIVE_GUEST_RESPONSIVE' }
@@ -420,9 +528,9 @@ try {
     $index = 0
     foreach ($command in $commands) {
         $index++
-        $capturePrefix = if ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+        $capturePrefix = if ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
         $captureName = "{0}-{1:D2}-{2}" -f $capturePrefix,$index,$command.name
-        $commandWaitSeconds = if ($Phase -eq 'RX20') { 15 } else { 5 }
+        $commandWaitSeconds = if ($Phase -in @('RX20','RX21')) { 15 } else { 5 }
         if ($command.open_terminal) {
             & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds $commandWaitSeconds -OpenTerminal
         } else {
@@ -432,7 +540,7 @@ try {
         $null = Assert-OwnQemu -Identity $owner
     }
 
-    $capturePrefix = if ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+    $capturePrefix = if ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
     $screenshots = @(Get-ChildItem -LiteralPath $helperRoot -Filter "$capturePrefix-*.png" -File)
     if ($screenshots.Count -ne $commands.Count) { throw "Expected one Console screenshot per smoke command; found $($screenshots.Count) for $($commands.Count) commands." }
 
@@ -440,8 +548,8 @@ try {
     $serial = Get-Content -Raw -LiteralPath $serialPath
     $heartbeatCountAfter = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
     if ($heartbeatCountAfter -le $heartbeatCountBefore) { throw "Guest heartbeat did not continue during the $Phase smoke commands." }
-    $scriptNames = if ($Phase -eq 'RX20') { $rx20ScriptNames } elseif ($Phase -eq 'RX19') { $rx19ScriptNames } elseif ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
-    $serialScriptNames = if ($Phase -in @('RX20','RX19','RX18','RX17','RX16')) {
+    $scriptNames = if ($Phase -eq 'RX21') { $rx21ScriptNames } elseif ($Phase -eq 'RX20') { $rx20ScriptNames } elseif ($Phase -eq 'RX19') { $rx19ScriptNames } elseif ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
+    $serialScriptNames = if ($Phase -in @('RX21','RX20','RX19','RX18','RX17','RX16')) {
         $scriptNames
     } elseif ($Phase -eq 'RX15') {
         @($scriptNames | Where-Object { $_ -ne 'rx15-conversion-resource-limit.rex' })
@@ -455,7 +563,7 @@ try {
     foreach ($scriptName in $serialScriptNames) {
         if (-not $serial.Contains("/" + $scriptName)) { throw "Serial log did not record guest script access: $scriptName" }
     }
-    if ($Phase -eq 'RX20') {
+    if ($Phase -in @('RX20','RX21')) {
         if ($serial -notmatch '\[REXX-CLOCK\] source=CMOS_RTC read=ok raw=1 local=0 utc=0 offset=unknown resolution_ns=3B9ACA00 accuracy=unknown monotonic=PIT') {
             throw 'RX20 guest did not report a successful CMOS raw reading with unknown interpretation and PIT monotonic capability.'
         }
@@ -470,6 +578,40 @@ try {
     & $helper -QuitQemu -CommandText '' -CaptureName 'shutdown' -WaitSeconds 0
     $shutdownConfirmed = $true
     if (-not $qemuProcess.WaitForExit(30000)) { throw 'Verified QMP quit did not stop the isolated QEMU process within 30 seconds.' }
+    if ($null -ne $qacProcess) {
+        if (-not $qacProcess.WaitForExit(30000)) { throw 'QAC did not report child exit and release the acceptance reservation within 30 seconds.' }
+        $qacProcess.Refresh()
+        $qacProcessExitCode = $qacProcess.ExitCode
+        $qacStderr = if (Test-Path -LiteralPath $qemuStderrPath) { Get-Content -Raw -LiteralPath $qemuStderrPath } else { '' }
+        $qacChildExitMatch = [regex]::Match($qacStderr,'QAC QEMU exited: [^\r\n]* exitCode=(?<code>-?\d+)')
+        if (-not $qacChildExitMatch.Success) { throw 'QAC did not report the managed QEMU child exit code.' }
+        $qacReportedChildExitCode = [int]$qacChildExitMatch.Groups['code'].Value
+        if ($qacStderr -notmatch 'QAC reservation released:') { throw 'QAC did not report releasing its acceptance reservation after child exit.' }
+        if ($null -ne $qacProcessExitCode -and $qacProcessExitCode -ne $qacReportedChildExitCode) {
+            throw "QAC process exit code $qacProcessExitCode did not match its reported QEMU child exit code $qacReportedChildExitCode."
+        }
+        if ($qacReportedChildExitCode -ne 0) { throw "QAC acceptance child returned exit code $qacReportedChildExitCode." }
+        $qacAfter = & $QacCliPath status 2>&1
+        $qacAfterText = @($qacAfter) -join "`n"
+        [System.IO.File]::WriteAllText((Join-Path $evidenceRoot 'qac-status-after.txt'),$qacAfterText+"`n",[System.Text.UTF8Encoding]::new($false))
+        if ($qacAfterText -notmatch 'Managed sessions: 0; queued: 0; blocked: 0') {
+            throw 'QAC did not report the acceptance session and reservation fully released after QEMU exit.'
+        }
+        $qacReservationReleased = $true
+        [PSCustomObject]@{
+            qac_cli_path = $QacCliPath
+            qac_cli_pid = $qacProcess.Id
+            project = 'guideXOSServer'
+            mode = 'acceptance'
+            direct_qemu_child_pid = $owner.pid
+            qac_process_exit_code = $qacProcessExitCode
+            qac_reported_child_exit_code = $qacReportedChildExitCode
+            qac_reservation_released = $qacReservationReleased
+            qmp_shutdown_acknowledged = $shutdownConfirmed
+            managed_sessions_after = 0
+            completed_at_utc = [DateTime]::UtcNow.ToString('o')
+        } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidenceRoot 'qac-run.json') -Encoding utf8
+    }
     $immediateCensus = Get-QemuCensus
     $immediateCensus | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidenceRoot 'qemu-immediate-post-shutdown-census.json') -Encoding utf8
 } catch {
@@ -482,6 +624,7 @@ try {
             & (Join-Path $helperRoot $helperName) -QuitQemu -CommandText '' -CaptureName 'shutdown-recovery' -WaitSeconds 0
             $shutdownConfirmed = $true
             $null = $qemuProcess.WaitForExit(30000)
+            if ($null -ne $qacProcess) { $null = $qacProcess.WaitForExit(30000) }
         } catch {
             Write-Warning "Could not verify and shut down the isolated QEMU owner: $($_.Exception.Message)"
         }
@@ -519,6 +662,9 @@ $processReconciliation = [PSCustomObject]@{
     owned_qemu_pid = $owner.pid
     owned_pid_absent_after_shutdown = [int]$owner.pid -notin $immediatePids -and [int]$owner.pid -notin $finalPids
     qmp_shutdown_acknowledged = $shutdownConfirmed
+    qac_cli_pid = if ($null -ne $qacProcess) { $qacProcess.Id } else { $null }
+    qac_reported_child_exit_code = $qacReportedChildExitCode
+    qac_reservation_released = $qacReservationReleased
     phase_preflight_census = if (Test-Path -LiteralPath $phasePreflightPath) { 'preflight.json' } else { $null }
     preflight_qemu_pids = $preflightPids
     preflight_pids_absent_before_launch = $preflightAbsentBeforeLaunch
@@ -568,6 +714,11 @@ $smokeResult = [PSCustomObject]@{
     qemu_immediate_post_shutdown_census = 'qemu-immediate-post-shutdown-census.json'
     qemu_final_census = 'qemu-final-census.json'
     qemu_process_reconciliation = 'qemu-process-reconciliation.json'
+    qac_acceptance_mode = $useQac
+    qac_cli_pid = if ($useQac) { $owner.qacPid } else { $null }
+    qac_acceptance_released = if ($useQac) { $qacReservationReleased } else { $null }
+    qac_process_exit_code = if ($useQac) { $qacProcessExitCode } else { $null }
+    qac_reported_child_exit_code = if ($useQac) { $qacReportedChildExitCode } else { $null }
     evidence_directory = $evidenceRoot
 }
 $smokeResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidenceRoot 'qemu-smoke-result.json') -Encoding utf8

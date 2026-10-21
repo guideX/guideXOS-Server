@@ -1,0 +1,115 @@
+{
+  "schema": "guidexos.rexx.rx21.scorecard.v1",
+  "phase": "RX21",
+  "outcome": "B — Partial",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "0d8fd1d52c941df962cfa94d0d55b48f560bc895",
+  "local_commit_includes_scorecard": true,
+  "settings_audit": {
+    "status": "COMPLETE",
+    "report": "REXX_RX21_SETTINGS_INTEGRATION_AUDIT.md",
+    "suitable_persistent_rtc_policy_service": false,
+    "existing_display_options_store": "display-options.cfg schema version 1; display preference scope; not suitable for RTC interpretation",
+    "kernel_rtc_settings_provider": false,
+    "settings_ui_native_visual_acceptance": "NOT_CLAIMED"
+  },
+  "policy_model": {
+    "documented": true,
+    "production_policy_loaded": false,
+    "default": "Unknown",
+    "source": "No supported RTC policy source in this checkout",
+    "configured_intent_is_physical_verification": false,
+    "offset_convention": "local = UTC + utc_offset_minutes",
+    "offset_range_minutes": "-1440 through +1440",
+    "offset_missing_distinct_from_zero": true,
+    "local_with_offset_provenance_supported_by_rx20_contract": false,
+    "dst_or_region_timezone_rules": false
+  },
+  "clock": {
+    "production_source": "CMOS RTC at AMD64 ports 0x70/0x71",
+    "raw_calendar": "RX20 behavior retained",
+    "calendar_validity": "RX20 behavior retained",
+    "interpretation": "Unknown; no local or UTC wall capability",
+    "policy_source_and_persistence_status": "No production interface or field",
+    "monotonic": "PIT remains independent of wall clock",
+    "cmos_modified": false,
+    "uefi_gettime_or_settime_called": false
+  },
+  "rexx": {
+    "DATE": "Partial; clock-free conversions supported; current-date forms unavailable",
+    "TIME": "Partial; elapsed/reset forms supported; current wall forms unavailable",
+    "regina_differential": "NOT_RUN unless available in RX21 hosted runner",
+    "external_compatibility_percentage": "NOT_CLAIMED"
+  },
+  "qualification": {
+    "rx21_policy_tests": {
+      "status": "NOT_RUN",
+      "reason": "No production policy/configuration implementation exists to exercise"
+    },
+    "rx20_clock_contract_regression": {
+      "status": "PASS",
+      "checks": 123,
+      "evidence": "evidence/rx21/direct-clock-tests/run-31d34ab706ad4adca41760f31ebcfd3f/result.json"
+    },
+    "hosted_inherited_regressions": {
+      "status": "PASS",
+      "named_cli_and_fixture_cases": 304,
+      "regina": "NOT_RUN; unavailable",
+      "evidence": "evidence/rx21/hosted-regressions.log"
+    },
+    "address_sanitizer": {
+      "status": "PASS",
+      "targets": "22/22",
+      "local_expected_exit_cases": "195/195",
+      "regina_differential": "NOT_RUN; unavailable"
+    },
+    "undefined_behavior_sanitizer": {
+      "status": "PASS",
+      "targets": "22/22",
+      "local_expected_exit_cases": "195/195",
+      "regina_differential": "NOT_RUN; unavailable"
+    },
+    "freestanding_amd64": {
+      "status": "PASS",
+      "rexx_c_objects": 9,
+      "kernel_elf_sha256": "a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80",
+      "evidence": "evidence/rx21/native-build/native-link-evidence-0987bc56bb9e4233ba82f16cf1604d67.json"
+    },
+    "isolated_qemu_guest": {
+      "status": "PASS",
+      "qac_mode": "exclusive acceptance",
+      "qac_reported_child_exit_code": 0,
+      "qac_reservation_released": true,
+      "qmp_shutdown_acknowledged": true,
+      "network_disabled": true,
+      "evidence": "evidence/rx21/native-guest/run-bcab174960604782b05c37a02dea8091"
+    },
+    "settings_persistence_reload": {
+      "status": "NOT_RUN",
+      "reason": "No supported RTC policy write path exists"
+    }
+  },
+  "protected_integrity": {
+    "protected_artifact_baseline": "evidence/rx21/protected-artifacts-start.json",
+    "root_object_and_pdb_files": "31/31 hashes and sizes match",
+    "preexisting_untracked_paths": 37042,
+    "preexisting_untracked_paths_present": 37042,
+    "final_comparison": "evidence/rx21/protected-artifacts-final.json",
+    "root_phase": "Absent"
+  },
+  "inventory": {
+    "builtin_rows": 75,
+    "date_status": "Partial",
+    "time_status": "Partial",
+    "implementation_count_inflated": false,
+    "file": "REXX_RX21_BUILTIN_INVENTORY.csv"
+  },
+  "remaining_dependencies": [
+    "Versioned, failure-safe system-settings service for RTC interpretation and optional fixed offset",
+    "Kernel-readable effective setting with guaranteed load order before clock capability consumers",
+    "Settings-source identity, persistence status, and generation/invalidation contract",
+    "Configured local RTC with fixed offset needs a clock provenance representation",
+    "Native guest evidence for policy write, reboot/reload, invalid-data recovery, and policy clearing"
+  ],
+  "recommendation": "Do not schedule RTC-only repair phases automatically. Return to independent classic REXX built-ins in RX22 and retain RTC policy as a future gated settings-service integration."
+}

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21')]
     [string]$Phase = 'RX12R1',
     [ValidateSet('Address', 'Undefined', 'Both')]
     [string]$Sanitizer = 'Both',
@@ -18,7 +18,9 @@ $phaseOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX19') {
+$guardManifest = if ($Phase -eq 'RX21') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx21\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX19') {
     Join-Path $rootDir 'docs\rexx\evidence\rx19\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX20') {
     Join-Path $rootDir 'docs\rexx\evidence\rx20\protected-artifacts-start.json'
@@ -224,7 +226,7 @@ function Invoke-OneSanitizer {
         [PSCustomObject]@{ Name = 'rx18_string_builtins'; Driver = 'tests\rexx_rx18_string_builtins_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx19_date_time'; Driver = 'tests\rexx_rx19_date_time_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') }
     )
-    if ($Phase -eq 'RX20') {
+    if ($Phase -in @('RX20','RX21')) {
         $plans += [PSCustomObject]@{
             Name = 'rx20_clock_contract'
             Driver = 'tests\kernel_clock_contract_test.cpp'

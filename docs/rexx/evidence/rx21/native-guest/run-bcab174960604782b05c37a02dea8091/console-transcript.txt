@@ -1,0 +1,8 @@
+RX21 isolated QEMU Console transcript
+Kernel SHA-256: a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx21\qemu-bcab174960604782b05c37a02dea8091\guest\esp
+COMMAND: rexx /rx21clk.rex | expected visible marker/status: RX21_NATIVE_CLOCK_CAPABILITY_DONE
+COMMAND: echo $? | expected visible marker/status: 0
+COMMAND: rexx /rx21rcv.rex | expected visible marker/status: RX21_NATIVE_GUEST_RESPONSIVE
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=37
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

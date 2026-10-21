@@ -1,0 +1,22 @@
+
+FullName                                                                                                               
+--------                                                                                                               
+D:\dev\guideXOSServer_REXX\build\rexx\rx21\qemu-bcab174960604782b05c37a02dea8091\helper\rx21-01-raw-clock-capabiliti...
+D:\dev\guideXOSServer_REXX\build\rexx\rx21\qemu-bcab174960604782b05c37a02dea8091\helper\rx21-02-clock-script-exit-st...
+D:\dev\guideXOSServer_REXX\build\rexx\rx21\qemu-bcab174960604782b05c37a02dea8091\helper\rx21-03-post-error-date-reco...
+RX21 artifact preservation: PASS
+Stage: qemu-smoke-guest
+Verified UTC: 2026-10-21T03:09:31.4854091Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Requested QMP shutdown for owned QEMU PID 8604 on port 52793.
+RX21 artifact preservation: PASS
+Stage: qemu-smoke-final
+Verified UTC: 2026-10-21T03:09:34.6355304Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+Isolated QEMU smoke passed.
+Kernel SHA-256: a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80
+Guest evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx21\native-guest\run-bcab174960604782b05c37a02dea8091
+
+

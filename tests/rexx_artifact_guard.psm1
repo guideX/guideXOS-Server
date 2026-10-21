@@ -93,7 +93,7 @@ function Start-ReXXArtifactRun {
         [Parameter(Mandatory)][string]$RunRoot,
         [Parameter(Mandatory)][string]$WorkingDirectory,
         [string[]]$PlannedOutputs = @(),
-        [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20')][string]$Phase = 'RX12R1'
+        [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21')][string]$Phase = 'RX12R1'
     )
     $manifest = Get-ReXXGuardManifest -ManifestPath $ManifestPath
     $repoRoot = [System.IO.Path]::GetFullPath([string]$manifest.repository)
@@ -152,7 +152,7 @@ function Test-ReXXArtifactRun {
         [Parameter(Mandatory)][string]$ManifestPath,
         [Parameter(Mandatory)][string]$RunRoot,
         [Parameter(Mandatory)][string]$Stage,
-        [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20')][string]$Phase = 'RX12R1'
+        [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21')][string]$Phase = 'RX12R1'
     )
     $manifest = Get-ReXXGuardManifest -ManifestPath $ManifestPath
     $runFull = [System.IO.Path]::GetFullPath($RunRoot)

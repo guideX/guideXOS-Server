@@ -1,0 +1,24 @@
+﻿[
+    {
+        "Kind":  "Address",
+        "Compiler":  "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\cl.exe",
+        "CompilerVersion":  "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for x64",
+        "EvidenceDir":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx21\\sanitizer-address-78bb2a367dc3476cb83cb0d440b2c95c\\logs",
+        "BuildDir":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx21\\sanitizer-address-78bb2a367dc3476cb83cb0d440b2c95c\\bin",
+        "RunDir":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx21\\sanitizer-address-78bb2a367dc3476cb83cb0d440b2c95c",
+        "DurableEvidence":  "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx21\\sanitizer-address-78bb2a367dc3476cb83cb0d440b2c95c",
+        "InstallationPath":  "C:\\Program Files\\Microsoft Visual Studio\\18\\Community",
+        "VCToolsVersion":  "14.51.36231"
+    },
+    {
+        "Kind":  "Undefined",
+        "Compiler":  "C:\\Program Files\\LLVM\\bin\\clang-cl.exe",
+        "CompilerVersion":  "clang version 22.1.8 (https://github.com/llvm/llvm-project ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)",
+        "EvidenceDir":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx21\\sanitizer-undefined-ce5f3c25d3c841a085423ea7bff93bbb\\logs",
+        "BuildDir":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx21\\sanitizer-undefined-ce5f3c25d3c841a085423ea7bff93bbb\\bin",
+        "RunDir":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx21\\sanitizer-undefined-ce5f3c25d3c841a085423ea7bff93bbb",
+        "DurableEvidence":  "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx21\\sanitizer-undefined-ce5f3c25d3c841a085423ea7bff93bbb",
+        "InstallationPath":  "C:\\Program Files\\Microsoft Visual Studio\\18\\Community",
+        "VCToolsVersion":  "14.51.36231"
+    }
+]

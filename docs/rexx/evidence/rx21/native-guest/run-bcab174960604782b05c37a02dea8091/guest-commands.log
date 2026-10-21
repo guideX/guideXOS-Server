@@ -1,0 +1,6 @@
+[2026-10-21T03:08:53.9041301Z] rexx /rx21clk.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx21\qemu-bcab174960604782b05c37a02dea8091\screenshots-raw\rx21-01-raw-clock-capabilities-and-monotonic.ppm
+[2026-10-21T03:09:10.3988076Z] echo $?
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx21\qemu-bcab174960604782b05c37a02dea8091\screenshots-raw\rx21-02-clock-script-exit-status.ppm
+[2026-10-21T03:09:27.9620903Z] rexx /rx21rcv.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx21\qemu-bcab174960604782b05c37a02dea8091\screenshots-raw\rx21-03-post-error-date-recovery.ppm

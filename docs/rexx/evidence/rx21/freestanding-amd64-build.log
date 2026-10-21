@@ -1,0 +1,16 @@
+RX21 artifact preservation: PASS
+Stage: native-amd64-build
+Verified UTC: 2026-10-21T02:54:23.9513065Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+RX21 artifact preservation: PASS
+Stage: native-amd64-final
+Verified UTC: 2026-10-21T02:54:24.0758658Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+AMD64 native build passed.
+ELF SHA-256: a3950c82a95c7b80383c345984e6e61257d3bb1f6b31806c9f4ae910568b0c80
+REXX C object files: 9
+Output audit: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx21\native-build\output-audit-0987bc56bb9e4233ba82f16cf1604d67.json
+Link evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx21\native-build\native-link-evidence-0987bc56bb9e4233ba82f16cf1604d67.json
+Preservation evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx21\native-build\preservation-0987bc56bb9e4233ba82f16cf1604d67
