@@ -1,0 +1,7 @@
+CapturedAtLocal: 2026-10-20 22:01:44 -07:00
+
+QAC status:
+Coordinator: Online Name: guideXOS QAC Version: 2.0.0 PID: 408 Started (UTC): 2026-10-20T10:15:26.9743468+00:00 Uptime: 67577s QEMU processes: 0 (0 foreign) Managed development limit: 2 Managed sessions: 0; queued: 0; blocked: 0
+
+QAC list:
+Coordinator: Online (guideXOS QAC 2.0.0) Reservations: 0 Managed sessions: 0

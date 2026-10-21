@@ -1,0 +1,48 @@
+2026-10-20T21:49:30.896031-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:49:30.896031-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:49:30.896031-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:49:30.896031-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:49:30.896031-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:49:30.896031-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot2-storage-backed/boot2-screen.ppm"},"id":3}
+2026-10-20T21:49:30.912721-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:50:21.387880-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:50:21.387880-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:50:21.387880-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:50:21.387880-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:50:21.387880-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:50:21.387880-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot2-storage-backed/desktop-initial.ppm"},"id":3}
+2026-10-20T21:50:21.397830-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:50:36.109417-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:50:36.109417-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:50:36.109417-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:50:36.109417-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:50:36.109417-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:50:36.109417-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey meta_l"},"id":3}
+2026-10-20T21:50:36.109417-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:50:36.732723-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:50:36.732723-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:50:36.733526-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:50:36.733835-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:50:36.733835-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:50:36.733835-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot2-storage-backed/start-menu.ppm"},"id":3}
+2026-10-20T21:50:36.741838-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:52:10.624683-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:52:10.624683-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:52:10.624683-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:52:10.624683-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:52:10.625683-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:52:10.625683-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey f12"},"id":3}
+2026-10-20T21:52:10.625683-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:52:12.926555-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:52:12.926555-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:52:12.926555-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:52:12.927525-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:52:12.927525-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:52:12.927525-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot2-storage-backed/pacman-shortcut-attempt.ppm"},"id":3}
+2026-10-20T21:52:12.937734-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:52:40.199465-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:52:40.199465-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:52:40.199465-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:52:40.199465-07:00 TX {"execute":"quit","id":2}
+2026-10-20T21:52:40.201474-07:00 RX {"timestamp": {"seconds": 1792558360, "microseconds": 201474}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+2026-10-20T21:52:40.201474-07:00 RX {"return": {}, "id": 2}

@@ -1,0 +1,15 @@
+{
+  "observedAtLocal": "2026-10-20 21:37:21 -07:00",
+  "repository": "D:\\dev\\guideXOSServer",
+  "branch": "main",
+  "head": "7279a6d75c4327a1369d8a6e0340ed7a4f7449be",
+  "expectedHead": "7279a6d75c4327a1369d8a6e0340ed7a4f7449be",
+  "trackedWorktreeClean": true,
+  "trackedStatus": "",
+  "untrackedPathCountBeforeS22R10Evidence": 2653,
+  "phaseFilePresent": false,
+  "concurrentCodexChildAgents": 0,
+  "candidateModified": false,
+  "distModified": false,
+  "guestLaunchedByS22R10": false
+}

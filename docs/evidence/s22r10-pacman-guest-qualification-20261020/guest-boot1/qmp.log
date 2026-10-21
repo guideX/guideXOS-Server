@@ -1,0 +1,700 @@
+2026-10-20T21:40:09.0620574-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:40:09.0674164-07:00 TX {"execute":"qmp_capabilities"}
+2026-10-20T21:40:09.0905510-07:00 RX {"error": {"class": "GenericError", "desc": "JSON parse error, stray '\uFFFD'"}}
+2026-10-20T21:40:09.0917549-07:00 TX {"execute":"query-status"}
+2026-10-20T21:40:09.0935261-07:00 RX {"return": {}}
+2026-10-20T21:40:09.1073779-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/desktop-boot1-initial.ppm"}}
+2026-10-20T21:40:09.1102858-07:00 RX {"return": {"status": "running", "running": true}}
+2026-10-20T21:40:40.457015-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:40:40.540328-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:40:40.540328-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:40:40.540328-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:40:40.540328-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:40:40.540328-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/desktop-boot1-initial2.ppm"},"id":3}
+2026-10-20T21:40:40.557072-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:41:11.381610-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:41:11.381610-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:41:11.382210-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:41:11.382619-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:41:11.382619-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:41:11.382619-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -590 372"},"id":3}
+2026-10-20T21:41:11.382619-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:41:11.966340-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:41:11.966340-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:41:11.966340-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:41:11.966340-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:41:11.966340-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:41:11.966340-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"},"id":3}
+2026-10-20T21:41:11.966340-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:41:12.406241-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:41:12.406241-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:41:12.406241-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:41:12.406241-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:41:12.406241-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:41:12.406241-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"},"id":3}
+2026-10-20T21:41:12.406241-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:41:13.233727-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:41:13.233727-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:41:13.233727-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:41:13.233727-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:41:13.233727-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:41:13.233727-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/start-menu-boot1.ppm"},"id":3}
+2026-10-20T21:41:13.248059-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:41:25.664789-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:41:25.664789-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:41:25.664789-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:41:25.664789-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:41:25.676457-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:41:25.676457-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -98 74"},"id":3}
+2026-10-20T21:41:25.677401-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:41:25.797561-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -98 74"},"id":4}
+2026-10-20T21:41:25.797561-07:00 RX {"return": "", "id": 4}
+2026-10-20T21:41:25.918916-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -98 74"},"id":5}
+2026-10-20T21:41:25.918916-07:00 RX {"return": "", "id": 5}
+2026-10-20T21:41:26.040387-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -98 74"},"id":6}
+2026-10-20T21:41:26.040387-07:00 RX {"return": "", "id": 6}
+2026-10-20T21:41:26.161412-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -98 74"},"id":7}
+2026-10-20T21:41:26.161412-07:00 RX {"return": "", "id": 7}
+2026-10-20T21:41:26.282654-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/pointer-near-start.ppm"},"id":8}
+2026-10-20T21:41:26.282654-07:00 RX {"return": "", "id": 8}
+2026-10-20T21:41:34.968419-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:41:34.968857-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:41:34.968857-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:41:34.968857-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:41:34.968857-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:41:34.968857-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"},"id":3}
+2026-10-20T21:41:34.968857-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:41:35.091363-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"},"id":4}
+2026-10-20T21:41:35.091363-07:00 RX {"return": "", "id": 4}
+2026-10-20T21:41:35.213084-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/start-menu-boot1-attempt.ppm"},"id":5}
+2026-10-20T21:41:35.219091-07:00 RX {"return": "", "id": 5}
+2026-10-20T21:42:01.866821-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:42:01.866821-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:42:01.866821-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:42:01.866821-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:42:01.866821-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:42:01.866821-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey meta_l"},"id":3}
+2026-10-20T21:42:01.866821-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:42:02.658357-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:42:02.658357-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:42:02.658357-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:42:02.658357-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:42:02.658357-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:42:02.658357-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/start-menu-boot1.ppm"},"id":3}
+2026-10-20T21:42:02.666590-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:42:22.575120-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:42:22.575120-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:42:22.575120-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:42:22.575120-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:42:22.575120-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:42:22.575120-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -20"},"id":3}
+2026-10-20T21:42:22.575120-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:42:22.706074-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -20"},"id":4}
+2026-10-20T21:42:22.707079-07:00 RX {"return": "", "id": 4}
+2026-10-20T21:42:22.827533-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -20"},"id":5}
+2026-10-20T21:42:22.827533-07:00 RX {"return": "", "id": 5}
+2026-10-20T21:42:22.948729-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -20"},"id":6}
+2026-10-20T21:42:22.948729-07:00 RX {"return": "", "id": 6}
+2026-10-20T21:42:23.070218-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -20"},"id":7}
+2026-10-20T21:42:23.070218-07:00 RX {"return": "", "id": 7}
+2026-10-20T21:42:23.191655-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -20"},"id":8}
+2026-10-20T21:42:23.192118-07:00 RX {"return": "", "id": 8}
+2026-10-20T21:42:23.313055-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -20"},"id":9}
+2026-10-20T21:42:23.313055-07:00 RX {"return": "", "id": 9}
+2026-10-20T21:42:23.434410-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -20"},"id":10}
+2026-10-20T21:42:23.434410-07:00 RX {"return": "", "id": 10}
+2026-10-20T21:42:23.555868-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/pointer-check.ppm"},"id":11}
+2026-10-20T21:42:23.706504-07:00 RX {"return": "", "id": 11}
+2026-10-20T21:42:31.857730-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:42:31.857730-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:42:31.857730-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:42:31.857730-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:42:31.857730-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:42:31.857730-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":3}
+2026-10-20T21:42:31.857730-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:42:31.980891-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":4}
+2026-10-20T21:42:31.980891-07:00 RX {"return": "", "id": 4}
+2026-10-20T21:42:32.101987-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":5}
+2026-10-20T21:42:32.101987-07:00 RX {"return": "", "id": 5}
+2026-10-20T21:42:32.223695-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":6}
+2026-10-20T21:42:32.223695-07:00 RX {"return": "", "id": 6}
+2026-10-20T21:42:32.344841-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":7}
+2026-10-20T21:42:32.344841-07:00 RX {"return": "", "id": 7}
+2026-10-20T21:42:32.466805-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":8}
+2026-10-20T21:42:32.466805-07:00 RX {"return": "", "id": 8}
+2026-10-20T21:42:32.587969-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":9}
+2026-10-20T21:42:32.587969-07:00 RX {"return": "", "id": 9}
+2026-10-20T21:42:32.709094-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":10}
+2026-10-20T21:42:32.709094-07:00 RX {"return": "", "id": 10}
+2026-10-20T21:42:32.830205-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":11}
+2026-10-20T21:42:32.830205-07:00 RX {"return": "", "id": 11}
+2026-10-20T21:42:32.951626-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":12}
+2026-10-20T21:42:32.951626-07:00 RX {"return": "", "id": 12}
+2026-10-20T21:42:33.072906-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":13}
+2026-10-20T21:42:33.072906-07:00 RX {"return": "", "id": 13}
+2026-10-20T21:42:33.194093-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":14}
+2026-10-20T21:42:33.194093-07:00 RX {"return": "", "id": 14}
+2026-10-20T21:42:33.315447-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":15}
+2026-10-20T21:42:33.315447-07:00 RX {"return": "", "id": 15}
+2026-10-20T21:42:33.436872-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 20"},"id":16}
+2026-10-20T21:42:33.436872-07:00 RX {"return": "", "id": 16}
+2026-10-20T21:42:33.558148-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 0 30"},"id":17}
+2026-10-20T21:42:33.558148-07:00 RX {"return": "", "id": 17}
+2026-10-20T21:42:33.679249-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/settings-pointer-hover.ppm"},"id":18}
+2026-10-20T21:42:33.684166-07:00 RX {"return": "", "id": 18}
+2026-10-20T21:42:46.810354-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:42:46.810354-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:42:46.810354-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:42:46.810354-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:42:46.811581-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:42:46.811581-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -35 28"},"id":3}
+2026-10-20T21:42:46.811581-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:42:46.933008-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -35 28"},"id":4}
+2026-10-20T21:42:46.933008-07:00 RX {"return": "", "id": 4}
+2026-10-20T21:42:47.054382-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -35 28"},"id":5}
+2026-10-20T21:42:47.054382-07:00 RX {"return": "", "id": 5}
+2026-10-20T21:42:47.175580-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -35 28"},"id":6}
+2026-10-20T21:42:47.175580-07:00 RX {"return": "", "id": 6}
+2026-10-20T21:42:47.296925-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/pointer-start-target.ppm"},"id":7}
+2026-10-20T21:42:47.296925-07:00 RX {"return": "", "id": 7}
+2026-10-20T21:43:00.481531-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:00.481531-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:00.481531-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:00.481531-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:00.481531-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:00.481531-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"},"id":3}
+2026-10-20T21:43:00.481531-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:00.604407-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"},"id":4}
+2026-10-20T21:43:00.605418-07:00 RX {"return": "", "id": 4}
+2026-10-20T21:43:01.631694-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:01.631694-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:01.631694-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:01.633699-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:01.633699-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:01.633699-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/settings-open-boot1.ppm"},"id":3}
+2026-10-20T21:43:01.640519-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:17.585870-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:17.585870-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:17.586679-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:17.586679-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:17.587016-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:17.587016-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -28"},"id":3}
+2026-10-20T21:43:17.587016-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:17.708499-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -28"},"id":4}
+2026-10-20T21:43:17.708499-07:00 RX {"return": "", "id": 4}
+2026-10-20T21:43:17.829640-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -28"},"id":5}
+2026-10-20T21:43:17.829640-07:00 RX {"return": "", "id": 5}
+2026-10-20T21:43:17.951140-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -28"},"id":6}
+2026-10-20T21:43:17.951140-07:00 RX {"return": "", "id": 6}
+2026-10-20T21:43:18.072401-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/settings-hover2.ppm"},"id":7}
+2026-10-20T21:43:18.072401-07:00 RX {"return": "", "id": 7}
+2026-10-20T21:43:37.845262-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:37.845262-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:37.847271-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:37.847271-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:37.847271-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:37.847271-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -50 40"},"id":3}
+2026-10-20T21:43:37.847271-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:38.604450-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:38.604450-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:38.604450-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:38.604450-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:38.604450-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:38.604450-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -50 40"},"id":3}
+2026-10-20T21:43:38.604450-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:39.338019-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:39.338019-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:39.338390-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:39.338390-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:39.338390-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:39.338390-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -50 40"},"id":3}
+2026-10-20T21:43:39.338390-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:40.055748-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:40.055748-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:40.055748-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:40.055748-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:40.055748-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:40.055748-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -50 40"},"id":3}
+2026-10-20T21:43:40.055748-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:40.776508-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:40.776508-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:40.778514-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:40.778514-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:40.778514-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:40.778514-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -50 40"},"id":3}
+2026-10-20T21:43:40.778514-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:41.489829-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:41.489829-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:41.489829-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:41.489829-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:41.489829-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:41.489829-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -50 40"},"id":3}
+2026-10-20T21:43:41.489829-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:42.206224-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:42.206224-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:42.207064-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:42.207064-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:42.207368-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:42.207368-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -50 40"},"id":3}
+2026-10-20T21:43:42.207368-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:42.923614-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:42.923614-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:42.924333-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:42.924705-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:42.924705-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:42.924705-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -50 40"},"id":3}
+2026-10-20T21:43:42.924705-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:43.624209-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:43.624209-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:43.624920-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:43.624920-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:43.625246-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:43.625246-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/pointer-start-button.ppm"},"id":3}
+2026-10-20T21:43:43.625246-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:52.080967-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:52.080967-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:52.080967-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:52.080967-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:52.081953-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:52.082325-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey tab"},"id":3}
+2026-10-20T21:43:52.082325-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:52.749632-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:52.749632-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:52.749632-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:52.749632-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:52.749632-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:52.749632-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/start-tab-focus.ppm"},"id":3}
+2026-10-20T21:43:52.766233-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:58.803207-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:58.803207-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:58.803207-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:58.803207-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:58.804480-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:58.804480-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey right"},"id":3}
+2026-10-20T21:43:58.804480-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:43:59.387075-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:43:59.387075-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:43:59.387979-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:43:59.387979-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:43:59.387979-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:43:59.387979-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/start-right-focus.ppm"},"id":3}
+2026-10-20T21:43:59.390668-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:26.292527-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:26.292527-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:26.292527-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:26.292527-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:26.293892-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:26.293892-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:26.293892-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:26.811086-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:26.811086-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:26.811086-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:26.811086-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:26.811086-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:26.811086-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:26.811086-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:27.326751-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:27.326751-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:27.327790-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:27.327790-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:27.328139-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:27.328139-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:27.328139-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:27.858577-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:27.858577-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:27.858577-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:27.858577-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:27.860583-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:27.860583-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:27.861911-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:28.487831-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:28.487831-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:28.487831-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:28.487831-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:28.487831-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:28.487831-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:28.489837-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:29.148325-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:29.148325-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:29.148325-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:29.148325-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:29.150334-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:29.150334-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:29.150334-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:29.856028-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:29.856028-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:29.856028-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:29.856028-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:29.856028-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:29.856028-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:29.858035-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:30.376201-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:30.376201-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:30.376201-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:30.376201-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:30.376201-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:30.376201-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:30.376201-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:30.879947-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:30.879947-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:30.880774-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:30.881114-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:30.881114-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:30.881114-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:30.881114-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:31.531629-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:31.531629-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:31.531629-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:31.531629-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:31.531629-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:31.531629-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:31.533872-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:32.030717-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:32.030717-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:32.030717-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:32.030717-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:32.031677-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:32.032149-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:32.032149-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:32.535150-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:32.535150-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:32.535150-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:32.535150-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:32.545931-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:32.545931-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:32.545931-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:33.065828-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:33.065828-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:33.065828-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:33.065828-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:33.065828-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:33.065828-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:33.065828-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:33.582185-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:33.582185-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:33.583232-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:33.583232-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:33.583232-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:33.583232-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:33.583232-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:34.066966-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:34.082307-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:34.082307-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:34.082307-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:34.082307-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:34.082307-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:34.083675-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:34.584155-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:34.584155-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:34.584155-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:34.584155-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:34.584155-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:34.584155-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:34.584155-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:35.080761-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:35.080761-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:35.080761-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:35.080761-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:35.080761-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:35.080761-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:35.082768-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:35.585089-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:35.585089-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:35.585089-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:35.585089-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:35.585089-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:35.585089-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:35.585089-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:36.094564-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:36.094564-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:36.094564-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:36.094564-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:36.094564-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:36.094564-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:36.096569-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:36.585814-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:36.585814-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:36.585814-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:36.585814-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:36.585814-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:36.585814-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 -20"},"id":3}
+2026-10-20T21:44:36.585814-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:37.105197-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:37.105197-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:37.105197-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:37.105197-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:37.105197-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:37.105197-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/pointer-corner.ppm"},"id":3}
+2026-10-20T21:44:37.126659-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:52.781399-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:52.781399-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:52.782153-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:52.782515-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:52.782515-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:52.782515-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 20"},"id":3}
+2026-10-20T21:44:52.782515-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:53.399727-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:53.399727-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:53.399727-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:53.399727-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:53.399727-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:53.399727-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 20"},"id":3}
+2026-10-20T21:44:53.399727-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:54.033223-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:54.034282-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:54.034282-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:54.034282-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:54.034282-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:54.034282-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 20"},"id":3}
+2026-10-20T21:44:54.034282-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:54.633062-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:54.633062-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:54.633062-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:54.633062-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:54.633062-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:54.633062-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 20"},"id":3}
+2026-10-20T21:44:54.634450-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:55.251273-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:55.251273-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:55.251273-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:55.251273-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:55.251273-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:55.251273-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 20"},"id":3}
+2026-10-20T21:44:55.251273-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:55.862843-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:55.862843-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:55.862843-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:55.862843-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:55.862843-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:55.862843-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 20"},"id":3}
+2026-10-20T21:44:55.862843-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:56.468909-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:56.468909-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:56.468909-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:56.468909-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:56.468909-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:56.468909-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 20"},"id":3}
+2026-10-20T21:44:56.468909-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:57.085716-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:57.086150-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:57.086150-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:57.086150-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:57.086150-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:57.086150-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 20"},"id":3}
+2026-10-20T21:44:57.086150-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:44:57.686623-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:44:57.686623-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:44:57.686623-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:44:57.686623-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:44:57.686623-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:44:57.686623-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/settings-hover-final.ppm"},"id":3}
+2026-10-20T21:44:57.707252-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:06.042344-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:06.042344-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:06.043140-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:06.043140-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:06.043623-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:06.043623-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"},"id":3}
+2026-10-20T21:45:06.043623-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:06.826547-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:06.827114-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:06.827504-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:06.827504-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:06.827504-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:06.827504-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"},"id":3}
+2026-10-20T21:45:06.827504-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:07.993914-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:07.993914-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:07.995182-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:07.995182-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:07.995182-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:07.995182-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/settings-open-boot1.ppm"},"id":3}
+2026-10-20T21:45:07.995182-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:20.787819-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:20.787819-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:20.787819-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:20.788721-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:20.789059-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:20.789059-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey p"},"id":3}
+2026-10-20T21:45:20.789059-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:21.538443-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:21.538443-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:21.539286-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:21.539286-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:21.539667-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:21.539667-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/settings-personalization-boot1.ppm"},"id":3}
+2026-10-20T21:45:21.687385-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:22.108987-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:22.108987-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:22.108987-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:22.108987-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:22.108987-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:22.108987-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey a"},"id":3}
+2026-10-20T21:45:22.108987-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:22.809794-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:22.809794-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:22.809794-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:22.809794-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:22.815384-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:22.815384-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/settings-about-boot1.ppm"},"id":3}
+2026-10-20T21:45:22.824055-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:23.240693-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:23.240693-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:23.240693-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:23.240693-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:23.240693-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:23.240693-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey s"},"id":3}
+2026-10-20T21:45:23.240693-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:23.958427-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:23.958427-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:23.958427-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:23.958427-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:23.958427-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:23.958427-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/settings-system-return-boot1.ppm"},"id":3}
+2026-10-20T21:45:23.958427-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:24.391937-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:24.391937-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:24.391937-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:24.391937-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:24.391937-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:24.391937-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey alt-f4"},"id":3}
+2026-10-20T21:45:24.391937-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:25.108349-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:25.108349-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:25.108935-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:25.108935-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:25.109942-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:25.109942-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/desktop-after-settings-close-boot1.ppm"},"id":3}
+2026-10-20T21:45:25.112381-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:40.621252-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:40.621806-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:40.622252-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:40.622252-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:40.622252-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:40.622252-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"sendkey meta_l"},"id":3}
+2026-10-20T21:45:40.622252-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:41.259222-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:41.259222-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:41.259222-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:41.259222-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:41.259222-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:41.259222-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/start-menu-navigator.ppm"},"id":3}
+2026-10-20T21:45:41.389509-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:47.177571-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:47.177571-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:47.177571-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:47.177571-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:47.177571-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:47.177571-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 0"},"id":3}
+2026-10-20T21:45:47.177571-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:47.843622-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:47.843622-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:47.843622-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:47.844418-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:47.844418-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:47.844418-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 0"},"id":3}
+2026-10-20T21:45:47.844418-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:48.451507-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:48.451507-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:48.451507-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:48.451507-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:48.451507-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:48.451507-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 0"},"id":3}
+2026-10-20T21:45:48.451507-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:49.077885-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:49.077885-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:49.078778-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:49.078778-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:49.078778-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:49.078778-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 0"},"id":3}
+2026-10-20T21:45:49.078778-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:49.696259-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:49.696259-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:49.705327-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:49.705327-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:49.705327-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:49.705327-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -40 0"},"id":3}
+2026-10-20T21:45:49.705327-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:50.313508-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:50.313508-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:50.313508-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:50.313508-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:50.313508-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:50.313508-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/navigator-pointer-hover.ppm"},"id":3}
+2026-10-20T21:45:50.330202-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:56.551936-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:56.551936-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:56.551936-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:56.551936-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:56.551936-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:56.551936-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"},"id":3}
+2026-10-20T21:45:56.551936-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:57.285951-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:57.285951-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:57.288905-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:57.288905-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:57.288905-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:57.288905-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"},"id":3}
+2026-10-20T21:45:57.288905-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:45:59.754583-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:45:59.754583-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:45:59.754583-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:45:59.754583-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:45:59.754583-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:45:59.754583-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/navigator-open-boot1.ppm"},"id":3}
+2026-10-20T21:45:59.765296-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:46:15.933802-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:46:15.934342-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:46:15.934688-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:46:15.934688-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:46:15.934688-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:46:15.934688-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -40"},"id":3}
+2026-10-20T21:46:15.934688-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:46:16.551906-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:46:16.551906-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:46:16.551906-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:46:16.551906-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:46:16.551906-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:46:16.551906-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move 40 -40"},"id":3}
+2026-10-20T21:46:16.551906-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:46:17.178063-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:46:17.180069-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:46:17.180069-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:46:17.180069-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:46:17.180069-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:46:17.180069-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_move -15 -64"},"id":3}
+2026-10-20T21:46:17.180069-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:46:17.801661-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:46:17.801661-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:46:17.802555-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:46:17.802555-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:46:17.802875-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:46:17.802875-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/navigator-link-hover.ppm"},"id":3}
+2026-10-20T21:46:17.869573-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:46:24.491398-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:46:24.491398-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:46:24.491398-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:46:24.491398-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:46:24.491398-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:46:24.491398-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 1"},"id":3}
+2026-10-20T21:46:24.491398-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:46:25.194807-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:46:25.194807-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:46:25.194807-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:46:25.194807-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:46:25.194807-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:46:25.194807-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"mouse_button 0"},"id":3}
+2026-10-20T21:46:25.194807-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:46:27.476376-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:46:27.476376-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:46:27.477231-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:46:27.477231-07:00 TX {"execute":"query-status","id":2}
+2026-10-20T21:46:27.477543-07:00 RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-20T21:46:27.477543-07:00 TX {"execute":"human-monitor-command","arguments":{"command-line":"screendump D:/dev/guideXOSServer/docs/evidence/s22r10-pacman-guest-qualification-20261020/guest-boot1/navigator-downloads.ppm"},"id":3}
+2026-10-20T21:46:27.477543-07:00 RX {"return": "", "id": 3}
+2026-10-20T21:48:40.821283-07:00 RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-20T21:48:40.821283-07:00 TX {"execute":"qmp_capabilities","id":1}
+2026-10-20T21:48:40.821283-07:00 RX {"return": {}, "id": 1}
+2026-10-20T21:48:40.821283-07:00 TX {"execute":"quit","id":2}
+2026-10-20T21:48:40.821283-07:00 RX {"timestamp": {"seconds": 1792558120, "microseconds": 821283}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+2026-10-20T21:48:40.821283-07:00 RX {"return": {}, "id": 2}

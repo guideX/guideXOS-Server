@@ -1,0 +1,89 @@
+{
+  "createdAtLocal": "2026-10-20 21:53:59 -07:00",
+  "source": "D:\\dev\\guideXOSServer\\out\\release-profile\\95cf3e2d-778b-4b31-8948-4acdb7cc6aaa\\ESP",
+  "disposableWritableEsp": "D:\\dev\\guideXOSServer\\docs\\evidence\\s22r10-pacman-guest-qualification-20261020\\guest-boot3-fresh-storage\\writable-esp",
+  "sourceCandidateIsoSha256": "e98bf087efc071ddf82db4dce9d79335aacbf38310de43b032744165792d712b",
+  "fileCount": 16,
+  "files": [
+    {
+      "path": "Apps\\PacMan\\app.json",
+      "bytes": 956,
+      "sha256": "3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449"
+    },
+    {
+      "path": "Apps\\PacMan\\bin\\amd64\\pacman.elf",
+      "bytes": 63640,
+      "sha256": "eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\audio\\EatPill.wav",
+      "bytes": 7156,
+      "sha256": "510a52e5776573197aef14d77e393185b6c7148d1b59dac535d45c5ca0498686"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\audio\\extralife.wav",
+      "bytes": 21248,
+      "sha256": "767db1552130e676398c121ec605f90f20c89bbbab272305bc781adc8e91d1cd"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\audio\\fruiteat.wav",
+      "bytes": 5120,
+      "sha256": "82c96a997ac2e837de4e418f29f4f4fa6142dd2a0c38f764b6d989d8bd98605d"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\audio\\ghosteat.wav",
+      "bytes": 9090,
+      "sha256": "225168072b38671c89c1fc775d513ca86fbb899e3e82c8032445f6a6dc5e1b95"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\audio\\killed.wav",
+      "bytes": 17008,
+      "sha256": "1c3e91df8e19041ea5783185c5a8a9f2321993b43481c215d8caf3df590290de"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\audio\\StartMusic.wav",
+      "bytes": 68318,
+      "sha256": "062cdc7196c54033f8bf11878d6659fd5b0ba11cd6945640ec8fac4376919421"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\audio\\startmusicold.wav",
+      "bytes": 46592,
+      "sha256": "a6e1c14f6cbc59cb5244c0119c728d412252370eea48bc574c1307a774c83caf"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\level1.gximg",
+      "bytes": 888860,
+      "sha256": "535b37e66d7159078df8a16ce059a6f7ab038588cc9875e152033d046ff47fe1"
+    },
+    {
+      "path": "Apps\\PacMan\\resources\\pacpics.gximg",
+      "bytes": 360476,
+      "sha256": "57a605df8f24ac9641ff6c9d39df551a17ffbcd68466a561adf5f045de259d50"
+    },
+    {
+      "path": "build-identity.txt",
+      "bytes": 1640,
+      "sha256": "ee75fb72c0567b49d15084b3e5e67daec3ccadfaf1c6578e079452c3adf3803c"
+    },
+    {
+      "path": "EFI\\BOOT\\BOOTX64.EFI",
+      "bytes": 56832,
+      "sha256": "16b0e1830e7c4a13c992f31baa007b405df557eb8d9f95f56fc8586d946656ac"
+    },
+    {
+      "path": "kernel-symbol-audit.txt",
+      "bytes": 7972,
+      "sha256": "9416a180b94e61ecdf94d7e3f55d2cec9211bec540d48f04dd7697fcc4853c8a"
+    },
+    {
+      "path": "kernel.elf",
+      "bytes": 2771408,
+      "sha256": "533997c618dc6c3dcdd0d6f6603a8eebbb2db726bdc01d2ff04d8657d310e90e"
+    },
+    {
+      "path": "ramdisk.img",
+      "bytes": 67108864,
+      "sha256": "ead5105aa131dee575e0021fac1650a28330df422bd211ca6baccdd267179f05"
+    }
+  ]
+}

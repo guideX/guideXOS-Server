@@ -1,0 +1,10 @@
+{
+  "observedAtLocal": "2026-10-20 21:37:21 -07:00",
+  "statusExitCode": 0,
+  "statusOutput": "Coordinator: Online\r\nName: guideXOS QAC\r\nVersion: 2.0.0\r\nPID: 408\r\nStarted (UTC): 2026-10-20T10:15:26.9743468+00:00\r\nUptime: 66113s\r\nQEMU processes: 0 (0 foreign)\r\nManaged development limit: 2\r\nManaged sessions: 0; queued: 0; blocked: 0",
+  "processes": [],
+  "qacReservationForS22R10": "not acquired",
+  "admissionDecision": "Do not launch: an existing managed acceptance session is active against a different checkout.",
+  "foreignProcessesTerminated": 0,
+  "reservationAttempts": 0
+}

@@ -1,0 +1,26 @@
+{
+  "verifiedAtLocal": "2026-10-20 22:01:59 -07:00",
+  "branch": "main",
+  "head": "7279a6d75c4327a1369d8a6e0340ed7a4f7449be",
+  "trackedWorktreeCleanBeforeCommit": true,
+  "phaseFilePresent": false,
+  "candidateIso": "out/release-profile/95cf3e2d-778b-4b31-8948-4acdb7cc6aaa/artifacts/guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso",
+  "candidateIsoSha256": "e98bf087efc071ddf82db4dce9d79335aacbf38310de43b032744165792d712b",
+  "candidateIsoMatchesExpected": true,
+  "candidateEspChecks": [
+    {
+      "boot": "guest-boot2-storage-backed",
+      "manifestFileCount": 16,
+      "candidateEspFilesMatch": true,
+      "mismatches": []
+    },
+    {
+      "boot": "guest-boot3-fresh-storage",
+      "manifestFileCount": 16,
+      "candidateEspFilesMatch": true,
+      "mismatches": []
+    }
+  ],
+  "distTrackedChanges": [],
+  "qemuProcesses": []
+}

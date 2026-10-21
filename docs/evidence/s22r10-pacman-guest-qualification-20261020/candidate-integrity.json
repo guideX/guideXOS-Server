@@ -1,0 +1,27 @@
+{
+  "observedAtLocal": "2026-10-20 21:37:21 -07:00",
+  "path": "D:\\dev\\guideXOSServer\\out\\release-profile\\95cf3e2d-778b-4b31-8948-4acdb7cc6aaa\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso",
+  "bytes": 90245120,
+  "expectedSha256": "e98bf087efc071ddf82db4dce9d79335aacbf38310de43b032744165792d712b",
+  "observedSha256": "e98bf087efc071ddf82db4dce9d79335aacbf38310de43b032744165792d712b",
+  "sha256Matches": true,
+  "checksumReceipt": "e98bf087efc071ddf82db4dce9d79335aacbf38310de43b032744165792d712b  guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso",
+  "buildId": "95cf3e2d-778b-4b31-8948-4acdb7cc6aaa",
+  "releaseProfile": "ServerV03PacManOnly",
+  "buildStatus": "success",
+  "sourceCommit": "43f4725a6d7e9ae9949edccddc055c595cd93cb5",
+  "sourceBranch": "main",
+  "manifestSha256": "1b1d31d3fa6ccbe1c5ace6044bf37ca916016a1f03d6523948a071dfc7e6cb18",
+  "candidateOnly": true,
+  "artifactType": "bootable-uefi-iso",
+  "nativeElfPackageNames": [
+    "PacMan"
+  ],
+  "espAppDirectories": [
+    "PacMan"
+  ],
+  "developerStudioSelected": "not_selected",
+  "developerStudioDirectoryPresent": false,
+  "manifestNativeElfPackageCount": 1,
+  "unexpectedNativeElfPackages": []
+}
