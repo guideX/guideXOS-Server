@@ -2,7 +2,7 @@
 
 ## Outcome
 
-**Outcome A — Accepted for the isolated C185 managed host boundary.** C186 defines and exercises the lifecycle, identity, surface, callback, and resize semantics of the C185 sample boundary. The 38-suite/930-case aggregate, C182 starter, C185 host tests, independent CounterApp build, isolated NativeAOT link, and ELF conversion passed. No production application composition, kernel, NativeAOT ABI, or release package source changed, so no guest run was required. This does not qualify external application installation or dynamic loading.
+**Outcome B — Partial.** C186 defines and exercises the lifecycle, identity, surface, callback, and resize semantics of the C185 sample boundary. The 38-suite/930-case aggregate, C182 starter, C185 host tests, independent CounterApp build, isolated NativeAOT link, and ELF conversion passed. No production application composition, kernel, NativeAOT ABI, or release package source changed, so no guest run was required. The preservation gate is not fully certifiable: an initial NativeAOT invocation wrote HostLogProof output into the existing C185 output tree before the root output override was discovered, and no pre-run file hash was recorded for those generated outputs. The final build and retained evidence are isolated under the C186 output root. This does not qualify external application installation or dynamic loading.
 
 ## Starting architecture and audit findings
 
@@ -82,7 +82,7 @@ The isolated C185 host runner reports **28 C185 cases PASS** and **15 C186 cases
 
 The final captured C185/C186 host qualification log is `out/dotnet/c186-managed-host-contract/host-qualification/host-qualification.log`. The C182 run used `out/dotnet/c186-managed-host-contract/c182-artifacts/c182-host-qualification.log`. The aggregate manifest and component logs are under `out/dotnet/c186-managed-host-contract/aggregate/evidence`.
 
-The build exposed the repository's root `Directory.Build.props` output override for the C185 boundary. The final NativeAOT build was rerun with an isolated `DirectoryBuildPropsPath` and explicit C186 output roots; the retained evidence below refers only to that isolated build. The pre-existing `ESP/ramdisk.img` SHA-256 remained `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`.
+The first NativeAOT invocation unexpectedly routed HostLogProof intermediates to `out/dotnet/c185-managed-host-services/host-bin/release_win-x64` and `host-obj/release_win-x64` because the repository's root `Directory.Build.props` overrides the artifacts path for the C185 boundary. Those generated files were written before the override was discovered; their pre-run hashes were not captured, so their prior bytes cannot be verified from this run. No files were deleted. The NativeAOT build was then rerun with an isolated `DirectoryBuildPropsPath` and explicit C186 output roots; the retained NativeAOT evidence below refers only to that isolated build. The protected sample `bin/obj` paths remained present, and `ESP/ramdisk.img` retained SHA-256 `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`.
 
 ## Independent compilation and NativeAOT retention
 
