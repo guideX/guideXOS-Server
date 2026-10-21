@@ -7,6 +7,8 @@ param(
     [string]$ArtifactRoot = '',
     [string]$CandidateEspPath = 'E:\bkup\artifacts\SN10R2_20261020\qemu\20261020T042331758\esp',
     [string]$CandidateVerificationPath = 'E:\bkup\artifacts\SN10R2_20261020\staged-candidate-verification.json',
+    [string]$CandidateDiskPath = 'E:\bkup\artifacts\SN10R6_20261020\media\stellar-navigator-sn10r6.raw',
+    [string]$CandidateDiskVerificationPath = 'E:\bkup\artifacts\SN10R6_20261020\media\stellar-navigator-sn10r6-verification.json',
     [switch]$VerifyCandidateOnly,
     [switch]$SelfTest
 )
@@ -223,19 +225,29 @@ function Get-Sha256([string]$Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function New-DisposableQemuDiskCopy([string]$SourcePath, [string]$DestinationPath) {
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "Verified raw disk source is missing: $SourcePath" }
+    if (Test-Path -LiteralPath $DestinationPath) { throw "Refusing to replace an existing per-run disk copy: $DestinationPath" }
+    [IO.File]::Copy([IO.Path]::GetFullPath($SourcePath), [IO.Path]::GetFullPath($DestinationPath), $false)
+    $sourceHash = Get-Sha256 $SourcePath
+    $copyHash = Get-Sha256 $DestinationPath
+    if ($copyHash -cne $sourceHash) { throw 'Disposable QEMU disk copy differs from its verified source image.' }
+    [ordered]@{ path = [IO.Path]::GetFullPath($DestinationPath); lengthBytes = (Get-Item -LiteralPath $DestinationPath).Length; initialSha256 = $copyHash; sourcePath = [IO.Path]::GetFullPath($SourcePath); sourceSha256 = $sourceHash; byteIdenticalAtCreation = $true; sourceModified = $false }
+}
+
 function ConvertTo-QemuOptionValue([string]$Value) {
     # QEMU keyval option values escape a filename comma by doubling it.
     # ProcessStartInfo.ArgumentList handles Windows argument quoting separately.
     $Value.Replace(',', ',,')
 }
 
-function New-QemuArguments([string]$EspPath, [int]$SerialPort, [int]$MonitorPort, [string]$FirmwarePath = $Ovmf) {
+function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPort, [string]$FirmwarePath = $Ovmf) {
     $firmware = ConvertTo-QemuOptionValue ([IO.Path]::GetFullPath($FirmwarePath))
-    $esp = ConvertTo-QemuOptionValue ([IO.Path]::GetFullPath($EspPath))
+    $disk = ConvertTo-QemuOptionValue ([IO.Path]::GetFullPath($DiskPath))
     @(
         '-machine', 'pc,usb=off',
         '-drive', "if=pflash,format=raw,readonly=on,file=$firmware",
-        '-drive', "file=fat:$esp,format=raw,if=ide,index=0,readonly=on",
+        '-drive', "file=$disk,format=raw,if=ide,index=0",
         '-m', '1024M',
         '-vga', 'std',
         '-display', 'none',
@@ -251,7 +263,7 @@ function New-QemuArguments([string]$EspPath, [int]$SerialPort, [int]$MonitorPort
 
 function New-RunDirectory {
     if (-not $ArtifactRoot) {
-        $ArtifactRoot = Join-Path $env:USERPROFILE ('.codex\artifacts\SN10R4_' + (Get-Date -Format 'yyyyMMdd'))
+        $ArtifactRoot = Join-Path $env:USERPROFILE ('.codex\artifacts\SN10R6_' + (Get-Date -Format 'yyyyMMdd'))
     }
     $full = [IO.Path]::GetFullPath($ArtifactRoot)
     $id = Get-Date -Format 'yyyyMMddTHHmmssfff'
@@ -271,7 +283,7 @@ function Test-StructuredArgumentPassing {
     Set-Content -LiteralPath $scriptPath -Value $scriptLines -Encoding utf8
     $expected = @(
         '-drive', "if=pflash,format=raw,readonly=on,file=C:\SN10 R3 & (quoted)'s path\firmware,, rev 2.fd",
-        '-drive', "file=fat:C:\SN10 R3 & (quoted)'s path\candidate,, rev 2,format=raw,if=ide,index=0,readonly=on",
+        '-drive', "file=C:\SN10 R3 & (quoted)'s path\candidate,, rev 2.raw,format=raw,if=ide,index=0",
         'single quoted path with spaces.txt',
         "ampersand & parentheses (kept literally) and an apostrophe '"
     )
@@ -476,7 +488,7 @@ exit $ExitCode
 }
 
 function Assert-CandidateIdentity {
-    $required = @($Kernel, $App, $AppManifest, $Dataset, $Ovmf, $Bootloader, $CandidateEspPath, $CandidateVerificationPath)
+    $required = @($Kernel, $App, $AppManifest, $Dataset, $Ovmf, $Bootloader, $CandidateEspPath, $CandidateVerificationPath, $CandidateDiskPath, $CandidateDiskVerificationPath)
     foreach ($path in $required) { if (-not (Test-Path -LiteralPath $path)) { throw "SN10 immutable candidate input is missing: $path" } }
     $verification = Get-Content -LiteralPath $CandidateVerificationPath -Raw | ConvertFrom-Json
     $espFull = [IO.Path]::GetFullPath($CandidateEspPath).TrimEnd('\')
@@ -506,7 +518,24 @@ function Assert-CandidateIdentity {
         if ($actual -cne $pair[2]) { throw "Current source artifact identity mismatch: $($pair[0]) ($actual)" }
         $sourceFiles[$pair[0]] = [ordered]@{ path = $pair[1]; lengthBytes = (Get-Item -LiteralPath $pair[1]).Length; sha256 = $actual; expectedSha256 = $pair[2]; matchesExpected = $true }
     }
-    $result = [ordered]@{ passed = $true; immutableExistingEspReused = $true; qemuEspReadOnly = $true; sourceArtifacts = $sourceFiles; stagedEsp = $espFull; stagedFiles = $staged }
+    $diskVerification = Get-Content -LiteralPath $CandidateDiskVerificationPath -Raw | ConvertFrom-Json
+    $diskFull = [IO.Path]::GetFullPath($CandidateDiskPath)
+    $recordedDisk = [IO.Path]::GetFullPath([string]$diskVerification.imagePath)
+    if ($diskVerification.passed -ne $true -or $recordedDisk -cne $diskFull) { throw 'Candidate raw-disk verification does not identify this validated disk image.' }
+    if ([string]$diskVerification.format -cne 'raw' -or [string]$diskVerification.partitionTable -cne 'GPT' -or [string]$diskVerification.fatType -cne 'FAT32' -or [int]$diskVerification.sectorSizeBytes -ne 512) { throw 'Candidate disk does not have the verified raw/GPT/FAT32/512-byte layout.' }
+    if ([int64]$diskVerification.imageBytes -ne (Get-Item -LiteralPath $diskFull).Length -or [string]$diskVerification.imageSha256 -notmatch '^[0-9a-f]{64}$') { throw 'Candidate disk geometry or recorded SHA-256 is invalid.' }
+    $diskHash = Get-Sha256 $diskFull
+    if ($diskHash -cne [string]$diskVerification.imageSha256) { throw 'Candidate raw disk SHA-256 does not match its verification record.' }
+    if ([IO.Path]::GetFullPath([string]$diskVerification.sourceEsp).TrimEnd('\') -cne $espFull) { throw 'Candidate disk was not built from the validated staged ESP.' }
+    if ([int64]$diskVerification.partitionStartLba -lt 34 -or [int64]$diskVerification.partitionSectors -le 0 -or [int64]$diskVerification.partitionEndLba -ne ([int64]$diskVerification.partitionStartLba + [int64]$diskVerification.partitionSectors - 1)) { throw 'Candidate disk partition geometry is inconsistent.' }
+    $diskFiles = @{}
+    foreach ($entry in $diskVerification.files) { $diskFiles[[string]$entry.path] = [string]$entry.sha256 }
+    foreach ($entry in $verification.stagedInputs) {
+        $relative = ([IO.Path]::GetRelativePath($espFull, [IO.Path]::GetFullPath([string]$entry.path))).Replace('\', '/')
+        if (-not $diskFiles.ContainsKey($relative) -or $diskFiles[$relative] -cne [string]$entry.sha256) { throw "Candidate disk does not contain verified staged payload $relative." }
+    }
+    $diskRecord = [ordered]@{ path = $diskFull; lengthBytes = (Get-Item -LiteralPath $diskFull).Length; sha256 = $diskHash; format = 'raw'; partitionTable = 'GPT'; fatType = 'FAT32'; sectorSizeBytes = 512; partitionStartLba = [int64]$diskVerification.partitionStartLba; partitionSectors = [int64]$diskVerification.partitionSectors; partitionEndLba = [int64]$diskVerification.partitionEndLba; verifiedFiles = $diskFiles.Count; verificationPath = [IO.Path]::GetFullPath($CandidateDiskVerificationPath) }
+    $result = [ordered]@{ passed = $true; immutableExistingEspReused = $true; candidateDiskUntouchedByRuntime = $true; sourceArtifacts = $sourceFiles; stagedEsp = $espFull; stagedFiles = $staged; candidateDisk = $diskRecord }
     $result | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $script:RunRoot 'candidate-verification.json') -Encoding utf8
     return $result
 }
@@ -541,6 +570,17 @@ function Get-QacReservationId([SN10R3ManagedProcess]$Managed) {
         if ($line -match 'QAC reservation requested: id=([0-9a-fA-F-]{16,64}) project=StellarNavigator mode=acceptance') { return $Matches[1] }
     }
     return $null
+}
+
+function Get-QemuEarlyExitDetails([string]$Text) {
+    $launch = [regex]::Match($Text, 'QEMU launched: reservation=([0-9a-fA-F-]{16,64})[^\r\n]*pid=(\d+)')
+    $exit = [regex]::Match($Text, 'QEMU exited: reservation=([0-9a-fA-F-]{16,64})[^\r\n]*pid=(\d+)[^\r\n]*exitCode=(-?\d+)')
+    if (-not $launch.Success -or -not $exit.Success) { return $null }
+    if ($launch.Groups[1].Value -cne $exit.Groups[1].Value -or $launch.Groups[2].Value -cne $exit.Groups[2].Value) { return $null }
+    if ($Text -match '(?i)Block node is read-only') {
+        return [ordered]@{ classification = 'PREBOOT_STORAGE_FAILURE'; reservationId = $launch.Groups[1].Value; qemuPid = [int]$launch.Groups[2].Value; exitCode = [int]$exit.Groups[3].Value; rootCause = 'QEMU rejected the configured storage block node before guest startup: Block node is read-only.' }
+    }
+    return [ordered]@{ classification = 'PREBOOT_QEMU_STARTUP_FAILURE'; reservationId = $launch.Groups[1].Value; qemuPid = [int]$launch.Groups[2].Value; exitCode = [int]$exit.Groups[3].Value; rootCause = 'QAC launched QEMU, but QEMU exited before the runner could attach to its process or observe guest serial output.' }
 }
 
 function Get-DirectQemuChild([int]$ParentPid) {
@@ -619,26 +659,37 @@ function Invoke-SelfTest {
     $capture1 = $null; $capture2 = $null; $capture3 = $null; $capture4 = $null; $capture5 = $null; $capture6 = $null
     try {
         $argCheck = Test-StructuredArgumentPassing
-        $driveArgs = New-QemuArguments 'C:\SN10 R3 & (candidate), rev 2\esp' 40001 40002 'C:\SN10 R3 & (firmware), rev 2\OVMF.fd'
+        $driveArgs = New-QemuArguments 'C:\SN10 R3 & (candidate), rev 2\stellar-navigator.raw' 40001 40002 'C:\SN10 R3 & (firmware), rev 2\OVMF.fd'
         $firmwareArg = $driveArgs[3]
-        $espArg = $driveArgs[5]
+        $diskArg = $driveArgs[5]
         $expectedFirmwareArg = 'if=pflash,format=raw,readonly=on,file=' + ('C:\SN10 R3 & (firmware), rev 2\OVMF.fd'.Replace(', ', ',, '))
-        if ($firmwareArg -cne $expectedFirmwareArg -or $espArg -notmatch 'file=fat:.*format=raw,if=ide,index=0,readonly=on' -or $driveArgs[0] -ne '-machine') {
-            throw 'Safe QEMU drive-construction assertions failed.'
+        if ($firmwareArg -cne $expectedFirmwareArg -or $diskArg -notmatch '^file=(?!fat:).+\.raw,format=raw,if=ide,index=0$' -or $driveArgs[0] -ne '-machine') {
+            throw 'Disposable writable raw GPT/FAT32 disk argument construction failed.'
         }
-        if ($firmwareArg.Contains('"') -or $espArg.Contains('"') -or $espArg -notmatch ',, rev 2') { throw 'QEMU drive path escaping or structured quoting is invalid.' }
+        if ($firmwareArg.Contains('"') -or $diskArg.Contains('"') -or $diskArg -notmatch ',, rev 2') { throw 'QEMU drive path escaping or structured quoting is invalid.' }
         $runnerResult.checks.commandConstruction = [ordered]@{
             passed = $true
             windowsPathsWithSpaces = $true
             qemuDriveFilenameCommasDoubled = $true
             shellQuotesEmbedded = $false
             firmwareAttachment = $firmwareArg
-            espAttachment = $espArg
-            espInterface = 'ide index 0, read-only FAT directory'
-            isolation = 'no image writes; existing FAT directory is attached read-only'
+            diskAttachment = $diskArg
+            diskInterface = 'ide index 0, raw GPT disk with FAT32 EFI System Partition, writable disposable copy'
+            isolation = 'QEMU receives one per-run copy; the verified candidate disk and source ESP remain unchanged'
             argumentVector = $driveArgs
             processArgumentRoundTrip = $argCheck
         }
+
+        $previousStorageFailure = Get-QemuEarlyExitDetails "QAC QEMU launched: reservation=20e46155756b4cb383d0a7198b86b21e pid=13280`nQAC QEMU exited: reservation=20e46155756b4cb383d0a7198b86b21e pid=13280 exitCode=1`nC:\Program Files\qemu\qemu-system-x86_64.exe: Block node is read-only"
+        $otherStartupFailure = Get-QemuEarlyExitDetails "QAC QEMU launched: reservation=20e46155756b4cb383d0a7198b86b21e pid=13280`nQAC QEMU exited: reservation=20e46155756b4cb383d0a7198b86b21e pid=13280 exitCode=1`nfirmware argument could not be opened"
+        if (-not $previousStorageFailure -or $previousStorageFailure.classification -cne 'PREBOOT_STORAGE_FAILURE' -or -not $otherStartupFailure -or $otherStartupFailure.classification -cne 'PREBOOT_QEMU_STARTUP_FAILURE') { throw 'Early QEMU startup failures were not classified separately from QAC coordination.' }
+        $runnerResult.checks.earlyQemuExitClassification = [ordered]@{ passed = $true; reproducesRecordedStorageFailure = $true; classification = $previousStorageFailure.classification; distinguishesOtherStartupFailure = $true; otherClassification = $otherStartupFailure.classification }
+        $copySource = Join-Path $script:RunRoot 'selftest-source.raw'
+        $copyTarget = Join-Path $script:RunRoot 'selftest-disposable.raw'
+        [IO.File]::WriteAllBytes($copySource, [Text.Encoding]::UTF8.GetBytes('immutable-candidate-test-bytes'))
+        $copyEvidence = New-DisposableQemuDiskCopy $copySource $copyTarget
+        if (-not $copyEvidence.byteIdenticalAtCreation -or $copyEvidence.sourceModified -or (Get-Sha256 $copySource) -cne $copyEvidence.sourceSha256) { throw 'Disposable QEMU disk-copy isolation check failed.' }
+        $runnerResult.checks.disposableDiskIsolation = [ordered]@{ passed = $true; sourceRemainsByteIdentical = $true; perRunCopyInitiallyMatches = $true; qemuCanWriteOnlyToCopy = $true; evidence = $copyEvidence }
 
         $reopenCommand = 'desktop.launch com.guidexos.stellarnavigator'
         $reopenKeys = @(Get-QemuTextKeyCommands $reopenCommand)
@@ -743,7 +794,7 @@ function Invoke-SelfTest {
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
         $runnerResult.resultPath = Join-Path $script:RunRoot 'runner-selftest.json'
         $runnerResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $runnerResult.resultPath -Encoding utf8
-        Write-Host "[SN10R4] offline runner self-test PASS: $($runnerResult.resultPath)"
+        Write-Host "[SN10R6] offline runner self-test PASS: $($runnerResult.resultPath)"
         return 0
     } catch {
         if ($capture1) { $capture1.Dispose() }
@@ -757,8 +808,8 @@ function Invoke-SelfTest {
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
         $runnerResult.resultPath = Join-Path $script:RunRoot 'runner-selftest.json'
         $runnerResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $runnerResult.resultPath -Encoding utf8
-        Write-Host "[SN10R4] offline runner self-test FAIL: $($runnerResult.error)"
-        Write-Host "[SN10R4] evidence: $($runnerResult.resultPath)"
+        Write-Host "[SN10R6] offline runner self-test FAIL: $($runnerResult.error)"
+        Write-Host "[SN10R6] evidence: $($runnerResult.resultPath)"
         return 1
     }
 }
@@ -768,12 +819,12 @@ if ($SelfTest) { exit (Invoke-SelfTest) }
 if ($VerifyCandidateOnly) {
     try {
         [void](Assert-CandidateIdentity)
-        Write-Host "[SN10R4] candidate and staged manifest verification PASS: $(Join-Path $script:RunRoot 'candidate-verification.json')"
+        Write-Host "[SN10R6] candidate, staged ESP, and raw disk verification PASS: $(Join-Path $script:RunRoot 'candidate-verification.json')"
         exit 0
     } catch {
-        [ordered]@{ passed = $false; classification = 'FAIL'; error = $_.Exception.Message; candidateEsp = $CandidateEspPath; capturedAtLocal = (Get-Date).ToString('o') } |
+        [ordered]@{ passed = $false; classification = 'FAIL'; error = $_.Exception.Message; candidateEsp = $CandidateEspPath; candidateDisk = $CandidateDiskPath; capturedAtLocal = (Get-Date).ToString('o') } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $script:RunRoot 'candidate-verification.json') -Encoding utf8
-        Write-Host "[SN10R4] candidate verification FAIL: $($_.Exception.Message)"
+        Write-Host "[SN10R6] candidate verification FAIL: $($_.Exception.Message)"
         exit 1
     }
 }
@@ -829,13 +880,18 @@ try {
         queuePath = (Join-Path $script:RunRoot 'qac-queue-before.log')
     }
 
+    $runtimeDiskPath = Join-Path $script:RunRoot 'qac-disposable-disk.raw'
+    $runtimeDiskCopy = New-DisposableQemuDiskCopy $CandidateDiskPath $runtimeDiskPath
+    if ($runtimeDiskCopy.initialSha256 -cne $candidateCheck.candidateDisk.sha256) { throw 'Per-run writable QEMU disk copy differs from the verified immutable candidate image.' }
+    $overall.checks.runtimeDiskCopy = [ordered]@{ passed = $true; path = $runtimeDiskCopy.path; initialSha256 = $runtimeDiskCopy.initialSha256; byteLength = $runtimeDiskCopy.lengthBytes; sourceCandidate = $runtimeDiskCopy.sourcePath; sourceCandidateSha256 = $runtimeDiskCopy.sourceSha256; attachedReadWriteForIdeCompatibility = $true; sourceCandidateModified = $false }
+
     $monitorProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $monitorProbe.Start()
     $script:MonitorPort = ([Net.IPEndPoint]$monitorProbe.LocalEndpoint).Port
     $monitorProbe.Stop()
     $serialLog = Join-Path $script:RunRoot 'guest-serial.log'
     $capture = [SN10R3SerialCapture]::new($serialLog)
-    $qemuArguments = @(New-QemuArguments $CandidateEspPath $capture.Port $script:MonitorPort)
+    $qemuArguments = @(New-QemuArguments $runtimeDiskPath $capture.Port $script:MonitorPort)
     $qacArguments = @('run', '--project', 'StellarNavigator', '--mode', 'acceptance', '--', $Qemu) + $qemuArguments
     [ordered]@{
         qacExecutable = $QacCli
@@ -844,8 +900,12 @@ try {
         qemuArgumentVector = $qemuArguments
         serialEndpoint = [ordered]@{ host = $capture.Host; port = $capture.Port; backend = 'QEMU socket chardev TCP client to runner-owned loopback listener' }
         monitorEndpoint = [ordered]@{ host = '127.0.0.1'; port = $script:MonitorPort; backend = 'HMP TCP loopback, ephemeral per run' }
-        espPath = [IO.Path]::GetFullPath($CandidateEspPath)
-        espAccess = 'read-only FAT directory backend and read-only drive'
+        candidateEspPath = [IO.Path]::GetFullPath($CandidateEspPath)
+        candidateDiskPath = [IO.Path]::GetFullPath($CandidateDiskPath)
+        qemuDisposableDiskPath = [IO.Path]::GetFullPath($runtimeDiskPath)
+        candidateDiskSha256 = $candidateCheck.candidateDisk.sha256
+        qemuDisposableDiskInitialSha256 = $runtimeDiskCopy.initialSha256
+        diskLayout = [ordered]@{ format = 'raw'; partitionTable = 'GPT'; partitionStartLba = $candidateCheck.candidateDisk.partitionStartLba; partitionSectors = $candidateCheck.candidateDisk.partitionSectors; sectorSizeBytes = 512; filesystem = 'FAT32'; interface = 'IDE index 0'; qemuAccess = 'writable isolated per-run clone' }
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $script:RunRoot 'qemu-invocation.json') -Encoding utf8
     $overall.checks.launchConstruction = [ordered]@{ passed = $true; invocationPath = (Join-Path $script:RunRoot 'qemu-invocation.json'); effectiveArgumentVectorRecorded = $true; structuredProcessArguments = $true }
     $overall.checks.serialCapture = [ordered]@{ endpointInitializedBeforeQemu = $true; host = $capture.Host; port = $capture.Port; logPath = $serialLog; qemuSerialStreamEndpoint = 'QEMU socket chardev TCP client to runner-owned loopback listener' }
@@ -864,6 +924,18 @@ try {
 
     if (-not $script:Owned) {
         if (-not $script:ReservationId) { $script:ReservationId = Get-QacReservationId $script:ManagedQac }
+        if ($script:ManagedQac.HasExited) {
+            [void]$script:ManagedQac.WaitForExit(5000)
+            $earlyOutput = $script:ManagedQac.StdoutText + [Environment]::NewLine + $script:ManagedQac.StderrText
+            $earlyExit = Get-QemuEarlyExitDetails $earlyOutput
+            if ($earlyExit) {
+                $script:ReservationId = $earlyExit.reservationId
+                $overall.blocker = $earlyExit.classification
+                $overall.checks.qacReservation = [ordered]@{ acquired = $true; reservationId = $earlyExit.reservationId; project = 'StellarNavigator'; mode = 'acceptance'; qemuPid = $earlyExit.qemuPid; qemuExitedBeforeRunnerAttach = $true; qemuExitCode = $earlyExit.exitCode }
+                $overall.checks.qemuStartup = [ordered]@{ passed = $false; stage = 'QEMU process startup before guest serial observation'; classification = $earlyExit.classification; rootCause = $earlyExit.rootCause; qacOutputPath = (Join-Path $script:RunRoot 'qac-run.stderr.log'); guestBootObserved = $false }
+                throw "$($earlyExit.classification): $($earlyExit.rootCause)"
+            }
+        }
         if ($script:ReservationId) {
             $queuedRaw = Get-QacSnapshot 'qac-reservation-inspect.queued.json' @('inspect', $script:ReservationId)
             $queued = $queuedRaw | ConvertFrom-Json
@@ -902,7 +974,22 @@ try {
         qemuCommandLine = $cim.CommandLine
         qemuCreationDate = ([datetime]$cim.CreationDate).ToUniversalTime().ToString('o')
     }
-    [void](Get-OwnedQacReservation $script:ReservationId $script:Owned.Process.Id)
+    try {
+        [void](Get-OwnedQacReservation $script:ReservationId $script:Owned.Process.Id)
+    } catch {
+        if ($script:Owned.Process.HasExited -and $script:ManagedQac) {
+            [void]$script:ManagedQac.WaitForExit(5000)
+            $earlyOutput = $script:ManagedQac.StdoutText + [Environment]::NewLine + $script:ManagedQac.StderrText
+            $earlyExit = Get-QemuEarlyExitDetails $earlyOutput
+            if ($earlyExit) {
+                $overall.blocker = $earlyExit.classification
+                $overall.checks.qacReservation = [ordered]@{ acquired = $true; reservationId = $earlyExit.reservationId; project = 'StellarNavigator'; mode = 'acceptance'; qemuPid = $earlyExit.qemuPid; qemuExitedBeforeRunnerAttach = $true; qemuExitCode = $earlyExit.exitCode }
+                $overall.checks.qemuStartup = [ordered]@{ passed = $false; stage = 'QEMU process startup before guest serial observation'; classification = $earlyExit.classification; rootCause = $earlyExit.rootCause; qacOutputPath = (Join-Path $script:RunRoot 'qac-run.stderr.log'); guestBootObserved = $false }
+                throw "$($earlyExit.classification): $($earlyExit.rootCause)"
+            }
+        }
+        throw
+    }
 
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     $bootText = Wait-SerialPattern -Capture $capture -Pattern '\[KERNEL\] VFS layer initialized' -Seconds $remaining -Description 'AMD64 kernel VFS boot marker'
@@ -976,6 +1063,8 @@ try {
     $overall.blocker = $null
 } catch {
     if ($overall.blocker -eq 'EXTERNAL_QEMU_COORDINATION_BLOCKER') { $overall.classification = 'BLOCKED' }
+    elseif ($overall.blocker -eq 'PREBOOT_STORAGE_FAILURE' -or $_.Exception.Message -like 'PREBOOT_STORAGE_FAILURE:*') { $overall.classification = 'FAIL'; $overall.blocker = 'PREBOOT_STORAGE_FAILURE' }
+    elseif ($overall.blocker -eq 'PREBOOT_QEMU_STARTUP_FAILURE' -or $_.Exception.Message -like 'PREBOOT_QEMU_STARTUP_FAILURE:*') { $overall.classification = 'FAIL'; $overall.blocker = 'PREBOOT_QEMU_STARTUP_FAILURE' }
     elseif ($_.Exception.Message -like 'SERIAL_CAPTURE_FAILURE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'SERIAL_CAPTURE_FAILURE' }
     elseif ($_.Exception.Message -like 'NO_GUEST_SERIAL_OUTPUT:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'NO_GUEST_SERIAL_OUTPUT' }
     elseif ($_.Exception.Message -like 'SERIAL_STREAM_DISCONNECT_FAILURE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'SERIAL_STREAM_DISCONNECT_FAILURE' }
@@ -1030,8 +1119,8 @@ try {
     $overall.serialLog = if ($serialLog) { $serialLog } else { $null }
     $overall.resultPath = Join-Path $script:RunRoot 'acceptance-result.json'
     $overall | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath $overall.resultPath -Encoding utf8
-    Write-Host "[SN10R4] $($overall.classification): $($overall.resultPath)"
-    if ($overall.blocker) { Write-Host "[SN10R4] blocker=$($overall.blocker)" }
+    Write-Host "[SN10R6] $($overall.classification): $($overall.resultPath)"
+    if ($overall.blocker) { Write-Host "[SN10R6] blocker=$($overall.blocker)" }
 }
 
 if ($overall.classification -eq 'PASS') { exit 0 }
