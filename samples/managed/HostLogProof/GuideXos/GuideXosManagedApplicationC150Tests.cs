@@ -2,7 +2,7 @@ using System;
 
 namespace HostLogProof;
 
-#if HOSTLOGPROOF_MANAGED_APP_RETURN
+#if HOSTLOGPROOF_MANAGED_APP_RETURN || HOSTLOGPROOF_C185_BOUNDARY
 /// <summary>
 /// The managed App Model keeps five bounded logical application objects so
 /// all established managed desktop applications can coexist.

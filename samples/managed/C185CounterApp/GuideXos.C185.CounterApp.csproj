@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AssemblyName>GuideXos.C185.CounterApp</AssemblyName>
+    <RootNamespace>GuideXos.C185.CounterApp</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ManagedUiContracts\GuideXos.ManagedUi.Contracts.csproj" />
+  </ItemGroup>
+</Project>

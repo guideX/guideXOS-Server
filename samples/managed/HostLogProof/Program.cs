@@ -2544,6 +2544,13 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
+#if HOSTLOGPROOF_C185_BOUNDARY
+        // This branch exists only in the isolated C185 NativeAOT composition.
+        // It statically calls the external factory and never enters the normal
+        // production selector table.
+        return GuideXosManagedHostServicesC185Composition.Dispatch(ctx);
+#else
+
 #if HOSTLOGPROOF_PRODUCTION
         // C102 and C104 use only the application host-call ABI for output.
         // C104-A keeps the C102 calculation while making its module identity
@@ -3412,6 +3419,7 @@ public static unsafe class Program
         {
             return ctx->host->log(ctx, message);
         }
+#endif
 #endif
     }
 

@@ -2,4 +2,9 @@
   <PropertyGroup>
     <ResolveNuGetPackages>false</ResolveNuGetPackages>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'HostLogProof' and '$(HostLogProofC185Boundary)' == 'true'">
+    <BaseOutputPath>$(MSBuildThisFileDirectory)out\dotnet\c185-managed-host-services\host-bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)out\dotnet\c185-managed-host-services\host-obj\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(MSBuildThisFileDirectory)out\dotnet\c185-managed-host-services\host-obj\</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
 </Project>

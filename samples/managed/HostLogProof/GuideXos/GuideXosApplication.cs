@@ -46,12 +46,12 @@ public readonly struct GuideXosApplicationDescriptor
         Selector = selector;
         Name = name.ToArray();
         Application = application;
-#if HOSTLOGPROOF_MANAGED_APP_RETURN
+#if HOSTLOGPROOF_MANAGED_APP_RETURN || HOSTLOGPROOF_C185_BOUNDARY
         Factory = null;
 #endif
     }
 
-#if HOSTLOGPROOF_MANAGED_APP_RETURN
+#if HOSTLOGPROOF_MANAGED_APP_RETURN || HOSTLOGPROOF_C185_BOUNDARY
     public GuideXosApplicationDescriptor(
         uint selector,
         ReadOnlySpan<byte> name,
@@ -67,7 +67,7 @@ public readonly struct GuideXosApplicationDescriptor
     public uint Selector { get; }
     public byte[] Name { get; }
     public GuideXosApplication Application { get; }
-#if HOSTLOGPROOF_MANAGED_APP_RETURN
+#if HOSTLOGPROOF_MANAGED_APP_RETURN || HOSTLOGPROOF_C185_BOUNDARY
     public Func<GuideXosApplication> Factory { get; }
 #endif
 }
