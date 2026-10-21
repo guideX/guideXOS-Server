@@ -1,6 +1,38 @@
 # Stellar Navigator SN10 — Native Application Bring-up
 
-**Current result: Outcome B — SN10R6 built and verified a raw GPT/FAT32 disk from the accepted ESP. Its single granted QAC run reproduced `Block node is read-only` because the runner attached the IDE hard disk read-only. The runner now prepares a writable, per-run disk copy while keeping the verified source image and ESP unchanged. The corrected launch has not yet been QAC-tested; no guest serial or native application evidence exists. `.phase` remains `SN10`.**
+**Current result: Outcome C — SN10R7 used its one authorized QAC-managed QEMU launch. The writable raw IDE disk booted UEFI, the AMD64 kernel, and a usable desktop, but the kernel could not mount the GPT/FAT32 disk. App Model discovery returned `NO_APPS_DIRECTORY` and the production dispatcher rejected Stellar Navigator. The native ELF, DE440s evaluation, and application lifecycle were not reached. `.phase` remains `SN10`.**
+
+### SN10R7 qualification update (2026-10-20)
+
+**Outcome C — technical blocker: the guest FAT32 mount path does not read GPT partition entries.** The one authorized guest attempt started and ended on `STELLAR_NAVIGATOR` at `e142c4c7072ecb72052602d25814e28658e99304`; `.phase` was `SN10` and remains `SN10`. The starting worktree contained 1,982 pre-existing dirty entries (235 modified tracked paths and 1,747 untracked paths), rather than the 239 described in the authorization. All were preserved. The QEMU acceptance run changed no repository files. The follow-up runner repair is committed locally as `e467f5d71b6d910ce6ae003182dbdd75c761b7ee`; no kernel or application production source changed.
+
+#### Writable-disk preflight and runner checks
+
+The accepted raw disk is `E:\bkup\artifacts\SN10R6_20261020\media\stellar-navigator-sn10r6.raw` (270,532,608 bytes), SHA-256 `79dc215fb2fd6f4ade3d1a6e56eeed0297ca733adc241769b3b0a76422450b8a`. Candidate-only verification passed and matched the accepted manifest. Kernel `3aea5f9f10734dc6f248c6bdc05379d3b69a8d0d4b2ad3ec689f4dc71cb9ea1a`, native ELF `6d5f1ca1b04a9ddbaf08e2eed8600ffaf776c06b6e45aab435f61fda9c2e66eb`, app manifest `08b43a2e0ddb05550d8ee02733b0ebbcc109556a29f685d6cfe54280b6a8df7c`, DE440s data `d52b91573c29e6a4e5b6dc19c4af4d9747f6da2122f5b3aff4503684a96d2c0a`, OVMF `2df617a6fd1bae41ec7c0e3bceca96c928a5a88d8dc198468d34733393ab2792`, and bootloader `07e5350656e93e28f30cda66bbb924aef7d3d7053498547b27cc469b88d21783` all matched.
+
+The full preflight copy at `E:\bkup\artifacts\SN10R7_20261020\preflight\qac-disposable-disk-preflight.raw` had the same SHA-256, was not marked read-only, and opened for writing as `LEON2_RDT\guideX`. The source retained its `Archive` attribute and its original SHA-256. The IDE attachment was validated offline as `file=<per-run-copy>.raw,format=raw,if=ide,index=0`; it had no read-only property and was a hard disk. The only read-only drive was the separate OVMF pflash firmware. QAC CLI source inspection and the runner's vector check confirmed that QEMU arguments pass through unchanged. Evidence is in `preflight\writable-disk-preflight.json` and `preflight\offline-command-validation\qemu-command-offline-validation.json`.
+
+The offline acceptance-runner self-tests passed twice, including after the final runner changes. They cover structured argument boundaries, live TCP serial capture, marker detection, timeout and abnormal-exit handling, disk copying and source isolation, close/reopen key automation, QAC queue ownership, and endpoint cleanup. The disk-copy test sets the source read-only, verifies the copy is writable, then simulates a guest write and confirms that only the copy changes. The runner now also classifies `NO_APPS_DIRECTORY` and `appmodel-launch result=failed` as guest acceptance failures. These are runner-only tests, not guest evidence. Candidate verification, self-test output, and the QAC attempt evidence are under `E:\bkup\artifacts\SN10R7_20261020\`.
+
+#### QAC reservation and guest boot
+
+A fresh QAC census at approximately 9:12 PM PDT showed the coordinator online with zero QEMU processes, reservations, managed sessions, or queued requests. The runner acquired exclusive acceptance reservation `cb4470bac23b496ba22dd7c5810bf1a2` and launched its direct QEMU child, PID `33260`. QAC held the reservation through the run and released it after QEMU exited with code 0. No foreign process or reservation was touched.
+
+The effective QEMU command used `-drive if=pflash,format=raw,readonly=on,file=D:\dev\guideXOSServer_STELLAR_NAVIGATOR\OVMF.fd` and `-drive file=E:\bkup\artifacts\SN10R7_20261020\qemu\20261020T211310690\qac-disposable-disk.raw,format=raw,if=ide,index=0`. QEMU emitted no block-device startup error. UEFI executed the bootloader, the AMD64 kernel started, and ATA detected one drive (`ata0m`). The kernel tried that drive as persistent storage, but VFS reported `Filesystem mount failed` and `failed to mount boot runtime image at /`. The desktop rendered and continued producing kernel heartbeats. A 1280×800 desktop screenshot is `qemu\20261020T211310690\desktop-after-appmodel-failure.png` (original QEMU PPM is preserved beside it).
+
+#### First failing component and application result
+
+The first failed guest component was the root filesystem mount, before App Model discovery. Guest serial reports `[KERNEL] Trying persistent storage device ata0m at /`, `[KERNEL] WARNING: No writable persistent storage filesystem found`, and `[desktop] failed to mount boot runtime image at /`. App Model discovery then reported `[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY`; the production dispatcher returned `usage=blocked-unknown-fallback`, followed by `[SN10-GUEST] appmodel-launch result=failed`.
+
+The source explains the failure: `kernel/core/fs_fat.cpp` probes a FAT boot sector at LBA 0 or scans four MBR primary entries for legacy FAT partition types. It does not parse a GPT header or GPT partition entries. The verified candidate uses a protective MBR (partition type `0xEE`) and a GPT EFI System Partition beginning at LBA 2048, so the FAT mount path cannot reach the FAT32 boot sector. The IDE drive itself was detected and the candidate copy was writable; disk permissions and QEMU's IDE attachment were not the remaining blocker. The current evidence supports a kernel GPT mount-support gap as the exact root cause.
+
+The guest never launched the native ELF. It produced no native shell, DE440s ET/TDB 0 computation, coordinate comparison, normal application close, production-shell relaunch, second instance, or application stability evidence. The runner result records `SERIAL_CAPTURE_FAILURE` because this task sent `quit` to its verified QAC-owned QEMU child after the app-discovery failure; QAC records the orderly code-0 exit and reservation release. The guest failure and screenshot precede that cleanup. No second launch was made.
+
+#### Closeout
+
+The run-copy SHA-256 changed from the verified initial hash to `b2c092b3d2512871c88d3dbe44a98a4a8aa9437ccf93bad9f3c620fb838b66da` across 1,983 bytes in 30 sectors, while the original candidate remained unchanged at `79dc215fb2fd6f4ade3d1a6e56eeed0297ca733adc241769b3b0a76422450b8a`. The final runner self-test passed at `qemu\20261020T211808951\runner-selftest.json`; the candidate verification and actual serial log, QAC reservation records, QEMU argument vector, screenshot, and disk-copy comparison are preserved under `E:\bkup\artifacts\SN10R7_20261020\`.
+
+The phase remains `SN10`; no acceptance claim or phase advance is made. The remaining gate is GPT-aware FAT partition mounting (or an equivalently supported guest boot-disk layout), followed by a separately authorized guest acceptance run for native App Model launch, authentic ephemeris computation and tolerance, normal close/reopen, and stability. The runner-only repair commit is `e467f5d71b6d910ce6ae003182dbdd75c761b7ee`; this task did not push to GitHub.
 
 ### SN10R6 qualification update (2026-10-20)
 
