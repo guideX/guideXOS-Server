@@ -760,6 +760,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\ManagedStarterC182\ManagedStarterC182.cs" Link="Applications\ManagedStarterC182.cs" />
+    <Compile Include="..\ManagedStarterC182\ManagedStarterC182HostTests.cs" Link="GuideXos\ManagedStarterC182HostTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="9.0.0" PrivateAssets="all" />
   </ItemGroup>
 
