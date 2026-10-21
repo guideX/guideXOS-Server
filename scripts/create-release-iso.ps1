@@ -5,6 +5,9 @@ param(
     [ValidateSet('amd64')]
     [string]$Arch = 'amd64',
 
+    [ValidateSet('Development', 'ServerV03PacManOnly')]
+    [string]$ReleaseProfile = 'Development',
+
     [switch]$Clean,
     [switch]$SkipBuild,
     [switch]$RequireCleanWorktree,
@@ -19,6 +22,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module -Name (Join-Path $PSScriptRoot 'release-build-integrity.psm1') -Force
+$ReleaseProfileContract = Get-ReleaseProfileContract -Profile $ReleaseProfile
 
 $ScriptRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $ScriptRoot '..')).Path
@@ -26,7 +30,18 @@ $DistRoot = Join-Path $RepositoryRoot 'dist'
 $ReleaseToolsRoot = Join-Path $RepositoryRoot 'out\release-tools'
 $ReleaseWorkRoot = Join-Path $RepositoryRoot 'out\release-iso'
 $BuildScript = Join-Path $RepositoryRoot 'build.ps1'
-$EspRoot = Join-Path $RepositoryRoot 'ESP'
+$ReleaseBuildId = if ([string]::IsNullOrWhiteSpace($env:GXOS_RELEASE_BUILD_ID)) {
+    [Guid]::NewGuid().ToString('D')
+} else {
+    try { [Guid]::Parse($env:GXOS_RELEASE_BUILD_ID).ToString('D') } catch { throw "[release-iso] GXOS_RELEASE_BUILD_ID is not a valid GUID." }
+}
+$ProfileStagingRoot = Join-Path $RepositoryRoot ("out\release-profile\" + $ReleaseBuildId)
+$EspRoot = if ($ReleaseProfile -eq 'ServerV03PacManOnly') { Join-Path $ProfileStagingRoot 'ESP' } else { Join-Path $RepositoryRoot 'ESP' }
+$ReleaseArtifactRoot = if ($ReleaseProfile -eq 'ServerV03PacManOnly') {
+    Join-Path $ProfileStagingRoot $ReleaseProfileContract.OutputDirectoryName
+} else {
+    Join-Path $RepositoryRoot $ReleaseProfileContract.OutputDirectoryName
+}
 $EspHelper = Join-Path $RepositoryRoot 'tools\release_esp.py'
 $IsoHelper = Join-Path $RepositoryRoot 'tools\release_iso.py'
 $RequirementsFile = Join-Path $RepositoryRoot 'requirements-release.txt'
@@ -276,7 +291,17 @@ function Resolve-ReleasePython {
 
 function Get-FileRecord([System.IO.FileInfo]$File) {
     if ($File.Length -le 0) { Fail "empty ESP file is not allowed in a release: $($File.FullName)" }
-    $relative = Get-RepositoryRelativePath $File.FullName
+    $developmentEspRoot = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'ESP'))
+    if ([IO.Path]::GetFullPath($EspRoot) -eq $developmentEspRoot) {
+        $relative = Get-RepositoryRelativePath $File.FullName
+    } else {
+        $espPrefix = [IO.Path]::GetFullPath($EspRoot).TrimEnd('\') + '\'
+        $filePath = [IO.Path]::GetFullPath($File.FullName)
+        if (-not $filePath.StartsWith($espPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            Fail "ESP file is outside the selected profile staging root: $($File.FullName)"
+        }
+        $relative = $filePath.Substring($espPrefix.Length).Replace('\', '/')
+    }
     return [ordered]@{
         path = $relative
         size = [int64]$File.Length
@@ -330,14 +355,11 @@ function Get-EspContents {
 }
 
 function Get-EspPackageRecords($EspRecords) {
-    $repositoryPrefix = 'ESP/'
     $records = @()
     foreach ($record in $EspRecords) {
-        if (-not $record.path.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-            Fail "ESP record is not rooted under ESP: $($record.path)"
-        }
+        $packagePath = if ($record.path.StartsWith('ESP/', [StringComparison]::OrdinalIgnoreCase)) { $record.path.Substring(4) } else { $record.path }
         $records += [ordered]@{
-            path = $record.path.Substring($repositoryPrefix.Length)
+            path = $packagePath
             size = [int64]$record.size
             sha256 = $record.sha256
         }
@@ -399,12 +421,13 @@ function Assert-Fat32Image([System.IO.FileInfo]$Image) {
 function Copy-EspToStaging($Records, [string]$StagingRoot) {
     New-Item -ItemType Directory -Path $StagingRoot -Force | Out-Null
     foreach ($record in $Records) {
-        $source = Join-Path $RepositoryRoot ($record.path -replace '/', '\')
-        $repositoryPrefix = 'ESP/'
-        if (-not $record.path.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-            Fail "ESP record is not rooted under ESP: $($record.path)"
+        if ($record.path.StartsWith('ESP/', [StringComparison]::OrdinalIgnoreCase)) {
+            $source = Join-Path $RepositoryRoot ($record.path -replace '/', '\')
+            $packagePath = $record.path.Substring(4)
+        } else {
+            $source = Join-Path $EspRoot ($record.path -replace '/', '\')
+            $packagePath = $record.path
         }
-        $packagePath = $record.path.Substring($repositoryPrefix.Length)
         $destination = Join-Path $StagingRoot ($packagePath -replace '/', '\')
         $parent = Split-Path -Parent $destination
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -416,26 +439,31 @@ function Invoke-CanonicalBuild {
     if (-not (Test-Path -LiteralPath $BuildScript -PathType Leaf)) { Fail "canonical build script is missing: $BuildScript" }
     $powershell = Get-Command powershell.exe -ErrorAction SilentlyContinue
     if ($null -eq $powershell) { Fail 'Windows PowerShell (powershell.exe) is required to invoke the canonical build.' }
-    $buildArgs = @('-Arch', $Arch)
-    if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch) }
-    Write-Host "[release-iso] invoking canonical build.ps1 with supported arguments" -ForegroundColor Cyan
-    $buildId = [Guid]::NewGuid().ToString('D')
+    $buildArgs = @('-Arch', $Arch, '-ReleaseProfile', $ReleaseProfile)
+    if ($Clean) { $buildArgs = @('-Clean', '-Arch', $Arch, '-ReleaseProfile', $ReleaseProfile) }
+    Write-Host "[release-iso] invoking canonical build.ps1 with release profile $ReleaseProfile" -ForegroundColor Cyan
     $previousBuildId = $env:GXOS_RELEASE_BUILD_ID
     try {
-        $env:GXOS_RELEASE_BUILD_ID = $buildId
+        $env:GXOS_RELEASE_BUILD_ID = $ReleaseBuildId
         $result = Invoke-ExternalChecked -FilePath $powershell.Source -Arguments (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BuildScript) + $buildArgs)
         Assert-ReleaseCommandCompleted -Command 'canonical build.ps1' -ExitCode $result.ExitCode -Output $result.Output
     } finally {
         if ($null -eq $previousBuildId) { Remove-Item Env:\GXOS_RELEASE_BUILD_ID -ErrorAction SilentlyContinue }
         else { $env:GXOS_RELEASE_BUILD_ID = $previousBuildId }
     }
-    return $buildId
+    return $ReleaseBuildId
 }
 
 if ($Version -notmatch '^(0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
     Fail "invalid version '$Version'. Use a conservative semantic version such as 0.1.0 or 0.1.0-rc1."
 }
 if ($SkipBuild -and $Clean) { Fail '-Clean cannot be combined with -SkipBuild because it removes the existing ESP.' }
+if ($ReleaseProfile -eq 'ServerV03PacManOnly' -and $SkipBuild) {
+    Fail 'ServerV03PacManOnly requires a fresh canonical build and cannot reuse an existing ESP.'
+}
+if ($ReleaseProfile -eq 'ServerV03PacManOnly' -and $Version -ne '0.3.0') {
+    Fail 'ServerV03PacManOnly is qualified only for the Server 0.3.0 target version.'
+}
 if ($IsoBackend -eq 'PyCdlib' -and -not [string]::IsNullOrWhiteSpace($OscdimgPath)) {
     Fail '-OscdimgPath is only valid with -IsoBackend Oscdimg. PyCdlib is the default backend and does not require the ADK.'
 }
@@ -450,13 +478,17 @@ if (-not $worktreeClean) {
 }
 if ($SkipBuild -and -not $worktreeClean) { Fail '-SkipBuild requires a clean worktree so the ESP receipt cannot describe a different source tree.' }
 
+if ($ReleaseProfile -eq 'ServerV03PacManOnly' -and (Test-Path -LiteralPath $ProfileStagingRoot)) {
+    Fail "profile staging path already exists for build ID $ReleaseBuildId; refusing stale candidate reuse: $ProfileStagingRoot"
+}
 $artifactBase = "guideXOS-Server-v$Version-$Arch"
+if ($ReleaseProfile -eq 'ServerV03PacManOnly') { $artifactBase += '-pacman-only-candidate' }
 $isoName = "$artifactBase.iso"
 $shaName = "$isoName.sha256"
 $manifestName = "$artifactBase.manifest.json"
-$finalIso = Join-Path $DistRoot $isoName
-$finalSha = Join-Path $DistRoot $shaName
-$finalManifest = Join-Path $DistRoot $manifestName
+$finalIso = Join-Path $ReleaseArtifactRoot $isoName
+$finalSha = Join-Path $ReleaseArtifactRoot $shaName
+$finalManifest = Join-Path $ReleaseArtifactRoot $manifestName
 foreach ($existing in @($finalIso, $finalSha, $finalManifest)) {
     if (Test-Path -LiteralPath $existing) {
         if (-not $Force) { Fail "output already exists: $existing. Use -Force to replace it after successful validation." }
@@ -478,7 +510,6 @@ try {
     if (-not (Test-Path -LiteralPath $EspHelper -PathType Leaf)) { Fail "FAT image helper is missing: $EspHelper" }
     if (-not (Test-Path -LiteralPath $IsoHelper -PathType Leaf)) { Fail "ISO verification helper is missing: $IsoHelper" }
     $python = Resolve-ReleasePython
-    New-Item -ItemType Directory -Path $DistRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $ReleaseWorkRoot -Force | Out-Null
     $WorkDirectory = Join-Path $ReleaseWorkRoot ("$artifactBase-" + [Guid]::NewGuid().ToString('N'))
     if (-not (Test-UnderRoot $WorkDirectory $ReleaseWorkRoot)) { Fail 'internal work directory escaped the approved release work root.' }
@@ -487,21 +518,34 @@ try {
     $expectedBuildId = $null
     if (-not $SkipBuild) { $expectedBuildId = Invoke-CanonicalBuild }
     [void](Assert-ReleaseNativeAppShipSet -EspRoot $EspRoot `
-        -RequiredPackageNames @('PacMan', 'DeveloperStudio') `
+        -RequiredPackageNames $ReleaseProfileContract.PackageNames `
         -Architecture $Arch -TargetServerVersion '0.3.0')
     $releaseIdentity = Assert-ReleaseBuildIdentity `
         -IdentityPath (Join-Path $EspRoot 'build-identity.txt') `
         -EspRoot $EspRoot `
         -ExpectedSourceCommit $sourceCommit `
         -ExpectedBuildId $expectedBuildId `
+        -ExpectedReleaseProfile $ReleaseProfile `
         -Architecture $Arch
     $esp = Get-EspContents
+    New-Item -ItemType Directory -Path $ReleaseArtifactRoot -Force | Out-Null
 
-    $devStudioManifestRecord = @($esp.Files | Where-Object { $_.path -eq 'ESP/Apps/DeveloperStudio/app.json' }) | Select-Object -First 1
-    $devStudioElfRecord = @($esp.Files | Where-Object { $_.path -eq 'ESP/Apps/DeveloperStudio/bin/amd64/developerstudio.elf' }) | Select-Object -First 1
-    $symbolAuditRecord = @($esp.Files | Where-Object { $_.path -eq 'ESP/kernel-symbol-audit.txt' }) | Select-Object -First 1
-    if ($null -eq $devStudioManifestRecord -or $null -eq $devStudioElfRecord -or $null -eq $symbolAuditRecord) {
-        Fail 'required DeveloperStudio package records or kernel symbol audit are missing from the ESP inventory.'
+    $espRecordPrefix = if ($EspRoot -eq (Join-Path $RepositoryRoot 'ESP')) { 'ESP/' } else { '' }
+    $symbolAuditRecord = @($esp.Files | Where-Object { $_.path -eq ($espRecordPrefix + 'kernel-symbol-audit.txt') }) | Select-Object -First 1
+    if ($null -eq $symbolAuditRecord) { Fail 'required kernel symbol audit is missing from the ESP inventory.' }
+    $nativeElfPackageRecords = @()
+    foreach ($packageName in $ReleaseProfileContract.PackageNames) {
+        $manifestRecord = @($esp.Files | Where-Object { $_.path -eq ($espRecordPrefix + "Apps/$packageName/app.json") }) | Select-Object -First 1
+        $contract = switch ($packageName) {
+            'PacMan' { [PSCustomObject]@{ Elf = 'bin/amd64/pacman.elf' } }
+            'DeveloperStudio' { [PSCustomObject]@{ Elf = 'bin/amd64/developerstudio.elf' } }
+            default { Fail "No ISO package record contract exists for $packageName." }
+        }
+        $elfRecord = @($esp.Files | Where-Object { $_.path -eq ($espRecordPrefix + "Apps/$packageName/$($contract.Elf)") }) | Select-Object -First 1
+        if ($null -eq $manifestRecord -or $null -eq $elfRecord) {
+            Fail "required $packageName manifest or ELF record is missing from the ESP inventory."
+        }
+        $nativeElfPackageRecords += [ordered]@{ name = $packageName; manifest = $manifestRecord; elf = $elfRecord }
     }
 
     $bootloader = Get-Item -LiteralPath (Join-Path $EspRoot 'EFI\BOOT\BOOTX64.EFI')
@@ -538,6 +582,8 @@ try {
         'guideXOS Server release media',
         ("Version: $Version"),
         ("Architecture: $Arch"),
+        ("Native ELF profile: $ReleaseProfile"),
+        ("Native ELF packages: $($ReleaseProfileContract.PackageNames -join ', ')"),
         ("Source commit: $sourceCommit"),
         '',
         ("The bootable UEFI FAT image is $bootImageIsoPath."),
@@ -593,7 +639,7 @@ try {
         fs = '2.4.16'
         pycdlib = '1.16.0'
         isoBackend = $IsoBackend
-        canonicalBuild = 'build.ps1 -Arch amd64' + $(if ($Clean) { ' -Clean' } else { '' })
+        canonicalBuild = 'build.ps1 -Arch amd64 -ReleaseProfile ' + $ReleaseProfile + $(if ($Clean) { ' -Clean' } else { '' })
     }
     if ($IsoBackend -eq 'Oscdimg') {
         $toolRecords.oscdimg = Get-ToolRecord $oscdimg $oscdimgVersion
@@ -603,6 +649,9 @@ try {
         product = 'guideXOS Server'
         version = $Version
         architecture = $Arch
+        releaseProfile = $ReleaseProfile
+        nativeElfPackages = @($nativeElfPackageRecords)
+        candidateOnly = ($ReleaseProfile -eq 'ServerV03PacManOnly')
         artifactType = 'bootable-uefi-iso'
         isoBackend = $IsoBackend
         buildMode = $(if ($SkipBuild) { 'reused-validated-ESP' } else { 'canonical-build' })
@@ -618,6 +667,7 @@ try {
             buildId = $releaseIdentity['buildId']
             buildStatus = $releaseIdentity['buildStatus']
             sourceCommit = $releaseIdentity['sourceCommit']
+            releaseProfile = $releaseIdentity['releaseProfile']
             startedAtUtc = $releaseIdentity['startedAtUtc']
             stages = [ordered]@{
                 bootloader = $releaseIdentity['stage.bootloader']
@@ -628,12 +678,6 @@ try {
                 developerStudio = $releaseIdentity['stage.developerStudio']
                 appPackages = $releaseIdentity['stage.appPackages']
             }
-        }
-        developerStudio = [ordered]@{
-            contract = 'Phase 25 signed-off package pin; manifest and ELF both exact-hash verified'
-            provenance = 'DeveloperStudio Phase 25 release-candidate record; sign-off bb66e11c38dffae21514384f73b1920b53ac64fe; paired Server commit fb71e36c77866cdabf20873e6ad3de0ddc3bbe02'
-            manifest = $devStudioManifestRecord
-            elf = $devStudioElfRecord
         }
         kernelSymbolAudit = $symbolAuditRecord
         requiredInputFiles = @($esp.Required)
@@ -655,6 +699,14 @@ try {
             'The ISO and EFI image are read-only release media.',
             'Persistent user data must live on separate writable storage; this script never writes physical USB media.'
         )
+    }
+    if ($ReleaseProfileContract.RequiresDeveloperStudio) {
+        $manifest.developerStudio = [ordered]@{
+            contract = 'Phase 25 signed-off package pin; manifest and ELF both exact-hash verified'
+            provenance = 'DeveloperStudio Phase 25 release-candidate record; sign-off bb66e11c38dffae21514384f73b1920b53ac64fe; paired Server commit fb71e36c77866cdabf20873e6ad3de0ddc3bbe02'
+            manifest = $nativeElfPackageRecords | Where-Object { $_.name -eq 'DeveloperStudio' } | Select-Object -ExpandProperty manifest
+            elf = $nativeElfPackageRecords | Where-Object { $_.name -eq 'DeveloperStudio' } | Select-Object -ExpandProperty elf
+        }
     }
     $manifestTemp = Join-Path $WorkDirectory $manifestName
     [IO.File]::WriteAllText($manifestTemp, ($manifest | ConvertTo-Json -Depth 12) + "`n", $utf8NoBom)
@@ -695,7 +747,11 @@ try {
     }
 
     Write-Host ''
-    Write-Host '[release-iso] release artifact created and structurally verified.' -ForegroundColor Green
+    if ($ReleaseProfile -eq 'ServerV03PacManOnly') {
+        Write-Host '[release-iso] PacMan-only candidate created and structurally verified; it remains under out and was not published.' -ForegroundColor Green
+    } else {
+        Write-Host '[release-iso] release artifact created and structurally verified.' -ForegroundColor Green
+    }
     Write-Host ("  ISO:      " + $finalIso)
     Write-Host ("  SHA-256:  " + $finalSha)
     Write-Host ("  Manifest: " + $finalManifest)
@@ -705,7 +761,12 @@ try {
     Write-Host 'Verify the checksum:' -ForegroundColor Cyan
     Write-Host ("  `$expected = (Get-Content -LiteralPath '" + $finalSha + "').Split()[0]; `$actual = (Get-FileHash -LiteralPath '" + $finalIso + "' -Algorithm SHA256).Hash; if (`$expected -ne `$actual) { throw 'SHA-256 mismatch' } else { 'SHA-256 OK' }")
     Write-Host 'Test the exact ISO in QEMU:' -ForegroundColor Cyan
-    Write-Host ("  .\scripts\test-release-iso.ps1 -IsoPath '.\dist\$isoName'")
+    $relativeIsoPath = if ($ReleaseProfile -eq 'ServerV03PacManOnly') {
+        ".\out\release-profile\$ReleaseBuildId\artifacts\$isoName"
+    } else {
+        ".\dist\$isoName"
+    }
+    Write-Host ("  .\scripts\test-release-iso.ps1 -IsoPath '$relativeIsoPath'")
 } finally {
     if ($null -ne $WorkDirectory -and (Test-Path -LiteralPath $WorkDirectory -PathType Container) -and (Test-UnderRoot $WorkDirectory $ReleaseWorkRoot)) {
         # WorkDirectory is a freshly-created child of the approved ignored root.

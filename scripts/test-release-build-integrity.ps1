@@ -24,6 +24,7 @@ function Write-TestIdentity([string]$Status = 'success', [bool]$CompleteStages =
     $lines = @(
         'schemaVersion=2',
         'buildId=2e3a5996-7f24-458d-a5d8-0398b6934f8b',
+        'releaseProfile=Development',
         "buildStatus=$Status",
         'sourceCommit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         'architecture=amd64',
@@ -69,8 +70,53 @@ function Write-TestIdentity([string]$Status = 'success', [bool]$CompleteStages =
     [IO.File]::WriteAllLines($IdentityPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Write-PacManOnlyIdentity([string]$EspPath) {
+    $lines = @(
+        'schemaVersion=2',
+        'buildId=2e3a5996-7f24-458d-a5d8-0398b6934f8b',
+        'releaseProfile=ServerV03PacManOnly',
+        'buildStatus=success',
+        'sourceCommit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        'architecture=amd64',
+        'startedAtUtc=2026-10-19T12:00:00.0000000Z',
+        'stage.bootloader=passed',
+        'stage.kernel=passed',
+        'stage.symbolAudit=passed',
+        'stage.ramdisk=passed',
+        'stage.pacman=passed',
+        'stage.developerStudio=not_selected',
+        'stage.appPackages=passed'
+    )
+    $artifacts = @(
+        @{ Name = 'bootloader'; Path = 'EFI/BOOT/BOOTX64.EFI'; Bytes = [byte[]](1,2,3) },
+        @{ Name = 'kernel'; Path = 'kernel.elf'; Bytes = [byte[]](4,5,6) },
+        @{ Name = 'ramdisk'; Path = 'ramdisk.img'; Bytes = [byte[]](7,8,9) },
+        @{ Name = 'kernelSymbolAudit'; Path = 'kernel-symbol-audit.txt'; Bytes = [byte[]](10,11,12) },
+        @{ Name = 'pacman.manifest'; Path = 'Apps/PacMan/app.json'; Source = (Join-Path $PSScriptRoot '..\Apps\PacMan\app.json') },
+        @{ Name = 'pacman.elf'; Path = 'Apps/PacMan/bin/amd64/pacman.elf'; Source = (Join-Path $PSScriptRoot '..\Apps\PacMan\bin\amd64\pacman.elf') }
+    )
+    foreach ($artifact in $artifacts) {
+        $path = Join-Path $EspPath ($artifact.Path -replace '/', '\')
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+        if ($artifact.ContainsKey('Source')) { Copy-Item -LiteralPath $artifact.Source -Destination $path -Force }
+        else { [IO.File]::WriteAllBytes($path, $artifact.Bytes) }
+        $item = Get-Item -LiteralPath $path
+        $lines += "artifact.$($artifact.Name).path=$($artifact.Path)"
+        $lines += "artifact.$($artifact.Name).bytes=$($item.Length)"
+        $lines += "artifact.$($artifact.Name).sha256=$((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant())"
+    }
+    [IO.File]::WriteAllLines((Join-Path $EspPath 'build-identity.txt'), $lines, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 try {
     New-Item -ItemType Directory -Path $EspRoot -Force | Out-Null
+
+    $defaultProfile = Get-ReleaseProfileContract
+    $developmentProfile = Get-ReleaseProfileContract -Profile 'Development'
+    $pacmanOnlyProfile = Get-ReleaseProfileContract -Profile 'ServerV03PacManOnly'
+    Assert-True ($defaultProfile.Name -eq 'Development' -and $defaultProfile.RequiresDeveloperStudio) 'keeps Development as the unmodified default profile'
+    Assert-True ($developmentProfile.PackageNames.Count -eq 2 -and $developmentProfile.PackageNames -contains 'DeveloperStudio' -and $developmentProfile.RequiresDeveloperStudio) 'preserves the default Development profile with its PacMan and DeveloperStudio stages'
+    Assert-True ($pacmanOnlyProfile.PackageNames.Count -eq 1 -and $pacmanOnlyProfile.PackageNames[0] -eq 'PacMan' -and -not $pacmanOnlyProfile.RequiresDeveloperStudio) 'selects an explicit PacMan-only Server v0.3 profile'
 
     Assert-Throws { Assert-ReleaseCommandCompleted -Command 'required-stage' -ExitCode 7 -Output '' } 'rejects a required command returning nonzero'
     Assert-Throws { Assert-ReleaseCommandCompleted -Command 'required-stage' -ExitCode 0 -Output 'ERROR: stage failed' } 'rejects a child that prints an error but exits zero'
@@ -105,8 +151,23 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\Apps\PacMan\bin\amd64\pacman.elf') -Destination (Join-Path $packageSetPacman 'bin\amd64\pacman.elf')
     $selectedPackageSet = Assert-ReleaseNativeAppShipSet -EspRoot $packageSetRoot -RequiredPackageNames @('PacMan') -Architecture 'amd64' -TargetServerVersion '0.3.0'
     Assert-True ($selectedPackageSet.PackageNames.Count -eq 1 -and $selectedPackageSet.PackageNames[0] -eq 'PacMan') 'accepts the selected PacMan-only Native ELF ship-set'
+    $missingPacmanRoot = Join-Path $TestRoot 'missing-pacman-esp'
+    New-Item -ItemType Directory -Path (Join-Path $missingPacmanRoot 'Apps') -Force | Out-Null
+    Assert-Throws { Assert-ReleaseNativeAppShipSet -EspRoot $missingPacmanRoot -RequiredPackageNames $pacmanOnlyProfile.PackageNames -Architecture 'amd64' -TargetServerVersion '0.3.0' } 'rejects a PacMan-only profile with its required PacMan package missing'
+    $excludedStudioRoot = Join-Path $packageSetRoot 'Apps\DeveloperStudio'
+    New-Item -ItemType Directory -Path (Join-Path $excludedStudioRoot 'bin\amd64') -Force | Out-Null
+    Copy-Item -LiteralPath $modernDeveloperStudioManifest -Destination (Join-Path $excludedStudioRoot 'app.json')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\Apps\DeveloperStudio\bin\amd64\developerstudio.elf') -Destination (Join-Path $excludedStudioRoot 'bin\amd64\developerstudio.elf')
+    Assert-Throws { Assert-ReleaseNativeAppShipSet -EspRoot $packageSetRoot -RequiredPackageNames $pacmanOnlyProfile.PackageNames -Architecture 'amd64' -TargetServerVersion '0.3.0' } 'rejects the incompatible DeveloperStudio package when excluded by the PacMan-only profile'
+    Remove-Item -LiteralPath (Join-Path $packageSetRoot 'Apps\DeveloperStudio') -Recurse -Force
     New-Item -ItemType Directory -Path (Join-Path $packageSetRoot 'Apps\UnlistedPackage') -Force | Out-Null
-    Assert-Throws { Assert-ReleaseNativeAppShipSet -EspRoot $packageSetRoot -RequiredPackageNames @('PacMan') -Architecture 'amd64' -TargetServerVersion '0.3.0' } 'rejects an extra package directory copied into ESP\Apps outside the release selection'
+    Assert-Throws { Assert-ReleaseNativeAppShipSet -EspRoot $packageSetRoot -RequiredPackageNames $pacmanOnlyProfile.PackageNames -Architecture 'amd64' -TargetServerVersion '0.3.0' } 'rejects an unexpected Native ELF package copied into ESP\Apps outside the release selection'
+
+    $tooNewManifest = Join-Path $TestRoot 'pacman-too-new.json'
+    $tooNewPackage = Get-Content -LiteralPath $pacmanManifest -Raw | ConvertFrom-Json
+    $tooNewPackage.minGuideXOSVersion = '0.5.0'
+    [IO.File]::WriteAllText($tooNewManifest, ($tooNewPackage | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Assert-ReleaseNativeAppManifest -ManifestPath $tooNewManifest -PackageName 'PacMan' -Architecture 'amd64' -TargetServerVersion '0.3.0' } 'rejects a selected package requiring an unsupported Server version'
 
     $compatibleManifest = Join-Path $TestRoot 'developerstudio-v03-compatible.json'
     [IO.File]::WriteAllText($compatibleManifest, '{"id":"com.guidexos.developerstudio","minGuideXOSVersion":"0.3.0"}')
@@ -152,6 +213,22 @@ try {
     Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) -ExpectedBuildId '2e3a5996-7f24-458d-a5d8-0398b6934f8b' } 'rejects the exact Phase 25 artifact pair for the Server v0.3 target despite a complete successful receipt'
     $validated = Assert-ReleaseBuildIdentity -IdentityPath $IdentityPath -EspRoot $EspRoot -ExpectedSourceCommit ('a' * 40) -ExpectedBuildId '2e3a5996-7f24-458d-a5d8-0398b6934f8b' -TargetServerVersion '0.5.0'
     Assert-True ($validated['buildStatus'] -eq 'success') 'accepts the exact Phase 25 identity for its declared Server 0.5.0 minimum'
+
+    $pacmanOnlyEsp = Join-Path $TestRoot 'pacman-only-identity-esp'
+    New-Item -ItemType Directory -Path $pacmanOnlyEsp -Force | Out-Null
+    Write-PacManOnlyIdentity $pacmanOnlyEsp
+    $pacmanOnlyIdentity = Assert-ReleaseBuildIdentity -IdentityPath (Join-Path $pacmanOnlyEsp 'build-identity.txt') -EspRoot $pacmanOnlyEsp -ExpectedSourceCommit ('a' * 40) -ExpectedBuildId '2e3a5996-7f24-458d-a5d8-0398b6934f8b' -ExpectedReleaseProfile 'ServerV03PacManOnly' -TargetServerVersion '0.3.0'
+    Assert-True ($pacmanOnlyIdentity['stage.developerStudio'] -eq 'not_selected' -and -not ($pacmanOnlyIdentity.Keys | Where-Object { $_ -like 'artifact.developerStudio.*' })) 'accepts a complete PacMan-only receipt without DeveloperStudio artifacts'
+    $pacmanOnlyIdentityPath = Join-Path $pacmanOnlyEsp 'build-identity.txt'
+    $wrongPacmanReceipt = [IO.File]::ReadAllText($pacmanOnlyIdentityPath).Replace('artifact.pacman.manifest.path=Apps/PacMan/app.json', 'artifact.pacman.manifest.path=kernel.elf')
+    [IO.File]::WriteAllText($pacmanOnlyIdentityPath, $wrongPacmanReceipt, (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $pacmanOnlyIdentityPath -EspRoot $pacmanOnlyEsp -ExpectedSourceCommit ('a' * 40) -ExpectedReleaseProfile 'ServerV03PacManOnly' } 'rejects a build receipt whose PacMan package path points at a stale or unrelated artifact'
+    Write-PacManOnlyIdentity $pacmanOnlyEsp
+    $missingStageReceipt = @([IO.File]::ReadAllLines($pacmanOnlyIdentityPath) | Where-Object { $_ -ne 'stage.developerStudio=not_selected' })
+    [IO.File]::WriteAllLines($pacmanOnlyIdentityPath, $missingStageReceipt, (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $pacmanOnlyIdentityPath -EspRoot $pacmanOnlyEsp -ExpectedSourceCommit ('a' * 40) -ExpectedReleaseProfile 'ServerV03PacManOnly' } 'rejects a PacMan-only receipt that does not explicitly record the DeveloperStudio stage as not selected'
+    Write-PacManOnlyIdentity $pacmanOnlyEsp
+    Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath (Join-Path $pacmanOnlyEsp 'build-identity.txt') -EspRoot $pacmanOnlyEsp -ExpectedSourceCommit ('a' * 40) -ExpectedReleaseProfile 'Development' } 'rejects a build receipt whose selected profile differs from the requested profile'
 } finally {
     if (Test-Path -LiteralPath $TestRoot -PathType Container) {
         Remove-Item -LiteralPath $TestRoot -Recurse -Force

@@ -10,6 +10,32 @@ function Get-DeveloperStudioSignedOffIdentity {
     }
 }
 
+function Get-ReleaseProfileContract {
+    param(
+        [ValidateSet('Development', 'ServerV03PacManOnly')]
+        [string]$Profile = 'Development'
+    )
+
+    switch ($Profile) {
+        'Development' {
+            return [PSCustomObject]@{
+                Name = 'Development'
+                PackageNames = @('PacMan', 'DeveloperStudio')
+                RequiresDeveloperStudio = $true
+                OutputDirectoryName = 'dist'
+            }
+        }
+        'ServerV03PacManOnly' {
+            return [PSCustomObject]@{
+                Name = 'ServerV03PacManOnly'
+                PackageNames = @('PacMan')
+                RequiresDeveloperStudio = $false
+                OutputDirectoryName = 'artifacts'
+            }
+        }
+    }
+}
+
 function Assert-ReleaseCommandCompleted {
     param(
         [Parameter(Mandatory = $true)][string]$Command,
@@ -166,6 +192,10 @@ function Assert-ReleaseNativeAppShipSet {
             throw "Required Native app package is missing from the ESP ship-set: $requiredName"
         }
     }
+    $unselectedNames = @($selectedNames | Where-Object { $RequiredPackageNames -notcontains $_ })
+    if ($unselectedNames.Count -gt 0) {
+        throw "Native app package is present but excluded from the selected ship-set: $($unselectedNames -join ', ')"
+    }
     foreach ($packageDirectory in $packageDirectories) {
         $contract = Get-ReleaseNativeAppContract -PackageName $packageDirectory.Name
         $manifestPath = Join-Path $packageDirectory.FullName 'app.json'
@@ -213,6 +243,8 @@ function Assert-ReleaseBuildIdentity {
         [Parameter(Mandatory = $true)][string]$EspRoot,
         [Parameter(Mandatory = $true)][string]$ExpectedSourceCommit,
         [string]$ExpectedBuildId,
+        [ValidateSet('Development', 'ServerV03PacManOnly')]
+        [string]$ExpectedReleaseProfile = 'Development',
         [ValidateSet('amd64')][string]$Architecture = 'amd64',
         [string]$TargetServerVersion = '0.3.0'
     )
@@ -224,6 +256,11 @@ function Assert-ReleaseBuildIdentity {
         }
     }
     if ($identity['schemaVersion'] -ne '2') { throw "Unsupported release build identity schema: $($identity['schemaVersion'])" }
+    $profile = if ($identity.ContainsKey('releaseProfile')) { $identity['releaseProfile'] } else { 'Development' }
+    if ($profile -ne $ExpectedReleaseProfile) {
+        throw "Build identity release profile '$profile' does not match selected profile '$ExpectedReleaseProfile'."
+    }
+    $profileContract = Get-ReleaseProfileContract -Profile $ExpectedReleaseProfile
     if ($identity['buildStatus'] -ne 'success') { throw "Build identity status is '$($identity['buildStatus'])', not success." }
     if ($identity['sourceCommit'] -ne $ExpectedSourceCommit) { throw "Build identity source commit $($identity['sourceCommit']) does not match $ExpectedSourceCommit." }
     if ($identity['architecture'] -ne $Architecture) { throw "Build identity architecture $($identity['architecture']) does not match $Architecture." }
@@ -231,7 +268,9 @@ function Assert-ReleaseBuildIdentity {
     try { [void][Guid]::Parse($identity['buildId']) } catch { throw "Invalid build identity ID: $($identity['buildId'])" }
     try { [void][DateTime]::Parse($identity['startedAtUtc']).ToUniversalTime() } catch { throw "Invalid build identity timestamp: $($identity['startedAtUtc'])" }
 
-    foreach ($stage in @('bootloader', 'kernel', 'symbolAudit', 'ramdisk', 'pacman', 'developerStudio', 'appPackages')) {
+    $requiredStages = @('bootloader', 'kernel', 'symbolAudit', 'ramdisk', 'pacman', 'appPackages')
+    if ($profileContract.RequiresDeveloperStudio) { $requiredStages += 'developerStudio' }
+    foreach ($stage in $requiredStages) {
         $key = "stage.$stage"
         if (-not $identity.ContainsKey($key) -or $identity[$key] -ne 'passed') {
             $result = if ($identity.ContainsKey($key)) { $identity[$key] } else { 'missing' }
@@ -239,10 +278,22 @@ function Assert-ReleaseBuildIdentity {
         }
     }
 
-    $requiredArtifacts = @(
-        'bootloader', 'kernel', 'ramdisk', 'kernelSymbolAudit',
-        'pacman.manifest', 'pacman.elf', 'developerStudio.manifest', 'developerStudio.elf'
-    )
+    $requiredArtifacts = @('bootloader', 'kernel', 'ramdisk', 'kernelSymbolAudit', 'pacman.manifest', 'pacman.elf')
+    $expectedArtifactPaths = @{
+        bootloader = 'EFI/BOOT/BOOTX64.EFI'
+        kernel = 'kernel.elf'
+        ramdisk = 'ramdisk.img'
+        kernelSymbolAudit = 'kernel-symbol-audit.txt'
+        'pacman.manifest' = 'Apps/PacMan/app.json'
+        'pacman.elf' = 'Apps/PacMan/bin/amd64/pacman.elf'
+    }
+    if ($profileContract.RequiresDeveloperStudio) {
+        $requiredArtifacts += @('developerStudio.manifest', 'developerStudio.elf')
+        $expectedArtifactPaths['developerStudio.manifest'] = 'Apps/DeveloperStudio/app.json'
+        $expectedArtifactPaths['developerStudio.elf'] = 'Apps/DeveloperStudio/bin/amd64/developerstudio.elf'
+    } elseif (@($identity.Keys | Where-Object { $_ -like 'artifact.developerStudio.*' }).Count -gt 0) {
+        throw 'PacMan-only build identity unexpectedly records DeveloperStudio artifacts.'
+    }
     $resolvedEspRoot = (Resolve-Path -LiteralPath $EspRoot).Path
     foreach ($artifact in $requiredArtifacts) {
         $prefix = "artifact.$artifact"
@@ -255,6 +306,9 @@ function Assert-ReleaseBuildIdentity {
         $relativePath = $identity["$prefix.path"].Replace('/', '\')
         if ([IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '(^|\\)\.\.(\\|$)') {
             throw "Build identity artifact path escapes ESP: $relativePath"
+        }
+        if (-not [string]::Equals($relativePath.Replace('\', '/'), $expectedArtifactPaths[$artifact], [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Build identity artifact '$artifact' has unexpected path '$relativePath'; expected '$($expectedArtifactPaths[$artifact])'."
         }
         $artifactPath = Join-Path $resolvedEspRoot $relativePath
         if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) { throw "Required staged artifact is missing: $relativePath" }
@@ -272,9 +326,17 @@ function Assert-ReleaseBuildIdentity {
             throw 'DeveloperStudio ELF is not the exact Phase 25 signed-off package binary.'
         }
     }
-    $developerStudioManifest = Join-Path $resolvedEspRoot ($identity['artifact.developerStudio.manifest.path'].Replace('/', '\'))
-    [void](Assert-DeveloperStudioMinimumServerVersion -ManifestPath $developerStudioManifest -TargetServerVersion $TargetServerVersion)
+    if ($profileContract.RequiresDeveloperStudio) {
+        $developerStudioManifest = Join-Path $resolvedEspRoot ($identity['artifact.developerStudio.manifest.path'].Replace('/', '\'))
+        [void](Assert-DeveloperStudioMinimumServerVersion -ManifestPath $developerStudioManifest -TargetServerVersion $TargetServerVersion)
+    } elseif (-not $identity.ContainsKey('stage.developerStudio') -or $identity['stage.developerStudio'] -ne 'not_selected') {
+        throw "DeveloperStudio stage must be 'not_selected' in the PacMan-only profile."
+    } else {
+        [void](Assert-ReleaseNativeAppShipSet -EspRoot $resolvedEspRoot `
+            -RequiredPackageNames $profileContract.PackageNames -Architecture $Architecture `
+            -TargetServerVersion $TargetServerVersion)
+    }
     return $identity
 }
 
-Export-ModuleMember -Function Get-DeveloperStudioSignedOffIdentity, Assert-DeveloperStudioMinimumServerVersion, Assert-ReleaseNativeAppManifest, Assert-ReleaseNativeAppShipSet, Assert-ReleaseCommandCompleted, Read-ReleaseBuildIdentity, Assert-ReleaseBuildIdentity
+Export-ModuleMember -Function Get-DeveloperStudioSignedOffIdentity, Get-ReleaseProfileContract, Assert-DeveloperStudioMinimumServerVersion, Assert-ReleaseNativeAppManifest, Assert-ReleaseNativeAppShipSet, Assert-ReleaseCommandCompleted, Read-ReleaseBuildIdentity, Assert-ReleaseBuildIdentity

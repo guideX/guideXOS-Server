@@ -17,7 +17,9 @@ param(
     [switch]$Debug,
     [switch]$WaitGdb,
     [string]$Memory = "1024M",
-    [string]$Arch = "amd64"
+    [string]$Arch = "amd64",
+    [ValidateSet('Development', 'ServerV03PacManOnly')]
+    [string]$ReleaseProfile = 'Development'
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,23 +33,42 @@ Write-Host ""
 
 $RootDir = $PSScriptRoot
 Import-Module -Name (Join-Path $RootDir 'scripts\release-build-integrity.psm1') -Force
+$ReleaseProfileContract = Get-ReleaseProfileContract -Profile $ReleaseProfile
+Write-Host "Release profile: $ReleaseProfile (Native ELF packages: $($ReleaseProfileContract.PackageNames -join ', '))" -ForegroundColor Cyan
 $DeveloperStudioSignedOffIdentity = Get-DeveloperStudioSignedOffIdentity
 $ProcessEnvironmentScript = Join-Path $RootDir "scripts\process_environment.ps1"
 . $ProcessEnvironmentScript
 Normalize-ProcessEnvironment
 . (Join-Path $RootDir "scripts\qemu-secure-rng-args.ps1")
 . (Join-Path $RootDir "scripts\build-native-command.ps1")
-$ESPDir = Join-Path $RootDir "ESP"
 $KernelDir = Join-Path $RootDir "kernel"
 $BootloaderDir = Join-Path $RootDir "guideXOSBootLoader"
 $DiskDir = Join-Path $RootDir "disks"
 $KernelBuildSkipped = $false
 $WallpaperRuntimeImageBuilt = $false
-$SkipWallpaperRuntimeImageBuild = $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD -eq "1"
+$SkipWallpaperRuntimeImageBuild = $ReleaseProfile -eq 'Development' -and $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD -eq "1"
 $BuildId = if ([string]::IsNullOrWhiteSpace($env:GXOS_RELEASE_BUILD_ID)) {
     [Guid]::NewGuid().ToString('D')
 } else {
     try { [Guid]::Parse($env:GXOS_RELEASE_BUILD_ID).ToString('D') } catch { throw "ERROR: GXOS_RELEASE_BUILD_ID is not a valid GUID." }
+}
+$ProfileStagingRoot = $null
+$RuntimeStagingRoot = Join-Path $RootDir ("out\build-staging\" + $BuildId)
+$PacmanPackageOutputDir = Join-Path $RootDir 'Apps\PacMan'
+if ($ReleaseProfile -eq 'ServerV03PacManOnly') {
+    $ProfileStagingRoot = Join-Path $RootDir ("out\release-profile\" + $BuildId)
+    if ((Test-Path -LiteralPath $ProfileStagingRoot) -or (Test-Path -LiteralPath $RuntimeStagingRoot)) {
+        throw "ERROR: Release staging path already exists for build ID $BuildId; refusing duplicate execution or stale artifact reuse. ESP root: $ProfileStagingRoot; runtime stage: $RuntimeStagingRoot"
+    }
+    New-Item -ItemType Directory -Path $ProfileStagingRoot -Force | Out-Null
+    $ESPDir = Join-Path $ProfileStagingRoot 'ESP'
+    $PacmanPackageOutputDir = Join-Path $ProfileStagingRoot 'packages\PacMan'
+} else {
+    $ESPDir = Join-Path $RootDir 'ESP'
+}
+if ($ProfileStagingRoot) {
+    Write-Host "Release build ID: $BuildId" -ForegroundColor Cyan
+    Write-Host "Release profile output: $ProfileStagingRoot" -ForegroundColor Cyan
 }
 $sourceCommitOutput = & git -C $RootDir rev-parse HEAD 2>$null
 $sourceCommitExitCode = $LASTEXITCODE
@@ -60,6 +81,7 @@ $BuildIdentityPath = Join-Path $ESPDir "build-identity.txt"
 $script:BuildIdentity = [ordered]@{
     schemaVersion = '2'
     buildId = $BuildId
+    releaseProfile = $ReleaseProfile
     buildStatus = 'in_progress'
     sourceCommit = $BuildSourceCommit
     architecture = $Arch
@@ -72,7 +94,7 @@ $script:BuildIdentity = [ordered]@{
     'stage.symbolAudit' = 'pending'
     'stage.ramdisk' = 'pending'
     'stage.pacman' = 'pending'
-    'stage.developerStudio' = 'pending'
+    'stage.developerStudio' = $(if ($ReleaseProfileContract.RequiresDeveloperStudio) { 'pending' } else { 'not_selected' })
     'stage.appPackages' = 'pending'
 }
 
@@ -132,11 +154,11 @@ function Build-WallpaperRuntimeImage {
     if (Test-Path $WallpaperPackScript) {
         Write-Host "      Building wallpaper filesystem image..." -ForegroundColor Cyan
         $smokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1"
-        $runtimeStageRoot = Join-Path $RootDir ("out\build-staging\" + $BuildId)
+        $runtimeStageRoot = $RuntimeStagingRoot
         $wallpaperOutputDir = Join-Path $runtimeStageRoot 'wallpaper-pack'
         $stagedRamdisk = Join-Path $runtimeStageRoot 'ramdisk.img'
         New-Item -ItemType Directory -Path $runtimeStageRoot -Force | Out-Null
-        $nativePackageDirs = @((Join-Path $ESPDir "Apps\PacMan"), (Join-Path $ESPDir "Apps\DeveloperStudio"))
+        $nativePackageDirs = @($ReleaseProfileContract.PackageNames | ForEach-Object { Join-Path $ESPDir ("Apps\" + $_) })
         if ($smokeCaFixture) {
             & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir $wallpaperOutputDir -OutputImage $stagedRamdisk -NativePackageDirs $nativePackageDirs -SmokeCaFixture
         } else {
@@ -145,7 +167,11 @@ function Build-WallpaperRuntimeImage {
         if (!(Test-Path -LiteralPath $stagedRamdisk -PathType Leaf) -or (Get-Item -LiteralPath $stagedRamdisk).Length -le 0) {
             Fail-Build 'wallpaper runtime packer reported completion but produced no ramdisk image.' 'ramdisk'
         }
-        foreach ($packageName in @('PacMan', 'DeveloperStudio')) {
+        $runtimePackageNames = @(Get-ChildItem -LiteralPath (Join-Path $wallpaperOutputDir 'Apps') -Directory -Force | ForEach-Object { $_.Name } | Sort-Object)
+        if (@(Compare-Object @($ReleaseProfileContract.PackageNames | Sort-Object) $runtimePackageNames).Count -gt 0) {
+            Fail-Build "runtime image Native ELF package directories do not match selected profile ${ReleaseProfile}: $($runtimePackageNames -join ', ')" 'ramdisk'
+        }
+        foreach ($packageName in $ReleaseProfileContract.PackageNames) {
             $stagedRoot = Join-Path $ESPDir "Apps\$packageName"
             $runtimeRoot = Join-Path (Join-Path $wallpaperOutputDir 'Apps') $packageName
             if (!(Test-Path -LiteralPath $runtimeRoot -PathType Container)) {
@@ -188,7 +214,7 @@ function Build-PacmanPackage {
     }
 
     $pacmanBuildArgs = @{
-        OutputPackage = (Join-Path $RootDir "Apps\PacMan")
+        OutputPackage = $PacmanPackageOutputDir
         Clean = $Clean
     }
     Write-Host "      Building PacMan AMD64 Native ELF package..." -ForegroundColor Cyan
@@ -220,10 +246,11 @@ function Assert-DeveloperStudioSignedOffSource {
     [void](Assert-DeveloperStudioMinimumServerVersion -ManifestPath $manifestPath -TargetServerVersion '0.3.0')
 }
 
-# Check the pinned package and its declared runtime requirement before any build
-# output is cleaned or replaced. The Phase 25 pair requires Server 0.5.0, so it
-# cannot qualify for this Server 0.3 build even when its hashes match.
-Assert-DeveloperStudioSignedOffSource
+# Keep the existing development package pin. The PacMan-only release profile
+# deliberately does not read or modify DeveloperStudio source or ESP artifacts.
+if ($ReleaseProfileContract.RequiresDeveloperStudio) {
+    Assert-DeveloperStudioSignedOffSource
+}
 
 # Step 1: Clean if requested
 if ($Clean) {
@@ -574,15 +601,21 @@ elseif (Test-Path $KernelBin) {
 # QEMU path exposes the ESP FAT volume at /, while the release ISO uses the
 # same package from ramdisk.img when no persistent root is available.
 function Stage-AppModelPackages {
-    $packageSpecs = @(
-        @{ Name = "PacMan"; Id = "com.guidexos.pacman"; Elf = "bin\amd64\pacman.elf" },
-        @{ Name = "DeveloperStudio"; Id = "com.guidexos.developerstudio"; Elf = "bin\amd64\developerstudio.elf"; ExpectedManifestBytes = $DeveloperStudioSignedOffIdentity.ManifestBytes; ExpectedManifestHash = $DeveloperStudioSignedOffIdentity.ManifestSha256; ExpectedElfBytes = $DeveloperStudioSignedOffIdentity.ElfBytes; ExpectedElfHash = $DeveloperStudioSignedOffIdentity.ElfSha256 }
-    )
+    $packageSpecs = @()
+    foreach ($packageName in $ReleaseProfileContract.PackageNames) {
+        if ($packageName -eq 'PacMan') {
+            $packageSpecs += @{ Name = 'PacMan'; Id = 'com.guidexos.pacman'; Elf = 'bin\amd64\pacman.elf'; SourceRoot = $PacmanPackageOutputDir }
+        } elseif ($packageName -eq 'DeveloperStudio') {
+            $packageSpecs += @{ Name = 'DeveloperStudio'; Id = 'com.guidexos.developerstudio'; Elf = 'bin\amd64\developerstudio.elf'; SourceRoot = (Join-Path $RootDir 'Apps\DeveloperStudio'); ExpectedManifestBytes = $DeveloperStudioSignedOffIdentity.ManifestBytes; ExpectedManifestHash = $DeveloperStudioSignedOffIdentity.ManifestSha256; ExpectedElfBytes = $DeveloperStudioSignedOffIdentity.ElfBytes; ExpectedElfHash = $DeveloperStudioSignedOffIdentity.ElfSha256 }
+        } else {
+            Fail-Build "Unsupported Native ELF package in profile ${ReleaseProfile}: $packageName" 'appPackages'
+        }
+    }
     $appsRoot = Join-Path $ESPDir "Apps"
     New-Item -ItemType Directory -Path $appsRoot -Force | Out-Null
     foreach ($spec in $packageSpecs) {
         $stageIdentityName = if ($spec.Name -eq 'DeveloperStudio') { 'developerStudio' } else { 'pacman' }
-        $packageRoot = Join-Path $RootDir ("Apps\" + $spec.Name)
+        $packageRoot = $spec.SourceRoot
         $manifestPath = Join-Path $packageRoot "app.json"
         $elfPath = Join-Path $packageRoot $spec.Elf
         foreach ($required in @(
@@ -680,7 +713,7 @@ Stage-AppModelPackages
 # release media, so extra package directories must fail the build.
 try {
     [void](Assert-ReleaseNativeAppShipSet -EspRoot $ESPDir `
-        -RequiredPackageNames @('PacMan', 'DeveloperStudio') `
+        -RequiredPackageNames $ReleaseProfileContract.PackageNames `
         -Architecture $Arch -TargetServerVersion '0.3.0')
 } catch {
     Fail-Build "Native app ship-set validation failed: $($_.Exception.Message)" 'appPackages'
@@ -689,7 +722,8 @@ try {
 # Build the boot-time runtime filesystem from the verified ESP package bytes.
 Build-WallpaperRuntimeImage
 
-$requiredBuildStages = @('bootloader', 'kernel', 'symbolAudit', 'ramdisk', 'pacman', 'developerStudio', 'appPackages')
+$requiredBuildStages = @('bootloader', 'kernel', 'symbolAudit', 'ramdisk', 'pacman', 'appPackages')
+if ($ReleaseProfileContract.RequiresDeveloperStudio) { $requiredBuildStages += 'developerStudio' }
 $allRequiredStagesPassed = @($requiredBuildStages | Where-Object { $script:BuildIdentity["stage.$_"] -ne 'passed' }).Count -eq 0
 if ($allRequiredStagesPassed) {
     Set-BuildIdentityValue 'buildStatus' 'success'
