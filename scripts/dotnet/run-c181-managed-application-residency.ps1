@@ -10,10 +10,6 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'The C181 runner requires PowerShell Core (pwsh); Windows PowerShell 5.1 does not support ProcessStartInfo.ArgumentList.'
 }
 
-if ($SingleBootNumber -ne 0 -and $Lane -ne 'production') {
-    throw 'SingleBootNumber is reserved for independent ordinary production boots.'
-}
-
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $artifactRoot = Join-Path $repo 'out/dotnet/c181-managed-application-residency'
 $root = if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
@@ -28,8 +24,13 @@ $baseEsp = if ($Lane -eq 'focused') {
     Join-Path $artifactRoot 'media/esp-production-c181-qac'
 }
 $proofKernelPath = if ($Lane -eq 'focused') {
-    Join-Path $artifactRoot 'media/proof-esp/kernel.elf'
+    Join-Path $artifactRoot 'kernel-proof-c181/bin/kernel.elf'
 } else { $null }
+$proofAppRamdiskPath = if ($Lane -eq 'focused') {
+    Join-Path $artifactRoot 'media/proof-app-c181-r1/ramdisk.img'
+} else { $null }
+$focusedProofKernelSha256 = 'B360905ED40EEDDA32E14851E5E980C7204D427F21ABE200C8D4FBBE61832C63'
+$focusedProofRamdiskSha256 = 'F61BF2A3012D298762A94DA64A48AAC2382632C39068D8C8860E3255D4E50E28'
 $esp = Join-Path $laneRoot 'esp'
 $serial = Join-Path $laneRoot 'serial.log'
 $qmpLog = Join-Path $laneRoot 'qmp.log'
@@ -54,6 +55,28 @@ function Get-MediaHashes([string]$EspPath) {
 if (-not (Test-Path -LiteralPath $baseEsp -PathType Container)) { throw "Missing staged ESP: $baseEsp" }
 if ($Lane -eq 'focused' -and -not (Test-Path -LiteralPath $proofKernelPath -PathType Leaf)) {
     throw "Focused lane requires the staged C181 proof kernel: $proofKernelPath."
+}
+if ($Lane -eq 'focused') {
+    $actualProofKernelHash = (Get-FileHash -LiteralPath $proofKernelPath -Algorithm SHA256).Hash
+    if ($actualProofKernelHash -ne $focusedProofKernelSha256) {
+        throw "Focused lane C181 proof kernel hash mismatch: expected $focusedProofKernelSha256; found $actualProofKernelHash ($proofKernelPath)."
+    }
+    if (-not (Test-Path -LiteralPath $proofAppRamdiskPath -PathType Leaf)) {
+        throw "Focused lane requires the proof-enabled managed app ramdisk: $proofAppRamdiskPath."
+    }
+    $actualProofRamdiskHash = (Get-FileHash -LiteralPath $proofAppRamdiskPath -Algorithm SHA256).Hash
+    if ($actualProofRamdiskHash -ne $focusedProofRamdiskSha256) {
+        throw "Focused lane proof app ramdisk hash mismatch: expected $focusedProofRamdiskSha256; found $actualProofRamdiskHash ($proofAppRamdiskPath)."
+    }
+    $proofAppRamdiskText = [System.Text.Encoding]::ASCII.GetString(
+        [System.IO.File]::ReadAllBytes($proofAppRamdiskPath))
+    foreach ($marker in @(
+        'C172-MANAGED-GEOMETRY','C173-MANAGED-GEOMETRY','C175-MANAGED-GEOMETRY',
+        'C178-CALC-GEOMETRY','C179-TM-GEOMETRY')) {
+        if (-not $proofAppRamdiskText.Contains($marker)) {
+            throw "Focused lane proof app ramdisk is missing required managed marker $marker."
+        }
+    }
 }
 if (-not (Test-Path -LiteralPath $qacCli -PathType Leaf)) { throw "QAC CLI is unavailable: $qacCli" }
 if (-not (Test-Path -LiteralPath $qemu -PathType Leaf)) { throw "QEMU is unavailable: $qemu" }
@@ -86,15 +109,18 @@ Set-Content -LiteralPath (Join-Path $laneRoot 'qac-before.list.txt') -Value $lis
 $sourceMediaHashes = Get-MediaHashes $baseEsp
 Copy-Item -LiteralPath $baseEsp -Destination $esp -Recurse
 if ($Lane -eq 'focused') {
-    # Use the C181 proof kernel for compositor diagnostics, while keeping the
-    # regular focused app payload out of the separate C166 proof-selector path.
+    # Pair the C181 proof-control kernel with managed apps built with the
+    # internal resize and lifecycle markers required by this focused lane.
     Copy-Item -LiteralPath $proofKernelPath -Destination (Join-Path $esp 'kernel.elf') -Force
+    Copy-Item -LiteralPath $proofAppRamdiskPath -Destination (Join-Path $esp 'ramdisk.img') -Force
 }
 $candidateMediaHashes = Get-MediaHashes $esp
 foreach ($relativePath in $candidateMediaHashes.Keys) {
-    $expectedHash = if ($Lane -eq 'focused' -and $relativePath -eq 'kernel.elf') {
-        (Get-FileHash -LiteralPath $proofKernelPath -Algorithm SHA256).Hash
-    } else { $sourceMediaHashes[$relativePath] }
+    $expectedHash = switch ($relativePath) {
+        'kernel.elf' { if ($Lane -eq 'focused') {$focusedProofKernelSha256} else {$sourceMediaHashes[$relativePath]} }
+        'ramdisk.img' { if ($Lane -eq 'focused') {$focusedProofRamdiskSha256} else {$sourceMediaHashes[$relativePath]} }
+        default { $sourceMediaHashes[$relativePath] }
+    }
     if ($expectedHash -ne $candidateMediaHashes[$relativePath]) {
         throw "Staged media hash mismatch for $relativePath."
     }
@@ -466,7 +492,7 @@ function Get-ResidentResizeSpec([string]$Name) {
         'settings' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.settingscenter';Selector='00000005';Width=560;Height=340;TargetWidth=720;TargetHeight=420;NativeLabel='C172-NATIVE-GEOMETRY';NativeOwner='app=ManagedSettings';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C172-MANAGED-GEOMETRY layout=recomputed popup=dismissed capture=none focus=retained result=PASS\r?$';TitlebarRgb='43,80,111'} }
         'explorer' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.fileexplorer';Selector='00000008';TaskbarX=351;Width=800;Height=390;TargetWidth=600;TargetHeight=360;NativeLabel='C173-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.fileexplorer';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C173-MANAGED-GEOMETRY size=600x360 path=1 selection=1 scroll=\d+ focus=1 popup=0 result=PASS\r?$';TitlebarRgb='43,80,111'} }
         'notes' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.notes';Selector='00000004';TaskbarX=617;Width=600;Height=360;TargetWidth=560;TargetHeight=344;NativeLabel='C175-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.notes';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C175-MANAGED-GEOMETRY size=560x344 client=560x320 editor=\d+x\d+ result=PASS\r?$';TitlebarRgb='85,136,170'} }
-        'calculator' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.calculator';Selector='00000006';TaskbarX=497;Width=292;Height=270;TargetWidth=512;TargetHeight=420;NativeLabel='C178-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.calculator';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C178-CALC-GEOMETRY outer=512x420 client=512x396 disp=56 phase=3 op=3 len=2 focus=18 result=PASS\r?$';TitlebarRgb='43,80,111'} }
+        'calculator' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.calculator';Selector='00000006';TaskbarX=497;Width=292;Height=270;TargetWidth=512;TargetHeight=420;NativeLabel='C178-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.calculator';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C178-CALC-GEOMETRY outer=512x420 client=512x396 disp=56 phase=3 op=0 len=2 focus=18 result=PASS\r?$';TitlebarRgb='43,80,111'} }
         'taskmanager' { return [pscustomobject]@{Name=$Name;Id='com.guidexos.apps.managed.taskmanager';Selector='00000007';TaskbarX=741;Width=800;Height=370;TargetWidth=800;TargetHeight=344;NativeLabel='C179-NATIVE-GEOMETRY';NativeOwner='appId=com.guidexos.apps.managed.taskmanager';ManagedPattern='^\[C102-MANAGED-OUTPUT\] C179-TM-GEOMETRY outer=800x344 client=800x320 list=45x10 rows=\d+ sel=\S+ scroll=\d+ focus=\d+ snap=1 id=1 result=PASS\r?$';TitlebarRgb='43,80,111'} }
         default { throw "Unknown resident app resize target: $Name" }
     }
@@ -516,6 +542,15 @@ function Get-PpmTitlebarWidth([string]$Path,[string]$Rgb) {
     return $longest + 2
 }
 
+function Resolve-ResidentWidth([int]$MeasuredWidth,[int[]]$CandidateWidths) {
+    foreach ($candidateWidth in $CandidateWidths) {
+        if ([Math]::Abs($MeasuredWidth-$candidateWidth) -le 2) {
+            return [int]$candidateWidth
+        }
+    }
+    throw "Resident titlebar measured $MeasuredWidth pixels; expected one of $($CandidateWidths -join ', ')."
+}
+
 function Focus-ResidentApp([string]$Name,[int]$BootNumber,[int]$ExpectedWidth=0) {
     $spec = Get-ResidentResizeSpec $Name
     if ($ExpectedWidth -le 0) { $ExpectedWidth = $spec.Width }
@@ -563,7 +598,8 @@ function Focus-ResidentApp([string]$Name,[int]$BootNumber,[int]$ExpectedWidth=0)
         $focusScreenshot = Capture ("focus-"+$Name+"-"+([guid]::NewGuid().ToString('N').Substring(0,8))) $bootPath
         $measuredWidth = Get-PpmTitlebarWidth $focusScreenshot $spec.TitlebarRgb
     }
-    if ([Math]::Abs($measuredWidth-$ExpectedWidth) -gt 2) { throw "$Name focus screenshot measured width $measuredWidth; expected $ExpectedWidth." }
+    try { [void](Resolve-ResidentWidth $measuredWidth @($ExpectedWidth)) }
+    catch { throw "$Name focus screenshot measured width $measuredWidth; expected $ExpectedWidth." }
     return [pscustomobject]@{
         identity=[ordered]@{
             instance=if ($focus.Success) {$focus.Groups['instance'].Value} else {$null}
@@ -672,6 +708,7 @@ function Reject-NotesGeometry([int]$BootNumber) {
 }
 
 function Exercise-BootThreeLifecycle([int]$BootNumber) {
+    $notesSpec = Get-ResidentResizeSpec 'notes'
     Launch-AllFive $BootNumber $serialOffset
     [void](Capture 'five-apps-resident' (Join-Path $laneRoot ('boot'+$BootNumber)))
     Resize-ResidentApp 'notes' $BootNumber
@@ -679,7 +716,7 @@ function Exercise-BootThreeLifecycle([int]$BootNumber) {
     # Interleave an edit/save with focus transitions and two close/reopen
     # cycles. Each close frees one resident slot; reopening must create a new
     # Notes generation and return the actual resident count to five.
-    [void](Open-AppMenuItem 'notes' $BootNumber)
+    [void](Focus-ResidentApp -Name 'notes' -BootNumber $BootNumber -ExpectedWidth $notesSpec.TargetWidth)
     $editStart = (Read-Serial).Length
     Click 380 338
     Send-Key 'z'
@@ -688,9 +725,9 @@ function Exercise-BootThreeLifecycle([int]$BootNumber) {
 
     $originX = [Math]::Max(0,[int](($script:screenWidth-600)/2))
     $originY = [Math]::Max(0,[int](($script:screenHeight-360)/2))
-    $currentWidth = 560
+    $currentWidth = $notesSpec.TargetWidth
     for ($cycle=1; $cycle -le 2; $cycle++) {
-        $before = Focus-ResidentApp 'notes' $BootNumber $currentWidth
+        $before = Focus-ResidentApp -Name 'notes' -BootNumber $BootNumber -ExpectedWidth $currentWidth
         $closeStart = (Read-Serial).Length
         Click ($originX+$currentWidth-14) ($originY+12)
         $destroyPattern = '(?m)^\[C150-SURFACE\] action=destroy appId=com\.guidexos\.apps\.managed\.notes generation=' + [regex]::Escape($before.identity.generation) + ' window=' + [regex]::Escape($before.identity.window) + ' reason=close-or-replace\r?$'
@@ -709,7 +746,9 @@ function Exercise-BootThreeLifecycle([int]$BootNumber) {
         if ($newGeneration -eq $before.identity.generation) {
             throw "Boot 3 Notes reopen cycle $cycle reused its closed generation."
         }
-        $after = Focus-ResidentApp 'notes' $BootNumber 600
+        # A fresh Notes launch creates its default 600-pixel-wide surface.
+        $after = Focus-ResidentApp -Name 'notes' -BootNumber $BootNumber -ExpectedWidth $notesSpec.Width
+        $reopenedWidth = Resolve-ResidentWidth $after.measuredTitlebarWidth @($notesSpec.Width)
         if ($Lane -eq 'focused' -and $after.identity.instance -eq $before.identity.instance) {
             throw "Boot 3 Notes reopen cycle $cycle reused its closed native instance."
         }
@@ -729,8 +768,9 @@ function Exercise-BootThreeLifecycle([int]$BootNumber) {
             concurrentCountAfterClose=$closedCount;concurrentCountAfterReopen=$restoredCount
             generationChanged=($after.identity.generation -ne $before.identity.generation)
             nativeInstanceChanged=if ($Lane -eq 'focused') {$after.identity.instance -ne $before.identity.instance} else {'not-visible-in-production'}
+            reopenedOuterWidth=$reopenedWidth
         })
-        $currentWidth = 600
+        $currentWidth = $reopenedWidth
     }
 
     # The resident Explorer remains active through the Notes lifecycle and
@@ -1056,9 +1096,13 @@ $manifest = [ordered]@{
     evidenceRoot=$root
     sourceMediaPath=$baseEsp
     proofKernelPath=$proofKernelPath
+    proofKernelSha256=if ($Lane -eq 'focused') {$focusedProofKernelSha256} else {$null}
+    proofAppRamdiskPath=$proofAppRamdiskPath
+    proofAppRamdiskSha256=if ($Lane -eq 'focused') {$focusedProofRamdiskSha256} else {$null}
     kernelBuildClass=if ($Lane -eq 'focused') {'proof-controlled'} else {'proof-disabled-production'}
+    qualificationScope=if ($SingleBootNumber -ne 0) {'single-cold-boot-diagnostic'} else {'three-boot-acceptance'}
     proofKernelMarkers=$presentProofMarkers
-    boots=$bootNumbers.Count
+    boots=@($bootNumbers).Count
     scenarioBootNumber=if ($SingleBootNumber -ne 0) {$SingleBootNumber} else {$null}
     qacMode='acceptance'
     qacProject='guideXOSServer'
