@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 
 namespace HostLogProof;
 
-public static unsafe class GuideXosManagedHostServicesC185Tests
+public static unsafe partial class GuideXosManagedHostServicesC185Tests
 {
     public const int FocusedCaseCount = 28;
     public const int StressOperationCount = 1000;
@@ -20,10 +20,16 @@ public static unsafe class GuideXosManagedHostServicesC185Tests
     private static int s_textDraws;
     private static int s_rectDraws;
     private static int s_closeRequests;
+    private static int s_successfulCloseRequests;
     private static int s_lastWidth;
     private static int s_lastHeight;
     private static bool s_failNextWindow;
     private static bool s_failNextRect;
+    private static bool s_failNextClose;
+    private static bool s_enforceFakeWindowGeneration;
+    private static ulong s_nextFakeWindowHandle;
+    private static readonly ulong[] s_fakeWindowHandles = new ulong[8];
+    private static readonly uint[] s_fakeWindowGenerations = new uint[8];
     private static int s_lifetimeFactoryCalls;
 
     public static int FirstFailedCase { get; private set; }
@@ -162,7 +168,6 @@ public static unsafe class GuideXosManagedHostServicesC185Tests
     private static int RequestWindow(NativeGxAppContext* context,
         byte* title, int width, int height, ulong* window)
     {
-        _ = context;
         s_windowRequests++;
         s_lastWidth = width;
         s_lastHeight = height;
@@ -171,10 +176,17 @@ public static unsafe class GuideXosManagedHostServicesC185Tests
             s_failNextWindow = false;
             return -1;
         }
-        if (title == null || title[0] == 0 || window == null ||
+        if (context == null || title == null || title[0] == 0 || window == null ||
             width <= 0 || height <= 0)
             return -1;
-        *window = 0xC185u;
+        int freeIndex = FindFreeFakeWindow();
+        if (freeIndex < 0) return -1;
+        ulong handle = ++s_nextFakeWindowHandle;
+        if (handle == 0u) handle = ++s_nextFakeWindowHandle;
+        s_fakeWindowHandles[freeIndex] = handle;
+        s_fakeWindowGenerations[freeIndex] =
+            (uint)((ulong)(nuint)context->userData >> 32);
+        *window = handle;
         return 0;
     }
 
@@ -183,7 +195,7 @@ public static unsafe class GuideXosManagedHostServicesC185Tests
         int x, int y, byte* text)
     {
         _ = context;
-        if (window == 0u || x < 0 || y < 0 || text == null) return -1;
+        if (!FakeWindowBelongsToContext(context, window) || x < 0 || y < 0 || text == null) return -1;
         s_textDraws++;
         return 0;
     }
@@ -194,7 +206,7 @@ public static unsafe class GuideXosManagedHostServicesC185Tests
     {
         _ = context;
         _ = color;
-        if (window == 0u || x < 0 || y < 0 || width <= 0 || height <= 0)
+        if (!FakeWindowBelongsToContext(context, window) || x < 0 || y < 0 || width <= 0 || height <= 0)
             return -1;
         s_rectDraws++;
         if (!s_failNextRect) return 0;
@@ -206,9 +218,46 @@ public static unsafe class GuideXosManagedHostServicesC185Tests
     private static int CloseWindow(NativeGxAppContext* context, ulong window)
     {
         _ = context;
-        if (window == 0u) return -1;
         s_closeRequests++;
+        if (s_failNextClose)
+        {
+            s_failNextClose = false;
+            return -1;
+        }
+        int index = FindFakeWindow(window);
+        if (context == null || index < 0) return -1;
+        if (s_enforceFakeWindowGeneration &&
+            !FakeWindowBelongsToContext(context, window)) return -1;
+        s_fakeWindowHandles[index] = 0u;
+        s_fakeWindowGenerations[index] = 0u;
+        s_successfulCloseRequests++;
         return 0;
+    }
+
+    private static int FindFreeFakeWindow()
+    {
+        for (int index = 0; index < s_fakeWindowHandles.Length; index++)
+            if (s_fakeWindowHandles[index] == 0u) return index;
+        return -1;
+    }
+
+    private static int FindFakeWindow(ulong handle)
+    {
+        for (int index = 0; index < s_fakeWindowHandles.Length; index++)
+            if (handle != 0u && s_fakeWindowHandles[index] == handle)
+                return index;
+        return -1;
+    }
+
+    private static bool FakeWindowBelongsToContext(
+        NativeGxAppContext* context, ulong window)
+    {
+        if (context == null) return false;
+        int index = FindFakeWindow(window);
+        if (index < 0) return false;
+        if (!s_enforceFakeWindowGeneration) return true;
+        uint generation = (uint)((ulong)(nuint)context->userData >> 32);
+        return s_fakeWindowGenerations[index] == generation;
     }
 
     private static bool RunInvalidHostServiceRequests()
@@ -498,10 +547,16 @@ public static unsafe class GuideXosManagedHostServicesC185Tests
         s_textDraws = 0;
         s_rectDraws = 0;
         s_closeRequests = 0;
+        s_successfulCloseRequests = 0;
         s_lastWidth = 0;
         s_lastHeight = 0;
         s_failNextWindow = false;
         s_failNextRect = false;
+        s_failNextClose = false;
+        s_enforceFakeWindowGeneration = false;
+        s_nextFakeWindowHandle = 0xC1850000u;
+        Array.Clear(s_fakeWindowHandles);
+        Array.Clear(s_fakeWindowGenerations);
     }
 
     private static bool Case(ref int count, bool condition)

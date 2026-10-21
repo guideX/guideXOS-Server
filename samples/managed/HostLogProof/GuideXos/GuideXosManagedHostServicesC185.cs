@@ -7,13 +7,22 @@ using GuideXos.ManagedUi;
 
 namespace HostLogProof;
 
+internal enum GuideXosC185LifecycleState : byte
+{
+    Created,
+    Initializing,
+    Active,
+    Closing,
+    Closed,
+    Failed,
+}
+
 internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
 {
     private IManagedUiApplication _application;
     private GuideXosC185HostServicesAdapter _services;
     private ManagedUiApplicationIdentity _identity;
-    private bool _initialized;
-    private bool _teardownComplete;
+    private GuideXosC185LifecycleState _state;
 
     internal GuideXosC185ApplicationBridge(IManagedUiApplication application)
     {
@@ -22,12 +31,22 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
 
     internal IManagedUiApplication ApplicationForTests => _application;
     internal GuideXosC185HostServicesAdapter ServicesForTests => _services;
+    internal GuideXosC185LifecycleState StateForTests => _state;
 
     internal GuideXosResult RenderForWindow()
     {
-        if (!_initialized || _application == null || _teardownComplete)
+        if (_state != GuideXosC185LifecycleState.Active ||
+            _application == null || _services?.Window?.IsOpen != true)
             return GuideXosResult.InvalidArgument;
-        return GuideXosC185ResultMap.ToHost(_application.Render());
+        try
+        {
+            return GuideXosC185ResultMap.ToHost(_application.Render());
+        }
+        catch
+        {
+            return GuideXosC185ResultMap.ToHost(
+                ManagedUiResult.ApplicationFailure);
+        }
     }
 
     internal void SetIdentity(uint applicationId, uint generation)
@@ -38,20 +57,35 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
     [MethodImpl(MethodImplOptions.NoInlining)]
     public override GuideXosResult Launch(GuideXosHost host)
     {
-        if (host == null || _application == null || _teardownComplete ||
-            _identity.Generation == 0u || _initialized)
+        if (host == null || _application == null ||
+            _identity.Generation == 0u ||
+            _state != GuideXosC185LifecycleState.Created)
             return GuideXosResult.InvalidArgument;
 
+        _state = GuideXosC185LifecycleState.Initializing;
         _services = new GuideXosC185HostServicesAdapter(host, this, _identity);
-        ManagedUiResult result = _application.Initialize(_services,
-            in _identity);
+        ManagedUiResult result;
+        try
+        {
+            result = _application.Initialize(_services, in _identity);
+        }
+        catch
+        {
+            result = ManagedUiResult.ApplicationFailure;
+        }
         if (result != ManagedUiResult.Success)
         {
             ReleaseAfterInitializationFailure();
             return GuideXosC185ResultMap.ToHost(result);
         }
 
-        _initialized = true;
+        if (_state != GuideXosC185LifecycleState.Initializing)
+        {
+            ReleaseAfterInitializationFailure();
+            return GuideXosResult.InvalidArgument;
+        }
+
+        _state = GuideXosC185LifecycleState.Active;
         return GuideXosResult.Success;
     }
 
@@ -60,9 +94,18 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
         uint actionId)
     {
         _ = host;
-        if (!_initialized || _application == null || _teardownComplete)
+        if (!CanReceiveCallbacks)
             return GuideXosResult.InvalidArgument;
-        return GuideXosC185ResultMap.ToHost(_application.HandleAction(actionId));
+        try
+        {
+            return GuideXosC185ResultMap.ToHost(
+                _application.HandleAction(actionId));
+        }
+        catch
+        {
+            return GuideXosC185ResultMap.ToHost(
+                ManagedUiResult.ApplicationFailure);
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -70,11 +113,19 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
         GuideXosInputEvent input)
     {
         _ = host;
-        if (!_initialized || _application == null || _teardownComplete)
+        if (!CanReceiveCallbacks)
             return GuideXosResult.InvalidArgument;
         ManagedUiInputEvent externalInput = GuideXosC185InputMap.From(input);
-        return GuideXosC185ResultMap.ToHost(
-            _application.HandleInput(in externalInput));
+        try
+        {
+            return GuideXosC185ResultMap.ToHost(
+                _application.HandleInput(in externalInput));
+        }
+        catch
+        {
+            return GuideXosC185ResultMap.ToHost(
+                ManagedUiResult.ApplicationFailure);
+        }
     }
 
     internal override bool TryGetManagedResizeGeometryC180(
@@ -84,10 +135,20 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
         bounds = default;
         outerWidth = 0;
         outerHeight = 0;
-        if (!_initialized || _application == null || _services?.Window == null ||
-            !_application.TryGetResizeBounds(out ManagedUiResizeBounds externalBounds) ||
-            !externalBounds.IsValid)
+        if (!CanReceiveCallbacks || _services?.Window == null)
             return false;
+
+        ManagedUiResizeBounds externalBounds;
+        try
+        {
+            if (!_application.TryGetResizeBounds(out externalBounds) ||
+                !externalBounds.IsValid)
+                return false;
+        }
+        catch
+        {
+            return false;
+        }
 
         bounds = new GuideXosManagedWindowResizeBoundsC174(
             externalBounds.MinimumOuterWidth, externalBounds.MinimumOuterHeight,
@@ -104,8 +165,7 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
     {
         _ = host;
         GuideXosC185WindowAdapter window = _services?.Window;
-        if (!_initialized || _application == null || window == null ||
-            !transaction.IsValid)
+        if (!CanReceiveCallbacks || window == null || !transaction.IsValid)
             return GuideXosResult.InvalidArgument;
 
         GuideXosManagedWindowResizeCandidateC174 candidate = transaction.Candidate;
@@ -114,7 +174,20 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
             candidate.OuterWidth, candidate.OuterHeight,
             candidate.ClientWidth, candidate.ClientHeight);
         window.SetGeometry(candidate.OuterWidth, candidate.OuterHeight);
-        ManagedUiResizeOutcome outcome = _application.HandleResize(in proposal);
+        ManagedUiResizeOutcome outcome;
+        try
+        {
+            outcome = _application.HandleResize(in proposal);
+        }
+        catch
+        {
+            window.SetGeometry(transaction.PriorOuterWidth,
+                transaction.PriorOuterHeight);
+            CompleteResizeSafely(false);
+            return GuideXosC185ResultMap.ToHost(
+                ManagedUiResult.ApplicationFailure);
+        }
+
         bool accepted = transaction.Complete(outcome.LayoutAccepted,
             GuideXosC185ResultMap.ToHost(outcome.RenderResult),
             outcome.StateAccepted);
@@ -122,20 +195,32 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
         if (!accepted)
             window.SetGeometry(transaction.PriorOuterWidth,
                 transaction.PriorOuterHeight);
-        _application.CompleteResize(accepted);
+        try
+        {
+            _application.CompleteResize(accepted);
+        }
+        catch
+        {
+            window.SetGeometry(transaction.PriorOuterWidth,
+                transaction.PriorOuterHeight);
+            CompleteResizeSafely(false);
+            return GuideXosC185ResultMap.ToHost(
+                ManagedUiResult.ApplicationFailure);
+        }
         return transaction.Result;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     public override void OnTearingDown()
     {
-        if (_teardownComplete) return;
-        _teardownComplete = true;
-        _initialized = false;
-        _application?.OnTearingDown();
-        _services?.Release();
-        _services = null;
-        _application = null;
+        Release(GuideXosC185LifecycleState.Closed);
+    }
+
+    internal void NotifyWindowClosed()
+    {
+        if (_state == GuideXosC185LifecycleState.Active ||
+            _state == GuideXosC185LifecycleState.Initializing)
+            _state = GuideXosC185LifecycleState.Closing;
     }
 
     internal void SetResizeGeometryForTests(int width, int height)
@@ -143,14 +228,59 @@ internal sealed class GuideXosC185ApplicationBridge : GuideXosApplication
         _services?.Window?.SetGeometry(width, height);
     }
 
-    private void ReleaseAfterInitializationFailure()
+    private bool CanReceiveCallbacks =>
+        _state == GuideXosC185LifecycleState.Active &&
+        _application != null && _services?.Window?.IsOpen == true;
+
+    private void CompleteResizeSafely(bool accepted)
     {
-        if (_teardownComplete) return;
-        _teardownComplete = true;
-        _application?.OnTearingDown();
-        _services?.Release();
-        _services = null;
-        _application = null;
+        try
+        {
+            _application?.CompleteResize(accepted);
+        }
+        catch
+        {
+            // The host has already rolled the candidate geometry back.
+        }
+    }
+
+    private void ReleaseAfterInitializationFailure() =>
+        Release(GuideXosC185LifecycleState.Failed);
+
+    private void Release(GuideXosC185LifecycleState terminalState)
+    {
+        if (_state == GuideXosC185LifecycleState.Closed ||
+            _state == GuideXosC185LifecycleState.Failed)
+            return;
+
+        _state = GuideXosC185LifecycleState.Closing;
+        IManagedUiApplication application = _application;
+        GuideXosC185HostServicesAdapter services = _services;
+        try
+        {
+            application?.OnTearingDown();
+        }
+        catch
+        {
+            // Resource release still runs if application teardown fails.
+        }
+        finally
+        {
+            try
+            {
+                services?.Release();
+            }
+            catch
+            {
+                // The adapter invalidates its wrappers even if host close fails.
+            }
+            finally
+            {
+                _services = null;
+                _application = null;
+                _state = terminalState;
+            }
+        }
     }
 }
 
@@ -178,6 +308,8 @@ internal sealed class GuideXosC185HostServicesAdapter : IManagedUiHostServices
         window = null;
         if (_released || _host == null) return ManagedUiResult.InvalidState;
         if (Window != null) return ManagedUiResult.ResourceLimit;
+        if (!_host.HasCapability(GuideXosCapability.Close))
+            return ManagedUiResult.Unsupported;
         if (title.Length == 0 || title.Length > 127 || outerWidth <= 0 ||
             outerHeight <= GuideXosManagedWindowResizeBoundsC174.NativeTitlebarHeight)
             return ManagedUiResult.InvalidArgument;
@@ -199,8 +331,14 @@ internal sealed class GuideXosC185HostServicesAdapter : IManagedUiHostServices
     {
         if (_released) return;
         _released = true;
-        Window?.ReleaseFromHost();
-        Window = null;
+        try
+        {
+            Window?.ReleaseFromHost();
+        }
+        finally
+        {
+            Window = null;
+        }
     }
 }
 
@@ -344,11 +482,14 @@ internal sealed class GuideXosC185WindowAdapter : IManagedUiWindow
     {
         if (_closed) return ManagedUiResult.Success;
         if (_nativeSurface == null) return ManagedUiResult.InvalidState;
-        GuideXosResult result = _nativeSurface.TryClose();
+        GuideXosSurface nativeSurface = _nativeSurface;
+        GuideXosResult result = nativeSurface.TryClose();
         if (result == GuideXosResult.Success)
         {
             _closed = true;
             _controls.Reset();
+            _nativeSurface = null;
+            _owner.NotifyWindowClosed();
         }
         return GuideXosC185ResultMap.ToManaged(result);
     }
@@ -365,11 +506,21 @@ internal sealed class GuideXosC185WindowAdapter : IManagedUiWindow
 
     internal void ReleaseFromHost()
     {
-        if (_closed) return;
-        _controls.Reset();
-        if (_nativeSurface != null) _ = _nativeSurface.TryClose();
-        _closed = true;
-        _nativeSurface = null;
+        if (_closed)
+        {
+            _nativeSurface = null;
+            return;
+        }
+        try
+        {
+            _controls.Reset();
+            if (_nativeSurface != null) _ = _nativeSurface.TryClose();
+        }
+        finally
+        {
+            _closed = true;
+            _nativeSurface = null;
+        }
     }
 }
 
@@ -508,7 +659,8 @@ internal static class GuideXosC185ResultMap
         ManagedUiResult.Success => GuideXosResult.Success,
         ManagedUiResult.WindowCreationFailed => GuideXosResult.SurfaceCreationFailed,
         ManagedUiResult.Unsupported => GuideXosResult.InvalidAction,
-        ManagedUiResult.InvalidState => GuideXosResult.SurfaceCreationFailed,
+        ManagedUiResult.InvalidState => GuideXosResult.InvalidArgument,
+        ManagedUiResult.ApplicationFailure => GuideXosResult.InvalidArgument,
         _ => GuideXosResult.InvalidArgument,
     };
 

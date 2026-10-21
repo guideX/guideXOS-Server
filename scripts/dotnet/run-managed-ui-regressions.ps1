@@ -8,6 +8,13 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+$inventoryPath = Join-Path $PSScriptRoot 'managed-ui-regression-inventory.json'
+if (-not (Test-Path -LiteralPath $inventoryPath -PathType Leaf)) {
+    throw "Required managed UI regression inventory is missing: $inventoryPath"
+}
+Import-Module (Join-Path $PSScriptRoot 'ManagedUiRegressionInventory.psm1') -Force
+$inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$inventorySha256 = (Get-FileHash -LiteralPath $inventoryPath -Algorithm SHA256).Hash.ToUpperInvariant()
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $EvidenceRoot = Join-Path $RepoRoot 'out\dotnet\c180-managed-resize-contract\host'
 }
@@ -176,31 +183,29 @@ $c167Match = [regex]::Match($settingsGate.output,
 $c168Match = [regex]::Match($settingsGate.output,
     'C168 host UI/layout cases=(\d+) pageCycles=(\d+) selectionChanges=(\d+) applyResetCycles=(\d+) popupCycles=(\d+) result=(PASS|FAIL)')
 
-$baselineSuiteNames = @(
-    'C133-ComboBox', 'C134-TransientRouting', 'C135-PopupMenuApi',
-    'C135-PopupMenuHost', 'C137-Wheel', 'C139-SharedViewport',
-    'C140-ScrollView', 'C141-VerticalStack', 'C142-MarginsAlignment',
-    'C145-Dialogs', 'C146-Settings', 'C146-StoreFormat',
-    'C170-ControlRendering', 'C170-Stress',
-    'C169-ListBoxRendering', 'C169-Stress',
-    'C171-WindowLayout', 'C171-Stress', 'C172-WindowResize', 'C172-Stress',
-    'C173-ExplorerResize', 'C173-ExplorerStress',
-    'C174-SharedResize', 'C174-Stress',
-    'C175-NotesResize', 'C175-NotesResizeStress',
-    'C176-NotesNavigation', 'C176-NotesNavigationStress',
-    'C177-NotesNewline', 'C177-NotesNewlineStress',
-    'C178-CalculatorResize', 'C178-CalculatorResizeStress',
-    'C179-TaskManagerResize', 'C179-TaskManagerResizeStress',
-    'C180-ResizeContract', 'C180-ResizeContractStress')
-$suiteNames = @($suites | ForEach-Object { $_.name })
-$hostSummaryValid = $summaryMatch.Success -and $summaryMatch.Groups[5].Value -eq 'PASS' -and
-    [int]$summaryMatch.Groups[1].Value -eq 36 -and $suites.Count -eq 36 -and
-    [int]$summaryMatch.Groups[2].Value -eq 36 -and
-    [int]$summaryMatch.Groups[3].Value -eq 0 -and
-    [int]$summaryMatch.Groups[4].Value -eq 899 -and
-    @($baselineSuiteNames | Where-Object { $suiteNames -notcontains $_ }).Count -eq 0 -and
-    @($suiteNames | Where-Object { $_ -notin $baselineSuiteNames }).Count -eq 0 -and
-    @($suites | Where-Object result -ne 'PASS').Count -eq 0
+$focusedSummary = if ($summaryMatch.Success) {
+    [ordered]@{
+        suites = [int]$summaryMatch.Groups[1].Value
+        passed = [int]$summaryMatch.Groups[2].Value
+        failed = [int]$summaryMatch.Groups[3].Value
+        cases = [int]$summaryMatch.Groups[4].Value
+        result = $summaryMatch.Groups[5].Value
+    }
+} else { $null }
+$inventoryProbe = [ordered]@{
+    schemaVersion = 1
+    status = if ($summaryMatch.Success -and $summaryMatch.Groups[5].Value -eq 'PASS') { 'PASS' } else { 'FAIL' }
+    suiteInventoryId = [string]$inventory.inventoryId
+    suiteInventorySha256 = $inventorySha256
+    focusedSuites = $suites
+    focusedSummary = $focusedSummary
+}
+$inventoryValidation = Test-ManagedUiRegressionManifest -Manifest $inventoryProbe `
+    -Inventory $inventory -InventorySha256 $inventorySha256
+$hostSummaryValid = $inventoryValidation.Valid
+if (-not $hostSummaryValid) {
+    Write-Host "Managed UI inventory validation failed: $($inventoryValidation.Errors -join '; ')"
+}
 $renderingSuite = @($suites | Where-Object name -eq 'C170-ControlRendering')
 $renderingSuitePass = $renderingSuite.Count -eq 1 -and
     $renderingSuite[0].cases -eq 21 -and $renderingSuite[0].result -eq 'PASS'
@@ -475,11 +480,15 @@ $manifestStatus = if ($gatePassed -and $integrityErrors.Count -eq 0) { 'PASS' } 
 
 $manifest = [ordered]@{
     schemaVersion = 1
-    phase = 'C180-managed-resize-contract-host-regression'
+    phase = 'managed-ui-regression-aggregate'
     sourceHead = $sourceHead
     runId = $runId
     status = $manifestStatus
     noQemuRequired = $true
+    suiteInventoryId = [string]$inventory.inventoryId
+    suiteInventorySha256 = $inventorySha256
+    suiteInventoryExpectedSuiteCount = [int]$inventory.expectedSuiteCount
+    suiteInventoryExpectedCaseCount = [int]$inventory.expectedCaseCount
     artifactIntegrity = [ordered]@{
         result = if ($integrityErrors.Count -eq 0) { 'PASS' } else { 'FAIL' }
         algorithm = 'SHA-256'
@@ -493,15 +502,7 @@ $manifest = [ordered]@{
         log = $c135Build.step.log
     }
     focusedSuites = $suites
-    focusedSummary = if ($summaryMatch.Success) {
-        [ordered]@{
-            suites = [int]$summaryMatch.Groups[1].Value
-            passed = [int]$summaryMatch.Groups[2].Value
-            failed = [int]$summaryMatch.Groups[3].Value
-            cases = [int]$summaryMatch.Groups[4].Value
-            result = $summaryMatch.Groups[5].Value
-        }
-    } else { $null }
+    focusedSummary = $focusedSummary
     renderingAndStress = if ($stressMatch.Success) {
         [ordered]@{
             listBoxFocusTransitions = 500
@@ -683,15 +684,18 @@ $manifestPath = Join-Path $EvidenceRoot 'managed-ui-host-manifest.json'
 $manifestJson = $manifest | ConvertTo-Json -Depth 12
 Set-Content -LiteralPath $manifestPath -Value $manifestJson -Encoding utf8
 $parsedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$manifestInventoryValidation = Test-ManagedUiRegressionManifest `
+    -Manifest $parsedManifest -Inventory $inventory -InventorySha256 $inventorySha256
 $manifestValid = $parsedManifest.schemaVersion -eq 1 -and
-    $parsedManifest.phase -eq 'C180-managed-resize-contract-host-regression' -and
+    $parsedManifest.phase -eq 'managed-ui-regression-aggregate' -and
     $parsedManifest.sourceHead -eq $sourceHead -and
     $parsedManifest.status -eq $manifestStatus -and
     $parsedManifest.artifactIntegrity.referencedFiles.Count -eq $artifactRecords.Count -and
-    $parsedManifest.artifactIntegrity.result -eq 'PASS'
+    $parsedManifest.artifactIntegrity.result -eq 'PASS' -and
+    $manifestInventoryValidation.Valid
 if (-not $manifestValid) {
-    Write-Error "Generated C180 host manifest failed schema or reference validation: $manifestPath"
+    Write-Error "Generated managed UI aggregate manifest failed schema, inventory, or reference validation: $manifestPath"
 }
-Write-Host "Managed UI Regression Gate result=$($manifest.status) suites=$($suites.Count) cases=$($summaryMatch.Groups[4].Value) manifest=$manifestPath"
+Write-Host "Managed UI Regression Gate result=$($manifest.status) suites=$($suites.Count) cases=$($focusedSummary.cases) inventory=$($inventory.inventoryId) manifest=$manifestPath"
 if (-not $gatePassed -or -not $manifestValid) { exit 1 }
 exit 0
