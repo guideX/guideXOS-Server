@@ -32,6 +32,7 @@ $Expected = @{
     Manifest = '08b43a2e0ddb05550d8ee02733b0ebbcc109556a29f685d6cfe54280b6a8df7c'
     Bootloader = '07e5350656e93e28f30cda66bbb924aef7d3d7053498547b27cc469b88d21783'
     Ovmf = '2df617a6fd1bae41ec7c0e3bceca96c928a5a88d8dc198468d34733393ab2792'
+    Disk = '29d060d068edc81daf720ca314e7b9dd9a3bbd376a053d1c0cb903de0c00a8a5'
 }
 
 $TypeDefinition = @'
@@ -44,7 +45,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 public sealed class SN10R3SerialCapture : IDisposable
 {
@@ -54,7 +54,7 @@ public sealed class SN10R3SerialCapture : IDisposable
     private readonly StringBuilder _text = new StringBuilder();
     private readonly ManualResetEventSlim _changed = new ManualResetEventSlim(false);
     private readonly CancellationTokenSource _stop = new CancellationTokenSource();
-    private Task _worker;
+    private Thread _worker;
     private TcpClient _client;
     private Exception _error;
     private bool _connected;
@@ -72,32 +72,53 @@ public sealed class SN10R3SerialCapture : IDisposable
     {
         _logPath = Path.GetFullPath(logPath);
         Directory.CreateDirectory(Path.GetDirectoryName(_logPath));
-        File.WriteAllBytes(_logPath, Array.Empty<byte>());
+        File.WriteAllBytes(_logPath, new byte[0]);
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Server.ExclusiveAddressUse = true;
         _listener.Start(1);
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
-        _worker = Task.Run((Func<Task>)PumpAsync);
+        _worker = new Thread(Pump);
+        _worker.IsBackground = true;
+        _worker.Name = "SN10 serial capture";
+        _worker.Start();
     }
 
-    private async Task PumpAsync()
+    private void RecordError(Exception error)
+    {
+        lock (_gate)
+        {
+            if (_error == null) _error = error;
+        }
+        _changed.Set();
+    }
+
+    private void Pump()
     {
         try
         {
-            _client = await _listener.AcceptTcpClientAsync(_stop.Token).ConfigureAwait(false);
-            _client.NoDelay = true;
-            lock (_gate) _connected = true;
+            TcpClient accepted = _listener.AcceptTcpClient();
+            lock (_gate)
+            {
+                if (_stop.IsCancellationRequested)
+                {
+                    accepted.Close();
+                    return;
+                }
+                _client = accepted;
+                _client.NoDelay = true;
+                _connected = true;
+            }
             _changed.Set();
-            using (var output = new FileStream(_logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 8192, true))
+            using (var output = new FileStream(_logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 8192))
             using (var stream = _client.GetStream())
             {
                 var buffer = new byte[8192];
                 while (!_stop.IsCancellationRequested)
                 {
-                    int count = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), _stop.Token).ConfigureAwait(false);
+                    int count = stream.Read(buffer, 0, buffer.Length);
                     if (count == 0) break;
-                    await output.WriteAsync(buffer.AsMemory(0, count), _stop.Token).ConfigureAwait(false);
-                    await output.FlushAsync(_stop.Token).ConfigureAwait(false);
+                    output.Write(buffer, 0, count);
+                    output.Flush();
                     string chunk = Encoding.ASCII.GetString(buffer, 0, count);
                     lock (_gate)
                     {
@@ -109,16 +130,25 @@ public sealed class SN10R3SerialCapture : IDisposable
             }
         }
         catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) when (_stop.IsCancellationRequested) { }
-        catch (SocketException) when (_stop.IsCancellationRequested) { }
+        catch (ObjectDisposedException ex)
+        {
+            if (!_stop.IsCancellationRequested) RecordError(ex);
+        }
+        catch (SocketException ex)
+        {
+            if (!_stop.IsCancellationRequested) RecordError(ex);
+        }
+        catch (IOException ex)
+        {
+            if (!_stop.IsCancellationRequested) RecordError(ex);
+        }
         catch (Exception ex)
         {
-            lock (_gate) _error = ex;
-            _changed.Set();
+            RecordError(ex);
         }
         finally
         {
-            try { _client?.Dispose(); } catch { }
+            try { if (_client != null) _client.Dispose(); } catch { }
             lock (_gate) _completed = true;
             _changed.Set();
         }
@@ -138,20 +168,25 @@ public sealed class SN10R3SerialCapture : IDisposable
 
     public bool WaitForCompletion(int milliseconds)
     {
-        return _worker.Wait(milliseconds);
+        return _worker.Join(milliseconds);
     }
 
     public void Stop()
     {
         _stop.Cancel();
         try { _listener.Stop(); } catch { }
-        try { _client?.Close(); } catch { }
+        TcpClient client = null;
+        lock (_gate) client = _client;
+        try { if (client != null) client.Close(); } catch { }
     }
 
     public void Dispose()
     {
         Stop();
-        try { _worker.Wait(3000); } catch { }
+        if (_worker != null && !_worker.Join(3000))
+        {
+            throw new TimeoutException("Serial capture worker did not stop after its listener and client were closed.");
+        }
         _changed.Dispose();
         _stop.Dispose();
     }
@@ -164,6 +199,48 @@ public sealed class SN10R3ManagedProcess : IDisposable
     private readonly StringBuilder _stderr = new StringBuilder();
     private readonly ConcurrentQueue<string> _stderrLines = new ConcurrentQueue<string>();
     public Process Process { get; private set; }
+
+    public static string QuoteArgument(string argument)
+    {
+        if (argument == null) argument = String.Empty;
+        var result = new StringBuilder();
+        result.Append('"');
+        int backslashes = 0;
+        for (int i = 0; i < argument.Length; i++)
+        {
+            char value = argument[i];
+            if (value == '\\')
+            {
+                backslashes++;
+            }
+            else if (value == '"')
+            {
+                result.Append('\\', backslashes * 2 + 1);
+                result.Append('"');
+                backslashes = 0;
+            }
+            else
+            {
+                result.Append('\\', backslashes);
+                result.Append(value);
+                backslashes = 0;
+            }
+        }
+        result.Append('\\', backslashes * 2);
+        result.Append('"');
+        return result.ToString();
+    }
+
+    public static string BuildCommandLine(string[] arguments)
+    {
+        var result = new StringBuilder();
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (i != 0) result.Append(' ');
+            result.Append(QuoteArgument(arguments[i]));
+        }
+        return result.ToString();
+    }
 
     public SN10R3ManagedProcess(string fileName, string workingDirectory, string[] arguments,
                                 string stdoutPath, string stderrPath)
@@ -178,7 +255,7 @@ public sealed class SN10R3ManagedProcess : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        info.Arguments = BuildCommandLine(arguments);
         Process = new Process { StartInfo = info, EnableRaisingEvents = true };
         Process.OutputDataReceived += (sender, eventArgs) =>
         {
@@ -210,15 +287,25 @@ public sealed class SN10R3ManagedProcess : IDisposable
 
     public string StdoutText { get { lock (_gate) return _stdout.ToString(); } }
     public string StderrText { get { lock (_gate) return _stderr.ToString(); } }
-    public bool WaitForExit(int milliseconds) { return Process.WaitForExit(milliseconds); }
+    public bool WaitForExit(int milliseconds)
+    {
+        bool exited = Process.WaitForExit(milliseconds);
+        if (exited) Process.WaitForExit();
+        return exited;
+    }
     public bool HasExited { get { return Process.HasExited; } }
     public int ExitCode { get { return Process.ExitCode; } }
-    public void Dispose() { Process?.Dispose(); }
+    public void Dispose() { if (Process != null) Process.Dispose(); }
 }
 '@
 
 if (-not ('SN10R3SerialCapture' -as [type])) {
-    Add-Type -TypeDefinition $TypeDefinition -Language CSharp
+    try {
+        $script:CompiledHelperTypes = @(Add-Type -TypeDefinition $TypeDefinition -Language CSharp -PassThru -ErrorAction Stop)
+    } catch {
+        Write-Error -ErrorRecord $_
+        throw
+    }
 }
 
 function Get-Sha256([string]$Path) {
@@ -282,8 +369,12 @@ function New-DisposableQemuDiskCopy([string]$SourcePath, [string]$DestinationPat
 
 function ConvertTo-QemuOptionValue([string]$Value) {
     # QEMU keyval option values escape a filename comma by doubling it.
-    # ProcessStartInfo.ArgumentList handles Windows argument quoting separately.
+    # Windows command-line quoting is applied separately when starting a process.
     $Value.Replace(',', ',,')
+}
+
+function Join-WindowsCommandLineArguments([string[]]$Arguments) {
+    [SN10R3ManagedProcess]::BuildCommandLine($Arguments)
 }
 
 function New-QemuArguments([string]$DiskPath, [int]$SerialPort, [int]$MonitorPort, [string]$FirmwarePath = $Ovmf) {
@@ -319,32 +410,33 @@ function New-RunDirectory {
 }
 
 function Test-StructuredArgumentPassing {
-    $powershell = (Get-Command pwsh.exe -ErrorAction Stop).Source
+    $powershell = Join-Path $PSHOME 'powershell.exe'
+    if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) { throw "Windows PowerShell executable is missing: $powershell" }
     $scriptPath = Join-Path $script:RunRoot 'argv-echo.ps1'
     $scriptLines = @(
         '$ErrorActionPreference = ''Stop''',
-        '$args | ConvertTo-Json -Compress | Set-Content -LiteralPath $env:SN10R3_ARGV_PATH -Encoding utf8'
+        'ConvertTo-Json -InputObject @($args) -Compress | Set-Content -LiteralPath $env:SN10R3_ARGV_PATH -Encoding utf8'
     )
     Set-Content -LiteralPath $scriptPath -Value $scriptLines -Encoding utf8
     $expected = @(
         '-drive', "if=pflash,format=raw,readonly=on,file=C:\SN10 R3 & (quoted)'s path\firmware,, rev 2.fd",
         '-drive', "file=C:\SN10 R3 & (quoted)'s path\candidate,, rev 2.raw,format=raw,if=ide,index=0",
         'single quoted path with spaces.txt',
-        "ampersand & parentheses (kept literally) and an apostrophe '"
+        "ampersand & parentheses (kept literally) and an apostrophe '",
+        'embedded " quote and trailing slash\',
+        ''
     )
-    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = $powershell
     $info.WorkingDirectory = $script:RunRoot
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
-    $info.ArgumentList.Add('-NoProfile')
-    $info.ArgumentList.Add('-File')
-    $info.ArgumentList.Add($scriptPath)
-    foreach ($arg in $expected) { $info.ArgumentList.Add($arg) }
+    $childArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath) + $expected
+    $info.Arguments = Join-WindowsCommandLineArguments $childArguments
     $dumpPath = Join-Path $script:RunRoot 'argv-roundtrip.json'
-    $info.Environment['SN10R3_ARGV_PATH'] = $dumpPath
+    $info.EnvironmentVariables['SN10R3_ARGV_PATH'] = $dumpPath
     $process = [Diagnostics.Process]::Start($info)
     if (-not $process.WaitForExit(10000)) { $process.Kill(); throw 'Structured argument round-trip timed out.' }
     $stdout = $process.StandardOutput.ReadToEnd()
@@ -503,7 +595,7 @@ try {
     $client.Connect([Net.IPAddress]::Loopback, $Port)
     $stream = $client.GetStream()
     $lines = switch ($Scenario) {
-        'Markers' { @('[TEST] boot-ready', '[TEST] app-visible', '[TEST] ephemeris-evaluated', '[TEST] second-instance-ready', 'partial-after-nonzero-exit') }
+        'Markers' { @('[TEST] boot-ready', '[TEST] app-visible', '[TEST] first-ephemeris-evaluated', '[TEST] first-close-requested', '[TEST] first-shutdown-complete', '[TEST] first-appmodel-return', '[TEST] reopen-command-dispatched', '[TEST] second-window-created', '[TEST] second-ephemeris-evaluated', '[TEST] second-close-requested', '[TEST] second-shutdown-complete', '[TEST] second-cleanup-complete', 'partial-after-nonzero-exit') }
         'Partial' { @('[TEST] partial-progress') }
         'PartialHold' { @('[TEST] partial-progress') }
         'Fatal' { @('[KERNEL-PANIC] assertion=offline-fixture halted=1') }
@@ -521,14 +613,15 @@ try {
 exit $ExitCode
 '@
     Set-Content -LiteralPath $producerPath -Value $producer -Encoding utf8
-    $info = [Diagnostics.ProcessStartInfo]::new()
-    $info.FileName = (Get-Command pwsh.exe -ErrorAction Stop).Source
+    $info = New-Object Diagnostics.ProcessStartInfo
+    $info.FileName = Join-Path $PSHOME 'powershell.exe'
     $info.WorkingDirectory = $script:RunRoot
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
-    foreach ($argument in @('-NoProfile', '-File', $producerPath, [string]$Port, $Scenario, [string]$ExitCode)) { $info.ArgumentList.Add($argument) }
+    $producerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $producerPath, [string]$Port, $Scenario, [string]$ExitCode)
+    $info.Arguments = Join-WindowsCommandLineArguments $producerArguments
     [Diagnostics.Process]::Start($info)
 }
 
@@ -570,7 +663,7 @@ function Assert-CandidateIdentity {
     if ([string]$diskVerification.format -cne 'raw' -or [string]$diskVerification.partitionTable -cne 'MBR' -or [string]$diskVerification.fatType -cne 'FAT32' -or [int]$diskVerification.sectorSizeBytes -ne 512) { throw 'Candidate disk does not have the verified raw/MBR/FAT32/512-byte layout.' }
     if ([int64]$diskVerification.imageBytes -ne (Get-Item -LiteralPath $diskFull).Length -or [string]$diskVerification.imageSha256 -notmatch '^[0-9a-f]{64}$') { throw 'Candidate disk geometry or recorded SHA-256 is invalid.' }
     $diskHash = Get-Sha256 $diskFull
-    if ($diskHash -cne [string]$diskVerification.imageSha256) { throw 'Candidate raw disk SHA-256 does not match its verification record.' }
+    if ($diskHash -cne [string]$diskVerification.imageSha256 -or $diskHash -cne $Expected.Disk) { throw 'Candidate raw disk SHA-256 does not match its verification record and accepted SN10R8 identity.' }
     if ([IO.Path]::GetFullPath([string]$diskVerification.sourceEsp).TrimEnd('\') -cne $espFull) { throw 'Candidate disk was not built from the validated staged ESP.' }
     $rootPartition = $diskVerification.rootPartition
     $efiPartition = $diskVerification.efiPartition
@@ -599,7 +692,7 @@ function Assert-CandidateIdentity {
     $diskFiles = @{}
     foreach ($entry in $diskVerification.files) { $diskFiles[[string]$entry.path] = [string]$entry.sha256 }
     foreach ($entry in $verification.stagedInputs) {
-        $relative = ([IO.Path]::GetRelativePath($espFull, [IO.Path]::GetFullPath([string]$entry.path))).Replace('\', '/')
+        $relative = ([IO.Path]::GetFullPath([string]$entry.path).Substring($espFull.Length + 1)).Replace('\', '/')
         if (-not $diskFiles.ContainsKey($relative) -or $diskFiles[$relative] -cne [string]$entry.sha256) { throw "Candidate disk does not contain verified staged payload $relative." }
     }
     $diskRecord = [ordered]@{ path = $diskFull; lengthBytes = (Get-Item -LiteralPath $diskFull).Length; sha256 = $diskHash; format = 'raw'; partitionTable = 'MBR'; fatType = 'FAT32'; sectorSizeBytes = 512; rootPartitionType = '0x0C'; rootPartitionStartLba = [int64]$rootPartition.startLba; rootPartitionSectors = [int64]$rootPartition.sectors; rootPartitionEndLba = [int64]$rootPartition.endLba; efiPartitionType = '0xEF'; efiPartitionStartLba = [int64]$efiPartition.startLba; efiPartitionSectors = [int64]$efiPartition.sectors; efiPartitionEndLba = [int64]$efiPartition.endLba; partitionStartLba = [int64]$diskVerification.partitionStartLba; partitionSectors = [int64]$diskVerification.partitionSectors; partitionEndLba = [int64]$diskVerification.partitionEndLba; verifiedFiles = $diskFiles.Count; verificationPath = [IO.Path]::GetFullPath($CandidateDiskVerificationPath) }
@@ -735,10 +828,16 @@ function Save-Screenshot([string]$Name) {
 }
 
 function Invoke-SelfTest {
+    $frameworkDescription = $null
+    try { $frameworkDescription = [Runtime.InteropServices.RuntimeInformation]::FrameworkDescription } catch { $frameworkDescription = '.NET Framework ' + [Environment]::Version.ToString() }
+    $cscDirectory = if ([IntPtr]::Size -eq 8) { Join-Path $env:windir 'Microsoft.NET\Framework64\v4.0.30319' } else { Join-Path $env:windir 'Microsoft.NET\Framework\v4.0.30319' }
+    $cscPath = Join-Path $cscDirectory 'csc.exe'
+    $cscVersion = if (Test-Path -LiteralPath $cscPath) { (Get-Item -LiteralPath $cscPath).VersionInfo.FileVersion } else { $null }
     $runnerResult = [ordered]@{
         schemaVersion = 1
         mode = 'offline-runner-self-test'
         startedAtLocal = (Get-Date).ToString('o')
+        hostRuntime = [ordered]@{ powershellVersion = [string]$PSVersionTable.PSVersion; edition = [string]$PSVersionTable.PSEdition; clrVersion = [string]$PSVersionTable.CLRVersion; frameworkDescription = [string]$frameworkDescription; processBitness = [IntPtr]::Size * 8; csharpCompilerPath = $cscPath; csharpCompilerFileVersion = $cscVersion }
         classification = 'PASS'
         qemuLaunched = $false
         qacReservationRequested = $false
@@ -746,7 +845,18 @@ function Invoke-SelfTest {
         logs = [ordered]@{}
     }
     $capture1 = $null; $capture2 = $null; $capture3 = $null; $capture4 = $null; $capture5 = $null; $capture6 = $null
+    $managedExitTest = $null; $managedTimeoutTest = $null
     try {
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($PSCommandPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        if (@($parseErrors).Count -ne 0) { throw "Windows PowerShell parser returned $(@($parseErrors).Count) error(s): $($parseErrors[0].Message)" }
+        $runnerResult.checks.scriptParsing = [ordered]@{ passed = $true; parser = 'Windows PowerShell 5.1 Parser.ParseFile'; parseErrors = 0 }
+
+        $loadedHelpers = @('SN10R3SerialCapture', 'SN10R3ManagedProcess')
+        foreach ($typeName in $loadedHelpers) { if (-not ($typeName -as [type])) { throw "Required C# helper type was not loaded: $typeName" } }
+        $runnerResult.checks.addTypeCompilation = [ordered]@{ passed = $true; language = 'C# supported by Windows PowerShell 5.1 Add-Type'; loadedTypes = $loadedHelpers; compiler = 'System.CodeDom CSharpCodeProvider invoked by Add-Type'; diagnostics = @(); result = 'Compilation completed without errors or warnings.' }
+
         $freeLane = Get-QacLaneCensus "Coordinator: Online`nQEMU processes: 0`nManaged sessions: 0; queued: 0" 'Reservations: 0' 'Queued reservations: 0'
         $busyLane = Get-QacLaneCensus "Coordinator: Online`nQEMU processes: 1 (0 foreign)`nManaged sessions: 1; queued: 0; blocked: 0" 'Reservations: 1' 'Queued reservations: 0'
         $unknownLane = Get-QacLaneCensus 'Coordinator: Online' 'Reservations: 0' 'Queued reservations: 0'
@@ -775,6 +885,25 @@ function Invoke-SelfTest {
             processArgumentRoundTrip = $argCheck
         }
 
+        $managedExitStdout = Join-Path $script:RunRoot 'selftest-managed-process.stdout.log'
+        $managedExitStderr = Join-Path $script:RunRoot 'selftest-managed-process.stderr.log'
+        $exitCommand = "Write-Output SN10R8_TEST_STDOUT; [Console]::Error.WriteLine('SN10R8_TEST_STDERR'); exit 23"
+        $managedExitTest = [SN10R3ManagedProcess]::new((Join-Path $PSHOME 'powershell.exe'), $script:RunRoot, @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $exitCommand), $managedExitStdout, $managedExitStderr)
+        if (-not $managedExitTest.WaitForExit(10000) -or $managedExitTest.ExitCode -ne 23 -or $managedExitTest.StdoutText -notmatch 'SN10R8_TEST_STDOUT' -or $managedExitTest.StderrText -notmatch 'SN10R8_TEST_STDERR') { throw 'Managed process helper did not preserve redirected output and abnormal exit code 23.' }
+        $managedExitTest.Dispose(); $managedExitTest = $null
+
+        $timeoutStdout = Join-Path $script:RunRoot 'selftest-managed-timeout.stdout.log'
+        $timeoutStderr = Join-Path $script:RunRoot 'selftest-managed-timeout.stderr.log'
+        $timeoutCommand = "Write-Output SN10R8_TIMEOUT_STARTED; Start-Sleep -Seconds 2; exit 0"
+        $managedTimeoutTest = [SN10R3ManagedProcess]::new((Join-Path $PSHOME 'powershell.exe'), $script:RunRoot, @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $timeoutCommand), $timeoutStdout, $timeoutStderr)
+        $timeoutReady = [Diagnostics.Stopwatch]::StartNew()
+        while ($managedTimeoutTest.StdoutText -notmatch 'SN10R8_TIMEOUT_STARTED' -and $timeoutReady.Elapsed.TotalSeconds -lt 5) { Start-Sleep -Milliseconds 50 }
+        if ($managedTimeoutTest.StdoutText -notmatch 'SN10R8_TIMEOUT_STARTED') { throw 'Managed timeout fixture did not report its live marker.' }
+        $boundedExitWait = -not $managedTimeoutTest.WaitForExit(100)
+        if (-not $boundedExitWait -or -not $managedTimeoutTest.WaitForExit(5000) -or $managedTimeoutTest.ExitCode -ne 0) { throw 'Managed process bounded wait did not time out while active and then report normal completion.' }
+        $managedTimeoutTest.Dispose(); $managedTimeoutTest = $null
+        $runnerResult.checks.managedProcessHandling = [ordered]@{ passed = $true; abnormalExitCode = 23; stdoutCaptured = $true; stderrCaptured = $true; boundedWaitTimedOutWhileRunning = $boundedExitWait; normalExitAfterTimeout = $true; evidence = @($managedExitStdout, $managedExitStderr, $timeoutStdout, $timeoutStderr) }
+
         $previousStorageFailure = Get-QemuEarlyExitDetails "QAC QEMU launched: reservation=20e46155756b4cb383d0a7198b86b21e pid=13280`nQAC QEMU exited: reservation=20e46155756b4cb383d0a7198b86b21e pid=13280 exitCode=1`nC:\Program Files\qemu\qemu-system-x86_64.exe: Block node is read-only"
         $otherStartupFailure = Get-QemuEarlyExitDetails "QAC QEMU launched: reservation=20e46155756b4cb383d0a7198b86b21e pid=13280`nQAC QEMU exited: reservation=20e46155756b4cb383d0a7198b86b21e pid=13280 exitCode=1`nfirmware argument could not be opened"
         if (-not $previousStorageFailure -or $previousStorageFailure.classification -cne 'PREBOOT_STORAGE_FAILURE' -or -not $otherStartupFailure -or $otherStartupFailure.classification -cne 'PREBOOT_QEMU_STARTUP_FAILURE') { throw 'Early QEMU startup failures were not classified separately from QAC coordination.' }
@@ -794,6 +923,20 @@ function Invoke-SelfTest {
         } finally { if ($simulatedGuestWrite) { $simulatedGuestWrite.Dispose() } }
         if ((Get-Sha256 $copySource) -cne $sourceHashBeforeSimulatedGuestWrite -or (Get-Sha256 $copyTarget) -ceq $copyEvidence.initialSha256) { throw 'Simulated guest disk write did not remain isolated to the writable copy.' }
         $runnerResult.checks.disposableDiskIsolation = [ordered]@{ passed = $true; sourceRemainsByteIdenticalAfterSimulatedGuestWrite = $true; sourceReadOnlyAttributePreserved = $true; perRunCopyInitiallyMatches = $true; perRunCopyReadOnlyAttributeCleared = $true; hostWriteOpenSucceeded = $true; simulatedGuestWriteChangedOnlyCopy = $true; evidence = $copyEvidence }
+
+        $candidateCopyPath = Join-Path $script:RunRoot 'selftest-candidate-writable-copy.raw'
+        $candidateCopyEvidence = New-DisposableQemuDiskCopy $CandidateDiskPath $candidateCopyPath
+        if ($candidateCopyEvidence.sourceSha256 -cne $Expected.Disk -or $candidateCopyEvidence.initialSha256 -cne $Expected.Disk -or $candidateCopyEvidence.sourceSha256AfterCopy -cne $Expected.Disk -or -not $candidateCopyEvidence.writeAccess.writeOpenSucceeded) { throw 'Actual SN10R8 candidate disposable-copy verification failed.' }
+        $candidateQemuArguments = @(New-QemuArguments $candidateCopyPath 40003 40004)
+        $candidateIdeArguments = @()
+        for ($i = 0; $i -lt $candidateQemuArguments.Count - 1; $i++) {
+            if ($candidateQemuArguments[$i] -ceq '-drive' -and $candidateQemuArguments[$i + 1] -match '(^|,)if=ide(,|$)') { $candidateIdeArguments += [string]$candidateQemuArguments[$i + 1] }
+        }
+        if ($candidateIdeArguments.Count -ne 1 -or $candidateIdeArguments[0] -cne "file=$candidateCopyPath,format=raw,if=ide,index=0" -or $candidateIdeArguments[0] -match '(?i)readonly|if=cdrom|fat:') { throw 'Actual candidate copy is not represented by one writable raw IDE QEMU attachment.' }
+        $candidateSourceAfterTest = Get-Sha256 $CandidateDiskPath
+        if ($candidateSourceAfterTest -cne $Expected.Disk) { throw 'Actual candidate source disk changed during offline writable-copy verification.' }
+        Remove-Item -LiteralPath $candidateCopyPath -Force
+        $runnerResult.checks.actualCandidateDiskCopy = [ordered]@{ passed = $true; originalSha256 = $candidateSourceAfterTest; originalUnchanged = $true; disposableInitialSha256 = $candidateCopyEvidence.initialSha256; disposableWriteOpenSucceeded = $candidateCopyEvidence.writeAccess.writeOpenSucceeded; sourceAttributesUnchanged = ($candidateCopyEvidence.sourceAttributes -ceq $candidateCopyEvidence.sourceAttributesAfterCopy); effectiveIdeDiskArgument = $candidateIdeArguments[0]; disposableCopyRemovedAfterOfflineCheck = (-not (Test-Path -LiteralPath $candidateCopyPath)); qemuLaunched = $false }
 
         $reopenCommand = 'desktop.launch com.guidexos.stellarnavigator'
         $reopenKeys = @(Get-QemuTextKeyCommands $reopenCommand)
@@ -823,16 +966,20 @@ function Invoke-SelfTest {
         $runnerResult.checks.captureEndpointInitialized = $true
         [void](Wait-SerialPattern -Capture $capture1 -Pattern '\[TEST\] boot-ready' -Seconds 5 -Description 'controlled boot marker')
         [void](Wait-SerialPattern -Capture $capture1 -Pattern '\[TEST\] app-visible' -Seconds 5 -Description 'controlled application marker')
-        [void](Wait-SerialPattern -Capture $capture1 -Pattern '\[TEST\] ephemeris-evaluated' -Seconds 5 -Description 'controlled computation marker')
-        $secondInstanceStart = $capture1.Snapshot().IndexOf('[TEST] ephemeris-evaluated', [StringComparison]::Ordinal)
-        if ($secondInstanceStart -lt 0) { throw 'Serial cursor fixture marker was not captured.' }
-        $secondInstanceStart += '[TEST] ephemeris-evaluated'.Length
-        [void](Wait-SerialPattern -Capture $capture1 -Pattern '\[TEST\] second-instance-ready' -Seconds 5 -Description 'controlled second instance marker' -StartIndex $secondInstanceStart)
+        $lifecycleMarkers = @('[TEST] first-ephemeris-evaluated', '[TEST] first-close-requested', '[TEST] first-shutdown-complete', '[TEST] first-appmodel-return', '[TEST] reopen-command-dispatched', '[TEST] second-window-created', '[TEST] second-ephemeris-evaluated', '[TEST] second-close-requested', '[TEST] second-shutdown-complete', '[TEST] second-cleanup-complete')
+        $lifecycleCursor = 0
+        foreach ($marker in $lifecycleMarkers) {
+            $lifecycleText = Wait-SerialPattern -Capture $capture1 -Pattern ([regex]::Escape($marker)) -Seconds 5 -Description "offline close/reopen marker $marker" -StartIndex $lifecycleCursor
+            $markerMatch = [regex]::Match($lifecycleText, [regex]::Escape($marker))
+            if (-not $markerMatch.Success) { throw "Offline close/reopen marker was not received: $marker" }
+            $lifecycleCursor += $markerMatch.Index + $markerMatch.Length
+        }
         if (-not $producer1.WaitForExit(5000)) { $producer1.Kill(); throw 'Controlled serial producer did not exit.' }
         [void]$capture1.WaitForCompletion(3000)
         $liveText = $capture1.Snapshot()
         if ($producer1.ExitCode -ne 23 -or $capture1.BytesReceived -le 0 -or $liveText -notmatch 'partial-after-nonzero-exit') { throw 'Abnormal producer exit did not leave a complete partial log.' }
         $runnerResult.checks.liveSerialStream = [ordered]@{ passed = $true; connected = $capture1.Connected; bytes = $capture1.BytesReceived; markersRecognizedIncrementally = $true; producerExitCode = $producer1.ExitCode; partialLogPreservedAfterAbnormalTermination = $true; logPath = $capture1Path }
+        $runnerResult.checks.offlineCloseReopen = [ordered]@{ passed = $true; markersObservedInOrder = $lifecycleMarkers; firstInstanceNormalCloseAndReturn = $true; relaunchDispatchedThroughDesktopLaunch = $true; secondInstanceFreshEvaluationAndCleanup = $true; cursorAdvancedBetweenMarkers = $true }
         $capture1.Dispose(); $capture1 = $null
         $portReleased = $false
         try { $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port1); $listener.Start(); $listener.Stop(); $portReleased = $true } catch { }
@@ -896,7 +1043,12 @@ function Invoke-SelfTest {
         if (-not $captureFailureObserved -or $capture4.Connected -or $capture4.BytesReceived -ne 0) { throw 'No-client capture failure was not distinguished from connected zero-byte output.' }
         $capture4.Dispose(); $capture4 = $null
         $runnerResult.checks.captureFailureClassification = [ordered]@{ passed = $true; classification = 'SERIAL_CAPTURE_FAILURE'; noClientDetected = $captureFailureObserved; rule = 'No QEMU TCP client is a capture failure; a connected client with zero bytes is no guest output.' }
-        $runnerResult.checks.resourcesReleased = [ordered]@{ passed = $true; listenerStopped = $true; ephemeralPortRebindSucceeded = $true }
+        $logWritable = $true
+        foreach ($capturePath in @($capture1Path, $capture2Path, $capture3Path, $capture5Path, $capture6Path, $capture4Path)) {
+            $logStream = [IO.File]::Open($capturePath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            $logStream.Dispose()
+        }
+        $runnerResult.checks.resourcesReleased = [ordered]@{ passed = $true; listenerStopped = $true; ephemeralPortRebindSucceeded = $true; captureLogFilesCanBeExclusivelyReopened = $logWritable }
         $runnerResult.logs = [ordered]@{ live = $capture1Path; missingMarker = $capture2Path; noOutput = $capture3Path; streamDisconnect = $capture5Path; guestFailure = $capture6Path }
         $runnerResult.finishedAtLocal = (Get-Date).ToString('o')
         $runnerResult.resultPath = Join-Path $script:RunRoot 'runner-selftest.json'
