@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,9 @@ if ($null -eq $gxxCommand) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX25') {
+$guardManifest = if ($Phase -eq 'RX26') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx26\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX25') {
     Join-Path $rootDir 'docs\rexx\evidence\rx25\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX24') {
     Join-Path $rootDir 'docs\rexx\evidence\rx24\protected-artifacts-start.json'
@@ -60,7 +62,8 @@ $plannedOutputs = @(
     'rexx_rx17_bitwise_tests.exe', 'rexx_rx18_string_builtins_tests.exe',
     'rexx_rx19_date_time_tests.exe',
     'rexx_rx2_shell_bridge_tests.exe', 'rexx_rx22_classic_diagnostic_tests.exe',
-    'rexx_rx24_address_trace_tests.exe', 'rexx_rx25_random_tests.exe'
+    'rexx_rx24_address_trace_tests.exe', 'rexx_rx25_random_tests.exe',
+    'rexx_rx26_index_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
@@ -95,6 +98,7 @@ $rx19Test = Join-Path $buildDirectory "rexx_rx19_date_time_tests.exe"
 $rx22Test = Join-Path $buildDirectory "rexx_rx22_classic_diagnostic_tests.exe"
 $rx24Test = Join-Path $buildDirectory "rexx_rx24_address_trace_tests.exe"
 $rx25Test = Join-Path $buildDirectory "rexx_rx25_random_tests.exe"
+$rx26Test = Join-Path $buildDirectory "rexx_rx26_index_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -458,7 +462,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX22 classic/diagnostic built-in assertions failed with exit code $LASTEXITCODE."
 }
 
-if ($Phase -in @('RX24','RX25')) {
+if ($Phase -in @('RX24','RX25','RX26')) {
     Write-Host "Building RX24 ADDRESS and TRACE assertions"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -474,7 +478,7 @@ if ($Phase -in @('RX24','RX25')) {
     }
 }
 
-if ($Phase -eq 'RX25') {
+if ($Phase -in @('RX25','RX26')) {
     Write-Host "Building RX25 RANDOM assertions"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -488,6 +492,22 @@ if ($Phase -eq 'RX25') {
     & $rx25Test
     if ($LASTEXITCODE -ne 0) {
         throw "RX25 RANDOM assertions failed with exit code $LASTEXITCODE."
+    }
+}
+
+if ($Phase -eq 'RX26') {
+    Write-Host "Building RX26 INDEX assertions and equivalence corpus"
+    & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+        -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
+        (Join-Path $PSScriptRoot "rexx_rx26_index_test.c") `
+        @commonSources -lm -o $rx26Test
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX26 INDEX test build failed with exit code $LASTEXITCODE."
+    }
+    Write-Host "Running RX26 INDEX assertions and equivalence corpus"
+    & $rx26Test
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX26 INDEX tests failed with exit code $LASTEXITCODE."
     }
 }
 
@@ -1269,6 +1289,20 @@ if ($limitExit -ne 1 -or
 $script:cliPassed++
 Write-Host "[PASS] CLI source-size memory limit"
 
+$script:rx26FixturePassed = 0
+if ($Phase -eq 'RX26') {
+    $fixture = Join-Path $PSScriptRoot 'rexx_rx26\index_reference.rex'
+    $expectedPath = [System.IO.Path]::ChangeExtension($fixture, '.out')
+    $actual = Invoke-CapturedProcess $cliTest @($fixture)
+    $actualText = ($actual.Stdout -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    $expectedText = ((Get-Content -Raw -LiteralPath $expectedPath) -replace "`r`n", "`n").TrimEnd([char[]]"`n")
+    if ($actual.ExitCode -ne 0 -or $actualText -cne $expectedText -or $actual.Stderr.Length -ne 0) {
+        throw "RX26 INDEX CLI fixture failed. Expected '$expectedText'; got '$actualText'/$($actual.ExitCode)."
+    }
+    $script:rx26FixturePassed = 1
+    Write-Host '[PASS] RX26 IBM INDEX, binary, and POS CLI fixture'
+}
+
 Test-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot -Stage 'hosted-fixtures' -Phase $Phase | Out-Null
 $durablePreservation = Join-Path $rootDir ("docs\rexx\evidence\$($Phase.ToLowerInvariant())\preservation\hosted-$runId")
 New-Item -ItemType Directory -Path $durablePreservation -Force | Out-Null
@@ -1291,6 +1325,7 @@ Write-Host "RX14 numeric and inspection fixtures passed: $script:rx14FixturePass
 Write-Host "RX15 conversion fixtures passed: $script:rx15FixturePassed/$script:rx15FixturePassed"
 Write-Host "RX16 hexadecimal/binary literal fixtures passed: $script:rx16FixturePassed/$script:rx16FixturePassed"
 Write-Host "RX17 bitwise string fixtures passed: $script:rx17FixturePassed/$script:rx17FixturePassed"
+if ($Phase -eq 'RX26') { Write-Host "RX26 INDEX CLI fixtures passed: $script:rx26FixturePassed/$script:rx26FixturePassed" }
 Write-Host "RX22 classic/diagnostic fixtures passed: $script:rx22FixturePassed/$script:rx22FixturePassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"

@@ -1273,37 +1273,58 @@ static RexxVMStatus rexx_builtin_strip(const RexxValue *arguments,
     return rexx_value_set_string(result, string.bytes + first, last - first);
 }
 
-static RexxVMStatus rexx_builtin_pos(const RexxValue *arguments,
-                                     size_t argument_count,
-                                     RexxValue *result)
+static RexxVMStatus rexx_builtin_pos_core(const RexxValue *needle_argument,
+                                         const RexxValue *haystack_argument,
+                                         const RexxValue *start_argument,
+                                         RexxValue *result)
 {
     RexxBuiltinStringView needle;
     RexxBuiltinStringView haystack;
     size_t start = 1u;
     size_t start_index;
     RexxVMStatus status;
+    RexxNumericStatus numeric_status;
+    RexxDecimal parsed_start;
+    uint32_t converted_start;
 
-    status = rexx_builtin_string_view(&arguments[0], &needle);
+    status = rexx_builtin_string_view(needle_argument, &needle);
     if (status == REXX_VM_STATUS_OK) {
-        status = rexx_builtin_string_view(&arguments[1], &haystack);
+        status = rexx_builtin_string_view(haystack_argument, &haystack);
     }
     if (status != REXX_VM_STATUS_OK) {
         return status;
     }
-    if (argument_count >= 3u && arguments[2].type != REXX_VALUE_UNSET) {
-        status = rexx_builtin_size(&arguments[2], &start);
+    if (start_argument != NULL &&
+        start_argument->type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_decimal(start_argument, &parsed_start);
         if (status != REXX_VM_STATUS_OK) {
             return status;
         }
-        if (start == 0u) {
+        if (parsed_start.sign <= 0) {
             return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
         }
+        numeric_status = rexx_decimal_to_uint32(&parsed_start,
+                                                &converted_start);
+        if (numeric_status == REXX_NUMERIC_RANGE) {
+            /* Every supported haystack is shorter than UINT32_MAX. Keep the
+             * positive decimal exact and avoid narrowing it through size_t. */
+            return rexx_builtin_set_size(result, 0u);
+        }
+        if (numeric_status != REXX_NUMERIC_OK) {
+            return numeric_status == REXX_NUMERIC_RESOURCE_LIMIT
+                       ? REXX_VM_STATUS_RESOURCE_LIMIT
+                       : REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        }
+        if (converted_start == 0u) {
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        }
+        start = (size_t)converted_start;
     }
 
-    start_index = start - 1u;
-    if (start_index > haystack.length) {
+    if (start > haystack.length) {
         return rexx_builtin_set_size(result, 0u);
     }
+    start_index = start - 1u;
     if (needle.length == 0u) return rexx_builtin_set_size(result, 0u);
     if (needle.length > haystack.length - start_index) {
         return rexx_builtin_set_size(result, 0u);
@@ -1323,6 +1344,24 @@ static RexxVMStatus rexx_builtin_pos(const RexxValue *arguments,
         }
     }
     return rexx_builtin_set_size(result, 0u);
+}
+
+static RexxVMStatus rexx_builtin_pos(const RexxValue *arguments,
+                                     size_t argument_count,
+                                     RexxValue *result)
+{
+    const RexxValue *start = argument_count >= 3u ? &arguments[2] : NULL;
+    return rexx_builtin_pos_core(&arguments[0], &arguments[1], start, result);
+}
+
+/* IBM TSO/E and VM INDEX uses POS's byte search with the string arguments
+ * reversed. Keep validation, start handling, and search semantics shared. */
+static RexxVMStatus rexx_builtin_index(const RexxValue *arguments,
+                                       size_t argument_count,
+                                       RexxValue *result)
+{
+    const RexxValue *start = argument_count >= 3u ? &arguments[2] : NULL;
+    return rexx_builtin_pos_core(&arguments[1], &arguments[0], start, result);
 }
 
 static RexxVMStatus rexx_builtin_copies(const RexxValue *arguments,
@@ -4113,6 +4152,7 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "WORDS", 1u, 1u, rexx_builtin_words, NULL },
     { "STRIP", 1u, 3u, rexx_builtin_strip, NULL },
     { "POS", 2u, 3u, rexx_builtin_pos, NULL },
+    { "INDEX", 2u, 3u, rexx_builtin_index, NULL },
     { "TRANSLATE", 1u, 4u, rexx_builtin_translate, NULL },
     { "WORDPOS", 2u, 3u, rexx_builtin_wordpos, NULL },
     { "SPACE", 1u, 3u, rexx_builtin_space, NULL },

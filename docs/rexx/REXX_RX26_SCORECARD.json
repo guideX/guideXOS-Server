@@ -1,0 +1,171 @@
+{
+  "schema": "guidexos.rexx.rx26.scorecard.v1",
+  "phase": "RX26",
+  "outcome": "ACCEPTED",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "a7a7c830924510b2b3a7692f17b34e853d937cac",
+  "ending_head": "Reported in the final RX26 response; this file avoids a self-referential commit hash.",
+  "local_commit": "Reported in the final RX26 response.",
+  "implementation": {
+    "status": "PASS",
+    "signature": "INDEX(haystack,needle[,start])",
+    "compatibility_classification": "IBM TSO/E and VM non-SAA extension; POS(needle,haystack[,start]) remains the portable preferred function.",
+    "approach": "INDEX calls the shared POS byte-search core with the first two string arguments reversed. No second search engine or recursive public dispatch was introduced.",
+    "byte_semantics": "Exact case-sensitive byte comparison; embedded NUL, high-bit, nonprintable, and all 00-FF byte values are preserved.",
+    "limits": "Existing 16 MiB string limit retained. No Unicode, locale, or DBCS behavior added.",
+    "start_validation": "Optional positive whole REXX decimal, default 1; exact parsing and validation precede offset calculation. Valid positive starts beyond the string, including values above UINT32_MAX, return 0.",
+    "pos_compatibility_correction": "Prior POS conversion returned RESOURCE_LIMIT for valid positive starts above UINT32_MAX. Since all supported strings are shorter, RX26 now returns 0 for such starts in the shared POS and INDEX core; direct regression cases cover both names.",
+    "input_mutation": "None; input views are borrowed, and the existing result-construction helper is used."
+  },
+  "inventory_preflight": {
+    "source": "REXX_RX25_BUILTIN_INVENTORY.csv",
+    "rows": 75,
+    "starting_status_counts": {
+      "Implemented": 55,
+      "Not implemented": 15,
+      "Partial": 3,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "index_status": "Not implemented; no INDEX dispatch entry existed.",
+    "pos_status": "Implemented; one-byte-oriented POS search was present.",
+    "post_rx26_status_counts": {
+      "Implemented": 56,
+      "Not implemented": 14,
+      "Partial": 3,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "DATE_TIME_TRACE_classifications_unchanged": true
+  },
+  "hosted_qualification": {
+    "status": "PASS",
+    "direct_assertions": 48166,
+    "deterministic_equivalence_cases": 12000,
+    "property_seed": "0x52583236",
+    "independent_oracle": "Separate byte-by-byte search oracle checked generated cases and representative expected results; equivalence was not the sole correctness oracle.",
+    "allocation_failure_and_recovery": "PASS",
+    "IBM_reference_cli_fixture": "1/1",
+    "inherited_suite": "RX1-RX25 hosted suites and compatibility fixtures passed, including existing POS regressions.",
+    "inherited_cli_cases": "24/24",
+    "notable_inherited_results": {
+      "RX19_date_time_and_clock_assertions": 8275,
+      "RX19_property_cases": 2048,
+      "RX24_ADDRESS_TRACE_assertions": 65,
+      "RX25_RANDOM_assertions": 2156
+    },
+    "regina": "NOT_RUN — Regina executable unavailable; no external differential percentage is claimed.",
+    "evidence": "evidence/rx26/hosted-qualification.log"
+  },
+  "sanitizers": {
+    "status": "PASS",
+    "AddressSanitizer": {
+      "targets_passed": "26/26",
+      "compiler": "MSVC 19.51.36260",
+      "failed_targets": 0,
+      "nonempty_test_stderr_logs": 0,
+      "local_expected_result_cases": "196/196"
+    },
+    "UndefinedBehaviorSanitizer": {
+      "targets_passed": "26/26",
+      "compiler": "clang 22.1.8",
+      "failed_targets": 0,
+      "nonempty_test_stderr_logs": 0,
+      "local_expected_result_cases": "196/196"
+    },
+    "run_steps_per_matrix": 27,
+    "run_step_note": "The 27th run step is the 196-case corpus driver; the 26/26 target total counts each compiled hosted build/test target.",
+    "regina": "NOT_RUN — unavailable.",
+    "evidence": "evidence/rx26/sanitizers-summary.json"
+  },
+  "freestanding_amd64": {
+    "status": "PASS",
+    "rexx_c_objects": 9,
+    "kernel_elf_sha256": "ce32736f6a0c0e31bd3eb348582baeaa4eab450251bdf5b14fd2464a42ec6678",
+    "freestanding_flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "output_root": "build/rexx/rx26/native-amd64-cfc4cb39ee8a40e4bb694469f4200132",
+    "evidence": "evidence/rx26/native-build/native-link-evidence-cfc4cb39ee8a40e4bb694469f4200132.json"
+  },
+  "qac_guest_acceptance": {
+    "status": "PASS",
+    "run": "evidence/rx26/native-guest/run-f29a7bccefee4854b5891ffcfcce23ab",
+    "project": "guideXOSServer",
+    "mode": "acceptance",
+    "qemu_version": "11.0.0",
+    "network_disabled": true,
+    "disposable_media": true,
+    "kernel_sha256_matches_staged_media": true,
+    "guest_checks": [
+      "IBM INDEX vectors and not-found cases passed.",
+      "Binary INDEX search passed and the corresponding POS result matched.",
+      "Invalid zero start was trapped; later INDEX returned 5 and the interpreter remained responsive.",
+      "RX24 ADDRESS/TRACE success and error recovery passed.",
+      "RX25 unseeded samples repeated across independent program runs; seeded range, reseed, invalid seed/range traps, and recovery passed.",
+      "DATE and TIME current forms failed closed; RX24 guard reported PIT activity alive.",
+      "RX20 clock contract passed; TIME E and TIME R increased during the guest run.",
+      "Kernel heartbeat increased from 1 to 158 records during the suite."
+    ],
+    "shutdown_and_release": {
+      "qmp_shutdown_acknowledged": true,
+      "qac_reported_qemu_child_exit_code": 0,
+      "qac_parent_cli_exit_code": 0,
+      "qac_parent_cli_exit_status": "captured",
+      "qac_reservation_released": true,
+      "post_exit_managed_sessions_queued_blocked": "0/0/0",
+      "owned_qemu_absent_after_shutdown": true,
+      "foreign_process_controlled": false
+    },
+    "retry_history": "An initial QAC preflight correctly declined to start while another managed reservation was active; that session was left untouched. A later guest run found the inherited long DATE/TIME filename missing in guest VFS, then shut down through acknowledged QMP and released its reservation. RX26 staged that same script under a shorter RX26-only name; the complete retry passed. The failed attempt's uncaptured QAC parent exit status is recorded as unknown in its attempt evidence.",
+    "evidence": "evidence/rx26/native-guest/run-f29a7bccefee4854b5891ffcfcce23ab/qemu-smoke-result.json"
+  },
+  "artifact_safety": {
+    "protected_root_objects_and_pdbs": "31/31 exact size and SHA-256 matches",
+    "protected_manifest": "evidence/rx26/protected-artifacts-start.json",
+    "starting_untracked_paths": 70142,
+    "starting_untracked_sha256": "ccc3e0fc314d3f47fe5b1734f5ecdcd3a475ba8045e5f1965673949b854e2b40",
+    "path_serialization": "Relative forward-slash paths, ordinal sort, UTF-8 without BOM, LF after each path.",
+    "rx25_reported_start_path_count": 63847,
+    "rx26_start_count_independently_reconciled": true,
+    "untracked_end_path_count_before_staging": 73624,
+    "untracked_end_sha256_before_staging": "a8b51655ab2f2ac59ef1e06dce9ce3e89a18092d869d47f18d195d972bec9a43",
+    "preexisting_path_set_preserved": true,
+    "missing_preexisting_paths": 0,
+    "additional_untracked_paths_at_end": 3482,
+    "untracked_reconciliation": "evidence/rx26/untracked-reconciliation-final.json"
+  },
+  "inventory": {
+    "rows": 75,
+    "implemented": 56,
+    "not_implemented": 14,
+    "partial": 3,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "DATE_TIME_TRACE_classifications_unchanged": true,
+    "file": "REXX_RX26_BUILTIN_INVENTORY.csv"
+  },
+  "remaining_compatibility_limits": [
+    "INDEX is a non-SAA IBM TSO/E and VM extension; POS is the portable preferred function.",
+    "Search positions are byte-oriented; no Unicode, locale, or DBCS behavior is claimed.",
+    "Regina was unavailable, so external-interpreter comparison did not run.",
+    "POS valid positive starts above UINT32_MAX now return 0, correcting the prior 32-bit conversion resource-limit result; explicit regression coverage was added."
+  ],
+  "recommended_rx27_scope": "Use the inventory-first gate to select JUSTIFY as a compact P3, non-I/O string-function candidate among the remaining 14 unimplemented entries. Confirm its exact IBM contract before implementation; defer stream, data-stack, and environment candidates until their host I/O contracts are separately defined. Keep DATE, TIME, and TRACE classifications unchanged unless separately authorized.",
+  "evidence": [
+    "evidence/rx26/preflight.json",
+    "evidence/rx26/hosted-qualification.log",
+    "evidence/rx26/native-build/",
+    "evidence/rx26/sanitizer-address-ce3a1325a2f84ab3b8d1d7d5d60a1d4e/",
+    "evidence/rx26/sanitizer-undefined-ce0bc15765ed4f0bb956ee9a578851f9/",
+    "evidence/rx26/native-guest/run-5761640525e0412eb5034cad66e086c0/qac-attempt.json",
+    "evidence/rx26/native-guest/run-f503cb027ac5434e8f5fb44b8c5c697d/qac-attempt.json",
+    "evidence/rx26/native-guest/run-f29a7bccefee4854b5891ffcfcce23ab/"
+  ]
+}
