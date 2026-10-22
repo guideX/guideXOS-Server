@@ -1743,6 +1743,9 @@ static StartMenuApp s_startMenuApps[] = {
 #if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
     {"Managed File Explorer", true, false, 0xFFC8B43C}, // bounded read-only VFS browser
 #endif
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+    {"Managed CounterApp", true, false, 0xFF9A6A42}, // isolated external app identity candidate
+#endif
     {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
     {"DisplayOptions", true, false, 0xFF606878}, // display options
     {"ControlPanel",   false, false, 0xFF808890}, // control surface
@@ -1777,6 +1780,9 @@ static const char* s_allProgramsList[] = {
     "ImgViewer",
     "AppModel",
     "Managed Counter",
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+    "Managed CounterApp",
+#endif
 #if defined(GXOS_NATIVEAOT_C158_MANAGED_CALCULATOR)
     "Managed Calculator",
 #endif
@@ -1803,6 +1809,7 @@ static bool verifyC161LauncherCounts() {
     bool hasManagedTaskManagerPin = false;
     bool hasNativeTaskManagerPin = false;
     bool hasManagedFileExplorerPin = false;
+    bool hasManagedCounterAppPin = false;
     for (int index = 0; index < kStartMenuAppCount; ++index) {
         const bool isControlPanel = desktop_str_eq(
             s_startMenuApps[index].name, "ControlPanel");
@@ -1814,12 +1821,15 @@ static bool verifyC161LauncherCounts() {
             s_startMenuApps[index].name, "Managed Task Manager");
         hasManagedFileExplorerPin |= desktop_str_eq(
             s_startMenuApps[index].name, "Managed File Explorer");
+        hasManagedCounterAppPin |= desktop_str_eq(
+            s_startMenuApps[index].name, "Managed CounterApp");
         hasNativeTaskManagerPin |= desktop_str_eq(
             s_startMenuApps[index].name, "TaskManager");
     }
     bool hasManagedTaskManagerProgram = false;
     bool hasNativeTaskManagerProgram = false;
     bool hasManagedFileExplorerProgram = false;
+    bool hasManagedCounterAppProgram = false;
     for (int index = 0; index < kAllProgramsCount; ++index) {
         hasManagedTaskManagerProgram |= desktop_str_eq(
             s_allProgramsList[index], "Managed Task Manager");
@@ -1827,11 +1837,23 @@ static bool verifyC161LauncherCounts() {
             s_allProgramsList[index], "TaskManager");
         hasManagedFileExplorerProgram |= desktop_str_eq(
             s_allProgramsList[index], "Managed File Explorer");
+        hasManagedCounterAppProgram |= desktop_str_eq(
+            s_allProgramsList[index], "Managed CounterApp");
     }
     const uint32_t catalogCount = static_cast<uint32_t>(
         gxos::apps::ManagedNativeAotCatalogCount());
     const bool passed =
-#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY) && \
+    defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+        catalogCount == 9u && startEntryCount == 19u && pinnedCount == 18u &&
+        kAllProgramsCount == 22 && hasManagedFileExplorerPin &&
+        hasManagedFileExplorerProgram && hasManagedCounterAppPin &&
+        hasManagedCounterAppProgram &&
+#elif defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+        catalogCount == 8u && startEntryCount == 18u && pinnedCount == 17u &&
+        kAllProgramsCount == 21 && hasManagedCounterAppPin &&
+        hasManagedCounterAppProgram &&
+#elif defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
         catalogCount == 8u && startEntryCount == 18u && pinnedCount == 17u &&
         kAllProgramsCount == 21 && hasManagedFileExplorerPin &&
         hasManagedFileExplorerProgram &&
@@ -1841,7 +1863,9 @@ static bool verifyC161LauncherCounts() {
 #endif
         hasManagedTaskManagerPin && hasNativeTaskManagerPin &&
         hasManagedTaskManagerProgram && hasNativeTaskManagerProgram;
-#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+    serial::puts("[C188-LAUNCHER-COUNTS] catalog=");
+#elif defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
     serial::puts("[C163-LAUNCHER-COUNTS] catalog=");
 #else
     serial::puts("[C161-LAUNCHER-COUNTS] catalog=");

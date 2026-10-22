@@ -784,7 +784,7 @@ internal static class GuideXosManagedHostServicesC185Composition
         return (int)s_runtime.Dispatch(host);
     }
 
-#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+#if HOSTLOGPROOF_C187_GUEST_CANDIDATE || HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
     [MethodImpl(MethodImplOptions.NoInlining)]
     internal static unsafe int Dispatch(NativeGxAppContext* context,
         uint nativeSelector)
@@ -801,8 +801,10 @@ internal static class GuideXosManagedHostServicesC185Composition
 
     internal static GuideXosApplicationDescriptor Descriptor => s_descriptor;
     internal static GuideXosC185Runtime CreateRuntimeForTests() => new();
-#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+#if HOSTLOGPROOF_C187_GUEST_CANDIDATE || HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
     internal static GuideXosC185ApplicationBridge CurrentBridgeForC187Tests =>
+        s_runtime.CurrentBridgeForTests;
+    internal static GuideXosC185ApplicationBridge CurrentBridgeForC188Tests =>
         s_runtime.CurrentBridgeForTests;
 #endif
 }
@@ -837,13 +839,20 @@ internal sealed class GuideXosC185Runtime
                 return GuideXosResult.InvalidArgument;
             ((GuideXosC185ApplicationBridge)application).SetIdentity(
                 CounterApplicationFactory.StableApplicationId, generation);
-#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+#if HOSTLOGPROOF_C187_GUEST_CANDIDATE || HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
             _ = host.TryLog("C187-FACTORY application=CounterApp factory=static"u8);
+#if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
+            _ = host.TryLog("C188-FACTORY selector=9 identity=com.guidexos.apps.managed.counterapp factory=static"u8);
+#endif
 #endif
             GuideXosResult launch = application.Launch(host);
-#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+#if HOSTLOGPROOF_C187_GUEST_CANDIDATE || HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
             if (launch == GuideXosResult.Success)
                 _ = host.TryLog("C187-WINDOW application=CounterApp result=PASS"u8);
+#if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
+            if (launch == GuideXosResult.Success)
+                _ = host.TryLog("C188-WINDOW selector=9 identity=com.guidexos.apps.managed.counterapp result=PASS"u8);
+#endif
 #endif
             if (launch != GuideXosResult.Success)
                 _ = _lifetime.Clear(CounterApplicationFactory.StableApplicationId,
@@ -865,7 +874,7 @@ internal sealed class GuideXosC185Runtime
         {
             GuideXosResult inputResult = application.HandleInput(host,
                 GuideXosInputEvent.From(host.LaunchContext));
-#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+#if HOSTLOGPROOF_C187_GUEST_CANDIDATE || HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
             GuideXosInputKind kind = host.LaunchContext.InputKind;
             if (inputResult == GuideXosResult.Success &&
                 (kind == GuideXosInputKind.PointerDown ||
@@ -874,6 +883,15 @@ internal sealed class GuideXosC185Runtime
             {
                 _ = host.TryLog("C187-INPUT application=CounterApp result=PASS"u8);
             }
+#if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
+            if (inputResult == GuideXosResult.Success &&
+                (kind == GuideXosInputKind.PointerDown ||
+                 kind == GuideXosInputKind.KeyDown ||
+                 kind == GuideXosInputKind.KeyChar))
+            {
+                _ = host.TryLog("C188-INPUT selector=9 identity=com.guidexos.apps.managed.counterapp result=PASS"u8);
+            }
+#endif
 #endif
             return inputResult;
         }

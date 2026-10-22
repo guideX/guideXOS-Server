@@ -2,7 +2,12 @@
   <PropertyGroup>
     <ResolveNuGetPackages>false</ResolveNuGetPackages>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'HostLogProof' and '$(HostLogProofC185Boundary)' == 'true'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'HostLogProof' and '$(C188ArtifactIsolation)' == 'true'">
+    <BaseOutputPath>$(C188HostOutputRoot)\host-bin\$(C188BuildScope)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(C188HostOutputRoot)\host-obj\$(C188BuildScope)\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(C188HostOutputRoot)\host-obj\$(C188BuildScope)\</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'HostLogProof' and '$(HostLogProofC185Boundary)' == 'true' and '$(C188ArtifactIsolation)' != 'true' and '$(HostLogProofC188ExternalAppIdentity)' != 'true'">
     <BaseOutputPath>$(MSBuildThisFileDirectory)out\dotnet\c185-managed-host-services\host-bin\</BaseOutputPath>
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)out\dotnet\c185-managed-host-services\host-obj\</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath>$(MSBuildThisFileDirectory)out\dotnet\c185-managed-host-services\host-obj\</MSBuildProjectExtensionsPath>

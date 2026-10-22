@@ -219,6 +219,9 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 #if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
 , 	{ "com.guidexos.apps.managed.fileexplorer", "Managed File Explorer", "Managed File Explorer", nullptr, nullptr, "app.files", "System", "Read-only managed browser over the bounded VFS directory service.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, detail::kManagedFileExplorerAliases, sizeof(detail::kManagedFileExplorerAliases) / sizeof(detail::kManagedFileExplorerAliases[0]), true, true, true, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 8u, kManagedNativeAotCompositeImagePath }
 #endif
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+, 	{ "com.guidexos.apps.managed.counterapp", "Managed CounterApp", "Managed CounterApp", nullptr, nullptr, "app.generic", "Development", "Development-only independently compiled CounterApp hosted in the resident NativeAOT composite image.", BuiltInAvailabilityBareMetal, 0, 0, 0, false, false, nullptr, 0, true, false, false, false, false, false, false, BuiltInAppLaunchKind::ManagedNativeAot, 9u, kManagedNativeAotCompositeImagePath }
+#endif
 };
 
 static const int kBuiltInAppMetadataCount = sizeof(kBuiltInAppMetadata) / sizeof(kBuiltInAppMetadata[0]);

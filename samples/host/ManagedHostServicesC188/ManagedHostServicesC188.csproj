@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>ManagedHostServicesC188Host</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\managed\HostLogProof\HostLogProof.csproj"
+      AdditionalProperties="HostLogProofHostTest=true;HostLogProofC185Boundary=true;HostLogProofC188ExternalAppIdentity=true;HostLogProofMode=C160Composite;HostLogProofC155ManagedNotesSession=true;HostLogProofC156ControlModifierShortcuts=true;HostLogProofC157ManagedNotesNewDocument=true;C188HostOutputRoot=$(C188HostOutputRoot)" />
+  </ItemGroup>
+</Project>

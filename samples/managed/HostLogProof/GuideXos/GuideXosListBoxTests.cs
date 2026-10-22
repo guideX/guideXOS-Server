@@ -79,6 +79,13 @@ public static class GuideXosListBoxTests
         bool spanOverflow = spanLabels.TryAdd(tooLong) ==
             GuideXosListBoxPopulationResult.Rejected &&
             spanLabels.ItemCount == 1 && spanLabels.SelectedLabel == "span";
+        string maximumSupportedText = new('x',
+            GuideXosListBox.MaximumSupportedLabelLength);
+        GuideXosListBox maximumSupported = new(1,
+            GuideXosListBox.MaximumSupportedLabelLength, 1, 20);
+        bool maximumSupportedLabel = maximumSupported.TryAdd(
+                maximumSupportedText) == GuideXosListBoxPopulationResult.Added &&
+            maximumSupported.GetItemLabel(0) == maximumSupportedText;
         spanLabels.ClearSelection();
         spanLabels.Focus();
         bool clearSelection = !spanLabels.HasSelection &&
@@ -86,7 +93,8 @@ public static class GuideXosListBoxTests
             spanLabels.FirstVisibleIndex == 0;
         return emptyState && emptyEnter && oneItem && population && clear &&
             repopulate && maximum && overflow && maximumLabel && labelOverflow &&
-            spanPopulation && spanOverflow && clearSelection;
+            spanPopulation && spanOverflow && maximumSupportedLabel &&
+            clearSelection;
     }
 
     private static bool SelectionAndActivation()

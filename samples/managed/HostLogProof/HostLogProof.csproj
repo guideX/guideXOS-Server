@@ -32,8 +32,16 @@
     <HostLogProofMapPath Condition="'$(HostLogProofMapPath)' == ''">$(MSBuildProjectDirectory)\..\..\..\out\dotnet\c185-managed-host-services\HostLogProof.map</HostLogProofMapPath>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofC188ExternalAppIdentity)' == 'true'">
+    <HostLogProofMapPath Condition="'$(HostLogProofMapPath)' == '' and '$(C188HostOutputRoot)' != ''">$(C188HostOutputRoot)\HostLogProof.map</HostLogProofMapPath>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofC187GuestCandidate)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C187_GUEST_CANDIDATE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofC188ExternalAppIdentity)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Allocating'">
@@ -770,6 +778,14 @@
 
   <ItemGroup Condition="'$(HostLogProofC187GuestCandidate)' == 'true'">
     <InternalsVisibleTo Include="ManagedHostServicesC187Host" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188ExternalAppIdentity)' == 'true'">
+    <InternalsVisibleTo Include="ManagedHostServicesC188Host" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188ExternalAppIdentity)' == 'true' and '$(HostLogProofHostTest)' != 'true'">
+    <Compile Remove="GuideXos/GuideXosManagedHostServicesC188Tests.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(HostLogProofC185Boundary)' == 'true'">

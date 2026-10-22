@@ -605,7 +605,12 @@ bool runC161ManagedTaskManagerRegistrationTest() {
         gxos::apps::FindManagedNativeAotAppByIdentity(
             "com.guidexos.apps.managed.calculator");
     const uint32_t expectedCatalogCount =
-#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY) && \
+    defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+        9u;
+#elif defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+        8u;
+#elif defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
         8u;
 #else
         7u;
@@ -633,7 +638,9 @@ bool runC161ManagedTaskManagerRegistrationTest() {
         gxos::apps::detail::builtInTextEquals(
             managedCalculator->appId,
             "com.guidexos.apps.managed.calculator");
-#if defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+    serial::puts("[C188-TM-REGISTRY] identity=com.guidexos.apps.managed.taskmanager selector=7 catalog=9 native-taskmanager=preserved native-calculator=preserved result=");
+#elif defined(GXOS_NATIVEAOT_C163_MANAGED_FILE_EXPLORER)
     serial::puts("[C163-TM-REGISTRY] identity=com.guidexos.apps.managed.taskmanager selector=7 catalog=8 display=Managed-Task-Manager native-taskmanager=preserved native-calculator=preserved managed-calculator=distinct result=");
 #else
     serial::puts("[C161-TM-REGISTRY] identity=com.guidexos.apps.managed.taskmanager selector=7 catalog=7 display=Managed-Task-Manager native-taskmanager=preserved native-calculator=preserved managed-calculator=distinct result=");
@@ -654,9 +661,15 @@ bool runC163ManagedFileExplorerRegistrationTest() {
     const gxos::apps::BuiltInAppMetadata* managedTaskManager =
         gxos::apps::FindManagedNativeAotAppByIdentity(
             "com.guidexos.apps.managed.taskmanager");
+    const uint32_t expectedCatalogCount =
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+        9u;
+#else
+        8u;
+#endif
     const bool passed = managed && native && managedTaskManager &&
         gxos::apps::ManagedNativeAotCatalogIsValid() &&
-        gxos::apps::ManagedNativeAotCatalogCount() == 8u &&
+        gxos::apps::ManagedNativeAotCatalogCount() == expectedCatalogCount &&
         gxos::apps::IsManagedNativeAotRecordValid(*managed) &&
         managed->managedSelector == 8u &&
         gxos::apps::detail::builtInTextEquals(
@@ -673,7 +686,56 @@ bool runC163ManagedFileExplorerRegistrationTest() {
         gxos::apps::detail::builtInTextEquals(
             native->appId, "gxos.builtin.fileexplorer") &&
         managedTaskManager->managedSelector == 7u;
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+    serial::puts("[C188-C163-FILE-EXPLORER-REGISTRY] managed=com.guidexos.apps.managed.fileexplorer selector=8 catalog=9 native=gxos.builtin.fileexplorer distinct=true result=");
+#else
     serial::puts("[C163-FILE-EXPLORER-REGISTRY] managed=com.guidexos.apps.managed.fileexplorer selector=8 catalog=8 native=gxos.builtin.fileexplorer distinct=true result=");
+#endif
+    serial::puts(passed ? "PASS\n" : "FAIL\n");
+    return passed;
+}
+#endif
+
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+bool runC188ExternalAppIdentityRegistrationTest() {
+    const gxos::apps::BuiltInAppMetadata* notes =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.notes");
+    const gxos::apps::BuiltInAppMetadata* settings =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.settingscenter");
+    const gxos::apps::BuiltInAppMetadata* calculator =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.calculator");
+    const gxos::apps::BuiltInAppMetadata* taskManager =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.taskmanager");
+    const gxos::apps::BuiltInAppMetadata* fileExplorer =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.fileexplorer");
+    const gxos::apps::BuiltInAppMetadata* counterApp =
+        gxos::apps::FindManagedNativeAotAppByIdentity(
+            "com.guidexos.apps.managed.counterapp");
+    const bool passed = gxos::apps::ManagedNativeAotCatalogIsValid() &&
+        gxos::apps::ManagedNativeAotCatalogCount() == 9u &&
+        notes && settings && calculator && taskManager && fileExplorer && counterApp &&
+        gxos::apps::IsManagedNativeAotRecordValid(*counterApp) &&
+        gxos::apps::IsBuiltInAppAvailableInBareMetal(*counterApp) &&
+        notes->managedSelector == 4u && settings->managedSelector == 5u &&
+        calculator->managedSelector == 6u && taskManager->managedSelector == 7u &&
+        fileExplorer->managedSelector == 8u && counterApp->managedSelector == 9u &&
+        gxos::apps::detail::builtInTextEquals(
+            counterApp->appId, "com.guidexos.apps.managed.counterapp") &&
+        gxos::apps::detail::builtInTextEquals(
+            counterApp->displayName, "Managed CounterApp") &&
+        gxos::apps::detail::builtInTextEquals(
+            counterApp->launchName, "Managed CounterApp") &&
+        gxos::apps::detail::builtInTextEquals(
+            counterApp->managedCompositeImagePath, kProductionCompositeImage) &&
+        !gxos::apps::detail::builtInTextEquals(
+            counterApp->appId, notes->appId) &&
+        counterApp->managedSelector != notes->managedSelector;
+    serial::puts("[C188-IDENTITY-REGISTRY] counterapp=com.guidexos.apps.managed.counterapp selector=9 production-selectors=4-8-preserved result=");
     serial::puts(passed ? "PASS\n" : "FAIL\n");
     return passed;
 }
@@ -1221,7 +1283,11 @@ public:
         // Notes and Settings Center close through ordinary window lifecycle
         // paths. Release their managed lifetime entries after close approval
         // so bounded App Model capacity remains reusable across transitions.
-        if (!m_replacingSurface && (m_selector == 4u || m_selector == 5u) &&
+        if (!m_replacingSurface && (m_selector == 4u || m_selector == 5u
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+                || m_selector == 9u
+#endif
+            ) &&
             m_surfaceApplicationId[0]) {
             const int32_t teardownResult = invokeManagedAction(
                 m_selector, kManagedApplicationLifetimeCloseActionId);
@@ -1240,6 +1306,20 @@ public:
                     m_selector, kLaunchFlagInput | kLaunchFlagInputKeyDown | 0x1Cu);
                 const bool staleRejected = staleInputResult != 0;
                 serial::puts("[C187-STALE-GENERATION] selector=00000004 generation=");
+                serial::put_hex32(m_applicationGeneration);
+                serial::puts(" callback=input result=");
+                serial::puts(staleRejected ? "REJECTED proof=PASS\n" : "ACCEPTED proof=FAIL\n");
+            }
+#endif
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+            if (m_selector == 9u && teardownResult == 0 &&
+                ManagedReturnTarget::identityEquals(
+                    m_surfaceApplicationId,
+                    "com.guidexos.apps.managed.counterapp")) {
+                const int32_t staleInputResult = invokeManagedInput(
+                    m_selector, kLaunchFlagInput | kLaunchFlagInputKeyDown | 0x1Cu);
+                const bool staleRejected = staleInputResult != 0;
+                serial::puts("[C188-STALE-GENERATION] selector=00000009 generation=");
                 serial::put_hex32(m_applicationGeneration);
                 serial::puts(" callback=input result=");
                 serial::puts(staleRejected ? "REJECTED proof=PASS\n" : "ACCEPTED proof=FAIL\n");
@@ -4912,6 +4992,16 @@ LaunchStatus launchLogicalApplication(const char* applicationId,
                                       const char* launchContext,
                                       uint32_t launchContextLength,
                                       uint32_t activationKind) {
+#if defined(GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY)
+    static bool c188IdentityRegistrationTestRun = false;
+    if (!c188IdentityRegistrationTestRun) {
+        c188IdentityRegistrationTestRun = true;
+        if (!runC188ExternalAppIdentityRegistrationTest()) {
+            serial::puts("[C188-IDENTITY-REGISTRY] launch=blocked result=FAIL\n");
+            return LaunchStatus::ManagedFailed;
+        }
+    }
+#endif
 #if defined(GXOS_NATIVEAOT_C164_FILE_ACTIVATION_PROOF)
     static bool c164AssociationTestsRun = false;
     if (!c164AssociationTestsRun) {

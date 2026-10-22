@@ -2544,7 +2544,11 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
-#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+#if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
+        // C188 maps the separately compiled CounterApp only to its dedicated
+        // development selector. Selectors 4-8 continue through production.
+        return DispatchC188ExternalAppIdentity(ctx);
+#elif HOSTLOGPROOF_C187_GUEST_CANDIDATE
         // The development candidate reuses the normal native selector path.
         // Selector 4 is occupied by the C185 sample for this image only;
         // selectors 5-8 still enter the existing static production registry.
@@ -3428,7 +3432,44 @@ public static unsafe class Program
 #endif
     }
 
-#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+#if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
+    internal enum C188GuestSelectorRoute : byte
+    {
+        Invalid,
+        CounterApp,
+        ProductionRegistry,
+    }
+
+    internal static C188GuestSelectorRoute GetC188GuestSelectorRoute(
+        uint selector) => selector switch
+        {
+            >= 4u and <= 8u => C188GuestSelectorRoute.ProductionRegistry,
+            9u => C188GuestSelectorRoute.CounterApp,
+            _ => C188GuestSelectorRoute.Invalid,
+        };
+
+    internal static int DispatchC188ExternalAppIdentity(
+        NativeGxAppContext* context)
+    {
+        if (context == null || context->size < GxAbi.AppContextLaunchPrefixSize ||
+            context->userData == null)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        uint selector = (uint)(nuint)context->userData;
+        switch (GetC188GuestSelectorRoute(selector))
+        {
+            case C188GuestSelectorRoute.CounterApp:
+                return GuideXosManagedHostServicesC185Composition.Dispatch(
+                    context, selector);
+            case C188GuestSelectorRoute.ProductionRegistry:
+                return DispatchC107Composite(context);
+            default:
+                return GxAbi.ErrorInvalidApplicationId;
+        }
+    }
+#elif HOSTLOGPROOF_C187_GUEST_CANDIDATE
     internal enum C187GuestSelectorRoute : byte
     {
         Invalid,

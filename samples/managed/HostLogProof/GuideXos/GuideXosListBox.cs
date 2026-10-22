@@ -34,7 +34,7 @@ public sealed class GuideXosListBox
     public const int DefaultRenderWidth = 48;
     public const int MaximumSupportedRenderWidth = 81;
 
-    private readonly char[] _labelStorage;
+    private readonly byte[] _labelStorage;
     private readonly int[] _labelLengths;
     private readonly int _maximumLabelLength;
     private int _visibleRowCount;
@@ -85,7 +85,7 @@ public sealed class GuideXosListBox
             lineHeight = 18;
         }
 
-        _labelStorage = new char[maximumItemCount * maximumLabelLength];
+        _labelStorage = new byte[maximumItemCount * maximumLabelLength];
         _labelLengths = new int[maximumItemCount];
         _maximumLabelLength = maximumLabelLength;
         _visibleRowCount = visibleRowCount;
@@ -178,8 +178,13 @@ public sealed class GuideXosListBox
     public string GetItemLabel(int index)
     {
         if (!IsValidIndex(index)) return string.Empty;
-        return new string(
-            _labelStorage, index * _maximumLabelLength, _labelLengths[index]);
+        Span<char> label = stackalloc char[_labelLengths[index]];
+        int offset = index * _maximumLabelLength;
+        for (int column = 0; column < label.Length; column++)
+        {
+            label[column] = (char)_labelStorage[offset + column];
+        }
+        return new string(label);
     }
 
     /// <summary>
@@ -204,7 +209,7 @@ public sealed class GuideXosListBox
         int offset = _itemCount * _maximumLabelLength;
         for (int index = 0; index < label.Length; index++)
         {
-            _labelStorage[offset + index] = label[index];
+            _labelStorage[offset + index] = (byte)label[index];
         }
         _labelLengths[_itemCount] = label.Length;
         ++_itemCount;
@@ -409,7 +414,7 @@ public sealed class GuideXosListBox
                 int offset = index * _maximumLabelLength;
                 for (int column = 0; column < length; column++)
                 {
-                    line[position++] = (byte)_labelStorage[offset + column];
+                    line[position++] = _labelStorage[offset + column];
                 }
             }
             if (surface.TrySetText(x, y + row * lineHeight,

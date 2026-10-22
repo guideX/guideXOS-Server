@@ -14,6 +14,7 @@ param(
     [switch]$ProductionApplication,
     [switch]$C185ExternalComposition,
     [switch]$C187GuestCandidate,
+    [switch]$C188ExternalAppIdentity,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -453,6 +454,12 @@ try {
          $managedProjectMode -ne 'C167ProofComposite')) {
         throw 'C187 guest candidate requires C185 external composition and a production C167 proof composite.'
     }
+    if ($C188ExternalAppIdentity -and
+        ($C187GuestCandidate -or -not $C185ExternalComposition -or
+         -not $ProductionApplication -or
+         $managedProjectMode -notin @('C160Composite','C167ProofComposite'))) {
+        throw 'C188 external identity requires the isolated C185 composition and a production C160 or C167 composite; it cannot share the C187 selector-4 candidate profile.'
+    }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
@@ -472,6 +479,11 @@ try {
         $publishProperties += '-p:HostLogProofC187GuestCandidate=true'
         $publishProperties += "-p:C187BuildScope=nativeaot"
         $publishProperties += "-p:C187HostOutputRoot=$OutputRoot"
+    }
+    if ($C188ExternalAppIdentity) {
+        $publishProperties += '-p:HostLogProofC188ExternalAppIdentity=true'
+        $publishProperties += "-p:C188BuildScope=nativeaot"
+        $publishProperties += "-p:C188HostOutputRoot=$OutputRoot"
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"
@@ -631,7 +643,7 @@ try {
         $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ThreadStaticLifecycleDiagnostics) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:`"$managedHostShimsObj`" `"$managedHostShimsSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ProductionApplication) { "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$c102StartupObj`" `"$c102StartupSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
-        "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true $(if ($C187GuestCandidate) { '--artifacts-path `"' + (Join-Path $OutputRoot 'project-artifacts') + '`"' }) -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true $($publishProperties -join ' ')"
+        "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true $(if ($C187GuestCandidate -or $C188ExternalAppIdentity) { '--artifacts-path `"' + (Join-Path $OutputRoot 'project-artifacts') + '`"' }) -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true $($publishProperties -join ' ')"
         "exit /b %errorlevel%"
     )
     $publishBatch | Set-Content -LiteralPath $buildBatch -Encoding ASCII
