@@ -1,0 +1,14 @@
+﻿{
+    "exit_code":  0,
+    "pid":  20904,
+    "started_at_utc":  "2026-10-22T05:19:59.8113816Z",
+    "finished_at_utc":  "2026-10-22T05:22:16.9957832Z",
+    "arguments":  [
+                      "-C",
+                      "D:\\dev\\guideXOSServer_REXX\\kernel",
+                      "-B",
+                      "ARCH=amd64",
+                      "BUILD_ROOT=../build/rexx/rx25/native-amd64-f8be9da08ba34853937041ba9f818d74",
+                      "all"
+                  ]
+}

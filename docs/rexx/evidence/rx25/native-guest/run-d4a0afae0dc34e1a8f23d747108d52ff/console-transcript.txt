@@ -1,0 +1,10 @@
+RX25 isolated QEMU Console transcript
+Kernel SHA-256: fcfd3ee4e3ec658feacb0890d314b31bfc1d1178bf06641604be50a01e338d88
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx25\qemu-d4a0afae0dc34e1a8f23d747108d52ff\guest\esp
+COMMAND: rexx /rx25-unseeded.rex | expected visible marker/status: RX25_UNSEEDED_SAMPLE
+COMMAND: rexx /rx25-unseeded.rex | expected visible marker/status: same RX25_UNSEEDED_SAMPLE value as first execution
+COMMAND: rexx /rx25-random-sequence.rex | expected visible marker/status: RX25_RANDOM_SEQUENCE_DONE
+COMMAND: rexx /rx24-date-time-clock-guard.rex | expected visible marker/status: RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE
+COMMAND: rexx /rx20clk.rex | expected visible marker/status: RX20_NATIVE_CLOCK_CAPABILITY_DONE
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=63
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

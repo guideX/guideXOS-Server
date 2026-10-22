@@ -1,0 +1,34 @@
+{
+  "schema": "guidexos.rexx.rx25.sanitizer-qualification.v1",
+  "phase": "RX25",
+  "status": "PASS",
+  "results": [
+    {
+      "kind": "Address",
+      "compiler": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\cl.exe",
+      "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for x64",
+      "targets_passed": 25,
+      "targets_total": 25,
+      "nonempty_test_stderr_logs": 0,
+      "findings": 0,
+      "local_expected_result_cases": 196,
+      "guideXOS_expected_exit_cases": 196,
+      "regina_available": false,
+      "durable_evidence": "sanitizer-address-d7c779bd50b8467a8d7bf65f905b0259"
+    },
+    {
+      "kind": "Undefined",
+      "compiler": "C:\\Program Files\\LLVM\\bin\\clang-cl.exe",
+      "compiler_version": "clang version 22.1.8 (https://github.com/llvm/llvm-project ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)",
+      "targets_passed": 25,
+      "targets_total": 25,
+      "nonempty_test_stderr_logs": 0,
+      "findings": 0,
+      "local_expected_result_cases": 196,
+      "guideXOS_expected_exit_cases": 196,
+      "regina_available": false,
+      "durable_evidence": "sanitizer-undefined-2b2a0946f3de45c0b8cc89dea9d5d8cb"
+    }
+  ],
+  "note": "Regina differential comparison was NOT_RUN because Regina was unavailable; each local expected-result corpus ran 196/196 guideXOS cases."
+}

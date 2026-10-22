@@ -196,6 +196,9 @@ typedef struct RexxVM {
     uint32_t numeric_digits; /* Per-VM NUMERIC DIGITS context. */
     uint32_t numeric_fuzz;   /* Per-VM NUMERIC FUZZ context. */
     RexxNumericForm numeric_form; /* Per-VM NUMERIC FORM context. */
+    /* Program-level RANDOM state. Deliberately not saved in routine frames. */
+    uint64_t random_state;
+    uint8_t random_initialized;
     size_t numeric_work_budget;
     size_t numeric_work_remaining;
     char *argument_string; /* Invocation string used by PARSE ARG. */

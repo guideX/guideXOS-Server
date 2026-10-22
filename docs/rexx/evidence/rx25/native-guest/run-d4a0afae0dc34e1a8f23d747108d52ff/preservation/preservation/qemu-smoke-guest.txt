@@ -1,0 +1,5 @@
+RX25 artifact preservation: PASS
+Stage: qemu-smoke-guest
+Verified UTC: 2026-10-22T05:26:48.0486975Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

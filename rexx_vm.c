@@ -4931,6 +4931,9 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
     vm->exit_has_value = 0;
     vm->pc = 0;
     memset(&vm->clock_context, 0, sizeof(vm->clock_context));
+    /* RANDOM belongs to this program execution, not the reusable VM object. */
+    vm->random_state = 0u;
+    vm->random_initialized = 0u;
     vm->status = REXX_VM_STATUS_OK;
     vm->error.status = REXX_VM_STATUS_OK;
     vm->error.pc = 0;

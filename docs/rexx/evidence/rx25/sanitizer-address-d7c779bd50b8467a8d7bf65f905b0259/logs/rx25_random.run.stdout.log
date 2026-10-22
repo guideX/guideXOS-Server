@@ -1,0 +1,2 @@
+[RX25-DISTRIBUTION] fixed-seed 60,000-call counts 0..5 = 9855,10003,9985,9975,9992,10190; tolerance=9500..10500 per category
+[RX25-RANDOM] assertions=2156 failures=0

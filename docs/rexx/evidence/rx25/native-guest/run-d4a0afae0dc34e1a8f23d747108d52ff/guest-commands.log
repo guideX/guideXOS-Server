@@ -1,0 +1,10 @@
+[2026-10-22T05:25:30.9934689Z] rexx /rx25-unseeded.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx25\qemu-d4a0afae0dc34e1a8f23d747108d52ff\screenshots-raw\rx25-01-unseeded-fallback-first-program.ppm
+[2026-10-22T05:25:49.0234325Z] rexx /rx25-unseeded.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx25\qemu-d4a0afae0dc34e1a8f23d747108d52ff\screenshots-raw\rx25-02-unseeded-fallback-new-program.ppm
+[2026-10-22T05:26:07.7894174Z] rexx /rx25-random-sequence.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx25\qemu-d4a0afae0dc34e1a8f23d747108d52ff\screenshots-raw\rx25-03-seed-reseed-range-and-error-recovery.ppm
+[2026-10-22T05:26:27.3120885Z] rexx /rx24-date-time-clock-guard.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx25\qemu-d4a0afae0dc34e1a8f23d747108d52ff\screenshots-raw\rx25-04-date-time-fail-closed-and-pit-monotonic.ppm
+[2026-10-22T05:26:44.6789389Z] rexx /rx20clk.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx25\qemu-d4a0afae0dc34e1a8f23d747108d52ff\screenshots-raw\rx25-05-independent-clock-contract.ppm

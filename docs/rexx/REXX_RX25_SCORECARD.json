@@ -1,0 +1,205 @@
+{
+  "schema": "guidexos.rexx.rx25.scorecard.v1",
+  "phase": "RX25",
+  "outcome": "A — Accepted",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "6e09bc51ec651646fbeeed50504594ce7a0b82fa",
+  "head_before_commit": "6e09bc51ec651646fbeeed50504594ce7a0b82fa",
+  "objective": "Implement and qualify the classic REXX RANDOM built-in while preserving RX1–RX24 behavior and the RX24 branch topology.",
+  "preflight": {
+    "tracked_worktree_clean_at_start": true,
+    "index_clean_at_start": true,
+    "rx24_head_matches_required": true,
+    "root_phase_marker_present": false,
+    "rx24_inventory_rows": 75,
+    "rx24_random_status": "Not implemented in inspected runtime dispatch",
+    "existing_random_dispatch_found": false,
+    "qac_online_and_clear_at_start": true,
+    "qemu_processes_at_start": 0,
+    "baseline_untracked_paths": 63847,
+    "baseline_untracked_manifest_sha256": "ae0f0b7a61aac81b33af2044d05221c57ace56db20216e1eee6cf168183f112d",
+    "rx24_start_paths": 51630,
+    "rx24_start_manifest_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+    "protected_root_artifacts": 31,
+    "preflight_evidence": "evidence/rx25/preflight.json"
+  },
+  "implementation": {
+    "signature": "RANDOM([min][,[max][,seed]])",
+    "generator": "PCG-XSH-RR 64/32 with guideXOS fixed stream",
+    "state_bytes": 8,
+    "multiplier": "6364136223846793005",
+    "increment": "1442695040888963407",
+    "explicit_seed_range": "0..999999999 inclusive",
+    "unseeded_policy": "Deterministic seed-zero fallback; no suitable general-purpose runtime seed service was available. Independent executions can repeat.",
+    "state_lifetime": "Per VM and program execution; persists through internal routines and condition unwinding; reset by rexx_vm_execute; distinct VMs do not share state.",
+    "equal_bounds": "Return the bound without drawing a range word; still initialize fallback state or apply an explicit reseed.",
+    "range_mapping": "Rejection sampling over a 32-bit output; inclusive width is at most 100001; exact decimal min-plus-offset arithmetic supports endpoints above uint64_t.",
+    "error_transition": "Validation, arithmetic, formatting, and result allocation complete before state commit; rejected calls do not reseed or advance state and return no partial result.",
+    "security": "Not cryptographic; never use for secrets, tokens, keys, or authentication."
+  },
+  "argument_contract": {
+    "defaults": "min=0, max=999",
+    "one_argument": "The single argument is max; min remains zero.",
+    "omitted_positions": "REXX_VALUE_UNSET retains positional meaning. RANDOM(10,) means min=10,max=999; RANDOM(,10) means min=0,max=10; RANDOM(,,seed) reseeds default bounds.",
+    "empty_string": "Rejected as supplied malformed input; not treated as omission.",
+    "bounds": "Nonnegative whole decimals; max >= min; max-min <= 100000, with exactly 100000 accepted.",
+    "large_endpoints": "Exact decimal representation; no binary floating-point narrowing; bounded by the existing parser, VM numeric-work, and output limits."
+  },
+  "hosted_qualification": {
+    "status": "PASS",
+    "random_direct_assertions": 2156,
+    "random_direct_failures": 0,
+    "independent_reference": "Two VMs matched an independently written PCG reference across 1000 calls; same-seed reseed restarted the sequence; distinct seeds were compared without requiring every value to differ.",
+    "state_cases": [
+      "VM isolation",
+      "internal routine sequence persistence",
+      "state retention after condition unwind",
+      "program execution reset",
+      "invalid input preserves prior state",
+      "failed result allocation rolls back tentative reseed",
+      "unsupported binary-number arguments are rejected without state change"
+    ],
+    "distribution_smoke": {
+      "status": "PASS",
+      "seed": 246813579,
+      "range": "0..5",
+      "samples": 60000,
+      "counts": [
+        9855,
+        10003,
+        9985,
+        9975,
+        9992,
+        10190
+      ],
+      "expected_per_category": 10000,
+      "tolerance": "9500..10500 per category",
+      "claim_limit": "A deterministic sanity check only; not proof of independence, mathematical randomness, or cryptographic quality."
+    },
+    "inherited_cli_cases": "24/24",
+    "inherited_fixture_counts": {
+      "RX3": "13/13",
+      "RX4": "11/11",
+      "RX5": "13/13",
+      "RX6": "25/25",
+      "RX7": "33/33",
+      "RX8": "26/26",
+      "RX9": "24/24",
+      "RX10": "19/19",
+      "RX12": "31/31",
+      "RX13": "33/33",
+      "RX14": "29/29",
+      "RX15": "3/3",
+      "RX16": "10/10",
+      "RX17": "10/10",
+      "RX22": "1/1"
+    },
+    "notable_inherited_assertions": {
+      "RX19_DATE_TIME_calendar": 8275,
+      "RX20_clock_contract": "Passed as a sanitizer target and QAC guest suite",
+      "RX24_ADDRESS_TRACE": 65
+    },
+    "regina": "NOT_RUN — no Regina executable was available; no external compatibility percentage is claimed.",
+    "evidence": "evidence/rx25/hosted-qualification-summary.json"
+  },
+  "sanitizers": {
+    "status": "PASS",
+    "ASan": {
+      "targets_passed": "25/25",
+      "compiler": "MSVC 19.51.36260",
+      "findings": 0,
+      "nonempty_test_stderr_logs": 0
+    },
+    "UBSan": {
+      "targets_passed": "25/25",
+      "compiler": "clang 22.1.8",
+      "findings": 0,
+      "nonempty_test_stderr_logs": 0
+    },
+    "local_expected_result_corpus": {
+      "cases_per_sanitizer": "196/196 guideXOS expected-exit cases",
+      "Regina": "NOT_RUN — unavailable"
+    },
+    "evidence": "evidence/rx25/sanitizer-qualification.json"
+  },
+  "freestanding_amd64": {
+    "status": "PASS",
+    "rexx_c_objects": 9,
+    "kernel_elf_sha256": "fcfd3ee4e3ec658feacb0890d314b31bfc1d1178bf06641604be50a01e338d88",
+    "freestanding_flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "output_root": "build/rexx/rx25/native-amd64-f8be9da08ba34853937041ba9f818d74",
+    "evidence": "evidence/rx25/native-build-summary.json"
+  },
+  "qac_guest_acceptance": {
+    "status": "PASS",
+    "project": "guideXOSServer",
+    "mode": "acceptance",
+    "qemu_version": "11.0.0",
+    "network_disabled": true,
+    "disposable_media": true,
+    "kernel_sha256_matches_staged_media": true,
+    "random_guest_checks": [
+      "Unseeded first sample was 422 in two independent program executions.",
+      "Seeded values remained within 1..6 and reseeding restarted the sample.",
+      "Invalid seed and range calls were trapped; a later valid call completed."
+    ],
+    "clock_guest_checks": [
+      "Current DATE and TIME forms failed closed.",
+      "DATE/TIME guard reported PIT alive.",
+      "TIME E increased from 0.000000 to 0.099993; kernel PIT heartbeat advanced from 1 to 63 records during the suite."
+    ],
+    "shutdown_and_release": {
+      "qmp_shutdown_acknowledged": true,
+      "qac_reported_qemu_child_exit_code": 0,
+      "qac_release_marker_logged": true,
+      "bounded_release_status_poll": "PASS — post-exit status showed zero managed sessions, queued requests, and blocked requests.",
+      "final_qac_list": "Reservations: 0; Managed sessions: 0",
+      "qac_cli_process_exit_code_recorded_by_runner": null,
+      "owned_qemu_absent_after_shutdown": true,
+      "foreign_qemu_controlled": false
+    },
+    "runner_retry_note": "The first managed guest run shut down safely but failed a runner-only serial-access postcheck because an unused RX24 recovery script was listed as expected. The check was corrected; the second managed run and release poll passed.",
+    "evidence": "evidence/rx25/native-guest-summary.json"
+  },
+  "artifact_safety": {
+    "protected_root_objects_and_pdbs": "31/31 exact size and SHA-256 matches",
+    "comparison": "evidence/rx25/protected-artifact-comparison.json",
+    "preexisting_untracked_paths": "All 63,847 RX25-start paths and all 51,630 RX24-start paths remained present before staging.",
+    "manifest_reconciliation": "evidence/rx25/untracked-reconciliation-final.json",
+    "rx23_discrepancy": "The RX23 checksum was recorded, but its source path list was unavailable. RX24 raw manifest bytes reproduce its recorded hash but use UTF-8 without BOM, CRLF, and non-ordinal order (644 inversions); canonical RX25-style serialization has a different hash. The 37-path RX24-final/RX25-start count delta matches the 37 paths added by the RX24 commit, none present in RX24 start paths. The missing RX23 list prevents attributing its hash difference to content or serialization path by path."
+  },
+  "inventory": {
+    "rows": 75,
+    "implemented": 55,
+    "not_implemented": 15,
+    "partial": 3,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "DATE_TIME_TRACE_classifications_unchanged": true,
+    "file": "REXX_RX25_BUILTIN_INVENTORY.csv"
+  },
+  "remaining_limits": [
+    "The unseeded policy is deterministic seed zero, so independent executions may repeat.",
+    "The guideXOS sequence is implementation-specific; no IBM bit-for-bit sequence claim is made.",
+    "Regina was unavailable, so external interpreter comparison did not run.",
+    "The QAC guest runner recorded a null CLI process exit code, but it recorded child exit code 0, the release marker, and a successful post-release zero-session status poll."
+  ],
+  "recommended_rx26_scope": "Select the next P3 unimplemented built-in through the inventory-first gate; INDEX is a compact string-function candidate. Keep stream and terminal functions behind an explicit I/O contract, and leave DATE/TIME/TRACE scope unchanged unless separately authorized.",
+  "artifact_safety_manifest_generation": {
+    "rx24_raw_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+    "rx24_raw_encoding": "UTF-8 without BOM, CRLF",
+    "rx24_ordinal_inversions": 644,
+    "rx24_canonical_rx25_style_sha256": "90bbcc4ae53c45d256d1c9bab53c0614de126f8007868fe7f98d5569a5d67620",
+    "rx24_final_to_rx25_start_path_count_delta": 37,
+    "rx24_commit_additions": 37,
+    "rx23_path_list_available": false
+  }
+}

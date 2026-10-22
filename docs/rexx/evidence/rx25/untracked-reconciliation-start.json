@@ -1,0 +1,41 @@
+{
+  "schema": "guidexos.rexx.rx25.untracked-reconciliation.v1",
+  "baseline_paths": 63847,
+  "baseline_sha256": "ae0f0b7a61aac81b33af2044d05221c57ace56db20216e1eee6cf168183f112d",
+  "rx24_start_paths": 51630,
+  "rx24_start_manifest_raw_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+  "rx24_start_recorded_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+  "rx24_start_sha256_matches_recorded": true,
+  "rx23_provided_sha256": "43e57cf301f213ad11bb1bcbff3e73af8eab4cd79ef1b0e6f9fdc210119a519d",
+  "rx23_source_manifest_path": null,
+  "rx23_source_manifest_found": false,
+  "rx24_final_reported_path_count": 63884,
+  "rx24_final_reported_new_paths": 12254,
+  "current_untracked_paths": 63847,
+  "preexisting_rx24_start_paths_still_untracked": 51630,
+  "missing_rx24_start_paths": 0,
+  "newly_untracked_since_rx24_start": 12217,
+  "current_count_delta_from_rx24_final": -37,
+  "conclusion": "RX24 raw manifest hash and path membership reproduce from its saved CRLF file; generation differs from the canonical RX25 serializer (ordinal ordering and LF endings). RX23 source list is absent, so its hash discrepancy cannot be attributed path by path. The 37-path final-count delta is accounted for by the RX24 commit additions, which were absent from the RX24 start manifest. RX25 baseline is independently captured as UTF-8 without BOM, slash-normalized, ordinal sorted, LF-delimited with final LF.",
+  "rx24_raw_manifest_audit": {
+    "raw_bytes": 6195043,
+    "raw_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+    "line_count": 51630,
+    "encoding": "UTF-8, no BOM",
+    "line_ending": "CRLF",
+    "ordinal_sorted": false,
+    "ordinal_inversions": 644,
+    "canonical_slash_normalized_ordinal_utf8_lf_sha256": "90bbcc4ae53c45d256d1c9bab53c0614de126f8007868fe7f98d5569a5d67620",
+    "canonical_bytes": 6143413
+  },
+  "rx24_to_rx25_count_delta_audit": {
+    "rx24_final_untracked_count": 63884,
+    "rx25_start_untracked_count": 63847,
+    "delta": 37,
+    "rx24_transition_parent": "db3c10308923118bbb408328c33c23c64c801fb3",
+    "rx24_transition_head": "6e09bc51ec651646fbeeed50504594ce7a0b82fa",
+    "paths_added_by_rx24_commit": 37,
+    "rx24_commit_additions_overlapping_start_manifest": 0,
+    "finding": "The count delta matches RX24 commit additions, all absent from the RX24 start manifest."
+  }
+}

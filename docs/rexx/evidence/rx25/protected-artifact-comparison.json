@@ -1,0 +1,11 @@
+{
+  "schema": "guidexos.rexx.rx25.protected-artifact-comparison.v1",
+  "captured_at_utc": "2026-10-22T05:30:49.2281985Z",
+  "status": "PASS",
+  "expected_count": 31,
+  "actual_count": 31,
+  "missing": [],
+  "unexpected": [],
+  "modified": [],
+  "all_hashes_and_sizes_match": true
+}

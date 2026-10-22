@@ -1807,6 +1807,305 @@ static RexxVMStatus rexx_builtin_return_decimal(RexxVM *vm,
     return rexx_value_set_string(result, output, (size_t)length);
 }
 
+/* PCG-XSH-RR 64/32, with a fixed stream selector. Unsigned overflow is part
+ * of the recurrence and is defined modulo 2^64. */
+#define REXX_RANDOM_PCG_MULTIPLIER UINT64_C(6364136223846793005)
+#define REXX_RANDOM_PCG_INCREMENT  UINT64_C(1442695040888963407)
+#define REXX_RANDOM_DEFAULT_SEED   UINT32_C(0)
+
+static uint32_t rexx_random_next_u32(uint64_t *state)
+{
+    uint64_t old_state = *state;
+    uint32_t shifted = (uint32_t)(((old_state >> 18u) ^ old_state) >> 27u);
+    uint32_t rotation = (uint32_t)(old_state >> 59u);
+    *state = old_state * REXX_RANDOM_PCG_MULTIPLIER +
+             REXX_RANDOM_PCG_INCREMENT;
+    return (shifted >> rotation) |
+           (shifted << ((UINT32_C(0) - rotation) & UINT32_C(31)));
+}
+
+static void rexx_random_seed_state(uint64_t *state, uint32_t seed)
+{
+    *state = 0u;
+    (void)rexx_random_next_u32(state);
+    *state += (uint64_t)seed;
+    (void)rexx_random_next_u32(state);
+}
+
+/* Rejection sampling maps a uniform 32-bit word to [0, bound) without modulo
+ * bias. Here bound <= 100001, so threshold < bound <= 100001. The output
+ * transform maps old state 0x07fffe0000000000 to 0xffffffff with rotation 0,
+ * which is accepted for every supported bound. The LCG has a 2^64 period
+ * (increment odd, multiplier congruent to 1 mod 4), so the loop terminates
+ * within at most 2^64 draws for each nonconstant requested range. */
+static uint32_t rexx_random_bounded(uint64_t *state, uint32_t bound)
+{
+    uint32_t threshold = (uint32_t)((UINT64_C(1) << 32u) % bound);
+    for (;;) {
+        uint32_t candidate = rexx_random_next_u32(state);
+        if (candidate >= threshold) return candidate % bound;
+    }
+}
+
+static RexxVMStatus rexx_random_parse_integer(RexxVM *vm,
+                                              const RexxValue *value,
+                                              RexxDecimal *number)
+{
+    size_t source_length = 0u;
+    uint32_t small_value;
+    RexxNumericStatus numeric_status;
+    RexxVMStatus status = rexx_builtin_decimal_exact(
+        value, number, &source_length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    status = rexx_builtin_charge_numeric_work(
+        vm, source_length + number->length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    numeric_status = rexx_decimal_to_uint32(number, &small_value);
+    /* RANGE means an exact nonnegative whole number too large for uint32_t;
+     * RANDOM bounds themselves are arbitrary-precision decimal values. */
+    if (numeric_status != REXX_NUMERIC_OK &&
+        numeric_status != REXX_NUMERIC_RANGE)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    return REXX_VM_STATUS_OK;
+}
+
+static size_t rexx_random_integer_length(const RexxDecimal *number)
+{
+    if (number->sign == 0) return 1u;
+    if (number->scale > 0)
+        return number->length - (size_t)number->scale;
+    return number->length +
+           (size_t)(-(int64_t)number->scale);
+}
+
+/* Return one base-10 digit by distance from the units position. The operand
+ * has already been checked as a nonnegative whole decimal. */
+static unsigned int rexx_random_integer_digit(const RexxDecimal *number,
+                                              size_t position)
+{
+    size_t zeroes;
+    size_t coefficient_position;
+    if (number->sign == 0) return 0u;
+    if (number->scale > 0) {
+        size_t integer_digits = number->length - (size_t)number->scale;
+        if (position >= integer_digits) return 0u;
+        return (unsigned int)(number->digits[integer_digits - position - 1u] -
+                              '0');
+    }
+    zeroes = (size_t)(-(int64_t)number->scale);
+    if (position < zeroes) return 0u;
+    coefficient_position = position - zeroes;
+    if (coefficient_position >= number->length) return 0u;
+    return (unsigned int)(number->digits[number->length -
+                                         coefficient_position - 1u] - '0');
+}
+
+/* Compute max-min using virtual integer digits, so a bound above uint64_t
+ * never passes through floating point or a narrowed machine integer. */
+static RexxVMStatus rexx_random_range_difference(
+    RexxVM *vm, const RexxDecimal *minimum, const RexxDecimal *maximum,
+    uint32_t *difference)
+{
+    size_t minimum_length = rexx_random_integer_length(minimum);
+    size_t maximum_length = rexx_random_integer_length(maximum);
+    size_t positions = minimum_length > maximum_length
+                           ? minimum_length : maximum_length;
+    size_t position;
+    unsigned int borrow = 0u;
+    uint32_t value = 0u;
+    uint32_t place = 1u;
+    RexxVMStatus status;
+
+    if (rexx_decimal_compare(minimum, maximum) > 0)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    status = rexx_builtin_charge_numeric_work(vm, positions);
+    if (status != REXX_VM_STATUS_OK) return status;
+    for (position = 0u; position < positions; ++position) {
+        int digit = (int)rexx_random_integer_digit(maximum, position) -
+                    (int)rexx_random_integer_digit(minimum, position) -
+                    (int)borrow;
+        if (digit < 0) {
+            digit += 10;
+            borrow = 1u;
+        } else {
+            borrow = 0u;
+        }
+        if (position >= 6u) {
+            if (digit != 0) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        } else {
+            uint32_t contribution = (uint32_t)digit * place;
+            if (contribution > UINT32_C(100000) - value)
+                return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+            value += contribution;
+            if (position < 5u) place *= 10u;
+        }
+    }
+    if (borrow != 0u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    *difference = value;
+    return REXX_VM_STATUS_OK;
+}
+
+/* Add a bounded offset to an arbitrary-precision integer without rounding.
+ * Trailing zeroes are retained as a negative decimal scale, keeping the
+ * coefficient within the existing 512-digit numeric representation. */
+static RexxVMStatus rexx_random_add_offset(const RexxDecimal *minimum,
+                                           uint32_t offset,
+                                           RexxDecimal *result)
+{
+    char reversed[REXX_DECIMAL_MAX_DIGITS];
+    size_t minimum_length;
+    size_t coefficient_length = 0u;
+    size_t trailing_zeroes = 0u;
+    size_t position = 0u;
+    uint32_t addend = offset;
+    unsigned int carry = 0u;
+    int started = 0;
+
+    if (offset == 0u) {
+        *result = *minimum;
+        return REXX_VM_STATUS_OK;
+    }
+    minimum_length = rexx_random_integer_length(minimum);
+    while (position < minimum_length || addend != 0u || carry != 0u) {
+        unsigned int add_digit = (unsigned int)(addend % 10u);
+        unsigned int sum;
+        unsigned int digit;
+        addend /= 10u;
+        sum = rexx_random_integer_digit(minimum, position) + add_digit + carry;
+        carry = sum / 10u;
+        digit = sum % 10u;
+        if (!started && digit == 0u) {
+            ++trailing_zeroes;
+        } else {
+            started = 1;
+            if (coefficient_length >= sizeof(reversed))
+                return REXX_VM_STATUS_RESOURCE_LIMIT;
+            reversed[coefficient_length++] = (char)('0' + digit);
+        }
+        if (position == SIZE_MAX) return REXX_VM_STATUS_RESOURCE_LIMIT;
+        ++position;
+    }
+    memset(result, 0, sizeof(*result));
+    if (!started) {
+        result->digits[0] = '0';
+        result->length = 1u;
+        return REXX_VM_STATUS_OK;
+    }
+    if (trailing_zeroes > (size_t)INT32_MAX)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    result->length = coefficient_length;
+    result->digits[coefficient_length] = '\0';
+    result->scale = -(int32_t)trailing_zeroes;
+    result->sign = 1;
+    while (coefficient_length != 0u) {
+        --coefficient_length;
+        result->digits[coefficient_length] = reversed[
+            result->length - coefficient_length - 1u];
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_random(RexxVM *vm,
+                                        const RexxValue *arguments,
+                                        size_t argument_count,
+                                        RexxValue *result)
+{
+    static const char zero_text[] = "0";
+    static const char default_max_text[] = "999";
+    RexxDecimal minimum, maximum, random_result;
+    const RexxValue *minimum_argument = NULL;
+    const RexxValue *maximum_argument = NULL;
+    uint32_t seed = 0u, difference, offset = 0u;
+    int has_seed = 0;
+    uint64_t next_state;
+    RexxVMStatus status;
+    RexxNumericStatus numeric_status;
+
+    if (vm == NULL || !vm->initialized ||
+        (argument_count != 0u && arguments == NULL))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (argument_count > 3u)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+
+    numeric_status = rexx_decimal_parse(zero_text, sizeof(zero_text) - 1u,
+                                        &minimum);
+    if (numeric_status != REXX_NUMERIC_OK) {
+        status = REXX_VM_STATUS_NUMERIC_ERROR;
+        goto cleanup;
+    }
+    numeric_status = rexx_decimal_parse(
+        default_max_text, sizeof(default_max_text) - 1u, &maximum);
+    if (numeric_status != REXX_NUMERIC_OK) {
+        status = REXX_VM_STATUS_NUMERIC_ERROR;
+        goto cleanup;
+    }
+
+    if (argument_count == 1u &&
+        arguments[0].type != REXX_VALUE_UNSET) {
+        /* The lone positional argument is max; an explicit comma switches
+         * the call to min,max positional interpretation. */
+        maximum_argument = &arguments[0];
+    } else {
+        if (argument_count >= 1u &&
+            arguments[0].type != REXX_VALUE_UNSET)
+            minimum_argument = &arguments[0];
+        if (argument_count >= 2u &&
+            arguments[1].type != REXX_VALUE_UNSET)
+            maximum_argument = &arguments[1];
+    }
+    if (minimum_argument != NULL) {
+        status = rexx_random_parse_integer(vm, minimum_argument, &minimum);
+        if (status != REXX_VM_STATUS_OK) goto cleanup;
+    }
+    if (maximum_argument != NULL) {
+        status = rexx_random_parse_integer(vm, maximum_argument, &maximum);
+        if (status != REXX_VM_STATUS_OK) goto cleanup;
+    }
+    if (argument_count >= 3u &&
+        arguments[2].type != REXX_VALUE_UNSET) {
+        RexxDecimal seed_decimal;
+        uint32_t converted_seed;
+        has_seed = 1;
+        status = rexx_random_parse_integer(vm, &arguments[2], &seed_decimal);
+        if (status != REXX_VM_STATUS_OK) goto cleanup;
+        numeric_status = rexx_decimal_to_uint32(&seed_decimal,
+                                                &converted_seed);
+        if (numeric_status != REXX_NUMERIC_OK ||
+            converted_seed > UINT32_C(999999999)) {
+            status = REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+            goto cleanup;
+        }
+        seed = converted_seed;
+    }
+
+    status = rexx_random_range_difference(vm, &minimum, &maximum,
+                                          &difference);
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+
+    next_state = vm->random_state;
+    if (has_seed) {
+        rexx_random_seed_state(&next_state, seed);
+    } else if (!vm->random_initialized) {
+        /* IBM leaves the first unseeded value implementation-defined. Use a
+         * deterministic seed-zero fallback in every execution environment. */
+        rexx_random_seed_state(&next_state, REXX_RANDOM_DEFAULT_SEED);
+    }
+    if (difference != 0u)
+        offset = rexx_random_bounded(&next_state, difference + 1u);
+    status = rexx_random_add_offset(&minimum, offset, &random_result);
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+    status = rexx_builtin_return_decimal(vm, &random_result, result);
+    if (status != REXX_VM_STATUS_OK) goto cleanup;
+
+    /* Validation, result arithmetic, and allocation all complete before the
+     * VM's program-level state changes. Failed calls consume no random word. */
+    vm->random_state = next_state;
+    vm->random_initialized = 1u;
+
+cleanup:
+    return status;
+}
+
 static RexxVMStatus rexx_builtin_abs(RexxVM *vm,
                                      const RexxValue *arguments,
                                      size_t argument_count,
@@ -3840,6 +4139,7 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "BITAND", 1u, 3u, rexx_builtin_bitand, NULL },
     { "BITOR", 1u, 3u, rexx_builtin_bitor, NULL },
     { "BITXOR", 1u, 3u, rexx_builtin_bitxor, NULL },
+    { "RANDOM", 0u, 3u, NULL, rexx_builtin_random },
     { "DATE", 0u, 3u, NULL, rexx_builtin_date },
     { "TIME", 0u, 1u, NULL, rexx_builtin_time }
 };

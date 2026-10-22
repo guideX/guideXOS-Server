@@ -1,0 +1,46 @@
+{
+  "schema": "guidexos.rexx.rx25.native-guest-summary.v1",
+  "phase": "RX25",
+  "status": "PASS",
+  "evidence_directory": "run-d4a0afae0dc34e1a8f23d747108d52ff",
+  "kernel_sha256": "fcfd3ee4e3ec658feacb0890d314b31bfc1d1178bf06641604be50a01e338d88",
+  "network_disabled": true,
+  "disposable_media": true,
+  "guest_scripts": [
+    "rx25-random-sequence.rex",
+    "rx25-unseeded.rex",
+    "rx24-date-time-clock-guard.rex",
+    "rx20clk.rex"
+  ],
+  "unseeded_sample": "422 on both separate program executions, visually confirmed in screenshots rx25-01 and rx25-02",
+  "seeded_reseed_and_range": "RX25_SEEDED_RANGE_RESEED_OK",
+  "invalid_calls_and_recovery": [
+    "RX25_INVALID_SEED_CAUGHT",
+    "RX25_INVALID_RANGE_CAUGHT",
+    "RX25_POST_ERROR_RANDOM_RECOVERED",
+    "RX25_RANDOM_SEQUENCE_DONE"
+  ],
+  "date_time": "Current DATE and TIME calls failed closed; RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE observed.",
+  "monotonic_clock": "RX20 TIME E advanced from 0.000000 to 0.099993 in the guest screenshot; kernel PIT heartbeat increased during suite.",
+  "heartbeat_count_before": 1,
+  "heartbeat_count_after": 63,
+  "qac": {
+    "project": "guideXOSServer",
+    "mode": "acceptance",
+    "reservation_released": true,
+    "reported_qemu_child_exit_code": 0,
+    "qac_cli_exit_code": null,
+    "post_release_status": "Coordinator: Online\nName: guideXOS QAC\nVersion: 2.0.0\nPID: 15972\nStarted (UTC): 2026-10-22T03:47:13.7210260+00:00\nUptime: 5974s\nQEMU processes: 0 (0 foreign)\nManaged development limit: 2\nManaged sessions: 0; queued: 0; blocked: 0",
+    "release_poll": "PASS: bounded status poll observed zero managed sessions, queued requests, and blocked requests.",
+    "qmp_shutdown_acknowledged": true
+  },
+  "process_reconciliation": "qemu-process-reconciliation.json",
+  "screenshots": [
+    "rx25-01-unseeded-fallback-first-program.png",
+    "rx25-02-unseeded-fallback-new-program.png",
+    "rx25-03-seed-reseed-range-and-error-recovery.png",
+    "rx25-04-date-time-fail-closed-and-pit-monotonic.png",
+    "rx25-05-independent-clock-contract.png"
+  ],
+  "first_attempt_note": "A first guest run ended safely after an RX25 harness postcheck expected an unused RX24 script; the QAC reservation returned to zero. The access check was corrected and the second managed run passed."
+}

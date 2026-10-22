@@ -1,0 +1,21 @@
+{
+  "schema": "guidexos.rexx.rx25.native-build-summary.v1",
+  "phase": "RX25",
+  "status": "PASS",
+  "command": "C:\\mingw64\\bin\\mingw32-make.exe -C kernel -B ARCH=amd64 BUILD_ROOT=../build/rexx/rx25/native-amd64-f8be9da08ba34853937041ba9f818d74 all",
+  "kernel_elf_sha256": "fcfd3ee4e3ec658feacb0890d314b31bfc1d1178bf06641604be50a01e338d88",
+  "kernel_elf_sha256_reverified": "fcfd3ee4e3ec658feacb0890d314b31bfc1d1178bf06641604be50a01e338d88",
+  "rexx_c_object_count": 9,
+  "freestanding_flags": [
+    "-ffreestanding",
+    "-nostdlib",
+    "-nostdinc++",
+    "-fno-builtin",
+    "-fno-exceptions",
+    "-fno-rtti"
+  ],
+  "output_root": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx25\\native-amd64-f8be9da08ba34853937041ba9f818d74",
+  "detailed_link_evidence": "native-build/native-link-evidence-f8be9da08ba34853937041ba9f818d74.json",
+  "status_file": "native-build/native-build-f8be9da08ba34853937041ba9f818d74.status.json",
+  "protected_artifact_comparison": "../protected-artifact-comparison.json"
+}

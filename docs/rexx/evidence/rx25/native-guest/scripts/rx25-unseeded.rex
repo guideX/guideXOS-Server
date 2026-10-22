@@ -1,0 +1,4 @@
+sample = RANDOM()
+IF sample < 0 THEN EXIT 20
+IF sample > 999 THEN EXIT 21
+SAY 'RX25_UNSEEDED_SAMPLE' sample
