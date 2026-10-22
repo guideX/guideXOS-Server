@@ -1,5 +1,6 @@
 #include "include/kernel/native_elf_baremetal.h"
 #include "include/kernel/native_elf_fault.h"
+#include "include/kernel/native_elf_alignment.h"
 
 #include "include/kernel/arch.h"
 #include "include/kernel/desktop.h"
@@ -323,6 +324,7 @@ struct Runtime {
     NativeWindowOwner* owner;
     gx_app_context context;
     gx_host_calls host;
+    uint8_t* imageAllocation;
     uint8_t* image;
     uint64_t imageBytes;
     gx_result (GX_CALL *entry)(gx_app_context*);
@@ -354,6 +356,14 @@ struct Runtime {
     // (StopOwner) reclaims exactly this app's sounds.
     uint64_t audioOwner;
 };
+
+static void release_image(Runtime* runtime) {
+    if (!runtime) return;
+    delete[] runtime->imageAllocation;
+    runtime->imageAllocation = nullptr;
+    runtime->image = nullptr;
+    runtime->imageBytes = 0;
+}
 
 void NativeWindowOwner::record_frame_guard_failure() {
     if (m_runtime) ++m_runtime->frameGuardFailures;
@@ -976,6 +986,7 @@ static bool load_image(Runtime* runtime) {
     uint64_t writableMaximum = 0;
     uint64_t readOnlyMinimum = ~0ull;
     uint64_t readOnlyMaximum = 0;
+    uint64_t imageAlignment = kPageSize;
     uint32_t loadCount = 0;
     for (uint16_t i = 0; i < header.phnum; ++i) {
         Elf64ProgramHeader program;
@@ -990,6 +1001,16 @@ static bool load_image(Runtime* runtime) {
             log_runtime(runtime, "load FAIL=segment-bounds");
             return false;
         }
+        uint64_t segmentAlignment = 0;
+        if (!kernel::native_elf_alignment::segment_alignment_valid(
+                program.offset, program.vaddr, program.align) ||
+            !kernel::native_elf_alignment::required_alignment(
+                program.align, kPageSize, &segmentAlignment) ||
+            segmentAlignment > kMaxLoadedImageBytes) {
+            log_runtime(runtime, "load FAIL=segment-alignment");
+            return false;
+        }
+        if (segmentAlignment > imageAlignment) imageAlignment = segmentAlignment;
         const uint64_t start = align_down(program.vaddr);
         const uint64_t end = align_up(program.vaddr + program.memsz);
         if (start < minimum) minimum = start;
@@ -1015,11 +1036,26 @@ static bool load_image(Runtime* runtime) {
     }
 
     const uint64_t imageBytes = maximum - minimum;
-    runtime->image = new uint8_t[static_cast<uint32_t>(imageBytes)];
-    if (!runtime->image) {
+    uint64_t allocationBytes = 0;
+    if (!kernel::native_elf_alignment::allocation_size(imageBytes, imageAlignment,
+            0xFFFFFFFFull, &allocationBytes)) {
+        log_runtime(runtime, "load FAIL=aligned-image-allocation-size");
+        return false;
+    }
+    runtime->imageAllocation = new uint8_t[static_cast<uint32_t>(allocationBytes)];
+    if (!runtime->imageAllocation) {
         log_runtime(runtime, "load FAIL=kernel-heap-image-allocation");
         return false;
     }
+    uintptr_t imageAddress = 0;
+    if (!kernel::native_elf_alignment::image_base(
+            reinterpret_cast<uintptr_t>(runtime->imageAllocation), minimum,
+            imageAlignment, &imageAddress)) {
+        log_runtime(runtime, "load FAIL=aligned-image-placement");
+        release_image(runtime);
+        return false;
+    }
+    runtime->image = reinterpret_cast<uint8_t*>(imageAddress);
     runtime->imageBytes = imageBytes;
     runtime->loadMinimum = minimum;
     runtime->loadMaximum = maximum;
@@ -1058,6 +1094,8 @@ static bool load_image(Runtime* runtime) {
     serial::puts(" minVaddr=0x"); serial::put_hex64(minimum);
     serial::puts(" maxVaddr=0x"); serial::put_hex64(maximum);
     serial::puts(" relocatedBase=0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime->image));
+    serial::puts(" loadAlignment=0x"); serial::put_hex64(imageAlignment);
+    serial::puts(" allocationBytes=0x"); serial::put_hex64(allocationBytes);
     serial::puts(" rebasedAbsoluteWords=0x"); serial::put_hex64(rebasedWords);
     serial::puts(" entry=0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime->image + (header.entry - minimum)));
     serial::puts(" stack=app-owned\n");
@@ -1850,14 +1888,12 @@ static bool run_package(Package* package) {
     log_breadcrumb(&runtime, "03 RUNTIME_CREATED");
     log_runtime(&runtime, "launch begin path=package-relative runtime=native-elf abi=guidexos-c-abi-v1");
     if (!load_image(&runtime)) {
-        delete[] runtime.image;
-        runtime.image = nullptr;
+        release_image(&runtime);
         return false;
     }
     runtime.stack = new uint8_t[kRuntimeStackBytes];
     if (!runtime.stack) {
-        delete[] runtime.image;
-        runtime.image = nullptr;
+        release_image(&runtime);
         log_runtime(&runtime, "launch FAIL=app-stack-allocation");
         return false;
     }
@@ -1903,9 +1939,8 @@ static bool run_package(Package* package) {
         abi_complete(&runtime, NativeAbiOperation::CloseWindow);
     }
     delete[] runtime.stack;
-    delete[] runtime.image;
+    release_image(&runtime);
     runtime.stack = nullptr;
-    runtime.image = nullptr;
     s_activeRuntime = nullptr;
     gxos_native_set_fault_recovery(0, 0);
     log_runtime(&runtime, result == GX_OK ? "lifecycle PASS window/resource cleanup complete" : "lifecycle FAIL app-returned-error");

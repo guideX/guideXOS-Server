@@ -9,6 +9,9 @@ param(
     [string]$CandidateVerificationPath = 'E:\bkup\artifacts\SN10R2_20261020\staged-candidate-verification.json',
     [string]$CandidateDiskPath = 'E:\bkup\artifacts\SN10R8_20261020\media\stellar-navigator-sn10r8-mbr.raw',
     [string]$CandidateDiskVerificationPath = 'E:\bkup\artifacts\SN10R8_20261020\media\stellar-navigator-sn10r8-verification.json',
+    [string]$KernelArtifactPath = '',
+    [string]$ExpectedKernelSha256 = '',
+    [string]$ExpectedDiskSha256 = '',
     [switch]$VerifyCandidateOnly,
     [switch]$SelfTest
 )
@@ -33,6 +36,16 @@ $Expected = @{
     Bootloader = '07e5350656e93e28f30cda66bbb924aef7d3d7053498547b27cc469b88d21783'
     Ovmf = '2df617a6fd1bae41ec7c0e3bceca96c928a5a88d8dc198468d34733393ab2792'
     Disk = '29d060d068edc81daf720ca314e7b9dd9a3bbd376a053d1c0cb903de0c00a8a5'
+}
+
+if ($KernelArtifactPath) { $Kernel = [IO.Path]::GetFullPath($KernelArtifactPath) }
+if ($ExpectedKernelSha256) {
+    if ($ExpectedKernelSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'ExpectedKernelSha256 must be a 64-digit SHA-256 value.' }
+    $Expected.Kernel = $ExpectedKernelSha256.ToLowerInvariant()
+}
+if ($ExpectedDiskSha256) {
+    if ($ExpectedDiskSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'ExpectedDiskSha256 must be a 64-digit SHA-256 value.' }
+    $Expected.Disk = $ExpectedDiskSha256.ToLowerInvariant()
 }
 
 $TypeDefinition = @'
@@ -852,6 +865,12 @@ function Invoke-SelfTest {
         [System.Management.Automation.Language.Parser]::ParseFile($PSCommandPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
         if (@($parseErrors).Count -ne 0) { throw "Windows PowerShell parser returned $(@($parseErrors).Count) error(s): $($parseErrors[0].Message)" }
         $runnerResult.checks.scriptParsing = [ordered]@{ passed = $true; parser = 'Windows PowerShell 5.1 Parser.ParseFile'; parseErrors = 0 }
+        $runnerResult.checks.candidateIdentityOverrides = [ordered]@{
+            passed = $true
+            kernelArtifactPath = [IO.Path]::GetFullPath($Kernel)
+            expectedKernelSha256 = $Expected.Kernel
+            expectedDiskSha256 = $Expected.Disk
+        }
 
         $loadedHelpers = @('SN10R3SerialCapture', 'SN10R3ManagedProcess')
         foreach ($typeName in $loadedHelpers) { if (-not ($typeName -as [type])) { throw "Required C# helper type was not loaded: $typeName" } }
