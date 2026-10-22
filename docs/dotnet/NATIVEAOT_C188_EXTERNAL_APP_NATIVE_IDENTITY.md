@@ -47,7 +47,7 @@ Guest evidence for Task Manager identity, taskbar selection, focus changes, conc
 
 All C188 outputs are below `out/dotnet/c188-external-app-identity/`, with unique attempt directories. Protected roots were inventoried before building; after-build comparisons are recorded below. The existing modified `ESP/ramdisk.img` stayed at its expected SHA-256 `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. The staged guest images are private copies; the staging writer replaced only `/APPS/GXOSAPP.ELF`, added seven FAT clusters, and preserved the other 185 files.
 
-The final protected inventory at `out/dotnet/c188-external-app-identity/attempt-061/protected-inventory/protected-comparison.json` reports 13 protected roots and 8,497 files before and after, with zero added, removed, or changed files. The preserved source ramdisk hash matches the expected value above.
+The final protected inventory at `out/dotnet/c188-external-app-identity/attempt-066/protected-inventory/protected-comparison.json` reports 13 protected roots and 8,497 files before and after, with zero added, removed, or changed files. The preserved source ramdisk hash matches the expected value above. Attempt 061 contains the earlier comparison.
 
 | Qualification | Evidence path | Result and SHA-256 |
 | --- | --- | --- |
@@ -71,7 +71,7 @@ QAC is the only guest launcher used. The original ramdisk is not supplied to QEM
 
 ### Boot 1 — Identity and launch
 
-The first request, reservation `71efb4e6618f4e3abbab2312373a69b9` from attempt 055, expired before launch after QAC's 1,800-second exclusive-slot wait; QAC stderr records `Reservation wait timed out.` The unrelated acceptance guest remained active and untouched. The identity retry is queued from isolated attempt 065. The acceptance sequence launches CounterApp by selector 9, exercises its button and keyboard input, opens Task Manager, and captures the snapshot while CounterApp remains resident.
+The first request, reservation `71efb4e6618f4e3abbab2312373a69b9` from attempt 055, expired before launch after QAC's 1,800-second exclusive-slot wait; QAC stderr records `Reservation wait timed out.` The unrelated acceptance guest remained active and untouched. The identity retry from isolated attempt 065 is waiting as reservation `b40679a6886749f6a626bf6280fc8425` behind active reservation `2c060850d2f640428021acbcc836ece5`; it has not launched QEMU. The acceptance sequence launches CounterApp by selector 9, exercises its button and keyboard input, opens Task Manager, and captures the snapshot while CounterApp remains resident.
 
 ### Boot 2 — Resize and lifecycle
 
@@ -93,4 +93,4 @@ C189 should first define a versioned external application package and identity c
 
 ## Outcome
 
-Pending completion of the three focused C188 QAC boots, the three ordinary production compatibility boots, and the local C188 commit. The final protected-tree comparison passed with zero changes. C189 has not been started.
+The implementation checkpoint is committed locally as `5b023b39ef42317a9f6fb7c75a7efc1da3f28294`. Outcome classification remains pending completion of the three focused C188 QAC boots and the three ordinary production compatibility boots. The final protected-tree comparison passed with zero changes. C189 has not been started.
