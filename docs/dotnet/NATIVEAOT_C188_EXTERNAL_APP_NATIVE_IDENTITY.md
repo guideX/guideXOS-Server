@@ -71,7 +71,7 @@ QAC is the only guest launcher used. The original ramdisk is not supplied to QEM
 
 ### Boot 1 — Identity and launch
 
-The first request, reservation `71efb4e6618f4e3abbab2312373a69b9` from attempt 055, expired before launch after QAC's 1,800-second exclusive-slot wait; QAC stderr records `Reservation wait timed out.` The unrelated acceptance guest remained active and untouched. The identity retry from isolated attempt 065 is waiting as reservation `b40679a6886749f6a626bf6280fc8425` behind active reservation `2c060850d2f640428021acbcc836ece5`; it has not launched QEMU. The acceptance sequence launches CounterApp by selector 9, exercises its button and keyboard input, opens Task Manager, and captures the snapshot while CounterApp remains resident.
+The first request, reservation `71efb4e6618f4e3abbab2312373a69b9` from attempt 055, expired before launch after QAC's 1,800-second exclusive-slot wait; QAC stderr records `Reservation wait timed out.` The unrelated acceptance guest remained active and untouched. The identity retry from attempt 065 also expired before launch after 1,800 seconds; QAC stderr records reservation `b40679a6886749f6a626bf6280fc8425` timing out. The current retry uses isolated attempt 067 and is queued as reservation `cc775d6911d844ba9d4d870a14f8a797` behind active reservation `2c060850d2f640428021acbcc836ece5`; it has not launched QEMU. Each staged image uses candidate ELF SHA-256 `9F84C525A3D6053EAB6D489563CD0C31B718CF082B3C0ED79544DBA6F9E3FEFC` and preserves the 185 unrelated ramdisk files. The acceptance sequence launches CounterApp by selector 9, exercises its button and keyboard input, opens Task Manager, and captures the snapshot while CounterApp remains resident.
 
 ### Boot 2 — Resize and lifecycle
 
