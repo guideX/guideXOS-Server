@@ -1,0 +1,13 @@
+QAC WPF dashboard observations — QAC3C1R1
+
+Preflight: the existing dashboard was targetable and displayed Coordinator Online (PID 15972), Foreign QEMU 0, Managed sessions 0, Queued reservations 0, Blocked reservations 0, and Acceptance lane Available.
+
+Queue barrier: after refresh, the dashboard displayed the childless QAC3C1R1QueueProbe acceptance reservation as Granted and the actual guideXOSServer development reservation as Waiting at queue position 1. The QEMU census was empty. The owner displayed as verified with the QAC CLI owner PID.
+
+Live development run: the dashboard displayed guideXOSServer / development / Running; queue position 0; owner LEON2_RDT\guideX (PID 20264), Verified; child PID 1484; duration; coordinator Online (PID 15972); and one managed QEMU census row for C:\Program Files\qemu\qemu-system-i386.exe with ownership managed. The activity panel showed reservation admission and child start.
+
+Minimize/restore: the dashboard window was minimized while PID 1484 was live. Computer Use reported the window as minimized. The same existing window was reacquired and restored; its row still showed the same guideXOSServer reservation and QEMU PID Running, coordinator Online, and verified ownership. No dashboard preference or system setting was changed.
+
+Completion: after QMP shutdown and QAC release, the restored dashboard showed Coordinator Online, Foreign QEMU 0, Managed sessions 0, Queued reservations 0, Blocked reservations 0, Acceptance lane Available, an empty reservation grid and QEMU census, and the activity item “Managed child exited.” The QAC CLI independently reported the prebuilt reservation Released.
+
+The WPF screenshots were visually inspected during the run but are not stored as files. The guest framebuffer screenshot is retained separately as guest-text-console.ppm and guest-text-console.png. These are agent-observed UI results, not owner-attested observations.

@@ -1,0 +1,37 @@
+[
+  {
+    "id": "ef13056ed45741c0902c1f3ae6941f33",
+    "kind": "ReservationRequested",
+    "reservationId": "c3575e3bf6a249ddb6aba9326691a22b",
+    "message": "guideXOSServer requested development reservation.",
+    "atUtc": "2026-10-22T14:13:44.926396-07:00"
+  },
+  {
+    "id": "0d0f6fe3d25d47e79e1c83f25f1b0478",
+    "kind": "ReservationGranted",
+    "reservationId": "c3575e3bf6a249ddb6aba9326691a22b",
+    "message": "guideXOSServer reservation was admitted.",
+    "atUtc": "2026-10-22T14:14:04.3722103-07:00"
+  },
+  {
+    "id": "d9cf54993cf54d78b22d347d88f8b2d9",
+    "kind": "LaunchStarting",
+    "reservationId": "c3575e3bf6a249ddb6aba9326691a22b",
+    "message": "Launch intent recorded; process identity is pending.",
+    "atUtc": "2026-10-22T14:14:04.3769736-07:00"
+  },
+  {
+    "id": "35327b7536614ff3901cb885f0138660",
+    "kind": "SessionStarted",
+    "reservationId": "c3575e3bf6a249ddb6aba9326691a22b",
+    "message": "guideXOSServer child process is running (PID 1484).",
+    "atUtc": "2026-10-22T14:14:04.4075225-07:00"
+  },
+  {
+    "id": "babfbbaf952646b8823c365da3cc2a78",
+    "kind": "SessionCompleted",
+    "reservationId": "c3575e3bf6a249ddb6aba9326691a22b",
+    "message": "Managed child exited.",
+    "atUtc": "2026-10-22T14:16:28.3255907-07:00"
+  }
+]

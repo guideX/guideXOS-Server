@@ -1,0 +1,5 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+Reservations: 1
+  6560ae4deaa74e259c13b3b4a1f8e56d | QAC3C1R1QueueProbe | acceptance | Granted | queue 0 | LEON2_RDT\guideX (PID 14192) | owner Verified
+Managed sessions: 1
+Managed session: 6560ae4deaa74e259c13b3b4a1f8e56d | Granted | QAC3C1R1QueueProbe · LEON2_RDT\guideX (PID 14192)

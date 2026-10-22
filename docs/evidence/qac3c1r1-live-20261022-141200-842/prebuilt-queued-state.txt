@@ -1,0 +1,31 @@
+observed_local=2026-10-22T14:13:45.5153351-07:00
+launcher_pid=8580
+launcher_has_exited=False
+queued_status_seen=True
+qemu_process_count=0
+launcher_stdout:
+Prebuilt kernel selected; this launcher does not build or replace kernel artifacts.
+Kernel: D:\dev\guideXOSServer\kernel\build\x86\bin\kernel.elf
+Format: ELF32 Intel 80386 ET_EXEC
+Size: 2478204 bytes
+SHA-256 before launch: 3566D010B087DD9309593ACAF59D6CF2CD48B15BCBDBC0C39F207AFB0774FC00
+Test-scoped QMP endpoint: tcp:127.0.0.1:44441 (omitted from normal interactive launches).
+Checking the interactive QAC coordinator...
+Coordinator: Online
+Name: guideXOS QAC
+Version: 2.0.0
+PID: 15972
+Started (UTC): 2026-10-22T03:47:13.7210260+00:00
+Uptime: 62790s
+QEMU processes: 0 (0 foreign)
+Managed development limit: 2
+Managed sessions: 1; queued: 0; blocked: 0
+QAC coordinator online.
+Reservation requested: project=guideXOSServer mode=development.
+Waiting for QAC admission; QAC reports queue position and cancellation status.
+QAC is managing the QEMU child. Close the QEMU window or press Ctrl+C to end this interactive development run.
+
+launcher_stderr:
+QAC reservation requested: id=c3575e3bf6a249ddb6aba9326691a22b project=guideXOSServer mode=development
+QAC queued for exclusive acceptance: id=c3575e3bf6a249ddb6aba9326691a22b position=1
+

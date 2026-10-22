@@ -1,0 +1,81 @@
+PASS [1] explicit QAC path with spaces resolves exactly
+PASS [2] sibling QAC apphost fallback resolves exactly
+PASS [3] prebuilt launcher selects the existing default kernel path
+PASS [4] explicit prebuilt kernel path with spaces resolves exactly
+PASS [5] existing prebuilt ELF32 i386 kernel passes format validation
+PASS [6] prebuilt kernel size is recorded
+PASS [7] prebuilt kernel SHA-256 is recorded
+PASS [8] prebuilt artifact remains unchanged by validation
+PASS [9] missing prebuilt kernel fails without generating a replacement
+PASS [10] incompatible prebuilt file fails clearly
+PASS [11] missing QAC CLI fails without unmanaged fallback
+PASS [12] GUIDEXOS_QAC_CLI is honored
+PASS [13] ProcessStartInfo uses QAC CLI as executable
+PASS [14] QAC starts in the original kernel working directory
+PASS [15] QAC process does not invoke a shell
+PASS [16] QAC run command is first
+PASS [17] QAC project switch is present
+PASS [18] QAC project is guideXOSServer
+PASS [19] QAC mode switch is present
+PASS [20] QAC mode is development
+PASS [21] QAC command separator is present
+PASS [22] QEMU executable path with spaces is preserved
+PASS [23] argument count is unchanged
+PASS [24] disk path boundary with spaces is preserved
+PASS [25] serial path boundary with spaces is preserved
+PASS [26] embedded quote is preserved
+PASS [27] empty argument is preserved
+PASS [28] trailing backslash is preserved
+PASS [29] prebuilt launcher preserves the exact original QEMU argument list
+PASS [30] prebuilt kernel path containing spaces keeps one QEMU argument
+PASS [31] prebuilt QAC invocation keeps development mode and Server project
+PASS [32] test-scoped QMP is loopback-only and not part of normal arguments
+PASS [33] QAC refuses a wrapper as the direct managed child
+PASS [34] original QEMU argument preserved: -machine
+PASS [35] original QEMU argument preserved: pc,usb=off
+PASS [36] original QEMU argument preserved: -kernel
+PASS [37] original QEMU argument preserved: build\x86\bin\kernel.elf
+PASS [38] original QEMU argument preserved: -m
+PASS [39] original QEMU argument preserved: 128M
+PASS [40] original QEMU argument preserved: -vga
+PASS [41] original QEMU argument preserved: std
+PASS [42] original QEMU argument preserved: -serial
+PASS [43] original QEMU argument preserved: stdio
+PASS [44] original QEMU argument preserved: -display
+PASS [45] original QEMU argument preserved: gtk
+PASS [46] original QEMU argument preserved: -vnc
+PASS [47] original QEMU argument preserved: :0
+PASS [48] original QEMU argument preserved: -no-reboot
+PASS [49] original QEMU argument preserved: -no-shutdown
+PASS [50] original QEMU argument preserved: -d
+PASS [51] original QEMU argument preserved: guest_errors
+PASS [52] serial output remains attached to stdio
+PASS [53] coordinator status check precedes the QAC run process start
+PASS [54] coordinator failure exits before launch and reports no fallback
+PASS [55] QAC CLI output provides queue and cancellation status
+PASS [56] the selected launcher returns the QAC child exit code
+PASS [57] interactive execution waits through QAC child verification
+PASS [58] the batch launcher invokes the QAC PowerShell runner
+PASS [59] the batch launcher propagates the PowerShell exit code
+PASS [60] no direct QEMU spawn remains in the selected launcher
+PASS [61] no process-name or process-tree cleanup was added
+PASS [62] the interactive launcher adds no QMP or guest timeout policy
+PASS [63] the interactive launcher makes no automated guest-marker claim
+PASS [64] the selected mode cannot be promoted to acceptance
+PASS [65] the managed QEMU process is started through QAC
+PASS [66] prebuilt batch launcher invokes the QAC runner and propagates its exit code
+PASS [67] prebuilt launcher does not invoke a build or solution build
+PASS [68] prebuilt launcher validates the selected artifact before requesting QAC
+PASS [69] prebuilt launcher records path, size, and prelaunch SHA-256
+PASS [70] prebuilt launcher checks the artifact hash after the managed run
+PASS [71] prebuilt launcher uses QAC development mode only
+PASS [72] prebuilt launcher does not start QEMU when the coordinator is unavailable
+PASS [73] prebuilt launcher retains queue waiting and cancellation behavior
+PASS [74] prebuilt launcher tracks and waits for the QAC CLI through verified child exit
+PASS [75] prebuilt launcher propagates zero and nonzero QAC child exit codes
+PASS [76] prebuilt launcher reports child-start failure without unmanaged fallback
+PASS [77] prebuilt launcher performs no process-name or process-tree cleanup
+PASS [78] normal prebuilt invocation omits QMP and timeout policies
+PASS [79] existing build-and-run launcher remains separate and unchanged
+PASS [80] prebuilt launcher routes the direct child through QAC rather than direct QEMU
+QAC development launcher contract checks passed: 80.

@@ -1,0 +1,7 @@
+pid=2968
+reservation_id=a5311434ed7947728eb4987123746c1d
+initial_state=Waiting
+initial_queue_position=1
+cancel_state=Cancelled
+request_cli_exit=1
+observed_at_local=2026-10-22T14:13:25.0196028-07:00

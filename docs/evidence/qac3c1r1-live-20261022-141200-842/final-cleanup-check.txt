@@ -1,0 +1,7 @@
+observed_local=2026-10-22T14:17:13.9392952-07:00
+kernel_path=D:\dev\guideXOSServer\kernel\build\x86\bin\kernel.elf
+kernel_size_after=2478204
+kernel_sha256_after=3566D010B087DD9309593ACAF59D6CF2CD48B15BCBDBC0C39F207AFB0774FC00
+qemu_processes_after=0
+test_ports_listening_after=0
+coordinator_pid_15972_alive=True

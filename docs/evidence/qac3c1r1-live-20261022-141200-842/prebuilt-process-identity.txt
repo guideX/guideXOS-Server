@@ -1,0 +1,19 @@
+observed_local=2026-10-22T14:16:04.1439390-07:00
+reservation_id=c3575e3bf6a249ddb6aba9326691a22b
+project=guideXOSServer
+mode=development
+state=Running
+requested_at_utc=10/22/2026 14:13:44
+granted_at_utc=10/22/2026 14:14:04
+owner=LEON2_RDT\guideX (PID 20264)
+owner_pid=20264
+owner_executable=D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe
+qemu_pid=1484
+qemu_start_time_utc=10/22/2026 14:14:04
+qemu_image=C:\Program Files\qemu\qemu-system-i386.exe
+qemu_parent_pid=20264
+qemu_creation_date_local=10/22/2026 14:14:04
+qemu_executable_path=C:\Program Files\qemu\qemu-system-i386.exe
+qemu_command_line="C:\Program Files\qemu\qemu-system-i386.exe" -machine pc,usb=off -kernel kernel\build\x86\bin\kernel.elf -m 128M -vga std -serial stdio -display gtk -vnc :0 -no-reboot -no-shutdown -d guest_errors -qmp tcp:127.0.0.1:44441,server=on,wait=off
+qmp_listener_owned_by_pid=1484
+vnc5900_listener_owned_by_pid=1484

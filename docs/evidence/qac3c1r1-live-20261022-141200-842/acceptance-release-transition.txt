@@ -1,0 +1,14 @@
+release_state=Released
+release_finished_at_utc=
+acceptance_fixture_owner_process_still_present=False
+observed_local=2026-10-22T14:14:05.3288370-07:00
+guideXOSServer_running_session_seen=True
+qemu_count=1
+qac_list:
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 1484 | C:\Program Files\qemu\qemu-system-i386.exe | 2026-10-22T21:14:04.3835797+00:00 | managed
+  Note: Reservation c3575e3bf6a249ddb6aba9326691a22b · guideXOSServer · development
+Reservations: 1
+  c3575e3bf6a249ddb6aba9326691a22b | guideXOSServer | development | Running | queue 0 | LEON2_RDT\guideX (PID 20264) | owner Verified | child PID 1484
+Managed sessions: 1
+Managed session: c3575e3bf6a249ddb6aba9326691a22b | Running | guideXOSServer · LEON2_RDT\guideX (PID 20264)

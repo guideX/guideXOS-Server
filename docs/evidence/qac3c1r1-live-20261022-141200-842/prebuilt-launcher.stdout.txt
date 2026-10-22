@@ -1,0 +1,27 @@
+Prebuilt kernel selected; this launcher does not build or replace kernel artifacts.
+Kernel: D:\dev\guideXOSServer\kernel\build\x86\bin\kernel.elf
+Format: ELF32 Intel 80386 ET_EXEC
+Size: 2478204 bytes
+SHA-256 before launch: 3566D010B087DD9309593ACAF59D6CF2CD48B15BCBDBC0C39F207AFB0774FC00
+Test-scoped QMP endpoint: tcp:127.0.0.1:44441 (omitted from normal interactive launches).
+Checking the interactive QAC coordinator...
+Coordinator: Online
+Name: guideXOS QAC
+Version: 2.0.0
+PID: 15972
+Started (UTC): 2026-10-22T03:47:13.7210260+00:00
+Uptime: 62790s
+QEMU processes: 0 (0 foreign)
+Managed development limit: 2
+Managed sessions: 1; queued: 0; blocked: 0
+QAC coordinator online.
+Reservation requested: project=guideXOSServer mode=development.
+Waiting for QAC admission; QAC reports queue position and cancellation status.
+QAC is managing the QEMU child. Close the QEMU window or press Ctrl+C to end this interactive development run.
+[GXOS-BUILD] identity=GXOS-LARGE-FILE-PASTE-TRACE-V1 probe=GXOS-LFPASTE-20260726-02
+[KERNEL] guideXOS kernel_main entered
+[KERNEL] Boot method: Multiboot
+[KERNEL] Framebuffer source=Multiboot framebufferCount=0 index=0 status=canonical base=0000000000000000 size=0000000000000000 geometry=0x0 pitch=0 bpp=0 format=Unknown
+QAC managed run completed with exit code 0.
+SHA-256 after QAC run: 3566D010B087DD9309593ACAF59D6CF2CD48B15BCBDBC0C39F207AFB0774FC00
+Kernel integrity check: unchanged.

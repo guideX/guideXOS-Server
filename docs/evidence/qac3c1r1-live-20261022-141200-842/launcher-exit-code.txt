@@ -1,0 +1,3 @@
+QEMU child exit code: 0 (QAC run log, exit_utc=2026-10-22T21:16:28.2672534Z)
+PowerShell runner log: “QAC managed run completed with exit code 0.”
+The detached outer Start-Process wrapper was observed exited, but its Process.ExitCode was not retained by the supervisor; the 80/80 contract suite verifies zero/nonzero exit propagation through the PowerShell and batch boundaries.

@@ -1,0 +1,29 @@
+client_local=2026-10-22T14:14:34.3061762-07:00 operation=status port=44441
+recv={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+send={"execute":"qmp_capabilities"}
+recv={"return": {}}
+send={"execute":"query-status"}
+recv={"return": {"status": "running", "running": true}}
+result={"return":{"status":"running","running":true}}
+client_local=2026-10-22T14:14:38.9203951-07:00 operation=screendump port=44441
+recv={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+send={"execute":"qmp_capabilities"}
+recv={"return": {}}
+send={"arguments":{"command-line":"screendump D:\\dev\\guideXOSServer\\docs\\evidence\\qac3c1r1-live-20261022-141200-842\\guest-text-console.ppm"},"execute":"human-monitor-command"}
+recv={"return": ""}
+result={"return":""}
+client_local=2026-10-22T14:16:05.0255999-07:00 operation=status port=44441
+recv={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+send={"execute":"qmp_capabilities"}
+recv={"return": {}}
+send={"execute":"query-status"}
+recv={"return": {"status": "running", "running": true}}
+result={"return":{"status":"running","running":true}}
+client_local=2026-10-22T14:16:28.1088540-07:00 operation=quit port=44441
+recv={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+send={"execute":"qmp_capabilities"}
+recv={"return": {}}
+send={"execute":"quit"}
+recv={"timestamp": {"seconds": 1792703788, "microseconds": 174151}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+recv={"return": {}}
+result={"return":{}}
