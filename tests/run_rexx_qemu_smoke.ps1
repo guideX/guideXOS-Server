@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27')]
     [string]$Phase = 'RX12R1',
     [Parameter(Mandatory)][string]$KernelPath,
     [string]$SourceEsp = 'C:\Users\guideX\.codex\rx12-native-guest\esp',
@@ -12,7 +12,9 @@ $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
     throw "$Phase QEMU qualification requires branch REXX_SUPPORT."
 }
-$guardManifest = if ($Phase -eq 'RX26') {
+$guardManifest = if ($Phase -eq 'RX27') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx27\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX26') {
     Join-Path $rootDir 'docs\rexx\evidence\rx26\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX25') {
     Join-Path $rootDir 'docs\rexx\evidence\rx25\protected-artifacts-start.json'
@@ -41,7 +43,7 @@ $guardManifest = if ($Phase -eq 'RX26') {
 }
 Import-Module -Name (Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1') -Force
 $qemuPath = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
-$useQac = $Phase -in @('RX21','RX22','RX24','RX25','RX26')
+$useQac = $Phase -in @('RX21','RX22','RX24','RX25','RX26','RX27')
 if ($useQac) {
     if ([string]::IsNullOrWhiteSpace($QacCliPath)) { $QacCliPath = $env:GUIDEXOS_QAC_CLI }
     if ([string]::IsNullOrWhiteSpace($QacCliPath)) {
@@ -70,7 +72,7 @@ $guestRoot = Join-Path $runRoot 'guest'
 $guestEsp = Join-Path $guestRoot 'esp'
 $stagedFirmware = Join-Path $guestRoot 'firmware-code.fd'
 $helperRoot = Join-Path $runRoot 'helper'
-$helperName = if ($Phase -in @('RX24','RX25','RX26')) { 'type_rx24_guest_command.ps1' } elseif ($Phase -eq 'RX22') { 'type_rx22_guest_command.ps1' } elseif ($Phase -eq 'RX21') { 'type_rx21_guest_command.ps1' } elseif ($Phase -eq 'RX20') { 'type_rx20_guest_command.ps1' } elseif ($Phase -eq 'RX19') { 'type_rx19_guest_command.ps1' } elseif ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
+$helperName = if ($Phase -in @('RX24','RX25','RX26','RX27')) { 'type_rx24_guest_command.ps1' } elseif ($Phase -eq 'RX22') { 'type_rx22_guest_command.ps1' } elseif ($Phase -eq 'RX21') { 'type_rx21_guest_command.ps1' } elseif ($Phase -eq 'RX20') { 'type_rx20_guest_command.ps1' } elseif ($Phase -eq 'RX19') { 'type_rx19_guest_command.ps1' } elseif ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
 $serialPath = Join-Path $runRoot 'serial.log'
 $qemuStdoutPath = Join-Path $runRoot 'qemu.stdout.log'
 $qemuStderrPath = Join-Path $runRoot 'qemu.stderr.log'
@@ -185,6 +187,20 @@ if ($Phase -eq 'RX26') {
         (Join-Path $guestEsp 'rx20clk.rex')
     )
 }
+if ($Phase -eq 'RX27') {
+    $plannedOutputs += @(
+        (Join-Path $guestEsp 'rx27-justify.rex'),
+        (Join-Path $guestEsp 'rx27-justify-error-recovery.rex'),
+        (Join-Path $guestEsp 'rx26-index-builtins.rex'),
+        (Join-Path $guestEsp 'rx26-index-error-recovery.rex'),
+        (Join-Path $guestEsp 'rx25-random-sequence.rex'),
+        (Join-Path $guestEsp 'rx25-unseeded.rex'),
+        (Join-Path $guestEsp 'rx24-address-trace.rex'),
+        (Join-Path $guestEsp 'rx24-error-recovery.rex'),
+        (Join-Path $guestEsp 'rx26-date-time-guard.rex'),
+        (Join-Path $guestEsp 'rx20clk.rex')
+    )
+}
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs -Phase $Phase
 $env:TEMP = $workDir
@@ -194,7 +210,7 @@ New-Item -ItemType Directory -Path $guestRoot,$helperRoot,$rawCaptureDir | Out-N
 
 $evidenceRoot = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\native-guest\run-$runId"
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
-$helperSource = if ($Phase -in @('RX24','RX25','RX26')) {
+$helperSource = if ($Phase -in @('RX24','RX25','RX26','RX27')) {
     Join-Path $rootDir 'docs\rexx\evidence\rx24\native-guest'
 } elseif ($Phase -eq 'RX22') {
     Join-Path $rootDir 'docs\rexx\evidence\rx22\native-guest'
@@ -325,18 +341,18 @@ if ($Phase -eq 'RX22') {
     }
 }
 $rx24ScriptNames = @()
-if ($Phase -in @('RX24','RX25','RX26')) {
+if ($Phase -in @('RX24','RX25','RX26','RX27')) {
     $rx24Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx24\native-guest\scripts'
     $rx24ScriptFiles = @(Get-ChildItem -LiteralPath $rx24Scripts -Filter 'rx24-*.rex' -File | Sort-Object Name)
     if ($rx24ScriptFiles.Count -ne 3) { throw "Expected three reviewed RX24 native guest scripts; found $($rx24ScriptFiles.Count)." }
     foreach ($scriptFile in $rx24ScriptFiles) {
-        if ($Phase -eq 'RX26' -and $scriptFile.Name -eq 'rx24-date-time-clock-guard.rex') { continue }
+        if ($Phase -in @('RX26','RX27') -and $scriptFile.Name -eq 'rx24-date-time-clock-guard.rex') { continue }
         Copy-Item -LiteralPath $scriptFile.FullName -Destination (Join-Path $guestEsp $scriptFile.Name)
         $rx24ScriptNames += $scriptFile.Name
     }
 }
 $rx25ScriptNames = @()
-if ($Phase -in @('RX25','RX26')) {
+if ($Phase -in @('RX25','RX26','RX27')) {
     $rx25Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx25\native-guest\scripts'
     $rx25ScriptFiles = @(Get-ChildItem -LiteralPath $rx25Scripts -Filter 'rx25-*.rex' -File | Sort-Object Name)
     if ($rx25ScriptFiles.Count -ne 2) { throw "Expected two reviewed RX25 native guest scripts; found $($rx25ScriptFiles.Count)." }
@@ -348,7 +364,7 @@ if ($Phase -in @('RX25','RX26')) {
     Copy-Item -LiteralPath $rx20ClockScript -Destination (Join-Path $guestEsp 'rx20clk.rex')
 }
 $rx26ScriptNames = @()
-if ($Phase -eq 'RX26') {
+if ($Phase -in @('RX26','RX27')) {
     $rx26Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx26\native-guest\scripts'
     $rx26ScriptFiles = @(Get-ChildItem -LiteralPath $rx26Scripts -Filter 'rx26-*.rex' -File | Sort-Object Name)
     if ($rx26ScriptFiles.Count -ne 2) { throw "Expected two reviewed RX26 native guest scripts; found $($rx26ScriptFiles.Count)." }
@@ -363,6 +379,16 @@ if ($Phase -eq 'RX26') {
     $rx20ClockScript = Join-Path $rootDir 'docs\rexx\evidence\rx20\native-guest\scripts\rx20clk.rex'
     Copy-Item -LiteralPath $rx20ClockScript -Destination (Join-Path $guestEsp 'rx20clk.rex')
     $rx26ScriptNames += 'rx20clk.rex'
+}
+$rx27ScriptNames = @()
+if ($Phase -eq 'RX27') {
+    $rx27Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx27\native-guest\scripts'
+    $rx27ScriptFiles = @(Get-ChildItem -LiteralPath $rx27Scripts -Filter 'rx27-*.rex' -File | Sort-Object Name)
+    if ($rx27ScriptFiles.Count -ne 2) { throw "Expected two reviewed RX27 native guest scripts; found $($rx27ScriptFiles.Count)." }
+    foreach ($scriptFile in $rx27ScriptFiles) {
+        Copy-Item -LiteralPath $scriptFile.FullName -Destination (Join-Path $guestEsp $scriptFile.Name)
+        $rx27ScriptNames += $scriptFile.Name
+    }
 }
 
 function Get-QemuCensus {
@@ -437,14 +463,14 @@ if ($useQac) {
     $qacBefore = & $QacCliPath status 2>&1
     $qacBeforeText = @($qacBefore) -join "`n"
     [System.IO.File]::WriteAllText((Join-Path $evidenceRoot 'qac-status-before.txt'),$qacBeforeText+"`n",[System.Text.UTF8Encoding]::new($false))
-    if ($Phase -in @('RX22','RX24','RX25','RX26') -and ($LASTEXITCODE -ne 0 -or $qacBeforeText -notmatch 'Coordinator: Online' -or
+    if ($Phase -in @('RX22','RX24','RX25','RX26','RX27') -and ($LASTEXITCODE -ne 0 -or $qacBeforeText -notmatch 'Coordinator: Online' -or
         $qacBeforeText -notmatch 'Managed sessions: 0; queued: 0; blocked: 0')) {
         throw "$Phase QAC is unavailable or already has an active/queued reservation; no guest was started. Status: $qacBeforeText"
     }
     $qacListBefore = & $QacCliPath list 2>&1
     $qacListBeforeText = @($qacListBefore) -join "`n"
     [System.IO.File]::WriteAllText((Join-Path $evidenceRoot 'qac-list-before.txt'),$qacListBeforeText+"`n",[System.Text.UTF8Encoding]::new($false))
-    if ($Phase -in @('RX22','RX24','RX25','RX26') -and ($LASTEXITCODE -ne 0 -or $qacListBeforeText -notmatch 'Reservations: 0' -or
+    if ($Phase -in @('RX22','RX24','RX25','RX26','RX27') -and ($LASTEXITCODE -ne 0 -or $qacListBeforeText -notmatch 'Reservations: 0' -or
         $qacListBeforeText -notmatch 'Managed sessions: 0')) {
         throw "$Phase QAC list shows an existing reservation or is unavailable; no guest was started. List: $qacListBeforeText"
     }
@@ -561,7 +587,7 @@ try {
     $heartbeatCountBefore = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
 
     $helper = Join-Path $helperRoot $helperName
-    $commands = if ($Phase -eq 'RX26') {
+    $commands = if ($Phase -in @('RX26','RX27')) {
         @(
             [PSCustomObject]@{ name='index-ibm-vectors-and-binary-search'; text='rexx /rx26-index-builtins.rex'; open_terminal=$true; expected='RX26_INDEX_BINARY_POS_DONE' },
             [PSCustomObject]@{ name='invalid-start-and-interpreter-recovery'; text='rexx /rx26-index-error-recovery.rex'; expected='RX26_INDEX_POST_ERROR_RESPONSIVE: 5' },
@@ -665,12 +691,18 @@ try {
             [PSCustomObject]@{ name='exit-status-check'; text='echo $?'; open_console=$false; expected='23' }
         )
     }
+    if ($Phase -eq 'RX27') {
+        $commands = @(
+            [PSCustomObject]@{ name='justify-IBM-vectors-binary-pad-and-truncation'; text='rexx /rx27-justify.rex'; open_terminal=$true; expected='RX27_JUSTIFY_DONE' },
+            [PSCustomObject]@{ name='invalid-arguments-and-interpreter-recovery'; text='rexx /rx27-justify-error-recovery.rex'; expected='RX27_POST_ERROR_RESPONSIVE: a   b' }
+        ) + @($commands)
+    }
     $index = 0
     foreach ($command in $commands) {
         $index++
-        $capturePrefix = if ($Phase -eq 'RX26') { 'rx26' } elseif ($Phase -eq 'RX25') { 'rx25' } elseif ($Phase -eq 'RX24') { 'rx24' } elseif ($Phase -eq 'RX22') { 'rx22' } elseif ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+        $capturePrefix = if ($Phase -eq 'RX27') { 'rx27' } elseif ($Phase -eq 'RX26') { 'rx26' } elseif ($Phase -eq 'RX25') { 'rx25' } elseif ($Phase -eq 'RX24') { 'rx24' } elseif ($Phase -eq 'RX22') { 'rx22' } elseif ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
         $captureName = "{0}-{1:D2}-{2}" -f $capturePrefix,$index,$command.name
-        $commandWaitSeconds = if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26')) { 15 } else { 5 }
+        $commandWaitSeconds = if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26','RX27')) { 15 } else { 5 }
         if ($command.open_terminal) {
             & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds $commandWaitSeconds -OpenTerminal
         } else {
@@ -680,7 +712,7 @@ try {
         $null = Assert-OwnQemu -Identity $owner
     }
 
-    $capturePrefix = if ($Phase -eq 'RX26') { 'rx26' } elseif ($Phase -eq 'RX25') { 'rx25' } elseif ($Phase -eq 'RX24') { 'rx24' } elseif ($Phase -eq 'RX22') { 'rx22' } elseif ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+    $capturePrefix = if ($Phase -eq 'RX27') { 'rx27' } elseif ($Phase -eq 'RX26') { 'rx26' } elseif ($Phase -eq 'RX25') { 'rx25' } elseif ($Phase -eq 'RX24') { 'rx24' } elseif ($Phase -eq 'RX22') { 'rx22' } elseif ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
     $screenshots = @(Get-ChildItem -LiteralPath $helperRoot -Filter "$capturePrefix-*.png" -File)
     if ($screenshots.Count -ne $commands.Count) { throw "Expected one Console screenshot per smoke command; found $($screenshots.Count) for $($commands.Count) commands." }
 
@@ -688,8 +720,8 @@ try {
     $serial = Get-Content -Raw -LiteralPath $serialPath
     $heartbeatCountAfter = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
     if ($heartbeatCountAfter -le $heartbeatCountBefore) { throw "Guest heartbeat did not continue during the $Phase smoke commands." }
-    $scriptNames = if ($Phase -eq 'RX26') { $rx26ScriptNames } elseif ($Phase -eq 'RX25') { @($rx25ScriptNames + @('rx24-date-time-clock-guard.rex','rx20clk.rex')) } elseif ($Phase -eq 'RX24') { $rx24ScriptNames } elseif ($Phase -eq 'RX22') { $rx22ScriptNames } elseif ($Phase -eq 'RX21') { $rx21ScriptNames } elseif ($Phase -eq 'RX20') { $rx20ScriptNames } elseif ($Phase -eq 'RX19') { $rx19ScriptNames } elseif ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
-    $serialScriptNames = if ($Phase -in @('RX26','RX25','RX24','RX22','RX21','RX20','RX19','RX18','RX17','RX16')) {
+    $scriptNames = if ($Phase -eq 'RX27') { @($rx27ScriptNames + $rx26ScriptNames) } elseif ($Phase -eq 'RX26') { $rx26ScriptNames } elseif ($Phase -eq 'RX25') { @($rx25ScriptNames + @('rx24-date-time-clock-guard.rex','rx20clk.rex')) } elseif ($Phase -eq 'RX24') { $rx24ScriptNames } elseif ($Phase -eq 'RX22') { $rx22ScriptNames } elseif ($Phase -eq 'RX21') { $rx21ScriptNames } elseif ($Phase -eq 'RX20') { $rx20ScriptNames } elseif ($Phase -eq 'RX19') { $rx19ScriptNames } elseif ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
+    $serialScriptNames = if ($Phase -in @('RX27','RX26','RX25','RX24','RX22','RX21','RX20','RX19','RX18','RX17','RX16')) {
         $scriptNames
     } elseif ($Phase -eq 'RX15') {
         @($scriptNames | Where-Object { $_ -ne 'rx15-conversion-resource-limit.rex' })
@@ -703,7 +735,7 @@ try {
     foreach ($scriptName in $serialScriptNames) {
         if (-not $serial.Contains("/" + $scriptName)) { throw "Serial log did not record guest script access: $scriptName" }
     }
-    if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26')) {
+    if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26','RX27')) {
         if ($serial -notmatch '\[REXX-CLOCK\] source=CMOS_RTC read=ok raw=1 local=0 utc=0 offset=unknown resolution_ns=3B9ACA00 accuracy=unknown monotonic=PIT') {
             throw 'RX20 guest did not report a successful CMOS raw reading with unknown interpretation and PIT monotonic capability.'
         }
