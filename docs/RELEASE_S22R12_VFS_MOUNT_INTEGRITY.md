@@ -9,6 +9,7 @@
 - Repository branch: `main`. The expected S22R11 checkpoint `396a358ec60ae513240c44f5871e95a588b5bc03` is an ancestor of the investigation tip.
 - The investigation began at `f556ae156bb701fb834a858c61f3589f0d940fc2`. While work was in progress, the live branch advanced to `b311cb09` with the QAC artifact-isolation integration; that commit and its working-tree state were preserved. The focused S22R12 source and regression-test commit is `ea786e2da4da01a57b1ab00429c8453edc9446ad`, based on `b311cb09`.
 - The repository already contained approximately 4,061 untracked paths. They were preserved. The PacMan-only candidate manifest records `worktreeCleanAtPackagingStart=false`; its `sourceGitCommit` is the S22R12 source/test commit above.
+- Final status after the S22R12 commits: zero tracked modifications and 9,252 untracked paths, including the preserved baseline plus S22R12 build evidence. No pre-existing path was removed.
 - The original S22R9 candidate remains at `out/release-profile/95cf3e2d-778b-4b31-8948-4acdb7cc6aaa/artifacts/guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso`. Its observed SHA-256 remains `e98bf087efc071ddf82db4dce9d79335aacbf38310de43b032744165792d712b`.
 - No files under `dist` were changed. The server repository has no `.phase` file, and the sibling QAC repository’s `.phase` ownership was left untouched.
 
@@ -91,7 +92,7 @@ The canonical release script’s default Windows PowerShell subprocess failed du
 
 ## 10. QAC guest results
 
-Corrected-candidate QAC boots in S22R12: **0**. The QAC coordinator remained online with a verified active acceptance reservation owned by another process and one verified reservation waiting in the queue. To respect exclusive QAC ownership, this phase did not queue a request, start a guest, interrupt a process or release another owner’s reservation.
+Corrected-candidate QAC boots in S22R12: **0**. At the final status check, the QAC coordinator was online with one verified active acceptance reservation owned by another process and two verified reservations waiting in the queue. To respect exclusive QAC ownership, this phase did not queue a request, start a guest, interrupt a process or release another owner’s reservation.
 
 Therefore this phase has no corrected-candidate observations for cold boot, persistent `/Apps`, repeated Start refresh, Navigator interaction, PacMan launch/gameplay/exit, Settings smoke or recovery. The S22R11 pre-fix observations above are retained only as forensic evidence.
 
