@@ -147,3 +147,25 @@ The existing WPF dashboard visibly showed the real `guideXOSServer` development 
 Final QAC status was Online with zero managed, queued, blocked, or foreign QEMU sessions; QEMU and both test listeners were gone. The test-owned fixtures and live reservation were safely cancelled or released. No foreign process, Windows service, firewall configuration, or unrelated repository was modified. Existing QAC2 recovery evidence was reused without restarting the live coordinator. The full evidence package is `docs/evidence/qac3c1r1-live-20261022-141200-842/qualification-summary.md`; dashboard screenshots were inspected during the run but not retained as files.
 
 QAC `.phase` now marks QAC3C1 accepted while overall QAC3 remains open and QAC3C2 is next. No QAC3C2 work began.
+
+## QAC3C2 per-run UEFI artifact isolation
+
+QAC3C2 adds an explicit staging step for the S22R10 PacMan UEFI qualification path. It does not launch QEMU. QAC3C3 will take the returned manifest, request QAC admission, allocate the loopback QMP endpoint, and start QEMU as the direct managed child.
+
+Prepare a workspace with:
+
+    pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-qac-uefi-artifacts.ps1 -EspPath .\out\release-profile\<build-id>\ESP -IsoPath .\out\release-profile\<build-id>\artifacts\<candidate.iso> -OvmfPath .\docs\evidence\<qualification>\OVMF-s22-readonly.fd -RunId pacman-smoke
+
+The default scratch root is %LOCALAPPDATA%\guideXOS\QAC\artifacts. -OutputRoot selects a different local volume directory. The helper appends a random GUID to the requested run label, refuses an existing identity, validates the source formats and paths, checks available space, and hashes each source before and after staging. Writable artifact sources must be copied. The read-only ISO and OVMF image may be shared after identity verification. A source that changes during staging causes a retained failed workspace; it is not silently retried or marked complete.
+
+The manifest is manifest.json in the returned workspace. It records the run and owner identities, schema version, source and private file inventories with SHA-256, access and staging modes, workflow, completion status, output paths, and a QEMU argument template. Its qacExecution.status begins as not-started. A consumer must reject incomplete manifests and call Test-QacUefiArtifactManifest before using their paths.
+
+The selected S22R10 workflow uses a directory-backed FAT ESP with QEMU fat:rw. Its ESP copy contains EFI/BOOT/BOOTX64.EFI, kernel.elf, ramdisk.img, and application assets. Each run gets its own copied ESP tree; the test ISO and read-only OVMF image stay at their verified canonical paths. The workflow has no separate pflash VARS image or additional writable guest disk. The NvVars file observed after a prior boot was created in that run's disposable ESP; the canonical source ESP did not contain it. New staged runs therefore start from the 16-file, pre-boot source tree.
+
+The launch template keeps the existing machine, storage, firmware, media, network, serial, and debug categories. Serial, QEMU debug, QMP transcript, and screenshot destinations are relative to the private workspace's output directory. No output file is created in a shared evidence directory. The historical S22R10 evidence used fixed QMP port 65253; the template deliberately leaves the port unbound and requires QAC3C3 to allocate a unique loopback port for each admitted run and hold that endpoint through verified QEMU child exit.
+
+Cleanup is explicit and ownership-checked. Remove-QacUefiArtifactWorkspace requires the full generated run ID, matching owner marker, current Windows owner, a path inside the declared scratch root, and a complete manifest. It refuses active or uncertain execution states; a released run also needs verified child exit. It refuses reparse points and never purges unknown or failed workspaces automatically. Failed workspaces and their diagnostic manifest remain available for investigation.
+
+The helper validates a directory-backed FAT payload's required UEFI paths; it does not build or convert a raw FAT image and does not claim a fresh guest boot. It makes source hashes comparable, but not a transactional filesystem snapshot: another writer that changes an input and restores the exact bytes during the bounded copy window cannot be ruled out. QAC admission still governs execution separately from artifact isolation.
+
+See QAC3C2-ARTIFACT-ISOLATION.md for the collision inventory, manifest fields, qualification evidence, and remaining boundaries.
