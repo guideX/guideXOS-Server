@@ -92,6 +92,17 @@ static NavigatorToolbarLayout navigatorToolbarLayout(int windowWidth)
     if (layout.addressW < 0) layout.addressW = 0;
     return layout;
 }
+
+class NavigatorSmokeAppScope {
+public:
+    NavigatorSmokeAppScope() : app_(new NavigatorApp()) {}
+    ~NavigatorSmokeAppScope() { delete app_; }
+
+    NavigatorApp* get() const { return app_; }
+
+private:
+    NavigatorApp* app_;
+};
 }
 
 static gxos::GxosCaStoreInfo probe_missing_ca_path()
@@ -7519,7 +7530,10 @@ static bool nav_starts_with(const char* value, const char* prefix);
 
 bool NavigatorApp::smokeTypographyPhase7A()
 {
-    NavigatorApp app;
+    NavigatorSmokeAppScope appScope;
+    NavigatorApp* appInstance = appScope.get();
+    if (!appInstance) return false;
+    NavigatorApp& app = *appInstance;
     app::KernelWindow smokeWindow;
     smokeWindow.w = 640;
     smokeWindow.h = 480;
@@ -7651,7 +7665,10 @@ bool NavigatorApp::smokeScrollbarPointerInput()
         "<p>scroll line 37</p><p>scroll line 38</p><p>scroll line 39</p>"
         "<p>scroll line 40</p><p>scroll line 41</p><p>scroll line 42</p>";
 
-    NavigatorApp app;
+    NavigatorSmokeAppScope appScope;
+    NavigatorApp* appInstance = appScope.get();
+    if (!appInstance) return false;
+    NavigatorApp& app = *appInstance;
     app::KernelWindow smokeWindow;
     smokeWindow.x = 96;
     smokeWindow.y = 72;
@@ -15033,7 +15050,10 @@ bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
     const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
     const int httpsLoadsBefore = s_kernelHttpControlledLocalHttpsLoads;
-    NavigatorApp app;
+    NavigatorSmokeAppScope appScope;
+    NavigatorApp* appInstance = appScope.get();
+    if (!appInstance) return false;
+    NavigatorApp& app = *appInstance;
     app.loadUrl(url);
     const int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
     const int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
@@ -15294,7 +15314,10 @@ bool NavigatorApp::smokeFormsLitePost(const char* action, int* statusCode, char*
         return false;
     }
 
-    NavigatorApp app;
+    NavigatorSmokeAppScope appScope;
+    NavigatorApp* appInstance = appScope.get();
+    if (!appInstance) return false;
+    NavigatorApp& app = *appInstance;
     app.submitFormsLitePost(action, formBody, formBodyBytes, "application/x-www-form-urlencoded");
     KernelHttpResponse* response = &s_kernelHttpResponse;
     int renderedBlocks = app.m_blockCount;
@@ -15371,7 +15394,10 @@ bool NavigatorApp::smokeInteractiveFormsLitePost(const char* formUrl, int* statu
     if (error && errorLen > 0) error[0] = '\0';
     if (submittedBodyBytes) *submittedBodyBytes = 0;
 
-    NavigatorApp app;
+    NavigatorSmokeAppScope appScope;
+    NavigatorApp* appInstance = appScope.get();
+    if (!appInstance) return false;
+    NavigatorApp& app = *appInstance;
     app.loadUrl(formUrl);
     auto findControl = [&app](BlockKind kind, const char* name, const char* value = nullptr) {
         for (int i = 0; i < app.m_blockCount; ++i) {
@@ -15468,7 +15494,10 @@ bool NavigatorApp::smokeInteractiveFormsLiteGet(const char* formUrl, char* final
     if (finalUrl && finalUrlLen > 0) finalUrl[0] = '\0';
     if (parsedBlocks) *parsedBlocks = 0;
     if (error && errorLen > 0) error[0] = '\0';
-    NavigatorApp app;
+    NavigatorSmokeAppScope appScope;
+    NavigatorApp* appInstance = appScope.get();
+    if (!appInstance) return false;
+    NavigatorApp& app = *appInstance;
     app.loadUrl(formUrl);
     auto findControl = [&app](BlockKind kind, const char* name, const char* value = nullptr) {
         for (int i = 0; i < app.m_blockCount; ++i) {
@@ -15644,7 +15673,10 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
 {
     int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
-    NavigatorApp app;
+    NavigatorSmokeAppScope appScope;
+    NavigatorApp* appInstance = appScope.get();
+    if (!appInstance) return false;
+    NavigatorApp& app = *appInstance;
     app.loadUrl(url);
     int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
     int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
