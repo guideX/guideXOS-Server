@@ -2544,7 +2544,12 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
-#if HOSTLOGPROOF_C185_BOUNDARY
+#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+        // The development candidate reuses the normal native selector path.
+        // Selector 4 is occupied by the C185 sample for this image only;
+        // selectors 5-8 still enter the existing static production registry.
+        return DispatchC187GuestCandidate(ctx);
+#elif HOSTLOGPROOF_C185_BOUNDARY
         // This branch exists only in the isolated C185 NativeAOT composition.
         // It statically calls the external factory and never enters the normal
         // production selector table.
@@ -3422,6 +3427,45 @@ public static unsafe class Program
 #endif
 #endif
     }
+
+#if HOSTLOGPROOF_C187_GUEST_CANDIDATE
+    internal enum C187GuestSelectorRoute : byte
+    {
+        Invalid,
+        CounterApp,
+        ProductionRegistry,
+    }
+
+    internal static C187GuestSelectorRoute GetC187GuestSelectorRoute(
+        uint selector) => selector switch
+        {
+            4u => C187GuestSelectorRoute.CounterApp,
+            >= 5u and <= 8u => C187GuestSelectorRoute.ProductionRegistry,
+            _ => C187GuestSelectorRoute.Invalid,
+        };
+
+    internal static int DispatchC187GuestCandidate(
+        NativeGxAppContext* context)
+    {
+        if (context == null || context->size < GxAbi.AppContextLaunchPrefixSize ||
+            context->userData == null)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        uint selector = (uint)(nuint)context->userData;
+        switch (GetC187GuestSelectorRoute(selector))
+        {
+            case C187GuestSelectorRoute.CounterApp:
+                return GuideXosManagedHostServicesC185Composition.Dispatch(
+                    context, selector);
+            case C187GuestSelectorRoute.ProductionRegistry:
+                return DispatchC107Composite(context);
+            default:
+                return GxAbi.ErrorInvalidApplicationId;
+        }
+    }
+#endif
 
 #if HOSTLOGPROOF_FIRST_REFILL_ALLOCATION || HOSTLOGPROOF_SEGMENT_BOUNDARY_ALLOCATION || HOSTLOGPROOF_SEGMENT_TRANSITION_ALLOCATION || HOSTLOGPROOF_FIRST_COLLECTION_BOUNDARY_ALLOCATION || HOSTLOGPROOF_REPEATED_ALLOCATION
     private static uint CountZeroBytes(byte[] buffer)

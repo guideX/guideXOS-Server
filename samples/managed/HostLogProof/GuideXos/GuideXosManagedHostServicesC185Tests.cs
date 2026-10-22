@@ -503,13 +503,13 @@ public static unsafe partial class GuideXosManagedHostServicesC185Tests
     }
 
     private static NativeGxAppContext CreateContext(NativeHostCallTable* table,
-        uint generation, uint launchFlags)
+        uint generation, uint launchFlags, uint selector = 0u)
     {
         NativeGxAppContext context = default;
         context.size = GxAbi.AppContextLaunchPrefixSize;
         context.apiVersion = GxAbi.ApiVersion;
         context.host = table;
-        context.userData = (void*)(nuint)((ulong)generation << 32);
+        context.userData = (void*)(nuint)(((ulong)generation << 32) | selector);
         context.launchFlags = launchFlags;
         return context;
     }

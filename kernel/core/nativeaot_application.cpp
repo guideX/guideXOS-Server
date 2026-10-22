@@ -1162,6 +1162,18 @@ public:
     bool onWindowCloseRequested() override {
 #if defined(GXOS_NATIVEAOT_C152_MANAGED_NOTES_SAVE_WORKFLOW) && \
     defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+#if defined(GXOS_NATIVEAOT_C187_GUEST_CANDIDATE)
+        // The isolated C187 image routes selector 4 to CounterApp while the
+        // surrounding native C150 registry still labels that selector Notes.
+        // Do not send the Notes-only dirty-document action to CounterApp.
+        // C150's normal lifetime-close action still runs in onWindowClose().
+        if (!m_replacingSurface && m_window && m_selector == 4u &&
+            ManagedReturnTarget::identityEquals(
+                m_surfaceApplicationId, kManagedNotesApplicationId)) {
+            serial::puts("[C187-NATIVE-CLOSE-ROUTE] selector=00000004 app=CounterApp result=PASS\n");
+            return true;
+        }
+#else
         if (!m_replacingSurface && m_window && m_selector == 4u &&
             ManagedReturnTarget::identityEquals(
                 m_surfaceApplicationId, kManagedNotesApplicationId)) {
@@ -1174,6 +1186,7 @@ public:
             serial::puts("[C152-CLOSE] request=vetoed dirty-prompt=active result=PASS\n");
             return false;
         }
+#endif
 #endif
         return true;
     }
@@ -1216,6 +1229,22 @@ public:
             serial::put_hex32(m_selector);
             serial::puts(" result=");
             serial::puts(teardownResult == 0 ? "PASS\n" : "FAIL\n");
+#if defined(GXOS_NATIVEAOT_C187_GUEST_CANDIDATE)
+            // Exercise the real NativeAOT input entry with the just-closed
+            // generation while this candidate surface still carries its
+            // selector/generation token. C181 must reject the stale dispatch.
+            if (m_selector == 4u && teardownResult == 0 &&
+                ManagedReturnTarget::identityEquals(
+                    m_surfaceApplicationId, kManagedNotesApplicationId)) {
+                const int32_t staleInputResult = invokeManagedInput(
+                    m_selector, kLaunchFlagInput | kLaunchFlagInputKeyDown | 0x1Cu);
+                const bool staleRejected = staleInputResult != 0;
+                serial::puts("[C187-STALE-GENERATION] selector=00000004 generation=");
+                serial::put_hex32(m_applicationGeneration);
+                serial::puts(" callback=input result=");
+                serial::puts(staleRejected ? "REJECTED proof=PASS\n" : "ACCEPTED proof=FAIL\n");
+            }
+#endif
         }
 #endif
 #if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
