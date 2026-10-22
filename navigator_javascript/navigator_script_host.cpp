@@ -13,6 +13,12 @@
 #include <utility>
 #include <vector>
 
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+#define GXOS_JS84_HOST_DIAGNOSTIC(statement) do { statement; } while (false)
+#else
+#define GXOS_JS84_HOST_DIAGNOSTIC(statement) do { } while (false)
+#endif
+
 namespace gxos {
 namespace javascript {
 
@@ -4378,6 +4384,19 @@ NavigatorScriptHostAdapter::selectorCollectionIteratorFor(
     return &selectorCollectionIterators_[index];
 }
 
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+std::size_t
+NavigatorScriptHostAdapter::activeSelectorCollectionIteratorCount() const
+{
+    std::size_t count = 0u;
+    for (const SelectorCollectionIteratorRecord& record :
+        selectorCollectionIterators_) {
+        if (record.active) ++count;
+    }
+    return count;
+}
+#endif
+
 bool NavigatorScriptHostAdapter::allocateSelectorCollectionIterator(
     HostInstanceId collectionToken, std::size_t entryLength,
     SelectorCollectionIteratorMode mode, HostInstanceId& iteratorToken)
@@ -4386,11 +4405,19 @@ bool NavigatorScriptHostAdapter::allocateSelectorCollectionIterator(
     if (collectionToken == 0u ||
         entryLength > static_cast<std::size_t>(
             (std::numeric_limits<std::uint32_t>::max)())) return false;
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+    std::size_t activeCount = 0u;
+#endif
     for (std::size_t index = 0u;
         index < selectorCollectionIterators_.size(); ++index) {
         SelectorCollectionIteratorRecord& record =
             selectorCollectionIterators_[index];
-        if (record.active) continue;
+        if (record.active) {
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+            ++activeCount;
+#endif
+            continue;
+        }
         record.collectionToken = collectionToken;
         record.generation = generation_;
         record.nextIndex = 0u;
@@ -4399,8 +4426,15 @@ bool NavigatorScriptHostAdapter::allocateSelectorCollectionIterator(
         record.exhausted = false;
         record.mode = mode;
         iteratorToken = static_cast<HostInstanceId>(index + 1u);
+        GXOS_JS84_HOST_DIAGNOSTIC({
+            ++selectorCollectionIteratorAllocations_;
+            if (selectorCollectionIteratorHighWater_ < activeCount + 1u)
+                selectorCollectionIteratorHighWater_ = activeCount + 1u;
+        });
         return true;
     }
+    GXOS_JS84_HOST_DIAGNOSTIC(
+        ++selectorCollectionIteratorAllocationFailures_);
     return false;
 }
 

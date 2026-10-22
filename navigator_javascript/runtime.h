@@ -182,6 +182,36 @@ struct RuntimeLimits {
     std::size_t maxRealmSourceBytes = kDefaultMaxJavaScriptRealmSourceBytes;
 };
 
+// Bounded, native-readable allocation history since the most recent reset.
+// Allocation totals include objects later removed by construction rollback;
+// published iterator results count only results returned successfully.
+// High-water values describe concurrently retained pool use. No counter
+// implies that an object is unreachable or eligible for reclamation.
+struct RuntimeDiagnostics {
+    std::size_t runtimeObjectsAllocated = 0u;
+    std::size_t objectPoolHighWater = 0u;
+    std::size_t iteratorResultObjectsAllocated = 0u;
+    std::size_t iteratorResultObjectsPublished = 0u;
+    std::size_t iteratorEntryArraysAllocated = 0u;
+    std::size_t iteratorEntryArraysPublished = 0u;
+    std::size_t runtimePropertiesAllocated = 0u;
+    std::size_t propertyPoolHighWater = 0u;
+    std::size_t arraySlotsAllocated = 0u;
+    std::size_t arraySlotHighWater = 0u;
+    std::size_t environmentsAllocated = 0u;
+    std::size_t environmentPoolHighWater = 0u;
+    std::size_t hostHandlesCreated = 0u;
+    std::size_t hostHandleLiveHighWater = 0u;
+    std::size_t hostHandleRegistryHighWater = 0u;
+    std::size_t failedObjectAllocations = 0u;
+    std::size_t failedPropertyAllocations = 0u;
+    std::size_t failedArraySlotAllocations = 0u;
+    std::size_t failedEnvironmentAllocations = 0u;
+    std::size_t failedHostHandleAllocations = 0u;
+    std::size_t collectionResultRollbacks = 0u;
+    std::size_t collectionEntryRollbacks = 0u;
+};
+
 // A context is an independent, resettable bounded JavaScript realm.  execute() copies a
 // bounded source view before lexing, so the resulting AST and diagnostics do
 // not borrow the caller's source lifetime.  AST nodes retain views into that
@@ -313,6 +343,9 @@ public:
     std::size_t hostObjectCount() const { return liveHostObjectCount_; }
     std::size_t hostOperationCount() const { return hostOperations_; }
     std::size_t hostMethodCount() const { return hostMethodCount_; }
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+    const RuntimeDiagnostics& diagnostics() const { return diagnostics_; }
+#endif
     bool builtInsInitialized() const { return builtInsInitialized_; }
 
 private:
@@ -475,6 +508,9 @@ private:
     std::size_t totalPropertyCount_ = 0;
     std::size_t totalPropertyKeyBytes_ = 0;
     std::size_t totalArrayElements_ = 0;
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+    RuntimeDiagnostics diagnostics_;
+#endif
     std::size_t userFunctionCount_ = 0;
     std::size_t nativeFunctionCount_ = 0;
     std::size_t hostMethodCount_ = 0;

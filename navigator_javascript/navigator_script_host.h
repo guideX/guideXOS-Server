@@ -473,6 +473,21 @@ public:
     HostGenerationId generation() const { return generation_; }
     gxos::web::WebDocument* document() const { return document_; }
     const NavigatorScriptHostLimits& limits() const { return limits_; }
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+    std::size_t activeSelectorCollectionIteratorCount() const;
+    std::size_t selectorCollectionIteratorHighWater() const
+    {
+        return selectorCollectionIteratorHighWater_;
+    }
+    std::size_t selectorCollectionIteratorAllocations() const
+    {
+        return selectorCollectionIteratorAllocations_;
+    }
+    std::size_t selectorCollectionIteratorAllocationFailures() const
+    {
+        return selectorCollectionIteratorAllocationFailures_;
+    }
+#endif
 
     HostResult validate(const HostObjectReference& object) override;
     HostResult getProperty(const HostObjectReference& object,
@@ -1064,6 +1079,11 @@ private:
     std::size_t clickOnclickRecordCount_ = 0;
     std::size_t clickListenerCount_ = 0;
     std::uint64_t nextListenerRegistrationSequence_ = 1u;
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+    std::size_t selectorCollectionIteratorHighWater_ = 0u;
+    std::size_t selectorCollectionIteratorAllocations_ = 0u;
+    std::size_t selectorCollectionIteratorAllocationFailures_ = 0u;
+#endif
     bool clickDispatchActive_ = false;
 #ifdef GXOS_RELATIVE_SELECTOR_DIAGNOSTICS
     RelativeSelectorDispatchProbe relativeSelectorDispatchProbe_ = nullptr;

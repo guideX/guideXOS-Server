@@ -10814,3 +10814,203 @@ repository under
 `C:\Users\guideX\AppData\Local\Temp\guidex-js83-evidence-c93678fc945241a3bb68580f550e39d8`.
 `.phase` remains absent. Kernel/QEMU execution was not run; hosted stack
 measurements do not establish bare-metal stack safety.
+
+### JS84 bounded object-lifetime diagnostics and ownership boundary
+
+JS84 takes the diagnostics-only path. It does not reclaim published objects,
+properties, Array slots, environments, functions, strings, or host iterator
+records. The existing monotonic object IDs and deterministic exhaustion errors
+remain unchanged. The diagnostics are native-only and are enabled by compiling
+the entire JS84 diagnostic test binary with
+`GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS`; production builds omit the counter
+state and counter updates. No JavaScript diagnostic API was added.
+
+#### Representation and ownership inventory
+
+`Value` is a tagged scalar. Strings, functions, and ordinary objects carry
+32-bit indices into their owning `RuntimeContext` pools. Ordinary object
+identity is the `RuntimeObjectId` vector index. Those indices do not carry a
+generation. Published object records are append-only for the context
+lifetime; no successful object slot is reused before reset. The only
+`objects_.resize()` removal is the JS81 collection-result construction
+rollback, which removes the private tail of an operation before its result is
+returned to script or host code. Runtime reset ends the realm contract and
+clears all pools; a C++ `Value` retained across reset is invalid and must not
+be used as a live object identity.
+
+Host-object `Value`s carry an opaque 64-bit token with generation and slot.
+`HostObjectRecord` copies the host-owned `HostObjectReference` tuple
+`(instanceId, generation, kind)`; it stores no pointer to the DOM or to a
+JavaScript object. Reusing a host slot after generation invalidation does not
+make an old token valid because the token's generation no longer matches.
+Navigator iterator records are a fixed array of 128 24-byte records. A record
+stores the collection token, host generation, cursor bounds/index, mode, and
+state. Exhausted records remain reserved until document-generation reset or
+adapter reattachment, so the record limit is deterministic and is not a
+JavaScript-object reclamation mechanism.
+
+Runtime object properties and Array elements contain copied `Value`s; object
+prototypes contain object IDs. Environments contain copied binding `Value`s
+and a parent environment ID. `FunctionRecord` stores AST declaration and
+closure-environment IDs. The evaluator's call frames store function and
+environment IDs plus a `this` `Value`; function arguments, return/completion
+values, expression results, and `for...of` iterator results also occupy
+ordinary C++ locals or bounded call-frame storage while evaluation is active.
+Those active C++ values are not registered in a complete runtime root table.
+`finalValue_` holds the most recent statement value until the next
+same-realm execution or reset. A copied `Value` may also be retained by the
+embedding C++ caller independently of the runtime.
+
+Global bindings are roots. Runtime `objects_`, `functions_`, `strings_`, and
+`environments_` are append-only bounded storage pools, and their indices can
+be copied into other stored values. A `RuntimeObject` can point to another
+object through a property, Array slot, or prototype. A `Binding` can point to
+an object or function. A function points back to its closure environment.
+The supported language can create self-cycles through object properties and
+Arrays, and closure/environment cycles can be retained through function
+bindings. No cycle collector or complete edge walk exists.
+
+Property writes can replace an existing `Value` edge. `Array.pop()` removes
+the final slot and returns its `Value`; the runtime decrements current Array
+slot use, while the popped object itself stays in the append-only object
+pool. The JS84 cumulative slot-allocation counter therefore differs from the
+current slot count and its high-water mark.
+
+The Navigator adapter retains callback `RuntimeFunctionId`s in its fixed
+click-handler and click-listener tables. These are host-owned roots into the
+runtime function pool until listener removal, handler clearing, document
+reattachment, or reset coordination by the embedding. During synchronous
+callbacks, argument vectors and callback return values are borrowed for the
+call and may escape into ordinary runtime storage. Event objects are runtime
+objects cached in a fixed 16-entry nesting array; each active Event record
+holds its current host-handle values, and the bounded Event-dispatch stack
+preserves nested dispatch state. No runtime object points directly to a
+`WebDocument`; DOM ownership stays with the host, and Elements are resolved by
+serial plus generation.
+
+The root inventory is therefore known but not complete enough to determine
+that any successfully published ordinary object is unreachable: active
+evaluator locals are not enumerated, external C++ holders are outside the
+runtime, host listener records retain function IDs, and cycles are supported.
+Unknown or untracked reachability is treated as live. A discarded expression
+does not establish unreachability; in particular, the most recent expression
+value may still be held by `finalValue_`, and all allocated records remain in
+their pools until reset. This is the explicit JS84 no-reclamation boundary.
+
+#### Iterator-result and environment lifetimes
+
+Navigator VALUES and KEYS `next()` steps create a fresh ordinary result object
+with `value` and `done` properties. ENTRIES creates a two-slot pair Array and
+then a fresh outer result object. The yielded Element is converted through
+the canonical generation-scoped host-handle registry. The outer result and
+the yielded value therefore have distinct identity and ownership paths: a
+result can be retained in a variable, property, or Array, while its yielded
+Element remains independently subject to host-generation validation.
+
+The `for...of` evaluator reads `done`, reads `value` only for a nonterminal
+step, creates a fresh lexical environment for that iteration, and then runs
+the body. Its local `iteratorResult` leaves C++ scope as the loop advances,
+but that is not a reclamation proof: the iterator protocol is general, a
+custom iterator may return a shared result, evaluator and host frames may
+still retain copies, and object IDs are directly copyable. Terminal results
+are allocated too, and allocation failure remains an error rather than normal
+exhaustion. `break`, `continue`, return, close, callback, and Event semantics
+are unchanged.
+
+Function-call and per-iteration environments are appended to the bounded
+environment vector and retained until reset. Function records keep closure
+environment IDs, and Navigator event listeners can retain function IDs.
+Consequently, neither loop completion nor function return is a sufficient
+environment reclamation condition. Reset clears runtime-owned environments,
+objects, properties, Arrays, functions, strings, host-handle records, cached
+Event state, and AST/source pools. The embedding owns the host adapter and
+DOM; it must clear or reattach host callback and iterator state when ending a
+realm. `NavigatorScriptExecutionHarness` does so when it reloads a document.
+
+#### Diagnostic counters and rollback boundary
+
+With the diagnostic compile flag, `RuntimeDiagnostics` reports cumulative
+successful object/property/Array-slot/environment/host-handle allocations,
+iterator-result and ENTRIES-pair allocations and publications, per-pool
+high-water values, failed bounded allocations, and collection result/entry
+rollback counts. Current pool use remains available through the existing
+count accessors. The host adapter separately reports iterator-registry
+allocation count, active high-water, and capacity failures. The counters are
+per-runtime/per-adapter aggregates, contain no object history, and do not
+change JavaScript-visible behavior. Runtime counters reset with
+`RuntimeContext::reset()`. Iterator-registry aggregates live for the adapter
+lifetime and remain across document-generation reset; both sets are enabled
+under the compile flag.
+
+Allocation rollback remains distinct from reclamation. The JS81 iterator
+builders snapshot tail counts, construct a result privately, and restore
+objects, properties, Array slots, and newly canonicalized host records when
+construction fails. The JS84 counters include transient allocation and
+high-water activity even when rollback restores the current pool counts.
+Published results are never removed, and there is no free list, object-slot
+reuse, compaction, reference counting, tracing scan, or reclamation counter.
+
+The diagnostic layout is compile-time test-only. `RuntimeContext` and the
+Navigator adapter must be compiled consistently with the flag because it adds
+counter state to those native types. A regular `build.bat` production build
+does not define the flag and has no diagnostic counter updates or extra
+per-context counter storage.
+
+#### JS84 qualification closeout
+
+**Outcome A1: diagnostic-only.** The ownership and reachability audit did not
+find a complete runtime root registry. Active evaluator locals and copied
+`Value`s held by embedding callers are not enumerable, Navigator listener
+tables retain function IDs, and object/Array and closure/environment cycles
+are supported. Unknown reachability therefore remains live. JS84 adds
+compile-time test diagnostics and documents the boundary; it does not reclaim
+published objects, reuse object slots, resize pools, or alter runtime behavior.
+
+Native qualification on 2026-10-22 completed with 93/93 diagnostic-build
+checks and 68/68 no-diagnostics compatibility checks. Strict warning-as-error
+compilation and the production `-O2` stack-usage compile passed. Traversals of
+0 through 1,019 Elements completed; 1,020- and 1,024-Element traversals failed
+at the existing 1,020-body object-pool boundary with `ObjectLimitExceeded`.
+The final object count was 1,020/1,024, with no reclaim or cursor advance on
+failure. Five-sample fresh-context medians (microseconds, diagnostics enabled /
+disabled) were: `for...of` 521/515, `forEach` 458/487, `values().next()`
+502/529, and 100 result-object allocations plus 200 properties 20/18. These
+are machine-specific qualification samples, not performance guarantees; the
+production build has no diagnostic fields or counter updates.
+
+The full regression matrix passed 86/86 lanes and reported 15,134/15,134
+focused assertions across 45 assertion-bearing lanes. This includes the JS84
+instrumented suite (93/93) and the separate no-diagnostics run (68/68).
+
+The fresh production `build.bat` run passed with the repository compiler at
+`C:\mingw64\bin\g++.exe`. Before restoration, the built executable was
+8,639,900 bytes with SHA-256
+`61DB9E1187260F4D59FA5E5B69D9422FC396E36D5CAEE2462D32047784AC4014`; the
+hosted process (PID 24472) reported the same path and hash. The hosted
+aggregate emitted 695 checks: 688 passed and seven existing CSS checks failed
+(phases 3C, 3G, 6A, three checks in 6B, and 6C). Its overall result is
+therefore FAIL due to those CSS cases. All three JS84 checks passed, including
+the fixture marker `JS84:assertions=10:failures=0`; no JavaScript or JS84 check
+failed.
+
+Ignored-artifact restoration was verified against the pre-build SHA-256
+manifest and backup: 1,367 files totaling 90,843,932 bytes, with zero missing,
+extra, or changed files. This restored the pre-existing `guideXOSServer.exe`
+(8,398,274 bytes, SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`). The
+`.phase` sentinel remained absent. Qualification logs and before/after
+manifests are outside the repository at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js84-evidence-20261022`.
+
+The work stayed on `NAVIGATOR_JAVASCRIPT_SUPPORT`. The baseline HEAD was
+`4e1c4428a67f1fc6197637194040aa03dfcb2364`, already one commit ahead of
+`origin/NAVIGATOR_JAVASCRIPT_SUPPORT`; JS84 was committed locally without
+push. The final source changes are limited to the runtime and adapter
+diagnostics, JS84 native test and runner, hosted fixture and aggregate checks,
+and this documentation. No kernel or QEMU qualification was run.
+
+For JS85, first design a complete and auditable root enumeration across
+evaluator frames, embedding-held values, and host-retained callbacks. Evaluate
+generation-tagged object handles as a separate identity change. Do not add
+general reclamation until every stored edge and root category can be traced,
+including cycles and reset boundaries.

@@ -11,6 +11,12 @@
 #include <string>
 #include <utility>
 
+#ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
+#define GXOS_JS84_DIAGNOSTIC(statement) do { statement; } while (false)
+#else
+#define GXOS_JS84_DIAGNOSTIC(statement) do { } while (false)
+#endif
+
 namespace gxos {
 namespace javascript {
 namespace {
@@ -1372,6 +1378,8 @@ private:
             if (arguments.size() > context_.limits_.maxArrayElements -
                 (oldLength > context_.limits_.maxArrayElements
                     ? context_.limits_.maxArrayElements : oldLength)) {
+                GXOS_JS84_DIAGNOSTIC(
+                    ++context_.diagnostics_.failedArraySlotAllocations);
                 fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
                 succeeded = false;
                 break;
@@ -1379,6 +1387,8 @@ private:
             if (arguments.size() > context_.limits_.maxTotalArrayElements ||
                 context_.totalArrayElements_ >
                     context_.limits_.maxTotalArrayElements - arguments.size()) {
+                GXOS_JS84_DIAGNOSTIC(
+                    ++context_.diagnostics_.failedArraySlotAllocations);
                 fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
                 succeeded = false;
                 break;
@@ -1386,6 +1396,8 @@ private:
             if (arguments.size() > context_.limits_.maxArrayIndex + 1u ||
                 oldLength > context_.limits_.maxArrayIndex + 1u -
                     arguments.size()) {
+                GXOS_JS84_DIAGNOSTIC(
+                    ++context_.diagnostics_.failedArraySlotAllocations);
                 fail(RuntimeErrorCode::ArrayIndexOutOfRange, callSite);
                 succeeded = false;
                 break;
@@ -1403,11 +1415,21 @@ private:
                     object->elements[oldLength + index] = arguments[index];
                 }
             } catch (const std::bad_alloc&) {
+                GXOS_JS84_DIAGNOSTIC(
+                    ++context_.diagnostics_.failedArraySlotAllocations);
                 fail(RuntimeErrorCode::AllocationFailure, callSite);
                 succeeded = false;
                 break;
             }
             context_.totalArrayElements_ += arguments.size();
+            GXOS_JS84_DIAGNOSTIC({
+                context_.diagnostics_.arraySlotsAllocated += arguments.size();
+                if (context_.diagnostics_.arraySlotHighWater <
+                    context_.totalArrayElements_) {
+                    context_.diagnostics_.arraySlotHighWater =
+                        context_.totalArrayElements_;
+                }
+            });
             result = Value::number(static_cast<double>(object->elements.size()));
             break;
         }
@@ -2554,6 +2576,7 @@ RuntimeContext::RuntimeContext(RuntimeLimits limits)
 
 void RuntimeContext::clearRuntimeState()
 {
+    GXOS_JS84_DIAGNOSTIC(diagnostics_ = RuntimeDiagnostics());
     ast_.reset();
     sourceStorage_.clear();
     realmSourceStorage_.clear();
@@ -2598,6 +2621,8 @@ void RuntimeContext::clearRuntimeState()
     hostOperations_ = 0;
     hostCallActive_ = false;
     hostReentryAllowed_ = false;
+    GXOS_JS84_DIAGNOSTIC(
+        diagnostics_.environmentPoolHighWater = environmentCount());
 }
 
 void RuntimeContext::reset()
@@ -2687,6 +2712,7 @@ bool RuntimeContext::createEnvironment(EnvironmentId parent,
     if (environmentCount() >= limits_.maxEnvironments ||
         environments_.size() >=
             static_cast<std::size_t>(kInvalidEnvironmentId - 1u)) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedEnvironmentAllocations);
         error = RuntimeErrorCode::EnvironmentLimitExceeded;
         return false;
     }
@@ -2695,9 +2721,15 @@ bool RuntimeContext::createEnvironment(EnvironmentId parent,
             EnvironmentLimits{limits_.maxFunctionEnvironmentBindings,
                 limits_.maxBindingNameLength}, parent);
     } catch (const std::bad_alloc&) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedEnvironmentAllocations);
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
+    GXOS_JS84_DIAGNOSTIC({
+        ++diagnostics_.environmentsAllocated;
+        if (diagnostics_.environmentPoolHighWater < environmentCount())
+            diagnostics_.environmentPoolHighWater = environmentCount();
+    });
     result = static_cast<EnvironmentId>(environments_.size());
     return true;
 }
@@ -2832,6 +2864,7 @@ bool RuntimeContext::createObject(bool array,
     error = RuntimeErrorCode::None;
     if (objects_.size() >= limits_.maxObjects ||
         objects_.size() >= static_cast<std::size_t>(kInvalidRuntimeObjectId)) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedObjectAllocations);
         error = RuntimeErrorCode::ObjectLimitExceeded;
         return false;
     }
@@ -2843,6 +2876,7 @@ bool RuntimeContext::createObject(bool array,
         initialElements.size() > limits_.maxTotalArrayElements ||
         totalArrayElements_ > limits_.maxTotalArrayElements -
             initialElements.size())) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedArraySlotAllocations);
         error = RuntimeErrorCode::ArrayLimitExceeded;
         return false;
     }
@@ -2857,11 +2891,28 @@ bool RuntimeContext::createObject(bool array,
         if (array) object.elements = initialElements;
         objects_.push_back(std::move(object));
     } catch (const std::bad_alloc&) {
+        GXOS_JS84_DIAGNOSTIC({
+            ++diagnostics_.failedObjectAllocations;
+            if (array && !initialElements.empty())
+                ++diagnostics_.failedArraySlotAllocations;
+        });
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
+    GXOS_JS84_DIAGNOSTIC({
+        ++diagnostics_.runtimeObjectsAllocated;
+        if (diagnostics_.objectPoolHighWater < objects_.size())
+            diagnostics_.objectPoolHighWater = objects_.size();
+    });
     result = static_cast<RuntimeObjectId>(objects_.size() - 1u);
-    if (array) totalArrayElements_ += initialElements.size();
+    if (array) {
+        totalArrayElements_ += initialElements.size();
+        GXOS_JS84_DIAGNOSTIC({
+            diagnostics_.arraySlotsAllocated += initialElements.size();
+            if (diagnostics_.arraySlotHighWater < totalArrayElements_)
+                diagnostics_.arraySlotHighWater = totalArrayElements_;
+        });
+    }
     return true;
 }
 
@@ -3005,9 +3056,11 @@ bool RuntimeContext::createCollectionIteratorResult(const HostValue& value,
     const std::vector<Value> noElements;
     RuntimeObjectId object = kInvalidRuntimeObjectId;
     if (!createObject(false, noElements, object, error)) return false;
+    GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsAllocated);
 
     const auto rollback = [this, objectCountBefore, propertyCountBefore,
         propertyKeyBytesBefore, arrayElementCountBefore]() {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.collectionResultRollbacks);
         objects_.resize(objectCountBefore);
         totalPropertyCount_ = propertyCountBefore;
         totalPropertyKeyBytes_ = propertyKeyBytesBefore;
@@ -3041,6 +3094,7 @@ bool RuntimeContext::createCollectionIteratorResult(const HostValue& value,
     }
     record->properties[0].value = convertedValue;
     result = Value::object(object);
+    GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsPublished);
     return true;
 }
 
@@ -3079,6 +3133,7 @@ bool RuntimeContext::createCollectionIteratorEntryResult(
         propertyKeyBytesBefore, arrayElementCountBefore, hostObjectCountBefore,
         liveHostObjectCountBefore, reusableHostObjectSlot,
         reusableHostObjectBefore, elementAlreadyRegistered]() {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.collectionEntryRollbacks);
         objects_.resize(objectCountBefore);
         totalPropertyCount_ = propertyCountBefore;
         totalPropertyKeyBytes_ = propertyKeyBytesBefore;
@@ -3117,12 +3172,14 @@ bool RuntimeContext::createCollectionIteratorEntryResult(
         rollback();
         return false;
     }
+    GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorEntryArraysAllocated);
 
     if (!createCollectionIteratorResult(HostValue::object(pairObject), false,
             result, error)) {
         rollback();
         return false;
     }
+    GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorEntryArraysPublished);
     return true;
 }
 
@@ -3274,16 +3331,25 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
             const std::size_t growth = newLength - object->elements.size();
             if (growth > limits_.maxTotalArrayElements ||
                 totalArrayElements_ > limits_.maxTotalArrayElements - growth) {
+                GXOS_JS84_DIAGNOSTIC(
+                    ++diagnostics_.failedArraySlotAllocations);
                 error = RuntimeErrorCode::ArrayLimitExceeded;
                 return false;
             }
             try {
                 object->elements.resize(newLength, Value::undefined());
             } catch (const std::bad_alloc&) {
+                GXOS_JS84_DIAGNOSTIC(
+                    ++diagnostics_.failedArraySlotAllocations);
                 error = RuntimeErrorCode::AllocationFailure;
                 return false;
             }
             totalArrayElements_ += growth;
+            GXOS_JS84_DIAGNOSTIC({
+                diagnostics_.arraySlotsAllocated += growth;
+                if (diagnostics_.arraySlotHighWater < totalArrayElements_)
+                    diagnostics_.arraySlotHighWater = totalArrayElements_;
+            });
         }
         object->elements[index] = value;
         return true;
@@ -3306,12 +3372,14 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
     }
     if (object->properties.size() >= limits_.maxPropertiesPerObject ||
         totalPropertyCount_ >= limits_.maxTotalProperties) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);
         error = RuntimeErrorCode::PropertyLimitExceeded;
         return false;
     }
     const std::size_t keyBytes = key.isSymbol() ? 0u : key.string.size();
     if (keyBytes > limits_.maxTotalPropertyKeyBytes ||
         totalPropertyKeyBytes_ > limits_.maxTotalPropertyKeyBytes - keyBytes) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);
         error = RuntimeErrorCode::PropertyLimitExceeded;
         return false;
     }
@@ -3323,11 +3391,17 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         property.readOnly = readOnly;
         object->properties.push_back(std::move(property));
     } catch (const std::bad_alloc&) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
     ++totalPropertyCount_;
     totalPropertyKeyBytes_ += keyBytes;
+    GXOS_JS84_DIAGNOSTIC({
+        ++diagnostics_.runtimePropertiesAllocated;
+        if (diagnostics_.propertyPoolHighWater < totalPropertyCount_)
+            diagnostics_.propertyPoolHighWater = totalPropertyCount_;
+    });
     return true;
 }
 
@@ -3501,6 +3575,7 @@ bool RuntimeContext::createHostObject(const HostObjectReference& input,
     }
     if (slot == hostObjects_.size() &&
         hostObjects_.size() >= limits_.maxHostObjects) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedHostHandleAllocations);
         error = RuntimeErrorCode::HostObjectLimitExceeded;
         return false;
     }
@@ -3509,10 +3584,18 @@ bool RuntimeContext::createHostObject(const HostObjectReference& input,
         hostObjects_[slot].live = true;
         hostObjects_[slot].reference = input;
     } catch (const std::bad_alloc&) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedHostHandleAllocations);
         error = RuntimeErrorCode::AllocationFailure;
         return false;
     }
     ++liveHostObjectCount_;
+    GXOS_JS84_DIAGNOSTIC({
+        ++diagnostics_.hostHandlesCreated;
+        if (diagnostics_.hostHandleLiveHighWater < liveHostObjectCount_)
+            diagnostics_.hostHandleLiveHighWater = liveHostObjectCount_;
+        if (diagnostics_.hostHandleRegistryHighWater < hostObjects_.size())
+            diagnostics_.hostHandleRegistryHighWater = hostObjects_.size();
+    });
     result = makeHostObjectId(slot, hostGeneration_);
     return true;
 }

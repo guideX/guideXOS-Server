@@ -5561,6 +5561,38 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js83AfterClick, 1000) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js84FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js84.html";
+    const bool js84Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js84FixtureUrl);
+    const std::string js84InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS84 bounded lifetime fixture passes on the hosted server",
+        js84Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js84FixtureUrl &&
+        contains(js84InitialText, "Navigator JavaScript JS84") &&
+        contains(js84InitialText, "JS84:assertions=10:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js84Loaded) + ",text=" +
+        summarizeText(js84InitialText, 1400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS84 retained and discarded iterator results preserve script-visible references",
+        js84Loaded && contains(js84InitialText,
+            ":loops=true:mutation=true:modes=true:references=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted assertions cover result aliases, Array/property references, a cycle, and discarded next() results");
+    const bool js84Click = gxos::apps::Navigator::SmokeClickFormControlById(
+        "event-a");
+    const std::string js84AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS84 nested Event loops retain cursor progress and Event metadata",
+        js84Click && contains(js84AfterClick,
+            "JS84:event:outer=3:nested=3:metadata=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js84Click) + ",text=" +
+        summarizeText(js84AfterClick, 1000) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
