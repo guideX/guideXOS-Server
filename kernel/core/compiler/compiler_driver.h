@@ -29,6 +29,18 @@ enum CompileModuleStatus : uint8_t {
     COMPILE_MODULE_CACHE_HIT = 2
 };
 
+enum class CompileFailureStage : uint8_t {
+    None = 0,
+    ProjectValidation,
+    SourceRead,
+    Frontend,
+    ObjectGeneration,
+    Linker,
+    ElfWriter,
+    ArtifactValidation,
+    ArtifactPublication
+};
+
 struct CompileSummary {
     bool success;
     bool reopenedAndValidated;
@@ -60,6 +72,7 @@ struct CompileSummary {
     uint32_t diagnosticCount;
     bool diagnosticsTruncated;
     CompileDiagnostic diagnostics[COMPILER_MAX_DIAGNOSTICS];
+    CompileFailureStage failureStage;
 };
 
 bool compile(const char* sourcePath,

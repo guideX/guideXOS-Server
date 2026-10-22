@@ -33,6 +33,7 @@ struct SourceSelection {
 };
 
 static bool equal_text(const char* left, const char* right);
+static bool append_text(char* output, uint32_t capacity, const char* input);
 
 static const char* diagnostic_display_path(const SourceSelection& selection, const char* path)
 {
@@ -40,6 +41,39 @@ static const char* diagnostic_display_path(const SourceSelection& selection, con
     for (uint32_t i = 0; i < selection.count; ++i)
         if (equal_text(selection.paths[i], path)) return selection.relatives[i];
     return path;
+}
+
+static const char* failure_stage_label(CompileFailureStage stage)
+{
+    switch (stage) {
+    case CompileFailureStage::ProjectValidation: return "project";
+    case CompileFailureStage::SourceRead: return "source";
+    case CompileFailureStage::Frontend: return "compiler";
+    case CompileFailureStage::ObjectGeneration: return "object";
+    case CompileFailureStage::Linker: return "linker";
+    case CompileFailureStage::ElfWriter: return "ELF writer";
+    case CompileFailureStage::ArtifactValidation: return "artifact validation";
+    case CompileFailureStage::ArtifactPublication: return "artifact publication";
+    default: return "compiler";
+    }
+}
+
+static bool diagnostic_has_source_location(const CompileDiagnostic& diagnostic)
+{
+    if (diagnostic.location.line == 0 || diagnostic.location.column == 0 ||
+        diagnostic.sourcePath[0] == '\0' || diagnostic.sourcePath[0] == '<') return false;
+    return true;
+}
+
+static void compiler_failure_message(const CompileSummary& summary, char* message, uint32_t capacity)
+{
+    if (!message || capacity == 0) return;
+    message[0] = '\0';
+    append_text(message, capacity, "[");
+    append_text(message, capacity, failure_stage_label(summary.failureStage));
+    append_text(message, capacity, "] ");
+    if (summary.diagnosticCount != 0) append_text(message, capacity, summary.diagnostics[0].message);
+    else append_text(message, capacity, "bare-metal build pipeline failed without a diagnostic");
 }
 
 struct BuildJob {
@@ -863,19 +897,19 @@ static void run_build_core(const gx_build_request* request)
     for (uint32_t i = 0; i < selection.count; ++i) {
         if (summary.moduleStatus[i] == COMPILE_MODULE_CACHE_HIT) {
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
-            copy_text(line, sizeof(line), "Using cached object ");
+            copy_text(line, sizeof(line), "Reused cached object ");
             append_text(line, sizeof(line), selection.relatives[i]);
             output_line(line, 1);
         } else if (summary.moduleStatus[i] == COMPILE_MODULE_COMPILED) {
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
-            copy_text(line, sizeof(line), "Compiling ");
+            copy_text(line, sizeof(line), "Compiled ");
             append_text(line, sizeof(line), selection.relatives[i]);
             output_line(line, 1);
         }
     }
     if (summary.linkedModuleCount != 0) {
         char linkLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
-        copy_text(linkLine, sizeof(linkLine), "Linking ");
+        copy_text(linkLine, sizeof(linkLine), "Linked ");
         append_dec(linkLine, sizeof(linkLine), summary.linkedModuleCount);
         append_text(linkLine, sizeof(linkLine), summary.linkedFromPersistedObjects
             ? " modules from validated objects" : " modules");
@@ -897,12 +931,34 @@ static void run_build_core(const gx_build_request* request)
         for (uint32_t i = 0; i < summary.diagnosticCount; ++i) {
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
             const char* diagnosticPath = diagnostic_display_path(selection, summary.diagnostics[i].sourcePath);
-            append_text(line, sizeof(line), diagnosticPath); append_text(line, sizeof(line), "("); append_dec(line, sizeof(line), summary.diagnostics[i].location.line); append_text(line, sizeof(line), ","); append_dec(line, sizeof(line), summary.diagnostics[i].location.column); append_text(line, sizeof(line), "): error: "); append_text(line, sizeof(line), summary.diagnostics[i].message);
+            if (summary.failureStage == CompileFailureStage::Linker) {
+                append_text(line, sizeof(line), "linker: error: ");
+                append_text(line, sizeof(line), summary.diagnostics[i].message);
+            } else if (diagnostic_has_source_location(summary.diagnostics[i])) {
+                append_text(line, sizeof(line), diagnosticPath);
+                append_text(line, sizeof(line), "(");
+                append_dec(line, sizeof(line), summary.diagnostics[i].location.line);
+                append_text(line, sizeof(line), ",");
+                append_dec(line, sizeof(line), summary.diagnostics[i].location.column);
+                append_text(line, sizeof(line), "): error: ");
+                append_text(line, sizeof(line), summary.diagnostics[i].message);
+            } else {
+                append_text(line, sizeof(line), "[");
+                append_text(line, sizeof(line), failure_stage_label(summary.failureStage));
+                append_text(line, sizeof(line), "] ");
+                if (diagnosticPath[0] != '<') {
+                    append_text(line, sizeof(line), diagnosticPath);
+                    append_text(line, sizeof(line), ": ");
+                }
+                append_text(line, sizeof(line), summary.diagnostics[i].message);
+            }
             output_line(line, 2);
         }
         s_job.snapshot.errorCount = summary.diagnosticCount == 0 ? 1 : summary.diagnosticCount;
         s_job.snapshot.warningCount = 0;
-        failure(GX_BUILD_ERROR_COMPILER_FAILED, "bare-metal compiler rejected the saved source");
+        char message[sizeof(s_job.snapshot.errorMessage)] = {};
+        compiler_failure_message(summary, message, sizeof(message));
+        failure(GX_BUILD_ERROR_COMPILER_FAILED, message);
         return;
     }
     s_job.snapshot.state = GX_BUILD_VALIDATING_ARTIFACT;

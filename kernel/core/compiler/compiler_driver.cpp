@@ -44,6 +44,19 @@ static uint32_t string_length(const char* value)
     return length;
 }
 
+static bool text_equal(const char* left, const char* right);
+
+static bool synthetic_diagnostic_kind(const char* tokenKind)
+{
+    return text_equal(tokenKind, "project") || text_equal(tokenKind, "path") ||
+        text_equal(tokenKind, "filesystem") || text_equal(tokenKind, "source") ||
+        text_equal(tokenKind, "include") || text_equal(tokenKind, "object") ||
+        text_equal(tokenKind, "elf") || text_equal(tokenKind, "source-map") ||
+        text_equal(tokenKind, "linker") || text_equal(tokenKind, "backend") ||
+        text_equal(tokenKind, "module") || text_equal(tokenKind, "debug") ||
+        text_equal(tokenKind, "relocation") || text_equal(tokenKind, "data");
+}
+
 static void put_decimal_u64(uint64_t value)
 {
     char digits[20];
@@ -105,6 +118,10 @@ static void append_diagnostics(const Diagnostics& diagnostics, CompileSummary* s
             ++bytes;
         }
         destination.tokenKind[bytes] = '\0';
+        if (synthetic_diagnostic_kind(destination.tokenKind)) {
+            destination.location.line = 0;
+            destination.location.column = 0;
+        }
         bytes = 0;
         while (bytes + 1 < sizeof(destination.sourcePath) && sourcePath && sourcePath[bytes]) {
             destination.sourcePath[bytes] = sourcePath[bytes];
@@ -276,18 +293,113 @@ static bool project_root_for_source(const char* sourcePath, const char* sourceId
     return true;
 }
 
+struct ExpandedSourceSegment {
+    uint32_t outputLineStart;
+    uint32_t outputLineCount;
+    uint32_t sourceLineStart;
+    uint16_t sourceIndex;
+};
+
 struct IncludeExpansion {
     char projectRoot[COMPILER_MAX_SOURCE_PATH_BYTES];
     char output[COMPILER_MAX_DECLARATION_BYTES + 1];
     uint32_t outputBytes;
+    uint32_t outputLine;
     uint32_t includedBytes;
     uint16_t dependencyCount;
     DeclarationDependency dependencies[COMPILER_MAX_DECLARATION_DEPENDENCIES];
     char active[COMPILER_MAX_INCLUDE_DEPTH][COMPILER_MAX_SOURCE_PATH_BYTES];
     uint16_t activeCount;
+    uint16_t sourcePathCount;
+    char sourcePaths[COMPILER_MAX_DECLARATION_DEPENDENCIES + 1][COMPILER_MAX_SOURCE_PATH_BYTES];
+    uint16_t sourceSegmentCount;
+    ExpandedSourceSegment sourceSegments[2 * COMPILER_MAX_DECLARATION_DEPENDENCIES + 3];
 };
 
 static IncludeExpansion s_includeExpansion = {};
+
+static bool append_expanded_text(IncludeExpansion& expansion, const char* text, uint32_t bytes)
+{
+    if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
+                             &expansion.outputBytes, text, bytes)) return false;
+    for (uint32_t i = 0; i < bytes; ++i)
+        if (text[i] == '\n') ++expansion.outputLine;
+    return true;
+}
+
+static bool map_expanded_source_line(IncludeExpansion& expansion, const char* sourcePath,
+                                     uint32_t sourceLine)
+{
+    uint16_t sourceIndex = 0xFFFFU;
+    for (uint32_t i = 0; i < expansion.sourcePathCount; ++i) {
+        if (text_equal(expansion.sourcePaths[i], sourcePath)) {
+            sourceIndex = static_cast<uint16_t>(i);
+            break;
+        }
+    }
+    if (sourceIndex == 0xFFFFU) {
+        if (expansion.sourcePathCount >= COMPILER_MAX_DECLARATION_DEPENDENCIES + 1U) return false;
+        sourceIndex = expansion.sourcePathCount++;
+        if (!copy_text(expansion.sourcePaths[sourceIndex], sizeof(expansion.sourcePaths[sourceIndex]), sourcePath)) return false;
+    }
+    if (expansion.sourceSegmentCount != 0) {
+        ExpandedSourceSegment& previous = expansion.sourceSegments[expansion.sourceSegmentCount - 1U];
+        if (previous.sourceIndex == sourceIndex &&
+            previous.outputLineStart + previous.outputLineCount == expansion.outputLine &&
+            previous.sourceLineStart + previous.outputLineCount == sourceLine) {
+            ++previous.outputLineCount;
+            return true;
+        }
+    }
+    if (expansion.sourceSegmentCount >= 2U * COMPILER_MAX_DECLARATION_DEPENDENCIES + 3U) return false;
+    ExpandedSourceSegment& segment = expansion.sourceSegments[expansion.sourceSegmentCount++];
+    segment.outputLineStart = expansion.outputLine;
+    segment.outputLineCount = 1;
+    segment.sourceLineStart = sourceLine;
+    segment.sourceIndex = sourceIndex;
+    return true;
+}
+
+static bool map_expanded_diagnostics(CompileSummary* summary, uint32_t firstDiagnostic,
+                                     const IncludeExpansion& expansion, const char* fallbackPath)
+{
+    if (!summary) return true;
+    for (uint32_t i = firstDiagnostic; i < summary->diagnosticCount; ++i) {
+        CompileDiagnostic& diagnostic = summary->diagnostics[i];
+        if (fallbackPath) copy_text(diagnostic.sourcePath, sizeof(diagnostic.sourcePath), fallbackPath);
+        const uint32_t expandedLine = diagnostic.location.line;
+        bool mapped = false;
+        if (expandedLine != 0) {
+            for (uint32_t segmentIndex = 0; segmentIndex < expansion.sourceSegmentCount; ++segmentIndex) {
+                const ExpandedSourceSegment& segment = expansion.sourceSegments[segmentIndex];
+                if (expandedLine < segment.outputLineStart ||
+                    expandedLine - segment.outputLineStart >= segment.outputLineCount ||
+                    segment.sourceIndex >= expansion.sourcePathCount) continue;
+                diagnostic.location.line = segment.sourceLineStart + expandedLine - segment.outputLineStart;
+                copy_text(diagnostic.sourcePath, sizeof(diagnostic.sourcePath), expansion.sourcePaths[segment.sourceIndex]);
+                mapped = true;
+                break;
+            }
+        }
+        if (!mapped) {
+            diagnostic.location.line = 0;
+            diagnostic.location.column = 0;
+        }
+    }
+    return true;
+}
+
+static void clear_synthetic_diagnostic_locations(CompileSummary* summary, uint32_t firstDiagnostic,
+                                                 const char* sourcePath)
+{
+    if (!summary) return;
+    for (uint32_t i = firstDiagnostic; i < summary->diagnosticCount; ++i) {
+        CompileDiagnostic& diagnostic = summary->diagnostics[i];
+        diagnostic.location.line = 0;
+        diagnostic.location.column = 0;
+        if (sourcePath) copy_text(diagnostic.sourcePath, sizeof(diagnostic.sourcePath), sourcePath);
+    }
+}
 
 static int32_t dependency_index(const IncludeExpansion& expansion, const char* path)
 {
@@ -409,26 +521,28 @@ static bool expand_include_file(IncludeExpansion& expansion, const char* relativ
         copy_text(expansion.active[expansion.activeCount++], sizeof(expansion.active[0]), relative);
     }
     uint32_t lineStart = 0;
+    uint32_t sourceLine = 1;
     while (lineStart < byteCount) {
         uint32_t lineEnd = lineStart;
         while (lineEnd < byteCount && bytes[lineEnd] != '\n' && bytes[lineEnd] != '\r') ++lineEnd;
         uint32_t lineBytes = lineEnd - lineStart;
+        const bool hasNewline = lineEnd < byteCount;
+        uint32_t newlineBytes = 0;
+        if (hasNewline)
+            newlineBytes = bytes[lineEnd] == '\r' && lineEnd + 1U < byteCount && bytes[lineEnd + 1U] == '\n' ? 2U : 1U;
         char requested[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
         bool directive = false;
         if (!parse_include_line(reinterpret_cast<const char*>(bytes + lineStart), lineBytes,
                                 requested, sizeof(requested), &directive, diagnostics)) return false;
         if (!directive) {
-            if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
-                                     &expansion.outputBytes, reinterpret_cast<const char*>(bytes + lineStart), lineBytes)) return false;
-            if (lineEnd < byteCount) {
-                const uint32_t newlineBytes = bytes[lineEnd] == '\r' && lineEnd + 1U < byteCount && bytes[lineEnd + 1U] == '\n' ? 2U : 1U;
-                if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
-                                         &expansion.outputBytes, "\n", 1)) return false;
-                lineEnd += newlineBytes;
-            }
+            if (!map_expanded_source_line(expansion, relative, sourceLine) ||
+                !append_expanded_text(expansion, reinterpret_cast<const char*>(bytes + lineStart), lineBytes)) return false;
+            if (hasNewline && !append_expanded_text(expansion, "\n", 1)) return false;
         } else {
             char resolved[COMPILER_MAX_SOURCE_PATH_BYTES] = {};
             bool found = false;
+            bool expanded = false;
+            uint32_t expandedHeaderBytes = 0;
             for (uint32_t variant = 0; variant < 3 && !found; ++variant) {
                 if (!header_candidate(relative, requested, variant, resolved, sizeof(resolved))) continue;
                 if (depth >= COMPILER_MAX_INCLUDE_DEPTH) {
@@ -440,6 +554,7 @@ static bool expand_include_file(IncludeExpansion& expansion, const char* relativ
                 uint32_t headerBytes = 0;
                 if (read_header(expansion, resolved, scratch, &headerBytes)) {
                     found = true;
+                    expandedHeaderBytes = headerBytes;
                     if (active_index(expansion, resolved) >= 0) {
                         diagnostics.error({0, 1, 1}, "include cycle detected", "include");
                         return false;
@@ -457,10 +572,9 @@ static bool expand_include_file(IncludeExpansion& expansion, const char* relativ
                         dependency.bytes = headerBytes;
                         dependency.hash = hash_bytes(scratch, headerBytes);
                         expansion.includedBytes += headerBytes;
-                        if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
-                                                 &expansion.outputBytes, "\n", 1) ||
-                            !expand_include_file(expansion, resolved, scratch, headerBytes,
+                        if (!expand_include_file(expansion, resolved, scratch, headerBytes,
                                                  static_cast<uint16_t>(depth + 1U), diagnostics)) return false;
+                        expanded = true;
                     }
                     break;
                 }
@@ -469,11 +583,18 @@ static bool expand_include_file(IncludeExpansion& expansion, const char* relativ
                 diagnostics.error({0, 1, 1}, "header not found", "include");
                 return false;
             }
-            if (!append_text_bounded(expansion.output, sizeof(expansion.output) - 1U,
-                                     &expansion.outputBytes, "\n", 1)) return false;
-            if (lineEnd < byteCount) lineEnd += bytes[lineEnd] == '\r' && lineEnd + 1U < byteCount && bytes[lineEnd + 1U] == '\n' ? 2U : 1U;
+            // A duplicate include still occupies its source line, while a new
+            // header is expanded in place. Add a separator only when the
+            // header itself had no final newline and the include did.
+            if ((!expanded || (expandedHeaderBytes == 0)) && hasNewline) {
+                if (!append_expanded_text(expansion, "\n", 1)) return false;
+            } else if (expanded && hasNewline && expansion.outputBytes != 0 &&
+                       expansion.output[expansion.outputBytes - 1U] != '\n') {
+                if (!append_expanded_text(expansion, "\n", 1)) return false;
+            }
         }
-        lineStart = lineEnd;
+        lineStart = lineEnd + newlineBytes;
+        ++sourceLine;
     }
     if (depth != 0 && expansion.activeCount != 0) --expansion.activeCount;
     return true;
@@ -489,6 +610,7 @@ static bool prepare_source_with_headers(const char* sourcePath, const char* sour
         !dependencies || !dependencyCount || sourceBytes > COMPILER_MAX_SOURCE_BYTES) return false;
     s_includeExpansion = {};
     IncludeExpansion& expansion = s_includeExpansion;
+    expansion.outputLine = 1;
     if (!project_root_for_source(sourcePath, sourceIdentityPath, expansion.projectRoot, sizeof(expansion.projectRoot))) {
         diagnostics.error({0, 1, 1}, "source path is outside its project build boundary", "include");
         return false;
@@ -609,9 +731,12 @@ static bool publish_object(const char* objectPath, const CompiledModule& module)
 
 } // namespace
 
-static bool fail_project(CompileSummary* summary)
+static bool fail_project(CompileSummary* summary, CompileFailureStage stage)
 {
-    if (summary) summary->success = false;
+    if (summary) {
+        summary->success = false;
+        summary->failureStage = stage;
+    }
     serial::puts("Compiler: build FAIL\n");
     return false;
 }
@@ -632,7 +757,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "project source list and output path are required", "project");
         if (summary) append_diagnostics(diagnostics, summary, "<project>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ProjectValidation);
     }
 
     serial::puts("Compiler: project_sources=");
@@ -643,6 +768,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
 
     if (summary) summary->sourceFileCount = sourceCount;
     bool compileFailed = false;
+    CompileFailureStage compileFailureStage = CompileFailureStage::None;
     uint32_t compiledModuleCount = 0;
     uint32_t cachedModuleCount = 0;
     uint32_t totalSourceBytes = 0;
@@ -660,12 +786,14 @@ static bool compile_project_impl(const char* const* sourcePaths,
             diagnostics.error(driverLocation, "unable to read regular source file", "path");
             if (summary) append_diagnostics(diagnostics, summary, sourcePath ? sourcePath : "<null>");
             compileFailed = true;
+            if (compileFailureStage == CompileFailureStage::None) compileFailureStage = CompileFailureStage::SourceRead;
             continue;
         }
         if (sourceInfo.size > COMPILER_MAX_SOURCE_BYTES) {
             diagnostics.error(driverLocation, "source exceeds 64 KiB compiler limit", "source");
             if (summary) append_diagnostics(diagnostics, summary, sourcePath);
             compileFailed = true;
+            if (compileFailureStage == CompileFailureStage::None) compileFailureStage = CompileFailureStage::Frontend;
             continue;
         }
         const uint32_t sourceBytes = static_cast<uint32_t>(sourceInfo.size);
@@ -674,6 +802,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
             diagnostics.error(driverLocation, "source read was shorter than filesystem metadata", "filesystem");
             if (summary) append_diagnostics(diagnostics, summary, sourcePath);
             compileFailed = true;
+            if (compileFailureStage == CompileFailureStage::None) compileFailureStage = CompileFailureStage::SourceRead;
             continue;
         }
         s_source[sourceBytes] = '\0';
@@ -692,12 +821,22 @@ static bool compile_project_impl(const char* const* sourcePaths,
             uint16_t dependencyCount = 0;
             if (!prepare_source_with_headers(sourcePath, sourceIdentityPath, s_source, sourceBytes,
                                              &expandedSource, &expandedBytes, dependencies,
-                                             &dependencyCount, diagnostics) ||
-                !compile_module_from_source(sourceIdentityPath, expandedSource, expandedBytes,
+                                             &dependencyCount, diagnostics)) {
+                const uint32_t firstDiagnostic = summary ? summary->diagnosticCount : 0;
+                if (summary) append_diagnostics(diagnostics, summary, sourcePath);
+                clear_synthetic_diagnostic_locations(summary, firstDiagnostic, sourceIdentityPath);
+                compileFailed = true;
+                if (compileFailureStage == CompileFailureStage::None) compileFailureStage = CompileFailureStage::Frontend;
+                continue;
+            }
+            const uint32_t firstDiagnostic = summary ? summary->diagnosticCount : 0;
+            if (!compile_module_from_source(sourceIdentityPath, expandedSource, expandedBytes,
                                             &s_modules[i], diagnostics)) {
-            if (summary) append_diagnostics(diagnostics, summary, sourcePath);
-            compileFailed = true;
-            continue;
+                if (summary) append_diagnostics(diagnostics, summary, sourcePath);
+                map_expanded_diagnostics(summary, firstDiagnostic, s_includeExpansion, sourceIdentityPath);
+                compileFailed = true;
+                if (compileFailureStage == CompileFailureStage::None) compileFailureStage = CompileFailureStage::Frontend;
+                continue;
             }
             s_modules[i].sourceBytes = sourceBytes;
             s_modules[i].sourceHash = sourceHash;
@@ -712,6 +851,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
                 diagnostics.error(driverLocation, "compiled object could not be published safely", "object");
                 if (summary) append_diagnostics(diagnostics, summary, sourcePath);
                 compileFailed = true;
+                if (compileFailureStage == CompileFailureStage::None) compileFailureStage = CompileFailureStage::ObjectGeneration;
                 continue;
             }
             if (objectPaths && objectPaths[i]) {
@@ -723,6 +863,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
                     diagnostics.error(driverLocation, "published ELF object could not be reopened", "object");
                     if (summary) append_diagnostics(diagnostics, summary, sourcePath);
                     compileFailed = true;
+                    if (compileFailureStage == CompileFailureStage::None) compileFailureStage = CompileFailureStage::ObjectGeneration;
                     continue;
                 }
             }
@@ -751,7 +892,8 @@ static bool compile_project_impl(const char* const* sourcePaths,
         summary->cachedModuleCount = cachedModuleCount;
     }
 
-    if (compileFailed) return fail_project(summary);
+    if (compileFailed) return fail_project(summary, compileFailureStage == CompileFailureStage::None
+        ? CompileFailureStage::Frontend : compileFailureStage);
 
     if (objectPaths) {
         serial::puts("Compiler: incremental_counts compiled=");
@@ -771,7 +913,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
     serial::putc('\n');
     if (!link_modules(s_modules, sourceCount, &s_linked, linkerDiagnostics)) {
         if (summary) append_diagnostics(linkerDiagnostics, summary, "<link>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::Linker);
     }
     if (summary) {
         summary->linkedModuleCount = sourceCount;
@@ -791,14 +933,14 @@ static bool compile_project_impl(const char* const* sourcePaths,
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "ELF writer could not construct bounded linked image", "elf");
         if (summary) append_diagnostics(diagnostics, summary, "<link>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ElfWriter);
     }
 
     if (!append_bootstrap_source_map(s_linked, s_elf, sizeof(s_elf), &layout)) {
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "ELF source map could not be appended", "source-map");
         if (summary) append_diagnostics(diagnostics, summary, "<link>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ElfWriter);
     }
 
     ElfValidationResult producedValidation = {};
@@ -810,7 +952,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, producedValidation.error, "elf");
         if (summary) append_diagnostics(diagnostics, summary, "<link>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ArtifactValidation);
     }
     serial::puts("Compiler: produced ELF validation PASS entry=0x");
     serial::put_hex64(layout.entryPoint);
@@ -821,7 +963,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "filesystem did not write complete ELF image", "filesystem");
         if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ArtifactPublication);
     }
     const uint64_t outputHash = hash_bytes(s_elf, layout.outputBytes);
     serial::puts("Compiler: output_bytes=");
@@ -835,14 +977,14 @@ static bool compile_project_impl(const char* const* sourcePaths,
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "generated ELF could not be closed through VFS", "filesystem");
         if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ArtifactPublication);
     }
     uint8_t reopenHandle = vfs::open(outputPath, vfs::OPEN_READ);
     if (reopenHandle == 0xFF) {
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "generated ELF could not be reopened through VFS", "filesystem");
         if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ArtifactPublication);
     }
     const int64_t reopenedSize = vfs::file_size(reopenHandle);
     const int32_t reopenedBytes = reopenedSize <= 0 || reopenedSize > COMPILER_MAX_OUTPUT_BYTES
@@ -854,7 +996,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "reopened ELF readback was incomplete", "filesystem");
         if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ArtifactPublication);
     }
     ElfValidationResult reopenedValidation = {};
     if (!validate_bootstrap_elf(s_reopened, static_cast<uint32_t>(reopenedBytes),
@@ -865,7 +1007,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, reopenedValidation.error, "elf");
         if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ArtifactValidation);
     }
     const uint64_t reopenedHash = hash_bytes(s_reopened, static_cast<uint32_t>(reopenedBytes));
     serial::puts("Compiler: reopened_bytes=");
@@ -877,7 +1019,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
         Diagnostics diagnostics;
         diagnostics.error(driverLocation, "reopened ELF hash differs from produced ELF hash", "filesystem");
         if (summary) append_diagnostics(diagnostics, summary, "<filesystem>");
-        return fail_project(summary);
+        return fail_project(summary, CompileFailureStage::ArtifactPublication);
     }
 
     if (summary) {
