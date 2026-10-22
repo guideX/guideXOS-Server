@@ -104,4 +104,30 @@ QAC `.phase` now records QAC3B accepted while overall QAC3 remains open; QAC3C h
 
 ## Future adoption
 
-QAC3C can assess `scripts/run-qemu-x86.bat` and the serial-marker UEFI smoke runners after their build outputs and shutdown paths are isolated and use QAC's direct-child contract. Broader Server conversion remains out of scope for QAC3B.
+QAC3C can assess the serial-marker UEFI smoke runners after their build outputs and shutdown paths are isolated and use QAC's direct-child contract. Broader Server conversion remains out of scope for QAC3B.
+
+## QAC3C1 prebuilt x86 launcher — Outcome B (2026-10-21)
+
+The prebuilt-kernel entry point is `scripts/run-qemu-x86.bat`. It now invokes `scripts/run-qemu-x86-prebuilt-qac.ps1`, which reuses `scripts/qac-managed-qemu.psm1` and runs `qac run --project guideXOSServer --mode development -- <QEMU> <arguments>`. Direct PowerShell invocation is also supported:
+
+```powershell
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-qemu-x86-prebuilt-qac.ps1
+```
+
+The default artifact is `kernel/build/x86/bin/kernel.elf`, resolved from the Server checkout regardless of the caller's current directory. `-KernelPath` can select another existing artifact; a relative path is resolved from the Server root, and an absolute path may contain spaces. Before requesting admission, the runner opens the file read-only, validates the ELF32 little-endian Intel 80386 executable header, and prints the resolved path, byte size, and SHA-256. A missing, unreadable, or incompatible artifact fails with a diagnostic. It does not invoke a kernel build, solution build, or replacement-artifact path. After QAC exits, the runner hashes the same file again and reports any change.
+
+On this checkout the selected artifact was `D:\dev\guideXOSServer\kernel\build\x86\bin\kernel.elf`, 2,478,204 bytes, SHA-256 `3566D010B087DD9309593ACAF59D6CF2CD48B15BCBDBC0C39F207AFB0774FC00`. Its on-disk ELF header was read and classified as ELF32 Intel 80386 ET_EXEC. No build or live launcher run occurred in this qualification attempt, so a post-QEMU artifact hash is still pending.
+
+The runner retains the prebuilt launcher's repository-root working directory and the root-relative QEMU kernel argument. It preserves the configured executable `C:\Program Files\qemu\qemu-system-i386.exe`, `-machine pc,usb=off`, `-kernel`, `-m 128M`, `-vga std`, `-serial stdio`, `-display gtk`, `-vnc :0`, `-no-reboot`, `-no-shutdown`, and `-d guest_errors`. No CPU override is supplied. Serial and existing debug output remain on the console streams; the launcher writes no kernel, ESP, shared image, log, or temporary artifact. It depends on the new PowerShell runner and the existing shared QAC argument helper; the batch file is only the entry point.
+
+QAC must already be online for the same Windows user. The resolver honors `-QacCliPath`, then `GUIDEXOS_QAC_CLI`, `qac.exe` on `PATH`, and finally the sibling QAC apphost. Coordinator or CLI failure stops before QEMU and never falls back to the old direct invocation. The request always uses development mode. Existing QAC queue fairness and its 30-minute admission policy apply; Ctrl+C while waiting is handled by QAC as a queued cancellation. Once admitted, the runner waits for the QAC command to verify the exact child exit and release before returning the child's exit code. Closing the QEMU GUI or pressing Ctrl+C retains the existing interactive shutdown behavior. No process-name cleanup, QMP requirement, guest marker, or timeout was added to normal launches.
+
+For bounded qualification only, `-QualificationQmpPort <port>` adds a QMP listener bound to `127.0.0.1`; the runner checks that the port is available first. The option is absent from the default argument list. It is reserved for a future test-owned shutdown when the acceptance lane is available.
+
+The extended launcher contract suite passed **80/80 assertions**. It covers default and explicit path selection, valid and invalid ELF fixtures, missing-kernel failure, unchanged fixture hash, no-build behavior, the development project/mode, QEMU executable and argument forwarding, paths with spaces, coordinator failure/no fallback, queue/cancellation contracts, child launch and exit propagation contracts, unsafe-cleanup guards, and separation from the build-and-run launcher. These checks are deterministic launcher contracts; they do not simulate QAC admission, child process ownership, guest execution, or recovery. The actual batch entry point was invoked with a missing path containing spaces; it returned 1 with “No build or replacement artifact was generated” before coordinator access. A second batch invocation used a nonexistent `-QacCliPath`; after printing the real kernel's path, size, format, and hash, it returned 2 without starting QEMU.
+
+At live preflight, QAC 2.0 was Online, but its census showed an active `guideXOSServer` acceptance reservation `844ca563d93249878a0368490bf0b9f8`, verified owner PID 16352, and managed QEMU PID 19004 (`qemu-system-x86_64.exe`). The reservation remained active at the final check. No development request was submitted, and that session was left untouched. Consequently there is no QAC3C1 development admission, QEMU direct-child identity, guest boot, exit/release transition, queue/cancellation run, or post-run hash evidence. QAC's own census showed no foreign QEMU process and no queued request at the last snapshot.
+
+The QAC WPF GUI process started as PID 20368, but the computer-use window service did not expose a targetable dashboard window. No visual claim is made for the development row, minimized/reopened behavior, or completion transition. The active acceptance session was visible in QAC CLI state only; it is not substituted as QAC3C1 dashboard evidence. The missing dashboard observation and protected acceptance workload leave mandatory live qualification open.
+
+**Outcome B — QAC3C1 implementation and contract checks are complete; QAC3C1 remains open.** The protected acceptance reservation prevented a safe development launch during this attempt. No QAC source, scheduler policy, kernel source, ESP image, Windows service, firewall rule, or foreign process was changed. QAC3C2 and later milestones have not begun.

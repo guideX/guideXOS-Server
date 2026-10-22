@@ -1,60 +1,13 @@
 @echo off
-REM
-REM QEMU x86 Launcher for guideXOS (Windows)
-REM
-REM Copyright (c) 2024 guideX
-REM
+setlocal
 
-REM Save current directory and change to script directory
-pushd %~dp0
-
-REM Go to project root (one level up from scripts)
-cd ..
-
-set KERNEL_PATH=kernel\build\x86\bin\kernel.elf
-set QEMU_PATH=C:\Program Files\qemu\qemu-system-i386.exe
-
-if not exist "%KERNEL_PATH%" (
-    echo Error: Kernel not found at %KERNEL_PATH%
-    echo Please build the kernel first:
-    echo   cd kernel
-    echo   build-x86.bat
-    popd
-    pause
+REM Launch the existing x86 kernel through QAC without building or replacing it.
+REM The PowerShell runner resolves the artifact and preserves this launcher's QEMU settings.
+set "RUNNER=%~dp0run-qemu-x86-prebuilt-qac.ps1"
+if not exist "%RUNNER%" (
+    echo Error: QAC prebuilt-kernel launcher not found at "%RUNNER%".
     exit /b 1
 )
 
-if not exist "%QEMU_PATH%" (
-    echo Error: QEMU not found at %QEMU_PATH%
-    echo Please install QEMU from: https://www.qemu.org/download/#windows
-    popd
-    pause
-    exit /b 1
-)
-
-echo Launching guideXOS x86 kernel in QEMU...
-echo Kernel: %KERNEL_PATH%
-echo.
-echo Framebuffer display: QEMU window shows the desktop directly
-echo VNC secondary viewer: connect to localhost:5900
-echo Press Ctrl+C in this window to exit QEMU
-echo ----------------------------------------
-echo.
-
-REM Launch with native framebuffer display (primary) and VNC (secondary viewer).
-REM usb=off ensures mouse events route to PS/2 (IRQ12) since the
-REM kernel does not yet have a USB HID driver.
-"%QEMU_PATH%" ^
-    -machine pc,usb=off ^
-    -kernel "%KERNEL_PATH%" ^
-    -m 128M ^
-    -vga std ^
-    -serial stdio ^
-    -display gtk ^
-    -vnc :0 ^
-    -no-reboot ^
-    -no-shutdown ^
-    -d guest_errors
-
-REM Restore original directory
-popd
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%RUNNER%" %*
+exit /b %ERRORLEVEL%
