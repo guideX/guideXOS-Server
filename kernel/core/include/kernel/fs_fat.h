@@ -97,6 +97,24 @@ enum TraversalStatus : uint8_t {
 const char* traversal_status_name(TraversalStatus status);
 TraversalStatus last_traversal_status();
 
+// Path lookup details preserve the distinction between a missing entry and
+// an underlying directory traversal or block I/O failure. The legacy bool
+// lookup API remains unchanged for existing callers.
+enum PathLookupStatus : uint8_t {
+    PATH_LOOKUP_OK = 0,
+    PATH_LOOKUP_INVALID_ARGUMENT,
+    PATH_LOOKUP_NOT_MOUNTED,
+    PATH_LOOKUP_NOT_FOUND,
+    PATH_LOOKUP_NOT_DIRECTORY,
+    PATH_LOOKUP_IO_ERROR,
+    PATH_LOOKUP_CORRUPT_DIRECTORY,
+    PATH_LOOKUP_NOT_ATTEMPTED,
+};
+
+const char* path_lookup_status_name(PathLookupStatus status);
+PathLookupStatus last_path_lookup_status();
+block::Status last_io_status();
+
 // Detailed result for delete_path().  The legacy bool API remains available,
 // but callers must be able to distinguish an intentionally refused rmdir from
 // an I/O or FAT-chain failure.

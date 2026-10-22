@@ -12,6 +12,8 @@
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
+#include "include/kernel/block_device.h"
+#include "include/kernel/fs_fat.h"
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/app_audio_stream.h"
 #include "include/kernel/native_present_validation.h"
@@ -362,10 +364,14 @@ void NativeWindowOwner::record_frame_guard_failure() {
 static Package s_packages[kMaxPackages];
 static uint32_t s_packageCount = 0;
 static char s_manifest[kMaxManifestBytes];
+static char s_lifecycleManifestProbe[1024];
 static bool s_discovered = false;
 static bool s_launchInProgress = false;
 static uint64_t s_runtimeSequence = 0;
 static Runtime* s_activeRuntime = nullptr;
+static uint32_t s_lifecycleCheckpointCount = 0;
+static bool s_discoveryOpenFailureReported = false;
+static bool s_discoveryEnumerationFailureReported = false;
 
 extern "C" uint64_t gxos_native_fault_recovery_rsp = 0;
 extern "C" uint64_t gxos_native_fault_recovery_rip = 0;
@@ -407,6 +413,18 @@ static void serial_put_u32_decimal(uint32_t value) {
         value /= 10u;
     } while (value != 0u && count < sizeof(digits));
     while (count > 0u) serial::putc(digits[--count]);
+}
+
+static void serial_put_bounded(const char* value, uint32_t capacity) {
+    if (!value) {
+        serial::puts("<null>");
+        return;
+    }
+    for (uint32_t index = 0; index < capacity; ++index) {
+        if (value[index] == '\0') return;
+        serial::putc(value[index]);
+    }
+    serial::puts("<unterminated>");
 }
 
 static bool text_copy(char* destination, uint32_t capacity, const char* source) {
@@ -673,6 +691,271 @@ static bool parse_package(const char* directory, Package* package) {
     return true;
 }
 
+static const char* apps_checkpoint_name(AppsLifecycleCheckpoint checkpoint) {
+    switch (checkpoint) {
+        case APPS_CHECKPOINT_INITIAL_MOUNT: return "A_INITIAL_MOUNT_COMPLETE";
+        case APPS_CHECKPOINT_PACMAN_REGISTERED: return "B_PACMAN_REGISTERED";
+        case APPS_CHECKPOINT_BEFORE_START_MENU_REFRESH: return "C_BEFORE_START_MENU_REFRESH";
+        case APPS_CHECKPOINT_AFTER_START_MENU_REFRESH: return "D_AFTER_START_MENU_REFRESH";
+        default: return "UNKNOWN";
+    }
+}
+
+static const char* block_status_name(block::Status status) {
+    switch (status) {
+        case block::BLOCK_OK: return "BLOCK_OK";
+        case block::BLOCK_ERR_IO: return "BLOCK_ERR_IO";
+        case block::BLOCK_ERR_TIMEOUT: return "BLOCK_ERR_TIMEOUT";
+        case block::BLOCK_ERR_NO_MEDIA: return "BLOCK_ERR_NO_MEDIA";
+        case block::BLOCK_ERR_NOT_READY: return "BLOCK_ERR_NOT_READY";
+        case block::BLOCK_ERR_INVALID: return "BLOCK_ERR_INVALID";
+        case block::BLOCK_ERR_UNSUPPORTED: return "BLOCK_ERR_UNSUPPORTED";
+        default: return "BLOCK_UNKNOWN";
+    }
+}
+
+static bool pacman_registered_in_model() {
+    for (uint32_t index = 0; index < s_packageCount; ++index) {
+        if (s_packages[index].valid && text_equal(s_packages[index].directory, "PacMan")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void log_apps_lifecycle_checkpoint(AppsLifecycleCheckpoint checkpoint,
+                                  bool menuStateAvailable,
+                                  bool menuHasPacMan,
+                                  uint32_t menuAppCount) {
+    // Keep this diagnostic bounded even if a UI path requests refresh in a
+    // loop. Each checkpoint uses fixed-size state and at most 32 directory
+    // entries; no heap allocations or persistent handles are retained.
+    static const uint32_t kMaxLifecycleCheckpoints = 16u;
+    static const uint32_t kMaxDirectoryEntries = 32u;
+    if (s_lifecycleCheckpointCount >= kMaxLifecycleCheckpoints) return;
+    ++s_lifecycleCheckpointCount;
+
+    serial::puts("[S22R11-APPS] checkpoint=");
+    serial::puts(apps_checkpoint_name(checkpoint));
+    serial::puts(" devices=");
+    serial_put_u32_decimal(block::device_count());
+    for (uint8_t index = 0; index < block::MAX_BLOCK_DEVICES; ++index) {
+        const block::BlockDevice* device = block::get_device(index);
+        if (!device) continue;
+        serial::puts(" dev[");
+        serial_put_u32_decimal(index);
+        serial::puts("]=");
+        serial_put_bounded(device->name, sizeof(device->name));
+        serial::puts("@gen");
+        serial::put_hex64(block::device_generation(index));
+    }
+    serial::putc('\n');
+
+    serial::puts("[S22R11-APPS] mountTable count=");
+    serial_put_u32_decimal(vfs::mount_count());
+    for (uint8_t index = 0; index < vfs::VFS_MAX_MOUNTS; ++index) {
+        const vfs::MountPoint* tableMount = vfs::get_mount_by_index(index);
+        if (!tableMount) continue;
+        const block::BlockDevice* tableDevice = block::get_device(tableMount->blockDevIndex);
+        serial::puts(" mount[");
+        serial_put_u32_decimal(index);
+        serial::puts("]=");
+        serial_put_bounded(tableMount->path, sizeof(tableMount->path));
+        serial::puts(":");
+        serial::puts(vfs::fs_type_name(tableMount->fsType));
+        serial::puts(tableMount->alias ? ":alias->" : ":mount->");
+        if (tableMount->alias) {
+            serial_put_bounded(tableMount->sourcePrefix, sizeof(tableMount->sourcePrefix));
+        } else {
+            serial_put_bounded(tableMount->path, sizeof(tableMount->path));
+        }
+        serial::puts("@dev");
+        serial_put_u32_decimal(tableMount->blockDevIndex);
+        serial::puts(" gen=0x");
+        serial::put_hex64(tableMount->blockDeviceGeneration);
+        serial::puts("/0x");
+        serial::put_hex64(block::device_generation(tableMount->blockDevIndex));
+        serial::puts(tableDevice ? " device=present" : " device=missing");
+    }
+    serial::putc('\n');
+
+    const uint8_t mountIndex = vfs::mount_index_for_path("/Apps");
+    const vfs::MountPoint* mount = mountIndex == 0xFF
+        ? nullptr : vfs::get_mount_by_index(mountIndex);
+    serial::puts("[S22R11-APPS] mount path=/Apps state=");
+    if (!mount) {
+        serial::puts("absent\n");
+    } else {
+        const uint64_t currentGeneration = block::device_generation(mount->blockDevIndex);
+        const block::BlockDevice* device = block::get_device(mount->blockDevIndex);
+        serial::puts("present index=");
+        serial_put_u32_decimal(mountIndex);
+        serial::puts(" root=");
+        serial_put_bounded(mount->path, sizeof(mount->path));
+        serial::puts(" fs=");
+        serial::puts(vfs::fs_type_name(mount->fsType));
+        serial::puts(" devIndex=");
+        serial_put_u32_decimal(mount->blockDevIndex);
+        serial::puts(" devName=");
+        if (device) serial_put_bounded(device->name, sizeof(device->name));
+        else serial::puts("missing");
+        serial::puts(" mountGen=0x");
+        serial::put_hex64(mount->blockDeviceGeneration);
+        serial::puts(" deviceGen=0x");
+        serial::put_hex64(currentGeneration);
+        serial::puts(" generationMatch=");
+        serial::puts(device && currentGeneration == mount->blockDeviceGeneration ? "yes" : "no");
+        if (mount->fsType == vfs::FS_TYPE_FAT32 || mount->fsType == vfs::FS_TYPE_EXFAT) {
+            const fs_fat::FATVolume* volume = fs_fat::get_volume(mount->fsVolumeIndex);
+            serial::puts(" volumeIndex=");
+            serial_put_u32_decimal(mount->fsVolumeIndex);
+            serial::puts(" volumeMounted=");
+            serial::puts(volume && volume->mounted ? "yes" : "no");
+            if (volume && volume->mounted) {
+                serial::puts(" volumeDevIndex=");
+                serial_put_u32_decimal(volume->blockDevIndex);
+                serial::puts(" fatType=");
+                serial_put_u32_decimal(static_cast<uint32_t>(volume->type));
+                serial::puts(" rootCluster=0x");
+                serial::put_hex32(volume->rootCluster);
+                serial::puts(" partitionOffset=0x");
+                serial::put_hex64(volume->partitionOffset);
+            }
+        }
+        serial::putc('\n');
+    }
+
+    vfs::FileInfo info{};
+    const vfs::Status appsStatus = vfs::stat("/Apps", &info);
+    const bool appsLookupAttempted = mountIndex != 0xFF;
+    const fs_fat::PathLookupStatus appsFatLookup = appsLookupAttempted
+        ? fs_fat::last_path_lookup_status() : fs_fat::PATH_LOOKUP_NOT_ATTEMPTED;
+    const block::Status appsBlockStatus = appsLookupAttempted
+        ? fs_fat::last_io_status() : block::BLOCK_ERR_INVALID;
+    const fs_fat::TraversalStatus appsTraversal = appsLookupAttempted
+        ? fs_fat::last_traversal_status() : fs_fat::TRAVERSAL_OK;
+    const bool appsIsDirectory = appsStatus == vfs::VFS_OK && info.type == vfs::FILE_TYPE_DIRECTORY;
+
+    uint8_t iterator = vfs::opendir("/Apps");
+    const vfs::DirectoryOpenResult enumerationOpen = vfs::last_directory_open_result();
+    const bool enumerationLookupAttempted = enumerationOpen != vfs::DIRECTORY_OPEN_NO_MOUNT &&
+        enumerationOpen != vfs::DIRECTORY_OPEN_NO_ITERATOR &&
+        enumerationOpen != vfs::DIRECTORY_OPEN_INVALID_ARGUMENT &&
+        enumerationOpen != vfs::DIRECTORY_OPEN_INVALID_PATH;
+    const fs_fat::PathLookupStatus enumerationLookup = enumerationLookupAttempted
+        ? fs_fat::last_path_lookup_status() : fs_fat::PATH_LOOKUP_NOT_ATTEMPTED;
+    const block::Status enumerationBlock = enumerationLookupAttempted
+        ? fs_fat::last_io_status() : block::BLOCK_ERR_INVALID;
+    const fs_fat::TraversalStatus enumerationTraversal = enumerationLookupAttempted
+        ? fs_fat::last_traversal_status() : fs_fat::TRAVERSAL_OK;
+    uint32_t entriesSeen = 0;
+    bool enumeratedPacMan = false;
+    bool enumerationEnded = false;
+    bool enumerationFailed = iterator == 0xFF;
+    bool enumerationBounded = false;
+    if (iterator != 0xFF) {
+        vfs::DirEntry entry{};
+        while (entriesSeen < kMaxDirectoryEntries) {
+            if (!vfs::readdir(iterator, &entry)) {
+                const vfs::DirectoryReadResult readResult = vfs::last_directory_read_result();
+                enumerationEnded = readResult == vfs::DIRECTORY_READ_END;
+                enumerationFailed = readResult == vfs::DIRECTORY_READ_FILESYSTEM_ERROR ||
+                    readResult == vfs::DIRECTORY_READ_INVALID_ITERATOR;
+                break;
+            }
+            ++entriesSeen;
+            if (entry.type == vfs::FILE_TYPE_DIRECTORY && text_equal(entry.name, "PacMan")) {
+                enumeratedPacMan = true;
+            }
+        }
+        enumerationBounded = entriesSeen == kMaxDirectoryEntries && !enumerationEnded;
+        vfs::closedir(iterator);
+    }
+
+    vfs::FileInfo packageInfo{};
+    const vfs::Status packageStatus = vfs::stat("/Apps/PacMan", &packageInfo);
+    const bool packageIsDirectory = packageStatus == vfs::VFS_OK &&
+        packageInfo.type == vfs::FILE_TYPE_DIRECTORY;
+    vfs::FileInfo manifestInfo{};
+    const vfs::Status manifestStatus = vfs::stat("/Apps/PacMan/app.json", &manifestInfo);
+    int32_t manifestBytes = -1;
+    if (manifestStatus == vfs::VFS_OK && manifestInfo.type == vfs::FILE_TYPE_REGULAR) {
+        manifestBytes = vfs::read_file("/Apps/PacMan/app.json", s_lifecycleManifestProbe,
+                                       sizeof(s_lifecycleManifestProbe));
+    }
+    const bool manifestComplete = manifestBytes >= 0 &&
+        static_cast<uint64_t>(manifestBytes) == manifestInfo.size &&
+        manifestInfo.size < sizeof(s_lifecycleManifestProbe);
+    const bool manifestLookupAttempted = mountIndex != 0xFF;
+    const block::Status manifestBlockStatus = manifestLookupAttempted
+        ? fs_fat::last_io_status() : block::BLOCK_ERR_INVALID;
+    const fs_fat::TraversalStatus manifestTraversal = manifestLookupAttempted
+        ? fs_fat::last_traversal_status() : fs_fat::TRAVERSAL_OK;
+
+    serial::puts("[S22R11-APPS] paths apps=");
+    serial::puts(vfs::status_name(appsStatus));
+    serial::puts(" appsDir=");
+    serial::puts(appsIsDirectory ? "yes" : "no");
+    serial::puts(" appsFat=");
+    serial::puts(fs_fat::path_lookup_status_name(appsFatLookup));
+    serial::puts(" appsBlock=");
+    serial::puts(appsLookupAttempted ? block_status_name(appsBlockStatus) : "NOT_ATTEMPTED");
+    serial::puts(" appsTraversal=");
+    serial::puts(appsLookupAttempted
+        ? fs_fat::traversal_status_name(appsTraversal) : "NOT_ATTEMPTED");
+    serial::puts(" enumerateOpen=");
+    serial::puts(vfs::directory_open_result_name(enumerationOpen));
+    serial::puts(" enumerateLookup=");
+    serial::puts(fs_fat::path_lookup_status_name(enumerationLookup));
+    serial::puts(" enumerateBlock=");
+    serial::puts(enumerationLookupAttempted ? block_status_name(enumerationBlock) : "NOT_ATTEMPTED");
+    serial::puts(" enumerateTraversal=");
+    serial::puts(enumerationLookupAttempted
+        ? fs_fat::traversal_status_name(enumerationTraversal) : "NOT_ATTEMPTED");
+    serial::puts(" enumerateEntries=");
+    serial_put_u32_decimal(entriesSeen);
+    serial::puts(" enumeratePacMan=");
+    serial::puts(enumeratedPacMan ? "yes" : "no");
+    serial::puts(" enumerateEnd=");
+    serial::puts(enumerationEnded ? "yes" : "no");
+    serial::puts(" enumerateError=");
+    serial::puts(enumerationFailed ? "yes" : "no");
+    serial::puts(" enumerateLimit=");
+    serial::puts(enumerationBounded ? "yes" : "no");
+    serial::puts(" packageDir=");
+    serial::puts(vfs::status_name(packageStatus));
+    serial::puts(" packageIsDir=");
+    serial::puts(packageIsDirectory ? "yes" : "no");
+    serial::puts(" manifest=");
+    serial::puts(vfs::status_name(manifestStatus));
+    serial::puts(" manifestBytes=");
+    if (manifestBytes < 0) serial::puts("error");
+    else serial_put_u32_decimal(static_cast<uint32_t>(manifestBytes));
+    serial::puts(" manifestSize=");
+    serial_put_u32_decimal(manifestInfo.size > 0xFFFFFFFFull
+        ? 0xFFFFFFFFu : static_cast<uint32_t>(manifestInfo.size));
+    serial::puts(" manifestComplete=");
+    serial::puts(manifestComplete ? "yes" : "no");
+    serial::puts(" manifestBlock=");
+    serial::puts(manifestLookupAttempted ? block_status_name(manifestBlockStatus) : "NOT_ATTEMPTED");
+    serial::puts(" manifestTraversal=");
+    serial::puts(manifestLookupAttempted
+        ? fs_fat::traversal_status_name(manifestTraversal) : "NOT_ATTEMPTED");
+    serial::puts(" registeredPacMan=");
+    serial::puts(pacman_registered_in_model() ? "yes" : "no");
+    serial::puts(" registeredCount=");
+    serial_put_u32_decimal(s_packageCount);
+    if (menuStateAvailable) {
+        serial::puts(" menuPacManAvailable=");
+        serial::puts(menuHasPacMan ? "yes" : "no");
+        serial::puts(" menuCount=");
+        serial_put_u32_decimal(menuAppCount);
+    } else {
+        serial::puts(" menuPacManAvailable=na menuCount=na");
+    }
+    serial::putc('\n');
+}
+
 void discover() {
     s_packageCount = 0;
     s_discovered = true;
@@ -682,18 +965,85 @@ void discover() {
         // VFS can be mounted after early desktop probes.  Do not permanently
         // cache a negative result from a not-yet-mounted package root.
         s_discovered = false;
+        if (s_discoveryOpenFailureReported) return;
+        s_discoveryOpenFailureReported = true;
+        const vfs::DirectoryOpenResult openResult = vfs::last_directory_open_result();
+        const bool fatLookupAttempted = openResult != vfs::DIRECTORY_OPEN_NO_MOUNT &&
+            openResult != vfs::DIRECTORY_OPEN_NO_ITERATOR &&
+            openResult != vfs::DIRECTORY_OPEN_INVALID_ARGUMENT &&
+            openResult != vfs::DIRECTORY_OPEN_INVALID_PATH;
+        serial::puts("[S22R11-APPS] failure=DISCOVERY_OPENDIR code=");
+        serial::puts(vfs::directory_open_result_name(openResult));
+        serial::puts(" fatLookup=");
+        serial::puts(fs_fat::path_lookup_status_name(fatLookupAttempted
+            ? fs_fat::last_path_lookup_status() : fs_fat::PATH_LOOKUP_NOT_ATTEMPTED));
+        serial::puts(" blockIO=");
+        serial::puts(fatLookupAttempted ? block_status_name(fs_fat::last_io_status()) : "NOT_ATTEMPTED");
+        serial::puts(" traversal=");
+        serial::puts(fatLookupAttempted
+            ? fs_fat::traversal_status_name(fs_fat::last_traversal_status()) : "NOT_ATTEMPTED");
+        const vfs::MountPoint* mount = vfs::get_mount("/Apps");
+        serial::puts(" mount=");
+        serial::puts(mount ? "present" : "absent");
+        if (mount) {
+            const uint64_t currentGeneration = block::device_generation(mount->blockDevIndex);
+            const fs_fat::FATVolume* volume =
+                (mount->fsType == vfs::FS_TYPE_FAT32 || mount->fsType == vfs::FS_TYPE_EXFAT)
+                    ? fs_fat::get_volume(mount->fsVolumeIndex) : nullptr;
+            serial::puts(" mountGen=0x");
+            serial::put_hex64(mount->blockDeviceGeneration);
+            serial::puts(" deviceGen=0x");
+            serial::put_hex64(currentGeneration);
+            serial::puts(" volumeMounted=");
+            serial::puts(volume && volume->mounted ? "yes" : "no");
+        }
+        serial::putc('\n');
         serial::puts("[NATIVE-ELF] discovery result=NO_APPS_DIRECTORY\n");
         return;
     }
+    s_discoveryOpenFailureReported = false;
     vfs::DirEntry entry;
-    while (s_packageCount < kMaxPackages && vfs::readdir(iterator, &entry)) {
+    bool enumerationEnded = false;
+    bool enumerationFailed = false;
+    while (s_packageCount < kMaxPackages) {
+        if (!vfs::readdir(iterator, &entry)) {
+            const vfs::DirectoryReadResult readResult = vfs::last_directory_read_result();
+            enumerationEnded = readResult == vfs::DIRECTORY_READ_END;
+            enumerationFailed = !enumerationEnded;
+            break;
+        }
         if (entry.type != vfs::FILE_TYPE_DIRECTORY || entry.name[0] == '.') continue;
         if (parse_package(entry.name, &s_packages[s_packageCount])) ++s_packageCount;
     }
     vfs::closedir(iterator);
+    if (enumerationFailed) {
+        s_packageCount = 0;
+        s_discovered = false;
+        if (!s_discoveryEnumerationFailureReported) {
+            serial::puts("[S22R11-APPS] failure=DISCOVERY_ENUMERATION code=");
+            serial::puts(vfs::directory_read_result_name(vfs::last_directory_read_result()));
+            serial::puts(" fatLookup=");
+            serial::puts(fs_fat::path_lookup_status_name(fs_fat::last_path_lookup_status()));
+            serial::puts(" blockIO=");
+            serial::puts(block_status_name(fs_fat::last_io_status()));
+            serial::puts(" traversal=");
+            serial::puts(fs_fat::traversal_status_name(fs_fat::last_traversal_status()));
+            serial::putc('\n');
+            serial::puts("[NATIVE-ELF] discovery result=ENUMERATION_FAILED\n");
+            s_discoveryEnumerationFailureReported = true;
+        }
+        return;
+    }
+    s_discoveryEnumerationFailureReported = false;
     serial::puts("[NATIVE-ELF] discovery result packages=0x");
     serial::put_hex32(s_packageCount);
+    if (!enumerationEnded && s_packageCount >= kMaxPackages) {
+        serial::puts(" limit=PACKAGE_CAP");
+    }
     serial::putc('\n');
+    if (pacman_registered_in_model()) {
+        log_apps_lifecycle_checkpoint(APPS_CHECKPOINT_PACMAN_REGISTERED);
+    }
 }
 
 static Package* find_package(const char* appName) {
@@ -714,6 +1064,10 @@ bool is_available(const char* appName) {
 
 const PackageInfo* lookup_package(const char* appName) {
     if (!s_discovered) discover();
+    return find_package(appName);
+}
+
+const PackageInfo* registered_package(const char* appName) {
     return find_package(appName);
 }
 
@@ -1994,10 +2348,12 @@ void app_audio_app_proof() {
 
 #else
 
+void log_apps_lifecycle_checkpoint(AppsLifecycleCheckpoint, bool, bool, uint32_t) {}
 void discover() {}
 bool launch(const char*) { return false; }
 bool is_available(const char*) { return false; }
 const PackageInfo* lookup_package(const char*) { return nullptr; }
+const PackageInfo* registered_package(const char*) { return nullptr; }
 uint32_t package_count() { return 0; }
 const PackageInfo* package_at(uint32_t) { return nullptr; }
 void app_audio_pump() {}

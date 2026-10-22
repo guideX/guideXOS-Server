@@ -21,6 +21,9 @@ $sources = @(
         ForEach-Object { $_.Trim().TrimEnd('^').Trim() } |
         Where-Object { $_ -and $_ -ne "server.cpp" }
 )
+if ($sources -notcontains "settings_presentation_core.cpp") {
+    $sources += "settings_presentation_core.cpp"
+}
 
 $output = [IO.Path]::GetFullPath($OutputPath)
 $outputDirectory = Split-Path -Parent $output
@@ -30,11 +33,12 @@ $arguments = @(
     "-std=c++17", "-Wall", "-Wextra", "-O2", "-idirafter", ".",
     "-Ithird_party/mbedtls/include",
     "-Ithird_party/mbedtls/tf-psa-crypto/include",
+    "-Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include",
     "-DGX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION",
     "-DGX_NATIVE_FILESYSTEM_CONTRACT_TEST",
     "tests/native_filesystem_contract_test.cpp"
 ) + $sources + @(
-    "-lws2_32", "-lsecur32", "-lcrypt32", "-lbcrypt", "-lgdi32", "-luser32", "-lmsimg32",
+    "-lws2_32", "-lsecur32", "-lcrypt32", "-lbcrypt", "-lgdi32", "-luser32", "-lmsimg32", "-lwinmm",
     "-o", $output
 )
 

@@ -33,6 +33,20 @@ struct PackageInfo {
     bool hasAudioOutput;
 };
 
+enum AppsLifecycleCheckpoint : uint8_t {
+    APPS_CHECKPOINT_INITIAL_MOUNT = 1,
+    APPS_CHECKPOINT_PACMAN_REGISTERED,
+    APPS_CHECKPOINT_BEFORE_START_MENU_REFRESH,
+    APPS_CHECKPOINT_AFTER_START_MENU_REFRESH,
+};
+
+// Emit a bounded S22R11 snapshot of storage, /Apps resolution, PacMan files,
+// App Model registration, and (when supplied) Start-menu membership.
+void log_apps_lifecycle_checkpoint(AppsLifecycleCheckpoint checkpoint,
+                                  bool menuStateAvailable = false,
+                                  bool menuHasPacMan = false,
+                                  uint32_t menuAppCount = 0);
+
 // Scan the mounted /Apps tree for supported NativeElf packages.
 void discover();
 
@@ -47,6 +61,9 @@ bool is_available(const char* appName);
 // non-null result means the package has a real bare-metal target, not merely a
 // manifest entry.
 const PackageInfo* lookup_package(const char* appName);
+
+// Inspect the current package table without triggering a discovery pass.
+const PackageInfo* registered_package(const char* appName);
 
 // Enumerate the same validated package table used by lookup_package().
 uint32_t package_count();

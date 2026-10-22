@@ -978,6 +978,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         const bool mounted = mount_persistent_storage();
         if (mounted) kernel::desktop::rememberDesktopGradientStorageDevice();
+        kernel::native_elf::log_apps_lifecycle_checkpoint(
+            kernel::native_elf::APPS_CHECKPOINT_INITIAL_MOUNT);
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");

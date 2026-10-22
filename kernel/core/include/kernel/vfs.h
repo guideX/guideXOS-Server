@@ -190,6 +190,35 @@ struct DirIterator {
     uint32_t index;                   // Current entry index
 };
 
+// Detailed outcomes for the legacy bool/handle directory APIs. These are
+// bounded diagnostic state so discovery callers can distinguish a missing
+// mount/path from iterator exhaustion or filesystem I/O failure.
+enum DirectoryOpenResult : uint8_t {
+    DIRECTORY_OPEN_NOT_ATTEMPTED = 0,
+    DIRECTORY_OPEN_OK,
+    DIRECTORY_OPEN_INVALID_ARGUMENT,
+    DIRECTORY_OPEN_NO_MOUNT,
+    DIRECTORY_OPEN_NO_ITERATOR,
+    DIRECTORY_OPEN_INVALID_PATH,
+    DIRECTORY_OPEN_PATH_LOOKUP_FAILED,
+    DIRECTORY_OPEN_NOT_DIRECTORY,
+    DIRECTORY_OPEN_FILESYSTEM_REJECTED,
+    DIRECTORY_OPEN_UNSUPPORTED_FILESYSTEM,
+};
+
+enum DirectoryReadResult : uint8_t {
+    DIRECTORY_READ_NOT_ATTEMPTED = 0,
+    DIRECTORY_READ_ENTRY,
+    DIRECTORY_READ_END,
+    DIRECTORY_READ_INVALID_ITERATOR,
+    DIRECTORY_READ_FILESYSTEM_ERROR,
+};
+
+const char* directory_open_result_name(DirectoryOpenResult result);
+DirectoryOpenResult last_directory_open_result();
+const char* directory_read_result_name(DirectoryReadResult result);
+DirectoryReadResult last_directory_read_result();
+
 // ================================================================
 // Public API — Initialization
 // ================================================================

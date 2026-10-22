@@ -4930,9 +4930,18 @@ static void SelectIconsInRectangle(int32_t left, int32_t top, int32_t right, int
 // Start Menu Management Implementation
 // ============================================================
 
+static bool start_menu_has_pacman_package()
+{
+    const native_elf::PackageInfo* package = native_elf::registered_package("Nexgen PacMan");
+    return package && package->valid && package->startMenuVisible;
+}
+
 // Refresh start menu app list (sync with desktop icons for pinned/recent)
 static void refresh_start_menu_list()
 {
+    native_elf::log_apps_lifecycle_checkpoint(
+        native_elf::APPS_CHECKPOINT_BEFORE_START_MENU_REFRESH,
+        true, start_menu_has_pacman_package(), static_cast<uint32_t>(s_startMenuAppCount));
     // Start Menu app visibility is intentionally independent from the
     // desktop system-icon policy.
     s_startMenuAppCount = kStaticStartMenuAppCount;
@@ -4991,6 +5000,9 @@ static void refresh_start_menu_list()
     }
 #endif
     serial::puts("[desktop] Start Menu app list refreshed from built-ins and validated packages\n");
+    native_elf::log_apps_lifecycle_checkpoint(
+        native_elf::APPS_CHECKPOINT_AFTER_START_MENU_REFRESH,
+        true, start_menu_has_pacman_package(), static_cast<uint32_t>(s_startMenuAppCount));
 }
 
 static const char* canonical_start_menu_recent_program(const char* appName)

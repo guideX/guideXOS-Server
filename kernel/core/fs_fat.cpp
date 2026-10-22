@@ -23,6 +23,7 @@ static FATFile   s_files[MAX_OPEN_FILES];
 static uint8_t   s_volumeCount = 0;
 static block::Status s_lastIoStatus = block::BLOCK_OK;
 static TraversalStatus s_lastTraversalStatus = TRAVERSAL_OK;
+static PathLookupStatus s_lastPathLookupStatus = PATH_LOOKUP_OK;
 static DeleteStatus s_lastDeleteStatus = DELETE_OK;
 static bool s_trashTraceActive = false;
 static uint64_t s_trashTraceGeneration = 0;
@@ -857,6 +858,7 @@ void init()
     s_volumeCount = 0;
     s_lastIoStatus = block::BLOCK_OK;
     s_lastTraversalStatus = TRAVERSAL_OK;
+    s_lastPathLookupStatus = PATH_LOOKUP_OK;
     s_lastDeleteStatus = DELETE_OK;
     s_fatScanIterations = 0;
     s_allocatedClusters = 0;
@@ -938,7 +940,16 @@ void close_dir(uint8_t volumeIndex)
 
 bool read_dir(uint8_t volumeIndex, DirEntry* out)
 {
-    if (!s_dirIter.active || s_dirIter.volIdx != volumeIndex) return false;
+    s_lastIoStatus = block::BLOCK_OK;
+    set_traversal_status(TRAVERSAL_OK);
+    if (!s_dirIter.active || s_dirIter.volIdx != volumeIndex) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return false;
+    }
+    if (!out) {
+        set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
+        return false;
+    }
 
     FATVolume& vol = s_volumes[volumeIndex];
     uint32_t entriesPerSector = vol.bytesPerSector / 32;
@@ -949,11 +960,13 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
         if (is_fat16_root_dir(vol, s_dirIter.cluster)) {
             if (s_dirIter.sectorInCluster >= vol.rootDirSectors) {
                 s_dirIter.active = false;
+                set_traversal_status(TRAVERSAL_DIRECTORY_END);
                 return false;
             }
 
             if (read_root_dir_sector(vol, s_dirIter.sectorInCluster, s_secBuf) != block::BLOCK_OK) {
                 s_dirIter.active = false;
+                set_traversal_status(TRAVERSAL_IO_ERROR);
                 return false;
             }
         } else if (is_end_of_chain(vol, s_dirIter.cluster) ||
@@ -981,6 +994,7 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
                 s_dirIter.cluster, s_dirIter.sectorInCluster, s_secBuf);
             if (st != block::BLOCK_OK) {
                 s_dirIter.active = false;
+                set_traversal_status(TRAVERSAL_IO_ERROR);
                 return false;
             }
         }
@@ -995,6 +1009,7 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
             // End of directory
             if (de->name[0] == 0x00) {
                 s_dirIter.active = false;
+                set_traversal_status(TRAVERSAL_DIRECTORY_END);
                 return false;
             }
 
@@ -1662,10 +1677,17 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
 static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const char* name,
                                  DirEntry* out, uint32_t* outSector, uint32_t* outOffset)
 {
-    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
-    if (!name || !out || !outSector || !outOffset) return false;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !name || !out || !outSector || !outOffset) {
+        s_lastPathLookupStatus = PATH_LOOKUP_INVALID_ARGUMENT;
+        return false;
+    }
+    if (!s_volumes[volumeIndex].mounted) {
+        s_lastPathLookupStatus = PATH_LOOKUP_NOT_MOUNTED;
+        return false;
+    }
 
     FATVolume& vol = s_volumes[volumeIndex];
+    s_lastPathLookupStatus = PATH_LOOKUP_NOT_FOUND;
     char lfnName[256];
     clear_lfn_name(lfnName, sizeof(lfnName));
 
@@ -1675,6 +1697,7 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
         for (uint32_t sectorIndex = 0; sectorIndex < vol.rootDirSectors; ++sectorIndex) {
             uint32_t sector = vol.rootDirFirstSector + sectorIndex;
             if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+                s_lastPathLookupStatus = PATH_LOOKUP_IO_ERROR;
                 return false;
             }
 
@@ -1682,7 +1705,10 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
                 uint32_t offset = entryIndex * 32;
                 const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
 
-                if (de->name[0] == 0x00) return false;
+                if (de->name[0] == 0x00) {
+                    s_lastPathLookupStatus = PATH_LOOKUP_NOT_FOUND;
+                    return false;
+                }
                 if (static_cast<uint8_t>(de->name[0]) == 0xE5) {
                     clear_lfn_name(lfnName, sizeof(lfnName));
                     continue;
@@ -1707,10 +1733,12 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
                 fill_dir_entry_from_fat(de, displayName, out);
                 *outSector = sector;
                 *outOffset = offset;
+                s_lastPathLookupStatus = PATH_LOOKUP_OK;
                 return true;
             }
         }
 
+        s_lastPathLookupStatus = PATH_LOOKUP_NOT_FOUND;
         return false;
     }
 
@@ -1724,6 +1752,7 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
             uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
             if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+                s_lastPathLookupStatus = PATH_LOOKUP_IO_ERROR;
                 return false;
             }
 
@@ -1731,7 +1760,10 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
                 uint32_t offset = entryIndex * 32;
                 const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
 
-                if (de->name[0] == 0x00) return false;
+                if (de->name[0] == 0x00) {
+                    s_lastPathLookupStatus = PATH_LOOKUP_NOT_FOUND;
+                    return false;
+                }
                 if (static_cast<uint8_t>(de->name[0]) == 0xE5) {
                     clear_lfn_name(lfnName, sizeof(lfnName));
                     continue;
@@ -1756,6 +1788,7 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
                 fill_dir_entry_from_fat(de, displayName, out);
                 *outSector = sector;
                 *outOffset = offset;
+                s_lastPathLookupStatus = PATH_LOOKUP_OK;
                 return true;
             }
         }
@@ -1763,15 +1796,33 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
         cluster = next_cluster(vol, cluster);
     }
 
+    if (s_lastIoStatus != block::BLOCK_OK) {
+        s_lastPathLookupStatus = PATH_LOOKUP_IO_ERROR;
+    } else if (s_lastTraversalStatus == TRAVERSAL_CHAIN_CYCLE ||
+               s_lastTraversalStatus == TRAVERSAL_INVALID_CLUSTER ||
+               s_lastTraversalStatus == TRAVERSAL_BAD_CLUSTER ||
+               s_lastTraversalStatus == TRAVERSAL_CHAIN_STEP_LIMIT ||
+               s_lastTraversalStatus == TRAVERSAL_TRUNCATED_CHAIN) {
+        s_lastPathLookupStatus = PATH_LOOKUP_CORRUPT_DIRECTORY;
+    } else if (is_end_of_chain(vol, cluster)) {
+        s_lastPathLookupStatus = PATH_LOOKUP_NOT_FOUND;
+    } else {
+        s_lastPathLookupStatus = PATH_LOOKUP_CORRUPT_DIRECTORY;
+    }
     return false;
 }
 
 static bool find_path_entry_at(uint8_t volumeIndex, const char* path,
                                DirEntry* out, uint32_t* outSector, uint32_t* outOffset)
 {
-    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
-    if (!s_volumes[volumeIndex].mounted) return false;
-    if (!path || !out || !outSector || !outOffset) return false;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !path || !out || !outSector || !outOffset) {
+        s_lastPathLookupStatus = PATH_LOOKUP_INVALID_ARGUMENT;
+        return false;
+    }
+    if (!s_volumes[volumeIndex].mounted) {
+        s_lastPathLookupStatus = PATH_LOOKUP_NOT_MOUNTED;
+        return false;
+    }
 
     FATVolume& vol = s_volumes[volumeIndex];
     const char* p = path;
@@ -1803,10 +1854,14 @@ static bool find_path_entry_at(uint8_t volumeIndex, const char* path,
             return true;
         }
 
-        if (!entry.isDir) return false;
+        if (!entry.isDir) {
+            s_lastPathLookupStatus = PATH_LOOKUP_NOT_DIRECTORY;
+            return false;
+        }
         currentCluster = entry.firstCluster;
     }
 
+    s_lastPathLookupStatus = PATH_LOOKUP_NOT_FOUND;
     return false;
 }
 
@@ -1869,9 +1924,17 @@ bool find_in_dir(uint8_t volumeIndex, const char* name, DirEntry* out)
 
 bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
 {
-    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
-    if (!s_volumes[volumeIndex].mounted) return false;
-    if (!path || !out) return false;
+    s_lastIoStatus = block::BLOCK_OK;
+    s_lastTraversalStatus = TRAVERSAL_OK;
+    s_lastPathLookupStatus = PATH_LOOKUP_OK;
+    if (volumeIndex >= MAX_FAT_VOLUMES || !path || !out) {
+        s_lastPathLookupStatus = PATH_LOOKUP_INVALID_ARGUMENT;
+        return false;
+    }
+    if (!s_volumes[volumeIndex].mounted) {
+        s_lastPathLookupStatus = PATH_LOOKUP_NOT_MOUNTED;
+        return false;
+    }
     
     FATVolume& vol = s_volumes[volumeIndex];
 
@@ -1885,6 +1948,7 @@ bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
         out->fileSize = 0;
         out->attr = ATTR_DIRECTORY;
         out->isDir = true;
+        s_lastPathLookupStatus = PATH_LOOKUP_OK;
         return true;
     }
 
@@ -2209,6 +2273,31 @@ const char* traversal_status_name(TraversalStatus status)
 TraversalStatus last_traversal_status()
 {
     return s_lastTraversalStatus;
+}
+
+const char* path_lookup_status_name(PathLookupStatus status)
+{
+    switch (status) {
+        case PATH_LOOKUP_OK: return "FAT_PATH_LOOKUP_OK";
+        case PATH_LOOKUP_INVALID_ARGUMENT: return "FAT_PATH_LOOKUP_INVALID_ARGUMENT";
+        case PATH_LOOKUP_NOT_MOUNTED: return "FAT_PATH_LOOKUP_NOT_MOUNTED";
+        case PATH_LOOKUP_NOT_FOUND: return "FAT_PATH_LOOKUP_NOT_FOUND";
+        case PATH_LOOKUP_NOT_DIRECTORY: return "FAT_PATH_LOOKUP_NOT_DIRECTORY";
+        case PATH_LOOKUP_IO_ERROR: return "FAT_PATH_LOOKUP_IO_ERROR";
+        case PATH_LOOKUP_CORRUPT_DIRECTORY: return "FAT_PATH_LOOKUP_CORRUPT_DIRECTORY";
+        case PATH_LOOKUP_NOT_ATTEMPTED: return "FAT_PATH_LOOKUP_NOT_ATTEMPTED";
+        default: return "FAT_PATH_LOOKUP_UNKNOWN";
+    }
+}
+
+PathLookupStatus last_path_lookup_status()
+{
+    return s_lastPathLookupStatus;
+}
+
+block::Status last_io_status()
+{
+    return s_lastIoStatus;
 }
 
 const char* delete_status_name(DeleteStatus status)

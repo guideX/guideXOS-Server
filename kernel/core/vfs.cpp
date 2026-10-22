@@ -27,6 +27,8 @@ static FileHandle   s_files[VFS_MAX_OPEN_FILES];
 static DirIterator  s_dirs[VFS_MAX_OPEN_FILES];
 static uint8_t      s_mountCount = 0;
 static bool         s_initialized = false;
+static DirectoryOpenResult s_lastDirectoryOpenResult = DIRECTORY_OPEN_NOT_ATTEMPTED;
+static DirectoryReadResult s_lastDirectoryReadResult = DIRECTORY_READ_NOT_ATTEMPTED;
 
 // ================================================================
 // Helper functions
@@ -348,12 +350,21 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
 
 void init()
 {
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[S22R11-VFS] event=INIT state=");
+    serial::puts(s_initialized ? "already_initialized" : "fresh");
+    serial::puts(" mountsBefore=0x");
+    serial::put_hex32(s_mountCount);
+    serial::putc('\n');
+#endif
     if (s_initialized) return;
     
     memzero(s_mounts, sizeof(s_mounts));
     memzero(s_files, sizeof(s_files));
     memzero(s_dirs, sizeof(s_dirs));
     s_mountCount = 0;
+    s_lastDirectoryOpenResult = DIRECTORY_OPEN_NOT_ATTEMPTED;
+    s_lastDirectoryReadResult = DIRECTORY_READ_NOT_ATTEMPTED;
     s_initialized = true;
     
 #if defined(__GNUC__) || defined(__clang__)
@@ -479,6 +490,15 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     serial::puts(" at '");
     serial::puts(path);
     serial::puts("'\n");
+    if (path[0] == '/' && path[1] == '\0') {
+        serial::puts("[S22R11-VFS] event=ROOT_MOUNT index=0x");
+        serial::put_hex32(index);
+        serial::puts(" device=0x");
+        serial::put_hex32(blockDevIndex);
+        serial::puts(" mounts=0x");
+        serial::put_hex32(s_mountCount);
+        serial::putc('\n');
+    }
 #endif
     
     return index;
@@ -565,6 +585,14 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
 
 Status unmount(const char* path)
 {
+    const bool rootRequest = path && path[0] == '/' && path[1] == '\0';
+#if defined(__GNUC__) || defined(__clang__)
+    if (rootRequest) {
+        serial::puts("[S22R11-VFS] event=ROOT_UNMOUNT_REQUEST mounts=0x");
+        serial::put_hex32(s_mountCount);
+        serial::putc('\n');
+    }
+#endif
     if (!path) return VFS_ERR_INVALID;
     
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
@@ -572,6 +600,9 @@ Status unmount(const char* path)
             // Check for open files on this mount
             for (uint8_t j = 0; j < VFS_MAX_OPEN_FILES; ++j) {
                 if (s_files[j].open && s_files[j].mountIndex == i) {
+#if defined(__GNUC__) || defined(__clang__)
+                    if (rootRequest) serial::puts("[S22R11-VFS] event=ROOT_UNMOUNT_RESULT result=BUSY\n");
+#endif
                     return VFS_ERR_BUSY;
                 }
             }
@@ -599,11 +630,16 @@ Status unmount(const char* path)
             serial::puts("[VFS] Unmounted '");
             serial::puts(path);
             serial::puts("'\n");
+            if (rootRequest) serial::puts("[S22R11-VFS] event=ROOT_UNMOUNT_RESULT result=UNMOUNTED\n");
 #endif
             
             return VFS_OK;
         }
     }
+
+#if defined(__GNUC__) || defined(__clang__)
+    if (rootRequest) serial::puts("[S22R11-VFS] event=ROOT_UNMOUNT_RESULT result=NOT_MOUNTED\n");
+#endif
     
     return VFS_ERR_NOT_MOUNT;
 }
@@ -1140,10 +1176,17 @@ const FileHandle* get_handle(uint8_t handle)
 
 uint8_t opendir(const char* path)
 {
-    if (!path) return 0xFF;
+    s_lastDirectoryOpenResult = DIRECTORY_OPEN_NOT_ATTEMPTED;
+    if (!path) {
+        s_lastDirectoryOpenResult = DIRECTORY_OPEN_INVALID_ARGUMENT;
+        return 0xFF;
+    }
     
     MountPoint* mount = find_mount_for_path(path);
-    if (!mount) return 0xFF;
+    if (!mount) {
+        s_lastDirectoryOpenResult = DIRECTORY_OPEN_NO_MOUNT;
+        return 0xFF;
+    }
     
     // Find free iterator
     uint8_t iter = 0xFF;
@@ -1154,7 +1197,10 @@ uint8_t opendir(const char* path)
         }
     }
     
-    if (iter == 0xFF) return 0xFF;
+    if (iter == 0xFF) {
+        s_lastDirectoryOpenResult = DIRECTORY_OPEN_NO_ITERATOR;
+        return 0xFF;
+    }
     
     // Initialize iterator
     DirIterator& di = s_dirs[iter];
@@ -1166,6 +1212,11 @@ uint8_t opendir(const char* path)
     // Get path relative to mount point
     char resolvedPath[VFS_MAX_PATH];
     const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
+    if (!relPath) {
+        di.active = false;
+        s_lastDirectoryOpenResult = DIRECTORY_OPEN_INVALID_PATH;
+        return 0xFF;
+    }
     
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
@@ -1175,6 +1226,7 @@ uint8_t opendir(const char* path)
                 (relPath[0] == '/' && relPath[1] == '\0')) {
                 if (!fs_fat::open_root_dir(mount->fsVolumeIndex)) {
                     di.active = false;
+                    s_lastDirectoryOpenResult = DIRECTORY_OPEN_FILESYSTEM_REJECTED;
                     return 0xFF;
                 }
             } else {
@@ -1182,18 +1234,21 @@ uint8_t opendir(const char* path)
                 fs_fat::DirEntry dirEntry;
                 if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &dirEntry)) {
                     di.active = false;
+                    s_lastDirectoryOpenResult = DIRECTORY_OPEN_PATH_LOOKUP_FAILED;
                     return 0xFF;  // Directory not found
                 }
                 
                 // Must be a directory
                 if (!dirEntry.isDir) {
                     di.active = false;
+                    s_lastDirectoryOpenResult = DIRECTORY_OPEN_NOT_DIRECTORY;
                     return 0xFF;  // Not a directory
                 }
                 
                 // Open the directory by its cluster
                 if (!fs_fat::open_dir(mount->fsVolumeIndex, dirEntry.firstCluster)) {
                     di.active = false;
+                    s_lastDirectoryOpenResult = DIRECTORY_OPEN_FILESYSTEM_REJECTED;
                     return 0xFF;
                 }
             }
@@ -1205,23 +1260,28 @@ uint8_t opendir(const char* path)
             // ext4 subdirectory support not yet implemented
             if (!fs_ext4::open_root_dir(mount->fsVolumeIndex)) {
                 di.active = false;
+                s_lastDirectoryOpenResult = DIRECTORY_OPEN_FILESYSTEM_REJECTED;
                 return 0xFF;
             }
             break;
             
         default:
             di.active = false;
+            s_lastDirectoryOpenResult = DIRECTORY_OPEN_UNSUPPORTED_FILESYSTEM;
             return 0xFF;
     }
     
+    s_lastDirectoryOpenResult = DIRECTORY_OPEN_OK;
+    s_lastDirectoryReadResult = DIRECTORY_READ_NOT_ATTEMPTED;
     return iter;
 }
 
 bool readdir(uint8_t iterator, DirEntry* entry)
 {
-    if (iterator >= VFS_MAX_OPEN_FILES) return false;
-    if (!s_dirs[iterator].active) return false;
-    if (!entry) return false;
+    if (iterator >= VFS_MAX_OPEN_FILES || !entry || !s_dirs[iterator].active) {
+        s_lastDirectoryReadResult = DIRECTORY_READ_INVALID_ITERATOR;
+        return false;
+    }
     
     DirIterator& di = s_dirs[iterator];
     MountPoint* mount = &s_mounts[di.mountIndex];
@@ -1231,6 +1291,21 @@ bool readdir(uint8_t iterator, DirEntry* entry)
         case FS_TYPE_EXFAT: {
             fs_fat::DirEntry fatEntry;
             if (!fs_fat::read_dir(mount->fsVolumeIndex, &fatEntry)) {
+                const fs_fat::TraversalStatus traversal = fs_fat::last_traversal_status();
+                if (fs_fat::last_io_status() != block::BLOCK_OK ||
+                    traversal == fs_fat::TRAVERSAL_IO_ERROR ||
+                    traversal == fs_fat::TRAVERSAL_INVALID_CLUSTER ||
+                    traversal == fs_fat::TRAVERSAL_BAD_CLUSTER ||
+                    traversal == fs_fat::TRAVERSAL_CHAIN_CYCLE ||
+                    traversal == fs_fat::TRAVERSAL_CHAIN_STEP_LIMIT ||
+                    traversal == fs_fat::TRAVERSAL_TRUNCATED_CHAIN) {
+                    s_lastDirectoryReadResult = DIRECTORY_READ_FILESYSTEM_ERROR;
+                } else if (traversal == fs_fat::TRAVERSAL_DIRECTORY_END ||
+                           traversal == fs_fat::TRAVERSAL_END_OF_CHAIN) {
+                    s_lastDirectoryReadResult = DIRECTORY_READ_END;
+                } else {
+                    s_lastDirectoryReadResult = DIRECTORY_READ_FILESYSTEM_ERROR;
+                }
                 return false;
             }
             
@@ -1241,6 +1316,7 @@ bool readdir(uint8_t iterator, DirEntry* entry)
             entry->isSystem = (fatEntry.attr & 0x04) != 0;
             entry->isReadOnly = (fatEntry.attr & 0x01) != 0;
             ++di.index;
+            s_lastDirectoryReadResult = DIRECTORY_READ_ENTRY;
             return true;
         }
         
@@ -1248,6 +1324,7 @@ bool readdir(uint8_t iterator, DirEntry* entry)
         case FS_TYPE_EXT4: {
             fs_ext4::Ext4DirEntry extEntry;
             if (!fs_ext4::read_dir(mount->fsVolumeIndex, &extEntry)) {
+                s_lastDirectoryReadResult = DIRECTORY_READ_END;
                 return false;
             }
             
@@ -1258,10 +1335,12 @@ bool readdir(uint8_t iterator, DirEntry* entry)
             entry->isSystem = false;
             entry->isReadOnly = false;
             ++di.index;
+            s_lastDirectoryReadResult = DIRECTORY_READ_ENTRY;
             return true;
         }
         
         default:
+            s_lastDirectoryReadResult = DIRECTORY_READ_FILESYSTEM_ERROR;
             return false;
     }
 }
@@ -1619,6 +1698,45 @@ uint64_t free_space(const char* mountPath)
     // Would need to query filesystem for actual free space
     // For now, return 0 (unknown)
     return 0;
+}
+
+const char* directory_open_result_name(DirectoryOpenResult result)
+{
+    switch (result) {
+        case DIRECTORY_OPEN_NOT_ATTEMPTED: return "VFS_DIR_OPEN_NOT_ATTEMPTED";
+        case DIRECTORY_OPEN_OK: return "VFS_DIR_OPEN_OK";
+        case DIRECTORY_OPEN_INVALID_ARGUMENT: return "VFS_DIR_OPEN_INVALID_ARGUMENT";
+        case DIRECTORY_OPEN_NO_MOUNT: return "VFS_DIR_OPEN_NO_MOUNT";
+        case DIRECTORY_OPEN_NO_ITERATOR: return "VFS_DIR_OPEN_NO_ITERATOR";
+        case DIRECTORY_OPEN_INVALID_PATH: return "VFS_DIR_OPEN_INVALID_PATH";
+        case DIRECTORY_OPEN_PATH_LOOKUP_FAILED: return "VFS_DIR_OPEN_PATH_LOOKUP_FAILED";
+        case DIRECTORY_OPEN_NOT_DIRECTORY: return "VFS_DIR_OPEN_NOT_DIRECTORY";
+        case DIRECTORY_OPEN_FILESYSTEM_REJECTED: return "VFS_DIR_OPEN_FILESYSTEM_REJECTED";
+        case DIRECTORY_OPEN_UNSUPPORTED_FILESYSTEM: return "VFS_DIR_OPEN_UNSUPPORTED_FILESYSTEM";
+        default: return "VFS_DIR_OPEN_UNKNOWN";
+    }
+}
+
+DirectoryOpenResult last_directory_open_result()
+{
+    return s_lastDirectoryOpenResult;
+}
+
+const char* directory_read_result_name(DirectoryReadResult result)
+{
+    switch (result) {
+        case DIRECTORY_READ_NOT_ATTEMPTED: return "VFS_DIR_READ_NOT_ATTEMPTED";
+        case DIRECTORY_READ_ENTRY: return "VFS_DIR_READ_ENTRY";
+        case DIRECTORY_READ_END: return "VFS_DIR_READ_END";
+        case DIRECTORY_READ_INVALID_ITERATOR: return "VFS_DIR_READ_INVALID_ITERATOR";
+        case DIRECTORY_READ_FILESYSTEM_ERROR: return "VFS_DIR_READ_FILESYSTEM_ERROR";
+        default: return "VFS_DIR_READ_UNKNOWN";
+    }
+}
+
+DirectoryReadResult last_directory_read_result()
+{
+    return s_lastDirectoryReadResult;
 }
 
 const char* fs_type_name(FSType type)
