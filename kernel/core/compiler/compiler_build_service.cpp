@@ -405,11 +405,189 @@ static void artifact_sha256(const uint8_t* bytes, uint32_t count, char output[GX
     Sha256 hash; hash.update(bytes, count); hash.finish(output);
 }
 
+static bool json_parse_string(const char* text, uint32_t length, uint32_t* position,
+                              char* output, uint32_t capacity)
+{
+    if (!text || !position || *position >= length || text[*position] != '"' || !output || capacity == 0) return false;
+    ++(*position);
+    uint32_t written = 0;
+    while (*position < length) {
+        char value = text[(*position)++];
+        if (value == '"') { output[written] = '\0'; return true; }
+        if (value == '\\') {
+            if (*position >= length) return false;
+            const char escaped = text[(*position)++];
+            if (escaped == '"' || escaped == '\\' || escaped == '/') value = escaped;
+            else if (escaped == 'n') value = '\n';
+            else if (escaped == 'r') value = '\r';
+            else if (escaped == 't') value = '\t';
+            else return false;
+        }
+        if (static_cast<unsigned char>(value) < 0x20 || written + 1 >= capacity) return false;
+        output[written++] = value;
+    }
+    return false;
+}
+
+static bool json_skip_string(const char* text, uint32_t length, uint32_t* position)
+{
+    if (!text || !position || *position >= length || text[*position] != '"') return false;
+    ++(*position);
+    while (*position < length) {
+        const char value = text[(*position)++];
+        if (value == '"') return true;
+        if (value == '\\') {
+            if (*position >= length) return false;
+            ++(*position);
+        } else if (static_cast<unsigned char>(value) < 0x20) return false;
+    }
+    return false;
+}
+
+static bool json_skip_composite(const char* text, uint32_t length, uint32_t* position)
+{
+    if (!text || !position || *position >= length ||
+        (text[*position] != '[' && text[*position] != '{')) return false;
+    uint32_t depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    for (; *position < length; ++(*position)) {
+        const char value = text[*position];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (value == '\\') escaped = true;
+            else if (value == '"') inString = false;
+            continue;
+        }
+        if (value == '"') inString = true;
+        else if (value == '[' || value == '{') ++depth;
+        else if (value == ']' || value == '}') {
+            if (depth == 0) return false;
+            --depth;
+            if (depth == 0) { ++(*position); return true; }
+        }
+    }
+    return false;
+}
+
+static bool json_string_array_value(const char* text, uint32_t length, const char* key,
+                                    char values[kMaxProjectSources][kMaxResolvedPath],
+                                    uint32_t* outCount, bool* outFound)
+{
+    if (outCount) *outCount = 0;
+    if (outFound) *outFound = false;
+    if (!text || !key || !values || !outCount || !outFound) return false;
+    uint32_t position = 0;
+    while (position < length && text[position] != '{') ++position;
+    if (position >= length) return false;
+    ++position;
+    while (position < length) {
+        skip_space(text, length, &position);
+        if (position < length && text[position] == '}') return true;
+        char property[64] = {};
+        if (!json_parse_string(text, length, &position, property, sizeof(property))) return false;
+        skip_space(text, length, &position);
+        if (position >= length || text[position++] != ':') return false;
+        skip_space(text, length, &position);
+        if (equal_text(property, key)) {
+            if (*outFound || position >= length || text[position++] != '[') return false;
+            *outFound = true;
+            skip_space(text, length, &position);
+            if (position < length && text[position] == ']') ++position;
+            else {
+                while (position < length) {
+                    if (*outCount >= kMaxProjectSources ||
+                        !json_parse_string(text, length, &position, values[*outCount], sizeof(values[0]))) return false;
+                    ++(*outCount);
+                    skip_space(text, length, &position);
+                    if (position < length && text[position] == ',') { ++position; skip_space(text, length, &position); continue; }
+                    if (position < length && text[position] == ']') { ++position; break; }
+                    return false;
+                }
+            }
+        } else if (position < length && text[position] == '"') {
+            if (!json_skip_string(text, length, &position)) return false;
+        } else if (position < length && (text[position] == '[' || text[position] == '{')) {
+            if (!json_skip_composite(text, length, &position)) return false;
+        } else {
+            while (position < length && text[position] != ',' && text[position] != '}') ++position;
+        }
+        skip_space(text, length, &position);
+        if (position < length && text[position] == ',') { ++position; continue; }
+        if (position < length && text[position] == '}') return true;
+        return false;
+    }
+    return false;
+}
+
+static bool source_extension(const char* value)
+{
+    if (!value) return false;
+    uint32_t length = text_length(value, kMaxResolvedPath);
+    uint32_t basename = 0;
+    for (uint32_t i = 0; i < length; ++i) if (value[i] == '/') basename = i + 1;
+    const uint32_t remaining = length - basename;
+    if (remaining >= 2 && value[length - 2] == '.' &&
+        (value[length - 1] == 'c' || value[length - 1] == 'C')) return true;
+    return remaining >= 4 && value[length - 4] == '.' &&
+        (value[length - 3] == 'c' || value[length - 3] == 'C') &&
+        (value[length - 2] == 'p' || value[length - 2] == 'P') &&
+        (value[length - 1] == 'p' || value[length - 1] == 'P');
+}
+
+static bool equal_text_folded(const char* left, const char* right)
+{
+    if (!left || !right) return left == right;
+    uint32_t i = 0;
+    while (left[i] && right[i]) {
+        char a = left[i], b = right[i];
+        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + ('a' - 'A'));
+        if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + ('a' - 'A'));
+        if (a != b) return false;
+        ++i;
+    }
+    return left[i] == right[i];
+}
+
+static bool choose_registered_sources(const char* root, const char* sourceRoot,
+                                      const char* sourceEntry,
+                                      const char names[kMaxProjectSources][kMaxResolvedPath],
+                                      uint32_t count, SourceSelection* selection)
+{
+    if (!root || !sourceRoot || !selection || count == 0 || count > kMaxProjectSources) return false;
+    if (sourceEntry && sourceEntry[0] != '\0' && !equal_text(names[0], sourceEntry)) return false;
+    *selection = {};
+    selection->count = count;
+    for (uint32_t i = 0; i < count; ++i) {
+        const char* source = names[i];
+        if (!safe_relative(source) || !source_extension(source) ||
+            equal_text_folded(source, "freestanding_memory.cpp")) return false;
+        for (uint32_t j = 0; j < i; ++j) if (equal_text_folded(names[j], source)) return false;
+        for (uint32_t j = 0; source[j]; ++j) if (source[j] == '\\') return false;
+        if (!copy_text(selection->relatives[i], sizeof(selection->relatives[i]), sourceRoot) ||
+            !append_text(selection->relatives[i], sizeof(selection->relatives[i]), "/") ||
+            !append_text(selection->relatives[i], sizeof(selection->relatives[i]), source) ||
+            !join_path(root, selection->relatives[i], selection->paths[i], sizeof(selection->paths[i]))) return false;
+        vfs::FileInfo info = {};
+        if (vfs::stat(selection->paths[i], &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR) return false;
+    }
+    return true;
+}
+
 static bool choose_sources(const char* root, const char* sourceRoot, const char* sourceEntry,
+                           const char* projectText, uint32_t projectTextLength,
                            SourceSelection* selection)
 {
     if (!root || !sourceRoot || !selection || !safe_relative(sourceRoot)) return false;
     *selection = {};
+    char registered[kMaxProjectSources][kMaxResolvedPath] = {};
+    uint32_t registeredCount = 0;
+    bool hasRegisteredSources = false;
+    if (!json_string_array_value(projectText, projectTextLength, "sources", registered,
+                                 &registeredCount, &hasRegisteredSources)) return false;
+    if (hasRegisteredSources)
+        return choose_registered_sources(root, sourceRoot, sourceEntry,
+                                         registered, registeredCount, selection);
     if (sourceEntry && sourceEntry[0] != '\0') {
         if (!safe_relative(sourceEntry) ||
             !join_path(root, sourceRoot, selection->paths[0], sizeof(selection->paths[0])) ||
@@ -597,7 +775,8 @@ static bool metadata_matches(const char* root, const gx_build_request* request,
     char sourceRoot[128] = {}; char sourceEntry[256] = {};
     if (!json_string_value(s_projectText, text_length(s_projectText, sizeof(s_projectText)), "sourceRoot", sourceRoot, sizeof(sourceRoot), false) ||
         !json_string_value(s_projectText, text_length(s_projectText, sizeof(s_projectText)), "sourceEntry", sourceEntry, sizeof(sourceEntry), true) ||
-        !choose_sources(root, sourceRoot, sourceEntry, selection)) {
+        !choose_sources(root, sourceRoot, sourceEntry,
+                        s_projectText, text_length(s_projectText, sizeof(s_projectText)), selection)) {
         if (outErrorCode) *outErrorCode = GX_BUILD_ERROR_SOURCE_SELECTION;
         return false;
     }
