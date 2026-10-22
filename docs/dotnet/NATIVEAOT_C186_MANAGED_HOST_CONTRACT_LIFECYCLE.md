@@ -129,3 +129,12 @@ The aggregate manifest additionally contains hashes for its three referenced com
 C185 supports one static sample factory and one window with one label and one button; it is not a general app loader or multi-window SDK. The same registered selector has one current lifetime entry, while the shared C181 table still holds at most five selectors. Input and rendering are synchronous. Programmatic activation remains unsupported. The public contract does not promise persistence for application-owned state. If the native host persistently fails a close during final teardown, C185 invalidates its public wrappers after its cleanup attempt and cannot retry through them.
 
 If C187 expands this boundary, first specify and qualify native close notification and persistent close-failure semantics for a real guest application. Keep dynamic loading, additional application slots, and broad framework extraction out of that work unless separately accepted. C186 does not start C187.
+
+## C186R1 follow-up
+
+The original C186 result above remains **Outcome B — Partial** for that run.
+C186R1 separately qualifies prospective build-output containment and accepts
+the corrected routing for future validation. It does not restore or certify
+the original bytes of any C185 file whose pre-C186 identity was not recorded.
+The full audit, preservation inventories, new artifact hashes, and handoff are
+in [NATIVEAOT_C186R1_ARTIFACT_ISOLATION.md](NATIVEAOT_C186R1_ARTIFACT_ISOLATION.md).
