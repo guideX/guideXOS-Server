@@ -1,0 +1,12 @@
+{
+  "schema": "guidexos.rexx.rx24.untracked-preservation.v1",
+  "captured_at_utc": "2026-10-22T04:29:24.4159065Z",
+  "baseline_path_count": 51630,
+  "baseline_manifest_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+  "preexisting_paths_present": 51630,
+  "missing_preexisting_path_count": 0,
+  "missing_preexisting_paths": [],
+  "current_untracked_path_count": 63884,
+  "new_untracked_path_count": 12254,
+  "root_phase_file_present": false
+}

@@ -1,0 +1,35 @@
+{
+  "schema": "guidexos.rexx.rx24.sanitizers.v1",
+  "phase": "RX24",
+  "status": "PASS",
+  "target_count_per_sanitizer": 24,
+  "rx24_direct_assertions": 65,
+  "rx24_direct_failures": 0,
+  "local_expected_result_corpus_per_sanitizer": {
+    "failed": 0,
+    "passed": 196,
+    "regina": "NOT_RUN — unavailable"
+  },
+  "sanitizers": [
+    {
+      "kind": "Address",
+      "compiler": "MSVC 19.51.36260",
+      "targets_passed": "24/24",
+      "findings": 0,
+      "rx24_test_output": "sanitizer-address-1baf9d056185449c973fcc2db6d2051e/logs/rx24_address_trace.run.stdout.log",
+      "corpus_results": "sanitizer-address-1baf9d056185449c973fcc2db6d2051e/results.json",
+      "corpus": "196/196 local expected results",
+      "regina": "NOT_RUN — no Regina executable found"
+    },
+    {
+      "kind": "Undefined",
+      "compiler": "clang 22.1.8",
+      "targets_passed": "24/24",
+      "findings": 0,
+      "rx24_test_output": "sanitizer-undefined-c5917e3b97134806839aba73ce970c40/logs/rx24_address_trace.run.stdout.log",
+      "corpus_results": "sanitizer-undefined-c5917e3b97134806839aba73ce970c40/results.json",
+      "corpus": "196/196 local expected results",
+      "regina": "NOT_RUN — no Regina executable found"
+    }
+  ]
+}

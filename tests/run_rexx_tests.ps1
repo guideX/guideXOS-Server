@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,9 @@ if ($null -eq $gxxCommand) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX22') {
+$guardManifest = if ($Phase -eq 'RX24') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx24\protected-artifacts-start.json'
+} elseif ($Phase -eq 'RX22') {
     Join-Path $rootDir 'docs\rexx\evidence\rx22\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX21') {
     Join-Path $rootDir 'docs\rexx\evidence\rx21\protected-artifacts-start.json'
@@ -55,7 +57,8 @@ $plannedOutputs = @(
     'rexx_rx15_conversion_tests.exe', 'rexx_rx16_literal_tests.exe',
     'rexx_rx17_bitwise_tests.exe', 'rexx_rx18_string_builtins_tests.exe',
     'rexx_rx19_date_time_tests.exe',
-    'rexx_rx2_shell_bridge_tests.exe', 'rexx_rx22_classic_diagnostic_tests.exe'
+    'rexx_rx2_shell_bridge_tests.exe', 'rexx_rx22_classic_diagnostic_tests.exe',
+    'rexx_rx24_address_trace_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
@@ -88,6 +91,7 @@ $rx17Test = Join-Path $buildDirectory "rexx_rx17_bitwise_tests.exe"
 $rx18Test = Join-Path $buildDirectory "rexx_rx18_string_builtins_tests.exe"
 $rx19Test = Join-Path $buildDirectory "rexx_rx19_date_time_tests.exe"
 $rx22Test = Join-Path $buildDirectory "rexx_rx22_classic_diagnostic_tests.exe"
+$rx24Test = Join-Path $buildDirectory "rexx_rx24_address_trace_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -449,6 +453,22 @@ Write-Host "Running RX22 classic/diagnostic built-in assertions"
 & $rx22Test
 if ($LASTEXITCODE -ne 0) {
     throw "RX22 classic/diagnostic built-in assertions failed with exit code $LASTEXITCODE."
+}
+
+if ($Phase -eq 'RX24') {
+    Write-Host "Building RX24 ADDRESS and TRACE assertions"
+    & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+        -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
+        (Join-Path $PSScriptRoot "rexx_rx24_address_trace_test.c") `
+        @commonSources -lm -o $rx24Test
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX24 ADDRESS/TRACE test build failed with exit code $LASTEXITCODE."
+    }
+    Write-Host "Running RX24 ADDRESS and TRACE assertions"
+    & $rx24Test
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX24 ADDRESS/TRACE assertions failed with exit code $LASTEXITCODE."
+    }
 }
 
 Write-Host "Running RX2 shell bridge assertions"

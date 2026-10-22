@@ -169,6 +169,100 @@ static RexxVMStatus rexx_builtin_set_empty(RexxValue *result)
     return rexx_value_set_string(result, rexx_builtin_empty, 0u);
 }
 
+static RexxVMStatus rexx_builtin_address(RexxVM *vm,
+                                       const RexxValue *arguments,
+                                       size_t argument_count,
+                                       RexxValue *result)
+{
+    const char *environment;
+    size_t environment_length;
+    RexxVMStatus status;
+    (void)arguments;
+    if (argument_count != 0u || vm == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    status = rexx_vm_get_address_environment(
+        vm, &environment, &environment_length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    while (environment_length != 0u &&
+           environment[environment_length - 1u] == ' ')
+        --environment_length;
+    return rexx_value_set_string(result, environment, environment_length);
+}
+
+static int rexx_builtin_trace_option_action(const char *bytes, size_t length,
+                                            char *action)
+{
+    size_t index;
+    unsigned char first;
+    if (bytes == NULL || action == NULL || length == 0u)
+        return -1;
+    for (index = 0u; index < length; ++index) {
+        unsigned char byte = (unsigned char)bytes[index];
+        if (!((byte >= 'A' && byte <= 'Z') ||
+              (byte >= 'a' && byte <= 'z')))
+            return -1;
+    }
+    first = rexx_builtin_ascii_upper((unsigned char)bytes[0]);
+    if (first == 'N' || first == 'O' || first == 'E' || first == 'F') {
+        *action = (char)first;
+        return 1;
+    }
+    if (first == 'A' || first == 'C' || first == 'I' || first == 'L' ||
+        first == 'R' || first == 'S') {
+        *action = (char)first;
+        return 0;
+    }
+    return -1;
+}
+
+static RexxVMStatus rexx_builtin_trace(RexxVM *vm,
+                                      const RexxValue *arguments,
+                                      size_t argument_count,
+                                      RexxValue *result)
+{
+    RexxBuiltinStringView option;
+    size_t index = 0u;
+    char new_action;
+    int option_capability;
+    RexxVMStatus status;
+
+    if (vm == NULL || (argument_count != 0u && arguments == NULL))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (vm->trace_action != 'N' && vm->trace_action != 'O' &&
+        vm->trace_action != 'E' && vm->trace_action != 'F')
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (argument_count == 0u)
+        return rexx_value_set_string(result, &vm->trace_action, 1u);
+    if (arguments[0].type != REXX_VALUE_STRING)
+        return REXX_VM_STATUS_INVALID_TRACE_REQUEST;
+    status = rexx_builtin_string_view(&arguments[0], &option);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (option.length == 0u)
+        return REXX_VM_STATUS_INVALID_TRACE_REQUEST;
+    while (index < option.length &&
+           (option.bytes[index] == '?' || option.bytes[index] == '!'))
+        ++index;
+    if (index == option.length) {
+        if (index != 0u)
+            return REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY;
+        return REXX_VM_STATUS_INVALID_TRACE_REQUEST;
+    }
+    option_capability = rexx_builtin_trace_option_action(
+        option.bytes + index, option.length - index, &new_action);
+    if (option_capability < 0)
+        return REXX_VM_STATUS_INVALID_TRACE_REQUEST;
+    if (index != 0u || option_capability == 0)
+        return REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY;
+
+    /* Construct the previous value before changing VM state so allocation
+     * failure cannot leave a partially applied TRACE request. */
+    status = rexx_value_set_string(result, &vm->trace_action, 1u);
+    if (status != REXX_VM_STATUS_OK) return status;
+    vm->trace_action = new_action;
+    vm->trace_enabled = new_action == 'O' ? 0u : 1u;
+    return REXX_VM_STATUS_OK;
+}
+
 static RexxVMStatus rexx_builtin_allocate_result(RexxValue *result,
                                                 size_t length,
                                                 char **bytes)
@@ -3696,6 +3790,8 @@ static RexxVMStatus rexx_builtin_time(RexxVM *vm,
 }
 
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
+    { "ADDRESS", 0u, 0u, NULL, rexx_builtin_address },
+    { "TRACE", 0u, 1u, NULL, rexx_builtin_trace },
     { "LENGTH", 1u, 1u, rexx_builtin_length, NULL },
     { "REVERSE", 1u, 1u, rexx_builtin_reverse, NULL },
     { "SOURCELINE", 0u, 1u, NULL, rexx_builtin_sourceline },

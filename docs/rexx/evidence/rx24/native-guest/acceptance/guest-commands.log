@@ -1,0 +1,6 @@
+[2026-10-22T04:19:19.8564680Z] rexx /rx24-address-trace.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx24\qemu-8d60cef4b81643b2b795d668f83b7238\screenshots-raw\rx24-01-address-trace-builtins.ppm
+[2026-10-22T04:19:38.7834978Z] rexx /rx24-error-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx24\qemu-8d60cef4b81643b2b795d668f83b7238\screenshots-raw\rx24-02-invalid-trace-recovery.ppm
+[2026-10-22T04:19:58.3998982Z] rexx /rx24-date-time-clock-guard.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx24\qemu-8d60cef4b81643b2b795d668f83b7238\screenshots-raw\rx24-03-date-time-fail-closed-guard.ppm

@@ -1,0 +1,31 @@
+{
+  "schema": "guidexos.rexx.rx24.qemu-acceptance.v1",
+  "status": "GUEST_PASS_QAC_POSTCHECK_RACE",
+  "qac_project": "guideXOSServer",
+  "qac_mode": "acceptance",
+  "reservation_id": "2abeeb06472b46da9c7bd8453288b6c3",
+  "qemu_pid": 21192,
+  "kernel_sha256": "7f1a82b734d18747c29516478c30556bb232426e111cb021e237ad2f215b8dc2",
+  "network_disabled": true,
+  "disposable_media": true,
+  "qmp_shutdown_acknowledged": true,
+  "qac_child_exit_code": 0,
+  "qac_release_marker_in_stderr": true,
+  "foreign_qemu_process_controlled": false,
+  "guest_scripts": [
+    "rx24-address-trace.rex",
+    "rx24-error-recovery.rex",
+    "rx24-date-time-clock-guard.rex"
+  ],
+  "observed": [
+    "ADDRESS returned KERNEL and one-command ADDRESS restored KERNEL.",
+    "TRACE E emitted an observable command trace for RX 127.",
+    "TRACE O returned E and then reported O.",
+    "Invalid TRACE Z was trapped; the guest remained responsive.",
+    "DATE and TIME current forms failed closed; TIME E advanced using PIT monotonic time.",
+    "Kernel PIT heartbeat continued."
+  ],
+  "runner_note": "The guest exited through QMP and QAC logged child exit code 0 and reservation release. The runner sampled QAC status before coordinator cleanup propagated and returned nonzero. A later read-only qac status/list showed zero sessions and reservations; a separate workspace acquired QAC after that observation. A repeat attempt was blocked before guest launch by that separate active reservation. A bounded 30-second release-status poll was added afterward and PowerShell syntax-checked; it was not re-run because the separate reservation held QAC.",
+  "evidence": "native-guest/acceptance",
+  "completed_at_utc": "2026-10-22T04:20:02Z"
+}

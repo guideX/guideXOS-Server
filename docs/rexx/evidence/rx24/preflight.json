@@ -1,0 +1,31 @@
+{
+  "schema": "guidexos.rexx.rx24.preflight.v1",
+  "captured_at": "2026-10-22T03:46:48.7898518Z",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "required_branch": "REXX_SUPPORT",
+  "actual_branch": "REXX_SUPPORT",
+  "required_starting_head": "db3c10308923118bbb408328c33c23c64c801fb3",
+  "actual_starting_head": "db3c10308923118bbb408328c33c23c64c801fb3",
+  "tracked_worktree_clean": true,
+  "index_clean": true,
+  "stale_rx23_prompt_artifacts": "NONE_FOUND",
+  "phase_guard_status": "RUNNERS_AND_GUARD_MANIFESTS_ACCEPT_THROUGH_RX22_ONLY",
+  "rx22_inventory_rows": 75,
+  "rx22_scorecard": "RX22",
+  "rx22_implemented": 53,
+  "rx22_plain_not_implemented": 18,
+  "rx22_partial": [
+    "DATE",
+    "TIME"
+  ],
+  "rx22_not_assessed": 1,
+  "rx22_not_implemented_by_design": 1,
+  "preexisting_untracked_path_count": 51630,
+  "preexisting_untracked_paths_file": "untracked-paths-start.txt",
+  "preexisting_untracked_manifest_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+  "provided_rx23_manifest_sha256": "43e57cf301f213ad11bb1bcbff3e73af8eab4cd79ef1b0e6f9fdc210119a519d",
+  "provided_manifest_matches": false,
+  "protected_root_obj_pdb_count": 31,
+  "protected_root_artifacts_file": "protected-artifacts-start.json",
+  "regina": "NOT_RUN — executable availability not checked yet"
+}

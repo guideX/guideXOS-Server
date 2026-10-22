@@ -1,0 +1,44 @@
+{
+  "schema": "guidexos.rexx.rx24.hosted-qualification.v1",
+  "phase": "RX24",
+  "status": "PASS",
+  "hosted_cli_cases": "24/24",
+  "rx24_direct_tests": {
+    "cases": [
+      "ADDRESS default and trailing blanks",
+      "persistent and temporary ADDRESS instruction behavior",
+      "routine return and exceptional unwind restoration",
+      "subroutine caller-state restoration and INTERPRET state mutation",
+      "TRACE query, option mutation, prior return value, and option spellings",
+      "numeric, empty, malformed, unsupported, and extra-argument recovery",
+      "N/E/F/O output against actual command RC",
+      "routine recursion and trace-state restoration",
+      "output-writer failure after actual dispatch and recovery",
+      "allocation failure without partial state mutation",
+      "VM isolation"
+    ],
+    "assertions": 65,
+    "status": "PASS",
+    "failures": 0
+  },
+  "inherited_regressions": {
+    "RX17": "10/10 fixtures; 15843 assertions; 2304 property cases",
+    "RX5": "13/13 fixtures; 35/35",
+    "RX3": "13/13 fixtures; 26 decimal assertions; 570 allocation assertions",
+    "RX12": "31/31 fixtures; 320/320 assertions",
+    "RX4": "11/11 fixtures; 53 arithmetic assertions",
+    "RX14": "29/29 fixtures; 333/333 assertions",
+    "RX22": "1/1 fixture; 2285/2285 assertions",
+    "RX19": "8275 assertions; 4112 direct cases; 2048 property cases",
+    "RX16": "10/10 fixtures; 104/104 assertions",
+    "RX7": "33/33 fixtures; 13 routine assertions; allocation failpoints passed",
+    "RX18": "99315 assertions; 13935 property cases",
+    "RX15": "3/3 fixtures; 211/211 assertions",
+    "RX13": "33/33 fixtures; 418/418 assertions",
+    "RX8": "26/26 fixtures; 281/281 semantic/allocation assertions",
+    "RX6": "25/25 fixtures; 444 allocation assertions",
+    "RX9": "24/24 condition fixtures; 469/469 assertions",
+    "RX10": "19/19 INTERPRET fixtures; 261 assertions"
+  },
+  "regina": "NOT_RUN — unavailable; no external compatibility percentage claimed."
+}

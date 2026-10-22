@@ -17,6 +17,8 @@ extern "C" {
 #endif
 
 #define REXX_VM_DEFAULT_STACK_CAPACITY ((size_t)256u)
+#define REXX_VM_DEFAULT_ADDRESS_ENVIRONMENT "KERNEL"
+#define REXX_VM_DEFAULT_TRACE_ACTION 'N'
 #define REXX_VM_MAX_STACK_CAPACITY ((size_t)1048576u)
 #define REXX_VM_MAX_TABLE_ENTRIES ((size_t)65536u)
 #define REXX_VM_MAX_PARSE_SOURCE_LENGTH ((size_t)16777216u)
@@ -85,7 +87,9 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_INVALID_EXPOSE_LIST,
     REXX_VM_STATUS_CONTROL_TRANSFER,
     REXX_VM_STATUS_DYNAMIC_SYNTAX,
-    REXX_VM_STATUS_CLOCK_UNAVAILABLE
+    REXX_VM_STATUS_CLOCK_UNAVAILABLE,
+    REXX_VM_STATUS_INVALID_TRACE_REQUEST,
+    REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY
 } RexxVMStatus;
 
 enum {
@@ -249,6 +253,8 @@ typedef struct RexxVM {
     int32_t rc;           /* Most recent guideXOS command return code. */
     char *address_environment; /* NULL means the initial KERNEL environment. */
     size_t address_environment_length;
+    char trace_action; /* Operationally supported actions: E, F, N, and O. */
+    uint8_t trace_enabled; /* Explicit TRACE option requested in this VM. */
     RexxVMCommandDispatcher command_dispatcher;
     void *command_dispatcher_user_data;
     RexxVMAddressDispatcher address_dispatcher;
@@ -307,6 +313,12 @@ void rexx_vm_set_address_dispatcher(RexxVM *vm,
 void rexx_vm_set_output_writer(RexxVM *vm,
                                RexxVMOutputWriter writer,
                                void *user_data);
+
+/* Return the active environment identity as a borrowed, length-bearing view.
+ * The initial environment is REXX_VM_DEFAULT_ADDRESS_ENVIRONMENT. */
+RexxVMStatus rexx_vm_get_address_environment(const RexxVM *vm,
+                                             const char **environment,
+                                             size_t *environment_length);
 
 /* Install a clock source for this VM only. Passing NULL restores the
  * deterministic unavailable-clock behavior. */

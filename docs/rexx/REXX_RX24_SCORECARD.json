@@ -1,0 +1,201 @@
+{
+  "schema": "guidexos.rexx.rx24.scorecard.v1",
+  "phase": "RX24",
+  "outcome": "B — Partial",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "db3c10308923118bbb408328c33c23c64c801fb3",
+  "pre_commit_head": "db3c10308923118bbb408328c33c23c64c801fb3",
+  "ending_head": "Recorded in final task report",
+  "local_commit_includes_scorecard": true,
+  "preflight": {
+    "tracked_worktree_clean": true,
+    "index_clean": true,
+    "stale_rx23_prompt_artifacts": "NONE_FOUND",
+    "rx22_inventory_rows": 75,
+    "rx22_fully_implemented": 53,
+    "rx22_plain_not_implemented": 18,
+    "rx22_partial": [
+      "DATE",
+      "TIME"
+    ],
+    "rx22_not_assessed": 1,
+    "rx22_not_implemented_by_design": 1,
+    "preexisting_untracked_paths": 51630,
+    "preexisting_untracked_manifest": "evidence/rx24/untracked-paths-start.txt",
+    "actual_manifest_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+    "provided_rx23_manifest_sha256": "43e57cf301f213ad11bb1bcbff3e73af8eab4cd79ef1b0e6f9fdc210119a519d",
+    "provided_manifest_sha_matches": false,
+    "manifest_note": "The path count matched 51,630; the captured byte-for-byte manifest hash did not match the supplied hash. The actual current path list was saved and used for preservation checks.",
+    "protected_root_obj_pdb_count": 31,
+    "root_phase_file_present": false
+  },
+  "architecture_audit": {
+    "address": {
+      "default_environment": "KERNEL",
+      "source": "Existing VM command-dispatch default",
+      "persistent_address_instruction": true,
+      "temporary_address_instruction": true,
+      "environment_aware_dispatcher": true,
+      "fallback": "RC 127 safe stub; no system shell",
+      "routine_return_and_unwind_restore": true,
+      "per_vm_isolation": true
+    },
+    "trace_before_rx24": {
+      "trace_instruction": "Lexer keyword only; no parser/compiler/VM instruction",
+      "trace_events": "No instruction/expression/label/command event stream",
+      "trace_output": "Existing SAY writer not connected to trace events",
+      "interactive_debugger": "No input callback",
+      "command_inhibition": "No control",
+      "scan": "No execution control",
+      "trace_state": "None"
+    },
+    "trace_after_rx24": {
+      "per_vm_action": true,
+      "per_vm_activation_flag": true,
+      "actions": [
+        "N",
+        "E",
+        "F",
+        "O"
+      ],
+      "output_boundary": "Existing VM output writer; hosted stdout fallback; freestanding fails closed without writer",
+      "routine_return_and_error_unwind_restore": true
+    }
+  },
+  "implementation": {
+    "ADDRESS": {
+      "status": "Implemented",
+      "semantics": "No arguments; returns active environment with trailing ASCII blanks removed; observes persistent ADDRESS; temporary one-command selection does not change persistent state; routine frames restore caller state; per-VM isolation."
+    },
+    "TRACE": {
+      "status": "Partial",
+      "semantics": "Query returns current canonical action. Option call returns previous action and applies the new action after result allocation. First alphabetic character selects action per IBM; numeric options are rejected. Explicit N/F trace negative command RC, E traces any nonzero command RC, O disables output. Output is written after real dispatch and includes action, source line, command and signed RC.",
+      "unsupported_options": [
+        "A",
+        "C",
+        "I",
+        "L",
+        "R",
+        "S",
+        "?",
+        "!"
+      ],
+      "unsupported_behavior": "Returns catchable invalid/unsupported request without changing state. Interactive debug and command inhibition are not implemented.",
+      "compatibility_note": "Default reported action is N, but diagnostics activate only after an explicit TRACE(option) call to preserve RX1-RX22 output."
+    },
+    "DATE": "Partial; unchanged; current wall-clock form remains fail closed.",
+    "TIME": "Partial; unchanged; current wall-clock form remains fail closed; elapsed TIME uses monotonic PIT ticks."
+  },
+  "qualification": {
+    "hosted": {
+      "status": "PASS",
+      "rx24_assertions": 65,
+      "rx24_failures": 0,
+      "cli_cases": "24/24",
+      "inherited_fixtures": {
+        "RX3": "13/13",
+        "RX4": "11/11",
+        "RX5": "13/13",
+        "RX6": "25/25",
+        "RX7": "33/33",
+        "RX8": "26/26",
+        "RX9": "24/24",
+        "RX10": "19/19",
+        "RX12": "31/31",
+        "RX13": "33/33",
+        "RX14": "29/29",
+        "RX15": "3/3",
+        "RX16": "10/10",
+        "RX17": "10/10",
+        "RX22": "1/1"
+      },
+      "rx18_property_cases": 13935,
+      "rx19_date_time_clock": {
+        "assertions": 8275,
+        "direct_cases": 4112,
+        "property_cases": 2048
+      },
+      "evidence": "evidence/rx24/hosted-qualification-summary.json"
+    },
+    "address_sanitizer": {
+      "status": "PASS",
+      "targets": "24/24",
+      "findings": 0,
+      "rx24_assertions": 65,
+      "rx24_failures": 0,
+      "local_expected_corpus": "196/196",
+      "evidence": "evidence/rx24/sanitizer-address-1baf9d056185449c973fcc2db6d2051e"
+    },
+    "undefined_behavior_sanitizer": {
+      "status": "PASS",
+      "targets": "24/24",
+      "findings": 0,
+      "rx24_assertions": 65,
+      "rx24_failures": 0,
+      "local_expected_corpus": "196/196",
+      "evidence": "evidence/rx24/sanitizer-undefined-c5917e3b97134806839aba73ce970c40"
+    },
+    "regina": "NOT_RUN — no Regina executable found; no external compatibility percentage claimed.",
+    "freestanding_amd64": {
+      "status": "PASS",
+      "rexx_c_objects": 9,
+      "kernel_sha256": "7f1a82b734d18747c29516478c30556bb232426e111cb021e237ad2f215b8dc2",
+      "kernel": "build/rexx/rx24/native-amd64-f9de4ce01cdb4985803d1233658e95e1/amd64/bin/kernel.elf",
+      "link_evidence": "evidence/rx24/native-build/native-link-evidence-f9de4ce01cdb4985803d1233658e95e1.json"
+    },
+    "isolated_qemu_guest": {
+      "guest_observations": "PASS",
+      "scripts": [
+        "rx24-address-trace.rex",
+        "rx24-error-recovery.rex",
+        "rx24-date-time-clock-guard.rex"
+      ],
+      "observable_trace": "TRACE E at command dispatch for safe stub RC 127",
+      "invalid_trace_recovery": "PASS; invalid Z trapped and guest responsive",
+      "date_time": "PASS; current DATE/TIME unavailable, elapsed TIME advances, PIT heartbeat continues",
+      "network_disabled": true,
+      "disposable_media": true,
+      "qmp_shutdown_acknowledged": true,
+      "qac_child_exit_code": 0,
+      "qac_release_logged": true,
+      "runner_exit": "Nonzero only at immediate post-QMP coordinator status check; a later read-only status/list showed zero sessions and reservations.",
+      "retry": "A repeat launch was prevented before guest start by a separate active QAC acceptance reservation from another workspace; no foreign process was controlled.",
+      "runner_followup": "A bounded 30-second QAC release-status poll was added and PowerShell syntax-checked; no rerun was possible while the separate reservation held QAC.",
+      "evidence": "evidence/rx24/native-guest/acceptance/qemu-acceptance-summary.json"
+    }
+  },
+  "protected_integrity": {
+    "baseline": "evidence/rx24/protected-artifacts-start.json",
+    "final": "evidence/rx24/protected-artifacts-final.json",
+    "root_obj_pdb_hashes_and_sizes": "31/31 match",
+    "untracked_comparison": "evidence/rx24/untracked-preservation-final.json",
+    "preexisting_paths_present": "51630/51630",
+    "missing_preexisting_paths": 0,
+    "captured_manifest_sha256": "c2b51967e3e8c376db632a0cbfc95f6f4d3bb7a0e73bc133b1573ba0a4870646",
+    "precommit_new_untracked_snapshot": 12254,
+    "root_phase_file": "Absent"
+  },
+  "inventory": {
+    "rows": 75,
+    "fully_implemented": 54,
+    "plain_not_implemented": 16,
+    "not_implemented_total_including_preserved_special_classifications": 18,
+    "partial": 3,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "date_status": "Partial",
+    "time_status": "Partial",
+    "changed_entries": [
+      "ADDRESS",
+      "TRACE"
+    ],
+    "file": "REXX_RX24_BUILTIN_INVENTORY.csv"
+  },
+  "limitations": [
+    "TRACE R/I/other clause-oriented actions are unsupported; no TRACE instruction parser or debugger input mechanism exists.",
+    "The ! command-inhibition prefix and scan mode are unsupported.",
+    "Default action query reports N, while trace output requires an explicit TRACE option for RX1-RX22 output compatibility.",
+    "The ADDRESS default environment is the existing KERNEL runtime identity; selected names are interpreted by the embedding dispatcher."
+  ],
+  "recommendation": "Consider RX25 RANDOM with explicit-seed deterministic generation, independent of clock provenance and host-command routing."
+}

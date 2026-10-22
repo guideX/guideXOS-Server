@@ -98,7 +98,9 @@ static const char *const vm_messages[] = {
     "unknown SIGNAL label", "invalid SIGNAL destination label",
     "invalid subsidiary PROCEDURE EXPOSE list", "condition control transfer",
     "syntax error in interpreted source",
-    "clock source unavailable or lacks a required capability"
+    "clock source unavailable or lacks a required capability",
+    "invalid TRACE request",
+    "TRACE action requires unsupported interpreter capability"
 };
 
 typedef struct RexxVMEnvironment RexxVMEnvironment;
@@ -168,6 +170,8 @@ struct RexxVMCallFrame {
     RexxVMClockContext clock_context;
     char *address_environment;
     size_t address_environment_length;
+    char trace_action;
+    uint8_t trace_enabled;
     int procedure_entered;
     int first_instruction;
     int owns_environment;
@@ -591,7 +595,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_CLOCK_UNAVAILABLE
+                            status <= REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -1334,6 +1338,7 @@ RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity)
     vm->stack_capacity = stack_capacity;
     vm->instruction_budget = REXX_VM_DEFAULT_INSTRUCTION_BUDGET;
     vm->numeric_digits = REXX_VM_DEFAULT_NUMERIC_DIGITS;
+    vm->trace_action = REXX_VM_DEFAULT_TRACE_ACTION;
     vm->numeric_fuzz = 0u;
     vm->numeric_form = REXX_NUMERIC_FORM_SCIENTIFIC;
     vm->numeric_work_budget = REXX_VM_DEFAULT_NUMERIC_WORK_BUDGET;
@@ -1478,13 +1483,155 @@ int32_t rexx_vm_guidexos_command_stub(const char *command, size_t command_length
 static const char *current_address_environment(const RexxVM *vm,
                                                size_t *length)
 {
-    static const char default_environment[] = "KERNEL";
+    static const char default_environment[] =
+        REXX_VM_DEFAULT_ADDRESS_ENVIRONMENT;
     if (vm->address_environment != NULL) {
         *length = vm->address_environment_length;
         return vm->address_environment;
     }
     *length = sizeof(default_environment) - 1u;
     return default_environment;
+}
+
+RexxVMStatus rexx_vm_get_address_environment(const RexxVM *vm,
+                                             const char **environment,
+                                             size_t *environment_length)
+{
+    size_t index;
+    if (vm == NULL || !vm->initialized || environment == NULL ||
+        environment_length == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (vm->address_environment == NULL) {
+        if (vm->address_environment_length != 0u)
+            return REXX_VM_STATUS_INVALID_ARGUMENT;
+        *environment = REXX_VM_DEFAULT_ADDRESS_ENVIRONMENT;
+        *environment_length =
+            sizeof(REXX_VM_DEFAULT_ADDRESS_ENVIRONMENT) - 1u;
+        return REXX_VM_STATUS_OK;
+    }
+    if (vm->address_environment_length == 0u ||
+        vm->address_environment_length > REXX_VM_MAX_NAME_LENGTH)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    for (index = 0u; index < vm->address_environment_length; ++index) {
+        if (vm->address_environment[index] == '\0')
+            return REXX_VM_STATUS_INVALID_ARGUMENT;
+    }
+    *environment = vm->address_environment;
+    *environment_length = vm->address_environment_length;
+    return REXX_VM_STATUS_OK;
+}
+
+static size_t trace_format_unsigned(char *output, size_t capacity,
+                                    size_t value)
+{
+    char reverse[3u * sizeof(size_t)];
+    size_t count = 0u;
+    size_t index;
+    do {
+        if (count >= sizeof(reverse)) return 0u;
+        reverse[count++] = (char)('0' + value % 10u);
+        value /= 10u;
+    } while (value != 0u);
+    if (count > capacity) return 0u;
+    for (index = 0u; index < count; ++index)
+        output[index] = reverse[count - index - 1u];
+    return count;
+}
+
+static size_t trace_format_rc(char *output, size_t capacity, int32_t rc)
+{
+    uint32_t magnitude;
+    char reverse[3u * sizeof(uint32_t)];
+    size_t count = 0u;
+    size_t index;
+    size_t offset = 0u;
+    int negative = rc < 0;
+    magnitude = negative ? (uint32_t)(-(rc + 1)) + 1u : (uint32_t)rc;
+    do {
+        if (count >= sizeof(reverse)) return 0u;
+        reverse[count++] = (char)('0' + magnitude % 10u);
+        magnitude /= 10u;
+    } while (magnitude != 0u);
+    if (capacity < count + (negative ? 1u : 0u)) return 0u;
+    if (negative) output[offset++] = '-';
+    for (index = 0u; index < count; ++index)
+        output[offset++] = reverse[count - index - 1u];
+    return offset;
+}
+
+static RexxVMStatus trace_write_bytes(RexxVM *vm, const char *bytes,
+                                      size_t length)
+{
+    if (vm->output_writer != NULL)
+        return vm->output_writer(vm->output_writer_user_data, bytes, length)
+                   != 0
+               ? REXX_VM_STATUS_OK : REXX_VM_STATUS_IO_ERROR;
+#if !defined(GXOS_BARE_METAL)
+    return fwrite(bytes, 1u, length, stdout) == length
+               ? REXX_VM_STATUS_OK : REXX_VM_STATUS_IO_ERROR;
+#else
+    (void)bytes;
+    (void)length;
+    return REXX_VM_STATUS_IO_ERROR;
+#endif
+}
+
+static int trace_action_matches_return_code(char action, int32_t rc)
+{
+    if (action == 'E') return rc != 0;
+    if (action == 'F') return rc < 0;
+    if (action == 'N') return rc < 0;
+    return 0;
+}
+
+static RexxVMStatus trace_command_outcome(RexxVM *vm,
+                                         const char *command,
+                                         size_t command_length,
+                                         size_t source_line,
+                                         int32_t rc)
+{
+    static const char prefix[] = "TRACE ";
+    static const char line_label[] = ": line ";
+    static const char command_delimiter[] = ": ";
+    static const char rc_prefix[] = " RC(";
+    static const char line_end[] = ")\n";
+    char line_number[3u * sizeof(size_t)];
+    char rc_number[3u * sizeof(uint32_t) + 1u];
+    size_t line_number_length;
+    size_t rc_number_length;
+    RexxVMStatus status;
+
+    if (vm == NULL || (command == NULL && command_length != 0u) ||
+        vm->trace_enabled == 0u ||
+        (vm->trace_action != 'N' && vm->trace_action != 'E' &&
+         vm->trace_action != 'F') ||
+        !trace_action_matches_return_code(vm->trace_action, rc))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    line_number_length = trace_format_unsigned(
+        line_number, sizeof(line_number), source_line);
+    rc_number_length = trace_format_rc(rc_number, sizeof(rc_number), rc);
+    if (line_number_length == 0u || rc_number_length == 0u)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    status = trace_write_bytes(vm, prefix, sizeof(prefix) - 1u);
+    if (status == REXX_VM_STATUS_OK)
+        status = trace_write_bytes(vm, &vm->trace_action, 1u);
+    if (status == REXX_VM_STATUS_OK)
+        status = trace_write_bytes(vm, line_label,
+                                  sizeof(line_label) - 1u);
+    if (status == REXX_VM_STATUS_OK)
+        status = trace_write_bytes(vm, line_number, line_number_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = trace_write_bytes(vm, command_delimiter,
+                                  sizeof(command_delimiter) - 1u);
+    if (status == REXX_VM_STATUS_OK && command_length != 0u)
+        status = trace_write_bytes(vm, command, command_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = trace_write_bytes(vm, rc_prefix, sizeof(rc_prefix) - 1u);
+    if (status == REXX_VM_STATUS_OK)
+        status = trace_write_bytes(vm, rc_number, rc_number_length);
+    if (status == REXX_VM_STATUS_OK)
+        status = trace_write_bytes(vm, line_end, sizeof(line_end) - 1u);
+    return status;
 }
 
 static RexxVMStatus set_address_environment(RexxVM *vm,
@@ -3426,6 +3573,8 @@ static RexxVMStatus execute_call(RexxVM *vm,
         frame->clock_context = vm->clock_context;
         frame->address_environment = saved_address;
         frame->address_environment_length = vm->address_environment_length;
+        frame->trace_action = vm->trace_action;
+        frame->trace_enabled = vm->trace_enabled;
         frame->first_instruction = 1;
         frame->condition_call = vm->condition_call_pending;
         copy_saved_condition_context(frame, &condition_snapshot);
@@ -4298,6 +4447,8 @@ static int syntax_error_is_catchable(RexxVMStatus status)
     case REXX_VM_STATUS_UNKNOWN_ROUTINE:
     case REXX_VM_STATUS_MISSING_FUNCTION_RESULT:
     case REXX_VM_STATUS_CLOCK_UNAVAILABLE:
+    case REXX_VM_STATUS_INVALID_TRACE_REQUEST:
+    case REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY:
     case REXX_VM_STATUS_UNKNOWN_LABEL:
     case REXX_VM_STATUS_INVALID_LABEL:
     case REXX_VM_STATUS_INVALID_PROCEDURE:
@@ -4327,6 +4478,9 @@ static int32_t syntax_error_code(RexxVMStatus status, int32_t detail)
         return 24;
     case REXX_VM_STATUS_CLOCK_UNAVAILABLE:
         return 40;
+    case REXX_VM_STATUS_INVALID_TRACE_REQUEST:
+    case REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY:
+        return 24;
     default:
         return 40;
     }
@@ -4353,6 +4507,10 @@ static const char *syntax_error_description(RexxVMStatus status,
         return "Invalid PROCEDURE instruction";
     case REXX_VM_STATUS_CLOCK_UNAVAILABLE:
         return "Clock source unavailable or does not provide local civil time";
+    case REXX_VM_STATUS_INVALID_TRACE_REQUEST:
+        return "Invalid TRACE request";
+    case REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY:
+        return "TRACE request requires an unsupported runtime capability";
     default:
         return "Language processing error";
     }
@@ -4626,6 +4784,7 @@ static RexxVMStatus return_from_routine(RexxVM *vm, int has_value,
         RexxVMClockContext clock_context = frame->clock_context;
         char *saved_address = frame->address_environment;
         size_t saved_address_length = frame->address_environment_length;
+        char trace_action = frame->trace_action;
         RexxVMArgument *arguments = frame->arguments;
         size_t argument_count = frame->argument_count;
         RexxVMStatus status = REXX_VM_STATUS_OK;
@@ -4649,6 +4808,8 @@ static RexxVMStatus return_from_routine(RexxVM *vm, int has_value,
         vm_free(vm->address_environment);
         vm->address_environment = saved_address;
         vm->address_environment_length = saved_address_length;
+        vm->trace_action = trace_action;
+        vm->trace_enabled = frame->trace_enabled;
         vm->active_chunk = return_chunk;
         vm->pc = return_pc;
         free_arguments(arguments, argument_count);
@@ -4686,6 +4847,8 @@ static void unwind_routines(RexxVM *vm)
         vm_free(vm->address_environment);
         vm->address_environment = frame->address_environment;
         vm->address_environment_length = frame->address_environment_length;
+        vm->trace_action = frame->trace_action;
+        vm->trace_enabled = frame->trace_enabled;
         frame->address_environment = NULL;
         free_arguments(frame->arguments, frame->argument_count);
         frame->arguments = NULL;
@@ -4997,6 +5160,12 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                 status = dispatch_command(vm, environment,
                                           environment_length,
                                           command, command_length);
+                if (status == REXX_VM_STATUS_OK &&
+                    vm->trace_enabled != 0u &&
+                    trace_action_matches_return_code(vm->trace_action, vm->rc))
+                    status = trace_command_outcome(
+                        vm, command, command_length, vm->current_source_line,
+                        vm->rc);
                 if (status == REXX_VM_STATUS_OK)
                     status = raise_command_condition(
                         vm, chunk, command, command_length,
@@ -5256,6 +5425,13 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
                     status = dispatch_command(vm, environment,
                                               environment_length,
                                               command, command_length);
+                    if (status == REXX_VM_STATUS_OK &&
+                        vm->trace_enabled != 0u &&
+                        trace_action_matches_return_code(vm->trace_action,
+                                                          vm->rc))
+                        status = trace_command_outcome(
+                            vm, command, command_length,
+                            vm->current_source_line, vm->rc);
                     if (status == REXX_VM_STATUS_OK)
                         status = raise_command_condition(
                             vm, chunk, command, command_length,
@@ -5355,7 +5531,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_CLOCK_UNAVAILABLE)
+        status > REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY)
         return "unknown VM status";
     return vm_messages[status];
 }
