@@ -33,6 +33,7 @@ struct EnvironmentLimits {
 struct Binding {
     std::string name;
     Value value;
+    bool immutable = false;
 };
 
 // Names are owned by the environment; lookup and assignment only borrow the
@@ -50,8 +51,10 @@ public:
     EnvironmentId parent() const { return parent_; }
     void setParent(EnvironmentId parent) { parent_ = parent; }
 
-    bool declare(SourceView name, Value value, EnvironmentError& error);
+    bool declare(SourceView name, Value value, EnvironmentError& error,
+        bool immutable = false);
     bool assign(SourceView name, Value value);
+    bool isImmutable(SourceView name) const;
     const Value* lookup(SourceView name) const;
 
     std::size_t bindingCount() const { return bindings_.size(); }

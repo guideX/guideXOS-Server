@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS83</title></head>
+<body>
+<h1>Navigator JavaScript JS83</h1>
+<pre id="result">JS83:pending</pre>
+<section>
+  <i id="r0" class="row"></i><i id="r1" class="row"></i>
+  <i id="r2" class="row"></i>
+</section>
+<section>
+  <i id="g0" class="grow"></i><i id="g1" class="grow"></i>
+  <i id="g2" class="candidate"></i>
+  <i id="s0" class="shrink"></i><i id="s1" class="shrink"></i>
+  <i id="s2" class="shrink"></i>
+</section>
+<button id="event-a" type="button">Run JS83 iteration</button>
+<button id="event-b" type="button">Nested JS83 event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var rows = document.querySelectorAll('.row');
+var outer = 'outer';
+var visited = 0;
+for (const row of document.querySelectorAll('.row')) {
+  verify(row === rows[visited]);
+  row.setAttribute('data-visited', 'yes');
+  visited++;
+}
+verify(visited === 3 && outer === 'outer');
+var continued = 0;
+for (let row of rows) {
+  continued++;
+  if (continued === 2) continue;
+}
+verify(continued === 3);
+var broken = 0;
+for (const row of rows) {
+  broken++;
+  break;
+}
+verify(broken === 1);
+var nested = 0;
+for (const left of rows) {
+  for (const right of rows) nested++;
+}
+verify(nested === 9);
+
+var cursor = rows.values();
+var first = cursor.next();
+var rest = 0;
+for (const row of cursor) rest++;
+var keys = 0;
+for (const index of rows.keys()) keys++;
+var entries = 0;
+for (const pair of rows.entries()) {
+  if (pair[0] === entries && pair[1] === rows[entries]) entries++;
+}
+var emptyCount = 0;
+for (const row of document.querySelectorAll('.absent')) emptyCount++;
+verify(first.value === rows[0] && rest === 2 && keys === 3 &&
+  entries === 3 && emptyCount === 0);
+
+var grow = document.querySelectorAll('.grow');
+var bounded = 0;
+for (const row of grow) {
+  bounded++;
+  if (bounded === 1)
+    document.querySelectorAll('#g2').item(0).setAttribute('class', 'grow');
+}
+var grown = 0;
+for (const row of grow) grown++;
+verify(bounded === 2 && grown === 3);
+
+var eventA = document.getElementById('event-a');
+var eventB = document.getElementById('event-b');
+var nestedEvents = 0;
+var eventOk = false;
+eventB.addEventListener('click', function(event) {
+  for (const row of rows) nestedEvents++;
+  eventOk = event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2;
+});
+eventA.addEventListener('click', function(event) {
+  var seen = 0;
+  for (const row of rows) {
+    seen++;
+    if (seen === 1) eventB.click();
+  }
+  verify(seen === 3 && event.target === eventA &&
+    event.currentTarget === eventA && event.eventPhase === 2);
+  document.getElementById('result').textContent =
+    'JS83:event:outer=' + seen + ':nested=' + nestedEvents +
+    ':metadata=' + eventOk;
+});
+
+var marker = 'JS83:assertions=' + assertions + ':failures=' + failures +
+  ':loops=' + (visited === 3 && continued === 3 && broken === 1 &&
+    nested === 9) + ':mutation=' + (bounded === 2 && grown === 3) +
+  ':modes=' + (rest === 2 && keys === 3 && entries === 3);
+document.getElementById('result').textContent = marker;
+</script>
+</body>
+</html>

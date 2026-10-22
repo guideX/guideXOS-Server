@@ -165,6 +165,7 @@ const char* astNodeKindName(AstNodeKind kind)
     case AstNodeKind::IfStatement: return "IfStatement";
     case AstNodeKind::WhileStatement: return "WhileStatement";
     case AstNodeKind::ForStatement: return "ForStatement";
+    case AstNodeKind::ForOfStatement: return "ForOfStatement";
     case AstNodeKind::BreakStatement: return "BreakStatement";
     case AstNodeKind::ContinueStatement: return "ContinueStatement";
     case AstNodeKind::FunctionDeclaration: return "FunctionDeclaration";

@@ -25,6 +25,7 @@ enum class AstNodeKind : std::uint8_t {
     IfStatement,
     WhileStatement,
     ForStatement,
+    ForOfStatement,
     BreakStatement,
     ContinueStatement,
     FunctionDeclaration,
@@ -126,6 +127,7 @@ struct AstNode {
     AstUpdateOperator updateOperator = AstUpdateOperator::Increment;
     bool computed = false;
     bool prefix = false;
+    bool immutableBinding = false;
 };
 
 class Ast {

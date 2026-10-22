@@ -32,7 +32,8 @@ std::size_t Environment::find(SourceView name) const
     return kNotFound;
 }
 
-bool Environment::declare(SourceView name, Value value, EnvironmentError& error)
+bool Environment::declare(SourceView name, Value value, EnvironmentError& error,
+    bool immutable)
 {
     error = EnvironmentError();
     if (name.data == nullptr && name.length != 0) {
@@ -59,6 +60,7 @@ bool Environment::declare(SourceView name, Value value, EnvironmentError& error)
         Binding binding;
         binding.name.assign(name.data == nullptr ? "" : name.data, name.length);
         binding.value = value;
+        binding.immutable = immutable;
         bindings_.push_back(binding);
     } catch (const std::bad_alloc&) {
         error.code = EnvironmentErrorCode::AllocationFailure;
@@ -70,9 +72,15 @@ bool Environment::declare(SourceView name, Value value, EnvironmentError& error)
 bool Environment::assign(SourceView name, Value value)
 {
     const std::size_t index = find(name);
-    if (index == kNotFound) return false;
+    if (index == kNotFound || bindings_[index].immutable) return false;
     bindings_[index].value = value;
     return true;
+}
+
+bool Environment::isImmutable(SourceView name) const
+{
+    const std::size_t index = find(name);
+    return index != kNotFound && bindings_[index].immutable;
 }
 
 const Value* Environment::lookup(SourceView name) const

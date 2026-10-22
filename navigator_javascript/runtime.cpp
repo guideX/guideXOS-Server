@@ -434,7 +434,7 @@ private:
     }
 
     bool declareIn(EnvironmentId environment, SourceView name, Value value,
-        SourceLocation location)
+        SourceLocation location, bool immutable = false)
     {
         Environment* target = context_.environmentAt(environment);
         if (target == nullptr) {
@@ -442,7 +442,7 @@ private:
             return false;
         }
         EnvironmentError error;
-        if (target->declare(name, value, error)) return true;
+        if (target->declare(name, value, error, immutable)) return true;
         switch (error.code) {
         case EnvironmentErrorCode::BindingLimitExceeded:
             fail(RuntimeErrorCode::BindingLimitExceeded, location);
@@ -493,6 +493,10 @@ private:
                 return false;
             }
             if (current->lookup(name) != nullptr) {
+                if (current->isImmutable(name)) {
+                    fail(RuntimeErrorCode::TypeError, location);
+                    return false;
+                }
                 if (!current->assign(name, value)) {
                     fail(RuntimeErrorCode::InvalidAstState, location);
                     return false;
@@ -543,6 +547,7 @@ private:
             return validNode(node.body, node.location) &&
                 validateFunctionPolicy(node.body, false);
         case AstNodeKind::ForStatement:
+        case AstNodeKind::ForOfStatement:
             return validNode(node.body, node.location) &&
                 validateFunctionPolicy(node.body, false);
         default:
@@ -595,6 +600,8 @@ private:
         case AstNodeKind::ForStatement:
             if (node.init != kInvalidAstNodeId &&
                 !hoistVariables(node.init, environment)) return false;
+            return hoistVariables(node.body, environment);
+        case AstNodeKind::ForOfStatement:
             return hoistVariables(node.body, environment);
         default:
             return true;
@@ -852,6 +859,51 @@ private:
         }
         fail(error, reference.location);
         return false;
+    }
+
+    bool readValueProperty(const Value& base,
+        const RuntimeContext::PropertyKey& key, Value& value,
+        SourceLocation location)
+    {
+        MemberReference reference;
+        reference.receiver = base;
+        reference.key = key;
+        reference.location = location;
+        if (base.isObject()) {
+            if (context_.objectAt(base.objectId()) == nullptr) {
+                fail(RuntimeErrorCode::CannotReadProperty, location);
+                return false;
+            }
+            reference.object = base.objectId();
+        } else if (base.isHostObject()) {
+            reference.hostObject = base.hostObjectId();
+            reference.hostObjectValue = true;
+        } else if (base.isString()) {
+            reference.stringPrimitive = true;
+        } else if (base.isSymbolNamespace()) {
+            reference.symbolNamespaceValue = true;
+        } else if (base.isNull() || base.isUndefined()) {
+            fail(RuntimeErrorCode::CannotReadProperty, location);
+            return false;
+        } else {
+            if (!context_.consumeStep(location)) return false;
+            value = Value::undefined();
+            return true;
+        }
+        return readMember(reference, value);
+    }
+
+    bool readValueProperty(const Value& base, const char* key,
+        Value& value, SourceLocation location)
+    {
+        RuntimeContext::PropertyKey propertyKey;
+        try {
+            propertyKey.string = key == nullptr ? "" : key;
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, location);
+            return false;
+        }
+        return readValueProperty(base, propertyKey, value, location);
     }
 
     bool writeMember(const MemberReference& reference, Value value)
@@ -1862,6 +1914,135 @@ private:
         return true;
     }
 
+    bool closeIterator(const Value& iterator, SourceLocation location)
+    {
+        Value returnMethod;
+        if (!readValueProperty(iterator, "return", returnMethod, location))
+            return false;
+        if (returnMethod.isUndefined() || returnMethod.isNull()) return true;
+        if (!returnMethod.isFunction()) {
+            fail(RuntimeErrorCode::NotCallable, location);
+            return false;
+        }
+
+        const std::vector<Value> noArguments;
+        Value closeResult;
+        if (!invokeFunction(returnMethod.functionId(), noArguments, location,
+                closeResult, iterator)) return false;
+        if (!closeResult.isObject() && !closeResult.isHostObject()) {
+            fail(RuntimeErrorCode::NotObject, location);
+            return false;
+        }
+        return true;
+    }
+
+    bool closeIteratorPreservingError(const Value& iterator,
+        SourceLocation location)
+    {
+        const RuntimeError originalError = context_.result_.runtimeError;
+        const ScriptStatus originalStatus = context_.result_.status;
+        (void)closeIterator(iterator, location);
+        if (originalError.code != RuntimeErrorCode::None) {
+            context_.result_.runtimeError = originalError;
+            context_.result_.status = originalStatus;
+        }
+        return false;
+    }
+
+    bool executeForOf(const AstNode& node, bool inFunction,
+        Control& control)
+    {
+        if (!validNode(node.name, node.location) ||
+            !validNode(node.expression, node.location) ||
+            !validNode(node.body, node.location)) return false;
+        if (context_.ast_.node(node.name).kind != AstNodeKind::Identifier) {
+            fail(RuntimeErrorCode::InvalidAstState, node.location);
+            return false;
+        }
+
+        Value iterable;
+        if (!evalExpression(node.expression, iterable)) return false;
+        RuntimeContext::PropertyKey iteratorKey;
+        iteratorKey.symbol = WellKnownSymbol::Iterator;
+        Value iteratorMethod;
+        if (!readValueProperty(iterable, iteratorKey, iteratorMethod,
+                node.location)) return false;
+        if (!iteratorMethod.isFunction()) {
+            fail(RuntimeErrorCode::NotCallable, node.location);
+            return false;
+        }
+
+        const std::vector<Value> noArguments;
+        Value iterator;
+        if (!invokeFunction(iteratorMethod.functionId(), noArguments,
+                node.location, iterator, iterable)) return false;
+        if (!iterator.isObject() && !iterator.isHostObject()) {
+            fail(RuntimeErrorCode::NotObject, node.location);
+            return false;
+        }
+
+        Value nextMethod;
+        if (!readValueProperty(iterator, "next", nextMethod, node.location))
+            return false;
+        if (!nextMethod.isFunction()) {
+            fail(RuntimeErrorCode::NotCallable, node.location);
+            return false;
+        }
+
+        SourceView bindingName;
+        if (!identifierName(node.name, bindingName)) return false;
+        const EnvironmentId loopEnvironment = currentEnvironment_;
+        while (true) {
+            Value iteratorResult;
+            if (!invokeFunction(nextMethod.functionId(), noArguments,
+                    node.location, iteratorResult, iterator)) return false;
+            if (!iteratorResult.isObject() &&
+                !iteratorResult.isHostObject()) {
+                fail(RuntimeErrorCode::NotObject, node.location);
+                return false;
+            }
+
+            Value done;
+            if (!readValueProperty(iteratorResult, "done", done,
+                    node.location)) return false;
+            if (truthy(done)) return true;
+
+            Value yielded;
+            if (!readValueProperty(iteratorResult, "value", yielded,
+                    node.location)) return false;
+
+            EnvironmentId iterationEnvironment = kInvalidEnvironmentId;
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            if (!context_.createEnvironment(loopEnvironment,
+                    iterationEnvironment, error)) {
+                fail(error, node.location);
+                return closeIteratorPreservingError(iterator, node.location);
+            }
+            currentEnvironment_ = iterationEnvironment;
+            if (!declareIn(iterationEnvironment, bindingName, yielded,
+                    context_.ast_.node(node.name).location,
+                    node.immutableBinding)) {
+                currentEnvironment_ = loopEnvironment;
+                return closeIteratorPreservingError(iterator, node.location);
+            }
+
+            Control bodyControl;
+            const bool bodySucceeded = executeStatement(node.body, true,
+                inFunction, bodyControl);
+            currentEnvironment_ = loopEnvironment;
+            if (!bodySucceeded)
+                return closeIteratorPreservingError(iterator, node.location);
+            if (bodyControl.kind == ControlKind::Break)
+                return closeIterator(iterator, node.location);
+            if (bodyControl.kind == ControlKind::Return) {
+                if (!closeIterator(iterator, node.location)) return false;
+                control = bodyControl;
+                return true;
+            }
+            // Continue and normal completion both advance this same iterator.
+        }
+    }
+
     bool executeStatement(AstNodeId id, bool inLoop, bool inFunction,
         Control& control)
     {
@@ -1983,6 +2164,8 @@ private:
                 if (bodyControl.kind == ControlKind::Continue) continue;
             }
         }
+        case AstNodeKind::ForOfStatement:
+            return executeForOf(node, inFunction, control);
         case AstNodeKind::BreakStatement:
             if (!inLoop) {
                 fail(RuntimeErrorCode::IllegalBreak, node.location);

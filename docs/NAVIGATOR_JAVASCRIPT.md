@@ -10535,11 +10535,12 @@ limit. At failure the cursor remained at index 1,020, with 2,053/4,096
 properties and all 1,024 objects in use. This is a fixture-specific maximum
 under its initial runtime occupancy, not a general traversal guarantee.
 Results remain live until runtime reset. No garbage collection, reference
-counting, or result recycling was introduced. Future reclamation requires
+counting, or result recycling was introduced. JS83 now uses this same
+observable result-allocation path for `for...of`; it does not reclaim results
+that the body does not retain. The safe iteration limit is therefore bounded
+by the runtime's current object occupancy. Future reclamation requires
 complete ownership/reachability tracking across bindings, object properties,
-Array slots, active callback/Event frames, and host references. Future
-`for...of` would still inherit bounded result-object consumption until such a
-lifetime design is qualified.
+Array slots, active callback/Event frames, and host references.
 
 Iterator-result construction now reserves the complete `{ value, done }`
 property shape before converting a yielded host value. If object, property,
@@ -10635,14 +10636,181 @@ again contains **1,367 files / 90,843,932 bytes**: **0 changed, 0 missing,
 and 0 extra**. Hosted and matrix logs remain outside the repository.
 
 `git diff --check` passed after qualification. No freestanding kernel runtime
-code changed, and kernel/QEMU execution was not run. JS83 should first define
-how interpreter-driven iteration safely scopes or avoids materializing each
-ordinary `{ value, done }` object under the current fixed object pool. It
-should retain the current lifetime accounting and allocation-failure
-behavior; `for...of` remains deferred until that bounded execution design is
-qualified.
+code changed, and kernel/QEMU execution was not run. JS83 implements bounded
+`for...of` by invoking the existing `Symbol.iterator` and `next()` operations.
+It retains the current result lifetime and allocation-failure behavior. The
+loop does not claim to complete a collection once iterator-result allocation
+reaches the fixed object-pool limit.
 
 **Outcome A — JS82 bounded default iterator foundation qualified.** This phase
 adds a minimal well-known Symbol identity and the bounded iterable-protocol
 entry points only. It does not add `for...of`, general Symbol compatibility,
 or garbage collection.
+
+### JS83 bounded `for...of` execution
+
+JS83 adds a first bounded `for...of` statement on top of the JS82 iterator
+protocol. It accepts one simple identifier declared with `const` or `let`:
+
+```javascript
+for (const element of supportedExpression) {
+    // any statement supported by the current parser
+}
+
+for (let element of supportedExpression) {
+    // the binding is mutable for this iteration
+}
+```
+
+The right-hand side is an ordinary supported expression, including a
+variable, member expression, or call. The parser recognizes contextual
+spellings for `const`, `let`, and `of`; the lexer does not reserve identifiers
+that were previously ordinary names. This subset does not include `var`
+iteration declarations, destructuring, labels, `for...in`, or assignment
+targets other than a single declared name.
+
+#### Iterator acquisition and advancement
+
+The evaluator evaluates the iterable expression once, resolves the typed
+`WellKnownSymbol::Iterator` key through its normal property-read path, and
+invokes that property as a callable with the iterable as its receiver. It
+validates the returned iterator object, reads `next` once through normal
+property lookup, and invokes it for each step with the iterator as receiver.
+This uses the established method-dispatch path for both custom JavaScript
+iterators and Navigator host iterators; the evaluator does not inspect the
+collection registry or synthesize Element values.
+
+Each `next()` result must be an ordinary object or host object. The evaluator
+reads `done`, applies JavaScript truthiness, and reads `value` only when
+`done` is false. Undefined, null, and other falsy yielded values are not
+completion. Invalid iterables, methods, iterator objects, and result objects
+fail through runtime errors. Allocation failure stays an error and never
+becomes `done = true` or silent truncation.
+
+#### Bindings and loop completion
+
+Each yielded value receives a fresh bounded environment parented by the
+environment surrounding the loop. `const` creates an immutable binding;
+assignment to it fails with `TypeError`. `let` creates a mutable binding.
+The loop binding does not overwrite an outer variable with the same name, and
+the surrounding environment is restored after normal completion, `break`,
+`continue`, return, or runtime failure. Environments remain retained until
+runtime reset, preserving escaped closure references.
+
+Normal exhaustion requests the terminal `{ value, done }` result. An empty
+collection executes zero bodies and still allocates that result. `continue`
+advances the same iterator and does not close it. `break` and return from a
+containing function call the iterator's `return` method when present. A body
+or loop-binding failure attempts to close and preserves the original runtime
+error if close also fails. A missing or null `return` is ignored; a
+non-callable method or primitive return result fails. Normal exhaustion does
+not close. Navigator has no general catchable exceptions, so this is a
+bounded control-completion subset rather than full ECMAScript completion
+semantics.
+
+Nested loops use independent cursors and per-iteration environments. Tests
+cover same-name nested bindings, inner `break`, outer-loop continuity,
+`continue`, function return, and nested `forEach()` callback execution. A
+nested Event dispatched from an outer loop preserves Event target,
+current-target, phase, and outer cursor position. JS9 `getElementById()`
+reentry policy is unchanged.
+
+#### DOM mutation and selector behavior
+
+Navigator collections preserve JS79–JS82 behavior: iterators capture their
+length at creation, then resolve each logical index against the live
+collection and original query scope. Growth does not extend an existing
+bound; a new iterator can observe growth. Shrinking or shifted membership
+affects later lookups. Native `for...of` checks cover scoped queries,
+tag/class adapters, and JS71 filtered positional selectors. No Element
+snapshot or persistent selector-result cache was added. JS83 also starts a
+loop over an old explicit cursor after document generation changes and its
+structural serial is reused; the loop fails with `StaleHostObject` before
+executing its body.
+
+#### Object ownership and measured capacity
+
+The loop invokes the existing public iterator operations, so every successful
+VALUES or KEYS step allocates one retained `{ value, done }` object and two
+properties. The terminal step allocates another. ENTRIES also allocates a
+two-slot pair Array. Results remain allocated until reset even when the body
+drops them. JS83 introduces no reclamation, object reuse, pool enlargement,
+second iterator registry, or collection snapshot.
+
+Configured capacities remain 1,024 runtime objects, 4,096 runtime
+properties, 4,096 Array slots, 2,048 environments, 2,048 host-object handles,
+and 128 shared iterator records of 24 bytes each (3,072 bytes total). Native
+fresh-runtime tests cover 0, 1, 16, 64, 128, 256, 512, 1,019, 1,020, and
+1,024 Elements. All sizes through 1,019 complete normally, establishing 1,019
+as the largest successfully tested traversal in a fresh runtime. With 1,020
+Elements, all 1,020 bodies execute, but allocation of the terminal result
+fails with `ObjectLimitExceeded`, so the loop does not complete normally. With
+1,024 Elements, the same limit is reached after 1,020 bodies and before the
+next value can be yielded. In both exhaustion cases, 1,020 result objects,
+2,040 properties, and 1,020 iteration environments have been added; runtime
+object usage is 1,024/1,024, host-object usage is 1,023/2,048, and one shared
+iterator record remains active at index 1,020. The failed next step does not
+advance the cursor or masquerade as exhaustion. Result objects and
+per-iteration environments remain retained until reset; the maximum safe
+traversal depends on the runtime's initial object occupancy.
+
+One local `-O2` single-run 128-Element comparison measured `for...of` at
+0.551 ms (129 result objects, 128 environments, 264 host operations), JS76
+`forEach()` at 0.493 ms (0 result objects, 128 environments, 261 host
+operations), and JS79 `values().next()` at 0.542 ms (129 result objects, no
+loop environments, 392 host operations). These are machine-specific single
+samples, not medians or constant-time claims. A three-Element ENTRIES loop
+added seven objects (three pair Arrays and four outer result objects), six
+Array slots, eight result properties, and three per-iteration environments.
+`-O2 -fstack-usage` reported 944 B for evaluator `executeForOf`, 400 B for
+`closeIterator`, 320 B for typed dynamic property reads, 80 B for the host
+iterator `next` adapter, and 576 B for runtime host-method invocation.
+Hosted compiler frames do not establish bare-metal stack safety. JS83 adds
+no selector-rank scratch or persistent filtered-rank state.
+
+The strict native lane runs the hosted JS83 fixture, including its click
+handler, as well as the native protocol, generation-reuse, and capacity cases.
+It passed **67/67 checks** with strict `-Wall -Wextra -Werror -pedantic`
+compilation. The final full JavaScript matrix, production build, hosted
+aggregate, and exact artifact restoration are recorded in the JS83
+qualification closeout below. Existing accepted CSS baseline failures remain
+CSS 3C, CSS 3G, CSS 6A, CSS 6B (three checks), and CSS 6C.
+JS84 should focus on a safe runtime-object ownership/reclamation design or a
+separately qualified result-storage model. Arbitrary-length traversal,
+generators, labels, destructuring, and unrestricted ECMAScript conformance
+remain deferred.
+
+#### JS83 qualification closeout
+
+The final JavaScript matrix passed **85/85 lanes** and reported
+**15,041/15,041 assertions across 44 assertion-bearing lanes**, including the
+final JS83 implementation. The dedicated JS83 native lane passed **67/67**
+with strict `-Wall -Wextra -Werror -pedantic` compilation and `-O2`
+stack-usage compilation.
+
+The production `build.bat` build succeeded. The fresh hosted executable was
+`guideXOSServer.exe` (8,635,292 bytes, SHA-256
+`FF58ABEE4180E0FEEDFE8EB1869CC04BFD13A1E809AB05A704539B636FD5BE95`); the
+hosted process reported PID 18528 and the same executable path and hash. The
+hosted aggregate's serialized rerun passed **685 checks**, including all
+three JS83 checks: the fixture reported `assertions=9:failures=0`, the
+bounded-loop behavior check passed, and the nested Event check preserved
+cursor progress and metadata. The aggregate reported only the seven accepted
+CSS baseline failures: CSS 3C, CSS 3G, CSS 6A, CSS 6B (three checks), and CSS
+6C. The hosted smoke wrapper reports exit code 1 when those checks remain
+marked `CHECK FAIL`; there were no JavaScript or JS83 hosted failures. An
+initial hosted attempt overlapped matrix compilation and also hit three
+window-startup checks; the serialized rerun cleared those checks and matched
+the seven-failure baseline.
+
+After hosted execution, the original ignored executable was restored and
+verified at 8,398,274 bytes with SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. The
+42 generated smoke fixtures (458,372 bytes) matched their baseline exactly.
+The full ignored-file manifest matched exactly: **1,367 files / 90,843,932
+bytes**, with **0 changed, 0 missing, and 0 extra files**. The final manifest,
+build log, matrix log, native evidence, and hosted logs are stored outside the
+repository under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js83-evidence-c93678fc945241a3bb68580f550e39d8`.
+`.phase` remains absent. Kernel/QEMU execution was not run; hosted stack
+measurements do not establish bare-metal stack safety.

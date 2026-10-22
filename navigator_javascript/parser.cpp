@@ -174,6 +174,19 @@ private:
 
     bool at(TokenType type) const { return current().type == type; }
 
+    bool identifierSpells(const Token& token, const char* spelling) const
+    {
+        if (token.type != TokenType::Identifier || spelling == nullptr)
+            return false;
+        std::size_t length = 0u;
+        while (spelling[length] != '\0') ++length;
+        if (token.lexeme.length != length || token.lexeme.data == nullptr)
+            return false;
+        for (std::size_t index = 0u; index < length; ++index)
+            if (token.lexeme.data[index] != spelling[index]) return false;
+        return true;
+    }
+
     const Token& advance()
     {
         const Token& token = current();
@@ -536,6 +549,43 @@ private:
     {
         const Token keyword = advance();
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
+
+        const bool constBinding = identifierSpells(current(), "const");
+        const bool letBinding = identifierSpells(current(), "let");
+        if (constBinding || letBinding) {
+            advance();
+            Token nameToken;
+            if (!expectIdentifier(nameToken)) return kInvalidAstNodeId;
+            const AstNodeId name = makeLeaf(AstNodeKind::Identifier,
+                nameToken);
+            if (name == kInvalidAstNodeId) return kInvalidAstNodeId;
+            if (!identifierSpells(current(), "of")) {
+                if (at(TokenType::EndOfInput)) {
+                    fail(ParserErrorCode::UnexpectedEndOfInput,
+                        current().location, TokenType::Identifier, true);
+                } else {
+                    fail(ParserErrorCode::UnexpectedToken,
+                        current().location, TokenType::Identifier, true);
+                }
+                return kInvalidAstNodeId;
+            }
+            advance();
+            const AstNodeId iterable = parseExpression();
+            if (iterable == kInvalidAstNodeId ||
+                !expect(TokenType::RightParen)) return kInvalidAstNodeId;
+            const AstNodeId body = parseStatement();
+            if (body == kInvalidAstNodeId) return kInvalidAstNodeId;
+
+            const AstNodeId statement = makeNode(AstNodeKind::ForOfStatement,
+                spanLocation(keyword.location, ast_.node(body).location));
+            if (statement != kInvalidAstNodeId) {
+                ast_.node(statement).name = name;
+                ast_.node(statement).expression = iterable;
+                ast_.node(statement).body = body;
+                ast_.node(statement).immutableBinding = constBinding;
+            }
+            return statement;
+        }
 
         AstNodeId init = kInvalidAstNodeId;
         if (!at(TokenType::Semicolon)) {
