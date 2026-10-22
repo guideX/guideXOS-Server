@@ -1463,6 +1463,151 @@ static RexxVMStatus rexx_builtin_space(const RexxValue *arguments,
     return REXX_VM_STATUS_OK;
 }
 
+/* IBM TSO/E and VM JUSTIFY is SPACE normalization followed by right
+ * truncation and even left-to-right distribution of the added pad bytes
+ * across the surviving word gaps. Keep the virtual normalized string in the
+ * input view: this avoids both a temporary normalized allocation and a
+ * second word tokenizer. */
+static RexxVMStatus rexx_builtin_justify(const RexxValue *arguments,
+                                         size_t argument_count,
+                                         RexxValue *result)
+{
+    RexxBuiltinStringView string;
+    RexxBuiltinStringView pad;
+    RexxBuiltinWord word;
+    size_t requested_length;
+    size_t source_cursor = 0u;
+    size_t word_count = 0u;
+    size_t content_length = 0u;
+    size_t normalized_length;
+    size_t prefix_length;
+    size_t truncated_length;
+    size_t truncated_word_count = 0u;
+    size_t truncated_content_length = 0u;
+    size_t gap_count;
+    size_t extra_padding = 0u;
+    size_t base_extra = 0u;
+    size_t extra_remainder = 0u;
+    size_t output_length;
+    size_t output_position = 0u;
+    size_t virtual_position = 0u;
+    size_t emitted_words = 0u;
+    unsigned char pad_byte = (unsigned char)' ';
+    char *output = NULL;
+    RexxVMStatus status;
+
+    status = rexx_builtin_string_view(&arguments[0], &string);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (string.length > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    status = rexx_builtin_size(&arguments[1], &requested_length);
+    if (status != REXX_VM_STATUS_OK) return status;
+    if (requested_length > REXX_BUILTIN_MAX_RESULT_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (argument_count >= 3u && arguments[2].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_string_view(&arguments[2], &pad);
+        if (status != REXX_VM_STATUS_OK) return status;
+        if (pad.length != 1u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        pad_byte = (unsigned char)pad.bytes[0];
+    }
+
+    /* Compute the SPACE-normalized length with checked bounded arithmetic. */
+    while (rexx_builtin_next_word(&string, &source_cursor, &word)) {
+        if (word.length > REXX_BUILTIN_MAX_RESULT_LENGTH - content_length)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        content_length += word.length;
+        if (word_count == SIZE_MAX) return REXX_VM_STATUS_RESOURCE_LIMIT;
+        ++word_count;
+    }
+    gap_count = word_count == 0u ? 0u : word_count - 1u;
+    if (gap_count > REXX_BUILTIN_MAX_RESULT_LENGTH - content_length)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    normalized_length = content_length + gap_count;
+
+    /* A prefix ending on the normalized separator drops that last blank. */
+    prefix_length = normalized_length < requested_length
+                        ? normalized_length : requested_length;
+    truncated_length = prefix_length;
+    source_cursor = 0u;
+    virtual_position = 0u;
+    while (rexx_builtin_next_word(&string, &source_cursor, &word)) {
+        size_t word_start = virtual_position;
+        size_t available;
+        size_t included;
+        if (truncated_word_count != 0u) {
+            if (word_start < prefix_length &&
+                prefix_length - word_start == 1u) {
+                /* The prefix includes only the blank before this word. */
+                if (truncated_length != 0u) --truncated_length;
+                break;
+            }
+            if (word_start >= prefix_length) break;
+            ++word_start; /* the one blank introduced by SPACE */
+        }
+        if (word_start >= prefix_length) break;
+        available = prefix_length - word_start;
+        included = word.length < available ? word.length : available;
+        if (included > REXX_BUILTIN_MAX_RESULT_LENGTH -
+                           truncated_content_length)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        truncated_content_length += included;
+        if (truncated_word_count == SIZE_MAX)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+        ++truncated_word_count;
+        virtual_position = word_start + word.length;
+        if (included < word.length) break;
+    }
+
+    if (truncated_word_count > 1u) {
+        gap_count = truncated_word_count - 1u;
+        if (requested_length < truncated_length)
+            return REXX_VM_STATUS_INVALID_ARGUMENT;
+        extra_padding = requested_length - truncated_length;
+        base_extra = extra_padding / gap_count;
+        extra_remainder = extra_padding % gap_count;
+        output_length = requested_length;
+    } else {
+        /* IBM's rule adds pad characters between words; it does not extend
+         * empty or single-word text to the requested width. */
+        gap_count = 0u;
+        output_length = truncated_length;
+    }
+    status = rexx_builtin_allocate_result(result, output_length, &output);
+    if (status != REXX_VM_STATUS_OK) return status;
+
+    source_cursor = 0u;
+    virtual_position = 0u;
+    while (rexx_builtin_next_word(&string, &source_cursor, &word)) {
+        size_t word_start = virtual_position;
+        size_t available;
+        size_t included;
+        if (emitted_words != 0u) {
+            if (word_start == prefix_length) break;
+            if (word_start > prefix_length) break;
+            ++word_start;
+        }
+        if (word_start >= prefix_length) break;
+        available = prefix_length - word_start;
+        included = word.length < available ? word.length : available;
+        if (emitted_words != 0u) {
+            size_t gap_index = emitted_words - 1u;
+            size_t separator_width = 1u + base_extra +
+                (gap_index < extra_remainder ? 1u : 0u);
+            memset(output + output_position, pad_byte, separator_width);
+            output_position += separator_width;
+        }
+        if (included != 0u) {
+            memcpy(output + output_position, string.bytes + word.start,
+                   included);
+            output_position += included;
+        }
+        ++emitted_words;
+        virtual_position = word_start + word.length;
+        if (included < word.length) break;
+    }
+    return REXX_VM_STATUS_OK;
+}
+
 static RexxVMStatus rexx_builtin_compare(const RexxValue *arguments,
                                          size_t argument_count,
                                          RexxValue *result)
@@ -4156,6 +4301,7 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "TRANSLATE", 1u, 4u, rexx_builtin_translate, NULL },
     { "WORDPOS", 2u, 3u, rexx_builtin_wordpos, NULL },
     { "SPACE", 1u, 3u, rexx_builtin_space, NULL },
+    { "JUSTIFY", 2u, 3u, rexx_builtin_justify, NULL },
     { "COPIES", 2u, 2u, rexx_builtin_copies, NULL },
     { "COMPARE", 2u, 3u, rexx_builtin_compare, NULL },
     { "VERIFY", 2u, 4u, rexx_builtin_verify, NULL },

@@ -1,0 +1,155 @@
+{
+  "schema": "guidexos.rexx.rx27.scorecard.v1",
+  "phase": "RX27",
+  "outcome": "PARTIAL",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "25ac71063951a3a17d3d031446b326e556d51e58",
+  "ending_head": "Reported in the final RX27 response; omitted here to avoid a self-referential commit hash.",
+  "local_commit": "Reported in the final RX27 response.",
+  "implementation": {
+    "status": "PASS",
+    "signature": "JUSTIFY(string,length[,pad])",
+    "compatibility_classification": "IBM TSO/E and VM non-SAA built-in.",
+    "approach": "Reuses rexx_builtin_next_word, the bounded byte-oriented scanner already used by SPACE; counts content and gaps, computes a virtual SPACE-normalized prefix, and writes once through the existing result allocator. No intermediate normalized string or second tokenizer.",
+    "normalization": "Existing SPACE blank class: ASCII space and bytes tab through carriage return. Trims leading/trailing blanks and collapses blank runs.",
+    "truncation": "Right-truncates the normalized view to length and removes a final normalized separator before counting surviving words and gaps.",
+    "padding": "For multiple remaining words, preserves each original normalized gap and distributes added width by quotient/remainder; remainder bytes go to gaps from left to right. The exactly-one-byte pad replaces separators and may be NUL.",
+    "empty_single_word_and_zero_width": "Empty/all-blank values remain empty. A single word is not extended outside itself; it is unchanged if it fits and right-truncated if it does not. Width zero returns the empty prefix. These follow IBM's documented between-word padding and truncation rules; the IBM examples do not list each edge as a standalone vector.",
+    "limits": "Byte-oriented; embedded NUL and high-bit bytes are preserved. Existing whole-number parsing and 16 MiB runtime output limit are retained. No Unicode, DBCS, locale, or transcoding behavior is claimed.",
+    "input_mutation": "None."
+  },
+  "inventory_preflight": {
+    "source": "REXX_RX26_BUILTIN_INVENTORY.csv",
+    "rows": 75,
+    "starting_status_counts": {
+      "Implemented": 56,
+      "Not implemented": 14,
+      "Partial": 3,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "justify_starting_status": "Not implemented in inspected runtime dispatch; no JUSTIFY dispatch entry existed.",
+    "post_rx27_status_counts": {
+      "Implemented": 57,
+      "Not implemented": 13,
+      "Partial": 3,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "DATE_TIME_TRACE_classifications_unchanged": true
+  },
+  "hosted_qualification": {
+    "status": "PASS",
+    "hosted_build_targets": "28/28",
+    "direct_assertions": 42589,
+    "deterministic_property_cases": 12000,
+    "property_seed": "0x52583237",
+    "independent_oracle": "A separate materializing normalized-buffer oracle checked truncation, trailing-separator removal, preserved word bytes, result width, and left-to-right pad distribution. Each random case matched in two independent VMs with NUMERIC DIGITS 2 and 34.",
+    "interpreter_allocation_failure_recovery": "PASS — all 5 measured VM allocation failpoints were injected; each OUT_OF_MEMORY was followed by successful execution of the same JUSTIFY program in the same VM.",
+    "direct_result_allocation_failure_recovery": "PASS — injected output allocation failure published no result; direct dispatch succeeded afterward and ownership returned to baseline.",
+    "ibm_reference_cli_fixture": "1/1",
+    "inherited_regression": "RX1-RX26 hosted targets and compatibility fixtures passed, including RX19 calendar/clock, RX24 ADDRESS/TRACE, RX25 RANDOM, RX26 INDEX/POS, SPACE/STRIP, and CLI cases.",
+    "hosted_cli_cases": "24/24",
+    "notable_inherited_assertions": {
+      "RX19_DATE_TIME_and_calendar": 8275,
+      "RX19_property_cases": 2048,
+      "RX24_ADDRESS_TRACE": 65,
+      "RX25_RANDOM": 2156,
+      "RX26_INDEX": 48166,
+      "RX26_deterministic_cases": 12000
+    },
+    "regina": "NOT_RUN — executable unavailable; no external compatibility percentage is claimed.",
+    "evidence": "evidence/rx27/hosted-qualification.log"
+  },
+  "sanitizers": {
+    "AddressSanitizer": {
+      "status": "PASS",
+      "targets_passed": "27/27",
+      "compiler": "MSVC 19.51.36260"
+    },
+    "UndefinedBehaviorSanitizer": {
+      "status": "PASS",
+      "targets_passed": "27/27",
+      "compiler": "clang 22.1.8"
+    },
+    "local_expected_result_corpus": "196/196 under each sanitizer; Regina comparisons NOT_RUN.",
+    "rx27_justify_direct_test": "PASS under both sanitizers; 42,589 assertions, 12,000 property cases, 5 interpreter failpoints.",
+    "evidence_directories": [
+      "evidence/rx27/sanitizer-address-985900cd4cc5466db6b52181d23f29be/",
+      "evidence/rx27/sanitizer-undefined-fafbf7238f1c4e3091f66706d71affb4/"
+    ]
+  },
+  "freestanding_amd64": {
+    "status": "PASS",
+    "rexx_c_objects": 9,
+    "kernel_elf_sha256": "da340faf9ba3a5aa59a774477a28a20797c248ea6f3d205bbac2d2c95b058c4c",
+    "freestanding_flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "build_output_root": "build/rexx/rx27/native-amd64-647f2be902e24213a20247282dfdfcf9",
+    "evidence": "evidence/rx27/native-build/native-link-evidence-647f2be902e24213a20247282dfdfcf9.json"
+  },
+  "qac_guest_acceptance": {
+    "status": "BLOCKED_NOT_RUN",
+    "reason": "An active managed reservation and QEMU child were mapped to guideXOSServer_DiskManagerImprovements. A separate guideXOSServerV1.1_DOTNET_SUPPORT QAC process was also observed. The RX27 guest was not launched and all foreign sessions were left untouched.",
+    "qac_parent_cli_exit_code": "UNKNOWN — RX27 QAC CLI was not launched.",
+    "qemu_child_exit_code": "UNKNOWN — RX27 QEMU child was not launched.",
+    "qmp_shutdown_acknowledged": "NOT_RUN",
+    "reservation_released": "NOT_RUN; no RX27 reservation acquired.",
+    "guest_checks": "JUSTIFY behavior, invalid-argument interpreter recovery, DATE/TIME fail-closed state, independent PIT progression, and acknowledged QMP shutdown remain unqualified in a guest.",
+    "preflight_evidence": "evidence/rx27/preflight.json"
+  },
+  "artifact_safety": {
+    "protected_root_objects_and_pdbs": "31/31 exact size and SHA-256 matches at all hosted, sanitizer, and native-build preservation gates.",
+    "protected_manifest": "evidence/rx27/protected-artifacts-start.json",
+    "starting_untracked_paths": 73617,
+    "starting_untracked_sha256": "fcba3e053790b51b72fc253c64b478893f5e0b3037028fbdfb73589280a178b2",
+    "path_serialization": "Relative forward-slash paths; ordinal sort; UTF-8 without BOM; LF after every path.",
+    "path_set_reconciliation": "evidence/rx27/untracked-reconciliation-final.json",
+    "build_output_root": "build/rexx/rx27/",
+    "protected_final_manifest": "evidence/rx27/protected-artifacts-final.json",
+    "precommit_untracked_path_count": 79740,
+    "precommit_untracked_sha256": "e3a296723d770f3a3f18461ec17e2d226e29e9bf62ed207daed26b8db42085f5",
+    "precommit_added_untracked_path_count": 6123,
+    "precommit_missing_starting_paths": 0,
+    "ending_untracked_path_count_after_commit": 79715,
+    "ending_untracked_sha256_after_commit": "0ce0ac7e6d02b5aa39739951198767f2a55b038a01c6367ce4b8bf58e254434e",
+    "preexisting_untracked_paths_preserved": true,
+    "missing_preexisting_untracked_paths": 0,
+    "new_rx27_paths_committed": 31,
+    "remaining_additional_untracked_paths_after_commit": 6098
+  },
+  "inventory": {
+    "rows": 75,
+    "implemented": 57,
+    "not_implemented": 13,
+    "partial": 3,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "DATE_TIME_TRACE_classifications_unchanged": true,
+    "file": "REXX_RX27_BUILTIN_INVENTORY.csv"
+  },
+  "remaining_compatibility_limits": [
+    "Exclusive QAC/QEMU guest acceptance remains blocked by foreign active reservations; no RX27 parent/child exit codes or guest result exist.",
+    "Regina was unavailable; no external interpreter comparison or percentage is claimed.",
+    "JUSTIFY remains byte-oriented with the existing 16 MiB output ceiling; no Unicode, DBCS, locale, or transcoding behavior is claimed."
+  ],
+  "recommended_rx28_scope": "Select FIND from the actual RX27 inventory of remaining P3 entries. It is a compact non-I/O word-search candidate; verify the IBM contract and relationship to existing WORDPOS during RX28 preflight.",
+  "evidence": [
+    "evidence/rx27/preflight.json",
+    "evidence/rx27/hosted-qualification.log",
+    "evidence/rx27/protected-artifacts-start.json",
+    "evidence/rx27/native-build/",
+    "evidence/rx27/sanitizer-address-985900cd4cc5466db6b52181d23f29be/",
+    "evidence/rx27/sanitizer-undefined-fafbf7238f1c4e3091f66706d71affb4/",
+    "evidence/rx27/protected-artifacts-final.json",
+    "evidence/rx27/untracked-reconciliation-final.json",
+    "evidence/rx27/sanitizers-summary.json"
+  ]
+}

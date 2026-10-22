@@ -1,0 +1,45 @@
+{
+  "schema": "guidexos.rexx.rx27-preflight.v1",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "required_branch": "REXX_SUPPORT",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "25ac71063951a3a17d3d031446b326e556d51e58",
+  "expected_starting_head": "25ac71063951a3a17d3d031446b326e556d51e58",
+  "tracked_worktree_clean": true,
+  "index_clean": true,
+  "justify_starting_status": "Not implemented in inspected runtime dispatch",
+  "justify_dispatch_present": false,
+  "protected_root_artifact_count": 31,
+  "protected_artifact_manifest": "protected-artifacts-start.json",
+  "starting_untracked_path_count": 73617,
+  "starting_untracked_sha256": "fcba3e053790b51b72fc253c64b478893f5e0b3037028fbdfb73589280a178b2",
+  "untracked_path_serialization": "Relative forward-slash paths; ordinal sort; UTF-8 without BOM; LF after every path.",
+  "starting_untracked_manifest": "untracked-start.paths",
+  "regina": "NOT_RUN — executable unavailable during preflight",
+  "stale_prompt_or_artifacts": "No stale RX27 scope; JUSTIFY was absent from the RX26 inventory and dispatch before implementation.",
+  "qac_preflight": "BLOCKED — active managed reservation for DiskManagerImprovements remained at guest gate; no RX27 QAC CLI or QEMU process launched.",
+  "qac_foreign_processes": [
+    {
+      "project": "guideXOSServer_DiskManagerImprovements",
+      "qac_cli_pid": 21872,
+      "qemu_pid": 25532,
+      "observed": "Active QAC acceptance process and child QEMU; process arguments point to DiskManagerImprovements guest paths."
+    },
+    {
+      "project": "guideXOSServerV1.1_DOTNET_SUPPORT",
+      "qac_cli_pid": 8844,
+      "qemu_pid": null,
+      "observed": "Separate QAC acceptance process; left untouched."
+    }
+  ],
+  "root_phase_marker": "absent",
+  "rx26_inventory_rows": 75,
+  "rx26_status_counts": {
+    "Implemented": 56,
+    "Not_implemented": 14,
+    "Partial": 3,
+    "Not_assessed": 1,
+    "Not_implemented_by_design": 1
+  },
+  "untracked_baseline_reconciled_from_actual_paths": true
+}

@@ -1,0 +1,19 @@
+RX27 hosted qualification
+
+Command: tests/run_rexx_tests.ps1 -Phase RX27
+Compiler: C:\mingw64\bin\gcc.exe (C11, -Wall -Wextra -Wpedantic -Werror)
+Result: PASS
+
+Hosted build targets: 28 passed (RX1-RX26 inherited targets plus RX27 JUSTIFY direct test).
+RX27 JUSTIFY: 42,589 assertions; 12,000 deterministic property cases; seed 0x52583237; failures 0; output limit 16,777,216 bytes.
+Independent property oracle: PASS; two independent VMs with NUMERIC DIGITS 2 and 34 matched the oracle and each other.
+RX27 IBM JUSTIFY CLI fixture: 1/1 passed, including the four IBM examples, deterministic examples, binary NUL pad, empty/single-word, and zero-width checks.
+Hosted CLI cases: 24/24 passed.
+RX19 DATE/TIME and clock assertions: 8,275 passed; property cases: 2,048.
+RX24 ADDRESS/TRACE assertions: 65 passed.
+RX25 RANDOM assertions: 2,156 passed.
+RX26 INDEX assertions: 48,166 passed; deterministic cases: 12,000.
+Inherited compatibility fixtures: RX3 13/13; RX4 11/11; RX5 13/13; RX6 25/25; RX7 33/33; RX8 26/26; RX9 condition fixtures 24/24; RX10 INTERPRET fixtures 19/19; RX12 built-in fixtures 31/31; RX13 string-editing fixtures 33/33; RX14 numeric fixtures 29/29; RX15 conversion fixtures 3/3; RX16 literal fixtures 10/10; RX17 bitwise fixtures 10/10; RX22 diagnostic fixture 1/1.
+Allocation failure: injected result-allocation failure returned OUT_OF_MEMORY with no result; subsequent direct dispatch succeeded. All five allocation failpoints measured during interpreter execution were injected; after each OUT_OF_MEMORY, the same VM reran the JUSTIFY program successfully with expected output. Ownership checks passed.
+Protected artifacts: 31/31 exact path, size, and SHA-256 matches at hosted-build, hosted-C, hosted-fixture, and hosted-final gates.
+Regina: NOT_RUN — executable unavailable; no external comparison percentage claimed.

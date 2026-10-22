@@ -1,0 +1,14 @@
+{
+  "exit_code": 0,
+  "pid": 14852,
+  "started_at_utc": "2026-10-22T23:33:26.8678846Z",
+  "finished_at_utc": "2026-10-22T23:36:12.2089652Z",
+  "arguments": [
+    "-C",
+    "D:\\dev\\guideXOSServer_REXX\\kernel",
+    "-B",
+    "ARCH=amd64",
+    "BUILD_ROOT=../build/rexx/rx27/native-amd64-647f2be902e24213a20247282dfdfcf9",
+    "all"
+  ]
+}
