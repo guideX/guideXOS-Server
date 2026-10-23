@@ -1,0 +1,228 @@
+{
+  "schemaVersion": 1,
+  "runId": "s22r13r1-boot2-20261022-c531b3f31b6f4b41965daf368b0fb0fc-d2d1f4f408d441a7ba5b66a6b36e2165",
+  "requestedRunId": "s22r13r1-boot2-20261022-c531b3f31b6f4b41965daf368b0fb0fc",
+  "project": "guideXOSServer",
+  "selectedWorkflow": "s22r10-pacman-uefi-qac",
+  "createdAtUtc": "2026-10-23T03:02:56.6519723Z",
+  "workspacePath": "C:\\Users\\guideX\\AppData\\Local\\guideXOS\\QAC\\artifacts\\s22r13r1-boot2-20261022-c531b3f31b6f4b41965daf368b0fb0fc-d2d1f4f408d441a7ba5b66a6b36e2165",
+  "workspaceRoot": "C:\\Users\\guideX\\AppData\\Local\\guideXOS\\QAC\\artifacts",
+  "workspaceOwner": "LEON2_RDT\\guideX",
+  "ownerToken": "d2d1f4f408d441a7ba5b66a6b36e2165",
+  "completionStatus": "complete",
+  "qacExecution": {
+    "status": "not-started",
+    "reservationId": null,
+    "childProcessId": null,
+    "childExitVerified": false
+  },
+  "sourceConsistency": "source hashes are checked before and after staging; this is not a transactional filesystem snapshot",
+  "artifacts": [
+    {
+      "name": "esp",
+      "role": "writable-uefi-esp",
+      "kind": "directory",
+      "access": "writable",
+      "disposition": "copy",
+      "sourcePath": "D:\\dev\\guideXOSServer\\docs\\evidence\\s22r13-pacman-corrected-guest-acceptance-20261022\\guest-boot1-storage-backed\\writable-esp",
+      "sourceSizeBytes": 71453524,
+      "sourceSha256": "8bc7c6d0784162851ed5f155775da6cf8510e4f9965cf494fb193889764ea39c",
+      "privatePath": "C:\\Users\\guideX\\AppData\\Local\\guideXOS\\QAC\\artifacts\\s22r13r1-boot2-20261022-c531b3f31b6f4b41965daf368b0fb0fc-d2d1f4f408d441a7ba5b66a6b36e2165\\artifacts\\esp",
+      "privateRelativePath": "artifacts/esp",
+      "privateSizeBytes": 71453524,
+      "privateSha256": "8bc7c6d0784162851ed5f155775da6cf8510e4f9965cf494fb193889764ea39c",
+      "files": [
+        {
+          "path": "Apps/PacMan/app.json",
+          "sizeBytes": 956,
+          "sha256": "3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449"
+        },
+        {
+          "path": "Apps/PacMan/bin/amd64/pacman.elf",
+          "sizeBytes": 63640,
+          "sha256": "eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc"
+        },
+        {
+          "path": "Apps/PacMan/resources/audio/EatPill.wav",
+          "sizeBytes": 7156,
+          "sha256": "510a52e5776573197aef14d77e393185b6c7148d1b59dac535d45c5ca0498686"
+        },
+        {
+          "path": "Apps/PacMan/resources/audio/extralife.wav",
+          "sizeBytes": 21248,
+          "sha256": "767db1552130e676398c121ec605f90f20c89bbbab272305bc781adc8e91d1cd"
+        },
+        {
+          "path": "Apps/PacMan/resources/audio/fruiteat.wav",
+          "sizeBytes": 5120,
+          "sha256": "82c96a997ac2e837de4e418f29f4f4fa6142dd2a0c38f764b6d989d8bd98605d"
+        },
+        {
+          "path": "Apps/PacMan/resources/audio/ghosteat.wav",
+          "sizeBytes": 9090,
+          "sha256": "225168072b38671c89c1fc775d513ca86fbb899e3e82c8032445f6a6dc5e1b95"
+        },
+        {
+          "path": "Apps/PacMan/resources/audio/killed.wav",
+          "sizeBytes": 17008,
+          "sha256": "1c3e91df8e19041ea5783185c5a8a9f2321993b43481c215d8caf3df590290de"
+        },
+        {
+          "path": "Apps/PacMan/resources/audio/StartMusic.wav",
+          "sizeBytes": 68318,
+          "sha256": "062cdc7196c54033f8bf11878d6659fd5b0ba11cd6945640ec8fac4376919421"
+        },
+        {
+          "path": "Apps/PacMan/resources/audio/startmusicold.wav",
+          "sizeBytes": 46592,
+          "sha256": "a6e1c14f6cbc59cb5244c0119c728d412252370eea48bc574c1307a774c83caf"
+        },
+        {
+          "path": "Apps/PacMan/resources/level1.gximg",
+          "sizeBytes": 888860,
+          "sha256": "535b37e66d7159078df8a16ce059a6f7ab038588cc9875e152033d046ff47fe1"
+        },
+        {
+          "path": "Apps/PacMan/resources/pacpics.gximg",
+          "sizeBytes": 360476,
+          "sha256": "57a605df8f24ac9641ff6c9d39df551a17ffbcd68466a561adf5f045de259d50"
+        },
+        {
+          "path": "build-identity.txt",
+          "sizeBytes": 1640,
+          "sha256": "0a2bd181ec5187adb94021b85e3b89b2b0c608fab038718d6dd76c37d55882a5"
+        },
+        {
+          "path": "EFI/BOOT/BOOTX64.EFI",
+          "sizeBytes": 56832,
+          "sha256": "7a42c1c447d12689a0a1fcc2be70183f976a22984c5b4280d7c8e653633cd24b"
+        },
+        {
+          "path": "kernel-symbol-audit.txt",
+          "sizeBytes": 7972,
+          "sha256": "9f0e95d3ba257f39334bfc1113fc0bffe23bc75f5ce0a9513b33d878337f4991"
+        },
+        {
+          "path": "kernel.elf",
+          "sizeBytes": 2789752,
+          "sha256": "1bbb1f4ea5f7937fae6b9f6381da3bc8cffcddd2c185b227116fe46e59384fdd"
+        },
+        {
+          "path": "ramdisk.img",
+          "sizeBytes": 67108864,
+          "sha256": "27fc2310f78aa38d47a2813f07cbec829dd81cfa4211f90b28e28cb572feb578"
+        }
+      ]
+    },
+    {
+      "name": "ovmf-firmware",
+      "role": "read-only-uefi-firmware",
+      "kind": "file",
+      "access": "read-only",
+      "disposition": "share",
+      "sourcePath": "D:\\dev\\guideXOSServer\\docs\\evidence\\settings-s22-v03-package-20261018\\OVMF-s22-readonly.fd",
+      "sourceSizeBytes": 3653632,
+      "sourceSha256": "2df617a6fd1bae41ec7c0e3bceca96c928a5a88d8dc198468d34733393ab2792",
+      "privatePath": "D:\\dev\\guideXOSServer\\docs\\evidence\\settings-s22-v03-package-20261018\\OVMF-s22-readonly.fd",
+      "privateRelativePath": null,
+      "privateSizeBytes": 3653632,
+      "privateSha256": "2df617a6fd1bae41ec7c0e3bceca96c928a5a88d8dc198468d34733393ab2792",
+      "files": [
+        {
+          "path": "OVMF-s22-readonly.fd",
+          "sizeBytes": 3653632,
+          "sha256": "2df617a6fd1bae41ec7c0e3bceca96c928a5a88d8dc198468d34733393ab2792"
+        }
+      ]
+    },
+    {
+      "name": "release-iso",
+      "role": "read-only-uefi-cdrom",
+      "kind": "file",
+      "access": "read-only",
+      "disposition": "share",
+      "sourcePath": "D:\\dev\\guideXOSServer\\out\\release-profile\\0eed0ed2-df00-403a-9646-0dffb22be3bb\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso",
+      "sourceSizeBytes": 90245120,
+      "sourceSha256": "b6b7b0faeef779a4ac06abb96ad749d2ce906df2e7751c1b9c329dd0a23fc2af",
+      "privatePath": "D:\\dev\\guideXOSServer\\out\\release-profile\\0eed0ed2-df00-403a-9646-0dffb22be3bb\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso",
+      "privateRelativePath": null,
+      "privateSizeBytes": 90245120,
+      "privateSha256": "b6b7b0faeef779a4ac06abb96ad749d2ce906df2e7751c1b9c329dd0a23fc2af",
+      "files": [
+        {
+          "path": "guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso",
+          "sizeBytes": 90245120,
+          "sha256": "b6b7b0faeef779a4ac06abb96ad749d2ce906df2e7751c1b9c329dd0a23fc2af"
+        }
+      ]
+    }
+  ],
+  "outputs": {
+    "directory": "output",
+    "serialLog": "output/serial.log",
+    "qemuDebugLog": "output/qemu-debug.log",
+    "qmpTranscript": "output/qmp-transcript.jsonl",
+    "screenshots": "output/screenshots"
+  },
+  "launchContract": {
+    "storage": {
+      "writableEspArtifact": "esp",
+      "readOnlyIsoArtifact": "release-iso",
+      "separateWritableGuestDisk": false
+    },
+    "firmwareVariableStore": {
+      "separatePflashStore": false,
+      "path": null,
+      "guestStateLocation": "private ESP directory",
+      "guestStateFilename": "NvVars"
+    },
+    "lifecycle": "Stage before QAC admission; QAC3C3 marks active before launch and released only after verified child exit.",
+    "qmp": {
+      "bindAddress": "127.0.0.1",
+      "port": null,
+      "allocation": "QAC3C3 must allocate one loopback port per admitted run and keep its listener ownership through verified QEMU child exit.",
+      "fixedPortReusable": false
+    },
+    "arguments": [
+      "-machine",
+      "pc,accel=whpx",
+      "-smp",
+      "2",
+      "-m",
+      "2048M",
+      "-vga",
+      "std",
+      "-display",
+      "none",
+      "-drive",
+      "if=pflash,format=raw,readonly=on,file={ovmfFirmware}",
+      "-drive",
+      "if=ide,format=raw,file=fat:rw:{esp},index=0",
+      "-drive",
+      "if=none,id=releasecdrom,file={iso},media=cdrom,readonly=on,format=raw",
+      "-device",
+      "ide-cd,drive=releasecdrom,bootindex=1",
+      "-boot",
+      "order=d",
+      "-net",
+      "none",
+      "-serial",
+      "file:{serialLog}",
+      "-D",
+      "{qemuDebugLog}",
+      "-d",
+      "guest_errors,cpu_reset",
+      "-rtc",
+      "base=utc,clock=host",
+      "-no-reboot",
+      "-no-shutdown",
+      "-monitor",
+      "none",
+      "-qmp",
+      "tcp:127.0.0.1:{QAC3C3-allocated-port},server=on,wait=off",
+      "-name",
+      "guideXOS-{runId}"
+    ],
+    "executableFamily": "qemu-system-x86_64.exe"
+  }
+}

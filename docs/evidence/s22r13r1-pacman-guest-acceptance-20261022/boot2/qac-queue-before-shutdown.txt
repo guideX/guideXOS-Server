@@ -1,0 +1,2 @@
+Queued reservations: 1
+  72c66d32bdf649daa836059d1d341120 | guideXOSServer | acceptance | Waiting | queue 1 | LEON2_RDT\guideX (PID 23380) | owner Verified

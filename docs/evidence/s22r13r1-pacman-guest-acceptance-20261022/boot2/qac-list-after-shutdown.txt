@@ -1,0 +1,7 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 25648 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-23T03:21:06.8104938+00:00 | managed
+  Note: Reservation 72c66d32bdf649daa836059d1d341120 · guideXOSServer · acceptance
+Reservations: 1
+  72c66d32bdf649daa836059d1d341120 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 23380) | owner Verified | child PID 25648
+Managed sessions: 1
+Managed session: 72c66d32bdf649daa836059d1d341120 | Running | guideXOSServer · LEON2_RDT\guideX (PID 23380)

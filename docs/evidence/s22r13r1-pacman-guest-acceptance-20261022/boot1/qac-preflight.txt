@@ -1,0 +1,20 @@
+=== status ===
+Coordinator: Online
+Name: guideXOS QAC
+Version: 2.0.0
+PID: 14284
+Started (UTC): 2026-10-22T21:23:05.5008927+00:00
+Uptime: 18597s
+QEMU processes: 1 (0 foreign)
+Managed development limit: 2
+Managed sessions: 1; queued: 0; blocked: 0
+=== list ===
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 22344 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-23T02:31:39.7213457+00:00 | managed
+  Note: Reservation 942f45b2ef35478d9de5deb9ee44fb73 · guideXOSServer · acceptance
+Reservations: 1
+  942f45b2ef35478d9de5deb9ee44fb73 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 1844) | owner Verified | child PID 22344
+Managed sessions: 1
+Managed session: 942f45b2ef35478d9de5deb9ee44fb73 | Running | guideXOSServer · LEON2_RDT\guideX (PID 1844)
+=== queue ===
+Queued reservations: 0

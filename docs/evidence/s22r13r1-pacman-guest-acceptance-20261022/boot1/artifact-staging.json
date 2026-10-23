@@ -1,0 +1,12 @@
+{
+  "stagedAtUtc": "2026-10-23T02:31:42.3829103Z",
+  "runId": "s22r13r1-boot1-20261022-eba519292a31440e96831e8666dade12",
+  "helper": "scripts/prepare-qac-uefi-artifacts.ps1 + qac-uefi-artifacts.psm1",
+  "workspace": "C:\\Users\\guideX\\AppData\\Local\\guideXOS\\QAC\\artifacts\\s22r13r1-boot1-20261022-eba519292a31440e96831e8666dade12",
+  "sourceEspTreeSha256": "8bc7c6d0784162851ed5f155775da6cf8510e4f9965cf494fb193889764ea39c",
+  "privateEspTreeSha256": "8bc7c6d0784162851ed5f155775da6cf8510e4f9965cf494fb193889764ea39c",
+  "espFileCount": 16,
+  "sourceCandidateSha256": "b6b7b0faeef779a4ac06abb96ad749d2ce906df2e7751c1b9c329dd0a23fc2af",
+  "firmwareSha256": "2df617a6fd1bae41ec7c0e3bceca96c928a5a88d8dc198468d34733393ab2792",
+  "isolation": "writable private ESP copy; read-only shared ISO and firmware"
+}

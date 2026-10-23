@@ -1,0 +1,14 @@
+{
+  "id": "702d260dd3cf43e387c714c78fafcabb",
+  "project": "guideXOSServer",
+  "mode": "acceptance",
+  "state": "Running",
+  "owner": "LEON2_RDT\\guideX (PID 13496)",
+  "ownerLiveness": "Verified",
+  "processId": 18264,
+  "processStartTimeUtc": "2026-10-23T03:03:45.9481518+00:00",
+  "processIdentity": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmpEndpoint": "127.0.0.1:55585",
+  "grantedAtUtc": "2026-10-23T03:03:45.9360000+00:00",
+  "queuePosition": 0
+}

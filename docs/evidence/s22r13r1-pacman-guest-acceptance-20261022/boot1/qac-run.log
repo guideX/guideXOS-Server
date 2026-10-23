@@ -1,0 +1,8 @@
+QAC reservation requested: id=4f17779acbd14810b4deb3d26a3a20a3 project=guideXOSServer mode=acceptance
+QAC queued for exclusive acceptance: id=4f17779acbd14810b4deb3d26a3a20a3 position=1
+QAC exclusive reservation granted: id=4f17779acbd14810b4deb3d26a3a20a3
+QAC QEMU launched: reservation=4f17779acbd14810b4deb3d26a3a20a3 pid=10628 executable=C:\Program Files\qemu\qemu-system-x86_64.exe launch_utc=2026-10-23T02:34:40.6382049+00:00
+{"reservationId":"4f17779acbd14810b4deb3d26a3a20a3","state":"Running","childProcessId":10628,"processIdentity":"C:\\Program Files\\qemu\\qemu-system-x86_64.exe","processStartTimeUtc":"2026-10-23T02:34:40.6382049+00:00"}
+C:\Program Files\qemu\qemu-system-x86_64.exe: warning: Ignoring request for interrupt vector 0
+QAC QEMU exited: reservation=4f17779acbd14810b4deb3d26a3a20a3 pid=10628 exitCode=0 exit_utc=2026-10-23T03:01:30.9182345Z
+QAC reservation released: id=4f17779acbd14810b4deb3d26a3a20a3 pid=10628

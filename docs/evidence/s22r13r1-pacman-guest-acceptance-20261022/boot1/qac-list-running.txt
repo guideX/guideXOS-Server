@@ -1,0 +1,7 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 10628 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-23T02:34:40.6382049+00:00 | managed
+  Note: Reservation 4f17779acbd14810b4deb3d26a3a20a3 · guideXOSServer · acceptance
+Reservations: 1
+  4f17779acbd14810b4deb3d26a3a20a3 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 21640) | owner Verified | child PID 10628
+Managed sessions: 1
+Managed session: 4f17779acbd14810b4deb3d26a3a20a3 | Running | guideXOSServer · LEON2_RDT\guideX (PID 21640)
