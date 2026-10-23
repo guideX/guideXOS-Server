@@ -1,0 +1,35 @@
+{
+  "capturedAtUtc": "2026-10-23T11:09:18Z",
+  "request": "Retry C188 guest qualification after the prior Outcome D closeout",
+  "repository": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT",
+  "branch": "v1.1_DOTNET_SUPPORT",
+  "head": "05c1d667cc9796a5f2a3c133c68d7486756a9a07",
+  "qacChecks": [
+    {
+      "command": "GuideXOS.QAC.Cli.exe status",
+      "result": "Coordinator unavailable: Coordinator connection timed out or is unavailable."
+    },
+    {
+      "command": "GuideXOS.QAC.Cli.exe list",
+      "result": "Coordinator unavailable: Coordinator connection timed out or is unavailable."
+    },
+    {
+      "command": "GuideXOS.QAC.Cli.exe status (separate fresh check)",
+      "result": "Coordinator unavailable: Coordinator connection timed out or is unavailable."
+    }
+  ],
+  "localProcessCensus": {
+    "query": "Win32_Process where Name matches qemu or GuideXOS.QAC",
+    "matches": []
+  },
+  "reservationState": "Unknown; coordinator did not respond",
+  "guestRunLaunched": false,
+  "reason": "QAC ownership and exclusive admission could not be verified safely",
+  "remainingBoots": [
+    "focused-boot-2 lifecycle",
+    "focused-boot-3 coexistence",
+    "production-boot-2 apps",
+    "production-boot-3 lifecycle"
+  ],
+  "c189Started": false
+}
