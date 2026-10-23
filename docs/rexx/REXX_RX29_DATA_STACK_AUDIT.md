@@ -42,3 +42,11 @@ A future stack implementation needs a bounded line-bearing store, explicit byte 
 ## RX29 boundary and evidence
 
 This audit is the completed architecture gate. It does not add a stack, input service, host queue, persistence layer, buffer markers, or source changes. No direct, property, fault-injection, sanitizer, freestanding, inherited-regression, or guest test was run after the gate. See `REXX_RX29_SCORECARD.json` and `docs/rexx/evidence/rx29/` for the exact preflight, QAC availability, artifact hashes, and preservation records.
+
+## Revalidation on 2026-10-23
+
+The current checkout began at `2ea2b54e99c30986ba13839f942d29d93a944801`, a documentation-only RX29 blocker commit whose parent is the accepted RX28 HEAD `cdf037707fbc5b9fe4755fff0b94337fb740cb7f`. No branch switching, reset, merge, rebase, or history rewrite occurred. A fresh source search confirmed the same architecture finding: the three words are lexer tokens only; there are no executable parser/compiler forms, external queue storage, or queue provider. The VM expression stack remains unrelated.
+
+The cumulative inherited RX1–RX28 hosted suite passed under the RX29 runner. ASan and UBSan each passed 28/28 targets and 196/196 local expected-result cases. The RX20 clock/PIT contract passed 123 checks. The freestanding AMD64 build linked nine REXX objects; `kernel.elf` SHA-256 is `a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef`. The 31 protected root artifacts passed the before/after guards.
+
+These are inherited regression and build results only. RX29-specific QUEUED assertions, queue-operation model tests, queue allocation-failure tests, and queue lifecycle tests remain `NOT_RUN` because production has no queue operation to exercise. No guest launched. A separate verified acceptance reservation was active at the first later QAC check; RX29 did not request a reservation or control that guest. At the final post-check, QAC reported zero sessions, reservations, queued requests, and QEMU processes. The exact status snapshots are in `docs/rexx/evidence/rx29/`.

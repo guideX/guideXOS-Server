@@ -23,3 +23,9 @@ The exact preflight, untracked-path manifest, protected root object hashes, and 
 The 75-entry inventory retains RX28's counts: 58 Implemented, 12 Not implemented, 3 Partial, 1 Not assessed, and 1 Not implemented by design. `QUEUED` remains Not implemented; DATE, TIME, and TRACE retain their prior classifications.
 
 RX30 should first establish a bounded, length-bearing external data-stack model and executable `QUEUE`, `PUSH`, `PULL`, and `PARSE PULL` operations, with explicit ownership and lifecycle rules across the existing VM, routine, `INTERPRET`, host, and program boundaries. Only then can `QUEUED()` count the active queue without inventing state. Buffer-stack instructions should remain out of scope unless separately implemented and qualified.
+
+## Revalidation on 2026-10-23
+
+The runtime decision remains blocked. The current run started from `2ea2b54e99c30986ba13839f942d29d93a944801`, the documentation-only child of the accepted RX28 HEAD, and left REXX production code unchanged. The inherited RX1–RX28 hosted suite, both 28-target sanitizer matrices, 196 local expected-result cases under each sanitizer, the 123-check RX20 clock/PIT contract, and the freestanding AMD64 link passed. These results do not qualify QUEUED semantics: there is still no data-stack instruction or active queue to count.
+
+The QAC guest gate remained incomplete. No guest was launched because the required operations are absent. A separate verified acceptance reservation was active at one status check; QAC later reported zero sessions, reservations, queued requests, and QEMU processes. RX29 did not request a reservation, alter foreign media, or control that guest. See `docs/rexx/evidence/rx29/` for run-specific logs, kernel hash, QAC snapshots, protected-artifact checks, and path reconciliation.

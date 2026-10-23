@@ -1,0 +1,18 @@
+{
+  "schema": "guidexos.rexx.rx29.qac-post-revalidation.v1",
+  "checked_utc": "2026-10-23T22:47:01.4672986Z",
+  "status_cli": "PASS",
+  "list_cli": "PASS",
+  "status_snapshot": "Coordinator: Online\r\nName: guideXOS QAC\r\nVersion: 2.0.0\r\nPID: 16064\r\nStarted (UTC): 2026-10-23T11:10:30.5849382+00:00\r\nUptime: 41790s\r\nQEMU processes: 0 (0 foreign)\r\nManaged development limit: 2\r\nManaged sessions: 0; queued: 0; blocked: 0",
+  "list_snapshot": "Coordinator: Online (guideXOS QAC 2.0.0)\r\nReservations: 0\r\nManaged sessions: 0",
+  "managed_sessions": 0,
+  "queued_reservations": 0,
+  "reservations": 0,
+  "qemu_processes": 0,
+  "rx29_reservation_requested": false,
+  "rx29_guest_launched": false,
+  "rx29_shutdown_command_issued": false,
+  "prior_other_run_reservation_id": "1adb5ec436cf4aa5afb1ad44638d4a10",
+  "prior_reservation_currently_listed": false,
+  "interpretation": "QAC is released/idle at post-check. The earlier verified owner was not controlled; RX29 held no reservation."
+}

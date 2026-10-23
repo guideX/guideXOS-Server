@@ -1,0 +1,83 @@
+{
+  "schema": "guidexos.rexx.rx29.revalidation.v1",
+  "checked_at_utc": "2026-10-23T22:43:50.4699819Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "2ea2b54e99c30986ba13839f942d29d93a944801",
+  "accepted_rx28_head": "cdf037707fbc5b9fe4755fff0b94337fb740cb7f",
+  "current_head_matches_accepted_rx28": false,
+  "accepted_rx28_is_parent_of_current_head": true,
+  "status": "Outcome C — blocked at the data-stack architecture gate",
+  "runtime_source_changes": 0,
+  "qualification_runner_files_changed": 5,
+  "data_stack": {
+    "lexer_tokens_present": true,
+    "queue_push_pull_parser_forms": false,
+    "compiler_opcodes": false,
+    "external_queue_storage": false,
+    "host_queue_provider": false,
+    "parse_pull": false,
+    "expression_value_stack_is_queue": false
+  },
+  "hosted": {
+    "status": "PASS",
+    "summary": "hosted-regression-summary.json",
+    "log": "hosted-regression.log",
+    "cumulative_rx1_rx28": "PASS",
+    "cli_cases": "24/24",
+    "queued_specific_tests": "NOT_RUN"
+  },
+  "sanitizers": {
+    "status": "PASS",
+    "address_targets": "28/28",
+    "undefined_targets": "28/28",
+    "local_expected_cases_per_matrix": "196/196",
+    "summary": "sanitizer-results.json",
+    "regina": "NOT_RUN"
+  },
+  "clock_contract": {
+    "status": "PASS",
+    "checks": 123,
+    "evidence": "direct-clock-tests"
+  },
+  "freestanding": {
+    "status": "PASS",
+    "rexx_objects": 9,
+    "kernel_elf_sha256": "a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef",
+    "link_evidence": "native-build/native-link-evidence-eaa4c166f50c453fa3f6f6d76c15ff4a.json"
+  },
+  "regina": "NOT_RUN — executable unavailable",
+  "qac_guest": {
+    "status": "NOT_RUN",
+    "reservation_requested": false,
+    "guest_launched": false,
+    "foreign_or_other_task_session_controlled": false,
+    "active_reservation_id": "1adb5ec436cf4aa5afb1ad44638d4a10",
+    "active_qemu_pid": 9776,
+    "owner_pid": 21028,
+    "evidence": "qac-occupied-revalidation.json",
+    "post_check_status": "Idle: zero sessions/reservations/queue/QEMU processes.",
+    "post_check_evidence": "qac-post-revalidation.json",
+    "shutdown_command_issued": false
+  },
+  "protected_artifacts": {
+    "status": "PASS",
+    "count": "31/31",
+    "evidence": "protected-artifact-revalidation.json"
+  },
+  "starting_untracked": {
+    "count": 83493,
+    "sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
+    "encoding": "UTF-8 without BOM",
+    "newline": "LF",
+    "sort": "ordinal, case-sensitive",
+    "manifest": "untracked-start-ordinal.paths"
+  },
+  "ending_untracked": {
+    "count": 86874,
+    "sha256": "FAA46ADD589A05D7A1CFB4C0D36313438C4A819F1C1FED0A493A2EF6AFAAA556",
+    "manifest": "untracked-end-ordinal.paths",
+    "missing_preexisting": 0,
+    "added": 3381,
+    "status": "PASS — original path set preserved"
+  }
+}

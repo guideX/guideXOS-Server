@@ -1,0 +1,14 @@
+{
+  "schema": "guidexos.rexx.rx29.qac-revalidation.v1",
+  "checked_utc": "2026-10-23T22:41:14.2404498Z",
+  "status_cli": "PASS",
+  "list_cli": "PASS",
+  "status_snapshot": "Coordinator: Online\r\nName: guideXOS QAC\r\nVersion: 2.0.0\r\nPID: 16064\r\nStarted (UTC): 2026-10-23T11:10:30.5849382+00:00\r\nUptime: 41443s\r\nQEMU processes: 1 (0 foreign)\r\nManaged development limit: 2\r\nManaged sessions: 1; queued: 0; blocked: 0",
+  "list_snapshot": "Coordinator: Online (guideXOS QAC 2.0.0)\r\nQEMU PID 9776 | C:\\Program Files\\qemu\\qemu-system-x86_64.exe | 2026-10-23T22:35:06.1119421+00:00 | managed\r\n  Note: Reservation 1adb5ec436cf4aa5afb1ad44638d4a10 · guideXOSServer · acceptance\r\nReservations: 1\r\n  1adb5ec436cf4aa5afb1ad44638d4a10 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\\guideX (PID 21028) | owner Verified | child PID 9776\r\nManaged sessions: 1\r\nManaged session: 1adb5ec436cf4aa5afb1ad44638d4a10 | Running | guideXOSServer · LEON2_RDT\\guideX (PID 21028)",
+  "rx29_reservation_requested": false,
+  "rx29_guest_launched": false,
+  "foreign_or_other_task_session_controlled": false,
+  "shutdown_attempted": false,
+  "guest_gate": "NOT_RUN",
+  "reason": "No executable data-stack instructions exist for RX29 guest scripts; a verified QAC acceptance reservation owned by another run was active at revalidation."
+}

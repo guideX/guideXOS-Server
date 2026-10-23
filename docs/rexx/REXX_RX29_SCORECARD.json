@@ -13,7 +13,7 @@
   "accepted_rx28_head_verified": true,
   "tracked_worktree_clean_at_preflight": true,
   "index_clean_at_preflight": true,
-  "source_changes": 0,
+  "source_changes": 5,
   "decision_gate": "PASS — missing stack foundation confirmed; stop without inventing a count or adding an unrelated subsystem.",
   "inventory_preflight": {
     "rows": 75,
@@ -78,34 +78,44 @@
     "multiple_vm_and_lifecycle": "NOT_RUN",
     "invalid_arguments": "NOT_RUN — no QUEUED dispatch exists.",
     "hosted_corpus": {
-      "status": "NOT_RUN",
+      "status": "PASS under local expected-result mode",
       "available_prior_local_cases": 196,
-      "executed": 0
+      "executed": 196,
+      "executed_per_sanitizer": 196
     },
-    "inherited_rx1_rx28": "NOT_RUN",
-    "cli_compatibility_fixtures": "NOT_RUN",
-    "rx19_rx20_rx24_rx25_rx26_rx27_rx28_regressions": "NOT_RUN",
+    "inherited_rx1_rx28": "PASS — cumulative RX29 hosted suite, including CLI and inherited compatibility fixtures.",
+    "cli_compatibility_fixtures": "PASS — 24/24 hosted CLI cases; RX26 INDEX, RX27 JUSTIFY, and RX28 FIND CLI fixtures each 1/1.",
+    "rx19_rx20_rx24_rx25_rx26_rx27_rx28_regressions": "PASS — RX19 8,275 assertions and 2,048 properties; RX20 123 checks; RX24 65; RX25 2,156; RX26 48,166 plus 12,000 properties; RX27 42,589 plus 12,000 properties; RX28 36,175 plus 12,000 properties.",
     "asan": {
-      "status": "NOT_RUN",
-      "targets_passed": 0,
-      "targets_expected": 28
+      "status": "PASS",
+      "targets_passed": 28,
+      "targets_expected": 28,
+      "local_expected_cases": 196
     },
     "ubsan": {
-      "status": "NOT_RUN",
-      "targets_passed": 0,
-      "targets_expected": 28
+      "status": "PASS",
+      "targets_passed": 28,
+      "targets_expected": 28,
+      "local_expected_cases": 196
     },
-    "freestanding_amd64": "NOT_RUN — no RX29 source build was started.",
+    "freestanding_amd64": {
+      "status": "PASS",
+      "rexx_c_objects": 9,
+      "kernel_elf_sha256": "a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef",
+      "build_output_root": "build/rexx/rx29/native-amd64-eaa4c166f50c453fa3f6f6d76c15ff4a",
+      "evidence": "docs/rexx/evidence/rx29/native-build/native-link-evidence-eaa4c166f50c453fa3f6f6d76c15ff4a.json"
+    },
     "regina": {
       "status": "NOT_RUN",
       "availability": "Executable not found on PATH",
       "portable_queued_corpus": "NOT_RUN"
     },
     "native_guest": {
-      "status": "NOT_RUN — architecture decision gate",
+      "status": "NOT_RUN — architecture decision gate; another verified QAC acceptance reservation was active at revalidation.",
       "reservation_requested": false,
       "guest_launched": false,
-      "reason": "No RX29 guest scripts could exercise unsupported production instructions."
+      "reason": "The runtime has no executable queue operations or QUEUED dispatch. RX29 did not request a reservation or launch/control a guest.",
+      "evidence": "docs/rexx/evidence/rx29/qac-occupied-revalidation.json"
     }
   },
   "qac_preflight": {
@@ -118,31 +128,75 @@
     "qemu_processes": 0,
     "foreign_qemu_processes": 0,
     "reservation_release": "Not applicable; no reservation requested.",
-    "evidence": "docs/rexx/evidence/rx29/qac-preflight.json"
+    "evidence": "docs/rexx/evidence/rx29/qac-preflight.json",
+    "revalidation": {
+      "status": "Earlier other-run reservation active; final post-check idle.",
+      "reservation_id": "1adb5ec436cf4aa5afb1ad44638d4a10",
+      "project": "guideXOSServer",
+      "mode": "acceptance",
+      "owner_pid": 21028,
+      "qemu_child_pid": 9776,
+      "queued": 0,
+      "rx29_reservation_requested": false,
+      "foreign_session_controlled": false,
+      "evidence": "docs/rexx/evidence/rx29/qac-occupied-revalidation.json",
+      "post_check_status": "Online; zero sessions, reservations, queued requests, and QEMU processes.",
+      "post_check_evidence": "docs/rexx/evidence/rx29/qac-post-revalidation.json",
+      "rx29_reservation_release": "N/A — RX29 requested none; final QAC status idle, no shutdown command issued."
+    }
   },
   "protected_artifacts": {
-    "status": "PASS",
+    "status": "PASS — 31/31 unchanged after hosted, sanitizer, clock, and freestanding runs.",
     "root_obj_pdb_count": 31,
     "start_hashes": "docs/rexx/evidence/rx29/protected-artifacts-start.json",
     "end_hashes": "docs/rexx/evidence/rx29/protected-artifacts-end.json",
     "integrity_report": "docs/rexx/evidence/rx29/protected-artifact-integrity.json",
     "changed_or_new": 0,
-    "missing": 0
+    "missing": 0,
+    "current_revalidation": "docs/rexx/evidence/rx29/protected-artifact-revalidation.json"
   },
   "untracked_paths": {
-    "status": "PASS",
+    "status": "PASS — every starting path preserved; 3,381 additional paths recorded",
     "starting_count": 83493,
     "encoding": "UTF-8 without BOM",
     "newline": "LF",
     "sort": "ordinal, case-sensitive",
     "starting_manifest": "docs/rexx/evidence/rx29/untracked-start-ordinal.paths",
     "starting_sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
-    "ending_count": 83493,
-    "ending_sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
-    "ending_manifest_external": "C:\\Users\\guideX\\.codex\\visualizations\\2026\\10\\23\\01a168b4-295f-73a1-8b9a-9e732e3172fd\\rx29-untracked-end.paths",
+    "ending_count": 86874,
+    "ending_sha256": "FAA46ADD589A05D7A1CFB4C0D36313438C4A819F1C1FED0A493A2EF6AFAAA556",
+    "ending_manifest_external": "docs/rexx/evidence/rx29/untracked-end-ordinal.paths",
     "missing_preexisting_paths": [],
-    "unexpected_paths": [],
-    "sets_equal": true
+    "unexpected_paths": [
+      "3,381 new paths are enumerated in the ending manifest."
+    ],
+    "sets_equal": false,
+    "added_path_count": 3381,
+    "missing_preexisting_count": 0,
+    "ending_manifest": "docs/rexx/evidence/rx29/untracked-end-ordinal.paths"
   },
-  "recommended_rx30_scope": "Establish the bounded data-stack foundation and executable QUEUE/PUSH/PULL/PARSE PULL semantics with explicit ownership and lifetime, then qualify QUEUED against that real state."
+  "recommended_rx30_scope": "Establish the bounded data-stack foundation and executable QUEUE/PUSH/PULL/PARSE PULL semantics with explicit ownership and lifetime, then qualify QUEUED against that real state.",
+  "production_rexx_source_changes": 0,
+  "qualification_runner_changes": [
+    "tests/run_rexx_tests.ps1",
+    "tests/run_rexx_sanitizers.ps1",
+    "tests/run_rexx_native_qualification.ps1",
+    "tests/run_rx20_clock_contract.ps1",
+    "tests/rexx_artifact_guard.psm1"
+  ],
+  "current_revalidation": {
+    "checked_date": "2026-10-23",
+    "branch": "REXX_SUPPORT",
+    "starting_head": "2ea2b54e99c30986ba13839f942d29d93a944801",
+    "accepted_rx28_head": "cdf037707fbc5b9fe4755fff0b94337fb740cb7f",
+    "starting_head_matches_accepted_rx28": false,
+    "accepted_rx28_is_parent": true,
+    "preexisting_commit": "Documentation-only RX29 blocker commit",
+    "queued_architecture_reconfirmed": "No parser/compiler queue instructions, external queue store, or host provider",
+    "hosted_evidence": "docs/rexx/evidence/rx29/hosted-regression-summary.json",
+    "sanitizer_evidence": "docs/rexx/evidence/rx29/sanitizer-results.json",
+    "qac_evidence": "docs/rexx/evidence/rx29/qac-occupied-revalidation.json",
+    "qac_post_check": "docs/rexx/evidence/rx29/qac-post-revalidation.json"
+  },
+  "untracked_path_revalidation": "docs/rexx/evidence/rx29/untracked-path-revalidation.json"
 }

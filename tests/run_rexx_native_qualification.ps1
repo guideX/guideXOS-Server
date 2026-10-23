@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29')]
     [string]$Phase = 'RX12R1',
     [string]$MakeExecutable = '',
     [string]$OutputEvidenceRoot = ''
@@ -12,7 +12,9 @@ if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
 }
 $kernelDir = Join-Path $rootDir 'kernel'
 $phaseRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())"
-$guardManifest = if ($Phase -eq 'RX28') {
+$guardManifest = if ($Phase -eq 'RX29') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx29\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX28') {
     Join-Path $rootDir 'docs\rexx\evidence\rx28\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX27') {
     Join-Path $rootDir 'docs\rexx\evidence\rx27\protected-artifacts-start.json'

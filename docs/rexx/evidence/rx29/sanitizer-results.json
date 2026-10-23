@@ -1,0 +1,26 @@
+{
+  "schema": "guidexos.rexx.rx29.sanitizer-summary.v1",
+  "phase": "RX29",
+  "address": {
+    "status": "PASS",
+    "target_builds": "28/28",
+    "target_runs": "28/28",
+    "local_expected_result_cases": "196/196",
+    "run_id": "8a3e3c98cc094f9984e56d5ef0a26af3",
+    "compiler": "MSVC 19.51.36260"
+  },
+  "undefined": {
+    "status": "PASS",
+    "target_builds": "28/28",
+    "target_runs": "28/28",
+    "local_expected_result_cases": "196/196",
+    "run_id": "7ee56e54830f427fa998c55209e3c4be",
+    "compiler": "clang 22.1.8"
+  },
+  "regina_differential": "NOT_RUN — executable unavailable; each matrix records 196 local EXPECTED_EXIT results",
+  "queued_specific_coverage": "NOT_RUN — no executable queue or QUEUED dispatch",
+  "evidence": [
+    "sanitizer-address-8a3e3c98cc094f9984e56d5ef0a26af3/results.json",
+    "sanitizer-undefined-7ee56e54830f427fa998c55209e3c4be/results.json"
+  ]
+}

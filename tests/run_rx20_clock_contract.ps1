@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX20','RX21')][string]$Phase = 'RX20'
+    [ValidateSet('RX20','RX21','RX29')][string]$Phase = 'RX20'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +13,8 @@ if ($null -eq $compiler) { throw 'g++ is required for the RX20 clock contract ho
 
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$manifest = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\protected-artifacts-start.json"
+$manifestName = if ($Phase -eq 'RX29') { 'protected-artifacts-guard.json' } else { 'protected-artifacts-start.json' }
+$manifest = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\$manifestName"
 $runId = [Guid]::NewGuid().ToString('N')
 $runRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())\direct-$runId"
 $workingDirectory = Join-Path $runRoot 'temp'

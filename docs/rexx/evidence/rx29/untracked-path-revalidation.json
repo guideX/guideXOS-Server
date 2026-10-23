@@ -1,0 +1,19 @@
+{
+  "schema": "guidexos.rexx.rx29.untracked-path-revalidation.v1",
+  "status": "PASS — all original paths preserved",
+  "path_set_equality": false,
+  "method": "Ordinal, case-sensitive set comparison using git ls-files --others --exclude-standard --full-name",
+  "path_encoding": "UTF-8 without BOM",
+  "newline": "LF with final newline",
+  "sort": "ordinal, case-sensitive",
+  "starting_count": 83493,
+  "starting_sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
+  "ending_count": 86874,
+  "ending_sha256": "FAA46ADD589A05D7A1CFB4C0D36313438C4A819F1C1FED0A493A2EF6AFAAA556",
+  "missing_preexisting_count": 0,
+  "missing_preexisting_paths": [],
+  "added_path_count": 3381,
+  "added_paths": "All additions are present in the ending manifest.",
+  "starting_manifest": "untracked-start-ordinal.paths",
+  "ending_manifest": "untracked-end-ordinal.paths"
+}
