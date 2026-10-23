@@ -2,7 +2,7 @@
 
 ### SN10R14 native window content and result-log repair (2026-10-23)
 
-**Outcome B — the invalid relocated pointers were corrected and qualified offline; guest acceptance remains incomplete because the single fresh QAC census found the lane occupied.** Starting branch, HEAD, and phase were `STELLAR_NAVIGATOR`, `342c685e7cef6afb84c6bc5d00ea5524b620c403`, and `SN10`. The starting status snapshot contained 1,984 entries (SHA-256 `56fedb5f31ff55c536d9ce7c635d42f5a741c3e6344688059b7a50ef69981976`). All starting entries were retained. The qualification added the native ELF build output, three build/runner scripts, and one focused relocation contract test; the existing dirty report and unrelated entries were preserved.
+**Outcome B — the invalid relocated pointers were corrected and qualified offline; guest acceptance remains incomplete because the single fresh QAC census found the lane occupied.** Starting branch, HEAD, and phase were `STELLAR_NAVIGATOR`, `342c685e7cef6afb84c6bc5d00ea5524b620c403`, and `SN10`. The starting status snapshot contained 1,984 entries (SHA-256 `56fedb5f31ff55c536d9ce7c635d42f5a741c3e6344688059b7a50ef69981976`). All pre-existing content was preserved. The qualification added the native ELF build output, three build/runner scripts, and one focused relocation contract test; the related dirty report was committed with this update, leaving 1,983 status entries. Every other baseline entry is unchanged.
 
 #### Result-log format and corruption boundary
 
