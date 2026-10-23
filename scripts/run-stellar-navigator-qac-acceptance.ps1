@@ -11,6 +11,7 @@ param(
     [string]$CandidateDiskVerificationPath = 'E:\bkup\artifacts\SN10R8_20261020\media\stellar-navigator-sn10r8-verification.json',
     [string]$KernelArtifactPath = '',
     [string]$ExpectedKernelSha256 = '',
+    [string]$ExpectedNativeElfSha256 = '',
     [string]$ExpectedDiskSha256 = '',
     [switch]$VerifyCandidateOnly,
     [switch]$SelfTest
@@ -42,6 +43,10 @@ if ($KernelArtifactPath) { $Kernel = [IO.Path]::GetFullPath($KernelArtifactPath)
 if ($ExpectedKernelSha256) {
     if ($ExpectedKernelSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'ExpectedKernelSha256 must be a 64-digit SHA-256 value.' }
     $Expected.Kernel = $ExpectedKernelSha256.ToLowerInvariant()
+}
+if ($ExpectedNativeElfSha256) {
+    if ($ExpectedNativeElfSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'ExpectedNativeElfSha256 must be a 64-digit SHA-256 value.' }
+    $Expected.NativeElf = $ExpectedNativeElfSha256.ToLowerInvariant()
 }
 if ($ExpectedDiskSha256) {
     if ($ExpectedDiskSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'ExpectedDiskSha256 must be a 64-digit SHA-256 value.' }
@@ -869,6 +874,7 @@ function Invoke-SelfTest {
             passed = $true
             kernelArtifactPath = [IO.Path]::GetFullPath($Kernel)
             expectedKernelSha256 = $Expected.Kernel
+            expectedNativeElfSha256 = $Expected.NativeElf
             expectedDiskSha256 = $Expected.Disk
         }
 

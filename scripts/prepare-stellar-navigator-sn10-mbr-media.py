@@ -318,7 +318,17 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         extra = sorted(set(actual) - set(source_manifest))
         changed = sorted(name for name in set(actual) & set(source_manifest) if actual[name] != source_manifest[name])
         raise ValueError(f"source ESP differs from accepted full-tree manifest; missing={missing}, extra={extra}, changed={changed}")
-    for name, digest in EXPECTED_REQUIRED_HASHES.items():
+    expected_hashes = dict(EXPECTED_REQUIRED_HASHES)
+    override_hashes = {
+        "kernel.elf": args.expected_kernel_sha256,
+        "Apps/StellarNavigator/bin/amd64/stellarnavigator.elf": args.expected_native_elf_sha256,
+    }
+    for name, digest in override_hashes.items():
+        if digest:
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+                raise ValueError(f"invalid expected SHA-256 override for {name}")
+            expected_hashes[name] = digest.lower()
+    for name, digest in expected_hashes.items():
         if name not in actual or actual[name]["sha256"] != digest:
             raise ValueError(f"accepted payload SHA-256 mismatch: {name}")
     if not BOOT_FILES.issubset(actual):
@@ -473,7 +483,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         "partitionEndLba": root_start + PARTITION_SECTORS - 1,
         "fatType": "FAT32",
         "files": list(actual.values()),
-        "requiredPaths": list(EXPECTED_REQUIRED_HASHES),
+        "requiredPaths": list(expected_hashes),
+        "requiredPayloadHashes": expected_hashes,
         "payloadHashesMatchAcceptedManifest": True,
         "originalGptUnchanged": original_hash_before == original_hash_after,
         "noKernelSourceChangeRequired": True,
@@ -490,6 +501,8 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--full-tree-manifest", type=Path, required=True)
     command.add_argument("--original-gpt-image", type=Path, required=True)
     command.add_argument("--expected-original-gpt-sha256", required=True)
+    command.add_argument("--expected-kernel-sha256", default="")
+    command.add_argument("--expected-native-elf-sha256", default="")
     command.add_argument("--output-dir", type=Path, required=True)
     return command
 

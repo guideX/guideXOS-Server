@@ -8,6 +8,7 @@ $SourceDir = $PSScriptRoot
 $OutputDir = Join-Path $Root 'Apps\StellarNavigator\bin\amd64'
 $ElfPath = Join-Path $OutputDir 'stellarnavigator.elf'
 $ManifestPath = Join-Path $Root 'Apps\StellarNavigator\app.json'
+$RelocationContractTest = Join-Path $SourceDir 'tests\native_elf_relocation_contract_test.ps1'
 $Clang = 'C:\Program Files\LLVM\bin\clang++.exe'
 $Lld = 'C:\Program Files\LLVM\bin\ld.lld.exe'
 $ReadElf = 'C:\mingw64\bin\readelf.exe'
@@ -19,8 +20,10 @@ foreach ($tool in @($Clang, $Lld, $ReadElf)) {
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $BuildDir = Join-Path $env:TEMP ('stellar-navigator-sn10-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
+# The bare-metal loader rebases MOVABS pointers, but small-model ET_EXEC output
+# can encode static string addresses as unsupported 32-bit immediates.
 $Common = @(
-    '--target=x86_64-unknown-elf', '-std=c++11', '-O2', '-Wall', '-Wextra', '-Werror',
+    '--target=x86_64-unknown-elf', '-std=c++11', '-O2', '-Wall', '-Wextra', '-Werror', '-mcmodel=large',
     '-ffreestanding', '-fno-exceptions', '-fno-rtti', '-fno-stack-protector', '-fno-builtin',
     '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-fno-threadsafe-statics',
     '-fno-use-cxa-atexit', '-ffp-contract=off', "-I$IncludeDir", "-I$SourceDir"
@@ -44,6 +47,8 @@ if ($LASTEXITCODE -ne 0 -or $Header -notmatch 'Class:\s+ELF64' -or
     $ProgramHeaders -match 'INTERP' -or $Relocations -notmatch 'There are no relocations') {
     throw "Built artifact does not meet the Native ELF static ET_EXEC contract.`n$Header`n$ProgramHeaders`n$Relocations"
 }
+
+& $RelocationContractTest -ElfPath $ElfPath
 
 Copy-Item -LiteralPath (Join-Path $SourceDir 'app.json') -Destination $ManifestPath -Force
 Write-Host "Native Stellar Navigator ELF: $ElfPath"
