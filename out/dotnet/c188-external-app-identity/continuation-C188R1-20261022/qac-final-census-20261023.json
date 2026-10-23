@@ -1,0 +1,5 @@
+{
+  "capturedAtUtc": "2026-10-23T11:33:44.1516487Z",
+  "status": "Coordinator: Online\r\nName: guideXOS QAC\r\nVersion: 2.0.0\r\nPID: 16064\r\nStarted (UTC): 2026-10-23T11:10:30.5849382+00:00\r\nUptime: 1393s\r\nQEMU processes: 0 (0 foreign)\r\nManaged development limit: 2\r\nManaged sessions: 0; queued: 0; blocked: 0",
+  "list": "Coordinator: Online (guideXOS QAC 2.0.0)\r\nReservations: 0\r\nManaged sessions: 0"
+}

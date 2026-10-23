@@ -1,0 +1,16 @@
+{
+  "capturedAtUtc": "2026-10-23T11:33:23.2914062Z",
+  "comparisonBaseline": "protected-after.json",
+  "repository": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT",
+  "branch": "v1.1_DOTNET_SUPPORT",
+  "head": "1d2baabe601563729241dd9a2735f4dba02dd8b0",
+  "protectedRootCount": 13,
+  "baselineFileCount": 8497,
+  "currentFileCount": 8497,
+  "added": [],
+  "removed": [],
+  "changed": [],
+  "result": "PASS",
+  "originalRamdiskSha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8",
+  "currentRamdiskSha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8"
+}
