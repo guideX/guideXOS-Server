@@ -10,6 +10,7 @@
 #include "include/kernel/input_manager.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/dm37_input_diagnostics.h"
 
 // Include available input backends
 #if ARCH_HAS_PS2
@@ -54,6 +55,7 @@ static uint32_t s_mappingDiagnosticLimit = 0;
 static uint32_t s_mappingDiagnosticCount = 0;
 static int32_t s_lastPs2X = 0;
 static int32_t s_lastPs2Y = 0;
+static uint32_t s_lastMouseEventDiagnosticSequence = 0;
 
 // ================================================================
 // Helpers
@@ -128,8 +130,9 @@ static void log_mapping_event(const display_input::DisplayPointerEvent& event)
 }
 
 static void apply_mapping_event(const display_input::DisplayPointerEvent& event,
-                                InputSource source)
+                                InputSource source, uint32_t diagnosticSequence)
 {
+    const bool buttonTransition = event.buttonMask != s_mouse.buttons;
     s_mouse.mapping = event;
     s_mouse.x = event.virtualX;
     s_mouse.y = event.virtualY;
@@ -139,6 +142,15 @@ static void apply_mapping_event(const display_input::DisplayPointerEvent& event,
     s_mouse.buttons = event.buttonMask;
     s_mouse.scrollY = static_cast<int8_t>(event.wheelDelta);
     s_mouse.scrollX = 0;
+    if (diagnosticSequence != 0 &&
+        diagnosticSequence != s_lastMouseEventDiagnosticSequence) {
+        s_lastMouseEventDiagnosticSequence = diagnosticSequence;
+        dm37_input_diagnostics::emit("input-map", diagnosticSequence,
+            event.buttonMask,
+            dm37_input_diagnostics::pack_coordinates(event.virtualX,
+                                                       event.virtualY),
+            !buttonTransition);
+    }
     log_mapping_event(event);
 }
 
@@ -250,7 +262,8 @@ static void poll_ps2_mouse()
         buttons != s_mouse.buttons || scroll != 0) {
         s_mouse.dirty = true;
     }
-    apply_mapping_event(event, InputSource::PS2);
+    apply_mapping_event(event, InputSource::PS2,
+        ps2mouse::last_event_diagnostic_sequence());
 }
 #endif
 
@@ -273,7 +286,7 @@ static void poll_usb_hid_mouse()
         usbMouse->buttons != s_mouse.buttons || usbMouse->wheel != 0) {
         s_mouse.dirty = true;
     }
-    apply_mapping_event(event, InputSource::USB_HID);
+    apply_mapping_event(event, InputSource::USB_HID, 0);
 }
 #endif // ARCH_HAS_USB && KERNEL_HAS_USB_HID
 
@@ -301,7 +314,7 @@ static void poll_virtio_input()
         vioMouse->buttons != s_mouse.buttons || vioMouse->wheel != 0) {
         s_mouse.dirty = true;
     }
-    apply_mapping_event(event, InputSource::VirtIO);
+    apply_mapping_event(event, InputSource::VirtIO, 0);
 }
 #endif
 
@@ -329,6 +342,7 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_displayMapper.setCursor(s_mouse.x, s_mouse.y);
     s_lastPs2X = s_mouse.x;
     s_lastPs2Y = s_mouse.y;
+    s_lastMouseEventDiagnosticSequence = 0;
     s_mappingDiagnosticCount = 0;
     
 #if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
@@ -445,6 +459,8 @@ void poll()
 // ----------------------------------------------------------------
 
 int32_t mouse_x()       { return s_mouse.x; }
+uint32_t last_mouse_event_diagnostic_sequence()
+{ return s_lastMouseEventDiagnosticSequence; }
 int32_t mouse_y()       { return s_mouse.y; }
 uint8_t mouse_buttons() { return s_mouse.buttons; }
 

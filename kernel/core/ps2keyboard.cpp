@@ -9,6 +9,7 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/shell.h"
+#include "include/kernel/dm37_input_diagnostics.h"
 
 namespace kernel {
 namespace ps2keyboard {
@@ -39,16 +40,22 @@ static KeyEvent s_nativeEventQueue[kEventQueueCapacity];
 static volatile uint8_t s_nativeEventHead = 0;
 static volatile uint8_t s_nativeEventTail = 0;
 
-static void enqueue_event(uint32_t key, bool keyUp)
+static uint8_t enqueue_event(uint32_t key, bool keyUp,
+                             uint32_t diagnosticSequence)
 {
-    if (key == 0) return;
+    if (key == 0) return 0;
     const KeyAction action = keyUp ? KeyAction::Up : KeyAction::Down;
+    uint8_t accepted = 0;
 
     const uint8_t legacyNext = static_cast<uint8_t>((s_eventHead + 1u) % kEventQueueCapacity);
     if (legacyNext != s_eventTail) {
         s_eventQueue[s_eventHead].key = key;
         s_eventQueue[s_eventHead].action = action;
+        s_eventQueue[s_eventHead].diagnosticSequence = diagnosticSequence;
         s_eventHead = legacyNext;
+        accepted |= 0x01;
+    } else {
+        accepted |= 0x04;
     }
 
     // Keep Native ELF transitions independent from the legacy desktop
@@ -58,8 +65,13 @@ static void enqueue_event(uint32_t key, bool keyUp)
     if (nativeNext != s_nativeEventTail) {
         s_nativeEventQueue[s_nativeEventHead].key = key;
         s_nativeEventQueue[s_nativeEventHead].action = action;
+        s_nativeEventQueue[s_nativeEventHead].diagnosticSequence = diagnosticSequence;
         s_nativeEventHead = nativeNext;
+        accepted |= 0x02;
+    } else {
+        accepted |= 0x08;
     }
+    return accepted;
 }
 
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -185,6 +197,7 @@ void init()
     s_eventTail = 0;
     s_nativeEventHead = 0;
     s_nativeEventTail = 0;
+    dm37_input_diagnostics::set_current_sequence(0);
     
     serial::puts("[PS2KB] Keyboard initialized (scancode set 2)\n");
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -331,7 +344,17 @@ void irq_handler()
     }
     
     if (key != 0) {
-        enqueue_event(key, keyUp);
+        const uint32_t diagnosticSequence =
+            dm37_input_diagnostics::is_control_key(key)
+            ? dm37_input_diagnostics::begin_event() : 0;
+        const uint8_t accepted = enqueue_event(key, keyUp,
+                                               diagnosticSequence);
+        if (diagnosticSequence != 0) {
+            dm37_input_diagnostics::emit("ps2-key",
+                diagnosticSequence, key, keyUp ? 0u : 1u);
+            dm37_input_diagnostics::emit("queue-accept",
+                diagnosticSequence, accepted, key);
+        }
         if (keyUp) return;
         s_lastKey = key;
         s_hasKey = true;
@@ -349,6 +372,7 @@ bool has_key()
 uint32_t get_key()
 {
     if (!s_hasKey) return 0;
+    dm37_input_diagnostics::set_current_sequence(0);
     s_hasKey = false;
     // Keep the legacy one-key API and the lossless transition queue in sync.
     // The desktop consumes key-downs only; discard queued release transitions
@@ -356,7 +380,15 @@ uint32_t get_key()
     while (s_eventTail != s_eventHead) {
         const KeyEvent event = s_eventQueue[s_eventTail];
         s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
-        if (event.action == KeyAction::Down) break;
+        if (event.action == KeyAction::Down) {
+            if (event.diagnosticSequence != 0) {
+                dm37_input_diagnostics::set_current_sequence(
+                    event.diagnosticSequence);
+                dm37_input_diagnostics::emit("legacy-pop",
+                    event.diagnosticSequence, event.key, s_lastKey);
+            }
+            break;
+        }
     }
     return s_lastKey;
 }
@@ -371,6 +403,10 @@ bool get_event(KeyEvent* outEvent)
     if (!outEvent || s_nativeEventTail == s_nativeEventHead) return false;
     *outEvent = s_nativeEventQueue[s_nativeEventTail];
     s_nativeEventTail = static_cast<uint8_t>((s_nativeEventTail + 1u) % kEventQueueCapacity);
+    if (outEvent->diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("native-pop",
+            outEvent->diagnosticSequence, outEvent->key,
+            outEvent->action == KeyAction::Down ? 1u : 0u);
     return true;
 }
 
@@ -385,6 +421,7 @@ void clear()
     s_eventTail = 0;
     s_nativeEventHead = 0;
     s_nativeEventTail = 0;
+    dm37_input_diagnostics::set_current_sequence(0);
 }
 
 bool is_ctrl_down()

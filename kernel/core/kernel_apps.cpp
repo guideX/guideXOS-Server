@@ -15,6 +15,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/time.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/dm37_input_diagnostics.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
 #include "include/kernel/file_clipboard.h"
 #include "include/kernel/image_adapter.h"
@@ -8151,6 +8152,12 @@ void DiskManagerApp::moveActionFocus(int delta) {
         m_window, candidates,
         sizeof(candidates) / sizeof(candidates[0]),
         m_actionFocus, delta);
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("dm-action-focus",
+            diagnosticSequence, static_cast<uint32_t>(m_actionFocus),
+            static_cast<uint32_t>(activeActionWidgetIdAt(m_actionFocus)));
     updateInitializeControls();
     invalidate();
 }
@@ -8169,19 +8176,43 @@ void DiskManagerApp::activateKeyboardAction() {
         invalidate();
         return;
     }
-    if (m_keyboardPane != KEYBOARD_ACTIONS) return;
+    if (!disk_manager_input_focus::action_activation_allowed(
+            static_cast<uint8_t>(m_keyboardPane))) return;
     const int widgetId = activeActionWidgetIdAt(m_actionFocus);
-    app::dispatch_button_activation(m_window, widgetId,
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("dm-action-attempt",
+            diagnosticSequence, static_cast<uint32_t>(m_actionFocus),
+            static_cast<uint32_t>(widgetId));
+    const bool dispatched = app::dispatch_button_activation(m_window, widgetId,
         [this](int id) { onWidgetClick(id); });
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("dm-action-result",
+            diagnosticSequence, static_cast<uint32_t>(widgetId),
+            dispatched ? 1u : 0u);
 }
 
 void DiskManagerApp::onKeyDown(uint32_t key) {
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0) {
+        const uint32_t state =
+            (static_cast<uint32_t>(m_keyboardPane) << 24) |
+            ((static_cast<uint32_t>(m_initializeDialogState) & 0xFFu) << 16) |
+            (static_cast<uint32_t>(m_actionFocus) & 0xFFFFu);
+        dm37_input_diagnostics::emit("dm-key", diagnosticSequence, key,
+                                     state);
+    }
     const bool escape = key == 27;
     const bool enter = key == '\n' || key == 13 || key == 32;
     const bool tab = key == '\t' || key == shell::KEY_TAB;
     if (m_mountDialogOpen) {
         if (escape) {
             m_mountDialogOpen = false;
+            disk_manager_input_focus::settle_storage_modal_focus(
+                m_keyboardPane, m_actionFocus,
+                disk_manager_input_focus::MODAL_MOUNT);
             strcopy(m_statusMessage, "Mount canceled.", sizeof(m_statusMessage));
             updateInitializeControls();
             invalidate();
@@ -8748,6 +8779,18 @@ void DiskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
 }
 
 void DiskManagerApp::onWidgetClick(int widgetId) {
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0 &&
+        (widgetId == m_unmountBtnId ||
+         (m_dialogIsDismount && (widgetId == m_confirmInitializeBtnId ||
+                                 widgetId == m_cancelInitializeBtnId)))) {
+        const uint32_t dialogState =
+            (static_cast<uint32_t>(m_initializeDialogState) << 8) |
+            (m_dialogIsDismount ? 1u : 0u);
+        dm37_input_diagnostics::emit("dm-widget-handler",
+            diagnosticSequence, static_cast<uint32_t>(widgetId), dialogState);
+    }
     if (m_dialogIsDismount && m_initializeDialogState ==
             INITIALIZE_DIALOG_DISMOUNT_CONFIRM &&
         widgetId == m_confirmInitializeBtnId) {
@@ -8769,6 +8812,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     }
     if (m_mountDialogOpen && widgetId == m_cancelInitializeBtnId) {
         m_mountDialogOpen = false;
+        disk_manager_input_focus::settle_storage_modal_focus(
+            m_keyboardPane, m_actionFocus,
+            disk_manager_input_focus::MODAL_MOUNT);
         strcopy(m_statusMessage, "Mount canceled.", sizeof(m_statusMessage));
         updateInitializeControls();
         invalidate();
@@ -13272,6 +13318,14 @@ void DiskManagerApp::closeInitializeDialog() {
         storage::cancel_delete_partition(m_deletePlan);
     if (m_gptRepairPlan.confirmationReady)
         storage::cancel_gpt_repair(m_gptRepairPlan);
+    if (m_dialogIsDismount || m_dialogIsFat32Integrity) {
+        const disk_manager_input_focus::StorageModal settledModal =
+            m_dialogIsDismount
+                ? disk_manager_input_focus::MODAL_DISMOUNT
+                : disk_manager_input_focus::MODAL_FAT32_CHECK;
+        disk_manager_input_focus::settle_storage_modal_focus(
+            m_keyboardPane, m_actionFocus, settledModal);
+    }
     m_initializeDialogState = INITIALIZE_DIALOG_CLOSED;
     m_dialogIsCreate = false;
     m_dialogIsFormat = false;
@@ -13394,6 +13448,9 @@ void DiskManagerApp::confirmPartitionMount() {
         strappend(status, ".", sizeof(status));
     }
     m_mountDialogOpen = false;
+    disk_manager_input_focus::settle_storage_modal_focus(
+        m_keyboardPane, m_actionFocus,
+        disk_manager_input_focus::MODAL_MOUNT);
     if (!m_closeAfterVerification) scanDisks();
     strcopy(m_statusMessage, status, sizeof(m_statusMessage));
     updateInitializeControls();
@@ -13402,6 +13459,12 @@ void DiskManagerApp::confirmPartitionMount() {
 
 void DiskManagerApp::beginDismountConfirmation() {
     using namespace disk_manager_dismount_ui;
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("dismount-entry",
+            diagnosticSequence, static_cast<uint32_t>(m_selectedPart),
+            static_cast<uint32_t>(m_keyboardPane));
     if (m_initializeDialogState != INITIALIZE_DIALOG_CLOSED ||
         m_mountDialogOpen || m_selectedDisk < 0 || m_selectedDisk >= m_diskCount ||
         m_selectedObject != SELECTED_PARTITION || m_selectedPart < 0 ||
@@ -13460,6 +13523,10 @@ void DiskManagerApp::beginDismountConfirmation() {
     m_createInputFocus = 2;
     m_initializeMessage[0] = '\0';
     m_initializeDialogState = INITIALIZE_DIALOG_DISMOUNT_CONFIRM;
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("confirmation-open",
+            diagnosticSequence, static_cast<uint32_t>(m_selectedPart),
+            static_cast<uint32_t>(m_createInputFocus));
     strcopy(m_statusMessage, "Review the captured mounted volume.",
             sizeof(m_statusMessage));
     updateInitializeControls();
@@ -13583,6 +13650,13 @@ void DiskManagerApp::runDismountOperation() {
             INITIALIZE_DIALOG_DISMOUNT_CONFIRM || !m_dismountTarget.valid)
         return;
 
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("dismount-handler",
+            diagnosticSequence, static_cast<uint32_t>(m_dismountTarget.valid),
+            static_cast<uint32_t>(m_initializeDialogState));
+
     vfs::MountPoint before = {};
     m_dismountBlockReason = revalidateDismountTarget(&before, true);
     if (before.active) m_dismountMountSnapshot = before;
@@ -13633,6 +13707,10 @@ void DiskManagerApp::runDismountOperation() {
     // The production VFS performs busy admission, quiescence, filesystem
     // teardown and the required durability Flush as one synchronous action.
     m_dismountStatus = vfs::dismount(m_dismountTarget.mount);
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("vfs-dismount-result",
+            diagnosticSequence, static_cast<uint32_t>(m_dismountStatus),
+            static_cast<uint32_t>(m_dismountTarget.mount.mountIndex));
     if (m_dismountStatus == vfs::VFS_OK) {
         strcopy(m_initializeMessage, "Volume Dismounted.",
                 sizeof(m_initializeMessage));
@@ -13706,6 +13784,10 @@ void DiskManagerApp::runDismountOperation() {
     }
     m_initializeDialogState = INITIALIZE_DIALOG_DISMOUNT_RESULT;
     m_createInputFocus = 0;
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("dismount-result-state",
+            diagnosticSequence, static_cast<uint32_t>(m_dismountStatus),
+            static_cast<uint32_t>(m_initializeDialogState));
     strcopy(m_statusMessage, m_initializeMessage, sizeof(m_statusMessage));
     updateInitializeControls();
     invalidate();

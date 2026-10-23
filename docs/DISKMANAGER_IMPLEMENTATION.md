@@ -464,3 +464,45 @@ final SHA-256 matched its starting hash. This is partial guest evidence, not
 Gate E or DM37 acceptance; `.phase` remains DM36→DM37. See the [DM37
 continuation 7 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-7--retry-with-clear-qac-census-partial-guest-evidence)
 and `out/dm37/dismount-guest/runs/E-workflow-qac-20261020-r5/`.
+
+## DM37 Continuation 8 — prelaunch ownership block
+
+The current source-matched runtime and clean fixture hashes were independently
+verified, but no guest was launched. QAC 2.0.0 showed a reservation from the
+sibling `guideXOSServer_FONT_SUPPORT` workspace, which exited naturally; a
+fresh prelaunch census then found a different verified acceptance reservation
+whose QEMU command line used the sibling `D:\dev\guideXOServer` workspace and
+PacMan release ISO. QAC labeled the session `guideXOSServer` and reported no
+foreign guest, but the changing workloads left the lane unavailable for safe
+DM37 use. Gate A remains accepted and Gate E remains
+incomplete after the prior read-only mount and VFS file-read evidence. The
+saved screenshots narrow the visible failure to Dismount activation, but do
+not trace input through PS/2 and the guest queue to the widget handler. Full
+preflight, hashes, QAC reservation details, I/O limitations, and remaining
+gates are in the [DM37 continuation 8 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-8--preflight-blocked-by-conflicting-active-qac-ownership).
+
+## DM37 Continuation 8 follow-up — QAC input trace and partial Gate E
+
+QAC 2.0.0's documented `run` path queued the `guideXOSServer` acceptance
+request and launched the direct QEMU child after admission. The source-matched
+guest reached the Dismount handler and confirmation, completed a successful
+read-only VFS Dismount, completed the DM36 FAT32 checker with zero findings,
+and explicitly remounted the same partition. The remounted screen shows
+`/mnt/disk1-part1` Mounted with a new partition-view generation. The final
+proof-file read was not verified because the Shell remained inactive after
+the Disk Manager Close and relative mouse X calibration was unreliable.
+Gate E remains incomplete; no DM37 acceptance or DM38 start is recorded.
+QAC logged a degraded warning during the run because its QEMU process census
+was incomplete; final child exit and reservation release were verified, but
+continuous census health is not claimed.
+
+Bounded `DM37-IN` traces identify keyboard dispatch through PS/2, queue,
+desktop/compositor focus, Disk Manager action/widget, handler, and
+confirmation. The 512-record cap was reached before the final remount input
+chain completed logging; the later screenshot still proves the resulting
+mounted state. A focus-reset helper and delayed-activation regression cover
+the stale action-focus case found in the preceding run. The guest's actual
+post-remount VFS read and delayed-key stress remain open. Run3 runtime hashes,
+QAC lease/release, full fixture integrity, cumulative QMP I/O limitations,
+host validation, and the untouched protected Git state are recorded in the
+[DM37 phase report follow-up](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-8-follow-up--qac-input-trace-and-partial-gate-e).

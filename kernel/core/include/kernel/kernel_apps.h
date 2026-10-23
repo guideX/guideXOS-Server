@@ -25,6 +25,7 @@
 #include "kernel/disk_manager_surface_verification_ui.h"
 #include "kernel/disk_manager_fat32_integrity_ui.h"
 #include "kernel/disk_manager_dismount_ui.h"
+#include "kernel/disk_manager_input_focus.h"
 #include "kernel/disk_manager_model.h"
 #include "kernel/desktop.h"
 #include "kernel/image_adapter.h"

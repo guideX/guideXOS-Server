@@ -23,6 +23,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/dm37_input_diagnostics.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/mmio.h"
@@ -1384,6 +1385,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             // The virtio-gpu live path consumes the normal desktop update
             // cadence; it does not own desktop/window state or input routing.
             kernel::virtio::gpu::presentation_tick();
+
+            // DM37 input records are collected with bounded fixed storage and
+            // drained outside PS/2 interrupt context.
+            kernel::dm37_input_diagnostics::flush();
 
             uint64_t workEndTicks = kernel::pit::ticks();
             if (workEndTicks >= workStartTicks) {

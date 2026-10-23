@@ -113,6 +113,7 @@ int32_t mouse_y();
 
 // Get current mouse button state
 uint8_t mouse_buttons();
+uint32_t last_mouse_event_diagnostic_sequence();
 
 // Get vertical scroll delta (reset after read)
 int8_t mouse_scroll_y();

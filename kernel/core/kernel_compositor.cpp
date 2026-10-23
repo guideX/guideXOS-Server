@@ -10,6 +10,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/dm37_input_diagnostics.h"
 
 #include <string.h>
 
@@ -580,6 +581,12 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
 
     app::KernelWindow* hitWin = nullptr;
     HitTestResult hit = hitTest(mx, my, &hitWin);
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("compositor-pointer-hit",
+            diagnosticSequence,
+            static_cast<uint32_t>(hit), hitWin ? hitWin->id : 0, true);
     if (hit == HitTestResult::Client && hitWin && hitWin->owner) {
         int localX = mx - hitWin->x;
         int localY = my - hitWin->y - TITLEBAR_HEIGHT;
@@ -595,6 +602,14 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
     
     app::KernelWindow* hitWin = nullptr;
     HitTestResult hit = hitTest(mx, my, &hitWin);
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("compositor-pointer-down",
+            diagnosticSequence,
+            (static_cast<uint32_t>(button) << 16) |
+                static_cast<uint32_t>(hit),
+            hitWin ? hitWin->id : 0);
     
     if (hit == HitTestResult::None) {
         return;
@@ -652,6 +667,12 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
                 int localY = my - hitWin->y - TITLEBAR_HEIGHT;
                 if (localX >= widget->x && localX < widget->x + widget->w &&
                     localY >= widget->y && localY < widget->y + widget->h) {
+                    if (diagnosticSequence != 0)
+                        dm37_input_diagnostics::emit("widget-press",
+                            diagnosticSequence,
+                            static_cast<uint32_t>(widget->id),
+                            dm37_input_diagnostics::pack_coordinates(
+                                localX, localY));
                     widget->pressed = true;
                     hitWin->dirty = true;
                     return;
@@ -685,6 +706,14 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
     // Check button releases
     app::KernelWindow* hitWin = nullptr;
     HitTestResult hit = hitTest(mx, my, &hitWin);
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("compositor-pointer-up",
+            diagnosticSequence,
+            (static_cast<uint32_t>(button) << 16) |
+                static_cast<uint32_t>(hit),
+            hitWin ? hitWin->id : 0);
     
     // Process button clicks
     for (int i = 0; i < MAX_WINDOWS; i++) {
@@ -750,6 +779,11 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
                 const bool dispatched = app::dispatch_widget_activation(
                     hitWin, widget->id,
                     [hitWin](int id) { hitWin->owner->onWidgetClick(id); });
+                if (diagnosticSequence != 0)
+                    dm37_input_diagnostics::emit("widget-activate",
+                        diagnosticSequence,
+                        static_cast<uint32_t>(widget->id),
+                        dispatched ? 1u : 0u);
                 if (wholeEraseStopWidget) {
                     serial::puts("[dm34-stop] pointer-dispatch result=");
                     serial::puts(dispatched ? "accepted\n" : "rejected\n");
@@ -777,6 +811,11 @@ void KernelCompositor::handleMouseWheel(int32_t mx, int32_t my, int8_t wheelDelt
 
 void KernelCompositor::handleKeyDown(uint32_t keyCode) {
     app::KernelWindow* focused = getFocusedWindow();
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("compositor-focus",
+            diagnosticSequence, keyCode, focused ? focused->id : 0);
     if (focused && focused->owner) {
         focused->owner->onKeyDown(keyCode);
     }

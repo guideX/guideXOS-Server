@@ -6,13 +6,14 @@ VFS lifecycle.** `.phase` remains `last_completed=DM36` and
 future work.
 
 **Latest continuation status (2026-10-20): Outcome B —
-`DM37_PARTIAL_GUEST_ACCEPTANCE`.** A retry after continuation 6 used a fresh
-QAC exclusive acceptance lease; QAC reported one managed guest and zero
-foreign QEMU. The workflow fixture was mounted read-only in Disk Manager and
-a fixture file was read through the guest VFS. Explicit Dismount could not be
-activated, so the FAT32 check and explicit remount were not reached. See
-continuation 7 at the end of this document. The earlier continuation 6
-foreign-QEMU report remains as historical evidence for that earlier census.
+`BLOCKED_BY_QAC_OR_FOREIGN_QEMU`.** Continuation 8 stopped before guest launch:
+QAC had a verified live acceptance reservation, but its QEMU command line
+pointed into the sibling `guideXOSServer_FONT_SUPPORT` project while the
+coordinator labeled the reservation `guideXOSServer`. That ownership conflict
+left the acceptance lane unavailable for safe DM37 use. Gate A remains
+accepted; Gate E remains incomplete after continuation 7. See continuation 8
+at the end of this document. The earlier continuation 6 and 7 censuses remain
+historical evidence for their respective runs.
 
 ## Scope and repository gate
 
@@ -860,3 +861,283 @@ this retry was the requested QAC QEMU guest verification. Production source
 did not change. The retained host baseline is 1,491/1,491 storage checks,
 with the previously accepted AMD64 kernel, `build.bat`, and UEFI x64 Release
 evidence. Do not advance `.phase` or start DM38 before DM37 Outcome A.
+
+## DM37 Continuation 8 — preflight blocked by conflicting active QAC ownership
+
+**Outcome B — `BLOCKED_BY_QAC_OR_FOREIGN_QEMU`.** Starting and ending HEAD
+were `e110046086ff4d06cf681580eb4d2df265a426ef` on
+`DISK_MANAGER_IMPROVEMENTS`; `.phase` remains `last_completed=DM36` /
+`next_expected=DM37`. No production source changed, no DM37 guest was started,
+and no QAC reservation was requested for this continuation.
+
+### Repository and relocated artifacts
+
+The 125 pre-existing staged deletions are confined to
+`out/appmodel-typed-dispatch-flags/`, `out/mc7-proof/`, and
+`out/wallpaper-pack/`. Those 125 paths are absent from the D: `out` tree and
+present under `E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out`;
+108 relocated Git blobs match HEAD exactly and 17 have different contents.
+The unstaged `.gitignore` change only adds a final newline. The pre-existing
+untracked `scripts/__pycache__/dm34_qmp_gui_input.cpython-312.pyc` was left
+untouched. No index operation was performed.
+
+The DM37 runtime remains source-matched. Its manifest records source revision
+`c40efd34eb67aa71b23e4f48f5243d8f18d11771`; all recorded production source
+hashes match the current worktree, and commits after that revision change only
+the two DM37 documentation files. The production AMD64 kernel and staged
+private ESP kernel both hash to
+`6D8DF6E65656B38DEA37F3704EC2639910C074EB448644FDB19FED5B47B7A29B`. The UEFI
+x64 Release bootloader and staged private ESP bootloader both hash to
+`736F0532DC491403ECAE3CC75A5F9815F03CAEFDD6D11CF853EE8483E81A53A7`. OVMF
+firmware hashes to
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`; QEMU
+11.0.0 (`v11.0.0-12122-ga4bb4b10c9`) hashes to
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`.
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0` remain required.
+
+The accepted clean `DM37IDLE01.raw` fixture remains at
+`out/dm37/dismount-guest/fixtures/DM37IDLE01.raw` on D:. The file is
+629,145,600 bytes and its independently recomputed SHA-256 is
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`, matching
+the recorded pristine hash. `DM37WORKFLOW01.raw` is in the same D: fixture
+directory and also currently hashes to the pristine value. The E: tree does
+not contain a relocated DM37 fixture/runtime tree. No fixture or runtime was
+regenerated or overwritten.
+
+### QAC census and input evidence
+
+The installed QAC CLI was the recorded 2.0.0 binary. Coordinator PID 408 was
+online. The first `qac status`, `qac list`, and `qac inspect` census showed
+verified reservation `c405e92f4b9c4f32865d0f3e7cad53eb`, owner
+`LEON2_RDT\guideX` PID 18588 and child QEMU PID 24124. QAC labeled it
+`guideXOSServer`, but its QEMU command line used
+`D:\dev\guideXOSServer_FONT_SUPPORT\out\font15-validation` for OVMF, ESP,
+and serial output and named `FONT15-live-guest-v3`. That child exited
+naturally before the next census; QAC then reported zero sessions.
+
+Immediately before a DM37 launch, a fresh census found a new verified
+acceptance reservation `eb86ad86e6614aa497c5718a82910ccc`, owner
+`LEON2_RDT\guideX` PID 29304 and child QEMU PID 35140, queue 0, and
+`degraded=false`. The command line used
+`D:\dev\guideXOSServer\docs\evidence\settings-s22-v03-package-20261018` and
+the sibling repository's `out\release-profile` PacMan ISO, with guest name
+`guideXOS-S22R10-PacMan-boot1`. QAC reported one managed QEMU and zero
+foreign; its process arguments still showed a different workspace from this
+DM37 checkout. This second session and QMP endpoint 65252 were not contacted
+or changed, and no DM37 reservation was requested. The acceptance lane was
+therefore treated as occupied.
+
+No new guest screenshots or dispatch trace were produced. Review of the
+retained continuation-7 screenshots shows fresh rendered frames, pointer
+movement to the Dismount button, and a later desktop capture with a visible
+File Explorer icon after a Return probe. The Dismount activation capture still
+shows no confirmation or state transition. This rules out concluding that the
+guest was globally frozen, but QMP acknowledgements and screenshots do not
+prove separate key-down/key-up or mouse-button delivery at the guest PS/2
+controller, input queue, or widget handler. The first observed failed
+transition remains the ordinary Dismount action activation; its precise
+boundary between QEMU delivery and widget dispatch is unresolved. No
+production input fix or temporary tracing was justified without a safe new
+guest run.
+
+### Gate E, integrity, shutdown, and retained qualification
+
+Continuation 7's actual read-only guest result remains: mounted at
+`/mnt/disk1-part1`; `DM9/PROOF.BIN` read through VFS with contents
+`guideXOS DM9 QEMU proof 001`. No Dismount confirmation/result, DM36 check,
+or explicit remount was observed. Gate E therefore remains incomplete. That
+run's target counters reported zero writes and unmaps and one Flush, but QEMU
+marked accounting invalid/failed, so the Flush and accumulated reads cannot
+be attributed to the file read or a specific operation. Its fixture hash
+matched after exit. ACPI powerdown did not complete; QMP `quit` ended the
+owned process, which closed QMP and released the QAC reservation, but this
+was not a clean guest OS shutdown. Continuation 8 launched no guest and has
+no shutdown or QAC cleanup action of its own.
+
+No host tests or builds were rerun because production source did not change;
+retain the prior **1,491/1,491 storage checks** and source-matched build
+evidence. Gate A remains accepted. Gate E, B, C guest scope, D, F, G, and
+remaining H cases remain open; Gate I continues to require per-run media and
+ownership verification. No commit or push was made, the existing staged and
+unstaged state was preserved, `.phase` was not advanced, and DM38 did not
+start.
+
+## DM37 Continuation 8 follow-up — QAC input trace and partial Gate E
+
+**Outcome B — `DM37_INPUT_DIAGNOSTICS_READY`.** This follow-up used the
+documented QAC FIFO admission path after the previously observed owner
+released its reservation. It completed the real Mount → Dismount → FAT32
+Check → Remount transitions on the clean read-only fixture, but could not
+re-read `DM9/PROOF.BIN` after remount. Gate E therefore remains incomplete;
+this is not DM37 acceptance and does not authorize DM38.
+
+### QAC admission and ownership
+
+The installed QAC 2.0.0 CLI help and source support `qac run` for a direct
+`qemu-system-*.exe` child, with queued admission, and the read-only `status`,
+`list`, `queue`, and `inspect` operations. The CLI waits on its reservation
+while it is pending; no undocumented scheduler behavior or direct QEMU launch
+was used. No global QAC settings or other repository were changed.
+
+The run used project identity `guideXOSServer`, mode `acceptance`, reservation
+`2c060850d2f640428021acbcc836ece5`, and owner
+`LEON2_RDT\guideX` PID 21872. QAC requested the reservation at
+`2026-10-22T22:46:17.7031284Z`, granted it at
+`2026-10-22T22:47:44.062518Z`, and registered direct QEMU child PID 25532.
+The CLI recorded FIFO queue position 1 and later grant. During the run,
+`qac.stderr.log` recorded a degraded warning because the QEMU process census
+was incomplete. This means continuous exclusive census health is not proven,
+even though the run began through QAC admission and no foreign process was
+reported in the subsequent status. Final inspection reported `Released`,
+`degraded=false`, owner verified, and reason `Managed child exited.` QEMU PID
+25532 exited and QMP port 59139 closed. A subsequent QAC listing showed a
+new managed reservation `755126b0030d418587a54c7d40da7c5b` with child PID
+15972. That later owner was not contacted, interrupted, or changed.
+
+### Source-matched runtime and artifacts
+
+The candidate manifest is
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\input-diagnostics-run3\runtime-manifest.json`.
+It identifies source revision `e110046086ff4d06cf681580eb4d2df265a426ef`
+on `DISK_MANAGER_IMPROVEMENTS`; all 13 recorded production source hashes
+were recomputed and matched the worktree before the guest run. The candidate
+enabled bounded diagnostics with
+`GXOS_DM37_INPUT_DIAGNOSTICS`; `NVME_WRITE_PROVEN=0` and
+`NVME_FLUSH_PROVEN=0` remained in force.
+
+The run3 freestanding kernel and private runtime ESP kernel both hash to
+`70433AE2BCC68FFC8508A3A0439817ED9AAAE14E1F70669428447186F8921C87`. The
+UEFI Release bootloader and private ESP `EFI/BOOT/BOOTX64.EFI` both hash to
+`B4AE9B5CF968F6B97447CCC595A0F84EF22B001394AF14389C05C6C98AFBABA4`. The
+ramdisk hash is
+`5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD`; the
+private OVMF image copied from the D: DM37 runtime hashes to
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`. The
+QEMU executable was version 11.0.0 (`v11.0.0-12122-ga4bb4b10c9`) with SHA-256
+`A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`.
+
+The campaign fixture and earlier DM37 fixture/build evidence remain on D:;
+the run1–run3 diagnostics, QAC invocation/reservation records, serial logs,
+QMP traces, screenshots, and run3 private runtime are on E: under
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\`.
+The run3 fixture was the D: file
+`out/dm37/dismount-guest/fixtures/DM37WORKFLOW01.raw`, attached through
+QEMU's read-only block option. No relocated fixture copy was used. After
+QEMU exited, a Windows exclusive read handle succeeded and the complete
+629,145,600-byte image SHA-256 was
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`, equal
+to the starting hash. No fixture or runtime evidence was deleted or
+overwritten.
+
+### Input dispatch and bounded diagnostics
+
+The production diagnostic path records bounded event identifiers across
+QMP-observed injection, PS/2 keyboard or mouse receipt, input-queue result,
+legacy dequeue, desktop key routing, compositor focus, Disk Manager key and
+action focus, action attempt, widget handler, Dismount handler, and
+confirmation-open transitions. It avoids sensitive text and hot-path
+allocation. The run3 serial ring contains exactly its 512-record limit; it
+does not imply later stages were absent. Pointer-motion diagnostics are
+capped at 16 records.
+
+For Dismount, the serial trace and screen evidence show the focused action at
+index 4/widget 6, ordinary Enter activation, accepted widget dispatch,
+handler entry, and the correct production confirmation. The confirmation
+identified USB device Disk1, GPT partition 1, `/mnt/disk1-part1`, Mounted,
+read-only, with zero open references and zero active I/O. Escape/Cancel
+protection left the mounted volume intact in the observed confirmation path.
+After explicit confirmation, the production VFS call returned success and
+the Disk Manager reported Unmounted while retaining the partition and device
+registration.
+
+The prior run2 delayed-Space observation motivated a narrow focus reset after
+storage-modal settlement: the pane returns to Partitions and action focus is
+reset before later input can select another operation. Focused host
+regressions cover that reset and delayed activation case. In run3, the
+keyboard path independently traversed the panes and action row and activated
+Dismount, the checker, and Mount. The guest did not show an unintended
+post-confirmation operation before the diagnostic cap; a separate guest
+delayed-key stress case remains unqualified.
+
+QEMU `query-mice` identified a relative PS/2 mouse (`absolute=false`); an
+absolute-motion event was rejected by QEMU. Relative movement and an earlier
+button edge reached desktop/compositor dispatch, but X calibration was not
+stable. In the final Shell-focus attempt, relative `+100` moved the pointer
+left and `-600` clamped it at the left screen edge. The Shell remained
+visible but inactive after Disk Manager closed, so a typed command burst and
+a later single Return produced no visible Shell input. QMP acknowledgements
+alone do not prove Shell delivery; after the 512-record cap, the chain from
+those inputs through PS/2 and focus to Shell processing is unobserved. This
+does not identify an earlier failure in the Disk Manager keyboard dispatch
+path, which was traced successfully for Dismount and Check.
+
+The ordinary application Close path was exercised after the remount settled.
+Guest serial recorded Alt+F4 recognition, a close request for the Disk
+Manager window, and an accepted result; the next settled screenshot shows
+the Shell. This is not a claim of Close-during-dismount acceptance. The Mount
+confirmation has no Tab focus-cycle behavior: the visible Mount action was
+selected, its target identity was reviewed, and Enter invoked the ordinary
+affirm path.
+
+### Gate E workflow and integrity
+
+**Stage A — Mount and initial proof read:** Disk Manager mounted USB serial
+`DM37WORKFLOW01`, GPT partition 1, FAT32 label `DM9PROOF`, read-only at
+`/mnt/disk1-part1`. Shell VFS read `DM9/PROOF.BIN` as
+`guideXOS DM9 QEMU proof 001` (29 bytes); the command closed its file
+reference before Dismount.
+
+**Stage B — Dismount:** the correct confirmation identity was shown and
+explicitly confirmed. The production VFS Dismount returned success; the
+partition became Unmounted, with device registration preserved and no open
+references or active I/O.
+
+**Stage C — Check FAT32:** the existing read-only checker ran against that
+same unmounted partition. It reported verification passed, 40 metadata reads
+(925,184 bytes), 306,688/306,688 FAT bytes compared, 3 chains/clusters, 2
+directories, 7 entries, 15 structural reads, a scan of 76,593 orphan
+clusters (3,063,808 bytes), zero findings, no repair, and released checker
+ownership. The result reported no structural inconsistencies and no
+incomplete result.
+
+**Stage D — Remount:** the same GPT partition was explicitly selected and
+mounted read-only at `/mnt/disk1-part1`. The settled Disk Manager screen
+shows Mounted and partition-view generation 3, following generation 2 before
+the check. The QMP/serial trace captured the remount Enter down event and
+queue acceptance, then reached the 512-record cap. The later screenshot
+proves the mounted state, but not a new file read. Because Shell focus could
+not be re-established with the available pointer calibration, the required
+post-remount `PROOF.BIN` read remains missing. Do not mark Gate E passed.
+
+The final pre-exit QMP sample for `dm37workflow_drive` reported 77,308
+cumulative reads / 40,678,400 bytes, zero writes / zero write bytes, and one
+cumulative Flush. QEMU marked `account_invalid=true` and `account_failed=true`;
+these counters are run-level and cannot be attributed to the checker, proof
+read, or an individual operation. The fixture remained QEMU-read-only, no
+NVMe writes or Flushes were proven, and the final full-image hash was
+unchanged.
+
+ACPI `system_powerdown` was acknowledged but the guest remained running
+after 20 seconds. With VFS activity settled and the fixture read-only, QMP
+`quit` terminated the owned emulator. This was emulator termination, not a
+clean guest OS shutdown. QAC verified child exit and reservation release;
+the QMP listener closed and exclusive fixture access was restored.
+
+The exact run evidence is under
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\input-diagnostics-run3\runs\qac-input-focus-fix-20261022-r3\`.
+The existing source validation for this candidate remains **1,491/1,491
+storage checks passing**, along with the focused input/focus, DM37 GUI and VFS
+lifecycle, DM36 checker/admission, storage ownership/removal, DM34/DM35
+widget/lifecycle, widget activation, USB trace classifier, GPT verifier,
+DM30 fixture verifier, AMD64 freestanding kernel, `build.bat`, and UEFI x64
+Release results. No production source changed after that validation; this
+follow-up added no tests or code.
+
+The repository started this follow-up at HEAD
+`e110046086ff4d06cf681580eb4d2df265a426ef`, branch
+`DISK_MANAGER_IMPROVEMENTS`, and `.phase` `last_completed=DM36` /
+`next_expected=DM37`. The 125 pre-existing staged deletions remain confined
+to `out/appmodel-typed-dispatch-flags/`, `out/mc7-proof/`, and
+`out/wallpaper-pack/`; the unstaged `.gitignore` final-newline edit and
+untracked Python cache are preserved. DM37 code/tests/docs remain separate
+from those deletions. No phase advancement or DM38 work occurred.

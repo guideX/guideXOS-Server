@@ -12,6 +12,7 @@
 #include "include/kernel/ps2mouse.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/dm37_input_diagnostics.h"
 
 namespace kernel {
 namespace ps2mouse {
@@ -34,6 +35,8 @@ static int32_t  s_mouseY    = 0;
 static uint8_t  s_buttons   = 0;
 static int8_t   s_scrollZ   = 0;
 static bool     s_dirty     = false;
+static uint32_t s_irqCount = 0;
+static uint32_t s_lastEventDiagnosticSequence = 0;
 
 static int      s_phase     = 0;     // packet assembly phase
 static uint8_t  s_packet[4] = {0};   // 4-byte packet buffer (IntelliMouse)
@@ -132,6 +135,7 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_mouseX  = s_screenW / 2;
     s_mouseY  = s_screenH / 2;
     s_phase   = 0;
+    s_lastEventDiagnosticSequence = 0;
 
     serial::puts("[PS2] Starting PS/2 mouse init\n");
 
@@ -217,8 +221,6 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_phase = 0;
     serial::puts("[PS2] Mouse init complete\n");
 }
-
-static uint32_t s_irqCount = 0;
 
 void irq_handler()
 {
@@ -308,6 +310,14 @@ void irq_handler()
     s_mouseX = clamp(s_mouseX + dx, 0, s_screenW - 1);
     s_mouseY = clamp(s_mouseY + dy, 0, s_screenH - 1);
 
+    if (dx != 0 || dy != 0 || s_buttons != oldButtons) {
+        s_lastEventDiagnosticSequence = dm37_input_diagnostics::begin_event();
+        dm37_input_diagnostics::emit("ps2-mouse",
+            s_lastEventDiagnosticSequence,
+            dm37_input_diagnostics::pack_signed_deltas(dx, dy), s_buttons,
+            s_buttons == oldButtons);
+    }
+
     // Scroll wheel (4th byte, signed)
     if (s_hasWheel) {
         s_scrollZ = static_cast<int8_t>(s_packet[3]);
@@ -318,6 +328,7 @@ int32_t get_x()       { return s_mouseX; }
 int32_t get_y()       { return s_mouseY; }
 uint8_t get_buttons() { return s_buttons; }
 int8_t  get_scroll_delta() { int8_t z = s_scrollZ; s_scrollZ = 0; return z; }
+uint32_t last_event_diagnostic_sequence() { return s_lastEventDiagnosticSequence; }
 bool    is_dirty()    { return s_dirty; }
 void    clear_dirty() { s_dirty = false; }
 
@@ -330,6 +341,7 @@ int32_t get_x()                 { return 0; }
 int32_t get_y()                 { return 0; }
 uint8_t get_buttons()           { return 0; }
 int8_t  get_scroll_delta()      { return 0; }
+uint32_t last_event_diagnostic_sequence() { return 0; }
 bool    is_dirty()              { return false; }
 void    clear_dirty()           { }
 

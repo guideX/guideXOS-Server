@@ -42,6 +42,7 @@ enum class KeyAction : uint8_t {
 struct KeyEvent {
     uint32_t key;
     KeyAction action;
+    uint32_t diagnosticSequence;
 };
 
 // Consume the lossless key transition queue used by Native ELF apps.

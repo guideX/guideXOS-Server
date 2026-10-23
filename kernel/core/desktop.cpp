@@ -26,6 +26,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/dm37_input_diagnostics.h"
 #include "include/kernel/system_font.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/desktop_capabilities.h"
@@ -10972,6 +10973,11 @@ int get_running_app_count()
 
 void handle_key(uint32_t key)
 {
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("desktop-key", diagnosticSequence,
+                                     key, 0);
     if (file_clipboard::operation_active()) return;
     reset_alt_f4_shortcut_state();
 
@@ -11062,6 +11068,9 @@ void handle_key(uint32_t key)
     // Route keyboard input to focused kernel compositor window first
     if (compositor::KernelCompositor::hasWindows()) {
         app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("desktop-focus",
+                diagnosticSequence, key, focused ? focused->id : 0);
         if (focused) {
             // Give modal app UI the first chance to consume Escape. Apps without
             // an active modal retain the desktop's close-window shortcut.
@@ -12038,6 +12047,10 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 {
     if (!s_initialized) return;
 
+    const uint32_t diagnosticSequence =
+        input::last_mouse_event_diagnostic_sequence();
+    dm37_input_diagnostics::set_current_sequence(diagnosticSequence);
+
     s_mouseX = mx;
     s_mouseY = my;
 
@@ -12053,6 +12066,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     uint8_t pressed  = buttons & ~s_prevButtons;   // newly pressed
     uint8_t released = s_prevButtons & ~buttons;    // newly released
     s_prevButtons = buttons;
+    if ((pressed & 0x03u) || (released & 0x03u))
+        dm37_input_diagnostics::emit("desktop-button-edge",
+            diagnosticSequence, pressed, released);
 
     apply_taskbar_layout();
     DesktopRect workArea = get_current_work_area();

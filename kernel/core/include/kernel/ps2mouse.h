@@ -40,6 +40,7 @@ uint8_t get_buttons();
 
 // Get scroll wheel delta (reset after read)
 int8_t get_scroll_delta();
+uint32_t last_event_diagnostic_sequence();
 
 // Check if position changed since last call to clear_dirty()
 bool is_dirty();
