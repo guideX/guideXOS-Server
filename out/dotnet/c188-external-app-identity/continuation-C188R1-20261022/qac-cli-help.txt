@@ -1,0 +1,8 @@
+QAC CLI: D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe
+Installed coordinator: guideXOS QAC 2.0.0
+Supported commands reported by `qac --help`:
+  qac <status|list|queue|help>
+  qac request --project <name> --mode <development|acceptance>
+  qac run --project <name> --mode <development|acceptance> -- <qemu-system-*.exe> [arguments...]
+  qac inspect <reservation-id> | cancel <reservation-id> | release <reservation-id>
+`run` starts QEMU as the direct child and owns exclusive admission; C188 used the existing `run-c188-qac-guest.ps1` runner with a 30-second admission bound.

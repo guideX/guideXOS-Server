@@ -1,0 +1,39 @@
+{
+  "capturedAtUtc": "2026-10-23T02:35:41.5017494Z",
+  "coordinatorStatus": "Coordinator: Online\r\nName: guideXOS QAC\r\nVersion: 2.0.0\r\nPID: 14284\r\nStarted (UTC): 2026-10-22T21:23:05.5008927+00:00\r\nUptime: 18755s\r\nQEMU processes: 1 (0 foreign)\r\nManaged development limit: 2\r\nManaged sessions: 1; queued: 0; blocked: 0\r\n",
+  "reservations": "Coordinator: Online (guideXOS QAC 2.0.0)\r\nQEMU PID 10628 | C:\\Program Files\\qemu\\qemu-system-x86_64.exe | 2026-10-23T02:34:40.6382049+00:00 | managed\r\n  Note: Reservation 4f17779acbd14810b4deb3d26a3a20a3 · guideXOSServer · acceptance\r\nReservations: 1\r\n  4f17779acbd14810b4deb3d26a3a20a3 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\\guideX (PID 21640) | owner Verified | child PID 10628\r\nManaged sessions: 1\r\nManaged session: 4f17779acbd14810b4deb3d26a3a20a3 | Running | guideXOSServer · LEON2_RDT\\guideX (PID 21640)\r\n",
+  "reservation": {
+    "id": "4f17779acbd14810b4deb3d26a3a20a3",
+    "project": "guideXOSServer",
+    "owner": "LEON2_RDT\\guideX (PID 21640)",
+    "mode": "acceptance",
+    "state": "Running",
+    "requestedAtUtc": "2026-10-22T19:34:11.0685307-07:00",
+    "grantedAtUtc": "2026-10-22T19:34:40.6292516-07:00",
+    "queuePosition": 0,
+    "processId": 10628,
+    "processStartTimeUtc": "2026-10-22T19:34:40.6382049-07:00",
+    "processIdentity": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "durationSeconds": 60,
+    "reason": null,
+    "degraded": false,
+    "ownerProcessStartedAtUtc": "2026-10-22T19:34:10.916301-07:00",
+    "ownerLiveness": "Verified"
+  },
+  "ownerAndChildProcesses": [
+    {
+      "processId": 21640,
+      "parentProcessId": 19176,
+      "name": "GuideXOS.QAC.Cli.exe",
+      "commandLine": "\"D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe\" run --project guideXOSServer --mode acceptance -- \"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc,accel=whpx -smp 2 -m 2048M -vga std -display none -drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer\\docs\\evidence\\settings-s22-v03-package-20261018\\OVMF-s22-readonly.fd -drive if=ide,format=raw,file=fat:rw:C:\\Users\\guideX\\AppData\\Local\\guideXOS\\QAC\\artifacts\\s22r13r1-boot1-20261022-eba519292a31440e96831e8666dade12\\artifacts\\esp,index=0 -drive if=none,id=releasecdrom,file=D:\\dev\\guideXOSServer\\out\\release-profile\\0eed0ed2-df00-403a-9646-0dffb22be3bb\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso,media=cdrom,readonly=on,format=raw -device ide-cd,drive=releasecdrom,bootindex=1 -boot order=d -net none -serial file:D:\\dev\\guideXOSServer\\docs\\evidence\\s22r13r1-pacman-guest-acceptance-20261022\\boot1\\serial.log -D D:\\dev\\guideXOSServer\\docs\\evidence\\s22r13r1-pacman-guest-acceptance-20261022\\boot1\\qemu-debug.log -d guest_errors,cpu_reset -rtc base=utc,clock=host -no-reboot -no-shutdown -monitor none -qmp tcp:127.0.0.1:65209,server=on,wait=off -name guideXOS-S22R13R1-boot1-storage-backed"
+    },
+    {
+      "processId": 10628,
+      "parentProcessId": 21640,
+      "name": "qemu-system-x86_64.exe",
+      "commandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc,accel=whpx -smp 2 -m 2048M -vga std -display none -drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer\\docs\\evidence\\settings-s22-v03-package-20261018\\OVMF-s22-readonly.fd -drive if=ide,format=raw,file=fat:rw:C:\\Users\\guideX\\AppData\\Local\\guideXOS\\QAC\\artifacts\\s22r13r1-boot1-20261022-eba519292a31440e96831e8666dade12\\artifacts\\esp,index=0 -drive if=none,id=releasecdrom,file=D:\\dev\\guideXOSServer\\out\\release-profile\\0eed0ed2-df00-403a-9646-0dffb22be3bb\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso,media=cdrom,readonly=on,format=raw -device ide-cd,drive=releasecdrom,bootindex=1 -boot order=d -net none -serial file:D:\\dev\\guideXOSServer\\docs\\evidence\\s22r13r1-pacman-guest-acceptance-20261022\\boot1\\serial.log -D D:\\dev\\guideXOSServer\\docs\\evidence\\s22r13r1-pacman-guest-acceptance-20261022\\boot1\\qemu-debug.log -d guest_errors,cpu_reset -rtc base=utc,clock=host -no-reboot -no-shutdown -monitor none -qmp tcp:127.0.0.1:65209,server=on,wait=off -name guideXOS-S22R13R1-boot1-storage-backed"
+    }
+  ],
+  "qualificationStopped": true,
+  "reason": "A different owner-verified acceptance session was admitted after the prior C188R1 reservation released."
+}

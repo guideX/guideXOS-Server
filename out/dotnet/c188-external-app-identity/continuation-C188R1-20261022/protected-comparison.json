@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "baselineFiles": 8497,
+  "currentFiles": 8497,
+  "protectedRootCount": 13,
+  "added": [],
+  "removed": [],
+  "changed": [],
+  "originalRamdiskSha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8",
+  "currentRamdiskSha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8",
+  "expectedRamdiskSha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8"
+}

@@ -4,7 +4,7 @@
 
 C188 adds a development-only native application descriptor for the independently compiled C185 CounterApp. The new descriptor gives CounterApp a distinct application ID and selector while keeping the five production selector mappings intact. The feature is enabled only by `GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY` in the isolated candidate kernel and NativeAOT host build.
 
-Hosted qualification passed: C188 25 focused cases; C182 15; C185 28; C186 15; C187 22; and the accepted managed UI baseline of 38 suites / 930 cases. Both the candidate and proof-disabled production NativeAOT and freestanding kernel builds passed. The final candidate uses the C160 profile with C166 ordinary application startup, so Notes can launch without running the C155 proof suites on first launch. Focused QAC guest qualification remains in progress below.
+Hosted qualification passed: C188 25 focused cases; C182 15; C185 28; C186 15; C187 22; and the accepted managed UI baseline of 38 suites / 930 cases. Both the candidate and proof-disabled production NativeAOT and freestanding kernel builds passed. The final candidate uses the C160 profile with C166 ordinary application startup, so Notes can launch without running the C155 proof suites on first launch. Guest acceptance remains incomplete; the C188R1 attempts and current blocker are recorded below.
 
 ## C187 limitation and Gate A
 
@@ -93,4 +93,34 @@ C189 should first define a versioned external application package and identity c
 
 ## Outcome
 
-The implementation checkpoint is committed locally as `5b023b39ef42317a9f6fb7c75a7efc1da3f28294`; protected inventory and QAC admission evidence are in follow-up documentation commits. Outcome classification remains pending completion of the three focused C188 QAC boots and the three ordinary production compatibility boots because QAC's existing acceptance reservation has remained active through three 1,800-second admission windows. The final protected-tree comparison passed with zero changes. C189 has not been started.
+The implementation checkpoint is committed locally as `5b023b39ef42317a9f6fb7c75a7efc1da3f28294`; protected inventory and QAC admission evidence are in follow-up documentation commits. At the original C188 closeout, the three focused QAC boots and three ordinary production compatibility boots remained pending because QAC's acceptance reservation persisted through three 1,800-second admission windows. The final protected-tree comparison passed with zero changes. C189 had not been started. The later C188R1 outcome is below.
+
+## C188R1 qualification closeout — 2026-10-22
+
+C188R1 continued C188 on branch `v1.1_DOTNET_SUPPORT`, starting at `9a651829a559e0e254f1c6d0dfea99a71f290c5b`. The current classification is **Outcome D — Blocked**. The continuation reused the retained development and proof-disabled production candidates; no product source or qualification script was changed and no candidate was rebuilt.
+
+### Preflight and candidate reuse
+
+The QAC CLI was installed at `D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe`; its supported `status`, `list`, `inspect`, and `run` workflow is captured in `qac-cli-help.txt`. The fresh QAC census before the first boot showed the coordinator online, zero reservations, zero managed sessions, and zero QEMU processes. The initial worktree snapshot contained 136 status entries, including the original modified ramdisk and existing untracked build outputs. D: had 50.90 GiB free. The development kernel and NativeAOT ELF matched their retained manifests: kernel SHA-256 `9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA`, composite ELF SHA-256 `9F84C525A3D6053EAB6D489563CD0C31B718CF082B3C0ED79544DBA6F9E3FEFC`, independently compiled CounterApp assembly SHA-256 `169309B2045D8DDE6E2C7B58AF9C7B0A1D3028B18EA18822156B67E5CB1D4F4C`, and ManagedUiContracts SHA-256 `E2EB06B22BBEE40AED4742DBC25C00F186BDB1A9A9E1AA7CE946A8E4446018A8`.
+
+The production kernel and composite ELF matched SHA-256 `22BC4AFE228263E4187B2AA57EAF21D1CEA46D3992A139F81EC185B1C22154AF` and `40953EEF2539484603A7CAC44255B7D47A3FCA5E8684E72FE4B7A18A60589BB8`. Its candidate manifest retains selectors 4–8 and reports no CounterApp descriptor or C188 selector route. Development selector 9 remains the unique CounterApp route. The ABI remains v4 / 128 bytes, with callbacks at offsets 104, 112, and 120, and residency remains limited to five applications. The retained NativeAOT validation reports ELF64 x86-64, seven load segments, zero relocations, and the required static factory and lifecycle symbols.
+
+Six isolated ESP copies were staged below `out/dotnet/c188-external-app-identity/continuation-C188R1-20261022/`. Focused media use ramdisk SHA-256 `CC3DEB0DA01B5A33AC159062BF72A846B9CFF6FCF4511FC0A90DB8FA4309FB1D` with the development kernel and app hashes above. Production media use ramdisk SHA-256 `CE79E453AACEE25DAA41A7F5152480CD5AC1A57A215C093EA1D7941A14D52BD3` with the proof-disabled production kernel and composite hashes above. The recorded staging manifests report 185 unrelated ramdisk files preserved and zero changes to other files. The original modified `ESP/ramdisk.img` still hashes to `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`.
+
+No standalone repository `.phase` or stale-prompt guard file was present. The existing C188 runner constrains evidence paths to the C188 output root and refuses to overwrite existing serial, QMP, or acceptance evidence.
+
+### QAC and guest attempts
+
+The first focused QAC run acquired reservation `19031b98d7a342ec9b99b870b1fcf85d` and QEMU child PID 12656. QAC verified its release after the runner's 180-second guest-readiness timeout. The kernel printed the C188 identity-registry PASS marker, but the serial log stopped during the initial Notes selector-4 launch after `C148-NOTES-CONTEXT`; the runner never observed the input loop. CounterApp was not launched, so this is not a focused identity or interaction pass. The screenshot, serial log, QMP log, and runner failure are preserved in `focused-boot-1/`.
+
+The first production run acquired reservation `942f45b2ef35478d9de5deb9ee44fb73` and QEMU child PID 22344. Its prelaunch census was clear, but QAC later reported that the reservation was degraded because one unmanaged QEMU process had appeared, compromising exclusive conditions. The runner captured that warning in QAC stderr, which it writes after the child exits. The guest printed input-manager initialization and began the Notes selector-4 launch, but the runner did not observe the main input loop within 180 seconds. QAC verified release. No all-five-app registration, behavior, or lifecycle gate passed in this run; the screenshot and raw logs are preserved in `production-boot-1/`.
+
+Immediately after that release, QAC admitted another acceptance reservation. The fresh blocking census shows reservation `4f17779acbd14810b4deb3d26a3a20a3`, owner `LEON2_RDT\guideX` (verified owner process PID 21640), and managed QEMU child PID 10628. Its command line identifies a separate Server v0.3 package acceptance run under `D:\dev\guideXOSServer`, with serial output in `docs/evidence/s22r13r1-pacman-guest-acceptance-20261022/boot1/serial.log`. This session was not touched. No additional C188R1 guest was launched. The remaining two focused boots and two production boots are unrun.
+
+### Regression and preservation evidence
+
+No source changed, so hosted tests and builds were not repeated. The retained evidence remains: C188 25 cases; C182 15; C185 28; C186 15; C187 22; and the managed UI aggregate of 38 suites / 930 cases, all previously passing. These results do not substitute for guest acceptance.
+
+The fresh C188R1 protected-tree comparison covered the actual current inventories: 13 protected roots and 8,497 files before and after, with zero added, removed, or changed files. The original ramdisk hash remained unchanged. Worktree comparison found no missing or changed pre-existing paths; the only additional status entry was this documentation update. Detailed candidate, QAC, workspace, guest, and protected-tree evidence is under `out/dotnet/c188-external-app-identity/continuation-C188R1-20261022/`; the raw historical attempts 001–067 remain intact. The older C185 artifact caveat is unchanged.
+
+**Outcome D — Blocked.** The two attempted boots did not reach the runner's input-loop gate. At the blocking census captured at `2026-10-23T02:35:41Z`, QAC showed owner-verified reservation `4f17779acbd14810b4deb3d26a3a20a3` in `Running`, owned by `LEON2_RDT\guideX` (owner PID 21640) with QEMU child PID 10628. Its Server v0.3 acceptance workspace and full command line are preserved in `qac-blocking-census.json`. Static checks and prior hosted evidence do not establish production guest acceptance. C188 remains open, and C189 has not been started.

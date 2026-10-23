@@ -1,0 +1,18 @@
+{
+  "id": "4f17779acbd14810b4deb3d26a3a20a3",
+  "project": "guideXOSServer",
+  "owner": "LEON2_RDT\\guideX (PID 21640)",
+  "mode": "acceptance",
+  "state": "Running",
+  "requestedAtUtc": "2026-10-22T19:34:11.0685307-07:00",
+  "grantedAtUtc": "2026-10-22T19:34:40.6292516-07:00",
+  "queuePosition": 0,
+  "processId": 10628,
+  "processStartTimeUtc": "2026-10-22T19:34:40.6382049-07:00",
+  "processIdentity": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "durationSeconds": 60,
+  "reason": null,
+  "degraded": false,
+  "ownerProcessStartedAtUtc": "2026-10-22T19:34:10.916301-07:00",
+  "ownerLiveness": "Verified"
+}

@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "startingStatusEntries": 136,
+  "currentStatusEntries": 137,
+  "preExistingPathsMissing": [],
+  "preExistingPathStatusChanged": [],
+  "unexpectedNonC188AddedPaths": [],
+  "expectedDocumentationChange": "docs/dotnet/NATIVEAOT_C188_EXTERNAL_APP_NATIVE_IDENTITY.md",
+  "newEvidenceRoot": "out/dotnet/c188-external-app-identity/continuation-C188R1-20261022",
+  "originalRamdiskSha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8"
+}
