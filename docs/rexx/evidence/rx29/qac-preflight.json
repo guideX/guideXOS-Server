@@ -1,0 +1,21 @@
+{
+  "schema": "guidexos.rexx.rx29.qac-preflight.v1",
+  "checked_utc": "2026-10-23",
+  "coordinator": "Online",
+  "version": "2.0.0",
+  "pid": 16064,
+  "managed_sessions": 0,
+  "queued_reservations": 0,
+  "blocked_reservations": 0,
+  "reservations": 0,
+  "qemu_processes": 0,
+  "foreign_qemu_processes": 0,
+  "status_cli": "PASS",
+  "list_cli": "PASS",
+  "queue_cli": "PASS",
+  "qac_cli": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+  "reservation_requested": false,
+  "guest_launched": false,
+  "reason": "Native guest qualification not entered: architecture decision gate found no external data stack or executable QUEUE/PUSH/PULL operations.",
+  "reservation_release": "Not applicable; RX29 did not request a reservation."
+}

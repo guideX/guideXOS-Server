@@ -1,0 +1,16 @@
+{
+  "schema": "guidexos.rexx.rx29.untracked-path-comparison.v1",
+  "status": "PASS",
+  "method": "Ordinal, case-sensitive set comparison between the persisted starting manifest and final git ls-files --others --exclude-standard --full-name output; staged RX29 files are tracked in the index and excluded.",
+  "path_encoding": "UTF-8 without BOM",
+  "newline": "LF with final newline",
+  "sort": "ordinal, case-sensitive",
+  "starting_count": 83493,
+  "ending_count": 83493,
+  "starting_sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
+  "ending_sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
+  "starting_manifest": "docs/rexx/evidence/rx29/untracked-start-ordinal.paths",
+  "ending_manifest_external": "C:\\Users\\guideX\\.codex\\visualizations\\2026\\10\\23\\01a168b4-295f-73a1-8b9a-9e732e3172fd\\rx29-untracked-end.paths",
+  "missing_preexisting_paths": [],
+  "unexpected_paths": []
+}

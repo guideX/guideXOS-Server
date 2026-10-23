@@ -1,0 +1,38 @@
+{
+  "schema": "guidexos.rexx.rx29.preflight.v1",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "cdf037707fbc5b9fe4755fff0b94337fb740cb7f",
+  "accepted_rx28_head_matches": true,
+  "tracked_worktree_clean": true,
+  "index_clean": true,
+  "root_phase_file_present": false,
+  "rx29_duplicate_guards_present": false,
+  "rx28_scorecard": "docs/rexx/REXX_RX28_SCORECARD.json",
+  "rx28_inventory": "docs/rexx/REXX_RX28_BUILTIN_INVENTORY.csv",
+  "rx28_inventory_counts": {
+    "rows": 75,
+    "implemented": 58,
+    "not_assessed": 1,
+    "not_implemented": 12,
+    "not_implemented_by_design": 1,
+    "partial": 3
+  },
+  "queued_status": "Not implemented in inspected runtime dispatch",
+  "starting_untracked_paths": {
+    "count": 83493,
+    "manifest": "docs/rexx/evidence/rx29/untracked-start-ordinal.paths",
+    "encoding": "UTF-8 without BOM",
+    "newline": "LF",
+    "sort": "ordinal, case-sensitive",
+    "sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
+    "bytes": 10030166
+  },
+  "protected_root_obj_pdb": {
+    "count": 31,
+    "manifest": "docs/rexx/evidence/rx29/protected-artifacts-start.json",
+    "hashes": "SHA-256",
+    "all_root_entries_recorded": true
+  },
+  "source_modified_before_preflight_complete": false
+}

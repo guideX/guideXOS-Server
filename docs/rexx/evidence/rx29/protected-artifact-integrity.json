@@ -1,0 +1,12 @@
+{
+  "schema": "guidexos.rexx.rx29.protected-artifacts.v1",
+  "status": "PASS",
+  "start_count": 31,
+  "end_count": 31,
+  "unchanged_count": 31,
+  "changed_or_new": [],
+  "missing": [],
+  "start_manifest": "protected-artifacts-start.json",
+  "end_manifest": "protected-artifacts-end.json",
+  "hash_algorithm": "SHA-256"
+}

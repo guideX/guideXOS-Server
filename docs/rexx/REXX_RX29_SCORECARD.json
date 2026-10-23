@@ -1,0 +1,148 @@
+{
+  "schema": "guidexos.rexx.rx29.scorecard.v1",
+  "phase": "RX29",
+  "outcome": "C — Blocked",
+  "status": "BLOCKED",
+  "blocker_classification": "Runtime data-stack architecture",
+  "blocker": "No external data queue or executable QUEUE/PUSH/PULL/PARSE PULL operations exist; implementing the foundation would exceed the QUEUED-only phase boundary.",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "starting_branch": "REXX_SUPPORT",
+  "ending_branch": "REXX_SUPPORT",
+  "starting_head": "cdf037707fbc5b9fe4755fff0b94337fb740cb7f",
+  "ending_head": "Recorded in final response; documentation commit hash is self-referential and omitted here.",
+  "accepted_rx28_head_verified": true,
+  "tracked_worktree_clean_at_preflight": true,
+  "index_clean_at_preflight": true,
+  "source_changes": 0,
+  "decision_gate": "PASS — missing stack foundation confirmed; stop without inventing a count or adding an unrelated subsystem.",
+  "inventory_preflight": {
+    "rows": 75,
+    "source": "docs/rexx/REXX_RX28_BUILTIN_INVENTORY.csv",
+    "starting_status_counts": {
+      "Implemented": 58,
+      "Not implemented": 12,
+      "Partial": 3,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "queued_status": "Not implemented in inspected runtime dispatch",
+    "queued_dispatch_present": false,
+    "date_time_trace_classifications_unchanged": true
+  },
+  "inventory": {
+    "rows": 75,
+    "implemented": 58,
+    "not_implemented": 12,
+    "partial": 3,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "queued": "Not implemented",
+    "date_time_trace_classifications_unchanged": true,
+    "file": "docs/rexx/REXX_RX29_BUILTIN_INVENTORY.csv"
+  },
+  "data_stack_audit": {
+    "lexer_tokens_present": true,
+    "parser_forms_present": false,
+    "compiler_opcodes_present": false,
+    "vm_external_queue_storage_present": false,
+    "host_data_queue_provider_present": false,
+    "expression_stack_is_data_queue": false,
+    "queue_instructions_executable": false,
+    "parse_pull_executable": false,
+    "buffer_levels_supported": false,
+    "details": "docs/rexx/REXX_RX29_DATA_STACK_AUDIT.md"
+  },
+  "queued_implementation": {
+    "implemented": false,
+    "source_modified": false,
+    "arguments": "Not tested; dispatcher entry absent",
+    "semantics": "Not implemented",
+    "separate_counter_added": false
+  },
+  "qualification": {
+    "direct_assertions": {
+      "status": "NOT_RUN",
+      "assertions": 0,
+      "reason": "No real queue operations or QUEUED dispatch to exercise."
+    },
+    "deterministic_model": {
+      "status": "NOT_RUN",
+      "seed": null,
+      "operations": 0,
+      "assertions": 0,
+      "reason": "An independent queue model cannot qualify absent production operations."
+    },
+    "allocation_failure_recovery": "NOT_RUN — no queue allocation path exists.",
+    "nested_routine": "NOT_RUN",
+    "interpret": "NOT_RUN",
+    "multiple_vm_and_lifecycle": "NOT_RUN",
+    "invalid_arguments": "NOT_RUN — no QUEUED dispatch exists.",
+    "hosted_corpus": {
+      "status": "NOT_RUN",
+      "available_prior_local_cases": 196,
+      "executed": 0
+    },
+    "inherited_rx1_rx28": "NOT_RUN",
+    "cli_compatibility_fixtures": "NOT_RUN",
+    "rx19_rx20_rx24_rx25_rx26_rx27_rx28_regressions": "NOT_RUN",
+    "asan": {
+      "status": "NOT_RUN",
+      "targets_passed": 0,
+      "targets_expected": 28
+    },
+    "ubsan": {
+      "status": "NOT_RUN",
+      "targets_passed": 0,
+      "targets_expected": 28
+    },
+    "freestanding_amd64": "NOT_RUN — no RX29 source build was started.",
+    "regina": {
+      "status": "NOT_RUN",
+      "availability": "Executable not found on PATH",
+      "portable_queued_corpus": "NOT_RUN"
+    },
+    "native_guest": {
+      "status": "NOT_RUN — architecture decision gate",
+      "reservation_requested": false,
+      "guest_launched": false,
+      "reason": "No RX29 guest scripts could exercise unsupported production instructions."
+    }
+  },
+  "qac_preflight": {
+    "status": "PASS",
+    "coordinator": "Online, QAC 2.0.0",
+    "managed_sessions": 0,
+    "queued": 0,
+    "blocked": 0,
+    "reservations": 0,
+    "qemu_processes": 0,
+    "foreign_qemu_processes": 0,
+    "reservation_release": "Not applicable; no reservation requested.",
+    "evidence": "docs/rexx/evidence/rx29/qac-preflight.json"
+  },
+  "protected_artifacts": {
+    "status": "PASS",
+    "root_obj_pdb_count": 31,
+    "start_hashes": "docs/rexx/evidence/rx29/protected-artifacts-start.json",
+    "end_hashes": "docs/rexx/evidence/rx29/protected-artifacts-end.json",
+    "integrity_report": "docs/rexx/evidence/rx29/protected-artifact-integrity.json",
+    "changed_or_new": 0,
+    "missing": 0
+  },
+  "untracked_paths": {
+    "status": "PASS",
+    "starting_count": 83493,
+    "encoding": "UTF-8 without BOM",
+    "newline": "LF",
+    "sort": "ordinal, case-sensitive",
+    "starting_manifest": "docs/rexx/evidence/rx29/untracked-start-ordinal.paths",
+    "starting_sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
+    "ending_count": 83493,
+    "ending_sha256": "3D65C626770D3075876DAAC140419D48D6F46EDC775DFA5F54FFC5A1F19350B0",
+    "ending_manifest_external": "C:\\Users\\guideX\\.codex\\visualizations\\2026\\10\\23\\01a168b4-295f-73a1-8b9a-9e732e3172fd\\rx29-untracked-end.paths",
+    "missing_preexisting_paths": [],
+    "unexpected_paths": [],
+    "sets_equal": true
+  },
+  "recommended_rx30_scope": "Establish the bounded data-stack foundation and executable QUEUE/PUSH/PULL/PARSE PULL semantics with explicit ownership and lifetime, then qualify QUEUED against that real state."
+}
