@@ -1,0 +1,28 @@
+{
+  "schema": "guidexos.rexx.rx28.guest-script-hosted-validation.v1",
+  "cli": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx28\\hosted-063836186c544001b837e50273139647\\bin\\rexx_cli.exe",
+  "results": [
+    {
+      "case": "rx28-find",
+      "exit_code": 0,
+      "expected": "RX28_FIND_DONE",
+      "actual": "RX28_FIND_DONE",
+      "passed": true
+    },
+    {
+      "case": "rx28-find-error-recovery",
+      "exit_code": 0,
+      "expected": "RX28_INVALID_FIND_ARGUMENT_CAUGHT\nRX28_POST_ERROR_RESPONSIVE",
+      "actual": "RX28_INVALID_FIND_ARGUMENT_CAUGHT\nRX28_POST_ERROR_RESPONSIVE",
+      "passed": true
+    },
+    {
+      "case": "rx28-find-demo",
+      "exit_code": 0,
+      "expected": "RX28_SINGLE= 2\nRX28_MULTIWORD= 2\nRX28_NOT_FOUND= 0\nRX28_BINARY= 2\nRX28_WORDPOS= 2\nRX28_FIND_DEMO_DONE",
+      "actual": "RX28_SINGLE= 2\nRX28_MULTIWORD= 2\nRX28_NOT_FOUND= 0\nRX28_BINARY= 2\nRX28_WORDPOS= 2\nRX28_FIND_DEMO_DONE",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

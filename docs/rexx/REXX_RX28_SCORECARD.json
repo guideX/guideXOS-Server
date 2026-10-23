@@ -1,0 +1,242 @@
+{
+  "schema": "guidexos.rexx.rx28.scorecard.v1",
+  "phase": "RX28",
+  "outcome": "Outcome A — Accepted. FIND implementation and all qualification gates passed. QAC acceptance was completed under the exact verified exclusive QAC-owned child after the runner exited 1 on an ExecutablePath process-record race before its guest-command gate.",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "8011aee140bab85542a73a4461d58d4e9a606839",
+  "ending_head": "Recorded in final response; omitted here to avoid a self-referential commit hash.",
+  "local_commit": "Recorded in final response; omitted here to avoid a self-referential commit hash.",
+  "implementation": {
+    "status": "Implemented",
+    "signature": "FIND(string,phrase)",
+    "compatibility_classification": "IBM TSO/E and VM non-SAA REXX built-in",
+    "approach": "Two-required-argument wrapper constructs a local descriptor pair [phrase,string] and calls rexx_builtin_wordpos with argument count 2. It uses WORDPOS default start and rejects a third argument through FIND descriptor validation. No distinct search engine, tokenizer, or search-buffer allocation.",
+    "result": "One-based word index of the first consecutive whole-word phrase match; 0 when absent or phrase contains no words.",
+    "normalization": "Uses the existing WORDPOS word scanner and byte-separator class (ASCII space and tab through carriage return); runs of separators normalize for word comparison.",
+    "case_punctuation_bytes": "Case-sensitive exact byte matching; punctuation, NUL, nonprintable, and high-bit bytes remain data unless a byte is an existing separator.",
+    "limits": "Existing search-work bounds and 16 MiB runtime string limit retained; no Unicode, DBCS, locale, or EBCDIC translation claim.",
+    "input_mutation": "None.",
+    "binary_literal_note": "RX16 X-literal grouping blanks are discarded. The packed bytes in '80 00FF 41'X form one word; an actual blank byte must be concatenated to create a word boundary."
+  },
+  "inventory_preflight": {
+    "source": "docs/rexx/REXX_RX27_BUILTIN_INVENTORY.csv",
+    "rows": 75,
+    "starting_status_counts": {
+      "Implemented": 57,
+      "Not implemented": 13,
+      "Partial": 3,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "find_preflight": "IBM TSO/E non-SAA, Not implemented, P3; no FIND dispatch entry at accepted RX27 HEAD.",
+    "post_rx28_status_counts": {
+      "Implemented": 58,
+      "Not implemented": 12,
+      "Partial": 3,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "DATE_TIME_TRACE_classifications_unchanged": true
+  },
+  "hosted_qualification": {
+    "status": "PASS",
+    "direct_assertions": 36175,
+    "deterministic_property_cases": 12000,
+    "property_seed": "0x52583238",
+    "independent_oracle": "Independently implemented bounded word-span oracle checks IBM vectors and randomized byte strings; all cases also compare FIND(string,phrase) with WORDPOS(phrase,string). Covers empty, separator, repeated/consecutive phrases, exact boundaries, punctuation, case, NUL, high-bit bytes, long words, and 10,000-word strings.",
+    "interpreter_allocation_failure_recovery": "PASS — all 6 measured interpreter allocation failpoints were injected; each was followed by successful execution in the same VM.",
+    "direct_result_allocation_failure_recovery": "PASS — affected output allocation returns OUT_OF_MEMORY without publishing a result; repeat dispatch succeeds and ownership returns to baseline.",
+    "ibm_reference_cli_fixture": "1/1",
+    "hosted_cli_cases": "24/24",
+    "inherited_regression": "RX1–RX27 hosted regression suites and compatibility fixtures passed, including RX19 DATE/TIME and calendar assertions, RX24 ADDRESS/TRACE, RX25 RANDOM, RX26 INDEX/POS, RX27 JUSTIFY, and RX28 FIND.",
+    "notable_inherited_assertions": {
+      "RX19_DATE_TIME_and_calendar": 8275,
+      "RX19_property_cases": 2048,
+      "RX24_ADDRESS_TRACE": 65,
+      "RX25_RANDOM": 2156,
+      "RX26_INDEX": 48166,
+      "RX26_deterministic_cases": 12000,
+      "RX27_JUSTIFY": 42589
+    },
+    "RX20_clock_contract": "PASS in both sanitizer target matrices and the RX28 exclusive QAC guest regression.",
+    "regina": "NOT_RUN — executable unavailable; no external compatibility percentage is claimed.",
+    "evidence": "docs/rexx/evidence/rx28/hosted-qualification.log"
+  },
+  "sanitizers": {
+    "AddressSanitizer": {
+      "status": "PASS",
+      "targets_passed": "28/28",
+      "compiler": "MSVC 19.51.36260"
+    },
+    "UndefinedBehaviorSanitizer": {
+      "status": "PASS",
+      "targets_passed": "28/28",
+      "compiler": "clang 22.1.8"
+    },
+    "local_expected_result_corpus": "196/196 local expected-result cases executed under each sanitizer; Regina comparison NOT_RUN.",
+    "rx28_find_direct_test": "PASS under both sanitizers; 36,175 assertions, 12,000 properties, 6 interpreter failpoints.",
+    "rx20_clock_contract": "PASS under both sanitizer runs.",
+    "evidence_summaries": [
+      "docs/rexx/evidence/rx28/sanitizers-summary.json"
+    ]
+  },
+  "freestanding_amd64": {
+    "status": "PASS",
+    "rexx_c_objects": 9,
+    "kernel_elf_sha256": "a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef",
+    "freestanding_flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "build_output_root": "build/rexx/rx28/native-amd64-67ae5162a2bb4941b830c49e6edb18b3",
+    "evidence": "docs/rexx/evidence/rx28/native-build/native-link-evidence-67ae5162a2bb4941b830c49e6edb18b3.json"
+  },
+  "qac_guest_acceptance": {
+    "status": "PASS_WITH_MANUAL_RECOVERY — every required guest script passed under the exact, independently verified QAC-owned QEMU child. The runner exited 1 before guest execution because the process record temporarily lacked ExecutablePath.",
+    "required_project": "guideXOSServer",
+    "required_mode": "exclusive acceptance",
+    "qmp_port_planned": 55592,
+    "network_disabled": true,
+    "disposable_media": true,
+    "kernel_sha256": "a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef",
+    "initial_qac_preflight": "PASS — zero managed sessions, reservations, queued runs, and QEMU processes.",
+    "occupied_snapshot": "docs/rexx/evidence/rx28/native-guest/run-9bceda5b9acd4af0ba36c60f131fef1b/qac-list-occupied-during-staging.txt",
+    "foreign_process_controlled": false,
+    "parent_exit_code": 0,
+    "child_exit_code": 0,
+    "runner_exit_code": 1,
+    "reservation_released": true,
+    "queue_position": 1,
+    "qac_cli_pid": 22028,
+    "queued_reservation_id": "df33741be5f142b3a0a027db32bfd73c",
+    "queued_snapshot": "docs/rexx/evidence/rx28/native-guest/run-9bceda5b9acd4af0ba36c60f131fef1b/qac-list-queued.txt",
+    "active_owner_modified": false,
+    "previous_attempt": {
+      "run": "docs/rexx/evidence/rx28/native-guest/run-9bceda5b9acd4af0ba36c60f131fef1b",
+      "qac_parent_exit_code": 0,
+      "qemu_child_exit_code": 0,
+      "runner_exit_code": 1,
+      "qmp_shutdown_acknowledged": true,
+      "reservation_released": true,
+      "guest_scripts_executed": false,
+      "reason": "No terminal had focus; screenshots show desktop only."
+    },
+    "retry": {
+      "run": "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806",
+      "qac_cli_pid": 23380,
+      "qmp_port": 55592,
+      "reservation_id": "72c66d32bdf649daa836059d1d341120",
+      "qemu_child_pid": 25648,
+      "console_open_before_first_command": true,
+      "process_owner_independently_verified": true,
+      "guest_acceptance": "PASS — manual suite after runner preflight race",
+      "qmp_shutdown_acknowledged": true,
+      "reservation_released": true
+    },
+    "guest_scripts_executed": true,
+    "manual_qmp_shutdown_acknowledged": true,
+    "runner_qmp_shutdown_acknowledged": false,
+    "qmp_shutdown_reason": "host-qmp-quit",
+    "heartbeat_records_final": 1378,
+    "heartbeat_before_manual_suite": "Unknown — runner exited before its heartbeat gate.",
+    "final_qac_managed_sessions": 0,
+    "final_qac_reservations": 0,
+    "final_qemu_process_count": 0,
+    "exclusive_reservation_id": "72c66d32bdf649daa836059d1d341120",
+    "verified_qac_parent_pid": 23380,
+    "verified_qemu_child_pid": 25648,
+    "runner_failure": "The runner observed a process-record race: ExecutablePath was null before owner metadata appeared, and exited before guest scripts. The independently verified QAC-owned child was then used for the manual suite.",
+    "guest_scripts": [
+      {
+        "script": "rx28-find-demo.rex",
+        "result": "PASS",
+        "evidence": "manual-rx28-01-find-demo.png, manual-rx28-02-find-assertions-binary.png"
+      },
+      {
+        "script": "rx28-find.rex",
+        "result": "PASS",
+        "evidence": "manual-rx28-02-find-assertions-binary.png"
+      },
+      {
+        "script": "rx28-find-error-recovery.rex",
+        "result": "PASS",
+        "evidence": "manual-rx28-03-find-error-recovery.png"
+      },
+      {
+        "script": "rx26-date-time-guard.rex",
+        "result": "PASS",
+        "evidence": "manual-rx28-04-date-time-pit.png"
+      },
+      {
+        "script": "rx20clk.rex",
+        "result": "PASS",
+        "evidence": "manual-rx28-05-rx20-clock-contract.png"
+      }
+    ],
+    "evidence": [
+      "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806/manual-qac-guest-qualification.json",
+      "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806/manual-qmp-shutdown.json",
+      "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806/console-transcript-manual.txt",
+      "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806/qac-runner-status.json",
+      "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806/qemu-owner-recovered-verification.json",
+      "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806/qac-list-after-rx28.txt"
+    ]
+  },
+  "artifact_safety": {
+    "protected_root_objects_and_pdbs": "31/31 exact size and SHA-256 matches at hosted, sanitizer, and native-build gates.",
+    "protected_start_manifest": "docs/rexx/evidence/rx28/protected-artifacts-start.json",
+    "starting_untracked_paths": 79855,
+    "starting_untracked_sha256": "27cf44084c1a9e3420dd48a42f9c98c9f8671cd1e1e02240b867f895a8cebea6",
+    "path_serialization": "Relative forward-slash paths; ordinal Unicode sort; UTF-8 without BOM; LF after each path.",
+    "precommit_untracked_paths_last_checked": 83521,
+    "precommit_missing_starting_paths_last_checked": 0,
+    "precommit_path_check": "Actual pre-stage path sets compared: all 79,855 baseline paths present; 3,666 additions at that snapshot. The final post-stage comparison uses canonical ordinal start/end manifests.",
+    "build_output_root": "build/rexx/rx28/",
+    "protected_final_manifest": "docs/rexx/evidence/rx28/protected-artifacts-final.json — 31/31 exact sizes and SHA-256 hashes match the RX28 start manifest.",
+    "added_untracked_paths_since_start_last_checked": 3666,
+    "poststage_untracked_paths": 83493,
+    "final_missing_starting_paths": 0,
+    "final_added_paths_since_start": 3638,
+    "untracked_end_manifest": "docs/rexx/evidence/rx28/untracked-end.paths",
+    "untracked_end_manifest_sha256": "3d65c626770d3075876daac140419d48d6f46edc775dfa5f54ffc5a1f19350b0",
+    "untracked_final_reconciliation": "docs/rexx/evidence/rx28/untracked-reconciliation.json",
+    "untracked_reconciliation_status": "PASS — actual current post-stage Git untracked paths match the ordinal end manifest; all 79,855 canonical baseline paths are present. The original unique capture was preserved and reserialized after its non-ordinal ordering was detected.",
+    "starting_untracked_manifest": "docs/rexx/evidence/rx28/untracked-start-ordinal.paths",
+    "original_untracked_capture_manifest": "docs/rexx/evidence/rx28/untracked-start.paths",
+    "original_untracked_capture_sha256": "6f6c921d0e4288fe1dda65a19fc9f6bb7655e6b62065ea458ca0d40abbfa68b5"
+  },
+  "inventory": {
+    "rows": 75,
+    "implemented": 58,
+    "not_implemented": 12,
+    "partial": 3,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "DATE_TIME_TRACE_classifications_unchanged": true,
+    "file": "docs/rexx/REXX_RX28_BUILTIN_INVENTORY.csv"
+  },
+  "remaining_compatibility_limits": [
+    "Regina executable unavailable; external differential is NOT_RUN and no compatibility percentage is claimed.",
+    "FIND inherits WORDPOS byte semantics, existing separator class, and 16 MiB string cap; no Unicode, DBCS, locale, or EBCDIC transcoding behavior is claimed."
+  ],
+  "recommended_rx29_scope": "Review QUEUED as a remaining P3 candidate against the existing data-stack implementation; compare its required state semantics with the environment-dependent P3 stream and identity built-ins before fixing RX29 scope.",
+  "evidence": [
+    "docs/rexx/evidence/rx28/preflight.json",
+    "docs/rexx/evidence/rx28/hosted-qualification.log",
+    "docs/rexx/evidence/rx28/sanitizers-summary.json",
+    "docs/rexx/evidence/rx28/native-amd64-runner.log",
+    "docs/rexx/evidence/rx28/native-build/",
+    "docs/rexx/evidence/rx28/native-guest/",
+    "docs/rexx/evidence/rx28/protected-artifacts-start.json",
+    "docs/rexx/evidence/rx28/untracked-start.paths",
+    "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806/manual-qac-guest-qualification.json",
+    "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806/manual-qmp-shutdown.json",
+    "docs/rexx/evidence/rx28/untracked-reconciliation.json",
+    "docs/rexx/evidence/rx28/untracked-end.paths"
+  ]
+}

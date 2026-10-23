@@ -1,0 +1,20 @@
+{
+  "schema": "guidexos.rexx.rx28.untracked-reconciliation.v1",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "baseline_manifest": "docs/rexx/evidence/rx28/untracked-start-ordinal.paths",
+  "baseline_path_count": 79855,
+  "baseline_manifest_sha256": "27cf44084c1a9e3420dd48a42f9c98c9f8671cd1e1e02240b867f895a8cebea6",
+  "preserved_source_capture_manifest": "docs/rexx/evidence/rx28/untracked-start.paths",
+  "preserved_source_capture_sha256": "6f6c921d0e4288fe1dda65a19fc9f6bb7655e6b62065ea458ca0d40abbfa68b5",
+  "source_capture_note": "Original RX28 capture preserved byte-for-byte. Its 79,855 entries were unique and had zero path-set difference, then reserialized in ordinal order in the baseline_manifest.",
+  "end_manifest": "docs/rexx/evidence/rx28/untracked-end.paths",
+  "end_manifest_sha256": "3d65c626770d3075876daac140419d48d6f46edc775dfa5f54ffc5a1f19350b0",
+  "end_path_count": 83493,
+  "serialization": "Relative forward-slash paths; ordinal Unicode string sort; UTF-8 without BOM; LF after every path.",
+  "comparison": "Actual current post-stage Git untracked path set compared with the canonical baseline using ordinal path equality.",
+  "missing_baseline_path_count": 0,
+  "missing_baseline_paths": [],
+  "added_since_baseline_path_count": 3638,
+  "added_paths": "See end_manifest for the complete actual path set; additions are RX28 build/evidence outputs and canonical start/end manifests.",
+  "result": "PASS"
+}

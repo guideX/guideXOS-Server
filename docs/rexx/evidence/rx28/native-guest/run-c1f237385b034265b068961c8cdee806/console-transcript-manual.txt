@@ -1,0 +1,14 @@
+RX28 manual QAC guest console transcript
+QAC reservation 72c66d32bdf649daa836059d1d341120; QAC CLI PID 23380; QEMU child PID 25648; QMP 127.0.0.1:55592; isolated ESP; -net none.
+Console was opened through Start > All Programs > Console on the exact ownership-verified RX28 QEMU child.
+COMMAND: rexx /rx28-find-demo.rex
+OUTPUT: RX28_SINGLE= 2; RX28_MULTIWORD= 2; RX28_NOT_FOUND= 0; RX28_BINARY= 2; RX28_WORDPOS= 2; RX28_FIND_DEMO_DONE
+COMMAND: rexx /rx28-find.rex
+OUTPUT: RX28_FIND_DONE
+COMMAND: rexx /rx28-find-error-recovery.rex
+OUTPUT: RX28_INVALID_FIND_ARGUMENT_CAUGHT; RX28_POST_ERROR_RESPONSIVE
+COMMAND: rexx /rx26-date-time-guard.rex
+OUTPUT: RX24_DATE_CURRENT_UNAVAILABLE; RX24_TIME_CURRENT_UNAVAILABLE; RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE
+COMMAND: rexx /rx20clk.rex (repeat after first screenshot captured before end)
+OUTPUT: RX20_DATE_CURRENT_UNAVAILABLE; RX20_TIME_CURRENT_UNAVAILABLE; RX20_MONOTONIC_E; RX20_MONOTONIC_R; RX20_NATIVE_CLOCK_CAPABILITY_DONE
+Visual evidence filenames use the manual-rx28- prefix; guest-commands-manual.log retains the full QMP helper command history.

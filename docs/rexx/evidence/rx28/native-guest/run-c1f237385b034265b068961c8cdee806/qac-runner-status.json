@@ -1,0 +1,19 @@
+{
+  "schema": "guidexos.rexx.rx28.qac-runner-status.v1",
+  "completedAtUtc": "2026-10-23T03:44:25.5919335Z",
+  "qacReservationId": "72c66d32bdf649daa836059d1d341120",
+  "qacCliPid": 23380,
+  "qacParentExitCode": 0,
+  "qemuChildPid": 25648,
+  "qemuChildExitCode": 0,
+  "runnerPid": 6280,
+  "runnerExitCode": 1,
+  "qmpShutdownAcknowledged": false,
+  "reservationReleased": true,
+  "heartbeatCountBefore": 0,
+  "heartbeatCountAfter": 0,
+  "guestError": "The launched QEMU child failed exact executable or parent verification.",
+  "qacStatusAfter": "Coordinator: Online\r\nName: guideXOS QAC\r\nVersion: 2.0.0\r\nPID: 14284\r\nStarted (UTC): 2026-10-22T21:23:05.5008927+00:00\r\nUptime: 22879s\r\nQEMU processes: 0 (0 foreign)\r\nManaged development limit: 2\r\nManaged sessions: 0; queued: 0; blocked: 0",
+  "qacListAfter": "Coordinator: Online (guideXOS QAC 2.0.0)\r\nReservations: 0\r\nManaged sessions: 0",
+  "qemuProcessesAfter": []
+}

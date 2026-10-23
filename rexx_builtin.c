@@ -1769,6 +1769,21 @@ static RexxVMStatus rexx_builtin_wordpos(const RexxValue *arguments,
     return rexx_builtin_set_size(result, 0u);
 }
 
+/* FIND(string, phrase) is the non-SAA spelling of WORDPOS(phrase, string).
+ * Pass exactly two arguments so WORDPOS always uses its default start word. */
+static RexxVMStatus rexx_builtin_find(const RexxValue *arguments,
+                                      size_t argument_count,
+                                      RexxValue *result)
+{
+    RexxValue wordpos_arguments[2];
+
+    if (argument_count != 2u || arguments == NULL)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    wordpos_arguments[0] = arguments[1];
+    wordpos_arguments[1] = arguments[0];
+    return rexx_builtin_wordpos(wordpos_arguments, 2u, result);
+}
+
 static size_t rexx_builtin_table_find(const char *table,
                                       size_t table_length,
                                       unsigned char byte)
@@ -4300,6 +4315,7 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "INDEX", 2u, 3u, rexx_builtin_index, NULL },
     { "TRANSLATE", 1u, 4u, rexx_builtin_translate, NULL },
     { "WORDPOS", 2u, 3u, rexx_builtin_wordpos, NULL },
+    { "FIND", 2u, 2u, rexx_builtin_find, NULL },
     { "SPACE", 1u, 3u, rexx_builtin_space, NULL },
     { "JUSTIFY", 2u, 3u, rexx_builtin_justify, NULL },
     { "COPIES", 2u, 2u, rexx_builtin_copies, NULL },

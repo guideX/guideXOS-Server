@@ -1,0 +1,13 @@
+{
+  "runnerPid": 6280,
+  "requestedAtUtc": "2026-10-23T03:04:03.8139664Z",
+  "project": "guideXOSServer",
+  "mode": "acceptance",
+  "qacCli": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+  "qemu": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmpPort": 55592,
+  "disposableEsp": "build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\guest\\esp",
+  "initialManagedSessions": 1,
+  "initialQueuedReservations": 0,
+  "queuedInsteadOfBypassingActiveReservation": true
+}

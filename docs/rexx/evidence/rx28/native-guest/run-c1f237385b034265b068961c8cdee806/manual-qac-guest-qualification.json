@@ -1,0 +1,105 @@
+{
+  "schema": "guidexos.rexx.rx28.manual-qac-guest.v1",
+  "runId": "c1f237385b034265b068961c8cdee806",
+  "recordedAtUtc": "2026-10-23T03:44:59.6894743Z",
+  "qacReservationId": "72c66d32bdf649daa836059d1d341120",
+  "qacCliPid": 23380,
+  "qemuPid": 25648,
+  "qmpPort": 55592,
+  "qemuPath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "disposableEsp": "build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\guest\\esp",
+  "network": "disabled (-net none)",
+  "kernelSha256": "a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef",
+  "consoleLaunch": "Start menu All Programs Console",
+  "scripts": [
+    {
+      "markers": [
+        "RX28_SINGLE= 2",
+        "RX28_MULTIWORD= 2",
+        "RX28_NOT_FOUND= 0",
+        "RX28_BINARY= 2",
+        "RX28_WORDPOS= 2",
+        "RX28_FIND_DEMO_DONE"
+      ],
+      "result": "PASS",
+      "script": "rx28-find-demo.rex"
+    },
+    {
+      "markers": [
+        "RX28_FIND_DONE"
+      ],
+      "result": "PASS",
+      "script": "rx28-find.rex"
+    },
+    {
+      "markers": [
+        "RX28_INVALID_FIND_ARGUMENT_CAUGHT",
+        "RX28_POST_ERROR_RESPONSIVE"
+      ],
+      "result": "PASS",
+      "script": "rx28-find-error-recovery.rex"
+    },
+    {
+      "markers": [
+        "RX24_DATE_CURRENT_UNAVAILABLE",
+        "RX24_TIME_CURRENT_UNAVAILABLE",
+        "RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE"
+      ],
+      "result": "PASS",
+      "script": "rx26-date-time-guard.rex"
+    },
+    {
+      "note": "First attempt screenshot was captured before completion; the immediate repeat displayed all expected markers.",
+      "markers": [
+        "RX20_DATE_CURRENT_UNAVAILABLE",
+        "RX20_TIME_CURRENT_UNAVAILABLE",
+        "RX20_MONOTONIC_E",
+        "RX20_MONOTONIC_R",
+        "RX20_NATIVE_CLOCK_CAPABILITY_DONE"
+      ],
+      "result": "PASS",
+      "script": "rx20clk.rex"
+    }
+  ],
+  "screenshots": [
+    {
+      "bytes": 24305,
+      "sha256": "8a316b4ef3658fe5d8412d6726c8eb85a7c2db53e9847732ba3a626b4f4ad5cd",
+      "name": "manual-rx28-01-find-demo.png"
+    },
+    {
+      "bytes": 24964,
+      "sha256": "07180f79d098f1e91bc954b430285289aeda069eccadf948b7f77e28a4e853b9",
+      "name": "manual-rx28-02-find-assertions-binary.png"
+    },
+    {
+      "bytes": 26723,
+      "sha256": "d7ce3587960eef31bfa6c4c0aebc57a4c579af9decce5cb1233d8d590eb37069",
+      "name": "manual-rx28-03-find-error-recovery.png"
+    },
+    {
+      "bytes": 27477,
+      "sha256": "1e82d3de0aaf9cdd6f8ed04fcd74504bcab0570802705d41be9c4b29c3516772",
+      "name": "manual-rx28-04-date-time-pit.png"
+    },
+    {
+      "bytes": 25692,
+      "sha256": "088f99cbbafc424897700bbe79a7c030eb9512300ee160226378b91687e9d0cb",
+      "name": "manual-rx28-05-rx20-clock-contract.png"
+    }
+  ],
+  "runnerStatus": "QAC runner exited 1 after exact-process-record race. Manual guest scripts passed under the same verified QAC-owned child; parent and child exited 0, manual QMP SHUTDOWN acknowledged, reservation released.",
+  "qacParentExitCode": 0,
+  "reservationReleased": true,
+  "heartbeatRecordsObservedAtEnd": 1378,
+  "heartbeatBeforeManualSuite": "Not recorded; runner exited its preflight before the heartbeat gate.",
+  "qmpShutdownReason": "host-qmp-quit",
+  "runnerError": "The launched QEMU child failed exact executable or parent verification (process-record race before ExecutablePath became available).",
+  "qemuChildExitCode": 0,
+  "finalQacManagedSessions": 0,
+  "finalQemuProcessCount": 0,
+  "manualQmpShutdownAcknowledged": true,
+  "finalQacReservations": 0,
+  "runnerShutdownAcknowledged": false,
+  "runnerExitCode": 1
+}

@@ -1,0 +1,12 @@
+{
+  "runId": "c1f237385b034265b068961c8cdee806",
+  "sourceEsp": "C:\\Users\\guideX\\.codex\\rx12-native-guest\\esp",
+  "disposableEsp": "build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\guest\\esp",
+  "sourceFirmware": "C:\\Users\\guideX\\.codex\\rx12-native-guest\\firmware-code.fd",
+  "stagedFirmware": "build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\guest\\firmware-code.fd",
+  "kernelSource": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx28\\native-amd64-67ae5162a2bb4941b830c49e6edb18b3\\amd64\\bin\\kernel.elf",
+  "stagedKernel": "build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\guest\\esp\\kernel.elf",
+  "kernelSha256": "a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef",
+  "productionMediaUsed": false,
+  "createdAtUtc": "2026-10-23T03:03:49.7973056Z"
+}

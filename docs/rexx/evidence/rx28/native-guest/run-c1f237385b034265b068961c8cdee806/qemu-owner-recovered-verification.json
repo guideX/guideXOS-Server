@@ -1,0 +1,11 @@
+{
+  "qacList": "Coordinator: Online (guideXOS QAC 2.0.0)\r\nQEMU PID 25648 | C:\\Program Files\\qemu\\qemu-system-x86_64.exe | 2026-10-23T03:21:06.8104938+00:00 | managed\r\n  Note: Reservation 72c66d32bdf649daa836059d1d341120 · guideXOSServer · acceptance\r\nReservations: 1\r\n  72c66d32bdf649daa836059d1d341120 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\\guideX (PID 23380) | owner Verified | child PID 25648\r\nManaged sessions: 1\r\nManaged session: 72c66d32bdf649daa836059d1d341120 | Running | guideXOSServer · LEON2_RDT\\guideX (PID 23380)",
+  "processId": 25648,
+  "parentProcessId": 23380,
+  "executablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "commandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc -accel tcg -drive if=pflash,format=raw,readonly=on,file=build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\guest\\firmware-code.fd -drive file=fat:rw:build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\guest\\esp,format=raw,if=ide,index=0 -m 1024M -smp 1 -vga std -serial file:build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\serial.log -no-reboot -no-shutdown -boot order=c -rtc base=utc,clock=host -net none -display none -monitor none -qmp tcp:127.0.0.1:55592,server=on,wait=off -D build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\qemu.log -d guest_errors",
+  "qmpPort": 55592,
+  "listenerProcessId": 25648,
+  "espPath": "build\\rexx\\rx28\\qemu-c1f237385b034265b068961c8cdee806\\guest\\esp",
+  "verifiedAtUtc": "2026-10-23T03:21:49.4664841Z"
+}
