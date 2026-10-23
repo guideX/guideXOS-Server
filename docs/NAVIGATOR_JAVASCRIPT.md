@@ -11009,8 +11009,207 @@ push. The final source changes are limited to the runtime and adapter
 diagnostics, JS84 native test and runner, hosted fixture and aggregate checks,
 and this documentation. No kernel or QEMU qualification was run.
 
-For JS85, first design a complete and auditable root enumeration across
-evaluator frames, embedding-held values, and host-retained callbacks. Evaluate
-generation-tagged object handles as a separate identity change. Do not add
-general reclamation until every stored edge and root category can be traced,
-including cycles and reset boundaries.
+JS84 recommended that JS85 begin with a complete, auditable root enumeration
+across evaluator frames, embedding-held values, and host-retained callbacks,
+then evaluate generation-tagged object handles as a separate identity change.
+The bounded JS85 work below qualifies one additional host-handle reference
+path. Full root enumeration and object identity work remain open; no published
+object reclamation is safe until all stored edges and root categories can be
+traced, including cycles and reset boundaries.
+
+### JS85 bounded ownership validation and reclamation boundary
+
+**Outcome A1 — JS85 bounded ownership validation qualified.** JS85 adds one
+independently executable ownership-safety invariant for a retained iterator
+result whose `value` property contains a generation-scoped Element handle. It
+does not reclaim or reuse published JavaScript objects, increase any pool, or
+change production runtime code.
+
+#### Pre-implementation decision
+
+JS84 proved bounded allocation accounting, the distinction between private
+construction rollback and successful publication, retained object aliases and
+stored property/Array edges, and monotonic `RuntimeObjectId` slots until realm
+reset. It also found that there is no complete root registry: evaluator C++
+locals, embedding-held `Value` copies, host-retained function IDs, and supported
+object and closure cycles cannot all be enumerated.
+
+The selected reclamation candidate was one published outer iterator-result
+object returned from a VALUES cursor's `.next()` call, with its `value`
+property holding a canonical Element handle. This frequently allocated result
+costs one bounded object plus two properties. KEYS results, ENTRIES results,
+their pair Arrays, and yielded canonical Element wrappers were not candidates
+for this phase.
+
+Published result reclamation was rejected. `RuntimeObjectId` is an unversioned
+32-bit index into the context's append-only object vector. A live or
+embedding-held old ID could therefore identify a replacement if its slot were
+reused. In addition, JS84's unknown roots prevent proving the absence of all
+references. Unknown ownership stays allocated until reset.
+
+The exact JS84 evidence gap selected for JS85 was the stored reference path
+`iterator result -> value property -> RuntimeHostObjectId -> HostObjectRecord
+-> HostObjectReference` across document-generation replacement when the new
+document reuses the old Element's structural serial. JS84 rejected a stale
+explicit cursor at this boundary, but did not exercise that path through
+retained result aliases, nested callback/Event results, and a C++-copied
+`Value` together.
+
+#### Identity, roots, and the new invariant
+
+Ordinary `Value` objects hold a 32-bit `RuntimeObjectId` vector index with no
+generation. Object properties, Array slots, and prototypes copy those values.
+Environment bindings also copy values and link to parent environments;
+functions retain closure environment IDs. Published object records are not
+reused before reset. JS84's tail resize remains confined to failed private
+iterator-result construction before publication.
+
+Host-object values hold an opaque 64-bit `RuntimeHostObjectId`: the upper
+32 bits carry the host generation and the lower 32 bits carry a registry slot.
+The corresponding `HostObjectRecord` copies the host-owned
+`(instanceId, generation, kind)` tuple and stores no DOM pointer. A handle from
+an invalidated generation is rejected even if a new Element has the same
+structural serial and a host registry slot is reused.
+
+Known roots and edges include global bindings; object properties, Array slots,
+and prototypes; environment bindings and parent environments; function closure
+environment IDs; the most recent `finalValue_`; active evaluator values and
+call frames; host callback/listener function IDs; active Event records; and
+copied values held by the embedding C++ caller. The first groups are stored
+edges that JS84 already audited. Active C++ locals, copies retained outside the
+runtime, and complete callback/Event ownership are not represented by a
+complete runtime root table. Self-cycles and shared object/closure edges are
+supported. No cycle walk or collector was added.
+
+`tests/navigator_javascript_js85_test.cpp` proves this narrower generation
+invariant using supported Navigator syntax. It stores results directly, by
+alias, through an object property and Array, in a self-cycle, through nested
+function returns, and in nested Event callbacks; it also copies the published
+result `Value`s into native storage. After replacing the document with one
+whose Element has the same structural serial, the test verifies:
+
+- The published result object IDs and all JavaScript aliases retain identity.
+- Each result still contains its original host-handle token.
+- All four copied old-generation Element tokens reject host-property access
+  with `StaleHostObject`.
+- A newly registered token for the reused serial resolves in the new
+  generation and differs from every old token.
+- The existing stale `setAttribute` method behavior remains a safe no-op; the
+  replacement document's retained attribute storage does not change.
+- The result object pool count does not decrease or reuse a result slot.
+- Replacing the realm clears its JavaScript bindings at the existing reset
+  boundary. A native `Value` retained across reset remains invalid and is not
+  used as a live identity.
+
+This is an ownership-safety regression, not a reachability witness. It proves
+one stored host-handle edge and its generation behavior; it does not claim
+that all references to an ordinary object are enumerable or that any result
+is unreachable. Since ownership remains incomplete and object identity is not
+generation-tagged, reclamation eligibility stays false for every published
+object. Actual reclamation count is zero.
+
+#### Capacity and cost
+
+Pool capacities remain 1,024 runtime objects, 4,096 runtime properties,
+4,096 Array slots, 2,048 environments, 2,048 host-object handles, and 128
+24-byte iterator records (3,072 bytes). The JS84 fresh-runtime capacity lane
+was rerun unchanged against the final JS85 runtime source:
+
+| Collection size | Result | Bodies | Result objects | Properties | Environments | Host handles | Iterator records |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 0 | Complete | 0 | 1 | 2 | 0 | 3 | 1 |
+| 1 | Complete | 1 | 2 | 4 | 1 | 4 | 1 |
+| 16 | Complete | 16 | 17 | 34 | 16 | 19 | 1 |
+| 64 | Complete | 64 | 65 | 130 | 64 | 67 | 1 |
+| 128 | Complete | 128 | 129 | 258 | 128 | 131 | 1 |
+| 256 | Complete | 256 | 257 | 514 | 256 | 259 | 1 |
+| 512 | Complete | 512 | 513 | 1,026 | 512 | 515 | 1 |
+| 1,019 | Complete | 1,019 | 1,020 | 2,040 | 1,019 | 1,022 | 1 |
+| 1,020 | `ObjectLimitExceeded` | 1,020 | 1,020 | 2,040 | 1,020 | 1,023 | 1 |
+| 1,024 | `ObjectLimitExceeded` | 1,020 | 1,020 | 2,040 | 1,020 | 1,023 | 1 |
+
+At 1,020 and 1,024 Elements, the loop bodies run but allocation of the
+terminal result fails, so the traversal does not complete normally. The
+largest successfully tested fresh-runtime traversal remains 1,019 Elements.
+There is no JS85 reclamation or capacity improvement; the existing allocation
+failure remains deterministic and does not advance the cursor or masquerade
+as `done=true`. VALUES traversal uses no Array slots; its 2,040 result
+properties and 1,020 iteration environments remain retained at exhaustion.
+Object high-water reaches the 1,024-record limit, host-handle usage is
+1,023/2,048, environment usage is 1,020/2,048, and the iterator registry uses
+1/128 records. These values are unchanged from JS84.
+
+The final-source JS84 five-sample medians were 694 microseconds for 128-value
+`for...of` (129 result objects, 128 environments, 264 host operations), 495
+microseconds for `forEach()` (no result objects, 128 environments, 261 host
+operations), and 543 microseconds for `values().next()` (129 result objects,
+no loop environments, 392 host operations). The diagnostic-disabled control
+medians were 550, 484, and 529 microseconds respectively. One hundred result
+objects plus 200 properties measured 29 microseconds with diagnostics and 19
+microseconds without. These machine-specific samples show no JS85 production
+hot-path overhead because JS85 changes only native tests, the runner, and
+documentation.
+
+The unchanged `-O2 -fstack-usage` figures were 944 bytes for
+`executeForOf`, 400 bytes for `closeIterator`, 320 bytes for typed property
+reads, 80 bytes for iterator advancement, and 576 bytes for host-method
+invocation. These hosted compiler frames do not establish bare-metal stack
+safety. Kernel/QEMU qualification was not run.
+
+#### Qualification and closeout
+
+The JS85 native lane passed **12/12** checks and strict C++17 compilation with
+`-Wall -Wextra -Werror -pedantic`; its runner also compiles the bounded
+Navigator test path with `GXOS_BARE_METAL`. JS85 adds no production diagnostic
+state or ownership metadata. Existing JS84 allocation-failure and private
+construction rollback injections passed in the rerun JS84 lane; JS85 adds no
+new allocation or release stages to inject. No JS85 hosted HTML fixture was
+added: the qualified invariant directly invalidates and reattaches a document
+inside the native same-realm harness, and the production runtime did not
+change.
+
+The complete JavaScript matrix passed **87/87 lanes** and
+**15,146/15,146 assertions across 46 assertion-bearing lanes**, including
+JS84's 93/93 diagnostic checks and JS85's 12/12 ownership checks. The separate
+JS79–JS84 focused rerun passed all six suites: 202, 379, 600, 29, 67, and 93
+checks respectively, with strict compilation in each lane. JS9 Event behavior
+and all existing iterator/`for...of` behavior remain covered by the matrix.
+
+`build.bat` passed at source HEAD
+`7d1aa8ad47218b267e4e7237b1099c4b560c66b4`; the fresh
+`guideXOSServer.exe` was 8,639,900 bytes with SHA-256
+`3832898E59EC5D14F78E4C830DC46FE9B089B43AB02E7CC5F25EF61BC8DFA9B7`. The
+hosted run used that exact path and hash (PID 23276). It reported **688 checks
+passed and 7 failed**; all JavaScript checks passed, including the three JS84
+hosted checks. The seven existing CSS failures remain CSS 3C, CSS 3G, CSS 6A,
+CSS 6B (three checks), and CSS 6C. The hosted wrapper exits 1 because those
+CSS checks remain marked failed.
+
+The JS84 authoritative artifact manifest remained exactly 1,367 files and
+90,843,932 bytes before and after the run. The supplementary recursive
+manifest contains 5,554 files and 537,294,713 bytes because it also expands
+the ignored `third_party/mbedtls` dependency source tree (4,187 files,
+446,450,781 bytes). That recursive manifest also returned to its exact
+**5,554 files / 537,294,713 bytes**, with zero changed, missing, or extra
+files. The original ignored executable was restored at 8,398,274 bytes with
+SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. The
+42 generated smoke fixtures (458,372 bytes) matched their saved baseline.
+Evidence and manifests are outside the repository under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js85-evidence-20261022-3a7b3689401f4ba98dc9f32b9aed7a5d`.
+`.phase` remains absent.
+
+JS85 stayed on `NAVIGATOR_JAVASCRIPT_SUPPORT`, starting from JS84 HEAD
+`7d1aa8ad47218b267e4e7237b1099c4b560c66b4`, two commits ahead of
+`origin/NAVIGATOR_JAVASCRIPT_SUPPORT`. The native test, runner, and this
+qualification record are committed locally without push. No production
+runtime source changed.
+
+#### Remaining limit and JS86 direction
+
+JS86 should design a complete, bounded root enumeration for active evaluator
+frames, final results, callbacks/Events, and embedding-held runtime values,
+then evaluate generation-tagged ordinary object handles as a separate identity
+change. Until both root completeness and stale-object identity are proven,
+published object reclamation remains forbidden. Do not substitute an
+unbounded trace, reference count, or free list for that proof.
