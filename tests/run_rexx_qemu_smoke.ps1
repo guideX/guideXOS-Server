@@ -709,6 +709,20 @@ try {
             & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds $commandWaitSeconds
         }
         if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Guest input/screenshot helper failed for $($command.name) with exit code $LASTEXITCODE." }
+        if ($Phase -eq 'RX27') {
+            $scriptMatch = [regex]::Match([string]$command.text,'^rexx /(?<script>[^ ]+\.rex)$')
+            if ($scriptMatch.Success) {
+                Start-Sleep -Milliseconds 500
+                $serial = Read-QemuSerialLog $serialPath
+                $guestScriptPath = '/' + $scriptMatch.Groups['script'].Value
+                if (-not $serial.Contains($guestScriptPath)) {
+                    $retryCaptureName = 'retry-' + $captureName
+                    Write-Warning "Guest did not open $guestScriptPath on the first command entry; retrying once."
+                    & $helper -CommandText ([string]$command.text) -CaptureName $retryCaptureName -WaitSeconds $commandWaitSeconds
+                    if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Guest input/screenshot retry failed for $($command.name) with exit code $LASTEXITCODE." }
+                }
+            }
+        }
         $null = Assert-OwnQemu -Identity $owner
     }
 

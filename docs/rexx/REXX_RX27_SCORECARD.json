@@ -1,7 +1,7 @@
 {
   "schema": "guidexos.rexx.rx27.scorecard.v1",
   "phase": "RX27",
-  "outcome": "PARTIAL",
+  "outcome": "ACCEPTED",
   "repository": "D:\\dev\\guideXOSServer_REXX",
   "branch": "REXX_SUPPORT",
   "starting_head": "25ac71063951a3a17d3d031446b326e556d51e58",
@@ -96,14 +96,37 @@
     "evidence": "evidence/rx27/native-build/native-link-evidence-647f2be902e24213a20247282dfdfcf9.json"
   },
   "qac_guest_acceptance": {
-    "status": "BLOCKED_NOT_RUN",
-    "reason": "An active managed reservation and QEMU child were mapped to guideXOSServer_DiskManagerImprovements. A separate guideXOSServerV1.1_DOTNET_SUPPORT QAC process was also observed. The RX27 guest was not launched and all foreign sessions were left untouched.",
-    "qac_parent_cli_exit_code": "UNKNOWN — RX27 QAC CLI was not launched.",
-    "qemu_child_exit_code": "UNKNOWN — RX27 QEMU child was not launched.",
-    "qmp_shutdown_acknowledged": "NOT_RUN",
-    "reservation_released": "NOT_RUN; no RX27 reservation acquired.",
-    "guest_checks": "JUSTIFY behavior, invalid-argument interpreter recovery, DATE/TIME fail-closed state, independent PIT progression, and acknowledged QMP shutdown remain unqualified in a guest.",
-    "preflight_evidence": "evidence/rx27/preflight.json"
+    "status": "PASS",
+    "run": "evidence/rx27/native-guest/run-a7b6e750fbf847f380d64aa68b411ede",
+    "project": "guideXOSServer",
+    "mode": "exclusive acceptance",
+    "qemu_version": "11.0.0",
+    "network_disabled": true,
+    "disposable_media": true,
+    "kernel_sha256": "da340faf9ba3a5aa59a774477a28a20797c248ea6f3d205bbac2d2c95b058c4c",
+    "guest_checks": [
+      "RX27_JUSTIFY_DONE after the IBM vectors, custom pad, redistribution, binary NUL pad, and truncation assertions.",
+      "RX27_POST_ERROR_RESPONSIVE after invalid JUSTIFY pad validation.",
+      "RX26 INDEX/POS vectors and error recovery.",
+      "RX24 ADDRESS/TRACE success and recovery.",
+      "RX25 RANDOM unseeded, seeded, reseed, range, and error recovery.",
+      "DATE/TIME current forms failed closed; independent PIT clock contract passed."
+    ],
+    "heartbeat_count_before_suite": 1,
+    "heartbeat_count_after_suite": 237,
+    "qmp_shutdown_acknowledged": true,
+    "qac_parent_cli_pid": 2392,
+    "qac_parent_cli_exit_code": 0,
+    "qemu_child_pid": 24920,
+    "qemu_child_exit_code": 0,
+    "rx27_runner_exit_code": 0,
+    "reservation_released": true,
+    "post_run_qac_status": "Managed sessions: 0; queued: 0; blocked: 0; Reservations: 0.",
+    "foreign_process_controlled": false,
+    "additional_foreign_qemu_seen": false,
+    "retry_history": "An earlier guest attempt exited 1 because QMP keyboard input mistyped rx26-index-builtins.rex. That attempt had an unknown QAC parent CLI exit code, QEMU child exit code 0, acknowledged QMP shutdown, and a released reservation. The successful run retried once after serial showed the script had not opened; the retry produced RX26_INDEX_BINARY_POS_DONE.",
+    "failed_attempt_evidence": "evidence/rx27/native-guest/run-41d193127f4a4f1b8163d27f18c5d6ff/ contains the first attempt status, command log, serial trace, QMP shutdown acknowledgment, and QAC child exit/release log; compact summary is evidence/rx27/qac-qualification-completion.json.",
+    "evidence": "evidence/rx27/native-guest/run-a7b6e750fbf847f380d64aa68b411ede/qemu-smoke-result.json"
   },
   "artifact_safety": {
     "protected_root_objects_and_pdbs": "31/31 exact size and SHA-256 matches at all hosted, sanitizer, and native-build preservation gates.",
@@ -123,7 +146,17 @@
     "preexisting_untracked_paths_preserved": true,
     "missing_preexisting_untracked_paths": 0,
     "new_rx27_paths_committed": 31,
-    "remaining_additional_untracked_paths_after_commit": 6098
+    "remaining_additional_untracked_paths_after_commit": 6098,
+    "task_start_untracked_path_count": 79715,
+    "task_start_untracked_sha256": "0ce0ac7e6d02b5aa39739951198767f2a55b038a01c6367ce4b8bf58e254434e",
+    "task_start_path_inventory_external": "C:\\Users\\guideX\\AppData\\Local\\Temp\\rx27-untracked-baseline-385779e9766e40beb4b9e82591590aef.txt",
+    "task_start_path_sets_compared": true,
+    "followup_reconciliation": "evidence/rx27/untracked-reconciliation-followup.json",
+    "task_poststage_untracked_path_count": 79855,
+    "task_poststage_untracked_sha256": "27cf44084c1a9e3420dd48a42f9c98c9f8671cd1e1e02240b867f895a8cebea6",
+    "task_missing_preexisting_untracked_paths": 0,
+    "task_preexisting_paths_now_tracked": 0,
+    "task_preexisting_untracked_paths_preserved": true
   },
   "inventory": {
     "rows": 75,
@@ -136,9 +169,9 @@
     "file": "REXX_RX27_BUILTIN_INVENTORY.csv"
   },
   "remaining_compatibility_limits": [
-    "Exclusive QAC/QEMU guest acceptance remains blocked by foreign active reservations; no RX27 parent/child exit codes or guest result exist.",
-    "Regina was unavailable; no external interpreter comparison or percentage is claimed.",
-    "JUSTIFY remains byte-oriented with the existing 16 MiB output ceiling; no Unicode, DBCS, locale, or transcoding behavior is claimed."
+    "Regina executable unavailable; Regina differential is NOT_RUN and no external compatibility percentage is claimed.",
+    "Strings remain byte-oriented under the existing 16 MiB runtime output cap; no Unicode, DBCS, locale, or transcoding behavior is claimed.",
+    "Empty, single-word, and zero-width behavior is inferred from IBM gap-only padding and truncation rules; IBM does not enumerate those cases as standalone examples."
   ],
   "recommended_rx28_scope": "Select FIND from the actual RX27 inventory of remaining P3 entries. It is a compact non-I/O word-search candidate; verify the IBM contract and relationship to existing WORDPOS during RX28 preflight.",
   "evidence": [
@@ -150,6 +183,12 @@
     "evidence/rx27/sanitizer-undefined-fafbf7238f1c4e3091f66706d71affb4/",
     "evidence/rx27/protected-artifacts-final.json",
     "evidence/rx27/untracked-reconciliation-final.json",
-    "evidence/rx27/sanitizers-summary.json"
-  ]
+    "evidence/rx27/sanitizers-summary.json",
+    "evidence/rx27/qac-qualification-completion.json",
+    "evidence/rx27/native-guest/run-a7b6e750fbf847f380d64aa68b411ede/",
+    "evidence/rx27/native-guest/run-41d193127f4a4f1b8163d27f18c5d6ff/",
+    "evidence/rx27/native-guest/run-a7b6e750fbf847f380d64aa68b411ede/rx27-03-index-ibm-vectors-and-binary-search-retry.png"
+  ],
+  "actual_prequalification_head": "2dadf77a178a5b187335ea1f8339df54d5e681aa",
+  "prequalification_state": "RX27 source/tests/docs already existed on the required branch at task start; hosted, sanitizer, and freestanding gates had passed, while QAC guest acceptance was recorded as blocked."
 }

@@ -1,0 +1,81 @@
+{
+  "schema": "guidexos.rexx.rx27.qac-qualification-completion.v1",
+  "phase": "RX27",
+  "final_status": "PASS",
+  "requested_rx26_base_head": "25ac71063951a3a17d3d031446b326e556d51e58",
+  "actual_head_at_task_start": "2dadf77a178a5b187335ea1f8339df54d5e681aa",
+  "branch": "REXX_SUPPORT",
+  "reservation_preflight": [
+    {
+      "state": "BUSY",
+      "managed_sessions": 1,
+      "queued": 1,
+      "active_foreign_qemu_pid": 25532,
+      "qac_pid": 21872,
+      "action": "No RX27 guest was launched; foreign QAC/QEMU processes were left untouched."
+    },
+    {
+      "state": "CLEAR",
+      "managed_sessions": 0,
+      "queued": 0,
+      "reservations": 0,
+      "action": "Exclusive RX27 acceptance started only after the coordinator and list both showed zero reservations."
+    }
+  ],
+  "attempts": [
+    {
+      "run": "qemu-41d193127f4a4f1b8163d27f18c5d6ff",
+      "runner_exit_code": 1,
+      "result": "FAILED_RETRYABLE_INPUT",
+      "reason": "One QMP keyboard entry did not open rx26-index-builtins.rex; the serial access audit stopped the run.",
+      "qac_parent_cli_exit_code": null,
+      "qac_parent_cli_exit_status": "UNKNOWN_NOT_CAPTURED",
+      "qemu_child_pid": 15972,
+      "qemu_child_exit_code": 0,
+      "qmp_shutdown_acknowledged": true,
+      "reservation_released": true,
+      "foreign_process_controlled": false,
+      "build_evidence": "build/rexx/rx27/qemu-41d193127f4a4f1b8163d27f18c5d6ff"
+    },
+    {
+      "run": "qemu-a7b6e750fbf847f380d64aa68b411ede",
+      "runner_exit_code": 0,
+      "result": "PASS",
+      "qac_parent_cli_pid": 2392,
+      "qac_parent_cli_exit_code": 0,
+      "qemu_child_pid": 24920,
+      "qemu_child_exit_code": 0,
+      "qmp_shutdown_acknowledged": true,
+      "reservation_released": true,
+      "network_disabled": true,
+      "disposable_media": true,
+      "kernel_sha256": "da340faf9ba3a5aa59a774477a28a20797c248ea6f3d205bbac2d2c95b058c4c",
+      "guest_scripts": [
+        "rx27-justify.rex",
+        "rx27-justify-error-recovery.rex",
+        "rx26-index-builtins.rex",
+        "rx26-index-error-recovery.rex",
+        "rx24-address-trace.rex",
+        "rx24-error-recovery.rex",
+        "rx25-unseeded.rex",
+        "rx25-random-sequence.rex",
+        "rx26-date-time-guard.rex",
+        "rx20clk.rex"
+      ],
+      "direct_markers": [
+        "RX27_JUSTIFY_DONE",
+        "RX27_POST_ERROR_RESPONSIVE: a   b",
+        "RX26_INDEX_BINARY_POS_DONE"
+      ],
+      "heartbeat_count_before_suite": 1,
+      "heartbeat_count_after_suite": 237,
+      "additional_foreign_qemu_seen": false,
+      "post_run_managed_sessions": 0,
+      "post_run_queued": 0,
+      "post_run_reservations": 0,
+      "evidence": "docs/rexx/evidence/rx27/native-guest/run-a7b6e750fbf847f380d64aa68b411ede"
+    }
+  ],
+  "cleanup": "Acknowledged QMP quit; owned child exited 0; QAC parent CLI exited 0; reservation released; final QEMU census empty.",
+  "protected_artifacts": "31/31 exact path, size, and SHA-256 matches at the guest preservation gates."
+}

@@ -1,0 +1,16 @@
+RX27 isolated QEMU Console transcript
+Kernel SHA-256: da340faf9ba3a5aa59a774477a28a20797c248ea6f3d205bbac2d2c95b058c4c
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx27\qemu-a7b6e750fbf847f380d64aa68b411ede\guest\esp
+COMMAND: rexx /rx27-justify.rex | expected visible marker/status: RX27_JUSTIFY_DONE
+COMMAND: rexx /rx27-justify-error-recovery.rex | expected visible marker/status: RX27_POST_ERROR_RESPONSIVE: a   b
+COMMAND: rexx /rx26-index-builtins.rex | expected visible marker/status: RX26_INDEX_BINARY_POS_DONE
+COMMAND: rexx /rx26-index-error-recovery.rex | expected visible marker/status: RX26_INDEX_POST_ERROR_RESPONSIVE: 5
+COMMAND: rexx /rx24-address-trace.rex | expected visible marker/status: RX24_ADDRESS_TRACE_DONE
+COMMAND: rexx /rx24-error-recovery.rex | expected visible marker/status: RX24_GUEST_RESPONSIVE
+COMMAND: rexx /rx25-unseeded.rex | expected visible marker/status: RX25_UNSEEDED_SAMPLE
+COMMAND: rexx /rx25-unseeded.rex | expected visible marker/status: same RX25_UNSEEDED_SAMPLE value as first execution
+COMMAND: rexx /rx25-random-sequence.rex | expected visible marker/status: RX25_RANDOM_SEQUENCE_DONE
+COMMAND: rexx /rx26-date-time-guard.rex | expected visible marker/status: RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE
+COMMAND: rexx /rx20clk.rex | expected visible marker/status: RX20_NATIVE_CLOCK_CAPABILITY_DONE
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=237
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

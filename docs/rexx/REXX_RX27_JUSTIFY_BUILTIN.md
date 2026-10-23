@@ -4,7 +4,7 @@
 
 RX27 adds `JUSTIFY(string,length[,pad])` as an IBM TSO/E and VM non-SAA built-in. Its implementation uses the existing bounded `SPACE` word scanner and the existing result-string allocator. It does not add a tokenizer or a general formatting subsystem.
 
-The source implementation, direct tests, hosted regressions, sanitizers, and freestanding AMD64 link passed. Overall RX27 remains **Partial** because exclusive QAC/QEMU guest acceptance could not run while a foreign managed QAC reservation was active. Regina was also unavailable, so no external-interpreter comparison or compatibility percentage is claimed.
+The source implementation, direct tests, hosted regressions, sanitizers, freestanding AMD64 link, and exclusive QAC/QEMU guest acceptance passed. RX27 is **Accepted**. Regina was unavailable, so no external-interpreter comparison or compatibility percentage is claimed.
 
 ## Contract and implementation
 
@@ -14,7 +14,7 @@ The implementation makes three bounded scans over the source view. It counts wor
 
 For `g` surviving gaps, it divides the added width by `g`; each gap gets the quotient and the leftmost `remainder` gaps get one more byte. The selected one-byte pad replaces each normalized separator. An explicit NUL pad is valid because validation uses the supplied byte length, not C-string termination.
 
-IBM describes padding between words. There are no such gaps for empty or single-word normalized input, so the result is not extended outside the words: empty/all-blank input stays empty, a single word is returned unchanged if it fits, and is right-truncated if it does not. Width zero returns the empty prefix. The reference's examples do not list these three edge cases separately; these results follow the documented between-word rule and truncation rule, and are covered locally. The [Classic Rexx Functions Reference](https://rexxinfo.org/reference/articles/classic_rexx_functions.html) is an additional non-IBM example source for gap padding and right truncation. No Regina execution was available in this phase.
+IBM describes padding between words and permits a zero length. There are no such gaps for empty or single-word normalized input, so this implementation adds no outer padding: empty/all-blank input stays empty, a single word is returned unchanged if it fits and is right-truncated if it does not, and width zero returns the empty prefix. IBM's examples do not list these cases separately; this behavior is an inference from the documented gap-only padding and truncation rules, and is covered locally. The [Classic Rexx Functions Reference](https://rexxinfo.org/reference/articles/classic_rexx_functions.html) also describes gap padding and right truncation, but does not add standalone examples for these edges. Regina was unavailable, so these cases have no external-runtime comparison.
 
 The required length uses the existing nonnegative whole-number helper. Existing numeric parsing/resource statuses are preserved; values beyond the helper's representable range and outputs beyond the 16 MiB runtime string cap fail before result allocation. Empty and one-word values do not divide by a gap count. A normal result needs one result allocation and no intermediate normalized string.
 
@@ -40,12 +40,13 @@ The deterministic property oracle materializes an independently normalized byte 
 - Freestanding AMD64: nine REXX C objects compiled and linked. `kernel.elf` SHA-256 is `da340faf9ba3a5aa59a774477a28a20797c248ea6f3d205bbac2d2c95b058c4c`.
 - Allocation recovery: all five VM allocation failpoints measured during interpreter execution were injected; after each `OUT_OF_MEMORY`, the same VM executed the JUSTIFY program successfully with the expected output.
 - Protected root `.obj`/`.pdb` files: 31/31 exact path, size, and SHA-256 matches at every hosted, sanitizer, and native-build preservation gate.
-- QAC guest acceptance: `NOT_RUN` / blocked by an active foreign QAC/QEMU run. No RX27 QAC parent or QEMU child was launched; their exit codes and reservation release are unknown/not applicable. The foreign guest was left untouched.
+- QAC guest acceptance: **PASS**, QEMU 11.0.0, exclusive `guideXOSServer` acceptance reservation, networking disabled, disposable media. The guest checked the RX27 IBM vectors, custom pad, post-truncation redistribution, binary NUL pad, and invalid-argument recovery; inherited INDEX/POS, ADDRESS/TRACE, RANDOM, DATE/TIME fail-closed, and clock checks also passed. PIT heartbeats advanced from 1 to 237 during the suite. QMP shutdown was acknowledged, QAC parent CLI exit code was 0, guest QEMU child exit code was 0, and the reservation returned to zero sessions/queues/reservations. Evidence is in `evidence/rx27/native-guest/run-a7b6e750fbf847f380d64aa68b411ede/` and `evidence/rx27/qac-qualification-completion.json`.
+- Guest command retry: the first acceptance attempt exited 1 after a QMP keyboard entry failed to launch the RX26 INDEX fixture; its child exited 0, QMP shutdown was acknowledged, and the reservation was released. The next exclusive run retried that command once after checking serial file access, captured the successful INDEX marker in `evidence/rx27/native-guest/run-a7b6e750fbf847f380d64aa68b411ede/rx27-03-index-ibm-vectors-and-binary-search-retry.png`, and passed. The first attempt remains recorded as retry history; no foreign QAC/QEMU process was controlled.
 
 Compact machine-readable results and preflight evidence are in `evidence/rx27/`; detailed build, sanitizer, and preservation logs remain in their phase-specific subdirectories. Kernel binaries and build outputs remain under `build/rexx/rx27/` and are not committed.
 
 ## Inventory and follow-up
 
-The inventory remains at 75 entries: 57 implemented, 13 not implemented, 3 partial, 1 not assessed, and 1 not implemented by design. Existing `DATE`, `TIME`, and `TRACE` partial classifications are unchanged. Regina comparison and native guest acceptance remain unqualified.
+The inventory remains at 75 entries: 57 implemented, 13 not implemented, 3 partial, 1 not assessed, and 1 not implemented by design. Existing `DATE`, `TIME`, and `TRACE` partial classifications are unchanged. Remaining compatibility limits are the unavailable Regina comparison, byte-oriented processing, and the documented-rule inference for empty/single-word/zero-width cases.
 
 Recommended RX28 candidate: `FIND`, which remains a P3 unimplemented entry in the RX27 inventory and is a compact, non-I/O word-search candidate. Confirm its IBM contract and alias/behavior relationship to the existing word-position implementation during RX28 preflight.
