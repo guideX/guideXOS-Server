@@ -6,6 +6,7 @@
 #include "core/compiler/compiler_module.h"
 #include "core/compiler/compiler_linker.h"
 #include "core/compiler/compiler_object.h"
+#include "core/native_elf/native_elf_stack_policy.h"
 #include "arch/amd64/compiler_backend.h"
 
 #include <cstdio>
@@ -104,6 +105,18 @@ static bool rejected(const char* source, const char* needle)
     return !parse_text(source, &unit, &diagnostics) && diagnostic_contains(diagnostics, needle);
 }
 
+static bool recursive_struct_pointer_source(uint32_t recursiveCalls, char* source,
+                                            uint32_t sourceCapacity)
+{
+    if (!source || sourceCapacity == 0) return false;
+    const int written = std::snprintf(source, sourceCapacity,
+        "struct Point { int x; }; "
+        "int recurse(struct Point* p, int n) { if (n == 0) return p->x; return recurse(p, n - 1); } "
+        "int gx_main(gx_app_context* ctx) { struct Point p; p.x = 42; return recurse(&p, %u); }",
+        recursiveCalls);
+    return written > 0 && static_cast<uint32_t>(written) < sourceCapacity;
+}
+
 static bool basic()
 {
     const char* source =
@@ -144,10 +157,33 @@ static bool basic()
         "struct Point { int x; }; "
         "int recurse(struct Point* p, int n) { if (n == 0) return p->x; return recurse(p, n - 1); } "
         "int gx_main(gx_app_context* ctx) { struct Point p; p.x = 42; return recurse(&p, 76); }";
-    CallResult deep = {};
-    if (!require(compile_and_run(deepRecursive, 0, &deep) &&
-                 (deep.status & 0xFFU) == COMPILER_RUNTIME_STATUS_CALL_DEPTH,
-                 "struct pointer recursion guard is preserved")) return false;
+    CallResult moderate = {};
+    if (!require(compile_and_run(deepRecursive, 42, &moderate) && moderate.status == 0,
+                 "struct pointer recursion below the runtime limit succeeds")) return false;
+
+    // gx_main is activation 1 and the first recurse call is activation 2.
+    // This count reaches the configured maximum; the next count requests one
+    // activation beyond the compiler/NativeElf stack policy.
+    char atBoundary[512] = {};
+    if (!require(COMPILER_MAX_RUNTIME_CALL_DEPTH >= 3U &&
+                 recursive_struct_pointer_source(COMPILER_MAX_RUNTIME_CALL_DEPTH - 2U,
+                                                 atBoundary, sizeof(atBoundary)),
+                 "struct pointer recursion boundary fixture is bounded")) return false;
+    CallResult boundary = {};
+    if (!require(compile_and_run(atBoundary, 42, &boundary) && boundary.status == 0,
+                 "struct pointer recursion at the runtime boundary succeeds")) return false;
+
+    char beyondBoundary[512] = {};
+    if (!require(recursive_struct_pointer_source(COMPILER_MAX_RUNTIME_CALL_DEPTH - 1U,
+                                                 beyondBoundary, sizeof(beyondBoundary)),
+                 "struct pointer recursion overflow fixture is bounded")) return false;
+    CallResult exceeded = {};
+    if (!require(compile_and_run(beyondBoundary, 0, &exceeded) &&
+                 (exceeded.status & 0xFFU) == COMPILER_RUNTIME_STATUS_CALL_DEPTH &&
+                 (exceeded.status >> 8U) == COMPILER_MAX_RUNTIME_CALL_DEPTH,
+                 "struct pointer recursion beyond the runtime boundary is rejected")) return false;
+    if (!require(compile_and_run(recursive, 42),
+                 "struct pointer recursion recovers after a runtime depth failure")) return false;
     return true;
 }
 
@@ -167,12 +203,29 @@ static bool diagnostics()
                  "dot on struct pointer is rejected")) return false;
     if (!require(rejected("struct P { int x; }; int gx_main(gx_app_context* c) { struct P p; return p->x; }", "arrow access requires"),
                  "arrow on struct value is rejected")) return false;
+    if (!require(rejected("struct Node { struct Node* next; }; int gx_main(gx_app_context* c) { return 0; }",
+                          "struct fields must be int"),
+                 "self-referential struct pointer fields remain unsupported")) return false;
+    if (!require(rejected("struct Node { struct Node next; }; int gx_main(gx_app_context* c) { return 0; }",
+                          "struct fields must be int"),
+                 "directly embedded recursive struct fields remain unsupported")) return false;
+    if (!require(rejected("struct Left { struct Right* right; }; struct Right { struct Left* left; }; int gx_main(gx_app_context* c) { return 0; }",
+                          "struct fields must be int"),
+                 "mutually recursive struct pointer fields remain unsupported")) return false;
+    if (!require(rejected("struct Node; int gx_main(gx_app_context* c) { return 0; }",
+                          "unknown struct type"),
+                 "incomplete struct declarations remain unsupported")) return false;
     if (!require(rejected("struct P { int x; }; struct R { int x; }; int gx_main(gx_app_context* c) { struct P p; struct R* r = &p; return 0; }", "different type"),
                  "struct pointer type mismatch is rejected")) return false;
     if (!require(rejected("struct P { int x; }; int gx_main(gx_app_context* c) { struct P a; struct P b; a = b; return 0; }", "whole-struct assignment"),
                  "whole struct assignment is rejected")) return false;
     if (!require(rejected("struct P { int x; }; int f(struct P p) { return p.x; } int gx_main(gx_app_context* c) { return 0; }", "passed by pointer"),
                  "by-value struct parameter is rejected")) return false;
+    const char* afterRejectedTypes =
+        "struct Point { int x; }; "
+        "int gx_main(gx_app_context* c) { struct Point p; p.x = 42; return p.x; }";
+    if (!require(compile_and_run(afterRejectedTypes, 42),
+                 "valid struct compilation recovers after rejected recursive types")) return false;
     return true;
 }
 

@@ -18,7 +18,8 @@ $sources = @(
 & $gxx -std=c++14 -Wall -Wextra -O2 -DGXOS_BARE_METAL `
     "-I$repoRoot" "-I$(Join-Path $repoRoot 'kernel')" `
     "-iquote$(Join-Path $repoRoot 'kernel/core/include')" `
-    "-I$(Join-Path $repoRoot 'kernel/arch/amd64/include')" @sources -o $testBinary
+    "-I$(Join-Path $repoRoot 'kernel/arch/amd64/include')" `
+    @sources "-Wl,--stack,8388608" -o $testBinary
 if ($LASTEXITCODE -ne 0) { throw "compiler structs host test build failed" }
 & $testBinary
 if ($LASTEXITCODE -ne 0) { throw "compiler structs host test failed" }
