@@ -2992,6 +2992,78 @@ static RexxVMStatus rexx_builtin_value(RexxVM *vm,
     return rexx_vm_value_access(vm, name, name_length, new_value, result);
 }
 
+/* CHARIN positions and lengths are exact decimal whole numbers. Do not round
+ * them through NUMERIC DIGITS before conversion to a bounded native type. */
+static RexxVMStatus rexx_builtin_charin_integer(const RexxValue *value,
+                                                int allow_zero,
+                                                uint32_t *number)
+{
+    RexxDecimal parsed;
+    RexxNumericStatus numeric_status;
+    RexxVMStatus status;
+
+    if (value == NULL || number == NULL)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    status = rexx_builtin_decimal(value, &parsed);
+    if (status != REXX_VM_STATUS_OK)
+        return status == REXX_VM_STATUS_RESOURCE_LIMIT
+                   ? status : REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (parsed.sign < 0) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    numeric_status = rexx_decimal_to_uint32(&parsed, number);
+    if (numeric_status == REXX_NUMERIC_RANGE)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (numeric_status != REXX_NUMERIC_OK || (!allow_zero && *number == 0u))
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    return REXX_VM_STATUS_OK;
+}
+
+static RexxVMStatus rexx_builtin_charin(RexxVM *vm,
+                                         const RexxValue *arguments,
+                                         size_t argument_count,
+                                         RexxValue *result)
+{
+    RexxBuiltinStringView name_view;
+    const unsigned char *name = NULL;
+    size_t name_length = 0u;
+    size_t requested_length = 1u;
+    uint32_t start = 0u;
+    int use_default = 1;
+    int has_start = 0;
+    RexxVMStatus status;
+
+    if (vm == NULL || result == NULL || argument_count > 3u ||
+        (arguments == NULL && argument_count != 0u))
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (argument_count > 0u &&
+        arguments[0].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_string_view(&arguments[0], &name_view);
+        if (status != REXX_VM_STATUS_OK)
+            return status == REXX_VM_STATUS_RESOURCE_LIMIT
+                       ? status : REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        name = (const unsigned char *)name_view.bytes;
+        name_length = name_view.length;
+        use_default = 0;
+    }
+    if (argument_count > 1u &&
+        arguments[1].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_charin_integer(&arguments[1], 0, &start);
+        if (status != REXX_VM_STATUS_OK) return status;
+        has_start = 1;
+    }
+    if (argument_count > 2u &&
+        arguments[2].type != REXX_VALUE_UNSET) {
+        uint32_t converted_length = 0u;
+        status = rexx_builtin_charin_integer(&arguments[2], 1,
+                                             &converted_length);
+        if (status != REXX_VM_STATUS_OK) return status;
+        requested_length = (size_t)converted_length;
+        if (requested_length > REXX_VM_MAX_PARSE_SOURCE_LENGTH)
+            return REXX_VM_STATUS_RESOURCE_LIMIT;
+    }
+    return rexx_vm_charin(vm, use_default, name, name_length, has_start,
+                          (uint64_t)start, requested_length, result);
+}
+
 static RexxVMStatus rexx_builtin_xrange(RexxVM *vm,
                                         const RexxValue *arguments,
                                         size_t argument_count,
@@ -4387,6 +4459,7 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "DATATYPE", 1u, 2u, NULL, rexx_builtin_datatype },
     { "SYMBOL", 1u, 1u, NULL, rexx_builtin_symbol },
     { "VALUE", 1u, 2u, NULL, rexx_builtin_value },
+    { "CHARIN", 0u, 3u, NULL, rexx_builtin_charin },
     { "XRANGE", 0u, 2u, NULL, rexx_builtin_xrange },
     { "C2D", 1u, 2u, NULL, rexx_builtin_c2d },
     { "C2X", 1u, 1u, rexx_builtin_c2x, NULL },

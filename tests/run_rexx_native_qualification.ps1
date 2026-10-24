@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31','RX32')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31','RX32','RX33')]
     [string]$Phase = 'RX12R1',
     [string]$MakeExecutable = '',
     [string]$OutputEvidenceRoot = ''
@@ -18,6 +18,8 @@ $guardManifest = if ($Phase -eq 'RX30') {
     Join-Path $rootDir 'docs\rexx\evidence\rx31\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX32') {
     Join-Path $rootDir 'docs\rexx\evidence\rx32\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX33') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx33\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX29') {
     Join-Path $rootDir 'docs\rexx\evidence\rx29\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX28') {
@@ -181,7 +183,7 @@ $elfHashSecond = (Get-FileHash -LiteralPath $kernelElf -Algorithm SHA256).Hash.T
 if ($elfHash -ne $elfHashSecond) { throw 'kernel.elf changed during its recorded SHA-256 verification.' }
 $rexxObjectDirectory = Join-Path (Join-Path $buildDir 'obj') 'rexx'
 $rexxObjectCount = @(Get-ChildItem -LiteralPath $rexxObjectDirectory -Filter '*.o' -File).Count
-$expectedRexxObjectCount = if ($Phase -in @('RX30','RX31','RX32')) { 10 } else { 9 }
+$expectedRexxObjectCount = if ($Phase -in @('RX30','RX31','RX32','RX33')) { 10 } else { 9 }
 if ($rexxObjectCount -ne $expectedRexxObjectCount) { throw "Expected $expectedRexxObjectCount REXX C object files; found $rexxObjectCount in $rexxObjectDirectory." }
 $previousPhaseReference = $null
 if ($Phase -eq 'RX14') {

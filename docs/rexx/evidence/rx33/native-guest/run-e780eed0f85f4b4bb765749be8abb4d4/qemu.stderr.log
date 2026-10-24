@@ -1,0 +1,6 @@
+QAC reservation requested: id=2b61a62eb0d84905a87376c0015785cc project=guideXOSServer mode=acceptance
+QAC exclusive reservation granted: id=2b61a62eb0d84905a87376c0015785cc
+QAC QEMU launched: reservation=2b61a62eb0d84905a87376c0015785cc pid=12788 executable=C:\Program Files\qemu\qemu-system-x86_64.exe launch_utc=2026-10-24T13:41:49.4167869+00:00
+{"reservationId":"2b61a62eb0d84905a87376c0015785cc","state":"Running","childProcessId":12788,"processIdentity":"C:\\Program Files\\qemu\\qemu-system-x86_64.exe","processStartTimeUtc":"2026-10-24T13:41:49.4167869+00:00"}
+QAC QEMU exited: reservation=2b61a62eb0d84905a87376c0015785cc pid=12788 exitCode=0 exit_utc=2026-10-24T13:45:09.8724863Z
+QAC reservation released: id=2b61a62eb0d84905a87376c0015785cc pid=12788

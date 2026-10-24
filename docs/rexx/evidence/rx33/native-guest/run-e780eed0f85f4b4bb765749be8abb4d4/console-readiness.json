@@ -1,0 +1,29 @@
+{
+  "schema": "guidexos.rexx.rx33.console-readiness.v1",
+  "captured_at_utc": "2026-10-24T13:42:14.7528054Z",
+  "qac_cli_pid": 18872,
+  "qemu_pid": 12788,
+  "qemu_executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmp_port": 64885,
+  "disposable_esp": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx33\\qemu-e780eed0f85f4b4bb765749be8abb4d4\\guest\\esp",
+  "network": "disabled (-net none)",
+  "probe_command": "echo RX33_CONSOLE_READY",
+  "screenshot": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx33\\qemu-e780eed0f85f4b4bb765749be8abb4d4\\helper\\console-readiness-probe.png",
+  "serial_contains_probe": false,
+  "visual_probe_command_and_output": "Must be visibly confirmed in the QMP screenshot before creating the PASS review marker.",
+  "resume_marker": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx33\\qemu-e780eed0f85f4b4bb765749be8abb4d4\\console-readiness-reviewed.continue",
+  "requires_visual_review_before_scripts": true,
+  "visually_verified": true,
+  "verified_at_utc": "2026-10-24T13:42:38.6958375Z",
+  "guest_rexx_scripts_sent": true,
+  "guest_script_commands": [
+    "rexx /rx33-charin-arguments.rex",
+    "rexx /rx33-charin-unconfigured.rex",
+    "rexx /rx33-recovery.rex",
+    "rexx /rx32-value-demo.rex",
+    "rexx /rx32-queue-demo.rex",
+    "rexx /rx32-empty-pull.rex",
+    "rexx /rx32-date-time-guard.rex",
+    "rexx /rx20clk.rex"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "guidexos.rexx.rx33.qemu-runner-process.v1",
+  "captured_at_utc": "2026-10-24T13:45:12.4093452Z",
+  "process_id": 9044,
+  "exit_code": 0,
+  "status": "PASS",
+  "stdout_path": "C:\\Users\\guideX\\AppData\\Local\\Temp\\rx33-qemu-wrapper-1baae666be6a458cb688cf97532b5e3b.stdout.log",
+  "stderr_path": "C:\\Users\\guideX\\AppData\\Local\\Temp\\rx33-qemu-wrapper-1baae666be6a458cb688cf97532b5e3b.stderr.log"
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "guidexos.rexx.rx33.native-qualification.v1",
+  "status": "PASS",
+  "architecture": "AMD64 freestanding",
+  "rexx_c_object_count": 10,
+  "build_id": "433ec69be94f498b80f14a2917ab95a8",
+  "kernel_elf": "build/rexx/rx33/native-amd64-433ec69be94f498b80f14a2917ab95a8/amd64/bin/kernel.elf",
+  "kernel_elf_sha256": "d459c9ab791ccc2165e9cb75f5f8ec89608c06c920604e05f2981f45844f4e1d",
+  "link_evidence": "native-build/native-link-evidence-433ec69be94f498b80f14a2917ab95a8.json",
+  "build_status": "native-build/native-build-433ec69be94f498b80f14a2917ab95a8.status.json",
+  "no_clean_target_invoked": true,
+  "production_esp_or_disk_in_build_plan": false,
+  "full_output_audit": "native-build/output-audit-433ec69be94f498b80f14a2917ab95a8.json",
+  "full_output_audit_sha256": "5fe64969c564475efe72d5fec331e94d08ede3f41aabaf023718c9178a5ff626",
+  "full_output_audit_committed": false
+}

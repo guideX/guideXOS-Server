@@ -13,6 +13,8 @@
 static size_t test_allocator_fail_on;
 static size_t test_allocator_attempt_count;
 static size_t test_allocator_live_blocks;
+static size_t test_byte_stream_copy_fail_on;
+static size_t test_byte_stream_copy_attempt_count;
 
 static int test_allocator_should_fail(void)
 {
@@ -75,11 +77,47 @@ size_t rexx_vm_test_allocator_live_blocks(void)
 {
     return test_allocator_live_blocks;
 }
+
+void rexx_vm_test_byte_stream_copy_fail_on(size_t copy_attempt)
+{
+    test_byte_stream_copy_attempt_count = 0u;
+    test_byte_stream_copy_fail_on = copy_attempt;
+}
+
+void rexx_vm_test_byte_stream_copy_disable(void)
+{
+    test_byte_stream_copy_fail_on = 0u;
+}
+
+size_t rexx_vm_test_byte_stream_copy_attempts(void)
+{
+    return test_byte_stream_copy_attempt_count;
+}
+
+static int vm_copy_byte_stream_result(char *destination,
+                                      const unsigned char *source,
+                                      size_t length)
+{
+    ++test_byte_stream_copy_attempt_count;
+    if (test_byte_stream_copy_fail_on != 0u &&
+        test_byte_stream_copy_attempt_count == test_byte_stream_copy_fail_on)
+        return 0;
+    memcpy(destination, source, length);
+    return 1;
+}
 #else
 #define vm_malloc malloc
 #define vm_calloc calloc
 #define vm_realloc realloc
 #define vm_free free
+
+static int vm_copy_byte_stream_result(char *destination,
+                                      const unsigned char *source,
+                                      size_t length)
+{
+    memcpy(destination, source, length);
+    return 1;
+}
 #endif
 
 #define REXX_VM_MAX_NAME_LENGTH ((size_t)65535u)
@@ -106,7 +144,15 @@ static const char *const vm_messages[] = {
     "input provider reported end of input",
     "input provider failed",
     "input provider requested unsupported pending input",
-    "input provider returned an invalid byte span or ownership value"
+    "input provider returned an invalid byte span or ownership value",
+    "no byte-stream provider or default input stream is available",
+    "byte-stream input is temporarily unavailable",
+    "byte-stream input reached end of stream",
+    "byte-stream name is not registered by the provider",
+    "byte-stream provider failed",
+    "byte-stream provider requested unsupported pending input",
+    "byte-stream operation is unsupported",
+    "byte-stream provider returned invalid metadata or bytes"
 };
 
 typedef struct RexxVMEnvironment RexxVMEnvironment;
@@ -601,7 +647,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_INPUT_RESULT_INVALID
+                            status <= REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -1417,7 +1463,7 @@ void rexx_vm_free(RexxVM *vm)
     RexxVMEnvironment *root;
     if (vm == NULL) return;
     /* A provider callback may not destroy the VM from inside its own call. */
-    if (vm->execution_active) return;
+    if (vm->execution_active || vm->byte_stream_callback_active) return;
     live = vm->sp < vm->stack_capacity ? vm->sp : vm->stack_capacity;
     for (i = 0; vm->stack != NULL && i < live; ++i) rexx_value_clear(&vm->stack[i]);
     for (i = 0; vm->globals != NULL && i < vm->global_count &&
@@ -1507,6 +1553,213 @@ RexxVMStatus rexx_vm_set_input_reader(RexxVM *vm,
     vm->input_reader = reader;
     vm->input_reader_user_data = reader != NULL ? user_data : NULL;
     return REXX_VM_STATUS_OK;
+}
+
+RexxVMStatus rexx_vm_set_byte_stream_provider(
+    RexxVM *vm, const RexxVMByteStreamProvider *provider, void *user_data)
+{
+    if (vm == NULL || !vm->initialized || vm->execution_active ||
+        vm->byte_stream_callback_active)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (provider != NULL &&
+        (provider->resolve == NULL || provider->read == NULL))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (provider == NULL) {
+        memset(&vm->byte_stream_provider, 0,
+               sizeof(vm->byte_stream_provider));
+        vm->byte_stream_provider_user_data = NULL;
+    } else {
+        vm->byte_stream_provider = *provider;
+        vm->byte_stream_provider_user_data = user_data;
+    }
+    return REXX_VM_STATUS_OK;
+}
+
+static int byte_stream_info_is_empty(const RexxVMByteStreamInfo *stream)
+{
+    return stream != NULL && stream->identity == NULL &&
+           stream->capabilities == 0u &&
+           stream->ownership == REXX_VM_BYTE_STREAM_IDENTITY_UNSPECIFIED;
+}
+
+static int byte_stream_read_is_empty(const RexxVMByteStreamRead *read_result)
+{
+    return read_result != NULL && read_result->bytes == NULL &&
+           read_result->length == 0u &&
+           read_result->ownership == REXX_VM_INPUT_OWNERSHIP_UNSPECIFIED &&
+           read_result->eof_after_read == 0u;
+}
+
+static RexxVMStatus byte_stream_map_resolve_status(
+    RexxVMByteStreamResolveStatus status)
+{
+    switch (status) {
+    case REXX_VM_BYTE_STREAM_RESOLVE_UNKNOWN:
+        return REXX_VM_STATUS_BYTE_STREAM_UNKNOWN;
+    case REXX_VM_BYTE_STREAM_RESOLVE_UNAVAILABLE:
+        return REXX_VM_STATUS_BYTE_STREAM_NOT_READY;
+    case REXX_VM_BYTE_STREAM_RESOLVE_ERROR:
+        return REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR;
+    default:
+        return REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+    }
+}
+
+static RexxVMStatus byte_stream_map_seek_status(
+    RexxVMByteStreamSeekStatus status)
+{
+    switch (status) {
+    case REXX_VM_BYTE_STREAM_SEEK_UNSUPPORTED:
+        return REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION;
+    case REXX_VM_BYTE_STREAM_SEEK_UNAVAILABLE:
+        return REXX_VM_STATUS_BYTE_STREAM_NOT_READY;
+    case REXX_VM_BYTE_STREAM_SEEK_ERROR:
+        return REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR;
+    default:
+        return REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+    }
+}
+
+static RexxVMStatus byte_stream_map_read_status(
+    RexxVMByteStreamReadStatus status)
+{
+    switch (status) {
+    case REXX_VM_BYTE_STREAM_READ_EOF:
+        return REXX_VM_STATUS_BYTE_STREAM_END_OF_FILE;
+    case REXX_VM_BYTE_STREAM_READ_UNAVAILABLE:
+        return REXX_VM_STATUS_BYTE_STREAM_NOT_READY;
+    case REXX_VM_BYTE_STREAM_READ_ERROR:
+        return REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR;
+    case REXX_VM_BYTE_STREAM_READ_PENDING:
+        return REXX_VM_STATUS_BYTE_STREAM_PENDING_UNSUPPORTED;
+    case REXX_VM_BYTE_STREAM_READ_UNSUPPORTED:
+        return REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION;
+    default:
+        return REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+    }
+}
+
+RexxVMStatus rexx_vm_charin(RexxVM *vm, int use_default,
+                            const unsigned char *name, size_t name_length,
+                            int has_start, uint64_t one_based_start,
+                            size_t requested_length, RexxValue *result)
+{
+    const uint32_t valid_capabilities =
+        REXX_VM_BYTE_STREAM_CAP_READABLE | REXX_VM_BYTE_STREAM_CAP_SEEKABLE;
+    RexxVMByteStreamProvider provider;
+    void *provider_user_data;
+    RexxVMByteStreamInfo stream;
+    RexxVMByteStreamResolveStatus resolve_status;
+    RexxVMStatus status = REXX_VM_STATUS_OK;
+    char *result_bytes = NULL;
+    int callback_guard = 0;
+
+    if (vm == NULL || !vm->initialized || result == NULL ||
+        (use_default != 0 && use_default != 1) ||
+        (name == NULL && name_length != 0u) ||
+        (use_default && name_length != 0u) ||
+        (has_start != 0 && has_start != 1) ||
+        (has_start && one_based_start == 0u))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    rexx_value_clear(result);
+    if (requested_length > REXX_VM_MAX_PARSE_SOURCE_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (vm->byte_stream_callback_active)
+        return REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR;
+    provider = vm->byte_stream_provider;
+    provider_user_data = vm->byte_stream_provider_user_data;
+    if (provider.resolve == NULL || provider.read == NULL)
+        return REXX_VM_STATUS_BYTE_STREAM_UNAVAILABLE;
+
+    /* Allocate before resolving, seeking, or reading. An allocation failure
+     * therefore cannot consume a byte or move a stream cursor. */
+    status = rexx_value_allocate_string(result, requested_length,
+                                        &result_bytes);
+    if (status != REXX_VM_STATUS_OK) return status;
+
+    memset(&stream, 0, sizeof(stream));
+    vm->byte_stream_callback_active = 1u;
+    callback_guard = 1;
+    resolve_status = provider.resolve(provider_user_data, use_default, name,
+                                     name_length, &stream);
+    if (resolve_status != REXX_VM_BYTE_STREAM_RESOLVE_OK) {
+        if (!byte_stream_info_is_empty(&stream))
+            status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+        else if (resolve_status <= REXX_VM_BYTE_STREAM_RESOLVE_ERROR)
+            status = byte_stream_map_resolve_status(resolve_status);
+        else
+            status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+        goto cleanup;
+    }
+    if (stream.identity == NULL ||
+        stream.ownership != REXX_VM_BYTE_STREAM_IDENTITY_BORROWED ||
+        (stream.capabilities & REXX_VM_BYTE_STREAM_CAP_READABLE) == 0u ||
+        (stream.capabilities & ~valid_capabilities) != 0u ||
+        (((stream.capabilities & REXX_VM_BYTE_STREAM_CAP_SEEKABLE) != 0u) &&
+         provider.seek == NULL)) {
+        status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+        goto cleanup;
+    }
+
+    if (has_start) {
+        RexxVMByteStreamSeekStatus seek_status;
+        if ((stream.capabilities & REXX_VM_BYTE_STREAM_CAP_SEEKABLE) == 0u) {
+            status = REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION;
+            goto cleanup;
+        }
+        seek_status = provider.seek(provider_user_data, stream.identity,
+                                    one_based_start);
+        if (seek_status != REXX_VM_BYTE_STREAM_SEEK_OK) {
+            status = byte_stream_map_seek_status(seek_status);
+            goto cleanup;
+        }
+    }
+
+    if (requested_length != 0u) {
+        RexxVMByteStreamRead read_result;
+        RexxVMByteStreamReadStatus read_status;
+        memset(&read_result, 0, sizeof(read_result));
+        read_result.ownership = REXX_VM_INPUT_OWNERSHIP_UNSPECIFIED;
+        read_status = provider.read(provider_user_data, stream.identity,
+                                    requested_length, &read_result);
+        if (read_status != REXX_VM_BYTE_STREAM_READ_OK) {
+            if (!byte_stream_read_is_empty(&read_result))
+                status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+            else if (read_status <= REXX_VM_BYTE_STREAM_READ_UNSUPPORTED)
+                status = byte_stream_map_read_status(read_status);
+            else
+                status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+            goto cleanup;
+        }
+        if (read_result.length > requested_length ||
+            read_result.eof_after_read > 1u ||
+            (read_result.length != 0u &&
+             (read_result.bytes == NULL ||
+              read_result.ownership != REXX_VM_INPUT_OWNERSHIP_BORROWED)) ||
+            (read_result.length == 0u &&
+             (read_result.bytes != NULL ||
+              read_result.ownership != REXX_VM_INPUT_OWNERSHIP_UNSPECIFIED ||
+              read_result.eof_after_read == 0u))) {
+            status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+            goto cleanup;
+        }
+        if (read_result.length == 0u) {
+            status = REXX_VM_STATUS_BYTE_STREAM_END_OF_FILE;
+            goto cleanup;
+        }
+        if (!vm_copy_byte_stream_result(result_bytes, read_result.bytes,
+                                        read_result.length)) {
+            status = REXX_VM_STATUS_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+        result_bytes[read_result.length] = '\0';
+        result->as.string.length = read_result.length;
+    }
+
+cleanup:
+    if (callback_guard) vm->byte_stream_callback_active = 0u;
+    if (status != REXX_VM_STATUS_OK) rexx_value_clear(result);
+    return status;
 }
 
 int32_t rexx_vm_guidexos_command_stub(const char *command, size_t command_length)
@@ -4650,6 +4903,14 @@ static int syntax_error_is_catchable(RexxVMStatus status)
     case REXX_VM_STATUS_UNKNOWN_LABEL:
     case REXX_VM_STATUS_INVALID_LABEL:
     case REXX_VM_STATUS_INVALID_PROCEDURE:
+    case REXX_VM_STATUS_BYTE_STREAM_UNAVAILABLE:
+    case REXX_VM_STATUS_BYTE_STREAM_NOT_READY:
+    case REXX_VM_STATUS_BYTE_STREAM_END_OF_FILE:
+    case REXX_VM_STATUS_BYTE_STREAM_UNKNOWN:
+    case REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR:
+    case REXX_VM_STATUS_BYTE_STREAM_PENDING_UNSUPPORTED:
+    case REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION:
+    case REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID:
         return 1;
     default:
         return 0;
@@ -4709,6 +4970,15 @@ static const char *syntax_error_description(RexxVMStatus status,
         return "Invalid TRACE request";
     case REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY:
         return "TRACE request requires an unsupported runtime capability";
+    case REXX_VM_STATUS_BYTE_STREAM_UNAVAILABLE:
+    case REXX_VM_STATUS_BYTE_STREAM_NOT_READY:
+    case REXX_VM_STATUS_BYTE_STREAM_END_OF_FILE:
+    case REXX_VM_STATUS_BYTE_STREAM_UNKNOWN:
+    case REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR:
+    case REXX_VM_STATUS_BYTE_STREAM_PENDING_UNSUPPORTED:
+    case REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION:
+    case REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID:
+        return "Stream I/O error";
     default:
         return "Language processing error";
     }
@@ -5750,7 +6020,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_INPUT_RESULT_INVALID)
+        status > REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID)
         return "unknown VM status";
     return vm_messages[status];
 }

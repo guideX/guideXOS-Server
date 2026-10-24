@@ -1,0 +1,44 @@
+RX33 native guest output — QMP console captures, run e780eed0f85f4b4bb765749be8abb4d4
+Console readiness was visually confirmed before the runner sent REXX commands.
+Each marker below is transcribed from the correspondingly named captured console image in this directory.
+
+rx33-01-charin-invalid-start-and-shell-recovery.png
+  RX33_CHARIN_ARGUMENT_VALIDATION_BEGIN
+  RX33_CHARIN_ARGUMENT_REJECTED
+
+rx33-02-charin-unconfigured-default-fails-closed.png
+  RX33_CHARIN_BEGIN
+  rexx: /rx33-charin-unconfigured.rex: runtime error at instruction 2: no byte-stream provider or default input stream is available
+
+rx33-03-post-charin-error-shell-recovery.png
+  RX33_POST_ERROR_RESPONSIVE
+
+rx33-04-value-default-read-assignment-old-value-and-compound-tail.png
+  RX32_VALUE_DEFAULT_BOUNDARY=ABSENT
+  RX32_VALUE_EMPTY_ASSIGNMENT_LENGTH=0
+  RX32_VALUE_COMPOUND=tail
+  RX32_VALUE_DEMO_DONE
+
+rx33-05-queue-priority-case-and-count-regression.png
+  RX32_QUEUE_PUSH_COUNTS_ORDER=0/3/Gamma/ALPHA/Beta/BETA/0
+  RX32_CASE_PRESERVE_UPPER=MiXeD/MIXED
+  RX32_EMPTY_COUNT_LENGTH_FINAL=1/0/0
+  RX32_TEMPLATE_PLACEHOLDER=one/three
+  RX32_ROUTINE_INTERPRET=Routine/Dynamic
+  RX32_QUEUE_DEMO_DONE
+
+rx33-06-production-input-provider-fails-closed.png
+  RX32_EMPTY_PULL_BEGIN
+  rexx: /rx32-empty-pull.rex: runtime error at instruction 5: external data stack is empty and no input provider is available
+
+rx33-07-wall-clock-fail-closed-and-pit-alive.png
+  RX24_DATE_CURRENT_UNAVAILABLE
+  RX24_TIME_CURRENT_UNAVAILABLE
+  RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE
+
+rx33-08-raw-clock-provenance-and-monotonic-contract.png
+  RX20_DATE_CURRENT_UNAVAILABLE
+  RX20_TIME_CURRENT_UNAVAILABLE
+  RX20_MONOTONIC_E 0.000000 0.099993
+
+The screenshots show live guest shell command output. guest-commands.log records the commands sent; qemu-smoke-result.json records the guest script accesses. The final RX20 capture did not show TIME(R) progression or RX20_NATIVE_CLOCK_CAPABILITY_DONE. The QEMU runner returns process status but does not capture per-command REXX exit status. No successful native CHARIN read is claimed.

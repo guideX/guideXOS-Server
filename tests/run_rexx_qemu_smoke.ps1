@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32','RX33')]
     [string]$Phase = 'RX12R1',
     [Parameter(Mandatory)][string]$KernelPath,
     [string]$SourceEsp = 'C:\Users\guideX\.codex\rx12-native-guest\esp',
@@ -19,6 +19,8 @@ $guardManifest = if ($Phase -eq 'RX30') {
     Join-Path $rootDir 'docs\rexx\evidence\rx31\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX32') {
     Join-Path $rootDir 'docs\rexx\evidence\rx32\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX33') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx33\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX27') {
     Join-Path $rootDir 'docs\rexx\evidence\rx27\protected-artifacts-start.json'
 } elseif ($Phase -eq 'RX26') {
@@ -50,7 +52,7 @@ $guardManifest = if ($Phase -eq 'RX30') {
 }
 Import-Module -Name (Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1') -Force
 $qemuPath = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
-$useQac = $Phase -in @('RX21','RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32')
+$useQac = $Phase -in @('RX21','RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32','RX33')
 if ($useQac) {
     if ([string]::IsNullOrWhiteSpace($QacCliPath)) { $QacCliPath = $env:GUIDEXOS_QAC_CLI }
     if ([string]::IsNullOrWhiteSpace($QacCliPath)) {
@@ -79,7 +81,7 @@ $guestRoot = Join-Path $runRoot 'guest'
 $guestEsp = Join-Path $guestRoot 'esp'
 $stagedFirmware = Join-Path $guestRoot 'firmware-code.fd'
 $helperRoot = Join-Path $runRoot 'helper'
-$helperName = if ($Phase -in @('RX24','RX25','RX26','RX27','RX30','RX31','RX32')) { 'type_rx24_guest_command.ps1' } elseif ($Phase -eq 'RX22') { 'type_rx22_guest_command.ps1' } elseif ($Phase -eq 'RX21') { 'type_rx21_guest_command.ps1' } elseif ($Phase -eq 'RX20') { 'type_rx20_guest_command.ps1' } elseif ($Phase -eq 'RX19') { 'type_rx19_guest_command.ps1' } elseif ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
+$helperName = if ($Phase -in @('RX24','RX25','RX26','RX27','RX30','RX31','RX32','RX33')) { 'type_rx24_guest_command.ps1' } elseif ($Phase -eq 'RX22') { 'type_rx22_guest_command.ps1' } elseif ($Phase -eq 'RX21') { 'type_rx21_guest_command.ps1' } elseif ($Phase -eq 'RX20') { 'type_rx20_guest_command.ps1' } elseif ($Phase -eq 'RX19') { 'type_rx19_guest_command.ps1' } elseif ($Phase -eq 'RX18') { 'type_rx18_guest_command.ps1' } elseif ($Phase -eq 'RX17') { 'type_rx17_guest_command.ps1' } elseif ($Phase -eq 'RX16') { 'type_rx16_guest_command.ps1' } elseif ($Phase -eq 'RX15') { 'type_rx15_guest_command.ps1' } elseif ($Phase -eq 'RX14') { 'type_rx14_guest_command.ps1' } elseif ($Phase -eq 'RX13') { 'type_rx13_guest_command.ps1' } else { 'type_rx12_guest_command.ps1' }
 $serialPath = Join-Path $runRoot 'serial.log'
 $qemuStdoutPath = Join-Path $runRoot 'qemu.stdout.log'
 $qemuStderrPath = Join-Path $runRoot 'qemu.stderr.log'
@@ -246,6 +248,21 @@ if ($Phase -eq 'RX32') {
         (Join-Path $runRoot 'console-readiness-reviewed.continue')
     )
 }
+if ($Phase -eq 'RX33') {
+    $plannedOutputs += @(
+        (Join-Path $guestEsp 'rx33-charin-arguments.rex'),
+        (Join-Path $guestEsp 'rx33-charin-unconfigured.rex'),
+        (Join-Path $guestEsp 'rx33-recovery.rex'),
+        (Join-Path $guestEsp 'rx32-value-demo.rex'),
+        (Join-Path $guestEsp 'rx32-queue-demo.rex'),
+        (Join-Path $guestEsp 'rx32-empty-pull.rex'),
+        (Join-Path $guestEsp 'rx32-date-time-guard.rex'),
+        (Join-Path $guestEsp 'rx20clk.rex'),
+        (Join-Path $helperRoot 'console-readiness-probe.png'),
+        (Join-Path $runRoot 'console-readiness.json'),
+        (Join-Path $runRoot 'console-readiness-reviewed.continue')
+    )
+}
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workDir -PlannedOutputs $plannedOutputs -Phase $Phase
 $env:TEMP = $workDir
@@ -255,7 +272,7 @@ New-Item -ItemType Directory -Path $guestRoot,$helperRoot,$rawCaptureDir | Out-N
 
 $evidenceRoot = Join-Path $rootDir "docs\rexx\evidence\$($Phase.ToLowerInvariant())\native-guest\run-$runId"
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
-$helperSource = if ($Phase -in @('RX24','RX25','RX26','RX27','RX30','RX31','RX32')) {
+$helperSource = if ($Phase -in @('RX24','RX25','RX26','RX27','RX30','RX31','RX32','RX33')) {
     Join-Path $rootDir 'docs\rexx\evidence\rx24\native-guest'
 } elseif ($Phase -eq 'RX22') {
     Join-Path $rootDir 'docs\rexx\evidence\rx22\native-guest'
@@ -482,6 +499,26 @@ if ($Phase -eq 'RX32') {
         $rx32ScriptNames += $scriptName
     }
 }
+$rx33ScriptNames = @()
+if ($Phase -eq 'RX33') {
+    if (-not $PauseAfterConsoleReadiness) {
+        throw 'RX33 QAC acceptance requires -PauseAfterConsoleReadiness so the Console prompt and focus can be visually verified before guest scripts are sent.'
+    }
+    $rx33Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx33\native-guest\scripts'
+    foreach ($scriptName in @('rx33-charin-arguments.rex','rx33-charin-unconfigured.rex','rx33-recovery.rex')) {
+        $scriptPath = Join-Path $rx33Scripts $scriptName
+        if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw "RX33 guest script is missing: $scriptPath" }
+        Copy-Item -LiteralPath $scriptPath -Destination (Join-Path $guestEsp $scriptName)
+        $rx33ScriptNames += $scriptName
+    }
+    $rx32Scripts = Join-Path $rootDir 'docs\rexx\evidence\rx32\native-guest\scripts'
+    foreach ($scriptName in @('rx32-value-demo.rex','rx32-queue-demo.rex','rx32-empty-pull.rex','rx32-date-time-guard.rex','rx20clk.rex')) {
+        $scriptPath = Join-Path $rx32Scripts $scriptName
+        if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw "RX32 inherited guest script is missing: $scriptPath" }
+        Copy-Item -LiteralPath $scriptPath -Destination (Join-Path $guestEsp $scriptName)
+        $rx33ScriptNames += $scriptName
+    }
+}
 
 function Get-QemuCensus {
     $items = @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-x86_64.exe'" -ErrorAction SilentlyContinue)
@@ -555,14 +592,14 @@ if ($useQac) {
     $qacBefore = & $QacCliPath status 2>&1
     $qacBeforeText = @($qacBefore) -join "`n"
     [System.IO.File]::WriteAllText((Join-Path $evidenceRoot 'qac-status-before.txt'),$qacBeforeText+"`n",[System.Text.UTF8Encoding]::new($false))
-    if ($Phase -in @('RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32') -and ($LASTEXITCODE -ne 0 -or $qacBeforeText -notmatch 'Coordinator: Online' -or
+    if ($Phase -in @('RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32','RX33') -and ($LASTEXITCODE -ne 0 -or $qacBeforeText -notmatch 'Coordinator: Online' -or
         $qacBeforeText -notmatch 'Managed sessions: 0; queued: 0; blocked: 0')) {
         throw "$Phase QAC is unavailable or already has an active/queued reservation; no guest was started. Status: $qacBeforeText"
     }
     $qacListBefore = & $QacCliPath list 2>&1
     $qacListBeforeText = @($qacListBefore) -join "`n"
     [System.IO.File]::WriteAllText((Join-Path $evidenceRoot 'qac-list-before.txt'),$qacListBeforeText+"`n",[System.Text.UTF8Encoding]::new($false))
-    if ($Phase -in @('RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32') -and ($LASTEXITCODE -ne 0 -or $qacListBeforeText -notmatch 'Reservations: 0' -or
+    if ($Phase -in @('RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32','RX33') -and ($LASTEXITCODE -ne 0 -or $qacListBeforeText -notmatch 'Reservations: 0' -or
         $qacListBeforeText -notmatch 'Managed sessions: 0')) {
         throw "$Phase QAC list shows an existing reservation or is unavailable; no guest was started. List: $qacListBeforeText"
     }
@@ -700,6 +737,17 @@ try {
             [PSCustomObject]@{ name='live-date-time-fail-closed-and-pit-alive'; text='rexx /rx30-date-time-guard.rex'; expected='RX24_DATE_CURRENT_UNAVAILABLE; RX24_TIME_CURRENT_UNAVAILABLE; RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE' },
             [PSCustomObject]@{ name='independent-clock-monotonic-contract'; text='rexx /rx20clk.rex'; expected='RX20_DATE_CURRENT_UNAVAILABLE; RX20_TIME_CURRENT_UNAVAILABLE; RX20_MONOTONIC_E; RX20_MONOTONIC_R; RX20_NATIVE_CLOCK_CAPABILITY_DONE' }
         )
+    } elseif ($Phase -eq 'RX33') {
+        @(
+            [PSCustomObject]@{ name='charin-invalid-start-and-shell-recovery'; text='rexx /rx33-charin-arguments.rex'; expected='RX33_CHARIN_ARGUMENT_VALIDATION_BEGIN; RX33_CHARIN_ARGUMENT_REJECTED; exit status 0' },
+            [PSCustomObject]@{ name='charin-unconfigured-default-fails-closed'; text='rexx /rx33-charin-unconfigured.rex'; expected='RX33_CHARIN_BEGIN followed by deterministic no-byte-stream-provider error; RX33_CHARIN_UNEXPECTED_RETURN absent' },
+            [PSCustomObject]@{ name='post-charin-error-shell-recovery'; text='rexx /rx33-recovery.rex'; expected='RX33_POST_ERROR_RESPONSIVE; exit status 0' },
+            [PSCustomObject]@{ name='value-default-read-assignment-old-value-and-compound-tail'; text='rexx /rx32-value-demo.rex'; expected='RX32_VALUE_DEFAULT_BOUNDARY=ABSENT; RX32_VALUE_EMPTY_ASSIGNMENT_LENGTH=0; RX32_VALUE_COMPOUND=tail; RX32_VALUE_DEMO_DONE; exit status 0' },
+            [PSCustomObject]@{ name='queue-priority-case-and-count-regression'; text='rexx /rx32-queue-demo.rex'; expected='RX32_QUEUE_PUSH_COUNTS_ORDER=0/3/Gamma/ALPHA/Beta/BETA/0; RX32_CASE_PRESERVE_UPPER=MiXeD/MIXED; RX32_EMPTY_COUNT_LENGTH_FINAL=1/0/0; RX32_TEMPLATE_PLACEHOLDER=one/three; RX32_ROUTINE_INTERPRET=Routine/Dynamic; RX32_QUEUE_DEMO_DONE; exit status 0' },
+            [PSCustomObject]@{ name='production-input-provider-fails-closed'; text='rexx /rx32-empty-pull.rex'; expected='RX32_EMPTY_PULL_BEGIN followed by deterministic input-provider-unavailable error; RX32_EMPTY_PULL_UNEXPECTED_RETURN absent' },
+            [PSCustomObject]@{ name='wall-clock-fail-closed-and-pit-alive'; text='rexx /rx32-date-time-guard.rex'; expected='RX24_DATE_CURRENT_UNAVAILABLE; RX24_TIME_CURRENT_UNAVAILABLE; RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE; exit status 0' },
+            [PSCustomObject]@{ name='raw-clock-provenance-and-monotonic-contract'; text='rexx /rx20clk.rex'; expected='RX20_DATE_CURRENT_UNAVAILABLE; RX20_TIME_CURRENT_UNAVAILABLE; RX20_MONOTONIC_E; RX20_MONOTONIC_R; RX20_NATIVE_CLOCK_CAPABILITY_DONE; exit status 0' }
+        )
     } elseif ($Phase -eq 'RX32') {
         @(
             [PSCustomObject]@{ name='value-default-read-assignment-old-value-and-compound-tail'; text='rexx /rx32-value-demo.rex'; expected='RX32_VALUE_DEFAULT_BOUNDARY=ABSENT; RX32_VALUE_EMPTY_ASSIGNMENT_LENGTH=0; RX32_VALUE_COMPOUND=tail; RX32_VALUE_DEMO_DONE; exit status 0' },
@@ -816,7 +864,7 @@ try {
             [PSCustomObject]@{ name='invalid-arguments-and-interpreter-recovery'; text='rexx /rx27-justify-error-recovery.rex'; expected='RX27_POST_ERROR_RESPONSIVE: a   b' }
         ) + @($commands)
     }
-    if ($Phase -in @('RX30','RX31','RX32')) {
+    if ($Phase -in @('RX30','RX31','RX32','RX33')) {
         $readinessCapture = Join-Path $helperRoot 'console-readiness-probe.png'
         $readinessRecordPath = Join-Path $runRoot 'console-readiness.json'
         $continuePath = Join-Path $runRoot 'console-readiness-reviewed.continue'
@@ -870,9 +918,9 @@ try {
     $index = 0
     foreach ($command in $commands) {
         $index++
-        $capturePrefix = if ($Phase -eq 'RX30') { 'rx30' } elseif ($Phase -eq 'RX31') { 'rx31' } elseif ($Phase -eq 'RX32') { 'rx32' } elseif ($Phase -eq 'RX27') { 'rx27' } elseif ($Phase -eq 'RX26') { 'rx26' } elseif ($Phase -eq 'RX25') { 'rx25' } elseif ($Phase -eq 'RX24') { 'rx24' } elseif ($Phase -eq 'RX22') { 'rx22' } elseif ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+        $capturePrefix = if ($Phase -eq 'RX30') { 'rx30' } elseif ($Phase -eq 'RX31') { 'rx31' } elseif ($Phase -eq 'RX32') { 'rx32' } elseif ($Phase -eq 'RX33') { 'rx33' } elseif ($Phase -eq 'RX27') { 'rx27' } elseif ($Phase -eq 'RX26') { 'rx26' } elseif ($Phase -eq 'RX25') { 'rx25' } elseif ($Phase -eq 'RX24') { 'rx24' } elseif ($Phase -eq 'RX22') { 'rx22' } elseif ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
         $captureName = "{0}-{1:D2}-{2}" -f $capturePrefix,$index,$command.name
-        $commandWaitSeconds = if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32')) { 15 } else { 5 }
+        $commandWaitSeconds = if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32','RX33')) { 15 } else { 5 }
         if ($command.open_terminal) {
             & $helper -CommandText ([string]$command.text) -CaptureName $captureName -WaitSeconds $commandWaitSeconds -OpenTerminal
         } else {
@@ -895,14 +943,14 @@ try {
         }
         $null = Assert-OwnQemu -Identity $owner
     }
-    if ($Phase -in @('RX30','RX31','RX32')) {
+    if ($Phase -in @('RX30','RX31','RX32','RX33')) {
         $readiness = Get-Content -Raw -LiteralPath $readinessRecordPath | ConvertFrom-Json
         $readiness | Add-Member -NotePropertyName guest_rexx_scripts_sent -NotePropertyValue $true -Force
         $readiness | Add-Member -NotePropertyName guest_script_commands -NotePropertyValue @($commands | ForEach-Object { [string]$_.text }) -Force
         $readiness | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $readinessRecordPath -Encoding utf8
     }
 
-    $capturePrefix = if ($Phase -eq 'RX30') { 'rx30' } elseif ($Phase -eq 'RX31') { 'rx31' } elseif ($Phase -eq 'RX32') { 'rx32' } elseif ($Phase -eq 'RX27') { 'rx27' } elseif ($Phase -eq 'RX26') { 'rx26' } elseif ($Phase -eq 'RX25') { 'rx25' } elseif ($Phase -eq 'RX24') { 'rx24' } elseif ($Phase -eq 'RX22') { 'rx22' } elseif ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
+    $capturePrefix = if ($Phase -eq 'RX30') { 'rx30' } elseif ($Phase -eq 'RX31') { 'rx31' } elseif ($Phase -eq 'RX32') { 'rx32' } elseif ($Phase -eq 'RX33') { 'rx33' } elseif ($Phase -eq 'RX27') { 'rx27' } elseif ($Phase -eq 'RX26') { 'rx26' } elseif ($Phase -eq 'RX25') { 'rx25' } elseif ($Phase -eq 'RX24') { 'rx24' } elseif ($Phase -eq 'RX22') { 'rx22' } elseif ($Phase -eq 'RX21') { 'rx21' } elseif ($Phase -eq 'RX20') { 'rx20' } elseif ($Phase -eq 'RX19') { 'rx19' } elseif ($Phase -eq 'RX18') { 'rx18' } elseif ($Phase -eq 'RX17') { 'rx17' } elseif ($Phase -eq 'RX16') { 'rx16' } elseif ($Phase -eq 'RX15') { 'rx15' } elseif ($Phase -eq 'RX14') { 'rx14' } elseif ($Phase -eq 'RX13') { 'rx13' } else { 'rx12r1' }
     $screenshots = @(Get-ChildItem -LiteralPath $helperRoot -Filter "$capturePrefix-*.png" -File)
     if ($screenshots.Count -ne $commands.Count) { throw "Expected one Console screenshot per smoke command; found $($screenshots.Count) for $($commands.Count) commands." }
 
@@ -910,8 +958,8 @@ try {
     $serial = Get-Content -Raw -LiteralPath $serialPath
     $heartbeatCountAfter = ([regex]::Matches($serial, '\[KERNEL-HEARTBEAT\]')).Count
     if ($heartbeatCountAfter -le $heartbeatCountBefore) { throw "Guest heartbeat did not continue during the $Phase smoke commands." }
-    $scriptNames = if ($Phase -eq 'RX30') { $rx30ScriptNames } elseif ($Phase -eq 'RX31') { $rx31ScriptNames } elseif ($Phase -eq 'RX32') { $rx32ScriptNames } elseif ($Phase -eq 'RX27') { @($rx27ScriptNames + $rx26ScriptNames) } elseif ($Phase -eq 'RX26') { $rx26ScriptNames } elseif ($Phase -eq 'RX25') { @($rx25ScriptNames + @('rx24-date-time-clock-guard.rex','rx20clk.rex')) } elseif ($Phase -eq 'RX24') { $rx24ScriptNames } elseif ($Phase -eq 'RX22') { $rx22ScriptNames } elseif ($Phase -eq 'RX21') { $rx21ScriptNames } elseif ($Phase -eq 'RX20') { $rx20ScriptNames } elseif ($Phase -eq 'RX19') { $rx19ScriptNames } elseif ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
-    $serialScriptNames = if ($Phase -in @('RX30','RX31','RX32','RX27','RX26','RX25','RX24','RX22','RX21','RX20','RX19','RX18','RX17','RX16')) {
+    $scriptNames = if ($Phase -eq 'RX30') { $rx30ScriptNames } elseif ($Phase -eq 'RX31') { $rx31ScriptNames } elseif ($Phase -eq 'RX32') { $rx32ScriptNames } elseif ($Phase -eq 'RX33') { $rx33ScriptNames } elseif ($Phase -eq 'RX27') { @($rx27ScriptNames + $rx26ScriptNames) } elseif ($Phase -eq 'RX26') { $rx26ScriptNames } elseif ($Phase -eq 'RX25') { @($rx25ScriptNames + @('rx24-date-time-clock-guard.rex','rx20clk.rex')) } elseif ($Phase -eq 'RX24') { $rx24ScriptNames } elseif ($Phase -eq 'RX22') { $rx22ScriptNames } elseif ($Phase -eq 'RX21') { $rx21ScriptNames } elseif ($Phase -eq 'RX20') { $rx20ScriptNames } elseif ($Phase -eq 'RX19') { $rx19ScriptNames } elseif ($Phase -eq 'RX18') { $rx18ScriptNames } elseif ($Phase -eq 'RX17') { $rx17ScriptNames } elseif ($Phase -eq 'RX16') { $rx16ScriptNames } elseif ($Phase -eq 'RX15') { $rx15ScriptNames } elseif ($Phase -eq 'RX14') { $rx14ScriptNames } elseif ($Phase -eq 'RX13') { $rx13ScriptNames } else { @('rx12-string-builtins.rex','rx12-arg.rex','rx12-syntax-recovery.rex','rx12-oversized-output.rex','rx12-recovery.rex','rx12-exit-status.rex') }
+    $serialScriptNames = if ($Phase -in @('RX30','RX31','RX32','RX33','RX27','RX26','RX25','RX24','RX22','RX21','RX20','RX19','RX18','RX17','RX16')) {
         $scriptNames
     } elseif ($Phase -eq 'RX15') {
         @($scriptNames | Where-Object { $_ -ne 'rx15-conversion-resource-limit.rex' })
@@ -925,7 +973,7 @@ try {
     foreach ($scriptName in $serialScriptNames) {
         if (-not $serial.Contains("/" + $scriptName)) { throw "Serial log did not record guest script access: $scriptName" }
     }
-    if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32')) {
+    if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX30','RX31','RX32','RX33')) {
         if ($serial -notmatch '\[REXX-CLOCK\] source=CMOS_RTC read=ok raw=1 local=0 utc=0 offset=unknown resolution_ns=3B9ACA00 accuracy=unknown monotonic=PIT') {
             throw 'RX20 guest did not report a successful CMOS raw reading with unknown interpretation and PIT monotonic capability.'
         }
@@ -1063,7 +1111,7 @@ Copy-Item -LiteralPath $ownerPath -Destination $evidenceRoot
 Copy-Item -LiteralPath (Join-Path $helperRoot 'qemu-shutdown.json') -Destination $evidenceRoot
 Copy-Item -LiteralPath (Join-Path $helperRoot 'guest-commands.log') -Destination $evidenceRoot
 Get-ChildItem -LiteralPath $helperRoot -Filter "$capturePrefix-*.png" -File | Copy-Item -Destination $evidenceRoot
-if ($Phase -in @('RX30','RX31','RX32')) {
+if ($Phase -in @('RX30','RX31','RX32','RX33')) {
     Copy-Item -LiteralPath (Join-Path $runRoot 'console-readiness.json') -Destination $evidenceRoot
     Copy-Item -LiteralPath (Join-Path $helperRoot 'console-readiness-probe.png') -Destination $evidenceRoot
     $manualFocusProbe = Join-Path $helperRoot 'manual-focus-probe.png'

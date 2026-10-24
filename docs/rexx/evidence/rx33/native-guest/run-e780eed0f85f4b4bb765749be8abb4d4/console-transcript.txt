@@ -1,0 +1,13 @@
+RX33 isolated QEMU Console transcript
+Kernel SHA-256: d459c9ab791ccc2165e9cb75f5f8ec89608c06c920604e05f2981f45844f4e1d
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx33\qemu-e780eed0f85f4b4bb765749be8abb4d4\guest\esp
+COMMAND: rexx /rx33-charin-arguments.rex | expected visible marker/status: RX33_CHARIN_ARGUMENT_VALIDATION_BEGIN; RX33_CHARIN_ARGUMENT_REJECTED; exit status 0
+COMMAND: rexx /rx33-charin-unconfigured.rex | expected visible marker/status: RX33_CHARIN_BEGIN followed by deterministic no-byte-stream-provider error; RX33_CHARIN_UNEXPECTED_RETURN absent
+COMMAND: rexx /rx33-recovery.rex | expected visible marker/status: RX33_POST_ERROR_RESPONSIVE; exit status 0
+COMMAND: rexx /rx32-value-demo.rex | expected visible marker/status: RX32_VALUE_DEFAULT_BOUNDARY=ABSENT; RX32_VALUE_EMPTY_ASSIGNMENT_LENGTH=0; RX32_VALUE_COMPOUND=tail; RX32_VALUE_DEMO_DONE; exit status 0
+COMMAND: rexx /rx32-queue-demo.rex | expected visible marker/status: RX32_QUEUE_PUSH_COUNTS_ORDER=0/3/Gamma/ALPHA/Beta/BETA/0; RX32_CASE_PRESERVE_UPPER=MiXeD/MIXED; RX32_EMPTY_COUNT_LENGTH_FINAL=1/0/0; RX32_TEMPLATE_PLACEHOLDER=one/three; RX32_ROUTINE_INTERPRET=Routine/Dynamic; RX32_QUEUE_DEMO_DONE; exit status 0
+COMMAND: rexx /rx32-empty-pull.rex | expected visible marker/status: RX32_EMPTY_PULL_BEGIN followed by deterministic input-provider-unavailable error; RX32_EMPTY_PULL_UNEXPECTED_RETURN absent
+COMMAND: rexx /rx32-date-time-guard.rex | expected visible marker/status: RX24_DATE_CURRENT_UNAVAILABLE; RX24_TIME_CURRENT_UNAVAILABLE; RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE; exit status 0
+COMMAND: rexx /rx20clk.rex | expected visible marker/status: RX20_DATE_CURRENT_UNAVAILABLE; RX20_TIME_CURRENT_UNAVAILABLE; RX20_MONOTONIC_E; RX20_MONOTONIC_R; RX20_NATIVE_CLOCK_CAPABILITY_DONE; exit status 0
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=119
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

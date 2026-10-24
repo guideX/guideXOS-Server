@@ -96,7 +96,15 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_INPUT_END_OF_FILE,
     REXX_VM_STATUS_INPUT_PROVIDER_ERROR,
     REXX_VM_STATUS_INPUT_PENDING_UNSUPPORTED,
-    REXX_VM_STATUS_INPUT_RESULT_INVALID
+    REXX_VM_STATUS_INPUT_RESULT_INVALID,
+    REXX_VM_STATUS_BYTE_STREAM_UNAVAILABLE,
+    REXX_VM_STATUS_BYTE_STREAM_NOT_READY,
+    REXX_VM_STATUS_BYTE_STREAM_END_OF_FILE,
+    REXX_VM_STATUS_BYTE_STREAM_UNKNOWN,
+    REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR,
+    REXX_VM_STATUS_BYTE_STREAM_PENDING_UNSUPPORTED,
+    REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION,
+    REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID
 } RexxVMStatus;
 
 enum {
@@ -217,6 +225,76 @@ typedef enum RexxVMInputReadStatus {
 typedef RexxVMInputReadStatus (*RexxVMInputReader)(
     void *user_data, RexxVMInputLine *line);
 
+/* RX33 byte streams are resolved by identity through an installed per-VM
+ * provider. The embedding owns the provider context and keeps it alive until
+ * the provider is cleared or the VM is freed. Resolved identities are opaque,
+ * provider-owned handles that remain valid for the callbacks on that read.
+ * The provider owns each stream cursor and advances it only by the byte count
+ * returned with READ_OK; non-OK callbacks leave it unchanged. Read spans are
+ * borrowed until the next provider callback. The VM copies them immediately
+ * and never frees an identity, buffer, context, or provider resource. */
+typedef enum RexxVMByteStreamResolveStatus {
+    REXX_VM_BYTE_STREAM_RESOLVE_OK = 0,
+    REXX_VM_BYTE_STREAM_RESOLVE_UNKNOWN,
+    REXX_VM_BYTE_STREAM_RESOLVE_UNAVAILABLE,
+    REXX_VM_BYTE_STREAM_RESOLVE_ERROR
+} RexxVMByteStreamResolveStatus;
+
+enum {
+    REXX_VM_BYTE_STREAM_CAP_READABLE = 1u << 0,
+    REXX_VM_BYTE_STREAM_CAP_SEEKABLE = 1u << 1
+};
+
+typedef enum RexxVMByteStreamIdentityOwnership {
+    REXX_VM_BYTE_STREAM_IDENTITY_UNSPECIFIED = 0,
+    REXX_VM_BYTE_STREAM_IDENTITY_BORROWED = 1
+} RexxVMByteStreamIdentityOwnership;
+
+typedef struct RexxVMByteStreamInfo {
+    const void *identity;
+    uint32_t capabilities;
+    RexxVMByteStreamIdentityOwnership ownership;
+} RexxVMByteStreamInfo;
+
+typedef enum RexxVMByteStreamReadStatus {
+    REXX_VM_BYTE_STREAM_READ_OK = 0,
+    REXX_VM_BYTE_STREAM_READ_EOF,
+    REXX_VM_BYTE_STREAM_READ_UNAVAILABLE,
+    REXX_VM_BYTE_STREAM_READ_ERROR,
+    REXX_VM_BYTE_STREAM_READ_PENDING,
+    REXX_VM_BYTE_STREAM_READ_UNSUPPORTED
+} RexxVMByteStreamReadStatus;
+
+typedef enum RexxVMByteStreamSeekStatus {
+    REXX_VM_BYTE_STREAM_SEEK_OK = 0,
+    REXX_VM_BYTE_STREAM_SEEK_UNSUPPORTED,
+    REXX_VM_BYTE_STREAM_SEEK_UNAVAILABLE,
+    REXX_VM_BYTE_STREAM_SEEK_ERROR
+} RexxVMByteStreamSeekStatus;
+
+typedef struct RexxVMByteStreamRead {
+    const unsigned char *bytes;
+    size_t length;
+    RexxVMInputOwnership ownership;
+    /* Nonzero means this successful read reached EOF after these bytes. */
+    uint8_t eof_after_read;
+} RexxVMByteStreamRead;
+
+typedef RexxVMByteStreamResolveStatus (*RexxVMByteStreamResolver)(
+    void *user_data, int use_default, const unsigned char *name,
+    size_t name_length, RexxVMByteStreamInfo *stream);
+typedef RexxVMByteStreamReadStatus (*RexxVMByteStreamReader)(
+    void *user_data, const void *identity, size_t requested,
+    RexxVMByteStreamRead *read_result);
+typedef RexxVMByteStreamSeekStatus (*RexxVMByteStreamSeeker)(
+    void *user_data, const void *identity, uint64_t one_based_position);
+
+typedef struct RexxVMByteStreamProvider {
+    RexxVMByteStreamResolver resolve;
+    RexxVMByteStreamReader read;
+    RexxVMByteStreamSeeker seek;
+} RexxVMByteStreamProvider;
+
 typedef struct RexxVM {
     RexxValue *stack;
     size_t stack_capacity;
@@ -256,6 +334,9 @@ typedef struct RexxVM {
     RexxVMClockContext clock_context;
     RexxVMInputReader input_reader;
     void *input_reader_user_data;
+    RexxVMByteStreamProvider byte_stream_provider;
+    void *byte_stream_provider_user_data;
+    uint8_t byte_stream_callback_active;
     void *do_frames; /* Private bounded storage for active DO instructions. */
     size_t do_depth;
     size_t do_frame_capacity;
@@ -375,6 +456,20 @@ RexxVMStatus rexx_vm_set_input_reader(RexxVM *vm,
                                       RexxVMInputReader reader,
                                       void *user_data);
 
+/* Install or clear the optional per-VM RX33 byte-stream provider. Callback
+ * tables are copied into the VM; the host owns user_data and every identity.
+ * Replacement is permitted only while the VM is quiescent. */
+RexxVMStatus rexx_vm_set_byte_stream_provider(
+    RexxVM *vm, const RexxVMByteStreamProvider *provider, void *user_data);
+
+/* Execute one bounded CHARIN byte read. `use_default` distinguishes an
+ * omitted name from an explicit zero-length name. The provider owns cursor
+ * advancement; the VM only asks it to seek or read. */
+RexxVMStatus rexx_vm_charin(RexxVM *vm, int use_default,
+                            const unsigned char *name, size_t name_length,
+                            int has_start, uint64_t one_based_start,
+                            size_t requested_length, RexxValue *result);
+
 /* Snapshot access is cached per executed REXX clause. */
 RexxVMStatus rexx_vm_clock_read_for_clause(
     RexxVM *vm, RexxVMClockReading *reading);
@@ -408,6 +503,11 @@ void rexx_vm_test_allocator_fail_on(size_t allocation_attempt);
 void rexx_vm_test_allocator_disable(void);
 size_t rexx_vm_test_allocator_attempts(void);
 size_t rexx_vm_test_allocator_live_blocks(void);
+/* Inject a failure at a CHARIN borrowed-buffer copy point. These controls are
+ * hosted test-only and are absent from normal and freestanding builds. */
+void rexx_vm_test_byte_stream_copy_fail_on(size_t copy_attempt);
+void rexx_vm_test_byte_stream_copy_disable(void);
+size_t rexx_vm_test_byte_stream_copy_attempts(void);
 RexxVMStatus rexx_vm_test_raise_condition(
     RexxVM *vm, const RexxBytecodeChunk *chunk, RexxConditionType condition,
     const char *description, size_t description_length, size_t source_line,

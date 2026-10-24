@@ -1,0 +1,46 @@
+{
+  "schema": "guidexos.rexx.rx33.sanitizer-qualification.v1",
+  "status": "PASS",
+  "source_head": "2d1dfe9ec7869f1108cc54a6dc490372b4fbcb43",
+  "rx33_result": {
+    "seed": "0x52583333",
+    "direct_assertions": 396,
+    "property_cases": 4096,
+    "property_assertions": 12290,
+    "lifecycle_cycles": 32,
+    "failures": 0
+  },
+  "runs": [
+    {
+      "kind": "AddressSanitizer",
+      "status": "PASS",
+      "executable_targets": 33,
+      "local_expected_result_cases": 196,
+      "external_reference_status": "NOT_RUN — Regina unavailable.",
+      "rx33_log": "sanitizer-address-2869268f89794a1b8bf649c0a18f34f2/logs/rx33_byte_stream.run.stdout.log",
+      "evidence_directory": "sanitizer-address-2869268f89794a1b8bf649c0a18f34f2",
+      "build_statuses": 33,
+      "run_statuses": 34,
+      "run_failures": 0,
+      "results_json_sha256": "45695e9edd0f1d6f651b123cc612bf2295aaee06a7bb14cf42b911167766814e",
+      "raw_results_committed": false
+    },
+    {
+      "kind": "UndefinedBehaviorSanitizer",
+      "status": "PASS",
+      "executable_targets": 33,
+      "local_expected_result_cases": 196,
+      "external_reference_status": "NOT_RUN — Regina unavailable.",
+      "rx33_log": "sanitizer-undefined-a4da6e22c3d24811872dbc6f1cd6be60/logs/rx33_byte_stream.run.stdout.log",
+      "evidence_directory": "sanitizer-undefined-a4da6e22c3d24811872dbc6f1cd6be60",
+      "build_statuses": 33,
+      "run_statuses": 34,
+      "run_failures": 0,
+      "results_json_sha256": "aa6e70c409abc02d3fca63a3ed209df9cf7bba0e6640ada09ad903356a325198",
+      "raw_results_committed": false
+    }
+  ],
+  "counts_note": "Each sanitizer folder has 34 stdout logs: 33 executable build/test targets plus one separate differential-corpus run. The 196 local expected-result cases are not Regina comparisons.",
+  "address_no_diagnostic_matches": true,
+  "undefined_no_diagnostic_matches": true
+}

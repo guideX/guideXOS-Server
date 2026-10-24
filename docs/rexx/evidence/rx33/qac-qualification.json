@@ -1,0 +1,28 @@
+{
+  "schema": "guidexos.rexx.rx33.qac-qualification.v1",
+  "status": "PASS — QAC process, ownership, shutdown, and RX33 fail-closed proof; inherited RX20 TIME(R) guest subcase incomplete.",
+  "run_id": "run-e780eed0f85f4b4bb765749be8abb4d4",
+  "qac_cli_sha256": "f7089d508c1d8307e11de1b944b6e1087c038c4901333e8228ec117291ca8df6",
+  "qac_parent_exit_code": 0,
+  "qac_parent_exit_source": "Captured from the exited QAC CLI process.",
+  "qemu_child_exit_code": 0,
+  "qemu_runner_exit_code": 0,
+  "qmp_shutdown_acknowledged": true,
+  "reservation_released": true,
+  "final_qemu_process_count": 0,
+  "network_disabled": true,
+  "disposable_media_used": true,
+  "production_media_used": false,
+  "kernel_sha256_matches_staged_kernel": true,
+  "heartbeat_before": 1,
+  "heartbeat_after": 119,
+  "console_readiness_visually_verified": true,
+  "guest_script_count": 8,
+  "positive_native_charin_read": false,
+  "evidence_directory": "native-guest/run-e780eed0f85f4b4bb765749be8abb4d4",
+  "runner_exit_capture": "native-guest/run-e780eed0f85f4b4bb765749be8abb4d4/runner-process-result.json",
+  "observed_output_transcript": "native-guest/run-e780eed0f85f4b4bb765749be8abb4d4/console-observed-output.txt",
+  "incomplete_guest_subcases": [
+    "RX20 TIME(E) marker visible; TIME(R) and RX20_NATIVE_CLOCK_CAPABILITY_DONE not observed. Runner does not capture per-command REXX exit status."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "guidexos.rexx.rx33.hosted-qualification.v1",
+  "status": "PASS",
+  "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_rexx_tests.ps1 -Phase RX33",
+  "evidence": "hosted-rx33-final.log",
+  "rx33": {
+    "seed": "0x52583333",
+    "direct_assertions": 396,
+    "property_cases": 4096,
+    "property_assertions": 12290,
+    "lifecycle_cycles": 32,
+    "failures": 0
+  },
+  "inherited": {
+    "rx19_calendar_clock": "8275 assertions; 2048 property cases; 0 failures",
+    "rx20_clock_contract": "PASS",
+    "rx24_address_trace": "65 assertions; 0 failures",
+    "rx25_random": "2156 assertions; fixed-seed 60000-call distribution; 0 failures",
+    "rx26_index": "48166 assertions; 12000 equivalence cases; 0 failures",
+    "rx27_justify": "42589 assertions; 12000 property cases; 0 failures",
+    "rx28_find": "36175 assertions; 12000 property cases; 0 failures",
+    "rx30_data_stack": "seed 0x52583330; 10000 operations; 181417 assertions; 0 failures",
+    "rx30_queue_language": "seed 0x52583331; 1200 operations; 193 assertions; 0 failures",
+    "rx31_host_input": "seed 0x52583331; 256 operations; 169 assertions; 0 failures",
+    "rx32_value": "seed 0x52583332; 4096 property cases; 20533 total assertions; 0 failures"
+  },
+  "cli_cases": "26/26",
+  "compatibility_fixtures": {
+    "RX3": "13/13",
+    "RX4": "11/11",
+    "RX5": "13/13",
+    "RX6": "25/25",
+    "RX7": "33/33",
+    "RX8": "26/26",
+    "RX9": "24/24",
+    "RX10": "19/19",
+    "RX12": "31/31",
+    "RX13": "33/33",
+    "RX14": "29/29",
+    "RX15": "3/3",
+    "RX16": "10/10",
+    "RX17": "10/10",
+    "RX22": "1/1",
+    "RX26": "1/1",
+    "RX27": "1/1",
+    "RX28": "1/1",
+    "RX32": "1/1",
+    "RX33_fail_closed": "1/1"
+  },
+  "regina": "NOT_RUN — no Regina executable found on PATH"
+}
