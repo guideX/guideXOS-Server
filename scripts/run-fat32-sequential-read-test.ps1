@@ -18,6 +18,7 @@ $Arguments = @(
     "-iquote$(Join-Path $Root 'kernel\core\include')",
     "-I$(Join-Path $Root 'kernel\arch\amd64\include')",
     (Join-Path $Root 'kernel\core\fs_fat.cpp'),
+    (Join-Path $Root 'kernel\core\vfs.cpp'),
     (Join-Path $Root 'kernel\tests\fat32_sequential_read_test.cpp'),
     '-o', $Output
 )

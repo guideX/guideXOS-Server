@@ -76,6 +76,29 @@ static void strcopy(char* dst, const char* src, size_t maxLen)
 
 void join_path(const char* base, const char* name, char* output, size_t outputSize);
 
+static bool mount_generation_current(const MountPoint* mount)
+{
+    return mount && mount->active && mount->blockDeviceGeneration != 0 &&
+        block::device_generation(mount->blockDevIndex) == mount->blockDeviceGeneration;
+}
+
+static MountPoint* mount_for_file_handle(const FileHandle& file)
+{
+    if (!file.open || file.mountIndex >= VFS_MAX_MOUNTS) return nullptr;
+    MountPoint* mount = &s_mounts[file.mountIndex];
+    return mount_generation_current(mount) ? mount : nullptr;
+}
+
+static void release_file_handle_without_io(FileHandle& file, MountPoint* mount)
+{
+    if (mount && (mount->fsType == FS_TYPE_FAT32 || mount->fsType == FS_TYPE_EXFAT) &&
+        file.fsFileHandle != 0xFF) {
+        // FAT close only releases the in-memory cursor; it performs no device I/O.
+        fs_fat::close_file(file.fsFileHandle);
+    }
+    file.open = false;
+}
+
 static int strcmp(const char* s1, const char* s2)
 {
     while (*s1 && (*s1 == *s2)) {
@@ -105,7 +128,7 @@ static MountPoint* find_mount_for_path(const char* path)
     size_t bestLen = 0;
     
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
-        if (!s_mounts[i].active) continue;
+        if (!mount_generation_current(&s_mounts[i])) continue;
         
         size_t mountLen = strlen(s_mounts[i].path);
         
@@ -457,6 +480,14 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
 #endif
         return 0xFF;
     }
+
+    if (block::device_generation(blockDevIndex) != blockDeviceGeneration) {
+        if (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT)
+            fs_fat::unmount(fsVolume);
+        else if (fsType == FS_TYPE_EXT2 || fsType == FS_TYPE_EXT4)
+            fs_ext4::unmount(fsVolume);
+        return 0xFF;
+    }
     
     // Initialize mount point
     MountPoint& mp = s_mounts[index];
@@ -569,10 +600,20 @@ Status unmount(const char* path)
     
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
+            MountPoint& mount = s_mounts[i];
+            const bool deviceCurrent = mount_generation_current(&mount);
             // Check for open files on this mount
             for (uint8_t j = 0; j < VFS_MAX_OPEN_FILES; ++j) {
                 if (s_files[j].open && s_files[j].mountIndex == i) {
-                    return VFS_ERR_BUSY;
+                    if (deviceCurrent) return VFS_ERR_BUSY;
+                    release_file_handle_without_io(s_files[j], &mount);
+                }
+            }
+
+            if (!deviceCurrent) {
+                for (uint8_t j = 0; j < VFS_MAX_OPEN_FILES; ++j) {
+                    if (s_dirs[j].active && s_dirs[j].mountIndex == i)
+                        s_dirs[j].active = false;
                 }
             }
             
@@ -920,6 +961,12 @@ uint8_t open(const char* path, uint16_t flags)
     if (!found) {
         return 0xFF;
     }
+
+    if (!mount_generation_current(mount)) {
+        if (mount->fsType == FS_TYPE_FAT32 || mount->fsType == FS_TYPE_EXFAT)
+            fs_fat::close_file(fsHandle);
+        return 0xFF;
+    }
     
     // Initialize handle
     FileHandle& fh = s_files[handle];
@@ -942,7 +989,11 @@ Status close(uint8_t handle)
     FileHandle& fh = s_files[handle];
     Status flushStatus = VFS_OK;
     // Close via filesystem driver
-    MountPoint* mount = &s_mounts[fh.mountIndex];
+    MountPoint* mount = fh.mountIndex < VFS_MAX_MOUNTS ? &s_mounts[fh.mountIndex] : nullptr;
+    if (!mount_generation_current(mount)) {
+        release_file_handle_without_io(fh, mount);
+        return VFS_ERR_NOT_MOUNT;
+    }
 
     if ((fh.flags & OPEN_WRITE) && mount->fsType == FS_TYPE_FAT32) {
         block::Status blockStatus = block::BLOCK_OK;
@@ -979,8 +1030,8 @@ int32_t read(uint8_t handle, void* buffer, uint32_t size)
     if (!(fh.flags & OPEN_READ)) {
         return VFS_ERR_INVALID;
     }
-    
-    MountPoint* mount = &s_mounts[fh.mountIndex];
+    MountPoint* mount = mount_for_file_handle(fh);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
     int32_t bytesRead = 0;
     
     switch (mount->fsType) {
@@ -995,6 +1046,8 @@ int32_t read(uint8_t handle, void* buffer, uint32_t size)
         default:
             break;
     }
+
+    if (!mount_generation_current(mount)) return VFS_ERR_NOT_MOUNT;
     
     if (bytesRead > 0) {
         fh.position += static_cast<uint64_t>(bytesRead);
@@ -1015,7 +1068,8 @@ int32_t write(uint8_t handle, const void* buffer, uint32_t size)
         return VFS_ERR_INVALID;
     }
     
-    MountPoint* mount = &s_mounts[fh.mountIndex];
+    MountPoint* mount = mount_for_file_handle(fh);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
     
     if (mount->readOnly) {
         return VFS_ERR_READ_ONLY;
@@ -1035,6 +1089,8 @@ int32_t write(uint8_t handle, const void* buffer, uint32_t size)
             return VFS_ERR_NOT_SUPPORTED;
     }
 
+    if (!mount_generation_current(mount)) return VFS_ERR_NOT_MOUNT;
+
     if (bytesWritten > 0) {
         fh.position += static_cast<uint64_t>(bytesWritten);
         if (fh.position > fh.size) {
@@ -1050,6 +1106,7 @@ int32_t write(uint8_t handle, const void* buffer, uint32_t size)
                                                      &blockStatus);
             const Status mapped = map_fat_file_write_status(sizeStatus);
             if (mapped != VFS_OK) return mapped;
+            if (!mount_generation_current(mount)) return VFS_ERR_NOT_MOUNT;
             fh.size = fh.position;
         }
     }
@@ -1083,7 +1140,8 @@ Status seek(uint8_t handle, int64_t offset, SeekOrigin origin)
         newPos = 0;
     }
 
-    MountPoint* mount = &s_mounts[fh.mountIndex];
+    MountPoint* mount = mount_for_file_handle(fh);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
     if (newPos > 0xFFFFFFFFll) return VFS_ERR_INVALID;
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
@@ -1097,6 +1155,8 @@ Status seek(uint8_t handle, int64_t offset, SeekOrigin origin)
             return VFS_ERR_NOT_SUPPORTED;
     }
 
+    if (!mount_generation_current(mount)) return VFS_ERR_NOT_MOUNT;
+
     fh.position = static_cast<uint64_t>(newPos);
     return VFS_OK;
 }
@@ -1105,24 +1165,29 @@ int64_t tell(uint8_t handle)
 {
     if (handle >= VFS_MAX_OPEN_FILES) return -1;
     if (!s_files[handle].open) return -1;
-    return static_cast<int64_t>(s_files[handle].position);
+    return mount_for_file_handle(s_files[handle])
+        ? static_cast<int64_t>(s_files[handle].position) : -1;
 }
 
 int64_t file_size(uint8_t handle)
 {
     if (handle >= VFS_MAX_OPEN_FILES) return -1;
     if (!s_files[handle].open) return -1;
-    return static_cast<int64_t>(s_files[handle].size);
+    return mount_for_file_handle(s_files[handle])
+        ? static_cast<int64_t>(s_files[handle].size) : -1;
 }
 
 Status flush(uint8_t handle)
 {
     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
     if (!s_files[handle].open) return VFS_ERR_INVALID;
-    MountPoint* mount = &s_mounts[s_files[handle].mountIndex];
+    MountPoint* mount = mount_for_file_handle(s_files[handle]);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
     if (mount->fsType != FS_TYPE_FAT32) return VFS_OK;
     block::Status blockStatus = block::BLOCK_OK;
-    return fs_fat::flush(mount->fsVolumeIndex, &blockStatus)
+    const bool flushed = fs_fat::flush(mount->fsVolumeIndex, &blockStatus);
+    if (!mount_generation_current(mount)) return VFS_ERR_NOT_MOUNT;
+    return flushed
         ? VFS_OK
         : (blockStatus == block::BLOCK_ERR_TIMEOUT ? VFS_ERR_IO_TIMEOUT : VFS_ERR_IO);
 }
@@ -1131,7 +1196,7 @@ const FileHandle* get_handle(uint8_t handle)
 {
     if (handle >= VFS_MAX_OPEN_FILES) return nullptr;
     if (!s_files[handle].open) return nullptr;
-    return &s_files[handle];
+    return mount_for_file_handle(s_files[handle]) ? &s_files[handle] : nullptr;
 }
 
 // ================================================================
@@ -1225,12 +1290,20 @@ bool readdir(uint8_t iterator, DirEntry* entry)
     
     DirIterator& di = s_dirs[iterator];
     MountPoint* mount = &s_mounts[di.mountIndex];
+    if (!mount_generation_current(mount)) {
+        di.active = false;
+        return false;
+    }
     
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
         case FS_TYPE_EXFAT: {
             fs_fat::DirEntry fatEntry;
             if (!fs_fat::read_dir(mount->fsVolumeIndex, &fatEntry)) {
+                return false;
+            }
+            if (!mount_generation_current(mount)) {
+                di.active = false;
                 return false;
             }
             

@@ -279,6 +279,7 @@ struct FATVolume {
     bool     mounted;
     FATType  type;
     uint8_t  blockDevIndex;       // index in block::get_device()
+    uint64_t blockDeviceGeneration; // registry identity captured at mount
     uint64_t partitionOffset;     // start LBA of the mounted volume within the block device
 
     // FAT12/16 + FAT32 shared geometry

@@ -16,6 +16,7 @@
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/app_audio_stream.h"
 #include "include/kernel/native_present_validation.h"
+#include "include/kernel/native_read_progress.h"
 
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
@@ -337,7 +338,7 @@ struct Runtime {
     uint8_t resourceReadHandle;
     uint64_t resourceReadPosition;
     uint64_t resourceReadSize;
-    uint64_t nextReadLogOffset;
+    native_read_progress::State readProgress;
     char resourceReadPath[256];
     uint32_t tickLogCount;
     uint32_t frameGuardFailures;
@@ -1283,14 +1284,15 @@ static void close_resource_read(Runtime* runtime) {
     runtime->resourceReadHandle = 0xFF;
     runtime->resourceReadPosition = 0;
     runtime->resourceReadSize = 0;
-    runtime->nextReadLogOffset = 0;
+    native_read_progress::reset(runtime->readProgress);
     runtime->resourceReadPath[0] = '\0';
 }
 
 static void log_resource_read(Runtime* runtime, const char* relative, const char* path,
                               uint64_t offset, uint32_t requested, uint32_t returned,
-                              uint64_t size, const char* result, uint64_t elapsedMs) {
-    if (!runtime || runtime->readLogCount >= 80u) return;
+                              uint64_t size, const char* result, uint64_t elapsedMs,
+                              uint64_t progressCheckpoint = 0) {
+    if (!runtime || runtime->readLogCount >= native_read_progress::kMaxDiagnosticRecords) return;
     ++runtime->readLogCount;
     serial::puts("[NATIVE-ELF] file_read app="); serial::puts(runtime->package->displayName);
     serial::puts(" relative="); serial::puts(relative ? relative : "(none)");
@@ -1300,13 +1302,16 @@ static void log_resource_read(Runtime* runtime, const char* relative, const char
     serial::puts(" size=0x"); serial::put_hex64(size);
     serial::puts(" result="); serial::puts(result);
     serial::puts(" elapsed_ms=0x"); serial::put_hex64(elapsedMs);
+    if (progressCheckpoint != 0) {
+        serial::puts(" sequential_progress=0x"); serial::put_hex64(progressCheckpoint);
+    }
     if (path) { serial::puts(" path="); serial::puts(path); }
     serial::putc('\n');
 }
 
 static void log_resource_open(Runtime* runtime, const char* relative, const char* path,
                               uint64_t size, uint64_t elapsedMs) {
-    if (!runtime || runtime->readLogCount >= 80u) return;
+    if (!runtime || runtime->readLogCount >= native_read_progress::kMaxDiagnosticRecords) return;
     ++runtime->readLogCount;
     serial::puts("[NATIVE-ELF] file_open app="); serial::puts(runtime->package->displayName);
     serial::puts(" relative="); serial::puts(relative ? relative : "(none)");
@@ -1314,6 +1319,13 @@ static void log_resource_open(Runtime* runtime, const char* relative, const char
     serial::puts(" result=ok elapsed_ms=0x"); serial::put_hex64(elapsedMs);
     if (path) { serial::puts(" path="); serial::puts(path); }
     serial::putc('\n');
+}
+
+static uint64_t read_elapsed_ms(uint64_t startTicks)
+{
+    const uint64_t endTicks = pit::ticks();
+    const uint64_t elapsedTicks = endTicks >= startTicks ? endTicks - startTicks : 0u;
+    return elapsedTicks > UINT64_MAX / 10u ? UINT64_MAX : elapsedTicks * 10u;
 }
 
 static gx_result GX_CALL host_file_read(gx_app_context* context, const char* relative, uint64_t offset,
@@ -1333,7 +1345,7 @@ static gx_result GX_CALL host_file_read(gx_app_context* context, const char* rel
         const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
         if (handle == 0xFF) {
             log_resource_read(runtime, relative, path, offset, requested, 0u, 0u,
-                "open-failed", (pit::ticks() - startTicks) * 10u);
+                "open-failed", read_elapsed_ms(startTicks));
             return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
         }
         const int64_t size = vfs::file_size(handle);
@@ -1341,47 +1353,66 @@ static gx_result GX_CALL host_file_read(gx_app_context* context, const char* rel
                 sizeof(runtime->resourceReadPath), path)) {
             vfs::close(handle);
             log_resource_read(runtime, relative, path, offset, requested, 0u, 0u,
-                "size-failed", (pit::ticks() - startTicks) * 10u);
+                "size-failed", read_elapsed_ms(startTicks));
             return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
         }
         runtime->resourceReadHandle = handle;
         runtime->resourceReadPosition = 0u;
         runtime->resourceReadSize = static_cast<uint64_t>(size);
-        runtime->nextReadLogOffset = 0x100000u;
+        native_read_progress::reset(runtime->readProgress);
         log_resource_open(runtime, relative, path, runtime->resourceReadSize,
-            (pit::ticks() - startTicks) * 10u);
+            read_elapsed_ms(startTicks));
     }
     const uint64_t size = runtime->resourceReadSize;
     if (offset > 0xFFFFFFFFu || offset > size) {
         log_resource_read(runtime, relative, path, offset, requested, 0u, size,
-            "invalid-offset", (pit::ticks() - startTicks) * 10u);
+            "invalid-offset", read_elapsed_ms(startTicks));
+        native_read_progress::reset(runtime->readProgress);
         return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
     }
     const bool repositioned = runtime->resourceReadPosition != offset;
     if (repositioned &&
         vfs::seek(runtime->resourceReadHandle, static_cast<int64_t>(offset), vfs::SEEK_SET) != vfs::VFS_OK) {
         log_resource_read(runtime, relative, path, offset, requested, 0u, size,
-            "seek-failed", (pit::ticks() - startTicks) * 10u);
+            "seek-failed", read_elapsed_ms(startTicks));
         close_resource_read(runtime);
         return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
     }
     const int32_t amount = vfs::read(runtime->resourceReadHandle, buffer, requested);
     if (amount < 0 || static_cast<uint32_t>(amount) > requested) {
         log_resource_read(runtime, relative, path, offset, requested, 0u, size,
-            "read-failed", (pit::ticks() - startTicks) * 10u);
+            "read-failed", read_elapsed_ms(startTicks));
+        native_read_progress::observe(runtime->readProgress, offset, 0u, false, nullptr);
         close_resource_read(runtime);
         return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
     }
     *outBytesRead = static_cast<uint32_t>(amount);
-    runtime->resourceReadPosition = offset + static_cast<uint32_t>(amount);
-    const bool progressCheckpoint = repositioned || offset == 0u ||
-        offset >= runtime->nextReadLogOffset || offset == size || runtime->resourceReadPosition == size;
-    if (progressCheckpoint) {
+    const uint32_t returned = static_cast<uint32_t>(amount);
+    if (static_cast<uint64_t>(returned) > UINT64_MAX - offset) {
+        *outBytesRead = 0u;
         log_resource_read(runtime, relative, path, offset, requested,
-            static_cast<uint32_t>(amount), size, "ok", (pit::ticks() - startTicks) * 10u);
-        while (runtime->nextReadLogOffset <= offset &&
-               runtime->nextReadLogOffset <= UINT64_MAX - 0x100000u)
-            runtime->nextReadLogOffset += 0x100000u;
+            0u, size, "offset-overflow", read_elapsed_ms(startTicks));
+        close_resource_read(runtime);
+        return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
+    }
+    const uint64_t endOffset = offset + returned;
+    runtime->resourceReadPosition = endOffset;
+    uint64_t firstCheckpoint = 0;
+    const uint32_t crossedCheckpoints = native_read_progress::observe(
+        runtime->readProgress, offset, returned, true, &firstCheckpoint);
+    const uint64_t elapsedMs = read_elapsed_ms(startTicks);
+    for (uint32_t i = 0; i < crossedCheckpoints &&
+         runtime->readLogCount < native_read_progress::kMaxDiagnosticRecords; ++i) {
+        const uint64_t checkpoint = firstCheckpoint +
+            static_cast<uint64_t>(i) * native_read_progress::kCheckpointInterval;
+        log_resource_read(runtime, relative, path, offset, requested, returned,
+            size, "ok", elapsedMs, checkpoint);
+    }
+    const bool operationRecord = repositioned || offset == 0u || returned == 0u ||
+        endOffset == size;
+    if (operationRecord && crossedCheckpoints == 0u) {
+        log_resource_read(runtime, relative, path, offset, requested, returned,
+            size, "ok", elapsedMs);
     }
     return abi_result(runtime, NativeAbiOperation::ReadResource, GX_OK);
 }

@@ -40,11 +40,12 @@ static const uint32_t kMaxSafeDirectoryChainSteps = 4096u;
 static uint8_t   s_secBuf[4096]; // supports up to 4096-byte sectors
 // Four bounded FAT-sector cache entries keep the adjacent links used by file
 // traversal and the tortoise/hare safety check from repeating synchronous
-// block reads. The key includes device and absolute LBA.
+// block reads. The key includes device generation and absolute LBA.
 static const uint32_t kFatSectorCacheEntries = 4u;
 struct FatSectorCacheEntry {
     bool valid;
     uint8_t device;
+    uint64_t generation;
     uint64_t lba;
     uint32_t bytes;
     uint64_t lastUse;
@@ -102,8 +103,23 @@ static bool is_fat_partition_type(uint8_t partType)
 
 static block::Status read_volume_sector(const FATVolume& vol, uint64_t lba, void* buffer)
 {
+    const uint64_t generation = block::device_generation(vol.blockDevIndex);
+    if (generation == 0 || generation != vol.blockDeviceGeneration) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+        return s_lastIoStatus;
+    }
     s_lastIoStatus = block::read_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    if (s_lastIoStatus == block::BLOCK_OK &&
+        block::device_generation(vol.blockDevIndex) != generation) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+    }
     return s_lastIoStatus;
+}
+
+static bool volume_device_current(const FATVolume& vol)
+{
+    return vol.blockDeviceGeneration != 0 &&
+        block::device_generation(vol.blockDevIndex) == vol.blockDeviceGeneration;
 }
 
 static void invalidate_fat_sector_cache()
@@ -120,11 +136,24 @@ static block::Status read_fat_sector(const FATVolume& vol, uint64_t lba,
         s_lastIoStatus = block::BLOCK_ERR_INVALID;
         return s_lastIoStatus;
     }
+    const uint64_t generation = block::device_generation(vol.blockDevIndex);
+    if (generation == 0 || generation != vol.blockDeviceGeneration) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+        return s_lastIoStatus;
+    }
     const uint64_t absoluteLba = vol.partitionOffset + lba;
     for (uint32_t i = 0; i < kFatSectorCacheEntries; ++i) {
         FatSectorCacheEntry& entry = s_fatSectorCache[i];
+        if (entry.valid && entry.device == vol.blockDevIndex &&
+            entry.generation != generation) {
+            entry.valid = false;
+        }
         if (entry.valid && entry.device == vol.blockDevIndex && entry.lba == absoluteLba &&
-            entry.bytes == vol.bytesPerSector) {
+            entry.bytes == vol.bytesPerSector && entry.generation == generation) {
+            if (block::device_generation(vol.blockDevIndex) != generation) {
+                s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+                return s_lastIoStatus;
+            }
             if (s_fatSectorCacheClock == UINT64_MAX) {
                 for (uint32_t j = 0; j < kFatSectorCacheEntries; ++j)
                     s_fatSectorCache[j].lastUse = 0;
@@ -146,7 +175,13 @@ static block::Status read_fat_sector(const FATVolume& vol, uint64_t lba,
     entry.valid = false;
     s_lastIoStatus = block::read_sectors(vol.blockDevIndex, absoluteLba, 1, entry.data);
     if (s_lastIoStatus == block::BLOCK_OK) {
+        if (block::device_generation(vol.blockDevIndex) != generation ||
+            generation != vol.blockDeviceGeneration) {
+            s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+            return s_lastIoStatus;
+        }
         entry.device = vol.blockDevIndex;
+        entry.generation = generation;
         entry.lba = absoluteLba;
         entry.bytes = vol.bytesPerSector;
         if (s_fatSectorCacheClock == UINT64_MAX) s_fatSectorCacheClock = 0;
@@ -159,6 +194,11 @@ static block::Status read_fat_sector(const FATVolume& vol, uint64_t lba,
 
 static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, const void* buffer)
 {
+    const uint64_t generation = block::device_generation(vol.blockDevIndex);
+    if (generation == 0 || generation != vol.blockDeviceGeneration) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+        return s_lastIoStatus;
+    }
     const uint64_t absoluteLba = vol.partitionOffset + lba;
     for (uint32_t i = 0; i < kFatSectorCacheEntries; ++i) {
         if (s_fatSectorCache[i].valid && s_fatSectorCache[i].device == vol.blockDevIndex &&
@@ -177,6 +217,10 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
         serial::puts("\n");
     }
     s_lastIoStatus = block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+    if (s_lastIoStatus == block::BLOCK_OK &&
+        block::device_generation(vol.blockDevIndex) != generation) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+    }
     if (s_trashTraceActive) {
         serial::puts("TRASH_BLOCK_WRITE_LBA gen=");
         serial::put_hex64(s_trashTraceGeneration);
@@ -206,7 +250,16 @@ static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, con
 
 static block::Status flush_volume_io(const FATVolume& vol)
 {
+    const uint64_t generation = block::device_generation(vol.blockDevIndex);
+    if (generation == 0 || generation != vol.blockDeviceGeneration) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+        return s_lastIoStatus;
+    }
     s_lastIoStatus = block::flush(vol.blockDevIndex);
+    if (s_lastIoStatus == block::BLOCK_OK &&
+        block::device_generation(vol.blockDevIndex) != generation) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+    }
     serial::puts("LFPASTE_FLUSH_END status=0x");
     serial::put_hex8(static_cast<uint8_t>(s_lastIoStatus));
     serial::puts("\n");
@@ -946,6 +999,8 @@ uint8_t mount(uint8_t blockDevIndex)
 {
     invalidate_fat_sector_cache();
     if (s_volumeCount >= MAX_FAT_VOLUMES) return 0xFF;
+    const uint64_t blockDeviceGeneration = block::device_generation(blockDevIndex);
+    if (blockDeviceGeneration == 0) return 0xFF;
 
     // Find a free slot
     uint8_t idx = 0xFF;
@@ -956,13 +1011,21 @@ uint8_t mount(uint8_t blockDevIndex)
 
     FATVolume& vol = s_volumes[idx];
     memzero(&vol, sizeof(vol));
+    vol.blockDevIndex = blockDevIndex;
+    vol.blockDeviceGeneration = blockDeviceGeneration;
 
     // Try FAT first, then exFAT
-    if (try_mount_fat(blockDevIndex, vol)) {
+    if (try_mount_fat(blockDevIndex, vol) &&
+        block::device_generation(blockDevIndex) == blockDeviceGeneration) {
         ++s_volumeCount;
         return idx;
     }
-    if (try_mount_exfat(blockDevIndex, vol)) {
+    memzero(&vol, sizeof(vol));
+    vol.blockDevIndex = blockDevIndex;
+    vol.blockDeviceGeneration = blockDeviceGeneration;
+    if (block::device_generation(blockDevIndex) == blockDeviceGeneration &&
+        try_mount_exfat(blockDevIndex, vol) &&
+        block::device_generation(blockDevIndex) == blockDeviceGeneration) {
         ++s_volumeCount;
         return idx;
     }
@@ -990,6 +1053,7 @@ bool open_root_dir(uint8_t volumeIndex)
 {
     if (volumeIndex >= MAX_FAT_VOLUMES) return false;
     if (!s_volumes[volumeIndex].mounted) return false;
+    if (!volume_device_current(s_volumes[volumeIndex])) return false;
 
     s_dirIter.active          = true;
     s_dirIter.volIdx          = volumeIndex;
@@ -1017,6 +1081,11 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
     if (!s_dirIter.active || s_dirIter.volIdx != volumeIndex) return false;
 
     FATVolume& vol = s_volumes[volumeIndex];
+    if (!volume_device_current(vol)) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+        s_dirIter.active = false;
+        return false;
+    }
     uint32_t entriesPerSector = vol.bytesPerSector / 32;
     char lfnName[256];
     clear_lfn_name(lfnName, sizeof(lfnName));
@@ -1116,6 +1185,7 @@ uint8_t open_file(uint8_t volumeIndex, uint32_t firstCluster,
 {
     if (volumeIndex >= MAX_FAT_VOLUMES) return 0xFF;
     if (!s_volumes[volumeIndex].mounted) return 0xFF;
+    if (!volume_device_current(s_volumes[volumeIndex])) return 0xFF;
 
     for (uint8_t i = 0; i < MAX_OPEN_FILES; ++i) {
         if (!s_files[i].open) {
@@ -1144,6 +1214,12 @@ uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
         set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
         return 0;
     }
+    if (f.volumeIndex >= MAX_FAT_VOLUMES ||
+        !volume_device_current(s_volumes[f.volumeIndex])) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+        set_traversal_status(TRAVERSAL_IO_ERROR);
+        return 0;
+    }
 
     FATVolume& vol = s_volumes[f.volumeIndex];
     uint32_t bytesRead = 0;
@@ -1166,9 +1242,12 @@ uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
     if (expectedClusters == 0 && bytesRequested != 0) expectedClusters = 1;
     const uint32_t stepLimit = expectedClusters < max_chain_steps(vol)
         ? expectedClusters : max_chain_steps(vol);
-    if (bytesRequested != 0 && chain_cycle_detected(vol, f.currentCluster, stepLimit)) {
-        set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
-        return 0;
+    if (bytesRequested != 0) {
+        if (chain_cycle_detected(vol, f.currentCluster, stepLimit)) {
+            set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
+            return 0;
+        }
+        if (s_lastTraversalStatus == TRAVERSAL_IO_ERROR) return 0;
     }
 
     while (bytesRead < len && f.currentOffset < f.fileSize) {
@@ -1238,6 +1317,12 @@ bool seek_file(uint8_t fileHandle, uint32_t offset)
     if (fileHandle >= MAX_OPEN_FILES) return false;
     FATFile& f = s_files[fileHandle];
     if (!f.open) return false;
+    if (f.volumeIndex >= MAX_FAT_VOLUMES ||
+        !volume_device_current(s_volumes[f.volumeIndex])) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+        set_traversal_status(TRAVERSAL_IO_ERROR);
+        return false;
+    }
 
     // Seeking past EOF is allowed by the VFS contract.  A subsequent read
     // returns zero; for offsets inside the file, rebuild the cluster cursor
@@ -1333,6 +1418,11 @@ static uint32_t write_file_cursor(FATFile& f, const void* buffer, uint32_t len)
     }
 
     FATVolume& vol = s_volumes[f.volumeIndex];
+    if (!volume_device_current(vol)) {
+        s_lastIoStatus = block::BLOCK_ERR_NO_MEDIA;
+        set_traversal_status(TRAVERSAL_IO_ERROR);
+        return 0;
+    }
     if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) {
         set_traversal_status(TRAVERSAL_INVALID_ARGUMENT);
         return 0;
@@ -1355,10 +1445,12 @@ static uint32_t write_file_cursor(FATFile& f, const void* buffer, uint32_t len)
         (span + clusterBytes - 1) / clusterBytes);
     const uint32_t stepLimit = expectedClusters < max_chain_steps(vol)
         ? expectedClusters : max_chain_steps(vol);
+    set_traversal_status(TRAVERSAL_OK);
     if (chain_cycle_detected(vol, f.currentCluster, stepLimit)) {
         set_traversal_status(TRAVERSAL_CHAIN_CYCLE);
         return 0;
     }
+    if (s_lastTraversalStatus == TRAVERSAL_IO_ERROR) return 0;
 
     serial::puts("LFPASTE_BEGIN size=0x");
     serial::put_hex32(len);
@@ -1915,6 +2007,7 @@ bool open_dir(uint8_t volumeIndex, uint32_t dirCluster)
 {
     if (volumeIndex >= MAX_FAT_VOLUMES) return false;
     if (!s_volumes[volumeIndex].mounted) return false;
+    if (!volume_device_current(s_volumes[volumeIndex])) return false;
     
     s_dirIter.active          = true;
     s_dirIter.volIdx          = volumeIndex;
