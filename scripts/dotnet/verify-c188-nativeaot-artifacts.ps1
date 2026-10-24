@@ -2,12 +2,16 @@ param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [Parameter(Mandatory=$true)][string]$EvidenceRoot,
     [Parameter()][switch]$NotesStartupDiagnostics,
+    [Parameter()][switch]$NotesStartupOperationIsolation,
     [Parameter()][string]$ReadElfPath = 'C:\mingw64\bin\readelf.exe'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $(if ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' })))
+$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation
+if ($NotesStartupDiagnostics -and $NotesStartupOperationIsolation) { throw 'Choose one C188 Notes startup diagnostic phase.' }
+$phaseRootName = if ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
 foreach ($path in @($candidate,$evidence)) {
@@ -65,13 +69,13 @@ $notesSources = @(
 $allNotesMarkers = [System.Collections.Generic.List[string]]::new()
 foreach ($sourcePath in $notesSources) {
     $sourceText = [System.IO.File]::ReadAllText($sourcePath)
-    foreach ($match in [regex]::Matches($sourceText,'C188R3-\d{3} [A-Z][A-Z0-9 -]+')) {
+    foreach ($match in [regex]::Matches($sourceText,'C188R[34]-\d{3} [A-Z][A-Z0-9 =-]+')) {
         if (-not $allNotesMarkers.Contains($match.Value)) { $allNotesMarkers.Add($match.Value) }
     }
 }
-if ($NotesStartupDiagnostics) {
+if ($isStartupDiagnostic) {
     foreach ($marker in $allNotesMarkers) {
-        if (-not $elfText.Contains($marker)) { throw "C188R3 diagnostic ELF omitted required retained marker $marker" }
+        if (-not $elfText.Contains($marker)) { throw "$phaseRootName diagnostic ELF omitted required retained marker $marker" }
     }
 } else {
     foreach ($marker in $allNotesMarkers) {
@@ -118,7 +122,9 @@ foreach ($entry in $artifacts.GetEnumerator()) {
     $item = Get-Item -LiteralPath $entry.Value
     $fileEvidence[$entry.Key] = [ordered]@{path=$item.FullName;bytes=$item.Length;sha256=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash}
 }
-$nativeAotMode = if ($NotesStartupDiagnostics) {
+$nativeAotMode = if ($NotesStartupOperationIsolation) {
+    'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R4OperationIsolation'
+} elseif ($NotesStartupDiagnostics) {
     'C160Composite+C185Boundary+C188ExternalAppIdentity'
 } else {
     'C167ProofComposite+C185Boundary+C188ExternalAppIdentity'
@@ -128,7 +134,7 @@ $manifest = [ordered]@{
     elfClass='ELF64';elfMachine='x86-64';loadSegmentCount=$loadCount;relocations=0
     nativeApplicationId='com.guidexos.apps.managed.counterapp';nativeSelector=9
     productionSelectors=@{notes=4;settings=5;calculator=6;taskManager=7;fileExplorer=8}
-    requiredRetainedSymbols=$symbolEvidence;notesStartupDiagnostics=[bool]$NotesStartupDiagnostics;retainedNotesMarkers=$(if ($NotesStartupDiagnostics) { @($allNotesMarkers) } else { @() });artifacts=$fileEvidence
+    requiredRetainedSymbols=$symbolEvidence;notesStartupDiagnostics=$isStartupDiagnostic;notesStartupOperationIsolation=[bool]$NotesStartupOperationIsolation;retainedNotesMarkers=$(if ($isStartupDiagnostic) { @($allNotesMarkers) } else { @() });artifacts=$fileEvidence
     readelfEvidence=[ordered]@{header=$headerPath;programHeaders=$programPath;relocations=$relocationPath}
 }
 $manifestPath = Join-Path $evidence 'nativeaot-qualification.json'

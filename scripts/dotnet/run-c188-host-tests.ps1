@@ -9,7 +9,8 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r3-notes-startup-diagnostics')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r3-notes-startup-diagnostics')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r4-notes-startup-operation')))
 $root = [System.IO.Path]::GetFullPath($OutputRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)

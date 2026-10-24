@@ -854,24 +854,69 @@ public sealed partial class ManagedNotes : GuideXosApplication
         host.TryLog("C188R3-103 NOTES-STARTUP-STATE-RESET"u8);
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-201 BEFORE C133-PROOF-CONTEXT-INITIAL"u8);
+#endif
         _c133ProofContext = host.LaunchContext.Utf8.SequenceEqual("c133"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-202 AFTER C133-PROOF-CONTEXT-INITIAL"u8);
+        host.TryLog("C188R4-203 BEFORE C133-COMBO-TEST-CONTEXT-INITIAL"u8);
+#endif
         _c133ComboTestContext = host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-204 AFTER C133-COMBO-TEST-CONTEXT-INITIAL"u8);
+        host.TryLog("C188R4-205 BEFORE C133-HOST-TEST-CONTEXT-INITIAL"u8);
+#endif
         _c133HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-206 AFTER C133-HOST-TEST-CONTEXT-INITIAL"u8);
+#endif
 #if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-207 BEFORE C134-HOST-TEST-CONTEXT-INITIAL"u8);
+#endif
         _c134HostTestContext =
             host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-208 AFTER C134-HOST-TEST-CONTEXT-INITIAL"u8);
+#endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-209 BEFORE C135-PROOF-CONTEXT-INITIAL"u8);
+#endif
         _c135ProofContext = host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-native"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-210 AFTER C135-PROOF-CONTEXT-INITIAL"u8);
+#endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-211 BEFORE C135-PROOF-CONTEXT-MERGE-C151-INITIAL"u8);
+#endif
         _c135ProofContext = _c135ProofContext || _c151ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-212 AFTER C135-PROOF-CONTEXT-MERGE-C151-INITIAL"u8);
+#endif
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-213 BEFORE C135-MENU-TEST-CONTEXT-INITIAL"u8);
 #endif
         _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-214 AFTER C135-MENU-TEST-CONTEXT-INITIAL"u8);
+        host.TryLog("C188R4-215 BEFORE C135-HOST-TEST-CONTEXT-INITIAL"u8);
+#endif
         _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-216 AFTER C135-HOST-TEST-CONTEXT-INITIAL"u8);
+#endif
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-217 BEFORE C136-PROOF-CONTEXT-INITIAL"u8);
+#endif
         _c136ProofContext = host.LaunchContext.Utf8.SequenceEqual("c136"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-native"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c136-api"u8) ||
@@ -884,21 +929,60 @@ public sealed partial class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8)
 #endif
             ;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-218 AFTER C136-PROOF-CONTEXT-INITIAL"u8);
+#endif
 #endif
 #endif
 #endif
 #endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-219 BEFORE C119-PROOF-CONTEXT"u8);
+#endif
         _c119ProofContext = IsC119Context(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-220 AFTER C119-PROOF-CONTEXT"u8);
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-221 BEFORE C119-OPEN-BUTTON-RESET"u8);
+#endif
         _openButton.Reset();
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-222 AFTER C119-OPEN-BUTTON-RESET"u8);
+        host.TryLog("C188R4-223 BEFORE C119-SAVE-BUTTON-RESET"u8);
+#endif
         _saveButton.Reset();
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-224 AFTER C119-SAVE-BUTTON-RESET"u8);
+        host.TryLog("C188R4-225 BEFORE C119-SAVE-AS-BUTTON-RESET"u8);
+#endif
         _saveAsButton.Reset();
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-226 AFTER C119-SAVE-AS-BUTTON-RESET"u8);
+#endif
         if (host.LaunchContext.Utf8.SequenceEqual("c119-disabled"u8))
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-227 BRANCH C119-DISABLED=TAKEN"u8);
+            host.TryLog("C188R4-228 BEFORE C119-SAVE-BUTTON-DISABLE"u8);
+#endif
             _saveButton.SetEnabled(false);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-229 AFTER C119-SAVE-BUTTON-DISABLE"u8);
+#endif
+        }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-227 BRANCH C119-DISABLED=SKIPPED"u8);
         }
 #endif
+#endif
 #if HOSTLOGPROOF_C120_MANAGED_CONTROL_HOST
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-230 BEFORE C120-PROOF-CONTEXT"u8);
+#endif
         _c120ProofContext = IsC120Context(host)
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
             || host.LaunchContext.Utf8.SequenceEqual("c133-notes"u8) ||
@@ -925,70 +1009,239 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
             ;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-231 AFTER C120-PROOF-CONTEXT"u8);
+#endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-232 BEFORE C121-PROOF-CONTEXT"u8);
+#endif
         _c121ProofContext = IsC121Context(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-233 AFTER C121-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-234 BEFORE C121-CHECKBOX-TEST-CONTEXT"u8);
+#endif
         _c121CheckboxTestContext = IsC121CheckboxTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-235 AFTER C121-CHECKBOX-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-236 BEFORE C121-HOST-TEST-CONTEXT"u8);
+#endif
         _c121HostTestContext = IsC121HostTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-237 AFTER C121-HOST-TEST-CONTEXT"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-238 BEFORE C122-PROOF-CONTEXT"u8);
+#endif
         _c122ProofContext = IsC122Context(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-239 AFTER C122-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-240 BEFORE C122-LABEL-TEST-CONTEXT"u8);
+#endif
         _c122LabelTestContext = IsC122LabelTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-241 AFTER C122-LABEL-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-242 BEFORE C122-LABEL-HOST-TEST-CONTEXT"u8);
+#endif
         _c122LabelHostTestContext = IsC122LabelHostTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-243 AFTER C122-LABEL-HOST-TEST-CONTEXT"u8);
+#endif
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-244 BEFORE C123-PROOF-CONTEXT"u8);
+#endif
         _c123ProofContext = IsC123Context(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-245 AFTER C123-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-246 BEFORE C123-SEPARATOR-TEST-CONTEXT"u8);
+#endif
         _c123SeparatorTestContext = IsC123SeparatorTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-247 AFTER C123-SEPARATOR-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-248 BEFORE C123-SEPARATOR-HOST-TEST-CONTEXT"u8);
+#endif
         _c123SeparatorHostTestContext = IsC123SeparatorHostTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-249 AFTER C123-SEPARATOR-HOST-TEST-CONTEXT"u8);
+#endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-250 BEFORE C124-PROOF-CONTEXT"u8);
+#endif
         _c124ProofContext = IsC124Context(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-251 AFTER C124-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-252 BEFORE C124-RADIO-TEST-CONTEXT"u8);
+#endif
         _c124RadioTestContext = IsC124RadioTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-253 AFTER C124-RADIO-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-254 BEFORE C124-RADIO-HOST-TEST-CONTEXT"u8);
+#endif
         _c124RadioHostTestContext = IsC124RadioHostTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-255 AFTER C124-RADIO-HOST-TEST-CONTEXT"u8);
+#endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-256 BEFORE C125-PROOF-CONTEXT"u8);
+#endif
         _c125ProofContext = IsC125Context(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-257 AFTER C125-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-258 BEFORE C125-PROGRESS-TEST-CONTEXT"u8);
+#endif
         _c125ProgressTestContext = IsC125ProgressTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-259 AFTER C125-PROGRESS-TEST-CONTEXT"u8);
+#endif
 #if HOSTLOGPROOF_C126_MANAGED_GROUP_BOX
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-260 BEFORE C126-PROOF-CONTEXT"u8);
+#endif
         _c126ProofContext = IsC126NotesContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-261 AFTER C126-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-262 BEFORE C126-GROUP-BOX-TEST-CONTEXT"u8);
+#endif
         _c126GroupBoxTestContext = IsC126GroupBoxTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-263 AFTER C126-GROUP-BOX-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-264 BEFORE C125-PROOF-CONTEXT-MERGE-C126"u8);
+#endif
         _c125ProofContext = _c125ProofContext || _c126ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-265 AFTER C125-PROOF-CONTEXT-MERGE-C126"u8);
+#endif
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-266 BEFORE C127-PROOF-CONTEXT"u8);
+#endif
         _c127ProofContext = IsC127NotesContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-267 AFTER C127-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-268 BEFORE C127-PANEL-TEST-CONTEXT"u8);
+#endif
         _c127PanelTestContext = IsC127PanelTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-269 AFTER C127-PANEL-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-270 BEFORE C125-PROOF-CONTEXT-MERGE-C127"u8);
+#endif
         _c125ProofContext = _c125ProofContext || _c127ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-271 AFTER C125-PROOF-CONTEXT-MERGE-C127"u8);
+#endif
 #if HOSTLOGPROOF_C128_MANAGED_PANEL_LIFECYCLE
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-272 BEFORE C128-PROOF-CONTEXT"u8);
+#endif
         _c128ProofContext = IsC128NotesContext(host);
-        _c128PanelLifecycleTestContext =
-            IsC128PanelLifecycleTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-273 AFTER C128-PROOF-CONTEXT"u8);
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-274 BEFORE C128-PANEL-LIFECYCLE-TEST-CONTEXT"u8);
+#endif
+        _c128PanelLifecycleTestContext = IsC128PanelLifecycleTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-275 AFTER C128-PANEL-LIFECYCLE-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-276 BEFORE C125-PROOF-CONTEXT-MERGE-C128"u8);
+#endif
         _c125ProofContext = _c125ProofContext || _c128ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-277 AFTER C125-PROOF-CONTEXT-MERGE-C128"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C129_SHIFT_TAB_TRANSPORT
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-278 BEFORE C129-PROOF-CONTEXT"u8);
+#endif
         _c129ProofContext = IsC129Context(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-279 AFTER C129-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-280 BEFORE C129-SHIFT-TAB-TEST-CONTEXT"u8);
+#endif
         _c129ShiftTabTestContext = IsC129ShiftTabTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-281 AFTER C129-SHIFT-TAB-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-282 BEFORE C129-PROOF-STAGE-RESET"u8);
+#endif
         _c129ProofStage = 0;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-283 AFTER C129-PROOF-STAGE-RESET"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-284 BEFORE C131-PROOF-CONTEXT"u8);
+#endif
         _c131ProofContext = IsC131NotesContext(host)
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
             || IsC132NotesContext(host)
 #endif
             ;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-285 AFTER C131-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-286 BEFORE C131-CHECKBOX-TEST-CONTEXT"u8);
+#endif
         _c131CheckBoxTestContext = IsC131CheckBoxTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-287 AFTER C131-CHECKBOX-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-288 BEFORE C131-HOST-TEST-CONTEXT"u8);
+#endif
         _c131HostTestContext = IsC131HostTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-289 AFTER C131-HOST-TEST-CONTEXT"u8);
+#endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-290 BEFORE C132-PROOF-CONTEXT"u8);
+#endif
         _c132ProofContext = IsC132NotesContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-291 AFTER C132-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-292 BEFORE C132-RADIO-TEST-CONTEXT"u8);
+#endif
         _c132RadioTestContext = IsC132RadioTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-293 AFTER C132-RADIO-TEST-CONTEXT"u8);
+        host.TryLog("C188R4-294 BEFORE C132-HOST-TEST-CONTEXT"u8);
+#endif
         _c132HostTestContext = IsC132HostTestContext(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-295 AFTER C132-HOST-TEST-CONTEXT"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-296 BEFORE C133-PROOF-CONTEXT-SECOND-PASS"u8);
+#endif
         _c133ProofContext = IsC133NotesContext(host) ||
             IsC133ComboTestContext(host) ||
             IsC133HostTestContext(host) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-notes"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-disabled"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-297 AFTER C133-PROOF-CONTEXT-SECOND-PASS"u8);
+#endif
 #if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-298 BEFORE C133-PROOF-CONTEXT-MERGE-C134"u8);
+#endif
         _c133ProofContext = _c133ProofContext ||
             host.LaunchContext.Utf8.SequenceEqual("c134"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-299 AFTER C133-PROOF-CONTEXT-MERGE-C134"u8);
+#endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-300 BEFORE C133-PROOF-CONTEXT-MERGE-C135"u8);
+#endif
         _c133ProofContext = _c133ProofContext ||
             host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c135-api"u8) ||
@@ -1000,21 +1253,49 @@ public sealed partial class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c136-native"u8)
 #endif
             ;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-301 AFTER C133-PROOF-CONTEXT-MERGE-C135"u8);
+#endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-304 BEFORE C133-PROOF-CONTEXT-MERGE-C151"u8);
+#endif
         _c133ProofContext = _c133ProofContext || _c151ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-305 AFTER C133-PROOF-CONTEXT-MERGE-C151"u8);
 #endif
 #endif
+#endif
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-306 BEFORE C133-COMBO-TEST-CONTEXT-SECOND-PASS"u8);
 #endif
         _c133ComboTestContext = IsC133ComboTestContext(host) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-combo-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-307 AFTER C133-COMBO-TEST-CONTEXT-SECOND-PASS"u8);
+        host.TryLog("C188R4-308 BEFORE C133-HOST-TEST-CONTEXT-SECOND-PASS"u8);
+#endif
         _c133HostTestContext = IsC133HostTestContext(host) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-combo-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-309 AFTER C133-HOST-TEST-CONTEXT-SECOND-PASS"u8);
+#endif
 #if HOSTLOGPROOF_C134_TRANSIENT_POPUP_ROUTING
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-310 BEFORE C134-HOST-TEST-CONTEXT-SECOND-PASS"u8);
+#endif
         _c134HostTestContext =
             host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-311 AFTER C134-HOST-TEST-CONTEXT-SECOND-PASS"u8);
+#endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-312 BEFORE C135-PROOF-CONTEXT-SECOND-PASS"u8);
+#endif
         _c135ProofContext = host.LaunchContext.Utf8.SequenceEqual("c135"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c135-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8)
@@ -1032,11 +1313,30 @@ public sealed partial class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8)
 #endif
             ;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-313 AFTER C135-PROOF-CONTEXT-SECOND-PASS"u8);
+#endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-314 BEFORE C135-PROOF-CONTEXT-MERGE-C151"u8);
+#endif
         _c135ProofContext = _c135ProofContext || _c151ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-315 AFTER C135-PROOF-CONTEXT-MERGE-C151"u8);
+#endif
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-316 BEFORE C135-MENU-TEST-CONTEXT-SECOND-PASS"u8);
 #endif
         _c135MenuTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-api"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-317 AFTER C135-MENU-TEST-CONTEXT-SECOND-PASS"u8);
+        host.TryLog("C188R4-318 BEFORE C135-HOST-TEST-CONTEXT-SECOND-PASS"u8);
+#endif
         _c135HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c135-host-tests"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-319 AFTER C135-HOST-TEST-CONTEXT-SECOND-PASS"u8);
+#endif
 #endif
 #endif
 #endif
@@ -1050,15 +1350,30 @@ public sealed partial class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c137-relaunch"u8);
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-320 BEFORE C137-PROOF-CONTEXT-MERGE-C151"u8);
+#endif
         _c137ProofContext = _c137ProofContext || _c151ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-321 AFTER C137-PROOF-CONTEXT-MERGE-C151"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-322 BEFORE C138-PROOF-CONTEXT"u8);
+#endif
         _c138ProofContext = host.LaunchContext.Utf8.SequenceEqual("c138"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-native"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-relaunch"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-323 AFTER C138-PROOF-CONTEXT"u8);
+#endif
 #if HOSTLOGPROOF_C139_SHARED_SCROLL_VIEWPORT
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-324 BEFORE C139-PROOF-CONTEXT"u8);
+#endif
         _c139ProofContext = host.LaunchContext.Utf8.SequenceEqual("c139"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c139-native"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c139-api"u8) ||
@@ -1069,96 +1384,271 @@ public sealed partial class ManagedNotes : GuideXosApplication
             host.LaunchContext.Utf8.SequenceEqual("c138-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-host-tests"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c138-relaunch"u8);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-325 AFTER C139-PROOF-CONTEXT"u8);
+        host.TryLog("C188R4-326 BEFORE C138-PROOF-CONTEXT-MERGE-C139"u8);
+#endif
         _c138ProofContext = _c138ProofContext || _c139ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-327 AFTER C138-PROOF-CONTEXT-MERGE-C139"u8);
+#endif
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-328 BEFORE C137-PROOF-CONTEXT-MERGE-C138"u8);
 #endif
         _c137ProofContext = _c137ProofContext || _c138ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-329 AFTER C137-PROOF-CONTEXT-MERGE-C138"u8);
+#endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-330 BEFORE C135-PROOF-CONTEXT-MERGE-C138"u8);
+#endif
         _c135ProofContext = _c135ProofContext || _c138ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-331 AFTER C135-PROOF-CONTEXT-MERGE-C138"u8);
+#endif
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-332 BEFORE C136-PROOF-CONTEXT-MERGE-C138"u8);
+#endif
         _c136ProofContext = _c136ProofContext || _c138ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-333 AFTER C136-PROOF-CONTEXT-MERGE-C138"u8);
+#endif
 #endif
 #endif
 #endif
 #endif
 #if HOSTLOGPROOF_C132_REUSABLE_RADIO_BUTTON
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-334 BEFORE C120-PROOF-CONTEXT-MERGE-C132"u8);
+#endif
         _c120ProofContext = _c120ProofContext || _c132ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-335 AFTER C120-PROOF-CONTEXT-MERGE-C132"u8);
+        host.TryLog("C188R4-336 BEFORE C121-PROOF-CONTEXT-MERGE-C132"u8);
+#endif
         _c121ProofContext = _c121ProofContext || _c132ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-337 AFTER C121-PROOF-CONTEXT-MERGE-C132"u8);
+        host.TryLog("C188R4-338 BEFORE C122-PROOF-CONTEXT-MERGE-C132"u8);
+#endif
         _c122ProofContext = _c122ProofContext || _c132ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-339 AFTER C122-PROOF-CONTEXT-MERGE-C132"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-340 BEFORE C120-PROOF-CONTEXT-MERGE-C133"u8);
+#endif
         _c120ProofContext = _c120ProofContext || _c133ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-341 AFTER C120-PROOF-CONTEXT-MERGE-C133"u8);
+        host.TryLog("C188R4-342 BEFORE C121-PROOF-CONTEXT-MERGE-C133"u8);
+#endif
         _c121ProofContext = _c121ProofContext || _c133ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-343 AFTER C121-PROOF-CONTEXT-MERGE-C133"u8);
+        host.TryLog("C188R4-344 BEFORE C131-PROOF-CONTEXT-MERGE-C133"u8);
+#endif
         _c131ProofContext = _c131ProofContext || _c133ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-345 AFTER C131-PROOF-CONTEXT-MERGE-C133"u8);
+        host.TryLog("C188R4-346 BEFORE C122-PROOF-CONTEXT-MERGE-C133"u8);
+#endif
         _c122ProofContext = _c122ProofContext || _c133ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-347 AFTER C122-PROOF-CONTEXT-MERGE-C133"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-348 BEFORE C120-PROOF-CONTEXT-MERGE-C137"u8);
+#endif
         _c120ProofContext = _c120ProofContext || _c137ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-349 AFTER C120-PROOF-CONTEXT-MERGE-C137"u8);
+#endif
  #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-350 BEFORE C120-PROOF-CONTEXT-MERGE-C147"u8);
+#endif
         _c120ProofContext = _c120ProofContext || _c147RuntimeConsumerContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-351 AFTER C120-PROOF-CONTEXT-MERGE-C147"u8);
+#endif
  #endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-352 BEFORE C121-PROOF-CONTEXT-MERGE-C137"u8);
+#endif
         _c121ProofContext = _c121ProofContext || _c137ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-353 AFTER C121-PROOF-CONTEXT-MERGE-C137"u8);
+        host.TryLog("C188R4-354 BEFORE C131-PROOF-CONTEXT-MERGE-C137"u8);
+#endif
         _c131ProofContext = _c131ProofContext || _c137ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-355 AFTER C131-PROOF-CONTEXT-MERGE-C137"u8);
+#endif
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-356 BEFORE C124-PROOF-CONTEXT-MERGE-C125"u8);
 #endif
         _c124ProofContext = _c124ProofContext || _c125ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-357 AFTER C124-PROOF-CONTEXT-MERGE-C125"u8);
+#endif
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-358 BEFORE C123-PROOF-CONTEXT-MERGE-C124"u8);
 #endif
         _c123ProofContext = _c123ProofContext || _c124ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-359 AFTER C123-PROOF-CONTEXT-MERGE-C124"u8);
+#endif
+#endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-360 BEFORE C122-PROOF-CONTEXT-MERGE-C123"u8);
 #endif
         _c122ProofContext = _c122ProofContext || _c123ProofContext;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        host.TryLog("C188R4-361 AFTER C122-PROOF-CONTEXT-MERGE-C123"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
         if (_c133HostTestContext &&
             !_c133HostTestsRun)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-370 BRANCH C133-HOST-TEST=TAKEN"u8);
+            host.TryLog("C188R4-371 BEFORE C133-HOST-TEST-CALL"u8);
+#endif
             bool earlyC133HostTests =
                 GuideXosComboBoxC133HostTests.Run(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-372 AFTER C133-HOST-TEST-CALL"u8);
+#endif
             _c133HostTestsRun = true;
             host.TryLog(earlyC133HostTests
                 ? "C133-HOST tests=PASS"u8
                 : "C133-HOST tests=FAIL"u8);
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-370 BRANCH C133-HOST-TEST=SKIPPED"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C134_HOST_TESTS
         if (_c134HostTestContext && !_c134HostTestsRun)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-373 BRANCH C134-HOST-TEST=TAKEN"u8);
+            host.TryLog("C188R4-374 BEFORE C134-HOST-TEST-CALL"u8);
+#endif
             bool c134HostTests =
                 GuideXosComboBoxC134HostTests.Run(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-375 AFTER C134-HOST-TEST-CALL"u8);
+#endif
             _c134HostTestsRun = true;
             host.TryLog(c134HostTests
                 ? "C134-HOST tests=PASS"u8
                 : "C134-HOST tests=FAIL"u8);
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-373 BRANCH C134-HOST-TEST=SKIPPED"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C135_HOST_TESTS
         if (_c135HostTestContext && !_c135HostTestsRun)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-376 BRANCH C135-HOST-TEST=TAKEN"u8);
+            host.TryLog("C188R4-377 BEFORE C135-HOST-TEST-CALL"u8);
+#endif
             bool c135HostTests =
                 GuideXosPopupMenuC135HostTests.Run(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-378 AFTER C135-HOST-TEST-CALL"u8);
+#endif
             _c135HostTestsRun = true;
             _c135HostTestsPassed = c135HostTests;
             host.TryLog(c135HostTests
                 ? "C135-POPUP-HOST-TESTS cases=40 result=PASS"u8
                 : "C135-POPUP-HOST-TESTS cases=40 result=FAIL"u8);
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-376 BRANCH C135-HOST-TEST=SKIPPED"u8);
+        }
+#endif
 #endif
         if (_c133ProofContext && !_c134HostTestsRun)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-379 BRANCH C133-PROOF-TEST=TAKEN"u8);
+            host.TryLog("C188R4-380 BEFORE C133-PROOF-TEST-CALL"u8);
+#endif
             bool c134HostTests =
                 GuideXosComboBoxC134HostTests.Run(host);
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-381 AFTER C133-PROOF-TEST-CALL"u8);
+#endif
             _c134HostTestsRun = true;
             host.TryLog(c134HostTests
                 ? "C134-HOST tests=PASS"u8
                 : "C134-HOST tests=FAIL"u8);
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-379 BRANCH C133-PROOF-TEST=SKIPPED"u8);
+        }
+#endif
 #endif
 #endif
         if (_c122ProofContext || _c122LabelTestContext || _c122LabelHostTestContext)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-382 BRANCH C122-LABEL-RESET=TAKEN"u8);
+            host.TryLog("C188R4-383 BEFORE C122-LABEL-RESET"u8);
+#endif
             _pathLabel.Reset();
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-384 AFTER C122-LABEL-RESET"u8);
+#endif
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-382 BRANCH C122-LABEL-RESET=SKIPPED"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
         if (_c123ProofContext || _c123SeparatorTestContext ||
             _c123SeparatorHostTestContext)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-385 BRANCH C123-SEPARATOR-RESET=TAKEN"u8);
+            host.TryLog("C188R4-386 BEFORE C123-SEPARATOR-RESET"u8);
+#endif
             _separator.Reset();
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-387 AFTER C123-SEPARATOR-RESET"u8);
+#endif
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-385 BRANCH C123-SEPARATOR-RESET=SKIPPED"u8);
+        }
+#endif
 #endif
 #if HOSTLOGPROOF_C124_MANAGED_RADIO_BUTTON
         if (_c124ProofContext || _c124RadioTestContext ||
@@ -1169,6 +1659,10 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
         )
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-388 BRANCH C124-RADIO-SETUP=TAKEN"u8);
+            host.TryLog("C188R4-389 BEFORE C124-RADIO-SETUP"u8);
+#endif
             _pathDisplayGroup.Reset();
             _fullPathRadio.Reset();
             _fileNameRadio.Reset();
@@ -1188,11 +1682,24 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 }
             }
 #endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-390 AFTER C124-RADIO-SETUP"u8);
+#endif
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-388 BRANCH C124-RADIO-SETUP=SKIPPED"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
         if (_c133ProofContext)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-391 BRANCH C133-COMBO-SETUP=TAKEN"u8);
+            host.TryLog("C188R4-392 BEFORE C133-COMBO-SETUP"u8);
+#endif
             _pathDisplayCombo.Reset();
             _pathDisplayCombo.ClearItems();
             _pathDisplayCombo.TryAddItem("Full Path");
@@ -1208,10 +1715,23 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 return GuideXosResult.InvalidArgument;
             }
 #endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-393 AFTER C133-COMBO-SETUP"u8);
+#endif
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-391 BRANCH C133-COMBO-SETUP=SKIPPED"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
         if (_c135ProofContext)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-394 BRANCH C135-POPUP-SETUP=TAKEN"u8);
+            host.TryLog("C188R4-395 BEFORE C135-POPUP-SETUP"u8);
+#endif
             _c135Menu.Reset();
             _c135Menu.ClearItems();
 #if HOSTLOGPROOF_C157_MANAGED_NOTES_NEW_DOCUMENT
@@ -1285,26 +1805,74 @@ public sealed partial class ManagedNotes : GuideXosApplication
             _c136CommandCount = 0u;
             _c136InputTraceCount = 0u;
 #endif
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-396 AFTER C135-POPUP-SETUP"u8);
+#endif
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-394 BRANCH C135-POPUP-SETUP=SKIPPED"u8);
+        }
+#endif
 #endif
 #endif
         if (_c125ProofContext || _c125ProgressTestContext)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-397 BRANCH C125-DOCUMENT-USAGE-RESET=TAKEN"u8);
+            host.TryLog("C188R4-398 BEFORE C125-DOCUMENT-USAGE-RESET"u8);
+#endif
             _documentUsage.Reset();
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-399 AFTER C125-DOCUMENT-USAGE-RESET"u8);
+#endif
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-397 BRANCH C125-DOCUMENT-USAGE-RESET=SKIPPED"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C126_MANAGED_GROUP_BOX
         if (_c126ProofContext || _c126GroupBoxTestContext)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-400 BRANCH C126-LAYOUT=TAKEN"u8);
+            host.TryLog("C188R4-401 BEFORE C126-LAYOUT"u8);
+#endif
             _pathDisplayBox.Reset();
             if (!ApplyC126RadioLayout()) return GuideXosResult.InvalidArgument;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-402 AFTER C126-LAYOUT"u8);
+#endif
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-400 BRANCH C126-LAYOUT=SKIPPED"u8);
+        }
+#endif
 #if HOSTLOGPROOF_C127_MANAGED_PANEL
         if (_c127ProofContext || _c127PanelTestContext)
         {
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-403 BRANCH C127-LAYOUT=TAKEN"u8);
+            host.TryLog("C188R4-404 BEFORE C127-LAYOUT"u8);
+#endif
             _pathDisplayBox.Reset();
             _pathDisplayPanel.Reset();
             if (!ApplyC127PanelLayout()) return GuideXosResult.InvalidArgument;
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+            host.TryLog("C188R4-405 AFTER C127-LAYOUT"u8);
+#endif
         }
+#if HOSTLOGPROOF_C188R4_NOTES_STARTUP
+        else
+        {
+            host.TryLog("C188R4-403 BRANCH C127-LAYOUT=SKIPPED"u8);
+        }
+#endif
 #endif
 #endif
 #endif

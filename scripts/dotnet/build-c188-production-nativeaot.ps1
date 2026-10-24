@@ -9,7 +9,8 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r3-notes-startup-diagnostics')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r3-notes-startup-diagnostics')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r4-notes-startup-operation')))
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
@@ -98,8 +99,9 @@ foreach ($development in @(
         throw "Proof-disabled production NativeAOT artifacts contain development-only identity material: $development"
     }
 }
-if ($mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-')) {
-    throw 'Proof-disabled production NativeAOT artifacts contain C188R3 startup instrumentation.'
+if ($mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-') -or
+    $mapText.Contains('C188R4-') -or $elfText.Contains('C188R4-')) {
+    throw 'Proof-disabled production NativeAOT artifacts contain C188R3/R4 startup instrumentation.'
 }
 $manifest = [ordered]@{
     result='PASS'
