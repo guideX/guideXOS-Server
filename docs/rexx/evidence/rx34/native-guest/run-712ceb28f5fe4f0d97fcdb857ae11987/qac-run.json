@@ -1,0 +1,15 @@
+﻿{
+    "qac_cli_path":  "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+    "qac_cli_pid":  10840,
+    "project":  "guideXOSServer",
+    "mode":  "acceptance",
+    "direct_qemu_child_pid":  11372,
+    "qac_process_exit_code":  0,
+    "qac_process_exit_code_source":  "Derived from QAC CLI run exit-code passthrough; Start-Process ExitCode was null after process exit.",
+    "qac_process_exit_status":  "derived_from_documented_cli_contract",
+    "qac_reported_child_exit_code":  0,
+    "qac_reservation_released":  true,
+    "qmp_shutdown_acknowledged":  true,
+    "managed_sessions_after":  0,
+    "completed_at_utc":  "2026-10-24T15:25:25.2700492Z"
+}

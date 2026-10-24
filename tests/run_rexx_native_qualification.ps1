@@ -1,11 +1,16 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31','RX32','RX33')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31','RX32','RX33','RX34')]
     [string]$Phase = 'RX12R1',
     [string]$MakeExecutable = '',
-    [string]$OutputEvidenceRoot = ''
+    [string]$OutputEvidenceRoot = '',
+    [switch]$Rx34StreamFixture
 )
 
 $ErrorActionPreference = 'Stop'
+$fixtureMode = [bool]$Rx34StreamFixture
+if ($fixtureMode -and $Phase -ne 'RX34') {
+    throw '-Rx34StreamFixture is valid only for -Phase RX34.'
+}
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
     throw "$Phase native qualification requires branch REXX_SUPPORT."
@@ -20,6 +25,8 @@ $guardManifest = if ($Phase -eq 'RX30') {
     Join-Path $rootDir 'docs\rexx\evidence\rx32\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX33') {
     Join-Path $rootDir 'docs\rexx\evidence\rx33\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX34') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx34\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX29') {
     Join-Path $rootDir 'docs\rexx\evidence\rx29\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX28') {
@@ -158,7 +165,9 @@ $auditPath = Join-Path $evidenceRoot ("output-audit-$runId.json")
 $stdoutPath = Join-Path $evidenceRoot ("native-build-$runId.stdout.log")
 $stderrPath = Join-Path $evidenceRoot ("native-build-$runId.stderr.log")
 $statusPath = Join-Path $evidenceRoot ("native-build-$runId.status.json")
-$makeArguments = @('-C', $kernelDir, '-B', 'ARCH=amd64', "BUILD_ROOT=$buildRootArgument", 'all')
+$makeArguments = @('-C', $kernelDir, '-B', 'ARCH=amd64', "BUILD_ROOT=$buildRootArgument")
+if ($fixtureMode) { $makeArguments += 'RX34_STREAM_FIXTURE=1' }
+$makeArguments += 'all'
 $process = Start-Process -FilePath $makeExecutable -ArgumentList $makeArguments `
     -WorkingDirectory $workDir -NoNewWindow -PassThru -Wait `
     -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
@@ -183,7 +192,7 @@ $elfHashSecond = (Get-FileHash -LiteralPath $kernelElf -Algorithm SHA256).Hash.T
 if ($elfHash -ne $elfHashSecond) { throw 'kernel.elf changed during its recorded SHA-256 verification.' }
 $rexxObjectDirectory = Join-Path (Join-Path $buildDir 'obj') 'rexx'
 $rexxObjectCount = @(Get-ChildItem -LiteralPath $rexxObjectDirectory -Filter '*.o' -File).Count
-$expectedRexxObjectCount = if ($Phase -in @('RX30','RX31','RX32','RX33')) { 10 } else { 9 }
+$expectedRexxObjectCount = if ($Phase -in @('RX30','RX31','RX32','RX33','RX34')) { 10 } else { 9 }
 if ($rexxObjectCount -ne $expectedRexxObjectCount) { throw "Expected $expectedRexxObjectCount REXX C object files; found $rexxObjectCount in $rexxObjectDirectory." }
 $previousPhaseReference = $null
 if ($Phase -eq 'RX14') {
@@ -210,6 +219,8 @@ $linkEvidence = [PSCustomObject]@{
     kernel_elf_sha256_reverified = $elfHashSecond
     kernel_pe = $kernelPe
     kernel_pe_sha256 = (Get-FileHash -LiteralPath $kernelPe -Algorithm SHA256).Hash.ToLowerInvariant()
+    rx34_stream_fixture_enabled = $fixtureMode
+    rx34_stream_fixture_make_define = if ($fixtureMode) { 'RX34_STREAM_FIXTURE=1' } else { $null }
     rexx_c_object_count = $rexxObjectCount
     rexx_c_objects = @(Get-ChildItem -LiteralPath $rexxObjectDirectory -Filter '*.o' -File | Sort-Object Name | ForEach-Object { $_.Name })
     freestanding_flags = @('-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-exceptions','-fno-rtti')

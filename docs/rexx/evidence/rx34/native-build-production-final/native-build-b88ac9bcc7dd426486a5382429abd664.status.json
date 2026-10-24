@@ -1,0 +1,14 @@
+﻿{
+    "exit_code":  0,
+    "pid":  22748,
+    "started_at_utc":  "2026-10-24T15:02:41.9745372Z",
+    "finished_at_utc":  "2026-10-24T15:05:14.1589854Z",
+    "arguments":  [
+                      "-C",
+                      "D:\\dev\\guideXOSServer_REXX\\kernel",
+                      "-B",
+                      "ARCH=amd64",
+                      "BUILD_ROOT=../build/rexx/rx34/native-amd64-b88ac9bcc7dd426486a5382429abd664",
+                      "all"
+                  ]
+}

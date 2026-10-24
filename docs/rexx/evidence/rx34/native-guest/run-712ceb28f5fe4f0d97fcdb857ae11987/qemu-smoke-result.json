@@ -1,0 +1,32 @@
+﻿{
+    "schema":  "guidexos.rexx.rx34.qemu-smoke.v1",
+    "completed_at_utc":  "2026-10-24T15:25:27.4982222Z",
+    "passed":  true,
+    "qemu_version":  "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "kernel_sha256":  "67edd7fb3bbcf2fc237a4c397d8fb06aec11ee56a8b617a382ff43146d4034d2",
+    "staged_kernel_sha256":  "67edd7fb3bbcf2fc237a4c397d8fb06aec11ee56a8b617a382ff43146d4034d2",
+    "network_disabled":  true,
+    "copied_disposable_media":  true,
+    "production_media_used":  false,
+    "script_accesses_in_serial":  [
+                                      "rx34-no-provider.rex",
+                                      "rx34-recovery.rex"
+                                  ],
+    "heartbeat_count_before_suite":  1,
+    "heartbeat_count_after_suite":  44,
+    "qmp_shutdown_acknowledged":  true,
+    "qemu_pre_run_census":  "qemu-ownership-census-before.json",
+    "qemu_immediate_post_shutdown_census":  "qemu-immediate-post-shutdown-census.json",
+    "qemu_final_census":  "qemu-final-census.json",
+    "qemu_process_reconciliation":  "qemu-process-reconciliation.json",
+    "qac_acceptance_mode":  true,
+    "rx34_stream_fixture_enabled":  false,
+    "native_build_evidence":  "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx34\\native-build-production-final2\\native-link-evidence-f7dd825272e1495da22d4144599b1101.json",
+    "qac_cli_pid":  10840,
+    "qac_acceptance_released":  true,
+    "qac_process_exit_code":  0,
+    "qac_process_exit_code_source":  "Derived from QAC CLI run exit-code passthrough; Start-Process ExitCode was null after process exit.",
+    "qac_process_exit_status":  "derived_from_documented_cli_contract",
+    "qac_reported_child_exit_code":  0,
+    "evidence_directory":  "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx34\\native-guest\\run-712ceb28f5fe4f0d97fcdb857ae11987"
+}

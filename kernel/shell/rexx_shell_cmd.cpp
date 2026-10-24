@@ -38,6 +38,135 @@ namespace {
 static const size_t kMaxCommandLineBytes = 256u;
 static const int kMaxArgumentCount = 16;
 
+#if defined(GXOS_REXX_RX34_FIXTURE)
+struct Rx34FixtureStream {
+    const char* name;
+    size_t name_length;
+    const unsigned char* bytes;
+    size_t length;
+    size_t position;
+    uint64_t generation;
+    bool seekable;
+    bool fail_read_once;
+};
+
+struct Rx34FixtureContext {
+    Rx34FixtureStream streams[5];
+};
+
+static const unsigned char kRx34DefaultBytes[] = { 'D', '0' };
+static const unsigned char kRx34SampleBytes[] = { 'A', 'B', 'C', 'D', 'E', 'F' };
+static const unsigned char kRx34BinaryBytes[] = { 'A', 0x00, 0x80, 0xff, 'B' };
+static const unsigned char kRx34NoSeekBytes[] = { 'N', 'S' };
+static const unsigned char kRx34FaultBytes[] = { 'F', 'A' };
+
+static bool rx34_name_equals(const unsigned char* name, size_t name_length,
+                             const char* expected, size_t expected_length) {
+    if (name_length != expected_length) return false;
+    for (size_t index = 0; index < name_length; ++index) {
+        if (name[index] != static_cast<unsigned char>(expected[index]))
+            return false;
+    }
+    return true;
+}
+
+static Rx34FixtureStream* rx34_fixture_identity(void* user_data,
+                                                const void* identity) {
+    Rx34FixtureContext* context = static_cast<Rx34FixtureContext*>(user_data);
+    if (context == NULL || identity == NULL) return NULL;
+    for (size_t index = 0; index < 5u; ++index)
+        if (identity == &context->streams[index])
+            return &context->streams[index];
+    return NULL;
+}
+
+static RexxVMByteStreamResolveStatus rx34_fixture_resolve(
+    void* user_data, int use_default, const unsigned char* name,
+    size_t name_length, RexxVMByteStreamInfo* info) {
+    Rx34FixtureContext* context = static_cast<Rx34FixtureContext*>(user_data);
+    Rx34FixtureStream* stream = NULL;
+    if (context == NULL || info == NULL || (name == NULL && name_length != 0u))
+        return REXX_VM_BYTE_STREAM_RESOLVE_ERROR;
+    if (use_default) {
+        stream = &context->streams[0];
+    } else {
+        for (size_t index = 0; index < 5u; ++index) {
+            Rx34FixtureStream* candidate = &context->streams[index];
+            if (rx34_name_equals(name, name_length, candidate->name,
+                                 candidate->name_length)) {
+                stream = candidate;
+                break;
+            }
+        }
+    }
+    if (stream == NULL) return REXX_VM_BYTE_STREAM_RESOLVE_UNKNOWN;
+    info->identity = stream;
+    info->stable_identity = reinterpret_cast<const unsigned char*>(stream->name);
+    info->stable_identity_length = stream->name_length;
+    info->identity_generation = stream->generation;
+    info->capabilities = REXX_VM_BYTE_STREAM_CAP_READABLE;
+    if (stream->seekable) info->capabilities |= REXX_VM_BYTE_STREAM_CAP_SEEKABLE;
+    info->ownership = REXX_VM_BYTE_STREAM_IDENTITY_BORROWED;
+    return REXX_VM_BYTE_STREAM_RESOLVE_OK;
+}
+
+static RexxVMByteStreamReadStatus rx34_fixture_read(
+    void* user_data, const void* identity, size_t requested,
+    RexxVMByteStreamRead* result) {
+    Rx34FixtureStream* stream = rx34_fixture_identity(user_data, identity);
+    if (stream == NULL || result == NULL)
+        return REXX_VM_BYTE_STREAM_READ_ERROR;
+    if (stream->fail_read_once) {
+        stream->fail_read_once = false;
+        return REXX_VM_BYTE_STREAM_READ_ERROR;
+    }
+    if (stream->position >= stream->length)
+        return REXX_VM_BYTE_STREAM_READ_EOF;
+    size_t available = stream->length - stream->position;
+    size_t count = requested < available ? requested : available;
+    result->bytes = stream->bytes + stream->position;
+    result->length = count;
+    result->ownership = REXX_VM_INPUT_OWNERSHIP_BORROWED;
+    stream->position += count;
+    result->eof_after_read = stream->position == stream->length ? 1u : 0u;
+    return REXX_VM_BYTE_STREAM_READ_OK;
+}
+
+static RexxVMByteStreamSeekStatus rx34_fixture_seek(
+    void* user_data, const void* identity, uint64_t one_based_position) {
+    Rx34FixtureStream* stream = rx34_fixture_identity(user_data, identity);
+    if (stream == NULL) return REXX_VM_BYTE_STREAM_SEEK_ERROR;
+    if (!stream->seekable) return REXX_VM_BYTE_STREAM_SEEK_UNSUPPORTED;
+    if (one_based_position == 0u ||
+        one_based_position > static_cast<uint64_t>(stream->length) + 1u)
+        return REXX_VM_BYTE_STREAM_SEEK_INVALID_POSITION;
+    stream->position = static_cast<size_t>(one_based_position - 1u);
+    return REXX_VM_BYTE_STREAM_SEEK_OK;
+}
+
+static RexxVMByteStreamProvider rx34_fixture_provider() {
+    RexxVMByteStreamProvider provider = {};
+    provider.resolve = rx34_fixture_resolve;
+    provider.read = rx34_fixture_read;
+    provider.seek = rx34_fixture_seek;
+    return provider;
+}
+
+static void rx34_fixture_init(Rx34FixtureContext* context) {
+    if (context == NULL) return;
+    context->streams[0] = { "default", 7u, kRx34DefaultBytes,
+                            sizeof(kRx34DefaultBytes), 0u, 1u, true, false };
+    context->streams[1] = { "rx34sample", 10u, kRx34SampleBytes,
+                            sizeof(kRx34SampleBytes), 0u, 1u, true, false };
+    context->streams[2] = { "rx34binary", 10u, kRx34BinaryBytes,
+                            sizeof(kRx34BinaryBytes), 0u, 1u, true, false };
+    context->streams[3] = { "noseek", 6u, kRx34NoSeekBytes,
+                            sizeof(kRx34NoSeekBytes), 0u, 1u, false, false };
+    context->streams[4] = { "fault", 5u, kRx34FaultBytes,
+                            sizeof(kRx34FaultBytes), 0u, 1u, true, true };
+}
+#endif
+
 static int shell_output_writer(void*, RexxOutputStream,
                                const char* bytes, size_t length) {
     return kernel::shell::write_rexx_output(bytes, length) ? 1 : 0;
@@ -260,6 +389,10 @@ int shell_cmd_rexx(int argc, char** argv) {
     int script_index = 1;
     int index;
     RexxOutputHost host;
+#if defined(GXOS_REXX_RX34_FIXTURE)
+    Rx34FixtureContext fixture_context = {};
+    RexxVMByteStreamProvider fixture_provider = rx34_fixture_provider();
+#endif
 
     if (argc < 1 || argc > kMaxArgumentCount || argv == NULL || argv[0] == NULL ||
         !rexx_command_name(argv[0])) {
@@ -292,6 +425,12 @@ int shell_cmd_rexx(int argc, char** argv) {
     host.context = NULL;
     host.max_stdout_bytes = 65536u;
     host.max_stderr_bytes = 4096u;
+#if defined(GXOS_REXX_RX34_FIXTURE)
+    rx34_fixture_init(&fixture_context);
+    return guide_rexx_main_with_stream_provider(
+        argc, resolved_argv, &host, shell_rexx_clock_reader, NULL,
+        &fixture_provider, &fixture_context);
+#endif
 #if defined(__GNUC__) || defined(__clang__)
     if (guide_rexx_main_with_services != NULL) {
         return guide_rexx_main_with_services(

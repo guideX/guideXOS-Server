@@ -1,0 +1,15 @@
+﻿{
+    "exit_code":  0,
+    "pid":  18768,
+    "started_at_utc":  "2026-10-24T15:14:39.5490479Z",
+    "finished_at_utc":  "2026-10-24T15:17:48.0387471Z",
+    "arguments":  [
+                      "-C",
+                      "D:\\dev\\guideXOSServer_REXX\\kernel",
+                      "-B",
+                      "ARCH=amd64",
+                      "BUILD_ROOT=../build/rexx/rx34/native-amd64-d3275259bbaf40bea3e4ad8d8a5150f4",
+                      "RX34_STREAM_FIXTURE=1",
+                      "all"
+                  ]
+}

@@ -1,0 +1,24 @@
+﻿{
+    "schema":  "guidexos.rexx.rx34.console-readiness.v1",
+    "captured_at_utc":  "2026-10-24T15:33:25.0728636Z",
+    "qac_cli_pid":  18624,
+    "qemu_pid":  9300,
+    "qemu_executable":  "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "qmp_port":  60846,
+    "disposable_esp":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\qemu-ffc708d20b0a419d8f4c9fcf8c673f51\\guest\\esp",
+    "network":  "disabled (-net none)",
+    "probe_command":  "echo RX34_CONSOLE_READY",
+    "screenshot":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\qemu-ffc708d20b0a419d8f4c9fcf8c673f51\\helper\\console-readiness-probe.png",
+    "serial_contains_probe":  false,
+    "visual_probe_command_and_output":  "Must be visibly confirmed in the QMP screenshot before creating the PASS review marker.",
+    "resume_marker":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\qemu-ffc708d20b0a419d8f4c9fcf8c673f51\\console-readiness-reviewed.continue",
+    "requires_visual_review_before_scripts":  true,
+    "visually_verified":  true,
+    "verified_at_utc":  "2026-10-24T15:33:44.2338652Z",
+    "guest_rexx_scripts_sent":  true,
+    "guest_script_commands":  [
+                                  "rexx /rx34-stream-positive.rex",
+                                  "rexx /rx34-stream-error.rex",
+                                  "rexx /rx34-recovery.rex"
+                              ]
+}

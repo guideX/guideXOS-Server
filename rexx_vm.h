@@ -39,6 +39,8 @@ extern "C" {
 #define REXX_VM_MAX_DYNAMIC_BYTECODE_BYTES ((size_t)4194304u)
 #define REXX_VM_MAX_DYNAMIC_INSTRUCTIONS ((size_t)65536u)
 #define REXX_VM_DEFAULT_INTERPRET_COMPILE_BUDGET ((size_t)8388608u)
+#define REXX_VM_BYTE_STREAM_STATUS_CAPACITY ((size_t)16u)
+#define REXX_VM_BYTE_STREAM_IDENTITY_MAX_BYTES ((size_t)128u)
 
 typedef enum RexxValueType {
     REXX_VALUE_UNSET = 0,
@@ -225,14 +227,20 @@ typedef enum RexxVMInputReadStatus {
 typedef RexxVMInputReadStatus (*RexxVMInputReader)(
     void *user_data, RexxVMInputLine *line);
 
-/* RX33 byte streams are resolved by identity through an installed per-VM
- * provider. The embedding owns the provider context and keeps it alive until
- * the provider is cleared or the VM is freed. Resolved identities are opaque,
- * provider-owned handles that remain valid for the callbacks on that read.
+/* Byte streams are resolved by identity through an installed per-VM provider.
+ * The embedding owns the provider context and keeps it alive until the
+ * provider is cleared or the VM is freed. `identity` is an opaque callback
+ * handle and is never retained by the VM. `stable_identity` is a length-bearing
+ * byte key borrowed only for the resolver call; the VM copies it into a
+ * bounded condition table (up to 16 streams, 128 identity bytes each). A
+ * zero-length stable identity is valid only when its pointer is non-NULL.
+ * `identity_generation` is nonzero and changes when the provider reuses the
+ * same stable identity for a different logical stream lifetime. Replacing the
+ * provider also clears all state.
  * The provider owns each stream cursor and advances it only by the byte count
  * returned with READ_OK; non-OK callbacks leave it unchanged. Read spans are
  * borrowed until the next provider callback. The VM copies them immediately
- * and never frees an identity, buffer, context, or provider resource. */
+ * and never frees a handle, buffer, context, or provider resource. */
 typedef enum RexxVMByteStreamResolveStatus {
     REXX_VM_BYTE_STREAM_RESOLVE_OK = 0,
     REXX_VM_BYTE_STREAM_RESOLVE_UNKNOWN,
@@ -251,10 +259,60 @@ typedef enum RexxVMByteStreamIdentityOwnership {
 } RexxVMByteStreamIdentityOwnership;
 
 typedef struct RexxVMByteStreamInfo {
-    const void *identity;
+    const void *identity; /* Opaque callback handle; never retained by VM. */
+    const unsigned char *stable_identity;
+    size_t stable_identity_length;
     uint32_t capabilities;
     RexxVMByteStreamIdentityOwnership ownership;
+    uint64_t identity_generation;
 } RexxVMByteStreamInfo;
+
+typedef enum RexxVMByteStreamConditionState {
+    REXX_VM_BYTE_STREAM_CONDITION_UNKNOWN = 0,
+    REXX_VM_BYTE_STREAM_CONDITION_RESOLVED,
+    REXX_VM_BYTE_STREAM_CONDITION_READY,
+    REXX_VM_BYTE_STREAM_CONDITION_ERROR
+} RexxVMByteStreamConditionState;
+
+typedef enum RexxVMByteStreamOperation {
+    REXX_VM_BYTE_STREAM_OPERATION_NONE = 0,
+    REXX_VM_BYTE_STREAM_OPERATION_RESOLVE,
+    REXX_VM_BYTE_STREAM_OPERATION_READ,
+    REXX_VM_BYTE_STREAM_OPERATION_SEEK,
+    REXX_VM_BYTE_STREAM_OPERATION_ZERO_LENGTH_READ
+} RexxVMByteStreamOperation;
+
+typedef enum RexxVMByteStreamErrorClass {
+    REXX_VM_BYTE_STREAM_ERROR_NONE = 0,
+    REXX_VM_BYTE_STREAM_ERROR_SHORT_READ,
+    REXX_VM_BYTE_STREAM_ERROR_END_OF_STREAM,
+    REXX_VM_BYTE_STREAM_ERROR_NOT_READY,
+    REXX_VM_BYTE_STREAM_ERROR_PROVIDER,
+    REXX_VM_BYTE_STREAM_ERROR_PENDING_UNSUPPORTED,
+    REXX_VM_BYTE_STREAM_ERROR_UNSUPPORTED_OPERATION,
+    REXX_VM_BYTE_STREAM_ERROR_INVALID_METADATA,
+    REXX_VM_BYTE_STREAM_ERROR_INVALID_POSITION,
+    REXX_VM_BYTE_STREAM_ERROR_RESULT_COPY,
+    REXX_VM_BYTE_STREAM_ERROR_UNAVAILABLE
+} RexxVMByteStreamErrorClass;
+
+/* A caller-owned, fixed-size snapshot. `valid` is zero for an unknown stream.
+ * The identity bytes are copied into this value; no provider pointer escapes. */
+typedef struct RexxVMByteStreamConditionStatus {
+    uint8_t valid;
+    RexxVMByteStreamConditionState state;
+    RexxVMByteStreamOperation last_operation;
+    RexxVMByteStreamErrorClass error_class;
+    uint8_t eof_after_last_read;
+    uint64_t provider_generation;
+    uint64_t identity_generation;
+    RexxVMStatus last_status;
+    uint32_t diagnostic_code;
+    size_t identity_length;
+    size_t requested_length;
+    size_t returned_length;
+    unsigned char identity[REXX_VM_BYTE_STREAM_IDENTITY_MAX_BYTES];
+} RexxVMByteStreamConditionStatus;
 
 typedef enum RexxVMByteStreamReadStatus {
     REXX_VM_BYTE_STREAM_READ_OK = 0,
@@ -269,7 +327,8 @@ typedef enum RexxVMByteStreamSeekStatus {
     REXX_VM_BYTE_STREAM_SEEK_OK = 0,
     REXX_VM_BYTE_STREAM_SEEK_UNSUPPORTED,
     REXX_VM_BYTE_STREAM_SEEK_UNAVAILABLE,
-    REXX_VM_BYTE_STREAM_SEEK_ERROR
+    REXX_VM_BYTE_STREAM_SEEK_ERROR,
+    REXX_VM_BYTE_STREAM_SEEK_INVALID_POSITION
 } RexxVMByteStreamSeekStatus;
 
 typedef struct RexxVMByteStreamRead {
@@ -337,6 +396,10 @@ typedef struct RexxVM {
     RexxVMByteStreamProvider byte_stream_provider;
     void *byte_stream_provider_user_data;
     uint8_t byte_stream_callback_active;
+    uint64_t byte_stream_provider_generation;
+    size_t byte_stream_status_count;
+    RexxVMByteStreamConditionStatus
+        byte_stream_statuses[REXX_VM_BYTE_STREAM_STATUS_CAPACITY];
     void *do_frames; /* Private bounded storage for active DO instructions. */
     size_t do_depth;
     size_t do_frame_capacity;
@@ -461,6 +524,20 @@ RexxVMStatus rexx_vm_set_input_reader(RexxVM *vm,
  * Replacement is permitted only while the VM is quiescent. */
 RexxVMStatus rexx_vm_set_byte_stream_provider(
     RexxVM *vm, const RexxVMByteStreamProvider *provider, void *user_data);
+
+/* Read-only query by the stable, provider-resolved identity bytes. It never
+ * calls the provider or changes the cursor. Unknown identities return OK with
+ * `status->valid == 0` and state UNKNOWN. The output is fully caller-owned. */
+RexxVMStatus rexx_vm_query_byte_stream_status(
+    const RexxVM *vm, const unsigned char *stable_identity,
+    size_t stable_identity_length,
+    RexxVMByteStreamConditionStatus *status);
+
+/* Resolve a caller-facing stream name for observation without reading, seeking,
+ * or allocating a status-table entry. */
+RexxVMStatus rexx_vm_resolve_byte_stream_status(
+    RexxVM *vm, int use_default, const unsigned char *name, size_t name_length,
+    RexxVMByteStreamConditionStatus *status);
 
 /* Execute one bounded CHARIN byte read. `use_default` distinguishes an
  * omitted name from an explicit zero-length name. The provider owns cursor

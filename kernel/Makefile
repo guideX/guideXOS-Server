@@ -159,6 +159,14 @@ REXX_CFLAGS += -nostdlib -DGXOS_BARE_METAL
 REXX_CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 REXX_CFLAGS += $(EXTRA_CFLAGS) $(ARCH_CFLAGS)
 
+# RX34's in-memory byte-stream provider is strictly qualification-only. The
+# default production kernel compiles no provider installation or fixture data.
+RX34_STREAM_FIXTURE ?= 0
+ifeq ($(RX34_STREAM_FIXTURE),1)
+CFLAGS += -DGXOS_REXX_RX34_FIXTURE
+REXX_CFLAGS += -DGXOS_REXX_RX34_FIXTURE
+endif
+
 # Targets
 .PHONY: all clean info verify-mbedtls-guidexos mbedtls-guidexos-compile-probe
 

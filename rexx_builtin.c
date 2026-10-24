@@ -3064,6 +3064,119 @@ static RexxVMStatus rexx_builtin_charin(RexxVM *vm,
                           (uint64_t)start, requested_length, result);
 }
 
+/* Read-only STREAM state subset; this never reads or seeks the provider. */
+static const char *rexx_builtin_stream_state_name(
+    const RexxVMByteStreamConditionStatus *status)
+{
+    if (status == NULL) return "INVALID";
+    if (!status->valid && status->state == REXX_VM_BYTE_STREAM_CONDITION_UNKNOWN)
+        return "UNKNOWN";
+    switch (status->state) {
+    case REXX_VM_BYTE_STREAM_CONDITION_RESOLVED: return "UNRESOLVED";
+    case REXX_VM_BYTE_STREAM_CONDITION_READY:
+        return status->eof_after_last_read ? "EXHAUSTED" : "READY";
+    case REXX_VM_BYTE_STREAM_CONDITION_ERROR:
+        switch (status->error_class) {
+        case REXX_VM_BYTE_STREAM_ERROR_SHORT_READ: return "SHORT_READ";
+        case REXX_VM_BYTE_STREAM_ERROR_END_OF_STREAM: return "EOF";
+        case REXX_VM_BYTE_STREAM_ERROR_NOT_READY: return "NOTREADY";
+        case REXX_VM_BYTE_STREAM_ERROR_UNSUPPORTED_OPERATION: return "UNSUPPORTED";
+        case REXX_VM_BYTE_STREAM_ERROR_INVALID_METADATA:
+        case REXX_VM_BYTE_STREAM_ERROR_INVALID_POSITION: return "INVALID";
+        case REXX_VM_BYTE_STREAM_ERROR_UNAVAILABLE: return "UNAVAILABLE";
+        default: return "ERROR";
+        }
+    case REXX_VM_BYTE_STREAM_CONDITION_UNKNOWN:
+    default: return "UNKNOWN";
+    }
+}
+
+static int rexx_builtin_stream_append_size(char *output, size_t capacity,
+                                           size_t *length, size_t value)
+{
+    char digits[3u * sizeof(size_t) + 1u];
+    size_t count = 0u;
+    do {
+        digits[count++] = (char)('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && count < sizeof(digits));
+    if (count > capacity - *length) return 0;
+    while (count != 0u) output[(*length)++] = digits[--count];
+    return 1;
+}
+
+static RexxVMStatus rexx_builtin_stream(RexxVM *vm,
+                                       const RexxValue *arguments,
+                                       size_t argument_count,
+                                       RexxValue *result)
+{
+    RexxBuiltinStringView name_view, operation_view;
+    const unsigned char *name = NULL;
+    size_t name_length = 0u, detail_length;
+    int use_default = 1, include_detail = 0;
+    RexxVMByteStreamConditionStatus snapshot;
+    RexxVMStatus status;
+    const char *state;
+    char detail[160];
+
+    if (vm == NULL || result == NULL || argument_count > 2u ||
+        (arguments == NULL && argument_count != 0u))
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (argument_count > 0u && arguments[0].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_string_view(&arguments[0], &name_view);
+        if (status != REXX_VM_STATUS_OK)
+            return status == REXX_VM_STATUS_RESOURCE_LIMIT
+                       ? status : REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        name = (const unsigned char *)name_view.bytes;
+        name_length = name_view.length;
+        use_default = 0;
+    }
+    if (argument_count > 1u && arguments[1].type != REXX_VALUE_UNSET) {
+        status = rexx_builtin_string_view(&arguments[1], &operation_view);
+        if (status != REXX_VM_STATUS_OK)
+            return status == REXX_VM_STATUS_RESOURCE_LIMIT
+                       ? status : REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+        if (rexx_builtin_ascii_equal(operation_view.bytes, operation_view.length,
+                                     "D", 1u))
+            include_detail = 1;
+        else if (!rexx_builtin_ascii_equal(operation_view.bytes,
+                                           operation_view.length, "S", 1u))
+            return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    status = rexx_vm_resolve_byte_stream_status(
+        vm, use_default, name, name_length, &snapshot);
+    if (status != REXX_VM_STATUS_OK) return status;
+    state = rexx_builtin_stream_state_name(&snapshot);
+    if (!include_detail ||
+        snapshot.last_operation != REXX_VM_BYTE_STREAM_OPERATION_READ)
+        return rexx_value_set_string(result, state, strlen(state));
+
+    detail_length = strlen(state);
+    if (detail_length >= sizeof(detail)) return REXX_VM_STATUS_RESOURCE_LIMIT;
+    memcpy(detail, state, detail_length);
+#define REXX_STREAM_APPEND_LITERAL(literal) \
+    do { \
+        size_t text_length = sizeof(literal) - 1u; \
+        if (text_length > sizeof(detail) - detail_length) \
+            return REXX_VM_STATUS_RESOURCE_LIMIT; \
+        memcpy(detail + detail_length, literal, text_length); \
+        detail_length += text_length; \
+    } while (0)
+    REXX_STREAM_APPEND_LITERAL(" requested=");
+    if (!rexx_builtin_stream_append_size(detail, sizeof(detail), &detail_length,
+                                         snapshot.requested_length))
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    REXX_STREAM_APPEND_LITERAL(" returned=");
+    if (!rexx_builtin_stream_append_size(detail, sizeof(detail), &detail_length,
+                                         snapshot.returned_length))
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    REXX_STREAM_APPEND_LITERAL(" eof=");
+    if (detail_length == sizeof(detail)) return REXX_VM_STATUS_RESOURCE_LIMIT;
+    detail[detail_length++] = snapshot.eof_after_last_read ? '1' : '0';
+#undef REXX_STREAM_APPEND_LITERAL
+    return rexx_value_set_string(result, detail, detail_length);
+}
+
 static RexxVMStatus rexx_builtin_xrange(RexxVM *vm,
                                         const RexxValue *arguments,
                                         size_t argument_count,
@@ -4460,6 +4573,7 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "SYMBOL", 1u, 1u, NULL, rexx_builtin_symbol },
     { "VALUE", 1u, 2u, NULL, rexx_builtin_value },
     { "CHARIN", 0u, 3u, NULL, rexx_builtin_charin },
+    { "STREAM", 0u, 2u, NULL, rexx_builtin_stream },
     { "XRANGE", 0u, 2u, NULL, rexx_builtin_xrange },
     { "C2D", 1u, 2u, NULL, rexx_builtin_c2d },
     { "C2X", 1u, 1u, rexx_builtin_c2x, NULL },

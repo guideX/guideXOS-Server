@@ -45,6 +45,15 @@ int guide_rexx_main_with_services(int argc,
                                   RexxVMClockReader clock_reader,
                                   void *clock_user_data);
 
+/* Test/embedding extension for one synchronous invocation. A NULL provider
+ * preserves the normal fail-closed configuration. Provider and context are
+ * borrowed and must remain alive until this call returns. */
+int guide_rexx_main_with_stream_provider(
+    int argc, char **argv, const RexxOutputHost *host,
+    RexxVMClockReader clock_reader, void *clock_user_data,
+    const RexxVMByteStreamProvider *stream_provider,
+    void *stream_user_data);
+
 #ifdef __cplusplus
 }
 #endif

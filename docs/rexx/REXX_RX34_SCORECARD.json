@@ -1,0 +1,219 @@
+{
+  "schema": "guidexos.rexx.rx34.scorecard.v1",
+  "phase": "RX34",
+  "outcome": {
+    "classification": "A",
+    "label": "Accepted",
+    "reason": "Bounded per-VM stream status, read-only observation, inherited hosted and sanitizer regressions, a positive native fixture CHARIN read with exact EOF and short-read observations, and a separate production no-provider fail-closed guest all passed."
+  },
+  "repository": {
+    "path": "D:\\dev\\guideXOSServer_REXX",
+    "branch": "REXX_SUPPORT",
+    "starting_head": "f582160776c04b7d063e3dfcee7b729c2e4541c2",
+    "tracked_paths_after_commit": 19773,
+    "untracked_paths_after_commit": 131064,
+    "tracked_paths_added_since_rx34_baseline": 429
+  },
+  "compatibility_reference": {
+    "profile": "IBM z/OS 2.5 byte-oriented CHARIN stream I/O",
+    "references": [
+      "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-charin",
+      "https://www.ibm.com/docs/en/zos/2.5.0?topic=implementation-stream-io-functions",
+      "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-stream-operations"
+    ],
+    "guideXOS_adaptations": [
+      "STREAM([name][,S|D]) is a read-only status/detail subset and is not IBM STREAM Command/C compatibility.",
+      "Provider errors and EOF are retained as separate observable states.",
+      "STREAM observation does not clear state.",
+      "SIGNAL ON NOTREADY delivery is not implemented."
+    ]
+  },
+  "stream_state": {
+    "owner": "One RexxVM; no process-global table.",
+    "capacity_per_vm": 16,
+    "stable_identity_max_bytes": 128,
+    "identity_key": "Copied provider stable identity plus VM provider generation and nonzero provider identity generation.",
+    "provider_replacement": "Clears the table and advances provider generation.",
+    "capacity_exhaustion": "Fails before seek/read callback; no eviction.",
+    "states": [
+      "UNKNOWN",
+      "UNRESOLVED",
+      "READY",
+      "EXHAUSTED",
+      "SHORT_READ",
+      "EOF",
+      "NOTREADY",
+      "ERROR",
+      "UNSUPPORTED",
+      "INVALID",
+      "UNAVAILABLE"
+    ],
+    "transition_summary": {
+      "full_read": "READY unless provider reports EOF after the final returned byte, then EXHAUSTED.",
+      "short_read": "Returns all obtained bytes and records SHORT_READ with requested/returned counts and EOF bit.",
+      "subsequent_eof": "A later zero-byte EOF callback records EOF separately.",
+      "provider_error": "Records ERROR and retains the provider status.",
+      "valid_seek": "Sets READY and clears the earlier condition.",
+      "sequential_zero_length": "Returns empty, makes no read/seek callback, preserves the sticky condition, and sets last operation/counts to ZERO_LENGTH_READ/0/0.",
+      "invalid_position_or_arguments": "Reject before corrupting cursor or prior state; malformed CHARIN arguments are rejected before provider callbacks.",
+      "vm_teardown": "Clears inline VM status; embedding remains owner of provider context and resources."
+    }
+  },
+  "observation": {
+    "rexx_interface": "STREAM([name][,S|D])",
+    "default_operation": "S returns one status label.",
+    "detail_operation": "D adds requested/returned/eof only for the last positive READ.",
+    "provider_callbacks": "Resolver only; never reads, seeks, inserts, or mutates status-table entries.",
+    "unsupported": [
+      "IBM STREAM Command/C operations",
+      "OPEN, CLOSE, write, file discovery, or path interpretation",
+      "SIGNAL ON NOTREADY"
+    ]
+  },
+  "charin": {
+    "signature": "CHARIN([name][,[start][,length]])",
+    "maximum_returned_bytes": 16777216,
+    "positioning": "Explicit start is one-based; CHARIN('sample',5) reads one byte at position five.",
+    "binary": "Length-bearing data preserves NUL and bytes 0x80-0xFF.",
+    "zero_length": "Explicit start plus zero length seeks without reading; sequential zero length does not call provider and retains the sticky condition.",
+    "oversized_request": "16 MiB + 1 produces VM resource-limit failure before provider callbacks; the guest invocation terminates and cannot trap the runtime error with SIGNAL ON SYNTAX. Hosted tests verify prior state remains unchanged."
+  },
+  "hosted_qualification": {
+    "runner_log": "build/rexx/rx34/rx34-hosted-final5.log",
+    "cli_cases_passed": "27/27",
+    "local_expected_result_cases_passed": "196/196",
+    "regina": "NOT_RUN; no suitable Regina executable was available.",
+    "rx34_stream_state_test": {
+      "direct_assertions": 217,
+      "property_cases": 4096,
+      "property_seed": "0x52583434",
+      "property_assertions": 16387,
+      "total_assertions": 16604,
+      "lifecycle_cycles": 32,
+      "failures": 0
+    },
+    "inherited_charin_provider_model": {
+      "direct_assertions": 471,
+      "property_cases": 7000,
+      "property_assertions": 38442,
+      "failures": 0
+    },
+    "inherited_regressions": {
+      "rx30_data_stack": "10000 operations; 181417 assertions; 0 failures.",
+      "rx30_queue_language": "1200 property operations; 193 assertions; 0 failures.",
+      "rx31_input_provider": "256 operations; 169 assertions; 0 failures.",
+      "rx32_value": "4096 property cases; 20533 assertions; 0 failures."
+    }
+  },
+  "sanitizers": {
+    "runner_log": "build/rexx/rx34/rx34-sanitizers-final3.log",
+    "address": {
+      "targets_built": 34,
+      "targets_passed": 34,
+      "failures": 0,
+      "rx34_stream_state_included": true,
+      "evidence": "evidence/rx34/sanitizer-address-168ea90c5d3a48f1b9327a116bc2662a"
+    },
+    "undefined_behavior": {
+      "targets_built": 34,
+      "targets_passed": 34,
+      "failures": 0,
+      "rx34_stream_state_included": true,
+      "evidence": "evidence/rx34/sanitizer-undefined-dd5ad3aa688c44fd82645a6b9c172c60"
+    },
+    "local_expected_result_cases": "196/196 per sanitizer run; differential comparison NOT_RUN because Regina was unavailable."
+  },
+  "freestanding_amd64_builds": {
+    "rex_c_object_count_each": 10,
+    "production": {
+      "fixture_enabled": false,
+      "kernel": "build/rexx/rx34/native-amd64-f7dd825272e1495da22d4144599b1101/amd64/bin/kernel.elf",
+      "sha256": "67edd7fb3bbcf2fc237a4c397d8fb06aec11ee56a8b617a382ff43146d4034d2",
+      "link_evidence": "evidence/rx34/native-build-production-final2/native-link-evidence-f7dd825272e1495da22d4144599b1101.json"
+    },
+    "fixture": {
+      "fixture_enabled": true,
+      "kernel": "build/rexx/rx34/native-amd64-d3275259bbaf40bea3e4ad8d8a5150f4/amd64/bin/kernel.elf",
+      "sha256": "bea97f4a01cacbd8a50fc10e7f4638497b1cb3778e66713832cff760f1b4fe33",
+      "link_evidence": "evidence/rx34/native-build-fixture-final2/native-link-evidence-d3275259bbaf40bea3e4ad8d8a5150f4.json"
+    },
+    "guarded_root_artifacts": "31/31 unchanged in each isolated build and QAC guest run."
+  },
+  "native_guest_qualification": {
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "network": "Disabled (-net none); disposable copied ESP and firmware used.",
+    "production_no_provider": {
+      "evidence_directory": "evidence/rx34/native-guest/run-712ceb28f5fe4f0d97fcdb857ae11987",
+      "reservation_id": "a9f2bc645e104f6ba8860e430868e55f",
+      "result": "STREAM()=UNAVAILABLE; CHARIN() failed closed through the REXX syntax trap; STREAM() remained UNAVAILABLE; recovery script ran.",
+      "qmp_shutdown_acknowledged": true,
+      "qac_child_exit_code": 0,
+      "qac_reservation_released": true,
+      "managed_sessions_after": 0,
+      "final_qemu_count": 0
+    },
+    "positive_fixture": {
+      "evidence_directory": "evidence/rx34/native-guest/run-ffc708d20b0a419d8f4c9fcf8c673f51",
+      "reservation_id": "d53a2b417cf0477993808bafdee9fa38",
+      "results": {
+        "default": "44",
+        "first_named_read": "414243",
+        "cursor_continuation": "4445",
+        "charin_name_position_five": "45",
+        "position_five_cursor_continuation": "46",
+        "zero_length_reposition": "4142",
+        "exact_final_byte": "EXHAUSTED requested=1 returned=1 eof=1",
+        "binary_length_and_hex": "5 / 410080FF42",
+        "short_read_bytes_and_state": "43444546 / SHORT_READ requested=8 returned=4 eof=1",
+        "subsequent_eof": "EOF requested=1 returned=0 eof=1",
+        "provider_error": "ERROR requested=1 returned=0 eof=0",
+        "unknown_and_missing": "UNKNOWN / UNKNOWN",
+        "nonseekable_position": "UNSUPPORTED",
+        "invalid_position_and_argument": "Prior READY detail preserved.",
+        "oversized_request": "VM resource limit exceeded after RX34_OVERSIZED_REQUEST_BEGIN; the follow-up recovery script then ran."
+      },
+      "qmp_shutdown_acknowledged": true,
+      "qac_child_exit_code": 0,
+      "qac_reservation_released": true,
+      "managed_sessions_after": 0,
+      "final_qemu_count": 0
+    }
+  },
+  "preservation": {
+    "baseline_directory": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx34-preservation\\20261024T142205Z",
+    "baseline_tracked_paths": 19344,
+    "baseline_untracked_paths": 120577,
+    "original_untracked_paths_missing": 0,
+    "original_untracked_paths_unexpectedly_tracked": 0,
+    "original_tracked_paths_missing": 0,
+    "protected_obj_pdb_records": 17467,
+    "protected_obj_pdb_hashes_and_sizes_unchanged": 17467,
+    "root_guard_artifacts_unchanged": "31/31",
+    "tracked_paths_after_commit": 19773,
+    "new_tracked_paths_since_baseline": 429,
+    "untracked_paths_after_commit": 131064,
+    "new_untracked_paths_since_baseline": 10487,
+    "reconciliation": "evidence/rx34/preservation-reconciliation.json"
+  },
+  "builtin_inventory": {
+    "path": "docs/rexx/REXX_RX33_BUILTIN_INVENTORY.csv",
+    "status_counts": {
+      "Implemented": 60,
+      "Not implemented": 8,
+      "Partial": 5,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "charin": "Partial; registered byte-provider reads and bounded status are qualified, but production has no provider and compatibility remains a subset.",
+    "stream": "Partial; read-only S/D status subset only."
+  },
+  "remaining_compatibility_gaps": [
+    "No production byte-stream provider or general filesystem integration.",
+    "No STREAM OPEN/CLOSE/write/line I/O or full IBM STREAM Command/C behavior.",
+    "No SIGNAL ON NOTREADY delivery, asynchronous waiting, or stream-error reset operation.",
+    "The native oversized request ends the current REXX invocation with a VM resource-limit error; post-error STREAM observation is available only in hosted assertions before teardown.",
+    "Regina comparison was not run because the executable was unavailable.",
+    "RX34 does not close RX31 native input or RX20 TIME(R) guest-acceptance gaps."
+  ],
+  "recommended_rx35_direction": "Do not begin automatically. If prioritized, first specify a production provider contract and ownership/teardown policy, then evaluate language-level NOTREADY delivery and stream error recovery without adding unrestricted filesystem access."
+}

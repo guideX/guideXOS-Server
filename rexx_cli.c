@@ -216,7 +216,9 @@ static int rexx_cli_execute_source(RexxOutputContext *output,
                                    size_t argument_string_length,
                                    int argument_string_present,
                                    RexxVMClockReader clock_reader,
-                                   void *clock_user_data)
+                                   void *clock_user_data,
+                                   const RexxVMByteStreamProvider *stream_provider,
+                                   void *stream_user_data)
 {
     RexxLexer lexer;
     RexxParser parser;
@@ -280,6 +282,16 @@ static int rexx_cli_execute_source(RexxOutputContext *output,
                                  path, rexx_vm_status_name(vm_status));
         goto cleanup;
     }
+    if (stream_provider != NULL) {
+        vm_status = rexx_vm_set_byte_stream_provider(
+            &vm, stream_provider, stream_user_data);
+        if (vm_status != REXX_VM_STATUS_OK) {
+            (void)rexx_output_format(output, REXX_OUTPUT_STDERR,
+                                     "rexx: %s: byte-stream provider installation failed: %s\n",
+                                     path, rexx_vm_status_name(vm_status));
+            goto cleanup;
+        }
+    }
     if (argument_string_present) {
         vm_status = rexx_vm_set_argument_string(
             &vm, argument_string, argument_string_length);
@@ -342,11 +354,11 @@ cleanup:
 }
 
 /* Explicit output host used by a kernel shell or another embedding Console. */
-int guide_rexx_main_with_services(int argc,
-                                  char **argv,
-                                  const RexxOutputHost *host,
-                                  RexxVMClockReader clock_reader,
-                                  void *clock_user_data)
+int guide_rexx_main_with_stream_provider(
+    int argc, char **argv, const RexxOutputHost *host,
+    RexxVMClockReader clock_reader, void *clock_user_data,
+    const RexxVMByteStreamProvider *stream_provider,
+    void *stream_user_data)
 {
     const char *program_name = "rexx";
     const char *script_path = NULL;
@@ -433,10 +445,21 @@ int guide_rexx_main_with_services(int argc,
                                      source_length, argument_string,
                                      argument_string_length,
                                      script_argument_start < argc,
-                                     clock_reader, clock_user_data);
+                                     clock_reader, clock_user_data,
+                                     stream_provider, stream_user_data);
     free(argument_string);
     rexx_os_free_file(source);
     return result;
+}
+
+int guide_rexx_main_with_services(int argc,
+                                  char **argv,
+                                  const RexxOutputHost *host,
+                                  RexxVMClockReader clock_reader,
+                                  void *clock_user_data)
+{
+    return guide_rexx_main_with_stream_provider(
+        argc, argv, host, clock_reader, clock_user_data, NULL, NULL);
 }
 
 int guide_rexx_main_with_output(int argc,

@@ -1,0 +1,20 @@
+﻿{
+    "pid":  11372,
+    "qacPid":  10840,
+    "qacProject":  "guideXOSServer",
+    "qacMode":  "acceptance",
+    "qacCliPath":  "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+    "rx34_stream_fixture":  false,
+    "native_build_evidence":  "D:\\dev\\guideXOSServer_REXX\\docs\\rexx\\evidence\\rx34\\native-build-production-final2\\native-link-evidence-f7dd825272e1495da22d4144599b1101.json",
+    "qemuPath":  "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+    "qmpPort":  56697,
+    "espPath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\qemu-712ceb28f5fe4f0d97fcdb857ae11987\\guest\\esp",
+    "firmwarePath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\qemu-712ceb28f5fe4f0d97fcdb857ae11987\\guest\\firmware-code.fd",
+    "serialPath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\qemu-712ceb28f5fe4f0d97fcdb857ae11987\\serial.log",
+    "rawCaptureDir":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\qemu-712ceb28f5fe4f0d97fcdb857ae11987\\screenshots-raw",
+    "kernelPath":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\native-amd64-f7dd825272e1495da22d4144599b1101\\amd64\\bin\\kernel.elf",
+    "kernelSha256":  "67edd7fb3bbcf2fc237a4c397d8fb06aec11ee56a8b617a382ff43146d4034d2",
+    "stagedKernelSha256":  "67edd7fb3bbcf2fc237a4c397d8fb06aec11ee56a8b617a382ff43146d4034d2",
+    "network":  "disabled (-net none)",
+    "runRoot":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\qemu-712ceb28f5fe4f0d97fcdb857ae11987"
+}

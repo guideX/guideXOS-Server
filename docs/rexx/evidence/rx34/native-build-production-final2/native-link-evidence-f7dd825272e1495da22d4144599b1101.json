@@ -1,0 +1,37 @@
+﻿{
+    "schema":  "guidexos.rexx.native-link-evidence.v1",
+    "built_at_utc":  "2026-10-24T15:13:50.8185522Z",
+    "kernel_elf":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\native-amd64-f7dd825272e1495da22d4144599b1101\\amd64\\bin\\kernel.elf",
+    "kernel_elf_sha256":  "67edd7fb3bbcf2fc237a4c397d8fb06aec11ee56a8b617a382ff43146d4034d2",
+    "kernel_elf_sha256_reverified":  "67edd7fb3bbcf2fc237a4c397d8fb06aec11ee56a8b617a382ff43146d4034d2",
+    "kernel_pe":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\native-amd64-f7dd825272e1495da22d4144599b1101\\amd64\\bin\\kernel.pe",
+    "kernel_pe_sha256":  "167755e0b78ea99651073f785037915be2450e98bf33eccd4841a87693c98060",
+    "rx34_stream_fixture_enabled":  false,
+    "rx34_stream_fixture_make_define":  null,
+    "rexx_c_object_count":  10,
+    "rexx_c_objects":  [
+                           "rexx_builtin.o",
+                           "rexx_cli.o",
+                           "rexx_compiler.o",
+                           "rexx_data_stack.o",
+                           "rexx_lexer.o",
+                           "rexx_numeric.o",
+                           "rexx_os_io.o",
+                           "rexx_output.o",
+                           "rexx_parser.o",
+                           "rexx_vm.o"
+                       ],
+    "freestanding_flags":  [
+                               "-ffreestanding",
+                               "-nostdlib",
+                               "-nostdinc++",
+                               "-fno-builtin",
+                               "-fno-exceptions",
+                               "-fno-rtti"
+                           ],
+    "historical_rx12_elf_sha256":  "ce835ef3b77aa066db46f9cb9964b6bb0d7c589b4202a2b1965129854fd80dee",
+    "matches_historical_rx12":  false,
+    "previous_phase_reference":  null,
+    "build_output_root":  "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx34\\native-amd64-f7dd825272e1495da22d4144599b1101",
+    "build_succeeded":  true
+}

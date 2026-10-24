@@ -1564,6 +1564,12 @@ RexxVMStatus rexx_vm_set_byte_stream_provider(
     if (provider != NULL &&
         (provider->resolve == NULL || provider->read == NULL))
         return REXX_VM_STATUS_INVALID_ARGUMENT;
+    /* Provider identity handles belong to one installed provider lifetime.
+     * Drop every cached condition before publishing the replacement. */
+    memset(vm->byte_stream_statuses, 0, sizeof(vm->byte_stream_statuses));
+    vm->byte_stream_status_count = 0u;
+    if (vm->byte_stream_provider_generation != UINT64_MAX)
+        ++vm->byte_stream_provider_generation;
     if (provider == NULL) {
         memset(&vm->byte_stream_provider, 0,
                sizeof(vm->byte_stream_provider));
@@ -1578,8 +1584,211 @@ RexxVMStatus rexx_vm_set_byte_stream_provider(
 static int byte_stream_info_is_empty(const RexxVMByteStreamInfo *stream)
 {
     return stream != NULL && stream->identity == NULL &&
+           stream->stable_identity == NULL &&
+           stream->stable_identity_length == 0u &&
            stream->capabilities == 0u &&
-           stream->ownership == REXX_VM_BYTE_STREAM_IDENTITY_UNSPECIFIED;
+           stream->ownership == REXX_VM_BYTE_STREAM_IDENTITY_UNSPECIFIED &&
+           stream->identity_generation == 0u;
+}
+
+static int byte_stream_stable_identity_is_valid(
+    const RexxVMByteStreamInfo *stream)
+{
+    return stream != NULL && stream->stable_identity != NULL &&
+           stream->identity_generation != 0u &&
+           stream->stable_identity_length <=
+               REXX_VM_BYTE_STREAM_IDENTITY_MAX_BYTES;
+}
+
+static int byte_stream_identity_matches(
+    const RexxVMByteStreamConditionStatus *entry,
+    const unsigned char *identity, size_t identity_length,
+    uint64_t identity_generation)
+{
+    return entry != NULL && entry->valid &&
+           entry->identity_generation == identity_generation &&
+           entry->identity_length == identity_length &&
+           (identity_length == 0u ||
+            memcmp(entry->identity, identity, identity_length) == 0);
+}
+
+static RexxVMByteStreamConditionStatus *byte_stream_find_status(
+    RexxVM *vm, const unsigned char *identity, size_t identity_length,
+    uint64_t identity_generation)
+{
+    size_t index;
+    if (vm == NULL || (identity == NULL && identity_length != 0u))
+        return NULL;
+    for (index = 0u; index < vm->byte_stream_status_count; ++index) {
+        RexxVMByteStreamConditionStatus *entry =
+            &vm->byte_stream_statuses[index];
+        if (byte_stream_identity_matches(entry, identity, identity_length,
+                                         identity_generation) &&
+            entry->provider_generation == vm->byte_stream_provider_generation)
+            return entry;
+    }
+    return NULL;
+}
+
+static RexxVMByteStreamConditionStatus *byte_stream_get_status(
+    RexxVM *vm, const unsigned char *identity, size_t identity_length,
+    uint64_t identity_generation)
+{
+    RexxVMByteStreamConditionStatus entry;
+    RexxVMByteStreamConditionStatus *existing;
+    size_t index;
+    if (!byte_stream_stable_identity_is_valid(
+            &(RexxVMByteStreamInfo){
+                .stable_identity = identity,
+                .stable_identity_length = identity_length,
+                .identity_generation = identity_generation
+            }))
+        return NULL;
+    existing = byte_stream_find_status(vm, identity, identity_length,
+                                       identity_generation);
+    if (existing != NULL) return existing;
+    /* A provider may reuse a stable key for a new logical stream lifetime.
+     * Replace its old slot in place so status never leaks across generations. */
+    for (index = 0u; index < vm->byte_stream_status_count; ++index) {
+        existing = &vm->byte_stream_statuses[index];
+        if (existing->valid &&
+            existing->provider_generation == vm->byte_stream_provider_generation &&
+            existing->identity_length == identity_length &&
+            (identity_length == 0u ||
+             memcmp(existing->identity, identity, identity_length) == 0)) {
+            memset(existing, 0, sizeof(*existing));
+            existing->valid = 1u;
+            existing->state = REXX_VM_BYTE_STREAM_CONDITION_RESOLVED;
+            existing->last_operation = REXX_VM_BYTE_STREAM_OPERATION_RESOLVE;
+            existing->last_status = REXX_VM_STATUS_OK;
+            existing->provider_generation = vm->byte_stream_provider_generation;
+            existing->identity_generation = identity_generation;
+            existing->identity_length = identity_length;
+            if (identity_length != 0u)
+                memcpy(existing->identity, identity, identity_length);
+            return existing;
+        }
+    }
+    if (vm->byte_stream_status_count >=
+        REXX_VM_BYTE_STREAM_STATUS_CAPACITY)
+        return NULL;
+
+    /* Build the complete entry locally. The table never exposes a partially
+     * initialized identity or condition record. */
+    memset(&entry, 0, sizeof(entry));
+    entry.valid = 1u;
+    entry.state = REXX_VM_BYTE_STREAM_CONDITION_RESOLVED;
+    entry.last_operation = REXX_VM_BYTE_STREAM_OPERATION_RESOLVE;
+    entry.last_status = REXX_VM_STATUS_OK;
+    entry.provider_generation = vm->byte_stream_provider_generation;
+    entry.identity_generation = identity_generation;
+    entry.identity_length = identity_length;
+    if (identity_length != 0u)
+        memcpy(entry.identity, identity, identity_length);
+    vm->byte_stream_statuses[vm->byte_stream_status_count] = entry;
+    ++vm->byte_stream_status_count;
+    return &vm->byte_stream_statuses[vm->byte_stream_status_count - 1u];
+}
+
+static void byte_stream_status_success(
+    RexxVMByteStreamConditionStatus *entry,
+    RexxVMByteStreamOperation operation, size_t requested_length,
+    size_t returned_length, int eof_after_read)
+{
+    if (entry == NULL) return;
+    entry->last_operation = operation;
+    entry->last_status = REXX_VM_STATUS_OK;
+    entry->requested_length = requested_length;
+    entry->returned_length = returned_length;
+    entry->eof_after_last_read = (uint8_t)(eof_after_read != 0);
+    entry->state = REXX_VM_BYTE_STREAM_CONDITION_READY;
+    entry->error_class = REXX_VM_BYTE_STREAM_ERROR_NONE;
+    entry->diagnostic_code = 0u;
+}
+
+static void byte_stream_status_zero_read(
+    RexxVMByteStreamConditionStatus *entry)
+{
+    if (entry == NULL) return;
+    entry->last_operation = REXX_VM_BYTE_STREAM_OPERATION_ZERO_LENGTH_READ;
+    entry->last_status = REXX_VM_STATUS_OK;
+    entry->requested_length = 0u;
+    entry->returned_length = 0u;
+    entry->eof_after_last_read = 0u;
+    /* This operation consumes no bytes and does not clear a stored error. */
+}
+
+static void byte_stream_status_error(
+    RexxVMByteStreamConditionStatus *entry,
+    RexxVMByteStreamOperation operation, RexxVMByteStreamErrorClass error,
+    RexxVMStatus status, uint32_t diagnostic_code,
+    size_t requested_length, size_t returned_length, int eof_after_read)
+{
+    if (entry == NULL) return;
+    /* Callback failure is an observed stream error. Its classification stays
+     * separate from the interpreter's NOTREADY condition and immediate code. */
+    entry->state = REXX_VM_BYTE_STREAM_CONDITION_ERROR;
+    entry->last_operation = operation;
+    entry->error_class = error;
+    entry->last_status = status;
+    entry->diagnostic_code = diagnostic_code;
+    entry->requested_length = requested_length;
+    entry->returned_length = returned_length;
+    entry->eof_after_last_read = (uint8_t)(eof_after_read != 0);
+}
+
+static RexxVMByteStreamErrorClass byte_stream_error_for_status(
+    RexxVMStatus status)
+{
+    switch (status) {
+    case REXX_VM_STATUS_BYTE_STREAM_NOT_READY:
+        return REXX_VM_BYTE_STREAM_ERROR_NOT_READY;
+    case REXX_VM_STATUS_BYTE_STREAM_END_OF_FILE:
+        return REXX_VM_BYTE_STREAM_ERROR_END_OF_STREAM;
+    case REXX_VM_STATUS_BYTE_STREAM_PENDING_UNSUPPORTED:
+        return REXX_VM_BYTE_STREAM_ERROR_PENDING_UNSUPPORTED;
+    case REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION:
+        return REXX_VM_BYTE_STREAM_ERROR_UNSUPPORTED_OPERATION;
+    case REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID:
+        return REXX_VM_BYTE_STREAM_ERROR_INVALID_METADATA;
+    case REXX_VM_STATUS_BYTE_STREAM_UNAVAILABLE:
+        return REXX_VM_BYTE_STREAM_ERROR_UNAVAILABLE;
+    case REXX_VM_STATUS_OUT_OF_MEMORY:
+        return REXX_VM_BYTE_STREAM_ERROR_RESULT_COPY;
+    default:
+        return REXX_VM_BYTE_STREAM_ERROR_PROVIDER;
+    }
+}
+
+RexxVMStatus rexx_vm_query_byte_stream_status(
+    const RexxVM *vm, const unsigned char *stable_identity,
+    size_t stable_identity_length,
+    RexxVMByteStreamConditionStatus *status)
+{
+    size_t index;
+    if (status == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+    memset(status, 0, sizeof(*status));
+    status->state = REXX_VM_BYTE_STREAM_CONDITION_UNKNOWN;
+    status->last_status = REXX_VM_STATUS_OK;
+    if (vm == NULL || !vm->initialized ||
+        (stable_identity == NULL && stable_identity_length != 0u))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (stable_identity_length > REXX_VM_BYTE_STREAM_IDENTITY_MAX_BYTES)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    for (index = 0u; index < vm->byte_stream_status_count; ++index) {
+        const RexxVMByteStreamConditionStatus *entry =
+            &vm->byte_stream_statuses[index];
+        if (entry->valid &&
+            entry->provider_generation == vm->byte_stream_provider_generation &&
+            entry->identity_length == stable_identity_length &&
+            (stable_identity_length == 0u ||
+             memcmp(entry->identity, stable_identity,
+                    stable_identity_length) == 0)) {
+            *status = *entry;
+            return REXX_VM_STATUS_OK;
+        }
+    }
+    return REXX_VM_STATUS_OK;
 }
 
 static int byte_stream_read_is_empty(const RexxVMByteStreamRead *read_result)
@@ -1615,6 +1824,8 @@ static RexxVMStatus byte_stream_map_seek_status(
         return REXX_VM_STATUS_BYTE_STREAM_NOT_READY;
     case REXX_VM_BYTE_STREAM_SEEK_ERROR:
         return REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR;
+    case REXX_VM_BYTE_STREAM_SEEK_INVALID_POSITION:
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
     default:
         return REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
     }
@@ -1639,6 +1850,109 @@ static RexxVMStatus byte_stream_map_read_status(
     }
 }
 
+RexxVMStatus rexx_vm_resolve_byte_stream_status(
+    RexxVM *vm, int use_default, const unsigned char *name, size_t name_length,
+    RexxVMByteStreamConditionStatus *status)
+{
+    RexxVMByteStreamProvider provider;
+    RexxVMByteStreamInfo stream;
+    RexxVMByteStreamResolveStatus resolve_status;
+    RexxVMByteStreamConditionStatus *existing;
+    RexxVMStatus mapped_status;
+
+    if (status == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+    memset(status, 0, sizeof(*status));
+    status->state = REXX_VM_BYTE_STREAM_CONDITION_UNKNOWN;
+    status->last_status = REXX_VM_STATUS_OK;
+    if (vm == NULL || !vm->initialized ||
+        (use_default != 0 && use_default != 1) ||
+        (name == NULL && name_length != 0u) ||
+        (use_default && name_length != 0u))
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (name_length > REXX_VM_BYTE_STREAM_IDENTITY_MAX_BYTES)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    provider = vm->byte_stream_provider;
+    status->provider_generation = vm->byte_stream_provider_generation;
+    if (provider.resolve == NULL || provider.read == NULL) {
+        status->valid = 1u;
+        status->state = REXX_VM_BYTE_STREAM_CONDITION_ERROR;
+        status->last_operation = REXX_VM_BYTE_STREAM_OPERATION_RESOLVE;
+        status->error_class = REXX_VM_BYTE_STREAM_ERROR_UNAVAILABLE;
+        status->last_status = REXX_VM_STATUS_BYTE_STREAM_UNAVAILABLE;
+        status->diagnostic_code = (uint32_t)status->last_status;
+        return REXX_VM_STATUS_OK;
+    }
+    if (vm->byte_stream_callback_active) {
+        status->valid = 1u;
+        status->state = REXX_VM_BYTE_STREAM_CONDITION_ERROR;
+        status->last_operation = REXX_VM_BYTE_STREAM_OPERATION_RESOLVE;
+        status->error_class = REXX_VM_BYTE_STREAM_ERROR_PROVIDER;
+        status->last_status = REXX_VM_STATUS_BYTE_STREAM_PROVIDER_ERROR;
+        status->diagnostic_code = (uint32_t)status->last_status;
+        return REXX_VM_STATUS_OK;
+    }
+
+    memset(&stream, 0, sizeof(stream));
+    vm->byte_stream_callback_active = 1u;
+    resolve_status = provider.resolve(vm->byte_stream_provider_user_data,
+                                      use_default, name, name_length, &stream);
+    vm->byte_stream_callback_active = 0u;
+    if (resolve_status != REXX_VM_BYTE_STREAM_RESOLVE_OK) {
+        if (!byte_stream_info_is_empty(&stream) ||
+            resolve_status > REXX_VM_BYTE_STREAM_RESOLVE_ERROR) {
+            mapped_status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+            status->valid = 1u;
+            status->state = REXX_VM_BYTE_STREAM_CONDITION_ERROR;
+            status->error_class = REXX_VM_BYTE_STREAM_ERROR_INVALID_METADATA;
+        } else if (resolve_status == REXX_VM_BYTE_STREAM_RESOLVE_UNKNOWN) {
+            status->last_operation = REXX_VM_BYTE_STREAM_OPERATION_RESOLVE;
+            status->last_status = REXX_VM_STATUS_BYTE_STREAM_UNKNOWN;
+            return REXX_VM_STATUS_OK;
+        } else {
+            mapped_status = byte_stream_map_resolve_status(resolve_status);
+            status->valid = 1u;
+            status->state = REXX_VM_BYTE_STREAM_CONDITION_ERROR;
+            status->error_class = byte_stream_error_for_status(mapped_status);
+        }
+        status->last_operation = REXX_VM_BYTE_STREAM_OPERATION_RESOLVE;
+        status->last_status = mapped_status;
+        status->diagnostic_code = (uint32_t)mapped_status;
+        return REXX_VM_STATUS_OK;
+    }
+    if (!byte_stream_stable_identity_is_valid(&stream) ||
+        stream.identity == NULL ||
+        stream.ownership != REXX_VM_BYTE_STREAM_IDENTITY_BORROWED ||
+        (stream.capabilities & REXX_VM_BYTE_STREAM_CAP_READABLE) == 0u ||
+        (stream.capabilities & ~(REXX_VM_BYTE_STREAM_CAP_READABLE |
+                                 REXX_VM_BYTE_STREAM_CAP_SEEKABLE)) != 0u ||
+        (((stream.capabilities & REXX_VM_BYTE_STREAM_CAP_SEEKABLE) != 0u) &&
+         provider.seek == NULL)) {
+        status->valid = 1u;
+        status->state = REXX_VM_BYTE_STREAM_CONDITION_ERROR;
+        status->last_operation = REXX_VM_BYTE_STREAM_OPERATION_RESOLVE;
+        status->error_class = REXX_VM_BYTE_STREAM_ERROR_INVALID_METADATA;
+        status->last_status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+        status->diagnostic_code = (uint32_t)status->last_status;
+        return REXX_VM_STATUS_OK;
+    }
+    existing = byte_stream_find_status(
+        vm, stream.stable_identity, stream.stable_identity_length,
+        stream.identity_generation);
+    if (existing != NULL) {
+        *status = *existing;
+        return REXX_VM_STATUS_OK;
+    }
+    status->valid = 1u;
+    status->state = REXX_VM_BYTE_STREAM_CONDITION_RESOLVED;
+    status->last_operation = REXX_VM_BYTE_STREAM_OPERATION_RESOLVE;
+    status->last_status = REXX_VM_STATUS_OK;
+    status->identity_generation = stream.identity_generation;
+    status->identity_length = stream.stable_identity_length;
+    if (status->identity_length != 0u)
+        memcpy(status->identity, stream.stable_identity, status->identity_length);
+    return REXX_VM_STATUS_OK;
+}
+
 RexxVMStatus rexx_vm_charin(RexxVM *vm, int use_default,
                             const unsigned char *name, size_t name_length,
                             int has_start, uint64_t one_based_start,
@@ -1649,6 +1963,7 @@ RexxVMStatus rexx_vm_charin(RexxVM *vm, int use_default,
     RexxVMByteStreamProvider provider;
     void *provider_user_data;
     RexxVMByteStreamInfo stream;
+    RexxVMByteStreamConditionStatus *stream_status = NULL;
     RexxVMByteStreamResolveStatus resolve_status;
     RexxVMStatus status = REXX_VM_STATUS_OK;
     char *result_bytes = NULL;
@@ -1691,6 +2006,21 @@ RexxVMStatus rexx_vm_charin(RexxVM *vm, int use_default,
             status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
         goto cleanup;
     }
+    if (!byte_stream_stable_identity_is_valid(&stream)) {
+        status = stream.stable_identity_length >
+                         REXX_VM_BYTE_STREAM_IDENTITY_MAX_BYTES
+                     ? REXX_VM_STATUS_RESOURCE_LIMIT
+                     : REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+        goto cleanup;
+    }
+    stream_status = byte_stream_get_status(
+        vm, stream.stable_identity, stream.stable_identity_length,
+        stream.identity_generation);
+    if (stream_status == NULL) {
+        /* Keep status observable before any cursor-changing callback. */
+        status = REXX_VM_STATUS_RESOURCE_LIMIT;
+        goto cleanup;
+    }
     if (stream.identity == NULL ||
         stream.ownership != REXX_VM_BYTE_STREAM_IDENTITY_BORROWED ||
         (stream.capabilities & REXX_VM_BYTE_STREAM_CAP_READABLE) == 0u ||
@@ -1698,22 +2028,45 @@ RexxVMStatus rexx_vm_charin(RexxVM *vm, int use_default,
         (((stream.capabilities & REXX_VM_BYTE_STREAM_CAP_SEEKABLE) != 0u) &&
          provider.seek == NULL)) {
         status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+        byte_stream_status_error(
+            stream_status, REXX_VM_BYTE_STREAM_OPERATION_RESOLVE,
+            REXX_VM_BYTE_STREAM_ERROR_INVALID_METADATA, status,
+            (uint32_t)status, requested_length, 0u, 0);
+        goto cleanup;
+    }
+    if (has_start &&
+        (stream.capabilities & REXX_VM_BYTE_STREAM_CAP_SEEKABLE) == 0u) {
+        status = REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION;
+        if (stream_status != NULL)
+            byte_stream_status_error(
+                stream_status, REXX_VM_BYTE_STREAM_OPERATION_SEEK,
+                REXX_VM_BYTE_STREAM_ERROR_UNSUPPORTED_OPERATION, status,
+                (uint32_t)status, requested_length, 0u, 0);
         goto cleanup;
     }
 
     if (has_start) {
         RexxVMByteStreamSeekStatus seek_status;
-        if ((stream.capabilities & REXX_VM_BYTE_STREAM_CAP_SEEKABLE) == 0u) {
-            status = REXX_VM_STATUS_BYTE_STREAM_UNSUPPORTED_OPERATION;
-            goto cleanup;
-        }
         seek_status = provider.seek(provider_user_data, stream.identity,
                                     one_based_start);
         if (seek_status != REXX_VM_BYTE_STREAM_SEEK_OK) {
             status = byte_stream_map_seek_status(seek_status);
+            /* Invalid positions are caller errors, and unsupported seeks
+             * have not changed the cursor. Preserve the prior stream state. */
+            if (seek_status != REXX_VM_BYTE_STREAM_SEEK_INVALID_POSITION)
+                byte_stream_status_error(
+                    stream_status, REXX_VM_BYTE_STREAM_OPERATION_SEEK,
+                    byte_stream_error_for_status(status),
+                    status, (uint32_t)status, requested_length, 0u, 0);
             goto cleanup;
         }
+        byte_stream_status_success(stream_status,
+                                   REXX_VM_BYTE_STREAM_OPERATION_SEEK,
+                                   requested_length, 0u, 0);
     }
+
+    if (requested_length == 0u && !has_start)
+        byte_stream_status_zero_read(stream_status);
 
     if (requested_length != 0u) {
         RexxVMByteStreamRead read_result;
@@ -1729,6 +2082,11 @@ RexxVMStatus rexx_vm_charin(RexxVM *vm, int use_default,
                 status = byte_stream_map_read_status(read_status);
             else
                 status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+            byte_stream_status_error(
+                stream_status, REXX_VM_BYTE_STREAM_OPERATION_READ,
+                byte_stream_error_for_status(status), status,
+                (uint32_t)status, requested_length, 0u,
+                status == REXX_VM_STATUS_BYTE_STREAM_END_OF_FILE);
             goto cleanup;
         }
         if (read_result.length > requested_length ||
@@ -1741,12 +2099,36 @@ RexxVMStatus rexx_vm_charin(RexxVM *vm, int use_default,
               read_result.ownership != REXX_VM_INPUT_OWNERSHIP_UNSPECIFIED ||
               read_result.eof_after_read == 0u))) {
             status = REXX_VM_STATUS_BYTE_STREAM_RESULT_INVALID;
+            byte_stream_status_error(
+                stream_status, REXX_VM_BYTE_STREAM_OPERATION_READ,
+                REXX_VM_BYTE_STREAM_ERROR_INVALID_METADATA, status,
+                (uint32_t)status, requested_length, read_result.length,
+                read_result.eof_after_read == 1u);
             goto cleanup;
         }
         if (read_result.length == 0u) {
             status = REXX_VM_STATUS_BYTE_STREAM_END_OF_FILE;
+            byte_stream_status_error(
+                stream_status, REXX_VM_BYTE_STREAM_OPERATION_READ,
+                REXX_VM_BYTE_STREAM_ERROR_END_OF_STREAM, status,
+                (uint32_t)status, requested_length, 0u, 1);
             goto cleanup;
         }
+        if (read_result.length < requested_length) {
+            byte_stream_status_error(
+                stream_status, REXX_VM_BYTE_STREAM_OPERATION_READ,
+                REXX_VM_BYTE_STREAM_ERROR_SHORT_READ, REXX_VM_STATUS_OK,
+                (uint32_t)REXX_VM_BYTE_STREAM_ERROR_SHORT_READ,
+                requested_length, read_result.length,
+                read_result.eof_after_read == 1u);
+        } else {
+            byte_stream_status_success(
+                stream_status, REXX_VM_BYTE_STREAM_OPERATION_READ,
+                requested_length, read_result.length,
+                read_result.eof_after_read == 1u);
+        }
+        /* The provider has advanced before this copy. Preserve the stream
+         * outcome even if a hosted injected copy refusal follows. */
         if (!vm_copy_byte_stream_result(result_bytes, read_result.bytes,
                                         read_result.length)) {
             status = REXX_VM_STATUS_OUT_OF_MEMORY;
