@@ -91,7 +91,12 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_CLOCK_UNAVAILABLE,
     REXX_VM_STATUS_INVALID_TRACE_REQUEST,
     REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY,
-    REXX_VM_STATUS_INPUT_UNAVAILABLE
+    REXX_VM_STATUS_INPUT_UNAVAILABLE,
+    REXX_VM_STATUS_INPUT_NOT_READY,
+    REXX_VM_STATUS_INPUT_END_OF_FILE,
+    REXX_VM_STATUS_INPUT_PROVIDER_ERROR,
+    REXX_VM_STATUS_INPUT_PENDING_UNSUPPORTED,
+    REXX_VM_STATUS_INPUT_RESULT_INVALID
 } RexxVMStatus;
 
 enum {
@@ -186,6 +191,32 @@ typedef int32_t (*RexxVMOutputWriter)(void *user_data,
                                       const char *bytes,
                                       size_t length);
 
+/* A provider supplies one immediate line as an immutable borrowed byte span.
+ * The callback owns its bytes; the VM copies them before parsing and never
+ * frees the provider's pointer. A NULL pointer with zero length is a valid
+ * empty line. */
+typedef enum RexxVMInputOwnership {
+    REXX_VM_INPUT_OWNERSHIP_UNSPECIFIED = 0,
+    REXX_VM_INPUT_OWNERSHIP_BORROWED = 1
+} RexxVMInputOwnership;
+
+typedef struct RexxVMInputLine {
+    const unsigned char *bytes;
+    size_t length;
+    RexxVMInputOwnership ownership;
+} RexxVMInputLine;
+
+typedef enum RexxVMInputReadStatus {
+    REXX_VM_INPUT_READ_OK = 0,
+    REXX_VM_INPUT_READ_UNAVAILABLE,
+    REXX_VM_INPUT_READ_END_OF_INPUT,
+    REXX_VM_INPUT_READ_ERROR,
+    REXX_VM_INPUT_READ_PENDING
+} RexxVMInputReadStatus;
+
+typedef RexxVMInputReadStatus (*RexxVMInputReader)(
+    void *user_data, RexxVMInputLine *line);
+
 typedef struct RexxVM {
     RexxValue *stack;
     size_t stack_capacity;
@@ -223,6 +254,8 @@ typedef struct RexxVM {
     RexxVMClockReader clock_reader;
     void *clock_reader_user_data;
     RexxVMClockContext clock_context;
+    RexxVMInputReader input_reader;
+    void *input_reader_user_data;
     void *do_frames; /* Private bounded storage for active DO instructions. */
     size_t do_depth;
     size_t do_frame_capacity;
@@ -273,6 +306,7 @@ typedef struct RexxVM {
     RexxValue exit_value;
     int exit_requested;
     int exit_has_value;
+    uint8_t execution_active; /* Reject callback replacement/reentry while executing. */
     int initialized;
 } RexxVM;
 
@@ -331,6 +365,15 @@ RexxVMStatus rexx_vm_get_address_environment(const RexxVM *vm,
 void rexx_vm_set_clock_reader(RexxVM *vm,
                               RexxVMClockReader reader,
                               void *user_data);
+
+/* Install an optional per-VM PULL input provider. Passing NULL clears it.
+ * The callback must return immediately; PENDING is reported as unsupported.
+ * Its borrowed bytes must remain valid until the next callback or until the
+ * reader is replaced while the VM is quiescent. This setter rejects changes
+ * made reentrantly during execution. Concurrent VM access is unsupported. */
+RexxVMStatus rexx_vm_set_input_reader(RexxVM *vm,
+                                      RexxVMInputReader reader,
+                                      void *user_data);
 
 /* Snapshot access is cached per executed REXX clause. */
 RexxVMStatus rexx_vm_clock_read_for_clause(

@@ -101,7 +101,12 @@ static const char *const vm_messages[] = {
     "clock source unavailable or lacks a required capability",
     "invalid TRACE request",
     "TRACE action requires unsupported interpreter capability",
-    "external data stack is empty and no input provider is available"
+    "external data stack is empty and no input provider is available",
+    "input provider has no line available",
+    "input provider reported end of input",
+    "input provider failed",
+    "input provider requested unsupported pending input",
+    "input provider returned an invalid byte span or ownership value"
 };
 
 typedef struct RexxVMEnvironment RexxVMEnvironment;
@@ -596,7 +601,7 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_INPUT_UNAVAILABLE
+                            status <= REXX_VM_STATUS_INPUT_RESULT_INVALID
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
@@ -1411,6 +1416,8 @@ void rexx_vm_free(RexxVM *vm)
     RexxVMCallFrame *frames;
     RexxVMEnvironment *root;
     if (vm == NULL) return;
+    /* A provider callback may not destroy the VM from inside its own call. */
+    if (vm->execution_active) return;
     live = vm->sp < vm->stack_capacity ? vm->sp : vm->stack_capacity;
     for (i = 0; vm->stack != NULL && i < live; ++i) rexx_value_clear(&vm->stack[i]);
     for (i = 0; vm->globals != NULL && i < vm->global_count &&
@@ -1489,6 +1496,17 @@ void rexx_vm_set_clock_reader(RexxVM *vm,
     vm->clock_reader = reader;
     vm->clock_reader_user_data = reader != NULL ? user_data : NULL;
     memset(&vm->clock_context, 0, sizeof(vm->clock_context));
+}
+
+RexxVMStatus rexx_vm_set_input_reader(RexxVM *vm,
+                                      RexxVMInputReader reader,
+                                      void *user_data)
+{
+    if (vm == NULL || !vm->initialized || vm->execution_active)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    vm->input_reader = reader;
+    vm->input_reader_user_data = reader != NULL ? user_data : NULL;
+    return REXX_VM_STATUS_OK;
 }
 
 int32_t rexx_vm_guidexos_command_stub(const char *command, size_t command_length)
@@ -2626,6 +2644,7 @@ static RexxVMStatus execute_parse(RexxVM *vm,
     const char *source = empty_string;
     size_t source_length = 0u;
     char *source_copy = NULL;
+    int provider_input = 0;
     size_t parse_work_remaining = REXX_VM_MAX_PARSE_WORK;
     size_t group_index;
     RexxVMStatus status = REXX_VM_STATUS_OK;
@@ -2655,13 +2674,58 @@ static RexxVMStatus execute_parse(RexxVM *vm,
     if (plan->source_kind == REXX_PARSE_SOURCE_PULL) {
         RexxDataStackStatus pull_status = rexx_data_stack_take_head(
             &vm->data_stack, &pull_item);
-        if (pull_status == REXX_DATA_STACK_EMPTY)
-            return REXX_VM_STATUS_INPUT_UNAVAILABLE;
-        if (pull_status != REXX_DATA_STACK_OK) {
+        if (pull_status == REXX_DATA_STACK_EMPTY) {
+            RexxVMInputReader reader = vm->input_reader;
+            void *reader_user_data = vm->input_reader_user_data;
+            RexxVMInputLine line;
+            RexxVMInputReadStatus read_status;
+
+            if (reader == NULL)
+                return REXX_VM_STATUS_INPUT_UNAVAILABLE;
+            line.bytes = NULL;
+            line.length = 0u;
+            line.ownership = REXX_VM_INPUT_OWNERSHIP_UNSPECIFIED;
+            read_status = reader(reader_user_data, &line);
+            switch (read_status) {
+            case REXX_VM_INPUT_READ_OK:
+                break;
+            case REXX_VM_INPUT_READ_UNAVAILABLE:
+                return REXX_VM_STATUS_INPUT_NOT_READY;
+            case REXX_VM_INPUT_READ_END_OF_INPUT:
+                return REXX_VM_STATUS_INPUT_END_OF_FILE;
+            case REXX_VM_INPUT_READ_ERROR:
+                return REXX_VM_STATUS_INPUT_PROVIDER_ERROR;
+            case REXX_VM_INPUT_READ_PENDING:
+                return REXX_VM_STATUS_INPUT_PENDING_UNSUPPORTED;
+            default:
+                return REXX_VM_STATUS_INPUT_RESULT_INVALID;
+            }
+            if (line.ownership != REXX_VM_INPUT_OWNERSHIP_BORROWED ||
+                (line.bytes == NULL && line.length != 0u))
+                return REXX_VM_STATUS_INPUT_RESULT_INVALID;
+            if (line.length > REXX_VM_MAX_PARSE_SOURCE_LENGTH)
+                return REXX_VM_STATUS_RESOURCE_LIMIT;
+
+            provider_input = 1;
+            source_length = line.length;
+            if (plan->template_count == 0u)
+                return REXX_VM_STATUS_OK;
+            if (source_length == SIZE_MAX)
+                return REXX_VM_STATUS_RESOURCE_LIMIT;
+            source_copy = (char *)vm_malloc(source_length + 1u);
+            if (source_copy == NULL)
+                return REXX_VM_STATUS_OUT_OF_MEMORY;
+            if (source_length != 0u)
+                memcpy(source_copy, line.bytes, source_length);
+            source_copy[source_length] = '\0';
+            source = source_copy;
+        }
+        else if (pull_status != REXX_DATA_STACK_OK) {
             rexx_data_stack_item_clear(&pull_item);
             return REXX_VM_STATUS_INVALID_BYTECODE;
         }
-        if (plan->template_count == 0u) {
+        if (pull_status == REXX_DATA_STACK_OK &&
+            plan->template_count == 0u) {
             rexx_data_stack_item_clear(&pull_item);
             return REXX_VM_STATUS_OK;
         }
@@ -2672,6 +2736,7 @@ static RexxVMStatus execute_parse(RexxVM *vm,
         : (RexxVMEnvironment *)vm->current_environment;
     overlay = environment_new(vm, destination, 0);
     if (overlay == NULL) {
+        vm_free(source_copy);
         rexx_data_stack_item_clear(&pull_item);
         return REXX_VM_STATUS_OUT_OF_MEMORY;
     }
@@ -2737,8 +2802,10 @@ static RexxVMStatus execute_parse(RexxVM *vm,
             status = value_string(&input, &source_copy, &source_length);
         if (status == REXX_VM_STATUS_OK) source = source_copy;
     } else if (plan->source_kind == REXX_PARSE_SOURCE_PULL) {
-        source = (const char *)pull_item.bytes;
-        source_length = pull_item.length;
+        if (!provider_input) {
+            source = (const char *)pull_item.bytes;
+            source_length = pull_item.length;
+        }
     } else {
         status = pop_move(vm, &input);
         if (status == REXX_VM_STATUS_OK)
@@ -4955,6 +5022,10 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 
     if (vm == NULL || !vm->initialized || chunk == NULL)
         return vm_fail(vm, REXX_VM_STATUS_INVALID_ARGUMENT, 0);
+    /* A synchronous host callback cannot recursively execute its VM. Avoid
+     * changing the outer execution's error state when rejecting reentry. */
+    if (vm->execution_active)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
     if ((chunk->instruction_count != 0 && chunk->instructions == NULL) ||
         chunk->instruction_count > REXX_COMPILER_MAX_INSTRUCTIONS ||
         chunk->constant_count > REXX_COMPILER_MAX_POOL_ENTRIES ||
@@ -4974,6 +5045,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
          (chunk->source_length != 0u || chunk->source_line_count != 0u)))
         return vm_fail(vm, REXX_VM_STATUS_INVALID_BYTECODE, 0);
 
+    vm->execution_active = 1u;
     vm->active_chunk = chunk;
     vm->root_chunk = chunk;
     vm->active_parse_overlay = NULL;
@@ -5039,6 +5111,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             clear_stack(vm);
             vm->active_chunk = NULL;
             vm->root_chunk = NULL;
+            vm->execution_active = 0u;
             return vm_fail(vm, REXX_VM_STATUS_INSTRUCTION_LIMIT,
                            exhausted_pc);
         }
@@ -5092,6 +5165,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             vm->error.message = "ok";
             vm->active_chunk = NULL;
             vm->root_chunk = NULL;
+            vm->execution_active = 0u;
             return REXX_VM_STATUS_OK;
 
         case OP_NOP:
@@ -5592,6 +5666,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             clear_stack(vm);
             vm->active_chunk = NULL;
             vm->root_chunk = NULL;
+            vm->execution_active = 0u;
             return vm_fail(vm, status, current_pc);
         }
 
@@ -5614,6 +5689,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             vm->error.message = "ok";
             vm->active_chunk = NULL;
             vm->root_chunk = NULL;
+            vm->execution_active = 0u;
             return REXX_VM_STATUS_OK;
         }
     }
@@ -5625,13 +5701,14 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
     vm->error.message = "ok";
     vm->active_chunk = NULL;
     vm->root_chunk = NULL;
+    vm->execution_active = 0u;
     return REXX_VM_STATUS_OK;
 }
 
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_INPUT_UNAVAILABLE)
+        status > REXX_VM_STATUS_INPUT_RESULT_INVALID)
         return "unknown VM status";
     return vm_messages[status];
 }

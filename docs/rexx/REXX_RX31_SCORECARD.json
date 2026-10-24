@@ -1,0 +1,116 @@
+{
+  "schema": "guidexos.rexx.rx31.scorecard.v1",
+  "phase": "RX31",
+  "outcome": "Outcome B — Partial",
+  "status": "PARTIAL",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "starting_branch": "REXX_SUPPORT",
+  "ending_branch": "REXX_SUPPORT",
+  "required_starting_head": "b42e44652c4aa560a48ecbfeb0e5d86c48ab5b46",
+  "starting_head": "b42e44652c4aa560a48ecbfeb0e5d86c48ab5b46",
+  "ending_head": "Reported in the final response; omitted because a commit cannot embed its own hash.",
+  "required_starting_head_verified": true,
+  "tracked_worktree_clean_at_start": true,
+  "index_clean_at_start": true,
+  "no_push": true,
+  "input_provider": {
+    "status": "IMPLEMENTED_AND_HOST_QUALIFIED",
+    "scope": "Optional synchronous per-VM callback for PULL and PARSE PULL after the VM external data stack is empty.",
+    "callback_lifetime": "Host owns callback and context. A successful byte span is borrowed until the next callback or a quiescent replacement. VM copies bytes before parsing and never frees provider storage.",
+    "limits": {
+      "maximum_line_bytes": 16777216,
+      "queue_elements_charged": false,
+      "queue_payload_charged": false,
+      "truncation": false
+    },
+    "production_console_provider": "NOT_INSTALLED — the kernel shell has no safe reusable line-input service; empty-queue PULL remains fail-closed.",
+    "pending_input": "Rejected as INPUT_PENDING_UNSUPPORTED; no wait, event loop, busy-wait, or terminal editing."
+  },
+  "inventory": {
+    "entries": 75,
+    "implemented": 59,
+    "not_implemented": 11,
+    "partial": 3,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "date_time_trace_reclassified": false
+  },
+  "qualification": {
+    "hosted": {
+      "status": "PASS",
+      "phase_runner": "tests/run_rexx_tests.ps1 -Phase RX31",
+      "run_directory": "build/rexx/rx31/hosted-38036c02d447477bab47ed5ece43f341/bin",
+      "provider_test": {
+        "seed": "0x52583331",
+        "model_operations": 256,
+        "assertions": 169,
+        "failures": 0
+      },
+      "coverage": "Provider behavior and ownership, queue priority, PULL/PARSE case rules, binary bytes, empty/unavailable/EOF/error/pending outcomes, limits, allocation-failure recovery, multiple VMs, routines, INTERPRET, RX30 reference-model, RX1–RX29 inherited regressions, RX19 clock/calendar, RX24 TRACE/ADDRESS, RX25–RX28, CLI and compatibility fixtures.",
+      "key_results": {
+        "RX2_VFS_output": "45 assertions passed",
+        "RX19_clock_calendar": "8275 direct assertions; 2048 deterministic properties; 0 failures",
+        "RX24_ADDRESS_TRACE": "65 assertions; 0 failures",
+        "RX25_RANDOM": "2156 assertions; fixed-seed 60000-call distribution; 0 failures",
+        "RX26_INDEX": "48166 assertions; 12000 deterministic equivalence cases; 0 failures",
+        "RX27_JUSTIFY": "42589 assertions; 12000 deterministic property cases; 0 failures",
+        "RX28_FIND_WORDPOS": "36175 assertions; 12000 deterministic oracle cases; 0 failures",
+        "RX30_data_stack": "Seed 0x52583330; 10000 operations; 181417 assertions; 0 failures",
+        "RX30_queue_language": "Seed 0x52583331; 1200 operations; 193 assertions; 0 failures",
+        "CLI": "24/24; RX9 24/24; RX10 19/19; RX12 31/31; RX13 33/33; RX14 29/29; RX15 3/3; RX16 10/10; RX17 10/10; RX26/RX27/RX28/RX22 one fixture each; RX3–RX8 inherited compatibility fixtures all passed."
+      },
+      "regina": "NOT_RUN — executable unavailable; no external compatibility comparison claimed."
+    },
+    "asan": {
+      "status": "PASS",
+      "executable_targets": "31/31 passed; 0 failed",
+      "corpus": "196 local expected-result cases executed; Regina comparison NOT_RUN."
+    },
+    "ubsan": {
+      "status": "PASS",
+      "executable_targets": "31/31 passed; 0 failed",
+      "corpus": "196 local expected-result cases executed; Regina comparison NOT_RUN."
+    },
+    "freestanding_amd64": {
+      "status": "PASS",
+      "rexx_c_object_count": 10,
+      "kernel_elf_sha256": "13089ff7407d2120d443270b7b1292be437b8f8a4d151295ae71870732693e2d",
+      "kernel_pe_sha256": "b08aa135650c886e7152dd586ce467b353050abb5f573fe1d74017e37ba45d5d",
+      "guest_execution": "NOT_RUN"
+    },
+    "qac_qemu_guest": {
+      "status": "NOT_RUN — ownership preflight unavailable",
+      "qac_cli": "Not found on PATH or GUIDEXOS_QAC_CLI; QAC owner/reservation query could not be made.",
+      "foreign_qemu": "PID 4868 from D:\\dev\\guideXOS was active with -net none; it was left untouched.",
+      "rx31_qemu_started": false,
+      "guest_output_markers": "NOT_RUN",
+      "qmp_shutdown_acknowledgment": "NOT_APPLICABLE — RX31 did not start QEMU.",
+      "qac_reservation_release": "NOT_APPLICABLE — no RX31 reservation was acquired.",
+      "parent_child_runner_exit_codes": "NOT_RUN — no RX31 guest runner or QEMU child launched."
+    }
+  },
+  "preservation": {
+    "protected_root_obj_pdb_count": 31,
+    "protected_artifact_hash_checks": "PASS at hosted, sanitizer, and native build/final gates; all 31 paths and hashes matched.",
+    "starting_untracked_path_count": 96928,
+    "starting_untracked_manifest": "evidence/rx31/untracked-start-ordinal.paths",
+    "starting_untracked_manifest_sha256": "EBBF1A569A313F0DEA773E15489B5B53172200B15A784CB1F083CB5BDDD3CFAF",
+    "ending_untracked_path_count": 100478,
+    "historical_evidence": "RX19–RX30 evidence was left intact; RX31 build and guest outputs are phase-isolated."
+  },
+  "capability_disposition": {
+    "date": "Partial — production wall interpretation remains unknown; no current DATE output enabled.",
+    "time": "Partial — raw CMOS remains non-wall-capable; PIT elapsed timing remains available.",
+    "trace": "Partial — N/E/F/O command-return tracing only; clause/expression/interactive actions remain unsupported."
+  },
+  "evidence": {
+    "preflight": "evidence/rx31/preflight.json",
+    "input_provider_contract": "REXX_RX31_HOST_INPUT_PROVIDER.md",
+    "host_capability_audit": "REXX_RX31_HOST_CAPABILITY_AUDIT.md",
+    "hosted_regression_log": "evidence/rx31/hosted-regression.log",
+    "focused_provider_log": "evidence/rx31/host-input-test.txt",
+    "native_build": "evidence/rx31/native-build/native-link-evidence-029081ef0b4743989ab9310717676e15.json",
+    "qac_decision": "evidence/rx31/native-guest/qac-preflight.json"
+  },
+  "recommended_rx32_scope": "Return to independent missing built-ins. Keep persistent RTC policy/live DATE-TIME, full TRACE events, interactive debugging, host stream I/O, IBM-specific EXTERNALS/LINESIZE/USERID, and shared/named/persistent queues as separate milestones."
+}

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +21,8 @@ $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
 $guardManifest = if ($Phase -eq 'RX30') {
     Join-Path $rootDir 'docs\rexx\evidence\rx30\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX31') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx31\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX29') {
     Join-Path $rootDir 'docs\rexx\evidence\rx29\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX28') {
@@ -73,7 +75,7 @@ $plannedOutputs = @(
     'rexx_rx24_address_trace_tests.exe', 'rexx_rx25_random_tests.exe',
     'rexx_rx26_index_tests.exe', 'rexx_rx27_justify_tests.exe',
     'rexx_rx28_find_tests.exe', 'rexx_rx30_data_stack_tests.exe',
-    'rexx_rx30_queue_tests.exe'
+    'rexx_rx30_queue_tests.exe', 'rexx_rx31_host_input_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
@@ -113,6 +115,7 @@ $rx27Test = Join-Path $buildDirectory "rexx_rx27_justify_tests.exe"
 $rx28Test = Join-Path $buildDirectory "rexx_rx28_find_tests.exe"
 $rx30DataStackTest = Join-Path $buildDirectory "rexx_rx30_data_stack_tests.exe"
 $rx30QueueTest = Join-Path $buildDirectory "rexx_rx30_queue_tests.exe"
+$rx31HostInputTest = Join-Path $buildDirectory "rexx_rx31_host_input_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -477,7 +480,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX22 classic/diagnostic built-in assertions failed with exit code $LASTEXITCODE."
 }
 
-if ($Phase -in @('RX24','RX25','RX26','RX27','RX28','RX29')) {
+if ($Phase -in @('RX24','RX25','RX26','RX27','RX28','RX29','RX31')) {
     Write-Host "Building RX24 ADDRESS and TRACE assertions"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -493,7 +496,7 @@ if ($Phase -in @('RX24','RX25','RX26','RX27','RX28','RX29')) {
     }
 }
 
-if ($Phase -in @('RX25','RX26','RX27','RX28','RX29')) {
+if ($Phase -in @('RX25','RX26','RX27','RX28','RX29','RX31')) {
     Write-Host "Building RX25 RANDOM assertions"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -510,7 +513,7 @@ if ($Phase -in @('RX25','RX26','RX27','RX28','RX29')) {
     }
 }
 
-if ($Phase -in @('RX26','RX27','RX28','RX29')) {
+if ($Phase -in @('RX26','RX27','RX28','RX29','RX31')) {
     Write-Host "Building RX26 INDEX assertions and equivalence corpus"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -526,7 +529,7 @@ if ($Phase -in @('RX26','RX27','RX28','RX29')) {
     }
 }
 
-if ($Phase -in @('RX27','RX28','RX29')) {
+if ($Phase -in @('RX27','RX28','RX29','RX31')) {
     Write-Host "Building RX27 JUSTIFY assertions and deterministic oracle corpus"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -542,7 +545,7 @@ if ($Phase -in @('RX27','RX28','RX29')) {
     }
 }
 
-if ($Phase -in @('RX28','RX29')) {
+if ($Phase -in @('RX28','RX29','RX31')) {
     Write-Host "Building RX28 FIND assertions and deterministic independent oracle corpus"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -558,7 +561,7 @@ if ($Phase -in @('RX28','RX29')) {
     }
 }
 
-if ($Phase -eq 'RX30') {
+if ($Phase -in @('RX30','RX31')) {
     Write-Host "Building RX30 independent data-stack and executable language qualification"
     & $gccCommand.Source -std=c11 -Wall -Wextra -Wpedantic -Werror `
         (Join-Path $PSScriptRoot "rexx_rx30_data_stack_test.c") `
@@ -574,6 +577,17 @@ if ($Phase -eq 'RX30') {
     if ($LASTEXITCODE -ne 0) {
         throw "RX30 QUEUE/PUSH/PULL test build failed with exit code $LASTEXITCODE."
     }
+    if ($Phase -eq 'RX31') {
+        Write-Host "Building RX31 bounded host-input provider qualification"
+        & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+            -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR `
+            -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
+            (Join-Path $PSScriptRoot "rexx_rx31_host_input_test.c") `
+            @commonSources -lm -o $rx31HostInputTest
+        if ($LASTEXITCODE -ne 0) {
+            throw "RX31 host-input test build failed with exit code $LASTEXITCODE."
+        }
+    }
     Write-Host "Running RX30 data-stack reference deque qualification"
     & $rx30DataStackTest
     if ($LASTEXITCODE -ne 0) {
@@ -583,6 +597,13 @@ if ($Phase -eq 'RX30') {
     & $rx30QueueTest
     if ($LASTEXITCODE -ne 0) {
         throw "RX30 language tests failed with exit code $LASTEXITCODE."
+    }
+    if ($Phase -eq 'RX31') {
+        Write-Host "Running RX31 bounded host-input provider qualification"
+        & $rx31HostInputTest
+        if ($LASTEXITCODE -ne 0) {
+            throw "RX31 host-input tests failed with exit code $LASTEXITCODE."
+        }
     }
 }
 
@@ -1365,7 +1386,7 @@ $script:cliPassed++
 Write-Host "[PASS] CLI source-size memory limit"
 
 $script:rx26FixturePassed = 0
-if ($Phase -in @('RX26','RX28','RX29')) {
+if ($Phase -in @('RX26','RX28','RX29','RX31')) {
     $fixture = Join-Path $PSScriptRoot 'rexx_rx26\index_reference.rex'
     $expectedPath = [System.IO.Path]::ChangeExtension($fixture, '.out')
     $actual = Invoke-CapturedProcess $cliTest @($fixture)
@@ -1379,7 +1400,7 @@ if ($Phase -in @('RX26','RX28','RX29')) {
 }
 
 $script:rx27FixturePassed = 0
-if ($Phase -in @('RX27','RX28','RX29')) {
+if ($Phase -in @('RX27','RX28','RX29','RX31')) {
     $fixture = Join-Path $PSScriptRoot 'rexx_rx27\justify_reference.rex'
     $expectedPath = [System.IO.Path]::ChangeExtension($fixture, '.out')
     $actual = Invoke-CapturedProcess $cliTest @($fixture)
@@ -1393,7 +1414,7 @@ if ($Phase -in @('RX27','RX28','RX29')) {
 }
 
 $script:rx28FixturePassed = 0
-if ($Phase -in @('RX28','RX29')) {
+if ($Phase -in @('RX28','RX29','RX31')) {
     $fixture = Join-Path $PSScriptRoot 'rexx_rx28\find_reference.rex'
     $expectedPath = [System.IO.Path]::ChangeExtension($fixture, '.out')
     $actual = Invoke-CapturedProcess $cliTest @($fixture)
@@ -1428,9 +1449,9 @@ Write-Host "RX14 numeric and inspection fixtures passed: $script:rx14FixturePass
 Write-Host "RX15 conversion fixtures passed: $script:rx15FixturePassed/$script:rx15FixturePassed"
 Write-Host "RX16 hexadecimal/binary literal fixtures passed: $script:rx16FixturePassed/$script:rx16FixturePassed"
 Write-Host "RX17 bitwise string fixtures passed: $script:rx17FixturePassed/$script:rx17FixturePassed"
-if ($Phase -in @('RX26','RX28','RX29')) { Write-Host "RX26 INDEX CLI fixtures passed: $script:rx26FixturePassed/$script:rx26FixturePassed" }
-if ($Phase -in @('RX27','RX28','RX29')) { Write-Host "RX27 JUSTIFY CLI fixtures passed: $script:rx27FixturePassed/$script:rx27FixturePassed" }
-if ($Phase -in @('RX28','RX29')) { Write-Host "RX28 FIND CLI fixtures passed: $script:rx28FixturePassed/$script:rx28FixturePassed" }
+if ($Phase -in @('RX26','RX28','RX29','RX31')) { Write-Host "RX26 INDEX CLI fixtures passed: $script:rx26FixturePassed/$script:rx26FixturePassed" }
+if ($Phase -in @('RX27','RX28','RX29','RX31')) { Write-Host "RX27 JUSTIFY CLI fixtures passed: $script:rx27FixturePassed/$script:rx27FixturePassed" }
+if ($Phase -in @('RX28','RX29','RX31')) { Write-Host "RX28 FIND CLI fixtures passed: $script:rx28FixturePassed/$script:rx28FixturePassed" }
 Write-Host "RX22 classic/diagnostic fixtures passed: $script:rx22FixturePassed/$script:rx22FixturePassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"

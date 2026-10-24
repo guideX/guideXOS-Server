@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31')]
     [string]$Phase = 'RX12R1',
     [ValidateSet('Address', 'Undefined', 'Both')]
     [string]$Sanitizer = 'Both',
@@ -20,6 +20,8 @@ $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
 $guardManifest = if ($Phase -eq 'RX30') {
     Join-Path $rootDir 'docs\rexx\evidence\rx30\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX31') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx31\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX29') {
     Join-Path $rootDir 'docs\rexx\evidence\rx29\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX28') {
@@ -243,7 +245,7 @@ function Invoke-OneSanitizer {
         [PSCustomObject]@{ Name = 'rx19_date_time'; Driver = 'tests\rexx_rx19_date_time_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR') },
         [PSCustomObject]@{ Name = 'rx22_classic_diagnostic'; Driver = 'tests\rexx_rx22_classic_diagnostic_test.c'; Sources = $common; Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR') }
     )
-    if ($Phase -in @('RX24','RX26','RX27','RX28','RX29','RX30')) {
+    if ($Phase -in @('RX24','RX26','RX27','RX28','RX29','RX30','RX31')) {
         $plans += [PSCustomObject]@{
             Name = 'rx24_address_trace'
             Driver = 'tests\rexx_rx24_address_trace_test.c'
@@ -251,7 +253,7 @@ function Invoke-OneSanitizer {
             Defines = @('REXX_VM_TEST_ALLOCATOR')
         }
     }
-    if ($Phase -in @('RX25','RX26','RX27','RX28','RX29','RX30')) {
+    if ($Phase -in @('RX25','RX26','RX27','RX28','RX29','RX30','RX31')) {
         $plans += [PSCustomObject]@{
             Name = 'rx25_random'
             Driver = 'tests\rexx_rx25_random_test.c'
@@ -259,7 +261,7 @@ function Invoke-OneSanitizer {
             Defines = @('REXX_VM_TEST_ALLOCATOR')
         }
     }
-    if ($Phase -in @('RX26','RX27','RX28','RX29','RX30')) {
+    if ($Phase -in @('RX26','RX27','RX28','RX29','RX30','RX31')) {
         $plans += [PSCustomObject]@{
             Name = 'rx26_index'
             Driver = 'tests\rexx_rx26_index_test.c'
@@ -267,7 +269,7 @@ function Invoke-OneSanitizer {
             Defines = @('REXX_VM_TEST_ALLOCATOR')
         }
     }
-    if ($Phase -in @('RX27','RX28','RX29','RX30')) {
+    if ($Phase -in @('RX27','RX28','RX29','RX30','RX31')) {
         $plans += [PSCustomObject]@{
             Name = 'rx27_justify'
             Driver = 'tests\rexx_rx27_justify_test.c'
@@ -275,7 +277,7 @@ function Invoke-OneSanitizer {
             Defines = @('REXX_VM_TEST_ALLOCATOR')
         }
     }
-    if ($Phase -in @('RX28','RX29','RX30')) {
+    if ($Phase -in @('RX28','RX29','RX30','RX31')) {
         $plans += [PSCustomObject]@{
             Name = 'rx28_find'
             Driver = 'tests\rexx_rx28_find_test.c'
@@ -283,7 +285,7 @@ function Invoke-OneSanitizer {
             Defines = @('REXX_VM_TEST_ALLOCATOR')
         }
     }
-    if ($Phase -eq 'RX30') {
+    if ($Phase -in @('RX30','RX31')) {
         $plans += [PSCustomObject]@{
             Name = 'rx30_data_stack'
             Driver = 'tests\rexx_rx30_data_stack_test.c'
@@ -297,7 +299,15 @@ function Invoke-OneSanitizer {
             Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR')
         }
     }
-    if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30')) {
+    if ($Phase -eq 'RX31') {
+        $plans += [PSCustomObject]@{
+            Name = 'rx31_host_input'
+            Driver = 'tests\rexx_rx31_host_input_test.c'
+            Sources = $common
+            Defines = @('REXX_VM_TEST_ALLOCATOR','REXX_PARSER_TEST_ALLOCATOR','REXX_COMPILER_TEST_ALLOCATOR')
+        }
+    }
+    if ($Phase -in @('RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31')) {
         $plans += [PSCustomObject]@{
             Name = 'rx20_clock_contract'
             Driver = 'tests\kernel_clock_contract_test.cpp'
