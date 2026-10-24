@@ -1,9 +1,14 @@
 # Intel I219-LM TX Descriptor-Consumption Qualification — Phase 27
 
 **Status:** bounded probe implementation and hosted qualification are complete.
-No physical AIDA_LPT transmission has been run. The Phase 27 ISO and QEMU
-readiness qualification are recorded in the final artifact addendum below.
-Physical descriptor consumption and wire emission remain unverified.
+A Phase 27 command sequence was run on AIDA_LPT, but no packet transmission
+was recorded. The Phase 27 ISO and QEMU readiness qualification are recorded
+in the final artifact addendum below. Physical descriptor consumption and wire
+emission remain unverified.
+
+**Current PHASE27R2 disposition:** Outcome C — AIDA_LPT DMA translation
+remains unverifiable from the supplied evidence. No transmission is authorized;
+the phase remains open at `last_completed=PHASE26`, `next_expected=PHASE27`.
 
 ## Repository gate and phase authority
 
@@ -337,8 +342,216 @@ after packaging. The manifest records the exact generated identity file hash
 inside the ISO and the clean implementation source commit. No implementation
 source was uncommitted at packaging time.
 
-No AIDA_LPT physical transmission was performed. There is no descriptor
-consumption, DD completion, external frame capture, or peer-receipt evidence;
-the audit's phase tracker remains `last_completed=PHASE26` and
+The Phase 27 command was run on AIDA_LPT, but no descriptor publication,
+consumption, DD completion, external frame capture, or peer receipt was
+demonstrated. The audit's phase tracker remains `last_completed=PHASE26` and
 `next_expected=PHASE27` until the physical procedure above is run and evidence
 is supplied.
+
+## PHASE27R2 DMA translation attestation audit
+
+**Disposition: Outcome C — translation state is unverifiable.** The physical
+evidence supplied for this review confirms successful I219-LM initialization,
+TX ring READY, link UP, and PCI command `0x0006`. ACPI RSDP and root-table
+traversal succeeded, but no DMAR signature was found in the firmware-supplied
+root and no matching DRHD was available. No VT-d unit status was read, so the
+hardware translation state remains unknown. The probe did not record descriptor
+publication, and physical TX completion remains unverified.
+
+The operator confirms that both read-only preflight and the explicit
+`nicinfo tx iommu isolated` command were run. The old-ISO lines for
+`preflight=`, `probe-consumed=`, `attempt=`, and `failure=` were not supplied.
+No value for those fields, failed gate, latch state, descriptor preparation,
+or TDT publication is inferred in this audit. The repository search found no
+additional physical transcript in its Phase 27 documents or logs. This is not
+a new physical attempt and does not authorize one.
+
+### Starting state and duplicate-work check
+
+- Starting branch: `NAVIGATOR_GENERAL_IMPROVEMENTS`.
+- Starting HEAD: `b6de1226e08f54658b01d61900ad4ee1f1a2c0e8`.
+- Starting worktree: clean.
+- `.phase`: absent; this audit remains the phase-state record.
+- Before this update, no PHASE27R2 audit or completed DMA-attestation
+  implementation was present. Existing PHASE27R / fail-closed work was
+  reviewed; it is incomplete for physical qualification and already preserves
+  the no-DMAR state as unknown.
+
+The Phase 27 state remains:
+
+```text
+last_completed=PHASE26
+next_expected=PHASE27
+```
+
+### What the boot chain currently establishes
+
+The UEFI loader obtains an ACPI RSDP from the firmware configuration table,
+retains it in the boot handoff, and builds CPU page tables. For the I219
+diagnostic build it allocates a two-page, below-4-GiB `EfiLoaderData` region,
+checks that it is contiguous and does not overlap known boot objects, and
+includes the region in the CPU identity-mapped ranges. The kernel uses the
+resulting physical addresses for the TX ring and packet buffer.
+
+Those steps establish CPU virtual-to-physical translation, reservation,
+contiguity, and placement. They do not call a PCI DMA mapper, create an IOVA,
+install a device context entry, or prove the NIC's DMA address translates to
+that physical memory. PCI bus mastering and a ready ring likewise do not prove
+device mapping.
+
+The kernel's `vtd::discover` path validates the supplied RSDP and root table,
+searches that root for DMAR, and only reads VT-d registers after parsing a
+matching DRHD. It does not guess a VT-d MMIO base, write GCMD/RTADDR/FSTS, walk
+the active root/context tables, or establish a mapping. Thus “no DMAR in the
+validated firmware root” is evidence about the exposed ACPI table set; it is
+not evidence that VT-d hardware is absent or disabled.
+
+When DMAR is present, the parser matches a requester by PCI segment and either
+an include-all DRHD or an explicit device scope. The running NIC's exact PCI
+segment/BDF must be captured; `8086:156F` alone identifies the device model, not
+its requester ID. The current explicit-scope helper accepts a one-element
+device path only, so it can miss a valid multi-hop bridge path and fail closed.
+That parser limitation should be addressed before treating explicit-scope
+matching as complete. A safe future audit must validate all applicable
+remapping-unit coverage and the actual requester path rather than infer it
+from the vendor/device ID.
+
+The existing register decoder reads `GSTS.TES` from the DMAR-described unit.
+Intel defines TES as read-only status indicating whether DMA remapping is
+enabled. Without a DMAR-described unit and a verified requester match, there
+is no safe register base from which this kernel can obtain that status. The
+current physical evidence therefore contains no positive or negative VT-d
+status reading.
+
+### Safety models
+
+| Model | Evidence required before I219 TX | Assessment on AIDA_LPT / in guideXOS |
+|---|---|---|
+| **A — verified translation disabled** | Discover the applicable remapping unit(s) for the actual PCI segment/BDF; validate DRHD scope coverage; read a valid unit status showing `GSTS.TES=0` for each applicable unit. Do not infer this from absent DMAR, a BIOS label, bus mastering, or CPU identity maps. | **Not established.** No DMAR and no matching DRHD were exposed, so no status read is available. The kernel already refuses this state. It is feasible in principle if firmware exposes complete, trustworthy unit descriptions and readable status. |
+| **B — verified DMA mapping** | Create a device-specific mapping for the full descriptor ring and packet buffer; use the returned device/IOVA addresses in TDBA and the TX descriptor; grant the NIC only the required read/write access; verify coverage, lifetime, ownership, and cache-coherency rules through TX completion. Preserve the mapping across kernel handoff or have the kernel own the IOMMU domain. | **Not implemented or established.** The loader does not use `EFI_PCI_IO_PROTOCOL.Map` or an IOMMU protocol, and the kernel has no VT-d mapping/page-table management path. UEFI defines PCI controller DMA mapping services, while TianoCore also defines an EDK II IOMMU protocol extension; neither is currently queried here. A boot-services mapping cannot be assumed to remain valid for the kernel after `ExitBootServices`; the handoff would need an explicit, verified lifetime contract or kernel-owned mappings. Feasible as a future OS-owned IOMMU feature, with substantial implementation and physical validation. |
+| **C — unverifiable translation state** | Required hardware status or an explicit device mapping cannot be obtained and verified. Keep the TX submission gate closed. | **Current result.** This is the only evidence-supported classification. It is safe and matches the current fail-closed driver behavior. |
+
+The UEFI PCI I/O protocol's `Map()` returns a controller-specific device
+address and a mapping token, and the specification's DMA flow pairs mapping
+with an `Unmap()` after use. UEFI boot services terminate at
+`ExitBootServices()`, when the loader assumes platform resource management.
+Those interfaces are useful design inputs, but their presence on AIDA_LPT and
+the persistence of any firmware-managed mapping through this kernel handoff
+have not been established. EDK II's `EDKII_IOMMU_PROTOCOL` is an implementation
+extension, not a capability that can be presumed on arbitrary firmware.
+
+### Most promising supported path
+
+Keep the existing unknown-state refusal. The most supportable implementation
+path is a future kernel-owned VT-d domain: parse and validate complete DMAR
+coverage for the actual requester; allocate and initialize the required root,
+context, and second-level tables; map the ring as device read/write and the TX
+packet buffer as device read; install mappings with the required invalidation
+and ownership barriers; then use the resulting IOVAs in the NIC registers and
+descriptor. That work must account for all applicable units, reserved-memory
+regions, requester aliases, cache policy, mapping teardown, reset behavior,
+bounded polling, and no retry after ambiguous ownership. It needs hosted tests
+and a separately qualified physical procedure before any TX experiment.
+
+A narrower UEFI-assisted path could be considered only if AIDA_LPT exposes a
+supported PCI/IOMMU mapping protocol for the I219 and the loader can prove that
+the mapping remains installed and owned by the kernel after handoff. The
+current source contains no such protocol discovery or handoff contract, so this
+is a question for read-only firmware inspection, not an available safety
+model.
+
+### Old isolated-probe evidence and required output fields
+
+The original Phase 27 source used for the old ISO treated a fully traversed
+ACPI root with no DMAR table as `iommuMappingKnown=true`. That implementation
+was unsafe and was corrected by the current fail-closed source at HEAD. This
+source fact does not identify the old physical run's blocking gate: the probe
+evaluates several ordered gates, and any earlier gate could have refused
+before the no-DMAR condition mattered.
+
+In the old source, the bare `nicinfo tx iommu` command ran the read-only
+preflight. The isolated command ran the same inspectable gates, then checked
+operator confirmation. Only after preflight and confirmation did it set the
+one-shot latch and enter `send_raw_diagnostic_frame`. Within that helper,
+additional PCI, ring, descriptor-availability, and DMA-address checks could
+return before descriptor publication. Therefore `attempt=one` means the helper
+was entered; it does not prove descriptor preparation or a TDT write.
+
+For an existing transcript, these fields have distinct meanings:
+
+- `preflight=` plus the exact `failure=` line identifies the first software
+  gate reported as refusing the command. `preflight=PASS` alone does not
+  establish isolated-network confirmation or submission.
+- `probe-consumed=` reports the one-shot latch. In source, it is set after
+  preflight and isolation confirmation, immediately before the helper call.
+- `attempt=` reports whether the helper was entered. `attempt=none` means it
+  stopped before the helper; `attempt=one` can still stop before descriptor
+  preparation.
+- `descriptor-pre-TDT=raw16`, decoded descriptor bytes, and
+  `buffer-pre-TDT-first32`, together with descriptor/buffer DMA addresses,
+  show the state captured after software descriptor preparation. The printer
+  has no independent `descriptor-prepared=` flag, so missing or default raw
+  values do not by themselves prove that the descriptor was untouched.
+- `descriptor-submitted=`, `TDT-write=`, `publication-fence=`, immediate TDT
+  readback, and before/final TDH/TDT are needed to establish whether the probe
+  reached its doorbell boundary and whether the write was observed. A
+  publication-fence flag alone is set immediately before the MMIO write; a
+  matching immediate readback corroborates the completed doorbell.
+- `descriptor-final-DD=not-submitted` means the software did not report a
+  published descriptor and did not read a post-submission DD result. It is not
+  a hardware DD-clear observation. If the transcript explicitly says
+  `TDT-write=not-reached` and has no immediate readback, the probe did not hand
+  that TX descriptor to the NIC for a new TX DMA operation.
+
+The supplied physical summary gives `descriptor-final-DD=not-submitted` and
+states that descriptor publication was not recorded. It does not provide the
+other fields above. The historical physical attempt therefore remains
+**unresolved** as to preflight failure, latch consumption, helper entry, and
+descriptor preparation. No gate, latch state, descriptor ownership transition,
+or failure string is retroactively assigned.
+
+### BIOS inspection and image decision
+
+A read-only BIOS/UEFI inspection is worthwhile because it may explain why the
+firmware root omitted DMAR and indicate whether the platform claims to have
+VT-d/DMA-remapping enabled. Record the platform model, BIOS/UEFI version, the
+current setting label and value (for example, Intel VT-d, Directed I/O, IOMMU,
+or DMA Remapping), and a photograph of the page. Exit Setup without saving any
+changes. Do not toggle VT-d, load defaults, or change any other firmware
+setting under this phase.
+
+That setting is contextual evidence only. Even “disabled” in Setup would not
+replace a hardware status read for the actual requester; “enabled” with no
+DMAR would reinforce the firmware-description gap. No platform model or BIOS
+setting value is present in the supplied evidence, so the BIOS result remains
+pending.
+
+No new diagnostic image is justified now. The current read-only path already
+reports the missing DMAR/unknown-mapping refusal, the old physical output is
+incomplete, and no safe transmission model has been implemented or tested.
+Do not rerun the isolated probe or request a repeat transmission. If firmware
+inspection provides new evidence, use it to plan a separate read-only audit;
+any future transmission image requires an implemented and tested Model A or B
+and separate physical qualification.
+
+### PHASE27R2 changes and validation
+
+This update changes only this audit document. No kernel or bootloader source,
+probe behavior, ISO, firmware setting, or physical device state was changed.
+No hosted tests or target builds were run because no implementation changed;
+the existing Phase 11–27R test/build results remain as recorded above. The
+documentation diff was checked for whitespace errors.
+
+Primary references reviewed:
+
+- [UEFI Specification 2.10, PCI Bus Support and DMA mapping](https://uefi.org/specs/UEFI/2.10/14_Protocols_PCI_Bus_Support.html)
+- [UEFI Specification 2.10, Boot Services and `ExitBootServices`](https://uefi.org/specs/UEFI/2.10/07_Services_Boot_Services.html)
+- [TianoCore EDK II IOMMU protocol definition](https://github.com/tianocore/edk2/blob/master/MdeModulePkg/Include/Protocol/IoMmu.h)
+- [Intel VT-d Architecture Specification](https://cdrdv2-public.intel.com/831418/vt-directed-io-spec.pdf)
+
+Final phase state remains:
+
+```text
+last_completed=PHASE26
+next_expected=PHASE27
+```
