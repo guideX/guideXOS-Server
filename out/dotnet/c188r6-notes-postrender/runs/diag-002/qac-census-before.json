@@ -1,0 +1,21 @@
+{
+  "capturedUtc": "2026-10-24T20:58:52.1759707Z",
+  "coordinator": "guideXOS QAC 2.0.0",
+  "coordinatorPid": 16064,
+  "coordinatorOnline": true,
+  "qemuProcessCount": 0,
+  "reservationCount": 0,
+  "managedSessionCount": 0,
+  "queued": 0,
+  "blocked": 0,
+  "exclusiveLaneClear": true,
+  "status": "Coordinator: Online\nName: guideXOS QAC\nVersion: 2.0.0\nPID: 16064\nStarted (UTC): 2026-10-23T11:10:30.5849382+00:00\nUptime: 121701s\nQEMU processes: 0 (0 foreign)\nManaged development limit: 2\nManaged sessions: 0; queued: 0; blocked: 0",
+  "reservations": "Coordinator: Online (guideXOS QAC 2.0.0)\nReservations: 0\nManaged sessions: 0",
+  "observedQemuProcesses": [],
+  "observedOwnerProcess": [],
+  "admissionReservation": "708517e1010242c5bd47c55eadfd85d6",
+  "admissionOwner": "LEON2_RDT\\guideX",
+  "admissionOwnerPid": 25364,
+  "admissionQemuPid": 17616,
+  "admissionOwnerVerified": true
+}

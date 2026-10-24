@@ -1,0 +1,10 @@
+{
+  "phase": "C188R6",
+  "runRoot": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r6-notes-postrender\\runs\\diag-002",
+  "managedAppPath": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r6-notes-postrender\\build\\diag-001\\nativeaot\\artifacts\\HostLogProof.elf",
+  "expectedKernelSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+  "bootTimeoutSeconds": 120,
+  "admissionWindowSeconds": 1,
+  "probeNotesInput": true,
+  "launchedUtc": "2026-10-24T21:00:09.8845399Z"
+}

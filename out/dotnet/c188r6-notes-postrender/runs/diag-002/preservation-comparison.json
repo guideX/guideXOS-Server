@@ -1,0 +1,16 @@
+{
+  "capturedUtc": "2026-10-24T21:05:20.3773847Z",
+  "branch": "v1.1_DOTNET_SUPPORT",
+  "head": "77f2b46816d979d1c48bbf7f9cb1adf105b6b43b",
+  "initialStatusPaths": 136,
+  "currentStatusPaths": 136,
+  "preexistingStatusPathsPreserved": true,
+  "statusDifferences": [],
+  "protectedRootsBefore": 13,
+  "protectedRootsAfter": 13,
+  "protectedFilesBefore": 8497,
+  "protectedFilesAfter": 8497,
+  "protectedDifferences": [],
+  "originalRamdiskSha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8",
+  "originalRamdiskPreserved": true
+}

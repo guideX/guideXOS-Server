@@ -1,0 +1,8 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 17616 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-24T21:00:43.3758848+00:00 | managed
+  Note: Reservation 708517e1010242c5bd47c55eadfd85d6 · guideXOSServer · acceptance
+Reservations: 1
+  708517e1010242c5bd47c55eadfd85d6 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 25364) | owner Verified | child PID 17616
+Managed sessions: 1
+Managed session: 708517e1010242c5bd47c55eadfd85d6 | Running | guideXOSServer · LEON2_RDT\guideX (PID 25364)
+

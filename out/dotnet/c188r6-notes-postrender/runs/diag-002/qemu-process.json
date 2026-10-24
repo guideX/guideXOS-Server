@@ -1,0 +1,7 @@
+{
+  "ProcessId": 17616,
+  "ParentProcessId": 25364,
+  "Name": "qemu-system-x86_64.exe",
+  "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel tcg -machine pc -smp 1 -drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\OVMF.fd -drive file=fat:rw:D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r6-notes-postrender\\runs\\diag-002\\esp,format=raw,if=ide,index=0 -m 1024M -vga std -display none -serial file:D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r6-notes-postrender\\runs\\diag-002\\serial.log -qmp tcp:127.0.0.1:60983,server,nowait -boot order=c -no-shutdown -rtc base=utc,clock=host",
+  "CreationDate": "2026-10-24T14:00:43.375884-07:00"
+}
