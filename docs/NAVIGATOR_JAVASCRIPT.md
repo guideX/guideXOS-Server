@@ -11205,11 +11205,129 @@ JS85 stayed on `NAVIGATOR_JAVASCRIPT_SUPPORT`, starting from JS84 HEAD
 qualification record are committed locally without push. No production
 runtime source changed.
 
-#### Remaining limit and JS86 direction
+#### JS86 status
 
-JS86 should design a complete, bounded root enumeration for active evaluator
-frames, final results, callbacks/Events, and embedding-held runtime values,
-then evaluate generation-tagged ordinary object handles as a separate identity
-change. Until both root completeness and stale-object identity are proven,
-published object reclamation remains forbidden. Do not substitute an
-unbounded trace, reference count, or free list for that proof.
+JS86 evaluates a fixed-capacity root registry and generation-tagged handle in
+an isolated native model. That work does not establish complete production
+enumeration of evaluator frames, final results, callbacks/Events, or
+embedding-held values. Published production object reclamation remains
+forbidden until both root completeness and stale-object identity are proven.
+Do not substitute an unbounded trace, reference count, or free list for that
+proof.
+
+### JS86 bounded root and identity model
+
+JS86 qualifies a test-only model for bounded root registration, graph reachability,
+and generation-tagged ordinary-object identity. It does not qualify production
+root completeness or object reclamation. No production runtime source, `Value`,
+`RuntimeContext`, pool, or allocation behavior changed.
+
+#### Production facts and boundary
+
+The production runtime still stores ordinary object references as unversioned
+32-bit `RuntimeObjectId` indexes into `RuntimeContext::objects_`. `Value` is 40
+bytes and `RuntimeObject` is 56 bytes in the hosted compiler used for this
+qualification. The object pool has 1,024 slots; property and Array-slot limits
+are 4,096 each; environments are limited to 2,048; host handles to 2,048. Array
+values use the ordinary object identity with an Array tag in the object record.
+The separate HostObject identity already uses a generation/slot token.
+
+Properties, Array elements, prototypes, bindings, call frames, callback
+listeners, Event state, host adapters, and embedding code retain values through
+different paths. Active evaluator temporaries and native `Value` copies held by
+an embedder are not centrally enumerated. A `RuntimeObject*` returned by
+`objectAt()` points into a vector whose storage can move as it grows. Reset
+clears runtime storage and permits ordinary IDs to start over, so carrying old
+native `Value` bits across reset is outside the supported lifetime contract.
+These facts leave production reachability incomplete and make index reuse
+unsafe.
+
+#### Test-only identity and roots
+
+The model in `tests/navigator_javascript_js86_model.h` uses a packed 32-bit
+handle with 10 slot bits and 22 generation bits. It represents up to 1,024
+slots. Generation zero is invalid, the all-ones handle is invalid, and the
+maximum accepted generation is 4,194,302. A slot is quarantined rather than
+wrapping when its generation is exhausted. Resolution requires a live slot and
+an exact generation match. Reset preserves generation history. This packing is
+a candidate identity format, not a production ABI or a change to `Value`.
+
+The fixed root registry stores copied handles, never a `Value*` or stack
+address. It supports 128 root registrations and 16 generation-tagged owners.
+Root tokens are 16 bytes; owner tokens are 8 bytes; a root record is 20 bytes;
+the complete root table is 2,688 bytes in the measured model. Each registration
+has an independent lifetime, owner release removes that owner's registrations,
+and stale owner/root tokens cannot affect a later registration after token
+reuse. `NativeRootScope` demonstrates nested callback/Event ownership and
+unwinds registrations on normal return or error. An escaping or embedding-held
+value must be copied into an explicit registration; scope exit alone cannot
+infer that it escaped.
+
+The reference graph is also fixed capacity: 1,024 nodes and 4,096 edges, with
+property, Array-element, and prototype edge kinds. Bounded traversal covers
+chains, reachable and unreachable cycles, duplicate edges, and invalid-edge
+injection. Capacity overflow or malformed graph state fails closed. The bounded
+identity model allows simulated retirement only when the caller asserts
+`CompleteForModel` and the identity is unreachable from all registered roots.
+`UnknownExternalRoots` vetoes retirement. This assertion can only be made by a
+test caller; production does not have the complete root enumeration needed to
+make it.
+
+#### Measurements
+
+The model profile is 64,128 bytes total: a 12,288-byte identity table, 2,688
+bytes for root records and owner metadata, and 49,152 bytes for the graph. The
+generation metadata lower bound for 1,024 production slots is 4,096 bytes if
+stored as one 32-bit generation per slot; this is an integration estimate, not
+an observed production allocation. A future production design must account for
+its actual layout and existing object payload separately. The largest static
+stack frame in the strict test build is 5,184 bytes, in full graph traversal.
+Hosted compiler `sizeof` measurements and model timings are specific to this
+test build and do not establish embedded-target RAM or stack suitability.
+
+The harness reported these approximate nanoseconds per operation: handle
+construction 1.2; valid resolution at 1,024 slots 1.2; invalid and stale-handle
+rejection 1.3 each; root register/release pair 3.8; three nested scopes 149.2;
+lookup across all 128 roots 72.8; and a generation-exhaustion probe 11.6.
+These are model microbenchmarks, not production runtime measurements.
+
+#### Qualification results
+
+The strict JS86 native lane passed **109/109** checks with C++17,
+`-Wall -Wextra -Werror -pedantic`, and stack-usage reporting. Focused JS79–JS85
+reruns passed **1,382** checks total (202, 379, 600, 29, 67, 93, and 12); the
+JS84 no-diagnostics compatibility lane passed **68/68**. The full JavaScript
+matrix passed **88/88 lanes** and **15,255/15,255 assertions across 47
+assertion-bearing lanes**.
+
+`build.bat` succeeded at source HEAD
+`82e949b998c199998369310101661c1340261209`. The fresh executable was 8,639,900
+bytes with SHA-256
+`4880AD7C279452AD86C663C23E7E9C19623D7AF21DC2DF2653C95FFF0CA1B0BA`. The
+hosted runner used that exact executable (PID 23208) and completed with 688 of
+695 checks passing. All **429 hosted JavaScript checks passed**. The seven
+failures are the existing CSS checks: phases 3C, 3G, 6A, three checks in 6B,
+and 6C.
+The wrapper's overall exit code is 1 because those CSS checks remain failed.
+
+Before/after ignored-artifact manifests matched exactly: 1,367 authoritative
+files / 90,843,932 bytes and 5,554 recursive files / 537,294,713 bytes,
+including the ignored `third_party/mbedtls` source tree. There were zero
+changed, missing, or extra files after restoration. The original ignored
+executable was restored to 8,398,274 bytes and SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+Evidence, logs, and manifests are preserved outside the repository at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js86-preservation-20261023-165232-fa8c45b3da4e494a8d3eb7068c9fb3a3`.
+`.phase` remains absent.
+
+#### Remaining limits and next step
+
+The registry and graph prove their bounded model behavior only. JS86 does not
+add production root registration, enumerate every evaluator local or
+embedding-held value, prove callback/Event ownership complete, stabilize
+`objectAt()` pointers, or make stale production IDs detectable. Production
+reclamation and object-slot reuse remain forbidden. Any later production work
+must first establish and audit a complete set of root owners and their scope
+boundaries; until then, unknown external roots must prevent retirement. Kernel
+and QEMU qualification was not run, so these hosted stack measurements do not
+claim bare-metal safety.
