@@ -29,10 +29,25 @@ enum class Error : uint32_t {
 typedef bool (*ReadAt)(void* user, uint64_t offset, void* buffer,
                        uint32_t capacity, uint32_t* bytesRead);
 
+enum class ProgressStage : uint32_t {
+    AuthenticationStarted,
+    AuthenticationProgress,
+    AuthenticationComplete,
+    IndexValidationStarted,
+    IndexValidationComplete,
+    TargetRecordSelected,
+    CoefficientEvaluationStarted,
+    CoefficientEvaluationComplete
+};
+
+typedef void (*Progress)(void* user, ProgressStage stage, uint64_t value);
+
 struct Reader {
     ReadAt readAt;
     void* user;
     uint64_t fileSize;
+    Progress progress;
+    void* progressUser;
 };
 
 struct Segment {

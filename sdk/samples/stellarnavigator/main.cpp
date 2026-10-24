@@ -26,6 +26,10 @@ struct FileSource {
     const char* path;
 };
 
+struct ProgressContext {
+    gx_app_context* app;
+};
+
 static stellar_native::Context g_ephemeris;
 
 static void copy_text(char* destination, uint32_t capacity, const char* source) {
@@ -50,6 +54,64 @@ static bool append_text(char* destination, uint32_t capacity, uint32_t* length,
     }
     destination[*length] = '\0';
     return true;
+}
+
+static bool append_uint64(char* destination, uint32_t capacity, uint32_t* length,
+                          uint64_t value) {
+    char reversed[24];
+    uint32_t digits = 0;
+    do {
+        reversed[digits++] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && digits < sizeof(reversed));
+    while (digits > 0u) {
+        char digit[2] = { reversed[--digits], '\0' };
+        if (!append_text(destination, capacity, length, digit)) return false;
+    }
+    return true;
+}
+
+static uint64_t app_ticks_ms(gx_app_context* app) {
+    if (!app || !app->host) return 0u;
+    const gx_host_calls* host = app->host;
+    if (host->size < offsetof(gx_host_calls, get_ticks_ms) + sizeof(host->get_ticks_ms) ||
+        !host->get_ticks_ms) return 0u;
+    return host->get_ticks_ms(app);
+}
+
+static void emit_stage(gx_app_context* app, const char* name, bool hasValue, uint64_t value) {
+    if (!app || !app->host || !app->host->log || !name) return;
+    char record[192];
+    record[0] = '\0';
+    uint32_t length = 0u;
+    if (!append_text(record, sizeof(record), &length, "STELLAR_NAVIGATOR_STAGE name=") ||
+        !append_text(record, sizeof(record), &length, name) ||
+        !append_text(record, sizeof(record), &length, " ticks_ms=") ||
+        !append_uint64(record, sizeof(record), &length, app_ticks_ms(app)) ||
+        !append_text(record, sizeof(record), &length, " clock=pit-10ms")) return;
+    if (hasValue && (!append_text(record, sizeof(record), &length, " value=") ||
+        !append_uint64(record, sizeof(record), &length, value))) return;
+    app->host->log(app, record);
+}
+
+static const char* progress_stage_name(stellar_native::ProgressStage stage) {
+    switch (stage) {
+    case stellar_native::ProgressStage::AuthenticationStarted: return "authentication-start";
+    case stellar_native::ProgressStage::AuthenticationProgress: return "authentication-progress-bytes";
+    case stellar_native::ProgressStage::AuthenticationComplete: return "authentication-complete-bytes";
+    case stellar_native::ProgressStage::IndexValidationStarted: return "index-validation-start";
+    case stellar_native::ProgressStage::IndexValidationComplete: return "index-validation-complete-segments";
+    case stellar_native::ProgressStage::TargetRecordSelected: return "target-record-selected-offset";
+    case stellar_native::ProgressStage::CoefficientEvaluationStarted: return "coefficient-evaluation-start-offset";
+    case stellar_native::ProgressStage::CoefficientEvaluationComplete: return "coefficient-evaluation-complete-offset";
+    }
+    return "unknown";
+}
+
+static void native_progress(void* user, stellar_native::ProgressStage stage, uint64_t value) {
+    ProgressContext* progress = static_cast<ProgressContext*>(user);
+    if (!progress) return;
+    emit_stage(progress->app, progress_stage_name(stage), true, value);
 }
 
 static bool format_fixed3(double value, char* destination, uint32_t capacity) {
@@ -193,13 +255,15 @@ static bool draw_content(gx_app_context* app, gx_handle window, const AppData& d
     return success;
 }
 
-static void evaluate_fixed_state(gx_app_context* app, AppData* data, FileSource* source) {
+static void evaluate_fixed_state(gx_app_context* app, AppData* data, FileSource* source,
+                                 ProgressContext* progress) {
     data->available = false;
     data->error = stellar_native::Error::ReadFailure;
     data->positionKm = { 0.0, 0.0, 0.0 };
     copy_text(data->status, sizeof(data->status), "DE440s data file could not be read.");
 
     uint32_t exists = 0;
+    emit_stage(app, "ephemeris-file-check-start", false, 0u);
     const gx_result existsResult = native_file_exists(app, kDataPath, &exists);
     if (existsResult == GX_OK && exists == 0u) {
         data->error = stellar_native::Error::ReadFailure;
@@ -210,19 +274,35 @@ static void evaluate_fixed_state(gx_app_context* app, AppData* data, FileSource*
         copy_text(data->status, sizeof(data->status), "DE440s data availability check failed.");
         return;
     }
+    emit_stage(app, "ephemeris-file-present", false, 0u);
 
     source->app = app;
     source->path = kDataPath;
+    progress->app = app;
     const stellar_native::Reader reader = {
-        native_read_at, source, stellar_native::kDatasetBytes
+        native_read_at, source, stellar_native::kDatasetBytes, native_progress, progress
     };
+    const uint64_t initializeStart = app_ticks_ms(app);
+    emit_stage(app, "ephemeris-initialize-start", false, 0u);
     data->error = stellar_native::initialize(&g_ephemeris, &reader);
+    const uint64_t initializeEnd = app_ticks_ms(app);
+    emit_stage(app, "ephemeris-initialize-complete-error-code", true,
+        static_cast<uint64_t>(data->error));
+    emit_stage(app, "ephemeris-initialize-duration-ms", true,
+        initializeEnd - initializeStart);
     if (data->error != stellar_native::Error::Ok) {
         copy_text(data->status, sizeof(data->status), stellar_native::errorText(data->error));
         return;
     }
+    const uint64_t evaluationStart = app_ticks_ms(app);
+    emit_stage(app, "ephemeris-evaluation-start", false, 0u);
     data->error = stellar_native::evaluatePosition(&g_ephemeris, kTargetEarth,
         kFixedEpochEt, &data->positionKm);
+    const uint64_t evaluationEnd = app_ticks_ms(app);
+    emit_stage(app, "ephemeris-evaluation-complete-error-code", true,
+        static_cast<uint64_t>(data->error));
+    emit_stage(app, "ephemeris-evaluation-duration-ms", true,
+        evaluationEnd - evaluationStart);
     if (data->error != stellar_native::Error::Ok) {
         copy_text(data->status, sizeof(data->status), stellar_native::errorText(data->error));
         stellar_native::shutdown(&g_ephemeris);
@@ -241,14 +321,18 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* app) {
         !host->log || !host->request_window || !host->draw_text || !host->draw_rect ||
         !host->poll_event || !host->file_read) return GX_ERROR_UNSUPPORTED;
 
+    emit_stage(app, "application-entry", false, 0u);
     AppData data = {};
     FileSource source = {};
-    evaluate_fixed_state(app, &data, &source);
+    ProgressContext progress = {};
+    evaluate_fixed_state(app, &data, &source, &progress);
     char resultLog[512];
     make_result_log(data, resultLog, sizeof(resultLog));
+    emit_stage(app, "ephemeris-result-formatted", false, 0u);
     host->log(app, resultLog[0] ? resultLog : "STELLAR_NAVIGATOR_EPHEMERIS status=log-format-error");
 
     gx_handle window = 0;
+    emit_stage(app, "window-creation-start", false, 0u);
     const gx_result windowResult = host->request_window(app, "Stellar Navigator SN10", kWindowWidth,
         kWindowHeight, &window);
     if (windowResult != GX_OK) {
@@ -258,10 +342,12 @@ extern "C" gx_result GX_CALL gx_main(gx_app_context* app) {
     }
     host->log(app, "STELLAR_NAVIGATOR_UI status=window-created");
 
+    emit_stage(app, "initial-content-render-start", false, 0u);
     const bool firstDrawSucceeded = draw_content(app, window, data);
     host->log(app, firstDrawSucceeded
         ? "STELLAR_NAVIGATOR_UI status=initial-content-drawn"
         : "STELLAR_NAVIGATOR_UI status=initial-draw-failed");
+    if (firstDrawSucceeded) emit_stage(app, "application-ready", false, 0u);
     bool done = false;
     while (!done) {
         gx_event event;

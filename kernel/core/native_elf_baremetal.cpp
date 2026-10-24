@@ -334,6 +334,11 @@ struct Runtime {
     bool lastFocus;
     bool focusKnown;
     uint32_t readLogCount;
+    uint8_t resourceReadHandle;
+    uint64_t resourceReadPosition;
+    uint64_t resourceReadSize;
+    uint64_t nextReadLogOffset;
+    char resourceReadPath[256];
     uint32_t tickLogCount;
     uint32_t frameGuardFailures;
     NativeAbiOperation currentAbiOperation;
@@ -1272,39 +1277,111 @@ static gx_result GX_CALL host_file_exists(gx_app_context* context, const char* r
     return GX_OK;
 }
 
+static void close_resource_read(Runtime* runtime) {
+    if (!runtime) return;
+    if (runtime->resourceReadHandle != 0xFF) vfs::close(runtime->resourceReadHandle);
+    runtime->resourceReadHandle = 0xFF;
+    runtime->resourceReadPosition = 0;
+    runtime->resourceReadSize = 0;
+    runtime->nextReadLogOffset = 0;
+    runtime->resourceReadPath[0] = '\0';
+}
+
+static void log_resource_read(Runtime* runtime, const char* relative, const char* path,
+                              uint64_t offset, uint32_t requested, uint32_t returned,
+                              uint64_t size, const char* result, uint64_t elapsedMs) {
+    if (!runtime || runtime->readLogCount >= 80u) return;
+    ++runtime->readLogCount;
+    serial::puts("[NATIVE-ELF] file_read app="); serial::puts(runtime->package->displayName);
+    serial::puts(" relative="); serial::puts(relative ? relative : "(none)");
+    serial::puts(" offset=0x"); serial::put_hex64(offset);
+    serial::puts(" requested=0x"); serial::put_hex32(requested);
+    serial::puts(" returned=0x"); serial::put_hex32(returned);
+    serial::puts(" size=0x"); serial::put_hex64(size);
+    serial::puts(" result="); serial::puts(result);
+    serial::puts(" elapsed_ms=0x"); serial::put_hex64(elapsedMs);
+    if (path) { serial::puts(" path="); serial::puts(path); }
+    serial::putc('\n');
+}
+
+static void log_resource_open(Runtime* runtime, const char* relative, const char* path,
+                              uint64_t size, uint64_t elapsedMs) {
+    if (!runtime || runtime->readLogCount >= 80u) return;
+    ++runtime->readLogCount;
+    serial::puts("[NATIVE-ELF] file_open app="); serial::puts(runtime->package->displayName);
+    serial::puts(" relative="); serial::puts(relative ? relative : "(none)");
+    serial::puts(" size=0x"); serial::put_hex64(size);
+    serial::puts(" result=ok elapsed_ms=0x"); serial::put_hex64(elapsedMs);
+    if (path) { serial::puts(" path="); serial::puts(path); }
+    serial::putc('\n');
+}
+
 static gx_result GX_CALL host_file_read(gx_app_context* context, const char* relative, uint64_t offset,
                                         void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
     Runtime* runtime = runtime_from(context);
     if (outBytesRead) *outBytesRead = 0;
     if (!runtime || !relative || !buffer || !outBytesRead || bufferSize == 0) return GX_ERROR_INVALID_ARGUMENT;
+    const uint64_t startTicks = pit::ticks();
     abi_begin(runtime, NativeAbiOperation::ReadResource);
     char path[256];
     if (!package_path(runtime->package, relative, path, sizeof(path))) {
         return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_PERMISSION_DENIED);
     }
-    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
-    if (handle == 0xFF) return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
-    const int64_t size = vfs::file_size(handle);
-    if (size < 0 || offset > static_cast<uint64_t>(size) ||
-        vfs::seek(handle, static_cast<int64_t>(offset), vfs::SEEK_SET) != vfs::VFS_OK) {
-        vfs::close(handle);
+    uint32_t requested = bufferSize > kReadChunkBytes ? kReadChunkBytes : bufferSize;
+    if (runtime->resourceReadHandle == 0xFF || !text_equal(runtime->resourceReadPath, path)) {
+        close_resource_read(runtime);
+        const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+        if (handle == 0xFF) {
+            log_resource_read(runtime, relative, path, offset, requested, 0u, 0u,
+                "open-failed", (pit::ticks() - startTicks) * 10u);
+            return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
+        }
+        const int64_t size = vfs::file_size(handle);
+        if (size < 0 || !text_copy(runtime->resourceReadPath,
+                sizeof(runtime->resourceReadPath), path)) {
+            vfs::close(handle);
+            log_resource_read(runtime, relative, path, offset, requested, 0u, 0u,
+                "size-failed", (pit::ticks() - startTicks) * 10u);
+            return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
+        }
+        runtime->resourceReadHandle = handle;
+        runtime->resourceReadPosition = 0u;
+        runtime->resourceReadSize = static_cast<uint64_t>(size);
+        runtime->nextReadLogOffset = 0x100000u;
+        log_resource_open(runtime, relative, path, runtime->resourceReadSize,
+            (pit::ticks() - startTicks) * 10u);
+    }
+    const uint64_t size = runtime->resourceReadSize;
+    if (offset > 0xFFFFFFFFu || offset > size) {
+        log_resource_read(runtime, relative, path, offset, requested, 0u, size,
+            "invalid-offset", (pit::ticks() - startTicks) * 10u);
         return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
     }
-    uint32_t requested = bufferSize;
-    if (requested > kReadChunkBytes) requested = kReadChunkBytes;
-    const int32_t amount = vfs::read(handle, buffer, requested);
-    vfs::close(handle);
-    if (amount < 0) return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
+    const bool repositioned = runtime->resourceReadPosition != offset;
+    if (repositioned &&
+        vfs::seek(runtime->resourceReadHandle, static_cast<int64_t>(offset), vfs::SEEK_SET) != vfs::VFS_OK) {
+        log_resource_read(runtime, relative, path, offset, requested, 0u, size,
+            "seek-failed", (pit::ticks() - startTicks) * 10u);
+        close_resource_read(runtime);
+        return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
+    }
+    const int32_t amount = vfs::read(runtime->resourceReadHandle, buffer, requested);
+    if (amount < 0 || static_cast<uint32_t>(amount) > requested) {
+        log_resource_read(runtime, relative, path, offset, requested, 0u, size,
+            "read-failed", (pit::ticks() - startTicks) * 10u);
+        close_resource_read(runtime);
+        return abi_result(runtime, NativeAbiOperation::ReadResource, GX_ERROR_FAILED);
+    }
     *outBytesRead = static_cast<uint32_t>(amount);
-    if (runtime->readLogCount < 80u) {
-        ++runtime->readLogCount;
-        serial::puts("[NATIVE-ELF] file_read app="); serial::puts(runtime->package->displayName);
-        serial::puts(" relative="); serial::puts(relative);
-        serial::puts(" offset=0x"); serial::put_hex64(offset);
-        serial::puts(" requested=0x"); serial::put_hex32(requested);
-        serial::puts(" returned=0x"); serial::put_hex32(static_cast<uint32_t>(amount));
-        serial::puts(" size=0x"); serial::put_hex64(static_cast<uint64_t>(size));
-        serial::puts(" path="); serial::puts(path); serial::putc('\n');
+    runtime->resourceReadPosition = offset + static_cast<uint32_t>(amount);
+    const bool progressCheckpoint = repositioned || offset == 0u ||
+        offset >= runtime->nextReadLogOffset || offset == size || runtime->resourceReadPosition == size;
+    if (progressCheckpoint) {
+        log_resource_read(runtime, relative, path, offset, requested,
+            static_cast<uint32_t>(amount), size, "ok", (pit::ticks() - startTicks) * 10u);
+        while (runtime->nextReadLogOffset <= offset &&
+               runtime->nextReadLogOffset <= UINT64_MAX - 0x100000u)
+            runtime->nextReadLogOffset += 0x100000u;
     }
     return abi_result(runtime, NativeAbiOperation::ReadResource, GX_OK);
 }
@@ -1877,6 +1954,7 @@ static void initialize_host_table(Runtime* runtime) {
 static bool run_package(Package* package) {
     Runtime runtime{};
     runtime.package = package;
+    runtime.resourceReadHandle = 0xFF;
     runtime.exitCode = GX_OK;
     ++s_runtimeSequence;
     runtime.audioOwner = s_runtimeSequence;
@@ -1931,6 +2009,7 @@ static bool run_package(Package* package) {
     // BackendStopOwner). In-flight DMA completes its bounded ring; the
     // stream itself stays up for the next application.
     app_audio::backend_instance().stop_owner(runtime.audioOwner);
+    close_resource_read(&runtime);
     if (runtime.owner) {
         abi_begin(&runtime, NativeAbiOperation::CloseWindow);
         if (runtime.owner->window()) runtime.owner->requestClose();

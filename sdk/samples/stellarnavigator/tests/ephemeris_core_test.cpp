@@ -9,11 +9,18 @@
 struct FileReader {
     std::ifstream file;
     uint64_t sizeLimit;
+    uint64_t zeroProgressAt;
+    uint32_t successfulDataReads;
+    uint32_t zeroProgressReads;
     bool corrupt;
+    bool zeroProgress;
 };
 
 static stellar_native::Context g_context;
 static int g_checks = 0;
+static stellar_native::ProgressStage g_progressStages[64];
+static uint64_t g_progressValues[64];
+static uint32_t g_progressCount = 0u;
 
 static void check(bool passed, const char* name) {
     ++g_checks;
@@ -30,6 +37,10 @@ static bool read_file_at(void* user, uint64_t offset, void* buffer,
     if (bytesRead) *bytesRead = 0;
     if (!reader || !buffer || !bytesRead || capacity == 0u) return false;
     if (offset >= reader->sizeLimit) return true;
+    if (reader->zeroProgress && offset >= reader->zeroProgressAt) {
+        ++reader->zeroProgressReads;
+        return true;
+    }
     uint64_t available = reader->sizeLimit - offset;
     uint32_t requested = available < capacity ? static_cast<uint32_t>(available) : capacity;
     reader->file.clear();
@@ -37,14 +48,29 @@ static bool read_file_at(void* user, uint64_t offset, void* buffer,
     if (!reader->file) return false;
     reader->file.read(static_cast<char*>(buffer), static_cast<std::streamsize>(requested));
     *bytesRead = static_cast<uint32_t>(reader->file.gcount());
+    if (*bytesRead != 0u) ++reader->successfulDataReads;
     if (reader->corrupt && offset <= 4096u && offset + *bytesRead > 4096u)
         static_cast<uint8_t*>(buffer)[4096u - static_cast<uint32_t>(offset)] ^= 0x01u;
     return reader->file.good() || reader->file.eof();
 }
 
+static void record_progress(void*, stellar_native::ProgressStage stage, uint64_t value) {
+    if (g_progressCount < 64u) {
+        g_progressStages[g_progressCount] = stage;
+        g_progressValues[g_progressCount] = value;
+        ++g_progressCount;
+    }
+}
+
 static stellar_native::Reader make_reader(FileReader* file, uint64_t size) {
-    stellar_native::Reader reader = { read_file_at, file, size };
+    stellar_native::Reader reader = { read_file_at, file, size, record_progress, nullptr };
     return reader;
+}
+
+static bool has_progress_stage(stellar_native::ProgressStage stage) {
+    for (uint32_t i = 0; i < g_progressCount; ++i)
+        if (g_progressStages[i] == stage) return true;
+    return false;
 }
 
 int main(int argc, char** argv) {
@@ -70,6 +96,16 @@ int main(int argc, char** argv) {
           std::fabs(position.y - 132361381.154) <= 0.0005 &&
           std::fabs(position.z - 57418653.286) <= 0.0005,
         "match hosted SN4 Earth position at ET 0 within 0.001 km display precision");
+    check(g_progressCount >= 10u &&
+          g_progressStages[0] == stellar_native::ProgressStage::AuthenticationStarted &&
+          has_progress_stage(stellar_native::ProgressStage::AuthenticationProgress) &&
+          has_progress_stage(stellar_native::ProgressStage::AuthenticationComplete) &&
+          has_progress_stage(stellar_native::ProgressStage::IndexValidationStarted) &&
+          has_progress_stage(stellar_native::ProgressStage::IndexValidationComplete) &&
+          has_progress_stage(stellar_native::ProgressStage::TargetRecordSelected) &&
+          has_progress_stage(stellar_native::ProgressStage::CoefficientEvaluationStarted) &&
+          has_progress_stage(stellar_native::ProgressStage::CoefficientEvaluationComplete),
+        "emit bounded authentication, index, record-selection, and evaluation checkpoints");
 
     stellar_native::Vector3 repeated = {};
     check(stellar_native::evaluatePosition(&g_context, 399, 0.0, &repeated) == stellar_native::Error::Ok &&
@@ -98,6 +134,10 @@ int main(int argc, char** argv) {
         "reject an undersized dataset before parsing");
 
     file.sizeLimit = stellar_native::kDatasetBytes;
+    reader = make_reader(&file, stellar_native::kDatasetBytes + 1u);
+    check(stellar_native::initialize(&g_context, &reader) == stellar_native::Error::DatasetSizeMismatch,
+        "reject an oversized dataset before parsing");
+
     file.corrupt = true;
     reader = make_reader(&file, stellar_native::kDatasetBytes);
     check(stellar_native::initialize(&g_context, &reader) == stellar_native::Error::DatasetHashMismatch,
@@ -110,6 +150,18 @@ int main(int argc, char** argv) {
         "reject a short read at the dataset boundary");
 
     file.sizeLimit = stellar_native::kDatasetBytes;
+    file.zeroProgressAt = 4u * 1024u * 1024u;
+    file.successfulDataReads = 0u;
+    file.zeroProgressReads = 0u;
+    file.zeroProgress = true;
+    reader = make_reader(&file, stellar_native::kDatasetBytes);
+    const stellar_native::Error zeroProgressResult = stellar_native::initialize(&g_context, &reader);
+    check(zeroProgressResult == stellar_native::Error::ReadFailure &&
+          file.successfulDataReads == 64u && file.zeroProgressReads == 1u,
+        "stop on the first zero-progress read after 64 successful chunks");
+
+    file.zeroProgress = false;
+    file.zeroProgressAt = 0u;
     reader = make_reader(&file, stellar_native::kDatasetBytes);
     check(stellar_native::initialize(&g_context, &reader) == stellar_native::Error::Ok,
         "reinitialize successfully after teardown and failed loads");

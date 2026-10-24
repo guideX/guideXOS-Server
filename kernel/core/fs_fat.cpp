@@ -38,6 +38,20 @@ static const uint32_t kMaxSafeDirectoryChainSteps = 4096u;
 
 // Sector buffer for reading metadata (one sector at a time)
 static uint8_t   s_secBuf[4096]; // supports up to 4096-byte sectors
+// Four bounded FAT-sector cache entries keep the adjacent links used by file
+// traversal and the tortoise/hare safety check from repeating synchronous
+// block reads. The key includes device and absolute LBA.
+static const uint32_t kFatSectorCacheEntries = 4u;
+struct FatSectorCacheEntry {
+    bool valid;
+    uint8_t device;
+    uint64_t lba;
+    uint32_t bytes;
+    uint64_t lastUse;
+    uint8_t data[4096];
+};
+static FatSectorCacheEntry s_fatSectorCache[kFatSectorCacheEntries];
+static uint64_t s_fatSectorCacheClock = 0;
 
 // Directory iteration state
 static struct {
@@ -92,8 +106,65 @@ static block::Status read_volume_sector(const FATVolume& vol, uint64_t lba, void
     return s_lastIoStatus;
 }
 
+static void invalidate_fat_sector_cache()
+{
+    for (uint32_t i = 0; i < kFatSectorCacheEntries; ++i)
+        s_fatSectorCache[i].valid = false;
+    s_fatSectorCacheClock = 0;
+}
+
+static block::Status read_fat_sector(const FATVolume& vol, uint64_t lba,
+                                     const uint8_t** outData)
+{
+    if (!outData || vol.bytesPerSector == 0 || vol.bytesPerSector > sizeof(s_fatSectorCache[0].data)) {
+        s_lastIoStatus = block::BLOCK_ERR_INVALID;
+        return s_lastIoStatus;
+    }
+    const uint64_t absoluteLba = vol.partitionOffset + lba;
+    for (uint32_t i = 0; i < kFatSectorCacheEntries; ++i) {
+        FatSectorCacheEntry& entry = s_fatSectorCache[i];
+        if (entry.valid && entry.device == vol.blockDevIndex && entry.lba == absoluteLba &&
+            entry.bytes == vol.bytesPerSector) {
+            if (s_fatSectorCacheClock == UINT64_MAX) {
+                for (uint32_t j = 0; j < kFatSectorCacheEntries; ++j)
+                    s_fatSectorCache[j].lastUse = 0;
+                s_fatSectorCacheClock = 0;
+            }
+            entry.lastUse = ++s_fatSectorCacheClock;
+            *outData = entry.data;
+            s_lastIoStatus = block::BLOCK_OK;
+            return s_lastIoStatus;
+        }
+    }
+    uint32_t victim = 0;
+    for (uint32_t i = 1; i < kFatSectorCacheEntries; ++i) {
+        if (!s_fatSectorCache[i].valid || (s_fatSectorCache[victim].valid &&
+            s_fatSectorCache[i].lastUse < s_fatSectorCache[victim].lastUse))
+            victim = i;
+    }
+    FatSectorCacheEntry& entry = s_fatSectorCache[victim];
+    entry.valid = false;
+    s_lastIoStatus = block::read_sectors(vol.blockDevIndex, absoluteLba, 1, entry.data);
+    if (s_lastIoStatus == block::BLOCK_OK) {
+        entry.device = vol.blockDevIndex;
+        entry.lba = absoluteLba;
+        entry.bytes = vol.bytesPerSector;
+        if (s_fatSectorCacheClock == UINT64_MAX) s_fatSectorCacheClock = 0;
+        entry.lastUse = ++s_fatSectorCacheClock;
+        entry.valid = true;
+        *outData = entry.data;
+    }
+    return s_lastIoStatus;
+}
+
 static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, const void* buffer)
 {
+    const uint64_t absoluteLba = vol.partitionOffset + lba;
+    for (uint32_t i = 0; i < kFatSectorCacheEntries; ++i) {
+        if (s_fatSectorCache[i].valid && s_fatSectorCache[i].device == vol.blockDevIndex &&
+            s_fatSectorCache[i].lba == absoluteLba)
+            s_fatSectorCache[i].valid = false;
+    }
     if (s_trashTraceActive) {
         serial::puts("TRASH_BLOCK_WRITE_BEGIN gen=");
         serial::put_hex64(s_trashTraceGeneration);
@@ -261,18 +332,19 @@ static uint32_t fat_next_cluster(const FATVolume& vol, uint32_t cluster)
     uint32_t fatSector   = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
     uint32_t entryOffset = fatOffset % vol.bytesPerSector;
 
-    block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
+    const uint8_t* sectorData = nullptr;
+    block::Status st = read_fat_sector(vol, fatSector, &sectorData);
     if (st != block::BLOCK_OK) {
         set_traversal_status(TRAVERSAL_IO_ERROR);
         return fat_end_value(vol);
     }
 
     if (entrySize == 2) {
-        uint32_t val = *reinterpret_cast<uint16_t*>(&s_secBuf[entryOffset]);
+        uint32_t val = *reinterpret_cast<const uint16_t*>(sectorData + entryOffset);
         return val & fat_cluster_mask(vol);
     }
 
-    uint32_t val = *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]);
+    uint32_t val = *reinterpret_cast<const uint32_t*>(sectorData + entryOffset);
     return val & fat_cluster_mask(vol);
 }
 
@@ -296,13 +368,14 @@ static uint32_t exfat_next_cluster(const FATVolume& vol, uint32_t cluster)
     uint32_t fatSector   = vol.exfatFatOffset + (fatOffset / sectorSize);
     uint32_t entryOffset = fatOffset % sectorSize;
 
-    block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
+    const uint8_t* sectorData = nullptr;
+    block::Status st = read_fat_sector(vol, fatSector, &sectorData);
     if (st != block::BLOCK_OK) {
         set_traversal_status(TRAVERSAL_IO_ERROR);
         return 0xFFFFFFFF;
     }
 
-    return *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]);
+    return *reinterpret_cast<const uint32_t*>(sectorData + entryOffset);
 }
 
 // ================================================================
@@ -851,6 +924,7 @@ static block::Status write_root_dir_sector(const FATVolume& vol, uint32_t sector
 
 void init()
 {
+    invalidate_fat_sector_cache();
     memzero(s_volumes, sizeof(s_volumes));
     memzero(s_files, sizeof(s_files));
     memzero(&s_dirIter, sizeof(s_dirIter));
@@ -870,6 +944,7 @@ void set_trash_trace(bool enabled, uint64_t generation)
 
 uint8_t mount(uint8_t blockDevIndex)
 {
+    invalidate_fat_sector_cache();
     if (s_volumeCount >= MAX_FAT_VOLUMES) return 0xFF;
 
     // Find a free slot
@@ -899,6 +974,7 @@ void unmount(uint8_t volumeIndex)
 {
     if (volumeIndex >= MAX_FAT_VOLUMES) return;
     if (!s_volumes[volumeIndex].mounted) return;
+    invalidate_fat_sector_cache();
 
     // Close any open files on this volume
     for (uint8_t i = 0; i < MAX_OPEN_FILES; ++i) {

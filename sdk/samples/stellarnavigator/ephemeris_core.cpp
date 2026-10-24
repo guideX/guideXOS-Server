@@ -10,6 +10,7 @@ static const uint32_t kSupportedVersion = 1u;
 static const uint32_t kMaxProvenanceBytes = 16384u;
 static const uint32_t kMaxDegree = 50u;
 static const double kRecordDomainSlack = 1.0e-9;
+static const uint64_t kProgressIntervalBytes = 4u * 1024u * 1024u;
 
 static const uint8_t kExpectedSha256[32] = {
     0xd5, 0x2b, 0x91, 0x57, 0x3c, 0x29, 0xe6, 0xa4,
@@ -172,6 +173,11 @@ static bool read_exact(const Reader& reader, uint64_t offset, void* destination,
     return true;
 }
 
+static void report_progress(const Context* context, ProgressStage stage, uint64_t value) {
+    if (context && context->reader.progress)
+        context->reader.progress(context->reader.progressUser, stage, value);
+}
+
 static uint32_t u32_le(const uint8_t* bytes) {
     return static_cast<uint32_t>(bytes[0]) |
            (static_cast<uint32_t>(bytes[1]) << 8) |
@@ -316,6 +322,7 @@ static Error parse_index(Context* context) {
 
 static Error authenticate_dataset(Context* context) {
     if (context->reader.fileSize != kDatasetBytes) return Error::DatasetSizeMismatch;
+    report_progress(context, ProgressStage::AuthenticationStarted, 0u);
     uint8_t extra = 0;
     uint32_t extraBytes = 0;
     if (!context->reader.readAt(context->reader.user, kDatasetBytes, &extra, 1u, &extraBytes) || extraBytes > 1u)
@@ -325,6 +332,7 @@ static Error authenticate_dataset(Context* context) {
     Sha256 sha;
     sha_init(&sha);
     uint64_t offset = 0;
+    uint64_t lastProgress = 0;
     while (offset < kDatasetBytes) {
         const uint64_t remaining = kDatasetBytes - offset;
         const uint32_t requested = remaining > kHashChunkBytes
@@ -334,11 +342,16 @@ static Error authenticate_dataset(Context* context) {
                 requested, &bytesRead) || bytesRead != requested) return Error::ReadFailure;
         sha_update(&sha, context->scratch, bytesRead);
         offset += bytesRead;
+        if (offset - lastProgress >= kProgressIntervalBytes || offset == kDatasetBytes) {
+            report_progress(context, ProgressStage::AuthenticationProgress, offset);
+            lastProgress = offset;
+        }
     }
     uint8_t digest[32];
     sha_finish(&sha, digest);
     for (uint32_t i = 0; i < sizeof(digest); ++i)
         if (digest[i] != kExpectedSha256[i]) return Error::DatasetHashMismatch;
+    report_progress(context, ProgressStage::AuthenticationComplete, offset);
     return Error::Ok;
 }
 
@@ -357,6 +370,7 @@ static Error evaluate_segment(const Context* context, const Segment& segment,
     const uint64_t recordOffset = segment.dataOffset + recordIndex * recordBytes;
     if (recordOffset > context->reader.fileSize || recordBytes > context->reader.fileSize - recordOffset)
         return Error::InvalidIndex;
+    report_progress(context, ProgressStage::TargetRecordSelected, recordOffset);
 
     uint8_t record[kMaxRecordWords * 8u];
     if (!read_exact(context->reader, recordOffset, record, static_cast<uint32_t>(recordBytes)))
@@ -371,6 +385,7 @@ static Error evaluate_segment(const Context* context, const Segment& segment,
     if (!finite(normalized) || normalized < -1.0 - kRecordDomainSlack ||
         normalized > 1.0 + kRecordDomainSlack) return Error::InvalidRecord;
     const double u = normalized < -1.0 ? -1.0 : (normalized > 1.0 ? 1.0 : normalized);
+    report_progress(context, ProgressStage::CoefficientEvaluationStarted, recordOffset);
     const uint32_t coefficientCount = static_cast<uint32_t>(segment.degree) + 1u;
     double values[3];
     for (uint32_t axis = 0; axis < 3u; ++axis) {
@@ -389,6 +404,7 @@ static Error evaluate_segment(const Context* context, const Segment& segment,
     positionKm->x = values[0];
     positionKm->y = values[1];
     positionKm->z = values[2];
+    report_progress(context, ProgressStage::CoefficientEvaluationComplete, recordOffset);
     return Error::Ok;
 }
 
@@ -407,7 +423,12 @@ Error initialize(Context* context, const Reader* reader) {
                  magic[4] != 'H' || magic[5] != '0' || magic[6] != '4' || magic[7] != 'B')
             result = Error::InvalidHeader;
     }
-    if (result == Error::Ok) result = parse_index(context);
+    if (result == Error::Ok) {
+        report_progress(context, ProgressStage::IndexValidationStarted, 0u);
+        result = parse_index(context);
+        if (result == Error::Ok)
+            report_progress(context, ProgressStage::IndexValidationComplete, context->segmentCount);
+    }
     if (result != Error::Ok) {
         shutdown(context);
         return result;
