@@ -167,3 +167,9 @@ One R5 diagnostic guest verified `C188R4-379 ...=SKIPPED`, C147/C148, C120 setup
 # C188R6 follow-up
 
 The focused post-render Notes startup investigation is documented in [NATIVEAOT_C188R6_NOTES_POSTRENDER_STARTUP.md](NATIVEAOT_C188R6_NOTES_POSTRENDER_STARTUP.md). C188R6 tests the remaining managed launch path after `C188R3-163`; it does not resume the full C188 acceptance campaign.
+
+## C188R7 Notes proof authorization — 2026-10-24
+
+C188R7 separated the C137 mouse-wheel suite's explicit proof authorization from the Notes setup state inherited through C151/C152. C147/C148 initialization, Notes control and document behavior, and explicit C137 qualification remain intact. The 46-case C137 suite, C133/C134 context checks, the 38-suite / 930-case managed UI aggregate, C188/C182/C185/C186/C187 hosted checks, and diagnostic plus proof-disabled production builds passed.
+
+The one targeted R7 guest did not start: a fresh post-build QAC census showed two foreign QEMU processes from another project's diagnostics, and QAC reported acceptance reservations blocked. No R7 serial checkpoints or guest input observations exist. **Outcome D — Blocked; C188 remains open.** See [the C188R7 authorization report](NATIVEAOT_C188R7_NOTES_PROOF_AUTHORIZATION.md) for the audit, exact hashes, hosted/build evidence, preservation comparison, and next gate.

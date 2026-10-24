@@ -170,6 +170,30 @@ def r6_branch_pair(before: int, label: str, branch: str) -> list[Step]:
     ]
 
 
+def r7_branch_step(name: str, checkpoint_id: int, branch: str) -> Step:
+    prefix = f"C188R7-{checkpoint_id:03d} BRANCH {branch}="
+    return Step(name, (re.escape(prefix + "TAKEN"), re.escape(prefix + "SKIPPED")))
+
+
+def r7_branch_pair(before: int, label: str, branch: str) -> list[Step]:
+    return [
+        Step(
+            f"before {label}",
+            (re.escape(f"C188R7-{before:03d} BEFORE {label}"),),
+            optional=True,
+            branch_key=branch,
+            branch_value="TAKEN",
+        ),
+        Step(
+            f"after {label}",
+            (re.escape(f"C188R7-{before + 1:03d} AFTER {label}"),),
+            optional=True,
+            branch_key=branch,
+            branch_value="TAKEN",
+        ),
+    ]
+
+
 _c120_step_index = next(
     index for index, step in enumerate(R4_OPERATION_STEPS)
     if step.name == "before C120-PROOF-CONTEXT"
@@ -331,8 +355,35 @@ def r6_steps() -> list[Step]:
     return steps
 
 
+def r7_steps() -> list[Step]:
+    return [
+        Step("C150 application instance", (r"C150-APP-INSTANCE id=\d+ generation=\d+",)),
+        literal("Notes launch entry", "C188R7-100 NOTES-LAUNCH-ENTRY"),
+        literal("C147 runtime context", "C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS"),
+        literal("C148 settings context", "C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS"),
+        r7_branch_step("C133 host suite", 180, "C133-HOST-TEST"),
+        r7_branch_step("C134 host suite", 181, "C134-HOST-TEST"),
+        r7_branch_step("C133 C134 companion suite", 182, "C133-C134-COMPANION-TEST"),
+        literal("Notes control host reset", "C188R7-110 NOTES-CONTROL-HOST-RESET"),
+        literal("initial render return", "C188R7-101 INITIAL-RENDER-RETURN"),
+        literal("post-render settings return", "C188R7-102 POST-RENDER-SETTINGS-RETURN"),
+        r7_branch_step("C133 combo suite", 183, "C133-COMBO-SUITE"),
+        r7_branch_step("C137 test invocation", 200, "C137-TEST"),
+        *r7_branch_pair(201, "C137-SUITE", "C137-TEST"),
+        r7_branch_step("C137 summary branch", 203, "C137-TEST-SUMMARY"),
+        literal("after C137 invocation decision", "C188R7-204 AFTER C137-INVOCATION-DECISION"),
+        literal("after post-render proof checks", "C188R7-205 AFTER POSTRENDER-PROOF-CHECKS"),
+        Step("Notes launch result", (r"C188R7-206 NOTES-LAUNCH-RESULT=(?:SUCCESS|FAILURE)",)),
+        literal("ManagedNotes launch return", "C188R7-207 BEFORE MANAGEDNOTES-LAUNCH-RETURN"),
+        literal("application launch return", "C188R7-208 AFTER APPLICATION-LAUNCH-RETURN"),
+        Step("native launch return", (r"\[C102-LAUNCH-RETURN\] status=0x[0-9A-Fa-f]+",)),
+        literal("input manager initialized", "[KERNEL] Input manager initialized"),
+        literal("main input loop", "[KERNEL] Entering main loop (waiting for input)..."),
+    ]
+
+
 EVENT_PATTERNS = (
-    re.compile(r"^C188R[346]-\d{3} [A-Z0-9][A-Z0-9 =_-]*$"),
+    re.compile(r"^C188R[3467]-\d{3} [A-Z0-9][A-Z0-9 =_-]*$"),
     re.compile(r"^C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS$"),
     re.compile(r"^C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS$"),
     re.compile(r"^C150-APP-INSTANCE id=\d+ generation=\d+$"),
@@ -373,7 +424,7 @@ def _branch_values(events: list[dict[str, object]]) -> dict[str, str]:
     values: dict[str, str] = {}
     for event in events:
         marker = str(event["marker"])
-        match = re.fullmatch(r"C188R[46]-\d{3} BRANCH ([A-Z0-9-]+)=(TAKEN|SKIPPED)", marker)
+        match = re.fullmatch(r"C188R[467]-\d{3} BRANCH ([A-Z0-9-]+)=(TAKEN|SKIPPED)", marker)
         if match:
             values[match.group(1)] = match.group(2)
     return values
@@ -505,6 +556,8 @@ def validate_text(
 def describe(phase: str) -> dict[str, object]:
     if phase == "C188R6":
         steps = r6_steps()
+    elif phase == "C188R7":
+        steps = r7_steps()
     else:
         steps = r3_steps(phase in {"C188R4", "C188R5"})
     return {
@@ -521,9 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     describe_parser = subparsers.add_parser("describe")
-    describe_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6"), required=True)
+    describe_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6", "C188R7"), required=True)
     validate_parser = subparsers.add_parser("validate")
-    validate_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6"), required=True)
+    validate_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6", "C188R7"), required=True)
     validate_parser.add_argument("--serial", type=Path, required=True)
     validate_parser.add_argument("--capture-state", choices=("complete", "truncated", "incomplete", "unknown"), default="unknown")
     args = parser.parse_args(argv)
@@ -532,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     raw = args.serial.read_bytes()
     text = raw.decode("utf-8", errors="replace")
-    phase_steps = r6_steps() if args.phase == "C188R6" else r3_steps(args.phase in {"C188R4", "C188R5"})
+    phase_steps = r7_steps() if args.phase == "C188R7" else r6_steps() if args.phase == "C188R6" else r3_steps(args.phase in {"C188R4", "C188R5"})
     result = validate_text(text, phase_steps, capture_state=args.capture_state)
     result["serialPath"] = str(args.serial)
     result["serialSha256"] = hashlib.sha256(raw).hexdigest().upper()

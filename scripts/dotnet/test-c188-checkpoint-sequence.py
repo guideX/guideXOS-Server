@@ -213,6 +213,67 @@ class CheckpointSequenceTests(unittest.TestCase):
         self.assertEqual("SKIPPED", result["branchOutcomes"]["C137-TEST"])
         self.assertEqual([], result["missingRequiredCheckpoints"])
 
+    def test_c188r7_ordinary_notes_skip_path_is_branch_aware(self) -> None:
+        steps = CHECKPOINTS.r7_steps()
+        serial = "\n".join([
+            "C150-APP-INSTANCE id=4 generation=1",
+            "C188R7-100 NOTES-LAUNCH-ENTRY",
+            "C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS",
+            "C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS",
+            "C188R7-180 BRANCH C133-HOST-TEST=SKIPPED",
+            "C188R7-181 BRANCH C134-HOST-TEST=SKIPPED",
+            "C188R7-182 BRANCH C133-C134-COMPANION-TEST=SKIPPED",
+            "C188R7-110 NOTES-CONTROL-HOST-RESET",
+            "C188R7-101 INITIAL-RENDER-RETURN",
+            "C188R7-102 POST-RENDER-SETTINGS-RETURN",
+            "C188R7-183 BRANCH C133-COMBO-SUITE=SKIPPED",
+            "C188R7-200 BRANCH C137-TEST=SKIPPED",
+            "C188R7-203 BRANCH C137-TEST-SUMMARY=SKIPPED",
+            "C188R7-204 AFTER C137-INVOCATION-DECISION",
+            "C188R7-205 AFTER POSTRENDER-PROOF-CHECKS",
+            "C188R7-206 NOTES-LAUNCH-RESULT=SUCCESS",
+            "C188R7-207 BEFORE MANAGEDNOTES-LAUNCH-RETURN",
+            "C188R7-208 AFTER APPLICATION-LAUNCH-RETURN",
+            "[C102-LAUNCH-RETURN] status=0x00000000",
+            "[KERNEL] Input manager initialized",
+            "[KERNEL] Entering main loop (waiting for input)...",
+        ]) + "\n"
+        result = CHECKPOINTS.validate_text(serial, steps, capture_state="complete")
+        self.assertEqual("PASS", result["result"])
+        self.assertEqual("[KERNEL] Entering main loop (waiting for input)...", result["lastExpectedCheckpointCompleted"])
+        self.assertEqual("SKIPPED", result["branchOutcomes"]["C133-HOST-TEST"])
+        self.assertEqual("SKIPPED", result["branchOutcomes"]["C134-HOST-TEST"])
+        self.assertEqual("SKIPPED", result["branchOutcomes"]["C133-C134-COMPANION-TEST"])
+        self.assertEqual("SKIPPED", result["branchOutcomes"]["C133-COMBO-SUITE"])
+        self.assertEqual("SKIPPED", result["branchOutcomes"]["C137-TEST"])
+        self.assertEqual([], result["missingRequiredCheckpoints"])
+
+    def test_c188r7_skipped_c137_rejects_suite_operation_markers(self) -> None:
+        result = CHECKPOINTS.validate_text(
+            "C188R7-200 BRANCH C137-TEST=SKIPPED\n"
+            "C188R7-201 BEFORE C137-SUITE\n"
+            "C188R7-202 AFTER C137-SUITE\n",
+            [
+                CHECKPOINTS.r7_branch_step("C137 test invocation", 200, "C137-TEST"),
+                *CHECKPOINTS.r7_branch_pair(201, "C137-SUITE", "C137-TEST"),
+            ],
+            capture_state="complete",
+        )
+        self.assertEqual("FAIL", result["result"])
+        self.assertEqual(
+            ["C188R7-201 BEFORE C137-SUITE", "C188R7-202 AFTER C137-SUITE"],
+            result["unexpectedBranchCheckpoints"],
+        )
+
+    def test_c188r7_checkpoint_order_keeps_launch_and_readiness_after_c137_decision(self) -> None:
+        names = [step["name"] for step in CHECKPOINTS.describe("C188R7")["expectedOrderedCheckpoints"]]
+        self.assertLess(names.index("C137 test invocation"), names.index("after C137 invocation decision"))
+        self.assertLess(names.index("after C137 invocation decision"), names.index("after post-render proof checks"))
+        self.assertLess(names.index("after post-render proof checks"), names.index("ManagedNotes launch return"))
+        self.assertLess(names.index("ManagedNotes launch return"), names.index("application launch return"))
+        self.assertLess(names.index("application launch return"), names.index("input manager initialized"))
+        self.assertLess(names.index("input manager initialized"), names.index("main input loop"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

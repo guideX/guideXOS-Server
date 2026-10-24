@@ -5,6 +5,12 @@ if (args.Length == 1 && args[0] == "--c188r5-notes-proof-invocation")
 {
     return NotesProofInvocationC188R5Regression.Run() ? 0 : 1;
 }
+if (args.Length == 1 && args[0] == "--c188r7-notes-proof-authorization")
+{
+    bool r5Passed = NotesProofInvocationC188R5Regression.Run();
+    bool r7Passed = NotesProofInvocationC188R7Regression.Run();
+    return r5Passed && r7Passed ? 0 : 1;
+}
 
 int passedSuites = 0;
 int failedSuites = 0;

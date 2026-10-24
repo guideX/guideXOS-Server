@@ -11,7 +11,8 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188-external-app-identity')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r5-notes-proof-invocation')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r6-notes-postrender')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r6-notes-postrender')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r7-notes-proof-authorization')))
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
@@ -138,8 +139,11 @@ foreach ($developmentMarker in @(
     'Managed CounterApp',
     'C188-IDENTITY-REGISTRY',
     'C188-LAUNCHER-COUNTS',
-    'C188-STALE-GENERATION'
-    'C188R6-'
+    'C188-STALE-GENERATION',
+    'C188R3-',
+    'C188R4-',
+    'C188R6-',
+    'C188R7-'
 )) {
     if ($kernelText.Contains($developmentMarker)) {
         throw "Proof-disabled production ELF contains development-only marker $developmentMarker"

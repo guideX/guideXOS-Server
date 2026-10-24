@@ -757,6 +757,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
     public override GuideXosResult Launch(GuideXosHost host)
     {
         if (host.IsCapabilityProbe) return GuideXosResult.Success;
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog("C188R7-100 NOTES-LAUNCH-ENTRY"u8);
+#endif
 #if HOSTLOGPROOF_C188R3_NOTES_STARTUP
         host.TryLog("C188R3-100 NOTES-LAUNCH-ENTRY"u8);
 #endif
@@ -1519,8 +1522,15 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
-        if (_c133HostTestContext &&
-            !_c133HostTestsRun)
+        bool runC133HostTests =
+            GuideXosNotesProofTestInvocation.ShouldRunC133HostTests(
+                host.LaunchContext.Utf8, _c133HostTestsRun);
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog(runC133HostTests
+            ? "C188R7-180 BRANCH C133-HOST-TEST=TAKEN"u8
+            : "C188R7-180 BRANCH C133-HOST-TEST=SKIPPED"u8);
+#endif
+        if (runC133HostTests)
         {
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
             host.TryLog("C188R4-370 BRANCH C133-HOST-TEST=TAKEN"u8);
@@ -1543,7 +1553,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C134_HOST_TESTS
-        if (_c134HostTestContext && !_c134HostTestsRun)
+        bool runC134HostTests =
+            _c134HostTestContext && !_c134HostTestsRun;
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog(runC134HostTests
+            ? "C188R7-181 BRANCH C134-HOST-TEST=TAKEN"u8
+            : "C188R7-181 BRANCH C134-HOST-TEST=SKIPPED"u8);
+#endif
+        if (runC134HostTests)
         {
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
             host.TryLog("C188R4-373 BRANCH C134-HOST-TEST=TAKEN"u8);
@@ -1590,8 +1607,15 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 #endif
-        if (GuideXosNotesProofTestInvocation.ShouldRunC134HostTests(
-                host.LaunchContext.Utf8, _c134HostTestsRun))
+        bool runC134CompanionTests =
+            GuideXosNotesProofTestInvocation.ShouldRunC134HostTests(
+                host.LaunchContext.Utf8, _c134HostTestsRun);
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog(runC134CompanionTests
+            ? "C188R7-182 BRANCH C133-C134-COMPANION-TEST=TAKEN"u8
+            : "C188R7-182 BRANCH C133-C134-COMPANION-TEST=SKIPPED"u8);
+#endif
+        if (runC134CompanionTests)
         {
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
             host.TryLog("C188R4-379 BRANCH C133-PROOF-TEST=TAKEN"u8);
@@ -1937,6 +1961,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
             _mainControlHost.Reset();
 #if HOSTLOGPROOF_C188R3_NOTES_STARTUP
             host.TryLog("C188R3-112 NOTES-CONTROL-HOST-RESET-DONE"u8);
+#endif
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+            host.TryLog("C188R7-110 NOTES-CONTROL-HOST-RESET"u8);
 #endif
             _mainControlHost.TryRegisterButton(C120OpenControlId, _openButton);
             _mainControlHost.TryRegisterButton(C120SaveControlId, _saveButton);
@@ -2750,6 +2777,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C188R3_NOTES_STARTUP
         host.TryLog("C188R3-161 NOTES-FIRST-RENDER-RETURN"u8);
 #endif
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog("C188R7-101 INITIAL-RENDER-RETURN"u8);
+#endif
 #if HOSTLOGPROOF_C166_ORDINARY_BUILD
         host.TryLog("C166-ORDINARY-READY app=ManagedNotes render=PASS"u8);
 #endif
@@ -2771,6 +2801,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #if HOSTLOGPROOF_C188R3_NOTES_STARTUP
         host.TryLog("C188R3-163 NOTES-POST-RENDER-SETTINGS-RETURN"u8);
+#endif
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog("C188R7-102 POST-RENDER-SETTINGS-RETURN"u8);
 #endif
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
         host.TryLog("C188R6-200 AFTER C188R3-163"u8);
@@ -3221,7 +3254,15 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
         bool c133ApiContext = host.LaunchContext.Utf8.SequenceEqual("c133-api"u8);
         bool c133HostContext = host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
-        bool c133ComboTests = (_c133ComboTestContext || c133ApiContext) && !_c133ComboTestsRun
+        bool runC133ComboTests =
+            GuideXosNotesProofTestInvocation.ShouldRunC133ComboTests(
+                host.LaunchContext.Utf8, _c133ComboTestsRun);
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog(runC133ComboTests
+            ? "C188R7-183 BRANCH C133-COMBO-SUITE=TAKEN"u8
+            : "C188R7-183 BRANCH C133-COMBO-SUITE=SKIPPED"u8);
+#endif
+        bool c133ComboTests = runC133ComboTests
             ? GuideXosComboBoxC133Tests.Run(host) : true;
         bool c133HostTests = (_c133HostTestContext || c133HostContext) &&
             !_c133HostTestsRun
@@ -3282,14 +3323,22 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
         bool c137Tests;
-        bool runC137Tests = ((_c137ProofContext
+        bool runC137Tests =
+            GuideXosNotesProofTestInvocation.ShouldRunC137MouseWheelTests(
+                host.LaunchContext.Utf8, _c137ProofContext,
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
-                && !_c138ProofContext
+                _c138ProofContext,
+#else
+                false,
 #endif
-                ) ||
-                host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
-                host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8)) &&
-            !_c137TestsRun;
+                _c137TestsRun);
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog(runC137Tests
+            ? "C188R7-200 BRANCH C137-TEST=TAKEN"u8
+            : "C188R7-200 BRANCH C137-TEST=SKIPPED"u8);
+        if (runC137Tests)
+            host.TryLog("C188R7-201 BEFORE C137-SUITE"u8);
+#endif
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
         host.TryLog(runC137Tests
             ? "C188R6-206 BRANCH C137-TEST=TAKEN"u8
@@ -3319,6 +3368,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 host.TryLog("C188R6-211 BEFORE C137-SUITE"u8);
 #endif
                 c137Tests = GuideXosMouseWheelC137Tests.Run(host);
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+                host.TryLog("C188R7-202 AFTER C137-SUITE"u8);
+#endif
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
                 host.TryLog("C188R6-212 AFTER C137-SUITE"u8);
 #endif
@@ -3339,26 +3391,46 @@ public sealed partial class ManagedNotes : GuideXosApplication
             c137Tests = true;
         }
 #else
-        bool c137Tests = ((_c137ProofContext
+        bool c137Tests = GuideXosNotesProofTestInvocation
+            .ShouldRunC137MouseWheelTests(host.LaunchContext.Utf8,
+                _c137ProofContext,
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
-            && !_c138ProofContext
+                _c138ProofContext,
+#else
+                false,
 #endif
-            ) ||
-            host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8)) &&
-            !_c137TestsRun
+                _c137TestsRun)
             ? GuideXosMouseWheelC137Tests.Run(host) : true;
 #endif
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
-        bool c137SummaryBranch = _c137ProofContext ||
-            host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8);
+        bool c137SummaryBranch =
+            GuideXosNotesProofTestInvocation.IsC137ProofInvocationAuthorized(
+                host.LaunchContext.Utf8,
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                _c138ProofContext
+#else
+                false
+#endif
+            );
         host.TryLog(c137SummaryBranch
             ? "C188R6-215 BRANCH C137-TEST-SUMMARY=TAKEN"u8
             : "C188R6-215 BRANCH C137-TEST-SUMMARY=SKIPPED"u8);
 #endif
-        if (_c137ProofContext || host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8))
+        bool c137SummaryAuthorized =
+            GuideXosNotesProofTestInvocation.IsC137ProofInvocationAuthorized(
+                host.LaunchContext.Utf8,
+#if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
+                _c138ProofContext
+#else
+                false
+#endif
+            );
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog(c137SummaryAuthorized
+            ? "C188R7-203 BRANCH C137-TEST-SUMMARY=TAKEN"u8
+            : "C188R7-203 BRANCH C137-TEST-SUMMARY=SKIPPED"u8);
+#endif
+        if (c137SummaryAuthorized)
         {
             _c137TestsRun = true;
             _c137TestsPassed = c137Tests;
@@ -3372,6 +3444,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
             host.TryLog("C188R6-217 AFTER C137-TEST-SUMMARY-LOG"u8);
 #endif
         }
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog("C188R7-204 AFTER C137-INVOCATION-DECISION"u8);
+#endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
         bool c138Tests = _c138ProofContext && _c138TestsRun
             ? _c138TestsPassed : true;
@@ -3508,7 +3583,10 @@ public sealed partial class ManagedNotes : GuideXosApplication
         if (runFocusedProofTests)
             host.TryLog("C188R6-205 AFTER FOCUSED-PROOF-CATALOG"u8);
 #endif
-#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog("C188R7-205 AFTER POSTRENDER-PROOF-CHECKS"u8);
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP || HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
         host.TryLog("C188R6-224 BEFORE NOTES-LAUNCH-RESULT-CALCULATION"u8);
 #endif
@@ -3575,6 +3653,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
         host.TryLog("C188R6-226 AFTER NOTES-LAUNCH-RESULT-LOG"u8);
         host.TryLog("C188R6-227 BEFORE MANAGEDNOTES-LAUNCH-RETURN"u8);
 #endif
+#endif
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        host.TryLog(launchResult == GuideXosResult.Success
+            ? "C188R7-206 NOTES-LAUNCH-RESULT=SUCCESS"u8
+            : "C188R7-206 NOTES-LAUNCH-RESULT=FAILURE"u8);
+        host.TryLog("C188R7-207 BEFORE MANAGEDNOTES-LAUNCH-RETURN"u8);
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP || HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
         return launchResult;
 #endif
     }

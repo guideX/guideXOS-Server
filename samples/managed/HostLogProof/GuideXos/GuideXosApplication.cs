@@ -353,6 +353,10 @@ public static unsafe class GuideXosApplicationRegistry
                     application, host, host.LaunchContext.ActionId)
                 : application.Launch(host);
 #endif
+#if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
+        if (!host.LaunchContext.IsInput && !host.IsAction)
+            host.TryLog("C188R7-208 AFTER APPLICATION-LAUNCH-RETURN"u8);
+#endif
 #if HOSTLOGPROOF_C160_APPLICATION_SNAPSHOT_PROOF
         if (result == GuideXosResult.Success && isNewLaunch &&
             !host.IsCapabilityProbe && !host.IsAbiProbe)
