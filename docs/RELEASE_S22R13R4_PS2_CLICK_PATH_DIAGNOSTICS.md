@@ -88,7 +88,7 @@ Two bounded QAC sessions were needed. The first used diagnostic v1 for pointer c
 | boot1, diagnostic v1 | `39011666cc5b4fd1b9ac511a94cf7915` / `16696` | Pointer calibration only; clean QMP shutdown and QAC release. |
 | boot2, diagnostic v2 | `60aae845d5c1463cb9454239d72a4a81` / `17160` | Start, Settings, PacMan, gameplay input, and visual app exit. |
 
-The v2 owner was verified before every input action. QAC reported no foreign QEMU process. Shutdown used the owned helper's `hmp quit`; afterward `qac list`, `qac status`, and `qac queue` reported zero reservations, QEMU processes, managed sessions, queued reservations, and blocked requests. Captures are in `boot1/` and `boot2/`; the v2 launch vector is `boot2/qemu-launch.json`.
+The v2 owner was verified before every input action. QAC reported no foreign QEMU process. Shutdown used the owned helper's `hmp quit`; immediately afterward `qac list`, `qac status`, and `qac queue` reported zero reservations, QEMU processes, managed sessions, queued reservations, and blocked requests. A later read-only check briefly observed a distinct QAC reservation (`0203a68771fa4c9ea89a5da16d7814cc`, QEMU PID `19228`, created 02:55:09 UTC). No input or shutdown was sent to it. At 02:55:50 UTC, a subsequent read-only check again reported zero reservations, QEMU processes, sessions, and queued reservations. The final snapshot is `boot2/qac-final-observation-with-concurrent-session.txt`. Captures are in `boot1/` and `boot2/`; the v2 launch vector is `boot2/qemu-launch.json`.
 
 ## 7. Click-path result and acceptance on diagnostic v2
 
