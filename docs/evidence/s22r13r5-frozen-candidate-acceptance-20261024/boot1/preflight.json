@@ -1,0 +1,107 @@
+{
+  "observedAtUtc": "2026-10-24T14:45:10.7049675Z",
+  "repository": "D:\\dev\\guideXOSServer",
+  "branch": "main",
+  "head": "454c8f14dc2048a7174cc517c3499ef62c521a5f",
+  "expectedHead": "454c8f14dc2048a7174cc517c3499ef62c521a5f",
+  "trackedStatusCount": 0,
+  "untrackedFileCount": 9894,
+  "candidateIso": "D:\\dev\\guideXOSServer\\out\\release-profile\\0eed0ed2-df00-403a-9646-0dffb22be3bb\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso",
+  "candidateSha256": "b6b7b0faeef779a4ac06abb96ad749d2ce906df2e7751c1b9c329dd0a23fc2af",
+  "receiptSha256": "b6b7b0faeef779a4ac06abb96ad749d2ce906df2e7751c1b9c329dd0a23fc2af",
+  "buildId": "0eed0ed2-df00-403a-9646-0dffb22be3bb",
+  "sourceCommit": "ea786e2da4da01a57b1ab00429c8453edc9446ad",
+  "releaseProfile": "ServerV03PacManOnly",
+  "nativeElfPackages": [
+    "PacMan"
+  ],
+  "developerStudioPresent": false,
+  "candidateEspAppDirectories": [
+    "PacMan"
+  ],
+  "privateEspFiles": 16,
+  "privateEspTreeSha256": "41370a1164db8554b8483c71b12764a266ebb8399d3ba186f3f7463278671bcd",
+  "privateEspFileList": [
+    {
+      "path": "Apps/PacMan/app.json",
+      "length": 956,
+      "sha256": "3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449"
+    },
+    {
+      "path": "Apps/PacMan/bin/amd64/pacman.elf",
+      "length": 63640,
+      "sha256": "eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/EatPill.wav",
+      "length": 7156,
+      "sha256": "510a52e5776573197aef14d77e393185b6c7148d1b59dac535d45c5ca0498686"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/extralife.wav",
+      "length": 21248,
+      "sha256": "767db1552130e676398c121ec605f90f20c89bbbab272305bc781adc8e91d1cd"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/fruiteat.wav",
+      "length": 5120,
+      "sha256": "82c96a997ac2e837de4e418f29f4f4fa6142dd2a0c38f764b6d989d8bd98605d"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/ghosteat.wav",
+      "length": 9090,
+      "sha256": "225168072b38671c89c1fc775d513ca86fbb899e3e82c8032445f6a6dc5e1b95"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/killed.wav",
+      "length": 17008,
+      "sha256": "1c3e91df8e19041ea5783185c5a8a9f2321993b43481c215d8caf3df590290de"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/StartMusic.wav",
+      "length": 68318,
+      "sha256": "062cdc7196c54033f8bf11878d6659fd5b0ba11cd6945640ec8fac4376919421"
+    },
+    {
+      "path": "Apps/PacMan/resources/audio/startmusicold.wav",
+      "length": 46592,
+      "sha256": "a6e1c14f6cbc59cb5244c0119c728d412252370eea48bc574c1307a774c83caf"
+    },
+    {
+      "path": "Apps/PacMan/resources/level1.gximg",
+      "length": 888860,
+      "sha256": "535b37e66d7159078df8a16ce059a6f7ab038588cc9875e152033d046ff47fe1"
+    },
+    {
+      "path": "Apps/PacMan/resources/pacpics.gximg",
+      "length": 360476,
+      "sha256": "57a605df8f24ac9641ff6c9d39df551a17ffbcd68466a561adf5f045de259d50"
+    },
+    {
+      "path": "build-identity.txt",
+      "length": 1640,
+      "sha256": "0a2bd181ec5187adb94021b85e3b89b2b0c608fab038718d6dd76c37d55882a5"
+    },
+    {
+      "path": "EFI/BOOT/BOOTX64.EFI",
+      "length": 56832,
+      "sha256": "7a42c1c447d12689a0a1fcc2be70183f976a22984c5b4280d7c8e653633cd24b"
+    },
+    {
+      "path": "kernel-symbol-audit.txt",
+      "length": 7972,
+      "sha256": "9f0e95d3ba257f39334bfc1113fc0bffe23bc75f5ce0a9513b33d878337f4991"
+    },
+    {
+      "path": "kernel.elf",
+      "length": 2789752,
+      "sha256": "1bbb1f4ea5f7937fae6b9f6381da3bc8cffcddd2c185b227116fe46e59384fdd"
+    },
+    {
+      "path": "ramdisk.img",
+      "length": 67108864,
+      "sha256": "27fc2310f78aa38d47a2813f07cbec829dd81cfa4211f90b28e28cb572feb578"
+    }
+  ],
+  "qacPhase": "QAC1: accepted\r\nQAC2: accepted\r\nQAC3A: accepted\r\nQAC3B: accepted\r\nQAC3C1: accepted\r\nQAC3C2: accepted\r\nQAC3: open\r\nNext: QAC3C3\r\n"
+}

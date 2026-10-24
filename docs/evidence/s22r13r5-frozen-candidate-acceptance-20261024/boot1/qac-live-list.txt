@@ -1,0 +1,7 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 21340 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-24T14:45:42.6634062+00:00 | managed
+  Note: Reservation 565c10df59bd46aba0d04ac3b87564e7 · guideXOSServer · acceptance
+Reservations: 1
+  565c10df59bd46aba0d04ac3b87564e7 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 3324) | owner Verified | child PID 21340
+Managed sessions: 1
+Managed session: 565c10df59bd46aba0d04ac3b87564e7 | Running | guideXOSServer · LEON2_RDT\guideX (PID 3324)

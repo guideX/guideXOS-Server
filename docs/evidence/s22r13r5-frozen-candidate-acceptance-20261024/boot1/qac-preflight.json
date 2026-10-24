@@ -1,0 +1,26 @@
+{
+  "observedAtUtc": "2026-10-24T14:45:42.1402494Z",
+  "statusExitCode": 0,
+  "listExitCode": 0,
+  "queueExitCode": 0,
+  "status": [
+    "Coordinator: Online",
+    "Name: guideXOS QAC",
+    "Version: 2.0.0",
+    "PID: 16064",
+    "Started (UTC): 2026-10-23T11:10:30.5849382+00:00",
+    "Uptime: 99311s",
+    "QEMU processes: 0 (0 foreign)",
+    "Managed development limit: 2",
+    "Managed sessions: 0; queued: 0; blocked: 0"
+  ],
+  "list": [
+    "Coordinator: Online (guideXOS QAC 2.0.0)",
+    "Reservations: 0",
+    "Managed sessions: 0"
+  ],
+  "queue": [
+    "Queued reservations: 0"
+  ],
+  "qemuProcesses": []
+}

@@ -1,0 +1,145 @@
+2026-10-24T14:57:10.5859163Z RX {"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+2026-10-24T14:57:10.5917233Z TX {"execute":"qmp_capabilities","id":1}
+2026-10-24T14:57:10.5972453Z RX {"return": {}, "id": 1}
+2026-10-24T14:57:10.6076836Z TX {"execute":"query-status","id":2}
+2026-10-24T14:57:10.6087303Z RX {"return": {"status": "running", "running": true}, "id": 2}
+2026-10-24T14:57:10.7705786Z TX {"execute":"query-status","id":3}
+2026-10-24T14:57:10.7715279Z RX {"return": {"status": "running", "running": true}, "id": 3}
+2026-10-24T14:57:10.7735934Z TX {"arguments":{"command-line":"sendkey f"},"execute":"human-monitor-command","id":4}
+2026-10-24T14:57:10.7751738Z RX {"return": "", "id": 4}
+2026-10-24T14:57:10.7760520Z ACTION_COMPLETE hmpkey f index=1/28
+2026-10-24T14:57:11.1004848Z TX {"execute":"query-status","id":5}
+2026-10-24T14:57:11.1013959Z RX {"return": {"status": "running", "running": true}, "id": 5}
+2026-10-24T14:57:11.1023895Z TX {"arguments":{"command-line":"sendkey i"},"execute":"human-monitor-command","id":6}
+2026-10-24T14:57:11.1038091Z RX {"return": "", "id": 6}
+2026-10-24T14:57:11.1049822Z ACTION_COMPLETE hmpkey i index=2/28
+2026-10-24T14:57:11.4363420Z TX {"execute":"query-status","id":7}
+2026-10-24T14:57:11.4372165Z RX {"return": {"status": "running", "running": true}, "id": 7}
+2026-10-24T14:57:11.4382539Z TX {"arguments":{"command-line":"sendkey l"},"execute":"human-monitor-command","id":8}
+2026-10-24T14:57:11.4394051Z RX {"return": "", "id": 8}
+2026-10-24T14:57:11.4401283Z ACTION_COMPLETE hmpkey l index=3/28
+2026-10-24T14:57:11.7631104Z TX {"execute":"query-status","id":9}
+2026-10-24T14:57:11.7639859Z RX {"return": {"status": "running", "running": true}, "id": 9}
+2026-10-24T14:57:11.7649668Z TX {"arguments":{"command-line":"sendkey e"},"execute":"human-monitor-command","id":10}
+2026-10-24T14:57:11.7661282Z RX {"return": "", "id": 10}
+2026-10-24T14:57:11.7669455Z ACTION_COMPLETE hmpkey e index=4/28
+2026-10-24T14:57:12.0969500Z TX {"execute":"query-status","id":11}
+2026-10-24T14:57:12.0978950Z RX {"return": {"status": "running", "running": true}, "id": 11}
+2026-10-24T14:57:12.0990588Z TX {"arguments":{"command-line":"sendkey shift-semicolon"},"execute":"human-monitor-command","id":12}
+2026-10-24T14:57:12.1004184Z RX {"return": "", "id": 12}
+2026-10-24T14:57:12.1011670Z ACTION_COMPLETE hmpkey shift-semicolon index=5/28
+2026-10-24T14:57:12.4259250Z TX {"execute":"query-status","id":13}
+2026-10-24T14:57:12.4267973Z RX {"return": {"status": "running", "running": true}, "id": 13}
+2026-10-24T14:57:12.4277760Z TX {"arguments":{"command-line":"sendkey slash"},"execute":"human-monitor-command","id":14}
+2026-10-24T14:57:12.4290131Z RX {"return": "", "id": 14}
+2026-10-24T14:57:12.4299340Z ACTION_COMPLETE hmpkey slash index=6/28
+2026-10-24T14:57:12.7589247Z TX {"execute":"query-status","id":15}
+2026-10-24T14:57:12.7597897Z RX {"return": {"status": "running", "running": true}, "id": 15}
+2026-10-24T14:57:12.7607675Z TX {"arguments":{"command-line":"sendkey slash"},"execute":"human-monitor-command","id":16}
+2026-10-24T14:57:12.7620732Z RX {"return": "", "id": 16}
+2026-10-24T14:57:12.7628488Z ACTION_COMPLETE hmpkey slash index=7/28
+2026-10-24T14:57:13.0920922Z TX {"execute":"query-status","id":17}
+2026-10-24T14:57:13.0929772Z RX {"return": {"status": "running", "running": true}, "id": 17}
+2026-10-24T14:57:13.0940226Z TX {"arguments":{"command-line":"sendkey slash"},"execute":"human-monitor-command","id":18}
+2026-10-24T14:57:13.0953038Z RX {"return": "", "id": 18}
+2026-10-24T14:57:13.0962923Z ACTION_COMPLETE hmpkey slash index=8/28
+2026-10-24T14:57:13.4249602Z TX {"execute":"query-status","id":19}
+2026-10-24T14:57:13.4257802Z RX {"return": {"status": "running", "running": true}, "id": 19}
+2026-10-24T14:57:13.4266408Z TX {"arguments":{"command-line":"sendkey shift-a"},"execute":"human-monitor-command","id":20}
+2026-10-24T14:57:13.4277461Z RX {"return": "", "id": 20}
+2026-10-24T14:57:13.4283242Z ACTION_COMPLETE hmpkey shift-a index=9/28
+2026-10-24T14:57:13.7563971Z TX {"execute":"query-status","id":21}
+2026-10-24T14:57:13.7571520Z RX {"return": {"status": "running", "running": true}, "id": 21}
+2026-10-24T14:57:13.7579117Z TX {"arguments":{"command-line":"sendkey p"},"execute":"human-monitor-command","id":22}
+2026-10-24T14:57:13.7589751Z RX {"return": "", "id": 22}
+2026-10-24T14:57:13.7596242Z ACTION_COMPLETE hmpkey p index=10/28
+2026-10-24T14:57:14.0897381Z TX {"execute":"query-status","id":23}
+2026-10-24T14:57:14.0904485Z RX {"return": {"status": "running", "running": true}, "id": 23}
+2026-10-24T14:57:14.0911894Z TX {"arguments":{"command-line":"sendkey p"},"execute":"human-monitor-command","id":24}
+2026-10-24T14:57:14.0921879Z RX {"return": "", "id": 24}
+2026-10-24T14:57:14.0927482Z ACTION_COMPLETE hmpkey p index=11/28
+2026-10-24T14:57:14.4138178Z TX {"execute":"query-status","id":25}
+2026-10-24T14:57:14.4147215Z RX {"return": {"status": "running", "running": true}, "id": 25}
+2026-10-24T14:57:14.4160340Z TX {"arguments":{"command-line":"sendkey s"},"execute":"human-monitor-command","id":26}
+2026-10-24T14:57:14.4173819Z RX {"return": "", "id": 26}
+2026-10-24T14:57:14.4181015Z ACTION_COMPLETE hmpkey s index=12/28
+2026-10-24T14:57:14.7631021Z TX {"execute":"query-status","id":27}
+2026-10-24T14:57:14.7637942Z RX {"return": {"status": "running", "running": true}, "id": 27}
+2026-10-24T14:57:14.7646619Z TX {"arguments":{"command-line":"sendkey slash"},"execute":"human-monitor-command","id":28}
+2026-10-24T14:57:14.7659381Z RX {"return": "", "id": 28}
+2026-10-24T14:57:14.7665754Z ACTION_COMPLETE hmpkey slash index=13/28
+2026-10-24T14:57:15.0878364Z TX {"execute":"query-status","id":29}
+2026-10-24T14:57:15.0888804Z RX {"return": {"status": "running", "running": true}, "id": 29}
+2026-10-24T14:57:15.0897033Z TX {"arguments":{"command-line":"sendkey shift-p"},"execute":"human-monitor-command","id":30}
+2026-10-24T14:57:15.0909228Z RX {"return": "", "id": 30}
+2026-10-24T14:57:15.0917356Z ACTION_COMPLETE hmpkey shift-p index=14/28
+2026-10-24T14:57:15.4191363Z TX {"execute":"query-status","id":31}
+2026-10-24T14:57:15.4198486Z RX {"return": {"status": "running", "running": true}, "id": 31}
+2026-10-24T14:57:15.4204586Z TX {"arguments":{"command-line":"sendkey a"},"execute":"human-monitor-command","id":32}
+2026-10-24T14:57:15.4283935Z RX {"return": "", "id": 32}
+2026-10-24T14:57:15.4291522Z ACTION_COMPLETE hmpkey a index=15/28
+2026-10-24T14:57:15.7536233Z TX {"execute":"query-status","id":33}
+2026-10-24T14:57:15.7542754Z RX {"return": {"status": "running", "running": true}, "id": 33}
+2026-10-24T14:57:15.7548390Z TX {"arguments":{"command-line":"sendkey c"},"execute":"human-monitor-command","id":34}
+2026-10-24T14:57:15.7557870Z RX {"return": "", "id": 34}
+2026-10-24T14:57:15.7562285Z ACTION_COMPLETE hmpkey c index=16/28
+2026-10-24T14:57:16.0788268Z TX {"execute":"query-status","id":35}
+2026-10-24T14:57:16.0795077Z RX {"return": {"status": "running", "running": true}, "id": 35}
+2026-10-24T14:57:16.0802018Z TX {"arguments":{"command-line":"sendkey shift-m"},"execute":"human-monitor-command","id":36}
+2026-10-24T14:57:16.0813668Z RX {"return": "", "id": 36}
+2026-10-24T14:57:16.0819644Z ACTION_COMPLETE hmpkey shift-m index=17/28
+2026-10-24T14:57:16.4390805Z TX {"execute":"query-status","id":37}
+2026-10-24T14:57:16.4397865Z RX {"return": {"status": "running", "running": true}, "id": 37}
+2026-10-24T14:57:16.4403568Z TX {"arguments":{"command-line":"sendkey a"},"execute":"human-monitor-command","id":38}
+2026-10-24T14:57:16.4413930Z RX {"return": "", "id": 38}
+2026-10-24T14:57:16.4420130Z ACTION_COMPLETE hmpkey a index=18/28
+2026-10-24T14:57:16.7883720Z TX {"execute":"query-status","id":39}
+2026-10-24T14:57:16.7891006Z RX {"return": {"status": "running", "running": true}, "id": 39}
+2026-10-24T14:57:16.7897322Z TX {"arguments":{"command-line":"sendkey n"},"execute":"human-monitor-command","id":40}
+2026-10-24T14:57:16.7906904Z RX {"return": "", "id": 40}
+2026-10-24T14:57:16.7911709Z ACTION_COMPLETE hmpkey n index=19/28
+2026-10-24T14:57:17.1011114Z TX {"execute":"query-status","id":41}
+2026-10-24T14:57:17.1017754Z RX {"return": {"status": "running", "running": true}, "id": 41}
+2026-10-24T14:57:17.1022982Z TX {"arguments":{"command-line":"sendkey slash"},"execute":"human-monitor-command","id":42}
+2026-10-24T14:57:17.1034079Z RX {"return": "", "id": 42}
+2026-10-24T14:57:17.1038400Z ACTION_COMPLETE hmpkey slash index=20/28
+2026-10-24T14:57:17.4242924Z TX {"execute":"query-status","id":43}
+2026-10-24T14:57:17.4249345Z RX {"return": {"status": "running", "running": true}, "id": 43}
+2026-10-24T14:57:17.4254403Z TX {"arguments":{"command-line":"sendkey a"},"execute":"human-monitor-command","id":44}
+2026-10-24T14:57:17.4263579Z RX {"return": "", "id": 44}
+2026-10-24T14:57:17.4267546Z ACTION_COMPLETE hmpkey a index=21/28
+2026-10-24T14:57:17.7518586Z TX {"execute":"query-status","id":45}
+2026-10-24T14:57:17.7524873Z RX {"return": {"status": "running", "running": true}, "id": 45}
+2026-10-24T14:57:17.7530196Z TX {"arguments":{"command-line":"sendkey p"},"execute":"human-monitor-command","id":46}
+2026-10-24T14:57:17.7539965Z RX {"return": "", "id": 46}
+2026-10-24T14:57:17.7543872Z ACTION_COMPLETE hmpkey p index=22/28
+2026-10-24T14:57:18.0891043Z TX {"execute":"query-status","id":47}
+2026-10-24T14:57:18.0897019Z RX {"return": {"status": "running", "running": true}, "id": 47}
+2026-10-24T14:57:18.0901559Z TX {"arguments":{"command-line":"sendkey p"},"execute":"human-monitor-command","id":48}
+2026-10-24T14:57:18.0910569Z RX {"return": "", "id": 48}
+2026-10-24T14:57:18.0914366Z ACTION_COMPLETE hmpkey p index=23/28
+2026-10-24T14:57:18.4127908Z TX {"execute":"query-status","id":49}
+2026-10-24T14:57:18.4135755Z RX {"return": {"status": "running", "running": true}, "id": 49}
+2026-10-24T14:57:18.4140800Z TX {"arguments":{"command-line":"sendkey dot"},"execute":"human-monitor-command","id":50}
+2026-10-24T14:57:18.4150332Z RX {"return": "", "id": 50}
+2026-10-24T14:57:18.4154489Z ACTION_COMPLETE hmpkey dot index=24/28
+2026-10-24T14:57:18.7373282Z TX {"execute":"query-status","id":51}
+2026-10-24T14:57:18.7380132Z RX {"return": {"status": "running", "running": true}, "id": 51}
+2026-10-24T14:57:18.7384662Z TX {"arguments":{"command-line":"sendkey j"},"execute":"human-monitor-command","id":52}
+2026-10-24T14:57:18.7393561Z RX {"return": "", "id": 52}
+2026-10-24T14:57:18.7397589Z ACTION_COMPLETE hmpkey j index=25/28
+2026-10-24T14:57:19.0770524Z TX {"execute":"query-status","id":53}
+2026-10-24T14:57:19.0777483Z RX {"return": {"status": "running", "running": true}, "id": 53}
+2026-10-24T14:57:19.0782233Z TX {"arguments":{"command-line":"sendkey s"},"execute":"human-monitor-command","id":54}
+2026-10-24T14:57:19.0791227Z RX {"return": "", "id": 54}
+2026-10-24T14:57:19.0795965Z ACTION_COMPLETE hmpkey s index=26/28
+2026-10-24T14:57:19.6011667Z TX {"execute":"query-status","id":55}
+2026-10-24T14:57:19.6019988Z RX {"return": {"status": "running", "running": true}, "id": 55}
+2026-10-24T14:57:19.6028930Z TX {"arguments":{"command-line":"sendkey o"},"execute":"human-monitor-command","id":56}
+2026-10-24T14:57:19.6044878Z RX {"return": "", "id": 56}
+2026-10-24T14:57:19.6062445Z ACTION_COMPLETE hmpkey o index=27/28
+2026-10-24T14:57:19.9433699Z TX {"execute":"query-status","id":57}
+2026-10-24T14:57:19.9440452Z RX {"return": {"status": "running", "running": true}, "id": 57}
+2026-10-24T14:57:19.9444850Z TX {"arguments":{"command-line":"sendkey n"},"execute":"human-monitor-command","id":58}
+2026-10-24T14:57:19.9453762Z RX {"return": "", "id": 58}
+2026-10-24T14:57:19.9464096Z ACTION_COMPLETE hmpkey n index=28/28

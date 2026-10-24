@@ -1,0 +1,7 @@
+{
+  "ProcessId": 21340,
+  "ParentProcessId": 3324,
+  "CreationDate": "2026-10-24T07:45:42.663406-07:00",
+  "ExecutablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc,accel=whpx -smp 2 -m 2048M -vga std -display none -drive if=pflash,format=raw,readonly=on,file=D:\\dev\\guideXOSServer\\docs\\evidence\\settings-s22-v03-package-20261018\\OVMF-s22-readonly.fd -drive if=ide,format=raw,file=fat:rw:D:\\dev\\guideXOSServer\\docs\\evidence\\s22r13r5-frozen-candidate-acceptance-20261024\\boot1\\guest\\writable-esp,index=0 -drive if=none,id=releasecdrom,file=D:\\dev\\guideXOSServer\\out\\release-profile\\0eed0ed2-df00-403a-9646-0dffb22be3bb\\artifacts\\guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso,media=cdrom,readonly=on,format=raw -device ide-cd,drive=releasecdrom,bootindex=1 -boot order=d -net none -serial file:D:\\dev\\guideXOSServer\\docs\\evidence\\s22r13r5-frozen-candidate-acceptance-20261024\\boot1\\serial.log -D D:\\dev\\guideXOSServer\\docs\\evidence\\s22r13r5-frozen-candidate-acceptance-20261024\\boot1\\qemu-debug.log -d guest_errors,cpu_reset -rtc base=utc,clock=host -no-reboot -no-shutdown -monitor none -qmp tcp:127.0.0.1:64216,server=on,wait=off -name guideXOS-S22R13R5-frozen-candidate-boot1-storage-backed"
+}
