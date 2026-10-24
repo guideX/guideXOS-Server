@@ -868,7 +868,8 @@ public sealed partial class ManagedNotes : GuideXosApplication
         host.TryLog("C188R4-204 AFTER C133-COMBO-TEST-CONTEXT-INITIAL"u8);
         host.TryLog("C188R4-205 BEFORE C133-HOST-TEST-CONTEXT-INITIAL"u8);
 #endif
-        _c133HostTestContext = host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+        _c133HostTestContext = GuideXosNotesProofTestInvocation
+            .IsC133HostTestContext(host.LaunchContext.Utf8);
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
         host.TryLog("C188R4-206 AFTER C133-HOST-TEST-CONTEXT-INITIAL"u8);
 #endif
@@ -876,8 +877,8 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
         host.TryLog("C188R4-207 BEFORE C134-HOST-TEST-CONTEXT-INITIAL"u8);
 #endif
-        _c134HostTestContext =
-            host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+        _c134HostTestContext = GuideXosNotesProofTestInvocation
+            .IsC134HostTestContext(host.LaunchContext.Utf8);
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
         host.TryLog("C188R4-208 AFTER C134-HOST-TEST-CONTEXT-INITIAL"u8);
 #endif
@@ -1287,8 +1288,8 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
         host.TryLog("C188R4-310 BEFORE C134-HOST-TEST-CONTEXT-SECOND-PASS"u8);
 #endif
-        _c134HostTestContext =
-            host.LaunchContext.Utf8.SequenceEqual("c134-host-tests"u8);
+        _c134HostTestContext = GuideXosNotesProofTestInvocation
+            .IsC134HostTestContext(host.LaunchContext.Utf8);
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
         host.TryLog("C188R4-311 AFTER C134-HOST-TEST-CONTEXT-SECOND-PASS"u8);
 #endif
@@ -1589,7 +1590,8 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 #endif
-        if (_c133ProofContext && !_c134HostTestsRun)
+        if (GuideXosNotesProofTestInvocation.ShouldRunC134HostTests(
+                host.LaunchContext.Utf8, _c134HostTestsRun))
         {
 #if HOSTLOGPROOF_C188R4_NOTES_STARTUP
             host.TryLog("C188R4-379 BRANCH C133-PROOF-TEST=TAKEN"u8);
@@ -3766,9 +3768,8 @@ public sealed partial class ManagedNotes : GuideXosApplication
 
     private static bool IsC133HostTestContext(GuideXosHost host)
     {
-        return host.LaunchContext.Utf8.SequenceEqual(
-            "c133-combo-host-tests"u8) ||
-            host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
+        return GuideXosNotesProofTestInvocation.IsC133HostTestContext(
+            host.LaunchContext.Utf8);
     }
 #endif
 #endif

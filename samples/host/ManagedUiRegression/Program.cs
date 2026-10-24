@@ -1,6 +1,11 @@
 using HostLogProof;
 using HostLogProof.Applications;
 
+if (args.Length == 1 && args[0] == "--c188r5-notes-proof-invocation")
+{
+    return NotesProofInvocationC188R5Regression.Run() ? 0 : 1;
+}
+
 int passedSuites = 0;
 int failedSuites = 0;
 int totalCases = 0;

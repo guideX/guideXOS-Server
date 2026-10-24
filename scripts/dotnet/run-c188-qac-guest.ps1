@@ -16,13 +16,19 @@ if ([bool]$ProductionCompatibility -ne $isProductionScenario) {
 }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity'))
+$phaseRoots = @(
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation')))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
-$relativeBootRoot = [System.IO.Path]::GetRelativePath($phaseRoot, $bootRoot)
-if ($relativeBootRoot -eq '.' -or $relativeBootRoot.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-    [System.IO.Path]::IsPathRooted($relativeBootRoot)) {
-    throw "C188 guest evidence must remain below $phaseRoot."
+$phaseRoot = @($phaseRoots | Where-Object {
+    $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
+    $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
+        -not [System.IO.Path]::IsPathRooted($relative)
+} | Select-Object -First 1)
+if ($phaseRoot.Count -eq 0) {
+    throw "C188 guest evidence must remain below one of: $($phaseRoots -join ', ')."
 }
+$phaseRoot = $phaseRoot[0]
 $esp = Join-Path $bootRoot 'esp'
 $serial = Join-Path $bootRoot 'serial.log'
 $qmpLog = Join-Path $bootRoot 'qmp.log'
@@ -47,6 +53,15 @@ Set-Content -LiteralPath (Join-Path $bootRoot 'qac-before.status.txt') -Value $q
 Set-Content -LiteralPath (Join-Path $bootRoot 'qac-before.list.txt') -Value $qacListBefore -Encoding utf8
 if ($qacStatusBefore -notmatch 'Coordinator:\s+Online' -or $qacStatusBefore -notmatch 'QEMU processes:\s+\d+ \(0 foreign\)') {
     throw 'QAC is unavailable or reports a foreign QEMU process; C188 guest launch was not attempted.'
+}
+$c188r5Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation'))
+$isC188R5Boot = $bootRoot.StartsWith($c188r5Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+    [System.StringComparison]::OrdinalIgnoreCase)
+if ($isC188R5Boot -and (
+        $qacStatusBefore -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
+        $qacListBefore -notmatch 'Reservations:\s+0' -or
+        $qacListBefore -notmatch 'Managed sessions:\s+0')) {
+    throw 'C188R5 requires exclusive QAC admission; an existing reservation or managed session was detected.'
 }
 
 $mediaHashes = [ordered]@{}

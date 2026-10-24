@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$BuildRoot,
     [Parameter()][switch]$NotesStartupDiagnostics,
-    [Parameter()][switch]$NotesStartupOperationIsolation
+    [Parameter()][switch]$NotesStartupOperationIsolation,
+    [Parameter()][switch]$NotesProofInvocationCorrection
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -9,8 +10,12 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'C188 NativeAOT candidate builds require PowerShell Core.'
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-if ($NotesStartupDiagnostics -and $NotesStartupOperationIsolation) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$selectedPhaseCount = 0
+if ($NotesStartupDiagnostics) { $selectedPhaseCount++ }
+if ($NotesStartupOperationIsolation) { $selectedPhaseCount++ }
+if ($NotesProofInvocationCorrection) { $selectedPhaseCount++ }
+if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
+$phaseRootName = if ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $build = [System.IO.Path]::GetFullPath($BuildRoot)
 $relative = [System.IO.Path]::GetRelativePath($phaseRoot, $build)
@@ -75,6 +80,10 @@ if ($NotesStartupDiagnostics) {
 if ($NotesStartupOperationIsolation) {
     $arguments.C188R4NotesStartupOperationIsolation = $true
 }
+if ($NotesProofInvocationCorrection) {
+    $arguments.C188R3NotesStartupDiagnostics = $true
+    $arguments.C188R4NotesStartupOperationIsolation = $true
+}
 $logPath = Join-Path $build 'nativeaot-build.log'
 $output = ''
 $buildExitCode = 0
@@ -94,6 +103,8 @@ if ($NotesStartupDiagnostics) {
     & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification') -NotesStartupDiagnostics
 } elseif ($NotesStartupOperationIsolation) {
     & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification') -NotesStartupOperationIsolation
+} elseif ($NotesProofInvocationCorrection) {
+    & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification') -NotesProofInvocationCorrection
 } else {
     & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification')
 }
@@ -108,6 +119,7 @@ $manifest = [ordered]@{
     isolatedArtifactsPath=(Join-Path $nativeRoot 'project-artifacts')
     notesStartupDiagnostics=[bool]$NotesStartupDiagnostics
     notesStartupOperationIsolation=[bool]$NotesStartupOperationIsolation
+    notesProofInvocationCorrection=[bool]$NotesProofInvocationCorrection
     productionApplicationSelectorsPreserved=@(4,5,6,7,8)
     candidateSelector=9; candidateIdentity='com.guidexos.apps.managed.counterapp'
 }

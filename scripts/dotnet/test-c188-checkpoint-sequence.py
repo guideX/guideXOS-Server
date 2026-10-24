@@ -139,6 +139,37 @@ class CheckpointSequenceTests(unittest.TestCase):
         self.assertEqual([], result["missingRequiredCheckpoints"])
         self.assertEqual("SKIPPED", result["branchOutcomes"]["C127-LAYOUT"])
 
+    def test_c188r5_uses_the_r4_instrumented_skip_path(self) -> None:
+        self.assertEqual(
+            CHECKPOINTS.describe("C188R4")["expectedOrderedCheckpoints"],
+            CHECKPOINTS.describe("C188R5")["expectedOrderedCheckpoints"],
+        )
+        steps = CHECKPOINTS.r3_steps(True)
+        lines: list[str] = []
+        for step in steps:
+            if step.branch_key is not None:
+                continue
+            if "BRANCH" in step.patterns[0]:
+                lines.append(re.sub(r"\\(.)", r"\1", step.patterns[-1]))
+                continue
+            pattern = step.patterns[0]
+            if step.name == "C150 application instance":
+                marker = "C150-APP-INSTANCE id=4 generation=1"
+            elif step.name == "native launch return":
+                marker = "[C102-LAUNCH-RETURN] status=0x00000000"
+            else:
+                marker = re.sub(r"\\(.)", r"\1", pattern)
+            lines.append(marker)
+
+        result = CHECKPOINTS.validate_text(
+            "\n".join(lines) + "\n",
+            CHECKPOINTS.r3_steps(True),
+            capture_state="complete",
+        )
+        self.assertEqual("PASS", result["result"])
+        self.assertEqual("SKIPPED", result["branchOutcomes"]["C133-PROOF-TEST"])
+        self.assertEqual([], result["missingRequiredCheckpoints"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

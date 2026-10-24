@@ -4,14 +4,21 @@ param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
     [Parameter()][ValidateRange(90,240)][int]$BootTimeoutSeconds = 150,
     [Parameter()][ValidateRange(1,60)][int]$AdmissionWindowSeconds = 60,
-    [Parameter()][ValidateSet('C188R3','C188R4')][string]$Phase = 'C188R3'
+    [Parameter()][switch]$ProbeNotesInput,
+    [Parameter()][ValidateSet('C188R3','C188R4','C188R5')][string]$Phase = 'C188R3'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -ne 'Core') { throw 'C188 Notes startup diagnostic guest requires PowerShell Core.' }
+if ($Phase -eq 'C188R5' -and -not $ProbeNotesInput) {
+    throw 'C188R5 requires a real Notes pointer and keyboard input probe.'
+}
+if ($ProbeNotesInput -and $Phase -ne 'C188R5') {
+    throw 'The real Notes input probe is reserved for the C188R5 diagnostic guest.'
+}
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRootName = if ($Phase -eq 'C188R4') { 'out/dotnet/c188r4-notes-startup-operation' } else { 'out/dotnet/c188r3-notes-startup-diagnostics' }
+$phaseRootName = if ($Phase -eq 'C188R5') { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($Phase -eq 'C188R4') { 'out/dotnet/c188r4-notes-startup-operation' } else { 'out/dotnet/c188r3-notes-startup-diagnostics' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $root = [System.IO.Path]::GetFullPath($RunRoot)
 $relativeRoot = [System.IO.Path]::GetRelativePath($phaseRoot, $root)
@@ -36,7 +43,8 @@ $evidencePaths = @(
     (Join-Path $root 'qac-after.status.txt'), (Join-Path $root 'qac-after.list.txt'),
     (Join-Path $root 'qac.stdout.log'), (Join-Path $root 'qac.stderr.log'),
     (Join-Path $root 'qac-run-arguments.json'), (Join-Path $root 'observed-checkpoints.json'),
-    (Join-Path $root 'qac-exit-code.txt'), (Join-Path $root 'final-stage.ppm'))
+    (Join-Path $root 'qac-exit-code.txt'), (Join-Path $root 'notes-before-input.ppm'),
+    (Join-Path $root 'final-stage.ppm'))
 foreach ($path in $evidencePaths) {
     if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite C188 startup diagnostic evidence: $path" }
 }
@@ -87,6 +95,10 @@ Set-Content -LiteralPath (Join-Path $root 'qac-before.list.txt') -Value $qacList
 $preflightClear = $qacStatusBefore -match 'Coordinator:\s+Online' -and
     $qacStatusBefore -match 'QEMU processes:\s+0 \(0 foreign\)' -and
     $qacListBefore -match 'Reservations:\s+0'
+if ($Phase -eq 'C188R5') {
+    $preflightClear = $preflightClear -and
+        $qacListBefore -match 'Managed sessions:\s+0'
+}
 if (-not $preflightClear) {
     $expected.outcome = 'blocked-before-launch'
     $manifest = [ordered]@{result='BLOCKED';reason='QAC unavailable or acceptance ownership is already active';qacStatus=$qacStatusBefore.Trim();qacList=$qacListBefore.Trim();expectedObservations=$expectedPath}
@@ -134,6 +146,10 @@ $bootLoopReached = $false
 $inputManagerInitialized = $false
 $qemuStatus = $null
 $screenshotPath = Join-Path $root 'final-stage.ppm'
+$notesBeforeInputPath = Join-Path $root 'notes-before-input.ppm'
+$notesPointerAccepted = $false
+$notesKeyboardAccepted = $false
+$notesSurfaceCreated = $false
 $reservationId = $null
 $reservationRequestUtc = [DateTime]::UtcNow
 $admissionWaitSeconds = $null
@@ -165,6 +181,47 @@ function Invoke-DiagnosticQmp([string]$Command,[object]$Arguments=$null) {
         if ($response -match '"error"') { throw "QMP $Command failed: $response" }
         return $response
     } finally { $client.Dispose() }
+}
+
+function Send-DiagnosticInputEvent([string]$Type,[object]$Data) {
+    $event = [ordered]@{type=$Type;data=$Data}
+    [void](Invoke-DiagnosticQmp 'input-send-event' ([ordered]@{events=@($event)}))
+}
+
+function Send-DiagnosticNotesInput([string]$CurrentSerial) {
+    $widthMatch = [regex]::Match($CurrentSerial,'(?m)^\[DESKTOP CAP\] framebuffer_width=0x([0-9A-Fa-f]+)\r?$')
+    $heightMatch = [regex]::Match($CurrentSerial,'(?m)^\[DESKTOP CAP\] framebuffer_height=0x([0-9A-Fa-f]+)\r?$')
+    if (-not $widthMatch.Success -or -not $heightMatch.Success) {
+        throw 'C188R5 input probe requires framebuffer dimensions from the guest.'
+    }
+    $width = [Convert]::ToInt32($widthMatch.Groups[1].Value,16)
+    $height = [Convert]::ToInt32($heightMatch.Groups[1].Value,16)
+    if ($width -lt 600 -or $height -lt 360) {
+        throw "C188R5 Notes input target does not fit the reported framebuffer ${width}x${height}."
+    }
+    # The centered Notes window is 600x360. Its editor begins at client
+    # coordinate (20,84), below the 24-pixel title bar.
+    $targetX = [int](($width - 600) / 2) + 40
+    $targetY = [int](($height - 360) / 2) + 140
+    $cursorX = [Math]::Min($width - 1,[int]($width / 2) + 1)
+    $cursorY = [Math]::Min($height - 1,[int]($height / 2) + 1)
+    foreach ($axis in @(@{name='x';current=$cursorX;target=$targetX},@{name='y';current=$cursorY;target=$targetY})) {
+        $remaining = [int]($axis.target - $axis.current)
+        while ($remaining -ne 0) {
+            $step = [Math]::Sign($remaining) * [Math]::Min([Math]::Abs($remaining),40)
+            Send-DiagnosticInputEvent 'rel' ([ordered]@{axis=$axis.name;value=$step})
+            $remaining -= $step
+        }
+    }
+    Send-DiagnosticInputEvent 'btn' ([ordered]@{button='left';down=$true})
+    Start-Sleep -Milliseconds 100
+    Send-DiagnosticInputEvent 'btn' ([ordered]@{button='left';down=$false})
+    Start-Sleep -Milliseconds 250
+    Send-DiagnosticInputEvent 'key' ([ordered]@{down=$true;key=[ordered]@{type='qcode';data='a'}})
+    Start-Sleep -Milliseconds 80
+    Send-DiagnosticInputEvent 'key' ([ordered]@{down=$false;key=[ordered]@{type='qcode';data='a'}})
+    Start-Sleep -Milliseconds 400
+    return Read-DiagnosticSerial
 }
 
 function Wait-DiagnosticQmp([int]$TimeoutSeconds) {
@@ -232,7 +289,16 @@ try {
     $serialText = Read-DiagnosticSerial
     if ($bootLoopReached) { $outcome = 'input-loop-reached' }
     else { $outcome = 'startup-timeout-or-guest-exit' }
+    $notesSurfaceCreated = $serialText -match '(?m)^\[C150-SURFACE\] action=create appId=com\.guidexos\.apps\.managed\.notes generation=[0-9A-Fa-f]+ window=[0-9A-Fa-f]+ result=PASS\r?$'
     try { $qemuStatus = Invoke-DiagnosticQmp 'query-status' } catch { $qemuStatus = "query-status failed: $($_.Exception.Message)" }
+    if ($bootLoopReached -and $ProbeNotesInput) {
+        if ($notesSurfaceCreated) {
+            [void](Invoke-DiagnosticQmp 'screendump' ([ordered]@{filename=$notesBeforeInputPath}))
+            $serialText = Send-DiagnosticNotesInput $serialText
+            $notesPointerAccepted = $serialText -match '(?m)^C120-POINTER target=document result=PASS\r?$'
+            $notesKeyboardAccepted = $serialText -match '(?m)^C117-TEXT-AREA edit=changed result=PASS\r?$'
+        }
+    }
     try { [void](Invoke-DiagnosticQmp 'screendump' ([ordered]@{filename=$screenshotPath})) } catch {
         $screenshotPath = $null
         Set-Content -LiteralPath (Join-Path $root 'screendump-error.txt') -Value $_.Exception.Message -Encoding utf8
@@ -297,8 +363,9 @@ $firstMissing = $checkpointAnalysis.firstExpectedMissingCheckpoint
 $serialHash = if (Test-Path -LiteralPath $serial) { (Get-FileHash -LiteralPath $serial -Algorithm SHA256).Hash } else { $null }
 $qmpHash = if (Test-Path -LiteralPath $qmpLog) { (Get-FileHash -LiteralPath $qmpLog -Algorithm SHA256).Hash } else { $null }
 $screenshotHash = if ($null -ne $screenshotPath -and (Test-Path -LiteralPath $screenshotPath)) { (Get-FileHash -LiteralPath $screenshotPath -Algorithm SHA256).Hash } else { $null }
+$notesInputProbePassed = -not $ProbeNotesInput -or ($notesSurfaceCreated -and $notesPointerAccepted -and $notesKeyboardAccepted)
 $manifest = [ordered]@{
-    result=if ($outcome -eq 'input-loop-reached' -and $releaseVerified) { 'PASS-DIAGNOSTIC-BOUNDARY-REACHED' } elseif ($outcome -eq 'runner-error') { 'RUNNER-ERROR' } else { 'GUEST-DID-NOT-REACH-INPUT-LOOP' }
+    result=if ($outcome -eq 'input-loop-reached' -and $releaseVerified -and $notesInputProbePassed) { 'PASS-DIAGNOSTIC-BOUNDARY-REACHED' } elseif ($outcome -eq 'runner-error') { 'RUNNER-ERROR' } elseif (-not $bootLoopReached) { 'GUEST-DID-NOT-REACH-INPUT-LOOP' } elseif ($ProbeNotesInput -and -not $notesInputProbePassed) { 'GUEST-REACHED-LOOP-BUT-NOTES-INPUT-PROBE-FAILED' } else { 'GUEST-DID-NOT-REACH-INPUT-LOOP' }
     outcome=$outcome;phase=$Phase;runRoot=$root;project='guideXOSServer';mode='acceptance'
     qacOwnerPid=$qacProcess.Id;qacReservationId=$reservationId;qacReservationRequestId=if ($reservationRequest.Success) { $reservationRequest.Groups[1].Value } else { $null }
     qacGuestPid=if ($childExit.Success) { $childExit.Groups[2].Value } else { $null }
@@ -306,6 +373,10 @@ $manifest = [ordered]@{
     qacReleaseVerified=$releaseVerified;qacAdmissionWaitSeconds=$admissionWaitSeconds
     bootTimeoutSeconds=$BootTimeoutSeconds;bootLoopReached=$bootLoopReached;qemuStatus=$qemuStatus
     inputManagerInitialized=$inputManagerInitialized;acceptanceReadinessPredicateSatisfied=($inputManagerInitialized -and $bootLoopReached)
+    notesInputProbeRequested=[bool]$ProbeNotesInput;notesSurfaceCreated=$notesSurfaceCreated
+    notesPointerAccepted=$notesPointerAccepted;notesKeyboardAccepted=$notesKeyboardAccepted
+    notesBeforeInputScreenshot=if (Test-Path -LiteralPath $notesBeforeInputPath) { $notesBeforeInputPath } else { $null }
+    notesBeforeInputScreenshotSha256=if (Test-Path -LiteralPath $notesBeforeInputPath) { (Get-FileHash -LiteralPath $notesBeforeInputPath -Algorithm SHA256).Hash } else { $null }
     checkpointCaptureState=$captureState;checkpointValidationResult=$checkpointAnalysis.result;checkpointValidation=(Join-Path $root 'observed-checkpoints.json')
     kernelSha256=$mediaHashes['kernel.elf'];managedCompositeSha256=$managedHash;ramdiskSha256=$mediaHashes['ramdisk.img'];uefiLoaderSha256=$mediaHashes['EFI/BOOT/BOOTX64.EFI']
     serialLog=$serial;serialLogSha256=$serialHash;qmpLog=$qmpLog;qmpLogSha256=$qmpHash
@@ -321,3 +392,4 @@ Write-Output ("{0}_DIAGNOSTIC outcome={1} last={2} firstMissing={3} qacReleaseVe
 Write-Output "${Phase}_DIAGNOSTIC_MANIFEST=$manifestPath"
 if (-not $releaseVerified) { exit 4 }
 if (-not $bootLoopReached) { exit 2 }
+if (-not $notesInputProbePassed) { exit 5 }

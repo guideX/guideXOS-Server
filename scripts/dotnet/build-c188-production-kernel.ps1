@@ -8,14 +8,19 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
 }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$artifactRoot = [System.IO.Path]::GetFullPath(
-    (Join-Path $repo 'out\dotnet\c188-external-app-identity'))
+$artifactRoots = @(
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188-external-app-identity')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r5-notes-proof-invocation')))
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
-$relativeBuildRoot = [System.IO.Path]::GetRelativePath($artifactRoot, $buildRootFull)
-if ($relativeBuildRoot -eq '.' -or $relativeBuildRoot.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-    [System.IO.Path]::IsPathRooted($relativeBuildRoot)) {
-    throw "BuildRoot must be a unique directory below $artifactRoot."
+$artifactRoot = @($artifactRoots | Where-Object {
+    $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
+    $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
+        -not [System.IO.Path]::IsPathRooted($relative)
+} | Select-Object -First 1)
+if ($artifactRoot.Count -eq 0) {
+    throw "BuildRoot must be a unique directory below one of: $($artifactRoots -join ', ')."
 }
+$artifactRoot = $artifactRoot[0]
 if (Test-Path -LiteralPath $buildRootFull) {
     throw "Refusing to overwrite an existing C188 kernel build: $buildRootFull"
 }

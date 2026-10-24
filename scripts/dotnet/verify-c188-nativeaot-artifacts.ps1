@@ -3,14 +3,19 @@ param(
     [Parameter(Mandatory=$true)][string]$EvidenceRoot,
     [Parameter()][switch]$NotesStartupDiagnostics,
     [Parameter()][switch]$NotesStartupOperationIsolation,
+    [Parameter()][switch]$NotesProofInvocationCorrection,
     [Parameter()][string]$ReadElfPath = 'C:\mingw64\bin\readelf.exe'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation
-if ($NotesStartupDiagnostics -and $NotesStartupOperationIsolation) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation -or $NotesProofInvocationCorrection
+$selectedPhaseCount = 0
+if ($NotesStartupDiagnostics) { $selectedPhaseCount++ }
+if ($NotesStartupOperationIsolation) { $selectedPhaseCount++ }
+if ($NotesProofInvocationCorrection) { $selectedPhaseCount++ }
+if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
+$phaseRootName = if ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)

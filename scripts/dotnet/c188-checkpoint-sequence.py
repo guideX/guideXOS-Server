@@ -434,7 +434,7 @@ def validate_text(
 
 
 def describe(phase: str) -> dict[str, object]:
-    is_r4 = phase == "C188R4"
+    is_r4 = phase in {"C188R4", "C188R5"}
     steps = r3_steps(is_r4)
     return {
         "phase": phase,
@@ -450,9 +450,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     describe_parser = subparsers.add_parser("describe")
-    describe_parser.add_argument("--phase", choices=("C188R3", "C188R4"), required=True)
+    describe_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5"), required=True)
     validate_parser = subparsers.add_parser("validate")
-    validate_parser.add_argument("--phase", choices=("C188R3", "C188R4"), required=True)
+    validate_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5"), required=True)
     validate_parser.add_argument("--serial", type=Path, required=True)
     validate_parser.add_argument("--capture-state", choices=("complete", "truncated", "incomplete", "unknown"), default="unknown")
     args = parser.parse_args(argv)
@@ -461,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     raw = args.serial.read_bytes()
     text = raw.decode("utf-8", errors="replace")
-    result = validate_text(text, r3_steps(args.phase == "C188R4"), capture_state=args.capture_state)
+    result = validate_text(text, r3_steps(args.phase in {"C188R4", "C188R5"}), capture_state=args.capture_state)
     result["serialPath"] = str(args.serial)
     result["serialSha256"] = hashlib.sha256(raw).hexdigest().upper()
     print(json.dumps(result, indent=2))
