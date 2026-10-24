@@ -1,0 +1,7 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 24052 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-24T17:55:04.9801461+00:00 | managed
+  Note: Reservation 8b84465adf184cc6a1f416744168127c · guideXOSServer · acceptance
+Reservations: 1
+  8b84465adf184cc6a1f416744168127c | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 31704) | owner Verified | child PID 24052
+Managed sessions: 1
+Managed session: 8b84465adf184cc6a1f416744168127c | Running | guideXOSServer · LEON2_RDT\guideX (PID 31704)

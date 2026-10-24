@@ -1,0 +1,42 @@
+{
+  "schema": "guidexos.rexx.rx37r1.regression-evidence.v1",
+  "recorded_at_utc": "2026-10-24T19:00:36.3877389Z",
+  "newly_executed_for_rx37r1": false,
+  "evidence_source_revision": "4906677df9818f6c241d4c233bde1a65e68f5741",
+  "source_matches_head": true,
+  "provenance_note": "RX37 logs predate the local RX37 commit and do not embed its final commit SHA. Current relevant tracked files match HEAD; source-to-build linkage is based on RX37 records and not a separate cryptographic commit attestation.",
+  "hosted": {
+    "historical_exit_code": 0,
+    "focused_assertions": 4203,
+    "direct_assertions": 107,
+    "property_cases": 4096,
+    "cli_cases": "28/28",
+    "inherited_regressions": "RX1–RX36 inherited runner passed; 28/28 CLI cases and phase fixture counts passed.",
+    "runner_log": "docs/rexx/evidence/rx37/hosted-regression-runner.log",
+    "exit_record": "docs/rexx/evidence/rx37/hosted-regression-exit.txt"
+  },
+  "asan": {
+    "historical": "PASS",
+    "targets": "36/36",
+    "exit_code": 0,
+    "runner_log": "docs/rexx/evidence/rx37/sanitizers-final-run.log",
+    "target": "rx37_output_capability"
+  },
+  "ubsan": {
+    "historical": "PASS",
+    "targets": "36/36",
+    "exit_code": 0,
+    "runner_log": "docs/rexx/evidence/rx37/sanitizers-final-run.log",
+    "target": "rx37_output_capability"
+  },
+  "regina": "NOT_RUN — unavailable in RX37.",
+  "freestanding": {
+    "historical_result": "PASS",
+    "architecture": "AMD64 freestanding",
+    "kernel_elf": "build/rexx/rx37/native-amd64-e6734534203e4ca1bf08a95e9f4f248b/amd64/bin/kernel.elf",
+    "recorded_sha256": "11aa057a68734c8ec39defac19b9a1310ab7f1d7c946f6f64ef8d22f92bfe6a8",
+    "current_sha256": "11aa057a68734c8ec39defac19b9a1310ab7f1d7c946f6f64ef8d22f92bfe6a8",
+    "rebuilt_for_rx37r1": false,
+    "evidence": "docs/rexx/evidence/rx37/native-build/native-link-evidence-e6734534203e4ca1bf08a95e9f4f248b.json"
+  }
+}

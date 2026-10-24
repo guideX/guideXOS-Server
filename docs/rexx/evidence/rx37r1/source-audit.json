@@ -1,0 +1,79 @@
+{
+  "schema": "guidexos.rexx.rx37r1.source-audit.v1",
+  "audited_at_utc": "2026-10-24T19:00:36.3877389Z",
+  "source_revision": "4906677df9818f6c241d4c233bde1a65e68f5741",
+  "production_source_changed": false,
+  "source_blobs": [
+    {
+      "path": "rexx_vm.c",
+      "git_blob_at_head": "d45c55ceb882e2cebdae0f2e0d01fc075d6c9d6b",
+      "git_blob_in_worktree": "d45c55ceb882e2cebdae0f2e0d01fc075d6c9d6b",
+      "matches_head": true
+    },
+    {
+      "path": "rexx_vm.h",
+      "git_blob_at_head": "63ff00b4fe88deacde6e5074a04e1f7b77d576f7",
+      "git_blob_in_worktree": "63ff00b4fe88deacde6e5074a04e1f7b77d576f7",
+      "matches_head": true
+    },
+    {
+      "path": "rexx_output_capability.h",
+      "git_blob_at_head": "84cf95126e68ad59221e32af7bccbfb9107b3dcd",
+      "git_blob_in_worktree": "84cf95126e68ad59221e32af7bccbfb9107b3dcd",
+      "matches_head": true
+    },
+    {
+      "path": "rexx_cli.c",
+      "git_blob_at_head": "6a5be165d112b2a5a9b350d85bcdeafcc4f4753f",
+      "git_blob_in_worktree": "6a5be165d112b2a5a9b350d85bcdeafcc4f4753f",
+      "matches_head": true
+    },
+    {
+      "path": "kernel/shell/rexx_shell_cmd.cpp",
+      "git_blob_at_head": "6e8391d4a80457ff873305575083165d6f18372d",
+      "git_blob_in_worktree": "6e8391d4a80457ff873305575083165d6f18372d",
+      "matches_head": true
+    },
+    {
+      "path": "kernel/core/shell.cpp",
+      "git_blob_at_head": "1fbe25efc601ec31230863151aa26f5264a184e8",
+      "git_blob_in_worktree": "1fbe25efc601ec31230863151aa26f5264a184e8",
+      "matches_head": true
+    },
+    {
+      "path": "tests/rexx_rx37_output_capability_test.c",
+      "git_blob_at_head": "7b5f4ed1e9229dfae654706d65f7f65763ed4e18",
+      "git_blob_in_worktree": "7b5f4ed1e9229dfae654706d65f7f65763ed4e18",
+      "matches_head": true
+    },
+    {
+      "path": "tests/run_rexx_tests.ps1",
+      "git_blob_at_head": "41213cc80302c5131c18547d7a638222c3c8bb2c",
+      "git_blob_in_worktree": "41213cc80302c5131c18547d7a638222c3c8bb2c",
+      "matches_head": true
+    }
+  ],
+  "vm_binding": "RexxVM owns output writer, capability reader, user data, and binding generation.",
+  "cli_installation": "rexx_cli.c installs rexx_cli_vm_output_capability after installing the VM output writer.",
+  "production_host": "kernel/shell/rexx_shell_cmd.cpp sets host.read_capability = NULL.",
+  "no_provider_status": "If queried through the production CLI bridge, the bridge returns READ_UNSUPPORTED; the VM returns QUERY_UNSUPPORTED and leaves zero width with state DESTINATION_NOT_INSTALLED. This is code-derived; no native query was executed.",
+  "no_provider_vs_no_reader": "QUERY_NO_PROVIDER occurs only when the VM reader or writer is null. It is not the production shell status because the CLI bridge reader is installed.",
+  "metadata_copy": "The provider fills a local candidate. The VM validates and assigns the complete struct by value; capability metadata itself has no pointers.",
+  "validation": "struct_size, enums, reserved bits, state/unit/wrap combinations, width bounds, record length, identity, and nonzero destination generation are validated.",
+  "width_limit": 1048576,
+  "width_units": [
+    "character columns",
+    "output bytes",
+    "record bytes",
+    "pixels",
+    "none"
+  ],
+  "generation": "VM binding generation is snapshotted and checked around callbacks; writer replacement clears the reader and advances it. Provider destination_generation must be nonzero but monotonic changes remain provider-owned and are not enforced by the VM.",
+  "replacement": "A reader belongs to the current writer context. Replacing writer during a callback is detected as QUERY_STALE; re-installation is explicit.",
+  "lifetime": "VM free returns while execution or capability callback is active and clears reader/writer references on teardown. Host must keep callback context alive while installed.",
+  "shell_width_provider": "None. No 119-byte-to-column or pixel-to-column conversion.",
+  "say_path": "OP_SAY emits full value then a separate LF callback. kernel/core/shell.cpp chunks at 119 payload bytes and output_string flushes callback-local residuals into rows. This is storage/callback behavior, not an API width policy.",
+  "renderer": "charsPerLine is computed from drawable pixel width but not used to wrap rows; no resize generation is published.",
+  "hosted_test_discrepancy": "The RX37 hosted formatter model carries its own column state across processing chunks and uses an independent test destination. The production shell writer does not use that formatter or capability metadata.",
+  "native_fixture": "No RX37 native probe currently calls rexx_vm_get_output_capability from the guest, and no fixture destination owns both metadata and SAY wrapping. RX37R1 did not add test-only kernel/CLI plumbing."
+}

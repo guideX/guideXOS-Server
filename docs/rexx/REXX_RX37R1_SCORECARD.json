@@ -1,0 +1,99 @@
+{
+  "schema": "guidexos.rexx.rx37r1.scorecard.v1",
+  "phase": "RX37R1",
+  "outcome": "C — native qualification blocked; QAC admission not established",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "4906677df9818f6c241d4c233bde1a65e68f5741",
+  "ending_head": "reported in final response after local documentation commit",
+  "production_source_changed": false,
+  "native_fixture": {
+    "built": false,
+    "provider_installed": false,
+    "reason": "RX37 has no guest diagnostic path that invokes the capability query or fixed-column fixture formatter. New test-only kernel/CLI wiring was not added during this blocked qualification.",
+    "production_shell_host_provider": "NULL",
+    "vm_query_if_called_through_cli_bridge": "QUERY_UNSUPPORTED with zero width; code-derived, not natively observed"
+  },
+  "preflight": {
+    "expected_starting_head": "4906677df9818f6c241d4c233bde1a65e68f5741",
+    "starting_head_matches": true,
+    "rx37_commit_is_parent": true,
+    "tracked_worktree_clean": true,
+    "index_clean": true,
+    "tracked_paths": 19874,
+    "root_phase_marker_present": false,
+    "prior_rx37r1_work_found": false,
+    "starting_untracked_paths": 141969,
+    "starting_untracked_manifest_sha256": "87df2bb82b29e1ab25a2f363742e268baf34869a0826b9282f1a61f0596f49ec",
+    "starting_untracked_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx37r1-preservation\\20261024T190000Z\\untracked-paths.utf8.txt",
+    "protected_root_artifacts": 31,
+    "protected_artifact_matches": 31
+  },
+  "native_guest": {
+    "result": "NOT_RUN — bounded FIFO admission was cancelled without a grant while another verified acceptance guest remained active.",
+    "runner_started": false,
+    "qemu_child_pid": null,
+    "runner_exit_code": null,
+    "qac_parent_exit_code": null,
+    "qmp_shutdown_acknowledged": null,
+    "rx37r1_reservation_acquired": false,
+    "rx37r1_reservation_release": "NOT_APPLICABLE — request remained Waiting and QAC recorded it Cancelled by client.",
+    "guest_output_markers": [],
+    "screenshots": [],
+    "native_scripts_executed": [],
+    "evidence": "docs/rexx/evidence/rx37r1/qac-admission.json"
+  },
+  "qac": {
+    "cli_path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+    "cli_sha256": "f7089d508c1d8307e11de1b944b6e1087c038c4901333e8228ec117291ca8df6",
+    "version": "2.0.0",
+    "read_only_command_exit_codes": {
+      "help": 0,
+      "status": 0,
+      "list": 0,
+      "inspect_cancelled_request": 0
+    },
+    "active_reservation": "8b84465adf184cc6a1f416744168127c",
+    "active_owner_cli_pid": 31704,
+    "active_child_pid": 24052,
+    "rx37r1_request_id": "b52ad0cd93334cbf8c5783584d48a74d",
+    "rx37r1_request_initial_queue_position": 1,
+    "rx37r1_request_state": "Cancelled"
+  },
+  "say": {
+    "native_output_observed": false,
+    "vm_behavior": "OP_SAY writes the value bytes and final LF separately.",
+    "kernel_writer_behavior": "Processes up to 119 payload bytes per 120-byte temporary buffer; callback/chunk boundaries may flush stored rows.",
+    "logical_character_width": "Not declared by the production shell; no pixel-to-column or storage-limit conversion."
+  },
+  "historical_rx37_regressions": {
+    "newly_executed": false,
+    "focused_assertions": 4203,
+    "hosted_regression_exit_code": 0,
+    "hosted_cli_cases": "28/28",
+    "asan_targets": "36/36",
+    "ubsan_targets": "36/36",
+    "regina": "NOT_RUN — unavailable",
+    "freestanding_amd64_elf_sha256": "11aa057a68734c8ec39defac19b9a1310ab7f1d7c946f6f64ef8d22f92bfe6a8",
+    "historical_logs_embed_final_commit_sha": false,
+    "source_worktree_matches_head": true
+  },
+  "inventory": {
+    "entries": 75,
+    "Implemented": 61,
+    "Not implemented": 7,
+    "Partial": 5,
+    "Not assessed": 1,
+    "Not implemented by design": 1,
+    "LINESIZE": "Not implemented",
+    "DATE_TIME_TRACE_CHARIN": "Partial",
+    "rx31_outcome": "Outcome B — Partial",
+    "classification_changes": []
+  },
+  "preservation": {
+    "protected_artifact_matches": "31/31",
+    "starting_untracked_paths": 141969,
+    "starting_untracked_manifest_sha256": "87df2bb82b29e1ab25a2f363742e268baf34869a0826b9282f1a61f0596f49ec",
+    "reconciliation": "docs/rexx/evidence/rx37r1/untracked-reconciliation.json"
+  },
+  "recommended_rx38_scope": "First close RX37R1 native qualification when QAC admission is available. Then qualify one production destination-owned character-column policy against actual SAY wrapping and resize generations. Keep LINESIZE Not implemented until both are authoritative and agree."
+}

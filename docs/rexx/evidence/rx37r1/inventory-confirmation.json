@@ -1,0 +1,35 @@
+{
+  "schema": "guidexos.rexx.rx37r1.inventory-confirmation.v1",
+  "captured_at_utc": "2026-10-24T19:00:36.3877389Z",
+  "path": "docs/rexx/REXX_RX37_BUILTIN_INVENTORY.csv",
+  "entry_count": 75,
+  "counts": {
+    "Not implemented": 7,
+    "Partial": 5,
+    "Not assessed": 1,
+    "Not implemented by design": 1,
+    "Implemented": 61
+  },
+  "linesize_status": "Not implemented",
+  "unchanged_partial_functions": [
+    {
+      "function_name": "CHARIN",
+      "status": "Partial"
+    },
+    {
+      "function_name": "DATE",
+      "status": "Partial"
+    },
+    {
+      "function_name": "TIME",
+      "status": "Partial"
+    },
+    {
+      "function_name": "TRACE",
+      "status": "Partial"
+    }
+  ],
+  "rx31_outcome": "Outcome B — Partial",
+  "classification_changes": [],
+  "rexx_rx37_inventory_sha256": "cec3b7bef1a29a19e5263a7589f6770acf019c4cb72a2b204ab5100fa39b340e"
+}
