@@ -1,0 +1,20 @@
+{
+  "schema": "guidexos.rexx.rx37.untracked-path-reconciliation.v1",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "compared_at_utc": "2026-10-24T18:28:51.3617159Z",
+  "comparison": "exact ordinal path-set comparison; canonical UTF-8 without BOM, LF terminated, ordinal sorted",
+  "starting_count": 134930,
+  "starting_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx36-preservation\\20261024T173533Z\\untracked-paths.utf8.txt",
+  "starting_manifest_sha256": "2924cb6124e3f53a7b56bee46782856d5afc634b99c19e3af918e86bf3bf17ec",
+  "ending_count": 141969,
+  "ending_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx37-preservation\\20261024T182850Z\\untracked-paths.utf8.txt",
+  "ending_manifest_sha256": "87df2bb82b29e1ab25a2f363742e268baf34869a0826b9282f1a61f0596f49ec",
+  "added_count": 7039,
+  "added_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx37-preservation\\20261024T182850Z\\added-paths.utf8.txt",
+  "added_manifest_sha256": "b19ac5e062a6559dbf526557884df2d1b8c6ed0043cdce3d05d014bc91cab94f",
+  "missing_count": 0,
+  "missing_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx37-preservation\\20261024T182850Z\\missing-paths.utf8.txt",
+  "missing_manifest_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+  "added_paths_include": "RX37 hosted/sanitizer/native output evidence, isolated build outputs, and other paths created during this phase",
+  "preexisting_paths_deleted": false
+}

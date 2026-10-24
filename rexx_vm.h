@@ -9,6 +9,7 @@
 
 #include "rexx_compiler.h"
 #include "rexx_data_stack.h"
+#include "rexx_output_capability.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -444,6 +445,9 @@ typedef struct RexxVM {
     void *address_dispatcher_user_data;
     RexxVMOutputWriter output_writer;
     void *output_writer_user_data;
+    RexxVMOutputCapabilityReader output_capability_reader;
+    uint64_t output_provider_generation;
+    uint8_t output_capability_callback_active;
 
     RexxVMStatus status;
     RexxVMError error;
@@ -497,6 +501,15 @@ void rexx_vm_set_address_dispatcher(RexxVM *vm,
 void rexx_vm_set_output_writer(RexxVM *vm,
                                RexxVMOutputWriter writer,
                                void *user_data);
+
+/* Install a read-only destination query for the same per-VM context used by
+ * the output writer. The caller owns that context and keeps it alive until
+ * both callbacks are cleared/replaced and any active callback has returned.
+ * The VM retains no snapshot; every query calls the provider. */
+RexxVMStatus rexx_vm_set_output_capability_reader(
+    RexxVM *vm, RexxVMOutputCapabilityReader reader);
+RexxVMOutputCapabilityQueryStatus rexx_vm_get_output_capability(
+    RexxVM *vm, RexxVMOutputCapability *capability);
 
 /* Return the active environment identity as a borrowed, length-bearing view.
  * The initial environment is REXX_VM_DEFAULT_ADDRESS_ENVIRONMENT. */

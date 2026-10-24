@@ -158,6 +158,7 @@ static RexxOutputHost capture_host(Capture *capture,
     host.context = capture;
     host.max_stdout_bytes = stdout_limit;
     host.max_stderr_bytes = stderr_limit;
+    host.read_capability = NULL;
     return host;
 }
 

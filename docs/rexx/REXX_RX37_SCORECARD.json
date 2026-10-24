@@ -1,0 +1,202 @@
+{
+  "schema": "guidexos.rexx.rx37.scorecard.v1",
+  "phase": "RX37",
+  "outcome": "B — capability foundation implemented and hosted qualified; native destination acceptance incomplete",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "034de0e75b9c0db1125de360f0764ff58e8bde6d",
+  "ending_head": "reported in final response after local commit",
+  "preflight": {
+    "tracked_paths": 19828,
+    "tracked_worktree_clean": true,
+    "index_clean": true,
+    "prior_rx37_work": false,
+    "root_phase_marker_present": false,
+    "rx36_inventory_counts": {
+      "Implemented": 61,
+      "Not implemented": 7,
+      "Partial": 5,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "protected_root_artifacts": 31,
+    "starting_untracked_paths": 134930,
+    "starting_untracked_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx36-preservation\\20261024T173533Z\\untracked-paths.utf8.txt",
+    "starting_untracked_manifest_sha256": "2924cb6124e3f53a7b56bee46782856d5afc634b99c19e3af918e86bf3bf17ec"
+  },
+  "output_pipeline": "OP_SAY converts to bytes, calls the VM writer for the non-empty payload, then calls it separately for LF. Kernel adapter uses 120-byte arrays and processes 119-byte chunks. output_string flushes each call's residual text into scrollback rows; therefore the current storage/callback boundary does create rows, but no shared logical character-column width is declared.",
+  "buffer_behavior": {
+    "max_vm_say_payload": "Full evaluated value length in one callback",
+    "separate_newline_callback_bytes": 1,
+    "kernel_temp_capacity_bytes": 120,
+    "kernel_chunk_payload_bytes": 119,
+    "stored_row_capacity_bytes": 119,
+    "scrollback_rows": 100,
+    "NUL": "rejected by kernel adapter",
+    "CR": "stored, then rendered as blank",
+    "high_bit": "stored, then rendered as blank",
+    "explicit_LF": "stores rows",
+    "say_final_LF": "separate callback currently stores an empty row"
+  },
+  "contract": {
+    "header": "rexx_output_capability.h",
+    "host_extension": "optional RexxOutputHost.read_capability",
+    "vm_setter": "rexx_vm_set_output_capability_reader",
+    "vm_query": "rexx_vm_get_output_capability",
+    "ownership": "Per VM; provider is the same destination context as the writer; query is synchronous, by-value, read-only, and allocation-free",
+    "units": [
+      "character columns",
+      "output bytes",
+      "record bytes",
+      "pixels",
+      "none"
+    ],
+    "states": [
+      "known",
+      "no meaningful width",
+      "destination not installed",
+      "temporarily unknown",
+      "stale"
+    ],
+    "query_errors": [
+      "no provider",
+      "unsupported",
+      "provider failure",
+      "invalid metadata",
+      "stale binding"
+    ],
+    "maximum_width": 1048576,
+    "production_shell_reader": "not installed"
+  },
+  "destinations": {
+    "interactive": "Kernel shell output is present; no logical column provider is installed.",
+    "redirected": "Generic hosted writer/redirection is possible; mode and record semantics are not detected; test-only raw-byte mode.",
+    "background": "No separate production REXX background destination; test-only mode.",
+    "record": "No production record writer or record length; test-only mock mode."
+  },
+  "say_formatting": "RX37 adds no output formatting changes. Tests model destination width and records with an independent formatter; the kernel shell storage/callback row behavior is not represented as a native width or LINESIZE.",
+  "resize_generation": "VM caches no snapshots. Provider returns current metadata each query. Writer replacement clears reader and increments VM binding generation; replacement during callback yields QUERY_STALE. Host owns destination identity/generation for resize/font/renderer changes. Tests cover width expansion/contraction, redirect swaps, pixel updates and revocation, stale observation, no history rewrite.",
+  "linesize": {
+    "implemented": false,
+    "inventory_status": "Not implemented",
+    "decision": "Path B — capability foundation only",
+    "reason": "No production host reports character columns tied to a shared SAY wrapping policy; 119 bytes, pixels, record length, font advance, and IBM batch constant are not converted.",
+    "reference": "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-linesize"
+  },
+  "hosted": {
+    "command": "pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tests/run_rexx_tests.ps1 -Phase RX37",
+    "exit_code": 0,
+    "focused_assertions": 4203,
+    "direct_assertions": 107,
+    "property_cases": 4096,
+    "property_assertions": 4096,
+    "property_seed": "0x52583337",
+    "failures": 0,
+    "hosted_cli_cases": "28/28",
+    "rx25_random_assertions": 2156,
+    "rx26_index_assertions": 48166,
+    "rx27_justify_assertions": 42589,
+    "rx28_find_assertions": 36175,
+    "rx30_data_stack_assertions": 181417,
+    "rx30_queue_assertions": 193,
+    "rx31_input_assertions": 169,
+    "rx32_value_assertions": 20533,
+    "rx33_charin_assertions": 471,
+    "rx34_stream_state_assertions": 16604,
+    "rx35_externals_assertions": 4114,
+    "raw_cli_fixture": "hosted-say-output.json (559 stdout bytes; exit 0); hosted only"
+  },
+  "failure_recovery": "Tests cover missing provider, unsupported/failure statuses, invalid units and bounds, provider/writer replacement during query, resize during query, stale result, teardown rejection during callback, allocation-free query, partial writer failure, subsequent recovery, multiple VMs, internal routine calls, and INTERPRET.",
+  "inherited_regressions": {
+    "hosted": "RX1–RX36 inherited runner passed; 28/28 CLI cases and phase fixture counts passed.",
+    "address_sanitizer": {
+      "build_targets": 36,
+      "passed_targets": 36,
+      "failed_targets": 0,
+      "rx37_target": "rx37_output_capability"
+    },
+    "undefined_behavior_sanitizer": {
+      "build_targets": 36,
+      "passed_targets": 36,
+      "failed_targets": 0,
+      "rx37_target": "rx37_output_capability"
+    },
+    "regina": "NOT_RUN — no Regina executable; 196 differential cases not compared; no compatibility percentage claimed."
+  },
+  "freestanding": {
+    "result": "PASS",
+    "runner_exit_code": 0,
+    "make_exit_code": 0,
+    "architecture": "AMD64 freestanding",
+    "rx34_fixture_enabled": false,
+    "rexx_c_object_count": 10,
+    "kernel_elf": "build/rexx/rx37/native-amd64-e6734534203e4ca1bf08a95e9f4f248b/amd64/bin/kernel.elf",
+    "kernel_elf_sha256": "11aa057a68734c8ec39defac19b9a1310ab7f1d7c946f6f64ef8d22f92bfe6a8",
+    "evidence": "docs/rexx/evidence/rx37/native-build/native-link-evidence-e6734534203e4ca1bf08a95e9f4f248b.json"
+  },
+  "native_qac": {
+    "result": "NOT_RUN — exclusive QAC coordinator had an active acceptance reservation and two queued requests.",
+    "qac_cli_path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+    "qac_cli_sha256": "f7089d508c1d8307e11de1b944b6e1087c038c4901333e8228ec117291ca8df6",
+    "version": "2.0.0",
+    "help_exit_code": 0,
+    "status_exit_code": 0,
+    "list_exit_code": 0,
+    "managed_sessions": 1,
+    "reservations": 3,
+    "queued": 2,
+    "blocked": 0,
+    "existing_acceptance_reservation": "8b84465adf184cc6a1f416744168127c",
+    "rx37_reservation_acquired": false,
+    "qac_parent_exit_code": null,
+    "qemu_child_exit_code": null,
+    "runner_exit_code": null,
+    "qmp_port_allocated": false,
+    "qmp_shutdown_acknowledged": null,
+    "reservation_release": "NOT_APPLICABLE — RX37 acquired no reservation; existing QAC session/process left untouched.",
+    "native_say_output": "No RX37 guest, output markers, screenshot, or native capability diagnostics were captured.",
+    "evidence": "docs/rexx/evidence/rx37/qac-preflight.json"
+  },
+  "artifact_integrity": {
+    "protected_start": "docs/rexx/evidence/rx37/protected-artifacts-guard.json",
+    "protected_end": "docs/rexx/evidence/rx37/protected-artifacts-end.json",
+    "protected_expected": 31,
+    "protected_matches": 31,
+    "changed_paths": []
+  },
+  "untracked_reconciliation": {
+    "starting_paths": 134930,
+    "ending_paths": 141969,
+    "missing_paths": 0,
+    "added_paths": 7039,
+    "starting_manifest_sha256": "2924cb6124e3f53a7b56bee46782856d5afc634b99c19e3af918e86bf3bf17ec",
+    "ending_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx37-preservation\\20261024T182850Z\\untracked-paths.utf8.txt",
+    "ending_manifest_sha256": "87df2bb82b29e1ab25a2f363742e268baf34869a0826b9282f1a61f0596f49ec",
+    "added_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx37-preservation\\20261024T182850Z\\added-paths.utf8.txt",
+    "added_manifest_sha256": "b19ac5e062a6559dbf526557884df2d1b8c6ed0043cdce3d05d014bc91cab94f",
+    "missing_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx37-preservation\\20261024T182850Z\\missing-paths.utf8.txt",
+    "missing_manifest_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "inventory": {
+    "path": "docs/rexx/REXX_RX37_BUILTIN_INVENTORY.csv",
+    "copied_exactly_from": "docs/rexx/REXX_RX36_BUILTIN_INVENTORY.csv",
+    "sha256": "cec3b7bef1a29a19e5263a7589f6770acf019c4cb72a2b204ab5100fa39b340e",
+    "entries": 75,
+    "counts": {
+      "Implemented": 61,
+      "Not implemented": 7,
+      "Partial": 5,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "classification_changes": []
+  },
+  "local_commit_sha": "reported in final response; omitted here to avoid a self-referential commit hash",
+  "remaining_limitations": [
+    "No production output destination installs a capability reader or reports a verified logical column width.",
+    "Production kernel shell storage rows and SAY callback behavior are not unified under a logical-column policy; its current 119-byte split is storage/callback-induced.",
+    "Font/renderer/resize capability notifications are only modeled; kernel shell has no provider wired to those events.",
+    "Native QAC guest qualification, visible SAY proof, screenshots, QMP acknowledgment, and reservation release were not run because the coordinator lane was occupied.",
+    "Regina differential comparison is unavailable."
+  ],
+  "recommended_rx38_scope": "When exclusive QAC admission is available, qualify one production destination-owned output policy against actual SAY row formation and display geometry, with explicit unknown states and generation changes. Only reconsider LINESIZE after a character-column policy and SAY use are tied together; do not expand into a terminal emulator or general output-redirection system."
+}

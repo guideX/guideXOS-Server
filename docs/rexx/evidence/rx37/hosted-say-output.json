@@ -1,0 +1,10 @@
+{
+  "command": "rexx_cli.exe tests/rexx_rx37/say_output_qualification.rex",
+  "exit_code": 0,
+  "stdout_file": "docs/rexx/evidence/rx37/hosted-say-output.stdout.bin",
+  "stdout_bytes": 559,
+  "stdout_sha256": "bf48e8cf41cdeb52e0a1c03b8aae30fea89aeb535e334de35db7fefdd2e1d122",
+  "stderr_file": "docs/rexx/evidence/rx37/hosted-say-output.stderr.txt",
+  "stderr_empty": true,
+  "note": "Hosted stdout byte capture only; no kernel-shell or native-QAC claim."
+}

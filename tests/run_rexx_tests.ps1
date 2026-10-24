@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31','RX32','RX33','RX34','RX35')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30','RX31','RX32','RX33','RX34','RX35','RX37')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +31,8 @@ $guardManifest = if ($Phase -eq 'RX30') {
     Join-Path $rootDir 'docs\rexx\evidence\rx34\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX35') {
     Join-Path $rootDir 'docs\rexx\evidence\rx35\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX37') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx37\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX29') {
     Join-Path $rootDir 'docs\rexx\evidence\rx29\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX28') {
@@ -85,7 +87,8 @@ $plannedOutputs = @(
     'rexx_rx28_find_tests.exe', 'rexx_rx30_data_stack_tests.exe',
     'rexx_rx30_queue_tests.exe', 'rexx_rx31_host_input_tests.exe',
     'rexx_rx32_value_tests.exe', 'rexx_rx33_byte_stream_tests.exe',
-    'rexx_rx34_stream_state_tests.exe', 'rexx_rx35_externals_tests.exe'
+    'rexx_rx34_stream_state_tests.exe', 'rexx_rx35_externals_tests.exe',
+    'rexx_rx37_output_capability_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
@@ -130,6 +133,7 @@ $rx32ValueTest = Join-Path $buildDirectory "rexx_rx32_value_tests.exe"
 $rx33ByteStreamTest = Join-Path $buildDirectory "rexx_rx33_byte_stream_tests.exe"
 $rx34StreamStateTest = Join-Path $buildDirectory "rexx_rx34_stream_state_tests.exe"
 $rx35ExternalsTest = Join-Path $buildDirectory "rexx_rx35_externals_tests.exe"
+$rx37OutputCapabilityTest = Join-Path $buildDirectory "rexx_rx37_output_capability_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
@@ -494,7 +498,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "RX22 classic/diagnostic built-in assertions failed with exit code $LASTEXITCODE."
 }
 
-if ($Phase -in @('RX24','RX25','RX26','RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX24','RX25','RX26','RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) {
     Write-Host "Building RX24 ADDRESS and TRACE assertions"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -510,7 +514,7 @@ if ($Phase -in @('RX24','RX25','RX26','RX27','RX28','RX29','RX31','RX32','RX33',
     }
 }
 
-if ($Phase -in @('RX25','RX26','RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX25','RX26','RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) {
     Write-Host "Building RX25 RANDOM assertions"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -527,7 +531,7 @@ if ($Phase -in @('RX25','RX26','RX27','RX28','RX29','RX31','RX32','RX33','RX34',
     }
 }
 
-if ($Phase -in @('RX26','RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX26','RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) {
     Write-Host "Building RX26 INDEX assertions and equivalence corpus"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -543,7 +547,7 @@ if ($Phase -in @('RX26','RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')
     }
 }
 
-if ($Phase -in @('RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) {
     Write-Host "Building RX27 JUSTIFY assertions and deterministic oracle corpus"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -559,7 +563,7 @@ if ($Phase -in @('RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
     }
 }
 
-if ($Phase -in @('RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) {
     Write-Host "Building RX28 FIND assertions and deterministic independent oracle corpus"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -575,7 +579,7 @@ if ($Phase -in @('RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
     }
 }
 
-if ($Phase -in @('RX30','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX30','RX31','RX32','RX33','RX34','RX35','RX37')) {
     Write-Host "Building RX30 independent data-stack and executable language qualification"
     & $gccCommand.Source -std=c11 -Wall -Wextra -Wpedantic -Werror `
         (Join-Path $PSScriptRoot "rexx_rx30_data_stack_test.c") `
@@ -591,7 +595,7 @@ if ($Phase -in @('RX30','RX31','RX32','RX33','RX34','RX35')) {
     if ($LASTEXITCODE -ne 0) {
         throw "RX30 QUEUE/PUSH/PULL test build failed with exit code $LASTEXITCODE."
     }
-    if ($Phase -in @('RX31','RX32','RX33','RX34','RX35')) {
+    if ($Phase -in @('RX31','RX32','RX33','RX34','RX35','RX37')) {
         Write-Host "Building RX31 bounded host-input provider qualification"
         & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
             -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR `
@@ -612,7 +616,7 @@ if ($Phase -in @('RX30','RX31','RX32','RX33','RX34','RX35')) {
     if ($LASTEXITCODE -ne 0) {
         throw "RX30 language tests failed with exit code $LASTEXITCODE."
     }
-    if ($Phase -in @('RX31','RX32','RX33','RX34','RX35')) {
+    if ($Phase -in @('RX31','RX32','RX33','RX34','RX35','RX37')) {
         Write-Host "Running RX31 bounded host-input provider qualification"
         & $rx31HostInputTest
         if ($LASTEXITCODE -ne 0) {
@@ -621,7 +625,7 @@ if ($Phase -in @('RX30','RX31','RX32','RX33','RX34','RX35')) {
     }
 }
 
-if ($Phase -in @('RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX32','RX33','RX34','RX35','RX37')) {
     Write-Host "Building RX32 VALUE assertions and deterministic independent model corpus"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR `
@@ -638,10 +642,10 @@ if ($Phase -in @('RX32','RX33','RX34','RX35')) {
     }
 }
 
-if ($Phase -in @('RX33','RX34','RX35')) {
+if ($Phase -in @('RX33','RX34','RX35','RX37')) {
     Write-Host "Building RX33 bounded byte-stream provider and CHARIN model qualification"
     $rx34Defines = @()
-    if ($Phase -in @('RX34','RX35')) { $rx34Defines = @('-DREXX_RX34_TEST') }
+    if ($Phase -in @('RX34','RX35','RX37')) { $rx34Defines = @('-DREXX_RX34_TEST') }
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
         -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR `
         @rx34Defines -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
@@ -657,7 +661,7 @@ if ($Phase -in @('RX33','RX34','RX35')) {
     }
 }
 
-if ($Phase -in @('RX34','RX35')) {
+if ($Phase -in @('RX34','RX35','RX37')) {
     Write-Host "Building RX34 focused stream-state/property qualification"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) (Join-Path $PSScriptRoot "rexx_rx34_stream_state_test.c") @commonSources -lm -o $rx34StreamStateTest
     if ($LASTEXITCODE -ne 0) {
@@ -670,7 +674,7 @@ if ($Phase -in @('RX34','RX35')) {
     }
 }
 
-if ($Phase -eq 'RX35') {
+if ($Phase -in @('RX35','RX37')) {
     Write-Host "Building RX35 EXTERNALS direct/property qualification"
     & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) (Join-Path $PSScriptRoot "rexx_rx35_externals_test.c") @commonSources -lm -o $rx35ExternalsTest
     if ($LASTEXITCODE -ne 0) {
@@ -682,6 +686,20 @@ if ($Phase -eq 'RX35') {
         throw "RX35 EXTERNALS tests failed with exit code $LASTEXITCODE."
     }
 }
+
+if ($Phase -eq 'RX37') {
+    Write-Host "Building RX37 destination-owned output capability qualification"
+    & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) (Join-Path $PSScriptRoot "rexx_rx37_output_capability_test.c") @commonSources -lm -o $rx37OutputCapabilityTest
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX37 output capability test build failed with exit code $LASTEXITCODE."
+    }
+    Write-Host "Running RX37 destination-owned output capability qualification"
+    & $rx37OutputCapabilityTest
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX37 output capability tests failed with exit code $LASTEXITCODE."
+    }
+}
+
 Write-Host "Running RX2 shell bridge assertions"
 & $rx2ShellBridgeTest
 if ($LASTEXITCODE -ne 0) {
@@ -1461,7 +1479,7 @@ $script:cliPassed++
 Write-Host "[PASS] CLI source-size memory limit"
 
 $script:rx26FixturePassed = 0
-if ($Phase -in @('RX26','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX26','RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) {
     $fixture = Join-Path $PSScriptRoot 'rexx_rx26\index_reference.rex'
     $expectedPath = [System.IO.Path]::ChangeExtension($fixture, '.out')
     $actual = Invoke-CapturedProcess $cliTest @($fixture)
@@ -1475,7 +1493,7 @@ if ($Phase -in @('RX26','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
 }
 
 $script:rx27FixturePassed = 0
-if ($Phase -in @('RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) {
     $fixture = Join-Path $PSScriptRoot 'rexx_rx27\justify_reference.rex'
     $expectedPath = [System.IO.Path]::ChangeExtension($fixture, '.out')
     $actual = Invoke-CapturedProcess $cliTest @($fixture)
@@ -1489,7 +1507,7 @@ if ($Phase -in @('RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
 }
 
 $script:rx28FixturePassed = 0
-if ($Phase -in @('RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) {
     $fixture = Join-Path $PSScriptRoot 'rexx_rx28\find_reference.rex'
     $expectedPath = [System.IO.Path]::ChangeExtension($fixture, '.out')
     $actual = Invoke-CapturedProcess $cliTest @($fixture)
@@ -1503,7 +1521,7 @@ if ($Phase -in @('RX28','RX29','RX31','RX32','RX33','RX34','RX35')) {
 }
 
 $script:rx32FixturePassed = 0
-if ($Phase -in @('RX32','RX33','RX34','RX35')) {
+if ($Phase -in @('RX32','RX33','RX34','RX35','RX37')) {
     $fixture = Join-Path $PSScriptRoot 'rexx_rx32\value_reference.rex'
     $fixtureSource = Get-Content -Raw -LiteralPath $fixture
     Assert-CliCase 'rx32_value_reference' $fixtureSource @(
@@ -1513,7 +1531,7 @@ if ($Phase -in @('RX32','RX33','RX34','RX35')) {
     $script:rx32FixturePassed = 1
 }
 $script:rx35FixturePassed = 0
-if ($Phase -eq 'RX35') {
+if ($Phase -in @('RX35','RX37')) {
     $fixture = Join-Path $PSScriptRoot 'rexx_rx35\externals_qualification.rex'
     $fixtureSource = Get-Content -Raw -LiteralPath $fixture
     Assert-CliCase 'rx35_tsoe_externals_reference_and_recovery' $fixtureSource @(
@@ -1527,7 +1545,7 @@ if ($Phase -eq 'RX35') {
     $script:rx35FixturePassed = 1
 }
 $script:rx33FixturePassed = 0
-if ($Phase -in @('RX33','RX34','RX35')) {
+if ($Phase -in @('RX33','RX34','RX35','RX37')) {
     $charinUnavailableSource = @"
 say 'RX33_CHARIN_BEGIN'
 ignored = charin()
@@ -1538,7 +1556,7 @@ say 'RX33_CHARIN_UNEXPECTED_RETURN'
     $script:rx33FixturePassed = 1
 }
 $script:rx34FixturePassed = 0
-if ($Phase -in @('RX34','RX35')) {
+if ($Phase -in @('RX34','RX35','RX37')) {
     $streamUnavailableSource = @"
 say 'RX34_STREAM_DEFAULT=' || stream()
 say 'RX34_STREAM_NAMED=' || stream('sample')
@@ -1570,13 +1588,13 @@ Write-Host "RX14 numeric and inspection fixtures passed: $script:rx14FixturePass
 Write-Host "RX15 conversion fixtures passed: $script:rx15FixturePassed/$script:rx15FixturePassed"
 Write-Host "RX16 hexadecimal/binary literal fixtures passed: $script:rx16FixturePassed/$script:rx16FixturePassed"
 Write-Host "RX17 bitwise string fixtures passed: $script:rx17FixturePassed/$script:rx17FixturePassed"
-if ($Phase -in @('RX26','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) { Write-Host "RX26 INDEX CLI fixtures passed: $script:rx26FixturePassed/$script:rx26FixturePassed" }
-if ($Phase -in @('RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35')) { Write-Host "RX27 JUSTIFY CLI fixtures passed: $script:rx27FixturePassed/$script:rx27FixturePassed" }
-if ($Phase -in @('RX28','RX29','RX31','RX32','RX33','RX34','RX35')) { Write-Host "RX28 FIND CLI fixtures passed: $script:rx28FixturePassed/$script:rx28FixturePassed" }
-if ($Phase -in @('RX32','RX33','RX34','RX35')) { Write-Host "RX32 VALUE CLI fixtures passed: $script:rx32FixturePassed/$script:rx32FixturePassed" }
-if ($Phase -in @('RX33','RX34','RX35')) { Write-Host "RX33 CHARIN fail-closed CLI fixtures passed: $script:rx33FixturePassed/$script:rx33FixturePassed" }
-if ($Phase -in @('RX34','RX35')) { Write-Host "RX34 STREAM no-provider CLI fixtures passed: $script:rx34FixturePassed/$script:rx34FixturePassed" }
-if ($Phase -eq 'RX35') { Write-Host "RX35 EXTERNALS CLI fixtures passed: $script:rx35FixturePassed/$script:rx35FixturePassed" }
+if ($Phase -in @('RX26','RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) { Write-Host "RX26 INDEX CLI fixtures passed: $script:rx26FixturePassed/$script:rx26FixturePassed" }
+if ($Phase -in @('RX27','RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) { Write-Host "RX27 JUSTIFY CLI fixtures passed: $script:rx27FixturePassed/$script:rx27FixturePassed" }
+if ($Phase -in @('RX28','RX29','RX31','RX32','RX33','RX34','RX35','RX37')) { Write-Host "RX28 FIND CLI fixtures passed: $script:rx28FixturePassed/$script:rx28FixturePassed" }
+if ($Phase -in @('RX32','RX33','RX34','RX35','RX37')) { Write-Host "RX32 VALUE CLI fixtures passed: $script:rx32FixturePassed/$script:rx32FixturePassed" }
+if ($Phase -in @('RX33','RX34','RX35','RX37')) { Write-Host "RX33 CHARIN fail-closed CLI fixtures passed: $script:rx33FixturePassed/$script:rx33FixturePassed" }
+if ($Phase -in @('RX34','RX35','RX37')) { Write-Host "RX34 STREAM no-provider CLI fixtures passed: $script:rx34FixturePassed/$script:rx34FixturePassed" }
+if ($Phase -in @('RX35','RX37')) { Write-Host "RX35 EXTERNALS CLI fixtures passed: $script:rx35FixturePassed/$script:rx35FixturePassed" }
 Write-Host "RX22 classic/diagnostic fixtures passed: $script:rx22FixturePassed/$script:rx22FixturePassed"
 Write-Host "RX3 compatibility fixtures passed: $script:rx3Passed/$script:rx3Passed"
 Write-Host "RX4 compatibility fixtures passed: $script:rx4Passed/$script:rx4Passed"

@@ -33,6 +33,17 @@ static int rexx_cli_vm_output(void *context,
                              REXX_OUTPUT_STDOUT, bytes, length);
 }
 
+static RexxVMOutputCapabilityReadStatus rexx_cli_vm_output_capability(
+    void *context, RexxVMOutputCapability *capability)
+{
+    RexxOutputContext *output = (RexxOutputContext *)context;
+    if (output == NULL || capability == NULL)
+        return REXX_VM_OUTPUT_CAPABILITY_READ_FAILURE;
+    if (output->host == NULL || output->host->read_capability == NULL)
+        return REXX_VM_OUTPUT_CAPABILITY_READ_UNSUPPORTED;
+    return output->host->read_capability(output->host->context, capability);
+}
+
 /* Print one consistent usage form for both help and argument errors. */
 static int rexx_cli_print_usage(RexxOutputContext *output,
                                 RexxOutputStream stream,
@@ -304,6 +315,8 @@ static int rexx_cli_execute_source(RexxOutputContext *output,
     }
 
     rexx_vm_set_output_writer(&vm, rexx_cli_vm_output, output);
+    (void)rexx_vm_set_output_capability_reader(
+        &vm, rexx_cli_vm_output_capability);
     rexx_vm_set_address_dispatcher(&vm, rexx_os_vm_address_dispatcher, NULL);
     rexx_vm_set_clock_reader(&vm, clock_reader, clock_user_data);
     vm_status = rexx_vm_execute(&vm, chunk);

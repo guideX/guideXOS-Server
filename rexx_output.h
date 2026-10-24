@@ -2,6 +2,7 @@
 #define GUIDEXOS_REXX_OUTPUT_H
 
 #include <stddef.h>
+#include "rexx_output_capability.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +25,8 @@ typedef struct RexxOutputHost {
     void *context;
     size_t max_stdout_bytes;
     size_t max_stderr_bytes;
+    /* Optional read-only query for the same destination used by write. */
+    RexxVMOutputCapabilityReader read_capability;
 } RexxOutputHost;
 
 /* Mutable accounting belongs to one CLI execution, never a process global. */

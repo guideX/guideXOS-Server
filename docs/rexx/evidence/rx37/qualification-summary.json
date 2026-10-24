@@ -1,0 +1,22 @@
+{
+  "schema": "guidexos.rexx.rx37.qualification-summary.v1",
+  "created_at_utc": "2026-10-24T18:26:47.6261681Z",
+  "hosted_command_exit_code": 0,
+  "focused_assertions": 4203,
+  "focused_direct": 107,
+  "property_cases": 4096,
+  "property_seed": "0x52583337",
+  "focused_failures": 0,
+  "hosted_cli_cases": "28/28",
+  "asan": "PASS 36/36 build and run targets",
+  "ubsan": "PASS 36/36 build and run targets",
+  "regina": "NOT_RUN — unavailable",
+  "freestanding_amd64": "PASS — make exit 0",
+  "kernel_elf_sha256": "11aa057a68734c8ec39defac19b9a1310ab7f1d7c946f6f64ef8d22f92bfe6a8",
+  "qac": "NOT_RUN — active acceptance and queued reservations; no RX37 QAC request or QEMU launch",
+  "protected_artifacts": "31/31 matched at start/end",
+  "hosted_runner_log": "docs/rexx/evidence/rx37/hosted-regression-runner.log",
+  "sanitizer_runner_log": "docs/rexx/evidence/rx37/sanitizers-final-run.log",
+  "qac_snapshot": "docs/rexx/evidence/rx37/qac-preflight.json",
+  "native_link": "docs/rexx/evidence/rx37/native-build/native-link-evidence-e6734534203e4ca1bf08a95e9f4f248b.json"
+}

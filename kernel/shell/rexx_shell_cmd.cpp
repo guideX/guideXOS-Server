@@ -425,6 +425,7 @@ int shell_cmd_rexx(int argc, char** argv) {
     host.context = NULL;
     host.max_stdout_bytes = 65536u;
     host.max_stderr_bytes = 4096u;
+    host.read_capability = NULL;
 #if defined(GXOS_REXX_RX34_FIXTURE)
     rx34_fixture_init(&fixture_context);
     return guide_rexx_main_with_stream_provider(

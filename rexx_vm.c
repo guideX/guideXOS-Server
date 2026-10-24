@@ -1414,6 +1414,7 @@ RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity)
     vm->interpret_compile_budget =
         REXX_VM_DEFAULT_INTERPRET_COMPILE_BUDGET;
     vm->interpret_compile_remaining = vm->interpret_compile_budget;
+    vm->output_provider_generation = 1u;
     vm->initialized = 1;
     vm->root_environment = environment_new(vm, NULL, 1);
     if (vm->root_environment == NULL) {
@@ -1463,7 +1464,11 @@ void rexx_vm_free(RexxVM *vm)
     RexxVMEnvironment *root;
     if (vm == NULL) return;
     /* A provider callback may not destroy the VM from inside its own call. */
-    if (vm->execution_active || vm->byte_stream_callback_active) return;
+    if (vm->execution_active || vm->byte_stream_callback_active ||
+        vm->output_capability_callback_active) return;
+    vm->output_capability_reader = NULL;
+    vm->output_writer = NULL;
+    vm->output_writer_user_data = NULL;
     live = vm->sp < vm->stack_capacity ? vm->sp : vm->stack_capacity;
     for (i = 0; vm->stack != NULL && i < live; ++i) rexx_value_clear(&vm->stack[i]);
     for (i = 0; vm->globals != NULL && i < vm->global_count &&
@@ -1530,8 +1535,157 @@ void rexx_vm_set_output_writer(RexxVM *vm,
                                void *user_data)
 {
     if (vm == NULL || !vm->initialized) return;
+    /* A reader is bound to the same context as its writer. Requiring it to be
+     * reinstalled prevents a replacement writer from inheriting stale width
+     * metadata from an earlier destination. */
+    vm->output_capability_reader = NULL;
+    if (vm->output_provider_generation != UINT64_MAX)
+        ++vm->output_provider_generation;
     vm->output_writer = writer;
     vm->output_writer_user_data = writer != NULL ? user_data : NULL;
+}
+
+RexxVMStatus rexx_vm_set_output_capability_reader(
+    RexxVM *vm, RexxVMOutputCapabilityReader reader)
+{
+    if (vm == NULL || !vm->initialized || vm->execution_active ||
+        vm->output_capability_callback_active ||
+        (reader != NULL && vm->output_writer == NULL) ||
+        vm->output_provider_generation == UINT64_MAX)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    vm->output_capability_reader = reader;
+    ++vm->output_provider_generation;
+    return REXX_VM_STATUS_OK;
+}
+
+static void output_capability_set_unavailable(
+    RexxVMOutputCapability *capability,
+    RexxVMOutputCapabilityState state)
+{
+    memset(capability, 0, sizeof(*capability));
+    capability->struct_size = (uint32_t)sizeof(*capability);
+    capability->state = state;
+}
+
+static int output_capability_metadata_valid(
+    const RexxVMOutputCapability *capability)
+{
+    int kind_valid;
+    int wrap_valid;
+    if (capability == NULL ||
+        capability->struct_size != (uint32_t)sizeof(*capability) ||
+        capability->reserved != 0u)
+        return 0;
+    kind_valid = capability->destination_kind >=
+                     REXX_VM_OUTPUT_DESTINATION_NONE &&
+                 capability->destination_kind <=
+                     REXX_VM_OUTPUT_DESTINATION_RECORD;
+    wrap_valid = capability->wrap_policy >= REXX_VM_OUTPUT_WRAP_UNKNOWN &&
+                 capability->wrap_policy <=
+                     REXX_VM_OUTPUT_WRAP_STORAGE_LIMIT;
+    if (!kind_valid || !wrap_valid) return 0;
+    if (capability->state == REXX_VM_OUTPUT_CAPABILITY_DESTINATION_NOT_INSTALLED) {
+        return capability->destination_kind ==
+                   REXX_VM_OUTPUT_DESTINATION_NONE &&
+               capability->width_unit == REXX_VM_OUTPUT_WIDTH_NONE &&
+               capability->logical_line_width == 0u &&
+               capability->record_length == 0u &&
+               capability->destination_identity == 0u &&
+               capability->destination_generation == 0u &&
+               capability->wrap_policy == REXX_VM_OUTPUT_WRAP_UNKNOWN;
+    }
+    if (capability->state < REXX_VM_OUTPUT_CAPABILITY_KNOWN ||
+        capability->state > REXX_VM_OUTPUT_CAPABILITY_STALE ||
+        capability->destination_kind == REXX_VM_OUTPUT_DESTINATION_NONE ||
+        capability->destination_identity == 0u ||
+        capability->destination_generation == 0u)
+        return 0;
+    if (capability->state != REXX_VM_OUTPUT_CAPABILITY_KNOWN) {
+        return capability->width_unit == REXX_VM_OUTPUT_WIDTH_NONE &&
+               capability->logical_line_width == 0u &&
+               capability->record_length == 0u;
+    }
+    if (capability->width_unit < REXX_VM_OUTPUT_WIDTH_CHARACTER_COLUMNS ||
+        capability->width_unit > REXX_VM_OUTPUT_WIDTH_PIXELS ||
+        capability->logical_line_width == 0u ||
+        capability->logical_line_width >
+            REXX_VM_OUTPUT_CAPABILITY_MAX_WIDTH)
+        return 0;
+    switch (capability->width_unit) {
+    case REXX_VM_OUTPUT_WIDTH_CHARACTER_COLUMNS:
+    case REXX_VM_OUTPUT_WIDTH_PIXELS:
+        return capability->wrap_policy ==
+                   REXX_VM_OUTPUT_WRAP_DESTINATION_WIDTH &&
+               capability->record_length == 0u &&
+               capability->destination_kind !=
+                   REXX_VM_OUTPUT_DESTINATION_RECORD;
+    case REXX_VM_OUTPUT_WIDTH_OUTPUT_BYTES:
+        return (capability->wrap_policy ==
+                    REXX_VM_OUTPUT_WRAP_DESTINATION_WIDTH ||
+                capability->wrap_policy ==
+                    REXX_VM_OUTPUT_WRAP_STORAGE_LIMIT) &&
+               capability->record_length == 0u &&
+               capability->destination_kind !=
+                   REXX_VM_OUTPUT_DESTINATION_RECORD;
+    case REXX_VM_OUTPUT_WIDTH_RECORD_BYTES:
+        return capability->wrap_policy ==
+                   REXX_VM_OUTPUT_WRAP_RECORD_BOUNDARY &&
+               capability->record_length ==
+                   capability->logical_line_width &&
+               (capability->destination_kind ==
+                    REXX_VM_OUTPUT_DESTINATION_RECORD ||
+                capability->destination_kind ==
+                    REXX_VM_OUTPUT_DESTINATION_BACKGROUND);
+    default:
+        return 0;
+    }
+}
+
+RexxVMOutputCapabilityQueryStatus rexx_vm_get_output_capability(
+    RexxVM *vm, RexxVMOutputCapability *capability)
+{
+    RexxVMOutputCapability candidate;
+    RexxVMOutputCapabilityReader reader;
+    RexxVMOutputWriter writer;
+    void *writer_user_data;
+    uint64_t provider_generation;
+    RexxVMOutputCapabilityReadStatus read_status;
+
+    if (capability == NULL)
+        return REXX_VM_OUTPUT_CAPABILITY_QUERY_INVALID_ARGUMENT;
+    output_capability_set_unavailable(
+        capability, REXX_VM_OUTPUT_CAPABILITY_DESTINATION_NOT_INSTALLED);
+    if (vm == NULL || !vm->initialized || vm->output_capability_callback_active)
+        return REXX_VM_OUTPUT_CAPABILITY_QUERY_INVALID_ARGUMENT;
+    reader = vm->output_capability_reader;
+    writer = vm->output_writer;
+    writer_user_data = vm->output_writer_user_data;
+    provider_generation = vm->output_provider_generation;
+    if (reader == NULL || writer == NULL)
+        return REXX_VM_OUTPUT_CAPABILITY_QUERY_NO_PROVIDER;
+
+    output_capability_set_unavailable(
+        &candidate, REXX_VM_OUTPUT_CAPABILITY_DESTINATION_NOT_INSTALLED);
+    vm->output_capability_callback_active = 1u;
+    read_status = reader(writer_user_data, &candidate);
+    vm->output_capability_callback_active = 0u;
+    if (vm->output_provider_generation != provider_generation ||
+        vm->output_capability_reader != reader ||
+        vm->output_writer != writer ||
+        vm->output_writer_user_data != writer_user_data) {
+        output_capability_set_unavailable(
+            capability, REXX_VM_OUTPUT_CAPABILITY_STALE);
+        return REXX_VM_OUTPUT_CAPABILITY_QUERY_STALE;
+    }
+    if (read_status == REXX_VM_OUTPUT_CAPABILITY_READ_FAILURE)
+        return REXX_VM_OUTPUT_CAPABILITY_QUERY_PROVIDER_FAILURE;
+    if (read_status == REXX_VM_OUTPUT_CAPABILITY_READ_UNSUPPORTED)
+        return REXX_VM_OUTPUT_CAPABILITY_QUERY_UNSUPPORTED;
+    if (read_status != REXX_VM_OUTPUT_CAPABILITY_READ_OK ||
+        !output_capability_metadata_valid(&candidate))
+        return REXX_VM_OUTPUT_CAPABILITY_QUERY_INVALID_METADATA;
+    *capability = candidate;
+    return REXX_VM_OUTPUT_CAPABILITY_QUERY_OK;
 }
 
 void rexx_vm_set_clock_reader(RexxVM *vm,

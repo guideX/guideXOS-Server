@@ -1,0 +1,30 @@
+{
+  "schema": "guidexos.rexx.rx37.qac-preflight.v1",
+  "captured_at_utc": "2026-10-24T18:20:49.5944963Z",
+  "cli_path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+  "cli_sha256": "f7089d508c1d8307e11de1b944b6e1087c038c4901333e8228ec117291ca8df6",
+  "help_exit_code": 0,
+  "status_exit_code": 0,
+  "list_exit_code": 0,
+  "coordinator_online": true,
+  "cli_version": "2.0.0",
+  "managed_sessions": 1,
+  "queued": 2,
+  "blocked": 0,
+  "reservations": 3,
+  "active_acceptance_reservation": "8b84465adf184cc6a1f416744168127c",
+  "active_owner": "LEON2_RDT\\guideX (PID 31704), owner verified",
+  "active_qemu_child_pid": 24052,
+  "rx37_reservation_acquired": false,
+  "rx37_guest_launched": false,
+  "qmp_port_allocated": false,
+  "qemu_processes": [
+    {
+      "pid": 24052,
+      "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "command_line": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel whpx -drive if=pflash,format=raw,readonly=on,file=E:/CodexArtifacts/guideXOSServer_DiskManagerImprovements/out/dm37/input-diagnostics-run4/runtime/firmware/OVMF.fd -machine pc,usb=off -device piix3-usb-uhci,id=uhci -drive if=none,id=dm37boot,format=raw,file=fat:rw:E:/CodexArtifacts/guideXOSServer_DiskManagerImprovements/out/dm37/input-diagnostics-run4/runtime/esp -device ide-hd,drive=dm37boot,bus=ide.0 -drive if=none,id=dm37workflow_drive,file=D:/dev/guideXOSServer_DiskManagerImprovements/out/dm37/dismount-guest/fixtures/DM37WORKFLOW01.raw,format=raw,readonly=on,cache=writeback -device usb-storage,id=dm37workflow_device,bus=uhci.0,drive=dm37workflow_drive,removable=on,serial=DM37WORKFLOW01 -netdev user,id=net0 -device e1000,netdev=net0 -object rng-builtin,id=rng0 -device virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000 -m 1024M -vga std -display gtk -monitor none -serial file:E:\\CodexArtifacts\\guideXOSServer_DiskManagerImprovements\\out\\dm37\\input-diagnostics-run4\\runs\\qac-shell-focus-recovery-20261024-r4\\guest.serial.log -qmp tcp:127.0.0.1:59140,server=on,wait=off -rtc base=utc,clock=host -no-reboot -name dm37-shell-focus-recovery-cont9-r4"
+    }
+  ],
+  "status_snapshot": "Coordinator: Online\nName: guideXOS QAC\nVersion: 2.0.0\nPID: 16064\nStarted (UTC): 2026-10-23T11:10:30.5849382+00:00\nUptime: 112218s\nQEMU processes: 1 (0 foreign)\nManaged development limit: 2\nManaged sessions: 1; queued: 2; blocked: 0",
+  "list_snapshot": "Coordinator: Online (guideXOS QAC 2.0.0)\nQEMU PID 24052 | C:\\Program Files\\qemu\\qemu-system-x86_64.exe | 2026-10-24T17:55:04.9801461+00:00 | managed\n  Note: Reservation 8b84465adf184cc6a1f416744168127c · guideXOSServer · acceptance\nReservations: 3\n  8b84465adf184cc6a1f416744168127c | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\\guideX (PID 31704) | owner Verified | child PID 24052\n  3db20d3f6ad94171916b2a470a64ca01 | guideXOSServer | acceptance | Waiting | queue 1 | LEON2_RDT\\guideX (PID 16936) | owner Verified\n  09a8a056e201455f9a68ca3bc72d5457 | guideXOS_NET10 | acceptance | Waiting | queue 2 | LEON2_RDT\\guideX (PID 22704) | owner Verified\nManaged sessions: 1\nManaged session: 8b84465adf184cc6a1f416744168127c | Running | guideXOSServer · LEON2_RDT\\guideX (PID 31704)"
+}
