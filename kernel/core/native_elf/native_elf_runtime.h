@@ -126,6 +126,10 @@ struct NativeAppExecutionContext {
     NativeRuntimeStatus runtimeStatus;
     uint32_t runtimeCallDepth;
     bool hostLogSerialTruncated;
+
+    // Kernel-assigned identity for this reusable runtime instance. It is not
+    // supplied by NativeElf code and is never part of the SDK ABI.
+    uint64_t runtimeIdentity;
 };
 
 // These assertions pin the generated-code ABI to the SDK definition.  The

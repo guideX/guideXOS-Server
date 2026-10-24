@@ -38,6 +38,7 @@
 #include "include/kernel/block_device.h"
 #if defined(GXOS_BARE_METAL)
 #include "native_elf/native_elf_scheduler.h"
+#include "compiler/compiler_build_service.h"
 #endif
 #if defined(GXOS_BARE_METAL)
 #include "include/kernel/app_launch_target_resolver.h"
@@ -175,6 +176,12 @@ static inline void disable_interrupts()
 // Perform system shutdown (extern for shell access)
 void perform_shutdown()
 {
+#if defined(GXOS_BARE_METAL)
+    if (kernel::compiler::BareMetalBuildService::shutdown() != GX_OK) {
+        kernel::serial::puts("Shutdown deferred: build-job execution has not reached a safe boundary\n");
+        return;
+    }
+#endif
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
     // Method 1: QEMU debug exit (cleanest for QEMU with isa-debug-exit device)
     // Exit code will be (0 << 1) | 1 = 1, indicating success

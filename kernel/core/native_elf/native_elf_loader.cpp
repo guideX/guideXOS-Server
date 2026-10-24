@@ -35,6 +35,7 @@ static bool s_contextConfigured = false;
 static bool s_nxEnabled = false;
 static uint8_t s_file[NATIVE_APP_MAX_ELF_FILE_BYTES];
 static NativeAppExecutionContext s_appRuntime = {};
+static uint64_t s_nextAppRuntimeIdentity = 1ULL;
 static char s_bareBuildStrings[8][768] = {};
 static char s_bareRunStrings[11][768] = {};
 static char s_bareDebugStrings[1][GX_DEVELOPMENT_RUN_MAX_SHA256_BYTES] = {};
@@ -49,6 +50,17 @@ static const uint64_t NESTED_SERVICE_STACK_BASE =
 static bool s_nestedExecutionActive = false;
 static bool s_phase29zTargetCallActive = false;
 static uint64_t s_phase29zTargetCallStartTick = 0;
+
+static uint64_t allocate_app_runtime_identity()
+{
+    const uint64_t reservedKernelIdentity = ~static_cast<uint64_t>(0);
+    if (s_nextAppRuntimeIdentity == 0 ||
+        s_nextAppRuntimeIdentity == reservedKernelIdentity) return 0;
+    const uint64_t identity = s_nextAppRuntimeIdentity;
+    s_nextAppRuntimeIdentity = identity == reservedKernelIdentity - 1ULL
+        ? 0ULL : identity + 1ULL;
+    return identity;
+}
 // Nested execution only needs to suspend the active target image while the
 // child runs. Keep this kernel-owned snapshot bounded by the artifact file
 // limit instead of mirroring the full 512-MiB guest mapping window in kernel
@@ -431,6 +443,7 @@ static bool app_context_valid(gx_app_context* context)
     const bool executionActive = s_appRuntime.state == NativeAppExecutionState::Running ||
         s_nestedExecutionActive;
     return executionActive && context &&
+        s_appRuntime.runtimeIdentity != 0 &&
         context == &s_appRuntime.appContext && context->host == &s_appRuntime.hostCalls &&
         context->userData == &s_appRuntime;
 }
@@ -780,6 +793,10 @@ static gx_result GX_CALL host_native_window_run(gx_app_context* context,
 static gx_result GX_CALL host_bare_build_start(gx_app_context* context, const gx_build_request* request, gx_build_handle* output)
 {
     if (!app_context_valid(context) || !request || !output || !app_pointer_range(request, sizeof(*request)) || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_PERMISSION_DENIED;
+    *output = 0;
+    // Check the request header before dereferencing any caller-owned string.
+    if (request->size < sizeof(gx_build_request) ||
+        request->version != GX_BUILD_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
     const char* input[8] = { request->projectRoot, request->projectId, request->projectKind, request->targetProfile,
                              request->buildSystem, request->buildScript, request->expectedArtifact, request->configuration };
     for (uint32_t i = 0; i < 8; ++i) if (!app_string(input[i], s_bareBuildStrings[i], sizeof(s_bareBuildStrings[i]))) return GX_ERROR_INVALID_ARGUMENT;
@@ -792,19 +809,22 @@ static gx_result GX_CALL host_bare_build_start(gx_app_context* context, const gx
     copied.buildScript = s_bareBuildStrings[5];
     copied.expectedArtifact = s_bareBuildStrings[6];
     copied.configuration = s_bareBuildStrings[7];
-    return compiler::BareMetalBuildService::start(&copied, output);
+    return compiler::BareMetalBuildService::start_owned(
+        &copied, s_appRuntime.runtimeIdentity, output);
 }
 
 static gx_result GX_CALL host_bare_build_poll(gx_app_context* context, gx_build_handle handle, gx_build_snapshot* output)
 {
     if (!app_context_valid(context) || !output || !app_pointer_range(output, sizeof(*output))) return GX_ERROR_PERMISSION_DENIED;
-    return compiler::BareMetalBuildService::poll(handle, output);
+    return compiler::BareMetalBuildService::poll_owned(
+        s_appRuntime.runtimeIdentity, handle, output);
 }
 
 static gx_result GX_CALL host_bare_build_release(gx_app_context* context, gx_build_handle handle)
 {
     if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
-    return compiler::BareMetalBuildService::release(handle);
+    return compiler::BareMetalBuildService::release_owned(
+        s_appRuntime.runtimeIdentity, handle);
 }
 
 static void copy_bytes(uint8_t* destination, const uint8_t* source, uint64_t count);
@@ -1267,6 +1287,15 @@ static void initialize_app_context()
 static bool teardown_application(NativeElfRunReport* report)
 {
     bool clean = true;
+    const gx_result buildOwnerResult =
+        compiler::BareMetalBuildService::owner_closed(s_appRuntime.runtimeIdentity);
+    if (buildOwnerResult == GX_ERROR_BUSY) {
+        if (report) {
+            report->teardownComplete = false;
+            report->finalState = s_appRuntime.state;
+        }
+        return false;
+    }
     if (!restore_all_debug_breakpoints()) clean = false;
     copy_gui_proof(report);
     destroy_native_gui();
@@ -1855,6 +1884,10 @@ static bool run_file_internal(const char* path,
         return fail_report(report, "NativeElf application context is still active");
     }
     s_appRuntime = {};
+    s_appRuntime.runtimeIdentity = allocate_app_runtime_identity();
+    if (s_appRuntime.runtimeIdentity == 0) {
+        return fail_report(report, "NativeElf runtime identity space exhausted");
+    }
     s_appRuntime.state = NativeAppExecutionState::Empty;
     reset_gui_runtime();
 

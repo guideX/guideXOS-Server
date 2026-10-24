@@ -3,6 +3,7 @@
 //
 
 #include "compiler_build_service.h"
+#include "compiler_build_job_manager.h"
 
 #include "compiler_driver.h"
 #include "elf_writer.h"
@@ -25,12 +26,7 @@ static const uint32_t kMaxProjectText = 16u * 1024u;
 static const uint32_t kMaxResolvedPath = 256u;
 static const uint32_t kMaxProjectSources = COMPILER_MAX_TRANSLATION_UNITS;
 
-struct SourceSelection {
-    uint32_t count;
-    char paths[kMaxProjectSources][kMaxResolvedPath];
-    char relatives[kMaxProjectSources][kMaxResolvedPath];
-    char objectPaths[kMaxProjectSources][kMaxResolvedPath];
-};
+using BuildJobManager::SourceSelection;
 
 static bool equal_text(const char* left, const char* right);
 static bool append_text(char* output, uint32_t capacity, const char* input);
@@ -76,14 +72,10 @@ static void compiler_failure_message(const CompileSummary& summary, char* messag
     else append_text(message, capacity, "bare-metal build pipeline failed without a diagnostic");
 }
 
-struct BuildJob {
-    bool used;
-    gx_build_handle handle;
-    gx_build_snapshot snapshot;
-};
-
-static BuildJob s_job = {};
-static gx_build_handle s_nextHandle = 1;
+static BuildJobManager::Manager s_buildJobManager;
+static gx_build_snapshot s_workingSnapshot = {};
+static gx_build_handle s_activeBuildHandle = 0;
+static uint64_t s_activeBuildOwner = 0;
 static char s_projectText[kMaxProjectText + 1];
 static char s_manifestText[kMaxProjectText + 1];
 static uint8_t s_artifact[COMPILER_MAX_OUTPUT_BYTES];
@@ -130,7 +122,7 @@ static void phase29y_directory_trace(const gx_build_request* request, const char
     if (s_phase29yDirectoryTraceCount >= 128U) return;
     ++s_phase29yDirectoryTraceCount;
     serial::puts("DEVELOPER_STUDIO_PHASE29Y_DIRECTORY op="); serial::puts(operation ? operation : "unknown");
-    serial::puts(" build_handle="); serial::put_hex64(s_job.handle);
+    serial::puts(" build_handle="); serial::put_hex64(s_activeBuildHandle);
     serial::puts(" project_id="); bounded_serial_text(request ? request->projectId : nullptr, 127U);
     serial::puts(" debug_request_id=<unavailable> project_generation=<unavailable>");
     serial::puts(" root="); bounded_serial_text(root, kMaxResolvedPath);
@@ -155,9 +147,9 @@ static void phase28v_build_trace(const char* event)
     serial::puts("DEVELOPER_STUDIO_PHASE28V_BUILD ");
     serial::puts(event);
     serial::puts(" handle=");
-    serial::put_hex64(s_job.handle);
+    serial::put_hex64(s_activeBuildHandle);
     serial::puts(" state=");
-    serial::put_hex32(static_cast<uint32_t>(s_job.snapshot.state));
+    serial::put_hex32(static_cast<uint32_t>(s_workingSnapshot.state));
     serial::putc('\n');
 }
 
@@ -350,20 +342,20 @@ static void clear_snapshot(gx_build_snapshot* snapshot, gx_build_handle handle)
 
 static void output_line(const char* text, uint32_t stream)
 {
-    if (!s_job.used || !text || s_job.snapshot.outputCount >= GX_BUILD_MAX_OUTPUT_LINES) {
-        if (s_job.used) s_job.snapshot.outputTruncated = 1;
+    if (s_activeBuildHandle == 0 || !text || s_workingSnapshot.outputCount >= GX_BUILD_MAX_OUTPUT_LINES) {
+        if (s_activeBuildHandle != 0) s_workingSnapshot.outputTruncated = 1;
         return;
     }
-    gx_build_output_line& line = s_job.snapshot.output[s_job.snapshot.outputCount++];
+    gx_build_output_line& line = s_workingSnapshot.output[s_workingSnapshot.outputCount++];
     line.stream = stream;
     copy_text(line.text, sizeof(line.text), text);
 }
 
 static void failure(uint32_t errorCode, const char* message)
 {
-    s_job.snapshot.state = GX_BUILD_FAILED;
-    s_job.snapshot.errorCode = errorCode;
-    copy_text(s_job.snapshot.errorMessage, sizeof(s_job.snapshot.errorMessage), message ? message : "bare-metal build failed");
+    s_workingSnapshot.state = GX_BUILD_FAILED;
+    s_workingSnapshot.errorCode = errorCode;
+    copy_text(s_workingSnapshot.errorMessage, sizeof(s_workingSnapshot.errorMessage), message ? message : "bare-metal build failed");
 }
 
 static void sha256_rotr(uint32_t value, uint32_t count, uint32_t* result)
@@ -844,7 +836,7 @@ static bool metadata_matches(const char* root, const gx_build_request* request,
 static void run_build_core(const gx_build_request* request)
 {
     phase28v_build_trace("CORE_ENTRY");
-    s_job.snapshot.state = GX_BUILD_PREPARING;
+    s_workingSnapshot.state = GX_BUILD_PREPARING;
     output_line("Bare-metal build backend: kernel VFS compiler", 1);
     output_line("No host process or external toolchain is used", 1);
     SourceSelection selection = {};
@@ -858,6 +850,15 @@ static void run_build_core(const gx_build_request* request)
         return;
     }
     phase28v_build_trace("METADATA_READY");
+    if (s_buildJobManager.set_source_membership(s_activeBuildOwner,
+                                                s_activeBuildHandle,
+                                                selection) != GX_OK ||
+        s_buildJobManager.queue_synchronous_job(s_activeBuildOwner,
+                                                s_activeBuildHandle) != GX_OK) {
+        failure(GX_BUILD_ERROR_SOURCE_SELECTION,
+                "validated source membership could not be retained by the build job");
+        return;
+    }
     vfs::FileInfo rootInfo = {};
     const vfs::Status rootStatus = vfs::stat(request->projectRoot, &rootInfo);
     phase29y_directory_trace(request, "owned-project-root", request->projectRoot,
@@ -879,7 +880,13 @@ static void run_build_core(const gx_build_request* request)
             return;
         }
     }
-    s_job.snapshot.state = GX_BUILD_RUNNING;
+    if (s_buildJobManager.mark_running(s_activeBuildOwner,
+                                       s_activeBuildHandle) != GX_OK) {
+        failure(GX_BUILD_ERROR_INTERNAL,
+                "build job could not enter its running state");
+        return;
+    }
+    s_workingSnapshot.state = GX_BUILD_RUNNING;
     phase28v_build_trace("COMPILE_ENTRY");
     const char* sourcePaths[kMaxProjectSources] = {};
     const char* sourceIdentityPaths[kMaxProjectSources] = {};
@@ -915,10 +922,10 @@ static void run_build_core(const gx_build_request* request)
             ? " modules from validated objects" : " modules");
         output_line(linkLine, 1);
     }
-    s_job.snapshot.sourceFileCount = summary.sourceFileCount;
-    s_job.snapshot.compiledModuleCount = summary.compiledModuleCount;
-    s_job.snapshot.cachedModuleCount = summary.cachedModuleCount;
-    s_job.snapshot.linkedModuleCount = summary.linkedModuleCount;
+    s_workingSnapshot.sourceFileCount = summary.sourceFileCount;
+    s_workingSnapshot.compiledModuleCount = summary.compiledModuleCount;
+    s_workingSnapshot.cachedModuleCount = summary.cachedModuleCount;
+    s_workingSnapshot.linkedModuleCount = summary.linkedModuleCount;
     char counterLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
     copy_text(counterLine, sizeof(counterLine), "Object counters: compiled=");
     append_dec(counterLine, sizeof(counterLine), summary.compiledModuleCount);
@@ -954,14 +961,14 @@ static void run_build_core(const gx_build_request* request)
             }
             output_line(line, 2);
         }
-        s_job.snapshot.errorCount = summary.diagnosticCount == 0 ? 1 : summary.diagnosticCount;
-        s_job.snapshot.warningCount = 0;
-        char message[sizeof(s_job.snapshot.errorMessage)] = {};
+        s_workingSnapshot.errorCount = summary.diagnosticCount == 0 ? 1 : summary.diagnosticCount;
+        s_workingSnapshot.warningCount = 0;
+        char message[sizeof(s_workingSnapshot.errorMessage)] = {};
         compiler_failure_message(summary, message, sizeof(message));
         failure(GX_BUILD_ERROR_COMPILER_FAILED, message);
         return;
     }
-    s_job.snapshot.state = GX_BUILD_VALIDATING_ARTIFACT;
+    s_workingSnapshot.state = GX_BUILD_VALIDATING_ARTIFACT;
     phase28v_build_trace("ARTIFACT_VALIDATION_ENTRY");
     vfs::FileInfo info = {};
     const bool artifactRead = vfs::stat(artifactPath, &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR && info.size <= sizeof(s_artifact);
@@ -970,17 +977,17 @@ static void run_build_core(const gx_build_request* request)
     native_elf::NativeElfValidationResult validation = {};
     const bool valid = artifactRead && readBytes == static_cast<int32_t>(bytes) && native_elf::validate_native_elf(s_artifact, bytes, native_elf::default_validation_policy(), &validation);
     if (!valid) {
-        s_job.snapshot.errorCount = 1;
+        s_workingSnapshot.errorCount = 1;
         failure(readBytes != static_cast<int32_t>(bytes) ? GX_BUILD_ERROR_ARTIFACT_MISSING : GX_BUILD_ERROR_ARTIFACT_INVALID, "produced artifact failed NativeElf validation");
         return;
     }
-    s_job.snapshot.state = GX_BUILD_SUCCEEDED;
-    s_job.snapshot.artifactSize = bytes;
-    s_job.snapshot.artifactValid = 1;
-    s_job.snapshot.artifactEntryPoint = static_cast<uint32_t>(validation.entryPoint);
-    copy_text(s_job.snapshot.artifactPath, sizeof(s_job.snapshot.artifactPath), request->expectedArtifact);
-    copy_text(s_job.snapshot.artifactArchitecture, sizeof(s_job.snapshot.artifactArchitecture), kArchitecture);
-    artifact_sha256(s_artifact, bytes, s_job.snapshot.artifactSha256);
+    s_workingSnapshot.state = GX_BUILD_SUCCEEDED;
+    s_workingSnapshot.artifactSize = bytes;
+    s_workingSnapshot.artifactValid = 1;
+    s_workingSnapshot.artifactEntryPoint = static_cast<uint32_t>(validation.entryPoint);
+    copy_text(s_workingSnapshot.artifactPath, sizeof(s_workingSnapshot.artifactPath), request->expectedArtifact);
+    copy_text(s_workingSnapshot.artifactArchitecture, sizeof(s_workingSnapshot.artifactArchitecture), kArchitecture);
+    artifact_sha256(s_artifact, bytes, s_workingSnapshot.artifactSha256);
     char successLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
     append_text(successLine, sizeof(successLine), "NativeElf validation PASS | bytes="); append_dec(successLine, sizeof(successLine), bytes); append_text(successLine, sizeof(successLine), " | entry=0x");
     const uint32_t entry = static_cast<uint32_t>(validation.entryPoint);
@@ -990,7 +997,7 @@ static void run_build_core(const gx_build_request* request)
         append_text(successLine, sizeof(successLine), digit);
     }
     output_line(successLine, 1);
-    s_job.snapshot.processExitCode = 0;
+    s_workingSnapshot.processExitCode = 0;
     phase28v_build_trace("CORE_COMPLETE");
 }
 
@@ -1015,35 +1022,73 @@ static void run_build(const gx_build_request* request)
 
 } // namespace
 
-gx_result start(const gx_build_request* request, gx_build_handle* outHandle)
+gx_result start_owned(const gx_build_request* request, uint64_t ownerIdentity,
+                      gx_build_handle* outHandle)
 {
     phase28v_build_trace("START_ENTRY");
-    if (!request || !outHandle || request->size < sizeof(gx_build_request) || request->version != GX_BUILD_API_VERSION) return GX_ERROR_INVALID_ARGUMENT;
-    *outHandle = 0;
-    if (s_job.used) return GX_ERROR_BUSY;
-    s_job.used = true;
-    s_job.handle = s_nextHandle++;
-    if (s_job.handle == 0) s_job.handle = s_nextHandle++;
-    clear_snapshot(&s_job.snapshot, s_job.handle);
-    *outHandle = s_job.handle;
-    run_build(request);
+    if (!outHandle) return GX_ERROR_INVALID_ARGUMENT;
+    const gx_result admitted = s_buildJobManager.begin_synchronous_job(
+        ownerIdentity, request, outHandle);
+    if (admitted != GX_OK) return admitted;
+
+    s_activeBuildHandle = *outHandle;
+    s_activeBuildOwner = ownerIdentity;
+    clear_snapshot(&s_workingSnapshot, s_activeBuildHandle);
+    const gx_build_request* ownedRequest =
+        s_buildJobManager.request_for_execution(ownerIdentity,
+                                                s_activeBuildHandle);
+    if (!ownedRequest) {
+        failure(GX_BUILD_ERROR_INTERNAL,
+                "owned build request snapshot could not be recovered");
+    } else {
+        run_build(ownedRequest);
+    }
     phase28v_build_trace("START_RETURN");
-    serial::puts(s_job.snapshot.state == GX_BUILD_SUCCEEDED ? "BareMetalBuild: PASS\n" : "BareMetalBuild: FAIL\n");
-    return GX_OK;
+    const bool succeeded = s_workingSnapshot.state == GX_BUILD_SUCCEEDED;
+    const gx_result completed = s_buildJobManager.complete_synchronous_job(
+        ownerIdentity, s_activeBuildHandle, &s_workingSnapshot);
+    serial::puts(succeeded ? "BareMetalBuild: PASS\n" : "BareMetalBuild: FAIL\n");
+    s_activeBuildHandle = 0;
+    s_activeBuildOwner = 0;
+    return completed;
+}
+
+gx_result start(const gx_build_request* request, gx_build_handle* outHandle)
+{
+    return start_owned(request, BuildJobManager::kKernelOwnerIdentity,
+                       outHandle);
+}
+
+gx_result poll_owned(uint64_t ownerIdentity, gx_build_handle handle,
+                     gx_build_snapshot* outSnapshot)
+{
+    return s_buildJobManager.poll(ownerIdentity, handle, outSnapshot);
 }
 
 gx_result poll(gx_build_handle handle, gx_build_snapshot* outSnapshot)
 {
-    if (!s_job.used || handle == 0 || handle != s_job.handle || !outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
-    *outSnapshot = s_job.snapshot;
-    return GX_OK;
+    return poll_owned(BuildJobManager::kKernelOwnerIdentity, handle,
+                      outSnapshot);
+}
+
+gx_result release_owned(uint64_t ownerIdentity, gx_build_handle handle)
+{
+    return s_buildJobManager.release(ownerIdentity, handle);
 }
 
 gx_result release(gx_build_handle handle)
 {
-    if (!s_job.used || handle == 0 || handle != s_job.handle) return GX_ERROR_INVALID_ARGUMENT;
-    s_job = {};
-    return GX_OK;
+    return release_owned(BuildJobManager::kKernelOwnerIdentity, handle);
+}
+
+gx_result owner_closed(uint64_t ownerIdentity)
+{
+    return s_buildJobManager.owner_closed(ownerIdentity);
+}
+
+gx_result shutdown()
+{
+    return s_buildJobManager.shutdown();
 }
 
 } // namespace BareMetalBuildService
