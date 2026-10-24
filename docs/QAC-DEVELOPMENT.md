@@ -169,3 +169,9 @@ Cleanup is explicit and ownership-checked. Remove-QacUefiArtifactWorkspace requi
 The helper validates a directory-backed FAT payload's required UEFI paths; it does not build or convert a raw FAT image and does not claim a fresh guest boot. It makes source hashes comparable, but not a transactional filesystem snapshot: another writer that changes an input and restores the exact bytes during the bounded copy window cannot be ruled out. QAC admission still governs execution separately from artifact isolation.
 
 See QAC3C2-ARTIFACT-ISOLATION.md for the collision inventory, manifest fields, qualification evidence, and remaining boundaries.
+
+## QAC3C3 UEFI launch integration
+
+QAC3C3 consumes a completed QAC3C2 manifest, keeps the canonical ESP read-only by launching from the private writable copy, and sends the QEMU argument vector through `qac run --project guideXOSServer --mode acceptance -- ...`. The QAC CLI remains QEMU's direct parent. The runner verifies the reservation identity and exact child PID, executable, parent, start time, and loopback QMP listener before negotiating QMP or changing guest state. QMP candidates are randomized per attempt; endpoint collisions are retried only after QAC verifies child exit and reservation release. The runner records guest results separately from the integration lifecycle and retains uncertain workspaces.
+
+The interrupted-session reconciliation, implementation review, regression totals, screenshot-path checks, bounded admission outcome, and final disposition are recorded in [QAC3C3-UEFI-QUALIFICATION.md](QAC3C3-UEFI-QUALIFICATION.md). The bounded admission expired before QEMU startup, so QAC3C3 remains open; acceptance still requires a live run that verifies a current-run screenshot, QMP shutdown, exact child exit, QAC release, artifact integrity, and dashboard behavior. The accepted QAC3C1 and QAC3C2 records remain unchanged.
