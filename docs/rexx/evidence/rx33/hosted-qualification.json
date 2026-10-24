@@ -2,7 +2,7 @@
   "schema": "guidexos.rexx.rx33.hosted-qualification.v1",
   "status": "PASS",
   "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_rexx_tests.ps1 -Phase RX33",
-  "evidence": "hosted-rx33-final.log",
+  "evidence": "Compact counts in this JSON; full runner output retained in the worktree only.",
   "rx33": {
     "seed": "0x52583333",
     "direct_assertions": 396,
@@ -47,5 +47,8 @@
     "RX32": "1/1",
     "RX33_fail_closed": "1/1"
   },
-  "regina": "NOT_RUN — no Regina executable found on PATH"
+  "regina": "NOT_RUN — no Regina executable found on PATH",
+  "raw_log": "hosted-rx33-final.log",
+  "raw_log_sha256": "2201b24fe4526b8c4656db19a07f272bc7f85d8c8bba30add36cba03d2c5a1c7",
+  "raw_log_committed": false
 }

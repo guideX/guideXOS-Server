@@ -1,0 +1,19 @@
+{
+  "schema": "guidexos.rexx.rx33.qac-prelaunch-attempt.v1",
+  "attempt_run_id": "e3fd620cc65c4b3ab4c90306fa22e420",
+  "captured_at_utc": "2026-10-24T13:43:59Z",
+  "command": "tests/run_rexx_qemu_smoke.ps1 -Phase RX33 -KernelPath <fresh RX33 ELF> -QacCliPath <verified QAC CLI> -PauseAfterConsoleReadiness",
+  "runner_exit_code": 1,
+  "outcome": "BLOCKED_BEFORE_GUEST_LAUNCH",
+  "guest_started": false,
+  "reason": "QAC preflight found an existing verified acceptance reservation and one managed QEMU session; the runner stopped before guest launch.",
+  "coordinator_status": "Online, guideXOS QAC 2.0.0",
+  "managed_qemu_pid": 12788,
+  "foreign_qemu_processes": 0,
+  "active_reservation_id": "2b61a62eb0d84905a87376c0015785cc",
+  "active_project": "guideXOSServer",
+  "active_mode": "acceptance",
+  "ownership": "Verified by QAC",
+  "action_taken": "No reservation was bypassed or controlled. The existing managed run completed and released its reservation; a fresh RX33 run then passed against the same kernel SHA-256.",
+  "later_successful_run": "evidence/rx33/native-guest/run-05a6d0904da04e3abfd5608927178aac"
+}

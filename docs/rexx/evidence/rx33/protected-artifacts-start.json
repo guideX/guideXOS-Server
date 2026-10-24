@@ -1,162 +1,157 @@
-{
-  "schema": "guidexos.rexx.rx33.protected-artifacts.v1",
-  "captured_at_utc": "2026-10-24T13:07:15.1465181Z",
-  "count": 31,
-  "artifacts": [
-    {
-      "path": "app_manifest_loader.obj",
-      "size_bytes": 547237,
-      "sha256": "51120fcd4eaf191fdf204657c6dce9d96e88b3e53af8f8e2f68dad055302ee64"
-    },
-    {
-      "path": "app_manifest_validator.obj",
-      "size_bytes": 143513,
-      "sha256": "fd28a089de33ae7a31dd13bcb1a9760e1fb60d902d5696b978a63a154a7aa457"
-    },
-    {
-      "path": "app_manifest.obj",
-      "size_bytes": 4844,
-      "sha256": "3d36d426029578bed89a02a9c12afd8aeeedab01d1931c697793bfb6e0ea2709"
-    },
-    {
-      "path": "oob.obj",
-      "size_bytes": 2177,
-      "sha256": "f52eeedbefe36cd9a867cd6ae325d6ed633540684d608d3b52e27669e8af08dc"
-    },
-    {
-      "path": "rexx_builtin.obj",
-      "size_bytes": 77524,
-      "sha256": "c509fcc6b0c63f5844970c13de4caf553c2d213210e4fa7c86ecd406daf519cf"
-    },
-    {
-      "path": "rexx_cli_test_driver.obj",
-      "size_bytes": 2491,
-      "sha256": "d87f87cfb9ead784f339a72644d089719d37b110b855137542683ffe0717a91b"
-    },
-    {
-      "path": "rexx_cli.obj",
-      "size_bytes": 42335,
-      "sha256": "0184fd52fe40fbc2234bcbdcd2698c80870be76285ae8a86c0259c23c22baf50"
-    },
-    {
-      "path": "rexx_compiler.obj",
-      "size_bytes": 107890,
-      "sha256": "b0bc1b2359b6dcf0c9f8ae10121c5822ebba6e8e25ed834264f90cf401c739f5"
-    },
-    {
-      "path": "rexx_lexer.obj",
-      "size_bytes": 87405,
-      "sha256": "aa24f7f50850d58319165d53201c146404df9531bfa35d461efea8fe0f5132e3"
-    },
-    {
-      "path": "rexx_main.obj",
-      "size_bytes": 78995,
-      "sha256": "3d3edfd8d58475fdf5f90c3147b27664f933d0649e2fe615b2b19ee9b71e5703"
-    },
-    {
-      "path": "rexx_numeric.obj",
-      "size_bytes": 94850,
-      "sha256": "43b852cb9320541a6c1d930fe2480cbaec2b88957f7c7f9c26bd4780cfe40d57"
-    },
-    {
-      "path": "rexx_os_io.obj",
-      "size_bytes": 26736,
-      "sha256": "23eafa97d15dd01f6f88ba4b6eb2d1bcd50a8ca726b3aa216b22416ac12a6821"
-    },
-    {
-      "path": "rexx_output.obj",
-      "size_bytes": 19798,
-      "sha256": "e9c2f9e01fc8a011956ba78e547a9a18ddad20b266ab53be785d8ca6d749649f"
-    },
-    {
-      "path": "rexx_parser.obj",
-      "size_bytes": 196123,
-      "sha256": "0c8987aa876be56e5d6d3550c1b9716c0d6ed1ccae786cb91a65b38dea26aa7a"
-    },
-    {
-      "path": "rexx_rx10_interpret_test.obj",
-      "size_bytes": 79748,
-      "sha256": "029a03a6fa6331518b45162cd03658727c8a60875c1c99519e3ef279110328b8"
-    },
-    {
-      "path": "rexx_rx2_shell_bridge_test.obj",
-      "size_bytes": 29257,
-      "sha256": "29c4676dbd1b0fcb5c5c43054c2ed631f0bdd45f4e2ede9ad9f162ec47b595c7"
-    },
-    {
-      "path": "rexx_rx2_test_driver.obj",
-      "size_bytes": 87634,
-      "sha256": "6ff30d472d554d738c4e72ab22070623a5b8bb3c2ba0e5310831bf449270eded"
-    },
-    {
-      "path": "rexx_rx3_alloc_failure_test.obj",
-      "size_bytes": 127834,
-      "sha256": "d1eb173c612a6d8377b25141446f5279965fd8f63d7e67ffa68470cbb1da97ec"
-    },
-    {
-      "path": "rexx_rx3_decimal_test.obj",
-      "size_bytes": 46746,
-      "sha256": "ea4998116d81e8fbd5c74254609ff77ee18296fe328c2dcbc8adbb13cf1f1726"
-    },
-    {
-      "path": "rexx_rx4_arithmetic_test.obj",
-      "size_bytes": 130150,
-      "sha256": "d0aaa1fb9e13f966978daeea2261f26898011027912ef7044dd63903a3e251a4"
-    },
-    {
-      "path": "rexx_rx5_numeric_context_test.obj",
-      "size_bytes": 63326,
-      "sha256": "6d92fce1d9120a4c8f38c80aa44ed22d24d328bc9c4a44c127452401b2749049"
-    },
-    {
-      "path": "rexx_rx6_parse_alloc_failure_test.obj",
-      "size_bytes": 81444,
-      "sha256": "204b875913f1724126de36057a9dd6347b92992d7130b2cbeb90205998f87253"
-    },
-    {
-      "path": "rexx_rx7_alloc_failure_test.obj",
-      "size_bytes": 34190,
-      "sha256": "4014fd92672b64f8244c0152a47fcf2d6202a298329984f5764fa680ee9ed03e"
-    },
-    {
-      "path": "rexx_rx7_routines_test.obj",
-      "size_bytes": 34537,
-      "sha256": "de8dc6a0d89aa00d190b88f99cd97842338f5bdb2baeba143bc2f681e20dc31e"
-    },
-    {
-      "path": "rexx_rx8_semantics_alloc_test.obj",
-      "size_bytes": 49312,
-      "sha256": "bc093252bb86ccfcf49901cd30c5aec5ede0df920bba5fbd97d950a61a0017d7"
-    },
-    {
-      "path": "rexx_rx9_condition_test.obj",
-      "size_bytes": 111833,
-      "sha256": "388418b0e689c63e20c12867ffbe6a3557c6e3c3a24d4a21963e08faf7c7532c"
-    },
-    {
-      "path": "rexx_shell_cmd.obj",
-      "size_bytes": 21083,
-      "sha256": "bfc8a40d02dd882633fd00336eb4ab8a8382dcc50b861a23a5c7781c7cd29808"
-    },
-    {
-      "path": "rexx_vm.obj",
-      "size_bytes": 397001,
-      "sha256": "3d7e2aee727c96b319360f3ace52c919277b079fbf2ef6285ef93bc6c04bb38f"
-    },
-    {
-      "path": "safe.obj",
-      "size_bytes": 3237,
-      "sha256": "2ece9b541fa799dd42c3994fd6f926e711bd99fe07e90d73a1b56b35ad6fea31"
-    },
-    {
-      "path": "smoke.obj",
-      "size_bytes": 2823,
-      "sha256": "5c821658df5f030c8090c58524c1b0776b66c481c6b15a626489eed7b3571d69"
-    },
-    {
-      "path": "vc140.pdb",
-      "size_bytes": 241664,
-      "sha256": "482bb9dd5861da2cdbee73687f8c278f368fa4da1e844f1f4279a18c210a9ab8"
-    }
-  ]
-}
+[
+  {
+    "name": "app_manifest_loader.obj",
+    "size_bytes": 547237,
+    "sha256": "51120FCD4EAF191FDF204657C6DCE9D96E88B3E53AF8F8E2F68DAD055302EE64"
+  },
+  {
+    "name": "app_manifest_validator.obj",
+    "size_bytes": 143513,
+    "sha256": "FD28A089DE33AE7A31DD13BCB1A9760E1FB60D902D5696B978A63A154A7AA457"
+  },
+  {
+    "name": "app_manifest.obj",
+    "size_bytes": 4844,
+    "sha256": "3D36D426029578BED89A02A9C12AFD8AEEEDAB01D1931C697793BFB6E0EA2709"
+  },
+  {
+    "name": "oob.obj",
+    "size_bytes": 2177,
+    "sha256": "F52EEEDBEFE36CD9A867CD6AE325D6ED633540684D608D3B52E27669E8AF08DC"
+  },
+  {
+    "name": "rexx_builtin.obj",
+    "size_bytes": 77524,
+    "sha256": "C509FCC6B0C63F5844970C13DE4CAF553C2D213210E4FA7C86ECD406DAF519CF"
+  },
+  {
+    "name": "rexx_cli_test_driver.obj",
+    "size_bytes": 2491,
+    "sha256": "D87F87CFB9EAD784F339A72644D089719D37B110B855137542683FFE0717A91B"
+  },
+  {
+    "name": "rexx_cli.obj",
+    "size_bytes": 42335,
+    "sha256": "0184FD52FE40FBC2234BCBDCD2698C80870BE76285AE8A86C0259C23C22BAF50"
+  },
+  {
+    "name": "rexx_compiler.obj",
+    "size_bytes": 107890,
+    "sha256": "B0BC1B2359B6DCF0C9F8AE10121C5822EBBA6E8E25ED834264F90CF401C739F5"
+  },
+  {
+    "name": "rexx_lexer.obj",
+    "size_bytes": 87405,
+    "sha256": "AA24F7F50850D58319165D53201C146404DF9531BFA35D461EFEA8FE0F5132E3"
+  },
+  {
+    "name": "rexx_main.obj",
+    "size_bytes": 78995,
+    "sha256": "3D3EDFD8D58475FDF5F90C3147B27664F933D0649E2FE615B2B19EE9B71E5703"
+  },
+  {
+    "name": "rexx_numeric.obj",
+    "size_bytes": 94850,
+    "sha256": "43B852CB9320541A6C1D930FE2480CBAEC2B88957F7C7F9C26BD4780CFE40D57"
+  },
+  {
+    "name": "rexx_os_io.obj",
+    "size_bytes": 26736,
+    "sha256": "23EAFA97D15DD01F6F88BA4B6EB2D1BCD50A8CA726B3AA216B22416AC12A6821"
+  },
+  {
+    "name": "rexx_output.obj",
+    "size_bytes": 19798,
+    "sha256": "E9C2F9E01FC8A011956BA78E547A9A18DDAD20B266AB53BE785D8CA6D749649F"
+  },
+  {
+    "name": "rexx_parser.obj",
+    "size_bytes": 196123,
+    "sha256": "0C8987AA876BE56E5D6D3550C1B9716C0D6ED1CCAE786CB91A65B38DEA26AA7A"
+  },
+  {
+    "name": "rexx_rx10_interpret_test.obj",
+    "size_bytes": 79748,
+    "sha256": "029A03A6FA6331518B45162CD03658727C8A60875C1C99519E3EF279110328B8"
+  },
+  {
+    "name": "rexx_rx2_shell_bridge_test.obj",
+    "size_bytes": 29257,
+    "sha256": "29C4676DBD1B0FCB5C5C43054C2ED631F0BDD45F4E2EDE9AD9F162EC47B595C7"
+  },
+  {
+    "name": "rexx_rx2_test_driver.obj",
+    "size_bytes": 87634,
+    "sha256": "6FF30D472D554D738C4E72AB22070623A5B8BB3C2BA0E5310831BF449270EDED"
+  },
+  {
+    "name": "rexx_rx3_alloc_failure_test.obj",
+    "size_bytes": 127834,
+    "sha256": "D1EB173C612A6D8377B25141446F5279965FD8F63D7E67FFA68470CBB1DA97EC"
+  },
+  {
+    "name": "rexx_rx3_decimal_test.obj",
+    "size_bytes": 46746,
+    "sha256": "EA4998116D81E8FBD5C74254609FF77EE18296FE328C2DCBC8ADBB13CF1F1726"
+  },
+  {
+    "name": "rexx_rx4_arithmetic_test.obj",
+    "size_bytes": 130150,
+    "sha256": "D0AAA1FB9E13F966978DAEEA2261F26898011027912EF7044DD63903A3E251A4"
+  },
+  {
+    "name": "rexx_rx5_numeric_context_test.obj",
+    "size_bytes": 63326,
+    "sha256": "6D92FCE1D9120A4C8F38C80AA44ED22D24D328BC9C4A44C127452401B2749049"
+  },
+  {
+    "name": "rexx_rx6_parse_alloc_failure_test.obj",
+    "size_bytes": 81444,
+    "sha256": "204B875913F1724126DE36057A9DD6347B92992D7130B2CBEB90205998F87253"
+  },
+  {
+    "name": "rexx_rx7_alloc_failure_test.obj",
+    "size_bytes": 34190,
+    "sha256": "4014FD92672B64F8244C0152A47FCF2D6202A298329984F5764FA680EE9ED03E"
+  },
+  {
+    "name": "rexx_rx7_routines_test.obj",
+    "size_bytes": 34537,
+    "sha256": "DE8DC6A0D89AA00D190B88F99CD97842338F5BDB2BAEBA143BC2F681E20DC31E"
+  },
+  {
+    "name": "rexx_rx8_semantics_alloc_test.obj",
+    "size_bytes": 49312,
+    "sha256": "BC093252BB86CCFCF49901CD30C5AEC5EDE0DF920BBA5FBD97D950A61A0017D7"
+  },
+  {
+    "name": "rexx_rx9_condition_test.obj",
+    "size_bytes": 111833,
+    "sha256": "388418B0E689C63E20C12867FFBE6A3557C6E3C3A24D4A21963E08FAF7C7532C"
+  },
+  {
+    "name": "rexx_shell_cmd.obj",
+    "size_bytes": 21083,
+    "sha256": "BFC8A40D02DD882633FD00336EB4AB8A8382DCC50B861A23A5C7781C7CD29808"
+  },
+  {
+    "name": "rexx_vm.obj",
+    "size_bytes": 397001,
+    "sha256": "3D7E2AEE727C96B319360F3ACE52C919277B079FBF2EF6285EF93BC6C04BB38F"
+  },
+  {
+    "name": "safe.obj",
+    "size_bytes": 3237,
+    "sha256": "2ECE9B541FA799DD42C3994FD6F926E711BD99FE07E90D73A1B56B35AD6FEA31"
+  },
+  {
+    "name": "smoke.obj",
+    "size_bytes": 2823,
+    "sha256": "5C821658DF5F030C8090C58524C1B0776B66C481C6B15A626489EED7B3571D69"
+  },
+  {
+    "name": "vc140.pdb",
+    "size_bytes": 241664,
+    "sha256": "482BB9DD5861DA2CDBEE73687F8C278F368FA4DA1E844F1F4279A18C210A9AB8"
+  }
+]
