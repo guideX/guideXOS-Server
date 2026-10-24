@@ -9,6 +9,10 @@
 
 #include "include/kernel/block_device.h"
 
+#if defined(GXOS_BARE_METAL) && (defined(__GNUC__) || defined(__clang__))
+#include "include/kernel/serial_debug.h"
+#endif
+
 namespace kernel {
 namespace block {
 
@@ -24,6 +28,22 @@ static void advanceGeneration(uint8_t index)
 {
     ++s_deviceGenerations[index];
     if (s_deviceGenerations[index] == 0) ++s_deviceGenerations[index];
+}
+static void log_generation_event(const char* event, uint8_t index, uint64_t generation)
+{
+#if defined(GXOS_BARE_METAL) && (defined(__GNUC__) || defined(__clang__))
+    serial::puts("[BLOCK-GENERATION] event=");
+    serial::puts(event);
+    serial::puts(" deviceIndex=0x");
+    serial::put_hex8(index);
+    serial::puts(" generation=0x");
+    serial::put_hex64(generation);
+    serial::putc('\n');
+#else
+    (void)event;
+    (void)index;
+    (void)generation;
+#endif
 }
 
 // ================================================================
@@ -50,7 +70,10 @@ static void memcopy(void* dst, const void* src, uint32_t len)
 void init()
 {
     for (uint8_t i = 0; i < MAX_BLOCK_DEVICES; ++i) {
-        if (s_devices[i].active) advanceGeneration(i);
+        if (s_devices[i].active) {
+            advanceGeneration(i);
+            log_generation_event("registry-init", i, s_deviceGenerations[i]);
+        }
     }
     memzero(s_devices, sizeof(s_devices));
     s_deviceCount = 0;
@@ -64,6 +87,7 @@ uint8_t register_device(const BlockDevice& dev)
             s_devices[i].active = true;
             advanceGeneration(i);
             ++s_deviceCount;
+            log_generation_event("registration", i, s_deviceGenerations[i]);
             return i;
         }
     }
@@ -77,6 +101,7 @@ void unregister_device(uint8_t index)
     s_devices[index].active = false;
     advanceGeneration(index);
     if (s_deviceCount > 0) --s_deviceCount;
+    log_generation_event("unregistration", index, s_deviceGenerations[index]);
 }
 
 uint8_t device_count()

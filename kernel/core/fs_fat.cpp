@@ -1000,6 +1000,13 @@ uint8_t mount(uint8_t blockDevIndex)
     invalidate_fat_sector_cache();
     if (s_volumeCount >= MAX_FAT_VOLUMES) return 0xFF;
     const uint64_t blockDeviceGeneration = block::device_generation(blockDevIndex);
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[FAT-GENERATION] event=mount-capture deviceIndex=0x");
+    serial::put_hex8(blockDevIndex);
+    serial::puts(" generation=0x");
+    serial::put_hex64(blockDeviceGeneration);
+    serial::putc('\n');
+#endif
     if (blockDeviceGeneration == 0) return 0xFF;
 
     // Find a free slot
@@ -1018,6 +1025,13 @@ uint8_t mount(uint8_t blockDevIndex)
     if (try_mount_fat(blockDevIndex, vol) &&
         block::device_generation(blockDevIndex) == blockDeviceGeneration) {
         ++s_volumeCount;
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[FAT-GENERATION] event=mount-ready deviceIndex=0x");
+        serial::put_hex8(blockDevIndex);
+        serial::puts(" generation=0x");
+        serial::put_hex64(vol.blockDeviceGeneration);
+        serial::putc('\n');
+#endif
         return idx;
     }
     memzero(&vol, sizeof(vol));
@@ -1027,9 +1041,25 @@ uint8_t mount(uint8_t blockDevIndex)
         try_mount_exfat(blockDevIndex, vol) &&
         block::device_generation(blockDevIndex) == blockDeviceGeneration) {
         ++s_volumeCount;
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[FAT-GENERATION] event=mount-ready deviceIndex=0x");
+        serial::put_hex8(blockDevIndex);
+        serial::puts(" generation=0x");
+        serial::put_hex64(vol.blockDeviceGeneration);
+        serial::putc('\n');
+#endif
         return idx;
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[FAT-GENERATION] event=mount-rejected deviceIndex=0x");
+    serial::put_hex8(blockDevIndex);
+    serial::puts(" recordedGeneration=0x");
+    serial::put_hex64(blockDeviceGeneration);
+    serial::puts(" currentGeneration=0x");
+    serial::put_hex64(block::device_generation(blockDevIndex));
+    serial::putc('\n');
+#endif
     return 0xFF;
 }
 

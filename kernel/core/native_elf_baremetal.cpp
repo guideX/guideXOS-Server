@@ -627,11 +627,6 @@ static bool read_at(const char* path, uint64_t offset, void* buffer, uint32_t le
     return okay && total == length;
 }
 
-static bool read_file_exact(const char* path, void* buffer, uint32_t length) {
-    uint32_t amount = 0;
-    return read_at(path, 0, buffer, length, &amount) && amount == length;
-}
-
 static bool parse_package(const char* directory, Package* package) {
     if (!directory || !package) return false;
     for (uint32_t i = 0; i < sizeof(Package); ++i) reinterpret_cast<uint8_t*>(package)[i] = 0;
@@ -971,8 +966,38 @@ static uint64_t rebase_static_absolute_words(Runtime* runtime, uint64_t minimum,
 static bool load_image(Runtime* runtime) {
     char path[256];
     if (!package_path(runtime->package, runtime->package->executable, path, sizeof(path))) return false;
-    Elf64Header header;
-    if (!read_file_exact(path, &header, sizeof(header))) {
+    Elf64Header header{};
+    const uint8_t headerHandle = vfs::open(path, vfs::OPEN_READ);
+    if (headerHandle == 0xFFu) {
+        serial::puts("[NATIVE-ELF] runtime=");
+        serial::put_hex64(s_runtimeSequence);
+        serial::puts(" stage=elf-header-open path=");
+        serial::puts(path);
+        serial::puts(" mountLookup=");
+        serial::puts(vfs::mount_lookup_result_name(vfs::last_mount_lookup_result()));
+        serial::putc('\n');
+        log_runtime(runtime, "load FAIL=elf-header-read");
+        return false;
+    }
+    uint32_t headerBytes = 0;
+    while (headerBytes < sizeof(header)) {
+        const uint32_t remaining = static_cast<uint32_t>(sizeof(header)) - headerBytes;
+        const int32_t amount = vfs::read(headerHandle,
+            reinterpret_cast<uint8_t*>(&header) + headerBytes, remaining);
+        if (amount <= 0 || static_cast<uint32_t>(amount) > remaining) break;
+        headerBytes += static_cast<uint32_t>(amount);
+    }
+    const vfs::Status headerClose = vfs::close(headerHandle);
+    if (headerBytes != sizeof(header) || headerClose != vfs::VFS_OK) {
+        serial::puts("[NATIVE-ELF] runtime=");
+        serial::put_hex64(s_runtimeSequence);
+        serial::puts(" stage=elf-header-read bytes=0x");
+        serial::put_hex32(headerBytes);
+        serial::puts(" closeStatus=");
+        serial::puts(vfs::status_name(headerClose));
+        serial::puts(" mountLookup=");
+        serial::puts(vfs::mount_lookup_result_name(vfs::last_mount_lookup_result()));
+        serial::putc('\n');
         log_runtime(runtime, "load FAIL=elf-header-read");
         return false;
     }

@@ -1,5 +1,31 @@
 # Stellar Navigator SN10 — Native Application Bring-up
 
+### SN10R20 VFS mount-generation diagnosis (2026-10-24)
+
+**Outcome B — VFS path resolution now reports mount ownership and generation state, and deterministic coverage exercises the AppModel-to-ELF path. The R20 candidate passed offline checks; its one QAC admission attempt found an occupied lane, so no guest was launched.** Work started on `STELLAR_NAVIGATOR` at HEAD `3f5c4c8a7f99be8a8fbdecaff5419b7c1cdf34bf`, with `.phase` `SN10` and 274 dirty entries, none staged. The pre-existing report and runner edits, and all other dirty work, were preserved. No branch switch, reset, clean, stash, history rewrite, or push was performed.
+
+#### Diagnosis and changes
+
+The SN10R18 serial log establishes that the root FAT32 volume mounted and AppModel discovered the package, then VFS failed to select a mount for the native ELF path. It does not record mount-table state or device generations at the failing lookup, so the historic transition that caused the failure remains unproven.
+
+The VFS now classifies path lookup as `MOUNT_FOUND`, `MOUNT_NOT_FOUND`, `MOUNT_STALE_GENERATION`, or `MOUNT_INVALIDATED`. Bounded `/Apps` diagnostics record the requested path, selected mount and device, and recorded/current generations. A stale longer mount prefix now fails closed instead of falling back to a different parent filesystem. Mount registration, explicit unmount invalidation, FAT generation capture, and generation changes during FAT mount are logged. The native ELF loader distinguishes failure to open the header from failure to read or close it, and includes the VFS lookup classification. Header reads retain the existing loop so short successful reads are accumulated until the full ELF header is available.
+
+The deterministic FAT/VFS regression passed **21/21** checks: sequential-read checks **11/11**, generation checks **10/10**, and the separate root-mount regression **11/11**. It covers repeated AppModel manifest opens/closes followed by the nested ELF path, missing and stale mounts, stale handle rejection, explicit invalidation/remount to different media, and a generation transition during FAT mount. The standalone block-device generation test passed **5/5**, native read-progress test **10/10**, native ephemeris suite **18/18**, and hosted Release suite **323 passed, 0 failed, 0 skipped**.
+
+#### Freestanding build and candidate
+
+The AMD64 freestanding kernel build passed with the existing no-exceptions/no-RTTI/no-standard-library restrictions. `readelf` reports ELF64 AMD64 `ET_EXEC`, entry `0x100000`, two 4 KiB-aligned load segments, and no relocations. The 2,672,168-byte kernel is at `kernel/build/sn10r20-amd64/bin/kernel.elf`, SHA-256 `bf8a241f374f63636fe732582956116c0a80615492e43f967221f06595f2bc69`; the existing default build output remained unchanged.
+
+The final measured candidate is under `E:\bkup\artifacts\SN10R20_20261024\candidate-final`. Its candidate manifest SHA-256 is `e4512d173d9fa2b394b295c75b7861bba1cbb44b63faa8bed327276f851eb92a` and full-tree manifest SHA-256 is `6af600ebc40d7991543d1008aa5f4bd9140b847a3f3e90f798f18a1eb5bd8184`. Candidate-only verification passed. The 270,532,608-byte raw MBR/FAT32 disk is `media-r20-final\stellar-navigator-sn10r8-mbr.raw`, SHA-256 `cddb923081cf43341d1bc4c140d56b972c9cf3a616729ffd59b6c6ba7285eff5`. It has a type `0x0C` root partition at LBA 2048 and separate type `0xEF` EFI partition at LBA 264192; all 15 payloads and both FAT volumes passed read-back and path validation. The original GPT source remained unchanged at SHA-256 `79dc215fb2fd6f4ade3d1a6e56eeed0297ca733adc241769b3b0a76422450b8a`.
+
+The final candidate identity check passed at `E:\bkup\artifacts\SN10R20_20261024\candidate-verification-final\qemu\20261024T151112214\candidate-verification.json`. The Windows PowerShell 5.1 runner self-test passed with `qemuLaunched=false` and `qacReservationRequested=false` at `E:\bkup\artifacts\SN10R20_20261024\runner-self-test-final\qemu\20261024T151114558\runner-selftest.json`.
+
+#### QAC admission and remaining guest gate
+
+The single fresh QAC census at `2026-10-24T15:08:59-07:00` found the coordinator online with one QEMU process, one managed session, two reservations, and one queued reservation. It was performed against the first offline-qualified R20 candidate (disk SHA-256 `e70a4a5a408c729c522bf92ee5b502faf47549760d52291ad7cd4186d441d09b`). The runner recorded `QAC_OCCUPIED`, made no reservation request, and left the active lane untouched. After the occupied result, the header short-read loop was restored and the final candidate was rebuilt and verified offline; no second QAC census or launch occurred. Evidence is under `E:\bkup\artifacts\SN10R20_20261024\qac-run\qemu\20261024T150859348\`; no QEMU child, guest serial output, or guest screenshot was produced.
+
+This run therefore does not establish whether the new diagnostics will identify the R18 failure, nor does it establish native launch, DE440s authentication/evaluation, UI, close/reopen, or desktop stability. `.phase` remains `SN10`; no acceptance or phase-advance claim is made. The guest gate requires a later authorized QAC run after an empty-lane preflight.
+
 ### SN10R18 FAT generation safety and sequential-read timing (2026-10-24)
 
 **Outcome B — the FAT cache and VFS now reject stale block-device generations, sequential read diagnostics count returned bytes across actual 1 MiB boundaries, and the rebuilt candidate passed offline validation. The one permitted QAC census found an occupied lane, so no reservation or guest launch was requested.** Work began on branch `STELLAR_NAVIGATOR`, HEAD `8bf26a1e340110ec752f64866b2a5c836c6d7808`, with `.phase` `SN10`. The initial full status census recorded 2,047 entries (259 tracked changes and 1,788 untracked files); none were staged. The pre-existing SN10R17 report and QAC runner edits remain outside this change. The local `origin/STELLAR_NAVIGATOR` reflog already showed `update by push` to `8bf26a1e` at `2026-10-24 10:35:20 -0700`; this work made no remote contact or ref changes.

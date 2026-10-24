@@ -119,6 +119,16 @@ enum Status : int8_t {
     VFS_ERR_ROLLBACK_FAILED = -23,
 };
 
+// Reason for the most recent path-to-mount lookup. File operations continue
+// to return VFS_ERR_NOT_MOUNT for compatibility; diagnostics can retain the
+// lifecycle distinction behind that status.
+enum MountLookupResult : uint8_t {
+    MOUNT_LOOKUP_FOUND = 0,
+    MOUNT_NOT_FOUND = 1,
+    MOUNT_STALE_GENERATION = 2,
+    MOUNT_INVALIDATED = 3,
+};
+
 // ================================================================
 // File/directory information
 // ================================================================
@@ -221,6 +231,8 @@ Status unmount(const char* path);
 
 // Get mount point info by path.
 const MountPoint* get_mount(const char* path);
+MountLookupResult last_mount_lookup_result();
+const char* mount_lookup_result_name(MountLookupResult result);
 
 // Return the stable mount-table slot selected for a path, or 0xFF.
 uint8_t mount_index_for_path(const char* path);

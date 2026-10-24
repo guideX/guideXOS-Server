@@ -27,6 +27,11 @@ static FileHandle   s_files[VFS_MAX_OPEN_FILES];
 static DirIterator  s_dirs[VFS_MAX_OPEN_FILES];
 static uint8_t      s_mountCount = 0;
 static bool         s_initialized = false;
+static MountLookupResult s_lastMountLookupResult = MOUNT_NOT_FOUND;
+static char s_lastInvalidatedMountPath[VFS_MAX_PATH] = {0};
+static bool s_hasLastInvalidatedMount = false;
+static uint32_t s_mountLookupDiagnosticCount = 0;
+static const uint32_t kMaxMountLookupDiagnostics = 64u;
 
 // ================================================================
 // Helper functions
@@ -75,6 +80,82 @@ static void strcopy(char* dst, const char* src, size_t maxLen)
 }
 
 void join_path(const char* base, const char* name, char* output, size_t outputSize);
+static size_t strlen(const char* s);
+static int strcmp(const char* s1, const char* s2);
+static int strncmp(const char* s1, const char* s2, size_t n);
+
+static bool path_has_mount_prefix(const char* path, const char* mountPath)
+{
+    if (!path || !mountPath) return false;
+    const size_t mountLen = strlen(mountPath);
+    if (mountLen == 0 || strncmp(path, mountPath, mountLen) != 0) return false;
+    return path[mountLen] == '\0' || path[mountLen] == '/' || mountLen == 1;
+}
+
+const char* mount_lookup_result_name(MountLookupResult result)
+{
+    switch (result) {
+        case MOUNT_LOOKUP_FOUND: return "MOUNT_FOUND";
+        case MOUNT_NOT_FOUND: return "MOUNT_NOT_FOUND";
+        case MOUNT_STALE_GENERATION: return "MOUNT_STALE_GENERATION";
+        case MOUNT_INVALIDATED: return "MOUNT_INVALIDATED";
+        default: return "MOUNT_LOOKUP_UNKNOWN";
+    }
+}
+
+MountLookupResult last_mount_lookup_result()
+{
+    return s_lastMountLookupResult;
+}
+
+static bool is_app_model_path(const char* path)
+{
+    return path && strncmp(path, "/Apps", 5u) == 0 &&
+        (path[5] == '\0' || path[5] == '/');
+}
+
+static void log_mount_lookup(const char* path, MountLookupResult result,
+                             const MountPoint* mount, uint8_t mountIndex,
+                             uint64_t currentGeneration)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    if (!is_app_model_path(path) || s_mountLookupDiagnosticCount >= kMaxMountLookupDiagnostics)
+        return;
+    ++s_mountLookupDiagnosticCount;
+    serial::puts("[VFS-MOUNT-LOOKUP] path=");
+    serial::puts(path);
+    serial::puts(" result=");
+    serial::puts(mount_lookup_result_name(result));
+    if (mount) {
+        serial::puts(" mountIndex=0x");
+        serial::put_hex8(mountIndex);
+        serial::puts(" mountPath=");
+        serial::puts(mount->path);
+        serial::puts(" deviceIndex=0x");
+        serial::put_hex8(mount->blockDevIndex);
+        serial::puts(" recordedGeneration=0x");
+        serial::put_hex64(mount->blockDeviceGeneration);
+        serial::puts(" currentGeneration=0x");
+        serial::put_hex64(currentGeneration);
+    }
+    serial::putc('\n');
+#else
+    (void)path;
+    (void)result;
+    (void)mount;
+    (void)mountIndex;
+    (void)currentGeneration;
+#endif
+}
+
+static void clear_matching_invalidation(const char* path)
+{
+    if (s_hasLastInvalidatedMount && path &&
+        strcmp(s_lastInvalidatedMountPath, path) == 0) {
+        s_lastInvalidatedMountPath[0] = '\0';
+        s_hasLastInvalidatedMount = false;
+    }
+}
 
 static bool mount_generation_current(const MountPoint* mount)
 {
@@ -84,9 +165,28 @@ static bool mount_generation_current(const MountPoint* mount)
 
 static MountPoint* mount_for_file_handle(const FileHandle& file)
 {
-    if (!file.open || file.mountIndex >= VFS_MAX_MOUNTS) return nullptr;
+    if (!file.open || file.mountIndex >= VFS_MAX_MOUNTS) {
+        s_lastMountLookupResult = MOUNT_NOT_FOUND;
+        return nullptr;
+    }
     MountPoint* mount = &s_mounts[file.mountIndex];
-    return mount_generation_current(mount) ? mount : nullptr;
+    if (!mount->active) {
+        s_lastMountLookupResult = s_hasLastInvalidatedMount &&
+            path_has_mount_prefix(file.path, s_lastInvalidatedMountPath)
+            ? MOUNT_INVALIDATED : MOUNT_NOT_FOUND;
+        log_mount_lookup(file.path, s_lastMountLookupResult, nullptr, 0xFFu, 0);
+        return nullptr;
+    }
+    const uint64_t currentGeneration = block::device_generation(mount->blockDevIndex);
+    if (mount->blockDeviceGeneration == 0 ||
+        currentGeneration != mount->blockDeviceGeneration) {
+        s_lastMountLookupResult = MOUNT_STALE_GENERATION;
+        log_mount_lookup(file.path, s_lastMountLookupResult, mount, file.mountIndex,
+                         currentGeneration);
+        return nullptr;
+    }
+    s_lastMountLookupResult = MOUNT_LOOKUP_FOUND;
+    return mount;
 }
 
 static void release_file_handle_without_io(FileHandle& file, MountPoint* mount)
@@ -122,29 +222,66 @@ static int strncmp(const char* s1, const char* s2, size_t n)
 // Find the mount point that best matches a path
 static MountPoint* find_mount_for_path(const char* path)
 {
-    if (!path) return nullptr;
+    if (!path) {
+        s_lastMountLookupResult = MOUNT_NOT_FOUND;
+        return nullptr;
+    }
     
     MountPoint* bestMatch = nullptr;
     size_t bestLen = 0;
+    uint64_t bestCurrentGeneration = 0;
+    MountPoint* staleMatch = nullptr;
+    size_t staleLen = 0;
+    uint8_t staleIndex = 0xFF;
+    uint64_t staleCurrentGeneration = 0;
     
     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
-        if (!mount_generation_current(&s_mounts[i])) continue;
-        
-        size_t mountLen = strlen(s_mounts[i].path);
-        
-        // Check if path starts with mount path
-        if (strncmp(path, s_mounts[i].path, mountLen) == 0) {
-            // Ensure we match at a path boundary
-            if (path[mountLen] == '\0' || path[mountLen] == '/' || 
-                mountLen == 1) {  // Root mount "/"
-                if (mountLen > bestLen) {
-                    bestMatch = &s_mounts[i];
-                    bestLen = mountLen;
-                }
+        MountPoint& candidate = s_mounts[i];
+        if (!candidate.active || !path_has_mount_prefix(path, candidate.path)) continue;
+        const uint64_t currentGeneration = block::device_generation(candidate.blockDevIndex);
+        if (candidate.blockDeviceGeneration == 0 ||
+            currentGeneration != candidate.blockDeviceGeneration) {
+            const size_t mountLen = strlen(candidate.path);
+            if (mountLen > staleLen) {
+                staleMatch = &candidate;
+                staleLen = mountLen;
+                staleIndex = i;
+                staleCurrentGeneration = currentGeneration;
             }
+            continue;
+        }
+
+        const size_t mountLen = strlen(candidate.path);
+        if (mountLen > bestLen) {
+            bestMatch = &candidate;
+            bestLen = mountLen;
+            bestCurrentGeneration = currentGeneration;
         }
     }
-    
+
+    // A stale longer mount still owns its prefix. Falling back to a valid
+    // parent mount would expose a different filesystem at the same path.
+    if (staleMatch && staleLen >= bestLen) {
+        s_lastMountLookupResult = MOUNT_STALE_GENERATION;
+        log_mount_lookup(path, s_lastMountLookupResult, staleMatch, staleIndex,
+                         staleCurrentGeneration);
+        return nullptr;
+    }
+    if (bestMatch) {
+        s_lastMountLookupResult = MOUNT_LOOKUP_FOUND;
+        log_mount_lookup(path, s_lastMountLookupResult, bestMatch,
+                         static_cast<uint8_t>(bestMatch - s_mounts),
+                         bestCurrentGeneration);
+        return bestMatch;
+    }
+
+    if (s_hasLastInvalidatedMount &&
+        path_has_mount_prefix(path, s_lastInvalidatedMountPath)) {
+        s_lastMountLookupResult = MOUNT_INVALIDATED;
+    } else {
+        s_lastMountLookupResult = MOUNT_NOT_FOUND;
+    }
+    log_mount_lookup(path, s_lastMountLookupResult, nullptr, 0xFFu, 0);
     return bestMatch;
 }
 
@@ -377,6 +514,10 @@ void init()
     memzero(s_files, sizeof(s_files));
     memzero(s_dirs, sizeof(s_dirs));
     s_mountCount = 0;
+    s_lastMountLookupResult = MOUNT_NOT_FOUND;
+    s_lastInvalidatedMountPath[0] = '\0';
+    s_hasLastInvalidatedMount = false;
+    s_mountLookupDiagnosticCount = 0;
     s_initialized = true;
     
 #if defined(__GNUC__) || defined(__clang__)
@@ -482,6 +623,17 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     }
 
     if (block::device_generation(blockDevIndex) != blockDeviceGeneration) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS-MOUNT-LIFECYCLE] result=MOUNT_INVALIDATED path=");
+        serial::puts(path);
+        serial::puts(" deviceIndex=0x");
+        serial::put_hex8(blockDevIndex);
+        serial::puts(" recordedGeneration=0x");
+        serial::put_hex64(blockDeviceGeneration);
+        serial::puts(" currentGeneration=0x");
+        serial::put_hex64(block::device_generation(blockDevIndex));
+        serial::puts(" reason=generation-change-during-registration\n");
+#endif
         if (fsType == FS_TYPE_FAT32 || fsType == FS_TYPE_EXFAT)
             fs_fat::unmount(fsVolume);
         else if (fsType == FS_TYPE_EXT2 || fsType == FS_TYPE_EXT4)
@@ -501,10 +653,18 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     mp.readOnly = !blockDevice || !blockDevice->writeFn;
     mp.alias = false;
     mp.sourcePrefix[0] = '\0';
+    clear_matching_invalidation(path);
     
     ++s_mountCount;
     
 #if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[VFS-MOUNT-LIFECYCLE] result=MOUNT_REGISTERED path=");
+    serial::puts(path);
+    serial::puts(" deviceIndex=0x");
+    serial::put_hex8(blockDevIndex);
+    serial::puts(" recordedGeneration=0x");
+    serial::put_hex64(blockDeviceGeneration);
+    serial::putc('\n');
     serial::puts("[VFS] Mounted ");
     serial::puts(fs_type_name(fsType));
     serial::puts(" at '");
@@ -580,10 +740,18 @@ uint8_t mount_alias(const char* path, const char* sourcePath)
     mp.readOnly = sourceMount->readOnly;
     mp.alias = true;
     strcopy(mp.sourcePrefix, sourceRelative, sizeof(mp.sourcePrefix));
+    clear_matching_invalidation(path);
 
     ++s_mountCount;
 
 #if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[VFS-MOUNT-LIFECYCLE] result=MOUNT_REGISTERED path=");
+    serial::puts(path);
+    serial::puts(" deviceIndex=0x");
+    serial::put_hex8(mp.blockDevIndex);
+    serial::puts(" recordedGeneration=0x");
+    serial::put_hex64(mp.blockDeviceGeneration);
+    serial::puts(" alias=true\n");
     serial::puts("[VFS] Mounted alias '");
     serial::puts(path);
     serial::puts("' -> '");
@@ -618,6 +786,19 @@ Status unmount(const char* path)
             }
             
             // Unmount the filesystem
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS-MOUNT-LIFECYCLE] result=MOUNT_INVALIDATED path=");
+            serial::puts(path);
+            serial::puts(" deviceIndex=0x");
+            serial::put_hex8(mount.blockDevIndex);
+            serial::puts(" recordedGeneration=0x");
+            serial::put_hex64(mount.blockDeviceGeneration);
+            serial::puts(" currentGeneration=0x");
+            serial::put_hex64(block::device_generation(mount.blockDevIndex));
+            serial::puts(" reason=explicit-unmount\n");
+#endif
+            strcopy(s_lastInvalidatedMountPath, path, sizeof(s_lastInvalidatedMountPath));
+            s_hasLastInvalidatedMount = true;
             switch (s_mounts[i].fsType) {
                 case FS_TYPE_FAT32:
                 case FS_TYPE_EXFAT:
