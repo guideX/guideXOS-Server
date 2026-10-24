@@ -1495,151 +1495,158 @@ bool DisplayConfigurationService::submit(const DisplayConfigurationCommand& comm
                 : "TopologyGenerationStale: dismiss was not applied");
         } else {
             DisplayConfigurationRequest topologyRequest{};
-            DisplayTopologyReconciliationPlan plan{};
-            const char* planReason = nullptr;
-            const bool planned = build_topology_request(activeBefore, pending, topologyRequest,
-                                                        plan, command, &planReason);
-            const bool valid = planned && validate_topology_request(topologyRequest, activeBefore, &planReason);
-            plan.valid = valid ? 1u : 0u;
-            if (!valid) copy_text(plan.rejectionReason, sizeof(plan.rejectionReason),
-                                  planReason != nullptr ? planReason : "topology reconciliation plan rejected");
-            fill_pending_response(response, pending, &plan);
-            response.requestedConfiguration = plan.proposedRequestedConfiguration;
-            response.proposedConfiguration = plan.proposedRequestedConfiguration;
-            response.validationResult = valid
-                ? static_cast<uint32_t>(DisplayConfigurationValidationResult::Passed)
-                : static_cast<uint32_t>(DisplayConfigurationValidationResult::Failed);
-            if (type == DisplayConfigurationCommandType::PreviewTopologyReconciliation) {
-                response.success = valid ? 1u : 0u;
-                response.resultCode = valid
-                    ? static_cast<uint32_t>(DisplayConfigurationResultCode::Success)
-                    : static_cast<uint32_t>(DisplayConfigurationResultCode::InvalidConfiguration);
-                set_diagnostic(response, valid
-                    ? "topology reconciliation preview complete; no GPU mutation"
-                    : (planReason != nullptr ? planReason : "topology reconciliation preview rejected"));
-            } else if (!valid) {
-                response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::InvalidConfiguration);
-                set_diagnostic(response, planReason != nullptr ? planReason : "topology reconciliation plan rejected");
+            DisplayTopologyReconciliationPlan* plan = new DisplayTopologyReconciliationPlan{};
+            if (!plan) {
+                response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::TopologyReconciliationUnavailable);
+                set_diagnostic(response, "topology reconciliation workspace unavailable");
                 accepted = false;
             } else {
-                // This is the sole authoritative topology mutation path. The
-                // observer only publishes pending state; it never reaches this
-                // branch on its own.
-                DisplayConfigurationCommand applyCommand = command;
-                applyCommand.origin = command.origin == 0u
-                    ? static_cast<uint32_t>(DisplayConfigurationRequestOrigin::UserApply) : command.origin;
-                applyCommand.requestedConfiguration = topologyRequest;
-                applyCommand.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration);
-                const DisplayConfigurationRequest oldRequest = [&]() {
-                    DisplayConfigurationRequest value{};
-                    request_from_snapshot(activeBefore, value);
-                    return value;
-                }();
-                kernel::serial::puts("Topology reconciliation apply: generation=");
-                serial_u64(command.topologyGeneration);
-                kernel::serial::puts(" action=");
-                serial_text(pending.changeType == static_cast<uint32_t>(VirtioGpuTopologyChangeType::OutputRemoval) ? "remove" : "add");
-                kernel::serial::puts(" genuineDeviceEvent=");
-                serial_text(pending.genuineDeviceEvent ? "yes" : "no");
-                kernel::serial::puts(" injectedTestEvent=");
-                serial_text(pending.injectedEvent ? "yes" : "no");
-                kernel::serial::puts(" state=pausing-presentation\n");
-                kernel::virtio::gpu::set_display_configuration_backend_presentation_paused(true);
-                response.presentationPaused = 1u;
-
-                kernel::virtio::gpu::DisplayConfigurationBackendResult backendResult{};
-                const bool backendApplied = kernel::virtio::gpu::apply_display_configuration_backend_layout(
-                    topologyRequest, failureInjectionFlags, &backendResult);
-                response.targetRebuildSucceeded = backendResult.targetRebuilt;
-                response.validationResult = backendResult.validationFrame
+                const char* planReason = nullptr;
+                const bool planned = build_topology_request(activeBefore, pending, topologyRequest,
+                                                            *plan, command, &planReason);
+                const bool valid = planned && validate_topology_request(topologyRequest, activeBefore, &planReason);
+                plan->valid = valid ? 1u : 0u;
+                if (!valid) copy_text(plan->rejectionReason, sizeof(plan->rejectionReason),
+                                      planReason != nullptr ? planReason : "topology reconciliation plan rejected");
+                fill_pending_response(response, pending, plan);
+                response.requestedConfiguration = plan->proposedRequestedConfiguration;
+                response.proposedConfiguration = plan->proposedRequestedConfiguration;
+                response.validationResult = valid
                     ? static_cast<uint32_t>(DisplayConfigurationValidationResult::Passed)
                     : static_cast<uint32_t>(DisplayConfigurationValidationResult::Failed);
-                response.rollbackAttempted = backendApplied ? 0u : 1u;
-                response.success = backendApplied ? 1u : 0u;
-                response.resultCode = backendApplied
-                    ? static_cast<uint32_t>(DisplayConfigurationResultCode::Success)
-                    : result_code_for_backend(backendResult);
-                set_backend_diagnostic(response, backendResult);
+                if (type == DisplayConfigurationCommandType::PreviewTopologyReconciliation) {
+                    response.success = valid ? 1u : 0u;
+                    response.resultCode = valid
+                        ? static_cast<uint32_t>(DisplayConfigurationResultCode::Success)
+                        : static_cast<uint32_t>(DisplayConfigurationResultCode::InvalidConfiguration);
+                    set_diagnostic(response, valid
+                        ? "topology reconciliation preview complete; no GPU mutation"
+                        : (planReason != nullptr ? planReason : "topology reconciliation preview rejected"));
+                } else if (!valid) {
+                    response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::InvalidConfiguration);
+                    set_diagnostic(response, planReason != nullptr ? planReason : "topology reconciliation plan rejected");
+                    accepted = false;
+                } else {
+                    // This is the sole authoritative topology mutation path. The
+                    // observer only publishes pending state; it never reaches this
+                    // branch on its own.
+                    DisplayConfigurationCommand applyCommand = command;
+                    applyCommand.origin = command.origin == 0u
+                        ? static_cast<uint32_t>(DisplayConfigurationRequestOrigin::UserApply) : command.origin;
+                    applyCommand.requestedConfiguration = topologyRequest;
+                    applyCommand.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration);
+                    const DisplayConfigurationRequest oldRequest = [&]() {
+                        DisplayConfigurationRequest value{};
+                        request_from_snapshot(activeBefore, value);
+                        return value;
+                    }();
+                    kernel::serial::puts("Topology reconciliation apply: generation=");
+                    serial_u64(command.topologyGeneration);
+                    kernel::serial::puts(" action=");
+                    serial_text(pending.changeType == static_cast<uint32_t>(VirtioGpuTopologyChangeType::OutputRemoval) ? "remove" : "add");
+                    kernel::serial::puts(" genuineDeviceEvent=");
+                    serial_text(pending.genuineDeviceEvent ? "yes" : "no");
+                    kernel::serial::puts(" injectedTestEvent=");
+                    serial_text(pending.injectedEvent ? "yes" : "no");
+                    kernel::serial::puts(" state=pausing-presentation\n");
+                    kernel::virtio::gpu::set_display_configuration_backend_presentation_paused(true);
+                    response.presentationPaused = 1u;
 
-                if (response.success != 0u) {
-                    kernel::virtio::gpu::get_display_configuration_backend_snapshots(
-                        &detected, &response.activeConfiguration);
-                    response.detectedConfiguration = detected;
-                    response.success = update_input_layout(response.activeConfiguration) ? 1u : 0u;
+                    kernel::virtio::gpu::DisplayConfigurationBackendResult backendResult{};
+                    const bool backendApplied = kernel::virtio::gpu::apply_display_configuration_backend_layout(
+                        topologyRequest, failureInjectionFlags, &backendResult);
+                    response.targetRebuildSucceeded = backendResult.targetRebuilt;
+                    response.validationResult = backendResult.validationFrame
+                        ? static_cast<uint32_t>(DisplayConfigurationValidationResult::Passed)
+                        : static_cast<uint32_t>(DisplayConfigurationValidationResult::Failed);
+                    response.rollbackAttempted = backendApplied ? 0u : 1u;
+                    response.success = backendApplied ? 1u : 0u;
+                    response.resultCode = backendApplied
+                        ? static_cast<uint32_t>(DisplayConfigurationResultCode::Success)
+                        : result_code_for_backend(backendResult);
+                    set_backend_diagnostic(response, backendResult);
+
                     if (response.success != 0u) {
-                        kernel::compositor::KernelCompositor::reconcileDisplayTopology(
-                            static_cast<uint32_t>(response.activeConfiguration.virtualDesktopWidth),
-                            static_cast<uint32_t>(response.activeConfiguration.virtualDesktopHeight));
-                        reconcile_desktop_topology_from_snapshot(response.activeConfiguration);
-                    } else {
-                        response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::TargetRebuildFailed);
-                        set_diagnostic(response, "topology reconciliation input update failed");
-                    }
-                    if (response.success != 0u &&
-                        (applyCommand.flags & DisplayConfigurationFlagCommitPersistence) != 0u) {
-                        if (persist_configuration(response.activeConfiguration)) {
-                            response.persistenceCommitted = 1u;
-                        } else {
-                            response.success = 0u;
-                            response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::PersistenceFailed);
-                            set_diagnostic(response, "topology reconciliation persistence failed; rolling back");
-                        }
-                    }
-                    if (response.success != 0u &&
-                        !kernel::virtio::gpu::apply_detected_topology_for_service(command.topologyGeneration)) {
-                        response.success = 0u;
-                        response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::TopologyGenerationStale);
-                        set_diagnostic(response, "TopologyGenerationStale: pending topology changed before commit");
-                    }
-                }
-
-                if (response.success == 0u) {
-                    response.rollbackAttempted = 1u;
-                    kernel::virtio::gpu::DisplayConfigurationBackendResult rollbackResult{};
-                    const bool rollback = kernel::virtio::gpu::apply_display_configuration_backend_layout(
-                        oldRequest, 0u, &rollbackResult);
-                    response.rollbackSucceeded = rollback ? 1u : 0u;
-                    response.rollbackOldOutputsRestored = rollback ? 1u : 0u;
-                    response.rollbackOldPrimaryRestored = rollback ? 1u : 0u;
-                    response.rollbackOldLayoutRestored = rollback ? 1u : 0u;
-                    if (rollback) {
                         kernel::virtio::gpu::get_display_configuration_backend_snapshots(
                             &detected, &response.activeConfiguration);
                         response.detectedConfiguration = detected;
-                        update_input_layout(response.activeConfiguration);
-                        kernel::compositor::KernelCompositor::reconcileDisplayTopology(
-                            static_cast<uint32_t>(response.activeConfiguration.virtualDesktopWidth),
-                            static_cast<uint32_t>(response.activeConfiguration.virtualDesktopHeight));
-                        reconcile_desktop_topology_from_snapshot(response.activeConfiguration);
-                        set_diagnostic(response, "topology reconciliation failed; complete rollback succeeded");
-                        copy_text(response.rollbackResult, sizeof(response.rollbackResult),
-                                  "scanouts, resources, layout, primary, windows, cursor restored");
+                        response.success = update_input_layout(response.activeConfiguration) ? 1u : 0u;
+                        if (response.success != 0u) {
+                            kernel::compositor::KernelCompositor::reconcileDisplayTopology(
+                                static_cast<uint32_t>(response.activeConfiguration.virtualDesktopWidth),
+                                static_cast<uint32_t>(response.activeConfiguration.virtualDesktopHeight));
+                            reconcile_desktop_topology_from_snapshot(response.activeConfiguration);
+                        } else {
+                            response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::TargetRebuildFailed);
+                            set_diagnostic(response, "topology reconciliation input update failed");
+                        }
+                        if (response.success != 0u &&
+                            (applyCommand.flags & DisplayConfigurationFlagCommitPersistence) != 0u) {
+                            if (persist_configuration(response.activeConfiguration)) {
+                                response.persistenceCommitted = 1u;
+                            } else {
+                                response.success = 0u;
+                                response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::PersistenceFailed);
+                                set_diagnostic(response, "topology reconciliation persistence failed; rolling back");
+                            }
+                        }
+                        if (response.success != 0u &&
+                            !kernel::virtio::gpu::apply_detected_topology_for_service(command.topologyGeneration)) {
+                            response.success = 0u;
+                            response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::TopologyGenerationStale);
+                            set_diagnostic(response, "TopologyGenerationStale: pending topology changed before commit");
+                        }
+                    }
+
+                    if (response.success == 0u) {
+                        response.rollbackAttempted = 1u;
+                        kernel::virtio::gpu::DisplayConfigurationBackendResult rollbackResult{};
+                        const bool rollback = kernel::virtio::gpu::apply_display_configuration_backend_layout(
+                            oldRequest, 0u, &rollbackResult);
+                        response.rollbackSucceeded = rollback ? 1u : 0u;
+                        response.rollbackOldOutputsRestored = rollback ? 1u : 0u;
+                        response.rollbackOldPrimaryRestored = rollback ? 1u : 0u;
+                        response.rollbackOldLayoutRestored = rollback ? 1u : 0u;
+                        if (rollback) {
+                            kernel::virtio::gpu::get_display_configuration_backend_snapshots(
+                                &detected, &response.activeConfiguration);
+                            response.detectedConfiguration = detected;
+                            update_input_layout(response.activeConfiguration);
+                            kernel::compositor::KernelCompositor::reconcileDisplayTopology(
+                                static_cast<uint32_t>(response.activeConfiguration.virtualDesktopWidth),
+                                static_cast<uint32_t>(response.activeConfiguration.virtualDesktopHeight));
+                            reconcile_desktop_topology_from_snapshot(response.activeConfiguration);
+                            set_diagnostic(response, "topology reconciliation failed; complete rollback succeeded");
+                            copy_text(response.rollbackResult, sizeof(response.rollbackResult),
+                                      "scanouts, resources, layout, primary, windows, cursor restored");
+                        } else {
+                            response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::RollbackFailed);
+                            set_diagnostic(response, "topology reconciliation rollback failed");
+                        }
                     } else {
-                        response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::RollbackFailed);
-                        set_diagnostic(response, "topology reconciliation rollback failed");
+                        advance_active_configuration_generation();
+                        activeConfigurationChanged = true;
+                        applyCommand.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration);
+                        s_lastKnownGood = applyCommand;
+                        s_haveLastKnownGood = true;
+                        if (response.activeConfiguration.outputCount >= 2u) {
+                            s_lastKnownGoodTwoOutput = applyCommand;
+                            s_haveLastKnownGoodTwoOutput = true;
+                        }
+                        response.activeConfigurationGeneration = s_activeConfigurationGeneration;
+                        response.provisionalResourcesReleased = 1u;
+                        set_diagnostic(response, pending.changeType == static_cast<uint32_t>(VirtioGpuTopologyChangeType::OutputRemoval)
+                            ? "topology reconciliation removal committed; provisional resource retired after validation"
+                            : "topology reconciliation addition committed; live dual-output presentation restored");
                     }
-                } else {
-                    advance_active_configuration_generation();
-                    activeConfigurationChanged = true;
-                    applyCommand.commandType = static_cast<uint32_t>(DisplayConfigurationCommandType::ApplyConfiguration);
-                    s_lastKnownGood = applyCommand;
-                    s_haveLastKnownGood = true;
-                    if (response.activeConfiguration.outputCount >= 2u) {
-                        s_lastKnownGoodTwoOutput = applyCommand;
-                        s_haveLastKnownGoodTwoOutput = true;
+                    kernel::virtio::gpu::set_display_configuration_backend_presentation_paused(false);
+                    response.presentationResumed = 1u;
+                    response.rollbackPresentationResumed = response.rollbackSucceeded;
+                    if (response.success == 0u && response.rollbackSucceeded != 0u) {
+                        response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::RollbackSucceeded);
                     }
-                    response.activeConfigurationGeneration = s_activeConfigurationGeneration;
-                    response.provisionalResourcesReleased = 1u;
-                    set_diagnostic(response, pending.changeType == static_cast<uint32_t>(VirtioGpuTopologyChangeType::OutputRemoval)
-                        ? "topology reconciliation removal committed; provisional resource retired after validation"
-                        : "topology reconciliation addition committed; live dual-output presentation restored");
                 }
-                kernel::virtio::gpu::set_display_configuration_backend_presentation_paused(false);
-                response.presentationResumed = 1u;
-                response.rollbackPresentationResumed = response.rollbackSucceeded;
-                if (response.success == 0u && response.rollbackSucceeded != 0u) {
-                    response.resultCode = static_cast<uint32_t>(DisplayConfigurationResultCode::RollbackSucceeded);
-                }
+                delete plan;
             }
         }
     } else if (type == DisplayConfigurationCommandType::RefreshDetectedTopology) {

@@ -561,6 +561,42 @@ int main()
           decodedStorage.disks[0].sectorSize == 512,
           "disk capacity, sector size, identity, and generation round-trip");
 
+    DispatchWorkspace dispatchWorkspace{};
+    checkDevice(dispatch(deviceRequest, deviceRequestBytes, inventoryProviders,
+              &dispatchWorkspace, DispatchTrust::TrustedSystemServicePeer,
+              response, sizeof(response), &responseBytes) &&
+          decodeResponseHeader(response, responseBytes, &responseHeader) &&
+          responseHeader.status == ResponseStatus::Ok &&
+          dispatchWorkspace.devices.generation == 41 &&
+          dispatchWorkspace.storage.generation == 0,
+          "caller-owned dispatch workspace serves a device request without populating unrelated snapshots");
+    checkStorage(dispatch(storageRequest, storageRequestBytes, inventoryProviders,
+              &dispatchWorkspace, DispatchTrust::TrustedSystemServicePeer,
+              response, sizeof(response), &responseBytes) &&
+          decodeResponseHeader(response, responseBytes, &responseHeader) &&
+          responseHeader.status == ResponseStatus::Ok &&
+          dispatchWorkspace.storage.generation == 51 &&
+          dispatchWorkspace.devices.generation == 41,
+          "the same bounded dispatch workspace can be reused for a storage request");
+    inventoryState.storage.generation = 52;
+    checkStorage(dispatch(storageRequest, storageRequestBytes, inventoryProviders,
+              &dispatchWorkspace, DispatchTrust::TrustedSystemServicePeer,
+              response, sizeof(response), &responseBytes) &&
+          dispatchWorkspace.storage.generation == 52,
+          "reused storage workspace receives fresh provider state on each request");
+    inventoryState.storage.generation = 51;
+
+    checkStorage(dispatch(storageRequest, storageRequestBytes, inventoryProviders,
+              static_cast<DispatchWorkspace*>(nullptr),
+              DispatchTrust::TrustedSystemServicePeer, response, sizeof(response),
+              &responseBytes) &&
+          decodeResponseHeader(response, responseBytes, &responseHeader) &&
+          responseHeader.type == kStorageSnapshotResponseType &&
+          responseHeader.requestId == 302u &&
+          responseHeader.status == ResponseStatus::InternalError &&
+          responseHeader.payloadBytes == 0u,
+          "missing workspace returns a framed storage error instead of accessing provider state");
+
     uint8_t malformedDeviceRequest[kMaxRequestBytes]{};
     std::memcpy(malformedDeviceRequest, deviceRequest, deviceRequestBytes);
     writeU32(malformedDeviceRequest + 12, 1u);

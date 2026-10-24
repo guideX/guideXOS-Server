@@ -2854,7 +2854,7 @@ bool DisplayOptionsApp::queryDisplayConfiguration()
     command.structureSize = sizeof(command);
     command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
     command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::QueryActiveConfiguration);
-    gxos::display::DisplayConfigurationResponse response{};
+    gxos::display::DisplayConfigurationResponse& response = m_displayServiceResponse;
     const uint64_t generation = m_windowGeneration;
     const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
     if (generation != m_windowGeneration || response.requestId != command.requestId || response.commandType != command.commandType) return false;
@@ -2895,7 +2895,7 @@ bool DisplayOptionsApp::queryPendingTopologyChange()
     command.structureSize = sizeof(command);
     command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
     command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::QueryPendingTopologyChange);
-    gxos::display::DisplayConfigurationResponse response{};
+    gxos::display::DisplayConfigurationResponse& response = m_displayServiceResponse;
     const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
     if (!submitted || response.success == 0u) return false;
     m_pendingTopologyChange = response.detectedTopologyChange;
@@ -2917,7 +2917,7 @@ bool DisplayOptionsApp::previewPendingTopologyChange()
     command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::PreviewTopologyReconciliation);
     command.topologyGeneration = m_pendingTopologyChange.topologyGeneration;
     command.activeConfigurationGeneration = m_activeConfigurationGeneration;
-    gxos::display::DisplayConfigurationResponse response{};
+    gxos::display::DisplayConfigurationResponse& response = m_displayServiceResponse;
     const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
     if (!submitted || response.success == 0u) {
         strcopy(m_displayStatus, "Review failed: ", sizeof(m_displayStatus));
@@ -2947,7 +2947,7 @@ bool DisplayOptionsApp::applyPendingTopologyChange()
     command.origin = static_cast<uint32_t>(gxos::display::DisplayConfigurationRequestOrigin::UserApply);
     command.topologyGeneration = m_pendingTopologyChange.topologyGeneration;
     command.activeConfigurationGeneration = m_activeConfigurationGeneration;
-    gxos::display::DisplayConfigurationResponse response{};
+    gxos::display::DisplayConfigurationResponse& response = m_displayServiceResponse;
     const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
     if (!submitted || response.success == 0u) {
         strcopy(m_displayStatus, "Topology apply failed: ", sizeof(m_displayStatus));
@@ -2986,7 +2986,7 @@ bool DisplayOptionsApp::dismissPendingTopologyChange()
     command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::DismissPendingTopologyChange);
     command.topologyGeneration = m_pendingTopologyChange.topologyGeneration;
     command.activeConfigurationGeneration = m_activeConfigurationGeneration;
-    gxos::display::DisplayConfigurationResponse response{};
+    gxos::display::DisplayConfigurationResponse& response = m_displayServiceResponse;
     const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
     if (!submitted || response.success == 0u) {
         strcopy(m_displayStatus, "Keep current failed: ", sizeof(m_displayStatus));
@@ -3007,12 +3007,13 @@ bool DisplayOptionsApp::refreshPendingTopologyChange()
     command.structureSize = sizeof(command);
     command.requestId = gxos::display::DisplayConfigurationService::nextRequestId();
     command.commandType = static_cast<uint32_t>(gxos::display::DisplayConfigurationCommandType::RefreshDetectedTopology);
-    gxos::display::DisplayConfigurationResponse response{};
+    gxos::display::DisplayConfigurationResponse& response = m_displayServiceResponse;
     const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
+    const bool refreshSucceeded = submitted && response.success != 0u;
     queryPendingTopologyChange();
-    strcopy(m_displayStatus, submitted && response.success ? "Displays refreshed; review pending change" : "Display refresh failed", sizeof(m_displayStatus));
+    strcopy(m_displayStatus, refreshSucceeded ? "Displays refreshed; review pending change" : "Display refresh failed", sizeof(m_displayStatus));
     invalidate();
-    return submitted && response.success != 0u;
+    return refreshSucceeded;
 }
 
 bool DisplayOptionsApp::injectPendingTopologyForTest(uint32_t kind)
@@ -3085,7 +3086,7 @@ bool DisplayOptionsApp::submitDisplayConfiguration(bool closeOnSuccess)
     strcopy(m_displayStatus, "Applying display configuration...", sizeof(m_displayStatus));
     invalidate();
 
-    gxos::display::DisplayConfigurationResponse response{};
+    gxos::display::DisplayConfigurationResponse& response = m_displayServiceResponse;
     const bool submitted = gxos::display::DisplayConfigurationService::submit(command, response);
     m_displayRequestPending = false;
     if (generation != m_windowGeneration || response.requestId != m_displayRequestId || response.commandType != command.commandType) return false;

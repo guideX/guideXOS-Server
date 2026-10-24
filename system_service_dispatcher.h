@@ -17,6 +17,21 @@ struct DispatchProviders {
     ReadStorageSnapshotFunction readStorage{nullptr};
 };
 
+// A single bounded request workspace. The bridge owns it for one serialized
+// request so the fixed snapshots do not multiply across nested stack frames.
+struct DispatchWorkspace {
+    network_settings::NetworkSnapshot network{};
+    settings_inventory::DeviceSnapshot devices{};
+    settings_inventory::StorageSnapshot storage{};
+};
+
+template <typename T>
+inline void clearDispatchValue(T& value)
+{
+    uint8_t* bytes = reinterpret_cast<uint8_t*>(&value);
+    for (size_t i = 0; i < sizeof(value); ++i) bytes[i] = 0u;
+}
+
 // Authorization is supplied by the runtime endpoint after it verifies its
 // caller or transport. It is never read from a request field.
 enum class DispatchTrust : uint8_t {
@@ -39,6 +54,7 @@ inline ResponseStatus responseStatusFor(network_settings::Result result)
 
 inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
                      const DispatchProviders& provider,
+                     DispatchWorkspace* workspace,
                      DispatchTrust trust,
                      uint8_t* responseBytes, size_t responseCapacity,
                      size_t* responseSize)
@@ -54,11 +70,22 @@ inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
             ((*responseSize = kResponseHeaderBytes), true);
     }
 
+    if (!workspace) {
+        const uint16_t responseType = request.type == static_cast<uint16_t>(RequestType::SetNetworkConfiguration)
+            ? kConfigurationResponseType
+            : request.type == static_cast<uint16_t>(RequestType::GetDeviceSnapshot)
+                ? kDeviceSnapshotResponseType
+                : request.type == static_cast<uint16_t>(RequestType::GetStorageSnapshot)
+                    ? kStorageSnapshotResponseType : kNetworkSnapshotResponseType;
+        const ResponseStatus status = request.version == kProtocolVersion
+            ? ResponseStatus::InternalError : ResponseStatus::BadVersion;
+        return encodeResponseHeader(kProtocolVersion, responseType, request.requestId,
+            status, 0, responseBytes, responseCapacity) &&
+            ((*responseSize = kResponseHeaderBytes), true);
+    }
+
     ResponseStatus status = ResponseStatus::Ok;
-    network_settings::NetworkSnapshot snapshot{};
     bool includeSnapshot = false;
-    settings_inventory::DeviceSnapshot devices{};
-    settings_inventory::StorageSnapshot storage{};
     enum class Payload { None, Network, Devices, Storage } payload = Payload::None;
     uint16_t responseType = kNetworkSnapshotResponseType;
     if (request.version != kProtocolVersion) {
@@ -85,12 +112,14 @@ inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
         if (!provider.network.readSnapshot) {
             status = ResponseStatus::Unavailable;
         } else {
+            clearDispatchValue(workspace->network);
+            workspace->network.version = network_settings::kContractVersion;
             const network_settings::Result result = provider.network.readSnapshot(
-                provider.network.context, &snapshot);
+                provider.network.context, &workspace->network);
             status = responseStatusFor(result);
             if (result == network_settings::Result::Ok ||
                 result == network_settings::Result::Unavailable) {
-                if (!validSnapshot(snapshot)) status = ResponseStatus::MalformedSnapshot;
+                if (!validSnapshot(workspace->network)) status = ResponseStatus::MalformedSnapshot;
                 else { includeSnapshot = true; payload = Payload::Network; }
             }
         }
@@ -99,9 +128,11 @@ inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
         if (!provider.readDevices) {
             status = ResponseStatus::Unavailable;
         } else {
-            status = provider.readDevices(provider.inventoryContext, &devices);
+            clearDispatchValue(workspace->devices);
+            workspace->devices.version = settings_inventory::kContractVersion;
+            status = provider.readDevices(provider.inventoryContext, &workspace->devices);
             if (status == ResponseStatus::Ok || status == ResponseStatus::Unavailable) {
-                if (!settings_inventory::validDeviceSnapshot(devices)) status = ResponseStatus::MalformedSnapshot;
+                if (!settings_inventory::validDeviceSnapshot(workspace->devices)) status = ResponseStatus::MalformedSnapshot;
                 else { includeSnapshot = true; payload = Payload::Devices; }
             }
         }
@@ -110,9 +141,11 @@ inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
         if (!provider.readStorage) {
             status = ResponseStatus::Unavailable;
         } else {
-            status = provider.readStorage(provider.inventoryContext, &storage);
+            clearDispatchValue(workspace->storage);
+            workspace->storage.version = settings_inventory::kContractVersion;
+            status = provider.readStorage(provider.inventoryContext, &workspace->storage);
             if (status == ResponseStatus::Ok || status == ResponseStatus::Unavailable) {
-                if (!settings_inventory::validStorageSnapshot(storage)) status = ResponseStatus::MalformedSnapshot;
+                if (!settings_inventory::validStorageSnapshot(workspace->storage)) status = ResponseStatus::MalformedSnapshot;
                 else { includeSnapshot = true; payload = Payload::Storage; }
             }
         }
@@ -130,14 +163,25 @@ inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
         uint8_t* body = responseBytes + kResponseHeaderBytes;
         const size_t bodyCapacity = responseCapacity - kResponseHeaderBytes;
         const bool encoded = payload == Payload::Network
-            ? encodeSnapshot(snapshot, body, bodyCapacity)
+            ? encodeSnapshot(workspace->network, body, bodyCapacity)
             : payload == Payload::Devices
-            ? encodeDeviceSnapshot(devices, body, bodyCapacity)
-            : encodeStorageSnapshot(storage, body, bodyCapacity);
+            ? encodeDeviceSnapshot(workspace->devices, body, bodyCapacity)
+            : encodeStorageSnapshot(workspace->storage, body, bodyCapacity);
         if (!encoded) return false;
     }
     *responseSize = kResponseHeaderBytes + payloadBytes;
     return true;
+}
+
+inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,
+                     const DispatchProviders& provider,
+                     DispatchTrust trust,
+                     uint8_t* responseBytes, size_t responseCapacity,
+                     size_t* responseSize)
+{
+    DispatchWorkspace workspace{};
+    return dispatch(requestBytes, requestSize, provider, &workspace, trust,
+        responseBytes, responseCapacity, responseSize);
 }
 
 inline bool dispatch(const uint8_t* requestBytes, size_t requestSize,

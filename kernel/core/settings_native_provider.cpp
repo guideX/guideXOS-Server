@@ -312,6 +312,21 @@ static bool queryActiveDisplayConfiguration(
     return true;
 }
 
+class ScopedDisplayConfigurationResponse {
+public:
+    ScopedDisplayConfigurationResponse()
+        : m_response(new gxos::display::DisplayConfigurationResponse{})
+    {
+    }
+
+    ~ScopedDisplayConfigurationResponse() { delete m_response; }
+
+    gxos::display::DisplayConfigurationResponse* get() const { return m_response; }
+
+private:
+    gxos::display::DisplayConfigurationResponse* m_response;
+};
+
 static void addActiveModeFields(
     const gxos::display::DisplayConfigurationResponse& response,
     DisplaySnapshotV1& snapshot)
@@ -501,13 +516,17 @@ SnapshotStatus readDisplaySnapshot(
     *outSize = sizeof(DisplaySnapshotV1);
     if (capacity < sizeof(DisplaySnapshotV1)) return SnapshotStatus::BufferTooSmall;
 
-    gxos::display::DisplayConfigurationResponse activeConfiguration{};
+    // The response carries the complete display-control contract, including
+    // bounded topology diagnostics. Keep that 8 KiB record out of the boot
+    // stack while the Settings provider synchronously submits its read query.
+    ScopedDisplayConfigurationResponse activeConfiguration;
+    if (!activeConfiguration.get()) return SnapshotStatus::Unavailable;
     bool topologyAvailable = false;
-    if (!queryActiveDisplayConfiguration(activeConfiguration, topologyAvailable)) {
+    if (!queryActiveDisplayConfiguration(*activeConfiguration.get(), topologyAvailable)) {
         return SnapshotStatus::Unavailable;
     }
     const uint64_t revision =
-        static_cast<uint64_t>(activeConfiguration.activeConfigurationGeneration) + 1u;
+        static_cast<uint64_t>(activeConfiguration.get()->activeConfigurationGeneration) + 1u;
     DisplaySnapshotV1 snapshot{};
     const SnapshotStatus status = buildDisplaySnapshot(
         framebuffer::is_available(),
@@ -521,7 +540,7 @@ SnapshotStatus readDisplaySnapshot(
     if (status != SnapshotStatus::Ok) return status;
 
     if (topologyAvailable) {
-        addActiveModeFields(activeConfiguration, snapshot);
+        addActiveModeFields(*activeConfiguration.get(), snapshot);
     }
     if (!validDisplaySnapshot(snapshot)) return SnapshotStatus::Unavailable;
     *outRevision = snapshot.revision;

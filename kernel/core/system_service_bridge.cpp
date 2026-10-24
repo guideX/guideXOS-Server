@@ -31,6 +31,13 @@ size_t s_requestUsed = 0;
 uint64_t s_lastRequestByteTick = 0;
 bool s_initialized = false;
 
+struct DispatchWorkspaceScope {
+    DispatchWorkspaceScope() : value(new DispatchWorkspace{}) {}
+    ~DispatchWorkspaceScope() { delete value; }
+
+    DispatchWorkspace* value;
+};
+
 void serialIrqHandler()
 {
     for (uint32_t count = 0; count < kRxCapacity; ++count) {
@@ -101,7 +108,8 @@ void serveRequest()
     for (size_t i = 0; i < kMaxResponseBytes; ++i) response[i] = 0u;
     size_t responseBytes = 0;
     const DispatchProviders provider = settings_inventory_provider::appModelProvider();
-    const bool framed = dispatch(s_request, s_requestUsed, provider,
+    DispatchWorkspaceScope workspace;
+    const bool framed = dispatch(s_request, s_requestUsed, provider, workspace.value,
         DispatchTrust::TrustedSystemServicePeer, response, kMaxResponseBytes,
         &responseBytes);
     if (!framed || responseBytes < kResponseHeaderBytes) {
@@ -113,7 +121,7 @@ void serveRequest()
     const bool responseHeaderValid = decodeResponseHeader(
         response, responseBytes, &responseHeader);
     if (responseHeaderValid && responseHeader.payloadBytes == kSnapshotWireBytes) {
-        NetworkSnapshot snapshot{};
+        NetworkSnapshot& snapshot = workspace.value->network;
         if (decodeSnapshot(response + kResponseHeaderBytes,
                 responseHeader.payloadBytes, &snapshot)) {
             serial::puts("[NETSNAP] generation=");
@@ -145,7 +153,7 @@ void serveRequest()
         }
     }
     if (responseHeaderValid && responseHeader.payloadBytes == kDeviceSnapshotWireBytes) {
-        settings_inventory::DeviceSnapshot snapshot{};
+        settings_inventory::DeviceSnapshot& snapshot = workspace.value->devices;
         if (decodeDeviceSnapshot(response + kResponseHeaderBytes,
                 responseHeader.payloadBytes, &snapshot)) {
             serial::puts("[DEVICESNAP] generation=");
@@ -179,7 +187,7 @@ void serveRequest()
         }
     }
     if (responseHeaderValid && responseHeader.payloadBytes == kStorageSnapshotWireBytes) {
-        settings_inventory::StorageSnapshot snapshot{};
+        settings_inventory::StorageSnapshot& snapshot = workspace.value->storage;
         if (decodeStorageSnapshot(response + kResponseHeaderBytes,
                 responseHeader.payloadBytes, &snapshot)) {
             serial::puts("[STORAGESNAP] generation=");

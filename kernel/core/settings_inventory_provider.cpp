@@ -18,6 +18,13 @@ namespace {
 using namespace gxos::settings_inventory;
 using gxos::system_service::ResponseStatus;
 
+template <typename T>
+void clearSnapshot(T& snapshot)
+{
+    uint8_t* bytes = reinterpret_cast<uint8_t*>(&snapshot);
+    for (size_t i = 0; i < sizeof(snapshot); ++i) bytes[i] = 0u;
+}
+
 bool sameText(const char* left, const char* right, size_t capacity)
 {
     for (size_t i = 0; i < capacity; ++i) {
@@ -399,7 +406,9 @@ void makeVolumeStableId(uint8_t slot, char* output, size_t capacity)
 ResponseStatus readDeviceSnapshot(void*, DeviceSnapshot* output)
 {
     if (!output) return ResponseStatus::InternalError;
-    DeviceSnapshot snapshot{};
+    DeviceSnapshot& snapshot = *output;
+    clearSnapshot(snapshot);
+    snapshot.version = kContractVersion;
     snapshot.backend = Backend::Kernel;
 
     gxos::network_settings::NetworkSnapshot network{};
@@ -508,14 +517,15 @@ ResponseStatus readDeviceSnapshot(void*, DeviceSnapshot* output)
     finishDeviceSnapshot(snapshot);
     updateDeviceGeneration(snapshot);
     if (!validDeviceSnapshot(snapshot)) return ResponseStatus::MalformedSnapshot;
-    *output = snapshot;
     return ResponseStatus::Ok;
 }
 
 ResponseStatus readStorageSnapshot(void*, StorageSnapshot* output)
 {
     if (!output) return ResponseStatus::InternalError;
-    StorageSnapshot snapshot{};
+    StorageSnapshot& snapshot = *output;
+    clearSnapshot(snapshot);
+    snapshot.version = kContractVersion;
     snapshot.backend = Backend::Kernel;
     for (uint8_t i = 0; i < block::MAX_BLOCK_DEVICES; ++i) {
         const block::BlockDevice* dev = block::get_device(i);
@@ -563,7 +573,6 @@ ResponseStatus readStorageSnapshot(void*, StorageSnapshot* output)
     finishStorageSnapshot(snapshot);
     updateStorageGeneration(snapshot);
     if (!validStorageSnapshot(snapshot)) return ResponseStatus::MalformedSnapshot;
-    *output = snapshot;
     return ResponseStatus::Ok;
 }
 

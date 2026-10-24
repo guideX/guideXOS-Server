@@ -290,6 +290,9 @@ private:
     uint32_t m_appliedPrimaryOutput;
     gxos::display::DisplayConfigurationSnapshot m_activeDisplayConfiguration;
     gxos::display::DisplayConfigurationSnapshot m_requestedDisplayConfiguration;
+    // Owned by this heap allocated app so command responses never consume a
+    // multi-kilobyte automatic frame on the fixed boot stack.
+    gxos::display::DisplayConfigurationResponse m_displayServiceResponse;
     gxos::display::DisplayTopologyChangeQuery m_pendingTopologyChange;
     uint32_t m_activeConfigurationGeneration;
     bool m_displayLocalEdits;
