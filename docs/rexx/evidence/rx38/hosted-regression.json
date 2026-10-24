@@ -1,0 +1,51 @@
+{
+  "schema": "guidexos.rexx.rx38.hosted-regression.v1",
+  "captured_at_utc": "2026-10-24T21:41:32Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "51aa11297a2eb2933123e5d4dab696da691b3848",
+  "production_source_revision": "4906677df9818f6c241d4c233bde1a65e68f5741",
+  "command": "pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tests/run_rexx_tests.ps1 -Phase RX37",
+  "result": "PASS — runner reached the final hosted summary and all printed suites/fixtures passed.",
+  "run_root": "build/rexx/rx37/hosted-5fd0d9099b1c4b0799e9583c8e9d640d",
+  "coverage": [
+    "Core arithmetic, evaluation, parser/compiler/VM behavior, allocation failure and recovery.",
+    "RX2 VFS/output and freestanding numeric adapter.",
+    "RX3–RX10 numeric, PARSE, routine, condition, INTERPRET and recovery suites.",
+    "RX12–RX19 classic built-ins, numeric/string properties, and clock fixtures.",
+    "RX22 diagnostic built-ins; RX24 ADDRESS/TRACE; RX25 RANDOM; RX26 INDEX; RX27 JUSTIFY; RX28 FIND.",
+    "RX30 data stack and queue language; RX31 host input provider; RX32 VALUE; RX33 byte streams; RX34 stream state; RX35 EXTERNALS; RX37 output capability.",
+    "CLI and compatibility fixtures, including fail-closed RX33 CHARIN, RX34 STREAM, RX35 EXTERNALS, and the established RX3–RX8 fixtures."
+  ],
+  "focused_current_results": {
+    "RX30_data_stack_model": {"operations":10000,"assertions":181417,"failures":0},
+    "RX30_queue_language_model": {"operations":1200,"assertions":193,"failures":0},
+    "RX31_host_input_model": {"operations":256,"assertions":169,"failures":0},
+    "RX37_output_capability_direct_rerun": {
+      "command_target":"build/rexx/rx37/hosted-5fd0d9099b1c4b0799e9583c8e9d640d/bin/rexx_rx37_output_capability_tests.exe",
+      "assertions":4203,
+      "direct_assertions":107,
+      "property_cases":4096,
+      "failures":0,
+      "exit_code":0,
+      "seed":"0x52583337"
+    }
+  },
+  "fixture_summary": {
+    "hosted_cli_cases":"28/28",
+    "RX9_condition_fixtures":"24/24",
+    "RX10_interpret_fixtures":"19/19",
+    "RX12_builtin_fixtures":"31/31",
+    "RX13_string_fixtures":"33/33",
+    "RX14_numeric_fixtures":"29/29",
+    "RX15_conversion_fixtures":"3/3",
+    "RX16_literal_fixtures":"10/10",
+    "RX17_bitwise_fixtures":"10/10",
+    "RX22_diagnostic_fixtures":"1/1",
+    "RX26_INDEX_RX27_JUSTIFY_RX28_FIND_RX32_VALUE_RX33_CHARIN_RX34_STREAM_RX35_EXTERNALS":"each reported 1/1"
+  },
+  "regina": "NOT_RUN — executable unavailable; no external compatibility result claimed.",
+  "sanitizers": "Not rerun; production source is unchanged from RX37 and its accepted 36/36 ASan and 36/36 UBSan results remain source-current.",
+  "freestanding_amd64": "Not rebuilt; accepted RX37 link remains source-current.",
+  "protected_artifact_guard": "PASS at hosted-build, hosted-fixture, and hosted-final checkpoints; 31/31 root artifacts matched. RX38 also independently compared start/end hashes.",
+  "native_guest": "NOT_RUN in RX38."
+}

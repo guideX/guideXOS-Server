@@ -1,0 +1,29 @@
+{
+  "schema": "guidexos.rexx.rx38.source-delta.v1",
+  "rx37_commit": "4906677df9818f6c241d4c233bde1a65e68f5741",
+  "starting_head": "51aa11297a2eb2933123e5d4dab696da691b3848",
+  "tracked_path_count": 19889,
+  "tracked_worktree_changes": 0,
+  "index_changes": 0,
+  "files_changed_since_rx37": [
+    "docs/rexx/REXX_RX37R1_NATIVE_QUALIFICATION.md",
+    "docs/rexx/REXX_RX37R1_SCORECARD.json",
+    "docs/rexx/evidence/rx37r1/README.md",
+    "docs/rexx/evidence/rx37r1/inventory-confirmation.json",
+    "docs/rexx/evidence/rx37r1/preflight.json",
+    "docs/rexx/evidence/rx37r1/protected-artifact-comparison.json",
+    "docs/rexx/evidence/rx37r1/qac-admission.json",
+    "docs/rexx/evidence/rx37r1/qac-cancelled-request-inspect.json",
+    "docs/rexx/evidence/rx37r1/qac-help.txt",
+    "docs/rexx/evidence/rx37r1/qac-list-final.txt",
+    "docs/rexx/evidence/rx37r1/qac-status-final.txt",
+    "docs/rexx/evidence/rx37r1/qemu-qac-process-census.json",
+    "docs/rexx/evidence/rx37r1/regression-evidence.json",
+    "docs/rexx/evidence/rx37r1/source-audit.json",
+    "docs/rexx/evidence/rx37r1/untracked-reconciliation.json"
+  ],
+  "non_documentation_changes_since_rx37": 0,
+  "production_source_changed": false,
+  "rx37r1_source_audit": "docs/rexx/evidence/rx37r1/source-audit.json",
+  "scope": "The RX37R1 commit adds qualification documentation only. RX37 production source remains current."
+}

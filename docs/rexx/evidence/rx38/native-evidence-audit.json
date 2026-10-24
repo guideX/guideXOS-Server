@@ -1,0 +1,493 @@
+{
+  "schema": "guidexos.rexx.rx38.native-evidence-audit.v1",
+  "reviewed_scope": "RX22 through RX37R1 historical QAC/native evidence; no RX38 guest execution",
+  "records_are_historical": true,
+  "phases": [
+    {
+      "phase": "RX22",
+      "result": "PASS",
+      "kernel_sha256": "252ec7776697d3d5265b2f5b54bb7e4abd37cce06336f888010f832b50445807",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "exclusive acceptance",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel"
+      },
+      "scripts_and_markers": [
+        "rx22-classic-diagnostic.rex: REVERSE text/binary, SOURCELINE, ERRORTEXT(16/60)",
+        "rx22-error-recovery.rex: invalid built-in recovery and interpreter responsiveness",
+        "rx22-date-time-clock-guard.rex: current DATE/TIME fail-closed, TIME(E) progress, advancing heartbeat"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": "not separately recorded",
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [],
+      "evidence": "docs/rexx/evidence/rx22/native-guest/run-ef133694179041bcaf459d5fc030566f"
+    },
+    {
+      "phase": "RX23",
+      "result": "No standalone RX23 REXX QAC run is claimed in the reviewed phase scorecards.",
+      "kernel_sha256": null,
+      "guest_configuration": null,
+      "scripts_and_markers": [],
+      "process": {
+        "qac_parent_exit_code": "not applicable",
+        "qemu_child_exit_code": "not applicable",
+        "runner_exit_code": "not applicable",
+        "qmp_shutdown_acknowledged": false,
+        "reservation_released": "not applicable"
+      },
+      "unverified": [
+        "No RX23-specific guest proof is relied on by RX38."
+      ],
+      "evidence": "docs/rexx/REXX_RX22_SCORECARD.json; no RX23 scorecard found"
+    },
+    {
+      "phase": "RX24",
+      "result": "Guest checks passed; immediate post-QMP coordinator status check made the runner nonzero, then later read-only status/list showed zero sessions/reservations.",
+      "kernel_sha256": "7f1a82b734d18747c29516478c30556bb232426e111cb021e237ad2f215b8dc2",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "acceptance",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel"
+      },
+      "scripts_and_markers": [
+        "rx24-address-trace.rex: TRACE E at command dispatch for safe stub RC 127",
+        "rx24-error-recovery.rex: invalid TRACE option trapped and guest responsive",
+        "rx24-date-time-clock-guard.rex: current DATE/TIME unavailable; elapsed TIME and PIT heartbeat progress"
+      ],
+      "process": {
+        "qac_parent_exit_code": "not separately recorded",
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": "nonzero at immediate post-QMP coordinator status check",
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [
+        "No repeat guest launch was possible while another checkout held QAC; the later status/list did show zero managed sessions and reservations."
+      ],
+      "evidence": "docs/rexx/evidence/rx24/native-guest/acceptance/qemu-acceptance-summary.json"
+    },
+    {
+      "phase": "RX25",
+      "result": "PASS",
+      "kernel_sha256": "fcfd3ee4e3ec658feacb0890d314b31bfc1d1178bf06641604be50a01e338d88",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "acceptance",
+        "qemu_version": "11.0.0",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel"
+      },
+      "scripts_and_markers": [
+        "RANDOM: independent unseeded run, seeded range/reseed, invalid-seed/range trap and recovery",
+        "DATE/TIME current forms fail closed; TIME(E) advanced 0.000000 to 0.099993; PIT heartbeat 1 to 63"
+      ],
+      "process": {
+        "qac_parent_exit_code": "not captured",
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": "not separately recorded",
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [
+        "QAC CLI process exit field was blank in the runner record; child exit 0, release marker, and final empty QAC list were recorded."
+      ],
+      "evidence": "docs/rexx/evidence/rx25/native-guest-summary.json"
+    },
+    {
+      "phase": "RX26",
+      "result": "PASS",
+      "kernel_sha256": "ce32736f6a0c0e31bd3eb348582baeaa4eab450251bdf5b14fd2464a42ec6678",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "acceptance",
+        "qemu_version": "11.0.0",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel"
+      },
+      "scripts_and_markers": [
+        "INDEX/POS IBM vectors, not-found and binary cases",
+        "invalid INDEX start trapped; later result 5 and interpreter responsive",
+        "ADDRESS/TRACE, RANDOM, DATE/TIME fail-closed, TIME(E)/TIME(R), PIT heartbeat 1 to 158"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": "not separately recorded",
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [],
+      "evidence": "docs/rexx/evidence/rx26/native-guest/run-f29a7bccefee4854b5891ffcfcce23ab"
+    },
+    {
+      "phase": "RX27",
+      "result": "PASS",
+      "kernel_sha256": "da340faf9ba3a5aa59a774477a28a20797c248ea6f3d205bbac2d2c95b058c4c",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "exclusive acceptance",
+        "qemu_version": "11.0.0",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel"
+      },
+      "scripts_and_markers": [
+        "JUSTIFY IBM vectors, pad redistribution, binary NUL pad, truncation; RX27_JUSTIFY_DONE",
+        "invalid pad trapped; RX27_POST_ERROR_RESPONSIVE",
+        "inherited INDEX, ADDRESS/TRACE, RANDOM, DATE/TIME/PIT checks"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": 0,
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [],
+      "evidence": "docs/rexx/evidence/rx27/native-guest/run-a7b6e750fbf847f380d64aa68b411ede"
+    },
+    {
+      "phase": "RX28",
+      "result": "PASS_WITH_MANUAL_RECOVERY",
+      "kernel_sha256": "a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "exclusive acceptance",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel"
+      },
+      "scripts_and_markers": [
+        "rx28-find-demo.rex, rx28-find.rex, rx28-find-error-recovery.rex: all passed",
+        "rx26-date-time-guard.rex and rx20clk.rex: passed"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": 1,
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true,
+        "shutdown_method": "Manual QMP for the independently verified QAC-owned child"
+      },
+      "unverified": [
+        "Automated runner exited before guest scripts when ExecutablePath was temporarily null. The exact QAC-owned child was independently verified and the manual suite passed; do not treat the runner itself as exit 0."
+      ],
+      "evidence": "docs/rexx/evidence/rx28/native-guest/run-c1f237385b034265b068961c8cdee806"
+    },
+    {
+      "phase": "RX29",
+      "result": "NOT_RUN — decision/implementation gate did not require a guest; no reservation requested.",
+      "kernel_sha256": "a7bf227e6228973c06f2033021adb568bcdb7fbe25066737497d2f8f991decef",
+      "guest_configuration": null,
+      "scripts_and_markers": [],
+      "process": {
+        "qac_parent_exit_code": "not applicable",
+        "qemu_child_exit_code": "not applicable",
+        "runner_exit_code": "not applicable",
+        "qmp_shutdown_acknowledged": false,
+        "reservation_released": "not applicable"
+      },
+      "unverified": [
+        "No RX29 guest execution claim."
+      ],
+      "evidence": "docs/rexx/REXX_RX29_SCORECARD.json"
+    },
+    {
+      "phase": "RX30",
+      "result": "PASS — exclusive QAC acceptance",
+      "kernel_sha256": "f3647c4b3efa9c9a01d96ab4e440bf37aaf15a0044181315292833584ad5fac9",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "exclusive acceptance",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel"
+      },
+      "scripts_and_markers": [
+        "rx30-queue-demo.rex",
+        "rx30-empty-pull.rex",
+        "rx30-recovery.rex",
+        "rx30-date-time-guard.rex",
+        "rx20clk.rex"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": 0,
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [],
+      "evidence": "docs/rexx/evidence/rx30/native-guest"
+    },
+    {
+      "phase": "RX31",
+      "result": "NOT_RUN — QAC ownership preflight unavailable at RX31; no guest launched.",
+      "kernel_sha256": "13089ff7407d2120d443270b7b1292be437b8f8a4d151295ae71870732693e2d",
+      "guest_configuration": null,
+      "scripts_and_markers": [],
+      "process": {
+        "qac_parent_exit_code": "not applicable",
+        "qemu_child_exit_code": "not applicable",
+        "runner_exit_code": "not applicable",
+        "qmp_shutdown_acknowledged": false,
+        "reservation_released": "not applicable"
+      },
+      "unverified": [
+        "Injected native input-provider behavior was not executed. RX35 later directly proved only the production no-provider path."
+      ],
+      "evidence": "docs/rexx/evidence/rx31/native-guest/qac-preflight.json"
+    },
+    {
+      "phase": "RX32",
+      "result": "PASS",
+      "kernel_sha256": "a3588d5991d2529c31c97615e5d558d8ea6bb68b828fa68ad04723d23d4026dd",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "acceptance",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel"
+      },
+      "scripts_and_markers": [
+        "Seven commands: VALUE demo/invalid-name recovery, queue regression, provider fail-closed/recovery, DATE/TIME fail-closed, raw clock/PIT output"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": 0,
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [
+        "RX32 scorecard explicitly retains RX31 native acceptance as OPEN."
+      ],
+      "evidence": "docs/rexx/evidence/rx32/native-guest/run-6a14f833d6d74a159b1acb64ff8273d0"
+    },
+    {
+      "phase": "RX33",
+      "result": "PASS — RX20 TIME(R) inherited subcase remains incomplete.",
+      "kernel_sha256": "d459c9ab791ccc2165e9cb75f5f8ec89608c06c920604e05f2981f45844f4e1d",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "acceptance",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production no-provider kernel"
+      },
+      "scripts_and_markers": [
+        "CHARIN invalid start and recovery; unconfigured default stream fails closed with no fabricated bytes; post-error responsiveness; VALUE; queue; RX31 input-provider fail-closed; current DATE/TIME fail-closed; PIT TIME(E) 0.000000 to 0.099993"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": 0,
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [
+        "TIME(R) and RX20_NATIVE_CLOCK_CAPABILITY_DONE were not observed.",
+        "RX33 scorecard explicitly retains RX31 native acceptance as OPEN."
+      ],
+      "evidence": "docs/rexx/evidence/rx33/native-guest/run-e780eed0f85f4b4bb765749be8abb4d4"
+    },
+    {
+      "phase": "RX34-production",
+      "result": "PASS — production no-provider fail-closed run",
+      "kernel_sha256": "67edd7fb3bbcf2fc237a4c397d8fb06aec11ee56a8b617a382ff43146d4034d2",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "acceptance",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel; fixture disabled"
+      },
+      "scripts_and_markers": [
+        "STREAM()=UNAVAILABLE; CHARIN failed closed through a REXX trap; STREAM stayed UNAVAILABLE; recovery script ran"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qac_parent_exit_status": "derived from documented QAC CLI exit-code passthrough",
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": "not separately recorded",
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [],
+      "evidence": "docs/rexx/evidence/rx34/native-guest/run-712ceb28f5fe4f0d97fcdb857ae11987"
+    },
+    {
+      "phase": "RX34-fixture",
+      "result": "PASS — positive qualification-only provider fixture",
+      "kernel_sha256": "bea97f4a01cacbd8a50fc10e7f4638497b1cb3778e66713832cff760f1b4fe33",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "acceptance",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "fixture kernel; injected RX34 stream provider enabled"
+      },
+      "scripts_and_markers": [
+        "Default/named reads, cursor continuation, binary 410080FF42, zero-length reposition, EOF, short read, provider error, unknown stream, non-seekable position, invalid-position state preservation, oversized limit, recovery"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qac_parent_exit_status": "derived from documented QAC CLI exit-code passthrough",
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": "not separately recorded",
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true
+      },
+      "unverified": [
+        "This fixture does not establish a production stream provider or arbitrary path access."
+      ],
+      "evidence": "docs/rexx/evidence/rx34/native-guest/run-ffc708d20b0a419d8f4c9fcf8c673f51"
+    },
+    {
+      "phase": "RX35",
+      "result": "PASS",
+      "kernel_sha256": "4f7ad559768e02564e0f16db50578c7b799676ed845291b3f62d7e7eaddbae53",
+      "guest_configuration": {
+        "project": "guideXOSServer",
+        "mode": "acceptance",
+        "qemu_version": "11.0.0",
+        "network_disabled": true,
+        "disposable_media": true,
+        "production_or_fixture": "production kernel; rx34_stream_fixture=false; production media not used"
+      },
+      "scripts_and_markers": [
+        "Eight commands: EXTERNALS; RX32 queue; RX31 empty PULL; RX31 recovery; VALUE; RX34 no-provider; RX34 recovery; DATE/TIME/PIT",
+        "RX31 markers: default-input-unavailable/no fabricated input; RX31_POST_ERROR_RESPONSIVE; RX31_RECOVERY_COUNT=0; exit status 0"
+      ],
+      "process": {
+        "qac_parent_exit_code": 0,
+        "qac_parent_exit_status": "captured from exited QAC CLI",
+        "qemu_child_exit_code": 0,
+        "runner_exit_code": "not separately recorded",
+        "qmp_shutdown_acknowledged": true,
+        "reservation_released": true,
+        "managed_sessions_after": 0,
+        "final_qemu_count": 0
+      },
+      "unverified": [
+        "The inherited TIME(R) screenshot and final completion marker were not visible; no TIME(R) completion claim."
+      ],
+      "evidence": "docs/rexx/evidence/rx35/native-guest/run-c89be1a5e65645d29cfce2eaea1477da"
+    },
+    {
+      "phase": "RX36",
+      "result": "NOT_RUN — feasibility stop; guest not launched.",
+      "kernel_sha256": null,
+      "guest_configuration": null,
+      "scripts_and_markers": [],
+      "process": {
+        "qac_parent_exit_code": "not applicable",
+        "qemu_child_exit_code": "not applicable",
+        "runner_exit_code": "not applicable",
+        "qmp_shutdown_acknowledged": false,
+        "reservation_released": "not applicable"
+      },
+      "unverified": [
+        "A later QAC snapshot saw a separate StellarNavigator reservation/guest; RX36 preserved it and launched no process."
+      ],
+      "evidence": "docs/rexx/REXX_RX36_SCORECARD.json"
+    },
+    {
+      "phase": "RX37",
+      "result": "NOT_RUN — QAC acceptance lane occupied by a managed run and queued requests.",
+      "kernel_sha256": "11aa057a68734c8ec39defac19b9a1310ab7f1d7c946f6f64ef8d22f92bfe6a8",
+      "guest_configuration": null,
+      "scripts_and_markers": [],
+      "process": {
+        "qac_parent_exit_code": "not applicable",
+        "qemu_child_exit_code": "not applicable",
+        "runner_exit_code": "not applicable",
+        "qmp_shutdown_acknowledged": false,
+        "reservation_released": "not applicable"
+      },
+      "unverified": [
+        "No RX37 native SAY output or capability query marker, screenshot, or guest acceptance is claimed."
+      ],
+      "evidence": "docs/rexx/REXX_RX37_SCORECARD.json"
+    },
+    {
+      "phase": "RX37R1",
+      "result": "Outcome C — no QAC admission; request cancelled while waiting, no guest launched.",
+      "kernel_sha256": null,
+      "guest_configuration": {
+        "historical_active_owner": "guideXOSServer_DiskManagerImprovements checkout",
+        "historical_qac_reservation": "8b84465adf184cc6a1f416744168127c",
+        "historical_qac_child_pid": 24052,
+        "historical_wait_seconds": 20,
+        "historical_queue_position": 1
+      },
+      "scripts_and_markers": [],
+      "process": {
+        "qac_parent_exit_code": "requesting PTY wrapper interrupted with 1; QAC CLI exit not independently captured",
+        "qemu_child_exit_code": "not started",
+        "runner_exit_code": "not started",
+        "qmp_shutdown_acknowledged": false,
+        "reservation_released": "no reservation granted; request recorded Cancelled by client"
+      },
+      "unverified": [
+        "Capability API query and native fixture destination were not exercised.",
+        "No RX37R1 screenshot, output marker, or native SAY claim."
+      ],
+      "evidence": "docs/rexx/evidence/rx37r1/qac-admission.json"
+    }
+  ],
+  "rx31_cross_phase_evidence": {
+    "directly_relevant_production_proof": [
+      {
+        "phase": "RX32",
+        "proof": "Provider fail-closed/recovery; RX32 scorecard still says RX31 native acceptance OPEN."
+      },
+      {
+        "phase": "RX33",
+        "proof": "Input-provider fail-closed marker; RX33 scorecard still says RX31 native acceptance OPEN."
+      },
+      {
+        "phase": "RX35",
+        "proof": "/rx31-empty-pull.rex produced the default-input-unavailable error with no fabricated input; /rx31-recovery.rex showed responsiveness and QUEUED count 0."
+      }
+    ],
+    "full_rx31_gate_closed": false,
+    "reason": "No later native guest installed the injected RX31 reader or supplied a provider line. The production no-reader requirement is directly demonstrated; the injected provider's native contract is not."
+  },
+  "rx38_qac_snapshot": {
+    "status_exit_code": 0,
+    "list_exit_code": 0,
+    "coordinator": "Online",
+    "managed_reservations": 0,
+    "managed_sessions": 0,
+    "queued": 0,
+    "blocked": 0,
+    "guest_launched": false,
+    "foreign_qemu_process_count": 2,
+    "foreign_qemu_processes": [
+      {
+        "pid": 20392,
+        "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+        "qac_classification": "unmanaged/foreign",
+        "rx38_action": "left untouched"
+      },
+      {
+        "pid": 21932,
+        "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+        "qac_classification": "unmanaged/foreign",
+        "rx38_action": "left untouched"
+      }
+    ]
+  }
+}

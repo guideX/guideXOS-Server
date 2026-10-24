@@ -1,0 +1,25 @@
+{
+  "schema": "guidexos.rexx.rx38.qemu-process-snapshot.v1",
+  "captured_at_utc": "2026-10-24T21:52:32.6037770Z",
+  "source": "QAC list plus read-only process metadata",
+  "processes": [
+    {
+      "pid": 20392,
+      "present": true,
+      "parent_pid": 18816,
+      "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "executable_sha256": "a930e028f93d0fa47e4d58bdad2432f7466dc2b6af0ae376f77ef7a298ffdd02",
+      "creation_date": "2026-10-24T14:49:00.836879-07:00",
+      "ownership": "QAC list reports unmanaged/foreign; RX38 did not control it"
+    },
+    {
+      "pid": 21932,
+      "present": true,
+      "parent_pid": 12684,
+      "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "executable_sha256": "a930e028f93d0fa47e4d58bdad2432f7466dc2b6af0ae376f77ef7a298ffdd02",
+      "creation_date": "2026-10-24T14:51:05.145777-07:00",
+      "ownership": "QAC list reports unmanaged/foreign; RX38 did not control it"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "schema": "guidexos.rexx.rx38.inventory-reconciliation.v1",
+  "inventory_path": "docs/rexx/REXX_RX37_BUILTIN_INVENTORY.csv",
+  "sha256": "cec3b7bef1a29a19e5263a7589f6770acf019c4cb72a2b204ab5100fa39b340e",
+  "entry_count": 75,
+  "counts": {
+    "Implemented": 61,
+    "Not implemented": 7,
+    "Partial": 5,
+    "Not assessed": 1,
+    "Not implemented by design": 1
+  },
+  "incomplete_entries": [
+    {"function_name":"CHARIN","status":"Partial"},
+    {"function_name":"CHAROUT","status":"Not implemented"},
+    {"function_name":"CHARS","status":"Not implemented"},
+    {"function_name":"DATE","status":"Partial"},
+    {"function_name":"LINEIN","status":"Not implemented"},
+    {"function_name":"LINEOUT","status":"Not implemented"},
+    {"function_name":"LINES","status":"Not implemented"},
+    {"function_name":"LINESIZE","status":"Not implemented"},
+    {"function_name":"STREAM","status":"Partial"},
+    {"function_name":"TIME","status":"Partial"},
+    {"function_name":"TRACE","status":"Partial"},
+    {"function_name":"USERID","status":"Not implemented"},
+    {"function_name":"REGINA_EXTENSION_SET","status":"Not assessed"},
+    {"function_name":"No functions proposed","status":"Not implemented by design"}
+  ],
+  "linesize": "Not implemented",
+  "classification_changes": [],
+  "rx35_inventory_cross_check": {
+    "path": "docs/rexx/REXX_RX35_BUILTIN_INVENTORY.csv",
+    "sha256": "cec3b7bef1a29a19e5263a7589f6770acf019c4cb72a2b204ab5100fa39b340e",
+    "entries": 75,
+    "normalized_counts_match": true,
+    "EXTERNALS": "Implemented",
+    "LINESIZE": "Not implemented"
+  },
+  "source": "RX35 and RX37 inventory CSVs have the same SHA-256; RX37R1 inventory-confirmation.json records the same counts. RX38 re-read and matched the classifications without changes."
+}

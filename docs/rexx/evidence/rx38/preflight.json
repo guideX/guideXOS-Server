@@ -1,0 +1,29 @@
+{
+  "schema": "guidexos.rexx.rx38.preflight.v1",
+  "captured_at_utc": "2026-10-24T21:38:16.1946966Z",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "51aa11297a2eb2933123e5d4dab696da691b3848",
+  "rx37_head": "4906677df9818f6c241d4c233bde1a65e68f5741",
+  "rx37r1_is_parent": true,
+  "tracked_worktree_changes": 0,
+  "index_changes": 0,
+  "starting_untracked_paths": 141969,
+  "starting_untracked_manifest": "docs/rexx/evidence/rx38/starting-untracked.paths.gz",
+  "starting_untracked_manifest_sha256": "f5e60f4f83139cf64b6bd3bf8a3f681f18c6cabedc72a62a0314e353f120647d",
+  "starting_untracked_manifest_sha256_scope": "SHA-256 of the decompressed UTF-8/LF ordinal-sorted path manifest",
+  "starting_untracked_manifest_encoding": "UTF-8, LF, ordinal-sorted before gzip",
+  "protected_root_artifact_count": 31,
+  "protected_root_artifact_manifest": "docs/rexx/evidence/rx38/protected-root-start.json",
+  "baseline_snapshot_preceded_hosted_test": true,
+  "tracked_path_count": 19889,
+  "production_source_diff_rx37_to_starting_head": 0,
+  "qualification_records_reviewed": [
+    "docs/rexx/REXX_RX37_SCORECARD.json",
+    "docs/rexx/REXX_RX37R1_SCORECARD.json",
+    "docs/rexx/REXX_RX31_SCORECARD.json",
+    "docs/rexx/REXX_RX34_STREAM_CONDITION_STATE.md",
+    "docs/rexx/REXX_RX35_BUILTIN_INVENTORY.csv",
+    "docs/rexx/REXX_RX36_SCORECARD.json",
+    "docs/rexx/REXX_RX37_LINESIZE_ELIGIBILITY.md"
+  ]
+}

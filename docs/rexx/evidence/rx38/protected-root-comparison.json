@@ -1,0 +1,11 @@
+{
+  "schema": "guidexos.rexx.rx38.protected-artifact-comparison.v1",
+  "algorithm": "SHA-256",
+  "starting_count": 31,
+  "ending_count": 31,
+  "matches": true,
+  "unchanged_count": 31,
+  "start_manifest": "protected-root-start.json",
+  "end_manifest": "protected-root-end.json",
+  "differences": []
+}

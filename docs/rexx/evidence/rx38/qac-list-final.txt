@@ -1,0 +1,7 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 20392 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-24T21:49:00.8368793+00:00 | unmanaged/foreign
+QEMU PID 21932 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-24T21:51:05.1457775+00:00 | unmanaged/foreign
+Reservations: 0
+Managed sessions: 0
+Coordinator warning: 2 foreign QEMU process(es) detected; acceptance reservations are blocked.
+ExitCode=0

@@ -1,0 +1,117 @@
+{
+  "schema": "guidexos.rexx.rx38.scorecard.v1",
+  "phase": "RX38",
+  "recommendation": "A — core ready for a bounded guideXOS Server v0.3 integration profile",
+  "integration_performed": false,
+  "package_or_release_published": false,
+  "branch": "REXX_SUPPORT",
+  "starting_head": "51aa11297a2eb2933123e5d4dab696da691b3848",
+  "rx37_head": "4906677df9818f6c241d4c233bde1a65e68f5741",
+  "tracked_worktree_clean_at_start": true,
+  "index_clean_at_start": true,
+  "production_source_changed_since_rx37": false,
+  "built_in_inventory": {
+    "path": "docs/rexx/REXX_RX37_BUILTIN_INVENTORY.csv",
+    "sha256": "cec3b7bef1a29a19e5263a7589f6770acf019c4cb72a2b204ab5100fa39b340e",
+    "entries": 75,
+    "Implemented": 61,
+    "Not implemented": 7,
+    "Partial": 5,
+    "Not assessed": 1,
+    "Not implemented by design": 1,
+    "classification_changes": []
+  },
+  "qualification": {
+    "core_readiness": "PASS for the bounded profile; no demonstrated P0 essential-runtime or safety defect.",
+    "hosted_phase": {
+      "command": "pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File tests/run_rexx_tests.ps1 -Phase RX37",
+      "result": "PASS — current hosted phase completed; core, inherited, and RX30/RX31/RX32/RX33/RX34/RX35/RX37 focused targets and fixtures passed.",
+      "regina": "NOT_RUN — executable unavailable.",
+      "protected_artifact_guard": "PASS — 31/31 at hosted build, fixtures, and final gates."
+    },
+    "rx37_output_capability": {
+      "direct_target": "build/rexx/rx37/hosted-5fd0d9099b1c4b0799e9583c8e9d640d/bin/rexx_rx37_output_capability_tests.exe",
+      "assertions": 4203,
+      "direct_assertions": 107,
+      "property_cases": 4096,
+      "failures": 0,
+      "exit_code": 0
+    },
+    "rx30_data_stack": {
+      "model_operations": 10000,
+      "assertions": 181417,
+      "failures": 0,
+      "queue_language_operations": 1200,
+      "queue_language_assertions": 193,
+      "queue_language_failures": 0
+    },
+    "rx31_host_input": {
+      "model_operations": 256,
+      "assertions": 169,
+      "failures": 0,
+      "native_injected_provider_acceptance": "OPEN"
+    },
+    "sanitizers": {
+      "asan": "Historical RX37 evidence PASS, 36/36 targets; not rerun because production source is unchanged.",
+      "ubsan": "Historical RX37 evidence PASS, 36/36 targets; not rerun because production source is unchanged."
+    },
+    "freestanding_amd64": {
+      "status": "Historical RX37 evidence PASS; source-current, not rebuilt in RX38.",
+      "kernel_elf_sha256": "11aa057a68734c8ec39defac19b9a1310ab7f1d7c946f6f64ef8d22f92bfe6a8"
+    }
+  },
+  "open_gates": {
+    "rx31": "Formal native acceptance of an injected input provider remains open. RX32/RX33/RX35 guests prove production no-provider fail-closed behavior and recovery only.",
+    "rx37r1": "Native output-capability query proof remains open. No guest was started; ordinary production SAY does not call the optional query.",
+    "linesize": "Not implemented; no production logical-column and shared SAY wrapping policy."
+  },
+  "release_priorities": {
+    "P0": [],
+    "P1": [],
+    "P2": [
+      "Production line-input and stream-provider integration if required by product use cases.",
+      "Trusted wall-clock service for current DATE/TIME forms.",
+      "Production SAY row/newline policy if compact or width-aware output is required."
+    ],
+    "P3": [
+      "LINESIZE and destination-owned logical width/resize generation.",
+      "Richer TRACE and interactive debugging.",
+      "USERID and optional IBM/Regina compatibility."
+    ]
+  },
+  "qac_rx38": {
+    "read_only_status_and_list_exit_codes": [
+      0,
+      0
+    ],
+    "coordinator": "Online",
+    "managed_reservations": 0,
+    "managed_sessions": 0,
+    "queued": 0,
+    "blocked": 0,
+    "unmanaged_foreign_qemu": {
+      "count": 2,
+      "pids": [
+        20392,
+        21932
+      ],
+      "controlled_by_rx38": false
+    },
+    "native_guest_launched": false,
+    "reason": "No release-critical native proof was required for the bounded profile; final QAC check reported two foreign QEMU processes and warned that acceptance reservations were blocked."
+  },
+  "preservation": {
+    "protected_root_artifacts": 31,
+    "protected_path_size_sha256_matches": 31,
+    "starting_untracked_paths": 141969,
+    "starting_untracked_paths_missing": 0,
+    "starting_path_set_matches_rx37r1_recorded_set": true,
+    "starting_manifest_sha256": "f5e60f4f83139cf64b6bd3bf8a3f681f18c6cabedc72a62a0314e353f120647d",
+    "starting_manifest_sha256_scope": "Decompressed UTF-8/LF ordinal-sorted path list",
+    "ending_untracked_paths": 142055,
+    "additional_untracked_paths_at_end": 86,
+    "ending_manifest_sha256": "82b7b58c9781e5444d2d582e50af340f093cd3bad1eab0fd06974aef6508e3e6",
+    "ending_manifest_sha256_scope": "Decompressed UTF-8/LF ordinal-sorted path list after staging RX38 reports."
+  },
+  "recommended_rx39_scope": "Bounded Server v0.3 integration and necessary guest smoke checks after QAC is available; verify the production KERNEL bridge and document current SAY/input/clock boundaries. No new built-ins or broad host subsystem."
+}

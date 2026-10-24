@@ -1,0 +1,14 @@
+{
+  "schema": "guidexos.rexx.rx38.untracked-reconciliation.v1",
+  "starting_count": 141969,
+  "ending_count": 142055,
+  "starting_manifest": "starting-untracked.paths.gz",
+  "ending_manifest": "ending-untracked.paths.gz",
+  "starting_manifest_sha256": "f5e60f4f83139cf64b6bd3bf8a3f681f18c6cabedc72a62a0314e353f120647d",
+  "ending_manifest_sha256": "82b7b58c9781e5444d2d582e50af340f093cd3bad1eab0fd06974aef6508e3e6",
+  "missing_starting_paths": 0,
+  "additional_paths": 86,
+  "path_set_preserved": true,
+  "additional_paths_file": "new-untracked-paths.txt",
+  "historical_rx37r1_set_comparison": "Exact set match for 141969 starting paths; RX37R1 file SHA-256 was 87df2bb82b29e1ab25a2f363742e268baf34869a0826b9282f1a61f0596f49ec, while RX38 records a fresh ordinal UTF-8/LF serialization."
+}
