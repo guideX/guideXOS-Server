@@ -99,7 +99,8 @@ bool same(const Value& left, const Value& right)
     case ValueType::HostObject: return left.hostObjectId() == right.hostObjectId();
     case ValueType::Symbol:
         return left.wellKnownSymbolValue() == right.wellKnownSymbolValue();
-    case ValueType::SymbolNamespace: return true;
+    case ValueType::SymbolNamespace:
+    case ValueType::ObjectNamespace: return true;
     }
     return false;
 }

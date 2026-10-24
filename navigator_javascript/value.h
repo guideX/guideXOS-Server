@@ -16,6 +16,7 @@ enum class ValueType : std::uint8_t {
     HostObject,
     Symbol,
     SymbolNamespace,
+    ObjectNamespace,
 };
 
 // Only symbols defined by the runtime itself are currently representable.
@@ -60,6 +61,7 @@ public:
     static Value object(RuntimeObjectId id);
     static Value hostObject(RuntimeHostObjectId id);
     static Value wellKnownSymbol(WellKnownSymbol symbol);
+    static Value objectNamespace();
     // The minimal global Symbol intrinsic is a namespace for the supported
     // well-known identities, not a callable Symbol() constructor.
     static Value symbolNamespace();
@@ -77,6 +79,10 @@ public:
     bool isSymbolNamespace() const
     {
         return type_ == ValueType::SymbolNamespace;
+    }
+    bool isObjectNamespace() const
+    {
+        return type_ == ValueType::ObjectNamespace;
     }
 
     bool booleanValue() const { return booleanValue_; }

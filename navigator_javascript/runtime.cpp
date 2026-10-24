@@ -224,6 +224,16 @@ bool parseBoundedArrayIndex(const std::string& key, std::size_t maximum,
     return true;
 }
 
+bool parseEcmaArrayIndex(const std::string& key, std::uint32_t& index)
+{
+    const std::size_t maximum = static_cast<std::size_t>(
+        std::numeric_limits<std::uint32_t>::max() - 1u);
+    std::size_t parsed = 0u;
+    if (!parseBoundedArrayIndex(key, maximum, parsed)) return false;
+    index = static_cast<std::uint32_t>(parsed);
+    return true;
+}
+
 std::size_t maximumSupportedArrayLength(const RuntimeLimits& limits)
 {
     std::size_t maximum = limits.maxArrayElements;
@@ -385,6 +395,7 @@ private:
         bool stringPrimitive = false;
         bool hostObjectValue = false;
         bool symbolNamespaceValue = false;
+        bool objectNamespaceValue = false;
         RuntimeContext::PropertyKey key;
         SourceLocation location;
     };
@@ -450,6 +461,12 @@ private:
         // not provide the callable Symbol() constructor or dynamic Symbols.
         if (textEquals(name, "Symbol")) {
             value = Value::symbolNamespace();
+            return true;
+        }
+        // JS89 exposes Object as a bounded intrinsic namespace. It does not
+        // add a runtime object or global binding; only Object.keys is present.
+        if (textEquals(name, "Object")) {
+            value = Value::objectNamespace();
             return true;
         }
         fail(RuntimeErrorCode::UnknownIdentifier,
@@ -781,7 +798,8 @@ private:
             key.symbol = value.wellKnownSymbolValue();
             return true;
         }
-        if (value.isObject() || value.isFunction()) {
+        if (value.isObject() || value.isFunction() ||
+            value.isObjectNamespace()) {
             fail(RuntimeErrorCode::InvalidPropertyKey, location);
             return false;
         }
@@ -810,14 +828,16 @@ private:
         Value object;
         if (!evalExpression(node.object, object)) return false;
         if (!object.isObject() && !object.isHostObject() &&
-            !object.isString() && !object.isSymbolNamespace()) {
+            !object.isString() && !object.isSymbolNamespace() &&
+            !object.isObjectNamespace()) {
             fail(object.isNull() || object.isUndefined()
                 ? (forWrite ? RuntimeErrorCode::CannotWriteProperty
                     : RuntimeErrorCode::CannotReadProperty)
                 : RuntimeErrorCode::NotObject, node.location);
             return false;
         }
-        if (object.isSymbolNamespace() && forWrite) {
+        if ((object.isSymbolNamespace() || object.isObjectNamespace()) &&
+            forWrite) {
             fail(RuntimeErrorCode::NotObject, node.location);
             return false;
         }
@@ -855,6 +875,9 @@ private:
         } else if (object.isSymbolNamespace()) {
             reference.symbolNamespaceValue = true;
             reference.receiver = object;
+        } else if (object.isObjectNamespace()) {
+            reference.objectNamespaceValue = true;
+            reference.receiver = object;
         } else {
             reference.object = object.objectId();
             reference.receiver = object;
@@ -879,6 +902,13 @@ private:
             value = !reference.key.isSymbol() &&
                 reference.key.string == "iterator"
                 ? Value::wellKnownSymbol(WellKnownSymbol::Iterator)
+                : Value::undefined();
+            return true;
+        }
+        if (reference.objectNamespaceValue) {
+            value = !reference.key.isSymbol() &&
+                reference.key.string == "keys"
+                ? Value::function(context_.objectKeysFunction_)
                 : Value::undefined();
             return true;
         }
@@ -919,6 +949,8 @@ private:
             reference.stringPrimitive = true;
         } else if (base.isSymbolNamespace()) {
             reference.symbolNamespaceValue = true;
+        } else if (base.isObjectNamespace()) {
+            reference.objectNamespaceValue = true;
         } else if (base.isNull() || base.isUndefined()) {
             fail(RuntimeErrorCode::CannotReadProperty, location);
             return false;
@@ -946,6 +978,10 @@ private:
     bool writeMember(const MemberReference& reference, Value value)
     {
         if (reference.stringPrimitive) {
+            fail(RuntimeErrorCode::NotObject, reference.location);
+            return false;
+        }
+        if (reference.objectNamespaceValue) {
             fail(RuntimeErrorCode::NotObject, reference.location);
             return false;
         }
@@ -1302,17 +1338,15 @@ private:
             context_.objectAt(objectId);
         if (object == nullptr) return false;
         if (object->array && key == "length") return true;
-        if (object->array && isCanonicalArrayIndexSpelling(key)) {
-            std::size_t index = 0;
-            if (parseBoundedArrayIndex(key, context_.limits_.maxArrayIndex,
-                index)) {
-                const std::size_t position =
-                    RuntimeContext::findArrayElementPosition(*object, index);
-                return index < object->arrayLength &&
-                    position < object->elements.size() &&
-                    object->elements[position].index == index;
-            }
-            return false;
+        std::uint32_t standardIndex = 0u;
+        if (object->array && parseEcmaArrayIndex(key, standardIndex)) {
+            const std::size_t index = static_cast<std::size_t>(standardIndex);
+            if (index > context_.limits_.maxArrayIndex) return false;
+            const std::size_t position =
+                RuntimeContext::findArrayElementPosition(*object, index);
+            return index < object->arrayLength &&
+                position < object->elements.size() &&
+                object->elements[position].index == index;
         }
         for (const RuntimeContext::RuntimeProperty& property :
             object->properties) {
@@ -1330,18 +1364,17 @@ private:
         if (object == nullptr) return false;
         if (!key.isSymbol()) {
             if (object->array && key.string == "length") return true;
-            if (object->array && isCanonicalArrayIndexSpelling(key.string)) {
-                std::size_t index = 0;
-                if (parseBoundedArrayIndex(key.string,
-                    context_.limits_.maxArrayIndex, index)) {
-                    const std::size_t position =
-                        RuntimeContext::findArrayElementPosition(*object,
-                            index);
-                    return index < object->arrayLength &&
-                        position < object->elements.size() &&
-                        object->elements[position].index == index;
-                }
-                return false;
+            std::uint32_t standardIndex = 0u;
+            if (object->array && parseEcmaArrayIndex(key.string,
+                    standardIndex)) {
+                const std::size_t index =
+                    static_cast<std::size_t>(standardIndex);
+                if (index > context_.limits_.maxArrayIndex) return false;
+                const std::size_t position =
+                    RuntimeContext::findArrayElementPosition(*object, index);
+                return index < object->arrayLength &&
+                    position < object->elements.size() &&
+                    object->elements[position].index == index;
             }
         }
         for (const RuntimeContext::RuntimeProperty& property :
@@ -1352,6 +1385,236 @@ private:
                         property.key == key.string) return true;
         }
         return false;
+    }
+
+    bool createObjectKeys(RuntimeObjectId sourceId, SourceLocation callSite,
+        Value& result)
+    {
+        const RuntimeContext::RuntimeObject* source =
+            context_.objectAt(sourceId);
+        if (source == nullptr || sourceId == context_.objectPrototype_ ||
+            sourceId == context_.arrayPrototype_ ||
+            sourceId == context_.mathObject_ ||
+            sourceId == context_.eventConstantsObject_ ||
+            source->arrayIterator) {
+            fail(RuntimeErrorCode::InvalidReceiver, callSite);
+            return false;
+        }
+        for (const RuntimeContext::RuntimeProperty& property :
+            source->properties) {
+            if (property.readOnly) {
+                // The current property record only tracks write protection.
+                // Host-created Event fields do not carry enough metadata to
+                // make an enumerable-own-key claim.
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                return false;
+            }
+        }
+
+        std::size_t keyCount = source->array ? source->elements.size() : 0u;
+        std::size_t keyBytes = 0u;
+        const auto addKeySize = [this, &keyBytes, callSite](
+            std::size_t length) {
+                if (length > context_.limits_.maxRuntimeStringLength ||
+                    length > context_.limits_.maxTotalRuntimeStringBytes ||
+                    keyBytes > context_.limits_.maxTotalRuntimeStringBytes -
+                        length) {
+                    fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+                    return false;
+                }
+                keyBytes += length;
+                return true;
+            };
+        const auto indexLength = [](std::size_t index) {
+            std::size_t length = 1u;
+            while (index >= 10u) {
+                index /= 10u;
+                ++length;
+            }
+            return length;
+        };
+
+        std::size_t previousArrayIndex = 0u;
+        if (source->array) {
+            for (std::size_t position = 0u;
+                position < source->elements.size(); ++position) {
+                if (!context_.consumeStep(callSite)) return false;
+                const std::size_t index = source->elements[position].index;
+                if (index >= source->arrayLength ||
+                    index > context_.limits_.maxArrayIndex ||
+                    (position != 0u && index <= previousArrayIndex)) {
+                    fail(RuntimeErrorCode::InvalidAstState, callSite);
+                    return false;
+                }
+                previousArrayIndex = index;
+                if (!addKeySize(indexLength(index))) return false;
+            }
+        }
+
+        for (const RuntimeContext::RuntimeProperty& property :
+            source->properties) {
+            if (!context_.consumeStep(callSite)) return false;
+            if (property.symbolKey != WellKnownSymbol::None ||
+                (source->array && property.key == "length")) continue;
+            std::uint32_t standardIndex = 0u;
+            if (source->array && parseEcmaArrayIndex(property.key,
+                    standardIndex)) {
+                // Indexed Array properties are stored only in the sorted
+                // elements vector. A duplicate here means the own-key store
+                // is internally inconsistent.
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                return false;
+            }
+            if (keyCount == std::numeric_limits<std::size_t>::max()) {
+                fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
+                return false;
+            }
+            ++keyCount;
+            if (!addKeySize(property.key.size())) return false;
+        }
+
+        const std::size_t maximumResultLength =
+            maximumSupportedArrayLength(context_.limits_);
+        if (keyCount > context_.limits_.maxArrayElements ||
+            keyCount > maximumResultLength ||
+            keyCount > context_.limits_.maxTotalArrayElements ||
+            context_.totalArrayElements_ >
+                context_.limits_.maxTotalArrayElements - keyCount) {
+            fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
+            return false;
+        }
+        if (context_.objects_.size() >= context_.limits_.maxObjects) {
+            fail(RuntimeErrorCode::ObjectLimitExceeded, callSite);
+            return false;
+        }
+        if (keyCount > context_.limits_.maxRuntimeStringValues ||
+            context_.strings_.size() >
+                context_.limits_.maxRuntimeStringValues - keyCount ||
+            keyBytes > context_.limits_.maxTotalRuntimeStringBytes ||
+            context_.totalStringBytes_ >
+                context_.limits_.maxTotalRuntimeStringBytes - keyBytes) {
+            fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+            return false;
+        }
+
+        std::vector<RuntimeContext::RuntimeArrayElement> keyElements;
+        try {
+#if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+            if (context_.failNextObjectKeysScratchAllocationForTesting_) {
+                context_.failNextObjectKeysScratchAllocationForTesting_ = false;
+                throw std::bad_alloc();
+            }
+#endif
+            keyElements.reserve(keyCount);
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, callSite);
+            return false;
+        }
+
+        const auto appendKey = [this, &keyElements, callSite](SourceView key) {
+            if (!context_.consumeStep(callSite)) return false;
+            Value keyValue;
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+#if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+            if (context_.failNextObjectKeysStringCreationForTesting_) {
+                context_.failNextObjectKeysStringCreationForTesting_ = false;
+                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                return false;
+            }
+#endif
+            if (!context_.createString(key, keyValue, error)) {
+                fail(error, callSite);
+                return false;
+            }
+            try {
+#if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+                if (context_.failNextObjectKeysElementInsertionForTesting_) {
+                    context_.failNextObjectKeysElementInsertionForTesting_ =
+                        false;
+                    throw std::bad_alloc();
+                }
+#endif
+                keyElements.push_back({keyElements.size(), keyValue});
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                return false;
+            }
+            return true;
+        };
+        const auto appendIndex = [this, &appendKey, callSite](
+            std::size_t index) {
+            char buffer[32] = {};
+            const auto conversion = std::to_chars(buffer,
+                buffer + sizeof(buffer), index);
+            if (conversion.ec != std::errc()) {
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                return false;
+            }
+            return appendKey(SourceView(buffer, static_cast<std::size_t>(
+                conversion.ptr - buffer)));
+        };
+
+        if (source->array) {
+            for (const RuntimeContext::RuntimeArrayElement& element :
+                source->elements) {
+                if (!appendIndex(element.index)) return false;
+            }
+        } else {
+            bool hasPreviousIndex = false;
+            std::uint32_t previousIndex = 0u;
+            while (true) {
+                bool found = false;
+                std::uint32_t smallestIndex = 0u;
+                std::size_t smallestProperty = 0u;
+                for (std::size_t position = 0u;
+                    position < source->properties.size(); ++position) {
+                    if (!context_.consumeStep(callSite)) return false;
+                    const RuntimeContext::RuntimeProperty& property =
+                        source->properties[position];
+                    if (property.symbolKey != WellKnownSymbol::None) continue;
+                    std::uint32_t index = 0u;
+                    if (!parseEcmaArrayIndex(property.key, index) ||
+                        (hasPreviousIndex && index <= previousIndex)) continue;
+                    if (!found || index < smallestIndex) {
+                        found = true;
+                        smallestIndex = index;
+                        smallestProperty = position;
+                    }
+                }
+                if (!found) break;
+                const std::string& key =
+                    source->properties[smallestProperty].key;
+                if (!appendKey(SourceView(key.data(), key.size()))) return false;
+                previousIndex = smallestIndex;
+                hasPreviousIndex = true;
+            }
+        }
+
+        for (const RuntimeContext::RuntimeProperty& property :
+            source->properties) {
+            if (!context_.consumeStep(callSite)) return false;
+            if (property.symbolKey != WellKnownSymbol::None ||
+                (source->array && property.key == "length")) continue;
+            std::uint32_t standardIndex = 0u;
+            if (!source->array && parseEcmaArrayIndex(property.key,
+                    standardIndex)) continue;
+            if (!appendKey(SourceView(property.key.data(), property.key.size())))
+                return false;
+        }
+        if (keyElements.size() != keyCount) {
+            fail(RuntimeErrorCode::InvalidAstState, callSite);
+            return false;
+        }
+
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        RuntimeObjectId resultId = kInvalidRuntimeObjectId;
+        if (!context_.createArray(keyCount, std::move(keyElements), resultId,
+                error)) {
+            fail(error, callSite);
+            return false;
+        }
+        result = Value::object(resultId);
+        return true;
     }
 
     bool invokeNative(const RuntimeContext::FunctionRecord& function,
@@ -1396,6 +1659,16 @@ private:
 
         switch (static_cast<RuntimeContext::NativeFunctionId>(
             function.nativeFunction)) {
+        case RuntimeContext::NativeFunctionId::ObjectKeys: {
+            const Value& target = argumentOrUndefined(0u);
+            if (!target.isObject()) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            succeeded = createObjectKeys(target.objectId(), callSite, result);
+            break;
+        }
         case RuntimeContext::NativeFunctionId::ObjectHasOwnProperty: {
             if (!receiver.isObject() ||
                 context_.objectAt(receiver.objectId()) == nullptr) {
@@ -1751,6 +2024,7 @@ private:
             return true;
         case ValueType::Symbol:
         case ValueType::SymbolNamespace:
+        case ValueType::ObjectNamespace:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         }
@@ -1793,6 +2067,7 @@ private:
             return false;
         case ValueType::Symbol:
         case ValueType::SymbolNamespace:
+        case ValueType::ObjectNamespace:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         }
@@ -2421,6 +2696,7 @@ private:
         case ValueType::HostObject:
         case ValueType::Symbol:
         case ValueType::SymbolNamespace:
+        case ValueType::ObjectNamespace:
             return true;
         }
         return false;
@@ -2458,6 +2734,8 @@ private:
             return left.wellKnownSymbolValue() != WellKnownSymbol::None &&
                 left.wellKnownSymbolValue() == right.wellKnownSymbolValue();
         case ValueType::SymbolNamespace:
+            return true;
+        case ValueType::ObjectNamespace:
             return true;
         }
         return false;
@@ -2780,6 +3058,7 @@ void RuntimeContext::clearRuntimeState()
     eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
     arrayIteratorNextFunction_ = kInvalidRuntimeFunctionId;
     arrayIteratorSelfFunction_ = kInvalidRuntimeFunctionId;
+    objectKeysFunction_ = kInvalidRuntimeFunctionId;
     eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
     eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
     builtInsInitialized_ = false;
@@ -3337,6 +3616,8 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         error = RuntimeErrorCode::BuiltInInitializationFailed;
         return false;
     }
+    if (!createNativeFunction(NativeFunctionId::ObjectKeys,
+            objectKeysFunction_, error)) return false;
     const char eventName[] = "Event";
     // Event constants are optional only when an explicitly tiny caller limit
     // cannot fit the bounded namespace. This keeps the older runtime limit
@@ -3673,11 +3954,12 @@ bool RuntimeContext::readProperty(RuntimeObjectId objectId,
             value = Value::number(static_cast<double>(object->arrayLength));
             return true;
         }
+        std::uint32_t standardIndex = 0u;
         if (!key.isSymbol() && object->array &&
-            isCanonicalArrayIndexSpelling(key.string)) {
-            std::size_t index = 0;
-            if (!parseBoundedArrayIndex(key.string, limits_.maxArrayIndex,
-                    index)) {
+            parseEcmaArrayIndex(key.string, standardIndex)) {
+            const std::size_t index =
+                static_cast<std::size_t>(standardIndex);
+            if (index > limits_.maxArrayIndex) {
                 error = RuntimeErrorCode::ArrayIndexOutOfRange;
                 return false;
             }
@@ -3741,10 +4023,12 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
     if (!key.isSymbol() && object->array && key.string == "length") {
         return setArrayLength(objectId, value, error);
     }
+    std::uint32_t standardIndex = 0u;
     if (!key.isSymbol() && object->array &&
-        isCanonicalArrayIndexSpelling(key.string)) {
-        std::size_t index = 0;
-        if (!parseBoundedArrayIndex(key.string, limits_.maxArrayIndex, index)) {
+        parseEcmaArrayIndex(key.string, standardIndex)) {
+        const std::size_t index =
+            static_cast<std::size_t>(standardIndex);
+        if (index > limits_.maxArrayIndex) {
             error = RuntimeErrorCode::ArrayIndexOutOfRange;
             return false;
         }
@@ -4349,6 +4633,7 @@ bool RuntimeContext::convertValueToHost(const Value& value, HostValue& result,
         return true;
     case ValueType::Symbol:
     case ValueType::SymbolNamespace:
+    case ValueType::ObjectNamespace:
         error = RuntimeErrorCode::HostInvalidValue;
         (void)location;
         return false;

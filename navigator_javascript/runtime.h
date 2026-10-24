@@ -374,6 +374,7 @@ private:
 
     enum class NativeFunctionId : std::uint8_t {
         ObjectHasOwnProperty = 0,
+        ObjectKeys,
         ArrayPush,
         ArrayPop,
         ArrayIteratorCreate,
@@ -544,6 +545,9 @@ private:
 #if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
     bool failNextArrayCreationForTesting_ = false;
     bool failNextArraySlotInsertionForTesting_ = false;
+    bool failNextObjectKeysScratchAllocationForTesting_ = false;
+    bool failNextObjectKeysStringCreationForTesting_ = false;
+    bool failNextObjectKeysElementInsertionForTesting_ = false;
 #endif
 #ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
     RuntimeDiagnostics diagnostics_;
@@ -566,6 +570,7 @@ private:
         kInvalidRuntimeFunctionId;
     RuntimeFunctionId arrayIteratorSelfFunction_ =
         kInvalidRuntimeFunctionId;
+    RuntimeFunctionId objectKeysFunction_ = kInvalidRuntimeFunctionId;
     RuntimeFunctionId eventStopImmediatePropagationFunction_ =
         kInvalidRuntimeFunctionId;
     RuntimeFunctionId eventPreventDefaultFunction_ =

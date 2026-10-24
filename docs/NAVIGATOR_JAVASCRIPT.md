@@ -11682,3 +11682,117 @@ runtime's bounded object-property model can support them without weakening
 the current sparse-slot and allocation invariants. Keep garbage collection,
 published-object reuse, and broad Array-method expansion out of scope until
 their identity and capacity requirements are separately measured.
+
+## JS89 — bounded own-key enumeration
+
+JS89 adds the bounded intrinsic `Object.keys(value)`. The intrinsic namespace
+is resolved without allocating a runtime object or global binding, exposes
+only `keys`, and can be shadowed by a script binding. Supported receivers are
+ordinary runtime objects and Arrays whose stored properties have audited
+enumerability. Built-in prototype/namespace objects, Array iterator cursors,
+read-only host-created properties, host wrappers, functions, and primitives
+are rejected. This keeps internal host metadata out of the result.
+
+The runtime's ordinary property record stores a string key or typed
+well-known-Symbol key, a Value, and a `readOnly` flag. It has no explicit
+enumerable/configurable/accessor metadata. Supported object-literal and
+assignment properties are appended in creation order; updating a key keeps
+its position. Array numeric properties are held as sorted occupied-index
+records, and logical `length` is specialized storage. `Object.keys` walks
+those own-property stores directly: it does not read through the prototype
+chain, emit typed Symbols, enumerate holes, or emit Array `length`.
+
+For ordinary objects, canonical index strings from `"0"` through
+`"4294967294"` are emitted in ascending numeric order, followed by other
+string keys in insertion order. `"01"`, negative spellings, and
+`"4294967295"` are ordinary strings. Array index ordering follows the
+occupied records; the JS88 1,024-position write bound remains in force. A
+hole at an occupied logical position is omitted even if a prototype read
+would find an inherited value, while an own property containing `undefined`
+is included. The returned value is a dense Array of fresh string Values and
+is independent of later changes to the source. It uses JS87's regular Array
+iterator, including independent iterator cursors.
+
+Enumeration first scans and bounds the result count and key bytes, then builds
+a bounded scratch list, allocates key strings, and publishes the result Array
+only after all keys have been constructed. It does not allocate property
+records for the result. Capacity and injected allocation failures return an
+error rather than a truncated Array; the source remains unchanged. Failed
+string allocations may remain retained under the runtime's existing
+no-reclamation lifetime policy. Default limits remain 1,024 objects, 256
+properties per object, 4,096 total properties, 1,024 Array elements per
+result, and 4,096 occupied Array records. Qualification constructed a maximum
+1,024-key Array result with 2,048 occupied Array records total (source plus
+result), 6/1,024 objects, and 15/4,096 properties. The largest measured
+ordinary object had 256 keys.
+
+The property-attribute audit found no truthful way to report
+`writable`/`enumerable`/`configurable` triples across the supported and
+host-created property kinds. In particular, `readOnly` only describes write
+protection and does not encode enumerability. `Object.getOwnPropertyDescriptor`
+is therefore deferred; no descriptor API or mutation system was added.
+
+The JS89 native lane passed **466/466 checks**, including strict C++17 syntax
+compilation with `-Wall -Wextra -Werror -pedantic`, pool-boundary cases,
+deterministic allocation-failure injection, source preservation, sparse and
+explicit-`undefined` behavior, Symbol/prototype exclusions, JS81 entry-pair
+Arrays, snapshot independence, and `for...of` interoperability. The final
+measurement reported `RuntimeObject` 88 B, `RuntimeProperty` 80 B, an
+occupied Array record 48 B, and `Value` 40 B. The hosted compiler stack
+report measured 480 B for `createObjectKeys`, 736 B for `invokeNative`, and
+944 B for `executeForOf`; its two enumeration lambdas measured 192 B and
+320 B. These stack figures are compiler-specific, not bare-metal stack
+guarantees.
+
+Five-fresh-realm median timings below include parsing and evaluation and have
+no timing threshold:
+
+| Case | Keys | Median |
+|---|---:|---:|
+| Empty object | 0 | 4 µs |
+| Small object | 4 | 7 µs |
+| Numeric ordering | 64 | 68 µs |
+| String insertion order | 64 | 94 µs |
+| Dense Array | 16 | 16 µs |
+| Dense Array | 256 | 157 µs |
+| Dense Array | 1,024 | 723 µs |
+| One-slot sparse Array, length 1,024 | 1 | 6 µs |
+| All-hole Array, length 1,024 | 0 | 5 µs |
+| Three snapshots of 256 keys | 768 result slots | 197 µs |
+| `for...of` over 64 key strings | 64 | 76 µs |
+
+The focused JS79–JS88 regressions passed **1,889/1,889 checks** and JS84's
+no-diagnostics control passed **68/68**. The full JavaScript matrix passed
+**91/91 lanes** and **16,119/16,119 assertions across 50 assertion-bearing
+lanes**. The production build succeeded. Its fresh `guideXOSServer.exe` was
+8,680,026 bytes with SHA-256
+`A41C13FF5FB14A74AF1477A70008F6165CDA694AC885419ED05BE75FFDD63AD6`.
+
+The hosted run used that exact executable (PID 26816). The JS89 page reported
+**9/9 assertions**, and all four JS89 aggregate checks passed, including
+Symbol exclusion, numeric and insertion ordering, sparse occupancy, snapshot
+stability, key-Array iteration, JS81 pair occupancy, and nested Event callback
+state. The hosted aggregate reported **699/706 checks**: its only failures
+were the seven established CSS checks (3C, 3G, 6A, three checks in 6B, and
+6C); every JavaScript check passed. The smoke process consequently printed
+`NAVIGATOR_SMOKE_RESULT: FAIL` for that known aggregate baseline.
+
+The preflight ignored-artifact snapshot and backup are held outside the
+checkout at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js89-evidence\`. The tracked
+starting revision was `49aaa42ca632ee13bf9a096027b6ad602313a4e4`; live
+upstream refs matched at preflight (0 ahead / 0 behind). `.phase` remained
+absent. No kernel or QEMU run was performed; neither is required for this
+Navigator native/hosted qualification path.
+
+After qualification, the ignored-file manifest matched its preflight snapshot
+exactly: **1,367 files / 90,843,932 bytes**, with zero changed, missing, or
+extra files. The recursive manifest had 9,455 baseline files and 9,458 final
+files: the nine expected edited source/documentation files and three new JS89
+files, with no missing files. The production executable was restored from the
+preflight backup and its size and SHA-256 matched the saved manifest.
+
+JS89 qualifies bounded own-key enumeration only. A future JS90 can first
+extend property metadata and audit native-created properties; a descriptor
+API should wait until the runtime can represent every reported attribute
+accurately, including Array `length` and host-created properties.
