@@ -12,7 +12,7 @@
 #include <cstring>
 #endif
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
@@ -153,7 +153,7 @@ namespace gxos { namespace gui {
             return len * (kGlyphW + kSpacing) - kSpacing;
         }
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         // Draw a string onto an HDC at (x,y) with the given color
         // Uses SetPixel - slow but compatible; for small text like tooltips and tray labels
         static void DrawString(HDC dc, int x, int y, const char* str, int len, COLORREF color) {

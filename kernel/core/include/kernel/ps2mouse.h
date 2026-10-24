@@ -38,6 +38,9 @@ int32_t get_y();
 // Get current button state (bitfield of MouseButtons)
 uint8_t get_buttons();
 
+// Monotonic identifier for the last complete packet, including rejected motion.
+uint32_t get_packet_sequence();
+
 // Get scroll wheel delta (reset after read)
 int8_t get_scroll_delta();
 

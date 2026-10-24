@@ -114,6 +114,9 @@ int32_t mouse_y();
 // Get current mouse button state
 uint8_t mouse_buttons();
 
+// Source event identifier for the latest PS/2 packet mapped to desktop state.
+uint32_t mouse_event_sequence();
+
 // Get vertical scroll delta (reset after read)
 int8_t mouse_scroll_y();
 

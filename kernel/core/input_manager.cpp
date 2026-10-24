@@ -10,6 +10,7 @@
 #include "include/kernel/input_manager.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/mouse_input_trace.h"
 
 // Include available input backends
 #if ARCH_HAS_PS2
@@ -54,6 +55,8 @@ static uint32_t s_mappingDiagnosticLimit = 0;
 static uint32_t s_mappingDiagnosticCount = 0;
 static int32_t s_lastPs2X = 0;
 static int32_t s_lastPs2Y = 0;
+static uint32_t s_mouseEventSequence = 0;
+static uint32_t s_lastMappedPacketSequence = 0;
 
 // ================================================================
 // Helpers
@@ -240,6 +243,8 @@ static void poll_ps2_mouse()
     int32_t dy = y - s_lastPs2Y;
     s_lastPs2X = x;
     s_lastPs2Y = y;
+    const uint32_t packetSequence = ps2mouse::get_packet_sequence();
+    s_mouseEventSequence = packetSequence;
     uint8_t buttons = ps2mouse::get_buttons();
     int8_t scroll = ps2mouse::get_scroll_delta();
 
@@ -251,6 +256,12 @@ static void poll_ps2_mouse()
         s_mouse.dirty = true;
     }
     apply_mapping_event(event, InputSource::PS2);
+    if (packetSequence != s_lastMappedPacketSequence) {
+        mouse_trace::record(packetSequence, mouse_trace::PointerMapped,
+                            event.virtualX, event.virtualY, buttons,
+                            dx, dy, 0, event.valid ? 1 : 0);
+        s_lastMappedPacketSequence = packetSequence;
+    }
 }
 #endif
 
@@ -329,6 +340,8 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_displayMapper.setCursor(s_mouse.x, s_mouse.y);
     s_lastPs2X = s_mouse.x;
     s_lastPs2Y = s_mouse.y;
+    s_mouseEventSequence = 0;
+    s_lastMappedPacketSequence = ps2mouse::get_packet_sequence();
     s_mappingDiagnosticCount = 0;
     
 #if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
@@ -447,6 +460,7 @@ void poll()
 int32_t mouse_x()       { return s_mouse.x; }
 int32_t mouse_y()       { return s_mouse.y; }
 uint8_t mouse_buttons() { return s_mouse.buttons; }
+uint32_t mouse_event_sequence() { return s_mouseEventSequence; }
 
 int8_t mouse_scroll_y()
 {

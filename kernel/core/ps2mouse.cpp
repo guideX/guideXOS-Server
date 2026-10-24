@@ -11,6 +11,7 @@
 
 #include "include/kernel/ps2mouse.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/mouse_input_trace.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
@@ -38,6 +39,8 @@ static bool     s_dirty     = false;
 static int      s_phase     = 0;     // packet assembly phase
 static uint8_t  s_packet[4] = {0};   // 4-byte packet buffer (IntelliMouse)
 static bool     s_hasWheel  = false;
+static uint32_t s_packetSequence = 0;
+static uint32_t s_candidatePacketId = 0;
 
 static int32_t  s_screenW   = 1024;
 static int32_t  s_screenH   = 768;
@@ -132,6 +135,10 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_mouseX  = s_screenW / 2;
     s_mouseY  = s_screenH / 2;
     s_phase   = 0;
+    s_packetSequence = 0;
+    s_candidatePacketId = 0;
+    s_buttons = 0;
+    s_dirty = false;
 
     serial::puts("[PS2] Starting PS/2 mouse init\n");
 
@@ -228,7 +235,9 @@ void irq_handler()
     if ((status & 0x01) == 0) return;  // no data available
     if ((status & 0x20) == 0) {
         // Data is from keyboard, not mouse — read and discard to clear buffer
-        arch::inb(kDataPort);
+        uint8_t keyboardByte = arch::inb(kDataPort);
+        mouse_trace::record_irq(0, mouse_trace::Ps2Byte, s_mouseX, s_mouseY,
+                            s_buttons, status, keyboardByte, 0, -1);
         return;
     }
 
@@ -243,6 +252,9 @@ void irq_handler()
     }
 
     uint8_t d = arch::inb(kDataPort);
+    const int phaseBefore = s_phase;
+    if (phaseBefore == 0) s_candidatePacketId = (d & 0x08) != 0
+        ? s_packetSequence + 1u : 0u;
 
     if (s_phase == 0) {
         // Waiting for first byte with bit 3 set (always-1 bit)
@@ -267,11 +279,21 @@ void irq_handler()
         s_phase = 0;
     } else {
         s_phase = 0;
+        s_candidatePacketId = 0;
+        mouse_trace::record_irq(0, mouse_trace::Ps2Byte, s_mouseX, s_mouseY,
+                            s_buttons, status, d, phaseBefore, -2);
         return;
     }
 
+    mouse_trace::record_irq(s_candidatePacketId, mouse_trace::Ps2Byte,
+                        s_mouseX, s_mouseY, s_buttons,
+                        status, d, phaseBefore, s_phase);
+
     // Only process when we've collected a full packet
     if (s_phase != 0) return;
+
+    const uint32_t eventId = s_candidatePacketId;
+    s_candidatePacketId = 0;
 
     // Validate: bit 3 of byte 0 must be set
     if ((s_packet[0] & 0x08) == 0) return;
@@ -286,6 +308,11 @@ void irq_handler()
     if (s_packet[0] & 0x01) s_buttons |= Left;
     if (s_packet[0] & 0x02) s_buttons |= Right;
     if (s_packet[0] & 0x04) s_buttons |= Middle;
+    if (s_buttons != oldButtons) {
+        mouse_trace::record_irq(eventId, mouse_trace::ButtonTransition,
+                            s_mouseX, s_mouseY, s_buttons,
+                            oldButtons, s_buttons, 0, 0);
+    }
 
     // Delta X/Y as signed
     int32_t dx = static_cast<int32_t>(s_packet[1]);
@@ -300,23 +327,37 @@ void irq_handler()
     if (iabs(dx) < kNoiseThreshold) dx = 0;
     if (iabs(dy) < kNoiseThreshold) dy = 0;
 
-    // Discard corrupted packets
-    if (iabs(dx) >= kMaxDeltaPerPacket && iabs(dy) >= kMaxDeltaPerPacket) return;
+    // Discard corrupted motion packets. Packet assembly has already returned
+    // to phase zero, and decoded buttons remain independently observable.
+    const bool rejectedMotion = iabs(dx) >= kMaxDeltaPerPacket &&
+        iabs(dy) >= kMaxDeltaPerPacket;
+    if (rejectedMotion) {
+        mouse_trace::record_irq(eventId, mouse_trace::Ps2Packet,
+                            s_mouseX, s_mouseY, s_buttons,
+                            dx, dy, 0, 0);
+        s_packetSequence = eventId;
+        return;
+    }
 
     // Update position
     if (dx != 0 || dy != 0 || s_buttons != oldButtons) s_dirty = true;
     s_mouseX = clamp(s_mouseX + dx, 0, s_screenW - 1);
     s_mouseY = clamp(s_mouseY + dy, 0, s_screenH - 1);
+    mouse_trace::record_irq(eventId, mouse_trace::Ps2Packet,
+                        s_mouseX, s_mouseY, s_buttons,
+                        dx, dy, 0, 1);
 
     // Scroll wheel (4th byte, signed)
     if (s_hasWheel) {
         s_scrollZ = static_cast<int8_t>(s_packet[3]);
     }
+    s_packetSequence = eventId;
 }
 
 int32_t get_x()       { return s_mouseX; }
 int32_t get_y()       { return s_mouseY; }
 uint8_t get_buttons() { return s_buttons; }
+uint32_t get_packet_sequence() { return s_packetSequence; }
 int8_t  get_scroll_delta() { int8_t z = s_scrollZ; s_scrollZ = 0; return z; }
 bool    is_dirty()    { return s_dirty; }
 void    clear_dirty() { s_dirty = false; }
@@ -329,6 +370,7 @@ void    irq_handler()           { }
 int32_t get_x()                 { return 0; }
 int32_t get_y()                 { return 0; }
 uint8_t get_buttons()           { return 0; }
+uint32_t get_packet_sequence()  { return 0; }
 int8_t  get_scroll_delta()      { return 0; }
 bool    is_dirty()              { return false; }
 void    clear_dirty()           { }

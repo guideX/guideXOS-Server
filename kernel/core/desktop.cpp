@@ -24,6 +24,7 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/input_manager.h"
+#include "include/kernel/mouse_input_trace.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
@@ -9490,6 +9491,7 @@ void cooperative_yield()
         draw_cursor(input::mouse_x(), input::mouse_y());
     }
 
+    mouse_trace::flush();
     pumping = false;
 }
 
@@ -12486,10 +12488,19 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 {
     if (!s_initialized) return;
 
+#if defined(GXOS_PS2_CLICK_TRACE)
+    struct TraceFlushOnReturn {
+        ~TraceFlushOnReturn() { mouse_trace::flush(); }
+    } traceFlushOnReturn;
+#endif
+
     s_mouseX = mx;
     s_mouseY = my;
+    const uint32_t eventId = input::mouse_event_sequence();
 
     if (file_clipboard::operation_active()) {
+        mouse_trace::record(eventId, mouse_trace::DesktopDispatch,
+                            mx, my, buttons, 0, 0, 0, -1);
         // A synchronous paste may yield for paint/timer work, but button
         // edges must not enter desktop, compositor, or app dispatch.
         s_prevButtons = buttons;
@@ -12501,6 +12512,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     uint8_t pressed  = buttons & ~s_prevButtons;   // newly pressed
     uint8_t released = s_prevButtons & ~buttons;    // newly released
     s_prevButtons = buttons;
+    mouse_trace::record(eventId, mouse_trace::DesktopDispatch,
+                        mx, my, buttons, pressed, released, 0,
+                        s_startMenuOpen ? 1 : 0);
 
     apply_taskbar_layout();
     DesktopRect workArea = get_current_work_area();
@@ -12564,7 +12578,21 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     bool overStartMenu = is_point_in_start_menu(mx, my);
     bool overModalDialog = is_point_in_modal_dialog(mx, my);
     bool overUIOverlay = overStartMenu || overModalDialog || s_rightClickMenuOpen;
+#if defined(GXOS_PS2_CLICK_TRACE)
+    app::KernelWindow* traceTargetWindow = nullptr;
+    const compositor::HitTestResult traceWindowHit = overUIOverlay
+        ? compositor::HitTestResult::None
+        : compositor::KernelCompositor::hitTest(mx, my, &traceTargetWindow);
+    bool overCompositorWindow = !overUIOverlay &&
+        traceWindowHit != compositor::HitTestResult::None;
+    mouse_trace::record(eventId, mouse_trace::WindowHitTest, mx, my, buttons,
+                        static_cast<int32_t>(traceWindowHit),
+                        overCompositorWindow ? 1 : 0,
+                        traceTargetWindow != nullptr ? traceTargetWindow->id : 0,
+                        overUIOverlay ? -1 : 0);
+#else
     bool overCompositorWindow = !overUIOverlay && compositor::KernelCompositor::isPointOverWindow(mx, my);
+#endif
     bool compositorHasActivePress = compositor::KernelCompositor::isButtonPressActive();
     
     if ((overCompositorWindow || compositorHasActivePress) && !overUIOverlay) {
@@ -13148,8 +13176,15 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         }
 
         // Start button area follows the current taskbar dock position.
-        if (point_in_rect(mx, my, get_start_button_rect())) {
+        const bool startButtonHit = point_in_rect(mx, my, get_start_button_rect());
+        mouse_trace::record(eventId, mouse_trace::WidgetHitTest, mx, my,
+                            buttons, startButtonHit ? 1 : 0, 0, 1,
+                            s_startMenuOpen ? 1 : 0);
+        if (startButtonHit) {
             toggle_start_menu();
+            mouse_trace::record(eventId, mouse_trace::ClickResult, mx, my,
+                                buttons, pressed, released, 1,
+                                s_startMenuOpen ? 1 : 0);
             draw();
             draw_cursor(mx, my);
             return;
@@ -13169,12 +13204,18 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             // First check if click is on a start menu item
             int leftHit = -1, rightHit = -1;
             hit_test_start_menu(mx, my, leftHit, rightHit);
+            mouse_trace::record(eventId, mouse_trace::WidgetHitTest, mx, my,
+                                buttons, leftHit, rightHit, 2,
+                                (leftHit >= 0 || rightHit >= 0) ? 1 : 0);
 
             if (leftHit >= 0) {
                 // Clicked a left-column app
                 s_clickedMenuLeft = leftHit;
                 s_clickedMenuRight = -1;
                 show_start_menu_notification(start_menu_left_item_label_for_row(leftHit));
+                mouse_trace::record(eventId, mouse_trace::ClickResult, mx, my,
+                                    buttons, leftHit, rightHit, 2,
+                                    s_startMenuOpen ? 1 : 0);
                 draw();
                 draw_cursor(mx, my);
                 return;
@@ -13184,6 +13225,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 s_clickedMenuRight = rightHit;
                 s_clickedMenuLeft = -1;
                 show_start_menu_notification(s_startMenuRight[rightHit].label);
+                mouse_trace::record(eventId, mouse_trace::ClickResult, mx, my,
+                                    buttons, leftHit, rightHit, 2,
+                                    s_startMenuOpen ? 1 : 0);
                 draw();
                 draw_cursor(mx, my);
                 return;
