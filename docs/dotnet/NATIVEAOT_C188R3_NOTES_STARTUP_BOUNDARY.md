@@ -1,6 +1,6 @@
 # guideXOS Server .NET Support — C188R3 Notes Startup Boundary
 
-**Outcome B — Boundary narrowed.** The diagnostic guest entered the real selector-4 `ManagedNotes.Launch`, passed the recorded C147/C148 context checks, and completed the startup state reset. It then stopped producing serial checkpoints before control initialization began. QMP still reported QEMU running at the bounded timeout, and QAC released the sole diagnostic reservation. The failing operation inside the remaining source interval is not established; no product correction is justified.
+**Outcome B — Boundary narrowed.** The diagnostic guest entered the real selector-4 `ManagedNotes.Launch`, passed the recorded C147/C148 context checks, and completed the startup state reset. It then stopped producing serial checkpoints before reaching the C120 control-host initialization branch. QMP still reported QEMU running at the bounded timeout, and QAC released the sole diagnostic reservation. The failing operation inside the remaining source interval is not established; no product correction is justified.
 
 ## Scope and historical evidence
 
@@ -62,7 +62,7 @@ C188R3-103 NOTES-STARTUP-STATE-RESET
 
 **First uncompleted checkpoint:** `C188R3-110 NOTES-CONTROL-INITIALIZATION-BEGIN`.
 
-The marker interval from `-103` to `-110` contains launch/context flag classification, Notes proof-context setup, and control state/layout preparation, including conditional C126/C127 layout calls. No checkpoint in that interval establishes which conditional path ran or which operation stopped. The serial log has no Notes surface request, layout, render, launch-return, C102 return, input-manager, or kernel input-loop marker. The listbox and renderer stages were not reached, so this boot does not support the earlier speculative ListBox or rendering theories.
+The marker `-110` is immediately before the `_c120ProofContext` branch that initializes the managed control host. The uninstrumented interval from `-103` to `-110` includes launch/context flag classification, Notes proof-context setup, and control state/layout preparation, including conditional C126/C127 layout calls. No checkpoint in that interval establishes which conditional path ran or which operation stopped. The serial log has no Notes surface request, layout, render, launch-return, C102 return, input-manager, or kernel input-loop marker. The listbox and renderer stages were not reached, so this boot does not support the earlier speculative ListBox or rendering theories.
 
 The runner's original `diagnostic-manifest.json` reports `C150-APP-INSTANCE id=4` as its first missing checkpoint because its expected list incorrectly placed C148 before C150. The raw serial ordering above is authoritative. The checked-in runner now uses the corrected order, and `checkpoint-sequence-correction.json` preserves the corrected expected/observed comparison without rewriting the original run record; it identifies `C188R3-110` as the first missing checkpoint.
 
