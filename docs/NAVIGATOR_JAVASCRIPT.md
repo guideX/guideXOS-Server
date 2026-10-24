@@ -11331,3 +11331,193 @@ must first establish and audit a complete set of root owners and their scope
 boundaries; until then, unknown external roots must prevent retirement. Kernel
 and QEMU qualification was not run, so these hosted stack measurements do not
 claim bare-metal safety.
+
+### JS87 bounded Array iterable support
+
+JS87 adds default value iteration for Navigator's existing ordinary JavaScript
+Arrays. `array[Symbol.iterator]()` and `array.values()` create independent
+cursors, and the existing JS83 `for...of` evaluator consumes them through the
+normal iterator protocol. This phase does not add Array destructuring, spread,
+generators, async iteration, or general Array methods.
+
+#### Existing Array representation and supported subset
+
+An Array remains an ordinary `RuntimeObject` tagged as an Array. Its values are
+stored in the existing dense `std::vector<Value>` slots; canonical numeric
+indices address those slots, the object uses `Array.prototype`, and `length`
+is derived from the current slot count. Supported construction includes Array
+literals, nested Array literals, and the native-created `[index, Element]`
+entry pairs from JS81. Supported changes include `push`, `pop`, and numeric
+index assignment. `length` is not writable in this runtime.
+
+Indexed assignment can extend an Array. The runtime fills any intervening
+positions with actual `undefined` values, so iteration yields `undefined` at
+those positions and continues. This storage cannot distinguish a hole from an
+own `undefined`; Array elision syntax such as `[1, , 3]` is unsupported. JS87
+therefore qualifies dense values and the runtime's dense gap behavior, not
+standard sparse-Array semantics.
+
+Each Array has an ordinary unversioned `RuntimeObjectId`, like other
+JavaScript objects. IDs remain stable vector indices for a realm's lifetime;
+objects are retained until reset, and the runtime does not reuse published
+object slots. A `RuntimeObject*` may move when the object vector grows, so
+iterator state stores the source ID and reacquires the object after any
+allocation. Runtime reset remains the boundary that invalidates both Arrays
+and their cursors.
+
+#### Protocol and bounded cursor design
+
+Built-in setup registers one native factory as both `Array.prototype.values`
+and the genuine typed `Array.prototype[Symbol.iterator]` property. The two
+lookups return the same function value. The string key
+`"Symbol.iterator"` remains distinct and does not stand in for the
+well-known Symbol key. No parser shortcut or Array-literal special case is
+used; acquisition follows ordinary typed property lookup and native dispatch.
+
+An Array cursor is an ordinary runtime object using `Object.prototype`. Its
+bounded record stores an Array iterator tag, the source `RuntimeObjectId`, the
+next `std::size_t` index, and a terminal-exhaustion flag. The object owns a
+`next` property and a genuine Symbol iterator property. Both point to shared
+native callables; the latter returns the cursor itself. A separate iterator
+prototype object was deliberately avoided so the existing JS79 object-pool
+capacity remains unchanged.
+
+Array cursors use the existing bounded runtime object and property pools; they
+do not use or expand the DOM iterator registry. Creating a cursor consumes one
+runtime object and two properties. Each `next()` creates a distinct ordinary
+`{ value, done }` result object with two properties. The current `RuntimeObject`
+is 72 bytes in the hosted MinGW build, up from 56 bytes before JS87. The
+16-byte record increase adds at most 16,384 bytes across the configured
+1,024-record object pool. This is object-vector payload only, before property
+storage and allocator overhead. The 128-record DOM iterator registry remains
+24 bytes per record / 3,072 bytes total; the 1,918-byte selector descriptor,
+1,936-byte collection record, and 247,808-byte collection registry remain
+unchanged.
+
+The cursor checks the source Array's current slot count on each `next()`. Growth
+before the cursor reaches the end is visible; shrinkage can cause the next
+call to finish. Once a call returns `done: true`, exhaustion stays terminal
+even if the Array later grows. Each step returns the actual stored `Value`,
+including falsy primitives, `null`, `undefined`, ordinary objects, nested
+Arrays, and canonical Element references. Empty and terminal calls return
+`value: undefined` and a Boolean `done: true`; retained earlier results remain
+stable. If result allocation fails, the cursor index is not advanced.
+
+The factory, `next`, and self-return native methods validate their receivers.
+Wrong or unbound receivers fail with `InvalidReceiver`. The shared `for...of`
+path continues to handle per-iteration `const` and `let` bindings, `continue`,
+`break`, function return, and IteratorClose. Nested Array loops, including
+reentrant nested Event callbacks, use separate cursors. IteratorClose invokes
+an available user-supplied `return` method on `break`; Array cursors do not add
+a built-in `return` method.
+
+JS81 entry-pair Arrays can themselves be iterated. Their numeric index stays a
+number, their Element stays the canonical host value, and replacing the
+document still makes an old Element stale through the existing host-generation
+checks. JS87 does not bind ordinary Array cursor validity to DOM document
+generation.
+
+#### Bounds, capacity, and remaining gaps
+
+Default bounds remain 1,024 runtime objects, 256 properties per object, 4,096
+total properties, 1,024 slots per Array, 4,096 total Array slots, and maximum
+Array index 1,023. A cursor adds ordinary retained objects and properties to
+those limits. Exhaustion of a pool reports the existing deterministic runtime
+error; it does not silently stop a loop. The test fills a 64-object pool, then
+confirms that a failed result allocation reports `ObjectLimitExceeded` and
+leaves the cursor index unchanged. The near-limit 1,024-slot test confirms
+that another `push` fails with `ArrayLimitExceeded`.
+
+The largest full traversal measured in JS87 is 512 elements. A 1,024-slot
+Array can be constructed, but JS87 does not claim that all of its `next()`
+result objects fit in the same bounded runtime object pool. Sparse holes,
+writable `length`, `keys()`, `entries()`, and Array mutation during an active
+callback beyond the operations tested here remain outside the qualified
+subset. No production reclamation, slot reuse, or JS86 test-model integration
+was introduced.
+
+#### JS87 qualification and performance
+
+The strict JS87 native lane passed **31/31 checks**. It compiled the JS87 test
+and changed runtime with C++17, `-Wall -Wextra -Werror -pedantic`, then linked
+and ran the native harness. Coverage includes genuine Symbol/string-key
+separation, method identity, self-return, independent cursors, empty and
+repeated exhaustion, mixed value types, nested Arrays, mutation and dense gaps,
+receiver validation, JS81 pair interoperability, stale Element protection,
+object-pool failure, and nested Event callback reentry.
+The same `navigator-smoke/javascript-js87.html` fixture is registered in the
+production `navigator.smoke` aggregate; that path loads the page and clicks
+`event-a`, which dispatches a nested click to `event-b` while an Array cursor is
+active.
+
+The JS87 benchmark reports five-fresh-realm medians in microseconds; each
+measured operation includes parsing and evaluation. At lengths 16, 64, 128,
+256, and 512, full Array `for...of` medians were 18, 47, 92, 181, and 360 µs;
+explicit cursor traversal medians were 22, 45, 92, 192, and 375 µs. At 64
+elements, cursor creation measured 3 µs, first `next()` 3 µs, middle 3 µs,
+last 4 µs, exhaustion 4 µs, repeated exhaustion 4 µs, nested traversal 42
+µs, and mutation between steps 6 µs. A 1,024-slot near-capacity `push`
+failure measured 3 µs. These small hosted samples are observations without
+timing thresholds and include interpreter setup costs; they do not establish
+constant-time traversal. JS81's 64-entry DOM `values()` traversal measured
+353 µs in its own harness. That workload includes live DOM lookup and uses a
+different harness, so it is contextual rather than a direct Array-versus-DOM
+benchmark.
+
+Hosted static stack reports for the changed runtime were 720 bytes for shared
+native dispatch, 944 bytes for `executeForOf`, and 464 bytes for
+`createArrayIteratorResult`. The 128-byte nested native lambda frame was also
+reported. These compiler-specific hosted measurements do not qualify a
+bare-metal stack. No QEMU or bare-metal run was performed.
+
+The full JavaScript matrix passed **89/89 lanes** and **15,286/15,286
+assertions across 48 assertion-bearing lanes**. Focused JS79–JS86 reruns passed
+**1,491/1,491 checks** (JS79 202, JS80 379, JS81 600, JS82 29, JS83 67,
+JS84 93, JS85 12, and JS86 109). JS84's separate no-diagnostics compatibility
+control passed **68/68**. All were run against the JS87 runtime source.
+
+`build.bat` succeeded from the JS87 working tree on
+`NAVIGATOR_JAVASCRIPT_SUPPORT`, based on starting HEAD
+`8ac0ad587b9e6df43bab56f5377c98db1d40219e`. It produced
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,652,889
+bytes, SHA-256
+`3E3C716F23040BCB429A95DA4FA31FEE90739A14A0B911D1270BE4036C80694B`.
+The hosted process used the same path and hash, with PID 20956.
+
+The production `navigator.smoke` aggregate added three JS87 checks. All three
+passed: the page reported `JS87:assertions=12:failures=0`, its marker confirmed
+Array and JS81 pair behavior, and the `event-a` click dispatched a nested
+`event-b` click while preserving both Event records. The hosted run passed all
+**432 JavaScript checks**, including JS9 reentry and the historical JavaScript
+fixtures. The aggregate reported **691/698 checks passed**; the only seven
+failures were the established CSS cases: phases 3C, 3G, 6A, three checks in
+6B, and 6C. The wrapper exit code was 1 because of those existing CSS failures.
+
+Artifact restoration was exact. The ignored manifest matched before and after:
+**1,367 files / 90,843,932 bytes**, with **zero changed, missing, or extra
+files**. The only modified ignored artifact was the freshly built executable;
+the original `guideXOSServer.exe` was restored to 8,398,274 bytes and SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+
+The supplementary recursive manifest excluded `.git` contents as in
+preflight. It grew from **9,449 files / 704,713,719 bytes** to **9,452 files /
+704,774,904 bytes**: the three expected JS87 source, test, and fixture files
+were added; six existing tracked files changed; no baseline file was missing.
+The recursive additions and changes are the JS87 implementation and
+qualification sources. `.phase` remained absent. All manifests, the verified
+ignored-file backup, full matrix log, focused regression evidence, build
+provenance, and hosted output are preserved outside the repository at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js87-evidence\audit-20261023-192416-97678a40878c477d91250f946bd62167`.
+
+#### Remaining gaps and recommended JS88 direction
+
+JS87 qualifies bounded dense Array value iteration only. Array elisions and
+true holes cannot be represented; `length` is derived and read-only; the
+default object pool can limit how many result records a long traversal retains.
+These limits should remain explicit in compatibility claims.
+
+A useful JS88 direction is a separately bounded design for Array elisions,
+true holes, and `length` writes, with tests for iteration over absent slots and
+pool accounting. Keep GC, object-slot reuse, and broad Array method expansion
+out of that work until their own ownership and capacity requirements are
+qualified.

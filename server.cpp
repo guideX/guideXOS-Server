@@ -5593,6 +5593,40 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js84AfterClick, 1000) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js87FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js87.html";
+    const bool js87Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js87FixtureUrl);
+    const std::string js87InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS87 Array iterable fixture passes on the hosted server",
+        js87Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js87FixtureUrl &&
+        contains(js87InitialText, "Navigator JavaScript JS87") &&
+        contains(js87InitialText, "JS87:assertions=") &&
+        contains(js87InitialText, ":failures=0:") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js87Loaded) + ",text=" +
+        summarizeText(js87InitialText, 1400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS87 Array default iteration, nested Arrays, and JS81 entry pairs pass",
+        js87Loaded && contains(js87InitialText,
+            ":arrays=true:pairs=true:events=ready") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted assertions cover genuine Symbol iteration, values(), mutation, "
+        "for-of, nested Arrays, and JS81 pair Arrays");
+    const bool js87Click = js87Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("event-a");
+    const std::string js87AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS87 nested Event Array iteration preserves Event metadata",
+        js87Click && contains(js87AfterClick,
+            "JS87:event:nested=true:outer=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js87Click) + ",text=" +
+        summarizeText(js87AfterClick, 1000) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

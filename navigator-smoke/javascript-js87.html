@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS87</title></head>
+<body>
+<h1>Navigator JavaScript JS87</h1>
+<pre id="result">JS87:pending</pre>
+<section>
+  <i id="row-a" class="row"></i><i id="row-b" class="row"></i>
+</section>
+<button id="event-a" type="button">Run JS87 Array iteration</button>
+<button id="event-b" type="button">Nested JS87 Array event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var numbers = [10, 20, 30];
+var total = 0;
+for (const number of numbers) total = total + number;
+verify(total === 60);
+
+var names = ["alpha", "beta", "gamma"];
+var nameCount = 0;
+for (const name of names) nameCount++;
+verify(nameCount === 3);
+
+var groups = [[1, 2], [3, 4]];
+var nestedCount = 0;
+var nestedSum = 0;
+for (const group of groups) {
+  for (const number of group) {
+    nestedCount++;
+    nestedSum = nestedSum + number;
+  }
+}
+verify(nestedCount === 4 && nestedSum === 10);
+
+var cursor = numbers[Symbol.iterator]();
+var first = cursor.next();
+var self = cursor[Symbol.iterator]();
+var second = cursor.next();
+var selfOk = self === cursor && first.value === 10 &&
+  first.done === false && second.value === 20;
+verify(selfOk);
+
+var independent = numbers.values();
+verify(independent.next().value === 10 && cursor.next().value === 30);
+verify(cursor.next().value === undefined && cursor.next().done === true);
+
+var methodIdentity = numbers.values === numbers[Symbol.iterator];
+var symbolKeySeparate = numbers["Symbol.iterator"] === undefined &&
+  numbers.iterator === undefined;
+verify(methodIdentity && symbolKeySeparate);
+
+var mixed = [0, "", false, null, undefined];
+var mixedCursor = mixed.values();
+verify(mixedCursor.next().value === 0 && mixedCursor.next().value === "" &&
+  mixedCursor.next().value === false && mixedCursor.next().value === null &&
+  mixedCursor.next().value === undefined && mixedCursor.next().done === true);
+
+var mutable = [1, 2];
+var mutableCursor = mutable.values();
+var beforeGrowth = mutableCursor.next();
+mutable.push(3);
+verify(beforeGrowth.value === 1 && mutableCursor.next().value === 2 &&
+  mutableCursor.next().value === 3);
+mutable.pop();
+
+var broken = 0;
+for (const value of numbers) {
+  broken++;
+  break;
+}
+var continued = 0;
+var bodies = 0;
+for (let value of numbers) {
+  continued++;
+  if (value === 20) continue;
+  bodies++;
+}
+verify(broken === 1 && continued === 3 && bodies === 2);
+
+var rows = document.querySelectorAll(".row");
+var pair = rows.entries().next().value;
+var pairCount = 0;
+var pairOk = pair[0] === 0 && pair[1] === rows[0];
+for (const item of pair) {
+  if (pairCount === 0) pairOk = pairOk && item === 0;
+  if (pairCount === 1) pairOk = pairOk && item === rows[0];
+  pairCount++;
+}
+verify(pairOk && pair.length === 2 && pairCount === 2);
+
+var collectionCount = 0;
+for (const row of rows) collectionCount++;
+verify(collectionCount === 2);
+
+var eventA = document.getElementById("event-a");
+var eventB = document.getElementById("event-b");
+var nestedEventOk = false;
+var outerEventOk = false;
+eventB.addEventListener("click", function(event) {
+  var values = [event, 7];
+  var seen = 0;
+  var eventIdentity = false;
+  for (const item of values) {
+    seen++;
+    if (seen === 1) eventIdentity = item === event;
+  }
+  nestedEventOk = eventIdentity && seen === 2 && event.target === eventB &&
+    event.currentTarget === eventB && event.eventPhase === 2;
+});
+eventA.addEventListener("click", function(event) {
+  var values = [1, 2, 3];
+  var cursor = values.values();
+  var total = cursor.next().value;
+  eventB.click();
+  for (const value of cursor) total = total + value;
+  outerEventOk = total === 6 && event.target === eventA &&
+    event.currentTarget === eventA && event.eventPhase === 2;
+  document.getElementById("result").textContent =
+    "JS87:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+
+var marker = "JS87:assertions=" + assertions + ":failures=" + failures +
+  ":arrays=" + (total === 60 && nameCount === 3 && nestedCount === 4) +
+  ":pairs=" + pairOk + ":events=ready";
+document.getElementById("result").textContent = marker;
+</script>
+</body>
+</html>

@@ -1450,6 +1450,121 @@ private:
             --context_.totalArrayElements_;
             break;
         }
+        case RuntimeContext::NativeFunctionId::ArrayIteratorCreate: {
+            const RuntimeObjectId arrayId = receiver.isObject()
+                ? receiver.objectId() : kInvalidRuntimeObjectId;
+            const RuntimeContext::RuntimeObject* array =
+                context_.objectAt(arrayId);
+            if (array == nullptr || !array->array) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            const std::vector<Value> noElements;
+            RuntimeObjectId iteratorId = kInvalidRuntimeObjectId;
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            const std::size_t objectCountBefore = context_.objects_.size();
+            const std::size_t propertyCountBefore =
+                context_.totalPropertyCount_;
+            const std::size_t propertyKeyBytesBefore =
+                context_.totalPropertyKeyBytes_;
+            if (!context_.createObject(false, noElements, iteratorId, error,
+                    context_.objectPrototype_)) {
+                fail(error, callSite);
+                succeeded = false;
+                break;
+            }
+            RuntimeContext::PropertyKey symbolIteratorKey;
+            symbolIteratorKey.symbol = WellKnownSymbol::Iterator;
+            if (!context_.writeProperty(iteratorId, "next",
+                    Value::function(context_.arrayIteratorNextFunction_),
+                    error) ||
+                !context_.writeProperty(iteratorId, symbolIteratorKey,
+                    Value::function(context_.arrayIteratorSelfFunction_),
+                    error)) {
+                context_.objects_.resize(objectCountBefore);
+                context_.totalPropertyCount_ = propertyCountBefore;
+                context_.totalPropertyKeyBytes_ = propertyKeyBytesBefore;
+                fail(error, callSite);
+                succeeded = false;
+                break;
+            }
+            RuntimeContext::RuntimeObject* iterator =
+                context_.objectAt(iteratorId);
+            if (iterator == nullptr) {
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                succeeded = false;
+                break;
+            }
+            iterator->arrayIterator = true;
+            iterator->arrayIteratorSource = arrayId;
+            result = Value::object(iteratorId);
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::ArrayIteratorNext: {
+            const RuntimeObjectId iteratorId = receiver.isObject()
+                ? receiver.objectId() : kInvalidRuntimeObjectId;
+            const RuntimeContext::RuntimeObject* iterator =
+                context_.objectAt(iteratorId);
+            if (iterator == nullptr || !iterator->arrayIterator) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+
+            const RuntimeObjectId arrayId = iterator->arrayIteratorSource;
+            const std::size_t index = iterator->arrayIteratorIndex;
+            const bool wasExhausted = iterator->arrayIteratorExhausted;
+            Value yielded = Value::undefined();
+            bool done = wasExhausted;
+            if (!wasExhausted) {
+                const RuntimeContext::RuntimeObject* array =
+                    context_.objectAt(arrayId);
+                if (array == nullptr || !array->array) {
+                    fail(RuntimeErrorCode::InvalidAstState, callSite);
+                    succeeded = false;
+                    break;
+                }
+                if (index < array->elements.size()) {
+                    yielded = array->elements[index];
+                } else {
+                    done = true;
+                }
+            }
+
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            if (!context_.createArrayIteratorResult(yielded, done, result,
+                    error)) {
+                fail(error, callSite);
+                succeeded = false;
+                break;
+            }
+            RuntimeContext::RuntimeObject* updatedIterator =
+                context_.objectAt(iteratorId);
+            if (updatedIterator == nullptr ||
+                !updatedIterator->arrayIterator) {
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                succeeded = false;
+                break;
+            }
+            if (done) {
+                updatedIterator->arrayIteratorExhausted = true;
+            } else {
+                updatedIterator->arrayIteratorIndex = index + 1u;
+            }
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::ArrayIteratorSelf: {
+            const RuntimeContext::RuntimeObject* iterator = receiver.isObject()
+                ? context_.objectAt(receiver.objectId()) : nullptr;
+            if (iterator == nullptr || !iterator->arrayIterator) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            result = receiver;
+            break;
+        }
         case RuntimeContext::NativeFunctionId::MathAbs: {
             double number = 0.0;
             succeeded = numericArgument(0, number);
@@ -2605,6 +2720,8 @@ void RuntimeContext::clearRuntimeState()
     eventDispatchStack_ = {};
     eventDispatchDepth_ = 0;
     eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
+    arrayIteratorNextFunction_ = kInvalidRuntimeFunctionId;
+    arrayIteratorSelfFunction_ = kInvalidRuntimeFunctionId;
     eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
     eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
     builtInsInitialized_ = false;
@@ -2942,6 +3059,22 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         !install(arrayPrototype_, "pop", NativeFunctionId::ArrayPop, error)) {
         return false;
     }
+    RuntimeFunctionId arrayIteratorCreate = kInvalidRuntimeFunctionId;
+    if (!createNativeFunction(NativeFunctionId::ArrayIteratorCreate,
+            arrayIteratorCreate, error)) return false;
+    const Value arrayIteratorMethod = Value::function(arrayIteratorCreate);
+    PropertyKey symbolIteratorKey;
+    symbolIteratorKey.symbol = WellKnownSymbol::Iterator;
+    if (!writeProperty(arrayPrototype_, "values", arrayIteratorMethod,
+            error) ||
+        !writeProperty(arrayPrototype_, symbolIteratorKey,
+            arrayIteratorMethod, error) ||
+        !createNativeFunction(NativeFunctionId::ArrayIteratorNext,
+            arrayIteratorNextFunction_, error) ||
+        !createNativeFunction(NativeFunctionId::ArrayIteratorSelf,
+            arrayIteratorSelfFunction_, error)) {
+        return false;
+    }
     if (!install(mathObject_, "abs", NativeFunctionId::MathAbs, error) ||
         !install(mathObject_, "min", NativeFunctionId::MathMin, error) ||
         !install(mathObject_, "max", NativeFunctionId::MathMax, error) ||
@@ -3093,6 +3226,50 @@ bool RuntimeContext::createCollectionIteratorResult(const HostValue& value,
         return false;
     }
     record->properties[0].value = convertedValue;
+    result = Value::object(object);
+    GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsPublished);
+    return true;
+}
+
+bool RuntimeContext::createArrayIteratorResult(const Value& value, bool done,
+    Value& result, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    result = Value::undefined();
+    const std::size_t objectCountBefore = objects_.size();
+    const std::size_t propertyCountBefore = totalPropertyCount_;
+    const std::size_t propertyKeyBytesBefore = totalPropertyKeyBytes_;
+    const std::size_t arrayElementCountBefore = totalArrayElements_;
+    const std::vector<Value> noElements;
+    RuntimeObjectId object = kInvalidRuntimeObjectId;
+    if (!createObject(false, noElements, object, error)) return false;
+    GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsAllocated);
+
+    const auto rollback = [this, objectCountBefore, propertyCountBefore,
+        propertyKeyBytesBefore, arrayElementCountBefore]() {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.arrayIteratorResultRollbacks);
+        objects_.resize(objectCountBefore);
+        totalPropertyCount_ = propertyCountBefore;
+        totalPropertyKeyBytes_ = propertyKeyBytesBefore;
+        totalArrayElements_ = arrayElementCountBefore;
+    };
+
+    if (!writeProperty(object, "value", Value::undefined(), error) ||
+        !writeProperty(object, "done", Value::boolean(done), error)) {
+        rollback();
+        return false;
+    }
+    RuntimeObject* record = objectAt(object);
+    if (record == nullptr || record->properties.size() != 2u ||
+        record->properties[0].symbolKey != WellKnownSymbol::None ||
+        record->properties[0].key != "value" ||
+        record->properties[1].symbolKey != WellKnownSymbol::None ||
+        record->properties[1].key != "done") {
+        error = RuntimeErrorCode::InvalidAstState;
+        rollback();
+        return false;
+    }
+    record->properties[0].value = value;
     result = Value::object(object);
     GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsPublished);
     return true;

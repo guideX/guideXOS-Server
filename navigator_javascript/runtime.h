@@ -210,6 +210,7 @@ struct RuntimeDiagnostics {
     std::size_t failedHostHandleAllocations = 0u;
     std::size_t collectionResultRollbacks = 0u;
     std::size_t collectionEntryRollbacks = 0u;
+    std::size_t arrayIteratorResultRollbacks = 0u;
 };
 
 // A context is an independent, resettable bounded JavaScript realm.  execute() copies a
@@ -373,6 +374,9 @@ private:
         ObjectHasOwnProperty = 0,
         ArrayPush,
         ArrayPop,
+        ArrayIteratorCreate,
+        ArrayIteratorNext,
+        ArrayIteratorSelf,
         MathAbs,
         MathMin,
         MathMax,
@@ -398,6 +402,13 @@ private:
         RuntimeObjectId prototype = kInvalidRuntimeObjectId;
         std::vector<RuntimeProperty> properties;
         std::vector<Value> elements;
+        // Array iterator state lives in its ordinary, retained runtime object.
+        // IDs are stable vector indices; no RuntimeObject pointer survives an
+        // allocation that can grow objects_.
+        bool arrayIterator = false;
+        bool arrayIteratorExhausted = false;
+        RuntimeObjectId arrayIteratorSource = kInvalidRuntimeObjectId;
+        std::size_t arrayIteratorIndex = 0u;
     };
 
     struct HostObjectRecord {
@@ -445,6 +456,8 @@ private:
     bool createObject(bool array, const std::vector<Value>& initialElements,
         RuntimeObjectId& result, RuntimeErrorCode& error,
         RuntimeObjectId prototype = kInvalidRuntimeObjectId);
+    bool createArrayIteratorResult(const Value& value, bool done,
+        Value& result, RuntimeErrorCode& error);
     RuntimeObject* objectAt(RuntimeObjectId id);
     const RuntimeObject* objectAt(RuntimeObjectId id) const;
     bool readProperty(RuntimeObjectId object, const std::string& key,
@@ -524,6 +537,10 @@ private:
     RuntimeObjectId eventConstantsObject_ = kInvalidRuntimeObjectId;
     RuntimeObjectId eventObject_ = kInvalidRuntimeObjectId;
     RuntimeFunctionId eventStopPropagationFunction_ =
+        kInvalidRuntimeFunctionId;
+    RuntimeFunctionId arrayIteratorNextFunction_ =
+        kInvalidRuntimeFunctionId;
+    RuntimeFunctionId arrayIteratorSelfFunction_ =
         kInvalidRuntimeFunctionId;
     RuntimeFunctionId eventStopImmediatePropagationFunction_ =
         kInvalidRuntimeFunctionId;

@@ -262,7 +262,7 @@ void testObjectsAndProperties()
     expectNumber(context, "numeric", 8.0, "objects: numeric key coercion");
     expectType(context, "missing", ValueType::Undefined,
         "objects: missing property is Undefined");
-    expect(context.objectCount() == 5 && context.propertyCount() == 16,
+    expect(context.objectCount() == 5 && context.propertyCount() == 18,
         "objects: bounded pool and duplicate-free properties");
 
     const ScriptResult duplicate = execute(context,
@@ -378,7 +378,10 @@ void testObjectArrayLimitsAndReset()
         RuntimeErrorCode::PropertyLimitExceeded, "objects: property limit", properties);
 
     RuntimeLimits totalProperties;
-    totalProperties.maxTotalProperties = 14;
+    // Array.prototype now exposes values() and Symbol.iterator, adding two
+    // built-in property entries. Keep this limit above initialization so the
+    // script still exercises the runtime property limit.
+    totalProperties.maxTotalProperties = 16;
     expectError("var a = {}; a.x = 1; var b = {}; b.y = 2;",
         RuntimeErrorCode::PropertyLimitExceeded,
         "objects: total property limit", totalProperties);
@@ -414,7 +417,7 @@ void testObjectArrayLimitsAndReset()
         "reset: objects and arrays setup succeeds");
     expect(context.objectCount() == 6, "reset: objects are retained before reset");
     context.reset();
-    expect(context.objectCount() == 4 && context.propertyCount() == 13 &&
+    expect(context.objectCount() == 4 && context.propertyCount() == 15 &&
         context.arrayElementCount() == 0, "reset: object pools are cleared");
     expect(execute(context, "var result = 7;").succeeded(),
         "reset: new script after object reset succeeds");
@@ -624,7 +627,7 @@ void testFunctionClosureAndResetLifetime()
         "functions: reset clears active frames");
     expect(context.environmentCount() == 1,
         "functions: reset clears function environments");
-    expect(context.functionValueCount() == 9 && context.nativeFunctionCount() == 9,
+    expect(context.functionValueCount() == 12 && context.nativeFunctionCount() == 12,
         "functions: reset recreates native identities");
     expect(execute(context, "var result = 7;").succeeded(),
         "functions: unrelated script after reset succeeds");
