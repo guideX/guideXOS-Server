@@ -1,0 +1,150 @@
+{
+  "schema": "guidexos.rexx.rx35.scorecard.v1",
+  "phase": "RX35",
+  "outcome": "A — EXTERNALS accepted for the selected IBM TSO/E profile",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "4ff79526bd719c19dbb650559fdbfcb904c2afe8",
+  "profile": {
+    "function": "EXTERNALS()",
+    "implementation": "IBM TSO/E 2.5 non-SAA contract",
+    "result": "Exact numeric decimal 0 for every zero-argument invocation.",
+    "argument_contract": "Zero arguments; supplied arguments are rejected by the existing built-in validation path.",
+    "independence": "No host, terminal, kernel, filesystem, or stream service; QUEUED() and the RX30 external data stack remain separate.",
+    "excluded_dialect": "IBM z/VM counts logical lines typed ahead at a terminal; that behavior requires an input buffer and is not implemented."
+  },
+  "inventory": {
+    "entry_count": 75,
+    "before_rx35": {
+      "Implemented": 60,
+      "Not implemented": 8,
+      "Partial": 5,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "after_rx35": {
+      "Implemented": 61,
+      "Not implemented": 7,
+      "Partial": 5,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "changed_entry": "EXTERNALS: Not implemented -> Implemented for the selected TSO/E profile.",
+    "retained_statuses": {
+      "RX31": "Outcome B remains open; RX35 does not alter RX31 acceptance status.",
+      "CHARIN": "Partial; no production input provider was added."
+    }
+  },
+  "hosted_qualification": {
+    "result": "PASS",
+    "runner": "tests/run_rexx_tests.ps1 -Phase RX35",
+    "general_cli_cases": "28/28",
+    "rx35_cli_fixture": "1/1",
+    "rx35_direct_assertions": 18,
+    "rx35_property_cases": 4096,
+    "rx35_property_seed": "0x52583335",
+    "rx35_property_assertions": 4096,
+    "rx35_boundary_groups": 4,
+    "rx35_total_assertions": 4114,
+    "rx35_failures": 0,
+    "inherited_results": {
+      "RX30 data stack": "10,000 operations; 181,417 assertions; 0 failures.",
+      "RX30 queue language": "1,200 property operations; 193 assertions; 0 failures.",
+      "RX31 host input": "256 operations; 169 assertions; 0 failures.",
+      "RX32 VALUE": "4,096 property cases; 20,533 assertions; 0 failures.",
+      "RX33 CHARIN provider model": "7,000 property cases; 38,913 assertions; 0 failures.",
+      "RX34 stream state": "4,096 property cases; 16,604 total assertions; 0 failures."
+    },
+    "regina_differential": "NOT_RUN — Regina executable unavailable."
+  },
+  "sanitizers": {
+    "address": {
+      "result": "PASS",
+      "targets_built": 35,
+      "targets_passed": 35,
+      "failures": 0,
+      "externals_target_included": true,
+      "local_expected_result_cases": "196/196",
+      "differential": "NOT_RUN — Regina unavailable.",
+      "evidence": "docs/rexx/evidence/rx35/sanitizer-address-758cb45a9d7249d1924f2640d455e5ec"
+    },
+    "undefined_behavior": {
+      "result": "PASS",
+      "targets_built": 35,
+      "targets_passed": 35,
+      "failures": 0,
+      "externals_target_included": true,
+      "local_expected_result_cases": "196/196",
+      "differential": "NOT_RUN — Regina unavailable.",
+      "evidence": "docs/rexx/evidence/rx35/sanitizer-undefined-a521c759f18041bfb88fe37b1e25c313"
+    }
+  },
+  "freestanding_amd64": {
+    "result": "PASS",
+    "rexx_c_object_count": 10,
+    "freestanding": true,
+    "fixture_enabled": false,
+    "compiler_warning_lines": 785,
+    "compiler_error_lines": 0,
+    "kernel_elf": "build/rexx/rx35/native-amd64-027d406368c84c43aceeff8082901071/amd64/bin/kernel.elf",
+    "kernel_elf_sha256": "4f7ad559768e02564e0f16db50578c7b799676ed845291b3f62d7e7eaddbae53",
+    "link_evidence": "docs/rexx/evidence/rx35/native-build/native-link-evidence-027d406368c84c43aceeff8082901071.json"
+  },
+  "native_guest_qualification": {
+    "result": "PASS",
+    "qualifying_run": "run-c89be1a5e65645d29cfce2eaea1477da",
+    "evidence": "docs/rexx/evidence/rx35/native-guest/run-c89be1a5e65645d29cfce2eaea1477da",
+    "qemu_version": "QEMU emulator version 11.0.0 (v11.0.0-12122-ga4bb4b10c9)",
+    "qac_project": "guideXOSServer",
+    "qac_mode": "acceptance",
+    "network": "Disabled (-net none); copied disposable ESP and firmware used.",
+    "production_media_used": false,
+    "kernel_sha256_matches_native_evidence": true,
+    "guest_commands_and_screenshots": 8,
+    "console_readiness_visually_verified": true,
+    "externals_results": {
+      "normal_empty_buffer_numeric_repeat_nested_interpret_recovery": "0",
+      "independent_stack_boundary": "EXTERNALS/QUEUED = 0/1",
+      "argument_error_trap": "Caught and recovered."
+    },
+    "inherited_guest_results": {
+      "RX31": "Empty host input failed closed; recovery completed; queue count returned to zero.",
+      "RX32": "Separate QUEUE/PUSH/PULL regression and VALUE regression completed.",
+      "RX34": "STREAM() reported UNAVAILABLE; CHARIN failed closed; state remained UNAVAILABLE; recovery completed.",
+      "RX20 clock": "DATE and TIME current operations failed closed; TIME(E) advanced from 0.000000 to 0.179987; kernel heartbeat records increased from 1 before the guest suite to 172 after it."
+    },
+    "time_r_native_completion": "NOT_CLAIMED — the inherited rx20clk.rex screenshot did not show its TIME(R) or final completion markers.",
+    "qmp_shutdown_acknowledged": true,
+    "qac_child_exit_code": 0,
+    "qac_reservation_released": true,
+    "managed_sessions_after_qualifying_run": 0,
+    "final_qemu_count_after_qualifying_run": 0,
+    "protected_root_artifacts": "31/31 paths, sizes, and SHA-256 hashes matched at both QEMU guard checkpoints."
+  },
+  "non_qualifying_attempts": [
+    {
+      "run": "run-7db70a4b777346148b4bf8f552104ee5",
+      "status": "FAILED_AND_EXCLUDED",
+      "reason": "The first runner version used the RX12 screenshot prefix; it captured guest commands but failed the RX35 screenshot-count guard."
+    },
+    {
+      "run": "run-4e7fa33cb244480ba44b7416f3edc269",
+      "status": "STOPPED_AND_EXCLUDED",
+      "reason": "A second QAC reservation appeared after RX35 preflight. RX35 shut down only its verified owned QEMU PID after three screenshots and left the other session untouched."
+    }
+  ],
+  "preservation": {
+    "initial_untracked_paths": 131064,
+    "initial_untracked_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx35-preservation\\20261024T152000Z\\untracked-paths.utf8.txt",
+    "initial_untracked_manifest_sha256": "2C28ECD47D7B5E62E2B89BB4CF8B150646E7CAACE02F9632C32F85B2D91060BD",
+    "protected_root_artifact_count": 31,
+    "protected_root_artifact_guard": "docs/rexx/evidence/rx35/protected-artifacts-guard.json",
+    "final_path_set_reconciliation": "docs/rexx/evidence/rx35/preservation-reconciliation.json"
+  },
+  "compatibility_claims": {
+    "regina": "NOT_RUN — unavailable.",
+    "external_compatibility_percentage": "NOT_CLAIMED",
+    "zvm_externals": "Excluded; no terminal type-ahead buffer contract implemented.",
+    "rx31_outcome_b": "Remains open.",
+    "rx34_charin": "Remains Partial."
+  }
+}

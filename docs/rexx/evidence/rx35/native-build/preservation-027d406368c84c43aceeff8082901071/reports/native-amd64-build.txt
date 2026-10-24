@@ -1,0 +1,5 @@
+RX35 artifact preservation: PASS
+Stage: native-amd64-build
+Verified UTC: 2026-10-24T16:35:59.4728898Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

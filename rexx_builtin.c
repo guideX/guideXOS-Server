@@ -4529,6 +4529,18 @@ static RexxVMStatus rexx_builtin_queued(RexxVM *vm,
     return rexx_value_set_string(result, output, length);
 }
 
+/* IBM TSO/E has no terminal input buffer, so its non-SAA EXTERNALS()
+ * function always returns zero. The z/VM typed-ahead input queue is a
+ * separate, intentionally unsupported dialect contract. */
+static RexxVMStatus rexx_builtin_externals(const RexxValue *arguments,
+                                          size_t argument_count,
+                                          RexxValue *result)
+{
+    (void)arguments;
+    if (argument_count != 0u) return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    return rexx_builtin_set_size(result, 0u);
+}
+
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "ADDRESS", 0u, 0u, NULL, rexx_builtin_address },
     { "TRACE", 0u, 1u, NULL, rexx_builtin_trace },
@@ -4589,7 +4601,8 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "RANDOM", 0u, 3u, NULL, rexx_builtin_random },
     { "DATE", 0u, 3u, NULL, rexx_builtin_date },
     { "TIME", 0u, 1u, NULL, rexx_builtin_time },
-    { "QUEUED", 0u, 0u, NULL, rexx_builtin_queued }
+    { "QUEUED", 0u, 0u, NULL, rexx_builtin_queued },
+    { "EXTERNALS", 0u, 0u, rexx_builtin_externals, NULL }
 };
 
 const RexxBuiltinDescriptor *rexx_builtin_lookup(const char *name,

@@ -1,0 +1,5 @@
+RX35 artifact preservation: PASS
+Stage: preflight
+Verified UTC: 2026-10-24T16:32:46.9179625Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.

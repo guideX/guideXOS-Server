@@ -1,0 +1,17 @@
+{
+  "schema": "guidexos.rexx.rx35.preflight.v1",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "4ff79526bd719c19dbb650559fdbfcb904c2afe8",
+  "expected_starting_head": "4ff79526bd719c19dbb650559fdbfcb904c2afe8",
+  "tracked_worktree_clean": true,
+  "index_clean": true,
+  "starting_untracked_paths": 131064,
+  "untracked_manifest_path": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx35-preservation\\20261024T152000Z\\untracked-paths.utf8.txt",
+  "untracked_manifest_sha256": "2C28ECD47D7B5E62E2B89BB4CF8B150646E7CAACE02F9632C32F85B2D91060BD",
+  "protected_root_artifact_count": 31,
+  "protected_artifacts_manifest": "docs/rexx/evidence/rx35/protected-artifacts-guard.json",
+  "rx35_tracked_paths_at_start": [],
+  "rx35_untracked_paths_at_start": [],
+  "duplicate_work_found": false
+}

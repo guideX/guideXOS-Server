@@ -1,0 +1,13 @@
+RX35 isolated QEMU Console transcript
+Kernel SHA-256: 4f7ad559768e02564e0f16db50578c7b799676ed845291b3f62d7e7eaddbae53
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx35\qemu-c89be1a5e65645d29cfce2eaea1477da\guest\esp
+COMMAND: rexx /rx35-externals.rex | expected visible marker/status: RX35_EXTERNALS_NORMAL=0; RX35_EXTERNALS_EMPTY_BUFFER=0; RX35_EXTERNALS_NUMERIC=0; RX35_EXTERNALS_REPEAT=0/0; RX35_EXTERNALS_STACK_BOUNDARY=0/1; RX35_EXTERNALS_NESTED=0; RX35_EXTERNALS_ROUTINE=0; RX35_EXTERNALS_INTERPRET=0; RX35_EXTERNALS_INVALID_CAUGHT; RX35_EXTERNALS_RECOVERY=0
+COMMAND: rexx /rx32-queue-demo.rex | expected visible marker/status: RX32_QUEUE_PUSH_COUNTS_ORDER=0/3/Gamma/ALPHA/Beta/BETA/0; RX32_CASE_PRESERVE_UPPER=MiXeD/MIXED; RX32_EMPTY_COUNT_LENGTH_FINAL=1/0/0; RX32_TEMPLATE_PLACEHOLDER=one/three; RX32_ROUTINE_INTERPRET=Routine/Dynamic; RX32_QUEUE_DEMO_DONE; exit status 0
+COMMAND: rexx /rx31-empty-pull.rex | expected visible marker/status: RX31_EMPTY_PULL_BEGIN followed by deterministic default-input-unavailable error; no fabricated input
+COMMAND: rexx /rx31-recovery.rex | expected visible marker/status: RX31_POST_ERROR_RESPONSIVE; RX31_RECOVERY_COUNT= 0; exit status 0
+COMMAND: rexx /rx32-value-demo.rex | expected visible marker/status: RX32_VALUE_DEFAULT_BOUNDARY=ABSENT; RX32_VALUE_EMPTY_ASSIGNMENT_LENGTH=0; RX32_VALUE_COMPOUND=tail; RX32_VALUE_DEMO_DONE; exit status 0
+COMMAND: rexx /rx34-no-provider.rex | expected visible marker/status: RX34_NO_PROVIDER_STATE=UNAVAILABLE; RX34_NO_PROVIDER_FAIL_CLOSED; RX34_NO_PROVIDER_STATE_AFTER=UNAVAILABLE; exit status 0
+COMMAND: rexx /rx34-recovery.rex | expected visible marker/status: RX34_POST_STREAM_RESPONSIVE; exit status 0
+COMMAND: rexx /rx20clk.rex | expected visible marker/status: RX20_DATE_CURRENT_UNAVAILABLE; RX20_TIME_CURRENT_UNAVAILABLE; RX20_MONOTONIC_E; RX20_MONOTONIC_R; RX20_NATIVE_CLOCK_CAPABILITY_DONE; exit status 0
+Serial boot/heartbeat: PASS; heartbeat records before suite=1 after suite=172
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

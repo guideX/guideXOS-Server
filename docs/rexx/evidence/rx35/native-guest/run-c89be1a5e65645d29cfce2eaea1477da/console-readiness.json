@@ -1,0 +1,29 @@
+{
+  "schema": "guidexos.rexx.rx35.console-readiness.v1",
+  "captured_at_utc": "2026-10-24T16:40:25.0943494Z",
+  "qac_cli_pid": 9280,
+  "qemu_pid": 4868,
+  "qemu_executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmp_port": 62017,
+  "disposable_esp": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx35\\qemu-c89be1a5e65645d29cfce2eaea1477da\\guest\\esp",
+  "network": "disabled (-net none)",
+  "probe_command": "echo RX35_CONSOLE_READY",
+  "screenshot": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx35\\qemu-c89be1a5e65645d29cfce2eaea1477da\\helper\\console-readiness-probe.png",
+  "serial_contains_probe": false,
+  "visual_probe_command_and_output": "Must be visibly confirmed in the QMP screenshot before creating the PASS review marker.",
+  "resume_marker": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx35\\qemu-c89be1a5e65645d29cfce2eaea1477da\\console-readiness-reviewed.continue",
+  "requires_visual_review_before_scripts": true,
+  "visually_verified": true,
+  "verified_at_utc": "2026-10-24T16:40:35.8780903Z",
+  "guest_rexx_scripts_sent": true,
+  "guest_script_commands": [
+    "rexx /rx35-externals.rex",
+    "rexx /rx32-queue-demo.rex",
+    "rexx /rx31-empty-pull.rex",
+    "rexx /rx31-recovery.rex",
+    "rexx /rx32-value-demo.rex",
+    "rexx /rx34-no-provider.rex",
+    "rexx /rx34-recovery.rex",
+    "rexx /rx20clk.rex"
+  ]
+}
