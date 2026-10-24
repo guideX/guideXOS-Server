@@ -2,9 +2,9 @@
 
 ## Scope and current status
 
-C188R6 continues the focused Notes startup investigation after the C188R5 correction. It does not run the six-scenario C188 campaign or begin C189. The R6 candidate was built and staged, but its guest was not run because the fresh QAC census found another verified acceptance owner. The source finding below is a testable hypothesis, not a confirmed runtime root cause.
+C188R6 continues the focused Notes startup investigation after the C188R5 correction. Its initial `diag-001` guest admission was blocked by an occupied QAC lane and remains historical evidence. Phase C188R6R1 later ran one targeted guest from the retained candidate under a verified exclusive reservation. That run identified the C137 proof suite being selected on the ordinary Notes startup route; it did not establish input-loop readiness or full C188 acceptance. No C188 acceptance scenario was resumed and C189 was not started.
 
-Preflight confirmed branch `v1.1_DOTNET_SUPPORT` and starting HEAD `3b0c9ecc96f2056c5cb059dedd8c8f35dd5fb992`, matching the requested prefix. C188R5 implementation is at that HEAD. The preserved `ESP/ramdisk.img` SHA-256 is `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. Preflight recorded 136 existing worktree status paths, 13 protected roots with 8,497 files, and 6,944 files in the previous R3–R5 evidence roots. The initial QAC census was online with zero QEMU processes, reservations, or managed sessions. These inventories will be compared again after qualification.
+The original R6 preflight confirmed branch `v1.1_DOTNET_SUPPORT` at `3b0c9ecc96f2056c5cb059dedd8c8f35dd5fb992`; C188R5 implementation is at that commit. The C188R6R1 continuation started on the same branch at `77f2b46816d979d1c48bbf7f9cb1adf105b6b43b`. The preserved `ESP/ramdisk.img` SHA-256 remained `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. Fresh pre-guest and post-guest inventories both recorded 136 pre-existing worktree status paths and 13 protected roots with 8,497 files; all pre-existing paths and protected hashes matched.
 
 ## C188R5 findings carried forward
 
@@ -85,7 +85,7 @@ The existing ABI and application model were not edited. The C188 hosted suite an
 
 The initial R6 candidate (still using the inherited C137 test predicate) is staged at `out/dotnet/c188r6-notes-postrender/runs/diag-001/`. The source `ESP/ramdisk.img` and isolated pre-stage copy both hashed to `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. Only the isolated run copy was updated with `/APPS/GXOSAPP.ELF`; staged ramdisk SHA-256 is `3A0E57E85C38F929CFF6B2FC71F0EC15AB40748FD544E5CDE372AD702DFF80EF`, preserving 185 unrelated files. The candidate kernel SHA-256 is `9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA`; UEFI loader SHA-256 is `D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B`.
 
-### QAC admission
+### Historical QAC admission for diag-001
 
 At the fresh census, QAC was online, but one verified managed acceptance session was already running: reservation `8b84465adf184cc6a1f416744168127c`, owner `LEON2_RDT\guideX` (owner PID 31704), QEMU PID 24052. QAC reported one managed session and one QEMU process. The exact status, list, process, and blocked-admission records are in `runs/diag-001/qac-preflight-blocked.*` and `runs/diag-001/blocked-admission.json`.
 
@@ -95,8 +95,64 @@ No R6 reservation was requested, no guest was queued or started, and the other o
 
 The pre-commit blocked-admission comparison recorded 136 pre-existing status paths and 154 current paths, including the R6 changes. All 136 pre-existing paths remained present and byte-identical. The final post-commit comparison returned to 136 current paths, with no missing or changed pre-existing paths. All 13 protected roots / 8,497 files and the 6,944 files in the previous R3–R5 evidence roots matched their preflight SHA-256 inventories exactly, with no additions, removals, or changes. The original modified ramdisk hash stayed unchanged. The final report is `out/dotnet/c188r6-notes-postrender/preservation-comparison.json`.
 
-**Outcome D — blocked.** QAC ownership prevented the single required targeted diagnostic guest after static qualification. NativeAOT/kernel build success does not establish launch return or Notes readiness. The correction remains incomplete because no runtime evidence confirmed the C137 branch or any other post-render stopping point.
+**Historical outcome for diag-001: Outcome D — blocked.** QAC ownership prevented that targeted diagnostic guest after static qualification. NativeAOT/kernel build success did not establish launch return or Notes readiness. At that point no runtime evidence confirmed the C137 branch or any other post-render stopping point.
 
-Remaining gates: a fresh QAC census after the current acceptance owner exits; one R6 diagnostic boot of the preserved staged candidate with the bounded Notes input probe; evidence of managed launch return, kernel input-loop readiness, visible Notes rendering, and accepted Notes input; then, only if those gates pass, a separate production-readiness continuation. The full six-scenario C188 campaign remains pending.
+At the time of the initial `diag-001` block, remaining gates were a fresh QAC census, one R6 diagnostic boot, and readiness/input evidence. C188R6R1 satisfied the census and diagnostic-boot gates; launch return, input-loop readiness, visible Notes rendering, and accepted Notes input remain unverified. The full six-scenario C188 campaign remains pending.
 
-Recommended C188R7 direction: resume only the focused R6 guest admission against the preserved candidate after QAC is free. Use its branch-aware serial markers to confirm or reject C137 as the first post-render qualification leak. Make a small predicate change and run one confirmation guest only if the evidence isolates that branch; otherwise move instrumentation to the first incomplete native/host boundary. Do not begin C189 or resume the full C188 campaign automatically.
+The recommendation in the initial R6 report was to resume the focused diagnostic guest after QAC became free. That run is recorded below.
+
+## C188R6R1 deferred diagnostic guest
+
+### Admission and candidate integrity
+
+At `2026-10-24T20:58:52.1759707Z`, the single fresh QAC census reported the coordinator online, zero QEMU processes, zero reservations, and zero managed sessions; its snapshot is `runs/diag-002/qac-census-before.json`. QAC granted reservation `708517e1010242c5bd47c55eadfd85d6` at `2026-10-24T21:00:43.3758848Z` for project `guideXOSServer`, mode `acceptance`. The during-run list verified owner `LEON2_RDT\guideX` (owner PID `25364`) and child QEMU PID `17616`. The existing runner used a one-second admission window and a 120-second guest readiness bound.
+
+The retained candidate was reused without rebuilding. Its original `diag-001` files were left unchanged; the prepared ESP was copied to `runs/diag-002/esp/` for the new run. Full SHA-256 checks matched the retained C188R6 manifest:
+
+| Artifact | SHA-256 |
+|---|---|
+| Source `ESP/ramdisk.img` (unchanged) | `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` |
+| Diagnostic NativeAOT ELF | `B97C7EA3BA2D636415F5EF4E09D23D8C341610D249710F7EC81E399A37DC3883` |
+| NativeAOT PE | `A5EA36E0DBFE60863571B3D520BA2AFB06920FFA8CDEB5170D9918C72F7AA32F` |
+| NativeAOT link map | `EFEFEBEB3207274EEAFD950A9D421E68B933E66E7A8B8A9319B23AC502706FEA` |
+| Freestanding diagnostic kernel | `9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA` |
+| Staged guest ramdisk | `3A0E57E85C38F929CFF6B2FC71F0EC15AB40748FD544E5CDE372AD702DFF80EF` |
+| UEFI bootloader | `D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B` |
+
+The guest used the existing C188R6 proof-instrumented NativeAOT composite, its matching freestanding kernel, and the `/APPS/GXOSAPP.ELF` staged route. Candidate hashes and launch settings are in `runs/diag-002/candidate-integrity-before.json` and `runs/diag-002/runner-launch.json`. The complete guest command line is in `runs/diag-002/qemu-process.json`.
+
+### Actual post-render sequence and source finding
+
+The serial capture contained 251 ordered expected checkpoints. `RenderMain` returned successfully at `C188R3-299` / `C188R3-161`, then the C147/C149 post-render settings operation returned at `C188R3-163`. R6 markers `200/201` followed. The C133 initial summary was skipped; the C135 summary and C117 status-log span both completed; the broad focused proof catalog was skipped.
+
+The first non-completing span was the C137 suite:
+
+| Checkpoint | Observation |
+|---|---|
+| `C188R6-206 BRANCH C137-TEST=TAKEN` | Ordinary Notes startup entered the C137 proof-test branch. |
+| `C188R6-207/208` | Runtime-settings capture completed. |
+| `C188R6-209/210` | Temporary defaults commit completed. |
+| `C188R6-211 BEFORE C137-SUITE` | Emitted immediately before the suite call. |
+| `C188R6-212 AFTER C137-SUITE` | First expected missing checkpoint. |
+
+The validator therefore records `lastExpectedCheckpointCompleted=C188R6-211 BEFORE C137-SUITE` and `firstExpectedMissingCheckpoint=after C137-SUITE`. The following restore, Notes result calculation, `ManagedNotes.Launch` return, application-dispatch return, and native `[C102-LAUNCH-RETURN]` markers were not reached.
+
+The source explains why the suite is incorrectly selected. In `samples/managed/HostLogProof/Applications/ManagedNotes.cs`, `_c152Enabled` is set at line 771; `_c151ProofContext` includes that shared C152 setup state at lines 776–782. The real `c147-native-notes` launch also makes `_c147RuntimeConsumerContext` true at line 785, with shared C151 setup retained at lines 825–830. Later, line 1357 merges `_c151ProofContext` into `_c137ProofContext`. The branch at lines 3285–3292 runs C137 whenever that merged context is true, C138 is false, and `_c137TestsRun` is false. The candidate emitted `C137-TEST=TAKEN`, confirming this branch at runtime on the ordinary Notes route.
+
+At line 3321, `ManagedNotes.Launch` calls `GuideXosMouseWheelC137Tests.Run(host)`. The helper is a 46-case qualification suite (`GuideXosMouseWheelC137Tests.cs:20–73`); its `GuideXosHost` argument is unused by the suite body. The runtime did not emit the immediate after-call marker at line 3323, and the QMP status remained `running` at the 120-second bound. This is a concrete startup failure mechanism: shared Notes setup accidentally authorizes proof-only C137 work during ordinary Notes startup. The precise non-returning inner test operation is not isolated, and the synchronous `host.TryLog` that emits marker 212 remains a possible adjacent stall point. The report does not attribute the failure to `RenderMain`.
+
+### Readiness, QMP, and release
+
+The Notes surface was created for app instance `id=4`, generation `1`, and `C150-SURFACE` reported success. The captured final framebuffer (`runs/diag-002/final-stage.ppm`; PNG preview at `runs/diag-002/final-stage.png`) shows only the desktop shell and welcome notification; no Notes window is visible. The input manager was not initialized and the kernel never reached `Entering main loop (waiting for input)`. Accordingly, the runner sent no pointer or keyboard input, and Notes interaction/responsiveness is unverified.
+
+The runner's QMP log records `query-status` returning `running`, a successful final `screendump`, and the runner's own `quit`. No QMP events were recorded. QAC logged the guest exit with code `0`, then released reservation `708517e1010242c5bd47c55eadfd85d6`. The post-run census recorded zero QEMU processes, reservations, or managed sessions; `qacReleaseVerified=true`. Exit code zero is not guest readiness evidence.
+
+The complete raw serial, ordered validator output, QMP log, screenshot, QAC records, candidate hashes, and process command line are retained under `out/dotnet/c188r6-notes-postrender/runs/diag-002/`. Key hashes: serial `3FB19BDEABF8F30C367D97A3FEE00214D220FB9CB7780FCD1A5D93F3EB3EDF60`; QMP log `497E2EABA17B5999DCCB12A82816A3B3FCC3BDAA3198405442E8A8A7912C7F6D`; framebuffer PPM `85CC26C7C696CCEF6CEF9A364F48DA06C193319569FD1D42AE3CC302F25C86B5`.
+
+### Preservation, outcome, and next scope
+
+The fresh baseline and post-guest comparison recorded 13 protected roots / 8,497 files and 136 pre-existing worktree paths. All protected file paths, sizes, and hashes matched; all 136 original status paths remained byte-identical. The source `ESP/ramdisk.img` still hashes to `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. The pre-existing C185 limitation concerning 212 generated files whose earlier contents cannot be verified remains unresolved. The comparison is `runs/diag-002/preservation-comparison.json`.
+
+**Current C188R6R1 result: Outcome A — the post-render failure mechanism was identified.** Ordinary Notes startup accidentally selects the C137 qualification suite through the C151/C152 shared-context merge, then fails to confirm suite completion within the bounded guest run. The inner suite operation is still unisolated, and Notes launch/input-loop readiness remains unverified.
+
+Recommended C188R7 scope: make the smallest predicate correction that separates C137 test authorization from C151/C152 setup state while preserving shared Notes initialization. Add a focused regression proving `c147-native-notes`, `c151-notes`, and `c152-notes` keep required setup but skip C137, while explicit `c137-*` contexts still run it. Then run one bounded confirmation guest and inspect whether launch return and input-loop readiness follow; add per-case C137 checkpoints only if the same span remains incomplete. Keep the full six-scenario C188 campaign and C189 separate. Do not begin either automatically.
