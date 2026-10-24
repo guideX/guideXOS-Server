@@ -1,0 +1,169 @@
+{
+  "schema": "guidexos.rexx.rx36.scorecard.v1",
+  "phase": "RX36",
+  "outcome": "C — blocked; no safely feasible remaining built-in",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "cd000901474d3b4a5f7db1b378ce73487472f0c5",
+  "rx35_implementation_commit": "1d87fd6eaf61a6bc9f1a35d18f4503ef6ba1d8c7",
+  "rx35_commit_is_direct_parent": true,
+  "selection": {
+    "selected_builtin": null,
+    "decision": "The LINESIZE host-width gate failed, and no other Not implemented candidate has a complete compatible production capability.",
+    "source_changed": false,
+    "test_target_added": false,
+    "user_visible_compatibility_claim": "None"
+  },
+  "inventory": {
+    "entry_count": 75,
+    "rx35_verified_starting_counts": {
+      "Implemented": 61,
+      "Not implemented": 7,
+      "Partial": 5,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "request_estimate_counts": {
+      "Implemented": 61,
+      "Not implemented": 8,
+      "Partial": 4,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "rx36_counts": {
+      "Implemented": 61,
+      "Not implemented": 7,
+      "Partial": 5,
+      "Not assessed": 1,
+      "Not implemented by design": 1
+    },
+    "classification_changes": [],
+    "snapshot_inventory": "docs/rexx/REXX_RX36_BUILTIN_INVENTORY.csv",
+    "snapshot_matches_rx35_inventory": true,
+    "charin": "Partial",
+    "rx31": "Outcome B remains open"
+  },
+  "candidate_audit": {
+    "remaining_not_implemented": [
+      "CHAROUT",
+      "CHARS",
+      "LINEIN",
+      "LINEOUT",
+      "LINES",
+      "LINESIZE",
+      "USERID"
+    ],
+    "matrix": "docs/rexx/REXX_RX36_BUILTIN_SELECTION.md",
+    "selected_candidate": null,
+    "next_architectural_dependency": "Per-output-destination logical width and wrapping capability, with per-VM query, resize behavior, and explicit interactive, redirected, background, and record-output modes."
+  },
+  "linesize": {
+    "ibm_profile": "IBM TSO/E non-SAA. Foreground, batch, and non-TSO/E return contracts differ.",
+    "feasibility_decision": "C — missing output-width architecture",
+    "implemented": false,
+    "fabricated_width_used": false,
+    "guideXOS_say_width_verified": false,
+    "finding": "The VM writer accepts only bytes and length. The kernel shell splits storage at 119 bytes while rendering from separate draw geometry. The hosted output host has no logical width or destination-mode query. No single authoritative width is available to the VM.",
+    "reference": "https://www.ibm.com/docs/en/zos/2.5.0?topic=functions-linesize",
+    "audit": "docs/rexx/REXX_RX36_HOST_CAPABILITY_AUDIT.md"
+  },
+  "hosted_qualification": {
+    "rx36_focused_tests": "NOT_RUN — no function selected and no source implementation added.",
+    "direct_assertions": 0,
+    "property_cases": 0,
+    "property_assertions": 0,
+    "failures": null,
+    "inherited_rx1_rx35_regressions": "NOT_RERUN — source was unchanged.",
+    "regina": "NOT_RUN — no candidate corpus was created; no external compatibility percentage claimed."
+  },
+  "sanitizers": {
+    "address": {
+      "result": "NOT_RUN — no source implementation was added.",
+      "targets_built": 0,
+      "targets_passed": 0
+    },
+    "undefined_behavior": {
+      "result": "NOT_RUN — no source implementation was added.",
+      "targets_built": 0,
+      "targets_passed": 0
+    }
+  },
+  "freestanding_amd64": {
+    "result": "NOT_RUN — no production source changed.",
+    "kernel_sha256": null
+  },
+  "qac_preflight": {
+    "cli_path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+    "help_exit_code": 0,
+    "status_exit_code": 0,
+    "list_exit_code": 0,
+    "coordinator": "Online",
+    "first_snapshot": {
+      "active_reservations": 0,
+      "managed_sessions": 0,
+      "queued": 0,
+      "blocked": 0,
+      "qemu_count": 0
+    },
+    "later_snapshot": {
+      "active_reservations": 1,
+      "project": "StellarNavigator",
+      "reservation_id_prefix": "c5d0a5daa0f8",
+      "owner_verified": true,
+      "managed_qemu_child_pid": 17080,
+      "foreign_to_rx36": true,
+      "action": "Preserved untouched; no RX36 request or QEMU process was launched."
+    },
+    "saved_snapshot_evidence": [
+      "docs/rexx/evidence/rx36/qac-status-preflight.txt",
+      "docs/rexx/evidence/rx36/qac-list-preflight.txt",
+      "docs/rexx/evidence/rx36/qac-processes-preflight.json",
+      "docs/rexx/evidence/rx36/qac-status-final.txt",
+      "docs/rexx/evidence/rx36/qac-list-final.txt"
+    ],
+    "final_snapshot": {
+      "status_exit_code": 0,
+      "list_exit_code": 0,
+      "coordinator": "Online",
+      "active_reservations": 0,
+      "managed_sessions": 0,
+      "queued": 0,
+      "blocked": 0,
+      "qemu_process_count": 0,
+      "earlier_other_project_reservation": "No longer listed; RX36 performed no cancellation, release, signal, or termination."
+    }
+  },
+  "native_guest_qualification": {
+    "result": "NOT_RUN — Outcome C feasibility stop; no guest media or RX36 QEMU session launched. A separate verified StellarNavigator reservation was active in the later QAC snapshot and was preserved.",
+    "guest_markers": [],
+    "qac_parent_cli_exit_code": null,
+    "qemu_child_exit_code": null,
+    "runner_exit_code": null,
+    "qmp_shutdown_acknowledged": null,
+    "reservation_released": "NOT_APPLICABLE — RX36 acquired no reservation. The earlier other-project reservation was no longer listed at the final read-only check; RX36 performed no cancellation, release, signal, or termination.",
+    "final_owned_qemu_census": 0,
+    "observed_other_project_managed_qemu_count": 1,
+    "rx20_time_r_attempt": "NOT_ATTEMPTED — no guest launched."
+  },
+  "preservation": {
+    "start_tracked_worktree_changes": 0,
+    "start_index_changes": 0,
+    "starting_untracked_paths": 134930,
+    "starting_untracked_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx36-preservation\\20261024T173533Z\\untracked-paths.utf8.txt",
+    "starting_untracked_manifest_sha256": "2924cb6124e3f53a7b56bee46782856d5afc634b99c19e3af918e86bf3bf17ec",
+    "rx35_final_path_set_diff_at_start": 0,
+    "protected_root_artifacts_expected": 31,
+    "protected_root_artifacts_matched_at_start": 31,
+    "ending_untracked_paths": 134930,
+    "ending_path_set_reconciliation": "docs/rexx/evidence/rx36/preservation-reconciliation.json",
+    "protected_root_artifact_end_guard": "docs/rexx/evidence/rx36/protected-artifacts-end.json",
+    "intentionally_tracked_rx36_paths": 15,
+    "push_performed": false
+  },
+  "compatibility_limits": [
+    "LINESIZE remains Not implemented until guideXOS exposes authoritative destination-owned logical columns shared with SAY wrapping.",
+    "CHAROUT, CHARS, LINEIN, LINEOUT, and LINES remain Not implemented until their required production stream contracts exist.",
+    "USERID remains Not implemented until a trustworthy identity capability and unavailable behavior are defined.",
+    "RX34 STREAM remains a guideXOS read-only status subset; no production stream provider is present."
+  ],
+  "recommended_rx37_scope": "Define and implement a per-output-destination logical width capability shared with SAY wrapping, including unknown-width and output-mode behavior, before reconsidering LINESIZE."
+}

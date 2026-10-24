@@ -1,0 +1,82 @@
+{
+  "schema": "guidexos.rexx.rx36.preflight.v1",
+  "captured_at_utc": "2026-10-24T17:35:33.3215979Z",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "branch": "REXX_SUPPORT",
+  "starting_head": "cd000901474d3b4a5f7db1b378ce73487472f0c5",
+  "expected_starting_head": "cd000901474d3b4a5f7db1b378ce73487472f0c5",
+  "rx35_implementation_commit": "1d87fd6eaf61a6bc9f1a35d18f4503ef6ba1d8c7",
+  "rx35_is_direct_parent": true,
+  "rx35_is_ancestor_exit_code": 0,
+  "upstream_status": "REXX_SUPPORT ahead 3 of origin/REXX_SUPPORT",
+  "tracked_path_count": 19828,
+  "tracked_worktree_change_count": 0,
+  "index_change_count": 0,
+  "untracked_path_count": 134930,
+  "rx35_final_untracked_path_set_diff_count": 0,
+  "rx36_start_untracked_manifest": "C:\\Users\\guideX\\AppData\\Local\\Codex\\rx36-preservation\\20261024T173533Z\\untracked-paths.utf8.txt",
+  "rx36_start_untracked_manifest_encoding": "UTF-8 without BOM, LF terminated, ordinal-sorted paths",
+  "rx36_start_untracked_manifest_sha256": "2924cb6124e3f53a7b56bee46782856d5afc634b99c19e3af918e86bf3bf17ec",
+  "rx35_final_manifest_sha256": "38e39577d72561a116713c305371f3a22bc8b4fb45f51bb8820509150996b123",
+  "protected_root_artifact_count": 31,
+  "protected_root_artifact_matches": 31,
+  "rx35_inventory_entry_count": 75,
+  "rx35_inventory_counts": {
+    "Implemented": 61,
+    "Not implemented": 7,
+    "Partial": 5,
+    "Not assessed": 1,
+    "Not implemented by design": 1
+  },
+  "request_estimate_counts": {
+    "Implemented": 61,
+    "Not implemented": 8,
+    "Partial": 4,
+    "Not assessed": 1,
+    "Not implemented by design": 1
+  },
+  "qac_cli_path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+  "qac_help_exit_code": 0,
+  "qac_status_exit_code": 0,
+  "qac_list_exit_code": 0,
+  "qac_first_snapshot": {
+    "coordinator": "Online",
+    "active_reservations": 0,
+    "managed_sessions": 0,
+    "queued": 0,
+    "blocked": 0,
+    "qemu_count": 0,
+    "qemu_foreign_count": 0
+  },
+  "qac_later_snapshot": {
+    "coordinator": "Online",
+    "active_reservations": 1,
+    "project": "StellarNavigator",
+    "mode": "acceptance",
+    "reservation_id_prefix": "c5d0a5daa0f8",
+    "owner_verified": true,
+    "managed_qemu_child_pid": 17080,
+    "foreign_to_rx36": true,
+    "qemu_foreign_or_unmanaged_count": 0,
+    "action": "Preserved without cancellation, release, or process termination; RX36 did not launch QEMU."
+  },
+  "qac_snapshot_evidence": {
+    "status": "docs/rexx/evidence/rx36/qac-status-preflight.txt",
+    "list": "docs/rexx/evidence/rx36/qac-list-preflight.txt",
+    "process_ownership": "docs/rexx/evidence/rx36/qac-processes-preflight.json"
+  },
+  "qac_final_snapshot": {
+    "status_exit_code": 0,
+    "list_exit_code": 0,
+    "active_reservations": 0,
+    "managed_sessions": 0,
+    "queued": 0,
+    "blocked": 0,
+    "qemu_count": 0,
+    "earlier_other_project_session": "No longer listed; no RX36 action was taken."
+  },
+  "root_phase_file_present": false,
+  "rx36_docs_or_evidence_preexisting": false,
+  "rx36_hosted_runner_phase_support": false,
+  "rx36_native_runner_phase_support": false
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "guidexos.rexx.rx36.qac-process-ownership.v1",
+  "observed_at_utc": "2026-10-24T17:35:33.3215979Z",
+  "coordinator": {
+    "pid": 16064,
+    "name": "GuideXOS.QAC.Coordinator.exe",
+    "state": "Online"
+  },
+  "gui": {
+    "pid": 19056,
+    "name": "GuideXOS.QAC.Gui.exe",
+    "state": "Existing user process; left untouched"
+  },
+  "other_project_session": {
+    "project": "StellarNavigator",
+    "mode": "acceptance",
+    "reservation_id_prefix": "c5d0a5daa0f8",
+    "owner": "Verified by the QAC coordinator",
+    "qac_cli_pid": 9268,
+    "qemu_pid": 17080,
+    "managed_child_count": 1,
+    "foreign_to_rx36": true,
+    "command_line_recorded": false,
+    "action": "No cancellation, release, signal, or process termination performed"
+  },
+  "rx36_owned_qemu_count": 0
+}

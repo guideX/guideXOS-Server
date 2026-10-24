@@ -1,0 +1,7 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 17080 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-24T17:34:52.2874854+00:00 | managed
+  Note: Reservation c5d0a5daa0f849c4b0618385f3651ddb · StellarNavigator · acceptance
+Reservations: 1
+  c5d0a5daa0f849c4b0618385f3651ddb | StellarNavigator | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 9268) | owner Verified | child PID 17080
+Managed sessions: 1
+Managed session: c5d0a5daa0f849c4b0618385f3651ddb | Running | StellarNavigator · LEON2_RDT\guideX (PID 9268)
