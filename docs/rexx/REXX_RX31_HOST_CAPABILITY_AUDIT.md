@@ -19,6 +19,16 @@ RX31 defines the safe empty-queue `PULL` integration point and records the produ
 
 RX31 improves the input row only for injected embeddings and keeps production empty-queue behavior fail-closed. DATE, TIME, and TRACE remain Partial.
 
+### Qualification categories
+
+| Category | RX31 capabilities and evidence |
+| --- | --- |
+| Implemented and qualified | Per-VM external data stack and `QUEUED()`; RX31 queue-first fallback logic under deterministic host tests; PIT elapsed timing; TRACE N/E/F/O command-return behavior. The input callback is qualified as an embedding contract, not as a live Console source. |
+| Available only through injected tests | Provider-supplied PULL lines; deterministic local/UTC clock readings, offsets, and clock failure cases. These adapters do not establish a production Console or wall-clock source. |
+| Present but unqualified for REXX input | The kernel shell receives characters into its own private command buffer and synchronously executes complete commands. It has no reusable REXX line-read service or safe reentrant pull operation. |
+| Unsupported in production | A live default-input provider; valid local or UTC wall-clock output from the raw CMOS source; full TRACE clause/expression events; interactive TRACE debugging. |
+| Deferred due to OS architecture dependency | Console line input needs a safe kernel input service with bounded cancellation and VM-safe lifetime. RTC interpretation needs a versioned Settings-to-kernel policy contract. Interactive debugging needs interpreter pause/resume control and an input/output lifecycle. |
+
 ## Existing host integration surfaces
 
 The VM already has per-VM clock, output, and command dispatch callbacks. REXX VFS operations and default ADDRESS routing use process-wide startup services. There was no REXX line-input callback. The new `RexxVMInputReader` is a small per-VM extension, not a generalized host-services table.
