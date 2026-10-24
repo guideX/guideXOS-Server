@@ -8,12 +8,15 @@
   "qualification_head_before_commit": "2d1dfe9ec7869f1108cc54a6dc490372b4fbcb43",
   "preflight": {
     "head_charin_status": "Not implemented",
-    "working_tree_at_start": "Tracked worktree contained five modified RX33 files; index was clean at the required starting HEAD. The pre-existing partial RX33 work was preserved and completed.",
+    "working_tree_at_start": "Tracked worktree and index were clean at the required starting HEAD; no partial RX33 implementation was present.",
     "index_clean": true,
     "root_phase_file_present": false,
     "qac_prelaunch": "Online; zero active reservations, managed sessions, and QEMU processes.",
     "regina": "NOT_RUN — no Regina executable available.",
-    "evidence": "evidence/rx33/preflight.json"
+    "evidence": "evidence/rx33/preflight.json",
+    "tracked_worktree_clean": true,
+    "duplicate_rx33_scope_present": false,
+    "starting_untracked_path_count": 107304
   },
   "inventory_before": {
     "implemented": 60,
@@ -186,18 +189,24 @@
   "preservation": {
     "protected_root_artifacts": 31,
     "protected_artifact_status": "PASS — 31/31 paths, sizes, and SHA-256 hashes match the starting snapshot.",
-    "starting_untracked_path_count": 107309,
+    "starting_untracked_path_count": 107304,
     "starting_untracked_manifest": "evidence/rx33/untracked-start-ordinal.paths.gz",
-    "starting_untracked_manifest_sha256": "9059397C1EF3609F12CD365BDF5AE8214087ABEE1855746EE163697696BCCDC9",
+    "starting_untracked_manifest_sha256": "2450792a672ae80a69a622df4bcb958d2cfe19c0765e9ea0c155ea2bc85db57a",
     "ending_path_reconciliation": "PASS — exact baseline path-set membership checked against all ending tracked and untracked paths; every starting path remains present on disk.",
     "ending_untracked_path_count": 120577,
-    "added_untracked_path_count": 13272,
+    "added_untracked_path_count": 13273,
     "ending_manifest": "evidence/rx33/untracked-end-ordinal.paths.gz",
-    "ending_manifest_sha256": "6A971D856F762C81CC62260CF53315D986B271A56A6DCF308C39B86D3800FE8C",
+    "ending_manifest_sha256": "942d6f22b31af092ca6ff1bfb245adf2aa01faf695345d631fb9ec6c529e887a",
     "missing_preexisting_paths": 0,
     "path_set_comparison_evidence": "evidence/rx33/untracked-path-reconciliation.json",
-    "ending_snapshot_scope": "Captured after staging selected RX33 source, documentation, and evidence updates and immediately before the evidence correction commit. Four preflight paths are now tracked by the RX33 implementation commit; all remain present on disk and in the ending tracked-plus-untracked set.",
-    "preexisting_paths_now_tracked": 4
+    "ending_snapshot_scope": "Current exact untracked path set captured after RX33 qualification commits and before this preservation-metadata correction commit. All 107304 original paths remain untracked and present on disk; the ending tracked-plus-untracked set contains every original path.",
+    "preexisting_paths_now_tracked": 0,
+    "starting_untracked_canonical_payload_sha256": "7624636eb07fc6c884ef67aacbb28fb36807384fa675979a8c2a6882365f42b4",
+    "starting_source_plain_path_list_sha256": "79822e16793b67f8be08f79f97acb974cb1d8db49b813bd0edfa86c283560454",
+    "original_captured_gzip_manifest_sha256": "5da2681880f9e545e6b288445ecfaddeabe9637dd3da9d588782b8d9d0923850",
+    "ending_canonical_payload_sha256": "5c63a9bcc5c7531125fa0489e008d4da151392fae232361210cc412001b10c8e",
+    "baseline_paths_still_untracked": 107304,
+    "verified_at_utc": "2026-10-24T14:07:50.4323664Z"
   },
   "rx31_native_acceptance": "OPEN — RX31 Outcome B remains a separate native guest qualification gate.",
   "remaining_limits": [
