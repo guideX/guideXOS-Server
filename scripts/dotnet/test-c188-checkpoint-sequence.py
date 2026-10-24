@@ -170,6 +170,49 @@ class CheckpointSequenceTests(unittest.TestCase):
         self.assertEqual("SKIPPED", result["branchOutcomes"]["C133-PROOF-TEST"])
         self.assertEqual([], result["missingRequiredCheckpoints"])
 
+    def test_c188r6_adds_ordered_postrender_diagnostic_branches(self) -> None:
+        names = [step["name"] for step in CHECKPOINTS.describe("C188R6")["expectedOrderedCheckpoints"]]
+        self.assertLess(names.index("post-render settings return"), names.index("after checkpoint 163"))
+        self.assertLess(names.index("C133 initial summary branch"), names.index("post-render context summaries return"))
+        self.assertLess(names.index("post-render context summaries return"), names.index("before C117 post-render status logs"))
+        self.assertLess(names.index("before ManagedNotes.Launch return"), names.index("after application launch return"))
+        self.assertLess(names.index("after application launch return"), names.index("before application result log"))
+        self.assertLess(names.index("before application result log"), names.index("application result"))
+        self.assertLess(names.index("application result"), names.index("after application result log"))
+
+    def test_c188r6_taken_c137_branch_requires_bounded_operations(self) -> None:
+        steps = [
+            CHECKPOINTS.r6_branch_step("C137 test branch", 206, "C137-TEST"),
+            *CHECKPOINTS.r6_branch_pair(207, "C137-RUNTIME-CAPTURE", "C137-TEST"),
+            *CHECKPOINTS.r6_branch_pair(209, "C137-DEFAULTS-COMMIT", "C137-TEST"),
+            *CHECKPOINTS.r6_branch_pair(211, "C137-SUITE", "C137-TEST"),
+            *CHECKPOINTS.r6_branch_pair(213, "C137-RUNTIME-RESTORE", "C137-TEST"),
+        ]
+        serial = "\n".join([
+            "C188R6-206 BRANCH C137-TEST=TAKEN",
+            "C188R6-207 BEFORE C137-RUNTIME-CAPTURE",
+            "C188R6-208 AFTER C137-RUNTIME-CAPTURE",
+            "C188R6-209 BEFORE C137-DEFAULTS-COMMIT",
+            "C188R6-210 AFTER C137-DEFAULTS-COMMIT",
+            "C188R6-211 BEFORE C137-SUITE",
+        ]) + "\n"
+        result = CHECKPOINTS.validate_text(serial, steps, capture_state="complete")
+        self.assertEqual("FAIL", result["result"])
+        self.assertEqual("after C137-SUITE", result["firstExpectedMissingCheckpoint"])
+
+    def test_c188r6_skipped_c137_branch_does_not_require_suite_markers(self) -> None:
+        steps = [
+            CHECKPOINTS.r6_branch_step("C137 test branch", 206, "C137-TEST"),
+            *CHECKPOINTS.r6_branch_pair(207, "C137-RUNTIME-CAPTURE", "C137-TEST"),
+            *CHECKPOINTS.r6_branch_pair(209, "C137-DEFAULTS-COMMIT", "C137-TEST"),
+            *CHECKPOINTS.r6_branch_pair(211, "C137-SUITE", "C137-TEST"),
+            *CHECKPOINTS.r6_branch_pair(213, "C137-RUNTIME-RESTORE", "C137-TEST"),
+        ]
+        result = CHECKPOINTS.validate_text("C188R6-206 BRANCH C137-TEST=SKIPPED\n", steps, capture_state="complete")
+        self.assertEqual("PASS", result["result"])
+        self.assertEqual("SKIPPED", result["branchOutcomes"]["C137-TEST"])
+        self.assertEqual([], result["missingRequiredCheckpoints"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

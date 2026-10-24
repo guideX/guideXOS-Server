@@ -10,7 +10,8 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188-external-app-identity')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r5-notes-proof-invocation')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r5-notes-proof-invocation')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r6-notes-postrender')))
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
@@ -138,6 +139,7 @@ foreach ($developmentMarker in @(
     'C188-IDENTITY-REGISTRY',
     'C188-LAUNCHER-COUNTS',
     'C188-STALE-GENERATION'
+    'C188R6-'
 )) {
     if ($kernelText.Contains($developmentMarker)) {
         throw "Proof-disabled production ELF contains development-only marker $developmentMarker"

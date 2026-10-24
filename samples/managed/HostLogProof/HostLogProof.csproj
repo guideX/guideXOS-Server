@@ -52,6 +52,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R4_NOTES_STARTUP</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofC188R6NotesPostRenderStartup)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R6_NOTES_POSTRENDER</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Allocating'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING</DefineConstants>
   </PropertyGroup>

@@ -17,6 +17,7 @@ param(
     [switch]$C188ExternalAppIdentity,
     [switch]$C188R3NotesStartupDiagnostics,
     [switch]$C188R4NotesStartupOperationIsolation,
+    [switch]$C188R6NotesPostRenderStartup,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -472,6 +473,12 @@ try {
          $managedProjectMode -ne 'C160Composite' -or $C187GuestCandidate)) {
         throw 'C188R4 Notes startup operation isolation requires the isolated C188 external-identity production C160 candidate.'
     }
+    if ($C188R6NotesPostRenderStartup -and
+        (-not $C188R3NotesStartupDiagnostics -or -not $C188R4NotesStartupOperationIsolation -or
+         -not $C188ExternalAppIdentity -or -not $ProductionApplication -or
+         $managedProjectMode -ne 'C160Composite' -or $C187GuestCandidate)) {
+        throw 'C188R6 Notes post-render startup diagnostics require the isolated C188 external-identity production C160 candidate with R3 and R4 instrumentation.'
+    }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
@@ -503,6 +510,9 @@ try {
     if ($C188R4NotesStartupOperationIsolation) {
         $publishProperties += '-p:HostLogProofC188R3NotesStartupDiagnostics=true'
         $publishProperties += '-p:HostLogProofC188R4NotesStartupOperationIsolation=true'
+    }
+    if ($C188R6NotesPostRenderStartup) {
+        $publishProperties += '-p:HostLogProofC188R6NotesPostRenderStartup=true'
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"

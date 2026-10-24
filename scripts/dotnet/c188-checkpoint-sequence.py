@@ -146,6 +146,30 @@ def branch_pair(before: int, label: str, branch: str) -> list[Step]:
     ]
 
 
+def r6_branch_step(name: str, checkpoint_id: int, branch: str) -> Step:
+    prefix = f"C188R6-{checkpoint_id:03d} BRANCH {branch}="
+    return Step(name, (re.escape(prefix + "TAKEN"), re.escape(prefix + "SKIPPED")))
+
+
+def r6_branch_pair(before: int, label: str, branch: str) -> list[Step]:
+    return [
+        Step(
+            f"before {label}",
+            (re.escape(f"C188R6-{before:03d} BEFORE {label}"),),
+            optional=True,
+            branch_key=branch,
+            branch_value="TAKEN",
+        ),
+        Step(
+            f"after {label}",
+            (re.escape(f"C188R6-{before + 1:03d} AFTER {label}"),),
+            optional=True,
+            branch_key=branch,
+            branch_value="TAKEN",
+        ),
+    ]
+
+
 _c120_step_index = next(
     index for index, step in enumerate(R4_OPERATION_STEPS)
     if step.name == "before C120-PROOF-CONTEXT"
@@ -262,8 +286,53 @@ def r3_steps(include_r4: bool) -> list[Step]:
     return steps
 
 
+def r6_steps() -> list[Step]:
+    steps = r3_steps(True)
+    launch_entry = next(index for index, step in enumerate(steps) if step.name == "Notes launch entry")
+    steps.insert(launch_entry, literal("before ManagedNotes.Launch call", "C188R6-010 BEFORE APPLICATION-LAUNCH-CALL"))
+
+    post_render = next(index for index, step in enumerate(steps) if step.name == "post-render settings return") + 1
+    post_render_steps = [
+        literal("after checkpoint 163", "C188R6-200 AFTER C188R3-163"),
+        literal("post-render context summaries begin", "C188R6-201 BEFORE POSTRENDER-CONTEXT-SUMMARIES"),
+        r6_branch_step("C133 initial summary branch", 228, "C133-INITIAL-SUMMARY"),
+        *r6_branch_pair(229, "C133-INITIAL-SUMMARY-LOG", "C133-INITIAL-SUMMARY"),
+        r6_branch_step("C135 initial summary branch", 231, "C135-INITIAL-SUMMARY"),
+        *r6_branch_pair(232, "C135-INITIAL-SUMMARY", "C135-INITIAL-SUMMARY"),
+        literal("post-render context summaries return", "C188R6-202 AFTER POSTRENDER-CONTEXT-SUMMARIES"),
+        literal("before C117 post-render status logs", "C188R6-234 BEFORE C117-POSTRENDER-STATUS-LOGS"),
+        literal("after C117 post-render status logs", "C188R6-235 AFTER C117-POSTRENDER-STATUS-LOGS"),
+        r6_branch_step("focused proof catalog branch", 203, "FOCUSED-PROOF-CATALOG"),
+        *r6_branch_pair(204, "FOCUSED-PROOF-CATALOG", "FOCUSED-PROOF-CATALOG"),
+        r6_branch_step("C137 test branch", 206, "C137-TEST"),
+        *r6_branch_pair(207, "C137-RUNTIME-CAPTURE", "C137-TEST"),
+        *r6_branch_pair(209, "C137-DEFAULTS-COMMIT", "C137-TEST"),
+        *r6_branch_pair(211, "C137-SUITE", "C137-TEST"),
+        *r6_branch_pair(213, "C137-RUNTIME-RESTORE", "C137-TEST"),
+        r6_branch_step("C137 summary branch", 215, "C137-TEST-SUMMARY"),
+        *r6_branch_pair(216, "C137-TEST-SUMMARY-LOG", "C137-TEST-SUMMARY"),
+        r6_branch_step("C139 test branch", 218, "C139-TEST"),
+        *r6_branch_pair(219, "C139-SUITE", "C139-TEST"),
+        r6_branch_step("C139 summary branch", 221, "C139-TEST-SUMMARY"),
+        *r6_branch_pair(222, "C139-TEST-SUMMARY-LOG", "C139-TEST-SUMMARY"),
+        literal("before Notes result calculation", "C188R6-224 BEFORE NOTES-LAUNCH-RESULT-CALCULATION"),
+        literal("before Notes result log", "C188R6-225 BEFORE NOTES-LAUNCH-RESULT-LOG"),
+        literal("after Notes result log", "C188R6-226 AFTER NOTES-LAUNCH-RESULT-LOG"),
+        literal("before ManagedNotes.Launch return", "C188R6-227 BEFORE MANAGEDNOTES-LAUNCH-RETURN"),
+    ]
+    steps[post_render:post_render] = post_render_steps
+
+    caller_return = next(index for index, step in enumerate(steps) if step.name == "application launch return")
+    steps.insert(caller_return, literal("after application launch return", "C188R6-011 AFTER APPLICATION-LAUNCH-RETURN"))
+    caller_return = next(index for index, step in enumerate(steps) if step.name == "application launch return") + 1
+    steps.insert(caller_return, literal("before application result log", "C188R6-012 BEFORE APPLICATION-RESULT-LOG"))
+    application_result = next(index for index, step in enumerate(steps) if step.name == "application result") + 1
+    steps.insert(application_result, literal("after application result log", "C188R6-013 AFTER APPLICATION-RESULT-LOG"))
+    return steps
+
+
 EVENT_PATTERNS = (
-    re.compile(r"^C188R[34]-\d{3} [A-Z0-9][A-Z0-9 =_-]*$"),
+    re.compile(r"^C188R[346]-\d{3} [A-Z0-9][A-Z0-9 =_-]*$"),
     re.compile(r"^C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS$"),
     re.compile(r"^C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS$"),
     re.compile(r"^C150-APP-INSTANCE id=\d+ generation=\d+$"),
@@ -304,7 +373,7 @@ def _branch_values(events: list[dict[str, object]]) -> dict[str, str]:
     values: dict[str, str] = {}
     for event in events:
         marker = str(event["marker"])
-        match = re.fullmatch(r"C188R4-\d{3} BRANCH ([A-Z0-9-]+)=(TAKEN|SKIPPED)", marker)
+        match = re.fullmatch(r"C188R[46]-\d{3} BRANCH ([A-Z0-9-]+)=(TAKEN|SKIPPED)", marker)
         if match:
             values[match.group(1)] = match.group(2)
     return values
@@ -434,8 +503,10 @@ def validate_text(
 
 
 def describe(phase: str) -> dict[str, object]:
-    is_r4 = phase in {"C188R4", "C188R5"}
-    steps = r3_steps(is_r4)
+    if phase == "C188R6":
+        steps = r6_steps()
+    else:
+        steps = r3_steps(phase in {"C188R4", "C188R5"})
     return {
         "phase": phase,
         "expectedOrderedCheckpoints": [
@@ -450,9 +521,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     describe_parser = subparsers.add_parser("describe")
-    describe_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5"), required=True)
+    describe_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6"), required=True)
     validate_parser = subparsers.add_parser("validate")
-    validate_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5"), required=True)
+    validate_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6"), required=True)
     validate_parser.add_argument("--serial", type=Path, required=True)
     validate_parser.add_argument("--capture-state", choices=("complete", "truncated", "incomplete", "unknown"), default="unknown")
     args = parser.parse_args(argv)
@@ -461,7 +532,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     raw = args.serial.read_bytes()
     text = raw.decode("utf-8", errors="replace")
-    result = validate_text(text, r3_steps(args.phase in {"C188R4", "C188R5"}), capture_state=args.capture_state)
+    phase_steps = r6_steps() if args.phase == "C188R6" else r3_steps(args.phase in {"C188R4", "C188R5"})
+    result = validate_text(text, phase_steps, capture_state=args.capture_state)
     result["serialPath"] = str(args.serial)
     result["serialSha256"] = hashlib.sha256(raw).hexdigest().upper()
     print(json.dumps(result, indent=2))

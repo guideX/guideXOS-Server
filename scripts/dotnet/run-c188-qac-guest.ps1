@@ -18,7 +18,8 @@ if ([bool]$ProductionCompatibility -ne $isProductionScenario) {
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender')))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $phaseRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
@@ -57,11 +58,14 @@ if ($qacStatusBefore -notmatch 'Coordinator:\s+Online' -or $qacStatusBefore -not
 $c188r5Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation'))
 $isC188R5Boot = $bootRoot.StartsWith($c188r5Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
     [System.StringComparison]::OrdinalIgnoreCase)
-if ($isC188R5Boot -and (
+$c188r6Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender'))
+$isC188R6Boot = $bootRoot.StartsWith($c188r6Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+    [System.StringComparison]::OrdinalIgnoreCase)
+if (($isC188R5Boot -or $isC188R6Boot) -and (
         $qacStatusBefore -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
         $qacListBefore -notmatch 'Reservations:\s+0' -or
         $qacListBefore -notmatch 'Managed sessions:\s+0')) {
-    throw 'C188R5 requires exclusive QAC admission; an existing reservation or managed session was detected.'
+    throw 'C188R5/C188R6 requires exclusive QAC admission; an existing reservation or managed session was detected.'
 }
 
 $mediaHashes = [ordered]@{}

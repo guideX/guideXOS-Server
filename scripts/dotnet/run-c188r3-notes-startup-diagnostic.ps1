@@ -5,20 +5,20 @@ param(
     [Parameter()][ValidateRange(90,240)][int]$BootTimeoutSeconds = 150,
     [Parameter()][ValidateRange(1,60)][int]$AdmissionWindowSeconds = 60,
     [Parameter()][switch]$ProbeNotesInput,
-    [Parameter()][ValidateSet('C188R3','C188R4','C188R5')][string]$Phase = 'C188R3'
+    [Parameter()][ValidateSet('C188R3','C188R4','C188R5','C188R6')][string]$Phase = 'C188R3'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -ne 'Core') { throw 'C188 Notes startup diagnostic guest requires PowerShell Core.' }
-if ($Phase -eq 'C188R5' -and -not $ProbeNotesInput) {
-    throw 'C188R5 requires a real Notes pointer and keyboard input probe.'
+if ($Phase -in @('C188R5','C188R6') -and -not $ProbeNotesInput) {
+    throw "$Phase requires a real Notes pointer and keyboard input probe."
 }
-if ($ProbeNotesInput -and $Phase -ne 'C188R5') {
-    throw 'The real Notes input probe is reserved for the C188R5 diagnostic guest.'
+if ($ProbeNotesInput -and $Phase -notin @('C188R5','C188R6')) {
+    throw 'The real Notes input probe is available only to C188R5/C188R6 diagnostic guests.'
 }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRootName = if ($Phase -eq 'C188R5') { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($Phase -eq 'C188R4') { 'out/dotnet/c188r4-notes-startup-operation' } else { 'out/dotnet/c188r3-notes-startup-diagnostics' }
+$phaseRootName = if ($Phase -eq 'C188R6') { 'out/dotnet/c188r6-notes-postrender' } elseif ($Phase -eq 'C188R5') { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($Phase -eq 'C188R4') { 'out/dotnet/c188r4-notes-startup-operation' } else { 'out/dotnet/c188r3-notes-startup-diagnostics' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $root = [System.IO.Path]::GetFullPath($RunRoot)
 $relativeRoot = [System.IO.Path]::GetRelativePath($phaseRoot, $root)
@@ -95,7 +95,7 @@ Set-Content -LiteralPath (Join-Path $root 'qac-before.list.txt') -Value $qacList
 $preflightClear = $qacStatusBefore -match 'Coordinator:\s+Online' -and
     $qacStatusBefore -match 'QEMU processes:\s+0 \(0 foreign\)' -and
     $qacListBefore -match 'Reservations:\s+0'
-if ($Phase -eq 'C188R5') {
+if ($Phase -in @('C188R5','C188R6')) {
     $preflightClear = $preflightClear -and
         $qacListBefore -match 'Managed sessions:\s+0'
 }
@@ -192,12 +192,12 @@ function Send-DiagnosticNotesInput([string]$CurrentSerial) {
     $widthMatch = [regex]::Match($CurrentSerial,'(?m)^\[DESKTOP CAP\] framebuffer_width=0x([0-9A-Fa-f]+)\r?$')
     $heightMatch = [regex]::Match($CurrentSerial,'(?m)^\[DESKTOP CAP\] framebuffer_height=0x([0-9A-Fa-f]+)\r?$')
     if (-not $widthMatch.Success -or -not $heightMatch.Success) {
-        throw 'C188R5 input probe requires framebuffer dimensions from the guest.'
+        throw "$Phase input probe requires framebuffer dimensions from the guest."
     }
     $width = [Convert]::ToInt32($widthMatch.Groups[1].Value,16)
     $height = [Convert]::ToInt32($heightMatch.Groups[1].Value,16)
     if ($width -lt 600 -or $height -lt 360) {
-        throw "C188R5 Notes input target does not fit the reported framebuffer ${width}x${height}."
+        throw "$Phase Notes input target does not fit the reported framebuffer ${width}x${height}."
     }
     # The centered Notes window is 600x360. Its editor begins at client
     # coordinate (20,84), below the 24-pixel title bar.

@@ -2772,6 +2772,10 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C188R3_NOTES_STARTUP
         host.TryLog("C188R3-163 NOTES-POST-RENDER-SETTINGS-RETURN"u8);
 #endif
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog("C188R6-200 AFTER C188R3-163"u8);
+        host.TryLog("C188R6-201 BEFORE POSTRENDER-CONTEXT-SUMMARIES"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (_c125ProofContext)
@@ -2859,6 +2863,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog(_c133ProofContext
+#if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+            && !_c135ProofContext
+#endif
+            ? "C188R6-228 BRANCH C133-INITIAL-SUMMARY=TAKEN"u8
+            : "C188R6-228 BRANCH C133-INITIAL-SUMMARY=SKIPPED"u8);
+#endif
         if (_c133ProofContext
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
             && !_c135ProofContext
@@ -2869,14 +2881,28 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 _pathDisplayCombo.SelectedIndex == 0 &&
                 _pathDisplayCombo.ItemCount == 2 &&
                 !_pathDisplayCombo.IsOpen && _c133ProofContext;
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-229 BEFORE C133-INITIAL-SUMMARY-LOG"u8);
+#endif
             host.TryLog(c133Initial
                 ? "C133-NOTES initial=registration=7 selection=full-path callbacks=0 result=PASS"u8
                 : "C133-NOTES initial=FAIL result=FAIL"u8);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-230 AFTER C133-INITIAL-SUMMARY-LOG"u8);
+#endif
         }
 #endif
 #if HOSTLOGPROOF_C135_REUSABLE_POPUP_MENU
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog(_c135ProofContext
+            ? "C188R6-231 BRANCH C135-INITIAL-SUMMARY=TAKEN"u8
+            : "C188R6-231 BRANCH C135-INITIAL-SUMMARY=SKIPPED"u8);
+#endif
         if (_c135ProofContext)
         {
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-232 BEFORE C135-INITIAL-SUMMARY"u8);
+#endif
             int c135ExpectedRegistration = 8;
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
             if (_c138ProofContext) c135ExpectedRegistration = 10;
@@ -2959,6 +2985,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 ? "C135-NOTES initial=registration=8 items=4 capture=none result=PASS"u8
                 : "C135-NOTES initial=result=FAIL"u8);
 #endif
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-233 AFTER C135-INITIAL-SUMMARY"u8);
+#endif
         }
 #if HOSTLOGPROOF_C136_SECONDARY_POINTER_CONTEXT_MENU
         if (_c136ProofContext)
@@ -2979,10 +3008,17 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog("C188R6-202 AFTER POSTRENDER-CONTEXT-SUMMARIES"u8);
+        host.TryLog("C188R6-234 BEFORE C117-POSTRENDER-STATUS-LOGS"u8);
+#endif
         host.TryLog("C117-NOTES threadStatic=PASS"u8);
         host.TryLog(loadResult == GuideXosFileResult.Success
             ? "C117-NOTES initial=multiline source=VFS result=PASS"u8
             : "C117-NOTES initial=multiline source=fixture result=PASS"u8);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog("C188R6-235 AFTER C117-POSTRENDER-STATUS-LOGS"u8);
+#endif
         bool runFocusedProofTests = true;
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
         runFocusedProofTests = !_c119ProofContext || !_c119ButtonTestsRun;
@@ -3069,6 +3105,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
         {
             runFocusedProofTests = false;
         }
+#endif
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog(runFocusedProofTests
+            ? "C188R6-203 BRANCH FOCUSED-PROOF-CATALOG=TAKEN"u8
+            : "C188R6-203 BRANCH FOCUSED-PROOF-CATALOG=SKIPPED"u8);
+        if (runFocusedProofTests)
+            host.TryLog("C188R6-204 BEFORE FOCUSED-PROOF-CATALOG"u8);
 #endif
         bool textAreaTests = runFocusedProofTests
             ? GuideXosTextAreaTests.Run(host) : true;
@@ -3239,28 +3282,56 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
         bool c137Tests;
-        if (((_c137ProofContext
+        bool runC137Tests = ((_c137ProofContext
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
                 && !_c138ProofContext
 #endif
                 ) ||
                 host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
                 host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8)) &&
-            !_c137TestsRun)
+            !_c137TestsRun;
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog(runC137Tests
+            ? "C188R6-206 BRANCH C137-TEST=TAKEN"u8
+            : "C188R6-206 BRANCH C137-TEST=SKIPPED"u8);
+#endif
+        if (runC137Tests)
         {
             // The historical C137 behavior suite specifies standard wheel
             // direction. Keep it deterministic when boot loaded NaturalScroll.
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-207 BEFORE C137-RUNTIME-CAPTURE"u8);
+#endif
             RuntimeSettingsTestCapture priorRuntime =
                 GuideXosRuntimeSettings.Active.CaptureForTests();
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-208 AFTER C137-RUNTIME-CAPTURE"u8);
+#endif
             try
             {
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+                host.TryLog("C188R6-209 BEFORE C137-DEFAULTS-COMMIT"u8);
+#endif
                 GuideXosRuntimeSettings.Active.TryCommit(
                     ManagedSettingsSnapshot.Defaults);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+                host.TryLog("C188R6-210 AFTER C137-DEFAULTS-COMMIT"u8);
+                host.TryLog("C188R6-211 BEFORE C137-SUITE"u8);
+#endif
                 c137Tests = GuideXosMouseWheelC137Tests.Run(host);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+                host.TryLog("C188R6-212 AFTER C137-SUITE"u8);
+#endif
             }
             finally
             {
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+                host.TryLog("C188R6-213 BEFORE C137-RUNTIME-RESTORE"u8);
+#endif
                 GuideXosRuntimeSettings.Active.RestoreForTests(priorRuntime);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+                host.TryLog("C188R6-214 AFTER C137-RUNTIME-RESTORE"u8);
+#endif
             }
         }
         else
@@ -3278,14 +3349,28 @@ public sealed partial class ManagedNotes : GuideXosApplication
             !_c137TestsRun
             ? GuideXosMouseWheelC137Tests.Run(host) : true;
 #endif
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        bool c137SummaryBranch = _c137ProofContext ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
+            host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8);
+        host.TryLog(c137SummaryBranch
+            ? "C188R6-215 BRANCH C137-TEST-SUMMARY=TAKEN"u8
+            : "C188R6-215 BRANCH C137-TEST-SUMMARY=SKIPPED"u8);
+#endif
         if (_c137ProofContext || host.LaunchContext.Utf8.SequenceEqual("c137-api"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c137-host-tests"u8))
         {
             _c137TestsRun = true;
             _c137TestsPassed = c137Tests;
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-216 BEFORE C137-TEST-SUMMARY-LOG"u8);
+#endif
             host.TryLog(c137Tests
                 ? "C137-TESTS transport=12 text-area=16 list-box=18 cases=46 result=PASS"u8
                 : "C137-TESTS transport=12 text-area=16 list-box=18 cases=46 result=FAIL"u8);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-217 AFTER C137-TEST-SUMMARY-LOG"u8);
+#endif
         }
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
         bool c138Tests = _c138ProofContext && _c138TestsRun
@@ -3297,15 +3382,45 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 : "C138-TESTS api=FAIL drag-host=FAIL binding=FAIL result=FAIL"u8);
         }
 #if HOSTLOGPROOF_C139_SHARED_SCROLL_VIEWPORT
-        bool c139Tests = _c139ProofContext && !_c139TestsRun
-            ? GuideXosSharedScrollViewportC139Tests.Run(host) : true;
+        bool runC139Tests = _c139ProofContext && !_c139TestsRun;
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog(runC139Tests
+            ? "C188R6-218 BRANCH C139-TEST=TAKEN"u8
+            : "C188R6-218 BRANCH C139-TEST=SKIPPED"u8);
+#endif
+        bool c139Tests;
+        if (runC139Tests)
+        {
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-219 BEFORE C139-SUITE"u8);
+#endif
+            c139Tests = GuideXosSharedScrollViewportC139Tests.Run(host);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-220 AFTER C139-SUITE"u8);
+#endif
+        }
+        else
+        {
+            c139Tests = true;
+        }
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog(_c139ProofContext
+            ? "C188R6-221 BRANCH C139-TEST-SUMMARY=TAKEN"u8
+            : "C188R6-221 BRANCH C139-TEST-SUMMARY=SKIPPED"u8);
+#endif
         if (_c139ProofContext)
         {
             _c139TestsRun = true;
             _c139TestsPassed = c139Tests;
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-222 BEFORE C139-TEST-SUMMARY-LOG"u8);
+#endif
             host.TryLog(c139Tests
                 ? "C139-TESTS viewport=30 textarea=10 listbox=10 cross=4 cases=54 result=PASS"u8
                 : "C139-TESTS result=FAIL"u8);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-223 AFTER C139-TEST-SUMMARY-LOG"u8);
+#endif
         }
 #endif
 #endif
@@ -3389,7 +3504,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        if (runFocusedProofTests)
+            host.TryLog("C188R6-205 AFTER FOCUSED-PROOF-CATALOG"u8);
+#endif
 #if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog("C188R6-224 BEFORE NOTES-LAUNCH-RESULT-CALCULATION"u8);
+#endif
         GuideXosResult launchResult = (
 #else
         return (
@@ -3443,9 +3565,16 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument);
 #if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog("C188R6-225 BEFORE NOTES-LAUNCH-RESULT-LOG"u8);
+#endif
         host.TryLog(launchResult == GuideXosResult.Success
             ? "C188R3-170 NOTES-LAUNCH-RESULT-SUCCESS"u8
             : "C188R3-171 NOTES-LAUNCH-RESULT-FAILURE"u8);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+        host.TryLog("C188R6-226 AFTER NOTES-LAUNCH-RESULT-LOG"u8);
+        host.TryLog("C188R6-227 BEFORE MANAGEDNOTES-LAUNCH-RETURN"u8);
+#endif
         return launchResult;
 #endif
     }

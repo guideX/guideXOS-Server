@@ -327,11 +327,23 @@ public static unsafe class GuideXosApplicationRegistry
         else
         {
             host.TryLog("C188R3-010 APPLICATION-LAUNCH-BEGIN"u8);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-010 BEFORE APPLICATION-LAUNCH-CALL"u8);
+#endif
             result = application.Launch(host);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-011 AFTER APPLICATION-LAUNCH-RETURN"u8);
+#endif
             host.TryLog("C188R3-011 APPLICATION-LAUNCH-RETURN"u8);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-012 BEFORE APPLICATION-RESULT-LOG"u8);
+#endif
             host.TryLog(result == GuideXosResult.Success
                 ? "C188R3-012 APPLICATION-RESULT-SUCCESS"u8
                 : "C188R3-013 APPLICATION-RESULT-FAILURE"u8);
+#if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
+            host.TryLog("C188R6-013 AFTER APPLICATION-RESULT-LOG"u8);
+#endif
         }
 #else
         GuideXosResult result = host.LaunchContext.IsInput
