@@ -2964,6 +2964,34 @@ static RexxVMStatus rexx_builtin_symbol(RexxVM *vm,
     return rexx_value_set_string(result, initialized ? "VAR" : "LIT", 3u);
 }
 
+static RexxVMStatus rexx_builtin_value(RexxVM *vm,
+                                       const RexxValue *arguments,
+                                       size_t argument_count,
+                                       RexxValue *result)
+{
+    const char *name;
+    size_t name_length;
+    const RexxValue *new_value = NULL;
+    int constant = 0;
+    RexxVMStatus status;
+
+    if (vm == NULL || arguments == NULL || result == NULL ||
+        argument_count < 1u || argument_count > 2u)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    status = rexx_builtin_text_view(&arguments[0], &name, &name_length);
+    if (status != REXX_VM_STATUS_OK)
+        return status == REXX_VM_STATUS_OUT_OF_MEMORY
+            ? status : REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (name_length > (size_t)65535u)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    if (!rexx_builtin_symbol_name(name, name_length, &constant) || constant)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (argument_count == 2u &&
+        arguments[1].type != REXX_VALUE_UNSET)
+        new_value = &arguments[1];
+    return rexx_vm_value_access(vm, name, name_length, new_value, result);
+}
+
 static RexxVMStatus rexx_builtin_xrange(RexxVM *vm,
                                         const RexxValue *arguments,
                                         size_t argument_count,
@@ -4358,6 +4386,7 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "FORMAT", 1u, 5u, NULL, rexx_builtin_format },
     { "DATATYPE", 1u, 2u, NULL, rexx_builtin_datatype },
     { "SYMBOL", 1u, 1u, NULL, rexx_builtin_symbol },
+    { "VALUE", 1u, 2u, NULL, rexx_builtin_value },
     { "XRANGE", 0u, 2u, NULL, rexx_builtin_xrange },
     { "C2D", 1u, 2u, NULL, rexx_builtin_c2d },
     { "C2X", 1u, 1u, rexx_builtin_c2x, NULL },

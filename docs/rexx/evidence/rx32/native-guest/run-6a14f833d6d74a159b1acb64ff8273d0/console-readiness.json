@@ -1,0 +1,31 @@
+{
+  "schema": "guidexos.rexx.rx32.console-readiness.v1",
+  "captured_at_utc": "2026-10-24T03:01:17.7845374Z",
+  "qac_cli_pid": 18484,
+  "qemu_pid": 22212,
+  "qemu_executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmp_port": 58454,
+  "disposable_esp": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx32\\qemu-6a14f833d6d74a159b1acb64ff8273d0\\guest\\esp",
+  "network": "disabled (-net none)",
+  "probe_command": "echo RX32_CONSOLE_READY",
+  "screenshot": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx32\\qemu-6a14f833d6d74a159b1acb64ff8273d0\\helper\\console-readiness-probe.png",
+  "serial_contains_probe": false,
+  "visual_probe_command_and_output": "Must be visibly confirmed in the QMP screenshot before creating the PASS review marker.",
+  "resume_marker": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx32\\qemu-6a14f833d6d74a159b1acb64ff8273d0\\console-readiness-reviewed.continue",
+  "requires_visual_review_before_scripts": true,
+  "visually_verified": true,
+  "verified_at_utc": "2026-10-24T03:02:18.748579Z",
+  "guest_rexx_scripts_sent": true,
+  "guest_script_commands": [
+    "rexx /rx32-value-demo.rex",
+    "rexx /rx32-value-error-recovery.rex",
+    "rexx /rx32-queue-demo.rex",
+    "rexx /rx32-empty-pull.rex",
+    "rexx /rx32-recovery.rex",
+    "rexx /rx32-date-time-guard.rex",
+    "rexx /rx20clk.rex"
+  ],
+  "console_focus_probe_command": "echo RX32_FOCUS_READY (clicked the terminal input area before typing)",
+  "console_focus_probe_screenshot": "console-focus-probe.png",
+  "console_focus_probe_visually_verified": true
+}

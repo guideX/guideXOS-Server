@@ -430,6 +430,17 @@ RexxVMStatus rexx_vm_symbol_is_initialized(RexxVM *vm,
                                            size_t name_length,
                                            int *initialized);
 
+/* Read a lexically validated variable symbol from the active environment.
+ * An uninitialized symbol returns its resolved uppercase name without
+ * raising NOVALUE. When new_value is non-NULL, store it after reading and
+ * return the prior value. old_value must be initialized and distinct from
+ * new_value. */
+RexxVMStatus rexx_vm_value_access(RexxVM *vm,
+                                 const char *name,
+                                 size_t name_length,
+                                 const RexxValue *new_value,
+                                 RexxValue *old_value);
+
 const char *rexx_vm_status_name(RexxVMStatus status);
 
 #ifdef __cplusplus

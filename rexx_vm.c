@@ -2261,6 +2261,48 @@ static RexxVMEnvironment *variable_access_environment(RexxVM *vm)
     return (RexxVMEnvironment *)vm->current_environment;
 }
 
+RexxVMStatus rexx_vm_value_access(RexxVM *vm,
+                                 const char *name,
+                                 size_t name_length,
+                                 const RexxValue *new_value,
+                                 RexxValue *old_value)
+{
+    RexxVMEnvironment *environment;
+    RexxSymbol symbol;
+    char *canonical_name;
+    RexxVMStatus status;
+
+    if (vm == NULL || !vm->initialized || name == NULL || name_length == 0u ||
+        old_value == NULL || old_value == new_value)
+        return REXX_VM_STATUS_INVALID_ARGUMENT;
+    if (name_length > REXX_VM_MAX_NAME_LENGTH)
+        return REXX_VM_STATUS_RESOURCE_LIMIT;
+    rexx_value_clear(old_value);
+    environment = variable_access_environment(vm);
+    if (environment == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
+
+    canonical_name = copy_name(name, name_length);
+    if (canonical_name == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
+    symbol.name = canonical_name;
+    symbol.length = name_length;
+    symbol.kind = resolved_name_uses_stem_table(canonical_name, name_length)
+        ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE;
+
+    /* VALUE lookup is deliberately independent of the NOVALUE condition. */
+    status = environment_load_variable(vm, environment, &symbol, old_value);
+    if (status == REXX_VM_STATUS_INVALID_EXPOSE_LIST)
+        status = REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    if (status == REXX_VM_STATUS_OK && new_value != NULL) {
+        status = environment_set(vm, environment, canonical_name, name_length,
+                                 0, new_value);
+        if (status == REXX_VM_STATUS_INVALID_EXPOSE_LIST)
+            status = REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    }
+    vm_free(canonical_name);
+    if (status != REXX_VM_STATUS_OK) rexx_value_clear(old_value);
+    return status;
+}
+
 static RexxVMStatus load_variable(RexxVM *vm, const RexxSymbol *symbol, int stem)
 {
     RexxValue value = REXX_VALUE_INIT;

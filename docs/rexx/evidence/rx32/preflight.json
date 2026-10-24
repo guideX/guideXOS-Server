@@ -1,0 +1,55 @@
+{
+  "schema": "guidexos.rexx.rx32.preflight.v1",
+  "captured_at_utc": "2026-10-24T02:34:32.1389263Z",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "required_branch": "REXX_SUPPORT",
+  "observed_branch": "REXX_SUPPORT",
+  "accepted_start_head": "475b19a68b38d747d09dadcfc192c6126947856f",
+  "observed_start_head": "475b19a68b38d747d09dadcfc192c6126947856f",
+  "tracked_worktree_clean_at_start": true,
+  "index_clean_at_start": true,
+  "root_phase_file_present": false,
+  "rx32_paths_present_at_start": false,
+  "rx31_counts": {
+    "implemented": 59,
+    "not_implemented": 11,
+    "partial": 3,
+    "not_assessed": 1,
+    "not_implemented_by_design": 1,
+    "total": 75
+  },
+  "unimplemented_candidates": [
+    "CHARIN",
+    "CHAROUT",
+    "CHARS",
+    "LINEIN",
+    "LINEOUT",
+    "LINES",
+    "STREAM",
+    "VALUE",
+    "EXTERNALS",
+    "LINESIZE",
+    "USERID"
+  ],
+  "not_assessed": [
+    "REGINA_EXTENSION_SET"
+  ],
+  "protected_root_artifact_count": 31,
+  "protected_start_manifest": "evidence/rx32/protected-artifacts-guard.json",
+  "protected_start_manifest_sha256": "9a5bf5f02f159d709f96ccaa9f719e07b4bfb54a5b672a3496732f3b21c8c521",
+  "untracked_start_count": 100478,
+  "untracked_start_manifest": "evidence/rx32/untracked-start-ordinal.paths.gz",
+  "untracked_start_manifest_sha256": "fe390aec42fc4c241ff856336b3beca836eb7d094ea1c55a55016a91d0472e10",
+  "untracked_manifest_serialization": "Gzip of UTF-8 without BOM, LF-delimited, unique repo-relative paths sorted with StringComparer.Ordinal.",
+  "qac_cli": {
+    "path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+    "sha256": "f7089d508c1d8307e11de1b944b6e1087c038c4901333e8228ec117291ca8df6",
+    "file_version": "1.0.0.0",
+    "product_name": "GuideXOS.QAC.Cli",
+    "initial_observation": "Located through sibling QAC project build output; status/list previously confirmed coordinator online with zero reservations and zero QEMU processes.",
+    "current_observation": "A separate managed acceptance session appeared after initial discovery; RX32 guest launch remains gated until it releases."
+  },
+  "qac_rx31_status": "RX31 Outcome B remains open; native acceptance is not inherited from RX32.",
+  "untracked_start_manifest_payload_sha256": "fe390aec42fc4c241ff856336b3beca836eb7d094ea1c55a55016a91d0472e10",
+  "untracked_start_manifest_compressed_sha256": "6262863b310f772503dfcaa853218b99e75eea911a550765f3897ee2d917572b"
+}

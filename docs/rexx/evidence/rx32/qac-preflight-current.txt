@@ -1,0 +1,22 @@
+RX32 QAC ownership and acceptance record
+CLI: D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe
+CLI identity: GuideXOS.QAC.Cli 1.0.0.0; SHA-256 F7089D508C1D8307E11DE1B944B6E1087C0384901333E8228EC117291CA8DF6
+Coordinator: Online; guideXOS QAC 2.0.0.
+Initial preflight found an unrelated managed acceptance reservation. RX32 did not control it and waited for it to clear.
+Pre-launch snapshot for the successful RX32 run:
+  Coordinator online; QEMU processes 0 (0 foreign).
+  Managed sessions 0; queued 0; blocked 0.
+  Reservations 0; managed sessions 0.
+  Source snapshots: evidence/rx32/native-guest/run-6a14f833d6d74a159b1acb64ff8273d0/qac-status-before.txt and qac-list-before.txt.
+Successful RX32 acceptance:
+  Reservation 5e472717be7047f5b48d0c80065c8508; project guideXOSServer; mode acceptance.
+  QAC CLI PID 18484; direct QEMU child PID 22212.
+  Network disabled; unique disposable ESP; console prompt and echo probe reviewed before any REXX command.
+  Direct QEMU child exit code 0. QAC CLI run contract preserves the direct child's exit code, so parent CLI exit code is 0; the orchestration runner exited 0.
+  QMP shutdown acknowledged. QAC released the reservation.
+Final snapshot:
+  Coordinator online; QEMU processes 0 (0 foreign).
+  Managed sessions 0; queued 0; blocked 0.
+  Reservations 0; managed sessions 0.
+  Sources: evidence/rx32/native-guest/run-6a14f833d6d74a159b1acb64ff8273d0/qac-status-after.txt, qac-status-final.txt, qac-list-final.txt, qemu-process-reconciliation.json, and qac-run.json.
+The earlier unrelated acceptance session was never controlled. RX31 native acceptance remains open and unchanged.

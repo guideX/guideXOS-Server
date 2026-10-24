@@ -1,0 +1,26 @@
+{
+  "schema": "guidexos.rexx.rx32.untracked-reconciliation.v1",
+  "captured_at_utc": "2026-10-24T03:11:58.1702098Z",
+  "path_scope": "git ls-files --others --exclude-standard immediately before local commit; RX32 additions already staged",
+  "serialization": "Gzip of UTF-8 without BOM, LF-delimited, unique repo-relative paths sorted with StringComparer.Ordinal.",
+  "start": {
+    "count": 100478,
+    "payload_sha256": "fe390aec42fc4c241ff856336b3beca836eb7d094ea1c55a55016a91d0472e10",
+    "compressed_sha256": "6262863b310f772503dfcaa853218b99e75eea911a550765f3897ee2d917572b",
+    "manifest": "evidence/rx32/untracked-start-ordinal.paths.gz"
+  },
+  "end": {
+    "count": 107304,
+    "payload_sha256": "00601884fa7a02a7287be32c2cc6573a4599dcfe69fd5ca525adaef7dea7e3e9",
+    "compressed_sha256": "0b5d00dcedbc98d4555ebc88511bd64da364afb0a6eb2ad3f676616ea38c36d6",
+    "manifest": "evidence/rx32/untracked-end-ordinal.paths.gz"
+  },
+  "difference": {
+    "preexisting_paths_missing": 0,
+    "added_paths": 6826,
+    "manifest": "evidence/rx32/untracked-added-ordinal.paths.gz",
+    "added_payload_sha256": "f52811f8aef70098ab6bd91a3df7527ffe6f05a562bc049aaf3e90ab157bfc0f",
+    "added_compressed_sha256": "3f0765b1173a55a80c93be141c92e5d3a057f5ae7efb788249ef91ab44613922"
+  },
+  "comparison": "PASS — every starting untracked path remains present in the actual ending path set."
+}

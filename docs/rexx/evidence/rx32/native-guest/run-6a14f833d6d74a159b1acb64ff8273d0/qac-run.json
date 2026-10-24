@@ -1,0 +1,16 @@
+{
+  "qac_cli_path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+  "qac_cli_pid": 18484,
+  "project": "guideXOSServer",
+  "mode": "acceptance",
+  "direct_qemu_child_pid": 22212,
+  "qac_process_exit_code": 0,
+  "qac_process_exit_status": "derived_from_documented_cli_contract",
+  "qac_reported_child_exit_code": 0,
+  "qac_reservation_released": true,
+  "qmp_shutdown_acknowledged": true,
+  "managed_sessions_after": 0,
+  "completed_at_utc": "2026-10-24T03:04:31.7206427Z",
+  "qac_process_exit_code_source": "The QAC CLI help states run preserves the direct child exit code; the CLI logged child exitCode=0 and released its reservation. The orchestration runner exited 0. Start-Process returned null for the CLI ExitCode field.",
+  "runner_exit_code": 0
+}
