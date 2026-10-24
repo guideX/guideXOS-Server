@@ -93,7 +93,7 @@ No R6 reservation was requested, no guest was queued or started, and the other o
 
 ### Preservation and outcome
 
-The post-build/blocked-admission comparison recorded 136 pre-existing status paths and 154 current paths before the R6 implementation commit. All 136 pre-existing paths remained present and byte-identical. All 13 protected roots / 8,497 files and the 6,944 files in the previous R3–R5 evidence roots matched their preflight SHA-256 inventories exactly, with no additions, removals, or changes. The original modified ramdisk hash stayed unchanged. The report is `out/dotnet/c188r6-notes-postrender/preservation-comparison.json`.
+The pre-commit blocked-admission comparison recorded 136 pre-existing status paths and 154 current paths, including the R6 changes. All 136 pre-existing paths remained present and byte-identical. The final post-commit comparison returned to 136 current paths, with no missing or changed pre-existing paths. All 13 protected roots / 8,497 files and the 6,944 files in the previous R3–R5 evidence roots matched their preflight SHA-256 inventories exactly, with no additions, removals, or changes. The original modified ramdisk hash stayed unchanged. The final report is `out/dotnet/c188r6-notes-postrender/preservation-comparison.json`.
 
 **Outcome D — blocked.** QAC ownership prevented the single required targeted diagnostic guest after static qualification. NativeAOT/kernel build success does not establish launch return or Notes readiness. The correction remains incomplete because no runtime evidence confirmed the C137 branch or any other post-render stopping point.
 
