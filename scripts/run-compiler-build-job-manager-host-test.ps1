@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$outputDirectory = Join-Path $repoRoot "out/comp3r3-validation"
+$outputDirectory = Join-Path $repoRoot "out/comp3r4-validation"
 $testBinary = Join-Path $outputDirectory "compiler-build-job-manager-host-test.exe"
 $buildLog = Join-Path $outputDirectory "compiler-build-job-manager-host-test-build.log"
 
@@ -22,6 +22,13 @@ if ($buildExitCode -ne 0) {
     Get-Content -Path $buildLog -Tail 60
     throw "kernel build-job manager test build failed; see $buildLog"
 }
+
+$desktopSource = Get-Content -Raw -Path (Join-Path $repoRoot "kernel/core/desktop.cpp")
+$desktopPumpPattern = '(?s)const bool nativeElfTargetActive\s*=\s*kernel::native_elf::NativeElfRunService::native_elf_scheduler_in_target\(\);\s*\(void\)kernel::compiler::BareMetalBuildService::pump_cooperative_test_step\(\);\s*if\s*\(!nativeElfTargetActive\)\s*\(void\)kernel::native_elf::NativeElfRunService::native_elf_scheduler_pump\(\);'
+if (-not [regex]::IsMatch($desktopSource, $desktopPumpPattern)) {
+    throw "desktop update boundary is not wired to the guarded build-job pump"
+}
+Write-Host "Desktop build-job pump wiring PASS"
 
 & $testBinary
 if ($LASTEXITCODE -ne 0) { throw "kernel build-job manager test failed" }

@@ -53,11 +53,15 @@ public:
                                        const gx_build_snapshot* result);
 
     // This test-owned continuation is used only by hosted state-machine tests.
-    // It is not connected to a guest callback or the desktop update loop.
+    // The desktop update loop may advance it through the guarded internal
+    // pump below. It is never admitted through an application callback.
     gx_result admit_test_job(uint64_t ownerIdentity,
                              const gx_build_request* request,
                              gx_build_handle* outHandle);
-    gx_result pump_one_test_step();
+    gx_result pump_one_test_step_at_desktop_boundary(
+        bool nativeElfTargetActive);
+    gx_result request_test_cancel(uint64_t ownerIdentity,
+                                  gx_build_handle handle);
 
     gx_result cancel_queued(uint64_t ownerIdentity, gx_build_handle handle);
     gx_result poll(uint64_t ownerIdentity, gx_build_handle handle,
@@ -104,6 +108,7 @@ private:
     static void append_test_output(gx_build_snapshot* snapshot,
                                    const char* text);
     void set_cancelled(const char* reason);
+    gx_result pump_one_test_step();
 
     volatile uint8_t lock_;
     bool shuttingDown_;

@@ -8431,7 +8431,10 @@ void tick()
     // context.  Give it one bounded slice from the normal desktop scheduler
     // boundary; a target-side tick is ignored by the scheduler guard.
 #if defined(GXOS_BARE_METAL)
-    if (!kernel::native_elf::NativeElfRunService::native_elf_scheduler_in_target())
+    const bool nativeElfTargetActive =
+        kernel::native_elf::NativeElfRunService::native_elf_scheduler_in_target();
+    (void)kernel::compiler::BareMetalBuildService::pump_cooperative_test_step();
+    if (!nativeElfTargetActive)
         (void)kernel::native_elf::NativeElfRunService::native_elf_scheduler_pump();
 #endif
 }

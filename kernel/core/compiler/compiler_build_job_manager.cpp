@@ -458,6 +458,12 @@ gx_result Manager::pump_one_test_step()
         unlock();
         return GX_ERROR_FAILED;
     }
+    if (job_.ownerClosed || job_.cancelRequested) {
+        set_cancelled("test continuation stopped at a safe step boundary");
+        if (job_.ownerClosed) clear_job();
+        unlock();
+        return GX_OK;
+    }
     job_.pumpInProgress = true;
     generation = job_.generation;
     nextStep = job_.testStep + 1U;
@@ -506,6 +512,36 @@ gx_result Manager::pump_one_test_step()
         job_.snapshot.artifactSize = 0U;
         job_.snapshot.artifactEntryPoint = 0U;
     }
+    unlock();
+    return GX_OK;
+}
+
+gx_result Manager::pump_one_test_step_at_desktop_boundary(
+    bool nativeElfTargetActive)
+{
+    // host_bare_poll_event can call desktop::tick while the NativeElf target
+    // is active. Do not recurse into build work from that nested update.
+    if (nativeElfTargetActive) return GX_ERROR_BUSY;
+    return pump_one_test_step();
+}
+
+gx_result Manager::request_test_cancel(uint64_t ownerIdentity,
+                                       gx_build_handle handle)
+{
+    lock();
+    if (!handle_matches(handle)) {
+        unlock();
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!owner_matches(ownerIdentity)) {
+        unlock();
+        return GX_ERROR_PERMISSION_DENIED;
+    }
+    if (!job_.testOnly || job_.callActive || terminal(job_.state)) {
+        unlock();
+        return GX_ERROR_BUSY;
+    }
+    job_.cancelRequested = true;
     unlock();
     return GX_OK;
 }

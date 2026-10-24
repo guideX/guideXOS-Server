@@ -145,26 +145,66 @@ static void test_test_continuation_and_queued_cancel()
     assert(manager.admit_test_job(owner, &fixture.request, &handle) == GX_OK);
     assert(manager.poll(owner, handle, &snapshot) == GX_OK);
     assert(snapshot.state == GX_BUILD_PREPARING && snapshot.outputCount == 0U);
-    assert(manager.pump_one_test_step() == GX_OK);
+    // A nested desktop tick from an active NativeElf target must not run the
+    // continuation. The ordinary desktop boundary advances exactly one unit.
+    assert(manager.pump_one_test_step_at_desktop_boundary(true) == GX_ERROR_BUSY);
+    gx_build_snapshot nested = {};
+    assert(manager.poll(owner, handle, &nested) == GX_OK);
+    assert(nested.state == GX_BUILD_PREPARING && nested.outputCount == 0U);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
     assert(manager.poll(owner, handle, &snapshot) == GX_OK);
     assert(snapshot.state == GX_BUILD_RUNNING && snapshot.outputCount == 1U);
     assert(std::strstr(snapshot.output[0].text, "TEST ONLY") != nullptr &&
            std::strstr(snapshot.output[0].text, "step 1/3") != nullptr);
-    assert(manager.pump_one_test_step() == GX_OK);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
     assert(manager.poll(owner, handle, &snapshot) == GX_OK);
     assert(snapshot.outputCount == 2U &&
            std::strstr(snapshot.output[1].text, "step 2/3") != nullptr);
-    assert(manager.pump_one_test_step() == GX_OK);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
     assert(manager.poll(owner, handle, &snapshot) == GX_OK);
     assert(snapshot.state == GX_BUILD_FAILED && snapshot.outputCount == 3U);
-    assert(snapshot.artifactValid == 0U && snapshot.artifactSize == 0U);
+    assert(snapshot.artifactValid == 0U && snapshot.artifactSize == 0U &&
+           snapshot.artifactEntryPoint == 0U && snapshot.artifactPath[0] == '\0' &&
+           snapshot.artifactSha256[0] == '\0');
     assert(std::strstr(snapshot.errorMessage, "no compiler or artifact work ran") != nullptr);
     const gx_build_snapshot terminal = snapshot;
-    assert(manager.pump_one_test_step() == GX_ERROR_FAILED);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_ERROR_FAILED);
     assert(manager.poll(owner, handle, &snapshot) == GX_OK);
     assert(std::memcmp(&snapshot, &terminal, sizeof(snapshot)) == 0);
-    assert(manager.owner_closed(owner) == GX_OK);
+    assert(manager.release(owner, handle) == GX_OK);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) ==
+           GX_ERROR_INVALID_ARGUMENT);
+
+    gx_build_handle reused = 0;
+    assert(manager.admit_test_job(owner, &fixture.request, &reused) == GX_OK);
+    assert(reused != handle);
     assert(manager.poll(owner, handle, &snapshot) == GX_ERROR_INVALID_ARGUMENT);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
+    assert(manager.poll(owner, reused, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_RUNNING && snapshot.outputCount == 1U &&
+           std::strstr(snapshot.output[0].text, "step 1/3") != nullptr);
+    assert(manager.owner_closed(owner) == GX_OK);
+    assert(manager.poll(owner, reused, &snapshot) == GX_ERROR_INVALID_ARGUMENT);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) ==
+           GX_ERROR_INVALID_ARGUMENT);
+
+    gx_build_handle cancelledBetweenSteps = 0;
+    assert(manager.admit_test_job(owner, &fixture.request,
+                                  &cancelledBetweenSteps) == GX_OK);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
+    assert(manager.request_test_cancel(owner, cancelledBetweenSteps) == GX_OK);
+    assert(manager.poll(owner, cancelledBetweenSteps, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_RUNNING && snapshot.outputCount == 1U);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
+    assert(manager.poll(owner, cancelledBetweenSteps, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_CANCELLED && snapshot.outputCount == 1U &&
+           snapshot.artifactValid == 0U);
+    const gx_build_snapshot cancelledSnapshot = snapshot;
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_ERROR_FAILED);
+    assert(manager.poll(owner, cancelledBetweenSteps, &snapshot) == GX_OK);
+    assert(std::memcmp(&snapshot, &cancelledSnapshot,
+                       sizeof(snapshot)) == 0);
+    assert(manager.release(owner, cancelledBetweenSteps) == GX_OK);
 
     gx_build_handle cancelled = 0;
     assert(manager.admit_test_job(owner, &fixture.request, &cancelled) == GX_OK);
@@ -212,6 +252,19 @@ static void test_owner_close_and_shutdown_barrier()
            GX_ERROR_INVALID_ARGUMENT);
     assert(manager.admit_test_job(owner + 4U, &fixture.request, &competing) ==
            GX_ERROR_FAILED);
+
+    Manager betweenStepShutdown;
+    gx_build_handle testJob = 0;
+    RequestFixture testFixture;
+    assert(betweenStepShutdown.admit_test_job(owner + 5U, &testFixture.request,
+                                               &testJob) == GX_OK);
+    assert(betweenStepShutdown.pump_one_test_step_at_desktop_boundary(false) ==
+           GX_OK);
+    assert(betweenStepShutdown.shutdown() == GX_OK);
+    assert(betweenStepShutdown.pump_one_test_step_at_desktop_boundary(false) ==
+           GX_ERROR_FAILED);
+    assert(betweenStepShutdown.poll(owner + 5U, testJob, &snapshot) ==
+           GX_ERROR_INVALID_ARGUMENT);
 }
 
 static void test_capacity_generation_wrap_and_concurrent_poll()
@@ -260,9 +313,9 @@ static void test_capacity_generation_wrap_and_concurrent_poll()
             }
         });
     }
-    assert(manager.pump_one_test_step() == GX_OK);
-    assert(manager.pump_one_test_step() == GX_OK);
-    assert(manager.pump_one_test_step() == GX_OK);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
+    assert(manager.pump_one_test_step_at_desktop_boundary(false) == GX_OK);
     for (std::thread& worker : workers) worker.join();
     assert(pollFailures.load() == 0U);
     assert(badAdmissionResults.load() == 0U);

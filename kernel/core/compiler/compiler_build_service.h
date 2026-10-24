@@ -21,6 +21,9 @@ gx_result release(gx_build_handle handle);
 // owner-aware calls keep a guessed public handle from crossing app lifetimes.
 gx_result start_owned(const gx_build_request* request, uint64_t ownerIdentity,
                       gx_build_handle* outHandle);
+// Advances at most one internal qualification step. This is not a build
+// callback and cannot execute the compiler or publish an artifact.
+gx_result pump_cooperative_test_step();
 gx_result poll_owned(uint64_t ownerIdentity, gx_build_handle handle,
                      gx_build_snapshot* outSnapshot);
 gx_result release_owned(uint64_t ownerIdentity, gx_build_handle handle);

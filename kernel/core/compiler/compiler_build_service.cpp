@@ -8,6 +8,7 @@
 #include "compiler_driver.h"
 #include "elf_writer.h"
 #include "../native_elf/native_elf_executor.h"
+#include "../native_elf/native_elf_scheduler.h"
 #include "../native_elf/native_elf_validator.h"
 #include "kernel/serial_debug.h"
 #include "kernel/vfs.h"
@@ -1057,6 +1058,14 @@ gx_result start(const gx_build_request* request, gx_build_handle* outHandle)
 {
     return start_owned(request, BuildJobManager::kKernelOwnerIdentity,
                        outHandle);
+}
+
+gx_result pump_cooperative_test_step()
+{
+    const bool nativeElfTargetActive =
+        native_elf::NativeElfRunService::native_elf_scheduler_in_target();
+    return s_buildJobManager.pump_one_test_step_at_desktop_boundary(
+        nativeElfTargetActive);
 }
 
 gx_result poll_owned(uint64_t ownerIdentity, gx_build_handle handle,
