@@ -345,7 +345,7 @@ void irq_handler()
     
     if (key != 0) {
         const uint32_t diagnosticSequence =
-            dm37_input_diagnostics::is_control_key(key)
+            dm37_input_diagnostics::should_trace_key(key)
             ? dm37_input_diagnostics::begin_event() : 0;
         const uint8_t accepted = enqueue_event(key, keyUp,
                                                diagnosticSequence);

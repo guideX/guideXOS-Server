@@ -21,6 +21,7 @@
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/dm37_input_diagnostics.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -1332,11 +1333,22 @@ static void cmd_vfscat(const char* path) {
     output_string("Reading file: ");
     output_string(path);
     output_string("\n\n");
+
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
     
     vfs::HandleToken handle = vfs::open(path, vfs::OPEN_READ);
     if (handle == 0xFF) {
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("shell-vfscat-open-failed",
+                diagnosticSequence, static_cast<uint32_t>(handle), 0);
         output_string("Cannot open file\n");
         return;
+    }
+    if (diagnosticSequence != 0) {
+        dm37_input_diagnostics::emit("shell-vfscat-open",
+            diagnosticSequence, static_cast<uint32_t>(handle),
+            static_cast<uint32_t>(handle >> 32));
     }
     
     // Read file in chunks
@@ -1349,8 +1361,19 @@ static void cmd_vfscat(const char* path) {
         output_string(buffer);
         totalRead += bytesRead;
     }
-    
-    vfs::close(handle);
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("shell-vfscat-read",
+            diagnosticSequence, static_cast<uint32_t>(totalRead),
+            static_cast<uint32_t>(bytesRead));
+
+    const vfs::Status closeStatus = vfs::close(handle);
+    if (diagnosticSequence != 0) {
+        dm37_input_diagnostics::emit("shell-vfscat-close-handle",
+            diagnosticSequence, static_cast<uint32_t>(handle),
+            static_cast<uint32_t>(handle >> 32));
+        dm37_input_diagnostics::emit("shell-vfscat-close-status",
+            diagnosticSequence, static_cast<uint32_t>(closeStatus), 0);
+    }
     
     output_string("\n\n--- End of file (");
     char sizeStr[16];
@@ -3121,6 +3144,15 @@ static void execute_command(const char* cmd) {
     } else if (str_eq(command, "vfsls")) {
         cmd_vfsls(arg1);
     } else if (str_eq(command, "vfscat")) {
+        const uint32_t diagnosticSequence =
+            dm37_input_diagnostics::current_sequence();
+        if (diagnosticSequence != 0) {
+            const bool dm37ProofTarget = str_eq(arg1,
+                "/mnt/disk1-part1/DM9/PROOF.BIN");
+            dm37_input_diagnostics::emit("shell-vfscat-dispatch",
+                diagnosticSequence, dm37ProofTarget ? 1u : 0u,
+                static_cast<uint32_t>(str_len(arg1)));
+        }
         cmd_vfscat(arg1);
     } else if (str_eq(command, "vfsstat")) {
         cmd_vfsstat(arg1);
@@ -3368,6 +3400,12 @@ void process_char(char c) {
 }
 
 void process_key(uint32_t key) {
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("shell-process-key",
+            diagnosticSequence, key,
+            s_state == ShellState::Closed ? 0u : 1u);
     if (s_state == ShellState::Closed) return;
     
     switch (key) {

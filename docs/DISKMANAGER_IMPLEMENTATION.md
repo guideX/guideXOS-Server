@@ -506,3 +506,20 @@ post-remount VFS read and delayed-key stress remain open. Run3 runtime hashes,
 QAC lease/release, full fixture integrity, cumulative QMP I/O limitations,
 host validation, and the untouched protected Git state are recorded in the
 [DM37 phase report follow-up](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-8-follow-up--qac-input-trace-and-partial-gate-e).
+
+## DM37 Continuation 9 — Shell focus handoff diagnosed
+
+Run4 used a source-matched, read-only QAC guest and reproduced the initial
+29-byte VFS read, but did not complete Dismount, FAT32 check, remount, or the
+post-remount read. After Disk Manager closed, the visible Shell ignored typed
+characters while inactive. The existing Escape/Grave recovery restored
+visible Shell input; `help` was typed, submitted, and rendered. Source routing
+confirms that desktop keys go to a focused compositor window before the Shell,
+and Shell input is processed only when the Shell is active. QAC logged a
+temporary degraded census warning; a later supported inspection showed the
+owned reservation healthy, and normal Shell shutdown released it. The
+read-only fixture hash was unchanged. `.phase` remains DM36→DM37 and Gate E
+remains incomplete pending a fresh post-remount VFS open/read/close. See the
+[DM37 continuation 9 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-9--shell-focus-handoff-diagnosed-gate-e-remains-open)
+for runtime hashes, QAC evidence, screenshots, cleanup, validation, and the
+remaining gates.

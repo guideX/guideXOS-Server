@@ -1141,3 +1141,114 @@ to `out/appmodel-typed-dispatch-flags/`, `out/mc7-proof/`, and
 `out/wallpaper-pack/`; the unstaged `.gitignore` final-newline edit and
 untracked Python cache are preserved. DM37 code/tests/docs remain separate
 from those deletions. No phase advancement or DM38 work occurred.
+
+## DM37 Continuation 9 — Shell focus handoff diagnosed; Gate E remains open
+
+**Outcome B — `DM37_FOCUS_HANDOFF_DIAGNOSED`.** This QAC-managed run
+reproduced the initial read-only mount and 29-byte VFS read, then isolated
+the Shell handoff after Disk Manager closed. The existing production
+Escape/Grave recovery restored Shell input and submitted a harmless `help`
+command. The run did not complete Dismount, the DM36 checker, a new remount,
+or the decisive post-remount proof-file open/read/close. It is not Gate E
+acceptance and does not authorize DM38. `.phase` remains DM36→DM37.
+
+### Run4 provenance, QAC, and artifacts
+
+Run4 used the documented QAC 2.0.0 `qac run --project guideXOSServer --mode
+acceptance --` path. Reservation `8b84465adf184cc6a1f416744168127c` admitted
+direct QEMU child PID 24052; verified owner PID 31704. The QAC stderr log
+recorded three warnings that the reservation was degraded because “1
+unmanaged QEMU process(es) detected.” At the authoritative 19:02:17 UTC
+snapshot, `status` and `list` showed one managed QEMU and zero foreign, and
+`inspect` reported `degraded=false`, owner verified. A separate acceptance
+reservation was queued at that time; it was not contacted or changed. The
+warning means uninterrupted census health is not claimed. At 19:10:43 UTC,
+QAC reported zero QEMU processes and no queued sessions; run4 inspection was
+`Released`, reason `Managed child exited.`
+
+The source-matched runtime manifest is
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\input-diagnostics-run4\runtime-manifest.json`
+(SHA-256
+`EEC6B1F1ECFED244CC663E31AA7148B86286257E76AAE6A186828320A0CC7990`). It
+records the starting revision `cb99d67fb06fbe18f38971ae201e8439334d402a`
+and 15 production-source hashes; all 15 were recomputed from the actual
+worktree and matched. Runtime hashes were independently recomputed:
+
+- Kernel: `F53BD7B37554A4D4568034155B1DA180CA48A828787F4817F851D94C599351F2`
+- UEFI bootloader: `E65C0A2CBF50534CDB01602800F579446B27B2BE7597BDB461E1E83F94BC0DF4`
+- OVMF: `2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`
+- Ramdisk: `5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD`
+
+Diagnostics were bounded to 512 records and 16 pointer-motion records, with
+an explicit incomplete/loss marker. They were compiled with
+`GXOS_DM37_INPUT_DIAGNOSTICS_POSTCHECK_ONLY`; the checkpoint arms after the
+FAT32 result dialog closes. Since run4 did not enter that checker, no
+post-check `DM37-IN` trace was armed or captured. The host QMP event log and
+screenshots therefore establish the actions and visible results, but do not
+prove every keyboard transition through PS/2 and the guest queue. The earlier
+run3 full buffer remains incomplete evidence, not evidence that later input
+was absent.
+
+The private runtime and run evidence remain on E: under
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\input-diagnostics-run4\`;
+the fixture remained at
+`D:\dev\guideXOSServer_DiskManagerImprovements\out\dm37\dismount-guest\fixtures\DM37WORKFLOW01.raw`.
+No relocated fixture or sibling ESP was used or overwritten. The 629,145,600
+byte fixture was QEMU-block-read-only, with physical media absent and
+`NVME_WRITE_PROVEN=0` / `NVME_FLUSH_PROVEN=0`.
+
+### Shell handoff and observed workflow
+
+Run4 mounted USB serial `DM37WORKFLOW01`, GPT partition 1, FAT32 label
+`DM9PROOF`, read-only at `/mnt/disk1-part1`. The initial Shell VFS read of
+`DM9/PROOF.BIN` showed exactly `guideXOS DM9 QEMU proof 001` and `29 bytes
+read` in `shell-initial-vfscat.png`; the file reference was closed by the
+ordinary `vfscat` path. This is the pre-dismount read only.
+
+The code audit and guest screen agree on the handoff gap. `desktop::handle_key`
+routes to a focused compositor window before checking the separate Shell
+surface. After Disk Manager closes, compositor focus is cleared but the Shell
+is not automatically marked active. The Shell branch processes input only
+when `s_shellActive` is true and it is not minimized. On screen, typed `help`
+after Disk Manager Close produced no characters. Pressing Escape closed the
+inactive Shell; the existing `grave_accent` toggle reopened it active. `help`
+then appeared at the prompt, Return submitted it, and the help output was
+visible. The relevant screenshots are `after-escape-close.png`,
+`shell-focus-test-before-submit.png`, `shell-grave-reopened.png`,
+`shell-active-help-typed.png`, and `shell-active-help-output.png` in the run4
+evidence directory. This uses the existing production path; no test-only
+focus setter or new shortcut was used.
+
+After recovery, Disk Manager reopened through the typed Shell command and
+the exact USB identity, read-only state, mount path, and partition-view
+generation 2 were visible. The Dismount confirmation never opened despite
+further ordinary action-pane and Enter/Space attempts. No Dismount, checker,
+remount, or post-remount VFS read occurred. The Shell/action focus attempt is
+not treated as proof that a delayed Enter/Space could not activate a later
+operation. Guest serial contains accepted Alt+F4 close requests for Disk
+Manager windows 3E9–3EB earlier in this run; the final reopened instance was
+closed with Escape. No Close-during-operation or delayed-key stress case was
+qualified.
+
+QMP `system_powerdown` produced a `POWERDOWN` event but left the guest
+running. Once filesystem activity was settled, the production Shell's
+`shutdown` command completed; serial recorded
+`[SHUTDOWN] final reason=system-shutdown exitCode=0`. QAC recorded child exit
+code 0 and released the reservation. QMP closed with the guest. Afterward an
+exclusive host read handle was acquired for the fixture; its final size and
+SHA-256 remained 629,145,600 bytes and
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`.
+Run-level QMP counters for `dm37workflow_drive` showed 27,761,152 read bytes,
+zero writes, and one Flush, but `account_invalid=true` and
+`account_failed=true`; they cannot be attributed to an individual stage.
+
+The focused diagnostics, Shell recovery, storage-manager suite
+(1,491/1,491), widget activation, auxiliary verifiers, AMD64 freestanding
+kernel, `build.bat`, and UEFI x64 Release validations all passed before this
+documentation-only update. `git diff --check` is recorded with the final
+commit validation. Gate A remains accepted. Gate E's final read remains
+required, as do the unattempted busy-volume, protected-admission, writable
+durability, removal/replacement, failure-injection, and delayed-key/Close
+cases. The next continuation should requalify the full workflow under QAC
+using the now-identified Shell recovery and must still capture a fresh
+post-remount VFS open/read/close before claiming Gate E.

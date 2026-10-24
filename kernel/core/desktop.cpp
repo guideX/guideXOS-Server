@@ -27,6 +27,7 @@
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/dm37_input_diagnostics.h"
+#include "include/kernel/shell_focus_recovery.h"
 #include "include/kernel/system_font.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/desktop_capabilities.h"
@@ -11102,9 +11103,19 @@ void handle_key(uint32_t key)
     
     // If shell is open, send keys to it
     if (shell::is_open()) {
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("shell-route", diagnosticSequence,
+                key, (s_shellActive ? 1u : 0u) |
+                     (s_shellMinimized ? 2u : 0u));
         // Escape closes shell
-        if (key == 27) {  // ESC
+        const shell_focus_recovery::State shellState = {
+            true, s_shellActive, s_shellMinimized};
+        const shell_focus_recovery::State escapedShellState =
+            shell_focus_recovery::after_escape(shellState, key);
+        if (!escapedShellState.open) {
             close_shell_surface_if_open();
+            s_shellActive = escapedShellState.active;
+            s_shellMinimized = escapedShellState.minimized;
             draw();
             return;
         }
@@ -11133,14 +11144,18 @@ void handle_key(uint32_t key)
     // Desktop keyboard shortcuts
     if (key == '`' || key == '~') {
         // Backtick opens/restores terminal
-        if (shell::is_open() && s_shellMinimized) {
-            s_shellMinimized = false;
-            s_shellActive = true;
-        } else {
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("shell-toggle",
+                diagnosticSequence, shell::is_open() ? 1u : 0u,
+                s_shellActive ? 1u : 0u);
+        const shell_focus_recovery::State shellState = {
+            shell::is_open(), s_shellActive, s_shellMinimized};
+        const shell_focus_recovery::State restoredShellState =
+            shell_focus_recovery::after_grave(shellState, key);
+        if (restoredShellState.open != shellState.open)
             shell::toggle();
-            s_shellActive = true;
-            s_shellMinimized = false;
-        }
+        s_shellActive = restoredShellState.active;
+        s_shellMinimized = restoredShellState.minimized;
         draw();
         return;
     }

@@ -13312,6 +13312,11 @@ void DiskManagerApp::closeInitializeDialog() {
             return;
         }
     }
+#if defined(GXOS_DM37_INPUT_DIAGNOSTICS_POSTCHECK_ONLY)
+    if (m_dialogIsFat32Integrity && m_initializeDialogState ==
+            INITIALIZE_DIALOG_FAT32_RESULT)
+        dm37_input_diagnostics::arm_postcheck_focus_checkpoint();
+#endif
     if (m_initializePlan.confirmationReady)
         storage::cancel_initialize_disk(m_initializePlan);
     if (m_deletePlan.confirmationReady)
