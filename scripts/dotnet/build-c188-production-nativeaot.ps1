@@ -7,12 +7,17 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'C188 production NativeAOT builds require PowerShell Core.'
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity'))
+$phaseRoots = @(
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r3-notes-startup-diagnostics')))
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
-$relative = [System.IO.Path]::GetRelativePath($phaseRoot, $root)
-if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-    [System.IO.Path]::IsPathRooted($relative)) {
-    throw "BuildRoot must be a unique directory below $phaseRoot."
+$allowedRoot = @($phaseRoots | Where-Object {
+    $relative = [System.IO.Path]::GetRelativePath($_, $root)
+    $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
+        -not [System.IO.Path]::IsPathRooted($relative)
+} | Select-Object -First 1)
+if ($allowedRoot.Count -eq 0) {
+    throw "BuildRoot must be a unique directory below one of: $($phaseRoots -join ', ')."
 }
 if (Test-Path -LiteralPath $root) {
     throw "Refusing to overwrite C188 proof-disabled production NativeAOT output: $root"
@@ -92,6 +97,9 @@ foreach ($development in @(
     if ($mapText.Contains($development) -or $elfText.Contains($development)) {
         throw "Proof-disabled production NativeAOT artifacts contain development-only identity material: $development"
     }
+}
+if ($mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-')) {
+    throw 'Proof-disabled production NativeAOT artifacts contain C188R3 startup instrumentation.'
 }
 $manifest = [ordered]@{
     result='PASS'

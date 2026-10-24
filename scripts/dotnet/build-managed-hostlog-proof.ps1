@@ -15,6 +15,7 @@ param(
     [switch]$C185ExternalComposition,
     [switch]$C187GuestCandidate,
     [switch]$C188ExternalAppIdentity,
+    [switch]$C188R3NotesStartupDiagnostics,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -460,6 +461,11 @@ try {
          $managedProjectMode -notin @('C160Composite','C167ProofComposite'))) {
         throw 'C188 external identity requires the isolated C185 composition and a production C160 or C167 composite; it cannot share the C187 selector-4 candidate profile.'
     }
+    if ($C188R3NotesStartupDiagnostics -and
+        (-not $C188ExternalAppIdentity -or -not $ProductionApplication -or
+         $managedProjectMode -ne 'C160Composite' -or $C187GuestCandidate)) {
+        throw 'C188R3 Notes startup diagnostics require the isolated C188 external-identity production C160 candidate.'
+    }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
@@ -484,6 +490,9 @@ try {
         $publishProperties += '-p:HostLogProofC188ExternalAppIdentity=true'
         $publishProperties += "-p:C188BuildScope=nativeaot"
         $publishProperties += "-p:C188HostOutputRoot=$OutputRoot"
+    }
+    if ($C188R3NotesStartupDiagnostics) {
+        $publishProperties += '-p:HostLogProofC188R3NotesStartupDiagnostics=true'
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"
@@ -647,7 +656,8 @@ try {
         "exit /b %errorlevel%"
     )
     $publishBatch | Set-Content -LiteralPath $buildBatch -Encoding ASCII
-    & $buildBatch
+    $buildBatchLog = Join-Path $artifactRoot 'build-native-hostlog.log'
+    & $buildBatch *>&1 | Tee-Object -FilePath $buildBatchLog
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE"
     }

@@ -9,13 +9,19 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'C188 ramdisk staging requires PowerShell Core.'
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity'))
+$phaseRoots = @(
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r3-notes-startup-diagnostics')))
 $root = [System.IO.Path]::GetFullPath($CandidateRoot)
-$relative = [System.IO.Path]::GetRelativePath($phaseRoot, $root)
-if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-    [System.IO.Path]::IsPathRooted($relative)) {
-    throw "C188 candidate root must remain below $phaseRoot."
+$phaseRoot = @($phaseRoots | Where-Object {
+    $relative = [System.IO.Path]::GetRelativePath($_, $root)
+    $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
+        -not [System.IO.Path]::IsPathRooted($relative)
+} | Select-Object -First 1)
+if ($phaseRoot.Count -eq 0) {
+    throw "C188 candidate root must remain below one of: $($phaseRoots -join ', ')."
 }
+$phaseRoot = $phaseRoot[0]
 if (-not (Test-Path -LiteralPath $root -PathType Container)) {
     throw "C188 candidate root does not exist: $root"
 }

@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory=$true)][string]$BuildRoot
+    [Parameter(Mandatory=$true)][string]$BuildRoot,
+    [Parameter()][switch]$NotesStartupDiagnostics
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -7,7 +8,7 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'C188 NativeAOT candidate builds require PowerShell Core.'
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity'))
+$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $(if ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' })))
 $build = [System.IO.Path]::GetFullPath($BuildRoot)
 $relative = [System.IO.Path]::GetRelativePath($phaseRoot, $build)
 if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
@@ -65,14 +66,29 @@ $arguments = @{
     C162ManagedTaskManagerClose = $true
     C163ManagedFileExplorer = $true
 }
+if ($NotesStartupDiagnostics) {
+    $arguments.C188R3NotesStartupDiagnostics = $true
+}
 $logPath = Join-Path $build 'nativeaot-build.log'
-$output = (& $buildScript @arguments 2>&1 | Out-String)
+$output = ''
+$buildExitCode = 0
+try {
+    $output = (& $buildScript @arguments *>&1 | Out-String)
+    $buildExitCode = $LASTEXITCODE
+} catch {
+    $buildExitCode = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
+    $output += "`nBUILD SCRIPT ERROR:`n$($_ | Out-String)"
+}
 Set-Content -LiteralPath $logPath -Value $output -Encoding utf8
-if ($LASTEXITCODE -ne 0) {
-    throw "C188 NativeAOT build failed with exit code $LASTEXITCODE. See $logPath"
+if ($buildExitCode -ne 0) {
+    throw "C188 NativeAOT build failed with exit code $buildExitCode. See $logPath"
 }
 $verify = Join-Path $PSScriptRoot 'verify-c188-nativeaot-artifacts.ps1'
-& $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification')
+if ($NotesStartupDiagnostics) {
+    & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification') -NotesStartupDiagnostics
+} else {
+    & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification')
+}
 if ($LASTEXITCODE -ne 0) { throw "C188 NativeAOT artifact verification failed with exit code $LASTEXITCODE." }
 $kernelElf = Join-Path $nativeRoot 'artifacts/HostLogProof.elf'
 $manifest = [ordered]@{
@@ -82,6 +98,7 @@ $manifest = [ordered]@{
     kernelElfSha256=(Get-FileHash -LiteralPath $kernelElf -Algorithm SHA256).Hash
     buildLogSha256=(Get-FileHash -LiteralPath $logPath -Algorithm SHA256).Hash
     isolatedArtifactsPath=(Join-Path $nativeRoot 'project-artifacts')
+    notesStartupDiagnostics=[bool]$NotesStartupDiagnostics
     productionApplicationSelectorsPreserved=@(4,5,6,7,8)
     candidateSelector=9; candidateIdentity='com.guidexos.apps.managed.counterapp'
 }

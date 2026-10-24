@@ -467,6 +467,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #else
     private uint _launchCount;
 #endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+    private bool _c188r3StartupRenderPending;
+#endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
     private static bool s_c151RegressionTestsRun;
 #endif
@@ -754,10 +757,16 @@ public sealed partial class ManagedNotes : GuideXosApplication
     public override GuideXosResult Launch(GuideXosHost host)
     {
         if (host.IsCapabilityProbe) return GuideXosResult.Success;
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-100 NOTES-LAUNCH-ENTRY"u8);
+#endif
         bool documentActivation = host.LaunchContext.IsDocumentActivation;
         if (documentActivation && (host.Selector != 4u ||
                 !host.LaunchContext.HasText))
             return GuideXosResult.InvalidArgument;
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-101 NOTES-CONTEXT-VALIDATED"u8);
+#endif
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
         _c152Enabled = true;
         if (_c152Enabled) _c152DocumentState.InitializeUntitled(_textArea);
@@ -828,6 +837,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
         }
 #endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-102 NOTES-SETTINGS-CONTEXT-READY"u8);
+#endif
         uint launchCount = ++_launchCount;
         uint threadLaunchCount = ++s_threadLaunchCount;
         if (threadLaunchCount != launchCount)
@@ -838,6 +850,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 
         _picker.Reset();
         _saveInvocation = 0;
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-103 NOTES-STARTUP-STATE-RESET"u8);
+#endif
 #if HOSTLOGPROOF_C133_REUSABLE_COMBOBOX
         _c133ProofContext = host.LaunchContext.Utf8.SequenceEqual("c133"u8) ||
             host.LaunchContext.Utf8.SequenceEqual("c133-host"u8);
@@ -1295,6 +1310,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-110 NOTES-CONTROL-INITIALIZATION-BEGIN"u8);
+#endif
         if (_c120ProofContext)
         {
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
@@ -1314,6 +1332,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
             {
                 _showStatusCheckBox.SetEnabled(false);
             }
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            host.TryLog("C188R3-111 NOTES-CONTROL-HOST-CREATE-BEGIN"u8);
 #endif
             _mainControlHost = new GuideXosControlHost(
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
@@ -1344,6 +1365,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
             _mainControlHost.Reset();
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            host.TryLog("C188R3-112 NOTES-CONTROL-HOST-RESET-DONE"u8);
+#endif
             _mainControlHost.TryRegisterButton(C120OpenControlId, _openButton);
             _mainControlHost.TryRegisterButton(C120SaveControlId, _saveButton);
             _mainControlHost.TryRegisterButton(C120SaveAsControlId, _saveAsButton);
@@ -1396,15 +1420,27 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
                 )
             {
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+                host.TryLog("C188R3-120 NOTES-LIST-RESET-BEGIN"u8);
+#endif
                 _c137ListBox.Reset();
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+                host.TryLog("C188R3-121 NOTES-LIST-RESET-RETURN"u8);
+#endif
                 int fixtureRows = 12;
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
                 if (_c147RuntimeConsumerContext) fixtureRows = 40;
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+                host.TryLog("C188R3-122 NOTES-LIST-POPULATION-BEGIN"u8);
 #endif
                 for (int index = 0; index < fixtureRows; index++)
                 {
                     _c137ListBox.TryAdd(C137FixtureLabel(index));
                 }
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+                host.TryLog("C188R3-123 NOTES-LIST-POPULATION-RETURN"u8);
+#endif
 #if HOSTLOGPROOF_C148_SETTINGS_V2
                 if (_c147RuntimeConsumerContext)
                 {
@@ -1425,6 +1461,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 )
             {
                 _mainControlHost.TryRegisterListBox(C137ListControlId, _c137ListBox);
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+                host.TryLog("C188R3-124 NOTES-LIST-CONTROL-REGISTERED"u8);
+#endif
             }
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
             if (_c138ProofContext)
@@ -1720,6 +1759,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
         _useTextInput = _c118ProofContext;
 #endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-125 NOTES-CONTROL-INITIALIZATION-RETURN"u8);
+#endif
         _currentPath =
             documentActivation ? host.LaunchContext.DocumentPath :
 #if HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS
@@ -1856,8 +1898,14 @@ public sealed partial class ManagedNotes : GuideXosApplication
         {
         if (!documentActivation)
         {
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-130 NOTES-DOCUMENT-LOAD-BEGIN"u8);
+#endif
         loadResult = GuideXosFile.ReadAllTextUtf8(
             host, Encoding.UTF8.GetBytes(_currentPath), out byte[] loaded);
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-131 NOTES-DOCUMENT-LOAD-RETURN"u8);
+#endif
 #if HOSTLOGPROOF_C152_MANAGED_NOTES_SAVE_WORKFLOW
         if (_c152Enabled)
         {
@@ -1914,6 +1962,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
         _textArea.SetCaretToStart();
 #endif
         _textArea.Blur();
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-132 NOTES-DOCUMENT-STATE-READY"u8);
+#endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
         if (_c138ProofContext)
         {
@@ -1956,8 +2007,16 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-140 NOTES-SURFACE-REQUEST-BEGIN"u8);
+#endif
         GuideXosResult result = host.TryCreateSurface(
             "Managed Notes"u8, 600, 360, out GuideXosSurface surface);
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog(result == GuideXosResult.Success && surface != null
+            ? "C188R3-141 NOTES-SURFACE-REQUEST-SUCCESS"u8
+            : "C188R3-142 NOTES-SURFACE-REQUEST-FAILURE"u8);
+#endif
         if (result != GuideXosResult.Success || surface == null) return result;
         _window = surface.Handle;
 #if HOSTLOGPROOF_C175_MANAGED_NOTES_RESIZE
@@ -2021,10 +2080,19 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
         }
 #endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-150 NOTES-LAYOUT-INITIALIZATION-BEGIN"u8);
+        bool layoutInitialized = TryInitializeC175Layout();
+        host.TryLog(layoutInitialized
+            ? "C188R3-151 NOTES-LAYOUT-INITIALIZATION-RETURN-SUCCESS"u8
+            : "C188R3-152 NOTES-LAYOUT-INITIALIZATION-RETURN-FAILURE"u8);
+        if (!layoutInitialized) return GuideXosResult.InvalidArgument;
+#else
         if (!TryInitializeC175Layout())
         {
             return GuideXosResult.InvalidArgument;
         }
+#endif
 #if !HOSTLOGPROOF_C167_UI_FOCUSED_BUILD && !HOSTLOGPROOF_C166_ORDINARY_BUILD
 #if HOSTLOGPROOF_C156_CONTROL_MODIFIER_SHORTCUTS
         bool c156Modifiers = GuideXosInputTransportC156Tests.Run(host);
@@ -2104,11 +2172,21 @@ public sealed partial class ManagedNotes : GuideXosApplication
             _c138TestsRun = true;
         }
 #endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        _c188r3StartupRenderPending = true;
+        host.TryLog("C188R3-160 NOTES-FIRST-RENDER-BEGIN"u8);
+#endif
         if (!RenderMain(host, surface, launchCount)) return GuideXosResult.InvalidArgument;
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-161 NOTES-FIRST-RENDER-RETURN"u8);
+#endif
 #if HOSTLOGPROOF_C166_ORDINARY_BUILD
         host.TryLog("C166-ORDINARY-READY app=ManagedNotes render=PASS"u8);
 #endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-162 NOTES-POST-RENDER-SETTINGS-BEGIN"u8);
+#endif
         if (_c147RuntimeConsumerContext)
         {
             if (!LogC149KeyboardTips(host,
@@ -2121,6 +2199,9 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
                 return GuideXosResult.InvalidArgument;
         }
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog("C188R3-163 NOTES-POST-RENDER-SETTINGS-RETURN"u8);
+#endif
 #endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (_c125ProofContext)
@@ -2738,7 +2819,12 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
-        return textAreaTests
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        GuideXosResult launchResult = (
+#else
+        return (
+#endif
+            textAreaTests
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
             && c138Tests
 #endif
@@ -2785,7 +2871,13 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #endif
-            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument);
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        host.TryLog(launchResult == GuideXosResult.Success
+            ? "C188R3-170 NOTES-LAUNCH-RESULT-SUCCESS"u8
+            : "C188R3-171 NOTES-LAUNCH-RESULT-FAILURE"u8);
+        return launchResult;
+#endif
     }
 
 #if HOSTLOGPROOF_C118_MANAGED_LIST_BOX
@@ -5711,6 +5803,11 @@ public sealed partial class ManagedNotes : GuideXosApplication
 
     private bool RenderMain(GuideXosHost host, GuideXosSurface surface, uint launchCount)
     {
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        bool c188r3StartupRender = _c188r3StartupRenderPending;
+        if (c188r3StartupRender)
+            host.TryLog("C188R3-200 RENDER-MAIN-ENTRY"u8);
+#endif
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
         if (!SyncDocumentUsage()) return false;
 #endif
@@ -5727,38 +5824,123 @@ public sealed partial class ManagedNotes : GuideXosApplication
             _currentPath.AsSpan(), pathBuffer)];
         statusBuffer = statusBuffer[..Encoding.UTF8.GetBytes(
             _status.AsSpan(), statusBuffer)];
-        bool rendered = surface.TryFillRect(10, 10,
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        if (c188r3StartupRender)
+            host.TryLog("C188R3-201 RENDER-MAIN-BUFFERS-READY"u8);
+#endif
+        bool rendered =
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-210 RENDER-BACKGROUND-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+                surface.TryFillRect(10, 10,
+                    Math.Max(0, _c175Layout.ClientWidth - 20),
+                    Math.Max(0, _c175Layout.ClientHeight - 20), 0x007A5A9Au) ==
+                    GuideXosResult.Success,
+                "C188R3-211 RENDER-BACKGROUND-RETURN-SUCCESS"u8,
+                "C188R3-212 RENDER-BACKGROUND-RETURN-FAILURE"u8) &&
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-213 RENDER-HEADING-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+                GuideXosText.Line(surface, 24, "Managed Notes | "u8,
+                    "multiline text area"u8),
+                "C188R3-214 RENDER-HEADING-RETURN-SUCCESS"u8,
+                "C188R3-215 RENDER-HEADING-RETURN-FAILURE"u8) &&
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-216 RENDER-LAUNCH-COUNT-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+                GuideXosText.CountLine(surface, 48, "Launches: "u8,
+                    launchCount),
+                "C188R3-217 RENDER-LAUNCH-COUNT-RETURN-SUCCESS"u8,
+                "C188R3-218 RENDER-LAUNCH-COUNT-RETURN-FAILURE"u8) &&
+#else
+            surface.TryFillRect(10, 10,
                 Math.Max(0, _c175Layout.ClientWidth - 20),
                 Math.Max(0, _c175Layout.ClientHeight - 20), 0x007A5A9Au) ==
                 GuideXosResult.Success &&
             GuideXosText.Line(surface, 24, "Managed Notes | "u8, "multiline text area"u8) &&
             GuideXosText.CountLine(surface, 48, "Launches: "u8, launchCount) &&
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-219 RENDER-PATH-LABEL-BEGIN"u8) &&
+#endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
 #if HOSTLOGPROOF_C122_MANAGED_LABEL
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Observe(host, c188r3StartupRender,
+                (!_c122ProofContext || RenderPathLabel(surface)),
+                "C188R3-220 RENDER-PATH-LABEL-RETURN-SUCCESS"u8,
+                "C188R3-221 RENDER-PATH-LABEL-RETURN-FAILURE"u8) &&
+#else
             (!_c122ProofContext || RenderPathLabel(surface)) &&
+#endif
+#else
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Observe(host, c188r3StartupRender,
+                (!_c121ProofContext || !_showPathCheckBox.Checked ||
+                    GuideXosText.Line(surface,
+                        GuideXosManagedNotesLayoutC175.PathLabelY, "Path: "u8,
+                        pathBuffer)),
+                "C188R3-220 RENDER-PATH-LABEL-RETURN-SUCCESS"u8,
+                "C188R3-221 RENDER-PATH-LABEL-RETURN-FAILURE"u8) &&
 #else
             (!_c121ProofContext || !_showPathCheckBox.Checked ||
                 GuideXosText.Line(surface,
                     GuideXosManagedNotesLayoutC175.PathLabelY, "Path: "u8,
                     pathBuffer)) &&
 #endif
+#endif
+#else
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Observe(host, c188r3StartupRender,
+                GuideXosText.Line(surface,
+                    GuideXosManagedNotesLayoutC175.PathLabelY, "Path: "u8,
+                    pathBuffer),
+                "C188R3-220 RENDER-PATH-LABEL-RETURN-SUCCESS"u8,
+                "C188R3-221 RENDER-PATH-LABEL-RETURN-FAILURE"u8) &&
 #else
             GuideXosText.Line(surface,
                 GuideXosManagedNotesLayoutC175.PathLabelY, "Path: "u8,
                 pathBuffer) &&
 #endif
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-222 RENDER-TEXT-AREA-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+                _textArea.Render(surface,
+                    GuideXosManagedNotesLayoutC175.EditorX,
+                    GuideXosManagedNotesLayoutC175.EditorY,
+                    GuideXosManagedNotesLayoutC175.EditorLineHeight) ==
+                    GuideXosResult.Success,
+                "C188R3-223 RENDER-TEXT-AREA-RETURN-SUCCESS"u8,
+                "C188R3-224 RENDER-TEXT-AREA-RETURN-FAILURE"u8) &&
+#else
             _textArea.Render(surface,
                 GuideXosManagedNotesLayoutC175.EditorX,
                 GuideXosManagedNotesLayoutC175.EditorY,
                 GuideXosManagedNotesLayoutC175.EditorLineHeight) ==
                 GuideXosResult.Success &&
+#endif
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
             (!(_c137ProofContext
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
                 || _c147RuntimeConsumerContext
 #endif
-            ) || _c137ListBox.Render(surface, _c175Layout.ListX, 72, 18) ==
-                GuideXosResult.Success) &&
+            ) ||
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+                (C188R3Checkpoint(host, c188r3StartupRender,
+                    "C188R3-225 RENDER-LIST-BEGIN"u8) &&
+                C188R3Observe(host, c188r3StartupRender,
+                    _c137ListBox.Render(surface, _c175Layout.ListX, 72, 18) ==
+                        GuideXosResult.Success,
+                    "C188R3-226 RENDER-LIST-RETURN-SUCCESS"u8,
+                    "C188R3-227 RENDER-LIST-RETURN-FAILURE"u8))) &&
+#else
+                _c137ListBox.Render(surface, _c175Layout.ListX, 72, 18) ==
+                    GuideXosResult.Success) &&
+#endif
 #if HOSTLOGPROOF_C138_REUSABLE_SCROLLBAR
             (!_c138ProofContext || _c138TextScrollBar.Render(surface) ==
                 GuideXosResult.Success) &&
@@ -5766,6 +5948,24 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 GuideXosResult.Success) &&
 #endif
 #endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-228 RENDER-STATUS-BEGIN"u8) &&
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Observe(host, c188r3StartupRender,
+#if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
+                (!_c131ProofContext || _showStatusVisible
+                    ? GuideXosText.Line(surface, _c175Layout.StatusY, "Status: "u8,
+                        statusBuffer)
+                    : true),
+#else
+                GuideXosText.Line(surface, _c175Layout.StatusY, "Status: "u8,
+                    statusBuffer),
+#endif
+                "C188R3-229 RENDER-STATUS-RETURN-SUCCESS"u8,
+                "C188R3-230 RENDER-STATUS-RETURN-FAILURE"u8) &&
+#else
 #if HOSTLOGPROOF_C131_REUSABLE_CHECKBOX
             (!_c131ProofContext || _showStatusVisible
                 ? GuideXosText.Line(surface, _c175Layout.StatusY, "Status: "u8,
@@ -5775,6 +5975,22 @@ public sealed partial class ManagedNotes : GuideXosApplication
             GuideXosText.Line(surface, _c175Layout.StatusY, "Status: "u8,
                 statusBuffer) &&
 #endif
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-231 RENDER-EDITOR-INFO-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+#if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
+                GuideXosText.Line(surface, _c175Layout.EditorInfoY,
+                    "Document usage: "u8, ReadOnlySpan<byte>.Empty) &&
+                _documentUsage.Render(surface) == GuideXosResult.Success,
+#else
+                GuideXosText.Line(surface, _c175Layout.EditorInfoY,
+                    "Editor: "u8, "bounded ASCII; [] selection; | caret"u8),
+#endif
+                "C188R3-232 RENDER-EDITOR-INFO-RETURN-SUCCESS"u8,
+                "C188R3-233 RENDER-EDITOR-INFO-RETURN-FAILURE"u8) &&
+#else
 #if HOSTLOGPROOF_C125_MANAGED_PROGRESS_BAR
             GuideXosText.Line(surface, _c175Layout.EditorInfoY,
                 "Document usage: "u8, ReadOnlySpan<byte>.Empty) &&
@@ -5783,8 +5999,18 @@ public sealed partial class ManagedNotes : GuideXosApplication
             GuideXosText.Line(surface, _c175Layout.EditorInfoY,
                 "Editor: "u8, "bounded ASCII; [] selection; | caret"u8) &&
 #endif
+#endif
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-234 RENDER-KEYBOARD-TIPS-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+                RenderC149KeyboardTips(surface),
+                "C188R3-235 RENDER-KEYBOARD-TIPS-RETURN-SUCCESS"u8,
+                "C188R3-236 RENDER-KEYBOARD-TIPS-RETURN-FAILURE"u8) &&
+#else
             RenderC149KeyboardTips(surface) &&
+#endif
 #endif
 #if HOSTLOGPROOF_C123_MANAGED_SEPARATOR
             (!_c123ProofContext || _separator.Render(surface) == GuideXosResult.Success) &&
@@ -5809,9 +6035,30 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
 #endif
 #if HOSTLOGPROOF_C119_MANAGED_BUTTON
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-237 RENDER-OPEN-BUTTON-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+                _openButton.Render(surface) == GuideXosResult.Success,
+                "C188R3-238 RENDER-OPEN-BUTTON-RETURN-SUCCESS"u8,
+                "C188R3-239 RENDER-OPEN-BUTTON-RETURN-FAILURE"u8) &&
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-240 RENDER-SAVE-BUTTON-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+                _saveButton.Render(surface) == GuideXosResult.Success,
+                "C188R3-241 RENDER-SAVE-BUTTON-RETURN-SUCCESS"u8,
+                "C188R3-242 RENDER-SAVE-BUTTON-RETURN-FAILURE"u8) &&
+            C188R3Checkpoint(host, c188r3StartupRender,
+                "C188R3-243 RENDER-SAVE-AS-BUTTON-BEGIN"u8) &&
+            C188R3Observe(host, c188r3StartupRender,
+                _saveAsButton.Render(surface) == GuideXosResult.Success,
+                "C188R3-244 RENDER-SAVE-AS-BUTTON-RETURN-SUCCESS"u8,
+                "C188R3-245 RENDER-SAVE-AS-BUTTON-RETURN-FAILURE"u8) &&
+#else
             _openButton.Render(surface) == GuideXosResult.Success &&
             _saveButton.Render(surface) == GuideXosResult.Success &&
             _saveAsButton.Render(surface) == GuideXosResult.Success &&
+#endif
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             (!_c121ProofContext || _showPathCheckBox.Render(surface) ==
                 GuideXosResult.Success) &&
@@ -5857,15 +6104,25 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 GuideXosResult.Success) &&
 #endif
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            true
+#else
             surface.TryAddButton(430, _c175Layout.SettingsY, 90, 28, "Settings"u8,
                 C150SettingsActionId, out _) == GuideXosResult.Success &&
+#endif
 #endif
 #endif
 #else
             surface.TryAddButton(20, _c175Layout.MainButtonsY, 90, 28, "Open"u8, 20u, out _) == GuideXosResult.Success &&
             surface.TryAddButton(120, _c175Layout.MainButtonsY, 90, 28, "Save"u8, 22u, out _) == GuideXosResult.Success &&
-            surface.TryAddButton(220, _c175Layout.MainButtonsY, 100, 28, "Save As"u8, 21u, out _) == GuideXosResult.Success &&
+            surface.TryAddButton(220, _c175Layout.MainButtonsY, 100, 28, "Save As"u8, 21u, out _) == GuideXosResult.Success
+#if !HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            &&
 #endif
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+            ;
+#else
 #if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
             (_c121ProofContext
                 ? surface.TryAddButton(468, _c175Layout.MainButtonsY, 90, 28, "Reload"u8,
@@ -5874,6 +6131,45 @@ public sealed partial class ManagedNotes : GuideXosApplication
                     3u, out _)) == GuideXosResult.Success;
 #else
             surface.TryAddButton(330, _c175Layout.MainButtonsY, 90, 28, "Reload"u8, 3u, out _) == GuideXosResult.Success;
+#endif
+#endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+        if (rendered)
+        {
+            if (c188r3StartupRender)
+                host.TryLog("C188R3-246 RENDER-SETTINGS-BUTTON-BEGIN"u8);
+            GuideXosResult settingsResult = surface.TryAddButton(430,
+                _c175Layout.SettingsY, 90, 28, "Settings"u8,
+                C150SettingsActionId, out _);
+            if (c188r3StartupRender)
+                host.TryLog(settingsResult == GuideXosResult.Success
+                    ? "C188R3-247 RENDER-SETTINGS-BUTTON-RETURN-SUCCESS"u8
+                    : "C188R3-248 RENDER-SETTINGS-BUTTON-RETURN-FAILURE"u8);
+            rendered = settingsResult == GuideXosResult.Success;
+        }
+#endif
+        if (rendered)
+        {
+            if (c188r3StartupRender)
+                host.TryLog("C188R3-249 RENDER-RELOAD-BUTTON-BEGIN"u8);
+            GuideXosResult reloadResult =
+#if HOSTLOGPROOF_C121_MANAGED_CHECKBOX
+                _c121ProofContext
+                    ? surface.TryAddButton(468, _c175Layout.MainButtonsY, 90, 28,
+                        "Reload"u8, 3u, out _)
+                    : surface.TryAddButton(330, _c175Layout.MainButtonsY, 90, 28,
+                        "Reload"u8, 3u, out _);
+#else
+                surface.TryAddButton(330, _c175Layout.MainButtonsY, 90, 28,
+                    "Reload"u8, 3u, out _);
+#endif
+            if (c188r3StartupRender)
+                host.TryLog(reloadResult == GuideXosResult.Success
+                    ? "C188R3-250 RENDER-RELOAD-BUTTON-RETURN-SUCCESS"u8
+                    : "C188R3-251 RENDER-RELOAD-BUTTON-RETURN-FAILURE"u8);
+            rendered = reloadResult == GuideXosResult.Success;
+        }
 #endif
 #if HOSTLOGPROOF_C151_MANAGED_OPEN_FILE_DIALOG
         if (rendered && _c151ProofContext && _c151OpenFileDialog.IsOpen)
@@ -5893,8 +6189,34 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 GuideXosResult.Success;
         }
 #endif
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        if (c188r3StartupRender)
+        {
+            host.TryLog(rendered
+                ? "C188R3-299 RENDER-MAIN-RETURN-SUCCESS"u8
+                : "C188R3-298 RENDER-MAIN-RETURN-FAILURE"u8);
+            _c188r3StartupRenderPending = false;
+        }
+#endif
         return rendered;
     }
+
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+    private static bool C188R3Checkpoint(GuideXosHost host, bool active,
+        ReadOnlySpan<byte> marker)
+    {
+        if (active) host.TryLog(marker);
+        return true;
+    }
+
+    private static bool C188R3Observe(GuideXosHost host, bool active,
+        bool result, ReadOnlySpan<byte> successMarker,
+        ReadOnlySpan<byte> failureMarker)
+    {
+        if (active) host.TryLog(result ? successMarker : failureMarker);
+        return result;
+    }
+#endif
 
 #if HOSTLOGPROOF_C149_SECOND_RUNTIME_SETTING
     internal static ReadOnlySpan<byte> KeyboardTipsText(bool showTips) =>

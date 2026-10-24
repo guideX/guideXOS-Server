@@ -7,12 +7,17 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'C188 hosted tests require PowerShell Core.'
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity'))
+$phaseRoots = @(
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r3-notes-startup-diagnostics')))
 $root = [System.IO.Path]::GetFullPath($OutputRoot)
-$relative = [System.IO.Path]::GetRelativePath($phaseRoot, $root)
-if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-    [System.IO.Path]::IsPathRooted($relative)) {
-    throw "OutputRoot must be a unique directory below $phaseRoot."
+$allowedRoot = @($phaseRoots | Where-Object {
+    $relative = [System.IO.Path]::GetRelativePath($_, $root)
+    $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
+        -not [System.IO.Path]::IsPathRooted($relative)
+} | Select-Object -First 1)
+if ($allowedRoot.Count -eq 0) {
+    throw "OutputRoot must be a unique directory below one of: $($phaseRoots -join ', ')."
 }
 if (Test-Path -LiteralPath $root) {
     throw "Refusing to overwrite C188 hosted test output: $root"

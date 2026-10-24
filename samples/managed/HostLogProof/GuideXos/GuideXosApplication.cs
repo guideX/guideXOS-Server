@@ -313,12 +313,34 @@ public static unsafe class GuideXosApplicationRegistry
             return GxAbi.ErrorInvalidApplicationId;
         }
 
+#if HOSTLOGPROOF_C188R3_NOTES_STARTUP
+        GuideXosResult result;
+        if (host.LaunchContext.IsInput)
+        {
+            result = application.HandleInput(host, input);
+        }
+        else if (host.IsAction)
+        {
+            result = GuideXosManagedWindowResizeDispatchC180.DispatchAction(
+                application, host, host.LaunchContext.ActionId);
+        }
+        else
+        {
+            host.TryLog("C188R3-010 APPLICATION-LAUNCH-BEGIN"u8);
+            result = application.Launch(host);
+            host.TryLog("C188R3-011 APPLICATION-LAUNCH-RETURN"u8);
+            host.TryLog(result == GuideXosResult.Success
+                ? "C188R3-012 APPLICATION-RESULT-SUCCESS"u8
+                : "C188R3-013 APPLICATION-RESULT-FAILURE"u8);
+        }
+#else
         GuideXosResult result = host.LaunchContext.IsInput
             ? application.HandleInput(host, input)
             : host.IsAction
                 ? GuideXosManagedWindowResizeDispatchC180.DispatchAction(
                     application, host, host.LaunchContext.ActionId)
                 : application.Launch(host);
+#endif
 #if HOSTLOGPROOF_C160_APPLICATION_SNAPSHOT_PROOF
         if (result == GuideXosResult.Success && isNewLaunch &&
             !host.IsCapabilityProbe && !host.IsAbiProbe)

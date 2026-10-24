@@ -1,12 +1,13 @@
 param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [Parameter(Mandatory=$true)][string]$EvidenceRoot,
+    [Parameter()][switch]$NotesStartupDiagnostics,
     [Parameter()][string]$ReadElfPath = 'C:\mingw64\bin\readelf.exe'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity'))
+$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $(if ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' })))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
 foreach ($path in @($candidate,$evidence)) {
@@ -57,6 +58,26 @@ $elfText = [System.Text.Encoding]::ASCII.GetString($elfBytes)
 foreach ($marker in @('C188-FACTORY selector=9 identity=com.guidexos.apps.managed.counterapp','C188-WINDOW selector=9 identity=com.guidexos.apps.managed.counterapp','C188-INPUT selector=9 identity=com.guidexos.apps.managed.counterapp')) {
     if (-not $elfText.Contains($marker)) { throw "C188 ELF omitted required retained marker $marker" }
 }
+$notesSources = @(
+    (Join-Path $repo 'samples/managed/HostLogProof/GuideXos/GuideXosApplication.cs'),
+    (Join-Path $repo 'samples/managed/HostLogProof/Applications/ManagedNotes.cs')
+)
+$allNotesMarkers = [System.Collections.Generic.List[string]]::new()
+foreach ($sourcePath in $notesSources) {
+    $sourceText = [System.IO.File]::ReadAllText($sourcePath)
+    foreach ($match in [regex]::Matches($sourceText,'C188R3-\d{3} [A-Z][A-Z0-9 -]+')) {
+        if (-not $allNotesMarkers.Contains($match.Value)) { $allNotesMarkers.Add($match.Value) }
+    }
+}
+if ($NotesStartupDiagnostics) {
+    foreach ($marker in $allNotesMarkers) {
+        if (-not $elfText.Contains($marker)) { throw "C188R3 diagnostic ELF omitted required retained marker $marker" }
+    }
+} else {
+    foreach ($marker in $allNotesMarkers) {
+        if ($elfText.Contains($marker)) { throw "Ordinary C188 ELF contains proof-only startup instrumentation $marker" }
+    }
+}
 
 $headerPath = Join-Path $evidence 'HostLogProof.readelf-header.txt'
 $programPath = Join-Path $evidence 'HostLogProof.readelf-program-headers.txt'
@@ -97,12 +118,17 @@ foreach ($entry in $artifacts.GetEnumerator()) {
     $item = Get-Item -LiteralPath $entry.Value
     $fileEvidence[$entry.Key] = [ordered]@{path=$item.FullName;bytes=$item.Length;sha256=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash}
 }
+$nativeAotMode = if ($NotesStartupDiagnostics) {
+    'C160Composite+C185Boundary+C188ExternalAppIdentity'
+} else {
+    'C167ProofComposite+C185Boundary+C188ExternalAppIdentity'
+}
 $manifest = [ordered]@{
-    result='PASS';candidateRoot=$candidate;nativeAotMode='C167ProofComposite+C185Boundary+C188ExternalAppIdentity'
+    result='PASS';candidateRoot=$candidate;nativeAotMode=$nativeAotMode
     elfClass='ELF64';elfMachine='x86-64';loadSegmentCount=$loadCount;relocations=0
     nativeApplicationId='com.guidexos.apps.managed.counterapp';nativeSelector=9
     productionSelectors=@{notes=4;settings=5;calculator=6;taskManager=7;fileExplorer=8}
-    requiredRetainedSymbols=$symbolEvidence;artifacts=$fileEvidence
+    requiredRetainedSymbols=$symbolEvidence;notesStartupDiagnostics=[bool]$NotesStartupDiagnostics;retainedNotesMarkers=$(if ($NotesStartupDiagnostics) { @($allNotesMarkers) } else { @() });artifacts=$fileEvidence
     readelfEvidence=[ordered]@{header=$headerPath;programHeaders=$programPath;relocations=$relocationPath}
 }
 $manifestPath = Join-Path $evidence 'nativeaot-qualification.json'
