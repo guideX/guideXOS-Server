@@ -11796,3 +11796,189 @@ JS89 qualifies bounded own-key enumeration only. A future JS90 can first
 extend property metadata and audit native-created properties; a descriptor
 API should wait until the runtime can represent every reported attribute
 accurately, including Array `length` and host-created properties.
+
+## JS90 — Bounded Property Attributes
+
+JS90 adds explicit internal metadata for `writable`, `enumerable`, and
+`configurable`. It does not expose a public descriptor or property-mutation
+API.
+
+### Representation and property categories
+
+Before JS90, `RuntimeProperty` stored a string key, `Value`, a `readOnly`
+boolean, and a typed `WellKnownSymbol` key. The boolean represented only the
+existing script-write restriction; it could not truthfully describe
+enumerability or configurability. `RuntimeArrayElement` stored a `size_t`
+index and a `Value`, while `RuntimeObject::arrayLength` held the logical Array
+length separately.
+
+`RuntimeProperty` now owns a one-byte `PropertyAttributes` mask. Three bits
+store the values and three bits record whether each value is known. This lets
+the runtime distinguish a supported false value from an unclassified
+attribute. Ordinary script-created string and typed Symbol data properties
+start with all three attributes known and true. The old `readOnly` behavior is
+derived from a known false `writable` bit. Native replacement changes the
+value only, preserving the established attributes and insertion position.
+The privileged host refresh path likewise changes only a cached value.
+
+Occupied Array index records carry the same one-byte metadata and use a
+`uint32_t` index, which covers the language's canonical Array-index domain.
+This uses the former `size_t` padding: `RuntimeArrayElement` remains 48 B.
+An occupied index has ordinary writable, enumerable, configurable data
+attributes. A hole has no record and therefore no attributes; a present
+`undefined` value still has an occupied record. Shrinking length removes
+records, and growing it creates holes.
+
+Array `length` remains specialized logical storage, not a detached
+`RuntimeProperty`. Its fixed metadata is writable, nonenumerable, and
+nonconfigurable. Existing bounded numeric length writes remain authoritative.
+`Object.keys` omits `length`, filters supported own string properties by
+`enumerable`, retains JS89 numeric/insertion ordering, and ignores typed
+Symbols. It rejects ordinary receivers with string properties whose metadata
+is incomplete, preserving the host-property boundary.
+
+Native-created property classes are initialized according to their known
+construction contracts. Iterator-result `value` and `done` fields receive
+ordinary data attributes. Built-in and iterator method properties record
+known writability while leaving enumeration and configurability unknown.
+Event singleton properties record known nonwritability and unknown
+enumeration/configuration; `Object.keys(Event)` remains unsupported.
+Host wrappers continue to expose properties through separate host APIs, and
+iterator cursor state stays private. Configurability is represented but is
+not enforced because deletion and redefinition remain unsupported.
+
+Supported attribute categories are ordinary object literal and assignment
+data properties (including numeric-name strings and typed Symbols), occupied
+Array indices, the specialized Array `length`, and native iterator-result
+data properties. Native prototype methods, iterator cursor method properties,
+Event fields, and Event constants retain only the attributes justified by
+their current construction and mutation paths. Built-in namespaces,
+prototypes, iterator cursor objects, host wrappers, functions, and primitives
+remain outside `Object.keys`' supported receiver set. No host wrapper members
+or private cursor state are synthesized into ordinary properties.
+
+The prior script assignment contract is preserved: writes to a known
+nonwritable property are deterministic no-ops, while writes to writable
+properties change only their value. The dedicated host refresh operation can
+update cached Event values without weakening script protection or changing
+metadata. New properties validate that writability is known, initialize the
+full record before publication, and update bounded counters only after a
+successful insertion. Injected insertion failure leaves object identity,
+property counts, prior values, and prior attributes intact. No runtime pool
+capacity was raised.
+
+On the qualified x64 host compiler, the mask itself is 1 B while
+`RuntimeObject`, `RuntimeProperty`, Array element record, and `Value` remain
+88 B, 80 B, 48 B, and 40 B respectively. The one-byte fields fit existing
+record padding; there is no record-size increase. Existing limits remain
+1,024 objects, 256 properties per object, 4,096 total properties, 1,024
+bounded Array positions, 4,096 occupied Array records, 4,096 runtime string
+values, 2,048 environments, 2,048 host handles, and 128 DOM iterator records.
+
+### JS90 qualification
+
+The JS90 native lane uses strict C++17 compilation with
+`-Wall -Wextra -Werror -pedantic`, bounded allocation-failure injection,
+property-order and metadata checks, sparse Array tests, host safety checks,
+maximum-capacity cases, performance measurements, and hosted static stack
+reports. The focused JS79–JS89 regression run passed **2,355/2,355 checks**
+across 11 lanes. The JS84 no-diagnostics compatibility control passed
+**68/68 checks**.
+
+The JS90 native lane passed **544/544 checks**. Strict C++17 compilation
+passed for the JS90 harness and touched runtime/AST/parser code using
+`-Wall -Wextra -Werror -pedantic`; the full matrix also passed **92/92 lanes**
+and **16,663/16,663 reported assertions across 51 assertion-bearing lanes**.
+The qualification compiler was MinGW GCC 15.2.0 targeting
+`x86_64-w64-mingw32`.
+
+At maximum enumeration, `Object.keys` returned all 1,024 keys in a dense
+result with 1,024 records (49,152 B of vector record capacity), 6/1,024
+objects, 15/4,096 properties, and 2,048/4,096 occupied Array slots. Pool
+high-water was 6 objects, 15 properties, and 2,048 Array slots. A separate
+256-property object returned all 256 keys and used 271/4,096 properties
+including its result binding. The capacities remained unchanged.
+
+Representative five-sample median timings include parsing/evaluation unless
+the case says otherwise; they are observations, not thresholds:
+
+| Case | Median |
+|---|---:|
+| Ordinary object creation | 4 µs |
+| Ordinary assignment | 4 µs |
+| Read-only assignment (evaluation only) | 2 µs |
+| Property lookup | 5 µs |
+| Numeric-name lookup | 5 µs |
+| Sparse index insertion | 4 µs |
+| Array length shrink/grow | 6 µs |
+| `Object.keys`, 64 enumerable + 64 hidden | 7 µs |
+| Nested Event property access and `Object.keys` dispatch | 16 µs |
+| `Object.keys`, 64 numeric names | 69 µs |
+| `Object.keys`, 64 insertion-ordered names | 101 µs |
+| `Object.keys`, dense Array of 1,024 | 736 µs |
+| `Object.keys`, one occupied slot at length 1,024 | 6 µs |
+| `Object.keys`, three 256-key snapshots | 195 µs |
+
+The compiler's hosted static stack report measured 352 B for Array-literal
+evaluation, 480 B for `createObjectKeys` (with 192 B and 320 B enumeration
+helpers), 736 B for `invokeNative`, 944 B for `executeForOf`, 176 B for
+`createArray`, 240 B for `readArrayIndex`, and 112 B for `setArrayLength`.
+The legacy writable-property overloads measured 224 B (string key) and
+128 B (`PropertyKey`); the attribute-aware overloads measured 192 B and
+272 B respectively. These hosted compiler figures are not bare-metal stack
+guarantees.
+
+The fresh production build passed from starting HEAD
+`4db21a9ef5de561490325e384ad964a93c770923`. It produced an 8,688,833-byte
+`guideXOSServer.exe` with SHA-256
+`E48ADA6722FB3A522DE004C439167A56CB5A4EE242ADBE194446A835F605D728`.
+The hosted server used `D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`
+(PID 19628, same SHA-256 as the fresh build). The JS90 page reported
+**12/12 assertions and zero failures**;
+all four JS90 hosted aggregate checks passed, including ordinary assignment,
+numeric/insertion ordering, sparse holes versus explicit `undefined`,
+writable Array length, typed Symbol iteration, JS81 entry-pair Arrays, and
+nested Event callbacks.
+
+The hosted aggregate reported **703/710 checks**. Its only failures were the
+seven established CSS checks: phase 3C baselines/clipping/hit targets/focus,
+phase 3G parser/containing-block diagnostics, phase 6A nested scrolling,
+three phase 6B sticky/fixed-descendant checks, and phase 6C sticky/fixed/
+clipping/flex behavior. No hosted JavaScript check failed. The aggregate
+therefore printed `NAVIGATOR_SMOKE_RESULT: FAIL` for that known CSS baseline.
+
+Preflight began on branch `NAVIGATOR_JAVASCRIPT_SUPPORT` at the stated
+starting HEAD, **1 ahead / 0 behind** its upstream, with a clean tracked tree,
+no JS90-or-later qualification present, and `.phase` absent. The ignored
+manifest contained **1,367 files / 90,843,932 bytes**. The production build
+and hosted run changed only the ignored `guideXOSServer.exe`; it was restored
+from the external preflight backup at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js90-evidence\run-20261024-144434\ignored-baseline\guideXOSServer.exe`.
+The restored executable matched its original 8,398,274-byte size and SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+All **1,367/1,367** ignored baseline files were backed up and rechecked. The
+final ignored manifest matched exactly: **1,367 files / 90,843,932 bytes**,
+with zero changed, missing, or extra files. The recursive manifest excluded
+`.git`: it moved from **9,458 files / 704,936,372 bytes** to **9,461 files /
+705,057,538 bytes**, with five expected changed files, the three new JS90
+files, and zero missing files or unrelated extras. No `.phase` file was
+created. No kernel or QEMU run was performed; that path is not required for
+the Navigator native/hosted qualification.
+
+During the run, the local `origin/NAVIGATOR_JAVASCRIPT_SUPPORT` tracking ref
+advanced to the starting JS89 HEAD; its reflog records an update by push at
+2026-10-24 14:57 -0700. This run did not fetch or push. The pre-commit refs
+therefore matched; the local JS90 commit leaves the branch **1 ahead / 0
+behind** its then-current upstream.
+
+The preflight/final ignored manifests, recursive manifests, and comparison
+record are in that same external evidence directory. The external
+qualification logs are under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js90-evidence\run-20261024-144434\`.
+
+No public descriptor API, deletion/redefinition machinery, capacity increase,
+object reclamation, slot reuse, parser/evaluator refactor, selector change,
+or kernel/QEMU behavior is part of JS90. The recommended JS91 direction is a
+read-only own-data-property descriptor snapshot, limited to categories with
+fully classified attributes and only after reviewing own-key lookup, typed
+Symbol identity, Array `length`, ordering, and host inclusion boundaries.

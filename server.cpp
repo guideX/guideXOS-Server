@@ -5700,6 +5700,45 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js89AfterClick, 1000) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js90FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js90.html";
+    const bool js90Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js90FixtureUrl);
+    const std::string js90InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS90 bounded property-attribute fixture passes on the hosted server",
+        js90Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js90FixtureUrl &&
+        contains(js90InitialText, "Navigator JavaScript JS90") &&
+        contains(js90InitialText, "JS90:assertions=12:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js90Loaded) + ",text=" +
+        summarizeText(js90InitialText, 1400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS90 hosted ordinary assignment and JS89 key ordering pass",
+        js90Loaded && contains(js90InitialText,
+            ":object=true:ordering=true:sparse=true:boundedSparse=true") &&
+        contains(js90InitialText, ":snapshot=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted checks preserve ordinary replacement, numeric ordering, sparse holes, explicit undefined, and snapshots");
+    add("JS90 hosted writable length, typed Symbol iteration, and entry pairs pass",
+        js90Loaded && contains(js90InitialText,
+            ":writableLength=true:symbolIterator=true:snapshot=true") &&
+        contains(js90InitialText, ":iterable=true:pairs=true:events=ready") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "Array length remains writable and specialized; Symbol.iterator and JS81 pair Arrays remain interoperable");
+    const bool js90Click = js90Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("event-a");
+    const std::string js90AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS90 nested Event callbacks preserve read-only host property behavior",
+        js90Click && contains(js90AfterClick,
+            "JS90:event:nested=true:outer=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js90Click) + ",text=" +
+        summarizeText(js90AfterClick, 1000) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

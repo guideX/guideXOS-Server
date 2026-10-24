@@ -1402,10 +1402,13 @@ private:
         }
         for (const RuntimeContext::RuntimeProperty& property :
             source->properties) {
-            if (property.readOnly) {
-                // The current property record only tracks write protection.
-                // Host-created Event fields do not carry enough metadata to
-                // make an enumerable-own-key claim.
+            if (property.symbolKey == WellKnownSymbol::None &&
+                (!property.attributes.isValid() ||
+                    !property.attributes.isFullyKnown())) {
+                // Host-created Event fields have known write protection but
+                // unknown enumeration/configuration attributes. Keep those
+                // receivers outside Object.keys until their contract is
+                // qualified independently.
                 fail(RuntimeErrorCode::InvalidReceiver, callSite);
                 return false;
             }
@@ -1442,6 +1445,9 @@ private:
                 const std::size_t index = source->elements[position].index;
                 if (index >= source->arrayLength ||
                     index > context_.limits_.maxArrayIndex ||
+                    !source->elements[position].attributes.isValid() ||
+                    !source->elements[position].attributes.isFullyKnown() ||
+                    !source->elements[position].attributes.enumerable() ||
                     (position != 0u && index <= previousArrayIndex)) {
                     fail(RuntimeErrorCode::InvalidAstState, callSite);
                     return false;
@@ -1456,6 +1462,7 @@ private:
             if (!context_.consumeStep(callSite)) return false;
             if (property.symbolKey != WellKnownSymbol::None ||
                 (source->array && property.key == "length")) continue;
+            if (!property.attributes.enumerable()) continue;
             std::uint32_t standardIndex = 0u;
             if (source->array && parseEcmaArrayIndex(property.key,
                     standardIndex)) {
@@ -1557,6 +1564,7 @@ private:
         if (source->array) {
             for (const RuntimeContext::RuntimeArrayElement& element :
                 source->elements) {
+                if (!element.attributes.enumerable()) continue;
                 if (!appendIndex(element.index)) return false;
             }
         } else {
@@ -1571,7 +1579,8 @@ private:
                     if (!context_.consumeStep(callSite)) return false;
                     const RuntimeContext::RuntimeProperty& property =
                         source->properties[position];
-                    if (property.symbolKey != WellKnownSymbol::None) continue;
+                    if (property.symbolKey != WellKnownSymbol::None ||
+                        !property.attributes.enumerable()) continue;
                     std::uint32_t index = 0u;
                     if (!parseEcmaArrayIndex(property.key, index) ||
                         (hasPreviousIndex && index <= previousIndex)) continue;
@@ -1594,7 +1603,8 @@ private:
             source->properties) {
             if (!context_.consumeStep(callSite)) return false;
             if (property.symbolKey != WellKnownSymbol::None ||
-                (source->array && property.key == "length")) continue;
+                (source->array && property.key == "length") ||
+                !property.attributes.enumerable()) continue;
             std::uint32_t standardIndex = 0u;
             if (!source->array && parseEcmaArrayIndex(property.key,
                     standardIndex)) continue;
@@ -1801,10 +1811,12 @@ private:
             symbolIteratorKey.symbol = WellKnownSymbol::Iterator;
             if (!context_.writeProperty(iteratorId, "next",
                     Value::function(context_.arrayIteratorNextFunction_),
-                    error) ||
+                    error,
+                    RuntimeContext::PropertyAttributes::writableOnly(true)) ||
                 !context_.writeProperty(iteratorId, symbolIteratorKey,
                     Value::function(context_.arrayIteratorSelfFunction_),
-                    error)) {
+                    error,
+                    RuntimeContext::PropertyAttributes::writableOnly(true))) {
                 context_.objects_.resize(objectCountBefore);
                 context_.totalPropertyCount_ = propertyCountBefore;
                 context_.totalPropertyKeyBytes_ = propertyKeyBytesBefore;
@@ -3068,6 +3080,14 @@ void RuntimeContext::clearRuntimeState()
     eventImmediatePropagationStopped_ = false;
     eventDefaultPrevented_ = false;
     eventCancelable_ = true;
+#if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+    failNextArrayCreationForTesting_ = false;
+    failNextArraySlotInsertionForTesting_ = false;
+    failNextObjectKeysScratchAllocationForTesting_ = false;
+    failNextObjectKeysStringCreationForTesting_ = false;
+    failNextObjectKeysElementInsertionForTesting_ = false;
+    failNextPropertyInsertionForTesting_ = false;
+#endif
     hostObjects_.clear();
     hostMethods_.clear();
     hostGlobalSpecs_.clear();
@@ -3405,7 +3425,11 @@ bool RuntimeContext::createArray(std::size_t logicalLength,
     for (std::size_t position = 0u; position < initialElements.size();
         ++position) {
         const std::size_t index = initialElements[position].index;
-        if (index >= logicalLength ||
+        const PropertyAttributes& attributes =
+            initialElements[position].attributes;
+        if (index >= logicalLength || !attributes.isValid() ||
+            !attributes.isFullyKnown() || !attributes.writable() ||
+            !attributes.enumerable() || !attributes.configurable() ||
             (position != 0u && index <= previousIndex)) {
             error = RuntimeErrorCode::InvalidAstState;
             return false;
@@ -3518,6 +3542,16 @@ bool RuntimeContext::setArrayLength(RuntimeObjectId objectId,
         error = RuntimeErrorCode::CannotWriteProperty;
         return false;
     }
+    const PropertyAttributes lengthAttributes =
+        PropertyAttributes::arrayLength();
+    if (!lengthAttributes.isValid() || !lengthAttributes.hasWritable() ||
+        !lengthAttributes.writable() || !lengthAttributes.hasEnumerable() ||
+        lengthAttributes.enumerable() ||
+        !lengthAttributes.hasConfigurable() ||
+        lengthAttributes.configurable()) {
+        error = RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
     if (!value.isNumber()) {
         error = RuntimeErrorCode::TypeError;
         return false;
@@ -3574,7 +3608,8 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         RuntimeFunctionId function = kInvalidRuntimeFunctionId;
         if (!createNativeFunction(native, function, installError)) return false;
         return writeProperty(object, std::string(name),
-            Value::function(function), installError);
+            Value::function(function), installError,
+            PropertyAttributes::writableOnly(true));
     };
 
     if (!install(objectPrototype_, "hasOwnProperty",
@@ -3590,9 +3625,10 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
     PropertyKey symbolIteratorKey;
     symbolIteratorKey.symbol = WellKnownSymbol::Iterator;
     if (!writeProperty(arrayPrototype_, "values", arrayIteratorMethod,
-            error) ||
+            error, PropertyAttributes::writableOnly(true)) ||
         !writeProperty(arrayPrototype_, symbolIteratorKey,
-            arrayIteratorMethod, error) ||
+            arrayIteratorMethod, error,
+            PropertyAttributes::writableOnly(true)) ||
         !createNativeFunction(NativeFunctionId::ArrayIteratorNext,
             arrayIteratorNextFunction_, error) ||
         !createNativeFunction(NativeFunctionId::ArrayIteratorSelf,
@@ -3999,14 +4035,38 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
 {
     PropertyKey propertyKey;
     propertyKey.string = key;
-    return writeProperty(objectId, propertyKey, value, error, readOnly);
+    return writeProperty(objectId, propertyKey, value, error,
+        readOnly ? PropertyAttributes::writableOnly(false)
+            : PropertyAttributes::ordinaryData());
 }
 
 bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
     const PropertyKey& key, Value value, RuntimeErrorCode& error,
     bool readOnly)
 {
+    return writeProperty(objectId, key, value, error,
+        readOnly ? PropertyAttributes::writableOnly(false)
+            : PropertyAttributes::ordinaryData());
+}
+
+bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
+    const std::string& key, Value value, RuntimeErrorCode& error,
+    const PropertyAttributes& attributes)
+{
+    PropertyKey propertyKey;
+    propertyKey.string = key;
+    return writeProperty(objectId, propertyKey, value, error, attributes);
+}
+
+bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
+    const PropertyKey& key, Value value, RuntimeErrorCode& error,
+    const PropertyAttributes& attributes)
+{
     error = RuntimeErrorCode::None;
+    if (!attributes.isValid() || !attributes.hasWritable()) {
+        error = RuntimeErrorCode::InvalidAstState;
+        return false;
+    }
     if (key.isSymbol() && key.symbol != WellKnownSymbol::Iterator) {
         error = RuntimeErrorCode::InvalidPropertyKey;
         return false;
@@ -4026,6 +4086,10 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
     std::uint32_t standardIndex = 0u;
     if (!key.isSymbol() && object->array &&
         parseEcmaArrayIndex(key.string, standardIndex)) {
+        if (attributes.bits != PropertyAttributes::ordinaryData().bits) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
         const std::size_t index =
             static_cast<std::size_t>(standardIndex);
         if (index > limits_.maxArrayIndex) {
@@ -4086,11 +4150,15 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
             : property.symbolKey == WellKnownSymbol::None &&
                 property.key == key.string;
         if (matches) {
-            // Host-created Event properties are immutable from script. A
-            // non-strict assignment is a deterministic no-op; the host can
-            // still refresh the cached handle values through the dedicated
-            // updateExistingProperty path below.
-            if (property.readOnly) return true;
+            if (!property.attributes.isValid() ||
+                !property.attributes.hasWritable()) {
+                error = RuntimeErrorCode::InvalidAstState;
+                return false;
+            }
+            // Non-writable properties retain the established deterministic
+            // no-op assignment behavior. Host event refreshes use the
+            // dedicated updateExistingProperty path below.
+            if (!property.attributes.writable()) return true;
             property.value = value;
             return true;
         }
@@ -4113,7 +4181,13 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         if (!key.isSymbol()) property.key = key.string;
         property.symbolKey = key.symbol;
         property.value = value;
-        property.readOnly = readOnly;
+        property.attributes = attributes;
+#if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+        if (failNextPropertyInsertionForTesting_) {
+            failNextPropertyInsertionForTesting_ = false;
+            throw std::bad_alloc();
+        }
+#endif
         object->properties.push_back(std::move(property));
     } catch (const std::bad_alloc&) {
         GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedPropertyAllocations);

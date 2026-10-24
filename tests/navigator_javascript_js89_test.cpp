@@ -73,7 +73,8 @@ struct NavigatorScriptRuntimeTestAccess {
             object->properties) {
             if (property.symbolKey == WellKnownSymbol::None &&
                 property.key == key) {
-                readOnly = property.readOnly;
+                readOnly = property.attributes.hasWritable() &&
+                    !property.attributes.writable();
                 return true;
             }
         }
@@ -113,7 +114,9 @@ struct NavigatorScriptRuntimeTestAccess {
         for (const RuntimeContext::RuntimeProperty& property :
             object->properties) {
             if (property.symbolKey == WellKnownSymbol::None &&
-                property.key == key) return property.readOnly;
+                property.key == key && property.attributes.hasWritable()) {
+                return !property.attributes.writable();
+            }
         }
         return false;
     }

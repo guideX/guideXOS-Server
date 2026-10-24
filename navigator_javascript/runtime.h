@@ -391,18 +391,105 @@ private:
         EventPreventDefault,
     };
 
+    struct PropertyAttributes {
+        enum : std::uint8_t {
+            Writable = 1u << 0u,
+            Enumerable = 1u << 1u,
+            Configurable = 1u << 2u,
+            WritableKnown = 1u << 3u,
+            EnumerableKnown = 1u << 4u,
+            ConfigurableKnown = 1u << 5u,
+            ValueMask = Writable | Enumerable | Configurable,
+            KnownMask = WritableKnown | EnumerableKnown | ConfigurableKnown,
+            AllMask = ValueMask | KnownMask,
+        };
+
+        std::uint8_t bits = 0u;
+
+        static constexpr PropertyAttributes unknown()
+        {
+            return {0u};
+        }
+
+        static constexpr PropertyAttributes ordinaryData()
+        {
+            return {AllMask};
+        }
+
+        static constexpr PropertyAttributes writableOnly(bool writable)
+        {
+            return {static_cast<std::uint8_t>(
+                static_cast<std::uint8_t>(WritableKnown) |
+                (writable ? static_cast<std::uint8_t>(Writable)
+                    : static_cast<std::uint8_t>(0u)))};
+        }
+
+        static constexpr PropertyAttributes arrayLength()
+        {
+            return {static_cast<std::uint8_t>(Writable | WritableKnown |
+                EnumerableKnown | ConfigurableKnown)};
+        }
+
+        constexpr bool isValid() const
+        {
+            return (bits & static_cast<std::uint8_t>(~AllMask)) == 0u &&
+                ((bits & Writable) == 0u ||
+                    (bits & WritableKnown) != 0u) &&
+                ((bits & Enumerable) == 0u ||
+                    (bits & EnumerableKnown) != 0u) &&
+                ((bits & Configurable) == 0u ||
+                    (bits & ConfigurableKnown) != 0u);
+        }
+
+        constexpr bool hasWritable() const
+        {
+            return (bits & WritableKnown) != 0u;
+        }
+
+        constexpr bool hasEnumerable() const
+        {
+            return (bits & EnumerableKnown) != 0u;
+        }
+
+        constexpr bool hasConfigurable() const
+        {
+            return (bits & ConfigurableKnown) != 0u;
+        }
+
+        constexpr bool isFullyKnown() const
+        {
+            return (bits & KnownMask) == KnownMask;
+        }
+
+        constexpr bool writable() const { return (bits & Writable) != 0u; }
+        constexpr bool enumerable() const { return (bits & Enumerable) != 0u; }
+        constexpr bool configurable() const
+        {
+            return (bits & Configurable) != 0u;
+        }
+    };
+
     struct RuntimeProperty {
         std::string key;
         Value value;
-        bool readOnly = false;
-        // Uses padding after the existing string/value/flag fields so typed
-        // Symbol identity does not enlarge a bounded property record.
+        PropertyAttributes attributes = PropertyAttributes::unknown();
+        // Typed Symbol identity remains separate from string keys and uses
+        // the existing tail padding in this bounded record.
         WellKnownSymbol symbolKey = WellKnownSymbol::None;
     };
 
     struct RuntimeArrayElement {
-        std::size_t index = 0u;
+        // ECMAScript Array indices are bounded to uint32_t by the key parser.
+        // Pairing this with the attribute byte uses the old size_t padding.
+        std::uint32_t index = 0u;
+        PropertyAttributes attributes = PropertyAttributes::ordinaryData();
         Value value = Value::undefined();
+
+        RuntimeArrayElement() = default;
+        RuntimeArrayElement(std::size_t indexValue, const Value& elementValue)
+            : index(static_cast<std::uint32_t>(indexValue)),
+              attributes(PropertyAttributes::ordinaryData()),
+              value(elementValue) {}
     };
 
     struct RuntimeObject {
@@ -491,6 +578,12 @@ private:
         Value value, RuntimeErrorCode& error, bool readOnly = false);
     bool writeProperty(RuntimeObjectId object, const PropertyKey& key,
         Value value, RuntimeErrorCode& error, bool readOnly = false);
+    bool writeProperty(RuntimeObjectId object, const std::string& key,
+        Value value, RuntimeErrorCode& error,
+        const PropertyAttributes& attributes);
+    bool writeProperty(RuntimeObjectId object, const PropertyKey& key,
+        Value value, RuntimeErrorCode& error,
+        const PropertyAttributes& attributes);
     bool updateExistingProperty(RuntimeObjectId object, const std::string& key,
         Value value, RuntimeErrorCode& error);
     bool initializeBuiltIns(RuntimeErrorCode& error);
@@ -548,6 +641,7 @@ private:
     bool failNextObjectKeysScratchAllocationForTesting_ = false;
     bool failNextObjectKeysStringCreationForTesting_ = false;
     bool failNextObjectKeysElementInsertionForTesting_ = false;
+    bool failNextPropertyInsertionForTesting_ = false;
 #endif
 #ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
     RuntimeDiagnostics diagnostics_;

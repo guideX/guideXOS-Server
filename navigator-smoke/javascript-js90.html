@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS90</title></head>
+<body>
+<h1>Navigator JavaScript JS90</h1>
+<pre id="result">JS90:pending</pre>
+<section>
+  <i id="row-a" class="row"></i><i id="row-b" class="row"></i>
+</section>
+<button id="event-a" type="button">Run JS90 enumeration event</button>
+<button id="event-b" type="button">Nested JS90 enumeration event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var emptyKeys = Object.keys({});
+var item = { first: 1, second: 2 };
+item.first = 10;
+var objectKeys = Object.keys(item);
+verify(emptyKeys.length === 0 && objectKeys.length === 2 &&
+  objectKeys[0] === "first" && objectKeys[1] === "second" &&
+  item.first === 10);
+
+var ordered = {};
+ordered.beta = 1;
+ordered.alpha = 2;
+ordered["10"] = 10;
+ordered["2"] = 2;
+ordered["1"] = 1;
+ordered["01"] = 11;
+ordered["4294967295"] = 12;
+ordered[Symbol.iterator] = 13;
+var orderedKeys = Object.keys(ordered);
+verify(orderedKeys.length === 7 && orderedKeys[0] === "1" &&
+  orderedKeys[1] === "2" && orderedKeys[2] === "10" &&
+  orderedKeys[3] === "beta" && orderedKeys[4] === "alpha" &&
+  orderedKeys[5] === "01" && orderedKeys[6] === "4294967295");
+
+var sparse = [10, , 30];
+var sparseKeys = Object.keys(sparse);
+var explicit = [10, undefined, 30];
+var explicitKeys = Object.keys(explicit);
+verify(sparse.length === 3 && sparseKeys.length === 2 &&
+  sparseKeys[0] === "0" && sparseKeys[1] === "2" &&
+  !sparse.hasOwnProperty("1") && explicitKeys.length === 3 &&
+  explicitKeys[1] === "1" && explicit.hasOwnProperty("1"));
+verify(Object.keys([10, 20]).length === 2);
+
+var boundedSparse = [10, , undefined, 40];
+var boundedSparseKeys = Object.keys(boundedSparse);
+verify(boundedSparseKeys.length === 3 && boundedSparseKeys[0] === "0" &&
+  boundedSparseKeys[1] === "2" && boundedSparseKeys[2] === "3" &&
+  boundedSparse.hasOwnProperty("2") &&
+  !boundedSparse.hasOwnProperty("1"));
+
+var writableLength = [10, 20, 30];
+writableLength.length = 1;
+writableLength.length = 3;
+verify(writableLength.length === 3 && writableLength[0] === 10 &&
+  !writableLength.hasOwnProperty("1") &&
+  !writableLength.hasOwnProperty("2") &&
+  Object.keys(writableLength).length === 1);
+
+var symbolArray = [7];
+var symbolKeys = Object.keys(symbolArray);
+var symbolCursor = symbolArray[Symbol.iterator]();
+verify(symbolKeys.length === 1 && symbolKeys[0] === "0" &&
+  symbolCursor.next().value === 7 &&
+  symbolCursor[Symbol.iterator]() === symbolCursor);
+
+var stableSource = [10, , 30];
+var stableKeys = Object.keys(stableSource);
+stableSource.length = 0;
+verify(stableKeys.length === 2 && stableKeys[0] === "0" &&
+  stableKeys[1] === "2" && stableSource.length === 0);
+
+var iterated = 0;
+for (const key of sparseKeys) iterated++;
+var iterSource = [4, 5];
+var keyArray = Object.keys(iterSource);
+var cursorA = keyArray[Symbol.iterator]();
+var cursorB = keyArray[Symbol.iterator]();
+var firstA = cursorA.next();
+var firstB = cursorB.next();
+verify(iterated === 2 && cursorA[Symbol.iterator]() === cursorA &&
+  firstA.value === "0" && firstB.value === "0" &&
+  cursorA.next().value === "1" && cursorB.next().value === "1" &&
+  cursorA.next().done === true);
+
+var changing = [10, , 30];
+var beforeFill = Object.keys(changing);
+changing[1] = undefined;
+var afterFill = Object.keys(changing);
+changing.length = 1;
+var afterShrink = Object.keys(changing);
+changing.length = 3;
+var afterRegrow = Object.keys(changing);
+verify(beforeFill.length === 2 && afterFill.length === 3 &&
+  afterFill[1] === "1" && afterShrink.length === 1 &&
+  afterRegrow.length === 1 && !changing.hasOwnProperty("1"));
+
+var namedArray = [];
+namedArray["01"] = 1;
+namedArray["4294967295"] = 2;
+var namedArrayKeys = Object.keys(namedArray);
+verify(namedArrayKeys.length === 2 && namedArrayKeys[0] === "01" &&
+  namedArrayKeys[1] === "4294967295");
+
+var rows = document.querySelectorAll(".row");
+var pair = rows.entries().next().value;
+var pairKeys = Object.keys(pair);
+var pairBefore = pairKeys.length === 2 && pairKeys[0] === "0" &&
+  pairKeys[1] === "1";
+pair.length = 1;
+var pairShrunk = Object.keys(pair);
+pair.length = 2;
+var pairRegrown = Object.keys(pair);
+verify(pairBefore && pairShrunk.length === 1 && pairShrunk[0] === "0" &&
+  pairRegrown.length === 1 && pairRegrown[0] === "0" &&
+  pair[1] === undefined && elementPairIdentity());
+function elementPairIdentity() {
+  return pair[0] === 0 && pair[1] === undefined && rows[0].id === "row-a";
+}
+
+var eventValues = [];
+var nestedEventOk = false;
+var outerEventOk = false;
+var nestedKeysOk = false;
+var nestedTargetOk = false;
+var nestedCurrentTargetOk = false;
+var nestedPhaseOk = false;
+var eventA = document.getElementById("event-a");
+var eventB = document.getElementById("event-b");
+eventB.addEventListener("click", function(event) {
+  event.target = eventA;
+  eventValues[2] = undefined;
+  var keys = Object.keys(eventValues);
+  nestedKeysOk = keys.length === 2 && keys[0] === "0" &&
+    keys[1] === "2";
+  nestedTargetOk = event.target === eventB;
+  nestedCurrentTargetOk = event.currentTarget === eventB;
+  nestedPhaseOk = event.eventPhase === 2;
+  nestedEventOk = nestedKeysOk && nestedTargetOk &&
+    nestedCurrentTargetOk && nestedPhaseOk;
+});
+eventA.addEventListener("click", function(event) {
+  eventValues = [1, , 3];
+  var before = Object.keys(eventValues);
+  eventB.click();
+  var after = Object.keys(eventValues);
+  outerEventOk = before.length === 2 && after.length === 2 &&
+    after[0] === "0" && after[1] === "2" &&
+    event.target === eventA && event.currentTarget === eventA &&
+    event.eventPhase === 2;
+  document.getElementById("result").textContent =
+    "JS90:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+
+var marker = "JS90:assertions=" + assertions + ":failures=" + failures +
+  ":object=" + (objectKeys.length === 2) +
+  ":ordering=" + (orderedKeys.length === 7) +
+  ":sparse=" + (sparseKeys.length === 2 && explicitKeys.length === 3) +
+  ":boundedSparse=" + (boundedSparseKeys.length === 3 &&
+    boundedSparseKeys[1] === "2") +
+  ":writableLength=" + (writableLength.length === 3 &&
+    !writableLength.hasOwnProperty("1")) +
+  ":symbolIterator=" + (symbolCursor[Symbol.iterator]() === symbolCursor) +
+  ":snapshot=" + (stableKeys.length === 2) +
+  ":iterable=" + (iterated === 2) +
+  ":pairs=" + pairBefore + ":events=ready";
+document.getElementById("result").textContent = marker;
+</script>
+</body>
+</html>
