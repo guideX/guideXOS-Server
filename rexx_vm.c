@@ -100,7 +100,8 @@ static const char *const vm_messages[] = {
     "syntax error in interpreted source",
     "clock source unavailable or lacks a required capability",
     "invalid TRACE request",
-    "TRACE action requires unsupported interpreter capability"
+    "TRACE action requires unsupported interpreter capability",
+    "external data stack is empty and no input provider is available"
 };
 
 typedef struct RexxVMEnvironment RexxVMEnvironment;
@@ -595,10 +596,22 @@ static RexxVMStatus vm_fail(RexxVM *vm, RexxVMStatus status, size_t pc)
         vm->error.status = status;
         vm->error.pc = pc;
         vm->error.message = status >= REXX_VM_STATUS_OK &&
-                            status <= REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY
+                            status <= REXX_VM_STATUS_INPUT_UNAVAILABLE
                                 ? vm_messages[status] : "unknown VM error";
     }
     return status;
+}
+
+static void *vm_data_stack_allocate(void *context, size_t size)
+{
+    (void)context;
+    return vm_malloc(size);
+}
+
+static void vm_data_stack_deallocate(void *context, void *allocation)
+{
+    (void)context;
+    vm_free(allocation);
 }
 
 static int find_entry(const RexxVMEntry *entries, size_t count,
@@ -1329,6 +1342,10 @@ RexxVMStatus rexx_vm_init(RexxVM *vm, size_t stack_capacity)
 {
     if (vm == NULL) return REXX_VM_STATUS_INVALID_ARGUMENT;
     memset(vm, 0, sizeof(*vm));
+    if (rexx_data_stack_init(&vm->data_stack, vm_data_stack_allocate,
+                             vm_data_stack_deallocate, vm) !=
+        REXX_DATA_STACK_OK)
+        return vm_fail(vm, REXX_VM_STATUS_INVALID_ARGUMENT, 0);
     if (stack_capacity == 0) stack_capacity = REXX_VM_DEFAULT_STACK_CAPACITY;
     if (stack_capacity > REXX_VM_MAX_STACK_CAPACITY ||
         stack_capacity > SIZE_MAX / sizeof(*vm->stack))
@@ -1433,6 +1450,7 @@ void rexx_vm_free(RexxVM *vm)
     vm_free(vm->argument_string);
     vm_free(vm->condition_description);
     free_condition_target_names(vm->condition_target_names);
+    rexx_data_stack_destroy(&vm->data_stack);
     memset(vm, 0, sizeof(*vm));
 }
 
@@ -2604,6 +2622,7 @@ static RexxVMStatus execute_parse(RexxVM *vm,
     RexxVMEnvironment *overlay = NULL;
     void *previous_overlay;
     RexxValue input = REXX_VALUE_INIT;
+    RexxDataStackItem pull_item = REXX_DATA_STACK_ITEM_INIT;
     const char *source = empty_string;
     size_t source_length = 0u;
     char *source_copy = NULL;
@@ -2614,7 +2633,7 @@ static RexxVMStatus execute_parse(RexxVM *vm,
     if (chunk->parse_plans == NULL || plan_index >= chunk->parse_plan_count)
         return REXX_VM_STATUS_INVALID_BYTECODE;
     plan = &chunk->parse_plans[plan_index];
-    if (plan->source_kind > REXX_PARSE_SOURCE_VALUE ||
+    if (plan->source_kind > REXX_PARSE_SOURCE_PULL ||
         plan->uppercase > 1u ||
         plan->reserved != 0u ||
         plan->first_template > chunk->parse_template_count ||
@@ -2630,11 +2649,32 @@ static RexxVMStatus execute_parse(RexxVM *vm,
         return REXX_VM_STATUS_INVALID_BYTECODE;
     }
 
+    /* PULL consumes before template parsing, matching the REXX data-stack
+     * contract. The removed node stays owned locally until every error path
+     * has completed. */
+    if (plan->source_kind == REXX_PARSE_SOURCE_PULL) {
+        RexxDataStackStatus pull_status = rexx_data_stack_take_head(
+            &vm->data_stack, &pull_item);
+        if (pull_status == REXX_DATA_STACK_EMPTY)
+            return REXX_VM_STATUS_INPUT_UNAVAILABLE;
+        if (pull_status != REXX_DATA_STACK_OK) {
+            rexx_data_stack_item_clear(&pull_item);
+            return REXX_VM_STATUS_INVALID_BYTECODE;
+        }
+        if (plan->template_count == 0u) {
+            rexx_data_stack_item_clear(&pull_item);
+            return REXX_VM_STATUS_OK;
+        }
+    }
+
     destination = vm->active_parse_overlay != NULL
         ? (RexxVMEnvironment *)vm->active_parse_overlay
         : (RexxVMEnvironment *)vm->current_environment;
     overlay = environment_new(vm, destination, 0);
-    if (overlay == NULL) return REXX_VM_STATUS_OUT_OF_MEMORY;
+    if (overlay == NULL) {
+        rexx_data_stack_item_clear(&pull_item);
+        return REXX_VM_STATUS_OUT_OF_MEMORY;
+    }
     overlay->transparent_parent = 1;
     previous_overlay = vm->active_parse_overlay;
     vm->active_parse_overlay = overlay;
@@ -2696,6 +2736,9 @@ static RexxVMStatus execute_parse(RexxVM *vm,
         if (status == REXX_VM_STATUS_OK)
             status = value_string(&input, &source_copy, &source_length);
         if (status == REXX_VM_STATUS_OK) source = source_copy;
+    } else if (plan->source_kind == REXX_PARSE_SOURCE_PULL) {
+        source = (const char *)pull_item.bytes;
+        source_length = pull_item.length;
     } else {
         status = pop_move(vm, &input);
         if (status == REXX_VM_STATUS_OK)
@@ -2751,6 +2794,52 @@ cleanup:
     environment_free(overlay);
     vm_free(source_copy);
     rexx_value_clear(&input);
+    rexx_data_stack_item_clear(&pull_item);
+    return status;
+}
+
+static RexxVMStatus execute_data_stack_insert(RexxVM *vm,
+                                              const RexxInstruction *ins,
+                                              int at_head)
+{
+    static const char empty_string[] = "";
+    RexxValue value = REXX_VALUE_INIT;
+    const char *bytes = empty_string;
+    char *converted = NULL;
+    size_t length = 0u;
+    RexxDataStackStatus stack_status;
+    RexxVMStatus status = REXX_VM_STATUS_OK;
+
+    if ((ins->flags & (uint8_t)~REXX_INSTRUCTION_HAS_VALUE) != 0u ||
+        ins->operand != 0u || ins->auxiliary != 0u)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    if ((ins->flags & REXX_INSTRUCTION_HAS_VALUE) != 0u) {
+        status = pop_move(vm, &value);
+        if (status == REXX_VM_STATUS_OK)
+            status = value_string(&value, &converted, &length);
+        if (status == REXX_VM_STATUS_OK) bytes = converted;
+    }
+    if (status == REXX_VM_STATUS_OK) {
+        stack_status = at_head
+            ? rexx_data_stack_push(&vm->data_stack, bytes, length)
+            : rexx_data_stack_queue(&vm->data_stack, bytes, length);
+        switch (stack_status) {
+        case REXX_DATA_STACK_OK:
+            status = REXX_VM_STATUS_OK;
+            break;
+        case REXX_DATA_STACK_OUT_OF_MEMORY:
+            status = REXX_VM_STATUS_OUT_OF_MEMORY;
+            break;
+        case REXX_DATA_STACK_RESOURCE_LIMIT:
+            status = REXX_VM_STATUS_RESOURCE_LIMIT;
+            break;
+        default:
+            status = REXX_VM_STATUS_INVALID_BYTECODE;
+            break;
+        }
+    }
+    vm_free(converted);
+    rexx_value_clear(&value);
     return status;
 }
 
@@ -5178,6 +5267,14 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
             break;
         }
 
+        case OP_QUEUE:
+            status = execute_data_stack_insert(vm, ins, 0);
+            break;
+
+        case OP_PUSH:
+            status = execute_data_stack_insert(vm, ins, 1);
+            break;
+
         case OP_CALL:
             status = execute_call(vm, chunk, ins, &value, NULL, 0u);
             break;
@@ -5534,7 +5631,7 @@ RexxVMStatus rexx_vm_execute(RexxVM *vm, const RexxBytecodeChunk *chunk)
 const char *rexx_vm_status_name(RexxVMStatus status)
 {
     if (status < REXX_VM_STATUS_OK ||
-        status > REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY)
+        status > REXX_VM_STATUS_INPUT_UNAVAILABLE)
         return "unknown VM status";
     return vm_messages[status];
 }

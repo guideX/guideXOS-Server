@@ -2229,6 +2229,9 @@ static RexxAstClause *rexx_parser_parse_parse_clause(
     if (parser->current.type == TOKEN_KEYWORD_ARG) {
         parse_clause->source_kind = REXX_AST_PARSE_ARG;
         if (!rexx_parser_advance(parser)) return NULL;
+    } else if (parser->current.type == TOKEN_KEYWORD_PULL) {
+        parse_clause->source_kind = REXX_AST_PARSE_PULL;
+        if (!rexx_parser_advance(parser)) return NULL;
     } else if (parser->current.type == TOKEN_SYMBOL &&
                rexx_token_equals_ascii_case_insensitive(&parser->current,
                                                         "VAR")) {
@@ -2280,6 +2283,22 @@ static RexxAstClause *rexx_parser_parse_parse_clause(
     return clause;
 }
 
+static RexxAstClause *rexx_parser_parse_pull_clause(
+    RexxParser *parser,
+    unsigned int stop_mask)
+{
+    RexxToken pull_token = parser->current;
+    RexxAstClause *clause = rexx_parser_new_clause(
+        parser, REXX_AST_CLAUSE_PARSE, &pull_token);
+    if (clause == NULL || !rexx_parser_advance(parser)) return NULL;
+    clause->as.parse_clause.source_kind = REXX_AST_PARSE_PULL;
+    clause->as.parse_clause.uppercase = 1;
+    if (!rexx_parser_parse_template_list(
+            parser, stop_mask, &clause->as.parse_clause.templates))
+        return NULL;
+    return clause;
+}
+
 static RexxAstClause *rexx_parser_parse_simple_keyword(
     RexxParser *parser,
     RexxAstClauseKind kind,
@@ -2293,7 +2312,9 @@ static RexxAstClause *rexx_parser_parse_simple_keyword(
     }
     if (kind == REXX_AST_CLAUSE_SAY ||
         kind == REXX_AST_CLAUSE_INTERPRET ||
-        kind == REXX_AST_CLAUSE_ADDRESS) {
+        kind == REXX_AST_CLAUSE_ADDRESS ||
+        kind == REXX_AST_CLAUSE_QUEUE ||
+        kind == REXX_AST_CLAUSE_PUSH) {
         /* Keep an explicit ADDRESS environment separate from command text. */
         if (kind == REXX_AST_CLAUSE_ADDRESS &&
             !rexx_parser_token_is_stop(&parser->current, stop_mask) &&
@@ -2375,6 +2396,17 @@ static RexxAstClause *rexx_parser_parse_clause(RexxParser *parser,
     case TOKEN_KEYWORD_SAY:
         clause = rexx_parser_parse_simple_keyword(
             parser, REXX_AST_CLAUSE_SAY, stop_mask);
+        break;
+    case TOKEN_KEYWORD_QUEUE:
+        clause = rexx_parser_parse_simple_keyword(
+            parser, REXX_AST_CLAUSE_QUEUE, stop_mask);
+        break;
+    case TOKEN_KEYWORD_PUSH:
+        clause = rexx_parser_parse_simple_keyword(
+            parser, REXX_AST_CLAUSE_PUSH, stop_mask);
+        break;
+    case TOKEN_KEYWORD_PULL:
+        clause = rexx_parser_parse_pull_clause(parser, stop_mask);
         break;
     case TOKEN_KEYWORD_INTERPRET:
         clause = rexx_parser_parse_simple_keyword(
@@ -2493,6 +2525,8 @@ static void rexx_parser_free_clause_list(RexxAstClause *clauses)
             rexx_parser_free_expression(clauses->as.assignment.value);
             break;
         case REXX_AST_CLAUSE_SAY:
+        case REXX_AST_CLAUSE_QUEUE:
+        case REXX_AST_CLAUSE_PUSH:
         case REXX_AST_CLAUSE_INTERPRET:
         case REXX_AST_CLAUSE_ADDRESS:
         case REXX_AST_CLAUSE_RETURN:

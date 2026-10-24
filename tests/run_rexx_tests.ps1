@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29')][string]$Phase = 'RX12R1'
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30')][string]$Phase = 'RX12R1'
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,9 @@ if ($null -eq $gxxCommand) {
 }
 $guardModule = Join-Path $PSScriptRoot 'rexx_artifact_guard.psm1'
 Import-Module -Name $guardModule -Force
-$guardManifest = if ($Phase -eq 'RX29') {
+$guardManifest = if ($Phase -eq 'RX30') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx30\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX29') {
     Join-Path $rootDir 'docs\rexx\evidence\rx29\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX28') {
     Join-Path $rootDir 'docs\rexx\evidence\rx28\protected-artifacts-start.json'
@@ -70,7 +72,8 @@ $plannedOutputs = @(
     'rexx_rx2_shell_bridge_tests.exe', 'rexx_rx22_classic_diagnostic_tests.exe',
     'rexx_rx24_address_trace_tests.exe', 'rexx_rx25_random_tests.exe',
     'rexx_rx26_index_tests.exe', 'rexx_rx27_justify_tests.exe',
-    'rexx_rx28_find_tests.exe'
+    'rexx_rx28_find_tests.exe', 'rexx_rx30_data_stack_tests.exe',
+    'rexx_rx30_queue_tests.exe'
 ) | ForEach-Object { Join-Path (Join-Path $runRoot 'bin') $_ }
 $null = Start-ReXXArtifactRun -ManifestPath $guardManifest -RunRoot $runRoot `
     -WorkingDirectory $workingDirectory -PlannedOutputs $plannedOutputs -Phase $Phase
@@ -108,11 +111,14 @@ $rx25Test = Join-Path $buildDirectory "rexx_rx25_random_tests.exe"
 $rx26Test = Join-Path $buildDirectory "rexx_rx26_index_tests.exe"
 $rx27Test = Join-Path $buildDirectory "rexx_rx27_justify_tests.exe"
 $rx28Test = Join-Path $buildDirectory "rexx_rx28_find_tests.exe"
+$rx30DataStackTest = Join-Path $buildDirectory "rexx_rx30_data_stack_tests.exe"
+$rx30QueueTest = Join-Path $buildDirectory "rexx_rx30_queue_tests.exe"
 $rx2ShellBridgeTest = Join-Path $buildDirectory "rexx_rx2_shell_bridge_tests.exe"
 $commonSources = @(
     (Join-Path $rootDir "rexx_lexer.c"),
     (Join-Path $rootDir "rexx_parser.c"),
     (Join-Path $rootDir "rexx_compiler.c"),
+    (Join-Path $rootDir "rexx_data_stack.c"),
     (Join-Path $rootDir "rexx_vm.c"),
     (Join-Path $rootDir "rexx_builtin.c"),
     (Join-Path $rootDir "rexx_numeric.c")
@@ -549,6 +555,34 @@ if ($Phase -in @('RX28','RX29')) {
     & $rx28Test
     if ($LASTEXITCODE -ne 0) {
         throw "RX28 FIND tests failed with exit code $LASTEXITCODE."
+    }
+}
+
+if ($Phase -eq 'RX30') {
+    Write-Host "Building RX30 independent data-stack and executable language qualification"
+    & $gccCommand.Source -std=c11 -Wall -Wextra -Wpedantic -Werror `
+        (Join-Path $PSScriptRoot "rexx_rx30_data_stack_test.c") `
+        (Join-Path $rootDir "rexx_data_stack.c") -o $rx30DataStackTest
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX30 data-stack test build failed with exit code $LASTEXITCODE."
+    }
+    & $gccCommand.Source -std=c11 -DREXX_VM_TEST_ALLOCATOR `
+        -DREXX_PARSER_TEST_ALLOCATOR -DREXX_COMPILER_TEST_ALLOCATOR `
+        -Wall -Wextra -Wpedantic -Werror ("-I" + $rootDir) `
+        (Join-Path $PSScriptRoot "rexx_rx30_queue_test.c") `
+        @commonSources -lm -o $rx30QueueTest
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX30 QUEUE/PUSH/PULL test build failed with exit code $LASTEXITCODE."
+    }
+    Write-Host "Running RX30 data-stack reference deque qualification"
+    & $rx30DataStackTest
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX30 data-stack tests failed with exit code $LASTEXITCODE."
+    }
+    Write-Host "Running RX30 executable data-stack language qualification"
+    & $rx30QueueTest
+    if ($LASTEXITCODE -ne 0) {
+        throw "RX30 language tests failed with exit code $LASTEXITCODE."
     }
 }
 

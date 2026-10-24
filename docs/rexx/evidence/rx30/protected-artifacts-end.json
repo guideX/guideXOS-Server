@@ -1,0 +1,157 @@
+[
+  {
+    "name": "app_manifest_loader.obj",
+    "bytes": 547237,
+    "sha256": "51120FCD4EAF191FDF204657C6DCE9D96E88B3E53AF8F8E2F68DAD055302EE64"
+  },
+  {
+    "name": "app_manifest_validator.obj",
+    "bytes": 143513,
+    "sha256": "FD28A089DE33AE7A31DD13BCB1A9760E1FB60D902D5696B978A63A154A7AA457"
+  },
+  {
+    "name": "app_manifest.obj",
+    "bytes": 4844,
+    "sha256": "3D36D426029578BED89A02A9C12AFD8AEEEDAB01D1931C697793BFB6E0EA2709"
+  },
+  {
+    "name": "oob.obj",
+    "bytes": 2177,
+    "sha256": "F52EEEDBEFE36CD9A867CD6AE325D6ED633540684D608D3B52E27669E8AF08DC"
+  },
+  {
+    "name": "rexx_builtin.obj",
+    "bytes": 77524,
+    "sha256": "C509FCC6B0C63F5844970C13DE4CAF553C2D213210E4FA7C86ECD406DAF519CF"
+  },
+  {
+    "name": "rexx_cli_test_driver.obj",
+    "bytes": 2491,
+    "sha256": "D87F87CFB9EAD784F339A72644D089719D37B110B855137542683FFE0717A91B"
+  },
+  {
+    "name": "rexx_cli.obj",
+    "bytes": 42335,
+    "sha256": "0184FD52FE40FBC2234BCBDCD2698C80870BE76285AE8A86C0259C23C22BAF50"
+  },
+  {
+    "name": "rexx_compiler.obj",
+    "bytes": 107890,
+    "sha256": "B0BC1B2359B6DCF0C9F8AE10121C5822EBBA6E8E25ED834264F90CF401C739F5"
+  },
+  {
+    "name": "rexx_lexer.obj",
+    "bytes": 87405,
+    "sha256": "AA24F7F50850D58319165D53201C146404DF9531BFA35D461EFEA8FE0F5132E3"
+  },
+  {
+    "name": "rexx_main.obj",
+    "bytes": 78995,
+    "sha256": "3D3EDFD8D58475FDF5F90C3147B27664F933D0649E2FE615B2B19EE9B71E5703"
+  },
+  {
+    "name": "rexx_numeric.obj",
+    "bytes": 94850,
+    "sha256": "43B852CB9320541A6C1D930FE2480CBAEC2B88957F7C7F9C26BD4780CFE40D57"
+  },
+  {
+    "name": "rexx_os_io.obj",
+    "bytes": 26736,
+    "sha256": "23EAFA97D15DD01F6F88BA4B6EB2D1BCD50A8CA726B3AA216B22416AC12A6821"
+  },
+  {
+    "name": "rexx_output.obj",
+    "bytes": 19798,
+    "sha256": "E9C2F9E01FC8A011956BA78E547A9A18DDAD20B266AB53BE785D8CA6D749649F"
+  },
+  {
+    "name": "rexx_parser.obj",
+    "bytes": 196123,
+    "sha256": "0C8987AA876BE56E5D6D3550C1B9716C0D6ED1CCAE786CB91A65B38DEA26AA7A"
+  },
+  {
+    "name": "rexx_rx10_interpret_test.obj",
+    "bytes": 79748,
+    "sha256": "029A03A6FA6331518B45162CD03658727C8A60875C1C99519E3EF279110328B8"
+  },
+  {
+    "name": "rexx_rx2_shell_bridge_test.obj",
+    "bytes": 29257,
+    "sha256": "29C4676DBD1B0FCB5C5C43054C2ED631F0BDD45F4E2EDE9AD9F162EC47B595C7"
+  },
+  {
+    "name": "rexx_rx2_test_driver.obj",
+    "bytes": 87634,
+    "sha256": "6FF30D472D554D738C4E72AB22070623A5B8BB3C2BA0E5310831BF449270EDED"
+  },
+  {
+    "name": "rexx_rx3_alloc_failure_test.obj",
+    "bytes": 127834,
+    "sha256": "D1EB173C612A6D8377B25141446F5279965FD8F63D7E67FFA68470CBB1DA97EC"
+  },
+  {
+    "name": "rexx_rx3_decimal_test.obj",
+    "bytes": 46746,
+    "sha256": "EA4998116D81E8FBD5C74254609FF77EE18296FE328C2DCBC8ADBB13CF1F1726"
+  },
+  {
+    "name": "rexx_rx4_arithmetic_test.obj",
+    "bytes": 130150,
+    "sha256": "D0AAA1FB9E13F966978DAEEA2261F26898011027912EF7044DD63903A3E251A4"
+  },
+  {
+    "name": "rexx_rx5_numeric_context_test.obj",
+    "bytes": 63326,
+    "sha256": "6D92FCE1D9120A4C8F38C80AA44ED22D24D328BC9C4A44C127452401B2749049"
+  },
+  {
+    "name": "rexx_rx6_parse_alloc_failure_test.obj",
+    "bytes": 81444,
+    "sha256": "204B875913F1724126DE36057A9DD6347B92992D7130B2CBEB90205998F87253"
+  },
+  {
+    "name": "rexx_rx7_alloc_failure_test.obj",
+    "bytes": 34190,
+    "sha256": "4014FD92672B64F8244C0152A47FCF2D6202A298329984F5764FA680EE9ED03E"
+  },
+  {
+    "name": "rexx_rx7_routines_test.obj",
+    "bytes": 34537,
+    "sha256": "DE8DC6A0D89AA00D190B88F99CD97842338F5BDB2BAEBA143BC2F681E20DC31E"
+  },
+  {
+    "name": "rexx_rx8_semantics_alloc_test.obj",
+    "bytes": 49312,
+    "sha256": "BC093252BB86CCFCF49901CD30C5AEC5EDE0DF920BBA5FBD97D950A61A0017D7"
+  },
+  {
+    "name": "rexx_rx9_condition_test.obj",
+    "bytes": 111833,
+    "sha256": "388418B0E689C63E20C12867FFBE6A3557C6E3C3A24D4A21963E08FAF7C7532C"
+  },
+  {
+    "name": "rexx_shell_cmd.obj",
+    "bytes": 21083,
+    "sha256": "BFC8A40D02DD882633FD00336EB4AB8A8382DCC50B861A23A5C7781C7CD29808"
+  },
+  {
+    "name": "rexx_vm.obj",
+    "bytes": 397001,
+    "sha256": "3D7E2AEE727C96B319360F3ACE52C919277B079FBF2EF6285EF93BC6C04BB38F"
+  },
+  {
+    "name": "safe.obj",
+    "bytes": 3237,
+    "sha256": "2ECE9B541FA799DD42C3994FD6F926E711BD99FE07E90D73A1B56B35AD6FEA31"
+  },
+  {
+    "name": "smoke.obj",
+    "bytes": 2823,
+    "sha256": "5C821658DF5F030C8090C58524C1B0776B66C481C6B15A626489EED7B3571D69"
+  },
+  {
+    "name": "vc140.pdb",
+    "bytes": 241664,
+    "sha256": "482BB9DD5861DA2CDBEE73687F8C278F368FA4DA1E844F1F4279A18C210A9AB8"
+  }
+]

@@ -1,0 +1,19 @@
+{
+  "schema": "guidexos.rexx.rx30.qemu-process-reconciliation.v1",
+  "owned_qemu_pid": 24428,
+  "owned_pid_absent_after_shutdown": true,
+  "qmp_shutdown_acknowledged": true,
+  "qac_cli_pid": 24044,
+  "qac_reported_child_exit_code": 0,
+  "qac_reservation_released": true,
+  "phase_preflight_census": "preflight.json",
+  "preflight_qemu_pids": [],
+  "preflight_pids_absent_before_launch": [],
+  "pre_run_qemu_pids": [],
+  "immediate_post_shutdown_qemu_pids": [],
+  "final_qemu_pids": [],
+  "preexisting_foreign_pids_absent_at_final": [],
+  "additional_foreign_pids_seen_after_launch": [],
+  "control_sent_to_any_foreign_pid": false,
+  "foreign_process_changes_cause": "Unknown; RX30 sent no process control to any pre-existing or newly observed foreign QEMU process."
+}

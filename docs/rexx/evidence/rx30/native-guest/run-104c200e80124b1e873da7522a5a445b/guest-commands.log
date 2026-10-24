@@ -1,0 +1,12 @@
+[2026-10-24T01:14:26.3465619Z] echo RX30_CONSOLE_READY
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx30\qemu-104c200e80124b1e873da7522a5a445b\screenshots-raw\console-readiness-probe.ppm
+[2026-10-24T01:16:13.3687112Z] rexx /rx30-queue-demo.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx30\qemu-104c200e80124b1e873da7522a5a445b\screenshots-raw\rx30-01-queue-push-pull-counts-templates-routines-interpret.ppm
+[2026-10-24T01:16:31.7016260Z] rexx /rx30-empty-pull.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx30\qemu-104c200e80124b1e873da7522a5a445b\screenshots-raw\rx30-02-empty-queue-input-fails-closed.ppm
+[2026-10-24T01:16:49.8010240Z] rexx /rx30-recovery.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx30\qemu-104c200e80124b1e873da7522a5a445b\screenshots-raw\rx30-03-post-error-interpreter-recovery.ppm
+[2026-10-24T01:17:08.6630708Z] rexx /rx30-date-time-guard.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx30\qemu-104c200e80124b1e873da7522a5a445b\screenshots-raw\rx30-04-live-date-time-fail-closed-and-pit-alive.ppm
+[2026-10-24T01:17:26.0955834Z] rexx /rx20clk.rex
+QMP screenshot: D:\dev\guideXOSServer_REXX\build\rexx\rx30\qemu-104c200e80124b1e873da7522a5a445b\screenshots-raw\rx30-05-independent-clock-monotonic-contract.ppm

@@ -1,0 +1,11 @@
+{
+  "schema": "guidexos.rexx.rx30.console-readiness-review.v1",
+  "reviewed_at_utc": "2026-10-24T01:15:55.0928514Z",
+  "screenshot": "console-readiness-probe.png",
+  "visible_terminal": "guideXOS Shell terminal window open",
+  "visible_command": "echo RX30_CONSOLE_READY",
+  "visible_echo": "RX30_CONSOLE_READY",
+  "visible_prompt": "[guideXOS /]$ prompt with insertion cursor",
+  "conclusion": "Console was open, focused, and accepted/echoed input before any REXX demo script was sent.",
+  "serial_contains_probe": false
+}

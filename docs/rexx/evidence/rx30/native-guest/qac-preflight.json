@@ -1,0 +1,7 @@
+{
+  "schema": "guidexos.rexx.rx30.qac-preflight.v1",
+  "captured_at_utc": "2026-10-24T01:13:54.9813465Z",
+  "qac_status": "Coordinator: Online\nName: guideXOS QAC\nVersion: 2.0.0\nPID: 16064\nStarted (UTC): 2026-10-23T11:10:30.5849382+00:00\nUptime: 50604s\nQEMU processes: 0 (0 foreign)\nManaged development limit: 2\nManaged sessions: 0; queued: 0; blocked: 0",
+  "qac_list": "Coordinator: Online (guideXOS QAC 2.0.0)\nReservations: 0\nManaged sessions: 0",
+  "qemu_processes": []
+}

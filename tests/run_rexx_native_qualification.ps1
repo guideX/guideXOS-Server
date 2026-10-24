@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29')]
+    [ValidateSet('RX12R1','RX13','RX14','RX15','RX16','RX17','RX18','RX19','RX20','RX21','RX22','RX24','RX25','RX26','RX27','RX28','RX29','RX30')]
     [string]$Phase = 'RX12R1',
     [string]$MakeExecutable = '',
     [string]$OutputEvidenceRoot = ''
@@ -12,7 +12,9 @@ if ((git -C $rootDir branch --show-current).Trim() -ne 'REXX_SUPPORT') {
 }
 $kernelDir = Join-Path $rootDir 'kernel'
 $phaseRoot = Join-Path $rootDir "build\rexx\$($Phase.ToLowerInvariant())"
-$guardManifest = if ($Phase -eq 'RX29') {
+$guardManifest = if ($Phase -eq 'RX30') {
+    Join-Path $rootDir 'docs\rexx\evidence\rx30\protected-artifacts-guard.json'
+} elseif ($Phase -eq 'RX29') {
     Join-Path $rootDir 'docs\rexx\evidence\rx29\protected-artifacts-guard.json'
 } elseif ($Phase -eq 'RX28') {
     Join-Path $rootDir 'docs\rexx\evidence\rx28\protected-artifacts-start.json'
@@ -107,7 +109,7 @@ foreach ($source in Get-ChildItem -LiteralPath (Join-Path $rootDir 'third_party\
     $relative = [System.IO.Path]::GetFullPath($source.FullName).Substring($thirdPartyRoot.Length)
     Add-NativeSourceOutputs $source.FullName (Join-Path 'obj\third_party' ([System.IO.Path]::ChangeExtension($relative, '.o'))) $true
 }
-foreach ($sourceName in @('rexx_lexer.c','rexx_parser.c','rexx_compiler.c','rexx_vm.c','rexx_builtin.c','rexx_numeric.c','rexx_output.c','rexx_os_io.c','rexx_cli.c')) {
+foreach ($sourceName in @('rexx_lexer.c','rexx_parser.c','rexx_compiler.c','rexx_data_stack.c','rexx_vm.c','rexx_builtin.c','rexx_numeric.c','rexx_output.c','rexx_os_io.c','rexx_cli.c')) {
     Add-NativeSourceOutputs (Join-Path $rootDir $sourceName) (Join-Path 'obj\rexx' ([System.IO.Path]::ChangeExtension($sourceName, '.o'))) $true
 }
 $null = $plannedOutputs.Add((Join-Path (Join-Path $buildDir 'bin') 'kernel.pe'))
@@ -175,7 +177,8 @@ $elfHashSecond = (Get-FileHash -LiteralPath $kernelElf -Algorithm SHA256).Hash.T
 if ($elfHash -ne $elfHashSecond) { throw 'kernel.elf changed during its recorded SHA-256 verification.' }
 $rexxObjectDirectory = Join-Path (Join-Path $buildDir 'obj') 'rexx'
 $rexxObjectCount = @(Get-ChildItem -LiteralPath $rexxObjectDirectory -Filter '*.o' -File).Count
-if ($rexxObjectCount -ne 9) { throw "Expected nine REXX C object files; found $rexxObjectCount in $rexxObjectDirectory." }
+$expectedRexxObjectCount = if ($Phase -eq 'RX30') { 10 } else { 9 }
+if ($rexxObjectCount -ne $expectedRexxObjectCount) { throw "Expected $expectedRexxObjectCount REXX C object files; found $rexxObjectCount in $rexxObjectDirectory." }
 $previousPhaseReference = $null
 if ($Phase -eq 'RX14') {
     $previousEvidenceDirectory = Join-Path $rootDir 'docs\rexx\evidence\rx13\native-build'

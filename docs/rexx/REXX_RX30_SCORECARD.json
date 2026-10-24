@@ -1,0 +1,220 @@
+{
+  "schema": "guidexos.rexx.rx30.scorecard.v1",
+  "phase": "RX30",
+  "outcome": "Outcome A — Accepted native data-stack core",
+  "status": "ACCEPTED",
+  "repository": "D:\\dev\\guideXOSServer_REXX",
+  "starting_branch": "REXX_SUPPORT",
+  "ending_branch": "REXX_SUPPORT",
+  "starting_head": "e7e59b976e3658b0c086fea33abdbc77deba4a81",
+  "ending_head": "Reported in the final response; omitted here because a commit cannot embed its own hash.",
+  "required_starting_head_verified": true,
+  "tracked_worktree_clean_at_start": true,
+  "index_clean_at_start": true,
+  "architecture": {
+    "queue_representation": "Per-VM doubly linked list with exact-length flexible-array byte nodes; evaluation stack remains separate.",
+    "ownership": "Queue copies inserts; successful head removal transfers node ownership into a local item; VM teardown frees remaining nodes.",
+    "lifecycle": "Initialized in rexx_vm_init; retained across rexx_vm_execute, internal/nested routine returns, and INTERPRET; destroyed in rexx_vm_free; no global state.",
+    "element_limit": 4096,
+    "count_type": "uint32_t",
+    "max_element_bytes": 16777216,
+    "max_aggregate_payload_bytes": 16777216,
+    "amd64_node_header_bytes": 24,
+    "max_node_header_overhead_bytes": 98304,
+    "preallocation": "None",
+    "explicit_allocator_metadata": "Excluded from payload/header accounting; owned by the existing allocator."
+  },
+  "instructions": {
+    "QUEUE": "PASS — expression evaluated/converted once, copied to tail; omitted expression inserts empty string.",
+    "PUSH": "PASS — same expression/value path, copied to head; omitted expression inserts empty string.",
+    "PULL": "PASS — removes head, applies ASCII byte uppercase, then existing parse-template engine; no template discards.",
+    "PARSE PULL": "PASS — removes head and parses without uppercase; shares parse-plan and template machinery.",
+    "PARSE UPPER PULL": "PASS — existing parse uppercase flag with PULL source."
+  },
+  "queued": {
+    "status": "PASS",
+    "signature": "Exactly zero arguments",
+    "value": "Normal whole-number decimal string from authoritative per-VM count",
+    "empty_elements_counted": true,
+    "consumes": false,
+    "reads_input": false,
+    "changes_numeric_settings": false,
+    "separate_counter": false
+  },
+  "input_policy": {
+    "provider_available": false,
+    "empty_queue": "Explicit REXX_VM_STATUS_INPUT_UNAVAILABLE; no synthetic empty line, stdin access, or blocking wait.",
+    "compatibility_note": "IBM classic REXX terminal/default input fallback is unsupported until a bounded input provider exists."
+  },
+  "byte_model": {
+    "payload": "Exact binary byte spans, including empty, embedded NUL, high-bit bytes, spaces, and case.",
+    "uppercase": "ASCII a-z to A-Z only on a private retrieved copy.",
+    "unicode_locale_dbcs_ebcdic": "Not claimed or implemented."
+  },
+  "qualification": {
+    "storage_model": {
+      "status": "PASS",
+      "seed": "0x52583330",
+      "operations": 10000,
+      "assertions": 181417,
+      "failures": 0,
+      "coverage": [
+        "empty initialization",
+        "head/tail insertion and mixed FIFO/LIFO order",
+        "empty, NUL, high-bit and large binary elements",
+        "count and capacity boundaries",
+        "allocation failure atomicity",
+        "repeated initialize/destroy",
+        "independent queue instances",
+        "cleanup after errors"
+      ]
+    },
+    "language_model": {
+      "status": "PASS",
+      "seed": "0x52583331",
+      "operations": 1200,
+      "assertions": 193,
+      "failures": 0,
+      "coverage": [
+        "QUEUE",
+        "PUSH",
+        "PULL",
+        "PARSE PULL",
+        "QUEUED",
+        "valid/invalid operations",
+        "internal routines",
+        "INTERPRET",
+        "computed expressions",
+        "error recovery",
+        "multiple VMs"
+      ]
+    },
+    "fault_injection": {
+      "status": "PASS",
+      "queue_expression_failure": "No element inserted",
+      "result_conversion_and_node_allocation": "Failure leaves existing queue/count unchanged",
+      "pull_uppercase_allocation": "Item already consumed; detached ownership cleaned",
+      "parse_template_and_assignment_allocations": "Item already consumed; detached ownership cleaned; VM succeeds after recovery",
+      "compile_or_INTERPRET_syntax_failure_before_pull": "No pull instruction executes; queued element retained",
+      "queue_removal": "Pointer/count operation has no allocation stage to inject; invalid/empty states are checked",
+      "teardown": "No-fail destructor; repeated teardown and leak accounting verified; all remaining elements released.",
+      "recovery": "Successful queue operation and QUEUED count after injected failures; no leaks, drift, cross-VM leakage, UAF, or double-free observed."
+    }
+  },
+  "regression": {
+    "hosted": "PASS — RX1–RX29 inherited hosted suite and CLI/compatibility fixtures; RX30 storage and language suites passed.",
+    "cli_cases": "24/24",
+    "rx9_condition_fixtures": "24/24",
+    "rx10_interpret_fixtures": "19/19",
+    "rx12_builtin_fixtures": "31/31",
+    "rx13_string_fixtures": "33/33",
+    "rx14_inspection_fixtures": "29/29",
+    "rx15_conversion": "3/3",
+    "rx16_literal": "10/10",
+    "rx17_bitwise": "10/10",
+    "rx22_classic": "1/1",
+    "rx19_date_time": "8275 assertions, 0 failures, 2048 properties",
+    "rx20_clock_contract": "123 checks",
+    "rx24_to_rx28": "PASS",
+    "regina": "NOT_RUN — Regina executable unavailable; no independent cross-interpreter claim."
+  },
+  "sanitizers": {
+    "ASan": "PASS",
+    "ASan_targets_passed": 30,
+    "ASan_targets_expected": 30,
+    "UBSan": "PASS",
+    "UBSan_targets_passed": 30,
+    "UBSan_targets_expected": 30,
+    "local_expected_corpus_cases": 196,
+    "local_expected_cases_per_sanitizer": 196,
+    "external_differential": "NOT_RUN — Regina unavailable."
+  },
+  "freestanding": {
+    "status": "PASS",
+    "rexx_c_objects": 10,
+    "flags": [
+      "-ffreestanding",
+      "-nostdlib",
+      "-nostdinc++",
+      "-fno-builtin",
+      "-fno-exceptions",
+      "-fno-rtti"
+    ],
+    "kernel_elf_sha256": "f3647c4b3efa9c9a01d96ab4e440bf37aaf15a0044181315292833584ad5fac9",
+    "build_evidence": "docs/rexx/evidence/rx30/native-build/native-link-evidence-de56cd5f7e9541d09c4c043f6b75fde5.json"
+  },
+  "native_guest": {
+    "status": "PASS — exclusive QAC acceptance",
+    "final_run": "docs/rexx/evidence/rx30/native-guest/run-ab53cec6398c44d7bc90cfdbad1ec60c",
+    "all_guest_markers_visible": true,
+    "network_disabled": true,
+    "rx30_disposable_media": true,
+    "kernel_sha256": "f3647c4b3efa9c9a01d96ab4e440bf37aaf15a0044181315292833584ad5fac9",
+    "heartbeat_before": 2,
+    "heartbeat_after": 116,
+    "qac_parent_exit_code": 0,
+    "qemu_child_exit_code": 0,
+    "runner_exit_code": 0,
+    "qmp_shutdown_acknowledged": true,
+    "qac_reservation_released": true,
+    "post_shutdown_qemu_count": 0,
+    "first_complete_pass": "run-104c200e80124b1e873da7522a5a445b, preserved separately; compact-output rerun improved visible marker capture.",
+    "evidence": "docs/rexx/evidence/rx30/native-guest/",
+    "qac_cli_pid": 18744,
+    "qemu_child_pid": 19160,
+    "qac_reservation_id": "ee04c6649ec343f4bbec21ec8a4316dc",
+    "commands_executed": [
+      "rx30-queue-demo.rex",
+      "rx30-empty-pull.rex",
+      "rx30-recovery.rex",
+      "rx30-date-time-guard.rex",
+      "rx20clk.rex"
+    ],
+    "final_run_note": "Final requalification after parser AST cleanup fix; compact guest output verified visibly against the final freestanding kernel."
+  },
+  "protected_artifacts": {
+    "status": "PASS — exact size and SHA-256 match",
+    "count": 31,
+    "baseline": "docs/rexx/evidence/rx29/protected-artifacts-start.json",
+    "end": "docs/rexx/evidence/rx30/protected-artifacts-end.json",
+    "integrity": "docs/rexx/evidence/rx30/protected-artifact-integrity.json"
+  },
+  "untracked_paths": {
+    "status": "PASS — exact actual path-set reconciliation; every RX29 untracked path remains present.",
+    "starting_count": 86874,
+    "baseline": "docs/rexx/evidence/rx29/untracked-end-ordinal.paths",
+    "baseline_sha256": "FAA46ADD589A05D7A1CFB4C0D36313438C4A819F1C1FED0A493A2EF6AFAAA556",
+    "final_count": 96928,
+    "missing_preexisting_count": 0,
+    "canonical_sort": "Ordinal, case-sensitive",
+    "encoding": "UTF-8 without BOM",
+    "newline": "LF",
+    "end_manifest": "docs/rexx/evidence/rx30/untracked-end-ordinal.paths",
+    "manifest_sha256": "EBBF1A569A313F0DEA773E15489B5B53172200B15A784CB1F083CB5BDDD3CFAF",
+    "added_path_count": 10054,
+    "preexisting_paths_preserved": true,
+    "sets_equal": false,
+    "added_paths_are_enumerated_in_final_manifest": true
+  },
+  "inventory": {
+    "file": "docs/rexx/REXX_RX30_BUILTIN_INVENTORY.csv",
+    "rows": 75,
+    "classifications": {
+      "Not implemented by design": 1,
+      "Implemented": 59,
+      "Not assessed": 1,
+      "Partial": 3,
+      "Not implemented": 11
+    },
+    "queued": "Implemented; no instruction entries added."
+  },
+  "compatibility_limits": [
+    "External queue is per-VM only and is not persistent or shared across processes.",
+    "Empty-stack terminal/default input is unavailable and fails closed.",
+    "Uppercase follows ASCII byte semantics only.",
+    "No interactive terminal, cross-process IPC, or OS queue service is included.",
+    "Regina is unavailable; independent IBM interpreter differential results are NOT_RUN."
+  ],
+  "recommended_rx31_scope": "The 75-entry inventory now has 11 unimplemented functions (CHARIN, CHAROUT, CHARS, LINEIN, LINEOUT, LINES, STREAM, VALUE, EXTERNALS, LINESIZE, USERID), three partial entries (DATE, TIME, TRACE), one not assessed extension set (REGINA_EXTENSION_SET), and one item not implemented by design. First define bounded host-provider contracts and complete the already-partial DATE/TIME trusted-clock behavior and remaining TRACE semantics; treat the CHARIN/LINEIN/STREAM families as a separate explicitly scoped I/O phase, and keep IBM-specific EXTERNALS/LINESIZE/USERID outside the portable baseline pending a documented target.",
+  "production_rexx_source_files": 10
+}

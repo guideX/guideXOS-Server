@@ -614,6 +614,10 @@
       <CompileAs>CompileAsC</CompileAs>
       <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <ClCompile Include="rexx_data_stack.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <ClCompile Include="rexx_vm.c">
       <CompileAs>CompileAsC</CompileAs>
       <AdditionalIncludeDirectories>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

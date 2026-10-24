@@ -8,6 +8,7 @@
  */
 
 #include "rexx_compiler.h"
+#include "rexx_data_stack.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -89,7 +90,8 @@ typedef enum RexxVMStatus {
     REXX_VM_STATUS_DYNAMIC_SYNTAX,
     REXX_VM_STATUS_CLOCK_UNAVAILABLE,
     REXX_VM_STATUS_INVALID_TRACE_REQUEST,
-    REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY
+    REXX_VM_STATUS_UNSUPPORTED_TRACE_CAPABILITY,
+    REXX_VM_STATUS_INPUT_UNAVAILABLE
 } RexxVMStatus;
 
 enum {
@@ -188,6 +190,7 @@ typedef struct RexxVM {
     RexxValue *stack;
     size_t stack_capacity;
     size_t sp;            /* Number of live entries; top is stack[sp - 1]. */
+    RexxDataStack data_stack; /* Per-VM REXX external data stack. */
     size_t pc;            /* Current bytecode instruction index. */
     size_t current_source_line; /* Source line of the active instruction. */
     const RexxBytecodeChunk *active_chunk; /* Valid only during execute. */

@@ -1,0 +1,10 @@
+{
+  "schema": "guidexos.rexx.rx30.protected-artifact-integrity.v1",
+  "checked_at_utc": "2026-10-24T01:38:04.497479Z",
+  "baseline": "docs/rexx/evidence/rx29/protected-artifacts-start.json",
+  "end_manifest": "docs/rexx/evidence/rx30/protected-artifacts-end.json",
+  "expected_count": 31,
+  "actual_count": 31,
+  "unchanged": true,
+  "differences": []
+}

@@ -1,0 +1,16 @@
+RX30 artifact preservation: PASS
+Stage: native-amd64-build
+Verified UTC: 2026-10-24T01:33:15.6246260Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+RX30 artifact preservation: PASS
+Stage: native-amd64-final
+Verified UTC: 2026-10-24T01:33:15.7024424Z
+Artifacts: 31/31
+All baseline root .obj/.pdb paths and hashes match.
+AMD64 native build passed.
+ELF SHA-256: f3647c4b3efa9c9a01d96ab4e440bf37aaf15a0044181315292833584ad5fac9
+REXX C object files: 10
+Output audit: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx30\native-build\output-audit-de56cd5f7e9541d09c4c043f6b75fde5.json
+Link evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx30\native-build\native-link-evidence-de56cd5f7e9541d09c4c043f6b75fde5.json
+Preservation evidence: D:\dev\guideXOSServer_REXX\docs\rexx\evidence\rx30\native-build\preservation-de56cd5f7e9541d09c4c043f6b75fde5

@@ -132,6 +132,7 @@ REXX_C_SOURCES := $(addprefix $(GUIDEXOS_REPO_ROOT)/, \
 	rexx_lexer.c \
 	rexx_parser.c \
 	rexx_compiler.c \
+	rexx_data_stack.c \
 	rexx_vm.c \
 	rexx_builtin.c \
 	rexx_numeric.c \

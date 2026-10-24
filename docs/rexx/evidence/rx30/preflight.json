@@ -1,0 +1,22 @@
+{
+  "schema": "guidexos.rexx.rx30.preflight.v1",
+  "branch": "REXX_SUPPORT",
+  "head": "e7e59b976e3658b0c086fea33abdbc77deba4a81",
+  "expected_head": "e7e59b976e3658b0c086fea33abdbc77deba4a81",
+  "tracked_worktree_clean": false,
+  "index_clean": true,
+  "rx29_untracked_baseline_count": 86874,
+  "current_untracked_count": 86894,
+  "baseline_paths_missing": 0,
+  "preexisting_paths_preserved": true,
+  "phase_manifest": "protected-artifacts-guard.json copied from RX29 verified 31-file baseline",
+  "changed_untracked_paths": [
+    20
+  ],
+  "preexisting_untracked_baseline": "docs/rexx/evidence/rx29/untracked-end-ordinal.paths",
+  "duplicate_execution_guard": "No dedicated duplicate-execution lock/manifest guard is present; current runners use GUID-specific run directories and fail if a chosen run root exists.",
+  "root_phase_file_present": false,
+  "qac_initial_evidence": "RX29 status showed zero reservations and zero QEMU processes at its final check; RX30 will reverify before launch.",
+  "tracked_worktree_clean_at_start": true,
+  "baseline_verification_note": "Before RX30 edits, git status showed no tracked or staged changes; the initial branch and HEAD matched the required RX29 accepted state. The tracked_worktree_clean field records a later snapshot after edits had begun."
+}

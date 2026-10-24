@@ -1,0 +1,230 @@
+{
+  "schema": "guidexos.rexx.artifact-preservation.v1",
+  "stage": "qemu-smoke-guest",
+  "verified_at_utc": "2026-10-24T01:21:34.2718716Z",
+  "passed": true,
+  "expected_artifact_count": 31,
+  "actual_artifact_count": 31,
+  "missing": [],
+  "modified": [],
+  "unexpected": [],
+  "artifacts": [
+    {
+      "relative_path": "app_manifest_loader.obj",
+      "file_type": "obj",
+      "size_bytes": 547237,
+      "sha256": "51120fcd4eaf191fdf204657c6dce9d96e88b3e53af8f8e2f68dad055302ee64",
+      "last_write_utc": "2026-10-11T18:00:40.3637924Z"
+    },
+    {
+      "relative_path": "app_manifest_validator.obj",
+      "file_type": "obj",
+      "size_bytes": 143513,
+      "sha256": "fd28a089de33ae7a31dd13bcb1a9760e1fb60d902d5696b978a63a154a7aa457",
+      "last_write_utc": "2026-10-11T18:00:40.3637924Z"
+    },
+    {
+      "relative_path": "app_manifest.obj",
+      "file_type": "obj",
+      "size_bytes": 4844,
+      "sha256": "3d36d426029578bed89a02a9c12afd8aeeedab01d1931c697793bfb6e0ea2709",
+      "last_write_utc": "2026-10-11T18:00:40.3607918Z"
+    },
+    {
+      "relative_path": "oob.obj",
+      "file_type": "obj",
+      "size_bytes": 2177,
+      "sha256": "f52eeedbefe36cd9a867cd6ae325d6ed633540684d608d3b52e27669e8af08dc",
+      "last_write_utc": "2026-10-17T21:14:28.8309027Z"
+    },
+    {
+      "relative_path": "rexx_builtin.obj",
+      "file_type": "obj",
+      "size_bytes": 77524,
+      "sha256": "c509fcc6b0c63f5844970c13de4caf553c2d213210e4fa7c86ecd406daf519cf",
+      "last_write_utc": "2026-10-17T22:49:23.2738072Z"
+    },
+    {
+      "relative_path": "rexx_cli_test_driver.obj",
+      "file_type": "obj",
+      "size_bytes": 2491,
+      "sha256": "d87f87cfb9ead784f339a72644d089719d37b110b855137542683ffe0717a91b",
+      "last_write_utc": "2026-10-17T22:48:40.5209143Z"
+    },
+    {
+      "relative_path": "rexx_cli.obj",
+      "file_type": "obj",
+      "size_bytes": 42335,
+      "sha256": "0184fd52fe40fbc2234bcbdcd2698c80870be76285ae8a86c0259c23c22baf50",
+      "last_write_utc": "2026-10-17T22:48:54.7920464Z"
+    },
+    {
+      "relative_path": "rexx_compiler.obj",
+      "file_type": "obj",
+      "size_bytes": 107890,
+      "sha256": "b0bc1b2359b6dcf0c9f8ae10121c5822ebba6e8e25ed834264f90cf401c739f5",
+      "last_write_utc": "2026-10-17T22:49:23.4029673Z"
+    },
+    {
+      "relative_path": "rexx_lexer.obj",
+      "file_type": "obj",
+      "size_bytes": 87405,
+      "sha256": "aa24f7f50850d58319165d53201c146404df9531bfa35d461efea8fe0f5132e3",
+      "last_write_utc": "2026-10-17T22:49:23.4645746Z"
+    },
+    {
+      "relative_path": "rexx_main.obj",
+      "file_type": "obj",
+      "size_bytes": 78995,
+      "sha256": "3d3edfd8d58475fdf5f90c3147b27664f933d0649e2fe615b2b19ee9b71e5703",
+      "last_write_utc": "2026-10-17T22:48:37.9856842Z"
+    },
+    {
+      "relative_path": "rexx_numeric.obj",
+      "file_type": "obj",
+      "size_bytes": 94850,
+      "sha256": "43b852cb9320541a6c1d930fe2480cbaec2b88957f7c7f9c26bd4780cfe40d57",
+      "last_write_utc": "2026-10-17T22:49:23.2529551Z"
+    },
+    {
+      "relative_path": "rexx_os_io.obj",
+      "file_type": "obj",
+      "size_bytes": 26736,
+      "sha256": "23eafa97d15dd01f6f88ba4b6eb2d1bcd50a8ca726b3aa216b22416ac12a6821",
+      "last_write_utc": "2026-10-17T22:48:54.7815254Z"
+    },
+    {
+      "relative_path": "rexx_output.obj",
+      "file_type": "obj",
+      "size_bytes": 19798,
+      "sha256": "e9c2f9e01fc8a011956ba78e547a9a18ddad20b266ab53be785d8ca6d749649f",
+      "last_write_utc": "2026-10-17T22:48:54.7755241Z"
+    },
+    {
+      "relative_path": "rexx_parser.obj",
+      "file_type": "obj",
+      "size_bytes": 196123,
+      "sha256": "0c8987aa876be56e5d6d3550c1b9716c0d6ed1ccae786cb91a65b38dea26aa7a",
+      "last_write_utc": "2026-10-17T22:49:23.4428947Z"
+    },
+    {
+      "relative_path": "rexx_rx10_interpret_test.obj",
+      "file_type": "obj",
+      "size_bytes": 79748,
+      "sha256": "029a03a6fa6331518b45162cd03658727c8a60875c1c99519e3ef279110328b8",
+      "last_write_utc": "2026-10-17T22:49:17.2374074Z"
+    },
+    {
+      "relative_path": "rexx_rx2_shell_bridge_test.obj",
+      "file_type": "obj",
+      "size_bytes": 29257,
+      "sha256": "29c4676dbd1b0fcb5c5c43054c2ed631f0bdd45f4e2ede9ad9f162ec47b595c7",
+      "last_write_utc": "2026-10-17T21:25:20.1353206Z"
+    },
+    {
+      "relative_path": "rexx_rx2_test_driver.obj",
+      "file_type": "obj",
+      "size_bytes": 87634,
+      "sha256": "6ff30d472d554d738c4e72ab22070623a5b8bb3c2ba0e5310831bf449270eded",
+      "last_write_utc": "2026-10-17T22:48:54.8030457Z"
+    },
+    {
+      "relative_path": "rexx_rx3_alloc_failure_test.obj",
+      "file_type": "obj",
+      "size_bytes": 127834,
+      "sha256": "d1eb173c612a6d8377b25141446f5279965fd8f63d7e67ffa68470cbb1da97ec",
+      "last_write_utc": "2026-10-17T22:48:58.3016761Z"
+    },
+    {
+      "relative_path": "rexx_rx3_decimal_test.obj",
+      "file_type": "obj",
+      "size_bytes": 46746,
+      "sha256": "ea4998116d81e8fbd5c74254609ff77ee18296fe328c2dcbc8adbb13cf1f1726",
+      "last_write_utc": "2026-10-17T22:48:55.7779431Z"
+    },
+    {
+      "relative_path": "rexx_rx4_arithmetic_test.obj",
+      "file_type": "obj",
+      "size_bytes": 130150,
+      "sha256": "d0aaa1fb9e13f966978daeea2261f26898011027912ef7044dd63903a3e251a4",
+      "last_write_utc": "2026-10-17T22:48:59.5956097Z"
+    },
+    {
+      "relative_path": "rexx_rx5_numeric_context_test.obj",
+      "file_type": "obj",
+      "size_bytes": 63326,
+      "sha256": "6d92fce1d9120a4c8f38c80aa44ed22d24d328bc9c4a44c127452401b2749049",
+      "last_write_utc": "2026-10-17T22:49:01.2803039Z"
+    },
+    {
+      "relative_path": "rexx_rx6_parse_alloc_failure_test.obj",
+      "file_type": "obj",
+      "size_bytes": 81444,
+      "sha256": "204b875913f1724126de36057a9dd6347b92992d7130b2cbeb90205998f87253",
+      "last_write_utc": "2026-10-17T22:49:03.5086377Z"
+    },
+    {
+      "relative_path": "rexx_rx7_alloc_failure_test.obj",
+      "file_type": "obj",
+      "size_bytes": 34190,
+      "sha256": "4014fd92672b64f8244c0152a47fcf2d6202a298329984f5764fa680ee9ed03e",
+      "last_write_utc": "2026-10-17T22:49:07.1365843Z"
+    },
+    {
+      "relative_path": "rexx_rx7_routines_test.obj",
+      "file_type": "obj",
+      "size_bytes": 34537,
+      "sha256": "de8dc6a0d89aa00d190b88f99cd97842338f5bdb2baeba143bc2f681e20dc31e",
+      "last_write_utc": "2026-10-17T22:49:05.6599071Z"
+    },
+    {
+      "relative_path": "rexx_rx8_semantics_alloc_test.obj",
+      "file_type": "obj",
+      "size_bytes": 49312,
+      "sha256": "bc093252bb86ccfcf49901cd30c5aec5ede0df920bba5fbd97d950a61a0017d7",
+      "last_write_utc": "2026-10-17T22:49:10.7994500Z"
+    },
+    {
+      "relative_path": "rexx_rx9_condition_test.obj",
+      "file_type": "obj",
+      "size_bytes": 111833,
+      "sha256": "388418b0e689c63e20c12867ffbe6a3557c6e3c3a24d4a21963e08faf7c7532c",
+      "last_write_utc": "2026-10-17T22:49:14.3312023Z"
+    },
+    {
+      "relative_path": "rexx_shell_cmd.obj",
+      "file_type": "obj",
+      "size_bytes": 21083,
+      "sha256": "bfc8a40d02dd882633fd00336eb4ab8a8382dcc50b861a23a5c7781c7cd29808",
+      "last_write_utc": "2026-10-17T21:25:20.1284103Z"
+    },
+    {
+      "relative_path": "rexx_vm.obj",
+      "file_type": "obj",
+      "size_bytes": 397001,
+      "sha256": "3d7e2aee727c96b319360f3ace52c919277b079fbf2ef6285ef93bc6c04bb38f",
+      "last_write_utc": "2026-10-17T22:49:23.3652577Z"
+    },
+    {
+      "relative_path": "safe.obj",
+      "file_type": "obj",
+      "size_bytes": 3237,
+      "sha256": "2ece9b541fa799dd42c3994fd6f926e711bd99fe07e90d73a1b56b35ad6fea31",
+      "last_write_utc": "2026-10-17T21:13:45.0913793Z"
+    },
+    {
+      "relative_path": "smoke.obj",
+      "file_type": "obj",
+      "size_bytes": 2823,
+      "sha256": "5c821658df5f030c8090c58524c1b0776b66c481c6b15a626489eed7b3571d69",
+      "last_write_utc": "2026-10-17T21:13:00.6367771Z"
+    },
+    {
+      "relative_path": "vc140.pdb",
+      "file_type": "pdb",
+      "size_bytes": 241664,
+      "sha256": "482bb9dd5861da2cdbee73687f8c278f368fa4da1e844f1f4279a18c210a9ab8",
+      "last_write_utc": "2026-10-17T22:49:23.5104430Z"
+    }
+  ]
+}

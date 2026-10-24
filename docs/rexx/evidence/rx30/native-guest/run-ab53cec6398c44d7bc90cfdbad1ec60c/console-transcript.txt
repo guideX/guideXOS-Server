@@ -1,0 +1,10 @@
+RX30 isolated QEMU Console transcript
+Kernel SHA-256: f3647c4b3efa9c9a01d96ab4e440bf37aaf15a0044181315292833584ad5fac9
+Network: disabled (-net none); disposable ESP: D:\dev\guideXOSServer_REXX\build\rexx\rx30\qemu-ab53cec6398c44d7bc90cfdbad1ec60c\guest\esp
+COMMAND: rexx /rx30-queue-demo.rex | expected visible marker/status: RX30_QUEUE_PUSH_COUNTS_ORDER=0/3/Gamma/ALPHA/Beta/BETA/0; RX30_CASE_PRESERVE_UPPER=MiXeD/MIXED; RX30_EMPTY_COUNT_LENGTH_FINAL=1/0/0; placeholder, routine, INTERPRET, done markers
+COMMAND: rexx /rx30-empty-pull.rex | expected visible marker/status: RX30_EMPTY_PULL_BEGIN followed by deterministic default-input-unavailable error; no fabricated line or wait
+COMMAND: rexx /rx30-recovery.rex | expected visible marker/status: RX30_POST_ERROR_RESPONSIVE; RX30_RECOVERY_COUNT= 0
+COMMAND: rexx /rx30-date-time-guard.rex | expected visible marker/status: RX24_DATE_CURRENT_UNAVAILABLE; RX24_TIME_CURRENT_UNAVAILABLE; RX24_DATE_TIME_FAIL_CLOSED_PIT_ALIVE
+COMMAND: rexx /rx20clk.rex | expected visible marker/status: RX20_DATE_CURRENT_UNAVAILABLE; RX20_TIME_CURRENT_UNAVAILABLE; RX20_MONOTONIC_E; RX20_MONOTONIC_R; RX20_NATIVE_CLOCK_CAPABILITY_DONE
+Serial boot/heartbeat: PASS; heartbeat records before suite=2 after suite=116
+The per-command QMP screenshots are the visual evidence for the expected markers and shell exit status.

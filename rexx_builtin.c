@@ -4287,6 +4287,35 @@ static RexxVMStatus rexx_builtin_time(RexxVM *vm,
     return rexx_value_set_string(result, output, output_length);
 }
 
+static RexxVMStatus rexx_builtin_queued(RexxVM *vm,
+                                       const RexxValue *arguments,
+                                       size_t argument_count,
+                                       RexxValue *result)
+{
+    char output[10];
+    size_t length = 0u;
+    size_t index;
+    uint32_t count;
+    RexxDataStackStatus stack_status;
+
+    (void)arguments;
+    if (argument_count != 0u || vm == NULL || !vm->initialized)
+        return REXX_VM_STATUS_INVALID_FUNCTION_CALL;
+    stack_status = rexx_data_stack_get_count(&vm->data_stack, &count);
+    if (stack_status != REXX_DATA_STACK_OK)
+        return REXX_VM_STATUS_INVALID_BYTECODE;
+    do {
+        output[length++] = (char)('0' + (count % 10u));
+        count /= 10u;
+    } while (count != 0u);
+    for (index = 0u; index < length / 2u; ++index) {
+        char byte = output[index];
+        output[index] = output[length - index - 1u];
+        output[length - index - 1u] = byte;
+    }
+    return rexx_value_set_string(result, output, length);
+}
+
 static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "ADDRESS", 0u, 0u, NULL, rexx_builtin_address },
     { "TRACE", 0u, 1u, NULL, rexx_builtin_trace },
@@ -4343,7 +4372,8 @@ static const RexxBuiltinDescriptor rexx_builtin_table[] = {
     { "BITXOR", 1u, 3u, rexx_builtin_bitxor, NULL },
     { "RANDOM", 0u, 3u, NULL, rexx_builtin_random },
     { "DATE", 0u, 3u, NULL, rexx_builtin_date },
-    { "TIME", 0u, 1u, NULL, rexx_builtin_time }
+    { "TIME", 0u, 1u, NULL, rexx_builtin_time },
+    { "QUEUED", 0u, 0u, NULL, rexx_builtin_queued }
 };
 
 const RexxBuiltinDescriptor *rexx_builtin_lookup(const char *name,

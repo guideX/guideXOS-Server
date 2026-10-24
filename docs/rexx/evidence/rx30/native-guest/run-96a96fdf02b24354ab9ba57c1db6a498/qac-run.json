@@ -1,0 +1,14 @@
+{
+  "qac_cli_path": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+  "qac_cli_pid": 24044,
+  "project": "guideXOSServer",
+  "mode": "acceptance",
+  "direct_qemu_child_pid": 24428,
+  "qac_process_exit_code": 0,
+  "qac_process_exit_status": "captured",
+  "qac_reported_child_exit_code": 0,
+  "qac_reservation_released": true,
+  "qmp_shutdown_acknowledged": true,
+  "managed_sessions_after": 0,
+  "completed_at_utc": "2026-10-24T01:21:34.8251569Z"
+}

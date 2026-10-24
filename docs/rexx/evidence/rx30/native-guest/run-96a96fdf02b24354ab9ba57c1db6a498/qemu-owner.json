@@ -1,0 +1,18 @@
+{
+  "pid": 24428,
+  "qacPid": 24044,
+  "qacProject": "guideXOSServer",
+  "qacMode": "acceptance",
+  "qacCliPath": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+  "qemuPath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "qmpPort": 53271,
+  "espPath": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx30\\qemu-96a96fdf02b24354ab9ba57c1db6a498\\guest\\esp",
+  "firmwarePath": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx30\\qemu-96a96fdf02b24354ab9ba57c1db6a498\\guest\\firmware-code.fd",
+  "serialPath": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx30\\qemu-96a96fdf02b24354ab9ba57c1db6a498\\serial.log",
+  "rawCaptureDir": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx30\\qemu-96a96fdf02b24354ab9ba57c1db6a498\\screenshots-raw",
+  "kernelPath": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx30\\native-amd64-c0110bd146864e2fa3a561f007db3e8f\\amd64\\bin\\kernel.elf",
+  "kernelSha256": "aed9ca763f67ede02a97dfba1e89a948d416c1ce068286aa7d9a96b73c3b01c1",
+  "stagedKernelSha256": "aed9ca763f67ede02a97dfba1e89a948d416c1ce068286aa7d9a96b73c3b01c1",
+  "network": "disabled (-net none)",
+  "runRoot": "D:\\dev\\guideXOSServer_REXX\\build\\rexx\\rx30\\qemu-96a96fdf02b24354ab9ba57c1db6a498"
+}

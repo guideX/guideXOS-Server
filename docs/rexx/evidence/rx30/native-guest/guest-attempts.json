@@ -1,0 +1,30 @@
+{
+  "schema": "guidexos.rexx.rx30.native-guest-attempts.v1",
+  "attempts": [
+    {
+      "run_id": "run-104c200e80124b1e873da7522a5a445b",
+      "result": "PASS",
+      "runner_exit_code": 0,
+      "note": "Initial complete RX30 QAC guest pass. Queue demo output exceeded the visible Console area, so a compact-output rerun was performed for clearer visual evidence."
+    },
+    {
+      "run_id": "run-96a96fdf02b24354ab9ba57c1db6a498",
+      "result": "PASS",
+      "runner_exit_code": 0,
+      "note": "Second complete RX30 QAC guest pass using compact output; all required queue, input-failure, recovery, DATE/TIME, and clock markers are visible in captured Console screenshots."
+    },
+    {
+      "run_id": "run-ab53cec6398c44d7bc90cfdbad1ec60c",
+      "result": "PASS",
+      "kernel_sha256": "f3647c4b3efa9c9a01d96ab4e440bf37aaf15a0044181315292833584ad5fac9",
+      "qac_parent_exit_code": 0,
+      "qemu_child_exit_code": 0,
+      "runner_exit_code": 0,
+      "qmp_shutdown_acknowledged": true,
+      "reservation_released": true,
+      "note": "Final complete QAC guest pass after parser AST cleanup correction. Compact queue output and all required markers were captured visibly; DATE/TIME fail-closed and PIT progression passed."
+    }
+  ],
+  "attempt_count": 3,
+  "final_run": "run-ab53cec6398c44d7bc90cfdbad1ec60c"
+}

@@ -587,7 +587,8 @@ static uint32_t rexx_compiler_add_parse_plan(RexxCompiler *compiler,
                 ? REXX_SYMBOL_STEM : REXX_SYMBOL_VARIABLE);
         if (compiler->status != REXX_COMPILER_STATUS_OK) return 0u;
     } else if (parse_clause->source_kind != REXX_AST_PARSE_ARG &&
-               parse_clause->source_kind != REXX_AST_PARSE_VALUE) {
+               parse_clause->source_kind != REXX_AST_PARSE_VALUE &&
+               parse_clause->source_kind != REXX_AST_PARSE_PULL) {
         rexx_compiler_fail(compiler, REXX_COMPILER_STATUS_MALFORMED_AST,
                            &clause->token,
                            rexx_compiler_message_malformed_ast);
@@ -1247,6 +1248,25 @@ static int rexx_compiler_compile_clause_inner(RexxCompiler *compiler,
         (void)rexx_compiler_emit(compiler, OP_SAY,
                                  clause->as.simple.expression != NULL ? 1u : 0u,
                                  0u, 0u, &clause->token);
+        break;
+    case REXX_AST_CLAUSE_QUEUE:
+    case REXX_AST_CLAUSE_PUSH:
+        if (clause->as.simple.expression != NULL &&
+            !rexx_compiler_compile_expression(
+                compiler, clause->as.simple.expression)) return 0;
+        if (clause->as.simple.has_address_environment) {
+            rexx_compiler_fail(compiler,
+                               REXX_COMPILER_STATUS_MALFORMED_AST,
+                               &clause->token,
+                               rexx_compiler_message_malformed_ast);
+            return 0;
+        }
+        (void)rexx_compiler_emit(
+            compiler,
+            clause->kind == REXX_AST_CLAUSE_QUEUE ? OP_QUEUE : OP_PUSH,
+            clause->as.simple.expression != NULL
+                ? REXX_INSTRUCTION_HAS_VALUE : 0u,
+            0u, 0u, &clause->token);
         break;
     case REXX_AST_CLAUSE_INTERPRET:
         if (clause->as.simple.expression == NULL ||

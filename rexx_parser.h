@@ -7,7 +7,8 @@
  * buffer used by the lexer; keep that buffer alive for as long as the AST is
  * inspected. AST nodes themselves are allocated by this module and released
  * with rexx_parser_free_ast(). The grammar covers labels, assignments,
- * command expressions, ADDRESS, PARSE, SAY/CALL/RETURN/EXIT/NOP/LEAVE/ITERATE,
+ * command expressions, ADDRESS, PARSE, QUEUE/PUSH/PULL,
+ * SAY/CALL/RETURN/EXIT/NOP/LEAVE/ITERATE,
  * INTERPRET, and the IF, DO, and SELECT control forms; other lexer keywords currently
  * produce a syntax error because they do not yet have dedicated AST forms.
  */
@@ -133,7 +134,9 @@ typedef enum RexxAstClauseKind {
     REXX_AST_CLAUSE_DROP,
     REXX_AST_CLAUSE_SIGNAL,
     REXX_AST_CLAUSE_CONDITION,
-    REXX_AST_CLAUSE_INTERPRET
+    REXX_AST_CLAUSE_INTERPRET,
+    REXX_AST_CLAUSE_QUEUE,
+    REXX_AST_CLAUSE_PUSH
 } RexxAstClauseKind;
 
 typedef enum RexxAstConditionAction {
@@ -157,7 +160,8 @@ typedef enum RexxAstSignalKind {
 typedef enum RexxAstParseSourceKind {
     REXX_AST_PARSE_ARG = 0,
     REXX_AST_PARSE_VAR,
-    REXX_AST_PARSE_VALUE
+    REXX_AST_PARSE_VALUE,
+    REXX_AST_PARSE_PULL
 } RexxAstParseSourceKind;
 
 typedef enum RexxAstParsePartKind {

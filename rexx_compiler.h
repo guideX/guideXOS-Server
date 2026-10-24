@@ -93,7 +93,9 @@ typedef enum RexxOpcode {
     OP_DROP_SUBSIDIARY,
     OP_SIGNAL,
     OP_CONDITION,
-    OP_INTERPRET
+    OP_INTERPRET,
+    OP_QUEUE,
+    OP_PUSH
 } RexxOpcode;
 
 typedef enum RexxConditionType {
@@ -192,7 +194,8 @@ typedef struct RexxParseTemplate {
 typedef enum RexxParseSourceKind {
     REXX_PARSE_SOURCE_ARG = 0,
     REXX_PARSE_SOURCE_VAR,
-    REXX_PARSE_SOURCE_VALUE
+    REXX_PARSE_SOURCE_VALUE,
+    REXX_PARSE_SOURCE_PULL
 } RexxParseSourceKind;
 
 typedef struct RexxParsePlan {
