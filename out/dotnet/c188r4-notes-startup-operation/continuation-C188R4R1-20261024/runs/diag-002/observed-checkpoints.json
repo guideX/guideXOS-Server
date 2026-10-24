@@ -1,0 +1,944 @@
+{
+  "result": "FAIL",
+  "captureState": "complete",
+  "serialTruncationStatus": "complete-capture",
+  "serialHasFinalLineTerminator": true,
+  "checkpointAbsenceInterpretation": "unobserved-in-complete-capture",
+  "lastObservedCheckpoint": "C188R4-380 BEFORE C133-PROOF-TEST-CALL",
+  "lastExpectedCheckpointCompleted": "C188R4-380 BEFORE C133-PROOF-TEST-CALL",
+  "firstExpectedMissingCheckpoint": "after C133-PROOF-TEST-CALL",
+  "missingRequiredCheckpoints": [
+    "after C133-PROOF-TEST-CALL",
+    "path label reset branch",
+    "separator reset branch",
+    "radio setup branch",
+    "combo setup branch",
+    "popup menu setup branch",
+    "document usage reset branch",
+    "C126 group box layout branch",
+    "C127 panel layout branch",
+    "control initialization",
+    "control host creation",
+    "control host reset",
+    "list reset begin",
+    "list reset return",
+    "list population begin",
+    "list population return",
+    "list control registration",
+    "control initialization return",
+    "document load begin",
+    "document load return",
+    "document state ready",
+    "surface request begin",
+    "surface request result",
+    "layout initialization begin",
+    "layout initialization result",
+    "first render begin",
+    "RenderMain entry",
+    "RenderMain buffers ready",
+    "background begin",
+    "background result",
+    "heading begin",
+    "heading result",
+    "launch count begin",
+    "launch count result",
+    "path label begin",
+    "path label result",
+    "text area begin",
+    "text area result",
+    "list render begin",
+    "list render result",
+    "status render begin",
+    "status render result",
+    "editor info begin",
+    "editor info result",
+    "keyboard tips begin",
+    "keyboard tips result",
+    "open button begin",
+    "open button result",
+    "save button begin",
+    "save button result",
+    "save as button begin",
+    "save as button result",
+    "settings button begin",
+    "settings button result",
+    "reload button begin",
+    "reload button result",
+    "RenderMain result",
+    "first render return",
+    "post-render settings begin",
+    "post-render settings return",
+    "Notes launch result",
+    "application launch return",
+    "application result",
+    "native launch return",
+    "input manager initialized",
+    "main input loop"
+  ],
+  "missingOptionalCheckpoints": [],
+  "duplicateCheckpoints": [],
+  "outOfOrderCheckpoints": [],
+  "unexpectedBranchCheckpoints": [],
+  "branchOutcomes": {
+    "C119-DISABLED": "SKIPPED",
+    "C133-HOST-TEST": "SKIPPED",
+    "C134-HOST-TEST": "SKIPPED",
+    "C135-HOST-TEST": "SKIPPED",
+    "C133-PROOF-TEST": "TAKEN"
+  },
+  "observedOrderedCheckpoints": [
+    {
+      "marker": "C150-APP-INSTANCE id=4 generation=1",
+      "line": 330,
+      "byteOffset": 15431
+    },
+    {
+      "marker": "C188R3-010 APPLICATION-LAUNCH-BEGIN",
+      "line": 331,
+      "byteOffset": 15490
+    },
+    {
+      "marker": "C188R3-100 NOTES-LAUNCH-ENTRY",
+      "line": 332,
+      "byteOffset": 15549
+    },
+    {
+      "marker": "C188R3-101 NOTES-CONTEXT-VALIDATED",
+      "line": 333,
+      "byteOffset": 15602
+    },
+    {
+      "marker": "C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS",
+      "line": 334,
+      "byteOffset": 15660
+    },
+    {
+      "marker": "C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS",
+      "line": 335,
+      "byteOffset": 15742
+    },
+    {
+      "marker": "C188R3-102 NOTES-SETTINGS-CONTEXT-READY",
+      "line": 336,
+      "byteOffset": 15846
+    },
+    {
+      "marker": "C188R3-103 NOTES-STARTUP-STATE-RESET",
+      "line": 337,
+      "byteOffset": 15909
+    },
+    {
+      "marker": "C188R4-201 BEFORE C133-PROOF-CONTEXT-INITIAL",
+      "line": 338,
+      "byteOffset": 15969
+    },
+    {
+      "marker": "C188R4-202 AFTER C133-PROOF-CONTEXT-INITIAL",
+      "line": 339,
+      "byteOffset": 16037
+    },
+    {
+      "marker": "C188R4-203 BEFORE C133-COMBO-TEST-CONTEXT-INITIAL",
+      "line": 340,
+      "byteOffset": 16104
+    },
+    {
+      "marker": "C188R4-204 AFTER C133-COMBO-TEST-CONTEXT-INITIAL",
+      "line": 341,
+      "byteOffset": 16177
+    },
+    {
+      "marker": "C188R4-205 BEFORE C133-HOST-TEST-CONTEXT-INITIAL",
+      "line": 342,
+      "byteOffset": 16249
+    },
+    {
+      "marker": "C188R4-206 AFTER C133-HOST-TEST-CONTEXT-INITIAL",
+      "line": 343,
+      "byteOffset": 16321
+    },
+    {
+      "marker": "C188R4-207 BEFORE C134-HOST-TEST-CONTEXT-INITIAL",
+      "line": 344,
+      "byteOffset": 16392
+    },
+    {
+      "marker": "C188R4-208 AFTER C134-HOST-TEST-CONTEXT-INITIAL",
+      "line": 345,
+      "byteOffset": 16464
+    },
+    {
+      "marker": "C188R4-209 BEFORE C135-PROOF-CONTEXT-INITIAL",
+      "line": 346,
+      "byteOffset": 16535
+    },
+    {
+      "marker": "C188R4-210 AFTER C135-PROOF-CONTEXT-INITIAL",
+      "line": 347,
+      "byteOffset": 16603
+    },
+    {
+      "marker": "C188R4-211 BEFORE C135-PROOF-CONTEXT-MERGE-C151-INITIAL",
+      "line": 348,
+      "byteOffset": 16670
+    },
+    {
+      "marker": "C188R4-212 AFTER C135-PROOF-CONTEXT-MERGE-C151-INITIAL",
+      "line": 349,
+      "byteOffset": 16749
+    },
+    {
+      "marker": "C188R4-213 BEFORE C135-MENU-TEST-CONTEXT-INITIAL",
+      "line": 350,
+      "byteOffset": 16827
+    },
+    {
+      "marker": "C188R4-214 AFTER C135-MENU-TEST-CONTEXT-INITIAL",
+      "line": 351,
+      "byteOffset": 16899
+    },
+    {
+      "marker": "C188R4-215 BEFORE C135-HOST-TEST-CONTEXT-INITIAL",
+      "line": 352,
+      "byteOffset": 16970
+    },
+    {
+      "marker": "C188R4-216 AFTER C135-HOST-TEST-CONTEXT-INITIAL",
+      "line": 353,
+      "byteOffset": 17042
+    },
+    {
+      "marker": "C188R4-217 BEFORE C136-PROOF-CONTEXT-INITIAL",
+      "line": 354,
+      "byteOffset": 17113
+    },
+    {
+      "marker": "C188R4-218 AFTER C136-PROOF-CONTEXT-INITIAL",
+      "line": 355,
+      "byteOffset": 17181
+    },
+    {
+      "marker": "C188R4-219 BEFORE C119-PROOF-CONTEXT",
+      "line": 356,
+      "byteOffset": 17248
+    },
+    {
+      "marker": "C188R4-220 AFTER C119-PROOF-CONTEXT",
+      "line": 357,
+      "byteOffset": 17308
+    },
+    {
+      "marker": "C188R4-221 BEFORE C119-OPEN-BUTTON-RESET",
+      "line": 358,
+      "byteOffset": 17367
+    },
+    {
+      "marker": "C188R4-222 AFTER C119-OPEN-BUTTON-RESET",
+      "line": 359,
+      "byteOffset": 17431
+    },
+    {
+      "marker": "C188R4-223 BEFORE C119-SAVE-BUTTON-RESET",
+      "line": 360,
+      "byteOffset": 17494
+    },
+    {
+      "marker": "C188R4-224 AFTER C119-SAVE-BUTTON-RESET",
+      "line": 361,
+      "byteOffset": 17558
+    },
+    {
+      "marker": "C188R4-225 BEFORE C119-SAVE-AS-BUTTON-RESET",
+      "line": 362,
+      "byteOffset": 17621
+    },
+    {
+      "marker": "C188R4-226 AFTER C119-SAVE-AS-BUTTON-RESET",
+      "line": 363,
+      "byteOffset": 17688
+    },
+    {
+      "marker": "C188R4-227 BRANCH C119-DISABLED=SKIPPED",
+      "line": 364,
+      "byteOffset": 17754
+    },
+    {
+      "marker": "C188R4-230 BEFORE C120-PROOF-CONTEXT",
+      "line": 365,
+      "byteOffset": 17817
+    },
+    {
+      "marker": "C188R4-231 AFTER C120-PROOF-CONTEXT",
+      "line": 366,
+      "byteOffset": 17877
+    },
+    {
+      "marker": "C188R4-232 BEFORE C121-PROOF-CONTEXT",
+      "line": 367,
+      "byteOffset": 17936
+    },
+    {
+      "marker": "C188R4-233 AFTER C121-PROOF-CONTEXT",
+      "line": 368,
+      "byteOffset": 17996
+    },
+    {
+      "marker": "C188R4-234 BEFORE C121-CHECKBOX-TEST-CONTEXT",
+      "line": 369,
+      "byteOffset": 18055
+    },
+    {
+      "marker": "C188R4-235 AFTER C121-CHECKBOX-TEST-CONTEXT",
+      "line": 370,
+      "byteOffset": 18123
+    },
+    {
+      "marker": "C188R4-236 BEFORE C121-HOST-TEST-CONTEXT",
+      "line": 371,
+      "byteOffset": 18190
+    },
+    {
+      "marker": "C188R4-237 AFTER C121-HOST-TEST-CONTEXT",
+      "line": 372,
+      "byteOffset": 18254
+    },
+    {
+      "marker": "C188R4-238 BEFORE C122-PROOF-CONTEXT",
+      "line": 373,
+      "byteOffset": 18317
+    },
+    {
+      "marker": "C188R4-239 AFTER C122-PROOF-CONTEXT",
+      "line": 374,
+      "byteOffset": 18377
+    },
+    {
+      "marker": "C188R4-240 BEFORE C122-LABEL-TEST-CONTEXT",
+      "line": 375,
+      "byteOffset": 18436
+    },
+    {
+      "marker": "C188R4-241 AFTER C122-LABEL-TEST-CONTEXT",
+      "line": 376,
+      "byteOffset": 18501
+    },
+    {
+      "marker": "C188R4-242 BEFORE C122-LABEL-HOST-TEST-CONTEXT",
+      "line": 377,
+      "byteOffset": 18565
+    },
+    {
+      "marker": "C188R4-243 AFTER C122-LABEL-HOST-TEST-CONTEXT",
+      "line": 378,
+      "byteOffset": 18635
+    },
+    {
+      "marker": "C188R4-244 BEFORE C123-PROOF-CONTEXT",
+      "line": 379,
+      "byteOffset": 18704
+    },
+    {
+      "marker": "C188R4-245 AFTER C123-PROOF-CONTEXT",
+      "line": 380,
+      "byteOffset": 18764
+    },
+    {
+      "marker": "C188R4-246 BEFORE C123-SEPARATOR-TEST-CONTEXT",
+      "line": 381,
+      "byteOffset": 18823
+    },
+    {
+      "marker": "C188R4-247 AFTER C123-SEPARATOR-TEST-CONTEXT",
+      "line": 382,
+      "byteOffset": 18892
+    },
+    {
+      "marker": "C188R4-248 BEFORE C123-SEPARATOR-HOST-TEST-CONTEXT",
+      "line": 383,
+      "byteOffset": 18960
+    },
+    {
+      "marker": "C188R4-249 AFTER C123-SEPARATOR-HOST-TEST-CONTEXT",
+      "line": 384,
+      "byteOffset": 19034
+    },
+    {
+      "marker": "C188R4-250 BEFORE C124-PROOF-CONTEXT",
+      "line": 385,
+      "byteOffset": 19107
+    },
+    {
+      "marker": "C188R4-251 AFTER C124-PROOF-CONTEXT",
+      "line": 386,
+      "byteOffset": 19167
+    },
+    {
+      "marker": "C188R4-252 BEFORE C124-RADIO-TEST-CONTEXT",
+      "line": 387,
+      "byteOffset": 19226
+    },
+    {
+      "marker": "C188R4-253 AFTER C124-RADIO-TEST-CONTEXT",
+      "line": 388,
+      "byteOffset": 19291
+    },
+    {
+      "marker": "C188R4-254 BEFORE C124-RADIO-HOST-TEST-CONTEXT",
+      "line": 389,
+      "byteOffset": 19355
+    },
+    {
+      "marker": "C188R4-255 AFTER C124-RADIO-HOST-TEST-CONTEXT",
+      "line": 390,
+      "byteOffset": 19425
+    },
+    {
+      "marker": "C188R4-256 BEFORE C125-PROOF-CONTEXT",
+      "line": 391,
+      "byteOffset": 19494
+    },
+    {
+      "marker": "C188R4-257 AFTER C125-PROOF-CONTEXT",
+      "line": 392,
+      "byteOffset": 19554
+    },
+    {
+      "marker": "C188R4-258 BEFORE C125-PROGRESS-TEST-CONTEXT",
+      "line": 393,
+      "byteOffset": 19613
+    },
+    {
+      "marker": "C188R4-259 AFTER C125-PROGRESS-TEST-CONTEXT",
+      "line": 394,
+      "byteOffset": 19681
+    },
+    {
+      "marker": "C188R4-260 BEFORE C126-PROOF-CONTEXT",
+      "line": 395,
+      "byteOffset": 19748
+    },
+    {
+      "marker": "C188R4-261 AFTER C126-PROOF-CONTEXT",
+      "line": 396,
+      "byteOffset": 19808
+    },
+    {
+      "marker": "C188R4-262 BEFORE C126-GROUP-BOX-TEST-CONTEXT",
+      "line": 397,
+      "byteOffset": 19867
+    },
+    {
+      "marker": "C188R4-263 AFTER C126-GROUP-BOX-TEST-CONTEXT",
+      "line": 398,
+      "byteOffset": 19936
+    },
+    {
+      "marker": "C188R4-264 BEFORE C125-PROOF-CONTEXT-MERGE-C126",
+      "line": 399,
+      "byteOffset": 20004
+    },
+    {
+      "marker": "C188R4-265 AFTER C125-PROOF-CONTEXT-MERGE-C126",
+      "line": 400,
+      "byteOffset": 20075
+    },
+    {
+      "marker": "C188R4-266 BEFORE C127-PROOF-CONTEXT",
+      "line": 401,
+      "byteOffset": 20145
+    },
+    {
+      "marker": "C188R4-267 AFTER C127-PROOF-CONTEXT",
+      "line": 402,
+      "byteOffset": 20205
+    },
+    {
+      "marker": "C188R4-268 BEFORE C127-PANEL-TEST-CONTEXT",
+      "line": 403,
+      "byteOffset": 20264
+    },
+    {
+      "marker": "C188R4-269 AFTER C127-PANEL-TEST-CONTEXT",
+      "line": 404,
+      "byteOffset": 20329
+    },
+    {
+      "marker": "C188R4-270 BEFORE C125-PROOF-CONTEXT-MERGE-C127",
+      "line": 405,
+      "byteOffset": 20393
+    },
+    {
+      "marker": "C188R4-271 AFTER C125-PROOF-CONTEXT-MERGE-C127",
+      "line": 406,
+      "byteOffset": 20464
+    },
+    {
+      "marker": "C188R4-272 BEFORE C128-PROOF-CONTEXT",
+      "line": 407,
+      "byteOffset": 20534
+    },
+    {
+      "marker": "C188R4-273 AFTER C128-PROOF-CONTEXT",
+      "line": 408,
+      "byteOffset": 20594
+    },
+    {
+      "marker": "C188R4-274 BEFORE C128-PANEL-LIFECYCLE-TEST-CONTEXT",
+      "line": 409,
+      "byteOffset": 20653
+    },
+    {
+      "marker": "C188R4-275 AFTER C128-PANEL-LIFECYCLE-TEST-CONTEXT",
+      "line": 410,
+      "byteOffset": 20728
+    },
+    {
+      "marker": "C188R4-276 BEFORE C125-PROOF-CONTEXT-MERGE-C128",
+      "line": 411,
+      "byteOffset": 20802
+    },
+    {
+      "marker": "C188R4-277 AFTER C125-PROOF-CONTEXT-MERGE-C128",
+      "line": 412,
+      "byteOffset": 20873
+    },
+    {
+      "marker": "C188R4-278 BEFORE C129-PROOF-CONTEXT",
+      "line": 413,
+      "byteOffset": 20943
+    },
+    {
+      "marker": "C188R4-279 AFTER C129-PROOF-CONTEXT",
+      "line": 414,
+      "byteOffset": 21003
+    },
+    {
+      "marker": "C188R4-280 BEFORE C129-SHIFT-TAB-TEST-CONTEXT",
+      "line": 415,
+      "byteOffset": 21062
+    },
+    {
+      "marker": "C188R4-281 AFTER C129-SHIFT-TAB-TEST-CONTEXT",
+      "line": 416,
+      "byteOffset": 21131
+    },
+    {
+      "marker": "C188R4-282 BEFORE C129-PROOF-STAGE-RESET",
+      "line": 417,
+      "byteOffset": 21199
+    },
+    {
+      "marker": "C188R4-283 AFTER C129-PROOF-STAGE-RESET",
+      "line": 418,
+      "byteOffset": 21263
+    },
+    {
+      "marker": "C188R4-284 BEFORE C131-PROOF-CONTEXT",
+      "line": 419,
+      "byteOffset": 21326
+    },
+    {
+      "marker": "C188R4-285 AFTER C131-PROOF-CONTEXT",
+      "line": 420,
+      "byteOffset": 21386
+    },
+    {
+      "marker": "C188R4-286 BEFORE C131-CHECKBOX-TEST-CONTEXT",
+      "line": 421,
+      "byteOffset": 21445
+    },
+    {
+      "marker": "C188R4-287 AFTER C131-CHECKBOX-TEST-CONTEXT",
+      "line": 422,
+      "byteOffset": 21513
+    },
+    {
+      "marker": "C188R4-288 BEFORE C131-HOST-TEST-CONTEXT",
+      "line": 423,
+      "byteOffset": 21580
+    },
+    {
+      "marker": "C188R4-289 AFTER C131-HOST-TEST-CONTEXT",
+      "line": 424,
+      "byteOffset": 21644
+    },
+    {
+      "marker": "C188R4-290 BEFORE C132-PROOF-CONTEXT",
+      "line": 425,
+      "byteOffset": 21707
+    },
+    {
+      "marker": "C188R4-291 AFTER C132-PROOF-CONTEXT",
+      "line": 426,
+      "byteOffset": 21767
+    },
+    {
+      "marker": "C188R4-292 BEFORE C132-RADIO-TEST-CONTEXT",
+      "line": 427,
+      "byteOffset": 21826
+    },
+    {
+      "marker": "C188R4-293 AFTER C132-RADIO-TEST-CONTEXT",
+      "line": 428,
+      "byteOffset": 21891
+    },
+    {
+      "marker": "C188R4-294 BEFORE C132-HOST-TEST-CONTEXT",
+      "line": 429,
+      "byteOffset": 21955
+    },
+    {
+      "marker": "C188R4-295 AFTER C132-HOST-TEST-CONTEXT",
+      "line": 430,
+      "byteOffset": 22019
+    },
+    {
+      "marker": "C188R4-296 BEFORE C133-PROOF-CONTEXT-SECOND-PASS",
+      "line": 431,
+      "byteOffset": 22082
+    },
+    {
+      "marker": "C188R4-297 AFTER C133-PROOF-CONTEXT-SECOND-PASS",
+      "line": 432,
+      "byteOffset": 22154
+    },
+    {
+      "marker": "C188R4-298 BEFORE C133-PROOF-CONTEXT-MERGE-C134",
+      "line": 433,
+      "byteOffset": 22225
+    },
+    {
+      "marker": "C188R4-299 AFTER C133-PROOF-CONTEXT-MERGE-C134",
+      "line": 434,
+      "byteOffset": 22296
+    },
+    {
+      "marker": "C188R4-300 BEFORE C133-PROOF-CONTEXT-MERGE-C135",
+      "line": 435,
+      "byteOffset": 22366
+    },
+    {
+      "marker": "C188R4-301 AFTER C133-PROOF-CONTEXT-MERGE-C135",
+      "line": 436,
+      "byteOffset": 22437
+    },
+    {
+      "marker": "C188R4-304 BEFORE C133-PROOF-CONTEXT-MERGE-C151",
+      "line": 437,
+      "byteOffset": 22507
+    },
+    {
+      "marker": "C188R4-305 AFTER C133-PROOF-CONTEXT-MERGE-C151",
+      "line": 438,
+      "byteOffset": 22578
+    },
+    {
+      "marker": "C188R4-306 BEFORE C133-COMBO-TEST-CONTEXT-SECOND-PASS",
+      "line": 439,
+      "byteOffset": 22648
+    },
+    {
+      "marker": "C188R4-307 AFTER C133-COMBO-TEST-CONTEXT-SECOND-PASS",
+      "line": 440,
+      "byteOffset": 22725
+    },
+    {
+      "marker": "C188R4-308 BEFORE C133-HOST-TEST-CONTEXT-SECOND-PASS",
+      "line": 441,
+      "byteOffset": 22801
+    },
+    {
+      "marker": "C188R4-309 AFTER C133-HOST-TEST-CONTEXT-SECOND-PASS",
+      "line": 442,
+      "byteOffset": 22877
+    },
+    {
+      "marker": "C188R4-310 BEFORE C134-HOST-TEST-CONTEXT-SECOND-PASS",
+      "line": 443,
+      "byteOffset": 22952
+    },
+    {
+      "marker": "C188R4-311 AFTER C134-HOST-TEST-CONTEXT-SECOND-PASS",
+      "line": 444,
+      "byteOffset": 23028
+    },
+    {
+      "marker": "C188R4-312 BEFORE C135-PROOF-CONTEXT-SECOND-PASS",
+      "line": 445,
+      "byteOffset": 23103
+    },
+    {
+      "marker": "C188R4-313 AFTER C135-PROOF-CONTEXT-SECOND-PASS",
+      "line": 446,
+      "byteOffset": 23175
+    },
+    {
+      "marker": "C188R4-314 BEFORE C135-PROOF-CONTEXT-MERGE-C151",
+      "line": 447,
+      "byteOffset": 23246
+    },
+    {
+      "marker": "C188R4-315 AFTER C135-PROOF-CONTEXT-MERGE-C151",
+      "line": 448,
+      "byteOffset": 23317
+    },
+    {
+      "marker": "C188R4-316 BEFORE C135-MENU-TEST-CONTEXT-SECOND-PASS",
+      "line": 449,
+      "byteOffset": 23387
+    },
+    {
+      "marker": "C188R4-317 AFTER C135-MENU-TEST-CONTEXT-SECOND-PASS",
+      "line": 450,
+      "byteOffset": 23463
+    },
+    {
+      "marker": "C188R4-318 BEFORE C135-HOST-TEST-CONTEXT-SECOND-PASS",
+      "line": 451,
+      "byteOffset": 23538
+    },
+    {
+      "marker": "C188R4-319 AFTER C135-HOST-TEST-CONTEXT-SECOND-PASS",
+      "line": 452,
+      "byteOffset": 23614
+    },
+    {
+      "marker": "C188R4-320 BEFORE C137-PROOF-CONTEXT-MERGE-C151",
+      "line": 453,
+      "byteOffset": 23689
+    },
+    {
+      "marker": "C188R4-321 AFTER C137-PROOF-CONTEXT-MERGE-C151",
+      "line": 454,
+      "byteOffset": 23760
+    },
+    {
+      "marker": "C188R4-322 BEFORE C138-PROOF-CONTEXT",
+      "line": 455,
+      "byteOffset": 23830
+    },
+    {
+      "marker": "C188R4-323 AFTER C138-PROOF-CONTEXT",
+      "line": 456,
+      "byteOffset": 23890
+    },
+    {
+      "marker": "C188R4-324 BEFORE C139-PROOF-CONTEXT",
+      "line": 457,
+      "byteOffset": 23949
+    },
+    {
+      "marker": "C188R4-325 AFTER C139-PROOF-CONTEXT",
+      "line": 458,
+      "byteOffset": 24009
+    },
+    {
+      "marker": "C188R4-326 BEFORE C138-PROOF-CONTEXT-MERGE-C139",
+      "line": 459,
+      "byteOffset": 24068
+    },
+    {
+      "marker": "C188R4-327 AFTER C138-PROOF-CONTEXT-MERGE-C139",
+      "line": 460,
+      "byteOffset": 24139
+    },
+    {
+      "marker": "C188R4-328 BEFORE C137-PROOF-CONTEXT-MERGE-C138",
+      "line": 461,
+      "byteOffset": 24209
+    },
+    {
+      "marker": "C188R4-329 AFTER C137-PROOF-CONTEXT-MERGE-C138",
+      "line": 462,
+      "byteOffset": 24280
+    },
+    {
+      "marker": "C188R4-330 BEFORE C135-PROOF-CONTEXT-MERGE-C138",
+      "line": 463,
+      "byteOffset": 24350
+    },
+    {
+      "marker": "C188R4-331 AFTER C135-PROOF-CONTEXT-MERGE-C138",
+      "line": 464,
+      "byteOffset": 24421
+    },
+    {
+      "marker": "C188R4-332 BEFORE C136-PROOF-CONTEXT-MERGE-C138",
+      "line": 465,
+      "byteOffset": 24491
+    },
+    {
+      "marker": "C188R4-333 AFTER C136-PROOF-CONTEXT-MERGE-C138",
+      "line": 466,
+      "byteOffset": 24562
+    },
+    {
+      "marker": "C188R4-334 BEFORE C120-PROOF-CONTEXT-MERGE-C132",
+      "line": 467,
+      "byteOffset": 24632
+    },
+    {
+      "marker": "C188R4-335 AFTER C120-PROOF-CONTEXT-MERGE-C132",
+      "line": 468,
+      "byteOffset": 24703
+    },
+    {
+      "marker": "C188R4-336 BEFORE C121-PROOF-CONTEXT-MERGE-C132",
+      "line": 469,
+      "byteOffset": 24773
+    },
+    {
+      "marker": "C188R4-337 AFTER C121-PROOF-CONTEXT-MERGE-C132",
+      "line": 470,
+      "byteOffset": 24844
+    },
+    {
+      "marker": "C188R4-338 BEFORE C122-PROOF-CONTEXT-MERGE-C132",
+      "line": 471,
+      "byteOffset": 24914
+    },
+    {
+      "marker": "C188R4-339 AFTER C122-PROOF-CONTEXT-MERGE-C132",
+      "line": 472,
+      "byteOffset": 24985
+    },
+    {
+      "marker": "C188R4-340 BEFORE C120-PROOF-CONTEXT-MERGE-C133",
+      "line": 473,
+      "byteOffset": 25055
+    },
+    {
+      "marker": "C188R4-341 AFTER C120-PROOF-CONTEXT-MERGE-C133",
+      "line": 474,
+      "byteOffset": 25126
+    },
+    {
+      "marker": "C188R4-342 BEFORE C121-PROOF-CONTEXT-MERGE-C133",
+      "line": 475,
+      "byteOffset": 25196
+    },
+    {
+      "marker": "C188R4-343 AFTER C121-PROOF-CONTEXT-MERGE-C133",
+      "line": 476,
+      "byteOffset": 25267
+    },
+    {
+      "marker": "C188R4-344 BEFORE C131-PROOF-CONTEXT-MERGE-C133",
+      "line": 477,
+      "byteOffset": 25337
+    },
+    {
+      "marker": "C188R4-345 AFTER C131-PROOF-CONTEXT-MERGE-C133",
+      "line": 478,
+      "byteOffset": 25408
+    },
+    {
+      "marker": "C188R4-346 BEFORE C122-PROOF-CONTEXT-MERGE-C133",
+      "line": 479,
+      "byteOffset": 25478
+    },
+    {
+      "marker": "C188R4-347 AFTER C122-PROOF-CONTEXT-MERGE-C133",
+      "line": 480,
+      "byteOffset": 25549
+    },
+    {
+      "marker": "C188R4-348 BEFORE C120-PROOF-CONTEXT-MERGE-C137",
+      "line": 481,
+      "byteOffset": 25619
+    },
+    {
+      "marker": "C188R4-349 AFTER C120-PROOF-CONTEXT-MERGE-C137",
+      "line": 482,
+      "byteOffset": 25690
+    },
+    {
+      "marker": "C188R4-350 BEFORE C120-PROOF-CONTEXT-MERGE-C147",
+      "line": 483,
+      "byteOffset": 25760
+    },
+    {
+      "marker": "C188R4-351 AFTER C120-PROOF-CONTEXT-MERGE-C147",
+      "line": 484,
+      "byteOffset": 25831
+    },
+    {
+      "marker": "C188R4-352 BEFORE C121-PROOF-CONTEXT-MERGE-C137",
+      "line": 485,
+      "byteOffset": 25901
+    },
+    {
+      "marker": "C188R4-353 AFTER C121-PROOF-CONTEXT-MERGE-C137",
+      "line": 486,
+      "byteOffset": 25972
+    },
+    {
+      "marker": "C188R4-354 BEFORE C131-PROOF-CONTEXT-MERGE-C137",
+      "line": 487,
+      "byteOffset": 26042
+    },
+    {
+      "marker": "C188R4-355 AFTER C131-PROOF-CONTEXT-MERGE-C137",
+      "line": 488,
+      "byteOffset": 26113
+    },
+    {
+      "marker": "C188R4-356 BEFORE C124-PROOF-CONTEXT-MERGE-C125",
+      "line": 489,
+      "byteOffset": 26183
+    },
+    {
+      "marker": "C188R4-357 AFTER C124-PROOF-CONTEXT-MERGE-C125",
+      "line": 490,
+      "byteOffset": 26254
+    },
+    {
+      "marker": "C188R4-358 BEFORE C123-PROOF-CONTEXT-MERGE-C124",
+      "line": 491,
+      "byteOffset": 26324
+    },
+    {
+      "marker": "C188R4-359 AFTER C123-PROOF-CONTEXT-MERGE-C124",
+      "line": 492,
+      "byteOffset": 26395
+    },
+    {
+      "marker": "C188R4-360 BEFORE C122-PROOF-CONTEXT-MERGE-C123",
+      "line": 493,
+      "byteOffset": 26465
+    },
+    {
+      "marker": "C188R4-361 AFTER C122-PROOF-CONTEXT-MERGE-C123",
+      "line": 494,
+      "byteOffset": 26536
+    },
+    {
+      "marker": "C188R4-370 BRANCH C133-HOST-TEST=SKIPPED",
+      "line": 495,
+      "byteOffset": 26606
+    },
+    {
+      "marker": "C188R4-373 BRANCH C134-HOST-TEST=SKIPPED",
+      "line": 496,
+      "byteOffset": 26670
+    },
+    {
+      "marker": "C188R4-376 BRANCH C135-HOST-TEST=SKIPPED",
+      "line": 497,
+      "byteOffset": 26734
+    },
+    {
+      "marker": "C188R4-379 BRANCH C133-PROOF-TEST=TAKEN",
+      "line": 498,
+      "byteOffset": 26798
+    },
+    {
+      "marker": "C188R4-380 BEFORE C133-PROOF-TEST-CALL",
+      "line": 499,
+      "byteOffset": 26861
+    }
+  ],
+  "recognizedCheckpointCount": 170,
+  "serialPath": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002\\serial.log",
+  "serialSha256": "0A3446D3330265869B80697AB16D3AB1BBD4E9D56DCE93657A2C809A91697F46"
+}

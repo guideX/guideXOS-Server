@@ -1,0 +1,8 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 1956 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-24T15:46:48.6791620+00:00 | managed
+  Note: Reservation 659a1bdb05be45428bd1e41262a586cc · guideXOSServer · acceptance
+Reservations: 1
+  659a1bdb05be45428bd1e41262a586cc | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 18836) | owner Verified | child PID 1956
+Managed sessions: 1
+Managed session: 659a1bdb05be45428bd1e41262a586cc | Running | guideXOSServer · LEON2_RDT\guideX (PID 18836)
+

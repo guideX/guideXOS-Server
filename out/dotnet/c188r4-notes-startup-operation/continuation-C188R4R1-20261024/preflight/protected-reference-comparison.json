@@ -1,0 +1,13 @@
+{
+  "reference": "C188R4 preflight/protected-before.json",
+  "referenceRoots": 13,
+  "referenceFiles": 8497,
+  "currentRoots": 13,
+  "currentFiles": 8497,
+  "addedBeforeRun": 0,
+  "removedBeforeRun": 0,
+  "changedBeforeRun": 0,
+  "addedPaths": [],
+  "removedPaths": [],
+  "changedFiles": []
+}

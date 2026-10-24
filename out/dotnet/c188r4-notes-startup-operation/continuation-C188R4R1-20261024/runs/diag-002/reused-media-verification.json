@@ -1,0 +1,39 @@
+{
+  "capturedAtUtc": "2026-10-24T15:45:43.6156893Z",
+  "source": "C188R4 retained runs/diag-001 candidate staging",
+  "destination": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002",
+  "candidateChanged": false,
+  "media": [
+    {
+      "path": "kernel.elf",
+      "sourceSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+      "runSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+      "matches": true
+    },
+    {
+      "path": "ramdisk.img",
+      "sourceSha256": "AE9CC800D6A5B0FE6839B75DE01874CBB735BD2D5FAE9731C9107CF52E206AC2",
+      "runSha256": "AE9CC800D6A5B0FE6839B75DE01874CBB735BD2D5FAE9731C9107CF52E206AC2",
+      "matches": true
+    },
+    {
+      "path": "desktop.cfg",
+      "sourceSha256": "96BBE0EC8E7EA30B04B54CC375678F27595051FB15CCF8F722FAA8930F386B76",
+      "runSha256": "96BBE0EC8E7EA30B04B54CC375678F27595051FB15CCF8F722FAA8930F386B76",
+      "matches": true
+    },
+    {
+      "path": "EFI/BOOT/BOOTX64.EFI",
+      "sourceSha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B",
+      "runSha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B",
+      "matches": true
+    },
+    {
+      "path": "NvVars",
+      "sourceSha256": "4B99DDCDB62B5F1C5001A89B97C3796000A79CD6B76BDAFA3613E149F6035C56",
+      "runSha256": "4B99DDCDB62B5F1C5001A89B97C3796000A79CD6B76BDAFA3613E149F6035C56",
+      "matches": true
+    }
+  ],
+  "result": "PASS"
+}

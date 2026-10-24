@@ -1,0 +1,4 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+Reservations: 0
+Managed sessions: 0
+

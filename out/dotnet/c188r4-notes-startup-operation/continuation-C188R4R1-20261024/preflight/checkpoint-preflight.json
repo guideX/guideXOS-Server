@@ -1,0 +1,107 @@
+{
+  "phase": "C188R4R1",
+  "capturedAtUtc": "2026-10-24T15:54:05.5153866Z",
+  "startingHead": "67d4e656ad81c6387626844e6dca14d9a0e57307",
+  "branch": "v1.1_DOTNET_SUPPORT",
+  "candidateVerification": {
+    "capturedAtUtc": "2026-10-24T15:45:56.5006833Z",
+    "head": "67d4e656ad81c6387626844e6dca14d9a0e57307",
+    "c188r4Commit": "67d4e656ad81c6387626844e6dca14d9a0e57307",
+    "nativeAotQualificationResult": "PASS",
+    "diagnosticSelector": 9,
+    "diagnosticIdentity": "com.guidexos.apps.managed.counterapp",
+    "productionSelectors": {
+      "taskManager": 7,
+      "notes": 4,
+      "calculator": 6,
+      "fileExplorer": 8,
+      "settings": 5
+    },
+    "operationIsolationInstrumented": true,
+    "productionQualificationResult": "PASS",
+    "productionMarkerExclusion": {
+      "c188SelectorRoutePresent": false,
+      "counterAppDescriptorPresent": false
+    },
+    "recordedMarkers": 286,
+    "recordedR4Markers": 208,
+    "targetNotesSelector": 4,
+    "targetNotesLaunchContext": "c147-native-notes",
+    "targetPathEvidence": "Historical R3 serial confirms selector=4; C147 context PASS before checkpoint 103.",
+    "artifactCount": 6,
+    "artifacts": [
+      {
+        "name": "diagnosticNativeAotElf",
+        "path": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r4-notes-startup-operation\\build\\candidate-001\\nativeaot\\artifacts\\HostLogProof.elf",
+        "expectedSha256": "B36857BF2F54AC81BA151648D688B9808D798184ED70D84B0E6453BD9C111776",
+        "actualSha256": "B36857BF2F54AC81BA151648D688B9808D798184ED70D84B0E6453BD9C111776",
+        "matches": true
+      },
+      {
+        "name": "productionNativeAotElf",
+        "path": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r4-notes-startup-operation\\build\\production-check-001\\nativeaot\\artifacts\\HostLogProof.elf",
+        "expectedSha256": "941F8B6AA9C6432A778D820E2BDEA5CFF0883AE793DBB5526C7E9ECD352E7CFB",
+        "actualSha256": "941F8B6AA9C6432A778D820E2BDEA5CFF0883AE793DBB5526C7E9ECD352E7CFB",
+        "matches": true
+      },
+      {
+        "name": "freestandingKernelElf",
+        "path": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r4-notes-startup-operation\\build\\kernel-attempt-001\\bin\\kernel.elf",
+        "expectedSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+        "actualSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+        "matches": true
+      },
+      {
+        "name": "stagedRamdisk",
+        "path": "out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002\\esp\\ramdisk.img",
+        "expectedSha256": "AE9CC800D6A5B0FE6839B75DE01874CBB735BD2D5FAE9731C9107CF52E206AC2",
+        "actualSha256": "AE9CC800D6A5B0FE6839B75DE01874CBB735BD2D5FAE9731C9107CF52E206AC2",
+        "matches": true
+      },
+      {
+        "name": "uefiBootloader",
+        "path": "out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002\\esp\\EFI\\BOOT\\BOOTX64.EFI",
+        "expectedSha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B",
+        "actualSha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B",
+        "matches": true
+      },
+      {
+        "name": "stagedKernelCopy",
+        "path": "out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002\\esp\\kernel.elf",
+        "expectedSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+        "actualSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+        "matches": true
+      }
+    ],
+    "result": "PASS"
+  },
+  "checkpointPreflight": {
+    "selectedPath": "C150 selector 4 / c147-native-notes",
+    "notesStartupIsolationCandidate": true,
+    "proofCompositeSelector": 9,
+    "proofCompositeIdentity": "com.guidexos.apps.managed.counterapp",
+    "retainedMarkerEntries": 286,
+    "retainedR4MarkerEntries": 208,
+    "threeButtonResetPairs": [
+      "C188R4-221/222 OPEN",
+      "C188R4-223/224 SAVE",
+      "C188R4-225/226 SAVE-AS"
+    ],
+    "optionalBranchCoverage": "Branch-aware validator uses recorded branch outcome; optional checkpoint omissions are not treated as missing.",
+    "correctedPriorSequence": "C188R3 report and checkpoint-sequence-correction.json consulted; C150 precedes optional C147/C148; 9 focused validator tests passed.",
+    "result": "PASS"
+  },
+  "validatorTests": {
+    "command": "python scripts/dotnet/test-c188-checkpoint-sequence.py",
+    "result": "PASS",
+    "cases": 9,
+    "evidence": "Console output from this turn; C188R4 report records the same 9 passing focused cases.",
+    "notRepeated": true,
+    "executedBeforeQacAdmission": true,
+    "thisContinuationRun": true
+  },
+  "runRoot": "out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002",
+  "validatorOutput": "out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002\\observed-checkpoints.json",
+  "rawSerialSha256": "0A3446D3330265869B80697AB16D3AB1BBD4E9D56DCE93657A2C809A91697F46",
+  "result": "READY-FOR-ONE-GUEST"
+}

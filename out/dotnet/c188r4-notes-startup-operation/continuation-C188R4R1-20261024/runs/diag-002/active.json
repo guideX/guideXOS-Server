@@ -1,0 +1,8 @@
+{
+  "qmpPort": 64189,
+  "esp": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002\\esp",
+  "serial": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r4-notes-startup-operation\\continuation-C188R4R1-20261024\\runs\\diag-002\\serial.log",
+  "reservationId": "659a1bdb05be45428bd1e41262a586cc",
+  "ownerPid": 18836,
+  "scenario": "notes-startup-diagnostic"
+}

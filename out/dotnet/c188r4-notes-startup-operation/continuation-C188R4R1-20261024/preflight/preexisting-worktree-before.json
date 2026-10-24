@@ -1,0 +1,822 @@
+{
+  "capturedAtUtc": "2026-10-24T15:53:23.2609314Z",
+  "count": 136,
+  "items": [
+    {
+      "status": " M",
+      "path": "ESP/ramdisk.img",
+      "bytes": 67108864,
+      "sha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/GuideXos.C185.CounterApp.dll",
+      "bytes": 9728,
+      "sha256": "BD87A6A865A0D747037B8B3CCA89EA980919F11D68E955F0A70684485056DEFC"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/GuideXos.C185.CounterApp.pdb",
+      "bytes": 12272,
+      "sha256": "8B47B808D28B71F2F0503232064DDFC60224C7FD0E65D173ABA4F98328653542"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 11264,
+      "sha256": "F232A827F9B781E9EB374F2140ADCA88918BD44695B4D4D65F7D71BFBDA689AC"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/GuideXos.ManagedUi.Contracts.pdb",
+      "bytes": 12176,
+      "sha256": "8C62A526C47CC74FCABC673316BCB07CB3B22AF1E7A868E92676E1ACE647DAF9"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/HostLogProof.deps.json",
+      "bytes": 1419,
+      "sha256": "0066E3BE56A858219B502C9BCAB4A6E71C496FE98B85F1043AB37C5E1A773F42"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/HostLogProof.dll",
+      "bytes": 585728,
+      "sha256": "0B338E6378D6C7FB02C606D3AC25BCF32C7FF74A052DD40672A1FDF2559AB462"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/HostLogProof.exe",
+      "bytes": 156160,
+      "sha256": "8AC4CEDEF2850176C00E7A0EEF2E5B340D1B09106578071B0FA489D91432D279"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/HostLogProof.pdb",
+      "bytes": 242960,
+      "sha256": "FDD726AE11408522DEC02E291D9F281712D08A671D95348BECFDC9B3F51237E2"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/HostLogProof.runtimeconfig.json",
+      "bytes": 447,
+      "sha256": "86F305ACED9638BCF63E9ED062B33BD4B51EDE05E37BBDEC2EA3EB782A606483"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/ManagedHostServicesC185Host.deps.json",
+      "bytes": 1635,
+      "sha256": "F4C00B0AFD6D523010C91EF809265892302ED8E478068EBEB04CE640DD9C7D6C"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/ManagedHostServicesC185Host.dll",
+      "bytes": 6656,
+      "sha256": "8E652E3653B22E447DDA2DD1080739375A081DB2400917A57A55612F6BDA2313"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/ManagedHostServicesC185Host.exe",
+      "bytes": 156672,
+      "sha256": "CD68B11D7EC6E37533632EC1C8C19BD80DA7A40529808421E7442E8003C3F51B"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/ManagedHostServicesC185Host.pdb",
+      "bytes": 10992,
+      "sha256": "6F35BD597E2B2EED683A5DE235907B768EEBFB745F6BB413A8B868D9C381F14A"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/bin/Release/net9.0/win-x64/ManagedHostServicesC185Host.runtimeconfig.json",
+      "bytes": 340,
+      "sha256": "3C0BF772B95C93363A0A14E5DF78E4EC408C90F04CB7103205AF97B2D276FAB0"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/ManagedHostServicesC185.csproj.nuget.dgspec.json",
+      "bytes": 7981,
+      "sha256": "5D1867DD2A099427E1DF74289752EB162F901D9F1E497C4F539A85B0F69FE384"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/ManagedHostServicesC185.csproj.nuget.g.props",
+      "bytes": 1304,
+      "sha256": "D0A4D00472E32EF3B2AA0FF63991162A7FD9C14AD6BECDC421D59F09AC4A2A33"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/ManagedHostServicesC185.csproj.nuget.g.targets",
+      "bytes": 150,
+      "sha256": "971CC9B535384849B5C661D776CD7A80833A416265E32E8968E06C367368B8B5"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/.NETCoreApp,Version=v9.0.AssemblyAttributes.cs",
+      "bytes": 198,
+      "sha256": "9E76499C4E5CB623AD4889EAA99B1A53D9C970EFCF902D8B096E78A19EE4285D"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedH.667295D5.Up2Date",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.AssemblyInfo.cs",
+      "bytes": 1057,
+      "sha256": "A476D27F76C22FA5ABC8C3C0228F25C2F09BB790B06AD648AD69E678A71D7BBE"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.AssemblyInfoInputs.cache",
+      "bytes": 66,
+      "sha256": "B0C3091C781B43BAA78AF9F40690CABC7B36269726B538C8C67FB120B04D1FF0"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.GeneratedMSBuildEditorConfig.editorconfig",
+      "bytes": 872,
+      "sha256": "46F0CF00E9D153F2107E6C8D3E9B0A6B809223510192EDDDF96876299CB412CE"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.GlobalUsings.g.cs",
+      "bytes": 239,
+      "sha256": "A3C6048BB4D922B1799A9977F84362A3787B68810CAC67AA86AC3AA23295F227"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.assets.cache",
+      "bytes": 229,
+      "sha256": "6F0B58CDE2343388824021B3D618BB50044C60DEFD6828624799C0F308E05AEC"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.csproj.AssemblyReference.cache",
+      "bytes": 1640,
+      "sha256": "F002E5985E8442FEF6FC15EB7A2A594E15DA1C1F7D9EFD53211A4BA5E2875BBE"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.csproj.CoreCompileInputs.cache",
+      "bytes": 66,
+      "sha256": "23F823A02C42C7B149E0C14A251648390946F40EA222C4FC4DF2E424BEEA7AEC"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.csproj.FileListAbsolute.txt",
+      "bytes": 3684,
+      "sha256": "4E7C67BB590211A2732EAD6392C2C1064D0F38EFB001D85935EB07A8655DFF4F"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.genruntimeconfig.cache",
+      "bytes": 66,
+      "sha256": "575A543BC984BCAA3317FE3C01C1E62B7B5C17B0CA755974CB8ED29E68C3146E"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185.sourcelink.json",
+      "bytes": 165,
+      "sha256": "078389B846BF92853884F3315A2F4646A7138C878E71835E95D1148A35B283A6"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185Host.dll",
+      "bytes": 6656,
+      "sha256": "8E652E3653B22E447DDA2DD1080739375A081DB2400917A57A55612F6BDA2313"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ManagedHostServicesC185Host.pdb",
+      "bytes": 10992,
+      "sha256": "6F35BD597E2B2EED683A5DE235907B768EEBFB745F6BB413A8B868D9C381F14A"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/apphost.exe",
+      "bytes": 156672,
+      "sha256": "CD68B11D7EC6E37533632EC1C8C19BD80DA7A40529808421E7442E8003C3F51B"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/ref/ManagedHostServicesC185Host.dll",
+      "bytes": 5120,
+      "sha256": "C02BC16155B401A5F401FDDBB5C8FB47FBEC3C7EA11705BCA8E275785BEE25B9"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/Release/net9.0/win-x64/refint/ManagedHostServicesC185Host.dll",
+      "bytes": 5120,
+      "sha256": "C02BC16155B401A5F401FDDBB5C8FB47FBEC3C7EA11705BCA8E275785BEE25B9"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/project.assets.json",
+      "bytes": 4426,
+      "sha256": "2E7E5D6B6276236973A828730C9616E22AFC50E9BF93CDF0953F9E22A3A60EDF"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedHostServicesC185/obj/project.nuget.cache",
+      "bytes": 804,
+      "sha256": "9E216FDBFBD722EE1428C5F6B3140023996288A11D18AE69B1BACF2C70D424BC"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedStarterC182/obj/ManagedStarterC182.csproj.nuget.dgspec.json",
+      "bytes": 7931,
+      "sha256": "59780330A08B71ADDE488C1E9A6DC9BE1179FB8057E0D899F2630C07BD5BEC49"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedStarterC182/obj/ManagedStarterC182.csproj.nuget.g.props",
+      "bytes": 1304,
+      "sha256": "D0A4D00472E32EF3B2AA0FF63991162A7FD9C14AD6BECDC421D59F09AC4A2A33"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedStarterC182/obj/ManagedStarterC182.csproj.nuget.g.targets",
+      "bytes": 150,
+      "sha256": "971CC9B535384849B5C661D776CD7A80833A416265E32E8968E06C367368B8B5"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedStarterC182/obj/Release/net9.0/win-x64/ManagedStarterC182.GlobalUsings.g.cs",
+      "bytes": 239,
+      "sha256": "A3C6048BB4D922B1799A9977F84362A3787B68810CAC67AA86AC3AA23295F227"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedStarterC182/obj/Release/net9.0/win-x64/ManagedStarterC182.assets.cache",
+      "bytes": 229,
+      "sha256": "6354138E4EBBD26E56D59B1F4BF797C65A67492FF0BA52AE202C97F928B84F2D"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedStarterC182/obj/Release/net9.0/win-x64/ManagedStarterC182.csproj.FileListAbsolute.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedStarterC182/obj/project.assets.json",
+      "bytes": 4396,
+      "sha256": "0C72258B03BA12FD1E452A7463FBE9495A7A1BB5A2F8B659CE4EA6830822E367"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedStarterC182/obj/project.nuget.cache",
+      "bytes": 794,
+      "sha256": "C2FF7A398C2D880EA59FFB85CB3631D60FB08BBE6D8B4F47BB912F35BCCBD8BE"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedUiRegression/obj/ManagedUiRegression.csproj.nuget.dgspec.json",
+      "bytes": 8371,
+      "sha256": "5BAD1EC33D167F576D188B8A6F516A25D7A315CFC5EAE027D362595157815D59"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedUiRegression/obj/ManagedUiRegression.csproj.nuget.g.props",
+      "bytes": 1304,
+      "sha256": "D0A4D00472E32EF3B2AA0FF63991162A7FD9C14AD6BECDC421D59F09AC4A2A33"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedUiRegression/obj/ManagedUiRegression.csproj.nuget.g.targets",
+      "bytes": 150,
+      "sha256": "971CC9B535384849B5C661D776CD7A80833A416265E32E8968E06C367368B8B5"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedUiRegression/obj/Release/net9.0/win-x64/ManagedUiRegression.GlobalUsings.g.cs",
+      "bytes": 239,
+      "sha256": "A3C6048BB4D922B1799A9977F84362A3787B68810CAC67AA86AC3AA23295F227"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedUiRegression/obj/Release/net9.0/win-x64/ManagedUiRegression.assets.cache",
+      "bytes": 229,
+      "sha256": "984212722CBE22CBBA5225AE317373E8978358E3E30B76ACA9D0804B418D3EC6"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedUiRegression/obj/Release/net9.0/win-x64/ManagedUiRegression.csproj.FileListAbsolute.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedUiRegression/obj/project.assets.json",
+      "bytes": 4808,
+      "sha256": "5A5D4953D886E98D32D63CD8BF9AC4795BEB5AC3F1340F7730A57359A3A5B507"
+    },
+    {
+      "status": "??",
+      "path": "samples/host/ManagedUiRegression/obj/project.nuget.cache",
+      "bytes": 1266,
+      "sha256": "03758AA79433EB0673C3A7E7AC6CBB36AA6DE5B148B03B34BCEE5E37344B83E3"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/Release/net9.0/GuideXos.C185.CounterApp.deps.json",
+      "bytes": 915,
+      "sha256": "A00FE958C9D632FB2836A36A2CA07C6DEF4655796BB199A7018A1D515FCF795F"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/Release/net9.0/GuideXos.C185.CounterApp.dll",
+      "bytes": 9728,
+      "sha256": "BD87A6A865A0D747037B8B3CCA89EA980919F11D68E955F0A70684485056DEFC"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/Release/net9.0/GuideXos.C185.CounterApp.pdb",
+      "bytes": 12272,
+      "sha256": "8B47B808D28B71F2F0503232064DDFC60224C7FD0E65D173ABA4F98328653542"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/Release/net9.0/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 11264,
+      "sha256": "F232A827F9B781E9EB374F2140ADCA88918BD44695B4D4D65F7D71BFBDA689AC"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/Release/net9.0/GuideXos.ManagedUi.Contracts.pdb",
+      "bytes": 12176,
+      "sha256": "8C62A526C47CC74FCABC673316BCB07CB3B22AF1E7A868E92676E1ACE647DAF9"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/x64/Release/net9.0/GuideXos.C185.CounterApp.deps.json",
+      "bytes": 915,
+      "sha256": "A00FE958C9D632FB2836A36A2CA07C6DEF4655796BB199A7018A1D515FCF795F"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/x64/Release/net9.0/GuideXos.C185.CounterApp.dll",
+      "bytes": 9216,
+      "sha256": "836E5323F43514C9DEA23EF9781E8A45F54E8E4A6D8FE7B5B35C0535EF4E0814"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/x64/Release/net9.0/GuideXos.C185.CounterApp.pdb",
+      "bytes": 12280,
+      "sha256": "14203B71A42E725D9E75C1C785B525891168659828B045367F4C9B2CE8F08306"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 10752,
+      "sha256": "1F9F4F3D5087AC96C670F148ABC56F19AC2EFEC48ACCA1F89981154C71F94830"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/bin/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.pdb",
+      "bytes": 12180,
+      "sha256": "9711B7597D12C981EC5D3FA4D28CB563E90CDF6F216B49FE7E07536D939867CC"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/GuideXos.C185.CounterApp.csproj.nuget.dgspec.json",
+      "bytes": 6623,
+      "sha256": "E1FF822D2DC5421ACB1D8BB808C47F9C95F5A94E8331F96575696B9A65514B8B"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/GuideXos.C185.CounterApp.csproj.nuget.g.props",
+      "bytes": 1304,
+      "sha256": "D0A4D00472E32EF3B2AA0FF63991162A7FD9C14AD6BECDC421D59F09AC4A2A33"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/GuideXos.C185.CounterApp.csproj.nuget.g.targets",
+      "bytes": 150,
+      "sha256": "971CC9B535384849B5C661D776CD7A80833A416265E32E8968E06C367368B8B5"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/.NETCoreApp,Version=v9.0.AssemblyAttributes.cs",
+      "bytes": 198,
+      "sha256": "9E76499C4E5CB623AD4889EAA99B1A53D9C970EFCF902D8B096E78A19EE4285D"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.A5316F79.Up2Date",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.AssemblyInfo.cs",
+      "bytes": 1048,
+      "sha256": "57B4FB42C1E5B61D6C924E12C9DDB764632BA1FB8F8CFB1DC0B8A4E2BB3778B5"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.AssemblyInfoInputs.cache",
+      "bytes": 66,
+      "sha256": "D274E2DCFA3609F6E399A787BE8AA3FCC67324886C615DA18CE167D8D07F6590"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.GeneratedMSBuildEditorConfig.editorconfig",
+      "bytes": 867,
+      "sha256": "94431C69DF55727A24C03118EF1D109A70884BBFEBBF85F5F2DDFFC5D9F29A19"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.GlobalUsings.g.cs",
+      "bytes": 239,
+      "sha256": "A3C6048BB4D922B1799A9977F84362A3787B68810CAC67AA86AC3AA23295F227"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.assets.cache",
+      "bytes": 229,
+      "sha256": "E6FF575458946866A01BF61C1220976B5E78AC7CCB527768F8A631FB331AAB4F"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.csproj.AssemblyReference.cache",
+      "bytes": 449,
+      "sha256": "DF47AE2BE1E1B94D65030811E837E6C66E5EC58F0B19FE7566052E4CF024C24E"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.csproj.CoreCompileInputs.cache",
+      "bytes": 66,
+      "sha256": "1167156B6E41880DDE54B232CA612B6E2E95829EE072956FAD72C42E48B238B4"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.csproj.FileListAbsolute.txt",
+      "bytes": 2095,
+      "sha256": "C11D03D123A031B33E9D07AC099E2E84A0288D8075A0B12B150EB72CB3109E50"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.dll",
+      "bytes": 9728,
+      "sha256": "BD87A6A865A0D747037B8B3CCA89EA980919F11D68E955F0A70684485056DEFC"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.pdb",
+      "bytes": 12272,
+      "sha256": "8B47B808D28B71F2F0503232064DDFC60224C7FD0E65D173ABA4F98328653542"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/GuideXos.C185.CounterApp.sourcelink.json",
+      "bytes": 165,
+      "sha256": "078389B846BF92853884F3315A2F4646A7138C878E71835E95D1148A35B283A6"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/ref/GuideXos.C185.CounterApp.dll",
+      "bytes": 7680,
+      "sha256": "DB2C0D01043D13F0E4D6CBD2B9D974DF707D0203372279CE47CBA0B607AFB447"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/Release/net9.0/refint/GuideXos.C185.CounterApp.dll",
+      "bytes": 7680,
+      "sha256": "DB2C0D01043D13F0E4D6CBD2B9D974DF707D0203372279CE47CBA0B607AFB447"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/project.assets.json",
+      "bytes": 4027,
+      "sha256": "E9423FD2041DB2E0E54BC9A79F1A47FE96CC74506F44EEE7A55285C8C2B3ACCE"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/project.nuget.cache",
+      "bytes": 655,
+      "sha256": "F2E967CA3DE3C78FBBCEAA61571271017CAF43E1DFF42691FF14E08A0233D067"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/.NETCoreApp,Version=v9.0.AssemblyAttributes.cs",
+      "bytes": 198,
+      "sha256": "9E76499C4E5CB623AD4889EAA99B1A53D9C970EFCF902D8B096E78A19EE4285D"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.A5316F79.Up2Date",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.AssemblyInfo.cs",
+      "bytes": 1048,
+      "sha256": "57B4FB42C1E5B61D6C924E12C9DDB764632BA1FB8F8CFB1DC0B8A4E2BB3778B5"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.AssemblyInfoInputs.cache",
+      "bytes": 66,
+      "sha256": "D274E2DCFA3609F6E399A787BE8AA3FCC67324886C615DA18CE167D8D07F6590"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.GeneratedMSBuildEditorConfig.editorconfig",
+      "bytes": 1054,
+      "sha256": "462E4ACCDCCDC14DB09E0776C73C5B0F2769B5F4421CF567BDD5F172D1992BD9"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.GlobalUsings.g.cs",
+      "bytes": 239,
+      "sha256": "A3C6048BB4D922B1799A9977F84362A3787B68810CAC67AA86AC3AA23295F227"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.assets.cache",
+      "bytes": 1002,
+      "sha256": "33304478B44E7520C800D56C8985ED53A759F074431F7CDAE6E127E818E5AEA8"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.csproj.AssemblyReference.cache",
+      "bytes": 454,
+      "sha256": "404847FC49D5D01099949B00C2B997ABD505BCDABCEC92F13E59766F7849505E"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.csproj.CoreCompileInputs.cache",
+      "bytes": 66,
+      "sha256": "3E6314053ADBAE7E0790196BD588D3E36CAB688DA3313EA9ECA5707737DD17D2"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.csproj.FileListAbsolute.txt",
+      "bytes": 2159,
+      "sha256": "9B8C1A959EF5CC0466F771799166AADEE34DD5B34CA640C42C7826DAE2670662"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.dll",
+      "bytes": 9216,
+      "sha256": "836E5323F43514C9DEA23EF9781E8A45F54E8E4A6D8FE7B5B35C0535EF4E0814"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.pdb",
+      "bytes": 12280,
+      "sha256": "14203B71A42E725D9E75C1C785B525891168659828B045367F4C9B2CE8F08306"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/GuideXos.C185.CounterApp.sourcelink.json",
+      "bytes": 165,
+      "sha256": "078389B846BF92853884F3315A2F4646A7138C878E71835E95D1148A35B283A6"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/ref/GuideXos.C185.CounterApp.dll",
+      "bytes": 6144,
+      "sha256": "BCB018637E94AD5498FC211F108AAF8AEA5959E74C27068938BBC0741B20FE80"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/C185CounterApp/obj/x64/Release/net9.0/refint/GuideXos.C185.CounterApp.dll",
+      "bytes": 6144,
+      "sha256": "BCB018637E94AD5498FC211F108AAF8AEA5959E74C27068938BBC0741B20FE80"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/HostLogProof/c182-host-smoke/obj/HostLogProof/release_win-x64/HostLogProof.csproj.FileListAbsolute.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/bin/Release/net9.0/GuideXos.ManagedUi.Contracts.deps.json",
+      "bytes": 476,
+      "sha256": "66843D7DDBE31E75B783AA2104CCB2AB6FC99157A0BA7CC7FF4BE378104396FE"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/bin/Release/net9.0/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 11264,
+      "sha256": "F232A827F9B781E9EB374F2140ADCA88918BD44695B4D4D65F7D71BFBDA689AC"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/bin/Release/net9.0/GuideXos.ManagedUi.Contracts.pdb",
+      "bytes": 12176,
+      "sha256": "8C62A526C47CC74FCABC673316BCB07CB3B22AF1E7A868E92676E1ACE647DAF9"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/bin/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.deps.json",
+      "bytes": 476,
+      "sha256": "66843D7DDBE31E75B783AA2104CCB2AB6FC99157A0BA7CC7FF4BE378104396FE"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/bin/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 10752,
+      "sha256": "1F9F4F3D5087AC96C670F148ABC56F19AC2EFEC48ACCA1F89981154C71F94830"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/bin/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.pdb",
+      "bytes": 12180,
+      "sha256": "9711B7597D12C981EC5D3FA4D28CB563E90CDF6F216B49FE7E07536D939867CC"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/GuideXos.ManagedUi.Contracts.csproj.nuget.dgspec.json",
+      "bytes": 3267,
+      "sha256": "17C3B094BD33D79C0C10EB8E55F9AC70D6ADFA4B44414F6396C9A4F2AD14245F"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/GuideXos.ManagedUi.Contracts.csproj.nuget.g.props",
+      "bytes": 1304,
+      "sha256": "D0A4D00472E32EF3B2AA0FF63991162A7FD9C14AD6BECDC421D59F09AC4A2A33"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/GuideXos.ManagedUi.Contracts.csproj.nuget.g.targets",
+      "bytes": 150,
+      "sha256": "971CC9B535384849B5C661D776CD7A80833A416265E32E8968E06C367368B8B5"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/.NETCoreApp,Version=v9.0.AssemblyAttributes.cs",
+      "bytes": 198,
+      "sha256": "9E76499C4E5CB623AD4889EAA99B1A53D9C970EFCF902D8B096E78A19EE4285D"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.AssemblyInfo.cs",
+      "bytes": 1060,
+      "sha256": "A00FF30F02F2FD16F16545D55ECA81C302C2075BA6C165CA4C2D43186B54BAEB"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.AssemblyInfoInputs.cache",
+      "bytes": 66,
+      "sha256": "35AD80E3FA67AEF4F813B8AA2546E70A07C759D20509F8C47CF503BFB903C54B"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.GeneratedMSBuildEditorConfig.editorconfig",
+      "bytes": 865,
+      "sha256": "7B0687CA232BAE28FD9439BF5AB889B1453DD23952FDBF9E6B418DCF38A94CFB"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.GlobalUsings.g.cs",
+      "bytes": 239,
+      "sha256": "A3C6048BB4D922B1799A9977F84362A3787B68810CAC67AA86AC3AA23295F227"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.assets.cache",
+      "bytes": 229,
+      "sha256": "B2523E2770D41E1153082C1530EB6F828A9AF3B7AF58EFB271ED6B7106D48A05"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.csproj.CoreCompileInputs.cache",
+      "bytes": 66,
+      "sha256": "0028C8F96656EAA1BBAD967020D9999A66276F9F318B3BF11A23FB435C2F6456"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.csproj.FileListAbsolute.txt",
+      "bytes": 1675,
+      "sha256": "A8DCBA5AF9EF703DA437B8A6F60EF24A38906A3A547873485A1BC71B051E7A4C"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 11264,
+      "sha256": "F232A827F9B781E9EB374F2140ADCA88918BD44695B4D4D65F7D71BFBDA689AC"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.pdb",
+      "bytes": 12176,
+      "sha256": "8C62A526C47CC74FCABC673316BCB07CB3B22AF1E7A868E92676E1ACE647DAF9"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/GuideXos.ManagedUi.Contracts.sourcelink.json",
+      "bytes": 165,
+      "sha256": "078389B846BF92853884F3315A2F4646A7138C878E71835E95D1148A35B283A6"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/ref/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 11264,
+      "sha256": "638660E40EA88275F3C40D1812985510BE9C0B0C7B0269A1E620E578F31619D3"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/Release/net9.0/refint/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 11264,
+      "sha256": "638660E40EA88275F3C40D1812985510BE9C0B0C7B0269A1E620E578F31619D3"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/project.assets.json",
+      "bytes": 3103,
+      "sha256": "DD8553063DFCA03EFE9A45F8A4D5550D989735397BB0D7BC870B50B0D1953A7B"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/project.nuget.cache",
+      "bytes": 663,
+      "sha256": "280882F0439EF07F7435BAD9A5A3FA97285810C2DD08962FE7F8CF611B26E12B"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/.NETCoreApp,Version=v9.0.AssemblyAttributes.cs",
+      "bytes": 198,
+      "sha256": "9E76499C4E5CB623AD4889EAA99B1A53D9C970EFCF902D8B096E78A19EE4285D"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.AssemblyInfo.cs",
+      "bytes": 1060,
+      "sha256": "A00FF30F02F2FD16F16545D55ECA81C302C2075BA6C165CA4C2D43186B54BAEB"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.AssemblyInfoInputs.cache",
+      "bytes": 66,
+      "sha256": "35AD80E3FA67AEF4F813B8AA2546E70A07C759D20509F8C47CF503BFB903C54B"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.GeneratedMSBuildEditorConfig.editorconfig",
+      "bytes": 1052,
+      "sha256": "70495767EF362C9BE7477E978E11722B52C4ABF5221D9E9D51410B3A716E6D6A"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.GlobalUsings.g.cs",
+      "bytes": 239,
+      "sha256": "A3C6048BB4D922B1799A9977F84362A3787B68810CAC67AA86AC3AA23295F227"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.assets.cache",
+      "bytes": 1002,
+      "sha256": "1782C4BE716FDDFB42C62082CBF5DA13DBB72A38C2E4EE525F3EABC5E6E05653"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.csproj.CoreCompileInputs.cache",
+      "bytes": 66,
+      "sha256": "8FA73D1C11A3AFCBCA2AF6570F67E0B4C943EF785E1D95096F80E88B268BDAA2"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.csproj.FileListAbsolute.txt",
+      "bytes": 1723,
+      "sha256": "74B08C2AC6E915969A23100C312A0004FCD8CD0CCB5FDF077AECB2DA95C4B66C"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 10752,
+      "sha256": "1F9F4F3D5087AC96C670F148ABC56F19AC2EFEC48ACCA1F89981154C71F94830"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.pdb",
+      "bytes": 12180,
+      "sha256": "9711B7597D12C981EC5D3FA4D28CB563E90CDF6F216B49FE7E07536D939867CC"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/GuideXos.ManagedUi.Contracts.sourcelink.json",
+      "bytes": 165,
+      "sha256": "078389B846BF92853884F3315A2F4646A7138C878E71835E95D1148A35B283A6"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/ref/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 10240,
+      "sha256": "F9825C81751FFB3DACD3711FDC708445BBA2F32327FCE7B0182A0B6D321B5D6F"
+    },
+    {
+      "status": "??",
+      "path": "samples/managed/ManagedUiContracts/obj/x64/Release/net9.0/refint/GuideXos.ManagedUi.Contracts.dll",
+      "bytes": 10240,
+      "sha256": "F9825C81751FFB3DACD3711FDC708445BBA2F32327FCE7B0182A0B6D321B5D6F"
+    }
+  ]
+}
