@@ -187,6 +187,7 @@ const char* astNodeKindName(AstNodeKind kind)
     case AstNodeKind::ObjectLiteral: return "ObjectLiteral";
     case AstNodeKind::ObjectProperty: return "ObjectProperty";
     case AstNodeKind::ArrayLiteral: return "ArrayLiteral";
+    case AstNodeKind::ArrayElision: return "ArrayElision";
     }
     return "Invalid";
 }

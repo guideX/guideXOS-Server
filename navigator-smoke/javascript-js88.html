@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS88</title></head>
+<body>
+<h1>Navigator JavaScript JS88</h1>
+<pre id="result">JS88:pending</pre>
+<section>
+  <i id="row-a" class="row"></i><i id="row-b" class="row"></i>
+</section>
+<button id="event-a" type="button">Run JS88 sparse Array event</button>
+<button id="event-b" type="button">Nested JS88 Array event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var sparse = [];
+sparse[3] = 40;
+verify(sparse.length === 4 && sparse[0] === undefined &&
+  sparse[3] === 40 && !sparse.hasOwnProperty("0") &&
+  !sparse.hasOwnProperty("2") && sparse.hasOwnProperty("3"));
+
+var literal = [10, , 30];
+var explicit = [10, undefined, 30];
+verify(literal.length === 3 && literal[1] === undefined &&
+  !literal.hasOwnProperty("1") && explicit.hasOwnProperty("1"));
+
+var oneHole = [,];
+var twoHoles = [,,];
+var trailing = [1,];
+var trailingHole = [1,,];
+verify(oneHole.length === 1 && twoHoles.length === 2 &&
+  trailing.length === 1 && trailingHole.length === 2 &&
+  !trailingHole.hasOwnProperty("1"));
+
+var holeCount = 0;
+var holeCursor = literal[Symbol.iterator]();
+for (const value of literal) holeCount++;
+verify(holeCount === 3 && holeCursor.next().value === 10 &&
+  holeCursor.next().value === undefined && holeCursor.next().value === 30);
+
+var values = [10, 20, 30];
+values.length = 2;
+var reduced = values.length;
+values.length = 4;
+var extended = values.length;
+verify(reduced === 2 && extended === 4 && values[2] === undefined &&
+  !values.hasOwnProperty("2") && values[0] === 10 && values[1] === 20);
+
+values[3] = undefined;
+verify(values.hasOwnProperty("3") && values[3] === undefined);
+values.length = 1;
+values.length = 4;
+verify(!values.hasOwnProperty("1") && !values.hasOwnProperty("3") &&
+  values[1] === undefined);
+
+var rows = document.querySelectorAll(".row");
+var pair = rows.entries().next().value;
+var element = pair[1];
+pair.length = 1;
+var pairShrunk = pair.length === 1 && !pair.hasOwnProperty("1") &&
+  pair[1] === undefined;
+pair.length = 2;
+var pairGrown = pair.length === 2 && !pair.hasOwnProperty("1") &&
+  pair[0] === 0 && element === rows[0] && element.id === "row-a";
+var freshPair = rows.entries().next().value;
+verify(pairShrunk && pairGrown && freshPair.length === 2 &&
+  freshPair.hasOwnProperty("0") && freshPair.hasOwnProperty("1"));
+
+var collectionCount = 0;
+for (const row of rows) collectionCount++;
+verify(collectionCount === 2);
+
+var eventValues = [];
+var nestedEventOk = false;
+var outerEventOk = false;
+var eventA = document.getElementById("event-a");
+var eventB = document.getElementById("event-b");
+eventB.addEventListener("click", function(event) {
+  eventValues.length = 5;
+  eventValues[4] = 5;
+  var total = 0;
+  var count = 0;
+  for (const value of eventValues) {
+    count++;
+    if (value !== undefined) total = total + value;
+  }
+  nestedEventOk = count === 5 && total === 9 &&
+    !eventValues.hasOwnProperty("1") && eventValues[4] === 5 &&
+    event.target === eventB && event.currentTarget === eventB &&
+    event.eventPhase === 2;
+});
+eventA.addEventListener("click", function(event) {
+  eventValues = [1, , 3];
+  var cursor = eventValues.values();
+  var sum = cursor.next().value;
+  eventB.click();
+  var count = 1;
+  for (const value of cursor) {
+    count++;
+    if (value !== undefined) sum = sum + value;
+  }
+  outerEventOk = count === 5 && sum === 9 &&
+    event.target === eventA && event.currentTarget === eventA &&
+    event.eventPhase === 2;
+  document.getElementById("result").textContent =
+    "JS88:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+
+var marker = "JS88:assertions=" + assertions + ":failures=" + failures +
+  ":sparse=" + (sparse.length === 4 && sparse[0] === undefined) +
+  ":length=" + (reduced === 2 && extended === 4) +
+  ":iteration=" + (holeCount === 3) + ":pairs=" + pairGrown +
+  ":events=ready";
+document.getElementById("result").textContent = marker;
+</script>
+</body>
+</html>

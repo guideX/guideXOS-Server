@@ -1074,6 +1074,14 @@ private:
                     TokenType::RightBracket, true);
                 return kInvalidAstNodeId;
             }
+            if (at(TokenType::Comma)) {
+                const Token comma = advance();
+                const AstNodeId elision = makeNode(AstNodeKind::ArrayElision,
+                    comma.location);
+                if (elision == kInvalidAstNodeId) return elision;
+                elements.push_back(elision);
+                continue;
+            }
             const AstNodeId element = parseExpression();
             if (element == kInvalidAstNodeId) return kInvalidAstNodeId;
             elements.push_back(element);

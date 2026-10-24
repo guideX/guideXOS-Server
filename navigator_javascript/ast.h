@@ -48,6 +48,7 @@ enum class AstNodeKind : std::uint8_t {
     ObjectLiteral,
     ObjectProperty,
     ArrayLiteral,
+    ArrayElision,
 };
 
 enum class AstUnaryOperator : std::uint8_t {

@@ -5627,6 +5627,42 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js87AfterClick, 1000) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js88FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js88.html";
+    const bool js88Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js88FixtureUrl);
+    const std::string js88InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS88 bounded sparse Array fixture passes on the hosted server",
+        js88Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js88FixtureUrl &&
+        contains(js88InitialText, "Navigator JavaScript JS88") &&
+        contains(js88InitialText, "JS88:assertions=9:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js88Loaded) + ",text=" +
+        summarizeText(js88InitialText, 1400) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS88 hosted sparse writes, elisions, and hole iteration pass",
+        js88Loaded && contains(js88InitialText,
+            ":sparse=true:length=true:iteration=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted assertions distinguish hole reads, explicit undefined, and sparse iteration");
+    add("JS88 hosted writable length and JS81 entry pair Arrays pass",
+        js88Loaded && contains(js88InitialText, ":pairs=true:events=ready") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted assertions cover shrink/regrowth, fresh pairs, and removed Element slots");
+    const bool js88Click = js88Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("event-a");
+    const std::string js88AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS88 nested Event Array mutation preserves iterator state and metadata",
+        js88Click && contains(js88AfterClick,
+            "JS88:event:nested=true:outer=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js88Click) + ",text=" +
+        summarizeText(js88AfterClick, 1000) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

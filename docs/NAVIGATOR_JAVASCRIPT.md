@@ -11509,15 +11509,176 @@ ignored-file backup, full matrix log, focused regression evidence, build
 provenance, and hosted output are preserved outside the repository at
 `C:\Users\guideX\AppData\Local\Temp\guidex-js87-evidence\audit-20261023-192416-97678a40878c477d91250f946bd62167`.
 
-#### Remaining gaps and recommended JS88 direction
+#### JS88 bounded sparse Arrays and writable length
 
-JS87 qualifies bounded dense Array value iteration only. Array elisions and
-true holes cannot be represented; `length` is derived and read-only; the
-default object pool can limit how many result records a long traversal retains.
-These limits should remain explicit in compatibility claims.
+JS88 adds bounded sparse indexed storage, Array literal elisions, and a
+writable logical `length`. It qualifies this Navigator subset; it does not
+claim complete ECMAScript Array conformance.
 
-A useful JS88 direction is a separately bounded design for Array elisions,
-true holes, and `length` writes, with tests for iteration over absent slots and
-pool accounting. Keep GC, object-slot reuse, and broad Array method expansion
-out of that work until their own ownership and capacity requirements are
-qualified.
+Before JS88, an Array's `elements` vector was both its logical length and its
+dense indexed storage. Missing positions therefore had to be stored as
+`undefined`. JS88 gives each Array an authoritative `arrayLength` and stores
+only present indexed values in a sorted vector of
+`RuntimeArrayElement { index, value }` records. The index in each record is
+the occupancy metadata. A hole takes no element record; an own element whose
+value is `undefined` takes one. The Array's object identity and each stored
+object value remain context-owned numeric IDs, so moving vectors cannot expose
+unstable native pointers.
+
+An indexed assignment creates just its target record and extends logical
+length to `index + 1` when needed. Intermediate positions stay absent. Reads
+of absent positions produce `undefined` after prototype lookup; the existing
+`hasOwnProperty` behavior distinguishes a hole from an explicit
+`undefined`. `pop()` removes the last logical position, returning
+`undefined` for a hole, and `push()` appends at logical length. Array literals
+use an `ArrayElision` syntax node for each missing position. Thus `[,]` has
+length 1, `[,,]` length 2, `[10,,30]` length 3, `[1,]` length 1, and `[1,,]`
+length 2. Nested literals preserve the same rule; an unterminated elision
+literal is a parser error.
+
+Array `length` reads and writes use `arrayLength`; it is not a detached
+ordinary property. A supported numeric value must be finite, integral,
+nonnegative, no greater than the ECMAScript maximum of 4,294,967,295, and
+within Navigator's lower runtime limit. A non-number produces `TypeError`;
+an invalid numeric value produces `InvalidArrayLength`; a standard-valid
+length above the Navigator limit produces `ArrayLimitExceeded`. This runtime
+does not perform JavaScript's general `ToNumber` coercion for the length
+setter. Under the default limits, the maximum logical length is 1,024 and the
+maximum writable index is 1,023.
+
+Growing length only changes the logical length; it does not allocate slots.
+Shrinking removes all present indexed records at or above the new length and
+decrements the occupied-slot count. Regrowth leaves those positions as holes.
+The backing vector's capacity can remain allocated after shrink, following the
+existing `pop()` storage policy; the global limit counts occupied records,
+not retained vector capacity. Both are finite: at most 1,024 Objects are
+retained, each Array is limited to 1,024 occupied records, and the context
+limits the concurrently occupied slot count to 4,096. The capacity limit is
+therefore a logical slot bound rather than a strict heap-byte budget.
+
+At the default per-Array occupancy limit, indexed record payload is at most
+1,024 × 48 = 49,152 bytes for one Array, before allocator overhead. The
+record's index is the complete occupancy metadata; there is no separate
+per-position bitmap. Aggregate vector capacity can exceed the 4,096 active
+slot count if many Arrays are filled and later shrunk, so its exact byte
+high-water depends on the standard-library allocator and retained capacities.
+
+Shrinking drops the Array's reference from the removed indexed record but
+does not reclaim its object. An earlier alias retains the same object ID and
+remains readable. Production object reclamation and slot reuse remain
+disabled. Test-only failure injection covers Array creation and indexed-slot
+insertion; failed creation or insertion leaves published Array length,
+occupancy, and slot accounting unchanged. Length growth itself allocates no
+slot storage. No runtime pool was increased.
+
+The storage change preserves JS81 `entries()` pair Arrays: native-created
+Arrays are converted to the same indexed record form, and pair mutation uses
+the shared length behavior. JS87 `values()` and `Symbol.iterator` share the
+same iterator. Each advancement checks the current logical length, then looks
+up that index through the Array and its prototype chain. A hole yields an
+inherited indexed value when present and otherwise `undefined`; exhaustion
+stays terminal. Existing `for...of` control flow, iterator result allocation
+limits, and retained-result policy remain in force. The hosted JS88 fixture
+also changes a sparse Array from a nested Event callback while an outer
+iterator remains active; Event target, currentTarget, and phase checks pass.
+The established JS9 reentrancy path remains covered by the regression and
+hosted suites; JS88 does not change `getElementById()` reentrancy.
+
+The default object, property, Array-slot, environment, host-handle, and DOM
+iterator limits remain 1,024, 4,096, 4,096, 2,048, 2,048, and 128 records
+respectively. The DOM iterator record remains 24 bytes, or 3,072 bytes for its
+128-record registry. On the hosted C++17 toolchain, `RuntimeObject` is 88
+bytes, compared with 72 bytes for the JS87 layout. `Value` is 40 bytes; an
+indexed record is 48 bytes, an 8-byte or 20% increase per occupied slot over
+the former dense Value record. At the 4,096 active-slot limit, record payload
+is 196,608 bytes, compared with 163,840 bytes for 4,096 Values. An empty Array
+adds no indexed vector allocation. In the native measurements, a dense
+four-element Array used four records and capacity four (192 bytes of record
+payload); a length-four Array with one assignment used one record and
+capacity one (48 bytes); a length-four Array grown without writes used no
+records and capacity zero. An all-hole literal also has zero indexed record
+capacity. The sample runtime containing the dense, sparse, and grown Arrays
+reported five occupied slots out of 4,096.
+
+The focused JS88 lane passed **367/367 checks** with strict C++17 compilation
+using `-Wall -Wextra -Werror -pedantic`. It covers hole versus explicit
+`undefined`, sparse writes, elision and trailing-comma grammar, length
+validation, shrink and regrowth, retained object aliases, native creation
+failure, slot insertion failure, pool limits, prototype reads, iterator
+mutation and terminal exhaustion, JS81 pair Arrays, and nested Event
+callbacks. The hosted static stack report measured 352 bytes for
+`evalArrayLiteral`, 736 for `invokeNative`, 944 for `executeForOf`, 176 for
+`createArray`, 240 for `readArrayIndex`, 112 for `setArrayLength`, and 208/256
+for the two `writeProperty` overloads. The nested native lambda frame was
+128 bytes. These are compiler-specific hosted measurements, not a bare-metal
+stack guarantee.
+
+The JS88 performance harness uses five fresh realms for each median, with
+parsing and evaluation included. Values below are microseconds; traversal
+sizes above the bounded iterator-result workload are intentionally omitted.
+
+| Length | Dense create | Sparse length/write | Index write | Length read | Shrink/grow | Hole read | `for...of` | Ascending writes | Descending writes | Nested traversal |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 4 | 4 | 4 | 6 | 5 | 6 | 6 | 0 | 0 | 12 |
+| 1 | 4 | 6 | 5 | 6 | 6 | 7 | 7 | 7 | 7 | 15 |
+| 16 | 8 | 10 | 9 | 7 | 17 | 7 | 28 | 15 | 14 | 54 |
+| 64 | 30 | 6 | 30 | 7 | 31 | 6 | 75 | 39 | 37 | 176 |
+| 128 | 58 | 6 | 55 | 7 | 57 | 7 | 162 | 71 | 69 | 328 |
+| 256 | 127 | 5 | 132 | 6 | 121 | 6 | 338 | 137 | 143 | 660 |
+| 512 | 238 | 6 | 230 | 6 | 223 | 6 | 609 | 300 | 326 | 0 |
+| 1,024 | 411 | 5 | 420 | 6 | 441 | 6 | 0 | 719 | 929 | 0 |
+
+These short hosted samples have no timing threshold. Sorted-vector insertion
+and lookup are linear in the number of occupied elements; descending writes
+show the bounded shifting cost. The measurements include parsing and
+evaluation and do not establish constant-time operations.
+
+The focused JS79–JS87 reruns passed **1,522/1,522 checks**; JS84's separate
+no-diagnostics control passed **68/68**. Against final JS88 source, the full
+JavaScript matrix passed **90/90 lanes** and **15,653/15,653 assertions across
+49 assertion-bearing lanes**. The final-source focused JS88 lane passed
+**367/367 checks** with strict C++17 syntax compilation of the runtime, parser,
+AST, and test harness under `GXOS_BARE_METAL`. Focused JS79–JS87 regressions
+passed **1,522/1,522 checks**, and JS84's no-diagnostics control passed
+**68/68**.
+
+The production `build.bat` completed successfully from the JS88 working tree
+based on starting revision `1fd78538c9025aabbf1bb85054205c8d2a82d223`. It
+produced `guideXOSServer.exe` at 8,665,618 bytes with SHA-256
+`808546862394376D4938B3A52DAB9B6816FEBB7BC5D8746E77DE7C2B26BC966A`. The
+hosted smoke used that exact executable path and hash; its process ID was
+15456. The JS88 page reported **9/9 assertions**, and all four JS88 aggregate
+checks passed, including nested Event mutation while an outer Array iterator
+remained active. Historical JavaScript fixtures, including JS9 Event
+reentrancy, also passed. The hosted aggregate reported **695/702 checks
+passed**. Its only failures were the seven established CSS checks: phases 3C,
+3G, and 6A; three checks in 6B; and 6C. No JavaScript check failed.
+
+The ignored-artifact manifest was restored and verified byte-for-byte:
+**1,367 files / 90,843,932 bytes**, with **zero changed, missing, or extra
+files**. The only ignored output changed during qualification was the
+production executable. It was restored from the verified preflight backup to
+8,398,274 bytes and SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. The
+recursive manifest contains the nine expected modified source/documentation
+files and three expected new JS88 files; no baseline file is missing. `.phase`
+remained absent. No kernel or QEMU run was performed; neither is required for
+this hosted/native JS88 qualification path.
+
+Build, hosted, native, regression, stack, and manifest evidence is preserved
+outside the checkout under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js88-evidence\`, including the
+preflight artifact snapshot and ignored-file backup.
+
+#### Remaining gaps and recommended JS89 direction
+
+JS88 does not implement the complete Array property-descriptor system,
+general length coercion, proxies, reflection APIs, noncanonical numeric
+properties, unbounded lengths, general Array methods, destructuring, spread,
+generators, or async iterators. The default 1,024-position Array limit and
+4,096 occupied-slot limit remain Navigator-specific. A useful JS89 direction
+is to qualify own-key enumeration and property descriptors only if the
+runtime's bounded object-property model can support them without weakening
+the current sparse-slot and allocation invariants. Keep garbage collection,
+published-object reuse, and broad Array-method expansion out of scope until
+their identity and capacity requirements are separately measured.

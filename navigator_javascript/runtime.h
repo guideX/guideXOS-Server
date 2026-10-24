@@ -19,6 +19,7 @@ constexpr std::uint8_t kEventPhaseNone = 0u;
 constexpr std::uint8_t kEventPhaseCapturing = 1u;
 constexpr std::uint8_t kEventPhaseAtTarget = 2u;
 constexpr std::uint8_t kEventPhaseBubbling = 3u;
+constexpr std::uint64_t kMaximumJavaScriptArrayLength = 4294967295ull;
 
 enum class RuntimeErrorCode : std::uint8_t {
     None = 0,
@@ -49,6 +50,7 @@ enum class RuntimeErrorCode : std::uint8_t {
     PropertyNameTooLong,
     ArrayLimitExceeded,
     ArrayIndexOutOfRange,
+    InvalidArrayLength,
     InvalidPropertyKey,
     InvalidReceiver,
     TypeError,
@@ -397,11 +399,19 @@ private:
         WellKnownSymbol symbolKey = WellKnownSymbol::None;
     };
 
+    struct RuntimeArrayElement {
+        std::size_t index = 0u;
+        Value value = Value::undefined();
+    };
+
     struct RuntimeObject {
         bool array = false;
+        std::size_t arrayLength = 0u;
         RuntimeObjectId prototype = kInvalidRuntimeObjectId;
         std::vector<RuntimeProperty> properties;
-        std::vector<Value> elements;
+        // Only present indexed properties have records. The sorted index is
+        // also the occupancy metadata, so holes consume no element storage.
+        std::vector<RuntimeArrayElement> elements;
         // Array iterator state lives in its ordinary, retained runtime object.
         // IDs are stable vector indices; no RuntimeObject pointer survives an
         // allocation that can grow objects_.
@@ -456,6 +466,16 @@ private:
     bool createObject(bool array, const std::vector<Value>& initialElements,
         RuntimeObjectId& result, RuntimeErrorCode& error,
         RuntimeObjectId prototype = kInvalidRuntimeObjectId);
+    bool createArray(std::size_t logicalLength,
+        std::vector<RuntimeArrayElement>&& initialElements,
+        RuntimeObjectId& result, RuntimeErrorCode& error,
+        RuntimeObjectId prototype = kInvalidRuntimeObjectId);
+    static std::size_t findArrayElementPosition(const RuntimeObject& object,
+        std::size_t index);
+    bool readArrayIndex(RuntimeObjectId object, std::size_t index,
+        Value& value, RuntimeErrorCode& error, SourceLocation location);
+    bool setArrayLength(RuntimeObjectId object, const Value& value,
+        RuntimeErrorCode& error);
     bool createArrayIteratorResult(const Value& value, bool done,
         Value& result, RuntimeErrorCode& error);
     RuntimeObject* objectAt(RuntimeObjectId id);
@@ -521,6 +541,10 @@ private:
     std::size_t totalPropertyCount_ = 0;
     std::size_t totalPropertyKeyBytes_ = 0;
     std::size_t totalArrayElements_ = 0;
+#if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+    bool failNextArrayCreationForTesting_ = false;
+    bool failNextArraySlotInsertionForTesting_ = false;
+#endif
 #ifdef GXOS_JAVASCRIPT_LIFETIME_DIAGNOSTICS
     RuntimeDiagnostics diagnostics_;
 #endif

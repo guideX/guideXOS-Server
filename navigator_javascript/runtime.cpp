@@ -224,6 +224,37 @@ bool parseBoundedArrayIndex(const std::string& key, std::size_t maximum,
     return true;
 }
 
+std::size_t maximumSupportedArrayLength(const RuntimeLimits& limits)
+{
+    std::size_t maximum = limits.maxArrayElements;
+    const std::size_t languageMaximum = static_cast<std::size_t>(
+        kMaximumJavaScriptArrayLength);
+    if (maximum > languageMaximum) maximum = languageMaximum;
+    if (limits.maxArrayIndex !=
+        std::numeric_limits<std::size_t>::max()) {
+        const std::size_t indexMaximum = limits.maxArrayIndex + 1u;
+        if (maximum > indexMaximum) maximum = indexMaximum;
+    }
+    return maximum;
+}
+
+bool propertyKeyMatchesArrayIndex(const std::string& key, std::size_t index)
+{
+    if (key.empty()) return false;
+    char digits[sizeof(std::size_t) * 3u] = {};
+    std::size_t digitCount = 0u;
+    do {
+        digits[digitCount++] = static_cast<char>('0' + index % 10u);
+        index /= 10u;
+    } while (index != 0u);
+    if (key.size() != digitCount) return false;
+    for (std::size_t position = 0u; position < digitCount; ++position) {
+        if (key[position] != digits[digitCount - position - 1u])
+            return false;
+    }
+    return true;
+}
+
 } // namespace
 
 class RuntimeContext::Evaluator : public HostFunctionInvoker {
@@ -992,15 +1023,16 @@ private:
 
     bool evalArrayLiteral(AstNodeId id, const AstNode& node, Value& result)
     {
-        std::vector<Value> elements;
+        std::vector<RuntimeContext::RuntimeArrayElement> elements;
         try {
-            elements.reserve(node.childCount);
             for (std::size_t index = 0; index < node.childCount; ++index) {
                 const AstNodeId elementId = context_.ast_.childAt(id, index);
                 if (!validNode(elementId, node.location)) return false;
+                if (context_.ast_.node(elementId).kind ==
+                    AstNodeKind::ArrayElision) continue;
                 Value element;
                 if (!evalExpression(elementId, element)) return false;
-                elements.push_back(element);
+                elements.push_back({index, element});
             }
         } catch (const std::bad_alloc&) {
             fail(RuntimeErrorCode::AllocationFailure, node.location);
@@ -1009,7 +1041,8 @@ private:
         if (!context_.consumeStep(node.location)) return false;
         RuntimeObjectId array = kInvalidRuntimeObjectId;
         RuntimeErrorCode error = RuntimeErrorCode::None;
-        if (!context_.createObject(true, elements, array, error)) {
+        if (!context_.createArray(node.childCount, std::move(elements), array,
+                error)) {
             fail(error, node.location);
             return false;
         }
@@ -1078,8 +1111,11 @@ private:
             return evalObjectLiteral(id, node, value);
         case AstNodeKind::ArrayLiteral:
             return evalArrayLiteral(id, node, value);
+        case AstNodeKind::ArrayElision:
+            fail(RuntimeErrorCode::InvalidAstState, node.location);
+            return false;
         case AstNodeKind::ObjectProperty:
-            case AstNodeKind::NewExpression:
+        case AstNodeKind::NewExpression:
             fail(RuntimeErrorCode::UnsupportedFeature, node.location);
             return false;
         default:
@@ -1270,7 +1306,11 @@ private:
             std::size_t index = 0;
             if (parseBoundedArrayIndex(key, context_.limits_.maxArrayIndex,
                 index)) {
-                return index < object->elements.size();
+                const std::size_t position =
+                    RuntimeContext::findArrayElementPosition(*object, index);
+                return index < object->arrayLength &&
+                    position < object->elements.size() &&
+                    object->elements[position].index == index;
             }
             return false;
         }
@@ -1294,7 +1334,12 @@ private:
                 std::size_t index = 0;
                 if (parseBoundedArrayIndex(key.string,
                     context_.limits_.maxArrayIndex, index)) {
-                    return index < object->elements.size();
+                    const std::size_t position =
+                        RuntimeContext::findArrayElementPosition(*object,
+                            index);
+                    return index < object->arrayLength &&
+                        position < object->elements.size() &&
+                        object->elements[position].index == index;
                 }
                 return false;
             }
@@ -1374,10 +1419,11 @@ private:
                 succeeded = false;
                 break;
             }
-            const std::size_t oldLength = object->elements.size();
-            if (arguments.size() > context_.limits_.maxArrayElements -
-                (oldLength > context_.limits_.maxArrayElements
-                    ? context_.limits_.maxArrayElements : oldLength)) {
+            const std::size_t oldLength = object->arrayLength;
+            const std::size_t maximumLength =
+                maximumSupportedArrayLength(context_.limits_);
+            if (oldLength > maximumLength ||
+                arguments.size() > maximumLength - oldLength) {
                 GXOS_JS84_DIAGNOSTIC(
                     ++context_.diagnostics_.failedArraySlotAllocations);
                 fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
@@ -1393,15 +1439,6 @@ private:
                 succeeded = false;
                 break;
             }
-            if (arguments.size() > context_.limits_.maxArrayIndex + 1u ||
-                oldLength > context_.limits_.maxArrayIndex + 1u -
-                    arguments.size()) {
-                GXOS_JS84_DIAGNOSTIC(
-                    ++context_.diagnostics_.failedArraySlotAllocations);
-                fail(RuntimeErrorCode::ArrayIndexOutOfRange, callSite);
-                succeeded = false;
-                break;
-            }
             for (std::size_t index = 0; index < arguments.size(); ++index) {
                 if (!context_.consumeStep(callSite)) {
                     succeeded = false;
@@ -1410,9 +1447,11 @@ private:
             }
             if (!succeeded) break;
             try {
-                object->elements.resize(oldLength + arguments.size());
+                object->elements.reserve(object->elements.size() +
+                    arguments.size());
                 for (std::size_t index = 0; index < arguments.size(); ++index) {
-                    object->elements[oldLength + index] = arguments[index];
+                    object->elements.push_back({oldLength + index,
+                        arguments[index]});
                 }
             } catch (const std::bad_alloc&) {
                 GXOS_JS84_DIAGNOSTIC(
@@ -1422,6 +1461,7 @@ private:
                 break;
             }
             context_.totalArrayElements_ += arguments.size();
+            object->arrayLength = oldLength + arguments.size();
             GXOS_JS84_DIAGNOSTIC({
                 context_.diagnostics_.arraySlotsAllocated += arguments.size();
                 if (context_.diagnostics_.arraySlotHighWater <
@@ -1430,7 +1470,7 @@ private:
                         context_.totalArrayElements_;
                 }
             });
-            result = Value::number(static_cast<double>(object->elements.size()));
+            result = Value::number(static_cast<double>(object->arrayLength));
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayPop: {
@@ -1441,13 +1481,23 @@ private:
                 succeeded = false;
                 break;
             }
-            if (object->elements.empty()) {
+            if (object->arrayLength == 0u) {
                 result = Value::undefined();
                 break;
             }
-            result = object->elements.back();
-            object->elements.pop_back();
-            --context_.totalArrayElements_;
+            const std::size_t removedIndex = object->arrayLength - 1u;
+            const std::size_t position =
+                RuntimeContext::findArrayElementPosition(*object, removedIndex);
+            if (position < object->elements.size() &&
+                object->elements[position].index == removedIndex) {
+                result = object->elements[position].value;
+                object->elements.erase(object->elements.begin() +
+                    static_cast<std::ptrdiff_t>(position));
+                --context_.totalArrayElements_;
+            } else {
+                result = Value::undefined();
+            }
+            object->arrayLength = removedIndex;
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayIteratorCreate: {
@@ -1525,12 +1575,20 @@ private:
                     succeeded = false;
                     break;
                 }
-                if (index < array->elements.size()) {
-                    yielded = array->elements[index];
+                if (index < array->arrayLength) {
+                    RuntimeErrorCode lookupError = RuntimeErrorCode::None;
+                    if (!context_.readArrayIndex(arrayId, index, yielded,
+                            lookupError, callSite)) {
+                        fail(lookupError, callSite);
+                        succeeded = false;
+                        break;
+                    }
                 } else {
                     done = true;
                 }
             }
+
+            if (!succeeded) break;
 
             RuntimeErrorCode error = RuntimeErrorCode::None;
             if (!context_.createArrayIteratorResult(yielded, done, result,
@@ -2989,23 +3047,41 @@ bool RuntimeContext::createObject(bool array,
         error = RuntimeErrorCode::InvalidAstState;
         return false;
     }
-    if (array && (initialElements.size() > limits_.maxArrayElements ||
-        initialElements.size() > limits_.maxTotalArrayElements ||
-        totalArrayElements_ > limits_.maxTotalArrayElements -
-            initialElements.size())) {
-        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedArraySlotAllocations);
-        error = RuntimeErrorCode::ArrayLimitExceeded;
-        return false;
+    if (array) {
+        if (initialElements.size() > maximumSupportedArrayLength(limits_) ||
+            initialElements.size() > limits_.maxTotalArrayElements ||
+            totalArrayElements_ > limits_.maxTotalArrayElements -
+                initialElements.size()) {
+            GXOS_JS84_DIAGNOSTIC(
+                ++diagnostics_.failedArraySlotAllocations);
+            error = RuntimeErrorCode::ArrayLimitExceeded;
+            return false;
+        }
+        std::vector<RuntimeArrayElement> indexedElements;
+        try {
+            indexedElements.reserve(initialElements.size());
+            for (std::size_t index = 0u; index < initialElements.size();
+                ++index) {
+                indexedElements.push_back({index, initialElements[index]});
+            }
+        } catch (const std::bad_alloc&) {
+            GXOS_JS84_DIAGNOSTIC({
+                ++diagnostics_.failedObjectAllocations;
+                ++diagnostics_.failedArraySlotAllocations;
+            });
+            error = RuntimeErrorCode::AllocationFailure;
+            return false;
+        }
+        return createArray(initialElements.size(),
+            std::move(indexedElements), result, error, prototype);
     }
     try {
         RuntimeObject object;
-        object.array = array;
         object.prototype = prototype;
         if (object.prototype == kInvalidRuntimeObjectId &&
             builtInsInitialized_) {
-            object.prototype = array ? arrayPrototype_ : objectPrototype_;
+            object.prototype = objectPrototype_;
         }
-        if (array) object.elements = initialElements;
         objects_.push_back(std::move(object));
     } catch (const std::bad_alloc&) {
         GXOS_JS84_DIAGNOSTIC({
@@ -3022,14 +3098,183 @@ bool RuntimeContext::createObject(bool array,
             diagnostics_.objectPoolHighWater = objects_.size();
     });
     result = static_cast<RuntimeObjectId>(objects_.size() - 1u);
-    if (array) {
-        totalArrayElements_ += initialElements.size();
-        GXOS_JS84_DIAGNOSTIC({
-            diagnostics_.arraySlotsAllocated += initialElements.size();
-            if (diagnostics_.arraySlotHighWater < totalArrayElements_)
-                diagnostics_.arraySlotHighWater = totalArrayElements_;
-        });
+    return true;
+}
+
+bool RuntimeContext::createArray(std::size_t logicalLength,
+    std::vector<RuntimeArrayElement>&& initialElements,
+    RuntimeObjectId& result, RuntimeErrorCode& error,
+    RuntimeObjectId prototype)
+{
+    error = RuntimeErrorCode::None;
+    if (objects_.size() >= limits_.maxObjects ||
+        objects_.size() >= static_cast<std::size_t>(kInvalidRuntimeObjectId)) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedObjectAllocations);
+        error = RuntimeErrorCode::ObjectLimitExceeded;
+        return false;
     }
+    if (logicalLength > maximumSupportedArrayLength(limits_) ||
+        initialElements.size() > limits_.maxArrayElements ||
+        initialElements.size() > limits_.maxTotalArrayElements ||
+        totalArrayElements_ > limits_.maxTotalArrayElements -
+            initialElements.size()) {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.failedArraySlotAllocations);
+        error = RuntimeErrorCode::ArrayLimitExceeded;
+        return false;
+    }
+    std::size_t previousIndex = 0u;
+    for (std::size_t position = 0u; position < initialElements.size();
+        ++position) {
+        const std::size_t index = initialElements[position].index;
+        if (index >= logicalLength ||
+            (position != 0u && index <= previousIndex)) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
+        previousIndex = index;
+    }
+#if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+    if (failNextArrayCreationForTesting_) {
+        failNextArrayCreationForTesting_ = false;
+        GXOS_JS84_DIAGNOSTIC({
+            ++diagnostics_.failedObjectAllocations;
+            ++diagnostics_.failedArraySlotAllocations;
+        });
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+#endif
+    try {
+        RuntimeObject object;
+        object.array = true;
+        object.arrayLength = logicalLength;
+        object.prototype = prototype;
+        if (object.prototype == kInvalidRuntimeObjectId &&
+            builtInsInitialized_) {
+            object.prototype = arrayPrototype_;
+        }
+        object.elements = std::move(initialElements);
+        objects_.push_back(std::move(object));
+    } catch (const std::bad_alloc&) {
+        GXOS_JS84_DIAGNOSTIC({
+            ++diagnostics_.failedObjectAllocations;
+            ++diagnostics_.failedArraySlotAllocations;
+        });
+        error = RuntimeErrorCode::AllocationFailure;
+        return false;
+    }
+    GXOS_JS84_DIAGNOSTIC({
+        ++diagnostics_.runtimeObjectsAllocated;
+        if (diagnostics_.objectPoolHighWater < objects_.size())
+            diagnostics_.objectPoolHighWater = objects_.size();
+    });
+    result = static_cast<RuntimeObjectId>(objects_.size() - 1u);
+    totalArrayElements_ += objects_.back().elements.size();
+    GXOS_JS84_DIAGNOSTIC({
+        diagnostics_.arraySlotsAllocated += objects_.back().elements.size();
+        if (diagnostics_.arraySlotHighWater < totalArrayElements_)
+            diagnostics_.arraySlotHighWater = totalArrayElements_;
+    });
+    return true;
+}
+
+std::size_t RuntimeContext::findArrayElementPosition(
+    const RuntimeObject& object, std::size_t index)
+{
+    for (std::size_t position = 0u; position < object.elements.size();
+        ++position) {
+        if (object.elements[position].index >= index) return position;
+    }
+    return object.elements.size();
+}
+
+bool RuntimeContext::readArrayIndex(RuntimeObjectId objectId,
+    std::size_t index, Value& value, RuntimeErrorCode& error,
+    SourceLocation location)
+{
+    error = RuntimeErrorCode::None;
+    RuntimeObjectId current = objectId;
+    for (std::size_t depth = 0u; depth < limits_.maxPrototypeDepth; ++depth) {
+        if (!consumeStep(location)) {
+            error = RuntimeErrorCode::ExecutionBudgetExceeded;
+            return false;
+        }
+        const RuntimeObject* object = objectAt(current);
+        if (object == nullptr) {
+            error = RuntimeErrorCode::CannotReadProperty;
+            return false;
+        }
+        if (object->array && index < object->arrayLength) {
+            const std::size_t position =
+                findArrayElementPosition(*object, index);
+            if (position < object->elements.size() &&
+                object->elements[position].index == index) {
+                value = object->elements[position].value;
+                return true;
+            }
+        }
+        for (const RuntimeProperty& property : object->properties) {
+            if (property.symbolKey == WellKnownSymbol::None &&
+                propertyKeyMatchesArrayIndex(property.key, index)) {
+                value = property.value;
+                return true;
+            }
+        }
+        if (object->prototype == kInvalidRuntimeObjectId) {
+            value = Value::undefined();
+            return true;
+        }
+        current = object->prototype;
+    }
+    error = RuntimeErrorCode::PrototypeChainExceeded;
+    return false;
+}
+
+bool RuntimeContext::setArrayLength(RuntimeObjectId objectId,
+    const Value& value, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    RuntimeObject* object = objectAt(objectId);
+    if (object == nullptr || !object->array) {
+        error = RuntimeErrorCode::CannotWriteProperty;
+        return false;
+    }
+    if (!value.isNumber()) {
+        error = RuntimeErrorCode::TypeError;
+        return false;
+    }
+    const double requestedLength = value.numberValue();
+    if (!std::isfinite(requestedLength) || requestedLength < 0.0 ||
+        std::floor(requestedLength) != requestedLength ||
+        requestedLength > static_cast<double>(
+            kMaximumJavaScriptArrayLength)) {
+        error = RuntimeErrorCode::InvalidArrayLength;
+        return false;
+    }
+    if (requestedLength > static_cast<double>(
+            maximumSupportedArrayLength(limits_))) {
+        error = RuntimeErrorCode::ArrayLimitExceeded;
+        return false;
+    }
+    const std::size_t newLength = static_cast<std::size_t>(requestedLength);
+    if (newLength < object->arrayLength) {
+        std::size_t firstRemoved = object->elements.size();
+        for (std::size_t position = 0u;
+            position < object->elements.size(); ++position) {
+            if (object->elements[position].index >= newLength) {
+                firstRemoved = position;
+                break;
+            }
+        }
+        const std::size_t removed = object->elements.size() - firstRemoved;
+        if (removed > totalArrayElements_) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
+        object->elements.resize(firstRemoved);
+        totalArrayElements_ -= removed;
+    }
+    object->arrayLength = newLength;
     return true;
 }
 
@@ -3425,7 +3670,7 @@ bool RuntimeContext::readProperty(RuntimeObjectId objectId,
             return false;
         }
         if (!key.isSymbol() && object->array && key.string == "length") {
-            value = Value::number(static_cast<double>(object->elements.size()));
+            value = Value::number(static_cast<double>(object->arrayLength));
             return true;
         }
         if (!key.isSymbol() && object->array &&
@@ -3436,9 +3681,14 @@ bool RuntimeContext::readProperty(RuntimeObjectId objectId,
                 error = RuntimeErrorCode::ArrayIndexOutOfRange;
                 return false;
             }
-            if (index < object->elements.size()) {
-                value = object->elements[index];
-                return true;
+            if (index < object->arrayLength) {
+                const std::size_t position =
+                    findArrayElementPosition(*object, index);
+                if (position < object->elements.size() &&
+                    object->elements[position].index == index) {
+                    value = object->elements[position].value;
+                    return true;
+                }
             }
         }
         for (const RuntimeProperty& property : object->properties) {
@@ -3489,8 +3739,7 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         return false;
     }
     if (!key.isSymbol() && object->array && key.string == "length") {
-        error = RuntimeErrorCode::CannotWriteProperty;
-        return false;
+        return setArrayLength(objectId, value, error);
     }
     if (!key.isSymbol() && object->array &&
         isCanonicalArrayIndexSpelling(key.string)) {
@@ -3499,36 +3748,51 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
             error = RuntimeErrorCode::ArrayIndexOutOfRange;
             return false;
         }
-        if (index >= limits_.maxArrayElements) {
+        if (index >= maximumSupportedArrayLength(limits_)) {
             error = RuntimeErrorCode::ArrayLimitExceeded;
             return false;
         }
-        const std::size_t newLength = index + 1u;
-        if (newLength > object->elements.size()) {
-            const std::size_t growth = newLength - object->elements.size();
-            if (growth > limits_.maxTotalArrayElements ||
-                totalArrayElements_ > limits_.maxTotalArrayElements - growth) {
+        const std::size_t position =
+            findArrayElementPosition(*object, index);
+        if (position < object->elements.size() &&
+            object->elements[position].index == index) {
+            object->elements[position].value = value;
+        } else {
+            if (object->elements.size() >= limits_.maxArrayElements ||
+                totalArrayElements_ >= limits_.maxTotalArrayElements) {
                 GXOS_JS84_DIAGNOSTIC(
                     ++diagnostics_.failedArraySlotAllocations);
                 error = RuntimeErrorCode::ArrayLimitExceeded;
                 return false;
             }
             try {
-                object->elements.resize(newLength, Value::undefined());
+#if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
+                if (failNextArraySlotInsertionForTesting_) {
+                    failNextArraySlotInsertionForTesting_ = false;
+                    throw std::bad_alloc();
+                }
+#endif
+                object->elements.push_back({index, value});
             } catch (const std::bad_alloc&) {
                 GXOS_JS84_DIAGNOSTIC(
                     ++diagnostics_.failedArraySlotAllocations);
                 error = RuntimeErrorCode::AllocationFailure;
                 return false;
             }
-            totalArrayElements_ += growth;
+            for (std::size_t cursor = object->elements.size() - 1u;
+                cursor > position; --cursor) {
+                object->elements[cursor] = object->elements[cursor - 1u];
+            }
+            object->elements[position] = {index, value};
+            ++totalArrayElements_;
             GXOS_JS84_DIAGNOSTIC({
-                diagnostics_.arraySlotsAllocated += growth;
+                ++diagnostics_.arraySlotsAllocated;
                 if (diagnostics_.arraySlotHighWater < totalArrayElements_)
                     diagnostics_.arraySlotHighWater = totalArrayElements_;
             });
         }
-        object->elements[index] = value;
+        const std::size_t newLength = index + 1u;
+        if (newLength > object->arrayLength) object->arrayLength = newLength;
         return true;
     }
 
@@ -4546,6 +4810,7 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
     case RuntimeErrorCode::ArrayLimitExceeded: return "ArrayLimitExceeded";
     case RuntimeErrorCode::ArrayIndexOutOfRange:
         return "ArrayIndexOutOfRange";
+    case RuntimeErrorCode::InvalidArrayLength: return "InvalidArrayLength";
     case RuntimeErrorCode::InvalidPropertyKey: return "InvalidPropertyKey";
     case RuntimeErrorCode::InvalidReceiver: return "InvalidReceiver";
     case RuntimeErrorCode::TypeError: return "TypeError";

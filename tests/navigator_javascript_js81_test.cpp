@@ -61,6 +61,7 @@ struct NavigatorScriptIteratorTestAccess {
 
 struct NavigatorScriptRuntimeTestAccess {
     using Object = RuntimeContext::RuntimeObject;
+    using ArrayElement = RuntimeContext::RuntimeArrayElement;
     using Property = RuntimeContext::RuntimeProperty;
     using HostObject = RuntimeContext::HostObjectRecord;
     using HostMethod = RuntimeContext::HostMethodRecord;
@@ -115,7 +116,7 @@ struct NavigatorScriptRuntimeTestAccess {
         std::size_t bytes = 0u;
         for (const Object& object : runtime.objects_)
             if (object.array && object.elements.size() == 2u)
-                bytes += object.elements.capacity() * sizeof(Value);
+                bytes += object.elements.capacity() * sizeof(ArrayElement);
         return bytes;
     }
     static bool isArray(const RuntimeContext& runtime, RuntimeObjectId id)
@@ -129,7 +130,7 @@ struct NavigatorScriptRuntimeTestAccess {
         std::size_t bytes = 0u;
         for (const Object& object : runtime.objects_)
             if (object.array)
-                bytes += object.elements.capacity() * sizeof(Value);
+                bytes += object.elements.capacity() * sizeof(ArrayElement);
         return bytes;
     }
     static std::size_t iteratorResultPropertyCapacityBytes(

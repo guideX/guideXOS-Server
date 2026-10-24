@@ -429,6 +429,55 @@ void testObjectAndArrayLiterals()
         "malformed array literal");
 }
 
+void testArrayElisions()
+{
+    const std::string source =
+        "var a=[10,,30];var b=[,];var c=[,,];var d=[1,];"
+        "var e=[1,,];var f=[[,],];";
+    expectSuccess(source, "Array literal elisions",
+        [](const Ast& ast) {
+            const auto initializerAt = [&ast](std::size_t statement) {
+                const AstNodeId declaration =
+                    ast.childAt(ast.root(), statement);
+                const AstNodeId declarator = ast.childAt(declaration, 0u);
+                return ast.node(declarator).initializer;
+            };
+            const AstNodeId a = initializerAt(0u);
+            const AstNodeId b = initializerAt(1u);
+            const AstNodeId c = initializerAt(2u);
+            const AstNodeId d = initializerAt(3u);
+            const AstNodeId e = initializerAt(4u);
+            const AstNodeId f = initializerAt(5u);
+            expect(ast.childCount(a) == 3u &&
+                ast.node(ast.childAt(a, 1u)).kind == AstNodeKind::ArrayElision,
+                "[10,,30] retains one elision position");
+            expect(ast.childCount(b) == 1u &&
+                ast.node(ast.childAt(b, 0u)).kind == AstNodeKind::ArrayElision,
+                "[,] has length one in the syntax tree");
+            expect(ast.childCount(c) == 2u &&
+                ast.node(ast.childAt(c, 0u)).kind == AstNodeKind::ArrayElision &&
+                ast.node(ast.childAt(c, 1u)).kind == AstNodeKind::ArrayElision,
+                "[,,] has two elision positions");
+            expect(ast.childCount(d) == 1u &&
+                ast.node(ast.childAt(d, 0u)).kind == AstNodeKind::NumericLiteral,
+                "[1,] trailing comma adds no element");
+            expect(ast.childCount(e) == 2u &&
+                ast.node(ast.childAt(e, 1u)).kind == AstNodeKind::ArrayElision,
+                "[1,,] retains the final hole");
+            const AstNodeId nested = ast.childAt(f, 0u);
+            expect(ast.childCount(f) == 1u &&
+                ast.node(nested).kind == AstNodeKind::ArrayLiteral &&
+                ast.childCount(nested) == 1u &&
+                ast.node(ast.childAt(nested, 0u)).kind == AstNodeKind::ArrayElision,
+                "nested elisions and trailing commas remain distinct");
+        });
+
+    const ParseResult malformed = parse("var invalid=[1,,");
+    expect(!malformed.succeeded() &&
+        malformed.error.code == ParserErrorCode::UnexpectedEndOfInput,
+        "unterminated elision literal fails deterministically");
+}
+
 void testNegativeSyntax()
 {
     expectError("var = 1;", ParserErrorCode::ExpectedToken, 4,
@@ -533,6 +582,7 @@ int main()
     testPrecedence();
     testAdditionalExpressions();
     testObjectAndArrayLiterals();
+    testArrayElisions();
     testNegativeSyntax();
     testLimits();
     testLocationsAndLexerPropagation();
