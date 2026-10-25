@@ -139,7 +139,7 @@ The staged ramdisk hashes differ because each isolated copy contains its own dia
 
 ## 14. Preservation and worktree comparison
 
-The fresh baseline was captured before edits at `out/dotnet/c188r9-registry-input-reentry/preflight/baseline.json`. It measured 13 protected roots, 8,497 protected files, and 136 pre-existing worktree status paths. The original `ESP/ramdisk.img` SHA-256 was `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`; the final comparison confirms that exact hash. Final comparison details are saved under the R9 preflight evidence directory.
+The fresh baseline was captured before edits at `out/dotnet/c188r9-registry-input-reentry/preflight/baseline.json`. It measured 13 protected roots, 8,497 protected files, and 136 pre-existing worktree status paths. The final comparison passed with all 13 roots and 8,497 files unchanged, all 136 pre-existing status paths preserved with matching flags and file hashes, and zero new status paths. The original `ESP/ramdisk.img` SHA-256 was `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`; the final comparison confirms that exact hash. The machine-readable result is `out/dotnet/c188r9-registry-input-reentry/preflight/final-comparison.json`.
 
 The historical uncertainty around 212 older C185 generated files remains unchanged and is not presented as a new deletion or alteration. Existing R8 evidence and earlier NativeAOT artifacts were not overwritten. Only new R9 artifacts were written under the dedicated R9 output root.
 
