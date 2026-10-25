@@ -198,7 +198,7 @@ The full run is retained under `out/dotnet/c188r10-nativeaot-state-reentry/runs/
 | Before-input screenshot | `95BCAC045DBD3713D3721D12FE7917B913D3FB262CD55F0AA47E3742B8111FA3` |
 | After-pointer screenshot | `A79CBCB59AE889F1DF107B11C1EBFDD2482EBD6C42A8C92E297A25504615F8EA` |
 
-The fresh pre-run baseline contained 13 protected roots, 8,497 files, and 136 existing status paths. The original `ESP/ramdisk.img` remained at SHA-256 `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. The complete baseline and post-run comparison retain relative paths, sizes, and hashes, plus the historical uncertainty for 212 C185 generated files. Guest media and framebuffer images remain uncommitted under the ignored run directory.
+The fresh pre-run baseline contained 13 protected roots, 8,497 files, and 136 existing status paths. The post-run comparison passed with 13/13 roots, 8,497/8,497 protected files, 136/136 prior status paths and hashes preserved, zero differences, zero new status paths, and 136 current status paths. The original `ESP/ramdisk.img` remained at SHA-256 `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. `preflight-final-comparison.json` (SHA-256 `E4D474B8B015E0F7E00BB8E859CB80F1948BBFE1A6448A372FB5E9E0EF586048`) retains the root membership, relative paths, sizes, hashes, and historical uncertainty for 212 C185 generated files. Guest media and framebuffer images remain uncommitted under the ignored run directory.
 
 No product behavior was changed, no production candidate was booted, and the six-scenario C188 campaign and C189 were not started. C188 acceptance remains open; Notes input acceptance was not demonstrated.
 
