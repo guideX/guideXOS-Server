@@ -31,6 +31,21 @@ internal sealed class GuideXosManagedApplicationLifetime
     internal uint C188R11ReplacementEvents => _c188r11ReplacementEvents;
     internal uint C188R11TeardownEvents => _c188r11TeardownEvents;
     internal uint C188R11Generation => _generation;
+    internal uint C188R11NotesOwnerGeneration
+    {
+        get
+        {
+            for (int index = 0; index < _entries.Length; index++)
+            {
+                if (_entries[index].Selector == 4u &&
+                    _entries[index].Application != null)
+                {
+                    return _entries[index].Generation;
+                }
+            }
+            return 0u;
+        }
+    }
     internal uint C188R11ResidentMask
     {
         get

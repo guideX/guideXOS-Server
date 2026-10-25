@@ -349,7 +349,13 @@ public sealed unsafe class GuideXosHost
         {
             return GuideXosResult.CapabilityUnavailable;
         }
-        if (text.Length == 0 || text.Length > 127) return GuideXosResult.InvalidArgument;
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        const int maximumMessageLength = 255;
+#else
+        const int maximumMessageLength = 127;
+#endif
+        if (text.Length == 0 || text.Length > maximumMessageLength)
+            return GuideXosResult.InvalidArgument;
 
         Span<byte> buffer = stackalloc byte[text.Length + 1];
         text.CopyTo(buffer);

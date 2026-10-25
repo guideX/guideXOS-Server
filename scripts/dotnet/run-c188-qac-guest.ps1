@@ -252,15 +252,9 @@ try {
 
     $text = Read-GuestSerial
     if ($isC188R11Boot) {
-        Assert-C188R11NativeLaunchBoundary $text
-        if (-not (Test-C188R11ManagedLaunchState $text)) {
-            throw '[C188R11-FAIL] reason=managed-launch-state-snapshot-missing; no input may be sent.'
-        }
-        if (-not (Test-C188R11InitializationEvidence $text)) {
-            throw '[C188R11-FAIL] reason=initialization-epoch-evidence-missing; no input may be sent.'
-        }
-        if (-not (Test-C188R11NotesReady $text)) {
-            throw '[C188R11-FAIL] reason=notes-launch-not-ready; no input may be sent.'
+        $readinessFailure = Get-C188R11ReadinessFailureReason $text
+        if (-not [string]::IsNullOrEmpty($readinessFailure)) {
+            throw "[C188R11-FAIL] reason=$readinessFailure; no screenshot or input may be captured."
         }
     }
     $widthMatch = [regex]::Match($text,'(?m)^\[DESKTOP CAP\] framebuffer_width=0x([0-9A-Fa-f]+)\r?$')
@@ -269,7 +263,7 @@ try {
     $width = [Convert]::ToInt32($widthMatch.Groups[1].Value,16)
     $height = [Convert]::ToInt32($heightMatch.Groups[1].Value,16)
     $allProgramsCount = if ($ProductionCompatibility) { 21 } else { 22 }
-    $active = [ordered]@{qmpPort=$qmpPort;screenWidth=$width;screenHeight=$height;allProgramsCount=$allProgramsCount;productionCompatibility=[bool]$ProductionCompatibility;esp=$esp;serial=$serial;pid=$qacProcess.Id}
+    $active = [ordered]@{qmpPort=$qmpPort;screenWidth=$width;screenHeight=$height;allProgramsCount=$allProgramsCount;productionCompatibility=[bool]$ProductionCompatibility;esp=$esp;serial=$serial;pid=$qacProcess.Id;preInputManagedSnapshotAvailable=$false;preInputManagedSnapshotReason='no existing read-only managed snapshot request interface'}
     $active | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'active.json') -Encoding utf8
     $qacDuringStatus = (& $qacCli status 2>&1 | Out-String)
     $qacDuringList = (& $qacCli list 2>&1 | Out-String)
@@ -280,6 +274,9 @@ try {
     }
     [void](Invoke-Qmp 'screendump' ([ordered]@{filename=(Join-Path $bootRoot 'desktop-ready.ppm')}))
     Write-Output ("C188_GUEST_READY QMP_PORT={0} FRAMEBUFFER={1}x{2} PID={3}" -f $qmpPort,$width,$height,$qacProcess.Id)
+    if ($isC188R11Boot) {
+        Write-Output 'C188R11_CHECKPOINT_B=UNAVAILABLE reason=no-existing-read-only-managed-snapshot-interface; latest-nonmutating-managed-observation=managed-return'
+    }
     Write-Output 'Use scripts/dotnet/c188-qmp-control.py to send guest input; QMP quit ends this QAC reservation.'
 
     if (-not $qacProcess.WaitForExit($MaxRuntimeSeconds * 1000)) {
@@ -362,8 +359,15 @@ $manifest = [ordered]@{
     r11NativeInputBoundary=if ($isC188R11Boot) { Test-C188R11NativeInputBoundary $serialText } else { $false }
     r11NativeInputResult=if ($isC188R11Boot) { Get-C188R11NativeInputResult $serialText } else { '' }
     r11ImageContextMatch=if ($isC188R11Boot) { Test-C188R11ImageContextMatch $serialText } else { $false }
-    r11ManagedInputSnapshots=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state st=dispatch-entry .*\r?$')).Count } else { 0 }
-    r11LookupResults=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state st=lookup .*\r?$')).Count } else { 0 }
+    r11ManagedInputSnapshots=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=input-dispatch-entry .*\r?$')).Count } else { 0 }
+    r11LookupResults=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=lookup .*\r?$')).Count } else { 0 }
+    r11ManagedSequenceOrder=if ($isC188R11Boot) { Test-C188R11ManagedSequenceOrder $serialText } else { $false }
+    r11ManagedNativeBoundaryCorrelation=if ($isC188R11Boot) { Test-C188R11ManagedBoundaryCorrelation $serialText } else { $false }
+    r11CheckpointBAvailable=$false
+    r11CheckpointBLimitation='No safe read-only managed snapshot request exists after main-loop readiness; checkpoint A is the latest pre-input managed observation.'
+    screenshotPath=(Join-Path $bootRoot 'desktop-ready.ppm')
+    screenshotCaptured=(Test-Path -LiteralPath (Join-Path $bootRoot 'desktop-ready.ppm') -PathType Leaf)
+    qacDegradedCensusWarning=($qacStderr -match 'reservation .* is degraded.*QEMU process census is incomplete')
     registryLaunchLookupSuccessMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=descriptor-lookup .*input=0 .*result=0\r?$')).Count
     registryLaunchLookupRejectedMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=descriptor-lookup .*input=0 .*result=-4\r?$')).Count
     registryInputEntryMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=dispatch-entry .*input=1 .*\r?$')).Count
@@ -451,7 +455,8 @@ $scenarioPass = switch ($Scenario) {
         $manifest.r11NativeLaunchBoundary -and $manifest.r11ManagedLaunchState -and
             $manifest.r11InitializationEvidence -and $manifest.r11NativeInputBoundary -and
             $manifest.r11ImageContextMatch -and $manifest.r11ManagedInputSnapshots -ge 1 -and
-            $manifest.r11LookupResults -ge 1
+            $manifest.r11LookupResults -ge 1 -and $manifest.r11ManagedSequenceOrder -and
+            $manifest.r11ManagedNativeBoundaryCorrelation -and $manifest.screenshotCaptured
         break
     }
 }

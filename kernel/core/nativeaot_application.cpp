@@ -137,6 +137,7 @@ void logC188r10NativeBoundary(const char* stage, uint32_t invocation,
 #endif
 #if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
 uint32_t g_c188r11NativeInvocationCount = 0u;
+uint32_t g_c188r11NativeSequence = 0u;
 uint32_t g_c188r11NextImageIdentity = 1u;
 uint32_t g_c188r11ImageIdentity = 0u;
 uint32_t g_c188r11HostInitializationEpoch = 0u;
@@ -148,12 +149,21 @@ uint32_t g_c188r11HostRecordsPrinted = 0u;
 bool g_c188r11InitOverflowReported = false;
 bool g_c188r11HostOverflowReported = false;
 
+uint32_t nextC188r11NativeSequence() {
+    if (g_c188r11NativeSequence >= 128u) return 0u;
+    return ++g_c188r11NativeSequence;
+}
+
 void logC188r11Image(const char* stage, uint32_t moduleIdentity,
                      uintptr_t entryPoint, uintptr_t artifactBase,
                      uintptr_t artifactSpan, uint16_t segmentCount) {
+    const uint32_t sequence = nextC188r11NativeSequence();
+    if (sequence == 0u) return;
     const uint64_t entryOffset = entryPoint >= artifactBase
         ? static_cast<uint64_t>(entryPoint - artifactBase) : UINT64_MAX;
-    serial::puts("[C188R11-NATIVE] stage=");
+    serial::puts("[C188R11-NATIVE] nseq=");
+    serial::put_hex32(sequence);
+    serial::puts(" stage=");
     serial::puts(stage);
     serial::puts(" module=");
     serial::put_hex32(moduleIdentity);
@@ -173,13 +183,19 @@ void logC188r11NativeBoundary(const char* stage, const char* route,
                               uintptr_t artifactBase, uintptr_t artifactSpan,
                               uint16_t segmentCount) {
     if (selector != 4u) return;
+    const uint32_t sequence = nextC188r11NativeSequence();
+    if (sequence == 0u) return;
     const uint64_t entryOffset = entryPoint >= artifactBase
         ? static_cast<uint64_t>(entryPoint - artifactBase) : UINT64_MAX;
-    serial::puts("[C188R11-NATIVE] stage=");
+    serial::puts("[C188R11-NATIVE] nseq=");
+    serial::put_hex32(sequence);
+    serial::puts(" stage=");
     serial::puts(stage);
     serial::puts(" route=");
     serial::puts(route);
     serial::puts(" call=");
+    serial::put_hex32(invocation);
+    serial::puts(" corr=");
     serial::put_hex32(invocation);
     serial::puts(" id=4 gen=");
     serial::put_hex32(generation);
@@ -4022,8 +4038,12 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
         if (g_c188r11PoolInitializationEvents != UINT32_MAX)
             ++g_c188r11PoolInitializationEvents;
         if (g_c188r11InitRecordsPrinted < 16u) {
+            const uint32_t sequence = nextC188r11NativeSequence();
+            if (sequence == 0u) return 0;
             ++g_c188r11InitRecordsPrinted;
-            serial::puts("[C188R11-NATIVE] stage=managed-init-event regEpoch=");
+            serial::puts("[C188R11-NATIVE] nseq=");
+            serial::put_hex32(sequence);
+            serial::puts(" stage=managed-init-event regEpoch=");
             serial::put_hex32(g_c188r11RegistryInitializationEvents);
             serial::puts(" poolEpoch=");
             serial::put_hex32(g_c188r11PoolInitializationEvents);
@@ -4096,7 +4116,13 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
         c111Message ? "[C111-MANAGED-OUTPUT] " :
         c107Message ? "[C107-MANAGED-OUTPUT] " :
         c104Message ? "[C104-MANAGED-OUTPUT] " : "[C102-MANAGED-OUTPUT] ");
-    for (uint32_t index = 0; index < 128u && message[index] != 0; ++index) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    constexpr uint32_t managedLogMessageLimit = 256u;
+#else
+    constexpr uint32_t managedLogMessageLimit = 128u;
+#endif
+    for (uint32_t index = 0;
+         index < managedLogMessageLimit && message[index] != 0; ++index) {
         serial::putc(static_cast<char>(message[index]));
     }
     serial::puts("\n");
@@ -4129,8 +4155,13 @@ void startupMarker(uint32_t stage) {
         }
     }
     if (traceC188r11HostEvent && g_c188r11HostRecordsPrinted < 24u) {
+        const uint32_t sequence = nextC188r11NativeSequence();
+        if (sequence == 0u) traceC188r11HostEvent = false;
+        else {
         ++g_c188r11HostRecordsPrinted;
-        serial::puts("[C188R11-HOST] stage=");
+        serial::puts("[C188R11-HOST] nseq=");
+        serial::put_hex32(sequence);
+        serial::puts(" stage=");
         serial::puts(c188r11Stage);
         serial::puts(" hostEpoch=");
         serial::put_hex32(g_c188r11HostInitializationEpoch);
@@ -4143,6 +4174,7 @@ void startupMarker(uint32_t stage) {
         serial::puts(" module=");
         serial::put_hex32(g_c188r11ImageIdentity);
         serial::puts("\n");
+        }
     } else if (traceC188r11HostEvent && !g_c188r11HostOverflowReported) {
         g_c188r11HostOverflowReported = true;
         serial::puts("[C188R11-HOST] stage=trace-overflow count=24\n");

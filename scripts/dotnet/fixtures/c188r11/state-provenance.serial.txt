@@ -1,18 +1,34 @@
-[C188R11-NATIVE] stage=image-mapped module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80
-[C188R11-NATIVE] stage=before-managed-entry route=resident-launch call=00000001 id=4 gen=00000001 input=00000000 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=FFFFFFFF
-[C188R11-HOST] stage=initialize-begin hostEpoch=00000001 readyCalls=00000000 regEpoch=00000000 poolEpoch=00000000 module=00000001
-[C188R11-HOST] stage=initialize-ready hostEpoch=00000001 readyCalls=00000000 regEpoch=00000000 poolEpoch=00000000 module=00000001
-[C188R11-MANAGED] stage=entry call=1 id=4 gen=1 in=0 rc=-1
-[C102-MANAGED-OUTPUT] C188R11-INIT re=1 pe=1 rg=1 p=1 ps=1
-[C188R11-NATIVE] stage=managed-init-event regEpoch=00000001 poolEpoch=00000001 module=00000001
-[C102-MANAGED-OUTPUT] C188R11 state st=managed-return rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 m=1 g=1 td=0 n=5 result=0
-[C188R11-MANAGED] stage=exit call=1 id=4 gen=1 in=0 rc=0
-[C188R11-NATIVE] stage=after-managed-return route=resident-launch call=00000001 id=4 gen=00000001 input=00000000 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=00000000
-[C188R11-NATIVE] stage=before-managed-entry route=input call=00000002 id=4 gen=00000001 input=00000001 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=FFFFFFFF
-[C188R11-HOST] stage=ready-reentry hostEpoch=00000001 readyCalls=00000001 regEpoch=00000001 poolEpoch=00000001 module=00000001
-[C188R11-MANAGED] stage=entry call=2 id=4 gen=1 in=1 rc=-1
-[C102-MANAGED-OUTPUT] C188R11 state st=dispatch-entry rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 m=0 g=1 td=0 n=0 result=-1
-[C102-MANAGED-OUTPUT] C188R11 state st=before-tryfind rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 m=0 g=1 td=0 n=0 result=-1
-[C102-MANAGED-OUTPUT] C188R11 state st=lookup rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 m=0 g=1 td=0 n=0 result=-4
-[C188R11-MANAGED] stage=exit call=2 id=4 gen=1 in=1 rc=-4
-[C188R11-NATIVE] stage=after-managed-return route=input call=00000002 id=4 gen=00000001 input=00000001 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=FFFFFFFC
+[C150-APP-LAUNCH] id=com.guidexos.apps.managed.notes generation=00000001 selector=00000004 kind=normal
+[C188R11-NATIVE] nseq=00000001 stage=image-mapped module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80
+[C188R11-NATIVE] nseq=00000002 stage=before-managed-entry route=resident-launch call=00000001 corr=00000001 id=4 gen=00000001 input=00000000 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=FFFFFFFF
+[C188R11-HOST] nseq=00000003 stage=initialize-begin hostEpoch=00000001 readyCalls=00000000 regEpoch=00000000 poolEpoch=00000000 module=00000001
+[C188R11-HOST] nseq=00000004 stage=initialize-ready hostEpoch=00000001 readyCalls=00000000 regEpoch=00000000 poolEpoch=00000000 module=00000001
+[C102-MANAGED-OUTPUT] C188R11-MANAGED stage=entry seq=1 call=1 corr=1 id=4 gen=1 in=0 rc=-1
+[C102-MANAGED-OUTPUT] C188R11-REG seq=2 selector=4
+[C102-MANAGED-OUTPUT] C188R11-REG seq=3 selector=5
+[C102-MANAGED-OUTPUT] C188R11-REG seq=4 selector=6
+[C102-MANAGED-OUTPUT] C188R11-REG seq=5 selector=7
+[C102-MANAGED-OUTPUT] C188R11-REG seq=6 selector=8
+[C188R11-NATIVE] nseq=00000005 stage=managed-init-event regEpoch=00000001 poolEpoch=00000001 module=00000001
+[C102-MANAGED-OUTPUT] C188R11-INIT seq=7 re=1 pe=1 rg=1 p=1 ps=1
+[C102-MANAGED-OUTPUT] C188R11 state seq=8 st=launch-dispatch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=0 g=0 td=0 n=5 result=-1
+[C102-MANAGED-OUTPUT] C188R11 state seq=9 st=before-tryfind selector=4 ownerGen=0 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=0 g=0 td=0 n=5 result=-1
+[C102-MANAGED-OUTPUT] C188R11 state seq=10 st=lookup selector=4 ownerGen=0 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=0 g=0 td=0 n=5 result=0
+[C102-MANAGED-OUTPUT] C188R11 state seq=11 st=before-resident selector=4 ownerGen=0 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=0 g=0 td=0 n=5 result=-1
+[C102-MANAGED-OUTPUT] C188R11 state seq=12 st=instance-start selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0
+[C102-MANAGED-OUTPUT] C188R11 state seq=13 st=launch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1
+[C150-SURFACE] action=create appId=com.guidexos.apps.managed.notes generation=00000001 window=000003E8 result=PASS
+[C102-MANAGED-OUTPUT] C188R11 state seq=14 st=launch-return selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0
+[C102-MANAGED-OUTPUT] C188R11 state seq=15 st=managed-return selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0
+[C102-MANAGED-OUTPUT] C188R11-MANAGED stage=exit seq=16 call=1 corr=1 id=4 gen=1 in=0 rc=0
+[C188R11-NATIVE] nseq=00000006 stage=after-managed-return route=resident-launch call=00000001 corr=00000001 id=4 gen=00000001 input=00000000 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=00000000
+[KERNEL] Entering main loop (waiting for input)...
+[C188R11-NATIVE] nseq=00000007 stage=before-managed-entry route=input call=00000002 corr=00000002 id=4 gen=00000001 input=00000001 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=FFFFFFFF
+[C188R11-HOST] nseq=00000008 stage=ready-reentry hostEpoch=00000001 readyCalls=00000001 regEpoch=00000001 poolEpoch=00000001 module=00000001
+[C102-MANAGED-OUTPUT] C188R11-MANAGED stage=entry seq=17 call=2 corr=2 id=4 gen=1 in=1 rc=-1
+[C102-MANAGED-OUTPUT] C188R11 state seq=18 st=input-dispatch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1
+[C102-MANAGED-OUTPUT] C188R11 state seq=19 st=before-tryfind selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1
+[C102-MANAGED-OUTPUT] C188R11 state seq=20 st=lookup selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0
+[C102-MANAGED-OUTPUT] C188R11 state seq=21 st=resident-found selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0
+[C102-MANAGED-OUTPUT] C188R11-MANAGED stage=exit seq=22 call=2 corr=2 id=4 gen=1 in=1 rc=0
+[C188R11-NATIVE] nseq=00000009 stage=after-managed-return route=input call=00000002 corr=00000002 id=4 gen=00000001 input=00000001 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=00000000

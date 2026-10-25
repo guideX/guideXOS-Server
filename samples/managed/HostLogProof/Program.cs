@@ -3506,12 +3506,18 @@ public static unsafe class Program
             return;
         }
 
-        Span<byte> line = stackalloc byte[96];
+        uint sequence = C188R11DiagnosticSequence.Next();
+        if (sequence == 0u) return;
+        Span<byte> line = stackalloc byte[128];
         int position = 0;
         if (!GuideXosText.Append(line, ref position,
                 "C188R11-MANAGED stage="u8) ||
             !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position, " seq="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, sequence) ||
             !GuideXosText.Append(line, ref position, " call="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, invocation) ||
+            !GuideXosText.Append(line, ref position, " corr="u8) ||
             !GuideXosText.AppendUnsigned(line, ref position, invocation) ||
             !GuideXosText.Append(line, ref position, " id=4 gen="u8) ||
             !GuideXosText.AppendUnsigned(line, ref position, generation) ||

@@ -6,7 +6,7 @@ namespace HostLogProof;
 
 public static unsafe class GuideXosApplicationRegistryC188R11Tests
 {
-    public const int CaseCount = 12;
+    public const int CaseCount = 13;
     public static int FirstFailedCase { get; private set; }
     private static int s_notesHandlerEntries;
     private static ulong s_nextWindow = 0xC1881100u;
@@ -17,6 +17,16 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
         s_notesHandlerEntries = 0;
         int cases = 0;
         bool passed = true;
+
+        C188R11SequenceCounter boundedSequence = new(3u);
+        uint sequence1 = boundedSequence.Next();
+        uint sequence2 = boundedSequence.Next();
+        uint sequence3 = boundedSequence.Next();
+        bool sequenceIsMonotonicAndBounded = sequence1 == 1u &&
+            sequence2 == sequence1 + 1u &&
+            sequence3 == sequence2 + 1u &&
+            boundedSequence.Next() == 0u && boundedSequence.Next() == 0u;
+        passed &= Case(ref cases, sequenceIsMonotonicAndBounded);
 
         object original = new();
         C188R11ObjectIdentityTracker repeatedTracker = new();
@@ -88,6 +98,7 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             afterLaunch.DescriptorCount == 5u &&
             GuideXosApplicationRegistry.TryFind(4u, out _) &&
             afterLaunch.ResidentMask == 1u &&
+            afterLaunch.NotesOwnerGeneration == 1u &&
             afterLaunch.GenerationHighWatermark >= 1u &&
             launchResidentFound &&
             notes is Applications.ManagedNotes;
@@ -109,6 +120,8 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             snapshotBefore.ResidentMask == snapshotAfter.ResidentMask &&
             snapshotBefore.GenerationHighWatermark ==
                 snapshotAfter.GenerationHighWatermark &&
+            snapshotBefore.NotesOwnerGeneration ==
+                snapshotAfter.NotesOwnerGeneration &&
             snapshotBefore.PoolClearEvents == snapshotAfter.PoolClearEvents &&
             snapshotBefore.TeardownEvents == snapshotAfter.TeardownEvents &&
             snapshotBefore.RegistryIdentity.Identity ==
@@ -162,6 +175,7 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             GuideXosApplicationRegistry.C188R11CaptureState();
         bool closeIsActualTeardown = closeResult == 0 &&
             afterClose.ResidentMask == 0u &&
+            afterClose.NotesOwnerGeneration == 0u &&
             afterClose.PoolClearEvents == snapshotAfter.PoolClearEvents + 1u &&
             afterClose.ResidentReplacementEvents ==
                 snapshotAfter.ResidentReplacementEvents &&
@@ -237,12 +251,27 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
     [UnmanagedCallersOnly]
     private static int Log(NativeGxAppContext* context, byte* message)
     {
-        ReadOnlySpan<byte> handler = "C188R11 state st=handler-enter"u8;
+        ReadOnlySpan<byte> handler = "C188R11 state seq="u8;
         int index = 0;
         while (index < handler.Length && message[index] == handler[index])
             index++;
-        if (index == handler.Length) s_notesHandlerEntries++;
+        if (index == handler.Length &&
+            Contains(message, " st=handler-enter"u8)) s_notesHandlerEntries++;
         return 0;
+    }
+
+    private static bool Contains(byte* value, ReadOnlySpan<byte> sought)
+    {
+        int length = 0;
+        while (value[length] != 0) length++;
+        for (int start = 0; start <= length - sought.Length; start++)
+        {
+            int index = 0;
+            while (index < sought.Length && value[start + index] == sought[index])
+                index++;
+            if (index == sought.Length) return true;
+        }
+        return false;
     }
 
     [UnmanagedCallersOnly]
