@@ -22,6 +22,86 @@ static const uint16_t kStatusPort  = 0x64;
 // Key state
 static uint32_t s_lastKey = 0;
 static bool s_hasKey = false;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+static uint32_t s_c188r11r2EventSequence = 0;
+static uint32_t s_c188r11r2PendingEventId = 0;
+static uint32_t s_c188r11r2PendingScancode = 0;
+static uint32_t s_c188r11r2DequeuedEventId = 0;
+static uint32_t s_c188r11r2DequeuedScancode = 0;
+static uint32_t s_c188r11r2PendingOverwrites = 0;
+static volatile C188R11R2KeyTrace s_c188r11r2Trace[16] = {};
+static volatile uint32_t s_c188r11r2TraceHead = 0u;
+static volatile uint32_t s_c188r11r2TraceTail = 0u;
+static uint32_t s_c188r11r2TraceRecordsWritten = 0u;
+static uint32_t s_c188r11r2TraceRecordsPrinted = 0u;
+static uint32_t s_c188r11r2TraceSequence = 0u;
+static uint32_t s_c188r11r2TraceOverflow = 0u;
+static bool s_c188r11r2TraceOverflowReported = false;
+
+enum C188R11R2KeyPhase : uint32_t {
+    C188R11R2PrefixE0 = 1u,
+    C188R11R2PrefixF0 = 2u,
+    C188R11R2ModifierShift = 3u,
+    C188R11R2ModifierControl = 4u,
+    C188R11R2ModifierAlt = 5u,
+    C188R11R2ModifierCaps = 6u,
+    C188R11R2KeyRelease = 7u,
+    C188R11R2KeyQueued = 8u,
+    C188R11R2KeyUnsupported = 9u
+};
+
+static uint32_t next_c188r11r2_event_id()
+{
+    if (s_c188r11r2EventSequence >= 32u) return 0u;
+    return ++s_c188r11r2EventSequence;
+}
+
+static void record_c188r11r2_key(uint32_t eventId, uint32_t scancode,
+                                  uint32_t key, uint32_t phase, bool keyUp,
+                                  bool extended, bool shift, bool control)
+{
+    if (s_c188r11r2TraceRecordsWritten >= 16u) {
+        if (s_c188r11r2TraceOverflow < 255u)
+            ++s_c188r11r2TraceOverflow;
+        return;
+    }
+    const uint32_t head = s_c188r11r2TraceHead;
+    const uint32_t tail = s_c188r11r2TraceTail;
+    if (head - tail >= 16u) {
+        if (s_c188r11r2TraceOverflow < 255u)
+            ++s_c188r11r2TraceOverflow;
+        return;
+    }
+    const uint32_t sequence = ++s_c188r11r2TraceSequence;
+    volatile C188R11R2KeyTrace& trace = s_c188r11r2Trace[head % 16u];
+    trace.sequence = sequence;
+    trace.eventId = eventId;
+    trace.scancode = scancode;
+    trace.key = key;
+    trace.phase = phase;
+    trace.keyUp = keyUp ? 1u : 0u;
+    trace.extended = extended ? 1u : 0u;
+    trace.shift = shift ? 1u : 0u;
+    trace.control = control ? 1u : 0u;
+    ++s_c188r11r2TraceRecordsWritten;
+    s_c188r11r2TraceHead = head + 1u;
+}
+
+static const char* c188r11r2_phase_name(uint32_t phase)
+{
+    switch (phase) {
+        case C188R11R2PrefixE0: return "prefix-e0";
+        case C188R11R2PrefixF0: return "prefix-f0";
+        case C188R11R2ModifierShift: return "modifier-shift";
+        case C188R11R2ModifierControl: return "modifier-control";
+        case C188R11R2ModifierAlt: return "modifier-alt";
+        case C188R11R2ModifierCaps: return "modifier-caps";
+        case C188R11R2KeyRelease: return "key-release";
+        case C188R11R2KeyQueued: return "key-queued";
+        default: return "key-unsupported";
+    }
+}
+#endif
 static bool s_leftShiftDown = false;
 static bool s_rightShiftDown = false;
 static bool s_leftCtrlDown = false;
@@ -150,6 +230,21 @@ void init()
     
     s_lastKey = 0;
     s_hasKey = false;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    s_c188r11r2EventSequence = 0;
+    s_c188r11r2PendingEventId = 0;
+    s_c188r11r2PendingScancode = 0;
+    s_c188r11r2DequeuedEventId = 0;
+    s_c188r11r2DequeuedScancode = 0;
+    s_c188r11r2PendingOverwrites = 0;
+    s_c188r11r2TraceHead = 0u;
+    s_c188r11r2TraceTail = 0u;
+    s_c188r11r2TraceRecordsWritten = 0u;
+    s_c188r11r2TraceRecordsPrinted = 0u;
+    s_c188r11r2TraceSequence = 0u;
+    s_c188r11r2TraceOverflow = 0u;
+    s_c188r11r2TraceOverflowReported = false;
+#endif
     s_leftShiftDown = false;
     s_rightShiftDown = false;
     s_leftCtrlDown = false;
@@ -188,16 +283,28 @@ void irq_handler()
     // 0xE0 = extended key prefix
     // 0xF0 = break (key release) prefix
     if (scancode == 0xE0) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        record_c188r11r2_key(0u, scancode, 0u, C188R11R2PrefixE0,
+            false, false, is_shift_down(), is_ctrl_down());
+#endif
         s_extendedKey = true;
         return;
     }
     if (scancode == 0xF0) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        record_c188r11r2_key(0u, scancode, 0u, C188R11R2PrefixF0,
+            false, s_extendedKey, is_shift_down(), is_ctrl_down());
+#endif
         s_breakCode = true;
         return;
     }
     
     bool keyUp = s_breakCode;
     s_breakCode = false;  // Reset for next scancode
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    const bool c188r11r2Extended = s_extendedKey;
+    const uint32_t c188r11r2EventId = next_c188r11r2_event_id();
+#endif
     bool altF4Candidate = false;
     bool altF4LeftDown = false;
     bool altF4RightDown = false;
@@ -210,6 +317,11 @@ void irq_handler()
         } else {
             s_rightShiftDown = !keyUp;
         }
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        record_c188r11r2_key(c188r11r2EventId, scancode, 0u,
+            C188R11R2ModifierShift, keyUp, c188r11r2Extended,
+            is_shift_down(), is_ctrl_down());
+#endif
 #if defined(GXOS_NATIVEAOT_C129_SHIFT_TAB_INPUT_TRANSPORT)
         serial::puts("[C129-KEYBOARD] shift=");
         serial::puts(keyUp ? "up" : "down");
@@ -232,6 +344,11 @@ void irq_handler()
         } else {
             s_leftCtrlDown = !keyUp;
         }
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        record_c188r11r2_key(c188r11r2EventId, scancode, 0u,
+            C188R11R2ModifierControl, keyUp, c188r11r2Extended,
+            is_shift_down(), is_ctrl_down());
+#endif
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
         log_key_transition(rightCtrl ? "ctrl-right" : "ctrl-left",
             scancode, keyUp, s_extendedKey);
@@ -263,11 +380,21 @@ void irq_handler()
             log_key_transition("alt-left", scancode, keyUp, false);
 #endif
         }
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        record_c188r11r2_key(c188r11r2EventId, scancode, 0u,
+            C188R11R2ModifierAlt, keyUp, c188r11r2Extended,
+            is_shift_down(), is_ctrl_down());
+#endif
         s_extendedKey = false;
         return;
     }
     if (scancode == SC2_CAPS && !keyUp) {  // Caps Lock (toggle on press)
         s_capsLock = !s_capsLock;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        record_c188r11r2_key(c188r11r2EventId, scancode, 0u,
+            C188R11R2ModifierCaps, false, c188r11r2Extended,
+            is_shift_down(), is_ctrl_down());
+#endif
         s_extendedKey = false;
         return;
     }
@@ -291,12 +418,22 @@ void irq_handler()
         }
         s_extendedKey = false;
         if (keyUp) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+            record_c188r11r2_key(c188r11r2EventId, scancode, KEY_F1 + 3u,
+                C188R11R2KeyRelease, true, c188r11r2Extended,
+                is_shift_down(), is_ctrl_down());
+#endif
             return;
         }
     }
     
     // Only process key presses, not releases
     if (keyUp) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        record_c188r11r2_key(c188r11r2EventId, scancode, 0u,
+            C188R11R2KeyRelease, true, c188r11r2Extended,
+            is_shift_down(), is_ctrl_down());
+#endif
         s_extendedKey = false;
         return;
     }
@@ -350,7 +487,18 @@ void irq_handler()
         }
     }
     
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    record_c188r11r2_key(c188r11r2EventId, scancode, key,
+        key != 0u ? C188R11R2KeyQueued : C188R11R2KeyUnsupported,
+        false, c188r11r2Extended, is_shift_down(), is_ctrl_down());
+#endif
     if (key != 0) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        if (s_hasKey && s_c188r11r2PendingOverwrites < 255u)
+            ++s_c188r11r2PendingOverwrites;
+        s_c188r11r2PendingEventId = c188r11r2EventId;
+        s_c188r11r2PendingScancode = scancode;
+#endif
         s_lastKey = key;
         s_hasKey = true;
         s_lastKeyCtrlDown = s_leftCtrlDown || s_rightCtrlDown;
@@ -372,13 +520,117 @@ uint32_t get_key()
 {
     if (!s_hasKey) return 0;
     s_hasKey = false;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    s_c188r11r2DequeuedEventId = s_c188r11r2PendingEventId;
+    s_c188r11r2DequeuedScancode = s_c188r11r2PendingScancode;
+#endif
     return s_lastKey;
+}
+
+uint32_t last_dequeued_event_id()
+{
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    return s_c188r11r2DequeuedEventId;
+#else
+    return 0u;
+#endif
+}
+
+uint32_t last_dequeued_scancode()
+{
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    return s_c188r11r2DequeuedScancode;
+#else
+    return 0u;
+#endif
+}
+
+uint32_t last_dequeued_pending_overwrites()
+{
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    return s_c188r11r2PendingOverwrites;
+#else
+    return 0u;
+#endif
+}
+
+bool try_get_c188r11r2_key_trace(C188R11R2KeyTrace* trace)
+{
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    if (!trace) return false;
+    const uint32_t tail = s_c188r11r2TraceTail;
+    const uint32_t head = s_c188r11r2TraceHead;
+    if (tail == head) return false;
+    const volatile C188R11R2KeyTrace& source =
+        s_c188r11r2Trace[tail % 16u];
+    trace->sequence = source.sequence;
+    trace->eventId = source.eventId;
+    trace->scancode = source.scancode;
+    trace->key = source.key;
+    trace->phase = source.phase;
+    trace->keyUp = source.keyUp;
+    trace->extended = source.extended;
+    trace->shift = source.shift;
+    trace->control = source.control;
+    s_c188r11r2TraceTail = tail + 1u;
+    return true;
+#else
+    (void)trace;
+    return false;
+#endif
+}
+
+void flush_c188r11r2_key_traces()
+{
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    C188R11R2KeyTrace trace{};
+    while (s_c188r11r2TraceRecordsPrinted < 16u &&
+           try_get_c188r11r2_key_trace(&trace)) {
+        ++s_c188r11r2TraceRecordsPrinted;
+        serial::puts("[C188R11R2_KEY] stage=irq-scan seq=");
+        serial::put_hex32(trace.sequence);
+        serial::puts(" eid=");
+        serial::put_hex32(trace.eventId);
+        serial::puts(" sc=");
+        serial::put_hex32(trace.scancode);
+        serial::puts(" ext=");
+        serial::puts(trace.extended ? "1" : "0");
+        serial::puts(" phase=");
+        serial::puts(c188r11r2_phase_name(trace.phase));
+        serial::puts(" key=");
+        serial::put_hex32(trace.key);
+        serial::puts(" transition=");
+        serial::puts(trace.keyUp ? "up" : "down");
+        serial::puts(" shift=");
+        serial::puts(trace.shift ? "1" : "0");
+        serial::puts(" ctrl=");
+        serial::puts(trace.control ? "1" : "0");
+        serial::puts(" route=");
+        serial::puts(trace.phase == C188R11R2KeyQueued ? "queue" :
+            trace.phase == C188R11R2KeyUnsupported ? "drop" : "consume");
+        serial::puts("\n");
+    }
+    if (s_c188r11r2TraceOverflow != 0u &&
+        !s_c188r11r2TraceOverflowReported) {
+        s_c188r11r2TraceOverflowReported = true;
+        serial::puts("[C188R11R2_KEY] stage=irq-trace-overflow dropped=");
+        serial::put_hex32(s_c188r11r2TraceOverflow);
+        serial::puts("\n");
+    }
+#endif
 }
 
 void clear()
 {
     s_hasKey = false;
     s_lastKey = 0;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    s_c188r11r2PendingEventId = 0u;
+    s_c188r11r2PendingScancode = 0u;
+    s_c188r11r2DequeuedEventId = 0u;
+    s_c188r11r2DequeuedScancode = 0u;
+    s_c188r11r2PendingOverwrites = 0u;
+#endif
     s_lastKeyCtrlDown = false;
     s_lastKeyLeftCtrlDown = false;
     s_lastKeyRightCtrlDown = false;
@@ -469,6 +721,11 @@ void init() {}
 void irq_handler() {}
 bool has_key() { return false; }
 uint32_t get_key() { return 0; }
+uint32_t last_dequeued_event_id() { return 0u; }
+uint32_t last_dequeued_scancode() { return 0u; }
+uint32_t last_dequeued_pending_overwrites() { return 0u; }
+bool try_get_c188r11r2_key_trace(C188R11R2KeyTrace*) { return false; }
+void flush_c188r11r2_key_traces() {}
 void clear() {}
 bool is_ctrl_down() { return false; }
 bool is_left_ctrl_down() { return false; }

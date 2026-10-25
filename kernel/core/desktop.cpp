@@ -8650,8 +8650,10 @@ void cooperative_yield()
 
     if (ps2keyboard::has_key()) {
         uint32_t key = ps2keyboard::get_key();
+        ps2keyboard::flush_c188r11r2_key_traces();
         if (key != 0) handle_key(key);
     }
+    ps2keyboard::flush_c188r11r2_key_traces();
 
     const uint32_t now = (uint32_t)pit::ticks();
     if (now - lastPresentTick >= 10) {
@@ -10591,6 +10593,30 @@ void handle_key(uint32_t key)
 {
     reset_alt_f4_shortcut_state();
 
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    static uint32_t c188r11r2KeyboardRecords = 0u;
+    const uint32_t c188r11r2EventId =
+        ps2keyboard::last_dequeued_event_id();
+    if (c188r11r2EventId != 0u && c188r11r2KeyboardRecords < 24u) {
+        ++c188r11r2KeyboardRecords;
+        serial::puts("[C188R11R2_KEY] stage=kernel-dequeue source=ps2-irq eid=");
+        serial::put_hex32(c188r11r2EventId);
+        serial::puts(" sc=");
+        serial::put_hex32(ps2keyboard::last_dequeued_scancode());
+        serial::puts(" key=");
+        serial::put_hex32(key);
+        serial::puts(" class=");
+        serial::puts(key >= 32u && key < 127u ? "printable" : "keydown");
+        serial::puts(" shift=");
+        serial::puts(ps2keyboard::last_key_shift_down() ? "1" : "0");
+        serial::puts(" ctrl=");
+        serial::puts(ps2keyboard::last_key_ctrl_down() ? "1" : "0");
+        serial::puts(" overwritten=");
+        serial::put_hex32(ps2keyboard::last_dequeued_pending_overwrites());
+        serial::puts(" result=PASS\n");
+    }
+#endif
+
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
     if (key == kAltF4KeyCode) {
         serial::puts("[desktop] key f4 candidate=");
@@ -10663,6 +10689,23 @@ void handle_key(uint32_t key)
     // Route keyboard input to focused kernel compositor window first
     if (compositor::KernelCompositor::hasWindows()) {
         app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        if (c188r11r2EventId != 0u && c188r11r2KeyboardRecords < 24u) {
+            ++c188r11r2KeyboardRecords;
+            serial::puts("[C188R11R2_KEY] stage=focus-target eid=");
+            serial::put_hex32(c188r11r2EventId);
+            serial::puts(" window=");
+            serial::put_hex32(focused ? focused->id : 0u);
+            serial::puts(" title=");
+            serial::puts(focused ? focused->title : "(none)");
+            serial::puts(" owner=");
+            serial::puts(focused && focused->owner
+                ? focused->owner->getName() : "(none)");
+            serial::puts(" route=");
+            serial::puts(focused ? "focused-window" : "no-focused-window");
+            serial::puts("\n");
+        }
+#endif
         if (focused) {
             // Give Escape to the focused compositor app. Managed text fields
             // use it to cancel their active picker without closing the app.

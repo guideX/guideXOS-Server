@@ -110,7 +110,7 @@ if ($isStartupDiagnostic) {
         $requiredNotesMarkers += @('C188R10 state stage=', 'C188R10-MANAGED stage=')
     }
     if ($ManagedStateProvenance) {
-        $requiredNotesMarkers += @('C188R11 state seq=', 'C188R11-INIT seq=', 'C188R11-MANAGED stage=')
+        $requiredNotesMarkers += @('C188R11 state seq=', 'C188R11-INIT seq=', 'C188R11-MANAGED stage=', 'C188R11R2_KEY')
     }
     foreach ($marker in $requiredNotesMarkers) {
         if (-not $elfText.Contains($marker)) { throw "$phaseRootName diagnostic ELF omitted required retained marker $marker" }

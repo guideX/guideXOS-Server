@@ -5369,6 +5369,10 @@ public sealed partial class ManagedNotes : GuideXosApplication
     public override GuideXosResult HandleInput(
         GuideXosHost host, GuideXosInputEvent input)
     {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        HostLogProof.GuideXosApplicationRegistry.LogC188R11R2Keyboard(
+            host, "notes-callback-entry"u8, -1);
+#endif
         if (host.TryGetSurface(_window, out GuideXosSurface surface) !=
                 GuideXosResult.Success || surface == null)
         {

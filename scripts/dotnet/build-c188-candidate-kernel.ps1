@@ -139,7 +139,7 @@ if (-not (Test-Path -LiteralPath $kernelElf -PathType Leaf)) {
 }
 $bytes = [System.IO.File]::ReadAllBytes($kernelElf)
 $kernelText = [System.Text.Encoding]::ASCII.GetString($bytes)
-foreach ($marker in @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY','C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION') + $(if ($ManagedStateReentry) { @('C188R10-NATIVE') } else { @() }) + $(if ($ManagedStateProvenance) { @('C188R11-NATIVE','C188R11-HOST') } else { @() })) {
+foreach ($marker in @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY','C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION') + $(if ($ManagedStateReentry) { @('C188R10-NATIVE') } else { @() }) + $(if ($ManagedStateProvenance) { @('C188R11-NATIVE','C188R11-HOST','C188R11R2_KEY') } else { @() })) {
     if (-not $kernelText.Contains($marker)) { throw "C188 kernel ELF is missing required marker $marker." }
 }
 foreach ($requiredFlag in @('-fno-exceptions','-fno-rtti','-nostdinc++','-std=c++14')) {

@@ -245,6 +245,7 @@ public static unsafe class GuideXosApplicationRegistry
     private static uint s_c188r11ResetEvents = 0u;
     private static bool s_c188r11InitializationEventReported;
     private static uint s_c188r11RegistryTraceRecords;
+    private static uint s_c188r11r2KeyboardRecords;
 #endif
 #if GUIDEXOS_PROOF_CONTROL
     private static bool s_proofConfigConsumed;
@@ -434,6 +435,52 @@ public static unsafe class GuideXosApplicationRegistry
             host.TryLog(line[..position]);
         }
     }
+
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    internal static void LogC188R11R2Keyboard(GuideXosHost host,
+        ReadOnlySpan<byte> stage, int resultCode)
+    {
+        if (host == null || host.Selector != 4u ||
+            !host.LaunchContext.IsInput ||
+            (host.LaunchContext.InputKind != GuideXosInputKind.KeyDown &&
+             host.LaunchContext.InputKind != GuideXosInputKind.KeyChar) ||
+            s_c188r11r2KeyboardRecords >= 16u)
+        {
+            return;
+        }
+        uint sequence = C188R11DiagnosticSequence.Next();
+        if (sequence == 0u) return;
+        s_c188r11r2KeyboardRecords++;
+        ReadOnlySpan<byte> kind = host.LaunchContext.InputKind ==
+                GuideXosInputKind.KeyChar
+            ? "key-char"u8 : "key-down"u8;
+        Span<byte> line = stackalloc byte[160];
+        int position = 0;
+        if (GuideXosText.Append(line, ref position,
+                "C188R11R2_KEY seq="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, sequence) &&
+            GuideXosText.Append(line, ref position, " stage="u8) &&
+            GuideXosText.Append(line, ref position, stage) &&
+            GuideXosText.Append(line, ref position, " selector="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, host.Selector) &&
+            GuideXosText.Append(line, ref position, " kind="u8) &&
+            GuideXosText.Append(line, ref position, kind) &&
+            GuideXosText.Append(line, ref position, " value="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                host.LaunchContext.InputKeyCode) &&
+            GuideXosText.Append(line, ref position, " shift="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                host.LaunchContext.InputShift ? 1u : 0u) &&
+            GuideXosText.Append(line, ref position, " ctrl="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                host.LaunchContext.InputControl ? 1u : 0u) &&
+            GuideXosText.Append(line, ref position, " result="u8) &&
+            AppendC188R11Signed(line, ref position, resultCode))
+        {
+            host.TryLog(line[..position]);
+        }
+    }
+#endif
 
     private static void LogC188R11State(GuideXosHost host,
         ReadOnlySpan<byte> stage, uint selector, uint generation,
@@ -635,6 +682,7 @@ public static unsafe class GuideXosApplicationRegistry
                     ? "input-dispatch-entry"u8
                     : "launch-dispatch-entry"u8, selector,
                 host.LaunchContext.ApplicationGeneration, -1);
+            LogC188R11R2Keyboard(host, "managed-dispatch-entry"u8, -1);
         }
 #endif
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
@@ -913,6 +961,10 @@ public static unsafe class GuideXosApplicationRegistry
                 applicationGeneration, -1);
 #endif
             result = application.HandleInput(host, input);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            LogC188R11R2Keyboard(host, "managed-callback-return"u8,
+                (int)result);
+#endif
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
             LogC188R10State(host, "input-return"u8, selector,
                 applicationGeneration, (int)result);

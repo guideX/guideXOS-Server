@@ -6901,6 +6901,22 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
 #endif
         
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        kernel::app::KernelWindow* c188r11r2FocusedWindow =
+            kernel::compositor::KernelCompositor::getFocusedWindow();
+        kernel::serial::puts("[C188R11R2_KEY] stage=main-loop-focus window=");
+        kernel::serial::put_hex32(c188r11r2FocusedWindow
+            ? c188r11r2FocusedWindow->id : 0u);
+        kernel::serial::puts(" title=");
+        kernel::serial::puts(c188r11r2FocusedWindow
+            ? c188r11r2FocusedWindow->title : "(none)");
+        kernel::serial::puts(" owner=");
+        kernel::serial::puts(c188r11r2FocusedWindow &&
+                c188r11r2FocusedWindow->owner
+            ? c188r11r2FocusedWindow->owner->getName() : "(none)");
+        kernel::serial::puts(" result=");
+        kernel::serial::puts(c188r11r2FocusedWindow ? "focused\n" : "none\n");
+#endif
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         
@@ -6934,6 +6950,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             // Process buffered keyboard input from PS/2 IRQ handler
             if (kernel::ps2keyboard::has_key()) {
                 uint32_t key = kernel::ps2keyboard::get_key();
+                kernel::ps2keyboard::flush_c188r11r2_key_traces();
                 if (key != 0) {
                     kernel::desktop::handle_key(key);
                     // handle_key calls draw() internally; redraw cursor overlay
@@ -6942,6 +6959,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                         kernel::input::mouse_y());
                 }
             }
+            kernel::ps2keyboard::flush_c188r11r2_key_traces();
 
             kernel::desktop::tick();
 

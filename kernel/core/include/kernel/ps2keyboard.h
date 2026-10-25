@@ -26,6 +26,26 @@ bool has_key();
 // Returns 0 if no key available
 uint32_t get_key();
 
+// Bounded C188R11 keyboard provenance for the most recently dequeued key.
+// These values are zero in builds without the R11 diagnostic define.
+uint32_t last_dequeued_event_id();
+uint32_t last_dequeued_scancode();
+uint32_t last_dequeued_pending_overwrites();
+
+struct C188R11R2KeyTrace {
+    uint32_t sequence;
+    uint32_t eventId;
+    uint32_t scancode;
+    uint32_t key;
+    uint32_t phase;
+    uint32_t keyUp;
+    uint32_t extended;
+    uint32_t shift;
+    uint32_t control;
+};
+bool try_get_c188r11r2_key_trace(C188R11R2KeyTrace* trace);
+void flush_c188r11r2_key_traces();
+
 // Modifier state accessors
 bool is_ctrl_down();
 bool is_left_ctrl_down();

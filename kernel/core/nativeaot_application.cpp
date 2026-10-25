@@ -148,6 +148,8 @@ uint32_t g_c188r11InitRecordsPrinted = 0u;
 uint32_t g_c188r11HostRecordsPrinted = 0u;
 bool g_c188r11InitOverflowReported = false;
 bool g_c188r11HostOverflowReported = false;
+uint32_t g_c188r11r2KeyboardEventId = 0u;
+uint32_t g_c188r11r2KeyboardRecordsPrinted = 0u;
 
 uint32_t nextC188r11NativeSequence() {
     if (g_c188r11NativeSequence >= 128u) return 0u;
@@ -293,6 +295,36 @@ constexpr uint32_t kC137RelaunchKey = 0x11Bu;
 constexpr uint32_t kLaunchFlagInputShift = 0x00800000u;
 constexpr uint32_t kLaunchFlagInputControl = 0x00400000u;
 constexpr uint32_t kLaunchFlagInputValueMask = 0x003FFFFFu;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+void logC188r11r2KeyboardBoundary(const char* stage, uint32_t selector,
+                                  uint32_t launchFlags, uint32_t eventId,
+                                  uint32_t call, int32_t result) {
+    if (selector != 4u || eventId == 0u ||
+        g_c188r11r2KeyboardRecordsPrinted >= 16u) return;
+    ++g_c188r11r2KeyboardRecordsPrinted;
+    serial::puts("[C188R11R2_KEY] stage=");
+    serial::puts(stage);
+    serial::puts(" eid=");
+    serial::put_hex32(eventId);
+    serial::puts(" call=");
+    serial::put_hex32(call);
+    serial::puts(" corr=");
+    serial::put_hex32(call);
+    serial::puts(" selector=");
+    serial::put_hex32(selector);
+    serial::puts(" kind=");
+    serial::put_hex32(launchFlags & kLaunchFlagInputKindMask);
+    serial::puts(" value=");
+    serial::put_hex32(launchFlags & kLaunchFlagInputValueMask);
+    serial::puts(" shift=");
+    serial::puts((launchFlags & kLaunchFlagInputShift) ? "1" : "0");
+    serial::puts(" ctrl=");
+    serial::puts((launchFlags & kLaunchFlagInputControl) ? "1" : "0");
+    serial::puts(" rc=");
+    serial::put_hex32(static_cast<uint32_t>(result));
+    serial::puts("\n");
+}
+#endif
 // C172 reserves one existing 29-bit application action range for synchronous
 // outer-window geometry updates. The v4 host-call table and entry signature
 // remain unchanged.
@@ -1304,16 +1336,35 @@ public:
 
     void onKeyChar(char c) override {
         if (m_selector == 0u) return;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        const uint32_t previousKeyboardEventId =
+            g_c188r11r2KeyboardEventId;
+        g_c188r11r2KeyboardEventId =
+            ps2keyboard::last_dequeued_event_id();
+#endif
         // Printable Control chords are routed as KeyDown from the desktop
         // dispatcher. This guard also prevents a late split KeyChar from
         // inserting a command letter if another path emits one unexpectedly.
-        if (ps2keyboard::last_key_ctrl_down()) return;
+        if (ps2keyboard::last_key_ctrl_down()) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+            logC188r11r2KeyboardBoundary(
+                "native-reject-control-chord", m_selector,
+                kLaunchFlagInput | kLaunchFlagInputKeyChar |
+                    static_cast<uint8_t>(c) | kLaunchFlagInputControl,
+                g_c188r11r2KeyboardEventId, 0u, -2);
+            g_c188r11r2KeyboardEventId = previousKeyboardEventId;
+#endif
+            return;
+        }
         const uint32_t payload = static_cast<uint32_t>(
             static_cast<uint8_t>(c));
         const uint32_t inputPayload = payload |
             (ps2keyboard::last_key_shift_down() ? kLaunchFlagInputShift : 0u);
         const int32_t result = invokeManagedInput(
             m_selector, kLaunchFlagInput | kLaunchFlagInputKeyChar | inputPayload);
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        g_c188r11r2KeyboardEventId = previousKeyboardEventId;
+#endif
         serial::puts("[C116-NATIVE-INPUT] kind=key-char value=");
         serial::put_hex32(payload);
         serial::puts(" shift=");
@@ -4582,6 +4633,11 @@ int32_t invokeManagedWithHostMetadata(
     ManagedFileActivationRequest* fileActivationRequest = nullptr) {
     if (g_application.state != ApplicationLifecycleState::Resident ||
         g_application.entryPoint == 0u || selector == 0u) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        logC188r11r2KeyboardBoundary("native-reject-no-resident-image",
+            selector, launchFlags, g_c188r11r2KeyboardEventId, 0u,
+            kInvalidApplicationIdReturn);
+#endif
         return kInvalidApplicationIdReturn;
     }
 
@@ -4652,6 +4708,9 @@ int32_t invokeManagedWithHostMetadata(
             static_cast<uint32_t>(packedUserData >> 32), true, -1,
             g_application.entryPoint, g_application.artifactBase,
             g_application.artifactSpan, g_application.loadSegmentCount);
+        logC188r11r2KeyboardBoundary("native-managed-entry", selector,
+            launchFlags, g_c188r11r2KeyboardEventId,
+            c188r11DiagnosticInvocation, -1);
     }
 #endif
 #if defined(GXOS_NATIVEAOT_C188R10_STATE_REENTRY)
@@ -4686,6 +4745,9 @@ int32_t invokeManagedWithHostMetadata(
             static_cast<uint32_t>(packedUserData >> 32), true, managedReturn,
             g_application.entryPoint, g_application.artifactBase,
             g_application.artifactSpan, g_application.loadSegmentCount);
+        logC188r11r2KeyboardBoundary("native-managed-return", selector,
+            launchFlags, g_c188r11r2KeyboardEventId,
+            c188r11DiagnosticInvocation, managedReturn);
     }
 #endif
 #if defined(GXOS_NATIVEAOT_C188R10_STATE_REENTRY)
@@ -4749,6 +4811,10 @@ int32_t invokeManagedInput(uint32_t selector, uint32_t inputFlags) {
          kind != kLaunchFlagInputSecondaryPointerDown &&
          kind != kLaunchFlagInputSecondaryPointerUp) ||
         payload > kLaunchFlagInputPayloadMask) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        logC188r11r2KeyboardBoundary("native-reject-invalid-input",
+            selector, inputFlags, g_c188r11r2KeyboardEventId, 0u, -2);
+#endif
         return -2;
     }
     g_c116InputDispatchActive = true;
