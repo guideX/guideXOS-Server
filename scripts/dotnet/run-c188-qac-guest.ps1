@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$BootEvidencePath,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
-    [Parameter(Mandatory=$true)][ValidateSet('identity','lifecycle','coexistence','production-startup','production-apps','production-lifecycle','registry-input-reentry')][string]$Scenario,
+    [Parameter(Mandatory=$true)][ValidateSet('identity','lifecycle','coexistence','production-startup','production-apps','production-lifecycle','registry-input-reentry','managed-state-provenance')][string]$Scenario,
     [Parameter()][switch]$ProductionCompatibility,
     [Parameter()][ValidateRange(60,3600)][int]$MaxRuntimeSeconds = 1200,
     [Parameter()][ValidateRange(30,300)][int]$BootTimeoutSeconds = 180,
@@ -21,7 +21,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $phaseRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
@@ -71,7 +72,14 @@ $c188r10Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r1
 $isC188R10Boot = $Scenario -eq 'registry-input-reentry' -and
     $bootRoot.StartsWith($c188r10Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase)
-if (($isC188R5Boot -or $isC188R6Boot -or $isC188R9Boot -or $isC188R10Boot) -and (
+$c188r11Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance'))
+$isC188R11Boot = $Scenario -eq 'managed-state-provenance' -and
+    $bootRoot.StartsWith($c188r11Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+        [System.StringComparison]::OrdinalIgnoreCase)
+if ($isC188R11Boot) {
+    . (Join-Path $PSScriptRoot 'c188r11-runner-predicates.ps1')
+}
+if (($isC188R5Boot -or $isC188R6Boot -or $isC188R9Boot -or $isC188R10Boot -or $isC188R11Boot) -and (
         $qacStatusBefore -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
         $qacListBefore -notmatch 'Reservations:\s+0' -or
         $qacListBefore -notmatch 'Managed sessions:\s+0' -or
@@ -102,6 +110,11 @@ if ($ProductionCompatibility) {
 } else {
     foreach ($marker in @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY','C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION')) {
         if (-not $kernelText.Contains($marker)) { throw "Candidate kernel is missing required marker $marker." }
+    }
+    if ($isC188R11Boot -and
+        (-not $kernelText.Contains('C188R11-NATIVE') -or
+         -not $kernelText.Contains('C188R11-HOST'))) {
+        throw 'C188R11 diagnostic kernel is missing native image/host provenance markers.'
     }
 }
 
@@ -201,6 +214,13 @@ try {
             $admitted = $true
             break
         }
+        if ($isC188R11Boot -and $ownedLine -match '^\s*([0-9a-f]{32})\s+\|.*\|\s+Queued\b') {
+            $ownQueuedReservation = $Matches[1]
+            $cancelOutput = (& $qacCli cancel $ownQueuedReservation 2>&1 | Out-String)
+            Set-Content -LiteralPath (Join-Path $bootRoot 'qac-own-queue-canceled.txt') -Value $cancelOutput -Encoding utf8
+            if (-not $qacProcess.HasExited) { [void]$qacProcess.WaitForExit(30000) }
+            throw 'C188R11 exclusive admission was not immediate; only this run-owned queued request was canceled, and no QEMU was launched.'
+        }
         if ((Get-Date) - $lastQueueNotice -gt [TimeSpan]::FromSeconds(30)) {
             Write-Output ("C188_QAC_ADMISSION_WAIT ownerPid={0} activeReservationCount={1}" -f $qacProcess.Id,([regex]::Matches($qacListNow,'(?m)^\s*[0-9a-f]{32}\s+\|')).Count)
             $lastQueueNotice = Get-Date
@@ -231,6 +251,18 @@ try {
     if (-not $ready) { throw 'Guest did not reach the input loop before timeout.' }
 
     $text = Read-GuestSerial
+    if ($isC188R11Boot) {
+        Assert-C188R11NativeLaunchBoundary $text
+        if (-not (Test-C188R11ManagedLaunchState $text)) {
+            throw '[C188R11-FAIL] reason=managed-launch-state-snapshot-missing; no input may be sent.'
+        }
+        if (-not (Test-C188R11InitializationEvidence $text)) {
+            throw '[C188R11-FAIL] reason=initialization-epoch-evidence-missing; no input may be sent.'
+        }
+        if (-not (Test-C188R11NotesReady $text)) {
+            throw '[C188R11-FAIL] reason=notes-launch-not-ready; no input may be sent.'
+        }
+    }
     $widthMatch = [regex]::Match($text,'(?m)^\[DESKTOP CAP\] framebuffer_width=0x([0-9A-Fa-f]+)\r?$')
     $heightMatch = [regex]::Match($text,'(?m)^\[DESKTOP CAP\] framebuffer_height=0x([0-9A-Fa-f]+)\r?$')
     if (-not $widthMatch.Success -or -not $heightMatch.Success) { throw 'Guest omitted framebuffer dimensions.' }
@@ -324,6 +356,14 @@ $manifest = [ordered]@{
     productionNotesCloseApprovalMarkers=([regex]::Matches($serialText,'(?m)^\[C152-CLOSE\] request=accepted dirty=false result=PASS\r?$')).Count
     c188SerialMarkers=([regex]::Matches($serialText,'(?m)^.*C188[-A-Z].*$')).Count
     registryDiagnosticMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*\r?$')).Count
+    r11NativeLaunchBoundary=if ($isC188R11Boot) { Test-C188R11NativeLaunchBoundary $serialText } else { $false }
+    r11ManagedLaunchState=if ($isC188R11Boot) { Test-C188R11ManagedLaunchState $serialText } else { $false }
+    r11InitializationEvidence=if ($isC188R11Boot) { Test-C188R11InitializationEvidence $serialText } else { $false }
+    r11NativeInputBoundary=if ($isC188R11Boot) { Test-C188R11NativeInputBoundary $serialText } else { $false }
+    r11NativeInputResult=if ($isC188R11Boot) { Get-C188R11NativeInputResult $serialText } else { '' }
+    r11ImageContextMatch=if ($isC188R11Boot) { Test-C188R11ImageContextMatch $serialText } else { $false }
+    r11ManagedInputSnapshots=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state st=dispatch-entry .*\r?$')).Count } else { 0 }
+    r11LookupResults=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state st=lookup .*\r?$')).Count } else { 0 }
     registryLaunchLookupSuccessMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=descriptor-lookup .*input=0 .*result=0\r?$')).Count
     registryLaunchLookupRejectedMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=descriptor-lookup .*input=0 .*result=-4\r?$')).Count
     registryInputEntryMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=dispatch-entry .*input=1 .*\r?$')).Count
@@ -405,6 +445,13 @@ $scenarioPass = switch ($Scenario) {
             $manifest.notesHandlerMarkers -ge 1 -and
             $manifest.notesPointerFocusMarkers -ge 1 -and
             $manifest.notesDocumentEditMarkers -ge 1
+        break
+    }
+    'managed-state-provenance' {
+        $manifest.r11NativeLaunchBoundary -and $manifest.r11ManagedLaunchState -and
+            $manifest.r11InitializationEvidence -and $manifest.r11NativeInputBoundary -and
+            $manifest.r11ImageContextMatch -and $manifest.r11ManagedInputSnapshots -ge 1 -and
+            $manifest.r11LookupResults -ge 1
         break
     }
 }

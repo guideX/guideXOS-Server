@@ -135,6 +135,69 @@ void logC188r10NativeBoundary(const char* stage, uint32_t invocation,
     serial::puts("\n");
 }
 #endif
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+uint32_t g_c188r11NativeInvocationCount = 0u;
+uint32_t g_c188r11NextImageIdentity = 1u;
+uint32_t g_c188r11ImageIdentity = 0u;
+uint32_t g_c188r11HostInitializationEpoch = 0u;
+uint32_t g_c188r11ReadyReentryCount = 0u;
+uint32_t g_c188r11RegistryInitializationEvents = 0u;
+uint32_t g_c188r11PoolInitializationEvents = 0u;
+uint32_t g_c188r11InitRecordsPrinted = 0u;
+uint32_t g_c188r11HostRecordsPrinted = 0u;
+bool g_c188r11InitOverflowReported = false;
+bool g_c188r11HostOverflowReported = false;
+
+void logC188r11Image(const char* stage, uint32_t moduleIdentity,
+                     uintptr_t entryPoint, uintptr_t artifactBase,
+                     uintptr_t artifactSpan, uint16_t segmentCount) {
+    const uint64_t entryOffset = entryPoint >= artifactBase
+        ? static_cast<uint64_t>(entryPoint - artifactBase) : UINT64_MAX;
+    serial::puts("[C188R11-NATIVE] stage=");
+    serial::puts(stage);
+    serial::puts(" module=");
+    serial::put_hex32(moduleIdentity);
+    serial::puts(" entryOff=");
+    serial::put_hex64(entryOffset);
+    serial::puts(" segments=");
+    serial::put_hex32(segmentCount);
+    serial::puts(" span=");
+    serial::put_hex64(static_cast<uint64_t>(artifactSpan));
+    serial::puts("\n");
+}
+
+void logC188r11NativeBoundary(const char* stage, const char* route,
+                              uint32_t invocation, uint32_t selector,
+                              uint32_t generation, bool input,
+                              int32_t result, uintptr_t entryPoint,
+                              uintptr_t artifactBase, uintptr_t artifactSpan,
+                              uint16_t segmentCount) {
+    if (selector != 4u) return;
+    const uint64_t entryOffset = entryPoint >= artifactBase
+        ? static_cast<uint64_t>(entryPoint - artifactBase) : UINT64_MAX;
+    serial::puts("[C188R11-NATIVE] stage=");
+    serial::puts(stage);
+    serial::puts(" route=");
+    serial::puts(route);
+    serial::puts(" call=");
+    serial::put_hex32(invocation);
+    serial::puts(" id=4 gen=");
+    serial::put_hex32(generation);
+    serial::puts(" input=");
+    serial::put_hex32(input ? 1u : 0u);
+    serial::puts(" module=");
+    serial::put_hex32(g_c188r11ImageIdentity);
+    serial::puts(" entryOff=");
+    serial::put_hex64(entryOffset);
+    serial::puts(" segments=");
+    serial::put_hex32(segmentCount);
+    serial::puts(" span=");
+    serial::put_hex64(static_cast<uint64_t>(artifactSpan));
+    serial::puts(" rc=");
+    serial::put_hex32(static_cast<uint32_t>(result));
+    serial::puts("\n");
+}
+#endif
 constexpr uint32_t kManagedFilePathMaxBytes = 96u;
 constexpr uint32_t kManagedFileMaxBytes = 16u * 1024u;
 constexpr uint32_t kManagedDirectoryMaxEntries = 64u;
@@ -3952,6 +4015,27 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedCloseWindow(
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
     NativeGxAppContext*, uint8_t* message) {
     if (message == nullptr) return -1;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    if (managedMessageStartsWith(message, "C188R11-INIT ")) {
+        if (g_c188r11RegistryInitializationEvents != UINT32_MAX)
+            ++g_c188r11RegistryInitializationEvents;
+        if (g_c188r11PoolInitializationEvents != UINT32_MAX)
+            ++g_c188r11PoolInitializationEvents;
+        if (g_c188r11InitRecordsPrinted < 16u) {
+            ++g_c188r11InitRecordsPrinted;
+            serial::puts("[C188R11-NATIVE] stage=managed-init-event regEpoch=");
+            serial::put_hex32(g_c188r11RegistryInitializationEvents);
+            serial::puts(" poolEpoch=");
+            serial::put_hex32(g_c188r11PoolInitializationEvents);
+            serial::puts(" module=");
+            serial::put_hex32(g_c188r11ImageIdentity);
+            serial::puts("\n");
+        } else if (!g_c188r11InitOverflowReported) {
+            g_c188r11InitOverflowReported = true;
+            serial::puts("[C188R11-NATIVE] stage=managed-init-event overflow=1\n");
+        }
+    }
+#endif
     if (managedMessageEquals(message, "C102-MANAGED-ENTRY")) {
         g_c102ManagedEntryObserved = true;
     } else if (managedMessageEquals(message, "C102-MANAGED-PASS")) {
@@ -4020,6 +4104,50 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedLog(
 }
 
 void startupMarker(uint32_t stage) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    const char* c188r11Stage = nullptr;
+    if (stage == 0xC188B001u) {
+        if (g_c188r11HostInitializationEpoch != UINT32_MAX)
+            ++g_c188r11HostInitializationEpoch;
+        c188r11Stage = "initialize-begin";
+    } else if (stage == 0xC188B002u) {
+        c188r11Stage = "initialize-ready";
+    } else if (stage == 0xC188B003u) {
+        if (g_c188r11ReadyReentryCount != UINT32_MAX)
+            ++g_c188r11ReadyReentryCount;
+        c188r11Stage = "ready-reentry";
+    }
+    bool traceC188r11HostEvent = c188r11Stage != nullptr;
+    if (traceC188r11HostEvent && stage == 0xC188B003u &&
+        g_activeManagedContext != nullptr &&
+        (g_activeManagedContext->launchFlags & kLaunchFlagInput) != 0u) {
+        const uint32_t kind = g_activeManagedContext->launchFlags &
+            kLaunchFlagInputKindMask;
+        if (kind == 0u || (kind >= kLaunchFlagInputWheel &&
+                kind <= kLaunchFlagInputWheelLast)) {
+            traceC188r11HostEvent = false;
+        }
+    }
+    if (traceC188r11HostEvent && g_c188r11HostRecordsPrinted < 24u) {
+        ++g_c188r11HostRecordsPrinted;
+        serial::puts("[C188R11-HOST] stage=");
+        serial::puts(c188r11Stage);
+        serial::puts(" hostEpoch=");
+        serial::put_hex32(g_c188r11HostInitializationEpoch);
+        serial::puts(" readyCalls=");
+        serial::put_hex32(g_c188r11ReadyReentryCount);
+        serial::puts(" regEpoch=");
+        serial::put_hex32(g_c188r11RegistryInitializationEvents);
+        serial::puts(" poolEpoch=");
+        serial::put_hex32(g_c188r11PoolInitializationEvents);
+        serial::puts(" module=");
+        serial::put_hex32(g_c188r11ImageIdentity);
+        serial::puts("\n");
+    } else if (traceC188r11HostEvent && !g_c188r11HostOverflowReported) {
+        g_c188r11HostOverflowReported = true;
+        serial::puts("[C188R11-HOST] stage=trace-overflow count=24\n");
+    }
+#endif
     serial::puts("[C102-STARTUP] stage=");
     serial::put_hex32(stage);
     serial::puts("\n");
@@ -4475,6 +4603,25 @@ int32_t invokeManagedWithHostMetadata(
     g_managedLastSelector = selector;
     g_activeManagedContext = &context;
     arch::amd64::disable_interrupts();
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    uint32_t c188r11DiagnosticInvocation = 0u;
+    const uint32_t c188r11InputKind = launchFlags & kLaunchFlagInputKindMask;
+    const bool c188r11Input = (launchFlags & kLaunchFlagInput) != 0u &&
+        c188r11InputKind != kLaunchFlagInputPointerMove &&
+        !(c188r11InputKind >= kLaunchFlagInputWheel &&
+          c188r11InputKind <= kLaunchFlagInputWheelLast);
+    if (selector == 4u && c188r11Input &&
+        g_c188r11NativeInvocationCount < 24u) {
+        c188r11DiagnosticInvocation = ++g_c188r11NativeInvocationCount;
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(context.userData));
+        logC188r11NativeBoundary("before-managed-entry", "input",
+            c188r11DiagnosticInvocation, selector,
+            static_cast<uint32_t>(packedUserData >> 32), true, -1,
+            g_application.entryPoint, g_application.artifactBase,
+            g_application.artifactSpan, g_application.loadSegmentCount);
+    }
+#endif
 #if defined(GXOS_NATIVEAOT_C188R10_STATE_REENTRY)
     uint32_t diagnosticInvocation = 0u;
     const uint32_t diagnosticInputKind =
@@ -4498,6 +4645,17 @@ int32_t invokeManagedWithHostMetadata(
 #endif
     const int32_t managedReturn = reinterpret_cast<Entry>(
         g_application.entryPoint)(&startup);
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    if (c188r11DiagnosticInvocation != 0u) {
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(context.userData));
+        logC188r11NativeBoundary("after-managed-return", "input",
+            c188r11DiagnosticInvocation, selector,
+            static_cast<uint32_t>(packedUserData >> 32), true, managedReturn,
+            g_application.entryPoint, g_application.artifactBase,
+            g_application.artifactSpan, g_application.loadSegmentCount);
+    }
+#endif
 #if defined(GXOS_NATIVEAOT_C188R10_STATE_REENTRY)
     if (diagnosticInvocation != 0u) {
         const uint64_t packedUserData = static_cast<uint64_t>(
@@ -4735,7 +4893,31 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     g_c107ManagedInvalidApplicationObserved = false;
     g_activeManagedContext = &app;
     arch::amd64::disable_interrupts();
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    uint32_t c188r11DiagnosticInvocation = 0u;
+    if (logicalAppId == 4u && g_c188r11NativeInvocationCount < 24u) {
+        c188r11DiagnosticInvocation = ++g_c188r11NativeInvocationCount;
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(app.userData));
+        logC188r11NativeBoundary("before-managed-entry", "resident-launch",
+            c188r11DiagnosticInvocation, logicalAppId,
+            static_cast<uint32_t>(packedUserData >> 32), false, -1,
+            report->entryPoint, report->artifactBase, report->artifactSpan,
+            report->loadSegmentCount);
+    }
+#endif
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    if (c188r11DiagnosticInvocation != 0u) {
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(app.userData));
+        logC188r11NativeBoundary("after-managed-return", "resident-launch",
+            c188r11DiagnosticInvocation, logicalAppId,
+            static_cast<uint32_t>(packedUserData >> 32), false, managedReturn,
+            report->entryPoint, report->artifactBase, report->artifactSpan,
+            report->loadSegmentCount);
+    }
+#endif
     arch::amd64::enable_interrupts();
     g_activeManagedContext = nullptr;
     report->managedReturn = managedReturn;
@@ -4892,6 +5074,16 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
         emitC103Return(sequence, report->status);
         return report->status;
     }
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    if (g_c188r11NextImageIdentity != 0u) {
+        g_c188r11ImageIdentity = g_c188r11NextImageIdentity++;
+        if (g_c188r11NextImageIdentity == 0u)
+            g_c188r11NextImageIdentity = 0u;
+    }
+    logC188r11Image("image-mapped", g_c188r11ImageIdentity,
+        report->entryPoint, report->artifactBase, report->artifactSpan,
+        report->loadSegmentCount);
+#endif
     const memory::address_space::FrameAccounting afterMap =
         memory::address_space::accounting();
     report->mapTotalTracked = afterMap.totalKnownFrames;
@@ -4973,7 +5165,31 @@ LaunchStatus launchInternal(const char* path, uint32_t logicalAppId,
     g_c107ManagedInvalidApplicationObserved = false;
     g_activeManagedContext = &app;
     arch::amd64::disable_interrupts();
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    uint32_t c188r11DiagnosticInvocation = 0u;
+    if (logicalAppId == 4u && g_c188r11NativeInvocationCount < 24u) {
+        c188r11DiagnosticInvocation = ++g_c188r11NativeInvocationCount;
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(app.userData));
+        logC188r11NativeBoundary("before-managed-entry", "resident-launch",
+            c188r11DiagnosticInvocation, logicalAppId,
+            static_cast<uint32_t>(packedUserData >> 32), false, -1,
+            report->entryPoint, report->artifactBase, report->artifactSpan,
+            report->loadSegmentCount);
+    }
+#endif
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    if (c188r11DiagnosticInvocation != 0u) {
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(app.userData));
+        logC188r11NativeBoundary("after-managed-return", "resident-launch",
+            c188r11DiagnosticInvocation, logicalAppId,
+            static_cast<uint32_t>(packedUserData >> 32), false, managedReturn,
+            report->entryPoint, report->artifactBase, report->artifactSpan,
+            report->loadSegmentCount);
+    }
+#endif
     arch::amd64::enable_interrupts();
     g_activeManagedContext = nullptr;
     report->managedReturn = managedReturn;

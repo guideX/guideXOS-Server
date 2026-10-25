@@ -72,6 +72,111 @@ public readonly struct GuideXosApplicationDescriptor
 #endif
 }
 
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+internal readonly struct C188R11ObjectIdentitySnapshot
+{
+    public C188R11ObjectIdentitySnapshot(uint identity,
+        uint initializationEpoch, uint replacementEvents, uint clearEvents)
+    {
+        Identity = identity;
+        InitializationEpoch = initializationEpoch;
+        ReplacementEvents = replacementEvents;
+        ClearEvents = clearEvents;
+    }
+
+    public uint Identity { get; }
+    public uint InitializationEpoch { get; }
+    public uint ReplacementEvents { get; }
+    public uint ClearEvents { get; }
+}
+
+/// <summary>
+/// Proof-only identity based on reference equality. The current reference is
+/// deliberately retained; no object address or GC pin is involved.
+/// </summary>
+internal sealed class C188R11ObjectIdentityTracker
+{
+    private object _current;
+    private uint _nextIdentity;
+    private uint _identity;
+    private uint _initializationEpoch;
+    private uint _replacementEvents;
+    private uint _clearEvents;
+
+    public uint Observe(object current)
+    {
+        if (ReferenceEquals(_current, current)) return _identity;
+        if (current == null)
+        {
+            _current = null;
+            _identity = 0u;
+            return 0u;
+        }
+
+        _current = current;
+        _identity = ++_nextIdentity;
+        if (_nextIdentity > 1u) _replacementEvents++;
+        return _identity;
+    }
+
+    public void RecordInitialization(object storage)
+    {
+        Observe(storage);
+        _initializationEpoch++;
+    }
+
+    public void RecordClear(object storage)
+    {
+        Observe(storage);
+        _clearEvents++;
+    }
+
+    public C188R11ObjectIdentitySnapshot Capture(object current)
+    {
+        Observe(current);
+        return new C188R11ObjectIdentitySnapshot(_identity,
+            _initializationEpoch, _replacementEvents, _clearEvents);
+    }
+}
+
+internal readonly struct C188R11ProvenanceSnapshot
+{
+    public C188R11ProvenanceSnapshot(
+        C188R11ObjectIdentitySnapshot registryIdentity,
+        C188R11ObjectIdentitySnapshot poolIdentity,
+        C188R11ObjectIdentitySnapshot poolStorageIdentity,
+        uint registryInitializationEpoch, uint poolInitializationEpoch,
+        uint descriptorCount,
+        uint residentMask, uint poolClearEvents, uint residentReplacementEvents,
+        uint teardownEvents, uint generationHighWatermark)
+    {
+        RegistryIdentity = registryIdentity;
+        PoolIdentity = poolIdentity;
+        PoolStorageIdentity = poolStorageIdentity;
+        RegistryInitializationEpoch = registryInitializationEpoch;
+        PoolInitializationEpoch = poolInitializationEpoch;
+        DescriptorCount = descriptorCount;
+        ResidentMask = residentMask;
+        PoolClearEvents = poolClearEvents;
+        ResidentReplacementEvents = residentReplacementEvents;
+        TeardownEvents = teardownEvents;
+        GenerationHighWatermark = generationHighWatermark;
+    }
+
+    public C188R11ObjectIdentitySnapshot RegistryIdentity { get; }
+    public C188R11ObjectIdentitySnapshot PoolIdentity { get; }
+    public C188R11ObjectIdentitySnapshot PoolStorageIdentity { get; }
+    public uint RegistryInitializationEpoch { get; }
+    public uint PoolInitializationEpoch { get; }
+    public uint DescriptorCount { get; }
+    public uint ResidentMask { get; }
+    public uint PoolClearEvents { get; }
+    public uint ResidentReplacementEvents { get; }
+    public uint TeardownEvents { get; }
+    public uint GenerationHighWatermark { get; }
+}
+#endif
+
 /// <summary>
 /// Compile-time, bounded registry. There is no reflection or assembly scan.
 /// </summary>
@@ -88,6 +193,17 @@ public static unsafe class GuideXosApplicationRegistry
     private static uint s_c188r10RegistryTraceRecords;
     private static uint s_c188r10TeardownCalls;
     private static uint s_c188r10RegistryInitializationGeneration = 1u;
+#endif
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private static readonly C188R11ObjectIdentityTracker
+        s_c188r11RegistryIdentity = new();
+    private static readonly C188R11ObjectIdentityTracker
+        s_c188r11PoolIdentity = new();
+    private static readonly C188R11ObjectIdentityTracker
+        s_c188r11PoolStorageIdentity = new();
+    private static uint s_c188r11RegistryInitializationEpoch;
+    private static bool s_c188r11InitializationEventReported;
+    private static uint s_c188r11RegistryTraceRecords;
 #endif
 #if GUIDEXOS_PROOF_CONTROL
     private static bool s_proofConfigConsumed;
@@ -148,6 +264,169 @@ public static unsafe class GuideXosApplicationRegistry
         new(5u, "Managed ScrollView"u8, new Applications.ManagedScrollViewDemo()),
 #endif
     };
+#endif
+
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    static GuideXosApplicationRegistry()
+    {
+        // The descriptor and lifetime field initializers have allocated their
+        // backing objects before this actual type-initialization event.
+        s_c188r11RegistryInitializationEpoch++;
+        s_c188r11RegistryIdentity.RecordInitialization(s_entries);
+        s_c188r11PoolIdentity.RecordInitialization(s_lifetime);
+        s_c188r11PoolStorageIdentity.RecordInitialization(
+            s_lifetime.C188R11StorageObject);
+    }
+
+    internal static C188R11ProvenanceSnapshot C188R11CaptureState()
+    {
+        C188R11ObjectIdentitySnapshot registry =
+            s_c188r11RegistryIdentity.Capture(s_entries);
+        C188R11ObjectIdentitySnapshot pool =
+            s_c188r11PoolIdentity.Capture(s_lifetime);
+        C188R11ObjectIdentitySnapshot poolStorage =
+            s_c188r11PoolStorageIdentity.Capture(
+                s_lifetime.C188R11StorageObject);
+        uint residentMask = s_lifetime.C188R11ResidentMask;
+        return new C188R11ProvenanceSnapshot(
+            registry, pool, poolStorage,
+            s_c188r11RegistryInitializationEpoch,
+            s_lifetime.C188R11InitializationEpoch,
+            (uint)s_entries.Length, residentMask, s_lifetime.C188R11ClearEvents,
+            s_lifetime.C188R11ReplacementEvents,
+            s_lifetime.C188R11TeardownEvents,
+            s_lifetime.C188R11Generation);
+    }
+
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    internal static bool C188R11TryGetResident(uint selector,
+        uint generation, out GuideXosApplication application) =>
+        s_lifetime.TryGet(selector, generation, out application);
+#endif
+
+    private static void LogC188R11InitializationEvent(GuideXosHost host)
+    {
+        if (s_c188r11InitializationEventReported) return;
+        s_c188r11InitializationEventReported = true;
+        C188R11ProvenanceSnapshot state = C188R11CaptureState();
+        Span<byte> line = stackalloc byte[96];
+        int position = 0;
+        if (GuideXosText.Append(line, ref position, "C188R11-INIT re="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.RegistryInitializationEpoch) &&
+            GuideXosText.Append(line, ref position, " pe="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolInitializationEpoch) &&
+            GuideXosText.Append(line, ref position, " rg="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.RegistryIdentity.Identity) &&
+            GuideXosText.Append(line, ref position, " p="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolIdentity.Identity) &&
+            GuideXosText.Append(line, ref position, " ps="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolStorageIdentity.Identity))
+        {
+            host.TryLog(line[..position]);
+        }
+    }
+
+    private static void LogC188R11State(GuideXosHost host,
+        ReadOnlySpan<byte> stage, uint selector, uint generation,
+        int resultCode)
+    {
+        if (selector != 4u || s_c188r11RegistryTraceRecords >= 48u ||
+            (host.LaunchContext.IsInput &&
+             (host.LaunchContext.InputKind == GuideXosInputKind.PointerMove ||
+              host.LaunchContext.InputKind == GuideXosInputKind.Wheel)))
+        {
+            return;
+        }
+        s_c188r11RegistryTraceRecords++;
+        C188R11ProvenanceSnapshot state = C188R11CaptureState();
+        Span<byte> line = stackalloc byte[256];
+        int position = 0;
+        if (GuideXosText.Append(line, ref position, "C188R11 state st="u8) &&
+            GuideXosText.Append(line, ref position, stage) &&
+            GuideXosText.Append(line, ref position, " rg="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.RegistryIdentity.Identity) &&
+            GuideXosText.Append(line, ref position, " re="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.RegistryInitializationEpoch) &&
+            GuideXosText.Append(line, ref position, " rr="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.RegistryIdentity.ReplacementEvents) &&
+            GuideXosText.Append(line, ref position, " rcl="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.RegistryIdentity.ClearEvents) &&
+            GuideXosText.Append(line, ref position, " p="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolIdentity.Identity) &&
+            GuideXosText.Append(line, ref position, " pr="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolIdentity.ReplacementEvents) &&
+            GuideXosText.Append(line, ref position, " ps="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolStorageIdentity.Identity) &&
+            GuideXosText.Append(line, ref position, " psr="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolStorageIdentity.ReplacementEvents) &&
+            GuideXosText.Append(line, ref position, " pe="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolInitializationEpoch) &&
+            GuideXosText.Append(line, ref position, " sr="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.ResidentReplacementEvents) &&
+            GuideXosText.Append(line, ref position, " pc="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolClearEvents) &&
+            GuideXosText.Append(line, ref position, " m="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.ResidentMask) &&
+            GuideXosText.Append(line, ref position, " g="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.GenerationHighWatermark) &&
+            GuideXosText.Append(line, ref position, " td="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.TeardownEvents) &&
+            GuideXosText.Append(line, ref position, " n="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.DescriptorCount) &&
+            GuideXosText.Append(line, ref position, " result="u8) &&
+            AppendC188R11Signed(line, ref position, resultCode))
+        {
+            host.TryLog(line[..position]);
+        }
+    }
+
+    private static bool AppendC188R11Signed(
+        Span<byte> buffer, ref int position, int value)
+    {
+        if (value < 0)
+        {
+            if (!GuideXosText.Append(buffer, ref position, "-"u8)) return false;
+            return GuideXosText.AppendUnsigned(buffer, ref position,
+                unchecked((uint)(-(long)value)));
+        }
+        return GuideXosText.AppendUnsigned(buffer, ref position, (uint)value);
+    }
+
+    private static void LogC188R11LifetimeLookup(GuideXosHost host,
+        uint selector, uint generation, bool found)
+    {
+        if (selector != 4u) return;
+        Span<byte> line = stackalloc byte[64];
+        int position = 0;
+        if (GuideXosText.Append(line, ref position,
+                "C188R11-LIFETIME id=4 gen="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, generation) &&
+            GuideXosText.Append(line, ref position, " result="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, found ? 0u : 1u))
+        {
+            host.TryLog(line[..position]);
+        }
+    }
 #endif
 
     public static bool TryFind(
@@ -224,6 +503,14 @@ public static unsafe class GuideXosApplicationRegistry
                 : (int)hostResult;
         }
 
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (selector == 4u)
+        {
+            LogC188R11InitializationEvent(host);
+            LogC188R11State(host, "dispatch-entry"u8, selector,
+                host.LaunchContext.ApplicationGeneration, -1);
+        }
+#endif
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
         if (selector == 4u &&
             (host.LaunchContext.IsInput ||
@@ -273,6 +560,13 @@ public static unsafe class GuideXosApplicationRegistry
         }
 #endif
 
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (selector == 4u)
+        {
+            LogC188R11State(host, "before-tryfind"u8, selector,
+                host.LaunchContext.ApplicationGeneration, -1);
+        }
+#endif
         bool descriptorFound = TryFind(selector,
             out GuideXosApplicationDescriptor descriptor);
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
@@ -290,6 +584,14 @@ public static unsafe class GuideXosApplicationRegistry
             host.LaunchContext.ApplicationGeneration,
             descriptorFound ? 0 : GxAbi.ErrorInvalidApplicationId);
 #endif
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (selector == 4u)
+        {
+            LogC188R11State(host, "lookup"u8, selector,
+                host.LaunchContext.ApplicationGeneration,
+                descriptorFound ? 0 : GxAbi.ErrorInvalidApplicationId);
+        }
+#endif
         if (!descriptorFound)
         {
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
@@ -300,6 +602,13 @@ public static unsafe class GuideXosApplicationRegistry
             host.TryLog("C112-UNKNOWN-SELECTOR"u8);
             return GxAbi.ErrorInvalidApplicationId;
         }
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE && HOSTLOGPROOF_MANAGED_APP_RETURN
+        if (selector == 4u)
+        {
+            LogC188R11State(host, "before-resident"u8, selector,
+                host.LaunchContext.ApplicationGeneration, -1);
+        }
+#endif
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
         LogC188R10State(host, "resident"u8, selector,
             host.LaunchContext.ApplicationGeneration, -1);
@@ -408,6 +717,10 @@ public static unsafe class GuideXosApplicationRegistry
             LogC188R10State(host, "start"u8, selector,
                 applicationGeneration, 0);
 #endif
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            LogC188R11State(host, "instance-start"u8, selector,
+                applicationGeneration, 0);
+#endif
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
             Span<byte> instanceMarker = stackalloc byte[96];
             int markerLength = 0;
@@ -420,25 +733,41 @@ public static unsafe class GuideXosApplicationRegistry
             host.TryLog(instanceMarker[..markerLength]);
 #endif
         }
-        else if (s_lifetime.TryGet(selector, applicationGeneration,
-                out application))
-        {
-#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
-            if (host.LaunchContext.IsInput)
-                LogC188R8InputBoundary(host, "lifetime-found"u8, selector, 0);
-#endif
-        }
         else
         {
+            bool residentFound = s_lifetime.TryGet(selector,
+                applicationGeneration, out application);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            LogC188R11LifetimeLookup(host, selector,
+                applicationGeneration, residentFound);
+#endif
+            if (residentFound)
+            {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+                LogC188R11State(host, "resident-found"u8, selector,
+                    applicationGeneration, 0);
+#endif
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
-            if (host.LaunchContext.IsInput)
-                LogC188R8InputBoundary(host, "lifetime-rejected"u8, selector,
-                    GxAbi.ErrorInvalidApplicationId);
+                if (host.LaunchContext.IsInput)
+                    LogC188R8InputBoundary(host, "lifetime-found"u8, selector, 0);
+#endif
+            }
+            else
+            {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+                LogC188R11State(host, "resident-miss"u8, selector,
+                    applicationGeneration, GxAbi.ErrorInvalidApplicationId);
+#endif
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+                if (host.LaunchContext.IsInput)
+                    LogC188R8InputBoundary(host, "lifetime-rejected"u8, selector,
+                        GxAbi.ErrorInvalidApplicationId);
 #endif
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
-            host.TryLog("C150-DISPATCH rejected=stale-application result=FAIL"u8);
+                host.TryLog("C150-DISPATCH rejected=stale-application result=FAIL"u8);
 #endif
-            return GxAbi.ErrorInvalidApplicationId;
+                return GxAbi.ErrorInvalidApplicationId;
+            }
         }
 
 #if HOSTLOGPROOF_C188R3_NOTES_STARTUP
@@ -483,6 +812,10 @@ public static unsafe class GuideXosApplicationRegistry
 #endif
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
             LogC188R10State(host, "launch-return"u8, selector,
+                applicationGeneration, (int)result);
+#endif
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            LogC188R11State(host, "launch-return"u8, selector,
                 applicationGeneration, (int)result);
 #endif
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
@@ -615,6 +948,10 @@ public static unsafe class GuideXosApplicationRegistry
 #endif
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
         LogC188R10State(host, "return"u8, selector,
+            applicationGeneration, (int)result);
+#endif
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        LogC188R11State(host, "managed-return"u8, selector,
             applicationGeneration, (int)result);
 #endif
         return (int)result;

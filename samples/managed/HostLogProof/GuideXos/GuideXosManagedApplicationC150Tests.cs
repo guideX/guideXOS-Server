@@ -12,6 +12,41 @@ internal sealed class GuideXosManagedApplicationLifetime
     internal const int Capacity = 5;
     private readonly Entry[] _entries = new Entry[Capacity];
     private uint _generation;
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private uint _c188r11InitializationEpoch;
+    private uint _c188r11ClearEvents;
+    private uint _c188r11ReplacementEvents;
+    private uint _c188r11TeardownEvents;
+
+    public GuideXosManagedApplicationLifetime()
+    {
+        // This constructor is the actual allocation/initialization boundary
+        // for one C181 pool owner.
+        _c188r11InitializationEpoch++;
+    }
+
+    internal object C188R11StorageObject => _entries;
+    internal uint C188R11InitializationEpoch => _c188r11InitializationEpoch;
+    internal uint C188R11ClearEvents => _c188r11ClearEvents;
+    internal uint C188R11ReplacementEvents => _c188r11ReplacementEvents;
+    internal uint C188R11TeardownEvents => _c188r11TeardownEvents;
+    internal uint C188R11Generation => _generation;
+    internal uint C188R11ResidentMask
+    {
+        get
+        {
+            uint mask = 0u;
+            for (int index = 0; index < _entries.Length; index++)
+            {
+                if (_entries[index].Application != null)
+                {
+                    mask |= 1u << index;
+                }
+            }
+            return mask;
+        }
+    }
+#endif
 
     private struct Entry
     {
@@ -60,7 +95,16 @@ internal sealed class GuideXosManagedApplicationLifetime
 
         uint assignedGeneration = requestedGeneration == 0u
             ? _generation + 1u : requestedGeneration;
-        _entries[entryIndex].Application?.OnTearingDown();
+        GuideXosApplication previousApplication =
+            _entries[entryIndex].Application;
+        if (previousApplication != null)
+        {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            _c188r11ReplacementEvents++;
+            _c188r11TeardownEvents++;
+#endif
+            previousApplication.OnTearingDown();
+        }
         _entries[entryIndex] = default;
         _entries[entryIndex].Selector = descriptor.Selector;
         _entries[entryIndex].Generation = assignedGeneration;
@@ -92,7 +136,15 @@ internal sealed class GuideXosManagedApplicationLifetime
         int entryIndex = FindEntry(selector);
         if (entryIndex < 0 || generation == 0u ||
             _entries[entryIndex].Generation != generation) return false;
-        _entries[entryIndex].Application?.OnTearingDown();
+        GuideXosApplication application = _entries[entryIndex].Application;
+        if (application != null)
+        {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            _c188r11ClearEvents++;
+            _c188r11TeardownEvents++;
+#endif
+            application.OnTearingDown();
+        }
         _entries[entryIndex] = default;
         return true;
     }
@@ -101,7 +153,15 @@ internal sealed class GuideXosManagedApplicationLifetime
     {
         int entryIndex = FindEntry(selector);
         if (entryIndex < 0) return;
-        _entries[entryIndex].Application?.OnTearingDown();
+        GuideXosApplication application = _entries[entryIndex].Application;
+        if (application != null)
+        {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            _c188r11ClearEvents++;
+            _c188r11TeardownEvents++;
+#endif
+            application.OnTearingDown();
+        }
         _entries[entryIndex] = default;
     }
 

@@ -15,7 +15,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r7-notes-proof-authorization')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')))
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
@@ -107,7 +108,8 @@ foreach ($development in @(
 if ($mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-') -or
     $mapText.Contains('C188R4-') -or $elfText.Contains('C188R4-') -or
     $mapText.Contains('C188R6-') -or $elfText.Contains('C188R6-') -or
-    $mapText.Contains('C188R7-') -or $elfText.Contains('C188R7-')) {
+    $mapText.Contains('C188R7-') -or $elfText.Contains('C188R7-') -or
+    $mapText.Contains('C188R11-') -or $elfText.Contains('C188R11-')) {
     throw 'Proof-disabled production NativeAOT artifacts contain C188R3/R4/R6/R7 startup instrumentation.'
 }
 $manifest = [ordered]@{

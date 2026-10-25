@@ -1,5 +1,11 @@
 #include <stddef.h>
 
+#if defined(HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE)
+#define C188R11_STARTUP_INITIALIZE_BEGIN 0xC188B001u
+#define C188R11_STARTUP_INITIALIZE_READY 0xC188B002u
+#define C188R11_STARTUP_READY_REENTRY 0xC188B003u
+#endif
+
 // This is the application-owned NativeAOT bootstrap seam.  The production
 // guideXOS launcher passes the neutral startup tables through this stable
 // application-owned seam.  The wrapper installs them into the runtime before
@@ -48,6 +54,10 @@ GuideXosNativeAotApplicationEntry(void* rawContext)
     }
 
     if (g_startupState == kStartupReady) {
+#if defined(HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE)
+        if (context->startupMarker != NULL)
+            context->startupMarker(C188R11_STARTUP_READY_REENTRY);
+#endif
         if (context->installTls == NULL || context->installTls() != 0) {
             return -103;
         }
@@ -57,6 +67,10 @@ GuideXosNativeAotApplicationEntry(void* rawContext)
         return -104;
     }
     g_startupState = kStartupInitializing;
+#if defined(HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE)
+    if (context->startupMarker != NULL)
+        context->startupMarker(C188R11_STARTUP_INITIALIZE_BEGIN);
+#endif
     guidexos_nativeaot_pal_set_startup_marker(context->startupMarker);
     if (context->startupMarker != NULL) context->startupMarker(1u);
     if (guidexos_nativeaot_pal_install_hooks(context->legacyPalHooks) != 0) {
@@ -87,6 +101,10 @@ GuideXosNativeAotApplicationEntry(void* rawContext)
     }
     if (context->startupMarker != NULL) context->startupMarker(7u);
     g_startupState = kStartupReady;
+#if defined(HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE)
+    if (context->startupMarker != NULL)
+        context->startupMarker(C188R11_STARTUP_INITIALIZE_READY);
+#endif
     int managedResult = ManagedMain(context->managedContext);
     return managedResult;
 }

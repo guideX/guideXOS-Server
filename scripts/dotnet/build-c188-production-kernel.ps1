@@ -14,7 +14,8 @@ $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r6-notes-postrender')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r7-notes-proof-authorization')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r9-registry-input-reentry')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r10-nativeaot-state-reentry')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r10-nativeaot-state-reentry')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r11-managed-state-provenance')))
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
@@ -145,7 +146,8 @@ foreach ($developmentMarker in @(
     'C188R3-',
     'C188R4-',
     'C188R6-',
-    'C188R7-'
+    'C188R7-',
+    'C188R11-'
 )) {
     if ($kernelText.Contains($developmentMarker)) {
         throw "Proof-disabled production ELF contains development-only marker $developmentMarker"

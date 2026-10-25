@@ -23,6 +23,7 @@ param(
     [switch]$C188R8NotesInputRouting,
     [switch]$C188R9RegistryInputReentry,
     [switch]$C188R10ManagedStateReentry,
+    [switch]$C188R11ManagedStateProvenance,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -520,6 +521,16 @@ try {
          $C188R6NotesPostRenderStartup)) {
         throw 'C188R10 state diagnostics require the isolated ordinary C160 C188 candidate with R7/R8/R9 instrumentation and cannot include the larger R3/R4/R6 marker sets.'
     }
+    if ($C188R11ManagedStateProvenance -and
+        (-not $C188R9RegistryInputReentry -or
+         -not $C188R8NotesInputRouting -or
+         -not $C188ExternalAppIdentity -or -not $ProductionApplication -or
+         $managedProjectMode -ne 'C160Composite' -or $C187GuestCandidate -or
+         -not $C166OrdinaryBuild -or $C188R3NotesStartupDiagnostics -or
+         $C188R4NotesStartupOperationIsolation -or
+         $C188R6NotesPostRenderStartup)) {
+        throw 'C188R11 state provenance requires an isolated ordinary C160 C188 candidate with R7/R8/R9 instrumentation and excludes the larger R3/R4/R6 marker sets.'
+    }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
@@ -566,6 +577,9 @@ try {
     }
     if ($C188R10ManagedStateReentry) {
         $publishProperties += '-p:HostLogProofC188R10ManagedStateReentry=true'
+    }
+    if ($C188R11ManagedStateProvenance) {
+        $publishProperties += '-p:HostLogProofC188R11ManagedStateProvenance=true'
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"
@@ -724,7 +738,7 @@ try {
         "if errorlevel 1 exit /b %errorlevel%"
         $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ThreadStaticLifecycleDiagnostics) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:`"$managedHostShimsObj`" `"$managedHostShimsSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
-        $(if ($ProductionApplication) { "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$c102StartupObj`" `"$c102StartupSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
+        $(if ($ProductionApplication) { "cl.exe /nologo /TC /c /GS- /Zl $(if ($C188R11ManagedStateProvenance) { '/DHOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE' }) /Fo:`"$c102StartupObj`" `"$c102StartupSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true $(if ($ProjectArtifactIsolation -or $C187GuestCandidate -or $C188ExternalAppIdentity) { '--artifacts-path `"' + (Join-Path $OutputRoot 'project-artifacts') + '`"' }) -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true $($publishProperties -join ' ')"
         "exit /b %errorlevel%"
     )

@@ -6,6 +6,10 @@ namespace HostLogProof;
 
 public static unsafe class Program
 {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private static uint s_c188r11ManagedInvocationCount;
+    private static uint s_c188r11ManagedBoundaryRecords;
+#endif
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
     private static uint s_c188r10ManagedInvocationCount;
     private static uint s_c188r10ManagedBoundaryRecords;
@@ -2551,7 +2555,31 @@ public static unsafe class Program
 #if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
         // C188 maps the separately compiled CounterApp only to its dedicated
         // development selector. Selectors 4-8 continue through production.
-#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        uint invocation = ++s_c188r11ManagedInvocationCount;
+        uint selector = (uint)(nuint)ctx->userData;
+        uint generation = (uint)((ulong)(nuint)ctx->userData >> 32);
+        bool input = (ctx->launchFlags & GxAbi.LaunchFlagInput) != 0u;
+        uint inputKind = ctx->launchFlags & GxAbi.LaunchFlagInputKindMask;
+        bool boundedInput = !input || (inputKind != 0u &&
+            (inputKind < GxAbi.LaunchFlagInputWheel ||
+             inputKind > GxAbi.LaunchFlagInputWheelLast));
+        bool traceManagedBoundary = selector == 4u && boundedInput &&
+            s_c188r11ManagedBoundaryRecords < 24u;
+        if (traceManagedBoundary)
+        {
+            s_c188r11ManagedBoundaryRecords++;
+            LogC188R11ManagedBoundary(ctx, "entry"u8, invocation, selector,
+                generation, input, -1);
+        }
+        int dispatchResult = DispatchC188ExternalAppIdentity(ctx);
+        if (traceManagedBoundary)
+        {
+            LogC188R11ManagedBoundary(ctx, "exit"u8, invocation, selector,
+                generation, input, dispatchResult);
+        }
+        return dispatchResult;
+#elif HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
         uint invocation = ++s_c188r10ManagedInvocationCount;
         uint selector = (uint)(nuint)ctx->userData;
         uint generation = (uint)((ulong)(nuint)ctx->userData >> 32);
@@ -3461,6 +3489,57 @@ public static unsafe class Program
 #endif
 #endif
     }
+
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private static void LogC188R11ManagedBoundary(
+        NativeGxAppContext* context,
+        ReadOnlySpan<byte> stage,
+        uint invocation,
+        uint selector,
+        uint generation,
+        bool input,
+        int result)
+    {
+        if (context == null || context->host == null ||
+            context->host->log == null || selector != 4u)
+        {
+            return;
+        }
+
+        Span<byte> line = stackalloc byte[96];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R11-MANAGED stage="u8) ||
+            !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position, " call="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, invocation) ||
+            !GuideXosText.Append(line, ref position, " id=4 gen="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, generation) ||
+            !GuideXosText.Append(line, ref position, " in="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, input ? 1u : 0u) ||
+            !GuideXosText.Append(line, ref position, " rc="u8) ||
+            !AppendC188R11Signed(line, ref position, result))
+        {
+            return;
+        }
+
+        line[position] = 0;
+        fixed (byte* message = line)
+            _ = context->host->log(context, message);
+    }
+
+    private static bool AppendC188R11Signed(
+        Span<byte> buffer, ref int position, int value)
+    {
+        if (value < 0)
+        {
+            if (!GuideXosText.Append(buffer, ref position, "-"u8)) return false;
+            return GuideXosText.AppendUnsigned(buffer, ref position,
+                unchecked((uint)(-(long)value)));
+        }
+        return GuideXosText.AppendUnsigned(buffer, ref position, (uint)value);
+    }
+#endif
 
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
     private static void LogC188R10ManagedBoundary(
