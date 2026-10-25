@@ -627,7 +627,7 @@ void testFunctionClosureAndResetLifetime()
         "functions: reset clears active frames");
     expect(context.environmentCount() == 1,
         "functions: reset clears function environments");
-    expect(context.functionValueCount() == 13 && context.nativeFunctionCount() == 13,
+    expect(context.functionValueCount() == 14 && context.nativeFunctionCount() == 14,
         "functions: reset recreates native identities");
     expect(execute(context, "var result = 7;").succeeded(),
         "functions: unrelated script after reset succeeds");

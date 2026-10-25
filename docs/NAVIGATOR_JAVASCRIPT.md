@@ -11978,7 +11978,151 @@ qualification logs are under
 
 No public descriptor API, deletion/redefinition machinery, capacity increase,
 object reclamation, slot reuse, parser/evaluator refactor, selector change,
-or kernel/QEMU behavior is part of JS90. The recommended JS91 direction is a
-read-only own-data-property descriptor snapshot, limited to categories with
-fully classified attributes and only after reviewing own-key lookup, typed
-Symbol identity, Array `length`, ordering, and host inclusion boundaries.
+or kernel/QEMU behavior is part of JS90. JS91 adds the bounded read-only
+descriptor snapshot described below. Further work should retain the current
+scope unless complete attribute enforcement and host-property classification
+are implemented before adding descriptor mutation or inherited-property APIs.
+
+## JS91 — Bounded Read-Only Own-Property Descriptors
+
+JS91 adds `Object.getOwnPropertyDescriptor(object, key)` for supported
+ordinary objects and Arrays. It returns a fresh ordinary object containing
+`value`, `writable`, `enumerable`, and `configurable`, or `undefined` when the
+requested own property is absent. This is a value snapshot: changing the
+descriptor object does not change the source property. Object-valued
+`value` fields retain the same runtime object identity through the existing
+`Value` reference representation.
+
+### Lookup and classification boundary
+
+Descriptor lookup uses the evaluator's own-property path. It does not call
+the prototype-aware `readProperty`, so inherited names and prototype methods
+do not become own descriptors. This includes inherited Array methods and the
+Array prototype's typed iterator Symbol. A sparse Array hole is absent even
+when its logical index is below `length`; an occupied index whose value is
+`undefined` remains present. Array `length` is handled from its specialized
+logical storage and reports its fixed writable, nonenumerable,
+nonconfigurable attributes.
+
+String and numeric property keys follow the runtime's existing string-key
+conversion and canonical Array-index classification. Names such as `"01"`,
+`"1.0"`, `"-1"`, and `"4294967295"` remain ordinary string properties;
+`"4294967294"` is within the supported Array-index range. Genuine
+well-known Symbol keys retain typed identity and remain separate from strings
+with the same description. The `Symbol` namespace itself is not coerced into
+a string key.
+
+The receiver must be a supported ordinary runtime object or Array. Built-in
+namespaces and prototypes, host wrappers, iterator cursor objects, Event
+constants, and primitives do not acquire synthesized ordinary properties.
+An own property with incomplete attribute metadata returns
+`UnsupportedFeature`; incomplete metadata is never mistaken for absence.
+This leaves host wrapper members and private iterator state behind their
+existing APIs.
+
+The descriptor's four fields are inserted as fully classified ordinary data
+properties. The descriptor object's attributes describe that snapshot's own
+fields; they do not enable source-property mutation. The existing attribute
+mask remains one byte, and `RuntimeObject`, `RuntimeProperty`, Array element,
+and `Value` sizes remain 88 B, 80 B, 48 B, and 40 B. Pool limits do not
+increase. Creating a descriptor consumes one object and four properties,
+without consuming runtime strings or Array slots.
+
+Descriptor construction is unpublished until all four fields exist. If any
+insertion fails, the temporary object and property/key-byte counters are
+rolled back. Native test injection covers failure after each of zero through
+three successful field insertions. The runtime does not add object
+reclamation, slot reuse, garbage collection, accessors, proxies, deletion, or
+redefinition.
+
+### JS91 qualification
+
+The JS91 native harness passed **32/32 checks** under strict C++17 compilation
+with `-Wall -Wextra -Werror -pedantic`. It covers ordinary and numeric names,
+typed Symbols, missing versus explicit `undefined`, inherited-property
+exclusion, sparse holes, Array `length`, snapshot independence, object
+identity, nonwritable and nonenumerable metadata, unsupported partial
+metadata, invalid receivers and keys, pool exhaustion, injected rollback,
+runtime reset, and JS81 pair-Array interoperability. The focused JS79–JS90
+regression run passed **2,899/2,899 checks** across 12 lanes; JS84's
+no-lifetime-diagnostics compatibility control passed **68/68**. The final
+JavaScript matrix passed **93/93 lanes** and **16,695/16,695 reported
+assertions across 52 assertion-bearing lanes**. No QEMU or QAC run was
+performed.
+
+Five-sample median timings below include parsing and evaluation for 64
+operations and are observations, not thresholds:
+
+| Case | Median |
+|---|---:|
+| Ordinary property read | 27 µs |
+| Own-property presence | 37 µs |
+| Present descriptor | 95 µs |
+| Missing descriptor | 47 µs |
+| Nonenumerable descriptor | 96 µs |
+| Typed Symbol descriptor | 80 µs |
+| Numeric-key descriptor | 94 µs |
+| Dense Array index descriptor | 82 µs |
+| Sparse-hole lookup | 46 µs |
+| Array `length` descriptor | 81 µs |
+
+The isolated native harness measured 126 ns per object allocation, 83 ns per
+descriptor field insertion, 1 ns per attribute-mask classification, and
+zero scratch bytes. At capacity, 1,019 descriptors succeeded before
+`ObjectLimitExceeded`: the test began with 5 objects and 16 properties and
+ended at 1,024/1,024 objects and 4,092/4,096 properties. The runtime string
+count stayed at 1. This confirms the object pool is the first limiting pool
+for that workload.
+
+The hosted compiler's static stack report measured 80 B for own-property
+presence, 512 B for descriptor snapshot construction, 208 B for its field
+insertion lambda, 288 B for the descriptor lookup helper, and 720 B for
+`invokeNative`. These host-compiler figures are not bare-metal stack
+guarantees.
+
+The production build succeeded with exit code 0. The fresh
+`guideXOSServer.exe` was 8,704,934 bytes with SHA-256
+`124A5B8A6CA2669C59100CFE8DB9685D7D6C5DEA24943E2237758F5DC6C914B0`.
+Hosted smoke used that exact executable (PID 8252). The JS91 page reported
+**11/11 assertions and zero failures**, and all four JS91 aggregate checks
+passed, including the nested Event callback and iterator-state check.
+
+The hosted aggregate reported **707/714 checks**. Its only failures were the
+seven established CSS checks: phase 3C baselines/clipping/hit targets/focus,
+phase 3G parser/containing-block diagnostics, phase 6A nested scrolling,
+three phase 6B sticky/fixed-descendant checks, and phase 6C sticky/fixed/
+clipping/flex behavior. No hosted JavaScript check failed, so the aggregate
+printed `NAVIGATOR_SMOKE_RESULT: FAIL` for the existing CSS baseline.
+
+Preflight started on branch `NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`b90da6cdd30acd6555f564e28c377379b2294be1`, clean and **0 ahead / 0 behind**
+the then-current upstream tracking ref, with `.phase` absent. The ignored
+preflight manifest contained **1,367 files / 90,843,932 bytes**. It and the
+recursive preflight manifest are retained with the external qualification
+evidence at
+`C:\Users\guideX\AppData\Local\Temp\guidex-js91-evidence\run-20261025-075658-bcb258cd\`.
+After build and hosted smoke, the original executable was restored from the
+preflight backup and matched its original **8,398,274-byte** size and SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. The
+generated Navigator fixtures and downloads were also restored from their
+backups. The final ignored manifest matched exactly: **1,367 files /
+90,843,932 bytes**, with **0 changed, 0 missing, and 0 extra files**. The
+recursive manifest (excluding Git metadata) grew from **9,461 files /
+705,057,538 bytes** to **9,464 files / 705,125,385 bytes**: the six expected
+modified source/documentation files and three new JS91 files, with zero
+missing files or unrelated additions. The comparison CSVs, full matrix log,
+focused JS79–JS90 log, native JS91 artifacts, hosted log, and preflight
+backups are in the external evidence directory above. The hosted log is
+`hosted-js91\navigator-hosted-smoke-20261025-093035.log`.
+
+`.phase` remained absent. No branch switch, fetch, push, QEMU, or QAC run
+occurred. The local JS91 commit leaves the branch **1 ahead / 0 behind** its
+unchanged upstream tracking ref; divergence was rechecked after commit
+without fetching. The preflight tracking ref matched the starting HEAD at
+0/0.
+
+JS92 should consider descriptor mutation only after the runtime can enforce
+all three source attributes consistently for ordinary properties, Array
+indices and `length`, and any host-created property classes admitted by the
+API. Accessors, proxies, inherited-property descriptors, deletion, and
+redefinition remain outside JS91.

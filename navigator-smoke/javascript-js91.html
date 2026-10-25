@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS91</title></head>
+<body>
+<h1>Navigator JavaScript JS91</h1>
+<pre id="result">JS91:pending</pre>
+<section>
+  <i id="row-a" class="row"></i><i id="row-b" class="row"></i>
+</section>
+<button id="event-a" type="button">Run JS91 descriptor event</button>
+<button id="event-b" type="button">Nested JS91 descriptor event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var item = { name: "Navigator" };
+var descriptor = Object.getOwnPropertyDescriptor(item, "name");
+verify(descriptor !== undefined && descriptor.value === "Navigator" &&
+  descriptor.writable === true && descriptor.enumerable === true &&
+  descriptor.configurable === true);
+
+var missing = Object.getOwnPropertyDescriptor(item, "missing");
+var values = [10, undefined, 30];
+var presentUndefined = Object.getOwnPropertyDescriptor(values, "1");
+verify(missing === undefined && presentUndefined !== undefined &&
+  presentUndefined.value === undefined);
+
+var sparse = [10, , 30];
+var hole = Object.getOwnPropertyDescriptor(sparse, "1");
+verify(hole === undefined && !sparse.hasOwnProperty("1"));
+
+var lengthValues = [10, 20, 30];
+var lengthDescriptor =
+  Object.getOwnPropertyDescriptor(lengthValues, "length");
+lengthValues.length = 1;
+verify(lengthDescriptor.value === 3 && lengthValues.length === 1 &&
+  lengthDescriptor.writable === true &&
+  lengthDescriptor.enumerable === false &&
+  lengthDescriptor.configurable === false);
+
+var snapshotSource = { count: 10 };
+var snapshot = Object.getOwnPropertyDescriptor(snapshotSource, "count");
+snapshotSource.count = 20;
+verify(snapshot.value === 10 && snapshotSource.count === 20);
+
+var inner = { count: 10 };
+var outer = { child: inner };
+var childDescriptor =
+  Object.getOwnPropertyDescriptor(outer, "child");
+verify(childDescriptor.value === inner);
+
+var numeric = { "0": 7, "01": 8, "1.0": 9, "-1": 10,
+  "4294967294": 11, "4294967295": 12 };
+var numericDescriptor = Object.getOwnPropertyDescriptor(numeric, 0);
+var leadingDescriptor = Object.getOwnPropertyDescriptor(numeric, "01");
+var maxIndexDescriptor =
+  Object.getOwnPropertyDescriptor(numeric, "4294967294");
+var maxUintDescriptor =
+  Object.getOwnPropertyDescriptor(numeric, "4294967295");
+verify(numericDescriptor.value === 7 && leadingDescriptor.value === 8 &&
+  Object.getOwnPropertyDescriptor(numeric, "1.0").value === 9 &&
+  Object.getOwnPropertyDescriptor(numeric, "-1").value === 10 &&
+  maxIndexDescriptor.value === 11 && maxUintDescriptor.value === 12);
+
+var symbolObject = {};
+symbolObject[Symbol.iterator] = 13;
+var symbolDescriptor =
+  Object.getOwnPropertyDescriptor(symbolObject, Symbol.iterator);
+var symbolString = Object.getOwnPropertyDescriptor(symbolObject,
+  "Symbol.iterator");
+verify(symbolDescriptor.value === 13 && symbolString === undefined);
+
+var stableArray = [4, 5, 6];
+var indexSnapshot = Object.getOwnPropertyDescriptor(stableArray, 1);
+stableArray[1] = 50;
+verify(indexSnapshot.value === 5 && stableArray[1] === 50);
+
+var keys = Object.keys(descriptor);
+verify(keys.length === 4 && keys[0] === "value" &&
+  keys[1] === "writable" && keys[2] === "enumerable" &&
+  keys[3] === "configurable");
+
+var rows = document.querySelectorAll(".row");
+var savedElement = rows[0];
+var pair = rows.entries().next().value;
+var pairFirst = Object.getOwnPropertyDescriptor(pair, "0");
+var pairSecond = Object.getOwnPropertyDescriptor(pair, "1");
+pair.length = 1;
+var pairAfterShrink = Object.getOwnPropertyDescriptor(pair, "1");
+pair.length = 2;
+var pairAfterRegrow = Object.getOwnPropertyDescriptor(pair, "1");
+verify(pairFirst.value === 0 && pairSecond.value === rows[0] &&
+  pairAfterShrink === undefined && pairAfterRegrow === undefined &&
+  pair[0] === 0 && rows[0].id === "row-a");
+
+var eventA = document.getElementById("event-a");
+var eventB = document.getElementById("event-b");
+var nestedEventOk = false;
+var outerEventOk = false;
+var callbackDescriptorOk = false;
+var hostReadOnlyOk = false;
+var savedEvent;
+eventB.addEventListener("click", function(event) {
+  savedEvent = event;
+  event.target = eventA;
+  hostReadOnlyOk = event.target === eventB;
+  var callbackValues = [1, undefined, 3];
+  var callbackDescriptor =
+    Object.getOwnPropertyDescriptor(callbackValues, "1");
+  callbackDescriptorOk = callbackDescriptor !== undefined &&
+    callbackDescriptor.value === undefined;
+  nestedEventOk = event.target === eventB &&
+    event.currentTarget === eventB && callbackDescriptorOk &&
+    hostReadOnlyOk;
+});
+eventA.addEventListener("click", function(event) {
+  var callbackValues = [1, , 3];
+  var callbackBefore =
+    Object.getOwnPropertyDescriptor(callbackValues, "1");
+  eventB.click();
+  outerEventOk = callbackBefore === undefined &&
+    event.target === eventA && event.currentTarget === eventA &&
+    nestedEventOk;
+  document.getElementById("result").textContent =
+    "JS91:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+
+var marker = "JS91:assertions=" + assertions + ":failures=" + failures +
+  ":object=" + (descriptor.value === "Navigator") +
+  ":missing=" + (missing === undefined) +
+  ":undefined=" + (presentUndefined.value === undefined) +
+  ":hole=" + (hole === undefined) +
+  ":length=" + (lengthDescriptor.value === 3) +
+  ":snapshot=" + (snapshot.value === 10) +
+  ":identity=" + (childDescriptor.value === inner) +
+  ":numeric=" + (numericDescriptor.value === 7) +
+  ":symbol=" + (symbolDescriptor.value === 13) +
+  ":pair=" + (pairFirst.value === 0) + ":events=ready";
+document.getElementById("result").textContent = marker;
+</script>
+</body>
+</html>

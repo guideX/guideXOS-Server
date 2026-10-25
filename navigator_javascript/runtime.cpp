@@ -799,6 +799,7 @@ private:
             return true;
         }
         if (value.isObject() || value.isFunction() ||
+            value.isSymbolNamespace() ||
             value.isObjectNamespace()) {
             fail(RuntimeErrorCode::InvalidPropertyKey, location);
             return false;
@@ -909,7 +910,11 @@ private:
             value = !reference.key.isSymbol() &&
                 reference.key.string == "keys"
                 ? Value::function(context_.objectKeysFunction_)
-                : Value::undefined();
+                : !reference.key.isSymbol() &&
+                    reference.key.string == "getOwnPropertyDescriptor"
+                    ? Value::function(
+                        context_.objectGetOwnPropertyDescriptorFunction_)
+                    : Value::undefined();
             return true;
         }
         if (reference.hostObjectValue) {
@@ -1627,6 +1632,182 @@ private:
         return true;
     }
 
+    bool createDescriptorSnapshot(const Value& propertyValue,
+        const RuntimeContext::PropertyAttributes& attributes,
+        SourceLocation callSite, Value& result)
+    {
+        if (!attributes.isValid() || !attributes.isFullyKnown()) {
+            fail(RuntimeErrorCode::UnsupportedFeature, callSite);
+            return false;
+        }
+
+        static const char valueKey[] = "value";
+        static const char writableKey[] = "writable";
+        static const char enumerableKey[] = "enumerable";
+        static const char configurableKey[] = "configurable";
+        const std::size_t requiredKeyBytes =
+            sizeof(valueKey) - 1u + sizeof(writableKey) - 1u +
+            sizeof(enumerableKey) - 1u + sizeof(configurableKey) - 1u;
+        if (context_.objects_.size() >= context_.limits_.maxObjects) {
+            fail(RuntimeErrorCode::ObjectLimitExceeded, callSite);
+            return false;
+        }
+        if (context_.limits_.maxPropertiesPerObject < 4u ||
+            context_.limits_.maxTotalProperties < 4u ||
+            context_.totalPropertyCount_ >
+                context_.limits_.maxTotalProperties - 4u) {
+            fail(RuntimeErrorCode::PropertyLimitExceeded, callSite);
+            return false;
+        }
+        if (context_.limits_.maxPropertyNameLength <
+                sizeof(configurableKey) - 1u) {
+            fail(RuntimeErrorCode::PropertyNameTooLong, callSite);
+            return false;
+        }
+        if (requiredKeyBytes > context_.limits_.maxTotalPropertyKeyBytes ||
+            context_.totalPropertyKeyBytes_ >
+                context_.limits_.maxTotalPropertyKeyBytes - requiredKeyBytes) {
+            fail(RuntimeErrorCode::PropertyLimitExceeded, callSite);
+            return false;
+        }
+
+        const std::vector<Value> noElements;
+        RuntimeObjectId descriptorId = kInvalidRuntimeObjectId;
+        RuntimeErrorCode error = RuntimeErrorCode::None;
+        if (!context_.createObject(false, noElements, descriptorId, error)) {
+            fail(error, callSite);
+            return false;
+        }
+
+        std::size_t insertedProperties = 0u;
+        std::size_t insertedKeyBytes = 0u;
+        const auto addField = [this, descriptorId, callSite,
+            &insertedProperties, &insertedKeyBytes](const char* key,
+                Value value) {
+            RuntimeErrorCode fieldError = RuntimeErrorCode::None;
+            RuntimeContext::PropertyKey fieldKey;
+            try {
+                fieldKey.string.assign(key);
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                return false;
+            }
+            if (!context_.writeProperty(descriptorId, fieldKey, value,
+                    fieldError,
+                    RuntimeContext::PropertyAttributes::ordinaryData())) {
+                fail(fieldError, callSite);
+                return false;
+            }
+            ++insertedProperties;
+            insertedKeyBytes += fieldKey.string.size();
+            return true;
+        };
+
+        if (!addField(valueKey, propertyValue) ||
+            !addField(writableKey, Value::boolean(attributes.writable())) ||
+            !addField(enumerableKey,
+                Value::boolean(attributes.enumerable())) ||
+            !addField(configurableKey,
+                Value::boolean(attributes.configurable()))) {
+            RuntimeContext::RuntimeObject* unpublished =
+                context_.objectAt(descriptorId);
+            if (unpublished != nullptr &&
+                static_cast<std::size_t>(descriptorId) + 1u ==
+                    context_.objects_.size()) {
+                context_.totalPropertyCount_ -= insertedProperties;
+                context_.totalPropertyKeyBytes_ -= insertedKeyBytes;
+                context_.objects_.pop_back();
+            }
+            result = Value::undefined();
+            return false;
+        }
+
+        result = Value::object(descriptorId);
+        return true;
+    }
+
+    bool createOwnPropertyDescriptor(RuntimeObjectId sourceId,
+        const RuntimeContext::PropertyKey& key, SourceLocation callSite,
+        Value& result)
+    {
+        const RuntimeContext::RuntimeObject* source =
+            context_.objectAt(sourceId);
+        if (source == nullptr || sourceId == context_.objectPrototype_ ||
+            sourceId == context_.arrayPrototype_ ||
+            sourceId == context_.mathObject_ ||
+            sourceId == context_.eventConstantsObject_ ||
+            source->arrayIterator) {
+            fail(RuntimeErrorCode::InvalidReceiver, callSite);
+            return false;
+        }
+        if (!key.isSymbol() &&
+            key.string.size() > context_.limits_.maxPropertyNameLength) {
+            fail(RuntimeErrorCode::PropertyNameTooLong, callSite);
+            return false;
+        }
+        if (!context_.consumeStep(callSite)) return false;
+
+        if (!hasOwnProperty(sourceId, key)) {
+            result = Value::undefined();
+            return true;
+        }
+
+        Value propertyValue = Value::undefined();
+        RuntimeContext::PropertyAttributes attributes =
+            RuntimeContext::PropertyAttributes::unknown();
+        if (!key.isSymbol() && source->array && key.string == "length") {
+            propertyValue = Value::number(
+                static_cast<double>(source->arrayLength));
+            attributes = RuntimeContext::PropertyAttributes::arrayLength();
+        } else {
+            bool found = false;
+            std::uint32_t standardIndex = 0u;
+            if (!key.isSymbol() && source->array &&
+                parseEcmaArrayIndex(key.string, standardIndex)) {
+                const std::size_t index =
+                    static_cast<std::size_t>(standardIndex);
+                if (index <= context_.limits_.maxArrayIndex &&
+                    index < source->arrayLength) {
+                    const std::size_t position =
+                        RuntimeContext::findArrayElementPosition(*source,
+                            index);
+                    if (position < source->elements.size() &&
+                        source->elements[position].index == index) {
+                        propertyValue = source->elements[position].value;
+                        attributes = source->elements[position].attributes;
+                        found = true;
+                    }
+                }
+            }
+            if (!found) {
+                for (const RuntimeContext::RuntimeProperty& property :
+                    source->properties) {
+                    const bool matches = key.isSymbol()
+                        ? property.symbolKey == key.symbol
+                        : property.symbolKey == WellKnownSymbol::None &&
+                            property.key == key.string;
+                    if (matches) {
+                        propertyValue = property.value;
+                        attributes = property.attributes;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                return false;
+            }
+        }
+
+        if (!attributes.isValid() || !attributes.isFullyKnown()) {
+            fail(RuntimeErrorCode::UnsupportedFeature, callSite);
+            return false;
+        }
+        return createDescriptorSnapshot(propertyValue, attributes,
+            callSite, result);
+    }
+
     bool invokeNative(const RuntimeContext::FunctionRecord& function,
         const std::vector<Value>& arguments, SourceLocation callSite,
         Value receiver, Value& result)
@@ -1677,6 +1858,24 @@ private:
                 break;
             }
             succeeded = createObjectKeys(target.objectId(), callSite, result);
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::ObjectGetOwnPropertyDescriptor: {
+            const Value& target = argumentOrUndefined(0u);
+            if (!target.isObject() ||
+                context_.objectAt(target.objectId()) == nullptr) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            RuntimeContext::PropertyKey key;
+            if (!propertyKeyFromValue(argumentOrUndefined(1u), key,
+                    callSite)) {
+                succeeded = false;
+                break;
+            }
+            succeeded = createOwnPropertyDescriptor(target.objectId(), key,
+                callSite, result);
             break;
         }
         case RuntimeContext::NativeFunctionId::ObjectHasOwnProperty: {
@@ -3071,6 +3270,7 @@ void RuntimeContext::clearRuntimeState()
     arrayIteratorNextFunction_ = kInvalidRuntimeFunctionId;
     arrayIteratorSelfFunction_ = kInvalidRuntimeFunctionId;
     objectKeysFunction_ = kInvalidRuntimeFunctionId;
+    objectGetOwnPropertyDescriptorFunction_ = kInvalidRuntimeFunctionId;
     eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
     eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
     builtInsInitialized_ = false;
@@ -3087,6 +3287,8 @@ void RuntimeContext::clearRuntimeState()
     failNextObjectKeysStringCreationForTesting_ = false;
     failNextObjectKeysElementInsertionForTesting_ = false;
     failNextPropertyInsertionForTesting_ = false;
+    failPropertyInsertionAfterCountForTesting_ = false;
+    propertyInsertionsBeforeFailureForTesting_ = 0u;
 #endif
     hostObjects_.clear();
     hostMethods_.clear();
@@ -3653,7 +3855,10 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         return false;
     }
     if (!createNativeFunction(NativeFunctionId::ObjectKeys,
-            objectKeysFunction_, error)) return false;
+            objectKeysFunction_, error) ||
+        !createNativeFunction(
+            NativeFunctionId::ObjectGetOwnPropertyDescriptor,
+            objectGetOwnPropertyDescriptorFunction_, error)) return false;
     const char eventName[] = "Event";
     // Event constants are optional only when an explicitly tiny caller limit
     // cannot fit the bounded namespace. This keeps the older runtime limit
@@ -4186,6 +4391,13 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         if (failNextPropertyInsertionForTesting_) {
             failNextPropertyInsertionForTesting_ = false;
             throw std::bad_alloc();
+        }
+        if (failPropertyInsertionAfterCountForTesting_) {
+            if (propertyInsertionsBeforeFailureForTesting_ == 0u) {
+                failPropertyInsertionAfterCountForTesting_ = false;
+                throw std::bad_alloc();
+            }
+            --propertyInsertionsBeforeFailureForTesting_;
         }
 #endif
         object->properties.push_back(std::move(property));

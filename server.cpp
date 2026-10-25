@@ -5739,6 +5739,44 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js90AfterClick, 1000) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js91FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js91.html";
+    const bool js91Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js91FixtureUrl);
+    const std::string js91InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS91 bounded own-property descriptor fixture passes on the hosted server",
+        js91Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js91FixtureUrl &&
+        contains(js91InitialText, "Navigator JavaScript JS91") &&
+        contains(js91InitialText, "JS91:assertions=11:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js91Loaded) + ",text=" +
+        summarizeText(js91InitialText, 1600) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS91 hosted descriptors preserve missing, undefined, sparse, and length semantics",
+        js91Loaded && contains(js91InitialText,
+            ":object=true:missing=true:undefined=true:hole=true:length=true") &&
+        contains(js91InitialText, ":snapshot=true:identity=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "hosted descriptors snapshot primitives, retain object identity, omit holes, and expose Array length metadata");
+    add("JS91 hosted key classification preserves numeric and typed Symbol keys",
+        js91Loaded && contains(js91InitialText,
+            ":numeric=true:symbol=true:pair=true:events=ready") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "canonical numeric names, genuine Symbol identity, and JS81 pair occupancy remain distinct");
+    const bool js91Click = js91Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("event-a");
+    const std::string js91AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS91 nested Event callbacks preserve descriptor and iterator state",
+        js91Click && contains(js91AfterClick,
+            "JS91:event:nested=true:outer=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js91Click) + ",text=" +
+        summarizeText(js91AfterClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
