@@ -4,7 +4,8 @@ param(
     [Parameter()][switch]$NotesStartupOperationIsolation,
     [Parameter()][switch]$NotesProofInvocationCorrection,
     [Parameter()][switch]$NotesPostRenderStartup,
-    [Parameter()][switch]$NotesProofAuthorization
+    [Parameter()][switch]$NotesProofAuthorization,
+    [Parameter()][switch]$NotesInputRouting
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -18,8 +19,9 @@ if ($NotesStartupOperationIsolation) { $selectedPhaseCount++ }
 if ($NotesProofInvocationCorrection) { $selectedPhaseCount++ }
 if ($NotesPostRenderStartup) { $selectedPhaseCount++ }
 if ($NotesProofAuthorization) { $selectedPhaseCount++ }
+if ($NotesInputRouting) { $selectedPhaseCount++ }
 if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRootName = if ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $build = [System.IO.Path]::GetFullPath($BuildRoot)
 $relative = [System.IO.Path]::GetRelativePath($phaseRoot, $build)
@@ -96,6 +98,10 @@ if ($NotesPostRenderStartup) {
 if ($NotesProofAuthorization) {
     $arguments.C188R7NotesProofAuthorization = $true
 }
+if ($NotesInputRouting) {
+    $arguments.C188R7NotesProofAuthorization = $true
+    $arguments.C188R8NotesInputRouting = $true
+}
 $logPath = Join-Path $build 'nativeaot-build.log'
 $output = ''
 $buildExitCode = 0
@@ -121,6 +127,8 @@ if ($NotesStartupDiagnostics) {
     & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification') -NotesPostRenderStartup
 } elseif ($NotesProofAuthorization) {
     & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification') -NotesProofAuthorization
+} elseif ($NotesInputRouting) {
+    & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification') -NotesInputRouting
 } else {
     & $verify -CandidateRoot $nativeRoot -EvidenceRoot (Join-Path $nativeRoot 'qualification')
 }
@@ -138,6 +146,7 @@ $manifest = [ordered]@{
     notesProofInvocationCorrection=[bool]$NotesProofInvocationCorrection
     notesPostRenderStartup=[bool]$NotesPostRenderStartup
     notesProofAuthorization=[bool]$NotesProofAuthorization
+    notesInputRouting=[bool]$NotesInputRouting
     productionApplicationSelectorsPreserved=@(4,5,6,7,8)
     candidateSelector=9; candidateIdentity='com.guidexos.apps.managed.counterapp'
 }

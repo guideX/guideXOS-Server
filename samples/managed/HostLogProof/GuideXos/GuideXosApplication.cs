@@ -78,6 +78,9 @@ public readonly struct GuideXosApplicationDescriptor
 public static unsafe class GuideXosApplicationRegistry
 {
     public const uint LifetimeCloseActionId = 0x01500002u;
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+    private static uint s_c188r8InputTraceRecords;
+#endif
 #if GUIDEXOS_PROOF_CONTROL
     private static bool s_proofConfigConsumed;
 #endif
@@ -174,6 +177,13 @@ public static unsafe class GuideXosApplicationRegistry
                 : (int)hostResult;
         }
 
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+        if (host.LaunchContext.IsInput)
+        {
+            LogC188R8InputBoundary(host, "managed-entry"u8, selector, 0);
+        }
+#endif
+
 #if GUIDEXOS_PROOF_CONTROL
         if (!s_proofConfigConsumed)
         {
@@ -204,9 +214,18 @@ public static unsafe class GuideXosApplicationRegistry
 
         if (!TryFind(selector, out GuideXosApplicationDescriptor descriptor))
         {
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+            if (host.LaunchContext.IsInput)
+                LogC188R8InputBoundary(host, "selector-rejected"u8, selector,
+                    GxAbi.ErrorInvalidApplicationId);
+#endif
             host.TryLog("C112-UNKNOWN-SELECTOR"u8);
             return GxAbi.ErrorInvalidApplicationId;
         }
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+        if (host.LaunchContext.IsInput)
+            LogC188R8InputBoundary(host, "application-found"u8, selector, 0);
+#endif
 
 #if HOSTLOGPROOF_C155_MANAGED_NOTES_SESSION
         // C150 may need to discard a pending semantic session after Notes was
@@ -304,9 +323,18 @@ public static unsafe class GuideXosApplicationRegistry
         else if (s_lifetime.TryGet(selector, applicationGeneration,
                 out application))
         {
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+            if (host.LaunchContext.IsInput)
+                LogC188R8InputBoundary(host, "lifetime-found"u8, selector, 0);
+#endif
         }
         else
         {
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+            if (host.LaunchContext.IsInput)
+                LogC188R8InputBoundary(host, "lifetime-rejected"u8, selector,
+                    GxAbi.ErrorInvalidApplicationId);
+#endif
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
             host.TryLog("C150-DISPATCH rejected=stale-application result=FAIL"u8);
 #endif
@@ -317,7 +345,14 @@ public static unsafe class GuideXosApplicationRegistry
         GuideXosResult result;
         if (host.LaunchContext.IsInput)
         {
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+            LogC188R8InputBoundary(host, "notes-handler-enter"u8, selector, 0);
+#endif
             result = application.HandleInput(host, input);
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+            LogC188R8InputBoundary(host, "notes-handler-return"u8, selector,
+                (int)result);
+#endif
         }
         else if (host.IsAction)
         {
@@ -438,6 +473,64 @@ public static unsafe class GuideXosApplicationRegistry
 #endif
         return (int)result;
     }
+
+#if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
+    private static void LogC188R8InputBoundary(
+        GuideXosHost host,
+        ReadOnlySpan<byte> stage,
+        uint selector,
+        int resultCode)
+    {
+        GuideXosInputKind kind = host.LaunchContext.InputKind;
+        if (kind == GuideXosInputKind.PointerMove ||
+            kind == GuideXosInputKind.Wheel ||
+            s_c188r8InputTraceRecords >= 16u)
+        {
+            return;
+        }
+        s_c188r8InputTraceRecords++;
+
+        Span<byte> line = stackalloc byte[124];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R8-300 INPUT-BOUNDARY stage="u8) ||
+            !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position, " selector="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, selector) ||
+            !GuideXosText.Append(line, ref position, " generation="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                host.LaunchContext.ApplicationGeneration) ||
+            !GuideXosText.Append(line, ref position, " kind="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, (uint)kind) ||
+            !GuideXosText.Append(line, ref position, " flags="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                host.LaunchContext.Flags) ||
+            !GuideXosText.Append(line, ref position, " x="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                (uint)host.LaunchContext.InputX) ||
+            !GuideXosText.Append(line, ref position, " y="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                (uint)host.LaunchContext.InputY) ||
+            !GuideXosText.Append(line, ref position, " result="u8) ||
+            !AppendSigned(line, ref position, resultCode))
+        {
+            return;
+        }
+        host.TryLog(line[..position]);
+    }
+
+    private static bool AppendSigned(
+        Span<byte> buffer, ref int position, int value)
+    {
+        if (value < 0)
+        {
+            if (!GuideXosText.Append(buffer, ref position, "-"u8)) return false;
+            return GuideXosText.AppendUnsigned(buffer, ref position,
+                unchecked((uint)(-(long)value)));
+        }
+        return GuideXosText.AppendUnsigned(buffer, ref position, (uint)value);
+    }
+#endif
 }
 
 internal static class GuideXosText

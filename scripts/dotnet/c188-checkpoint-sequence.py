@@ -302,7 +302,7 @@ def r3_steps(include_r4: bool) -> list[Step]:
             any_of("Notes launch result", "C188R3-170 NOTES-LAUNCH-RESULT-SUCCESS", "C188R3-171 NOTES-LAUNCH-RESULT-FAILURE"),
             literal("application launch return", "C188R3-011 APPLICATION-LAUNCH-RETURN"),
             any_of("application result", "C188R3-012 APPLICATION-RESULT-SUCCESS", "C188R3-013 APPLICATION-RESULT-FAILURE"),
-            Step("native launch return", (r"\[C102-LAUNCH-RETURN\] status=0x[0-9A-Fa-f]+",)),
+            Step("native launch return", (r"\[C102-LAUNCH-RETURN\] status=(?:0[xX])?00000000",)),
             literal("input manager initialized", "[KERNEL] Input manager initialized"),
             literal("main input loop", "[KERNEL] Entering main loop (waiting for input)..."),
         ]
@@ -376,18 +376,18 @@ def r7_steps() -> list[Step]:
         Step("Notes launch result", (r"C188R7-206 NOTES-LAUNCH-RESULT=(?:SUCCESS|FAILURE)",)),
         literal("ManagedNotes launch return", "C188R7-207 BEFORE MANAGEDNOTES-LAUNCH-RETURN"),
         literal("application launch return", "C188R7-208 AFTER APPLICATION-LAUNCH-RETURN"),
-        Step("native launch return", (r"\[C102-LAUNCH-RETURN\] status=0x[0-9A-Fa-f]+",)),
+        Step("native launch return", (r"\[C102-LAUNCH-RETURN\] status=(?:0[xX])?00000000",)),
         literal("input manager initialized", "[KERNEL] Input manager initialized"),
         literal("main input loop", "[KERNEL] Entering main loop (waiting for input)..."),
     ]
 
 
 EVENT_PATTERNS = (
-    re.compile(r"^C188R[3467]-\d{3} [A-Z0-9][A-Z0-9 =_-]*$"),
+    re.compile(r"^C188R[34678]-\d{3} [A-Z0-9][A-Z0-9 =_-]*$"),
     re.compile(r"^C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS$"),
     re.compile(r"^C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS$"),
     re.compile(r"^C150-APP-INSTANCE id=\d+ generation=\d+$"),
-    re.compile(r"^\[C102-LAUNCH-RETURN\] status=0x[0-9A-Fa-f]+$"),
+    re.compile(r"^\[C102-LAUNCH-RETURN\] status=(?:0[xX])?[0-9A-Fa-f]{8}$"),
     re.compile(r"^\[KERNEL\] Input manager initialized$"),
     re.compile(r"^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.$"),
 )
@@ -556,7 +556,7 @@ def validate_text(
 def describe(phase: str) -> dict[str, object]:
     if phase == "C188R6":
         steps = r6_steps()
-    elif phase == "C188R7":
+    elif phase in {"C188R7", "C188R8"}:
         steps = r7_steps()
     else:
         steps = r3_steps(phase in {"C188R4", "C188R5"})
@@ -574,9 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     describe_parser = subparsers.add_parser("describe")
-    describe_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6", "C188R7"), required=True)
+    describe_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6", "C188R7", "C188R8"), required=True)
     validate_parser = subparsers.add_parser("validate")
-    validate_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6", "C188R7"), required=True)
+    validate_parser.add_argument("--phase", choices=("C188R3", "C188R4", "C188R5", "C188R6", "C188R7", "C188R8"), required=True)
     validate_parser.add_argument("--serial", type=Path, required=True)
     validate_parser.add_argument("--capture-state", choices=("complete", "truncated", "incomplete", "unknown"), default="unknown")
     args = parser.parse_args(argv)
@@ -585,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     raw = args.serial.read_bytes()
     text = raw.decode("utf-8", errors="replace")
-    phase_steps = r7_steps() if args.phase == "C188R7" else r6_steps() if args.phase == "C188R6" else r3_steps(args.phase in {"C188R4", "C188R5"})
+    phase_steps = r7_steps() if args.phase in {"C188R7", "C188R8"} else r6_steps() if args.phase == "C188R6" else r3_steps(args.phase in {"C188R4", "C188R5"})
     result = validate_text(text, phase_steps, capture_state=args.capture_state)
     result["serialPath"] = str(args.serial)
     result["serialSha256"] = hashlib.sha256(raw).hexdigest().upper()

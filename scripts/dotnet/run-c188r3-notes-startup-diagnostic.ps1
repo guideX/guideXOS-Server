@@ -5,23 +5,24 @@ param(
     [Parameter()][ValidateRange(90,240)][int]$BootTimeoutSeconds = 150,
     [Parameter()][ValidateRange(1,60)][int]$AdmissionWindowSeconds = 60,
     [Parameter()][switch]$ProbeNotesInput,
-    [Parameter()][ValidateSet('C188R3','C188R4','C188R5','C188R6','C188R7')][string]$Phase = 'C188R3'
+    [Parameter()][ValidateSet('C188R3','C188R4','C188R5','C188R6','C188R7','C188R8')][string]$Phase = 'C188R3'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'c188r8-notes-input-probe.ps1')
 if ($PSVersionTable.PSEdition -ne 'Core') { throw 'C188 Notes startup diagnostic guest requires PowerShell Core.' }
-if ($Phase -in @('C188R5','C188R6','C188R7') -and -not $ProbeNotesInput) {
+if ($Phase -in @('C188R5','C188R6','C188R7','C188R8') -and -not $ProbeNotesInput) {
     throw "$Phase requires a real Notes pointer and keyboard input probe."
 }
-if ($ProbeNotesInput -and $Phase -notin @('C188R5','C188R6','C188R7')) {
-    throw 'The real Notes input probe is available only to C188R5/C188R6/C188R7 diagnostic guests.'
+if ($ProbeNotesInput -and $Phase -notin @('C188R5','C188R6','C188R7','C188R8')) {
+    throw 'The real Notes input probe is available only to C188R5/C188R6/C188R7/C188R8 diagnostic guests.'
 }
-if ($Phase -eq 'C188R7' -and $AdmissionWindowSeconds -gt 30) {
-    throw 'C188R7 uses a bounded QAC admission window of at most 30 seconds.'
+if ($Phase -in @('C188R7','C188R8') -and $AdmissionWindowSeconds -gt 30) {
+    throw "$Phase uses a bounded QAC admission window of at most 30 seconds."
 }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRootName = if ($Phase -eq 'C188R7') { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($Phase -eq 'C188R6') { 'out/dotnet/c188r6-notes-postrender' } elseif ($Phase -eq 'C188R5') { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($Phase -eq 'C188R4') { 'out/dotnet/c188r4-notes-startup-operation' } else { 'out/dotnet/c188r3-notes-startup-diagnostics' }
+$phaseRootName = if ($Phase -eq 'C188R8') { 'out/dotnet/c188r8-notes-input-routing' } elseif ($Phase -eq 'C188R7') { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($Phase -eq 'C188R6') { 'out/dotnet/c188r6-notes-postrender' } elseif ($Phase -eq 'C188R5') { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($Phase -eq 'C188R4') { 'out/dotnet/c188r4-notes-startup-operation' } else { 'out/dotnet/c188r3-notes-startup-diagnostics' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $root = [System.IO.Path]::GetFullPath($RunRoot)
 $relativeRoot = [System.IO.Path]::GetRelativePath($phaseRoot, $root)
@@ -98,7 +99,7 @@ Set-Content -LiteralPath (Join-Path $root 'qac-before.list.txt') -Value $qacList
 $preflightClear = $qacStatusBefore -match 'Coordinator:\s+Online' -and
     $qacStatusBefore -match 'QEMU processes:\s+0 \(0 foreign\)' -and
     $qacListBefore -match 'Reservations:\s+0'
-if ($Phase -in @('C188R5','C188R6','C188R7')) {
+if ($Phase -in @('C188R5','C188R6','C188R7','C188R8')) {
     $preflightClear = $preflightClear -and
         $qacListBefore -match 'Managed sessions:\s+0'
 }
@@ -298,8 +299,9 @@ try {
         if ($notesSurfaceCreated) {
             [void](Invoke-DiagnosticQmp 'screendump' ([ordered]@{filename=$notesBeforeInputPath}))
             $serialText = Send-DiagnosticNotesInput $serialText
-            $notesPointerAccepted = $serialText -match '(?m)^C120-POINTER target=document result=PASS\r?$'
-            $notesKeyboardAccepted = $serialText -match '(?m)^C117-TEXT-AREA edit=changed result=PASS\r?$'
+            $notesProbeResult = Get-C188R8NotesInputProbeResult -SerialText $serialText
+            $notesPointerAccepted = $notesProbeResult.PointerAccepted
+            $notesKeyboardAccepted = $notesProbeResult.KeyboardAccepted
         }
     }
     try { [void](Invoke-DiagnosticQmp 'screendump' ([ordered]@{filename=$screenshotPath})) } catch {
@@ -369,9 +371,9 @@ $screenshotHash = if ($null -ne $screenshotPath -and (Test-Path -LiteralPath $sc
 $notesInputProbePassed = -not $ProbeNotesInput -or ($notesSurfaceCreated -and $notesPointerAccepted -and $notesKeyboardAccepted)
 $checkpointValidationPassed = $checkpointAnalysis.result -ceq 'PASS'
 $notesDiagnosticPassed = $outcome -eq 'input-loop-reached' -and $releaseVerified -and $notesInputProbePassed -and
-    ($Phase -ne 'C188R7' -or ($checkpointValidationPassed -and $notesSurfaceCreated))
+    ($Phase -notin @('C188R7','C188R8') -or ($checkpointValidationPassed -and $notesSurfaceCreated))
 $manifest = [ordered]@{
-    result=if ($notesDiagnosticPassed) { 'PASS-DIAGNOSTIC-BOUNDARY-REACHED' } elseif ($outcome -eq 'runner-error') { 'RUNNER-ERROR' } elseif (-not $bootLoopReached) { 'GUEST-DID-NOT-REACH-INPUT-LOOP' } elseif ($ProbeNotesInput -and -not $notesInputProbePassed) { 'GUEST-REACHED-LOOP-BUT-NOTES-INPUT-PROBE-FAILED' } elseif ($Phase -eq 'C188R7' -and -not $checkpointValidationPassed) { 'GUEST-REACHED-LOOP-BUT-CHECKPOINT-VALIDATION-FAILED' } elseif ($Phase -eq 'C188R7' -and -not $notesSurfaceCreated) { 'GUEST-REACHED-LOOP-BUT-NOTES-SURFACE-MISSING' } else { 'GUEST-DID-NOT-REACH-INPUT-LOOP' }
+    result=if ($notesDiagnosticPassed) { 'PASS-DIAGNOSTIC-BOUNDARY-REACHED' } elseif ($outcome -eq 'runner-error') { 'RUNNER-ERROR' } elseif (-not $bootLoopReached) { 'GUEST-DID-NOT-REACH-INPUT-LOOP' } elseif ($ProbeNotesInput -and -not $notesInputProbePassed) { 'GUEST-REACHED-LOOP-BUT-NOTES-INPUT-PROBE-FAILED' } elseif ($Phase -in @('C188R7','C188R8') -and -not $checkpointValidationPassed) { 'GUEST-REACHED-LOOP-BUT-CHECKPOINT-VALIDATION-FAILED' } elseif ($Phase -in @('C188R7','C188R8') -and -not $notesSurfaceCreated) { 'GUEST-REACHED-LOOP-BUT-NOTES-SURFACE-MISSING' } else { 'GUEST-DID-NOT-REACH-INPUT-LOOP' }
     outcome=$outcome;phase=$Phase;runRoot=$root;project='guideXOSServer';mode='acceptance'
     qacOwnerPid=$qacProcess.Id;qacReservationId=$reservationId;qacReservationRequestId=if ($reservationRequest.Success) { $reservationRequest.Groups[1].Value } else { $null }
     qacGuestPid=if ($childExit.Success) { $childExit.Groups[2].Value } else { $null }
@@ -399,4 +401,4 @@ Write-Output "${Phase}_DIAGNOSTIC_MANIFEST=$manifestPath"
 if (-not $releaseVerified) { exit 4 }
 if (-not $bootLoopReached) { exit 2 }
 if (-not $notesInputProbePassed) { exit 5 }
-if ($Phase -eq 'C188R7' -and -not $notesDiagnosticPassed) { exit 6 }
+if ($Phase -in @('C188R7','C188R8') -and -not $notesDiagnosticPassed) { exit 6 }

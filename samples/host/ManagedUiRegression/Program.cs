@@ -11,6 +11,10 @@ if (args.Length == 1 && args[0] == "--c188r7-notes-proof-authorization")
     bool r7Passed = NotesProofInvocationC188R7Regression.Run();
     return r5Passed && r7Passed ? 0 : 1;
 }
+if (args.Length == 1 && args[0] == "--c188r8-notes-input-routing")
+{
+    return NotesInputRoutingC188R8Regression.Run() ? 0 : 1;
+}
 
 int passedSuites = 0;
 int failedSuites = 0;

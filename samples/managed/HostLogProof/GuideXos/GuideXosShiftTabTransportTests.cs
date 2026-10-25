@@ -14,7 +14,7 @@ public static class GuideXosShiftTabTransportTests
         bool repeated = RepeatedTraversalIsDeterministic();
         bool result = sequence && skipped && modal && staleSpace && repeated;
         bool counted = s_caseCount == 31;
-        host.TryLog(result && counted
+        host?.TryLog(result && counted
             ? "C129-SHIFT-TAB-TESTS cases=31 result=PASS"u8
             : "C129-SHIFT-TAB-TESTS result=FAIL"u8);
         return result && counted;

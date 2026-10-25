@@ -274,6 +274,54 @@ class CheckpointSequenceTests(unittest.TestCase):
         self.assertLess(names.index("application launch return"), names.index("input manager initialized"))
         self.assertLess(names.index("input manager initialized"), names.index("main input loop"))
 
+    def test_native_return_accepts_prefixed_and_unprefixed_zero_status(self) -> None:
+        step = next(step for step in CHECKPOINTS.r7_steps() if step.name == "native launch return")
+        for marker in (
+            "[C102-LAUNCH-RETURN] status=0x00000000",
+            "[C102-LAUNCH-RETURN] status=00000000",
+            "[C102-LAUNCH-RETURN] status=0X00000000",
+        ):
+            with self.subTest(marker=marker):
+                result = CHECKPOINTS.validate_text(marker + "\n", [step], capture_state="complete")
+                self.assertEqual("PASS", result["result"])
+                self.assertEqual([], result["missingRequiredCheckpoints"])
+
+    def test_native_return_rejects_nonzero_missing_and_malformed_status(self) -> None:
+        step = next(step for step in CHECKPOINTS.r7_steps() if step.name == "native launch return")
+        cases = (
+            "[C102-LAUNCH-RETURN] status=00000001\n",
+            "",
+            "[C102-LAUNCH-RETURN] status=0x0000000G\n",
+            "[C102-LAUNCH-RETURN] status=0000000\n",
+            "[C102-LAUNCH-RETURN] status=000000000\n",
+        )
+        for serial in cases:
+            with self.subTest(serial=serial):
+                result = CHECKPOINTS.validate_text(serial, [step], capture_state="complete")
+                self.assertEqual("FAIL", result["result"])
+                self.assertEqual(["native launch return"], result["missingRequiredCheckpoints"])
+
+    def test_native_return_duplicate_and_out_of_order_integrity_remain_enforced(self) -> None:
+        step = next(step for step in CHECKPOINTS.r7_steps() if step.name == "native launch return")
+        marker = "[C102-LAUNCH-RETURN] status=00000000"
+        duplicate = CHECKPOINTS.validate_text(marker + "\n" + marker + "\n", [step], capture_state="complete")
+        self.assertEqual("FAIL", duplicate["result"])
+        self.assertTrue(any(item.get("marker") == marker for item in duplicate["duplicateCheckpoints"]))
+
+        ordered = [CHECKPOINTS.literal("before", "C188R8-001 BEFORE"), step]
+        out_of_order = CHECKPOINTS.validate_text(
+            marker + "\nC188R8-001 BEFORE\n", ordered, capture_state="complete"
+        )
+        self.assertEqual("FAIL", out_of_order["result"])
+        self.assertEqual("native launch return", out_of_order["firstExpectedMissingCheckpoint"])
+        self.assertTrue(any(item["checkpoint"] == "native launch return" for item in out_of_order["outOfOrderCheckpoints"]))
+
+    def test_c188r8_uses_r7_startup_checkpoints_with_status_format_fix(self) -> None:
+        self.assertEqual(
+            CHECKPOINTS.describe("C188R7")["expectedOrderedCheckpoints"],
+            CHECKPOINTS.describe("C188R8")["expectedOrderedCheckpoints"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
