@@ -57,6 +57,8 @@ The registry and pool epochs inside managed state can reset if their owning stat
 
 Counters are bounded and saturating. Managed state traces are capped at 48 records; native image invocations at 24; native init records at 16; and host startup records at 24. An overflow marker is emitted when the independent native event-record limits are exceeded. These are proof-only counters, not product services.
 
+Managed snapshots identify lifecycle stages and are correlated by serial order, managed call, module ID, and epochs. They do not include one explicit monotonic sequence field on every state row. Add that field before the next guest run so ordering remains directly machine-checkable across all marker families.
+
 The snapshot reads the descriptor array, pool references, resident slot entries, and generation values directly. It does not call `TryFind` or `TryGet`, allocate a replacement registry, or dispatch an application callback. The snapshot can advance only diagnostic trace bookkeeping; hosted tests verify that it leaves application residency, generation, clear count, teardown count, and identities unchanged.
 
 ## 5. Native launch-boundary marker correction
