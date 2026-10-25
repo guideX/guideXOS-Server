@@ -208,9 +208,10 @@ function Add-QacOutputLine {
         return
     }
     if ($Line -match 'QAC reservation released: id=([a-f0-9]+) pid=([0-9]+)') {
-        $script:Execution.qacCliReleaseReported = $true
-        $script:Execution.timings.qacReleaseReportedAtUtc = $timestamp
-        Add-ExecutionEvent -Type 'qac-release-reported' -Data @{reservationId=$Matches[1];childProcessId=[int]$Matches[2];observedAtUtc=$timestamp}
+        $script:Execution.qacCliReleaseReportedReservationId = $Matches[1]
+        $script:Execution.qacCliReleaseReportedChildProcessId = [int]$Matches[2]
+        $script:Execution.qacCliReleaseLineObservedAtUtc = $timestamp
+        Add-ExecutionEvent -Type 'qac-release-line-observed' -Data @{reservationId=$Matches[1];childProcessId=[int]$Matches[2];observedAtUtc=$timestamp}
         return
     }
     if ($Line -match 'Recovery Required|release is not verified|remains conservatively blocked') {
@@ -218,6 +219,24 @@ function Add-QacOutputLine {
         Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
         Set-ExecutionState -State 'RecoveryRequired' -Data @{message=$Line}
     }
+}
+
+function Confirm-QacReleaseReport {
+    $reportedReservationId = [string]$script:Execution.qacCliReleaseReportedReservationId
+    if ([string]::IsNullOrWhiteSpace($reportedReservationId)) { return $false }
+
+    $reportedChildProcessId = [int]$script:Execution.qacCliReleaseReportedChildProcessId
+    $matchesExecution = $script:Execution.reservationId -and $script:Execution.childProcessId -gt 0 -and
+        (Test-QacS22R10ReleaseIdentity -ReportedReservationId $reportedReservationId -ReportedChildProcessId $reportedChildProcessId -ExpectedReservationId ([string]$script:Execution.reservationId) -ExpectedChildProcessId ([int]$script:Execution.childProcessId))
+    $script:Execution.qacCliReleaseReported = [bool]$matchesExecution
+    if ($matchesExecution) {
+        $observedAtUtc = [string]$script:Execution.qacCliReleaseLineObservedAtUtc
+        $script:Execution.timings.qacReleaseReportedAtUtc = $observedAtUtc
+        Add-ExecutionEvent -Type 'qac-release-reported' -Data @{reservationId=$reportedReservationId;childProcessId=$reportedChildProcessId;observedAtUtc=$observedAtUtc}
+    } else {
+        Add-ExecutionEvent -Type 'qac-release-identity-mismatch' -Data @{reportedReservationId=$reportedReservationId;reportedChildProcessId=$reportedChildProcessId;expectedReservationId=$script:Execution.reservationId;expectedChildProcessId=$script:Execution.childProcessId;observedAtUtc=$script:Execution.qacCliReleaseLineObservedAtUtc}
+    }
+    return [bool]$matchesExecution
 }
 
 function Drain-QacOutput {
@@ -368,7 +387,11 @@ function Complete-QacAttempt {
         throw "QAC managed-run process remained active after the bounded $waitSeconds-second supervision window; it was not terminated."
     }
     $Process.WaitForExit()
-    Drain-QacOutput -Process $Process -StdoutTask ([ref]$script:StdoutTask) -StderrTask ([ref]$script:StderrTask)
+    $remainingOutput = @(Complete-QacS22R10ProcessOutputDrain -Process $Process -StdoutTask ([ref]$script:StdoutTask) -StderrTask ([ref]$script:StderrTask))
+    foreach ($outputLine in $remainingOutput) {
+        Add-QacOutputLine -Stream $outputLine.Stream -Line $outputLine.Line
+    }
+    [void](Confirm-QacReleaseReport)
     $script:Execution.qacCliExitCode = $Process.ExitCode
     Add-ExecutionEvent -Type 'qac-cli-exit' -Data @{exitCode=$Process.ExitCode}
 }
@@ -426,7 +449,8 @@ try {
         qacCli=$script:QacCli; qemuExecutable=$qemu; qemuVersion=$qemuVersion;
         qacReservationId=$null; reservationId=$null; queuePosition=$null; qacCliProcessId=$null;
         childProcessId=$null; childStartUtc=$null; childExitVerified=$false; qemuExitCode=$null; qacCliExitCode=$null;
-        qacCliReleaseReported=$false; reservationReleaseVerified=$false; recoveryRequired=$false;
+        qacCliReleaseReported=$false; qacCliReleaseReportedReservationId=$null; qacCliReleaseReportedChildProcessId=0; qacCliReleaseLineObservedAtUtc=$null;
+        reservationReleaseVerified=$false; recoveryRequired=$false;
         manifestSchemaVersion=1; qmp=[ordered]@{endpoint=$null;status='not-allocated';ownership='unbound';quitAcknowledged=$false;quitResponse=$null};
         qemuArguments=@(); guestResult='INCOMPLETE'; guestResultReason=$null; cleanupEligible=$false;
         timings=[ordered]@{stagingStartAtUtc=$null;stagingCompleteAtUtc=$null;reservationRequestedAtUtc=$null;reservationGrantedAtUtc=$null;qemuChildStartAtUtc=$null;firstGuestProgressAtUtc=$null;guestCompletionOrFailureAtUtc=$null;qmpShutdownRequestedAtUtc=$null;qemuChildExitAtUtc=$null;qacReleaseReportedAtUtc=$null;qacReleaseVerifiedAtUtc=$null};
@@ -503,6 +527,9 @@ try {
         $script:Execution.reservationReleaseVerified = $false
         $script:Execution.childExitVerified = $false
         $script:Execution.qacCliReleaseReported = $false
+        $script:Execution.qacCliReleaseReportedReservationId = $null
+        $script:Execution.qacCliReleaseReportedChildProcessId = 0
+        $script:Execution.qacCliReleaseLineObservedAtUtc = $null
         $script:Execution.qemuExitCode = $null
         $script:Execution.qacCliExitCode = $null
         $script:Execution.recoveryRequired = $false
@@ -546,7 +573,7 @@ try {
                 }
                 if ($listening) {
                     $reservation = Get-QacInspectRecord -ReservationId $script:Execution.reservationId
-                    if (-not (Test-QacS22R10ReservationIdentity -Reservation $reservation -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId ([int]$script:Execution.childProcessId))) {
+                    if (-not (Test-QacS22R10ReservationIdentity -Reservation $reservation -ExpectedReservationId ([string]$script:Execution.reservationId) -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId ([int]$script:Execution.childProcessId))) {
                         throw 'QAC inspect did not confirm the expected active acceptance reservation and child.'
                     }
                     $script:Execution.reservation = $reservation
@@ -647,10 +674,11 @@ try {
                 $script:Execution.finalReservation = $finalReservation
                 $launchedChild = $script:Execution.childProcessId -gt 0
                 if ($launchedChild) {
-                    $script:Execution.reservationReleaseVerified = ($finalReservation.state -eq 'Released')
-                    if (-not $script:Execution.reservationReleaseVerified) { throw "QAC reservation ended in '$($finalReservation.state)', not Released." }
+                    $script:Execution.reservationReleaseVerified = Test-QacS22R10ReservationIdentity -Reservation $finalReservation -ExpectedReservationId ([string]$script:Execution.reservationId) -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Released' -ExpectedChildProcessId ([int]$script:Execution.childProcessId)
+                    if (-not $script:Execution.reservationReleaseVerified) { throw 'QAC inspect did not confirm the exact Released acceptance reservation and child identity.' }
                     if (-not $script:Execution.qacCliReleaseReported) { throw 'QAC inspect says Released but qac run did not report verified release.' }
                 } else {
+                    if ([string]$finalReservation.id -cne [string]$script:Execution.reservationId) { throw 'QAC inspect returned a different childless reservation identity.' }
                     $script:Execution.reservationReleaseVerified = $finalReservation.state -in @('Cancelled','Expired','Failed','Released')
                     if (-not $script:Execution.reservationReleaseVerified) { throw "Childless QAC reservation ended in unexpected state '$($finalReservation.state)'." }
                     $script:Execution.cancelledBeforeLaunch = $finalReservation.state -eq 'Cancelled'

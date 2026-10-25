@@ -144,7 +144,7 @@ $sources=New-TestSources -Root $sourcesRoot
 $sourceEsp=Get-QacS22R10ArtifactIdentity -Path $sources.Esp -Kind directory
 $sourceIso=Get-QacS22R10ArtifactIdentity -Path $sources.Iso -Kind file
 $sourceOvmf=Get-QacS22R10ArtifactIdentity -Path $sources.Ovmf -Kind file
-$first=$null; $second=$null; $qmpClient=$null; $goodServer=$null; $wrongServer=$null; $silentServer=$null
+$first=$null; $second=$null; $qmpClient=$null; $goodServer=$null; $wrongServer=$null; $silentServer=$null; $drainProcess=$null; $preExitDrainProcess=$null
 
 try {
     $first=New-TestWorkspace -Sources $sources -Label 'manifest'
@@ -200,8 +200,46 @@ try {
     Assert-True 'argument boundaries preserve a path containing spaces as one QEMU token' (@($qacArgs | Where-Object {$_ -like '*fat:rw:*'}).Count -eq 1 -and $qacArgs -contains $writable[0])
     Assert-True 'QAC does not fall back to an unmanaged QEMU argument vector' ($qacArgs[0] -eq 'run' -and $qacArgs -contains '--' -and $qacArgs[6] -like '*qemu-system-x86_64.exe')
     $runnerSource=Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1') -Raw
+    $drainModuleSource=Get-Content -LiteralPath $launchPath -Raw
     Assert-True 'outer runner launches the QAC CLI process rather than starting QEMU directly' ($runnerSource -match '\$start\.FileName\s*=\s*\$script:QacCli' -and $runnerSource -notmatch 'Start-Process\s+\$qemu|ProcessStartInfo\s*\(\s*\$qemu')
+    Assert-True 'runner drains redirected QAC output to EOF after process exit before checking release' ($runnerSource -match 'Complete-QacS22R10ProcessOutputDrain' -and $runnerSource -match 'foreach \(\$outputLine in \$remainingOutput\)')
+    $waitIndex=$runnerSource.IndexOf('$Process.WaitForExit()',[StringComparison]::Ordinal)
+    $drainIndex=$runnerSource.IndexOf('Complete-QacS22R10ProcessOutputDrain',[StringComparison]::Ordinal)
+    $releaseCheckIndex=$runnerSource.IndexOf('[void](Confirm-QacReleaseReport)',[StringComparison]::Ordinal)
+    $cliExitIndex=$runnerSource.IndexOf('$script:Execution.qacCliExitCode = $Process.ExitCode',[StringComparison]::Ordinal)
+    Assert-True 'process exit precedes bounded output drain, release-line validation, and CLI exit recording' ($waitIndex -ge 0 -and $drainIndex -gt $waitIndex -and $releaseCheckIndex -gt $drainIndex -and $cliExitIndex -gt $releaseCheckIndex)
+    Assert-True 'post-exit drain has a validated finite deadline and returns an explicit timeout failure' ($drainModuleSource -match '\[ValidateRange\(1,30\)\]\[int\]\$DrainTimeoutSeconds\s*=\s*5' -and $drainModuleSource -match 'AddSeconds\(\$DrainTimeoutSeconds\)' -and $drainModuleSource -match 'Timed out after \$DrainTimeoutSeconds seconds')
+    Assert-True 'QAC release output is checked against both the exact reservation and child identity' ($runnerSource -match 'qacCliReleaseReportedReservationId' -and $runnerSource -match 'Test-QacS22R10ReleaseIdentity' -and $runnerSource -match 'ExpectedReservationId \(\[string\]\$script:Execution\.reservationId\)')
+    Assert-True 'runner retains RecoveryRequired when release evidence is missing or mismatched' ($runnerSource -match 'if \(-not \$script:Execution\.qacCliReleaseReported\).*QAC inspect says Released' -and $runnerSource -match "-State 'RecoveryRequired'")
     Assert-True 'existing guest Start-menu hotkey is available through the verified QMP operator path' ($runnerSource -match '\(meta_l\|meta_r\|ctrl-esc')
+
+    $drainStart=[Diagnostics.ProcessStartInfo]::new()
+    $drainStart.FileName=(Get-Process -Id $PID).Path
+    $drainStart.UseShellExecute=$false; $drainStart.CreateNoWindow=$true
+    $drainStart.RedirectStandardOutput=$true; $drainStart.RedirectStandardError=$true
+    foreach ($argument in @('-NoLogo','-NoProfile','-Command',"[Console]::Out.WriteLine('stdout drain fixture'); [Console]::Error.WriteLine('QAC reservation released: id=abc123 pid=4321')")) { $drainStart.ArgumentList.Add($argument) }
+    $drainProcess=[Diagnostics.Process]::new(); $drainProcess.StartInfo=$drainStart
+    if (-not $drainProcess.Start()) { throw 'Could not start the bounded QAC output-drain fixture.' }
+    $drainStdout=$drainProcess.StandardOutput.ReadLineAsync()
+    $drainStderr=$drainProcess.StandardError.ReadLineAsync()
+    if (-not $drainProcess.WaitForExit(10000)) { $drainProcess.Kill(); throw 'The QAC output-drain fixture did not exit within its test bound.' }
+    $drainedOutput=@(Complete-QacS22R10ProcessOutputDrain -Process $drainProcess -StdoutTask ([ref]$drainStdout) -StderrTask ([ref]$drainStderr))
+    Assert-True 'post-exit output drain preserves stdout and stderr records, including the final QAC release line' (@($drainedOutput | Where-Object { $_.Stream -eq 'stdout' -and $_.Line -eq 'stdout drain fixture' }).Count -eq 1 -and @($drainedOutput | Where-Object { $_.Stream -eq 'stderr' -and $_.Line -eq 'QAC reservation released: id=abc123 pid=4321' }).Count -eq 1)
+    $drainProcess.Dispose(); $drainProcess=$null
+
+    $preExitDrainStart=[Diagnostics.ProcessStartInfo]::new()
+    $preExitDrainStart.FileName=(Get-Process -Id $PID).Path
+    $preExitDrainStart.UseShellExecute=$false; $preExitDrainStart.CreateNoWindow=$true
+    $preExitDrainStart.RedirectStandardOutput=$true; $preExitDrainStart.RedirectStandardError=$true
+    foreach ($argument in @('-NoLogo','-NoProfile','-Command','Start-Sleep -Milliseconds 300')) { $preExitDrainStart.ArgumentList.Add($argument) }
+    $preExitDrainProcess=[Diagnostics.Process]::new(); $preExitDrainProcess.StartInfo=$preExitDrainStart
+    if (-not $preExitDrainProcess.Start()) { throw 'Could not start the process-exit ordering fixture.' }
+    $preExitStdout=$preExitDrainProcess.StandardOutput.ReadLineAsync()
+    $preExitStderr=$preExitDrainProcess.StandardError.ReadLineAsync()
+    [void](Assert-Throws 'post-exit EOF drain refuses to run before the redirected process exits' { Complete-QacS22R10ProcessOutputDrain -Process $preExitDrainProcess -StdoutTask ([ref]$preExitStdout) -StderrTask ([ref]$preExitStderr) } 'only be drained to EOF after the process exits')
+    if (-not $preExitDrainProcess.WaitForExit(10000)) { $preExitDrainProcess.Kill(); throw 'The process-exit ordering fixture did not exit within its test bound.' }
+    [void](Complete-QacS22R10ProcessOutputDrain -Process $preExitDrainProcess -StdoutTask ([ref]$preExitStdout) -StderrTask ([ref]$preExitStderr))
+    $preExitDrainProcess.Dispose(); $preExitDrainProcess=$null
 
     $runnerTokens=$null; $runnerParseErrors=$null
     $runnerAst=[System.Management.Automation.Language.Parser]::ParseInput($runnerSource,[ref]$runnerTokens,[ref]$runnerParseErrors)
@@ -257,9 +295,13 @@ try {
     $typedDateFixture=[PSCustomObject]@{ProcessId=42001;ParentProcessId=42000;ExecutablePath='C:\Program Files\qemu\qemu-system-x86_64.exe';CreationDate=[DateTime]::UtcNow}
     Assert-True 'direct-child identity accepts the typed DateTime returned by Get-CimInstance' (Test-QacS22R10DirectChildIdentity -ProcessRecord $typedDateFixture -ExpectedPid 42001 -ExpectedParentPid 42000 -ExpectedExecutable 'C:\Program Files\qemu\qemu-system-x86_64.exe' -ExpectedStartUtc ([DateTimeOffset]::UtcNow) -StartToleranceSeconds 2)
     Assert-True 'wrong QAC parent identity is rejected' (-not (Test-QacS22R10DirectChildIdentity -ProcessRecord $processFixture -ExpectedPid 42001 -ExpectedParentPid 9 -ExpectedExecutable 'C:\Program Files\qemu\qemu-system-x86_64.exe' -ExpectedStartUtc $startFixture))
-    $inspectFixture=[PSCustomObject]@{project='guideXOSServer';mode='acceptance';state='Running';processId=42001;processStartTimeUtc=$startFixture.ToString('O')}
-    Assert-True 'actual qac inspect processId field confirms the expected reservation and child identity' (Test-QacS22R10ReservationIdentity -Reservation $inspectFixture -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId 42001)
-    Assert-True 'qac inspect reservation for another process is rejected' (-not (Test-QacS22R10ReservationIdentity -Reservation $inspectFixture -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId 42002))
+    $inspectFixture=[PSCustomObject]@{id='abc123';project='guideXOSServer';mode='acceptance';state='Running';processId=42001;processStartTimeUtc=$startFixture.ToString('O')}
+    Assert-True 'qac inspect processId and reservation id confirm the expected reservation and child identity' (Test-QacS22R10ReservationIdentity -Reservation $inspectFixture -ExpectedReservationId 'abc123' -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId 42001)
+    Assert-True 'qac inspect reservation for another process is rejected' (-not (Test-QacS22R10ReservationIdentity -Reservation $inspectFixture -ExpectedReservationId 'abc123' -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId 42002))
+    Assert-True 'qac inspect response for another reservation id is rejected' (-not (Test-QacS22R10ReservationIdentity -Reservation $inspectFixture -ExpectedReservationId 'def456' -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId 42001))
+    Assert-True 'QAC release line confirms the exact reservation and child identity' (Test-QacS22R10ReleaseIdentity -ReportedReservationId 'abc123' -ReportedChildProcessId 42001 -ExpectedReservationId 'abc123' -ExpectedChildProcessId 42001)
+    Assert-True 'release line from another reservation cannot confirm release' (-not (Test-QacS22R10ReleaseIdentity -ReportedReservationId 'def456' -ReportedChildProcessId 42001 -ExpectedReservationId 'abc123' -ExpectedChildProcessId 42001))
+    Assert-True 'release line for another child cannot confirm release' (-not (Test-QacS22R10ReleaseIdentity -ReportedReservationId 'abc123' -ReportedChildProcessId 42002 -ExpectedReservationId 'abc123' -ExpectedChildProcessId 42001))
     $connection=[PSCustomObject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=50001;OwningProcess=42001}
     Assert-True 'QMP listener ownership requires the exact QEMU child PID' (Test-QacS22R10QmpListenerOwner -Connections @($connection) -Port 50001 -ExpectedProcessId 42001)
     Assert-True 'QMP listener owned by another PID is rejected' (-not (Test-QacS22R10QmpListenerOwner -Connections @($connection) -Port 50001 -ExpectedProcessId 42002))
@@ -317,6 +359,8 @@ try {
     Write-Host "QAC3C3 launcher contract checks passed: $script:checkCount/$script:checkCount"
 } finally {
     Close-QacS22R10QmpClient -Client $qmpClient
+    if ($drainProcess) { $drainProcess.Dispose() }
+    if ($preExitDrainProcess) { $preExitDrainProcess.Dispose() }
     if ($goodServer) { $goodServer.Dispose() }
     if ($wrongServer) { $wrongServer.Dispose() }
     if ($silentServer) { $silentServer.Dispose() }

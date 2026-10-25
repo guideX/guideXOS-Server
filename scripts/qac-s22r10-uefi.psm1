@@ -228,16 +228,31 @@ function Test-QacS22R10ReservationIdentity {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Reservation,
+        [Parameter(Mandatory)][string]$ExpectedReservationId,
         [Parameter(Mandatory)][string]$ExpectedProject,
         [Parameter(Mandatory)][string]$ExpectedMode,
         [Parameter(Mandatory)][string]$ExpectedState,
         [Parameter(Mandatory)][int]$ExpectedChildProcessId
     )
     $reportedChildPid = if ($null -ne $Reservation.processId) { [int]$Reservation.processId } else { [int]$Reservation.childProcessId }
-    return ([string]$Reservation.project -ceq $ExpectedProject) -and
+    return ([string]$Reservation.id -ceq $ExpectedReservationId) -and
+        ([string]$Reservation.project -ceq $ExpectedProject) -and
         ([string]$Reservation.mode -ceq $ExpectedMode) -and
         ([string]$Reservation.state -ceq $ExpectedState) -and
         ($reportedChildPid -eq $ExpectedChildProcessId)
+}
+
+function Test-QacS22R10ReleaseIdentity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ReportedReservationId,
+        [Parameter(Mandatory)][int]$ReportedChildProcessId,
+        [Parameter(Mandatory)][string]$ExpectedReservationId,
+        [Parameter(Mandatory)][int]$ExpectedChildProcessId
+    )
+    return $ReportedReservationId.Equals($ExpectedReservationId, [StringComparison]::OrdinalIgnoreCase) -and
+        $ReportedChildProcessId -gt 0 -and
+        $ReportedChildProcessId -eq $ExpectedChildProcessId
 }
 
 function New-QacS22R10ScreendumpCommand {
@@ -296,6 +311,40 @@ function Test-QacS22R10CleanupEligible {
     )
     if ($ChildWasLaunched) { return $ChildExitVerified -and $ReservationReleaseVerified -and $ReservationState -eq 'Released' }
     return $ReservationState -in @('Cancelled','Expired','Failed','Released') -and $ReservationReleaseVerified
+}
+
+function Complete-QacS22R10ProcessOutputDrain {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][ref]$StdoutTask,
+        [Parameter(Mandatory)][ref]$StderrTask,
+        [ValidateRange(1,30)][int]$DrainTimeoutSeconds = 5
+    )
+
+    if (-not $Process.HasExited) { throw 'QAC output can only be drained to EOF after the process exits.' }
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($DrainTimeoutSeconds)
+    $records = [System.Collections.Generic.List[object]]::new()
+    while (($null -ne $StdoutTask.Value -or $null -ne $StderrTask.Value) -and [DateTimeOffset]::UtcNow -lt $deadline) {
+        foreach ($streamName in @('stdout','stderr')) {
+            $taskRef = if ($streamName -eq 'stdout') { $StdoutTask } else { $StderrTask }
+            while ($null -ne $taskRef.Value -and $taskRef.Value.IsCompleted) {
+                $line = $taskRef.Value.GetAwaiter().GetResult()
+                if ($null -eq $line) {
+                    $taskRef.Value = $null
+                    break
+                }
+                [void]$records.Add([PSCustomObject]@{Stream=$streamName;Line=$line})
+                if ($streamName -eq 'stdout') { $taskRef.Value = $Process.StandardOutput.ReadLineAsync() }
+                else { $taskRef.Value = $Process.StandardError.ReadLineAsync() }
+            }
+        }
+        if ($null -ne $StdoutTask.Value -or $null -ne $StderrTask.Value) { Start-Sleep -Milliseconds 10 }
+    }
+    if ($null -ne $StdoutTask.Value -or $null -ne $StderrTask.Value) {
+        throw "Timed out after $DrainTimeoutSeconds seconds waiting for QAC CLI output streams to close."
+    }
+    return $records.ToArray()
 }
 
 function Get-QacS22R10QmpResponse {
@@ -407,4 +456,4 @@ function Close-QacS22R10QmpClient {
     try { $Client.Tcp.Dispose() } catch { }
 }
 
-Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Test-QacS22R10CleanupEligible, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient
+Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient
