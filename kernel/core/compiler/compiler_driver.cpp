@@ -23,6 +23,7 @@ static uint8_t s_compare[COMPILER_MAX_OUTPUT_BYTES];
 static uint8_t s_object[COMPILER_MAX_OBJECT_BYTES];
 static uint8_t s_headerSource[COMPILER_MAX_INCLUDE_DEPTH][COMPILER_MAX_DECLARATION_FILE_BYTES + 1];
 static CompiledModule s_modules[COMPILER_MAX_TRANSLATION_UNITS] = {};
+static CompiledModule s_objectValidationModule = {};
 static LinkedProgram s_linked = {};
 
 static uint64_t hash_bytes(const uint8_t* bytes, uint32_t count)
@@ -42,6 +43,13 @@ static uint32_t string_length(const char* value)
     uint32_t length = 0;
     if (value) while (value[length]) ++length;
     return length;
+}
+
+static void clear_storage(void* storage, uint32_t byteCount)
+{
+    uint8_t* bytes = static_cast<uint8_t*>(storage);
+    if (!bytes) return;
+    for (uint32_t i = 0; i < byteCount; ++i) bytes[i] = 0;
 }
 
 static bool text_equal(const char* left, const char* right);
@@ -683,20 +691,23 @@ static bool load_cached_object(const char* objectPath, const char* sourcePath,
     const uint32_t bytes = static_cast<uint32_t>(info.size);
     if (vfs::read_file(objectPath, s_object, bytes) != static_cast<int32_t>(bytes)) return false;
     Diagnostics diagnostics;
-    CompiledModule loaded = {};
-    if (!deserialize_elf_object(s_object, bytes, &loaded, diagnostics)) {
+    // The caller supplies a cleared slot in the static project-module table.
+    // Decode in place so a cache hit does not reserve a second full module on
+    // the 128 KiB compiler service stack.
+    if (!deserialize_elf_object(s_object, bytes, module, diagnostics)) {
         serial::puts("Compiler: cache_reject "); serial::puts(objectPath); serial::puts(" reason=malformed ELF object\n");
         return false;
     }
-    if (!elf_object_identity_matches(loaded, sourceIdentityPath, sourceBytes, sourceHash)) {
+    if (!elf_object_identity_matches(*module, sourceIdentityPath, sourceBytes, sourceHash)) {
+        clear_storage(module, static_cast<uint32_t>(sizeof(*module)));
         serial::puts("Compiler: cache_reject "); serial::puts(objectPath); serial::puts(" reason=source identity mismatch\n");
         return false;
     }
-    if (!declaration_dependencies_current(loaded, sourcePath, sourceIdentityPath)) {
+    if (!declaration_dependencies_current(*module, sourcePath, sourceIdentityPath)) {
+        clear_storage(module, static_cast<uint32_t>(sizeof(*module)));
         serial::puts("Compiler: cache_reject "); serial::puts(objectPath); serial::puts(" reason=declaration dependency mismatch\n");
         return false;
     }
-    *module = loaded;
     return true;
 }
 
@@ -705,9 +716,14 @@ static bool publish_object(const char* objectPath, const CompiledModule& module)
     if (!objectPath || objectPath[0] == '\0') return false;
     uint32_t bytes = 0;
     if (!serialize_elf_object(module, s_object, sizeof(s_object), &bytes)) return false;
-    CompiledModule checked = {};
     Diagnostics diagnostics;
-    if (!deserialize_elf_object(s_object, bytes, &checked, diagnostics)) return false;
+    clear_storage(&s_objectValidationModule,
+                  static_cast<uint32_t>(sizeof(s_objectValidationModule)));
+    const bool objectValidated = deserialize_elf_object(s_object, bytes,
+                                                        &s_objectValidationModule, diagnostics);
+    clear_storage(&s_objectValidationModule,
+                  static_cast<uint32_t>(sizeof(s_objectValidationModule)));
+    if (!objectValidated) return false;
     char temporary[COMPILER_MAX_SOURCE_PATH_BYTES + 1] = {};
     if (!temporary_sibling_path(objectPath, temporary, sizeof(temporary))) return false;
     if (vfs::exists(temporary)) (void)vfs::unlink(temporary);
@@ -748,9 +764,10 @@ static bool compile_project_impl(const char* const* sourcePaths,
                                  const char* outputPath,
                                  CompileSummary* summary)
 {
-    if (summary) *summary = {};
-    for (uint32_t i = 0; i < COMPILER_MAX_TRANSLATION_UNITS; ++i) s_modules[i] = {};
-    s_linked = {};
+    if (summary) clear_storage(summary, static_cast<uint32_t>(sizeof(*summary)));
+    for (uint32_t i = 0; i < COMPILER_MAX_TRANSLATION_UNITS; ++i)
+        clear_storage(&s_modules[i], static_cast<uint32_t>(sizeof(s_modules[i])));
+    clear_storage(&s_linked, static_cast<uint32_t>(sizeof(s_linked)));
     const SourceLocation driverLocation = {0, 1, 1};
     if (!sourcePaths || sourceCount == 0 || sourceCount > COMPILER_MAX_TRANSLATION_UNITS ||
         !outputPath || outputPath[0] == '\0') {
@@ -858,7 +875,7 @@ static bool compile_project_impl(const char* const* sourcePaths,
                 // The compiler product is deliberately discarded before the
                 // linker sees it. This makes the clean-build path exercise
                 // the same close/reopen boundary as a cache hit.
-                s_modules[i] = {};
+                clear_storage(&s_modules[i], static_cast<uint32_t>(sizeof(s_modules[i])));
                 if (!load_cached_object(objectPaths[i], sourcePath, sourceIdentityPath, sourceBytes, sourceHash, &s_modules[i])) {
                     diagnostics.error(driverLocation, "published ELF object could not be reopened", "object");
                     if (summary) append_diagnostics(diagnostics, summary, sourcePath);

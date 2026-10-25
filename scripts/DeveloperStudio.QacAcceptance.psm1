@@ -20,9 +20,11 @@ function Resolve-QacAcceptanceCliPath {
 }
 
 function Get-QacAcceptancePassMarker {
-    param([Parameter(Mandatory = $true)][ValidateSet('28Q', '28O')][string]$Phase)
+    param([Parameter(Mandatory = $true)][ValidateSet('27E', '27F', '28Q', '28O')][string]$Phase)
 
     switch ($Phase) {
+        '27E' { return 'phase27e=PASS' }
+        '27F' { return 'phase27f=PASS' }
         '28Q' { return 'DEVELOPER_STUDIO_PHASE28Q_PASS' }
         '28O' { return 'DEVELOPER_STUDIO_PHASE28O_PASS' }
     }

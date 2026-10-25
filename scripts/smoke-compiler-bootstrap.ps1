@@ -77,6 +77,8 @@ param(
     [switch]$Phase29YUseStagedDeveloperStudioPackage,
     [switch]$QemuExceptionTrace,
     [switch]$QacDeveloperStudioAcceptance,
+    [string]$KernelBuildDirectory = '',
+    [string]$EvidenceOutputDirectory = '',
     [string]$QacCliPath = '',
     [int]$QacAdmissionTimeoutSeconds = 1800,
     [switch]$Phase29ISentinelOnly,
@@ -103,11 +105,14 @@ if ($Phase29COnly) { $Phase28QOnly = $true }
 $Phase29LOwnershipGate = $Phase29LOwnershipOnly -or $Phase29LFullAcceptance
 $qacAcceptanceEnabled = [bool]$QacDeveloperStudioAcceptance
 $qacCliResolved = ''
+$qacAcceptancePhase = ''
 $script:qacRecoveryRequired = $false
 if ($qacAcceptanceEnabled) {
-    if (-not ($Phase28QOnly -or $Phase28OOnly)) {
-        throw '-QacDeveloperStudioAcceptance is supported only by the focused Developer Studio Phase 28Q and Phase 28O guest acceptance launchers.'
-    }
+    if ($Phase28QOnly) { $qacAcceptancePhase = '28Q' }
+    elseif ($Phase28OOnly) { $qacAcceptancePhase = '28O' }
+    elseif ($Phase27F) { $qacAcceptancePhase = '27F' }
+    elseif ($Phase27E) { $qacAcceptancePhase = '27E' }
+    else { throw '-QacDeveloperStudioAcceptance requires focused Phase27E/Phase27F, Phase28QOnly, or Phase28OOnly.' }
     if ($QacAdmissionTimeoutSeconds -lt 1 -or $QacAdmissionTimeoutSeconds -gt 86400) {
         throw 'QacAdmissionTimeoutSeconds must be between 1 and 86400 seconds.'
     }
@@ -393,6 +398,17 @@ if (($Phase28J -or $Phase28K) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 
 if (($Phase28L -or $Phase28M -or $Phase28N -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29ISentinelOnly -or $Phase29EManifestOnly) -and $TimeoutSeconds -lt 120) { $TimeoutSeconds = 120 }
 $root = Split-Path -Parent $PSScriptRoot
 $kernelDirectory = Join-Path $root "kernel"
+$kernelBuildDirectoryRelative = 'build/amd64'
+if (-not [string]::IsNullOrWhiteSpace($KernelBuildDirectory)) {
+    $candidateBuildDirectory = $KernelBuildDirectory.Replace('\', '/').Trim('/')
+    if ($candidateBuildDirectory -notmatch '^out/' -or
+        $candidateBuildDirectory -match '(^|/)\.\.(?:/|$)' -or
+        $candidateBuildDirectory -match '^[A-Za-z]:') {
+        throw 'KernelBuildDirectory must be a relative path under kernel/out.'
+    }
+    $kernelBuildDirectoryRelative = $candidateBuildDirectory
+}
+$kernelBuildDirectory = Join-Path $kernelDirectory $kernelBuildDirectoryRelative
 $espDirectory = Join-Path $root "ESP"
 $fixtureDirectory = Join-Path $root "scripts/fixtures/phase27b"
 $phase27dFixtureDirectory = Join-Path $root "scripts/fixtures/phase27d"
@@ -466,6 +482,14 @@ $qemuPath = "C:\Program Files\qemu\qemu-system-x86_64.exe"
 $ovmfCodePath = Join-Path $root "OVMF.fd"
 $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-phase28g-" + [guid]::NewGuid().ToString("N"))
 $evidenceDirectory = Join-Path $tempDirectory "artifacts"
+$bootloaderOutputDirectory = Join-Path $tempDirectory "bootloader-bin"
+$bootloaderIntermediateDirectory = Join-Path $tempDirectory "bootloader-obj"
+if ($Phase27E -or $Phase27F) {
+    $phase27eAppDirectory = Join-Path $tempDirectory 'Apps/DS27E'
+}
+if ($Phase27F) {
+    $phase27fAppDirectory = Join-Path $tempDirectory 'Apps/DS27F'
+}
 $backups = @{}
 $directoryBackups = @{}
 $activeEspDirectory = $espDirectory
@@ -1199,7 +1223,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 if ($qacState.Launched -and -not $qacState.RequiredMarkerObserved -and
                     (Test-Path -LiteralPath $serialPath)) {
                     try {
-                        $qacRequiredMarker = Get-QacAcceptancePassMarker -Phase $(if ($Phase28QOnly) { '28Q' } else { '28O' })
+                        $qacRequiredMarker = Get-QacAcceptancePassMarker -Phase $qacAcceptancePhase
                         $qacSerialObservation = Read-QacSerialMarker -Path $serialPath -Marker $qacRequiredMarker `
                             -State $qacState.SerialReaderState
                         $qacState.SerialBytesObserved = $qacSerialObservation.TotalBytes
@@ -1215,7 +1239,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                             $qacState.RequiredMarkerObservedWithinDeadline = $qacMarkerWithinDeadline -and $qacMarkerBeforeChildExit
                             $qacElapsedMilliseconds = [Math]::Round(($qacMarkerObservedAtUtc - $qacState.RunStartedAtUtc).TotalMilliseconds, 1)
                             Write-P29JHostTrace $hostTracePath 'QAC PASS MARKER OBSERVED' ("boot={0} phase={1} observed_utc={2} elapsed_ms={3} within_deadline={4} before_child_exit={5} deadline_utc={6} child_exit_utc={7} serial_bytes={8} read_io_errors={9}" -f
-                                $runNumber, $(if ($Phase28QOnly) { '28Q' } else { '28O' }), $qacMarkerObservedAtUtc.ToString('o'),
+                                $runNumber, $qacAcceptancePhase, $qacMarkerObservedAtUtc.ToString('o'),
                                 $qacElapsedMilliseconds, [int]$qacMarkerWithinDeadline, [int]$qacMarkerBeforeChildExit,
                                 $qacState.RunDeadline.ToString('o'), $(if ($qacState.QemuExitedAtUtc) { $qacState.QemuExitedAtUtc.ToString('o') } else { 'not-reported' }),
                                 $qacState.SerialBytesObserved, $qacState.SerialProbeIOExceptionCount)
@@ -1455,10 +1479,10 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         $debugcon = Read-SerialText $debugconPath
         $qemuDebug = Read-SerialText $qemuDebugPath
         if ($qacAcceptanceEnabled -and -not $qacState.RequiredMarkerObserved) {
-            $qacFinalMarker = Get-QacAcceptancePassMarker -Phase $(if ($Phase28QOnly) { '28Q' } else { '28O' })
+            $qacFinalMarker = Get-QacAcceptancePassMarker -Phase $qacAcceptancePhase
             if ($serial.Contains($qacFinalMarker)) {
                 Write-P29JHostTrace $hostTracePath 'QAC PASS MARKER FINAL-ONLY' ("boot={0} phase={1} inspected_utc={2} qemu_exit_utc={3} runtime_timeout={4} serial_bytes={5} read_io_errors={6} acceptance=0" -f
-                    $runNumber, $(if ($Phase28QOnly) { '28Q' } else { '28O' }), [DateTime]::UtcNow.ToString('o'),
+                    $runNumber, $qacAcceptancePhase, [DateTime]::UtcNow.ToString('o'),
                     $(if ($qacState.QemuExitedAtUtc) { $qacState.QemuExitedAtUtc.ToString('o') } else { 'not-reported' }),
                     [int]$qacState.RuntimeTimedOut, $qacState.SerialReaderState.Offset, $qacState.SerialProbeIOExceptionCount)
             }
@@ -1528,7 +1552,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
             )
         }
         if ($Phase27F) {
-            $requiredMarkers += @(
+            $phase27fRequiredMarkers = @(
                 "phase27f_run_backend=PASS",
                 "phase27f_ide_run=PASS",
                 "phase27f_source_edit_run=PASS",
@@ -1537,7 +1561,6 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 "phase27f_run_recovery=PASS",
                 "phase27f_repeat=PASS",
                 "phase27f_repeat_run=PASS",
-                "phase27f_output_isolation=PASS",
                 "phase27f_exit_code=PASS",
                 "phase27f_artifact_identity=PASS",
                 "phase27f_kernel_survival=PASS",
@@ -1545,6 +1568,18 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 "phase27f_app_launch=PASS",
                 "ELF Loader: Phase 27F smoke PASS"
             )
+            $runContractHeader = Join-Path $root 'sdk/include/guidexos/development_run.h'
+            $runOutputCapability = $false
+            if (Test-Path -LiteralPath $runContractHeader -PathType Leaf) {
+                $runOutputCapability = [bool](Select-String -LiteralPath $runContractHeader `
+                    -Pattern 'GX_DEVELOPMENT_RUN_CAP_OUTPUT_CAPTURE' -Quiet)
+            }
+            if ($runOutputCapability) {
+                $phase27fRequiredMarkers += 'phase27f_output_isolation=PASS'
+            } else {
+                $phase27fRequiredMarkers += 'phase27f_output_capture=UNSUPPORTED_LEGACY_SDK'
+            }
+            $requiredMarkers += $phase27fRequiredMarkers
         }
         if ($Phase27G) {
             $requiredMarkers += @(
@@ -3753,14 +3788,18 @@ try {
         if (!(Test-Path (Join-Path $developerStudioRoot "scripts/build-phase27e.ps1"))) {
             throw "Developer Studio Phase 27E build script is missing: $developerStudioRoot"
         }
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27e.ps1") -ServerRoot $root
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27e.ps1") `
+            -ServerRoot $root -PackageDirectory $phase27eAppDirectory `
+            -BuildScratchDirectory (Join-Path $tempDirectory 'build-scratch/phase27e')
         if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27E proof app build failed" }
     }
     if ($Phase27F) {
         if (!(Test-Path (Join-Path $developerStudioRoot "scripts/build-phase27f.ps1"))) {
             throw "Developer Studio Phase 27F build script is missing: $developerStudioRoot"
         }
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27f.ps1") -ServerRoot $root
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $developerStudioRoot "scripts/build-phase27f.ps1") `
+            -ServerRoot $root -PackageDirectory $phase27fAppDirectory `
+            -BuildScratchDirectory (Join-Path $tempDirectory 'build-scratch/phase27f')
         if ($LASTEXITCODE -ne 0) { throw "Developer Studio Phase 27F proof app build failed" }
     }
     if ($Phase27G) {
@@ -3895,9 +3934,11 @@ try {
     if ($Phase28M) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE28M_SMOKE" }
     Push-Location $kernelDirectory
     try {
-        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/main.o")
-        if ($Phase27E -or $Phase27F -or $Phase27M -or $Phase27O -or $Phase27P -or $Phase27Q -or $Phase27R -or $Phase27S -or $Phase27T -or $Phase27U -or $Phase27V -or $Phase27W -or $Phase27X -or $Phase27Y -or $Phase27Z -or $Phase28A -or $Phase28B -or $Phase28C -or $Phase28D -or $Phase28E -or $Phase28F -or $Phase28G -or $Phase28H -or $Phase28I -or $Phase28J -or $Phase28K -or $Phase28L -or $Phase28M) {
-            Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/native_elf/native_elf_smoke.o")
+        if ([string]::IsNullOrWhiteSpace($KernelBuildDirectory)) {
+            Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/main.o")
+            if ($Phase27E -or $Phase27F -or $Phase27M -or $Phase27O -or $Phase27P -or $Phase27Q -or $Phase27R -or $Phase27S -or $Phase27T -or $Phase27U -or $Phase27V -or $Phase27W -or $Phase27X -or $Phase27Y -or $Phase27Z -or $Phase28A -or $Phase28B -or $Phase28C -or $Phase28D -or $Phase28E -or $Phase28F -or $Phase28G -or $Phase28H -or $Phase28I -or $Phase28J -or $Phase28K -or $Phase28L -or $Phase28M) {
+                Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $kernelDirectory "build/amd64/obj/core/native_elf/native_elf_smoke.o")
+            }
         }
         $savedErrorActionPreference = $ErrorActionPreference
         try {
@@ -3905,7 +3946,7 @@ try {
             # letting PowerShell's Stop policy abort a successful make.
             $ErrorActionPreference = "Continue"
             $makeArguments = @(
-                "all", "ARCH=amd64", "EXTRA_CFLAGS=$env:EXTRA_CFLAGS",
+                "all", "ARCH=amd64", "BUILD_DIR=$kernelBuildDirectoryRelative", "EXTRA_CFLAGS=$env:EXTRA_CFLAGS",
                 "MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS="
             )
             # This checkout may intentionally omit the optional third-party
@@ -3934,13 +3975,16 @@ try {
         Pop-Location
     }
 
+    New-Item -ItemType Directory -Force -Path $bootloaderOutputDirectory, $bootloaderIntermediateDirectory | Out-Null
+    $bootloaderOutArgument = "/p:OutDir=$($bootloaderOutputDirectory.TrimEnd([char]92))\"
+    $bootloaderIntArgument = "/p:IntDir=$($bootloaderIntermediateDirectory.TrimEnd([char]92))\"
     & $msbuild (Join-Path $root "guideXOSBootLoader/guideXOSBootLoader.vcxproj") `
         /p:Configuration=Release /p:Platform=x64 /t:Rebuild /m /nologo /verbosity:minimal `
-        /p:TrackFileAccess=false
+        /p:TrackFileAccess=false $bootloaderOutArgument $bootloaderIntArgument
     if ($LASTEXITCODE -ne 0) { throw "bootloader build failed" }
 
-    $kernelBinary = Join-Path $kernelDirectory "build/amd64/bin/kernel.elf"
-    $bootloaderBinary = Join-Path $root "guideXOSBootLoader/x64/Release/guideXOSBootLoader.exe"
+    $kernelBinary = Join-Path $kernelBuildDirectory "bin/kernel.elf"
+    $bootloaderBinary = Join-Path $bootloaderOutputDirectory "guideXOSBootLoader.exe"
     if (!(Test-Path $kernelBinary) -or !(Test-Path $bootloaderBinary)) {
         throw "fresh kernel or bootloader output is missing"
     }
@@ -5952,6 +5996,21 @@ finally {
             Copy-Item $directoryBackups[$relativeDirectory] $target -Recurse -Force
         }
     }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($EvidenceOutputDirectory) -and (Test-Path -LiteralPath $tempDirectory)) {
+        $evidenceDestination = if ([IO.Path]::IsPathRooted($EvidenceOutputDirectory)) {
+            [IO.Path]::GetFullPath($EvidenceOutputDirectory)
+        } else {
+            [IO.Path]::GetFullPath((Join-Path $root $EvidenceOutputDirectory))
+        }
+        New-Item -ItemType Directory -Force -Path $evidenceDestination | Out-Null
+        Get-ChildItem -LiteralPath $tempDirectory -File -Filter 'boot*.log' -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $evidenceDestination -Force
+        $artifactSource = Join-Path $tempDirectory 'artifacts'
+        if (Test-Path -LiteralPath $artifactSource -PathType Container) {
+            Copy-Item -LiteralPath $artifactSource -Destination (Join-Path $evidenceDestination 'artifacts') -Recurse -Force
+        }
+        Write-Host "Boot evidence preserved at: $evidenceDestination" -ForegroundColor DarkCyan
     }
     if ($Phase28LOnly -or $Phase28MOnly -or $Phase28NOnly -or $Phase28OOnly -or $Phase28POnly -or $Phase28QOnly -or $Phase29COnly -or $Phase29LOwnershipOnly -or $Phase29LFullAcceptance -or $Phase29ISentinelOnly -or $Phase29EManifestOnly) {
         $proofLabel = if ($Phase29LOwnershipOnly -or $Phase29LFullAcceptance) { "Phase 29L ownership" } elseif ($Phase29EManifestOnly) { "Phase 29E manifest identity" } elseif ($Phase29ISentinelOnly) { "Phase 29I sentinel" } elseif ($Phase29COnly) { "Phase 29C" } elseif ($Phase28QOnly) { "Phase 28Q" } elseif ($Phase28POnly) { "Phase 28P" } elseif ($Phase28OOnly) { "Phase 28O" } elseif ($Phase28NOnly) { "Phase 28N" } elseif ($Phase28MOnly) { "Phase 28M" } else { "Phase 28L" }

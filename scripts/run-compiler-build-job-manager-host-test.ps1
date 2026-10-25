@@ -1,7 +1,10 @@
+param([string]$OutputDirectory = '')
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$outputDirectory = Join-Path $repoRoot "out/comp3r4-validation"
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot "out/comp3r4-validation" }
+$outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $testBinary = Join-Path $outputDirectory "compiler-build-job-manager-host-test.exe"
 $buildLog = Join-Path $outputDirectory "compiler-build-job-manager-host-test-build.log"
 

@@ -8,6 +8,8 @@ function Assert-QacTest([bool]$Condition, [string]$Message) {
 
 Assert-QacTest ((Get-QacAcceptancePassMarker -Phase '28Q') -ceq 'DEVELOPER_STUDIO_PHASE28Q_PASS') 'Phase 28Q waits only for its guest acceptance PASS marker.'
 Assert-QacTest ((Get-QacAcceptancePassMarker -Phase '28O') -ceq 'DEVELOPER_STUDIO_PHASE28O_PASS') 'Phase 28O waits only for its guest acceptance PASS marker.'
+Assert-QacTest ((Get-QacAcceptancePassMarker -Phase '27E') -ceq 'phase27e=PASS') 'Phase 27E waits only for its guest acceptance PASS marker.'
+Assert-QacTest ((Get-QacAcceptancePassMarker -Phase '27F') -ceq 'phase27f=PASS') 'Phase 27F waits only for its guest acceptance PASS marker.'
 
 Add-Type -TypeDefinition @'
 using System;

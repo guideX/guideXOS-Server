@@ -1,7 +1,10 @@
+param([string]$OutputDirectory = '')
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$outputDirectory = Join-Path $repoRoot "out/comp3-validation"
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot "out/comp3-validation" }
+$outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $testBinary = Join-Path $outputDirectory "native-build-service-responsiveness-test.exe"
 $buildLog = Join-Path $outputDirectory "native-build-service-responsiveness-build.log"
 $fixtureRoot = Join-Path $outputDirectory "hosted-service-fixture"

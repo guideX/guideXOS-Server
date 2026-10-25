@@ -1,6 +1,9 @@
+param([string]$OutputDirectory = '')
+
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$outputDirectory = Join-Path $repoRoot "out/validation"
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot "out/validation" }
+$outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $testBinary = Join-Path $outputDirectory "compiler-structs-host-test.exe"
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 $gxx = (Get-Command g++ -ErrorAction Stop).Source
