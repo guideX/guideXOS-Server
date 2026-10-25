@@ -228,6 +228,16 @@ static const uint64_t XHCI_ERSTBA_PTR_MASK = 0xFFFFFFFFFFFFFFC0ULL;
 static const uint64_t XHCI_ERDP_PTR_MASK   = 0xFFFFFFFFFFFFFFF0ULL;
 static const uint64_t XHCI_ERDP_EHB        = 0x00000008;
 
+inline bool xhci_encode_erdp(uint64_t eventAddress, uint64_t* valueOut)
+{
+    if (valueOut == nullptr || eventAddress == 0u ||
+        (eventAddress & 0x0Fu) != 0u) {
+        return false;
+    }
+    *valueOut = (eventAddress & XHCI_ERDP_PTR_MASK) | XHCI_ERDP_EHB;
+    return true;
+}
+
 // ================================================================
 // Port register offsets (from opBase + 0x400 + (portIndex-1)*0x10)
 // ================================================================
@@ -335,6 +345,7 @@ enum class XhciOwnershipState : uint8_t {
 
 struct XhciPortStatus {
     uint8_t  portIndex;       // 1-based
+    uint32_t rawStatus;       // PORTSC value observed from MMIO
     bool     connected;       // CCS
     bool     enabled;         // PED
     bool     powered;         // PP
@@ -447,6 +458,7 @@ inline XhciPortStatus decode_port_status(uint8_t portIndex, uint32_t portsc)
 {
     XhciPortStatus ps;
     ps.portIndex       = portIndex;
+    ps.rawStatus       = portsc;
     ps.connected       = portsc_is_connected(portsc);
     ps.enabled         = portsc_is_enabled(portsc);
     ps.powered         = portsc_is_powered(portsc);
@@ -483,6 +495,43 @@ inline uint32_t ring_index(uint32_t index, uint32_t size)
 inline bool ring_is_power_of_two(uint32_t size)
 {
     return size != 0 && (size & (size - 1)) == 0;
+}
+
+inline bool xhci_command_ring_advance(uint32_t ringSize,
+                                     uint32_t* index,
+                                     uint32_t* cycle,
+                                     bool* wrapped)
+{
+    if (wrapped != nullptr) *wrapped = false;
+    if (index == nullptr || cycle == nullptr || wrapped == nullptr ||
+        !ring_is_power_of_two(ringSize) || ringSize < 4u ||
+        *index >= ringSize - 1u || *cycle > 1u) {
+        return false;
+    }
+    ++(*index);
+    if (*index == ringSize - 1u) {
+        *index = 0u;
+        *cycle ^= 1u;
+        *wrapped = true;
+    }
+    return true;
+}
+
+inline bool xhci_event_ring_advance(uint32_t ringSize,
+                                    uint32_t* index,
+                                    uint32_t* cycle)
+{
+    if (index == nullptr || cycle == nullptr ||
+        !ring_is_power_of_two(ringSize) || ringSize < 2u ||
+        *index >= ringSize || *cycle > 1u) {
+        return false;
+    }
+    ++(*index);
+    if (*index == ringSize) {
+        *index = 0u;
+        *cycle ^= 1u;
+    }
+    return true;
 }
 
 // ================================================================
@@ -699,6 +748,135 @@ inline bool translate_kernel_dma_address(uint64_t virtualAddress,
     if (lastByteOffset > (~static_cast<uint64_t>(0) - physicalAddress)) return false;
     if (!ac64 && physicalAddress + lastByteOffset > 0xFFFFFFFFULL) return false;
     *physicalOut = physicalAddress;
+    return true;
+}
+
+// INPUT3D-R5 uses bounded static backing for xHCI scratchpads. Controllers
+// may advertise up to 1023 entries, while this first implementation reserves
+// a small fixed pool and fails closed when the advertised request exceeds it.
+static const uint32_t XHCI_MAX_DMA_SCRATCHPAD_BUFFERS = 16u;
+static const uint32_t XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE = 64u * 1024u;
+static const uint32_t XHCI_DMA_SCRATCHPAD_STORAGE_SIZE =
+    (XHCI_MAX_DMA_SCRATCHPAD_BUFFERS + 1u) * XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE;
+
+enum class XhciDeviceDmaTranslationEvidence : uint8_t {
+    Unknown = 0,
+    NoAcpiRemappingTable,
+    AcpiRemappingTablePresent
+};
+
+inline bool xhci_device_dma_translation_verified(
+    XhciDeviceDmaTranslationEvidence evidence)
+{
+    return evidence == XhciDeviceDmaTranslationEvidence::NoAcpiRemappingTable;
+}
+
+enum class XhciScratchpadPlanError : uint8_t {
+    None = 0,
+    CountExceedsCapacity,
+    NoSupportedPageSize,
+    PageSizeExceedsCapacity,
+    StorageInsufficient,
+    InvalidOutput
+};
+
+struct XhciScratchpadPlan {
+    uint32_t count;
+    uint32_t pageSize;
+    uint32_t storageBytes;
+    XhciScratchpadPlanError error;
+};
+
+// PAGESIZE bit 0 describes 4 KiB; each following bit doubles the size.
+// Select the smallest advertised page that fits the statically reserved pool.
+inline bool make_xhci_scratchpad_plan(uint32_t count,
+                                      uint32_t pageSizeBitmap,
+                                      uint32_t bufferCapacity,
+                                      uint32_t maxPageSize,
+                                      uint32_t storageCapacity,
+                                      XhciScratchpadPlan* out)
+{
+    if (out == nullptr) return false;
+    *out = {};
+    out->error = XhciScratchpadPlanError::InvalidOutput;
+
+    if (count == 0u) {
+        out->error = XhciScratchpadPlanError::None;
+        return true;
+    }
+    if (count > bufferCapacity) {
+        out->error = XhciScratchpadPlanError::CountExceedsCapacity;
+        return false;
+    }
+
+    bool anyPageSize = false;
+    uint32_t selectedPageSize = 0u;
+    for (uint32_t bit = 0u; bit < 16u; ++bit) {
+        if ((pageSizeBitmap & (1u << bit)) == 0u) continue;
+        anyPageSize = true;
+        const uint32_t candidate = 4096u << bit;
+        if (candidate <= maxPageSize) {
+            selectedPageSize = candidate;
+            break;
+        }
+    }
+    if (!anyPageSize) {
+        out->error = XhciScratchpadPlanError::NoSupportedPageSize;
+        return false;
+    }
+    if (selectedPageSize == 0u) {
+        out->error = XhciScratchpadPlanError::PageSizeExceedsCapacity;
+        return false;
+    }
+    if (count > storageCapacity / selectedPageSize) {
+        out->error = XhciScratchpadPlanError::StorageInsufficient;
+        return false;
+    }
+
+    out->count = count;
+    out->pageSize = selectedPageSize;
+    out->storageBytes = count * selectedPageSize;
+    out->error = XhciScratchpadPlanError::None;
+    return true;
+}
+
+// Construct the Scratchpad Buffer Array only after every entry passes range,
+// page alignment, address-width, and non-overlap checks. On failure the output
+// is cleared so no partially valid array can be published to the controller.
+inline bool build_xhci_scratchpad_array(uint32_t count,
+                                       uint32_t pageSize,
+                                       const uint64_t* bufferAddresses,
+                                       uint32_t bufferCapacity,
+                                       bool ac64,
+                                       uint64_t* arrayOut,
+                                       uint32_t arrayCapacity)
+{
+    if (arrayOut == nullptr || arrayCapacity == 0u) return false;
+    for (uint32_t i = 0u; i < arrayCapacity; ++i) arrayOut[i] = 0u;
+    if (count == 0u) return true;
+    if (count > bufferCapacity || count > arrayCapacity ||
+        bufferAddresses == nullptr || pageSize < 4096u ||
+        (pageSize & (pageSize - 1u)) != 0u) {
+        return false;
+    }
+
+    const uint64_t lastByteOffset = static_cast<uint64_t>(pageSize) - 1u;
+    for (uint32_t i = 0u; i < count; ++i) {
+        const uint64_t address = bufferAddresses[i];
+        if (address == 0u || (address & (pageSize - 1u)) != 0u ||
+            lastByteOffset > (~static_cast<uint64_t>(0) - address)) {
+            return false;
+        }
+        const uint64_t lastByte = address + lastByteOffset;
+        if (!ac64 && lastByte > 0xFFFFFFFFULL) return false;
+        for (uint32_t prior = 0u; prior < i; ++prior) {
+            const uint64_t priorAddress = bufferAddresses[prior];
+            const uint64_t priorLast = priorAddress + lastByteOffset;
+            if (address <= priorLast && priorAddress <= lastByte) return false;
+        }
+    }
+
+    for (uint32_t i = 0u; i < count; ++i) arrayOut[i] = bufferAddresses[i];
     return true;
 }
 
@@ -1224,6 +1402,11 @@ const XhciCapabilities* capabilities();
 // Set the kernel physical base for DMA address translation (Section 12).
 // Must be called before enumerate_device() on UEFI boot.
 void set_kernel_physical_base(uint64_t physicalBase);
+
+// Pass the bootloader's checksum-validated ACPI DMAR/IVRS scan result. DMA
+// addresses remain blocked when discovery is unknown or a remapping table is
+// present because no IOMMU domain/mapping implementation exists yet.
+void set_acpi_dma_remapping_state(bool scanValid, bool remappingTablePresent);
 
 // Enumerate the first connected USB device (Section 5).
 bool enumerate_device(EnumeratedDevice* out);

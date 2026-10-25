@@ -204,7 +204,7 @@ static void initialize_controller(ControllerSnapshot* controller)
     controller->supportedProtocolCount = 0u;
     controller->scratchpadBuffersRequired = 0u;
     controller->ac64 = false;
-    controller->iommuStatusUnknown = true;
+    controller->iommuStatus = IommuStatus::Unknown;
     controller->rootPortCount = 0u;
     controller->connectedPortCount = 0u;
     controller->selectedPort = 0u;
@@ -582,7 +582,8 @@ void record_capabilities(int32_t controllerIndex, uint8_t capLength,
                          uint16_t hciVersion, uint8_t maxSlots,
                          uint8_t maxPorts, uint8_t contextSize, bool ac64,
                          uint32_t supportedProtocolCount,
-                         uint32_t scratchpadBuffersRequired)
+                         uint32_t scratchpadBuffersRequired,
+                         IommuStatus iommuStatus)
 {
     lock_snapshot();
     ControllerSnapshot* controller = controller_for_index(controllerIndex);
@@ -597,6 +598,7 @@ void record_capabilities(int32_t controllerIndex, uint8_t capLength,
             controller->supportedProtocolCount = supportedProtocolCount;
         }
         controller->scratchpadBuffersRequired = scratchpadBuffersRequired;
+        controller->iommuStatus = iommuStatus;
         publish_snapshot_change_locked();
     }
     unlock_snapshot();
@@ -663,8 +665,14 @@ void record_stage(int32_t controllerIndex, Stage stage, Status status,
     s_snapshot.latestControllerIndex = controllerIndex;
     s_snapshot.latestStage = stage;
     s_snapshot.latestStatus = result;
+    // Unsupported HID discovery/report delivery are implementation frontiers,
+    // not hardware failures. Preserve an explicit unsupported DMA prerequisite
+    // because it is the condition that prevents controller execution.
+    const bool unsupportedPrerequisite =
+        status == Status::Unsupported && stage == Stage::DmaPrerequisites;
     if (!s_snapshot.firstFailure.present &&
-        (status == Status::Fail || status == Status::Timeout)) {
+        (status == Status::Fail || status == Status::Timeout ||
+         status == Status::Blocked || unsupportedPrerequisite)) {
         s_snapshot.firstFailure.present = true;
         s_snapshot.firstFailure.controllerIndex = controllerIndex;
         if (controller != nullptr) {
@@ -880,6 +888,16 @@ const char* controller_kind_name(ControllerKind kind)
     }
 }
 
+const char* iommu_status_name(IommuStatus status)
+{
+    switch (status) {
+        case IommuStatus::NoAcpiRemappingTable: return "NO ACPI REMAP TABLE";
+        case IommuStatus::AcpiRemappingTablePresent: return "ACPI REMAP TABLE PRESENT";
+        case IommuStatus::Unknown: return "UNKNOWN";
+        default: return "UNKNOWN";
+    }
+}
+
 uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capacity)
 {
     if (out == nullptr || capacity == 0u) return 0u;
@@ -887,7 +905,8 @@ uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capa
     uint32_t position = append_text(out, capacity, 0u, status_name(result.status));
     const bool includeResult = result.status == Status::Fail ||
                                result.status == Status::Timeout ||
-                               result.status == Status::Blocked;
+                               result.status == Status::Blocked ||
+                               result.status == Status::Unsupported;
     if (result.hasCompletionCode && includeResult) {
         position = append_text(out, capacity, position, " cc=0x");
         position = append_hex(out, capacity, position, result.completionCode, 2u);

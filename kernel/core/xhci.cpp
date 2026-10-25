@@ -147,6 +147,8 @@ static bool s_dmaReady = false;
 static uint8_t s_selectedPort = 0u;
 static XhciCapabilities s_caps = {};
 static uint8_t s_portCount = 0;
+static bool s_acpiDmaRemappingScanValid = false;
+static bool s_acpiDmaRemappingTablePresent = false;
 
 // DMA structures (statically allocated for INPUT2)
 static const uint32_t COMMAND_RING_SIZE = 64;
@@ -168,6 +170,27 @@ alignas(64) static uint8_t  s_inputCtx[INPUT_CTX_SIZE];
 alignas(64) static uint8_t  s_deviceCtx[DEVICE_CTX_SIZE];
 alignas(64) static XhciTrb  s_ep0Ring[EP0_RING_SIZE];
 alignas(64) static uint8_t  s_controlBuf[CONTROL_BUF_SIZE];
+
+struct XhciDmaAddresses {
+    uint64_t commandRing;
+    uint64_t eventRing;
+    uint64_t erst;
+    uint64_t dcbaa;
+    uint64_t inputCtx;
+    uint64_t deviceCtx;
+    uint64_t ep0Ring;
+    uint64_t controlBuf;
+    uint64_t scratchpadArray;
+};
+
+static XhciDmaAddresses s_dmaAddresses = {};
+static uint32_t s_scratchpadPageSize = 0u;
+static uint32_t s_scratchpadCount = 0u;
+static uint64_t s_scratchpadBufferAddresses[XHCI_MAX_DMA_SCRATCHPAD_BUFFERS] = {};
+alignas(64) static uint64_t s_scratchpadArray[XHCI_MAX_DMA_SCRATCHPAD_BUFFERS] = {};
+// Physical alignment is derived from the verified DMA base at runtime; the
+// extra page of capacity supplies the maximum alignment padding.
+static uint8_t s_scratchpadStorage[XHCI_DMA_SCRATCHPAD_STORAGE_SIZE] = {};
 
 static uint32_t s_commandRingIndex = 0;
 static uint32_t s_commandRingCycle = 1;
@@ -227,6 +250,16 @@ static void port_write32(uint32_t portIndex, uint32_t offset, uint32_t value)
     *mmio_port(portIndex, offset) = value;
 }
 
+static void dma_write_barrier()
+{
+    asm volatile("sfence" ::: "memory");
+}
+
+static void dma_read_barrier()
+{
+    asm volatile("lfence" ::: "memory");
+}
+
 // ================================================================
 // DMA address translation (Section 12)
 //
@@ -239,19 +272,6 @@ static void port_write32(uint32_t portIndex, uint32_t offset, uint32_t value)
 static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 static bool s_kernelPhysicalBaseValid = true; // Multiboot loads this image at its link base.
 
-static uint64_t kernel_virt_to_phys(uintptr_t virt)
-{
-    const uint64_t v = static_cast<uint64_t>(virt);
-    if (!s_kernelPhysicalBaseValid || v < 0x100000ULL) {
-        return 0;
-    }
-    const uint64_t offset = v - 0x100000ULL;
-    if (offset > (~static_cast<uint64_t>(0) - s_kernelPhysicalBase)) {
-        return 0;
-    }
-    return s_kernelPhysicalBase + offset;
-}
-
 static bool dma_region_address(const void* pointer, uint32_t size,
                                uint32_t alignment, uint64_t* physicalOut)
 {
@@ -261,6 +281,19 @@ static bool dma_region_address(const void* pointer, uint32_t size,
         static_cast<uint64_t>(reinterpret_cast<uintptr_t>(__kernel_start)),
         static_cast<uint64_t>(reinterpret_cast<uintptr_t>(__kernel_end)),
         s_kernelPhysicalBase, size, alignment, s_caps.ac64, physicalOut);
+}
+
+static bool dma_region_physical_alignment(const void* pointer, uint32_t size,
+                                          uint32_t physicalAlignment,
+                                          uint64_t* physicalOut)
+{
+    if (!dma_region_address(pointer, size, 1u, physicalOut) ||
+        physicalAlignment == 0u ||
+        (physicalAlignment & (physicalAlignment - 1u)) != 0u ||
+        (*physicalOut & (static_cast<uint64_t>(physicalAlignment) - 1u)) != 0u) {
+        return false;
+    }
+    return true;
 }
 
 static void diagnostic_stage(modern_input_diagnostics::Stage stage,
@@ -283,36 +316,174 @@ static void diagnostic_stage(modern_input_diagnostics::Stage stage,
 
 static bool validate_dma_prerequisites()
 {
-    if (s_caps.maxScratchpadBufs != 0u) {
+    s_dmaReady = false;
+    s_dmaAddresses = {};
+    s_scratchpadPageSize = 0u;
+    s_scratchpadCount = 0u;
+    for (uint32_t i = 0u; i < XHCI_MAX_DMA_SCRATCHPAD_BUFFERS; ++i) {
+        s_scratchpadBufferAddresses[i] = 0u;
+        s_scratchpadArray[i] = 0u;
+    }
+
+    const uint32_t pageSizeBitmap = op_read32(XHCI_OP_PAGESIZE);
+    XhciScratchpadPlan scratchpadPlan = {};
+    if (!make_xhci_scratchpad_plan(
+            s_caps.maxScratchpadBufs, pageSizeBitmap,
+            XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+            XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+            XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &scratchpadPlan)) {
+        const bool unsupported =
+            scratchpadPlan.error == XhciScratchpadPlanError::CountExceedsCapacity ||
+            scratchpadPlan.error == XhciScratchpadPlanError::NoSupportedPageSize ||
+            scratchpadPlan.error == XhciScratchpadPlanError::PageSizeExceedsCapacity ||
+            scratchpadPlan.error == XhciScratchpadPlanError::StorageInsufficient;
+        const char* reason = "SCRATCHPAD_PLAN_INVALID";
+        switch (scratchpadPlan.error) {
+            case XhciScratchpadPlanError::CountExceedsCapacity:
+                reason = "SCRATCHPAD_COUNT_EXCEEDS_STATIC_CAPACITY";
+                break;
+            case XhciScratchpadPlanError::NoSupportedPageSize:
+                reason = "CONTROLLER_ADVERTISED_NO_PAGE_SIZE";
+                break;
+            case XhciScratchpadPlanError::PageSizeExceedsCapacity:
+                reason = "SCRATCHPAD_PAGE_SIZE_EXCEEDS_STATIC_CAPACITY";
+                break;
+            case XhciScratchpadPlanError::StorageInsufficient:
+                reason = "SCRATCHPAD_BACKING_CAPACITY_INSUFFICIENT";
+                break;
+            default:
+                break;
+        }
         diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
-                         modern_input_diagnostics::Status::Unsupported,
-                         s_caps.maxScratchpadBufs, true);
-        serial_puts("[XHCI] DMA blocked: scratchpad buffers are required but not implemented\n");
+                         unsupported ? modern_input_diagnostics::Status::Unsupported
+                                      : modern_input_diagnostics::Status::Blocked,
+                         s_caps.maxScratchpadBufs, true, 0u, false,
+                         0u, 0u, 0u, 0u, false, reason);
+        serial_puts("[XHCI] DMA blocked: ");
+        serial_puts(reason);
+        serial_puts("\n");
+        return false;
+    }
+    s_scratchpadCount = scratchpadPlan.count;
+    s_scratchpadPageSize = scratchpadPlan.pageSize;
+
+    if (!dma_region_address(s_commandRing, sizeof(s_commandRing), 64u,
+                            &s_dmaAddresses.commandRing) ||
+        !dma_region_address(s_eventRing, sizeof(s_eventRing), 64u,
+                            &s_dmaAddresses.eventRing) ||
+        !dma_region_address(s_erst, sizeof(s_erst), 64u,
+                            &s_dmaAddresses.erst) ||
+        !dma_region_address(s_dcbaa, sizeof(s_dcbaa), 64u,
+                            &s_dmaAddresses.dcbaa) ||
+        !dma_region_address(s_inputCtx, sizeof(s_inputCtx), 64u,
+                            &s_dmaAddresses.inputCtx) ||
+        !dma_region_address(s_deviceCtx, sizeof(s_deviceCtx), 64u,
+                            &s_dmaAddresses.deviceCtx) ||
+        !dma_region_address(s_ep0Ring, sizeof(s_ep0Ring), 64u,
+                            &s_dmaAddresses.ep0Ring) ||
+        !dma_region_address(s_controlBuf, sizeof(s_controlBuf), 64u,
+                            &s_dmaAddresses.controlBuf)) {
+        const char* reason = s_kernelPhysicalBaseValid
+            ? "STATIC_DMA_REGION_TRANSLATION_ALIGNMENT_OR_AC64_INVALID"
+            : "KERNEL_PHYSICAL_BASE_UNAVAILABLE";
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_kernelPhysicalBaseValid ? 2u : 1u, true,
+                         0u, false, 0u, 0u, 0u, 0u, false, reason);
+        serial_puts("[XHCI] DMA blocked: ");
+        serial_puts(reason);
+        serial_puts("\n");
         return false;
     }
 
-    uint64_t ignored = 0u;
-    const bool valid =
-        dma_region_address(s_commandRing, sizeof(s_commandRing), 64u, &ignored) &&
-        dma_region_address(s_eventRing, sizeof(s_eventRing), 64u, &ignored) &&
-        dma_region_address(s_erst, sizeof(s_erst), 64u, &ignored) &&
-        dma_region_address(s_dcbaa, sizeof(s_dcbaa), 64u, &ignored) &&
-        dma_region_address(s_inputCtx, sizeof(s_inputCtx), 64u, &ignored) &&
-        dma_region_address(s_deviceCtx, sizeof(s_deviceCtx), 64u, &ignored) &&
-        dma_region_address(s_ep0Ring, sizeof(s_ep0Ring), 64u, &ignored) &&
-        dma_region_address(s_controlBuf, sizeof(s_controlBuf), 64u, &ignored);
-    if (!valid) {
+    if (s_scratchpadCount != 0u) {
+        uint64_t storageStart = 0u;
+        if (!dma_region_address(s_scratchpadStorage, 1u, 1u, &storageStart)) {
+            diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                             modern_input_diagnostics::Status::Blocked,
+                             0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                             "SCRATCHPAD_STORAGE_TRANSLATION_UNAVAILABLE");
+            return false;
+        }
+        const uint64_t mask = static_cast<uint64_t>(s_scratchpadPageSize) - 1u;
+        const uint32_t storageOffset = static_cast<uint32_t>((0u - storageStart) & mask);
+        if (storageOffset > XHCI_DMA_SCRATCHPAD_STORAGE_SIZE ||
+            scratchpadPlan.storageBytes >
+                XHCI_DMA_SCRATCHPAD_STORAGE_SIZE - storageOffset) {
+            diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                             modern_input_diagnostics::Status::Unsupported,
+                             scratchpadPlan.storageBytes, true,
+                             0u, false, 0u, 0u, 0u, 0u, false,
+                             "SCRATCHPAD_ALIGNMENT_PADDING_EXCEEDS_STATIC_CAPACITY");
+            return false;
+        }
+        uint8_t* storage = s_scratchpadStorage + storageOffset;
+        uint64_t storagePhysical = 0u;
+        if (!dma_region_physical_alignment(storage,
+                                           scratchpadPlan.storageBytes,
+                                           s_scratchpadPageSize,
+                                           &storagePhysical)) {
+            diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                             modern_input_diagnostics::Status::Blocked,
+                             0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                             "SCRATCHPAD_BACKING_NOT_CONTIGUOUS_ALIGNED_OR_ADDRESSABLE");
+            return false;
+        }
+        for (uint32_t byte = 0u; byte < scratchpadPlan.storageBytes; ++byte) {
+            storage[byte] = 0u;
+        }
+        for (uint32_t i = 0u; i < s_scratchpadCount; ++i) {
+            s_scratchpadBufferAddresses[i] = storagePhysical +
+                static_cast<uint64_t>(i) * s_scratchpadPageSize;
+        }
+        if (!build_xhci_scratchpad_array(
+                s_scratchpadCount, s_scratchpadPageSize,
+                s_scratchpadBufferAddresses, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                s_caps.ac64, s_scratchpadArray,
+                XHCI_MAX_DMA_SCRATCHPAD_BUFFERS) ||
+            !dma_region_address(s_scratchpadArray,
+                                s_scratchpadCount * sizeof(uint64_t), 64u,
+                                &s_dmaAddresses.scratchpadArray)) {
+            for (uint32_t i = 0u; i < XHCI_MAX_DMA_SCRATCHPAD_BUFFERS; ++i) {
+                s_scratchpadArray[i] = 0u;
+            }
+            diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                             modern_input_diagnostics::Status::Blocked,
+                             s_scratchpadCount, true, 0u, false,
+                             0u, 0u, 0u, 0u, false,
+                             "SCRATCHPAD_ARRAY_ADDRESS_OR_CONTENT_INVALID");
+            return false;
+        }
+    }
+
+    const XhciDeviceDmaTranslationEvidence translationEvidence =
+        !s_acpiDmaRemappingScanValid
+            ? XhciDeviceDmaTranslationEvidence::Unknown
+            : (s_acpiDmaRemappingTablePresent
+                ? XhciDeviceDmaTranslationEvidence::AcpiRemappingTablePresent
+                : XhciDeviceDmaTranslationEvidence::NoAcpiRemappingTable);
+    if (!xhci_device_dma_translation_verified(translationEvidence)) {
+        const bool remappingTablePresent = translationEvidence ==
+            XhciDeviceDmaTranslationEvidence::AcpiRemappingTablePresent;
+        const char* reason = remappingTablePresent
+            ? "IOMMU_REMAP_TABLE_PRESENT_WITHOUT_DMA_DOMAIN_SUPPORT"
+            : "DEVICE_ADDRESS_TRANSLATION_UNVERIFIED";
         diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                          modern_input_diagnostics::Status::Blocked,
-                         s_kernelPhysicalBaseValid ? 2u : 1u, true);
-        serial_puts("[XHCI] DMA blocked: physical translation, alignment, or controller address width is invalid\n");
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         reason);
+        serial_puts("[XHCI] DMA blocked: ");
+        serial_puts(reason);
+        serial_puts("\n");
         return false;
     }
 
     s_dmaReady = true;
     diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
-                     modern_input_diagnostics::Status::Pass);
-    serial_puts("[XHCI] DMA buffer translation/alignment validated; IOMMU state unknown\n");
+                     modern_input_diagnostics::Status::Pass, 0u, false,
+                     0u, false, 0u, 0u, 0u, 0u, false,
+                     "DIRECT_PHYSICAL_DMA_NO_ACPI_REMAP_TABLE");
+    serial_puts("[XHCI] DMA regions and scratchpads validated; direct physical DMA selected\n");
     return true;
 }
 
@@ -336,6 +507,7 @@ static void ring_doorbell(uint32_t doorbell, uint32_t value)
 {
     volatile uint32_t* db = reinterpret_cast<volatile uint32_t*>(
         static_cast<uintptr_t>(s_mmioBase + s_caps.dbBase + doorbell * 4u));
+    dma_write_barrier();
     *db = value;
 }
 
@@ -620,7 +792,12 @@ static bool parse_capabilities()
     modern_input_diagnostics::record_capabilities(
         s_diagnosticControllerIndex, s_caps.caplength, s_caps.hciVersion,
         s_caps.maxSlots, s_caps.maxPorts, s_caps.csz ? 64u : 32u,
-        s_caps.ac64, 0u, s_caps.maxScratchpadBufs);
+        s_caps.ac64, 0u, s_caps.maxScratchpadBufs,
+        !s_acpiDmaRemappingScanValid
+            ? modern_input_diagnostics::IommuStatus::Unknown
+            : (s_acpiDmaRemappingTablePresent
+                ? modern_input_diagnostics::IommuStatus::AcpiRemappingTablePresent
+                : modern_input_diagnostics::IommuStatus::NoAcpiRemappingTable));
     diagnostic_stage(modern_input_diagnostics::Stage::Capabilities,
                      modern_input_diagnostics::Status::Pass);
 
@@ -847,8 +1024,7 @@ static void init_command_ring()
     }
 
     // Link TRB at the end to wrap the ring
-    const uint64_t ringBase = kernel_virt_to_phys(
-        reinterpret_cast<uintptr_t>(s_commandRing));
+    const uint64_t ringBase = s_dmaAddresses.commandRing;
     s_commandRing[COMMAND_RING_SIZE - 1].parameter = ringBase;
     s_commandRing[COMMAND_RING_SIZE - 1].status = 0;
     s_commandRing[COMMAND_RING_SIZE - 1].control =
@@ -859,6 +1035,7 @@ static void init_command_ring()
 
     // Program CRCR
     const uint64_t crcr = ringBase | XHCI_CRCR_RCS;
+    dma_write_barrier();
     op_write64(XHCI_OP_CRCR, crcr);
 
     serial_puts("[XHCI] command ring configured\n");
@@ -873,8 +1050,7 @@ static void init_event_ring()
     }
 
     // ERST
-    const uint64_t eventRingBase = kernel_virt_to_phys(
-        reinterpret_cast<uintptr_t>(s_eventRing));
+    const uint64_t eventRingBase = s_dmaAddresses.eventRing;
     s_erst[0].ringSegmentBaseAddr = eventRingBase;
     s_erst[0].ringSegmentSize = EVENT_RING_SIZE;
     s_erst[0].reserved = 0;
@@ -883,7 +1059,8 @@ static void init_event_ring()
     rt_write32(XHCI_RT_ERSTSZ, ERST_ENTRIES);
 
     // Program ERSTBA
-    const uint64_t erstba = kernel_virt_to_phys(reinterpret_cast<uintptr_t>(s_erst));
+    const uint64_t erstba = s_dmaAddresses.erst;
+    dma_write_barrier();
     rt_write64(XHCI_RT_ERSTBA, erstba);
 
     // Program ERDP
@@ -906,10 +1083,13 @@ static void init_dcbaa()
         s_dcbaa[i] = 0;
     }
 
+    if (s_scratchpadCount != 0u) {
+        s_dcbaa[0] = s_dmaAddresses.scratchpadArray;
+    }
+
     // Program DCBAAP
-    const uint64_t dcbaap = kernel_virt_to_phys(
-                                reinterpret_cast<uintptr_t>(s_dcbaa)) &
-                            XHCI_DCBAAP_PTR_MASK;
+    const uint64_t dcbaap = s_dmaAddresses.dcbaa & XHCI_DCBAAP_PTR_MASK;
+    dma_write_barrier();
     op_write64(XHCI_OP_DCBAAP, dcbaap);
 
     serial_puts("[XHCI] DCBAA configured\n");
@@ -928,26 +1108,6 @@ static void init_interrupter()
     rt_write32(XHCI_RT_IMOD, 0);
 
     serial_puts("[XHCI] interrupter/polling configured\n");
-}
-
-// ================================================================
-// Page size validation
-// ================================================================
-
-static bool validate_page_size()
-{
-    const uint32_t pageSize = op_read32(XHCI_OP_PAGESIZE);
-    // xHCI supports 4K, 8K, 16K, 32K, 64K pages
-    // We require 4K pages for simplicity
-    if ((pageSize & 0x01u) == 0u) {
-        serial_puts("[XHCI] page size not 4K\n");
-        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
-                         modern_input_diagnostics::Status::Blocked,
-                         pageSize, true);
-        return false;
-    }
-    serial_puts("[XHCI] page size validated (4K)\n");
-    return true;
 }
 
 // ================================================================
@@ -1015,21 +1175,35 @@ static bool process_one_event(XhciEventTrb* eventOut)
         return false; // No more events
     }
 
-    *eventOut = evt;
-    ++s_eventRingIndex;
+    dma_read_barrier();
 
-    if (s_eventRingIndex >= EVENT_RING_SIZE) {
-        s_eventRingIndex = 0;
-        s_eventRingCycle ^= 1u;
+    *eventOut = evt;
+    if (!xhci_event_ring_advance(EVENT_RING_SIZE, &s_eventRingIndex,
+                                &s_eventRingCycle)) {
+        diagnostic_stage(modern_input_diagnostics::Stage::RingInitialization,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_eventRingIndex, true, 0u, false,
+                         0u, 0u, 0u, 0u, false,
+                         "EVENT_RING_CURSOR_INVALID");
+        return false;
     }
     return true;
 }
 
 static void update_erdp()
 {
-    const uint64_t erdp = kernel_virt_to_phys(
-        reinterpret_cast<uintptr_t>(&s_eventRing[s_eventRingIndex]));
-    rt_write64(XHCI_RT_ERDP, erdp);
+    const uint64_t erdp = s_dmaAddresses.eventRing +
+        static_cast<uint64_t>(s_eventRingIndex) * sizeof(XhciEventTrb);
+    uint64_t erdpValue = 0u;
+    if (!xhci_encode_erdp(erdp, &erdpValue)) {
+        diagnostic_stage(modern_input_diagnostics::Stage::RingInitialization,
+                         modern_input_diagnostics::Status::Blocked,
+                         0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                         "EVENT_RING_DEQUEUE_ADDRESS_INVALID");
+        return;
+    }
+    dma_write_barrier();
+    rt_write64(XHCI_RT_ERDP, erdpValue);
 }
 
 static uint32_t process_events()
@@ -1118,10 +1292,24 @@ static bool submit_command(const XhciTrb& cmd, CommandResult* result, uint32_t t
     trb.control |= s_commandRingCycle;
     s_commandRing[s_commandRingIndex] = trb;
 
-    ++s_commandRingIndex;
-    if (s_commandRingIndex >= COMMAND_RING_SIZE) {
-        s_commandRingIndex = 0;
-        s_commandRingCycle ^= 1u;
+    bool ringWrapped = false;
+    if (!xhci_command_ring_advance(COMMAND_RING_SIZE, &s_commandRingIndex,
+                                   &s_commandRingCycle, &ringWrapped)) {
+        diagnostic_stage(modern_input_diagnostics::Stage::RingInitialization,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_commandRingIndex, true, 0u, false,
+                         0u, 0u, 0u, 0u, false,
+                         "COMMAND_RING_CURSOR_INVALID");
+        return false;
+    }
+
+    // The controller can follow the Link TRB immediately after it executes
+    // the last usable command entry. Publish the next producer cycle before
+    // ringing the doorbell so the controller sees the new cycle on wrap.
+    if (ringWrapped) {
+        uint32_t linkControl = s_commandRing[COMMAND_RING_SIZE - 1u].control;
+        linkControl = (linkControl & ~0x01u) | s_commandRingCycle;
+        s_commandRing[COMMAND_RING_SIZE - 1u].control = linkControl;
     }
 
     ring_doorbell(0u, 0u);
@@ -1278,8 +1466,7 @@ static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
     const uint32_t mps = initial_max_packet_size(speed);
     ep0Ctx[0] = ep_ctx_set_max_packet_size(0u, mps);
     ep0Ctx[1] = ep_ctx_set_type(0u, XHCI_EP_TYPE_CONTROL) | ep_ctx_set_cerr(0u, 3u);
-    const uint64_t ep0RingPhys = kernel_virt_to_phys(
-        reinterpret_cast<uintptr_t>(s_ep0Ring));
+    const uint64_t ep0RingPhys = s_dmaAddresses.ep0Ring;
     ep0Ctx[2] = static_cast<uint32_t>(ep0RingPhys & 0xFFFFFFFFu);
     ep0Ctx[3] = static_cast<uint32_t>(ep0RingPhys >> 32);
 
@@ -1294,14 +1481,12 @@ static bool address_device(uint8_t slotId, uint8_t port, uint8_t speed)
     s_ep0RingIndex = 0;
     s_ep0RingCycle = 1;
 
-    const uint64_t devCtxPhys = kernel_virt_to_phys(
-        reinterpret_cast<uintptr_t>(s_deviceCtx));
+    const uint64_t devCtxPhys = s_dmaAddresses.deviceCtx;
     if (slotId < 256u) {
         s_dcbaa[slotId] = devCtxPhys & XHCI_DCBAAP_PTR_MASK;
     }
 
-    const uint64_t inputCtxPhys = kernel_virt_to_phys(
-        reinterpret_cast<uintptr_t>(s_inputCtx));
+    const uint64_t inputCtxPhys = s_dmaAddresses.inputCtx;
     CommandResult result;
     if (!submit_command(trb_address_device(inputCtxPhys, false, slotId), &result, 1000u)) {
         serial_puts("[XHCI] Address Device timeout slot=");
@@ -1378,8 +1563,16 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
     s_ep0Ring[idx++] = trb_setup_stage(setup, trt, false);
 
     if (hasDataStage) {
-        const uint64_t bufPhys = kernel_virt_to_phys(
-            reinterpret_cast<uintptr_t>(dataInDir ? dataIn : dataOut));
+        const void* dataBuffer = dataInDir ? dataIn : dataOut;
+        uint64_t bufPhys = 0u;
+        if (!dma_region_address(dataBuffer, req.wLength, 1u, &bufPhys)) {
+            diagnostic_stage(modern_input_diagnostics::Stage::ControlTransfer,
+                             modern_input_diagnostics::Status::Blocked,
+                             req.wLength, true, 0u, false,
+                             slotId, 0u, 1u, 0u, false,
+                             "CONTROL_DMA_BUFFER_OUTSIDE_VERIFIED_KERNEL_IMAGE");
+            return false;
+        }
         s_ep0Ring[idx++] = trb_data_stage(bufPhys, req.wLength, dataInDir, false, true);
     }
 
@@ -1391,8 +1584,7 @@ static bool ep0_control_transfer(uint8_t slotId, const UsbControlRequest& req,
         s_ep0Ring[i].control |= s_ep0RingCycle;
     }
 
-    const uint64_t ep0RingPhys = kernel_virt_to_phys(
-        reinterpret_cast<uintptr_t>(s_ep0Ring));
+    const uint64_t ep0RingPhys = s_dmaAddresses.ep0Ring;
     s_ep0Ring[EP0_RING_SIZE - 1u].parameter = ep0RingPhys;
     s_ep0Ring[EP0_RING_SIZE - 1u].control =
         (TRB_TYPE_LINK << 10) | (1u << 1) | s_ep0RingCycle;
@@ -1546,7 +1738,8 @@ static bool enumerate_first_device(EnumeratedDevice* out)
 
     uint8_t port = 0u;
     uint32_t connectedPorts = 0u;
-    for (uint8_t p = 1u; p <= s_portCount; ++p) {
+    for (uint32_t portValue = 1u; portValue <= s_portCount; ++portValue) {
+        const uint8_t p = static_cast<uint8_t>(portValue);
         XhciPortStatus ps;
         if (port_status(p, &ps)) {
             if (ps.connected) {
@@ -1715,9 +1908,9 @@ bool init()
         return false;
     }
 
-    // Do not hand DMA addresses to hardware until every static ring/context
-    // address has a verified physical translation, alignment, and address
-    // width. Scratchpad support is deliberately a hard prerequisite.
+    // Prepare and validate every controller-owned DMA region before changing
+    // controller ownership or state. Unknown device-address translation and
+    // unmanaged ACPI remapping remain fail-closed prerequisites.
     if (!validate_dma_prerequisites()) {
         return false;
     }
@@ -1731,10 +1924,6 @@ bool init()
     }
 
     if (!reset_controller()) {
-        return false;
-    }
-
-    if (!validate_page_size()) {
         return false;
     }
 
@@ -1758,19 +1947,73 @@ bool init()
 
     uint32_t connectedPorts = 0u;
     uint8_t firstConnectedPort = 0u;
-    for (uint8_t port = 1u; port <= s_portCount; ++port) {
+    bool rootPortReadFailed = false;
+    uint8_t failedRootPort = 0u;
+    serial_puts("[XHCI] ROOT_PORTS bdf=");
+    serial_hex_n(s_bus, 2u);
+    kernel::serial::putc(':');
+    serial_hex_n(s_dev, 2u);
+    kernel::serial::putc('.');
+    serial_hex_n(s_func, 1u);
+    serial_puts(" count=");
+    serial_u32_dec(s_portCount);
+    serial_puts("\n");
+    for (uint32_t portValue = 1u; portValue <= s_portCount; ++portValue) {
+        const uint8_t port = static_cast<uint8_t>(portValue);
         XhciPortStatus status;
-        if (port_status(port, &status) && status.connected) {
+        serial_puts("[XHCI] ROOT_PORT bdf=");
+        serial_hex_n(s_bus, 2u);
+        kernel::serial::putc(':');
+        serial_hex_n(s_dev, 2u);
+        kernel::serial::putc('.');
+        serial_hex_n(s_func, 1u);
+        serial_puts(" index=");
+        serial_u32_dec(port);
+        if (!port_status(port, &status)) {
+            serial_puts(" status=READ_FAILED\n");
+            rootPortReadFailed = true;
+            if (failedRootPort == 0u) failedRootPort = port;
+            continue;
+        }
+        if (status.connected) {
             ++connectedPorts;
             if (firstConnectedPort == 0u) firstConnectedPort = port;
         }
+        serial_puts(" connected=");
+        serial_puts(status.connected ? "yes" : "no");
+        serial_puts(" enabled=");
+        serial_puts(status.enabled ? "yes" : "no");
+        serial_puts(" speed=");
+        serial_u32_dec(status.speed);
+        serial_puts(" link=");
+        serial_u32_dec(status.linkState);
+        serial_puts(" raw=0x");
+        serial_hex_n(status.rawStatus, 8u);
+        serial_puts(" changes=CSC:");
+        serial_puts(status.connectChange ? "1" : "0");
+        serial_puts(",PRC:");
+        serial_puts(status.resetChange ? "1" : "0");
+        serial_puts(",PLC:");
+        serial_puts(status.linkStateChange ? "1" : "0");
+        serial_puts(",CEC:");
+        serial_puts(status.configError ? "1" : "0");
+        serial_puts(",OCA:");
+        serial_puts(status.overCurrent ? "1" : "0");
+        serial_puts(",WPR:");
+        serial_puts(status.warmReset ? "1" : "0");
+        serial_puts(" removable=");
+        serial_puts(status.deviceRemovable ? "yes\n" : "no\n");
     }
     modern_input_diagnostics::record_root_ports(
         s_diagnosticControllerIndex, s_portCount, connectedPorts,
         firstConnectedPort);
     diagnostic_stage(modern_input_diagnostics::Stage::RootPorts,
-                     modern_input_diagnostics::Status::Pass,
-                     connectedPorts, true);
+                     rootPortReadFailed
+                         ? modern_input_diagnostics::Status::Fail
+                         : modern_input_diagnostics::Status::Pass,
+                     rootPortReadFailed ? failedRootPort : connectedPorts,
+                     true, 0u, false, 0u, failedRootPort, 0u, 0u, false,
+                     rootPortReadFailed ? "ROOT_PORT_STATUS_READ_FAILED" : nullptr);
 
     s_initialized = true;
     serial_puts("[XHCI] init complete\n");
@@ -1848,6 +2091,12 @@ void set_kernel_physical_base(uint64_t physicalBase)
     } else {
         s_kernelPhysicalBaseValid = false;
     }
+}
+
+void set_acpi_dma_remapping_state(bool scanValid, bool remappingTablePresent)
+{
+    s_acpiDmaRemappingScanValid = scanValid;
+    s_acpiDmaRemappingTablePresent = scanValid && remappingTablePresent;
 }
 
 // Enumerate the first connected USB device: port reset, Enable Slot,

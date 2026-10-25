@@ -27,9 +27,11 @@
 namespace {
 
 int g_failures = 0;
+int g_assertions = 0;
 
 bool expect(bool value, const char* label)
 {
+    ++g_assertions;
     if (!value) {
         std::cerr << "FAIL: " << label << "\n";
         ++g_failures;
@@ -216,6 +218,36 @@ void test_ring_helpers()
     expect(ring_index(64u, 64u) == 0u, "ring index wrap 64");
     expect(ring_index(65u, 64u) == 1u, "ring index wrap 65");
     expect(ring_index(128u, 64u) == 0u, "ring index wrap 128");
+
+    uint32_t commandIndex = 61u;
+    uint32_t commandCycle = 1u;
+    bool commandWrapped = false;
+    expect(xhci_command_ring_advance(64u, &commandIndex, &commandCycle,
+                                     &commandWrapped) &&
+           commandIndex == 62u && commandCycle == 1u && !commandWrapped,
+           "command ring reserves its final entry for the Link TRB");
+    expect(xhci_command_ring_advance(64u, &commandIndex, &commandCycle,
+                                     &commandWrapped) &&
+           commandIndex == 0u && commandCycle == 0u && commandWrapped,
+           "command producer wraps before the Link TRB and toggles cycle");
+    expect(xhci_command_ring_advance(64u, &commandIndex, &commandCycle,
+                                     &commandWrapped) &&
+           commandIndex == 1u && commandCycle == 0u && !commandWrapped,
+           "command producer retains the toggled cycle after wrapping");
+    expect(!xhci_command_ring_advance(64u, nullptr, &commandCycle,
+                                     &commandWrapped),
+           "command ring rejects a missing cursor");
+
+    uint32_t eventIndex = 62u;
+    uint32_t eventCycle = 1u;
+    expect(xhci_event_ring_advance(64u, &eventIndex, &eventCycle) &&
+           eventIndex == 63u && eventCycle == 1u,
+           "event consumer advances through the final segment entry");
+    expect(xhci_event_ring_advance(64u, &eventIndex, &eventCycle) &&
+           eventIndex == 0u && eventCycle == 0u,
+           "event consumer wraps and toggles cycle state");
+    expect(!xhci_event_ring_advance(64u, nullptr, &eventCycle),
+           "event ring rejects a missing cursor");
 }
 
 // ================================================================
@@ -235,6 +267,15 @@ void test_erst_helpers()
            "ERST encode base zero");
     expect(erst_encode_base(0xFFFFFFFFFFFFFFFFULL) == 0xFFFFFFFFFFFFFFC0ULL,
            "ERST encode base all-ones");
+
+    uint64_t erdp = 0u;
+    expect(xhci_encode_erdp(0x1234567890ABCDF0ULL, &erdp) &&
+           erdp == (0x1234567890ABCDF0ULL | XHCI_ERDP_EHB),
+           "ERDP encodes an aligned address and clears event-handler-busy");
+    expect(!xhci_encode_erdp(0x1234567890ABCDF1ULL, &erdp),
+           "ERDP rejects an unaligned event address");
+    expect(!xhci_encode_erdp(0x1000u, nullptr),
+           "ERDP rejects a missing output");
 }
 
 // ================================================================
@@ -251,6 +292,7 @@ void test_port_status_decoding()
                                 (XHCI_PLS_U0 << 5);
         const XhciPortStatus ps = decode_port_status(1u, portsc);
         expect(ps.portIndex == 1u, "port status index");
+        expect(ps.rawStatus == portsc, "port status preserves raw PORTSC value");
         expect(ps.connected, "port status connected");
         expect(ps.enabled, "port status enabled");
         expect(ps.powered, "port status powered");
@@ -743,6 +785,139 @@ void test_dma_address_translation()
            "DMA address outside the loaded kernel image is rejected");
 }
 
+void test_scratchpad_dma_plan()
+{
+    expect(!xhci_device_dma_translation_verified(
+               XhciDeviceDmaTranslationEvidence::Unknown),
+           "unknown IOMMU state does not become a verified DMA translation");
+    expect(!xhci_device_dma_translation_verified(
+               XhciDeviceDmaTranslationEvidence::AcpiRemappingTablePresent),
+           "advertised remapping without a DMA domain remains blocked");
+    expect(xhci_device_dma_translation_verified(
+               XhciDeviceDmaTranslationEvidence::NoAcpiRemappingTable),
+           "valid no-remapping-table evidence permits direct physical DMA");
+
+    XhciScratchpadPlan plan = {};
+    expect(make_xhci_scratchpad_plan(0u, 0u,
+                                    XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                    XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                    XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.count == 0u && plan.pageSize == 0u && plan.storageBytes == 0u,
+           "zero scratchpads need no page-size allocation");
+    expect(make_xhci_scratchpad_plan(1u, 1u,
+                                    XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                    XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                    XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.pageSize == 4096u && plan.storageBytes == 4096u,
+           "one scratchpad uses the smallest advertised page size");
+    expect(make_xhci_scratchpad_plan(2u, 1u,
+                                    XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                    XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                    XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.count == 2u && plan.storageBytes == 8192u,
+           "two advertised scratchpads receive separate backing pages");
+    expect(make_xhci_scratchpad_plan(4u, 1u,
+                                    XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                    XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                    XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.count == 4u,
+           "larger valid scratchpad counts use controller-advertised count");
+    expect(make_xhci_scratchpad_plan(2u, 1u << 2,
+                                    XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                    XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                    XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.pageSize == 16384u && plan.storageBytes == 32768u,
+           "scratchpad plan respects the advertised 16 KiB page size");
+    expect(!make_xhci_scratchpad_plan(
+               XHCI_MAX_DMA_SCRATCHPAD_BUFFERS + 1u, 1u,
+               XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+               XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+               XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.error == XhciScratchpadPlanError::CountExceedsCapacity,
+           "scratchpad count overflow is rejected");
+    expect(!make_xhci_scratchpad_plan(1u, 0u,
+                                     XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                     XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                     XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.error == XhciScratchpadPlanError::NoSupportedPageSize,
+           "empty controller page-size bitmap is rejected");
+    expect(!make_xhci_scratchpad_plan(1u, 1u << 15,
+                                     XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                     XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                     XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.error == XhciScratchpadPlanError::PageSizeExceedsCapacity,
+           "page size beyond the fixed pool capacity is rejected");
+    expect(!make_xhci_scratchpad_plan(16u, 1u << 4,
+                                     XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                     XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                     16u * 65536u - 1u, &plan) &&
+           plan.error == XhciScratchpadPlanError::StorageInsufficient,
+           "pool capacity is checked without multiplying into overflow");
+    expect(!make_xhci_scratchpad_plan(1u, 1u,
+                                     XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                     XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                     XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, nullptr),
+           "null scratchpad plan output is rejected");
+}
+
+void test_scratchpad_array_validation()
+{
+    uint64_t addresses[4] = {0x2000u, 0x3000u, 0x4000u, 0x5000u};
+    uint64_t array[4] = {~0ULL, ~0ULL, ~0ULL, ~0ULL};
+    expect(build_xhci_scratchpad_array(0u, 4096u, nullptr, 4u, false,
+                                      array, 4u) &&
+           array[0] == 0u && array[3] == 0u,
+           "zero scratchpads leave the array empty");
+    expect(build_xhci_scratchpad_array(1u, 4096u, addresses, 4u, false,
+                                      array, 4u) &&
+           array[0] == addresses[0] && array[1] == 0u,
+           "one scratchpad address is registered without stale entries");
+    expect(build_xhci_scratchpad_array(2u, 4096u, addresses, 4u, false,
+                                      array, 4u) &&
+           array[0] == addresses[0] && array[1] == addresses[1],
+           "two scratchpad addresses are registered independently");
+    expect(build_xhci_scratchpad_array(4u, 4096u, addresses, 4u, false,
+                                      array, 4u) &&
+           array[3] == addresses[3],
+           "larger scratchpad array is fully populated");
+
+    addresses[1] = 0u;
+    expect(!build_xhci_scratchpad_array(2u, 4096u, addresses, 4u, true,
+                                       array, 4u) &&
+           array[0] == 0u && array[1] == 0u,
+           "partial scratchpad failure does not leave a publishable array");
+    addresses[1] = 0x2800u;
+    expect(!build_xhci_scratchpad_array(2u, 4096u, addresses, 4u, true,
+                                       array, 4u),
+           "misaligned scratchpad physical address is rejected");
+    addresses[1] = addresses[0];
+    expect(!build_xhci_scratchpad_array(2u, 4096u, addresses, 4u, true,
+                                       array, 4u),
+           "overlapping scratchpad pages are rejected");
+    addresses[0] = 0x100000000ULL;
+    addresses[1] = 0x100000000ULL;
+    expect(!build_xhci_scratchpad_array(1u, 4096u, addresses, 4u, false,
+                                       array, 4u),
+           "32-bit controller rejects scratchpad address above its limit");
+    expect(build_xhci_scratchpad_array(1u, 4096u, addresses + 1u, 4u, true,
+                                      array, 4u) &&
+           array[0] == 0x100000000ULL,
+           "64-bit controller accepts a verified high scratchpad page");
+    addresses[0] = ~0ULL - 0xFFEu;
+    expect(!build_xhci_scratchpad_array(1u, 4096u, addresses, 4u, true,
+                                       array, 4u),
+           "malformed near-limit scratchpad address is rejected");
+    expect(!build_xhci_scratchpad_array(5u, 4096u, addresses, 4u, true,
+                                       array, 4u),
+           "scratchpad count cannot exceed address or array capacity");
+    expect(!build_xhci_scratchpad_array(1u, 4096u, nullptr, 4u, true,
+                                       array, 4u),
+           "missing scratchpad address list is rejected");
+    expect(!build_xhci_scratchpad_array(1u, 3000u, addresses, 4u, true,
+                                       array, 4u),
+           "invalid scratchpad page geometry is rejected");
+}
+
 // ================================================================
 // Control request tests (Section 9)
 // ================================================================
@@ -780,10 +955,13 @@ int main()
     test_event_accessors();
     test_descriptor_validation();
     test_dma_address_translation();
+    test_scratchpad_dma_plan();
+    test_scratchpad_array_validation();
     test_control_request();
 
     if (g_failures == 0) {
-        std::cout << "xHCI bring-up test PASS\n";
+        std::cout << "xHCI bring-up tests PASS (" << g_assertions
+                  << " assertions)\n";
         return 0;
     }
     std::cerr << g_failures << " xHCI bring-up test failure(s)\n";

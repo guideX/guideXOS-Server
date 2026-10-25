@@ -366,6 +366,55 @@ void test_failure_before_desktop_initialization()
             "desktop initialization does not erase a prior controller failure");
 }
 
+void test_unsupported_dma_failure_is_sticky()
+{
+    initialize();
+    const int32_t controller = add_xhci(3u, 0u, 3u, 0x1022u, 0x1503u);
+    record_stage(controller, Stage::HidDiscovery, Status::Unsupported,
+                 0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                 "HID_DISCOVERY_NOT_IMPLEMENTED");
+    Snapshot snapshot = {};
+    copy_snapshot(&snapshot);
+    require(!snapshot.firstFailure.present,
+            "unsupported HID frontier is not reported as a hardware failure");
+
+    record_stage(controller, Stage::DmaPrerequisites, Status::Unsupported,
+                 2u, true, 0u, false, 0u, 0u, 0u, 0u, false,
+                 "SCRATCHPAD_COUNT_EXCEEDS_STATIC_CAPACITY");
+
+    copy_snapshot(&snapshot);
+    require(snapshot.controllers[0].stages[
+                static_cast<uint32_t>(Stage::DmaPrerequisites)].status == Status::Unsupported &&
+            snapshot.firstFailure.present &&
+            snapshot.firstFailure.stage == Stage::DmaPrerequisites &&
+            snapshot.firstFailure.result.status == Status::Unsupported,
+            "unsupported DMA prerequisites become the first meaningful failure");
+
+    char formatted[160];
+    format_stage_result(snapshot.firstFailure.result, formatted, sizeof(formatted));
+    require(std::strstr(formatted, "UNSUPPORTED") != nullptr &&
+            std::strstr(formatted, "SCRATCHPAD_COUNT_EXCEEDS_STATIC_CAPACITY") != nullptr,
+            "unsupported prerequisite formatting preserves its exact reason");
+    format_first_failure(snapshot, formatted, sizeof(formatted));
+    require(std::strstr(formatted, "xHCI 03:00.3 DMA prerequisites: UNSUPPORTED") != nullptr &&
+            std::strstr(formatted, "SCRATCHPAD_COUNT_EXCEEDS_STATIC_CAPACITY") != nullptr,
+            "first-failure panel formatting reports unsupported DMA reason");
+
+    record_stage(controller, Stage::ControllerHalt, Status::Fail,
+                 7u, true, 0u, false, 0u, 0u, 0u, 0u, false,
+                 "synthetic later failure");
+    copy_snapshot(&snapshot);
+    require(snapshot.firstFailure.stage == Stage::DmaPrerequisites &&
+            snapshot.firstFailure.result.status == Status::Unsupported,
+            "later hardware errors do not replace unsupported prerequisite evidence");
+    require(std::strcmp(iommu_status_name(IommuStatus::Unknown), "UNKNOWN") == 0 &&
+            std::strcmp(iommu_status_name(IommuStatus::NoAcpiRemappingTable),
+                        "NO ACPI REMAP TABLE") == 0 &&
+            std::strcmp(iommu_status_name(IommuStatus::AcpiRemappingTablePresent),
+                        "ACPI REMAP TABLE PRESENT") == 0,
+            "IOMMU discovery states preserve unknown versus ACPI evidence");
+}
+
 void test_snapshot_reset()
 {
     initialize();
@@ -614,6 +663,7 @@ int main()
     test_hda_child_range_bounds();
     test_boot_progress_and_presentation();
     test_failure_before_desktop_initialization();
+    test_unsupported_dma_failure_is_sticky();
     test_snapshot_reset();
     test_concurrent_publication();
     std::printf("Modern input diagnostics tests PASS (%d assertions).\n", g_assertions);

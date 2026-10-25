@@ -664,6 +664,120 @@ typedef struct {
 } RSDPDescriptor20;
 #pragma pack(pop)
 
+#pragma pack(push, 1)
+typedef struct {
+    char Signature[4];
+    UINT32 Length;
+    UINT8 Revision;
+    UINT8 Checksum;
+    UINT8 OemId[6];
+    UINT8 OemTableId[8];
+    UINT32 OemRevision;
+    UINT32 CreatorId;
+    UINT32 CreatorRevision;
+} GxosAcpiSdtHeader;
+#pragma pack(pop)
+
+static bool AcpiChecksumValid(const UINT8* bytes, UINT32 length)
+{
+    if (bytes == nullptr || length == 0u) return false;
+    UINT8 sum = 0u;
+    for (UINT32 i = 0u; i < length; ++i) sum = (UINT8)(sum + bytes[i]);
+    return sum == 0u;
+}
+
+static bool AcpiSignatureEquals(const char signature[4], const char* expected)
+{
+    return signature != nullptr && expected != nullptr &&
+           signature[0] == expected[0] && signature[1] == expected[1] &&
+           signature[2] == expected[2] && signature[3] == expected[3];
+}
+
+static bool AcpiRsdpSignatureValid(const char signature[8])
+{
+    static const char expected[8] = {'R', 'S', 'D', ' ', 'P', 'T', 'R', ' '};
+    if (signature == nullptr) return false;
+    for (UINT32 i = 0u; i < 8u; ++i) {
+        if (signature[i] != expected[i]) return false;
+    }
+    return true;
+}
+
+// Enumerate a small, checksum-validated ACPI root table before ExitBootServices.
+// This proves whether standard x86 DMAR/IVRS remapping tables were advertised;
+// it does not claim to inspect remapping-unit enable state.
+static bool ScanAcpiDmaRemappingTables(const RSDPDescriptor20* rsdp,
+                                       bool* remappingTablePresent)
+{
+    if (remappingTablePresent == nullptr) return false;
+    *remappingTablePresent = false;
+    if (rsdp == nullptr ||
+        !AcpiRsdpSignatureValid(rsdp->Signature) ||
+        !AcpiChecksumValid(reinterpret_cast<const UINT8*>(rsdp), 20u)) {
+        return false;
+    }
+
+    UINT64 rootAddress = 0u;
+    bool xsdt = false;
+    if (rsdp->Revision >= 2u && rsdp->XsdtAddress != 0u) {
+        if (rsdp->Length < sizeof(RSDPDescriptor20) || rsdp->Length > 4096u ||
+            !AcpiChecksumValid(reinterpret_cast<const UINT8*>(rsdp), rsdp->Length)) {
+            return false;
+        }
+        rootAddress = rsdp->XsdtAddress;
+        xsdt = true;
+    } else {
+        rootAddress = rsdp->RsdtAddress;
+    }
+    if (rootAddress == 0u) return false;
+
+    const GxosAcpiSdtHeader* root = reinterpret_cast<const GxosAcpiSdtHeader*>(
+        static_cast<UINTN>(rootAddress));
+    const UINT32 rootMinimum = (UINT32)sizeof(GxosAcpiSdtHeader);
+    const UINT32 maxTableBytes = 1024u * 1024u;
+    if (root->Length < rootMinimum || root->Length > maxTableBytes ||
+        !AcpiSignatureEquals(root->Signature, xsdt ? "XSDT" : "RSDT") ||
+        !AcpiChecksumValid(reinterpret_cast<const UINT8*>(root), root->Length)) {
+        return false;
+    }
+
+    const UINT32 entrySize = xsdt ? 8u : 4u;
+    const UINT32 entriesBytes = root->Length - rootMinimum;
+    if ((entriesBytes % entrySize) != 0u) return false;
+    const UINT32 entryCount = entriesBytes / entrySize;
+    if (entryCount > 256u) return false;
+
+    const UINT8* entries = reinterpret_cast<const UINT8*>(root) + rootMinimum;
+    for (UINT32 i = 0u; i < entryCount; ++i) {
+        UINT64 tableAddress = 0u;
+        if (xsdt) {
+            const UINT8* entry = entries + static_cast<UINTN>(i) * entrySize;
+            for (UINT32 byte = 0u; byte < 8u; ++byte) {
+                tableAddress |= static_cast<UINT64>(entry[byte]) << (byte * 8u);
+            }
+        } else {
+            const UINT8* entry = entries + static_cast<UINTN>(i) * entrySize;
+            for (UINT32 byte = 0u; byte < 4u; ++byte) {
+                tableAddress |= static_cast<UINT64>(entry[byte]) << (byte * 8u);
+            }
+        }
+        if (tableAddress == 0u) return false;
+
+        const GxosAcpiSdtHeader* table = reinterpret_cast<const GxosAcpiSdtHeader*>(
+            static_cast<UINTN>(tableAddress));
+        if (table->Length < rootMinimum || table->Length > maxTableBytes) return false;
+        const bool isDmar = AcpiSignatureEquals(table->Signature, "DMAR");
+        const bool isIvrs = AcpiSignatureEquals(table->Signature, "IVRS");
+        if (isDmar || isIvrs) {
+            if (!AcpiChecksumValid(reinterpret_cast<const UINT8*>(table), table->Length)) {
+                return false;
+            }
+            *remappingTablePresent = true;
+        }
+    }
+    return true;
+}
+
 RSDPDescriptor20* FindRSDP(EFI_SYSTEM_TABLE* SystemTable) {
     EFI_CONFIGURATION_TABLE* configTable = SystemTable->ConfigurationTable;
     UINTN tableCount = SystemTable->NumberOfTableEntries;
@@ -713,6 +827,18 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print((CONST CHAR16*)L"ACPI RSDP not found\n");
     } else {
         Print((CONST CHAR16*)L"ACPI RSDP found at %p, rev %u\n", (VOID*)rsdp, (UINT32)rsdp->Revision);
+    }
+    bool acpiRemappingTablePresent = false;
+    if (ScanAcpiDmaRemappingTables(rsdp, &acpiRemappingTablePresent)) {
+        v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID;
+        if (acpiRemappingTablePresent) {
+            v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT;
+            Print((CONST CHAR16*)L"[BOOT] ACPI DMA remapping table present; xHCI needs an IOMMU mapping contract\n");
+        } else {
+            Print((CONST CHAR16*)L"[BOOT] ACPI DMA remapping scan valid; no DMAR/IVRS table advertised\n");
+        }
+    } else {
+        Print((CONST CHAR16*)L"[BOOT] ACPI DMA remapping state unknown; xHCI DMA will remain blocked\n");
     }
 
     // --- Locate GOP ---

@@ -134,6 +134,12 @@ enum class OwnershipStatus : uint8_t {
     HandoffTimeout
 };
 
+enum class IommuStatus : uint8_t {
+    Unknown = 0,
+    NoAcpiRemappingTable,
+    AcpiRemappingTablePresent
+};
+
 enum class Stage : uint8_t {
     PciDiscovery = 0,
     BarMmio,
@@ -215,7 +221,7 @@ struct ControllerSnapshot {
     uint32_t supportedProtocolCount;
     uint32_t scratchpadBuffersRequired;
     bool ac64;
-    bool iommuStatusUnknown;
+    IommuStatus iommuStatus;
     uint32_t rootPortCount;
     uint32_t connectedPortCount;
     uint8_t selectedPort;
@@ -321,7 +327,8 @@ void record_capabilities(int32_t controllerIndex, uint8_t capLength,
                          uint16_t hciVersion, uint8_t maxSlots,
                          uint8_t maxPorts, uint8_t contextSize, bool ac64,
                          uint32_t supportedProtocolCount,
-                         uint32_t scratchpadBuffersRequired);
+                         uint32_t scratchpadBuffersRequired,
+                         IommuStatus iommuStatus = IommuStatus::Unknown);
 void record_root_ports(int32_t controllerIndex, uint32_t rootPortCount,
                        uint32_t connectedPortCount, uint8_t selectedPort);
 void record_device_descriptor(int32_t controllerIndex, bool transferSucceeded,
@@ -345,6 +352,7 @@ uint32_t format_startup_operation(const StartupOperationRecord& operation,
 const char* pci_scan_state_name(PciScanState state);
 const char* stage_name(Stage stage);
 const char* controller_kind_name(ControllerKind kind);
+const char* iommu_status_name(IommuStatus status);
 uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capacity);
 uint32_t format_first_failure(const Snapshot& snapshot, char* out, uint32_t capacity);
 bool calculate_panel_layout(uint32_t framebufferWidth, uint32_t framebufferHeight,

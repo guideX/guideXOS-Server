@@ -932,6 +932,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::pci_audio::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::native_elf::audio_set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::usb::xhci::controller::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::usb::xhci::controller::set_acpi_dma_remapping_state(
+                (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID) != 0u,
+                (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT) != 0u);
         }
         record_input3d_boot_milestone(
             kernel::modern_input_diagnostics::BootStage::PciDiscoveryEntered);

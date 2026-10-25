@@ -41,6 +41,12 @@ namespace guideXOS
     // Bounded diagnostic list size for framebuffer descriptors in BootInfo.
     static const uint32_t GUIDEXOS_MAX_FRAMEBUFFERS = 8u;
 
+    // Flags for the bounded ACPI DMA-remapping table scan. A valid scan with
+    // no remapping table permits the kernel's direct physical DMA contract;
+    // a present table requires an IOMMU mapping implementation.
+    static const uint32_t BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID = (1u << 3);
+    static const uint32_t BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT = (1u << 4);
+
     struct FramebufferDescriptor
     {
         uint64_t Base;

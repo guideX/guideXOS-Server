@@ -52,8 +52,10 @@ not treated as transport evidence.
 
 - The fixed-size, lock-protected snapshot is shared by PCI/xHCI startup and the
   existing desktop renderer. The desktop reads a copy; it does not drive the
-  controller. The first `FAIL` or `TIMEOUT` includes a copied controller
-  identity and stage result and survives later status updates or enumeration.
+  controller. The first `FAIL`, `TIMEOUT`, `BLOCKED`, or unsupported DMA
+  prerequisite includes a copied controller identity and stage result and
+  survives later status updates or enumeration. Unsupported HID stages remain
+  implementation frontiers and do not become hardware failures.
 - Up to eight USB controllers retain independent PCI and initialization
   results. Aggregate counts include additional controllers, which are
   reported as omitted. The existing xHCI driver selects and initializes only
@@ -64,10 +66,45 @@ not treated as transport evidence.
 - DMA prerequisites check each static ring, context, and control buffer for
   physical translation within linker-defined kernel image bounds, required
   alignment, and the controller's AC64 limit. UEFI supplies the physical base;
-  the linker-defined image span bounds every DMA structure. The kernel does
-  not discover IOMMU state, so the panel reports IOMMU/addressability as
-  unknown where it cannot be proven.
-  Scratchpad buffers are unsupported and block xHCI DMA setup when required.
+  the bootloader allocates the complete kernel image span in one contiguous
+  `AllocatePages` allocation and loads PT_LOAD segments at offsets within it.
+  This provides the bounded backing contract for the static xHCI regions; it is
+  not a general-purpose DMA allocator. The kernel does not equate MMIO virtual
+  addresses with DMA addresses.
+- INPUT3D-R5 reads the controller's advertised scratchpad count and the
+  operational PAGESIZE bitmap. It reserves a fixed 1.0625 MiB static pool for
+  at most 16 pages of at most 64 KiB each, including alignment slack. It
+  constructs the scratchpad array only after validating physical alignment,
+  non-overlap, range overflow, and AC64 addressability. Unsupported count or
+  page requirements fail closed before xHCI ownership, halt, or reset. The
+  array is registered through DCBAA[0]; zero-scratchpad controllers leave that
+  entry zero. Storage remains static for kernel lifetime.
+- The UEFI bootloader checksum-validates a bounded ACPI RSDP/root-table scan
+  for DMAR/IVRS. A valid scan with neither table permits the direct-physical
+  path; an unknown scan or advertised remapping table blocks controller DMA
+  because no IOMMU domain/mapping contract exists. The scan does not inspect
+  remapping-unit enable registers, so `NO ACPI REMAP TABLE` is evidence about
+  firmware description, not a hardware register proof that translation is
+  disabled. Active IOMMU state remains unknown on the VivoBook until a
+  standard platform contract or physical read-only measurement supplies it.
+  No IOMMU is disabled or bypassed by software.
+- The direct path currently assumes the standard coherent x86 PCIe DMA model
+  and the existing WB mapping of the loaded kernel image. DMA publication and
+  consumption use the architecture's `sfence`/`lfence` helpers; there is no
+  cache-maintenance API for non-coherent systems. Such systems and
+  non-x86 architectures remain unsupported by this contract.
+- Command/Event Ring, ERST, DCBAA, context, EP0 ring, and control-buffer
+  physical addresses are cached only after complete range/alignment/AC64
+  validation. The command Link TRB cycle is published before its doorbell on
+  wrap. Polling event consumption uses bounded cycle checks and advances ERDP
+  with EHB after consumption. Controller-owned memory is static and currently
+  scoped to the first selected controller; other discovered controllers retain
+  independent diagnostic identities and remain not attempted.
+- After Run/Stop succeeds, the selected controller reads every advertised
+  PORTSC and logs BDF, port index/count, CCS/PED, speed, link state, the full
+  raw status word, and the relevant change/error bits. The aggregate snapshot
+  records connected count and first connected port. A failed PORTSC read now
+  fails the root-port stage instead of being reported as a successful scan.
 - Enumeration remains limited to the first connected root port and one device
   descriptor. Completion status and descriptor identity are recorded only
   after observed transfers. A missing xHCI controller is shown by the real PCI

@@ -9415,8 +9415,9 @@ static void input3d_panel_draw_controller_details(
     position = input3d_panel_append(line, sizeof(line), position, controller.ac64 ? " AC64" : " AC32");
     position = input3d_panel_append(line, sizeof(line), position, " scratch=");
     position = input3d_panel_decimal(line, sizeof(line), position, controller.scratchpadBuffersRequired);
-    position = input3d_panel_append(line, sizeof(line), position,
-                                    controller.iommuStatusUnknown ? " IOMMU=UNKNOWN" : " IOMMU=CHECKED");
+    position = input3d_panel_append(line, sizeof(line), position, " IOMMU=");
+    input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::iommu_status_name(controller.iommuStatus));
     input3d_panel_draw_line(writer, line, rgb(205, 218, 238));
     input3d_panel_status_line(writer, "Rings",
         controller.stages[static_cast<uint32_t>(Stage::RingInitialization)]);
@@ -9800,6 +9801,12 @@ static uint64_t draw_input3d_diagnostics_panel()
             position = input3d_panel_append(line, sizeof(line), position,
                 modern_input_diagnostics::status_name(selected.stages[
                     static_cast<uint32_t>(modern_input_diagnostics::Stage::DmaPrerequisites)].status));
+            const modern_input_diagnostics::StageResult& dmaStage = selected.stages[
+                static_cast<uint32_t>(modern_input_diagnostics::Stage::DmaPrerequisites)];
+            if (dmaStage.detail != nullptr && dmaStage.detail[0] != '\0') {
+                position = input3d_panel_append(line, sizeof(line), position, " reason=");
+                position = input3d_panel_append(line, sizeof(line), position, dmaStage.detail);
+            }
             position = input3d_panel_append(line, sizeof(line), position, "/");
             input3d_panel_append(line, sizeof(line), position,
                 modern_input_diagnostics::status_name(selected.stages[
