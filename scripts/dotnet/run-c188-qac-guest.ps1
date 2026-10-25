@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$BootEvidencePath,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
-    [Parameter(Mandatory=$true)][ValidateSet('identity','lifecycle','coexistence','production-startup','production-apps','production-lifecycle')][string]$Scenario,
+    [Parameter(Mandatory=$true)][ValidateSet('identity','lifecycle','coexistence','production-startup','production-apps','production-lifecycle','registry-input-reentry')][string]$Scenario,
     [Parameter()][switch]$ProductionCompatibility,
     [Parameter()][ValidateRange(60,3600)][int]$MaxRuntimeSeconds = 1200,
     [Parameter()][ValidateRange(30,300)][int]$BootTimeoutSeconds = 180,
@@ -19,7 +19,8 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $phaseRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
@@ -61,11 +62,16 @@ $isC188R5Boot = $bootRoot.StartsWith($c188r5Root.TrimEnd('\','/') + [System.IO.P
 $c188r6Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender'))
 $isC188R6Boot = $bootRoot.StartsWith($c188r6Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
     [System.StringComparison]::OrdinalIgnoreCase)
-if (($isC188R5Boot -or $isC188R6Boot) -and (
+$c188r9Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry'))
+$isC188R9Boot = $Scenario -eq 'registry-input-reentry' -and
+    $bootRoot.StartsWith($c188r9Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+        [System.StringComparison]::OrdinalIgnoreCase)
+if (($isC188R5Boot -or $isC188R6Boot -or $isC188R9Boot) -and (
         $qacStatusBefore -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
         $qacListBefore -notmatch 'Reservations:\s+0' -or
-        $qacListBefore -notmatch 'Managed sessions:\s+0')) {
-    throw 'C188R5/C188R6 requires exclusive QAC admission; an existing reservation or managed session was detected.'
+        $qacListBefore -notmatch 'Managed sessions:\s+0' -or
+        $qacStatusBefore -notmatch 'queued:\s+0')) {
+    throw 'This diagnostic requires an empty QAC census; an existing QEMU process, reservation, managed session, or queued request was detected.'
 }
 
 $mediaHashes = [ordered]@{}
@@ -312,6 +318,16 @@ $manifest = [ordered]@{
     productionNotesLifetimeCloseMarkers=([regex]::Matches($serialText,'(?m)^\[C150-LIFETIME-CLOSE\] selector=00000004 result=PASS\r?$')).Count
     productionNotesCloseApprovalMarkers=([regex]::Matches($serialText,'(?m)^\[C152-CLOSE\] request=accepted dirty=false result=PASS\r?$')).Count
     c188SerialMarkers=([regex]::Matches($serialText,'(?m)^.*C188[-A-Z].*$')).Count
+    registryDiagnosticMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*\r?$')).Count
+    registryLaunchLookupSuccessMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=descriptor-lookup .*input=0 .*result=0\r?$')).Count
+    registryLaunchLookupRejectedMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=descriptor-lookup .*input=0 .*result=-4\r?$')).Count
+    registryInputEntryMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=dispatch-entry .*input=1 .*\r?$')).Count
+    registryLookupSuccessMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=descriptor-lookup .*input=1 .*result=0\r?$')).Count
+    registryLookupRejectedMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R9-300 REG .*stage=descriptor-lookup .*input=1 .*result=-4\r?$')).Count
+    validGenerationMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R8-300 INPUT-BOUNDARY stage=lifetime-found selector=4 generation=1 .*\r?$')).Count
+    notesHandlerMarkers=([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R8-300 INPUT-BOUNDARY stage=notes-handler-enter selector=4 generation=1 .*\r?$')).Count
+    notesPointerFocusMarkers=([regex]::Matches($serialText,'(?m)^\[C117-MANAGED-OUTPUT\] C117-TEXT-AREA focus=PASS source=pointer\r?$')).Count
+    notesDocumentEditMarkers=([regex]::Matches($serialText,'(?m)^\[C117-MANAGED-OUTPUT\] C117-TEXT-AREA edit=changed result=PASS\r?$')).Count
     notesLaunchMarkers=([regex]::Matches($serialText,'(?m)^\[C150-APP-LAUNCH\].*selector=00000004 kind=normal\r?$')).Count
     taskManagerLaunchMarkers=([regex]::Matches($serialText,'(?m)^\[C150-APP-LAUNCH\].*selector=00000007 kind=normal\r?$')).Count
     fileExplorerLaunchMarkers=([regex]::Matches($serialText,'(?m)^\[C150-APP-LAUNCH\].*selector=00000008 kind=normal\r?$')).Count
@@ -371,6 +387,19 @@ $scenarioPass = switch ($Scenario) {
             $manifest.productionNotesLifetimeCloseMarkers -ge 1 -and
             $manifest.productionNotesCloseApprovalMarkers -ge 1 -and
             $manifest.counterAppLaunchMarkers -eq 0
+        break
+    }
+    'registry-input-reentry' {
+        $manifest.productionSelector4LaunchMarkers -ge 1 -and
+            $manifest.productionNotesSurfaceMarkers -ge 1 -and
+            $manifest.registryDiagnosticMarkers -ge 4 -and
+            $manifest.registryInputEntryMarkers -ge 1 -and
+            $manifest.registryLookupSuccessMarkers -ge 1 -and
+            $manifest.registryLookupRejectedMarkers -eq 0 -and
+            $manifest.validGenerationMarkers -ge 1 -and
+            $manifest.notesHandlerMarkers -ge 1 -and
+            $manifest.notesPointerFocusMarkers -ge 1 -and
+            $manifest.notesDocumentEditMarkers -ge 1
         break
     }
 }

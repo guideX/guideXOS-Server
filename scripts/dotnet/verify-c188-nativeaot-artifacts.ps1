@@ -7,12 +7,13 @@ param(
     [Parameter()][switch]$NotesPostRenderStartup,
     [Parameter()][switch]$NotesProofAuthorization,
     [Parameter()][switch]$NotesInputRouting,
+    [Parameter()][switch]$NotesRegistryInputReentry,
     [Parameter()][string]$ReadElfPath = 'C:\mingw64\bin\readelf.exe'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation -or $NotesProofInvocationCorrection -or $NotesPostRenderStartup -or $NotesProofAuthorization -or $NotesInputRouting
+$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation -or $NotesProofInvocationCorrection -or $NotesPostRenderStartup -or $NotesProofAuthorization -or $NotesInputRouting -or $NotesRegistryInputReentry
 $selectedPhaseCount = 0
 if ($NotesStartupDiagnostics) { $selectedPhaseCount++ }
 if ($NotesStartupOperationIsolation) { $selectedPhaseCount++ }
@@ -20,8 +21,9 @@ if ($NotesProofInvocationCorrection) { $selectedPhaseCount++ }
 if ($NotesPostRenderStartup) { $selectedPhaseCount++ }
 if ($NotesProofAuthorization) { $selectedPhaseCount++ }
 if ($NotesInputRouting) { $selectedPhaseCount++ }
+if ($NotesRegistryInputReentry) { $selectedPhaseCount++ }
 if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRootName = if ($NotesRegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
@@ -80,12 +82,14 @@ $notesSources = @(
 $allNotesMarkers = [System.Collections.Generic.List[string]]::new()
 foreach ($sourcePath in $notesSources) {
     $sourceText = [System.IO.File]::ReadAllText($sourcePath)
-    foreach ($match in [regex]::Matches($sourceText,'C188R[34678]-\d{3} [A-Z][A-Z0-9 =-]+')) {
+    foreach ($match in [regex]::Matches($sourceText,'C188R[346789]-\d{3} [A-Z][A-Z0-9 =-]+')) {
         if (-not $allNotesMarkers.Contains($match.Value)) { $allNotesMarkers.Add($match.Value) }
     }
 }
 if ($isStartupDiagnostic) {
-    $requiredNotesMarkers = if ($NotesInputRouting) {
+    $requiredNotesMarkers = if ($NotesRegistryInputReentry) {
+        @($allNotesMarkers | Where-Object { $_ -like 'C188R7-*' -or $_ -like 'C188R8-*' -or $_ -like 'C188R9-*' })
+    } elseif ($NotesInputRouting) {
         @($allNotesMarkers | Where-Object { $_ -like 'C188R7-*' -or $_ -like 'C188R8-*' })
     } elseif ($NotesProofAuthorization) {
         @($allNotesMarkers | Where-Object { $_ -like 'C188R7-*' })
@@ -140,7 +144,9 @@ foreach ($entry in $artifacts.GetEnumerator()) {
     $item = Get-Item -LiteralPath $entry.Value
     $fileEvidence[$entry.Key] = [ordered]@{path=$item.FullName;bytes=$item.Length;sha256=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash}
 }
-$nativeAotMode = if ($NotesInputRouting) {
+$nativeAotMode = if ($NotesRegistryInputReentry) {
+    'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization+C188R8InputRouting+C188R9RegistryInputReentry'
+} elseif ($NotesInputRouting) {
     'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization+C188R8InputRouting'
 } elseif ($NotesPostRenderStartup) {
     'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R6PostRenderStartup'
@@ -160,7 +166,7 @@ $manifest = [ordered]@{
     elfClass='ELF64';elfMachine='x86-64';loadSegmentCount=$loadCount;relocations=0
     nativeApplicationId='com.guidexos.apps.managed.counterapp';nativeSelector=9
     productionSelectors=@{notes=4;settings=5;calculator=6;taskManager=7;fileExplorer=8}
-    requiredRetainedSymbols=$symbolEvidence;notesStartupDiagnostics=$isStartupDiagnostic;notesStartupOperationIsolation=[bool]$NotesStartupOperationIsolation;notesProofInvocationCorrection=[bool]$NotesProofInvocationCorrection;notesPostRenderStartup=[bool]$NotesPostRenderStartup;notesProofAuthorization=[bool]$NotesProofAuthorization;notesInputRouting=[bool]$NotesInputRouting;retainedNotesMarkers=$(if ($isStartupDiagnostic) { @($requiredNotesMarkers) } else { @() });artifacts=$fileEvidence
+    requiredRetainedSymbols=$symbolEvidence;notesStartupDiagnostics=$isStartupDiagnostic;notesStartupOperationIsolation=[bool]$NotesStartupOperationIsolation;notesProofInvocationCorrection=[bool]$NotesProofInvocationCorrection;notesPostRenderStartup=[bool]$NotesPostRenderStartup;notesProofAuthorization=[bool]$NotesProofAuthorization;notesInputRouting=[bool]$NotesInputRouting;notesRegistryInputReentry=[bool]$NotesRegistryInputReentry;retainedNotesMarkers=$(if ($isStartupDiagnostic) { @($requiredNotesMarkers) } else { @() });artifacts=$fileEvidence
     readelfEvidence=[ordered]@{header=$headerPath;programHeaders=$programPath;relocations=$relocationPath}
 }
 $manifestPath = Join-Path $evidence 'nativeaot-qualification.json'

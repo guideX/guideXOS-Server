@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>ManagedApplicationRegistryC188R9Host</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\managed\HostLogProof\HostLogProof.csproj"
+      AdditionalProperties="HostLogProofMode=C160Composite;HostLogProofHostTest=true;HostLogProofC156ControlModifierShortcuts=true;HostLogProofC158ManagedCalculator=true;HostLogProofC161ManagedTaskManager=true;HostLogProofC163ManagedFileExplorer=true;HostLogProofC188R9RegistryInputReentry=true" />
+  </ItemGroup>
+</Project>

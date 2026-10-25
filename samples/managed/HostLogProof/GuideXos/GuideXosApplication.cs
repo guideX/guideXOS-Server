@@ -81,6 +81,9 @@ public static unsafe class GuideXosApplicationRegistry
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
     private static uint s_c188r8InputTraceRecords;
 #endif
+#if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
+    private static uint s_c188r9RegistryTraceRecords;
+#endif
 #if GUIDEXOS_PROOF_CONTROL
     private static bool s_proofConfigConsumed;
 #endif
@@ -177,6 +180,16 @@ public static unsafe class GuideXosApplicationRegistry
                 : (int)hostResult;
         }
 
+#if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
+        if (selector == 4u &&
+            (host.LaunchContext.IsInput ||
+             (!host.IsAction && !host.IsCapabilityProbe && !host.IsAbiProbe)))
+        {
+            LogC188R9RegistryState(host, "dispatch-entry"u8, selector,
+                host.LaunchContext.ApplicationGeneration, -1);
+        }
+#endif
+
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
         if (host.LaunchContext.IsInput)
         {
@@ -212,7 +225,19 @@ public static unsafe class GuideXosApplicationRegistry
         }
 #endif
 
-        if (!TryFind(selector, out GuideXosApplicationDescriptor descriptor))
+        bool descriptorFound = TryFind(selector,
+            out GuideXosApplicationDescriptor descriptor);
+#if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
+        if (selector == 4u &&
+            (host.LaunchContext.IsInput ||
+             (!host.IsAction && !host.IsCapabilityProbe && !host.IsAbiProbe)))
+        {
+            LogC188R9RegistryState(host, "descriptor-lookup"u8, selector,
+                host.LaunchContext.ApplicationGeneration,
+                descriptorFound ? 0 : GxAbi.ErrorInvalidApplicationId);
+        }
+#endif
+        if (!descriptorFound)
         {
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
             if (host.LaunchContext.IsInput)
@@ -308,6 +333,13 @@ public static unsafe class GuideXosApplicationRegistry
                 return GxAbi.ErrorInvalidApplicationId;
             }
             applicationGeneration = generation;
+#if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
+            if (selector == 4u)
+            {
+                LogC188R9RegistryState(host, "instance-start"u8, selector,
+                    applicationGeneration, 0);
+            }
+#endif
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
             Span<byte> instanceMarker = stackalloc byte[96];
             int markerLength = 0;
@@ -366,6 +398,13 @@ public static unsafe class GuideXosApplicationRegistry
             host.TryLog("C188R6-010 BEFORE APPLICATION-LAUNCH-CALL"u8);
 #endif
             result = application.Launch(host);
+#if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
+            if (selector == 4u)
+            {
+                LogC188R9RegistryState(host, "launch-return"u8, selector,
+                    applicationGeneration, (int)result);
+            }
+#endif
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
             host.TryLog("C188R6-011 AFTER APPLICATION-LAUNCH-RETURN"u8);
 #endif
@@ -520,6 +559,79 @@ public static unsafe class GuideXosApplicationRegistry
     }
 
     private static bool AppendSigned(
+        Span<byte> buffer, ref int position, int value)
+    {
+        if (value < 0)
+        {
+            if (!GuideXosText.Append(buffer, ref position, "-"u8)) return false;
+            return GuideXosText.AppendUnsigned(buffer, ref position,
+                unchecked((uint)(-(long)value)));
+        }
+        return GuideXosText.AppendUnsigned(buffer, ref position, (uint)value);
+    }
+#endif
+
+#if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
+    private static void LogC188R9RegistryState(
+        GuideXosHost host,
+        ReadOnlySpan<byte> stage,
+        uint selector,
+        uint generation,
+        int resultCode)
+    {
+        if (s_c188r9RegistryTraceRecords >= 18u ||
+            (host.LaunchContext.IsInput &&
+             (host.LaunchContext.InputKind == GuideXosInputKind.PointerMove ||
+              host.LaunchContext.InputKind == GuideXosInputKind.Wheel)))
+        {
+            return;
+        }
+        s_c188r9RegistryTraceRecords++;
+
+        bool live = s_lifetime.TryGet(selector, generation, out _);
+        // GuideXosHost.TryLog accepts at most 127 bytes. Keep the populated
+        // five-slot snapshot inside that limit so launch and input snapshots
+        // are equally observable.
+        Span<byte> line = stackalloc byte[127];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R9-300 REG owner=static stage="u8) ||
+            !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position, " selector="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, selector) ||
+            !GuideXosText.Append(line, ref position, " gen="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, generation) ||
+            !GuideXosText.Append(line, ref position, " input="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                host.LaunchContext.IsInput ? 1u : 0u) ||
+            !GuideXosText.Append(line, ref position, " count="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                (uint)s_entries.Length) ||
+            !GuideXosText.Append(line, ref position, " slots="u8))
+        {
+            return;
+        }
+        for (int index = 0; index < s_entries.Length; index++)
+        {
+            if (index != 0 && !GuideXosText.Append(line, ref position, ","u8))
+                return;
+            if (!GuideXosText.AppendUnsigned(line, ref position,
+                    s_entries[index].Selector))
+            {
+                return;
+            }
+        }
+        if (!GuideXosText.Append(line, ref position, " live="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, live ? 1u : 0u) ||
+            !GuideXosText.Append(line, ref position, " result="u8) ||
+            !AppendC188R9Signed(line, ref position, resultCode))
+        {
+            return;
+        }
+        host.TryLog(line[..position]);
+    }
+
+    private static bool AppendC188R9Signed(
         Span<byte> buffer, ref int position, int value)
     {
         if (value < 0)

@@ -64,6 +64,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofC188R9RegistryInputReentry)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Allocating'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING</DefineConstants>
   </PropertyGroup>
