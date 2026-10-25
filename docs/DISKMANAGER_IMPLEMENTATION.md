@@ -523,3 +523,49 @@ remains incomplete pending a fresh post-remount VFS open/read/close. See the
 [DM37 continuation 9 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-9--shell-focus-handoff-diagnosed-gate-e-remains-open)
 for runtime hashes, QAC evidence, screenshots, cleanup, validation, and the
 remaining gates.
+
+## DM37 Continuation 10 — ordered read-only FAT32 workflow verified
+
+Run6 rebuilt the AMD64 kernel with a bounded PS/2 legacy-queue correction and
+completed the ordered read-only workflow in one QAC-managed guest. The
+production `get_key()` path now returns the oldest queued key-down rather than
+a shared value that a later IRQ could overwrite; a focused regression covers
+Escape/Enter FIFO delivery and releases. Disk Manager's ordinary action-pane
+navigation reached Dismount widget 6, opened confirmation, canceled safely,
+then reopened and confirmed through widget 11. The diagnostic chain records
+PS/2 receipt through production widget dispatch and handler entry. A 512-record
+append-only trace cap overflowed before final Shell events, so the report does
+not treat missing later trace rows as absent operations.
+
+Run6 retained a preliminary Dismount/Check/Remount before the first captured
+proof read. The qualifying sequence then began at that explicit Remount, read
+`DM9/PROOF.BIN` through Shell `vfscat` (29 bytes), Dismounted the same
+read-only GPT/FAT32 partition with zero references, completed FAT32 Check
+with zero stored findings and no repair, explicitly Remounted, and performed
+a fresh path-based read of the same 29-byte payload. The production command
+closes each VFS handle. The internal numeric VFS mount generation is not
+shown in retained guest diagnostics; the visible partition-view generation
+was 3, and the production mount/dismount lifecycle plus the fresh post-remount
+open establish the new path read without reusing the earlier file handle.
+
+QAC 2.0.0 reservation `783b379e44c94f0790d6b8912d7d38d6` owned child PID
+32672/QMP 59142. Temporary incomplete-census and unmanaged-QEMU warnings were
+reconciled by contemporaneous supported QAC snapshots showing the child
+managed and zero foreign sessions; continuous census health is not claimed.
+The guest used read-only fixture `DM37WORKFLOW01` and normal Shell shutdown;
+QAC observed exit code 0 and released the reservation. The fixture's starting
+and ending SHA-256 matched
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`.
+QMP accounting remained invalid and cumulative only (zero writes, one Flush).
+
+The full storage suite passed 1,491/1,491 checks, including focused DM37
+input/focus/Shell regressions, the new PS/2 queue regression, widget
+activation, and USB/GPT/DM30 verifiers. The freestanding AMD64 kernel,
+`build.bat`, and UEFI x64 Release builds passed. Gate A remains accepted;
+Gate E's ordered workflow is evidenced, while the remaining DM37
+busy/protected, writable durability,
+removal/replacement, failure-injection, and delayed-key/Close campaigns remain
+open. `.phase` remains DM36→DM37; DM38 has not started. See the [DM37
+continuation 10 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-10--reliable-action-pane-activation-and-ordered-fat32-workflow)
+for the exact source/runtime hashes, checker result, input evidence, QAC
+reconciliation, artifact paths, and validation record.

@@ -6,6 +6,7 @@
 //
 
 #include "include/kernel/ps2keyboard.h"
+#include "include/kernel/ps2keyboard_legacy_queue.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/shell.h"
@@ -21,8 +22,6 @@ static const uint16_t kDataPort    = 0x60;
 static const uint16_t kStatusPort  = 0x64;
 
 // Key state
-static uint32_t s_lastKey = 0;
-static bool s_hasKey = false;
 static bool s_shiftDown = false;
 static bool s_ctrlDown = false;
 static bool s_altDown = false;
@@ -180,8 +179,6 @@ void init()
         arch::inb(kDataPort);
     }
     
-    s_lastKey = 0;
-    s_hasKey = false;
     s_shiftDown = false;
     s_ctrlDown = false;
     s_altDown = false;
@@ -356,8 +353,6 @@ void irq_handler()
                 diagnosticSequence, accepted, key);
         }
         if (keyUp) return;
-        s_lastKey = key;
-        s_hasKey = true;
         s_lastKeyAltF4Candidate = altF4Candidate;
         s_lastKeyAltLeftDown = altF4LeftDown;
         s_lastKeyAltRightDown = altF4RightDown;
@@ -366,31 +361,27 @@ void irq_handler()
 
 bool has_key()
 {
-    return s_hasKey;
+    return legacy_queue::has_key_down(
+        s_eventQueue, s_eventTail, s_eventHead, kEventQueueCapacity);
 }
 
 uint32_t get_key()
 {
-    if (!s_hasKey) return 0;
     dm37_input_diagnostics::set_current_sequence(0);
-    s_hasKey = false;
     // Keep the legacy one-key API and the lossless transition queue in sync.
     // The desktop consumes key-downs only; discard queued release transitions
     // until the corresponding legacy key-down is reached.
-    while (s_eventTail != s_eventHead) {
-        const KeyEvent event = s_eventQueue[s_eventTail];
-        s_eventTail = static_cast<uint8_t>((s_eventTail + 1u) % kEventQueueCapacity);
-        if (event.action == KeyAction::Down) {
-            if (event.diagnosticSequence != 0) {
-                dm37_input_diagnostics::set_current_sequence(
-                    event.diagnosticSequence);
-                dm37_input_diagnostics::emit("legacy-pop",
-                    event.diagnosticSequence, event.key, s_lastKey);
-            }
-            break;
-        }
+    KeyEvent event = {};
+    if (!legacy_queue::pop_next_key_down(
+            s_eventQueue, s_eventTail, s_eventHead,
+            kEventQueueCapacity, &event)) return 0;
+    if (event.diagnosticSequence != 0) {
+        dm37_input_diagnostics::set_current_sequence(
+            event.diagnosticSequence);
+        dm37_input_diagnostics::emit("legacy-pop",
+            event.diagnosticSequence, event.key, event.key);
     }
-    return s_lastKey;
+    return event.key;
 }
 
 bool has_event()
@@ -412,8 +403,6 @@ bool get_event(KeyEvent* outEvent)
 
 void clear()
 {
-    s_hasKey = false;
-    s_lastKey = 0;
     s_lastKeyAltF4Candidate = false;
     s_lastKeyAltLeftDown = false;
     s_lastKeyAltRightDown = false;

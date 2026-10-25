@@ -1252,3 +1252,165 @@ durability, removal/replacement, failure-injection, and delayed-key/Close
 cases. The next continuation should requalify the full workflow under QAC
 using the now-identified Shell recovery and must still capture a fresh
 post-remount VFS open/read/close before claiming Gate E.
+
+## DM37 Continuation 10 — reliable action-pane activation and ordered FAT32 workflow
+
+**Outcome B — `DM37_WORKFLOW_VERIFIED` for the ordered read-only workflow in
+one QAC-managed guest.** The Run6 guest completed a fresh Shell VFS read after
+an explicit Dismount → FAT32 Check → Remount cycle. The fixture remained
+unchanged and the guest shut down through the production Shell. Gate A remains
+accepted; this does not qualify the other DM37 safety gates or start DM38.
+`.phase` remains `last_completed=DM36`, `next_expected=DM37`.
+
+### Keyboard queue defect and focused regression
+
+Run5's rapid Escape/Enter sequence exposed a defect in the legacy PS/2 API:
+`get_key()` removed one queued event but returned a shared `s_lastKey` value
+that a later IRQ could already have replaced. The Boolean `s_hasKey` could also
+be cleared while additional key-down events remained queued. The narrow fix
+makes `has_key()` scan pending transitions for a key-down, and makes
+`get_key()` pop and return the oldest queued key-down while skipping releases.
+The bounded event queue and production widget dispatcher remain in use.
+`tests/ps2keyboard_legacy_queue_test.cpp` covers Escape followed by Enter,
+interleaved releases, FIFO values and diagnostic sequence numbers, and a
+release-only tail. It passed with zero failures.
+
+### Run6 provenance and QAC ownership
+
+The run used branch `DISK_MANAGER_IMPROVEMENTS`, starting from
+`e516da393e43e4198859feb4e8248d1c24ba1d97`, with the PS/2 queue fix present in
+the working tree. The private runtime manifest reported 16 source hashes and
+no source mismatches. The rebuilt kernel was compiled for freestanding AMD64
+with `GXOS_DM37_INPUT_DIAGNOSTICS`, `NVME_WRITE_PROVEN=0`, and
+`NVME_FLUSH_PROVEN=0`; the manifest's kernel SHA-256 is
+`4BFD226CA145D0298A3C299DD44194B08606F6AAAD72F84085B3E271D52DD563`.
+The bootloader SHA-256 is
+`E65C0A2CBF50534CDB01602800F579446B27B2BE7597BDB461E1E83F94BC0DF4`, OVMF is
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`,
+ramdisk is `5C9B3C5302E72F845448688A4C57DA91FD95F111946F5FCA4C30E452449555FD`,
+NvVars is `48E7A7E0F277E90036E951B2E2A484A736AE706FB25B4AA654B8FA361E920667`,
+and QEMU is `A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`.
+The private ESP and manifest are under
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\input-diagnostics-run6-keyqueue-fix\`.
+
+QAC 2.0.0 granted acceptance reservation
+`783b379e44c94f0790d6b8912d7d38d6` to owner PID 23496. Its managed QEMU child
+was PID 32672 at `127.0.0.1:59142`. The wrapper emitted temporary incomplete
+census and “1 unmanaged QEMU” warnings. Contemporaneous supported status/list/
+inspect snapshots reconciled the running child as managed, with zero foreign
+sessions and `degraded=false`; this is not a claim of continuous census
+health. After guest exit, QAC reported exit code 0, reservation state
+`Released`, reason `Managed child exited`, and `degraded=false`; final status
+showed zero QEMU processes and zero managed sessions. QMP port 59142 closed.
+The evidence is in
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\input-diagnostics-run6-keyqueue-fix\runs\qac-keyqueue-corrected-workflow-20261024-r6\`.
+
+### Action-pane activation and confirmation
+
+The built-in Start Menu `[LaunchDispatch]` opened Disk Manager. With the
+manager in its known initial pane, Tab entered ACTIONS at Refresh; a harmless
+Refresh was activated through the ordinary keyboard/widget path and the
+visible state updated. In the mounted state the enabled action order was
+Refresh, Properties, Diagnostics, Verify Partition, Dismount Volume. Tab then
+four Right presses selected Dismount at action index 4 (production widget 6);
+Enter opened the confirmation. Its Cancel and Dismount widgets were 12 and 11.
+Escape canceled the first confirmation and the target remained Mounted. The
+same ordinary navigation reopened it; Tab moved from Cancel to Dismount and
+Enter confirmed. No direct handler call or test-only focus setter was used.
+
+The retained `DM37-IN` chain for the decisive first confirmation records the
+Enter PS/2 key and queue admission, legacy FIFO pop, desktop/compositor focus,
+Disk Manager action focus index 4/widget 6, action attempt, widget-handler
+dispatch, Dismount handler entry, and confirmation open. The visible
+confirmation/result screens and the subsequent checker/remount screenshots
+are retained in the Run6 directory. Diagnostics were boot-enabled with an
+append-only 512-record cap; the buffer overflowed before later Shell proof
+events. Missing post-cap records are not interpreted as evidence that the
+events did not happen.
+
+After the final Disk Manager operation, Escape closed the manager through its
+ordinary keyboard path; Grave restored active Shell input. The final
+`vfscat` command was typed and submitted at the Shell prompt, returned its
+29-byte result, and restored the prompt. No pointer activation was used, and
+this run did not qualify Close during a synchronous operation or delayed-key
+stress behavior.
+
+### Ordered workflow and media proof
+
+The target was read-only USB serial `DM37WORKFLOW01`, GPT partition 1, FAT32
+label `DM9PROOF`, at `/mnt/disk1-part1`. The first mount attempt was followed
+by a harmless confirmation-cancel test and a preliminary successful Dismount,
+FAT32 Check, and Remount before the first proof-file read was captured. That
+extra cycle is preserved as history. The qualifying ordered subsequence starts
+with that explicit Remount, followed by the first captured read, a second
+explicit Dismount, a completed Check, a further explicit Remount, and the
+fresh read. Thus the first captured read is not described as preceding the
+preliminary cycle.
+
+The first captured Shell command was
+`vfscat /mnt/disk1-part1/DM9/PROOF.BIN`. It printed
+`guideXOS DM9 QEMU proof 001` and reported 29 bytes. The captured payload is
+`guideXOS DM9 QEMU proof 001\r\n` (hex
+`6775696465584F5320444D392051454D552070726F6F66203030310D0A`). After the
+second Dismount, FAT32 Check, and explicit read-only Remount, Disk Manager
+again showed `/mnt/disk1-part1` mounted on the same registration and partition;
+the visible partition-view generation was 3. The internal numeric VFS
+`mountGeneration` is not printed by the retained guest UI/serial diagnostics;
+production VFS assigns a new monotonically increasing generation to each
+mount, and Dismount success followed by a separate path-based `vfscat` open
+provides the fresh-mount evidence. The final `vfscat` independently printed
+the same 29-byte payload and returned to the Shell prompt. Serial contains two
+separate opens of `/mnt/disk1-part1/DM9/PROOF.BIN`. The production
+`cmd_vfscat` path reads through EOF and calls `vfs::close(handle)`; because the
+diagnostic buffer had overflowed, no direct post-remount close trace is
+claimed. The command result, prompt return, serial open, and production close
+call together document that lifecycle without claiming a missing trace.
+
+The second Dismount confirmation captured USB device
+`usb-46F4:0001-p0-i0-10`, device registration 2, registry generation 5, GPT
+partition 1, LBA 2048 through 1,228,766 at 512 bytes/sector, and
+`/mnt/disk1-part1`. It showed zero open-file references, zero directory
+references, zero active I/O, read-only media, and no write Flush requirement.
+The production result showed `Volume Dismounted`, state `Unmounted`, zero
+references, and no automatic checker, repair, or format. The same partition
+remained present and the device registration was retained.
+
+Both FAT32 checks completed through Disk Manager. The retained result screen
+reported Verification Passed; 40 metadata reads / 925,184 bytes; all
+306,688/306,688 FAT bytes compared; 3 chains/clusters, 2 directories, 7
+entries; 15 structural reads; 76,593 orphan clusters scanned; and zero stored
+findings. No repair was run and the checker lease was released before the
+explicit Remount.
+
+The read-only fixture is
+`D:\dev\guideXOSServer_DiskManagerImprovements\out\dm37\dismount-guest\fixtures\DM37WORKFLOW01.raw`,
+629,145,600 bytes. Its starting and final SHA-256 are both
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`; the
+post-run exclusive host read handle succeeded. Pre-shutdown QMP block stats
+for the fixture showed 67,975 reads / 36,804,608 bytes, zero writes, and one
+Flush, but `account_invalid=true` and `account_failed=true`; these cumulative
+counters are not attributable to an individual operation.
+
+### Shutdown, validation, and remaining gates
+
+After the final read, the normal Shell `shutdown` command completed. Serial
+recorded `[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop
+expected=1`; QAC observed child exit code 0, released the reservation, and
+QMP closed without `quit`.
+
+Host validation for this production change passed: storage manager 1,491
+checks / 0 failures (including 249 USB Mass Storage checks); widget activation;
+DM37 diagnostics, input focus, Shell focus, and PS/2 queue regression; USB
+trace classification (7 tests); DM29 GPT verifier tests; and DM30 GPT fixture
+tests. The AMD64 freestanding kernel build passed with the diagnostic define
+and both NVMe proof flags disabled. The UEFI x64 Release MSBuild completed
+with 0 warnings and 0 errors. `build.bat` completed successfully after its
+dependency checks (the compiler emitted existing warnings). `git diff --check`
+passed. The run did not use physical media, prove NVMe writes or Flushes,
+force Dismount, or repair the fixture.
+
+Gate A remains accepted and Gate E's ordered read-only maintenance workflow
+is evidenced. Busy-volume Gate B, protected-admission Gate C, writable
+durability Gate D, device removal/replacement Gate F, controlled I/O/Flush
+failure Gate G, and delayed-key/Close qualification remain open. No DM38 work
+is authorized by this outcome; keep `.phase` at DM36→DM37.

@@ -27,11 +27,11 @@ void init();
 // IRQ1 handler - called by interrupt dispatcher
 void irq_handler();
 
-// Check if there's a new key available
+// Check if a queued key-down transition is available to the legacy dispatcher.
 bool has_key();
 
-// Get the last key pressed (ASCII or special code)
-// Returns 0 if no key available
+// Get the next queued key-down (ASCII or special code), skipping key releases.
+// Returns 0 if no key-down is available.
 uint32_t get_key();
 
 enum class KeyAction : uint8_t {
