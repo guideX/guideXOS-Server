@@ -132,3 +132,76 @@ Pre-existing generated/untracked directories and guest evidence were preserved. 
 No product correction was made. C188 acceptance remains open, including real Notes input/edit/redraw; proof-disabled production Notes readiness/input; dedicated CounterApp selector-9 acceptance; coexistence, resize, lifecycle, and identity scenarios; and the original six focused/production C188 scenarios. The six-scenario campaign and C189 were not started.
 
 The immediate next step is to resume only the bounded C188R10 diagnostic guest after QAC has an empty exclusive acceptance census. Compare native invocation IDs, managed entry counts, registry/pool owner tokens, descriptor count, C181 occupancy, generation validity, and teardown count from launch-return through the first pointer/key callbacks. Do not change registry or pool architecture unless those observations prove a specific source defect. If a later C188R11 phase is opened, keep it to one evidence-driven boundary and one bounded guest; C188R10's QAC gate must be closed first.
+
+## C188R10R1 guest continuation — 2026-10-25
+
+**Outcome B — boundary narrowed.** One safely admitted C188R10 `diag-002` guest reproduced the launch/input state difference. At Notes launch return, the registry had five descriptors and C181 held selector 4 at generation 1. At the first observed pointer callback, the descriptor count and resident mask were both zero. The registry and pool owner-slot tokens and initialization sentinel were unchanged, and teardown count remained zero. `TryFind(4)` returned false and dispatch returned `-4`. The operation that changed state was not observed, so this is not a root-cause finding and does not establish a NativeAOT runtime defect.
+
+### Admission and candidate identity
+
+The fresh QAC census at `2026-10-25T17:48:44Z` found the coordinator online with no QEMU processes, reservations, managed sessions, queued requests, or foreign QEMU process. The existing bounded runner then received exclusive acceptance reservation `abd258873474412d91552a5e69ce78b3` for `guideXOSServer`; owner `LEON2_RDT\guideX` was verified (owner PID 17904). QEMU child PID 30496 ran `C:\Program Files\qemu\qemu-system-x86_64.exe`. Admission took 0.9 seconds. The run used `run-c188-qac-guest.ps1`, scenario `registry-input-reentry`, with a 60-second admission bound, 180-second boot bound, and 240-second runtime bound.
+
+The `diag-002` candidate was reused unchanged. Every saved pre-boot hash matched, and the copy staged at `runs/diag-003/esp/` matched those hashes before and after the guest. The NativeAOT build manifest, kernel qualification, and ramdisk staging manifest all report PASS. No source or candidate was rebuilt.
+
+| Candidate artifact | Bytes | SHA-256 |
+|---|---:|---|
+| Diagnostic NativeAOT PE | 2,083,328 | `E25E66960C69643BBEDA65D0DD38A01AC0AD537D113A777419CE0B60274FC742` |
+| Diagnostic NativeAOT ELF | 2,109,440 | `C772C48205CADC8C857B07E143C8FD641DC06B7E0A1FC41A970B203D7635DB13` |
+| NativeAOT link map | 2,809,875 | `57F2BC89D71660F7B85CAFAE39A931194375BF8E625E69EE952236E85305190A` |
+| Diagnostic kernel ELF | 2,366,992 | `9C8C346BA912D5FCBEAB2645108E96F6CA630B3F6E6E20D4B7386419695597BD` |
+| Staged guest RAM disk | 67,108,864 | `8E622629071FD9E311F6E0F79B466B9C91746ADD40741FA55AF853CA9F86129F` |
+| Bootloader | 52,224 | `D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B` |
+| R10 targeted runner | 10,374 | `B8B3B449E29D2F56B90A9DB72FC5B3832F401798F979F511FD90250043A68B3C` |
+| Bounded QAC guest runner | 28,428 | `53D34D8A8AB94DB957A7C3B80A6475071E47437A43B4AAAAD07935836A51465E` |
+| R10 predicate helper | 1,850 | `42B66CC7F810888D6C1449E971CBEE734B67E968A0F80FA0816CEAD4A5A9B334` |
+| QMP control helper | 10,415 | `72731B3F892B0778589FAC9F02AF6309940F4F886235AC132C0C579A68613EE2` |
+| NativeAOT build manifest | 1,593 | `7F3AB5E7CD6B59D90E08E61B4F915D5BED5B8E871E3DCBEA461112247D844F00` |
+| Kernel qualification manifest | 2,072 | `60FEE81686BB59F799C9B7AC46E408E68E23DB437C416660A74AB8091C2F4A4D` |
+| Ramdisk staging manifest | 871 | `3E6F076B7D0C4B1368D6940FF0CBC3DDF311AA642DBB04A33FB4D8A5916F1334` |
+| Saved pre-boot hash manifest | 584 | `A9A62C24F978C27897BECC6FFD2EA4248341576ADF3101E75B4F6E1D842C9F5F` |
+
+The retained ELF contains the `C188R10 state stage=` and `C188R10-MANAGED stage=` diagnostics; the kernel contains `C188R10-NATIVE`. The R10 predicate source supports LF/CRLF and decimal/zero-padded generations and checks native launch-return and optional managed checkpoints. The runner predicates accept LF/CRLF and decimal/zero-padded generation formats, check the native launch-return marker, and expose checkpoint results for native invocation, managed entry, registry snapshot, input entry, handler, and return. The historical report records 13 predicate fixtures passing; their source and fixtures were inspected but not rerun for R1. The 14-case hosted reentry result was reused from its saved passing log. The 930-case managed UI aggregate was not rerun.
+
+### Runtime state and first inconsistent boundary
+
+| Snapshot | Registry token | Init | Descriptors | Pool token | Resident mask | Selector/generation | Valid | Teardown count | Result |
+|---|---:|---:|---:|---:|---:|---|---:|---:|---|
+| Notes launch return | `1780116663` | 1 | 5 (`4–8`) | `3728137811` | `1` | `4 / 1` | 1 | 0 | `rc=0` |
+| First pointer callback, dispatch | `1780116663` | 1 | 0 | `3728137811` | 0 | `4 / 1` | 0 | 0 | lookup `-4` |
+| Pointer release callback, dispatch | `1780116663` | 1 | 0 | `3728137811` | 0 | `4 / 1` | 0 | 0 | lookup `-4` |
+
+The launch trace shows `stage=start` with mask 1 and a valid generation, then `stage=launch-return` and `stage=return` with five descriptors, mask 1, and `rc=0`. At input, both pointer down and release entered the managed callback with selector 4 and generation 1. The first input `dispatch` snapshot already had `n=0`, mask 0, and invalid generation; `descriptor-lookup` returned `-4` before C181 lookup or `ManagedNotes.HandleInput`. Both native input calls returned `FFFFFFFC` (`-4`).
+
+The registry token and pool token are 32-bit hashes of the addresses of their static reference slots. Their repeated values are consistent with the same slot addresses, but hash collisions mean they do not prove address equality; neither token exposes the referenced array or C181 pool instance. The `init=1` value is a fixed diagnostic sentinel, not a monotonic initialization epoch, so it cannot detect a complete reinitialization that recreates the same values. Teardown count stayed zero, and no close marker was observed, but the counter covers the instrumented clear path and cannot rule out an uninstrumented replacement or state reset. These observations do not distinguish in-place mutation, reference replacement, reinitialization at the same mapping, memory corruption, or an observation-context defect.
+
+`C188R10-NATIVE` logged the two input callbacks with the same input image token `A6619991`, selector 4, and generation 1. No native launch-boundary record appeared, so the runtime cannot compare that token or a native launch-return code against the launch. Managed launch entry/exit records show `rc=0`, Notes surface creation succeeded, and the guest reached the main loop. Source and link-map evidence still show one exported NativeAOT composition, but runtime continuity across launch and input is not established by the missing launch marker.
+
+The narrowest established interval is after the valid launch-return snapshot and before the first managed input-dispatch snapshot. No intervening checkpoint identifies the operation that made the descriptors and resident slot unavailable.
+
+### Input, window, QMP, and QAC release
+
+The before-input screenshot showed Notes window `000003E8` at approximately screen bounds `(340,220)`–`(940,580)`. Screen point `(379,359)` was inside its editable text region, corresponding to client point `(39,115)`. One pointer click was sent. Since the first callback had already rejected selector 4, no keyboard character was sent. No Notes handler, pointer-focus, or edit-success marker was logged; the after-pointer screenshot shows unchanged document text. The window remained visible in the after-pointer screenshot; this is a separate visibility observation and does not imply registry state survived.
+
+QMP reported `running=true` before and after the click. The command/reply log records the screen captures, one pointer click (down/up), and the owned `quit`; no unsolicited `SHUTDOWN` event was retained. QEMU exited with code 0. QAC verified release of reservation `abd258873474412d91552a5e69ce78b3`, and its post-run census showed zero QEMU processes, reservations, managed sessions, queued requests, and blocked requests. The runner acceptance manifest is `FAIL` because the expected successful managed input path did not occur; QAC admission, QEMU termination, and reservation release succeeded.
+
+### Evidence and preservation
+
+The full run is retained under `out/dotnet/c188r10-nativeaot-state-reentry/runs/diag-003/`. `runtime-results.json` records the QAC identity, state snapshots, input outcome, media hashes, and evidence-file hashes; its SHA-256 is `D62CEF2A48F59314FE8B0580B2F7C10E29583FF368B2D281D2D10A4741B0F764`.
+
+| Runtime evidence | SHA-256 |
+|---|---|
+| QAC reservation/child log | `C62FA9999D2EE3298457BC71104A45D926CEE793907D0F87E05D05681192A7EB` |
+| Acceptance manifest | `96BF2166B5777EB81087C5C390723EC0515EB67865B9D93A035A54AEA1DA657E` |
+| Raw serial | `C379DC090E06E2852CB808CAD5CA1DBEADC1BF99E0F199835B54BB7DA3D99C15` |
+| QMP log | `139737A0D8229A702F49E1EF274004C759E1A441036E706F8CB7C962E2A6F410` |
+| QMP control log | `9D603429C63185FABE76C77FD3BA999D3BA34BB60EDDEB39F0DEF043F88A296E` |
+| Before-input screenshot | `95BCAC045DBD3713D3721D12FE7917B913D3FB262CD55F0AA47E3742B8111FA3` |
+| After-pointer screenshot | `A79CBCB59AE889F1DF107B11C1EBFDD2482EBD6C42A8C92E297A25504615F8EA` |
+
+The fresh pre-run baseline contained 13 protected roots, 8,497 files, and 136 existing status paths. The original `ESP/ramdisk.img` remained at SHA-256 `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. The complete baseline and post-run comparison retain relative paths, sizes, and hashes, plus the historical uncertainty for 212 C185 generated files. Guest media and framebuffer images remain uncommitted under the ignored run directory.
+
+No product behavior was changed, no production candidate was booted, and the six-scenario C188 campaign and C189 were not started. C188 acceptance remains open; Notes input acceptance was not demonstrated.
+
+### Recommended next action
+
+If C188R11 is opened, scope it to locating the interval between launch return and first input dispatch. Add a monotonic initialization/reset epoch and diagnostic identity for the actual registry-array and C181-pool references, and resolve why the native launch-boundary marker is absent. Keep one bounded guest and stop before keyboard input when descriptor lookup rejects. Do not implement a registry, C181, or NativeAOT runtime correction until evidence identifies the operation responsible.
