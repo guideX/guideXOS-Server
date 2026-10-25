@@ -12126,3 +12126,183 @@ all three source attributes consistently for ordinary properties, Array
 indices and `length`, and any host-created property classes admitted by the
 API. Accessors, proxies, inherited-property descriptors, deletion, and
 redefinition remain outside JS91.
+
+## JS92: bounded Array `keys()` and `entries()`
+
+JS92 starts from JS91 commit
+`d58b20974ae53a8d40d9594044bb5035f75c152d`. It extends the JS87 Array cursor
+with `VALUES`, `KEYS`, and `ENTRIES` modes. `Array.prototype.values()` and
+`Array.prototype[Symbol.iterator]` still share their original native factory;
+`keys()` and `entries()` are installed as distinct native Array prototype
+methods with the existing writable-only builtin attributes. Each call creates
+an independent bounded cursor. Its genuine `Symbol.iterator` method returns
+the same cursor without changing its position.
+
+The cursor retains the source `RuntimeObjectId`, next numeric index, and
+terminal state. A one-byte mode value occupies the existing padding at offset
+74 in `RuntimeObject`; the source ID remains at offset 76 and the index at
+offset 80. The complete record remains 88 bytes. The DOM collection iterator
+registry remains separate and keeps its captured-length policy.
+
+`keys()` returns Number indices from zero through the current logical Array
+length, including holes, without reading indexed values. `Object.keys()` still
+returns strings only for enumerable own properties, so a sparse Array such as
+`[10, , 30]` has own keys `"0"` and `"2"` while `keys()` yields `0`, `1`, and
+`2`. `entries()` uses the existing prototype-aware `readArrayIndex()` path and
+returns a genuine length-two Array with both occupied slots: the numeric index
+at slot zero and the actual JavaScript value at slot one. A hole therefore
+yields `[1, undefined]` unless a qualified inherited indexed value supplies
+the value. Neither mode writes to or fills a hole in the source. Explicit
+`undefined` remains an occupied source value.
+
+The pair stores values shallowly, preserving ordinary object, nested Array,
+and canonical Element identity. Each pair and outer `{ value, done }` result
+remains allocated and stable until runtime reset. Advancing one cursor cannot
+overwrite an earlier pair or affect another cursor. All three modes use the
+existing general `for...of` evaluator, including nested loops, fresh loop
+bindings, `break`, `continue`, containing-function `return`, and applicable
+IteratorClose behavior. Destructuring and spread remain unsupported.
+
+Array advancement checks the source's current logical length on every step.
+Growth before exhaustion can add future keys or entries; shrinkage can end a
+cursor normally. Once a successful step returns `done: true`, later growth
+does not restart it. The cursor advances only after its iterator result is
+fully constructed. Entry construction creates the pair through the existing
+Array facility, inserts both slots through `writeProperty()`, and then builds
+the standard iterator result. A failed pair slot, outer object, or result
+property rolls back unpublished objects, active property/key-byte counts, and
+Array-slot counts. A failed terminal-result allocation remains an allocation
+error and does not commit exhaustion. No published object reclamation, slot
+reuse, garbage collection, or pool increase was introduced.
+
+The measured per-successful-step costs are:
+
+| Mode | Indexed reads | Pair objects | Pair slots | Result objects | Result properties |
+|---|---:|---:|---:|---:|---:|
+| VALUES | 1 | 0 | 0 | 1 | 2 |
+| KEYS | 0 | 0 | 0 | 1 | 2 |
+| ENTRIES | 1 | 1 | 2 | 1 | 2 |
+
+All modes perform one live-length check and one cursor-state update per step.
+The runtime layout remains `RuntimeObject` 88 B, `Value` 40 B, and
+`RuntimeArrayElement` 48 B. Current limits remain 1,024 runtime objects,
+4,096 total properties (256 per object), 1,024 logical positions per Array,
+4,096 occupied Array records, 4,096 runtime strings, 2,048 environments,
+2,048 host handles, and 128 DOM iterator records.
+
+The first actual-capacity failures are deterministic `ObjectLimitExceeded`
+errors. In fresh all-hole runs of logical length 1,024, VALUES and KEYS each
+yield 1,018 items before result-object allocation fails; ENTRIES yields 509
+pairs. Those failed runs do not observe terminal `done: true`. The largest
+qualified all-hole runs that complete through terminal result creation are
+length 512 for VALUES and KEYS and length 256 for ENTRIES. These figures
+describe retained-result pool limits, not unlimited iteration. The tests also
+cover object, total-property, and Array-slot exhaustion; pair allocation;
+failure after the first or second pair slot; each outer-result property;
+terminal-result allocation; unchanged cursor position; and runtime use after
+failure.
+
+The native JS92 harness records five-sample hosted medians for cursor creation,
+first, middle, terminal, and repeated-terminal advancement; dense, sparse,
+all-hole, and nested-pair traversal; and near-capacity failure. Each script
+timing includes source setup, parsing, and evaluation. Its hosted static stack
+report measures 720 B for `invokeNative`, 944 B for `executeForOf`, 176 B for
+`createArray`, 240 B for `readArrayIndex`, 464 B for the standard Array
+iterator result, and 432 B for the entry-pair transaction. These compiler
+measurements do not establish bare-metal stack safety.
+
+JS92's hosted fixture covers the `Object.keys()` distinction, sparse holes,
+typed values, result stability, current length, self-return, independent
+cursors, `for...of`, nested JS81 pair Arrays, and nested Events. The JS92
+aggregate checks run alongside the existing JS9 reentrancy and JS81–JS91
+coverage.
+
+### JS92 final qualification record
+
+The work started from JS91 commit
+`d58b20974ae53a8d40d9594044bb5035f75c152d` on
+`NAVIGATOR_JAVASCRIPT_SUPPORT`. The duplicate-work gate found no existing
+JS92-or-later qualification. The native runtime and hosted adapter retain
+bounded storage, and published JavaScript objects remain allocated until
+runtime reset; no garbage collection or slot reuse was added.
+
+Strict C++17 qualification used `-Wall -Wextra -Werror -pedantic` with the
+bare-metal and test-failure-injection defines. The JS92 native harness passed
+229/229 checks. The full JavaScript matrix passed 94/94 lanes and
+16,924/16,924 reported assertions across 53 assertion-bearing lanes. Focused
+JS79–JS91 regressions passed 2,931/2,931 checks. The separate JS84
+no-diagnostics control passed 68/68.
+
+The hosted JS92 page passed all 16/16 fixture assertions. Its four aggregate
+checks passed, including nested Event dispatch. The full hosted aggregate
+recorded 711 passes and seven failures (718 checks total), and returned exit
+code 1. Those failures are the established CSS phase 3C, phase 3G, phase 6A,
+three phase 6B checks, and phase 6C. No new JavaScript or CSS failure appeared.
+The JS9 Event reentrancy check and the prior JavaScript hosted checks passed.
+
+The fresh production build succeeded with exit code 0 at source revision
+`d58b20974ae53a8d40d9594044bb5035f75c152d`. It produced
+`D:\\dev\\guideXOSServer_NAVIGATOR_JS_SUPPORT\\guideXOSServer.exe`, 8,714,451
+bytes, SHA-256
+`AAAF3DEEB74D0B96FE312AF0374EAB0F0183D27C0C37794F853555A720ACD8D2`.
+The build working-tree identity is that base revision plus the production
+source manifest SHA-256
+`A023542969758B100BDCD988B3D6786D4763D32CD73C8139F539692152240FB2`,
+covering the modified runtime header, runtime implementation, and server
+source.
+Hosted process 17104 ran that same path and hash. After hosted qualification,
+the repository executable was restored to 8,398,274 bytes with SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+
+Hosted median timings below are in microseconds, from five fresh runtime
+realms. Each script includes setup, parsing, and evaluation.
+
+| Mode | Create | First next | Middle next | Terminal next | Repeated terminal | for-of 64 | Sparse for-of 64 | All-hole for-of 64 | Near-capacity failure | Nested pair for-of |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| VALUES | 33 | 37 | 90 | 138 | 139 | 84 | 67 | 59 | 816 | — |
+| KEYS | 33 | 36 | 82 | 130 | 140 | 82 | 65 | 61 | 772 | — |
+| ENTRIES | 30 | 34 | 84 | 162 | 152 | 101 | 84 | 78 | 546 | 55 |
+
+At logical length 1,024, the first actual object-capacity failure occurred
+after 1,018 VALUES results, 1,018 KEYS results, or 509 ENTRIES pairs. The
+error was `ObjectLimitExceeded`, and the cursor remained at its last
+successful index without reporting terminal exhaustion. The largest
+all-hole traversals that completed terminal-result creation were length 512
+for VALUES and KEYS and length 256 for ENTRIES. These are retained-object
+limits, not unlimited iteration. Pool limits remain 1,024 runtime objects,
+4,096 total properties (256 per object), 1,024 logical positions per Array,
+4,096 occupied Array records, 4,096 strings, 2,048 environments, 2,048 host
+handles, and 128 DOM iterator records.
+
+Hosted static stack frames were 720 B for `invokeNative`, 944 B for
+`executeForOf`, 176 B for `createArray`, 240 B for `readArrayIndex`,
+464 B for the standard Array iterator result, and 432 B for the entry-pair
+transaction. These compiler measurements do not establish bare-metal stack
+safety. The runtime layout remains `RuntimeObject` 88 B, `Value` 40 B, and
+`RuntimeArrayElement` 48 B.
+
+The initial ignored-artifact manifest contained 1,367 files and 90,843,932
+bytes. After restoring the executable and verifying the generated fixture and
+downloads directories against their backups, the final ignored manifest had
+the same totals, with zero changed files, zero missing files, and zero new
+ignored files.
+
+The initial recursive manifest recorded 9,606 files and 1,108,367,869 bytes.
+The final scan, excluding only the repository's own `.git` directory,
+recorded 9,612 files and 1,108,460,495 bytes. Comparison found eight expected
+modified source or documentation files, no missing baseline paths, and six
+paths absent from the initial CSV. Three are the new JS92 fixture, smoke
+runner, and native test. The other three are tracked root dotfiles
+(`.gitignore` and two `.github` files) whose worktree blob hashes still
+match the starting commit; the initial recursive capture omitted them.
+Generated fixtures, downloads, and the repository executable match their
+preflight backups. Qualification logs and manifests are kept outside the
+repository. No QEMU or QAC activity was used; `.phase` remains absent.
+
+The hosted fixture confirms the distinctions among own keys, logical Array
+indices, and prototype-aware indexed reads. Destructuring, spread, generators,
+garbage collection, and unlimited iteration remain outside this phase.
+Recommended JS93 direction: qualify bounded `Array.prototype.forEach()`
+callback traversal with explicit hole, mutation, callback receiver, and
+exception behavior, while leaving these cursor modes and their current-length
+policy unchanged.

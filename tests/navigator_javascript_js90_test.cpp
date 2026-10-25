@@ -900,11 +900,16 @@ void testObjectKeysFailureAtomicity()
         stringsLimited.arrayElementCount() == 0u,
         "runtime string-pool exhaustion is detected before partial key creation");
 
+    const char* propertyBoundarySource =
+        "var source={only:1};var keys=Object.keys(source);";
+    RuntimeContext propertyBaseline;
+    const ScriptResult propertyBaselineResult = run(propertyBaseline,
+        propertyBoundarySource);
     RuntimeLimits propertyLimits;
-    propertyLimits.maxTotalProperties = 16u;
+    propertyLimits.maxTotalProperties = propertyBaseline.propertyCount();
     RuntimeContext propertyLimited(propertyLimits);
     const ScriptResult propertyResult = run(propertyLimited,
-        "var source={only:1};var keys=Object.keys(source);");
+        propertyBoundarySource);
     if (!(propertyResult.succeeded() &&
             keysEqual(propertyLimited, "keys", {"only"}) &&
             propertyLimited.propertyCount() == propertyLimits.maxTotalProperties)) {
@@ -915,7 +920,7 @@ void testObjectKeysFailureAtomicity()
             << propertyLimited.objectCount() << " keys="
             << keysEqual(propertyLimited, "keys", {"only"}) << '\n';
     }
-    expect(propertyResult.succeeded() &&
+    expect(propertyBaselineResult.succeeded() && propertyResult.succeeded() &&
         keysEqual(propertyLimited, "keys", {"only"}) &&
         propertyLimited.propertyCount() == propertyLimits.maxTotalProperties,
         "Object.keys succeeds at the property-pool boundary without consuming property records");
@@ -1027,7 +1032,7 @@ void testMaximumOrdinaryObjectKeys()
     expect(result.succeeded() &&
         NavigatorScriptRuntimeTestAccess::arrayStringsEqual(runtime,
             objectId(runtime, "keys"), expected) &&
-        runtime.propertyCount() == 271u &&
+        runtime.propertyCount() == 273u &&
         runtime.arrayElementCount() == expected.size(),
         "maximum 256-property ordinary object enumerates in creation order");
     std::cout << "JS90 maximum ordinary object: sourceKeys=" << expected.size()

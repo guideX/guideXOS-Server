@@ -1982,7 +1982,21 @@ private:
             object->arrayLength = removedIndex;
             break;
         }
-        case RuntimeContext::NativeFunctionId::ArrayIteratorCreate: {
+        case RuntimeContext::NativeFunctionId::ArrayIteratorCreate:
+        case RuntimeContext::NativeFunctionId::ArrayIteratorCreateKeys:
+        case RuntimeContext::NativeFunctionId::ArrayIteratorCreateEntries: {
+            const RuntimeContext::NativeFunctionId native =
+                static_cast<RuntimeContext::NativeFunctionId>(
+                    function.nativeFunction);
+            RuntimeContext::ArrayIteratorMode mode =
+                RuntimeContext::ArrayIteratorMode::Values;
+            if (native ==
+                RuntimeContext::NativeFunctionId::ArrayIteratorCreateKeys) {
+                mode = RuntimeContext::ArrayIteratorMode::Keys;
+            } else if (native ==
+                RuntimeContext::NativeFunctionId::ArrayIteratorCreateEntries) {
+                mode = RuntimeContext::ArrayIteratorMode::Entries;
+            }
             const RuntimeObjectId arrayId = receiver.isObject()
                 ? receiver.objectId() : kInvalidRuntimeObjectId;
             const RuntimeContext::RuntimeObject* array =
@@ -2031,6 +2045,7 @@ private:
                 break;
             }
             iterator->arrayIterator = true;
+            iterator->arrayIteratorMode = mode;
             iterator->arrayIteratorSource = arrayId;
             result = Value::object(iteratorId);
             break;
@@ -2049,6 +2064,15 @@ private:
             const RuntimeObjectId arrayId = iterator->arrayIteratorSource;
             const std::size_t index = iterator->arrayIteratorIndex;
             const bool wasExhausted = iterator->arrayIteratorExhausted;
+            const RuntimeContext::ArrayIteratorMode mode =
+                iterator->arrayIteratorMode;
+            if (mode != RuntimeContext::ArrayIteratorMode::Values &&
+                mode != RuntimeContext::ArrayIteratorMode::Keys &&
+                mode != RuntimeContext::ArrayIteratorMode::Entries) {
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                succeeded = false;
+                break;
+            }
             Value yielded = Value::undefined();
             bool done = wasExhausted;
             if (!wasExhausted) {
@@ -2060,12 +2084,18 @@ private:
                     break;
                 }
                 if (index < array->arrayLength) {
-                    RuntimeErrorCode lookupError = RuntimeErrorCode::None;
-                    if (!context_.readArrayIndex(arrayId, index, yielded,
-                            lookupError, callSite)) {
-                        fail(lookupError, callSite);
-                        succeeded = false;
-                        break;
+                    if (mode ==
+                        RuntimeContext::ArrayIteratorMode::Keys) {
+                        yielded = Value::number(static_cast<double>(index));
+                    } else {
+                        RuntimeErrorCode lookupError =
+                            RuntimeErrorCode::None;
+                        if (!context_.readArrayIndex(arrayId, index, yielded,
+                                lookupError, callSite)) {
+                            fail(lookupError, callSite);
+                            succeeded = false;
+                            break;
+                        }
                     }
                 } else {
                     done = true;
@@ -2075,8 +2105,13 @@ private:
             if (!succeeded) break;
 
             RuntimeErrorCode error = RuntimeErrorCode::None;
-            if (!context_.createArrayIteratorResult(yielded, done, result,
-                    error)) {
+            const bool resultCreated = mode ==
+                    RuntimeContext::ArrayIteratorMode::Entries && !done
+                ? context_.createArrayIteratorEntryResult(index, yielded,
+                    result, error)
+                : context_.createArrayIteratorResult(yielded, done, result,
+                    error);
+            if (!resultCreated) {
                 fail(error, callSite);
                 succeeded = false;
                 break;
@@ -3283,6 +3318,8 @@ void RuntimeContext::clearRuntimeState()
 #if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
     failNextArrayCreationForTesting_ = false;
     failNextArraySlotInsertionForTesting_ = false;
+    failArraySlotInsertionAfterCountForTesting_ = false;
+    arraySlotInsertionsBeforeFailureForTesting_ = 0u;
     failNextObjectKeysScratchAllocationForTesting_ = false;
     failNextObjectKeysStringCreationForTesting_ = false;
     failNextObjectKeysElementInsertionForTesting_ = false;
@@ -3823,11 +3860,25 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
     RuntimeFunctionId arrayIteratorCreate = kInvalidRuntimeFunctionId;
     if (!createNativeFunction(NativeFunctionId::ArrayIteratorCreate,
             arrayIteratorCreate, error)) return false;
+    RuntimeFunctionId arrayIteratorCreateKeys =
+        kInvalidRuntimeFunctionId;
+    if (!createNativeFunction(NativeFunctionId::ArrayIteratorCreateKeys,
+            arrayIteratorCreateKeys, error)) return false;
+    RuntimeFunctionId arrayIteratorCreateEntries =
+        kInvalidRuntimeFunctionId;
+    if (!createNativeFunction(NativeFunctionId::ArrayIteratorCreateEntries,
+            arrayIteratorCreateEntries, error)) return false;
     const Value arrayIteratorMethod = Value::function(arrayIteratorCreate);
     PropertyKey symbolIteratorKey;
     symbolIteratorKey.symbol = WellKnownSymbol::Iterator;
     if (!writeProperty(arrayPrototype_, "values", arrayIteratorMethod,
             error, PropertyAttributes::writableOnly(true)) ||
+        !writeProperty(arrayPrototype_, "keys",
+            Value::function(arrayIteratorCreateKeys), error,
+            PropertyAttributes::writableOnly(true)) ||
+        !writeProperty(arrayPrototype_, "entries",
+            Value::function(arrayIteratorCreateEntries), error,
+            PropertyAttributes::writableOnly(true)) ||
         !writeProperty(arrayPrototype_, symbolIteratorKey,
             arrayIteratorMethod, error,
             PropertyAttributes::writableOnly(true)) ||
@@ -4039,6 +4090,46 @@ bool RuntimeContext::createArrayIteratorResult(const Value& value, bool done,
     record->properties[0].value = value;
     result = Value::object(object);
     GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorResultObjectsPublished);
+    return true;
+}
+
+bool RuntimeContext::createArrayIteratorEntryResult(std::size_t index,
+    const Value& value, Value& result, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    result = Value::undefined();
+    const std::size_t objectCountBefore = objects_.size();
+    const std::size_t propertyCountBefore = totalPropertyCount_;
+    const std::size_t propertyKeyBytesBefore = totalPropertyKeyBytes_;
+    const std::size_t arrayElementCountBefore = totalArrayElements_;
+
+    const auto rollback = [this, objectCountBefore, propertyCountBefore,
+        propertyKeyBytesBefore, arrayElementCountBefore]() {
+        GXOS_JS84_DIAGNOSTIC(++diagnostics_.arrayIteratorEntryRollbacks);
+        objects_.resize(objectCountBefore);
+        totalPropertyCount_ = propertyCountBefore;
+        totalPropertyKeyBytes_ = propertyKeyBytesBefore;
+        totalArrayElements_ = arrayElementCountBefore;
+    };
+
+    std::vector<RuntimeArrayElement> noElements;
+    RuntimeObjectId pairId = kInvalidRuntimeObjectId;
+    if (!createArray(2u, std::move(noElements), pairId, error)) return false;
+    GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorEntryArraysAllocated);
+
+    if (!writeProperty(pairId, std::string("0"),
+            Value::number(static_cast<double>(index)), error) ||
+        !writeProperty(pairId, std::string("1"), value, error)) {
+        rollback();
+        return false;
+    }
+
+    if (!createArrayIteratorResult(Value::object(pairId), false, result,
+            error)) {
+        rollback();
+        return false;
+    }
+    GXOS_JS84_DIAGNOSTIC(++diagnostics_.iteratorEntryArraysPublished);
     return true;
 }
 
@@ -4323,6 +4414,13 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
                 if (failNextArraySlotInsertionForTesting_) {
                     failNextArraySlotInsertionForTesting_ = false;
                     throw std::bad_alloc();
+                }
+                if (failArraySlotInsertionAfterCountForTesting_) {
+                    if (arraySlotInsertionsBeforeFailureForTesting_ == 0u) {
+                        failArraySlotInsertionAfterCountForTesting_ = false;
+                        throw std::bad_alloc();
+                    }
+                    --arraySlotInsertionsBeforeFailureForTesting_;
                 }
 #endif
                 object->elements.push_back({index, value});

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS92</title></head>
+<body>
+<h1>Navigator JavaScript JS92</h1>
+<pre id="result">JS92:pending</pre>
+<section>
+  <i id="row-a" class="row"></i><i id="row-b" class="row"></i>
+</section>
+<button id="event-a" type="button">Run JS92 Array keys event</button>
+<button id="event-b" type="button">Nested JS92 Array entries event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var values = [10, , 30];
+var ownKeys = Object.keys(values);
+var holeDescriptor = Object.getOwnPropertyDescriptor(values, "1");
+var keyCursor = values.keys();
+var key0 = keyCursor.next();
+var key1 = keyCursor.next();
+var key2 = keyCursor.next();
+var keyDone = keyCursor.next();
+verify(key0.value === 0 && key1.value === 1 && key2.value === 2 &&
+  key0.value === 0 && keyDone.done === true);
+verify(ownKeys.length === 2 && ownKeys[0] === "0" && ownKeys[1] === "2" &&
+  holeDescriptor === undefined && !values.hasOwnProperty("1"));
+
+var entryCursor = values.entries();
+var entry0 = entryCursor.next().value;
+var entry1 = entryCursor.next().value;
+var entry2 = entryCursor.next().value;
+var entryDone = entryCursor.next();
+verify(entry0.length === 2 && entry0[0] === 0 && entry0[1] === 10 &&
+  entry1.length === 2 && entry1[0] === 1 && entry1[1] === undefined &&
+  entry2[0] === 2 && entry2[1] === 30 && entryDone.done === true);
+verify(entry0.hasOwnProperty("0") && entry0.hasOwnProperty("1") &&
+  entry1.hasOwnProperty("0") && entry1.hasOwnProperty("1") &&
+  !values.hasOwnProperty("1"));
+
+var valuesCursor = values.values();
+var defaultCursor = values[Symbol.iterator]();
+verify(values.values === values.values &&
+  values[Symbol.iterator] === values.values &&
+  defaultCursor[Symbol.iterator]() === defaultCursor &&
+  defaultCursor.next().value === 10 && valuesCursor.next().value === 10);
+verify(keyCursor[Symbol.iterator]() === keyCursor &&
+  entryCursor[Symbol.iterator]() === entryCursor);
+
+var stableValues = [10, 20];
+var stableCursor = stableValues.entries();
+var stableFirst = stableCursor.next();
+var stableSecond = stableCursor.next();
+stableValues[0] = 99;
+verify(stableFirst.value !== stableSecond.value &&
+  stableFirst.value[0] === 0 && stableFirst.value[1] === 10 &&
+  stableSecond.value[0] === 1 && stableSecond.value[1] === 20 &&
+  stableValues[0] === 99);
+
+var objectValue = { count: 1 };
+var nestedArray = [8, 9];
+var typedCursor = ["text", false, null, undefined, objectValue,
+  nestedArray].entries();
+var typed0 = typedCursor.next().value;
+var typed1 = typedCursor.next().value;
+var typed2 = typedCursor.next().value;
+var typed3 = typedCursor.next().value;
+var typed4 = typedCursor.next().value;
+var typed5 = typedCursor.next().value;
+verify(typed0[1] === "text" && typed1[1] === false &&
+  typed2[1] === null && typed3[1] === undefined &&
+  typed4[1] === objectValue && typed5[1] === nestedArray);
+
+var growthValues = [2, 4];
+var growthCursor = growthValues.entries();
+var growth0 = growthCursor.next().value;
+growthValues.length = 4;
+growthValues[3] = 8;
+var growth1 = growthCursor.next().value;
+var growth2 = growthCursor.next().value;
+var growth3 = growthCursor.next().value;
+verify(growth0[0] === 0 && growth1[0] === 1 && growth1[1] === 4 &&
+  growth2[0] === 2 && growth2[1] === undefined &&
+  growth3[0] === 3 && growth3[1] === 8);
+
+var shrinkValues = [1, 2, 3];
+var shrinkCursor = shrinkValues.keys();
+shrinkCursor.next();
+shrinkValues.length = 1;
+var shrinkDone = shrinkCursor.next();
+shrinkValues.length = 3;
+var stillDone = shrinkCursor.next();
+verify(shrinkDone.done === true && stillDone.done === true);
+
+var keysA = [4, 5].keys();
+var keysB = [4, 5].keys();
+var independentA = keysA.next();
+var independentB = keysB.next();
+verify(independentA.value === 0 && independentB.value === 0 &&
+  keysA.next().value === 1 && keysB.next().value === 1);
+
+var keyCount = 0;
+for (const key of values.keys()) {
+  keyCount = keyCount + 1;
+}
+var entryCount = 0;
+for (const pair of values.entries()) {
+  entryCount = entryCount + 1;
+}
+var continuedCount = 0;
+for (const key of values.keys()) {
+  if (key === 1) continue;
+  continuedCount = continuedCount + 1;
+}
+verify(keyCount === 3 && entryCount === 3 && continuedCount === 2);
+
+function firstItem(iterable) {
+  for (const item of iterable) {
+    return item;
+  }
+  return undefined;
+}
+verify(firstItem(values.keys()) === 0 && firstItem(values.entries())[0] === 0);
+
+var closeCount = 0;
+var closeCursor = values.keys();
+closeCursor["return"] = function() {
+  closeCount = closeCount + 1;
+  return { value: undefined, done: true };
+};
+for (const closeKey of closeCursor) {
+  break;
+}
+verify(closeCount === 1);
+
+var nestedCount = 0;
+for (const outerKey of values.keys()) {
+  for (const innerPair of values.entries()) {
+    if (outerKey === innerPair[0]) nestedCount = nestedCount + 1;
+  }
+}
+verify(nestedCount === 3);
+
+var rows = document.querySelectorAll(".row");
+var domCursor = rows.values();
+var domFirst = domCursor.next().value;
+var domPair = rows.entries().next().value;
+var pairKeys = domPair.keys();
+var pairEntries = domPair.entries();
+var pairEntry0 = pairEntries.next().value;
+var pairEntry1 = pairEntries.next().value;
+verify(domCursor[Symbol.iterator]() === domCursor &&
+  domFirst.id === "row-a" && domPair[0] === 0 && domPair[1] === rows[0] &&
+  pairKeys.next().value === 0 && pairKeys.next().value === 1 &&
+  pairEntry0[0] === 0 && pairEntry0[1] === 0 &&
+  pairEntry1[0] === 1 && pairEntry1[1] === rows[0]);
+
+var eventA = document.getElementById("event-a");
+var eventB = document.getElementById("event-b");
+var nestedEventOk = false;
+var outerEventOk = false;
+eventB.addEventListener("click", function(event) {
+  var nestedValues = [7, , 9];
+  var nestedEntry = nestedValues.entries().next().value;
+  var nestedKeys = nestedValues.keys();
+  nestedKeys.next();
+  nestedValues.length = 4;
+  var nestedKey = nestedKeys.next();
+  nestedEventOk = event.target === eventB && event.currentTarget === eventB &&
+    nestedEntry[0] === 0 && nestedEntry[1] === 7 && nestedKey.value === 1;
+});
+eventA.addEventListener("click", function(event) {
+  var outerValues = [3, 4];
+  var outerKeys = outerValues.keys();
+  var outerFirst = outerKeys.next();
+  eventB.click();
+  var outerSecond = outerKeys.next();
+  outerEventOk = event.target === eventA && event.currentTarget === eventA &&
+    outerFirst.value === 0 && outerSecond.value === 1 && nestedEventOk;
+  document.getElementById("result").textContent =
+    "JS92:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+
+var marker = "JS92:assertions=" + assertions + ":failures=" + failures +
+  ":keys=" + (keyCount === 3) + ":entries=" + (entryCount === 3) +
+  ":holes=" + (holeDescriptor === undefined) +
+  ":length=" + (growth3[1] === 8) + ":typed=" + (typed4[1] === objectValue) +
+  ":identity=" + (stableFirst.value[1] === 10) +
+  ":forof=" + (continuedCount === 2) + ":events=ready";
+document.getElementById("result").textContent = marker;
+</script>
+</body>
+</html>

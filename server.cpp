@@ -5777,6 +5777,43 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js91AfterClick, 1200) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js92FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js92.html";
+    const bool js92Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js92FixtureUrl);
+    const std::string js92InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS92 bounded Array keys and entries fixture passes on the hosted server",
+        js92Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js92FixtureUrl &&
+        contains(js92InitialText, "Navigator JavaScript JS92") &&
+        contains(js92InitialText, "JS92:assertions=16:failures=0") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js92Loaded) + ",text=" +
+        summarizeText(js92InitialText, 1800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    add("JS92 hosted keys include holes while Object.keys preserves own-key behavior",
+        js92Loaded && contains(js92InitialText,
+            ":keys=true:entries=true:holes=true:length=true:typed=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "numeric keys, sparse entry values, live length, and typed value identity pass");
+    add("JS92 hosted Array cursors retain protocol identity and for-of behavior",
+        js92Loaded && contains(js92InitialText,
+            ":identity=true:forof=true:events=ready") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        "independent cursors, self-return, terminal behavior, and loop control pass");
+    const bool js92Click = js92Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("event-a");
+    const std::string js92AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS92 nested Event callbacks preserve Array cursor modes and positions",
+        js92Click && contains(js92AfterClick,
+            "JS92:event:nested=true:outer=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js92Click) + ",text=" +
+        summarizeText(js92AfterClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

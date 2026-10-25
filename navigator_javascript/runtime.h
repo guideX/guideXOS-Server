@@ -213,6 +213,7 @@ struct RuntimeDiagnostics {
     std::size_t collectionResultRollbacks = 0u;
     std::size_t collectionEntryRollbacks = 0u;
     std::size_t arrayIteratorResultRollbacks = 0u;
+    std::size_t arrayIteratorEntryRollbacks = 0u;
 };
 
 // A context is an independent, resettable bounded JavaScript realm.  execute() copies a
@@ -379,6 +380,8 @@ private:
         ArrayPush,
         ArrayPop,
         ArrayIteratorCreate,
+        ArrayIteratorCreateKeys,
+        ArrayIteratorCreateEntries,
         ArrayIteratorNext,
         ArrayIteratorSelf,
         MathAbs,
@@ -390,6 +393,12 @@ private:
         EventStopPropagation,
         EventStopImmediatePropagation,
         EventPreventDefault,
+    };
+
+    enum class ArrayIteratorMode : std::uint8_t {
+        Values = 0,
+        Keys,
+        Entries,
     };
 
     struct PropertyAttributes {
@@ -506,6 +515,7 @@ private:
         // allocation that can grow objects_.
         bool arrayIterator = false;
         bool arrayIteratorExhausted = false;
+        ArrayIteratorMode arrayIteratorMode = ArrayIteratorMode::Values;
         RuntimeObjectId arrayIteratorSource = kInvalidRuntimeObjectId;
         std::size_t arrayIteratorIndex = 0u;
     };
@@ -567,6 +577,8 @@ private:
         RuntimeErrorCode& error);
     bool createArrayIteratorResult(const Value& value, bool done,
         Value& result, RuntimeErrorCode& error);
+    bool createArrayIteratorEntryResult(std::size_t index,
+        const Value& value, Value& result, RuntimeErrorCode& error);
     RuntimeObject* objectAt(RuntimeObjectId id);
     const RuntimeObject* objectAt(RuntimeObjectId id) const;
     bool readProperty(RuntimeObjectId object, const std::string& key,
@@ -639,6 +651,8 @@ private:
 #if defined(GXOS_JAVASCRIPT_TEST_FAILURE_INJECTION)
     bool failNextArrayCreationForTesting_ = false;
     bool failNextArraySlotInsertionForTesting_ = false;
+    bool failArraySlotInsertionAfterCountForTesting_ = false;
+    std::size_t arraySlotInsertionsBeforeFailureForTesting_ = 0u;
     bool failNextObjectKeysScratchAllocationForTesting_ = false;
     bool failNextObjectKeysStringCreationForTesting_ = false;
     bool failNextObjectKeysElementInsertionForTesting_ = false;

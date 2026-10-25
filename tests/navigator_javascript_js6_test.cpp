@@ -176,6 +176,9 @@ void testArrayPrototypeAndShadowing()
 void testIntegrationAndPrototypeStructure()
 {
     RuntimeContext context;
+    const std::size_t builtinObjectCount = context.objectCount();
+    const std::size_t builtinNativeFunctionCount =
+        context.nativeFunctionCount();
     const ScriptResult result = execute(context,
         "var values = [-3, 4, -8]; var sum = 0;"
         "for (var i = 0; i < values.length; i++) { sum += Math.abs(values[i]); }"
@@ -194,8 +197,9 @@ void testIntegrationAndPrototypeStructure()
         expect(context.prototypeOf(context.objectPrototypeId()) ==
             kInvalidRuntimeObjectId, "Object.prototype -> null");
     }
-    expect(context.objectCount() == 5, "built-in and script object accounting");
-    expect(context.nativeFunctionCount() == 14,
+    expect(context.objectCount() == builtinObjectCount + 1u,
+        "built-in and script object accounting");
+    expect(context.nativeFunctionCount() == builtinNativeFunctionCount,
         "native function accounting");
 }
 

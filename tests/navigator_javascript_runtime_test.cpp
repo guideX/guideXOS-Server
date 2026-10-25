@@ -249,6 +249,8 @@ void testNegativeRuntimeCases()
 void testObjectsAndProperties()
 {
     RuntimeContext context;
+    const std::size_t builtinObjectCount = context.objectCount();
+    const std::size_t builtinPropertyCount = context.propertyCount();
     const ScriptResult result = execute(context,
         "var obj = { x: 10, y: 20 }; obj.x += 5;"
         "var result = obj.x + obj.y;"
@@ -262,7 +264,8 @@ void testObjectsAndProperties()
     expectNumber(context, "numeric", 8.0, "objects: numeric key coercion");
     expectType(context, "missing", ValueType::Undefined,
         "objects: missing property is Undefined");
-    expect(context.objectCount() == 5 && context.propertyCount() == 18,
+    expect(context.objectCount() == builtinObjectCount + 1u &&
+        context.propertyCount() == builtinPropertyCount + 3u,
         "objects: bounded pool and duplicate-free properties");
 
     const ScriptResult duplicate = execute(context,
@@ -378,10 +381,10 @@ void testObjectArrayLimitsAndReset()
         RuntimeErrorCode::PropertyLimitExceeded, "objects: property limit", properties);
 
     RuntimeLimits totalProperties;
-    // Array.prototype now exposes values() and Symbol.iterator, adding two
-    // built-in property entries. Keep this limit above initialization so the
-    // script still exercises the runtime property limit.
-    totalProperties.maxTotalProperties = 16;
+    RuntimeContext propertyBaseline;
+    // Keep initialization within the limit and leave one record for script
+    // properties so the second insertion exercises deterministic exhaustion.
+    totalProperties.maxTotalProperties = propertyBaseline.propertyCount() + 1u;
     expectError("var a = {}; a.x = 1; var b = {}; b.y = 2;",
         RuntimeErrorCode::PropertyLimitExceeded,
         "objects: total property limit", totalProperties);
@@ -413,11 +416,15 @@ void testObjectArrayLimitsAndReset()
         "objects: operations share execution budget", budget);
 
     RuntimeContext context;
+    const std::size_t builtinObjectCount = context.objectCount();
+    const std::size_t builtinPropertyCount = context.propertyCount();
     expect(execute(context, "var a = { x: 1 }; a.x = 2; var b = [3];").succeeded(),
         "reset: objects and arrays setup succeeds");
-    expect(context.objectCount() == 6, "reset: objects are retained before reset");
+    expect(context.objectCount() == builtinObjectCount + 2u,
+        "reset: objects are retained before reset");
     context.reset();
-    expect(context.objectCount() == 4 && context.propertyCount() == 15 &&
+    expect(context.objectCount() == builtinObjectCount &&
+        context.propertyCount() == builtinPropertyCount &&
         context.arrayElementCount() == 0, "reset: object pools are cleared");
     expect(execute(context, "var result = 7;").succeeded(),
         "reset: new script after object reset succeeds");
@@ -604,6 +611,7 @@ void testFunctionLimitsAndFailures()
 void testFunctionClosureAndResetLifetime()
 {
     RuntimeContext context;
+    RuntimeContext builtinBaseline;
     const ScriptResult closure = execute(context,
         "function makeCounter() { var x = 0;"
         " function next() { x++; return x; } return next; }"
@@ -627,7 +635,8 @@ void testFunctionClosureAndResetLifetime()
         "functions: reset clears active frames");
     expect(context.environmentCount() == 1,
         "functions: reset clears function environments");
-    expect(context.functionValueCount() == 14 && context.nativeFunctionCount() == 14,
+    expect(context.functionValueCount() == builtinBaseline.functionValueCount() &&
+        context.nativeFunctionCount() == builtinBaseline.nativeFunctionCount(),
         "functions: reset recreates native identities");
     expect(execute(context, "var result = 7;").succeeded(),
         "functions: unrelated script after reset succeeds");
