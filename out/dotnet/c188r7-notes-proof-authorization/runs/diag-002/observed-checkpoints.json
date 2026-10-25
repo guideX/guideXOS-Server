@@ -1,0 +1,130 @@
+{
+  "result": "FAIL",
+  "captureState": "complete",
+  "serialTruncationStatus": "complete-capture",
+  "serialHasFinalLineTerminator": true,
+  "checkpointAbsenceInterpretation": "unobserved-in-complete-capture",
+  "lastObservedCheckpoint": "[KERNEL] Entering main loop (waiting for input)...",
+  "lastExpectedCheckpointCompleted": "[KERNEL] Entering main loop (waiting for input)...",
+  "firstExpectedMissingCheckpoint": "native launch return",
+  "missingRequiredCheckpoints": [
+    "native launch return"
+  ],
+  "missingOptionalCheckpoints": [],
+  "duplicateCheckpoints": [],
+  "outOfOrderCheckpoints": [],
+  "unexpectedBranchCheckpoints": [],
+  "branchOutcomes": {
+    "C133-HOST-TEST": "SKIPPED",
+    "C134-HOST-TEST": "SKIPPED",
+    "C133-C134-COMPANION-TEST": "SKIPPED",
+    "C133-COMBO-SUITE": "SKIPPED",
+    "C137-TEST": "SKIPPED",
+    "C137-TEST-SUMMARY": "SKIPPED"
+  },
+  "observedOrderedCheckpoints": [
+    {
+      "marker": "C150-APP-INSTANCE id=4 generation=1",
+      "line": 334,
+      "byteOffset": 15661
+    },
+    {
+      "marker": "C188R7-100 NOTES-LAUNCH-ENTRY",
+      "line": 335,
+      "byteOffset": 15720
+    },
+    {
+      "marker": "C147-NOTES-CONTEXT startup=loaded list=enabled result=PASS",
+      "line": 336,
+      "byteOffset": 15773
+    },
+    {
+      "marker": "C148-NOTES-CONTEXT settings=v2-migration-proof source=shared-runtime result=PASS",
+      "line": 337,
+      "byteOffset": 15855
+    },
+    {
+      "marker": "C188R7-180 BRANCH C133-HOST-TEST=SKIPPED",
+      "line": 338,
+      "byteOffset": 15959
+    },
+    {
+      "marker": "C188R7-181 BRANCH C134-HOST-TEST=SKIPPED",
+      "line": 339,
+      "byteOffset": 16023
+    },
+    {
+      "marker": "C188R7-182 BRANCH C133-C134-COMPANION-TEST=SKIPPED",
+      "line": 340,
+      "byteOffset": 16087
+    },
+    {
+      "marker": "C188R7-110 NOTES-CONTROL-HOST-RESET",
+      "line": 341,
+      "byteOffset": 16161
+    },
+    {
+      "marker": "C188R7-101 INITIAL-RENDER-RETURN",
+      "line": 378,
+      "byteOffset": 19841
+    },
+    {
+      "marker": "C188R7-102 POST-RENDER-SETTINGS-RETURN",
+      "line": 381,
+      "byteOffset": 20078
+    },
+    {
+      "marker": "C188R7-183 BRANCH C133-COMBO-SUITE=SKIPPED",
+      "line": 388,
+      "byteOffset": 20547
+    },
+    {
+      "marker": "C188R7-200 BRANCH C137-TEST=SKIPPED",
+      "line": 389,
+      "byteOffset": 20613
+    },
+    {
+      "marker": "C188R7-203 BRANCH C137-TEST-SUMMARY=SKIPPED",
+      "line": 390,
+      "byteOffset": 20672
+    },
+    {
+      "marker": "C188R7-204 AFTER C137-INVOCATION-DECISION",
+      "line": 391,
+      "byteOffset": 20739
+    },
+    {
+      "marker": "C188R7-205 AFTER POSTRENDER-PROOF-CHECKS",
+      "line": 392,
+      "byteOffset": 20804
+    },
+    {
+      "marker": "C188R7-206 NOTES-LAUNCH-RESULT=SUCCESS",
+      "line": 393,
+      "byteOffset": 20868
+    },
+    {
+      "marker": "C188R7-207 BEFORE MANAGEDNOTES-LAUNCH-RETURN",
+      "line": 394,
+      "byteOffset": 20930
+    },
+    {
+      "marker": "C188R7-208 AFTER APPLICATION-LAUNCH-RETURN",
+      "line": 395,
+      "byteOffset": 20998
+    },
+    {
+      "marker": "[KERNEL] Input manager initialized",
+      "line": 493,
+      "byteOffset": 25202
+    },
+    {
+      "marker": "[KERNEL] Entering main loop (waiting for input)...",
+      "line": 757,
+      "byteOffset": 41006
+    }
+  ],
+  "recognizedCheckpointCount": 20,
+  "serialPath": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r7-notes-proof-authorization\\runs\\diag-002\\serial.log",
+  "serialSha256": "A5AEDDD43ECEB55321E008E0E504E52BA47B7A37C5FBEFB54FC0E7B96F700FCD"
+}

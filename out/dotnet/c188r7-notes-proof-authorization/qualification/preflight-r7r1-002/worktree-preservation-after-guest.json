@@ -1,0 +1,11 @@
+{
+  "capturedUtc": "2026-10-25T01:02:04.8732281Z",
+  "preexistingStatusPathCount": 136,
+  "preexistingPathsMissing": [],
+  "preexistingStatusEntriesChanged": [],
+  "currentStatusPathCount": 136,
+  "newStatusEntries": [],
+  "originalRamdiskSha256Before": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8",
+  "originalRamdiskSha256After": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8",
+  "result": "PASS"
+}

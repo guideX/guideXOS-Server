@@ -1,0 +1,17 @@
+{
+  "capturedUtc": "2026-10-25T01:02:03.5502456Z",
+  "validatorResult": "FAIL",
+  "validatorFirstMissing": "native launch return",
+  "validatorExpectedRegex": "\\[C102-LAUNCH-RETURN\\] status=0x[0-9A-Fa-f]+",
+  "actualNativeReturnMarkerFound": true,
+  "actualNativeReturnLine": "[C102-LAUNCH-RETURN] status=00000000",
+  "actualNativeReturnLineNumber": 397,
+  "actualNativeReturnStatus": "00000000",
+  "applicationReturnLineNumber": 395,
+  "inputManagerLineNumber": 493,
+  "mainLoopLineNumber": 757,
+  "actualNativeEmitter": "kernel/core/nativeaot_application.cpp prints status= followed by put_hex32, with no 0x prefix",
+  "discrepancy": "Validator expects status=0x..., while the kernel emitted eight hexadecimal digits without 0x.",
+  "manualSequence": true,
+  "result": "PASS-MARKER-PRESENT-VALIDATOR-FORMAT-MISMATCH"
+}

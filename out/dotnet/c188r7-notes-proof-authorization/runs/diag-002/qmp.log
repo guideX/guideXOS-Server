@@ -1,0 +1,85 @@
+﻿command={"execute":"query-status"}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {"status": "running", "running": true}}
+
+command={"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r7-notes-proof-authorization\\runs\\diag-002\\notes-before-input.ppm"}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-40}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-40}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-40}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-40}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-40}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-40}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":-21}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-40}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"y","value":-1}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":true}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"left","down":false}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"a"}}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"a"}}}]}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"screendump","arguments":{"filename":"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r7-notes-proof-authorization\\runs\\diag-002\\final-stage.ppm"}}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+
+command={"execute":"quit"}
+greeting={"QMP": {"version": {"qemu": {"micro": 0, "minor": 0, "major": 11}, "package": "v11.0.0-12122-ga4bb4b10c9"}, "capabilities": ["oob"]}}
+capabilities={"return": {}}
+response={"return": {}}
+

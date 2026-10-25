@@ -1,0 +1,313 @@
+{
+  "capturedUtc": "2026-10-25T01:05:23.4432330Z",
+  "phase": "C188R7R1",
+  "startingHead": "4d25ee1b04d4f8bb547b3aff9d2897201c61694c",
+  "c188r7ImplementationHead": "de32fa7f1c9ad70c7d5349b8b9c9845bf30527b5",
+  "branch": "v1.1_DOTNET_SUPPORT",
+  "qacReservationId": "06ccbde6b0a84262a86436a126f6e923",
+  "qacOwnerPid": 28316,
+  "qemuPid": 21436,
+  "outcome": "B — Boundary narrowed",
+  "artifacts": [
+    {
+      "path": "docs/dotnet/NATIVEAOT_C188R7_NOTES_PROOF_AUTHORIZATION.md",
+      "bytes": 33999,
+      "sha256": "9F2DAB49732A989E9E1E8D7E63C85A4BC5408608D80933338021AF9C5AD5C52B"
+    },
+    {
+      "path": "docs/dotnet/NATIVEAOT_C188_EXTERNAL_APP_NATIVE_IDENTITY.md",
+      "bytes": 33681,
+      "sha256": "A10F353C5DEC024760F3D77641D6D487129FD09543EB940FBCFC614122711CB1"
+    },
+    {
+      "path": "scripts/dotnet/run-c188r3-notes-startup-diagnostic.ps1",
+      "bytes": 26902,
+      "sha256": "A6F5A20F7DDE2636589CCD3FD2EACC89EFA18E7A92276666F9493E339E90E416"
+    },
+    {
+      "path": "scripts/dotnet/c188-checkpoint-sequence.py",
+      "bytes": 29645,
+      "sha256": "13A9442CC484C94877137633D786F626AF99ED9C6ACA92C3452295412F6EF7D9"
+    },
+    {
+      "path": "scripts/dotnet/build-c188-nativeaot-candidate.ps1",
+      "bytes": 7576,
+      "sha256": "1EF99F0635B9865E1D6B3E8DC081C35EC572CA393145833A4E30C7CDCA9EFAE2"
+    },
+    {
+      "path": "samples/managed/HostLogProof/Applications/ManagedNotes.cs",
+      "bytes": 308362,
+      "sha256": "D3FD9205FD1ED6A1C41478743BE74DE20BCB0248FD52BE2E8575B8930C33A4F7"
+    },
+    {
+      "path": "samples/managed/HostLogProof/Applications/GuideXosNotesProofTestInvocation.cs",
+      "bytes": 2393,
+      "sha256": "214DDA628FF9C86DA2E96954129DEE1C2854380989DA363040DAA10B2D485914"
+    },
+    {
+      "path": "samples/managed/HostLogProof/GuideXos/GuideXosApplication.cs",
+      "bytes": 20586,
+      "sha256": "AA4C80AF0E450772F34531A647DB4B66BADB64AC4BEF71A3B222CF0DE095B04F"
+    },
+    {
+      "path": "kernel/core/nativeaot_application.cpp",
+      "bytes": 253456,
+      "sha256": "0B2D27DD6CF1B5B6963272AEAACF47596D3057012A2903B50CD99DB26EC64975"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/diag-nativeaot-002/build/nativeaot/artifacts/HostLogProof.elf",
+      "bytes": 2097152,
+      "sha256": "91B8FEB2C15FAE36DDB47DB730C7AAEF0FEC693266EDFC5E5C5BA65D844A183C"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/diag-nativeaot-002/build/nativeaot/artifacts/HostLogProof.exe",
+      "bytes": 2075136,
+      "sha256": "CCF0B091BA1917573BB32EECB442EBCB0726F53AA6E58DAB9A681898879B2227"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/diag-nativeaot-002/build/nativeaot/artifacts/HostLogProof.map",
+      "bytes": 2799663,
+      "sha256": "7D3B1698DF38DB1DBBE182D3B99483D2CBFA1DF434A6099A3EF01BAC103B7037"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/diag-nativeaot-002/build/nativeaot/qualification/nativeaot-qualification.json",
+      "bytes": 4716,
+      "sha256": "56D9AE88D9F9D12C2198AC62A17BD2902512645A66F505E3C2A6EDDAA941485B"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/diag-kernel-001/kernel/bin/kernel.elf",
+      "bytes": 2366792,
+      "sha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/diag-kernel-001/kernel/bin/kernel.pe",
+      "bytes": 2486359,
+      "sha256": "91AC0EB6E18F5DF8D5D4D5F6A048951F6932C98A301C66702B0EF7DDBF5BFDAA"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/diag-kernel-001/kernel/kernel-qualification.json",
+      "bytes": 2019,
+      "sha256": "7A59F144EC319EFE34228C2A89DE7911F28EBEF6391CD12F49F726C6B999F69B"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/prod-nativeaot-001/build/nativeaot/artifacts/HostLogProof.elf",
+      "bytes": 2179072,
+      "sha256": "608CD7E8C895890250B0C7A733ECF379A134DDC1C186F70D02984C3BF89B6626"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/prod-nativeaot-001/build/nativeaot/artifacts/HostLogProof.map",
+      "bytes": 2839973,
+      "sha256": "548040E79230B2975490CE8B923FD84F5FC291084D54AAFF1DFA0186F958EC40"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/candidates/prod-kernel-001/kernel/bin/kernel.elf",
+      "bytes": 2348392,
+      "sha256": "22BC4AFE228263E4187B2AA57EAF21D1CEA46D3992A139F81EC185B1C22154AF"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-001/esp/kernel.elf",
+      "bytes": 2366792,
+      "sha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-001/esp/ramdisk.img",
+      "bytes": 67108864,
+      "sha256": "FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-001/esp/EFI/BOOT/BOOTX64.EFI",
+      "bytes": 52224,
+      "sha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B"
+    },
+    {
+      "path": "ESP/ramdisk.img",
+      "bytes": 67108864,
+      "sha256": "AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8"
+    },
+    {
+      "path": "OVMF.fd",
+      "bytes": 3653632,
+      "sha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/preflight-r7r1-002/candidate-and-workspace-verification.json",
+      "bytes": 22240,
+      "sha256": "AEB6DF9E705EB4F57C2FF1C861F9A4809667BA62D99BA195CFFB74F7A3AC72A3"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/preflight-r7r1-002/protected-tree-before.json",
+      "bytes": 2028023,
+      "sha256": "B2F005A00D91D62D25E1532F370590A1A6B630E9FD63A8FD4349A1DF098BA321"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/preflight-r7r1-002/protected-tree-after.json",
+      "bytes": 2013810,
+      "sha256": "509646F53B88A14FD1388E43D5E3673A9140FBC6BDCE14C00B7A4981AD5AD8A5"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/preflight-r7r1-002/protected-tree-after-comparison.json",
+      "bytes": 3831,
+      "sha256": "638D00CDA2DFA29E4F60BA87CF402E9BFED4D646D15567940B116A3005AA3788"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/preflight-r7r1-002/worktree-preservation-after-guest.json",
+      "bytes": 454,
+      "sha256": "F25A8A4D90C5D0D6AAD88DE679E99FD7B959E45FC6A9373AC395091848B068F0"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/preflight-r7r1-001/historical-r6r1-verification.json",
+      "bytes": 4100,
+      "sha256": "F9EE66A75D100F12606726C7D5D51AC0347D929A3515685E560E4AD44F8D60EC"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/qac-census-r7r1-002/status.txt",
+      "bytes": 243,
+      "sha256": "1673980A15C361A673B24D132CD4081C128D0C3DAAA1172558D04D052A57B9DD"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/qac-census-r7r1-002/list.txt",
+      "bytes": 82,
+      "sha256": "12D7C7877835DFEFD4B593A7B0FA48EC41D59C40ED1E23040EBFE1D0D1E57B8A"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/qualification/qac-census-r7r1-002/census.json",
+      "bytes": 581,
+      "sha256": "B2A1CDFC36D4B682FEA99AA0B9A01B41EF137D50506681856381349F6E61654F"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/diagnostic-manifest.json",
+      "bytes": 5240,
+      "sha256": "85C0910173D124C77CF1E8C86211E9C6D1241FA0FD89665710A94E1BEACE726C"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/expected-observations.json",
+      "bytes": 6400,
+      "sha256": "F867F52C666765B822FC8A3F24419CAC3D1F04911FA6152D50BA30CDF1641374"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/observed-checkpoints.json",
+      "bytes": 3711,
+      "sha256": "F9BCBEC12F7618DFF5A7CE49EF7F8C528C7793466C3B4A73DFC80C4E5AF29566"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/checkpoint-reconciliation.json",
+      "bytes": 840,
+      "sha256": "D26D979DDF7BCA50A3538DF263E177D77C06D5551BCE5D13E167979630083756"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/serial.log",
+      "bytes": 43985,
+      "sha256": "A5AEDDD43ECEB55321E008E0E504E52BA47B7A37C5FBEFB54FC0E7B96F700FCD"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qmp.log",
+      "bytes": 5340,
+      "sha256": "2FFBEA914225900A40FA4E948A171575FBCD00937FD8B0C47E81D1B7E509BCCD"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac-run-arguments.json",
+      "bytes": 2162,
+      "sha256": "D399AADC14D322C72366EC1C56BD224B3EC61F6EA7A1BB720E2259595386E239"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac.stdout.log",
+      "bytes": 2,
+      "sha256": "7EB70257593DA06F682A3DDDA54A9D260D4FC514F645237F5CA74B08F8DA61A6"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac.stderr.log",
+      "bytes": 769,
+      "sha256": "F4F49FA77A8CF93756C3C45B5EDCB8D72BA0D124551939CB8A49C2FD49EF8472"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac-exit-code.txt",
+      "bytes": 3,
+      "sha256": "13BF7B3039C63BF5A50491FA3CFD8EB4E699D1BA1436315AEF9CBE5711530354"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac-before.status.txt",
+      "bytes": 243,
+      "sha256": "A0A308694713DBE297C57D5110D3B41F0B141B01EF7DCFFDEB38301A04F0FCCB"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac-before.list.txt",
+      "bytes": 82,
+      "sha256": "12D7C7877835DFEFD4B593A7B0FA48EC41D59C40ED1E23040EBFE1D0D1E57B8A"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac-during.status.txt",
+      "bytes": 243,
+      "sha256": "E7A92E823B3C7D81B512EACA4EE69611619E98E944DEE48B523F5BD28834CC1E"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac-during.list.txt",
+      "bytes": 539,
+      "sha256": "075C063A767F2D11B85C05560A50ED47D37A105C16E3E5508AFD3D2D970C3354"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac-after.status.txt",
+      "bytes": 243,
+      "sha256": "AC07CAD0A59C465EC28D2B6BC1E85A02022AB49E383AA38A0B8BCA392CF35308"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/qac-after.list.txt",
+      "bytes": 82,
+      "sha256": "12D7C7877835DFEFD4B593A7B0FA48EC41D59C40ED1E23040EBFE1D0D1E57B8A"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/media-manifest.json",
+      "bytes": 2227,
+      "sha256": "E73B7A219CA2EF10A6326B6AE54FAB4FBEB788F1D2D22224772349E1C59AF6E3"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/media-after.json",
+      "bytes": 783,
+      "sha256": "B455FF780376FFAF7D6173DCA4F35A98861E317D4430A59560164D02F0C17C40"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/ramdisk-staging.json",
+      "bytes": 895,
+      "sha256": "F5247C49A3A44865128861B7880480C9C48D5527B0E1E62A0D86D1DBD39D51E4"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/visual-evidence.json",
+      "bytes": 897,
+      "sha256": "27FE92B3E2CD21EA3C5CF634A49FC25373E17AC995FBB00099813CB3AEA5846A"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/notes-before-input.ppm",
+      "bytes": 3072016,
+      "sha256": "645C6B5EF14AE59F718454888E67AFFE3209B636957CACE91F52D6AEEDBC5B58"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/notes-before-input.png",
+      "bytes": 549424,
+      "sha256": "621A47F7D6CC94C48E26AB126DBE8AA3BC5E3BD291A696B2FA498E2269CB0994"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/final-stage.ppm",
+      "bytes": 3072016,
+      "sha256": "FCC367F31F7D5FFC5F80AD6CCE79DBB647E0F0C02E92F751675213D527C72836"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/final-stage.png",
+      "bytes": 549397,
+      "sha256": "8D6FFE83990E9DC5A617C7E69F368260290DD3B55AEEDD98AF9ABFA1C2FB35C3"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/esp/kernel.elf",
+      "bytes": 2366792,
+      "sha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/esp/ramdisk.img",
+      "bytes": 67108864,
+      "sha256": "FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB"
+    },
+    {
+      "path": "out/dotnet/c188r7-notes-proof-authorization/runs/diag-002/esp/EFI/BOOT/BOOTX64.EFI",
+      "bytes": 52224,
+      "sha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B"
+    }
+  ]
+}

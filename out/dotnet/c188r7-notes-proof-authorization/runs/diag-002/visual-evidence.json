@@ -1,0 +1,16 @@
+{
+  "capturedUtc": "2026-10-25T01:02:04.1988030Z",
+  "beforeInputPpmSha256": "645C6B5EF14AE59F718454888E67AFFE3209B636957CACE91F52D6AEEDBC5B58",
+  "beforeInputPngSha256": "621A47F7D6CC94C48E26AB126DBE8AA3BC5E3BD291A696B2FA498E2269CB0994",
+  "afterInputPpmSha256": "FCC367F31F7D5FFC5F80AD6CCE79DBB647E0F0C02E92F751675213D527C72836",
+  "afterInputPngSha256": "8D6FFE83990E9DC5A617C7E69F368260290DD3B55AEEDD98AF9ABFA1C2FB35C3",
+  "visibleNotesWindow": true,
+  "taskbarButtonVisible": true,
+  "focusedNotesMarkerPresent": false,
+  "keyboardEditMarkerPresent": false,
+  "pointerDocumentMarkerPresent": false,
+  "notesDocumentTextChanged": false,
+  "visualObservation": "Both captures show the real centered Managed Notes window and taskbar entry; the final capture contains no inserted a and Notes text remains unchanged.",
+  "qmpQueryStatusCaptured": true,
+  "qmpQuitCaptured": true
+}

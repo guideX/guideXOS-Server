@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "ramdisk": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r7-notes-proof-authorization\\runs\\diag-001\\esp\\ramdisk.img",
+  "managedApp": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r7-notes-proof-authorization\\candidates\\diag-nativeaot-002\\build\\nativeaot\\artifacts\\HostLogProof.elf",
+  "targetPath": "/APPS/GXOSAPP.ELF",
+  "previousAppBytes": 2064384,
+  "previousAppSha256": "AC80EC2937F55FE2AD828DDFBCAB7419A9BFB015B7B69B71C8FA01FB7CBBB637",
+  "stagedAppBytes": 2097152,
+  "stagedAppSha256": "91B8FEB2C15FAE36DDB47DB730C7AAEF0FEC693266EDFC5E5C5BA65D844A183C",
+  "ramdiskSha256": "FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB",
+  "mediaDescriptorRestored": "0x00",
+  "allocatedClustersRetained": 256,
+  "allocatedClustersAdded": 4,
+  "unrelatedFilesPreserved": 185,
+  "changedOtherFiles": 0
+}

@@ -1,0 +1,226 @@
+{
+  "phase": "C188R7",
+  "outcome": "pending",
+  "expectedOrderedCheckpoints": [
+    {
+      "name": "C150 application instance",
+      "patterns": [
+        "C150-APP-INSTANCE id=\\d+ generation=\\d+"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "Notes launch entry",
+      "patterns": [
+        "C188R7\\-100\\ NOTES\\-LAUNCH\\-ENTRY"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "C147 runtime context",
+      "patterns": [
+        "C147\\-NOTES\\-CONTEXT\\ startup=loaded\\ list=enabled\\ result=PASS"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "C148 settings context",
+      "patterns": [
+        "C148\\-NOTES\\-CONTEXT\\ settings=v2\\-migration\\-proof\\ source=shared\\-runtime\\ result=PASS"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "C133 host suite",
+      "patterns": [
+        "C188R7\\-180\\ BRANCH\\ C133\\-HOST\\-TEST=TAKEN",
+        "C188R7\\-180\\ BRANCH\\ C133\\-HOST\\-TEST=SKIPPED"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "C134 host suite",
+      "patterns": [
+        "C188R7\\-181\\ BRANCH\\ C134\\-HOST\\-TEST=TAKEN",
+        "C188R7\\-181\\ BRANCH\\ C134\\-HOST\\-TEST=SKIPPED"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "C133 C134 companion suite",
+      "patterns": [
+        "C188R7\\-182\\ BRANCH\\ C133\\-C134\\-COMPANION\\-TEST=TAKEN",
+        "C188R7\\-182\\ BRANCH\\ C133\\-C134\\-COMPANION\\-TEST=SKIPPED"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "Notes control host reset",
+      "patterns": [
+        "C188R7\\-110\\ NOTES\\-CONTROL\\-HOST\\-RESET"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "initial render return",
+      "patterns": [
+        "C188R7\\-101\\ INITIAL\\-RENDER\\-RETURN"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "post-render settings return",
+      "patterns": [
+        "C188R7\\-102\\ POST\\-RENDER\\-SETTINGS\\-RETURN"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "C133 combo suite",
+      "patterns": [
+        "C188R7\\-183\\ BRANCH\\ C133\\-COMBO\\-SUITE=TAKEN",
+        "C188R7\\-183\\ BRANCH\\ C133\\-COMBO\\-SUITE=SKIPPED"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "C137 test invocation",
+      "patterns": [
+        "C188R7\\-200\\ BRANCH\\ C137\\-TEST=TAKEN",
+        "C188R7\\-200\\ BRANCH\\ C137\\-TEST=SKIPPED"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "before C137-SUITE",
+      "patterns": [
+        "C188R7\\-201\\ BEFORE\\ C137\\-SUITE"
+      ],
+      "optional": true,
+      "branchKey": "C137-TEST",
+      "branchValue": "TAKEN"
+    },
+    {
+      "name": "after C137-SUITE",
+      "patterns": [
+        "C188R7\\-202\\ AFTER\\ C137\\-SUITE"
+      ],
+      "optional": true,
+      "branchKey": "C137-TEST",
+      "branchValue": "TAKEN"
+    },
+    {
+      "name": "C137 summary branch",
+      "patterns": [
+        "C188R7\\-203\\ BRANCH\\ C137\\-TEST\\-SUMMARY=TAKEN",
+        "C188R7\\-203\\ BRANCH\\ C137\\-TEST\\-SUMMARY=SKIPPED"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "after C137 invocation decision",
+      "patterns": [
+        "C188R7\\-204\\ AFTER\\ C137\\-INVOCATION\\-DECISION"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "after post-render proof checks",
+      "patterns": [
+        "C188R7\\-205\\ AFTER\\ POSTRENDER\\-PROOF\\-CHECKS"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "Notes launch result",
+      "patterns": [
+        "C188R7-206 NOTES-LAUNCH-RESULT=(?:SUCCESS|FAILURE)"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "ManagedNotes launch return",
+      "patterns": [
+        "C188R7\\-207\\ BEFORE\\ MANAGEDNOTES\\-LAUNCH\\-RETURN"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "application launch return",
+      "patterns": [
+        "C188R7\\-208\\ AFTER\\ APPLICATION\\-LAUNCH\\-RETURN"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "native launch return",
+      "patterns": [
+        "\\[C102-LAUNCH-RETURN\\] status=0x[0-9A-Fa-f]+"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "input manager initialized",
+      "patterns": [
+        "\\[KERNEL\\]\\ Input\\ manager\\ initialized"
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    },
+    {
+      "name": "main input loop",
+      "patterns": [
+        "\\[KERNEL\\]\\ Entering\\ main\\ loop\\ \\(waiting\\ for\\ input\\)\\.\\.\\."
+      ],
+      "optional": false,
+      "branchKey": null,
+      "branchValue": null
+    }
+  ],
+  "interpretation": "Optional path checkpoints do not count as missing. A closed complete serial capture distinguishes an unobserved checkpoint from truncation; duplicate and out-of-order markers are reported separately.",
+  "bootTimeoutSeconds": 150,
+  "admissionWindowSeconds": 30,
+  "startingKernelSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+  "managedCompositeSha256": "91B8FEB2C15FAE36DDB47DB730C7AAEF0FEC693266EDFC5E5C5BA65D844A183C",
+  "ramdiskSha256": "FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB",
+  "uefiLoaderSha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B"
+}

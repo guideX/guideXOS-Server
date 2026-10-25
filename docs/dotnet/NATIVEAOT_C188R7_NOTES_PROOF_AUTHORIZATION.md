@@ -149,3 +149,59 @@ The pre-launch source audit found no predicate change necessary. Selector-4 `c14
 No guest runtime result exists for this continuation. The actual checkpoint sequence is **not started**: no selector dispatch, Notes launch, proof skip/taken marker, Notes surface/render, managed or native launch return, input-manager initialization, main-loop readiness, Notes window, keyboard/pointer input, QMP session, framebuffer capture, guest shutdown, or reservation release was observed. The R7 checkpoint profile retains post-render and launch-return markers, but their presence in the compiled candidate is static evidence only. The first missing runtime checkpoint cannot be named because QAC did not admit the guest. No build or hosted regression was rerun; R7's historical accepted results remain historical.
 
 The post-preflight protected-tree and status comparison passed: 13 roots / 8,497 protected files unchanged, all 136 pre-existing status paths retained, and the modified RAM disk hash unchanged. No R7R1 guest-media artifacts were created. QAC cleanup and release are not applicable to this attempt because it acquired no reservation; both observed reservations remain owned by their other QAC workflows. The C185 historical uncertainty about 212 generated files remains preserved. C188 acceptance remains open; C188R8, C189, and the six acceptance scenarios were not started. Resume only with one bounded diagnostic guest after a fresh QAC census verifies zero foreign QEMU processes, reservations, managed sessions, and queued work, and after QAC grants the exclusive reservation.
+
+## C188R7R1 resumed one-guest Notes confirmation — 2026-10-24 local (2026-10-25 UTC)
+
+**Outcome B — Boundary narrowed.** One QAC-admitted diagnostic guest reused the C188R7 candidate and reached the main input loop. Real Notes was visible and had focus, but the bounded pointer and keyboard probe did not edit its document. C188 remains open; this is not production recovery or full C188 acceptance.
+
+### Preflight and candidate reuse
+
+The repository was `D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT` on `v1.1_DOTNET_SUPPORT`. Starting HEAD was `4d25ee1b04d4f8bb547b3aff9d2897201c61694c`; the requested C188R7 implementation commit `de32fa7f1c9ad70c7d5349b8b9c9845bf30527b5` is its ancestor. HEAD already included the earlier R7R1 QAC-block record above. Preflight found 13 protected roots / 8,497 files, 136 existing status paths, and the original modified `ESP/ramdisk.img` at its historical SHA-256 `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`. Current snapshots and comparisons are under `qualification/preflight-r7r1-002/`.
+
+The saved `runs/diag-001/esp/` candidate passed full manifest checks and was copied unchanged to the isolated `runs/diag-002/esp/` before execution. No source or candidate build was changed or rebuilt. The verified diagnostic artifacts were:
+
+| Artifact | SHA-256 |
+|---|---|
+| Diagnostic NativeAOT ELF | `91B8FEB2C15FAE36DDB47DB730C7AAEF0FEC693266EDFC5E5C5BA65D844A183C` |
+| NativeAOT PE | `CCF0B091BA1917573BB32EECB442EBCB0726F53AA6E58DAB9A681898879B2227` |
+| NativeAOT link map | `7D3B1698DF38DB1DBBE182D3B99483D2CBFA1DF434A6099A3EF01BAC103B7037` |
+| Diagnostic kernel ELF / PE | `9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA` / `91AC0EB6E18F5DF8D5D4D5F6A048951F6932C98A301C66702B0EF7DDBF5BFDAA` |
+| Staged RAM disk / UEFI bootloader | `FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB` / `D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B` |
+
+The diagnostic mode is `C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization`, with Notes selector 4 and selected route `c147-native-notes`. The proof-disabled production NativeAOT ELF (`608CD7E8C895890250B0C7A733ECF379A134DDC1C186F70D02984C3BF89B6626`) and kernel (`22BC4AFE228263E4187B2AA57EAF21D1CEA46D3992A139F81EC185B1C22154AF`) remained present and hash-matched; neither was booted. Prior hosted and build results remain historical and were not rerun.
+
+The R7 diagnostic runner hash is `A6F5A20F7DDE2636589CCD3FD2EACC89EFA18E7A92276666F9493E339E90E416`; its checkpoint-sequence script hash is `13A9442CC484C94877137633D786F626AF99ED9C6ACA92C3452295412F6EF7D9`. The NativeAOT builder hash is `1EF99F0635B9865E1D6B3E8DC081C35EC572CA393145833A4E30C7CDCA9EFAE2`, and the diagnostic qualification manifest hash is `56D9AE88D9F9D12C2198AC62A17BD2902512645A66F505E3C2A6EDDAA941485B`. The generated R7 checkpoint profile and route are in `runs/diag-002/expected-observations.json` (SHA-256 `F867F52C666765B822FC8A3F24419CAC3D1F04911FA6152D50BA30CDF1641374`).
+
+The current QAC census at `2026-10-25T00:56:11.8280020Z` found the coordinator online with zero QEMU processes, foreign processes, reservations, managed sessions, queued requests, and host QEMU processes. The existing C188R7 diagnostic runner then requested one exclusive acceptance reservation. QAC granted reservation `06ccbde6b0a84262a86436a126f6e923` to owner process PID `28316`, verified as `LEON2_RDT\guideX`; QEMU child PID was `21436`. The exact QAC/QEMU argument vector and candidate paths are retained in `runs/diag-002/qac-run-arguments.json`. The runner used the existing 150-second startup deadline and 30-second admission bound.
+
+### Guest startup and proof-suite decisions
+
+The raw serial checkpoint sequence was:
+
+1. Selector 4 created the managed Notes instance (`C150-APP-INSTANCE id=4 generation=1`) and entered `C188R7-100 NOTES-LAUNCH-ENTRY`.
+2. C147 and C148 reported their shared runtime settings context ready.
+3. C133 host, C134 host, C133/C134 companion, and C133 combo markers each reported `SKIPPED`.
+4. Notes control-host reset, initial render, post-render settings initialization, and post-render proof checks returned.
+5. C137 test invocation and test summary both reported `SKIPPED`; no C137 46-case suite ran.
+6. `C188R7-206 NOTES-LAUNCH-RESULT=SUCCESS`, the pre-return `C188R7-207` marker, and `C188R7-208 AFTER APPLICATION-LAUNCH-RETURN` were observed. `[APPMODEL-MANAGED-RESULT]` reported Notes success.
+7. The native kernel emitted `[C102-LAUNCH-RETURN] status=00000000` on serial line 397. Input manager initialization followed on line 493, then `[KERNEL] Entering main loop (waiting for input)...` on line 757.
+
+The checkpoint validator reports `FAIL` with `native launch return` as the first missing checkpoint. Its expected pattern requires `status=0x...`, while the actual kernel emitter in `kernel/core/nativeaot_application.cpp` prints `status=` followed by eight hexadecimal digits without a `0x` prefix. The raw marker is present with zero status and is correctly ordered before input-manager and main-loop readiness; `runs/diag-002/checkpoint-reconciliation.json` records this validator format mismatch. No validator or proof predicate was changed.
+
+C151/C152 setup remained enabled. Runtime output later reported canonical Notes identity with `C151-NOTES-LAUNCH ... result=PASS` and `C152-NOTES-LAUNCH ... result=PASS`. The C147/C148 startup context and Notes control state were preserved.
+
+### Notes window and actual input
+
+Serial identified the created surface as `com.guidexos.apps.managed.notes`, generation 1, window `000003E8`. The framebuffer captures show the centered “Managed Notes” window and its taskbar button. `C162-MANAGED-FOCUS` reported the Notes instance focused. QMP `query-status` reported `running=true`; its command responses, pointer/key events, screenshots, and owned `quit` are in `runs/diag-002/qmp.log`.
+
+The runner moved the pointer into the Notes editor, clicked, and sent the `a` key. The compositor trace reports a button hit on window `000003E8`, but the app input path logged pointer handling as ignored/failed (`C138` / `C136`) and the key as failed (`C129`). The expected `C120-POINTER target=document result=PASS` and `C117-TEXT-AREA edit=changed result=PASS` markers are absent. The before-input and final framebuffer captures show no inserted character; Notes did not accept the edit. The guest remained responsive to the QMP input events and stayed alive until the runner's owned shutdown.
+
+The final screenshot is `runs/diag-002/final-stage.png`; the raw framebuffer is `runs/diag-002/final-stage.ppm`. The before-input capture and conversion hashes are recorded in `runs/diag-002/visual-evidence.json`. Taskbar presence and focus were observed, but separate taskbar activation was not exercised.
+
+### Cleanup, preservation, and remaining gates
+
+QAC reported QEMU exit code 0 and released reservation `06ccbde6b0a84262a86436a126f6e923`. The runner verified release; its final QAC status showed zero QEMU processes, reservations, and managed sessions. Exit code 0 is not used as application success evidence.
+
+The post-run comparison passed with all 13 protected roots and 8,497 files unchanged: zero added, missing, or changed paths, sizes, or hashes. All 136 pre-existing worktree status entries remained unchanged. The original RAM disk hash stayed `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`; the isolated staged RAM disk stayed `FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB`. The C185 uncertainty about 212 generated files remains preserved. Guest logs, QAC records, manifests, screenshot hashes, and the complete protected-tree snapshots are retained below the R7 output root; `qualification/r7r1-guest-run-002-evidence-hashes.json` indexes the principal files.
+
+The diagnostic candidate now demonstrates real Notes launch, render, managed/native return, and input-loop readiness with C133/C134/C137 suites skipped. It did not demonstrate successful Notes editing. The proof-disabled production candidate has not been booted, and none of the six C188 acceptance scenarios were run. C188 remains open. The smallest next investigation is the focused Notes input path: the click hit the Notes window, but C136/C138 pointer routing and C129 keyboard handling did not accept the document edit. Correct the checkpoint validator's status-format expectation separately if that validator is used again. Do not start C188R8, C189, or the six-scenario campaign automatically.

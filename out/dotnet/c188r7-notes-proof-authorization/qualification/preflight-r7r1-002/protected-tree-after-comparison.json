@@ -1,0 +1,142 @@
+{
+  "capturedUtc": "2026-10-25T01:01:49.5972587Z",
+  "before": "qualification/preflight-r7r1-002/protected-tree-before.json",
+  "after": "qualification/preflight-r7r1-002/protected-tree-after.json",
+  "expectedRoots": 13,
+  "actualRoots": 13,
+  "expectedFiles": 8497,
+  "actualFiles": 8497.0,
+  "trees": [
+    {
+      "id": "c185-managed-host-services",
+      "path": "out/dotnet/c185-managed-host-services",
+      "expectedFiles": 1201,
+      "actualFiles": 1201,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "c186-managed-host-contract",
+      "path": "out/dotnet/c186-managed-host-contract",
+      "expectedFiles": 1139,
+      "actualFiles": 1139,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "c182-managed-application-authoring",
+      "path": "out/dotnet/c182-managed-application-authoring",
+      "expectedFiles": 820,
+      "actualFiles": 820,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "c181-managed-application-residency",
+      "path": "out/dotnet/c181-managed-application-residency",
+      "expectedFiles": 5202,
+      "actualFiles": 5202,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-host-c185-bin",
+      "path": "samples/host/ManagedHostServicesC185/bin",
+      "expectedFiles": 14,
+      "actualFiles": 14,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-host-c185-obj",
+      "path": "samples/host/ManagedHostServicesC185/obj",
+      "expectedFiles": 22,
+      "actualFiles": 22,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-host-c182-obj",
+      "path": "samples/host/ManagedStarterC182/obj",
+      "expectedFiles": 8,
+      "actualFiles": 8,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-host-regression-obj",
+      "path": "samples/host/ManagedUiRegression/obj",
+      "expectedFiles": 8,
+      "actualFiles": 8,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-counterapp-bin",
+      "path": "samples/managed/C185CounterApp/bin",
+      "expectedFiles": 10,
+      "actualFiles": 10,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-counterapp-obj",
+      "path": "samples/managed/C185CounterApp/obj",
+      "expectedFiles": 35,
+      "actualFiles": 35,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-c182-smoke",
+      "path": "samples/managed/HostLogProof/c182-host-smoke",
+      "expectedFiles": 1,
+      "actualFiles": 1,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-contracts-bin",
+      "path": "samples/managed/ManagedUiContracts/bin",
+      "expectedFiles": 6,
+      "actualFiles": 6,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "samples-contracts-obj",
+      "path": "samples/managed/ManagedUiContracts/obj",
+      "expectedFiles": 31,
+      "actualFiles": 31,
+      "addedCount": 0,
+      "missingCount": 0,
+      "changedCount": 0,
+      "result": "PASS"
+    }
+  ],
+  "result": "PASS"
+}

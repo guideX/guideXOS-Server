@@ -1,0 +1,47 @@
+{
+  "capturedUtc": "2026-10-25T00:56:28.3421270Z",
+  "runRoot": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r7-notes-proof-authorization\\runs\\diag-002",
+  "sourceCandidate": "runs/diag-001/esp",
+  "nativeAotElfSha256": "91B8FEB2C15FAE36DDB47DB730C7AAEF0FEC693266EDFC5E5C5BA65D844A183C",
+  "files": [
+    {
+      "relativePath": "kernel.elf",
+      "bytes": 2366792,
+      "sha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+      "sourceSha256": "9C12F856569E4FE40E1D70CEB56252D3D8E0138DCD4016F83E6F8627DAC261FA",
+      "matchesSource": true
+    },
+    {
+      "relativePath": "ramdisk.img",
+      "bytes": 67108864,
+      "sha256": "FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB",
+      "sourceSha256": "FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB",
+      "matchesSource": true
+    },
+    {
+      "relativePath": "EFI/BOOT/BOOTX64.EFI",
+      "bytes": 52224,
+      "sha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B",
+      "sourceSha256": "D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B",
+      "matchesSource": true
+    }
+  ],
+  "ramdiskStaging": {
+    "result": "PASS",
+    "ramdisk": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r7-notes-proof-authorization\\runs\\diag-001\\esp\\ramdisk.img",
+    "managedApp": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c188r7-notes-proof-authorization\\candidates\\diag-nativeaot-002\\build\\nativeaot\\artifacts\\HostLogProof.elf",
+    "targetPath": "/APPS/GXOSAPP.ELF",
+    "previousAppBytes": 2064384,
+    "previousAppSha256": "AC80EC2937F55FE2AD828DDFBCAB7419A9BFB015B7B69B71C8FA01FB7CBBB637",
+    "stagedAppBytes": 2097152,
+    "stagedAppSha256": "91B8FEB2C15FAE36DDB47DB730C7AAEF0FEC693266EDFC5E5C5BA65D844A183C",
+    "ramdiskSha256": "FF8130B427858A68997D57ABF06855357CA8FE7C9CF625D65871FF296650B8CB",
+    "mediaDescriptorRestored": "0x00",
+    "allocatedClustersRetained": 256,
+    "allocatedClustersAdded": 4,
+    "unrelatedFilesPreserved": 185,
+    "changedOtherFiles": 0
+  },
+  "sourceQacCensus": "qualification/qac-census-r7r1-002/census.json",
+  "result": "PASS"
+}

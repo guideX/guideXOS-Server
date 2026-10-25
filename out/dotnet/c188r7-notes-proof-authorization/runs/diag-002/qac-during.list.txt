@@ -1,0 +1,8 @@
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 21436 | C:\Program Files\qemu\qemu-system-x86_64.exe | 2026-10-25T00:56:37.7371292+00:00 | managed
+  Note: Reservation 06ccbde6b0a84262a86436a126f6e923 · guideXOSServer · acceptance
+Reservations: 1
+  06ccbde6b0a84262a86436a126f6e923 | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID 28316) | owner Verified | child PID 21436
+Managed sessions: 1
+Managed session: 06ccbde6b0a84262a86436a126f6e923 | Running | guideXOSServer · LEON2_RDT\guideX (PID 28316)
+

@@ -1,0 +1,19 @@
+{
+  "capturedUtc": "2026-10-25T00:56:11.8280020Z",
+  "coordinatorOnline": true,
+  "statusExitCode": 0,
+  "listExitCode": 0,
+  "qacCli": "D:\\dev\\guideXOS_QAC\\src\\GuideXOS.QAC.Cli\\bin\\Debug\\net10.0-windows\\GuideXOS.QAC.Cli.exe",
+  "status": "status.txt",
+  "list": "list.txt",
+  "qacQemuCount": 0,
+  "qacForeignQemuCount": 0,
+  "acceptanceAndOtherReservations": 0,
+  "managedSessions": 0,
+  "queuedRequests": 0,
+  "reservationOwners": [],
+  "hostQemuProcessCount": 0,
+  "hostQemuProcesses": [],
+  "exclusiveAdmissionPermitted": true,
+  "result": "CLEAR"
+}
