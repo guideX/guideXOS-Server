@@ -102,6 +102,39 @@ constexpr uint64_t kManagedCapabilities =
     kManagedCapabilityFileWrite | kManagedCapabilityDirectoryList |
     kManagedCapabilityFileStat | kManagedCapabilityApplicationSnapshot |
     kManagedCapabilityApplicationClose | kManagedCapabilityAssociationService;
+#if defined(GXOS_NATIVEAOT_C188R10_STATE_REENTRY)
+uint32_t g_c188r10NativeInvocationCount = 0u;
+
+uint32_t c188r10EntryToken(uintptr_t entryPoint) {
+    uint64_t value = static_cast<uint64_t>(entryPoint);
+    value ^= value >> 33;
+    value *= 0xff51afd7ed558ccdull;
+    value ^= value >> 33;
+    value *= 0xc4ceb9fe1a85ec53ull;
+    value ^= value >> 33;
+    return static_cast<uint32_t>(value ^ (value >> 32));
+}
+
+void logC188r10NativeBoundary(const char* stage, uint32_t invocation,
+                              uint32_t selector, uint32_t generation,
+                              bool input,
+                              int32_t result, uintptr_t entryPoint) {
+    if (selector != 4u) return;
+    serial::puts("[C188R10-NATIVE] stage=");
+    serial::puts(stage);
+    serial::puts(" call=");
+    serial::put_hex32(invocation);
+    serial::puts(" id=4 gen=");
+    serial::put_hex32(generation);
+    serial::puts(" input=");
+    serial::put_hex32(input ? 1u : 0u);
+    serial::puts(" image=");
+    serial::put_hex32(c188r10EntryToken(entryPoint));
+    serial::puts(" rc=");
+    serial::put_hex32(static_cast<uint32_t>(result));
+    serial::puts("\n");
+}
+#endif
 constexpr uint32_t kManagedFilePathMaxBytes = 96u;
 constexpr uint32_t kManagedFileMaxBytes = 16u * 1024u;
 constexpr uint32_t kManagedDirectoryMaxEntries = 64u;
@@ -4442,8 +4475,40 @@ int32_t invokeManagedWithHostMetadata(
     g_managedLastSelector = selector;
     g_activeManagedContext = &context;
     arch::amd64::disable_interrupts();
+#if defined(GXOS_NATIVEAOT_C188R10_STATE_REENTRY)
+    uint32_t diagnosticInvocation = 0u;
+    const uint32_t diagnosticInputKind =
+        launchFlags & kLaunchFlagInputKindMask;
+    const bool diagnosticInput =
+        (launchFlags & kLaunchFlagInput) == 0u ||
+        (diagnosticInputKind != kLaunchFlagInputPointerMove &&
+         !(diagnosticInputKind >= kLaunchFlagInputWheel &&
+           diagnosticInputKind <= kLaunchFlagInputWheelLast));
+    if (selector == 4u && diagnosticInput &&
+        g_c188r10NativeInvocationCount < 24u) {
+        diagnosticInvocation = ++g_c188r10NativeInvocationCount;
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(context.userData));
+        logC188r10NativeBoundary("before-managed-entry",
+            diagnosticInvocation, selector,
+            static_cast<uint32_t>(packedUserData >> 32),
+            (launchFlags & kLaunchFlagInput) != 0u, -1,
+            g_application.entryPoint);
+    }
+#endif
     const int32_t managedReturn = reinterpret_cast<Entry>(
         g_application.entryPoint)(&startup);
+#if defined(GXOS_NATIVEAOT_C188R10_STATE_REENTRY)
+    if (diagnosticInvocation != 0u) {
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(context.userData));
+        logC188r10NativeBoundary("after-managed-return",
+            diagnosticInvocation, selector,
+            static_cast<uint32_t>(packedUserData >> 32),
+            (launchFlags & kLaunchFlagInput) != 0u, managedReturn,
+            g_application.entryPoint);
+    }
+#endif
     arch::amd64::enable_interrupts();
     if (g_managedInvocationSurface)
         g_managedInvocationSurface->endManagedFrame();

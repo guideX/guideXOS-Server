@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory=$true)][string]$BuildRoot
+    [Parameter(Mandatory=$true)][string]$BuildRoot,
+    [Parameter()][switch]$ManagedStateReentry
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -16,7 +17,8 @@ $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r6-notes-postrender')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r7-notes-proof-authorization')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r8-notes-input-routing')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r9-registry-input-reentry')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r9-registry-input-reentry')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r10-nativeaot-state-reentry')))
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
@@ -95,6 +97,9 @@ $nativeFeatures = @(
     'GUIDEXOS_PROOF_CONTROL',
     'GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY'
 )
+if ($ManagedStateReentry) {
+    $nativeFeatures += 'GXOS_NATIVEAOT_C188R10_STATE_REENTRY'
+}
 $extraCFlags = ($nativeFeatures | ForEach-Object { '-D' + $_ }) -join ' '
 New-Item -ItemType Directory -Path $buildRootFull | Out-Null
 
@@ -129,7 +134,7 @@ if (-not (Test-Path -LiteralPath $kernelElf -PathType Leaf)) {
 }
 $bytes = [System.IO.File]::ReadAllBytes($kernelElf)
 $kernelText = [System.Text.Encoding]::ASCII.GetString($bytes)
-foreach ($marker in @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY','C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION')) {
+foreach ($marker in @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY','C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION') + $(if ($ManagedStateReentry) { @('C188R10-NATIVE') } else { @() })) {
     if (-not $kernelText.Contains($marker)) { throw "C188 kernel ELF is missing required marker $marker." }
 }
 foreach ($requiredFlag in @('-fno-exceptions','-fno-rtti','-nostdinc++','-std=c++14')) {
@@ -154,7 +159,8 @@ $manifest = [ordered]@{
     freestandingFlags = @('-std=c++14','-ffreestanding','-fno-exceptions','-fno-rtti','-nostdlib','-nostdinc++','-fno-builtin')
     c181ProofMarkers = @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY')
     c188CandidateMarkers = @('C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION')
-    candidateOnlyDefine = 'GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY'
+    stateReentryDiagnostic = [bool]$ManagedStateReentry
+    candidateOnlyDefines = @('GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY') + $(if ($ManagedStateReentry) { @('GXOS_NATIVEAOT_C188R10_STATE_REENTRY') } else { @() })
     standardKernelOutputTouched = $false
 }
 $manifestPath = Join-Path $buildRootFull 'kernel-qualification.json'

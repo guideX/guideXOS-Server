@@ -1,0 +1,4 @@
+[C102-MANAGED-OUTPUT] C188R10-MANAGED stage=entry call=2 id=4 gen=00000001 in=1 rc=-1
+[C102-MANAGED-OUTPUT] C188R10 state stage=dispatch reg=123 init=1 n=5 pool=456 mask=1 id=4 gen=1 valid=1 td=0 rc=-1
+[C102-MANAGED-OUTPUT] C188R10 state stage=handler-enter reg=123 init=1 n=5 pool=456 mask=1 id=4 gen=1 valid=1 td=0 rc=-1
+[C102-MANAGED-OUTPUT] C188R10 state stage=input-return reg=123 init=1 n=5 pool=456 mask=1 id=4 gen=1 valid=1 td=0 rc=0

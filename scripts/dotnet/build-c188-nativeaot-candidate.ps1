@@ -6,7 +6,8 @@ param(
     [Parameter()][switch]$NotesPostRenderStartup,
     [Parameter()][switch]$NotesProofAuthorization,
     [Parameter()][switch]$NotesInputRouting,
-    [Parameter()][switch]$RegistryInputReentry
+    [Parameter()][switch]$RegistryInputReentry,
+    [Parameter()][switch]$ManagedStateReentry
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -22,8 +23,9 @@ if ($NotesPostRenderStartup) { $selectedPhaseCount++ }
 if ($NotesProofAuthorization) { $selectedPhaseCount++ }
 if ($NotesInputRouting) { $selectedPhaseCount++ }
 if ($RegistryInputReentry) { $selectedPhaseCount++ }
+if ($ManagedStateReentry) { $selectedPhaseCount++ }
 if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($RegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRootName = if ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($RegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $build = [System.IO.Path]::GetFullPath($BuildRoot)
 $relative = [System.IO.Path]::GetRelativePath($phaseRoot, $build)
@@ -119,6 +121,12 @@ if ($RegistryInputReentry) {
     $arguments.C188R8NotesInputRouting = $true
     $arguments.C188R9RegistryInputReentry = $true
 }
+if ($ManagedStateReentry) {
+    $arguments.C188R7NotesProofAuthorization = $true
+    $arguments.C188R8NotesInputRouting = $true
+    $arguments.C188R9RegistryInputReentry = $true
+    $arguments.C188R10ManagedStateReentry = $true
+}
 $logPath = Join-Path $build 'nativeaot-build.log'
 $output = ''
 $buildExitCode = 0
@@ -135,6 +143,7 @@ if ($buildExitCode -ne 0) {
 }
 $verify = Join-Path $PSScriptRoot 'verify-c188-nativeaot-artifacts.ps1'
 if ($RegistryInputReentry) { $verifyArguments.NotesRegistryInputReentry = $true }
+if ($ManagedStateReentry) { $verifyArguments.ManagedStateReentry = $true }
 & $verify @verifyArguments
 if ($LASTEXITCODE -ne 0) { throw "C188 NativeAOT artifact verification failed with exit code $LASTEXITCODE." }
 $kernelElf = Join-Path $nativeRoot 'artifacts/HostLogProof.elf'
@@ -152,6 +161,7 @@ $manifest = [ordered]@{
     notesProofAuthorization=[bool]$NotesProofAuthorization
     notesInputRouting=[bool]$NotesInputRouting
     registryInputReentry=[bool]$RegistryInputReentry
+    managedStateReentry=[bool]$ManagedStateReentry
     productionApplicationSelectorsPreserved=@(4,5,6,7,8)
     candidateSelector=9; candidateIdentity='com.guidexos.apps.managed.counterapp'
 }

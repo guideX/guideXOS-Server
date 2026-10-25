@@ -22,6 +22,7 @@ param(
     [switch]$C188R7NotesProofAuthorization,
     [switch]$C188R8NotesInputRouting,
     [switch]$C188R9RegistryInputReentry,
+    [switch]$C188R10ManagedStateReentry,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -509,6 +510,16 @@ try {
          $C188R6NotesPostRenderStartup)) {
         throw 'C188R9 registry diagnostics require the isolated ordinary C160 C188 candidate with R7/R8 routing instrumentation and cannot include the larger R3/R4/R6 marker sets.'
     }
+    if ($C188R10ManagedStateReentry -and
+        (-not $C188R9RegistryInputReentry -or
+         -not $C188R8NotesInputRouting -or
+         -not $C188ExternalAppIdentity -or -not $ProductionApplication -or
+         $managedProjectMode -ne 'C160Composite' -or $C187GuestCandidate -or
+         -not $C166OrdinaryBuild -or $C188R3NotesStartupDiagnostics -or
+         $C188R4NotesStartupOperationIsolation -or
+         $C188R6NotesPostRenderStartup)) {
+        throw 'C188R10 state diagnostics require the isolated ordinary C160 C188 candidate with R7/R8/R9 instrumentation and cannot include the larger R3/R4/R6 marker sets.'
+    }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
@@ -552,6 +563,9 @@ try {
     }
     if ($C188R9RegistryInputReentry) {
         $publishProperties += '-p:HostLogProofC188R9RegistryInputReentry=true'
+    }
+    if ($C188R10ManagedStateReentry) {
+        $publishProperties += '-p:HostLogProofC188R10ManagedStateReentry=true'
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"

@@ -6,6 +6,10 @@ namespace HostLogProof;
 
 public static unsafe class Program
 {
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+    private static uint s_c188r10ManagedInvocationCount;
+    private static uint s_c188r10ManagedBoundaryRecords;
+#endif
 #if HOSTLOGPROOF_C104_APP_B
     private static int s_c104AppBState;
 #endif
@@ -2547,7 +2551,33 @@ public static unsafe class Program
 #if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
         // C188 maps the separately compiled CounterApp only to its dedicated
         // development selector. Selectors 4-8 continue through production.
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+        uint invocation = ++s_c188r10ManagedInvocationCount;
+        uint selector = (uint)(nuint)ctx->userData;
+        uint generation = (uint)((ulong)(nuint)ctx->userData >> 32);
+        bool input = (ctx->launchFlags & GxAbi.LaunchFlagInput) != 0u;
+        uint inputKind = ctx->launchFlags & GxAbi.LaunchFlagInputKindMask;
+        bool boundedInput = !input || (inputKind != 0u &&
+            (inputKind < GxAbi.LaunchFlagInputWheel ||
+             inputKind > GxAbi.LaunchFlagInputWheelLast));
+        bool traceManagedBoundary = selector == 4u && boundedInput &&
+            s_c188r10ManagedBoundaryRecords < 24u;
+        if (traceManagedBoundary)
+        {
+            s_c188r10ManagedBoundaryRecords++;
+            LogC188R10ManagedBoundary(ctx, "entry"u8, invocation, selector,
+                generation, input, -1);
+        }
+        int dispatchResult = DispatchC188ExternalAppIdentity(ctx);
+        if (traceManagedBoundary)
+        {
+            LogC188R10ManagedBoundary(ctx, "exit"u8, invocation, selector,
+                generation, input, dispatchResult);
+        }
+        return dispatchResult;
+#else
         return DispatchC188ExternalAppIdentity(ctx);
+#endif
 #elif HOSTLOGPROOF_C187_GUEST_CANDIDATE
         // The development candidate reuses the normal native selector path.
         // Selector 4 is occupied by the C185 sample for this image only;
@@ -3431,6 +3461,57 @@ public static unsafe class Program
 #endif
 #endif
     }
+
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+    private static void LogC188R10ManagedBoundary(
+        NativeGxAppContext* context,
+        ReadOnlySpan<byte> stage,
+        uint invocation,
+        uint selector,
+        uint generation,
+        bool input,
+        int result)
+    {
+        if (context == null || context->host == null ||
+            context->host->log == null || selector != 4u)
+        {
+            return;
+        }
+
+        Span<byte> line = stackalloc byte[96];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R10-MANAGED stage="u8) ||
+            !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position, " call="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, invocation) ||
+            !GuideXosText.Append(line, ref position, " id=4 gen="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, generation) ||
+            !GuideXosText.Append(line, ref position, " in="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, input ? 1u : 0u) ||
+            !GuideXosText.Append(line, ref position, " rc="u8) ||
+            !AppendC188R10Signed(line, ref position, result))
+        {
+            return;
+        }
+
+        line[position] = 0;
+        fixed (byte* message = line)
+            _ = context->host->log(context, message);
+    }
+
+    private static bool AppendC188R10Signed(
+        Span<byte> buffer, ref int position, int value)
+    {
+        if (value < 0)
+        {
+            if (!GuideXosText.Append(buffer, ref position, "-"u8)) return false;
+            return GuideXosText.AppendUnsigned(buffer, ref position,
+                unchecked((uint)(-(long)value)));
+        }
+        return GuideXosText.AppendUnsigned(buffer, ref position, (uint)value);
+    }
+#endif
 
 #if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
     internal enum C188GuestSelectorRoute : byte

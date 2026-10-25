@@ -1,0 +1,3 @@
+[KERNEL] Entering main loop (waiting for input)...
+[C150-APP-LAUNCH] selector=00000004 kind=normal
+[C150-SURFACE] action=create appId=com.guidexos.apps.managed.notes generation=00000001

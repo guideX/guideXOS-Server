@@ -84,6 +84,11 @@ public static unsafe class GuideXosApplicationRegistry
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
     private static uint s_c188r9RegistryTraceRecords;
 #endif
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+    private static uint s_c188r10RegistryTraceRecords;
+    private static uint s_c188r10TeardownCalls;
+    private static uint s_c188r10RegistryInitializationGeneration = 1u;
+#endif
 #if GUIDEXOS_PROOF_CONTROL
     private static bool s_proofConfigConsumed;
 #endif
@@ -164,6 +169,45 @@ public static unsafe class GuideXosApplicationRegistry
 
     public static int RegistrationCount => s_entries.Length;
 
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+    internal static uint C188R10RegistryOwnerIdentity =>
+        C188R10OwnerToken(System.Runtime.CompilerServices.Unsafe.AsPointer(
+            ref System.Runtime.CompilerServices.Unsafe.AsRef(in s_entries)));
+
+    internal static uint C188R10LifetimeOwnerIdentity =>
+        C188R10OwnerToken(System.Runtime.CompilerServices.Unsafe.AsPointer(
+            ref System.Runtime.CompilerServices.Unsafe.AsRef(in s_lifetime)));
+
+    internal static uint C188R10RegistryInitializationGeneration =>
+        s_c188r10RegistryInitializationGeneration;
+
+    internal static bool C188R10TryGetResident(uint selector,
+        uint generation, out GuideXosApplication application) =>
+        s_lifetime.TryGet(selector, generation, out application);
+
+    private static uint C188R10OwnerToken(void* ownerSlot)
+    {
+        ulong value = (ulong)(nuint)ownerSlot;
+        value ^= value >> 33;
+        value *= 0xff51afd7ed558ccdUL;
+        value ^= value >> 33;
+        value *= 0xc4ceb9fe1a85ec53UL;
+        value ^= value >> 33;
+        return (uint)(value ^ (value >> 32));
+    }
+
+#endif
+
+#if HOSTLOGPROOF_MANAGED_APP_RETURN
+    private static bool ClearResident(uint selector, uint generation)
+    {
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+        s_c188r10TeardownCalls++;
+#endif
+        return s_lifetime.Clear(selector, generation);
+    }
+#endif
+
     public static int Dispatch(NativeGxAppContext* context)
     {
         if (context == null || context->size < GxAbi.LegacyContextSize)
@@ -188,6 +232,10 @@ public static unsafe class GuideXosApplicationRegistry
             LogC188R9RegistryState(host, "dispatch-entry"u8, selector,
                 host.LaunchContext.ApplicationGeneration, -1);
         }
+#endif
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+        LogC188R10State(host, "dispatch"u8, selector,
+            host.LaunchContext.ApplicationGeneration, -1);
 #endif
 
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
@@ -237,6 +285,11 @@ public static unsafe class GuideXosApplicationRegistry
                 descriptorFound ? 0 : GxAbi.ErrorInvalidApplicationId);
         }
 #endif
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+        LogC188R10State(host, "lookup"u8, selector,
+            host.LaunchContext.ApplicationGeneration,
+            descriptorFound ? 0 : GxAbi.ErrorInvalidApplicationId);
+#endif
         if (!descriptorFound)
         {
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
@@ -247,6 +300,10 @@ public static unsafe class GuideXosApplicationRegistry
             host.TryLog("C112-UNKNOWN-SELECTOR"u8);
             return GxAbi.ErrorInvalidApplicationId;
         }
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+        LogC188R10State(host, "resident"u8, selector,
+            host.LaunchContext.ApplicationGeneration, -1);
+#endif
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
         if (host.LaunchContext.IsInput)
             LogC188R8InputBoundary(host, "application-found"u8, selector, 0);
@@ -277,7 +334,7 @@ public static unsafe class GuideXosApplicationRegistry
         if (host.IsAction && host.LaunchContext.ActionId ==
                 LifetimeCloseActionId)
         {
-            bool cleared = s_lifetime.Clear(selector,
+            bool cleared = ClearResident(selector,
                 host.LaunchContext.ApplicationGeneration);
             host.TryLog(cleared
                 ? "C150-LIFETIME-CLOSE result=PASS"u8
@@ -326,12 +383,19 @@ public static unsafe class GuideXosApplicationRegistry
         uint applicationGeneration = host.LaunchContext.ApplicationGeneration;
         if (isNewLaunch)
         {
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+            bool replacingResident = s_lifetime.TryGet(selector, out _);
+#endif
             if (!s_lifetime.TryStart(descriptor, applicationGeneration,
                     out application, out uint generation))
             {
                 host.TryLog("C150-LIFETIME-START result=FAIL capacity=5"u8);
                 return GxAbi.ErrorInvalidApplicationId;
             }
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+            if (replacingResident)
+                s_c188r10TeardownCalls++;
+#endif
             applicationGeneration = generation;
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
             if (selector == 4u)
@@ -339,6 +403,10 @@ public static unsafe class GuideXosApplicationRegistry
                 LogC188R9RegistryState(host, "instance-start"u8, selector,
                     applicationGeneration, 0);
             }
+#endif
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+            LogC188R10State(host, "start"u8, selector,
+                applicationGeneration, 0);
 #endif
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
             Span<byte> instanceMarker = stackalloc byte[96];
@@ -380,7 +448,15 @@ public static unsafe class GuideXosApplicationRegistry
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
             LogC188R8InputBoundary(host, "notes-handler-enter"u8, selector, 0);
 #endif
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+            LogC188R10State(host, "handler-enter"u8, selector,
+                applicationGeneration, -1);
+#endif
             result = application.HandleInput(host, input);
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+            LogC188R10State(host, "input-return"u8, selector,
+                applicationGeneration, (int)result);
+#endif
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
             LogC188R8InputBoundary(host, "notes-handler-return"u8, selector,
                 (int)result);
@@ -405,6 +481,10 @@ public static unsafe class GuideXosApplicationRegistry
                     applicationGeneration, (int)result);
             }
 #endif
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+            LogC188R10State(host, "launch-return"u8, selector,
+                applicationGeneration, (int)result);
+#endif
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
             host.TryLog("C188R6-011 AFTER APPLICATION-LAUNCH-RETURN"u8);
 #endif
@@ -420,12 +500,35 @@ public static unsafe class GuideXosApplicationRegistry
 #endif
         }
 #else
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+        GuideXosResult result;
+        if (host.LaunchContext.IsInput)
+        {
+            LogC188R10State(host, "handler-enter"u8, selector,
+                applicationGeneration, -1);
+            result = application.HandleInput(host, input);
+            LogC188R10State(host, "input-return"u8, selector,
+                applicationGeneration, (int)result);
+        }
+        else if (host.IsAction)
+        {
+            result = GuideXosManagedWindowResizeDispatchC180.DispatchAction(
+                application, host, host.LaunchContext.ActionId);
+        }
+        else
+        {
+            result = application.Launch(host);
+            LogC188R10State(host, "launch-return"u8, selector,
+                applicationGeneration, (int)result);
+        }
+#else
         GuideXosResult result = host.LaunchContext.IsInput
             ? application.HandleInput(host, input)
             : host.IsAction
                 ? GuideXosManagedWindowResizeDispatchC180.DispatchAction(
                     application, host, host.LaunchContext.ActionId)
                 : application.Launch(host);
+#endif
 #endif
 #if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
         if (!host.LaunchContext.IsInput && !host.IsAction)
@@ -470,7 +573,7 @@ public static unsafe class GuideXosApplicationRegistry
                 return GxAbi.ErrorInvalidArgument;
             }
             if (fileExplorerClosed &&
-                !s_lifetime.Clear(selector, applicationGeneration))
+                !ClearResident(selector, applicationGeneration))
             {
                 host.TryLog("C150-LIFETIME-CLOSE result=REJECT stale-generation=true"u8);
                 return GxAbi.ErrorInvalidApplicationId;
@@ -483,7 +586,7 @@ public static unsafe class GuideXosApplicationRegistry
                 Applications.ManagedCalculatorC158.CloseActionId &&
             result == GuideXosResult.Success)
         {
-            if (!s_lifetime.Clear(selector, applicationGeneration))
+            if (!ClearResident(selector, applicationGeneration))
                 return GxAbi.ErrorInvalidApplicationId;
         }
 #endif
@@ -493,13 +596,13 @@ public static unsafe class GuideXosApplicationRegistry
                 Applications.ManagedTaskManagerC161.CloseActionId &&
             result == GuideXosResult.Success)
         {
-            if (!s_lifetime.Clear(selector, applicationGeneration))
+            if (!ClearResident(selector, applicationGeneration))
                 return GxAbi.ErrorInvalidApplicationId;
         }
 #endif
         if (isNewLaunch && result != GuideXosResult.Success)
         {
-            _ = s_lifetime.Clear(selector, applicationGeneration);
+            _ = ClearResident(selector, applicationGeneration);
         }
 #else
         GuideXosResult result = host.LaunchContext.IsInput
@@ -510,8 +613,85 @@ public static unsafe class GuideXosApplicationRegistry
                     host.LaunchContext.ActionId)
                 : descriptor.Application.Launch(host);
 #endif
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+        LogC188R10State(host, "return"u8, selector,
+            applicationGeneration, (int)result);
+#endif
         return (int)result;
     }
+
+#if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
+    private static void LogC188R10State(
+        GuideXosHost host,
+        ReadOnlySpan<byte> stage,
+        uint selector,
+        uint generation,
+        int resultCode)
+    {
+        if (selector != 4u || s_c188r10RegistryTraceRecords >= 48u ||
+            (host.LaunchContext.IsInput &&
+             (host.LaunchContext.InputKind == GuideXosInputKind.PointerMove ||
+              host.LaunchContext.InputKind == GuideXosInputKind.Wheel)))
+        {
+            return;
+        }
+        s_c188r10RegistryTraceRecords++;
+
+        uint residentMask = 0u;
+        for (uint index = 0u; index < 5u; index++)
+        {
+            if (s_lifetime.TryGet(index + 4u, out _))
+                residentMask |= 1u << (int)index;
+        }
+        bool generationValid = s_lifetime.TryGet(selector, generation, out _);
+
+        Span<byte> line = stackalloc byte[127];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R10 state stage="u8) ||
+            !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position, " reg="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                C188R10RegistryOwnerIdentity) ||
+            !GuideXosText.Append(line, ref position, " init="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                s_c188r10RegistryInitializationGeneration) ||
+            !GuideXosText.Append(line, ref position, " n="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                (uint)s_entries.Length) ||
+            !GuideXosText.Append(line, ref position, " pool="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                C188R10LifetimeOwnerIdentity) ||
+            !GuideXosText.Append(line, ref position, " mask="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, residentMask) ||
+            !GuideXosText.Append(line, ref position, " id=4 gen="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, generation) ||
+            !GuideXosText.Append(line, ref position, " valid="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                generationValid ? 1u : 0u) ||
+            !GuideXosText.Append(line, ref position, " td="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position,
+                s_c188r10TeardownCalls) ||
+            !GuideXosText.Append(line, ref position, " rc="u8) ||
+            !AppendC188R10Signed(line, ref position, resultCode))
+        {
+            return;
+        }
+        host.TryLog(line[..position]);
+    }
+
+    private static bool AppendC188R10Signed(
+        Span<byte> buffer, ref int position, int value)
+    {
+        if (value < 0)
+        {
+            if (!GuideXosText.Append(buffer, ref position, "-"u8)) return false;
+            return GuideXosText.AppendUnsigned(buffer, ref position,
+                unchecked((uint)(-(long)value)));
+        }
+        return GuideXosText.AppendUnsigned(buffer, ref position, (uint)value);
+    }
+#endif
 
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
     private static void LogC188R8InputBoundary(

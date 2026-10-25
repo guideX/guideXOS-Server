@@ -1,0 +1,2 @@
+[C102-MANAGED-OUTPUT] C188R10-MANAGED stage=exit call=2 id=4 gen=1 in=0 rc=0
+[C188R10-NATIVE] stage=after-managed-return call=00000003 id=4 gen=00000001 input=00000000 image=7A123456 rc=00000000

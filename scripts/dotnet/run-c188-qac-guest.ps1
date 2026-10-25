@@ -20,7 +20,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r5-notes-proof-invocation')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $phaseRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
@@ -66,7 +67,11 @@ $c188r9Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-
 $isC188R9Boot = $Scenario -eq 'registry-input-reentry' -and
     $bootRoot.StartsWith($c188r9Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase)
-if (($isC188R5Boot -or $isC188R6Boot -or $isC188R9Boot) -and (
+$c188r10Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry'))
+$isC188R10Boot = $Scenario -eq 'registry-input-reentry' -and
+    $bootRoot.StartsWith($c188r10Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+        [System.StringComparison]::OrdinalIgnoreCase)
+if (($isC188R5Boot -or $isC188R6Boot -or $isC188R9Boot -or $isC188R10Boot) -and (
         $qacStatusBefore -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
         $qacListBefore -notmatch 'Reservations:\s+0' -or
         $qacListBefore -notmatch 'Managed sessions:\s+0' -or
