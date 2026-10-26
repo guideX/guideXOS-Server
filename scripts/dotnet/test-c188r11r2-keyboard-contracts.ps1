@@ -152,5 +152,11 @@ Assert-Contract 'input gate requires a fresh inspected reservation and correlate
     $qacRunner.Contains('QEMU processes:\s+1 \(0 foreign\)') -and
     $qacRunner.Contains('Managed sessions:\s+1; queued:\s+0; blocked:\s+0') -and
     $qacRunner.Contains('qacOwnershipRunIdentity=$qacOwnershipRunIdentity'))
+Assert-Contract 'QAC census and ownership snapshots are persisted before any fail-closed gate throws' (
+    $qacRunner.IndexOf('Set-Content -LiteralPath $qacStatusDuringPath') -ge 0 -and
+    $qacRunner.IndexOf('Set-Content -LiteralPath $qacStatusDuringPath') -lt
+        $qacRunner.IndexOf('$ownership = Get-C188R11R4QacOwnershipEvidence') -and
+    $qacRunner.IndexOf('$ownership | ConvertTo-Json -Depth 5') -lt
+        $qacRunner.IndexOf('if (-not [bool]$ownership.accepted)'))
 
 Write-Output "C188R11R2-KEYBOARD-CONTRACTS cases=$script:caseCount result=PASS"

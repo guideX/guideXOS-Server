@@ -289,6 +289,15 @@ try {
     $qacDuringList = (& $qacCli list 2>&1 | Out-String)
     $qacListExitCode = $LASTEXITCODE
     if ($isC188R11Boot) {
+        $qacStatusDuringPath = Join-Path $bootRoot 'qac-during.status.txt'
+        $qacListDuringPath = Join-Path $bootRoot 'qac-during.list.txt'
+        $qacInspectDuringPath = Join-Path $bootRoot 'qac-during.inspect.json'
+        $qacOwnershipPath = Join-Path $bootRoot 'qac-during-ownership.json'
+        foreach ($evidencePath in @($qacStatusDuringPath,$qacListDuringPath,$qacInspectDuringPath,$qacOwnershipPath)) {
+            if (Test-Path -LiteralPath $evidencePath) { throw "Refusing to overwrite QAC ownership evidence: $evidencePath" }
+        }
+        Set-Content -LiteralPath $qacStatusDuringPath -Value $qacDuringStatus -Encoding utf8
+        Set-Content -LiteralPath $qacListDuringPath -Value $qacDuringList -Encoding utf8
         if (-not [string]::IsNullOrWhiteSpace($qacCapture.CaptureError)) {
             throw "QAC process output capture failed: $($qacCapture.CaptureError)"
         }
@@ -312,6 +321,7 @@ try {
         }
         $qacInspectOutput = (& $qacCli inspect $qacReservationId 2>&1 | Out-String)
         $qacInspectExitCode = $LASTEXITCODE
+        Set-Content -LiteralPath $qacInspectDuringPath -Value $qacInspectOutput -Encoding utf8
         if ($qacInspectExitCode -ne 0) { throw 'QAC could not inspect the current run reservation.' }
         try { $qacInspection = $qacInspectOutput | ConvertFrom-Json -ErrorAction Stop }
         catch { throw 'QAC inspection returned an invalid reservation record.' }
@@ -350,21 +360,11 @@ try {
             childProcessAlive=$true;expectedQemuExecutableIdentity=[System.IO.Path]::GetFullPath($qemu)
         }
         $ownership = Get-C188R11R4QacOwnershipEvidence $qacDuringStatus $qacDuringList $qacInspection $qacOwnershipRunIdentity
+        $ownership | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $qacOwnershipPath -Encoding utf8
         if (-not [bool]$ownership.accepted) {
             throw "QAC ownership proof failed closed: $($ownership.reasons -join ', ')."
         }
         $qacOwnershipEvidence = $ownership
-        $qacStatusDuringPath = Join-Path $bootRoot 'qac-during.status.txt'
-        $qacListDuringPath = Join-Path $bootRoot 'qac-during.list.txt'
-        $qacInspectDuringPath = Join-Path $bootRoot 'qac-during.inspect.json'
-        $qacOwnershipPath = Join-Path $bootRoot 'qac-during-ownership.json'
-        foreach ($evidencePath in @($qacStatusDuringPath,$qacListDuringPath,$qacInspectDuringPath,$qacOwnershipPath)) {
-            if (Test-Path -LiteralPath $evidencePath) { throw "Refusing to overwrite QAC ownership evidence: $evidencePath" }
-        }
-        Set-Content -LiteralPath $qacStatusDuringPath -Value $qacDuringStatus -Encoding utf8
-        Set-Content -LiteralPath $qacListDuringPath -Value $qacDuringList -Encoding utf8
-        $qacInspection | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $qacInspectDuringPath -Encoding utf8
-        $ownership | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $qacOwnershipPath -Encoding utf8
         $qacDuringStatusConfirmed = $true
         $qacDuringListConfirmed = ($ownership.qacListReservationCount -gt 0)
     } else {
