@@ -12443,7 +12443,7 @@ The initial ignored manifest had 1,367 files and 90,843,932 bytes. The final
 manifest has the same totals with zero changed, missing, or newly ignored
 files. The protected generated fixtures matched all 42 preflight files, and
 the downloads fixture state matched its baseline. The recursive manifest grew
-from 9,612 files and 1,108,460,495 bytes to 9,615 files and 1,108,521,036
+from 9,612 files and 1,108,460,495 bytes to 9,615 files and 1,108,521,413
 bytes: seven expected modified source/test/documentation paths, the three new
 JS93 fixture/runner/test paths, and no missing baseline paths.
 
