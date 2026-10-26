@@ -79,7 +79,7 @@ if (-not [regex]::IsMatch($runtimeLifecycle,'(?m)^C188R11-RUNTIME-LIFECYCLE case
 }
 $qacOwnership = (& (Join-Path $PSScriptRoot 'test-c188r11r4-qac-ownership-predicates.ps1') 2>&1 | Out-String)
 Set-Content -LiteralPath (Join-Path $root 'qac-ownership-predicates.log') -Value $qacOwnership -Encoding utf8
-if (-not [regex]::IsMatch($qacOwnership,'(?m)^C188R11R4-QAC-OWNERSHIP cases=9 result=PASS\b')) {
+if (-not [regex]::IsMatch($qacOwnership,'(?m)^C188R11R4-QAC-OWNERSHIP cases=10 result=PASS\b')) {
     throw 'C188R11R4 QAC ownership predicate qualification failed.'
 }
 $qacStreamCapture = (& (Join-Path $PSScriptRoot 'test-c188r11r4-qac-stream-capture.ps1') 2>&1 | Out-String)
@@ -100,7 +100,7 @@ if (-not [regex]::IsMatch($keyboardRunnerPredicates,'(?m)^C188R11R2-RUNNER-PREDI
 $manifest = [ordered]@{
     result='PASS';outputRoot=$root;r9Cases=14;priorR10Cases=14;r11Cases=15
     runnerPredicateCases=30;outputBoundCases=6;runtimeLifecycleCases=7
-    qacOwnershipPredicateCases=9
+    qacOwnershipPredicateCases=10
     qacStreamCaptureCases=2
     keyboardContractCases=[int]([regex]::Match($keyboardContracts,'cases=(\d+)').Groups[1].Value)
     keyboardRunnerPredicateCases=[int]([regex]::Match($keyboardRunnerPredicates,'cases=(\d+)').Groups[1].Value)

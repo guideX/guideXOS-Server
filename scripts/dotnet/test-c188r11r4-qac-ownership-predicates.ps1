@@ -105,6 +105,11 @@ $wrongSessionList = $fullList.Replace($reservationId, 'fedcba9876543210fedcba987
 $wrongListEvidence = Get-C188R11R4QacOwnershipEvidence $status $wrongSessionList $inspection $run
 Assert-QacOwnership 'a contradictory nonempty QAC enumeration fails closed' (-not [bool]$wrongListEvidence.accepted)
 
+$partialList = $fullList -replace '(?m)^QEMU PID 200 \|[^\r\n]*\r?\n', ''
+$partialListEvidence = Get-C188R11R4QacOwnershipEvidence $status $partialList $inspection $run
+Assert-QacOwnership 'a partial list without the matching QEMU census row fails closed' (
+    -not [bool]$partialListEvidence.accepted)
+
 $missingChildIdentity = Copy-QacFixture $run
 $missingChildIdentity.childProcessAlive = $false
 $missingChildEvidence = Get-C188R11R4QacOwnershipEvidence $status $emptyList $inspection $missingChildIdentity

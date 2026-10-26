@@ -148,6 +148,14 @@ function Get-C188R11R4QacOwnershipEvidence(
                 $reasons.Add('qac-list-qemu-census-contradicts-inspected-child')
             }
         }
+        $listHasRows = $listedReservationIds.Count -gt 0 -or
+            $listedSessions.Count -gt 0 -or $processRows.Count -gt 0
+        if ($listHasRows -and
+            ([int]$reservationCountMatch.Groups['count'].Value -ne 1 -or
+             [int]$sessionCountMatch.Groups['count'].Value -ne 1 -or
+             $processRows.Count -ne 1)) {
+            $reasons.Add('qac-list-partial-census-contradicts-independent-ownership')
+        }
         if ($ListText -match '(?m)^Coordinator warning:') {
             $reasons.Add('qac-list-reports-census-warning')
         }
