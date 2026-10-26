@@ -4,13 +4,13 @@ function Get-C188R11R2LineMatch([string]$SerialText, [string]$Pattern) {
 
 function Get-C188R11R2KeyboardEvidence([string]$SerialText) {
     $focus = Get-C188R11R2LineMatch $SerialText `
-        '\[C188R11R2_KEY\] stage=main-loop-focus window=(?<window>[A-Fa-f0-9]{8}) title=Managed Notes owner=\S+ result=focused'
+        '\[C188R11R2_KEY\] stage=main-loop-focus window=(?<window>[A-Fa-f0-9]{8}) title=Managed Notes owner=.+? result=focused'
     $irq = Get-C188R11R2LineMatch $SerialText `
         '\[C188R11R2_KEY\] stage=irq-scan seq=[A-Fa-f0-9]{8} eid=(?<eid>[A-Fa-f0-9]{8}) sc=0000001C ext=0 phase=key-queued key=00000061 transition=down shift=0 ctrl=0 route=queue'
     $dequeue = Get-C188R11R2LineMatch $SerialText `
         '\[C188R11R2_KEY\] stage=kernel-dequeue source=ps2-irq eid=(?<eid>[A-Fa-f0-9]{8}) sc=0000001C key=00000061 class=printable shift=0 ctrl=0 overwritten=00000000 result=PASS'
     $target = Get-C188R11R2LineMatch $SerialText `
-        '\[C188R11R2_KEY\] stage=focus-target eid=(?<eid>[A-Fa-f0-9]{8}) window=(?<window>[A-Fa-f0-9]{8}) title=Managed Notes owner=\S+ route=focused-window'
+        '\[C188R11R2_KEY\] stage=focus-target eid=(?<eid>[A-Fa-f0-9]{8}) window=(?<window>[A-Fa-f0-9]{8}) title=Managed Notes owner=.+? route=focused-window'
     $nativeEntry = Get-C188R11R2LineMatch $SerialText `
         '\[C188R11R2_KEY\] stage=native-managed-entry eid=(?<eid>[A-Fa-f0-9]{8}) call=(?<call>[A-Fa-f0-9]{8}) corr=(?<corr>[A-Fa-f0-9]{8}) selector=00000004 kind=03000000 value=00000061 shift=0 ctrl=0 rc=FFFFFFFF'
     $nativeReturn = Get-C188R11R2LineMatch $SerialText `
@@ -25,8 +25,13 @@ function Get-C188R11R2KeyboardEvidence([string]$SerialText) {
         '\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=(?<seq>\d+) stage=managed-callback-return selector=4 kind=key-char value=97 shift=0 ctrl=0 result=(?<result>-?\d+)'
     $inputState = Get-C188R11R2LineMatch $SerialText `
         '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=input-dispatch-entry selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=-1'
-    $lookup = Get-C188R11R2LineMatch $SerialText `
-        '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=lookup selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=(?<result>-?\d+)'
+    $lookupPattern = '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=lookup selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=(?<result>-?\d+)'
+    $lookup = if ($inputState.Success) {
+        $afterInputEntry = $SerialText.Substring($inputState.Index + $inputState.Length)
+        Get-C188R11R2LineMatch $afterInputEntry $lookupPattern
+    } else {
+        Get-C188R11R2LineMatch $SerialText $lookupPattern
+    }
 
     $eventId = if ($dequeue.Success) { $dequeue.Groups['eid'].Value } else { '' }
     $nativeCall = if ($nativeEntry.Success) { $nativeEntry.Groups['call'].Value } else { '' }

@@ -20,6 +20,52 @@ if (Test-Path -LiteralPath $bootRoot) {
     throw "Refusing to overwrite C188R11R2 guest evidence: $bootRoot"
 }
 $null = New-Item -ItemType Directory -Path $bootRoot
+$candidateRoot = Join-Path $phaseRoot 'candidate\keyboard-dispatch-001'
+$candidateEsp = Join-Path $candidateRoot 'esp'
+$candidateStageManifestPath = Join-Path $candidateRoot 'ramdisk-staging.json'
+foreach ($requiredCandidatePath in @(
+    $candidateEsp,
+    (Join-Path $candidateEsp 'kernel.elf'),
+    (Join-Path $candidateEsp 'ramdisk.img'),
+    (Join-Path $candidateEsp 'EFI\BOOT\BOOTX64.EFI'),
+    $candidateStageManifestPath)) {
+    if (-not (Test-Path -LiteralPath $requiredCandidatePath -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $requiredCandidatePath -PathType Container)) {
+        throw "Validated C188R11R2 candidate input is missing: $requiredCandidatePath"
+    }
+}
+$candidateStageManifest = Get-Content -LiteralPath $candidateStageManifestPath -Raw | ConvertFrom-Json
+if ($candidateStageManifest.result -ne 'PASS') {
+    throw 'Retained C188R11R2 candidate staging manifest is not PASS.'
+}
+$candidateMediaHashes = [ordered]@{}
+foreach ($relativeMediaPath in @('kernel.elf','ramdisk.img','EFI\BOOT\BOOTX64.EFI')) {
+    $candidateMediaHashes[$relativeMediaPath.Replace('\','/')] =
+        (Get-FileHash -LiteralPath (Join-Path $candidateEsp $relativeMediaPath) -Algorithm SHA256).Hash
+}
+if ($candidateMediaHashes['kernel.elf'] -ne $ExpectedKernelSha256.ToUpperInvariant() -or
+    $candidateMediaHashes['ramdisk.img'] -ne $candidateStageManifest.ramdiskSha256.ToUpperInvariant()) {
+    throw 'Retained C188R11R2 candidate hashes do not match the requested kernel or staging manifest.'
+}
+$runEsp = Join-Path $bootRoot 'esp'
+Copy-Item -LiteralPath $candidateEsp -Destination $runEsp -Recurse
+foreach ($relativeMediaPath in @('kernel.elf','ramdisk.img','EFI\BOOT\BOOTX64.EFI')) {
+    $normalizedMediaPath = $relativeMediaPath.Replace('\','/')
+    $copiedHash = (Get-FileHash -LiteralPath (Join-Path $runEsp $relativeMediaPath) -Algorithm SHA256).Hash
+    if ($copiedHash -ne $candidateMediaHashes[$normalizedMediaPath]) {
+        throw "C188R11R2 candidate copy hash mismatch for $normalizedMediaPath."
+    }
+}
+[ordered]@{
+    result='PASS'
+    sourceEsp=$candidateEsp
+    stagingManifest=$candidateStageManifestPath
+    stagingManifestSha256=(Get-FileHash -LiteralPath $candidateStageManifestPath -Algorithm SHA256).Hash
+    expectedKernelSha256=$ExpectedKernelSha256.ToUpperInvariant()
+    sourceMediaHashes=$candidateMediaHashes
+    copiedEsp=$runEsp
+    copiedMediaHashes=$candidateMediaHashes
+} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $bootRoot 'r2-candidate-input-manifest.json') -Encoding utf8
 $runner = Join-Path $PSScriptRoot 'run-c188-qac-guest.ps1'
 $predicateHelpers = Join-Path $PSScriptRoot 'c188r11-runner-predicates.ps1'
 $r2PredicateHelpers = Join-Path $PSScriptRoot 'c188r11r2-runner-predicates.ps1'
@@ -96,7 +142,7 @@ try {
                     $serialText = Get-Content -LiteralPath $serialPath -Raw
                     $ready = Test-C188R11NotesReady $serialText
                     $focusVerified = [regex]::IsMatch($serialText,
-                        '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=\S+ result=focused\r?$')
+                        '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=.+? result=focused\r?$')
                     if ($ready -and $focusVerified) { break }
                 }
             } catch { $ready = $false; $focusVerified = $false }
@@ -126,7 +172,7 @@ try {
     $qmpActions.Add((Invoke-C188R11R2Control @('capture','before-input') 'r2-qmp-capture-before-input'))
     $serialText = Get-Content -LiteralPath $serialPath -Raw
     if (-not [regex]::IsMatch($serialText,
-            '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=\S+ result=focused\r?$')) {
+            '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=.+? result=focused\r?$')) {
         throw 'Notes lost the active-window focus snapshot before input; no keyboard event was sent.'
     }
 
