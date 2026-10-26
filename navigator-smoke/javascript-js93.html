@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS93</title></head>
+<body>
+<h1>Navigator JavaScript JS93</h1>
+<pre id="result">JS93:pending</pre>
+<section>
+  <i id="row-a" class="row"></i><i id="row-b" class="row"></i>
+</section>
+<button id="event-a" type="button">Run JS93 Array forEach event</button>
+<button id="event-b" type="button">Nested JS93 Array forEach event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var values = [10, 20, 30];
+var sum = 0;
+var callbackCount = 0;
+var argumentIdentity = true;
+var indicesAreNumbers = true;
+var expectedIndex = 0;
+var returnValue = values.forEach(function(value, index, array) {
+  sum = sum + value;
+  indicesAreNumbers = indicesAreNumbers && index === expectedIndex;
+  expectedIndex = expectedIndex + 1;
+  callbackCount++;
+  argumentIdentity = argumentIdentity && array === values;
+  return false;
+});
+verify(sum === 60 && callbackCount === 3 && argumentIdentity &&
+  indicesAreNumbers);
+verify(returnValue === undefined);
+
+var sparse = [10, , undefined, 40];
+var sparseCount = 0;
+var sparseIndices = "";
+var explicitUndefined = false;
+sparse.forEach(function(value, index, array) {
+  sparseCount++;
+  sparseIndices = sparseIndices + index;
+  if (index === 2) explicitUndefined = value === undefined && array === sparse;
+});
+var ownKeys = Object.keys(sparse);
+var holeDescriptor = Object.getOwnPropertyDescriptor(sparse, "1");
+var undefinedDescriptor = Object.getOwnPropertyDescriptor(sparse, "2");
+verify(sparseCount === 3 && sparseIndices === "023" &&
+  explicitUndefined && holeDescriptor === undefined &&
+  undefinedDescriptor !== undefined && undefinedDescriptor.value === undefined &&
+  ownKeys.length === 3 && ownKeys[1] === "2");
+
+var typed = [undefined, null, false, 0, ""];
+var typedCount = 0;
+typed.forEach(function(value) { typedCount++; });
+verify(typedCount === 5);
+
+var appended = [10, 20];
+var appendCount = 0;
+appended.forEach(function(value, index, array) {
+  appendCount++;
+  if (index === 0) array[2] = 30;
+});
+verify(appendCount === 2 && appended[2] === 30);
+
+var replaced = [10, 20, 30];
+var replacement = 0;
+replaced.forEach(function(value, index, array) {
+  if (index === 0) array[1] = 99;
+  if (index === 1) replacement = value;
+});
+verify(replacement === 99);
+
+var filled = [10, , 30];
+var fillCount = 0;
+filled.forEach(function(value, index, array) {
+  fillCount++;
+  if (index === 0) array[1] = 20;
+});
+verify(fillCount === 3);
+
+var removed = [1, 2, 3];
+var removedCount = 0;
+removed.forEach(function(value, index, array) {
+  removedCount++;
+  if (index === 0) array.length = 1;
+});
+verify(removedCount === 1);
+
+var regrown = [0, 1, 2, 3];
+var regrownIndices = "";
+regrown.forEach(function(value, index, array) {
+  regrownIndices = regrownIndices + index;
+  if (index === 0) {
+    array.length = 1;
+    array.length = 4;
+    array[3] = 33;
+  }
+});
+verify(regrownIndices === "03");
+
+var falseCount = 0;
+[1, 2, 3].forEach(function(value) {
+  falseCount++;
+  return false;
+});
+verify(falseCount === 3);
+
+var thisContext = { marker: 7 };
+var thisArgOk = false;
+[5].forEach(function(value, index, array) {
+  thisArgOk = this === thisContext && value === 5 && index === 0 &&
+    array.length === 1;
+}, thisContext);
+var omittedThisOk = false;
+var explicitUndefinedThisOk = false;
+[1].forEach(function() { omittedThisOk = this === undefined; });
+[1].forEach(function() {
+  explicitUndefinedThisOk = this === undefined;
+}, undefined);
+verify(thisArgOk && omittedThisOk && explicitUndefinedThisOk);
+
+var nestedTrace = "";
+var nestedOuter = [1, 2];
+var nestedOther = [7, 8];
+nestedOuter.forEach(function(value, index, array) {
+  nestedTrace = nestedTrace + "o" + index;
+  if (index === 0) {
+    array.forEach(function(innerValue, innerIndex) {
+      nestedTrace = nestedTrace + "i" + innerIndex;
+    });
+    nestedOther.forEach(function(otherValue, otherIndex) {
+      nestedTrace = nestedTrace + "d" + otherIndex;
+    });
+  }
+  nestedTrace = nestedTrace + "r" + index;
+});
+verify(nestedTrace === "o0i0i1d0d1r0o1r1");
+
+var rows = document.querySelectorAll(".row");
+var domCalls = 0;
+var arrayFromDom = 0;
+var domFromArray = 0;
+rows.forEach(function(row, index, collection) {
+  domCalls++;
+  [index].forEach(function(value) { arrayFromDom = arrayFromDom + value + 1; });
+});
+[1, 2].forEach(function(value) {
+  rows.forEach(function(row) { domFromArray++; });
+});
+var retainedRow = rows[0];
+var rowIdentity;
+[retainedRow].forEach(function(value) { rowIdentity = value; });
+verify(domCalls === 2 && arrayFromDom === 3 && domFromArray === 4 &&
+  rowIdentity === retainedRow);
+
+var iterator = [4, , 6].keys();
+var iteratorKeys = iterator.next().value === 0 &&
+  iterator.next().value === 1 && iterator.next().value === 2;
+verify(iteratorKeys && ![4, , 6].hasOwnProperty("1"));
+
+var eventA = document.getElementById("event-a");
+var eventB = document.getElementById("event-b");
+var nestedEventOk = false;
+var outerEventOk = false;
+eventB.addEventListener("click", function(event) {
+  var nestedValues = [7, , 9];
+  var nestedIndices = "";
+  var nestedDomCalls = 0;
+  nestedValues.forEach(function(value, index, array) {
+    nestedIndices = nestedIndices + index;
+    if (index === 0) array[1] = 8;
+  });
+  rows.forEach(function(row) { nestedDomCalls++; });
+  nestedEventOk = event.target === eventB && event.currentTarget === eventB &&
+    nestedIndices === "012" && nestedDomCalls === 2;
+});
+eventA.addEventListener("click", function(event) {
+  var outerValues = [3, 4];
+  var outerIndices = "";
+  outerValues.forEach(function(value, index) {
+    outerIndices = outerIndices + index;
+    if (index === 0) eventB.click();
+  });
+  outerEventOk = event.target === eventA && event.currentTarget === eventA &&
+    outerIndices === "01" && nestedEventOk;
+  document.getElementById("result").textContent =
+    "JS93:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+
+var marker = "JS93:assertions=" + assertions + ":failures=" + failures +
+  ":basic=" + (sum === 60 && returnValue === undefined) +
+  ":sparse=" + (sparseCount === 3 && sparseIndices === "023") +
+  ":length=" + (appendCount === 2) +
+  ":mutation=" + (replacement === 99 && fillCount === 3 && removedCount === 1 &&
+    regrownIndices === "03") +
+  ":nested=" + (nestedTrace === "o0i0i1d0d1r0o1r1") +
+  ":dom=" + (domCalls === 2 && arrayFromDom === 3 && domFromArray === 4) +
+  ":events=ready";
+document.getElementById("result").textContent = marker;
+</script>
+</body>
+</html>

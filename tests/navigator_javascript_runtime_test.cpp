@@ -375,9 +375,12 @@ void testObjectArrayLimitsAndReset()
         "objects: object limit", objects);
 
     RuntimeLimits properties;
-    properties.maxPropertiesPerObject = 6;
+    // Array.prototype owns seven supported methods/protocol entries after
+    // JS93, so leave enough room for built-in initialization and exceed the
+    // same configured bound with the ordinary object under test.
+    properties.maxPropertiesPerObject = 7;
     expectError("var a = {}; a.a = 1; a.b = 2; a.c = 3; a.d = 4;"
-        "a.e = 5; a.f = 6; a.g = 7;",
+        "a.e = 5; a.f = 6; a.g = 7; a.h = 8;",
         RuntimeErrorCode::PropertyLimitExceeded, "objects: property limit", properties);
 
     RuntimeLimits totalProperties;

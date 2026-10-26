@@ -1222,25 +1222,29 @@ private:
         const std::vector<Value>& arguments, SourceLocation callSite,
         Value& result, Value receiver = Value::undefined())
     {
-        const RuntimeContext::FunctionRecord* function =
+        const RuntimeContext::FunctionRecord* functionRecord =
             context_.functionAt(functionId);
-        if (function == nullptr) {
+        if (functionRecord == nullptr) {
             fail(RuntimeErrorCode::InvalidFunction, callSite);
             return false;
         }
-        if (function->kind == RuntimeContext::FunctionRecord::Kind::Native) {
-            return invokeNative(*function, arguments, callSite, receiver, result);
+        // Reentrant callbacks may append host/native function records and
+        // reallocate functions_. Keep the active invocation metadata stable
+        // across those calls rather than retaining a vector element pointer.
+        const RuntimeContext::FunctionRecord function = *functionRecord;
+        if (function.kind == RuntimeContext::FunctionRecord::Kind::Native) {
+            return invokeNative(function, arguments, callSite, receiver, result);
         }
-        if (function->kind == RuntimeContext::FunctionRecord::Kind::Host) {
-            return context_.invokeHostMethod(*function, arguments, receiver,
+        if (function.kind == RuntimeContext::FunctionRecord::Kind::Host) {
+            return context_.invokeHostMethod(function, arguments, receiver,
                 callSite, result, *this);
         }
-        if (function->declaration == kInvalidAstNodeId ||
-            function->closureEnvironment == kInvalidEnvironmentId) {
+        if (function.declaration == kInvalidAstNodeId ||
+            function.closureEnvironment == kInvalidEnvironmentId) {
             fail(RuntimeErrorCode::InvalidFunction, callSite);
             return false;
         }
-        const AstNode& declaration = context_.ast_.node(function->declaration);
+        const AstNode& declaration = context_.ast_.node(function.declaration);
         if ((declaration.kind != AstNodeKind::FunctionDeclaration &&
             declaration.kind != AstNodeKind::FunctionExpression) ||
             !validNode(declaration.body, callSite)) {
@@ -1254,7 +1258,7 @@ private:
 
         EnvironmentId callEnvironment = kInvalidEnvironmentId;
         RuntimeErrorCode error = RuntimeErrorCode::None;
-        if (!context_.createEnvironment(function->closureEnvironment,
+        if (!context_.createEnvironment(function.closureEnvironment,
             callEnvironment, error)) {
             fail(error, callSite);
             return false;
@@ -1283,7 +1287,7 @@ private:
 
         for (std::size_t index = 0; index < declaration.childCount; ++index) {
             const AstNodeId parameterId = context_.ast_.childAt(
-                function->declaration, index);
+                function.declaration, index);
             SourceView name;
             if (!identifierName(parameterId, name)) {
                 unwindFrame(callerEnvironment, callerThis, previousFrameCount,
@@ -1389,6 +1393,44 @@ private:
                     : property.symbolKey == WellKnownSymbol::None &&
                         property.key == key.string) return true;
         }
+        return false;
+    }
+
+    bool hasArrayIndex(RuntimeObjectId objectId, std::size_t index,
+        bool& present, SourceLocation location)
+    {
+        present = false;
+        RuntimeObjectId current = objectId;
+        for (std::size_t depth = 0u;
+            depth < context_.limits_.maxPrototypeDepth; ++depth) {
+            if (!context_.consumeStep(location)) return false;
+            const RuntimeContext::RuntimeObject* object =
+                context_.objectAt(current);
+            if (object == nullptr) {
+                fail(RuntimeErrorCode::CannotReadProperty, location);
+                return false;
+            }
+            if (object->array && index < object->arrayLength) {
+                const std::size_t position =
+                    RuntimeContext::findArrayElementPosition(*object, index);
+                if (position < object->elements.size() &&
+                    object->elements[position].index == index) {
+                    present = true;
+                    return true;
+                }
+            }
+            for (const RuntimeContext::RuntimeProperty& property :
+                object->properties) {
+                if (property.symbolKey == WellKnownSymbol::None &&
+                    propertyKeyMatchesArrayIndex(property.key, index)) {
+                    present = true;
+                    return true;
+                }
+            }
+            if (object->prototype == kInvalidRuntimeObjectId) return true;
+            current = object->prototype;
+        }
+        fail(RuntimeErrorCode::PrototypeChainExceeded, location);
         return false;
     }
 
@@ -1980,6 +2022,78 @@ private:
                 result = Value::undefined();
             }
             object->arrayLength = removedIndex;
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::ArrayForEach: {
+            const RuntimeObjectId arrayId = receiver.isObject()
+                ? receiver.objectId() : kInvalidRuntimeObjectId;
+            const RuntimeContext::RuntimeObject* array =
+                context_.objectAt(arrayId);
+            if (array == nullptr || !array->array) {
+                fail(RuntimeErrorCode::InvalidReceiver, callSite);
+                succeeded = false;
+                break;
+            }
+            const Value callback = argumentOrUndefined(0u);
+            if (!callback.isFunction()) {
+                fail(RuntimeErrorCode::NotCallable, callSite);
+                succeeded = false;
+                break;
+            }
+            const RuntimeFunctionId callbackId = callback.functionId();
+            if (context_.functionAt(callbackId) == nullptr) {
+                fail(RuntimeErrorCode::InvalidFunction, callSite);
+                succeeded = false;
+                break;
+            }
+            const std::size_t initialLength = array->arrayLength;
+            if (initialLength > maximumSupportedArrayLength(
+                    context_.limits_)) {
+                fail(RuntimeErrorCode::InvalidAstState, callSite);
+                succeeded = false;
+                break;
+            }
+            const Value thisArgument = argumentOrUndefined(1u);
+            std::vector<Value> callbackArguments;
+            bool callbackArgumentsReady = false;
+            for (std::size_t index = 0u; index < initialLength; ++index) {
+                bool present = false;
+                if (!hasArrayIndex(arrayId, index, present, callSite)) {
+                    succeeded = false;
+                    break;
+                }
+                if (!present) continue;
+
+                Value value = Value::undefined();
+                RuntimeErrorCode lookupError = RuntimeErrorCode::None;
+                if (!context_.readArrayIndex(arrayId, index, value,
+                        lookupError, callSite)) {
+                    fail(lookupError, callSite);
+                    succeeded = false;
+                    break;
+                }
+                if (!callbackArgumentsReady) {
+                    try {
+                        callbackArguments.resize(3u, Value::undefined());
+                    } catch (const std::bad_alloc&) {
+                        fail(RuntimeErrorCode::AllocationFailure, callSite);
+                        succeeded = false;
+                        break;
+                    }
+                    callbackArgumentsReady = true;
+                }
+                callbackArguments[0] = value;
+                callbackArguments[1] = Value::number(
+                    static_cast<double>(index));
+                callbackArguments[2] = receiver;
+                Value ignoredCallbackResult = Value::undefined();
+                if (!invokeFunction(callbackId, callbackArguments, callSite,
+                        ignoredCallbackResult, thisArgument)) {
+                    succeeded = false;
+                    break;
+                }
+            }
+            if (succeeded) result = Value::undefined();
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayIteratorCreate:
@@ -3093,27 +3207,33 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
         if (!createObject(false, noElements, eventObject_, error)) return false;
         if (eventDispatchDepth_ > 0u)
             eventObjectCache_[eventDispatchDepth_ - 1u] = eventObject_;
-        if (!createNativeFunction(NativeFunctionId::EventStopPropagation,
+        // These native operations use the active Event receiver and dispatch
+        // state, so one function record of each kind is sufficient for every
+        // cached nested Event object. Sharing avoids consuming three more
+        // entries from the fixed native-function pool at each nesting depth.
+        const auto discardIncompleteEventObject = [this]() {
+            eventObject_ = kInvalidRuntimeObjectId;
+            if (eventDispatchDepth_ > 0u)
+                eventObjectCache_[eventDispatchDepth_ - 1u] =
+                    kInvalidRuntimeObjectId;
+        };
+        if (eventStopPropagationFunction_ == kInvalidRuntimeFunctionId &&
+            !createNativeFunction(NativeFunctionId::EventStopPropagation,
                 eventStopPropagationFunction_, error)) {
-            eventObject_ = kInvalidRuntimeObjectId;
-            eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
-            eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
+            discardIncompleteEventObject();
             return false;
         }
-        if (!createNativeFunction(NativeFunctionId::EventStopImmediatePropagation,
+        if (eventStopImmediatePropagationFunction_ ==
+                kInvalidRuntimeFunctionId &&
+            !createNativeFunction(NativeFunctionId::EventStopImmediatePropagation,
                 eventStopImmediatePropagationFunction_, error)) {
-            eventObject_ = kInvalidRuntimeObjectId;
-            eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
-            eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
-            eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
+            discardIncompleteEventObject();
             return false;
         }
-        if (!createNativeFunction(NativeFunctionId::EventPreventDefault,
+        if (eventPreventDefaultFunction_ == kInvalidRuntimeFunctionId &&
+            !createNativeFunction(NativeFunctionId::EventPreventDefault,
                 eventPreventDefaultFunction_, error)) {
-            eventObject_ = kInvalidRuntimeObjectId;
-            eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
-            eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
-            eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
+            discardIncompleteEventObject();
             return false;
         }
         if (!writeProperty(eventObject_, "type", typeValue, error, true) ||
@@ -3138,16 +3258,15 @@ bool RuntimeContext::createOrUpdateEventObject(SourceView type,
                 Value::boolean(false), error, true) ||
             !writeProperty(eventObject_, "eventPhase",
                 Value::number(static_cast<double>(eventPhase_)), error, true)) {
-            eventObject_ = kInvalidRuntimeObjectId;
-            eventStopPropagationFunction_ = kInvalidRuntimeFunctionId;
-            eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
-            eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
+            discardIncompleteEventObject();
             return false;
         }
         if (hasKeyboardProperties &&
             (!writeProperty(eventObject_, "key", keyValue, error, true) ||
-                !writeProperty(eventObject_, "code", codeValue, error, true)))
+                !writeProperty(eventObject_, "code", codeValue, error, true))) {
+            discardIncompleteEventObject();
             return false;
+        }
     } else if (!updateExistingProperty(eventObject_, "type", typeValue, error) ||
         !updateExistingProperty(eventObject_, "target",
             Value::hostObject(targetObject), error) ||
@@ -3909,7 +4028,9 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
             objectKeysFunction_, error) ||
         !createNativeFunction(
             NativeFunctionId::ObjectGetOwnPropertyDescriptor,
-            objectGetOwnPropertyDescriptorFunction_, error)) return false;
+            objectGetOwnPropertyDescriptorFunction_, error) ||
+        !install(arrayPrototype_, "forEach", NativeFunctionId::ArrayForEach,
+            error)) return false;
     const char eventName[] = "Event";
     // Event constants are optional only when an explicitly tiny caller limit
     // cannot fit the bounded namespace. This keeps the older runtime limit

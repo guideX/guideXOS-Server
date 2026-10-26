@@ -379,6 +379,7 @@ private:
         ObjectGetOwnPropertyDescriptor,
         ArrayPush,
         ArrayPop,
+        ArrayForEach,
         ArrayIteratorCreate,
         ArrayIteratorCreateKeys,
         ArrayIteratorCreateEntries,

@@ -12306,3 +12306,162 @@ Recommended JS93 direction: qualify bounded `Array.prototype.forEach()`
 callback traversal with explicit hole, mutation, callback receiver, and
 exception behavior, while leaving these cursor modes and their current-length
 policy unchanged.
+
+## JS93: bounded Array `forEach()` callback traversal
+
+JS93 adds a genuine native `Array.prototype.forEach` method. It reuses the
+runtime's existing `Evaluator::invokeFunction()` dispatch path, which supports
+user JavaScript functions, native functions, and the established host callback
+path. The Array method is installed on `Array.prototype` with the same
+writable-only builtin attributes as the adjacent Array methods. It validates
+the callback before traversal, including for an empty Array, and reports
+`NotCallable` for missing or unsupported values. Only genuine runtime Arrays
+are accepted as receivers; an ordinary object inheriting `Array.prototype`
+and a direct call with an undefined receiver report `InvalidReceiver`.
+Generic array-like borrowing and `.call`/`.apply` are outside this phase.
+
+Each invocation captures the source Array's logical length once and visits
+indices below that bound. At every index it performs a bounded
+prototype-aware `HasProperty` check and then reads the current value through
+the existing `readArrayIndex()` lookup. This distinction skips a true hole,
+visits an own property containing `undefined`, and visits supported inherited
+indexed properties without creating an own slot. The index is passed as a
+Number, followed by the original Array value. Values and object references are
+shallowly preserved. Successful completion returns `undefined`; callback
+returns are ignored.
+
+The traversal does not snapshot values. Replacing a later value or filling a
+hole before its turn affects that visit. Removing an unvisited own property
+skips it unless a prototype supplies an indexed value. Shrinking the Array
+does not change the captured upper bound; a subsequent regrowth is observed
+through current property presence. Appends at or beyond the initial length
+are not visited. An already visited index is not revisited. Nested traversals
+use invocation-local bounds, indices, callback references, receiver values,
+and a reusable fixed-size three-Value callback argument vector.
+
+`thisArg` is supported by passing it directly as the callback receiver.
+Explicit ordinary objects preserve identity. Omitted and explicit
+`undefined` remain `undefined` because this runtime does not apply sloppy-mode
+receiver coercion. No strict/sloppy mode rules were added. Runtime callback
+errors stop traversal and propagate unchanged; for example, a null property
+read propagates `CannotReadProperty`. Mutations from callbacks that completed
+before the error remain in place, and active evaluator frames are restored.
+
+The prototype-chain presence check is bounded by `maxPrototypeDepth`; it
+checks sparse Array records and ordinary indexed properties without turning
+holes into records. The implementation does not call `values()`, `entries()`,
+`keys()`, or `for...of`, and it allocates no Array iterator cursors or iterator
+result objects. Array position, occupancy, key enumeration, and descriptor
+state are unchanged when a hole is skipped.
+
+Native and hosted qualification covers dense and sparse traversal, explicit
+`undefined`, `null` and falsy values, inherited indexed values, numeric indices,
+callback and Array identity, ignored callback returns, empty-Array callback
+validation, mutation of later values, hole filling, removal, shrink/regrowth,
+append beyond the captured length, same-Array and different-Array nesting,
+callback errors, retained user mutations, and deterministic callback
+environment exhaustion. It also checks Array traversal from a DOM collection
+callback and DOM collection iteration from an Array callback, plus nested
+Events that preserve outer Event metadata. Existing Event method function
+records are reused across the runtime's cached nested Event objects; this
+keeps JS9's depth-16 behavior within the unchanged 64-native-function limit.
+Reentrant host function calls copy the active function record before dispatch,
+so function-table growth cannot invalidate invocation metadata. No object
+reclamation, slot reuse, or global pool increase was introduced.
+
+The qualified dense maximum is 1,024 positions and 1,024 callback invocations.
+At that workload, observed pool high-water values were 5 objects, 18
+properties, 1,024 occupied Array slots, and 1,025 environments; host handles
+and runtime strings remained at zero. An all-hole Array of length 1,024
+completes with no callback calls or occupied slots. An Array length of 1,025
+fails at the existing `ArrayLimitExceeded` boundary. With a deliberately
+reduced two-environment limit, one callback completes and the next callback
+fails with `EnvironmentLimitExceeded`; active frames return to zero.
+
+The default runtime limits remain 1,024 objects, 256 properties per object,
+4,096 total properties, 1,024 Array positions, 4,096 occupied Array records,
+4,096 runtime strings, 2,048 environments, 2,048 host handles, 128 DOM
+iterator records, and 64 native function values. Layout remains
+`RuntimeObject` 88 B, `RuntimeProperty` 80 B, `RuntimeArrayElement` 48 B,
+and `Value` 40 B. The test expectation for the builtin property baseline is
+one higher because Array.prototype now exposes `forEach`.
+
+Five-sample hosted-native medians, including setup, parsing, and evaluation,
+were: dense traversal versus `for...of` at lengths 0 (8/8 us), 16 (20/23 us),
+64 (67/79 us), 128 (142/169 us), 256 (260/330 us), and 512 (561/649 us).
+At length 1,024, `forEach` completed in 1,287 us; the comparison `for...of`
+workload reached its existing `ObjectLimitExceeded` boundary. Other medians
+were 15 us for two-of-64 sparse traversal, 49 us for 1,024 holes, 65 us for 64
+explicit-undefined values, 93 us for later-value mutation, 182 us for nested
+16-by-16 traversal, 9 us for 31 inherited indexed visits, and 40 us for
+nested Event dispatch only. The JS93 strict native suite passed 50/50 checks.
+Hosted static frame measurements were 560 B for `invokeFunction`, 800 B for
+`invokeNative`, 176 B for `readArrayIndex`, and 16 B for the host collection
+callback traversal frame; `hasArrayIndex` was inlined. These hosted compiler
+measurements do not establish bare-metal stack safety.
+
+The hosted fixture `navigator-smoke/javascript-js93.html` checks 14
+assertions before Event dispatch and records nested Event results after the
+click dispatch. It preserves the existing inline-script integrity guard. The
+server smoke adds three checks for fixture execution, semantic marker coverage,
+and nested Event metadata.
+
+### JS93 final qualification record
+
+The starting revision was `92c4528ca67e37b1e33679da2f89ba84f293bcbd` on
+`NAVIGATOR_JAVASCRIPT_SUPPORT`, two commits ahead of upstream and none behind.
+The duplicate-work gate found no prior JS93-or-later implementation or
+qualification. The `.phase` marker is absent. No branch switch, fetch, push,
+QEMU, or QAC operation was performed.
+
+Strict C++17 qualification passed for JS93: 50/50 checks. The complete
+PowerShell JavaScript matrix passed 95/95 lanes and 16,974/16,974 reported
+assertions across 54 assertion-bearing lanes. Focused JS76–JS92 regression
+coverage passed 3,503/3,503 checks. JS84 passed 93/93 checks, its separate
+no-lifetime-diagnostics control passed 68/68, and the instrumentation
+comparison completed. The JS9 reentrancy lane passed within the full matrix.
+
+The hosted JS93 page reported 14/14 fixture assertions, and all three added
+server checks passed. The full hosted aggregate returned exit code 1 with
+714/721 checks passing. Its only seven failures are the established CSS phase
+3C, phase 3G, phase 6A, three phase 6B checks, and phase 6C; every hosted
+JavaScript check passed and no new CSS failure appeared.
+
+The fresh production build succeeded with exit code 0 from starting revision
+`92c4528ca67e37b1e33679da2f89ba84f293bcbd` plus the production source changes.
+The changed-source manifest SHA-256 was
+`60F08EFC8D480B4C22204C134510688966B9EBBE1684006AF44E37006E453507`; it
+covered `runtime.cpp`, `runtime.h`, and `server.cpp`. The build produced
+`D:\dev\guideXOSServer_NAVIGATOR_JS_SUPPORT\guideXOSServer.exe`, 8,725,460
+bytes, SHA-256
+`E55006F6501ACDAB2997699AF9729BE4F2526FD2610FB6EB5F988871A4B99C8D`.
+Hosted process 16516 ran that same path and hash. After hosted qualification,
+the repository executable was restored to 8,398,274 bytes with SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+
+The initial ignored manifest had 1,367 files and 90,843,932 bytes. The final
+manifest has the same totals with zero changed, missing, or newly ignored
+files. The protected generated fixtures matched all 42 preflight files, and
+the downloads fixture state matched its baseline. The recursive manifest grew
+from 9,612 files and 1,108,460,495 bytes to 9,615 files and 1,108,521,036
+bytes: seven expected modified source/test/documentation paths, the three new
+JS93 fixture/runner/test paths, and no missing baseline paths.
+
+The full matrix log is
+`C:\Users\guideX\AppData\Local\Temp\guidex-js93-evidence\run-20261026-072015-f1463d1144d64749a66b39e299b7125d\javascript-matrix-final.ps1.log`;
+the hosted smoke log is in the same directory's `hosted` folder. All
+qualification logs, build identities, and manifests are outside the
+repository under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js93-evidence\run-20261026-072015-f1463d1144d64749a66b39e299b7125d`.
+
+No garbage collection, object reclamation, slot reuse, or pool-capacity
+increase was introduced. The qualified boundary is a fixed initial length of
+at most 1,024 positions; a 1,025-position Array reports the existing
+`ArrayLimitExceeded` error. The hosted timing and stack numbers above are
+measurements only and do not establish bare-metal stack safety or general
+ECMAScript Array conformance.
+
+Recommended JS94 direction: qualify bounded `Array.prototype.map()` as a
+separate phase, preserving holes and the initial-length boundary while
+measuring its result-Array capacity failures. Do not infer other callback
+methods from JS93.

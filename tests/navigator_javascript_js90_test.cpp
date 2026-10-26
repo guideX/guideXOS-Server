@@ -1032,7 +1032,7 @@ void testMaximumOrdinaryObjectKeys()
     expect(result.succeeded() &&
         NavigatorScriptRuntimeTestAccess::arrayStringsEqual(runtime,
             objectId(runtime, "keys"), expected) &&
-        runtime.propertyCount() == 273u &&
+        runtime.propertyCount() == 274u &&
         runtime.arrayElementCount() == expected.size(),
         "maximum 256-property ordinary object enumerates in creation order");
     std::cout << "JS90 maximum ordinary object: sourceKeys=" << expected.size()
