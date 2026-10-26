@@ -77,9 +77,33 @@ Set-Content -LiteralPath (Join-Path $root 'runtime-lifecycle.log') -Value $runti
 if (-not [regex]::IsMatch($runtimeLifecycle,'(?m)^C188R11-RUNTIME-LIFECYCLE cases=7 result=PASS\b')) {
     throw 'C188R11 runtime lifecycle qualification failed.'
 }
+$qacOwnership = (& (Join-Path $PSScriptRoot 'test-c188r11r4-qac-ownership-predicates.ps1') 2>&1 | Out-String)
+Set-Content -LiteralPath (Join-Path $root 'qac-ownership-predicates.log') -Value $qacOwnership -Encoding utf8
+if (-not [regex]::IsMatch($qacOwnership,'(?m)^C188R11R4-QAC-OWNERSHIP cases=9 result=PASS\b')) {
+    throw 'C188R11R4 QAC ownership predicate qualification failed.'
+}
+$qacStreamCapture = (& (Join-Path $PSScriptRoot 'test-c188r11r4-qac-stream-capture.ps1') 2>&1 | Out-String)
+Set-Content -LiteralPath (Join-Path $root 'qac-stream-capture.log') -Value $qacStreamCapture -Encoding utf8
+if (-not [regex]::IsMatch($qacStreamCapture,'(?m)^C188R11R4-QAC-STREAM-CAPTURE cases=2 result=PASS\b')) {
+    throw 'C188R11R4 live QAC stream capture qualification failed.'
+}
+$keyboardContracts = (& (Join-Path $PSScriptRoot 'test-c188r11r2-keyboard-contracts.ps1') 2>&1 | Out-String)
+Set-Content -LiteralPath (Join-Path $root 'keyboard-contracts.log') -Value $keyboardContracts -Encoding utf8
+if (-not [regex]::IsMatch($keyboardContracts,'(?m)^C188R11R2-KEYBOARD-CONTRACTS cases=\d+ result=PASS\b')) {
+    throw 'C188R11R2 keyboard contract qualification failed.'
+}
+$keyboardRunnerPredicates = (& (Join-Path $PSScriptRoot 'test-c188r11r2-runner-predicates.ps1') 2>&1 | Out-String)
+Set-Content -LiteralPath (Join-Path $root 'keyboard-runner-predicates.log') -Value $keyboardRunnerPredicates -Encoding utf8
+if (-not [regex]::IsMatch($keyboardRunnerPredicates,'(?m)^C188R11R2-RUNNER-PREDICATES cases=\d+ result=PASS\b')) {
+    throw 'C188R11R2 keyboard runner predicate qualification failed.'
+}
 $manifest = [ordered]@{
     result='PASS';outputRoot=$root;r9Cases=14;priorR10Cases=14;r11Cases=15
     runnerPredicateCases=30;outputBoundCases=6;runtimeLifecycleCases=7
+    qacOwnershipPredicateCases=9
+    qacStreamCaptureCases=2
+    keyboardContractCases=[int]([regex]::Match($keyboardContracts,'cases=(\d+)').Groups[1].Value)
+    keyboardRunnerPredicateCases=[int]([regex]::Match($keyboardRunnerPredicates,'cases=(\d+)').Groups[1].Value)
     restoreExitCode=$restoreCode;runExitCode=$runCode
     independentBuildsSha256=(Get-FileHash -LiteralPath (Join-Path $root 'independent-builds.log') -Algorithm SHA256).Hash
     r9QualificationSha256=(Get-FileHash -LiteralPath (Join-Path $root 'c188r9-registry.log') -Algorithm SHA256).Hash
@@ -87,6 +111,10 @@ $manifest = [ordered]@{
     qualificationSha256=(Get-FileHash -LiteralPath $log -Algorithm SHA256).Hash
     runnerPredicatesSha256=(Get-FileHash -LiteralPath (Join-Path $root 'runner-predicates.log') -Algorithm SHA256).Hash
     runtimeLifecycleSha256=(Get-FileHash -LiteralPath (Join-Path $root 'runtime-lifecycle.log') -Algorithm SHA256).Hash
+    qacOwnershipPredicatesSha256=(Get-FileHash -LiteralPath (Join-Path $root 'qac-ownership-predicates.log') -Algorithm SHA256).Hash
+    qacStreamCaptureSha256=(Get-FileHash -LiteralPath (Join-Path $root 'qac-stream-capture.log') -Algorithm SHA256).Hash
+    keyboardContractsSha256=(Get-FileHash -LiteralPath (Join-Path $root 'keyboard-contracts.log') -Algorithm SHA256).Hash
+    keyboardRunnerPredicatesSha256=(Get-FileHash -LiteralPath (Join-Path $root 'keyboard-runner-predicates.log') -Algorithm SHA256).Hash
 }
 $manifestPath = Join-Path $root 'manifest.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8

@@ -22,6 +22,7 @@ if (Test-Path -LiteralPath $bootRoot) {
     throw "Refusing to overwrite C188R11R2 guest evidence: $bootRoot"
 }
 $null = New-Item -ItemType Directory -Path $bootRoot
+$runIdentityId = [guid]::NewGuid().ToString('N')
 $candidateRoot = if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     Join-Path $phaseRoot 'candidate\keyboard-dispatch-001'
 } else {
@@ -81,8 +82,14 @@ foreach ($relativeMediaPath in @('kernel.elf','ramdisk.img','EFI\BOOT\BOOTX64.EF
 $runner = Join-Path $PSScriptRoot 'run-c188-qac-guest.ps1'
 $predicateHelpers = Join-Path $PSScriptRoot 'c188r11-runner-predicates.ps1'
 $r2PredicateHelpers = Join-Path $PSScriptRoot 'c188r11r2-runner-predicates.ps1'
+$qacOwnershipHelpers = Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1'
 . $predicateHelpers
 . $r2PredicateHelpers
+. $qacOwnershipHelpers
+if ($null -eq ('GuideXos.C188.LiveProcessCapture' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'C188LiveProcessCapture.cs')
+}
+$qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $control = Join-Path $PSScriptRoot 'c188-qmp-control.py'
 $python = Get-Command python.exe -ErrorAction Stop | Select-Object -First 1
 $pwsh = Get-Command pwsh.exe -ErrorAction Stop | Select-Object -First 1
@@ -96,7 +103,9 @@ $gdbStdoutPath = Join-Path $bootRoot 'r4-gdb.stdout.log'
 $gdbStderrPath = Join-Path $bootRoot 'r4-gdb.stderr.log'
 $qmpActions = [System.Collections.Generic.List[object]]::new()
 foreach ($path in @($controllerStdout,$controllerStderr,$controllerManifest,
-    $gdbScriptPath,$gdbStdoutPath,$gdbStderrPath)) {
+    $gdbScriptPath,$gdbStdoutPath,$gdbStderrPath,
+    (Join-Path $bootRoot 'qac-input.status.txt'),(Join-Path $bootRoot 'qac-input.list.txt'),
+    (Join-Path $bootRoot 'qac-input.inspect.json'),(Join-Path $bootRoot 'qac-input-ownership.json'))) {
     if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite C188R11R2 evidence: $path" }
 }
 
@@ -122,7 +131,8 @@ $runnerArguments = @(
     '-Scenario','managed-state-provenance',
     '-MaxRuntimeSeconds',[string]$MaxRuntimeSeconds,
     '-BootTimeoutSeconds','180',
-    '-AdmissionTimeoutSeconds','60')
+    '-AdmissionTimeoutSeconds','60',
+    '-RunIdentityId',$runIdentityId)
 if ($MemoryWatchpoints) { $runnerArguments += '-EnableGdbStub' }
 foreach ($argument in $runnerArguments) {
     [void]$psi.ArgumentList.Add([string]$argument)
@@ -298,16 +308,69 @@ try {
         -not (Test-Path -LiteralPath $duringStatusPath -PathType Leaf)) {
         throw 'QAC did not publish the during-run census before the input gate; no key event was sent.'
     }
-    $duringList = Get-Content -LiteralPath $duringListPath -Raw
-    $duringStatus = Get-Content -LiteralPath $duringStatusPath -Raw
     $active = Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json
-    $duringListOwnsGuest = $duringList -match 'guideXOSServer\s+\|\s+acceptance\s+\|\s+Running' -and
-        $duringList -match ('\(PID\s+' + [regex]::Escape([string]$active.pid) + '\)')
-    $duringStatusOwnsGuest = [bool]$active.qacAdmissionConfirmed -and
-        $duringStatus -match 'QEMU processes:\s+1 \(0 foreign\)' -and
-        $duringStatus -match 'Managed sessions:\s+1; queued:\s+0; blocked:\s+0'
-    if (-not $duringListOwnsGuest -and -not $duringStatusOwnsGuest) {
-        throw 'QAC did not show the owned acceptance reservation for the active guest; no key event was sent.'
+    if ($null -eq $active.qacOwnershipRunIdentity) {
+        throw 'QAC run omitted its inspected ownership identity; no keyboard event was sent.'
+    }
+    if (-not [bool]$active.qacAdmissionConfirmed -or
+        [string]$active.runIdentityId -ne $runIdentityId -or
+        [string]$active.bootEvidencePath -ne $bootRoot -or
+        [int]$active.pid -ne [int]$active.qacOwnerProcessId -or
+        [int]$active.qacOwnershipRunIdentity.runnerProcessId -ne $qacRunner.Id -or
+        [int]$active.qacQemuChildPid -le 0) {
+        throw 'QAC run identity did not match the current isolated guest run; no keyboard event was sent.'
+    }
+
+    $inputQacStatus = (& $qacCli status 2>&1 | Out-String)
+    $inputQacStatusExitCode = $LASTEXITCODE
+    $inputQacList = (& $qacCli list 2>&1 | Out-String)
+    $inputQacListExitCode = $LASTEXITCODE
+    $inputQacInspect = (& $qacCli inspect ([string]$active.qacReservationId) 2>&1 | Out-String)
+    $inputQacInspectExitCode = $LASTEXITCODE
+    if ($inputQacStatusExitCode -ne 0 -or $inputQacListExitCode -ne 0 -or $inputQacInspectExitCode -ne 0) {
+        throw 'QAC could not provide a fresh status/list/inspect ownership snapshot; no keyboard event was sent.'
+    }
+    try { $inputQacInspection = $inputQacInspect | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw 'QAC input-gate inspection was not valid JSON; no keyboard event was sent.' }
+
+    $inputRunIdentity = [ordered]@{}
+    foreach ($property in $active.qacOwnershipRunIdentity.PSObject.Properties) {
+        $inputRunIdentity[$property.Name] = $property.Value
+    }
+    $inputRunIdentity.runIdentityId = [string]$active.runIdentityId
+    $inputRunIdentity.bootEvidencePath = [string]$active.bootEvidencePath
+    $inputRunIdentity.expectedBootEvidencePath = $bootRoot
+    try {
+        $ownerProcess = Get-Process -Id ([int]$active.qacOwnerProcessId) -ErrorAction Stop
+        $childProcess = Get-Process -Id ([int]$active.qacQemuChildPid) -ErrorAction Stop
+        $runnerProcess = Get-Process -Id ([int]$inputRunIdentity.runnerProcessId) -ErrorAction Stop
+        $ownerCim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($active.qacOwnerProcessId)" -ErrorAction Stop
+        $childCim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($active.qacQemuChildPid)" -ErrorAction Stop
+        $inputRunIdentity.ownerProcessAlive = ($null -ne $ownerCim)
+        $inputRunIdentity.ownerProcessStartTimeUtc = $ownerProcess.StartTime.ToUniversalTime().ToString('O')
+        $inputRunIdentity.ownerParentProcessId = if ($ownerCim) { [int]$ownerCim.ParentProcessId } else { 0 }
+        $inputRunIdentity.runnerProcessAlive = $true
+        $inputRunIdentity.expectedRunnerProcessStartTimeUtc = $runnerProcess.StartTime.ToUniversalTime().ToString('O')
+        $inputRunIdentity.childProcessAlive = ($null -ne $childCim)
+        $inputRunIdentity.childProcessStartTimeUtc = $childProcess.StartTime.ToUniversalTime().ToString('O')
+        $inputRunIdentity.childExecutableIdentity = if ($childCim) { [string]$childCim.ExecutablePath } else { '' }
+        $inputRunIdentity.childParentProcessId = if ($childCim) { [int]$childCim.ParentProcessId } else { 0 }
+    } catch {
+        $inputRunIdentity.ownerProcessAlive = $false
+        $inputRunIdentity.runnerProcessAlive = $false
+        $inputRunIdentity.childProcessAlive = $false
+    }
+    $inputOwnership = Get-C188R11R4QacOwnershipEvidence $inputQacStatus $inputQacList $inputQacInspection $inputRunIdentity
+    $qacInputStatusPath = Join-Path $bootRoot 'qac-input.status.txt'
+    $qacInputListPath = Join-Path $bootRoot 'qac-input.list.txt'
+    $qacInputInspectPath = Join-Path $bootRoot 'qac-input.inspect.json'
+    $qacInputOwnershipPath = Join-Path $bootRoot 'qac-input-ownership.json'
+    Set-Content -LiteralPath $qacInputStatusPath -Value $inputQacStatus -Encoding utf8
+    Set-Content -LiteralPath $qacInputListPath -Value $inputQacList -Encoding utf8
+    $inputQacInspection | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $qacInputInspectPath -Encoding utf8
+    $inputOwnership | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $qacInputOwnershipPath -Encoding utf8
+    if (-not [bool]$inputOwnership.accepted) {
+        throw "QAC ownership proof failed closed at input gate: $($inputOwnership.reasons -join ', '); no key event was sent."
     }
 
     $qmpActions.Add((Invoke-C188R11R2Control @('capture','before-input') 'r2-qmp-capture-before-input'))
@@ -357,7 +420,7 @@ $serialText = if (Test-Path -LiteralPath $serialPath) {
 } else { '' }
 $qacStderrPath = Join-Path $bootRoot 'qac.stderr.log'
 $qacStderr = if (Test-Path -LiteralPath $qacStderrPath) {
-    Get-Content -LiteralPath $qacStderrPath -Raw
+    [GuideXos.C188.LiveProcessCapture]::ReadAllTextShared($qacStderrPath)
 } else { '' }
 $reservation = [regex]::Match($qacStderr, 'QAC reservation requested: id=([0-9a-f]+)')
 $released = [regex]::Match($qacStderr, 'QAC reservation released: id=([0-9a-f]+)')
@@ -428,6 +491,7 @@ $rootCauseFixedAndQualified = $trace.traceComplete -and
     $trace.lookupResult -eq 0 -and $trace.notesCallbackEntry -and
     $memoryStorageStable -and $memoryStorageOwnedByPersistentHeap -and
     $baseManifest -and $baseManifest.result -eq 'PASS' -and
+    [bool]$inputOwnership.accepted -and [bool]$baseManifest.qacOwnershipProofAccepted -and
     $releaseVerified -and $ownedQemuExited -and $runnerExitCode -eq 0
 $outcome = if ($rootCauseFixedAndQualified) {
     'ROOT_CAUSE_FIXED_AND_QUALIFIED'
@@ -445,8 +509,11 @@ $manifest = [ordered]@{
     shiftExpectedManagedCallback=$false
     focusVerifiedBeforeInput=$focusVerified
     qacPreAdmissionExclusive=($beforeStatus -match 'QEMU processes:\s+0 \(0 foreign\)' -and $beforeList -match 'Reservations:\s+0')
-    qacOwnedAcceptanceRunning=[bool]($duringListOwnsGuest -or $duringStatusOwnsGuest)
-    qacReservationId=$(if ($reservation.Success) { $reservation.Groups[1].Value } else { '' })
+    runIdentityId=$runIdentityId
+    qacOwnedAcceptanceRunning=[bool]$inputOwnership.accepted
+    qacOwnershipEvidence=$inputOwnership
+    qacOwnershipEvidencePath=(Join-Path $bootRoot 'qac-input-ownership.json')
+    qacReservationId=[string]$inputOwnership.reservationId
     qemuPid=$(if ($qemuChild.Success) { $qemuChild.Groups[2].Value } else { '' })
     qacReleaseVerified=[bool]$releaseVerified
     ownedQemuExited=[bool]$ownedQemuExited

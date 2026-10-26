@@ -141,11 +141,16 @@ Assert-Contract 'memory watchpoints cover only the selected fields and stop afte
     $r2Runner.Contains('watch *`$c188_len_addr') -and
     $r2Runner.Contains('watch *`$c188_slot_addr') -and
     $r2Runner.Contains('if `$c188_hits >= 16'))
-Assert-Contract 'input gate waits for QAC census files and accepts only an exclusive owned-session status' (
+Assert-Contract 'input gate requires a fresh inspected reservation and correlated runner/child process identities' (
     $r2Runner.Contains('$duringCensusDeadline') -and
-    $r2Runner.Contains('QEMU processes:\s+1 \(0 foreign\)') -and
-    $r2Runner.Contains('Managed sessions:\s+1; queued:\s+0; blocked:\s+0') -and
-    $qacRunner.Contains('$qacDuringStatusConfirmed = $admitted -and') -and
-    $qacRunner.Contains('qacAdmissionConfirmed=[bool]$admitted'))
+    $r2Runner.Contains('inspect ([string]$active.qacReservationId)') -and
+    $r2Runner.Contains('Get-C188R11R4QacOwnershipEvidence') -and
+    $r2Runner.Contains('$inputOwnership.accepted') -and
+    $r2Runner.Contains("'GuideXos.C188.LiveProcessCapture' -as [type]") -and
+    $r2Runner.Contains('ReadAllTextShared($qacStderrPath)') -and
+    $qacRunner.Contains('Get-C188R11R4QacOwnershipEvidence') -and
+    $qacRunner.Contains('QEMU processes:\s+1 \(0 foreign\)') -and
+    $qacRunner.Contains('Managed sessions:\s+1; queued:\s+0; blocked:\s+0') -and
+    $qacRunner.Contains('qacOwnershipRunIdentity=$qacOwnershipRunIdentity'))
 
 Write-Output "C188R11R2-KEYBOARD-CONTRACTS cases=$script:caseCount result=PASS"

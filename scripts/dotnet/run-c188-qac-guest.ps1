@@ -6,11 +6,13 @@ param(
     [Parameter()][switch]$EnableGdbStub,
     [Parameter()][ValidateRange(60,3600)][int]$MaxRuntimeSeconds = 1200,
     [Parameter()][ValidateRange(30,300)][int]$BootTimeoutSeconds = 180,
-    [Parameter()][ValidateRange(30,1800)][int]$AdmissionTimeoutSeconds = 1750
+    [Parameter()][ValidateRange(30,1800)][int]$AdmissionTimeoutSeconds = 1750,
+    [Parameter()][ValidatePattern('^[A-Fa-f0-9]{32}$')][string]$RunIdentityId = ([guid]::NewGuid().ToString('N'))
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -ne 'Core') { throw 'C188 QAC guest runner requires PowerShell Core.' }
+if ($RunIdentityId -notmatch '^[A-Fa-f0-9]{32}$') { throw 'RunIdentityId must be a fresh 32-digit hexadecimal run token.' }
 $isProductionScenario = $Scenario.StartsWith('production-',[System.StringComparison]::Ordinal)
 if ([bool]$ProductionCompatibility -ne $isProductionScenario) {
     throw 'Use -ProductionCompatibility only with a production-* scenario, and use it for every production compatibility boot.'
@@ -47,7 +49,7 @@ Import-Module (Join-Path $PSScriptRoot 'c181-qmp.psm1') -Force -ErrorAction Stop
 foreach ($required in @($esp, (Join-Path $esp 'kernel.elf'), (Join-Path $esp 'ramdisk.img'), $qacCli, $qemu, $ovmf)) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Required C188 guest input is missing: $required" }
 }
-foreach ($newEvidence in @($serial,$qmpLog,(Join-Path $bootRoot 'active.json'),(Join-Path $bootRoot 'acceptance-manifest.json'))) {
+foreach ($newEvidence in @($serial,$qmpLog,$qacStdoutPath,$qacStderrPath,(Join-Path $bootRoot 'active.json'),(Join-Path $bootRoot 'acceptance-manifest.json'))) {
     if (Test-Path -LiteralPath $newEvidence) { throw "Refusing to overwrite guest evidence: $newEvidence" }
 }
 New-Item -ItemType Directory -Force -Path $bootRoot | Out-Null
@@ -79,6 +81,7 @@ $isC188R11Boot = $Scenario -eq 'managed-state-provenance' -and
         [System.StringComparison]::OrdinalIgnoreCase)
 if ($isC188R11Boot) {
     . (Join-Path $PSScriptRoot 'c188r11-runner-predicates.ps1')
+    . (Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1')
 }
 if ($EnableGdbStub -and -not $isC188R11Boot) {
     throw 'The GDB stub is restricted to the QAC-owned C188R11 diagnostic scenario.'
@@ -150,20 +153,16 @@ if ($EnableGdbStub) {
 $argsEvidence = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemu) + $qemuArgs
 $reservationRequestUtc = [DateTime]::UtcNow
 $argsEvidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'qac-run-arguments.json') -Encoding utf8
-[ordered]@{qmpPort=$qmpPort;gdbPort=$gdbPort;screenWidth=$null;screenHeight=$null;esp=$esp;serial=$serial} |
-    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'active.json') -Encoding utf8
+$initialActive = [ordered]@{qmpPort=$qmpPort;gdbPort=$gdbPort;screenWidth=$null;screenHeight=$null;esp=$esp;serial=$serial;runIdentityId=$RunIdentityId;bootEvidencePath=$bootRoot}
+$initialActive | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'active.json') -Encoding utf8
 
-$psi = [System.Diagnostics.ProcessStartInfo]::new()
-$psi.FileName = $qacCli
-$psi.WorkingDirectory = $repo
-$psi.UseShellExecute = $false
-$psi.CreateNoWindow = $true
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
-foreach ($argument in $argsEvidence) { [void]$psi.ArgumentList.Add([string]$argument) }
-$qacProcess = [System.Diagnostics.Process]::Start($psi)
-$stdoutTask = $qacProcess.StandardOutput.ReadToEndAsync()
-$stderrTask = $qacProcess.StandardError.ReadToEndAsync()
+if ($null -eq ('GuideXos.C188.LiveProcessCapture' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'C188LiveProcessCapture.cs')
+}
+$qacCapture = [GuideXos.C188.LiveProcessCapture]::new(
+    $qacCli,$repo,[string[]]$argsEvidence,$qacStdoutPath,$qacStderrPath)
+$qacProcess = $qacCapture.NativeProcess
+$qacExitCode = $null
 $qmpLogFile = [System.IO.File]::Open($qmpLog,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::ReadWrite)
 $qmpWriter = [System.IO.StreamWriter]::new($qmpLogFile,[System.Text.Encoding]::UTF8)
 $qmpWriter.AutoFlush = $true
@@ -280,20 +279,117 @@ try {
     $width = [Convert]::ToInt32($widthMatch.Groups[1].Value,16)
     $height = [Convert]::ToInt32($heightMatch.Groups[1].Value,16)
     $allProgramsCount = if ($ProductionCompatibility) { 21 } else { 22 }
-    $active = [ordered]@{qmpPort=$qmpPort;gdbPort=$gdbPort;screenWidth=$width;screenHeight=$height;allProgramsCount=$allProgramsCount;productionCompatibility=[bool]$ProductionCompatibility;esp=$esp;serial=$serial;pid=$qacProcess.Id;qacAdmissionConfirmed=[bool]$admitted;preInputManagedSnapshotAvailable=$false;preInputManagedSnapshotReason='no existing read-only managed snapshot request interface'}
-    $active | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'active.json') -Encoding utf8
+    $qacDuringStatusConfirmed = $false
+    $qacDuringListConfirmed = $false
+    $qacReservationId = $null
+    $qacOwnershipRunIdentity = $null
+    $qacOwnershipEvidence = $null
     $qacDuringStatus = (& $qacCli status 2>&1 | Out-String)
+    $qacStatusExitCode = $LASTEXITCODE
     $qacDuringList = (& $qacCli list 2>&1 | Out-String)
-    Set-Content -LiteralPath (Join-Path $bootRoot 'qac-during.status.txt') -Value $qacDuringStatus -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $bootRoot 'qac-during.list.txt') -Value $qacDuringList -Encoding utf8
-    $qacDuringListConfirmed = $qacDuringList -match 'guideXOSServer\s+\|\s+acceptance\s+\|\s+Running' -and
-        $qacDuringList -match ('\(PID\s+' + [regex]::Escape([string]$qacProcess.Id) + '\)')
-    $qacDuringStatusConfirmed = $admitted -and
-        $qacDuringStatus -match 'QEMU processes:\s+1 \(0 foreign\)' -and
-        $qacDuringStatus -match 'Managed sessions:\s+1; queued:\s+0; blocked:\s+0'
-    if (-not $qacDuringListConfirmed -and -not $qacDuringStatusConfirmed) {
-        throw 'QAC did not confirm the admitted owned guest as the sole non-foreign running process.'
+    $qacListExitCode = $LASTEXITCODE
+    if ($isC188R11Boot) {
+        if (-not [string]::IsNullOrWhiteSpace($qacCapture.CaptureError)) {
+            throw "QAC process output capture failed: $($qacCapture.CaptureError)"
+        }
+        if ($qacStatusExitCode -ne 0 -or $qacListExitCode -ne 0) {
+            throw 'QAC status/list could not produce an ownership census for the current run.'
+        }
+        $qacRunStderr = [GuideXos.C188.LiveProcessCapture]::ReadAllTextShared($qacStderrPath)
+        $requestedReservation = [regex]::Match($qacRunStderr,'QAC reservation requested: id=([0-9a-f]{32}) project=guideXOSServer mode=acceptance')
+        $launchedChild = [regex]::Match($qacRunStderr,'QAC QEMU launched: reservation=([0-9a-f]{32}) pid=(\d+) executable=(.+?) launch_utc=(\S+)')
+        $launchJsonLine = @($qacRunStderr -split "`r?`n" | Where-Object { $_ -match '^\{"reservationId"' } | Select-Object -Last 1)
+        if (-not $requestedReservation.Success -or -not $launchedChild.Success -or $launchJsonLine.Count -ne 1) {
+            throw 'QAC did not provide the current run reservation and direct-child registration evidence.'
+        }
+        try { $launchJson = $launchJsonLine[0] | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw 'QAC direct-child registration record was not valid JSON.' }
+        $qacReservationId = $requestedReservation.Groups[1].Value
+        if ($launchedChild.Groups[1].Value -ne $qacReservationId -or
+            [string]$launchJson.reservationId -ne $qacReservationId -or
+            [string]$launchJson.state -ne 'Running') {
+            throw 'QAC request, child-launch, and direct-child session identities disagree.'
+        }
+        $qacInspectOutput = (& $qacCli inspect $qacReservationId 2>&1 | Out-String)
+        $qacInspectExitCode = $LASTEXITCODE
+        if ($qacInspectExitCode -ne 0) { throw 'QAC could not inspect the current run reservation.' }
+        try { $qacInspection = $qacInspectOutput | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw 'QAC inspection returned an invalid reservation record.' }
+
+        $ownerCim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($qacProcess.Id)" -ErrorAction Stop
+        $childPid = [int]$launchJson.childProcessId
+        $childCim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $childPid" -ErrorAction Stop
+        $ownerProcess = Get-Process -Id $qacProcess.Id -ErrorAction Stop
+        $childProcess = Get-Process -Id $childPid -ErrorAction Stop
+        $runnerProcess = Get-Process -Id $PID -ErrorAction Stop
+        $ownerUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $ownerStartedAtUtc = $ownerProcess.StartTime.ToUniversalTime().ToString('O')
+        $runnerStartedAtUtc = $runnerProcess.StartTime.ToUniversalTime().ToString('O')
+        $qacOwnershipRunIdentity = [ordered]@{
+            runIdentityId=$RunIdentityId;bootEvidencePath=$bootRoot;expectedBootEvidencePath=$bootRoot
+            requestReservationId=$requestedReservation.Groups[1].Value
+            launchReservationId=$launchedChild.Groups[1].Value
+            launchJsonReservationId=[string]$launchJson.reservationId
+            activeReservationId=$qacReservationId
+            launchChildProcessId=[int]$launchedChild.Groups[2].Value
+            launchExecutableIdentity=$launchedChild.Groups[3].Value.Trim()
+            launchProcessStartTimeUtc=$launchJson.processStartTimeUtc
+            launchJsonChildProcessId=[int]$launchJson.childProcessId
+            launchJsonExecutableIdentity=[string]$launchJson.processIdentity
+            launchJsonProcessStartTimeUtc=$launchJson.processStartTimeUtc
+            ownerProcessId=$qacProcess.Id
+            ownerProcessStartTimeUtc=$ownerStartedAtUtc;qacOwnerStartedAtUtc=$ownerStartedAtUtc
+            ownerParentProcessId=[int]$ownerCim.ParentProcessId
+            ownerUser=$ownerUser;ownerProcessAlive=$true
+            runnerProcessId=$PID;runnerProcessAlive=$true
+            runnerProcessStartTimeUtc=$runnerStartedAtUtc;expectedRunnerProcessStartTimeUtc=$runnerStartedAtUtc
+            childProcessId=$childPid
+            childProcessStartTimeUtc=$childProcess.StartTime.ToUniversalTime().ToString('O')
+            childExecutableIdentity=[string]$childCim.ExecutablePath
+            childParentProcessId=[int]$childCim.ParentProcessId
+            childProcessAlive=$true;expectedQemuExecutableIdentity=[System.IO.Path]::GetFullPath($qemu)
+        }
+        $ownership = Get-C188R11R4QacOwnershipEvidence $qacDuringStatus $qacDuringList $qacInspection $qacOwnershipRunIdentity
+        if (-not [bool]$ownership.accepted) {
+            throw "QAC ownership proof failed closed: $($ownership.reasons -join ', ')."
+        }
+        $qacOwnershipEvidence = $ownership
+        $qacStatusDuringPath = Join-Path $bootRoot 'qac-during.status.txt'
+        $qacListDuringPath = Join-Path $bootRoot 'qac-during.list.txt'
+        $qacInspectDuringPath = Join-Path $bootRoot 'qac-during.inspect.json'
+        $qacOwnershipPath = Join-Path $bootRoot 'qac-during-ownership.json'
+        foreach ($evidencePath in @($qacStatusDuringPath,$qacListDuringPath,$qacInspectDuringPath,$qacOwnershipPath)) {
+            if (Test-Path -LiteralPath $evidencePath) { throw "Refusing to overwrite QAC ownership evidence: $evidencePath" }
+        }
+        Set-Content -LiteralPath $qacStatusDuringPath -Value $qacDuringStatus -Encoding utf8
+        Set-Content -LiteralPath $qacListDuringPath -Value $qacDuringList -Encoding utf8
+        $qacInspection | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $qacInspectDuringPath -Encoding utf8
+        $ownership | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $qacOwnershipPath -Encoding utf8
+        $qacDuringStatusConfirmed = $true
+        $qacDuringListConfirmed = ($ownership.qacListReservationCount -gt 0)
+    } else {
+        Set-Content -LiteralPath (Join-Path $bootRoot 'qac-during.status.txt') -Value $qacDuringStatus -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $bootRoot 'qac-during.list.txt') -Value $qacDuringList -Encoding utf8
+        $qacDuringListConfirmed = $qacDuringList -match 'guideXOSServer\s+\|\s+acceptance\s+\|\s+Running' -and
+            $qacDuringList -match ('\(PID\s+' + [regex]::Escape([string]$qacProcess.Id) + '\)')
+        $qacDuringStatusConfirmed = $admitted -and
+            $qacDuringStatus -match 'QEMU processes:\s+1 \(0 foreign\)' -and
+            $qacDuringStatus -match 'Managed sessions:\s+1; queued:\s+0; blocked:\s+0'
+        if (-not $qacDuringListConfirmed -and -not $qacDuringStatusConfirmed) {
+            throw 'QAC did not confirm the admitted owned guest as the sole non-foreign running process.'
+        }
     }
+    $active = [ordered]@{
+        qmpPort=$qmpPort;gdbPort=$gdbPort;screenWidth=$width;screenHeight=$height
+        allProgramsCount=$allProgramsCount;productionCompatibility=[bool]$ProductionCompatibility
+        esp=$esp;serial=$serial;pid=$qacProcess.Id;qacAdmissionConfirmed=[bool]$admitted
+        runIdentityId=$RunIdentityId;bootEvidencePath=$bootRoot
+        qacReservationId=$qacReservationId;qacQemuChildPid=if ($qacOwnershipRunIdentity) { $qacOwnershipRunIdentity.childProcessId } else { $null }
+        qacOwnerProcessId=if ($qacOwnershipRunIdentity) { $qacOwnershipRunIdentity.ownerProcessId } else { $null }
+        qacOwnershipRunIdentity=$qacOwnershipRunIdentity
+        preInputManagedSnapshotAvailable=$false;preInputManagedSnapshotReason='no existing read-only managed snapshot request interface'
+    }
+    $active | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $bootRoot 'active.json') -Encoding utf8
     [void](Invoke-Qmp 'screendump' ([ordered]@{filename=(Join-Path $bootRoot 'desktop-ready.ppm')}))
     Write-Output ("C188_GUEST_READY QMP_PORT={0} FRAMEBUFFER={1}x{2} PID={3}" -f $qmpPort,$width,$height,$qacProcess.Id)
     if ($isC188R11Boot) {
@@ -315,27 +411,47 @@ try {
     $qmpWriter.Dispose()
     $qmpLogFile.Dispose()
     if ($qacProcess.HasExited) {
-        Set-Content -LiteralPath $qacStdoutPath -Value $stdoutTask.GetAwaiter().GetResult() -Encoding utf8
-        $qacStderr = $stderrTask.GetAwaiter().GetResult()
-        Set-Content -LiteralPath $qacStderrPath -Value $qacStderr -Encoding utf8
-        Set-Content -LiteralPath (Join-Path $bootRoot 'qac-exit-code.txt') -Value $qacProcess.ExitCode -Encoding ascii
+        $qacProcess.WaitForExit()
+        $qacExitCode = $qacProcess.ExitCode
+        Set-Content -LiteralPath (Join-Path $bootRoot 'qac-exit-code.txt') -Value $qacExitCode -Encoding ascii
     }
+    $qacCapture.Dispose()
 }
 
 $qacStatusAfter = (& $qacCli status 2>&1 | Out-String)
 $qacListAfter = (& $qacCli list 2>&1 | Out-String)
 Set-Content -LiteralPath (Join-Path $bootRoot 'qac-after.status.txt') -Value $qacStatusAfter -Encoding utf8
 Set-Content -LiteralPath (Join-Path $bootRoot 'qac-after.list.txt') -Value $qacListAfter -Encoding utf8
-$qacStderr = [System.IO.File]::ReadAllText($qacStderrPath)
+$qacStderr = [GuideXos.C188.LiveProcessCapture]::ReadAllTextShared($qacStderrPath)
+if (-not [string]::IsNullOrWhiteSpace($qacCapture.CaptureError)) {
+    throw "QAC process output capture failed: $($qacCapture.CaptureError)"
+}
 $reservation = [regex]::Match($qacStderr,'QAC reservation requested: id=([0-9a-f]+)')
 $released = [regex]::Match($qacStderr,'QAC reservation released: id=([0-9a-f]+)')
 $childExit = [regex]::Match($qacStderr,'QAC QEMU exited: reservation=([0-9a-f]+) pid=(\d+) exitCode=(\d+)')
 $releaseVerified = $reservation.Success -and $released.Success -and $childExit.Success -and
     $reservation.Groups[1].Value -eq $released.Groups[1].Value -and
     $reservation.Groups[1].Value -eq $childExit.Groups[1].Value -and
-    [int]$childExit.Groups[3].Value -eq $qacProcess.ExitCode -and
+    [int]$childExit.Groups[3].Value -eq [int]$qacExitCode -and
     $qacListAfter -notmatch [regex]::Escape($reservation.Groups[1].Value)
-if ($qacProcess.ExitCode -ne 0) { throw "QAC/QEMU exited with code $($qacProcess.ExitCode)." }
+$qacAfterInspection = $null
+if ($reservation.Success) {
+    $qacAfterInspectOutput = (& $qacCli inspect $reservation.Groups[1].Value 2>&1 | Out-String)
+    if ($LASTEXITCODE -eq 0) {
+        try { $qacAfterInspection = $qacAfterInspectOutput | ConvertFrom-Json -ErrorAction Stop }
+        catch { $qacAfterInspection = $null }
+        if ($null -ne $qacAfterInspection) {
+            $qacAfterInspection | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $bootRoot 'qac-after.inspect.json') -Encoding utf8
+        }
+    }
+}
+if ($isC188R11Boot -and ($null -eq $qacAfterInspection -or
+    $qacAfterInspection.id -ne $reservation.Groups[1].Value -or
+    $qacAfterInspection.state -ne 'Released' -or
+    [int]$qacAfterInspection.processId -ne [int]$childExit.Groups[2].Value)) {
+    $releaseVerified = $false
+}
+if ($null -eq $qacExitCode -or $qacExitCode -ne 0) { throw "QAC/QEMU exited with code $qacExitCode." }
 if ($qacStatusAfter -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or $qacListAfter -notmatch 'Reservations:\s+0') {
     throw 'QAC post-run census is not empty.'
 }
@@ -347,12 +463,17 @@ $manifest = [ordered]@{
     productionCompatibility=[bool]$ProductionCompatibility
     productionIdentityAbsent=$productionIdentityAbsent
     qacReservationId=$reservation.Groups[1].Value;qacQemuPid=$childExit.Groups[2].Value
-    qemuExitCode=$qacProcess.ExitCode;qmpPort=$qmpPort;framebufferWidth=$width;framebufferHeight=$height
+    qemuExitCode=$qacExitCode;qmpPort=$qmpPort;framebufferWidth=$width;framebufferHeight=$height
     gdbStubEnabled=[bool]$EnableGdbStub;gdbPort=$gdbPort
     qacAdmissionWaitSeconds=$admissionWaitSeconds
     qacAdmissionConfirmed=[bool]$admitted
     qacDuringListConfirmed=[bool]$qacDuringListConfirmed
     qacDuringStatusConfirmed=[bool]$qacDuringStatusConfirmed
+    runIdentityId=$RunIdentityId
+    qacOwnershipProofAccepted=[bool]($isC188R11Boot -and $qacOwnershipEvidence.accepted)
+    qacOwnershipEvidence=if ($isC188R11Boot) { $qacOwnershipEvidence } else { $null }
+    qacInspectionPath=if ($isC188R11Boot) { Join-Path $bootRoot 'qac-during.inspect.json' } else { $null }
+    qacReleaseInspectionPath=if ($isC188R11Boot) { Join-Path $bootRoot 'qac-after.inspect.json' } else { $null }
     mediaHashes=$mediaHashes;serialLog=$serial;qmpLog=$qmpLog
     bootReady=($serialText -match '(?m)^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.\r?$')
     scenario=$Scenario
