@@ -3,6 +3,7 @@ Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $managedHost = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof/GuideXos/GuideXosHost.cs') -Raw
 $managedRegistry = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof/GuideXos/GuideXosApplication.cs') -Raw
+$managedLifetime = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof/GuideXos/GuideXosManagedApplicationC150Tests.cs') -Raw
 $kernel = Get-Content -LiteralPath (Join-Path $repo 'kernel/core/nativeaot_application.cpp') -Raw
 $fixture = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures/c188r11/state-provenance.serial.txt') -Raw
 $checks = 0
@@ -10,6 +11,14 @@ $checks = 0
 $managedLimit = '(?s)#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE\s+const int maximumMessageLength = 255;\s+#else\s+const int maximumMessageLength = 127;\s+#endif\s+if \(text.Length == 0 \|\| text.Length > maximumMessageLength\)'
 if (-not [regex]::IsMatch($managedHost, $managedLimit)) {
     throw 'Managed C188R11 logging must reject messages over 255 bytes while preserving the 127-byte limit in other builds.'
+}
+$checks++
+
+if (-not [regex]::IsMatch($managedRegistry,
+        '(?s)C188R11WriteEvents.*?C188R11LastWriteSite.*?GC\.CollectionCount\(0\)') -or
+    -not [regex]::IsMatch($managedLifetime,
+        '(?s)C188R11WriteEvents.*?C188R11LastWriteSite.*?RecordC188R11Write\(1u\).*?RecordC188R11Write\(2u\).*?RecordC188R11Write\(3u\)')) {
+    throw 'C188R11 snapshots must include read-only GC count and bounded pool-writer provenance for all three mutation sites.'
 }
 $checks++
 

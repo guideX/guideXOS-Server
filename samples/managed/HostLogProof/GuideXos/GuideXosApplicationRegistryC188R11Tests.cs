@@ -88,6 +88,8 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
 
         NativeHostCallTable table = CreateHostTable();
         NativeGxAppContext context = CreateContext(&table, 4u, 1u, 0u);
+        C188R11ProvenanceSnapshot beforeLaunch =
+            GuideXosApplicationRegistry.C188R11CaptureState();
         int launchResult = Program.DispatchC188ExternalAppIdentity(&context);
         C188R11ProvenanceSnapshot afterLaunch =
             GuideXosApplicationRegistry.C188R11CaptureState();
@@ -100,6 +102,8 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             afterLaunch.ResidentMask == 1u &&
             afterLaunch.NotesOwnerGeneration == 1u &&
             afterLaunch.GenerationHighWatermark >= 1u &&
+            afterLaunch.PoolWriteEvents == beforeLaunch.PoolWriteEvents + 1u &&
+            afterLaunch.LastPoolWriteSite == 1u &&
             launchResidentFound &&
             notes is Applications.ManagedNotes;
         if (!launchStateRetained)
@@ -123,6 +127,10 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             snapshotBefore.NotesOwnerGeneration ==
                 snapshotAfter.NotesOwnerGeneration &&
             snapshotBefore.PoolClearEvents == snapshotAfter.PoolClearEvents &&
+            snapshotBefore.PoolWriteEvents == snapshotAfter.PoolWriteEvents &&
+            snapshotBefore.LastPoolWriteSite == snapshotAfter.LastPoolWriteSite &&
+            snapshotBefore.ManagedGcCollections ==
+                snapshotAfter.ManagedGcCollections &&
             snapshotBefore.TeardownEvents == snapshotAfter.TeardownEvents &&
             snapshotBefore.RegistryIdentity.Identity ==
                 snapshotAfter.RegistryIdentity.Identity &&
@@ -145,6 +153,8 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             afterStale.GenerationHighWatermark ==
                 snapshotAfter.GenerationHighWatermark &&
             afterStale.PoolClearEvents == snapshotAfter.PoolClearEvents &&
+            afterStale.PoolWriteEvents == snapshotAfter.PoolWriteEvents &&
+            afterStale.LastPoolWriteSite == snapshotAfter.LastPoolWriteSite &&
             afterStale.TeardownEvents == snapshotAfter.TeardownEvents &&
             afterStale.RegistryIdentity.Identity ==
                 snapshotAfter.RegistryIdentity.Identity &&
@@ -177,6 +187,8 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             afterClose.ResidentMask == 0u &&
             afterClose.NotesOwnerGeneration == 0u &&
             afterClose.PoolClearEvents == snapshotAfter.PoolClearEvents + 1u &&
+            afterClose.PoolWriteEvents == snapshotAfter.PoolWriteEvents + 1u &&
+            afterClose.LastPoolWriteSite == 2u &&
             afterClose.ResidentReplacementEvents ==
                 snapshotAfter.ResidentReplacementEvents &&
             afterClose.TeardownEvents == snapshotAfter.TeardownEvents + 1u &&
@@ -196,6 +208,8 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
                 (int)GuideXosResult.Success &&
             afterReopen.ResidentMask == 1u &&
             afterReopen.GenerationHighWatermark == 2u &&
+            afterReopen.PoolWriteEvents == afterClose.PoolWriteEvents + 1u &&
+            afterReopen.LastPoolWriteSite == 1u &&
             afterReopen.PoolIdentity.Identity == snapshotAfter.PoolIdentity.Identity &&
             afterReopen.PoolStorageIdentity.Identity ==
                 snapshotAfter.PoolStorageIdentity.Identity &&

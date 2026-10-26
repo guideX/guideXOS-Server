@@ -176,7 +176,8 @@ internal readonly struct C188R11ProvenanceSnapshot
         uint descriptorCount, uint notesOwnerGeneration,
         uint residentMask, uint poolClearEvents, uint residentReplacementEvents,
         uint resetEvents, uint teardownEvents, uint generationHighWatermark,
-        uint sequence)
+        uint sequence, uint poolWriteEvents, uint lastPoolWriteSite,
+        uint managedGcCollections)
     {
         RegistryIdentity = registryIdentity;
         PoolIdentity = poolIdentity;
@@ -192,6 +193,9 @@ internal readonly struct C188R11ProvenanceSnapshot
         TeardownEvents = teardownEvents;
         GenerationHighWatermark = generationHighWatermark;
         Sequence = sequence;
+        PoolWriteEvents = poolWriteEvents;
+        LastPoolWriteSite = lastPoolWriteSite;
+        ManagedGcCollections = managedGcCollections;
     }
 
     public C188R11ObjectIdentitySnapshot RegistryIdentity { get; }
@@ -208,6 +212,9 @@ internal readonly struct C188R11ProvenanceSnapshot
     public uint TeardownEvents { get; }
     public uint GenerationHighWatermark { get; }
     public uint Sequence { get; }
+    public uint PoolWriteEvents { get; }
+    public uint LastPoolWriteSite { get; }
+    public uint ManagedGcCollections { get; }
 }
 #endif
 
@@ -376,7 +383,10 @@ public static unsafe class GuideXosApplicationRegistry
             residentMask, s_lifetime.C188R11ClearEvents,
             s_lifetime.C188R11ReplacementEvents,
             s_c188r11ResetEvents, s_lifetime.C188R11TeardownEvents,
-            s_lifetime.C188R11Generation, sequence);
+            s_lifetime.C188R11Generation, sequence,
+            s_lifetime.C188R11WriteEvents,
+            s_lifetime.C188R11LastWriteSite,
+            unchecked((uint)GC.CollectionCount(0)));
     }
 
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
@@ -557,7 +567,16 @@ public static unsafe class GuideXosApplicationRegistry
             GuideXosText.AppendUnsigned(line, ref position,
                 state.DescriptorCount) &&
             GuideXosText.Append(line, ref position, " result="u8) &&
-            AppendC188R11Signed(line, ref position, resultCode))
+            AppendC188R11Signed(line, ref position, resultCode) &&
+            GuideXosText.Append(line, ref position, " gc="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.ManagedGcCollections) &&
+            GuideXosText.Append(line, ref position, " w="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolWriteEvents) &&
+            GuideXosText.Append(line, ref position, ":"u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.LastPoolWriteSite))
         {
             host.TryLog(line[..position]);
         }

@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$BootEvidencePath,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
+    [Parameter()][string]$CandidateRoot = '',
     [Parameter()][ValidateRange(120,600)][int]$MaxRuntimeSeconds = 300
 )
 $ErrorActionPreference = 'Stop'
@@ -20,7 +21,17 @@ if (Test-Path -LiteralPath $bootRoot) {
     throw "Refusing to overwrite C188R11R2 guest evidence: $bootRoot"
 }
 $null = New-Item -ItemType Directory -Path $bootRoot
-$candidateRoot = Join-Path $phaseRoot 'candidate\keyboard-dispatch-001'
+$candidateRoot = if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
+    Join-Path $phaseRoot 'candidate\keyboard-dispatch-001'
+} else {
+    [System.IO.Path]::GetFullPath($CandidateRoot)
+}
+$candidateRelative = [System.IO.Path]::GetRelativePath($phaseRoot, $candidateRoot)
+if ($candidateRelative -eq '.' -or
+    $candidateRelative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
+    [System.IO.Path]::IsPathRooted($candidateRelative)) {
+    throw "CandidateRoot must be a unique directory below $phaseRoot."
+}
 $candidateEsp = Join-Path $candidateRoot 'esp'
 $candidateStageManifestPath = Join-Path $candidateRoot 'ramdisk-staging.json'
 foreach ($requiredCandidatePath in @(

@@ -18,11 +18,11 @@ $success = @'
 [C188R11R2_KEY] stage=focus-target eid=00000001 window=00000004 title=Managed Notes owner=ManagedAppWindow route=focused-window
 [C188R11R2_KEY] stage=native-managed-entry eid=00000001 call=00000002 corr=00000002 selector=00000004 kind=03000000 value=00000061 shift=0 ctrl=0 rc=FFFFFFFF
 [C102-MANAGED-OUTPUT] C188R11-MANAGED stage=entry seq=17 call=2 corr=2 id=4 gen=1 in=1 rc=-1
-[C102-MANAGED-OUTPUT] C188R11 state seq=18 st=input-dispatch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1
+[C102-MANAGED-OUTPUT] C188R11 state seq=18 st=input-dispatch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1 gc=0 w=1:1
 [C102-MANAGED-OUTPUT] C188R11R2_KEY seq=19 stage=managed-dispatch-entry selector=4 kind=key-char value=97 shift=0 ctrl=0 result=-1
-[C102-MANAGED-OUTPUT] C188R11 state seq=20 st=before-tryfind selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1
-[C102-MANAGED-OUTPUT] C188R11 state seq=21 st=lookup selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0
-[C102-MANAGED-OUTPUT] C188R11 state seq=22 st=resident-found selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0
+[C102-MANAGED-OUTPUT] C188R11 state seq=20 st=before-tryfind selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1 gc=0 w=1:1
+[C102-MANAGED-OUTPUT] C188R11 state seq=21 st=lookup selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=0 w=1:1
+[C102-MANAGED-OUTPUT] C188R11 state seq=22 st=resident-found selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=0 w=1:1
 [C102-MANAGED-OUTPUT] C188R11R2_KEY seq=23 stage=notes-callback-entry selector=4 kind=key-char value=97 shift=0 ctrl=0 result=-1
 [C102-MANAGED-OUTPUT] C188R11R2_KEY seq=24 stage=managed-callback-return selector=4 kind=key-char value=97 shift=0 ctrl=0 result=0
 [C188R11R2_KEY] stage=native-managed-return eid=00000001 call=00000002 corr=00000002 selector=00000004 kind=03000000 value=00000061 shift=0 ctrl=0 rc=00000000
@@ -35,7 +35,9 @@ Assert-Predicate 'kernel event id correlates across dequeue, focus, and native e
     $evidence.managedCall -eq '2')
 Assert-Predicate 'managed snapshot captures populated registry and resident Notes' (
     $evidence.registryCount -eq 5 -and $evidence.residentMask -eq 1 -and
-    $evidence.registryPopulated -and $evidence.lookupResult -eq 0)
+    $evidence.registryPopulated -and $evidence.lookupResult -eq 0 -and
+    $evidence.managedGcCollections -eq 0 -and $evidence.poolWriteEvents -eq 1 -and
+    $evidence.lastPoolWriteSite -eq 1)
 
 $emptyRegistry = [regex]::Replace($success,
     '(?m)^\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=\d+ stage=notes-callback-entry[^\r\n]*\r?\n', '')
@@ -68,8 +70,11 @@ $missingCallback = $success.Replace(
 Assert-Predicate 'managed dispatch without Notes callback is not full qualification' (
     -not (Test-C188R11R2KeyboardTrace $missingCallback))
 $missingSnapshot = $success.Replace(
-    '[C102-MANAGED-OUTPUT] C188R11 state seq=18 st=input-dispatch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1' + "`n", '')
+    '[C102-MANAGED-OUTPUT] C188R11 state seq=18 st=input-dispatch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1 gc=0 w=1:1' + "`n", '')
 Assert-Predicate 'managed entry without the earliest registry snapshot is rejected' (
     -not (Test-C188R11R2KeyboardTrace $missingSnapshot))
+$missingProvenance = $success.Replace('result=-1 gc=0 w=1:1', 'result=-1')
+Assert-Predicate 'managed input snapshot without GC and writer provenance is rejected' (
+    -not (Test-C188R11R2KeyboardTrace $missingProvenance))
 
 Write-Output "C188R11R2-RUNNER-PREDICATES cases=$script:caseCount result=PASS"

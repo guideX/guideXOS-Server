@@ -17,6 +17,8 @@ internal sealed class GuideXosManagedApplicationLifetime
     private uint _c188r11ClearEvents;
     private uint _c188r11ReplacementEvents;
     private uint _c188r11TeardownEvents;
+    private uint _c188r11WriteEvents;
+    private uint _c188r11LastWriteSite;
 
     public GuideXosManagedApplicationLifetime()
     {
@@ -30,6 +32,8 @@ internal sealed class GuideXosManagedApplicationLifetime
     internal uint C188R11ClearEvents => _c188r11ClearEvents;
     internal uint C188R11ReplacementEvents => _c188r11ReplacementEvents;
     internal uint C188R11TeardownEvents => _c188r11TeardownEvents;
+    internal uint C188R11WriteEvents => _c188r11WriteEvents;
+    internal uint C188R11LastWriteSite => _c188r11LastWriteSite;
     internal uint C188R11Generation => _generation;
     internal uint C188R11NotesOwnerGeneration
     {
@@ -124,6 +128,9 @@ internal sealed class GuideXosManagedApplicationLifetime
         _entries[entryIndex].Selector = descriptor.Selector;
         _entries[entryIndex].Generation = assignedGeneration;
         _entries[entryIndex].Application = application;
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        RecordC188R11Write(1u); // Completed TryStart entry assignment.
+#endif
         if (assignedGeneration > _generation) _generation = assignedGeneration;
         generation = assignedGeneration;
         return true;
@@ -161,6 +168,9 @@ internal sealed class GuideXosManagedApplicationLifetime
             application.OnTearingDown();
         }
         _entries[entryIndex] = default;
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        RecordC188R11Write(2u); // Completed generation-checked Clear.
+#endif
         return true;
     }
 
@@ -178,7 +188,18 @@ internal sealed class GuideXosManagedApplicationLifetime
             application.OnTearingDown();
         }
         _entries[entryIndex] = default;
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        RecordC188R11Write(3u); // Completed selector Clear.
+#endif
     }
+
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private void RecordC188R11Write(uint site)
+    {
+        _c188r11LastWriteSite = site;
+        if (_c188r11WriteEvents != uint.MaxValue) _c188r11WriteEvents++;
+    }
+#endif
 
     private int FindEntry(uint selector)
     {

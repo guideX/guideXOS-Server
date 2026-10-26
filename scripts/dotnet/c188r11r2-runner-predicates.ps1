@@ -24,8 +24,8 @@ function Get-C188R11R2KeyboardEvidence([string]$SerialText) {
     $callbackReturn = Get-C188R11R2LineMatch $SerialText `
         '\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=(?<seq>\d+) stage=managed-callback-return selector=4 kind=key-char value=97 shift=0 ctrl=0 result=(?<result>-?\d+)'
     $inputState = Get-C188R11R2LineMatch $SerialText `
-        '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=input-dispatch-entry selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=-1'
-    $lookupPattern = '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=lookup selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=(?<result>-?\d+)'
+        '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=input-dispatch-entry selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=-1 gc=(?<gc>\d+) w=(?<writes>\d+):(?<writeSite>\d+)'
+    $lookupPattern = '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=lookup selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=(?<result>-?\d+) gc=(?<gc>\d+) w=(?<writes>\d+):(?<writeSite>\d+)'
     $lookup = if ($inputState.Success) {
         $afterInputEntry = $SerialText.Substring($inputState.Index + $inputState.Length)
         Get-C188R11R2LineMatch $afterInputEntry $lookupPattern
@@ -74,6 +74,9 @@ function Get-C188R11R2KeyboardEvidence([string]$SerialText) {
         registryCount=$(if ($inputState.Success) { [uint32]$inputState.Groups['count'].Value } else { $null })
         residentMask=$(if ($inputState.Success) { [uint32]$inputState.Groups['mask'].Value } else { $null })
         registryPopulated=[bool]$populated
+        managedGcCollections=$(if ($inputState.Success) { [uint32]$inputState.Groups['gc'].Value } else { $null })
+        poolWriteEvents=$(if ($inputState.Success) { [uint32]$inputState.Groups['writes'].Value } else { $null })
+        lastPoolWriteSite=$(if ($inputState.Success) { [uint32]$inputState.Groups['writeSite'].Value } else { $null })
         inputStateSequence=$(if ($inputState.Success) { [uint32]$inputState.Groups['seq'].Value } else { $null })
         lookupResult=$(if ($lookup.Success) { [int]$lookup.Groups['result'].Value } else { $null })
         eventId=$eventId

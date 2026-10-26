@@ -82,20 +82,20 @@ function Test-C188R11ImageContextMatch([string]$SerialText) {
 
 function Test-C188R11ManagedLaunchState([string]$SerialText) {
     return [regex]::IsMatch($SerialText,
-        '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=[1-9]\d* st=managed-return selector=4 ownerGen=1 rg=[1-9]\d* re=1 rr=0 rcl=0 p=[1-9]\d* pr=0 ps=[1-9]\d* psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0\r?$')
+        '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=[1-9]\d* st=managed-return selector=4 ownerGen=1 rg=[1-9]\d* re=1 rr=0 rcl=0 p=[1-9]\d* pr=0 ps=[1-9]\d* psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=\d+ w=1:1\r?$')
 }
 
 function Test-C188R11ManagedInputState([string]$SerialText, [uint32]$Count,
     [uint32]$Mask, [string]$Result) {
     $pattern = '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=[1-9]\d* st=input-dispatch-entry selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=' +
-        $Mask + ' g=\d+ td=\d+ n=' + $Count + ' result=' + [regex]::Escape($Result) + '\r?$'
+        $Mask + ' g=\d+ td=\d+ n=' + $Count + ' result=' + [regex]::Escape($Result) + ' gc=\d+ w=\d+:\d+\r?$'
     return [regex]::IsMatch($SerialText, $pattern)
 }
 
 function Test-C188R11TryFindResult([string]$SerialText, [int]$Result) {
     return [regex]::IsMatch($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=[1-9]\d* st=lookup selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=\d+ g=\d+ td=\d+ n=\d+ result=' +
-        [regex]::Escape([string]$Result) + '\r?$')
+        [regex]::Escape([string]$Result) + ' gc=\d+ w=\d+:\d+\r?$')
 }
 
 function Test-C188R11InitializationEvidence([string]$SerialText) {

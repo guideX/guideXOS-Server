@@ -69,12 +69,12 @@ if ($runCode -ne 0 -or -not $r10 -or -not $r11) { throw "C188R11 hosted provenan
 if ($LASTEXITCODE -ne 0) { throw 'C188R11 runner predicate qualification failed.' }
 $outputBounds = (& (Join-Path $PSScriptRoot 'test-c188r11-output-bounds.ps1') 2>&1 | Out-String)
 Set-Content -LiteralPath (Join-Path $root 'output-bounds.log') -Value $outputBounds -Encoding utf8
-if (-not [regex]::IsMatch($outputBounds,'(?m)^C188R11-OUTPUT-BOUNDS cases=4 result=PASS\b')) {
+if (-not [regex]::IsMatch($outputBounds,'(?m)^C188R11-OUTPUT-BOUNDS cases=5 result=PASS\b')) {
     throw 'C188R11 output-bound qualification failed.'
 }
 $manifest = [ordered]@{
     result='PASS';outputRoot=$root;r9Cases=14;priorR10Cases=14;r11Cases=13
-    runnerPredicateCases=26;outputBoundCases=4;restoreExitCode=$restoreCode;runExitCode=$runCode
+    runnerPredicateCases=26;outputBoundCases=5;restoreExitCode=$restoreCode;runExitCode=$runCode
     independentBuildsSha256=(Get-FileHash -LiteralPath (Join-Path $root 'independent-builds.log') -Algorithm SHA256).Hash
     r9QualificationSha256=(Get-FileHash -LiteralPath (Join-Path $root 'c188r9-registry.log') -Algorithm SHA256).Hash
     restoreSha256=(Get-FileHash -LiteralPath (Join-Path $root 'restore.log') -Algorithm SHA256).Hash

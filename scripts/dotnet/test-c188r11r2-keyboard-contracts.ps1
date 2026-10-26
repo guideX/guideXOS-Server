@@ -12,6 +12,7 @@ $managed = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogPro
 $notes = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof/Applications/ManagedNotes.cs') -Raw
 $textArea = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof/GuideXos/GuideXosTextArea.cs') -Raw
 $main = Get-Content -LiteralPath (Join-Path $repo 'kernel/core/main.cpp') -Raw
+$r2Runner = Get-Content -LiteralPath (Join-Path $repo 'scripts/dotnet/run-c188r11r2-keyboard-dispatch.ps1') -Raw
 $script:caseCount = 0
 
 function Assert-Contract([string]$Name, [bool]$Condition) {
@@ -124,5 +125,10 @@ Assert-Contract 'keyboard trace is bounded and serial output is outside the IRQ 
     $ps2.Contains('void flush_c188r11r2_key_traces()') -and
     -not $ps2.Substring($ps2.IndexOf('void irq_handler()'),
         $ps2.IndexOf('bool has_key()') - $ps2.IndexOf('void irq_handler()')).Contains('serial::puts("[C188R11R2_KEY]'))
+Assert-Contract 'R2 runner accepts a unique isolated candidate below its phase root' (
+    $r2Runner.Contains("[string]`$CandidateRoot = ''") -and
+    $r2Runner.Contains('[System.IO.Path]::GetFullPath($CandidateRoot)') -and
+    $r2Runner.Contains('[System.IO.Path]::GetRelativePath($phaseRoot, $candidateRoot)') -and
+    $r2Runner.Contains('$candidateRelative.StartsWith'))
 
 Write-Output "C188R11R2-KEYBOARD-CONTRACTS cases=$script:caseCount result=PASS"
