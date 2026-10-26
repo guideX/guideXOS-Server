@@ -98,6 +98,65 @@ function Test-C188R11TryFindResult([string]$SerialText, [int]$Result) {
         [regex]::Escape([string]$Result) + ' gc=\d+ w=\d+:\d+\r?$')
 }
 
+function Get-C188R11MemorySnapshot([string]$SerialText, [string]$Stage) {
+    $pattern = '(?m)^\[C102-MANAGED-OUTPUT\] C188R11-MEM seq=(?<sequence>\d+) st=' +
+        [regex]::Escape($Stage) +
+        ' ra=(?<registry>[A-Fa-f0-9]{16}) owner=(?<owner>[A-Fa-f0-9]{16}) slot=(?<slot>[A-Fa-f0-9]{16}) live=(?<live>[A-Fa-f0-9]{16}) held=(?<held>[A-Fa-f0-9]{16}) gen=(?<generation>\d+:\d+:\d+:\d+) gc=(?<gc>\d+) heldLen=(?<heldLength>\d+)\r?$'
+    return [regex]::Match($SerialText, $pattern)
+}
+
+function Test-C188R11MemoryStorageStable([string]$SerialText) {
+    $initialized = Get-C188R11MemorySnapshot $SerialText 'registry-init'
+    $launch = Get-C188R11MemorySnapshot $SerialText 'managed-return'
+    $dispatch = Get-C188R11MemorySnapshot $SerialText 'input-dispatch-entry'
+    return $initialized.Success -and $launch.Success -and $dispatch.Success -and
+        $launch.Groups['registry'].Value -ne '0000000000000000' -and
+        $initialized.Groups['owner'].Value -ne '0000000000000000' -and
+        $launch.Groups['owner'].Value -ne '0000000000000000' -and
+        $initialized.Groups['slot'].Value -ne '0000000000000000' -and
+        $launch.Groups['slot'].Value -ne '0000000000000000' -and
+        $initialized.Groups['live'].Value -ne '0000000000000000' -and
+        $launch.Groups['live'].Value -ne '0000000000000000' -and
+        $initialized.Groups['registry'].Value -eq $launch.Groups['registry'].Value -and
+        $launch.Groups['registry'].Value -eq $dispatch.Groups['registry'].Value -and
+        $initialized.Groups['owner'].Value -eq $launch.Groups['owner'].Value -and
+        $launch.Groups['owner'].Value -eq $dispatch.Groups['owner'].Value -and
+        $initialized.Groups['slot'].Value -eq $launch.Groups['slot'].Value -and
+        $launch.Groups['slot'].Value -eq $dispatch.Groups['slot'].Value -and
+        $initialized.Groups['live'].Value -eq $launch.Groups['live'].Value -and
+        $launch.Groups['live'].Value -eq $dispatch.Groups['live'].Value -and
+        $initialized.Groups['held'].Value -eq $initialized.Groups['live'].Value -and
+        $launch.Groups['held'].Value -eq $launch.Groups['live'].Value -and
+        $dispatch.Groups['held'].Value -eq $dispatch.Groups['live'].Value -and
+        $initialized.Groups['generation'].Value -eq $launch.Groups['generation'].Value -and
+        $launch.Groups['generation'].Value -eq $dispatch.Groups['generation'].Value -and
+        $initialized.Groups['gc'].Value -eq $launch.Groups['gc'].Value -and
+        $launch.Groups['gc'].Value -eq $dispatch.Groups['gc'].Value -and
+        $initialized.Groups['heldLength'].Value -eq '5' -and
+        $launch.Groups['heldLength'].Value -eq '5' -and
+        $dispatch.Groups['heldLength'].Value -eq '5'
+}
+
+function Test-C188R11MemoryStorageInPersistentHeap([string]$SerialText) {
+    $heap = [regex]::Match($SerialText,
+        '(?m)^\[NATIVEAOT-HEAP\] action=initialize count=0000000000000001 base=(?<base>[A-Fa-f0-9]{16}) bytes=(?<bytes>[A-Fa-f0-9]{16}) reason=initial-managed-thread-attachment\r?$')
+    $snapshot = Get-C188R11MemorySnapshot $SerialText 'managed-return'
+    if (-not $heap.Success -or -not $snapshot.Success) { return $false }
+    $baseAddress = [Convert]::ToUInt64($heap.Groups['base'].Value,16)
+    $heapBytes = [Convert]::ToUInt64($heap.Groups['bytes'].Value,16)
+    if ($heapBytes -eq 0 -or $baseAddress -gt ([uint64]::MaxValue - $heapBytes)) {
+        return $false
+    }
+    $limitAddress = $baseAddress + $heapBytes
+    foreach ($name in @('registry','owner','slot','live','held')) {
+        $address = [Convert]::ToUInt64($snapshot.Groups[$name].Value,16)
+        if ($address -lt $baseAddress -or $address -ge $limitAddress) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Test-C188R11InitializationEvidence([string]$SerialText) {
     return [regex]::IsMatch($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C188R11-INIT seq=[1-9]\d* re=1 pe=1 rg=[1-9]\d* p=[1-9]\d* ps=[1-9]\d*\r?$') -and

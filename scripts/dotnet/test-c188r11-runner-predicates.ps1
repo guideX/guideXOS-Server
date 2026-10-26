@@ -24,6 +24,17 @@ if (-not (Test-C188R11ManagedSequenceOrder $fixture)) { throw 'Managed sequence 
 $passed++
 if (-not (Test-C188R11ManagedBoundaryCorrelation $fixture)) { throw 'Managed/native boundary correlation was rejected.' }
 $passed++
+if (-not (Test-C188R11MemoryStorageStable $fixture)) { throw 'Validated backing-storage identity was rejected.' }
+$passed++
+$stableHeapOwnership = Test-C188R11MemoryStorageInPersistentHeap $fixture
+if (-not $stableHeapOwnership) { throw 'Managed object storage outside the initialized persistent heap was rejected.' }
+$passed++
+$outOfHeapMemory = $fixture.Replace('ra=0000000200001000', 'ra=0000000300001000')
+if (Test-C188R11MemoryStorageInPersistentHeap $outOfHeapMemory) { throw 'A descriptor array outside the owned persistent heap was accepted.' }
+$passed++
+$changedBackingAddress = $fixture.Replace('st=input-dispatch-entry ra=0000000200001000', 'st=input-dispatch-entry ra=0000000200001100')
+if (Test-C188R11MemoryStorageStable $changedBackingAddress) { throw 'Changed descriptor backing address was accepted.' }
+$passed++
 if (-not (Test-C188R11NotesReady $fixture)) { throw 'Notes launch, surface, or main-loop readiness was rejected.' }
 $passed++
 if (-not [string]::IsNullOrEmpty((Get-C188R11ReadinessFailureReason $fixture))) { throw 'Complete readiness fixture returned a failure reason.' }

@@ -130,6 +130,8 @@ internal sealed class C188R11ObjectIdentityTracker
     private uint _replacementEvents;
     private uint _clearEvents;
 
+    internal object Current => _current;
+
     public uint Observe(object current)
     {
         if (ReferenceEquals(_current, current)) return _identity;
@@ -177,7 +179,12 @@ internal readonly struct C188R11ProvenanceSnapshot
         uint residentMask, uint poolClearEvents, uint residentReplacementEvents,
         uint resetEvents, uint teardownEvents, uint generationHighWatermark,
         uint sequence, uint poolWriteEvents, uint lastPoolWriteSite,
-        uint managedGcCollections)
+        uint managedGcCollections, nuint registryObjectAddress,
+        nuint poolOwnerObjectAddress, nuint poolEntriesFieldAddress,
+        nuint livePoolStorageObjectAddress,
+        nuint trackedPoolStorageObjectAddress, uint registryGcGeneration,
+        uint poolOwnerGcGeneration, uint livePoolStorageGcGeneration,
+        uint trackedPoolStorageGcGeneration, uint trackedPoolStorageLength)
     {
         RegistryIdentity = registryIdentity;
         PoolIdentity = poolIdentity;
@@ -196,6 +203,16 @@ internal readonly struct C188R11ProvenanceSnapshot
         PoolWriteEvents = poolWriteEvents;
         LastPoolWriteSite = lastPoolWriteSite;
         ManagedGcCollections = managedGcCollections;
+        RegistryObjectAddress = registryObjectAddress;
+        PoolOwnerObjectAddress = poolOwnerObjectAddress;
+        PoolEntriesFieldAddress = poolEntriesFieldAddress;
+        LivePoolStorageObjectAddress = livePoolStorageObjectAddress;
+        TrackedPoolStorageObjectAddress = trackedPoolStorageObjectAddress;
+        RegistryGcGeneration = registryGcGeneration;
+        PoolOwnerGcGeneration = poolOwnerGcGeneration;
+        LivePoolStorageGcGeneration = livePoolStorageGcGeneration;
+        TrackedPoolStorageGcGeneration = trackedPoolStorageGcGeneration;
+        TrackedPoolStorageLength = trackedPoolStorageLength;
     }
 
     public C188R11ObjectIdentitySnapshot RegistryIdentity { get; }
@@ -215,6 +232,16 @@ internal readonly struct C188R11ProvenanceSnapshot
     public uint PoolWriteEvents { get; }
     public uint LastPoolWriteSite { get; }
     public uint ManagedGcCollections { get; }
+    public nuint RegistryObjectAddress { get; }
+    public nuint PoolOwnerObjectAddress { get; }
+    public nuint PoolEntriesFieldAddress { get; }
+    public nuint LivePoolStorageObjectAddress { get; }
+    public nuint TrackedPoolStorageObjectAddress { get; }
+    public uint RegistryGcGeneration { get; }
+    public uint PoolOwnerGcGeneration { get; }
+    public uint LivePoolStorageGcGeneration { get; }
+    public uint TrackedPoolStorageGcGeneration { get; }
+    public uint TrackedPoolStorageLength { get; }
 }
 #endif
 
@@ -252,6 +279,7 @@ public static unsafe class GuideXosApplicationRegistry
     private static uint s_c188r11ResetEvents = 0u;
     private static bool s_c188r11InitializationEventReported;
     private static uint s_c188r11RegistryTraceRecords;
+    private static uint s_c188r11MemoryTraceRecords;
     private static uint s_c188r11r2KeyboardRecords;
 #endif
 #if GUIDEXOS_PROOF_CONTROL
@@ -367,6 +395,15 @@ public static unsafe class GuideXosApplicationRegistry
     internal static C188R11ProvenanceSnapshot C188R11CaptureState(
         uint sequence = 0u)
     {
+        // These addresses are converted from live, rooted references to scalar
+        // diagnostics only. They are never dereferenced by managed code or
+        // retained across calls; cross-boundary comparison is valid only when
+        // the GC collection count is unchanged.
+        // Retain the previous pool-array reference locally before Observe(null)
+        // clears the identity tracker. This lets the input snapshot distinguish
+        // a lost owner field from storage reclamation or an invalid object.
+        object trackedPoolStorage = s_c188r11PoolStorageIdentity.Current;
+        object livePoolStorage = s_lifetime.C188R11StorageObject;
         C188R11ObjectIdentitySnapshot registry =
             s_c188r11RegistryIdentity.Capture(s_entries);
         C188R11ObjectIdentitySnapshot pool =
@@ -375,7 +412,7 @@ public static unsafe class GuideXosApplicationRegistry
             s_c188r11PoolStorageIdentity.Capture(
                 s_lifetime.C188R11StorageObject);
         uint residentMask = s_lifetime.C188R11ResidentMask;
-        return new C188R11ProvenanceSnapshot(
+        C188R11ProvenanceSnapshot snapshot = new(
             registry, pool, poolStorage,
             s_c188r11RegistryInitializationEpoch,
             s_lifetime.C188R11InitializationEpoch,
@@ -386,7 +423,32 @@ public static unsafe class GuideXosApplicationRegistry
             s_lifetime.C188R11Generation, sequence,
             s_lifetime.C188R11WriteEvents,
             s_lifetime.C188R11LastWriteSite,
-            unchecked((uint)GC.CollectionCount(0)));
+            unchecked((uint)GC.CollectionCount(0)),
+            C188R11ObjectAddress(s_entries),
+            C188R11ObjectAddress(s_lifetime),
+            s_lifetime.C188R11EntriesFieldAddress,
+            C188R11ObjectAddress(livePoolStorage),
+            C188R11ObjectAddress(trackedPoolStorage),
+            C188R11GcGeneration(s_entries),
+            C188R11GcGeneration(s_lifetime),
+            C188R11GcGeneration(livePoolStorage),
+            C188R11GcGeneration(trackedPoolStorage),
+            trackedPoolStorage is Array trackedArray
+                ? unchecked((uint)trackedArray.Length) : 0u);
+        GC.KeepAlive(trackedPoolStorage);
+        return snapshot;
+    }
+
+    private static nuint C188R11ObjectAddress(object value)
+    {
+        return value == null ? (nuint)0 : unchecked((nuint)
+            System.Runtime.CompilerServices.Unsafe.As<object, nint>(ref value));
+    }
+
+    private static uint C188R11GcGeneration(object value)
+    {
+        return value == null ? uint.MaxValue :
+            unchecked((uint)GC.GetGeneration(value));
     }
 
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
@@ -406,6 +468,7 @@ public static unsafe class GuideXosApplicationRegistry
         LogC188R11Registration(host, 8u, s_c188r11FileExplorerRegistrationSequence);
         C188R11ProvenanceSnapshot state =
             C188R11CaptureState(s_c188r11RegistryInitializationSequence);
+        LogC188R11Memory(host, "registry-init"u8, state);
         Span<byte> line = stackalloc byte[112];
         int position = 0;
         if (GuideXosText.Append(line, ref position, "C188R11-INIT seq="u8) &&
@@ -579,7 +642,71 @@ public static unsafe class GuideXosApplicationRegistry
                 state.LastPoolWriteSite))
         {
             host.TryLog(line[..position]);
+            LogC188R11Memory(host, stage, state);
         }
+    }
+
+    private static void LogC188R11Memory(GuideXosHost host,
+        ReadOnlySpan<byte> stage, C188R11ProvenanceSnapshot state)
+    {
+        if (s_c188r11MemoryTraceRecords >= 48u) return;
+        Span<byte> line = stackalloc byte[224];
+        int position = 0;
+        if (GuideXosText.Append(line, ref position,
+                "C188R11-MEM seq="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position, state.Sequence) &&
+            GuideXosText.Append(line, ref position, " st="u8) &&
+            GuideXosText.Append(line, ref position, stage) &&
+            GuideXosText.Append(line, ref position, " ra="u8) &&
+            AppendC188R11Address(line, ref position,
+                state.RegistryObjectAddress) &&
+            GuideXosText.Append(line, ref position, " owner="u8) &&
+            AppendC188R11Address(line, ref position,
+                state.PoolOwnerObjectAddress) &&
+            GuideXosText.Append(line, ref position, " slot="u8) &&
+            AppendC188R11Address(line, ref position,
+                state.PoolEntriesFieldAddress) &&
+            GuideXosText.Append(line, ref position, " live="u8) &&
+            AppendC188R11Address(line, ref position,
+                state.LivePoolStorageObjectAddress) &&
+            GuideXosText.Append(line, ref position, " held="u8) &&
+            AppendC188R11Address(line, ref position,
+                state.TrackedPoolStorageObjectAddress) &&
+            GuideXosText.Append(line, ref position, " gen="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.RegistryGcGeneration) &&
+            GuideXosText.Append(line, ref position, ":"u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.PoolOwnerGcGeneration) &&
+            GuideXosText.Append(line, ref position, ":"u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.LivePoolStorageGcGeneration) &&
+            GuideXosText.Append(line, ref position, ":"u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.TrackedPoolStorageGcGeneration) &&
+            GuideXosText.Append(line, ref position, " gc="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.ManagedGcCollections) &&
+            GuideXosText.Append(line, ref position, " heldLen="u8) &&
+            GuideXosText.AppendUnsigned(line, ref position,
+                state.TrackedPoolStorageLength))
+        {
+            s_c188r11MemoryTraceRecords++;
+            host.TryLog(line[..position]);
+        }
+    }
+
+    private static bool AppendC188R11Address(Span<byte> buffer,
+        ref int position, nuint value)
+    {
+        const string digits = "0123456789ABCDEF";
+        if (buffer.Length - position < 16) return false;
+        ulong address = unchecked((ulong)value);
+        for (int shift = 60; shift >= 0; shift -= 4)
+        {
+            buffer[position++] = (byte)digits[(int)((address >> shift) & 0xFu)];
+        }
+        return true;
     }
 
     private static bool AppendC188R11Signed(

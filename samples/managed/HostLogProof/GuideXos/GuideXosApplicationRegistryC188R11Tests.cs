@@ -6,10 +6,13 @@ namespace HostLogProof;
 
 public static unsafe class GuideXosApplicationRegistryC188R11Tests
 {
-    public const int CaseCount = 13;
+    public const int CaseCount = 15;
     public static int FirstFailedCase { get; private set; }
     private static int s_notesHandlerEntries;
     private static ulong s_nextWindow = 0xC1881100u;
+
+    private static bool HasExpectedObjectGeneration(uint generation) =>
+        generation <= (uint)GC.MaxGeneration || generation == int.MaxValue;
 
     public static bool Run()
     {
@@ -77,6 +80,28 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             initial.PoolStorageIdentity.Identity ==
                 repeated.PoolStorageIdentity.Identity);
 
+        bool backingStorageIdentityStable =
+            initial.RegistryObjectAddress != 0 &&
+            initial.PoolOwnerObjectAddress != 0 &&
+            initial.PoolEntriesFieldAddress != 0 &&
+            initial.LivePoolStorageObjectAddress != 0 &&
+            initial.RegistryObjectAddress == repeated.RegistryObjectAddress &&
+            initial.PoolOwnerObjectAddress == repeated.PoolOwnerObjectAddress &&
+            initial.PoolEntriesFieldAddress == repeated.PoolEntriesFieldAddress &&
+            initial.LivePoolStorageObjectAddress ==
+                repeated.LivePoolStorageObjectAddress &&
+            initial.LivePoolStorageObjectAddress ==
+                initial.TrackedPoolStorageObjectAddress &&
+            initial.TrackedPoolStorageLength == 5u &&
+            initial.RegistryGcGeneration <= (uint)GC.MaxGeneration &&
+            initial.PoolOwnerGcGeneration <= (uint)GC.MaxGeneration &&
+            initial.LivePoolStorageGcGeneration <= (uint)GC.MaxGeneration &&
+            initial.TrackedPoolStorageGcGeneration <= (uint)GC.MaxGeneration;
+        passed &= Case(ref cases, backingStorageIdentityStable);
+        passed &= Case(ref cases,
+            HasExpectedObjectGeneration((uint)int.MaxValue) &&
+            !HasExpectedObjectGeneration(uint.MaxValue));
+
         bool allDescriptors = initial.DescriptorCount == 5u;
         for (uint selector = 4u; selector <= 8u; selector++)
         {
@@ -135,7 +160,19 @@ public static unsafe class GuideXosApplicationRegistryC188R11Tests
             snapshotBefore.RegistryIdentity.Identity ==
                 snapshotAfter.RegistryIdentity.Identity &&
             snapshotBefore.PoolIdentity.Identity ==
-                snapshotAfter.PoolIdentity.Identity;
+                snapshotAfter.PoolIdentity.Identity &&
+            snapshotBefore.RegistryObjectAddress ==
+                snapshotAfter.RegistryObjectAddress &&
+            snapshotBefore.PoolOwnerObjectAddress ==
+                snapshotAfter.PoolOwnerObjectAddress &&
+            snapshotBefore.PoolEntriesFieldAddress ==
+                snapshotAfter.PoolEntriesFieldAddress &&
+            snapshotBefore.LivePoolStorageObjectAddress ==
+                snapshotAfter.LivePoolStorageObjectAddress &&
+            snapshotBefore.TrackedPoolStorageObjectAddress ==
+                snapshotAfter.TrackedPoolStorageObjectAddress &&
+            snapshotBefore.TrackedPoolStorageLength ==
+                snapshotAfter.TrackedPoolStorageLength;
         passed &= Case(ref cases, snapshotsReadOnly);
 
         NativeGxAppContext staleContext = CreateContext(&table, 4u, 2u,

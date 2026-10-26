@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
     [Parameter(Mandatory=$true)][ValidateSet('identity','lifecycle','coexistence','production-startup','production-apps','production-lifecycle','registry-input-reentry','managed-state-provenance')][string]$Scenario,
     [Parameter()][switch]$ProductionCompatibility,
+    [Parameter()][switch]$EnableGdbStub,
     [Parameter()][ValidateRange(60,3600)][int]$MaxRuntimeSeconds = 1200,
     [Parameter()][ValidateRange(30,300)][int]$BootTimeoutSeconds = 180,
     [Parameter()][ValidateRange(30,1800)][int]$AdmissionTimeoutSeconds = 1750
@@ -79,6 +80,9 @@ $isC188R11Boot = $Scenario -eq 'managed-state-provenance' -and
 if ($isC188R11Boot) {
     . (Join-Path $PSScriptRoot 'c188r11-runner-predicates.ps1')
 }
+if ($EnableGdbStub -and -not $isC188R11Boot) {
+    throw 'The GDB stub is restricted to the QAC-owned C188R11 diagnostic scenario.'
+}
 if (($isC188R5Boot -or $isC188R6Boot -or $isC188R9Boot -or $isC188R10Boot -or $isC188R11Boot) -and (
         $qacStatusBefore -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or
         $qacListBefore -notmatch 'Reservations:\s+0' -or
@@ -122,6 +126,16 @@ $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopba
 $listener.Start()
 $qmpPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
 $listener.Stop()
+$gdbPort = 0
+if ($EnableGdbStub) {
+    do {
+        $gdbListener = [System.Net.Sockets.TcpListener]::new(
+            [System.Net.IPAddress]::Loopback,0)
+        $gdbListener.Start()
+        $gdbPort = ([System.Net.IPEndPoint]$gdbListener.LocalEndpoint).Port
+        $gdbListener.Stop()
+    } while ($gdbPort -eq $qmpPort)
+}
 $qemuArgs = @(
     '-accel','tcg','-machine','pc','-smp','1',
     '-drive',('if=pflash,format=raw,readonly=on,file='+$ovmf),
@@ -130,10 +144,13 @@ $qemuArgs = @(
     '-serial',('file:'+ $serial),
     '-qmp',('tcp:127.0.0.1:{0},server,nowait' -f $qmpPort),
     '-boot','order=c','-no-shutdown','-rtc','base=utc,clock=host')
+if ($EnableGdbStub) {
+    $qemuArgs += @('-gdb',('tcp:127.0.0.1:{0}' -f $gdbPort))
+}
 $argsEvidence = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemu) + $qemuArgs
 $reservationRequestUtc = [DateTime]::UtcNow
 $argsEvidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'qac-run-arguments.json') -Encoding utf8
-[ordered]@{qmpPort=$qmpPort;screenWidth=$null;screenHeight=$null;esp=$esp;serial=$serial} |
+[ordered]@{qmpPort=$qmpPort;gdbPort=$gdbPort;screenWidth=$null;screenHeight=$null;esp=$esp;serial=$serial} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'active.json') -Encoding utf8
 
 $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -263,14 +280,19 @@ try {
     $width = [Convert]::ToInt32($widthMatch.Groups[1].Value,16)
     $height = [Convert]::ToInt32($heightMatch.Groups[1].Value,16)
     $allProgramsCount = if ($ProductionCompatibility) { 21 } else { 22 }
-    $active = [ordered]@{qmpPort=$qmpPort;screenWidth=$width;screenHeight=$height;allProgramsCount=$allProgramsCount;productionCompatibility=[bool]$ProductionCompatibility;esp=$esp;serial=$serial;pid=$qacProcess.Id;preInputManagedSnapshotAvailable=$false;preInputManagedSnapshotReason='no existing read-only managed snapshot request interface'}
+    $active = [ordered]@{qmpPort=$qmpPort;gdbPort=$gdbPort;screenWidth=$width;screenHeight=$height;allProgramsCount=$allProgramsCount;productionCompatibility=[bool]$ProductionCompatibility;esp=$esp;serial=$serial;pid=$qacProcess.Id;qacAdmissionConfirmed=[bool]$admitted;preInputManagedSnapshotAvailable=$false;preInputManagedSnapshotReason='no existing read-only managed snapshot request interface'}
     $active | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bootRoot 'active.json') -Encoding utf8
     $qacDuringStatus = (& $qacCli status 2>&1 | Out-String)
     $qacDuringList = (& $qacCli list 2>&1 | Out-String)
     Set-Content -LiteralPath (Join-Path $bootRoot 'qac-during.status.txt') -Value $qacDuringStatus -Encoding utf8
     Set-Content -LiteralPath (Join-Path $bootRoot 'qac-during.list.txt') -Value $qacDuringList -Encoding utf8
-    if ($qacDuringList -notmatch 'guideXOSServer\s+\|\s+acceptance\s+\|\s+Running') {
-        throw 'QAC did not report the isolated guest as an active acceptance reservation.'
+    $qacDuringListConfirmed = $qacDuringList -match 'guideXOSServer\s+\|\s+acceptance\s+\|\s+Running' -and
+        $qacDuringList -match ('\(PID\s+' + [regex]::Escape([string]$qacProcess.Id) + '\)')
+    $qacDuringStatusConfirmed = $admitted -and
+        $qacDuringStatus -match 'QEMU processes:\s+1 \(0 foreign\)' -and
+        $qacDuringStatus -match 'Managed sessions:\s+1; queued:\s+0; blocked:\s+0'
+    if (-not $qacDuringListConfirmed -and -not $qacDuringStatusConfirmed) {
+        throw 'QAC did not confirm the admitted owned guest as the sole non-foreign running process.'
     }
     [void](Invoke-Qmp 'screendump' ([ordered]@{filename=(Join-Path $bootRoot 'desktop-ready.ppm')}))
     Write-Output ("C188_GUEST_READY QMP_PORT={0} FRAMEBUFFER={1}x{2} PID={3}" -f $qmpPort,$width,$height,$qacProcess.Id)
@@ -326,7 +348,11 @@ $manifest = [ordered]@{
     productionIdentityAbsent=$productionIdentityAbsent
     qacReservationId=$reservation.Groups[1].Value;qacQemuPid=$childExit.Groups[2].Value
     qemuExitCode=$qacProcess.ExitCode;qmpPort=$qmpPort;framebufferWidth=$width;framebufferHeight=$height
+    gdbStubEnabled=[bool]$EnableGdbStub;gdbPort=$gdbPort
     qacAdmissionWaitSeconds=$admissionWaitSeconds
+    qacAdmissionConfirmed=[bool]$admitted
+    qacDuringListConfirmed=[bool]$qacDuringListConfirmed
+    qacDuringStatusConfirmed=[bool]$qacDuringStatusConfirmed
     mediaHashes=$mediaHashes;serialLog=$serial;qmpLog=$qmpLog
     bootReady=($serialText -match '(?m)^\[KERNEL\] Entering main loop \(waiting for input\)\.\.\.\r?$')
     scenario=$Scenario
@@ -356,11 +382,18 @@ $manifest = [ordered]@{
     r11NativeLaunchBoundary=if ($isC188R11Boot) { Test-C188R11NativeLaunchBoundary $serialText } else { $false }
     r11ManagedLaunchState=if ($isC188R11Boot) { Test-C188R11ManagedLaunchState $serialText } else { $false }
     r11InitializationEvidence=if ($isC188R11Boot) { Test-C188R11InitializationEvidence $serialText } else { $false }
+    r11MemoryStorageStable=if ($isC188R11Boot) { Test-C188R11MemoryStorageStable $serialText } else { $false }
+    r11MemoryStorageOwnedByPersistentHeap=if ($isC188R11Boot) { Test-C188R11MemoryStorageInPersistentHeap $serialText } else { $false }
     r11NativeInputBoundary=if ($isC188R11Boot) { Test-C188R11NativeInputBoundary $serialText } else { $false }
     r11NativeInputResult=if ($isC188R11Boot) { Get-C188R11NativeInputResult $serialText } else { '' }
     r11ImageContextMatch=if ($isC188R11Boot) { Test-C188R11ImageContextMatch $serialText } else { $false }
     r11ManagedInputSnapshots=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=input-dispatch-entry .*\r?$')).Count } else { 0 }
     r11LookupResults=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=lookup .*\r?$')).Count } else { 0 }
+    r11SuccessfulLookupMarkers=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=lookup selector=4 .* m=1 .* n=5 result=0 .*\r?$')).Count } else { 0 }
+    r11NotesCallbackMarkers=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=\d+ stage=notes-callback-entry selector=4 kind=key-char value=97 shift=0 ctrl=0 result=-1\r?$')).Count } else { 0 }
+    r11ManagedCallbackReturnMarkers=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=\d+ stage=managed-callback-return selector=4 kind=key-char value=97 shift=0 ctrl=0 result=0\r?$')).Count } else { 0 }
+    persistentHeapInitializationMarkers=([regex]::Matches($serialText,'(?m)^\[NATIVEAOT-HEAP\] action=initialize count=0000000000000001 base=[A-Fa-f0-9]{16} bytes=[A-Fa-f0-9]{16} reason=initial-managed-thread-attachment\r?$')).Count
+    persistentHeapPreserveMarkers=([regex]::Matches($serialText,'(?m)^\[NATIVEAOT-HEAP\] action=preserve count=[A-Fa-f0-9]{16} resetCount=0000000000000001 base=[A-Fa-f0-9]{16} allocation=[A-Fa-f0-9]{16} reason=resident-managed-thread\r?$')).Count
     r11ManagedSequenceOrder=if ($isC188R11Boot) { Test-C188R11ManagedSequenceOrder $serialText } else { $false }
     r11ManagedNativeBoundaryCorrelation=if ($isC188R11Boot) { Test-C188R11ManagedBoundaryCorrelation $serialText } else { $false }
     r11CheckpointBAvailable=$false
@@ -454,8 +487,14 @@ $scenarioPass = switch ($Scenario) {
     'managed-state-provenance' {
         $manifest.r11NativeLaunchBoundary -and $manifest.r11ManagedLaunchState -and
             $manifest.r11InitializationEvidence -and $manifest.r11NativeInputBoundary -and
+            $manifest.r11MemoryStorageStable -and $manifest.r11MemoryStorageOwnedByPersistentHeap -and
             $manifest.r11ImageContextMatch -and $manifest.r11ManagedInputSnapshots -ge 1 -and
-            $manifest.r11LookupResults -ge 1 -and $manifest.r11ManagedSequenceOrder -and
+            $manifest.r11SuccessfulLookupMarkers -ge 1 -and
+            $manifest.r11NotesCallbackMarkers -ge 1 -and
+            $manifest.r11ManagedCallbackReturnMarkers -ge 1 -and
+            $manifest.persistentHeapInitializationMarkers -eq 1 -and
+            $manifest.persistentHeapPreserveMarkers -ge 1 -and
+            $manifest.r11ManagedSequenceOrder -and
             $manifest.r11ManagedNativeBoundaryCorrelation -and $manifest.screenshotCaptured
         break
     }

@@ -28,6 +28,19 @@ internal sealed class GuideXosManagedApplicationLifetime
     }
 
     internal object C188R11StorageObject => _entries;
+    // This is a scalar snapshot of a field location for a QAC-owned debugger
+    // watchpoint. It is neither retained nor dereferenced by managed code;
+    // callers correlate it with the GC count and re-read it at each boundary.
+    internal unsafe nuint C188R11EntriesFieldAddress
+    {
+        get
+        {
+            ref Entry[] entriesReference = ref
+                System.Runtime.CompilerServices.Unsafe.AsRef(in _entries);
+            return (nuint)System.Runtime.CompilerServices.Unsafe.AsPointer(
+                ref entriesReference);
+        }
+    }
     internal uint C188R11InitializationEpoch => _c188r11InitializationEpoch;
     internal uint C188R11ClearEvents => _c188r11ClearEvents;
     internal uint C188R11ReplacementEvents => _c188r11ReplacementEvents;

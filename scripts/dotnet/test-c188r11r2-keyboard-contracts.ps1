@@ -13,6 +13,7 @@ $notes = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof
 $textArea = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof/GuideXos/GuideXosTextArea.cs') -Raw
 $main = Get-Content -LiteralPath (Join-Path $repo 'kernel/core/main.cpp') -Raw
 $r2Runner = Get-Content -LiteralPath (Join-Path $repo 'scripts/dotnet/run-c188r11r2-keyboard-dispatch.ps1') -Raw
+$qacRunner = Get-Content -LiteralPath (Join-Path $repo 'scripts/dotnet/run-c188-qac-guest.ps1') -Raw
 $script:caseCount = 0
 
 function Assert-Contract([string]$Name, [bool]$Condition) {
@@ -130,5 +131,21 @@ Assert-Contract 'R2 runner accepts a unique isolated candidate below its phase r
     $r2Runner.Contains('[System.IO.Path]::GetFullPath($CandidateRoot)') -and
     $r2Runner.Contains('[System.IO.Path]::GetRelativePath($phaseRoot, $candidateRoot)') -and
     $r2Runner.Contains('$candidateRelative.StartsWith'))
+
+Assert-Contract 'memory watchpoints attach only to the QAC-owned loopback GDB stub' (
+    $r2Runner.Contains('[switch]$MemoryWatchpoints') -and
+    $r2Runner.Contains("if (`$MemoryWatchpoints) { `$runnerArguments += '-EnableGdbStub' }") -and
+    $r2Runner.Contains('target remote 127.0.0.1:$GdbPort') -and
+    $qacRunner.Contains("if (`$EnableGdbStub -and -not `$isC188R11Boot)"))
+Assert-Contract 'memory watchpoints cover only the selected fields and stop after sixteen hits' (
+    $r2Runner.Contains('watch *`$c188_len_addr') -and
+    $r2Runner.Contains('watch *`$c188_slot_addr') -and
+    $r2Runner.Contains('if `$c188_hits >= 16'))
+Assert-Contract 'input gate waits for QAC census files and accepts only an exclusive owned-session status' (
+    $r2Runner.Contains('$duringCensusDeadline') -and
+    $r2Runner.Contains('QEMU processes:\s+1 \(0 foreign\)') -and
+    $r2Runner.Contains('Managed sessions:\s+1; queued:\s+0; blocked:\s+0') -and
+    $qacRunner.Contains('$qacDuringStatusConfirmed = $admitted -and') -and
+    $qacRunner.Contains('qacAdmissionConfirmed=[bool]$admitted'))
 
 Write-Output "C188R11R2-KEYBOARD-CONTRACTS cases=$script:caseCount result=PASS"

@@ -63,25 +63,32 @@ $runCode = $LASTEXITCODE
 $log = Join-Path $root 'qualification.log'
 Set-Content -LiteralPath $log -Value $output -Encoding utf8
 $r10 = [regex]::IsMatch($output,'(?m)^C188R10-STATE-REENTRY cases=14 firstFailedCase=0 result=PASS\s*$')
-$r11 = [regex]::IsMatch($output,'(?m)^C188R11-STATE-PROVENANCE cases=13 firstFailedCase=0 result=PASS\s*$')
+$r11 = [regex]::IsMatch($output,'(?m)^C188R11-STATE-PROVENANCE cases=15 firstFailedCase=0 result=PASS\s*$')
 if ($runCode -ne 0 -or -not $r10 -or -not $r11) { throw "C188R11 hosted provenance regressions failed ($runCode). See $log" }
 & (Join-Path $PSScriptRoot 'test-c188r11-runner-predicates.ps1') 2>&1 | Set-Content -LiteralPath (Join-Path $root 'runner-predicates.log') -Encoding utf8
 if ($LASTEXITCODE -ne 0) { throw 'C188R11 runner predicate qualification failed.' }
 $outputBounds = (& (Join-Path $PSScriptRoot 'test-c188r11-output-bounds.ps1') 2>&1 | Out-String)
 Set-Content -LiteralPath (Join-Path $root 'output-bounds.log') -Value $outputBounds -Encoding utf8
-if (-not [regex]::IsMatch($outputBounds,'(?m)^C188R11-OUTPUT-BOUNDS cases=5 result=PASS\b')) {
+if (-not [regex]::IsMatch($outputBounds,'(?m)^C188R11-OUTPUT-BOUNDS cases=6 result=PASS\b')) {
     throw 'C188R11 output-bound qualification failed.'
 }
+$runtimeLifecycle = (& (Join-Path $PSScriptRoot 'test-c188r11-runtime-lifecycle.ps1') 2>&1 | Out-String)
+Set-Content -LiteralPath (Join-Path $root 'runtime-lifecycle.log') -Value $runtimeLifecycle -Encoding utf8
+if (-not [regex]::IsMatch($runtimeLifecycle,'(?m)^C188R11-RUNTIME-LIFECYCLE cases=7 result=PASS\b')) {
+    throw 'C188R11 runtime lifecycle qualification failed.'
+}
 $manifest = [ordered]@{
-    result='PASS';outputRoot=$root;r9Cases=14;priorR10Cases=14;r11Cases=13
-    runnerPredicateCases=26;outputBoundCases=5;restoreExitCode=$restoreCode;runExitCode=$runCode
+    result='PASS';outputRoot=$root;r9Cases=14;priorR10Cases=14;r11Cases=15
+    runnerPredicateCases=30;outputBoundCases=6;runtimeLifecycleCases=7
+    restoreExitCode=$restoreCode;runExitCode=$runCode
     independentBuildsSha256=(Get-FileHash -LiteralPath (Join-Path $root 'independent-builds.log') -Algorithm SHA256).Hash
     r9QualificationSha256=(Get-FileHash -LiteralPath (Join-Path $root 'c188r9-registry.log') -Algorithm SHA256).Hash
     restoreSha256=(Get-FileHash -LiteralPath (Join-Path $root 'restore.log') -Algorithm SHA256).Hash
     qualificationSha256=(Get-FileHash -LiteralPath $log -Algorithm SHA256).Hash
     runnerPredicatesSha256=(Get-FileHash -LiteralPath (Join-Path $root 'runner-predicates.log') -Algorithm SHA256).Hash
+    runtimeLifecycleSha256=(Get-FileHash -LiteralPath (Join-Path $root 'runtime-lifecycle.log') -Algorithm SHA256).Hash
 }
 $manifestPath = Join-Path $root 'manifest.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-Write-Output "C188R11_HOSTED=PASS R9_CASES=14 R10_CASES=14 R11_CASES=13 RUNNER_PREDICATES=26"
+Write-Output "C188R11_HOSTED=PASS R9_CASES=14 R10_CASES=14 R11_CASES=15 RUNNER_PREDICATES=30 RUNTIME_LIFECYCLE=7"
 Write-Output "C188R11_HOSTED_MANIFEST=$manifestPath"

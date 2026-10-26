@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory=$true)][string]$BootEvidencePath,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
     [Parameter()][string]$CandidateRoot = '',
+    [Parameter()][switch]$MemoryWatchpoints,
     [Parameter()][ValidateRange(120,600)][int]$MaxRuntimeSeconds = 300
 )
 $ErrorActionPreference = 'Stop'
@@ -90,8 +91,12 @@ $serialPath = Join-Path $bootRoot 'serial.log'
 $controllerStdout = Join-Path $bootRoot 'r2-controller.stdout.log'
 $controllerStderr = Join-Path $bootRoot 'r2-controller.stderr.log'
 $controllerManifest = Join-Path $bootRoot 'r2-keyboard-dispatch.json'
+$gdbScriptPath = Join-Path $bootRoot 'r4-memory-watchpoints.gdb'
+$gdbStdoutPath = Join-Path $bootRoot 'r4-gdb.stdout.log'
+$gdbStderrPath = Join-Path $bootRoot 'r4-gdb.stderr.log'
 $qmpActions = [System.Collections.Generic.List[object]]::new()
-foreach ($path in @($controllerStdout,$controllerStderr,$controllerManifest)) {
+foreach ($path in @($controllerStdout,$controllerStderr,$controllerManifest,
+    $gdbScriptPath,$gdbStdoutPath,$gdbStderrPath)) {
     if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite C188R11R2 evidence: $path" }
 }
 
@@ -99,6 +104,9 @@ $localQemu = @(Get-Process -Name 'qemu-system-x86_64' -ErrorAction SilentlyConti
 if ($localQemu.Count -ne 0) {
     throw 'Local QEMU process census is nonempty; the R2 guest was not attempted.'
 }
+$gdbCommand = if ($MemoryWatchpoints) {
+    Get-Command 'gdb.exe' -ErrorAction Stop | Select-Object -First 1
+} else { $null }
 
 $psi = [System.Diagnostics.ProcessStartInfo]::new()
 $psi.FileName = $pwsh.Source
@@ -107,14 +115,16 @@ $psi.UseShellExecute = $false
 $psi.CreateNoWindow = $true
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
-foreach ($argument in @(
+$runnerArguments = @(
     '-NoProfile','-File',$runner,
     '-BootEvidencePath',$bootRoot,
     '-ExpectedKernelSha256',$ExpectedKernelSha256,
     '-Scenario','managed-state-provenance',
     '-MaxRuntimeSeconds',[string]$MaxRuntimeSeconds,
     '-BootTimeoutSeconds','180',
-    '-AdmissionTimeoutSeconds','60')) {
+    '-AdmissionTimeoutSeconds','60')
+if ($MemoryWatchpoints) { $runnerArguments += '-EnableGdbStub' }
+foreach ($argument in $runnerArguments) {
     [void]$psi.ArgumentList.Add([string]$argument)
 }
 $qacRunner = [System.Diagnostics.Process]::Start($psi)
@@ -125,6 +135,9 @@ $inputSent = $false
 $focusVerified = $false
 $runnerExitCode = -1
 $shutdownRequested = $false
+$gdbProcess = $null
+$watchpointStatus = if ($MemoryWatchpoints) { 'WAITING_FOR_REGISTRY_SNAPSHOT' } else { 'NOT_REQUESTED' }
+$watchpointAttempted = $false
 
 function Invoke-C188R11R2Control([string[]]$Arguments, [string]$Name) {
     $output = (& $python.Source $control '--active' $activePath @Arguments 2>&1 | Out-String)
@@ -135,6 +148,98 @@ function Invoke-C188R11R2Control([string[]]$Arguments, [string]$Name) {
         throw "QMP action '$Name' failed with exit code $($exitCode): $output"
     }
     return [ordered]@{name=$Name;exitCode=$exitCode;log=$logPath}
+}
+
+function Start-C188R11R4MemoryWatchpoints($Snapshot, [int]$GdbPort) {
+    if (-not $MemoryWatchpoints -or $GdbPort -le 0 -or
+        $Snapshot.Groups['registry'].Value -eq '0000000000000000' -or
+        $Snapshot.Groups['slot'].Value -eq '0000000000000000') {
+        $script:watchpointStatus = 'INVALID_TARGET_ADDRESS'
+        return
+    }
+    $registryAddress = [Convert]::ToUInt64(
+        $Snapshot.Groups['registry'].Value,16)
+    $registryLengthAddress = ($registryAddress + 8u).ToString('X16')
+    $poolEntriesSlot = $Snapshot.Groups['slot'].Value
+    $gdbText = @"
+set pagination off
+set confirm off
+set architecture i386:x86-64
+target remote 127.0.0.1:$GdbPort
+set `$c188_hits = 0
+set `$c188_len_addr = (unsigned int*)0x$registryLengthAddress
+set `$c188_slot_addr = (unsigned long long*)0x$poolEntriesSlot
+set `$c188_old_len = *`$c188_len_addr
+set `$c188_old_entries = *`$c188_slot_addr
+watch *`$c188_len_addr
+set `$c188_len_bp = `$bpnum
+watch *`$c188_slot_addr
+set `$c188_slot_bp = `$bpnum
+commands `$c188_len_bp
+  silent
+  set `$c188_hits = `$c188_hits + 1
+  set `$c188_new_len = *`$c188_len_addr
+  printf "[C188R11R4-WATCH] hit=%u field=registry-length old=%u new=%u pc=%p\n", `$c188_hits, `$c188_old_len, `$c188_new_len, `$pc
+  x/8i `$pc-16
+  info registers rax rbx rcx rdx rsi rdi rbp rsp r8 r9 r10 r11
+  set `$c188_old_len = `$c188_new_len
+  if `$c188_hits >= 16
+    disable `$c188_len_bp
+    disable `$c188_slot_bp
+    printf "[C188R11R4-WATCH] bounded-hit-limit reached=16\n"
+  end
+  continue
+end
+commands `$c188_slot_bp
+  silent
+  set `$c188_hits = `$c188_hits + 1
+  set `$c188_new_entries = *`$c188_slot_addr
+  printf "[C188R11R4-WATCH] hit=%u field=pool-entries old=%016llx new=%016llx pc=%p\n", `$c188_hits, `$c188_old_entries, `$c188_new_entries, `$pc
+  x/8i `$pc-16
+  info registers rax rbx rcx rdx rsi rdi rbp rsp r8 r9 r10 r11
+  set `$c188_old_entries = `$c188_new_entries
+  if `$c188_hits >= 16
+    disable `$c188_len_bp
+    disable `$c188_slot_bp
+    printf "[C188R11R4-WATCH] bounded-hit-limit reached=16\n"
+  end
+  continue
+end
+printf "[C188R11R4-WATCH] watchpoints-armed registry-length=0x$registryLengthAddress pool-entries=0x$poolEntriesSlot\n"
+continue
+"@
+    Set-Content -LiteralPath $gdbScriptPath -Value $gdbText -Encoding ascii
+    $script:watchpointAttempted = $true
+    $script:watchpointStatus = 'STARTING'
+    $script:gdbProcess = Start-Process -FilePath $gdbCommand.Source `
+        -ArgumentList @('-q','-batch','-x',$gdbScriptPath) `
+        -RedirectStandardOutput $gdbStdoutPath `
+        -RedirectStandardError $gdbStderrPath `
+        -WindowStyle Hidden -PassThru
+    if (-not $script:gdbProcess) {
+        $script:watchpointStatus = 'FAILED_TO_START'
+        return
+    }
+
+    $armDeadline = (Get-Date).AddSeconds(20)
+    do {
+        if (Test-Path -LiteralPath $gdbStdoutPath -PathType Leaf) {
+            $gdbTextNow = [System.IO.File]::ReadAllText($gdbStdoutPath)
+            if ($gdbTextNow.Contains('[C188R11R4-WATCH] watchpoints-armed')) {
+                $script:watchpointStatus = 'ARMED'
+                return
+            }
+        }
+        if ($script:gdbProcess.HasExited) { break }
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $armDeadline)
+
+    $script:watchpointStatus = if ($script:gdbProcess.HasExited) {
+        'GDB_SETUP_FAILED'
+    } else { 'GDB_SETUP_TIMEOUT' }
+    if (-not $script:gdbProcess.HasExited) {
+        Stop-Process -Id $script:gdbProcess.Id -Force -ErrorAction SilentlyContinue
+    }
 }
 
 try {
@@ -149,8 +254,16 @@ try {
             (Test-Path -LiteralPath $serialPath -PathType Leaf)) {
             try {
                 $active = Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json
+                $serialText = Get-Content -LiteralPath $serialPath -Raw
+                if ($MemoryWatchpoints -and -not $watchpointAttempted) {
+                    $registryInitSnapshot = Get-C188R11MemorySnapshot `
+                        $serialText 'registry-init'
+                    if ($registryInitSnapshot.Success) {
+                        Start-C188R11R4MemoryWatchpoints $registryInitSnapshot `
+                            ([int]$active.gdbPort)
+                    }
+                }
                 if ([int]$active.screenWidth -gt 0 -and [int]$active.screenHeight -gt 0) {
-                    $serialText = Get-Content -LiteralPath $serialPath -Raw
                     $ready = Test-C188R11NotesReady $serialText
                     $focusVerified = [regex]::IsMatch($serialText,
                         '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=.+? result=focused\r?$')
@@ -158,7 +271,7 @@ try {
                 }
             } catch { $ready = $false; $focusVerified = $false }
         }
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds $(if ($MemoryWatchpoints -and -not $watchpointAttempted) { 25 } else { 250 })
     } while ((Get-Date) -lt $readyDeadline)
     if (-not $ready) { throw 'C188R11 readiness predicate did not reach the corrected managed-return boundary.' }
     if (-not $focusVerified) {
@@ -173,10 +286,27 @@ try {
         $beforeList -notmatch 'Reservations:\s+0') {
         throw 'QAC pre-admission census was not exclusive and empty; no key event was sent.'
     }
-    $duringList = Get-Content -LiteralPath (Join-Path $bootRoot 'qac-during.list.txt') -Raw
+    $duringListPath = Join-Path $bootRoot 'qac-during.list.txt'
+    $duringStatusPath = Join-Path $bootRoot 'qac-during.status.txt'
+    $duringCensusDeadline = (Get-Date).AddSeconds(15)
+    while ((-not (Test-Path -LiteralPath $duringListPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $duringStatusPath -PathType Leaf)) -and
+            -not $qacRunner.HasExited -and (Get-Date) -lt $duringCensusDeadline) {
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not (Test-Path -LiteralPath $duringListPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $duringStatusPath -PathType Leaf)) {
+        throw 'QAC did not publish the during-run census before the input gate; no key event was sent.'
+    }
+    $duringList = Get-Content -LiteralPath $duringListPath -Raw
+    $duringStatus = Get-Content -LiteralPath $duringStatusPath -Raw
     $active = Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json
-    if ($duringList -notmatch 'guideXOSServer\s+\|\s+acceptance\s+\|\s+Running' -or
-        $duringList -notmatch ('\(PID\s+' + [regex]::Escape([string]$active.pid) + '\)')) {
+    $duringListOwnsGuest = $duringList -match 'guideXOSServer\s+\|\s+acceptance\s+\|\s+Running' -and
+        $duringList -match ('\(PID\s+' + [regex]::Escape([string]$active.pid) + '\)')
+    $duringStatusOwnsGuest = [bool]$active.qacAdmissionConfirmed -and
+        $duringStatus -match 'QEMU processes:\s+1 \(0 foreign\)' -and
+        $duringStatus -match 'Managed sessions:\s+1; queued:\s+0; blocked:\s+0'
+    if (-not $duringListOwnsGuest -and -not $duringStatusOwnsGuest) {
         throw 'QAC did not show the owned acceptance reservation for the active guest; no key event was sent.'
     }
 
@@ -210,6 +340,12 @@ try {
     if ($qacRunner.HasExited) { $runnerExitCode = $qacRunner.ExitCode }
     throw
 } finally {
+    if ($gdbProcess -and -not $gdbProcess.HasExited) {
+        [void]$gdbProcess.WaitForExit(5000)
+        if (-not $gdbProcess.HasExited) {
+            Stop-Process -Id $gdbProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
     if ($qacRunner.HasExited) {
         Set-Content -LiteralPath $controllerStdout -Value $stdoutTask.GetAwaiter().GetResult() -Encoding utf8
         Set-Content -LiteralPath $controllerStderr -Value $stderrTask.GetAwaiter().GetResult() -Encoding utf8
@@ -246,18 +382,61 @@ $releaseVerified = $shutdownRequested -and $reservation.Success -and
 $ownedQemuExited = $qemuChild.Success -and
     -not (Get-Process -Id ([int]$qemuChild.Groups[2].Value) -ErrorAction SilentlyContinue)
 $trace = Get-C188R11R2KeyboardEvidence $serialText
+$memoryInitialization = Get-C188R11MemorySnapshot $serialText 'registry-init'
+$memoryLaunch = Get-C188R11MemorySnapshot $serialText 'managed-return'
+$memoryInput = Get-C188R11MemorySnapshot $serialText 'input-dispatch-entry'
+$memoryStorageStable = Test-C188R11MemoryStorageStable $serialText
+$memoryStorageOwnedByPersistentHeap =
+    Test-C188R11MemoryStorageInPersistentHeap $serialText
+$memoryStorageLocalized = $false
+if ($memoryInitialization.Success -and $memoryLaunch.Success -and
+    $memoryInput.Success -and $trace.registryCount -eq 0 -and
+    $trace.residentMask -eq 0) {
+    $memoryStorageLocalized =
+        $memoryInitialization.Groups['registry'].Value -eq $memoryLaunch.Groups['registry'].Value -and
+        $memoryLaunch.Groups['registry'].Value -eq $memoryInput.Groups['registry'].Value -and
+        $memoryInitialization.Groups['owner'].Value -eq $memoryLaunch.Groups['owner'].Value -and
+        $memoryLaunch.Groups['owner'].Value -eq $memoryInput.Groups['owner'].Value -and
+        $memoryInitialization.Groups['slot'].Value -eq $memoryLaunch.Groups['slot'].Value -and
+        $memoryLaunch.Groups['slot'].Value -eq $memoryInput.Groups['slot'].Value -and
+        $memoryInitialization.Groups['gc'].Value -eq $memoryLaunch.Groups['gc'].Value -and
+        $memoryLaunch.Groups['gc'].Value -eq $memoryInput.Groups['gc'].Value -and
+        $memoryInput.Groups['live'].Value -eq '0000000000000000' -and
+        $memoryInput.Groups['held'].Value -eq $memoryLaunch.Groups['live'].Value -and
+        $memoryInput.Groups['heldLen'].Value -eq '5'
+}
+$gdbText = if (Test-Path -LiteralPath $gdbStdoutPath -PathType Leaf) {
+    [System.IO.File]::ReadAllText($gdbStdoutPath)
+} else { '' }
+$gdbErrorText = if (Test-Path -LiteralPath $gdbStderrPath -PathType Leaf) {
+    [System.IO.File]::ReadAllText($gdbStderrPath)
+} else { '' }
+$watchpointHits = [regex]::Matches($gdbText,
+    '(?m)^\[C188R11R4-WATCH\] hit=\d+ field=(?:registry-length|pool-entries)')
+if ($MemoryWatchpoints -and $watchpointStatus -eq 'ARMED') {
+    $watchpointStatus = if ($watchpointHits.Count -gt 0) {
+        'ARMED_HITS_CAPTURED'
+    } else { 'ARMED_NO_HITS' }
+}
 $baseManifestPath = Join-Path $bootRoot 'acceptance-manifest.json'
 $baseManifest = if (Test-Path -LiteralPath $baseManifestPath) {
     Get-Content -LiteralPath $baseManifestPath -Raw | ConvertFrom-Json
 } else { $null }
 $degradedCensus = $qacStderr -match 'reservation .* is degraded.*QEMU process census is incomplete'
-$outcome = if ($trace.managedStateQualified) {
-    'MANAGED_DISPATCH_QUALIFIED'
-} elseif ($trace.irqScancodeReceived -or $trace.kernelDequeued -or
-    $trace.focusedNotesTarget -or $trace.nativeManagedEntry) {
-    'INPUT_BOUNDARY_LOCALIZED'
+$rootCauseFixedAndQualified = $trace.traceComplete -and
+    $trace.registryCount -eq 5 -and $trace.residentMask -eq 1 -and
+    $trace.lookupResult -eq 0 -and $trace.notesCallbackEntry -and
+    $memoryStorageStable -and $memoryStorageOwnedByPersistentHeap -and
+    $baseManifest -and $baseManifest.result -eq 'PASS' -and
+    $releaseVerified -and $ownedQemuExited -and $runnerExitCode -eq 0
+$outcome = if ($rootCauseFixedAndQualified) {
+    'ROOT_CAUSE_FIXED_AND_QUALIFIED'
+} elseif ($memoryStorageLocalized) {
+    'MEMORY_FAILURE_LOCALIZED'
+} elseif ($watchpointHits.Count -gt 0) {
+    'ROOT_CAUSE_PROVEN'
 } else {
-    'DIAGNOSTIC_INCONCLUSIVE'
+    'BLOCKED_OR_INCONCLUSIVE'
 }
 $manifest = [ordered]@{
     outcome=$outcome
@@ -266,13 +445,31 @@ $manifest = [ordered]@{
     shiftExpectedManagedCallback=$false
     focusVerifiedBeforeInput=$focusVerified
     qacPreAdmissionExclusive=($beforeStatus -match 'QEMU processes:\s+0 \(0 foreign\)' -and $beforeList -match 'Reservations:\s+0')
-    qacOwnedAcceptanceRunning=($duringList -match 'guideXOSServer\s+\|\s+acceptance\s+\|\s+Running' -and $duringList -match ('\(PID\s+' + [regex]::Escape([string]$active.pid) + '\)'))
+    qacOwnedAcceptanceRunning=[bool]($duringListOwnsGuest -or $duringStatusOwnsGuest)
     qacReservationId=$(if ($reservation.Success) { $reservation.Groups[1].Value } else { '' })
     qemuPid=$(if ($qemuChild.Success) { $qemuChild.Groups[2].Value } else { '' })
     qacReleaseVerified=[bool]$releaseVerified
     ownedQemuExited=[bool]$ownedQemuExited
     qacDegradedProcessCensusWarning=[bool]$degradedCensus
     trace=$trace
+    memorySnapshots=[ordered]@{
+        registryInitialization=$(if ($memoryInitialization.Success) { $memoryInitialization.Value } else { $null })
+        managedLaunchReturn=$(if ($memoryLaunch.Success) { $memoryLaunch.Value } else { $null })
+        firstInput=$(if ($memoryInput.Success) { $memoryInput.Value } else { $null })
+    }
+    memoryFailureLocalized=[bool]$memoryStorageLocalized
+    memoryStorageStable=[bool]$memoryStorageStable
+    memoryStorageOwnedByPersistentHeap=[bool]$memoryStorageOwnedByPersistentHeap
+    rootCauseFixedAndQualified=[bool]$rootCauseFixedAndQualified
+    memoryWatchpointsRequested=[bool]$MemoryWatchpoints
+    memoryWatchpointStatus=$watchpointStatus
+    memoryWatchpointHitCount=$watchpointHits.Count
+    gdbScriptPath=$(if (Test-Path -LiteralPath $gdbScriptPath) { $gdbScriptPath } else { '' })
+    gdbStdoutPath=$(if (Test-Path -LiteralPath $gdbStdoutPath) { $gdbStdoutPath } else { '' })
+    gdbStdoutSha256=$(if (Test-Path -LiteralPath $gdbStdoutPath) { (Get-FileHash -LiteralPath $gdbStdoutPath -Algorithm SHA256).Hash } else { '' })
+    gdbStderrPath=$(if (Test-Path -LiteralPath $gdbStderrPath) { $gdbStderrPath } else { '' })
+    gdbStderrSha256=$(if (Test-Path -LiteralPath $gdbStderrPath) { (Get-FileHash -LiteralPath $gdbStderrPath -Algorithm SHA256).Hash } else { '' })
+    gdbStderr=$gdbErrorText
     notesCallbackReached=[bool]$trace.notesCallbackEntry
     registryCount=$trace.registryCount
     residentMask=$trace.residentMask
@@ -290,7 +487,7 @@ $manifest = [ordered]@{
     runnerExitCode=$runnerExitCode
 }
 $manifest | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $controllerManifest -Encoding utf8
-Write-Output "C188R11R2_KEYBOARD=$outcome INPUT_SENT=$inputSent MANAGED_STATE=$($trace.managedStateQualified) CALLBACK=$($trace.notesCallbackEntry) REGISTRY_COUNT=$($trace.registryCount) RESIDENT_MASK=$($trace.residentMask) QAC_RELEASE=$releaseVerified QAC_DEGRADED=$degradedCensus"
+Write-Output "C188R11R4_MEMORY=$outcome INPUT_SENT=$inputSent MANAGED_STATE=$($trace.managedStateQualified) CALLBACK=$($trace.notesCallbackEntry) REGISTRY_COUNT=$($trace.registryCount) RESIDENT_MASK=$($trace.residentMask) MEMORY_STABLE=$memoryStorageStable WATCHPOINTS=$watchpointStatus HITS=$($watchpointHits.Count) QAC_RELEASE=$releaseVerified QAC_DEGRADED=$degradedCensus"
 Write-Output "C188R11R2_KEYBOARD_MANIFEST=$controllerManifest"
 if (-not $releaseVerified -or -not $ownedQemuExited) {
     throw 'The owned C188R11R2 QAC process or reservation did not complete verified shutdown.'

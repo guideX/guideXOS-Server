@@ -10,8 +10,11 @@
 [C102-MANAGED-OUTPUT] C188R11-REG seq=5 selector=7
 [C102-MANAGED-OUTPUT] C188R11-REG seq=6 selector=8
 [C188R11-NATIVE] nseq=00000005 stage=managed-init-event regEpoch=00000001 poolEpoch=00000001 module=00000001
+[NATIVEAOT-HEAP] action=initialize count=0000000000000001 base=0000000200000000 bytes=0000000000010000 reason=initial-managed-thread-attachment
+[C102-MANAGED-OUTPUT] C188R11-MEM seq=7 st=registry-init ra=0000000200001000 owner=0000000200002000 slot=0000000200002010 live=0000000200003000 held=0000000200003000 gen=0:0:0:0 gc=0 heldLen=5
 [C102-MANAGED-OUTPUT] C188R11-INIT seq=7 re=1 pe=1 rg=1 p=1 ps=1
 [C102-MANAGED-OUTPUT] C188R11 state seq=8 st=launch-dispatch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=0 g=0 td=0 n=5 result=-1 gc=0 w=0:0
+[C102-MANAGED-OUTPUT] C188R11-MEM seq=8 st=launch-dispatch-entry ra=0000000200001000 owner=0000000200002000 slot=0000000200002010 live=0000000200003000 held=0000000200003000 gen=0:0:0:0 gc=0 heldLen=5
 [C102-MANAGED-OUTPUT] C188R11 state seq=9 st=before-tryfind selector=4 ownerGen=0 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=0 g=0 td=0 n=5 result=-1 gc=0 w=0:0
 [C102-MANAGED-OUTPUT] C188R11 state seq=10 st=lookup selector=4 ownerGen=0 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=0 g=0 td=0 n=5 result=0 gc=0 w=0:0
 [C102-MANAGED-OUTPUT] C188R11 state seq=11 st=before-resident selector=4 ownerGen=0 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=0 g=0 td=0 n=5 result=-1 gc=0 w=0:0
@@ -20,6 +23,7 @@
 [C150-SURFACE] action=create appId=com.guidexos.apps.managed.notes generation=00000001 window=000003E8 result=PASS
 [C102-MANAGED-OUTPUT] C188R11 state seq=14 st=launch-return selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=0 w=1:1
 [C102-MANAGED-OUTPUT] C188R11 state seq=15 st=managed-return selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=0 w=1:1
+[C102-MANAGED-OUTPUT] C188R11-MEM seq=15 st=managed-return ra=0000000200001000 owner=0000000200002000 slot=0000000200002010 live=0000000200003000 held=0000000200003000 gen=0:0:0:0 gc=0 heldLen=5
 [C102-MANAGED-OUTPUT] C188R11-MANAGED stage=exit seq=16 call=1 corr=1 id=4 gen=1 in=0 rc=0
 [C188R11-NATIVE] nseq=00000006 stage=after-managed-return route=resident-launch call=00000001 corr=00000001 id=4 gen=00000001 input=00000000 module=00000001 entryOff=0000000000001000 segments=00000007 span=000000000004BE80 rc=00000000
 [KERNEL] Entering main loop (waiting for input)...
@@ -27,6 +31,7 @@
 [C188R11-HOST] nseq=00000008 stage=ready-reentry hostEpoch=00000001 readyCalls=00000001 regEpoch=00000001 poolEpoch=00000001 module=00000001
 [C102-MANAGED-OUTPUT] C188R11-MANAGED stage=entry seq=17 call=2 corr=2 id=4 gen=1 in=1 rc=-1
 [C102-MANAGED-OUTPUT] C188R11 state seq=18 st=input-dispatch-entry selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1 gc=0 w=1:1
+[C102-MANAGED-OUTPUT] C188R11-MEM seq=18 st=input-dispatch-entry ra=0000000200001000 owner=0000000200002000 slot=0000000200002010 live=0000000200003000 held=0000000200003000 gen=0:0:0:0 gc=0 heldLen=5
 [C102-MANAGED-OUTPUT] C188R11 state seq=19 st=before-tryfind selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=-1 gc=0 w=1:1
 [C102-MANAGED-OUTPUT] C188R11 state seq=20 st=lookup selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=0 w=1:1
 [C102-MANAGED-OUTPUT] C188R11 state seq=21 st=resident-found selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=0 w=1:1

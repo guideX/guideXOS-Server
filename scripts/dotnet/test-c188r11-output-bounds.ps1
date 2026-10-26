@@ -46,4 +46,10 @@ if (@($fixtureBodyLengths | Where-Object { $_ -gt 255 }).Count -ne 0) {
 }
 $checks++
 
+if (-not [regex]::IsMatch($managedRegistry,
+        '(?s)s_c188r11MemoryTraceRecords >= 48u.*?stackalloc byte\[224\].*?AppendC188R11Address.*?shift -= 4')) {
+    throw 'C188R11 physical-storage provenance must remain capped at 48 snapshots and emit fixed-width addresses from bounded stack storage.'
+}
+$checks++
+
 Write-Output "C188R11-OUTPUT-BOUNDS cases=$checks result=PASS maxFixtureBodyBytes=$maxFixtureBodyLength"

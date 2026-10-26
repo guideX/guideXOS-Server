@@ -58,6 +58,9 @@ $arguments = @{
     AllocationMode = 'Allocating'
     ManagedProjectMode = 'C160Composite'
     ProductionApplication = $true
+    # The production composite remains resident and receives later managed
+    # input callbacks, so its image-backed managed heap must remain resident.
+    PersistentCompositeLifecycle = $true
     UseGuideXosRuntimePack = $true
     C155ManagedNotesSession = $true
     C156ControlModifierShortcuts = $true
@@ -91,6 +94,14 @@ if ($LASTEXITCODE -ne 0 -or $header -notmatch 'Advanced Micro Devices X86-64') {
 }
 $mapText = [System.IO.File]::ReadAllText($mapPath)
 $elfText = [System.Text.Encoding]::ASCII.GetString($elfBytes)
+$runtimePackManifestPath = Join-Path $runtimePackOutput 'runtime-pack.manifest.json'
+if (-not (Test-Path -LiteralPath $runtimePackManifestPath -PathType Leaf)) {
+    throw "Production runtime-pack manifest is missing: $runtimePackManifestPath"
+}
+$runtimePackManifest = Get-Content -LiteralPath $runtimePackManifestPath -Raw | ConvertFrom-Json
+if (-not [bool]$runtimePackManifest.persistentCompositeLifecycle) {
+    throw 'C188 production NativeAOT must preserve its managed heap across reverse-P/Invoke entries.'
+}
 foreach ($required in @('GuideXosNativeAotApplicationEntry','GuideXosApplicationRegistry__Dispatch')) {
     if (-not $mapText.Contains($required)) { throw "Production NativeAOT map omitted standard dispatch symbol $required" }
 }
@@ -123,8 +134,9 @@ $manifest = [ordered]@{
     elfSha256=(Get-FileHash -LiteralPath $elfPath -Algorithm SHA256).Hash
     mapSha256=(Get-FileHash -LiteralPath $mapPath -Algorithm SHA256).Hash
     buildLogSha256=(Get-FileHash -LiteralPath $logPath -Algorithm SHA256).Hash
-    runtimePackManifest=Join-Path $runtimePackOutput 'runtime-pack.manifest.json'
-    runtimePackManifestSha256=(Get-FileHash -LiteralPath (Join-Path $runtimePackOutput 'runtime-pack.manifest.json') -Algorithm SHA256).Hash
+    persistentCompositeLifecycle=[bool]$runtimePackManifest.persistentCompositeLifecycle
+    runtimePackManifest=$runtimePackManifestPath
+    runtimePackManifestSha256=(Get-FileHash -LiteralPath $runtimePackManifestPath -Algorithm SHA256).Hash
     freestandingElfHeader=$header.Trim()
 }
 $manifestPath = Join-Path $root 'production-nativeaot-qualification.json'

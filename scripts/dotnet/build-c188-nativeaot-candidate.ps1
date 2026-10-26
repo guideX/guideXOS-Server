@@ -72,6 +72,10 @@ $arguments = @{
     # CounterApp route; it does not need C167 proof-control behavior.
     ManagedProjectMode = 'C160Composite'
     ProductionApplication = $true
+    # The resident composite is re-entered for app input after Launch returns.
+    # Keep its image-backed managed heap alive across those reverse-P/Invoke
+    # boundaries instead of clearing objects still referenced by static roots.
+    PersistentCompositeLifecycle = $true
     # Use the ordinary app build for guest UI runs; hosted suites carry the
     # regression coverage without executing proof routines on first launch.
     C166OrdinaryBuild = $true
@@ -155,10 +159,21 @@ if ($ManagedStateReentry) { $verifyArguments.ManagedStateReentry = $true }
 if ($ManagedStateProvenance) { $verifyArguments.ManagedStateProvenance = $true }
 & $verify @verifyArguments
 if ($LASTEXITCODE -ne 0) { throw "C188 NativeAOT artifact verification failed with exit code $LASTEXITCODE." }
+$runtimePackManifestPath = Join-Path $runtimePackOutput 'runtime-pack.manifest.json'
+if (-not (Test-Path -LiteralPath $runtimePackManifestPath -PathType Leaf)) {
+    throw "C188 runtime-pack manifest is missing: $runtimePackManifestPath"
+}
+$runtimePackManifest = Get-Content -LiteralPath $runtimePackManifestPath -Raw | ConvertFrom-Json
+if (-not [bool]$runtimePackManifest.persistentCompositeLifecycle) {
+    throw 'C188 resident managed application candidate must preserve its image-backed heap across reverse-P/Invoke entries.'
+}
 $kernelElf = Join-Path $nativeRoot 'artifacts/HostLogProof.elf'
 $manifest = [ordered]@{
     result='PASS'; buildRoot=$build; nativeAotRoot=$nativeRoot
     runtimePackRoot=$runtimePackOutput; directoryBuildProps=$propsPath
+    persistentCompositeLifecycle=[bool]$runtimePackManifest.persistentCompositeLifecycle
+    runtimePackManifest=$runtimePackManifestPath
+    runtimePackManifestSha256=(Get-FileHash -LiteralPath $runtimePackManifestPath -Algorithm SHA256).Hash
     kernelElf=$kernelElf
     kernelElfSha256=(Get-FileHash -LiteralPath $kernelElf -Algorithm SHA256).Hash
     buildLogSha256=(Get-FileHash -LiteralPath $logPath -Algorithm SHA256).Hash
