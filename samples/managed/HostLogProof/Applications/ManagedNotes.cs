@@ -4477,6 +4477,15 @@ public sealed partial class ManagedNotes : GuideXosApplication
             }
 #endif
             if (controlId == 0) return GuideXosResult.Success;
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            bool traceC188R4R2DocumentPointer =
+                controlId == C120DocumentControlId;
+            if (traceC188R4R2DocumentPointer)
+            {
+                LogC188R11R4R2EditorState(host, "before-pointer"u8, input,
+                    false, GuideXosTextAreaEditResult.Ignored, false);
+            }
+#endif
             GuideXosControlHostResult pointerResult = controlId == C120DocumentControlId
                 ? _mainControlHost.FocusAndRoutePointer(
                     controlId, input.X, input.Y, 20, 72, 8, 18)
@@ -4647,8 +4656,22 @@ public sealed partial class ManagedNotes : GuideXosApplication
                     pointerResult == GuideXosControlHostResult.Focused
                     ? "C120-POINTER target=document result=PASS"u8
                     : "C120-POINTER result=FAIL"u8);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            bool pointerRendered = RenderMain(host, surface, _launchCount);
+            if (traceC188R4R2DocumentPointer)
+            {
+                LogC188R11R4R2EditorState(host, "after-pointer"u8, input,
+                    true, pointerResult == GuideXosControlHostResult.Focused
+                        ? GuideXosTextAreaEditResult.Focused
+                        : GuideXosTextAreaEditResult.Ignored,
+                    pointerRendered);
+            }
+            return pointerRendered
+                ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+#else
             return RenderMain(host, surface, _launchCount)
                 ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+#endif
         }
 
 #if HOSTLOGPROOF_C137_MOUSE_WHEEL_SCROLLING
@@ -4753,6 +4776,17 @@ public sealed partial class ManagedNotes : GuideXosApplication
         }
 #endif
 
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        bool traceC188R4R2DocumentKey =
+            (input.Kind is GuideXosInputKind.KeyChar or
+                GuideXosInputKind.KeyDown) &&
+            _mainControlHost.ActiveControlId == C120DocumentControlId;
+        if (traceC188R4R2DocumentKey)
+        {
+            LogC188R11R4R2EditorState(host, "before-key"u8, input,
+                false, GuideXosTextAreaEditResult.Ignored, false);
+        }
+#endif
         GuideXosControlHostResult routeResult = _mainControlHost.HandleInput(input);
 #if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
         if (IsC164DocumentPath() &&
@@ -5035,8 +5069,35 @@ public sealed partial class ManagedNotes : GuideXosApplication
             SyncC138ScrollBars();
         }
 #endif
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        bool controlRendered = RenderMain(host, surface, _launchCount);
+        if (traceC188R4R2DocumentKey)
+        {
+            GuideXosTextAreaEditResult editResult = routeResult switch
+            {
+                GuideXosControlHostResult.Changed =>
+                    GuideXosTextAreaEditResult.Changed,
+                GuideXosControlHostResult.Moved =>
+                    GuideXosTextAreaEditResult.Moved,
+                GuideXosControlHostResult.Submitted =>
+                    GuideXosTextAreaEditResult.Submitted,
+                GuideXosControlHostResult.Cancelled =>
+                    GuideXosTextAreaEditResult.Cancelled,
+                GuideXosControlHostResult.Rejected =>
+                    GuideXosTextAreaEditResult.Rejected,
+                GuideXosControlHostResult.Scrolled =>
+                    GuideXosTextAreaEditResult.Scrolled,
+                _ => GuideXosTextAreaEditResult.Ignored,
+            };
+            LogC188R11R4R2EditorState(host, "after-key"u8, input,
+                true, editResult, controlRendered);
+        }
+        return controlRendered
+            ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+#else
         return RenderMain(host, surface, _launchCount)
             ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
+#endif
     }
 
     private int C120HitTest(int x, int y)
@@ -5430,6 +5491,10 @@ public sealed partial class ManagedNotes : GuideXosApplication
 #endif
         if (input.Kind == GuideXosInputKind.PointerDown)
         {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            LogC188R11R4R2EditorState(host, "before-pointer"u8, input,
+                false, GuideXosTextAreaEditResult.Ignored, false);
+#endif
             GuideXosTextAreaEditResult focus = _textArea.HandlePointerDown(
                 input.X, input.Y,
                 GuideXosManagedNotesLayoutC175.EditorX,
@@ -5442,12 +5507,30 @@ public sealed partial class ManagedNotes : GuideXosApplication
                 BlurButtons();
 #endif
                 host.TryLog("C117-TEXT-AREA focus=PASS source=pointer"u8);
-                return RenderMain(host, surface, _launchCount)
+                bool rendered = RenderMain(host, surface, _launchCount);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+                LogC188R11R4R2EditorState(host, "after-pointer"u8, input,
+                    true, focus, rendered);
+#endif
+                return rendered
                     ? GuideXosResult.Success : GuideXosResult.InvalidArgument;
             }
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            LogC188R11R4R2EditorState(host, "after-pointer"u8, input,
+                true, focus, false);
+#endif
             return GuideXosResult.Success;
         }
 
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        bool traceEditorKey = input.Kind is GuideXosInputKind.KeyChar or
+            GuideXosInputKind.KeyDown;
+        if (traceEditorKey)
+        {
+            LogC188R11R4R2EditorState(host, "before-key"u8, input,
+                false, GuideXosTextAreaEditResult.Ignored, false);
+        }
+#endif
         int previousFirstLine = _textArea.FirstVisibleLine;
         GuideXosTextAreaEditResult editResult = input.Kind switch
         {
@@ -5496,12 +5579,123 @@ public sealed partial class ManagedNotes : GuideXosApplication
         {
             _status = "Editor cancelled";
         }
-        if (!RenderMain(host, surface, _launchCount))
+        bool mainRendered = RenderMain(host, surface, _launchCount);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (traceEditorKey)
+        {
+            LogC188R11R4R2EditorState(host, "after-key"u8, input,
+                true, editResult, mainRendered);
+        }
+#endif
+        if (!mainRendered)
         {
             return GuideXosResult.InvalidArgument;
         }
         return GuideXosResult.Success;
     }
+
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    // C188R11R4R2 observes only the logical Notes editor state. Text copies
+    // are bounded by the editor's 256-character limit and emitted as chunks;
+    // no managed memory outside the editor buffer is inspected.
+    private void LogC188R11R4R2EditorState(GuideXosHost host,
+        ReadOnlySpan<byte> stage, GuideXosInputEvent input,
+        bool hasEditResult, GuideXosTextAreaEditResult editResult,
+        bool renderSucceeded)
+    {
+        if (_textArea.Length < 0 ||
+            _textArea.Length > GuideXosTextArea.DefaultMaximumCharacters)
+        {
+            host.TryLog("C188R11R4R2-NOTES invalid=editor-length"u8);
+            return;
+        }
+
+        ReadOnlySpan<byte> kind = input.Kind switch
+        {
+            GuideXosInputKind.PointerDown => "pointer-down"u8,
+            GuideXosInputKind.KeyChar => "key-char"u8,
+            GuideXosInputKind.KeyDown => "key-down"u8,
+            _ => "other"u8,
+        };
+        uint value = input.Kind == GuideXosInputKind.KeyChar
+            ? input.Character
+            : input.Kind == GuideXosInputKind.KeyDown ? input.KeyCode : 0u;
+        Span<byte> line = stackalloc byte[192];
+        int position = 0;
+        GuideXosText.Append(line, ref position,
+            "C188R11R4R2-NOTES stage="u8);
+        GuideXosText.Append(line, ref position, stage);
+        GuideXosText.Append(line, ref position, " kind="u8);
+        GuideXosText.Append(line, ref position, kind);
+        GuideXosText.Append(line, ref position, " x="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)Math.Max(0, input.X));
+        GuideXosText.Append(line, ref position, " y="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)Math.Max(0, input.Y));
+        GuideXosText.Append(line, ref position, " value="u8);
+        GuideXosText.AppendUnsigned(line, ref position, value);
+        GuideXosText.Append(line, ref position, " focused="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            _textArea.IsFocused ? 1u : 0u);
+        GuideXosText.Append(line, ref position, " len="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_textArea.Length);
+        GuideXosText.Append(line, ref position, " caret="u8);
+        GuideXosText.AppendUnsigned(line, ref position, (uint)_textArea.CaretIndex);
+        GuideXosText.Append(line, ref position, " edit="u8);
+        if (hasEditResult)
+        {
+            GuideXosText.AppendUnsigned(line, ref position, (uint)editResult);
+        }
+        else
+        {
+            GuideXosText.Append(line, ref position, "none"u8);
+        }
+        GuideXosText.Append(line, ref position, " render="u8);
+        GuideXosText.AppendUnsigned(line, ref position,
+            renderSucceeded ? 1u : 0u);
+        host.TryLog(line[..position]);
+
+        string text = _textArea.Text;
+        if (text.Length != _textArea.Length ||
+            text.Length > GuideXosTextArea.DefaultMaximumCharacters)
+        {
+            host.TryLog("C188R11R4R2-TEXT invalid=bounded-copy"u8);
+            return;
+        }
+
+        ReadOnlySpan<byte> digits = "0123456789ABCDEF"u8;
+        Span<byte> contentLine = stackalloc byte[192];
+        int chunkCount = Math.Max(1, (text.Length + 31) / 32);
+        for (int chunk = 0; chunk < chunkCount; chunk++)
+        {
+            contentLine.Clear();
+            int contentPosition = 0;
+            int offset = chunk * 32;
+            int count = Math.Min(32, text.Length - offset);
+            GuideXosText.Append(contentLine, ref contentPosition,
+                "C188R11R4R2-TEXT stage="u8);
+            GuideXosText.Append(contentLine, ref contentPosition, stage);
+            GuideXosText.Append(contentLine, ref contentPosition, " offset="u8);
+            GuideXosText.AppendUnsigned(contentLine, ref contentPosition,
+                (uint)offset);
+            GuideXosText.Append(contentLine, ref contentPosition, " count="u8);
+            GuideXosText.AppendUnsigned(contentLine, ref contentPosition,
+                (uint)count);
+            GuideXosText.Append(contentLine, ref contentPosition, " hex="u8);
+            for (int index = offset; index < offset + count; index++)
+            {
+                uint character = text[index];
+                if (character > 0x7Fu)
+                {
+                    host.TryLog("C188R11R4R2-TEXT invalid=non-ascii"u8);
+                    return;
+                }
+                contentLine[contentPosition++] = digits[(int)(character >> 4)];
+                contentLine[contentPosition++] = digits[(int)(character & 0x0Fu)];
+            }
+            host.TryLog(contentLine[..contentPosition]);
+        }
+    }
+#endif
 
 #if HOSTLOGPROOF_C164_FILE_ACTIVATION_PROOF
     private bool IsC164DocumentPath() =>

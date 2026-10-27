@@ -13,6 +13,7 @@ $notes = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof
 $textArea = Get-Content -LiteralPath (Join-Path $repo 'samples/managed/HostLogProof/GuideXos/GuideXosTextArea.cs') -Raw
 $main = Get-Content -LiteralPath (Join-Path $repo 'kernel/core/main.cpp') -Raw
 $r2Runner = Get-Content -LiteralPath (Join-Path $repo 'scripts/dotnet/run-c188r11r2-keyboard-dispatch.ps1') -Raw
+$r4r2Predicates = Get-Content -LiteralPath (Join-Path $repo 'scripts/dotnet/c188r11r4r2-runner-predicates.ps1') -Raw
 $qacRunner = Get-Content -LiteralPath (Join-Path $repo 'scripts/dotnet/run-c188-qac-guest.ps1') -Raw
 $script:caseCount = 0
 
@@ -119,6 +120,63 @@ $pointerFocus = $textArea.IndexOf('Focus();',
     $textArea.IndexOf('GuideXosTextAreaEditResult HandlePointerDown'))
 Assert-Contract 'Notes text insertion requires editor focus established by pointer-down' (
     $unfocused -ge 0 -and $pointerFocus -gt $textArea.IndexOf('GuideXosTextAreaEditResult HandlePointerDown'))
+
+$editorTraceStart = $notes.IndexOf('private void LogC188R11R4R2EditorState(')
+$editorTraceEnd = $notes.IndexOf('#endif', $editorTraceStart)
+$editorTrace = if ($editorTraceStart -ge 0 -and $editorTraceEnd -gt $editorTraceStart) {
+    $notes.Substring($editorTraceStart, $editorTraceEnd - $editorTraceStart)
+} else { '' }
+Assert-Contract 'Notes editor observations are compile-gated, bounded to 256 characters, and hex encoded' (
+    $notes.Contains('#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE') -and
+    $editorTrace.Contains('GuideXosTextArea.DefaultMaximumCharacters') -and
+    $editorTrace.Contains('int chunkCount = Math.Max(1, (text.Length + 31) / 32)') -and
+    $editorTrace.Contains('C188R11R4R2-TEXT stage=') -and
+    $editorTrace.Contains('C188R11R4R2-NOTES stage=') -and
+    -not $editorTrace.Contains('unsafe'))
+
+$editorPointerDispatch = $notes.IndexOf('if (input.Kind == GuideXosInputKind.PointerDown)',
+    $notes.IndexOf('public override GuideXosResult HandleInput', $notes.IndexOf('public sealed partial class ManagedNotes')))
+$pointerHandled = $notes.IndexOf('_textArea.HandlePointerDown(', $editorPointerDispatch)
+$focusSnapshot = $notes.IndexOf('"after-pointer"u8', $pointerHandled)
+$keySnapshot = $notes.IndexOf('LogC188R11R4R2EditorState(host, "after-key"u8', $focusSnapshot)
+Assert-Contract 'diagnostic snapshots straddle the source focus/edit call and completed Notes redraw' (
+    $editorPointerDispatch -ge 0 -and $pointerHandled -gt $editorPointerDispatch -and
+    $focusSnapshot -gt $pointerHandled -and $keySnapshot -gt $focusSnapshot -and
+    $editorTrace.Contains('renderSucceeded ? 1u : 0u'))
+
+$c120HandlerStart = $notes.IndexOf('private GuideXosResult HandleC120Input(')
+$c120FocusCall = $notes.IndexOf('_mainControlHost.FocusAndRoutePointer(',
+    $c120HandlerStart)
+$c120PointerSnapshot = $notes.IndexOf('"after-pointer"u8', $c120FocusCall)
+$c120KeyCall = $notes.IndexOf('_mainControlHost.HandleInput(input)',
+    $c120HandlerStart)
+$c120KeySnapshot = $notes.IndexOf('"after-key"u8', $c120KeyCall)
+Assert-Contract 'C120 control-host document focus and key routes emit the same bounded editor snapshots' (
+    $c120HandlerStart -ge 0 -and $c120FocusCall -gt $c120HandlerStart -and
+    $c120PointerSnapshot -gt $c120FocusCall -and
+    $c120KeyCall -gt $c120PointerSnapshot -and
+    $c120KeySnapshot -gt $c120KeyCall -and
+    $notes.Contains('traceC188R4R2DocumentPointer') -and
+    $notes.Contains('traceC188R4R2DocumentKey'))
+
+Assert-Contract 'guest runner performs one deterministic editor click, clears the pointer, then sends one a transaction' (
+    ([regex]::Matches($r2Runner, "Invoke-C188R11R2Control @\('click'")).Count -eq 1 -and
+    ([regex]::Matches($r2Runner, "Invoke-C188R11R2Control @\('key','a'")).Count -eq 1 -and
+    $r2Runner.IndexOf("'r2-qmp-click-notes-editor'") -lt
+        $r2Runner.IndexOf("'r2-qmp-move-pointer-clear'") -and
+    $r2Runner.IndexOf("'r2-qmp-move-pointer-clear'") -lt
+        $r2Runner.IndexOf("'r2-qmp-key-a-down-up'") -and
+    $r2Runner.Contains('localEditorY=99') -and
+    $r2Runner.Contains('y=00000063 result=PASS') -and
+    $r2Runner.Contains("@('capture','before-input')") -and
+    $r2Runner.Contains("@('capture','after-input')"))
+
+Assert-Contract 'text-entry acceptance requires buffer content at the previous caret, length and caret increments, focus, and redraw' (
+    $r4r2Predicates.Contains('$afterKey.text -ceq $beforeKey.text.Insert($beforeKey.caret, ''a'')') -and
+    $r4r2Predicates.Contains('$afterKey.length -eq $beforeKey.length + 1') -and
+    $r4r2Predicates.Contains('$afterKey.caret -eq $beforeKey.caret + 1') -and
+    $r4r2Predicates.Contains('$afterPointer.focused') -and
+    $r4r2Predicates.Contains('$afterKey.render'))
 
 Assert-Contract 'keyboard trace is bounded and serial output is outside the IRQ handler' (
     $ps2.Contains('s_c188r11r2TraceRecordsWritten >= 16u') -and

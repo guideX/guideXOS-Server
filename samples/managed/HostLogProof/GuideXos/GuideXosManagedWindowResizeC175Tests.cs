@@ -6,7 +6,7 @@ namespace HostLogProof;
 
 public static class GuideXosManagedWindowResizeC175Tests
 {
-    public const int CaseCount = 22;
+    public const int CaseCount = 24;
     public const int StressCaseCount = 7;
     public const int StressLayoutUpdates = 1000;
     public const int StressAlternatingResizes = 500;
@@ -75,6 +75,8 @@ public static class GuideXosManagedWindowResizeC175Tests
         passed &= Case(ref cases, LongViewportDocumentStability());
         passed &= Case(ref cases, EditingStatePreservation());
         passed &= Case(ref cases, PointerCoordinatesAfterResize());
+        passed &= Case(ref cases, EditorPointerFocusThenCharacterInsertion());
+        passed &= Case(ref cases, ControlHostPointerFocusThenCharacterInsertion());
         passed &= Case(ref cases, KeyboardNavigationAfterResize());
         passed &= Case(ref cases, EditUndoRedoAfterResize());
         passed &= Case(ref cases, DirtyStateAndPathPreservation());
@@ -84,7 +86,7 @@ public static class GuideXosManagedWindowResizeC175Tests
 
         if (cases != CaseCount) passed = false;
         host?.TryLog(passed
-            ? "C175-NOTES-RESIZE-HOST focused=22 result=PASS"u8
+            ? "C175-NOTES-RESIZE-HOST focused=23 result=PASS"u8
             : "C175-NOTES-RESIZE-HOST result=FAIL"u8);
         return passed;
     }
@@ -363,6 +365,68 @@ public static class GuideXosManagedWindowResizeC175Tests
             GuideXosManagedNotesLayoutC175.EditorLineHeight);
         return pointer == GuideXosTextAreaEditResult.Focused &&
             area.CaretLine == 1 && area.CaretColumn == 5 && area.IsFocused;
+    }
+
+    private static bool EditorPointerFocusThenCharacterInsertion()
+    {
+        if (!CreateDocument("one\ntwo"u8,
+                "/system/apps/C175/pointer-insert.txt", out GuideXosTextArea area,
+                out GuideXosNotesDocumentState document) || area.IsFocused)
+        {
+            return false;
+        }
+
+        int editorX = GuideXosManagedNotesLayoutC175.EditorX;
+        int editorY = GuideXosManagedNotesLayoutC175.EditorY;
+        int characterWidth = GuideXosManagedNotesLayoutC175.EditorCharacterWidth;
+        int lineHeight = GuideXosManagedNotesLayoutC175.EditorLineHeight;
+        GuideXosTextAreaEditResult pointer = area.HandlePointerDown(
+            editorX + characterWidth / 2,
+            editorY + lineHeight / 2,
+            editorX, editorY, characterWidth, lineHeight);
+        int beforeLength = area.Length;
+        int beforeCaret = area.CaretIndex;
+        string beforeText = area.Text;
+        GuideXosTextAreaEditResult insertion = area.HandleCharacter('a');
+
+        return pointer == GuideXosTextAreaEditResult.Focused && area.IsFocused &&
+            beforeText == "one\ntwo" && beforeLength == 7 && beforeCaret == 0 &&
+            insertion == GuideXosTextAreaEditResult.Changed &&
+            area.Text == "aone\ntwo" && area.Length == beforeLength + 1 &&
+            area.CaretIndex == beforeCaret + 1 && document.Dirty;
+    }
+
+    private static bool ControlHostPointerFocusThenCharacterInsertion()
+    {
+        if (!CreateDocument("one\ntwo"u8,
+                "/system/apps/C175/control-host-pointer-insert.txt",
+                out GuideXosTextArea area,
+                out GuideXosNotesDocumentState document) || area.IsFocused)
+        {
+            return false;
+        }
+
+        GuideXosControlHost host = new(1);
+        if (host.TryRegisterTextArea(6, area) !=
+                GuideXosControlHostResult.Registered)
+        {
+            return false;
+        }
+
+        GuideXosControlHostResult pointer = host.FocusAndRoutePointer(
+            6, 24, 99, 20, 72, 8, 18);
+        int beforeLength = area.Length;
+        int beforeCaret = area.CaretIndex;
+        string beforeText = area.Text;
+        GuideXosControlHostResult insertion = host.HandleInput(
+            GuideXosInputEvent.ForKeyChar('a'));
+
+        return pointer == GuideXosControlHostResult.Focused && area.IsFocused &&
+            host.ActiveControlId == 6 && beforeText == "one\ntwo" &&
+            beforeLength == 7 && beforeCaret == 4 &&
+            insertion == GuideXosControlHostResult.Changed &&
+            area.Text == "one\natwo" && area.Length == beforeLength + 1 &&
+            area.CaretIndex == beforeCaret + 1 && document.Dirty;
     }
 
     private static bool KeyboardNavigationAfterResize()

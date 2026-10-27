@@ -86,6 +86,7 @@ $qacOwnershipHelpers = Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.
 . $predicateHelpers
 . $r2PredicateHelpers
 . $qacOwnershipHelpers
+. (Join-Path $PSScriptRoot 'c188r11r4r2-runner-predicates.ps1')
 if ($null -eq ('GuideXos.C188.LiveProcessCapture' -as [type])) {
     Add-Type -Path (Join-Path $PSScriptRoot 'C188LiveProcessCapture.cs')
 }
@@ -143,6 +144,12 @@ $stdoutTask = $qacRunner.StandardOutput.ReadToEndAsync()
 $stderrTask = $qacRunner.StandardError.ReadToEndAsync()
 $inputSent = $false
 $focusVerified = $false
+$editorFocusVerified = $false
+$editorFocusState = $null
+$editorFocusScreenPoint = $null
+$pointerClearScreenPoint = $null
+$notesTextEntryEvidence = $null
+$editorFocusFailureReason = ''
 $runnerExitCode = -1
 $shutdownRequested = $false
 $gdbProcess = $null
@@ -375,18 +382,80 @@ try {
         throw "QAC ownership proof failed closed at input gate: $($inputOwnership.reasons -join ', '); no key event was sent."
     }
 
-    $qmpActions.Add((Invoke-C188R11R2Control @('capture','before-input') 'r2-qmp-capture-before-input'))
+    $qmpActions.Add((Invoke-C188R11R2Control @('capture','initial-notes') 'r2-qmp-capture-initial-notes'))
     $serialText = Get-Content -LiteralPath $serialPath -Raw
     if (-not [regex]::IsMatch($serialText,
             '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=.+? result=focused\r?$')) {
         throw 'Notes lost the active-window focus snapshot before input; no keyboard event was sent.'
     }
 
-    # This is the only keyboard transaction in the one authorized guest:
-    # QMP qcode a make followed by its matching break.
-    $qmpActions.Add((Invoke-C188R11R2Control @('key','a') 'r2-qmp-key-a-down-up'))
-    $inputSent = $true
-    $qmpActions.Add((Invoke-C188R11R2Control @('capture','after-input') 'r2-qmp-capture-after-input'))
+    # The window is centered by NativeAotApplication::open using its validated
+    # 600x360 initial geometry. In the active C120 control-host route, the
+    # document starts at (20,72) with 8x18 cells; local (24,99) is row 1,
+    # column 0. It also remains inside the direct C175 editor bounds.
+    $screenWidth = [int]$active.screenWidth
+    $screenHeight = [int]$active.screenHeight
+    $notesWindowX = [Math]::Max(0, [int][Math]::Floor(($screenWidth - 600) / 2))
+    $notesWindowY = [Math]::Max(0, [int][Math]::Floor(($screenHeight - 360) / 2))
+    $focusScreenX = $notesWindowX + 20 + 4
+    $focusScreenY = $notesWindowY + 24 + 99
+    $editorFocusScreenPoint = [ordered]@{
+        x=$focusScreenX; y=$focusScreenY; windowX=$notesWindowX
+        windowY=$notesWindowY; windowWidth=600; windowHeight=360
+        localEditorX=24; localEditorY=99; target='C120 document row 1, column 0 center'
+    }
+    $qmpActions.Add((Invoke-C188R11R2Control @('click',[string]$focusScreenX,[string]$focusScreenY) 'r2-qmp-click-notes-editor'))
+    $focusDeadline = (Get-Date).AddSeconds(8)
+    do {
+        $serialText = Get-Content -LiteralPath $serialPath -Raw
+        $editorFocusState = Get-C188R11R4R2StageSnapshot $serialText 'after-pointer'
+        $nativeEditorPointer = [regex]::IsMatch($serialText,
+            '(?m)^\[C116-NATIVE-INPUT\] kind=pointer-down x=00000018 y=00000063 result=PASS\r?$')
+        if ($null -ne $editorFocusState -and $nativeEditorPointer) { break }
+        Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $focusDeadline)
+    $editorFocusVerified = $null -ne $editorFocusState -and
+        $editorFocusState.kind -eq 'pointer-down' -and
+    $editorFocusState.x -eq 24 -and $editorFocusState.y -eq 99 -and
+    $editorFocusState.focused -and
+    $editorFocusState.caret -ge 0 -and
+    $editorFocusState.caret -le $editorFocusState.length -and
+        $editorFocusState.edit -eq '2' -and $editorFocusState.render -and
+        $nativeEditorPointer
+    if ($editorFocusVerified) {
+        # Move the QMP cursor to the title bar after the one editor click so
+        # the pointer image cannot cover the first glyph in either screenshot.
+        # A move without a button press does not change text-area focus/caret.
+        $pointerClearScreenPoint = [ordered]@{
+            x=$notesWindowX + 300; y=$notesWindowY + 12
+            target='Notes title bar, pointer only'
+        }
+        $qmpActions.Add((Invoke-C188R11R2Control @('move',
+            [string]$pointerClearScreenPoint.x,
+            [string]$pointerClearScreenPoint.y) 'r2-qmp-move-pointer-clear'))
+    }
+    $qmpActions.Add((Invoke-C188R11R2Control @('capture','editor-focused') 'r2-qmp-capture-editor-focused'))
+
+    if (-not $editorFocusVerified) {
+        $editorFocusFailureReason = 'The single source-defined editor click did not produce the Notes text-area focus marker; no keyboard event was sent.'
+        $qmpActions.Add([ordered]@{name='skip-a-key';reason=$editorFocusFailureReason})
+    } else {
+        # Keep the insertion comparison free of the caret/focus redraw: this
+        # baseline is taken after editor focus and immediately before ASCII a.
+        $qmpActions.Add((Invoke-C188R11R2Control @('capture','before-input') 'r2-qmp-capture-before-input'))
+
+        # This is the only keyboard transaction in the one authorized guest:
+        # QMP qcode a make followed by its matching break.
+        $qmpActions.Add((Invoke-C188R11R2Control @('key','a') 'r2-qmp-key-a-down-up'))
+        $inputSent = $true
+        $keyRenderDeadline = (Get-Date).AddSeconds(8)
+        do {
+            $serialText = Get-Content -LiteralPath $serialPath -Raw
+            if (Get-C188R11R4R2StageSnapshot $serialText 'after-key') { break }
+            Start-Sleep -Milliseconds 50
+        } while ((Get-Date) -lt $keyRenderDeadline)
+        $qmpActions.Add((Invoke-C188R11R2Control @('capture','after-input') 'r2-qmp-capture-after-input'))
+    }
     $qmpActions | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $bootRoot 'r2-qmp-actions.json') -Encoding utf8
     [void](Invoke-C188R11R2Control @('quit') 'r2-qmp-owned-quit')
     $shutdownRequested = $true
@@ -447,6 +516,9 @@ $releaseVerified = $shutdownRequested -and $reservation.Success -and
 $ownedQemuExited = $qemuChild.Success -and
     -not (Get-Process -Id ([int]$qemuChild.Groups[2].Value) -ErrorAction SilentlyContinue)
 $trace = Get-C188R11R2KeyboardEvidence $serialText
+$notesTextEntryEvidence = Get-C188R11R4R2NotesTextEntryEvidence $serialText `
+    ([bool]($trace.traceComplete -and $trace.notesCallbackEntry -and
+        $trace.notesCallbackReturn -and $trace.notesCallbackReturnResult -eq 0))
 $memoryInitialization = Get-C188R11MemorySnapshot $serialText 'registry-init'
 $memoryLaunch = Get-C188R11MemorySnapshot $serialText 'managed-return'
 $memoryInput = Get-C188R11MemorySnapshot $serialText 'input-dispatch-entry'
@@ -510,6 +582,11 @@ $manifest = [ordered]@{
     selectedInput='QMP qcode a down/up; Set-2 scancode 0x1C maps to ASCII a'
     shiftExpectedManagedCallback=$false
     focusVerifiedBeforeInput=$focusVerified
+    editorFocusVerified=$editorFocusVerified
+    editorFocusFailureReason=$editorFocusFailureReason
+    editorFocusScreenPoint=$editorFocusScreenPoint
+    pointerClearScreenPoint=$pointerClearScreenPoint
+    notesTextEntry=$notesTextEntryEvidence
     qacPreAdmissionExclusive=($beforeStatus -match 'QEMU processes:\s+0 \(0 foreign\)' -and $beforeList -match 'Reservations:\s+0')
     runIdentityId=$runIdentityId
     qacOwnedAcceptanceRunning=[bool]$inputOwnership.accepted
@@ -548,8 +625,12 @@ $manifest = [ordered]@{
     serialSha256=$(if (Test-Path -LiteralPath $serialPath) { (Get-FileHash -LiteralPath $serialPath -Algorithm SHA256).Hash } else { '' })
     qmpLogPath=(Join-Path $bootRoot 'qmp-control.log')
     qmpLogSha256=$(if (Test-Path -LiteralPath (Join-Path $bootRoot 'qmp-control.log')) { (Get-FileHash -LiteralPath (Join-Path $bootRoot 'qmp-control.log') -Algorithm SHA256).Hash } else { '' })
+    initialScreenshot=(Join-Path $bootRoot 'initial-notes.png')
+    editorFocusedScreenshot=(Join-Path $bootRoot 'editor-focused.png')
     beforeScreenshot=(Join-Path $bootRoot 'before-input.png')
     afterScreenshot=(Join-Path $bootRoot 'after-input.png')
+    initialScreenshotSha256=$(if (Test-Path -LiteralPath (Join-Path $bootRoot 'initial-notes.png')) { (Get-FileHash -LiteralPath (Join-Path $bootRoot 'initial-notes.png') -Algorithm SHA256).Hash } else { '' })
+    editorFocusedScreenshotSha256=$(if (Test-Path -LiteralPath (Join-Path $bootRoot 'editor-focused.png')) { (Get-FileHash -LiteralPath (Join-Path $bootRoot 'editor-focused.png') -Algorithm SHA256).Hash } else { '' })
     beforeScreenshotSha256=$(if (Test-Path -LiteralPath (Join-Path $bootRoot 'before-input.png')) { (Get-FileHash -LiteralPath (Join-Path $bootRoot 'before-input.png') -Algorithm SHA256).Hash } else { '' })
     afterScreenshotSha256=$(if (Test-Path -LiteralPath (Join-Path $bootRoot 'after-input.png')) { (Get-FileHash -LiteralPath (Join-Path $bootRoot 'after-input.png') -Algorithm SHA256).Hash } else { '' })
     qacBaseManifest=$baseManifestPath
@@ -557,6 +638,7 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $controllerManifest -Encoding utf8
 Write-Output "C188R11R4_MEMORY=$outcome INPUT_SENT=$inputSent MANAGED_STATE=$($trace.managedStateQualified) CALLBACK=$($trace.notesCallbackEntry) REGISTRY_COUNT=$($trace.registryCount) RESIDENT_MASK=$($trace.residentMask) MEMORY_STABLE=$memoryStorageStable WATCHPOINTS=$watchpointStatus HITS=$($watchpointHits.Count) QAC_RELEASE=$releaseVerified QAC_DEGRADED=$degradedCensus"
+Write-Output "C188R11R4R2_NOTES_TEXT_ENTRY=$($notesTextEntryEvidence.accepted) EDITOR_FOCUS=$editorFocusVerified BUFFER_INSERTED=$($notesTextEntryEvidence.oneCharacterInserted) REDRAW=$($notesTextEntryEvidence.redrawCompleted)"
 Write-Output "C188R11R2_KEYBOARD_MANIFEST=$controllerManifest"
 if (-not $releaseVerified -or -not $ownedQemuExited) {
     throw 'The owned C188R11R2 QAC process or reservation did not complete verified shutdown.'

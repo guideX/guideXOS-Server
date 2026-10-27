@@ -4,6 +4,7 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'C188R11R2 runner predicate tests require PowerShell Core.'
 }
 . (Join-Path $PSScriptRoot 'c188r11r2-runner-predicates.ps1')
+. (Join-Path $PSScriptRoot 'c188r11r4r2-runner-predicates.ps1')
 $script:caseCount = 0
 
 function Assert-Predicate([string]$Name, [bool]$Condition) {
@@ -95,5 +96,76 @@ Assert-Predicate 'managed entry without the earliest registry snapshot is reject
 $missingProvenance = $success.Replace('result=-1 gc=0 w=1:1', 'result=-1')
 Assert-Predicate 'managed input snapshot without GC and writer provenance is rejected' (
     -not (Test-C188R11R2KeyboardTrace $missingProvenance))
+
+$notesTextEntry = @'
+[C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=before-pointer kind=pointer-down x=24 y=99 value=0 focused=0 len=3 caret=0 edit=none render=0
+[C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=before-pointer offset=0 count=3 hex=78797A
+[C116-NATIVE-INPUT] kind=pointer-down x=00000018 y=00000063 result=PASS
+[C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=after-pointer kind=pointer-down x=24 y=99 value=0 focused=1 len=3 caret=0 edit=2 render=1
+[C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=after-pointer offset=0 count=3 hex=78797A
+[C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=before-key kind=key-char x=0 y=0 value=97 focused=1 len=3 caret=0 edit=none render=0
+[C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=before-key offset=0 count=3 hex=78797A
+[C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=after-key kind=key-char x=0 y=0 value=97 focused=1 len=4 caret=1 edit=1 render=1
+[C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=after-key offset=0 count=4 hex=6178797A
+'@
+$notesEntryEvidence = Get-C188R11R4R2NotesTextEntryEvidence $notesTextEntry $true
+Assert-Predicate 'editor click, existing-text insertion at caret, caret advance, and redraw qualify' (
+    $notesEntryEvidence.accepted -and $notesEntryEvidence.editorFocusEstablished -and
+    $notesEntryEvidence.preInputStateQualified -and $notesEntryEvidence.oneCharacterInserted -and
+    $notesEntryEvidence.redrawCompleted -and $notesEntryEvidence.beforeText -ceq 'xyz' -and
+    $notesEntryEvidence.afterText -ceq 'axyz' -and $notesEntryEvidence.beforeLength -eq 3 -and
+    $notesEntryEvidence.afterLength -eq 4 -and $notesEntryEvidence.beforeCaret -eq 0 -and
+    $notesEntryEvidence.afterCaret -eq 1)
+
+$notesC120Route = @'
+[C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=before-pointer kind=pointer-down x=24 y=99 value=0 focused=0 len=7 caret=0 edit=none render=0
+[C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=before-pointer offset=0 count=7 hex=6F6E650A74776F
+[C116-NATIVE-INPUT] kind=pointer-down x=00000018 y=00000063 result=PASS
+[C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=after-pointer kind=pointer-down x=24 y=99 value=0 focused=1 len=7 caret=4 edit=2 render=1
+[C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=after-pointer offset=0 count=7 hex=6F6E650A74776F
+[C102-MANAGED-OUTPUT] C120-POINTER target=document result=PASS
+[C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=before-key kind=key-char x=0 y=0 value=97 focused=1 len=7 caret=4 edit=none render=0
+[C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=before-key offset=0 count=7 hex=6F6E650A74776F
+[C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=after-key kind=key-char x=0 y=0 value=97 focused=1 len=8 caret=5 edit=1 render=1
+[C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=after-key offset=0 count=8 hex=6F6E650A6174776F
+'@
+$c120RouteEvidence = Get-C188R11R4R2NotesTextEntryEvidence $notesC120Route $true
+Assert-Predicate 'control-host route preserves its nonzero caret and qualifies insertion in existing text' (
+    $c120RouteEvidence.accepted -and $c120RouteEvidence.beforeText -ceq "one`ntwo" -and
+    $c120RouteEvidence.afterText -ceq "one`natwo" -and
+    $c120RouteEvidence.beforeCaret -eq 4 -and $c120RouteEvidence.afterCaret -eq 5)
+
+$callbackOnly = Get-C188R11R4R2NotesTextEntryEvidence $notesTextEntry $false
+Assert-Predicate 'a successful callback flag without an insertion trace is not accepted' (
+    -not $callbackOnly.accepted -and $callbackOnly.oneCharacterInserted)
+
+$wrongInsertion = $notesTextEntry.Replace(
+    'stage=after-key kind=key-char x=0 y=0 value=97 focused=1 len=4 caret=1 edit=1 render=1',
+    'stage=after-key kind=key-char x=0 y=0 value=97 focused=1 len=4 caret=1 edit=1 render=1').Replace(
+    'stage=after-key offset=0 count=4 hex=6178797A',
+    'stage=after-key offset=0 count=4 hex=7879617A')
+$wrongInsertionEvidence = Get-C188R11R4R2NotesTextEntryEvidence $wrongInsertion $true
+Assert-Predicate 'a changed buffer with the wrong insertion position or text is rejected' (
+    -not $wrongInsertionEvidence.accepted -and -not $wrongInsertionEvidence.oneCharacterInserted)
+
+$noRedraw = $notesTextEntry.Replace(
+    'kind=key-char x=0 y=0 value=97 focused=1 len=4 caret=1 edit=1 render=1',
+    'kind=key-char x=0 y=0 value=97 focused=1 len=4 caret=1 edit=1 render=0')
+$noRedrawEvidence = Get-C188R11R4R2NotesTextEntryEvidence $noRedraw $true
+Assert-Predicate 'buffer insertion remains distinct from redraw completion' (
+    -not $noRedrawEvidence.accepted -and $noRedrawEvidence.oneCharacterInserted -and
+    -not $noRedrawEvidence.redrawCompleted)
+
+$wrongFocus = $notesTextEntry.Replace(
+    'stage=after-pointer kind=pointer-down x=24 y=99 value=0 focused=1 len=3 caret=0 edit=2 render=1',
+    'stage=after-pointer kind=pointer-down x=24 y=99 value=0 focused=0 len=3 caret=0 edit=2 render=1')
+$wrongFocusEvidence = Get-C188R11R4R2NotesTextEntryEvidence $wrongFocus $true
+Assert-Predicate 'successful callback and text change cannot bypass explicit editor focus' (
+    -not $wrongFocusEvidence.accepted -and -not $wrongFocusEvidence.editorFocusEstablished)
+
+Assert-Predicate 'instrumentation rows remain bounded below the managed log cap' (
+    @($notesTextEntry -split "`r?`n" | Where-Object {
+        [System.Text.Encoding]::UTF8.GetByteCount($_.Substring('[C102-MANAGED-OUTPUT] '.Length)) -gt 255
+    }).Count -eq 0)
 
 Write-Output "C188R11R2-RUNNER-PREDICATES cases=$script:caseCount result=PASS"
