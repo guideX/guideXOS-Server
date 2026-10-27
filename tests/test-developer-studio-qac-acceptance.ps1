@@ -10,6 +10,13 @@ Assert-QacTest ((Get-QacAcceptancePassMarker -Phase '28Q') -ceq 'DEVELOPER_STUDI
 Assert-QacTest ((Get-QacAcceptancePassMarker -Phase '28O') -ceq 'DEVELOPER_STUDIO_PHASE28O_PASS') 'Phase 28O waits only for its guest acceptance PASS marker.'
 Assert-QacTest ((Get-QacAcceptancePassMarker -Phase '27E') -ceq 'phase27e=PASS') 'Phase 27E waits only for its guest acceptance PASS marker.'
 Assert-QacTest ((Get-QacAcceptancePassMarker -Phase '27F') -ceq 'phase27f=PASS') 'Phase 27F waits only for its guest acceptance PASS marker.'
+Assert-QacTest ((Get-QacAcceptancePassMarker -Phase 'COMP4D') -ceq 'DEVELOPER_STUDIO_COMP4D_GUEST_PASS') 'COMP4D waits only for its genuine guest Build/Run PASS marker.'
+Assert-QacTest ((Get-QacAcceptanceCompletionMarker -Phase 'COMP4D') -ceq 'DEVELOPER_STUDIO_COMP4D_GUEST_COMPLETE') 'COMP4D exposes a diagnostic stop marker that cannot satisfy acceptance.'
+$smokeScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\smoke-compiler-bootstrap.ps1') -Raw
+Assert-QacTest ($smokeScript.Contains('if ($Phase27W -and -not $Comp4DNativeBuildRun)')) 'COMP4D uses its focused proof gate instead of requiring the full Phase 27W matrix.'
+Assert-QacTest ($smokeScript.Contains("'comp4d_cooperative_progress=PASS'") -and
+    $smokeScript.Contains("'comp4d_compile_failure_preserved=PASS'") -and
+    $smokeScript.Contains("'comp4d_failed_build_blocks_run=PASS'")) 'COMP4D requires guest Build progress, failed-Build preservation, and Run rejection evidence.'
 
 Add-Type -TypeDefinition @'
 using System;

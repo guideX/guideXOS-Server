@@ -32,6 +32,7 @@ param(
     [switch]$Phase27VOnly,
     [switch]$Phase27W,
     [switch]$Phase27WOnly,
+    [switch]$Comp4DNativeBuildRunOnly,
     [switch]$Phase27X,
     [switch]$Phase27XOnly,
     [switch]$Phase27Y,
@@ -102,17 +103,20 @@ if ($Phase29GBeginDebugReturnOnly) { $Phase29FDebugStartOnly = $true }
 if ($Phase29FDebugStartOnly) { $Phase28QOnly = $true }
 if ($Phase29ISentinelOnly) { $Phase28QOnly = $true }
 if ($Phase29COnly) { $Phase28QOnly = $true }
+$Comp4DNativeBuildRun = [bool]$Comp4DNativeBuildRunOnly
+if ($Comp4DNativeBuildRun) { $Phase27WOnly = $true }
 $Phase29LOwnershipGate = $Phase29LOwnershipOnly -or $Phase29LFullAcceptance
 $qacAcceptanceEnabled = [bool]$QacDeveloperStudioAcceptance
 $qacCliResolved = ''
 $qacAcceptancePhase = ''
 $script:qacRecoveryRequired = $false
 if ($qacAcceptanceEnabled) {
-    if ($Phase28QOnly) { $qacAcceptancePhase = '28Q' }
+    if ($Comp4DNativeBuildRun) { $qacAcceptancePhase = 'COMP4D' }
+    elseif ($Phase28QOnly) { $qacAcceptancePhase = '28Q' }
     elseif ($Phase28OOnly) { $qacAcceptancePhase = '28O' }
     elseif ($Phase27F) { $qacAcceptancePhase = '27F' }
     elseif ($Phase27E) { $qacAcceptancePhase = '27E' }
-    else { throw '-QacDeveloperStudioAcceptance requires focused Phase27E/Phase27F, Phase28QOnly, or Phase28OOnly.' }
+    else { throw '-QacDeveloperStudioAcceptance requires focused Phase27E/Phase27F, Phase28QOnly, Phase28OOnly, or Comp4DNativeBuildRunOnly.' }
     if ($QacAdmissionTimeoutSeconds -lt 1 -or $QacAdmissionTimeoutSeconds -gt 86400) {
         throw 'QacAdmissionTimeoutSeconds must be between 1 and 86400 seconds.'
     }
@@ -1164,6 +1168,8 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         RequiredMarkerObservedAtUtc = $null
         RequiredMarkerObservedWithinDeadline = $false
         SerialReaderState = @{ Offset = [long]0; Carry = '' }
+        DiagnosticCompletionObserved = $false
+        DiagnosticReaderState = @{ Offset = [long]0; Carry = '' }
         SerialProbeIOExceptionCount = 0
         SerialBytesObserved = [long]0
     }
@@ -1243,6 +1249,23 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                                 $qacElapsedMilliseconds, [int]$qacMarkerWithinDeadline, [int]$qacMarkerBeforeChildExit,
                                 $qacState.RunDeadline.ToString('o'), $(if ($qacState.QemuExitedAtUtc) { $qacState.QemuExitedAtUtc.ToString('o') } else { 'not-reported' }),
                                 $qacState.SerialBytesObserved, $qacState.SerialProbeIOExceptionCount)
+                        }
+                        if ($qacAcceptancePhase -eq 'COMP4D' -and -not $qacState.DiagnosticCompletionObserved) {
+                            $qacCompletionMarker = Get-QacAcceptanceCompletionMarker -Phase $qacAcceptancePhase
+                            $qacCompletionObservation = Read-QacSerialMarker -Path $serialPath -Marker $qacCompletionMarker `
+                                -State $qacState.DiagnosticReaderState
+                            if ($qacCompletionObservation.Found) {
+                                $qacState.DiagnosticCompletionObserved = $true
+                                Write-P29JHostTrace $hostTracePath 'QAC DIAGNOSTIC COMPLETION MARKER OBSERVED' `
+                                    ("boot={0} phase={1} marker={2} acceptance=0 serial_bytes={3}" -f
+                                        $runNumber, $qacAcceptancePhase, $qacCompletionMarker,
+                                        $qacCompletionObservation.TotalBytes)
+                                if (-not $qacState.RequiredMarkerObservedWithinDeadline -and -not $qacState.ShutdownRequested) {
+                                    $harnessStopReason = 'guest_diagnostic_complete'
+                                    Request-QacGuestShutdown -QacState $qacState -QacProcess $process -QmpPort $qacQmpPort `
+                                        -Reason $harnessStopReason -HostTracePath $hostTracePath -RunNumber $runNumber
+                                }
+                            }
                         }
                         if ($qacState.RequiredMarkerObservedWithinDeadline -and -not $qacState.ShutdownRequested) {
                             $harnessStopReason = 'required_marker_observed'
@@ -2195,7 +2218,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 "ELF Loader: Phase 27V shared declarations and dependency smoke PASS"
             )
         }
-        if ($Phase27W) {
+        if ($Phase27W -and -not $Comp4DNativeBuildRun) {
             $requiredMarkers += @(
                 "phase27w_build_pass=PASS",
                 "phase27w_deploy_pass=PASS",
@@ -2225,6 +2248,24 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 "DEVELOPER_STUDIO_PHASE27W_NEGATIVE_PASS",
                 "DEVELOPER_STUDIO_PHASE27W_PASS",
                 "ELF Loader: Phase 27W Run Project smoke PASS"
+            )
+        }
+        if ($Comp4DNativeBuildRun) {
+            $requiredMarkers += @(
+                'phase27w_build_pass=PASS',
+                'comp4d_cooperative_progress=PASS',
+                'comp4d_queued_cancellation=PASS',
+                'comp4d_partial_elf_rejected=PASS',
+                'phase27w_deploy_pass=PASS',
+                'phase27w_launch_pass=PASS',
+                'phase27w_close_pass=PASS',
+                'phase27w_cleanup_pass=PASS',
+                'phase27w_artifact=PASS',
+                'comp4d_compile_failure_diagnostics=PASS',
+                'comp4d_compile_failure_preserved=PASS',
+                'comp4d_failed_build_blocks_run=PASS',
+                'comp4d_backup_cleanup=PASS',
+                'DEVELOPER_STUDIO_COMP4D_GUEST_PASS'
             )
         }
         if ($Phase27X) {
@@ -3916,6 +3957,7 @@ try {
     if ($Phase27U) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27U_SMOKE" }
     if ($Phase27V) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27V_SMOKE" }
     if ($Phase27W) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27W_SMOKE" }
+    if ($Comp4DNativeBuildRun) { $env:EXTRA_CFLAGS += " -DGXOS_COMP4D_SMOKE" }
     if ($Phase27X) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27X_SMOKE" }
     if ($Phase27Y) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27Y_SMOKE" }
     if ($Phase27Z) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27Z_SMOKE" }

@@ -2510,7 +2510,7 @@ static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32
     return file_contains_bytes_probe(path, pattern, patternBytes, nullptr);
 }
 
-#if defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
+#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
 static void print_decimal(uint32_t value)
 {
     char digits[10] = {};
@@ -2694,6 +2694,8 @@ static bool run_phase27v_build(gx_build_snapshot* snapshot)
 #endif
 
 #if defined(GXOS_PHASE27W_SMOKE)
+static const char kComp4DBuildOwner[] = "/P27W/build/bin/amd64/c4dkeep.bin";
+
 static bool run_phase27w_build(gx_build_snapshot* snapshot)
 {
     gx_build_request request = {};
@@ -2778,8 +2780,25 @@ static bool run_phase27w_session(const gx_build_snapshot& build,
     gx_development_run_snapshot completed = {};
     completed.size = sizeof(completed);
     const bool polled = started && NativeElfRunService::poll(handle, &completed) == GX_OK;
-    const bool normalClose = polled && completed.state == GX_DEVELOPMENT_RUN_COMPLETED &&
+    const bool successfulExitState = completed.state == GX_DEVELOPMENT_RUN_EXITED ||
+        completed.state == GX_DEVELOPMENT_RUN_COMPLETED;
+    const bool normalClose = polled && successfulExitState &&
+        completed.errorCode == GX_DEVELOPMENT_RUN_ERROR_NONE && completed.cleanupComplete != 0 &&
         completed.exitCode == expectedExitCode && phase27w_output_contains(completed, expectedOutput);
+#if defined(GXOS_COMP4D_SMOKE)
+    if (!normalClose) {
+        serial::puts("comp4d_run_snapshot started="); print_decimal(started ? 1U : 0U);
+        serial::puts(" polled="); print_decimal(polled ? 1U : 0U);
+        serial::puts(" state="); print_decimal(completed.state);
+        serial::puts(" error="); print_decimal(completed.errorCode);
+        serial::puts(" exit="); print_decimal(static_cast<uint32_t>(completed.exitCode));
+        serial::puts(" message="); serial::puts(completed.errorMessage); serial::putc('\n');
+        for (uint32_t i = 0; i < completed.outputCount; ++i) {
+            serial::puts("comp4d_run_output=");
+            serial::puts(completed.output[i].text); serial::putc('\n');
+        }
+    }
+#endif
     if (closed) *closed = normalClose;
     const bool release = polled && NativeElfRunService::release(handle) == GX_OK;
     if (cleaned) *cleaned = release && completed.cleanupComplete != 0 &&
@@ -2814,6 +2833,164 @@ static bool phase27w_failed_build_blocks_run(const gx_build_snapshot& build)
         snapshot.errorCode == GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET;
     return rejected && !NativeElfDevelopmentAppModel::has_active_registration();
 }
+
+#if defined(GXOS_COMP4D_SMOKE)
+static bool phase27w_build_output_contains(const gx_build_snapshot& snapshot,
+                                           const char* expected)
+{
+    if (!expected) return false;
+    for (uint32_t lineIndex = 0; lineIndex < snapshot.outputCount; ++lineIndex) {
+        const char* line = snapshot.output[lineIndex].text;
+        for (uint32_t offset = 0; line[offset] != '\0'; ++offset) {
+            uint32_t matched = 0;
+            while (expected[matched] != '\0' && line[offset + matched] != '\0' &&
+                   line[offset + matched] == expected[matched]) ++matched;
+            if (expected[matched] == '\0') return true;
+        }
+    }
+    return false;
+}
+
+static gx_build_request comp4d_build_request()
+{
+    gx_build_request request = {};
+    request.size = sizeof(request);
+    request.version = GX_BUILD_API_VERSION;
+    request.projectRoot = "/P27W";
+    request.projectId = "dev.guidexos.phase27w";
+    request.projectKind = "native-gui-application";
+    request.targetProfile = "guidexos.amd64.baremetal.bootstrap.native";
+    request.buildSystem = "guidexos-native-baremetal-bootstrap-v1";
+    request.buildScript = "";
+    request.expectedArtifact = "build/bin/amd64/p27w.elf";
+    request.configuration = "Debug";
+    return request;
+}
+
+static bool run_comp4d_cooperative_build(gx_build_snapshot* snapshot,
+                                         gx_build_handle* outHandle,
+                                         bool* sawPreparing,
+                                         bool* sawCompiler,
+                                         bool expectSuccess = true)
+{
+    static const uint64_t kOwner = 0x434F4D503444ULL;
+    if (outHandle) *outHandle = 0;
+    if (sawPreparing) *sawPreparing = false;
+    if (sawCompiler) *sawCompiler = false;
+    const gx_build_request request = comp4d_build_request();
+    gx_build_handle handle = 0;
+    if (compiler::BareMetalBuildService::request_owned(&request, kOwner, &handle) != GX_OK ||
+        handle == 0 || (handle >> 32) == 0) return false;
+
+    gx_build_snapshot local = {};
+    bool valid = true;
+    bool terminal = false;
+    for (uint32_t step = 0; step < 24U; ++step) {
+        if (compiler::BareMetalBuildService::poll_owned(kOwner, handle, &local) != GX_OK) {
+            valid = false;
+            break;
+        }
+        if (step == 0U && local.state == GX_BUILD_PREPARING &&
+            phase27w_build_output_contains(local, "Validating project metadata")) {
+            if (sawPreparing) *sawPreparing = true;
+        }
+        if (phase27w_build_output_contains(local, "Running bounded compiler pipeline")) {
+            if (sawCompiler) *sawCompiler = true;
+        }
+        if (local.state == GX_BUILD_SUCCEEDED || local.state == GX_BUILD_FAILED ||
+            local.state == GX_BUILD_CANCELLED) {
+            terminal = true;
+            break;
+        }
+    }
+    const bool released = compiler::BareMetalBuildService::release_owned(kOwner, handle) == GX_OK;
+    if (outHandle) *outHandle = handle;
+    if (snapshot) *snapshot = local;
+    const bool terminalStateMatches = expectSuccess ? local.state == GX_BUILD_SUCCEEDED :
+        local.state == GX_BUILD_FAILED;
+    if (!expectSuccess) {
+        if (snapshot) *snapshot = local;
+        return valid && terminal && released && terminalStateMatches && local.artifactValid == 0;
+    }
+    return valid && terminal && released && terminalStateMatches &&
+        local.artifactValid != 0 && local.sourceFileCount == 2U &&
+        local.compiledModuleCount == 2U && local.linkedModuleCount == 2U &&
+        local.artifactSize >= 64U && local.artifactSha256[0] != '\0' &&
+        equal_text(local.artifactPath, "build/bin/amd64/p27w.elf");
+}
+
+static bool comp4d_store_valid_artifact()
+{
+    if (!reset_vfs_file(kComp4DBuildOwner)) return false;
+    uint32_t bytes = 0;
+    if (!read_vfs_image("/P27W/build/bin/amd64/p27w.elf", s_invalidImage,
+                        sizeof(s_invalidImage), &bytes) || bytes < 4U ||
+        s_invalidImage[0] != 0x7FU || s_invalidImage[1] != 'E' ||
+        s_invalidImage[2] != 'L' || s_invalidImage[3] != 'F') return false;
+    return vfs::write_file(kComp4DBuildOwner, s_invalidImage, bytes) ==
+        static_cast<int32_t>(bytes);
+}
+
+static bool comp4d_artifact_matches_saved()
+{
+    return same_vfs_file_bytes("/P27W/build/bin/amd64/p27w.elf", kComp4DBuildOwner);
+}
+
+static bool comp4d_cancel_queued_build_preserves_artifact()
+{
+    static const uint64_t kOwner = 0x434F4D503445ULL;
+    if (!comp4d_store_valid_artifact()) return false;
+    const gx_build_request request = comp4d_build_request();
+    gx_build_handle handle = 0;
+    if (compiler::BareMetalBuildService::request_owned(&request, kOwner, &handle) != GX_OK ||
+        handle == 0) {
+        (void)reset_vfs_file(kComp4DBuildOwner);
+        return false;
+    }
+    gx_build_snapshot denied = {};
+    const bool crossOwnerDenied = compiler::BareMetalBuildService::poll_owned(
+        kOwner + 1U, handle, &denied) == GX_ERROR_PERMISSION_DENIED;
+    const bool cancelAccepted = compiler::BareMetalBuildService::cancel_owned(kOwner, handle) == GX_OK &&
+        compiler::BareMetalBuildService::cancel_owned(kOwner, handle) == GX_OK;
+    gx_build_snapshot cancelled = {};
+    const bool polled = compiler::BareMetalBuildService::poll_owned(kOwner, handle,
+                                                                     &cancelled) == GX_OK;
+    const bool cleanTerminal = polled && cancelled.state == GX_BUILD_CANCELLED &&
+        cancelled.errorCode == GX_BUILD_ERROR_BUILD_CANCELLED && !cancelled.artifactValid &&
+        cancelled.artifactSize == 0U && cancelled.artifactPath[0] == '\0' &&
+        cancelled.artifactSha256[0] == '\0' &&
+        !vfs::exists("/P27W/build/bin/amd64/gx4btmp.tmp") && comp4d_artifact_matches_saved();
+    const bool released = compiler::BareMetalBuildService::release_owned(kOwner, handle) == GX_OK;
+    const bool backupRemoved = reset_vfs_file(kComp4DBuildOwner);
+    return crossOwnerDenied && cancelAccepted && cleanTerminal && released && backupRemoved;
+}
+
+static bool comp4d_partial_elf_is_rejected(const gx_build_snapshot& build)
+{
+    static const uint8_t partialElf[] = { 0x7FU, 'E', 'L', 'F' };
+    if (!comp4d_store_valid_artifact()) return false;
+    const int32_t partialBytes = vfs::write_file(
+        "/P27W/build/bin/amd64/p27w.elf", partialElf, sizeof(partialElf));
+    gx_development_run_request request = phase27w_run_request(build);
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot rejected = {};
+    rejected.size = sizeof(rejected);
+    const bool rejectedBeforeLaunch = partialBytes == static_cast<int32_t>(sizeof(partialElf)) &&
+        NativeElfRunService::prepare(request, &handle, &rejected) == GX_OK && handle == 0 &&
+        rejected.state == GX_DEVELOPMENT_RUN_FAILED &&
+        rejected.errorCode == GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_SIZE_CHANGED;
+    uint32_t savedBytes = 0;
+    const bool savedRead = read_vfs_image(kComp4DBuildOwner, s_compareImage,
+                                           sizeof(s_compareImage), &savedBytes);
+    const bool restored = savedRead && vfs::write_file(
+        "/P27W/build/bin/amd64/p27w.elf", s_compareImage, savedBytes) ==
+            static_cast<int32_t>(savedBytes);
+    const bool preserved = restored && comp4d_artifact_matches_saved();
+    const bool backupRemoved = reset_vfs_file(kComp4DBuildOwner);
+    return rejectedBeforeLaunch && preserved && backupRemoved &&
+        !NativeElfDevelopmentAppModel::has_active_registration();
+}
+#endif
 #endif
 
 #if defined(GXOS_PHASE27X_SMOKE)
@@ -5063,15 +5240,30 @@ void run_bootstrap_execution_smoke()
     const char w27HeaderEdited[] =
         "extern int phase27w_value();\n"
         "// B\n";
+#if defined(GXOS_COMP4D_SMOKE)
+    const char w27Main[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"27W RUN 27\"); int quotient = -17 / 5; int remainder = -17 % 5; "
+        "if (quotient != -3) return 91; if (remainder != -2) return 92; "
+        "return phase27w_value() + 18; }\n";
+#else
     const char w27Main[] =
         "#include \"phase27w_value.h\"\n"
         "int gx_main(gx_app_context* ctx) { log(ctx, \"27W RUN 27\"); return phase27w_value(); }\n";
+#endif
     const char w27MainEdited[] =
         "#include \"phase27w_value.h\"\n"
         "int gx_main(gx_app_context* ctx) { log(ctx, \"27W RUN 28\"); return phase27w_value(); }\n";
+#if defined(GXOS_COMP4D_SMOKE)
+    const char w27Value[] =
+        "#include \"phase27w_value.h\"\n"
+        "int phase27w_value() { int i = 1; int sum = 0; while (i <= 5) { "
+        "if (i % 2 != 0) { sum = sum + i; } i = i + 1; } return sum; }\n";
+#else
     const char w27Value[] =
         "#include \"phase27w_value.h\"\n"
         "int phase27w_value() { return 27; }\n";
+#endif
     const char w27ValueEdited[] =
         "#include \"phase27w_value.h\"\n"
         "int phase27w_value() { return 28; }\n";
@@ -5101,20 +5293,55 @@ void run_bootstrap_execution_smoke()
     static gx_build_snapshot w27Failed = {};
     static gx_build_snapshot w27LinkFailed = {};
     static gx_build_snapshot w27Restored = {};
+    bool comp4dAllChecks = true;
+#if defined(GXOS_COMP4D_SMOKE)
+    bool comp4dSawPreparing = false;
+    bool comp4dSawCompiler = false;
+    gx_build_handle comp4dFirstHandle = 0;
+    const bool comp4dInitialBuild = fixture && run_comp4d_cooperative_build(
+        &w27Clean, &comp4dFirstHandle, &comp4dSawPreparing, &comp4dSawCompiler);
+    comp4dAllChecks = comp4dInitialBuild && comp4dSawPreparing && comp4dSawCompiler;
+    print_marker("comp4d_cooperative_progress", comp4dAllChecks);
+    const bool cleanBuild = comp4dInitialBuild &&
+        w27Clean.state == GX_BUILD_SUCCEEDED && w27Clean.artifactValid != 0 &&
+        w27Clean.compiledModuleCount == 2 && w27Clean.cachedModuleCount == 0 &&
+        w27Clean.artifactSize != 0;
+    comp4dAllChecks = comp4dAllChecks && cleanBuild;
+#else
     const bool cleanBuild = fixture && run_phase27w_build(&w27Clean) &&
         w27Clean.state == GX_BUILD_SUCCEEDED && w27Clean.artifactValid != 0 &&
         w27Clean.compiledModuleCount == 2 && w27Clean.cachedModuleCount == 0 &&
         w27Clean.artifactSize != 0;
+#endif
     print_marker("phase27w_build_pass", cleanBuild);
     if (cleanBuild) serial::puts("DEVELOPER_STUDIO_PHASE27W_BUILD_PASS\n");
+
+#if defined(GXOS_COMP4D_SMOKE)
+    const bool comp4dQueuedCancellation = cleanBuild &&
+        comp4d_cancel_queued_build_preserves_artifact();
+    comp4dAllChecks = comp4dAllChecks && comp4dQueuedCancellation;
+    print_marker("comp4d_queued_cancellation", comp4dQueuedCancellation);
+#else
+    const bool comp4dQueuedCancellation = true;
+#endif
 
     bool firstDeploy = false;
     bool firstBusyReject = false;
     bool firstClose = false;
     bool firstCleanup = false;
+#if defined(GXOS_COMP4D_SMOKE)
+    const bool firstRun = cleanBuild && comp4dQueuedCancellation && run_phase27w_session(
+        w27Clean, 27, "27W RUN 27", &firstDeploy, &firstBusyReject,
+        &firstClose, &firstCleanup);
+    const bool comp4dPartialArtifactRejected = firstRun &&
+        comp4d_partial_elf_is_rejected(w27Clean);
+    comp4dAllChecks = comp4dAllChecks && comp4dPartialArtifactRejected;
+    print_marker("comp4d_partial_elf_rejected", comp4dPartialArtifactRejected);
+#else
     const bool firstRun = cleanBuild && run_phase27w_session(
         w27Clean, 27, "27W RUN 27", &firstDeploy, &firstBusyReject,
         &firstClose, &firstCleanup);
+#endif
     print_marker("phase27w_deploy_pass", firstDeploy);
     if (firstDeploy) serial::puts("DEVELOPER_STUDIO_PHASE27W_DEPLOY_PASS\n");
     print_marker("phase27w_launch_pass", firstRun);
@@ -5127,9 +5354,77 @@ void run_bootstrap_execution_smoke()
     if (firstCleanup) serial::puts("DEVELOPER_STUDIO_PHASE27W_CLEANUP_PASS\n");
     print_marker("phase27w_already_running_rejected", firstBusyReject);
 
+#if defined(GXOS_COMP4D_SMOKE)
+    {
+        const bool initialRunChecks = firstRun && firstDeploy && firstBusyReject && firstClose &&
+            firstCleanup && comp4dPartialArtifactRejected;
+        const bool comp4dArtifactEvidence = initialRunChecks && emit_serial_artifact(
+            "/P27W/build/bin/amd64/p27w.elf", "w27main");
+        print_marker("phase27w_artifact", comp4dArtifactEvidence);
+        bool comp4dFailureSawPreparing = false;
+        bool comp4dFailureSawCompiler = false;
+        gx_build_handle comp4dFailureHandle = 0;
+        const bool priorStored = initialRunChecks && comp4d_store_valid_artifact();
+        const bool failureSourceWritten = priorStored && write_w27("/P27W/src/value.cpp", w27ValueBad);
+        const bool failureRequestCompleted = failureSourceWritten && run_comp4d_cooperative_build(
+            &w27Failed, &comp4dFailureHandle, &comp4dFailureSawPreparing,
+            &comp4dFailureSawCompiler, false);
+        const bool failureDiagnostics = failureRequestCompleted &&
+            phase27w_build_output_contains(w27Failed, "Validating project metadata") &&
+            phase27w_build_output_contains(w27Failed, "Running bounded compiler pipeline") &&
+            w27Failed.errorCode == GX_BUILD_ERROR_COMPILER_SYNTAX &&
+            w27Failed.errorCount != 0U && w27Failed.artifactSize == 0U &&
+            w27Failed.artifactPath[0] == '\0' && w27Failed.artifactSha256[0] == '\0' &&
+            phase27w_build_output_contains(w27Failed, "[syntax]");
+        const bool failurePreservedArtifact = failureRequestCompleted && comp4d_artifact_matches_saved();
+        const bool comp4dFailedBuildRunBlocked = failureRequestCompleted &&
+            phase27w_failed_build_blocks_run(w27Failed);
+        const bool comp4dFailureBackupCleaned = reset_vfs_file(kComp4DBuildOwner);
+        comp4dAllChecks = comp4dAllChecks && initialRunChecks && failureDiagnostics &&
+            comp4dFailedBuildRunBlocked &&
+            failurePreservedArtifact && comp4dFailureBackupCleaned;
+        if (!failureDiagnostics) {
+            serial::puts("comp4d_failure_snapshot completed="); print_decimal(failureRequestCompleted ? 1U : 0U);
+            serial::puts(" preparing="); print_decimal(comp4dFailureSawPreparing ? 1U : 0U);
+            serial::puts(" compiler="); print_decimal(comp4dFailureSawCompiler ? 1U : 0U);
+            serial::puts(" state="); print_decimal(w27Failed.state);
+            serial::puts(" error="); print_decimal(w27Failed.errorCode);
+            serial::puts(" count="); print_decimal(w27Failed.errorCount);
+            serial::puts(" artifact_valid="); print_decimal(w27Failed.artifactValid);
+            serial::puts(" artifact_size="); print_decimal(w27Failed.artifactSize);
+            serial::puts(" artifact_path="); serial::puts(w27Failed.artifactPath);
+            serial::puts(" artifact_sha256="); serial::puts(w27Failed.artifactSha256); serial::putc('\n');
+            for (uint32_t i = 0; i < w27Failed.outputCount; ++i) {
+                serial::puts("comp4d_failure_output=");
+                serial::puts(w27Failed.output[i].text); serial::putc('\n');
+            }
+        }
+        print_marker("comp4d_compile_failure_diagnostics", failureDiagnostics);
+        print_marker("comp4d_compile_failure_preserved", failurePreservedArtifact);
+        print_marker("comp4d_failed_build_blocks_run", comp4dFailedBuildRunBlocked);
+        print_marker("comp4d_backup_cleanup", comp4dFailureBackupCleaned);
+        if (comp4dAllChecks) serial::puts("DEVELOPER_STUDIO_COMP4D_GUEST_PASS\n");
+        serial::puts("DEVELOPER_STUDIO_COMP4D_GUEST_COMPLETE\n");
+        return;
+    }
+#endif
+
+#if defined(GXOS_COMP4D_SMOKE)
+    gx_build_handle comp4dWarmHandle = 0;
+    bool comp4dWarmSawPreparing = false;
+    bool comp4dWarmSawCompiler = false;
+    const bool comp4dWarmRequest = firstRun && run_comp4d_cooperative_build(
+        &w27Warm, &comp4dWarmHandle, &comp4dWarmSawPreparing, &comp4dWarmSawCompiler);
+    const bool warmBuild = comp4dWarmRequest && comp4dWarmHandle != comp4dFirstHandle &&
+        comp4dWarmSawPreparing && comp4dWarmSawCompiler &&
+        w27Warm.state == GX_BUILD_SUCCEEDED && w27Warm.compiledModuleCount == 0 &&
+        w27Warm.cachedModuleCount == 2;
+    comp4dAllChecks = comp4dAllChecks && warmBuild;
+#else
     const bool warmBuild = firstRun && run_phase27w_build(&w27Warm) &&
         w27Warm.state == GX_BUILD_SUCCEEDED && w27Warm.compiledModuleCount == 0 &&
         w27Warm.cachedModuleCount == 2;
+#endif
     bool secondDeploy = false;
     bool secondBusyReject = false;
     bool secondClose = false;
@@ -5157,10 +5452,29 @@ void run_bootstrap_execution_smoke()
         &editedClose, &editedCleanup);
     print_marker("phase27w_changed_artifact_pass", changedRun && editedDeploy && editedClose && editedCleanup);
 
-    const bool compilerFailureWritten = changedRun && write_w27("/P27W/src/value.cpp", w27ValueBad);
+    bool comp4dSavedPriorArtifact = true;
+#if defined(GXOS_COMP4D_SMOKE)
+    comp4dSavedPriorArtifact = changedRun && comp4d_store_valid_artifact();
+    comp4dAllChecks = comp4dAllChecks && comp4dSavedPriorArtifact;
+#endif
+    const bool compilerFailureWritten = changedRun && comp4dSavedPriorArtifact &&
+        write_w27("/P27W/src/value.cpp", w27ValueBad);
     const bool compilerFailureBuild = compilerFailureWritten && run_phase27w_build(&w27Failed) &&
         w27Failed.state == GX_BUILD_FAILED && w27Failed.artifactValid == 0 &&
         vfs::exists("/P27W/build/bin/amd64/p27w.elf");
+#if defined(GXOS_COMP4D_SMOKE)
+    const bool comp4dCompilerDiagnostics = compilerFailureBuild &&
+        w27Failed.errorCode == GX_BUILD_ERROR_COMPILER_SYNTAX && w27Failed.errorCount != 0U &&
+        w27Failed.artifactSize == 0U && w27Failed.artifactPath[0] == '\0' &&
+        w27Failed.artifactSha256[0] == '\0' &&
+        phase27w_build_output_contains(w27Failed, "[syntax]");
+    const bool comp4dCompilerFailurePreserved = compilerFailureBuild &&
+        comp4d_artifact_matches_saved();
+    comp4dAllChecks = comp4dAllChecks && comp4dCompilerDiagnostics &&
+        comp4dCompilerFailurePreserved;
+    print_marker("comp4d_compile_failure_diagnostics", comp4dCompilerDiagnostics);
+    print_marker("comp4d_compile_failure_preserved", comp4dCompilerFailurePreserved);
+#endif
     const bool staleRejected = compilerFailureBuild && phase27w_failed_build_blocks_run(w27Failed);
     print_marker("phase27w_stale_block_pass", staleRejected);
     if (staleRejected) serial::puts("DEVELOPER_STUDIO_PHASE27W_STALE_BLOCK_PASS\n");
@@ -5169,6 +5483,14 @@ void run_bootstrap_execution_smoke()
     const bool linkFailureBuild = linkFailureWritten && run_phase27w_build(&w27LinkFailed) &&
         w27LinkFailed.state == GX_BUILD_FAILED && w27LinkFailed.artifactValid == 0 &&
         vfs::exists("/P27W/build/bin/amd64/p27w.elf");
+#if defined(GXOS_COMP4D_SMOKE)
+    const bool comp4dLinkFailurePreserved = linkFailureBuild &&
+        w27LinkFailed.errorCode == GX_BUILD_ERROR_COMPILER_LINKER &&
+        w27LinkFailed.errorCount != 0U && phase27w_build_output_contains(w27LinkFailed, "[linker]") &&
+        comp4d_artifact_matches_saved();
+    comp4dAllChecks = comp4dAllChecks && comp4dLinkFailurePreserved;
+    print_marker("comp4d_link_failure_preserved", comp4dLinkFailurePreserved);
+#endif
     const bool linkFailureStaleRejected = linkFailureBuild && phase27w_failed_build_blocks_run(w27LinkFailed);
     print_marker("phase27w_link_failure_stale_block_pass", linkFailureStaleRejected);
     if (linkFailureStaleRejected)
@@ -5222,6 +5544,13 @@ void run_bootstrap_execution_smoke()
     const bool postFailureRestore = launchFailureCleanup && run_phase27w_build(&w27Restored) &&
         w27Restored.state == GX_BUILD_SUCCEEDED && w27Restored.artifactValid != 0;
 
+#if defined(GXOS_COMP4D_SMOKE)
+    const bool comp4dBackupCleanup = reset_vfs_file(kComp4DBuildOwner);
+    comp4dAllChecks = comp4dAllChecks && comp4dBackupCleanup;
+    print_marker("comp4d_backup_cleanup", comp4dBackupCleanup);
+    if (comp4dAllChecks) serial::puts("DEVELOPER_STUDIO_COMP4D_GUEST_PASS\n");
+#endif
+
     const bool unsupported = postFailureRestore && phase27w_reject_request(
         w27Restored, "console", w27Restored.artifactPath,
         GX_DEVELOPMENT_RUN_ERROR_UNSUPPORTED_TARGET);
@@ -5251,7 +5580,7 @@ void run_bootstrap_execution_smoke()
         firstBusyReject && warmBuild && rerun && secondBusyReject && editedBuild && changedRun &&
         compilerFailureBuild && staleRejected && linkFailureBuild && linkFailureStaleRejected && restoredBuild && recoveredRun &&
         wArtifactEvidence && launchFailureCleanup && unsupported && escaping && missingArtifactRejected && cancelled &&
-        !NativeElfDevelopmentAppModel::has_active_registration();
+        !NativeElfDevelopmentAppModel::has_active_registration() && comp4dAllChecks;
     print_marker("phase27w", phase27wPassed);
     serial::puts(phase27wPassed ?
         "ELF Loader: Phase 27W Run Project smoke PASS\nDEVELOPER_STUDIO_PHASE27W_PASS\n" :

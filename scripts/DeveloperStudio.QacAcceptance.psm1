@@ -20,13 +20,22 @@ function Resolve-QacAcceptanceCliPath {
 }
 
 function Get-QacAcceptancePassMarker {
-    param([Parameter(Mandatory = $true)][ValidateSet('27E', '27F', '28Q', '28O')][string]$Phase)
+    param([Parameter(Mandatory = $true)][ValidateSet('27E', '27F', '28Q', '28O', 'COMP4D')][string]$Phase)
 
     switch ($Phase) {
         '27E' { return 'phase27e=PASS' }
         '27F' { return 'phase27f=PASS' }
         '28Q' { return 'DEVELOPER_STUDIO_PHASE28Q_PASS' }
         '28O' { return 'DEVELOPER_STUDIO_PHASE28O_PASS' }
+        'COMP4D' { return 'DEVELOPER_STUDIO_COMP4D_GUEST_PASS' }
+    }
+}
+
+function Get-QacAcceptanceCompletionMarker {
+    param([Parameter(Mandatory = $true)][ValidateSet('COMP4D')][string]$Phase)
+
+    switch ($Phase) {
+        'COMP4D' { return 'DEVELOPER_STUDIO_COMP4D_GUEST_COMPLETE' }
     }
 }
 
@@ -258,7 +267,7 @@ function Test-QacManagedAcceptanceSuccess {
         -not $AdmissionTimedOut -and -not $RecoveryRequired -and -not $CoordinatorUnavailable
 }
 
-Export-ModuleMember -Function Resolve-QacAcceptanceCliPath, Get-QacAcceptancePassMarker, ConvertTo-QacWindowsCommandLineArgument,
+Export-ModuleMember -Function Resolve-QacAcceptanceCliPath, Get-QacAcceptancePassMarker, Get-QacAcceptanceCompletionMarker, ConvertTo-QacWindowsCommandLineArgument,
     New-QacManagedRunArgumentString, New-QacCliArgumentString, Invoke-QacCancelReservation,
     Register-QacConsoleCancellation, Unregister-QacConsoleCancellation, New-QacLoopbackQmpPort,
     Send-QacQmpQuit, Read-QacSerialMarker, Test-QacMarkerObservedWithinDeadline,

@@ -141,9 +141,13 @@ static void setup_project()
         "\"abi\":\"guidexos-c-abi-v1\"}");
     put("/workspace/comp4b/src/main.cpp",
         "#include \"helper.h\"\n"
-        "int gx_main(gx_app_context* ctx) { return calculate_value() / 2 + 21; }\n");
+        "int gx_main(gx_app_context* ctx) { int quotient = -17 / 5; int remainder = -17 % 5; "
+        "if (quotient != -3) return 91; if (remainder != -2) return 92; "
+        "return calculate_value() / 3; }\n");
     put("/workspace/comp4b/src/helper.cpp",
-        "int calculate_value() { return 42; }\n");
+        "int calculate_value() { int i = 1; int sum = 0; "
+        "while (i <= 5) { if (i % 2 != 0) { sum = sum + i; } "
+        "i = i + 1; } return sum; }\n");
     put("/workspace/comp4b/src/helper.h", "int calculate_value();\n");
     put(kFinalArtifact, "previous-successful-artifact");
 }
@@ -258,15 +262,35 @@ static void test_cancel_during_noninterruptible_compiler(RequestFixture& fixture
 
 static void test_failure_diagnostics_and_recovery(RequestFixture& fixture)
 {
+    gx_build_handle successfulHandle = start_build(fixture);
+    gx_build_snapshot successful = run_to_terminal(successfulHandle);
+    assert(successful.state == GX_BUILD_SUCCEEDED && successful.artifactValid &&
+           successful.sourceFileCount == 2U && successful.linkedModuleCount == 2U &&
+           successful.artifactSize >= 64U && successful.artifactSha256[0] != '\0');
     const std::vector<uint8_t> previous = read_vfs_bytes(kFinalArtifact);
+    assert(previous.size() == successful.artifactSize);
+    release_build(successfulHandle);
+
+    // A repeated unchanged Build gets a distinct generation and the same
+    // validated artifact identity, without exposing an intermediate ELF.
+    gx_build_handle repeatedHandle = start_build(fixture);
+    assert(repeatedHandle != successfulHandle);
+    gx_build_snapshot repeated = run_to_terminal(repeatedHandle);
+    assert(repeated.state == GX_BUILD_SUCCEEDED && repeated.artifactValid &&
+           repeated.artifactSize == successful.artifactSize &&
+           std::strcmp(repeated.artifactSha256, successful.artifactSha256) == 0 &&
+           read_vfs_bytes(kFinalArtifact) == previous);
+    release_build(repeatedHandle);
+
     put("/workspace/comp4b/src/main.cpp",
-        "int gx_main(gx_app_context* ctx) { return 7 / 0; }\n");
+        "int gx_main(gx_app_context* ctx) { return (1 + ); }\n");
     gx_build_handle handle = start_build(fixture);
     gx_build_snapshot snapshot = run_to_terminal(handle);
     assert(snapshot.state == GX_BUILD_FAILED && !snapshot.artifactValid &&
-           snapshot.errorCode == GX_BUILD_ERROR_COMPILER_SEMANTIC &&
-           snapshot.errorCount != 0U && output_contains(snapshot, "[semantic]") &&
-           output_contains(snapshot, "constant division by zero"));
+           snapshot.errorCode == GX_BUILD_ERROR_COMPILER_SYNTAX &&
+           snapshot.errorCount != 0U && output_contains(snapshot, "[syntax]") &&
+           snapshot.artifactSize == 0U && snapshot.artifactPath[0] == '\0' &&
+           snapshot.artifactSha256[0] == '\0');
     assert(!kernel::vfs::exists(kTemporaryArtifact));
     assert(read_vfs_bytes(kFinalArtifact) == previous);
     release_build(handle);
