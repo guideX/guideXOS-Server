@@ -125,8 +125,8 @@ static bool calculate_rel32(uint64_t target, uint64_t after, int32_t* output)
 static bool report_kind_conflict(const SourceLocation& location, const char* name,
                                  Diagnostics& diagnostics)
 {
-    diagnostics.error_identifier_suffix(location, "symbol ", name, name_length(name),
-                                        " defined as both function and global", "linker");
+    diagnostics.error_identifier_suffix_as(CompilerDiagnosticKind::Linker, location, "symbol ",
+        name, name_length(name), " defined as both function and global", "linker");
     return false;
 }
 
@@ -154,6 +154,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
 bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                   LinkedProgram* output, Diagnostics& diagnostics, uint64_t imageBase)
 {
+    diagnostics.set_default_kind(CompilerDiagnosticKind::Linker);
     if (imageBase == 0 || (imageBase & 0xFFFU) != 0 ||
         imageBase > ~static_cast<uint64_t>(0) - BOOTSTRAP_MAX_ELF_BYTES) {
         diagnostics.error(SourceLocation{}, "link image base must be page-aligned and leave room for the bounded ELF", "linker");
@@ -307,7 +308,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             if (existing >= 0) {
                 if (output->exports[existing].kind != exportSymbol.kind)
                     return report_kind_conflict(exportSymbol.location, exportSymbol.name, diagnostics);
-                diagnostics.error_identifier(exportSymbol.location,
+                diagnostics.error_identifier_as(CompilerDiagnosticKind::Linker, exportSymbol.location,
                     symbol_is_data(exportSymbol.kind) ? "duplicate definition for global " :
                     "duplicate definition for function ", exportSymbol.name,
                     name_length(exportSymbol.name), "linker");
@@ -510,7 +511,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             }
             const int32_t symbolIndex = find_symbol(*output, importSymbol.name);
             if (symbolIndex < 0) {
-                diagnostics.error_identifier(importSymbol.location,
+                diagnostics.error_identifier_as(CompilerDiagnosticKind::Linker, importSymbol.location,
                     symbol_is_data(importSymbol.kind) ? "undefined external global " :
                     "undefined external function ", importSymbol.name,
                     name_length(importSymbol.name), "linker");
@@ -519,7 +520,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             const GlobalFunctionSymbol& definition = output->exports[symbolIndex];
             if (definition.kind != importSymbol.kind) {
                 if (symbol_is_data(definition.kind) && symbol_is_data(importSymbol.kind)) {
-                    diagnostics.error_identifier(importSymbol.location, "conflicting declaration for global ",
+                    diagnostics.error_identifier_as(CompilerDiagnosticKind::Linker, importSymbol.location,
+                                                  "conflicting declaration for global ",
                                                   importSymbol.name, name_length(importSymbol.name), "linker");
                     return false;
                 }
@@ -531,7 +533,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                     sameSignature = definition.parameterKinds[p] == importSymbol.parameterKinds[p] &&
                         definition.parameterStructTypes[p] == importSymbol.parameterStructTypes[p];
                 if (!sameSignature) {
-                    diagnostics.error_identifier(importSymbol.location, "conflicting declaration for function ",
+                    diagnostics.error_identifier_as(CompilerDiagnosticKind::Linker, importSymbol.location,
+                                                  "conflicting declaration for function ",
                                                   importSymbol.name, name_length(importSymbol.name), "function");
                     return false;
                 }
@@ -543,7 +546,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                        definition.elementCount != importSymbol.elementCount ||
                        definition.elementSize != importSymbol.elementSize ||
                        definition.structTypeIdentity != importSymbol.structTypeIdentity) {
-                    diagnostics.error_identifier(importSymbol.location, "conflicting declaration for global ",
+                    diagnostics.error_identifier_as(CompilerDiagnosticKind::Linker, importSymbol.location,
+                                              "conflicting declaration for global ",
                                               importSymbol.name, name_length(importSymbol.name), "linker");
                 return false;
             }
@@ -634,7 +638,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             const int32_t targetIndex = find_symbol(*output, relocation.targetSymbolName);
             if (relocation.kind == RelocationKind::CallRel32) {
                 if (relocation.width != 4 || targetIndex < 0) {
-                    if (targetIndex < 0) diagnostics.error_identifier(relocation.location,
+                    if (targetIndex < 0) diagnostics.error_identifier_as(
+                        CompilerDiagnosticKind::Linker, relocation.location,
                         "undefined external function ", relocation.targetSymbolName,
                         name_length(relocation.targetSymbolName), "linker");
                     else diagnostics.error(relocation.location, "CallRel32 target is not a function", "relocation");
@@ -665,7 +670,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 }
             } else if (relocation.kind == RelocationKind::GlobalDataAddress64) {
                 if (relocation.width != 8 || targetIndex < 0) {
-                    diagnostics.error_identifier(relocation.location, "undefined external global ",
+                    diagnostics.error_identifier_as(CompilerDiagnosticKind::Linker,
+                                                  relocation.location, "undefined external global ",
                                                   relocation.targetSymbolName,
                                                   name_length(relocation.targetSymbolName), "linker");
                     return false;

@@ -21,6 +21,7 @@ struct CompileDiagnostic {
     char message[COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES];
     char tokenKind[COMPILER_MAX_DIAGNOSTIC_TOKEN_BYTES];
     char sourcePath[COMPILER_MAX_DIAGNOSTIC_PATH_BYTES];
+    CompilerDiagnosticKind kind;
 };
 
 enum CompileModuleStatus : uint8_t {
@@ -38,7 +39,14 @@ enum class CompileFailureStage : uint8_t {
     Linker,
     ElfWriter,
     ArtifactValidation,
-    ArtifactPublication
+    ArtifactPublication,
+    Lexical,
+    Syntax,
+    Unsupported,
+    Semantic,
+    ResourceLimit,
+    CodeGeneration,
+    Internal
 };
 
 struct CompileSummary {

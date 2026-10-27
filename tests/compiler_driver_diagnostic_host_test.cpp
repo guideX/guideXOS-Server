@@ -126,6 +126,17 @@ static const CompileDiagnostic* diagnostic_for(const char* path)
         if (std::strcmp(g_summary.diagnostics[i].sourcePath, path) == 0) return &g_summary.diagnostics[i];
     return nullptr;
 }
+
+static std::vector<uint8_t> read_vfs_bytes(const char* path)
+{
+    vfs::FileInfo info = {};
+    assert(vfs::stat(path, &info) == vfs::VFS_OK);
+    std::vector<uint8_t> bytes(static_cast<size_t>(info.size));
+    if (!bytes.empty())
+        assert(vfs::read_file(path, &bytes[0], static_cast<uint32_t>(bytes.size())) ==
+               static_cast<int32_t>(bytes.size()));
+    return bytes;
+}
 }
 
 int main()
@@ -157,7 +168,8 @@ int main()
         "int invalid_header() { return missing_header_symbol; }\n");
     assert(!build());
     const CompileDiagnostic* headerError = diagnostic_for("src/helper.h");
-    assert(g_summary.failureStage == CompileFailureStage::Frontend && headerError &&
+    assert(g_summary.failureStage == CompileFailureStage::Semantic && headerError &&
+           headerError->kind == CompilerDiagnosticKind::Semantic &&
            headerError->location.line == 2 && headerError->location.column > 0 &&
            std::strstr(headerError->message, "missing_header_symbol"));
 
@@ -167,7 +179,8 @@ int main()
         "int gx_main(gx_app_context* ctx) { return missing_main_symbol; }\n");
     assert(!build());
     const CompileDiagnostic* mainError = diagnostic_for("src/main.cpp");
-    assert(g_summary.failureStage == CompileFailureStage::Frontend && mainError &&
+    assert(g_summary.failureStage == CompileFailureStage::Semantic && mainError &&
+           mainError->kind == CompilerDiagnosticKind::Semantic &&
            mainError->location.line == 2 && mainError->location.column > 0 &&
            std::strstr(mainError->message, "missing_main_symbol"));
 
@@ -180,7 +193,8 @@ int main()
         "}\n");
     assert(!build());
     const CompileDiagnostic* helperError = diagnostic_for("src/helper.cpp");
-    assert(g_summary.failureStage == CompileFailureStage::Frontend && helperError &&
+    assert(g_summary.failureStage == CompileFailureStage::Semantic && helperError &&
+           helperError->kind == CompilerDiagnosticKind::Semantic &&
            helperError->location.line == 2 && helperError->location.column > 0 &&
            std::strstr(helperError->message, "missing_helper_symbol"));
 
@@ -190,11 +204,66 @@ int main()
            g_summary.cachedModuleCount == 1 && g_summary.linkedModuleCount == 2);
 
     put("/comp3/src/main.cpp",
+        "#include \"missing.h\"\n"
+        "int gx_main(gx_app_context* ctx) { return 1; }\n");
+    assert(!build(1));
+    const CompileDiagnostic* headerReadError = diagnostic_for("src/main.cpp");
+    assert(g_summary.failureStage == CompileFailureStage::SourceRead && headerReadError &&
+           headerReadError->kind == CompilerDiagnosticKind::SourceRead &&
+           std::strstr(headerReadError->message, "header not found"));
+
+    const std::vector<uint8_t> lastSuccessfulArtifact = read_vfs_bytes("/comp3/build/app.elf");
+    put("/comp3/src/main.cpp", "int gx_main(gx_app_context* ctx) { return (1 + ); }\n");
+    assert(!build(1));
+    const CompileDiagnostic* syntaxError = diagnostic_for("src/main.cpp");
+    assert(g_summary.failureStage == CompileFailureStage::Syntax && syntaxError &&
+           syntaxError->kind == CompilerDiagnosticKind::Syntax && syntaxError->location.line == 1 &&
+           g_summary.success == false && g_summary.outputBytes == 0 && g_summary.outputHash == 0 &&
+           g_summary.reopenedHash == 0 &&
+           read_vfs_bytes("/comp3/build/app.elf") == lastSuccessfulArtifact);
+
+    put("/comp3/src/main.cpp",
+        "int* global_pointer;\n"
+        "int gx_main(gx_app_context* ctx) { return 1; }\n");
+    assert(!build(1));
+    const CompileDiagnostic* unsupportedError = diagnostic_for("src/main.cpp");
+    assert(g_summary.failureStage == CompileFailureStage::Unsupported && unsupportedError &&
+           unsupportedError->kind == CompilerDiagnosticKind::Unsupported &&
+           std::strstr(unsupportedError->message, "global pointer"));
+
+    put("/comp3/src/main.cpp",
+        "int gx_main(gx_app_context* ctx) { int value = 1; int* pointer = &value; int invalid = pointer; return 0; }\n");
+    assert(!build(1));
+    const CompileDiagnostic* typeError = diagnostic_for("src/main.cpp");
+    assert(g_summary.failureStage == CompileFailureStage::Semantic && typeError &&
+           typeError->kind == CompilerDiagnosticKind::Semantic &&
+           std::strstr(typeError->message, "cannot initialize int with a pointer"));
+
+    put("/comp3/src/main.cpp", "int gx_main(gx_app_context* ctx) { return @; }\n");
+    assert(!build(1));
+    const CompileDiagnostic* lexicalError = diagnostic_for("src/main.cpp");
+    assert(g_summary.failureStage == CompileFailureStage::Lexical && lexicalError &&
+           lexicalError->kind == CompilerDiagnosticKind::Lexical &&
+           lexicalError->location.line == 1 && std::strlen(lexicalError->message) <
+               COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES);
+
+    const std::string longIdentifier(70, 'x');
+    const std::string oversizedIdentifierSource =
+        "int gx_main(gx_app_context* ctx) { int " + longIdentifier + " = 1; return 0; }\n";
+    put("/comp3/src/main.cpp", oversizedIdentifierSource.c_str());
+    assert(!build(1));
+    const CompileDiagnostic* limitError = diagnostic_for("src/main.cpp");
+    assert(g_summary.failureStage == CompileFailureStage::ResourceLimit && limitError &&
+           limitError->kind == CompilerDiagnosticKind::ResourceLimit &&
+           std::strlen(limitError->message) < COMPILER_MAX_DIAGNOSTIC_MESSAGE_BYTES);
+
+    put("/comp3/src/main.cpp",
         "int missing_external();\n"
         "int gx_main(gx_app_context* ctx) { return missing_external(); }\n");
     assert(!compile_project_incremental(g_sourcePaths, g_identityPaths, g_objectPaths,
                                         1, "/comp3/build/app.elf", &g_summary));
     assert(g_summary.failureStage == CompileFailureStage::Linker && g_summary.diagnosticCount != 0 &&
+           g_summary.diagnostics[0].kind == CompilerDiagnosticKind::Linker &&
            g_summary.diagnostics[0].location.line == 0 &&
            std::strcmp(g_summary.diagnostics[0].sourcePath, "<link>") == 0 &&
            std::strstr(g_summary.diagnostics[0].message, "missing_external"));
@@ -209,8 +278,9 @@ int main()
     assert(!build(1));
     vfs::set_corrupt_final_artifact(false);
     assert(g_summary.failureStage == CompileFailureStage::ArtifactValidation &&
+           g_summary.diagnostics[0].kind == CompilerDiagnosticKind::Artifact &&
            g_summary.diagnosticCount != 0 && g_summary.diagnostics[0].location.line == 0);
 
-    std::puts("Compiler driver diagnostics, source mapping, incremental cache, linker and artifact stages PASS");
+    std::puts("Compiler diagnostic kinds, source mapping, incremental cache, linker, freshness and artifact stages PASS");
     return 0;
 }

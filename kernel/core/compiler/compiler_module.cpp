@@ -124,7 +124,8 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
         return true;
     }
     if (module->importCount >= COMPILER_MAX_MODULE_SYMBOLS) {
-        diagnostics.error(location, "module import capacity exceeded", "linker");
+        diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, location,
+                            "module import capacity exceeded", "linker");
         return false;
     }
     ImportSymbol& importSymbol = module->imports[module->importCount++];
@@ -159,7 +160,8 @@ static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
             global.size > sizeof(module->mutableData) - offset ||
             (!storage_kind_is_struct(global.kind) && (global.elementSize != 4 ||
              global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize))) {
-            diagnostics.error(global.location, "mutable global data capacity exceeded", "global");
+            diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, global.location,
+                                "mutable global data capacity exceeded", "global");
             return false;
         }
         for (uint32_t element = 0; !storage_kind_is_struct(global.kind) && element < global.elementCount; ++element) {
@@ -188,14 +190,16 @@ bool compile_module_from_source(const char* sourcePath,
                                 Diagnostics& diagnostics)
 {
     if (!module || !source || !sourcePath || sourcePath[0] == '\0') {
-        diagnostics.error({0, 1, 1}, "module source and path are required", "module");
+        diagnostics.error_as(CompilerDiagnosticKind::Internal, {0, 1, 1},
+                            "module source and path are required", "module");
         return false;
     }
     uint32_t pathBytes = 0;
     while (sourcePath[pathBytes] != '\0') ++pathBytes;
     if (sourceBytes > COMPILER_MAX_SOURCE_BYTES ||
         pathBytes + 1 > sizeof(module->sourcePath)) {
-        diagnostics.error({0, 1, 1}, "module source exceeds bounded path or source limit", "module");
+        diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, {0, 1, 1},
+                            "module source exceeds bounded path or source limit", "module");
         return false;
     }
 
@@ -229,7 +233,8 @@ bool compile_module_from_source(const char* sourcePath,
     module->entryCodeOffset = 0;
     module->hasEntry = s_unit.entryFunction != COMPILER_INVALID_INDEX;
     if (!flatten_string_table(s_unit, module->data, sizeof(module->data), &module->dataBytes)) {
-        diagnostics.error({0, 1, 1}, "source string data exceeds compiler limit", "data");
+        diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, {0, 1, 1},
+                            "source string data exceeds compiler limit", "data");
         return false;
     }
     if (!flatten_global_data(s_unit, module, diagnostics)) return false;
@@ -242,11 +247,13 @@ bool compile_module_from_source(const char* sourcePath,
             module->sourceMappings, COMPILER_MAX_SOURCE_MAPPINGS,
             &module->sourceMapCount, module->debugVariables,
             COMPILER_MAX_DEBUG_VARIABLES, &module->debugVariableCount)) {
-        diagnostics.error({0, 1, 1}, "AMD64 backend rejected target-neutral IR", "backend");
+        diagnostics.error_as(CompilerDiagnosticKind::CodeGeneration, {0, 1, 1},
+                            "AMD64 backend rejected target-neutral IR", "backend");
         return false;
     }
 #else
-    diagnostics.error({0, 1, 1}, "bootstrap compiler backend is only available on AMD64", "backend");
+    diagnostics.error_as(CompilerDiagnosticKind::CodeGeneration, {0, 1, 1},
+                        "bootstrap compiler backend is only available on AMD64", "backend");
     return false;
 #endif
 
@@ -259,7 +266,8 @@ bool compile_module_from_source(const char* sourcePath,
     for (uint32_t i = 0; i < s_unit.functionCount; ++i) {
         const FunctionIR& function = s_unit.functions[i];
         if (module->exportCount >= COMPILER_MAX_FUNCTIONS) {
-            diagnostics.error(function.location, "module export capacity exceeded", "linker");
+            diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, function.location,
+                                "module export capacity exceeded", "linker");
             return false;
         }
         ExportSymbol& exportSymbol = module->exports[module->exportCount++];
@@ -286,7 +294,8 @@ bool compile_module_from_source(const char* sourcePath,
         const GlobalSymbolIR& global = s_unit.globals[i];
         if (!global.isDefinition) continue;
         if (module->exportCount >= COMPILER_MAX_MODULE_SYMBOLS) {
-            diagnostics.error(global.location, "module export capacity exceeded", "linker");
+            diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, global.location,
+                                "module export capacity exceeded", "linker");
             return false;
         }
         ExportSymbol& exportSymbol = module->exports[module->exportCount++];
@@ -324,7 +333,8 @@ bool compile_module_from_source(const char* sourcePath,
                 continue;
             }
             if (module->importCount >= COMPILER_MAX_MODULE_SYMBOLS) {
-                diagnostics.error(call.location, "module import capacity exceeded", "linker");
+                diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, call.location,
+                                    "module import capacity exceeded", "linker");
                 return false;
             }
             ImportSymbol& importSymbol = module->imports[module->importCount++];

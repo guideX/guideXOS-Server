@@ -48,8 +48,28 @@ typedef enum gx_build_error_code {
      * retain their numeric meaning. */
     GX_BUILD_ERROR_COMPILER_FAILED = 18,
     GX_BUILD_ERROR_SOURCE_SELECTION = 19,
-    GX_BUILD_ERROR_UNSUPPORTED_PROJECT = 20
+    GX_BUILD_ERROR_UNSUPPORTED_PROJECT = 20,
+    /* Append-only detail codes for the in-kernel compiler. Snapshot layout
+     * remains unchanged; older consumers can continue treating nonzero as
+     * failure while newer consumers distinguish the failing stage. */
+    GX_BUILD_ERROR_COMPILER_SOURCE_READ = 21,
+    GX_BUILD_ERROR_COMPILER_LEXICAL = 22,
+    GX_BUILD_ERROR_COMPILER_SYNTAX = 23,
+    GX_BUILD_ERROR_COMPILER_UNSUPPORTED = 24,
+    GX_BUILD_ERROR_COMPILER_SEMANTIC = 25,
+    GX_BUILD_ERROR_COMPILER_LIMIT = 26,
+    GX_BUILD_ERROR_COMPILER_CODE_GENERATION = 27,
+    GX_BUILD_ERROR_COMPILER_OBJECT = 28,
+    GX_BUILD_ERROR_COMPILER_LINKER = 29,
+    GX_BUILD_ERROR_COMPILER_ELF_WRITER = 30,
+    GX_BUILD_ERROR_COMPILER_ARTIFACT_VALIDATION = 31,
+    GX_BUILD_ERROR_COMPILER_ARTIFACT_PUBLICATION = 32,
+    GX_BUILD_ERROR_COMPILER_INTERNAL = 33
 } gx_build_error_code;
+
+/* A backend that cannot report warning records sets warningCount to this
+ * reserved value instead of implying that it counted zero warnings. */
+#define GX_BUILD_COUNT_UNAVAILABLE 0xFFFFFFFFu
 
 typedef struct gx_build_request {
     uint32_t size;
@@ -77,7 +97,7 @@ typedef struct gx_build_snapshot {
     uint32_t state;
     int32_t processExitCode;
     uint32_t errorCode;
-    uint32_t warningCount;
+    uint32_t warningCount; /* GX_BUILD_COUNT_UNAVAILABLE means not reported. */
     uint32_t errorCount;
     uint32_t outputCount;
     uint32_t outputTruncated;

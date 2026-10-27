@@ -146,7 +146,8 @@ static bool parse_string_literal(const char* source, const Token& token,
             else if (escaped == '\\') value = '\\';
             else if (escaped == '"') value = '"';
             else {
-                diagnostics.error(token.location, "unsupported string escape", "string-literal");
+                diagnostics.error_as(CompilerDiagnosticKind::Unsupported, token.location,
+                                    "unsupported string escape", "string-literal");
                 return false;
             }
         }
@@ -622,7 +623,8 @@ private:
         if (current().kind == TokenKind::Equal) {
             ++(*m_index);
             if (!pointer) {
-                m_diagnostics.error(name.location, "whole-struct assignment and initialization are deferred", "struct");
+                m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, name.location,
+                                      "whole-struct assignment and initialization are deferred", "struct");
                 return false;
             }
             expression = parse_expression(0);
@@ -882,7 +884,8 @@ private:
         }
         ++(*m_index);
         if (localByName && localByName->kind == StorageKind::Struct && current().kind == TokenKind::Equal) {
-            m_diagnostics.error(name.location, "whole-struct assignment is not supported", "struct");
+            m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, name.location,
+                                  "whole-struct assignment is not supported", "struct");
             return false;
         }
         if (current().kind == TokenKind::LeftBracket) {
@@ -960,7 +963,8 @@ private:
             return false;
         }
         if (global >= 0 && m_unit->globals[global].kind == StorageKind::PointerInt) {
-            m_diagnostics.error(name.location, "global pointer variables are not supported in Phase 27R", "pointer");
+            m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, name.location,
+                                  "global pointer variables are not supported", "pointer");
             return false;
         }
         if (global >= 0 && m_output->expressions[expression].type != ValueType::Int32) {
@@ -1035,7 +1039,8 @@ private:
         const uint16_t expression = parse_expression(0);
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (m_output->expressions[expression].type != ValueType::Int32) {
-            m_diagnostics.error(location, "functions return int; pointer return values are not supported in Phase 27R", "type");
+            m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
+                                  "functions return int; pointer return values are not supported", "type");
             return false;
         }
         if (!expect(TokenKind::Semicolon, "expected ';' after return expression")) return false;
@@ -1667,7 +1672,8 @@ private:
                     return expression;
                 }
                 if (m_unit->globals[global].kind == StorageKind::PointerInt) {
-                    m_diagnostics.error(token.location, "global pointer variables are not supported in Phase 27R", "pointer");
+                    m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, token.location,
+                                          "global pointer variables are not supported", "pointer");
                     return COMPILER_INVALID_INDEX;
                 }
                 const uint16_t expression = make_expression(ExpressionKind::LoadGlobal, token.location,
@@ -1974,7 +1980,8 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
     ++(*index);
     if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::LeftBrace) {
         if (external) {
-            diagnostics.error(structToken.location, "extern struct definitions are not supported", "struct");
+            diagnostics.error_as(CompilerDiagnosticKind::Unsupported, structToken.location,
+                                "extern struct definitions are not supported", "struct");
             return false;
         }
         if (find_struct_type_name(*output, typeName) >= 0) {
@@ -1993,7 +2000,8 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
         while (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::RightBrace) {
             const Token fieldType = tokens[token_index_or_eof(*index, tokenCount)];
             if (fieldType.kind != TokenKind::KeywordInt) {
-                diagnostics.error(fieldType.location, "struct fields must be int in Phase 27T", "struct");
+                diagnostics.error_as(CompilerDiagnosticKind::Unsupported, fieldType.location,
+                                    "struct fields must be int", "struct");
                 return false;
             }
             ++(*index);
@@ -2015,8 +2023,9 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
             }
             ++(*index);
             if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::LeftBracket) {
-                diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
-                                  "array fields are deferred in Phase 27T", "struct");
+                diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                    tokens[token_index_or_eof(*index, tokenCount)].location,
+                                    "array fields are not supported", "struct");
                 return false;
             }
             if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::Semicolon) {
@@ -2059,8 +2068,9 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
         return false;
     }
     if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::Star) {
-        diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
-                          "global struct pointers are deferred in Phase 27T", "pointer");
+        diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                            tokens[token_index_or_eof(*index, tokenCount)].location,
+                            "global struct pointers are not supported", "pointer");
         return false;
     }
     const Token variableToken = tokens[token_index_or_eof(*index, tokenCount)];
@@ -2070,7 +2080,8 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
     }
     ++(*index);
     if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::LeftParen) {
-        diagnostics.error(variableToken.location, "struct return values are not supported", "function");
+        diagnostics.error_as(CompilerDiagnosticKind::Unsupported, variableToken.location,
+                            "struct return values are not supported", "function");
         return false;
     }
     bool isArray = false;
@@ -2132,9 +2143,11 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                             TranslationUnitIR* output, Diagnostics& diagnostics,
                             CallSite* callStorage, uint16_t* callArgumentStorage)
 {
+    diagnostics.set_default_kind(CompilerDiagnosticKind::Syntax);
     if (!source || !tokens || !output || tokenCount == 0 || !callStorage || !callArgumentStorage) {
         const SourceLocation location = {0, 1, 1};
-        diagnostics.error(location, "invalid parser input", "parser");
+        diagnostics.error_as(CompilerDiagnosticKind::Internal, location,
+                            "invalid parser input", "parser");
         return false;
     }
     *output = {};
@@ -2177,8 +2190,9 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             } else {
             ++index;
             if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star) {
-                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                                  "global pointer variables are not supported in Phase 27R", "pointer");
+                diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                    tokens[token_index_or_eof(index, tokenCount)].location,
+                                    "global pointer variables are not supported", "pointer");
                 return false;
             }
             const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
@@ -2240,8 +2254,9 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         }
         ++index;
         if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star) {
-            diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                              "global pointer variables are not supported in Phase 27R", "pointer");
+            diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                tokens[token_index_or_eof(index, tokenCount)].location,
+                                "global pointer variables are not supported", "pointer");
             return false;
         }
         const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
@@ -2535,8 +2550,9 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         else ++function.integerParameterCount;
                         ++index;
                         if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::LeftBracket) {
-                            diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                                              "array parameters are not supported in Phase 27R", "parameter");
+                            diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                                tokens[token_index_or_eof(index, tokenCount)].location,
+                                                "array parameters are not supported", "parameter");
                             return false;
                         }
                     }

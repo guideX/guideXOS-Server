@@ -29,7 +29,7 @@ static void put_decimal(uint32_t value)
 } // namespace
 
 Diagnostics::Diagnostics()
-    : m_count(0), m_overflowed(false)
+    : m_count(0), m_overflowed(false), m_defaultKind(CompilerDiagnosticKind::Unknown)
 {
 }
 
@@ -46,9 +46,32 @@ static void copy_message(char* output, uint32_t capacity, const char* input)
     output[i] = '\0';
 }
 
+static bool text_equals(const char* left, const char* right)
+{
+    if (!left || !right) return left == right;
+    uint32_t i = 0;
+    while (left[i] && right[i] && left[i] == right[i]) ++i;
+    return left[i] == right[i];
+}
+
 } // namespace
 
+void Diagnostics::set_default_kind(CompilerDiagnosticKind kind)
+{
+    m_defaultKind = kind;
+}
+
 void Diagnostics::error(SourceLocation location, const char* message, const char* tokenKind)
+{
+    CompilerDiagnosticKind kind = m_defaultKind;
+    // The parser already marks type-checking failures with this token kind.
+    if (kind == CompilerDiagnosticKind::Syntax && text_equals(tokenKind, "type"))
+        kind = CompilerDiagnosticKind::Semantic;
+    error_as(kind, location, message, tokenKind);
+}
+
+void Diagnostics::error_as(CompilerDiagnosticKind kind, SourceLocation location,
+                           const char* message, const char* tokenKind)
 {
     if (m_count >= COMPILER_MAX_DIAGNOSTICS) {
         m_overflowed = true;
@@ -60,12 +83,21 @@ void Diagnostics::error(SourceLocation location, const char* message, const char
                  message ? message : "compiler error");
     m_items[m_count].message = m_messageStorage[m_count];
     m_items[m_count].tokenKind = tokenKind ? tokenKind : "unknown";
+    m_items[m_count].kind = kind;
     ++m_count;
 }
 
 void Diagnostics::error_identifier(SourceLocation location, const char* prefix,
                                    const char* identifier, uint32_t identifierBytes,
                                    const char* tokenKind)
+{
+    error_identifier_as(CompilerDiagnosticKind::Semantic, location, prefix,
+                        identifier, identifierBytes, tokenKind);
+}
+
+void Diagnostics::error_identifier_as(CompilerDiagnosticKind kind, SourceLocation location,
+                                      const char* prefix, const char* identifier,
+                                      uint32_t identifierBytes, const char* tokenKind)
 {
     if (m_count >= COMPILER_MAX_DIAGNOSTICS) {
         m_overflowed = true;
@@ -82,12 +114,22 @@ void Diagnostics::error_identifier(SourceLocation location, const char* prefix,
     m_items[m_count].location = location;
     m_items[m_count].message = output;
     m_items[m_count].tokenKind = tokenKind ? tokenKind : "identifier";
+    m_items[m_count].kind = kind;
     ++m_count;
 }
 
 void Diagnostics::error_identifier_suffix(SourceLocation location, const char* prefix,
                                           const char* identifier, uint32_t identifierBytes,
                                           const char* suffix, const char* tokenKind)
+{
+    error_identifier_suffix_as(CompilerDiagnosticKind::Semantic, location, prefix,
+                               identifier, identifierBytes, suffix, tokenKind);
+}
+
+void Diagnostics::error_identifier_suffix_as(CompilerDiagnosticKind kind,
+                                             SourceLocation location, const char* prefix,
+                                             const char* identifier, uint32_t identifierBytes,
+                                             const char* suffix, const char* tokenKind)
 {
     if (m_count >= COMPILER_MAX_DIAGNOSTICS) {
         m_overflowed = true;
@@ -106,6 +148,7 @@ void Diagnostics::error_identifier_suffix(SourceLocation location, const char* p
     m_items[m_count].location = location;
     m_items[m_count].message = output;
     m_items[m_count].tokenKind = tokenKind ? tokenKind : "identifier";
+    m_items[m_count].kind = kind;
     ++m_count;
 }
 
@@ -147,6 +190,7 @@ void Diagnostics::error_function_argument_count(SourceLocation location, const c
     m_items[m_count].location = location;
     m_items[m_count].message = output;
     m_items[m_count].tokenKind = "call";
+    m_items[m_count].kind = CompilerDiagnosticKind::Semantic;
     ++m_count;
 }
 
@@ -170,6 +214,25 @@ bool Diagnostics::overflowed() const
     return m_overflowed;
 }
 
+const char* compiler_diagnostic_kind_name(CompilerDiagnosticKind kind)
+{
+    switch (kind) {
+    case CompilerDiagnosticKind::Lexical: return "lexical";
+    case CompilerDiagnosticKind::Syntax: return "syntax";
+    case CompilerDiagnosticKind::Unsupported: return "unsupported";
+    case CompilerDiagnosticKind::Semantic: return "semantic";
+    case CompilerDiagnosticKind::ResourceLimit: return "resource limit";
+    case CompilerDiagnosticKind::CodeGeneration: return "code generation";
+    case CompilerDiagnosticKind::ObjectGeneration: return "object generation";
+    case CompilerDiagnosticKind::Linker: return "linker";
+    case CompilerDiagnosticKind::Artifact: return "artifact";
+    case CompilerDiagnosticKind::Internal: return "compiler internal";
+    case CompilerDiagnosticKind::SourceRead: return "source read";
+    case CompilerDiagnosticKind::ProjectValidation: return "project validation";
+    default: return "unknown";
+    }
+}
+
 void print_diagnostics(const Diagnostics& diagnostics)
 {
     for (uint32_t i = 0; i < diagnostics.count(); ++i) {
@@ -181,6 +244,11 @@ void print_diagnostics(const Diagnostics& diagnostics)
         serial::puts(", offset ");
         put_decimal(diagnostic.location.offset);
         serial::puts(": ");
+        if (diagnostic.kind != CompilerDiagnosticKind::Unknown) {
+            serial::putc('[');
+            serial::puts(compiler_diagnostic_kind_name(diagnostic.kind));
+            serial::puts("] ");
+        }
         serial::puts(diagnostic.message);
         serial::puts(" (token=");
         serial::puts(diagnostic.tokenKind);

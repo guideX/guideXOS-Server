@@ -71,7 +71,8 @@ static bool add_token(Token* tokens, uint32_t capacity, uint32_t* count,
                       Diagnostics& diagnostics)
 {
     if (!tokens || !count || *count >= capacity) {
-        diagnostics.error(location, "token limit exceeded", "token");
+        diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, location,
+                            "token limit exceeded", "token");
         return false;
     }
     tokens[*count].kind = kind;
@@ -134,9 +135,11 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
                 uint32_t tokenCapacity, uint32_t* tokenCount,
                 Diagnostics& diagnostics)
 {
+    diagnostics.set_default_kind(CompilerDiagnosticKind::Lexical);
     if (!source || !tokens || !tokenCount || tokenCapacity == 0) {
         const SourceLocation location = {0, 1, 1};
-        diagnostics.error(location, "invalid lexer buffer", "lexer");
+        diagnostics.error_as(CompilerDiagnosticKind::Internal, location,
+                            "invalid lexer buffer", "lexer");
         return false;
     }
 
@@ -186,7 +189,8 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
                 advance(source, sourceLength, &index, &line, &column);
             const uint32_t length = index - start;
             if (length > COMPILER_MAX_IDENTIFIER_BYTES) {
-                diagnostics.error(location, "identifier exceeds 63-byte limit", "identifier");
+                diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, location,
+                                    "identifier exceeds 63-byte limit", "identifier");
                 return false;
             }
             if (!add_token(tokens, tokenCapacity, tokenCount,
@@ -224,7 +228,8 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
                 if (value == '\\') {
                     advance(source, sourceLength, &index, &line, &column);
                     if (index >= sourceLength || (source[index] != 'n' && source[index] != '\\' && source[index] != '"')) {
-                        diagnostics.error(stringLocation, "unsupported string escape", "string-literal");
+                        diagnostics.error_as(CompilerDiagnosticKind::Unsupported, stringLocation,
+                                            "unsupported string escape", "string-literal");
                         return false;
                     }
                     advance(source, sourceLength, &index, &line, &column);
@@ -241,7 +246,8 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
                 return false;
             }
             if (index - start > COMPILER_MAX_STRING_LITERAL_BYTES * 2U + 2U) {
-                diagnostics.error(stringLocation, "string literal exceeds 255-byte limit", "string-literal");
+                diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, stringLocation,
+                                    "string literal exceeds 255-byte limit", "string-literal");
                 return false;
             }
             if (!add_token(tokens, tokenCapacity, tokenCount, TokenKind::StringLiteral,

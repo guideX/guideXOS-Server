@@ -161,6 +161,7 @@ void Manager::clear_snapshot(gx_build_snapshot* snapshot,
     snapshot->version = kBuildApiVersion;
     snapshot->handle = handle;
     snapshot->state = state;
+    snapshot->warningCount = GX_BUILD_COUNT_UNAVAILABLE;
 }
 
 void Manager::append_test_output(gx_build_snapshot* snapshot,

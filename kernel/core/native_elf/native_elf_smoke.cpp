@@ -3737,7 +3737,7 @@ void run_bootstrap_execution_smoke()
         read_vfs_image(p27pArtifact, s_invalidImage, sizeof(s_invalidImage), &staleArtifactBytes) &&
         staleArtifactBytes == savedArtifactBytes && same_buffer(s_compareImage, s_invalidImage, savedArtifactBytes);
     const bool staleSymbol = staleBuildFailed && p27pStale.compiledModuleCount == 1 &&
-        p27pStale.cachedModuleCount == 2 && p27pStale.errorCode == GX_BUILD_ERROR_COMPILER_FAILED;
+        p27pStale.cachedModuleCount == 2 && p27pStale.errorCode == GX_BUILD_ERROR_COMPILER_LINKER;
     print_marker("phase27p_stale_symbol", staleSymbol);
     print_marker("phase27p_failed_build_preserves", staleArtifactPreserved);
 

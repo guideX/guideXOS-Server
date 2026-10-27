@@ -43,6 +43,13 @@ static const char* diagnostic_display_path(const SourceSelection& selection, con
 static const char* failure_stage_label(CompileFailureStage stage)
 {
     switch (stage) {
+    case CompileFailureStage::Lexical: return "lexical analysis";
+    case CompileFailureStage::Syntax: return "syntax analysis";
+    case CompileFailureStage::Unsupported: return "unsupported language construct";
+    case CompileFailureStage::Semantic: return "semantic analysis";
+    case CompileFailureStage::ResourceLimit: return "compiler resource limit";
+    case CompileFailureStage::CodeGeneration: return "code generation";
+    case CompileFailureStage::Internal: return "compiler internal";
     case CompileFailureStage::ProjectValidation: return "project";
     case CompileFailureStage::SourceRead: return "source";
     case CompileFailureStage::Frontend: return "compiler";
@@ -53,6 +60,38 @@ static const char* failure_stage_label(CompileFailureStage stage)
     case CompileFailureStage::ArtifactPublication: return "artifact publication";
     default: return "compiler";
     }
+}
+
+static uint32_t compiler_build_error_code(const CompileSummary& summary)
+{
+    switch (summary.failureStage) {
+    case CompileFailureStage::SourceRead: return GX_BUILD_ERROR_COMPILER_SOURCE_READ;
+    case CompileFailureStage::Lexical: return GX_BUILD_ERROR_COMPILER_LEXICAL;
+    case CompileFailureStage::Syntax: return GX_BUILD_ERROR_COMPILER_SYNTAX;
+    case CompileFailureStage::Unsupported: return GX_BUILD_ERROR_COMPILER_UNSUPPORTED;
+    case CompileFailureStage::Semantic: return GX_BUILD_ERROR_COMPILER_SEMANTIC;
+    case CompileFailureStage::ResourceLimit: return GX_BUILD_ERROR_COMPILER_LIMIT;
+    case CompileFailureStage::CodeGeneration: return GX_BUILD_ERROR_COMPILER_CODE_GENERATION;
+    case CompileFailureStage::ObjectGeneration: return GX_BUILD_ERROR_COMPILER_OBJECT;
+    case CompileFailureStage::Linker: return GX_BUILD_ERROR_COMPILER_LINKER;
+    case CompileFailureStage::ElfWriter: return GX_BUILD_ERROR_COMPILER_ELF_WRITER;
+    case CompileFailureStage::ArtifactValidation: return GX_BUILD_ERROR_COMPILER_ARTIFACT_VALIDATION;
+    case CompileFailureStage::ArtifactPublication: return GX_BUILD_ERROR_COMPILER_ARTIFACT_PUBLICATION;
+    case CompileFailureStage::ProjectValidation: return GX_BUILD_ERROR_UNSUPPORTED_PROJECT;
+    case CompileFailureStage::Internal: return GX_BUILD_ERROR_COMPILER_INTERNAL;
+    default: return GX_BUILD_ERROR_COMPILER_FAILED;
+    }
+}
+
+static const char* diagnostic_kind_label(const CompileDiagnostic& diagnostic,
+                                         CompileFailureStage failureStage)
+{
+    if (diagnostic.kind != CompilerDiagnosticKind::Unknown)
+        return compiler_diagnostic_kind_name(diagnostic.kind);
+    if (failureStage != CompileFailureStage::None &&
+        failureStage != CompileFailureStage::Frontend)
+        return failure_stage_label(failureStage);
+    return "compiler";
 }
 
 static bool diagnostic_has_source_location(const CompileDiagnostic& diagnostic)
@@ -339,6 +378,7 @@ static void clear_snapshot(gx_build_snapshot* snapshot, gx_build_handle handle)
     snapshot->handle = handle;
     snapshot->state = GX_BUILD_VALIDATING;
     snapshot->errorCode = GX_BUILD_ERROR_NONE;
+    snapshot->warningCount = GX_BUILD_COUNT_UNAVAILABLE;
 }
 
 static void output_line(const char* text, uint32_t stream)
@@ -940,7 +980,7 @@ static void run_build_core(const gx_build_request* request)
             char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
             const char* diagnosticPath = diagnostic_display_path(selection, summary.diagnostics[i].sourcePath);
             if (summary.failureStage == CompileFailureStage::Linker) {
-                append_text(line, sizeof(line), "linker: error: ");
+                append_text(line, sizeof(line), "linker: error: [linker] ");
                 append_text(line, sizeof(line), summary.diagnostics[i].message);
             } else if (diagnostic_has_source_location(summary.diagnostics[i])) {
                 append_text(line, sizeof(line), diagnosticPath);
@@ -949,6 +989,10 @@ static void run_build_core(const gx_build_request* request)
                 append_text(line, sizeof(line), ",");
                 append_dec(line, sizeof(line), summary.diagnostics[i].location.column);
                 append_text(line, sizeof(line), "): error: ");
+                append_text(line, sizeof(line), "[");
+                append_text(line, sizeof(line), diagnostic_kind_label(
+                    summary.diagnostics[i], summary.failureStage));
+                append_text(line, sizeof(line), "] ");
                 append_text(line, sizeof(line), summary.diagnostics[i].message);
             } else {
                 append_text(line, sizeof(line), "[");
@@ -958,15 +1002,18 @@ static void run_build_core(const gx_build_request* request)
                     append_text(line, sizeof(line), diagnosticPath);
                     append_text(line, sizeof(line), ": ");
                 }
+                append_text(line, sizeof(line), "[");
+                append_text(line, sizeof(line), diagnostic_kind_label(
+                    summary.diagnostics[i], summary.failureStage));
+                append_text(line, sizeof(line), "] ");
                 append_text(line, sizeof(line), summary.diagnostics[i].message);
             }
             output_line(line, 2);
         }
         s_workingSnapshot.errorCount = summary.diagnosticCount == 0 ? 1 : summary.diagnosticCount;
-        s_workingSnapshot.warningCount = 0;
         char message[sizeof(s_workingSnapshot.errorMessage)] = {};
         compiler_failure_message(summary, message, sizeof(message));
-        failure(GX_BUILD_ERROR_COMPILER_FAILED, message);
+        failure(compiler_build_error_code(summary), message);
         return;
     }
     s_workingSnapshot.state = GX_BUILD_VALIDATING_ARTIFACT;
@@ -1017,7 +1064,8 @@ static void run_build(const gx_build_request* request)
         reinterpret_cast<uint64_t>(s_buildServiceStack + sizeof(s_buildServiceStack)),
         &trampoline);
     if (!invoked) {
-        failure(GX_BUILD_ERROR_COMPILER_FAILED, "bare-metal compiler service stack invocation failed");
+        failure(GX_BUILD_ERROR_COMPILER_INTERNAL,
+                "bare-metal compiler service stack invocation failed");
     }
 }
 

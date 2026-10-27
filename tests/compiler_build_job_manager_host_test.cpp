@@ -10,6 +10,9 @@
 using kernel::compiler::BuildJobManager::Manager;
 using kernel::compiler::BuildJobManager::SourceSelection;
 
+static_assert(GX_BUILD_ERROR_COMPILER_FAILED == 18, "existing build error codes remain stable");
+static_assert(GX_BUILD_ERROR_COMPILER_LEXICAL == 22, "new compiler diagnostic codes append to v1");
+
 namespace {
 
 struct RequestFixture {
@@ -65,6 +68,7 @@ static gx_build_snapshot failed_result(gx_build_handle handle)
     snapshot.handle = handle;
     snapshot.state = GX_BUILD_FAILED;
     snapshot.errorCode = GX_BUILD_ERROR_COMPILER_FAILED;
+    snapshot.warningCount = GX_BUILD_COUNT_UNAVAILABLE;
     snapshot.errorCount = 1U;
     std::strcpy(snapshot.errorMessage, "hosted lifecycle test failure result");
     return snapshot;
@@ -106,10 +110,12 @@ static void test_request_copy_validation_and_owner()
     assert(manager.mark_running(owner, handle) == GX_OK);
     assert(manager.poll(owner, handle, &snapshot) == GX_OK);
     assert(snapshot.state == GX_BUILD_RUNNING && snapshot.handle != 0U);
+    assert(snapshot.warningCount == GX_BUILD_COUNT_UNAVAILABLE);
     gx_build_snapshot failure = failed_result(handle);
     assert(manager.complete_synchronous_job(owner, handle, &failure) == GX_OK);
     assert(manager.poll(owner, handle, &snapshot) == GX_OK);
-    assert(snapshot.state == GX_BUILD_FAILED && snapshot.errorCount == 1U);
+    assert(snapshot.state == GX_BUILD_FAILED && snapshot.errorCount == 1U &&
+           snapshot.warningCount == GX_BUILD_COUNT_UNAVAILABLE);
     assert(std::strcmp(snapshot.errorMessage,
                        "hosted lifecycle test failure result") == 0);
     std::strcpy(failure.errorMessage, "mutated caller result");

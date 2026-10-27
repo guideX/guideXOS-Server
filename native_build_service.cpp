@@ -162,6 +162,19 @@ const char* errorName(uint32_t error) {
     case GX_BUILD_ERROR_MANIFEST_ARTIFACT_MISMATCH: return "manifest_artifact_mismatch";
     case GX_BUILD_ERROR_OUTPUT_TRUNCATED: return "output_truncated";
     case GX_BUILD_ERROR_INTERNAL: return "internal";
+    case GX_BUILD_ERROR_COMPILER_SOURCE_READ: return "compiler_source_read";
+    case GX_BUILD_ERROR_COMPILER_LEXICAL: return "compiler_lexical";
+    case GX_BUILD_ERROR_COMPILER_SYNTAX: return "compiler_syntax";
+    case GX_BUILD_ERROR_COMPILER_UNSUPPORTED: return "compiler_unsupported_language";
+    case GX_BUILD_ERROR_COMPILER_SEMANTIC: return "compiler_semantic";
+    case GX_BUILD_ERROR_COMPILER_LIMIT: return "compiler_resource_limit";
+    case GX_BUILD_ERROR_COMPILER_CODE_GENERATION: return "compiler_code_generation";
+    case GX_BUILD_ERROR_COMPILER_OBJECT: return "compiler_object_generation";
+    case GX_BUILD_ERROR_COMPILER_LINKER: return "compiler_linker";
+    case GX_BUILD_ERROR_COMPILER_ELF_WRITER: return "compiler_elf_writer";
+    case GX_BUILD_ERROR_COMPILER_ARTIFACT_VALIDATION: return "compiler_artifact_validation";
+    case GX_BUILD_ERROR_COMPILER_ARTIFACT_PUBLICATION: return "compiler_artifact_publication";
+    case GX_BUILD_ERROR_COMPILER_INTERNAL: return "compiler_internal";
     default: return "unknown";
     }
 }
