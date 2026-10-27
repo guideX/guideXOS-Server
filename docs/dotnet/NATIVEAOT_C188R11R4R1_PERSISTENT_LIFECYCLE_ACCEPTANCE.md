@@ -266,3 +266,71 @@ Key retry artifact hashes:
 | Display copy (PNG) | `D6EF0C500A19273BB2375AB73ABA8F0A8483D34F92BE1A397B2F76CEED13039B` |
 
 **Current outcome: D — QAC_OR_EXECUTION_BLOCKED.** Persistent heap and resident Notes state are demonstrated through launch and lookup, but the one retry failed the required fresh local ownership correlation at the keyboard gate. No key was sent, so heap survival through a real keyboard callback, Notes callback execution, and text insertion remain unqualified. The smallest remaining step is to retain each refreshed local owner/runner/child identity field in the gate diagnostics, add a hosted regression for the observed relationship, and seek authorization for a new single guest acceptance run only after the ownership predicate can prove the current runner chain. The existing hosted aggregate remains PASS with the counts above; no implementation or NativeAOT runtime change was made in this retry.
+
+### User-authorized QEMU-empty retry — managed keyboard callback accepted
+
+The follow-up request arrived on branch `v1.1_DOTNET_SUPPORT` at HEAD `a40949ed85e49c24dd38b299c63a65aa37e8b262`. The source HEAD remained the same through guest shutdown and evidence evaluation; the closeout changes were uncommitted at that point. No branch switch, reset, restore, clean, stash, or history rewrite occurred. `ESP/ramdisk.img` remained at SHA-256 `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` before and after.
+
+The qualified R4 diagnostic candidate and proof-disabled production candidate were reused. Both manifests still report `PersistentCompositeLifecycle=true`, `Primary64KiB`, a 65,536-byte image-backed bounded static arena, and the same runtime source hash documented above. `RhpReversePInvoke` initializes and clears the arena only on first attachment; later entries preserve the active arena and TLS allocation cursor. Registry and lifetime-pool roots remain ordinary NativeAOT roots. No runtime, heap, allocator, registry, or Notes source changed, and no rebuild was required.
+
+#### QAC semantics and ownership predicate
+
+QAC `status` reports aggregate QEMU/foreign and managed-session/queue/block counts. `list` enumerates process-census rows, reservation rows, managed-session rows, and warnings. `inspect <reservation-id>` reports the owner, reservation state, owner liveness, child identity, and degradation state for one reservation. Each command requests a fresh snapshot, so separate calls are not atomic. An empty `list` by itself cannot authorize a run or prove that an active session is absent. If enumeration disagrees, admission requires independent current-run, reservation, owner/runner, and child-process proof; contradictory identity, foreign process, stale session, or missing ownership still fails closed.
+
+The prior timestamp bug is fixed. PowerShell `ConvertFrom-Json` produced typed `DateTime` values for ISO timestamps; stringifying them discarded `Kind`/offset and reparsing on this Pacific-time host shifted UTC values. The predicate now compares typed `DateTimeOffset`/`DateTime` values directly and parses only raw strings. Each ownership result includes individual owner/child checks and refreshed local process evidence; a process-capture exception is retained. Focused tests cover equivalent UTC and `-07:00` times, true identity contradictions, foreign process, stale session, missing owner, and child-parent mismatch.
+
+Exclusive preflight showed QAC Online with zero QEMU processes, zero foreign processes, zero reservations, and zero managed sessions; the local QEMU census was empty. Exactly one QAC-authorized boot ran in `persistent-lifecycle-acceptance-004/guest-001`:
+
+| Evidence | Observation |
+|---|---|
+| Run identity | `62cc67d4d9e342dd9868fd4946a700d0` |
+| Reservation | `f67bb47dc437466a8010ff868d03dfa6` |
+| QAC owner | PID `20320`, verified; direct child of runner PID `25572` |
+| QEMU child | PID `29516`, `C:\Program Files\qemu\qemu-system-x86_64.exe`; verified direct child of owner |
+| During-run status/list | One QEMU, zero foreign, one managed session; one reservation/session/process row with matching identities |
+| During-run inspect | Same reservation, `Running`, owner verified, matching child PID/start/path, `degraded=false` |
+| Input ownership predicate | Accepted; every owner/child check true; local capture error absent; run and reservation IDs match |
+| Shutdown/release | QEMU exit 0; reservation `Released`, owner verified, `degraded=false` |
+| After-run QAC/local census | Zero QEMU, foreign processes, reservations, and sessions |
+
+The R4 raw acceptance manifest remains preserved unchanged with its original `FAIL`: the previous callback-return gate required a dedicated marker that this candidate did not emit. A separate `posthoc-keyboard-acceptance.json` evaluates the saved serial with the corrected predicate. It correlates event ID, focus target, native call/correlation, managed call, first-input snapshot, lookup, callback entry, post-entry managed return, and native return. That trace is complete and accepted. The dedicated-marker gap was not separately investigated.
+
+#### Managed state at keyboard dispatch
+
+The only input transaction was ordinary ASCII `a` key-down/up via the established QMP path. The guest verified the Managed Notes window as focused before input and routed the event to Notes. The saved serial records:
+
+| Checkpoint | Observation |
+|---|---|
+| Heap lifecycle | One 65,536-byte initialization; two preserve events; reset count stayed 1 |
+| Registry/launch | Five descriptors, selectors 4–8; Notes generation 1 and resident mask `m=1`; launch `TryFind(4)=0` |
+| Physical managed storage | Registry array `0x00000001001F4F50`; pool owner `0x00000001001F51E0`; `_entries` slot `0x00000001001F51E8`; pool array `0x00000001001F5218`; these addresses match at registry initialization, launch return, and input; held length stays 5 |
+| First input snapshot, seq 16 | `n=5`, `m=1`, owner/pool generation 1, backing present, `gc=0`, writer state `w=1:1` |
+| Lookup, seq 19 | `TryFind(4)=0`; registry count 5 and Notes resident |
+| Notes callback | `notes-callback-entry`, selector 4, `value=97` (`a`) |
+| Callback/dispatch return | Following `managed-return`, seq 23, records `result=0`, `n=5`, `m=1`, generation 1, `gc=0`; managed exit and native-managed-return report `rc=0` |
+
+`GuideXosApplication.Dispatch` calls `application.HandleInput(host, input)`, then logs the `managed-return` state using that result and returns it. The ordered callback-entry, post-call managed return, managed exit, and native return prove that the actual Notes keyboard callback ran and returned `Success`. The updated keyboard predicate includes a passing positive case for this fallback and a negative case for nonzero callback return. Physical storage, pool length, descriptor count, resident mask, generation, and allocation provenance all survived the `RhpReversePInvoke` input boundary; this is not inferred from a logical identity token alone.
+
+R3's first-input snapshot had descriptor count 0, null pool backing, resident mask 0, and `TryFind(4)=-4`. R4 preserved the five descriptors and Notes residency through launch. This retry retains the physical managed storage at first keyboard dispatch and successfully resolves Notes afterward.
+
+#### Notes editing and evidence
+
+Notes received ASCII `a` and its callback returned `Success` (`0`). Existing diagnostics show no Notes document-edit marker. Before/after PNGs are byte-identical at SHA-256 `7822A3445497264954B0360020B9DDBCE45B87A0F8A68C9851B40936D4F45193`; PPMs also match at `E33BEB319B6FF93B1681CED41715D678AEBF9710F9495E566B2318D9A5A01103`. No visible text insertion is demonstrated. Window focus was verified; text-area/caret focus and editor insertion remain pending.
+
+| Run artifact | SHA-256 |
+|---|---|
+| Original acceptance manifest (unchanged) | `5DAB6B1BFF211E5F78C5F4799DAC75AF57BF0C1B71516037FED4FCA474E85EB3` |
+| Serial log | `9C346D9E652C2DCCE893F99AF10C93CB8C391481EE87956D8813A9282B7E010F` |
+| QMP control log | `6F7C72A870FB1F4F30CD4B303EFF69E720C3C5CCB59010E35DC6CADB7D7227FA` |
+| Input QAC ownership proof | `F250DD2B2003EEAE83325251EAC585821B4968C1F7D615108283670AB1DCE714` |
+| Posthoc keyboard evaluation | `643FEF70FE4659A7B5DA8BEF9E41F0D3D6314D54F5966C9A746341C62040E341` |
+| Before/after PNGs | `7822A3445497264954B0360020B9DDBCE45B87A0F8A68C9851B40936D4F45193` each |
+| Source ramdisk, before/after | `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` |
+
+#### Hosted validation and outcome
+
+The focused retry validation passed **47 cases**: QAC ownership 15, QAC stream capture 2, keyboard-runner predicates 11, and keyboard contracts 19. All six changed PowerShell files parsed, and `git diff --check` passed. The existing C188 hosted aggregate remains PASS with **129 cases** across registry, five-resident lifecycle, Notes, callback/dispatch, persistent lifecycle, provenance, and runner suites at `hosted/persistent-lifecycle-acceptance-009/manifest.json`. The existing managed UI aggregate remains PASS at 38 suites / 930 cases. Diagnostic and proof-disabled production build manifests remain PASS; the qualified R4 artifacts were reused.
+
+**Outcome A — PERSISTENT_LIFECYCLE_ACCEPTED.** The five descriptors and Notes resident state survived an ordinary keyboard callback; `TryFind(4)` succeeded; Notes' actual callback returned success; native/managed dispatch completed. **Visible text insertion: pending.** No second guest boot or additional keyboard transaction was performed. The smallest remaining step is to qualify text-area/caret focus and one-character insertion through the established input path, followed by broader five-resident application qualification.
+
+The actual qualification starting HEAD and the source HEAD at guest shutdown were both `a40949ed85e49c24dd38b299c63a65aa37e8b262`. The required source/documentation closeout is committed locally; its resulting repository HEAD is reported in the task closeout. The modified source ramdisk and unrelated generated/untracked sample outputs remain unstaged and preserved. No remote push was attempted under the existing C188 phase policy.

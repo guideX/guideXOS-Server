@@ -39,6 +39,25 @@ Assert-Predicate 'managed snapshot captures populated registry and resident Note
     $evidence.managedGcCollections -eq 0 -and $evidence.poolWriteEvents -eq 1 -and
     $evidence.lastPoolWriteSite -eq 1)
 
+$callbackReturnAsManagedState = [regex]::Replace($success,
+    '(?m)^\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=24 stage=managed-callback-return[^\r\n]*\r?\n', '')
+$callbackReturnAsManagedState += "`n[C102-MANAGED-OUTPUT] C188R11 state seq=25 st=managed-return selector=4 ownerGen=1 rg=1 re=1 rr=0 rcl=0 p=1 pr=0 ps=1 psr=0 pe=1 sr=0 pc=0 reset=0 m=1 g=1 td=0 n=5 result=0 gc=0 w=1:1`n"
+$callbackReturnAsManagedState += '[C102-MANAGED-OUTPUT] C188R11-MANAGED stage=exit seq=26 call=2 corr=2 id=4 gen=1 in=1 rc=0'
+$fallbackEvidence = Get-C188R11R2KeyboardEvidence $callbackReturnAsManagedState
+Assert-Predicate 'managed-return state records Notes callback success when the dedicated return marker is absent' (
+    [bool]$fallbackEvidence.traceComplete -and $fallbackEvidence.notesCallbackReturn -and
+    $fallbackEvidence.notesCallbackReturnResult -eq 0)
+
+$failedManagedReturn = [regex]::Replace($callbackReturnAsManagedState,
+    '(?m)(st=managed-return selector=4 .*?result=)-?\d+( gc=)', '$1-4$2')
+$failedManagedReturn = $failedManagedReturn.Replace(
+    'stage=native-managed-return eid=00000001 call=00000002 corr=00000002 selector=00000004 kind=03000000 value=00000061 shift=0 ctrl=0 rc=00000000',
+    'stage=native-managed-return eid=00000001 call=00000002 corr=00000002 selector=00000004 kind=03000000 value=00000061 shift=0 ctrl=0 rc=FFFFFFFC')
+$failedReturnEvidence = Get-C188R11R2KeyboardEvidence $failedManagedReturn
+Assert-Predicate 'a failed Notes callback result is not accepted as a successful keyboard dispatch' (
+    -not [bool]$failedReturnEvidence.traceComplete -and
+    -not [bool]$failedReturnEvidence.notesCallbackReturn)
+
 $emptyRegistry = [regex]::Replace($success,
     '(?m)^\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=\d+ stage=notes-callback-entry[^\r\n]*\r?\n', '')
 $emptyRegistry = [regex]::Replace($emptyRegistry,

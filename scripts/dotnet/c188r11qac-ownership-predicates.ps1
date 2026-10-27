@@ -1,8 +1,13 @@
 function Test-C188R11R4QacTimestamp([object]$Left, [object]$Right, [double]$ToleranceSeconds = 2.0) {
     if ($null -eq $Left -or $null -eq $Right) { return $false }
     try {
-        $leftTime = [DateTimeOffset]::Parse([string]$Left).ToUniversalTime()
-        $rightTime = [DateTimeOffset]::Parse([string]$Right).ToUniversalTime()
+        # ConvertFrom-Json parses ISO timestamps into DateTime values by default.
+        # Casting those values to string drops Kind/offset and can shift a UTC
+        # timestamp by the machine's local offset when it is parsed again.
+        $leftTime = if ($Left -is [DateTimeOffset]) { $Left } elseif ($Left -is [DateTime]) { [DateTimeOffset]$Left } else { [DateTimeOffset]::Parse([string]$Left) }
+        $rightTime = if ($Right -is [DateTimeOffset]) { $Right } elseif ($Right -is [DateTime]) { [DateTimeOffset]$Right } else { [DateTimeOffset]::Parse([string]$Right) }
+        $leftTime = $leftTime.ToUniversalTime()
+        $rightTime = $rightTime.ToUniversalTime()
         return [Math]::Abs(($leftTime - $rightTime).TotalSeconds) -le $ToleranceSeconds
     } catch {
         return $false
@@ -17,6 +22,18 @@ function Get-C188R11R4QacOwnershipEvidence(
 ) {
     $reasons = [System.Collections.Generic.List[string]]::new()
     $processRows = @()
+    $ownerChecks = [ordered]@{
+        ownerRecordValid=$false;ownerPidMatchesRunIdentity=$false
+        ownerParentMatchesRunner=$false;ownerProcessAlive=$false;runnerProcessAlive=$false
+        ownerStartMatchesQac=$false;runnerStartMatchesCurrent=$false
+        ownerUserMatches=$false;inspectionOwnerStartMatches=$false
+    }
+    $childChecks = [ordered]@{
+        childPidMatchesAllLaunchEvidence=$false;childParentMatchesOwner=$false
+        childProcessAlive=$false;childStartMatchesLocal=$false
+        childStartMatchesLaunch=$false;childStartMatchesLaunchJson=$false
+    }
+    $localProcessEvidence = $null
     if ($Inspection -is [string]) {
         try { $Inspection = $Inspection | ConvertFrom-Json -ErrorAction Stop }
         catch { $Inspection = $null }
@@ -27,6 +44,34 @@ function Get-C188R11R4QacOwnershipEvidence(
     }
     if ($null -eq $Inspection) { $reasons.Add('reservation-inspection-missing-or-invalid') }
     if ($null -eq $RunIdentity) { $reasons.Add('current-run-identity-missing-or-invalid') }
+    if ($null -ne $RunIdentity) {
+        $localProcessCaptureError = $null
+        if ($RunIdentity -is [System.Collections.IDictionary]) {
+            if ($RunIdentity.Contains('localProcessCaptureError')) {
+                $localProcessCaptureError = $RunIdentity['localProcessCaptureError']
+            }
+        } else {
+            $captureErrorProperty = $RunIdentity.PSObject.Properties['localProcessCaptureError']
+            if ($null -ne $captureErrorProperty) { $localProcessCaptureError = $captureErrorProperty.Value }
+        }
+        $localProcessEvidence = [ordered]@{
+            ownerProcessId=$RunIdentity.ownerProcessId
+            ownerProcessAlive=$RunIdentity.ownerProcessAlive
+            ownerProcessStartTimeUtc=$RunIdentity.ownerProcessStartTimeUtc
+            ownerParentProcessId=$RunIdentity.ownerParentProcessId
+            ownerUser=$RunIdentity.ownerUser
+            runnerProcessId=$RunIdentity.runnerProcessId
+            runnerProcessAlive=$RunIdentity.runnerProcessAlive
+            runnerProcessStartTimeUtc=$RunIdentity.runnerProcessStartTimeUtc
+            expectedRunnerProcessStartTimeUtc=$RunIdentity.expectedRunnerProcessStartTimeUtc
+            childProcessId=$RunIdentity.childProcessId
+            childProcessAlive=$RunIdentity.childProcessAlive
+            childProcessStartTimeUtc=$RunIdentity.childProcessStartTimeUtc
+            childExecutableIdentity=$RunIdentity.childExecutableIdentity
+            childParentProcessId=$RunIdentity.childParentProcessId
+            localProcessCaptureError=$localProcessCaptureError
+        }
+    }
 
     $statusQemu = [regex]::Match($StatusText, '(?m)^QEMU processes:\s*(?<count>\d+) \((?<foreign>\d+) foreign\)\s*$')
     $statusSessions = [regex]::Match($StatusText, '(?m)^Managed sessions:\s*(?<count>\d+); queued:\s*(?<queued>\d+); blocked:\s*(?<blocked>\d+)\s*$')
@@ -59,31 +104,44 @@ function Get-C188R11R4QacOwnershipEvidence(
             $Inspection.ownerLiveness -ne 'Verified') {
             $reasons.Add('reservation-not-current-verified-acceptance-session')
         }
-        if (-not $owner.Success -or
-            [int]$owner.Groups['pid'].Value -ne [int]$RunIdentity.ownerProcessId -or
-            [int]$RunIdentity.ownerParentProcessId -ne [int]$RunIdentity.runnerProcessId -or
-            -not [bool]$RunIdentity.runnerProcessAlive -or
-            -not [bool]$RunIdentity.ownerProcessAlive -or
-            -not (Test-C188R11R4QacTimestamp $RunIdentity.ownerProcessStartTimeUtc $RunIdentity.qacOwnerStartedAtUtc) -or
-            -not (Test-C188R11R4QacTimestamp $RunIdentity.runnerProcessStartTimeUtc $RunIdentity.expectedRunnerProcessStartTimeUtc) -or
-            -not [string]::Equals($owner.Groups['user'].Value, [string]$RunIdentity.ownerUser,
-                [System.StringComparison]::OrdinalIgnoreCase) -or
-            -not (Test-C188R11R4QacTimestamp $Inspection.ownerProcessStartedAtUtc $RunIdentity.ownerProcessStartTimeUtc)) {
+        $ownerChecks.ownerRecordValid = $owner.Success
+        $ownerChecks.ownerPidMatchesRunIdentity = $owner.Success -and
+            [int]$owner.Groups['pid'].Value -eq [int]$RunIdentity.ownerProcessId
+        $ownerChecks.ownerParentMatchesRunner =
+            [int]$RunIdentity.ownerParentProcessId -eq [int]$RunIdentity.runnerProcessId
+        $ownerChecks.ownerProcessAlive = [bool]$RunIdentity.ownerProcessAlive
+        $ownerChecks.runnerProcessAlive = [bool]$RunIdentity.runnerProcessAlive
+        $ownerChecks.ownerStartMatchesQac = Test-C188R11R4QacTimestamp `
+            $RunIdentity.ownerProcessStartTimeUtc $RunIdentity.qacOwnerStartedAtUtc
+        $ownerChecks.runnerStartMatchesCurrent = Test-C188R11R4QacTimestamp `
+            $RunIdentity.runnerProcessStartTimeUtc $RunIdentity.expectedRunnerProcessStartTimeUtc
+        $ownerChecks.ownerUserMatches = $owner.Success -and
+            [string]::Equals($owner.Groups['user'].Value, [string]$RunIdentity.ownerUser,
+                [System.StringComparison]::OrdinalIgnoreCase)
+        $ownerChecks.inspectionOwnerStartMatches = Test-C188R11R4QacTimestamp `
+            $Inspection.ownerProcessStartedAtUtc $RunIdentity.ownerProcessStartTimeUtc
+        $ownerFailures = @($ownerChecks.GetEnumerator() | Where-Object { -not [bool]$_.Value })
+        if ($ownerFailures.Count -gt 0) {
             $reasons.Add('reservation-owner-does-not-match-current-runner-process')
         }
 
         $inspectionChildPid = if ($null -ne $Inspection.processId) { [int]$Inspection.processId } else { 0 }
         $launchChildPid = if ($null -ne $RunIdentity.launchChildProcessId) { [int]$RunIdentity.launchChildProcessId } else { 0 }
         $jsonChildPid = if ($null -ne $RunIdentity.launchJsonChildProcessId) { [int]$RunIdentity.launchJsonChildProcessId } else { 0 }
-        if ($inspectionChildPid -le 0 -or
-            $inspectionChildPid -ne [int]$RunIdentity.childProcessId -or
-            $inspectionChildPid -ne $launchChildPid -or
-            $inspectionChildPid -ne $jsonChildPid -or
-            [int]$RunIdentity.childParentProcessId -ne [int]$RunIdentity.ownerProcessId -or
-            -not [bool]$RunIdentity.childProcessAlive -or
-            -not (Test-C188R11R4QacTimestamp $Inspection.processStartTimeUtc $RunIdentity.childProcessStartTimeUtc) -or
-            -not (Test-C188R11R4QacTimestamp $Inspection.processStartTimeUtc $RunIdentity.launchProcessStartTimeUtc) -or
-            -not (Test-C188R11R4QacTimestamp $Inspection.processStartTimeUtc $RunIdentity.launchJsonProcessStartTimeUtc)) {
+        $childChecks.childPidMatchesAllLaunchEvidence = $inspectionChildPid -gt 0 -and
+            $inspectionChildPid -eq [int]$RunIdentity.childProcessId -and
+            $inspectionChildPid -eq $launchChildPid -and $inspectionChildPid -eq $jsonChildPid
+        $childChecks.childParentMatchesOwner =
+            [int]$RunIdentity.childParentProcessId -eq [int]$RunIdentity.ownerProcessId
+        $childChecks.childProcessAlive = [bool]$RunIdentity.childProcessAlive
+        $childChecks.childStartMatchesLocal = Test-C188R11R4QacTimestamp `
+            $Inspection.processStartTimeUtc $RunIdentity.childProcessStartTimeUtc
+        $childChecks.childStartMatchesLaunch = Test-C188R11R4QacTimestamp `
+            $Inspection.processStartTimeUtc $RunIdentity.launchProcessStartTimeUtc
+        $childChecks.childStartMatchesLaunchJson = Test-C188R11R4QacTimestamp `
+            $Inspection.processStartTimeUtc $RunIdentity.launchJsonProcessStartTimeUtc
+        $childFailures = @($childChecks.GetEnumerator() | Where-Object { -not [bool]$_.Value })
+        if ($childFailures.Count -gt 0) {
             $reasons.Add('reservation-child-process-identity-not-verified')
         }
 
@@ -156,6 +214,9 @@ function Get-C188R11R4QacOwnershipEvidence(
     return [ordered]@{
         accepted = ($reasons.Count -eq 0)
         reasons = @($reasons)
+        ownerChecks = $ownerChecks
+        childChecks = $childChecks
+        localProcessEvidence = $localProcessEvidence
         runIdentityId = if ($null -ne $RunIdentity) { [string]$RunIdentity.runIdentityId } else { $null }
         reservationId = if ($null -ne $Inspection) { [string]$Inspection.id } else { $null }
         ownerProcessId = if ($null -ne $RunIdentity) { [int]$RunIdentity.ownerProcessId } else { $null }

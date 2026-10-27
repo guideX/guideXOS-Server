@@ -81,6 +81,7 @@ $isC188R11Boot = $Scenario -eq 'managed-state-provenance' -and
         [System.StringComparison]::OrdinalIgnoreCase)
 if ($isC188R11Boot) {
     . (Join-Path $PSScriptRoot 'c188r11-runner-predicates.ps1')
+    . (Join-Path $PSScriptRoot 'c188r11r2-runner-predicates.ps1')
     . (Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1')
 }
 if ($EnableGdbStub -and -not $isC188R11Boot) {
@@ -458,6 +459,9 @@ if ($qacStatusAfter -notmatch 'QEMU processes:\s+0 \(0 foreign\)' -or $qacListAf
 if (-not $releaseVerified) { throw 'QAC did not confirm this QEMU process and reservation were released.' }
 
 $serialText = Read-GuestSerial
+$r11KeyboardTraceForManifest = if ($isC188R11Boot) {
+    Get-C188R11R2KeyboardEvidence $serialText
+} else { $null }
 $manifest = [ordered]@{
     result='PENDING';project='guideXOSServer';mode='acceptance';qacReleaseVerified=$true
     productionCompatibility=[bool]$ProductionCompatibility
@@ -512,7 +516,7 @@ $manifest = [ordered]@{
     r11LookupResults=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=lookup .*\r?$')).Count } else { 0 }
     r11SuccessfulLookupMarkers=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11 state seq=\d+ st=lookup selector=4 .* m=1 .* n=5 result=0 .*\r?$')).Count } else { 0 }
     r11NotesCallbackMarkers=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=\d+ stage=notes-callback-entry selector=4 kind=key-char value=97 shift=0 ctrl=0 result=-1\r?$')).Count } else { 0 }
-    r11ManagedCallbackReturnMarkers=if ($isC188R11Boot) { ([regex]::Matches($serialText,'(?m)^\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=\d+ stage=managed-callback-return selector=4 kind=key-char value=97 shift=0 ctrl=0 result=0\r?$')).Count } else { 0 }
+    r11ManagedCallbackReturnMarkers=if ($isC188R11Boot -and $r11KeyboardTraceForManifest.notesCallbackReturn) { 1 } else { 0 }
     persistentHeapInitializationMarkers=([regex]::Matches($serialText,'(?m)^\[NATIVEAOT-HEAP\] action=initialize count=0000000000000001 base=[A-Fa-f0-9]{16} bytes=[A-Fa-f0-9]{16} reason=initial-managed-thread-attachment\r?$')).Count
     persistentHeapPreserveMarkers=([regex]::Matches($serialText,'(?m)^\[NATIVEAOT-HEAP\] action=preserve count=[A-Fa-f0-9]{16} resetCount=0000000000000001 base=[A-Fa-f0-9]{16} allocation=[A-Fa-f0-9]{16} reason=resident-managed-thread\r?$')).Count
     r11ManagedSequenceOrder=if ($isC188R11Boot) { Test-C188R11ManagedSequenceOrder $serialText } else { $false }

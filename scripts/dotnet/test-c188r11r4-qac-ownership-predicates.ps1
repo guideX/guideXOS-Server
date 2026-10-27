@@ -83,6 +83,35 @@ $windowsList = $fullList.Replace("`n", "`r`n")
 $windowsEvidence = Get-C188R11R4QacOwnershipEvidence $status $windowsList $inspection $run
 Assert-QacOwnership 'QAC CLI CRLF output preserves the matching process-row ownership evidence' ([bool]$windowsEvidence.accepted)
 
+$offsetRun = Copy-QacFixture $run
+$offsetRun.ownerProcessStartTimeUtc='2026-10-27T02:27:51.1401012Z'
+$offsetRun.qacOwnerStartedAtUtc='2026-10-27T02:27:51.1401012Z'
+$offsetRun.runnerProcessStartTimeUtc='2026-10-27T02:27:49.1203827Z'
+$offsetRun.expectedRunnerProcessStartTimeUtc='2026-10-27T02:27:49.1203827Z'
+$offsetRun.childProcessStartTimeUtc='2026-10-27T02:27:51.4328202Z'
+$offsetRun.launchProcessStartTimeUtc='2026-10-26T19:27:51.4328202-07:00'
+$offsetRun.launchJsonProcessStartTimeUtc='2026-10-26T19:27:51.4328202-07:00'
+$offsetInspection = Copy-QacFixture $inspection
+$offsetInspection.ownerProcessStartedAtUtc='2026-10-26T19:27:51.1401012-07:00'
+$offsetInspection.processStartTimeUtc='2026-10-26T19:27:51.4328202-07:00'
+$typedOffsetRun = (ConvertTo-Json -InputObject $offsetRun -Depth 6) | ConvertFrom-Json
+$typedOffsetInspection = (ConvertTo-Json -InputObject $offsetInspection -Depth 6) | ConvertFrom-Json
+$offsetEvidence = Get-C188R11R4QacOwnershipEvidence $status $fullList $typedOffsetInspection $typedOffsetRun
+Assert-QacOwnership 'ConvertFrom-Json UTC and local-offset DateTime values preserve equivalent process start identities' (
+    [bool]$offsetEvidence.accepted -and
+    @($offsetEvidence.ownerChecks.Values | Where-Object { -not [bool]$_ }).Count -eq 0 -and
+    @($offsetEvidence.childChecks.Values | Where-Object { -not [bool]$_ }).Count -eq 0)
+
+$wrongRunnerStart = [ordered]@{}
+foreach ($property in $typedOffsetRun.PSObject.Properties) {
+    $wrongRunnerStart[$property.Name] = $property.Value
+}
+$wrongRunnerStart.runnerProcessStartTimeUtc='2026-10-26T02:27:49.1203827Z'
+$wrongRunnerEvidence = Get-C188R11R4QacOwnershipEvidence $status $fullList $typedOffsetInspection $wrongRunnerStart
+Assert-QacOwnership 'a true runner-start contradiction remains rejected and identifies the failed check' (
+    -not [bool]$wrongRunnerEvidence.accepted -and
+    -not [bool]$wrongRunnerEvidence.ownerChecks.runnerStartMatchesCurrent)
+
 $partialList = @"
 Coordinator: Online (guideXOS QAC 2.0.0)
 QEMU PID 200 | $exe | $time | managed

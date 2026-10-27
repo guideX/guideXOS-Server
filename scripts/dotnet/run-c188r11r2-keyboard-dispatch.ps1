@@ -340,6 +340,7 @@ try {
     $inputRunIdentity.runIdentityId = [string]$active.runIdentityId
     $inputRunIdentity.bootEvidencePath = [string]$active.bootEvidencePath
     $inputRunIdentity.expectedBootEvidencePath = $bootRoot
+    $inputRunIdentity.localProcessCaptureError = $null
     try {
         $ownerProcess = Get-Process -Id ([int]$active.qacOwnerProcessId) -ErrorAction Stop
         $childProcess = Get-Process -Id ([int]$active.qacQemuChildPid) -ErrorAction Stop
@@ -356,6 +357,7 @@ try {
         $inputRunIdentity.childExecutableIdentity = if ($childCim) { [string]$childCim.ExecutablePath } else { '' }
         $inputRunIdentity.childParentProcessId = if ($childCim) { [int]$childCim.ParentProcessId } else { 0 }
     } catch {
+        $inputRunIdentity.localProcessCaptureError = $_.Exception.Message
         $inputRunIdentity.ownerProcessAlive = $false
         $inputRunIdentity.runnerProcessAlive = $false
         $inputRunIdentity.childProcessAlive = $false

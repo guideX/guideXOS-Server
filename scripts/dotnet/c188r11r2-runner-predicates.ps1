@@ -21,8 +21,18 @@ function Get-C188R11R2KeyboardEvidence([string]$SerialText) {
         '\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=(?<seq>\d+) stage=managed-dispatch-entry selector=4 kind=key-char value=97 shift=0 ctrl=0 result=-1'
     $callback = Get-C188R11R2LineMatch $SerialText `
         '\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=(?<seq>\d+) stage=notes-callback-entry selector=4 kind=key-char value=97 shift=0 ctrl=0 result=-1'
-    $callbackReturn = Get-C188R11R2LineMatch $SerialText `
-        '\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=(?<seq>\d+) stage=managed-callback-return selector=4 kind=key-char value=97 shift=0 ctrl=0 result=(?<result>-?\d+)'
+    $callbackReturn = [System.Text.RegularExpressions.Match]::Empty
+    if ($callback.Success) {
+        $callbackTail = $SerialText.Substring($callback.Index + $callback.Length)
+        $callbackReturn = Get-C188R11R2LineMatch $callbackTail `
+            '\[C102-MANAGED-OUTPUT\] C188R11R2_KEY seq=(?<seq>\d+) stage=managed-callback-return selector=4 kind=key-char value=97 shift=0 ctrl=0 result=(?<result>-?\d+)'
+        if (-not $callbackReturn.Success) {
+            # Some diagnostic builds omit this dedicated marker. The dispatcher
+            # still records the returned application result in managed-return.
+            $callbackReturn = Get-C188R11R2LineMatch $callbackTail `
+                '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=managed-return selector=4 .*? result=(?<result>-?\d+) gc=.*'
+        }
+    }
     $inputState = Get-C188R11R2LineMatch $SerialText `
         '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=input-dispatch-entry selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=-1 gc=(?<gc>\d+) w=(?<writes>\d+):(?<writeSite>\d+)'
     $lookupPattern = '\[C102-MANAGED-OUTPUT\] C188R11 state seq=(?<seq>\d+) st=lookup selector=4 ownerGen=\d+ rg=\d+ re=\d+ rr=\d+ rcl=\d+ p=\d+ pr=\d+ ps=\d+ psr=\d+ pe=\d+ sr=\d+ pc=\d+ reset=\d+ m=(?<mask>\d+) g=\d+ td=\d+ n=(?<count>\d+) result=(?<result>-?\d+) gc=(?<gc>\d+) w=(?<writes>\d+):(?<writeSite>\d+)'
@@ -37,6 +47,8 @@ function Get-C188R11R2KeyboardEvidence([string]$SerialText) {
     $nativeCall = if ($nativeEntry.Success) { $nativeEntry.Groups['call'].Value } else { '' }
     $managedCallValue = if ($managedCall.Success) { $managedCall.Groups['call'].Value } else { '' }
     $nativeCallDecimal = if ($nativeCall) { [Convert]::ToUInt32($nativeCall, 16) } else { 0u }
+    $callbackReturnSuccess = $callbackReturn.Success -and
+        $callbackReturn.Groups['result'].Value -eq '0'
     $populated = $inputState.Success -and
         [uint32]$inputState.Groups['count'].Value -gt 0u -and
         (([uint32]$inputState.Groups['mask'].Value -band 1u) -ne 0u)
@@ -52,7 +64,7 @@ function Get-C188R11R2KeyboardEvidence([string]$SerialText) {
         $nativeCallDecimal -eq [uint32]$managedCallValue -and
         $managedCall.Groups['call'].Value -eq $managedCall.Groups['corr'].Value
     $traceComplete = $managedStateQualified -and $nativeReturn.Success -and
-        $callback.Success -and $callbackReturn.Success -and
+        $callback.Success -and $callbackReturnSuccess -and
         $eventId -eq $nativeReturn.Groups['eid'].Value -and
         $nativeCall -eq $nativeReturn.Groups['call'].Value -and
         $nativeCall -eq $nativeReturn.Groups['corr'].Value
@@ -70,7 +82,8 @@ function Get-C188R11R2KeyboardEvidence([string]$SerialText) {
         managedInputSnapshot=[bool]$inputState.Success
         managedRegistryLookup=[bool]$lookup.Success
         notesCallbackEntry=[bool]$callback.Success
-        notesCallbackReturn=[bool]$callbackReturn.Success
+        notesCallbackReturn=[bool]$callbackReturnSuccess
+        notesCallbackReturnResult=$(if ($callbackReturnSuccess) { [int]$callbackReturn.Groups['result'].Value } else { $null })
         registryCount=$(if ($inputState.Success) { [uint32]$inputState.Groups['count'].Value } else { $null })
         residentMask=$(if ($inputState.Success) { [uint32]$inputState.Groups['mask'].Value } else { $null })
         registryPopulated=[bool]$populated
