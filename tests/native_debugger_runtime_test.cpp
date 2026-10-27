@@ -300,9 +300,13 @@ int main() {
         request.threadId = stop.threadId;
         request.stopGeneration = stop.context.stopGeneration;
         gx_development_debug_snapshot result{};
+        // Command releases the target thread before returning. The target may
+        // finish its single-step and reinstall the breakpoint before this
+        // thread inspects shared code memory, so only assert stable command
+        // acceptance here. The following trap assertion proves the original
+        // instruction ran and the breakpoint was rebound.
         const bool accepted = NativeAppDebugger::Command(request, "native-debugger-runtime-proof", &result) == gxos::apps::GX_OK &&
-            result.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING &&
-            *breakpointByte == originalByte;
+            result.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING;
         if (!accepted) {
             std::cerr << "Continue status=" << result.status << " error=" << result.errorMessage << "\n";
         }
@@ -310,7 +314,7 @@ int main() {
     };
 
     gx_development_debug_snapshot singleStepSnapshot{};
-    if (!expect(continueBreakpoint(trapSnapshot, 900), "restore byte, rewind RIP, and enable internal single-step")) {
+    if (!expect(continueBreakpoint(trapSnapshot, 900), "accept breakpoint continuation for internal single-step")) {
         cleanup();
         return 1;
     }
