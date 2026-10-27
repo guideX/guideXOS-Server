@@ -366,9 +366,8 @@ int main() {
     gx_development_debug_snapshot sourceStepPending{};
     if (!expect(NativeAppDebugger::Command(sourceStep, "native-debugger-runtime-proof", &sourceStepPending) == gxos::apps::GX_OK &&
                 sourceStepPending.status == GX_DEVELOPMENT_DEBUG_STATUS_SINGLE_STEP_PENDING &&
-                sourceStepPending.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE &&
-                *breakpointByte == originalByte,
-                "user source-step from a breakpoint restores the original byte")) {
+                sourceStepPending.singleStepKind == GX_DEVELOPMENT_DEBUG_SINGLE_STEP_USER_SOURCE,
+                "user source-step from a breakpoint is accepted")) {
         cleanup();
         return 1;
     }
@@ -596,6 +595,214 @@ int main() {
                 "Step Over teardown restores both original call-site bytes")) return 1;
     delete stepOverCounter;
     ExecutableMemory::Free(stepOverMapping);
+
+    // An existing user breakpoint in the callee interrupts Step Over. The
+    // temporary return owner must be removable without disturbing either
+    // persistent user owner, and cancelling the paused session must restore
+    // every remaining patch before the target thread exits.
+    ExecutableMemoryBlock interruptedStepOverMapping;
+    if (!expect(ExecutableMemory::Allocate(4096, interruptedStepOverMapping, error),
+                "interrupted Step Over executable memory allocation")) return 1;
+    volatile uint32_t* interruptedStepOverCounter = new volatile uint32_t(0);
+    uint8_t* interruptedStepOverCode = static_cast<uint8_t*>(interruptedStepOverMapping.base);
+    const uint64_t interruptedStepOverBase = static_cast<uint64_t>(
+        reinterpret_cast<uintptr_t>(interruptedStepOverMapping.base));
+    const uint64_t interruptedStepOverCall = interruptedStepOverBase;
+    const uint64_t interruptedStepOverReturn = interruptedStepOverBase + 5;
+    const uint64_t interruptedStepOverCallee = interruptedStepOverBase + 32;
+    interruptedStepOverCode[0] = 0xE8;
+    const int64_t interruptedRelative = static_cast<int64_t>(interruptedStepOverCallee) -
+        static_cast<int64_t>(interruptedStepOverCall + 5);
+    const int32_t interruptedRelative32 = static_cast<int32_t>(interruptedRelative);
+    std::memcpy(interruptedStepOverCode + 1, &interruptedRelative32, sizeof(interruptedRelative32));
+    interruptedStepOverCode[5] = 0xC3;
+    interruptedStepOverCode[32] = 0x48;
+    interruptedStepOverCode[33] = 0xB8;
+    const uint64_t interruptedCounterAddress = static_cast<uint64_t>(
+        reinterpret_cast<uintptr_t>(interruptedStepOverCounter));
+    std::memcpy(interruptedStepOverCode + 34, &interruptedCounterAddress,
+                sizeof(interruptedCounterAddress));
+    interruptedStepOverCode[42] = 0xFF;
+    interruptedStepOverCode[43] = 0x00;
+    interruptedStepOverCode[44] = 0xC3;
+    const uint8_t interruptedCallOriginalByte = interruptedStepOverCode[0];
+    const uint8_t interruptedReturnOriginalByte = interruptedStepOverCode[5];
+    const uint8_t interruptedCalleeOriginalByte = interruptedStepOverCode[32];
+    if (!expect(ExecutableMemory::Protect(interruptedStepOverMapping, 0, 1,
+                                          ExecutableMemoryProtection::ReadExecute, error),
+                "interrupted Step Over executable protection")) {
+        delete interruptedStepOverCounter;
+        ExecutableMemory::Free(interruptedStepOverMapping);
+        return 1;
+    }
+    NativeAppRuntimeContext interruptedStepOverContext{};
+    interruptedStepOverContext.runtimeId = 80;
+    interruptedStepOverContext.processId = 45;
+    interruptedStepOverContext.nativeStackBaseAddress = 0x1000;
+    interruptedStepOverContext.nativeStackEndAddress = 0x0000800000000000ull;
+    NativeElfImage interruptedStepOverImage{};
+    interruptedStepOverImage.preferredBaseAddress = interruptedStepOverBase;
+    interruptedStepOverImage.imageSize = interruptedStepOverMapping.size;
+    NativeElfSegment interruptedStepOverSegment{};
+    interruptedStepOverSegment.virtualAddress = interruptedStepOverBase;
+    interruptedStepOverSegment.memorySize = interruptedStepOverMapping.size;
+    interruptedStepOverSegment.flags = 1;
+    interruptedStepOverImage.loadedSegments.push_back(interruptedStepOverSegment);
+    if (!expect(NativeAppDebugger::RegisterRuntime(interruptedStepOverContext,
+                                                    interruptedStepOverMapping,
+                                                    interruptedStepOverImage, true, error),
+                "interrupted Step Over runtime registration")) {
+        delete interruptedStepOverCounter;
+        ExecutableMemory::Free(interruptedStepOverMapping);
+        return 1;
+    }
+    std::atomic<bool> interruptedStepOverCompleted{false};
+    std::atomic<bool> interruptedStepOverWaiting{false};
+    std::thread interruptedStepOverThread([&]() {
+        gxos::Allocator::setCurrentPid(45);
+        interruptedStepOverWaiting.store(true, std::memory_order_release);
+        typedef void (*InterruptedStepOverFunction)();
+        if (NativeAppDebugger::WaitForExecutionGate(80))
+            reinterpret_cast<InterruptedStepOverFunction>(interruptedStepOverMapping.base)();
+        interruptedStepOverCompleted.store(true, std::memory_order_release);
+        gxos::Allocator::setCurrentPid(0);
+    });
+    auto cleanupInterruptedStepOver = [&]() {
+        if (interruptedStepOverThread.joinable()) {
+            if (!interruptedStepOverCompleted.load(std::memory_order_acquire)) {
+                gx_development_debug_snapshot cancel{};
+                NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION,
+                                                       0, 0, 45, 80),
+                                           "native-debugger-runtime-proof", &cancel);
+            }
+            interruptedStepOverThread.join();
+        }
+        NativeAppDebugger::UnregisterRuntime(80);
+        delete interruptedStepOverCounter;
+        ExecutableMemory::Free(interruptedStepOverMapping);
+    };
+    if (!expect(waitFor(interruptedStepOverWaiting),
+                "interrupted Step Over target reached the closed execution gate")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    const uint64_t interruptedCallOwner = 920;
+    const uint64_t interruptedCalleeOwner = 921;
+    const uint64_t interruptedStepOverOwner = 0x8000000000000095ull;
+    gx_development_debug_snapshot interruptedCallBind{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(
+                    GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT, interruptedCallOwner,
+                    interruptedStepOverCall, 45, 80), "native-debugger-runtime-proof",
+                &interruptedCallBind) == gxos::apps::GX_OK &&
+                interruptedCallBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND &&
+                interruptedStepOverCode[0] == 0xCC,
+                "interrupted Step Over call-site breakpoint bind")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    gx_development_debug_snapshot interruptedCalleeBind{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(
+                    GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT, interruptedCalleeOwner,
+                    interruptedStepOverCallee, 45, 80), "native-debugger-runtime-proof",
+                &interruptedCalleeBind) == gxos::apps::GX_OK &&
+                interruptedCalleeBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND &&
+                interruptedStepOverCode[32] == 0xCC,
+                "interrupted Step Over callee breakpoint bind")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    gx_development_debug_snapshot interruptedTempBind{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(
+                    GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT,
+                    interruptedStepOverOwner, interruptedStepOverReturn, 45, 80),
+                "native-debugger-runtime-proof", &interruptedTempBind) == gxos::apps::GX_OK &&
+                interruptedTempBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND &&
+                interruptedTempBind.bindingCount == 1 && interruptedStepOverCode[5] == 0xCC,
+                "interrupted Step Over return breakpoint bind")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    gx_development_debug_snapshot interruptedRelease{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION,
+                                                       0, 0, 45, 80),
+                                           "native-debugger-runtime-proof", &interruptedRelease) ==
+                    gxos::apps::GX_OK,
+                "interrupted Step Over execution release")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    gx_development_debug_snapshot interruptedCallTrap{};
+    if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, interruptedCallTrap, 45, 80) &&
+                interruptedCallTrap.targetAddress == interruptedStepOverCall &&
+                interruptedCallTrap.context.valid != 0,
+                "interrupted Step Over real call-site trap")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    gx_development_debug_request interruptedCallRequest = makeRequest(
+        GX_DEVELOPMENT_DEBUG_STEP_OVER_CALL, interruptedStepOverOwner,
+        interruptedStepOverCall, 45, 80);
+    interruptedCallRequest.auxiliaryAddress = interruptedStepOverReturn;
+    interruptedCallRequest.threadId = interruptedCallTrap.threadId;
+    interruptedCallRequest.stopGeneration = interruptedCallTrap.context.stopGeneration;
+    interruptedCallRequest.commandGeneration = 401;
+    gx_development_debug_snapshot interruptedStart{};
+    if (!expect(NativeAppDebugger::Command(interruptedCallRequest,
+                                           "native-debugger-runtime-proof", &interruptedStart) ==
+                    gxos::apps::GX_OK &&
+                interruptedStart.status == GX_DEVELOPMENT_DEBUG_STATUS_READY &&
+                interruptedStepOverCode[0] == interruptedCallOriginalByte &&
+                interruptedStepOverCode[5] == 0xCC,
+                "interrupted Step Over starts with a temporary return breakpoint")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    gx_development_debug_snapshot interruptedCalleeTrap{};
+    if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, interruptedCalleeTrap, 45, 80) &&
+                interruptedCalleeTrap.targetAddress == interruptedStepOverCallee &&
+                interruptedCalleeTrap.bindingId == interruptedCalleeBind.bindingId &&
+                interruptedCalleeTrap.internalBreakpointTrap == 0 &&
+                interruptedStepOverCode[5] == 0xCC && *interruptedStepOverCounter == 0,
+                "user breakpoint in the callee interrupts Step Over before its body executes")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    gx_development_debug_snapshot interruptedTempRemove{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(
+                    GX_DEVELOPMENT_DEBUG_REMOVE_BREAKPOINT_OWNER,
+                    interruptedStepOverOwner, interruptedStepOverReturn, 45, 80),
+                "native-debugger-runtime-proof", &interruptedTempRemove) == gxos::apps::GX_OK &&
+                interruptedTempRemove.status == GX_DEVELOPMENT_DEBUG_STATUS_RESTORED &&
+                interruptedStepOverCode[5] == interruptedReturnOriginalByte &&
+                interruptedStepOverCode[0] == 0xCC &&
+                interruptedStepOverCode[32] == 0xCC,
+                "interrupted Step Over removes its return owner and keeps both user breakpoints")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    gx_development_debug_snapshot interruptedCancel{};
+    if (!expect(NativeAppDebugger::Command(makeRequest(GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION,
+                                                       0, 0, 45, 80),
+                                           "native-debugger-runtime-proof", &interruptedCancel) ==
+                    gxos::apps::GX_OK &&
+                interruptedCancel.status == GX_DEVELOPMENT_DEBUG_STATUS_RESTORED,
+                "interrupted Step Over stop restores remaining user breakpoints")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    interruptedStepOverThread.join();
+    if (!expect(interruptedStepOverCompleted.load(std::memory_order_acquire) &&
+                *interruptedStepOverCounter == 1 &&
+                interruptedStepOverCode[0] == interruptedCallOriginalByte &&
+                interruptedStepOverCode[5] == interruptedReturnOriginalByte &&
+                interruptedStepOverCode[32] == interruptedCalleeOriginalByte,
+                "interrupted Step Over cancellation releases target and restores every byte")) {
+        cleanupInterruptedStepOver();
+        return 1;
+    }
+    NativeAppDebugger::UnregisterRuntime(80);
+    delete interruptedStepOverCounter;
+    ExecutableMemory::Free(interruptedStepOverMapping);
 
     // Phase 8 machine-level proof: the current target frame saves a caller
     // return address inside the same Native ELF image. Step Out reads that

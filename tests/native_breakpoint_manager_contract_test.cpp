@@ -81,8 +81,11 @@ struct Model {
 int main() {
     static_assert(GX_DEVELOPMENT_DEBUG_MAX_SOURCE_BREAKPOINTS == 8u, "capacity changed");
     static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_LEGACY_BYTES == 104u, "legacy prefix changed");
-    static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_POLICY_BYTES == sizeof(gx_development_debug_request),
-                  "full breakpoint policy request must be self-sized");
+    static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_POLICY_BYTES ==
+                      offsetof(gx_development_debug_request, commandGeneration),
+                  "policy request boundary must stop before the appended step identity");
+    static_assert(GX_DEVELOPMENT_DEBUG_REQUEST_STEP_BYTES == sizeof(gx_development_debug_request),
+                  "full step request must include its command generation");
 
     Model model;
     uint32_t status = 0;
