@@ -437,6 +437,123 @@ int main() {
         return 1;
     }
 
+    // Re-register one NativeAppDebugger runtime three times and execute the
+    // same real target instruction in each generation. A previous-generation
+    // Continue request must not own the current session's breakpoint binding.
+    for (uint32_t cycle = 0; cycle < 3; ++cycle) {
+        *counter = 0;
+        NativeAppRuntimeContext restartContext = context;
+        restartContext.runtimeId = 77;
+        restartContext.processId = 42;
+        if (!expect(NativeAppDebugger::RegisterRuntime(restartContext, mapping, image, true, error),
+                    "restart cycle runtime registration")) {
+            delete counter;
+            ExecutableMemory::Free(mapping);
+            return 1;
+        }
+        const uint64_t sessionGeneration = 20 + cycle;
+        const uint64_t logicalBreakpointId = 920 + cycle;
+        auto cycleRequest = [&](uint32_t command, uint64_t breakpointId, uint64_t address) {
+            gx_development_debug_request request = makeRequest(command, breakpointId, address);
+            request.sessionGeneration = sessionGeneration;
+            return request;
+        };
+        gx_development_debug_snapshot cycleBind{};
+        gx_development_debug_request cycleBindRequest =
+            cycleRequest(GX_DEVELOPMENT_DEBUG_BIND_SOFTWARE_BREAKPOINT, logicalBreakpointId, targetAddress);
+        if (!expect(NativeAppDebugger::Command(cycleBindRequest, "native-debugger-runtime-proof", &cycleBind) == gxos::apps::GX_OK &&
+                    cycleBind.status == GX_DEVELOPMENT_DEBUG_STATUS_BOUND && cycleBind.bindingInstalled != 0 &&
+                    cycleBind.originalByte == originalByte && cycleBind.installedByte == 0xCC,
+                    "restart cycle installs a fresh persistent breakpoint owner")) {
+            NativeAppDebugger::UnregisterRuntime(77);
+            delete counter;
+            ExecutableMemory::Free(mapping);
+            return 1;
+        }
+
+        std::atomic<bool> cycleWaiting{false};
+        std::atomic<bool> cycleCompleted{false};
+        std::thread cycleThread([&]() {
+            gxos::Allocator::setCurrentPid(42);
+            cycleWaiting.store(true, std::memory_order_release);
+            typedef void (*RestartTargetFunction)();
+            if (NativeAppDebugger::WaitForExecutionGate(77))
+                reinterpret_cast<RestartTargetFunction>(mapping.base)();
+            cycleCompleted.store(true, std::memory_order_release);
+            gxos::Allocator::setCurrentPid(0);
+        });
+        auto cleanupRestartCycle = [&]() {
+            if (cycleThread.joinable()) {
+                gx_development_debug_request cancel = cycleRequest(GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION, 0, 0);
+                gx_development_debug_snapshot ignored{};
+                NativeAppDebugger::Command(cancel, "native-debugger-runtime-proof", &ignored);
+                cycleThread.join();
+            }
+            NativeAppDebugger::UnregisterRuntime(77);
+        };
+        if (!expect(waitFor(cycleWaiting), "restart cycle target reaches the closed launch gate")) {
+            cleanupRestartCycle();
+            delete counter;
+            ExecutableMemory::Free(mapping);
+            return 1;
+        }
+        gx_development_debug_snapshot cycleRelease{};
+        gx_development_debug_request cycleReleaseRequest = cycleRequest(GX_DEVELOPMENT_DEBUG_RELEASE_EXECUTION, 0, 0);
+        if (!expect(NativeAppDebugger::Command(cycleReleaseRequest, "native-debugger-runtime-proof", &cycleRelease) == gxos::apps::GX_OK &&
+                    cycleRelease.status == GX_DEVELOPMENT_DEBUG_STATUS_READY,
+                    "restart cycle releases the launch gate")) {
+            cleanupRestartCycle();
+            delete counter;
+            ExecutableMemory::Free(mapping);
+            return 1;
+        }
+        gx_development_debug_snapshot cycleTrap{};
+        if (!expect(pollForTrapFor(GX_DEVELOPMENT_DEBUG_TRAP_BREAKPOINT, cycleTrap, 42, 77) &&
+                    cycleTrap.context.valid != 0 && cycleTrap.context.sessionGeneration == sessionGeneration &&
+                    cycleTrap.targetAddress == targetAddress && *counter == 0,
+                    "restart cycle reaches the current generation's real breakpoint")) {
+            cleanupRestartCycle();
+            delete counter;
+            ExecutableMemory::Free(mapping);
+            return 1;
+        }
+        gx_development_debug_request staleContinue = cycleRequest(
+            GX_DEVELOPMENT_DEBUG_CONTINUE_BREAKPOINT, logicalBreakpointId, targetAddress);
+        staleContinue.sessionGeneration = sessionGeneration - 1;
+        staleContinue.threadId = cycleTrap.threadId;
+        staleContinue.stopGeneration = cycleTrap.context.stopGeneration;
+        gx_development_debug_snapshot staleContinueResult{};
+        if (!expect(NativeAppDebugger::Command(staleContinue, "native-debugger-runtime-proof", &staleContinueResult) == gxos::apps::GX_ERROR_FAILED &&
+                    staleContinueResult.status == GX_DEVELOPMENT_DEBUG_STATUS_REJECTED && *counter == 0,
+                    "previous-generation Continue cannot release the current breakpoint")) {
+            cleanupRestartCycle();
+            delete counter;
+            ExecutableMemory::Free(mapping);
+            return 1;
+        }
+        gx_development_debug_snapshot cycleStop{};
+        gx_development_debug_request cycleStopRequest = cycleRequest(GX_DEVELOPMENT_DEBUG_CANCEL_EXECUTION, 0, 0);
+        if (!expect(NativeAppDebugger::Command(cycleStopRequest, "native-debugger-runtime-proof", &cycleStop) == gxos::apps::GX_OK &&
+                    cycleStop.status == GX_DEVELOPMENT_DEBUG_STATUS_RESTORED,
+                    "restart cycle stops and restores the paused target")) {
+            cleanupRestartCycle();
+            delete counter;
+            ExecutableMemory::Free(mapping);
+            return 1;
+        }
+        cycleThread.join();
+        NativeAppDebugger::UnregisterRuntime(77);
+        if (!expect(cycleCompleted.load(std::memory_order_acquire) && *counter == 1 &&
+                    *breakpointByte == originalByte,
+                    "restart cycle completes exactly one restored instruction and releases runtime resources")) {
+            delete counter;
+            ExecutableMemory::Free(mapping);
+            return 1;
+        }
+        std::cout << "Restart cycle " << (cycle + 1) << " PASS: session=" << sessionGeneration
+                  << " breakpoint=" << logicalBreakpointId << " counter=" << *counter << "\n";
+    }
+
     // Phase 6 machine-level proof: a real CALL executes its callee at full
     // speed and traps only at the temporary return address. The user
     // breakpoint at the call site is shared/rebound rather than replaced.
