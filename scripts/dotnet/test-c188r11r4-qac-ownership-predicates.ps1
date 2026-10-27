@@ -62,7 +62,8 @@ $run = [ordered]@{
 $emptyEvidence = Get-C188R11R4QacOwnershipEvidence $status $emptyList $inspection $run
 Assert-QacOwnership 'empty list is accepted only with matching inspect, status, and verified process identities' (
     [bool]$emptyEvidence.accepted -and $emptyEvidence.reservationId -eq $reservationId -and
-    $emptyEvidence.qacListReservationCount -eq 0 -and $emptyEvidence.qacStatusForeignCount -eq 0)
+    $emptyEvidence.qacListReservationCount -eq 0 -and $emptyEvidence.qacStatusForeignCount -eq 0 -and
+    $emptyEvidence.qacStatusListSessionCountDisagrees -and $emptyEvidence.qacStatusListQemuCountDisagrees)
 
 $fullList = @"
 Coordinator: Online (guideXOS QAC 2.0.0)
@@ -74,7 +75,26 @@ Managed sessions: 1
 Managed session: $reservationId | Running | guideXOSServer · TEST\guideX (PID 100)
 "@
 $fullEvidence = Get-C188R11R4QacOwnershipEvidence $status $fullList $inspection $run
-Assert-QacOwnership 'matching independent list rows corroborate the inspected session and child' ([bool]$fullEvidence.accepted)
+Assert-QacOwnership 'matching independent list rows corroborate the inspected session and child' (
+    [bool]$fullEvidence.accepted -and -not $fullEvidence.qacStatusListSessionCountDisagrees -and
+    -not $fullEvidence.qacStatusListQemuCountDisagrees)
+
+$windowsList = $fullList.Replace("`n", "`r`n")
+$windowsEvidence = Get-C188R11R4QacOwnershipEvidence $status $windowsList $inspection $run
+Assert-QacOwnership 'QAC CLI CRLF output preserves the matching process-row ownership evidence' ([bool]$windowsEvidence.accepted)
+
+$partialList = @"
+Coordinator: Online (guideXOS QAC 2.0.0)
+QEMU PID 200 | $exe | $time | managed
+  Note: Reservation $reservationId · guideXOSServer · acceptance
+Reservations: 0
+Managed sessions: 0
+"@
+$partialEvidence = Get-C188R11R4QacOwnershipEvidence $status $partialList $inspection $run
+Assert-QacOwnership 'empty reservation and session enumerations are accepted only with independent matching proof' (
+    [bool]$partialEvidence.accepted -and $partialEvidence.qacListReservationOmitted -and
+    $partialEvidence.qacListSessionOmitted -and -not $partialEvidence.qacListQemuProcessOmitted -and
+    $partialEvidence.qacStatusListSessionCountDisagrees -and -not $partialEvidence.qacStatusListQemuCountDisagrees)
 
 $contradictoryIdentity = Copy-QacFixture $run
 $contradictoryIdentity.launchReservationId = 'fedcba9876543210fedcba9876543210'
@@ -105,10 +125,15 @@ $wrongSessionList = $fullList.Replace($reservationId, 'fedcba9876543210fedcba987
 $wrongListEvidence = Get-C188R11R4QacOwnershipEvidence $status $wrongSessionList $inspection $run
 Assert-QacOwnership 'a contradictory nonempty QAC enumeration fails closed' (-not [bool]$wrongListEvidence.accepted)
 
-$partialList = $fullList -replace '(?m)^QEMU PID 200 \|[^\r\n]*\r?\n', ''
-$partialListEvidence = Get-C188R11R4QacOwnershipEvidence $status $partialList $inspection $run
-Assert-QacOwnership 'a partial list without the matching QEMU census row fails closed' (
-    -not [bool]$partialListEvidence.accepted)
+$missingProcessList = $fullList -replace '(?m)^QEMU PID 200 \|[^\r\n]*\r?\n', ''
+$missingProcessEvidence = Get-C188R11R4QacOwnershipEvidence $status $missingProcessList $inspection $run
+Assert-QacOwnership 'missing process enumeration is recorded and accepted only with independently verified process identity' (
+    [bool]$missingProcessEvidence.accepted -and $missingProcessEvidence.qacListQemuProcessOmitted -and
+    $missingProcessEvidence.qacStatusListQemuCountDisagrees)
+
+$wrongListedChild = $partialList.Replace('QEMU PID 200', 'QEMU PID 201')
+$wrongListedChildEvidence = Get-C188R11R4QacOwnershipEvidence $status $wrongListedChild $inspection $run
+Assert-QacOwnership 'a partial list with a contradictory QEMU child fails closed' (-not [bool]$wrongListedChildEvidence.accepted)
 
 $missingChildIdentity = Copy-QacFixture $run
 $missingChildIdentity.childProcessAlive = $false

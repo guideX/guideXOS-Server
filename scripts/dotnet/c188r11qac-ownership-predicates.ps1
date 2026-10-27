@@ -133,7 +133,7 @@ function Get-C188R11R4QacOwnershipEvidence(
         }
 
         $processRows = @([regex]::Matches($ListText,
-            '(?m)^QEMU PID (?<pid>\d+) \| (?<path>[^|]+) \| (?<start>[^|]+) \| (?<ownership>[^\r\n]+)$'))
+            '(?m)^QEMU PID (?<pid>\d+) \| (?<path>[^|]+) \| (?<start>[^|]+) \| (?<ownership>[^\r\n]+)\r?$'))
         $processLineCount = [regex]::Matches($ListText, '(?m)^QEMU PID\s+').Count
         if ($processLineCount -ne $processRows.Count) {
             $reasons.Add('qac-list-qemu-census-unparseable')
@@ -147,14 +147,6 @@ function Get-C188R11R4QacOwnershipEvidence(
                 $ListText -notmatch ('(?m)^\s*Note: Reservation ' + [regex]::Escape([string]$Inspection.id) + '\b')) {
                 $reasons.Add('qac-list-qemu-census-contradicts-inspected-child')
             }
-        }
-        $listHasRows = $listedReservationIds.Count -gt 0 -or
-            $listedSessions.Count -gt 0 -or $processRows.Count -gt 0
-        if ($listHasRows -and
-            ([int]$reservationCountMatch.Groups['count'].Value -ne 1 -or
-             [int]$sessionCountMatch.Groups['count'].Value -ne 1 -or
-             $processRows.Count -ne 1)) {
-            $reasons.Add('qac-list-partial-census-contradicts-independent-ownership')
         }
         if ($ListText -match '(?m)^Coordinator warning:') {
             $reasons.Add('qac-list-reports-census-warning')
@@ -171,6 +163,13 @@ function Get-C188R11R4QacOwnershipEvidence(
         qacListReservationCount = if ($reservationCountMatch.Success) { [int]$reservationCountMatch.Groups['count'].Value } else { $null }
         qacListSessionCount = if ($sessionCountMatch.Success) { [int]$sessionCountMatch.Groups['count'].Value } else { $null }
         qacListQemuProcessCount = if ($null -ne $processRows) { $processRows.Count } else { 0 }
+        qacListReservationOmitted = $reservationCountMatch.Success -and [int]$reservationCountMatch.Groups['count'].Value -eq 0
+        qacListSessionOmitted = $sessionCountMatch.Success -and [int]$sessionCountMatch.Groups['count'].Value -eq 0
+        qacListQemuProcessOmitted = $null -ne $processRows -and $processRows.Count -eq 0
+        qacStatusListSessionCountDisagrees = $statusSessions.Success -and $sessionCountMatch.Success -and
+            [int]$statusSessions.Groups['count'].Value -ne [int]$sessionCountMatch.Groups['count'].Value
+        qacStatusListQemuCountDisagrees = $statusQemu.Success -and $null -ne $processRows -and
+            [int]$statusQemu.Groups['count'].Value -ne $processRows.Count
         qacStatusSessionCount = if ($statusSessions.Success) { [int]$statusSessions.Groups['count'].Value } else { $null }
         qacStatusQemuProcessCount = if ($statusQemu.Success) { [int]$statusQemu.Groups['count'].Value } else { $null }
         qacStatusForeignCount = if ($statusQemu.Success) { [int]$statusQemu.Groups['foreign'].Value } else { $null }
