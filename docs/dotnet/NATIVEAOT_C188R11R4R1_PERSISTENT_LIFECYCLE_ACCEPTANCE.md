@@ -213,6 +213,56 @@ Notes received no character in this run. Its keyboard callback was not invoked, 
 
 The source `ESP/ramdisk.img` SHA-256 was `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` before and after this continuation. It remains the pre-existing modification and is excluded from the implementation and report commits. Generated/untracked sample paths are also preserved.
 
-**Latest outcome remains D — QAC_OR_EXECUTION_BLOCKED.** The lifecycle correction is active and the guest launch-side state is healthy, but the one permitted boot stopped at an ownership-parser defect and did not reach keyboard dispatch. The CRLF parser is now fixed and its hosted regressions pass; no second boot was started. The smallest remaining step is one separately authorized guest run using the corrected gate to capture the first-input memory snapshot, successful `TryFind(4)`, actual Notes callback/result, and before/after screenshots. If that callback succeeds without text insertion, qualify editor/input behavior separately before broader five-resident interactive acceptance.
+**At the first closeout, the outcome was D — QAC_OR_EXECUTION_BLOCKED.** The lifecycle correction was active and launch-side state was healthy, but the first run stopped at a CRLF ownership-parser defect before keyboard dispatch. The parser was corrected and its hosted regressions passed. The following user-authorized retry is recorded separately below.
 
 The implementation changes are committed as `ba9e47e2d70e8f1138517eff9853236238d228d0` (QAC ownership reconciliation). This report is the subsequent documentation-only closeout commit. No remote push was attempted under the existing C188 phase policy.
+
+### User-authorized QEMU-empty retry
+
+Starting branch was `v1.1_DOTNET_SUPPORT` at HEAD `e65f4e479a233d0de0fc708aa24f39c926f2937d`. Ending source HEAD at guest shutdown, before this documentation-only closeout, was the same commit. The preflight at `2026-10-27T02:27:13Z` found QAC Online with zero QEMU processes, foreign processes, reservations, managed sessions, queued requests, or blocked requests; the local QEMU census was empty. The source `ESP/ramdisk.img` hash was `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` both before and after the run.
+
+The validated R4 diagnostic candidate was reused. Exactly one guest boot launched under QAC:
+
+| Evidence | Observation |
+|---|---|
+| Run identity | `c67056d2b2c04ef790678815c4071b53` |
+| QAC reservation | `b5b9a0dfa1974dd68db3f14aed789289` |
+| QAC owner process | PID `22128`; QAC inspection reported `ownerLiveness=Verified` |
+| Runner process | PID `28028`; launch snapshot recorded the owner as its child |
+| QEMU child | PID `18156`, `C:\Program Files\qemu\qemu-system-x86_64.exe` |
+| During-run status/list | One QEMU, zero foreign; one managed session; one reservation, session and QEMU row all matched the reservation and child IDs |
+| During-run inspection | Same reservation, `Running`, `degraded=false`, owner verified, matching child PID/start time/executable |
+| Launch ownership predicate | Accepted with no reasons |
+| Input ownership predicate | Failed closed with `reservation-owner-does-not-match-current-runner-process`; no key event was sent |
+| Shutdown and release | Owned QEMU exit code 0; reservation state `Released`, `degraded=false`; post-run QAC status/list show zero processes and reservations; local QEMU census is empty |
+
+The status/list/inspect interfaces and QAC process row agreed at both the in-run observation and the input gate. The final local owner/runner identity comparison still failed, despite the launch-time process-chain snapshot. The saved gate artifact reports the combined owner/runner predicate reason but does not retain each refreshed local comparison value, so the specific disagreeing field cannot be isolated after shutdown. The gate correctly failed closed; the observed agreement in QAC enumeration alone does not authorize relaxing the required local process-ownership proof. No second guest was started.
+
+The guest reached the corrected launch state and Managed Notes main loop before the input gate:
+
+| Checkpoint | Observation |
+|---|---|
+| Persistent heap | One 65,536-byte initialization and one later `action=preserve` marker |
+| Registry | Five descriptors, selectors 4–8; launch `TryFind(4)` succeeded |
+| Physical storage | Registry array `0x00000001001F4F50`; pool owner `0x00000001001F51E0`; `_entries` slot `0x00000001001F51E8`; pool array `0x00000001001F5218` |
+| Notes residency | Selector 4; resident mask `m=1`; owner/pool generation 1; pool backing present; held array length 5 |
+| Main loop and focus | Normal main-loop readiness; compositor reported Managed Notes focused |
+| Input transition | Not attempted; no `input-dispatch-entry` snapshot, lookup result at input, callback marker, or callback return |
+
+The only screenshot is the launch/readiness image [desktop-ready.png](../../out/dotnet/c188r11-managed-state-provenance/runs/persistent-lifecycle-acceptance-003/guest-001/desktop-ready.png). It shows the Managed Notes window open and focused before any input. The ownership failure occurred before the runner's explicit `before-input` capture and key commands. There is no after-input screenshot, delivered character, Notes text-buffer delta, or callback result; visible text insertion remains unqualified. The screenshot confirms the editor's launch presentation only.
+
+Key retry artifact hashes:
+
+| Artifact | SHA-256 |
+|---|---|
+| Acceptance manifest | `60CFB9D5FD3D60A1C318435F44F576187934F7D6A9E695D531070AD39CE94721` |
+| Guest serial log | `17163F3765762BCF1639AACE7B7E13FACEDD3C155234E2BC88F23D24761563F8` |
+| Launch ownership proof | `C30280C4864CE7B70D532BBA3DCAFF01367CB6422F8D5AF119F6B37180723587` |
+| Input ownership rejection | `3DB3C6013BFDD19143AA8B7F3A5C6595E7E66FB66B4118B991ADD107C5D903A5` |
+| Input QAC inspection | `CBE6353913A1B479605EE1D9693B1044B49D3246999105F3E4E195B212D7A10F` |
+| QAC stderr lifecycle log | `02C2C1982B9E2463E7B2036DED058FD2B676E8AA807C6F48F6767F57D2DDE7CE` |
+| QMP control log | `731950772C2B759F505801E06156248AD731E6AFEC093BA3054DC605993874C8` |
+| Launch screenshot (PPM) | `D4D620FF9C211F849A8827ED054B7B54CCEDA701B1B2BE26EB43410F5E9782C0` |
+| Display copy (PNG) | `D6EF0C500A19273BB2375AB73ABA8F0A8483D34F92BE1A397B2F76CEED13039B` |
+
+**Current outcome: D — QAC_OR_EXECUTION_BLOCKED.** Persistent heap and resident Notes state are demonstrated through launch and lookup, but the one retry failed the required fresh local ownership correlation at the keyboard gate. No key was sent, so heap survival through a real keyboard callback, Notes callback execution, and text insertion remain unqualified. The smallest remaining step is to retain each refreshed local owner/runner/child identity field in the gate diagnostics, add a hosted regression for the observed relationship, and seek authorization for a new single guest acceptance run only after the ownership predicate can prove the current runner chain. The existing hosted aggregate remains PASS with the counts above; no implementation or NativeAOT runtime change was made in this retry.
