@@ -127,6 +127,8 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::Ampersand: return "'&'";
         case TokenKind::Dot: return "'.'";
         case TokenKind::Arrow: return "'->'";
+        case TokenKind::Slash: return "'/'";
+        case TokenKind::Percent: return "'%'";
         default: return "unknown";
     }
 }
@@ -259,6 +261,8 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
         uint32_t tokenLength = 1;
         switch (c) {
             case '*': kind = TokenKind::Star; break;
+            case '/': kind = TokenKind::Slash; break;
+            case '%': kind = TokenKind::Percent; break;
             case '(': kind = TokenKind::LeftParen; break;
             case ')': kind = TokenKind::RightParen; break;
             case '{': kind = TokenKind::LeftBrace; break;

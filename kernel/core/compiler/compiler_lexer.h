@@ -53,6 +53,8 @@ enum class TokenKind : uint8_t {
     Ampersand,
     Dot,
     Arrow,
+    Slash,
+    Percent,
 };
 
 struct Token {

@@ -1322,17 +1322,45 @@ private:
     uint16_t parse_multiplicative(uint32_t depth)
     {
         uint16_t left = parse_unary(depth);
-        while (left != COMPILER_INVALID_INDEX && current().kind == TokenKind::Star) {
+        while (left != COMPILER_INVALID_INDEX &&
+               (current().kind == TokenKind::Star || current().kind == TokenKind::Slash ||
+                current().kind == TokenKind::Percent)) {
             const Token operatorToken = current();
+            const TokenKind operation = current().kind;
             ++(*m_index);
             const uint16_t right = parse_unary(depth);
             if (right == COMPILER_INVALID_INDEX) return COMPILER_INVALID_INDEX;
             if (m_output->expressions[left].type != ValueType::Int32 ||
                 m_output->expressions[right].type != ValueType::Int32) {
-                m_diagnostics.error(operatorToken.location, "arithmetic requires int expressions", "type");
+                m_diagnostics.error_as(CompilerDiagnosticKind::Semantic, operatorToken.location,
+                    operation == TokenKind::Star ? "multiplication requires int expressions" :
+                    operation == TokenKind::Slash ? "division requires int expressions" :
+                                                    "remainder requires int expressions", "type");
                 return COMPILER_INVALID_INDEX;
             }
-            left = make_expression(ExpressionKind::Multiply, operatorToken.location,
+            ExpressionKind kind = ExpressionKind::Multiply;
+            if (operation == TokenKind::Slash) kind = ExpressionKind::Divide;
+            else if (operation == TokenKind::Percent) kind = ExpressionKind::Remainder;
+            if (kind == ExpressionKind::Divide || kind == ExpressionKind::Remainder) {
+                uint32_t divisorBits = 0;
+                if (evaluate_expression(right, 0, &divisorBits) &&
+                    bits_to_i32(divisorBits) == 0) {
+                    m_diagnostics.error_as(CompilerDiagnosticKind::Semantic, operatorToken.location,
+                        kind == ExpressionKind::Divide ? "constant division by zero" :
+                                                       "constant remainder by zero", "arithmetic");
+                    return COMPILER_INVALID_INDEX;
+                }
+                uint32_t dividendBits = 0;
+                if (evaluate_expression(left, 0, &dividendBits) &&
+                    evaluate_expression(right, 0, &divisorBits) &&
+                    bits_to_i32(dividendBits) == static_cast<int32_t>(0x80000000U) &&
+                    bits_to_i32(divisorBits) == -1) {
+                    m_diagnostics.error_as(CompilerDiagnosticKind::Semantic, operatorToken.location,
+                        "constant signed division or remainder overflow", "arithmetic");
+                    return COMPILER_INVALID_INDEX;
+                }
+            }
+            left = make_expression(kind, operatorToken.location,
                                    left, right, COMPILER_INVALID_INDEX, 0);
         }
         return left;
@@ -1749,6 +1777,19 @@ private:
             case ExpressionKind::Add: *bits = left + right; return true;
             case ExpressionKind::Subtract: *bits = left - right; return true;
             case ExpressionKind::Multiply: *bits = left * right; return true;
+            case ExpressionKind::Divide:
+            case ExpressionKind::Remainder: {
+                const int32_t dividend = bits_to_i32(left);
+                const int32_t divisor = bits_to_i32(right);
+                // Keep the hosted compiler itself free of C++ division UB.
+                // The parser rejects these cases when both operands are
+                // compile-time constants; dynamic cases are handled by IDIV.
+                if (divisor == 0 ||
+                    (dividend == static_cast<int32_t>(0x80000000U) && divisor == -1)) return false;
+                *bits = static_cast<uint32_t>(expression.kind == ExpressionKind::Divide
+                    ? dividend / divisor : dividend % divisor);
+                return true;
+            }
             case ExpressionKind::Equal: *bits = bits_to_i32(left) == bits_to_i32(right) ? 1U : 0U; return true;
             case ExpressionKind::NotEqual: *bits = bits_to_i32(left) != bits_to_i32(right) ? 1U : 0U; return true;
             case ExpressionKind::Less: *bits = bits_to_i32(left) < bits_to_i32(right) ? 1U : 0U; return true;

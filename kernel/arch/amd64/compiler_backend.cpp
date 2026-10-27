@@ -267,6 +267,17 @@ public:
     bool add_eax_ecx() { static const uint8_t v[] = {0x01, 0xC8}; return bytes(v, sizeof(v)); }
     bool sub_eax_ecx() { static const uint8_t v[] = {0x29, 0xC8}; return bytes(v, sizeof(v)); }
     bool imul_eax_ecx() { static const uint8_t v[] = {0x0F, 0xAF, 0xC1}; return bytes(v, sizeof(v)); }
+    bool mov_ecx_eax() { static const uint8_t v[] = {0x89, 0xC1}; return bytes(v, sizeof(v)); }
+    bool pop_rax()
+    {
+        if (m_transientBytes < 8U || !byte(0x58)) return false;
+        m_transientBytes -= 8U;
+        m_rspMod16 = static_cast<uint8_t>((m_rspMod16 + 8U) & 0xFU);
+        return true;
+    }
+    bool cdq() { return byte(0x99); }
+    bool idiv_ecx() { static const uint8_t v[] = {0xF7, 0xF9}; return bytes(v, sizeof(v)); }
+    bool mov_eax_edx() { static const uint8_t v[] = {0x89, 0xD0}; return bytes(v, sizeof(v)); }
     bool imul_rax_imm32(uint32_t value)
     {
         return bytes(reinterpret_cast<const uint8_t*>("\x48\x69\xC0"), 3) && u32(value);
@@ -1593,6 +1604,8 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
         case ExpressionKind::Add:
         case ExpressionKind::Subtract:
         case ExpressionKind::Multiply:
+        case ExpressionKind::Divide:
+        case ExpressionKind::Remainder:
         case ExpressionKind::Equal:
         case ExpressionKind::NotEqual:
         case ExpressionKind::Less:
@@ -1607,7 +1620,14 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
             if (!emit_expression(emitter, unit, function, frame, functionLabels, expression.left,
                                  epilogueLabel, callFailureLabel) || !emitter.push_rax() ||
                 !emit_expression(emitter, unit, function, frame, functionLabels, expression.right,
-                                 epilogueLabel, callFailureLabel) || !emitter.pop_rcx()) return false;
+                                 epilogueLabel, callFailureLabel)) return false;
+            if (expression.kind == ExpressionKind::Divide ||
+                expression.kind == ExpressionKind::Remainder) {
+                if (!emitter.mov_ecx_eax() || !emitter.pop_rax() || !emitter.cdq() ||
+                    !emitter.idiv_ecx()) return false;
+                return expression.kind == ExpressionKind::Divide || emitter.mov_eax_edx();
+            }
+            if (!emitter.pop_rcx()) return false;
             if (expression.kind == ExpressionKind::Add) return emitter.add_eax_ecx();
             if (expression.kind == ExpressionKind::Subtract)
                 return emitter.bytes(reinterpret_cast<const uint8_t*>("\x91"), 1) && emitter.sub_eax_ecx();

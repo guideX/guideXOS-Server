@@ -41,7 +41,7 @@ Project preparation in the guest build service validates the target profile, ABI
 
 | Area | Status | Verified contract and limits | Source and test evidence |
 |---|---|---|---|
-| Integer types and arithmetic | Partial | Signed 32-bit `int`, integer literals, unary minus, `+`, `-`, `*`, signed comparisons, and short-circuit `&&`/`||`. No general `char`, unsigned/wider integers, floating point, division, modulo, or bitwise arithmetic. | Lexer/parser/IR/AMD64 backend; bootstrap and functions host tests; Phase 27I report. |
+| Integer types and arithmetic | Partial | Signed 32-bit `int`, integer literals, unary minus, `+`, `-`, `*`, signed `/` and `%`, signed comparisons, and short-circuit `&&`/`||`. Division truncates toward zero and remainder follows the dividend sign. No general `char`, unsigned/wider integers, floating point, or bitwise arithmetic. | Lexer/parser/IR/AMD64 backend; bootstrap/functions tests; COMP4C signed arithmetic hosted execution and code-generation test; Phase 27I report. |
 | Variables and assignments | Partial | Bounded locals and globals; scalar and indexed assignment; pointer and supported struct-field assignment; fixed storage limits. No general C declaration, cast, compound-assignment, or lifetime rules. | Parser, IR, backend; globals, arrays, pointers, structs tests. |
 | Conditional statements | Implemented | `if`/`else` with integer conditions, comparisons, and short-circuit logical expressions. | Parser/backend; bootstrap and functions tests; Phase 27I report. |
 | Loops | Implemented | `while`, `break`, and `continue`, under bounded nesting and generated-code limits. | Parser/backend; bootstrap/functions tests; Phase 27J report. |
@@ -106,7 +106,7 @@ No QEMU boot or genuine guest Build/Run was performed for COMP4A. Historical gue
 
 ## Remaining deficiencies and next milestone
 
-- The language is a bounded bootstrap subset, not a C or C++ implementation. It lacks general preprocessing, full declarations/type conversions, many scalar types, division/modulo, static storage, global pointers, array parameters, aggregate assignment, and standard-library support.
+- The language is a bounded bootstrap subset, not a C or C++ implementation. It lacks general preprocessing, full declarations/type conversions, many scalar types, unsigned and wider integer arithmetic, bitwise arithmetic, static storage, global pointers, array parameters, aggregate assignment, and standard-library support.
 - The guest backend is AMD64-only. No general relocatable linking, external libraries, or arbitrary OS-hosted compiler invocation exists in guest runtime.
 - Diagnostic classification is precise for the explicitly tagged front-end paths and existing pipeline stages; unclassified internal conditions intentionally retain the generic fallback.
 - The guest compiler has no warning generation/counting capability; consumers must treat `GX_BUILD_COUNT_UNAVAILABLE` as unavailable, not as zero.

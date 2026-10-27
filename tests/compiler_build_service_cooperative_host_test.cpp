@@ -104,6 +104,15 @@ static bool output_contains(const gx_build_snapshot& snapshot,
     return false;
 }
 
+static bool bytes_contain(const std::vector<uint8_t>& bytes,
+                         const uint8_t* needle, uint32_t needleBytes)
+{
+    if (!needle || needleBytes == 0 || needleBytes > bytes.size()) return false;
+    for (size_t i = 0; i + needleBytes <= bytes.size(); ++i)
+        if (std::memcmp(bytes.data() + i, needle, needleBytes) == 0) return true;
+    return false;
+}
+
 static void release_build(gx_build_handle handle)
 {
     assert(kernel::compiler::BareMetalBuildService::release_owned(
@@ -132,7 +141,7 @@ static void setup_project()
         "\"abi\":\"guidexos-c-abi-v1\"}");
     put("/workspace/comp4b/src/main.cpp",
         "#include \"helper.h\"\n"
-        "int gx_main(gx_app_context* ctx) { return calculate_value(); }\n");
+        "int gx_main(gx_app_context* ctx) { return calculate_value() / 2 + 21; }\n");
     put("/workspace/comp4b/src/helper.cpp",
         "int calculate_value() { return 42; }\n");
     put("/workspace/comp4b/src/helper.h", "int calculate_value();\n");
@@ -251,19 +260,20 @@ static void test_failure_diagnostics_and_recovery(RequestFixture& fixture)
 {
     const std::vector<uint8_t> previous = read_vfs_bytes(kFinalArtifact);
     put("/workspace/comp4b/src/main.cpp",
-        "int gx_main(gx_app_context* ctx) { return (1 + ); }\n");
+        "int gx_main(gx_app_context* ctx) { return 7 / 0; }\n");
     gx_build_handle handle = start_build(fixture);
     gx_build_snapshot snapshot = run_to_terminal(handle);
     assert(snapshot.state == GX_BUILD_FAILED && !snapshot.artifactValid &&
-           snapshot.errorCode == GX_BUILD_ERROR_COMPILER_SYNTAX &&
-           snapshot.errorCount != 0U && output_contains(snapshot, "[syntax]"));
+           snapshot.errorCode == GX_BUILD_ERROR_COMPILER_SEMANTIC &&
+           snapshot.errorCount != 0U && output_contains(snapshot, "[semantic]") &&
+           output_contains(snapshot, "constant division by zero"));
     assert(!kernel::vfs::exists(kTemporaryArtifact));
     assert(read_vfs_bytes(kFinalArtifact) == previous);
     release_build(handle);
 
     put("/workspace/comp4b/src/main.cpp",
         "#include \"helper.h\"\n"
-        "int gx_main(gx_app_context* ctx) { return calculate_value(); }\n");
+        "int gx_main(gx_app_context* ctx) { return calculate_value() / 2 + 21; }\n");
     handle = start_build(fixture);
     snapshot = run_to_terminal(handle);
     assert(snapshot.state == GX_BUILD_SUCCEEDED && snapshot.artifactValid &&
@@ -271,6 +281,8 @@ static void test_failure_diagnostics_and_recovery(RequestFixture& fixture)
     const std::vector<uint8_t> artifact = read_vfs_bytes(kFinalArtifact);
     assert(artifact.size() >= 4U && artifact[0] == 0x7FU && artifact[1] == 'E' &&
            artifact[2] == 'L' && artifact[3] == 'F');
+    const uint8_t linkedIdiv[] = {0x89, 0xC1, 0x58, 0x99, 0xF7, 0xF9};
+    assert(bytes_contain(artifact, linkedIdiv, sizeof(linkedIdiv)));
     assert(!kernel::vfs::exists(kTemporaryArtifact));
     release_build(handle);
 }

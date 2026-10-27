@@ -120,6 +120,10 @@ enum class ExpressionKind : uint8_t {
     PointerAdd,
     PointerSubtractInteger,
     StringLiteral,
+    // Append-only: object/debug metadata and existing compiler paths rely on
+    // the numeric values of the earlier expression kinds.
+    Divide,
+    Remainder,
 };
 
 enum class ValueType : uint8_t {
