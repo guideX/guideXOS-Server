@@ -40,6 +40,23 @@ public:
     gx_result begin_synchronous_job(uint64_t ownerIdentity,
                                     const gx_build_request* request,
                                     gx_build_handle* outHandle);
+    gx_result begin_cooperative_job(uint64_t ownerIdentity,
+                                    const gx_build_request* request,
+                                    gx_build_handle* outHandle);
+    gx_result begin_cooperative_step(uint64_t ownerIdentity,
+                                     gx_build_handle handle,
+                                     const gx_build_request** outRequest,
+                                     gx_build_snapshot* outSnapshot,
+                                     bool* outCancelRequested);
+    gx_result finish_cooperative_step(uint64_t ownerIdentity,
+                                      gx_build_handle handle,
+                                      const gx_build_snapshot* result,
+                                      bool terminalResult,
+                                      bool* outCancelled);
+    gx_result claim_finalization(uint64_t ownerIdentity,
+                                 gx_build_handle handle);
+    gx_result request_cancel(uint64_t ownerIdentity,
+                             gx_build_handle handle);
     const gx_build_request* request_for_execution(uint64_t ownerIdentity,
                                                   gx_build_handle handle);
     gx_result set_source_membership(uint64_t ownerIdentity,
@@ -80,6 +97,8 @@ private:
         bool cancelRequested;
         bool sourceMembershipReady;
         bool testOnly;
+        bool cooperative;
+        bool finalizationClaimed;
         State state;
         uint32_t generation;
         uint32_t testStep;
@@ -105,7 +124,7 @@ private:
     static void clear_snapshot(gx_build_snapshot* snapshot,
                                gx_build_handle handle,
                                uint32_t publicState);
-    static void append_test_output(gx_build_snapshot* snapshot,
+    static void append_output_line(gx_build_snapshot* snapshot,
                                    const char* text);
     void set_cancelled(const char* reason);
     gx_result pump_one_test_step();

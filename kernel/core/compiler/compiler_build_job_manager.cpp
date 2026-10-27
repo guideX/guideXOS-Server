@@ -164,7 +164,7 @@ void Manager::clear_snapshot(gx_build_snapshot* snapshot,
     snapshot->warningCount = GX_BUILD_COUNT_UNAVAILABLE;
 }
 
-void Manager::append_test_output(gx_build_snapshot* snapshot,
+void Manager::append_output_line(gx_build_snapshot* snapshot,
                                  const char* text)
 {
     if (!snapshot || !text) return;
@@ -178,6 +178,243 @@ void Manager::append_test_output(gx_build_snapshot* snapshot,
         snapshot->outputTruncated = 1U;
 }
 
+gx_result Manager::begin_cooperative_job(uint64_t ownerIdentity,
+                                         const gx_build_request* request,
+                                         gx_build_handle* outHandle)
+{
+    if (!outHandle) return GX_ERROR_INVALID_ARGUMENT;
+    *outHandle = 0;
+    if (ownerIdentity == 0 || !request ||
+        request->size < sizeof(gx_build_request) ||
+        request->version != GX_BUILD_API_VERSION) {
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    lock();
+    if (shuttingDown_) {
+        unlock();
+        return GX_ERROR_FAILED;
+    }
+    if (job_.used) {
+        unlock();
+        return GX_ERROR_BUSY;
+    }
+    if (generationExhausted_ || generation_ == 0xFFFFFFFFU) {
+        generationExhausted_ = true;
+        unlock();
+        return GX_ERROR_FAILED;
+    }
+
+    clear_job();
+    const gx_result copied = copy_request(request);
+    if (copied != GX_OK) {
+        clear_job();
+        unlock();
+        return copied;
+    }
+    ++generation_;
+    job_.generation = generation_;
+    job_.ownerIdentity = ownerIdentity;
+    job_.handle = (static_cast<uint64_t>(generation_) << 32) | kBuildSlotId;
+    job_.used = true;
+    job_.cooperative = true;
+    job_.state = State::Queued;
+    clear_snapshot(&job_.snapshot, job_.handle, GX_BUILD_PREPARING);
+    *outHandle = job_.handle;
+    unlock();
+    return GX_OK;
+}
+
+gx_result Manager::begin_cooperative_step(uint64_t ownerIdentity,
+                                          gx_build_handle handle,
+                                          const gx_build_request** outRequest,
+                                          gx_build_snapshot* outSnapshot,
+                                          bool* outCancelRequested)
+{
+    if (!outRequest || !outSnapshot || !outCancelRequested)
+        return GX_ERROR_INVALID_ARGUMENT;
+    *outRequest = nullptr;
+    clear_snapshot(outSnapshot, handle, GX_BUILD_IDLE);
+    *outCancelRequested = false;
+    lock();
+    if (!handle_matches(handle)) {
+        unlock();
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!owner_matches(ownerIdentity) || job_.ownerClosed) {
+        unlock();
+        return GX_ERROR_PERMISSION_DENIED;
+    }
+    if (!job_.cooperative || terminal(job_.state) || job_.pumpInProgress ||
+        job_.finalizationClaimed || shuttingDown_) {
+        unlock();
+        return GX_ERROR_BUSY;
+    }
+    job_.pumpInProgress = true;
+    if (job_.state == State::Queued) {
+        job_.state = State::Running;
+        job_.snapshot.state = GX_BUILD_RUNNING;
+    }
+    *outRequest = &job_.request;
+    *outSnapshot = job_.snapshot;
+    *outCancelRequested = job_.cancelRequested;
+    unlock();
+    return GX_OK;
+}
+
+gx_result Manager::finish_cooperative_step(uint64_t ownerIdentity,
+                                           gx_build_handle handle,
+                                           const gx_build_snapshot* result,
+                                           bool terminalResult,
+                                           bool* outCancelled)
+{
+    if (!result || !outCancelled) return GX_ERROR_INVALID_ARGUMENT;
+    *outCancelled = false;
+    lock();
+    if (!handle_matches(handle)) {
+        unlock();
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!owner_matches(ownerIdentity)) {
+        unlock();
+        return GX_ERROR_PERMISSION_DENIED;
+    }
+    if (!job_.cooperative || !job_.pumpInProgress || terminal(job_.state)) {
+        unlock();
+        return GX_ERROR_FAILED;
+    }
+
+    job_.pumpInProgress = false;
+    if ((job_.cancelRequested || job_.ownerClosed || shuttingDown_) &&
+        !job_.finalizationClaimed) {
+        char cancellationLine[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+        bool hadCancellationLine = false;
+        for (uint32_t i = 0; i < job_.snapshot.outputCount; ++i) {
+            const char* current = job_.snapshot.output[i].text;
+            const char prefix[] = "Cancellation requested;";
+            uint32_t j = 0;
+            while (j + 1U < sizeof(prefix) && current[j] == prefix[j] &&
+                   current[j] != '\0') ++j;
+            if (j + 1U == sizeof(prefix)) {
+                copy_text(cancellationLine, sizeof(cancellationLine), current);
+                hadCancellationLine = true;
+                break;
+            }
+        }
+        job_.snapshot = *result;
+        job_.snapshot.size = sizeof(gx_build_snapshot);
+        job_.snapshot.version = kBuildApiVersion;
+        job_.snapshot.handle = job_.handle;
+        if (hadCancellationLine) {
+            bool alreadyPresent = false;
+            for (uint32_t i = 0; i < job_.snapshot.outputCount; ++i) {
+                const char* current = job_.snapshot.output[i].text;
+                uint32_t j = 0;
+                while (cancellationLine[j] != '\0' &&
+                       current[j] == cancellationLine[j]) ++j;
+                if (cancellationLine[j] == '\0') {
+                    alreadyPresent = true;
+                    break;
+                }
+            }
+            if (!alreadyPresent) append_output_line(&job_.snapshot,
+                                                     cancellationLine);
+        }
+        set_cancelled("build cancelled at a cooperative stage boundary");
+        *outCancelled = true;
+    } else {
+        job_.snapshot = *result;
+        job_.snapshot.size = sizeof(gx_build_snapshot);
+        job_.snapshot.version = kBuildApiVersion;
+        job_.snapshot.handle = job_.handle;
+        if (terminalResult) {
+            if (result->state == GX_BUILD_SUCCEEDED &&
+                (!job_.sourceMembershipReady || !result->artifactValid)) {
+                clear_snapshot(&job_.snapshot, job_.handle, GX_BUILD_FAILED);
+                job_.snapshot.errorCode = GX_BUILD_ERROR_INTERNAL;
+                copy_text(job_.snapshot.errorMessage,
+                          sizeof(job_.snapshot.errorMessage),
+                          "successful build result has no validated artifact identity");
+                job_.state = State::Failed;
+            } else {
+                job_.state = result->state == GX_BUILD_SUCCEEDED ? State::Succeeded :
+                    (result->state == GX_BUILD_CANCELLED ? State::Cancelled : State::Failed);
+            }
+        } else {
+            job_.state = result->state == GX_BUILD_VALIDATING_ARTIFACT
+                ? State::Completing : State::Running;
+        }
+    }
+
+    if (job_.ownerClosed || shuttingDown_) clear_job();
+    unlock();
+    return GX_OK;
+}
+
+gx_result Manager::claim_finalization(uint64_t ownerIdentity,
+                                      gx_build_handle handle)
+{
+    lock();
+    if (!handle_matches(handle)) {
+        unlock();
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!owner_matches(ownerIdentity) || job_.ownerClosed) {
+        unlock();
+        return GX_ERROR_PERMISSION_DENIED;
+    }
+    if (!job_.cooperative || !job_.pumpInProgress || terminal(job_.state)) {
+        unlock();
+        return GX_ERROR_FAILED;
+    }
+    if (job_.cancelRequested || shuttingDown_) {
+        unlock();
+        return GX_ERROR_BUSY;
+    }
+    job_.finalizationClaimed = true;
+    job_.state = State::Completing;
+    job_.snapshot.state = GX_BUILD_VALIDATING_ARTIFACT;
+    unlock();
+    return GX_OK;
+}
+
+gx_result Manager::request_cancel(uint64_t ownerIdentity,
+                                  gx_build_handle handle)
+{
+    lock();
+    if (!handle_matches(handle)) {
+        unlock();
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!owner_matches(ownerIdentity) || job_.ownerClosed) {
+        unlock();
+        return GX_ERROR_PERMISSION_DENIED;
+    }
+    if (!job_.cooperative) {
+        unlock();
+        return GX_ERROR_BUSY;
+    }
+    if (job_.state == State::Cancelled) {
+        unlock();
+        return GX_OK;
+    }
+    if (terminal(job_.state) || job_.finalizationClaimed) {
+        unlock();
+        return GX_ERROR_BUSY;
+    }
+    if (!job_.cancelRequested) {
+        job_.cancelRequested = true;
+        if (job_.state == State::Queued && !job_.pumpInProgress) {
+            set_cancelled("queued build job cancelled before execution");
+        } else {
+            append_output_line(&job_.snapshot,
+                "Cancellation requested; it will take effect at the next safe boundary.");
+        }
+    }
+    unlock();
+    return GX_OK;
+}
+
 void Manager::set_cancelled(const char* reason)
 {
     job_.state = State::Cancelled;
@@ -186,7 +423,8 @@ void Manager::set_cancelled(const char* reason)
     job_.snapshot.artifactSize = 0U;
     job_.snapshot.artifactEntryPoint = 0U;
     job_.snapshot.processExitCode = -1;
-    job_.snapshot.errorCode = kTestErrorCode;
+    job_.snapshot.errorCode = GX_BUILD_ERROR_BUILD_CANCELLED;
+    job_.snapshot.errorCount = 0U;
     copy_text(job_.snapshot.errorMessage, sizeof(job_.snapshot.errorMessage),
               reason ? reason : "build job cancelled before completion");
 }
@@ -263,9 +501,14 @@ gx_result Manager::set_source_membership(uint64_t ownerIdentity,
         unlock();
         return GX_ERROR_PERMISSION_DENIED;
     }
-    if (!job_.callActive || job_.testOnly || job_.ownerClosed ||
+    const bool executionOwned = job_.callActive ||
+        (job_.cooperative && job_.pumpInProgress);
+    const bool preparing = job_.state == State::Preparing ||
+        (job_.cooperative && job_.state == State::Running &&
+         !job_.sourceMembershipReady);
+    if (!executionOwned || job_.testOnly || job_.ownerClosed ||
         job_.cancelRequested || shuttingDown_ ||
-        job_.state != State::Preparing ||
+        !preparing ||
         selection.count == 0 || selection.count > kMaximumSources) {
         unlock();
         return GX_ERROR_INVALID_ARGUMENT;
@@ -501,7 +744,7 @@ gx_result Manager::pump_one_test_step()
         line[position++] = static_cast<char>('0' + kTestContinuationSteps);
         line[position] = '\0';
     }
-    append_test_output(&job_.snapshot, line);
+    append_output_line(&job_.snapshot, line);
     if (completedStep >= kTestContinuationSteps) {
         job_.state = State::Failed;
         job_.snapshot.state = GX_BUILD_FAILED;

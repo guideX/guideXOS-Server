@@ -809,7 +809,7 @@ static gx_result GX_CALL host_bare_build_start(gx_app_context* context, const gx
     copied.buildScript = s_bareBuildStrings[5];
     copied.expectedArtifact = s_bareBuildStrings[6];
     copied.configuration = s_bareBuildStrings[7];
-    return compiler::BareMetalBuildService::start_owned(
+    return compiler::BareMetalBuildService::request_owned(
         &copied, s_appRuntime.runtimeIdentity, output);
 }
 
@@ -824,6 +824,14 @@ static gx_result GX_CALL host_bare_build_release(gx_app_context* context, gx_bui
 {
     if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
     return compiler::BareMetalBuildService::release_owned(
+        s_appRuntime.runtimeIdentity, handle);
+}
+
+static gx_result GX_CALL host_bare_build_cancel(gx_app_context* context,
+                                                 gx_build_handle handle)
+{
+    if (!app_context_valid(context)) return GX_ERROR_PERMISSION_DENIED;
+    return compiler::BareMetalBuildService::cancel_owned(
         s_appRuntime.runtimeIdentity, handle);
 }
 
@@ -1252,6 +1260,7 @@ static void initialize_app_context()
     s_appRuntime.hostCalls.bare_metal_build_project_start = host_bare_build_start;
     s_appRuntime.hostCalls.bare_metal_build_project_poll = host_bare_build_poll;
     s_appRuntime.hostCalls.bare_metal_build_project_release = host_bare_build_release;
+    s_appRuntime.hostCalls.bare_metal_build_project_cancel = host_bare_build_cancel;
     s_appRuntime.hostCalls.bare_metal_file_stat = host_bare_file_stat;
     s_appRuntime.hostCalls.bare_metal_file_read_workspace = host_bare_file_read_workspace;
     s_appRuntime.hostCalls.bare_metal_file_list = host_bare_file_list;

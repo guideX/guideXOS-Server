@@ -8433,7 +8433,7 @@ void tick()
 #if defined(GXOS_BARE_METAL)
     const bool nativeElfTargetActive =
         kernel::native_elf::NativeElfRunService::native_elf_scheduler_in_target();
-    (void)kernel::compiler::BareMetalBuildService::pump_cooperative_test_step();
+    (void)kernel::compiler::BareMetalBuildService::pump_cooperative_step();
     if (!nativeElfTargetActive)
         (void)kernel::native_elf::NativeElfRunService::native_elf_scheduler_pump();
 #endif

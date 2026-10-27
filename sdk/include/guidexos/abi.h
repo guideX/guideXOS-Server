@@ -208,6 +208,10 @@ typedef struct gx_host_calls {
                                                        char* path,
                                                        uint32_t pathCapacity,
                                                        uint32_t* requiredBytes);
+    /* Additive cancellation for queued bare-metal Developer Studio Builds.
+     * A request is observed at the next safe stage boundary. */
+    gx_result (GX_CALL *bare_metal_build_project_cancel)(gx_app_context* ctx,
+                                                          gx_build_handle handle);
 } gx_host_calls;
 
 #ifdef __cplusplus

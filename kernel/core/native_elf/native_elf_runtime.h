@@ -165,7 +165,9 @@ static_assert(offsetof(gx_host_calls, native_window_run) == 376,
                   "gx_host_calls bare-metal expression offset changed");
     static_assert(offsetof(gx_host_calls, get_document_activation_path) == 448,
                   "gx_host_calls document activation offset changed");
-    static_assert(sizeof(gx_host_calls) == 456, "gx_host_calls size changed");
+    static_assert(offsetof(gx_host_calls, bare_metal_build_project_cancel) == 456,
+                  "gx_host_calls Build cancel offset changed");
+    static_assert(sizeof(gx_host_calls) == 464, "gx_host_calls size changed");
 
 inline bool calculate_application_stack_layout(uint64_t base,
                                                uint64_t size,

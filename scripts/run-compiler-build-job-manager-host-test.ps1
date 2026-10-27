@@ -27,9 +27,9 @@ if ($buildExitCode -ne 0) {
 }
 
 $desktopSource = Get-Content -Raw -Path (Join-Path $repoRoot "kernel/core/desktop.cpp")
-$desktopPumpPattern = '(?s)const bool nativeElfTargetActive\s*=\s*kernel::native_elf::NativeElfRunService::native_elf_scheduler_in_target\(\);\s*\(void\)kernel::compiler::BareMetalBuildService::pump_cooperative_test_step\(\);\s*if\s*\(!nativeElfTargetActive\)\s*\(void\)kernel::native_elf::NativeElfRunService::native_elf_scheduler_pump\(\);'
+$desktopPumpPattern = '(?s)const bool nativeElfTargetActive\s*=\s*kernel::native_elf::NativeElfRunService::native_elf_scheduler_in_target\(\);\s*\(void\)kernel::compiler::BareMetalBuildService::pump_cooperative_step\(\);\s*if\s*\(!nativeElfTargetActive\)\s*\(void\)kernel::native_elf::NativeElfRunService::native_elf_scheduler_pump\(\);'
 if (-not [regex]::IsMatch($desktopSource, $desktopPumpPattern)) {
-    throw "desktop update boundary is not wired to the guarded build-job pump"
+    throw "desktop update boundary is not wired to the production cooperative Build pump"
 }
 Write-Host "Desktop build-job pump wiring PASS"
 

@@ -86,11 +86,17 @@ static_assert(offsetof(gx_host_calls, bare_metal_development_debug_evaluate_expr
               "bare-metal expression slot changed");
 static_assert(offsetof(gx_host_calls, get_document_activation_path) == 448,
               "document activation slot changed");
+static_assert(offsetof(gx_host_calls, bare_metal_build_project_cancel) == 456,
+              "bare-metal Build cancel slot changed");
+using gx_bare_metal_build_cancel_callback = gx_result (GX_CALL *)(gx_app_context*, gx_build_handle);
+static_assert(std::is_same<decltype(((gx_host_calls*)nullptr)->bare_metal_build_project_cancel),
+                           gx_bare_metal_build_cancel_callback>::value,
+              "bare-metal Build cancel callback signature changed");
 using gx_document_activation_path_callback = gx_result (GX_CALL *)(gx_app_context*, char*, uint32_t, uint32_t*);
 static_assert(std::is_same<decltype(((gx_host_calls*)nullptr)->get_document_activation_path),
                            gx_document_activation_path_callback>::value,
               "document activation callback signature changed");
-static_assert(sizeof(gx_host_calls) == 456, "gx_host_calls size changed");
+static_assert(sizeof(gx_host_calls) == 464, "gx_host_calls size changed");
 static_assert(sizeof(gx_development_run_request) == 120, "development run request size changed");
 static_assert(offsetof(gx_development_run_request, projectRoot) == 8, "development run request project root offset changed");
 static_assert(offsetof(gx_development_run_request, artifactSha256) == 56, "development run request artifact hash offset changed");

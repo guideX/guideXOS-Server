@@ -64,7 +64,9 @@ typedef enum gx_build_error_code {
     GX_BUILD_ERROR_COMPILER_ELF_WRITER = 30,
     GX_BUILD_ERROR_COMPILER_ARTIFACT_VALIDATION = 31,
     GX_BUILD_ERROR_COMPILER_ARTIFACT_PUBLICATION = 32,
-    GX_BUILD_ERROR_COMPILER_INTERNAL = 33
+    GX_BUILD_ERROR_COMPILER_INTERNAL = 33,
+    /* Append-only terminal classification for explicitly cancelled guest builds. */
+    GX_BUILD_ERROR_BUILD_CANCELLED = 34
 } gx_build_error_code;
 
 /* A backend that cannot report warning records sets warningCount to this

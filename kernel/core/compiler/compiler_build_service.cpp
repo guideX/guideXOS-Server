@@ -116,6 +116,28 @@ static BuildJobManager::Manager s_buildJobManager;
 static gx_build_snapshot s_workingSnapshot = {};
 static gx_build_handle s_activeBuildHandle = 0;
 static uint64_t s_activeBuildOwner = 0;
+enum class CooperativeStage : uint8_t {
+    Idle,
+    Metadata,
+    OutputDirectories,
+    SourceDirectories,
+    Compiler,
+    ArtifactValidation,
+    Publication
+};
+static CooperativeStage s_cooperativeStage = CooperativeStage::Idle;
+static bool s_cooperativePumpActive = false;
+static volatile uint8_t s_cooperativePumpLock = 0;
+static bool s_cooperativeStageTerminal = false;
+static uint32_t s_cooperativeSourceIndex = 0;
+static uint32_t s_cooperativeArtifactBytes = 0;
+static uint32_t s_cooperativeEntryPoint = 0;
+static SourceSelection s_cooperativeSources = {};
+static char s_cooperativeArtifactPath[kMaxResolvedPath] = {};
+static char s_cooperativeTemporaryPath[kMaxResolvedPath] = {};
+static char s_cooperativeBackupPath[kMaxResolvedPath] = {};
+static CompileSummary s_cooperativeSummary = {};
+static const gx_build_request* s_cooperativeRequest = nullptr;
 static char s_projectText[kMaxProjectText + 1];
 static char s_manifestText[kMaxProjectText + 1];
 static uint8_t s_artifact[COMPILER_MAX_OUTPUT_BYTES];
@@ -395,6 +417,7 @@ static void output_line(const char* text, uint32_t stream)
 static void failure(uint32_t errorCode, const char* message)
 {
     s_workingSnapshot.state = GX_BUILD_FAILED;
+    s_workingSnapshot.processExitCode = -1;
     s_workingSnapshot.errorCode = errorCode;
     copy_text(s_workingSnapshot.errorMessage, sizeof(s_workingSnapshot.errorMessage), message ? message : "bare-metal build failed");
 }
@@ -1049,6 +1072,417 @@ static void run_build_core(const gx_build_request* request)
     phase28v_build_trace("CORE_COMPLETE");
 }
 
+static bool sibling_sidecar(const char* path, const char* name,
+                            char* output, uint32_t capacity)
+{
+    if (!path || !name || !output || capacity == 0 ||
+        !copy_text(output, capacity, path)) return false;
+    uint32_t length = text_length(output, capacity);
+    while (length != 0 && output[length - 1U] != '/') --length;
+    if (length == 0) return false;
+    output[length] = '\0';
+    return append_text(output, capacity, name);
+}
+
+static void clear_cooperative_context()
+{
+    s_cooperativeStage = CooperativeStage::Idle;
+    s_cooperativePumpActive = false;
+    s_cooperativeStageTerminal = false;
+    s_cooperativeSourceIndex = 0;
+    s_cooperativeArtifactBytes = 0;
+    s_cooperativeEntryPoint = 0;
+    s_cooperativeRequest = nullptr;
+    s_activeBuildHandle = 0;
+    s_activeBuildOwner = 0;
+}
+
+static void cancel_cooperative_snapshot(const char* message)
+{
+    s_workingSnapshot.state = GX_BUILD_CANCELLED;
+    s_workingSnapshot.errorCode = GX_BUILD_ERROR_BUILD_CANCELLED;
+    s_workingSnapshot.processExitCode = -1;
+    s_workingSnapshot.artifactValid = 0;
+    s_workingSnapshot.artifactSize = 0;
+    s_workingSnapshot.artifactEntryPoint = 0;
+    s_workingSnapshot.artifactPath[0] = '\0';
+    s_workingSnapshot.artifactSha256[0] = '\0';
+    s_workingSnapshot.errorCount = 0;
+    copy_text(s_workingSnapshot.errorMessage,
+              sizeof(s_workingSnapshot.errorMessage),
+              message ? message : "build cancelled at a safe stage boundary");
+}
+
+static bool recover_cooperative_sidecars()
+{
+    const bool artifactExists = vfs::exists(s_cooperativeArtifactPath);
+    const bool backupExists = vfs::exists(s_cooperativeBackupPath);
+    if (backupExists) {
+        if (!artifactExists) {
+            if (vfs::rename(s_cooperativeBackupPath,
+                            s_cooperativeArtifactPath) != vfs::VFS_OK)
+                return false;
+        } else if (vfs::unlink(s_cooperativeBackupPath) != vfs::VFS_OK) {
+            return false;
+        }
+    }
+    if (vfs::exists(s_cooperativeTemporaryPath) &&
+        vfs::unlink(s_cooperativeTemporaryPath) != vfs::VFS_OK)
+        return false;
+    return true;
+}
+
+static void report_incremental_compile_result(bool compiled)
+{
+    for (uint32_t i = 0; i < s_cooperativeSources.count; ++i) {
+        if (s_cooperativeSummary.moduleStatus[i] == COMPILE_MODULE_CACHE_HIT) {
+            char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+            copy_text(line, sizeof(line), "Reused cached object ");
+            append_text(line, sizeof(line), s_cooperativeSources.relatives[i]);
+            output_line(line, 1);
+        } else if (s_cooperativeSummary.moduleStatus[i] == COMPILE_MODULE_COMPILED) {
+            char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+            copy_text(line, sizeof(line), "Compiled ");
+            append_text(line, sizeof(line), s_cooperativeSources.relatives[i]);
+            output_line(line, 1);
+        }
+    }
+    if (s_cooperativeSummary.linkedModuleCount != 0) {
+        char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+        copy_text(line, sizeof(line), "Linked ");
+        append_dec(line, sizeof(line), s_cooperativeSummary.linkedModuleCount);
+        append_text(line, sizeof(line), s_cooperativeSummary.linkedFromPersistedObjects
+            ? " modules from validated objects" : " modules");
+        output_line(line, 1);
+    }
+    s_workingSnapshot.sourceFileCount = s_cooperativeSummary.sourceFileCount;
+    s_workingSnapshot.compiledModuleCount = s_cooperativeSummary.compiledModuleCount;
+    s_workingSnapshot.cachedModuleCount = s_cooperativeSummary.cachedModuleCount;
+    s_workingSnapshot.linkedModuleCount = s_cooperativeSummary.linkedModuleCount;
+
+    if (compiled) return;
+    for (uint32_t i = 0; i < s_cooperativeSummary.diagnosticCount; ++i) {
+        char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+        const char* path = diagnostic_display_path(
+            s_cooperativeSources, s_cooperativeSummary.diagnostics[i].sourcePath);
+        if (s_cooperativeSummary.failureStage == CompileFailureStage::Linker) {
+            append_text(line, sizeof(line), "linker: error: [linker] ");
+            append_text(line, sizeof(line), s_cooperativeSummary.diagnostics[i].message);
+        } else if (diagnostic_has_source_location(s_cooperativeSummary.diagnostics[i])) {
+            append_text(line, sizeof(line), path);
+            append_text(line, sizeof(line), "(");
+            append_dec(line, sizeof(line), s_cooperativeSummary.diagnostics[i].location.line);
+            append_text(line, sizeof(line), ",");
+            append_dec(line, sizeof(line), s_cooperativeSummary.diagnostics[i].location.column);
+            append_text(line, sizeof(line), "): error: [");
+            append_text(line, sizeof(line), diagnostic_kind_label(
+                s_cooperativeSummary.diagnostics[i], s_cooperativeSummary.failureStage));
+            append_text(line, sizeof(line), "] ");
+            append_text(line, sizeof(line), s_cooperativeSummary.diagnostics[i].message);
+        } else {
+            append_text(line, sizeof(line), "[");
+            append_text(line, sizeof(line), failure_stage_label(
+                s_cooperativeSummary.failureStage));
+            append_text(line, sizeof(line), "] ");
+            if (path[0] != '<') {
+                append_text(line, sizeof(line), path);
+                append_text(line, sizeof(line), ": ");
+            }
+            append_text(line, sizeof(line), "[");
+            append_text(line, sizeof(line), diagnostic_kind_label(
+                s_cooperativeSummary.diagnostics[i], s_cooperativeSummary.failureStage));
+            append_text(line, sizeof(line), "] ");
+            append_text(line, sizeof(line), s_cooperativeSummary.diagnostics[i].message);
+        }
+        output_line(line, 2);
+    }
+    s_workingSnapshot.errorCount = s_cooperativeSummary.diagnosticCount == 0
+        ? 1U : s_cooperativeSummary.diagnosticCount;
+    char message[sizeof(s_workingSnapshot.errorMessage)] = {};
+    compiler_failure_message(s_cooperativeSummary, message, sizeof(message));
+    failure(compiler_build_error_code(s_cooperativeSummary), message);
+}
+
+static int32_t GX_CALL cooperative_step_entry(void* context)
+{
+    const gx_build_request* request =
+        static_cast<const gx_build_request*>(context);
+    s_cooperativeStageTerminal = false;
+    switch (s_cooperativeStage) {
+    case CooperativeStage::Metadata: {
+        s_workingSnapshot.state = GX_BUILD_PREPARING;
+        output_line("Validating project metadata and source selection", 1);
+        uint32_t metadataError = GX_BUILD_ERROR_UNSUPPORTED_PROJECT;
+        if (!request ||
+            !equal_text(request->targetProfile, kBareMetalTarget) ||
+            !equal_text(request->buildSystem, kBareMetalBuildSystem) ||
+            !metadata_matches(request->projectRoot, request,
+                              &s_cooperativeSources,
+                              s_cooperativeArtifactPath, &metadataError)) {
+            failure(metadataError,
+                metadataError == GX_BUILD_ERROR_SOURCE_SELECTION
+                    ? "project source selection is empty or exceeds the bounded source-file limit"
+                    : "project metadata is not a supported bare-metal bootstrap target");
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        if (!sibling_sidecar(s_cooperativeArtifactPath, "gx4btmp.tmp",
+                             s_cooperativeTemporaryPath,
+                             sizeof(s_cooperativeTemporaryPath)) ||
+            !sibling_sidecar(s_cooperativeArtifactPath, "gx4bbak.bak",
+                             s_cooperativeBackupPath,
+                             sizeof(s_cooperativeBackupPath))) {
+            failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT,
+                    "temporary artifact paths exceed the VFS path limit");
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        for (uint32_t i = 0; i < s_cooperativeSources.count; ++i) {
+            if (!object_path_for_source(request->projectRoot,
+                    s_cooperativeSources.relatives[i],
+                    s_cooperativeSources.objectPaths[i],
+                    sizeof(s_cooperativeSources.objectPaths[i]))) {
+                failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT,
+                        "project object path exceeds the VFS path limit");
+                s_cooperativeStageTerminal = true;
+                return 1;
+            }
+        }
+        if (s_buildJobManager.set_source_membership(
+                s_activeBuildOwner, s_activeBuildHandle,
+                s_cooperativeSources) != GX_OK) {
+            failure(GX_BUILD_ERROR_SOURCE_SELECTION,
+                    "validated source membership could not be retained by the build job");
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        s_cooperativeStage = CooperativeStage::OutputDirectories;
+        return 1;
+    }
+    case CooperativeStage::OutputDirectories:
+        output_line("Preparing bounded Build output and object directories", 1);
+        if (!ensure_output_directory(request->projectRoot, request) ||
+            !recover_cooperative_sidecars()) {
+            failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT,
+                    "Build output or temporary artifact recovery failed");
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        s_cooperativeSourceIndex = 0;
+        s_cooperativeStage = CooperativeStage::SourceDirectories;
+        return 1;
+    case CooperativeStage::SourceDirectories:
+        if (s_cooperativeSourceIndex < s_cooperativeSources.count) {
+            const uint32_t index = s_cooperativeSourceIndex++;
+            if (!ensure_object_source_directory(request->projectRoot,
+                    s_cooperativeSources.relatives[index], request)) {
+                failure(GX_BUILD_ERROR_INVALID_PROJECT_ROOT,
+                        "project object-cache directory could not be prepared");
+                s_cooperativeStageTerminal = true;
+                return 1;
+            }
+            char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+            copy_text(line, sizeof(line), "Prepared object cache for ");
+            append_text(line, sizeof(line), s_cooperativeSources.relatives[index]);
+            output_line(line, 1);
+            return 1;
+        }
+        s_cooperativeStage = CooperativeStage::Compiler;
+        return 1;
+    case CooperativeStage::Compiler: {
+        s_workingSnapshot.state = GX_BUILD_RUNNING;
+        output_line("Running bounded compiler pipeline; this compiler stage is not preemptible", 1);
+        const char* sourcePaths[kMaxProjectSources] = {};
+        const char* sourceIdentityPaths[kMaxProjectSources] = {};
+        const char* objectPaths[kMaxProjectSources] = {};
+        for (uint32_t i = 0; i < s_cooperativeSources.count; ++i) {
+            sourcePaths[i] = s_cooperativeSources.paths[i];
+            sourceIdentityPaths[i] = s_cooperativeSources.relatives[i];
+            objectPaths[i] = s_cooperativeSources.objectPaths[i];
+        }
+        s_cooperativeSummary = {};
+        const bool compiled = compile_project_incremental(
+            sourcePaths, sourceIdentityPaths, objectPaths,
+            s_cooperativeSources.count, s_cooperativeTemporaryPath,
+            &s_cooperativeSummary);
+        report_incremental_compile_result(compiled);
+        if (!compiled) {
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        s_cooperativeStage = CooperativeStage::ArtifactValidation;
+        return 1;
+    }
+    case CooperativeStage::ArtifactValidation: {
+        s_workingSnapshot.state = GX_BUILD_VALIDATING_ARTIFACT;
+        output_line("Validating the temporary NativeElf artifact", 1);
+        vfs::FileInfo info = {};
+        const bool found = vfs::stat(s_cooperativeTemporaryPath, &info) == vfs::VFS_OK &&
+            info.type == vfs::FILE_TYPE_REGULAR && info.size <= sizeof(s_artifact);
+        const uint32_t bytes = found ? static_cast<uint32_t>(info.size) : 0U;
+        const int32_t readBytes = found
+            ? (bytes == 0 ? 0 : vfs::read_file(s_cooperativeTemporaryPath,
+                                               s_artifact, bytes)) : -1;
+        native_elf::NativeElfValidationResult validation = {};
+        if (!found || readBytes != static_cast<int32_t>(bytes) ||
+            !native_elf::validate_native_elf(s_artifact, bytes,
+                native_elf::default_validation_policy(), &validation)) {
+            s_workingSnapshot.errorCount = 1;
+            failure(readBytes != static_cast<int32_t>(bytes)
+                ? GX_BUILD_ERROR_ARTIFACT_MISSING
+                : GX_BUILD_ERROR_ARTIFACT_INVALID,
+                "produced artifact failed NativeElf validation");
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        s_cooperativeArtifactBytes = bytes;
+        s_cooperativeEntryPoint = static_cast<uint32_t>(validation.entryPoint);
+        char line[GX_BUILD_MAX_OUTPUT_LINE_BYTES] = {};
+        copy_text(line, sizeof(line), "NativeElf validation PASS | bytes=");
+        append_dec(line, sizeof(line), bytes);
+        output_line(line, 1);
+        s_cooperativeStage = CooperativeStage::Publication;
+        return 1;
+    }
+    case CooperativeStage::Publication: {
+        if (s_buildJobManager.claim_finalization(
+                s_activeBuildOwner, s_activeBuildHandle) != GX_OK) {
+            cancel_cooperative_snapshot(
+                "build cancellation was accepted before artifact publication");
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        output_line("Publishing the fully validated artifact", 1);
+        const bool hadPrevious = vfs::exists(s_cooperativeArtifactPath);
+        if (hadPrevious &&
+            vfs::rename(s_cooperativeArtifactPath,
+                        s_cooperativeBackupPath) != vfs::VFS_OK) {
+            failure(GX_BUILD_ERROR_COMPILER_ARTIFACT_PUBLICATION,
+                    "previous artifact could not be retained for safe publication");
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        if (vfs::rename(s_cooperativeTemporaryPath,
+                        s_cooperativeArtifactPath) != vfs::VFS_OK) {
+            if (hadPrevious && vfs::rename(s_cooperativeBackupPath,
+                        s_cooperativeArtifactPath) != vfs::VFS_OK) {
+                failure(GX_BUILD_ERROR_COMPILER_ARTIFACT_PUBLICATION,
+                        "artifact publication failed and prior artifact recovery failed");
+            } else {
+                failure(GX_BUILD_ERROR_COMPILER_ARTIFACT_PUBLICATION,
+                        "validated temporary artifact could not be published");
+            }
+            s_cooperativeStageTerminal = true;
+            return 1;
+        }
+        if (hadPrevious &&
+            vfs::unlink(s_cooperativeBackupPath) != vfs::VFS_OK) {
+            // The backup path is fixed and is recovered or removed before the
+            // next Build; it cannot accumulate with repeated requests.
+            output_line("Prior artifact backup cleanup is deferred", 2);
+        }
+        s_workingSnapshot.state = GX_BUILD_SUCCEEDED;
+        s_workingSnapshot.processExitCode = 0;
+        s_workingSnapshot.artifactSize = s_cooperativeArtifactBytes;
+        s_workingSnapshot.artifactValid = 1;
+        s_workingSnapshot.artifactEntryPoint = s_cooperativeEntryPoint;
+        copy_text(s_workingSnapshot.artifactPath,
+                  sizeof(s_workingSnapshot.artifactPath),
+                  request->expectedArtifact);
+        copy_text(s_workingSnapshot.artifactArchitecture,
+                  sizeof(s_workingSnapshot.artifactArchitecture), kArchitecture);
+        artifact_sha256(s_artifact, s_cooperativeArtifactBytes,
+                        s_workingSnapshot.artifactSha256);
+        s_cooperativeStageTerminal = true;
+        return 1;
+    }
+    case CooperativeStage::Idle:
+        failure(GX_BUILD_ERROR_INTERNAL,
+                "cooperative Build stage was not initialized");
+        s_cooperativeStageTerminal = true;
+        return 1;
+    }
+    failure(GX_BUILD_ERROR_INTERNAL, "unknown cooperative Build stage");
+    s_cooperativeStageTerminal = true;
+    return 1;
+}
+
+static void cleanup_cooperative_temporary()
+{
+    if (s_cooperativeTemporaryPath[0] != '\0' &&
+        vfs::exists(s_cooperativeTemporaryPath))
+        (void)vfs::unlink(s_cooperativeTemporaryPath);
+}
+
+static gx_result advance_cooperative_stage(uint64_t ownerIdentity,
+                                           gx_build_handle handle)
+{
+    if (__atomic_test_and_set(&s_cooperativePumpLock, __ATOMIC_ACQUIRE))
+        return GX_ERROR_BUSY;
+    if (s_cooperativePumpActive || s_activeBuildHandle != handle ||
+        s_activeBuildOwner != ownerIdentity || handle == 0) {
+        __atomic_clear(&s_cooperativePumpLock, __ATOMIC_RELEASE);
+        return GX_ERROR_BUSY;
+    }
+    const gx_build_request* request = nullptr;
+    gx_build_snapshot startingSnapshot = {};
+    bool cancelRequested = false;
+    const gx_result claimed = s_buildJobManager.begin_cooperative_step(
+        ownerIdentity, handle, &request, &startingSnapshot, &cancelRequested);
+    if (claimed != GX_OK) {
+        __atomic_clear(&s_cooperativePumpLock, __ATOMIC_RELEASE);
+        return claimed;
+    }
+
+    s_cooperativePumpActive = true;
+    s_cooperativeRequest = request;
+    s_workingSnapshot = startingSnapshot;
+    s_cooperativeStageTerminal = false;
+    if (cancelRequested) {
+        cancel_cooperative_snapshot(
+            "build cancelled at the next cooperative stage boundary");
+        s_cooperativeStageTerminal = true;
+    } else {
+        native_elf::NativeElfTrampolineResult trampoline = {};
+        const bool invoked = native_elf::invoke_native_entry_on_stack(
+            reinterpret_cast<uint64_t>(&cooperative_step_entry),
+            const_cast<gx_build_request*>(request),
+            reinterpret_cast<uint64_t>(s_buildServiceStack +
+                                       sizeof(s_buildServiceStack)),
+            &trampoline);
+        if (!invoked) {
+            failure(GX_BUILD_ERROR_COMPILER_INTERNAL,
+                    "cooperative compiler service stack invocation failed");
+            s_cooperativeStageTerminal = true;
+        }
+    }
+
+    bool cancelled = false;
+    const gx_result committed = s_buildJobManager.finish_cooperative_step(
+        ownerIdentity, handle, &s_workingSnapshot,
+        s_cooperativeStageTerminal, &cancelled);
+    if (cancelled || s_workingSnapshot.state == GX_BUILD_CANCELLED ||
+        (s_cooperativeStageTerminal &&
+         s_workingSnapshot.state != GX_BUILD_SUCCEEDED))
+        cleanup_cooperative_temporary();
+    s_cooperativePumpActive = false;
+    if (committed == GX_OK &&
+        (s_cooperativeStageTerminal || cancelled))
+        clear_cooperative_context();
+    __atomic_clear(&s_cooperativePumpLock, __ATOMIC_RELEASE);
+    if (committed != GX_OK) return committed;
+    return GX_OK;
+}
+
+static gx_result advance_active_cooperative_stage()
+{
+    if (s_activeBuildHandle == 0 || s_activeBuildOwner == 0 ||
+        s_cooperativeStage == CooperativeStage::Idle)
+        return GX_ERROR_INVALID_ARGUMENT;
+    return advance_cooperative_stage(s_activeBuildOwner,
+                                     s_activeBuildHandle);
+}
+
 static int32_t GX_CALL build_service_entry(void* context)
 {
     run_build_core(static_cast<const gx_build_request*>(context));
@@ -1102,6 +1536,56 @@ gx_result start_owned(const gx_build_request* request, uint64_t ownerIdentity,
     return completed;
 }
 
+gx_result request_owned(const gx_build_request* request,
+                        uint64_t ownerIdentity,
+                        gx_build_handle* outHandle)
+{
+    if (!outHandle) return GX_ERROR_INVALID_ARGUMENT;
+    *outHandle = 0;
+    if (s_cooperativeStage != CooperativeStage::Idle ||
+        s_activeBuildHandle != 0) return GX_ERROR_BUSY;
+    const gx_result admitted = s_buildJobManager.begin_cooperative_job(
+        ownerIdentity, request, outHandle);
+    if (admitted != GX_OK) return admitted;
+    s_activeBuildHandle = *outHandle;
+    s_activeBuildOwner = ownerIdentity;
+    s_cooperativeStage = CooperativeStage::Metadata;
+    s_cooperativeSourceIndex = 0;
+    s_cooperativeArtifactBytes = 0;
+    s_cooperativeEntryPoint = 0;
+    s_cooperativeSources = {};
+    s_cooperativeArtifactPath[0] = '\0';
+    s_cooperativeTemporaryPath[0] = '\0';
+    s_cooperativeBackupPath[0] = '\0';
+    s_cooperativeSummary = {};
+    s_cooperativeRequest = nullptr;
+    clear_snapshot(&s_workingSnapshot, *outHandle);
+    s_workingSnapshot.state = GX_BUILD_PREPARING;
+    return GX_OK;
+}
+
+gx_result cancel_owned(uint64_t ownerIdentity, gx_build_handle handle)
+{
+    const gx_result result = s_buildJobManager.request_cancel(ownerIdentity,
+                                                               handle);
+    if (result != GX_OK) return result;
+    gx_build_snapshot snapshot = {};
+    if (s_buildJobManager.poll(ownerIdentity, handle, &snapshot) == GX_OK &&
+        snapshot.state == GX_BUILD_CANCELLED &&
+        s_activeBuildHandle == handle && s_activeBuildOwner == ownerIdentity) {
+        cleanup_cooperative_temporary();
+        clear_cooperative_context();
+    }
+    return GX_OK;
+}
+
+gx_result pump_cooperative_step()
+{
+    if (native_elf::NativeElfRunService::native_elf_scheduler_in_target())
+        return GX_ERROR_BUSY;
+    return advance_active_cooperative_stage();
+}
+
 gx_result start(const gx_build_request* request, gx_build_handle* outHandle)
 {
     return start_owned(request, BuildJobManager::kKernelOwnerIdentity,
@@ -1119,6 +1603,12 @@ gx_result pump_cooperative_test_step()
 gx_result poll_owned(uint64_t ownerIdentity, gx_build_handle handle,
                      gx_build_snapshot* outSnapshot)
 {
+    if (!outSnapshot) return GX_ERROR_INVALID_ARGUMENT;
+    if (handle != 0 && handle == s_activeBuildHandle &&
+        ownerIdentity == s_activeBuildOwner &&
+        s_cooperativeStage != CooperativeStage::Idle) {
+        (void)advance_cooperative_stage(ownerIdentity, handle);
+    }
     return s_buildJobManager.poll(ownerIdentity, handle, outSnapshot);
 }
 
@@ -1130,7 +1620,10 @@ gx_result poll(gx_build_handle handle, gx_build_snapshot* outSnapshot)
 
 gx_result release_owned(uint64_t ownerIdentity, gx_build_handle handle)
 {
-    return s_buildJobManager.release(ownerIdentity, handle);
+    const gx_result released = s_buildJobManager.release(ownerIdentity, handle);
+    if (released == GX_OK && handle == s_activeBuildHandle &&
+        ownerIdentity == s_activeBuildOwner) clear_cooperative_context();
+    return released;
 }
 
 gx_result release(gx_build_handle handle)
@@ -1140,12 +1633,22 @@ gx_result release(gx_build_handle handle)
 
 gx_result owner_closed(uint64_t ownerIdentity)
 {
-    return s_buildJobManager.owner_closed(ownerIdentity);
+    const gx_result closed = s_buildJobManager.owner_closed(ownerIdentity);
+    if (closed == GX_OK && ownerIdentity == s_activeBuildOwner) {
+        cleanup_cooperative_temporary();
+        clear_cooperative_context();
+    }
+    return closed;
 }
 
 gx_result shutdown()
 {
-    return s_buildJobManager.shutdown();
+    const gx_result stopped = s_buildJobManager.shutdown();
+    if (stopped == GX_OK) {
+        cleanup_cooperative_temporary();
+        clear_cooperative_context();
+    }
+    return stopped;
 }
 
 } // namespace BareMetalBuildService

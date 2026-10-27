@@ -21,6 +21,13 @@ gx_result release(gx_build_handle handle);
 // owner-aware calls keep a guessed public handle from crossing app lifetimes.
 gx_result start_owned(const gx_build_request* request, uint64_t ownerIdentity,
                       gx_build_handle* outHandle);
+// NativeElf Build callbacks use the queued path. One stage is advanced by
+// each poll or ordinary desktop scheduling boundary.
+gx_result request_owned(const gx_build_request* request,
+                        uint64_t ownerIdentity,
+                        gx_build_handle* outHandle);
+gx_result cancel_owned(uint64_t ownerIdentity, gx_build_handle handle);
+gx_result pump_cooperative_step();
 // Advances at most one internal qualification step. This is not a build
 // callback and cannot execute the compiler or publish an artifact.
 gx_result pump_cooperative_test_step();

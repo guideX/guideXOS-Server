@@ -12,6 +12,8 @@ using kernel::compiler::BuildJobManager::SourceSelection;
 
 static_assert(GX_BUILD_ERROR_COMPILER_FAILED == 18, "existing build error codes remain stable");
 static_assert(GX_BUILD_ERROR_COMPILER_LEXICAL == 22, "new compiler diagnostic codes append to v1");
+static_assert(GX_BUILD_ERROR_COMPILER_INTERNAL == 33, "COMP4A diagnostic code remains stable");
+static_assert(GX_BUILD_ERROR_BUILD_CANCELLED == 34, "Build cancellation code appends to v1");
 
 namespace {
 
@@ -71,6 +73,24 @@ static gx_build_snapshot failed_result(gx_build_handle handle)
     snapshot.warningCount = GX_BUILD_COUNT_UNAVAILABLE;
     snapshot.errorCount = 1U;
     std::strcpy(snapshot.errorMessage, "hosted lifecycle test failure result");
+    snapshot.outputCount = 1U;
+    snapshot.output[0].stream = 2U;
+    std::strcpy(snapshot.output[0].text, "hosted compiler diagnostic");
+    return snapshot;
+}
+
+static gx_build_snapshot succeeded_result(gx_build_handle handle)
+{
+    gx_build_snapshot snapshot = {};
+    snapshot.size = sizeof(snapshot);
+    snapshot.version = GX_BUILD_API_VERSION;
+    snapshot.handle = handle;
+    snapshot.state = GX_BUILD_SUCCEEDED;
+    snapshot.warningCount = GX_BUILD_COUNT_UNAVAILABLE;
+    snapshot.artifactValid = 1U;
+    snapshot.artifactSize = 128U;
+    snapshot.artifactEntryPoint = 1U;
+    std::strcpy(snapshot.artifactPath, "build/bin/amd64/app.elf");
     return snapshot;
 }
 
@@ -336,6 +356,140 @@ static void test_capacity_generation_wrap_and_concurrent_poll()
     assert(second == 0U);
 }
 
+static void test_production_cooperative_lifecycle()
+{
+    const uint64_t owner = 0x5001U;
+    Manager manager;
+    RequestFixture fixture;
+    gx_build_handle handle = 0;
+    gx_build_handle competing = 0;
+    gx_build_snapshot snapshot = {};
+    assert(manager.begin_cooperative_job(owner, &fixture.request, &handle) == GX_OK);
+    assert(manager.begin_cooperative_job(owner + 1U, &fixture.request,
+                                         &competing) == GX_ERROR_BUSY);
+    assert(competing == 0U);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_PREPARING && snapshot.handle == handle);
+
+    const gx_build_request* retained = nullptr;
+    bool cancelRequested = false;
+    assert(manager.begin_cooperative_step(owner, handle, &retained, &snapshot,
+                                          &cancelRequested) == GX_OK);
+    assert(retained && !cancelRequested && snapshot.state == GX_BUILD_RUNNING);
+    assert(manager.set_source_membership(owner, handle, valid_sources()) == GX_OK);
+    std::strcpy(snapshot.output[0].text, "Compiling source module");
+    snapshot.output[0].stream = 1U;
+    snapshot.outputCount = 1U;
+    bool cancelled = false;
+    assert(manager.finish_cooperative_step(owner, handle, &snapshot, false,
+                                           &cancelled) == GX_OK);
+    assert(!cancelled);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_RUNNING && snapshot.outputCount == 1U);
+
+    // Cancellation during a stage is observed when the step returns. The
+    // request is idempotent and cannot target a later generation.
+    assert(manager.begin_cooperative_step(owner, handle, &retained, &snapshot,
+                                          &cancelRequested) == GX_OK);
+    assert(!cancelRequested);
+    assert(manager.request_cancel(owner + 1U, handle) == GX_ERROR_PERMISSION_DENIED);
+    assert(manager.request_cancel(owner, handle) == GX_OK);
+    assert(manager.request_cancel(owner, handle) == GX_OK);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.outputCount == 2U &&
+           std::strstr(snapshot.output[1].text, "Cancellation requested") != nullptr);
+    snapshot.state = GX_BUILD_RUNNING;
+    assert(manager.finish_cooperative_step(owner, handle, &snapshot, false,
+                                           &cancelled) == GX_OK);
+    assert(cancelled);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_CANCELLED &&
+           snapshot.errorCode == GX_BUILD_ERROR_BUILD_CANCELLED &&
+           snapshot.artifactValid == 0U && snapshot.artifactSize == 0U);
+    assert(manager.request_cancel(owner, handle) == GX_OK);
+    const gx_build_handle cancelledHandle = handle;
+    assert(manager.release(owner, handle) == GX_OK);
+    assert(manager.request_cancel(owner, cancelledHandle) == GX_ERROR_INVALID_ARGUMENT);
+
+    // An accepted cancellation during a failing stage wins at the safe
+    // boundary; the compiler's output remains available in the output ring.
+    assert(manager.begin_cooperative_job(owner, &fixture.request, &handle) == GX_OK);
+    assert(manager.begin_cooperative_step(owner, handle, &retained, &snapshot,
+                                          &cancelRequested) == GX_OK);
+    assert(manager.set_source_membership(owner, handle, valid_sources()) == GX_OK);
+    assert(manager.request_cancel(owner, handle) == GX_OK);
+    gx_build_snapshot failure = failed_result(handle);
+    assert(manager.finish_cooperative_step(owner, handle, &failure, true,
+                                           &cancelled) == GX_OK);
+    assert(cancelled);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_CANCELLED &&
+           snapshot.errorCode == GX_BUILD_ERROR_BUILD_CANCELLED &&
+           std::strstr(snapshot.errorMessage, "cancelled") != nullptr &&
+           snapshot.outputCount == 2U &&
+           std::strstr(snapshot.output[0].text,
+                       "hosted compiler diagnostic") != nullptr);
+    assert(manager.release(owner, handle) == GX_OK);
+
+    // A failure committed first wins over a later cancel and keeps its diagnostic.
+    assert(manager.begin_cooperative_job(owner, &fixture.request, &handle) == GX_OK);
+    assert(manager.begin_cooperative_step(owner, handle, &retained, &snapshot,
+                                          &cancelRequested) == GX_OK);
+    assert(manager.set_source_membership(owner, handle, valid_sources()) == GX_OK);
+    failure = failed_result(handle);
+    assert(manager.finish_cooperative_step(owner, handle, &failure, true,
+                                           &cancelled) == GX_OK);
+    assert(!cancelled);
+    assert(manager.request_cancel(owner, handle) == GX_ERROR_BUSY);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_FAILED && snapshot.errorCount == 1U &&
+           std::strstr(snapshot.errorMessage, "hosted lifecycle") != nullptr);
+    assert(manager.release(owner, handle) == GX_OK);
+
+    // A cancel accepted before the finalization claim wins without publishing.
+    assert(manager.begin_cooperative_job(owner, &fixture.request, &handle) == GX_OK);
+    assert(manager.request_cancel(owner, handle) == GX_OK);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_CANCELLED && snapshot.artifactValid == 0U);
+    assert(manager.release(owner, handle) == GX_OK);
+
+    // Validation and finalization are distinct states. Once publication is
+    // claimed, cancellation is rejected and the successful generation owns
+    // the resulting artifact identity.
+    assert(manager.begin_cooperative_job(owner, &fixture.request, &handle) == GX_OK);
+    assert(manager.begin_cooperative_step(owner, handle, &retained, &snapshot,
+                                          &cancelRequested) == GX_OK);
+    assert(manager.set_source_membership(owner, handle, valid_sources()) == GX_OK);
+    snapshot.state = GX_BUILD_VALIDATING_ARTIFACT;
+    assert(manager.finish_cooperative_step(owner, handle, &snapshot, false,
+                                           &cancelled) == GX_OK);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_VALIDATING_ARTIFACT);
+    assert(manager.begin_cooperative_step(owner, handle, &retained, &snapshot,
+                                          &cancelRequested) == GX_OK);
+    assert(manager.claim_finalization(owner, handle) == GX_OK);
+    assert(manager.request_cancel(owner, handle) == GX_ERROR_BUSY);
+    gx_build_snapshot success = succeeded_result(handle);
+    assert(manager.finish_cooperative_step(owner, handle, &success, true,
+                                           &cancelled) == GX_OK);
+    assert(!cancelled);
+    assert(manager.poll(owner, handle, &snapshot) == GX_OK);
+    assert(snapshot.state == GX_BUILD_SUCCEEDED && snapshot.artifactValid == 1U);
+    assert(manager.release(owner, handle) == GX_OK);
+
+    // Owner closure cancels an in-flight stage and releases its fixed slot
+    // only after the active step reaches its safe return boundary.
+    assert(manager.begin_cooperative_job(owner, &fixture.request, &handle) == GX_OK);
+    assert(manager.begin_cooperative_step(owner, handle, &retained, &snapshot,
+                                          &cancelRequested) == GX_OK);
+    assert(manager.owner_closed(owner) == GX_ERROR_BUSY);
+    snapshot.state = GX_BUILD_RUNNING;
+    assert(manager.finish_cooperative_step(owner, handle, &snapshot, false,
+                                           &cancelled) == GX_OK);
+    assert(cancelled);
+    assert(manager.poll(owner, handle, &snapshot) == GX_ERROR_INVALID_ARGUMENT);
+}
+
 }
 
 int main()
@@ -344,6 +498,7 @@ int main()
     test_test_continuation_and_queued_cancel();
     test_owner_close_and_shutdown_barrier();
     test_capacity_generation_wrap_and_concurrent_poll();
+    test_production_cooperative_lifecycle();
     std::printf("Kernel build-job manager tests PASS | Manager bytes=%u | capacity=1\n",
                 static_cast<unsigned>(sizeof(Manager)));
     return 0;
