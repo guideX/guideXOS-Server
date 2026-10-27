@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS94</title></head>
+<body>
+<h1>Navigator JavaScript JS94</h1>
+<pre id="result">JS94:pending</pre>
+<button id="map-event-a" type="button">Run JS94 map event</button>
+<button id="map-event-b" type="button">Nested JS94 map event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions++;
+  if (!condition) failures++;
+}
+
+var source = [2, 4, 6];
+var calls = 0;
+var callbackArgs = true;
+var mapped = source.map(function(value, index, array) {
+  calls++;
+  callbackArgs = callbackArgs && array === source && index === calls - 1;
+  return value * 3;
+});
+verify(calls === 3 && callbackArgs && mapped.length === 3 &&
+  mapped[0] === 6 && mapped[1] === 12 && mapped[2] === 18);
+verify(mapped !== source && source[0] === 2 && source[1] === 4 && source[2] === 6);
+
+var empty = [];
+var emptyCalls = 0;
+var emptyResult = empty.map(function() { emptyCalls++; return 1; });
+verify(emptyResult !== empty && emptyResult.length === 0 && emptyCalls === 0);
+
+var context = {factor: 4};
+var thisArgOk = false;
+var one = [5].map(function(value, index, array) {
+  thisArgOk = this === context && value === 5 && index === 0 && array.length === 1;
+  return value * this.factor;
+}, context);
+verify(thisArgOk && one[0] === 20);
+
+var objectValue = {tag: 7};
+var nested = [8, 9];
+var references = [objectValue, nested];
+var referenceResult = references.map(function(value) { return value; });
+verify(referenceResult !== references && referenceResult[0] === objectValue &&
+  referenceResult[1] === nested);
+
+var words = ["a", "b"].map(function(value, index) { return value + index; });
+verify(words[0] === "a0" && words[1] === "b1");
+
+var sparse = [, 7, undefined];
+var sparseCalls = 0;
+var sparseResult = sparse.map(function(value, index) {
+  sparseCalls++;
+  if (index === 2) return value;
+  return value * 2;
+});
+verify(sparseResult.length === 3 && sparseCalls === 2 &&
+  !sparseResult.hasOwnProperty("0") && sparseResult[1] === 14 &&
+  sparseResult.hasOwnProperty("2") && sparseResult[2] === undefined);
+
+var replaced = [1, 2, 3];
+var replaceResult = replaced.map(function(value, index, array) {
+  if (index === 0) array[1] = 9;
+  return value * 10;
+});
+verify(replaceResult[1] === 90);
+
+var filled = [1, , 3];
+var fillResult = filled.map(function(value, index, array) {
+  if (index === 0) array[1] = 2;
+  return value * 5;
+});
+verify(fillResult[1] === 10 && fillResult.length === 3);
+
+var deleted = [1, 2, 3];
+var deleteIndices = "";
+var deleteResult = deleted.map(function(value, index, array) {
+  deleteIndices = deleteIndices + index;
+  if (index === 0) {
+    array.length = 1;
+    array.length = 3;
+    array[2] = 30;
+  }
+  return value;
+});
+verify(deleteIndices === "02" && deleteResult.length === 3 &&
+  !deleteResult.hasOwnProperty("1") && deleteResult[2] === 30);
+
+var appended = [4, 5];
+var appendResult = appended.map(function(value, index, array) {
+  if (index === 0) array[2] = 6;
+  return value;
+});
+verify(appendResult.length === 2 && !appendResult.hasOwnProperty("2") &&
+  appended[2] === 6);
+
+var shrunk = [7, 8, 9];
+var shrinkCalls = 0;
+var shrinkResult = shrunk.map(function(value, index, array) {
+  shrinkCalls++;
+  if (index === 0) array.length = 1;
+  return value;
+});
+verify(shrinkCalls === 1 && shrinkResult.length === 3 &&
+  !shrinkResult.hasOwnProperty("1") && !shrinkResult.hasOwnProperty("2"));
+
+var other = [2, 3];
+var another = [1];
+var otherResult = another.map(function(value) {
+  other[1] = 12;
+  return value + other[1];
+});
+verify(otherResult[0] === 13 && other[1] === 12);
+
+var innerA = [1, 2];
+var innerB = [3];
+var nestedResult = [innerA, innerB].map(function(items) {
+  return items.map(function(value) { return value * 2; });
+});
+verify(nestedResult[0] !== innerA && nestedResult[1] !== innerB &&
+  nestedResult[0][0] === 2 && nestedResult[0][1] === 4 &&
+  nestedResult[1][0] === 6);
+
+var eventA = document.getElementById("map-event-a");
+var eventB = document.getElementById("map-event-b");
+var nestedEventOk = false;
+var outerEventOk = false;
+eventB.addEventListener("click", function(event) {
+  var values = [2, 3].map(function(value) { return value * 2; });
+  nestedEventOk = event.target === eventB && event.currentTarget === eventB &&
+    values[0] === 4 && values[1] === 6;
+});
+eventA.addEventListener("click", function(event) {
+  var values = [4, 5].map(function(value, index) {
+    if (index === 0) eventB.click();
+    return value + 1;
+  });
+  outerEventOk = event.target === eventA && event.currentTarget === eventA &&
+    values[0] === 5 && values[1] === 6 && nestedEventOk;
+  document.getElementById("result").textContent =
+    "JS94:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+
+var marker = "JS94:assertions=" + assertions + ":failures=" + failures +
+  ":basic=" + (calls === 3 && mapped[0] === 6 && mapped[2] === 18 &&
+    thisArgOk && referenceResult[0] === objectValue && words[1] === "b1") +
+  ":sparse=" + (sparseCalls === 2 && sparseResult.length === 3 &&
+    !sparseResult.hasOwnProperty("0") && sparseResult.hasOwnProperty("2")) +
+  ":mutation=" + (replaceResult[1] === 90 && fillResult[1] === 10 &&
+    deleteIndices === "02" && appendResult.length === 2 && shrinkCalls === 1) +
+  ":nested=" + (nestedResult[0][1] === 4 && nestedResult[1][0] === 6) +
+  ":events=ready";
+document.getElementById("result").textContent = marker;
+</script>
+</body>
+</html>

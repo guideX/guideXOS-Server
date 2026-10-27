@@ -380,6 +380,7 @@ private:
         ArrayPush,
         ArrayPop,
         ArrayForEach,
+        ArrayMap,
         ArrayIteratorCreate,
         ArrayIteratorCreateKeys,
         ArrayIteratorCreateEntries,

@@ -1434,6 +1434,111 @@ private:
         return false;
     }
 
+    bool traverseArray(const Value& receiver, const Value& callback,
+        const Value& thisArgument, SourceLocation callSite, bool map,
+        Value& result)
+    {
+        const RuntimeObjectId arrayId = receiver.isObject()
+            ? receiver.objectId() : kInvalidRuntimeObjectId;
+        const RuntimeContext::RuntimeObject* array =
+            context_.objectAt(arrayId);
+        if (array == nullptr || !array->array) {
+            fail(RuntimeErrorCode::InvalidReceiver, callSite);
+            return false;
+        }
+        if (!callback.isFunction()) {
+            fail(RuntimeErrorCode::NotCallable, callSite);
+            return false;
+        }
+        const RuntimeFunctionId callbackId = callback.functionId();
+        if (context_.functionAt(callbackId) == nullptr) {
+            fail(RuntimeErrorCode::InvalidFunction, callSite);
+            return false;
+        }
+
+        // Keep only the stable object ID and captured length across callbacks:
+        // reentrant code may grow objects_ and invalidate RuntimeObject pointers.
+        const std::size_t initialLength = array->arrayLength;
+        if (initialLength > maximumSupportedArrayLength(context_.limits_)) {
+            fail(RuntimeErrorCode::InvalidAstState, callSite);
+            return false;
+        }
+
+        std::vector<Value> callbackArguments;
+        std::vector<RuntimeContext::RuntimeArrayElement> mappedElements;
+        bool callbackArgumentsReady = false;
+        for (std::size_t index = 0u; index < initialLength; ++index) {
+            bool present = false;
+            if (!hasArrayIndex(arrayId, index, present, callSite)) return false;
+            if (!present) continue;
+
+            Value value = Value::undefined();
+            RuntimeErrorCode lookupError = RuntimeErrorCode::None;
+            if (!context_.readArrayIndex(arrayId, index, value, lookupError,
+                    callSite)) {
+                fail(lookupError, callSite);
+                return false;
+            }
+            if (!callbackArgumentsReady) {
+                try {
+                    callbackArguments.resize(3u, Value::undefined());
+                } catch (const std::bad_alloc&) {
+                    fail(RuntimeErrorCode::AllocationFailure, callSite);
+                    return false;
+                }
+                callbackArgumentsReady = true;
+            }
+            callbackArguments[0] = value;
+            callbackArguments[1] = Value::number(
+                static_cast<double>(index));
+            callbackArguments[2] = receiver;
+            Value callbackResult = Value::undefined();
+            if (!invokeFunction(callbackId, callbackArguments, callSite,
+                    callbackResult, thisArgument)) return false;
+
+            if (map) {
+                try {
+                    mappedElements.emplace_back(index, callbackResult);
+                } catch (const std::bad_alloc&) {
+                    fail(RuntimeErrorCode::AllocationFailure, callSite);
+                    return false;
+                }
+            }
+        }
+
+        if (!map) {
+            result = Value::undefined();
+            return true;
+        }
+
+        // Compact transient scratch storage before it becomes persistent Array
+        // storage. Sparse results therefore retain only their occupied slots.
+        if (mappedElements.capacity() != mappedElements.size()) {
+            std::vector<RuntimeContext::RuntimeArrayElement> compactElements;
+            try {
+                compactElements.reserve(mappedElements.size());
+                for (const RuntimeContext::RuntimeArrayElement& element :
+                    mappedElements) {
+                    compactElements.push_back(element);
+                }
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                return false;
+            }
+            mappedElements.swap(compactElements);
+        }
+
+        RuntimeObjectId mappedArrayId = kInvalidRuntimeObjectId;
+        RuntimeErrorCode allocationError = RuntimeErrorCode::None;
+        if (!context_.createArray(initialLength, std::move(mappedElements),
+                mappedArrayId, allocationError)) {
+            fail(allocationError, callSite);
+            return false;
+        }
+        result = Value::object(mappedArrayId);
+        return true;
+    }
+
     bool createObjectKeys(RuntimeObjectId sourceId, SourceLocation callSite,
         Value& result)
     {
@@ -2024,76 +2129,13 @@ private:
             object->arrayLength = removedIndex;
             break;
         }
-        case RuntimeContext::NativeFunctionId::ArrayForEach: {
-            const RuntimeObjectId arrayId = receiver.isObject()
-                ? receiver.objectId() : kInvalidRuntimeObjectId;
-            const RuntimeContext::RuntimeObject* array =
-                context_.objectAt(arrayId);
-            if (array == nullptr || !array->array) {
-                fail(RuntimeErrorCode::InvalidReceiver, callSite);
-                succeeded = false;
-                break;
-            }
-            const Value callback = argumentOrUndefined(0u);
-            if (!callback.isFunction()) {
-                fail(RuntimeErrorCode::NotCallable, callSite);
-                succeeded = false;
-                break;
-            }
-            const RuntimeFunctionId callbackId = callback.functionId();
-            if (context_.functionAt(callbackId) == nullptr) {
-                fail(RuntimeErrorCode::InvalidFunction, callSite);
-                succeeded = false;
-                break;
-            }
-            const std::size_t initialLength = array->arrayLength;
-            if (initialLength > maximumSupportedArrayLength(
-                    context_.limits_)) {
-                fail(RuntimeErrorCode::InvalidAstState, callSite);
-                succeeded = false;
-                break;
-            }
-            const Value thisArgument = argumentOrUndefined(1u);
-            std::vector<Value> callbackArguments;
-            bool callbackArgumentsReady = false;
-            for (std::size_t index = 0u; index < initialLength; ++index) {
-                bool present = false;
-                if (!hasArrayIndex(arrayId, index, present, callSite)) {
-                    succeeded = false;
-                    break;
-                }
-                if (!present) continue;
-
-                Value value = Value::undefined();
-                RuntimeErrorCode lookupError = RuntimeErrorCode::None;
-                if (!context_.readArrayIndex(arrayId, index, value,
-                        lookupError, callSite)) {
-                    fail(lookupError, callSite);
-                    succeeded = false;
-                    break;
-                }
-                if (!callbackArgumentsReady) {
-                    try {
-                        callbackArguments.resize(3u, Value::undefined());
-                    } catch (const std::bad_alloc&) {
-                        fail(RuntimeErrorCode::AllocationFailure, callSite);
-                        succeeded = false;
-                        break;
-                    }
-                    callbackArgumentsReady = true;
-                }
-                callbackArguments[0] = value;
-                callbackArguments[1] = Value::number(
-                    static_cast<double>(index));
-                callbackArguments[2] = receiver;
-                Value ignoredCallbackResult = Value::undefined();
-                if (!invokeFunction(callbackId, callbackArguments, callSite,
-                        ignoredCallbackResult, thisArgument)) {
-                    succeeded = false;
-                    break;
-                }
-            }
-            if (succeeded) result = Value::undefined();
+        case RuntimeContext::NativeFunctionId::ArrayForEach:
+        case RuntimeContext::NativeFunctionId::ArrayMap: {
+            const bool map = function.nativeFunction ==
+                static_cast<std::uint8_t>(
+                    RuntimeContext::NativeFunctionId::ArrayMap);
+            succeeded = traverseArray(receiver, argumentOrUndefined(0u),
+                argumentOrUndefined(1u), callSite, map, result);
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayIteratorCreate:
@@ -4030,6 +4072,8 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
             NativeFunctionId::ObjectGetOwnPropertyDescriptor,
             objectGetOwnPropertyDescriptorFunction_, error) ||
         !install(arrayPrototype_, "forEach", NativeFunctionId::ArrayForEach,
+            error) ||
+        !install(arrayPrototype_, "map", NativeFunctionId::ArrayMap,
             error)) return false;
     const char eventName[] = "Event";
     // Event constants are optional only when an explicitly tiny caller limit

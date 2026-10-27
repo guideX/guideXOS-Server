@@ -12465,3 +12465,102 @@ Recommended JS94 direction: qualify bounded `Array.prototype.map()` as a
 separate phase, preserving holes and the initial-length boundary while
 measuring its result-Array capacity failures. Do not infer other callback
 methods from JS93.
+
+## JS94 — bounded `Array.prototype.map()`
+
+JS94 adds `Array.prototype.map(callback[, thisArg])` on the existing bounded
+Array prototype. It accepts genuine runtime Arrays, validates the callback
+before traversal (including for an empty source), invokes it with
+`(value, index, originalArray)`, forwards the explicit `thisArg`, and returns
+a distinct Array containing the callback results. Objects and nested Arrays
+returned by callbacks remain shallow references. The method is writable and
+uses the existing native function and callback frame paths.
+
+The implementation shares JS93's callback traversal, inherited-aware
+`HasProperty` check, indexed value lookup, captured source length, and callback
+invocation. It rechecks each current index immediately before reading it, so
+future replacements and filled holes are observed. Positions removed by
+supported length truncation are skipped, and source growth beyond the
+captured length is not visited. Existing `undefined` values are present
+properties and invoke the callback. An inherited numeric property is visited
+and its mapped value is
+stored as an own result property. Result holes preserve the source's skipped
+positions; the result keeps the captured logical length even if the source is
+shrunk during a callback.
+
+Mapped occupied slots are kept in temporary storage bounded by the captured
+maximum length. Only after all callbacks finish does the runtime create the
+result through the existing `createArray()` path. This keeps a partially
+initialized result unpublished and leaves no runtime object or Array slots
+behind when callback execution, destination allocation, or destination
+capacity checks fail. Callback side effects before a later failure are
+preserved. Sparse results are compacted before storage so holes consume no
+persistent Array-slot records. The method uses the existing limits: at most
+1,024 logical positions per Array, 1,024 occupied positions for this method,
+and the shared 4,096 total occupied Array-slot bound. A 1,025-position source
+is rejected by the existing `ArrayLimitExceeded` mechanism.
+
+Supported behavior includes nested `map()` calls, mutation of another Array,
+and nested Event callbacks through the existing host adapter. Exclusions are
+Array subclasses/species, generic array-like receivers, property deletion
+syntax, dynamic Array-capacity growth, and garbage collection. Arrays and
+callback-created runtime values continue to follow the existing retained
+until-reset lifetime model.
+
+The JS94 native lane checks callback arguments and `thisArg`, basic and
+shallow-reference results, explicit `undefined`, sparse and inherited
+indices, live source mutation, nested mapping, callback failure, unsupported
+receivers, Array-slot exhaustion, deterministic destination-allocation
+failure, and zero, one, 1,024, and rejected 1,025-position boundaries. The
+hosted JS94 fixture checks the common mapping, sparse, mutation, nested-call,
+and Event behavior.
+
+### JS94 qualification record
+
+The dedicated JS94 native lane passes **29/29 checks**, and JS93's focused
+`forEach()` lane passes **50/50**. The full JavaScript matrix passes
+**96/96 lanes and 17,003/17,003 reported assertions**: the accepted JS93
+baseline of 95 lanes and 16,974 assertions, plus the 29 JS94 assertions. The
+Array-related JS89, JS90, JS91, JS92, and JS93 lanes also pass at 466/466,
+544/544, 32/32, 229/229, and 50/50. JS89 and JS90's maximum-object property
+inventory expectations now include the one additional Array prototype
+property introduced by `map()`; their ordering and capacity behavior checks
+remain intact.
+
+JS94 passed strict C++17 compilation with
+`-Wall -Wextra -Werror -pedantic`. The MinGW x86_64 `-O2` static stack report
+measured 592 bytes for `traverseArray`, 736 bytes for `invokeNative`, 560
+bytes for `invokeFunction`, 176 bytes for `createArray`, and 176 bytes for
+`readArrayIndex`. The mapped values live in a temporary vector bounded by the
+captured 1,024-position maximum and are compacted before persistent storage.
+The callback-failure, injected allocation-failure, and capacity-exhaustion
+checks confirm that failed maps publish no destination Array and leave no
+destination object or Array-slot records behind. These hosted compiler stack
+figures do not establish a bare-metal stack guarantee.
+
+The production `build.bat` completed successfully. The newly built executable
+had SHA-256
+`48202A3F531FB48C6E1CFF68E6EE02F27BA1D825E8F0EDCB9C2B7A3B91A01BB6`, and
+the hosted server verified it ran that exact binary. The JS94 page reported
+**14/14 assertions with zero failures**; all three JS94 hosted aggregate
+checks passed, including sparse/live mutation behavior and nested Event
+callbacks.
+
+The full hosted aggregate reported **717/724 checks**. Its only failures are
+the same seven established CSS baseline checks recorded before JS94: phase
+3C baseline/clipping/hit-target/focus behavior, phase 3G positioned layout
+diagnostics, phase 6A nested scrolling, three phase 6B sticky/fixed-descendant
+checks, and phase 6C sticky/fixed/clipping/flex behavior. No hosted JavaScript
+check failed. The aggregate therefore remains `NAVIGATOR_SMOKE_RESULT: FAIL`
+for those existing CSS checks.
+
+The pre-qualification `guideXOSServer.exe` was **8,398,274 bytes** with
+SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. It was
+restored after the hosted run and its size and hash matched the original.
+All 42 generated Navigator fixture files also remained byte-identical
+(458,372 bytes total); the hosted smoke restored its `downloads` directory
+snapshot. Native JS94 evidence is under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js94-evidence\native-js94-20261026-213514-4fef1453785e498cb5084e280000805d\`;
+hosted output and logs are under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js94-hosted-preserve-20261026-213738\`.

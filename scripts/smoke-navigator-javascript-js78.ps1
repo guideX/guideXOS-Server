@@ -75,7 +75,8 @@ $stackDir = Join-Path $outputDir "stack-usage"
 New-Item -ItemType Directory -Path $stackDir | Out-Null
 foreach ($source in $sources) {
     $objectName = [System.IO.Path]::GetFileNameWithoutExtension($source) + ".o"
-    $stackOutput = & g++ -std=c++17 -Wall -Wextra -O2 -iquote . `
+    $stackOutput = & g++ -std=c++17 -Wall -Wextra -Wno-unused-parameter `
+        -Wno-missing-field-initializers -Wno-unused-function -O2 -iquote . `
         -fstack-usage -c $source -o (Join-Path $stackDir $objectName) 2>&1
     if ($LASTEXITCODE -ne 0) {
         $stackOutput | ForEach-Object { Write-Output $_ }
