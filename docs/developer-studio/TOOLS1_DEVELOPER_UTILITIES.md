@@ -1,141 +1,106 @@
-# TOOLS1 Developer Utilities
+# TOOLS1R Developer Utilities
 
 ## Result
 
-**Outcome C — Architectural blocker.** The Tools checkout contains the
-Developer Studio application package and its prebuilt Native ELF files, but
-not the editable Developer Studio application sources. The source checkout is
-a separate repository on `main`, while this task is constrained to the
-`DEVELOPER_STUDIO_TOOLS` branch. The missing Tools menu/registration and
-Find-in-Files error reporting require changes to the application UI and search
-service. Making those changes here would require copying or otherwise changing
-code outside the assigned checkout, so TOOLS1 is not marked verified.
+**Outcome B — `TOOLS1R_HOSTED_READY`.** The Tools source checkout is now
+independent, and the existing Find in Files service is exposed from a visible
+Tools menu and its existing `Ctrl+Shift+F` shortcut. Hosted model regressions
+and both architecture staging builds pass. Live hosted UI interaction and QAC
+guest acceptance remain pending because the required Server executable and
+QAC CLI are unavailable in this environment. The production Server package was
+not modified.
 
-The audit also found that a substantial Find in Files implementation is
-already present in the shipped AMD64 ELF and in the separate source checkout.
-It was not recreated.
+## Repository ownership
 
-## Repository and ownership audit
+| Repository | Role | Starting state | TOOLS1R state |
+| --- | --- | --- | --- |
+| `D:\dev\guideXOS_DeveloperStudio_Tools` | Server integration and package owner | `DEVELOPER_STUDIO_TOOLS`, `3c28a1c013fac2b02dc7090406644a5dc154a2ea`; existing audit commit was one commit ahead of `origin/DEVELOPER_STUDIO_TOOLS` | Same branch; only this audit document is changed here before its local commit. No ELF was replaced. |
+| `D:\dev\guideXOS_Developer_Studio` | Editable application source repository, original checkout | `main`, `058c83fe1ae270a103eadc7caca961328e8abe2a`; clean | Unchanged. |
+| `D:\dev\guideXOS_DeveloperStudio_Tools_Source` | Isolated editable Tools source checkout | Created at verified source baseline `058c83fe1ae270a103eadc7caca961328e8abe2a` | Branch `DEVELOPER_STUDIO_TOOLS`; implementation is committed locally as `f7438f5455b0889dd730380f17ff3651753ac196`. |
+| `D:\dev\guideXOS_Developer_Studio_Debugging` | Independent Debugging source worktree | At final audit: `DEVELOPER_STUDIO_DEBUGGING`, `d09e8e1b8ed40fd7a1277ebe835acf56344241d1`; clean | Unchanged. |
 
-At the start of this work, `D:\dev\guideXOS_DeveloperStudio_Tools` was on
-`DEVELOPER_STUDIO_TOOLS` at `e24ee589a0f13132d42487e1b04532a6e6d3cde3`,
-clean and even with `origin/DEVELOPER_STUDIO_TOOLS` (0 commits ahead and 0
-behind). No TOOLS, Compilation, or Debugging phase marker was changed.
+The Tools source worktree is a separate Git worktree of the Developer Studio
+source repository, not a copy inside the Server repository. The source remote
+is `git@github.com:guideX/guideXOS_Developer_Studio.git`; the Server remote is
+`git@github.com:guideX/guideXOS-Server.git`. At worktree creation the source
+`main` and Debugging worktree were both observed at `058c83f`; the Debugging
+branch later advanced independently to `d09e8e1`. No Compilation worktree was
+registered in this source repository's worktree list during this audit. No
+other track's files, checkout state, or phase markers were changed.
 
-The editable app source was found at
-`D:\dev\guideXOS_Developer_Studio`, on clean `main` at
-`058c83fe1ae270a103eadc7caca961328e8abe2a`. That checkout owns `src/`,
-`tests/`, and `build.ps1`; the build script compiles the app sources and stages
-the output into a Server checkout's `Apps/DeveloperStudio` package. It is not
-the requested Tools branch, and it was left unchanged.
+## Implementation
 
-| Area | Existing owner and interfaces | TOOLS1 relevance |
-| --- | --- | --- |
-| Developer Studio UI and app lifecycle | Developer Studio `src/main.cpp`; Native ELF window, event, draw, and present calls from `sdk/include/guidexos/abi.h` | The app uses static panel state and event handlers. There is no general tool registry or Tools menu. |
-| Active project and documents | `WorkspaceController` and `WorkspaceModel` in the Developer Studio source repository | Search receives the active project's ID, generation, and root and snapshots dirty documents. |
-| Project files | `WorkspaceFileSystem` and the Server Native ABI's `file_stat`, `file_list`, and `file_read_workspace` operations | Enumeration and reads are mediated by the host filesystem service; search does not write files. |
-| Editor navigation | `WorkspaceControllerOpenDocumentAtLocation` in the Developer Studio source repository | Find-in-Files result activation opens the file and moves to its line and column. |
-| Tool result presentation | The existing search panel in `src/main.cpp`; `OutputService` for operation messages | The panel draws result groups, line/column, preview, status, and empty state. There is no reusable registered-tool result surface. |
-| Build and Debug integration | Separate Build/Run and Debug controllers in the Developer Studio source repository | No changes were made to either controller or their UI. Their model tests passed in the hosted test tier below. |
-| Package integration | `Apps/DeveloperStudio/app.json` and `Apps/DeveloperStudio/bin/{amd64,arm64}/developerstudio.elf` in this Tools checkout | The package is tracked here, but rebuilding it requires the separate app source checkout. |
+- Added `src/developer_studio_tools.{h,cpp}` with a four-entry fixed-capacity
+  `DeveloperToolRegistry`. It stores explicit command descriptors and
+  activate/close callbacks; it is not a dynamic plugin loader.
+- Added a visible **Tools** menu with the registered **Find in Files** command.
+  The Tools menu and `Ctrl+Shift+F` call the same activation path. Repeated
+  activation preserves the current query and operation. Closing the panel
+  cancels and releases terminal search state; Escape during a running search
+  requests cancellation before closing.
+- Reused the existing `ProjectSearchService`, result-selection logic, and
+  `WorkspaceControllerOpenDocumentAtLocation` navigation path. No separate
+  search implementation or Server ABI change was introduced.
+- Added fixed, saturating aggregate counters for skipped large, binary,
+  unreadable, and changed/disappeared files. The panel shows one compact
+  summary, plus a bounded truncation or failure reason. Directory-list
+  truncation now has its own `PROJECT_SEARCH_DIRECTORY_ENTRIES_LIMIT` code;
+  result-capacity truncation preserves the existing bounded partial results.
+  Search limits and read-only behavior remain unchanged.
+- Added `tests/tools_test.cpp` for registry registration, descriptor and
+  shortcut, repeat activation, close veto and cleanup, and activation errors.
+  Expanded `tests/project_search_test.cpp` for navigation, skipped-file
+  diagnostics, and result capacity. Updated `docs/FIND_IN_FILES.md`.
+- Updated `build.ps1` to compile/link the registry in both package targets and
+  to run the new test. The script's explicit Run/debugger test source lists
+  now include the existing Build, Symbols, and Workspace dependencies needed
+  by those tests.
 
-The Server checkout's Native ABI is append-only and already supplies the
-filesystem calls needed by the existing search service. The source app
-contains no dynamic plugin loader, and none is needed for the bounded utility
-requested here.
+The hosted registry test exercises the shared descriptor activation and
+lifecycle behavior. The Tools menu and shortcut route through that same
+activation helper in `main.cpp`; a live UI click/keyboard run was not possible
+without the hosted Server executable described under qualification.
 
-## Existing Find in Files behavior
+## Validation and package integration
 
-The current app source implements `ProjectSearchService` in
-`src/developer_studio_project_search.{h,cpp}`. Its operation lifecycle is
-`ProjectSearchServiceInit`, `ProjectSearchStart`, repeated bounded
-`ProjectSearchPoll` calls, optional `ProjectSearchCancel`, and
-`ProjectSearchRelease`. The UI polls a bounded amount of work per frame and
-cancels when the active project generation changes. A new operation replaces
-the previous operation in the fixed-capacity service; there is no per-search
-heap resource to retain.
+Results from the isolated source checkout:
 
-The UI supports a query, include and exclude patterns, case sensitivity,
-whole-word matching, a result list grouped by file, line and column, bounded
-previews, a match count, truncation status, and a no-match message. Selecting
-or double-clicking a result opens it through the existing editor navigation
-path. Dirty open documents are searched from bounded snapshots. The feature is
-read-only.
+- Focused CTest: **2/2 passed** (`developer_studio_tools_test`,
+  `developer_studio_project_search_test`).
+- Full Developer Studio CTest suite: **35/35 passed**, including Build, Run,
+  workspace/navigation, and debugger model tests.
+- Full CMake build: **68/68 targets passed**.
+- `build.ps1` AMD64 package build: passed. Final scratch ELF SHA256:
+  `33217C69B1828E3B54C584A474E939BF49238C7A242E0CBFF49C4877D496A885`.
+- `build.ps1` ARM64 package build: passed. Final scratch ELF SHA256:
+  `D2FE87A625FB16093597A96BA6A31E04475EA1BF444D9262CDCC7ADE47A769D1`.
 
-The discoverable entry point requested by TOOLS1 is missing: the current UI
-opens Find in Files with `Ctrl+Shift+F`, but its visible menu bar contains
-File, Debug, and Build and has no Tools entry. The service is registered
-directly as application globals and event handlers; it is not an independently
-registered utility with a shared initialize/activate/refresh/close interface.
+Both package builds used the Server SDK include directory but set `ServerRoot`
+to `D:\dev\guideXOS_DeveloperStudio_Tools_Source\out\tools1r-package`.
+The generated manifest, temporary objects, and ELF files are confined to
+that ignored scratch directory. The production files
+`D:\dev\guideXOS_DeveloperStudio_Tools\Apps\DeveloperStudio\bin\amd64\developerstudio.elf`
+and `...\arm64\developerstudio.elf` were left unchanged. No source files were
+copied into the Server repository.
 
-The service uses fixed-capacity storage and these bounds:
+## Qualification limits
 
-| Limit | Hosted build | Bare-metal build |
-| --- | ---: | ---: |
-| Query | `kFindMaxQueryBytes` | `kFindMaxQueryBytes` |
-| File bytes | `kMaxEditorBytes` (256 KiB in the current hosted validation contract) | `kMaxEditorBytes` |
-| Total bytes scanned | 256 MiB | 256 MiB |
-| Files enumerated | 100,000 | 256 |
-| Directories visited / pending | 4,096 / 512 | 128 / 32 |
-| Maximum traversal depth | 64 | 64 |
-| Result files / total matches / matches per file | 256 / 4,096 / 512 | 32 / 256 / 32 |
-| Preview | 512 bytes | 512 bytes |
-| Work per poll | 16 entries, at most one file read | 16 entries, at most one file read |
-| Operation duration | 5 minutes | 5 minutes |
+- No `guideXOSServer.experimental.exe` was present under the Server checkout,
+  so the hosted application UI and real menu/shortcut interaction could not be
+  launched here.
+- `qac.exe` and a QAC CLI apphost were unavailable. No QEMU process was active
+  or started, so guest qualification remains **PENDING**.
+- Successful CTest and package builds are hosted/model and compile/link
+  evidence only; they do not constitute guest acceptance.
 
-The UI initializes source-oriented include patterns and excludes common build,
-vendor, and generated directories by default. Paths are normalized and checked
-against the project root; traversal components are rejected. Binary data is
-not matched. The synchronous read of one bounded file per poll is the current
-responsiveness limit; no kernel thread is created.
+## Local commits
 
-### Remaining TOOLS1 gaps
+- Developer Studio source branch `DEVELOPER_STUDIO_TOOLS`:
+  `f7438f5455b0889dd730380f17ff3651753ac196`
+  (`TOOLS1R: register Find in Files utility`).
+- Server Tools branch `DEVELOPER_STUDIO_TOOLS`:
+  this audit update is committed locally after the source commit; its exact
+  commit is the final Server Tools branch `HEAD`.
 
-- No visible Tools menu or explicit bounded utility registry/lifecycle exists.
-- Unreadable files, binary files, and files over the per-file limit can be
-  skipped without a useful per-file result. Error enum values exist, but the
-  current UI does not present a complete skipped-file report.
-- The existing `project_search_test.cpp` covers basic matches, include/exclude
-  patterns, case behavior, preview positions, dirty documents, cancellation,
-  repeated/stale operation IDs, binary skipping, and an invalid pattern. It
-  does not cover all requested overlong-input, oversized-line, result-cap,
-  enumeration-cap, missing/unreadable-file, changed-file, containment, and
-  navigation cases.
-- No QAC-managed guest acceptance was run. `qac.exe` was not on `PATH` and no
-  built QAC CLI apphost was found in the QAC checkout. No QEMU process was
-  started outside QAC.
-- The guest UX and navigation have not been qualified in this TOOLS1 run.
-
-## Hosted validation
-
-The existing Developer Studio fast validation tier was run against the
-unchanged source checkout with package building and the live hosted debugger
-smoke skipped:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
-  D:\dev\guideXOS_Developer_Studio\tests\run-developer-studio-validation-fast.ps1 `
-  -ServerRoot D:\dev\guideXOS_DeveloperStudio_Tools `
-  -BuildDirectory D:\dev\guideXOS_DeveloperStudio_Tools\out\validation\tools1-studio-fast `
-  -TraceDirectory D:\dev\guideXOS_DeveloperStudio_Tools\out\validation\tools1-traces `
-  -SkipPackage -SkipHosted
-```
-
-Result: CMake configure/build passed and CTest passed **34/34 tests, 0 failed**.
-The passing cases included project search, project/workspace, Build, Run,
-editor navigation, and debugger models. Manifest resolution also passed.
-Package rebuilding, live hosted application smoke, and guest qualification
-were not run. The AMD64 package in this checkout contains Find-in-Files UI and
-project-search strings; that artifact inspection is not guest qualification.
-
-## TOOLS2 recommendation
-
-First place the editable Developer Studio UI and utility sources under an
-explicit Tools-track branch or otherwise establish that the Tools track owns
-the app-source changes. Then add a small static utility descriptor/registry,
-expose Find in Files through a visible Tools entry, and reuse the existing
-`ProjectSearchService` behind it. Extend focused tests for the missing limits,
-error reporting, filesystem changes, containment, and selection/navigation
-cases before packaging and QAC qualification. Keep Build and Debug controllers
-as consumers of the shared project/editor interfaces rather than folding them
-into the Tools registry.
+Both commits are local only. Nothing was pushed, merged, rebased, reset, or
+stashed. TOOLS2 was not started.
