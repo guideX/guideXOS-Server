@@ -119,3 +119,100 @@ The implementation and ownership-gate changes are committed locally:
 - `a813779ad7794f5eac053aa8be49a0be01fd64c6` — preserve gate evidence before a fail-closed result.
 
 This acceptance report is the closeout documentation commit. The pre-existing ramdisk modification and unrelated untracked sample outputs remain unstaged and uncommitted. No remote push was attempted under the existing C188 phase policy.
+
+## Authorized continuation from the actual workspace HEAD
+
+The follow-up request arrived with the worktree at branch `v1.1_DOTNET_SUPPORT`, actual starting HEAD `c5ae6286772cd73aa636271d7d3a5ae8db97e94c`. The R4R1 report above already records one earlier guest attempt. This continuation used one additional QAC-authorized boot, then stopped without retrying when the input gate failed. The ownership-parser and hosted-test changes are at implementation HEAD `ba9e47e2d70e8f1138517eff9853236238d228d0` before this report update; the final closeout documentation is committed separately afterward.
+
+### QAC command semantics and ownership predicate
+
+QAC2's README documents `list` as the reservation and process-census view and `inspect <reservation-id>` as the read for one reservation. In the QAC coordinator source, `status` prints aggregate QEMU/foreign, managed-session, queued, and blocked counts. `list` prints QEMU process rows, active reservation rows, managed-session rows, and census warnings. Both commands request fresh snapshots; within any one coordinator snapshot, reservation and managed-session rows are derived from the same active reservation set. The commands do not provide an atomic cross-command snapshot, so a transition between separate calls can produce different results. A stable running session should appear in both `list` enumerations; an empty enumeration is not by itself evidence that a current run is authorized.
+
+The corrected predicate accepts an omitted or empty `list` enumeration only when independent current-run proof agrees across the requested reservation ID, QAC `inspect`, the exclusive `status` census, the owning QAC runner process, its verified direct QEMU child (PID, start time, and executable), and the run-specific evidence path/token. It records list omissions and status/list count disagreements in the ownership evidence. Any malformed row, conflicting identity, warning, foreign process, degraded/stale reservation, or failed process-ownership check still rejects the run. This handles empty list output through correlated evidence rather than treating the mismatch as harmless.
+
+The single guest run in this continuation showed a separate parser defect: QAC emitted normal Windows CRLF process rows, while the gate's process-row regular expression rejected the trailing carriage return. The gate therefore failed closed with only `qac-list-qemu-census-unparseable` even though the saved status, reservation row, managed-session row, process row, inspection, and checked local process identities agreed. The process-row parser now accepts CRLF, and the focused tests cover complete, empty, and partial lists; CRLF output; contradictory reservation/session/child identities; foreign census; stale/released session; missing owner; and missing or mis-parented child. QAC ownership predicate coverage is **13 passing cases**.
+
+### Lifecycle settings and reused artifacts
+
+Both diagnostic and proof-disabled production runtime-pack manifests report `persistentCompositeLifecycle=true`, a 65,536-byte `Primary64KiB` heap, and `bounded-static-image-backed-no-collection`. Both use runtime source SHA-256 `C47A6DF47EC42EFFE820E97F18D1832C4CD43F80DF2060DF4B6D1EF084544224`. The existing `RhpReversePInvoke` path still calls `initializeRuntimeState`; with the persistent define it zeros and initializes the arena only on first attachment, and later entries preserve the existing arena and TLS allocation cursor. The registry and lifetime-pool roots remain ordinary NativeAOT static roots. No new heap, allocator, runtime change, registry re-registration, or application-model change was introduced.
+
+The qualified R4 artifacts were reused without rebuilding:
+
+| Artifact | Qualification | SHA-256 |
+|---|---|---|
+| Diagnostic NativeAOT ELF | PASS | `15ABAAC80ED7C306D54572A701D6075D237D14C4F4C1AC5B04636820C376809D` |
+| Diagnostic kernel | PASS | `0032BD297D86314D86B182C8CFDC7A15E3C12FE07BDEE5F192A2BFFD78403B93` |
+| R4 staged diagnostic ramdisk | PASS | `3E9FC2B3757EF4BA7D528E7B56AF60CB4CE66CBAB249A4808D270514B543B703` |
+| Proof-disabled production NativeAOT ELF | PASS | `F8F7B89F6E79A242A96215F2164C1D290D0A8810EE3735B7E9045D1D14069732` |
+| Production kernel | PASS | `2BFCB9D3BEDEA1C4C161B5978EC1A71B33BCF11FAC846815B6D9EE49986465BF` |
+
+The diagnostic and production qualification manifests both report PASS and persistent lifecycle enabled. The R4 staging manifest reports PASS, 185 unrelated files preserved, and zero other files changed. Its staged managed ELF hash matches the diagnostic candidate.
+
+### Hosted validation for this continuation
+
+The final C188 aggregate is PASS at `out/dotnet/c188r11-managed-state-provenance/hosted/persistent-lifecycle-acceptance-009/manifest.json` (SHA-256 `E5F96F9B5CB62AACA9B9CD978499C0A21A7BC17903EEA202CA193E14C47A02F5`). It recorded restore/build exit code 0 and:
+
+| Suite | Cases | Result |
+|---|---:|---|
+| R9 managed registry | 14 | PASS |
+| R10 state reentry | 14 | PASS |
+| R11 state provenance | 15 | PASS |
+| R11 runner predicates | 30 | PASS |
+| Output bounds | 6 | PASS |
+| Persistent runtime lifecycle | 7 | PASS |
+| QAC ownership predicates | 13 | PASS |
+| QAC stream capture | 2 | PASS |
+| Keyboard contracts | 19 | PASS |
+| Keyboard runner predicates | 9 | PASS |
+
+The managed UI runner's 38 focused suites / 930 cases passed, including Notes resize, navigation, and newline/save suites. Its top-level manifest is marked FAIL because a separate C167/C168 child invocation under Windows PowerShell converted `dotnet.exe` stderr into a `NativeCommandError`; the 38-suite summary itself is PASS. I reran the Settings host directly under PowerShell Core: C167 passed 20 focused cases plus 60 stress iterations, and C168 passed 31 cases, 250 page cycles, 250 selection changes, 100 apply/reset cycles, and 250 popup cycles. Its PASS manifest is `out/dotnet/c188r11-managed-state-provenance/hosted/persistent-lifecycle-acceptance-007/c168-settings-core-validation-002/c168-settings-ui-host-manifest.json` (SHA-256 `52F519F62C64285552FE4C250085537E56A406B586DF7C457C6ADDF654E0F56E`).
+
+### One-boot QAC result
+
+The first read-only preflight found foreign QEMU PID `30252` from a PacMan hosted-soak command line. It was left untouched and exited naturally. The fresh recheck at `2026-10-27T01:18:44Z` showed QAC Online with zero QEMU, foreign processes, reservations, managed sessions, queued requests, and blocked requests; the local QEMU census was also empty. Evidence is under `out/dotnet/c188r11-managed-state-provenance/preflight/persistent-lifecycle-acceptance-rerun-001/`.
+
+Exactly one QAC acceptance reservation then launched the corrected R4 diagnostic candidate:
+
+- Run identity: `e4ffb5c8cfed4a71ad0d16fdfb21a7af`
+- Reservation: `11a8812d43b84abd938073751186cfbb`
+- QAC owner process: PID `24388`, owner liveness `Verified`
+- QEMU child: PID `32760`, `C:\Program Files\qemu\qemu-system-x86_64.exe`, start `2026-10-27T01:19:00.9702288Z`
+- During-run QAC status: one QEMU, zero foreign, one managed session, zero queued/blocked
+- During-run list and `inspect`: matching reservation/session/child, `Running`, `degraded=false`
+
+The gate stopped before the screenshot/input stage because of the CRLF parser defect. The QAC stderr log records child exit code 0 and reservation release. Post-run inspection reports the exact reservation as `Released`, owner liveness `Verified`, and `degraded=false`; QEMU PID `32760` is absent locally. A different unmanaged QEMU PID `23668` appeared in the subsequent post-run census and was left running. Its presence does not change the verified exit/release of this run. The QMP log contains only `quit`; no keyboard event was sent, and no before/after screenshot or keyboard acceptance manifest was produced.
+
+Key retained evidence:
+
+| Evidence | SHA-256 |
+|---|---|
+| Guest serial log | `C71FC94A54A42135C471904732FF1E42DFD10AE4BDE073FB99B6AF850B09B3AD` |
+| QAC stderr lifecycle log | `5028C66D1F94E2ABE391E24B3C43B0265D7AA5DE4913BF59A14AE8AAAD337930` |
+| During-run QAC list | `F932510ADBB53E74131F9503E083E036B149308042C443D67C7250454AFD357D` |
+| During-run QAC inspection | `347DC85EB2B9F1A18ED9E8AE67BA3F2D63F91972EA843FB5ECE4C52D2C12B5CE` |
+| QMP log | `53C53FAC0C21C25D3CEB83E2955A5FE8657502E8BFDC172D9DA7B9558CA81CA0` |
+| Post-run QAC reconciliation | `8880281AB954F1D553337B198641976074195FA5CCC3EDA641342F01E828AF39` |
+
+### Managed state and Notes result
+
+The guest log at `runs/persistent-lifecycle-acceptance-002/guest-001/serial.log` recorded:
+
+| Checkpoint | Observation |
+|---|---|
+| Heap initialization | One initialization at `0x00000001001F1600`, size `0x10000` (65,536 bytes) |
+| Later reverse entry | `action=preserve`, reset count remains 1, allocation cursor preserved |
+| Registry initialization | Five selectors 4–8; `re=1`, `pe=1`, `rg=1` |
+| Physical storage snapshots | Registry array `0x00000001001F4F50`; pool owner `0x00000001001F51E0`; `_entries` slot `0x00000001001F51E8`; pool array `0x00000001001F5218`. These addresses remained stable from registry initialization through Notes instance start and lie inside the initialized 64 KiB arena. |
+| Lookup | `TryFind(4)` returned `0` with descriptor count 5 |
+| Notes residency | At instance start and managed return: resident mask `m=1`, owner/pool generation `1`, pool backing present, held array length 5 |
+| Keyboard dispatch | Not attempted; no input-dispatch snapshot or callback result |
+
+This is stronger than relying on the stable logical identity token alone: the launch snapshots include physical object/storage addresses and the runtime's explicit preserve event. It still does not establish their state at a keyboard boundary. R3's first input snapshot had descriptor count 0, null pool backing, resident mask 0, and `TryFind(4)=-4`. R4's corrected boot established `n=5`, `m=1`, and successful lookup at launch but stopped before input. This continuation reached the same healthy launch state and focused Notes main loop, then stopped before input because the gate parser failed.
+
+Notes received no character in this run. Its keyboard callback was not invoked, no callback return or text-buffer delta exists, and visible text insertion remains unqualified. No screenshot was captured.
+
+The source `ESP/ramdisk.img` SHA-256 was `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` before and after this continuation. It remains the pre-existing modification and is excluded from the implementation and report commits. Generated/untracked sample paths are also preserved.
+
+**Latest outcome remains D — QAC_OR_EXECUTION_BLOCKED.** The lifecycle correction is active and the guest launch-side state is healthy, but the one permitted boot stopped at an ownership-parser defect and did not reach keyboard dispatch. The CRLF parser is now fixed and its hosted regressions pass; no second boot was started. The smallest remaining step is one separately authorized guest run using the corrected gate to capture the first-input memory snapshot, successful `TryFind(4)`, actual Notes callback/result, and before/after screenshots. If that callback succeeds without text insertion, qualify editor/input behavior separately before broader five-resident interactive acceptance.
+
+The implementation changes are committed as `ba9e47e2d70e8f1138517eff9853236238d228d0` (QAC ownership reconciliation). This report is the subsequent documentation-only closeout commit. No remote push was attempted under the existing C188 phase policy.
