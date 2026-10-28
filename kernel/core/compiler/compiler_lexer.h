@@ -55,12 +55,15 @@ enum class TokenKind : uint8_t {
     Arrow,
     Slash,
     Percent,
+    // Append-only: token values are consumed by bounded compiler buffers.
+    Character,
 };
 
 struct Token {
     TokenKind kind;
     SourceLocation location;
     uint32_t length;
+    int32_t value;
 };
 
 const char* token_kind_name(TokenKind kind);

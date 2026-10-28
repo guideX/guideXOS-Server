@@ -68,7 +68,7 @@ static void advance(const char* source, uint32_t length, uint32_t* index,
 
 static bool add_token(Token* tokens, uint32_t capacity, uint32_t* count,
                       TokenKind kind, SourceLocation location, uint32_t length,
-                      Diagnostics& diagnostics)
+                      Diagnostics& diagnostics, int32_t value = 0)
 {
     if (!tokens || !count || *count >= capacity) {
         diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, location,
@@ -78,6 +78,7 @@ static bool add_token(Token* tokens, uint32_t capacity, uint32_t* count,
     tokens[*count].kind = kind;
     tokens[*count].location = location;
     tokens[*count].length = length;
+    tokens[*count].value = value;
     ++(*count);
     return true;
 }
@@ -129,6 +130,7 @@ const char* token_kind_name(TokenKind kind)
         case TokenKind::Arrow: return "'->'";
         case TokenKind::Slash: return "'/'";
         case TokenKind::Percent: return "'%'";
+        case TokenKind::Character: return "character-literal";
         default: return "unknown";
     }
 }
@@ -185,6 +187,93 @@ bool lex_source(const char* source, uint32_t sourceLength, Token* tokens,
         }
 
         const SourceLocation location = {index, line, column};
+        const bool encodedCharacter =
+            ((c == 'L' || c == 'u' || c == 'U') && index + 1U < sourceLength &&
+             source[index + 1U] == '\'') ||
+            (c == 'u' && index + 2U < sourceLength && source[index + 1U] == '8' &&
+             source[index + 2U] == '\'');
+        if (encodedCharacter) {
+            diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
+                                "wide and encoded character literals are unsupported", "character-literal");
+            return false;
+        }
+
+        if (c == '\'') {
+            const SourceLocation literalLocation = location;
+            const uint32_t start = index;
+            advance(source, sourceLength, &index, &line, &column);
+            if (index >= sourceLength || source[index] == '\r' || source[index] == '\n') {
+                diagnostics.error(literalLocation, "unterminated character literal", "character-literal");
+                return false;
+            }
+            if (source[index] == '\'') {
+                advance(source, sourceLength, &index, &line, &column);
+                diagnostics.error(literalLocation,
+                                  "character literal must contain exactly one ASCII character",
+                                  "character-literal");
+                return false;
+            }
+
+            int32_t value = 0;
+            if (source[index] == '\\') {
+                advance(source, sourceLength, &index, &line, &column);
+                if (index >= sourceLength || source[index] == '\r' || source[index] == '\n') {
+                    diagnostics.error(literalLocation, "unterminated character literal", "character-literal");
+                    return false;
+                }
+                switch (source[index]) {
+                    case 'n': value = '\n'; break;
+                    case 'r': value = '\r'; break;
+                    case 't': value = '\t'; break;
+                    case '\\': value = '\\'; break;
+                    case '\'': value = '\''; break;
+                    case '0': value = 0; break;
+                    default:
+                        diagnostics.error_as(CompilerDiagnosticKind::Unsupported, literalLocation,
+                                            "unsupported escape in character literal", "character-literal");
+                        return false;
+                }
+                advance(source, sourceLength, &index, &line, &column);
+            } else {
+                const uint8_t byteValue = static_cast<uint8_t>(source[index]);
+                if (byteValue > 0x7EU) {
+                    diagnostics.error_as(CompilerDiagnosticKind::Unsupported, literalLocation,
+                                        "non-ASCII character encodings are unsupported", "character-literal");
+                    return false;
+                }
+                if (byteValue < 0x20U) {
+                    diagnostics.error_as(CompilerDiagnosticKind::Unsupported, literalLocation,
+                                        "ordinary character literals must use printable ASCII", "character-literal");
+                    return false;
+                }
+                value = byteValue;
+                advance(source, sourceLength, &index, &line, &column);
+            }
+
+            if (index >= sourceLength || source[index] != '\'') {
+                if (index < sourceLength && source[index] != '\r' && source[index] != '\n') {
+                    while (index < sourceLength && source[index] != '\'' &&
+                           source[index] != '\r' && source[index] != '\n')
+                        advance(source, sourceLength, &index, &line, &column);
+                    if (index < sourceLength && source[index] == '\'')
+                        advance(source, sourceLength, &index, &line, &column);
+                    else {
+                        diagnostics.error(literalLocation, "unterminated character literal", "character-literal");
+                        return false;
+                    }
+                    diagnostics.error_as(CompilerDiagnosticKind::Unsupported, literalLocation,
+                                        "multi-character literals are unsupported", "character-literal");
+                    return false;
+                }
+                diagnostics.error(literalLocation, "unterminated character literal", "character-literal");
+                return false;
+            }
+            advance(source, sourceLength, &index, &line, &column);
+            if (!add_token(tokens, tokenCapacity, tokenCount, TokenKind::Character,
+                           literalLocation, index - start, diagnostics, value)) return false;
+            continue;
+        }
+
         if (is_identifier_start(c)) {
             const uint32_t start = index;
             while (index < sourceLength && is_identifier_part(source[index]))

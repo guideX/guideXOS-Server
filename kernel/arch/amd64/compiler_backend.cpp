@@ -31,9 +31,25 @@ static int32_t slot_displacement(uint32_t slot)
     return -static_cast<int32_t>(4U * (slot + 1U));
 }
 
-static int32_t local_displacement(uint16_t slot)
+static const LocalSymbol* find_local_slot(const FunctionIR& function, uint16_t slot)
 {
-    return slot_displacement(slot);
+    for (uint32_t i = 0; i < function.localCount; ++i)
+        if (function.locals[i].slot == slot) return &function.locals[i];
+    return nullptr;
+}
+
+static bool has_parameter_slot(const FunctionIR& function, uint16_t slot)
+{
+    for (uint32_t i = 0; i < function.parameterCount; ++i)
+        if (function.parameters[i].slot == slot) return true;
+    return false;
+}
+
+static int32_t local_displacement(const FunctionIR& function, uint16_t slot)
+{
+    const LocalSymbol* local = find_local_slot(function, slot);
+    if (local) return -static_cast<int32_t>(local->stackOffsetBytes);
+    return has_parameter_slot(function, slot) ? slot_displacement(slot) : 0x7FFFFFFF;
 }
 
 static int32_t temporary_displacement(const FrameLayout& frame, uint16_t slot)
@@ -133,9 +149,19 @@ public:
                u32(static_cast<uint32_t>(displacement));
     }
     bool mov_eax_local(int32_t displacement) { return mov_reg_mem32(0, displacement); }
+    bool movsx_eax_local8(int32_t displacement)
+    {
+        return byte(0x0F) && byte(0xBE) && byte(0x85) && u32(static_cast<uint32_t>(displacement));
+    }
+    bool mov_local_al(int32_t displacement)
+    {
+        return byte(0x88) && byte(0x85) && u32(static_cast<uint32_t>(displacement));
+    }
     bool mov_eax_rax() { static const uint8_t v[] = {0x8B, 0x02}; return bytes(v, sizeof(v)); }
+    bool movsx_eax_rax8() { static const uint8_t v[] = {0x0F, 0xBE, 0x02}; return bytes(v, sizeof(v)); }
     bool mov_eax_ptr_rax() { static const uint8_t v[] = {0x8B, 0x00}; return bytes(v, sizeof(v)); }
     bool mov_rax_eax() { static const uint8_t v[] = {0x89, 0x02}; return bytes(v, sizeof(v)); }
+    bool mov_rax_al() { static const uint8_t v[] = {0x88, 0x02}; return bytes(v, sizeof(v)); }
     bool mov_eax_ecx() { static const uint8_t v[] = {0x89, 0xC8}; return bytes(v, sizeof(v)); }
     bool mov_local_eax(int32_t displacement)
     {
@@ -1127,7 +1153,7 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
                 if (function.locals[i].slot == expression.localIndex &&
                     function.locals[i].kind == StorageKind::Struct &&
                     function.locals[i].structTypeIndex == expression.elementCount) valid = true;
-            if (!valid || !emitter.lea_rax_local(local_displacement(expression.localIndex)) ||
+            if (!valid || !emitter.lea_rax_local(local_displacement(function, expression.localIndex)) ||
                 !emitter.mov_local_rax64(scratch) || !emitter.mov_local_rax64(scratch + 8)) return false;
             if (!emit_pointer_descriptor_metadata(emitter, scratch, structBytes, structBytes,
                                                   PointerProvenanceKind::LocalStruct)) return false;
@@ -1156,7 +1182,7 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
         for (uint32_t i = 0; i < function.localCount; ++i)
             if (function.locals[i].slot == expression.localIndex)
                 scalar = function.locals[i].kind == StorageKind::ScalarInt;
-        if (!scalar || !emitter.lea_rax_local(local_displacement(expression.localIndex)) ||
+        if (!scalar || !emitter.lea_rax_local(local_displacement(function, expression.localIndex)) ||
             !emitter.mov_local_rax64(scratch) || !emitter.mov_local_rax64(scratch + 8) ||
             !emit_pointer_descriptor_metadata(emitter, scratch, 4, 4,
                                                PointerProvenanceKind::LocalScalar) ||
@@ -1176,7 +1202,6 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
     if (expression.kind != ExpressionKind::AddressOfIndexed || expression.elementCount == 0 ||
         expression.elementSize == 0 || !functionLabels) return false;
     if (expression.indexedBaseKind == IndexedBaseKind::Local) {
-        if (expression.localIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U) return false;
         bool validArray = false;
         for (uint32_t i = 0; i < function.localCount; ++i) {
             const LocalSymbol& local = function.locals[i];
@@ -1204,7 +1229,7 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
     if (ok) ok = emitter.mov_local_rdx64(scratch);
     if (ok) {
         ok = expression.indexedBaseKind == IndexedBaseKind::Local
-            ? (emitter.lea_rax_local(local_displacement(expression.localIndex)) &&
+            ? (emitter.lea_rax_local(local_displacement(function, expression.localIndex)) &&
                emitter.mov_local_rax64(scratch + 8))
             : (emitter.emit_global_data_address(unit.globals[expression.globalIndex].name,
                                                 expression.location) &&
@@ -1255,11 +1280,16 @@ static bool emit_indexed_address(Emitter& emitter, const TranslationUnitIR& unit
         !emitter.cmp_eax_imm32(elementCount) || !emitter.emit_jge(boundsFailureLabel) ||
         !emitter.movsxd_rax_eax()) return false;
     if (baseKind == IndexedBaseKind::Local) {
-        if (baseIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U)
-            return false;
-        if (elementSize == 4) return emitter.lea_rdx_local_rax(local_displacement(baseIndex));
+        const LocalSymbol* local = find_local_slot(function, baseIndex);
+        if (!local) return false;
+        const bool validArray =
+            (local->kind == StorageKind::ArrayInt && elementSize == 4) ||
+            (local->kind == StorageKind::ArrayChar && elementSize == 1) ||
+            (local->kind == StorageKind::ArrayStruct && local->elementSize == elementSize);
+        if (!validArray || local->elementCount != elementCount) return false;
+        if (elementSize == 4) return emitter.lea_rdx_local_rax(local_displacement(function, baseIndex));
         return emitter.imul_rax_imm32(elementSize) &&
-               emitter.lea_reg_local64(2, local_displacement(baseIndex)) &&
+               emitter.lea_reg_local64(2, local_displacement(function, baseIndex)) &&
                emitter.add_rdx_rax();
     }
     if (baseIndex >= unit.globalCount) return false;
@@ -1506,12 +1536,17 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                 function.dataOffset + function.stringOffsets[static_cast<uint32_t>(expression.value)],
                 expression.location) && emitter.mov_rax_rdx();
         case ExpressionKind::LoadLocal:
-            if (expression.localIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U) return false;
+            if (local_displacement(function, expression.localIndex) == 0x7FFFFFFF) return false;
             for (uint32_t p = 0; p < function.parameterCount; ++p)
                 if (function.parameters[p].slot == expression.localIndex &&
                     function.parameters[p].kind == ParameterKind::StringPointer)
-                    return emitter.mov_rax_local(local_displacement(expression.localIndex));
-            return emitter.mov_eax_local(local_displacement(expression.localIndex));
+                    return emitter.mov_rax_local(local_displacement(function, expression.localIndex));
+            {
+                const LocalSymbol* local = find_local_slot(function, expression.localIndex);
+                return local && local->kind == StorageKind::ScalarChar
+                    ? emitter.movsx_eax_local8(local_displacement(function, expression.localIndex))
+                    : emitter.mov_eax_local(local_displacement(function, expression.localIndex));
+            }
         case ExpressionKind::LoadPointer: {
             bool pointerSlot = false;
             for (uint32_t p = 0; p < function.parameterCount; ++p)
@@ -1521,7 +1556,7 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                 if (function.locals[l].slot == expression.localIndex &&
                     (function.locals[l].kind == StorageKind::PointerInt ||
                      function.locals[l].kind == StorageKind::PointerStruct)) pointerSlot = true;
-            return pointerSlot && emitter.lea_rax_local(local_displacement(expression.localIndex));
+            return pointerSlot && emitter.lea_rax_local(local_displacement(function, expression.localIndex));
         }
         case ExpressionKind::LoadStructPointer: {
             bool pointerSlot = false;
@@ -1532,7 +1567,7 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                 if (function.locals[l].slot == expression.localIndex &&
                     function.locals[l].kind == StorageKind::PointerStruct &&
                     function.locals[l].structTypeIndex == expression.elementCount) pointerSlot = true;
-            return pointerSlot && emitter.lea_rax_local(local_displacement(expression.localIndex));
+            return pointerSlot && emitter.lea_rax_local(local_displacement(function, expression.localIndex));
         }
         case ExpressionKind::LoadStructAddressLocal: {
             bool valid = false;
@@ -1540,7 +1575,7 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                 if (function.locals[l].slot == expression.localIndex &&
                     function.locals[l].kind == StorageKind::Struct &&
                     function.locals[l].structTypeIndex == expression.elementCount) valid = true;
-            return valid && emitter.lea_rax_local(local_displacement(expression.localIndex));
+            return valid && emitter.lea_rax_local(local_displacement(function, expression.localIndex));
         }
         case ExpressionKind::LoadStructAddressGlobal:
             return expression.globalIndex < unit.globalCount &&
@@ -1562,7 +1597,8 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                                       expression.left, expression.indexedBaseKind, baseIndex,
                                       expression.elementCount, expression.elementSize, expression.location,
                                       boundsFailureLabel, epilogueLabel, callFailureLabel) ||
-                !emitter.mov_eax_rax() || !emitter.emit_jmp(endLabel) ||
+                !(expression.elementSize == 1 ? emitter.movsx_eax_rax8() : emitter.mov_eax_rax()) ||
+                !emitter.emit_jmp(endLabel) ||
                 !emitter.define_label(boundsFailureLabel) ||
                 !emit_array_bounds_failure(emitter, epilogueLabel) ||
                 !emitter.define_label(endLabel)) return false;
@@ -1667,57 +1703,68 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
             if (local->kind == StorageKind::PointerInt) {
                 if (statement.expression == COMPILER_INVALID_INDEX)
                     return emit_zero_pointer_descriptor(emitter,
-                                                        local_displacement(statement.localIndex));
+                                                        local_displacement(function, statement.localIndex));
                 uint16_t pointerSlot = COMPILER_INVALID_INDEX;
                 if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
                                            statement.expression, epilogueLabel, callFailureLabel,
                                            &pointerSlot) ||
-                    !emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex))) return false;
+                    !emit_copy_pointer_descriptor(emitter, local_displacement(function, statement.localIndex))) return false;
                 return pointerSlot == COMPILER_INVALID_INDEX ||
                        emitter.release_pointer_temporary_slots(1);
             }
             if (local->kind == StorageKind::PointerStruct) {
                 if (statement.expression == COMPILER_INVALID_INDEX)
                     return emit_zero_pointer_descriptor(emitter,
-                                                        local_displacement(statement.localIndex));
+                                                        local_displacement(function, statement.localIndex));
                 uint16_t pointerSlot = COMPILER_INVALID_INDEX;
                 if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
                                            statement.expression, epilogueLabel, callFailureLabel,
                                            &pointerSlot) ||
-                    !emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex))) return false;
+                    !emit_copy_pointer_descriptor(emitter, local_displacement(function, statement.localIndex))) return false;
                 return pointerSlot == COMPILER_INVALID_INDEX ||
                        emitter.release_pointer_temporary_slots(1);
             }
             if (local->kind == StorageKind::ArrayStruct) return statement.expression == COMPILER_INVALID_INDEX;
+            if (local->kind == StorageKind::ArrayChar) return true;
             if (local->kind == StorageKind::Struct) {
                 if (statement.expression == COMPILER_INVALID_INDEX || local->sizeBytes == 0 ||
                     (local->sizeBytes & 3U) != 0 ||
                     !emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                      epilogueLabel, callFailureLabel)) return false;
                 for (uint32_t word = 0; word < local->sizeBytes / 4U; ++word)
-                    if (!emitter.mov_local_eax(local_displacement(statement.localIndex) +
+                    if (!emitter.mov_local_eax(local_displacement(function, statement.localIndex) +
                                                 static_cast<int32_t>(word * 4U))) return false;
                 return true;
             }
+            if (local->kind == StorageKind::ScalarChar)
+                return statement.expression != COMPILER_INVALID_INDEX &&
+                    emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                    epilogueLabel, callFailureLabel) &&
+                    emitter.mov_local_al(local_displacement(function, statement.localIndex));
             return statement.expression != COMPILER_INVALID_INDEX &&
                 emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                 epilogueLabel, callFailureLabel) &&
-                emitter.mov_local_eax(local_displacement(statement.localIndex));
+                emitter.mov_local_eax(local_displacement(function, statement.localIndex));
         }
         case StatementKind::StoreLocal:
-            return statement.localIndex < function.parameterStorageBytes / 4U + function.localStorageBytes / 4U &&
-                emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
-                                epilogueLabel, callFailureLabel) &&
-                emitter.mov_local_eax(local_displacement(statement.localIndex));
+            if (local_displacement(function, statement.localIndex) == 0x7FFFFFFF) return false;
+            if (!emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                 epilogueLabel, callFailureLabel)) return false;
+            {
+                const LocalSymbol* local = find_local_slot(function, statement.localIndex);
+                return local && local->kind == StorageKind::ScalarChar
+                    ? emitter.mov_local_al(local_displacement(function, statement.localIndex))
+                    : emitter.mov_local_eax(local_displacement(function, statement.localIndex));
+            }
         case StatementKind::StorePointer:
-            if (statement.localIndex >= function.parameterStorageBytes / 4U + function.localStorageBytes / 4U)
+            if (local_displacement(function, statement.localIndex) == 0x7FFFFFFF)
                 return false;
             {
                 uint16_t pointerSlot = COMPILER_INVALID_INDEX;
                 if (!emit_expression_value(emitter, unit, function, frame, functionLabels,
                                             statement.expression, epilogueLabel, callFailureLabel,
                                             &pointerSlot) ||
-                    !emit_copy_pointer_descriptor(emitter, local_displacement(statement.localIndex))) return false;
+                    !emit_copy_pointer_descriptor(emitter, local_displacement(function, statement.localIndex))) return false;
                 return pointerSlot == COMPILER_INVALID_INDEX ||
                        emitter.release_pointer_temporary_slots(1);
             }
@@ -1743,7 +1790,8 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                                       baseIndex, statement.elementCount, statement.elementSize, statement.location,
                                       boundsFailureLabel, epilogueLabel, callFailureLabel) ||
                 !emitter.mov_eax_local(temporary_displacement(frame, temporaryBase)) ||
-                !emitter.mov_rax_eax() || !emitter.emit_jmp(endLabel) ||
+                !(statement.elementSize == 1 ? emitter.mov_rax_al() : emitter.mov_rax_eax()) ||
+                !emitter.emit_jmp(endLabel) ||
                 !emitter.define_label(boundsFailureLabel) ||
                 !emit_array_bounds_failure(emitter, epilogueLabel) ||
                 !emitter.define_label(endLabel) ||
@@ -2126,14 +2174,14 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
         for (uint32_t p = 0; p < function.parameterCount; ++p) {
             if (function.parameters[p].kind == ParameterKind::Integer) {
                 if (!emitter.mov_reg_local32(argumentRegisters[p],
-                                             local_displacement(function.parameters[p].slot))) return false;
+                                             slot_displacement(function.parameters[p].slot))) return false;
             } else if (function.parameters[p].kind == ParameterKind::StringPointer) {
                 if (!emitter.mov_rax_reg64(argumentRegisters[p]) ||
-                    !emitter.mov_local_rax(local_displacement(function.parameters[p].slot))) return false;
+                    !emitter.mov_local_rax(slot_displacement(function.parameters[p].slot))) return false;
             } else if (parameter_kind_is_pointer(function.parameters[p].kind)) {
                 if (!emitter.mov_rax_reg64(argumentRegisters[p]) ||
                     !emit_copy_pointer_descriptor(emitter,
-                                                  local_displacement(function.parameters[p].slot))) return false;
+                                                  slot_displacement(function.parameters[p].slot))) return false;
             }
         }
         uint16_t epilogueLabel = COMPILER_INVALID_INDEX;
@@ -2234,7 +2282,7 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
                     COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT;
                 record.sizeBytes = 4;
                 record.declaration = local.declaration;
-                record.frameOffset = slot_displacement(local.slot);
+                record.frameOffset = -static_cast<int32_t>(local.stackOffsetBytes);
                 record.liveStart = liveStart;
                 record.liveEnd = functionEnd;
             }

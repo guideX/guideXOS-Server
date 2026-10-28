@@ -76,7 +76,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 10;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 11;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -154,6 +154,10 @@ enum class StorageKind : uint8_t {
     Struct,
     ArrayStruct,
     PointerStruct,
+    // Appended to preserve the existing internal values. Character storage
+    // occupies one byte per scalar/element in the function frame.
+    ScalarChar,
+    ArrayChar,
 };
 
 enum class StructFieldKind : uint8_t {
@@ -316,6 +320,9 @@ struct LocalSymbol {
     uint16_t elementSize;
     uint16_t structTypeIndex;
     uint32_t sizeBytes;
+    // Absolute byte distance below RBP to the end of this local's allocation.
+    // `slot` is a symbol identity; it is not an address or a four-byte slot.
+    uint32_t stackOffsetBytes;
     bool initialized;
     SourceLocation declaration;
 };

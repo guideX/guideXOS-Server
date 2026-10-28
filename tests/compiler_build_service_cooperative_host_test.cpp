@@ -141,7 +141,10 @@ static void setup_project()
         "\"abi\":\"guidexos-c-abi-v1\"}");
     put("/workspace/comp4b/src/main.cpp",
         "#include \"helper.h\"\n"
-        "int gx_main(gx_app_context* ctx) { int quotient = -17 / 5; int remainder = -17 % 5; "
+        "int gx_main(gx_app_context* ctx) { char letter = 'A'; char bytes[2]; "
+        "bytes[0] = 'O'; bytes[1] = 'K'; "
+        "if (letter != 'A' || bytes[0] != 'O' || bytes[1] != 'K') return 90; "
+        "int quotient = -17 / 5; int remainder = -17 % 5; "
         "if (quotient != -3) return 91; if (remainder != -2) return 92; "
         "return calculate_value() / 3; }\n");
     put("/workspace/comp4b/src/helper.cpp",
@@ -289,6 +292,19 @@ static void test_failure_diagnostics_and_recovery(RequestFixture& fixture)
     assert(snapshot.state == GX_BUILD_FAILED && !snapshot.artifactValid &&
            snapshot.errorCode == GX_BUILD_ERROR_COMPILER_SYNTAX &&
            snapshot.errorCount != 0U && output_contains(snapshot, "[syntax]") &&
+           snapshot.artifactSize == 0U && snapshot.artifactPath[0] == '\0' &&
+           snapshot.artifactSha256[0] == '\0');
+    assert(!kernel::vfs::exists(kTemporaryArtifact));
+    assert(read_vfs_bytes(kFinalArtifact) == previous);
+    release_build(handle);
+
+    put("/workspace/comp4b/src/main.cpp",
+        "int gx_main(gx_app_context* ctx) { return 'A; }\n");
+    handle = start_build(fixture);
+    snapshot = run_to_terminal(handle);
+    assert(snapshot.state == GX_BUILD_FAILED && !snapshot.artifactValid &&
+           snapshot.errorCode == GX_BUILD_ERROR_COMPILER_LEXICAL &&
+           snapshot.errorCount != 0U && output_contains(snapshot, "[lexical]") &&
            snapshot.artifactSize == 0U && snapshot.artifactPath[0] == '\0' &&
            snapshot.artifactSha256[0] == '\0');
     assert(!kernel::vfs::exists(kTemporaryArtifact));

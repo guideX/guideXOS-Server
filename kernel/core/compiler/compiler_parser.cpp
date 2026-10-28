@@ -386,15 +386,17 @@ private:
         }
         const bool pointer = kind == StorageKind::PointerInt || kind == StorageKind::PointerStruct;
         const bool structStorage = storage_kind_is_struct(kind);
+        const bool characterStorage = kind == StorageKind::ScalarChar || kind == StorageKind::ArrayChar;
         const uint32_t elementBytes = pointer
             ? COMPILER_POINTER_DESCRIPTOR_BYTES
             : (structStorage && m_unit && structTypeIndex < m_unit->structTypeCount
                 ? m_unit->structTypes[structTypeIndex].sizeBytes
-                : static_cast<uint32_t>(elementCount) * 4U);
+                : (characterStorage ? 1U : 4U));
         uint32_t totalBytes = elementBytes;
-        if (kind == StorageKind::ArrayStruct &&
+        if ((kind == StorageKind::ArrayInt || kind == StorageKind::ArrayStruct ||
+             kind == StorageKind::ArrayChar) &&
             (!checked_mul_u32(elementCount, elementBytes, &totalBytes) || totalBytes == 0)) {
-            m_diagnostics.error(token.location, "struct array storage size overflows the bounded compiler", "array");
+            m_diagnostics.error(token.location, "array storage size overflows the bounded compiler", "array");
             return false;
         }
         if ((structStorage &&
@@ -406,32 +408,39 @@ private:
             return false;
         }
         const uint32_t localBase = m_output->parameterStorageBytes + m_output->localStorageBytes;
-        const uint32_t storageStart = pointer && (localBase & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U)) != 0
-            ? localBase + (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - (localBase & (COMPILER_POINTER_DESCRIPTOR_ALIGNMENT - 1U)))
-            : localBase;
+        const uint32_t storageAlignment = pointer ? COMPILER_POINTER_DESCRIPTOR_ALIGNMENT :
+            (characterStorage ? 1U :
+             (structStorage && m_unit && structTypeIndex < m_unit->structTypeCount
+                 ? m_unit->structTypes[structTypeIndex].alignment : 4U));
+        const uint32_t alignmentRemainder = localBase % storageAlignment;
+        const uint32_t alignmentPadding = alignmentRemainder == 0 ? 0U :
+            storageAlignment - alignmentRemainder;
+        if (localBase > 0xFFFFFFFFU - alignmentPadding) {
+            m_diagnostics.error(token.location, "local storage alignment overflows the bounded compiler", "local");
+            return false;
+        }
+        const uint32_t storageStart = localBase + alignmentPadding;
         const uint32_t storageEnd = storageStart + totalBytes;
         if (storageEnd < storageStart || storageEnd < m_output->parameterStorageBytes ||
             storageEnd - m_output->parameterStorageBytes > COMPILER_MAX_LOCAL_STORAGE_BYTES) {
             m_diagnostics.error(token.location, "local storage exceeds the bounded function-frame limit", "local");
             return false;
         }
-        // Stack slots grow toward lower addresses.  Store the array symbol's
-        // slot at its highest logical element so base + index*4 walks upward
-        // through element zero, one, ... in source order.
-        const uint16_t newSlot = static_cast<uint16_t>(
-            storageStart / 4U + (kind == StorageKind::ArrayInt ? elementCount - 1U :
-                                  (kind == StorageKind::ArrayStruct ? totalBytes / 4U - 1U :
-                                  (kind == StorageKind::Struct ? elementBytes / 4U - 1U :
-                                  (pointer ? COMPILER_POINTER_DESCRIPTOR_BYTES / 4U - 1U : 0U)))));
+        // Local `slot` values identify symbols. Actual placement is tracked in
+        // bytes, so adjacent chars can share a former dword without overlapping.
+        const uint16_t newSlot = static_cast<uint16_t>(0x8000U + m_output->localCount);
         LocalSymbol& local = m_output->locals[m_output->localCount++];
         local = {};
         local.kind = kind;
         local.slot = newSlot;
         local.elementCount = elementCount;
-        local.elementSize = structStorage ? static_cast<uint16_t>(elementBytes) : 4;
+        local.elementSize = structStorage ? static_cast<uint16_t>(elementBytes) :
+            static_cast<uint16_t>(characterStorage ? 1U : 4U);
         local.structTypeIndex = structTypeIndex;
         local.sizeBytes = totalBytes;
-        local.initialized = kind == StorageKind::ArrayInt || kind == StorageKind::ArrayStruct;
+        local.stackOffsetBytes = storageEnd;
+        local.initialized = kind == StorageKind::ArrayInt || kind == StorageKind::ArrayStruct ||
+                            kind == StorageKind::ArrayChar;
         local.declaration = token.location;
         if (!copy_identifier(local.name, sizeof(local.name), token)) return false;
         m_output->localStorageBytes = storageEnd - m_output->parameterStorageBytes;
@@ -456,9 +465,14 @@ private:
         if (!parse_integer(m_source, lengthToken, false, &length, m_diagnostics)) return false;
         ++(*m_index);
         if (!expect(TokenKind::RightBracket, "expected ']' after array length")) return false;
-        if (length <= 0 || static_cast<uint32_t>(length) > maximum) {
+        if (length <= 0) {
             m_diagnostics.error(lengthToken.location,
                                 "array length must be a positive integer constant", "array");
+            return false;
+        }
+        if (static_cast<uint32_t>(length) > maximum) {
+            m_diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, lengthToken.location,
+                                  "array length exceeds the bounded element limit", "array");
             return false;
         }
         if (elementCount) *elementCount = static_cast<uint16_t>(length);
@@ -544,7 +558,8 @@ private:
     bool parse_statement(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth,
                          uint32_t loopDepth)
     {
-        if (current().kind == TokenKind::KeywordInt) return parse_declaration(blockIndex);
+        if (current().kind == TokenKind::KeywordInt || current().kind == TokenKind::KeywordChar)
+            return parse_declaration(blockIndex);
         if (current().kind == TokenKind::KeywordStruct) return parse_struct_declaration(blockIndex);
         if (current().kind == TokenKind::Star) return parse_indirect_assignment(blockIndex);
         if (current().kind == TokenKind::Identifier) {
@@ -648,11 +663,17 @@ private:
     bool parse_declaration(uint16_t blockIndex)
     {
         const SourceLocation location = current().location;
+        const bool character = current().kind == TokenKind::KeywordChar;
         ++(*m_index);
         const bool pointer = current().kind == TokenKind::Star;
+        if (pointer && character) {
+            m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, current().location,
+                                  "local char pointers are not supported", "pointer");
+            return false;
+        }
         if (pointer) ++(*m_index);
         if (!token_is_name(current()) || current().kind == TokenKind::KeywordGxMain) {
-            error_current("expected identifier after 'int'");
+            error_current(character ? "expected identifier after 'char'" : "expected identifier after 'int'");
             return false;
         }
         const Token name = current();
@@ -669,10 +690,16 @@ private:
         }
         uint16_t slot = COMPILER_INVALID_INDEX;
         const StorageKind declaredKind = pointer ? StorageKind::PointerInt :
-            (wasArray ? StorageKind::ArrayInt : StorageKind::ScalarInt);
+            (character ? (wasArray ? StorageKind::ArrayChar : StorageKind::ScalarChar) :
+             (wasArray ? StorageKind::ArrayInt : StorageKind::ScalarInt));
         if (!add_local(name, declaredKind, elementCount, &slot)) return false;
         uint16_t expression = COMPILER_INVALID_INDEX;
         if (current().kind == TokenKind::Equal) {
+            if (character && wasArray) {
+                m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, name.location,
+                                      "char array initializers are not supported", "array");
+                return false;
+            }
             ++(*m_index);
             expression = parse_expression(0);
             if (expression == COMPILER_INVALID_INDEX) return false;
@@ -680,7 +707,8 @@ private:
             if (m_output->expressions[expression].type != expected) {
                 m_diagnostics.error(name.location, pointer
                     ? "cannot initialize int* with an int expression"
-                    : "cannot initialize int with a pointer expression", "type");
+                    : (character ? "cannot initialize char with a non-int expression"
+                                 : "cannot initialize int with a pointer expression"), "type");
                 return false;
             }
         } else {
@@ -892,7 +920,8 @@ private:
             const bool isLocal = localByName != nullptr;
             const LocalSymbol* local = isLocal ? localByName : nullptr;
             const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
-            const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
+            const bool isArray = (local && (local->kind == StorageKind::ArrayInt ||
+                                            local->kind == StorageKind::ArrayChar)) ||
                 (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
             if (!isArray) {
                 m_diagnostics.error(name.location, "indexed access requires an array", "array");
@@ -906,6 +935,11 @@ private:
             const uint16_t expression = parse_expression(0);
             if (expression == COMPILER_INVALID_INDEX ||
                 !expect(TokenKind::Semicolon, "expected ';' after indexed assignment")) return false;
+            if (local && local->kind == StorageKind::ArrayChar &&
+                m_output->expressions[expression].type != ValueType::Int32) {
+                m_diagnostics.error(name.location, "char array elements require an int expression", "type");
+                return false;
+            }
             const uint16_t elementCount = local ? local->elementCount : globalSymbol->elementCount;
             if (!validate_index_constant(indexExpression, elementCount, name.location)) return false;
             if (!append_statement(blockIndex, StatementKind::StoreIndexed, name.location, expression,
@@ -940,14 +974,16 @@ private:
                     (parameter ? parameter->structTypeIdentity :
                      m_unit->structTypes[localByName->structTypeIndex].identity));
             if (m_output->expressions[expression].type != expected || incompatibleStructPointer) {
+                const bool character = localByName && localByName->kind == StorageKind::ScalarChar;
                 m_diagnostics.error(name.location, pointer
                     ? "cannot assign an int expression to int*"
                     : (structPointer ? "cannot assign an incompatible struct pointer type"
-                                     : "cannot assign an int* expression to int"), "type");
+                                     : (character ? "cannot assign a non-int expression to char"
+                                                  : "cannot assign an int* expression to int")), "type");
                 return false;
             }
             const LocalSymbol* local = localByName;
-            if (local && local->kind == StorageKind::ArrayInt) {
+            if (local && (local->kind == StorageKind::ArrayInt || local->kind == StorageKind::ArrayChar)) {
                 m_diagnostics.error(name.location, "array value cannot be assigned directly", "array");
                 return false;
             }
@@ -1427,6 +1463,11 @@ private:
         }
         const bool indexed = current().kind == TokenKind::LeftBracket;
         if (!indexed) {
+            if (local && local->kind == StorageKind::ScalarChar) {
+                m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
+                                      "address of char storage is unsupported", "pointer");
+                return COMPILER_INVALID_INDEX;
+            }
             if (local && local->kind == StorageKind::ScalarInt)
                 return make_expression(ExpressionKind::AddressOfLocal, location,
                                        COMPILER_INVALID_INDEX, COMPILER_INVALID_INDEX,
@@ -1456,12 +1497,20 @@ private:
             }
             if (local && local->kind == StorageKind::ArrayInt)
                 m_diagnostics.error(location, "array value is not addressable; use an element", "pointer");
+            else if (local && local->kind == StorageKind::ArrayChar)
+                m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
+                                      "char array pointers are not supported", "pointer");
             else if (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt)
                 m_diagnostics.error(location, "array value is not addressable; use an element", "pointer");
             else if (parameter)
                 m_diagnostics.error(location, "expression is not addressable", "pointer");
             else
                 m_diagnostics.error(location, "expression is not addressable", "pointer");
+            return COMPILER_INVALID_INDEX;
+        }
+        if (local && local->kind == StorageKind::ArrayChar) {
+            m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
+                                  "char element pointers are not supported", "pointer");
             return COMPILER_INVALID_INDEX;
         }
         const bool isLocal = local != nullptr;
@@ -1553,6 +1602,10 @@ private:
     uint16_t parse_primary(uint32_t depth)
     {
         const Token token = current();
+        if (token.kind == TokenKind::Character) {
+            ++(*m_index);
+            return make_constant(token.value, token.location);
+        }
         if (token.kind == TokenKind::Integer) {
             ++(*m_index);
             int32_t value = 0;
@@ -1583,7 +1636,8 @@ private:
             if (indexed) {
                 const int32_t global = namedGlobal;
                 const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
-                const bool isArray = (local && local->kind == StorageKind::ArrayInt) ||
+                const bool isArray = (local && (local->kind == StorageKind::ArrayInt ||
+                                                local->kind == StorageKind::ArrayChar)) ||
                     (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
                 if (!isArray) {
                     m_diagnostics.error(token.location, structArray
@@ -1666,6 +1720,11 @@ private:
                     m_output->expressions[expression].indexedBaseKind = IndexedBaseKind::Local;
                     m_output->expressions[expression].globalIndex = COMPILER_INVALID_INDEX;
                     return expression;
+                }
+                if (local->kind == StorageKind::ArrayChar) {
+                    m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, token.location,
+                                          "char arrays do not convert to int*", "array");
+                    return COMPILER_INVALID_INDEX;
                 }
                 if (!local->initialized && local->kind != StorageKind::PointerInt) {
                     m_diagnostics.error(token.location, local->kind == StorageKind::PointerInt
@@ -2204,6 +2263,11 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
     uint32_t index = 0;
     while (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::EndOfFile) {
         Token externalToken = tokens[token_index_or_eof(index, tokenCount)];
+        if (externalToken.kind == TokenKind::KeywordChar) {
+            diagnostics.error_as(CompilerDiagnosticKind::Unsupported, externalToken.location,
+                                "global char storage and char return types are not supported", "char");
+            return false;
+        }
         if (externalToken.kind == TokenKind::KeywordStruct) {
             if (!parse_struct_external_declaration(source, tokens, tokenCount, &index,
                                                    output, diagnostics, false)) return false;
