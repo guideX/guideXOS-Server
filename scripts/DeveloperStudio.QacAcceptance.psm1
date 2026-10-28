@@ -20,7 +20,7 @@ function Resolve-QacAcceptanceCliPath {
 }
 
 function Get-QacAcceptancePassMarker {
-    param([Parameter(Mandatory = $true)][ValidateSet('27E', '27F', '28Q', '28O', 'COMP4D')][string]$Phase)
+    param([Parameter(Mandatory = $true)][ValidateSet('27E', '27F', '28Q', '28O', 'COMP4D', 'COMP4F')][string]$Phase)
 
     switch ($Phase) {
         '27E' { return 'phase27e=PASS' }
@@ -28,14 +28,16 @@ function Get-QacAcceptancePassMarker {
         '28Q' { return 'DEVELOPER_STUDIO_PHASE28Q_PASS' }
         '28O' { return 'DEVELOPER_STUDIO_PHASE28O_PASS' }
         'COMP4D' { return 'DEVELOPER_STUDIO_COMP4D_GUEST_PASS' }
+        'COMP4F' { return 'DEVELOPER_STUDIO_COMP4F_GUEST_PASS' }
     }
 }
 
 function Get-QacAcceptanceCompletionMarker {
-    param([Parameter(Mandatory = $true)][ValidateSet('COMP4D')][string]$Phase)
+    param([Parameter(Mandatory = $true)][ValidateSet('COMP4D', 'COMP4F')][string]$Phase)
 
     switch ($Phase) {
         'COMP4D' { return 'DEVELOPER_STUDIO_COMP4D_GUEST_COMPLETE' }
+        'COMP4F' { return 'DEVELOPER_STUDIO_COMP4F_GUEST_COMPLETE' }
     }
 }
 

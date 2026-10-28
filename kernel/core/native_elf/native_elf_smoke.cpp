@@ -2510,7 +2510,7 @@ static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32
     return file_contains_bytes_probe(path, pattern, patternBytes, nullptr);
 }
 
-#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
+#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
 static void print_decimal(uint32_t value)
 {
     char digits[10] = {};
@@ -2785,7 +2785,7 @@ static bool run_phase27w_session(const gx_build_snapshot& build,
     const bool normalClose = polled && successfulExitState &&
         completed.errorCode == GX_DEVELOPMENT_RUN_ERROR_NONE && completed.cleanupComplete != 0 &&
         completed.exitCode == expectedExitCode && phase27w_output_contains(completed, expectedOutput);
-#if defined(GXOS_COMP4D_SMOKE)
+#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE)
     if (!normalClose) {
         serial::puts("comp4d_run_snapshot started="); print_decimal(started ? 1U : 0U);
         serial::puts(" polled="); print_decimal(polled ? 1U : 0U);
@@ -2834,7 +2834,7 @@ static bool phase27w_failed_build_blocks_run(const gx_build_snapshot& build)
     return rejected && !NativeElfDevelopmentAppModel::has_active_registration();
 }
 
-#if defined(GXOS_COMP4D_SMOKE)
+#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE)
 static bool phase27w_build_output_contains(const gx_build_snapshot& snapshot,
                                            const char* expected)
 {
@@ -2873,7 +2873,11 @@ static bool run_comp4d_cooperative_build(gx_build_snapshot* snapshot,
                                          bool* sawCompiler,
                                          bool expectSuccess = true)
 {
+#if defined(GXOS_COMP4F_SMOKE)
+    static const uint64_t kOwner = 0x434F4D503446ULL;
+#else
     static const uint64_t kOwner = 0x434F4D503444ULL;
+#endif
     if (outHandle) *outHandle = 0;
     if (sawPreparing) *sawPreparing = false;
     if (sawCompiler) *sawCompiler = false;
@@ -2990,6 +2994,60 @@ static bool comp4d_partial_elf_is_rejected(const gx_build_snapshot& build)
     return rejectedBeforeLaunch && preserved && backupRemoved &&
         !NativeElfDevelopmentAppModel::has_active_registration();
 }
+
+#if defined(GXOS_COMP4F_SMOKE)
+static bool comp4f_object_abi11()
+{
+    uint32_t objectBytes = 0;
+    if (!read_vfs_image("/P27W/build/obj/amd64/src/value.o", s_invalidImage,
+                        sizeof(s_invalidImage), &objectBytes)) return false;
+    compiler::ElfObjectHeaderView header = {};
+    compiler::Diagnostics diagnostics;
+    return compiler::inspect_elf_object(s_invalidImage, objectBytes, &header, diagnostics) &&
+        header.elfType == 1 && header.machine == 62 &&
+        header.formatVersion == compiler::COMPILER_OBJECT_FORMAT_VERSION &&
+        header.compilerObjectAbiVersion == 11U &&
+        header.compilerObjectAbiVersion == compiler::COMPILER_OBJECT_ABI_VERSION;
+}
+
+static bool comp4f_write_source(const char* path, const char* text)
+{
+    return path && text && vfs::write_file(path, text,
+        static_cast<uint32_t>(__builtin_strlen(text))) ==
+        static_cast<int32_t>(__builtin_strlen(text));
+}
+
+static bool comp4f_build_and_run(const char* mainSource, const char* valueSource,
+                                 int32_t expectedExitCode, const char* expectedOutput,
+                                 gx_build_snapshot* outBuild, gx_build_handle* outHandle)
+{
+    if (outBuild) *outBuild = {};
+    if (outHandle) *outHandle = 0;
+    if (!comp4f_write_source("/P27W/include/phase27w_value.h",
+            "extern int phase27w_value();\n// COMP4F guest fixture\n") ||
+        !comp4f_write_source("/P27W/src/main.cpp", mainSource) ||
+        !comp4f_write_source("/P27W/src/value.cpp", valueSource)) return false;
+
+    gx_build_snapshot build = {};
+    gx_build_handle handle = 0;
+    bool sawPreparing = false;
+    bool sawCompiler = false;
+    const bool built = run_comp4d_cooperative_build(
+        &build, &handle, &sawPreparing, &sawCompiler);
+    const bool objectAbi = built && comp4f_object_abi11();
+    bool deployed = false;
+    bool alreadyRunningRejected = false;
+    bool closed = false;
+    bool cleaned = false;
+    const bool ran = objectAbi && run_phase27w_session(
+        build, expectedExitCode, expectedOutput, &deployed,
+        &alreadyRunningRejected, &closed, &cleaned);
+    if (outBuild) *outBuild = build;
+    if (outHandle) *outHandle = handle;
+    return built && sawPreparing && sawCompiler && objectAbi && ran && deployed &&
+        alreadyRunningRejected && closed && cleaned;
+}
+#endif
 #endif
 #endif
 
@@ -5294,6 +5352,116 @@ void run_bootstrap_execution_smoke()
     static gx_build_snapshot w27LinkFailed = {};
     static gx_build_snapshot w27Restored = {};
     bool comp4dAllChecks = true;
+#if defined(GXOS_COMP4F_SMOKE)
+    const char fMain65[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4F CHAR 65\"); return phase27w_value(); }\n";
+    const char fValue65[] =
+        "#include \"phase27w_value.h\"\n"
+        "int phase27w_value() { return 'A'; }\n";
+    const char fMain66[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4F SIGNED 66\"); return phase27w_value(); }\n";
+    const char fValue66[] =
+        "#include \"phase27w_value.h\"\n"
+        "int phase27w_value() { char positive = 'A'; char boundary = 127; char truncated128 = 128; "
+        "char truncated255 = 255; int promoted = truncated255; if (positive != 65) return 21; "
+        "if (boundary != 127) return 22; if (truncated128 != -128) return 23; "
+        "if (truncated255 != -1) return 24; if (promoted != -1) return 25; return 66; }\n";
+    const char fMain67[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4F ARRAY 67\"); return phase27w_value(); }\n";
+    const char fValue67[] =
+        "#include \"phase27w_value.h\"\n"
+        "int phase27w_value() { int before = 501; char bytes[4]; int after = 502; "
+        "bytes[0] = 'A'; bytes[1] = 127; bytes[2] = 128; bytes[3] = 255; "
+        "int promoted128 = bytes[2]; int promoted255 = bytes[3]; "
+        "if (before != 501) return 31; if (after != 502) return 32; "
+        "if (bytes[0] != 65) return 33; if (bytes[1] != 127) return 34; "
+        "if (bytes[2] != -128) return 35; if (bytes[3] != -1) return 36; "
+        "if (promoted128 != -128) return 37; if (promoted255 != -1) return 38; return 67; }\n";
+    const char fMain68[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4F ARITH 68\"); return phase27w_value(); }\n";
+    const char fValue68[] =
+        "#include \"phase27w_value.h\"\n"
+        "int phase27w_value() { char negative = 255; char dividend = -17; char divisor = 5; "
+        "int sum = 'A' + negative; int product = divisor * negative; "
+        "int quotient = dividend / divisor; int remainder = dividend % divisor; "
+        "if (sum != 64) return 41; if (product != -5) return 42; "
+        "if (quotient != -3) return 43; if (remainder != -2) return 44; return 68; }\n";
+    const char fMain82[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4F REPEAT R 82\"); return phase27w_value(); }\n";
+    const char fValue82[] =
+        "#include \"phase27w_value.h\"\n"
+        "int phase27w_value() { char result = 'R'; return result; }\n";
+    const char fMain83[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4F REPEAT S 83\"); return phase27w_value(); }\n";
+    const char fValue83[] =
+        "#include \"phase27w_value.h\"\n"
+        "int phase27w_value() { char result = 'S'; return result; }\n";
+    gx_build_snapshot fBuild65 = {}, fBuild66 = {}, fBuild67 = {}, fBuild68 = {};
+    gx_build_snapshot fFailed = {}, fBuild82 = {}, fBuild83 = {};
+    gx_build_handle fHandle65 = 0, fHandle66 = 0, fHandle67 = 0, fHandle68 = 0;
+    gx_build_handle fHandle82 = 0, fHandle83 = 0;
+    const bool fCharacter = fixture && comp4f_build_and_run(
+        fMain65, fValue65, 65, "COMP4F CHAR 65", &fBuild65, &fHandle65);
+    print_marker("comp4f_character_literal", fCharacter);
+    const bool fQueuedCancellation = fCharacter && comp4d_cancel_queued_build_preserves_artifact();
+    print_marker("comp4f_queued_cancel_preserved", fQueuedCancellation);
+    const bool fSignedScalar = fQueuedCancellation && comp4f_build_and_run(
+        fMain66, fValue66, 66, "COMP4F SIGNED 66", &fBuild66, &fHandle66);
+    print_marker("comp4f_signed_scalar", fSignedScalar);
+    const bool fByteArray = fSignedScalar && comp4f_build_and_run(
+        fMain67, fValue67, 67, "COMP4F ARRAY 67", &fBuild67, &fHandle67);
+    print_marker("comp4f_byte_array", fByteArray);
+    const bool fArithmetic = fByteArray && comp4f_build_and_run(
+        fMain68, fValue68, 68, "COMP4F ARITH 68", &fBuild68, &fHandle68);
+    print_marker("comp4f_arithmetic", fArithmetic);
+    const bool fObjectAbi = fArithmetic && comp4f_object_abi11();
+    print_marker("comp4f_object_abi11", fObjectAbi);
+    const bool fPartialElf = fObjectAbi && comp4d_partial_elf_is_rejected(fBuild68);
+    print_marker("comp4f_partial_elf_rejected", fPartialElf);
+
+    const bool fPriorStored = fPartialElf && comp4d_store_valid_artifact();
+    const bool fMalformedWritten = fPriorStored && comp4f_write_source(
+        "/P27W/src/value.cpp",
+        "#include \"phase27w_value.h\"\nint phase27w_value() { char malformed = 'Z; return malformed; }\n");
+    bool fFailureSawPreparing = false;
+    bool fFailureSawCompiler = false;
+    gx_build_handle fFailedHandle = 0;
+    const bool fFailureBuilt = fMalformedWritten && run_comp4d_cooperative_build(
+        &fFailed, &fFailedHandle, &fFailureSawPreparing, &fFailureSawCompiler, false);
+    const bool fFailureDiagnostics = fFailureBuilt && fFailureSawPreparing && fFailureSawCompiler &&
+        fFailed.state == GX_BUILD_FAILED && fFailed.errorCode == GX_BUILD_ERROR_COMPILER_LEXICAL &&
+        fFailed.errorCount != 0U && !fFailed.artifactValid && fFailed.artifactSize == 0U &&
+        fFailed.artifactPath[0] == '\0' && fFailed.artifactSha256[0] == '\0' &&
+        phase27w_build_output_contains(fFailed, "value.cpp(1,") &&
+        phase27w_build_output_contains(fFailed, "[lexical]");
+    const bool fFailurePreserved = fFailureBuilt && comp4d_artifact_matches_saved();
+    const bool fFailedRunBlocked = fFailureBuilt && phase27w_failed_build_blocks_run(fFailed);
+    const bool fBackupRemoved = reset_vfs_file(kComp4DBuildOwner);
+    print_marker("comp4f_compile_failure_diagnostics", fFailureDiagnostics);
+    print_marker("comp4f_compile_failure_preserved", fFailurePreserved && fBackupRemoved);
+    print_marker("comp4f_failed_build_blocks_run", fFailedRunBlocked);
+
+    const bool fRepeatedR = fFailureDiagnostics && fFailurePreserved && fFailedRunBlocked && fBackupRemoved &&
+        comp4f_build_and_run(fMain82, fValue82, 82, "COMP4F REPEAT R 82", &fBuild82, &fHandle82);
+    const bool fRepeatedS = fRepeatedR &&
+        comp4f_build_and_run(fMain83, fValue83, 83, "COMP4F REPEAT S 83", &fBuild83, &fHandle83);
+    const bool fGenerationIdentity = fRepeatedS && fHandle82 != fHandle83 &&
+        fHandle83 != fFailedHandle && !equal_text(fBuild82.artifactSha256, fBuild83.artifactSha256);
+    print_marker("comp4f_repeated_build_identity", fGenerationIdentity);
+    const bool comp4fAllChecks = fCharacter && fQueuedCancellation && fSignedScalar && fByteArray &&
+        fArithmetic && fObjectAbi && fPartialElf && fFailureDiagnostics && fFailurePreserved &&
+        fFailedRunBlocked && fBackupRemoved && fRepeatedR && fRepeatedS && fGenerationIdentity &&
+        !NativeElfDevelopmentAppModel::has_active_registration();
+    if (comp4fAllChecks) serial::puts("DEVELOPER_STUDIO_COMP4F_GUEST_PASS\n");
+    serial::puts("DEVELOPER_STUDIO_COMP4F_GUEST_COMPLETE\n");
+    return;
+#endif
 #if defined(GXOS_COMP4D_SMOKE)
     bool comp4dSawPreparing = false;
     bool comp4dSawCompiler = false;
@@ -5321,7 +5489,7 @@ void run_bootstrap_execution_smoke()
         comp4d_cancel_queued_build_preserves_artifact();
     comp4dAllChecks = comp4dAllChecks && comp4dQueuedCancellation;
     print_marker("comp4d_queued_cancellation", comp4dQueuedCancellation);
-#else
+#elif !defined(GXOS_COMP4F_SMOKE)
     const bool comp4dQueuedCancellation = true;
 #endif
 
