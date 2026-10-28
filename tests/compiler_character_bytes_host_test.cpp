@@ -287,7 +287,8 @@ static bool test_diagnostics()
     const char* tooMany = "int gx_main(gx_app_context* ctx) { char data[65]; return 0; }";
     const char* unsignedInt = "int gx_main(gx_app_context* ctx) { unsigned int value = 1; return value; }";
     const char* unsignedMissingBase = "int gx_main(gx_app_context* ctx) { unsigned value = 1; return value; }";
-    const char* unsignedPointer = "int gx_main(gx_app_context* ctx) { unsigned char* data; return 0; }";
+    const char* unsignedPointer =
+        "int gx_main(gx_app_context* ctx) { unsigned char* data = \"text\"; return 0; }";
     const char* unsignedTooMany = "int gx_main(gx_app_context* ctx) { unsigned char data[65]; return 0; }";
     const uint32_t lexical = static_cast<uint32_t>(std::strchr(unterminated, '\'') - unterminated);
     const uint32_t escape = static_cast<uint32_t>(std::strchr(badEscape, '\'') - badEscape);
@@ -345,10 +346,9 @@ static bool test_diagnostics()
            expect_rejection(unsignedMissingBase, CompilerDiagnosticKind::Unsupported,
                             "only unsigned char is supported",
                             static_cast<uint32_t>(std::strstr(unsignedMissingBase, "unsigned") - unsignedMissingBase)) &&
-           expect_rejection(unsignedPointer, CompilerDiagnosticKind::Unsupported,
-                            "unsigned char pointers are not supported",
-                            static_cast<uint32_t>(std::strstr(unsignedPointer, "unsigned char*") +
-                                                  std::strlen("unsigned char") - unsignedPointer)) &&
+           expect_rejection(unsignedPointer, CompilerDiagnosticKind::Semantic,
+                            "cannot initialize unsigned char*",
+                            static_cast<uint32_t>(std::strstr(unsignedPointer, "data") - unsignedPointer)) &&
            expect_rejection(unsignedTooMany, CompilerDiagnosticKind::ResourceLimit,
                             "array length exceeds",
                             static_cast<uint32_t>(std::strstr(unsignedTooMany, "65") - unsignedTooMany));

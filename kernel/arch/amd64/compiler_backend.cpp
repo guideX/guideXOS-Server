@@ -735,7 +735,8 @@ static bool is_legacy_single_log(const FunctionIR& function)
 
 static bool is_pointer_value_type(ValueType type)
 {
-    return type == ValueType::Int32Pointer || type == ValueType::StructPointer;
+    return type == ValueType::Int32Pointer || type == ValueType::StructPointer ||
+           type == ValueType::UnsignedCharPointer;
 }
 
 static uint16_t struct_pointer_type_index(const TranslationUnitIR& unit,
@@ -753,6 +754,7 @@ static uint32_t pointer_element_size(const TranslationUnitIR& unit,
                                      const Expression& expression)
 {
     if (expression.type == ValueType::Int32Pointer) return 4;
+    if (expression.type == ValueType::UnsignedCharPointer) return 1;
     const uint16_t structType = struct_pointer_type_index(unit, expression);
     return structType < unit.structTypeCount ? unit.structTypes[structType].sizeBytes : 0;
 }
@@ -761,6 +763,7 @@ static uint32_t pointer_element_alignment(const TranslationUnitIR& unit,
                                           const Expression& expression)
 {
     if (expression.type == ValueType::Int32Pointer) return 4;
+    if (expression.type == ValueType::UnsignedCharPointer) return 1;
     const uint16_t structType = struct_pointer_type_index(unit, expression);
     return structType < unit.structTypeCount ? unit.structTypes[structType].alignment : 0;
 }
@@ -850,7 +853,8 @@ static bool required_temporary_slots(const FunctionIR& function, uint16_t index,
     if (expression.kind == ExpressionKind::LoadIndexed || expression.kind == ExpressionKind::AddressOfIndexed ||
         expression.kind == ExpressionKind::LoadField || expression.kind == ExpressionKind::AddressOfField)
         return required_temporary_slots(function, expression.left, depth + 1U, output);
-    if (expression.kind == ExpressionKind::Negate || expression.kind == ExpressionKind::LoadIndirectInt32)
+    if (expression.kind == ExpressionKind::Negate || expression.kind == ExpressionKind::LoadIndirectInt32 ||
+        expression.kind == ExpressionKind::LoadIndirectUnsignedChar)
         return required_temporary_slots(function, expression.left, depth + 1U, output);
     if (!required_temporary_slots(function, expression.left, depth + 1U, &left)) return false;
     if (!required_temporary_slots(function, expression.right, depth + 1U, &right)) return false;
@@ -897,7 +901,8 @@ static bool required_transient_stack_bytes(const FunctionIR& function, uint16_t 
         *output = maximum;
         return *output <= COMPILER_MAX_TRANSIENT_STACK_BYTES;
     }
-    if (expression.kind == ExpressionKind::Negate || expression.kind == ExpressionKind::LoadIndirectInt32)
+    if (expression.kind == ExpressionKind::Negate || expression.kind == ExpressionKind::LoadIndirectInt32 ||
+        expression.kind == ExpressionKind::LoadIndirectUnsignedChar)
         return required_transient_stack_bytes(function, expression.left, depth + 1U, output);
 
     uint32_t left = 0, right = 0;
@@ -934,7 +939,8 @@ static bool required_pointer_temporary_slots(const FunctionIR& function, uint16_
         expression.kind == ExpressionKind::LoadField ||
         expression.kind == ExpressionKind::AddressOfField ||
         expression.kind == ExpressionKind::Negate ||
-        expression.kind == ExpressionKind::LoadIndirectInt32)
+        expression.kind == ExpressionKind::LoadIndirectInt32 ||
+        expression.kind == ExpressionKind::LoadIndirectUnsignedChar)
         return required_pointer_temporary_slots(function, expression.left, depth + 1U, output);
     if (expression.kind == ExpressionKind::PointerAdd ||
         expression.kind == ExpressionKind::PointerSubtractInteger) {
@@ -953,8 +959,8 @@ static bool required_pointer_temporary_slots(const FunctionIR& function, uint16_
     if ((expression.kind == ExpressionKind::Equal || expression.kind == ExpressionKind::NotEqual) &&
         expression.left < function.expressionCount &&
         expression.right < function.expressionCount &&
-        function.expressions[expression.left].type == ValueType::Int32Pointer &&
-        function.expressions[expression.right].type == ValueType::Int32Pointer) {
+        is_pointer_value_type(function.expressions[expression.left].type) &&
+        function.expressions[expression.right].type == function.expressions[expression.left].type) {
         uint16_t leftNeeded = 0;
         uint16_t rightNeeded = 0;
         if (!required_pointer_temporary_slots(function, expression.left, depth + 1U, &leftNeeded) ||
@@ -999,7 +1005,8 @@ static bool required_statement_temporary_slots(const FunctionIR& function, uint1
     for (uint32_t i = 0; i < function.statementCount; ++i) {
         const Statement& statement = function.statements[i];
         if (statement.kind != StatementKind::StoreIndexed &&
-            statement.kind != StatementKind::StoreIndirectInt32) continue;
+            statement.kind != StatementKind::StoreIndirectInt32 &&
+            statement.kind != StatementKind::StoreIndirectUnsignedChar) continue;
         uint16_t right = 0;
         uint16_t index = 0;
         if (!required_temporary_slots(function, statement.expression, 0, &right)) return false;
@@ -1071,18 +1078,22 @@ static bool emit_pointer_failure(Emitter& emitter, uint16_t epilogueLabel)
            emitter.emit_jmp(epilogueLabel);
 }
 
-static bool emit_pointer_validation(Emitter& emitter, uint16_t failureLabel)
+static bool emit_pointer_validation(Emitter& emitter, uint16_t failureLabel,
+                                    uint32_t elementSize, uint32_t elementAlignment)
 {
+    if ((elementSize != 1 && elementSize != 4) ||
+        (elementAlignment != 1 && elementAlignment != 4) || elementAlignment > elementSize) return false;
     // RAX points at the descriptor.  Validate the descriptor fields before
     // loading the user storage address in RDX.
     return emitter.test_rax_rax() && emitter.emit_jz(failureLabel) &&
            emitter.mov_ecx_ptr32(28) && emitter.cmp_ecx_imm32(1) && emitter.emit_jnz(failureLabel) &&
-           emitter.mov_ecx_ptr32(20) && emitter.cmp_ecx_imm32(4) && emitter.emit_jnz(failureLabel) &&
-           emitter.mov_r8d_ptr32(16) && emitter.cmp_r8d_imm32(4) && emitter.emit_jb(failureLabel) &&
+           emitter.mov_ecx_ptr32(20) && emitter.cmp_ecx_imm32(elementSize) && emitter.emit_jnz(failureLabel) &&
+           emitter.mov_r8d_ptr32(16) && emitter.cmp_r8d_imm32(elementSize) && emitter.emit_jb(failureLabel) &&
            emitter.mov_rdx_ptr64(0) && emitter.mov_rcx_ptr64(8) &&
            emitter.cmp_rdx_rcx() && emitter.emit_jb(failureLabel) &&
-           emitter.test_edx_imm32(3) && emitter.emit_jnz(failureLabel) &&
-           emitter.sub_rdx_rcx() && emitter.sub_r8d_imm32(4) &&
+           (elementAlignment == 1 || (emitter.test_edx_imm32(elementAlignment - 1U) &&
+                                      emitter.emit_jnz(failureLabel))) &&
+           emitter.sub_rdx_rcx() && emitter.sub_r8d_imm32(elementSize) &&
            emitter.cmp_rdx_r8() && emitter.emit_ja(failureLabel);
 }
 
@@ -1223,12 +1234,15 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
     }
     if (expression.kind == ExpressionKind::AddressOfLocal) {
         bool scalar = false;
+        const uint32_t elementSize = expression.type == ValueType::UnsignedCharPointer ? 1U : 4U;
         for (uint32_t i = 0; i < function.localCount; ++i)
             if (function.locals[i].slot == expression.localIndex)
-                scalar = function.locals[i].kind == StorageKind::ScalarInt;
+                scalar = elementSize == 1
+                    ? function.locals[i].kind == StorageKind::ScalarUnsignedChar
+                    : function.locals[i].kind == StorageKind::ScalarInt;
         if (!scalar || !emitter.lea_rax_local(local_displacement(function, expression.localIndex)) ||
             !emitter.mov_local_rax64(scratch) || !emitter.mov_local_rax64(scratch + 8) ||
-            !emit_pointer_descriptor_metadata(emitter, scratch, 4, 4,
+            !emit_pointer_descriptor_metadata(emitter, scratch, elementSize, elementSize,
                                                PointerProvenanceKind::LocalScalar) ||
             !emitter.lea_rax_local(scratch)) return false;
         return true;
@@ -1252,13 +1266,17 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
             if (local.slot != expression.localIndex) continue;
             validArray = expression.type == ValueType::StructPointer
                 ? local.kind == StorageKind::ArrayStruct && local.elementSize == expression.elementSize
-                : local.kind == StorageKind::ArrayInt && expression.elementSize == 4;
+                : (expression.type == ValueType::UnsignedCharPointer
+                    ? local.kind == StorageKind::ArrayUnsignedChar && expression.elementSize == 1
+                    : local.kind == StorageKind::ArrayInt && expression.elementSize == 4);
         }
         if (!validArray) return false;
     } else if (expression.globalIndex >= unit.globalCount ||
                (expression.type == ValueType::StructPointer
                    ? unit.globals[expression.globalIndex].kind != StorageKind::ArrayStruct
-                   : unit.globals[expression.globalIndex].kind != StorageKind::ArrayInt)) {
+                   : (expression.type == ValueType::UnsignedCharPointer
+                       ? unit.globals[expression.globalIndex].kind != StorageKind::ArrayUnsignedChar
+                       : unit.globals[expression.globalIndex].kind != StorageKind::ArrayInt))) {
         return false;
     }
     uint16_t boundsFailureLabel = COMPILER_INVALID_INDEX;
@@ -1603,7 +1621,8 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
             for (uint32_t l = 0; l < function.localCount; ++l)
                 if (function.locals[l].slot == expression.localIndex &&
                     (function.locals[l].kind == StorageKind::PointerInt ||
-                     function.locals[l].kind == StorageKind::PointerStruct)) pointerSlot = true;
+                     function.locals[l].kind == StorageKind::PointerStruct ||
+                     function.locals[l].kind == StorageKind::PointerUnsignedChar)) pointerSlot = true;
             return pointerSlot && emitter.lea_rax_local(local_displacement(function, expression.localIndex));
         }
         case ExpressionKind::LoadStructPointer: {
@@ -1683,8 +1702,23 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
             if (!emitter.create_label(&failureLabel) || !emitter.create_label(&endLabel) ||
                 !emit_expression_value(emitter, unit, function, frame, functionLabels, expression.left,
                                        epilogueLabel, callFailureLabel, &pointerChildSlot) ||
-                !emit_pointer_validation(emitter, failureLabel) ||
+                !emit_pointer_validation(emitter, failureLabel, 4, 4) ||
                 !emitter.mov_rdx_ptr64(0) || !emitter.mov_eax_rax() || !emitter.emit_jmp(endLabel) ||
+                !emitter.define_label(failureLabel) || !emit_pointer_failure(emitter, epilogueLabel) ||
+                !emitter.define_label(endLabel)) return false;
+            if (pointerChildSlot != COMPILER_INVALID_INDEX &&
+                !emitter.release_pointer_temporary_slots(1)) return false;
+            return true;
+        }
+        case ExpressionKind::LoadIndirectUnsignedChar: {
+            uint16_t failureLabel = COMPILER_INVALID_INDEX;
+            uint16_t endLabel = COMPILER_INVALID_INDEX;
+            uint16_t pointerChildSlot = COMPILER_INVALID_INDEX;
+            if (!emitter.create_label(&failureLabel) || !emitter.create_label(&endLabel) ||
+                !emit_expression_value(emitter, unit, function, frame, functionLabels, expression.left,
+                                       epilogueLabel, callFailureLabel, &pointerChildSlot) ||
+                !emit_pointer_validation(emitter, failureLabel, 1, 1) ||
+                !emitter.mov_rdx_ptr64(0) || !emitter.movzx_eax_rax8() || !emitter.emit_jmp(endLabel) ||
                 !emitter.define_label(failureLabel) || !emit_pointer_failure(emitter, epilogueLabel) ||
                 !emitter.define_label(endLabel)) return false;
             if (pointerChildSlot != COMPILER_INVALID_INDEX &&
@@ -1706,8 +1740,8 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
         case ExpressionKind::Greater:
         case ExpressionKind::GreaterEqual:
             if ((expression.kind == ExpressionKind::Equal || expression.kind == ExpressionKind::NotEqual) &&
-                function.expressions[expression.left].type == ValueType::Int32Pointer &&
-                function.expressions[expression.right].type == ValueType::Int32Pointer)
+                is_pointer_value_type(function.expressions[expression.left].type) &&
+                function.expressions[expression.right].type == function.expressions[expression.left].type)
                 return emit_pointer_equality(emitter, unit, function, frame, functionLabels, expression,
                                              epilogueLabel, callFailureLabel);
             if (!emit_expression(emitter, unit, function, frame, functionLabels, expression.left,
@@ -1757,7 +1791,8 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
             for (uint32_t i = 0; i < function.localCount; ++i)
                 if (function.locals[i].slot == statement.localIndex) local = &function.locals[i];
             if (!local) return false;
-            if (local->kind == StorageKind::PointerInt) {
+            if (local->kind == StorageKind::PointerInt ||
+                local->kind == StorageKind::PointerUnsignedChar) {
                 if (statement.expression == COMPILER_INVALID_INDEX)
                     return emit_zero_pointer_descriptor(emitter,
                                                         local_displacement(function, statement.localIndex));
@@ -1865,7 +1900,9 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
             return true;
         }
         case StatementKind::StoreIndirectInt32:
+        case StatementKind::StoreIndirectUnsignedChar:
         {
+            const bool byteStore = statement.kind == StatementKind::StoreIndirectUnsignedChar;
             uint16_t temporaryBase = 0;
             if (!emitter.acquire_temporary_slots(1, &temporaryBase) ||
                 !emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
@@ -1878,10 +1915,12 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                 !emit_expression_value(emitter, unit, function, frame, functionLabels,
                                        statement.targetExpression, epilogueLabel, callFailureLabel,
                                        &pointerTargetSlot) ||
-                !emit_pointer_validation(emitter, failureLabel) ||
+                !emit_pointer_validation(emitter, failureLabel, byteStore ? 1U : 4U,
+                                         byteStore ? 1U : 4U) ||
                 !emitter.mov_rdx_ptr64(0) ||
                 !emitter.mov_eax_local(temporary_displacement(frame, temporaryBase)) ||
-                !emitter.mov_rax_eax() || !emitter.emit_jmp(endLabel) ||
+                !(byteStore ? emitter.mov_rax_al() : emitter.mov_rax_eax()) ||
+                !emitter.emit_jmp(endLabel) ||
                 !emitter.define_label(failureLabel) || !emit_pointer_failure(emitter, epilogueLabel) ||
                 !emitter.define_label(endLabel) || !emitter.release_temporary_slots(1)) return false;
             if (pointerTargetSlot != COMPILER_INVALID_INDEX &&

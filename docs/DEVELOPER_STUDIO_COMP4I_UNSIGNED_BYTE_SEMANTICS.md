@@ -49,12 +49,12 @@ The complete COMP4A–COMP4H hosted regression set passed: driver diagnostics, b
 
 All new validation outputs were written under `out/comp4i-validation/`. Existing unrelated untracked validation artifacts were preserved. `git diff --check` passed.
 
-## Remaining limits and guest backlog
+## Remaining limits and consolidated guest backlog
 
-COMP4I does not add `unsigned int`, wider integer types, general unsigned arithmetic, casts, bitwise operations, standalone character globals, unsigned-byte pointers, or general character-pointer loads and stores. It does not add general C array decay or initializers. These forms are rejected or remain outside the bounded language subset; unsigned-byte pointers are not silently treated as `int*`.
+COMP4I did not add `unsigned int`, wider integer types, general unsigned arithmetic, casts, bitwise operations, standalone character globals, or general character-pointer loads and stores. It did not add general C array decay or initializers. These forms remain outside the bounded language subset.
 
-Guest qualification remains pending. COMP4F stays `HOSTED_READY_GUEST_PENDING`; COMP4H mixed-width structure guest qualification is outstanding; COMP4I guest acceptance is pending. No QEMU/QAC guest result is claimed. Any later combined guest acceptance must rebuild fixtures and cached compiler objects with object ABI 14 (or the current ABI at that time) and must not reuse incompatible older acceptance artifacts.
+Guest qualification remains pending for COMP4F (`HOSTED_READY_GUEST_PENDING`), COMP4H mixed-width structure fields, COMP4I unsigned-byte semantics, and COMP4J typed unsigned-byte pointers. COMP4J is hosted accepted; its detailed implementation and proof record is [DEVELOPER_STUDIO_COMP4J_UNSIGNED_BYTE_POINTERS.md](DEVELOPER_STUDIO_COMP4J_UNSIGNED_BYTE_POINTERS.md). No QEMU/QAC guest result is claimed for these phases. Any combined guest acceptance must rebuild fixtures and cached compiler objects using the current internal compiler object ABI 15 and must not reuse objects from ABIs 13 or 14.
 
-## Recommended COMP4J scope
+## Recommended COMP4K scope
 
-If COMP4J continues binary-data support, first define and implement a bounded `unsigned char*` subset on top of the current pointer-provenance model: explicit pointer type identity, permitted address sources, checked dereference loads/stores, byte truncation, and zero-extension. Keep arbitrary casts, unrestricted pointer arithmetic, and general C pointer conversion out of scope. Qualify object signatures, NativeElf execution, and failure safety in hosted tests before requesting any guest gate.
+Do not expand the language before the pending COMP4F/H/I/J guest backlog receives qualification capacity. Then consider only a small read-only byte-view extension if a concrete language use requires it. Keep unrestricted casts and general pointer escape out of scope.

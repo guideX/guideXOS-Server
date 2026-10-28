@@ -473,7 +473,7 @@ static bool read_export(Reader& reader, ExportSymbol& symbol)
     if (symbol.kind != SymbolKind::Function &&
         (symbol.parameterCount != 0 || returnKind != static_cast<uint8_t>(FunctionReturnKind::Integer))) return false;
     symbol.returnKind = static_cast<FunctionReturnKind>(returnKind);
-    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) { const uint8_t kindValue = reader.u8(); if (kindValue > static_cast<uint8_t>(ParameterKind::UnsignedCharacter)) return false; symbol.parameterKinds[i] = static_cast<ParameterKind>(kindValue); }
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) { const uint8_t kindValue = reader.u8(); if (kindValue > static_cast<uint8_t>(ParameterKind::UnsignedCharacterPointer)) return false; symbol.parameterKinds[i] = static_cast<ParameterKind>(kindValue); }
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) symbol.parameterStructTypes[i] = reader.u64();
     if (!read_optional_name(reader, symbol.structTypeName, sizeof(symbol.structTypeName))) return false;
     symbol.structTypeIdentity = reader.u64(); symbol.location = read_location(reader); return reader.ok();
@@ -500,7 +500,7 @@ static bool read_import(Reader& reader, ImportSymbol& symbol)
     if (returnReserved != 0 || returnKind > static_cast<uint8_t>(FunctionReturnKind::UnsignedCharacter)) return false;
     if (symbol.kind != SymbolKind::Function &&
         (symbol.expectedParameterCount != 0 || returnKind != static_cast<uint8_t>(FunctionReturnKind::Integer))) return false;
-    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) { const uint8_t kindValue = reader.u8(); if (kindValue > static_cast<uint8_t>(ParameterKind::UnsignedCharacter)) return false; symbol.parameterKinds[i] = static_cast<ParameterKind>(kindValue); }
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) { const uint8_t kindValue = reader.u8(); if (kindValue > static_cast<uint8_t>(ParameterKind::UnsignedCharacterPointer)) return false; symbol.parameterKinds[i] = static_cast<ParameterKind>(kindValue); }
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) symbol.parameterStructTypes[i] = reader.u64();
     if (!read_optional_name(reader, symbol.structTypeName, sizeof(symbol.structTypeName))) return false;
     symbol.structTypeIdentity = reader.u64(); symbol.location = read_location(reader); return reader.ok();

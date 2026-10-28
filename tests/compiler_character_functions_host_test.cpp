@@ -507,8 +507,10 @@ static bool test_signature_and_resource_diagnostics()
                CompilerDiagnosticKind::Unsupported, "unsigned int is not implemented") &&
            expect_rejection("unsigned char* not_supported(unsigned char value) { return value; }",
                CompilerDiagnosticKind::Unsupported, "character-pointer function return types") &&
-           expect_rejection("int bad_unsigned_pointer(unsigned char* value) { return 0; }",
-               CompilerDiagnosticKind::Unsupported, "unsigned char pointer parameters are not supported") &&
+           expect_rejection(
+               "int read_byte(unsigned char* value) { return value[0]; }\n"
+               "int gx_main(gx_app_context* ctx) { return read_byte(0); }",
+               CompilerDiagnosticKind::Semantic, "function argument requires unsigned char*") &&
            expect_rejection("char* text_value() { return \"text\"; }",
                CompilerDiagnosticKind::Unsupported, "character-pointer function return types") &&
            expect_rejection("int bad_pointer(char** text) { return 0; }",

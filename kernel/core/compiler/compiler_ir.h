@@ -76,7 +76,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 14;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 15;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -124,6 +124,7 @@ enum class ExpressionKind : uint8_t {
     // the numeric values of the earlier expression kinds.
     Divide,
     Remainder,
+    LoadIndirectUnsignedChar,
 };
 
 enum class ValueType : uint8_t {
@@ -132,6 +133,7 @@ enum class ValueType : uint8_t {
     StructValue,
     StructPointer,
     StringPointer,
+    UnsignedCharPointer,
 };
 
 enum class PointerProvenanceKind : uint32_t {
@@ -160,6 +162,7 @@ enum class StorageKind : uint8_t {
     ArrayChar,
     ScalarUnsignedChar,
     ArrayUnsignedChar,
+    PointerUnsignedChar,
 };
 
 enum class StructFieldKind : uint8_t {
@@ -235,6 +238,7 @@ enum class StatementKind : uint8_t {
     StorePointer,
     StoreIndirectInt32,
     StoreField,
+    StoreIndirectUnsignedChar,
 };
 
 struct Statement {
@@ -272,6 +276,7 @@ enum class ParameterKind : uint8_t {
     // Appended to preserve the serialized values of existing parameter kinds.
     Character,
     UnsignedCharacter,
+    UnsignedCharacterPointer,
 };
 
 enum class FunctionReturnKind : uint8_t {
@@ -346,6 +351,12 @@ struct LocalSymbol {
     // `slot` is a symbol identity; it is not an address or a four-byte slot.
     uint32_t stackOffsetBytes;
     bool initialized;
+    // Parser-only fact for unsigned-byte pointer locals. When true, the
+    // descriptor is known to originate in one fixed byte object and the
+    // offset is relative to that object's first element.
+    bool pointerBoundsKnown;
+    uint16_t pointerElementCount;
+    int32_t pointerElementOffset;
     SourceLocation declaration;
 };
 
@@ -503,6 +514,12 @@ inline bool storage_kind_is_struct(StorageKind kind)
     return kind == StorageKind::Struct || kind == StorageKind::ArrayStruct;
 }
 
+inline bool storage_kind_is_descriptor_pointer(StorageKind kind)
+{
+    return kind == StorageKind::PointerInt || kind == StorageKind::PointerStruct ||
+           kind == StorageKind::PointerUnsignedChar;
+}
+
 inline bool storage_kind_is_char8(StorageKind kind)
 {
     return kind == StorageKind::ScalarChar || kind == StorageKind::ArrayChar ||
@@ -527,12 +544,13 @@ inline bool struct_field_kind_is_char8(StructFieldKind kind)
 inline bool parameter_kind_is_pointer(ParameterKind kind)
 {
     return kind == ParameterKind::Int32Pointer || kind == ParameterKind::StructPointer ||
-           kind == ParameterKind::StringPointer;
+           kind == ParameterKind::StringPointer || kind == ParameterKind::UnsignedCharacterPointer;
 }
 
 inline bool parameter_kind_is_descriptor_pointer(ParameterKind kind)
 {
-    return kind == ParameterKind::Int32Pointer || kind == ParameterKind::StructPointer;
+    return kind == ParameterKind::Int32Pointer || kind == ParameterKind::StructPointer ||
+           kind == ParameterKind::UnsignedCharacterPointer;
 }
 
 enum class CompilerNativeAppCall : uint8_t {
