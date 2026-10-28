@@ -53,8 +53,10 @@ static bool compile_source(const char* source, Diagnostics* diagnostics)
                     &tokenCount, *diagnostics) ||
         !parse_translation_unit(source, g_tokens, tokenCount, &g_unit, *diagnostics,
                                 &g_calls[0][0], &g_arguments[0][0])) return false;
-    return amd64::emit_translation_unit(g_unit, 0, g_code, sizeof(g_code),
-                                        &g_codeBytes, &g_entryOffset);
+    const bool emitted = amd64::emit_translation_unit(g_unit, 0, g_code, sizeof(g_code),
+                                                       &g_codeBytes, &g_entryOffset);
+    if (!emitted) std::fprintf(stderr, "character test backend emission failed\n");
+    return emitted;
 }
 
 struct CallResult {
@@ -200,11 +202,63 @@ static bool test_character_execution_and_bytes()
                    "generated AMD64 preserves adjacent ints, truncates char stores, promotes signed chars, and indexes bytes");
 }
 
+static bool test_unsigned_character_execution_and_arrays()
+{
+    const char* source =
+        "int gx_main(gx_app_context* ctx) {\n"
+        "  int before = 287454020;\n"
+        "  unsigned char u127 = 127; unsigned char u128 = 128;\n"
+        "  unsigned char u255 = 255; unsigned char u256 = 256;\n"
+        "  unsigned char u300 = 300; unsigned char uminus = -1;\n"
+        "  unsigned char bytes[4];\n"
+        "  bytes[0] = 0; bytes[1] = 127; bytes[2] = 128; bytes[3] = 255;\n"
+        "  int afterBytes = 1432778632;\n"
+        "  if (u127 != 127 || u128 != 128 || u255 != 255 || u256 != 0) return 1;\n"
+        "  if (u300 != 44 || uminus != 255 || before != 287454020 || afterBytes != 1432778632) return 2;\n"
+        "  if (bytes[0] != 0 || bytes[1] != 127 || bytes[2] != 128 || bytes[3] != 255) return 3;\n"
+        "  return bytes[2] + bytes[3];\n"
+        "}\n";
+    Diagnostics diagnostics;
+    if (!compile_source(source, &diagnostics)) {
+        for (uint32_t i = 0; i < diagnostics.count(); ++i)
+            std::fprintf(stderr, "unsigned char diagnostic: %s\n", diagnostics.at(i).message);
+        return require(false, "unsigned char scalar and array source emits production AMD64");
+    }
+    const uint8_t localByteStore[] = {0x88, 0x85};
+    const uint8_t localZeroExtend[] = {0x0F, 0xB6, 0x85};
+    const uint8_t indexedByteStore[] = {0x88, 0x02};
+    const uint8_t indexedZeroExtend[] = {0x0F, 0xB6, 0x02};
+    if (!require(contains_bytes(localByteStore, sizeof(localByteStore)) &&
+                 contains_bytes(indexedByteStore, sizeof(indexedByteStore)),
+                 "unsigned scalar and array writes use byte-width stores")) return false;
+    if (!require(contains_bytes(localZeroExtend, sizeof(localZeroExtend)) &&
+                 contains_bytes(indexedZeroExtend, sizeof(indexedZeroExtend)),
+                 "unsigned scalar and array reads use MOVZX")) return false;
+    const FunctionIR& entry = g_unit.functions[g_unit.entryFunction];
+    uint32_t unsignedStorageBytes = 0;
+    for (uint32_t i = 0; i < entry.localCount; ++i) {
+        if (entry.locals[i].kind == StorageKind::ScalarUnsignedChar) {
+            if (!require(entry.locals[i].sizeBytes == 1 && entry.locals[i].elementSize == 1,
+                         "unsigned scalar owns one byte")) return false;
+            unsignedStorageBytes += entry.locals[i].sizeBytes;
+        } else if (entry.locals[i].kind == StorageKind::ArrayUnsignedChar) {
+            if (!require(entry.locals[i].sizeBytes == 4 && entry.locals[i].elementSize == 1,
+                         "unsigned array stores one byte per element")) return false;
+            unsignedStorageBytes += entry.locals[i].sizeBytes;
+        }
+    }
+    if (!require(unsignedStorageBytes == 10,
+                 "unsigned scalar and array frame storage has the expected byte count")) return false;
+    const CallResult result = execute_generated();
+    return require(result.value == 383 && result.runtimeFailure == 0,
+                   "generated AMD64 retains low bytes, promotes 0 through 255, and preserves adjacent integers and array elements");
+}
+
 static bool test_array_bounds()
 {
     Diagnostics diagnostics;
     if (!compile_source(
-            "int gx_main(gx_app_context* ctx) { char data[2]; int index = 2; return data[index]; }",
+            "int gx_main(gx_app_context* ctx) { unsigned char data[2]; int index = 2; return data[index]; }",
             &diagnostics))
         return require(false, "bounded char array source compiles");
     const CallResult result = execute_generated();
@@ -231,6 +285,10 @@ static bool test_diagnostics()
     const char* charAddress = "int gx_main(gx_app_context* ctx) { char value = 'A'; int* p = &value; return 0; }";
     const char* global = "char value; int gx_main(gx_app_context* ctx) { return 0; }";
     const char* tooMany = "int gx_main(gx_app_context* ctx) { char data[65]; return 0; }";
+    const char* unsignedInt = "int gx_main(gx_app_context* ctx) { unsigned int value = 1; return value; }";
+    const char* unsignedMissingBase = "int gx_main(gx_app_context* ctx) { unsigned value = 1; return value; }";
+    const char* unsignedPointer = "int gx_main(gx_app_context* ctx) { unsigned char* data; return 0; }";
+    const char* unsignedTooMany = "int gx_main(gx_app_context* ctx) { unsigned char data[65]; return 0; }";
     const uint32_t lexical = static_cast<uint32_t>(std::strchr(unterminated, '\'') - unterminated);
     const uint32_t escape = static_cast<uint32_t>(std::strchr(badEscape, '\'') - badEscape);
     const uint32_t multiOffset = static_cast<uint32_t>(std::strchr(multi, '\'') - multi);
@@ -280,14 +338,28 @@ static bool test_diagnostics()
            expect_rejection(global, CompilerDiagnosticKind::Unsupported,
                             "global char storage", globalOffset) &&
            expect_rejection(tooMany, CompilerDiagnosticKind::ResourceLimit,
-                            "array length exceeds", limitOffset);
+                            "array length exceeds", limitOffset) &&
+           expect_rejection(unsignedInt, CompilerDiagnosticKind::Unsupported,
+                            "unsigned int is not implemented",
+                            static_cast<uint32_t>(std::strstr(unsignedInt, "unsigned") - unsignedInt)) &&
+           expect_rejection(unsignedMissingBase, CompilerDiagnosticKind::Unsupported,
+                            "only unsigned char is supported",
+                            static_cast<uint32_t>(std::strstr(unsignedMissingBase, "unsigned") - unsignedMissingBase)) &&
+           expect_rejection(unsignedPointer, CompilerDiagnosticKind::Unsupported,
+                            "unsigned char pointers are not supported",
+                            static_cast<uint32_t>(std::strstr(unsignedPointer, "unsigned char*") +
+                                                  std::strlen("unsigned char") - unsignedPointer)) &&
+           expect_rejection(unsignedTooMany, CompilerDiagnosticKind::ResourceLimit,
+                            "array length exceeds",
+                            static_cast<uint32_t>(std::strstr(unsignedTooMany, "65") - unsignedTooMany));
 }
 
 } // namespace
 
 int main()
 {
-    if (!test_character_execution_and_bytes() || !test_array_bounds() || !test_diagnostics()) return 1;
+    if (!test_character_execution_and_bytes() || !test_unsigned_character_execution_and_arrays() ||
+        !test_array_bounds() || !test_diagnostics()) return 1;
     std::puts("compiler_character_bytes_host_test: PASS");
     return 0;
 }

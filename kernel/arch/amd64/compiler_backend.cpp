@@ -150,6 +150,10 @@ public:
     {
         return byte(0x0F) && byte(0xBE) && byte(0x85) && u32(static_cast<uint32_t>(displacement));
     }
+    bool movzx_eax_local8(int32_t displacement)
+    {
+        return byte(0x0F) && byte(0xB6) && byte(0x85) && u32(static_cast<uint32_t>(displacement));
+    }
     bool movsx_eax_al() { static const uint8_t v[] = {0x0F, 0xBE, 0xC0}; return bytes(v, sizeof(v)); }
     bool mov_local_al(int32_t displacement)
     {
@@ -168,7 +172,9 @@ public:
     }
     bool mov_eax_rax() { static const uint8_t v[] = {0x8B, 0x02}; return bytes(v, sizeof(v)); }
     bool movsx_eax_rax8() { static const uint8_t v[] = {0x0F, 0xBE, 0x02}; return bytes(v, sizeof(v)); }
+    bool movzx_eax_rax8() { static const uint8_t v[] = {0x0F, 0xB6, 0x02}; return bytes(v, sizeof(v)); }
     bool movsx_eax_byte_ptr_rax() { static const uint8_t v[] = {0x0F, 0xBE, 0x00}; return bytes(v, sizeof(v)); }
+    bool movzx_eax_byte_ptr_rax() { static const uint8_t v[] = {0x0F, 0xB6, 0x00}; return bytes(v, sizeof(v)); }
     bool mov_eax_ptr_rax() { static const uint8_t v[] = {0x8B, 0x00}; return bytes(v, sizeof(v)); }
     bool mov_rax_eax() { static const uint8_t v[] = {0x89, 0x02}; return bytes(v, sizeof(v)); }
     bool mov_rax_al() { static const uint8_t v[] = {0x88, 0x02}; return bytes(v, sizeof(v)); }
@@ -1322,7 +1328,7 @@ static bool emit_indexed_address(Emitter& emitter, const TranslationUnitIR& unit
         if (!local) return false;
         const bool validArray =
             (local->kind == StorageKind::ArrayInt && elementSize == 4) ||
-            (local->kind == StorageKind::ArrayChar && elementSize == 1) ||
+            (storage_kind_is_char_array(local->kind) && elementSize == 1) ||
             (local->kind == StorageKind::ArrayStruct && local->elementSize == elementSize);
         if (!validArray || local->elementCount != elementCount) return false;
         if (elementSize == 4) return emitter.lea_rdx_local_rax(local_displacement(function, baseIndex));
@@ -1581,10 +1587,13 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                 if (parameter && parameter->kind == ParameterKind::StringPointer)
                     return emitter.mov_rax_local(local_displacement(function, expression.localIndex));
                 const LocalSymbol* local = find_local_slot(function, expression.localIndex);
-                return (parameter && parameter->kind == ParameterKind::Character) ||
-                       (local && local->kind == StorageKind::ScalarChar)
-                    ? emitter.movsx_eax_local8(local_displacement(function, expression.localIndex))
-                    : emitter.mov_eax_local(local_displacement(function, expression.localIndex));
+                if ((parameter && parameter->kind == ParameterKind::UnsignedCharacter) ||
+                    (local && local->kind == StorageKind::ScalarUnsignedChar))
+                    return emitter.movzx_eax_local8(local_displacement(function, expression.localIndex));
+                if ((parameter && parameter->kind == ParameterKind::Character) ||
+                    (local && local->kind == StorageKind::ScalarChar))
+                    return emitter.movsx_eax_local8(local_displacement(function, expression.localIndex));
+                return emitter.mov_eax_local(local_displacement(function, expression.localIndex));
             }
         case ExpressionKind::LoadPointer: {
             bool pointerSlot = false;
@@ -1636,7 +1645,10 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                                       expression.left, expression.indexedBaseKind, baseIndex,
                                       expression.elementCount, expression.elementSize, expression.location,
                                       boundsFailureLabel, epilogueLabel, callFailureLabel) ||
-                !(expression.elementSize == 1 ? emitter.movsx_eax_rax8() : emitter.mov_eax_rax()) ||
+                !(expression.elementSize == 1
+                    ? (expression.indexedElementKind == IndexedElementKind::UnsignedCharacter
+                        ? emitter.movzx_eax_rax8() : emitter.movsx_eax_rax8())
+                    : emitter.mov_eax_rax()) ||
                 !emitter.emit_jmp(endLabel) ||
                 !emitter.define_label(boundsFailureLabel) ||
                 !emit_array_bounds_failure(emitter, epilogueLabel) ||
@@ -1656,7 +1668,9 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
             return field && emit_field_address_raw(emitter, unit, function, frame, functionLabels, expression,
                 epilogueLabel, callFailureLabel) &&
                 (field->kind == StructFieldKind::Char8
-                    ? emitter.movsx_eax_byte_ptr_rax() : emitter.mov_eax_ptr_rax());
+                    ? emitter.movsx_eax_byte_ptr_rax()
+                    : (field->kind == StructFieldKind::UnsignedChar8
+                        ? emitter.movzx_eax_byte_ptr_rax() : emitter.mov_eax_ptr_rax()));
         }
         case ExpressionKind::PointerAdd:
         case ExpressionKind::PointerSubtractInteger:
@@ -1768,7 +1782,7 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                        emitter.release_pointer_temporary_slots(1);
             }
             if (local->kind == StorageKind::ArrayStruct) return statement.expression == COMPILER_INVALID_INDEX;
-            if (local->kind == StorageKind::ArrayChar) return true;
+            if (storage_kind_is_char_array(local->kind)) return true;
             if (local->kind == StorageKind::Struct) {
                 if (statement.expression == COMPILER_INVALID_INDEX || local->sizeBytes == 0 ||
                     !emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
@@ -1781,7 +1795,8 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                                               static_cast<int32_t>(byteIndex))) return false;
                 return true;
             }
-            if (local->kind == StorageKind::ScalarChar)
+            if (storage_kind_is_char8(local->kind) && local->kind != StorageKind::ArrayChar &&
+                local->kind != StorageKind::ArrayUnsignedChar)
                 return statement.expression != COMPILER_INVALID_INDEX &&
                     emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                     epilogueLabel, callFailureLabel) &&
@@ -1798,9 +1813,10 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
             {
                 const LocalSymbol* local = find_local_slot(function, statement.localIndex);
                 const ParameterSymbol* parameter = find_parameter_slot(function, statement.localIndex);
-                if (parameter && parameter->kind == ParameterKind::Character)
+                if (parameter && parameter_kind_is_char8(parameter->kind))
                     return emitter.mov_local_al(local_displacement(function, statement.localIndex));
-                return local && local->kind == StorageKind::ScalarChar
+                return local && (local->kind == StorageKind::ScalarChar ||
+                                 local->kind == StorageKind::ScalarUnsignedChar)
                     ? emitter.mov_local_al(local_displacement(function, statement.localIndex))
                     : (local || (parameter && parameter->kind == ParameterKind::Integer))
                         ? emitter.mov_local_eax(local_displacement(function, statement.localIndex))
@@ -1886,7 +1902,7 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                                         epilogueLabel, callFailureLabel) ||
                 !emitter.mov_rdx_rax() ||
                 !emitter.mov_eax_local(temporary_displacement(frame, temporaryBase)) ||
-                !(field->kind == StructFieldKind::Char8 ? emitter.mov_rax_al() : emitter.mov_rax_eax()) ||
+                !(struct_field_kind_is_char8(field->kind) ? emitter.mov_rax_al() : emitter.mov_rax_eax()) ||
                 !emitter.release_temporary_slots(1)) return false;
             return true;
         }
@@ -1899,8 +1915,8 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
         case StatementKind::Return:
             if (!emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                  epilogueLabel, callFailureLabel)) return false;
-            if (function.returnKind == FunctionReturnKind::Character && !emitter.movsx_eax_al())
-                return false;
+            if (function.returnKind == FunctionReturnKind::Character && !emitter.movsx_eax_al()) return false;
+            if (function.returnKind == FunctionReturnKind::UnsignedCharacter && !emitter.movzx_eax_al()) return false;
             return emitter.emit_jmp(epilogueLabel);
         case StatementKind::Break: {
             uint16_t target = COMPILER_INVALID_INDEX;
@@ -2245,7 +2261,7 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
             if (function.parameters[p].kind == ParameterKind::Integer) {
                 if (!emitter.mov_reg_local32(argumentRegisters[p],
                                              local_displacement(function, function.parameters[p].slot))) return false;
-            } else if (function.parameters[p].kind == ParameterKind::Character) {
+            } else if (parameter_kind_is_char8(function.parameters[p].kind)) {
                 if (!emitter.mov_local_reg8(argumentRegisters[p],
                                             local_displacement(function, function.parameters[p].slot))) return false;
             } else if (function.parameters[p].kind == ParameterKind::StringPointer) {

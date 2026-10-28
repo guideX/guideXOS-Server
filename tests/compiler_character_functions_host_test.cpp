@@ -184,6 +184,9 @@ static bool expect_rejection(const char* source, CompilerDiagnosticKind kind,
     return require(valid, "invalid signature or expression has a located diagnostic");
 }
 
+static bool compile_module_text(const char* path, const char* source,
+                                CompiledModule* module, Diagnostics* diagnostics);
+
 static bool test_generated_parameter_and_return_execution()
 {
     const char* source =
@@ -272,6 +275,137 @@ static bool test_generated_parameter_and_return_execution()
 #endif
 }
 
+static bool test_unsigned_character_function_execution()
+{
+    const char* source =
+        "unsigned char normalize(unsigned char value) { return value; }\n"
+        "char signed_echo(char value) { return value; }\n"
+        "int mix(char signedValue, unsigned char unsignedValue, int amount) {\n"
+        "  return signedValue + unsignedValue + amount;\n"
+        "}\n"
+        "int relay(unsigned char value, char signedValue, int amount) {\n"
+        "  return mix(signedValue, value, amount);\n"
+        "}\n"
+        "int gx_main(gx_app_context* ctx) {\n"
+        "  if (normalize(511) != 255) return 1;\n"
+        "  if (signed_echo(255) != -1) return 2;\n"
+        "  return relay(255, 255, 1);\n"
+        "}\n";
+    Diagnostics diagnostics;
+    if (!compile_source(source, &diagnostics)) {
+        for (uint32_t i = 0; i < diagnostics.count(); ++i)
+            std::fprintf(stderr, "unsigned function diagnostic: %s\n", diagnostics.at(i).message);
+        return require(false, "unsigned byte function declarations compile through the production parser and backend");
+    }
+    const FunctionIR* normalize = nullptr;
+    const FunctionIR* mix = nullptr;
+    for (uint32_t i = 0; i < g_unit.functionCount; ++i) {
+        if (std::strcmp(g_unit.functions[i].name, "normalize") == 0) normalize = &g_unit.functions[i];
+        if (std::strcmp(g_unit.functions[i].name, "mix") == 0) mix = &g_unit.functions[i];
+    }
+    if (!require(normalize && normalize->returnKind == FunctionReturnKind::UnsignedCharacter &&
+                 normalize->parameters[0].kind == ParameterKind::UnsignedCharacter &&
+                 normalize->parameters[0].stackOffsetBytes == 1,
+                 "unsigned function return and parameter metadata retain unsigned-byte identity and storage")) return false;
+    if (!require(mix && mix->parameters[0].kind == ParameterKind::Character &&
+                 mix->parameters[1].kind == ParameterKind::UnsignedCharacter &&
+                 mix->parameters[2].kind == ParameterKind::Integer,
+                 "mixed signed-byte, unsigned-byte, and int parameters retain distinct kinds")) return false;
+    const uint8_t zeroExtendLocal[] = {0x0F, 0xB6, 0x85};
+    const uint8_t zeroExtendReturn[] = {0x0F, 0xB6, 0xC0};
+    if (!require(contains_bytes(g_code, g_codeBytes, zeroExtendLocal, sizeof(zeroExtendLocal)) &&
+                 contains_bytes(g_code, g_codeBytes, zeroExtendReturn, sizeof(zeroExtendReturn)),
+                 "unsigned parameter reads and return normalization emit MOVZX")) return false;
+    const CallResult result = execute_code(g_code, g_codeBytes, g_entryOffset);
+#if defined(_WIN32)
+    return require(result.value == 255 && result.runtimeFailure == 0,
+                   "generated AMD64 truncates arguments, promotes unsigned parameters, preserves signed char, and executes nested mixed calls");
+#else
+    (void)result;
+    return require(false, "this suite requires the Windows AMD64 hosted execution harness");
+#endif
+}
+
+static bool test_unsigned_cross_module_signature_and_object_abi()
+{
+    const char* consumer =
+        "extern unsigned char normalize(unsigned char);\n"
+        "int gx_main(gx_app_context* ctx) { return normalize(511); }\n";
+    const char* provider =
+        "unsigned char normalize(unsigned char value) { return value; }\n";
+    Diagnostics consumerDiagnostics;
+    Diagnostics providerDiagnostics;
+    if (!compile_module_text("src/main.cpp", consumer, &g_objectModules[0], &consumerDiagnostics) ||
+        !compile_module_text("src/normalize.cpp", provider, &g_objectModules[1], &providerDiagnostics)) {
+        for (uint32_t i = 0; i < consumerDiagnostics.count(); ++i)
+            std::fprintf(stderr, "unsigned consumer diagnostic: %s\n", consumerDiagnostics.at(i).message);
+        for (uint32_t i = 0; i < providerDiagnostics.count(); ++i)
+            std::fprintf(stderr, "unsigned provider diagnostic: %s\n", providerDiagnostics.at(i).message);
+        return require(false, "unsigned-byte consumer and provider compile independently");
+    }
+    if (!require(g_objectModules[0].imports[0].parameterKinds[0] == ParameterKind::UnsignedCharacter &&
+                 g_objectModules[0].imports[0].expectedReturnKind == FunctionReturnKind::UnsignedCharacter &&
+                 g_objectModules[1].exports[0].parameterKinds[0] == ParameterKind::UnsignedCharacter &&
+                 g_objectModules[1].exports[0].returnKind == FunctionReturnKind::UnsignedCharacter,
+                 "module import and export signatures preserve unsigned-byte parameter and return identity")) return false;
+    for (uint32_t i = 0; i < 2; ++i) {
+        if (!serialize_elf_object(g_objectModules[i], g_objectBytes[i],
+                                  sizeof(g_objectBytes[i]), &g_objectByteCounts[i]))
+            return require(false, "unsigned-byte production objects serialize");
+        Diagnostics objectDiagnostics;
+        ElfObjectHeaderView header = {};
+        if (!inspect_elf_object(g_objectBytes[i], g_objectByteCounts[i], &header, objectDiagnostics) ||
+            header.compilerObjectAbiVersion != COMPILER_OBJECT_ABI_VERSION ||
+            !deserialize_elf_object(g_objectBytes[i], g_objectByteCounts[i],
+                                    &g_roundTripModules[i], objectDiagnostics))
+            return require(false, "ABI-14 object reader round trips unsigned-byte signatures");
+    }
+    Diagnostics linkDiagnostics;
+    if (!link_modules(g_roundTripModules, 2, &g_linked, linkDiagnostics)) {
+        for (uint32_t i = 0; i < linkDiagnostics.count(); ++i)
+            std::fprintf(stderr, "unsigned link diagnostic: %s\n", linkDiagnostics.at(i).message);
+        return require(false, "matching ABI-14 unsigned-byte modules link");
+    }
+    ElfLayout layout = {};
+    if (!write_bootstrap_elf(g_linked.code, g_linked.codeBytes,
+                             g_linked.data, g_linked.dataBytes,
+                             g_linked.mutableData, g_linked.mutableDataBytes,
+                             g_linked.entryCodeOffset, g_finalElf, sizeof(g_finalElf), &layout))
+        return require(false, "unsigned-byte linked modules produce a NativeElf image");
+    ElfValidationResult validation = {};
+    if (!validate_bootstrap_elf(g_finalElf, layout.outputBytes, layout.imageBase,
+                                layout.codeOffset, g_linked.code, g_linked.codeBytes,
+                                &validation, g_linked.data, g_linked.dataBytes,
+                                g_linked.entryCodeOffset))
+        return require(false, "unsigned-byte NativeElf image validates");
+    const CallResult result = execute_code(g_finalElf + layout.codeOffset,
+                                           g_linked.codeBytes, g_linked.entryCodeOffset);
+#if defined(_WIN32)
+    if (!require(result.value == 255 && result.runtimeFailure == 0,
+                 "cross-module unsigned byte argument and return execute through serialized objects")) return false;
+#else
+    (void)result;
+    return require(false, "cross-module execution requires the Windows AMD64 hosted harness");
+#endif
+
+    CompiledModule mismatchConsumer = {};
+    CompiledModule mismatchProvider = {};
+    Diagnostics mismatchConsumerDiagnostics;
+    Diagnostics mismatchProviderDiagnostics;
+    if (!compile_module_text("src/main.cpp",
+            "extern int convert(char); int gx_main(gx_app_context* c) { return convert(255); }",
+            &mismatchConsumer, &mismatchConsumerDiagnostics) ||
+        !compile_module_text("src/convert.cpp", "int convert(unsigned char value) { return value; }",
+            &mismatchProvider, &mismatchProviderDiagnostics))
+        return require(false, "signed and unsigned cross-module signatures compile independently");
+    CompiledModule mismatchModules[2] = {mismatchConsumer, mismatchProvider};
+    LinkedProgram mismatchLinked = {};
+    Diagnostics mismatchLinkDiagnostics;
+    return require(!link_modules(mismatchModules, 2, &mismatchLinked, mismatchLinkDiagnostics) &&
+                   diagnostic_contains(mismatchLinkDiagnostics, "conflicting declaration for function 'convert'"),
+                   "linker rejects char and unsigned char parameters as different signatures");
+}
+
 static bool compile_module_text(const char* path, const char* source,
                                 CompiledModule* module, Diagnostics* diagnostics)
 {
@@ -314,10 +448,10 @@ static bool test_object_link_elf_and_cross_module_execution()
         ElfObjectHeaderView header = {};
         if (!inspect_elf_object(g_objectBytes[i], g_objectByteCounts[i],
                                 &header, objectDiagnostics) ||
-            header.compilerObjectAbiVersion != 13 || header.formatVersion != 2 ||
+            header.compilerObjectAbiVersion != COMPILER_OBJECT_ABI_VERSION || header.formatVersion != 2 ||
             !deserialize_elf_object(g_objectBytes[i], g_objectByteCounts[i],
                                     &g_roundTripModules[i], objectDiagnostics))
-            return require(false, "ELF object round trip accepts ABI 13 and preserves signatures");
+            return require(false, "ELF object round trip accepts the active ABI and preserves signatures");
     }
     if (!require(g_roundTripModules[0].imports[0].parameterKinds[0] == ParameterKind::Character &&
                  g_roundTripModules[0].imports[0].expectedReturnKind == FunctionReturnKind::Character &&
@@ -365,6 +499,16 @@ static bool test_signature_and_resource_diagnostics()
                "int choose(char value); int choose(int value);\n"
                "int gx_main(gx_app_context* ctx) { return choose(1); }",
                CompilerDiagnosticKind::Semantic, "conflicting declaration for function") &&
+           expect_rejection(
+               "int choose(char value); int choose(unsigned char value);\n"
+               "int gx_main(gx_app_context* ctx) { return choose(1); }",
+               CompilerDiagnosticKind::Semantic, "conflicting declaration for function") &&
+           expect_rejection("unsigned int not_supported(unsigned int value) { return value; }",
+               CompilerDiagnosticKind::Unsupported, "unsigned int is not implemented") &&
+           expect_rejection("unsigned char* not_supported(unsigned char value) { return value; }",
+               CompilerDiagnosticKind::Unsupported, "character-pointer function return types") &&
+           expect_rejection("int bad_unsigned_pointer(unsigned char* value) { return 0; }",
+               CompilerDiagnosticKind::Unsupported, "unsigned char pointer parameters are not supported") &&
            expect_rejection("char* text_value() { return \"text\"; }",
                CompilerDiagnosticKind::Unsupported, "character-pointer function return types") &&
            expect_rejection("int bad_pointer(char** text) { return 0; }",
@@ -413,7 +557,9 @@ static bool test_cross_module_conflicting_return_rejected()
 int main()
 {
     if (!test_generated_parameter_and_return_execution() ||
+        !test_unsigned_character_function_execution() ||
         !test_object_link_elf_and_cross_module_execution() ||
+        !test_unsigned_cross_module_signature_and_object_abi() ||
         !test_signature_and_resource_diagnostics() ||
         !test_cross_module_conflicting_return_rejected()) return 1;
     std::printf("compiler_character_functions_host_test: PASS (%u assertions)\n",

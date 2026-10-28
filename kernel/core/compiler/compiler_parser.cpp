@@ -256,7 +256,7 @@ private:
     {
         for (uint32_t i = 0; i < m_output->parameterCount; ++i) {
             if ((m_output->parameters[i].kind == ParameterKind::Integer ||
-                 m_output->parameters[i].kind == ParameterKind::Character) &&
+                 parameter_kind_is_char8(m_output->parameters[i].kind)) &&
                 name_matches(m_output->parameters[i].name, token))
                 return static_cast<int32_t>(m_output->parameters[i].slot);
         }
@@ -396,7 +396,7 @@ private:
         }
         const bool pointer = kind == StorageKind::PointerInt || kind == StorageKind::PointerStruct;
         const bool structStorage = storage_kind_is_struct(kind);
-        const bool characterStorage = kind == StorageKind::ScalarChar || kind == StorageKind::ArrayChar;
+        const bool characterStorage = storage_kind_is_char8(kind);
         const uint32_t elementBytes = pointer
             ? COMPILER_POINTER_DESCRIPTOR_BYTES
             : (structStorage && m_unit && structTypeIndex < m_unit->structTypeCount
@@ -404,7 +404,7 @@ private:
                 : (characterStorage ? 1U : 4U));
         uint32_t totalBytes = elementBytes;
         if ((kind == StorageKind::ArrayInt || kind == StorageKind::ArrayStruct ||
-             kind == StorageKind::ArrayChar) &&
+             storage_kind_is_char_array(kind)) &&
             (!checked_mul_u32(elementCount, elementBytes, &totalBytes) || totalBytes == 0)) {
             m_diagnostics.error(token.location, "array storage size overflows the bounded compiler", "array");
             return false;
@@ -450,7 +450,7 @@ private:
         local.sizeBytes = totalBytes;
         local.stackOffsetBytes = storageEnd;
         local.initialized = kind == StorageKind::ArrayInt || kind == StorageKind::ArrayStruct ||
-                            kind == StorageKind::ArrayChar;
+                            storage_kind_is_char_array(kind);
         local.declaration = token.location;
         if (!copy_identifier(local.name, sizeof(local.name), token)) return false;
         m_output->localStorageBytes = storageEnd - m_output->parameterStorageBytes;
@@ -568,7 +568,8 @@ private:
     bool parse_statement(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth,
                          uint32_t loopDepth)
     {
-        if (current().kind == TokenKind::KeywordInt || current().kind == TokenKind::KeywordChar)
+        if (current().kind == TokenKind::KeywordInt || current().kind == TokenKind::KeywordChar ||
+            current().kind == TokenKind::KeywordUnsigned)
             return parse_declaration(blockIndex);
         if (current().kind == TokenKind::KeywordStruct) return parse_struct_declaration(blockIndex);
         if (current().kind == TokenKind::Star) return parse_indirect_assignment(blockIndex);
@@ -673,17 +674,30 @@ private:
     bool parse_declaration(uint16_t blockIndex)
     {
         const SourceLocation location = current().location;
-        const bool character = current().kind == TokenKind::KeywordChar;
+        const bool unsignedType = current().kind == TokenKind::KeywordUnsigned;
+        const SourceLocation typeLocation = current().location;
+        if (unsignedType) {
+            ++(*m_index);
+            if (current().kind != TokenKind::KeywordChar) {
+                m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, typeLocation,
+                                      "only unsigned char is supported; unsigned int is not implemented", "type");
+                return false;
+            }
+        }
+        const bool character = unsignedType || current().kind == TokenKind::KeywordChar;
+        const bool unsignedCharacter = unsignedType;
         ++(*m_index);
         const bool pointer = current().kind == TokenKind::Star;
         if (pointer && character) {
             m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, current().location,
-                                  "local char pointers are not supported", "pointer");
+                                  unsignedCharacter ? "unsigned char pointers are not supported"
+                                                    : "local char pointers are not supported", "pointer");
             return false;
         }
         if (pointer) ++(*m_index);
         if (!token_is_name(current()) || current().kind == TokenKind::KeywordGxMain) {
-            error_current(character ? "expected identifier after 'char'" : "expected identifier after 'int'");
+            error_current(unsignedCharacter ? "expected identifier after 'unsigned char'" :
+                          (character ? "expected identifier after 'char'" : "expected identifier after 'int'"));
             return false;
         }
         const Token name = current();
@@ -700,14 +714,16 @@ private:
         }
         uint16_t slot = COMPILER_INVALID_INDEX;
         const StorageKind declaredKind = pointer ? StorageKind::PointerInt :
-            (character ? (wasArray ? StorageKind::ArrayChar : StorageKind::ScalarChar) :
-             (wasArray ? StorageKind::ArrayInt : StorageKind::ScalarInt));
+            (unsignedCharacter ? (wasArray ? StorageKind::ArrayUnsignedChar : StorageKind::ScalarUnsignedChar) :
+             (character ? (wasArray ? StorageKind::ArrayChar : StorageKind::ScalarChar) :
+             (wasArray ? StorageKind::ArrayInt : StorageKind::ScalarInt)));
         if (!add_local(name, declaredKind, elementCount, &slot)) return false;
         uint16_t expression = COMPILER_INVALID_INDEX;
         if (current().kind == TokenKind::Equal) {
             if (character && wasArray) {
                 m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, name.location,
-                                      "char array initializers are not supported", "array");
+                                      unsignedCharacter ? "unsigned char array initializers are not supported"
+                                                        : "char array initializers are not supported", "array");
                 return false;
             }
             ++(*m_index);
@@ -717,7 +733,8 @@ private:
             if (m_output->expressions[expression].type != expected) {
                 m_diagnostics.error(name.location, pointer
                     ? "cannot initialize int* with an int expression"
-                    : (character ? "cannot initialize char with a non-int expression"
+                    : (character ? (unsignedCharacter ? "cannot initialize unsigned char with a non-int expression"
+                                                       : "cannot initialize char with a non-int expression")
                                  : "cannot initialize int with a pointer expression"), "type");
                 return false;
             }
@@ -931,7 +948,7 @@ private:
             const LocalSymbol* local = isLocal ? localByName : nullptr;
             const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
             const bool isArray = (local && (local->kind == StorageKind::ArrayInt ||
-                                            local->kind == StorageKind::ArrayChar)) ||
+                                            storage_kind_is_char_array(local->kind))) ||
                 (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
             if (!isArray) {
                 m_diagnostics.error(name.location, "indexed access requires an array", "array");
@@ -945,9 +962,12 @@ private:
             const uint16_t expression = parse_expression(0);
             if (expression == COMPILER_INVALID_INDEX ||
                 !expect(TokenKind::Semicolon, "expected ';' after indexed assignment")) return false;
-            if (local && local->kind == StorageKind::ArrayChar &&
+            if (local && storage_kind_is_char_array(local->kind) &&
                 m_output->expressions[expression].type != ValueType::Int32) {
-                m_diagnostics.error(name.location, "char array elements require an int expression", "type");
+                m_diagnostics.error(name.location,
+                    local->kind == StorageKind::ArrayUnsignedChar
+                        ? "unsigned char array elements require an int expression"
+                        : "char array elements require an int expression", "type");
                 return false;
             }
             const uint16_t elementCount = local ? local->elementCount : globalSymbol->elementCount;
@@ -961,6 +981,10 @@ private:
             statement.elementCount = elementCount;
             statement.elementSize = local ? local->elementSize : globalSymbol->elementSize;
             statement.indexedBaseKind = local ? IndexedBaseKind::Local : IndexedBaseKind::Global;
+            statement.indexedElementKind = local && local->kind == StorageKind::ArrayUnsignedChar
+                ? IndexedElementKind::UnsignedCharacter
+                : (local && local->kind == StorageKind::ArrayChar
+                    ? IndexedElementKind::Character : IndexedElementKind::Int32);
             if (local) {
                 for (uint32_t i = 0; i < m_output->localCount; ++i)
                     if (m_output->locals[i].slot == static_cast<uint16_t>(slot)) m_output->locals[i].initialized = true;
@@ -985,17 +1009,23 @@ private:
                      m_unit->structTypes[localByName->structTypeIndex].identity));
             if (m_output->expressions[expression].type != expected || incompatibleStructPointer) {
                 const bool character =
-                    (localByName && localByName->kind == StorageKind::ScalarChar) ||
-                    (parameter && parameter->kind == ParameterKind::Character);
+                    (localByName && (localByName->kind == StorageKind::ScalarChar ||
+                                     localByName->kind == StorageKind::ScalarUnsignedChar)) ||
+                    (parameter && parameter_kind_is_char8(parameter->kind));
+                const bool unsignedCharacter =
+                    (localByName && localByName->kind == StorageKind::ScalarUnsignedChar) ||
+                    (parameter && parameter->kind == ParameterKind::UnsignedCharacter);
                 m_diagnostics.error(name.location, pointer
                     ? "cannot assign an int expression to int*"
                     : (structPointer ? "cannot assign an incompatible struct pointer type"
-                                     : (character ? "cannot assign a non-int expression to char"
+                                     : (character ? (unsignedCharacter
+                                         ? "cannot assign a non-int expression to unsigned char"
+                                         : "cannot assign a non-int expression to char")
                                                   : "cannot assign an int* expression to int")), "type");
                 return false;
             }
             const LocalSymbol* local = localByName;
-            if (local && (local->kind == StorageKind::ArrayInt || local->kind == StorageKind::ArrayChar)) {
+            if (local && (local->kind == StorageKind::ArrayInt || storage_kind_is_char_array(local->kind))) {
                 m_diagnostics.error(name.location, "array value cannot be assigned directly", "array");
                 return false;
             }
@@ -1088,7 +1118,7 @@ private:
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (m_output->expressions[expression].type != ValueType::Int32) {
             m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
-                                  m_output->returnKind == FunctionReturnKind::Character
+                                  m_output->returnKind != FunctionReturnKind::Integer
                                       ? "char functions require an int expression; pointer return values are not supported"
                                       : "functions return int; pointer return values are not supported", "type");
             return false;
@@ -1479,8 +1509,8 @@ private:
                 if (expression.kind == ExpressionKind::AddressOfField &&
                     expression.elementCount < m_unit->structTypeCount &&
                     expression.elementSize < m_unit->structTypes[expression.elementCount].fieldCount &&
-                    m_unit->structTypes[expression.elementCount].fields[expression.elementSize].kind ==
-                        StructFieldKind::Char8) {
+                    struct_field_kind_is_char8(
+                        m_unit->structTypes[expression.elementCount].fields[expression.elementSize].kind)) {
                     m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
                                           "address of char struct fields is unsupported", "pointer");
                     return COMPILER_INVALID_INDEX;
@@ -1490,7 +1520,8 @@ private:
         }
         const bool indexed = current().kind == TokenKind::LeftBracket;
         if (!indexed) {
-            if (local && local->kind == StorageKind::ScalarChar) {
+            if (local && (local->kind == StorageKind::ScalarChar ||
+                          local->kind == StorageKind::ScalarUnsignedChar)) {
                 m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
                                       "address of char storage is unsupported", "pointer");
                 return COMPILER_INVALID_INDEX;
@@ -1524,9 +1555,9 @@ private:
             }
             if (local && local->kind == StorageKind::ArrayInt)
                 m_diagnostics.error(location, "array value is not addressable; use an element", "pointer");
-            else if (local && local->kind == StorageKind::ArrayChar)
+            else if (local && storage_kind_is_char_array(local->kind))
                 m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
-                                      "char array pointers are not supported", "pointer");
+                                      "character array pointers are not supported", "pointer");
             else if (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt)
                 m_diagnostics.error(location, "array value is not addressable; use an element", "pointer");
             else if (parameter)
@@ -1535,9 +1566,9 @@ private:
                 m_diagnostics.error(location, "expression is not addressable", "pointer");
             return COMPILER_INVALID_INDEX;
         }
-        if (local && local->kind == StorageKind::ArrayChar) {
+        if (local && storage_kind_is_char_array(local->kind)) {
             m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
-                                  "char element pointers are not supported", "pointer");
+                                  "character element pointers are not supported", "pointer");
             return COMPILER_INVALID_INDEX;
         }
         const bool isLocal = local != nullptr;
@@ -1664,7 +1695,7 @@ private:
                 const int32_t global = namedGlobal;
                 const GlobalSymbolIR* globalSymbol = global >= 0 ? &m_unit->globals[global] : nullptr;
                 const bool isArray = (local && (local->kind == StorageKind::ArrayInt ||
-                                                local->kind == StorageKind::ArrayChar)) ||
+                                                storage_kind_is_char_array(local->kind))) ||
                     (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
                 if (!isArray) {
                     m_diagnostics.error(token.location, structArray
@@ -1689,6 +1720,11 @@ private:
                 m_output->expressions[expression].elementSize = local ? local->elementSize : globalSymbol->elementSize;
                 m_output->expressions[expression].indexedBaseKind =
                     local ? IndexedBaseKind::Local : IndexedBaseKind::Global;
+                m_output->expressions[expression].indexedElementKind =
+                    local && local->kind == StorageKind::ArrayUnsignedChar
+                        ? IndexedElementKind::UnsignedCharacter
+                        : (local && local->kind == StorageKind::ArrayChar
+                            ? IndexedElementKind::Character : IndexedElementKind::Int32);
                 return expression;
             }
             if (parameter) {
@@ -1748,9 +1784,11 @@ private:
                     m_output->expressions[expression].globalIndex = COMPILER_INVALID_INDEX;
                     return expression;
                 }
-                if (local->kind == StorageKind::ArrayChar) {
+                if (storage_kind_is_char_array(local->kind)) {
                     m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, token.location,
-                                          "char arrays do not convert to int*", "array");
+                                          local->kind == StorageKind::ArrayUnsignedChar
+                                              ? "unsigned char arrays do not convert to int*"
+                                              : "char arrays do not convert to int*", "array");
                     return COMPILER_INVALID_INDEX;
                 }
                 if (!local->initialized && local->kind != StorageKind::PointerInt) {
@@ -2128,11 +2166,22 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
         ++(*index);
         type.alignment = 1;
         while (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::RightBrace) {
-            const Token fieldType = tokens[token_index_or_eof(*index, tokenCount)];
-            const bool characterField = fieldType.kind == TokenKind::KeywordChar;
+            Token fieldType = tokens[token_index_or_eof(*index, tokenCount)];
+            bool unsignedCharacterField = false;
+            if (fieldType.kind == TokenKind::KeywordUnsigned) {
+                unsignedCharacterField = true;
+                ++(*index);
+                fieldType = tokens[token_index_or_eof(*index, tokenCount)];
+                if (fieldType.kind != TokenKind::KeywordChar) {
+                    diagnostics.error_as(CompilerDiagnosticKind::Unsupported, fieldType.location,
+                                        "only unsigned char struct fields are supported; unsigned int is not implemented", "type");
+                    return false;
+                }
+            }
+            const bool characterField = unsignedCharacterField || fieldType.kind == TokenKind::KeywordChar;
             if (!characterField && fieldType.kind != TokenKind::KeywordInt) {
                 diagnostics.error_as(CompilerDiagnosticKind::Unsupported, fieldType.location,
-                                    "struct fields must be int or char", "struct");
+                                    "struct fields must be int or char; unsigned char is also supported", "struct");
                 return false;
             }
             ++(*index);
@@ -2185,7 +2234,8 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
             field = {};
             for (uint32_t i = 0; i < fieldName.length; ++i) field.name[i] = source[fieldName.location.offset + i];
             field.name[fieldName.length] = '\0';
-            field.kind = characterField ? StructFieldKind::Char8 : StructFieldKind::Int32;
+            field.kind = unsignedCharacterField ? StructFieldKind::UnsignedChar8 :
+                (characterField ? StructFieldKind::Char8 : StructFieldKind::Int32);
             field.elementCount = 1;
             field.elementSize = static_cast<uint16_t>(fieldWidth);
             field.offset = fieldOffset;
@@ -2318,6 +2368,13 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
     uint32_t index = 0;
     while (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::EndOfFile) {
         Token externalToken = tokens[token_index_or_eof(index, tokenCount)];
+        bool unsignedCharacterType = externalToken.kind == TokenKind::KeywordUnsigned;
+        if (unsignedCharacterType &&
+            tokens[token_index_or_eof(index + 1U, tokenCount)].kind != TokenKind::KeywordChar) {
+            diagnostics.error_as(CompilerDiagnosticKind::Unsupported, externalToken.location,
+                                "only unsigned char is supported; unsigned int is not implemented", "type");
+            return false;
+        }
         if (externalToken.kind == TokenKind::KeywordStruct) {
             if (!parse_struct_external_declaration(source, tokens, tokenCount, &index,
                                                    output, diagnostics, false)) return false;
@@ -2331,28 +2388,38 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                                                        output, diagnostics, true)) return false;
                 continue;
             }
-            if (intToken.kind != TokenKind::KeywordInt && intToken.kind != TokenKind::KeywordChar) {
-                diagnostics.error(intToken.location, "expected 'int' or 'char' function declaration after 'extern'", "parser");
+            unsignedCharacterType = intToken.kind == TokenKind::KeywordUnsigned;
+            if (unsignedCharacterType &&
+                tokens[token_index_or_eof(index + 1U, tokenCount)].kind != TokenKind::KeywordChar) {
+                diagnostics.error_as(CompilerDiagnosticKind::Unsupported, intToken.location,
+                                    "only extern unsigned char functions are supported; unsigned int is not implemented", "type");
+                return false;
+            }
+            if (intToken.kind != TokenKind::KeywordInt && intToken.kind != TokenKind::KeywordChar &&
+                !unsignedCharacterType) {
+                diagnostics.error(intToken.location, "expected 'int', 'char', or 'unsigned char' function declaration after 'extern'", "parser");
                 return false;
             }
             // Function prototypes may use the familiar `extern int/char f(...)`
             // spelling. Re-enter the ordinary function-signature path.
-            uint32_t nameIndex = index + 1U;
+            uint32_t nameIndex = index + (unsignedCharacterType ? 2U : 1U);
             const bool pointerReturn = tokens[token_index_or_eof(nameIndex, tokenCount)].kind == TokenKind::Star;
             if (pointerReturn) ++nameIndex;
             const Token externName = tokens[token_index_or_eof(nameIndex, tokenCount)];
             const Token externAfterName = tokens[token_index_or_eof(nameIndex + 1U, tokenCount)];
-            if (pointerReturn && intToken.kind == TokenKind::KeywordChar &&
+            if (pointerReturn && (intToken.kind == TokenKind::KeywordChar || unsignedCharacterType) &&
                 token_is_name(externName) && externAfterName.kind == TokenKind::LeftParen) {
                 diagnostics.error_as(CompilerDiagnosticKind::Unsupported, intToken.location,
                                     "character-pointer function return types are not supported", "type");
                 return false;
             }
             if (!pointerReturn && token_is_name(externName) && externAfterName.kind == TokenKind::LeftParen) {
-                externalToken.kind = intToken.kind;
-            } else if (intToken.kind == TokenKind::KeywordChar) {
+                externalToken.kind = unsignedCharacterType ? TokenKind::KeywordUnsigned : intToken.kind;
+            } else if (intToken.kind == TokenKind::KeywordChar || unsignedCharacterType) {
                 diagnostics.error_as(CompilerDiagnosticKind::Unsupported, intToken.location,
-                                    "global char storage and char pointers are not supported", "char");
+                                    unsignedCharacterType
+                                        ? "global unsigned char storage and pointers are not supported"
+                                        : "global char storage and char pointers are not supported", "char");
                 return false;
             } else {
             ++index;
@@ -2414,13 +2481,15 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             continue;
             }
         }
-        const bool characterReturn = externalToken.kind == TokenKind::KeywordChar;
+        const bool characterReturn = externalToken.kind == TokenKind::KeywordChar || unsignedCharacterType;
+        const bool unsignedCharacterReturn = unsignedCharacterType;
         if (externalToken.kind != TokenKind::KeywordInt && !characterReturn) {
             diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
                               "expected external declaration beginning with 'int', 'char', or 'extern'", "parser");
             return false;
         }
         ++index;
+        if (unsignedCharacterReturn) ++index;
         if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star) {
             diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
                                 tokens[token_index_or_eof(index, tokenCount)].location,
@@ -2438,7 +2507,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         if (afterName.kind != TokenKind::LeftParen) {
             if (characterReturn) {
                 diagnostics.error_as(CompilerDiagnosticKind::Unsupported, externalToken.location,
-                                    "global char storage is not supported", "char");
+                                    unsignedCharacterReturn ? "global unsigned char storage is not supported"
+                                                            : "global char storage is not supported", "char");
                 return false;
             }
             char name[COMPILER_FUNCTION_NAME_CAPACITY] = {};
@@ -2568,7 +2638,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         function.rootBlock = COMPILER_INVALID_INDEX;
         function.codeLabel = COMPILER_INVALID_INDEX;
         function.location = nameToken.location;
-        function.returnKind = characterReturn ? FunctionReturnKind::Character : FunctionReturnKind::Integer;
+        function.returnKind = unsignedCharacterReturn ? FunctionReturnKind::UnsignedCharacter :
+            (characterReturn ? FunctionReturnKind::Character : FunctionReturnKind::Integer);
         for (uint32_t i = 0; i < output->functionCount; ++i) {
             const FunctionSymbol& existing = output->functionSymbols[i];
             if (token_text_equals(source, nameToken, existing.name)) {
@@ -2644,13 +2715,30 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                     }
                     const Token parameterType = tokens[token_index_or_eof(index, tokenCount)];
                     const bool structParameter = parameterType.kind == TokenKind::KeywordStruct;
-                    const bool characterType = parameterType.kind == TokenKind::KeywordChar;
-                    const bool stringPointerParameter = characterType &&
-                        tokens[token_index_or_eof(index + 1U, tokenCount)].kind == TokenKind::Star;
+                    const bool unsignedType = parameterType.kind == TokenKind::KeywordUnsigned;
+                    bool unsignedCharacterType = false;
+                    if (unsignedType) {
+                        const Token unsignedBase = tokens[token_index_or_eof(index + 1U, tokenCount)];
+                        if (unsignedBase.kind != TokenKind::KeywordChar) {
+                            diagnostics.error_as(CompilerDiagnosticKind::Unsupported, parameterType.location,
+                                                "only unsigned char parameters are supported; unsigned int is not implemented", "type");
+                            return false;
+                        }
+                        unsignedCharacterType = true;
+                    }
+                    const bool characterType = parameterType.kind == TokenKind::KeywordChar || unsignedCharacterType;
+                    if (unsignedCharacterType &&
+                        tokens[token_index_or_eof(index + 2U, tokenCount)].kind == TokenKind::Star) {
+                        diagnostics.error_as(CompilerDiagnosticKind::Unsupported, parameterType.location,
+                                            "unsigned char pointer parameters are not supported", "pointer");
+                        return false;
+                    }
+                    const bool stringPointerParameter = characterType && !unsignedCharacterType &&
+                        tokens[token_index_or_eof(index + (unsignedCharacterType ? 2U : 1U), tokenCount)].kind == TokenKind::Star;
                     const bool characterParameter = characterType && !stringPointerParameter;
                     if (!structParameter && !characterType && parameterType.kind != TokenKind::KeywordInt) {
                         diagnostics.error(parameterType.location,
-                                          "ordinary functions accept only int, char, char*, or struct-pointer parameters", "parameter");
+                                          "ordinary functions accept only int, char, unsigned char, char*, or struct-pointer parameters", "parameter");
                         return false;
                     }
                     uint16_t structTypeIndex = COMPILER_INVALID_INDEX;
@@ -2680,7 +2768,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         }
                         ++index;
                     } else {
-                        ++index;
+                        index += unsignedCharacterType ? 2U : 1U;
                     }
                     const bool pointerParameter = tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star;
                     if (stringPointerParameter && !pointerParameter) {
@@ -2715,7 +2803,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         parameterSymbol.kind = structParameter ? ParameterKind::StructPointer :
                             (stringPointerParameter ? ParameterKind::StringPointer :
                              (pointerParameter ? ParameterKind::Int32Pointer :
-                              (characterParameter ? ParameterKind::Character : ParameterKind::Integer)));
+                              (unsignedCharacterType ? ParameterKind::UnsignedCharacter :
+                               (characterParameter ? ParameterKind::Character : ParameterKind::Integer))));
                         parameterSymbol.structTypeIndex = structTypeIndex;
                         parameterSymbol.structTypeIdentity = structTypeIndex < output->structTypeCount
                             ? output->structTypes[structTypeIndex].identity : 0;
@@ -2755,7 +2844,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                         parameterSymbol.kind = structParameter ? ParameterKind::StructPointer :
                             (stringPointerParameter ? ParameterKind::StringPointer :
                              (pointerParameter ? ParameterKind::Int32Pointer :
-                              (characterParameter ? ParameterKind::Character : ParameterKind::Integer)));
+                              (unsignedCharacterType ? ParameterKind::UnsignedCharacter :
+                               (characterParameter ? ParameterKind::Character : ParameterKind::Integer))));
                         parameterSymbol.structTypeIndex = structTypeIndex;
                         parameterSymbol.structTypeIdentity = structTypeIndex < output->structTypeCount
                             ? output->structTypes[structTypeIndex].identity : 0;
@@ -2896,7 +2986,7 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                     : output->declarations[declaration].parameterStructTypes[a];
                 const uint16_t argument = function.callArguments[call.argumentStart + a];
                 if (argument >= function.expressionCount ||
-                    ((expectedKind == ParameterKind::Integer || expectedKind == ParameterKind::Character) &&
+                    ((expectedKind == ParameterKind::Integer || parameter_kind_is_char8(expectedKind)) &&
                      function.expressions[argument].type != ValueType::Int32) ||
                     (expectedKind == ParameterKind::Int32Pointer &&
                      function.expressions[argument].type != ValueType::Int32Pointer) ||
@@ -2914,8 +3004,8 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
                                               ? "function argument requires a compatible struct pointer"
                                               : (expectedKind == ParameterKind::StringPointer
                                                   ? "function argument requires char*"
-                                                  : (expectedKind == ParameterKind::Character
-                                                      ? "char argument requires an int expression"
+                                              : (parameter_kind_is_char8(expectedKind)
+                                                      ? "character argument requires an int expression"
                                                       : "function argument requires int"))),
                                       "type");
                     return false;

@@ -91,7 +91,12 @@ static bool compile_and_run(const char* source, int32_t expected,
     uint8_t code[COMPILER_MAX_CODE_BYTES] = {};
     uint32_t codeBytes = 0;
     uint32_t entryOffset = 0;
-    if (!compile(source, &unit, code, &codeBytes, &entryOffset, &diagnostics)) return false;
+    if (!compile(source, &unit, code, &codeBytes, &entryOffset, &diagnostics)) {
+        if (diagnostics.count() == 0) std::fprintf(stderr, "struct compiler emitted no code\n");
+        for (uint32_t i = 0; i < diagnostics.count(); ++i)
+            std::fprintf(stderr, "struct compile diagnostic: %s\n", diagnostics.at(i).message);
+        return false;
+    }
 #if defined(_WIN32)
     DWORD oldProtection = 0;
     if (!VirtualProtect(code, sizeof(code), PAGE_EXECUTE_READWRITE, &oldProtection)) return false;
@@ -102,6 +107,9 @@ static bool compile_and_run(const char* source, int32_t expected,
         std::memcpy(generatedCode, code, codeBytes);
         *generatedCodeBytes = codeBytes;
     }
+    if (result.value != expected || result.status != 0)
+        std::fprintf(stderr, "struct execution value=%d expected=%d status=%u\n",
+                     result.value, expected, result.status);
     return result.value == expected && result.status == 0;
 }
 
@@ -217,24 +225,68 @@ static bool execution_and_layout()
     return true;
 }
 
+static bool unsigned_field_execution_and_layout()
+{
+    const char* source =
+        "struct Packet { unsigned char type; int length; unsigned char flags; char signedFlag; }; "
+        "int gx_main(gx_app_context* ctx) { struct Packet packet; int after = 1000; "
+        "packet.type = 255; packet.length = 42; packet.flags = 128; packet.signedFlag = 255; "
+        "return packet.type + packet.length + packet.flags + packet.signedFlag + after; }";
+    TranslationUnitIR unit = {};
+    uint8_t code[COMPILER_MAX_CODE_BYTES] = {};
+    uint32_t codeBytes = 0;
+    if (!require(compile_and_run(source, 1424, &unit, code, &codeBytes),
+                 "unsigned and signed fields execute without overwriting neighboring storage")) return false;
+    const StructTypeIR& packet = unit.structTypes[0];
+    if (!require(packet.fieldCount == 4 && packet.fields[0].kind == StructFieldKind::UnsignedChar8 &&
+                 packet.fields[0].offset == 0 && packet.fields[0].sizeBytes == 1 &&
+                 packet.fields[1].kind == StructFieldKind::Int32 && packet.fields[1].offset == 4 &&
+                 packet.fields[1].sizeBytes == 4 &&
+                 packet.fields[2].kind == StructFieldKind::UnsignedChar8 && packet.fields[2].offset == 8 &&
+                 packet.fields[2].sizeBytes == 1 && packet.fields[3].kind == StructFieldKind::Char8 &&
+                 packet.fields[3].offset == 9 && packet.sizeBytes == 12 && packet.alignment == 4,
+                 "unsigned fields retain one-byte storage and the existing mixed-width layout")) return false;
+    const uint8_t zeroExtendField[] = {0x0F, 0xB6, 0x00};
+    const uint8_t signedExtendField[] = {0x0F, 0xBE, 0x00};
+    const uint8_t byteStoreField[] = {0x88, 0x02};
+    const uint8_t intStoreField[] = {0x89, 0x02};
+    if (!require(has_bytes(code, codeBytes, zeroExtendField, sizeof(zeroExtendField)) &&
+                   has_bytes(code, codeBytes, signedExtendField, sizeof(signedExtendField)) &&
+                   has_bytes(code, codeBytes, byteStoreField, sizeof(byteStoreField)) &&
+                   has_bytes(code, codeBytes, intStoreField, sizeof(intStoreField)),
+                   "field loads use MOVZX or MOVSX by signedness and stores preserve field width")) return false;
+    const char* multipleInstances =
+        "struct Packet { unsigned char value; }; int gx_main(gx_app_context* ctx) { "
+        "struct Packet first; struct Packet second; first.value = 128; second.value = 255; "
+        "return first.value + second.value; }";
+    if (!require(compile_and_run(multipleInstances, 383),
+                 "multiple local structures retain independent unsigned field values")) return false;
+    const char* structureArray =
+        "struct Packet { unsigned char value; }; int gx_main(gx_app_context* ctx) { "
+        "struct Packet packets[2]; packets[0].value = 128; packets[1].value = 255; "
+        "return packets[0].value + packets[1].value; }";
+    return require(compile_and_run(structureArray, 383),
+                   "arrays of structures retain one-byte unsigned fields and indexed addressing");
+}
+
 static bool modules_and_objects()
 {
     const char* providerSource =
-        "struct Packet { char state; int value; }; "
-        "int packet_total(struct Packet* p) { return p->state + p->value; }";
+        "struct Packet { unsigned char type; int value; char state; }; "
+        "int packet_total(struct Packet* p) { return p->type + p->value + p->state; }";
     const char* consumerSource =
-        "struct Packet { char state; int value; }; int packet_total(struct Packet* p); "
+        "struct Packet { unsigned char type; int value; char state; }; int packet_total(struct Packet* p); "
         "int gx_main(gx_app_context* ctx) { struct Packet packet; "
-        "packet.state = 255; packet.value = 42; return packet_total(&packet); }";
+        "packet.type = 255; packet.state = 255; packet.value = 42; return packet_total(&packet); }";
     CompiledModule modules[2] = {};
     Diagnostics diagnostics;
     if (!require(compile_module_from_source("src/provider.cpp", providerSource,
                  static_cast<uint32_t>(std::strlen(providerSource)), &modules[0], diagnostics),
-                 "provider module with a char field compiles")) return false;
+                 "provider module with an unsigned char field compiles")) return false;
     diagnostics = Diagnostics();
     if (!require(compile_module_from_source("src/consumer.cpp", consumerSource,
                  static_cast<uint32_t>(std::strlen(consumerSource)), &modules[1], diagnostics),
-                 "consumer module with the matching char-field layout compiles")) return false;
+                 "consumer module with the matching unsigned char-field layout compiles")) return false;
 
     uint8_t object[COMPILER_MAX_OBJECT_BYTES] = {};
     uint8_t repeated[COMPILER_MAX_OBJECT_BYTES] = {};
@@ -245,16 +297,17 @@ static bool modules_and_objects()
     ElfObjectHeaderView header = {};
     diagnostics = Diagnostics();
     if (!require(inspect_elf_object(object, objectBytes, &header, diagnostics) &&
-                 header.formatVersion == 2 && header.compilerObjectAbiVersion == 13,
-                 "physical object format stays v2 and semantic compiler ABI advances to 13")) return false;
+                 header.formatVersion == 2 && header.compilerObjectAbiVersion == COMPILER_OBJECT_ABI_VERSION,
+                 "physical object format stays v2 and semantic compiler ABI is current")) return false;
     CompiledModule restored[2] = {};
     diagnostics = Diagnostics();
     if (!require(deserialize_elf_object(object, objectBytes, &restored[0], diagnostics) &&
-                 restored[0].structTypes[0].fields[0].kind == StructFieldKind::Char8 &&
+                 restored[0].structTypes[0].fields[0].kind == StructFieldKind::UnsignedChar8 &&
                  restored[0].structTypes[0].fields[1].offset == 4 &&
-                 restored[0].structTypes[0].sizeBytes == 8,
-                 "object round trip preserves byte field kind and mixed layout")) return false;
-    object[header.metaOffset + 16U] = 12U;
+                 restored[0].structTypes[0].fields[2].kind == StructFieldKind::Char8 &&
+                 restored[0].structTypes[0].sizeBytes == 12,
+                 "object round trip preserves signedness-specific byte field kinds and mixed layout")) return false;
+    object[header.metaOffset + 16U] = 13U;
     const uint64_t oldAbiChecksum = elf_object_checksum(object, objectBytes,
                                                         header.metaOffset + 112U);
     for (uint32_t i = 0; i < 8U; ++i)
@@ -262,7 +315,7 @@ static bool modules_and_objects()
     diagnostics = Diagnostics();
     CompiledModule oldAbiRejected = {};
     if (!require(!deserialize_elf_object(object, objectBytes, &oldAbiRejected, diagnostics),
-                 "ABI-12 cached objects are rejected by the ABI-13 compiler")) return false;
+                 "ABI-13 cached objects are rejected by the ABI-14 compiler")) return false;
     if (!require(serialize_elf_object(modules[0], object, sizeof(object), &objectBytes) &&
                  serialize_elf_object(modules[0], repeated, sizeof(repeated), &repeatedBytes) &&
                  objectBytes == repeatedBytes && std::memcmp(object, repeated, objectBytes) == 0,
@@ -280,7 +333,7 @@ static bool modules_and_objects()
     }
     if (!require(linkedOk && linked.structTypeCount == 1 &&
                  linked.structTypes[0].identity == restored[0].structTypes[0].identity,
-                 "matching byte-accurate structure declarations link across modules")) return false;
+                 "matching signed and unsigned byte structure declarations link across modules")) return false;
 
     CompiledModule bad = modules[0];
     bad.structTypes[0].fields[1].offset = 1;
@@ -288,7 +341,7 @@ static bool modules_and_objects()
                  "overlapping or non-deterministic field metadata is rejected at serialization")) return false;
 
     const char* badOrderSource =
-        "struct Packet { int value; char state; }; int packet_total(struct Packet* p) { return p->state; }";
+        "struct Packet { int value; unsigned char state; }; int packet_total(struct Packet* p) { return p->state; }";
     CompiledModule badOrder = {};
     diagnostics = Diagnostics();
     if (!require(compile_module_from_source("src/bad-layout.cpp", badOrderSource,
@@ -326,6 +379,8 @@ static bool global_layout_and_diagnostics()
                           "pointer fields are not supported"), "char pointer fields are classified unsupported")) return false;
     if (!require(rejected("struct P { short value; }; int gx_main(gx_app_context* c) { return 0; }",
                           "struct fields must be int or char"), "unsupported field types are diagnosed")) return false;
+    if (!require(rejected("struct P { unsigned int value; }; int gx_main(gx_app_context* c) { return 0; }",
+                          "unsigned int is not implemented"), "unsigned int fields are explicitly unsupported")) return false;
     if (!require(rejected("struct P { char values[2]; }; int gx_main(gx_app_context* c) { return 0; }",
                           "array fields are not supported"), "array fields remain unsupported")) return false;
     if (!require(rejected("struct P { char value; }; int gx_main(gx_app_context* c) { struct P p; int* q = &p.value; return 0; }",
@@ -357,7 +412,8 @@ static bool global_layout_and_diagnostics()
 
 int main()
 {
-    if (!execution_and_layout() || !modules_and_objects() || !global_layout_and_diagnostics()) return 1;
+    if (!execution_and_layout() || !unsigned_field_execution_and_layout() ||
+        !modules_and_objects() || !global_layout_and_diagnostics()) return 1;
     std::printf("COMP4H assertions=%u result=PASS\n", g_assertions);
     return 0;
 }

@@ -57,6 +57,7 @@ enum class TokenKind : uint8_t {
     Percent,
     // Append-only: token values are consumed by bounded compiler buffers.
     Character,
+    KeywordUnsigned,
 };
 
 struct Token {

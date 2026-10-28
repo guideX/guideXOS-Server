@@ -76,7 +76,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 13;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 14;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -158,12 +158,21 @@ enum class StorageKind : uint8_t {
     // occupies one byte per scalar/element in the function frame.
     ScalarChar,
     ArrayChar,
+    ScalarUnsignedChar,
+    ArrayUnsignedChar,
 };
 
 enum class StructFieldKind : uint8_t {
     Int32,
     // Appended so persisted kind 0 remains the existing 32-bit field.
     Char8,
+    UnsignedChar8,
+};
+
+enum class IndexedElementKind : uint8_t {
+    Int32,
+    Character,
+    UnsignedCharacter,
 };
 
 struct StructFieldIR {
@@ -204,7 +213,7 @@ struct Expression {
     uint16_t elementCount;
     uint16_t elementSize;
     IndexedBaseKind indexedBaseKind;
-    uint8_t indexedReserved;
+    IndexedElementKind indexedElementKind;
     uint16_t structTypeIndex;
     int32_t value;
     SourceLocation location;
@@ -243,7 +252,7 @@ struct Statement {
     uint16_t elementCount;
     uint16_t elementSize;
     IndexedBaseKind indexedBaseKind;
-    uint8_t indexedReserved;
+    IndexedElementKind indexedElementKind;
     SourceLocation location;
 };
 
@@ -262,11 +271,13 @@ enum class ParameterKind : uint8_t {
     StringPointer,
     // Appended to preserve the serialized values of existing parameter kinds.
     Character,
+    UnsignedCharacter,
 };
 
 enum class FunctionReturnKind : uint8_t {
     Integer,
     Character,
+    UnsignedCharacter,
 };
 
 // Phase 28G deliberately describes only values whose AMD64 representation is
@@ -490,6 +501,27 @@ inline bool symbol_is_data(SymbolKind kind)
 inline bool storage_kind_is_struct(StorageKind kind)
 {
     return kind == StorageKind::Struct || kind == StorageKind::ArrayStruct;
+}
+
+inline bool storage_kind_is_char8(StorageKind kind)
+{
+    return kind == StorageKind::ScalarChar || kind == StorageKind::ArrayChar ||
+           kind == StorageKind::ScalarUnsignedChar || kind == StorageKind::ArrayUnsignedChar;
+}
+
+inline bool storage_kind_is_char_array(StorageKind kind)
+{
+    return kind == StorageKind::ArrayChar || kind == StorageKind::ArrayUnsignedChar;
+}
+
+inline bool parameter_kind_is_char8(ParameterKind kind)
+{
+    return kind == ParameterKind::Character || kind == ParameterKind::UnsignedCharacter;
+}
+
+inline bool struct_field_kind_is_char8(StructFieldKind kind)
+{
+    return kind == StructFieldKind::Char8 || kind == StructFieldKind::UnsignedChar8;
 }
 
 inline bool parameter_kind_is_pointer(ParameterKind kind)
