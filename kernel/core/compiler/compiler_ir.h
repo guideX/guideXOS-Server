@@ -76,7 +76,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 11;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 12;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -258,6 +258,13 @@ enum class ParameterKind : uint8_t {
     AppContextPointer,
     StructPointer,
     StringPointer,
+    // Appended to preserve the serialized values of existing parameter kinds.
+    Character,
+};
+
+enum class FunctionReturnKind : uint8_t {
+    Integer,
+    Character,
 };
 
 // Phase 28G deliberately describes only values whose AMD64 representation is
@@ -307,6 +314,8 @@ struct ParameterSymbol {
     uint16_t slot;
     uint16_t structTypeIndex;
     uint64_t structTypeIdentity;
+    // Byte distance below RBP to the end of the parameter's owned storage.
+    uint32_t stackOffsetBytes;
     bool initialized;
     SourceLocation declaration;
 };
@@ -338,6 +347,7 @@ struct CallSite {
     uint16_t argumentCount;
     uint16_t calleeFunction;
     uint16_t expectedParameterCount;
+    FunctionReturnKind expectedReturnKind;
     ParameterKind expectedParameterKinds[COMPILER_MAX_PARAMETERS];
     uint64_t expectedParameterStructTypes[COMPILER_MAX_PARAMETERS];
     bool external;
@@ -354,6 +364,7 @@ struct FunctionIR {
     bool usesAppContext;
     bool hasHostLog;
     bool returnConstantValid;
+    FunctionReturnKind returnKind;
     uint16_t functionIndex;
     uint16_t parameterCount;
     uint16_t integerParameterCount;
@@ -398,7 +409,8 @@ struct FunctionSymbol {
     uint16_t functionIndex;
     uint16_t parameterCount;
     uint16_t codeLabel;
-    uint16_t reserved;
+    FunctionReturnKind returnKind;
+    uint8_t reserved;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
     uint64_t parameterStructTypes[COMPILER_MAX_PARAMETERS];
     SourceLocation location;
@@ -407,6 +419,7 @@ struct FunctionSymbol {
 struct FunctionDeclaration {
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
     uint16_t parameterCount;
+    FunctionReturnKind returnKind;
     bool usesAppContext;
     uint8_t reserved;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
@@ -575,6 +588,7 @@ struct ExportSymbol {
     uint16_t elementCount;
     uint16_t elementSize;
     uint16_t parameterCount;
+    FunctionReturnKind returnKind;
     bool isEntry;
     uint8_t reserved;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
@@ -588,7 +602,8 @@ struct ImportSymbol {
     SymbolKind kind;
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
     uint16_t expectedParameterCount;
-    uint16_t reserved;
+    FunctionReturnKind expectedReturnKind;
+    uint8_t reserved;
     uint32_t size;
     uint32_t alignment;
     uint16_t elementCount;
@@ -647,6 +662,8 @@ struct GlobalFunctionSymbol {
     char name[COMPILER_FUNCTION_NAME_CAPACITY];
     uint16_t moduleIndex;
     uint16_t parameterCount;
+    FunctionReturnKind returnKind;
+    uint8_t reservedReturnKind;
     ParameterKind parameterKinds[COMPILER_MAX_PARAMETERS];
     uint64_t parameterStructTypes[COMPILER_MAX_PARAMETERS];
     char structTypeName[COMPILER_FUNCTION_NAME_CAPACITY];

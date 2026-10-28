@@ -26,11 +26,6 @@ static bool align16(uint32_t value, uint32_t* output)
     return true;
 }
 
-static int32_t slot_displacement(uint32_t slot)
-{
-    return -static_cast<int32_t>(4U * (slot + 1U));
-}
-
 static const LocalSymbol* find_local_slot(const FunctionIR& function, uint16_t slot)
 {
     for (uint32_t i = 0; i < function.localCount; ++i)
@@ -38,18 +33,20 @@ static const LocalSymbol* find_local_slot(const FunctionIR& function, uint16_t s
     return nullptr;
 }
 
-static bool has_parameter_slot(const FunctionIR& function, uint16_t slot)
+static const ParameterSymbol* find_parameter_slot(const FunctionIR& function, uint16_t slot)
 {
     for (uint32_t i = 0; i < function.parameterCount; ++i)
-        if (function.parameters[i].slot == slot) return true;
-    return false;
+        if (function.parameters[i].slot != COMPILER_INVALID_INDEX &&
+            function.parameters[i].slot == slot) return &function.parameters[i];
+    return nullptr;
 }
 
 static int32_t local_displacement(const FunctionIR& function, uint16_t slot)
 {
     const LocalSymbol* local = find_local_slot(function, slot);
     if (local) return -static_cast<int32_t>(local->stackOffsetBytes);
-    return has_parameter_slot(function, slot) ? slot_displacement(slot) : 0x7FFFFFFF;
+    const ParameterSymbol* parameter = find_parameter_slot(function, slot);
+    return parameter ? -static_cast<int32_t>(parameter->stackOffsetBytes) : 0x7FFFFFFF;
 }
 
 static int32_t temporary_displacement(const FrameLayout& frame, uint16_t slot)
@@ -153,9 +150,21 @@ public:
     {
         return byte(0x0F) && byte(0xBE) && byte(0x85) && u32(static_cast<uint32_t>(displacement));
     }
+    bool movsx_eax_al() { static const uint8_t v[] = {0x0F, 0xBE, 0xC0}; return bytes(v, sizeof(v)); }
     bool mov_local_al(int32_t displacement)
     {
         return byte(0x88) && byte(0x85) && u32(static_cast<uint32_t>(displacement));
+    }
+    bool mov_local_reg8(uint8_t reg, int32_t displacement)
+    {
+        if (reg < 8) {
+            if (reg >= 4 && !byte(0x40)) return false;
+            return byte(0x88) && byte(static_cast<uint8_t>(0x85U | (reg << 3))) &&
+                   u32(static_cast<uint32_t>(displacement));
+        }
+        return byte(0x44) && byte(0x88) &&
+               byte(static_cast<uint8_t>(0x85U | ((reg - 8U) << 3))) &&
+               u32(static_cast<uint32_t>(displacement));
     }
     bool mov_eax_rax() { static const uint8_t v[] = {0x8B, 0x02}; return bytes(v, sizeof(v)); }
     bool movsx_eax_rax8() { static const uint8_t v[] = {0x0F, 0xBE, 0x02}; return bytes(v, sizeof(v)); }
@@ -1537,13 +1546,13 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                 expression.location) && emitter.mov_rax_rdx();
         case ExpressionKind::LoadLocal:
             if (local_displacement(function, expression.localIndex) == 0x7FFFFFFF) return false;
-            for (uint32_t p = 0; p < function.parameterCount; ++p)
-                if (function.parameters[p].slot == expression.localIndex &&
-                    function.parameters[p].kind == ParameterKind::StringPointer)
-                    return emitter.mov_rax_local(local_displacement(function, expression.localIndex));
             {
+                const ParameterSymbol* parameter = find_parameter_slot(function, expression.localIndex);
+                if (parameter && parameter->kind == ParameterKind::StringPointer)
+                    return emitter.mov_rax_local(local_displacement(function, expression.localIndex));
                 const LocalSymbol* local = find_local_slot(function, expression.localIndex);
-                return local && local->kind == StorageKind::ScalarChar
+                return (parameter && parameter->kind == ParameterKind::Character) ||
+                       (local && local->kind == StorageKind::ScalarChar)
                     ? emitter.movsx_eax_local8(local_displacement(function, expression.localIndex))
                     : emitter.mov_eax_local(local_displacement(function, expression.localIndex));
             }
@@ -1752,9 +1761,14 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                                  epilogueLabel, callFailureLabel)) return false;
             {
                 const LocalSymbol* local = find_local_slot(function, statement.localIndex);
+                const ParameterSymbol* parameter = find_parameter_slot(function, statement.localIndex);
+                if (parameter && parameter->kind == ParameterKind::Character)
+                    return emitter.mov_local_al(local_displacement(function, statement.localIndex));
                 return local && local->kind == StorageKind::ScalarChar
                     ? emitter.mov_local_al(local_displacement(function, statement.localIndex))
-                    : emitter.mov_local_eax(local_displacement(function, statement.localIndex));
+                    : (local || (parameter && parameter->kind == ParameterKind::Integer))
+                        ? emitter.mov_local_eax(local_displacement(function, statement.localIndex))
+                        : false;
             }
         case StatementKind::StorePointer:
             if (local_displacement(function, statement.localIndex) == 0x7FFFFFFF)
@@ -1829,9 +1843,11 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
             return function.usesAppContext && emit_log(emitter, function, statement, dataAddress, true,
                                                        frame.contextDisplacement);
         case StatementKind::Return:
-            return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
-                                   epilogueLabel, callFailureLabel) &&
-                emitter.emit_jmp(epilogueLabel);
+            if (!emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                 epilogueLabel, callFailureLabel)) return false;
+            if (function.returnKind == FunctionReturnKind::Character && !emitter.movsx_eax_al())
+                return false;
+            return emitter.emit_jmp(epilogueLabel);
         case StatementKind::Break: {
             uint16_t target = COMPILER_INVALID_INDEX;
             return emitter.current_break_target(&target) && emitter.emit_jmp(target);
@@ -2174,14 +2190,17 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
         for (uint32_t p = 0; p < function.parameterCount; ++p) {
             if (function.parameters[p].kind == ParameterKind::Integer) {
                 if (!emitter.mov_reg_local32(argumentRegisters[p],
-                                             slot_displacement(function.parameters[p].slot))) return false;
+                                             local_displacement(function, function.parameters[p].slot))) return false;
+            } else if (function.parameters[p].kind == ParameterKind::Character) {
+                if (!emitter.mov_local_reg8(argumentRegisters[p],
+                                            local_displacement(function, function.parameters[p].slot))) return false;
             } else if (function.parameters[p].kind == ParameterKind::StringPointer) {
                 if (!emitter.mov_rax_reg64(argumentRegisters[p]) ||
-                    !emitter.mov_local_rax(slot_displacement(function.parameters[p].slot))) return false;
+                    !emitter.mov_local_rax(local_displacement(function, function.parameters[p].slot))) return false;
             } else if (parameter_kind_is_pointer(function.parameters[p].kind)) {
                 if (!emitter.mov_rax_reg64(argumentRegisters[p]) ||
                     !emit_copy_pointer_descriptor(emitter,
-                                                  slot_displacement(function.parameters[p].slot))) return false;
+                                                  local_displacement(function, function.parameters[p].slot))) return false;
             }
         }
         uint16_t epilogueLabel = COMPILER_INVALID_INDEX;
@@ -2246,7 +2265,7 @@ static bool emit_translation_unit_impl(const TranslationUnitIR& unit, uint64_t r
                     COMPILER_DEBUG_VARIABLE_FLAG_STABLE_FRAME_SLOT;
                 record.sizeBytes = size;
                 record.declaration = parameter.declaration;
-                record.frameOffset = slot_displacement(parameter.slot);
+                record.frameOffset = local_displacement(function, parameter.slot);
                 record.liveStart = functionStart;
                 record.liveEnd = functionEnd;
             }

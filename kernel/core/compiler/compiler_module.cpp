@@ -283,6 +283,7 @@ bool compile_module_from_source(const char* sourcePath,
         }
         exportSymbol.size = functionEnd - function.codeOffset;
         exportSymbol.parameterCount = function.parameterCount;
+        exportSymbol.returnKind = function.returnKind;
         for (uint32_t p = 0; p < function.parameterCount; ++p) {
             exportSymbol.parameterKinds[p] = function.parameters[p].kind;
             exportSymbol.parameterStructTypes[p] = function.parameters[p].structTypeIdentity;
@@ -321,7 +322,8 @@ bool compile_module_from_source(const char* sourcePath,
             if (!call.external || compiler_native_app_call(call.calleeName) != CompilerNativeAppCall::None) continue;
             const int32_t existing = find_import(*module, call.calleeName);
             if (existing >= 0) {
-                bool sameSignature = module->imports[existing].expectedParameterCount == call.expectedParameterCount;
+                bool sameSignature = module->imports[existing].expectedParameterCount == call.expectedParameterCount &&
+                    module->imports[existing].expectedReturnKind == call.expectedReturnKind;
                 for (uint32_t p = 0; sameSignature && p < call.expectedParameterCount; ++p)
                     sameSignature = module->imports[existing].parameterKinds[p] == call.expectedParameterKinds[p] &&
                         module->imports[existing].parameterStructTypes[p] == call.expectedParameterStructTypes[p];
@@ -342,6 +344,7 @@ bool compile_module_from_source(const char* sourcePath,
             importSymbol.kind = SymbolKind::Function;
             if (!copy_string(importSymbol.name, sizeof(importSymbol.name), call.calleeName)) return false;
             importSymbol.expectedParameterCount = call.expectedParameterCount;
+            importSymbol.expectedReturnKind = call.expectedReturnKind;
             for (uint32_t p = 0; p < call.expectedParameterCount; ++p) {
                 importSymbol.parameterKinds[p] = call.expectedParameterKinds[p];
                 importSymbol.parameterStructTypes[p] = call.expectedParameterStructTypes[p];

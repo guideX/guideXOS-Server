@@ -146,12 +146,15 @@ static void setup_project()
         "if (letter != 'A' || bytes[0] != 'O' || bytes[1] != 'K') return 90; "
         "int quotient = -17 / 5; int remainder = -17 % 5; "
         "if (quotient != -3) return 91; if (remainder != -2) return 92; "
+        "if (increment_character(127) != -128 || increment_character(65) != 66) return 93; "
         "return calculate_value() / 3; }\n");
     put("/workspace/comp4b/src/helper.cpp",
+        "char increment_character(char value) { return value + 1; } "
         "int calculate_value() { int i = 1; int sum = 0; "
         "while (i <= 5) { if (i % 2 != 0) { sum = sum + i; } "
         "i = i + 1; } return sum; }\n");
-    put("/workspace/comp4b/src/helper.h", "int calculate_value();\n");
+    put("/workspace/comp4b/src/helper.h",
+        "char increment_character(char value);\nint calculate_value();\n");
     put(kFinalArtifact, "previous-successful-artifact");
 }
 
@@ -355,6 +358,7 @@ static void test_cancel_during_validation_and_finalization_race(
     release_build(handle);
 
     put("/workspace/comp4b/src/helper.cpp",
+        "char increment_character(char value) { return value + 1; } "
         "int calculate_value() { return 45; }\n");
     handle = start_build(fixture);
     bool readyToPublish = false;
@@ -384,6 +388,7 @@ static void test_publication_rollback_and_recovery(RequestFixture& fixture)
 {
     const std::vector<uint8_t> previous = read_vfs_bytes(kFinalArtifact);
     put("/workspace/comp4b/src/helper.cpp",
+        "char increment_character(char value) { return value + 1; } "
         "int calculate_value() { return 46; }\n");
     gx_build_handle handle = start_build(fixture);
     gx_build_snapshot snapshot = {};

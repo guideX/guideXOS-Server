@@ -324,6 +324,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
             copy_name(global.name, sizeof(global.name), exportSymbol.name);
             global.moduleIndex = static_cast<uint16_t>(m);
             global.parameterCount = exportSymbol.parameterCount;
+            global.returnKind = exportSymbol.returnKind;
             for (uint32_t p = 0; p < exportSymbol.parameterCount; ++p) {
                 global.parameterKinds[p] = exportSymbol.parameterKinds[p];
                 global.parameterStructTypes[p] = exportSymbol.parameterStructTypes[p];
@@ -528,7 +529,8 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 return report_kind_conflict(importSymbol.location, importSymbol.name, diagnostics);
             }
             if (importSymbol.kind == SymbolKind::Function) {
-                bool sameSignature = definition.parameterCount == importSymbol.expectedParameterCount;
+                bool sameSignature = definition.parameterCount == importSymbol.expectedParameterCount &&
+                    definition.returnKind == importSymbol.expectedReturnKind;
                 for (uint32_t p = 0; sameSignature && p < importSymbol.expectedParameterCount; ++p)
                     sameSignature = definition.parameterKinds[p] == importSymbol.parameterKinds[p] &&
                         definition.parameterStructTypes[p] == importSymbol.parameterStructTypes[p];

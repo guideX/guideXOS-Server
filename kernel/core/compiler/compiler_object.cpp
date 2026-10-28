@@ -403,7 +403,7 @@ static void write_export(Writer& writer, const ExportSymbol& symbol)
     writer.u8(static_cast<uint8_t>(symbol.kind)); writer.u8(symbol.isEntry ? 1 : 0); writer.u16(0);
     write_fixed_name(writer, symbol.name, sizeof(symbol.name)); writer.u32(symbol.moduleCodeOffset); writer.u32(symbol.moduleDataOffset);
     writer.u32(symbol.size); writer.u32(symbol.alignment); writer.u16(symbol.elementCount); writer.u16(symbol.elementSize);
-    writer.u16(symbol.parameterCount); writer.u16(0);
+    writer.u16(symbol.parameterCount); writer.u8(static_cast<uint8_t>(symbol.returnKind)); writer.u8(0);
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) writer.u8(static_cast<uint8_t>(symbol.parameterKinds[i]));
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) writer.u64(symbol.parameterStructTypes[i]);
     write_fixed_name(writer, symbol.structTypeName, sizeof(symbol.structTypeName)); writer.u64(symbol.structTypeIdentity); write_location(writer, symbol.location);
@@ -414,9 +414,14 @@ static bool read_export(Reader& reader, ExportSymbol& symbol)
     symbol = {}; const uint8_t kind = reader.u8(); const uint8_t entry = reader.u8(); (void)reader.u16();
     if (kind > static_cast<uint8_t>(SymbolKind::DataStruct) || entry > 1 || !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
     symbol.kind = static_cast<SymbolKind>(kind); symbol.isEntry = entry != 0; symbol.moduleCodeOffset = reader.u32(); symbol.moduleDataOffset = reader.u32();
-    symbol.size = reader.u32(); symbol.alignment = reader.u32(); symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16(); symbol.parameterCount = reader.u16(); (void)reader.u16();
+    symbol.size = reader.u32(); symbol.alignment = reader.u32(); symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16(); symbol.parameterCount = reader.u16();
+    const uint8_t returnKind = reader.u8(); const uint8_t returnReserved = reader.u8();
     if (symbol.parameterCount > COMPILER_MAX_PARAMETERS) return false;
-    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) { const uint8_t kindValue = reader.u8(); if (kindValue > static_cast<uint8_t>(ParameterKind::StructPointer)) return false; symbol.parameterKinds[i] = static_cast<ParameterKind>(kindValue); }
+    if (returnReserved != 0 || returnKind > static_cast<uint8_t>(FunctionReturnKind::Character)) return false;
+    if (symbol.kind != SymbolKind::Function &&
+        (symbol.parameterCount != 0 || returnKind != static_cast<uint8_t>(FunctionReturnKind::Integer))) return false;
+    symbol.returnKind = static_cast<FunctionReturnKind>(returnKind);
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) { const uint8_t kindValue = reader.u8(); if (kindValue > static_cast<uint8_t>(ParameterKind::Character)) return false; symbol.parameterKinds[i] = static_cast<ParameterKind>(kindValue); }
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) symbol.parameterStructTypes[i] = reader.u64();
     if (!read_optional_name(reader, symbol.structTypeName, sizeof(symbol.structTypeName))) return false;
     symbol.structTypeIdentity = reader.u64(); symbol.location = read_location(reader); return reader.ok();
@@ -425,7 +430,7 @@ static bool read_export(Reader& reader, ExportSymbol& symbol)
 static void write_import(Writer& writer, const ImportSymbol& symbol)
 {
     writer.u8(static_cast<uint8_t>(symbol.kind)); writer.u8(0); writer.u16(0); write_fixed_name(writer, symbol.name, sizeof(symbol.name));
-    writer.u16(symbol.expectedParameterCount); writer.u16(0); writer.u32(symbol.size); writer.u32(symbol.alignment); writer.u16(symbol.elementCount); writer.u16(symbol.elementSize);
+    writer.u16(symbol.expectedParameterCount); writer.u8(static_cast<uint8_t>(symbol.expectedReturnKind)); writer.u8(0); writer.u32(symbol.size); writer.u32(symbol.alignment); writer.u16(symbol.elementCount); writer.u16(symbol.elementSize);
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) writer.u8(static_cast<uint8_t>(symbol.parameterKinds[i]));
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) writer.u64(symbol.parameterStructTypes[i]);
     write_fixed_name(writer, symbol.structTypeName, sizeof(symbol.structTypeName)); writer.u64(symbol.structTypeIdentity); write_location(writer, symbol.location);
@@ -435,9 +440,15 @@ static bool read_import(Reader& reader, ImportSymbol& symbol)
 {
     symbol = {}; const uint8_t kind = reader.u8(); (void)reader.u8(); (void)reader.u16();
     if (kind > static_cast<uint8_t>(SymbolKind::DataStruct) || !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
-    symbol.kind = static_cast<SymbolKind>(kind); symbol.expectedParameterCount = reader.u16(); (void)reader.u16(); symbol.size = reader.u32(); symbol.alignment = reader.u32(); symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16();
+    symbol.kind = static_cast<SymbolKind>(kind); symbol.expectedParameterCount = reader.u16();
+    const uint8_t returnKind = reader.u8(); const uint8_t returnReserved = reader.u8();
+    symbol.expectedReturnKind = static_cast<FunctionReturnKind>(returnKind);
+    symbol.size = reader.u32(); symbol.alignment = reader.u32(); symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16();
     if (symbol.kind == SymbolKind::Function && symbol.expectedParameterCount > COMPILER_MAX_PARAMETERS) return false;
-    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) { const uint8_t kindValue = reader.u8(); if (kindValue > static_cast<uint8_t>(ParameterKind::StructPointer)) return false; symbol.parameterKinds[i] = static_cast<ParameterKind>(kindValue); }
+    if (returnReserved != 0 || returnKind > static_cast<uint8_t>(FunctionReturnKind::Character)) return false;
+    if (symbol.kind != SymbolKind::Function &&
+        (symbol.expectedParameterCount != 0 || returnKind != static_cast<uint8_t>(FunctionReturnKind::Integer))) return false;
+    for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) { const uint8_t kindValue = reader.u8(); if (kindValue > static_cast<uint8_t>(ParameterKind::Character)) return false; symbol.parameterKinds[i] = static_cast<ParameterKind>(kindValue); }
     for (uint32_t i = 0; i < COMPILER_MAX_PARAMETERS; ++i) symbol.parameterStructTypes[i] = reader.u64();
     if (!read_optional_name(reader, symbol.structTypeName, sizeof(symbol.structTypeName))) return false;
     symbol.structTypeIdentity = reader.u64(); symbol.location = read_location(reader); return reader.ok();
