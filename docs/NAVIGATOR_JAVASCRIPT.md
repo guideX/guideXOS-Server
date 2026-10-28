@@ -12554,6 +12554,66 @@ checks, and phase 6C sticky/fixed/clipping/flex behavior. No hosted JavaScript
 check failed. The aggregate therefore remains `NAVIGATOR_SMOKE_RESULT: FAIL`
 for those existing CSS checks.
 
+## JS95 — bounded `Array.prototype.filter()`
+
+JS95 adds `Array.prototype.filter(callback[, thisArg])` to the existing bounded
+Array prototype. The receiver must be a genuine runtime Array. The callback is
+validated before traversal, including for an empty source, and receives
+`(value, index, sourceArray)` with the existing optional `thisArg` handling.
+The result is a new Array containing the original values whose callback results
+are truthy, in source visitation order. Object and nested Array values preserve
+their references.
+
+Filter reuses JS93–JS94's captured-length traversal, live inherited-aware
+property-presence check, indexed read, and callback invocation path. Holes are
+skipped, but inherited numeric properties are visited. Explicit `undefined` is
+a present element and is passed to the callback. Selected values are staged
+locally and assigned consecutive result indices, so sparse input always
+produces a dense result. The result's logical length is exactly the number of
+selected values.
+
+The source length is captured once. At each index below that bound, the
+runtime checks the current property state and reads its current value before
+calling the callback. Replacements and newly filled future holes are observed;
+removed or truncated future positions are skipped; appended positions beyond
+the captured length are ignored. Inclusion stores the value read for that
+callback invocation, even if the callback changes that source slot. Source
+side effects completed before a callback error remain visible.
+
+Selection scratch storage belongs to the active traversal call, which keeps
+nested filter, map, and forEach invocations independent. At most the captured
+1,024-position bound can be selected. The destination Array is created after
+all callbacks finish, through the existing bounded `createArray()` path, with
+the exact selected length and no temporary published result. Callback,
+destination allocation, and persistent slot-capacity failures propagate with
+no result Array record or result slots left behind. No Array capacity, object
+pool, slot pool, collector, or shared scratch storage was added.
+
+Generic array-like receivers, Array subclasses and species, and dynamic Array
+capacity growth remain unsupported. Arrays and callback-created runtime
+values retain the runtime's existing until-reset lifetime behavior.
+
+The dedicated JS95 native lane covers ordinary selection, callback identity
+and arguments, `thisArg`, reference preservation, primitive and reference
+truthiness, explicit `undefined`, sparse and inherited indices, source
+mutation, current-value retention, nested filter/map/forEach, callback errors,
+deterministic result-allocation injection, persistent slot exhaustion, and
+zero, maximum, sparse-maximum, and rejected 1,025-position boundaries. The
+hosted JS95 fixture checks common filter behavior and nested Event callbacks;
+its server checks are part of the hosted Navigator aggregate.
+
+### JS95 qualification record
+
+The JS95 lane passes 31/31 checks under strict C++17 compilation with
+`-Wall -Wextra -Werror -pedantic`. The focused hosted compiler stack report
+measures 592 bytes for `traverseArray`, 736 bytes for `invokeNative`, 560 bytes
+for `invokeFunction`, and 176 bytes for `createArray` and `readArrayIndex`.
+These hosted static measurements do not establish a bare-metal stack limit.
+
+The JS93 `forEach()` and JS94 `map()` regression lanes pass 50/50 and 29/29.
+The final matrix, hosted fixture, production executable, and aggregate evidence
+is recorded below.
+
 The pre-qualification `guideXOSServer.exe` was **8,398,274 bytes** with
 SHA-256
 `A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. It was
@@ -12564,3 +12624,51 @@ snapshot. Native JS94 evidence is under
 `C:\Users\guideX\AppData\Local\Temp\guidex-js94-evidence\native-js94-20261026-213514-4fef1453785e498cb5084e280000805d\`;
 hosted output and logs are under
 `C:\Users\guideX\AppData\Local\Temp\guidex-js94-hosted-preserve-20261026-213738\`.
+
+### JS95 final qualification record
+
+All **97/97 JavaScript matrix lanes** passed with **17,034/17,034 reported
+assertions** across 55 assertion-bearing lanes. The matrix invocation passed
+through JS88 before it exposed the JS89 and JS90 expected total-property count
+of 275, which now correctly counts 276 runtime properties after `filter()` is
+installed. Both tests still exercise a 256-property ordinary object and
+creation-order enumeration. After updating those exact builtin-count
+expectations, JS89 through JS95 passed in dedicated matrix-lane runs. The
+focused Array regression totals are JS89 466/466, JS90 544/544, JS91 32/32,
+JS92 229/229, JS93 50/50, JS94 29/29, and JS95 31/31: **1,381/1,381** checks.
+
+JS95 strict C++17 compilation passed with `-Wall -Wextra -Werror -pedantic`.
+The production `build.bat` also completed successfully. It emitted the
+repository's existing `-Wall` warnings in unrelated sources. The fresh
+`guideXOSServer.exe` was 8,738,876 bytes with SHA-256
+`C8FD98CE207A7EC0B926657D01AC4988278EDFA101C35DE20E501E9B58D904C1`; the
+hosted run verified it launched that exact executable. The JS95 page reported
+**14/14 assertions with zero failures**, and all three added JS95 hosted checks
+passed, including nested Event dispatch.
+
+The hosted aggregate reported **720/727 checks**. Its only seven failures
+remain the established CSS phase 3C, phase 3G, phase 6A, three phase 6B, and
+phase 6C checks from the JS94 baseline. No hosted JavaScript check failed.
+
+The maximum all-pass filter retained 2,048 total source-plus-result Array
+slots, with 1,024 selected result values. The maximum all-fail case retained
+only the 1,024 source slots, and the maximum-length sparse case retained two
+occupied slots across source and result. The existing `RuntimeObject` and
+`RuntimeArrayElement` sizes remain 88 and 48 bytes. The JS95 traversal stack
+frame is 592 bytes, unchanged from JS94; no persistent pool limits or record
+layouts were increased.
+
+The pre-qualification production executable was restored to **8,398,274
+bytes**, SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`; its
+size and hash match the saved original. All 42 generated Navigator fixtures
+remained byte-identical (458,372 bytes total), and the hosted script restored
+its `downloads` directory snapshot. `.phase` remains absent. No QEMU or QAC
+operation was performed.
+
+Native JS95 evidence is under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js95-evidence\native-js95-20261027-174455-c2c58958979b432b8bfa90ba73b70225\`;
+hosted logs and the saved executable/fixture snapshots are under
+`C:\Users\guideX\AppData\Local\Temp\guidex-js95-evidence\hosted-aggregate\`
+and
+`C:\Users\guideX\AppData\Local\Temp\guidex-js95-evidence\hosted-preserve-20261027-185412\`.

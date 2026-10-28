@@ -381,6 +381,7 @@ private:
         ArrayPop,
         ArrayForEach,
         ArrayMap,
+        ArrayFilter,
         ArrayIteratorCreate,
         ArrayIteratorCreateKeys,
         ArrayIteratorCreateEntries,

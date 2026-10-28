@@ -1436,7 +1436,7 @@ private:
 
     bool traverseArray(const Value& receiver, const Value& callback,
         const Value& thisArgument, SourceLocation callSite, bool map,
-        Value& result)
+        bool filter, Value& result)
     {
         const RuntimeObjectId arrayId = receiver.isObject()
             ? receiver.objectId() : kInvalidRuntimeObjectId;
@@ -1496,9 +1496,11 @@ private:
             if (!invokeFunction(callbackId, callbackArguments, callSite,
                     callbackResult, thisArgument)) return false;
 
-            if (map) {
+            if (map || (filter && truthy(callbackResult))) {
                 try {
-                    mappedElements.emplace_back(index, callbackResult);
+                    mappedElements.emplace_back(filter
+                            ? mappedElements.size() : index,
+                        filter ? value : callbackResult);
                 } catch (const std::bad_alloc&) {
                     fail(RuntimeErrorCode::AllocationFailure, callSite);
                     return false;
@@ -1506,7 +1508,7 @@ private:
             }
         }
 
-        if (!map) {
+        if (!map && !filter) {
             result = Value::undefined();
             return true;
         }
@@ -1528,9 +1530,11 @@ private:
             mappedElements.swap(compactElements);
         }
 
+        const std::size_t resultLength = filter
+            ? mappedElements.size() : initialLength;
         RuntimeObjectId mappedArrayId = kInvalidRuntimeObjectId;
         RuntimeErrorCode allocationError = RuntimeErrorCode::None;
-        if (!context_.createArray(initialLength, std::move(mappedElements),
+        if (!context_.createArray(resultLength, std::move(mappedElements),
                 mappedArrayId, allocationError)) {
             fail(allocationError, callSite);
             return false;
@@ -2130,12 +2134,16 @@ private:
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayForEach:
-        case RuntimeContext::NativeFunctionId::ArrayMap: {
+        case RuntimeContext::NativeFunctionId::ArrayMap:
+        case RuntimeContext::NativeFunctionId::ArrayFilter: {
             const bool map = function.nativeFunction ==
                 static_cast<std::uint8_t>(
                     RuntimeContext::NativeFunctionId::ArrayMap);
+            const bool filter = function.nativeFunction ==
+                static_cast<std::uint8_t>(
+                    RuntimeContext::NativeFunctionId::ArrayFilter);
             succeeded = traverseArray(receiver, argumentOrUndefined(0u),
-                argumentOrUndefined(1u), callSite, map, result);
+                argumentOrUndefined(1u), callSite, map, filter, result);
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayIteratorCreate:
@@ -4074,6 +4082,8 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         !install(arrayPrototype_, "forEach", NativeFunctionId::ArrayForEach,
             error) ||
         !install(arrayPrototype_, "map", NativeFunctionId::ArrayMap,
+            error) ||
+        !install(arrayPrototype_, "filter", NativeFunctionId::ArrayFilter,
             error)) return false;
     const char eventName[] = "Event";
     // Event constants are optional only when an explicitly tiny caller limit
