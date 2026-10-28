@@ -246,12 +246,17 @@ $sharedResizeStressSuitePass = $sharedResizeStressSuite.Count -eq 1 -and
     $sharedResizeStressSuite[0].result -eq 'PASS'
 $notesResizeSuite = @($suites | Where-Object name -eq 'C175-NotesResize')
 $notesResizeStressSuite = @($suites | Where-Object name -eq 'C175-NotesResizeStress')
+$notesResizeInventoryEntry = @($inventory.suites | Where-Object name -eq 'C175-NotesResize')
+$notesResizeExpectedCases = if ($notesResizeInventoryEntry.Count -eq 1) {
+    [int]$notesResizeInventoryEntry[0].cases
+} else { -1 }
 $notesNavigationSuite = @($suites | Where-Object name -eq 'C176-NotesNavigation')
 $notesNavigationStressSuite = @($suites | Where-Object name -eq 'C176-NotesNavigationStress')
 $notesNewlineSuite = @($suites | Where-Object name -eq 'C177-NotesNewline')
 $notesNewlineStressSuite = @($suites | Where-Object name -eq 'C177-NotesNewlineStress')
 $notesResizeSuitePass = $notesResizeSuite.Count -eq 1 -and
-    $notesResizeSuite[0].cases -eq 22 -and $notesResizeSuite[0].result -eq 'PASS'
+    $notesResizeSuite[0].cases -eq $notesResizeExpectedCases -and
+    $notesResizeSuite[0].result -eq 'PASS'
 $notesResizeStressSuitePass = $notesResizeStressSuite.Count -eq 1 -and
     $notesResizeStressSuite[0].cases -eq 7 -and $notesResizeStressSuite[0].result -eq 'PASS'
 $c135Pass = $c135Build.status -eq 'PASS'

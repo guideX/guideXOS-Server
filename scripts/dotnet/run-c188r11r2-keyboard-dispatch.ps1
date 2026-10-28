@@ -106,7 +106,9 @@ $qmpActions = [System.Collections.Generic.List[object]]::new()
 foreach ($path in @($controllerStdout,$controllerStderr,$controllerManifest,
     $gdbScriptPath,$gdbStdoutPath,$gdbStderrPath,
     (Join-Path $bootRoot 'qac-input.status.txt'),(Join-Path $bootRoot 'qac-input.list.txt'),
-    (Join-Path $bootRoot 'qac-input.inspect.json'),(Join-Path $bootRoot 'qac-input-ownership.json'))) {
+    (Join-Path $bootRoot 'qac-input.inspect.json'),(Join-Path $bootRoot 'qac-input-ownership.json'),
+    (Join-Path $bootRoot 'qac-prekey.status.txt'),(Join-Path $bootRoot 'qac-prekey.list.txt'),
+    (Join-Path $bootRoot 'qac-prekey.inspect.json'),(Join-Path $bootRoot 'qac-prekey-ownership.json'))) {
     if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite C188R11R2 evidence: $path" }
 }
 
@@ -146,6 +148,17 @@ $inputSent = $false
 $focusVerified = $false
 $editorFocusVerified = $false
 $editorFocusState = $null
+$focusEvidence = [ordered]@{
+    notesWindowActive=$false
+    documentControlRouteEstablished=$false
+    documentRouteCorrelatedToPointer=$false
+    editableDocumentWidgetFocused=$false
+    unrelatedControlFocused=$false
+    unsupportedRouteObserved=$false
+    focusUnknown=$true
+    focusState='unknown'
+}
+$preKeyOwnership = $null
 $editorFocusScreenPoint = $null
 $pointerClearScreenPoint = $null
 $notesTextEntryEvidence = $null
@@ -282,8 +295,8 @@ try {
                 }
                 if ([int]$active.screenWidth -gt 0 -and [int]$active.screenHeight -gt 0) {
                     $ready = Test-C188R11NotesReady $serialText
-                    $focusVerified = [regex]::IsMatch($serialText,
-                        '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=.+? result=focused\r?$')
+                    $startupFocusEvidence = Get-C188R11R4R2NotesFocusEvidence $serialText
+                    $focusVerified = [bool]$startupFocusEvidence.notesWindowActive
                     if ($ready -and $focusVerified) { break }
                 }
             } catch { $ready = $false; $focusVerified = $false }
@@ -384,8 +397,8 @@ try {
 
     $qmpActions.Add((Invoke-C188R11R2Control @('capture','initial-notes') 'r2-qmp-capture-initial-notes'))
     $serialText = Get-Content -LiteralPath $serialPath -Raw
-    if (-not [regex]::IsMatch($serialText,
-            '(?m)^\[C188R11R2_KEY\] stage=main-loop-focus window=[A-Fa-f0-9]{8} title=Managed Notes owner=.+? result=focused\r?$')) {
+    $initialFocusEvidence = Get-C188R11R4R2NotesFocusEvidence $serialText
+    if (-not [bool]$initialFocusEvidence.notesWindowActive) {
         throw 'Notes lost the active-window focus snapshot before input; no keyboard event was sent.'
     }
 
@@ -414,14 +427,11 @@ try {
         if ($null -ne $editorFocusState -and $nativeEditorPointer) { break }
         Start-Sleep -Milliseconds 50
     } while ((Get-Date) -lt $focusDeadline)
-    $editorFocusVerified = $null -ne $editorFocusState -and
-        $editorFocusState.kind -eq 'pointer-down' -and
-    $editorFocusState.x -eq 24 -and $editorFocusState.y -eq 99 -and
-    $editorFocusState.focused -and
-    $editorFocusState.caret -ge 0 -and
-    $editorFocusState.caret -le $editorFocusState.length -and
-        $editorFocusState.edit -eq '2' -and $editorFocusState.render -and
-        $nativeEditorPointer
+    $focusEvidence = Get-C188R11R4R2NotesFocusEvidence $serialText
+    $editorFocusVerified = [bool]$focusEvidence.notesWindowActive -and
+        [bool]$focusEvidence.documentControlRouteEstablished -and
+        [bool]$focusEvidence.documentRouteCorrelatedToPointer -and
+        [bool]$focusEvidence.editableDocumentWidgetFocused
     if ($editorFocusVerified) {
         # Move the QMP cursor to the title bar after the one editor click so
         # the pointer image cannot cover the first glyph in either screenshot.
@@ -437,12 +447,85 @@ try {
     $qmpActions.Add((Invoke-C188R11R2Control @('capture','editor-focused') 'r2-qmp-capture-editor-focused'))
 
     if (-not $editorFocusVerified) {
-        $editorFocusFailureReason = 'The single source-defined editor click did not produce the Notes text-area focus marker; no keyboard event was sent.'
+        $editorFocusFailureReason = 'The single source-defined click did not prove the C120 document-control route and editable text-area focus (focusState=' + $focusEvidence.focusState + '); no keyboard event was sent.'
         $qmpActions.Add([ordered]@{name='skip-a-key';reason=$editorFocusFailureReason})
     } else {
         # Keep the insertion comparison free of the caret/focus redraw: this
         # baseline is taken after editor focus and immediately before ASCII a.
         $qmpActions.Add((Invoke-C188R11R2Control @('capture','before-input') 'r2-qmp-capture-before-input'))
+
+        # Reconcile current QAC state and exact owner/child identity again at
+        # the last possible point before the only keyboard transaction.
+        $preKeyQacStatus = (& $qacCli status 2>&1 | Out-String)
+        $preKeyQacStatusExitCode = $LASTEXITCODE
+        $preKeyQacList = (& $qacCli list 2>&1 | Out-String)
+        $preKeyQacListExitCode = $LASTEXITCODE
+        $preKeyQacInspectText = (& $qacCli inspect ([string]$active.qacReservationId) 2>&1 | Out-String)
+        $preKeyQacInspectExitCode = $LASTEXITCODE
+        $preKeyStatusPath = Join-Path $bootRoot 'qac-prekey.status.txt'
+        $preKeyListPath = Join-Path $bootRoot 'qac-prekey.list.txt'
+        $preKeyInspectPath = Join-Path $bootRoot 'qac-prekey.inspect.json'
+        $preKeyOwnershipPath = Join-Path $bootRoot 'qac-prekey-ownership.json'
+        Set-Content -LiteralPath $preKeyStatusPath -Value $preKeyQacStatus -Encoding utf8
+        Set-Content -LiteralPath $preKeyListPath -Value $preKeyQacList -Encoding utf8
+        $preKeyInspection = $null
+        try { $preKeyInspection = $preKeyQacInspectText | ConvertFrom-Json -ErrorAction Stop }
+        catch { }
+        if ($null -ne $preKeyInspection) {
+            $preKeyInspection | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $preKeyInspectPath -Encoding utf8
+        } else {
+            Set-Content -LiteralPath $preKeyInspectPath -Value $preKeyQacInspectText -Encoding utf8
+        }
+
+        $preKeyActive = Get-Content -LiteralPath $activePath -Raw | ConvertFrom-Json
+        if ([string]$preKeyActive.runIdentityId -ne $runIdentityId -or
+            [string]$preKeyActive.bootEvidencePath -ne $bootRoot -or
+            [string]$preKeyActive.qacReservationId -ne [string]$active.qacReservationId -or
+            [int]$preKeyActive.qacOwnerProcessId -ne [int]$active.qacOwnerProcessId -or
+            [int]$preKeyActive.qacQemuChildPid -ne [int]$active.qacQemuChildPid) {
+            throw 'QAC run identity changed before the key gate; no key event was sent.'
+        }
+        $preKeyRunIdentity = [ordered]@{}
+        foreach ($property in $preKeyActive.qacOwnershipRunIdentity.PSObject.Properties) {
+            $preKeyRunIdentity[$property.Name] = $property.Value
+        }
+        $preKeyRunIdentity.runIdentityId = [string]$preKeyActive.runIdentityId
+        $preKeyRunIdentity.bootEvidencePath = [string]$preKeyActive.bootEvidencePath
+        $preKeyRunIdentity.expectedBootEvidencePath = $bootRoot
+        $preKeyRunIdentity.localProcessCaptureError = $null
+        try {
+            $preKeyOwnerProcess = Get-Process -Id ([int]$preKeyActive.qacOwnerProcessId) -ErrorAction Stop
+            $preKeyChildProcess = Get-Process -Id ([int]$preKeyActive.qacQemuChildPid) -ErrorAction Stop
+            $preKeyRunnerProcess = Get-Process -Id ([int]$preKeyRunIdentity.runnerProcessId) -ErrorAction Stop
+            $preKeyOwnerCim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($preKeyActive.qacOwnerProcessId)" -ErrorAction Stop
+            $preKeyChildCim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($preKeyActive.qacQemuChildPid)" -ErrorAction Stop
+            $preKeyRunIdentity.ownerProcessAlive = ($null -ne $preKeyOwnerCim)
+            $preKeyRunIdentity.ownerProcessStartTimeUtc = $preKeyOwnerProcess.StartTime.ToUniversalTime().ToString('O')
+            $preKeyRunIdentity.ownerParentProcessId = if ($preKeyOwnerCim) { [int]$preKeyOwnerCim.ParentProcessId } else { 0 }
+            $preKeyRunIdentity.runnerProcessAlive = $true
+            $preKeyRunIdentity.expectedRunnerProcessStartTimeUtc = $preKeyRunnerProcess.StartTime.ToUniversalTime().ToString('O')
+            $preKeyRunIdentity.childProcessAlive = ($null -ne $preKeyChildCim)
+            $preKeyRunIdentity.childProcessStartTimeUtc = $preKeyChildProcess.StartTime.ToUniversalTime().ToString('O')
+            $preKeyRunIdentity.childExecutableIdentity = if ($preKeyChildCim) { [string]$preKeyChildCim.ExecutablePath } else { '' }
+            $preKeyRunIdentity.childParentProcessId = if ($preKeyChildCim) { [int]$preKeyChildCim.ParentProcessId } else { 0 }
+        } catch {
+            $preKeyRunIdentity.localProcessCaptureError = $_.Exception.Message
+            $preKeyRunIdentity.ownerProcessAlive = $false
+            $preKeyRunIdentity.runnerProcessAlive = $false
+            $preKeyRunIdentity.childProcessAlive = $false
+        }
+        $preKeyOwnership = Get-C188R11R4QacOwnershipEvidence $preKeyQacStatus $preKeyQacList $preKeyInspection $preKeyRunIdentity
+        if ($preKeyQacStatusExitCode -ne 0 -or $preKeyQacListExitCode -ne 0 -or
+            $preKeyQacInspectExitCode -ne 0) {
+            $preKeyOwnership.accepted = $false
+            $preKeyOwnership.reasons = @($preKeyOwnership.reasons) + 'qac-prekey-command-failed'
+        }
+        $preKeyOwnership | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $preKeyOwnershipPath -Encoding utf8
+        if (-not [bool]$preKeyOwnership.accepted -or
+            [string]$preKeyOwnership.reservationId -ne [string]$inputOwnership.reservationId -or
+            [string]$preKeyOwnership.runIdentityId -ne $runIdentityId) {
+            throw "QAC ownership proof failed immediately before key injection: $($preKeyOwnership.reasons -join ', '); no key event was sent."
+        }
 
         # This is the only keyboard transaction in the one authorized guest:
         # QMP qcode a make followed by its matching break.
@@ -451,9 +534,13 @@ try {
         $keyRenderDeadline = (Get-Date).AddSeconds(8)
         do {
             $serialText = Get-Content -LiteralPath $serialPath -Raw
-            if (Get-C188R11R4R2StageSnapshot $serialText 'after-key') { break }
+            $afterKeySnapshot = Get-C188R11R4R2StageSnapshot $serialText 'after-key'
+            if ($null -ne $afterKeySnapshot -and $afterKeySnapshot.render) { break }
             Start-Sleep -Milliseconds 50
         } while ((Get-Date) -lt $keyRenderDeadline)
+        if ($null -ne $afterKeySnapshot -and $afterKeySnapshot.render) {
+            Start-Sleep -Milliseconds 250
+        }
         $qmpActions.Add((Invoke-C188R11R2Control @('capture','after-input') 'r2-qmp-capture-after-input'))
     }
     $qmpActions | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $bootRoot 'r2-qmp-actions.json') -Encoding utf8
@@ -583,6 +670,15 @@ $manifest = [ordered]@{
     shiftExpectedManagedCallback=$false
     focusVerifiedBeforeInput=$focusVerified
     editorFocusVerified=$editorFocusVerified
+    notesWindowActiveAtInput=[bool]$focusEvidence.notesWindowActive
+    documentControlRouteEstablished=[bool]$focusEvidence.documentControlRouteEstablished
+    documentRouteCorrelatedToPointer=[bool]$focusEvidence.documentRouteCorrelatedToPointer
+    editableDocumentWidgetFocused=[bool]$focusEvidence.editableDocumentWidgetFocused
+    unrelatedControlFocused=[bool]$focusEvidence.unrelatedControlFocused
+    unsupportedRouteObserved=[bool]$focusEvidence.unsupportedRouteObserved
+    focusUnknown=[bool]$focusEvidence.focusUnknown
+    focusState=[string]$focusEvidence.focusState
+    focusEvidence=$focusEvidence
     editorFocusFailureReason=$editorFocusFailureReason
     editorFocusScreenPoint=$editorFocusScreenPoint
     pointerClearScreenPoint=$pointerClearScreenPoint
@@ -592,6 +688,11 @@ $manifest = [ordered]@{
     qacOwnedAcceptanceRunning=[bool]$inputOwnership.accepted
     qacOwnershipEvidence=$inputOwnership
     qacOwnershipEvidencePath=(Join-Path $bootRoot 'qac-input-ownership.json')
+    qacPreKeyOwnershipAccepted=[bool]($null -ne $preKeyOwnership -and $preKeyOwnership.accepted)
+    qacPreKeyOwnershipEvidence=$preKeyOwnership
+    qacPreKeyStatusPath=$(if (Test-Path -LiteralPath (Join-Path $bootRoot 'qac-prekey.status.txt')) { Join-Path $bootRoot 'qac-prekey.status.txt' } else { '' })
+    qacPreKeyListPath=$(if (Test-Path -LiteralPath (Join-Path $bootRoot 'qac-prekey.list.txt')) { Join-Path $bootRoot 'qac-prekey.list.txt' } else { '' })
+    qacPreKeyInspectionPath=$(if (Test-Path -LiteralPath (Join-Path $bootRoot 'qac-prekey.inspect.json')) { Join-Path $bootRoot 'qac-prekey.inspect.json' } else { '' })
     qacReservationId=[string]$inputOwnership.reservationId
     qemuPid=$(if ($qemuChild.Success) { $qemuChild.Groups[2].Value } else { '' })
     qacReleaseVerified=[bool]$releaseVerified
@@ -638,7 +739,7 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $controllerManifest -Encoding utf8
 Write-Output "C188R11R4_MEMORY=$outcome INPUT_SENT=$inputSent MANAGED_STATE=$($trace.managedStateQualified) CALLBACK=$($trace.notesCallbackEntry) REGISTRY_COUNT=$($trace.registryCount) RESIDENT_MASK=$($trace.residentMask) MEMORY_STABLE=$memoryStorageStable WATCHPOINTS=$watchpointStatus HITS=$($watchpointHits.Count) QAC_RELEASE=$releaseVerified QAC_DEGRADED=$degradedCensus"
-Write-Output "C188R11R4R2_NOTES_TEXT_ENTRY=$($notesTextEntryEvidence.accepted) EDITOR_FOCUS=$editorFocusVerified BUFFER_INSERTED=$($notesTextEntryEvidence.oneCharacterInserted) REDRAW=$($notesTextEntryEvidence.redrawCompleted)"
+Write-Output "C188R11R4R2_NOTES_TEXT_ENTRY=$($notesTextEntryEvidence.accepted) WINDOW_ACTIVE=$($focusEvidence.notesWindowActive) C120_ROUTE=$($focusEvidence.documentControlRouteEstablished) EDITABLE_WIDGET=$($focusEvidence.editableDocumentWidgetFocused) FOCUS_STATE=$($focusEvidence.focusState) BUFFER_INSERTED=$($notesTextEntryEvidence.oneCharacterInserted) REDRAW=$($notesTextEntryEvidence.redrawCompleted) QAC_PREKEY=$($null -ne $preKeyOwnership -and $preKeyOwnership.accepted)"
 Write-Output "C188R11R2_KEYBOARD_MANIFEST=$controllerManifest"
 if (-not $releaseVerified -or -not $ownedQemuExited) {
     throw 'The owned C188R11R2 QAC process or reservation did not complete verified shutdown.'

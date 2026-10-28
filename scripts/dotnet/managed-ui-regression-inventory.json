@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "inventoryId": "managed-ui-regressions-c181-accepted-v1",
-  "acceptedBaseline": "C181",
+  "inventoryId": "managed-ui-regressions-c188r11r4r2-accepted-v1",
+  "acceptedBaseline": "C188R11R4R2",
   "expectedSuiteCount": 38,
-  "expectedCaseCount": 930,
+  "expectedCaseCount": 932,
   "suites": [
     { "name": "C133-ComboBox", "cases": 44 },
     { "name": "C134-TransientRouting", "cases": 30 },
@@ -29,7 +29,7 @@
     { "name": "C173-ExplorerStress", "cases": 10 },
     { "name": "C174-SharedResize", "cases": 22 },
     { "name": "C174-Stress", "cases": 4 },
-    { "name": "C175-NotesResize", "cases": 22 },
+    { "name": "C175-NotesResize", "cases": 24 },
     { "name": "C175-NotesResizeStress", "cases": 7 },
     { "name": "C176-NotesNavigation", "cases": 20 },
     { "name": "C176-NotesNavigationStress", "cases": 7 },

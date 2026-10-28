@@ -4,6 +4,11 @@ $inventoryPath = Join-Path $PSScriptRoot 'managed-ui-regression-inventory.json'
 Import-Module (Join-Path $PSScriptRoot 'ManagedUiRegressionInventory.psm1') -Force
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
 $inventoryHash = (Get-FileHash -LiteralPath $inventoryPath -Algorithm SHA256).Hash.ToUpperInvariant()
+$aggregateRunner = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'run-managed-ui-regressions.ps1') -Raw
+if ($aggregateRunner -notmatch '\$notesResizeExpectedCases = if \(\$notesResizeInventoryEntry\.Count -eq 1\)' -or
+    $aggregateRunner -notmatch '\$notesResizeSuite\[0\]\.cases -eq \$notesResizeExpectedCases') {
+    throw 'Managed Notes suite acceptance must use its authoritative inventory case count.'
+}
 
 function New-PassingManifest {
     $suites = @(

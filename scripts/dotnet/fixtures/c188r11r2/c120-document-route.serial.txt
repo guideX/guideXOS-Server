@@ -1,0 +1,3 @@
+[C188R11R2_KEY] stage=main-loop-focus window=000003E8 title=Managed Notes owner=Managed NativeAOT result=focused
+[C102-MANAGED-OUTPUT] C120-POINTER target=document result=PASS
+[C116-NATIVE-INPUT] kind=pointer-down x=00000018 y=0000005D result=PASS

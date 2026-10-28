@@ -176,7 +176,35 @@ Assert-Contract 'text-entry acceptance requires buffer content at the previous c
     $r4r2Predicates.Contains('$afterKey.length -eq $beforeKey.length + 1') -and
     $r4r2Predicates.Contains('$afterKey.caret -eq $beforeKey.caret + 1') -and
     $r4r2Predicates.Contains('$afterPointer.focused') -and
-    $r4r2Predicates.Contains('$afterKey.render'))
+    $r4r2Predicates.Contains('$afterKey.render') -and
+    $r4r2Predicates.Contains('documentControlRouteEstablished') -and
+    $r4r2Predicates.Contains('documentRouteCorrelatedToPointer') -and
+    $r4r2Predicates.Contains('C120-POINTER target=document result=PASS'))
+
+Assert-Contract 'runner separates active Notes window, C120 route, editable document focus, unrelated control focus, and unknown focus' (
+    $r4r2Predicates.Contains('notesWindowActive=') -and
+    $r4r2Predicates.Contains('documentControlRouteEstablished=') -and
+    $r4r2Predicates.Contains('editableDocumentWidgetFocused=') -and
+    $r4r2Predicates.Contains('unrelatedControlFocused=') -and
+    $r4r2Predicates.Contains('focusUnknown=') -and
+    $r2Runner.Contains('$focusEvidence.documentControlRouteEstablished') -and
+    $r2Runner.Contains('$focusEvidence.editableDocumentWidgetFocused'))
+
+Assert-Contract 'runner repeats full QAC ownership proof after before-input capture and before the only key transaction' (
+    $r2Runner.IndexOf("@('capture','before-input')") -lt
+        $r2Runner.IndexOf('$preKeyQacStatus =') -and
+    $r2Runner.IndexOf('$preKeyQacStatus =') -lt
+        $r2Runner.IndexOf('$preKeyOwnership = Get-C188R11R4QacOwnershipEvidence') -and
+    $r2Runner.IndexOf('$preKeyOwnership.accepted') -lt
+        $r2Runner.IndexOf("@('key','a')") -and
+    $r2Runner.Contains('qac-prekey-ownership.json') -and
+    $r2Runner.Contains('inspect ([string]$active.qacReservationId)'))
+
+Assert-Contract 'after-input capture waits for Notes redraw evidence and a bounded settling interval' (
+    $r2Runner.Contains('$afterKeySnapshot.render') -and
+    $r2Runner.Contains('Start-Sleep -Milliseconds 250') -and
+    $r2Runner.IndexOf('Start-Sleep -Milliseconds 250') -lt
+        $r2Runner.IndexOf("@('capture','after-input')"))
 
 Assert-Contract 'keyboard trace is bounded and serial output is outside the IRQ handler' (
     $ps2.Contains('s_c188r11r2TraceRecordsWritten >= 16u') -and

@@ -98,8 +98,10 @@ Assert-Predicate 'managed input snapshot without GC and writer provenance is rej
     -not (Test-C188R11R2KeyboardTrace $missingProvenance))
 
 $notesTextEntry = @'
+[C188R11R2_KEY] stage=main-loop-focus window=00000004 title=Managed Notes owner=ManagedAppWindow result=focused
 [C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=before-pointer kind=pointer-down x=24 y=99 value=0 focused=0 len=3 caret=0 edit=none render=0
 [C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=before-pointer offset=0 count=3 hex=78797A
+[C102-MANAGED-OUTPUT] C120-POINTER target=document result=PASS
 [C116-NATIVE-INPUT] kind=pointer-down x=00000018 y=00000063 result=PASS
 [C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=after-pointer kind=pointer-down x=24 y=99 value=0 focused=1 len=3 caret=0 edit=2 render=1
 [C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=after-pointer offset=0 count=3 hex=78797A
@@ -109,7 +111,7 @@ $notesTextEntry = @'
 [C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=after-key offset=0 count=4 hex=6178797A
 '@
 $notesEntryEvidence = Get-C188R11R4R2NotesTextEntryEvidence $notesTextEntry $true
-Assert-Predicate 'editor click, existing-text insertion at caret, caret advance, and redraw qualify' (
+Assert-Predicate 'C120 document click, existing-text insertion at caret, caret advance, and redraw qualify' (
     $notesEntryEvidence.accepted -and $notesEntryEvidence.editorFocusEstablished -and
     $notesEntryEvidence.preInputStateQualified -and $notesEntryEvidence.oneCharacterInserted -and
     $notesEntryEvidence.redrawCompleted -and $notesEntryEvidence.beforeText -ceq 'xyz' -and
@@ -118,12 +120,13 @@ Assert-Predicate 'editor click, existing-text insertion at caret, caret advance,
     $notesEntryEvidence.afterCaret -eq 1)
 
 $notesC120Route = @'
+[C188R11R2_KEY] stage=main-loop-focus window=00000004 title=Managed Notes owner=ManagedAppWindow result=focused
 [C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=before-pointer kind=pointer-down x=24 y=99 value=0 focused=0 len=7 caret=0 edit=none render=0
 [C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=before-pointer offset=0 count=7 hex=6F6E650A74776F
-[C116-NATIVE-INPUT] kind=pointer-down x=00000018 y=00000063 result=PASS
+[C102-MANAGED-OUTPUT] C120-POINTER target=document result=PASS
 [C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=after-pointer kind=pointer-down x=24 y=99 value=0 focused=1 len=7 caret=4 edit=2 render=1
 [C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=after-pointer offset=0 count=7 hex=6F6E650A74776F
-[C102-MANAGED-OUTPUT] C120-POINTER target=document result=PASS
+[C116-NATIVE-INPUT] kind=pointer-down x=00000018 y=00000063 result=PASS
 [C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=before-key kind=key-char x=0 y=0 value=97 focused=1 len=7 caret=4 edit=none render=0
 [C102-MANAGED-OUTPUT] C188R11R4R2-TEXT stage=before-key offset=0 count=7 hex=6F6E650A74776F
 [C102-MANAGED-OUTPUT] C188R11R4R2-NOTES stage=after-key kind=key-char x=0 y=0 value=97 focused=1 len=8 caret=5 edit=1 render=1
@@ -134,6 +137,58 @@ Assert-Predicate 'control-host route preserves its nonzero caret and qualifies i
     $c120RouteEvidence.accepted -and $c120RouteEvidence.beforeText -ceq "one`ntwo" -and
     $c120RouteEvidence.afterText -ceq "one`natwo" -and
     $c120RouteEvidence.beforeCaret -eq 4 -and $c120RouteEvidence.afterCaret -eq 5)
+
+$preservedR2FixturePath = Join-Path $PSScriptRoot 'fixtures/c188r11r2/c120-document-route.serial.txt'
+$preservedR2Serial = Get-Content -LiteralPath $preservedR2FixturePath -Raw
+$preservedR2Focus = Get-C188R11R4R2NotesFocusEvidence $preservedR2Serial
+Assert-Predicate 'preserved R2 serial evidence recognizes the active Notes window and exact C120 document route while leaving widget focus unknown' (
+    $preservedR2Focus.notesWindowActive -and
+    $preservedR2Focus.documentControlRouteEstablished -and
+    -not $preservedR2Focus.documentRouteCorrelatedToPointer -and
+    -not $preservedR2Focus.editableDocumentWidgetFocused -and
+    $preservedR2Focus.focusUnknown -and
+    $preservedR2Focus.focusState -eq 'unknown')
+
+$windowOnlyFocus = Get-C188R11R4R2NotesFocusEvidence '[C188R11R2_KEY] stage=main-loop-focus window=00000004 title=Managed Notes owner=ManagedAppWindow result=focused'
+Assert-Predicate 'active Notes window alone leaves document route and widget focus unknown' (
+    $windowOnlyFocus.notesWindowActive -and
+    -not $windowOnlyFocus.documentControlRouteEstablished -and
+    -not $windowOnlyFocus.editableDocumentWidgetFocused -and
+    $windowOnlyFocus.focusUnknown)
+
+$unrelatedControlFocus = Get-C188R11R4R2NotesFocusEvidence (
+    '[C188R11R2_KEY] stage=main-loop-focus window=00000004 title=Managed Notes owner=ManagedAppWindow result=focused' + [Environment]::NewLine +
+    '[C102-MANAGED-OUTPUT] C120-ROUTING active=control result=PASS')
+Assert-Predicate 'C120 active-control routing is distinguished from editable document focus' (
+    $unrelatedControlFocus.unrelatedControlFocused -and
+    -not $unrelatedControlFocus.editableDocumentWidgetFocused -and
+    $unrelatedControlFocus.focusState -eq 'unrelated-control')
+
+$documentThenUnrelatedControl = Get-C188R11R4R2NotesFocusEvidence (
+    $notesC120Route + [Environment]::NewLine +
+    '[C102-MANAGED-OUTPUT] C120-ROUTING active=control result=PASS')
+Assert-Predicate 'a later unrelated control route invalidates earlier document focus evidence' (
+    $documentThenUnrelatedControl.documentControlRouteEstablished -and
+    -not $documentThenUnrelatedControl.editableDocumentWidgetFocused -and
+    $documentThenUnrelatedControl.unrelatedControlFocused -and
+    $documentThenUnrelatedControl.focusState -eq 'unrelated-control')
+
+$unsupportedRouteFocus = Get-C188R11R4R2NotesFocusEvidence (
+    '[C188R11R2_KEY] stage=main-loop-focus window=00000004 title=Managed Notes owner=ManagedAppWindow result=focused' + [Environment]::NewLine +
+    '[C102-MANAGED-OUTPUT] C120-POINTER target=disabled result=PASS')
+Assert-Predicate 'disabled or unsupported pointer routing is retained as a non-editable focus observation' (
+    $unsupportedRouteFocus.unsupportedRouteObserved -and
+    -not $unsupportedRouteFocus.documentControlRouteEstablished -and
+    -not $unsupportedRouteFocus.editableDocumentWidgetFocused -and
+    $unsupportedRouteFocus.focusUnknown -and
+    $unsupportedRouteFocus.focusState -eq 'unsupported-route-focus-unknown')
+
+$missingC120Route = $notesC120Route -replace '(?m)^\[C102-MANAGED-OUTPUT\] C120-POINTER target=document result=PASS\r?\n', ''
+$missingC120RouteEvidence = Get-C188R11R4R2NotesTextEntryEvidence $missingC120Route $true
+Assert-Predicate 'editable buffer evidence without the established C120 document-control route is rejected' (
+    -not $missingC120RouteEvidence.accepted -and
+    -not $missingC120RouteEvidence.documentControlRouteEstablished -and
+    -not $missingC120RouteEvidence.editorFocusEstablished)
 
 $callbackOnly = Get-C188R11R4R2NotesTextEntryEvidence $notesTextEntry $false
 Assert-Predicate 'a successful callback flag without an insertion trace is not accepted' (

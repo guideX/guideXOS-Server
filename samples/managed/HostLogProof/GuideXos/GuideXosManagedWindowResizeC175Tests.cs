@@ -86,7 +86,7 @@ public static class GuideXosManagedWindowResizeC175Tests
 
         if (cases != CaseCount) passed = false;
         host?.TryLog(passed
-            ? "C175-NOTES-RESIZE-HOST focused=23 result=PASS"u8
+            ? "C175-NOTES-RESIZE-HOST focused=24 result=PASS"u8
             : "C175-NOTES-RESIZE-HOST result=FAIL"u8);
         return passed;
     }
