@@ -142,6 +142,13 @@ int main() {
     NativeElfImage image{};
     image.preferredBaseAddress = imageBase;
     image.imageSize = mapping.size;
+    // A present GXSM footer with an out-of-bounds payload must be rejected
+    // without preventing the native target from registering or executing.
+    image.imageBytes.resize(8);
+    const uint32_t malformedFooterMarker = 0x454D5847U;
+    const uint32_t malformedPayloadBytes = 48U;
+    std::memcpy(image.imageBytes.data(), &malformedFooterMarker, sizeof(malformedFooterMarker));
+    std::memcpy(image.imageBytes.data() + 4, &malformedPayloadBytes, sizeof(malformedPayloadBytes));
     NativeElfSegment segment{};
     segment.virtualAddress = imageBase;
     segment.memorySize = mapping.size;
@@ -243,6 +250,23 @@ int main() {
         return 1;
     }
     if (!expect(!completed.load(std::memory_order_acquire), "faulting target thread remains stopped")) {
+        cleanup();
+        return 1;
+    }
+
+    gx_development_debug_request malformedVariablesRequest =
+        makeRequest(GX_DEVELOPMENT_DEBUG_INSPECT_VARIABLES, 0, targetAddress);
+    malformedVariablesRequest.threadId = trapSnapshot.threadId;
+    malformedVariablesRequest.stopGeneration = trapSnapshot.context.stopGeneration;
+    gx_development_debug_variables malformedVariablesResult{};
+    const gx_result malformedVariablesCode = NativeAppDebugger::InspectVariables(
+        malformedVariablesRequest, "native-debugger-runtime-proof", &malformedVariablesResult);
+    if (!expect(malformedVariablesCode == gxos::apps::GX_ERROR_UNSUPPORTED &&
+                malformedVariablesResult.status == GX_DEVELOPMENT_DEBUG_VARIABLES_STATUS_UNSUPPORTED &&
+                malformedVariablesResult.variableCount == 0 &&
+                std::strstr(malformedVariablesResult.errorMessage,
+                            "authoritative GXSM metadata is unavailable") != nullptr,
+                "malformed GXSM trailer is rejected safely with no partial variable values")) {
         cleanup();
         return 1;
     }
