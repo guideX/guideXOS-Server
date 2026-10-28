@@ -266,6 +266,7 @@ public static unsafe class GuideXosApplicationRegistry
     private static uint s_c188r12r1SettingsDispatchTraceRecords;
     private static uint s_c188r12r1SettingsLaunchEntryTraceRecords;
     private static uint s_c188r12r1SettingsLaunchReturnTraceRecords;
+    private static uint s_c188r12r2SettingsLaunchTraceRequests;
     private static uint s_c188r11NotesRegistrationSequence;
     private static uint s_c188r11SettingsRegistrationSequence;
     private static uint s_c188r11CalculatorRegistrationSequence;
@@ -452,6 +453,36 @@ public static unsafe class GuideXosApplicationRegistry
     {
         return value == null ? uint.MaxValue :
             unchecked((uint)GC.GetGeneration(value));
+    }
+
+    private static void LogC188R12R2SettingsLaunch(
+        GuideXosHost host,
+        ReadOnlySpan<byte> stage,
+        ReadOnlySpan<byte> result,
+        uint generation,
+        int resultCode = int.MinValue)
+    {
+        if (host == null) return;
+        Span<byte> line = stackalloc byte[144];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R12R2_LAUNCH stage="u8) ||
+            !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position,
+                " appId=com.guidexos.apps.managed.settingscenter selector=5 generation="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, generation) ||
+            !GuideXosText.Append(line, ref position, " result="u8) ||
+            !GuideXosText.Append(line, ref position, result))
+        {
+            return;
+        }
+        if (resultCode != int.MinValue &&
+            (!GuideXosText.Append(line, ref position, " code="u8) ||
+             !AppendSigned(line, ref position, resultCode)))
+        {
+            return;
+        }
+        host.TryLog(line[..position]);
     }
 
 #if HOSTLOGPROOF_MANAGED_APP_RETURN
@@ -842,6 +873,19 @@ public static unsafe class GuideXosApplicationRegistry
             LogC188R11R2Keyboard(host, "managed-dispatch-entry"u8, -1);
         }
 #endif
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        uint launchGeneration = host.LaunchContext.ApplicationGeneration;
+        bool traceSettingsLaunch = selector == 5u &&
+            !host.LaunchContext.IsInput && !host.IsAction &&
+            !host.IsCapabilityProbe && !host.IsAbiProbe &&
+            s_c188r12r2SettingsLaunchTraceRequests < 4u;
+        if (traceSettingsLaunch)
+        {
+            ++s_c188r12r2SettingsLaunchTraceRequests;
+            LogC188R12R2SettingsLaunch(host, "dispatch-context"u8,
+                "PASS"u8, launchGeneration);
+        }
+#endif
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
         if (selector == 4u &&
             (host.LaunchContext.IsInput ||
@@ -892,14 +936,26 @@ public static unsafe class GuideXosApplicationRegistry
 #endif
 
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (traceSettingsLaunch)
+            LogC188R12R2SettingsLaunch(host, "dispatch-prelude"u8,
+                "PASS"u8, launchGeneration);
         if (selector == 4u)
         {
             LogC188R11State(host, "before-tryfind"u8, selector,
                 host.LaunchContext.ApplicationGeneration, -1);
         }
+        if (traceSettingsLaunch)
+            LogC188R12R2SettingsLaunch(host, "registration-lookup"u8,
+                "BEGIN"u8, launchGeneration);
 #endif
         bool descriptorFound = TryFind(selector,
             out GuideXosApplicationDescriptor descriptor);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (traceSettingsLaunch)
+            LogC188R12R2SettingsLaunch(host, "registration-lookup"u8,
+                descriptorFound ? "PASS"u8 : "FAIL"u8, launchGeneration,
+                descriptorFound ? 0 : GxAbi.ErrorInvalidApplicationId);
+#endif
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
         if (selector == 4u &&
             (host.LaunchContext.IsInput ||
@@ -925,6 +981,12 @@ public static unsafe class GuideXosApplicationRegistry
 #endif
         if (!descriptorFound)
         {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "dispatch-return"u8,
+                    "FAIL"u8, launchGeneration,
+                    GxAbi.ErrorInvalidApplicationId);
+#endif
 #if HOSTLOGPROOF_C188R8_NOTES_INPUT_ROUTING
             if (host.LaunchContext.IsInput)
                 LogC188R8InputBoundary(host, "selector-rejected"u8, selector,
@@ -987,10 +1049,32 @@ public static unsafe class GuideXosApplicationRegistry
 #if HOSTLOGPROOF_C147_RUNTIME_SETTINGS
         // The shared loader runs before the first managed application launch
         // or input callback; Settings Center is only one consumer of state.
-        if (!host.IsCapabilityProbe &&
-            !Applications.GuideXosRuntimeSettings.EnsureInitialized(host))
+        if (!host.IsCapabilityProbe)
         {
-            return GxAbi.ErrorInvalidArgument;
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "runtime-settings-init"u8,
+                    "BEGIN"u8, launchGeneration);
+#endif
+            bool runtimeSettingsReady =
+                Applications.GuideXosRuntimeSettings.EnsureInitialized(host);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "runtime-settings-init"u8,
+                    runtimeSettingsReady ? "PASS"u8 : "FAIL"u8,
+                    launchGeneration,
+                    runtimeSettingsReady ? 0 : GxAbi.ErrorInvalidArgument);
+#endif
+            if (!runtimeSettingsReady)
+            {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+                if (traceSettingsLaunch)
+                    LogC188R12R2SettingsLaunch(host, "dispatch-return"u8,
+                        "FAIL"u8, launchGeneration,
+                        GxAbi.ErrorInvalidArgument);
+#endif
+                return GxAbi.ErrorInvalidArgument;
+            }
         }
 #endif
 
@@ -1008,12 +1092,33 @@ public static unsafe class GuideXosApplicationRegistry
 #if HOSTLOGPROOF_C150_MANAGED_APP_RETURN
         if (!s_lifecycleTestsRun)
         {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "managed-lifecycle-tests"u8,
+                    "BEGIN"u8, launchGeneration);
+#endif
             s_lifecycleTestsRun = true;
             bool lifecycleTests = GuideXosManagedApplicationC150Tests.Run();
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "managed-lifecycle-tests"u8,
+                    lifecycleTests ? "PASS"u8 : "FAIL"u8,
+                    launchGeneration,
+                    lifecycleTests ? 0 : GxAbi.ErrorInvalidArgument);
+#endif
             host.TryLog(lifecycleTests
                 ? "C150-MANAGED-LIFECYCLE-TESTS cases=8 coexist=true capacity=5 result=PASS"u8
                 : "C150-MANAGED-LIFECYCLE-TESTS result=FAIL"u8);
-            if (!lifecycleTests) return GxAbi.ErrorInvalidArgument;
+            if (!lifecycleTests)
+            {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+                if (traceSettingsLaunch)
+                    LogC188R12R2SettingsLaunch(host, "dispatch-return"u8,
+                        "FAIL"u8, launchGeneration,
+                        GxAbi.ErrorInvalidArgument);
+#endif
+                return GxAbi.ErrorInvalidArgument;
+            }
         }
 #endif
 
@@ -1023,13 +1128,33 @@ public static unsafe class GuideXosApplicationRegistry
         uint applicationGeneration = host.LaunchContext.ApplicationGeneration;
         if (isNewLaunch)
         {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "lifetime-start"u8,
+                    "BEGIN"u8, launchGeneration);
+#endif
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
             bool replacingResident = s_lifetime.TryGet(selector, out _);
 #endif
-            if (!s_lifetime.TryStart(descriptor, applicationGeneration,
-                    out application, out uint generation))
+            bool lifetimeStarted = s_lifetime.TryStart(descriptor,
+                applicationGeneration, out application,
+                out uint generation);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "lifetime-start"u8,
+                    lifetimeStarted ? "PASS"u8 : "FAIL"u8,
+                    launchGeneration,
+                    lifetimeStarted ? 0 : GxAbi.ErrorInvalidApplicationId);
+#endif
+            if (!lifetimeStarted)
             {
                 host.TryLog("C150-LIFETIME-START result=FAIL capacity=5"u8);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+                if (traceSettingsLaunch)
+                    LogC188R12R2SettingsLaunch(host, "dispatch-return"u8,
+                        "FAIL"u8, launchGeneration,
+                        GxAbi.ErrorInvalidApplicationId);
+#endif
                 return GxAbi.ErrorInvalidApplicationId;
             }
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
@@ -1154,9 +1279,16 @@ public static unsafe class GuideXosApplicationRegistry
             if (selector == 4u)
                 LogC188R11State(host, "launch-entry"u8, selector,
                     applicationGeneration, -1);
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "application-entry"u8,
+                    "BEGIN"u8, launchGeneration);
 #endif
             result = application.Launch(host);
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "application-return"u8,
+                    result == GuideXosResult.Success ? "PASS"u8 : "FAIL"u8,
+                    launchGeneration, (int)result);
             if (selector == 5u &&
                 s_c188r12r1SettingsLaunchReturnTraceRecords < 8u)
             {
@@ -1215,17 +1347,39 @@ public static unsafe class GuideXosApplicationRegistry
         }
         else
         {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "application-entry"u8,
+                    "BEGIN"u8, launchGeneration);
+#endif
             result = application.Launch(host);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (traceSettingsLaunch)
+                LogC188R12R2SettingsLaunch(host, "application-return"u8,
+                    result == GuideXosResult.Success ? "PASS"u8 : "FAIL"u8,
+                    launchGeneration, (int)result);
+#endif
             LogC188R10State(host, "launch-return"u8, selector,
                 applicationGeneration, (int)result);
         }
 #else
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (traceSettingsLaunch)
+            LogC188R12R2SettingsLaunch(host, "application-entry"u8,
+                "BEGIN"u8, launchGeneration);
+#endif
         GuideXosResult result = host.LaunchContext.IsInput
             ? application.HandleInput(host, input)
             : host.IsAction
                 ? GuideXosManagedWindowResizeDispatchC180.DispatchAction(
                     application, host, host.LaunchContext.ActionId)
                 : application.Launch(host);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (traceSettingsLaunch)
+            LogC188R12R2SettingsLaunch(host, "application-return"u8,
+                result == GuideXosResult.Success ? "PASS"u8 : "FAIL"u8,
+                launchGeneration, (int)result);
+#endif
 #endif
 #endif
 #if HOSTLOGPROOF_C188R7_NOTES_PROOF_AUTHORIZATION
@@ -1318,6 +1472,10 @@ public static unsafe class GuideXosApplicationRegistry
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
         LogC188R11State(host, "managed-return"u8, selector,
             applicationGeneration, (int)result);
+        if (traceSettingsLaunch)
+            LogC188R12R2SettingsLaunch(host, "dispatch-return"u8,
+                result == GuideXosResult.Success ? "PASS"u8 : "FAIL"u8,
+                launchGeneration, (int)result);
 #endif
         return (int)result;
     }

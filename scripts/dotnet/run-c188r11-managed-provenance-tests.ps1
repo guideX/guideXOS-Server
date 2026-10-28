@@ -64,7 +64,8 @@ $log = Join-Path $root 'qualification.log'
 Set-Content -LiteralPath $log -Value $output -Encoding utf8
 $r10 = [regex]::IsMatch($output,'(?m)^C188R10-STATE-REENTRY cases=14 firstFailedCase=0 result=PASS\s*$')
 $r11 = [regex]::IsMatch($output,'(?m)^C188R11-STATE-PROVENANCE cases=15 firstFailedCase=0 result=PASS\s*$')
-if ($runCode -ne 0 -or -not $r10 -or -not $r11) { throw "C188R11 hosted provenance regressions failed ($runCode). See $log" }
+$r12r2 = [regex]::IsMatch($output,'(?m)^C188R12R2-LAUNCH-BOUNDARY cases=8 firstFailedCase=0 result=PASS\s*$')
+if ($runCode -ne 0 -or -not $r10 -or -not $r11 -or -not $r12r2) { throw "C188R11/R12R2 hosted provenance regressions failed ($runCode). See $log" }
 & (Join-Path $PSScriptRoot 'test-c188r11-runner-predicates.ps1') 2>&1 | Set-Content -LiteralPath (Join-Path $root 'runner-predicates.log') -Encoding utf8
 if ($LASTEXITCODE -ne 0) { throw 'C188R11 runner predicate qualification failed.' }
 $outputBounds = (& (Join-Path $PSScriptRoot 'test-c188r11-output-bounds.ps1') 2>&1 | Out-String)
@@ -98,7 +99,7 @@ if (-not [regex]::IsMatch($keyboardRunnerPredicates,'(?m)^C188R11R2-RUNNER-PREDI
     throw 'C188R11R2 keyboard runner predicate qualification failed.'
 }
 $manifest = [ordered]@{
-    result='PASS';outputRoot=$root;r9Cases=14;priorR10Cases=14;r11Cases=15
+    result='PASS';outputRoot=$root;r9Cases=14;priorR10Cases=14;r11Cases=15;r12r2LaunchBoundaryCases=8
     runnerPredicateCases=30;outputBoundCases=6;runtimeLifecycleCases=7
     qacOwnershipPredicateCases=[int]([regex]::Match($qacOwnership,'cases=(\d+)').Groups[1].Value)
     qacStreamCaptureCases=2
@@ -118,5 +119,5 @@ $manifest = [ordered]@{
 }
 $manifestPath = Join-Path $root 'manifest.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-Write-Output "C188R11_HOSTED=PASS R9_CASES=14 R10_CASES=14 R11_CASES=15 RUNNER_PREDICATES=30 RUNTIME_LIFECYCLE=7"
+Write-Output "C188R11_HOSTED=PASS R9_CASES=14 R10_CASES=14 R11_CASES=15 R12R2_LAUNCH_BOUNDARY_CASES=8 RUNNER_PREDICATES=30 RUNTIME_LIFECYCLE=7"
 Write-Output "C188R11_HOSTED_MANIFEST=$manifestPath"
