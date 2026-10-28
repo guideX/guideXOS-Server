@@ -8,7 +8,9 @@
 
 **Starting HEAD:** `f9b46384375cc2169fbe664ed48b5230841c9442`
 
-**Ending implementation HEAD:** recorded after the implementation commit; the final documentation closeout HEAD is reported in the task closeout.
+**Ending implementation HEAD:** `bb8837bd682478025ba404426aea48e29d208ea5` (COMP4J implementation commit).
+
+**Final documentation closeout HEAD:** reported in the task closeout.
 
 **Qualification:** hosted only; no QEMU launch and no QAC admission.
 
