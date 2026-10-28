@@ -168,9 +168,11 @@ public:
     }
     bool mov_eax_rax() { static const uint8_t v[] = {0x8B, 0x02}; return bytes(v, sizeof(v)); }
     bool movsx_eax_rax8() { static const uint8_t v[] = {0x0F, 0xBE, 0x02}; return bytes(v, sizeof(v)); }
+    bool movsx_eax_byte_ptr_rax() { static const uint8_t v[] = {0x0F, 0xBE, 0x00}; return bytes(v, sizeof(v)); }
     bool mov_eax_ptr_rax() { static const uint8_t v[] = {0x8B, 0x00}; return bytes(v, sizeof(v)); }
     bool mov_rax_eax() { static const uint8_t v[] = {0x89, 0x02}; return bytes(v, sizeof(v)); }
     bool mov_rax_al() { static const uint8_t v[] = {0x88, 0x02}; return bytes(v, sizeof(v)); }
+    bool mov_rdx_rax() { static const uint8_t v[] = {0x48, 0x89, 0xC2}; return bytes(v, sizeof(v)); }
     bool mov_eax_ecx() { static const uint8_t v[] = {0x89, 0xC8}; return bytes(v, sizeof(v)); }
     bool mov_local_eax(int32_t displacement)
     {
@@ -749,6 +751,27 @@ static uint32_t pointer_element_size(const TranslationUnitIR& unit,
     return structType < unit.structTypeCount ? unit.structTypes[structType].sizeBytes : 0;
 }
 
+static uint32_t pointer_element_alignment(const TranslationUnitIR& unit,
+                                          const Expression& expression)
+{
+    if (expression.type == ValueType::Int32Pointer) return 4;
+    const uint16_t structType = struct_pointer_type_index(unit, expression);
+    return structType < unit.structTypeCount ? unit.structTypes[structType].alignment : 0;
+}
+
+static const StructFieldIR* field_for_expression(const TranslationUnitIR& unit,
+                                                const Expression& expression)
+{
+    if ((expression.kind != ExpressionKind::LoadField &&
+         expression.kind != ExpressionKind::AddressOfField) ||
+        expression.elementCount >= unit.structTypeCount) return nullptr;
+    const StructTypeIR& type = unit.structTypes[expression.elementCount];
+    if (expression.elementSize >= type.fieldCount) return nullptr;
+    const StructFieldIR& field = type.fields[expression.elementSize];
+    return expression.value >= 0 && static_cast<uint32_t>(expression.value) == field.offset
+        ? &field : nullptr;
+}
+
 static bool has_indexed_access(const FunctionIR& function)
 {
     for (uint32_t i = 0; i < function.expressionCount; ++i)
@@ -1058,28 +1081,31 @@ static bool emit_pointer_validation(Emitter& emitter, uint16_t failureLabel)
 }
 
 static bool emit_pointer_position_validation(Emitter& emitter, uint16_t failureLabel,
-                                             uint32_t elementSize)
+                                             uint32_t elementSize, uint32_t elementAlignment)
 {
-    if (elementSize == 0) return false;
-    // Arithmetic accepts the one-past position, unlike dereference.  The
-    // descriptor still has to be a well-formed int* object descriptor.
+    if (elementSize == 0 || (elementAlignment != 1 && elementAlignment != 4)) return false;
+    // Arithmetic accepts the one-past position, unlike dereference. The
+    // descriptor must retain a valid extent and the element type's alignment.
     return emitter.test_rax_rax() && emitter.emit_jz(failureLabel) &&
            emitter.mov_ecx_ptr32(28) && emitter.cmp_ecx_imm32(1) && emitter.emit_jnz(failureLabel) &&
             emitter.mov_ecx_ptr32(20) && emitter.cmp_ecx_imm32(elementSize) && emitter.emit_jnz(failureLabel) &&
-            emitter.mov_r8d_ptr32(16) && emitter.cmp_r8d_imm32(elementSize) && emitter.emit_jb(failureLabel) &&
-           emitter.test_r8d_imm32(3) && emitter.emit_jnz(failureLabel) &&
+           emitter.mov_r8d_ptr32(16) && emitter.cmp_r8d_imm32(elementSize) && emitter.emit_jb(failureLabel) &&
+           (elementAlignment == 1 ||
+            (emitter.test_r8d_imm32(elementAlignment - 1U) && emitter.emit_jnz(failureLabel))) &&
            emitter.mov_rdx_ptr64(0) && emitter.mov_rcx_ptr64(8) &&
            emitter.cmp_rdx_rcx() && emitter.emit_jb(failureLabel) &&
-           emitter.test_rcx_imm32(3) && emitter.emit_jnz(failureLabel) &&
-           emitter.test_edx_imm32(3) && emitter.emit_jnz(failureLabel) &&
+           (elementAlignment == 1 ||
+            (emitter.test_rcx_imm32(elementAlignment - 1U) && emitter.emit_jnz(failureLabel))) &&
+           (elementAlignment == 1 ||
+            (emitter.test_edx_imm32(elementAlignment - 1U) && emitter.emit_jnz(failureLabel))) &&
            emitter.mov_r9_rcx() && emitter.add_r9_r8() && emitter.emit_jb(failureLabel) &&
            emitter.cmp_rdx_r9() && emitter.emit_ja(failureLabel);
 }
 
 static bool emit_struct_pointer_validation(Emitter& emitter, uint32_t structBytes,
-                                            uint16_t failureLabel)
+                                            uint32_t structAlignment, uint16_t failureLabel)
 {
-    if (structBytes == 0) return false;
+    if (structBytes == 0 || (structAlignment != 1 && structAlignment != 4)) return false;
     // A struct pointer descriptor carries the complete array extent and the
     // structural stride.  Field access is valid at any actual element, but
     // never at the one-past position.
@@ -1091,7 +1117,8 @@ static bool emit_struct_pointer_validation(Emitter& emitter, uint32_t structByte
             emitter.cmp_rdx_rcx() && emitter.emit_jb(failureLabel) &&
             emitter.mov_r9_rcx() && emitter.add_r9_r8() && emitter.emit_jb(failureLabel) &&
             emitter.cmp_rdx_r9() && emitter.emit_jae(failureLabel) &&
-            emitter.test_edx_imm32(3) && emitter.emit_jnz(failureLabel);
+            (structAlignment == 1 ||
+             (emitter.test_edx_imm32(structAlignment - 1U) && emitter.emit_jnz(failureLabel)));
 }
 
 static bool emit_pointer_arithmetic_failure(Emitter& emitter, uint16_t epilogueLabel)
@@ -1134,7 +1161,7 @@ static bool emit_field_address_raw(Emitter& emitter, const TranslationUnitIR& un
         !emit_expression_value(emitter, unit, function, frame, functionLabels, expression.left,
                                epilogueLabel, callFailureLabel, &pointerSlot) ||
          !emit_struct_pointer_validation(emitter, unit.structTypes[structTypeIndex].sizeBytes,
-                                        failureLabel) ||
+                                        unit.structTypes[structTypeIndex].alignment, failureLabel) ||
         !emitter.mov_rdx_ptr64(0) ||
         !emitter.lea_rax_rdx_disp32(static_cast<uint32_t>(expression.value)) ||
         !emitter.emit_jmp(endLabel) ||
@@ -1178,6 +1205,8 @@ static bool emit_address_of(Emitter& emitter, const TranslationUnitIR& unit,
         return emitter.lea_rax_local(scratch);
     }
     if (expression.kind == ExpressionKind::AddressOfField) {
+        const StructFieldIR* field = field_for_expression(unit, expression);
+        if (!field || field->kind != StructFieldKind::Int32) return false;
         if (!emit_field_address_raw(emitter, unit, function, frame, functionLabels, expression,
                                     epilogueLabel, callFailureLabel) ||
             !emitter.mov_local_rax64(scratch) || !emitter.mov_local_rax64(scratch + 8) ||
@@ -1366,7 +1395,8 @@ static bool emit_pointer_arithmetic(Emitter& emitter, const TranslationUnitIR& u
         (expression.kind == ExpressionKind::PointerSubtractInteger && !emitter.emit_jo(failureLabel)) ||
         !emitter.mov_r10_rdx() ||
         !emitter.lea_rax_local(pointer_temporary_displacement(frame, resultSlot)) ||
-         !emit_pointer_position_validation(emitter, failureLabel, elementSize) ||
+         !emit_pointer_position_validation(emitter, failureLabel, elementSize,
+             pointer_element_alignment(unit, function.expressions[pointerExpression])) ||
         !emitter.mov_rax_ptr64(0) || !emitter.test_r10_r10() ||
         !emitter.emit_jl(negativeLabel) || !emitter.add_rax_r10() ||
         !emitter.emit_jb(failureLabel) || !emitter.cmp_rax_r9() ||
@@ -1621,9 +1651,13 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
         case ExpressionKind::AddressOfField:
             return emit_address_of(emitter, unit, function, frame, functionLabels, expression,
                                    epilogueLabel, callFailureLabel);
-        case ExpressionKind::LoadField:
-            return emit_field_address_raw(emitter, unit, function, frame, functionLabels, expression,
-                                          epilogueLabel, callFailureLabel) && emitter.mov_eax_ptr_rax();
+        case ExpressionKind::LoadField: {
+            const StructFieldIR* field = field_for_expression(unit, expression);
+            return field && emit_field_address_raw(emitter, unit, function, frame, functionLabels, expression,
+                epilogueLabel, callFailureLabel) &&
+                (field->kind == StructFieldKind::Char8
+                    ? emitter.movsx_eax_byte_ptr_rax() : emitter.mov_eax_ptr_rax());
+        }
         case ExpressionKind::PointerAdd:
         case ExpressionKind::PointerSubtractInteger:
             return emit_pointer_arithmetic(emitter, unit, function, frame, functionLabels, expression,
@@ -1737,12 +1771,14 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
             if (local->kind == StorageKind::ArrayChar) return true;
             if (local->kind == StorageKind::Struct) {
                 if (statement.expression == COMPILER_INVALID_INDEX || local->sizeBytes == 0 ||
-                    (local->sizeBytes & 3U) != 0 ||
                     !emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
                                      epilogueLabel, callFailureLabel)) return false;
                 for (uint32_t word = 0; word < local->sizeBytes / 4U; ++word)
                     if (!emitter.mov_local_eax(local_displacement(function, statement.localIndex) +
                                                 static_cast<int32_t>(word * 4U))) return false;
+                for (uint32_t byteIndex = (local->sizeBytes & ~3U); byteIndex < local->sizeBytes; ++byteIndex)
+                    if (!emitter.mov_local_al(local_displacement(function, statement.localIndex) +
+                                              static_cast<int32_t>(byteIndex))) return false;
                 return true;
             }
             if (local->kind == StorageKind::ScalarChar)
@@ -1813,7 +1849,7 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
             return true;
         }
         case StatementKind::StoreIndirectInt32:
-        case StatementKind::StoreField: {
+        {
             uint16_t temporaryBase = 0;
             if (!emitter.acquire_temporary_slots(1, &temporaryBase) ||
                 !emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
@@ -1834,6 +1870,24 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
                 !emitter.define_label(endLabel) || !emitter.release_temporary_slots(1)) return false;
             if (pointerTargetSlot != COMPILER_INVALID_INDEX &&
                 !emitter.release_pointer_temporary_slots(1)) return false;
+            return true;
+        }
+        case StatementKind::StoreField: {
+            if (statement.targetExpression >= function.expressionCount) return false;
+            const Expression& target = function.expressions[statement.targetExpression];
+            const StructFieldIR* field = field_for_expression(unit, target);
+            if (!field || target.kind != ExpressionKind::AddressOfField) return false;
+            uint16_t temporaryBase = 0;
+            if (!emitter.acquire_temporary_slots(1, &temporaryBase) ||
+                !emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                 epilogueLabel, callFailureLabel) ||
+                !emitter.mov_local_eax(temporary_displacement(frame, temporaryBase)) ||
+                !emit_field_address_raw(emitter, unit, function, frame, functionLabels, target,
+                                        epilogueLabel, callFailureLabel) ||
+                !emitter.mov_rdx_rax() ||
+                !emitter.mov_eax_local(temporary_displacement(frame, temporaryBase)) ||
+                !(field->kind == StructFieldKind::Char8 ? emitter.mov_rax_al() : emitter.mov_rax_eax()) ||
+                !emitter.release_temporary_slots(1)) return false;
             return true;
         }
         case StatementKind::EvaluateExpression:

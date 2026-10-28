@@ -265,14 +265,28 @@ static bool copy_text(char* output, uint32_t capacity, const char* input)
     return true;
 }
 
-static bool valid_data_signature(SymbolKind kind, uint16_t elementCount, uint16_t elementSize,
+static bool module_has_struct_layout(const CompiledModule& module, uint64_t identity,
+                                    uint32_t sizeBytes, uint32_t alignment)
+{
+    for (uint32_t i = 0; i < module.structTypeCount; ++i) {
+        const StructTypeIR& type = module.structTypes[i];
+        if (type.identity == identity)
+            return type.sizeBytes == sizeBytes && type.alignment == alignment;
+    }
+    return false;
+}
+
+static bool valid_data_signature(const CompiledModule& module, SymbolKind kind,
+                                 uint16_t elementCount, uint16_t elementSize,
                                  uint32_t size, uint32_t alignment, uint64_t structTypeIdentity)
 {
     if (kind == SymbolKind::DataStruct)
         return elementCount != 0 && elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize != 0 &&
             elementSize <= COMPILER_MAX_STRUCT_BYTES && size != 0 &&
             size == static_cast<uint32_t>(elementCount) * elementSize &&
-            size <= COMPILER_MAX_LINKED_DATA_BYTES && alignment == 4 && structTypeIdentity != 0;
+            size <= COMPILER_MAX_LINKED_DATA_BYTES && (alignment == 1 || alignment == 4) &&
+            structTypeIdentity != 0 && module_has_struct_layout(module, structTypeIdentity,
+                                                                elementSize, alignment);
     return (kind == SymbolKind::Data || kind == SymbolKind::DataArray) && elementCount != 0 &&
         elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
         size == static_cast<uint32_t>(elementCount) * elementSize && alignment == 4;
@@ -312,6 +326,46 @@ static bool read_fixed_name(Reader& reader, char* output, uint32_t capacity)
 {
     if (!reader.bytes(reinterpret_cast<uint8_t*>(output), capacity)) return false;
     return valid_name(output, capacity);
+}
+
+static bool checked_align_struct_size(uint32_t value, uint32_t alignment, uint32_t* output)
+{
+    if (!output || (alignment != 1 && alignment != 4)) return false;
+    const uint32_t mask = alignment - 1U;
+    const uint32_t remainder = value & mask;
+    const uint32_t padding = remainder == 0 ? 0U : alignment - remainder;
+    if (value > COMPILER_MAX_STRUCT_BYTES - padding) return false;
+    *output = value + padding;
+    return true;
+}
+
+static bool valid_struct_type_layout(const StructTypeIR& type)
+{
+    if (!valid_name(type.name, sizeof(type.name)) || type.fieldCount == 0 ||
+        type.fieldCount > COMPILER_MAX_STRUCT_FIELDS || type.sizeBytes == 0 ||
+        type.sizeBytes > COMPILER_MAX_STRUCT_BYTES || type.identity == 0 ||
+        (type.alignment != 1 && type.alignment != 4)) return false;
+    uint32_t offset = 0;
+    uint32_t maximumAlignment = 1;
+    for (uint32_t i = 0; i < type.fieldCount; ++i) {
+        const StructFieldIR& field = type.fields[i];
+        if (!valid_name(field.name, sizeof(field.name))) return false;
+        for (uint32_t previous = 0; previous < i; ++previous)
+            if (names_equal(type.fields[previous].name, field.name)) return false;
+        const uint32_t width = field.kind == StructFieldKind::Char8 ? 1U :
+            (field.kind == StructFieldKind::Int32 ? 4U : 0U);
+        if (width == 0 || field.elementCount != 1 || field.elementSize != width ||
+            field.sizeBytes != width || field.alignment != width) return false;
+        uint32_t expectedOffset = 0;
+        if (!checked_align_struct_size(offset, width, &expectedOffset) ||
+            field.offset != expectedOffset || field.offset > COMPILER_MAX_STRUCT_BYTES ||
+            width > COMPILER_MAX_STRUCT_BYTES - field.offset) return false;
+        offset = field.offset + width;
+        if (width > maximumAlignment) maximumAlignment = width;
+    }
+    uint32_t expectedSize = 0;
+    return checked_align_struct_size(offset, maximumAlignment, &expectedSize) &&
+        type.alignment == maximumAlignment && type.sizeBytes == expectedSize;
 }
 
 static bool read_optional_name(Reader& reader, char* output, uint32_t capacity)
@@ -389,13 +443,11 @@ static bool read_struct_type(Reader& reader, StructTypeIR& type)
     for (uint32_t i = 0; i < type.fieldCount; ++i) {
         StructFieldIR& field = type.fields[i]; if (!read_fixed_name(reader, field.name, sizeof(field.name))) return false;
         const uint8_t kind = reader.u8(); (void)reader.u8();
-        if (kind > static_cast<uint8_t>(StructFieldKind::Int32)) return false;
+        if (kind > static_cast<uint8_t>(StructFieldKind::Char8)) return false;
         field.kind = static_cast<StructFieldKind>(kind); field.elementCount = reader.u16(); field.elementSize = reader.u16();
         field.offset = reader.u32(); field.sizeBytes = reader.u32(); field.alignment = reader.u32();
-        if (field.elementCount == 0 || field.elementSize != 4 || field.sizeBytes != 4 || field.alignment != 4 ||
-            field.offset > type.sizeBytes || field.sizeBytes > type.sizeBytes - field.offset) return false;
     }
-    return reader.ok();
+    return reader.ok() && valid_struct_type_layout(type);
 }
 
 static void write_export(Writer& writer, const ExportSymbol& symbol)
@@ -538,9 +590,10 @@ static bool validate_module_for_serialization(const CompiledModule& module)
     uint32_t edges = 0;
     for (uint32_t i = 0; i < module.functionCount; ++i) { if (module.localStorageBytes[i] > COMPILER_MAX_LOCAL_STORAGE_BYTES) return false; for (uint32_t j = 0; j < module.functionCount; ++j) if (module.callGraph[i][j]) ++edges; }
     if (edges > COMPILER_MAX_CALL_GRAPH_EDGES) return false;
-    for (uint32_t i = 0; i < module.structTypeCount; ++i) { const StructTypeIR& type = module.structTypes[i]; if (!valid_name(type.name, sizeof(type.name)) || type.fieldCount == 0 || type.fieldCount > COMPILER_MAX_STRUCT_FIELDS || type.sizeBytes == 0 || type.sizeBytes > COMPILER_MAX_STRUCT_BYTES || type.alignment == 0 || type.identity == 0) return false; }
-    for (uint32_t i = 0; i < module.exportCount; ++i) { const ExportSymbol& symbol = module.exports[i]; if (!valid_name(symbol.name, sizeof(symbol.name))) return false; if (symbol.kind == SymbolKind::Function) { if (symbol.moduleCodeOffset >= module.codeBytes || symbol.parameterCount > COMPILER_MAX_PARAMETERS || function_symbol_size(module, i) == 0) return false; } else if (!valid_data_signature(symbol.kind, symbol.elementCount, symbol.elementSize, symbol.size, symbol.alignment, symbol.structTypeIdentity) || !range32(symbol.moduleDataOffset, symbol.size, module.mutableDataBytes)) return false; }
-    for (uint32_t i = 0; i < module.importCount; ++i) { const ImportSymbol& symbol = module.imports[i]; if (!valid_name(symbol.name, sizeof(symbol.name))) return false; if (symbol.kind == SymbolKind::Function && symbol.expectedParameterCount > COMPILER_MAX_PARAMETERS) return false; if (symbol_is_data(symbol.kind) && !valid_data_signature(symbol.kind, symbol.elementCount, symbol.elementSize, symbol.size, symbol.alignment, symbol.structTypeIdentity)) return false; }
+    for (uint32_t i = 0; i < module.structTypeCount; ++i)
+        if (!valid_struct_type_layout(module.structTypes[i])) return false;
+    for (uint32_t i = 0; i < module.exportCount; ++i) { const ExportSymbol& symbol = module.exports[i]; if (!valid_name(symbol.name, sizeof(symbol.name))) return false; if (symbol.kind == SymbolKind::Function) { if (symbol.moduleCodeOffset >= module.codeBytes || symbol.parameterCount > COMPILER_MAX_PARAMETERS || function_symbol_size(module, i) == 0) return false; } else if (!valid_data_signature(module, symbol.kind, symbol.elementCount, symbol.elementSize, symbol.size, symbol.alignment, symbol.structTypeIdentity) || !range32(symbol.moduleDataOffset, symbol.size, module.mutableDataBytes)) return false; }
+    for (uint32_t i = 0; i < module.importCount; ++i) { const ImportSymbol& symbol = module.imports[i]; if (!valid_name(symbol.name, sizeof(symbol.name))) return false; if (symbol.kind == SymbolKind::Function && symbol.expectedParameterCount > COMPILER_MAX_PARAMETERS) return false; if (symbol_is_data(symbol.kind) && !valid_data_signature(module, symbol.kind, symbol.elementCount, symbol.elementSize, symbol.size, symbol.alignment, symbol.structTypeIdentity)) return false; }
     if (module.dependencyCount > COMPILER_MAX_DECLARATION_DEPENDENCIES ||
         module.sourceMapCount > COMPILER_MAX_SOURCE_MAPPINGS ||
         module.debugVariableCount > COMPILER_MAX_DEBUG_VARIABLES) return false;

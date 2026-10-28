@@ -141,7 +141,11 @@ static void setup_project()
         "\"abi\":\"guidexos-c-abi-v1\"}");
     put("/workspace/comp4b/src/main.cpp",
         "#include \"helper.h\"\n"
-        "int gx_main(gx_app_context* ctx) { char letter = 'A'; char bytes[2]; "
+        "struct Record { char status; int value; char flag; }; "
+        "int gx_main(gx_app_context* ctx) { struct Record record; "
+        "record.status = 'A'; record.value = 27; record.flag = 'Z'; "
+        "if (record.value + record.status - record.flag != 2) return 94; "
+        "char letter = 'A'; char bytes[2]; "
         "bytes[0] = 'O'; bytes[1] = 'K'; "
         "if (letter != 'A' || bytes[0] != 'O' || bytes[1] != 'K') return 90; "
         "int quotient = -17 / 5; int remainder = -17 % 5; "
@@ -246,7 +250,8 @@ static void test_cancel_during_noninterruptible_compiler(RequestFixture& fixture
     // finds a syntax error remains Cancelled at the boundary, while its
     // already-produced diagnostic text is retained in the bounded output.
     put("/workspace/comp4b/src/main.cpp",
-        "int gx_main(gx_app_context* ctx) { return (1 + ); }\n");
+        "struct Broken { char status int value; }; "
+        "int gx_main(gx_app_context* ctx) { return 0; }\n");
     handle = start_build(fixture);
     kernel::vfs::set_comp4b_cancel_hook(
         "/workspace/comp4b/src/main.cpp", nullptr, kOwner, handle,
@@ -289,7 +294,8 @@ static void test_failure_diagnostics_and_recovery(RequestFixture& fixture)
     release_build(repeatedHandle);
 
     put("/workspace/comp4b/src/main.cpp",
-        "int gx_main(gx_app_context* ctx) { return (1 + ); }\n");
+        "struct Broken { char status int value; }; "
+        "int gx_main(gx_app_context* ctx) { return 0; }\n");
     gx_build_handle handle = start_build(fixture);
     gx_build_snapshot snapshot = run_to_terminal(handle);
     assert(snapshot.state == GX_BUILD_FAILED && !snapshot.artifactValid &&

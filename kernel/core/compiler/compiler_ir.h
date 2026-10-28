@@ -76,7 +76,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 12;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 13;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -162,6 +162,8 @@ enum class StorageKind : uint8_t {
 
 enum class StructFieldKind : uint8_t {
     Int32,
+    // Appended so persisted kind 0 remains the existing 32-bit field.
+    Char8,
 };
 
 struct StructFieldIR {

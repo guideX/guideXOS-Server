@@ -116,6 +116,7 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
             module->imports[existing].elementCount != global.elementCount ||
             module->imports[existing].elementSize != global.elementSize ||
             module->imports[existing].size != global.size ||
+            module->imports[existing].alignment != global.alignment ||
             module->imports[existing].structTypeIdentity != global.structTypeIdentity) {
             diagnostics.error_identifier(location, "conflicting declaration for global ",
                                          name, name_length(name), "global");

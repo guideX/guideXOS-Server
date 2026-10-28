@@ -130,14 +130,28 @@ static bool report_kind_conflict(const SourceLocation& location, const char* nam
     return false;
 }
 
-static bool valid_linker_data_signature(SymbolKind kind, uint16_t elementCount, uint16_t elementSize,
+static bool module_has_struct_layout(const CompiledModule& module, uint64_t identity,
+                                    uint32_t sizeBytes, uint32_t alignment)
+{
+    for (uint32_t i = 0; i < module.structTypeCount; ++i) {
+        const StructTypeIR& type = module.structTypes[i];
+        if (type.identity == identity)
+            return type.sizeBytes == sizeBytes && type.alignment == alignment;
+    }
+    return false;
+}
+
+static bool valid_linker_data_signature(const CompiledModule& module, SymbolKind kind,
+                                        uint16_t elementCount, uint16_t elementSize,
                                         uint32_t size, uint32_t alignment, uint64_t structTypeIdentity)
 {
     if (kind == SymbolKind::DataStruct)
         return elementCount != 0 && elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize != 0 &&
             elementSize <= COMPILER_MAX_STRUCT_BYTES && size != 0 &&
             size == static_cast<uint32_t>(elementCount) * elementSize &&
-            size <= COMPILER_MAX_LINKED_DATA_BYTES && alignment == 4 && structTypeIdentity != 0;
+            size <= COMPILER_MAX_LINKED_DATA_BYTES && (alignment == 1 || alignment == 4) &&
+            structTypeIdentity != 0 && module_has_struct_layout(module, structTypeIdentity,
+                                                                elementSize, alignment);
     return (kind == SymbolKind::Data || kind == SymbolKind::DataArray) && elementCount != 0 &&
         elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
         size == static_cast<uint32_t>(elementCount) * elementSize && alignment == 4;
@@ -347,7 +361,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                 }
             } else {
                 if (!symbol_is_data(exportSymbol.kind) ||
-                    !valid_linker_data_signature(exportSymbol.kind, global.elementCount, global.elementSize,
+                    !valid_linker_data_signature(module, exportSymbol.kind, global.elementCount, global.elementSize,
                         global.size, global.alignment, global.structTypeIdentity) ||
                     global.moduleDataOffset > module.mutableDataBytes ||
                     module.mutableDataBytes - global.moduleDataOffset < global.size ||
@@ -541,7 +555,7 @@ bool link_modules(const CompiledModule* modules, uint32_t moduleCount,
                     return false;
                 }
             } else if (!symbol_is_data(importSymbol.kind) ||
-                       !valid_linker_data_signature(importSymbol.kind, importSymbol.elementCount,
+                       !valid_linker_data_signature(module, importSymbol.kind, importSymbol.elementCount,
                            importSymbol.elementSize, importSymbol.size, importSymbol.alignment,
                            importSymbol.structTypeIdentity) || definition.size != importSymbol.size ||
                        definition.alignment != importSymbol.alignment ||

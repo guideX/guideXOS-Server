@@ -314,10 +314,10 @@ static bool test_object_link_elf_and_cross_module_execution()
         ElfObjectHeaderView header = {};
         if (!inspect_elf_object(g_objectBytes[i], g_objectByteCounts[i],
                                 &header, objectDiagnostics) ||
-            header.compilerObjectAbiVersion != 12 || header.formatVersion != 2 ||
+            header.compilerObjectAbiVersion != 13 || header.formatVersion != 2 ||
             !deserialize_elf_object(g_objectBytes[i], g_objectByteCounts[i],
                                     &g_roundTripModules[i], objectDiagnostics))
-            return require(false, "ELF object round trip accepts ABI 12 and preserves signatures");
+            return require(false, "ELF object round trip accepts ABI 13 and preserves signatures");
     }
     if (!require(g_roundTripModules[0].imports[0].parameterKinds[0] == ParameterKind::Character &&
                  g_roundTripModules[0].imports[0].expectedReturnKind == FunctionReturnKind::Character &&

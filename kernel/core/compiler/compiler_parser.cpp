@@ -64,6 +64,15 @@ static bool checked_mul_u32(uint32_t left, uint32_t right, uint32_t* output)
     return true;
 }
 
+static bool checked_align_u32(uint32_t value, uint32_t alignment, uint32_t* output)
+{
+    if (!output || alignment == 0 || (alignment & (alignment - 1U)) != 0) return false;
+    const uint32_t mask = alignment - 1U;
+    if (value > 0xFFFFFFFFU - mask) return false;
+    *output = (value + mask) & ~mask;
+    return true;
+}
+
 static uint16_t expression_struct_type_index(const TranslationUnitIR& unit,
                                              const Expression& expression)
 {
@@ -872,7 +881,7 @@ private:
         const uint16_t expression = parse_expression(0);
         if (expression == COMPILER_INVALID_INDEX) return false;
         if (m_output->expressions[expression].type != ValueType::Int32) {
-            m_diagnostics.error(location, "struct fields in Phase 27T require int expressions", "type");
+            m_diagnostics.error(location, "struct fields require int expressions", "type");
             return false;
         }
         if (!expect(TokenKind::Semicolon, "expected ';' after field assignment")) return false;
@@ -1464,7 +1473,20 @@ private:
             (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayStruct);
         if (current().kind == TokenKind::Dot || current().kind == TokenKind::Arrow ||
             (structArray && current().kind == TokenKind::LeftBracket && array_has_field_suffix())) {
-            return parse_field_access(name, true, depth + 1U);
+            const uint16_t field = parse_field_access(name, true, depth + 1U);
+            if (field != COMPILER_INVALID_INDEX) {
+                const Expression& expression = m_output->expressions[field];
+                if (expression.kind == ExpressionKind::AddressOfField &&
+                    expression.elementCount < m_unit->structTypeCount &&
+                    expression.elementSize < m_unit->structTypes[expression.elementCount].fieldCount &&
+                    m_unit->structTypes[expression.elementCount].fields[expression.elementSize].kind ==
+                        StructFieldKind::Char8) {
+                    m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
+                                          "address of char struct fields is unsupported", "pointer");
+                    return COMPILER_INVALID_INDEX;
+                }
+            }
+            return field;
         }
         const bool indexed = current().kind == TokenKind::LeftBracket;
         if (!indexed) {
@@ -2054,11 +2076,11 @@ static bool global_signature_matches(const GlobalSymbolIR& global, StorageKind k
 static bool struct_global_signature_matches(const GlobalSymbolIR& global,
                                             StorageKind kind, uint16_t elementCount,
                                             uint16_t elementSize, uint32_t size,
-                                            uint64_t structTypeIdentity)
+                                            uint32_t alignment, uint64_t structTypeIdentity)
 {
     return global.kind == kind && global.elementCount == elementCount &&
         global.elementSize == elementSize && global.size == size &&
-        global.structTypeIdentity == structTypeIdentity && global.alignment == 4;
+        global.structTypeIdentity == structTypeIdentity && global.alignment == alignment;
 }
 
 static int32_t find_struct_type_name(const TranslationUnitIR& unit, const char* name)
@@ -2104,21 +2126,30 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
         type = {};
         for (uint32_t i = 0; i <= nameToken.length; ++i) type.name[i] = typeName[i];
         ++(*index);
+        type.alignment = 1;
         while (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::RightBrace) {
             const Token fieldType = tokens[token_index_or_eof(*index, tokenCount)];
-            if (fieldType.kind != TokenKind::KeywordInt) {
+            const bool characterField = fieldType.kind == TokenKind::KeywordChar;
+            if (!characterField && fieldType.kind != TokenKind::KeywordInt) {
                 diagnostics.error_as(CompilerDiagnosticKind::Unsupported, fieldType.location,
-                                    "struct fields must be int", "struct");
+                                    "struct fields must be int or char", "struct");
                 return false;
             }
             ++(*index);
+            if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::Star) {
+                diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                    tokens[token_index_or_eof(*index, tokenCount)].location,
+                                    "pointer fields are not supported", "struct");
+                return false;
+            }
             const Token fieldName = tokens[token_index_or_eof(*index, tokenCount)];
             if (!token_is_name(fieldName) || fieldName.kind == TokenKind::KeywordGxMain) {
                 diagnostics.error(fieldName.location, "expected struct field name", "struct");
                 return false;
             }
             if (type.fieldCount >= COMPILER_MAX_STRUCT_FIELDS) {
-                diagnostics.error(fieldName.location, "struct field capacity exceeded (maximum is 16)", "struct");
+                diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, fieldName.location,
+                                    "struct field capacity exceeded (maximum is 16)", "struct");
                 return false;
             }
             for (uint32_t i = 0; i < type.fieldCount; ++i) {
@@ -2141,30 +2172,47 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
                 return false;
             }
             ++(*index);
+            const uint32_t fieldWidth = characterField ? 1U : 4U;
+            uint32_t fieldOffset = 0;
+            if (!checked_align_u32(type.sizeBytes, fieldWidth, &fieldOffset) ||
+                fieldOffset > COMPILER_MAX_STRUCT_BYTES ||
+                fieldWidth > COMPILER_MAX_STRUCT_BYTES - fieldOffset) {
+                diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, fieldName.location,
+                                    "struct size exceeds the 256-byte limit", "struct");
+                return false;
+            }
             StructFieldIR& field = type.fields[type.fieldCount++];
             field = {};
             for (uint32_t i = 0; i < fieldName.length; ++i) field.name[i] = source[fieldName.location.offset + i];
             field.name[fieldName.length] = '\0';
-            field.kind = StructFieldKind::Int32;
+            field.kind = characterField ? StructFieldKind::Char8 : StructFieldKind::Int32;
             field.elementCount = 1;
-            field.elementSize = 4;
-            field.offset = type.sizeBytes;
-            field.sizeBytes = 4;
-            field.alignment = 4;
-            type.sizeBytes += 4;
+            field.elementSize = static_cast<uint16_t>(fieldWidth);
+            field.offset = fieldOffset;
+            field.sizeBytes = fieldWidth;
+            field.alignment = fieldWidth;
+            type.sizeBytes = fieldOffset + fieldWidth;
+            if (fieldWidth > type.alignment) type.alignment = fieldWidth;
         }
         if (type.fieldCount == 0) {
             diagnostics.error(nameToken.location, "struct must contain at least one field", "struct");
             return false;
         }
         ++(*index);
+        uint32_t finalSize = 0;
+        if (!checked_align_u32(type.sizeBytes, type.alignment, &finalSize) ||
+            finalSize == 0 || finalSize > COMPILER_MAX_STRUCT_BYTES) {
+            diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, nameToken.location,
+                                "struct size exceeds the 256-byte limit", "struct");
+            return false;
+        }
+        type.sizeBytes = finalSize;
         if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::Semicolon) {
             diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
                               "expected ';' after struct definition", "struct");
             return false;
         }
         ++(*index);
-        type.alignment = 4;
         type.identity = struct_type_identity(type);
         return true;
     }
@@ -2218,7 +2266,7 @@ static bool parse_struct_external_declaration(const char* source, const Token* t
         GlobalSymbolIR& global = output->globals[existing];
         if (!struct_global_signature_matches(global, kind, elementCount,
                                              static_cast<uint16_t>(type.sizeBytes), totalBytes,
-                                             type.identity) ||
+                                             type.alignment, type.identity) ||
             (external && global.isDefinition)) {
             diagnostics.error_identifier(variableToken.location, "conflicting declaration for global ",
                                          variableName, name_length(variableName), "global");
