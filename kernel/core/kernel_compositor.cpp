@@ -9,6 +9,10 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/serial_debug.h"
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE) && \
+    defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+#include "include/kernel/nativeaot_application.h"
+#endif
 
 namespace kernel {
 namespace compositor {
@@ -36,6 +40,12 @@ static uint8_t s_buttonPressButtons = 0;
 bool KernelCompositor::s_initialized = false;
 uint32_t KernelCompositor::s_showDesktopMinimized[MAX_WINDOWS];
 int KernelCompositor::s_showDesktopMinimizedCount = 0;
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+static uint32_t s_c188r12r1SettingsComposedWindowId = 0u;
+#if defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+static uint32_t s_c188r12r1SettingsLoggedComposedWindowId = 0u;
+#endif
+#endif
 
 // Bitmap font (5x7) - same as desktop.cpp
 static const int kGlyphW = 5;
@@ -263,6 +273,17 @@ app::KernelWindow* KernelCompositor::getWindow(uint32_t windowId) {
 
 app::KernelWindow* KernelCompositor::getFocusedWindow() {
     return getWindow(s_focusedWindowId);
+}
+
+bool KernelCompositor::isWindowTopmost(uint32_t windowId) {
+    int topmost = -1;
+    for (int index = MAX_WINDOWS - 1; index >= 0; --index) {
+        if (s_windows[index].valid && s_windows[index].window) {
+            topmost = index;
+            break;
+        }
+    }
+    return topmost >= 0 && s_windows[topmost].window->id == windowId;
 }
 
 #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
@@ -863,6 +884,9 @@ void KernelCompositor::clearHoverStates(app::KernelWindow* window) {
 }
 
 void KernelCompositor::drawAllWindows() {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    s_c188r12r1SettingsComposedWindowId = 0u;
+#endif
     if (!s_initialized) return;
     
     // Draw windows from back to front
@@ -871,10 +895,39 @@ void KernelCompositor::drawAllWindows() {
             app::KernelWindow* win = s_windows[i].window;
             if (!(win->flags & app::WF_MINIMIZED) && (win->flags & app::WF_VISIBLE)) {
                 drawWindow(win);
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE) && \
+    defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+                uint32_t applicationGeneration = 0u;
+                uint32_t surfaceGeneration = 0u;
+                if (nativeaot::isC188R12R1SettingsWindow(
+                        win, &applicationGeneration, &surfaceGeneration)) {
+                    s_c188r12r1SettingsComposedWindowId = win->id;
+                    if (s_c188r12r1SettingsLoggedComposedWindowId != win->id) {
+                        s_c188r12r1SettingsLoggedComposedWindowId = win->id;
+                        serial::puts("[C188R12R1-COMPOSITOR] stage=composed appId=com.guidexos.apps.managed.settingscenter generation=");
+                        serial::put_hex32(applicationGeneration);
+                        serial::puts(" surfaceGeneration=");
+                        serial::put_hex32(surfaceGeneration);
+                        serial::puts(" window=");
+                        serial::put_hex32(win->id);
+                        serial::puts(" visible=1 minimized=0 focused=");
+                        serial::puts((win->flags & app::WF_FOCUSED) ? "1" : "0");
+                        serial::puts(" front=");
+                        serial::puts(isWindowTopmost(win->id) ? "1" : "0");
+                        serial::puts(" result=DRAWN\n");
+                    }
+                }
+#endif
             }
         }
     }
 }
+
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+uint32_t KernelCompositor::c188r12r1SettingsComposedWindowId() {
+    return s_c188r12r1SettingsComposedWindowId;
+}
+#endif
 
 void KernelCompositor::drawWindow(app::KernelWindow* window) {
     if (!window) return;

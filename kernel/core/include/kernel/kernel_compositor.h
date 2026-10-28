@@ -100,6 +100,9 @@ public:
     
     // Get focused window
     static app::KernelWindow* getFocusedWindow();
+
+    // Returns true when this window is the frontmost live compositor entry.
+    static bool isWindowTopmost(uint32_t windowId);
     
     // Set focus to a window
     static void setFocus(uint32_t windowId);
@@ -129,6 +132,10 @@ public:
     
     // Rendering
     static void drawAllWindows();
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    // Window composed during the most recent drawAllWindows() pass, if any.
+    static uint32_t c188r12r1SettingsComposedWindowId();
+#endif
     static void drawWindow(app::KernelWindow* window);
     static void drawTitlebar(app::KernelWindow* window);
     static void drawWidget(app::Widget* widget, uint32_t winX, uint32_t winY);

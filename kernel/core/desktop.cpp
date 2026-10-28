@@ -8804,6 +8804,18 @@ void draw()
     // This is the key to preventing flickering - all drawing is done
     // to the back buffer, then copied to the screen in one operation
     framebuffer::present();
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    static uint32_t lastPresentedSettingsWindow = 0u;
+    const uint32_t settingsWindow =
+        compositor::KernelCompositor::c188r12r1SettingsComposedWindowId();
+    if (settingsWindow != 0u &&
+        settingsWindow != lastPresentedSettingsWindow) {
+        lastPresentedSettingsWindow = settingsWindow;
+        serial::puts("[C188R12R1-COMPOSITOR] stage=presented window=");
+        serial::put_hex32(settingsWindow);
+        serial::puts(" result=PASS\n");
+    }
+#endif
 }
 
 

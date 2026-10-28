@@ -263,6 +263,9 @@ public static unsafe class GuideXosApplicationRegistry
     private static uint s_c188r10RegistryInitializationGeneration = 1u;
 #endif
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private static uint s_c188r12r1SettingsDispatchTraceRecords;
+    private static uint s_c188r12r1SettingsLaunchEntryTraceRecords;
+    private static uint s_c188r12r1SettingsLaunchReturnTraceRecords;
     private static uint s_c188r11NotesRegistrationSequence;
     private static uint s_c188r11SettingsRegistrationSequence;
     private static uint s_c188r11CalculatorRegistrationSequence;
@@ -559,7 +562,8 @@ public static unsafe class GuideXosApplicationRegistry
         ReadOnlySpan<byte> stage, uint selector, uint generation,
         int resultCode, uint sequence = 0u)
     {
-        if (selector != 4u || s_c188r11RegistryTraceRecords >= 48u ||
+        if ((selector != 4u && selector != 5u) ||
+            s_c188r11RegistryTraceRecords >= 48u ||
             (host.LaunchContext.IsInput &&
              (host.LaunchContext.InputKind == GuideXosInputKind.PointerMove ||
               host.LaunchContext.InputKind == GuideXosInputKind.Wheel)))
@@ -820,6 +824,13 @@ public static unsafe class GuideXosApplicationRegistry
         }
 
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        if (selector == 5u && s_c188r12r1SettingsDispatchTraceRecords < 16u)
+        {
+            ++s_c188r12r1SettingsDispatchTraceRecords;
+            host.TryLog("C188R12R1-MANAGED stage=dispatch-entry selector=5 result=BEGIN"u8);
+            LogC188R11State(host, "settings-dispatch-entry"u8, selector,
+                host.LaunchContext.ApplicationGeneration, -1);
+        }
         if (selector == 4u)
         {
             LogC188R11InitializationEvent(host);
@@ -1128,6 +1139,14 @@ public static unsafe class GuideXosApplicationRegistry
         else
         {
             host.TryLog("C188R3-010 APPLICATION-LAUNCH-BEGIN"u8);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (selector == 5u &&
+                s_c188r12r1SettingsLaunchEntryTraceRecords < 8u)
+            {
+                ++s_c188r12r1SettingsLaunchEntryTraceRecords;
+                host.TryLog("C188R12R1-MANAGED stage=application-launch-entry selector=5 result=BEGIN"u8);
+            }
+#endif
 #if HOSTLOGPROOF_C188R6_NOTES_POSTRENDER
             host.TryLog("C188R6-010 BEFORE APPLICATION-LAUNCH-CALL"u8);
 #endif
@@ -1137,6 +1156,18 @@ public static unsafe class GuideXosApplicationRegistry
                     applicationGeneration, -1);
 #endif
             result = application.Launch(host);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            if (selector == 5u &&
+                s_c188r12r1SettingsLaunchReturnTraceRecords < 8u)
+            {
+                ++s_c188r12r1SettingsLaunchReturnTraceRecords;
+                host.TryLog(result == GuideXosResult.Success
+                    ? "C188R12R1-MANAGED stage=application-launch-return selector=5 result=PASS"u8
+                    : "C188R12R1-MANAGED stage=application-launch-return selector=5 result=FAIL"u8);
+                LogC188R11State(host, "settings-launch-return"u8, selector,
+                    applicationGeneration, (int)result);
+            }
+#endif
 #if HOSTLOGPROOF_C188R9_REGISTRY_INPUT_REENTRY
             if (selector == 4u)
             {

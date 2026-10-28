@@ -3,6 +3,7 @@
 #include "kernel/types.h"
 
 namespace kernel {
+namespace app { struct KernelWindow; }
 namespace nativeaot {
 
 enum class LaunchStatus : int32_t {
@@ -75,6 +76,13 @@ LaunchStatus launchLogical(const char* path, uint32_t logicalAppId,
                            uint32_t launchContextLength = 0u,
                            uint32_t activationKind = kManagedActivationKindNone);
 bool isProductionLogicalApplicationId(const char* applicationId);
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE) && \
+    defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+// Read-only identity check used by the bounded C188R12R1 compositor trace.
+bool isC188R12R1SettingsWindow(const app::KernelWindow* window,
+                               uint32_t* applicationGeneration,
+                               uint32_t* surfaceGeneration);
+#endif
 LaunchStatus launchLogicalApplication(const char* applicationId,
                                       LaunchReport* report,
                                       const char* launchContext = nullptr,

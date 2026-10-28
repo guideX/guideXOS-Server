@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$BootEvidencePath,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ExpectedKernelSha256,
-    [Parameter(Mandatory=$true)][ValidateSet('identity','lifecycle','coexistence','production-startup','production-apps','production-lifecycle','registry-input-reentry','managed-state-provenance')][string]$Scenario,
+    [Parameter(Mandatory=$true)][ValidateSet('identity','lifecycle','coexistence','production-startup','production-apps','production-lifecycle','registry-input-reentry','managed-state-provenance','settings-handoff-diagnostic')][string]$Scenario,
     [Parameter()][switch]$ProductionCompatibility,
     [Parameter()][switch]$EnableGdbStub,
     [Parameter()][ValidateRange(60,3600)][int]$MaxRuntimeSeconds = 1200,
@@ -76,7 +76,8 @@ $isC188R10Boot = $Scenario -eq 'registry-input-reentry' -and
     $bootRoot.StartsWith($c188r10Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase)
 $c188r11Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance'))
-$isC188R11Boot = $Scenario -eq 'managed-state-provenance' -and
+$isC188R11Boot = ($Scenario -eq 'managed-state-provenance' -or
+    $Scenario -eq 'settings-handoff-diagnostic') -and
     $bootRoot.StartsWith($c188r11Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase)
 if ($isC188R11Boot) {
@@ -623,6 +624,12 @@ $scenarioPass = switch ($Scenario) {
             $manifest.r11ManagedNativeBoundaryCorrelation -and $manifest.screenshotCaptured
         break
     }
+    'settings-handoff-diagnostic' {
+        # The outer C188R12R1 runner owns the source-validated click and
+        # evaluates the Settings-specific surface/presentation evidence.
+        $true
+        break
+    }
 }
 $manifest.result = if ($commonPass -and $scenarioPass) { 'PASS' } else { 'FAIL' }
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $bootRoot 'acceptance-manifest.json') -Encoding utf8
@@ -631,6 +638,8 @@ if ($manifest.result -ne 'PASS') {
 }
 if ($ProductionCompatibility) {
     Write-Output ("C188_PRODUCTION_QAC_RELEASE=VERIFIED SCENARIO={0} SELECTORS=4-8 COUNTERAPP_LAUNCHES={1} NOTES_CLOSES={2}" -f $Scenario,$manifest.counterAppLaunchMarkers,$manifest.productionNotesLifetimeCloseMarkers)
+} elseif ($Scenario -eq 'settings-handoff-diagnostic') {
+    Write-Output ("C188R12R1_QAC_RELEASE=VERIFIED BOOT_READY={0} NOTES_SURFACES={1} SETTINGS_SURFACES={2}" -f $manifest.bootReady,$manifest.productionNotesSurfaceMarkers,$manifest.productionSettingsSurfaceMarkers)
 } else {
     Write-Output ("C188_QAC_RELEASE=VERIFIED SCENARIO={0} COUNTERAPP_LAUNCHES={1} FACTORY={2} WINDOW={3} INPUT={4} CLOSE={5} STALE_REJECT={6}" -f $Scenario,$manifest.counterAppLaunchMarkers,$manifest.c188FactoryMarkers,$manifest.c188WindowMarkers,$manifest.c188InputMarkers,$manifest.c188LifetimeCloseMarkers,$manifest.c188StaleGenerationMarkers)
 }

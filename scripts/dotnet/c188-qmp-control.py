@@ -98,6 +98,7 @@ def move(qmp: Qmp, cursor: list[int] | None, x: int, y: int, width: int, height:
             step = (1 if distance > 0 else -1) * min(abs(distance), 40)
             send(qmp, {"type": "rel", "data": {"axis": axis, "value": step}})
             distance -= step
+            time.sleep(0.04)
     return [x, y]
 
 
@@ -108,6 +109,14 @@ def click(qmp: Qmp, cursor, x, y, width, height):
     send(qmp, {"type": "btn", "data": {"button": "left", "down": False}})
     time.sleep(0.35)
     return cursor
+
+
+def click_current(qmp: Qmp):
+    """Click the already positioned pointer without sending another motion."""
+    send(qmp, {"type": "btn", "data": {"button": "left", "down": True}})
+    time.sleep(0.12)
+    send(qmp, {"type": "btn", "data": {"button": "left", "down": False}})
+    time.sleep(0.35)
 
 
 def key(qmp: Qmp, name: str):
@@ -176,9 +185,12 @@ def main() -> int:
     click_cmd = sub.add_parser("click")
     click_cmd.add_argument("x", type=int)
     click_cmd.add_argument("y", type=int)
+    sub.add_parser("click-current")
     move_cmd = sub.add_parser("move")
     move_cmd.add_argument("x", type=int)
     move_cmd.add_argument("y", type=int)
+    move_cmd.add_argument("--from-x", type=int)
+    move_cmd.add_argument("--from-y", type=int)
     key_cmd = sub.add_parser("key")
     key_cmd.add_argument("key")
     drag = sub.add_parser("drag")
@@ -204,8 +216,15 @@ def main() -> int:
             print(png)
         elif args.action == "click":
             cursor = click(qmp, cursor, args.x, args.y, width, height)
+        elif args.action == "click-current":
+            click_current(qmp)
         elif args.action == "move":
-            cursor = move(qmp, cursor, args.x, args.y, width, height)
+            if (args.from_x is None) != (args.from_y is None):
+                raise ValueError("--from-x and --from-y must be supplied together")
+            observed_cursor = cursor
+            if args.from_x is not None:
+                observed_cursor = [args.from_x, args.from_y]
+            cursor = move(qmp, observed_cursor, args.x, args.y, width, height)
         elif args.action == "key":
             key(qmp, args.key)
         elif args.action == "drag":

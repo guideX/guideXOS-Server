@@ -1670,6 +1670,10 @@ public:
         return m_window != nullptr && m_window->id == static_cast<uint32_t>(window);
     }
 
+    bool ownsWindow(const app::KernelWindow* window) const {
+        return m_window == window;
+    }
+
     uint64_t windowId() const {
         return m_window ? static_cast<uint64_t>(m_window->id) : 0u;
     }
@@ -3964,19 +3968,109 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedFileStat(
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL managedRequestWindow(
     NativeGxAppContext* context, uint8_t* title, int32_t width, int32_t height,
     uint64_t* outWindow) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    const uintptr_t packedUserData = context
+        ? reinterpret_cast<uintptr_t>(context->userData) : 0u;
+    const uint32_t requestSelector = static_cast<uint32_t>(packedUserData);
+    const uint32_t requestGeneration = static_cast<uint32_t>(
+        static_cast<uint64_t>(packedUserData) >> 32u);
+    static uint32_t c188r12r1SurfaceTraceRequests = 0u;
+    const bool traceManagedSurface =
+        (requestSelector == 4u || requestSelector == 5u) &&
+        c188r12r1SurfaceTraceRequests < 16u;
+    if (traceManagedSurface) ++c188r12r1SurfaceTraceRequests;
+    if (traceManagedSurface) {
+        serial::puts("[C188R12R1-SURFACE] stage=request selector=");
+        serial::put_hex32(requestSelector);
+        serial::puts(" generation=");
+        serial::put_hex32(requestGeneration);
+        serial::puts(" width=");
+        serial::put_hex32(static_cast<uint32_t>(width));
+        serial::puts(" height=");
+        serial::put_hex32(static_cast<uint32_t>(height));
+        serial::puts(" result=BEGIN\n");
+    }
+#endif
     if (!activeSurfaceContext(context) || !title || !outWindow ||
         boundedCStringLength(title, app::MAX_TITLE_LEN - 1u) >= app::MAX_TITLE_LEN ||
         width < compositor::MIN_WINDOW_WIDTH || height < compositor::MIN_WINDOW_HEIGHT) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        if (traceManagedSurface) {
+            serial::puts("[C188R12R1-SURFACE] stage=create selector=");
+            serial::put_hex32(requestSelector);
+            serial::puts(" generation=");
+            serial::put_hex32(requestGeneration);
+            serial::puts(" result=FAIL reason=invalid-request\n");
+        }
+#endif
         return -2;
     }
     NativeAotManagedSurface* surface = managedSurface();
-    if (!surface) return -4;
+    if (!surface) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        if (traceManagedSurface) {
+            serial::puts("[C188R12R1-SURFACE] stage=create selector=");
+            serial::put_hex32(requestSelector);
+            serial::puts(" generation=");
+            serial::put_hex32(requestGeneration);
+            serial::puts(" result=FAIL reason=surface-unavailable\n");
+        }
+#endif
+        return -4;
+    }
     surface->setSelector(static_cast<uint32_t>(
         reinterpret_cast<uintptr_t>(context->userData)));
     if (!surface->open(reinterpret_cast<const char*>(title), width, height)) {
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+        if (traceManagedSurface) {
+            serial::puts("[C188R12R1-SURFACE] stage=create appId=");
+            serial::puts(surface->applicationId());
+            serial::puts(" selector=");
+            serial::put_hex32(requestSelector);
+            serial::puts(" generation=");
+            serial::put_hex32(surface->applicationGeneration());
+            serial::puts(" result=FAIL reason=window-open\n");
+        }
+#endif
         return -4;
     }
     *outWindow = surface->windowId();
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    if (traceManagedSurface) {
+        app::KernelWindow* window = compositor::KernelCompositor::getWindow(
+            static_cast<uint32_t>(*outWindow));
+        serial::puts("[C188R12R1-SURFACE] stage=created appId=");
+        serial::puts(surface->applicationId());
+        serial::puts(" selector=");
+        serial::put_hex32(requestSelector);
+        serial::puts(" generation=");
+        serial::put_hex32(surface->applicationGeneration());
+        serial::puts(" surfaceGeneration=");
+        serial::put_hex32(surface->surfaceGeneration());
+        serial::puts(" window=");
+        serial::put_hex32(static_cast<uint32_t>(*outWindow));
+        serial::puts(" x=");
+        serial::put_hex32(window ? static_cast<uint32_t>(window->x) : 0u);
+        serial::puts(" y=");
+        serial::put_hex32(window ? static_cast<uint32_t>(window->y) : 0u);
+        serial::puts(" width=");
+        serial::put_hex32(window ? static_cast<uint32_t>(window->w) : 0u);
+        serial::puts(" height=");
+        serial::put_hex32(window ? static_cast<uint32_t>(window->h) : 0u);
+        serial::puts(" visible=");
+        serial::puts(window && (window->flags & app::WF_VISIBLE) ? "1" : "0");
+        serial::puts(" minimized=");
+        serial::puts(window && (window->flags & app::WF_MINIMIZED) ? "1" : "0");
+        serial::puts(" focused=");
+        serial::puts(window && (window->flags & app::WF_FOCUSED) ? "1" : "0");
+        serial::puts(" front=");
+        serial::puts(window && compositor::KernelCompositor::isWindowTopmost(
+            window->id) ? "1" : "0");
+        serial::puts(" dirty=");
+        serial::puts(window && window->dirty ? "1" : "0");
+        serial::puts(" result=PASS\n");
+    }
+#endif
     serial::puts("[C111-SURFACE] action=create title=");
     serial::puts(reinterpret_cast<const char*>(title));
     serial::puts(" window=");
@@ -4489,6 +4583,29 @@ void releaseMappedPages() {
 
 } // namespace
 
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE) && \
+    defined(GXOS_NATIVEAOT_PRODUCTION_APPLICATION)
+bool isC188R12R1SettingsWindow(const app::KernelWindow* window,
+                               uint32_t* applicationGeneration,
+                               uint32_t* surfaceGeneration) {
+    if (!window) return false;
+    for (uint32_t index = 0u;
+         index < app::kApplicationSnapshotManagedCapacity; ++index) {
+        NativeAotManagedSurface* surface = g_managedSurfaces[index];
+        if (surface && surface->ownsWindow(window) &&
+            surface->selector() == 5u &&
+            surface->hasApplicationIdentity(kManagedSettingsApplicationId)) {
+            if (applicationGeneration)
+                *applicationGeneration = surface->applicationGeneration();
+            if (surfaceGeneration)
+                *surfaceGeneration = surface->surfaceGeneration();
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 const char* launchStatusName(LaunchStatus status) {
     switch (status) {
         case LaunchStatus::Success: return "success";
@@ -4992,6 +5109,20 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     g_activeManagedContext = &app;
     arch::amd64::disable_interrupts();
 #if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    static uint32_t c188r12r1ManagedEntryCalls = 0u;
+    uint32_t c188r12r1ManagedEntryCall = 0u;
+    if (logicalAppId == 5u && c188r12r1ManagedEntryCalls < 8u) {
+        c188r12r1ManagedEntryCall = ++c188r12r1ManagedEntryCalls;
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(app.userData));
+        serial::puts("[C188R12R1-NATIVE] stage=before-managed-entry selector=00000005 generation=");
+        serial::put_hex32(static_cast<uint32_t>(packedUserData >> 32u));
+        serial::puts(" call=");
+        serial::put_hex32(c188r12r1ManagedEntryCall);
+        serial::puts(" result=BEGIN\n");
+    }
+#endif
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
     uint32_t c188r11DiagnosticInvocation = 0u;
     if (logicalAppId == 4u && g_c188r11NativeInvocationCount < 24u) {
         c188r11DiagnosticInvocation = ++g_c188r11NativeInvocationCount;
@@ -5005,6 +5136,19 @@ LaunchStatus launchResident(const char* path, uint32_t logicalAppId,
     }
 #endif
     const int32_t managedReturn = reinterpret_cast<Entry>(report->entryPoint)(&startup);
+#if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
+    if (c188r12r1ManagedEntryCall != 0u) {
+        const uint64_t packedUserData = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(app.userData));
+        serial::puts("[C188R12R1-NATIVE] stage=after-managed-return selector=00000005 generation=");
+        serial::put_hex32(static_cast<uint32_t>(packedUserData >> 32u));
+        serial::puts(" call=");
+        serial::put_hex32(c188r12r1ManagedEntryCall);
+        serial::puts(" rc=");
+        serial::put_hex32(static_cast<uint32_t>(managedReturn));
+        serial::puts(" result=RETURNED\n");
+    }
+#endif
 #if defined(GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE)
     if (c188r11DiagnosticInvocation != 0u) {
         const uint64_t packedUserData = static_cast<uint64_t>(

@@ -56,6 +56,9 @@ internal struct ManagedSettingsSnapshot : IEquatable<ManagedSettingsSnapshot>
 /// </summary>
 public sealed class ManagedSettingsCenter : GuideXosApplication
 {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private static uint s_c188r12r1SettingsTraceRecords;
+#endif
     internal const int SurfaceWidth = 560;
     internal const int SurfaceHeight = 340;
     internal const int MinimumWindowWidth = 512;
@@ -437,9 +440,43 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
     internal int InitialContentHeight => _initialContentHeight;
     internal int FinalContentHeight => _finalContentHeight;
 
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private static void LogC188R12R1SettingsStage(
+        GuideXosHost host, ReadOnlySpan<byte> stage, uint generation,
+        int result = -1)
+    {
+        if (s_c188r12r1SettingsTraceRecords >= 16u) return;
+        ++s_c188r12r1SettingsTraceRecords;
+        Span<byte> line = stackalloc byte[128];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R12R1-SETTINGS stage="u8) ||
+            !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position,
+                " selector=5 generation="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, generation))
+        {
+            return;
+        }
+        if (result >= 0 &&
+            (!GuideXosText.Append(line, ref position, " result="u8) ||
+             !GuideXosText.AppendUnsigned(line, ref position,
+                 (uint)result)))
+        {
+            return;
+        }
+        line[position] = 0;
+        _ = host.TryLog(line[..position]);
+    }
+#endif
+
     public override GuideXosResult Launch(GuideXosHost host)
     {
         if (host.IsCapabilityProbe) return GuideXosResult.Success;
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        LogC188R12R1SettingsStage(host, "launch-entry"u8,
+            host.LaunchContext.ApplicationGeneration);
+#endif
         _appHost = host;
         _defaultAppsPage.SetService(new ManagedDefaultAppsHostService(host));
         ++_launchCount;
@@ -479,10 +516,26 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             _c146StoreTestsPassed = ManagedSettingsStoreC146Tests.Run(host);
         }
 #endif
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        LogC188R12R1SettingsStage(host, "before-surface-request"u8,
+            host.LaunchContext.ApplicationGeneration);
+#endif
         if (!ResetComposition()) return GuideXosResult.InvalidArgument;
         GuideXosResult create = host.TryCreateSurface(
             "Managed Settings Center"u8, _windowWidth, _windowHeight, out _surface);
-        if (create != GuideXosResult.Success || _surface == null) return create;
+        if (create != GuideXosResult.Success || _surface == null)
+        {
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+            LogC188R12R1SettingsStage(host, "surface-request-return"u8,
+                host.LaunchContext.ApplicationGeneration, (int)create);
+#endif
+            return create;
+        }
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        LogC188R12R1SettingsStage(host, "surface-created"u8,
+            host.LaunchContext.ApplicationGeneration,
+            (int)GuideXosResult.Success);
+#endif
         _window = _surface.Handle;
         if (!_testsRun)
         {
@@ -664,7 +717,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             host.TryLog(valid ? "C144-RELAUNCH close=PASS relaunch=PASS registration=12 result=PASS"u8 : "C144-RELAUNCH result=FAIL"u8);
 #endif
         }
-        return RenderC167Frame(host, _surface);
+        GuideXosResult renderResult = RenderC167Frame(host, _surface);
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        LogC188R12R1SettingsStage(host, "launch-return"u8,
+            host.LaunchContext.ApplicationGeneration, (int)renderResult);
+#endif
+        return renderResult;
     }
 
     public override GuideXosResult HandleInput(GuideXosHost host, GuideXosInputEvent input)

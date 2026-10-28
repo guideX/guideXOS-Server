@@ -2552,6 +2552,15 @@ public static unsafe class Program
             return GxAbi.ErrorUnsupported;
         }
 
+#if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+        uint managedSelector = (uint)(nuint)ctx->userData;
+        if (managedSelector == 5u)
+        {
+            LogC188R12R1ManagedMainEntry(ctx, managedSelector,
+                (uint)((ulong)(nuint)ctx->userData >> 32));
+        }
+#endif
+
 #if HOSTLOGPROOF_C188_EXTERNAL_APP_IDENTITY
         // C188 maps the separately compiled CounterApp only to its dedicated
         // development selector. Selectors 4-8 continue through production.
@@ -3491,6 +3500,22 @@ public static unsafe class Program
     }
 
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
+    private static void LogC188R12R1ManagedMainEntry(
+        NativeGxAppContext* context, uint selector, uint generation)
+    {
+        if (context == null || context->host == null ||
+            context->host->log == null || selector != 5u) return;
+        Span<byte> line = stackalloc byte[112];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R12R1-MANAGED stage=main-entry selector=5 generation="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, generation) ||
+            !GuideXosText.Append(line, ref position, " result=BEGIN"u8)) return;
+        line[position] = 0;
+        fixed (byte* message = line)
+            _ = context->host->log(context, message);
+    }
+
     private static void LogC188R11ManagedBoundary(
         NativeGxAppContext* context,
         ReadOnlySpan<byte> stage,
