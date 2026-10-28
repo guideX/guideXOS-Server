@@ -1,7 +1,8 @@
 # Developer Studio COMP4I — Unsigned Byte Semantics
 
-**Outcome: `COMP4I_HOSTED_ACCEPTED`**  
-**Qualification: hosted only**  
+**Outcome: `COMP4I_HOSTED_ACCEPTED`**
+
+**Qualification: hosted only**
 **Date: 2026-10-28**
 
 ## Revision record
