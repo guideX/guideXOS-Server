@@ -13,6 +13,7 @@ function Assert-C188R12R1([string]$Name, [bool]$Condition) {
 $notesSurface = '[C188R12R1-SURFACE] stage=created appId=com.guidexos.apps.managed.notes selector=00000004 generation=00000001 surfaceGeneration=00000001 window=000003E8 x=00000154 y=000000DC width=00000258 height=00000168 visible=1 minimized=0 focused=1 front=1 dirty=1 result=PASS'
 $acceptedTrace = @'
 [NATIVEAOT-HEAP] action=initialize count=0000000000000001 base=00000001001F2600 bytes=0000000000010000 reason=initial-managed-thread-attachment
+[C112-ACTION-DISPATCH] selector=00000004 action=00000018 managedReturn=00000000 result=PASS
 [APPMODEL-MANAGED-LAUNCH] source=DesktopLaunch appId=com.guidexos.apps.managed.settingscenter selector=00000005 image=/system/apps/GXOSAPP.ELF metadata=valid
 [NATIVEAOT-HEAP] action=preserve count=000000000000000E resetCount=0000000000000001 base=00000001001F2600 allocation=0000000100201008 reason=resident-managed-thread
 [C188R12R1-NATIVE] stage=before-managed-entry selector=00000005 generation=00000002 call=00000001 result=BEGIN
@@ -40,8 +41,29 @@ Assert-C188R12R1 'matching Settings surface, focus, composition and presentation
 Assert-C188R12R1 'generation and window identity remain correlated through presentation' (
     $positive.generation -eq '00000002' -and $positive.window -eq '000003E9' -and
     $positive.earliestMissingBoundary -eq 'presented-settings-surface' -and
-    $positive.settingsResidentMask -eq 1 -and
+    $positive.settingsResidentMask -eq 1 -and $positive.notesActionId -eq '00000018' -and
+    $positive.notesSettingsActionInvoked -and $positive.notesSettingsActionSucceeded -and
     $positive.settingsRegistryMemoryStable -and $positive.persistentHeapPreserved)
+
+$wrongAction = $acceptedTrace.Replace(
+    '[C112-ACTION-DISPATCH] selector=00000004 action=00000018 managedReturn=00000000 result=PASS',
+    '[C112-ACTION-DISPATCH] selector=00000004 action=00000017 managedReturn=FFFFFFFE result=FAIL')
+$wrongActionEvidence = Get-C188R12R1SettingsHandoffEvidence $wrongAction
+Assert-C188R12R1 'Notes action 0x17 can never qualify a Settings handoff' (
+    -not $wrongActionEvidence.accepted -and
+    -not $wrongActionEvidence.notesSettingsActionInvoked -and
+    $wrongActionEvidence.notesActionId -eq '00000017' -and
+    $wrongActionEvidence.earliestMissingBoundary -eq 'notes-settings-action')
+
+$failedSettingsAction = $acceptedTrace.Replace(
+    'action=00000018 managedReturn=00000000 result=PASS',
+    'action=00000018 managedReturn=FFFFFFFE result=FAIL')
+$failedSettingsActionEvidence = Get-C188R12R1SettingsHandoffEvidence $failedSettingsAction
+Assert-C188R12R1 'Settings action invocation and its return are reported separately' (
+    -not $failedSettingsActionEvidence.accepted -and
+    $failedSettingsActionEvidence.notesSettingsActionInvoked -and
+    -not $failedSettingsActionEvidence.notesSettingsActionSucceeded -and
+    $failedSettingsActionEvidence.earliestMissingBoundary -eq 'settings-action-return')
 
 $zeroResident = $acceptedTrace.Replace(
     'reset=0 m=1 g=2 td=1 n=5 result=0 gc=0 w=2:2',
@@ -61,9 +83,10 @@ Assert-C188R12R1 'Settings handoff without persistent heap preservation is rejec
 $launchOnly = Get-C188R12R1SettingsHandoffEvidence (
     '[APPMODEL-MANAGED-LAUNCH] source=DesktopLaunch appId=com.guidexos.apps.managed.settingscenter selector=00000005 image=/system/apps/GXOSAPP.ELF metadata=valid')
 Assert-C188R12R1 'launch request alone is never surface readiness' (
-    -not $launchOnly.accepted -and $launchOnly.earliestMissingBoundary -eq 'native-managed-entry')
+    -not $launchOnly.accepted -and $launchOnly.earliestMissingBoundary -eq 'notes-settings-action')
 
 $managedOnly = Get-C188R12R1SettingsHandoffEvidence (
+    '[C112-ACTION-DISPATCH] selector=00000004 action=00000018 managedReturn=00000000 result=PASS' + "`n" +
     '[APPMODEL-MANAGED-LAUNCH] source=DesktopLaunch appId=com.guidexos.apps.managed.settingscenter selector=00000005 image=/system/apps/GXOSAPP.ELF metadata=valid' + "`n" +
     '[C188R12R1-NATIVE] stage=before-managed-entry selector=00000005 generation=00000002 call=00000001 result=BEGIN')
 Assert-C188R12R1 'native entry without managed main entry remains unready' (
@@ -149,6 +172,14 @@ $verifiedPointerEvidence = Test-C188R12R1PointerOnSettingsButton $verifiedPointe
 Assert-C188R12R1 'the observed cursor must be inside the source-defined Settings button inset' (
     $verifiedPointerEvidence.accepted -and
     $verifiedPointerEvidence.reason -eq 'observed-pointer-inside-settings-button-safe-inset')
+$popupTarget = Get-C188R12R1NotesSettingsClickTarget (
+    $notesTrace + "`n[C102-MANAGED-OUTPUT] C135-POPUP-OPEN invoke=Options capture=PASS popup=open result=PASS") $repo 1280 800
+Assert-C188R12R1 'a pre-existing popup blocks pointer placement and the click' (
+    -not $popupTarget.accepted -and $popupTarget.reason -eq 'notes-popup-or-modal-already-open')
+$modalTarget = Get-C188R12R1NotesSettingsClickTarget (
+    $notesTrace + "`n[C102-MANAGED-OUTPUT] C151-DIALOG open=PASS modal=active member-registration=3 popup=closed capture=none drag=none result=PASS") $repo 1280 800
+Assert-C188R12R1 'a pre-existing modal blocks pointer placement and the click' (
+    -not $modalTarget.accepted -and $modalTarget.reason -eq 'notes-popup-or-modal-already-open')
 
 $oneClickQmp = @'
 request={"execute":"input-send-event","arguments":{"events":[{"type":"rel","data":{"axis":"x","value":1}}]}}
@@ -157,17 +188,25 @@ request={"execute":"input-send-event","arguments":{"events":[{"type":"btn","data
 '@
 $clickEvidence = Test-C188R12R1SingleClickQmpEvidence $oneClickQmp
 Assert-C188R12R1 'one left-click QMP sequence with no key input is accepted' $clickEvidence.accepted
-$misdirectedInputEvidence = Get-C188R12R1RunnerInputEvidence (
-    $notesTrace + "`n[C102-MANAGED-OUTPUT] C135-POPUP-OPEN invoke=Options capture=PASS popup=open result=PASS") `
-    $oneClickQmp $true $misplacedPointerEvidence
+$misdirectedTrace = $notesTrace.Replace(
+    '[C112-ACTION-DISPATCH] selector=00000004 action=00000018 managedReturn=00000000 result=PASS',
+    '[C112-ACTION-DISPATCH] selector=00000004 action=00000017 managedReturn=FFFFFFFE result=FAIL') +
+    "`n[C102-MANAGED-OUTPUT] C135-POPUP-OPEN invoke=Options capture=PASS popup=open result=PASS"
+$misdirectedInputEvidence = Get-C188R12R1RunnerInputEvidence `
+    $misdirectedTrace $oneClickQmp $true $verifiedPointerEvidence
 Assert-C188R12R1 'an unrelated Notes popup localizes the failure to runner input target delivery' (
     $misdirectedInputEvidence.earliestMissingBoundary -eq 'runner-input-target-delivery' -and
-    $misdirectedInputEvidence.unrelatedNotesMenuObserved)
+    $misdirectedInputEvidence.unrelatedNotesMenuObserved -and
+    $misdirectedInputEvidence.notesActionId -eq '00000017' -and
+    -not $misdirectedInputEvidence.notesSettingsActionSucceeded)
 $doubleClickEvidence = Test-C188R12R1SingleClickQmpEvidence ($oneClickQmp + $oneClickQmp)
 Assert-C188R12R1 'duplicate click sequence is rejected' (-not $doubleClickEvidence.accepted)
 $keyEvidence = Test-C188R12R1SingleClickQmpEvidence ($oneClickQmp +
     'request={"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"a"}}}]}}')
 Assert-C188R12R1 'character or key injection invalidates the handoff run' (-not $keyEvidence.accepted)
+$extraButtonEvidence = Test-C188R12R1SingleClickQmpEvidence ($oneClickQmp +
+    'request={"execute":"input-send-event","arguments":{"events":[{"type":"btn","data":{"button":"right","down":true}}]}}')
+Assert-C188R12R1 'any extra mouse-button event invalidates the single-click run' (-not $extraButtonEvidence.accepted)
 
 $runnerSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'run-c188r12r1-settings-handoff.ps1') -Raw
 Assert-C188R12R1 'runner contains one non-retryable Settings click site' (
@@ -179,7 +218,8 @@ Assert-C188R12R1 'runner has no key or application-launch input path' (
 Assert-C188R12R1 'runner verifies the source button position and clicks without moving the pointer' (
     $runnerSource.Contains('Invoke-C188R12R1PointerProbe') -and
     $runnerSource.Contains("Invoke-C188R12R1Control 'click-settings-once' @('click-current')") -and
-    $runnerSource.Contains('Test-C188R12R1PointerOnSettingsButton'))
+    $runnerSource.Contains('Test-C188R12R1PointerOnSettingsButton') -and
+    $runnerSource.Contains('if (-not [bool]$clickTarget.accepted)'))
 $clickCommandIndex = $runnerSource.IndexOf("Invoke-C188R12R1Control 'click-settings-once' @('click-current')")
 $placementProbeIndex = $runnerSource.IndexOf("Invoke-C188R12R1PointerProbe 'settings-pointer-probe-001'")
 $readinessWaitIndex = $runnerSource.IndexOf('$settingsDeadline = (Get-Date).AddSeconds(30)')
@@ -196,8 +236,23 @@ Assert-C188R12R1 'QMP relative steps are paced and the verified click path sends
         '(?s)def click_current\(qmp: Qmp\):(?<body>.*?)\n\ndef key\(') -and
     -not ([regex]::Match($qmpControlSource,
         '(?s)def click_current\(qmp: Qmp\):(?<body>.*?)\n\ndef key\(').Groups['body'].Value.Contains('"type": "rel"')))
+$ps2MouseSource = Get-Content -LiteralPath (Join-Path $repo 'kernel/core/ps2mouse.cpp') -Raw
+$cursorFinderSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'find-c188r12r1-cursor.py') -Raw
+$cursorDesktopSource = Get-Content -LiteralPath (Join-Path $repo 'kernel/core/desktop.cpp') -Raw
+Assert-C188R12R1 'QMP deltas use paced relative counts capped below the PS/2 packet clamp' (
+    [regex]::IsMatch($qmpControlSource,
+        '(?s)for axis, distance in \(\("x", dx\), \("y", dy\)\):\s+while distance:\s+step = .*?min\(abs\(distance\), 40\).*?"type": "rel"') -and
+    $qmpControlSource.Contains('time.sleep(0.04)'))
+Assert-C188R12R1 'PS/2 relative counts map one-for-one into clamped screen pixels with Y inverted' (
+    [regex]::IsMatch($ps2MouseSource,
+        '(?s)int32_t dx = static_cast<int32_t>\(s_packet\[1\]\);\s+int32_t dy = static_cast<int32_t>\(s_packet\[2\]\);.*?dy = -dy;.*?s_mouseX = clamp\(s_mouseX \+ dx, 0, s_screenW - 1\);\s+s_mouseY = clamp\(s_mouseY \+ dy, 0, s_screenH - 1\);'))
+Assert-C188R12R1 'screenshot cursor coordinates and the kernel mouse hotspot share the bitmap origin' (
+    $cursorFinderSource.Contains('"x": unique[0] if unique else None') -and
+    $cursorFinderSource.Contains('"y": unique[1] if unique else None') -and
+    [regex]::IsMatch($cursorDesktopSource,
+        '(?s)void draw_cursor\(int32_t mx, int32_t my\).*?int32_t px = mx \+ col;\s+int32_t py = my \+ row;'))
 $compositorSource = Get-Content -LiteralPath (Join-Path $repo 'kernel/core/kernel_compositor.cpp') -Raw
-$desktopSource = Get-Content -LiteralPath (Join-Path $repo 'kernel/core/desktop.cpp') -Raw
+$desktopSource = $cursorDesktopSource
 Assert-C188R12R1 'compositor and presentation tracing emit once per Settings window' (
     $compositorSource.Contains('s_c188r12r1SettingsLoggedComposedWindowId != win->id') -and
     $desktopSource.Contains('settingsWindow != lastPresentedSettingsWindow'))

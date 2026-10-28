@@ -293,6 +293,7 @@ try {
                 $beforeClickCheck = Test-C188R12R1SingleClickQmpEvidence $qmpBeforeClick
                 if ($beforeClickCheck.leftButtonDownCount -ne 0 -or
                     $beforeClickCheck.leftButtonUpCount -ne 0 -or
+                    $beforeClickCheck.buttonEventCount -ne 0 -or
                     $beforeClickCheck.keyEventCount -ne 0) {
                     throw 'QMP log already contains a button or key event before the single Settings action.'
                 }
@@ -351,6 +352,7 @@ try {
                             $failureText = 'QAC ownership was not current and exclusive at the verified Settings click gate.'
                         } elseif ($beforeClickCheck.leftButtonDownCount -ne 0 -or
                             $beforeClickCheck.leftButtonUpCount -ne 0 -or
+                            $beforeClickCheck.buttonEventCount -ne 0 -or
                             $beforeClickCheck.keyEventCount -ne 0) {
                             throw 'QMP log contains a prior button or key event before the verified Settings click.'
                         } else {
@@ -482,11 +484,14 @@ $qacExecutionQualified = $null -ne $baseManifest -and
     [bool]$baseManifest.qacOwnershipProofAccepted -and $qacReleaseVerified -and
     -not $ownershipDegraded
 $outcome = if ($runtimeRegressionProven) { 'E_MANAGED_RUNTIME_REGRESSION' }
-    elseif (-not $qacExecutionQualified -or
-        $earliestBoundary -in @('runner-input-target-delivery','runner-pointer-position-unverified',
-            'runner-input-sequence-invalid','runner-input-not-attempted')) { 'D_QAC_OR_EXECUTION_BLOCKED' }
+    elseif (-not $qacExecutionQualified) { 'D_QAC_OR_EXECUTION_BLOCKED' }
+    elseif (-not [bool]$clickEvidence.accepted -or
+        -not [bool]$runnerInputEvidence.pointerTargetVerified -or
+        -not [bool]$runnerInputEvidence.notesSettingsActionInvoked) { 'C_POINTER_ROUTE_UNQUALIFIED' }
+    elseif (-not [bool]$runnerInputEvidence.notesSettingsActionSucceeded) { 'SETTINGS_ACTION_HANDOFF_DEFECT_LOCALIZED' }
+    elseif (-not [bool]$settingsEvidence.appModelLaunch) { 'SETTINGS_ACTION_HANDOFF_DEFECT_LOCALIZED' }
     elseif ([bool]$settingsEvidence.accepted -and [bool]$clickEvidence.accepted) { 'A_SETTINGS_HANDOFF_ACCEPTED' }
-    else { 'C_HANDOFF_BOUNDARY_LOCALIZED' }
+    else { 'B_SETTINGS_SURFACE_DEFECT_LOCALIZED' }
 
 $screenshotComparison = $null
 $beforePpm = Join-Path $bootRoot 'before-settings.ppm'
@@ -521,6 +526,10 @@ $finalEvidence = [ordered]@{
     qacAdmissionConfirmed=if ($null -ne $baseManifest) { [bool]$baseManifest.qacAdmissionConfirmed } else { $false }
     qacOwnershipProofAccepted=if ($null -ne $baseManifest) { [bool]$baseManifest.qacOwnershipProofAccepted } else { $false }
     settingsEvidence=$settingsEvidence
+    settingsActionId=[string]$settingsEvidence.notesActionId
+    settingsActionInvoked=[bool]$settingsEvidence.notesSettingsActionInvoked
+    settingsActionSucceeded=[bool]$settingsEvidence.notesSettingsActionSucceeded
+    settingsAppModelLaunchRequested=[bool]$settingsEvidence.appModelLaunch
     settingsRegistryEntry=[bool]$settingsEvidence.settingsRegistryEntry
     settingsRegistryReturn=[bool]$settingsEvidence.settingsRegistryReturn
     settingsRegistryReturnValid=[bool]$settingsEvidence.settingsRegistryReturnValid

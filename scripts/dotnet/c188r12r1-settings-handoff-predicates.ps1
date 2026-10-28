@@ -1,4 +1,14 @@
 function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
+    $notesActionDispatches = [regex]::Matches($SerialText,
+        '(?m)^\[C112-ACTION-DISPATCH\] selector=00000004 action=(?<action>[0-9A-Fa-f]{8}) managedReturn=(?<managedReturn>[0-9A-Fa-f]{8}) result=(?<result>PASS|FAIL)\r?$')
+    $settingsActionDispatches = @($notesActionDispatches | Where-Object {
+        $_.Groups['action'].Value -eq '00000018'
+    })
+    $notesSettingsActionInvoked = $notesActionDispatches.Count -eq 1 -and
+        $settingsActionDispatches.Count -eq 1
+    $notesSettingsActionSucceeded = $notesSettingsActionInvoked -and
+        $settingsActionDispatches[0].Groups['managedReturn'].Value -eq '00000000' -and
+        $settingsActionDispatches[0].Groups['result'].Value -eq 'PASS'
     $appModelLaunch = [regex]::Match($SerialText,
         '(?m)^\[APPMODEL-MANAGED-LAUNCH\] source=DesktopLaunch appId=com\.guidexos\.apps\.managed\.settingscenter selector=00000005 image=/system/apps/GXOSAPP\.ELF metadata=valid\r?$')
     $nativeEntry = [regex]::Match($SerialText,
@@ -110,7 +120,11 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
 
     $entryCorrelated = $nativeEntry.Success -and $managedMain.Success -and
         $generation -eq $managedGenerationHex
-    $settingsCorrelated = $entryCorrelated -and $dispatch.Success -and
+    $settingsActionPrecedesLaunch = $notesSettingsActionSucceeded -and
+        $appModelLaunch.Success -and
+        $settingsActionDispatches[0].Index -lt $appModelLaunch.Index
+    $settingsCorrelated = $settingsActionPrecedesLaunch -and
+        $entryCorrelated -and $dispatch.Success -and
         $appLaunch.Success -and $settingsLaunch.Success -and
         $settingsGenerationHex -eq $generation
     $surfaceCorrelated = $settingsCorrelated -and $beforeSurface.Success -and
@@ -147,7 +161,10 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
         $appModelReturn.Success -and $registryEntry.Success -and
         $settingsRegistryPreserved
 
-    $boundary = if (-not $appModelLaunch.Success) { 'appmodel-launch-request' }
+    $boundary = if (-not $notesSettingsActionInvoked) { 'notes-settings-action' }
+        elseif (-not $notesSettingsActionSucceeded) { 'settings-action-return' }
+        elseif (-not $appModelLaunch.Success -or
+            $settingsActionDispatches[0].Index -ge $appModelLaunch.Index) { 'appmodel-launch-request' }
         elseif (-not $nativeEntry.Success) { 'native-managed-entry' }
         elseif (-not $managedMain.Success) { 'managed-main-entry' }
         elseif (-not $dispatch.Success) { 'managed-dispatch' }
@@ -170,6 +187,12 @@ function Get-C188R12R1SettingsHandoffEvidence([string]$SerialText) {
         earliestMissingBoundary=$boundary
         generation=$generation
         window=if ($surface.Success) { $surface.Groups['window'].Value.ToUpperInvariant() } else { '' }
+        notesActionDispatchCount=$notesActionDispatches.Count
+        notesSettingsActionInvoked=[bool]$notesSettingsActionInvoked
+        notesSettingsActionSucceeded=[bool]$notesSettingsActionSucceeded
+        notesActionId=if ($notesActionDispatches.Count -eq 1) { $notesActionDispatches[0].Groups['action'].Value.ToUpperInvariant() } else { '' }
+        notesActionManagedReturn=if ($notesActionDispatches.Count -eq 1) { $notesActionDispatches[0].Groups['managedReturn'].Value.ToUpperInvariant() } else { '' }
+        notesActionResult=if ($notesActionDispatches.Count -eq 1) { $notesActionDispatches[0].Groups['result'].Value } else { '' }
         appModelLaunch=[bool]$appModelLaunch.Success
         nativeManagedEntry=[bool]$nativeEntry.Success
         managedMainEntry=[bool]$managedMain.Success
@@ -209,12 +232,15 @@ function Test-C188R12R1SingleClickQmpEvidence([string]$QmpControlText) {
         '"type":"btn","data":\{"button":"left","down":true\}').Count
     $upCount = [regex]::Matches($QmpControlText,
         '"type":"btn","data":\{"button":"left","down":false\}').Count
+    $buttonEventCount = [regex]::Matches($QmpControlText, '"type":"btn"').Count
     $keyCount = [regex]::Matches($QmpControlText,
         '"type":"key"').Count
     return [ordered]@{
-        accepted=($downCount -eq 1 -and $upCount -eq 1 -and $keyCount -eq 0)
+        accepted=($downCount -eq 1 -and $upCount -eq 1 -and
+            $buttonEventCount -eq 2 -and $keyCount -eq 0)
         leftButtonDownCount=$downCount
         leftButtonUpCount=$upCount
+        buttonEventCount=$buttonEventCount
         keyEventCount=$keyCount
     }
 }
@@ -248,19 +274,25 @@ function Get-C188R12R1RunnerInputEvidence(
     $click = Test-C188R12R1SingleClickQmpEvidence $QmpControlText
     $settingsRequest = [regex]::IsMatch($SerialText,
         '(?m)^\[APPMODEL-MANAGED-LAUNCH\] source=DesktopLaunch appId=com\.guidexos\.apps\.managed\.settingscenter selector=00000005 image=/system/apps/GXOSAPP\.ELF metadata=valid\r?$')
+    $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $SerialText
     $unrelatedMenu = [regex]::IsMatch($SerialText,
         '(?m)^\[C102-MANAGED-OUTPUT\] C135-POPUP-OPEN invoke=(?:Options|File) capture=PASS popup=open result=PASS\r?$')
     $targetVerified = $null -ne $PointerTargetEvidence -and [bool]$PointerTargetEvidence.accepted
     $boundary = if (-not $ClickAttempted) { 'runner-input-not-attempted' }
         elseif (-not [bool]$click.accepted) { 'runner-input-sequence-invalid' }
-        elseif ($unrelatedMenu) { 'runner-input-target-delivery' }
         elseif (-not $targetVerified) { 'runner-pointer-position-unverified' }
+        elseif ($unrelatedMenu -or -not [bool]$settingsEvidence.notesSettingsActionInvoked) { 'runner-input-target-delivery' }
+        elseif (-not [bool]$settingsEvidence.notesSettingsActionSucceeded) { 'settings-action-return-failure' }
         elseif ($settingsRequest) { 'settings-appmodel-request-observed' }
         else { 'appmodel-launch-request' }
     return [ordered]@{
         earliestMissingBoundary=$boundary
         clickSequenceValid=[bool]$click.accepted
         pointerTargetVerified=$targetVerified
+        notesActionDispatchCount=[int]$settingsEvidence.notesActionDispatchCount
+        notesSettingsActionInvoked=[bool]$settingsEvidence.notesSettingsActionInvoked
+        notesSettingsActionSucceeded=[bool]$settingsEvidence.notesSettingsActionSucceeded
+        notesActionId=[string]$settingsEvidence.notesActionId
         settingsAppModelRequestObserved=$settingsRequest
         unrelatedNotesMenuObserved=$unrelatedMenu
         click=$click
@@ -270,6 +302,12 @@ function Get-C188R12R1RunnerInputEvidence(
 function Get-C188R12R1NotesSettingsClickTarget(
     [string]$SerialText, [string]$RepoRoot, [int]$ScreenWidth,
     [int]$ScreenHeight) {
+    $unexpectedOverlay = [regex]::IsMatch($SerialText,
+        '(?m)^(?:\[C102-MANAGED-OUTPUT\] )?\[?C(?:135-POPUP-OPEN|136-CONTEXT-OPEN) .*popup=open result=PASS\r?$|^(?:\[C102-MANAGED-OUTPUT\] )?\[?C151-DIALOG open=PASS modal=active .*result=PASS\r?$')
+    if ($unexpectedOverlay) {
+        return [ordered]@{accepted=$false;reason='notes-popup-or-modal-already-open';x=0;y=0}
+    }
+
     $notesSource = Get-Content -LiteralPath (Join-Path $RepoRoot 'samples/managed/HostLogProof/Applications/ManagedNotes.cs') -Raw
     $layoutSource = Get-Content -LiteralPath (Join-Path $RepoRoot 'samples/managed/HostLogProof/Applications/ManagedNotesC175.cs') -Raw
     $resizeSource = Get-Content -LiteralPath (Join-Path $RepoRoot 'samples/managed/HostLogProof/GuideXos/GuideXosManagedWindowResizeC174.cs') -Raw
