@@ -8,7 +8,8 @@ param(
     [Parameter()][switch]$NotesInputRouting,
     [Parameter()][switch]$RegistryInputReentry,
     [Parameter()][switch]$ManagedStateReentry,
-    [Parameter()][switch]$ManagedStateProvenance
+    [Parameter()][switch]$ManagedStateProvenance,
+    [Parameter()][switch]$LifetimeStartAttribution
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -26,8 +27,9 @@ if ($NotesInputRouting) { $selectedPhaseCount++ }
 if ($RegistryInputReentry) { $selectedPhaseCount++ }
 if ($ManagedStateReentry) { $selectedPhaseCount++ }
 if ($ManagedStateProvenance) { $selectedPhaseCount++ }
+if ($LifetimeStartAttribution) { $selectedPhaseCount++ }
 if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($RegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRootName = if ($LifetimeStartAttribution) { 'out/dotnet/c188r12r3-lifetime-start-attribution' } elseif ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($RegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $build = [System.IO.Path]::GetFullPath($BuildRoot)
 $relative = [System.IO.Path]::GetRelativePath($phaseRoot, $build)
@@ -133,11 +135,14 @@ if ($ManagedStateReentry) {
     $arguments.C188R9RegistryInputReentry = $true
     $arguments.C188R10ManagedStateReentry = $true
 }
-if ($ManagedStateProvenance) {
+if ($ManagedStateProvenance -or $LifetimeStartAttribution) {
     $arguments.C188R7NotesProofAuthorization = $true
     $arguments.C188R8NotesInputRouting = $true
     $arguments.C188R9RegistryInputReentry = $true
     $arguments.C188R11ManagedStateProvenance = $true
+}
+if ($LifetimeStartAttribution) {
+    $arguments.C188R12R3LifetimeStartAttribution = $true
 }
 $logPath = Join-Path $build 'nativeaot-build.log'
 $output = ''
@@ -157,6 +162,7 @@ $verify = Join-Path $PSScriptRoot 'verify-c188-nativeaot-artifacts.ps1'
 if ($RegistryInputReentry) { $verifyArguments.NotesRegistryInputReentry = $true }
 if ($ManagedStateReentry) { $verifyArguments.ManagedStateReentry = $true }
 if ($ManagedStateProvenance) { $verifyArguments.ManagedStateProvenance = $true }
+if ($LifetimeStartAttribution) { $verifyArguments.LifetimeStartAttribution = $true }
 & $verify @verifyArguments
 if ($LASTEXITCODE -ne 0) { throw "C188 NativeAOT artifact verification failed with exit code $LASTEXITCODE." }
 $runtimePackManifestPath = Join-Path $runtimePackOutput 'runtime-pack.manifest.json'
@@ -187,8 +193,26 @@ $manifest = [ordered]@{
     registryInputReentry=[bool]$RegistryInputReentry
     managedStateReentry=[bool]$ManagedStateReentry
     managedStateProvenance=[bool]$ManagedStateProvenance
+    lifetimeStartAttribution=[bool]$LifetimeStartAttribution
     productionApplicationSelectorsPreserved=@(4,5,6,7,8)
     candidateSelector=9; candidateIdentity='com.guidexos.apps.managed.counterapp'
+}
+$manifest['managedStateProvenance'] = [bool]($ManagedStateProvenance -or $LifetimeStartAttribution)
+if ($LifetimeStartAttribution) {
+    $candidateElfText = [System.Text.Encoding]::ASCII.GetString(
+        [System.IO.File]::ReadAllBytes($kernelElf))
+    foreach ($requiredMarker in @(
+        'C188R12R3_LIFETIME invocation=',
+        'factory-enter',
+        'factory-return',
+        'resident-register-enter',
+        'resident-register-return'
+    )) {
+        if (-not $candidateElfText.Contains($requiredMarker)) {
+            throw "C188R12R3 NativeAOT candidate is missing internal lifetime marker: $requiredMarker"
+        }
+    }
+    $manifest['lifetimeMarkerFamily'] = 'C188R12R3_LIFETIME'
 }
 $manifestPath = Join-Path $build 'c188-nativeaot-build.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8

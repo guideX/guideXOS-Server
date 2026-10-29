@@ -25,7 +25,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r6-notes-postrender')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $phaseRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
@@ -76,14 +77,21 @@ $isC188R10Boot = $Scenario -eq 'registry-input-reentry' -and
     $bootRoot.StartsWith($c188r10Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase)
 $c188r11Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance'))
-$isC188R11Boot = ($Scenario -eq 'managed-state-provenance' -or
-    $Scenario -eq 'settings-handoff-diagnostic') -and
-    $bootRoot.StartsWith($c188r11Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+$c188r12r3Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution'))
+$isC188R12R3Boot = $Scenario -eq 'settings-handoff-diagnostic' -and
+    $bootRoot.StartsWith($c188r12r3Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase)
+$isC188R11Boot = $isC188R12R3Boot -or (
+    ($Scenario -eq 'managed-state-provenance' -or $Scenario -eq 'settings-handoff-diagnostic') -and
+    $bootRoot.StartsWith($c188r11Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+        [System.StringComparison]::OrdinalIgnoreCase))
 if ($isC188R11Boot) {
     . (Join-Path $PSScriptRoot 'c188r11-runner-predicates.ps1')
     . (Join-Path $PSScriptRoot 'c188r11r2-runner-predicates.ps1')
     . (Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1')
+}
+if ($isC188R12R3Boot) {
+    . (Join-Path $PSScriptRoot 'c188r12r3-lifetime-predicates.ps1')
 }
 if ($EnableGdbStub -and -not $isC188R11Boot) {
     throw 'The GDB stub is restricted to the QAC-owned C188R11 diagnostic scenario.'
@@ -522,6 +530,7 @@ $manifest = [ordered]@{
     persistentHeapPreserveMarkers=([regex]::Matches($serialText,'(?m)^\[NATIVEAOT-HEAP\] action=preserve count=[A-Fa-f0-9]{16} resetCount=0000000000000001 base=[A-Fa-f0-9]{16} allocation=[A-Fa-f0-9]{16} reason=resident-managed-thread\r?$')).Count
     r11ManagedSequenceOrder=if ($isC188R11Boot) { Test-C188R11ManagedSequenceOrder $serialText } else { $false }
     r11ManagedNativeBoundaryCorrelation=if ($isC188R11Boot) { Test-C188R11ManagedBoundaryCorrelation $serialText } else { $false }
+    r12r3LifetimeEvidence=if ($isC188R12R3Boot) { Get-C188R12R3LifetimeEvidence $serialText } else { $null }
     r11CheckpointBAvailable=$false
     r11CheckpointBLimitation='No safe read-only managed snapshot request exists after main-loop readiness; checkpoint A is the latest pre-input managed observation.'
     screenshotPath=(Join-Path $bootRoot 'desktop-ready.ppm')

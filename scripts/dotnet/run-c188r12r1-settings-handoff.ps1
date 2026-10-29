@@ -10,16 +10,26 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'C188R12R1 Settings handoff runner requires PowerShell Core.'
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r11-managed-state-provenance'))
+$phaseRoots = @(
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r11-managed-state-provenance')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r3-lifetime-start-attribution')))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
-foreach ($candidatePath in @($candidate,$bootRoot)) {
-    $relative = [System.IO.Path]::GetRelativePath($phaseRoot,$candidatePath)
-    if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-        [System.IO.Path]::IsPathRooted($relative)) {
-        throw "C188R12R1 output must be a unique directory below $phaseRoot."
-    }
+$candidateRootMatches = @($phaseRoots | Where-Object {
+    $relative = [System.IO.Path]::GetRelativePath($_,$candidate)
+    $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
+        -not [System.IO.Path]::IsPathRooted($relative)
+})
+$bootRootMatches = @($phaseRoots | Where-Object {
+    $relative = [System.IO.Path]::GetRelativePath($_,$bootRoot)
+    $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
+        -not [System.IO.Path]::IsPathRooted($relative)
+})
+if ($candidateRootMatches.Count -ne 1 -or $bootRootMatches.Count -ne 1 -or
+    $candidateRootMatches[0] -cne $bootRootMatches[0]) {
+    throw "C188R12R1 candidate and guest evidence must be unique sibling runs under one of: $($phaseRoots -join ', ')."
 }
+$phaseRoot = $candidateRootMatches[0]
 if (-not (Test-Path -LiteralPath $candidate -PathType Container)) { throw "Candidate root is missing: $candidate" }
 if (Test-Path -LiteralPath $bootRoot) { throw "Guest evidence root already exists: $bootRoot" }
 
@@ -29,6 +39,7 @@ $ownershipHelpers = Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1
 . $ownershipHelpers
 . (Join-Path $PSScriptRoot 'c188r12r1-settings-handoff-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r12r2r1-settings-dispatch-predicates.ps1')
+. (Join-Path $PSScriptRoot 'c188r12r3-lifetime-predicates.ps1')
 
 $candidateEsp = Join-Path $candidate 'esp'
 $stagingManifestPath = Join-Path $candidate 'ramdisk-staging.json'
@@ -108,6 +119,7 @@ $runnerStdout = ''
 $runnerStderr = ''
 $settingsEvidence = $null
 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence '' $true
+$lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence ''
 $failureText = ''
 
 function Read-C188R12R1SharedText([string]$Path) {
@@ -381,6 +393,7 @@ try {
                                 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
                                 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence `
                                     $serialText $true
+                                $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence $serialText
                                 if ([bool]$settingsEvidence.accepted) { break }
                                 if ([bool]$settingsDispatchEvidence.dispatchReturned) {
                                     if ($settingsDispatchEvidence.outcome -eq 'EXPLICIT_FAILURE') { break }
@@ -458,6 +471,7 @@ try {
 $serialText = Read-C188R12R1SharedText $serialPath
 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence $serialText $true
+$lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence $serialText
 $qmpControlText = Read-C188R12R1SharedText $qmpControlPath
 $clickEvidence = Test-C188R12R1SingleClickQmpEvidence $qmpControlText
 $runnerInputEvidence = Get-C188R12R1RunnerInputEvidence $serialText $qmpControlText `
@@ -540,6 +554,7 @@ $finalEvidence = [ordered]@{
     qacOwnershipProofAccepted=if ($null -ne $baseManifest) { [bool]$baseManifest.qacOwnershipProofAccepted } else { $false }
     settingsEvidence=$settingsEvidence
     settingsDispatchEvidence=$settingsDispatchEvidence
+    lifetimeStartEvidence=$lifetimeStartEvidence
     settingsActionId=[string]$settingsEvidence.notesActionId
     settingsActionInvoked=[bool]$settingsEvidence.notesSettingsActionInvoked
     settingsActionSucceeded=[bool]$settingsEvidence.notesSettingsActionSucceeded
@@ -567,6 +582,7 @@ $finalEvidencePath = Join-Path $bootRoot 'r12r2r1-settings-dispatch-evidence.jso
 $finalEvidence | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $finalEvidencePath -Encoding utf8
 Write-Output "C188R12R1_SETTINGS_HANDOFF=$outcome BOUNDARY=$earliestBoundary CLICK_ATTEMPTED=$clickAttempted QAC_RELEASE=$qacReleaseVerified"
 Write-Output "C188R12R2R1_SETTINGS_DISPATCH=$($settingsDispatchEvidence.outcome) LAST_STAGE=$($settingsDispatchEvidence.lastObservedStage) NEXT=$($settingsDispatchEvidence.firstUnobservedBoundary)"
+Write-Output "C188R12R3_LIFETIME=$($lifetimeStartEvidence.outcome) NEXT=$($lifetimeStartEvidence.earliestIncompleteStage) INVOCATION=$($lifetimeStartEvidence.invocation)"
 Write-Output "C188R12R2R1_SETTINGS_EVIDENCE=$finalEvidencePath"
 if ($null -ne $qacRunner -and -not $qacRunner.HasExited) {
     throw "C188R12R1 evidence is saved but its bounded QAC runner is still active: $bootRoot"

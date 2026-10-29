@@ -16,7 +16,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r7-notes-proof-authorization')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')))
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
@@ -116,7 +117,8 @@ foreach ($development in @(
         throw "Proof-disabled production NativeAOT artifacts contain development-only identity material: $development"
     }
 }
-if ($mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-') -or
+if ($mapText.Contains('C188R12R3_LIFETIME') -or $elfText.Contains('C188R12R3_LIFETIME') -or
+    $mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-') -or
     $mapText.Contains('C188R4-') -or $elfText.Contains('C188R4-') -or
     $mapText.Contains('C188R6-') -or $elfText.Contains('C188R6-') -or
     $mapText.Contains('C188R7-') -or $elfText.Contains('C188R7-') -or

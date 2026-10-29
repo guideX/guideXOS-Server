@@ -7,10 +7,15 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance/hosted/state-provenance'
 }
 $root = [System.IO.Path]::GetFullPath($OutputRoot)
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance'))
-$relative = [System.IO.Path]::GetRelativePath($phaseRoot, $root)
-if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-    [System.IO.Path]::IsPathRooted($relative)) { throw "OutputRoot must be below $phaseRoot." }
+$phaseRoots = @(
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')))
+$allowedRoot = @($phaseRoots | Where-Object {
+    $relative = [System.IO.Path]::GetRelativePath($_, $root)
+    $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
+        -not [System.IO.Path]::IsPathRooted($relative)
+} | Select-Object -First 1)
+if ($allowedRoot.Count -eq 0) { throw "OutputRoot must be below one of: $($phaseRoots -join ', ')." }
 if (Test-Path -LiteralPath $root) { throw "Refusing to overwrite C188R11 hosted evidence: $root" }
 $null = New-Item -ItemType Directory -Path $root
 $project = Join-Path $repo 'samples/host/ManagedApplicationRegistryC188R11/ManagedApplicationRegistryC188R11.csproj'

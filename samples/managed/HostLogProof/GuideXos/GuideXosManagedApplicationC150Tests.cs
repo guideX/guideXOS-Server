@@ -12,6 +12,23 @@ internal sealed class GuideXosManagedApplicationLifetime
     internal const int Capacity = 5;
     private readonly Entry[] _entries = new Entry[Capacity];
     private uint _generation;
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+    private uint _c188r12r3TracedStarts;
+    internal uint C188R12R3Generation => _generation;
+    internal uint C188R12R3ResidentMask
+    {
+        get
+        {
+            uint mask = 0u;
+            for (int index = 0; index < _entries.Length; index++)
+            {
+                if (_entries[index].Application != null)
+                    mask |= 1u << index;
+            }
+            return mask;
+        }
+    }
+#endif
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
     private uint _c188r11InitializationEpoch;
     private uint _c188r11ClearEvents;
@@ -101,12 +118,78 @@ internal sealed class GuideXosManagedApplicationLifetime
         out GuideXosApplication application,
         out uint generation)
     {
+        return TryStartCore(descriptor, requestedGeneration, out application,
+            out generation, null, 0u, default);
+    }
+
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+    internal bool TryStartDiagnostic(
+        GuideXosApplicationDescriptor descriptor,
+        uint requestedGeneration,
+        out GuideXosApplication application,
+        out uint generation,
+        GuideXosHost diagnosticHost,
+        uint invocationId,
+        ReadOnlySpan<byte> applicationIdentity)
+    {
+        // Keep this proof-only trace bounded per lifetime manager. The
+        // production path uses TryStart and never emits these records.
+        if (_c188r12r3TracedStarts >= 8u)
+        {
+            return TryStartCore(descriptor, requestedGeneration,
+                out application, out generation, null, 0u, default);
+        }
+        _c188r12r3TracedStarts++;
+        if (invocationId == 0u)
+        {
+            invocationId = requestedGeneration != 0u
+                ? requestedGeneration
+                : _generation == uint.MaxValue ? uint.MaxValue : _generation + 1u;
+        }
+        if (applicationIdentity.IsEmpty)
+            applicationIdentity = descriptor.Name;
+        return TryStartCore(descriptor, requestedGeneration, out application,
+            out generation, diagnosticHost, invocationId, applicationIdentity);
+    }
+#endif
+
+    private bool TryStartCore(
+        GuideXosApplicationDescriptor descriptor,
+        uint requestedGeneration,
+        out GuideXosApplication application,
+        out uint generation,
+        GuideXosHost diagnosticHost,
+        uint invocationId,
+        ReadOnlySpan<byte> applicationIdentity)
+    {
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+        EmitC188R12R3(diagnosticHost, invocationId, "enter"u8,
+            descriptor.Selector, applicationIdentity, -1, "preflight"u8,
+            requestedGeneration);
+#endif
         int entryIndex = FindEntry(descriptor.Selector);
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+        EmitC188R12R3(diagnosticHost, invocationId, "existing-resident"u8,
+            descriptor.Selector, applicationIdentity, entryIndex,
+            entryIndex >= 0 ? "found"u8 : "miss"u8, requestedGeneration);
+#endif
         if (entryIndex < 0) entryIndex = FindFreeEntry();
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+        EmitC188R12R3(diagnosticHost, invocationId, "capacity-check"u8,
+            descriptor.Selector, applicationIdentity,
+            entryIndex >= 0 ? 0 : 1,
+            entryIndex >= 0 ? "available"u8 : "full"u8,
+            requestedGeneration);
+#endif
         if (entryIndex < 0)
         {
             application = null;
             generation = _generation;
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+            EmitC188R12R3(diagnosticHost, invocationId, "exit-failure"u8,
+                descriptor.Selector, applicationIdentity, 1, "capacity"u8,
+                generation);
+#endif
             return false;
         }
 
@@ -114,14 +197,72 @@ internal sealed class GuideXosManagedApplicationLifetime
         {
             application = null;
             generation = _generation;
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+            EmitC188R12R3(diagnosticHost, invocationId, "generation-check"u8,
+                descriptor.Selector, applicationIdentity, 2, "overflow"u8,
+                generation);
+            EmitC188R12R3(diagnosticHost, invocationId, "exit-failure"u8,
+                descriptor.Selector, applicationIdentity, 2, "generation"u8,
+                generation);
+#endif
             return false;
         }
 
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+        EmitC188R12R3(diagnosticHost, invocationId, "generation-check"u8,
+            descriptor.Selector, applicationIdentity, 0, "valid"u8,
+            requestedGeneration);
+        Func<GuideXosApplication> factory = descriptor.Factory;
+        EmitC188R12R3(diagnosticHost, invocationId, "factory-resolve"u8,
+            descriptor.Selector, applicationIdentity,
+            factory == null ? 3 : 0,
+            factory == null ? "missing"u8 : "resolved"u8,
+            requestedGeneration);
+        if (factory == null)
+        {
+            application = null;
+            generation = requestedGeneration == 0u
+                ? _generation : requestedGeneration;
+            EmitC188R12R3(diagnosticHost, invocationId, "exit-failure"u8,
+                descriptor.Selector, applicationIdentity, 3, "factory-missing"u8,
+                generation);
+            return false;
+        }
+
+        EmitC188R12R3(diagnosticHost, invocationId, "factory-enter"u8,
+            descriptor.Selector, applicationIdentity, -1, "invoking"u8,
+            requestedGeneration);
+        try
+        {
+            application = factory();
+        }
+        catch (Exception)
+        {
+            EmitC188R12R3(diagnosticHost, invocationId, "factory-throw"u8,
+                descriptor.Selector, applicationIdentity, -1, "exception"u8,
+                requestedGeneration);
+            EmitC188R12R3(diagnosticHost, invocationId, "exit-failure"u8,
+                descriptor.Selector, applicationIdentity, -1, "factory-exception"u8,
+                requestedGeneration);
+            throw;
+        }
+        EmitC188R12R3(diagnosticHost, invocationId, "factory-return"u8,
+            descriptor.Selector, applicationIdentity,
+            application == null ? 4 : 0,
+            application == null ? "null"u8 : "created"u8,
+            requestedGeneration);
+#else
         application = descriptor.Factory?.Invoke();
+#endif
         if (application == null)
         {
             generation = requestedGeneration == 0u
                 ? _generation : requestedGeneration;
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+            EmitC188R12R3(diagnosticHost, invocationId, "exit-failure"u8,
+                descriptor.Selector, applicationIdentity, 4, "factory-null"u8,
+                generation);
+#endif
             return false;
         }
 
@@ -129,13 +270,47 @@ internal sealed class GuideXosManagedApplicationLifetime
             ? _generation + 1u : requestedGeneration;
         GuideXosApplication previousApplication =
             _entries[entryIndex].Application;
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+        EmitC188R12R3(diagnosticHost, invocationId,
+            "resident-register-enter"u8, descriptor.Selector,
+            applicationIdentity, -1,
+            previousApplication == null ? "free-slot"u8 : "replacement"u8,
+            assignedGeneration);
+#endif
         if (previousApplication != null)
         {
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
             _c188r11ReplacementEvents++;
             _c188r11TeardownEvents++;
 #endif
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+            EmitC188R12R3(diagnosticHost, invocationId,
+                "teardown-enter"u8, descriptor.Selector,
+                applicationIdentity, -1, "callback"u8,
+                _entries[entryIndex].Generation);
+            try
+            {
+                previousApplication.OnTearingDown();
+            }
+            catch (Exception)
+            {
+                EmitC188R12R3(diagnosticHost, invocationId,
+                    "teardown-throw"u8, descriptor.Selector,
+                    applicationIdentity, -1, "exception"u8,
+                    _entries[entryIndex].Generation);
+                EmitC188R12R3(diagnosticHost, invocationId,
+                    "exit-failure"u8, descriptor.Selector,
+                    applicationIdentity, -1, "teardown-exception"u8,
+                    _entries[entryIndex].Generation);
+                throw;
+            }
+            EmitC188R12R3(diagnosticHost, invocationId,
+                "teardown-return"u8, descriptor.Selector,
+                applicationIdentity, 0, "complete"u8,
+                _entries[entryIndex].Generation);
+#else
             previousApplication.OnTearingDown();
+#endif
         }
         _entries[entryIndex] = default;
         _entries[entryIndex].Selector = descriptor.Selector;
@@ -144,10 +319,47 @@ internal sealed class GuideXosManagedApplicationLifetime
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
         RecordC188R11Write(1u); // Completed TryStart entry assignment.
 #endif
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+        EmitC188R12R3(diagnosticHost, invocationId,
+            "resident-register-return"u8, descriptor.Selector,
+            applicationIdentity, 0, "registered"u8, assignedGeneration);
+#endif
         if (assignedGeneration > _generation) _generation = assignedGeneration;
         generation = assignedGeneration;
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+        EmitC188R12R3(diagnosticHost, invocationId, "owner-assign"u8,
+            descriptor.Selector, applicationIdentity, 0, "generation-committed"u8,
+            generation);
+        EmitC188R12R3(diagnosticHost, invocationId, "exit-success"u8,
+            descriptor.Selector, applicationIdentity, 0, "resident"u8,
+            generation);
+#endif
         return true;
     }
+
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+    private void EmitC188R12R3(
+        GuideXosHost host,
+        uint invocationId,
+        ReadOnlySpan<byte> stage,
+        uint selector,
+        ReadOnlySpan<byte> identity,
+        int resultCode,
+        ReadOnlySpan<byte> state,
+        uint generation)
+    {
+        uint mask = 0u;
+        uint count = 0u;
+        for (int index = 0; index < _entries.Length; index++)
+        {
+            if (_entries[index].Application == null) continue;
+            count++;
+            mask |= 1u << index;
+        }
+        C188R12R3LifetimeDiagnostics.Emit(host, invocationId, stage,
+            selector, identity, count, mask, generation, resultCode, state);
+    }
+#endif
 
     public bool TryGet(uint selector, out GuideXosApplication application)
     {
@@ -227,6 +439,120 @@ internal sealed class GuideXosManagedApplicationLifetime
         for (int index = 0; index < _entries.Length; index++)
             if (_entries[index].Application == null) return index;
         return -1;
+    }
+}
+#endif
+
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+/// <summary>
+/// Bounded C188R12R3 trace formatter. Guest diagnostics use GuideXosHost's
+/// existing synchronous C102 logger; the optional capture buffer exists only
+/// in the hosted lifetime test build.
+/// </summary>
+internal static class C188R12R3LifetimeDiagnostics
+{
+#if HOSTLOGPROOF_C188R12R3_LIFETIME_TESTS
+    private const int TestLineCapacity = 128;
+    private static readonly byte[][] s_testLines = new byte[TestLineCapacity][];
+    private static int s_testLineCount;
+    private static bool s_testCaptureEnabled;
+
+    internal static int TestLineCount => s_testLineCount;
+
+    internal static ReadOnlySpan<byte> TestLine(int index) =>
+        index >= 0 && index < s_testLineCount ? s_testLines[index] : default;
+
+    internal static void BeginTestCapture()
+    {
+        Array.Clear(s_testLines);
+        s_testLineCount = 0;
+        s_testCaptureEnabled = true;
+    }
+
+    internal static void EndTestCapture() => s_testCaptureEnabled = false;
+#endif
+
+    internal static ReadOnlySpan<byte> IdentityFor(uint selector,
+        byte[] descriptorName) => selector switch
+    {
+        4u => "com.guidexos.apps.managed.notes"u8,
+        5u => "com.guidexos.apps.managed.settingscenter"u8,
+        6u => "com.guidexos.apps.managed.calculator"u8,
+        7u => "com.guidexos.apps.managed.taskmanager"u8,
+        8u => "com.guidexos.apps.managed.fileexplorer"u8,
+        _ => "other"u8,
+    };
+
+    internal static bool CaptureEnabled
+    {
+        get
+        {
+#if HOSTLOGPROOF_C188R12R3_LIFETIME_TESTS
+            return s_testCaptureEnabled;
+#else
+            return false;
+#endif
+        }
+    }
+
+    internal static void Emit(
+        GuideXosHost host,
+        uint invocationId,
+        ReadOnlySpan<byte> stage,
+        uint selector,
+        ReadOnlySpan<byte> identity,
+        uint residentCount,
+        uint residentMask,
+        uint generation,
+        int resultCode,
+        ReadOnlySpan<byte> state)
+    {
+        if (host == null && !CaptureEnabled) return;
+
+        Span<byte> line = stackalloc byte[224];
+        int position = 0;
+        if (!GuideXosText.Append(line, ref position,
+                "C188R12R3_LIFETIME invocation="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, invocationId) ||
+            !GuideXosText.Append(line, ref position, " stage="u8) ||
+            !GuideXosText.Append(line, ref position, stage) ||
+            !GuideXosText.Append(line, ref position, " selector="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, selector) ||
+            !GuideXosText.Append(line, ref position, " identity="u8) ||
+            !GuideXosText.Append(line, ref position,
+                identity.IsEmpty ? "unknown"u8 : identity) ||
+            !GuideXosText.Append(line, ref position, " count="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, residentCount) ||
+            !GuideXosText.Append(line, ref position, " mask="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, residentMask) ||
+            !GuideXosText.Append(line, ref position, " generation="u8) ||
+            !GuideXosText.AppendUnsigned(line, ref position, generation) ||
+            !GuideXosText.Append(line, ref position, " code="u8) ||
+            !AppendSigned(line, ref position, resultCode) ||
+            !GuideXosText.Append(line, ref position, " state="u8) ||
+            !GuideXosText.Append(line, ref position, state))
+        {
+            return;
+        }
+
+#if HOSTLOGPROOF_C188R12R3_LIFETIME_TESTS
+        if (s_testCaptureEnabled && s_testLineCount < TestLineCapacity)
+            s_testLines[s_testLineCount++] = line[..position].ToArray();
+#endif
+        if (host != null) _ = host.TryLog(line[..position]);
+    }
+
+    private static bool AppendSigned(Span<byte> line, ref int position,
+        int value)
+    {
+        if (value < 0)
+        {
+            long magnitude = -(long)value;
+            return GuideXosText.Append(line, ref position, "-"u8) &&
+                GuideXosText.AppendUnsigned(line, ref position,
+                    (uint)magnitude);
+        }
+        return GuideXosText.AppendUnsigned(line, ref position, (uint)value);
     }
 }
 #endif

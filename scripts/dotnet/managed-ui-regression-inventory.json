@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "inventoryId": "managed-ui-regressions-c188r11r4r2-accepted-v1",
-  "acceptedBaseline": "C188R11R4R2",
-  "expectedSuiteCount": 38,
-  "expectedCaseCount": 932,
+  "inventoryId": "managed-ui-regressions-c188r12r3-lifetime-start-v1",
+  "acceptedBaseline": "C188R12R3",
+  "expectedSuiteCount": 39,
+  "expectedCaseCount": 955,
   "suites": [
     { "name": "C133-ComboBox", "cases": 44 },
     { "name": "C134-TransientRouting", "cases": 30 },
@@ -42,6 +42,7 @@
     { "name": "C180-ResizeContract", "cases": 21 },
     { "name": "C180-ResizeContractStress", "cases": 7 },
     { "name": "C181-ManagedResidency", "cases": 24 },
-    { "name": "C181-ManagedResidencyStress", "cases": 7 }
+    { "name": "C181-ManagedResidencyStress", "cases": 7 },
+    { "name": "C188R12R3-LifetimeStart", "cases": 23 }
   ]
 }

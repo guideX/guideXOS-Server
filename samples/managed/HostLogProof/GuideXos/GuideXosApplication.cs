@@ -1136,9 +1136,17 @@ public static unsafe class GuideXosApplicationRegistry
 #if HOSTLOGPROOF_C188R10_MANAGED_STATE_REENTRY
             bool replacingResident = s_lifetime.TryGet(selector, out _);
 #endif
+#if HOSTLOGPROOF_C188R12R3_LIFETIME
+            bool lifetimeStarted = s_lifetime.TryStartDiagnostic(descriptor,
+                applicationGeneration, out application, out uint generation,
+                host, applicationGeneration,
+                C188R12R3LifetimeDiagnostics.IdentityFor(selector,
+                    descriptor.Name));
+#else
             bool lifetimeStarted = s_lifetime.TryStart(descriptor,
                 applicationGeneration, out application,
                 out uint generation);
+#endif
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
             if (traceSettingsLaunch)
                 LogC188R12R2SettingsLaunch(host, "lifetime-start"u8,

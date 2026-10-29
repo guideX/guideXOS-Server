@@ -24,6 +24,7 @@ param(
     [switch]$C188R9RegistryInputReentry,
     [switch]$C188R10ManagedStateReentry,
     [switch]$C188R11ManagedStateProvenance,
+    [switch]$C188R12R3LifetimeStartAttribution,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -531,6 +532,12 @@ try {
          $C188R6NotesPostRenderStartup)) {
         throw 'C188R11 state provenance requires an isolated ordinary C160 C188 candidate with R7/R8/R9 instrumentation and excludes the larger R3/R4/R6 marker sets.'
     }
+    if ($C188R12R3LifetimeStartAttribution -and
+        (-not $C188R11ManagedStateProvenance -or
+         -not $C188ExternalAppIdentity -or
+         $managedProjectMode -ne 'C160Composite')) {
+        throw 'C188R12R3 lifetime attribution requires the ordinary C160 composite C188 candidate and R11 provenance diagnostics.'
+    }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
@@ -580,6 +587,9 @@ try {
     }
     if ($C188R11ManagedStateProvenance) {
         $publishProperties += '-p:HostLogProofC188R11ManagedStateProvenance=true'
+    }
+    if ($C188R12R3LifetimeStartAttribution) {
+        $publishProperties += '-p:HostLogProofC188R12R3LifetimeStartAttribution=true'
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"

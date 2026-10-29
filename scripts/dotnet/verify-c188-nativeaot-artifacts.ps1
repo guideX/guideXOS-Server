@@ -10,12 +10,13 @@ param(
     [Parameter()][switch]$NotesRegistryInputReentry,
     [Parameter()][switch]$ManagedStateReentry,
     [Parameter()][switch]$ManagedStateProvenance,
+    [Parameter()][switch]$LifetimeStartAttribution,
     [Parameter()][string]$ReadElfPath = 'C:\mingw64\bin\readelf.exe'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation -or $NotesProofInvocationCorrection -or $NotesPostRenderStartup -or $NotesProofAuthorization -or $NotesInputRouting -or $NotesRegistryInputReentry -or $ManagedStateReentry -or $ManagedStateProvenance
+$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation -or $NotesProofInvocationCorrection -or $NotesPostRenderStartup -or $NotesProofAuthorization -or $NotesInputRouting -or $NotesRegistryInputReentry -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution
 $selectedPhaseCount = 0
 if ($NotesStartupDiagnostics) { $selectedPhaseCount++ }
 if ($NotesStartupOperationIsolation) { $selectedPhaseCount++ }
@@ -26,8 +27,9 @@ if ($NotesInputRouting) { $selectedPhaseCount++ }
 if ($NotesRegistryInputReentry) { $selectedPhaseCount++ }
 if ($ManagedStateReentry) { $selectedPhaseCount++ }
 if ($ManagedStateProvenance) { $selectedPhaseCount++ }
+if ($LifetimeStartAttribution) { $selectedPhaseCount++ }
 if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($NotesRegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRootName = if ($LifetimeStartAttribution) { 'out/dotnet/c188r12r3-lifetime-start-attribution' } elseif ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($NotesRegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
@@ -91,7 +93,7 @@ foreach ($sourcePath in $notesSources) {
     }
 }
 if ($isStartupDiagnostic) {
-    $requiredNotesMarkers = if ($ManagedStateProvenance) {
+    $requiredNotesMarkers = if ($ManagedStateProvenance -or $LifetimeStartAttribution) {
         @($allNotesMarkers | Where-Object { $_ -like 'C188R7-*' -or $_ -like 'C188R8-*' -or $_ -like 'C188R9-*' -or $_ -like 'C188R11-*' })
     } elseif ($ManagedStateReentry) {
         @($allNotesMarkers | Where-Object { $_ -like 'C188R7-*' -or $_ -like 'C188R8-*' -or $_ -like 'C188R9-*' -or $_ -like 'C188R10 *' -or $_ -like 'C188R10-*' })
@@ -109,11 +111,20 @@ if ($isStartupDiagnostic) {
         # uppercase-only source marker scanner does not discover them.
         $requiredNotesMarkers += @('C188R10 state stage=', 'C188R10-MANAGED stage=')
     }
-    if ($ManagedStateProvenance) {
+    if ($ManagedStateProvenance -or $LifetimeStartAttribution) {
         $requiredNotesMarkers += @('C188R11 state seq=', 'C188R11-INIT seq=', 'C188R11-MANAGED stage=', 'C188R11R2_KEY')
     }
     foreach ($marker in $requiredNotesMarkers) {
         if (-not $elfText.Contains($marker)) { throw "$phaseRootName diagnostic ELF omitted required retained marker $marker" }
+    }
+    if ($LifetimeStartAttribution) {
+        foreach ($marker in @('C188R12R3_LIFETIME invocation=', 'factory-enter',
+                'factory-return', 'resident-register-enter',
+                'resident-register-return')) {
+            if (-not $elfText.Contains($marker)) {
+                throw "$phaseRootName diagnostic ELF omitted lifetime marker $marker"
+            }
+        }
     }
 } else {
     foreach ($marker in $allNotesMarkers) {
@@ -160,7 +171,9 @@ foreach ($entry in $artifacts.GetEnumerator()) {
     $item = Get-Item -LiteralPath $entry.Value
     $fileEvidence[$entry.Key] = [ordered]@{path=$item.FullName;bytes=$item.Length;sha256=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash}
 }
-$nativeAotMode = if ($ManagedStateProvenance) {
+$nativeAotMode = if ($LifetimeStartAttribution) {
+    'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization+C188R8InputRouting+C188R9RegistryInputReentry+C188R11ManagedStateProvenance+C188R12R3LifetimeStartAttribution'
+} elseif ($ManagedStateProvenance) {
     'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization+C188R8InputRouting+C188R9RegistryInputReentry+C188R11ManagedStateProvenance'
 } elseif ($ManagedStateReentry) {
     'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization+C188R8InputRouting+C188R9RegistryInputReentry+C188R10ManagedStateReentry'
@@ -186,7 +199,7 @@ $manifest = [ordered]@{
     elfClass='ELF64';elfMachine='x86-64';loadSegmentCount=$loadCount;relocations=0
     nativeApplicationId='com.guidexos.apps.managed.counterapp';nativeSelector=9
     productionSelectors=@{notes=4;settings=5;calculator=6;taskManager=7;fileExplorer=8}
-    requiredRetainedSymbols=$symbolEvidence;notesStartupDiagnostics=$isStartupDiagnostic;notesStartupOperationIsolation=[bool]$NotesStartupOperationIsolation;notesProofInvocationCorrection=[bool]$NotesProofInvocationCorrection;notesPostRenderStartup=[bool]$NotesPostRenderStartup;notesProofAuthorization=[bool]($NotesProofAuthorization -or $ManagedStateReentry -or $ManagedStateProvenance);notesInputRouting=[bool]($NotesInputRouting -or $ManagedStateReentry -or $ManagedStateProvenance);notesRegistryInputReentry=[bool]($NotesRegistryInputReentry -or $ManagedStateReentry -or $ManagedStateProvenance);managedStateReentry=[bool]$ManagedStateReentry;managedStateProvenance=[bool]$ManagedStateProvenance;retainedNotesMarkers=$(if ($isStartupDiagnostic) { @($requiredNotesMarkers) } else { @() });artifacts=$fileEvidence
+    requiredRetainedSymbols=$symbolEvidence;notesStartupDiagnostics=$isStartupDiagnostic;notesStartupOperationIsolation=[bool]$NotesStartupOperationIsolation;notesProofInvocationCorrection=[bool]$NotesProofInvocationCorrection;notesPostRenderStartup=[bool]$NotesPostRenderStartup;notesProofAuthorization=[bool]($NotesProofAuthorization -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution);notesInputRouting=[bool]($NotesInputRouting -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution);notesRegistryInputReentry=[bool]($NotesRegistryInputReentry -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution);managedStateReentry=[bool]$ManagedStateReentry;managedStateProvenance=[bool]($ManagedStateProvenance -or $LifetimeStartAttribution);lifetimeStartAttribution=[bool]$LifetimeStartAttribution;retainedNotesMarkers=$(if ($isStartupDiagnostic) { @($requiredNotesMarkers) } else { @() });artifacts=$fileEvidence
     readelfEvidence=[ordered]@{header=$headerPath;programHeaders=$programPath;relocations=$relocationPath}
 }
 $manifestPath = Join-Path $evidence 'nativeaot-qualification.json'

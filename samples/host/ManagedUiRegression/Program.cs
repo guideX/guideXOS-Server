@@ -203,5 +203,11 @@ allPassed &= c181StressPassed;
 Console.WriteLine($"C181-STRESS slotOperations={GuideXosManagedApplicationResidencyC181Tests.AllocationReleaseOperationCount} crossApplicationResize={GuideXosManagedApplicationResidencyC181Tests.CrossApplicationResizeCount} exhaustionRecovery={GuideXosManagedApplicationResidencyC181Tests.ExhaustionRecoveryCount} staleGenerationRejects={GuideXosManagedApplicationResidencyC181Tests.StaleGenerationRejectionCount} fullLifecycles={GuideXosManagedApplicationResidencyC181Tests.FullLifecycleCount} resizeAllocationBytes={GuideXosManagedApplicationResidencyC181Tests.ResizeHotPathAllocationBytes} geometryDrift={GuideXosManagedApplicationResidencyC181Tests.GeometryDriftCount} result={(c181StressPassed ? "PASS" : "FAIL")}");
 Console.WriteLine($"C181-STRESS-DETAIL {GuideXosManagedApplicationResidencyC181Tests.StressFailureDetail}");
 
+bool c188r12r3LifetimePassed = RunSuite("C188R12R3-LifetimeStart",
+    GuideXosManagedApplicationLifetimeC188R12R3Tests.CaseCount,
+    () => GuideXosManagedApplicationLifetimeC188R12R3Tests.Run());
+allPassed &= c188r12r3LifetimePassed;
+Console.WriteLine($"C188R12R3-LIFETIME-DETAIL firstFailedCase={GuideXosManagedApplicationLifetimeC188R12R3Tests.FirstFailedCase} settingsConstructionBytes={GuideXosManagedApplicationLifetimeC188R12R3Tests.SettingsConstructionBytes} result={(c188r12r3LifetimePassed ? "PASS" : "FAIL")}");
+
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

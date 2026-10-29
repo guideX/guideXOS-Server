@@ -1,0 +1,155 @@
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'c188r12r3-lifetime-predicates.ps1')
+$script:cases = 0
+
+function Assert-C188R12R3([string]$Name, [bool]$Condition) {
+    $script:cases++
+    if (-not $Condition) { throw "C188R12R3 lifetime predicate failed: $Name" }
+}
+
+function New-LifeLine([string]$Stage, [int]$Code = 0,
+    [string]$State = 'pass', [uint32]$Count = 0,
+    [uint32]$Mask = 0) {
+    return "[C102-MANAGED-OUTPUT] C188R12R3_LIFETIME invocation=2 stage=$Stage selector=5 identity=com.guidexos.apps.managed.settingscenter count=$Count mask=$Mask generation=2 code=$Code state=$State"
+}
+
+function New-R2Line([string]$Stage, [string]$Result = 'PASS',
+    [int]$Code = 0) {
+    return "[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=$Stage appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=$Result code=$Code"
+}
+
+function New-StandardPrefix {
+    return @(
+        (New-R2Line 'dispatch-context'),
+        (New-R2Line 'dispatch-prelude'),
+        (New-R2Line 'registration-lookup'),
+        (New-R2Line 'runtime-settings-init')
+    )
+}
+
+function New-InternalSuccess {
+    return @(
+        (New-LifeLine 'enter' -1 'preflight'),
+        (New-LifeLine 'existing-resident' 1 'miss'),
+        (New-LifeLine 'capacity-check' 0 'available'),
+        (New-LifeLine 'generation-check' 0 'valid'),
+        (New-LifeLine 'factory-resolve' 0 'resolved'),
+        (New-LifeLine 'factory-enter' -1 'invoking'),
+        (New-LifeLine 'factory-return' 0 'created'),
+        (New-LifeLine 'resident-register-enter' -1 'free-slot'),
+        (New-LifeLine 'resident-register-return' 0 'registered' 1 1),
+        (New-LifeLine 'owner-assign' 0 'generation-committed' 1 1),
+        (New-LifeLine 'exit-success' 0 'resident' 1 1)
+    )
+}
+
+$factoryEntered = @(
+    (New-StandardPrefix) +
+    (New-R2Line 'lifetime-start' 'BEGIN') +
+    (New-LifeLine 'enter' -1 'preflight') +
+    (New-LifeLine 'existing-resident' 1 'miss') +
+    (New-LifeLine 'capacity-check' 0 'available') +
+    (New-LifeLine 'generation-check' 0 'valid') +
+    (New-LifeLine 'factory-resolve' 0 'resolved') +
+    (New-LifeLine 'factory-enter' -1 'invoking')
+) -join "`n"
+$factoryEnteredResult = Get-C188R12R3LifetimeEvidence $factoryEntered
+Assert-C188R12R3 'factory-enter without factory-return remains an unobserved boundary' `
+    ($factoryEnteredResult.outcome -eq 'FACTORY_ENTERED_NO_RETURN' -and
+     $factoryEnteredResult.earliestIncompleteStage -eq 'factory-invocation')
+
+$factoryError = @(
+    (New-StandardPrefix) +
+    (New-LifeLine 'enter' -1 'preflight') +
+    (New-LifeLine 'existing-resident' 1 'miss') +
+    (New-LifeLine 'capacity-check' 0 'available') +
+    (New-LifeLine 'generation-check' 0 'valid') +
+    (New-LifeLine 'factory-resolve' 0 'resolved') +
+    (New-LifeLine 'factory-enter' -1 'invoking') +
+    (New-LifeLine 'factory-return' 4 'null') +
+    (New-LifeLine 'exit-failure' 4 'factory-null')
+) -join "`n"
+$factoryErrorResult = Get-C188R12R3LifetimeEvidence $factoryError
+Assert-C188R12R3 'factory return with an error is explicit' `
+    ($factoryErrorResult.outcome -eq 'FACTORY_RETURNED_ERROR' -and
+     $factoryErrorResult.earliestIncompleteStage -eq 'factory-return')
+
+$registrationEntryOnly = @(
+    (New-StandardPrefix) +
+    (New-LifeLine 'enter' -1 'preflight') +
+    (New-LifeLine 'existing-resident' 1 'miss') +
+    (New-LifeLine 'capacity-check' 0 'available') +
+    (New-LifeLine 'generation-check' 0 'valid') +
+    (New-LifeLine 'factory-resolve' 0 'resolved') +
+    (New-LifeLine 'factory-enter' -1 'invoking') +
+    (New-LifeLine 'factory-return' 0 'created') +
+    (New-LifeLine 'resident-register-enter' -1 'free-slot')
+) -join "`n"
+$registrationEntryResult = Get-C188R12R3LifetimeEvidence $registrationEntryOnly
+Assert-C188R12R3 'registration entry is not treated as completed registration' `
+    ($registrationEntryResult.outcome -eq 'FACTORY_SUCCEEDED_REGISTRATION_INCOMPLETE' -and
+     $registrationEntryResult.earliestIncompleteStage -eq 'resident-registration')
+
+$registrationReturned = @(
+    (New-StandardPrefix) +
+    (New-InternalSuccess | Select-Object -SkipLast 1)
+) -join "`n"
+$registrationReturnedResult = Get-C188R12R3LifetimeEvidence $registrationReturned
+Assert-C188R12R3 'registration return without exit identifies follow-up boundary' `
+    ($registrationReturnedResult.outcome -eq 'REGISTRATION_SUCCEEDED_FOLLOWUP_INCOMPLETE' -and
+     $registrationReturnedResult.earliestIncompleteStage -eq 'try-start-return')
+
+$callerDidNotContinue = @(
+    (New-StandardPrefix) +
+    (New-R2Line 'lifetime-start') +
+    (New-InternalSuccess) +
+    (New-R2Line 'lifetime-start' 'PASS')
+) -join "`n"
+$callerDidNotContinueResult = Get-C188R12R3LifetimeEvidence $callerDidNotContinue
+Assert-C188R12R3 'successful TryStart followed by no application entry is distinguished' `
+    ($callerDidNotContinueResult.outcome -eq 'TRY_START_RETURNED_CALLER_NOT_CONTINUED' -and
+     $callerDidNotContinueResult.earliestIncompleteStage -eq 'application-entry')
+
+$successfulLaunch = @(
+    (New-StandardPrefix) +
+    (New-R2Line 'lifetime-start') +
+    (New-InternalSuccess) +
+    (New-R2Line 'lifetime-start' 'PASS') +
+    (New-R2Line 'application-entry' 'BEGIN') +
+    (New-R2Line 'application-return' 'PASS') +
+    (New-R2Line 'dispatch-return' 'PASS') +
+    '[C150-SURFACE] action=create appId=com.guidexos.apps.managed.settingscenter generation=00000002 window=000003E8 result=PASS'
+) -join "`n"
+$successfulLaunchResult = Get-C188R12R3LifetimeEvidence $successfulLaunch
+Assert-C188R12R3 'complete application return and surface evidence pass' `
+    ($successfulLaunchResult.outcome -eq 'SETTINGS_LAUNCH_SUCCEEDED' -and
+     $successfulLaunchResult.settingsSurfaceObserved -and
+     $successfulLaunchResult.callerContinued)
+
+$incomplete = @(
+    (New-StandardPrefix) +
+    (New-R2Line 'lifetime-start' 'BEGIN')
+) -join "`n"
+$incompleteResult = Get-C188R12R3LifetimeEvidence $incomplete
+Assert-C188R12R3 'missing internal trace stays incomplete rather than inferred failure' `
+    ($incompleteResult.outcome -eq 'INCOMPLETE_DIAGNOSTICS' -and
+     $incompleteResult.earliestIncompleteStage -eq 'settings-lifetime-entry')
+
+$badOrder = @(
+    (New-StandardPrefix) +
+    (New-LifeLine 'factory-return' 0 'created') +
+    (New-LifeLine 'factory-enter' -1 'invoking')
+) -join "`n"
+$badOrderResult = Get-C188R12R3LifetimeEvidence $badOrder
+Assert-C188R12R3 'impossible marker order is rejected' `
+    ($badOrderResult.outcome -eq 'INVALID_MARKERS' -and
+     -not $badOrderResult.markerOrderingValid)
+
+$malformed = (New-LifeLine 'enter' -1 'preflight') -replace 'identity=com.guidexos.apps.managed.settingscenter', 'identity=Managed Settings Center'
+$malformedResult = Get-C188R12R3LifetimeEvidence $malformed
+Assert-C188R12R3 'ambiguous identity formatting is rejected' `
+    ($malformedResult.outcome -eq 'INVALID_MARKERS' -and
+     $malformedResult.malformedMarkerCount -eq 1)
+
+Write-Output "C188R12R3-LIFETIME-PREDICATES cases=$script:cases result=PASS"
