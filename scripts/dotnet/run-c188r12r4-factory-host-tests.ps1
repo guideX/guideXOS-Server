@@ -50,7 +50,17 @@ if ($predicateExitCode -ne 0 -or -not $predicateSummary.Success -or
     throw "C188R12R4 synthetic runner predicates failed (exit=$predicateExitCode). See $predicateLog"
 }
 
-$warnings = @([regex]::Matches($hostOutput + "`n" + $predicateOutput,
+$linkBoundaryScript = Join-Path $PSScriptRoot 'test-c188r12r4r1-link-boundary.ps1'
+$linkBoundaryLog = Join-Path $runRoot 'link-boundary.log'
+$linkBoundaryOutput = (& $PSHOME\pwsh.exe -NoProfile -File $linkBoundaryScript -DotNetExe $dotnet.Source 2>&1 | Out-String)
+$linkBoundaryExitCode = $LASTEXITCODE
+Set-Content -LiteralPath $linkBoundaryLog -Value $linkBoundaryOutput -Encoding utf8
+if ($linkBoundaryExitCode -ne 0 -or
+    $linkBoundaryOutput -notmatch '(?m)^C188R12R4R1-LINK-BOUNDARY cases=6 guestDirect=true hostedDirect=false productionDirect=false allocationLineMaxBytes=\d+ result=PASS\s*$') {
+    throw "C188R12R4R1 NativeAOT link boundary qualification failed (exit=$linkBoundaryExitCode). See $linkBoundaryLog"
+}
+
+$warnings = @([regex]::Matches($hostOutput + "`n" + $predicateOutput + "`n" + $linkBoundaryOutput,
     '(?im)^.*\bwarning\b.*$') | ForEach-Object { $_.Value.Trim() })
 $manifest = [ordered]@{
     result='PASS'
@@ -62,10 +72,13 @@ $manifest = [ordered]@{
     hostLogSha256=(Get-FileHash -LiteralPath $hostLog -Algorithm SHA256).Hash
     predicateLog=$predicateLog
     predicateLogSha256=(Get-FileHash -LiteralPath $predicateLog -Algorithm SHA256).Hash
+    linkBoundaryLog=$linkBoundaryLog
+    linkBoundaryLogSha256=(Get-FileHash -LiteralPath $linkBoundaryLog -Algorithm SHA256).Hash
+    linkBoundaryCases=6
     warnings=$warnings
     syntheticFixturesOnly=$true
 }
 $manifestPath = Join-Path $runRoot 'hosted-qualification.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-Write-Output "C188R12R4-HOSTED=PASS factoryCases=$($manifest.focusedFactoryCases) predicateCases=$($manifest.syntheticPredicateCases) warnings=$($warnings.Count)"
+Write-Output "C188R12R4-HOSTED=PASS factoryCases=$($manifest.focusedFactoryCases) predicateCases=$($manifest.syntheticPredicateCases) linkBoundaryCases=$($manifest.linkBoundaryCases) warnings=$($warnings.Count)"
 Write-Output "C188R12R4-HOSTED-MANIFEST=$manifestPath"

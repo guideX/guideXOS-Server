@@ -86,6 +86,14 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4_FACTORY_TESTS</DefineConstants>
   </PropertyGroup>
 
+  <!-- The guest's native factory probes use only statically linked __Internal
+       functions.  Mark that boundary direct so NativeAOT does not retain its
+       Windows DefaultAssemblyLoadContext resolver in the bare-metal image.
+       Hosted tests compile their capture backend and keep normal host policy. -->
+  <ItemGroup Condition="'$(HostLogProofC188R12R4FactoryAttribution)' == 'true' and '$(HostLogProofC188R12R4FactoryTests)' != 'true' and '$(PublishAot)' == 'true'">
+    <DirectPInvoke Include="__Internal" />
+  </ItemGroup>
+
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Allocating'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING</DefineConstants>
   </PropertyGroup>

@@ -32915,9 +32915,9 @@ extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC31StrongRoot
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi;
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
-extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4BeginFactory__Ansi;
-extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4SetOperation__Ansi;
-extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4EndFactory__Ansi;
+// The three managed factory probes are direct __Internal P/Invokes in the
+// bare-metal NativeAOT profile. Their addresses are statically linked, so the
+// ELF startup path must not emulate the Windows loader's P/Invoke slot fixup.
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationCanFit__Ansi;
@@ -34762,18 +34762,8 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
 
     initializeRuntimeState(block);
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
-    using GuideXosC188R12R4BeginFactoryFn = int (__cdecl*)(gx_uint32, gx_uint32);
-    using GuideXosC188R12R4SetOperationFn = int (__cdecl*)(gx_uint32);
-    using GuideXosC188R12R4EndFactoryFn = int (__cdecl*)(gx_uint32);
-    __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4BeginFactory__Ansi =
-        reinterpret_cast<void*>(static_cast<GuideXosC188R12R4BeginFactoryFn>(
-            guideXosC188R12R4BeginFactory));
-    __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4SetOperation__Ansi =
-        reinterpret_cast<void*>(static_cast<GuideXosC188R12R4SetOperationFn>(
-            guideXosC188R12R4SetOperation));
-    __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4EndFactory__Ansi =
-        reinterpret_cast<void*>(static_cast<GuideXosC188R12R4EndFactoryFn>(
-            guideXosC188R12R4EndFactory));
+    // Managed calls reach these functions through direct NativeAOT imports.
+    // No runtime write to a Windows-loader-owned P/Invoke fixup cell is used.
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     if (firstManagedEntry) {

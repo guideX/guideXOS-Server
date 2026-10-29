@@ -12,7 +12,8 @@ param(
     [Parameter()][switch]$ManagedStateProvenance,
     [Parameter()][switch]$LifetimeStartAttribution,
     [Parameter()][switch]$FactoryAllocationAttribution,
-    [Parameter()][string]$ReadElfPath = 'C:\mingw64\bin\readelf.exe'
+    [Parameter()][string]$ReadElfPath = 'C:\mingw64\bin\readelf.exe',
+    [Parameter()][string]$ObjDumpPath = 'C:\mingw64\bin\objdump.exe'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -31,7 +32,7 @@ if ($ManagedStateProvenance) { $selectedPhaseCount++ }
 if ($LifetimeStartAttribution -and -not $FactoryAllocationAttribution) { $selectedPhaseCount++ }
 if ($FactoryAllocationAttribution) { $selectedPhaseCount++ }
 if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($FactoryAllocationAttribution) { 'out/dotnet/c188r12r4-factory-attribution' } elseif ($LifetimeStartAttribution) { 'out/dotnet/c188r12r3-lifetime-start-attribution' } elseif ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($NotesRegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRootName = if ($FactoryAllocationAttribution) { 'out/dotnet/c188r12r4r1-diagnostic-link-repair' } elseif ($LifetimeStartAttribution) { 'out/dotnet/c188r12r3-lifetime-start-attribution' } elseif ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($NotesRegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
@@ -129,10 +130,71 @@ if ($isStartupDiagnostic) {
         }
     }
     if ($FactoryAllocationAttribution) {
+        $ilcResponse = Join-Path $candidate 'obj/release_win-x64/native/HostLogProof.ilc.rsp'
+        $linkResponse = Join-Path $candidate 'obj/release_win-x64/native/link.rsp'
+        foreach ($path in @($ilcResponse,$linkResponse)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "C188R12R4 link dependency evidence is missing: $path"
+            }
+        }
+        $ilcArguments = [System.IO.File]::ReadAllText($ilcResponse)
+        $linkArguments = [System.IO.File]::ReadAllText($linkResponse)
+        if ($ilcArguments -notmatch '(?m)^--directpinvoke:__Internal\s*$') {
+            throw 'C188R12R4 guest NativeAOT configuration does not bind __Internal imports directly.'
+        }
+        if ($linkArguments -notmatch '(?i)/NODEFAULTLIB:kernel32\.lib') {
+            throw 'C188R12R4 guest link did not exclude the Windows Kernel32 import library.'
+        }
+        foreach ($symbol in @('guideXosC188R12R4BeginFactory',
+                'guideXosC188R12R4SetOperation', 'guideXosC188R12R4EndFactory')) {
+            if (-not $mapText.Contains($symbol)) {
+                throw "C188R12R4 map omitted statically linked guest instrumentation function $symbol"
+            }
+        }
+        if ($mapText.Contains('__pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4')) {
+            throw 'C188R12R4 guest map retained a Windows-loader-owned P/Invoke fixup cell.'
+        }
+        if (-not (Test-Path -LiteralPath $ObjDumpPath -PathType Leaf)) {
+            throw "C188R12R4 import-table validator is missing: $ObjDumpPath"
+        }
+        $peImports = (& $ObjDumpPath -p $artifacts.pe 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw "objdump failed while checking diagnostic PE imports: $ObjDumpPath" }
+        foreach ($symbol in @('FreeLibrary','GetProcAddress','LoadLibraryExW','SetThreadErrorMode')) {
+            if ($peImports.Contains($symbol)) {
+                throw "C188R12R4 diagnostic PE still imports unsupported Windows API $symbol"
+            }
+        }
         foreach ($marker in @('C188R12R4_FACTORY invocation=',
                 'C188R12R4_ALLOC invocation=', 'fast-capacity-miss')) {
             if (-not $elfText.Contains($marker)) {
                 throw "$phaseRootName diagnostic ELF omitted factory/allocation marker $marker"
+            }
+        }
+        $factoryDiagnosticMarkers = @(
+            'C188R12R1-MANAGED stage=dispatch-entry selector=5',
+            'C188R12R2_LAUNCH stage=',
+            'C188R12R3_LIFETIME invocation=',
+            'com.guidexos.apps.managed.settingscenter',
+            'factory-invoke',
+            'type-init-enter', 'type-init-return',
+            'object-allocation-request', 'base-constructor-enter',
+            'constructor-enter', 'model-init-enter', 'model-init-return',
+            'controls-init-enter', 'controls-init-return',
+            'dialogs-init-enter', 'dialogs-init-return',
+            'constructor-return', 'object-construction-result',
+            'factory-return', 'factory-failure',
+            'resident-register-enter', 'resident-register-return')
+        foreach ($marker in $factoryDiagnosticMarkers) {
+            if (-not $elfText.Contains($marker)) {
+                throw "$phaseRootName diagnostic ELF omitted required Settings selector-5 marker $marker"
+            }
+        }
+        foreach ($symbol in @(
+                'GuideXosApplicationRegistry___cctor',
+                'C188R12R4FactoryDiagnostics__CreateSettingsCenter',
+                'ManagedSettingsCenter___ctor_0')) {
+            if (-not $mapText.Contains($symbol)) {
+                throw "$phaseRootName diagnostic map omitted Settings factory path symbol $symbol"
             }
         }
         foreach ($symbol in @('RhpNewFast', 'guideXosStockRhpNewFast')) {
@@ -218,6 +280,19 @@ $manifest = [ordered]@{
     productionSelectors=@{notes=4;settings=5;calculator=6;taskManager=7;fileExplorer=8}
     requiredRetainedSymbols=$symbolEvidence;notesStartupDiagnostics=$isStartupDiagnostic;notesStartupOperationIsolation=[bool]$NotesStartupOperationIsolation;notesProofInvocationCorrection=[bool]$NotesProofInvocationCorrection;notesPostRenderStartup=[bool]$NotesPostRenderStartup;notesProofAuthorization=[bool]($NotesProofAuthorization -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution);notesInputRouting=[bool]($NotesInputRouting -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution);notesRegistryInputReentry=[bool]($NotesRegistryInputReentry -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution);managedStateReentry=[bool]$ManagedStateReentry;managedStateProvenance=[bool]($ManagedStateProvenance -or $LifetimeStartAttribution);lifetimeStartAttribution=[bool]$LifetimeStartAttribution;retainedNotesMarkers=$(if ($isStartupDiagnostic) { @($requiredNotesMarkers) } else { @() });artifacts=$fileEvidence
     readelfEvidence=[ordered]@{header=$headerPath;programHeaders=$programPath;relocations=$relocationPath}
+}
+if ($FactoryAllocationAttribution) {
+    $manifest['directInternalPInvoke'] = $true
+    $manifest['kernel32ImportLibraryExcluded'] = $true
+    $manifest['unsupportedWindowsLoaderImports'] = @()
+    $manifest['factoryInstrumentationFunctionsStaticallyLinked'] = @(
+        'guideXosC188R12R4BeginFactory',
+        'guideXosC188R12R4SetOperation',
+        'guideXosC188R12R4EndFactory')
+    $manifest['factoryDiagnosticMarkers'] = $factoryDiagnosticMarkers
+    $manifest['selectorFiveRegistration'] = $true
+    $manifest['allocationDiagnosticMarkers'] = @(
+        'C188R12R4_ALLOC invocation=', 'fast-capacity-miss')
 }
 $manifestPath = Join-Path $evidence 'nativeaot-qualification.json'
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
