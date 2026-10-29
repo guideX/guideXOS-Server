@@ -1,0 +1,1 @@
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=dispatch-context appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=PASS

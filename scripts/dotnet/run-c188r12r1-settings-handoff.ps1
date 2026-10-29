@@ -28,6 +28,7 @@ $ownershipHelpers = Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1
 . (Join-Path $PSScriptRoot 'c188r11r4r2-runner-predicates.ps1')
 . $ownershipHelpers
 . (Join-Path $PSScriptRoot 'c188r12r1-settings-handoff-predicates.ps1')
+. (Join-Path $PSScriptRoot 'c188r12r2r1-settings-dispatch-predicates.ps1')
 
 $candidateEsp = Join-Path $candidate 'esp'
 $stagingManifestPath = Join-Path $candidate 'ramdisk-staging.json'
@@ -64,9 +65,9 @@ foreach ($relativeMedia in @('kernel.elf','ramdisk.img','EFI\BOOT\BOOTX64.EFI'))
     }
 }
 $runIdentityId = [guid]::NewGuid().ToString('N')
-$runManifestPath = Join-Path $bootRoot 'r12r1-input-manifest.json'
+$runManifestPath = Join-Path $bootRoot 'r12r2r1-input-manifest.json'
 [ordered]@{
-    phase='C188R12R1-settings-handoff';runIdentityId=$runIdentityId
+    phase='C188R12R2R1-settings-dispatch';runIdentityId=$runIdentityId
     candidateRoot=$candidate;stagingManifest=$stagingManifestPath
     stagingManifestSha256=(Get-FileHash -LiteralPath $stagingManifestPath -Algorithm SHA256).Hash
     expectedKernelSha256=$ExpectedKernelSha256.ToUpperInvariant()
@@ -106,6 +107,7 @@ $ownershipDegraded = $false
 $runnerStdout = ''
 $runnerStderr = ''
 $settingsEvidence = $null
+$settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence '' $true
 $failureText = ''
 
 function Read-C188R12R1SharedText([string]$Path) {
@@ -373,10 +375,20 @@ try {
                             if ($clickExitCode -ne 0) { $failureText = "single verified Settings click command failed: $($clickResult.output)" }
 
                             $settingsDeadline = (Get-Date).AddSeconds(30)
+                            $surfaceSettleDeadline = $null
                             do {
                                 $serialText = Read-C188R12R1SharedText $serialPath
                                 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
+                                $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence `
+                                    $serialText $true
                                 if ([bool]$settingsEvidence.accepted) { break }
+                                if ([bool]$settingsDispatchEvidence.dispatchReturned) {
+                                    if ($settingsDispatchEvidence.outcome -eq 'EXPLICIT_FAILURE') { break }
+                                    if ($null -eq $surfaceSettleDeadline) {
+                                        $surfaceSettleDeadline = (Get-Date).AddSeconds(5)
+                                    }
+                                    if ((Get-Date) -ge $surfaceSettleDeadline) { break }
+                                }
                                 if ($qacRunner.HasExited) { break }
                                 Start-Sleep -Milliseconds 200
                             } while ((Get-Date) -lt $settingsDeadline)
@@ -445,6 +457,7 @@ try {
 
 $serialText = Read-C188R12R1SharedText $serialPath
 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
+$settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence $serialText $true
 $qmpControlText = Read-C188R12R1SharedText $qmpControlPath
 $clickEvidence = Test-C188R12R1SingleClickQmpEvidence $qmpControlText
 $runnerInputEvidence = Get-C188R12R1RunnerInputEvidence $serialText $qmpControlText `
@@ -506,7 +519,7 @@ if ((Test-Path -LiteralPath $beforePpm -PathType Leaf) -and
 }
 
 $finalEvidence = [ordered]@{
-    schemaVersion=1;phase='C188R12R1-settings-handoff';outcome=$outcome
+    schemaVersion=1;phase='C188R12R2R1-settings-dispatch';outcome=$outcome
     candidateRoot=$candidate;bootEvidencePath=$bootRoot
     runIdentityId=$runIdentityId;expectedKernelSha256=$ExpectedKernelSha256.ToUpperInvariant()
     sourceMediaHashes=$sourceMediaHashes;copiedMediaHashes=$copiedMediaHashes
@@ -526,6 +539,7 @@ $finalEvidence = [ordered]@{
     qacAdmissionConfirmed=if ($null -ne $baseManifest) { [bool]$baseManifest.qacAdmissionConfirmed } else { $false }
     qacOwnershipProofAccepted=if ($null -ne $baseManifest) { [bool]$baseManifest.qacOwnershipProofAccepted } else { $false }
     settingsEvidence=$settingsEvidence
+    settingsDispatchEvidence=$settingsDispatchEvidence
     settingsActionId=[string]$settingsEvidence.notesActionId
     settingsActionInvoked=[bool]$settingsEvidence.notesSettingsActionInvoked
     settingsActionSucceeded=[bool]$settingsEvidence.notesSettingsActionSucceeded
@@ -549,10 +563,11 @@ $finalEvidence = [ordered]@{
     serialSha256=if (Test-Path -LiteralPath $serialPath) { (Get-FileHash -LiteralPath $serialPath -Algorithm SHA256).Hash } else { '' }
     qmpControlSha256=if (Test-Path -LiteralPath $qmpControlPath) { (Get-FileHash -LiteralPath $qmpControlPath -Algorithm SHA256).Hash } else { '' }
 }
-$finalEvidencePath = Join-Path $bootRoot 'r12r1-settings-handoff-evidence.json'
+$finalEvidencePath = Join-Path $bootRoot 'r12r2r1-settings-dispatch-evidence.json'
 $finalEvidence | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $finalEvidencePath -Encoding utf8
 Write-Output "C188R12R1_SETTINGS_HANDOFF=$outcome BOUNDARY=$earliestBoundary CLICK_ATTEMPTED=$clickAttempted QAC_RELEASE=$qacReleaseVerified"
-Write-Output "C188R12R1_SETTINGS_EVIDENCE=$finalEvidencePath"
+Write-Output "C188R12R2R1_SETTINGS_DISPATCH=$($settingsDispatchEvidence.outcome) LAST_STAGE=$($settingsDispatchEvidence.lastObservedStage) NEXT=$($settingsDispatchEvidence.firstUnobservedBoundary)"
+Write-Output "C188R12R2R1_SETTINGS_EVIDENCE=$finalEvidencePath"
 if ($null -ne $qacRunner -and -not $qacRunner.HasExited) {
     throw "C188R12R1 evidence is saved but its bounded QAC runner is still active: $bootRoot"
 }

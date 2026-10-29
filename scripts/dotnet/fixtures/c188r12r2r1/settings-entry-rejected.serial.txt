@@ -1,0 +1,13 @@
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=dispatch-context appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=PASS
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=dispatch-prelude appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=PASS
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=registration-lookup appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=BEGIN
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=registration-lookup appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=PASS code=0
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=runtime-settings-init appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=BEGIN
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=runtime-settings-init appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=PASS code=0
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=managed-lifecycle-tests appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=BEGIN
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=managed-lifecycle-tests appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=PASS code=0
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=lifetime-start appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=BEGIN
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=lifetime-start appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=PASS code=0
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=application-entry appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=BEGIN
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=application-return appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=FAIL code=-5
+[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=dispatch-return appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=FAIL code=-5
