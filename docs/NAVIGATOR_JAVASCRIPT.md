@@ -12787,7 +12787,115 @@ generated viewport fixtures (458,372 bytes total) match their pre-build
 SHA-256 manifest. The tracked worktree was committed locally; `.phase` remains
 absent. No QEMU or QAC qualification was run.
 
-Recommended JS98 scope: qualify bounded `Array.prototype.find()` with the same
-captured-length traversal and a distinct result-presence representation, after
-specifying how a found `undefined` value is distinguished from no match. Keep
-`findIndex()` and `reduce()` outside JS98 unless separately selected.
+## JS98 — bounded `Array.prototype.find()`
+
+JS98 adds `Array.prototype.find(callback[, thisArg])` to the bounded native
+Array methods. The receiver must be a genuine runtime Array, and the callback
+must be callable even when the receiver is empty. The callback receives
+`(value, index, originalArray)` with the optional `thisArg`. Existing JavaScript
+truthiness determines whether the predicate matches; `find()` returns the
+source element captured for that callback, never the predicate's return value.
+No match returns JavaScript `undefined`.
+
+Unlike JS93 `forEach()`, JS94 `map()`, JS95 `filter()`, JS96 `some()`, and JS97
+`every()`, `find()` visits every index below its captured initial length,
+including absent slots. This matches `find()`'s specified indexed `Get` behavior:
+an absent slot produces `undefined` unless an inherited numeric property
+resolves first. The shared traversal keeps its existing inherited-aware
+presence check and read. Its explicit `Find` policy continues on an absent
+property and reads through `readArrayIndex()`; the other callback methods still
+skip absent properties. No common lookup rule was changed.
+
+The original Array length is captured once. Each in-range property is looked
+up live immediately before its callback, so future replacements and filled
+holes are visible. Shrinking the Array does not end traversal: removed
+in-range slots are visited as `undefined`, or as inherited values if visible.
+Appends beyond the captured length are ignored. The current element is copied
+into the callback arguments before callback execution and that same `Value` is
+copied to the result on a match. Mutating or shrinking the source during the
+callback therefore cannot replace the value returned by `find()`. Object and
+Array values retain their existing runtime identity through nested calls and
+allocations; the source slot is not reread after callback completion.
+
+The traversal's per-invocation `Continue`, `Stop`, and `Error` result carries
+match state independently from the returned value. A truthy predicate stores
+the captured element and returns `Stop` immediately. Thus a matched source
+value of `undefined` is returned publicly as `undefined` but still stops after
+that callback; a complete all-false search also returns `undefined` after
+visiting the captured range. Nested `find()` calls have independent stack-local
+control and do not stop an outer traversal. Errors reached before a match,
+including nested callback failures, execution-budget exhaustion, and call-depth
+exhaustion, use the ordinary runtime error path. Errors after a successful
+short-circuit are not reached.
+
+`find()` creates no result Array and stages no element buffer. The existing
+1,024-position limit, Array slot and object limits, 88-byte `RuntimeObject`,
+48-byte `RuntimeArrayElement`, and function/environment lifetime rules remain
+in force. Generic array-like receivers and Array subclasses remain unsupported.
+
+The JS98 native lane is `tests/navigator_javascript_js98_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js98.ps1`; the hosted fixture is
+`navigator-smoke/javascript-js98.html` and is registered in the server's
+hosted smoke aggregate. The lane covers ordinary matches and misses,
+truthiness, callback arguments and `thisArg`, all sparse positions, inherited
+numeric lookup, found-undefined short-circuiting, source mutation and captured
+primitive/object/Array values, nested callback methods and Event dispatch,
+validation and runtime failures, allocation-free result handling, and the
+1,024/1,025-position boundaries.
+
+The JS98 focused native lane passes **29/29 checks** under strict C++17 flags
+(`-Wall -Wextra -Werror -pedantic`). GCC `-O2 -fstack-usage` reports
+`traverseArray` at **672 bytes**, `invokeNative` at **736 bytes**, and
+`invokeFunction` at **560 bytes**, unchanged from JS97. These hosted compiler
+measurements do not establish a bare-metal stack guarantee.
+
+### JS98 qualification closeout
+
+The pre-edit branch and HEAD matched the requested
+`NAVIGATOR_JAVASCRIPT_SUPPORT` / `50b8e6e55096cecc18549ef2f4e8ff468d7229c4`
+baseline, the tracked worktree was clean, and `.phase` was absent. The live Git
+tracking refs showed **0 ahead / 0 behind** before this work (the earlier
+baseline note said 2 ahead / 0 behind); the local `origin` ref pointed to the
+starting HEAD. This qualification did not switch branches or alter remote
+refs.
+
+The complete JavaScript matrix passed **100/100 lanes** and reported
+**17,121/17,121 assertions across 59 lanes**, adding JS98's 29 checks to the
+JS97 baseline. The focused JS93–JS97 regression lanes remain **168/168**;
+JS93–JS98 together pass **197/197** checks. The JS98 hosted page reports
+`JS98:assertions=18:failures=0:shortCircuit=true:sparse=true:nested=true`, and
+the server's sparse/short-circuit and nested Event checks also pass (3/3 JS98
+hosted aggregate checks).
+
+The production hosted aggregate reports **729 passed / 7 failed / 736 total**.
+All JavaScript checks pass. Its only failures are the same seven established
+CSS baseline checks as the JS97 726/733 run: CSS phase 3C baselines/clipping/
+hit targets/focus; CSS phase 3G parser/containing-block diagnostics; CSS phase
+6A nested scrolling/fixed-descendant invariance; the three CSS phase 6B typed
+sticky diagnostics, local/nested sticky scrollports, and fixed-descendant
+invariance checks; and CSS phase 6C sticky/fixed/clipping/flex/extent
+neutrality. Thus the three additional aggregate checks are all passing JS98
+coverage, with no new failure category.
+
+`build.bat` completed successfully. The hosted process ran the just-built
+`guideXOSServer.exe` at the repository path, and its SHA-256 matched the build
+artifact: **8,756,918 bytes**,
+`E51009F1AB38A7060F6BE0AED3715D0245ECBDD63280652AF13758D7A4F0D293`. The
+saved original executable was restored and verified at **8,398,274 bytes**,
+SHA-256 `A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+All **42** generated viewport fixtures (**458,372 bytes**) match their saved
+hash manifest. `RuntimeObject` remains **88 bytes** and
+`RuntimeArrayElement` remains **48 bytes**; traversal remains bounded to
+1,024 positions and allocates no result Array or staging buffer. Hosted static
+stack numbers are not a bare-metal stack guarantee.
+
+The qualification is hosted-only: no QEMU was launched and no QAC admission
+was requested. `.phase` remains absent. The tracked changes are committed
+locally as `navigator: add JS98 bounded Array.prototype.find`; nothing was
+pushed.
+
+Recommended JS99 scope: add bounded `Array.prototype.findIndex()` using the
+same captured-length sparse visitation and short-circuit rules, returning the
+first matching source index (or `-1`) while preserving this phase's ownership,
+error, and memory limits. Keep `findLast()`, `findLastIndex()`, and `reduce()`
+deferred until separately specified and qualified.

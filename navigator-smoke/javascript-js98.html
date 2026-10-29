@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS98</title></head>
+<body>
+<h1>Navigator JavaScript JS98</h1>
+<pre id="result">JS98:pending</pre>
+<button id="find-event-a" type="button">Run JS98 find event</button>
+<button id="find-event-b" type="button">Nested JS98 find event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions=assertions+1;
+  if (!condition) failures=failures+1;
+}
+
+var values = [5, 12, 8, 130, 44];
+var calls = 0;
+var indices = "";
+var callbackArgs = true;
+var found = values.find(function(value, index, array) {
+  calls=calls+1;
+  indices=indices+index;
+  callbackArgs=callbackArgs&&array===values&&value===values[index];
+  return value > 10;
+});
+verify(found === 12 && calls === 2 && indices === "01");
+verify(callbackArgs && values[4] === 44);
+
+var returnedElement = [4, 8, 12].find(function() { return 100; });
+verify(returnedElement === 4);
+
+var emptyCalls = 0;
+var emptyResult = [].find(function() { emptyCalls=emptyCalls+1; return true; });
+verify(emptyResult === undefined && emptyCalls === 0);
+
+var lastCalls = 0;
+var last = [1, 2, 3].find(function(value) {
+  lastCalls=lastCalls+1;
+  return value === 3;
+});
+var missCalls = 0;
+var miss = [1, 2, 3].find(function() { missCalls=missCalls+1; return false; });
+verify(last === 3 && lastCalls === 3 && miss === undefined && missCalls === 3);
+
+var context = {target: 7};
+var thisArgOk = false;
+var thisCalls = 0;
+var thisResult = [6, 7, 8].find(function(value, index, array) {
+  thisCalls=thisCalls+1;
+  thisArgOk=this===context&&array.length===3&&index===thisCalls-1;
+  return this.target === value;
+}, context);
+verify(thisResult === 7 && thisArgOk && thisCalls === 2);
+
+var truthySource = [4, 8].find(function() { return "yes"; });
+var falsyCalls = 0;
+var falsyResult = [0, "", null, undefined, false].find(function(value) {
+  falsyCalls=falsyCalls+1;
+  return value;
+});
+verify(truthySource === 4 && falsyResult === undefined && falsyCalls === 5);
+
+var holes = [];
+holes.length = 3;
+var holeCalls = 0;
+var holeIndices = "";
+var holeValues = "";
+var noMatch = holes.find(function(value, index) {
+  holeCalls=holeCalls+1;
+  holeIndices=holeIndices+index;
+  if (value === undefined) holeValues=holeValues+"u";
+  else holeValues=holeValues+value;
+  return false;
+});
+verify(noMatch === undefined && holeCalls === 3 && holeIndices === "012" &&
+  holeValues === "uuu");
+
+var sparse = [];
+sparse.length = 3;
+sparse[1] = 7;
+var sparseCalls = 0;
+var sparseIndices = "";
+var sparseValues = "";
+sparse.find(function(value, index) {
+  sparseCalls=sparseCalls+1;
+  sparseIndices=sparseIndices+index;
+  if (value === undefined) sparseValues=sparseValues+"u";
+  else sparseValues=sparseValues+value;
+  return false;
+});
+verify(sparseCalls === 3 && sparseIndices === "012" && sparseValues === "u7u");
+
+var selectedCalls = 0;
+var selectedHole = holes.find(function(value) {
+  selectedCalls=selectedCalls+1;
+  return value === undefined;
+});
+var noMatchCalls = 0;
+holes.find(function() { noMatchCalls=noMatchCalls+1; return false; });
+verify(selectedHole === undefined && selectedCalls === 1 && noMatchCalls === 3);
+
+var explicitCalls = 0;
+var explicitUndefined = [1, undefined, 3].find(function(value, index) {
+  explicitCalls=explicitCalls+1;
+  return index === 1 && value === undefined;
+});
+verify(explicitUndefined === undefined && explicitCalls === 2);
+
+var replaced = [1, 2, 3];
+var replaceCalls = 0;
+var replacement = replaced.find(function(value, index, array) {
+  replaceCalls=replaceCalls+1;
+  if (index === 0) array[1] = 9;
+  return value === 9;
+});
+verify(replacement === 9 && replaceCalls === 2 && replaced[1] === 9);
+
+var filled = [1, , 3];
+var fillCalls = 0;
+var fillResult = filled.find(function(value, index, array) {
+  fillCalls=fillCalls+1;
+  if (index === 0) array[1] = 2;
+  return value === 2;
+});
+verify(fillResult === 2 && fillCalls === 2);
+
+var shrunk = [7, 8, 9];
+var shrinkCalls = 0;
+var shrinkIndices = "";
+var shrinkValues = "";
+var shrinkResult = shrunk.find(function(value, index, array) {
+  shrinkCalls=shrinkCalls+1;
+  shrinkIndices=shrinkIndices+index;
+  if (value === undefined) shrinkValues=shrinkValues+"u";
+  else shrinkValues=shrinkValues+value;
+  if (index === 0) array.length = 1;
+  return false;
+});
+verify(shrinkResult === undefined && shrinkCalls === 3 &&
+  shrinkIndices === "012" && shrinkValues === "7uu");
+
+var appended = [4, 5];
+var appendCalls = 0;
+var appendResult = appended.find(function(value, index, array) {
+  appendCalls=appendCalls+1;
+  if (index === 0) array[2] = 6;
+  return value === 6;
+});
+verify(appendResult === undefined && appendCalls === 2 && appended[2] === 6);
+
+var current = [12];
+var captured = current.find(function(value, index, array) {
+  array[index] = 99;
+  return true;
+});
+verify(captured === 12 && current[0] === 99);
+
+var shortCalls = 0;
+var shortCircuit = [1, 2, 3].find(function(value) {
+  shortCalls=shortCalls+1;
+  if (value === 3) null.missing;
+  return value === 1;
+});
+verify(shortCircuit === 1 && shortCalls === 1);
+
+var nestedOuterCalls = 0;
+var nestedInnerCalls = 0;
+var nested = [1, 2].find(function(value) {
+  nestedOuterCalls=nestedOuterCalls+1;
+  var inner = [10, 20, 30].find(function(item) {
+    nestedInnerCalls=nestedInnerCalls+1;
+    return item > 10;
+  });
+  return value === 2 && inner === 20;
+});
+var nestedOk = nested === 2 && nestedOuterCalls === 2 && nestedInnerCalls === 4;
+verify(nestedOk);
+
+var marker = "JS98:assertions=" + assertions + ":failures=" + failures +
+  ":shortCircuit=" + (shortCircuit === 1) + ":sparse=" +
+  (holeCalls === 3 && sparseCalls === 3) + ":nested=" + nestedOk +
+  ":events=ready";
+document.getElementById("result").textContent = marker;
+
+var eventA = document.getElementById("find-event-a");
+var eventB = document.getElementById("find-event-b");
+var nestedEventOk = false;
+var outerEventOk = false;
+var innerEventCalls = 0;
+var outerEventCalls = 0;
+var eventReference = {value: 5};
+var eventSource = [4, eventReference, 6];
+eventB.addEventListener("click", function(event) {
+  var match = [undefined, 2, 3].find(function(value, index) {
+    innerEventCalls=innerEventCalls+1;
+    return index === 0;
+  });
+  nestedEventOk=event.target===eventB&&event.currentTarget===eventB&&
+    match===undefined&&innerEventCalls===1;
+});
+eventA.addEventListener("click", function(event) {
+  var match = eventSource.find(function(value, index, array) {
+    outerEventCalls=outerEventCalls+1;
+    if (index === 0) {
+      eventB.click();
+      return false;
+    }
+    if (index === 1) {
+      array[index] = {};
+      array.length = 0;
+    }
+    return true;
+  });
+  outerEventOk=event.target===eventA&&event.currentTarget===eventA&&
+    match===eventReference&&match.value===5&&outerEventCalls===2&&
+    eventSource.length===0&&nestedEventOk;
+  document.getElementById("result").textContent=
+    "JS98:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+</script>
+</body>
+</html>
