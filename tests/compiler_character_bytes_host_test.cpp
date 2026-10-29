@@ -283,7 +283,6 @@ static bool test_diagnostics()
     const char* arrayInitializer =
         "int gx_main(gx_app_context* ctx) { char data[2] = 'A'; return 0; }";
     const char* charAddress = "int gx_main(gx_app_context* ctx) { char value = 'A'; int* p = &value; return 0; }";
-    const char* global = "char value[2]; int gx_main(gx_app_context* ctx) { return 0; }";
     const char* tooMany = "int gx_main(gx_app_context* ctx) { char data[65]; return 0; }";
     const char* unsignedInt = "int gx_main(gx_app_context* ctx) { unsigned int value = 1; return value; }";
     const char* unsignedMissingBase = "int gx_main(gx_app_context* ctx) { unsigned value = 1; return value; }";
@@ -308,7 +307,6 @@ static bool test_diagnostics()
     const uint32_t arrayInitializerOffset =
         static_cast<uint32_t>(std::strstr(arrayInitializer, "data") - arrayInitializer);
     const uint32_t addressOffset = static_cast<uint32_t>(std::strchr(charAddress, '&') - charAddress);
-    const uint32_t globalOffset = static_cast<uint32_t>(std::strchr(global, '[') - global);
     const uint32_t limitOffset = static_cast<uint32_t>(std::strstr(tooMany, "65") - tooMany);
     return expect_rejection(unterminated, CompilerDiagnosticKind::Lexical,
                             "unterminated character literal", lexical) &&
@@ -336,8 +334,6 @@ static bool test_diagnostics()
                             "char array initializers", arrayInitializerOffset) &&
            expect_rejection(charAddress, CompilerDiagnosticKind::Unsupported,
                             "address of char storage", addressOffset) &&
-           expect_rejection(global, CompilerDiagnosticKind::Unsupported,
-                            "file-scope char arrays are not supported", globalOffset) &&
            expect_rejection(tooMany, CompilerDiagnosticKind::ResourceLimit,
                             "array length exceeds", limitOffset) &&
            expect_rejection(unsignedInt, CompilerDiagnosticKind::Unsupported,
@@ -354,12 +350,31 @@ static bool test_diagnostics()
                             static_cast<uint32_t>(std::strstr(unsignedTooMany, "65") - unsignedTooMany));
 }
 
+static bool test_file_scope_signed_byte_array_declaration()
+{
+    const char* source = "char value[2]; int gx_main(gx_app_context* ctx) { return 0; }";
+    const uint32_t sourceBytes = static_cast<uint32_t>(std::strlen(source));
+    uint32_t tokenCount = 0;
+    g_unit = {};
+    Diagnostics diagnostics;
+    if (!require(lex_source(source, sourceBytes, g_tokens, COMPILER_MAX_TOKENS,
+                           &tokenCount, diagnostics) &&
+                 parse_translation_unit(source, g_tokens, tokenCount, &g_unit, diagnostics,
+                                        &g_calls[0][0], &g_arguments[0][0]),
+                 "file-scope signed char array declaration parses")) return false;
+    return require(g_unit.globalCount == 1 && g_unit.globals[0].kind == StorageKind::ArrayChar &&
+                   g_unit.globals[0].elementCount == 2 && g_unit.globals[0].elementSize == 1 &&
+                   g_unit.globals[0].size == 2 && g_unit.globals[0].alignment == 1,
+                   "file-scope signed char array has bounded one-byte layout metadata");
+}
+
 } // namespace
 
 int main()
 {
     if (!test_character_execution_and_bytes() || !test_unsigned_character_execution_and_arrays() ||
-        !test_array_bounds() || !test_diagnostics()) return 1;
+        !test_array_bounds() || !test_diagnostics() ||
+        !test_file_scope_signed_byte_array_declaration()) return 1;
     std::puts("compiler_character_bytes_host_test: PASS");
     return 0;
 }

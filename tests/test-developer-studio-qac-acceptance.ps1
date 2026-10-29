@@ -29,7 +29,7 @@ Assert-QacTest ($smokeScript.Contains('[switch]$Comp4FNativeBuildRunOnly') -and
     $smokeScript.Contains("'comp4f_compile_failure_preserved=PASS'") -and
     $smokeScript.Contains("'comp4f_repeated_build_identity=PASS'")) 'COMP4F admission requires the bounded character, array, failure-safety, and generation checks.'
 Assert-QacTest ($smokeScript.Contains('[switch]$Comp4KNativeBuildRunOnly') -and
-    $smokeScript.Contains("'comp4k_object_abi16=PASS'") -and
+    $smokeScript.Contains("'comp4k_object_abi17=PASS'") -and
     $smokeScript.Contains("'comp4k_character_bytes=PASS'") -and
     $smokeScript.Contains("'comp4k_queued_cancel_preserved=PASS'") -and
     $smokeScript.Contains("'comp4k_function_abi=PASS'") -and

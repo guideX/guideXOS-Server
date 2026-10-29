@@ -2295,7 +2295,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
         if ($Comp4KNativeBuildRun) {
             $requiredMarkers += @(
                 'comp4k_cooperative_progress=PASS',
-                'comp4k_object_abi16=PASS',
+                'comp4k_object_abi17=PASS',
                 'comp4k_character_bytes=PASS',
                 'comp4k_queued_cancel_preserved=PASS',
                 'comp4k_function_abi=PASS',

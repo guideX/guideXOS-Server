@@ -308,24 +308,24 @@ static bool test_scalar_storage_and_execution()
     const int32_t reopenedSigned = find_module_export(g_scratchModules[0], "signedValue");
     const int32_t reopenedUnsigned = find_module_export(g_scratchModules[0], "unsignedValue");
     if (!require(inspect_elf_object(g_object[0], bytes, &header, headerDiagnostics) &&
-                 header.formatVersion == 2 && header.compilerObjectAbiVersion == 16 &&
+                 header.formatVersion == 2 && header.compilerObjectAbiVersion == 17 &&
                  g_scratchModules[0].mutableDataBytes == 20 && reopenedSigned >= 0 && reopenedUnsigned >= 0 &&
                  g_scratchModules[0].exports[reopenedSigned].kind == SymbolKind::DataChar &&
                  g_scratchModules[0].exports[reopenedUnsigned].kind == SymbolKind::DataUnsignedChar,
-                 "object ABI 16 preserves format 2 byte signedness and layout")) return false;
+                 "object ABI 17 preserves format 2 byte signedness and layout")) return false;
     uint32_t repeatBytes = 0;
     if (!require(serialize_elf_object(g_modules[0], g_objectAgain, sizeof(g_objectAgain), &repeatBytes) &&
                  repeatBytes == bytes && std::memcmp(g_object[0], g_objectAgain, bytes) == 0,
                  "typed global object serialization is deterministic")) return false;
     std::memcpy(g_objectAgain, g_object[0], bytes);
-    g_objectAgain[header.metaOffset + 16U] = 15U;
+    g_objectAgain[header.metaOffset + 16U] = 16U;
     const uint64_t oldAbiChecksum = elf_object_checksum(g_objectAgain, bytes, header.metaOffset + 112U);
     for (uint32_t i = 0; i < 8U; ++i)
         g_objectAgain[header.metaOffset + 112U + i] = static_cast<uint8_t>(oldAbiChecksum >> (8U * i));
     Diagnostics oldAbiDiagnostics;
     if (!require(!deserialize_elf_object(g_objectAgain, bytes, &g_scratchModules[1], oldAbiDiagnostics) &&
                  diagnostic_contains(oldAbiDiagnostics, "compiler identity"),
-                 "ABI 15 cached objects are rejected")) return false;
+                 "ABI 16 cached objects are rejected")) return false;
 
     Diagnostics linkDiagnostics;
     if (!require(link_modules(g_modules, 1, &g_linked, linkDiagnostics),
@@ -436,9 +436,10 @@ static bool test_rejections_and_limits()
                  diagnostic_contains(diagnostics, "global initializer must be a constant integer"),
                  "unsupported initializer expressions receive a source-located diagnostic")) return false;
     diagnostics = Diagnostics();
-    if (!require(!compile_text("src/array.c", "unsigned char buffer[16];", &bad, diagnostics) &&
-                 diagnostic_contains(diagnostics, "file-scope char arrays are not supported"),
-                 "optional byte arrays are explicitly classified unsupported")) return false;
+    if (!require(compile_text("src/array.c", "unsigned char buffer[16];", &bad, diagnostics) &&
+                 bad.mutableDataBytes == 16 && bad.exportCount == 1 &&
+                 bad.exports[0].kind == SymbolKind::DataUnsignedCharArray,
+                 "global byte arrays use persistent one-byte elements")) return false;
     diagnostics = Diagnostics();
     if (!require(!compile_text("src/file_static.c", "static int hidden = 1;", &bad, diagnostics) &&
                  diagnostics.count() != 0 && diagnostics.at(0).kind == CompilerDiagnosticKind::Unsupported &&

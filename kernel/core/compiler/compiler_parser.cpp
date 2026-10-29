@@ -1053,7 +1053,8 @@ private:
                 (parameter && parameter->kind == ParameterKind::UnsignedCharacterPointer);
             const bool isArray = (local && (local->kind == StorageKind::ArrayInt ||
                                             storage_kind_is_char_array(local->kind))) ||
-                (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
+                (globalSymbol && (globalSymbol->kind == StorageKind::ArrayInt ||
+                                  storage_kind_is_char_array(globalSymbol->kind)));
             if (!isArray && !unsignedPointer) {
                 m_diagnostics.error(name.location, "indexed access requires an array", "array");
                 return false;
@@ -1098,10 +1099,14 @@ private:
                 m_output->statements[m_output->statementCount - 1U].targetExpression = target;
                 return true;
             }
-            if (local && storage_kind_is_char_array(local->kind) &&
+            if (((local && storage_kind_is_char_array(local->kind)) ||
+                 (globalSymbol && storage_kind_is_char_array(globalSymbol->kind))) &&
                 m_output->expressions[expression].type != ValueType::Int32) {
+                const bool unsignedElements = local
+                    ? local->kind == StorageKind::ArrayUnsignedChar
+                    : globalSymbol->kind == StorageKind::ArrayUnsignedChar;
                 m_diagnostics.error(name.location,
-                    local->kind == StorageKind::ArrayUnsignedChar
+                    unsignedElements
                         ? "unsigned char array elements require an int expression"
                         : "char array elements require an int expression", "type");
                 return false;
@@ -1117,9 +1122,12 @@ private:
             statement.elementCount = elementCount;
             statement.elementSize = local ? local->elementSize : globalSymbol->elementSize;
             statement.indexedBaseKind = local ? IndexedBaseKind::Local : IndexedBaseKind::Global;
-            statement.indexedElementKind = local && local->kind == StorageKind::ArrayUnsignedChar
+            statement.indexedElementKind =
+                ((local && local->kind == StorageKind::ArrayUnsignedChar) ||
+                 (globalSymbol && globalSymbol->kind == StorageKind::ArrayUnsignedChar))
                 ? IndexedElementKind::UnsignedCharacter
-                : (local && local->kind == StorageKind::ArrayChar
+                : (((local && local->kind == StorageKind::ArrayChar) ||
+                    (globalSymbol && globalSymbol->kind == StorageKind::ArrayChar))
                     ? IndexedElementKind::Character : IndexedElementKind::Int32);
             if (local) {
                 for (uint32_t i = 0; i < m_output->localCount; ++i)
@@ -1183,7 +1191,8 @@ private:
                                     name.location, expression,
                                     static_cast<uint16_t>(slot), COMPILER_INVALID_INDEX);
         }
-        if (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt) {
+        if (global >= 0 && (m_unit->globals[global].kind == StorageKind::ArrayInt ||
+                            storage_kind_is_char_array(m_unit->globals[global].kind))) {
             m_diagnostics.error(name.location, "array value cannot be assigned directly", "array");
             return false;
         }
@@ -1724,7 +1733,8 @@ private:
             else if (local && storage_kind_is_char_array(local->kind))
                 m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, location,
                                       "character array pointers are not supported", "pointer");
-            else if (global >= 0 && m_unit->globals[global].kind == StorageKind::ArrayInt)
+            else if (global >= 0 && (m_unit->globals[global].kind == StorageKind::ArrayInt ||
+                                     storage_kind_is_char_array(m_unit->globals[global].kind)))
                 m_diagnostics.error(location, "array value is not addressable; use an element", "pointer");
             else if (parameter)
                 m_diagnostics.error(location, "expression is not addressable", "pointer");
@@ -1742,7 +1752,8 @@ private:
                                         local->kind == StorageKind::ArrayStruct ||
                                         local->kind == StorageKind::ArrayUnsignedChar)) ||
             (global >= 0 && (m_unit->globals[global].kind == StorageKind::ArrayInt ||
-                             m_unit->globals[global].kind == StorageKind::ArrayStruct));
+                             m_unit->globals[global].kind == StorageKind::ArrayStruct ||
+                             m_unit->globals[global].kind == StorageKind::ArrayUnsignedChar));
         if (!isArray) {
             m_diagnostics.error(location, "indexed access requires an array", "array");
             return COMPILER_INVALID_INDEX;
@@ -1764,6 +1775,8 @@ private:
         m_output->expressions[expression].elementSize = isLocal ? local->elementSize : m_unit->globals[global].elementSize;
         m_output->expressions[expression].indexedBaseKind = isLocal ? IndexedBaseKind::Local : IndexedBaseKind::Global;
         if (isLocal && local->kind == StorageKind::ArrayUnsignedChar)
+            m_output->expressions[expression].type = ValueType::UnsignedCharPointer;
+        if (!isLocal && m_unit->globals[global].kind == StorageKind::ArrayUnsignedChar)
             m_output->expressions[expression].type = ValueType::UnsignedCharPointer;
         if (structArray) {
             m_output->expressions[expression].type = ValueType::StructPointer;
@@ -1899,7 +1912,8 @@ private:
                 }
                 const bool isArray = (local && (local->kind == StorageKind::ArrayInt ||
                                                 storage_kind_is_char_array(local->kind))) ||
-                    (globalSymbol && globalSymbol->kind == StorageKind::ArrayInt);
+                    (globalSymbol && (globalSymbol->kind == StorageKind::ArrayInt ||
+                                      storage_kind_is_char_array(globalSymbol->kind)));
                 if (!isArray) {
                     m_diagnostics.error(token.location, structArray
                         ? "struct array element requires a field access" : "indexed access requires an array", "array");
@@ -1924,9 +1938,11 @@ private:
                 m_output->expressions[expression].indexedBaseKind =
                     local ? IndexedBaseKind::Local : IndexedBaseKind::Global;
                 m_output->expressions[expression].indexedElementKind =
-                    local && local->kind == StorageKind::ArrayUnsignedChar
+                    ((local && local->kind == StorageKind::ArrayUnsignedChar) ||
+                     (globalSymbol && globalSymbol->kind == StorageKind::ArrayUnsignedChar))
                         ? IndexedElementKind::UnsignedCharacter
-                        : (local && local->kind == StorageKind::ArrayChar
+                        : (((local && local->kind == StorageKind::ArrayChar) ||
+                            (globalSymbol && globalSymbol->kind == StorageKind::ArrayChar))
                             ? IndexedElementKind::Character : IndexedElementKind::Int32);
                 return expression;
             }
@@ -2028,7 +2044,8 @@ private:
                     m_diagnostics.error(token.location, "struct array value requires an indexed field access", "array");
                     return COMPILER_INVALID_INDEX;
                 }
-                if (m_unit->globals[global].kind == StorageKind::ArrayInt) {
+                if (m_unit->globals[global].kind == StorageKind::ArrayInt ||
+                    m_unit->globals[global].kind == StorageKind::ArrayUnsignedChar) {
                     const uint16_t zero = make_constant(0, token.location);
                     const uint16_t expression = make_expression(ExpressionKind::AddressOfIndexed,
                         token.location, zero, COMPILER_INVALID_INDEX,
@@ -2038,7 +2055,14 @@ private:
                     m_output->expressions[expression].elementCount = m_unit->globals[global].elementCount;
                     m_output->expressions[expression].elementSize = m_unit->globals[global].elementSize;
                     m_output->expressions[expression].indexedBaseKind = IndexedBaseKind::Global;
+                    if (m_unit->globals[global].kind == StorageKind::ArrayUnsignedChar)
+                        m_output->expressions[expression].type = ValueType::UnsignedCharPointer;
                     return expression;
+                }
+                if (m_unit->globals[global].kind == StorageKind::ArrayChar) {
+                    m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, token.location,
+                                          "signed char arrays do not convert to byte pointers", "array");
+                    return COMPILER_INVALID_INDEX;
                 }
                 if (m_unit->globals[global].kind == StorageKind::PointerInt) {
                     m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, token.location,
@@ -2331,8 +2355,7 @@ static bool parse_global_initializer_value(const char* source, const Token* toke
 static bool global_signature_matches(const GlobalSymbolIR& global, StorageKind kind,
                                      uint16_t elementCount)
 {
-    const uint16_t elementSize = kind == StorageKind::ScalarChar ||
-        kind == StorageKind::ScalarUnsignedChar ? 1U : 4U;
+    const uint16_t elementSize = storage_kind_is_char8(kind) ? 1U : 4U;
     return global.kind == kind && global.elementCount == elementCount &&
         global.elementSize == elementSize &&
         global.size == static_cast<uint32_t>(elementCount) * elementSize &&
@@ -2373,17 +2396,14 @@ static bool parse_global_declaration(const char* source, const Token* tokens,
     }
     bool isArray = false;
     uint16_t elementCount = 1;
-    if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::LeftBracket &&
-        scalarKind != StorageKind::ScalarInt) {
-        diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
-                            tokens[token_index_or_eof(*index, tokenCount)].location,
-                            "file-scope char arrays are not supported", "global");
-        return false;
-    }
     if (!parse_global_array_length(source, tokens, tokenCount, index,
                                    COMPILER_MAX_ARRAY_ELEMENTS, &isArray,
                                    &elementCount, diagnostics)) return false;
-    const StorageKind kind = isArray ? StorageKind::ArrayInt : scalarKind;
+    const StorageKind kind = isArray
+        ? (scalarKind == StorageKind::ScalarChar ? StorageKind::ArrayChar
+            : (scalarKind == StorageKind::ScalarUnsignedChar
+                ? StorageKind::ArrayUnsignedChar : StorageKind::ArrayInt))
+        : scalarKind;
     bool hasInitializer = false;
     int32_t initialValue = 0;
     uint16_t initializerCount = 0;
@@ -2397,6 +2417,12 @@ static bool parse_global_declaration(const char* source, const Token* tokens,
         ++(*index);
     } else {
         if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::Equal) {
+            if (storage_kind_is_char_array(kind)) {
+                diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                    tokens[token_index_or_eof(*index, tokenCount)].location,
+                                    "file-scope byte array initializers are not supported", "global");
+                return false;
+            }
             hasInitializer = true;
             ++(*index);
             if (isArray && tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::LeftBrace) {
@@ -2446,8 +2472,7 @@ static bool parse_global_declaration(const char* source, const Token* tokens,
         ++(*index);
     }
 
-    const uint16_t elementSize = kind == StorageKind::ScalarChar ||
-        kind == StorageKind::ScalarUnsignedChar ? 1U : 4U;
+    const uint16_t elementSize = storage_kind_is_char8(kind) ? 1U : 4U;
     const uint32_t size = static_cast<uint32_t>(elementCount) * elementSize;
     const int32_t existing = find_global(*output, name);
     if (existing >= 0) {

@@ -154,6 +154,9 @@ static bool valid_linker_data_signature(const CompiledModule& module, SymbolKind
                                                                 elementSize, alignment);
     if (kind == SymbolKind::DataChar || kind == SymbolKind::DataUnsignedChar)
         return elementCount == 1 && elementSize == 1 && size == 1 && alignment == 1;
+    if (kind == SymbolKind::DataCharArray || kind == SymbolKind::DataUnsignedCharArray)
+        return elementCount != 0 && elementCount <= COMPILER_MAX_ARRAY_ELEMENTS &&
+            elementSize == 1 && size == elementCount && alignment == 1;
     return ((kind == SymbolKind::Data && elementCount == 1) || kind == SymbolKind::DataArray) &&
         elementCount != 0 && elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
         size == static_cast<uint32_t>(elementCount) * elementSize && alignment == 4;

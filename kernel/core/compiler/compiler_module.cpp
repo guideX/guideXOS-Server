@@ -159,9 +159,12 @@ static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
         const bool integerArray = global.kind == StorageKind::ArrayInt;
         const bool scalarByte = global.kind == StorageKind::ScalarChar ||
             global.kind == StorageKind::ScalarUnsignedChar;
+        const bool byteArray = storage_kind_is_char_array(global.kind);
         const bool validScalarOrArray =
             ((scalarInteger || integerArray) && global.elementSize == 4 && global.alignment == 4) ||
-            (scalarByte && global.elementCount == 1 && global.elementSize == 1 && global.alignment == 1);
+            (scalarByte && global.elementCount == 1 && global.elementSize == 1 && global.alignment == 1) ||
+            (byteArray && global.elementCount <= COMPILER_MAX_ARRAY_ELEMENTS &&
+             global.elementSize == 1 && global.alignment == 1);
         if ((global.alignment != 1 && global.alignment != 4) ||
             (global.alignment == 4 && offset > 0xFFFFFFFCU) ||
             global.elementCount == 0 || global.size == 0 ||
@@ -188,7 +191,7 @@ static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
             const int32_t initial = integerArray
                 ? global.initialValues[element] : global.initialValue;
             const uint32_t value = static_cast<uint32_t>(initial);
-            const uint32_t at = offset + element * 4U;
+            const uint32_t at = offset + element * global.elementSize;
             module->mutableData[at] = static_cast<uint8_t>(value);
             if (global.elementSize == 4) {
                 module->mutableData[at + 1U] = static_cast<uint8_t>(value >> 8);
