@@ -112,6 +112,14 @@ if ($parsedEvidence.allocationEvents.Count -ne 1 -or
     $parsedEvidence.firstIncompleteOperation -ne 'factory:model-init-enter') {
     throw 'C188R12R4 guest evidence parser did not preserve allocation data and first missing factory stage.'
 }
+$failureSerial = $sampleSerial + "`n" +
+    'C188R12R4_ALLOC invocation=123 selector=5 operation=3 kind=array stage=context-invalid size=0000000000000040 cursor=0000000000000000 available=0000000000000000 result=bounded-failfast'
+$failureEvidence = Get-C188R12R4FactoryEvidence -SerialText $failureSerial -CaptureState 'complete'
+if ($failureEvidence.outcome -ne 'EXPLICIT_ALLOCATION_FAILURE' -or
+    $failureEvidence.firstIncompleteOperation -ne 'allocation:array:context-invalid' -or
+    $failureEvidence.allocationEvents.Count -ne 2) {
+    throw 'C188R12R4 guest evidence parser did not classify array fail-fast evidence explicitly.'
+}
 
 $handoffSource = [System.IO.File]::ReadAllText(
     (Join-Path $PSScriptRoot 'run-c188r12r1-settings-handoff.ps1'))

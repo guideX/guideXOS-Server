@@ -44,7 +44,7 @@ function Get-C188R12R4FactoryEvidence {
     $lastStage = if ($stages.Count -gt 0) { $stages[-1] } else { $null }
 
     if ($allocationLines | Where-Object {
-        $_.Groups['stage'].Value -eq 'fast-capacity-miss' -and
+        $_.Groups['stage'].Value -in @('context-invalid', 'fast-capacity-miss') -and
         $_.Groups['result'].Value -eq 'bounded-failfast'
     } | Select-Object -First 1) {
         $outcome = 'EXPLICIT_ALLOCATION_FAILURE'
@@ -94,7 +94,7 @@ function Get-C188R12R4FactoryEvidence {
     $firstIncompleteOperation = $null
     if ($outcome -eq 'EXPLICIT_ALLOCATION_FAILURE') {
         $failure = $allocationLines | Where-Object {
-            $_.Groups['stage'].Value -eq 'fast-capacity-miss' -and
+            $_.Groups['stage'].Value -in @('context-invalid', 'fast-capacity-miss') -and
             $_.Groups['result'].Value -eq 'bounded-failfast'
         } | Select-Object -First 1
         $firstIncompleteOperation = "allocation:$($failure.Groups['kind'].Value):$($failure.Groups['stage'].Value)"
