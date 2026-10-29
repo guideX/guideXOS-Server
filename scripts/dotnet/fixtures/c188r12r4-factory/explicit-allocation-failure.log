@@ -3,4 +3,4 @@ C188R12R4_FACTORY invocation=2 selector=5 operation=0 stage=factory-invoke code=
 C188R12R4_FACTORY invocation=2 selector=5 operation=1 stage=type-init-enter code=0 result=begin
 C188R12R4_FACTORY invocation=2 selector=5 operation=2 stage=type-init-return code=0 result=complete
 C188R12R4_FACTORY invocation=2 selector=5 operation=2 stage=object-allocation-request code=0 result=new-expression
-C188R12R4_ALLOC invocation=2 selector=5 operation=2 kind=array stage=fast-capacity-miss size=0000000000000100 cursor=0000000010001000 available=0000000000000010 result=bounded-failfast
+C188R12R4_ALLOC invocation=0000000000000002 selector=0000000000000005 operation=0000000000000002 kind=array stage=fast-capacity-miss size=0000000000000100 cursor=0000000010001000 available=0000000000000010 result=bounded-failfast

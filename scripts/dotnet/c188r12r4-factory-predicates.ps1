@@ -1,7 +1,17 @@
+function Convert-C188R12R4TraceNumber([string]$Value) {
+    # Managed markers use decimal IDs; native allocation markers use a fixed
+    # 16-digit hexadecimal representation from persistentSerialPutHex64.
+    if ($Value -match '^[0-9A-Fa-f]{16}$') {
+        return [Convert]::ToUInt64($Value, 16).ToString(
+            [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    return $Value
+}
+
 function Get-C188R12R4FactoryEvidence {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)][string]$SerialText,
+        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$SerialText,
         [Parameter()][ValidateSet('complete','incomplete','live')][string]$CaptureState = 'incomplete'
     )
 
@@ -35,10 +45,17 @@ function Get-C188R12R4FactoryEvidence {
         }
     }
 
-    $invocation = $factoryInvoke.Groups['invocation'].Value
-    $factoryLines = @($factoryLines | Where-Object { $_.Groups['invocation'].Value -eq $invocation })
-    $lifetimeLines = @($lifetimeLines | Where-Object { $_.Groups['invocation'].Value -eq $invocation })
-    $allocationLines = @($allocationLines | Where-Object { $_.Groups['invocation'].Value -eq $invocation })
+    $invocation = Convert-C188R12R4TraceNumber $factoryInvoke.Groups['invocation'].Value
+    $factoryLines = @($factoryLines | Where-Object {
+        (Convert-C188R12R4TraceNumber $_.Groups['invocation'].Value) -eq $invocation
+    })
+    $lifetimeLines = @($lifetimeLines | Where-Object {
+        (Convert-C188R12R4TraceNumber $_.Groups['invocation'].Value) -eq $invocation
+    })
+    $allocationLines = @($allocationLines | Where-Object {
+        (Convert-C188R12R4TraceNumber $_.Groups['invocation'].Value) -eq $invocation -and
+        (Convert-C188R12R4TraceNumber $_.Groups['selector'].Value) -eq '5'
+    })
     $stages = @($factoryLines | ForEach-Object { $_.Groups['stage'].Value })
     $lifetimeStages = @($lifetimeLines | ForEach-Object { $_.Groups['stage'].Value })
     $lastStage = if ($stages.Count -gt 0) { $stages[-1] } else { $null }

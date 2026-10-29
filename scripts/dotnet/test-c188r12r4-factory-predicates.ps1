@@ -18,6 +18,15 @@ Assert-C188R12R4 'Factory entry without constructor entry' 'factory-entry-no-con
 Assert-C188R12R4 'Constructor entry without return' 'constructor-entry-no-return.log' 'CONSTRUCTOR_ENTRY_NO_RETURN'
 Assert-C188R12R4 'Allocation slow path without result' 'allocation-request-no-result.log' 'ALLOCATION_REQUEST_NO_RESULT'
 Assert-C188R12R4 'Explicit bounded allocator failure' 'explicit-allocation-failure.log' 'EXPLICIT_ALLOCATION_FAILURE'
+$nativeAllocation = Get-C188R12R4FactoryEvidence `
+    -SerialText (Get-Content -LiteralPath (Join-Path $fixtureRoot 'explicit-allocation-failure.log') -Raw) `
+    -CaptureState 'complete'
+if (-not $nativeAllocation.rootCauseProven -or
+    $nativeAllocation.firstIncompleteOperation -ne 'allocation:array:fast-capacity-miss' -or
+    $nativeAllocation.allocationEvents.Count -ne 1 -or
+    (Convert-C188R12R4TraceNumber $nativeAllocation.allocationEvents[0].invocation) -ne '2') {
+    throw 'Native fixed-width hexadecimal allocation markers were not correlated to the decimal factory invocation.'
+}
 Assert-C188R12R4 'Constructor success without factory return' 'constructor-success-factory-nonreturn.log' 'CONSTRUCTOR_SUCCESS_FACTORY_NONRETURN'
 Assert-C188R12R4 'Factory return without completed registration' 'factory-success-registration-failure.log' 'FACTORY_SUCCESS_REGISTRATION_FAILURE'
 Assert-C188R12R4 'Full Settings startup' 'complete-settings-startup.log' 'SETTINGS_STARTUP_SUCCESS'
