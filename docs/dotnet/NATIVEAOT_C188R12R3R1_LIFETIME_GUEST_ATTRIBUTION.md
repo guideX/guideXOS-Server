@@ -10,7 +10,7 @@
 - Ending investigation HEAD before this closeout commit: `3b6e489bca7b2625d1094ab8a70a84c31e6df450`.
 - The worktree already had a modified `ESP/ramdisk.img` and untracked host build and smoke-output directories. They were preserved. The source ramdisk SHA-256 before and after this work is `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`.
 - No reset, clean, restore, stash, branch switch, history rewrite, QEMU termination, runtime change, allocator change, source ramdisk change, or push was made.
-- The only phase edits are the lifetime evidence parser, its focused fixtures, the two runner call sites that provide capture-completeness state, and this report.
+- The only phase edits are the lifetime evidence parser, its focused fixtures, runner integration for capture-completeness state, and this report.
 
 ## Diagnostic candidate
 
