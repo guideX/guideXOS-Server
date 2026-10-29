@@ -1,6 +1,70 @@
 # C188R12R2R1R1 Settings Dispatch Guest Retry
 
-## Latest acceptance retry — 2026-10-28
+## Guest acceptance retry — 2026-10-28 (QAC recovered)
+
+**Outcome C — `DISPATCH_FAILURE_LOCALIZED`.** One QAC-authorized guest boot reached Settings selector 5 dispatch. Registration lookup and shared runtime-settings initialization passed. The last Settings dispatch marker is `lifetime-start BEGIN`; its matching result marker, application entry, application return, and dispatch return were not observed during the bounded 30-second trace window.
+
+This localizes the stall to the synchronous `s_lifetime.TryStart(descriptor, applicationGeneration, out application, out generation)` interval in `samples/managed/HostLogProof/GuideXos/GuideXosApplication.cs`, immediately after the `lifetime-start BEGIN` marker. There is no explicit failure code. The trace is consistent with execution stalling in that call path, but does not prove which internal operation stopped or exclude a missing output record. The Settings application entry and surface path were not reached.
+
+### Baseline and preservation
+
+- Repository: `D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT`; branch: `v1.1_DOTNET_SUPPORT`.
+- Actual starting HEAD: `87136642fa60077ebc167bfc3d95ca77eaaf51dc`.
+- Ending qualification HEAD before this documentation closeout: `87136642fa60077ebc167bfc3d95ca77eaaf51dc`.
+- This attempt used one QAC-managed boot, one Settings click, and no keyboard input. The earlier attempts in this report used no guest boot.
+- The pre-existing source `ESP/ramdisk.img` modification remains untouched and hashes to `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`.
+- Existing untracked build and smoke-test outputs were preserved. No runtime, registry, AppModel, Settings, kernel, or source ramdisk implementation changed.
+
+### Candidate and hosted checks
+
+The already-staged diagnostic candidate was revalidated and reused without rebuilding from `out/dotnet/c188r11-managed-state-provenance/candidates/r12r2-settings-dispatch-001`. The staging manifest reports `PASS`, 185 unrelated files preserved, and `changedOtherFiles=0`.
+
+| Artifact | SHA-256 | Verification |
+|---|---|---|
+| Diagnostic NativeAOT ELF | `E589E66DBC58EE74A02689EA164DEC2AF7178AA94C161895F91BC2F5867E43B` | Matches staging/build manifests; contains the Settings identity and `C188R12R2_LAUNCH` marker |
+| Candidate staged ramdisk | `AA692E80A7FE1EA478DA9C461986EC3BF8DD727192F5A9316887612C21FDC2DA` | Matches staging manifest |
+| Candidate kernel | `568B2C084387E45FE3718D422570EE761798542E461674AE8CE14A6B7804E864` | Matches runner input and acceptance manifest |
+| Candidate UEFI loader | `D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B` | Matches retained candidate hash |
+| Source `ESP/ramdisk.img` | `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` | Preserved |
+
+The build/runtime manifests report `persistentCompositeLifecycle=true`, `Primary64KiB`, a 65,536-byte heap, and `bounded-static-image-backed-no-collection`. The NativeAOT qualification reports Settings selector 5 and production selectors 4–8. The retained hosted preflight remains applicable because no source changed: marker parser 11 cases, Settings handoff 37, readiness 30, ownership 15, R12R2 registry dispatch 8, and lifecycle 7 all passed. The complete sequential hosted wrapper also passed; its stream-capture check passed 2 cases. The earlier concurrent stream-capture assertion failure remains recorded as a failure, with isolated and sequential reruns passing.
+
+### QAC admission, ownership, and input
+
+The fresh preflight at 2026-10-28 19:14:50 America/Los_Angeles showed QAC 2.0.0 online (PID 1388), zero QEMU processes, zero foreign processes, zero reservations, zero managed sessions, zero queued/blocked work, and no census warnings. The raw preflight is retained under `out/dotnet/c188r11-managed-state-provenance/runs/c188r12r2r1r1-settings-retry-002/admission-preflight-001/`.
+
+QAC granted exclusive reservation `f65b6276455f48bd9cea9e554260b041` after a 2.3-second admission wait. Owner PID 30904 and runner PID 4504 were correlated to QEMU child PID 7992 at `C:\Program Files\qemu\qemu-system-x86_64.exe`. Fresh status/list/inspect and local process identity checks were accepted before input, at the post-click checkpoint, and before shutdown; the census remained consistent with zero foreign QEMU processes.
+
+Notes reached its main loop with five descriptors (`n=5`). The source-defined Settings target was `(815,550)` in Notes window `000003E8`. The screenshot cursor finder reported one unique match at `(815,550)`, inside the safe inset `x=[776,854)`, `y=[542,558)`; no corrective pointer movement was needed. The runner sent exactly one left-button down/up pair and zero key events. Notes action `0x18` returned success and the Settings AppModel request was issued for `com.guidexos.apps.managed.settingscenter`, selector 5, image `/system/apps/GXOSAPP.ELF`.
+
+### Ordered dispatch trace and boundary
+
+| Boundary | Guest observation |
+|---|---|
+| Notes action `0x18` | One dispatch; managed return 0; `PASS` |
+| Settings AppModel request | Requested for the expected identity and selector 5 |
+| Native image entry / managed main and dispatch entry | Observed for generation 2 |
+| `dispatch-context`, `dispatch-prelude` | `PASS` |
+| `registration-lookup` | `BEGIN`, then `PASS code=0`; selector 5 resolved |
+| `runtime-settings-init` | `BEGIN`, then `PASS code=0` |
+| Managed lifecycle tests | The one-time suite had already passed during Notes startup (`cases=8`, `PASS`); its absence on the later Settings dispatch is expected |
+| `lifetime-start` | `BEGIN` observed; no `PASS` or `FAIL` result observed |
+| `ManagedSettingsCenter.Launch`, application/dispatch return | Not reached or observed |
+| Settings surface/readiness | Not reached; no Settings surface marker |
+
+The initial runner evidence file applied `RequireLifecycleTests=true`, so its generic `firstUnobservedBoundary` says `managed-lifecycle-tests-entry`. The serial log shows the suite passed earlier on Notes startup, and the persistent composite image runs it once. Re-evaluating the captured trace with that conditional stage optional gives `firstUnobservedBoundary=lifetime-start-result`; the corrected analysis is retained at `guest-001/dispatch-boundary-analysis.json`. The runner's broad handoff summary says `B_SETTINGS_SURFACE_DEFECT_LOCALIZED`; this closeout uses Outcome C because the dispatch did not reach application entry or the surface path.
+
+The post-transition screenshot still shows Notes and no Settings surface. The QMP PPM comparison changed 2,321 of 1,024,000 pixels (0.2267%). Since managed dispatch did not return, this image does not establish a compositor failure or a Settings presentation attempt.
+
+At `settings-dispatch-entry`, the native state marker reports `n=5` descriptors and `gc=0`; persistent heap initialization remained at 1, reset count at 1, and 12 preservation markers were recorded. No Settings resident return state was available (`settingsRegistryReturn=false`, resident mask unavailable sentinel `-1`), and no managed-runtime regression was proven. Registry/resident integrity after a completed Settings launch therefore remains unobserved.
+
+The runner requested QMP quit only after accepted pre-shutdown ownership. QEMU exited with code 0; QAC verified reservation release, and the postflight snapshot shows zero QEMU processes, reservations, and managed sessions. Raw serial SHA-256: `29F83812DFB00A081AF38C3286E54E6040AB04CFABD5C363CD8B37E37228BC2B`. The full guest evidence is retained in `out/dotnet/c188r11-managed-state-provenance/runs/c188r12r2r1r1-settings-retry-002/guest-001/`.
+
+### Smallest justified next action
+
+Do not change Settings, the allocator, or registry behavior based on this trace. First inspect and add bounded diagnostic points inside `s_lifetime.TryStart` around its factory and resident-registration operations, then run focused hosted checks. Any further guest boot belongs to a separately authorized phase; this retry used its one-boot allowance.
+
+## Prior QAC-blocked retry — coordinator unavailable
 
 **Outcome D — `QAC_OR_EXECUTION_BLOCKED`.** This addendum records the retry performed after the earlier closeout in this file. The guest diagnostic still could not start because the live QAC coordinator was unavailable. No guest boot, reservation request, pointer movement, click, or key input occurred.
 
