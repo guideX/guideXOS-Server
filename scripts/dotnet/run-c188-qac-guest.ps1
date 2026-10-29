@@ -530,7 +530,9 @@ $manifest = [ordered]@{
     persistentHeapPreserveMarkers=([regex]::Matches($serialText,'(?m)^\[NATIVEAOT-HEAP\] action=preserve count=[A-Fa-f0-9]{16} resetCount=0000000000000001 base=[A-Fa-f0-9]{16} allocation=[A-Fa-f0-9]{16} reason=resident-managed-thread\r?$')).Count
     r11ManagedSequenceOrder=if ($isC188R11Boot) { Test-C188R11ManagedSequenceOrder $serialText } else { $false }
     r11ManagedNativeBoundaryCorrelation=if ($isC188R11Boot) { Test-C188R11ManagedBoundaryCorrelation $serialText } else { $false }
-    r12r3LifetimeEvidence=if ($isC188R12R3Boot) { Get-C188R12R3LifetimeEvidence $serialText } else { $null }
+    r12r3LifetimeEvidence=if ($isC188R12R3Boot) {
+        Get-C188R12R3LifetimeEvidence -SerialText $serialText -CaptureState 'complete'
+    } else { $null }
     r11CheckpointBAvailable=$false
     r11CheckpointBLimitation='No safe read-only managed snapshot request exists after main-loop readiness; checkpoint A is the latest pre-input managed observation.'
     screenshotPath=(Join-Path $bootRoot 'desktop-ready.ppm')

@@ -393,7 +393,8 @@ try {
                                 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
                                 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence `
                                     $serialText $true
-                                $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence $serialText
+                                $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence `
+                                    -SerialText $serialText -CaptureState 'in-progress'
                                 if ([bool]$settingsEvidence.accepted) { break }
                                 if ([bool]$settingsDispatchEvidence.dispatchReturned) {
                                     if ($settingsDispatchEvidence.outcome -eq 'EXPLICIT_FAILURE') { break }
@@ -471,7 +472,6 @@ try {
 $serialText = Read-C188R12R1SharedText $serialPath
 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence $serialText $true
-$lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence $serialText
 $qmpControlText = Read-C188R12R1SharedText $qmpControlPath
 $clickEvidence = Test-C188R12R1SingleClickQmpEvidence $qmpControlText
 $runnerInputEvidence = Get-C188R12R1RunnerInputEvidence $serialText $qmpControlText `
@@ -497,6 +497,19 @@ $qacReleaseVerified = $null -ne $baseManifest -and
     [bool]$baseManifest.qacReleaseVerified -and
     $qacAfterStatus -match 'QEMU processes:\s+0 \(0 foreign\)' -and
     $qacAfterList -match 'Reservations:\s+0'
+$serialHashMatchesManifest = $false
+if ($null -ne $baseManifest -and
+    -not [string]::IsNullOrWhiteSpace([string]$baseManifest.serialSha256) -and
+    (Test-Path -LiteralPath $serialPath -PathType Leaf)) {
+    $serialHashMatchesManifest =
+        (Get-FileHash -LiteralPath $serialPath -Algorithm SHA256).Hash -eq
+        ([string]$baseManifest.serialSha256).ToUpperInvariant()
+}
+$serialCaptureComplete = $qacReleaseVerified -and $serialHashMatchesManifest -and
+    -not $ownershipDegraded
+$serialCaptureState = if ($serialCaptureComplete) { 'complete' } else { 'incomplete' }
+$lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence `
+    -SerialText $serialText -CaptureState $serialCaptureState
 $settingsRegistryRegression = [bool]$settingsEvidence.settingsRegistryReturn -and
     (-not [bool]$settingsEvidence.settingsRegistryReturnValid -or
      [bool]$settingsEvidence.settingsRegistryMemoryMismatch)
@@ -550,6 +563,9 @@ $finalEvidence = [ordered]@{
     qacOwnershipBeforeSettingsCheckpoint=$preSettingsCheckpointOwnership
     qacOwnershipBeforeShutdown=$preShutdownOwnership
     qmpQuitRequested=$qmpQuitRequested;qacReleaseVerified=$qacReleaseVerified
+    serialCaptureState=$serialCaptureState
+    serialHashMatchesAcceptanceManifest=$serialHashMatchesManifest
+    serialCaptureComplete=$serialCaptureComplete
     qacAdmissionConfirmed=if ($null -ne $baseManifest) { [bool]$baseManifest.qacAdmissionConfirmed } else { $false }
     qacOwnershipProofAccepted=if ($null -ne $baseManifest) { [bool]$baseManifest.qacOwnershipProofAccepted } else { $false }
     settingsEvidence=$settingsEvidence
