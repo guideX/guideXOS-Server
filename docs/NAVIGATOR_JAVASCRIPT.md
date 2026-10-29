@@ -12717,7 +12717,77 @@ Generic array-like receivers, Array subclasses and species, and dynamic Array
 capacity growth remain unsupported. No QEMU or QAC activity is part of this
 hosted-only phase.
 
-Recommended JS97 scope: qualify `Array.prototype.every()` by reusing the
-bounded traversal control while proving its false-result short circuit and
-Boolean return behavior independently. Keep `find()`, `findIndex()`, and
-`reduce()` outside that phase unless separately selected and specified.
+## JS97 — bounded `Array.prototype.every()`
+
+JS97 adds `Array.prototype.every(callback[, thisArg])` to the same bounded
+Array prototype. The receiver must be a genuine runtime Array. The callback is
+validated before traversal, including for an empty source, and receives
+`(value, index, sourceArray)` with the optional `thisArg`. Callback results are
+converted with the runtime's existing JavaScript truthiness rules; the method
+always returns a JavaScript Boolean.
+
+`every()` uses the shared JS93–JS96 captured-length traversal, live
+inherited-aware presence check, indexed value read, and callback invocation
+path. Holes are skipped, inherited numeric properties are visited, and an
+explicit `undefined` value is present. The source's logical length is captured
+once. Future replacements and inserted in-range properties are observed;
+removed or truncated slots are skipped; appends beyond the initial length are
+ignored. Each callback receives the value read for that visit even if it
+changes the current source slot.
+
+An empty or all-hole Array returns `true` without callback calls, unless an
+inherited numeric property fills a hole. A falsy callback result sets the
+Boolean result to `false` and uses the traversal's successful `Stop` status.
+No later index lookup or callback runs, while side effects already performed
+remain visible. Callback exceptions, nested runtime errors, execution-budget
+exhaustion, and call-depth exhaustion continue through the runtime error path.
+The distinct `Continue`, `Stop`, and `Error` statuses keep this method's stop
+rule separate from `forEach()`, `map()`, `filter()`, and `some()` semantics.
+
+`every()` creates no result Array and stages no mapped values. The existing
+1,024-position length limit, object and slot capacity limits, record layouts,
+reference lifetime behavior, and callback-environment ownership remain in
+force. Generic array-like receivers, Array subclasses and species, and dynamic
+Array capacity growth remain unsupported.
+
+The JS97 native lane covers Boolean results, truthiness, callback arguments and
+identity, `thisArg`, false-result short-circuiting, sparse and inherited
+indices, live replacement, deletion through length shrink, future-property
+insertion, append, source shrink, current-index mutation, unrelated Array
+mutation, nested Array methods and Event dispatch, callback and runtime-limit
+errors, no-result storage, and zero, maximum, sparse-maximum, and rejected
+1,025-position boundaries. The hosted fixture is
+`navigator-smoke/javascript-js97.html`; the hosted server aggregate checks its
+success and failure paths, sparse traversal, short-circuit marker, and nested
+Event dispatch.
+
+The JS97 focused native lane passes **29/29 checks** under strict C++17 warning
+flags (`-Wall -Wextra -Werror -pedantic`). Its GCC `-O2 -fstack-usage` report
+measures **672 bytes** for `traverseArray`, **736 bytes** for `invokeNative`,
+and **560 bytes** for `invokeFunction`, unchanged from JS96. `RuntimeObject`
+and `RuntimeArrayElement` remain **88 and 48 bytes**. These hosted compiler
+measurements do not establish a bare-metal stack guarantee.
+
+The complete JavaScript matrix passes **99/99 lanes** and **17,092/17,092
+reported assertions** (the JS96 baseline was 98/98 and 17,063/17,063). The
+focused JS93–JS97 native regression lanes pass **168/168 checks**: JS93
+forEach **50/50**, JS94 map **29/29**, JS95 filter **31/31**, JS96 some
+**29/29**, and JS97 every **29/29**. The production hosted aggregate reports
+**726/733 checks**, with the same seven CSS baseline failures as the JS96
+723/730 run; all three added JS97 hosted checks pass, and there are no
+JavaScript failures. The aggregate's nonzero status is from those existing CSS
+failures.
+
+The production build completed with an **8,751,256-byte** executable
+(SHA-256 `3F17C9268C4E17C24FBA43AB2CAA3DDDD264D8D50934EEAC347BCCDEF514DBA1`),
+352,982 bytes larger than the preserved pre-build executable. The original installed
+8,398,274-byte executable was restored and SHA-256 verified as
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated viewport fixtures (458,372 bytes total) match their pre-build
+SHA-256 manifest. The tracked worktree was committed locally; `.phase` remains
+absent. No QEMU or QAC qualification was run.
+
+Recommended JS98 scope: qualify bounded `Array.prototype.find()` with the same
+captured-length traversal and a distinct result-presence representation, after
+specifying how a found `undefined` value is distinguished from no match. Keep
+`findIndex()` and `reduce()` outside JS98 unless separately selected.

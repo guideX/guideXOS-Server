@@ -383,6 +383,7 @@ private:
         ArrayMap,
         ArrayFilter,
         ArraySome,
+        ArrayEvery,
         ArrayIteratorCreate,
         ArrayIteratorCreateKeys,
         ArrayIteratorCreateEntries,

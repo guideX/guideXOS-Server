@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS97</title></head>
+<body>
+<h1>Navigator JavaScript JS97</h1>
+<pre id="result">JS97:pending</pre>
+<button id="every-event-a" type="button">Run JS97 every event</button>
+<button id="every-event-b" type="button">Nested JS97 every event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions=assertions+1;
+  if (!condition) failures=failures+1;
+}
+
+var values = [2, 4, 6, 9, 10];
+var calls = 0;
+var indices = "";
+var callbackArgs = true;
+var allEven = values.every(function(value, index, array) {
+  calls=calls+1;
+  indices=indices+index;
+  callbackArgs=callbackArgs&&array===values&&value===values[index];
+  return value % 2 === 0;
+});
+verify(allEven === false && calls === 4 && indices === "0123");
+verify(callbackArgs && values[4] === 10);
+
+var empty = [];
+var emptyCalls = 0;
+var emptyResult = empty.every(function() {
+  emptyCalls=emptyCalls+1;
+  return false;
+});
+verify(emptyResult === true && emptyCalls === 0);
+var oneResult = [8].every(function(value) { return value === 8; });
+verify(oneResult === true);
+
+var context = {target: 7};
+var thisArgOk = false;
+var contextCalls = 0;
+var contextResult = [7, 7].every(function(value, index, array) {
+  contextCalls=contextCalls+1;
+  thisArgOk=this===context&&value===7&&index===contextCalls-1&&array.length===2;
+  return this.target === value;
+}, context);
+verify(contextResult === true && thisArgOk && contextCalls === 2);
+
+var truthyValues = [1, "yes", {}, []];
+var truthyCalls = 0;
+var truthyResult = truthyValues.every(function(value) {
+  truthyCalls=truthyCalls+1;
+  return value;
+});
+var zeroResult = [0].every(function(value) { return value; });
+var emptyStringResult = [""].every(function(value) { return value; });
+var nullResult = [null].every(function(value) { return value; });
+var undefinedResult = [undefined].every(function(value) { return value; });
+verify(truthyResult === true && truthyCalls === 4 && zeroResult === false &&
+  emptyStringResult === false && nullResult === false && undefinedResult === false);
+
+var holes = [];
+holes.length = 5;
+var holeCalls = 0;
+var holeResult = holes.every(function() { holeCalls=holeCalls+1; return false; });
+verify(holeResult === true && holeCalls === 0);
+
+var sparse = [];
+sparse.length = 5;
+sparse[1] = undefined;
+sparse[4] = 9;
+var sparseCalls = 0;
+var sparseIndices = "";
+var undefinedVisited = false;
+var sparseResult = sparse.every(function(value, index, array) {
+  sparseCalls=sparseCalls+1;
+  sparseIndices=sparseIndices+index;
+  if (index === 1) undefinedVisited=value===undefined&&array===sparse;
+  return value === undefined || value === 9;
+});
+verify(sparseResult === true && sparseCalls === 2 && sparseIndices === "14" &&
+  undefinedVisited);
+
+var allTrueCalls = 0;
+var allTrue = [1, 2].every(function(value) {
+  allTrueCalls=allTrueCalls+1;
+  return value > 0;
+});
+verify(allTrue === true && allTrueCalls === 2);
+
+var replaced = [1, 2, 3];
+var replaceCalls = 0;
+var replaceIndices = "";
+var replaceResult = replaced.every(function(value, index, array) {
+  replaceCalls=replaceCalls+1;
+  replaceIndices=replaceIndices+index;
+  if (index === 0) array[1] = 9;
+  return value !== 9;
+});
+verify(replaceResult === false && replaceCalls === 2 && replaceIndices === "01" &&
+  replaced[1] === 9 && replaced[2] === 3);
+
+var bounded = [4, 5];
+var boundedCalls = 0;
+var boundedResult = bounded.every(function(value, index, array) {
+  boundedCalls=boundedCalls+1;
+  if (index === 0) array[2] = 6;
+  return value !== 6;
+});
+verify(boundedResult === true && boundedCalls === 2 && bounded[2] === 6);
+
+var shrunk = [7, 8, 9];
+var shrinkCalls = 0;
+var shrinkResult = shrunk.every(function(value, index, array) {
+  shrinkCalls=shrinkCalls+1;
+  if (index === 0) array.length = 1;
+  return true;
+});
+verify(shrinkResult === true && shrinkCalls === 1);
+
+var nestedOuterCalls = 0;
+var nestedInnerCalls = 0;
+var nestedResult = [[1, 2], [3, 4]].every(function(row) {
+  nestedOuterCalls=nestedOuterCalls+1;
+  return row.every(function(value) {
+    nestedInnerCalls=nestedInnerCalls+1;
+    return value === 1 || value === 2;
+  });
+});
+var nestedOk = nestedResult === false && nestedOuterCalls === 2 && nestedInnerCalls === 3;
+verify(nestedOk);
+
+var skippedCalls = 0;
+var sideEffects = 0;
+var shortCircuit = [1, 2, 3].every(function(value) {
+  skippedCalls=skippedCalls+1;
+  sideEffects=sideEffects+1;
+  if (value === 3) null.missing;
+  return value === 0;
+});
+verify(shortCircuit === false && skippedCalls === 1 && sideEffects === 1);
+
+var marker = "JS97:assertions=" + assertions + ":failures=" + failures +
+  ":shortCircuit=" + shortCircuit + ":sparse=" + sparseResult +
+  ":nested=" + nestedOk + ":events=ready";
+document.getElementById("result").textContent = marker;
+
+var eventA = document.getElementById("every-event-a");
+var eventB = document.getElementById("every-event-b");
+var nestedEventOk = false;
+var outerEventOk = false;
+var innerEventCalls = 0;
+var outerEventCalls = 0;
+eventB.addEventListener("click", function(event) {
+  var matched = [1, 2, 3].every(function(value) {
+    innerEventCalls=innerEventCalls+1;
+    return value === 1;
+  });
+  nestedEventOk=event.target===eventB&&event.currentTarget===eventB&&
+    matched===false&&innerEventCalls===2;
+});
+eventA.addEventListener("click", function(event) {
+  var all = [4, 5, 6].every(function(value, index) {
+    outerEventCalls=outerEventCalls+1;
+    if (index === 0) eventB.click();
+    return value !== 6;
+  });
+  outerEventOk=event.target===eventA&&event.currentTarget===eventA&&
+    all===false&&outerEventCalls===3&&nestedEventOk;
+  document.getElementById("result").textContent=
+    "JS97:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+</script>
+</body>
+</html>
