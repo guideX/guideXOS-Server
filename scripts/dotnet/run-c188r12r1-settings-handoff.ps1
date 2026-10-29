@@ -118,7 +118,7 @@ $ownershipDegraded = $false
 $runnerStdout = ''
 $runnerStderr = ''
 $settingsEvidence = $null
-$settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence '' $true
+$settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence '' $false
 $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence ''
 $failureText = ''
 
@@ -392,7 +392,7 @@ try {
                                 $serialText = Read-C188R12R1SharedText $serialPath
                                 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
                                 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence `
-                                    $serialText $true
+                                    $serialText $false
                                 $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence `
                                     -SerialText $serialText -CaptureState 'in-progress'
                                 if ([bool]$settingsEvidence.accepted) { break }
@@ -471,7 +471,7 @@ try {
 
 $serialText = Read-C188R12R1SharedText $serialPath
 $settingsEvidence = Get-C188R12R1SettingsHandoffEvidence $serialText
-$settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence $serialText $true
+$settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence $serialText $false
 $qmpControlText = Read-C188R12R1SharedText $qmpControlPath
 $clickEvidence = Test-C188R12R1SingleClickQmpEvidence $qmpControlText
 $runnerInputEvidence = Get-C188R12R1RunnerInputEvidence $serialText $qmpControlText `

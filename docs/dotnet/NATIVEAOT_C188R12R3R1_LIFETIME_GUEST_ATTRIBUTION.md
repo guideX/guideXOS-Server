@@ -1,90 +1,106 @@
 # NativeAOT C188R12R3R1 — Lifetime Guest Attribution
 
-**Classification: Outcome D — `QAC_OR_EXECUTION_BLOCKED`**
+**Classification: Outcome B — LIFETIME_FAILURE_LOCALIZED**
 
-## Repository and preservation
+## Result
+
+One fresh QAC-authorized boot of the unchanged diagnostic candidate reached the selector-5 lifetime factory boundary. The verified complete serial trace emitted factory-enter for invocation 2, after successful resident lookup, capacity, generation, and factory-resolution checks. It contains no factory return or throw, resident-registration marker, lifetime return, or Settings application-entry marker.
+
+This localizes the first unobserved work to the synchronous selector-5 factory invocation that calls new ManagedSettingsCenter(). It does not identify where inside that constructor the execution stopped, and it does not prove a permanent hang, allocation failure, deadlock, recursion, or other root cause. No allocator or runtime correction is justified by this evidence.
+
+## Repository, HEAD, and preservation
 
 - Date: 2026-10-29 (America/Los_Angeles).
-- Branch: `v1.1_DOTNET_SUPPORT`.
-- Starting HEAD: `3b6e489bca7b2625d1094ab8a70a84c31e6df450`.
-- Ending investigation HEAD before this closeout commit: `3b6e489bca7b2625d1094ab8a70a84c31e6df450`.
-- The worktree already had a modified `ESP/ramdisk.img` and untracked host build and smoke-output directories. They were preserved. The source ramdisk SHA-256 before and after this work is `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`.
-- No reset, clean, restore, stash, branch switch, history rewrite, QEMU termination, runtime change, allocator change, source ramdisk change, or push was made.
-- The only phase edits are the lifetime evidence parser, its focused fixtures, runner integration for capture-completeness state, and this report.
+- Branch: v1.1_DOTNET_SUPPORT.
+- HEAD reported when this mission was first received: 3b6e489bca7b2625d1094ab8a70a84c31e6df450.
+- HEAD used for the fresh candidate run and evidence collection: 75c5674f935c96e6533fe034a4b7de54b8ac392a.
+- Ending investigation HEAD before this follow-up closeout commit: 75c5674f935c96e6533fe034a4b7de54b8ac392a.
+- The earlier blocked admission attempt launched no guest. On the user's retry, QAC became available and exactly one guest boot was performed.
+- The worktree already contained a modified ESP/ramdisk.img and untracked build/smoke-output directories. They were preserved. The source ramdisk SHA-256 before and after the guest run is AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8.
+- No reset, clean, restore, stash, branch switch, history rewrite, foreign-process termination, source ramdisk change, runtime or allocator behavior change, or push was performed.
+- The intended follow-up source changes are limited to the Settings-dispatch runner predicate, its focused regression test, and this report.
 
-## Diagnostic candidate
+## Candidate and runtime configuration
 
-The staged C188R12R3 candidate was reused without rebuilding from `out/dotnet/c188r12r3-lifetime-start-attribution/candidate-001`.
+The existing candidate at out/dotnet/c188r12r3-lifetime-start-attribution/candidate-001 was reused without rebuilding.
 
-| Artifact | SHA-256 | Verification |
-|---|---|---|
-| Candidate kernel | `568B2C084387E45FE3718D422570EE761798542E461674AE8CE14A6B7804E864` | Matches the R3 report and current candidate file |
-| Candidate staged ramdisk | `8398FC1EDC5A05FD1FA97EB1BF261D9B185F6E48D3F7E895EFEFCD4EF738D667` | Matches the staging manifest and current candidate file |
-| Candidate UEFI loader | `D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B` | Matches the R3 report and current candidate file |
-| Staged `/APPS/GXOSAPP.ELF` payload | `1EFEC6BEE84592A707217FEA273CB0384224743628ECE9CDE736FA7774871C0E` | Matches the build manifest and `ramdisk-staging.json` |
-| `ramdisk-staging.json` | `6A1C2671FD962DC624A1B8EB8857D21CBEEC299BFC0E1642463DD15FE1F41C31` | Matches the R3 report and current file |
-| Source `ESP/ramdisk.img` | `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` | Required preserved hash |
+| Artifact | SHA-256 |
+|---|---|
+| Candidate kernel | 568B2C084387E45FE3718D422570EE761798542E461674AE8CE14A6B7804E864 |
+| Candidate staged ramdisk | 8398FC1EDC5A05FD1FA97EB1BF261D9B185F6E48D3F7E895EFEFCD4EF738D667 |
+| Candidate UEFI loader | D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B |
+| Staged /APPS/GXOSAPP.ELF payload | 1EFEC6BEE84592A707217FEA273CB0384224743628ECE9CDE736FA7774871C0E |
+| Candidate ramdisk-staging.json | 6A1C2671FD962DC624A1B8EB8857D21CBEEC299BFC0E1642463DD15FE1F41C31 |
+| Source ESP/ramdisk.img | AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8 |
 
-The candidate staging manifest reports `PASS`, 185 unrelated files preserved, and `changedOtherFiles=0`. Its staged-app hash matches the diagnostic NativeAOT build manifest. The runtime-pack source hash also matches the current source. The accepted settings remain `persistentCompositeLifecycle=true`, `Primary64KiB`, 65,536 bytes, `bounded-static-image-backed-no-collection`; production selectors 4–8 are retained and Settings is selector 5.
-
-The handoff runner accepts this candidate root and verifies its kernel and ramdisk hashes before copying media. The intended candidate root and expected kernel hash are the values above. The runner was not invoked because fresh QAC admission failed.
+The staging manifest result was PASS. It reported 185 unrelated files preserved and changedOtherFiles=0; the staged app payload hash matched the diagnostic build manifest. Runtime manifests retained persistentCompositeLifecycle=true, Primary64KiB, 65,536 managed heap bytes, and bounded-static-image-backed-no-collection. The production selector catalog remains 4–8, with Settings at selector 5.
 
 ## Hosted preflight
 
-Focused checks run during this phase:
+The candidate and source identities were revalidated before execution. The accepted persistent lifecycle configuration and existing source-defined Settings route were checked. The one-run command selected the candidate root above and required the full kernel hash shown above.
 
-- C188R12R3 lifetime parser: **13/13 cases passed**.
-- C188R12R2R1 dispatch predicates: **11/11 passed**.
+Focused predicate checks run after the follow-up parser correction:
+
+- C188R12R3 lifetime predicates: **13/13 passed**.
+- C188R12R2R1 Settings-dispatch predicates: **12/12 passed**.
 - C188R12R1 Settings handoff and pointer predicates: **37/37 passed**.
 - C188R11R4 QAC ownership predicates: **15/15 passed**.
-- Retained C188 registry host executable: R10 **14**, R11 **15**, R12R2 launch-boundary **8** cases passed; the R12R2 suite exercises selector-5 factory and dispatch behavior.
-- PowerShell parser validation for the edited parser, tests, and runners: **zero errors**.
-- `git diff --check`: **passed**.
+- PowerShell parser validation for the modified runner and regression test: **zero errors**.
+- git diff --check: **passed**.
 
-The retained C188R12R3 hosted lifetime suite is **23/23 passed** and the broader managed UI qualification is **39 suites / 955 cases passed**. No source change invalidated those results, so the broader suite and NativeAOT candidate were not rebuilt.
+Retained hosted qualification from the preceding phase remains applicable because no managed-runtime or allocator source changed: the C188R12R3 lifetime suite passed **23/23**, managed UI qualification passed **39 suites / 955 cases**, and the retained registry executable passed R10 **14**, R11 **15**, and R12R2 selector-5 dispatch/factory **8** cases. Those retained suites were not rerun for this runner-only correction.
 
-The lifetime evaluator now receives an explicit capture state. Live observation, a verified complete serial capture, and an incomplete or truncated capture produce distinct results. A factory entry without a return is only localized as an interval when the full serial file is verified against the released QAC run; an incomplete capture reports `INSUFFICIENT_CAPTURE` and preserves the observed boundary without claiming execution stopped there. `factory-enter` is never treated as a successful factory return.
+The Settings-dispatch runner previously required the one-time managed lifecycle test marker for every Settings dispatch. That suite runs during initial Notes startup; it is not expected to run again during the later Settings transition. The runner now passes RequireLifecycleTests=false when parsing the later Settings dispatch at initialization, during live observation, and for final evidence. A focused regression case covers this route. This corrects the runner's dispatch summary; it does not alter the candidate or guest behavior.
 
-## Existing guest evidence retained from C188R12R2R1R1
+The raw run JSON was produced before this correction and labels the outer dispatch summary with the stale lifecycle requirement. The actual run serial was separately re-evaluated with the corrected predicate and saved at out/dotnet/c188r12r3-lifetime-start-attribution/runs/settings-lifetime-002/r12r2r1-settings-dispatch-corrected-analysis.json. That verified-complete analysis reports seven ordered dispatch markers, no malformed markers, lifecycleMarkerRequired=false, and the first unobserved outer boundary lifetime-start-result. The nested lifetime result in the original run JSON independently records the same factory boundary.
 
-The last retained serial log is `out/dotnet/c188r11-managed-state-provenance/runs/c188r12r2r1r1-settings-retry-002/guest-001/serial.log`, SHA-256 `29F83812DFB00A081AF38C3286E54E6040AB04CFABD5C363CD8B37E37228BC2B`.
+## QAC admission, ownership, and execution
 
-- The pre-transition screenshot and cursor probe confirmed the source-defined Settings button at `(815,550)` in Notes window `000003E8`; the cursor finder reported one unique match at that point. The screenshot and probe are retained at `.../guest-001/before-settings.png` and `.../guest-001/settings-pointer-probe-001-cursor.json`.
-- The previous run sent one Settings click and no keyboard input. Notes action `0x18` succeeded, the Settings AppModel request used selector 5, registration lookup returned `PASS code=0`, and runtime-settings initialization returned `PASS code=0`.
-- The last outer launch marker is `C188R12R2_LAUNCH stage=lifetime-start ... result=BEGIN`. No matching result or `C188R12R3_LIFETIME` marker appears in that older log; the older candidate predated the internal lifetime markers. No Settings application entry, return, or surface was observed.
-- The last completed operation in that trace was runtime-settings initialization. The lifetime-start call was entered, but the previous trace did not identify an operation inside `TryStart`.
-- Settings resident registration did not return in that trace. The Settings registry-return state and resident mask were unavailable. Notes retained five descriptors (`n=5`); no registry, heap-persistence, or Notes callback regression was demonstrated.
-- The prior owned guest exited with code 0 and QAC verified release. This is retained prior-run evidence, not admission for the current phase.
+The fresh retry found QAC 2.0.0 online. Before admission, its status reported zero QEMU processes (zero foreign), zero managed sessions, zero queued or blocked work; its list reported zero reservations and sessions. One reservation was obtained, ID 5aeff7083cd24a0996d21bf2c8d72b6b.
 
-## Arena and allocation instrumentation
+QAC accepted the owner/runner/child identity chain: owner PID 10444, runner PID 18000, QEMU child PID 23556 at C:\Program Files\qemu\qemu-system-x86_64.exe. The reservation was not degraded. The manifest records accepted ownership proof, confirmed admission, and verified release. QEMU exited with code 0. After release, QAC again reported zero QEMU processes (zero foreign), zero reservations, and zero managed sessions, queued, or blocked work.
 
-The retained pre-transition `NATIVEAOT-HEAP` observation has base `0x00000001001F4600`, 65,536 bytes, and allocation cursor `0x0000000100202F88`. The corresponding end is `0x0000000100204600`; the observed remaining capacity is `0x1678` (**5,752 bytes**). This is the last safe cursor snapshot before the prior Settings lifetime-start marker, not a measurement made inside the Settings factory.
+The single bounded run used the staged kernel hash above and MaxRuntimeSeconds=120. NativeAOT initialization completed, five descriptors were registered, and Notes became resident. There was exactly one guest boot, one Settings click, and zero keyboard events. No retry or second click occurred. Run artifacts are retained in out/dotnet/c188r12r3-lifetime-start-attribution/runs/settings-lifetime-002; the verified-complete serial.log SHA-256 is 5F0C5E3EFA56415E83F0E31DBB6BEF0395FF24B16F441EAF2B4147E7B256A159. before-settings.png and settings-check.png contain the pre-transition and settled post-transition captures.
 
-The candidate can report arena base and size at initialization and allocation cursor at the existing managed-thread preservation boundary. The lifetime markers report invocation, selector, resident count/mask, generation, result code, and stage. They do not report each Settings constructor allocation request or an allocator result. The bounded allocator records failure fields internally and immediately fail-fasts on an unsatisfied request; the current Settings route does not invoke the separate managed-allocation diagnostic report. Therefore the 5,752-byte remainder and hosted 18,000-byte constructor measurement do not prove NativeAOT exhaustion. No safe existing guest-visible operation provides the actual constructor request size or failure record for this route.
+## Input and Settings dispatch
 
-## Fresh QAC admission and guest result
+The pre-transition screenshot showed the source-defined Managed Notes Settings button in window 000003E8. The target was (815,550). One cursor probe found exactly one match at that coordinate, inside the verified safe inset x=[776,854), y=[542,558). The interaction plan records sourceValidated=true, pointerPositionVerified=true, one click, and zero key input.
 
-During the fresh admission check on 2026-10-29, direct read-only QAC CLI `status` and `list` calls both exited 1 with:
+Notes action 0x18 returned managed result 0 with PASS. The AppModel then requested Settings selector 5. Registration lookup returned PASS code=0, and runtime-settings initialization returned PASS code=0. The Notes lifetime had been cleanly closed before the Settings dispatch; its resident count of zero at Settings lifetime entry is therefore consistent with the close/replace path.
 
-```text
-Coordinator unavailable: Coordinator connection timed out or is unavailable.
-```
+The screenshot after the bounded observation still displayed the Notes image. Since the serial trace records Notes close approval and surface destruction before the Settings launch request, that image does not prove that a live Notes window remained. No Settings surface was observed.
 
-QAC online state, sessions, reservations, and a complete QEMU process census could not be verified. No reservation was requested, no guest runner was started, and no host process snapshot was treated as a substitute for QAC's census.
+## Ordered lifetime trace
 
-| Requested observation for this phase | Result |
-|---|---|
-| NativeAOT initialization, five descriptors, Notes residency | Not observed; no guest boot |
-| Screenshot-confirmed pointer and Settings click | Not repeated; no guest boot. Prior screenshot evidence is recorded above |
-| Notes action `0x18` and selector-5 lookup | Not repeated; no guest boot. Prior run passed both |
-| Ordered `C188R12R3_LIFETIME` trace and last completed internal operation | No R3 guest trace; no internal operation observed |
-| Native allocation request, failure, factory return, resident registration | Not observed |
-| Settings application entry, return, or surface | Not observed |
-| Registry/resident-pool post-transition integrity | Not observed in this phase |
-| Current guest exit and QAC release | Not applicable; no admission or guest was acquired |
+Notes startup was invocation 1, selector 4, generation 1. Its trace completed enter, resident miss, capacity available, generation valid, factory resolved, factory entered and returned code=0 state=created, resident registration entered and returned count=1 mask=1 code=0 state=registered, owner assignment, and exit-success. The startup diagnostic reported five registered descriptors (n=5).
 
-## Classification and next action
+Settings was invocation 2, selector 5, generation 2. The complete ordered trace was:
 
-**Outcome D — `QAC_OR_EXECUTION_BLOCKED`.** The candidate and hosted preflight are valid, but QAC did not provide the fresh complete census and exclusive admission required for a guest. This phase establishes no new runtime failure or success and does not prove an allocator defect.
+| Order | Stage | Result |
+|---:|---|---|
+| 1 | enter | count=0 mask=0 state=preflight |
+| 2 | existing-resident | state=miss |
+| 3 | capacity-check | code=0 state=available |
+| 4 | generation-check | code=0 state=valid |
+| 5 | factory-resolve | code=0 state=resolved |
+| 6 | factory-enter | code=-1 state=invoking |
 
-The smallest next phase is to restore QAC coordinator responsiveness, take one fresh complete and consistent census, and—only if the lane is clear—run one bounded boot of this unchanged candidate with one screenshot-verified Settings click. The verified-complete serial capture can then distinguish factory entry/return, registration, owner assignment, lifetime return, and caller continuation. No runtime or allocator correction is justified before that evidence.
+The parser found zero malformed markers and valid ordering. Its verified-complete result is FACTORY_ENTERED_NO_RETURN; the last completed operation is factory resolution. No factory return or throw, registration entry, owner assignment, or lifetime result followed. Since factory-enter is emitted immediately before application = factory(), the trace localizes the missing completion to that call boundary but does not show a constructor sub-operation.
+
+In source, TryStartCore emits factory-enter immediately before the synchronous application = factory() call in samples/managed/HostLogProof/GuideXos/GuideXosManagedApplicationC150Tests.cs. The selector-5 descriptor's static factory constructs ManagedSettingsCenter in samples/managed/HostLogProof/GuideXos/GuideXosApplication.cs. There are no markers inside that constructor, so the trace cannot narrow the interval to a constructor sub-operation.
+
+No ManagedSettingsCenter.Launch entry, Settings application return, or Settings surface marker was emitted. Settings registry return is false and invalid because execution did not reach a return; the Settings resident mask is unavailable (-1). These are missing observations, not evidence of registry corruption.
+
+## Arena and integrity evidence
+
+The last safe heap cursor before Settings dispatch was base 0x00000001001F5600, allocation cursor 0x0000000100204008, with a configured size of 65,536 bytes and end 0x0000000100205600. Remaining capacity at that observation was 0x15F8 (**5,624 bytes**). This was measured before the Settings factory invocation.
+
+The guest trace contains no per-allocation request size, allocation result, allocator failure record, or fail-fast marker associated with Settings construction. The hosted constructor measurement of 18,000 bytes is not a NativeAOT arena measurement and is not used to infer exhaustion. Arena capacity is therefore not established as the cause.
+
+The acceptance evidence reports persistent heap preserved, initialization count 1, and no demonstrated runtime regression. Settings registry-memory stability and resident-mask post-return observations are unavailable because registration was not reached. Notes action 0x18 succeeded; no Notes callback regression was demonstrated.
+
+## Classification and next phase
+
+**Outcome B — LIFETIME_FAILURE_LOCALIZED.** The retry materially narrows the boundary to the Settings factory invocation after all preceding lifetime preflight operations succeed. It does not prove a root cause.
+
+The smallest justified next qualification is to add narrowly scoped proof-only visibility inside the Settings constructor and, if available without changing allocator behavior, capture the native allocation request/result at the existing safe diagnostic boundary. Then rerun focused hosted predicates before any separately authorized guest attempt. Do not enlarge the arena or change runtime/allocator behavior based on the current evidence.

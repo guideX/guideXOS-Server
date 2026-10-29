@@ -68,6 +68,16 @@ $noLifecycle = Get-C188R12R2R1SettingsDispatchEvidence $successText.Replace(
 Assert-C188R12R2R1 'conditional lifecycle stage can be omitted only when the build does not require it' `
     ($noLifecycle.outcome -eq 'DISPATCH_SUCCEEDED' -and -not $noLifecycle.lifecycleMarkerObserved)
 
+$settingsFactoryBoundaryText = @(
+    ($successText -split "`r?`n" | Where-Object { $_ -match 'stage=(dispatch-context|dispatch-prelude|registration-lookup|runtime-settings-init)' })
+    '[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH stage=lifetime-start appId=com.guidexos.apps.managed.settingscenter selector=5 generation=2 result=BEGIN'
+) -join "`n"
+$settingsFactoryBoundary = Get-C188R12R2R1SettingsDispatchEvidence `
+    $settingsFactoryBoundaryText $false
+Assert-C188R12R2R1 'one-time lifecycle suite is optional on the later Settings dispatch' `
+    ($settingsFactoryBoundary.firstUnobservedBoundary -eq 'lifetime-start-result' -and
+     -not $settingsFactoryBoundary.lifecycleMarkerRequired)
+
 $badCodeText = $registrationText.Replace('result=FAIL code=-8','result=FAIL code=0')
 $badCode = Get-C188R12R2R1SettingsDispatchEvidence $badCodeText $true
 Assert-C188R12R2R1 'failure without a nonzero result code is rejected' `
