@@ -164,8 +164,13 @@ if ($isStartupDiagnostic) {
                 throw "C188R12R4 diagnostic PE still imports unsupported Windows API $symbol"
             }
         }
-        foreach ($marker in @('C188R12R4_FACTORY invocation=',
-                'C188R12R4_ALLOC invocation=', 'fast-capacity-miss')) {
+        $allocationDiagnosticMarkers = @(
+            'C188R12R4_ALLOC invocation=',
+            'context-invalid', 'fast-capacity-miss', 'bounded-failfast',
+            'RhpGcAlloc-fallback-entered', 'allocation-result',
+            'returned-in-arena', 'returned-outside-arena')
+        foreach ($marker in @('C188R12R4_FACTORY invocation=') +
+                $allocationDiagnosticMarkers) {
             if (-not $elfText.Contains($marker)) {
                 throw "$phaseRootName diagnostic ELF omitted factory/allocation marker $marker"
             }
@@ -291,8 +296,7 @@ if ($FactoryAllocationAttribution) {
         'guideXosC188R12R4EndFactory')
     $manifest['factoryDiagnosticMarkers'] = $factoryDiagnosticMarkers
     $manifest['selectorFiveRegistration'] = $true
-    $manifest['allocationDiagnosticMarkers'] = @(
-        'C188R12R4_ALLOC invocation=', 'fast-capacity-miss')
+    $manifest['allocationDiagnosticMarkers'] = $allocationDiagnosticMarkers
 }
 $manifestPath = Join-Path $evidence 'nativeaot-qualification.json'
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
