@@ -77,6 +77,6 @@ All phase-specific outputs were written under `out/comp4j-validation/`. QAC help
 
 ## Guest qualification and next phase
 
-`COMP4J_HOSTED_ACCEPTED` is a hosted result only. COMP4F remains `HOSTED_READY_GUEST_PENDING`; COMP4H and COMP4I guest qualification also remain pending. COMP4J guest qualification is added to the consolidated compiler guest-acceptance backlog. A future guest run must rebuild fixtures and cached objects with the current object ABI 15. No QEMU was launched and no QAC admission was requested because .NET Support retains guest-testing priority.
+`COMP4J_HOSTED_ACCEPTED` is a hosted result only. COMP4F remains `HOSTED_READY_GUEST_PENDING`; COMP4H and COMP4I guest qualification also remain pending. COMP4J guest qualification is added to the consolidated compiler guest-acceptance backlog. A future guest run must rebuild fixtures and cached objects with the current object ABI 16. No QEMU was launched and no QAC admission was requested because .NET Support retains guest-testing priority.
 
-Recommended COMP4K scope: wait for the compiler guest backlog to receive capacity, then qualify the current typed byte-pointer fixtures through guest Build/Run with freshly rebuilt ABI-15 objects. After that gate, consider only a small read-only byte-view extension if a concrete language use requires it; keep unrestricted casts and general pointer escape out of scope.
+Recommended COMP4K follow-up: after the compiler guest backlog receives capacity, qualify the typed byte-pointer fixtures through guest Build/Run with freshly rebuilt ABI-16 objects. After that gate, consider only a small read-only byte-view extension if a concrete language use requires it; keep unrestricted casts and general pointer escape out of scope.

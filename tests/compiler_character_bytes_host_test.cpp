@@ -283,7 +283,7 @@ static bool test_diagnostics()
     const char* arrayInitializer =
         "int gx_main(gx_app_context* ctx) { char data[2] = 'A'; return 0; }";
     const char* charAddress = "int gx_main(gx_app_context* ctx) { char value = 'A'; int* p = &value; return 0; }";
-    const char* global = "char value; int gx_main(gx_app_context* ctx) { return 0; }";
+    const char* global = "char value[2]; int gx_main(gx_app_context* ctx) { return 0; }";
     const char* tooMany = "int gx_main(gx_app_context* ctx) { char data[65]; return 0; }";
     const char* unsignedInt = "int gx_main(gx_app_context* ctx) { unsigned int value = 1; return value; }";
     const char* unsignedMissingBase = "int gx_main(gx_app_context* ctx) { unsigned value = 1; return value; }";
@@ -308,7 +308,7 @@ static bool test_diagnostics()
     const uint32_t arrayInitializerOffset =
         static_cast<uint32_t>(std::strstr(arrayInitializer, "data") - arrayInitializer);
     const uint32_t addressOffset = static_cast<uint32_t>(std::strchr(charAddress, '&') - charAddress);
-    const uint32_t globalOffset = 0;
+    const uint32_t globalOffset = static_cast<uint32_t>(std::strchr(global, '[') - global);
     const uint32_t limitOffset = static_cast<uint32_t>(std::strstr(tooMany, "65") - tooMany);
     return expect_rejection(unterminated, CompilerDiagnosticKind::Lexical,
                             "unterminated character literal", lexical) &&
@@ -337,7 +337,7 @@ static bool test_diagnostics()
            expect_rejection(charAddress, CompilerDiagnosticKind::Unsupported,
                             "address of char storage", addressOffset) &&
            expect_rejection(global, CompilerDiagnosticKind::Unsupported,
-                            "global char storage", globalOffset) &&
+                            "file-scope char arrays are not supported", globalOffset) &&
            expect_rejection(tooMany, CompilerDiagnosticKind::ResourceLimit,
                             "array length exceeds", limitOffset) &&
            expect_rejection(unsignedInt, CompilerDiagnosticKind::Unsupported,

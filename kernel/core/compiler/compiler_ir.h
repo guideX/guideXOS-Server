@@ -76,7 +76,7 @@ static const uint32_t COMPILER_MAX_POINTER_TEMPORARY_SLOTS = COMPILER_MAX_PARAME
 // independent from the compiler phase number: changing object-producing
 // semantics requires incrementing COMPILER_OBJECT_ABI_VERSION.
 static const uint16_t COMPILER_OBJECT_FORMAT_VERSION = 2;
-static const uint16_t COMPILER_OBJECT_ABI_VERSION = 15;
+static const uint16_t COMPILER_OBJECT_ABI_VERSION = 16;
 static const uint32_t COMPILER_OBJECT_ARCH_AMD64 = 1;
 static const uint32_t COMPILER_OBJECT_TARGET_ABI_GUIDEXOS_C_V1 = 1;
 static const uint32_t COMPILER_MAX_OBJECT_BYTES = 131072;
@@ -502,11 +502,25 @@ enum class SymbolKind : uint8_t {
     Data,
     DataArray,
     DataStruct,
+    // File-scope byte globals carry their signedness through the object ABI
+    // so cross-module declarations cannot silently disagree.
+    DataChar,
+    DataUnsignedChar,
 };
 
 inline bool symbol_is_data(SymbolKind kind)
 {
-    return kind == SymbolKind::Data || kind == SymbolKind::DataArray || kind == SymbolKind::DataStruct;
+    return kind == SymbolKind::Data || kind == SymbolKind::DataArray || kind == SymbolKind::DataStruct ||
+           kind == SymbolKind::DataChar || kind == SymbolKind::DataUnsignedChar;
+}
+
+inline SymbolKind global_symbol_kind(StorageKind kind)
+{
+    if (kind == StorageKind::ArrayInt) return SymbolKind::DataArray;
+    if (kind == StorageKind::ScalarChar) return SymbolKind::DataChar;
+    if (kind == StorageKind::ScalarUnsignedChar) return SymbolKind::DataUnsignedChar;
+    if (kind == StorageKind::Struct || kind == StorageKind::ArrayStruct) return SymbolKind::DataStruct;
+    return SymbolKind::Data;
 }
 
 inline bool storage_kind_is_struct(StorageKind kind)

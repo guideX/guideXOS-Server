@@ -3015,7 +3015,7 @@ static bool comp4k_stale_artifact_is_rejected(const gx_build_snapshot& build)
 #endif
 
 #if defined(GXOS_COMP4K_SMOKE)
-static bool comp4k_object_abi15()
+static bool comp4k_object_abi16()
 {
     uint32_t objectBytes = 0;
     if (!read_vfs_image("/P27W/build/obj/amd64/src/value.o", s_invalidImage,
@@ -3025,7 +3025,7 @@ static bool comp4k_object_abi15()
     return compiler::inspect_elf_object(s_invalidImage, objectBytes, &header, diagnostics) &&
         header.elfType == 1 && header.machine == 62 &&
         header.formatVersion == compiler::COMPILER_OBJECT_FORMAT_VERSION &&
-        header.compilerObjectAbiVersion == 15U &&
+        header.compilerObjectAbiVersion == 16U &&
         header.compilerObjectAbiVersion == compiler::COMPILER_OBJECT_ABI_VERSION;
 }
 
@@ -3055,7 +3055,7 @@ static bool comp4k_build_and_run(const char* headerText, const char* mainSource,
         &build, &handle, &sawPreparing, &sawCompiler);
     const bool freshModules = built && build.compiledModuleCount == 2U &&
         build.cachedModuleCount == 0U && build.linkedModuleCount == 2U;
-    const bool objectAbi = freshModules && comp4k_object_abi15();
+    const bool objectAbi = freshModules && comp4k_object_abi16();
     bool deployed = false;
     bool alreadyRunningRejected = false;
     bool closed = false;
@@ -5527,8 +5527,8 @@ void run_bootstrap_execution_smoke()
     print_marker("comp4k_unsigned_byte_pointers", kPointers);
     const bool kProgress = kBytes && kFunctions && kStructs && kPointers;
     print_marker("comp4k_cooperative_progress", kProgress);
-    const bool kObjectAbi = kProgress && comp4k_object_abi15();
-    print_marker("comp4k_object_abi15", kObjectAbi);
+    const bool kObjectAbi = kProgress && comp4k_object_abi16();
+    print_marker("comp4k_object_abi16", kObjectAbi);
 
     const bool kPartialElf = kObjectAbi && comp4d_partial_elf_is_rejected(kPointerBuild);
     print_marker("comp4k_partial_elf_rejected", kPartialElf);

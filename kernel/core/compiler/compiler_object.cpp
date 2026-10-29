@@ -287,8 +287,10 @@ static bool valid_data_signature(const CompiledModule& module, SymbolKind kind,
             size <= COMPILER_MAX_LINKED_DATA_BYTES && (alignment == 1 || alignment == 4) &&
             structTypeIdentity != 0 && module_has_struct_layout(module, structTypeIdentity,
                                                                 elementSize, alignment);
-    return (kind == SymbolKind::Data || kind == SymbolKind::DataArray) && elementCount != 0 &&
-        elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
+    if (kind == SymbolKind::DataChar || kind == SymbolKind::DataUnsignedChar)
+        return elementCount == 1 && elementSize == 1 && size == 1 && alignment == 1;
+    return ((kind == SymbolKind::Data && elementCount == 1) || kind == SymbolKind::DataArray) &&
+        elementCount != 0 && elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
         size == static_cast<uint32_t>(elementCount) * elementSize && alignment == 4;
 }
 
@@ -464,7 +466,7 @@ static void write_export(Writer& writer, const ExportSymbol& symbol)
 static bool read_export(Reader& reader, ExportSymbol& symbol)
 {
     symbol = {}; const uint8_t kind = reader.u8(); const uint8_t entry = reader.u8(); (void)reader.u16();
-    if (kind > static_cast<uint8_t>(SymbolKind::DataStruct) || entry > 1 || !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
+    if (kind > static_cast<uint8_t>(SymbolKind::DataUnsignedChar) || entry > 1 || !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
     symbol.kind = static_cast<SymbolKind>(kind); symbol.isEntry = entry != 0; symbol.moduleCodeOffset = reader.u32(); symbol.moduleDataOffset = reader.u32();
     symbol.size = reader.u32(); symbol.alignment = reader.u32(); symbol.elementCount = reader.u16(); symbol.elementSize = reader.u16(); symbol.parameterCount = reader.u16();
     const uint8_t returnKind = reader.u8(); const uint8_t returnReserved = reader.u8();
@@ -491,7 +493,7 @@ static void write_import(Writer& writer, const ImportSymbol& symbol)
 static bool read_import(Reader& reader, ImportSymbol& symbol)
 {
     symbol = {}; const uint8_t kind = reader.u8(); (void)reader.u8(); (void)reader.u16();
-    if (kind > static_cast<uint8_t>(SymbolKind::DataStruct) || !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
+    if (kind > static_cast<uint8_t>(SymbolKind::DataUnsignedChar) || !read_fixed_name(reader, symbol.name, sizeof(symbol.name))) return false;
     symbol.kind = static_cast<SymbolKind>(kind); symbol.expectedParameterCount = reader.u16();
     const uint8_t returnKind = reader.u8(); const uint8_t returnReserved = reader.u8();
     symbol.expectedReturnKind = static_cast<FunctionReturnKind>(returnKind);

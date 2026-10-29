@@ -111,8 +111,7 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
             return false;
         }
         const GlobalSymbolIR& global = unit.globals[globalIndex];
-        if (module->imports[existing].kind != (global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
-                                               storage_kind_is_struct(global.kind) ? SymbolKind::DataStruct : SymbolKind::Data) ||
+        if (module->imports[existing].kind != global_symbol_kind(global.kind) ||
             module->imports[existing].elementCount != global.elementCount ||
             module->imports[existing].elementSize != global.elementSize ||
             module->imports[existing].size != global.size ||
@@ -134,8 +133,7 @@ static bool append_global_import(CompiledModule* module, const TranslationUnitIR
     importSymbol.kind = SymbolKind::Data;
     if (!copy_string(importSymbol.name, sizeof(importSymbol.name), name)) return false;
     const GlobalSymbolIR& global = unit.globals[globalIndex];
-    importSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
-        storage_kind_is_struct(global.kind) ? SymbolKind::DataStruct : SymbolKind::Data;
+    importSymbol.kind = global_symbol_kind(global.kind);
     importSymbol.elementCount = global.elementCount;
     importSymbol.elementSize = global.elementSize;
     importSymbol.size = global.size;
@@ -156,24 +154,47 @@ static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
     for (uint32_t i = 0; i < unit.globalCount; ++i) {
         GlobalSymbolIR& global = unit.globals[i];
         if (!global.isDefinition) continue;
-        if ((offset & 3U) != 0) offset = (offset + 3U) & ~3U;
-        if (global.elementCount == 0 || global.size == 0 ||
-            global.size > sizeof(module->mutableData) - offset ||
-            (!storage_kind_is_struct(global.kind) && (global.elementSize != 4 ||
-             global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize))) {
+        uint32_t alignedOffset = 0;
+        const bool scalarInteger = global.kind == StorageKind::ScalarInt;
+        const bool integerArray = global.kind == StorageKind::ArrayInt;
+        const bool scalarByte = global.kind == StorageKind::ScalarChar ||
+            global.kind == StorageKind::ScalarUnsignedChar;
+        const bool validScalarOrArray =
+            ((scalarInteger || integerArray) && global.elementSize == 4 && global.alignment == 4) ||
+            (scalarByte && global.elementCount == 1 && global.elementSize == 1 && global.alignment == 1);
+        if ((global.alignment != 1 && global.alignment != 4) ||
+            (global.alignment == 4 && offset > 0xFFFFFFFCU) ||
+            global.elementCount == 0 || global.size == 0 ||
+            (!validScalarOrArray && !storage_kind_is_struct(global.kind))) {
+            diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, global.location,
+                                "mutable global data layout is invalid or exceeds capacity", "global");
+            return false;
+        }
+        alignedOffset = global.alignment == 4 ? (offset + 3U) & ~3U : offset;
+        if (alignedOffset > sizeof(module->mutableData)) {
+            diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, global.location,
+                                "mutable global data layout is invalid or exceeds capacity", "global");
+            return false;
+        }
+        offset = alignedOffset;
+        if (global.size > sizeof(module->mutableData) - offset ||
+            (!storage_kind_is_struct(global.kind) &&
+             global.size != static_cast<uint32_t>(global.elementCount) * global.elementSize)) {
             diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, global.location,
                                 "mutable global data capacity exceeded", "global");
             return false;
         }
         for (uint32_t element = 0; !storage_kind_is_struct(global.kind) && element < global.elementCount; ++element) {
-            const int32_t initial = global.kind == StorageKind::ArrayInt
+            const int32_t initial = integerArray
                 ? global.initialValues[element] : global.initialValue;
             const uint32_t value = static_cast<uint32_t>(initial);
             const uint32_t at = offset + element * 4U;
             module->mutableData[at] = static_cast<uint8_t>(value);
-            module->mutableData[at + 1U] = static_cast<uint8_t>(value >> 8);
-            module->mutableData[at + 2U] = static_cast<uint8_t>(value >> 16);
-            module->mutableData[at + 3U] = static_cast<uint8_t>(value >> 24);
+            if (global.elementSize == 4) {
+                module->mutableData[at + 1U] = static_cast<uint8_t>(value >> 8);
+                module->mutableData[at + 2U] = static_cast<uint8_t>(value >> 16);
+                module->mutableData[at + 3U] = static_cast<uint8_t>(value >> 24);
+            }
         }
         global.moduleDataOffset = offset;
         offset += global.size;
@@ -302,8 +323,7 @@ bool compile_module_from_source(const char* sourcePath,
         }
         ExportSymbol& exportSymbol = module->exports[module->exportCount++];
         exportSymbol = {};
-        exportSymbol.kind = global.kind == StorageKind::ArrayInt ? SymbolKind::DataArray :
-            storage_kind_is_struct(global.kind) ? SymbolKind::DataStruct : SymbolKind::Data;
+        exportSymbol.kind = global_symbol_kind(global.kind);
         if (!copy_string(exportSymbol.name, sizeof(exportSymbol.name), global.name)) return false;
         exportSymbol.moduleDataOffset = global.moduleDataOffset;
         exportSymbol.size = global.size;

@@ -295,13 +295,13 @@ static bool module_and_object_compatibility()
     GxoObjectHeaderView header = {};
     Diagnostics headerDiagnostics;
     if (!require(inspect_gxo_header(object, objectBytes, &header, headerDiagnostics) &&
-                 header.formatVersion == 2 && header.compilerObjectAbiVersion == 15,
-                 "object format 2 records the COMP4J internal ABI 15")) return false;
+                 header.formatVersion == 2 && header.compilerObjectAbiVersion == 16,
+                 "object format 2 records the COMP4L internal ABI 16")) return false;
 
     uint8_t incompatible[COMPILER_MAX_OBJECT_BYTES] = {};
     std::memcpy(incompatible, object, objectBytes);
     const uint32_t abiOffset = header.metaOffset + 16U;
-    incompatible[abiOffset] = 14;
+    incompatible[abiOffset] = 15;
     incompatible[abiOffset + 1U] = incompatible[abiOffset + 2U] = incompatible[abiOffset + 3U] = 0;
     const uint64_t checksum = elf_object_checksum(incompatible, objectBytes, header.metaOffset + 112U);
     for (uint32_t i = 0; i < 8; ++i)
@@ -310,7 +310,7 @@ static bool module_and_object_compatibility()
     Diagnostics incompatibleDiagnostics;
     if (!require(!deserialize_gxo_object(incompatible, objectBytes, &rejectedObject, incompatibleDiagnostics) &&
                  diagnostic_contains(incompatibleDiagnostics, "compiler identity"),
-                 "cached object with pre-COMP4J ABI 14 is rejected")) return false;
+                 "cached object with pre-COMP4L ABI 15 is rejected")) return false;
     return true;
 }
 

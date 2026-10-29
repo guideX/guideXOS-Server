@@ -653,6 +653,12 @@ private:
     bool parse_statement(uint16_t blockIndex, uint32_t depth, uint32_t conditionalDepth,
                          uint32_t loopDepth)
     {
+        if (current().kind == TokenKind::Identifier &&
+            token_text_equals(m_source, current(), "static")) {
+            m_diagnostics.error_as(CompilerDiagnosticKind::Unsupported, current().location,
+                                  "function-local static storage is not supported", "storage-class");
+            return false;
+        }
         if (current().kind == TokenKind::KeywordInt || current().kind == TokenKind::KeywordChar ||
             current().kind == TokenKind::KeywordUnsigned)
             return parse_declaration(blockIndex);
@@ -2298,6 +2304,12 @@ static bool parse_global_initializer_value(const char* source, const Token* toke
                                            int32_t* value, Diagnostics& diagnostics)
 {
     if (!source || !tokens || !index || !value) return false;
+    const Token first = tokens[token_index_or_eof(*index, tokenCount)];
+    if (first.kind == TokenKind::Character) {
+        *value = first.value;
+        ++(*index);
+        return true;
+    }
     bool negative = false;
     if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::Minus) {
         negative = true;
@@ -2305,7 +2317,8 @@ static bool parse_global_initializer_value(const char* source, const Token* toke
     }
     const Token literal = tokens[token_index_or_eof(*index, tokenCount)];
     if (literal.kind != TokenKind::Integer) {
-        diagnostics.error(literal.location, "global initializer must be a constant integer", "global");
+        diagnostics.error_as(CompilerDiagnosticKind::Unsupported, literal.location,
+                            "global initializer must be a constant integer", "global");
         return false;
     }
     int32_t magnitude = 0;
@@ -2318,8 +2331,166 @@ static bool parse_global_initializer_value(const char* source, const Token* toke
 static bool global_signature_matches(const GlobalSymbolIR& global, StorageKind kind,
                                      uint16_t elementCount)
 {
+    const uint16_t elementSize = kind == StorageKind::ScalarChar ||
+        kind == StorageKind::ScalarUnsignedChar ? 1U : 4U;
     return global.kind == kind && global.elementCount == elementCount &&
-        global.elementSize == 4 && global.size == static_cast<uint32_t>(elementCount) * 4U;
+        global.elementSize == elementSize &&
+        global.size == static_cast<uint32_t>(elementCount) * elementSize &&
+        global.alignment == elementSize;
+}
+
+static bool parse_global_declaration(const char* source, const Token* tokens,
+                                     uint32_t tokenCount, uint32_t* index,
+                                     TranslationUnitIR* output, Diagnostics& diagnostics,
+                                     const Token& nameToken, StorageKind scalarKind,
+                                     bool external)
+{
+    if (!source || !tokens || !index || !output) return false;
+    if (!token_is_name(nameToken) || nameToken.kind == TokenKind::KeywordGxMain ||
+        nameToken.length > COMPILER_MAX_IDENTIFIER_BYTES) {
+        diagnostics.error(nameToken.location, "global name is not a valid ordinary identifier", "global");
+        return false;
+    }
+    if (scalarKind != StorageKind::ScalarInt && scalarKind != StorageKind::ScalarChar &&
+        scalarKind != StorageKind::ScalarUnsignedChar) return false;
+    char name[COMPILER_FUNCTION_NAME_CAPACITY] = {};
+    for (uint32_t i = 0; i < nameToken.length; ++i)
+        name[i] = source[nameToken.location.offset + i];
+    name[nameToken.length] = '\0';
+    for (uint32_t i = 0; i < output->functionCount; ++i)
+        if (compiler_name_equals(output->functionSymbols[i].name, name))
+            return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
+    for (uint32_t i = 0; i < output->declarationCount; ++i)
+        if (compiler_name_equals(output->declarations[i].name, name))
+            return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
+
+    ++(*index);
+    if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::Star) {
+        diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                            tokens[token_index_or_eof(*index, tokenCount)].location,
+                            "global pointer variables are not supported", "pointer");
+        return false;
+    }
+    bool isArray = false;
+    uint16_t elementCount = 1;
+    if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::LeftBracket &&
+        scalarKind != StorageKind::ScalarInt) {
+        diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                            tokens[token_index_or_eof(*index, tokenCount)].location,
+                            "file-scope char arrays are not supported", "global");
+        return false;
+    }
+    if (!parse_global_array_length(source, tokens, tokenCount, index,
+                                   COMPILER_MAX_ARRAY_ELEMENTS, &isArray,
+                                   &elementCount, diagnostics)) return false;
+    const StorageKind kind = isArray ? StorageKind::ArrayInt : scalarKind;
+    bool hasInitializer = false;
+    int32_t initialValue = 0;
+    uint16_t initializerCount = 0;
+    int32_t initialValues[COMPILER_MAX_ARRAY_ELEMENTS] = {};
+    if (external) {
+        if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::Semicolon) {
+            diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
+                              "expected ';' after extern global declaration", "global");
+            return false;
+        }
+        ++(*index);
+    } else {
+        if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::Equal) {
+            hasInitializer = true;
+            ++(*index);
+            if (isArray && tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::LeftBrace) {
+                ++(*index);
+                if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::RightBrace) {
+                    while (true) {
+                        if (initializerCount >= elementCount ||
+                            initializerCount >= COMPILER_MAX_ARRAY_ELEMENTS) {
+                            diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
+                                              "array initializer has more elements than its declared length", "global");
+                            return false;
+                        }
+                        if (!parse_global_initializer_value(source, tokens, tokenCount, index,
+                                                            &initialValues[initializerCount], diagnostics)) return false;
+                        ++initializerCount;
+                        if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::Comma) break;
+                        ++(*index);
+                    }
+                }
+                if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::RightBrace) {
+                    diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
+                                      "expected '}' after global array initializer", "global");
+                    return false;
+                }
+                ++(*index);
+            } else {
+                if (isArray) {
+                    diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                        tokens[token_index_or_eof(*index, tokenCount)].location,
+                                        "global array initializer must be a bounded integer list", "global");
+                    return false;
+                }
+                if (!parse_global_initializer_value(source, tokens, tokenCount, index,
+                                                    &initialValue, diagnostics)) return false;
+                if (kind == StorageKind::ScalarChar || kind == StorageKind::ScalarUnsignedChar)
+                    initialValue = static_cast<int32_t>(static_cast<uint8_t>(initialValue));
+            }
+        }
+        if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::Semicolon) {
+            diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                tokens[token_index_or_eof(*index, tokenCount)].location,
+                                hasInitializer && !isArray
+                                    ? "global initializer must be a constant integer"
+                                    : "global initializer expressions are not supported", "global");
+            return false;
+        }
+        ++(*index);
+    }
+
+    const uint16_t elementSize = kind == StorageKind::ScalarChar ||
+        kind == StorageKind::ScalarUnsignedChar ? 1U : 4U;
+    const uint32_t size = static_cast<uint32_t>(elementCount) * elementSize;
+    const int32_t existing = find_global(*output, name);
+    if (existing >= 0) {
+        GlobalSymbolIR& global = output->globals[existing];
+        if (!global_signature_matches(global, kind, elementCount)) {
+            diagnostics.error_identifier(nameToken.location, "conflicting declaration for global ",
+                                         name, name_length(name), "global");
+            return false;
+        }
+        if (external) return true;
+        if (global.isDefinition) {
+            diagnostics.error_identifier(nameToken.location, "duplicate definition for global ",
+                                         name, name_length(name), "global");
+            return false;
+        }
+        global.isDefinition = true;
+        global.hasInitializer = hasInitializer;
+        global.initialValue = initialValue;
+        global.initializerCount = initializerCount;
+        for (uint32_t i = 0; i < initializerCount; ++i) global.initialValues[i] = initialValues[i];
+        global.location = nameToken.location;
+        return true;
+    }
+    if (output->globalCount >= COMPILER_MAX_GLOBALS) {
+        diagnostics.error_as(CompilerDiagnosticKind::ResourceLimit, nameToken.location,
+                            "global capacity exceeded (maximum is 32)", "global");
+        return false;
+    }
+    GlobalSymbolIR& global = output->globals[output->globalCount++];
+    global = {};
+    for (uint32_t i = 0; i <= nameToken.length; ++i) global.name[i] = name[i];
+    global.kind = kind;
+    global.isDefinition = !external;
+    global.hasInitializer = hasInitializer;
+    global.elementCount = elementCount;
+    global.elementSize = elementSize;
+    global.initialValue = initialValue;
+    global.initializerCount = initializerCount;
+    for (uint32_t i = 0; i < initializerCount; ++i) global.initialValues[i] = initialValues[i];
+    global.size = size;
+    global.alignment = elementSize;
+    global.location = nameToken.location;
+    return true;
 }
 
 static bool struct_global_signature_matches(const GlobalSymbolIR& global,
@@ -2579,6 +2750,12 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
     uint32_t index = 0;
     while (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::EndOfFile) {
         Token externalToken = tokens[token_index_or_eof(index, tokenCount)];
+        if (externalToken.kind == TokenKind::Identifier &&
+            token_text_equals(source, externalToken, "static")) {
+            diagnostics.error_as(CompilerDiagnosticKind::Unsupported, externalToken.location,
+                                "file-scope static linkage is not supported", "storage-class");
+            return false;
+        }
         bool unsignedCharacterType = externalToken.kind == TokenKind::KeywordUnsigned;
         if (unsignedCharacterType &&
             tokens[token_index_or_eof(index + 1U, tokenCount)].kind != TokenKind::KeywordChar) {
@@ -2626,70 +2803,20 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
             }
             if (!pointerReturn && token_is_name(externName) && externAfterName.kind == TokenKind::LeftParen) {
                 externalToken.kind = unsignedCharacterType ? TokenKind::KeywordUnsigned : intToken.kind;
-            } else if (intToken.kind == TokenKind::KeywordChar || unsignedCharacterType) {
-                diagnostics.error_as(CompilerDiagnosticKind::Unsupported, intToken.location,
-                                    unsignedCharacterType
-                                        ? "global unsigned char storage and pointers are not supported"
-                                        : "global char storage and char pointers are not supported", "char");
-                return false;
             } else {
-            ++index;
-            if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Star) {
-                diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
-                                    tokens[token_index_or_eof(index, tokenCount)].location,
-                                    "global pointer variables are not supported", "pointer");
-                return false;
-            }
-            const Token nameToken = tokens[token_index_or_eof(index, tokenCount)];
-            if (!token_is_name(nameToken) || nameToken.kind == TokenKind::KeywordGxMain) {
-                diagnostics.error(nameToken.location, "expected identifier after 'extern int'", "global");
-                return false;
-            }
-            char name[COMPILER_FUNCTION_NAME_CAPACITY] = {};
-            for (uint32_t i = 0; i < nameToken.length; ++i) name[i] = source[nameToken.location.offset + i];
-            name[nameToken.length] = '\0';
-            for (uint32_t i = 0; i < output->functionCount; ++i)
-                if (token_text_equals(source, nameToken, output->functionSymbols[i].name))
-                    return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
-            for (uint32_t i = 0; i < output->declarationCount; ++i)
-                if (token_text_equals(source, nameToken, output->declarations[i].name))
-                    return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
-            ++index;
-            bool isArray = false;
-            uint16_t elementCount = 1;
-            if (!parse_global_array_length(source, tokens, tokenCount, &index,
-                                           COMPILER_MAX_ARRAY_ELEMENTS, &isArray,
-                                           &elementCount, diagnostics)) return false;
-            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Semicolon) {
-                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                                  "expected ';' after extern global declaration", "global");
-                return false;
-            }
-            ++index;
-            int32_t globalIndex = find_global(*output, name);
-            if (globalIndex < 0) {
-                if (output->globalCount >= COMPILER_MAX_GLOBALS) {
-                    diagnostics.error(nameToken.location, "global capacity exceeded (maximum is 32)", "global");
+                if (pointerReturn) {
+                    diagnostics.error_as(CompilerDiagnosticKind::Unsupported, intToken.location,
+                                        "global pointer variables are not supported", "pointer");
                     return false;
                 }
-                globalIndex = static_cast<int32_t>(output->globalCount++);
-                GlobalSymbolIR& global = output->globals[globalIndex];
-                global = {};
-                for (uint32_t i = 0; i <= nameToken.length; ++i) global.name[i] = name[i];
-                global.location = nameToken.location;
-                global.kind = isArray ? StorageKind::ArrayInt : StorageKind::ScalarInt;
-                global.elementCount = elementCount;
-                global.elementSize = 4;
-                global.size = static_cast<uint32_t>(elementCount) * 4U;
-                global.alignment = 4;
-            } else if (!global_signature_matches(output->globals[globalIndex],
-                                                 isArray ? StorageKind::ArrayInt : StorageKind::ScalarInt,
-                                                 elementCount)) {
-                diagnostics.error_identifier(nameToken.location, "conflicting declaration for global ",
-                                              name, name_length(name), "global");
-                return false;
-            }
-            continue;
+                index = nameIndex;
+                const StorageKind globalKind = unsignedCharacterType
+                    ? StorageKind::ScalarUnsignedChar
+                    : (intToken.kind == TokenKind::KeywordChar
+                        ? StorageKind::ScalarChar : StorageKind::ScalarInt);
+                if (!parse_global_declaration(source, tokens, tokenCount, &index,
+                                              output, diagnostics, externName, globalKind, true)) return false;
+                continue;
             }
         }
         const bool characterReturn = externalToken.kind == TokenKind::KeywordChar || unsignedCharacterType;
@@ -2716,120 +2843,11 @@ bool parse_translation_unit(const char* source, const Token* tokens, uint32_t to
         }
         const Token afterName = tokens[token_index_or_eof(index + 1U, tokenCount)];
         if (afterName.kind != TokenKind::LeftParen) {
-            if (characterReturn) {
-                diagnostics.error_as(CompilerDiagnosticKind::Unsupported, externalToken.location,
-                                    unsignedCharacterReturn ? "global unsigned char storage is not supported"
-                                                            : "global char storage is not supported", "char");
-                return false;
-            }
-            char name[COMPILER_FUNCTION_NAME_CAPACITY] = {};
-            if (nameToken.kind == TokenKind::KeywordGxMain ||
-                nameToken.length > COMPILER_MAX_IDENTIFIER_BYTES) {
-                diagnostics.error(nameToken.location, "global name is not a valid ordinary identifier", "global");
-                return false;
-            }
-            for (uint32_t i = 0; i < nameToken.length; ++i) name[i] = source[nameToken.location.offset + i];
-            name[nameToken.length] = '\0';
-            for (uint32_t i = 0; i < output->functionCount; ++i)
-                if (token_text_equals(source, nameToken, output->functionSymbols[i].name))
-                    return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
-            for (uint32_t i = 0; i < output->declarationCount; ++i)
-                if (token_text_equals(source, nameToken, output->declarations[i].name))
-                    return report_symbol_kind_conflict(nameToken.location, name, diagnostics);
-
-            ++index;
-            bool isArray = false;
-            uint16_t elementCount = 1;
-            if (!parse_global_array_length(source, tokens, tokenCount, &index,
-                                           COMPILER_MAX_ARRAY_ELEMENTS, &isArray,
-                                           &elementCount, diagnostics)) return false;
-            int32_t initialValue = 0;
-            bool hasInitializer = false;
-            uint16_t initializerCount = 0;
-            int32_t initialValues[COMPILER_MAX_ARRAY_ELEMENTS] = {};
-            if (tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::Equal) {
-                hasInitializer = true;
-                ++index;
-                if (isArray && tokens[token_index_or_eof(index, tokenCount)].kind == TokenKind::LeftBrace) {
-                    ++index;
-                    if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightBrace) {
-                        while (true) {
-                            if (initializerCount >= elementCount || initializerCount >= COMPILER_MAX_ARRAY_ELEMENTS) {
-                                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                                                  "array initializer has more elements than its declared length", "global");
-                                return false;
-                            }
-                            if (!parse_global_initializer_value(source, tokens, tokenCount, &index,
-                                                                &initialValues[initializerCount], diagnostics)) return false;
-                            ++initializerCount;
-                            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Comma) break;
-                            ++index;
-                        }
-                    }
-                    if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::RightBrace) {
-                        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                                          "expected '}' after global array initializer", "global");
-                        return false;
-                    }
-                    ++index;
-                } else {
-                    if (isArray) {
-                        diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                                          "global array initializer must be a bounded integer list", "global");
-                        return false;
-                    }
-                    if (!parse_global_initializer_value(source, tokens, tokenCount, &index,
-                                                        &initialValue, diagnostics)) return false;
-                }
-            }
-            if (tokens[token_index_or_eof(index, tokenCount)].kind != TokenKind::Semicolon) {
-                diagnostics.error(tokens[token_index_or_eof(index, tokenCount)].location,
-                                  isArray ? "expected ';' after global array definition" :
-                                  "global initializer must be a constant integer", "global");
-                return false;
-            }
-            ++index;
-            const int32_t existingIndex = find_global(*output, name);
-            if (existingIndex >= 0) {
-                GlobalSymbolIR& global = output->globals[existingIndex];
-                if (global.isDefinition) {
-                    diagnostics.error_identifier(nameToken.location, "duplicate definition for global ",
-                                                  name, name_length(name), "global");
-                    return false;
-                }
-                if (!global_signature_matches(global,
-                                              isArray ? StorageKind::ArrayInt : StorageKind::ScalarInt,
-                                              elementCount)) {
-                    diagnostics.error_identifier(nameToken.location, "conflicting declaration for global ",
-                                                  name, name_length(name), "global");
-                    return false;
-                }
-                global.isDefinition = true;
-                global.hasInitializer = hasInitializer;
-                global.initialValue = initialValue;
-                global.initializerCount = initializerCount;
-                for (uint32_t i = 0; i < initializerCount; ++i) global.initialValues[i] = initialValues[i];
-                global.location = nameToken.location;
-            } else {
-                if (output->globalCount >= COMPILER_MAX_GLOBALS) {
-                    diagnostics.error(nameToken.location, "global capacity exceeded (maximum is 32)", "global");
-                    return false;
-                }
-                GlobalSymbolIR& global = output->globals[output->globalCount++];
-                global = {};
-                for (uint32_t i = 0; i <= nameToken.length; ++i) global.name[i] = name[i];
-                global.isDefinition = true;
-                global.hasInitializer = hasInitializer;
-                global.initialValue = initialValue;
-                global.kind = isArray ? StorageKind::ArrayInt : StorageKind::ScalarInt;
-                global.elementCount = elementCount;
-                global.elementSize = 4;
-                global.initializerCount = initializerCount;
-                for (uint32_t i = 0; i < initializerCount; ++i) global.initialValues[i] = initialValues[i];
-                global.location = nameToken.location;
-                global.size = static_cast<uint32_t>(elementCount) * 4U;
-                global.alignment = 4;
-            }
+            const StorageKind globalKind = unsignedCharacterType
+                ? StorageKind::ScalarUnsignedChar
+                : (characterReturn ? StorageKind::ScalarChar : StorageKind::ScalarInt);
+            if (!parse_global_declaration(source, tokens, tokenCount, &index,
+                                          output, diagnostics, nameToken, globalKind, false)) return false;
             continue;
         }
         if (output->functionCount >= COMPILER_MAX_FUNCTIONS) {

@@ -152,8 +152,10 @@ static bool valid_linker_data_signature(const CompiledModule& module, SymbolKind
             size <= COMPILER_MAX_LINKED_DATA_BYTES && (alignment == 1 || alignment == 4) &&
             structTypeIdentity != 0 && module_has_struct_layout(module, structTypeIdentity,
                                                                 elementSize, alignment);
-    return (kind == SymbolKind::Data || kind == SymbolKind::DataArray) && elementCount != 0 &&
-        elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
+    if (kind == SymbolKind::DataChar || kind == SymbolKind::DataUnsignedChar)
+        return elementCount == 1 && elementSize == 1 && size == 1 && alignment == 1;
+    return ((kind == SymbolKind::Data && elementCount == 1) || kind == SymbolKind::DataArray) &&
+        elementCount != 0 && elementCount <= COMPILER_MAX_ARRAY_ELEMENTS && elementSize == 4 &&
         size == static_cast<uint32_t>(elementCount) * elementSize && alignment == 4;
 }
 

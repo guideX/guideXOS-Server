@@ -1652,8 +1652,16 @@ static bool emit_expression_value(Emitter& emitter, const TranslationUnitIR& uni
                 emitter.mov_rax_reg64(2);
         case ExpressionKind::LoadGlobal:
             if (expression.globalIndex >= unit.globalCount) return false;
-            return emitter.emit_global_data_address(unit.globals[expression.globalIndex].name,
-                                                    expression.location) && emitter.mov_eax_rax();
+            {
+                const StorageKind kind = unit.globals[expression.globalIndex].kind;
+                if (kind != StorageKind::ScalarInt && kind != StorageKind::ScalarChar &&
+                    kind != StorageKind::ScalarUnsignedChar) return false;
+                if (!emitter.emit_global_data_address(unit.globals[expression.globalIndex].name,
+                                                     expression.location)) return false;
+                if (kind == StorageKind::ScalarChar) return emitter.movsx_eax_rax8();
+                if (kind == StorageKind::ScalarUnsignedChar) return emitter.movzx_eax_rax8();
+                return emitter.mov_eax_rax();
+            }
         case ExpressionKind::LoadIndexed: {
             uint16_t boundsFailureLabel = COMPILER_INVALID_INDEX;
             uint16_t endLabel = COMPILER_INVALID_INDEX;
@@ -1871,10 +1879,17 @@ static bool emit_statement(Emitter& emitter, const TranslationUnitIR& unit, cons
             }
         case StatementKind::StoreGlobal:
             if (statement.globalIndex >= unit.globalCount) return false;
-            return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
-                                   epilogueLabel, callFailureLabel) &&
-                emitter.emit_global_data_address(unit.globals[statement.globalIndex].name,
-                                                 statement.location) && emitter.mov_rax_eax();
+            {
+                const GlobalSymbolIR& global = unit.globals[statement.globalIndex];
+                if (global.kind != StorageKind::ScalarInt && global.kind != StorageKind::ScalarChar &&
+                    global.kind != StorageKind::ScalarUnsignedChar) return false;
+                return emit_expression(emitter, unit, function, frame, functionLabels, statement.expression,
+                                       epilogueLabel, callFailureLabel) &&
+                    emitter.emit_global_data_address(global.name, statement.location) &&
+                    (global.kind == StorageKind::ScalarChar ||
+                     global.kind == StorageKind::ScalarUnsignedChar
+                        ? emitter.mov_rax_al() : emitter.mov_rax_eax());
+            }
         case StatementKind::StoreIndexed: {
             const uint16_t baseIndex = statement.indexedBaseKind == IndexedBaseKind::Local
                 ? statement.localIndex : statement.globalIndex;
