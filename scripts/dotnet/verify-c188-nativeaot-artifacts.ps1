@@ -179,6 +179,8 @@ if ($isStartupDiagnostic) {
             'C188R12R1-MANAGED stage=dispatch-entry selector=5',
             'C188R12R2_LAUNCH stage=',
             'C188R12R3_LIFETIME invocation=',
+            'lifetime-start', 'factory-resolve', 'factory-enter',
+            'application-entry', 'application-return', 'dispatch-return',
             'com.guidexos.apps.managed.settingscenter',
             'factory-invoke',
             'type-init-enter', 'type-init-return',
