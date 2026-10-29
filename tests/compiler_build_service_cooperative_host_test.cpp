@@ -141,8 +141,10 @@ static void setup_project()
         "\"abi\":\"guidexos-c-abi-v1\"}");
     put("/workspace/comp4b/src/main.cpp",
         "#include \"helper.h\"\n"
+        "unsigned char seeded[3] = {11, 22, 33};\n"
         "struct Record { char status; int value; char flag; }; "
         "int gx_main(gx_app_context* ctx) { struct Record record; "
+        "if (seeded[0] != 11 || seeded[1] != 22 || seeded[2] != 33) return 89; "
         "record.status = 'A'; record.value = 27; record.flag = 'Z'; "
         "if (record.value + record.status - record.flag != 2) return 94; "
         "char letter = 'A'; char bytes[2]; "
@@ -294,13 +296,14 @@ static void test_failure_diagnostics_and_recovery(RequestFixture& fixture)
     release_build(repeatedHandle);
 
     put("/workspace/comp4b/src/main.cpp",
-        "struct Broken { char status int value; }; "
+        "unsigned char overflow[2] = {1, 2, 3}; "
         "int gx_main(gx_app_context* ctx) { return 0; }\n");
     gx_build_handle handle = start_build(fixture);
     gx_build_snapshot snapshot = run_to_terminal(handle);
     assert(snapshot.state == GX_BUILD_FAILED && !snapshot.artifactValid &&
            snapshot.errorCode == GX_BUILD_ERROR_COMPILER_SYNTAX &&
            snapshot.errorCount != 0U && output_contains(snapshot, "[syntax]") &&
+           output_contains(snapshot, "more elements than its declared length") &&
            snapshot.artifactSize == 0U && snapshot.artifactPath[0] == '\0' &&
            snapshot.artifactSha256[0] == '\0');
     assert(!kernel::vfs::exists(kTemporaryArtifact));

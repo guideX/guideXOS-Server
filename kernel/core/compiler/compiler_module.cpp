@@ -188,8 +188,10 @@ static bool flatten_global_data(TranslationUnitIR& unit, CompiledModule* module,
             return false;
         }
         for (uint32_t element = 0; !storage_kind_is_struct(global.kind) && element < global.elementCount; ++element) {
-            const int32_t initial = integerArray
-                ? global.initialValues[element] : global.initialValue;
+            const bool array = integerArray || byteArray;
+            const int32_t initial = array
+                ? (element < global.initializerCount ? global.initialValues[element] : 0)
+                : global.initialValue;
             const uint32_t value = static_cast<uint32_t>(initial);
             const uint32_t at = offset + element * global.elementSize;
             module->mutableData[at] = static_cast<uint8_t>(value);

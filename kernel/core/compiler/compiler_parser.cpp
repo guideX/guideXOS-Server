@@ -2417,12 +2417,6 @@ static bool parse_global_declaration(const char* source, const Token* tokens,
         ++(*index);
     } else {
         if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::Equal) {
-            if (storage_kind_is_char_array(kind)) {
-                diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
-                                    tokens[token_index_or_eof(*index, tokenCount)].location,
-                                    "file-scope byte array initializers are not supported", "global");
-                return false;
-            }
             hasInitializer = true;
             ++(*index);
             if (isArray && tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::LeftBrace) {
@@ -2438,8 +2432,26 @@ static bool parse_global_declaration(const char* source, const Token* tokens,
                         if (!parse_global_initializer_value(source, tokens, tokenCount, index,
                                                             &initialValues[initializerCount], diagnostics)) return false;
                         ++initializerCount;
-                        if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::Comma) break;
-                        ++(*index);
+                        const TokenKind separator = tokens[token_index_or_eof(*index, tokenCount)].kind;
+                        if (separator == TokenKind::Comma) {
+                            ++(*index);
+                            if (tokens[token_index_or_eof(*index, tokenCount)].kind == TokenKind::RightBrace)
+                                break;
+                            continue;
+                        }
+                        if (separator != TokenKind::RightBrace) {
+                            if (separator == TokenKind::EndOfFile || separator == TokenKind::Semicolon) {
+                                diagnostics.error(tokens[token_index_or_eof(*index, tokenCount)].location,
+                                                  "expected '}' after global array initializer", "global");
+                                return false;
+                            }
+                            diagnostics.error_as(CompilerDiagnosticKind::Unsupported,
+                                tokens[token_index_or_eof(*index, tokenCount)].location,
+                                "global array initializer expressions and missing separators are not supported",
+                                "global");
+                            return false;
+                        }
+                        break;
                     }
                 }
                 if (tokens[token_index_or_eof(*index, tokenCount)].kind != TokenKind::RightBrace) {

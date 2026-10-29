@@ -571,11 +571,13 @@ static bool test_bounds_initializers_and_limits()
                  "maximum bounded byte-array dimension uses 256 bytes")) return false;
     if (!expect_rejection("src/malformed.c", "unsigned char bytes[4;", "expected ']'",
                           "malformed byte-array declarations receive a located diagnostic")) return false;
-    if (!expect_rejection("src/brace_init.c", "char bytes[2] = {1, 2};", "array initializers are not supported",
-                          "unsupported byte-array list initializers are diagnosed")) return false;
-    if (!expect_rejection("src/scalar_init.c", "unsigned char bytes[2] = 1;", "array initializers are not supported",
+    if (!expect_rejection("src/local_brace_init.c",
+                          "int gx_main(gx_app_context* ctx) { char bytes[2] = {1, 2}; return 0; }",
+                          "array initializers are not supported",
+                          "local byte-array list initializers remain outside the global initializer subset")) return false;
+    if (!expect_rejection("src/scalar_init.c", "unsigned char bytes[2] = 1;", "global array initializer must be a bounded integer list",
                           "unsupported scalar-form byte-array initializers are diagnosed")) return false;
-    if (!expect_rejection("src/string_init.c", "char bytes[4] = \"abc\";", "array initializers are not supported",
+    if (!expect_rejection("src/string_init.c", "char bytes[4] = \"abc\";", "global array initializer must be a bounded integer list",
                           "unsupported string byte-array initializers are diagnosed")) return false;
     if (!expect_rejection("src/type.c", "float bytes[4];", "expected",
                           "unsupported global element types receive a located diagnostic")) return false;
