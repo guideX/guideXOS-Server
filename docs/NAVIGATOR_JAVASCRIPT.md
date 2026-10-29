@@ -12672,3 +12672,52 @@ hosted logs and the saved executable/fixture snapshots are under
 `C:\Users\guideX\AppData\Local\Temp\guidex-js95-evidence\hosted-aggregate\`
 and
 `C:\Users\guideX\AppData\Local\Temp\guidex-js95-evidence\hosted-preserve-20261027-185412\`.
+
+## JS96 — bounded `Array.prototype.some()`
+
+JS96 adds `Array.prototype.some(callback[, thisArg])` to the existing bounded
+Array prototype. The receiver must be a genuine runtime Array. The callback is
+validated before traversal, including for an empty source, and receives
+`(value, index, sourceArray)` with the optional `thisArg`. The result is always
+a JavaScript Boolean: `true` when a visited callback result is truthy, otherwise
+`false`. Empty and all-hole Arrays return `false` without callback calls.
+
+`some()` uses the existing JS93–JS95 captured-length traversal, live
+inherited-aware presence check, indexed value read, and callback invocation
+path. Holes are skipped, inherited numeric properties are visited, and an
+explicit `undefined` value is present. The source's logical length is captured
+once. Future replacements and inserted in-range properties are observed;
+removed or truncated slots are skipped; appends beyond the initial length are
+ignored. The callback receives the value read for that visit even when it
+changes the current source slot.
+
+Traversal control distinguishes `Continue`, successful `Stop`, and `Error`.
+When a callback result is truthy, `some()` returns `true` immediately without
+checking another source index or invoking another callback. Callback errors,
+execution-budget exhaustion, and call-depth exhaustion use the normal runtime
+error path. Nested traversals and nested Event dispatch keep per-invocation
+state. `some()` creates no result Array and stages no mapped values. The
+existing 1,024-position limit, object/slot limits, reference lifetime, and
+callback environment behavior are unchanged.
+
+The JS96 native lane covers Boolean results, early and complete traversal,
+callback arguments and identity, `thisArg`, truthiness, sparse and inherited
+indices, future and current-source mutation, nested some/map/filter/forEach,
+nested Events, callback and runtime-limit failures, no-result storage, and
+zero, maximum, sparse-maximum, and rejected 1,025-position boundaries. The
+hosted fixture is `navigator-smoke/javascript-js96.html` and includes a nested
+Event traversal. The focused JS96 lane passes **29/29 checks** under strict
+C++17 warning flags. Its GCC `-O2 -fstack-usage` report measures **672 bytes**
+for `traverseArray`, an increase of 80 bytes from JS95's 592-byte frame;
+`invokeNative` remains 736 bytes, `invokeFunction` 560 bytes, and
+`RuntimeObject` / `RuntimeArrayElement` remain 88 / 48 bytes. These hosted
+compiler measurements do not establish a bare-metal stack guarantee.
+
+Generic array-like receivers, Array subclasses and species, and dynamic Array
+capacity growth remain unsupported. No QEMU or QAC activity is part of this
+hosted-only phase.
+
+Recommended JS97 scope: qualify `Array.prototype.every()` by reusing the
+bounded traversal control while proving its false-result short circuit and
+Boolean return behavior independently. Keep `find()`, `findIndex()`, and
+`reduce()` outside that phase unless separately selected and specified.

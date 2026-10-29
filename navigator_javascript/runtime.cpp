@@ -1434,9 +1434,23 @@ private:
         return false;
     }
 
-    bool traverseArray(const Value& receiver, const Value& callback,
-        const Value& thisArgument, SourceLocation callSite, bool map,
-        bool filter, Value& result)
+    enum class ArrayTraversalKind : std::uint8_t {
+        ForEach = 0,
+        Map,
+        Filter,
+        Some,
+    };
+
+    enum class ArrayTraversalControl : std::uint8_t {
+        Continue = 0,
+        Stop,
+        Error,
+    };
+
+    ArrayTraversalControl traverseArray(const Value& receiver,
+        const Value& callback,
+        const Value& thisArgument, SourceLocation callSite,
+        ArrayTraversalKind kind, Value& result)
     {
         const RuntimeObjectId arrayId = receiver.isObject()
             ? receiver.objectId() : kInvalidRuntimeObjectId;
@@ -1444,16 +1458,16 @@ private:
             context_.objectAt(arrayId);
         if (array == nullptr || !array->array) {
             fail(RuntimeErrorCode::InvalidReceiver, callSite);
-            return false;
+            return ArrayTraversalControl::Error;
         }
         if (!callback.isFunction()) {
             fail(RuntimeErrorCode::NotCallable, callSite);
-            return false;
+            return ArrayTraversalControl::Error;
         }
         const RuntimeFunctionId callbackId = callback.functionId();
         if (context_.functionAt(callbackId) == nullptr) {
             fail(RuntimeErrorCode::InvalidFunction, callSite);
-            return false;
+            return ArrayTraversalControl::Error;
         }
 
         // Keep only the stable object ID and captured length across callbacks:
@@ -1461,7 +1475,7 @@ private:
         const std::size_t initialLength = array->arrayLength;
         if (initialLength > maximumSupportedArrayLength(context_.limits_)) {
             fail(RuntimeErrorCode::InvalidAstState, callSite);
-            return false;
+            return ArrayTraversalControl::Error;
         }
 
         std::vector<Value> callbackArguments;
@@ -1469,7 +1483,8 @@ private:
         bool callbackArgumentsReady = false;
         for (std::size_t index = 0u; index < initialLength; ++index) {
             bool present = false;
-            if (!hasArrayIndex(arrayId, index, present, callSite)) return false;
+            if (!hasArrayIndex(arrayId, index, present, callSite))
+                return ArrayTraversalControl::Error;
             if (!present) continue;
 
             Value value = Value::undefined();
@@ -1477,14 +1492,14 @@ private:
             if (!context_.readArrayIndex(arrayId, index, value, lookupError,
                     callSite)) {
                 fail(lookupError, callSite);
-                return false;
+                return ArrayTraversalControl::Error;
             }
             if (!callbackArgumentsReady) {
                 try {
                     callbackArguments.resize(3u, Value::undefined());
                 } catch (const std::bad_alloc&) {
                     fail(RuntimeErrorCode::AllocationFailure, callSite);
-                    return false;
+                    return ArrayTraversalControl::Error;
                 }
                 callbackArgumentsReady = true;
             }
@@ -1494,23 +1509,38 @@ private:
             callbackArguments[2] = receiver;
             Value callbackResult = Value::undefined();
             if (!invokeFunction(callbackId, callbackArguments, callSite,
-                    callbackResult, thisArgument)) return false;
+                    callbackResult, thisArgument))
+                return ArrayTraversalControl::Error;
 
-            if (map || (filter && truthy(callbackResult))) {
+            if (kind == ArrayTraversalKind::Some && truthy(callbackResult)) {
+                result = Value::boolean(true);
+                return ArrayTraversalControl::Stop;
+            }
+
+            if (kind == ArrayTraversalKind::Map ||
+                (kind == ArrayTraversalKind::Filter &&
+                    truthy(callbackResult))) {
                 try {
-                    mappedElements.emplace_back(filter
+                    mappedElements.emplace_back(kind ==
+                            ArrayTraversalKind::Filter
                             ? mappedElements.size() : index,
-                        filter ? value : callbackResult);
+                        kind == ArrayTraversalKind::Filter
+                            ? value : callbackResult);
                 } catch (const std::bad_alloc&) {
                     fail(RuntimeErrorCode::AllocationFailure, callSite);
-                    return false;
+                    return ArrayTraversalControl::Error;
                 }
             }
         }
 
-        if (!map && !filter) {
-            result = Value::undefined();
-            return true;
+        if (kind != ArrayTraversalKind::Map &&
+            kind != ArrayTraversalKind::Filter) {
+            if (kind == ArrayTraversalKind::Some) {
+                result = Value::boolean(false);
+            } else {
+                result = Value::undefined();
+            }
+            return ArrayTraversalControl::Continue;
         }
 
         // Compact transient scratch storage before it becomes persistent Array
@@ -1525,22 +1555,22 @@ private:
                 }
             } catch (const std::bad_alloc&) {
                 fail(RuntimeErrorCode::AllocationFailure, callSite);
-                return false;
+                return ArrayTraversalControl::Error;
             }
             mappedElements.swap(compactElements);
         }
 
-        const std::size_t resultLength = filter
+        const std::size_t resultLength = kind == ArrayTraversalKind::Filter
             ? mappedElements.size() : initialLength;
         RuntimeObjectId mappedArrayId = kInvalidRuntimeObjectId;
         RuntimeErrorCode allocationError = RuntimeErrorCode::None;
         if (!context_.createArray(resultLength, std::move(mappedElements),
                 mappedArrayId, allocationError)) {
             fail(allocationError, callSite);
-            return false;
+            return ArrayTraversalControl::Error;
         }
         result = Value::object(mappedArrayId);
-        return true;
+        return ArrayTraversalControl::Continue;
     }
 
     bool createObjectKeys(RuntimeObjectId sourceId, SourceLocation callSite,
@@ -2135,15 +2165,25 @@ private:
         }
         case RuntimeContext::NativeFunctionId::ArrayForEach:
         case RuntimeContext::NativeFunctionId::ArrayMap:
-        case RuntimeContext::NativeFunctionId::ArrayFilter: {
-            const bool map = function.nativeFunction ==
-                static_cast<std::uint8_t>(
-                    RuntimeContext::NativeFunctionId::ArrayMap);
-            const bool filter = function.nativeFunction ==
-                static_cast<std::uint8_t>(
-                    RuntimeContext::NativeFunctionId::ArrayFilter);
-            succeeded = traverseArray(receiver, argumentOrUndefined(0u),
-                argumentOrUndefined(1u), callSite, map, filter, result);
+        case RuntimeContext::NativeFunctionId::ArrayFilter:
+        case RuntimeContext::NativeFunctionId::ArraySome: {
+            const RuntimeContext::NativeFunctionId native =
+                static_cast<RuntimeContext::NativeFunctionId>(
+                    function.nativeFunction);
+            ArrayTraversalKind kind = ArrayTraversalKind::ForEach;
+            if (native == RuntimeContext::NativeFunctionId::ArrayMap) {
+                kind = ArrayTraversalKind::Map;
+            } else if (native ==
+                    RuntimeContext::NativeFunctionId::ArrayFilter) {
+                kind = ArrayTraversalKind::Filter;
+            } else if (native ==
+                    RuntimeContext::NativeFunctionId::ArraySome) {
+                kind = ArrayTraversalKind::Some;
+            }
+            const ArrayTraversalControl traversal = traverseArray(receiver,
+                argumentOrUndefined(0u), argumentOrUndefined(1u), callSite,
+                kind, result);
+            succeeded = traversal != ArrayTraversalControl::Error;
             break;
         }
         case RuntimeContext::NativeFunctionId::ArrayIteratorCreate:
@@ -4084,6 +4124,8 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         !install(arrayPrototype_, "map", NativeFunctionId::ArrayMap,
             error) ||
         !install(arrayPrototype_, "filter", NativeFunctionId::ArrayFilter,
+            error) ||
+        !install(arrayPrototype_, "some", NativeFunctionId::ArraySome,
             error)) return false;
     const char eventName[] = "Event";
     // Event constants are optional only when an explicitly tiny caller limit

@@ -382,6 +382,7 @@ private:
         ArrayForEach,
         ArrayMap,
         ArrayFilter,
+        ArraySome,
         ArrayIteratorCreate,
         ArrayIteratorCreateKeys,
         ArrayIteratorCreateEntries,
