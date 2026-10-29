@@ -79,6 +79,12 @@
   <PropertyGroup Condition="'$(HostLogProofC188R12R3LifetimeTests)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R3_LIFETIME_TESTS</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4FactoryAttribution)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4_FACTORY</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4FactoryTests)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4_FACTORY_TESTS</DefineConstants>
+  </PropertyGroup>
 
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Allocating'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_ALLOCATING</DefineConstants>

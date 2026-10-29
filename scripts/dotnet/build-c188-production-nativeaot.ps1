@@ -17,7 +17,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4-factory-attribution')))
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
@@ -118,12 +119,18 @@ foreach ($development in @(
     }
 }
 if ($mapText.Contains('C188R12R3_LIFETIME') -or $elfText.Contains('C188R12R3_LIFETIME') -or
+    $mapText.Contains('C188R12R4_FACTORY') -or $elfText.Contains('C188R12R4_FACTORY') -or
+    $mapText.Contains('C188R12R4_ALLOC') -or $elfText.Contains('C188R12R4_ALLOC') -or
+    $mapText.Contains('guideXosStockRhpNewFast') -or $elfText.Contains('guideXosStockRhpNewFast') -or
     $mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-') -or
     $mapText.Contains('C188R4-') -or $elfText.Contains('C188R4-') -or
     $mapText.Contains('C188R6-') -or $elfText.Contains('C188R6-') -or
     $mapText.Contains('C188R7-') -or $elfText.Contains('C188R7-') -or
     $mapText.Contains('C188R11-') -or $elfText.Contains('C188R11-')) {
-    throw 'Proof-disabled production NativeAOT artifacts contain C188R3/R4/R6/R7 startup instrumentation.'
+    throw 'Proof-disabled production NativeAOT artifacts contain C188 diagnostic or allocation instrumentation.'
+}
+if ([bool]$runtimePackManifest.c188r12r4FactoryAttribution) {
+    throw 'Proof-disabled production runtime pack enabled C188R12R4 factory attribution.'
 }
 $manifest = [ordered]@{
     result='PASS'

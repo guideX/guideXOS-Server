@@ -6,6 +6,7 @@ param(
     [string]$ExternalRuntimeRoot = "",
     [switch]$ManagedAllocation,
     [switch]$ManagedRepeatedAllocation,
+    [switch]$C188R12R4FactoryAttribution,
     [switch]$ProductionApplication,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
@@ -161,6 +162,10 @@ $externalCommit = $null
 $externalCheckoutHead = $null
 $managedHeapBytes = if ($HeapConfiguration -eq "Primary64KiB") { 65536 } elseif ($HeapConfiguration -eq "Primary128KiB") { 131072 } elseif ($HeapConfiguration -eq "Primary256KiB") { 262144 } elseif ($HeapConfiguration -eq "Primary4MiB") { 4194304 } elseif ($HeapConfiguration -eq "Primary8MiB") { 8388608 } else { 4096 }
 if ($ManagedRepeatedAllocation) { $ManagedAllocation = $true }
+if ($C188R12R4FactoryAttribution -and
+    (-not $ManagedAllocation -or -not $PersistentCompositeLifecycle)) {
+    throw 'C188R12R4 factory attribution requires managed allocation and the persistent composite lifecycle.'
+}
 
 if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
     $ExternalRuntimeRoot = [System.IO.Path]::GetFullPath($ExternalRuntimeRoot)
@@ -347,7 +352,15 @@ if ($LASTEXITCODE -ne 0) { throw "COFF symbol adaptation failed for thread.cpp.o
 & $objcopy --redefine-sym RhpFallbackFailFast=guideXosStockRhpFallbackFailFast $ehRenamedMember
 if ($LASTEXITCODE -ne 0) { throw "COFF symbol adaptation failed for EHHelpers.cpp.obj" }
 if ($ManagedAllocation) {
-    & $objcopy --redefine-sym RhpNewArray=guideXosStockRhpNewArray $allocFastRenamedMember
+    $allocationRenameArguments = @(
+        '--redefine-sym', 'RhpNewArray=guideXosStockRhpNewArray'
+    )
+    if ($C188R12R4FactoryAttribution) {
+        $allocationRenameArguments += @(
+            '--redefine-sym', 'RhpNewFast=guideXosStockRhpNewFast'
+        )
+    }
+    & $objcopy @allocationRenameArguments $allocFastRenamedMember
     if ($LASTEXITCODE -ne 0) { throw "COFF symbol adaptation failed for AllocFast.asm.obj" }
 }
 $fpCompileBatch = Join-Path $OutputRoot "build-nativeaot-fp-repair.bat"
@@ -558,7 +571,7 @@ $lines = @(
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' }) $(if ($PersistentCompositeLifecycle) { '/DGUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE' } else { '' }) $(if ($ThreadStaticLifecycleDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE' } else { '' })" } else { '' }) $c108Defines $c108Includes /Fo:`"$object`" `"$source`"",
+    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' }) $(if ($PersistentCompositeLifecycle) { '/DGUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE' } else { '' }) $(if ($C188R12R4FactoryAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION' } else { '' }) $(if ($ThreadStaticLifecycleDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE' } else { '' })" } else { '' }) $c108Defines $c108Includes /Fo:`"$object`" `"$source`"",
     "exit /b %errorlevel%"
 )
 $lines | Set-Content -LiteralPath $batch -Encoding ASCII
@@ -597,7 +610,7 @@ if ($NativeAotFpRepair) {
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -619,6 +632,7 @@ $manifest = [ordered]@{
         "RhpReversePInvokeAttachOrTrapThread2" = "guideXosStockRhpReversePInvokeAttachOrTrapThread2"
         "RhpFallbackFailFast" = "guideXosStockRhpFallbackFailFast"
         "RhpNewArray" = if ($ManagedAllocation) { "guideXosStockRhpNewArray" } else { $null }
+        "RhpNewFast" = if ($C188R12R4FactoryAttribution) { "guideXosStockRhpNewFast" } else { $null }
     }
     objcopy = $objcopy
     objcopySha256 = Get-Hash $objcopy
@@ -651,8 +665,10 @@ $manifest = [ordered]@{
     platformObject = $lock.platformObject
     liveWindowsImportsReplaced = @("FlsGetValue", "FlsSetValue", "RhpReversePInvoke", "RhpReversePInvokeReturn")
     managedAllocation = [bool]$ManagedAllocation
+    c188r12r4FactoryAttribution = [bool]$C188R12R4FactoryAttribution
     allocationMode = if ($ManagedRepeatedAllocation) { "Repeated" } elseif ($ManagedAllocation) { "Allocating" } else { "NonAllocating" }
-    allocationStrategy = if ($ManagedRepeatedAllocation) { "bounded-static-image-backed-no-collection-with-proof-specific-preflight-oom" } elseif ($ManagedAllocation) { "bounded-static-image-backed-no-collection" } else { "none" }
+    allocationStrategy = if ($C188R12R4FactoryAttribution) { "bounded-static-image-backed-arrays-with-stock-object-fallback-observed" } elseif ($ManagedRepeatedAllocation) { "bounded-static-image-backed-no-collection-with-proof-specific-preflight-oom" } elseif ($ManagedAllocation) { "bounded-static-image-backed-no-collection" } else { "none" }
+    objectAllocationFallback = if ($C188R12R4FactoryAttribution) { "stock-RhpNewFast-preserved-and-instrumented" } else { "stock-RhpNewFast" }
     managedHeapConfiguration = if ($ManagedAllocation) { $HeapConfiguration } else { "None" }
     managedHeapBytes = if ($ManagedAllocation) { $managedHeapBytes } else { 0 }
     managedArrayLength = if ($ManagedRepeatedAllocation) { 256 } elseif ($ManagedAllocation) { 24 } else { 0 }

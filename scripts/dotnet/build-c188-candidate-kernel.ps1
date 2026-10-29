@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$BuildRoot,
     [Parameter()][switch]$ManagedStateReentry,
-    [Parameter()][switch]$ManagedStateProvenance
+    [Parameter()][switch]$ManagedStateProvenance,
+    [Parameter()][switch]$FactoryAllocationAttribution
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -21,7 +22,8 @@ $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r9-registry-input-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r10-nativeaot-state-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r11-managed-state-provenance')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r3-lifetime-start-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r3-lifetime-start-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4-factory-attribution')))
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
@@ -103,7 +105,7 @@ $nativeFeatures = @(
 if ($ManagedStateReentry) {
     $nativeFeatures += 'GXOS_NATIVEAOT_C188R10_STATE_REENTRY'
 }
-if ($ManagedStateProvenance) {
+if ($ManagedStateProvenance -or $FactoryAllocationAttribution) {
     $nativeFeatures += 'GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE'
 }
 $extraCFlags = ($nativeFeatures | ForEach-Object { '-D' + $_ }) -join ' '
@@ -140,7 +142,7 @@ if (-not (Test-Path -LiteralPath $kernelElf -PathType Leaf)) {
 }
 $bytes = [System.IO.File]::ReadAllBytes($kernelElf)
 $kernelText = [System.Text.Encoding]::ASCII.GetString($bytes)
-foreach ($marker in @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY','C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION') + $(if ($ManagedStateReentry) { @('C188R10-NATIVE') } else { @() }) + $(if ($ManagedStateProvenance) { @('C188R11-NATIVE','C188R11-HOST','C188R11R2_KEY') } else { @() })) {
+foreach ($marker in @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY','C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION') + $(if ($ManagedStateReentry) { @('C188R10-NATIVE') } else { @() }) + $(if ($ManagedStateProvenance -or $FactoryAllocationAttribution) { @('C188R11-NATIVE','C188R11-HOST','C188R11R2_KEY') } else { @() })) {
     if (-not $kernelText.Contains($marker)) { throw "C188 kernel ELF is missing required marker $marker." }
 }
 foreach ($requiredFlag in @('-fno-exceptions','-fno-rtti','-nostdinc++','-std=c++14')) {
@@ -166,8 +168,8 @@ $manifest = [ordered]@{
     c181ProofMarkers = @('C171-WINDOW-CREATE','C172-COMPOSITOR-TRACE','C175-NATIVE-GEOMETRY')
     c188CandidateMarkers = @('C188-IDENTITY-REGISTRY','C188-LAUNCHER-COUNTS','C188-STALE-GENERATION')
     stateReentryDiagnostic = [bool]$ManagedStateReentry
-    stateProvenanceDiagnostic = [bool]$ManagedStateProvenance
-    candidateOnlyDefines = @('GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY') + $(if ($ManagedStateReentry) { @('GXOS_NATIVEAOT_C188R10_STATE_REENTRY') } else { @() }) + $(if ($ManagedStateProvenance) { @('GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE') } else { @() })
+    stateProvenanceDiagnostic = [bool]($ManagedStateProvenance -or $FactoryAllocationAttribution)
+    candidateOnlyDefines = @('GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY') + $(if ($ManagedStateReentry) { @('GXOS_NATIVEAOT_C188R10_STATE_REENTRY') } else { @() }) + $(if ($ManagedStateProvenance -or $FactoryAllocationAttribution) { @('GXOS_NATIVEAOT_C188R11_STATE_PROVENANCE') } else { @() })
     standardKernelOutputTouched = $false
 }
 $manifestPath = Join-Path $buildRootFull 'kernel-qualification.json'

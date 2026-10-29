@@ -766,6 +766,27 @@ struct GuideXosAllocationDiagnostics {
 __declspec(align(16)) unsigned char g_guideXosManagedHeap[kManagedHeapBytes];
 extern "C" volatile GuideXosAllocationDiagnostics g_guideXosAllocationDiagnostics = {};
 extern "C" void* __cdecl guideXosStockRhpNewArray(void* eeType, gx_size length);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+struct GuideXosC188R12R4FactoryAllocationState {
+    gx_uint32 invocationId;
+    gx_uint32 selector;
+    gx_uint32 operation;
+    gx_uint32 objectRequests;
+    gx_uint32 objectReturns;
+    gx_uint32 objectReturnedInArena;
+    gx_uint32 objectReturnedOutsideArena;
+    gx_uint32 objectReturnedNull;
+    gx_uint32 arrayRequests;
+    gx_uint32 arrayReturns;
+    gx_uint32 capacityMisses;
+    gx_uintptr initialCursor;
+    gx_uintptr lastRequestSize;
+    gx_uintptr lastCursor;
+    gx_uintptr lastAvailable;
+};
+GuideXosC188R12R4FactoryAllocationState g_guideXosC188R12R4FactoryAllocation = {};
+extern "C" void* __cdecl guideXosStockRhpNewFast(void* eeType);
+#endif
 #else
 extern "C" guidexos_nativeaot_allocation_diagnostics g_guideXosAllocationDiagnostics = {};
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
@@ -32893,6 +32914,11 @@ extern "C" __declspec(dllexport) int __cdecl guideXosNativeAotC011EC31StrongRoot
 #if !defined(GUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION) && !defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION) && !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedArrayHostLog__Ansi;
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4BeginFactory__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4SetOperation__Ansi;
+extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4EndFactory__Ansi;
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION)
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationCanFit__Ansi;
 extern "C" void* __pinvoke_HostLogProof__Module____Internal__guideXosManagedAllocationValidateObject__Ansi;
@@ -33338,6 +33364,109 @@ guideXosNativeAotCollectionBoundarySafeStop(gx_uint32 suspendReason) {
 }
 #endif
 
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+static gx_uintptr c188r12r4CurrentCursor() {
+    unsigned char* cell = runtimeCell(currentTlsBlock());
+    return cell == nullptr ? 0u : reinterpret_cast<gx_uintptr>(
+        *reinterpret_cast<void**>(cell));
+}
+
+static gx_uintptr c188r12r4CurrentLimit() {
+    unsigned char* cell = runtimeCell(currentTlsBlock());
+    return cell == nullptr ? 0u : reinterpret_cast<gx_uintptr>(
+        *reinterpret_cast<void**>(cell + sizeof(void*)));
+}
+
+static void c188r12r4EmitAllocation(
+    const char* kind, const char* stage, gx_uintptr requestSize,
+    gx_uintptr cursor, gx_uintptr available, const char* result) {
+    const auto& state = g_guideXosC188R12R4FactoryAllocation;
+    if (state.invocationId == 0u || state.selector != 5u) return;
+    persistentSerialPutString("C188R12R4_ALLOC invocation=");
+    persistentSerialPutHex64(state.invocationId);
+    persistentSerialPutString(" selector=");
+    persistentSerialPutHex64(state.selector);
+    persistentSerialPutString(" operation=");
+    persistentSerialPutHex64(state.operation);
+    persistentSerialPutString(" kind=");
+    persistentSerialPutString(kind);
+    persistentSerialPutString(" stage=");
+    persistentSerialPutString(stage);
+    persistentSerialPutString(" size=");
+    persistentSerialPutHex64(requestSize);
+    persistentSerialPutString(" cursor=");
+    persistentSerialPutHex64(cursor);
+    persistentSerialPutString(" available=");
+    persistentSerialPutHex64(available);
+    persistentSerialPutString(" result=");
+    persistentSerialPutString(result);
+    persistentSerialPutString("\n");
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosC188R12R4BeginFactory(gx_uint32 invocationId, gx_uint32 selector) {
+    g_guideXosC188R12R4FactoryAllocation = {};
+    auto& state = g_guideXosC188R12R4FactoryAllocation;
+    state.invocationId = invocationId;
+    state.selector = selector;
+    state.initialCursor = c188r12r4CurrentCursor();
+    state.lastCursor = state.initialCursor;
+    const gx_uintptr limit = c188r12r4CurrentLimit();
+    state.lastAvailable = limit >= state.initialCursor
+        ? limit - state.initialCursor : 0u;
+    return 0;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosC188R12R4SetOperation(gx_uint32 operation) {
+    g_guideXosC188R12R4FactoryAllocation.operation = operation;
+    return 0;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosC188R12R4EndFactory(gx_uint32 success) {
+    auto& state = g_guideXosC188R12R4FactoryAllocation;
+    const gx_uintptr cursor = c188r12r4CurrentCursor();
+    const gx_uintptr limit = c188r12r4CurrentLimit();
+    persistentSerialPutString("C188R12R4_ALLOC invocation=");
+    persistentSerialPutHex64(state.invocationId);
+    persistentSerialPutString(" selector=");
+    persistentSerialPutHex64(state.selector);
+    persistentSerialPutString(" operation=0 stage=factory-summary");
+    persistentSerialPutString(" objectRequests=");
+    persistentSerialPutHex64(state.objectRequests);
+    persistentSerialPutString(" objectReturns=");
+    persistentSerialPutHex64(state.objectReturns);
+    persistentSerialPutString(" objectInArena=");
+    persistentSerialPutHex64(state.objectReturnedInArena);
+    persistentSerialPutString(" objectOutsideArena=");
+    persistentSerialPutHex64(state.objectReturnedOutsideArena);
+    persistentSerialPutString(" objectNull=");
+    persistentSerialPutHex64(state.objectReturnedNull);
+    persistentSerialPutString(" arrayRequests=");
+    persistentSerialPutHex64(state.arrayRequests);
+    persistentSerialPutString(" arrayReturns=");
+    persistentSerialPutHex64(state.arrayReturns);
+    persistentSerialPutString(" capacityMisses=");
+    persistentSerialPutHex64(state.capacityMisses);
+    persistentSerialPutString(" cursorBefore=");
+    persistentSerialPutHex64(state.initialCursor);
+    persistentSerialPutString(" cursorAfter=");
+    persistentSerialPutHex64(cursor);
+    persistentSerialPutString(" allocated=");
+    persistentSerialPutHex64(cursor >= state.initialCursor
+        ? cursor - state.initialCursor : 0u);
+    persistentSerialPutString(" availableAfter=");
+    persistentSerialPutHex64(limit >= cursor ? limit - cursor : 0u);
+    persistentSerialPutString(" result=");
+    persistentSerialPutString(success != 0u ? "success\n" : "failure\n");
+    state.invocationId = 0u;
+    state.selector = 0u;
+    state.operation = 0u;
+    return 0;
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 #if !defined(GUIDEXOS_NATIVEAOT_USE_STOCK_RHP_NEW_ARRAY_ENTRY)
 extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size length) {
@@ -33373,6 +33502,12 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
 
     g_guideXosAllocationDiagnostics.requestedArrayLength = static_cast<gx_uint32>(length);
     g_guideXosAllocationDiagnostics.requestedObjectSize = static_cast<gx_uint32>(objectSize);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+    if (g_guideXosC188R12R4FactoryAllocation.invocationId != 0u) {
+        ++g_guideXosC188R12R4FactoryAllocation.arrayRequests;
+        g_guideXosC188R12R4FactoryAllocation.lastRequestSize = objectSize;
+    }
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC41_POST_GC_ALLOCATOR_PROVENANCE)
     // This is the C41 first-helper boundary: the wrapper has accepted the
@@ -33790,12 +33925,25 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     unsigned char* cell = runtimeCell(block);
     if (cell == nullptr) {
         g_guideXosAllocationDiagnostics.outOfMemory = 1u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+        ++g_guideXosC188R12R4FactoryAllocation.capacityMisses;
+        c188r12r4EmitAllocation("array", "context-invalid", objectSize,
+            0u, 0u, "bounded-failfast");
+#endif
         guideXosFailFast(6u);
     }
     const gx_uintptr allocationPointer = reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell));
     const gx_uintptr allocationLimit = reinterpret_cast<gx_uintptr>(*reinterpret_cast<void**>(cell + sizeof(void*)));
     if (allocationPointer == 0u || allocationLimit < allocationPointer || objectSize > allocationLimit - allocationPointer) {
         markAllocationOutOfMemory(cell, allocationPointer);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+        ++g_guideXosC188R12R4FactoryAllocation.capacityMisses;
+        c188r12r4EmitAllocation("array", "fast-capacity-miss", objectSize,
+            allocationPointer,
+            allocationLimit >= allocationPointer
+                ? allocationLimit - allocationPointer : 0u,
+            "bounded-failfast");
+#endif
         guideXosFailFast(6u);
     }
 
@@ -33814,8 +33962,72 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
     g_guideXosAllocationDiagnostics.lastObject = reinterpret_cast<gx_uintptr>(result);
     g_guideXosAllocationDiagnostics.lastObjectSize = objectSize;
     g_guideXosAllocationDiagnostics.allocationPointerAfter = allocationPointerAfter;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+    if (g_guideXosC188R12R4FactoryAllocation.invocationId != 0u)
+        ++g_guideXosC188R12R4FactoryAllocation.arrayReturns;
+#endif
     return result;
 #endif
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+extern "C" __declspec(noinline) void* __cdecl RhpNewFast(void* eeType) {
+    auto& state = g_guideXosC188R12R4FactoryAllocation;
+    const bool attributed = state.invocationId != 0u && state.selector == 5u;
+    gx_uintptr objectSize = 0u;
+    if (eeType != nullptr) {
+        // The locked AMD64 RhpNewFast entry uses EEType::BaseSize directly;
+        // that field already includes the object-header and object alignment.
+        objectSize = *reinterpret_cast<const gx_uint32*>(
+            reinterpret_cast<const unsigned char*>(eeType) + sizeof(gx_uint32));
+    }
+    const gx_uintptr cursorBefore = c188r12r4CurrentCursor();
+    const gx_uintptr limitBefore = c188r12r4CurrentLimit();
+    const gx_uintptr availableBefore = limitBefore >= cursorBefore
+        ? limitBefore - cursorBefore : 0u;
+    const bool capacityMiss = cursorBefore == 0u ||
+        limitBefore < cursorBefore || objectSize > availableBefore;
+    if (attributed) {
+        ++state.objectRequests;
+        state.lastRequestSize = objectSize;
+        state.lastCursor = cursorBefore;
+        state.lastAvailable = availableBefore;
+        if (capacityMiss) {
+            ++state.capacityMisses;
+            c188r12r4EmitAllocation("object", "fast-capacity-miss",
+                objectSize, cursorBefore, availableBefore,
+                "RhpGcAlloc-fallback-entered");
+        }
+    }
+
+    void* result = guideXosStockRhpNewFast(eeType);
+    if (attributed) {
+        const gx_uintptr cursorAfter = c188r12r4CurrentCursor();
+        const gx_uintptr heapBase = reinterpret_cast<gx_uintptr>(
+            g_guideXosManagedHeap);
+        const gx_uintptr heapLimit = heapBase + kManagedHeapBytes;
+        const gx_uintptr resultAddress = reinterpret_cast<gx_uintptr>(result);
+        const bool resultInPersistentArena = result != nullptr &&
+            resultAddress >= heapBase && resultAddress < heapLimit;
+        if (result != nullptr) {
+            ++state.objectReturns;
+            if (resultInPersistentArena)
+                ++state.objectReturnedInArena;
+            else
+                ++state.objectReturnedOutsideArena;
+        } else {
+            ++state.objectReturnedNull;
+        }
+        if (capacityMiss) {
+            c188r12r4EmitAllocation("object", "allocation-result",
+                objectSize, cursorBefore, availableBefore,
+                result == nullptr ? "null" : resultInPersistentArena
+                    ? "returned-in-arena" : "returned-outside-arena");
+        }
+        state.lastCursor = cursorAfter;
+    }
+    return result;
 }
 #endif
 
@@ -34549,6 +34761,20 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     }
 
     initializeRuntimeState(block);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
+    using GuideXosC188R12R4BeginFactoryFn = int (__cdecl*)(gx_uint32, gx_uint32);
+    using GuideXosC188R12R4SetOperationFn = int (__cdecl*)(gx_uint32);
+    using GuideXosC188R12R4EndFactoryFn = int (__cdecl*)(gx_uint32);
+    __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4BeginFactory__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosC188R12R4BeginFactoryFn>(
+            guideXosC188R12R4BeginFactory));
+    __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4SetOperation__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosC188R12R4SetOperationFn>(
+            guideXosC188R12R4SetOperation));
+    __pinvoke_HostLogProof__Module____Internal__guideXosC188R12R4EndFactory__Ansi =
+        reinterpret_cast<void*>(static_cast<GuideXosC188R12R4EndFactoryFn>(
+            guideXosC188R12R4EndFactory));
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     if (firstManagedEntry) {
         ++g_guideXosAllocationDiagnostics.managedEntryCount;

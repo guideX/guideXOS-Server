@@ -1,0 +1,6 @@
+C188R12R4_FACTORY invocation=2 selector=5 operation=0 stage=factory-invoke code=0 result=begin
+C188R12R3_LIFETIME invocation=2 stage=factory-enter selector=5 identity=com.guidexos.apps.managed.settingscenter count=1 mask=1 generation=2 code=-1 state=invoking
+C188R12R4_FACTORY invocation=2 selector=5 operation=10 stage=constructor-return code=0 result=complete
+C188R12R4_FACTORY invocation=2 selector=5 operation=11 stage=factory-return code=0 result=created
+C188R12R3_LIFETIME invocation=2 stage=factory-return selector=5 identity=com.guidexos.apps.managed.settingscenter count=1 mask=1 generation=2 code=0 state=created
+C188R12R3_LIFETIME invocation=2 stage=resident-register-enter selector=5 identity=com.guidexos.apps.managed.settingscenter count=1 mask=1 generation=2 code=-1 state=free-slot

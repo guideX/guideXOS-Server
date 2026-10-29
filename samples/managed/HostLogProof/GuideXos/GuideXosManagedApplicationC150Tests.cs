@@ -232,12 +232,35 @@ internal sealed class GuideXosManagedApplicationLifetime
         EmitC188R12R3(diagnosticHost, invocationId, "factory-enter"u8,
             descriptor.Selector, applicationIdentity, -1, "invoking"u8,
             requestedGeneration);
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+        bool c188r12r4SettingsFactory = descriptor.Selector == 5u;
+        bool c188r12r4FactorySucceeded = false;
+        if (c188r12r4SettingsFactory)
+        {
+            C188R12R4FactoryDiagnostics.BeginFactory(
+                diagnosticHost, invocationId, descriptor.Selector);
+            C188R12R4FactoryDiagnostics.Emit("factory-invoke"u8, 0u,
+                "begin"u8, 0);
+        }
+#endif
         try
         {
             application = factory();
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+            if (c188r12r4SettingsFactory)
+            {
+                c188r12r4FactorySucceeded = application != null;
+                C188R12R4FactoryDiagnostics.FactoryReturned(
+                    application != null);
+            }
+#endif
         }
         catch (Exception)
         {
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+            if (c188r12r4SettingsFactory)
+                C188R12R4FactoryDiagnostics.FactoryFailed();
+#endif
             EmitC188R12R3(diagnosticHost, invocationId, "factory-throw"u8,
                 descriptor.Selector, applicationIdentity, -1, "exception"u8,
                 requestedGeneration);
@@ -246,6 +269,14 @@ internal sealed class GuideXosManagedApplicationLifetime
                 requestedGeneration);
             throw;
         }
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+        finally
+        {
+            if (c188r12r4SettingsFactory)
+                C188R12R4FactoryDiagnostics.EndFactory(
+                    c188r12r4FactorySucceeded);
+        }
+#endif
         EmitC188R12R3(diagnosticHost, invocationId, "factory-return"u8,
             descriptor.Selector, applicationIdentity,
             application == null ? 4 : 0,

@@ -264,10 +264,26 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
 
     public ManagedSettingsCenter() : this(SurfaceWidth, SurfaceHeight) { }
 
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+    internal static void EnsureFactoryTypeInitializedC188R12R4()
+    {
+        _ = ResizeBounds;
+        _ = SectionTops.Length;
+    }
+#endif
+
     internal ManagedSettingsCenter(int initialWindowWidth, int initialWindowHeight)
     {
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+        C188R12R4FactoryDiagnostics.Emit("constructor-enter"u8, 3u,
+            "begin"u8, 0);
+#endif
         _windowWidth = initialWindowWidth;
         _windowHeight = initialWindowHeight;
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+        C188R12R4FactoryDiagnostics.Emit("model-init-enter"u8, 4u,
+            "begin"u8, 0);
+#endif
         _sectionLeaves = new object[][]
         {
             new object[] { _appearanceHeading, _density, _showStatus },
@@ -275,6 +291,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
             new object[] { _systemHeading, _summaryMode, _detailMode, _statusCombo, _statusProgress, _systemDescription },
             new object[] { _advancedHeading, _applyButton, _defaultsButton },
         };
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+        C188R12R4FactoryDiagnostics.Emit("model-init-return"u8, 5u,
+            "complete"u8, 0);
+        C188R12R4FactoryDiagnostics.Emit("controls-init-enter"u8, 6u,
+            "begin"u8, 0);
+#endif
 
         ConfigureMember(_appearanceHeading, GuideXosVerticalStackHorizontalAlignment.Left, 0, 2, 0, 2);
         ConfigureMember(_density, GuideXosVerticalStackHorizontalAlignment.Stretch, 8, 2, 8, 2);
@@ -329,6 +351,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _detailMode.Changed = OnStatusModeChanged;
         _menu.CommandInvoked = OnMenuCommand;
         ConfigureOptionsMenu();
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+        C188R12R4FactoryDiagnostics.Emit("controls-init-return"u8, 7u,
+            "complete"u8, 0);
+        C188R12R4FactoryDiagnostics.Emit("dialogs-init-enter"u8, 8u,
+            "begin"u8, 0);
+#endif
 
         _resetDialog.TryAddMember(_resetCancelButton);
         _resetDialog.TryAddMember(_resetConfirmButton);
@@ -349,7 +377,12 @@ public sealed class ManagedSettingsCenter : GuideXosApplication
         _dirtyCloseDialog.TrySetCancelResult(GuideXosDialogResult.Cancel);
         _dirtyCloseDialog.TrySetMessage("Apply changes before closing?");
         _dirtyCloseDialog.Closed = OnDirtyCloseDialogClosed;
-
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+        C188R12R4FactoryDiagnostics.Emit("dialogs-init-return"u8, 9u,
+            "complete"u8, 0);
+        C188R12R4FactoryDiagnostics.Emit("constructor-return"u8, 10u,
+            "complete"u8, 0);
+#endif
     }
 
     internal ManagedSettingsSnapshot Working => _working;

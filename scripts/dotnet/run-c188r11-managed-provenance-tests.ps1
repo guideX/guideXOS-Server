@@ -9,7 +9,8 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 $root = [System.IO.Path]::GetFullPath($OutputRoot)
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4-factory-attribution')))
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
     $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and

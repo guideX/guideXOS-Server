@@ -11,12 +11,13 @@ param(
     [Parameter()][switch]$ManagedStateReentry,
     [Parameter()][switch]$ManagedStateProvenance,
     [Parameter()][switch]$LifetimeStartAttribution,
+    [Parameter()][switch]$FactoryAllocationAttribution,
     [Parameter()][string]$ReadElfPath = 'C:\mingw64\bin\readelf.exe'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation -or $NotesProofInvocationCorrection -or $NotesPostRenderStartup -or $NotesProofAuthorization -or $NotesInputRouting -or $NotesRegistryInputReentry -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution
+$isStartupDiagnostic = $NotesStartupDiagnostics -or $NotesStartupOperationIsolation -or $NotesProofInvocationCorrection -or $NotesPostRenderStartup -or $NotesProofAuthorization -or $NotesInputRouting -or $NotesRegistryInputReentry -or $ManagedStateReentry -or $ManagedStateProvenance -or $LifetimeStartAttribution -or $FactoryAllocationAttribution
 $selectedPhaseCount = 0
 if ($NotesStartupDiagnostics) { $selectedPhaseCount++ }
 if ($NotesStartupOperationIsolation) { $selectedPhaseCount++ }
@@ -27,9 +28,10 @@ if ($NotesInputRouting) { $selectedPhaseCount++ }
 if ($NotesRegistryInputReentry) { $selectedPhaseCount++ }
 if ($ManagedStateReentry) { $selectedPhaseCount++ }
 if ($ManagedStateProvenance) { $selectedPhaseCount++ }
-if ($LifetimeStartAttribution) { $selectedPhaseCount++ }
+if ($LifetimeStartAttribution -and -not $FactoryAllocationAttribution) { $selectedPhaseCount++ }
+if ($FactoryAllocationAttribution) { $selectedPhaseCount++ }
 if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($LifetimeStartAttribution) { 'out/dotnet/c188r12r3-lifetime-start-attribution' } elseif ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($NotesRegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRootName = if ($FactoryAllocationAttribution) { 'out/dotnet/c188r12r4-factory-attribution' } elseif ($LifetimeStartAttribution) { 'out/dotnet/c188r12r3-lifetime-start-attribution' } elseif ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($NotesRegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $evidence = [System.IO.Path]::GetFullPath($EvidenceRoot)
@@ -93,7 +95,7 @@ foreach ($sourcePath in $notesSources) {
     }
 }
 if ($isStartupDiagnostic) {
-    $requiredNotesMarkers = if ($ManagedStateProvenance -or $LifetimeStartAttribution) {
+    $requiredNotesMarkers = if ($ManagedStateProvenance -or $LifetimeStartAttribution -or $FactoryAllocationAttribution) {
         @($allNotesMarkers | Where-Object { $_ -like 'C188R7-*' -or $_ -like 'C188R8-*' -or $_ -like 'C188R9-*' -or $_ -like 'C188R11-*' })
     } elseif ($ManagedStateReentry) {
         @($allNotesMarkers | Where-Object { $_ -like 'C188R7-*' -or $_ -like 'C188R8-*' -or $_ -like 'C188R9-*' -or $_ -like 'C188R10 *' -or $_ -like 'C188R10-*' })
@@ -111,18 +113,31 @@ if ($isStartupDiagnostic) {
         # uppercase-only source marker scanner does not discover them.
         $requiredNotesMarkers += @('C188R10 state stage=', 'C188R10-MANAGED stage=')
     }
-    if ($ManagedStateProvenance -or $LifetimeStartAttribution) {
+    if ($ManagedStateProvenance -or $LifetimeStartAttribution -or $FactoryAllocationAttribution) {
         $requiredNotesMarkers += @('C188R11 state seq=', 'C188R11-INIT seq=', 'C188R11-MANAGED stage=', 'C188R11R2_KEY')
     }
     foreach ($marker in $requiredNotesMarkers) {
         if (-not $elfText.Contains($marker)) { throw "$phaseRootName diagnostic ELF omitted required retained marker $marker" }
     }
-    if ($LifetimeStartAttribution) {
+    if ($LifetimeStartAttribution -or $FactoryAllocationAttribution) {
         foreach ($marker in @('C188R12R3_LIFETIME invocation=', 'factory-enter',
                 'factory-return', 'resident-register-enter',
                 'resident-register-return')) {
             if (-not $elfText.Contains($marker)) {
                 throw "$phaseRootName diagnostic ELF omitted lifetime marker $marker"
+            }
+        }
+    }
+    if ($FactoryAllocationAttribution) {
+        foreach ($marker in @('C188R12R4_FACTORY invocation=',
+                'C188R12R4_ALLOC invocation=', 'fast-capacity-miss')) {
+            if (-not $elfText.Contains($marker)) {
+                throw "$phaseRootName diagnostic ELF omitted factory/allocation marker $marker"
+            }
+        }
+        foreach ($symbol in @('RhpNewFast', 'guideXosStockRhpNewFast')) {
+            if (-not $mapText.Contains($symbol)) {
+                throw "$phaseRootName diagnostic map omitted allocation wrapper symbol $symbol"
             }
         }
     }
@@ -171,7 +186,9 @@ foreach ($entry in $artifacts.GetEnumerator()) {
     $item = Get-Item -LiteralPath $entry.Value
     $fileEvidence[$entry.Key] = [ordered]@{path=$item.FullName;bytes=$item.Length;sha256=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash}
 }
-$nativeAotMode = if ($LifetimeStartAttribution) {
+$nativeAotMode = if ($FactoryAllocationAttribution) {
+    'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization+C188R8InputRouting+C188R9RegistryInputReentry+C188R11ManagedStateProvenance+C188R12R3LifetimeStartAttribution+C188R12R4FactoryAllocationAttribution'
+} elseif ($LifetimeStartAttribution) {
     'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization+C188R8InputRouting+C188R9RegistryInputReentry+C188R11ManagedStateProvenance+C188R12R3LifetimeStartAttribution'
 } elseif ($ManagedStateProvenance) {
     'C160Composite+C185Boundary+C188ExternalAppIdentity+C188R7ProofAuthorization+C188R8InputRouting+C188R9RegistryInputReentry+C188R11ManagedStateProvenance'

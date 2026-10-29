@@ -25,6 +25,7 @@ param(
     [switch]$C188R10ManagedStateReentry,
     [switch]$C188R11ManagedStateProvenance,
     [switch]$C188R12R3LifetimeStartAttribution,
+    [switch]$C188R12R4FactoryAttribution,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -241,6 +242,7 @@ if ($UseGuideXosRuntimePack) {
     elseif ($AllocationMode -eq "Allocating") { $runtimePackBuildArguments += "-ManagedAllocation" }
     if ($ProductionApplication) { $runtimePackBuildArguments += "-ProductionApplication" }
     if ($PersistentCompositeLifecycle) { $runtimePackBuildArguments += "-PersistentCompositeLifecycle" }
+    if ($C188R12R4FactoryAttribution) { $runtimePackBuildArguments += "-C188R12R4FactoryAttribution" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
@@ -538,6 +540,17 @@ try {
          $managedProjectMode -ne 'C160Composite')) {
         throw 'C188R12R3 lifetime attribution requires the ordinary C160 composite C188 candidate and R11 provenance diagnostics.'
     }
+    if ($C188R12R4FactoryAttribution -and
+        (-not $C188R12R3LifetimeStartAttribution -or
+         -not $C188R11ManagedStateProvenance -or
+         -not $C188ExternalAppIdentity -or -not $ProductionApplication -or
+         -not $C166OrdinaryBuild -or
+         $managedProjectMode -ne 'C160Composite' -or
+         $AllocationMode -ne 'Allocating' -or
+         -not $PersistentCompositeLifecycle -or
+         -not $UseGuideXosRuntimePack)) {
+        throw 'C188R12R4 attribution requires the ordinary C160 production composite, R12R3 lifetime tracing, R11 provenance, allocating persistent runtime pack, and C166 ordinary build.'
+    }
     $publishProperties = @(
         "-p:HostLogProofRuntimeSupportObj=$runtimeSupportObj",
         "-p:HostLogProofMapPath=$artifactMap",
@@ -590,6 +603,9 @@ try {
     }
     if ($C188R12R3LifetimeStartAttribution) {
         $publishProperties += '-p:HostLogProofC188R12R3LifetimeStartAttribution=true'
+    }
+    if ($C188R12R4FactoryAttribution) {
+        $publishProperties += '-p:HostLogProofC188R12R4FactoryAttribution=true'
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"

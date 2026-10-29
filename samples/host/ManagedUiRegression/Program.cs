@@ -15,6 +15,18 @@ if (args.Length == 1 && args[0] == "--c188r8-notes-input-routing")
 {
     return NotesInputRoutingC188R8Regression.Run() ? 0 : 1;
 }
+if (args.Length == 1 && args[0] == "--c188r12r4-factory")
+{
+    bool passed = GuideXosManagedApplicationFactoryC188R12R4Tests.Run();
+    Console.WriteLine($"C188R12R4-FACTORY cases={GuideXosManagedApplicationFactoryC188R12R4Tests.CaseCount} firstFailedCase={GuideXosManagedApplicationFactoryC188R12R4Tests.FirstFailedCase} result={(passed ? "PASS" : "FAIL")}");
+    if (!passed)
+    {
+        foreach (string line in
+            GuideXosManagedApplicationFactoryC188R12R4Tests.CapturedFactoryLines())
+            Console.WriteLine(line);
+    }
+    return passed ? 0 : 1;
+}
 
 int passedSuites = 0;
 int failedSuites = 0;
@@ -208,6 +220,12 @@ bool c188r12r3LifetimePassed = RunSuite("C188R12R3-LifetimeStart",
     () => GuideXosManagedApplicationLifetimeC188R12R3Tests.Run());
 allPassed &= c188r12r3LifetimePassed;
 Console.WriteLine($"C188R12R3-LIFETIME-DETAIL firstFailedCase={GuideXosManagedApplicationLifetimeC188R12R3Tests.FirstFailedCase} settingsConstructionBytes={GuideXosManagedApplicationLifetimeC188R12R3Tests.SettingsConstructionBytes} result={(c188r12r3LifetimePassed ? "PASS" : "FAIL")}");
+
+bool c188r12r4FactoryPassed = RunSuite("C188R12R4-Factory",
+    GuideXosManagedApplicationFactoryC188R12R4Tests.CaseCount,
+    () => GuideXosManagedApplicationFactoryC188R12R4Tests.Run());
+allPassed &= c188r12r4FactoryPassed;
+Console.WriteLine($"C188R12R4-FACTORY-DETAIL firstFailedCase={GuideXosManagedApplicationFactoryC188R12R4Tests.FirstFailedCase} result={(c188r12r4FactoryPassed ? "PASS" : "FAIL")}");
 
 Console.WriteLine($"MANAGED-UI-HOST-GATE suites={passedSuites + failedSuites} passed={passedSuites} failed={failedSuites} cases={totalCases} result={(allPassed && failedSuites == 0 ? "PASS" : "FAIL")}");
 return allPassed && failedSuites == 0 ? 0 : 1;

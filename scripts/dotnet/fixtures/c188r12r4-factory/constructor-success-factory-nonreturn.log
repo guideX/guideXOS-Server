@@ -1,0 +1,4 @@
+C188R12R4_FACTORY invocation=2 selector=5 operation=0 stage=factory-invoke code=0 result=begin
+C188R12R4_FACTORY invocation=2 selector=5 operation=3 stage=constructor-enter code=0 result=begin
+C188R12R4_FACTORY invocation=2 selector=5 operation=10 stage=constructor-return code=0 result=complete
+C188R12R4_FACTORY invocation=2 selector=5 operation=2 stage=object-construction-result code=0 result=complete

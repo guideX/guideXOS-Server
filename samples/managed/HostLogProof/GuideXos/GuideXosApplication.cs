@@ -4,6 +4,13 @@ namespace HostLogProof;
 
 public abstract unsafe class GuideXosApplication
 {
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+    protected GuideXosApplication()
+    {
+        C188R12R4FactoryDiagnostics.EmitBaseConstructorEnter();
+    }
+#endif
+
     public abstract GuideXosResult Launch(GuideXosHost host);
     public virtual void OnTearingDown() { }
     public virtual GuideXosResult HandleAction(GuideXosHost host, uint actionId)
@@ -297,7 +304,11 @@ public static unsafe class GuideXosApplicationRegistry
         RegisterC188R11Descriptor(4u, "Managed Notes"u8,
             static () => new Applications.ManagedNotes()),
         RegisterC188R11Descriptor(5u, "Managed Settings Center"u8,
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+            static () => C188R12R4FactoryDiagnostics.CreateSettingsCenter()),
+#else
             static () => new Applications.ManagedSettingsCenter()),
+#endif
 #if HOSTLOGPROOF_C158_MANAGED_CALCULATOR
         RegisterC188R11Descriptor(6u, "Managed Calculator"u8,
             static () => new Applications.ManagedCalculatorC158()),
@@ -313,7 +324,11 @@ public static unsafe class GuideXosApplicationRegistry
 #else
         new(4u, "Managed Notes"u8, static () => new Applications.ManagedNotes()),
         new(5u, "Managed Settings Center"u8,
+#if HOSTLOGPROOF_C188R12R4_FACTORY
+            static () => C188R12R4FactoryDiagnostics.CreateSettingsCenter()),
+#else
             static () => new Applications.ManagedSettingsCenter()),
+#endif
 #if HOSTLOGPROOF_C158_MANAGED_CALCULATOR
         new(6u, "Managed Calculator"u8,
             static () => new Applications.ManagedCalculatorC158()),

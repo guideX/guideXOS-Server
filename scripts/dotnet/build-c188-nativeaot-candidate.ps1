@@ -9,7 +9,8 @@ param(
     [Parameter()][switch]$RegistryInputReentry,
     [Parameter()][switch]$ManagedStateReentry,
     [Parameter()][switch]$ManagedStateProvenance,
-    [Parameter()][switch]$LifetimeStartAttribution
+    [Parameter()][switch]$LifetimeStartAttribution,
+    [Parameter()][switch]$FactoryAllocationAttribution
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -28,8 +29,9 @@ if ($RegistryInputReentry) { $selectedPhaseCount++ }
 if ($ManagedStateReentry) { $selectedPhaseCount++ }
 if ($ManagedStateProvenance) { $selectedPhaseCount++ }
 if ($LifetimeStartAttribution) { $selectedPhaseCount++ }
+if ($FactoryAllocationAttribution) { $selectedPhaseCount++ }
 if ($selectedPhaseCount -gt 1) { throw 'Choose one C188 Notes startup diagnostic phase.' }
-$phaseRootName = if ($LifetimeStartAttribution) { 'out/dotnet/c188r12r3-lifetime-start-attribution' } elseif ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($RegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
+$phaseRootName = if ($FactoryAllocationAttribution) { 'out/dotnet/c188r12r4-factory-attribution' } elseif ($LifetimeStartAttribution) { 'out/dotnet/c188r12r3-lifetime-start-attribution' } elseif ($ManagedStateProvenance) { 'out/dotnet/c188r11-managed-state-provenance' } elseif ($ManagedStateReentry) { 'out/dotnet/c188r10-nativeaot-state-reentry' } elseif ($RegistryInputReentry) { 'out/dotnet/c188r9-registry-input-reentry' } elseif ($NotesInputRouting) { 'out/dotnet/c188r8-notes-input-routing' } elseif ($NotesProofAuthorization) { 'out/dotnet/c188r7-notes-proof-authorization' } elseif ($NotesPostRenderStartup) { 'out/dotnet/c188r6-notes-postrender' } elseif ($NotesProofInvocationCorrection) { 'out/dotnet/c188r5-notes-proof-invocation' } elseif ($NotesStartupOperationIsolation) { 'out/dotnet/c188r4-notes-startup-operation' } elseif ($NotesStartupDiagnostics) { 'out/dotnet/c188r3-notes-startup-diagnostics' } else { 'out/dotnet/c188-external-app-identity' }
 $phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo $phaseRootName))
 $build = [System.IO.Path]::GetFullPath($BuildRoot)
 $relative = [System.IO.Path]::GetRelativePath($phaseRoot, $build)
@@ -135,14 +137,17 @@ if ($ManagedStateReentry) {
     $arguments.C188R9RegistryInputReentry = $true
     $arguments.C188R10ManagedStateReentry = $true
 }
-if ($ManagedStateProvenance -or $LifetimeStartAttribution) {
+if ($ManagedStateProvenance -or $LifetimeStartAttribution -or $FactoryAllocationAttribution) {
     $arguments.C188R7NotesProofAuthorization = $true
     $arguments.C188R8NotesInputRouting = $true
     $arguments.C188R9RegistryInputReentry = $true
     $arguments.C188R11ManagedStateProvenance = $true
 }
-if ($LifetimeStartAttribution) {
+if ($LifetimeStartAttribution -or $FactoryAllocationAttribution) {
     $arguments.C188R12R3LifetimeStartAttribution = $true
+}
+if ($FactoryAllocationAttribution) {
+    $arguments.C188R12R4FactoryAttribution = $true
 }
 $logPath = Join-Path $build 'nativeaot-build.log'
 $output = ''
@@ -162,7 +167,8 @@ $verify = Join-Path $PSScriptRoot 'verify-c188-nativeaot-artifacts.ps1'
 if ($RegistryInputReentry) { $verifyArguments.NotesRegistryInputReentry = $true }
 if ($ManagedStateReentry) { $verifyArguments.ManagedStateReentry = $true }
 if ($ManagedStateProvenance) { $verifyArguments.ManagedStateProvenance = $true }
-if ($LifetimeStartAttribution) { $verifyArguments.LifetimeStartAttribution = $true }
+if ($LifetimeStartAttribution -or $FactoryAllocationAttribution) { $verifyArguments.LifetimeStartAttribution = $true }
+if ($FactoryAllocationAttribution) { $verifyArguments.FactoryAllocationAttribution = $true }
 & $verify @verifyArguments
 if ($LASTEXITCODE -ne 0) { throw "C188 NativeAOT artifact verification failed with exit code $LASTEXITCODE." }
 $runtimePackManifestPath = Join-Path $runtimePackOutput 'runtime-pack.manifest.json'
@@ -194,11 +200,13 @@ $manifest = [ordered]@{
     managedStateReentry=[bool]$ManagedStateReentry
     managedStateProvenance=[bool]$ManagedStateProvenance
     lifetimeStartAttribution=[bool]$LifetimeStartAttribution
+    factoryAllocationAttribution=[bool]$FactoryAllocationAttribution
     productionApplicationSelectorsPreserved=@(4,5,6,7,8)
     candidateSelector=9; candidateIdentity='com.guidexos.apps.managed.counterapp'
 }
-$manifest['managedStateProvenance'] = [bool]($ManagedStateProvenance -or $LifetimeStartAttribution)
-if ($LifetimeStartAttribution) {
+$manifest['managedStateProvenance'] = [bool]($ManagedStateProvenance -or $LifetimeStartAttribution -or $FactoryAllocationAttribution)
+$manifest['lifetimeStartAttribution'] = [bool]($LifetimeStartAttribution -or $FactoryAllocationAttribution)
+if ($LifetimeStartAttribution -or $FactoryAllocationAttribution) {
     $candidateElfText = [System.Text.Encoding]::ASCII.GetString(
         [System.IO.File]::ReadAllBytes($kernelElf))
     foreach ($requiredMarker in @(
@@ -213,6 +221,23 @@ if ($LifetimeStartAttribution) {
         }
     }
     $manifest['lifetimeMarkerFamily'] = 'C188R12R3_LIFETIME'
+}
+if ($FactoryAllocationAttribution) {
+    $candidateMapText = [System.IO.File]::ReadAllText((Join-Path $nativeRoot 'artifacts/HostLogProof.map'))
+    foreach ($requiredMarker in @(
+        'C188R12R4_FACTORY invocation=',
+        'C188R12R4_ALLOC invocation=',
+        'fast-capacity-miss',
+        'RhpNewFast',
+        'guideXosStockRhpNewFast'
+    )) {
+        if (-not $candidateElfText.Contains($requiredMarker) -and
+            -not $candidateMapText.Contains($requiredMarker)) {
+            throw "C188R12R4 NativeAOT candidate is missing attribution evidence: $requiredMarker"
+        }
+    }
+    $manifest['factoryMarkerFamily'] = 'C188R12R4_FACTORY'
+    $manifest['allocationMarkerFamily'] = 'C188R12R4_ALLOC'
 }
 $manifestPath = Join-Path $build 'c188-nativeaot-build.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8

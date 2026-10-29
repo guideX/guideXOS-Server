@@ -1,0 +1,3 @@
+C188R12R3_LIFETIME invocation=2 stage=factory-enter selector=5 identity=com.guidexos.apps.managed.settingscenter count=1 mask=1 generation=2 code=-1 state=invoking
+C188R12R4_FACTORY invocation=2 selector=5 operation=0 stage=factory-invoke code=0 result=begin
+C188R12R4_FACTORY invocation=2 selector=5 operation=1 stage=type-init-enter code=0 result=begin
