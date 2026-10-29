@@ -1,5 +1,74 @@
 # C188R12R2R1R1 Settings Dispatch Guest Retry
 
+## Latest acceptance retry — 2026-10-28
+
+**Outcome D — `QAC_OR_EXECUTION_BLOCKED`.** This addendum records the retry performed after the earlier closeout in this file. The guest diagnostic still could not start because the live QAC coordinator was unavailable. No guest boot, reservation request, pointer movement, click, or key input occurred.
+
+### Baseline and preservation
+
+- Repository: `D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT`; branch: `v1.1_DOTNET_SUPPORT`.
+- Actual starting HEAD: `17ffffc07e9adb50b8d362807a56f0ae396c1443`. This is newer than the request's last reported HEAD, `e2ee812baa13c2ab4d594db858df776eaf785470`; the prior closeout commit was already present at the start.
+- Ending qualification HEAD before this documentation update: `17ffffc07e9adb50b8d362807a56f0ae396c1443`.
+- The pre-existing `ESP/ramdisk.img` worktree modification remains untouched and hashes to `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8`.
+- Existing untracked build and smoke-test outputs were preserved. The fresh hosted report is `out/dotnet/c188r11-managed-state-provenance/hosted/retry-focused-preflight-002/`.
+- No source implementation changed. No reset, restore, clean, stash, branch switch, history rewrite, QEMU termination, or push was performed.
+
+### Diagnostic candidate verification
+
+The retained candidate was reused without rebuilding at `out/dotnet/c188r11-managed-state-provenance/candidates/r12r2-settings-dispatch-001`. Its staging manifest reports `PASS`, 185 unrelated files preserved, and `changedOtherFiles=0`.
+
+| Artifact | Current SHA-256 | Verification |
+|---|---|---|
+| Diagnostic NativeAOT ELF | `E589E66DBC58EE74A02689EA164DEC2AF7178AA94C161895F91BC2F5867E43B` | Matches the build and staging manifests; bytes contain `C188R12R2_LAUNCH` and the Settings app identity |
+| Candidate staged ramdisk | `AA692E80A7FE1EA478DA9C461986EC3BF8DD727192F5A9316887612C21FDC2DA` | Matches `ramdisk-staging.json` |
+| Candidate kernel | `568B2C084387E45FE3718D422570EE761798542E461674AE8CE14A6B7804E864` | Matches retained expected hash |
+| Candidate UEFI loader | `D72A35DA882892BA97356A1C006562ABA2908D9DD909152B96DCBB655D6C2D9B` | Matches retained expected hash |
+| Source `ESP/ramdisk.img` | `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` | Matches the required preserved hash |
+
+The build manifest reports `persistentCompositeLifecycle=true`; the runtime-pack manifest reports `Primary64KiB`, 65,536 managed heap bytes, and `bounded-static-image-backed-no-collection`. The NativeAOT qualification manifest reports ELF64/x86-64, seven load segments, zero relocations, production selectors 4–8, and Settings selector 5. The staging manifest points to this diagnostic ELF at `/APPS/GXOSAPP.ELF`. The retained prior guest trace recorded five descriptors (`n=5`); no new guest-side descriptor observation was possible in this blocked retry.
+
+The current parser accepts the actual `[C102-MANAGED-OUTPUT] C188R12R2_LAUNCH ...` syntax. The handoff predicates cover the source-derived target, screenshot-observed pointer location, at most one bounded corrective movement, ownership recheck, and one-click gate.
+
+### Hosted preflight
+
+All requested focused checks passed:
+
+- Launch-marker parser: 11 cases.
+- Settings handoff and pointer predicates: 37 cases.
+- Runner readiness predicates: 30 cases.
+- QAC ownership predicates: 15 cases.
+- C188 R9/R10/R11/R12R2 registry qualification: 14 / 14 / 15 / 8 cases; the R12R2 cases exercise the registered selector-5 Settings factory and dispatch boundary.
+- Persistent-lifecycle invariants: 7 cases.
+- Isolated wrapper manifest: `out/dotnet/c188r11-managed-state-provenance/hosted/retry-focused-preflight-002/manifest.json`, result `PASS`; its sequential QAC stream-capture check passed 2 cases. The wrapper also passed output bounds (6), keyboard contracts (27), and keyboard runner predicates (24).
+- `git diff --check`: PASS after this closeout edit.
+
+The earlier initial concurrent stream-capture live-line assertion failure remains a failure in the historical record. Its isolated rerun and subsequent sequential wrapper runs passed; this retry also ran the wrapper's stream-capture check sequentially and passed.
+
+### QAC gate and guest evidence
+
+At approximately 2026-10-28 19:05 America/Los_Angeles, fresh read-only QAC `status` and `list` calls both exited with code 2 and returned `Coordinator unavailable: Coordinator connection timed out or is unavailable.` A simultaneous host process snapshot found no `qemu-system-x86_64.exe`, but that cannot establish QAC's complete process census, reservation state, managed-session state, or foreign-process ownership. The snapshot is retained at `out/dotnet/c188r11-managed-state-provenance/hosted/retry-focused-preflight-002/qac-admission-snapshot.json`. The previously reported RC2 session was not assumed to have ended.
+
+The admission gate therefore failed at coordinator responsiveness and census completeness. No reservation was requested, the guest runner was not invoked, and no foreign process was touched. No guest evidence was generated:
+
+| Requested observation | Result in this retry |
+|---|---|
+| Exclusive QAC admission, owner/session, and QEMU identity | Not reached; QAC unavailable |
+| NativeAOT initialization, five descriptors, Notes residency/readiness | No guest boot; not observed |
+| Pre-handoff screenshot, pointer position, Settings click | No guest boot; no pointer or input event |
+| Notes action `0x18` and Settings AppModel request | Not observed |
+| Ordered `C188R12R2_LAUNCH` guest markers and selector lookup | No guest serial; not observed |
+| Settings initialization, lifetime start, application entry/return, managed dispatch return | No guest serial; not observed |
+| Settings surface, settled screenshot, registry/resident-pool integrity | No guest; not observed |
+| Guest shutdown and reservation release | Not applicable; no guest or reservation was acquired |
+
+This retry provides no runtime success, explicit dispatch failure, early return, or execution-stall evidence. Its outcome remains **`QAC_OR_EXECUTION_BLOCKED`**, not a Settings runtime failure.
+
+### Smallest justified next action
+
+Restore QAC coordinator responsiveness, then take one fresh complete and consistent census. Only if it shows no conflicting QEMU process, reservation, managed session, queued work, unexplained foreign process, or degraded ownership state should the single authorized boot use this unchanged, hash-verified candidate. No Settings, registry, dispatcher, allocator, or compositor change is justified by the current evidence.
+
+The prior retry report and its evidence remain below as historical record.
+
 **Run date:** 2026-10-28 (America/Los_Angeles)
 
 **Classification:** **Outcome D — `QAC_OR_EXECUTION_BLOCKED`**
