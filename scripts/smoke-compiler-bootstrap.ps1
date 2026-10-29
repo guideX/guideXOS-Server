@@ -34,6 +34,7 @@ param(
     [switch]$Phase27WOnly,
     [switch]$Comp4DNativeBuildRunOnly,
     [switch]$Comp4FNativeBuildRunOnly,
+    [switch]$Comp4KNativeBuildRunOnly,
     [switch]$Phase27X,
     [switch]$Phase27XOnly,
     [switch]$Phase27Y,
@@ -108,19 +109,22 @@ $Comp4DNativeBuildRun = [bool]$Comp4DNativeBuildRunOnly
 if ($Comp4DNativeBuildRun) { $Phase27WOnly = $true }
 $Comp4FNativeBuildRun = [bool]$Comp4FNativeBuildRunOnly
 if ($Comp4FNativeBuildRun) { $Phase27WOnly = $true }
+$Comp4KNativeBuildRun = [bool]$Comp4KNativeBuildRunOnly
+if ($Comp4KNativeBuildRun) { $Phase27WOnly = $true }
 $Phase29LOwnershipGate = $Phase29LOwnershipOnly -or $Phase29LFullAcceptance
 $qacAcceptanceEnabled = [bool]$QacDeveloperStudioAcceptance
 $qacCliResolved = ''
 $qacAcceptancePhase = ''
 $script:qacRecoveryRequired = $false
 if ($qacAcceptanceEnabled) {
-    if ($Comp4FNativeBuildRun) { $qacAcceptancePhase = 'COMP4F' }
+    if ($Comp4KNativeBuildRun) { $qacAcceptancePhase = 'COMP4K' }
+    elseif ($Comp4FNativeBuildRun) { $qacAcceptancePhase = 'COMP4F' }
     elseif ($Comp4DNativeBuildRun) { $qacAcceptancePhase = 'COMP4D' }
     elseif ($Phase28QOnly) { $qacAcceptancePhase = '28Q' }
     elseif ($Phase28OOnly) { $qacAcceptancePhase = '28O' }
     elseif ($Phase27F) { $qacAcceptancePhase = '27F' }
     elseif ($Phase27E) { $qacAcceptancePhase = '27E' }
-    else { throw '-QacDeveloperStudioAcceptance requires focused Phase27E/Phase27F, Phase28QOnly, Phase28OOnly, Comp4DNativeBuildRunOnly, or Comp4FNativeBuildRunOnly.' }
+    else { throw '-QacDeveloperStudioAcceptance requires focused Phase27E/Phase27F, Phase28QOnly, Phase28OOnly, Comp4DNativeBuildRunOnly, Comp4FNativeBuildRunOnly, or Comp4KNativeBuildRunOnly.' }
     if ($QacAdmissionTimeoutSeconds -lt 1 -or $QacAdmissionTimeoutSeconds -gt 86400) {
         throw 'QacAdmissionTimeoutSeconds must be between 1 and 86400 seconds.'
     }
@@ -2222,7 +2226,7 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 "ELF Loader: Phase 27V shared declarations and dependency smoke PASS"
             )
         }
-        if ($Phase27W -and -not $Comp4DNativeBuildRun -and -not $Comp4FNativeBuildRun) {
+        if ($Phase27W -and -not $Comp4DNativeBuildRun -and -not $Comp4FNativeBuildRun -and -not $Comp4KNativeBuildRun) {
             $requiredMarkers += @(
                 "phase27w_build_pass=PASS",
                 "phase27w_deploy_pass=PASS",
@@ -2286,6 +2290,24 @@ function Invoke-QemuProofBoot([int]$runNumber, [string]$qemu, [object]$finalEspA
                 'comp4f_failed_build_blocks_run=PASS',
                 'comp4f_repeated_build_identity=PASS',
                 'DEVELOPER_STUDIO_COMP4F_GUEST_PASS'
+            )
+        }
+        if ($Comp4KNativeBuildRun) {
+            $requiredMarkers += @(
+                'comp4k_cooperative_progress=PASS',
+                'comp4k_object_abi15=PASS',
+                'comp4k_character_bytes=PASS',
+                'comp4k_queued_cancel_preserved=PASS',
+                'comp4k_function_abi=PASS',
+                'comp4k_signature_rejection=PASS',
+                'comp4k_struct_fields=PASS',
+                'comp4k_unsigned_byte_pointers=PASS',
+                'comp4k_partial_elf_rejected=PASS',
+                'comp4k_stale_artifact_rejected=PASS',
+                'comp4k_compile_failure_preserved=PASS',
+                'comp4k_failed_build_blocks_run=PASS',
+                'comp4k_repeated_build_identity=PASS',
+                'DEVELOPER_STUDIO_COMP4K_GUEST_PASS'
             )
         }
         if ($Phase27X) {
@@ -3979,6 +4001,7 @@ try {
     if ($Phase27W) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27W_SMOKE" }
     if ($Comp4DNativeBuildRun) { $env:EXTRA_CFLAGS += " -DGXOS_COMP4D_SMOKE" }
     if ($Comp4FNativeBuildRun) { $env:EXTRA_CFLAGS += " -DGXOS_COMP4F_SMOKE" }
+    if ($Comp4KNativeBuildRun) { $env:EXTRA_CFLAGS += " -DGXOS_COMP4K_SMOKE" }
     if ($Phase27X) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27X_SMOKE" }
     if ($Phase27Y) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27Y_SMOKE" }
     if ($Phase27Z) { $env:EXTRA_CFLAGS += " -DGXOS_PHASE27Z_SMOKE" }

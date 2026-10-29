@@ -2510,7 +2510,7 @@ static bool file_contains_bytes(const char* path, const uint8_t* pattern, uint32
     return file_contains_bytes_probe(path, pattern, patternBytes, nullptr);
 }
 
-#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
+#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE) || defined(GXOS_COMP4K_SMOKE) || defined(GXOS_PHASE27M_SMOKE) || defined(GXOS_PHASE27P_SMOKE) || defined(GXOS_PHASE28A_SMOKE) || defined(GXOS_PHASE28B_SMOKE) || defined(GXOS_PHASE28C_SMOKE) || defined(GXOS_PHASE28D_SMOKE) || defined(GXOS_PHASE28E_SMOKE) || defined(GXOS_PHASE28F_SMOKE) || defined(GXOS_PHASE28G_SMOKE) || defined(GXOS_PHASE28H_SMOKE) || defined(GXOS_PHASE28I_SMOKE) || defined(GXOS_PHASE28J_SMOKE) || defined(GXOS_PHASE28K_SMOKE) || defined(GXOS_PHASE28L_SMOKE) || defined(GXOS_PHASE28M_SMOKE)
 static void print_decimal(uint32_t value)
 {
     char digits[10] = {};
@@ -2785,7 +2785,7 @@ static bool run_phase27w_session(const gx_build_snapshot& build,
     const bool normalClose = polled && successfulExitState &&
         completed.errorCode == GX_DEVELOPMENT_RUN_ERROR_NONE && completed.cleanupComplete != 0 &&
         completed.exitCode == expectedExitCode && phase27w_output_contains(completed, expectedOutput);
-#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE)
+#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE) || defined(GXOS_COMP4K_SMOKE)
     if (!normalClose) {
         serial::puts("comp4d_run_snapshot started="); print_decimal(started ? 1U : 0U);
         serial::puts(" polled="); print_decimal(polled ? 1U : 0U);
@@ -2834,7 +2834,7 @@ static bool phase27w_failed_build_blocks_run(const gx_build_snapshot& build)
     return rejected && !NativeElfDevelopmentAppModel::has_active_registration();
 }
 
-#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE)
+#if defined(GXOS_COMP4D_SMOKE) || defined(GXOS_COMP4F_SMOKE) || defined(GXOS_COMP4K_SMOKE)
 static bool phase27w_build_output_contains(const gx_build_snapshot& snapshot,
                                            const char* expected)
 {
@@ -2873,7 +2873,9 @@ static bool run_comp4d_cooperative_build(gx_build_snapshot* snapshot,
                                          bool* sawCompiler,
                                          bool expectSuccess = true)
 {
-#if defined(GXOS_COMP4F_SMOKE)
+#if defined(GXOS_COMP4K_SMOKE)
+    static const uint64_t kOwner = 0x434F4D50344BULL;
+#elif defined(GXOS_COMP4F_SMOKE)
     static const uint64_t kOwner = 0x434F4D503446ULL;
 #else
     static const uint64_t kOwner = 0x434F4D503444ULL;
@@ -2994,6 +2996,79 @@ static bool comp4d_partial_elf_is_rejected(const gx_build_snapshot& build)
     return rejectedBeforeLaunch && preserved && backupRemoved &&
         !NativeElfDevelopmentAppModel::has_active_registration();
 }
+
+#if defined(GXOS_COMP4K_SMOKE)
+static bool comp4k_stale_artifact_is_rejected(const gx_build_snapshot& build)
+{
+    static const char kWrongHash[] =
+        "0000000000000000000000000000000000000000000000000000000000000000";
+    gx_development_run_request request = phase27w_run_request(build);
+    request.artifactSha256 = kWrongHash;
+    gx_development_run_handle handle = 0;
+    gx_development_run_snapshot rejected = {};
+    rejected.size = sizeof(rejected);
+    return NativeElfRunService::prepare(request, &handle, &rejected) == GX_OK &&
+        handle == 0 && rejected.state == GX_DEVELOPMENT_RUN_FAILED &&
+        rejected.errorCode == GX_DEVELOPMENT_RUN_ERROR_ARTIFACT_CHANGED &&
+        !NativeElfDevelopmentAppModel::has_active_registration();
+}
+#endif
+
+#if defined(GXOS_COMP4K_SMOKE)
+static bool comp4k_object_abi15()
+{
+    uint32_t objectBytes = 0;
+    if (!read_vfs_image("/P27W/build/obj/amd64/src/value.o", s_invalidImage,
+                        sizeof(s_invalidImage), &objectBytes)) return false;
+    compiler::ElfObjectHeaderView header = {};
+    compiler::Diagnostics diagnostics;
+    return compiler::inspect_elf_object(s_invalidImage, objectBytes, &header, diagnostics) &&
+        header.elfType == 1 && header.machine == 62 &&
+        header.formatVersion == compiler::COMPILER_OBJECT_FORMAT_VERSION &&
+        header.compilerObjectAbiVersion == 15U &&
+        header.compilerObjectAbiVersion == compiler::COMPILER_OBJECT_ABI_VERSION;
+}
+
+static bool comp4k_write_source(const char* path, const char* text)
+{
+    return path && text && vfs::write_file(path, text,
+        static_cast<uint32_t>(__builtin_strlen(text))) ==
+        static_cast<int32_t>(__builtin_strlen(text));
+}
+
+static bool comp4k_build_and_run(const char* headerText, const char* mainSource,
+                                 const char* valueSource, int32_t expectedExitCode,
+                                 const char* expectedOutput, gx_build_snapshot* outBuild,
+                                 gx_build_handle* outHandle)
+{
+    if (outBuild) *outBuild = {};
+    if (outHandle) *outHandle = 0;
+    if (!headerText || !comp4k_write_source("/P27W/include/phase27w_value.h", headerText) ||
+        !comp4k_write_source("/P27W/src/main.cpp", mainSource) ||
+        !comp4k_write_source("/P27W/src/value.cpp", valueSource)) return false;
+
+    gx_build_snapshot build = {};
+    gx_build_handle handle = 0;
+    bool sawPreparing = false;
+    bool sawCompiler = false;
+    const bool built = run_comp4d_cooperative_build(
+        &build, &handle, &sawPreparing, &sawCompiler);
+    const bool freshModules = built && build.compiledModuleCount == 2U &&
+        build.cachedModuleCount == 0U && build.linkedModuleCount == 2U;
+    const bool objectAbi = freshModules && comp4k_object_abi15();
+    bool deployed = false;
+    bool alreadyRunningRejected = false;
+    bool closed = false;
+    bool cleaned = false;
+    const bool ran = objectAbi && run_phase27w_session(
+        build, expectedExitCode, expectedOutput, &deployed,
+        &alreadyRunningRejected, &closed, &cleaned);
+    if (outBuild) *outBuild = build;
+    if (outHandle) *outHandle = handle;
+    return built && sawPreparing && sawCompiler && freshModules && objectAbi && ran &&
+        deployed && alreadyRunningRejected && closed && cleaned;
+}
+#endif
 
 #if defined(GXOS_COMP4F_SMOKE)
 static bool comp4f_object_abi11()
@@ -5352,7 +5427,193 @@ void run_bootstrap_execution_smoke()
     static gx_build_snapshot w27LinkFailed = {};
     static gx_build_snapshot w27Restored = {};
     bool comp4dAllChecks = true;
-#if defined(GXOS_COMP4F_SMOKE)
+#if defined(GXOS_COMP4K_SMOKE)
+    static const char kBytesHeader[] =
+        "int phase27w_value();\n";
+    static const char kBytesMain[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4K CHAR_BYTES 105\"); return phase27w_value(); }\n";
+    static const char kBytesValue[] =
+        "int phase27w_value() { int before = 401; char signedValue = 255; "
+        "unsigned char unsignedValue = 255; unsigned char wrapped = 256; "
+        "char signedBytes[2]; unsigned char unsignedBytes[2]; int after = 402; "
+        "signedBytes[0] = 128; signedBytes[1] = 255; "
+        "unsignedBytes[0] = 128; unsignedBytes[1] = 255; "
+        "int escaped = '\\n' + '\\r' + '\\t' + '\\\\' + '\\'' + '\\0'; "
+        "if (before != 401) return 51; if (after != 402) return 52; "
+        "if (signedValue != -1 || signedValue + 1 != 0) return 53; "
+        "if (unsignedValue != 255 || wrapped != 0) return 54; "
+        "if (signedBytes[0] != -128 || signedBytes[1] != -1) return 55; "
+        "if (unsignedBytes[0] != 128 || unsignedBytes[1] != 255) return 56; "
+        "if (escaped != 163) return 57; return 105; }\n";
+    static const char kFunctionHeader[] =
+        "char comp4k_signed_echo(char value);\n"
+        "unsigned char comp4k_unsigned_echo(unsigned char value);\n"
+        "int comp4k_mixed(char signedValue, unsigned char unsignedValue, int amount);\n"
+        "char comp4k_nested(char value);\n";
+    static const char kFunctionMain[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { char signedResult = comp4k_signed_echo(255); "
+        "unsigned char unsignedResult = comp4k_unsigned_echo(255); "
+        "int mixedResult = comp4k_mixed(255, 255, 10); char nestedResult = comp4k_nested(128); "
+        "if (signedResult != -1) return 61; if (unsignedResult != 255) return 62; "
+        "if (mixedResult != 264) return 63; if (nestedResult != -128) return 64; "
+        "log(ctx, \"COMP4K FUNCTION_ABI 106\"); return 106; }\n";
+    static const char kFunctionValue[] =
+        "#include \"phase27w_value.h\"\n"
+        "char comp4k_signed_echo(char value) { return value; } "
+        "unsigned char comp4k_unsigned_echo(unsigned char value) { return value; } "
+        "char comp4k_nested(char value) { return comp4k_signed_echo(value); } "
+        "int comp4k_mixed(char signedValue, unsigned char unsignedValue, int amount) { "
+        "return comp4k_nested(signedValue) + comp4k_unsigned_echo(unsignedValue) + amount; }\n";
+    static const char kStructHeader[] =
+        "int phase27w_value();\n";
+    static const char kStructMain[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4K STRUCT_FIELDS 107\"); return phase27w_value(); }\n";
+    static const char kStructValue[] =
+        "struct Packet { char signedValue; int middle; unsigned char unsignedValue; char tail; }; "
+        "int phase27w_value() { int before = 701; struct Packet packets[2]; int after = 702; "
+        "packets[0].signedValue = 255; packets[0].middle = 12345; "
+        "packets[0].unsignedValue = 300; packets[0].tail = 128; "
+        "packets[1].signedValue = 128; packets[1].middle = 54321; "
+        "packets[1].unsignedValue = 255; packets[1].tail = 255; "
+        "if (before != 701 || after != 702) return 71; "
+        "if (packets[0].signedValue != -1 || packets[0].middle != 12345) return 72; "
+        "if (packets[0].unsignedValue != 44 || packets[0].tail != -128) return 73; "
+        "if (packets[1].signedValue != -128 || packets[1].middle != 54321) return 74; "
+        "if (packets[1].unsignedValue != 255 || packets[1].tail != -1) return 75; "
+        "return 107; }\n";
+    static const char kPointerHeader[] =
+        "int comp4k_relay(unsigned char* data);\n";
+    static const char kPointerMain[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { unsigned char scalar = 17; "
+        "unsigned char* scalarPointer = &scalar; unsigned char bytes[4]; "
+        "int before = 801; int after = 802; *scalarPointer = 511; "
+        "bytes[0] = 255; bytes[1] = 7; bytes[2] = 8; bytes[3] = 77; "
+        "int result = comp4k_relay(bytes); "
+        "if (*scalarPointer != 255 || before != 801 || after != 802) return 81; "
+        "if (result != 510 || bytes[0] != 255 || bytes[1] != 0 || "
+        "bytes[2] != 255 || bytes[3] != 77) return 82; "
+        "log(ctx, \"COMP4K BYTE_POINTER 108\"); return 108; }\n";
+    static const char kPointerValue[] =
+        "#include \"phase27w_value.h\"\n"
+        "int comp4k_first(unsigned char* data) { return *data; } "
+        "int comp4k_update(unsigned char* data, int index) { data[index] = 256; return *(data + index); } "
+        "int comp4k_mutate(unsigned char* data) { unsigned char* shifted = data + 2; "
+        "*shifted = 511; return comp4k_first(data) + comp4k_update(data, 1) + data[1] + *shifted; } "
+        "int comp4k_relay(unsigned char* data) { return comp4k_mutate(data); }\n";
+    static gx_build_snapshot kBytesBuild = {}, kFunctionsBuild = {}, kStructBuild = {}, kPointerBuild = {};
+    static gx_build_snapshot kMismatchBuild = {}, kLexicalBuild = {}, kRepeatRBuild = {}, kRepeatSBuild = {};
+    static gx_build_handle kBytesHandle = 0, kFunctionsHandle = 0, kStructHandle = 0, kPointerHandle = 0;
+    static gx_build_handle kMismatchHandle = 0, kLexicalHandle = 0, kRepeatRHandle = 0, kRepeatSHandle = 0;
+    const bool kBytes = fixture && comp4k_build_and_run(
+        kBytesHeader, kBytesMain, kBytesValue, 105, "COMP4K CHAR_BYTES 105", &kBytesBuild, &kBytesHandle);
+    print_marker("comp4k_character_bytes", kBytes);
+    const bool kQueuedCancel = kBytes && comp4d_cancel_queued_build_preserves_artifact();
+    print_marker("comp4k_queued_cancel_preserved", kQueuedCancel);
+    const bool kFunctions = kQueuedCancel && comp4k_build_and_run(
+        kFunctionHeader, kFunctionMain, kFunctionValue, 106, "COMP4K FUNCTION_ABI 106",
+        &kFunctionsBuild, &kFunctionsHandle);
+    print_marker("comp4k_function_abi", kFunctions);
+    const bool kStructs = kFunctions && comp4k_build_and_run(
+        kStructHeader, kStructMain, kStructValue, 107, "COMP4K STRUCT_FIELDS 107",
+        &kStructBuild, &kStructHandle);
+    print_marker("comp4k_struct_fields", kStructs);
+    const bool kPointers = kStructs && comp4k_build_and_run(
+        kPointerHeader, kPointerMain, kPointerValue, 108, "COMP4K BYTE_POINTER 108",
+        &kPointerBuild, &kPointerHandle);
+    print_marker("comp4k_unsigned_byte_pointers", kPointers);
+    const bool kProgress = kBytes && kFunctions && kStructs && kPointers;
+    print_marker("comp4k_cooperative_progress", kProgress);
+    const bool kObjectAbi = kProgress && comp4k_object_abi15();
+    print_marker("comp4k_object_abi15", kObjectAbi);
+
+    const bool kPartialElf = kObjectAbi && comp4d_partial_elf_is_rejected(kPointerBuild);
+    print_marker("comp4k_partial_elf_rejected", kPartialElf);
+    const bool kStaleArtifact = kPartialElf && comp4k_stale_artifact_is_rejected(kPointerBuild);
+    print_marker("comp4k_stale_artifact_rejected", kStaleArtifact);
+
+    const char kMismatchHeader[] = "int comp4k_convert(char value);\n";
+    const char kMismatchMain[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { return comp4k_convert(65); }\n";
+    const char kMismatchValue[] =
+        "int comp4k_convert(unsigned char value) { return value; }\n";
+    const bool kMismatchSaved = kStaleArtifact && comp4d_store_valid_artifact();
+    const bool kMismatchWritten = kMismatchSaved &&
+        comp4k_write_source("/P27W/include/phase27w_value.h", kMismatchHeader) &&
+        comp4k_write_source("/P27W/src/main.cpp", kMismatchMain) &&
+        comp4k_write_source("/P27W/src/value.cpp", kMismatchValue);
+    bool kMismatchSawPreparing = false;
+    bool kMismatchSawCompiler = false;
+    const bool kMismatchBuilt = kMismatchWritten && run_comp4d_cooperative_build(
+        &kMismatchBuild, &kMismatchHandle, &kMismatchSawPreparing, &kMismatchSawCompiler, false);
+    const bool kSignatureRejected = kMismatchBuilt && kMismatchSawPreparing && kMismatchSawCompiler &&
+        kMismatchBuild.errorCode == GX_BUILD_ERROR_COMPILER_LINKER && kMismatchBuild.errorCount != 0U &&
+        !kMismatchBuild.artifactValid && kMismatchBuild.artifactSize == 0U &&
+        kMismatchBuild.artifactPath[0] == '\0' && kMismatchBuild.artifactSha256[0] == '\0' &&
+        phase27w_build_output_contains(kMismatchBuild, "conflicting declaration for function 'comp4k_convert'");
+    print_marker("comp4k_signature_rejection", kSignatureRejected);
+    const bool kMismatchPreserved = kMismatchBuilt && comp4d_artifact_matches_saved();
+    const bool kMismatchRunBlocked = kMismatchBuilt && phase27w_failed_build_blocks_run(kMismatchBuild);
+    const bool kMismatchBackupRemoved = reset_vfs_file(kComp4DBuildOwner);
+
+    const char kLexicalHeader[] = "int phase27w_value();\n";
+    const char kLexicalMain[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { return phase27w_value(); }\n";
+    const char kLexicalValue[] =
+        "int phase27w_value() { char malformed = 'Z; return malformed; }\n";
+    const bool kLexicalSaved = kMismatchBackupRemoved && kMismatchPreserved && comp4d_store_valid_artifact();
+    const bool kLexicalWritten = kLexicalSaved &&
+        comp4k_write_source("/P27W/include/phase27w_value.h", kLexicalHeader) &&
+        comp4k_write_source("/P27W/src/main.cpp", kLexicalMain) &&
+        comp4k_write_source("/P27W/src/value.cpp", kLexicalValue);
+    bool kLexicalSawPreparing = false;
+    bool kLexicalSawCompiler = false;
+    const bool kLexicalBuilt = kLexicalWritten && run_comp4d_cooperative_build(
+        &kLexicalBuild, &kLexicalHandle, &kLexicalSawPreparing, &kLexicalSawCompiler, false);
+    const bool kLexicalDiagnostics = kLexicalBuilt && kLexicalSawPreparing && kLexicalSawCompiler &&
+        kLexicalBuild.errorCode == GX_BUILD_ERROR_COMPILER_LEXICAL && kLexicalBuild.errorCount != 0U &&
+        phase27w_build_output_contains(kLexicalBuild, "value.cpp(1,") &&
+        phase27w_build_output_contains(kLexicalBuild, "[lexical]");
+    const bool kLexicalPreserved = kLexicalBuilt && comp4d_artifact_matches_saved();
+    const bool kLexicalRunBlocked = kLexicalBuilt && phase27w_failed_build_blocks_run(kLexicalBuild);
+    const bool kLexicalBackupRemoved = reset_vfs_file(kComp4DBuildOwner);
+    print_marker("comp4k_compile_failure_preserved", kMismatchPreserved && kMismatchBackupRemoved &&
+        kLexicalDiagnostics && kLexicalPreserved && kLexicalBackupRemoved);
+    print_marker("comp4k_failed_build_blocks_run", kMismatchRunBlocked && kLexicalRunBlocked);
+
+    const char kRepeatHeader[] = "int phase27w_value();\n";
+    const char kRepeatMainR[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4K REPEAT R 82\"); return phase27w_value(); }\n";
+    const char kRepeatValueR[] = "int phase27w_value() { return 'R'; }\n";
+    const char kRepeatMainS[] =
+        "#include \"phase27w_value.h\"\n"
+        "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4K REPEAT S 83\"); return phase27w_value(); }\n";
+    const char kRepeatValueS[] = "int phase27w_value() { return 'S'; }\n";
+    const bool kRepeatR = kLexicalDiagnostics && kLexicalPreserved && kLexicalBackupRemoved &&
+        comp4k_build_and_run(kRepeatHeader, kRepeatMainR, kRepeatValueR, 82,
+            "COMP4K REPEAT R 82", &kRepeatRBuild, &kRepeatRHandle);
+    const bool kRepeatS = kRepeatR && comp4k_build_and_run(
+        kRepeatHeader, kRepeatMainS, kRepeatValueS, 83, "COMP4K REPEAT S 83",
+        &kRepeatSBuild, &kRepeatSHandle);
+    const bool kGenerationIdentity = kRepeatS && kRepeatRHandle != kRepeatSHandle &&
+        !equal_text(kRepeatRBuild.artifactSha256, kRepeatSBuild.artifactSha256);
+    print_marker("comp4k_repeated_build_identity", kGenerationIdentity);
+
+    const bool kAllChecks = kBytes && kQueuedCancel && kFunctions && kStructs && kPointers &&
+        kProgress && kObjectAbi && kPartialElf && kStaleArtifact && kSignatureRejected &&
+        kMismatchPreserved && kMismatchRunBlocked && kMismatchBackupRemoved &&
+        kLexicalDiagnostics && kLexicalPreserved && kLexicalRunBlocked && kLexicalBackupRemoved &&
+        kGenerationIdentity && !NativeElfDevelopmentAppModel::has_active_registration();
+    if (kAllChecks) serial::puts("DEVELOPER_STUDIO_COMP4K_GUEST_PASS\n");
+    serial::puts("DEVELOPER_STUDIO_COMP4K_GUEST_COMPLETE\n");
+    return;
+#elif defined(GXOS_COMP4F_SMOKE)
     const char fMain65[] =
         "#include \"phase27w_value.h\"\n"
         "int gx_main(gx_app_context* ctx) { log(ctx, \"COMP4F CHAR 65\"); return phase27w_value(); }\n";
@@ -5489,7 +5750,7 @@ void run_bootstrap_execution_smoke()
         comp4d_cancel_queued_build_preserves_artifact();
     comp4dAllChecks = comp4dAllChecks && comp4dQueuedCancellation;
     print_marker("comp4d_queued_cancellation", comp4dQueuedCancellation);
-#elif !defined(GXOS_COMP4F_SMOKE)
+#elif !defined(GXOS_COMP4F_SMOKE) && !defined(GXOS_COMP4K_SMOKE)
     const bool comp4dQueuedCancellation = true;
 #endif
 
