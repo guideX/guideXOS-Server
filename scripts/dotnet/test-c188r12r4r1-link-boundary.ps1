@@ -94,4 +94,38 @@ if ($maxAllocationLineBytes -gt 256) {
     throw "C188R12R4 allocation diagnostic line exceeds its 256-byte bound: $maxAllocationLineBytes"
 }
 
-Write-Output "C188R12R4R1-LINK-BOUNDARY cases=6 guestDirect=true hostedDirect=false productionDirect=false allocationLineMaxBytes=$maxAllocationLineBytes result=PASS"
+$predicatePath = Join-Path $PSScriptRoot 'c188r12r4-factory-predicates.ps1'
+. $predicatePath
+$sampleSerial = @(
+    'C188R12R4_FACTORY invocation=123 selector=5 operation=0 stage=factory-invoke code=0 result=begin',
+    'C188R12R4_FACTORY invocation=123 selector=5 operation=1 stage=type-init-enter code=0 result=begin',
+    'C188R12R4_FACTORY invocation=123 selector=5 operation=2 stage=type-init-return code=0 result=complete',
+    'C188R12R4_FACTORY invocation=123 selector=5 operation=2 stage=object-allocation-request code=0 result=new-expression',
+    'C188R12R4_FACTORY invocation=123 selector=5 operation=2 stage=base-constructor-enter code=0 result=entered',
+    'C188R12R4_FACTORY invocation=123 selector=5 operation=3 stage=constructor-enter code=0 result=entered',
+    'C188R12R4_ALLOC invocation=123 selector=5 operation=3 kind=object stage=fast-capacity-miss size=0000000000000028 cursor=0000000010001000 available=0000000000000000 result=RhpGcAlloc-fallback-entered') -join "`n"
+$parsedEvidence = Get-C188R12R4FactoryEvidence -SerialText $sampleSerial -CaptureState 'complete'
+if ($parsedEvidence.allocationEvents.Count -ne 1 -or
+    $parsedEvidence.allocationEvents[0].kind -ne 'object' -or
+    $parsedEvidence.allocationEvents[0].stage -ne 'fast-capacity-miss' -or
+    $parsedEvidence.allocationEvents[0].size -ne '0000000000000028' -or
+    $parsedEvidence.firstIncompleteOperation -ne 'factory:model-init-enter') {
+    throw 'C188R12R4 guest evidence parser did not preserve allocation data and first missing factory stage.'
+}
+
+$handoffSource = [System.IO.File]::ReadAllText(
+    (Join-Path $PSScriptRoot 'run-c188r12r1-settings-handoff.ps1'))
+if (-not $handoffSource.Contains('c188r12r4r1-diagnostic-link-repair') -or
+    -not $handoffSource.Contains("'c188r12r4-factory-predicates.ps1'") -or
+    -not $handoffSource.Contains('factoryEvidence=$factoryEvidence') -or
+    -not $handoffSource.Contains('allocationEvents')) {
+    throw 'The existing single-click Settings handoff runner does not accept or summarize the R4R1 factory candidate.'
+}
+$qacRunnerSource = [System.IO.File]::ReadAllText(
+    (Join-Path $PSScriptRoot 'run-c188-qac-guest.ps1'))
+if (-not $qacRunnerSource.Contains('c188r12r4r1-diagnostic-link-repair') -or
+    -not $qacRunnerSource.Contains('$isC188R12R4R1Boot')) {
+    throw 'The QAC guest runner does not accept the R4R1 diagnostic evidence root.'
+}
+
+Write-Output "C188R12R4R1-LINK-BOUNDARY cases=9 guestDirect=true hostedDirect=false productionDirect=false allocationLineMaxBytes=$maxAllocationLineBytes firstIncompleteParser=true oneClickRunner=true allocationSummary=true result=PASS"

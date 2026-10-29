@@ -26,7 +26,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r9-registry-input-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r10-nativeaot-state-reentry')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair')))
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $phaseRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $bootRoot)
@@ -78,9 +79,13 @@ $isC188R10Boot = $Scenario -eq 'registry-input-reentry' -and
         [System.StringComparison]::OrdinalIgnoreCase)
 $c188r11Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance'))
 $c188r12r3Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution'))
-$isC188R12R3Boot = $Scenario -eq 'settings-handoff-diagnostic' -and
-    $bootRoot.StartsWith($c188r12r3Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+$c188r12r4r1Root = [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair'))
+$isC188R12R4R1Boot = $Scenario -eq 'settings-handoff-diagnostic' -and
+    $bootRoot.StartsWith($c188r12r4r1Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
         [System.StringComparison]::OrdinalIgnoreCase)
+$isC188R12R3Boot = $isC188R12R4R1Boot -or ($Scenario -eq 'settings-handoff-diagnostic' -and
+    $bootRoot.StartsWith($c188r12r3Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
+        [System.StringComparison]::OrdinalIgnoreCase))
 $isC188R11Boot = $isC188R12R3Boot -or (
     ($Scenario -eq 'managed-state-provenance' -or $Scenario -eq 'settings-handoff-diagnostic') -and
     $bootRoot.StartsWith($c188r11Root.TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar,
@@ -90,7 +95,7 @@ if ($isC188R11Boot) {
     . (Join-Path $PSScriptRoot 'c188r11r2-runner-predicates.ps1')
     . (Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1')
 }
-if ($isC188R12R3Boot) {
+if ($isC188R12R3Boot -or $isC188R12R4R1Boot) {
     . (Join-Path $PSScriptRoot 'c188r12r3-lifetime-predicates.ps1')
 }
 if ($EnableGdbStub -and -not $isC188R11Boot) {

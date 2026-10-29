@@ -56,7 +56,7 @@ $linkBoundaryOutput = (& $PSHOME\pwsh.exe -NoProfile -File $linkBoundaryScript -
 $linkBoundaryExitCode = $LASTEXITCODE
 Set-Content -LiteralPath $linkBoundaryLog -Value $linkBoundaryOutput -Encoding utf8
 if ($linkBoundaryExitCode -ne 0 -or
-    $linkBoundaryOutput -notmatch '(?m)^C188R12R4R1-LINK-BOUNDARY cases=6 guestDirect=true hostedDirect=false productionDirect=false allocationLineMaxBytes=\d+ result=PASS\s*$') {
+    $linkBoundaryOutput -notmatch '(?m)^C188R12R4R1-LINK-BOUNDARY cases=9 guestDirect=true hostedDirect=false productionDirect=false allocationLineMaxBytes=\d+ firstIncompleteParser=true oneClickRunner=true allocationSummary=true result=PASS\s*$') {
     throw "C188R12R4R1 NativeAOT link boundary qualification failed (exit=$linkBoundaryExitCode). See $linkBoundaryLog"
 }
 
@@ -74,7 +74,7 @@ $manifest = [ordered]@{
     predicateLogSha256=(Get-FileHash -LiteralPath $predicateLog -Algorithm SHA256).Hash
     linkBoundaryLog=$linkBoundaryLog
     linkBoundaryLogSha256=(Get-FileHash -LiteralPath $linkBoundaryLog -Algorithm SHA256).Hash
-    linkBoundaryCases=6
+    linkBoundaryCases=9
     warnings=$warnings
     syntheticFixturesOnly=$true
 }

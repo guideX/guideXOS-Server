@@ -12,7 +12,8 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r11-managed-state-provenance')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r3-lifetime-start-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r3-lifetime-start-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r1-diagnostic-link-repair')))
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $bootRoot = [System.IO.Path]::GetFullPath($BootEvidencePath)
 $candidateRootMatches = @($phaseRoots | Where-Object {
@@ -40,6 +41,7 @@ $ownershipHelpers = Join-Path $PSScriptRoot 'c188r11qac-ownership-predicates.ps1
 . (Join-Path $PSScriptRoot 'c188r12r1-settings-handoff-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r12r2r1-settings-dispatch-predicates.ps1')
 . (Join-Path $PSScriptRoot 'c188r12r3-lifetime-predicates.ps1')
+. (Join-Path $PSScriptRoot 'c188r12r4-factory-predicates.ps1')
 
 $candidateEsp = Join-Path $candidate 'esp'
 $stagingManifestPath = Join-Path $candidate 'ramdisk-staging.json'
@@ -120,6 +122,7 @@ $runnerStderr = ''
 $settingsEvidence = $null
 $settingsDispatchEvidence = Get-C188R12R2R1SettingsDispatchEvidence '' $false
 $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence ''
+$factoryEvidence = Get-C188R12R4FactoryEvidence -SerialText '' -CaptureState 'incomplete'
 $failureText = ''
 
 function Read-C188R12R1SharedText([string]$Path) {
@@ -395,7 +398,12 @@ try {
                                     $serialText $false
                                 $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence `
                                     -SerialText $serialText -CaptureState 'in-progress'
+                                $factoryEvidence = Get-C188R12R4FactoryEvidence `
+                                    -SerialText $serialText -CaptureState 'live'
                                 if ([bool]$settingsEvidence.accepted) { break }
+                                if ($factoryEvidence.outcome -in @(
+                                        'EXPLICIT_ALLOCATION_FAILURE',
+                                        'EXPLICIT_FACTORY_FAILURE')) { break }
                                 if ([bool]$settingsDispatchEvidence.dispatchReturned) {
                                     if ($settingsDispatchEvidence.outcome -eq 'EXPLICIT_FAILURE') { break }
                                     if ($null -eq $surfaceSettleDeadline) {
@@ -510,6 +518,8 @@ $serialCaptureComplete = $qacReleaseVerified -and $serialHashMatchesManifest -an
 $serialCaptureState = if ($serialCaptureComplete) { 'complete' } else { 'incomplete' }
 $lifetimeStartEvidence = Get-C188R12R3LifetimeEvidence `
     -SerialText $serialText -CaptureState $serialCaptureState
+$factoryEvidence = Get-C188R12R4FactoryEvidence `
+    -SerialText $serialText -CaptureState $serialCaptureState
 $settingsRegistryRegression = [bool]$settingsEvidence.settingsRegistryReturn -and
     (-not [bool]$settingsEvidence.settingsRegistryReturnValid -or
      [bool]$settingsEvidence.settingsRegistryMemoryMismatch)
@@ -571,6 +581,7 @@ $finalEvidence = [ordered]@{
     settingsEvidence=$settingsEvidence
     settingsDispatchEvidence=$settingsDispatchEvidence
     lifetimeStartEvidence=$lifetimeStartEvidence
+    factoryEvidence=$factoryEvidence
     settingsActionId=[string]$settingsEvidence.notesActionId
     settingsActionInvoked=[bool]$settingsEvidence.notesSettingsActionInvoked
     settingsActionSucceeded=[bool]$settingsEvidence.notesSettingsActionSucceeded
@@ -599,6 +610,7 @@ $finalEvidence | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $finalEvide
 Write-Output "C188R12R1_SETTINGS_HANDOFF=$outcome BOUNDARY=$earliestBoundary CLICK_ATTEMPTED=$clickAttempted QAC_RELEASE=$qacReleaseVerified"
 Write-Output "C188R12R2R1_SETTINGS_DISPATCH=$($settingsDispatchEvidence.outcome) LAST_STAGE=$($settingsDispatchEvidence.lastObservedStage) NEXT=$($settingsDispatchEvidence.firstUnobservedBoundary)"
 Write-Output "C188R12R3_LIFETIME=$($lifetimeStartEvidence.outcome) NEXT=$($lifetimeStartEvidence.earliestIncompleteStage) INVOCATION=$($lifetimeStartEvidence.invocation)"
+Write-Output "C188R12R4_FACTORY=$($factoryEvidence.outcome) LAST_STAGE=$($factoryEvidence.lastFactoryStage) NEXT=$($factoryEvidence.firstIncompleteOperation) ALLOCATION_EVENTS=$(@($factoryEvidence.allocationEvents).Count)"
 Write-Output "C188R12R2R1_SETTINGS_EVIDENCE=$finalEvidencePath"
 if ($null -ne $qacRunner -and -not $qacRunner.HasExited) {
     throw "C188R12R1 evidence is saved but its bounded QAC runner is still active: $bootRoot"
