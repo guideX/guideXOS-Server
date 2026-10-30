@@ -399,6 +399,7 @@ private:
         EventStopImmediatePropagation,
         EventPreventDefault,
         ArrayFind,
+        ArrayFindIndex,
     };
 
     enum class ArrayIteratorMode : std::uint8_t {

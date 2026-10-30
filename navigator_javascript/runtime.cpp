@@ -1441,6 +1441,7 @@ private:
         Some,
         Every,
         Find,
+        FindIndex,
     };
 
     enum class ArrayTraversalControl : std::uint8_t {
@@ -1487,8 +1488,8 @@ private:
             bool present = false;
             if (!hasArrayIndex(arrayId, index, present, callSite))
                 return ArrayTraversalControl::Error;
-            const bool visitMissingIndex =
-                kind == ArrayTraversalKind::Find;
+            const bool visitMissingIndex = kind == ArrayTraversalKind::Find ||
+                kind == ArrayTraversalKind::FindIndex;
             if (!present && !visitMissingIndex) continue;
 
             Value value = Value::undefined();
@@ -1528,6 +1529,11 @@ private:
                 result = value;
                 return ArrayTraversalControl::Stop;
             }
+            if (kind == ArrayTraversalKind::FindIndex &&
+                truthy(callbackResult)) {
+                result = Value::number(static_cast<double>(index));
+                return ArrayTraversalControl::Stop;
+            }
 
             if (kind == ArrayTraversalKind::Map ||
                 (kind == ArrayTraversalKind::Filter &&
@@ -1551,6 +1557,8 @@ private:
                 result = Value::boolean(false);
             } else if (kind == ArrayTraversalKind::Every) {
                 result = Value::boolean(true);
+            } else if (kind == ArrayTraversalKind::FindIndex) {
+                result = Value::number(-1.0);
             } else {
                 result = Value::undefined();
             }
@@ -2182,7 +2190,8 @@ private:
         case RuntimeContext::NativeFunctionId::ArrayFilter:
         case RuntimeContext::NativeFunctionId::ArraySome:
         case RuntimeContext::NativeFunctionId::ArrayEvery:
-        case RuntimeContext::NativeFunctionId::ArrayFind: {
+        case RuntimeContext::NativeFunctionId::ArrayFind:
+        case RuntimeContext::NativeFunctionId::ArrayFindIndex: {
             const RuntimeContext::NativeFunctionId native =
                 static_cast<RuntimeContext::NativeFunctionId>(
                     function.nativeFunction);
@@ -2201,6 +2210,9 @@ private:
             } else if (native ==
                     RuntimeContext::NativeFunctionId::ArrayFind) {
                 kind = ArrayTraversalKind::Find;
+            } else if (native ==
+                    RuntimeContext::NativeFunctionId::ArrayFindIndex) {
+                kind = ArrayTraversalKind::FindIndex;
             }
             const ArrayTraversalControl traversal = traverseArray(receiver,
                 argumentOrUndefined(0u), argumentOrUndefined(1u), callSite,
@@ -4152,6 +4164,8 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         !install(arrayPrototype_, "every", NativeFunctionId::ArrayEvery,
             error) ||
         !install(arrayPrototype_, "find", NativeFunctionId::ArrayFind,
+            error) ||
+        !install(arrayPrototype_, "findIndex", NativeFunctionId::ArrayFindIndex,
             error)) return false;
     const char eventName[] = "Event";
     // Event constants are optional only when an explicitly tiny caller limit

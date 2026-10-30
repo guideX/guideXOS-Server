@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS99</title></head>
+<body>
+<h1>Navigator JavaScript JS99</h1>
+<pre id="result">JS99:pending</pre>
+<button id="find-index-event-a" type="button">Run JS99 findIndex event</button>
+<button id="find-index-event-b" type="button">Nested JS99 findIndex event</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions=assertions+1;
+  if (!condition) failures=failures+1;
+}
+
+var firstCalls = 0;
+var first = [5, 6, 7].findIndex(function(value) {
+  firstCalls=firstCalls+1;
+  return value === 5;
+});
+verify(first === 0 && firstCalls === 1);
+
+var middleCalls = 0;
+var middle = [4, 8, 9].findIndex(function(value) {
+  middleCalls=middleCalls+1;
+  return value === 8;
+});
+verify(middle === 1 && middleCalls === 2);
+
+var lastCalls = 0;
+var last = [4, 8, 9].findIndex(function(value) {
+  lastCalls=lastCalls+1;
+  return value === 9;
+});
+verify(last === 2 && lastCalls === 3);
+
+var missCalls = 0;
+var miss = [4, 8, 9].findIndex(function() {
+  missCalls=missCalls+1;
+  return false;
+});
+verify(miss === -1 && missCalls === 3);
+
+var multipleCalls = 0;
+var multiple = [5, 5, 5].findIndex(function(value) {
+  multipleCalls=multipleCalls+1;
+  return value === 5;
+});
+verify(multiple === 0 && multipleCalls === 1);
+
+var truthy = [4].findIndex(function() { return {}; });
+var falsyCalls = 0;
+var falsy = [0, "", null, undefined, false].findIndex(function(value) {
+  falsyCalls=falsyCalls+1;
+  return value;
+});
+verify(truthy === 0 && falsy === -1 && falsyCalls === 5);
+
+var source = [3, 6, 9];
+var argsOk = true;
+var argsIndex = source.findIndex(function(value, index, array) {
+  argsOk=argsOk&&array===source&&value===array[index]&&index>=0;
+  return index === 1 && value === 6;
+});
+verify(argsIndex === 1 && argsOk);
+
+var context = {target: 8};
+var thisCalls = 0;
+var thisIndex = [4, 8, 9].findIndex(function(value) {
+  thisCalls=thisCalls+1;
+  return value === this.target;
+}, context);
+verify(thisIndex === 1 && thisCalls === 2);
+
+var emptyCalls = 0;
+var empty = [].findIndex(function() { emptyCalls=emptyCalls+1; return true; });
+verify(empty === -1 && emptyCalls === 0);
+
+var sparse = [];
+sparse.length = 4;
+sparse[2] = 50;
+var sparseCalls = 0;
+var sparseIndices = "";
+var sparseValues = "";
+var sparseIndex = sparse.findIndex(function(value, index) {
+  sparseCalls=sparseCalls+1;
+  sparseIndices=sparseIndices+index;
+  if (value === undefined) sparseValues=sparseValues+"u";
+  else sparseValues=sparseValues+value;
+  return value === 50;
+});
+verify(sparseIndex === 2 && sparseCalls === 3 && sparseIndices === "012" &&
+  sparseValues === "uu50");
+
+var holes = [];
+holes.length = 3;
+var holeCalls = 0;
+var holeMiss = holes.findIndex(function(value) {
+  holeCalls=holeCalls+1;
+  return value === 12;
+});
+var selectedHoleCalls = 0;
+var selectedHole = holes.findIndex(function(value) {
+  selectedHoleCalls=selectedHoleCalls+1;
+  return value === undefined;
+});
+verify(holeMiss === -1 && holeCalls === 3 && selectedHole === 0 &&
+  selectedHoleCalls === 1);
+
+var explicit = [1, undefined, 3];
+var explicitCalls = 0;
+var explicitIndex = explicit.findIndex(function(value, index) {
+  explicitCalls=explicitCalls+1;
+  return value === undefined && index === 1;
+});
+verify(explicitIndex === 1 && explicitCalls === 2);
+
+var shrunk = [7, 8, 9];
+var shrinkCalls = 0;
+var shrinkIndices = "";
+var shrinkUndefined = 0;
+var shrinkIndex = shrunk.findIndex(function(value, index, array) {
+  shrinkCalls=shrinkCalls+1;
+  shrinkIndices=shrinkIndices+index;
+  if (index === 0) array.length=1;
+  if (value === undefined) shrinkUndefined=shrinkUndefined+1;
+  return false;
+});
+verify(shrinkIndex === -1 && shrinkCalls === 3 && shrinkIndices === "012" &&
+  shrinkUndefined === 2);
+
+var appended = [4, 5];
+var appendCalls = 0;
+var appendIndex = appended.findIndex(function(value, index, array) {
+  appendCalls=appendCalls+1;
+  if (index === 0) array[2]=6;
+  return value === 6;
+});
+verify(appendIndex === -1 && appendCalls === 2 && appended[2] === 6);
+
+var current = [12];
+var currentIndex = current.findIndex(function(value, index, array) {
+  array[index]=99;
+  return value === 12;
+});
+verify(currentIndex === 0 && current[0] === 99);
+
+var nestedIndex = [1, 2].findIndex(function(value) {
+  var inner = [10, 20].findIndex(function(item) { return item === 20; });
+  return value === 2 && inner === 1;
+});
+var findInIndex = [1, 2].findIndex(function(value) {
+  return value === 2 && [6, 7].find(function(item) { return item === 7; }) === 7;
+});
+var indexInFind = [1, 2].find(function(value) {
+  return value === 2 && [5, 6].findIndex(function(item) { return item === 6; }) === 1;
+});
+verify(nestedIndex === 1 && findInIndex === 1 && indexInFind === 2);
+
+var noMatchValue = [1, 2].find(function() { return false; });
+var noMatchIndex = [1, 2].findIndex(function() { return false; });
+verify(noMatchValue === undefined && noMatchIndex === -1);
+
+var matchedUndefinedCalls = 0;
+var foundUndefined = holes.find(function(value) {
+  matchedUndefinedCalls=matchedUndefinedCalls+1;
+  return value === undefined;
+});
+var matchedUndefinedIndexCalls = 0;
+var foundUndefinedIndex = holes.findIndex(function(value) {
+  matchedUndefinedIndexCalls=matchedUndefinedIndexCalls+1;
+  return value === undefined;
+});
+verify(foundUndefined === undefined && foundUndefinedIndex === 0 &&
+  matchedUndefinedCalls === 1 && matchedUndefinedIndexCalls === 1);
+
+var shortCalls = 0;
+var shortIndex = [1, 2, 3].findIndex(function(value) {
+  shortCalls=shortCalls+1;
+  if (value === 3) null.missing;
+  return value === 1;
+});
+verify(shortIndex === 0 && shortCalls === 1);
+
+var marker = "JS99:assertions=" + assertions + ":failures=" + failures +
+  ":shortCircuit=" + (shortIndex === 0 && shortCalls === 1) + ":sparse=" +
+  (sparseCalls === 3 && holeCalls === 3) + ":nested=" +
+  (nestedIndex === 1 && findInIndex === 1 && indexInFind === 2) +
+  ":events=ready";
+document.getElementById("result").textContent = marker;
+
+var eventA = document.getElementById("find-index-event-a");
+var eventB = document.getElementById("find-index-event-b");
+var nestedEventOk = false;
+var outerEventOk = false;
+var innerEventCalls = 0;
+var outerEventCalls = 0;
+eventB.addEventListener("click", function(event) {
+  var innerIndex = [undefined, 2, 3].findIndex(function(value, index) {
+    innerEventCalls=innerEventCalls+1;
+    return index === 0 && value === undefined;
+  });
+  nestedEventOk=event.target===eventB&&event.currentTarget===eventB&&
+    innerIndex===0&&innerEventCalls===1;
+});
+eventA.addEventListener("click", function(event) {
+  var source = [4, 5, 6];
+  var result = source.findIndex(function(value, index, array) {
+    outerEventCalls=outerEventCalls+1;
+    if (index === 0) { eventB.click(); return false; }
+    if (index === 1) { array[index]=90; array.length=1; }
+    return value === 5;
+  });
+  outerEventOk=event.target===eventA&&event.currentTarget===eventA&&
+    result===1&&outerEventCalls===2&&source.length===1&&nestedEventOk;
+  document.getElementById("result").textContent=
+    "JS99:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+</script>
+</body>
+</html>

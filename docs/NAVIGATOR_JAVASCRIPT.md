@@ -12894,8 +12894,94 @@ was requested. `.phase` remains absent. The tracked changes are committed
 locally as `navigator: add JS98 bounded Array.prototype.find`; nothing was
 pushed.
 
-Recommended JS99 scope: add bounded `Array.prototype.findIndex()` using the
-same captured-length sparse visitation and short-circuit rules, returning the
-first matching source index (or `-1`) while preserving this phase's ownership,
-error, and memory limits. Keep `findLast()`, `findLastIndex()`, and `reduce()`
-deferred until separately specified and qualified.
+## JS99 — bounded `Array.prototype.findIndex()`
+
+JS99 adds the native `Array.prototype.findIndex(callback[, thisArg])` method.
+It invokes `callback(value, index, array)` with the optional `thisArg` and
+returns the first matching source index as a Number. If no visited value
+matches, it returns the Number `-1`. Callback truthiness uses the runtime's
+existing Boolean conversion. A callback must be callable even for an empty
+Array; validation follows the established array callback-method behavior.
+
+The traversal captures the Array's initial length and visits every integer
+index in that range, including sparse holes. Each slot is read immediately
+before the callback, so inherited numeric properties and changes to future
+slots are observed. Removing or shrinking the Array does not shorten the
+captured traversal; appends past the captured length are ignored. A truthy
+callback result stops immediately, so later slots are not read or called.
+Nested `findIndex()` calls and other callback methods have independent
+stack-local traversal state. Callback exceptions, nested failures, budget
+exhaustion, and call-depth errors use the existing runtime error propagation.
+
+The implementation adds a `FindIndex` traversal policy to the shared bounded
+Array traversal and installs one native method on `Array.prototype`. It does
+not stage elements or allocate a result Array. The 1,024-position limit and
+existing Array, object, function, and environment ownership limits remain in
+force. Generic array-like receivers and Array subclasses remain unsupported.
+JS99 increases the fixed Array prototype property count from 12 to 13; tests
+that assert the ordinary global property count are updated from 279 to 280,
+while the separate 256-property ordinary-object boundary remains unchanged.
+
+The JS99 native lane is `tests/navigator_javascript_js99_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js99.ps1`; the hosted fixture is
+`navigator-smoke/javascript-js99.html` and is registered in the hosted smoke
+aggregate. The native lane covers index and `-1` results, callback arguments
+and `thisArg`, truthiness, sparse and inherited slots, short-circuiting,
+captured-length mutation behavior, reentrancy and nested Event dispatch,
+validation and runtime errors, memory limits, and the 1,024/1,025-position
+boundary. The hosted page covers matching, sparse visitation, short-circuiting,
+and nested Event behavior.
+
+The focused JS99 native lane passes **35/35 checks** under strict C++17 flags
+(`-Wall -Wextra -Werror -pedantic`). GCC `-O2 -fstack-usage` reports
+`traverseArray` at **608 bytes**, `invokeNative` at **736 bytes**, and
+`invokeFunction` at **560 bytes**; traversal is 64 bytes smaller than the JS98
+measurement. These hosted compiler measurements do not establish a bare-metal
+stack guarantee.
+
+### JS99 qualification closeout
+
+The pre-edit branch was `NAVIGATOR_JAVASCRIPT_SUPPORT` at
+`fef92d71171b57333899299ce6c9024dfd44d638`, one local commit ahead of the
+cached `origin/NAVIGATOR_JAVASCRIPT_SUPPORT` ref at
+`50b8e6e55096cecc18549ef2f4e8ff468d7229c4`. Fetching the live remote failed
+because SSH authentication returned `Permission denied (publickey)`, so live
+remote divergence could not be confirmed. No branch switch or remote-ref
+update was performed.
+
+The pre-JS99 matrix covers **100/100 lanes** and
+**17,121/17,121 assertions across 59 lanes**. The JS89 and JS90
+global-property expectations were updated for the added Array prototype
+method; both lanes still pass their full 256-property ordinary-object boundary
+checks. JS91–JS98 also pass, including **197/197 checks** across the focused
+JS93–JS98 lanes. The JS99 focused lane passes **35/35 checks**. The initial
+matrix invocation passed through JS88, then stopped at JS89 on the stale
+global-property total. After updating JS89/90, the affected and subsequent
+lanes were rerun individually and passed. Thus all 101 lanes and **17,156
+assertions** are covered by the matrix run plus the targeted continuation.
+
+The production build completed successfully; it emitted the existing warning
+set from unrelated files. The hosted aggregate ran the newly built executable
+at the repository path and verified its SHA-256 before launch: **8,763,062
+bytes**, `9C8A56EEA83E40699BB04CD839B35B4050CED682A109B96F9AA9336BBF5D6987`.
+The hosted aggregate recorded **732 passed / 7 failed / 739 total**. All three
+new JS99 checks passed, including the hosted page's 19 assertions, sparse
+visitation and short-circuit behavior, and nested Event dispatch. The seven
+failures are the established CSS baseline checks: CSS phase 3C
+baselines/clipping/hit targets/focus; phase 3G parser/containing-block
+diagnostics; phase 6A nested scrolling/fixed-descendant invariance; phase 6B
+typed sticky diagnostics, local/nested sticky scrollports, and fixed-descendant
+invariance; and phase 6C sticky/fixed/clipping/flex/extent neutrality.
+
+The original `guideXOSServer.exe` was restored and verified at **8,398,274
+bytes**, SHA-256 `A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+All **42** generated viewport fixtures (**458,372 bytes**) exactly match the
+pre-run manifest, with no missing or extra files. `RuntimeObject` remains
+**88 bytes**, `RuntimeArrayElement` remains **48 bytes**, and the traversal is
+bounded to 1,024 positions without allocating a result Array or staging
+buffer. Hosted static stack numbers do not establish a bare-metal stack
+guarantee.
+
+The qualification is hosted-only: no QEMU was launched and no QAC admission was
+requested. `.phase` remains absent. The changes are committed locally as
+`navigator: add JS99 bounded Array.prototype.findIndex`; nothing was pushed.
