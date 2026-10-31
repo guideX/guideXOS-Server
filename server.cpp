@@ -6040,6 +6040,42 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js99AfterClick, 1200) + ",error=" +
         gxos::apps::Navigator::SmokeJavaScriptLastError());
 
+    const std::string js100FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js100.html";
+    const bool js100Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js100FixtureUrl);
+    const std::string js100InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS100 bounded Array reduce fixture passes on the hosted server",
+        js100Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js100FixtureUrl &&
+        contains(js100InitialText, "Navigator JavaScript JS100") &&
+        contains(js100InitialText, "JS100:assertions=16:failures=0") &&
+        contains(js100InitialText, ":arguments=true:sparse=true:nested=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js100Loaded) + ",text=" +
+        summarizeText(js100InitialText, 1800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const bool js100Click = js100Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("reduce-event-a");
+    const std::string js100AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS100 nested Event callbacks preserve independent reduction accumulators",
+        js100Click && contains(js100AfterClick,
+            "JS100:event:nested=true:outer=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js100Click) + ",text=" +
+        summarizeText(js100AfterClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const bool js100ErrorClick = js100Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("reduce-error-event");
+    const std::string js100Error =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS100 empty reduction TypeError propagates from a hosted Event callback",
+        js100ErrorClick && contains(js100Error, "TypeError"),
+        std::string("click=") + yesNo(js100ErrorClick) + ",error=" +
+        js100Error);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

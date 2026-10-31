@@ -12985,3 +12985,84 @@ guarantee.
 The qualification is hosted-only: no QEMU was launched and no QAC admission was
 requested. `.phase` remains absent. The changes are committed locally as
 `navigator: add JS99 bounded Array.prototype.findIndex`; nothing was pushed.
+
+## JS100 — bounded `Array.prototype.reduce()`
+
+JS100 adds native `Array.prototype.reduce(callback[, initialValue])` for the
+runtime's supported Array model. The callback receives exactly four runtime
+arguments in this order: `(accumulator, currentValue, currentIndex,
+sourceArray)`. The index is numeric and the source is the original Array
+reference. Reduce has no `thisArg`; callback invocation follows the runtime's
+existing function-call `this` behavior.
+
+The implementation determines whether `initialValue` was supplied from the
+actual native argument count. An explicit `undefined` is therefore a real seed
+and differs from omission. With a seed, callbacks begin at the first present
+numeric property. Without one, the first present own or inherited numeric
+property becomes the seed without a callback; an empty or all-hole Array then
+reports the runtime `TypeError` equivalent. Callback callability is checked
+even when no callback would run. Empty Arrays with an initial value return that
+exact value, including `undefined`.
+
+Reduce uses a dedicated bounded driver beside the JS93–JS99 shared traversal.
+The driver captures source length once, checks prototype-aware property
+presence, and reads each current value immediately before callback invocation.
+It skips holes, visits explicit `undefined`, sees inherited numeric
+properties, observes changes to future slots, skips removed slots, ignores
+appends beyond the captured length, and keeps the already-read current value.
+Falsy callback returns are carried forward and do not stop traversal. The
+shared `Continue / Stop / Error` behavior for JS93–JS99 remains unchanged.
+
+The active accumulator is a stack-local tagged `Value`. Object and Array
+references are stable runtime IDs into append-only object storage for the
+realm, so replacing the local tagged value after a successful callback does
+not invalidate either the old source element or the new callback result. The
+native method keeps no global mutable reduction state, creates no result Array,
+and allocates no Array-sized staging buffer. Superseded local handles need no
+manual release in this runtime because it has no per-value reference counting
+or object reclamation; retained runtime objects follow the existing realm
+capacity rules. Callback and nested callback errors unwind through the standard
+invocation frames and do not return a partial accumulator.
+
+The source length is limited to 1,024 positions. Existing Array element,
+object, property, function, environment, execution-budget, and call-depth
+limits continue to apply. Generic array-like receivers and `reduceRight()` are
+unsupported. The fixed Array prototype now has fourteen named method/protocol
+entries; ordinary-object 256-property capacity checks remain unchanged.
+
+The native lane is `tests/navigator_javascript_js100_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js100.ps1`. The hosted fixture is
+`navigator-smoke/javascript-js100.html` and its server checks are registered
+in `server.cpp`. The focused lane covers arithmetic and order, callback
+arguments and source identity, initial-value presence, empty/single/sparse and
+inherited cases, accumulator identity and replacement, callback mutation,
+nested Array methods and Event dispatch, errors and cleanup, allocation limits,
+and the 1,024/1,025-position boundary. Qualification results, executable
+restoration, and fixture preservation were verified as follows:
+
+- JS100 strict C++17 native lane: 55/55 checks passed with `-Wall -Wextra
+  -Werror -pedantic`.
+- The complete JavaScript matrix passed 102/102 lanes and 17,211/17,211
+  reported focused assertions across 61 instrumented lanes. The JS93–JS99
+  lanes passed with 67, 29, 31, 29, 29, 29, and 35 checks respectively.
+- The production build succeeded. The final fresh executable used for hosted
+  qualification had SHA-256
+  `F2F708102E5473C120AD476D3011988B49C5CE273E4E884C3987239D1CD60C86`.
+- The hosted aggregate reported 735 passed, 7 failed, and 742 total checks.
+  All three JS100 hosted checks passed. The seven failures are the established
+  CSS baseline; compared with 732/7/739 before JS100, the aggregate adds three
+  passing checks and no new failures. The hosted script returns a failure
+  status when those known CSS checks fail.
+- The original `guideXOSServer.exe` was restored and verified at 8,398,274
+  bytes with SHA-256
+  `A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`.
+  All 42 generated persistent fixtures (458,372 bytes) still match their
+  pre-build path, size, and SHA-256 manifest. `.phase` remained absent.
+
+Static stack measurements from the JS100 MinGW `-O2` lane are: `reduceArray`
+560 bytes, `traverseArray` 528 bytes, `invokeNative` 736 bytes,
+`invokeFunction` 560 bytes, `hasArrayIndex` 144 bytes, and `readArrayIndex`
+176 bytes. `RuntimeObject` remains 88 bytes and `RuntimeArrayElement` remains
+48 bytes; the 1,024-position Array limit is unchanged. These are compiler
+static-frame measurements, not a bare-metal stack guarantee. Qualification is
+hosted-only; no QEMU or QAC run was performed.

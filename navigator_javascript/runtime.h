@@ -400,6 +400,7 @@ private:
         EventPreventDefault,
         ArrayFind,
         ArrayFindIndex,
+        ArrayReduce,
     };
 
     enum class ArrayIteratorMode : std::uint8_t {

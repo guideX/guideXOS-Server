@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS100</title></head>
+<body>
+<h1>Navigator JavaScript JS100</h1>
+<pre id="result">JS100:pending</pre>
+<button id="reduce-event-a" type="button">Run JS100 reduce event</button>
+<button id="reduce-event-b" type="button">Nested JS100 reduce event</button>
+<button id="reduce-error-event" type="button">Run JS100 reduce error</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions=assertions+1;
+  if (!condition) failures=failures+1;
+}
+
+var initialCalls = 0;
+var initial = [2,4,6].reduce(function(acc,value) {
+  initialCalls=initialCalls+1;
+  return acc+value;
+}, 10);
+verify(initial === 22 && initialCalls === 3);
+
+var omittedCalls = 0;
+var omitted = [2,4,6].reduce(function(acc,value) {
+  omittedCalls=omittedCalls+1;
+  return acc+value;
+});
+verify(omitted === 12 && omittedCalls === 2);
+
+var undefinedCalls = 0;
+var explicitUndefined = [5].reduce(function(acc,value) {
+  undefinedCalls=undefinedCalls+1;
+  if (acc === undefined) return value;
+  return acc;
+}, undefined);
+verify(explicitUndefined === 5 && undefinedCalls === 1);
+
+var emptyCalls = 0;
+var empty = [].reduce(function() { emptyCalls=emptyCalls+1; }, 10);
+var emptyUndefined = [].reduce(function() { emptyCalls=emptyCalls+1; }, undefined);
+verify(empty === 10 && emptyUndefined === undefined && emptyCalls === 0);
+
+var sparse = [];
+sparse.length = 5;
+sparse[1] = 4;
+sparse[4] = 6;
+var sparseCalls = 0;
+var sparseIndices = "";
+var sparseSum = sparse.reduce(function(acc,value,index) {
+  sparseCalls=sparseCalls+1;
+  sparseIndices=sparseIndices+index;
+  return acc+value;
+}, 0);
+verify(sparseSum === 10 && sparseCalls === 2 && sparseIndices === "14");
+
+var source = [10,20,30];
+var argumentCalls = 0;
+var argumentIndices = "";
+var argumentsOk = true;
+var argumentResult = source.reduce(function(acc,value,index,array,extra) {
+  argumentCalls=argumentCalls+1;
+  argumentIndices=argumentIndices+index;
+  argumentsOk=argumentsOk&&array===source&&extra===undefined&&
+    ((index===0&&acc===0&&value===10)||
+     (index===1&&acc===10&&value===20)||
+     (index===2&&acc===31&&value===30));
+  return acc+value+index;
+}, 0);
+verify(argumentResult === 63 && argumentCalls === 3 &&
+  argumentIndices === "012" && argumentsOk);
+
+var objectAccumulator = {total:0};
+var objectResult = [1,2].reduce(function(acc,value) {
+  acc.total=acc.total+value;
+  return acc;
+}, objectAccumulator);
+verify(objectResult === objectAccumulator && objectResult.total === 3);
+
+var arrayAccumulator = [];
+var arrayResult = [4,5].reduce(function(acc,value) {
+  acc.push(value);
+  return acc;
+}, arrayAccumulator);
+verify(arrayResult === arrayAccumulator && arrayResult.length === 2 &&
+  arrayResult[0] === 4 && arrayResult[1] === 5);
+
+var nested = [1,2].reduce(function(acc,value) {
+  return [acc,value].reduce(function(inner,item) { return inner+item; }, 0);
+}, 0);
+verify(nested === 3);
+
+var falsyCalls = 0;
+var falsy = [1,2,3].reduce(function(acc,value,index) {
+  falsyCalls=falsyCalls+1;
+  if (index === 0) return false;
+  if (index === 1) return 0;
+  return null;
+}, 9);
+verify(falsy === null && falsyCalls === 3);
+
+var replaced = [1,2,3];
+var replacedCalls = 0;
+var replacedSum = replaced.reduce(function(acc,value,index,array) {
+  replacedCalls=replacedCalls+1;
+  if (index === 0) { array[1]=20; array[2]=30; }
+  return acc+value;
+}, 0);
+verify(replacedSum === 51 && replacedCalls === 3);
+
+var filled = [];
+filled.length = 3;
+filled[0] = 1;
+var fillCalls = 0;
+var fillSum = filled.reduce(function(acc,value,index,array) {
+  fillCalls=fillCalls+1;
+  if (index === 0) array[1]=2;
+  return acc+value;
+}, 0);
+verify(fillSum === 3 && fillCalls === 2);
+
+var shrunk = [1,2,3];
+var shrinkCalls = 0;
+var shrinkSum = shrunk.reduce(function(acc,value,index,array) {
+  shrinkCalls=shrinkCalls+1;
+  if (index === 0) array.length=1;
+  return acc+value;
+}, 0);
+verify(shrinkSum === 1 && shrinkCalls === 1);
+
+var appended = [1,2];
+var appendCalls = 0;
+var appendSum = appended.reduce(function(acc,value,index,array) {
+  appendCalls=appendCalls+1;
+  if (index === 0) array[2]=3;
+  return acc+value;
+}, 0);
+verify(appendSum === 3 && appendCalls === 2 && appended.length === 3);
+
+var oneCalls = 0;
+var one = [5].reduce(function(acc,value) {
+  oneCalls=oneCalls+1;
+  return acc+value;
+});
+verify(one === 5 && oneCalls === 0);
+
+var holes = [];
+holes.length = 4;
+var holeCalls = 0;
+var holeSeed = holes.reduce(function(acc) {
+  holeCalls=holeCalls+1;
+  return acc;
+}, 7);
+verify(holeSeed === 7 && holeCalls === 0);
+
+var marker = "JS100:assertions=" + assertions + ":failures=" + failures +
+  ":arguments=" + argumentsOk + ":sparse=" + (sparseCalls === 2) +
+  ":nested=" + (nested === 3) + ":events=ready";
+document.getElementById("result").textContent = marker;
+
+var eventA = document.getElementById("reduce-event-a");
+var eventB = document.getElementById("reduce-event-b");
+var errorEvent = document.getElementById("reduce-error-event");
+var nestedEventOk = false;
+var outerEventOk = false;
+var innerEventCalls = 0;
+var outerEventCalls = 0;
+eventB.addEventListener("click", function(event) {
+  var inner = [2,3].reduce(function(acc,value,index,array) {
+    innerEventCalls=innerEventCalls+1;
+    return acc+value;
+  }, 0);
+  nestedEventOk=event.target===eventB&&event.currentTarget===eventB&&
+    inner===5&&innerEventCalls===2;
+});
+eventA.addEventListener("click", function(event) {
+  var result = [1,2,3].reduce(function(acc,value,index) {
+    outerEventCalls=outerEventCalls+1;
+    if (index === 0) { eventB.click(); return acc+value; }
+    return acc+value;
+  }, 0);
+  outerEventOk=event.target===eventA&&event.currentTarget===eventA&&
+    result===6&&outerEventCalls===3&&nestedEventOk;
+  document.getElementById("result").textContent=
+    "JS100:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+errorEvent.addEventListener("click", function() {
+  [].reduce(function(acc,value) { return acc+value; });
+});
+</script>
+</body>
+</html>

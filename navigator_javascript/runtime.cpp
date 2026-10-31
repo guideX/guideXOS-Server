@@ -1595,6 +1595,97 @@ private:
         return ArrayTraversalControl::Continue;
     }
 
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    ArrayTraversalControl reduceArray(const Value& receiver,
+        const Value& callback, bool hasInitialValue,
+        const Value& initialValue, SourceLocation callSite, Value& result)
+    {
+        const RuntimeObjectId arrayId = receiver.isObject()
+            ? receiver.objectId() : kInvalidRuntimeObjectId;
+        const RuntimeContext::RuntimeObject* array =
+            context_.objectAt(arrayId);
+        if (array == nullptr || !array->array) {
+            fail(RuntimeErrorCode::InvalidReceiver, callSite);
+            return ArrayTraversalControl::Error;
+        }
+        if (!callback.isFunction()) {
+            fail(RuntimeErrorCode::NotCallable, callSite);
+            return ArrayTraversalControl::Error;
+        }
+        const RuntimeFunctionId callbackId = callback.functionId();
+        if (context_.functionAt(callbackId) == nullptr) {
+            fail(RuntimeErrorCode::InvalidFunction, callSite);
+            return ArrayTraversalControl::Error;
+        }
+
+        // Reentrant callback execution may grow objects_ and invalidate this
+        // pointer. Retain only the stable source ID and the entry length.
+        const std::size_t initialLength = array->arrayLength;
+        if (initialLength > maximumSupportedArrayLength(context_.limits_)) {
+            fail(RuntimeErrorCode::InvalidAstState, callSite);
+            return ArrayTraversalControl::Error;
+        }
+
+        Value accumulator = initialValue;
+        bool accumulatorInitialized = hasInitialValue;
+        std::vector<Value> callbackArguments;
+        bool callbackArgumentsReady = false;
+        for (std::size_t index = 0u; index < initialLength; ++index) {
+            bool present = false;
+            if (!hasArrayIndex(arrayId, index, present, callSite))
+                return ArrayTraversalControl::Error;
+            if (!present) continue;
+
+            Value value = Value::undefined();
+            RuntimeErrorCode lookupError = RuntimeErrorCode::None;
+            if (!context_.readArrayIndex(arrayId, index, value, lookupError,
+                    callSite)) {
+                fail(lookupError, callSite);
+                return ArrayTraversalControl::Error;
+            }
+            if (!accumulatorInitialized) {
+                accumulator = value;
+                accumulatorInitialized = true;
+                continue;
+            }
+
+            if (!callbackArgumentsReady) {
+                try {
+                    callbackArguments.resize(4u, Value::undefined());
+                } catch (const std::bad_alloc&) {
+                    fail(RuntimeErrorCode::AllocationFailure, callSite);
+                    return ArrayTraversalControl::Error;
+                }
+                callbackArgumentsReady = true;
+            }
+            callbackArguments[0] = accumulator;
+            callbackArguments[1] = value;
+            callbackArguments[2] = Value::number(
+                static_cast<double>(index));
+            callbackArguments[3] = receiver;
+            Value callbackResult = Value::undefined();
+            if (!invokeFunction(callbackId, callbackArguments, callSite,
+                    callbackResult)) {
+                return ArrayTraversalControl::Error;
+            }
+            // Value is a small tagged handle. Runtime object records are
+            // append-only for a realm, so replacing this local handle cannot
+            // invalidate the callback's returned object or Array.
+            accumulator = callbackResult;
+        }
+
+        if (!accumulatorInitialized) {
+            fail(RuntimeErrorCode::TypeError, callSite);
+            return ArrayTraversalControl::Error;
+        }
+        result = accumulator;
+        return ArrayTraversalControl::Continue;
+    }
+
     bool createObjectKeys(RuntimeObjectId sourceId, SourceLocation callSite,
         Value& result)
     {
@@ -2217,6 +2308,16 @@ private:
             const ArrayTraversalControl traversal = traverseArray(receiver,
                 argumentOrUndefined(0u), argumentOrUndefined(1u), callSite,
                 kind, result);
+            succeeded = traversal != ArrayTraversalControl::Error;
+            break;
+        }
+        case RuntimeContext::NativeFunctionId::ArrayReduce: {
+            const bool hasInitialValue = arguments.size() > 1u;
+            const Value initialValue = hasInitialValue
+                ? arguments[1u] : Value::undefined();
+            const ArrayTraversalControl traversal = reduceArray(receiver,
+                argumentOrUndefined(0u), hasInitialValue, initialValue,
+                callSite, result);
             succeeded = traversal != ArrayTraversalControl::Error;
             break;
         }
@@ -4166,6 +4267,8 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         !install(arrayPrototype_, "find", NativeFunctionId::ArrayFind,
             error) ||
         !install(arrayPrototype_, "findIndex", NativeFunctionId::ArrayFindIndex,
+            error) ||
+        !install(arrayPrototype_, "reduce", NativeFunctionId::ArrayReduce,
             error)) return false;
     const char eventName[] = "Event";
     // Event constants are optional only when an explicitly tiny caller limit
