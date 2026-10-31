@@ -13130,8 +13130,9 @@ JS101 qualification completed on 2026-10-31. The complete JavaScript matrix
 passed **103/103 lanes** with **17,254/17,254 reported assertions**, including
 JS100's 55/55 reduction checks, JS101's 43/43 checks, and the JS93–JS99
 `forEach`, `map`, `filter`, `some`, `every`, `find`, and `findIndex` regressions.
-Every lane passed strict C++17 compilation; the relevant production `-O2`
-static stack report was collected by the JS101 lane.
+The JS101 lane passed strict C++17 compilation with `-Wall -Wextra -Werror
+-pedantic`; JS100 and JS93–JS99 also passed their strict warning checks. The
+relevant production `-O2` static stack report was collected by the JS101 lane.
 
 The hosted Navigator aggregate reported **738 passed, 7 failed, 745 total**.
 All three JS101 checks passed: the fixture, nested Event reductions, and
