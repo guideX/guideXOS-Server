@@ -20,13 +20,13 @@ function Add-TraceEvent([System.Collections.Generic.List[string]]$Lines,[string]
     $Lines.Add("[C188R12R4R5R1_INIT] invocation=00000001 stage=$Stage event=$Event code=$Code singleton=$Singleton")
 }
 function Add-Stage([System.Collections.Generic.List[string]]$Lines,[string]$Stage,[string]$Code='00000000',
-                   [string]$Singleton='00000000') {
-    Add-TraceEvent $Lines $Stage '00000001'
+                   [string]$Singleton='00000000',[string]$SingletonAtBegin='00000000') {
+    Add-TraceEvent $Lines $Stage '00000001' 'FFFFFFFF' $SingletonAtBegin
     Add-TraceEvent $Lines $Stage '00000002' $Code $Singleton
 }
 function Add-FailedStage([System.Collections.Generic.List[string]]$Lines,[string]$Stage,[string]$Code,
-                         [string]$Singleton='00000000') {
-    Add-TraceEvent $Lines $Stage '00000001'
+                         [string]$Singleton='00000000',[string]$SingletonAtBegin='00000000') {
+    Add-TraceEvent $Lines $Stage '00000001' 'FFFFFFFF' $SingletonAtBegin
     Add-TraceEvent $Lines $Stage '00000003' $Code $Singleton
 }
 function New-TraceText([System.Collections.Generic.List[string]]$Lines,[Nullable[uint32]]$RingOverflow=$null,
@@ -59,33 +59,33 @@ function Invoke-TraceAnalysis([string]$Name,[string]$Text,[switch]$TimedOut) {
 
 # A. Full, ordered path through the source-defined RhInitialize/GC boundaries.
 $success = [System.Collections.Generic.List[string]]::new()
-Add-Stage $success '00000001'
-Add-TraceEvent $success '00000002' '00000001'
-Add-TraceEvent $success '00000010' '00000001'
-Add-Stage $success '00000011'
-Add-Stage $success '00000012' '00000000' '00000010'
-Add-Stage $success '00000013' '00000000' '00000010'
+Add-Stage $success '00000001' '00000000' '00000010' '00000010'
+Add-TraceEvent $success '00000002' '00000001' 'FFFFFFFF' '00000010'
+Add-TraceEvent $success '00000010' '00000001' 'FFFFFFFF' '00000010'
+Add-Stage $success '00000011' '00000000' '00000010' '00000010'
+Add-Stage $success '00000012' '00000000' '00000010' '00000010'
+Add-Stage $success '00000013' '00000000' '00000010' '00000010'
 Add-TraceEvent $success '00000010' '00000002' '00000000' '00000010'
-Add-Stage $success '00000025' '00000000' '00000010'
+Add-TraceEvent $success '00000025' '00000004' '00000001' '00000010'
 Add-TraceEvent $success '00000026' '00000004' '00000001' '00000010'
-Add-TraceEvent $success '00000020' '00000001' 'FFFFFFFF' '00000013'
-Add-Stage $success '00000021' '00000000' '00000013'
-Add-Stage $success '00000022' '00000000' '00000013'
-Add-Stage $success '00000023' '00000000' '00000013'
-Add-TraceEvent $success '00000024' '00000001' 'FFFFFFFF' '00000013'
-Add-Stage $success '00000028' '00000000' '00000013'
-Add-Stage $success '00000029' '00000000' '00000013'
-Add-Stage $success '0000002A' '00000000' '00000013'
+Add-TraceEvent $success '00000020' '00000001' 'FFFFFFFF' '00000010'
+Add-Stage $success '00000021' '00000000' '00000010' '00000010'
+Add-Stage $success '00000022' '00000000' '00000010' '00000010'
+Add-Stage $success '00000023' '00000000' '00000010' '00000010'
+Add-TraceEvent $success '00000024' '00000001' 'FFFFFFFF' '00000010'
+Add-Stage $success '00000028' '00000000' '00000010' '00000010'
+Add-Stage $success '00000029' '00000000' '00000010' '00000010'
+Add-Stage $success '0000002A' '00000000' '00000013' '00000010'
 Add-TraceEvent $success '00000024' '00000002' '00000000' '00000013'
 Add-TraceEvent $success '00000030' '00000001' 'FFFFFFFF' '00000013'
-Add-Stage $success '00000031' '00000000' '0000001F'
-Add-Stage $success '00000032' '00000000' '0000001F'
-Add-Stage $success '00000033' '00000000' '0000001F'
-Add-Stage $success '00000034' '00000000' '0000001F'
+Add-Stage $success '00000031' '00000000' '0000001F' '00000013'
+Add-Stage $success '00000032' '00000000' '0000001F' '0000001F'
+Add-Stage $success '00000033' '00000000' '0000001F' '0000001F'
+Add-Stage $success '00000034' '00000000' '0000001F' '0000001F'
 Add-TraceEvent $success '00000030' '00000002' '00000000' '0000001F'
-Add-Stage $success '00000040' '00000000' '0000001F'
+Add-Stage $success '00000040' '00000000' '0000001F' '0000001F'
 Add-TraceEvent $success '00000020' '00000002' '00000000' '0000001F'
-Add-Stage $success '00000027' '00000000' '0000001F'
+Add-Stage $success '00000027' '00000000' '0000001F' '0000001F'
 Add-TraceEvent $success '00000002' '00000002' '00000000' '0000001F'
 $successGate = '[C188R12R4R5R1_INIT] managed_main_gate=blocked reason=runtime-threadstore-attachment-unqualified singleton=0000001F gcProof=not-entered'
 $successCapture = Invoke-TraceAnalysis 'a-successful-initialization' (New-TraceText $success -Gate $successGate)
@@ -94,6 +94,18 @@ Assert-True ($successCapture.analysis.rhInitializeResult -eq 'success') 'RhIniti
 Assert-True $successCapture.analysis.runtimeInstanceSingletonsReady 'RuntimeInstance/ThreadStore singleton bits are visible'
 Assert-True $successCapture.analysis.gcHeapAndHandlePublicationReady 'GC heap and handle manager publication bits are visible'
 Assert-True (-not $successCapture.analysis.managedMainDispatched) 'candidate safety gate suppresses proof without attachment qualification'
+$runtimePublishStage = @($successCapture.analysis.stages | Where-Object { $_.stageName -eq 'RuntimeInstancePublish' })[0]
+$gcPublicationStage = @($successCapture.analysis.stages | Where-Object { $_.stageName -eq 'GCHeapPublication' })[0]
+Assert-True ($runtimePublishStage.singletonBitsAtBegin -eq '00000010' -and
+    $runtimePublishStage.singletonBitsAtCompletion -eq '00000013') 'RuntimeInstance and ThreadStore bits appear only after publication'
+Assert-True ($gcPublicationStage.singletonBitsAtBegin -eq '00000013' -and
+    $gcPublicationStage.singletonBitsAtCompletion -eq '0000001F') 'GC heap and handle pointers appear only after GC publication'
+$preRuntimeBits = [Convert]::ToUInt32($successCapture.analysis.stages[1].singletonBitsAtBegin,16)
+Assert-True (($preRuntimeBits -band 0x83) -eq 0) 'current-thread indicator stays absent before attachment is qualified'
+$moduleIdentityObservation = @($successCapture.analysis.events | Where-Object {
+    $_.stage -eq '00000025' -and $_.eventName -eq 'observe'
+})[0]
+Assert-True ($moduleIdentityObservation.code -eq '00000001') 'module identity is recorded as an observation rather than an explicit failure boundary'
 $successStageOrder = @($successCapture.analysis.stages | ForEach-Object { $_.stageName })
 Assert-True (($successStageOrder.IndexOf('PalFls') -lt $successStageOrder.IndexOf('RuntimeInstance')) -and
     ($successStageOrder.IndexOf('RuntimeInstance') -lt $successStageOrder.IndexOf('GCHeapPublication')) -and
@@ -102,12 +114,12 @@ Assert-True (($successStageOrder.IndexOf('PalFls') -lt $successStageOrder.IndexO
 
 # B. PAL/FLS fails before the GC initialization boundary.
 $early = [System.Collections.Generic.List[string]]::new()
-Add-Stage $early '00000001'
-Add-TraceEvent $early '00000002' '00000001'
-Add-TraceEvent $early '00000010' '00000001'
-Add-FailedStage $early '00000011' 'FFFFFFFF'
-Add-FailedStage $early '00000010' '00000001'
-Add-FailedStage $early '00000002' '00000001'
+Add-Stage $early '00000001' '00000000' '00000010' '00000010'
+Add-TraceEvent $early '00000002' '00000001' 'FFFFFFFF' '00000010'
+Add-TraceEvent $early '00000010' '00000001' 'FFFFFFFF' '00000010'
+Add-FailedStage $early '00000011' 'FFFFFFFF' '00000010' '00000010'
+Add-FailedStage $early '00000010' '00000001' '00000010' '00000010'
+Add-FailedStage $early '00000002' '00000001' '00000010' '00000010'
 $earlyGate = '[C188R12R4R5R1_INIT] managed_main_gate=blocked rhResult=00000001'
 $earlyCapture = Invoke-TraceAnalysis 'b-early-pal-failure' (New-TraceText $early -Gate $earlyGate)
 Assert-True ($earlyCapture.analysis.earliestExplicitFailure.stageName -eq 'PalFls') 'early failure is attributed to PAL FLS'
@@ -116,38 +128,37 @@ Assert-True $earlyCapture.analysis.managedMainSuppressedOnInitializationFailure 
 
 # C. An explicit HRESULT failure at the GC heap publication boundary.
 $gcFailure = [System.Collections.Generic.List[string]]::new()
-Add-Stage $gcFailure '00000001'
-Add-TraceEvent $gcFailure '00000002' '00000001'
-Add-Stage $gcFailure '00000010'
-Add-TraceEvent $gcFailure '00000020' '00000001'
-Add-Stage $gcFailure '00000024' '00000000' '00000013'
-Add-TraceEvent $gcFailure '00000030' '00000001'
-Add-FailedStage $gcFailure '00000031' '8007000E' '00000013'
-Add-FailedStage $gcFailure '00000030' '00000001' '00000013'
-Add-FailedStage $gcFailure '00000020' '00000001' '00000013'
-Add-FailedStage $gcFailure '00000002' '00000001' '00000013'
+Add-Stage $gcFailure '00000001' '00000000' '00000010' '00000010'
+Add-TraceEvent $gcFailure '00000002' '00000001' 'FFFFFFFF' '00000010'
+Add-Stage $gcFailure '00000010' '00000000' '00000010' '00000010'
+Add-TraceEvent $gcFailure '00000020' '00000001' 'FFFFFFFF' '00000010'
+Add-Stage $gcFailure '00000024' '00000000' '00000013' '00000010'
+Add-TraceEvent $gcFailure '00000030' '00000001' 'FFFFFFFF' '00000013'
+Add-FailedStage $gcFailure '00000031' '8007000E' '00000013' '00000013'
+Add-FailedStage $gcFailure '00000030' '00000001' '00000013' '00000013'
+Add-FailedStage $gcFailure '00000020' '00000001' '00000013' '00000010'
+Add-FailedStage $gcFailure '00000002' '00000001' '00000013' '00000010'
 $gcCapture = Invoke-TraceAnalysis 'c-gc-publication-failure' (New-TraceText $gcFailure)
 Assert-True ($gcCapture.analysis.earliestExplicitFailure.stageName -eq 'GCHeapPublication') 'GC HRESULT failure is attributed to publication'
 Assert-True ($gcCapture.analysis.earliestExplicitFailure.code -eq '8007000E') 'explicit HRESULT is preserved'
 
 # D. RuntimeInstance returned, but its required ThreadStore singleton bit is absent.
 $singleton = [System.Collections.Generic.List[string]]::new()
-Add-Stage $singleton '00000001'
-Add-TraceEvent $singleton '00000002' '00000001'
-Add-TraceEvent $singleton '00000024' '00000001'
-Add-TraceEvent $singleton '00000024' '00000002' '00000000' '00000001'
-Add-FailedStage $singleton '00000002' '00000001' '00000001'
+Add-Stage $singleton '00000001' '00000000' '00000010' '00000010'
+Add-TraceEvent $singleton '00000002' '00000001' 'FFFFFFFF' '00000010'
+Add-TraceEvent $singleton '00000024' '00000001' 'FFFFFFFF' '00000010'
+Add-TraceEvent $singleton '00000024' '00000002' '00000000' '00000011'
+Add-FailedStage $singleton '00000002' '00000001' '00000011' '00000010'
 $singletonCapture = Invoke-TraceAnalysis 'd-missing-threadstore-singleton' (New-TraceText $singleton)
 Assert-True (-not $singletonCapture.analysis.runtimeInstanceSingletonsReady) 'missing ThreadStore is reported without dereference'
 Assert-True ($singletonCapture.analysis.runtimeInstanceMissingSingletonBits -eq 2) 'missing singleton bit is identified'
 
 # E. Module registration reports the source-defined fail-fast code; no later registration stage is invented.
 $moduleFailure = [System.Collections.Generic.List[string]]::new()
-Add-Stage $moduleFailure '00000001'
-Add-Stage $moduleFailure '00000002'
-Add-TraceEvent $moduleFailure '00000060' '00000001'
-Add-TraceEvent $moduleFailure '00000061' '00000001'
-Add-FailedStage $moduleFailure '00000061' '0000000A'
+Add-Stage $moduleFailure '00000001' '00000000' '00000010' '00000010'
+Add-Stage $moduleFailure '00000002' '00000000' '0000001F' '00000010'
+Add-Stage $moduleFailure '00000060' '00000000' '0000001F' '0000001F'
+Add-FailedStage $moduleFailure '00000061' '0000000A' '0000001F' '0000001F'
 $moduleCapture = Invoke-TraceAnalysis 'e-module-registration-failure' (New-TraceText $moduleFailure -End:$false)
 Assert-True ($moduleCapture.analysis.earliestExplicitFailure.stageName -eq 'moduleRegistration') 'module failure is identified'
 Assert-True (@($moduleCapture.analysis.events | Where-Object { $_.stage -eq '00000062' }).Count -eq 0) 'code-manager stage is not fabricated after module failure'
@@ -155,10 +166,10 @@ Assert-True (-not $moduleCapture.analysis.initTraceComplete) 'fail-fast without 
 
 # F. A begin marker without a return does not become an explicit stage failure.
 $incomplete = [System.Collections.Generic.List[string]]::new()
-Add-Stage $incomplete '00000001'
-Add-TraceEvent $incomplete '00000002' '00000001'
-Add-TraceEvent $incomplete '00000010' '00000001'
-Add-TraceEvent $incomplete '00000011' '00000001'
+Add-Stage $incomplete '00000001' '00000000' '00000010' '00000010'
+Add-TraceEvent $incomplete '00000002' '00000001' 'FFFFFFFF' '00000010'
+Add-TraceEvent $incomplete '00000010' '00000001' 'FFFFFFFF' '00000010'
+Add-TraceEvent $incomplete '00000011' '00000001' 'FFFFFFFF' '00000010'
 $incompleteCapture = Invoke-TraceAnalysis 'f-begin-without-completion' (New-TraceText $incomplete -End:$false -TerminalNewline:$false) -TimedOut
 $incompletePalFls = @($incompleteCapture.analysis.stages | Where-Object { $_.stageName -eq 'PalFls' })[0]
 Assert-True ($incompletePalFls.status -eq 'begin_without_completion') 'incomplete stage is not marked failed'
@@ -170,8 +181,8 @@ Assert-True $earlyCapture.analysis.managedMainSuppressedOnInitializationFailure 
 
 # H. Synthetic successful dispatch markers are parsed as dispatch/return evidence only.
 $managed = [System.Collections.Generic.List[string]]::new()
-Add-Stage $managed '00000001'
-Add-Stage $managed '00000002'
+Add-Stage $managed '00000001' '00000000' '00000010' '00000010'
+Add-Stage $managed '00000002' '00000000' '0000001F' '00000010'
 $managed.Add('[C188R12R4R5R1_INIT] trace_end invocation=00000001 count=00000004 overflow=00000000 serialDropped=00000000 rhResult=00000000')
 $managed.Add('[C188R12R4R5R1_INIT] managed_main_gate=open rhResult=00000000')
 $managed.Add('[C188R12R4R5R1_INIT] managed_main_call ordinal=00000001')

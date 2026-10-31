@@ -736,10 +736,10 @@ guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_STARTUP_IMPORT_LOOKUP);
         GX_INIT_EVENT_OBSERVE, pfn != NULL ? 1u : 0u, 0xFFFFFFFFu);
 '@ 'optional RtlDllShutdownInProgress import lookup'
         $startupText = Replace-ExactOneSource $startupText 'if \(!InitDLL\(PalGetModuleHandleFromPointer\(\(void\*\)&RhInitialize\)\)\)\s*return false;' @'
-guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_MODULE_IDENTITY);
     HANDLE startupModule = PalGetModuleHandleFromPointer((void*)&RhInitialize);
-    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_MODULE_IDENTITY,
-        startupModule != nullptr, startupModule == nullptr ? 1u : 0u);
+    guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_MODULE_IDENTITY,
+        GX_INIT_EVENT_OBSERVE, startupModule != nullptr ? 1u : 0u,
+        0xFFFFFFFFu);
     guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_INIT_DLL);
     const bool initDllSucceeded = InitDLL(startupModule);
     guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_INIT_DLL, initDllSucceeded);
