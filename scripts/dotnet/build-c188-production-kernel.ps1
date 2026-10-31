@@ -19,7 +19,8 @@ $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r3-lifetime-start-attribution')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4-factory-attribution')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r1-diagnostic-link-repair')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r1-runtime-init-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r1-runtime-init-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r3-init-return-contract')))
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
@@ -154,7 +155,8 @@ foreach ($developmentMarker in @(
     'C188R11-',
     'C188R12R4_FACTORY',
     'C188R12R4_ALLOC',
-    'C188R12R4R5R1_INIT'
+    'C188R12R4R5R1_INIT',
+    'C188R12R4R5R3_INIT'
 )) {
     if ($kernelText.Contains($developmentMarker)) {
         throw "Proof-disabled production ELF contains development-only marker $developmentMarker"

@@ -1,1 +1,2 @@
 /out/dotnet/c188r6-notes-postrender/runs/diag-002/serial.log -diff -text
+tests/dotnet/fixtures/nativeaot/C188R12R4R5R2-guest.serial.log -diff -text

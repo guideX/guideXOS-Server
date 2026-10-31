@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
-    $CandidateRoot = Join-Path $root "out\dotnet\c188r12r4r5r1-runtime-init-attribution\candidate-$stamp"
+    $CandidateRoot = Join-Path $root "out\dotnet\c188r12r4r5r3-init-return-contract\candidate-$stamp"
 }
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $allowed = [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet')) + [System.IO.Path]::DirectorySeparatorChar
@@ -75,7 +75,7 @@ Invoke-Logged 'pwsh' @(
     '-OutputRoot', $managedRoot, '-RuntimePackOutputRoot', $runtimeRoot,
     '-UseGuideXosRuntimePack', '-AllocationMode', 'Allocating',
     '-ProductionApplication', '-C188R12R4R5GcOwnershipProof',
-    '-C188R12R4R5R1InitDiagnostics',
+    '-C188R12R4R5R1InitDiagnostics', '-C188R12R4R5R3InitReturnContract',
     '-ManagedProjectMode', 'GcOwnershipProof'
 ) (Join-Path $candidate 'managed-build.log')
 
@@ -86,6 +86,7 @@ Require-File $runtimeManifestPath 'Runtime-pack manifest'
 $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
 if (-not [bool]$runtimeManifest.c188r12r4r5GcOwnershipProof -or
     -not [bool]$runtimeManifest.c188r12r4r5r1InitDiagnostics -or
+    -not [bool]$runtimeManifest.c188r12r4r5r3InitReturnContract -or
     [bool]$runtimeManifest.imageBackedArenaPresent -or
     [int64]$runtimeManifest.managedHeapBytes -ne 0 -or
     [string]$runtimeManifest.runtimeIdentity.sourceCommit -ne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3') {
@@ -102,6 +103,7 @@ $requiredSymbols = @(
     'GuideXosNativeAotGcStartupInstallHookTable',
     'GuideXosNativeAotGcStartupInstallPlatformHooks',
     'GuideXosNativeAotGcStartupMain', 'GuideXosNativeAotGcStartupGetState',
+    'GuideXosNativeAotGcStartupGetRhInitializeRawResult',
     'GuideXosNativeAotGcStartupGetPreGcState',
     'GuideXosNativeAotGcStartupGetAllocationCount',
     'GuideXosNativeAotGcStartupGetLastAllocationSize',
@@ -130,6 +132,7 @@ $exports = [ordered]@{
     GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_INSTALL_TABLE_ADDRESS = 'GuideXosNativeAotGcStartupInstallHookTable'
     GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_INSTALL_PLATFORM_ADDRESS = 'GuideXosNativeAotGcStartupInstallPlatformHooks'
     GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_STARTUP_MAIN_ADDRESS = 'GuideXosNativeAotGcStartupMain'
+    GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_RH_INITIALIZE_RAW_RESULT_ADDRESS = 'GuideXosNativeAotGcStartupGetRhInitializeRawResult'
     GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_STATE_ADDRESS = 'GuideXosNativeAotGcStartupGetState'
     GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_PRE_GC_STATE_ADDRESS = 'GuideXosNativeAotGcStartupGetPreGcState'
     GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_ALLOCATION_COUNT_ADDRESS = 'GuideXosNativeAotGcStartupGetAllocationCount'
@@ -230,7 +233,7 @@ $kernelFeatures = @(
     'GXOS_NATIVEAOT_C188_EXTERNAL_APP_IDENTITY'
 )
 $kernelDefines = ($kernelFeatures | ForEach-Object { '-D' + $_ }) -join ' '
-$kernelDefines += ' -DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS'
+$kernelDefines += ' -DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS -DGXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT'
 $makeArgs = @(
     '-C', 'kernel', 'ARCH=amd64', "BUILD_DIR=$kernelBuildDir",
     'GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1',
@@ -244,6 +247,7 @@ $kernelHash = Hash-File $kernel
 $kernelLog = Get-Content -LiteralPath (Join-Path $candidate 'kernel-build.log') -Raw
 if ($kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST' -or
     $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' -or
+    $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT' -or
     $kernelLog -notmatch 'gc-startup-artifact\.o') {
     throw 'Isolated kernel build does not show the ownership selector and embedded NativeAOT image.'
 }
@@ -279,14 +283,28 @@ if ($productionManifest.result -cne 'PASS' -or
     $productionKernelManifest.result -cne 'PASS') {
     throw 'Proof-disabled production NativeAOT/kernel isolation qualification failed.'
 }
+$productionRuntimeManifestPath = [string]$productionManifest.runtimePackManifest
+Require-File $productionRuntimeManifestPath 'Proof-disabled production runtime-pack manifest'
+$productionRuntimeManifest = Get-Content -LiteralPath $productionRuntimeManifestPath -Raw | ConvertFrom-Json
+$productionMapPath = Join-Path $productionNativeAotRoot 'nativeaot\artifacts\HostLogProof.map'
+Require-File $productionMapPath 'Proof-disabled production NativeAOT map'
+$productionMapText = Get-Content -LiteralPath $productionMapPath -Raw
+if ([bool]$productionRuntimeManifest.c188r12r4r5GcOwnershipProof -or
+    [bool]$productionRuntimeManifest.c188r12r4r5r1InitDiagnostics -or
+    [bool]$productionRuntimeManifest.c188r12r4r5r3InitReturnContract -or
+    $productionMapText.Contains('C188R12R4R5R1_INIT') -or
+    $productionMapText.Contains('C188R12R4R5R3_INIT') -or
+    $productionMapText.Contains('GuideXosNativeAotGcStartupGetRhInitializeRawResult')) {
+    throw 'Proof-disabled production NativeAOT outputs contain C188 return-contract instrumentation.'
+}
 
 $manifest = [ordered]@{
-    result = 'PASS_BUILD_READY_FOR_INIT_DIAGNOSTIC_QAC_PREFLIGHT'
+    result = 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST'
     repoRoot = $root
     head = (& git -C $root rev-parse HEAD).Trim()
     branch = (& git -C $root branch --show-current).Trim()
     candidateRoot = $candidate
-    mode = 'InitAttribution'
+    mode = 'InitReturnContract'
     productionApplicationStartupOnly = $true
     managedMainEnteredByCandidate = $false
     managedMainGateReason = 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.'
@@ -296,7 +314,9 @@ $manifest = [ordered]@{
     runtimePackIdentity = $runtimeManifest.identity
     runtimePackSourceCommit = $runtimeManifest.runtimeIdentity.sourceCommit
     runtimeInitDiagnostics = [bool]$runtimeManifest.c188r12r4r5r1InitDiagnostics
+    c188R12R4R5R3InitReturnContract = [bool]$runtimeManifest.c188r12r4r5r3InitReturnContract
     runtimePackSha256 = $runtimeManifest.objectSha256
+    runtimePackManifestSha256 = Hash-File $runtimeManifestPath
     managedPe = $pePath
     managedPeSha256 = Hash-File $pePath
     managedMapSha256 = Hash-File $mapPath
@@ -312,6 +332,7 @@ $manifest = [ordered]@{
     sourceRamdiskSha256 = Hash-File $ramdisk
     candidateRamdiskSha256 = $candidateRamdiskHash
     initializationTraceMarker = 'C188R12R4R5R1_INIT'
+    initializationReturnContractMarker = 'C188R12R4R5R3_INIT'
     initializationTraceCapacity = [int]$runtimeManifest.initializationTraceRecordCapacity
     initializationTraceSerialLineLimit = [int]$runtimeManifest.initializationTraceSerialLineLimit
     initializationTraceStageIds = [ordered]@{
@@ -333,8 +354,18 @@ $manifest = [ordered]@{
         bit4='RhConfig pointer available'; bit5='guideXOS NativeAOT modules initialized'
         bit6='code manager registered'; bit7='ThreadStore current-thread accessor non-null (not proof of list attachment)'
     }
-    adapterVersion = 'c188r12r4r5r1-init-trace-v1'
+    adapterVersion = 'c188r12r4r5r3-init-return-contract-v1'
     runnerVersion = 'c188r12r4r5r1-qac-runner-v1'
+    nativeRhInitialize = [ordered]@{
+        signature = 'extern "C" bool RhInitialize(bool isDll)'
+        successBoolean = 1
+        failureBoolean = 0
+        adapterStatusSuccess = 0
+        adapterStatusFailure = 1
+        rawResultExport = 'GuideXosNativeAotGcStartupGetRhInitializeRawResult'
+        moduleRegistrationIncluded = $false
+        managedMainIncluded = $false
+    }
     productionNativeAotManifest = $productionManifestPath
     productionNativeAotElfSha256 = [string]$productionManifest.elfSha256
     productionNativeAotPersistentCompositeLifecycle = [bool]$productionManifest.persistentCompositeLifecycle
@@ -343,6 +374,10 @@ $manifest = [ordered]@{
     productionIsolationChecks = [ordered]@{
         diagnosticAndProductionOutputsSeparate = $true
         diagnosticInstrumentationAbsentFromProduction = $true
+        productionRuntimePackC188ProofProfile = [bool]$productionRuntimeManifest.c188r12r4r5GcOwnershipProof
+        productionRuntimePackR1TraceProfile = [bool]$productionRuntimeManifest.c188r12r4r5r1InitDiagnostics
+        productionRuntimePackR3ReturnProfile = [bool]$productionRuntimeManifest.c188r12r4r5r3InitReturnContract
+        productionNativeAotMapExcludesReturnMarkers = $true
         productionPersistentCompositeLifecycle = [bool]$productionManifest.persistentCompositeLifecycle
         noGcOwnershipProofProfileInProduction = $true
     }
@@ -351,9 +386,55 @@ $manifest = [ordered]@{
     imageBackedArenaPresent = [bool]$runtimeManifest.imageBackedArenaPresent
     managedHeapBytes = [int64]$runtimeManifest.managedHeapBytes
     collectionPrecedent = 'C011EC36 guest evidence: compacting collection, updated stack root and weak handle, RestartEE/resume'
+    buildProvenance = [ordered]@{
+        sourceHead = (& git -C $root rev-parse HEAD).Trim()
+        sourceBranch = (& git -C $root branch --show-current).Trim()
+        runtimeSourceCommit = $runtimeManifest.runtimeIdentity.sourceCommit
+        candidateBuilder = $PSCommandPath
+        candidateBuilderSha256 = Hash-File $PSCommandPath
+        runtimePackBuilder = $runtimeManifest.buildCommandIdentity.script
+        runtimePackBuilderSha256 = $runtimeManifest.buildCommandIdentity.scriptSha256
+        runtimePackLockFile = $runtimeManifest.lockFile
+        runtimePackLockFileSha256 = $runtimeManifest.lockFileSha256
+        qemuLaunched = $false
+        qacReserved = $false
+    }
+    artifactHashes = [ordered]@{
+        candidateNativeAotPe = Hash-File $pePath
+        candidateNativeAotMap = Hash-File $mapPath
+        candidateNativeAotElf = Hash-File $elfPath
+        candidateNativeAotBuildLog = Hash-File (Join-Path $candidate 'managed-build.log')
+        candidatePeImports = Hash-File (Join-Path $candidate 'pe-imports.txt')
+        candidateElfInspection = Hash-File (Join-Path $candidate 'elf-inspection.txt')
+        candidatePeToElfLog = Hash-File (Join-Path $candidate 'pe-to-elf.log')
+        startupAdapterObject = Hash-File (Join-Path $artifactRoot 'guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.obj')
+        embeddedNativeAotObject = Hash-File $embeddedObject
+        embeddedNativeAotRawObject = Hash-File $embeddedRaw
+        startupExportsHeader = Hash-File $header
+        diagnosticKernelBuildLog = Hash-File (Join-Path $candidate 'kernel-build.log')
+        diagnosticKernelElf = $kernelHash
+        stagedEspKernel = Hash-File (Join-Path $esp 'kernel.elf')
+        stagedEspBootloader = Hash-File (Join-Path $espBoot 'BOOTX64.EFI')
+        stagedEspRamdisk = Hash-File (Join-Path $esp 'ramdisk.img')
+        bootloader = Hash-File $bootloader
+        runtimePackPlatformObject = Hash-File ([string]$runtimeManifest.object)
+        runtimePackLibrary = Hash-File ([string]$runtimeManifest.adaptedRuntimeLibrary)
+        runtimePackStartupReplacementSource = Hash-File (Join-Path $runtimeRoot 'guidexos_nativeaot_startup_replacement.cpp')
+        runtimePackManifest = Hash-File $runtimeManifestPath
+        runtimePackVersionHeader = Hash-File ([string]$runtimeManifest.c188r12r4r5r1RuntimeVersionHeader)
+        productionNativeAotBuildLog = Hash-File (Join-Path $productionRoot 'production-nativeaot-build.log')
+        productionNativeAotMap = Hash-File $productionMapPath
+        sourceRamdisk = Hash-File $ramdisk
+        productionNativeAotElf = Hash-File ([string]$productionManifest.elf)
+        productionNativeAotQualification = Hash-File $productionManifestPath
+        productionNativeAotRuntimePackManifest = Hash-File $productionRuntimeManifestPath
+        productionKernelBuildLog = Hash-File (Join-Path $productionRoot 'production-kernel-build.log')
+        productionKernelElf = Hash-File ([string]$productionKernelManifest.kernelElf)
+        productionKernelQualification = Hash-File $productionKernelManifestPath
+    }
 }
 $manifestPath = Join-Path $candidate 'candidate-manifest.json'
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-Write-Output "C188R12R4R5R1 initialization diagnostic candidate: READY ($candidate)"
+Write-Output "C188R12R4R5R3 initialization return-contract candidate: READY ($candidate)"
 Write-Output "Kernel SHA256: $kernelHash"
 Write-Output "Candidate manifest: $manifestPath"

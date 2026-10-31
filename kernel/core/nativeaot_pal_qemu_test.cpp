@@ -2242,7 +2242,8 @@ void runFirstRealAllocationImpl(
     uintptr_t standaloneNativeUnwindAddress,
     uintptr_t initTraceSetSinkAddress,
     uintptr_t initTraceGetCountAddress,
-    uintptr_t initTraceGetOverflowAddress) {
+    uintptr_t initTraceGetOverflowAddress,
+    uintptr_t initTraceRhInitializeRawResultAddress) {
     bool allPassed = true;
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     serial::puts("[nativeaot-thread-static] BEGIN\n");
@@ -2399,6 +2400,9 @@ void runFirstRealAllocationImpl(
     (void)initTraceGetCountAddress;
     (void)initTraceGetOverflowAddress;
 #endif
+#if !defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
+    (void)initTraceRhInitializeRawResultAddress;
+#endif
     const int32_t startupResult = reinterpret_cast<StartupMain>(startupMainAddress)();
     g_firstAllocationDiagnosticsAddress = reinterpret_cast<uintptr_t>(
         reinterpret_cast<GetDiagnostics>(getDiagnosticsAddress)());
@@ -2414,11 +2418,23 @@ void runFirstRealAllocationImpl(
     const uint32_t initTraceOverflow = initTraceGetOverflowAddress != 0u
         ? reinterpret_cast<InitTraceValue>(initTraceGetOverflowAddress)() : 0xFFFFFFFFu;
 #endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
+    using InitRhResultValue = uint32_t (__cdecl *)(void);
+    const uint32_t nativeRhInitializeResult =
+        initTraceRhInitializeRawResultAddress != 0u
+            ? reinterpret_cast<InitRhResultValue>(
+                  initTraceRhInitializeRawResultAddress)()
+            : 0xFFFFFFFFu;
+#endif
     serial::puts(
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
+        "[nativeaot-gc-first-allocation] startup adapter status="
+#else
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
         "[nativeaot-thread-static] RhInitialize return="
 #else
         "[nativeaot-gc-first-allocation] RhInitialize return="
+#endif
 #endif
     );
     serial::put_hex32(static_cast<uint32_t>(startupResult));
@@ -2440,15 +2456,36 @@ void runFirstRealAllocationImpl(
     serial::put_hex32(initTraceOverflow);
     serial::puts(" serialDropped=");
     serial::put_hex32(g_initTraceSerialDropped);
-    serial::puts(" rhResult=");
+    serial::puts(" adapterStatus=");
     serial::put_hex32(static_cast<uint32_t>(startupResult));
     serial::puts("\n");
 #endif
-    firstAllocationStatus("RhInitialize", startupResult == 0, allPassed);
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
+    serial::puts("[C188R12R4R5R3_INIT] init_result nativeBool=");
+    serial::put_hex32(nativeRhInitializeResult);
+    serial::puts(" adapterStatus=");
+    serial::put_hex32(static_cast<uint32_t>(startupResult));
+    serial::puts(" nativeOutcome=");
+    if (nativeRhInitializeResult == 0u) serial::puts("failure");
+    else if (nativeRhInitializeResult == 1u) serial::puts("success");
+    else serial::puts("unknown");
+    serial::puts(" adapterOutcome=");
+    serial::puts(startupResult == 0 ? "success\n" : "failure\n");
+#endif
+    firstAllocationStatus("RhInitialize adapter status (zero is success)",
+                          startupResult == 0, allPassed);
     if (startupResult != 0) {
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
+        serial::puts("[C188R12R4R5R1_INIT] managed_main_gate=blocked adapterStatus=");
+#else
         serial::puts("[C188R12R4R5R1_INIT] managed_main_gate=blocked rhResult=");
+#endif
         serial::put_hex32(static_cast<uint32_t>(startupResult));
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
+        serial::puts(" nativeBool=");
+        serial::put_hex32(nativeRhInitializeResult);
+#endif
         serial::puts("\n");
 #endif
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
@@ -2955,7 +2992,8 @@ void runFirstRealAllocation(
     uintptr_t standaloneNativeUnwindAddress,
     uintptr_t initTraceSetSinkAddress,
     uintptr_t initTraceGetCountAddress,
-    uintptr_t initTraceGetOverflowAddress) {
+    uintptr_t initTraceGetOverflowAddress,
+    uintptr_t initTraceRhInitializeRawResultAddress) {
     runFirstRealAllocationImpl(
         artifact, artifactSize, installPalAddress, installTableAddress,
         installPlatformAddress, startupMainAddress, getStateAddress,
@@ -2964,7 +3002,7 @@ void runFirstRealAllocation(
         managedMainAddress, finalizeAddress, getDiagnosticsAddress, generation,
         beginExperimentAddress, standaloneNativeUnwindAddress,
         initTraceSetSinkAddress, initTraceGetCountAddress,
-        initTraceGetOverflowAddress);
+        initTraceGetOverflowAddress, initTraceRhInitializeRawResultAddress);
 }
 #endif
 #endif

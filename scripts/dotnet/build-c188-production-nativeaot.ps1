@@ -20,7 +20,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4-factory-attribution')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r1-runtime-init-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r1-runtime-init-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r3-init-return-contract')))
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
@@ -108,6 +109,7 @@ if (-not [bool]$runtimePackManifest.persistentCompositeLifecycle) {
 }
 if ([bool]$runtimePackManifest.c188r12r4r5GcOwnershipProof -or
     [bool]$runtimePackManifest.c188r12r4r5r1InitDiagnostics -or
+    [bool]$runtimePackManifest.c188r12r4r5r3InitReturnContract -or
     [System.IO.Path]::GetFileName([string]$runtimePackManifest.object) -match 'c188r12r4r5r1') {
     throw 'Proof-disabled production NativeAOT contains the isolated R5/R1 diagnostic profile.'
 }
@@ -128,6 +130,7 @@ foreach ($development in @(
 if ($mapText.Contains('C188R12R3_LIFETIME') -or $elfText.Contains('C188R12R3_LIFETIME') -or
     $mapText.Contains('C188R12R4_FACTORY') -or $elfText.Contains('C188R12R4_FACTORY') -or
     $mapText.Contains('C188R12R4R5R1_INIT') -or $elfText.Contains('C188R12R4R5R1_INIT') -or
+    $mapText.Contains('C188R12R4R5R3_INIT') -or $elfText.Contains('C188R12R4R5R3_INIT') -or
     $mapText.Contains('C188R12R4_ALLOC') -or $elfText.Contains('C188R12R4_ALLOC') -or
     $mapText.Contains('guideXosStockRhpNewFast') -or $elfText.Contains('guideXosStockRhpNewFast') -or
     $mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-') -or

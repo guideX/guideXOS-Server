@@ -47,6 +47,8 @@ $stageNames = @{
 $eventNames = @{ '00000001'='begin'; '00000002'='pass'; '00000003'='fail'; '00000004'='observe' }
 $events = [System.Collections.Generic.List[object]]::new()
 $traceEnds = [System.Collections.Generic.List[object]]::new()
+$explicitReturnResults = [System.Collections.Generic.List[object]]::new()
+$legacyAdapterStatusLines = [System.Collections.Generic.List[object]]::new()
 $managedGates = [System.Collections.Generic.List[string]]::new()
 $managedCalls = [System.Collections.Generic.List[object]]::new()
 $managedReturns = [System.Collections.Generic.List[object]]::new()
@@ -65,15 +67,43 @@ foreach ($line in ($text -split "`r?`n")) {
         })
         continue
     }
-    if ($line -match '^\[C188R12R4R5R1_INIT\] trace_end invocation=([0-9A-F]{8}) count=([0-9A-F]{8}) overflow=([0-9A-F]{8}) serialDropped=([0-9A-F]{8}) rhResult=([0-9A-F]{8})$') {
+    if ($line -match '^\[C188R12R4R5R1_INIT\] trace_end invocation=([0-9A-F]{8}) count=([0-9A-F]{8}) overflow=([0-9A-F]{8}) serialDropped=([0-9A-F]{8}) (?:rhResult|adapterStatus)=([0-9A-F]{8})$') {
         $traceEnds.Add([pscustomobject]@{
             invocation=$Matches[1].ToUpperInvariant(); recordCount=$Matches[2].ToUpperInvariant()
             overflow=$Matches[3].ToUpperInvariant(); serialDropped=$Matches[4].ToUpperInvariant()
-            rhResult=$Matches[5].ToUpperInvariant()
+            adapterStatus=$Matches[5].ToUpperInvariant()
+            statusField=if ($line -match ' adapterStatus=') { 'adapterStatus' } else { 'rhResult (legacy adapter status)' }
         })
         continue
     }
-    if ($line -match '^\[C188R12R4R5R1_INIT\] managed_main_gate=(\S+)(?: reason=(\S+))?(?: singleton=([0-9A-F]{8}))?(?: gcProof=(\S+))?(?: rhResult=([0-9A-F]{8}))?$') {
+    if ($line -match '^\[C188R12R4R5R3_INIT\] init_result nativeBool=([0-9A-F]{8}) adapterStatus=([0-9A-F]{8}) nativeOutcome=(success|failure|unknown) adapterOutcome=(success|failure)$') {
+        $nativeBoolean = $Matches[1].ToUpperInvariant()
+        $adapterStatus = $Matches[2].ToUpperInvariant()
+        $nativeOutcome = if ($nativeBoolean -eq '00000001') { 'success' }
+            elseif ($nativeBoolean -eq '00000000') { 'failure' } else { 'unknown' }
+        $adapterOutcome = if ($adapterStatus -eq '00000000') { 'success' } else { 'failure' }
+        $explicitReturnResults.Add([pscustomobject]@{
+            nativeBoolean=$nativeBoolean
+            adapterStatus=$adapterStatus
+            nativeOutcome=$nativeOutcome
+            adapterOutcome=$adapterOutcome
+            serializedNativeOutcome=$Matches[3].ToLowerInvariant()
+            serializedAdapterOutcome=$Matches[4].ToLowerInvariant()
+            mappingMatches=(($nativeBoolean -eq '00000001' -and $adapterStatus -eq '00000000') -or
+                ($nativeBoolean -eq '00000000' -and $adapterStatus -eq '00000001'))
+            serializationMatches=($nativeOutcome -eq $Matches[3].ToLowerInvariant() -and
+                $adapterOutcome -eq $Matches[4].ToLowerInvariant())
+        })
+        continue
+    }
+    if ($line -match '^\[(?:nativeaot-gc-first-allocation|nativeaot-thread-static)\] (?:RhInitialize return|startup adapter status)=([0-9A-F]{8})(?:\s|$)') {
+        $legacyAdapterStatusLines.Add([pscustomobject]@{
+            adapterStatus=$Matches[1].ToUpperInvariant()
+            field=if ($line -match ' startup adapter status=') { 'startup adapter status' } else { 'RhInitialize return (legacy adapter status)' }
+        })
+        continue
+    }
+    if ($line -match '^\[C188R12R4R5R1_INIT\] managed_main_gate=\S+.*$') {
         $managedGates.Add($line)
         continue
     }
@@ -114,6 +144,33 @@ for ($index = 0; $index -lt $events.Count; $index++) {
 $rhTerminal = @($events | Where-Object { $_.stage -eq '00000002' -and $_.event -in @('00000002','00000003') } | Select-Object -Last 1)
 $rhInitializeResult = if ($rhTerminal.Count -eq 0) { $null } elseif ($rhTerminal[0].event -eq '00000002') { 'success' } else { 'failure' }
 $traceEnd = if ($traceEnds.Count -eq 1) { $traceEnds[0] } else { $null }
+$explicitReturn = if ($explicitReturnResults.Count -eq 1) { $explicitReturnResults[0] } else { $null }
+$legacyStatusLine = if ($legacyAdapterStatusLines.Count -eq 1) { $legacyAdapterStatusLines[0] } else { $null }
+$adapterStatusCode = if ($null -ne $explicitReturn) { $explicitReturn.adapterStatus }
+    elseif ($null -ne $traceEnd) { $traceEnd.adapterStatus }
+    elseif ($null -ne $legacyStatusLine) { $legacyStatusLine.adapterStatus }
+    else { $null }
+$adapterStatusSource = if ($null -ne $explicitReturn) { 'C188R12R4R5R3 explicit mapping marker' }
+    elseif ($null -ne $traceEnd) { $traceEnd.statusField }
+    elseif ($null -ne $legacyStatusLine) { $legacyStatusLine.field }
+    else { $null }
+$adapterOutcome = if ($null -eq $adapterStatusCode -or $adapterStatusCode -eq 'FFFFFFFF') { $null }
+    elseif ($adapterStatusCode -eq '00000000') { 'success' } else { 'failure' }
+$nativeBoolean = if ($null -ne $explicitReturn -and $explicitReturn.nativeBoolean -in @('00000000','00000001')) {
+    $explicitReturn.nativeBoolean
+} else { $null }
+$nativeOutcome = if ($null -ne $explicitReturn) { $explicitReturn.nativeOutcome }
+    elseif ($null -ne $rhInitializeResult) { $rhInitializeResult }
+    else { $null }
+$returnStatusMarkerConsistent = $true
+if ($null -ne $explicitReturn -and $null -ne $traceEnd -and
+    $explicitReturn.adapterStatus -ne $traceEnd.adapterStatus) {
+    $returnStatusMarkerConsistent = $false
+}
+if ($null -ne $explicitReturn -and $null -ne $legacyStatusLine -and
+    $explicitReturn.adapterStatus -ne $legacyStatusLine.adapterStatus) {
+    $returnStatusMarkerConsistent = $false
+}
 $serialEventCount = [uint32]$events.Count
 $traceRecordCountMatches = $null -ne $traceEnd -and ([Convert]::ToUInt32($traceEnd.recordCount,16) -eq $serialEventCount)
 $traceRingOverflow = if ($null -ne $traceEnd) { [Convert]::ToUInt32($traceEnd.overflow,16) } else { $null }
@@ -168,6 +225,18 @@ $analysis = [ordered]@{
     guestTimedOut=[bool]$GuestTimedOut
     initTraceComplete=[bool]$initTraceComplete
     rhInitializeResult=$rhInitializeResult
+    nativeRhInitializeBoolean=$nativeBoolean
+    nativeRhInitializeOutcome=$nativeOutcome
+    startupAdapterStatusCode=$adapterStatusCode
+    startupAdapterOutcome=$adapterOutcome
+    startupAdapterStatusSource=$adapterStatusSource
+    explicitReturnMarkerCount=$explicitReturnResults.Count
+    explicitReturnMarkerConsistent=if ($null -ne $explicitReturn) { $explicitReturn.serializationMatches } else { $null }
+    explicitReturnMappingConsistent=if ($null -ne $explicitReturn) { $explicitReturn.mappingMatches } else { $null }
+    returnStatusMarkerConsistent=if ($explicitReturnResults.Count -gt 0 -and
+        ($traceEnds.Count -gt 0 -or $legacyAdapterStatusLines.Count -gt 0)) {
+        $returnStatusMarkerConsistent
+    } else { $null }
     earliestExplicitFailure=$firstFailure
     runtimeInstanceSingletonsReady=$runtimeSingletonReady
     runtimeInstanceMissingSingletonBits=$runtimeSingletonMissingBits
@@ -178,6 +247,7 @@ $analysis = [ordered]@{
     managedMainDispatched=$managedMainDispatched
     managedMainReturned=$managedMainReturned
     managedMainSuppressedOnInitializationFailure=$managedMainSuppressedOnInitializationFailure
+    managedMainBlockedOnAdapterFailure=($adapterOutcome -eq 'failure' -and -not $managedMainDispatched)
     stages=@($pairedStages)
     events=@($events)
 }
@@ -185,4 +255,4 @@ $parent = Split-Path -Parent $outputFull
 if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
 $json = $analysis | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText($outputFull,$json,[System.Text.UTF8Encoding]::new($false))
-Write-Output "C188R12R4R5R1_INIT_ANALYSIS=$outputFull COMPLETE=$initTraceComplete RHINITIALIZE=$rhInitializeResult"
+Write-Output "C188R12R4R5R1_INIT_ANALYSIS=$outputFull COMPLETE=$initTraceComplete RHINITIALIZE=$rhInitializeResult ADAPTER=$adapterOutcome NATIVE=$nativeOutcome"

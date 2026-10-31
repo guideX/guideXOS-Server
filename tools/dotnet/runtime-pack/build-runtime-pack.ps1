@@ -9,6 +9,7 @@ param(
     [switch]$C188R12R4FactoryAttribution,
     [switch]$C188R12R4R5GcOwnershipProof,
     [switch]$C188R12R4R5R1InitDiagnostics,
+    [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$ProductionApplication,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
@@ -186,6 +187,10 @@ if ($C188R12R4R5R1InitDiagnostics -and
     (-not $C188R12R4R5GcOwnershipProof -or -not $ProductionApplication -or
      $PersistentCompositeLifecycle)) {
     throw 'C188R12R4R5R1 initialization diagnostics are isolated to the C188R12R4R5 proof profile and cannot enter persistent production lifecycle builds.'
+}
+if ($C188R12R4R5R3InitReturnContract -and
+    (-not $C188R12R4R5R1InitDiagnostics -or -not $C188R12R4R5GcOwnershipProof)) {
+    throw 'C188R12R4R5R3 return-contract diagnostics require the isolated C188R12R4R5R1 startup trace profile.'
 }
 if ($C188R12R4FactoryAttribution -and
     (-not $ManagedAllocation -or -not $PersistentCompositeLifecycle)) {
@@ -942,7 +947,7 @@ if ($NativeAotFpRepair) {
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -1000,6 +1005,7 @@ $manifest = [ordered]@{
     c188r12r4FactoryAttribution = [bool]$C188R12R4FactoryAttribution
     c188r12r4r5GcOwnershipProof = [bool]$C188R12R4R5GcOwnershipProof
     c188r12r4r5r1InitDiagnostics = [bool]$C188R12R4R5R1InitDiagnostics
+    c188r12r4r5r3InitReturnContract = [bool]$C188R12R4R5R3InitReturnContract
     c188r12r4r5r1RuntimeVersionHeader = $runtimeVersionHeader
     c188r12r4r5r1RuntimeVersionHeaderSha256 = $runtimeVersionHeaderSha256
     initializationTraceRecordCapacity = if ($C188R12R4R5R1InitDiagnostics) { 64 } else { 0 }

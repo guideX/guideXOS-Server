@@ -28,6 +28,7 @@ param(
     [switch]$C188R12R4FactoryAttribution,
     [switch]$C188R12R4R5GcOwnershipProof,
     [switch]$C188R12R4R5R1InitDiagnostics,
+    [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -247,6 +248,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4FactoryAttribution) { $runtimePackBuildArguments += "-C188R12R4FactoryAttribution" }
     if ($C188R12R4R5GcOwnershipProof) { $runtimePackBuildArguments += "-C188R12R4R5GcOwnershipProof" }
     if ($C188R12R4R5R1InitDiagnostics) { $runtimePackBuildArguments += "-C188R12R4R5R1InitDiagnostics" }
+    if ($C188R12R4R5R3InitReturnContract) { $runtimePackBuildArguments += "-C188R12R4R5R3InitReturnContract" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
@@ -270,6 +272,12 @@ if ($UseGuideXosRuntimePack) {
          -not [bool]$runtimePackManifestObject.c188r12r4r5GcOwnershipProof -or
          [bool]$runtimePackManifestObject.persistentCompositeLifecycle)) {
         throw 'C188R12R4R5R1 requires the isolated diagnostic proof runtime pack without persistent production lifecycle.'
+    }
+    if ($C188R12R4R5R3InitReturnContract -and
+        (-not [bool]$runtimePackManifestObject.c188r12r4r5r3InitReturnContract -or
+         -not [bool]$runtimePackManifestObject.c188r12r4r5r1InitDiagnostics -or
+         [bool]$runtimePackManifestObject.persistentCompositeLifecycle)) {
+        throw 'C188R12R4R5R3 requires explicit raw-return diagnostics in the isolated C188 proof runtime pack.'
     }
     $runtimePackObject = [string]$runtimePackManifestObject.object
     if ([string]::IsNullOrWhiteSpace($runtimePackObject) -or -not (Test-Path -LiteralPath $runtimePackObject)) {
@@ -450,6 +458,7 @@ $toolchainLines = @(
     "PersistentCompositeLifecycle=$PersistentCompositeLifecycle"
     "C188R12R4R5GcOwnershipProof=$C188R12R4R5GcOwnershipProof"
     "C188R12R4R5R1InitDiagnostics=$C188R12R4R5R1InitDiagnostics"
+    "C188R12R4R5R3InitReturnContract=$C188R12R4R5R3InitReturnContract"
         "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
         "AllocationMode=$AllocationMode"
     "RuntimePackRoot=$RuntimePackRoot"

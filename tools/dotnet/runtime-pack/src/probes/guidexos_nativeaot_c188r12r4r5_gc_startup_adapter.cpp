@@ -1,5 +1,6 @@
 #include "guidexos_nativeaot_pal_contract.h"
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
+#include "guidexos_nativeaot_rh_initialize_contract.h"
 #include "../platform/guidexos_nativeaot_init_trace.h"
 
 /*
@@ -8,9 +9,10 @@
  * NativeAOT RhInitialize entry.  It deliberately supplies no Windows import
  * shims, allocator, runtime state, or collection implementation.
  */
-extern "C" unsigned char RhInitialize(int isDll);
+extern "C" bool RhInitialize(bool isDll);
 
 static unsigned int g_startupResult = 0xFFFFFFFFu;
+static uint32_t g_rhInitializeRawResult = 0xFFFFFFFFu;
 
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
 extern "C" uint32_t __cdecl GuideXosNativeAotCaptureInitSingletonBits();
@@ -118,13 +120,22 @@ extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void
     guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_ADAPTER, true);
     guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_RH_INITIALIZE);
 #endif
-    g_startupResult = RhInitialize(0) ? 0u : 1u;
+    const bool nativeResult = RhInitialize(false);
+    const guidexos_nativeaot_rh_initialize_observation observation =
+        guidexos_nativeaot_observe_rh_initialize(nativeResult);
+    g_rhInitializeRawResult = observation.native_boolean;
+    g_startupResult = static_cast<unsigned int>(observation.adapter_status);
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
     const uint32_t singletonBits = captureInitSingletonBits();
     guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_RH_INITIALIZE,
-        g_startupResult == 0u, g_startupResult, singletonBits);
+        nativeResult, g_startupResult, singletonBits);
 #endif
     return (int)g_startupResult;
+}
+
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotGcStartupGetRhInitializeRawResult(void) {
+    return g_rhInitializeRawResult;
 }
 
 /* These are narrow scalar status values, not claims that GC completed a cycle. */
