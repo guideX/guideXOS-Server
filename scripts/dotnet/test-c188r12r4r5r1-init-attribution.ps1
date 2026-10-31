@@ -204,7 +204,19 @@ Assert-True ([System.IO.Path]::GetFullPath($successCapture.serial) -ne [System.I
 # J. The corrected QMP writer stays UTF-8 without a byte-order mark; no raw serial rewrite is present.
 $runnerText = Get-Content -LiteralPath $runner -Raw
 Assert-True ($runnerText -match '\[System\.Text\.UTF8Encoding\]::new\(\$false\)') 'QMP writer remains BOM-free'
+Assert-True ($runnerText -match '\$qmpErrorField = \$message\.PSObject\.Properties\[''error''\]') 'QMP parser reads the optional error field safely under strict mode'
+Assert-True ($runnerText -match '\$qmpReturnField = \$message\.PSObject\.Properties\[''return''\]') 'QMP parser reads the optional return field safely under strict mode'
+Assert-True ($runnerText -notmatch '\$message\.(error|return)\b') 'QMP parser does not dereference absent JSON fields directly'
+$qmpReturnMessage = '{"return": {}}' | ConvertFrom-Json
+$qmpErrorField = $qmpReturnMessage.PSObject.Properties['error']
+$qmpReturnField = $qmpReturnMessage.PSObject.Properties['return']
+Assert-True ($null -eq $qmpErrorField -and $null -ne $qmpReturnField) 'QMP return response without an error field parses under strict mode'
+$qmpErrorMessage = '{"error": {"class": "GenericError", "desc": "expected test error"}}' | ConvertFrom-Json
+$qmpErrorField = $qmpErrorMessage.PSObject.Properties['error']
+Assert-True ($null -ne $qmpErrorField -and $qmpErrorField.Value.desc -eq 'expected test error') 'QMP error response remains detectable'
 Assert-True ($runnerText -notmatch 'Set-Content[^\r\n]*\$serial\s+-Value') 'QAC runner does not overwrite QEMU serial'
+$mainText = Get-Content -LiteralPath (Join-Path $root 'kernel\core\main.cpp') -Raw
+Assert-True ($mainText -match '(?s)GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_DIAGNOSTICS_ADDRESS,\s*1u\s*#if defined\(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS\)\s*,\s*0u,\s*0u,\s*GUIDEXOS_NATIVEAOT_C188R12R4R5R1_TRACE_SET_SINK_ADDRESS,\s*GUIDEXOS_NATIVEAOT_C188R12R4R5R1_TRACE_GET_COUNT_ADDRESS,\s*GUIDEXOS_NATIVEAOT_C188R12R4R5R1_TRACE_GET_OVERFLOW_ADDRESS') 'diagnostic trace exports follow the two optional startup argument slots'
 $kernelText = Get-Content -LiteralPath $kernelSource -Raw
 $runtimeText = Get-Content -LiteralPath $runtimeSource -Raw
 Assert-True ($kernelText.Contains('runtime-threadstore-attachment-unqualified')) 'GC proof gate is fail-closed without runtime ThreadStore attachment evidence'
@@ -218,6 +230,7 @@ $manifest = [ordered]@{
         'RuntimeInstance returned with missing ThreadStore singleton';'module-registration fail-fast'
         'begin without completion does not fabricate failure';'RhInitialize failure suppresses ManagedMain'
         'synthetic success dispatch parsing';'raw serial hash preservation';'QMP UTF-8 BOM exclusion'
+        'QMP optional fields under strict mode';'QMP error response detection';'diagnostic trace export argument alignment'
     )
     syntheticOnly=$true
     noQemuLaunched=$true

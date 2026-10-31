@@ -118,8 +118,12 @@ function Read-QmpResponse([System.IO.StreamReader]$Reader,[string]$Command) {
         if ($null -eq $line) { throw "QMP closed while waiting for $Command." }
         Add-Content -LiteralPath $qmpLog -Value "rx $line" -Encoding utf8
         try { $message = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
-        if ($null -ne $message.error) { throw "QMP $Command error: $line" }
-        if ($null -ne $message.return -or $line -match '"return"\s*:') { return $line }
+        $qmpErrorField = $message.PSObject.Properties['error']
+        if ($null -ne $qmpErrorField -and $null -ne $qmpErrorField.Value) {
+            throw "QMP $Command error: $line"
+        }
+        $qmpReturnField = $message.PSObject.Properties['return']
+        if ($null -ne $qmpReturnField -or $line -match '"return"\s*:') { return $line }
     }
 }
 function Invoke-Qmp([string]$Command) {
