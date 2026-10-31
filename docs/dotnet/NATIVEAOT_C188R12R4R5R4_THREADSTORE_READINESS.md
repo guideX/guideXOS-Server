@@ -1,11 +1,11 @@
 # NativeAOT ThreadStore Attachment and Managed-Entry Readiness
 
-**Phase:** C188R12R4R5R4  
-**Outcome:** `THREADSTORE_DEFECT_PROVEN`  
-**Branch:** `v1.1_DOTNET_SUPPORT`  
-**Starting HEAD:** `7a76bb77eb6595a14b76e664b3ae8b83b9f6b4f4`  
-**Candidate source HEAD:** `5038777b9f6b1b489ceb9de3e26cf6299b46956f`  
-**Pinned NativeAOT source:** `9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3`
+- **Phase:** C188R12R4R5R4
+- **Outcome:** `THREADSTORE_DEFECT_PROVEN`
+- **Branch:** `v1.1_DOTNET_SUPPORT`
+- **Starting HEAD:** `7a76bb77eb6595a14b76e664b3ae8b83b9f6b4f4`
+- **Candidate source HEAD:** `5038777b9f6b1b489ceb9de3e26cf6299b46956f`
+- **Pinned NativeAOT source:** `9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3`
 
 ## Result
 
@@ -60,9 +60,9 @@ The isolated diagnostic NativeAOT candidate and its specialized diagnostic kerne
 
 The diagnostic managed/runtime build completed with 66 warnings and zero errors (56 `LNK4099`; remaining macro, linker, analyzer/compiler, and toolchain warnings). The specialized diagnostic kernel completed with 219 warnings and zero errors. The candidate PE import directory has RVA and size zero, so it has no Windows loader import table. The map attributes `PalGetMaximumStackBounds` to the replacement object and excludes the stock `PalRedhawkCommon.cpp.obj` member.
 
-Candidate root: `out/dotnet/c188r12r4r5r4-threadstore-readiness/candidate-20261031T174601065Z`  
-Candidate result: `PASS_BUILD_READY_FOR_THREADSTORE_READINESS_GUEST`  
-Manifest SHA-256: `36657A671D9088E51005D87F3D72033E88C65E234F932AFA32014F5858B9442E`
+- **Candidate root:** `out/dotnet/c188r12r4r5r4-threadstore-readiness/candidate-20261031T174601065Z`
+- **Candidate result:** `PASS_BUILD_READY_FOR_THREADSTORE_READINESS_GUEST`
+- **Manifest SHA-256:** `36657A671D9088E51005D87F3D72033E88C65E234F932AFA32014F5858B9442E`
 
 | Artifact | SHA-256 |
 |---|---|
