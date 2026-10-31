@@ -8,6 +8,7 @@ param(
     [switch]$ManagedRepeatedAllocation,
     [switch]$C188R12R4FactoryAttribution,
     [switch]$C188R12R4R5GcOwnershipProof,
+    [switch]$C188R12R4R5R1InitDiagnostics,
     [switch]$ProductionApplication,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
@@ -108,6 +109,18 @@ function Read-Lock() {
     return Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
 }
 
+function Replace-ExactOneSource([string]$Text, [string]$Pattern,
+                                [string]$Replacement, [string]$Description) {
+    $count = [System.Text.RegularExpressions.Regex]::Matches(
+        $Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline).Count
+    if ($count -ne 1) {
+        throw "Pinned NativeAOT source did not contain exactly one $Description site (found $count)."
+    }
+    return [System.Text.RegularExpressions.Regex]::Replace(
+        $Text, $Pattern, $Replacement,
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)
+}
+
 function Assert-StockPack([string]$Root, $Lock) {
     if (-not (Test-Path -LiteralPath $Root)) { throw "Stock NativeAOT runtime pack not found: $Root" }
     $nuspec = Join-Path $Root "runtime.win-x64.microsoft.dotnet.ilcompiler.nuspec"
@@ -168,6 +181,11 @@ if ($C188R12R4R5GcOwnershipProof -and
      $ManagedRepeatedAllocation -or $PersistentCompositeLifecycle -or
      $C188R12R4FactoryAttribution -or $ThreadStaticLifecycleDiagnostics)) {
     throw 'C188R12R4R5 GC ownership proof requires the production Workstation GC platform with managed allocation, and excludes arena repetition, persistent composite lifecycle, factory attribution, and TLS diagnostics.'
+}
+if ($C188R12R4R5R1InitDiagnostics -and
+    (-not $C188R12R4R5GcOwnershipProof -or -not $ProductionApplication -or
+     $PersistentCompositeLifecycle)) {
+    throw 'C188R12R4R5R1 initialization diagnostics are isolated to the C188R12R4R5 proof profile and cannot enter persistent production lifecycle builds.'
 }
 if ($C188R12R4FactoryAttribution -and
     (-not $ManagedAllocation -or -not $PersistentCompositeLifecycle)) {
@@ -303,6 +321,10 @@ if ($ProductionApplication) {
         "nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\startup.cpp.obj"
     )
 }
+if ($C188R12R4R5R1InitDiagnostics) {
+    $removedRuntimeMembers += 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\GCHelpers.cpp.obj'
+    $removedRuntimeMembers += 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\RuntimeInstance.cpp.obj'
+}
 if ($NativeAotFpRepair) {
     $removedRuntimeMembers += @($fpStackMember, $fpCoffMember)
 }
@@ -417,6 +439,7 @@ if ($ProductionApplication) {
     $rhConfigSource = Join-Path $gcSourceRoot "nativeaot\Runtime\RhConfig.cpp"
     $rhConfigWrapperSource = Join-Path $OutputRoot "guidexos_nativeaot_rhconfig_replacement.cpp"
     $startupSource = Join-Path $gcSourceRoot "nativeaot\Runtime\startup.cpp"
+    $runtimeInstanceSource = Join-Path $gcSourceRoot "nativeaot\Runtime\RuntimeInstance.cpp"
     $startupWrapperSource = Join-Path $OutputRoot "guidexos_nativeaot_startup_replacement.cpp"
     $gcEnvObject = Join-Path $OutputRoot "guidexos_gcenv.production.obj"
     $gcBridgeObject = Join-Path $OutputRoot "guidexos_nativeaot_gcenv_startup_bridge.production.obj"
@@ -427,7 +450,7 @@ if ($ProductionApplication) {
     $gcSupportRoot = Join-Path $OutputRoot "gcconfig-support"
     $gcSupportMinipal = Join-Path $gcSupportRoot "minipal"
     $gcSupportUtils = Join-Path $gcSupportMinipal "utils.h"
-    foreach ($path in @($gcEnvSource, $gcBridgeSource, $startupImportsSource, $gcConfigSource, $rhConfigSource, $startupSource, $gcSourceRoot)) {
+    foreach ($path in @($gcEnvSource, $gcBridgeSource, $startupImportsSource, $gcConfigSource, $rhConfigSource, $startupSource, $runtimeInstanceSource, $gcSourceRoot)) {
         if (-not (Test-Path -LiteralPath $path)) {
             throw "Production NativeAOT GC environment input is missing: $path"
         }
@@ -471,6 +494,276 @@ if ($ProductionApplication) {
     $rhConfigDefines = "$gcDefines /DTARGET_WINDOWS /DHOST_WINDOWS /DUNICODE"
     $startupDefines = "$gcDefines /DTARGET_WINDOWS /DHOST_WINDOWS /DUNICODE"
     $gcIncludes = "/I`"$(Join-Path $gcSourceRoot 'gc')`" /I`"$(Join-Path $gcSourceRoot 'gc\env')`" /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime')`" /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime\inc')`" /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime\windows')`" /I`"$(Join-Path $gcSourceRoot '..\native')`" /I`"$gcSupportRoot`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`""
+    # These replacement translation units must see the NativeAOT Runtime's
+    # gcenv.h before the GC's standalone gcenv.h, matching Runtime/CMakeLists.
+    $runtimeDiagnosticIncludes = "/I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime\inc')`" /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime')`" $gcIncludes"
+    $runtimeDiagnosticDefines = $startupDefines
+    $gcHelpersObject = $null
+    $gcHelpersInstrumentedSource = $null
+    $runtimeVersionHeader = $null
+    $runtimeVersionHeaderSha256 = $null
+    $runtimeInstanceObject = $null
+    $runtimeInstanceInstrumentedSource = $null
+    if ($C188R12R4R5R1InitDiagnostics) {
+        $startupDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS'
+        $gcDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS'
+        $rhConfigDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS'
+        # Keep the transformed upstream translation units on the same pinned
+        # NativeAOT Windows/AMD64 Release feature set used by Runtime/CMakeLists.
+        # Otherwise replacing GCHelpers/startup would silently compile out
+        # startup work (for example cached dispatch and EventPipe setup).
+        $runtimeDiagnosticDefines = "$startupDefines /DFEATURE_PERFTRACING /DFEATURE_EVENT_TRACE /DFEATURE_HIJACK /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_USE_SOFTWARE_WRITE_WATCH_FOR_GC_HEAP /DFEATURE_MANUALLY_MANAGED_CARD_BUNDLES /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DFEATURE_NATIVEAOT /DVERIFY_HEAP /DNATIVEAOT /D_LIB /DFEATURE_ETW /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_SPECIAL_USER_MODE_APC /DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS"
+        $eventingIntermediate = Join-Path $OutputRoot 'nativeaot-eventing'
+        $eventingIncludeDirectory = Join-Path $eventingIntermediate 'inc'
+        $eventManifest = Join-Path $gcSourceRoot 'vm\ClrEtwAll.man'
+        $eventExclusions = Join-Path $gcSourceRoot 'vm\ClrEtwAllMeta.lst'
+        $eventInclusionFile = Join-Path $gcSourceRoot 'nativeaot\Runtime\eventpipe\gen-eventing-event-inc.lst'
+        $eventingGenerator = Join-Path $gcSourceRoot 'scripts\genEventing.py'
+        $etwGenerator = Join-Path $gcSourceRoot 'scripts\genEtwProvider.py'
+        foreach ($path in @($eventManifest, $eventExclusions, $eventInclusionFile, $eventingGenerator, $etwGenerator)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Pinned NativeAOT eventing input is missing: $path"
+            }
+        }
+        $python = Get-Command 'python.exe' -ErrorAction Stop
+        $mc = Get-ChildItem -LiteralPath (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin') -Filter 'mc.exe' -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]mc\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($null -eq $mc) {
+            throw 'Windows SDK x64 mc.exe is required to generate pinned NativeAOT ETW headers.'
+        }
+        New-Item -ItemType Directory -Path $eventingIncludeDirectory -Force | Out-Null
+        $previousPath = $env:PATH
+        try {
+            $env:PATH = "$(Split-Path -Parent $mc.FullName);$previousPath"
+            & $python.Source $eventingGenerator --man $eventManifest --incdir $eventingIncludeDirectory --inc $eventInclusionFile --dummy (Join-Path $eventingIncludeDirectory 'etmdummy.h') --runtimeflavor nativeaot --nonextern --noxplatheader
+            if ($LASTEXITCODE -ne 0) { throw "Pinned NativeAOT event header generation failed with exit code $LASTEXITCODE" }
+            & $python.Source $etwGenerator --man $eventManifest --exc $eventExclusions --intermediate $eventingIntermediate
+            if ($LASTEXITCODE -ne 0) { throw "Pinned NativeAOT ETW header generation failed with exit code $LASTEXITCODE" }
+        }
+        finally {
+            $env:PATH = $previousPath
+        }
+        foreach ($path in @((Join-Path $eventingIncludeDirectory 'clretwallmain.h'), (Join-Path $eventingIntermediate 'clrxplatevents.h'))) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Pinned NativeAOT event header generation omitted: $path"
+            }
+        }
+        $runtimeDiagnosticIncludes += " /I`"$eventingIncludeDirectory`" /I`"$eventingIntermediate`""
+        # The pinned source checkout is a source subset and does not carry the
+        # full runtime-prereqs build output.  Recreate runtime_version.h from
+        # the locked ILCompiler package identity used for this exact candidate.
+        $runtimeVersion = [Version]$lock.ilCompiler.version
+        $runtimeVersionRevision = if ($runtimeVersion.Revision -ge 0) { $runtimeVersion.Revision } else { 0 }
+        $runtimeVersionHeader = Join-Path $eventingIntermediate 'runtime_version.h'
+        @(
+            '#pragma once'
+            "#define RuntimeProductVersion $($lock.ilCompiler.version)"
+            "#define RuntimeAssemblyMajorVersion $($runtimeVersion.Major)"
+            "#define RuntimeAssemblyMinorVersion $($runtimeVersion.Minor)"
+            "#define RuntimeFileMajorVersion $($runtimeVersion.Major)"
+            "#define RuntimeFileMinorVersion $($runtimeVersion.Minor)"
+            "#define RuntimeFileBuildVersion $($runtimeVersion.Build)"
+            "#define RuntimeFileRevisionVersion $runtimeVersionRevision"
+        ) | Set-Content -LiteralPath $runtimeVersionHeader -Encoding ASCII
+        $runtimeVersionHeaderSha256 = Get-Hash $runtimeVersionHeader
+        $runtimeDiagnosticIncludes += " /I`"$eventingIntermediate`""
+        $gcHelpersSource = Join-Path $gcSourceRoot 'nativeaot\Runtime\GCHelpers.cpp'
+        $gcHelpersInstrumentedSource = Join-Path $OutputRoot 'guidexos_nativeaot_gchelpers_init_diagnostics.cpp'
+        $gcHelpersObject = Join-Path $OutputRoot 'guidexos_nativeaot_gchelpers_init_diagnostics.obj'
+        if (-not (Test-Path -LiteralPath $gcHelpersSource -PathType Leaf)) {
+            throw "Pinned GCHelpers.cpp source is missing: $gcHelpersSource"
+        }
+
+        $helperText = Get-Content -LiteralPath $gcHelpersSource -Raw
+        # The freestanding replacement needs only LPVOID for daccess.h's
+        # non-DAC alias; including windows.h here would suppress gcenv.base.h
+        # and alter the upstream NativeAOT compile environment.
+        $helperText = 'typedef void* LPVOID;' + "`r`n" + '#include "guidexos_nativeaot_init_trace.h"' + "`r`n" + $helperText
+        $helperText = Replace-ExactOneSource $helperText 'HRESULT hr = GCHeapUtilities::InitializeGC\(\);\s*if \(FAILED\(hr\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_HEAP_PUBLICATION);
+    HRESULT hr = GCHeapUtilities::InitializeGC();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_HEAP_PUBLICATION,
+        SUCCEEDED(hr), static_cast<uint32_t>(hr));
+    if (FAILED(hr)) {
+        return false;
+    }
+'@ 'GC heap and handle-manager publication result'
+        $helperText = Replace-ExactOneSource $helperText 'hr = g_pGCHeap->Initialize\(\);\s*if \(FAILED\(hr\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_HEAP_INITIALIZE);
+    hr = g_pGCHeap->Initialize();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_HEAP_INITIALIZE,
+        SUCCEEDED(hr), static_cast<uint32_t>(hr));
+    if (FAILED(hr)) {
+        return false;
+    }
+'@ 'GC heap Initialize result'
+        $helperText = Replace-ExactOneSource $helperText 'if \(!RhInitializeFinalization\(\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_FINALIZATION);
+    const bool finalizationInitialized = RhInitializeFinalization();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_FINALIZATION,
+        finalizationInitialized);
+    if (!finalizationInitialized) {
+        return false;
+    }
+'@ 'finalization initialization result'
+        $helperText = Replace-ExactOneSource $helperText 'if \(!GCHandleUtilities::GetGCHandleManager\(\)->Initialize\(\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_HANDLE_MANAGER);
+    const bool handleManagerInitialized =
+        GCHandleUtilities::GetGCHandleManager()->Initialize();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_HANDLE_MANAGER,
+        handleManagerInitialized);
+    if (!handleManagerInitialized) {
+        return false;
+    }
+'@ 'GC handle-table initialization result'
+        Set-Content -LiteralPath $gcHelpersInstrumentedSource -Value $helperText -Encoding ASCII
+
+        $runtimeInstanceInstrumentedSource = Join-Path $OutputRoot 'guidexos_nativeaot_runtimeinstance_init_diagnostics.cpp'
+        $runtimeInstanceObject = Join-Path $OutputRoot 'guidexos_nativeaot_runtimeinstance_init_diagnostics.obj'
+        $runtimeInstanceText = 'typedef void* LPVOID;' + "`r`n" + '#include "guidexos_nativeaot_init_trace.h"' + "`r`n" +
+            (Get-Content -LiteralPath $runtimeInstanceSource -Raw)
+        $runtimeInstanceText = Replace-ExactOneSource $runtimeInstanceText 'NewHolder<RuntimeInstance> pRuntimeInstance = new \(nothrow\) RuntimeInstance\(\);\s*if \(NULL == pRuntimeInstance\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_RUNTIME_INSTANCE_ALLOC);
+    NewHolder<RuntimeInstance> pRuntimeInstance = new (nothrow) RuntimeInstance();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_RUNTIME_INSTANCE_ALLOC,
+        NULL != pRuntimeInstance, NULL != pRuntimeInstance ? 0u : 1u);
+    if (NULL == pRuntimeInstance) return false;
+'@ 'RuntimeInstance allocation result'
+        $runtimeInstanceText = Replace-ExactOneSource $runtimeInstanceText 'CreateHolder<ThreadStore>\s+pThreadStore = ThreadStore::Create\(pRuntimeInstance\);\s*if \(NULL == pThreadStore\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_THREAD_STORE_CREATE);
+    CreateHolder<ThreadStore> pThreadStore = ThreadStore::Create(pRuntimeInstance);
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_THREAD_STORE_CREATE,
+        NULL != pThreadStore, NULL != pThreadStore ? 0u : 1u);
+    if (NULL == pThreadStore) return false;
+'@ 'ThreadStore creation result'
+        $runtimeInstanceText = Replace-ExactOneSource $runtimeInstanceText 'pThreadStore\.SuppressRelease\(\);\s*pRuntimeInstance\.SuppressRelease\(\);\s*pRuntimeInstance->m_pThreadStore = pThreadStore;\s*pRuntimeInstance->m_hPalInstance = hPalInstance;\s*ASSERT_MSG\(g_pTheRuntimeInstance == NULL, "multi-instances are not supported"\);\s*g_pTheRuntimeInstance = pRuntimeInstance;' @'
+    pThreadStore.SuppressRelease();
+    pRuntimeInstance.SuppressRelease();
+
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_RUNTIME_INSTANCE_PUBLISH);
+    pRuntimeInstance->m_pThreadStore = pThreadStore;
+    pRuntimeInstance->m_hPalInstance = hPalInstance;
+
+    ASSERT_MSG(g_pTheRuntimeInstance == NULL, "multi-instances are not supported");
+    g_pTheRuntimeInstance = pRuntimeInstance;
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_RUNTIME_INSTANCE_PUBLISH, true);
+'@ 'RuntimeInstance/ThreadStore publication order'
+        $runtimeInstanceText += @'
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+extern "C" uint32_t __cdecl GuideXosNativeAotCaptureRuntimeInstanceBits()
+{
+    uint32_t bits = 0u;
+    auto* runtime = GetRuntimeInstance();
+    if (runtime != nullptr)
+    {
+        bits |= 1u << 0;
+        if (runtime->GetThreadStore() != nullptr)
+        {
+            bits |= 1u << 1;
+            if (ThreadStore::GetCurrentThreadIfAvailable() != nullptr)
+            {
+                bits |= 1u << 7;
+            }
+        }
+    }
+    return bits;
+}
+#endif
+'@
+        Set-Content -LiteralPath $runtimeInstanceInstrumentedSource -Value $runtimeInstanceText -Encoding ASCII
+
+        $startupText = Get-Content -LiteralPath $startupSource -Raw
+        $startupText = '#include "guidexos_nativeaot_init_trace.h"' + "`r`n" + $startupText
+        $startupText = Replace-ExactOneSource $startupText 'static bool InitDLL\(HANDLE hPalInstance\)\s*\{' @'
+static bool InitDLL(HANDLE hPalInstance)
+{
+'@ 'InitDLL entry'
+        $startupText = Replace-ExactOneSource $startupText 'if \(!InitializeInterfaceDispatch\(\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_INTERFACE_DISPATCH);
+    const bool interfaceDispatchInitialized = InitializeInterfaceDispatch();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_INTERFACE_DISPATCH,
+        interfaceDispatchInitialized);
+    if (!interfaceDispatchInitialized) return false;
+'@ 'interface-dispatch initialization result'
+        $startupText = Replace-ExactOneSource $startupText '(?m)^[ \t]*InitializeGCEventLock\(\);[ \t]*$' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_EVENT_LOCK);
+    InitializeGCEventLock();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_EVENT_LOCK, true);
+'@ 'GC event-lock initialization'
+        $startupText = Replace-ExactOneSource $startupText 'if \(!RestrictedCallouts::Initialize\(\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_RESTRICTED_CALLOUTS);
+    const bool restrictedCalloutsInitialized = RestrictedCallouts::Initialize();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_RESTRICTED_CALLOUTS,
+        restrictedCalloutsInitialized);
+    if (!restrictedCalloutsInitialized) return false;
+'@ 'restricted-callout initialization result'
+        $startupText = Replace-ExactOneSource $startupText 'if \(!RuntimeInstance::Initialize\(hPalInstance\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_RUNTIME_INSTANCE);
+    const bool runtimeInstanceInitialized = RuntimeInstance::Initialize(hPalInstance);
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_RUNTIME_INSTANCE,
+        runtimeInstanceInitialized, runtimeInstanceInitialized ? 0u : 1u);
+    if (!runtimeInstanceInitialized) return false;
+'@ 'RuntimeInstance and ThreadStore initialization result'
+        $startupText = Replace-ExactOneSource $startupText 'if \(!InitializeGC\(\)\)\s*return false;' @'
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_INITIALIZE);
+    const bool gcInitialized = InitializeGC();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_INITIALIZE, gcInitialized);
+    if (!gcInitialized) return false;
+'@ 'GC initialization gate'
+        $startupText = Replace-ExactOneSource $startupText 'if \(!DetectCPUFeatures\(\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_CPU_FEATURES);
+    const bool cpuFeaturesReady = DetectCPUFeatures();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_CPU_FEATURES,
+        cpuFeaturesReady);
+    if (!cpuFeaturesReady) return false;
+'@ 'CPU feature detection result'
+        $startupText = Replace-ExactOneSource $startupText 'if \(!PalInit\(\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_PAL_INIT);
+    const bool palInitialized = PalInit();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_PAL_INIT,
+        palInitialized);
+    if (!palInitialized) return false;
+'@ 'PalInit result'
+        $startupText = Replace-ExactOneSource $startupText 'PRTLDLLSHUTDOWNINPROGRESS pfn = \(PRTLDLLSHUTDOWNINPROGRESS\)GetProcAddress\(GetModuleHandleW\(W\("ntdll\.dll"\)\), "RtlDllShutdownInProgress"\);\s*if \(pfn != NULL\)\s*g_pfnRtlDllShutdownInProgress = pfn;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_STARTUP_IMPORT_LOOKUP);
+    PRTLDLLSHUTDOWNINPROGRESS pfn = (PRTLDLLSHUTDOWNINPROGRESS)GetProcAddress(GetModuleHandleW(W("ntdll.dll")), "RtlDllShutdownInProgress");
+    if (pfn != NULL)
+        g_pfnRtlDllShutdownInProgress = pfn;
+    guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_STARTUP_IMPORT_LOOKUP,
+        GX_INIT_EVENT_OBSERVE, pfn != NULL ? 1u : 0u, 0xFFFFFFFFu);
+'@ 'optional RtlDllShutdownInProgress import lookup'
+        $startupText = Replace-ExactOneSource $startupText 'if \(!InitDLL\(PalGetModuleHandleFromPointer\(\(void\*\)&RhInitialize\)\)\)\s*return false;' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_MODULE_IDENTITY);
+    HANDLE startupModule = PalGetModuleHandleFromPointer((void*)&RhInitialize);
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_MODULE_IDENTITY,
+        startupModule != nullptr, startupModule == nullptr ? 1u : 0u);
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_INIT_DLL);
+    const bool initDllSucceeded = InitDLL(startupModule);
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_INIT_DLL, initDllSucceeded);
+    if (!initDllSucceeded) return false;
+'@ 'InitDLL result and module identity'
+        $startupText = Replace-ExactOneSource $startupText '// Populate the values needed for debugging\s*PopulateDebugHeaders\(\);' @'
+guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_DEBUG_HEADERS);
+    PopulateDebugHeaders();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_DEBUG_HEADERS, true);
+'@ 'debug-header population after runtime startup'
+        $startupWrapperPrefix = @(
+            '#define GetModuleHandleW guidexos_nativeaot_startup_GetModuleHandleW'
+            '#define GetProcAddress guidexos_nativeaot_startup_GetProcAddress'
+            '#define atexit guidexos_nativeaot_startup_atexit'
+            '#include "guidexos_nativeaot_init_trace.h"'
+        ) -join "`r`n"
+        Set-Content -LiteralPath $startupWrapperSource -Value ($startupWrapperPrefix + "`r`n" + $startupText) -Encoding ASCII
+    }
+    $startupObjectDefines = $startupDefines
+    $startupObjectIncludes = $gcIncludes
+    if ($C188R12R4R5R1InitDiagnostics) {
+        $startupObjectDefines = $runtimeDiagnosticDefines
+        $startupObjectIncludes = $runtimeDiagnosticIncludes
+    }
     $gcBatch = Join-Path $OutputRoot "build-production-gc-environment.bat"
     $gcLines = @(
         "@echo off",
@@ -487,7 +780,7 @@ if ($ProductionApplication) {
         "if errorlevel 1 exit /b %errorlevel%",
         "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $rhConfigDefines $gcIncludes /Fo:`"$rhConfigObject`" `"$rhConfigWrapperSource`"",
         "if errorlevel 1 exit /b %errorlevel%",
-        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $startupDefines $gcIncludes /Fo:`"$startupObject`" `"$startupWrapperSource`"",
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $startupObjectDefines $startupObjectIncludes /Fo:`"$startupObject`" `"$startupWrapperSource`"",
         "if errorlevel 1 exit /b %errorlevel%",
         "exit /b 0"
     )
@@ -500,6 +793,38 @@ if ($ProductionApplication) {
         }
     }
     $productionGcEnvironmentObjects = " `"$gcEnvObject`" `"$gcBridgeObject`" `"$startupImportsObject`" `"$gcConfigObject`" `"$rhConfigObject`" `"$startupObject`""
+    if ($C188R12R4R5R1InitDiagnostics) {
+        $gcHelpersBatch = Join-Path $OutputRoot 'build-production-gchelpers-init-diagnostics.bat'
+        @(
+            '@echo off'
+            'setlocal'
+            "call `"$vcvars`" >nul"
+            'if errorlevel 1 exit /b %errorlevel%'
+            "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $runtimeDiagnosticDefines $runtimeDiagnosticIncludes /Fo:`"$gcHelpersObject`" `"$gcHelpersInstrumentedSource`""
+            'if errorlevel 1 exit /b %errorlevel%'
+            'exit /b 0'
+        ) | Set-Content -LiteralPath $gcHelpersBatch -Encoding ASCII
+        & $gcHelpersBatch
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $gcHelpersObject -PathType Leaf)) {
+            throw 'Instrumented GCHelpers.cpp replacement object did not compile.'
+        }
+        $productionGcEnvironmentObjects += " `"$gcHelpersObject`""
+        $runtimeInstanceBatch = Join-Path $OutputRoot 'build-production-runtimeinstance-init-diagnostics.bat'
+        @(
+            '@echo off'
+            'setlocal'
+            "call `"$vcvars`" >nul"
+            'if errorlevel 1 exit /b %errorlevel%'
+            "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $runtimeDiagnosticDefines $runtimeDiagnosticIncludes /Fo:`"$runtimeInstanceObject`" `"$runtimeInstanceInstrumentedSource`""
+            'if errorlevel 1 exit /b %errorlevel%'
+            'exit /b 0'
+        ) | Set-Content -LiteralPath $runtimeInstanceBatch -Encoding ASCII
+        & $runtimeInstanceBatch
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $runtimeInstanceObject -PathType Leaf)) {
+            throw 'Instrumented RuntimeInstance.cpp replacement object did not compile.'
+        }
+        $productionGcEnvironmentObjects += " `"$runtimeInstanceObject`""
+    }
 }
 $sdkLines = @(
     "@echo off",
@@ -578,7 +903,7 @@ $lines = @(
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' }) $(if ($PersistentCompositeLifecycle) { '/DGUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE' } else { '' }) $(if ($C188R12R4FactoryAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION' } else { '' }) $(if ($C188R12R4R5GcOwnershipProof) { '/DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_PROOF' } else { '' }) $(if ($ThreadStaticLifecycleDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE' } else { '' })" } else { '' }) $c108Defines $c108Includes /Fo:`"$object`" `"$source`"",
+    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' }) $(if ($PersistentCompositeLifecycle) { '/DGUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE' } else { '' }) $(if ($C188R12R4FactoryAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION' } else { '' }) $(if ($C188R12R4R5GcOwnershipProof) { '/DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_PROOF' } else { '' }) $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' } else { '' }) $(if ($ThreadStaticLifecycleDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE' } else { '' })" } else { '' }) $c108Defines $c108Includes /Fo:`"$object`" `"$source`"",
     "exit /b %errorlevel%"
 )
 $lines | Set-Content -LiteralPath $batch -Encoding ASCII
@@ -617,7 +942,7 @@ if ($NativeAotFpRepair) {
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -674,6 +999,11 @@ $manifest = [ordered]@{
     managedAllocation = [bool]$ManagedAllocation
     c188r12r4FactoryAttribution = [bool]$C188R12R4FactoryAttribution
     c188r12r4r5GcOwnershipProof = [bool]$C188R12R4R5GcOwnershipProof
+    c188r12r4r5r1InitDiagnostics = [bool]$C188R12R4R5R1InitDiagnostics
+    c188r12r4r5r1RuntimeVersionHeader = $runtimeVersionHeader
+    c188r12r4r5r1RuntimeVersionHeaderSha256 = $runtimeVersionHeaderSha256
+    initializationTraceRecordCapacity = if ($C188R12R4R5R1InitDiagnostics) { 64 } else { 0 }
+    initializationTraceSerialLineLimit = if ($C188R12R4R5R1InitDiagnostics) { 96 } else { 0 }
     allocationMode = if ($ManagedRepeatedAllocation) { "Repeated" } elseif ($ManagedAllocation) { "Allocating" } else { "NonAllocating" }
     allocationStrategy = if ($C188R12R4R5GcOwnershipProof) { "experimental-nativeaot-workstation-gc-object-and-array-allocation-no-c188-arena" } elseif ($C188R12R4FactoryAttribution) { "bounded-static-image-backed-arrays-with-stock-object-fallback-observed" } elseif ($ManagedRepeatedAllocation) { "bounded-static-image-backed-no-collection-with-proof-specific-preflight-oom" } elseif ($ManagedAllocation) { "bounded-static-image-backed-no-collection" } else { "none" }
     objectAllocationFallback = if ($C188R12R4FactoryAttribution) { "stock-RhpNewFast-preserved-and-instrumented" } else { "stock-RhpNewFast" }

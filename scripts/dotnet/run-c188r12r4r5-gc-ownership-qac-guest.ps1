@@ -10,19 +10,33 @@ if ($PSVersionTable.PSEdition -ne 'Core') { throw 'C188R12R4R5 QAC guest require
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5-gc-ownership-proof'))
-$relative = [System.IO.Path]::GetRelativePath($phaseRoot, $candidate)
-if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-    [System.IO.Path]::IsPathRooted($relative)) {
-    throw "CandidateRoot must be a unique candidate below $phaseRoot."
-}
-
 $candidateManifestPath = Join-Path $candidate 'candidate-manifest.json'
 if (-not (Test-Path -LiteralPath $candidateManifestPath -PathType Leaf)) {
     throw "Qualified candidate manifest is missing: $candidateManifestPath"
 }
 $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
-if ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_QAC_PREFLIGHT' -or
+$isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
+$phaseRoot = if ($isInitAttribution) {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r1-runtime-init-attribution'))
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5-gc-ownership-proof'))
+}
+$relative = [System.IO.Path]::GetRelativePath($phaseRoot, $candidate)
+if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
+    [System.IO.Path]::IsPathRooted($relative)) {
+    throw "CandidateRoot must be a unique candidate below $phaseRoot."
+}
+if ($isInitAttribution) {
+    if ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_INIT_DIAGNOSTIC_QAC_PREFLIGHT' -or
+        -not [bool]$candidateManifest.runtimeInitDiagnostics -or
+        [bool]$candidateManifest.qemuLaunched -or [bool]$candidateManifest.qacReserved -or
+        -not [bool]$candidateManifest.productionIsolationChecks.diagnosticAndProductionOutputsSeparate -or
+        -not [bool]$candidateManifest.productionIsolationChecks.diagnosticInstrumentationAbsentFromProduction -or
+        -not [bool]$candidateManifest.productionNativeAotPersistentCompositeLifecycle -or
+        $candidateManifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3') {
+        throw 'R1 candidate manifest failed its one-guest initialization-diagnostics or production-isolation gate.'
+    }
+} elseif ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_QAC_PREFLIGHT' -or
     $candidateManifest.mode -cne 'GcOwnershipProof' -or
     [bool]$candidateManifest.imageBackedArenaPresent -or
     [int64]$candidateManifest.managedHeapBytes -ne 0 -or
@@ -235,13 +249,23 @@ try {
     $deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
     do {
         $serialText = Read-GuestSerial
-        $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
+        if ($isInitAttribution) {
+            $guestPass = $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*rhResult=(?:0x)?[0-9A-F]{8}\s*$' -and
+                $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
+        } else {
+            $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
+        }
         if ($guestPass) { break }
         if ($qacProcess.HasExited) { break }
         Start-Sleep -Milliseconds 200
     } while ((Get-Date) -lt $deadline)
     $serialText = Read-GuestSerial
-    $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
+    if ($isInitAttribution) {
+        $guestPass = $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*rhResult=(?:0x)?[0-9A-F]{8}\s*$' -and
+            $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
+    } else {
+        $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
+    }
     try { $qemuStatus = Invoke-Qmp 'query-status' } catch { $qemuStatus = 'query-status failed: ' + $_.Exception.Message }
     if (-not $qacProcess.HasExited) { [void](Invoke-Qmp 'quit') }
     if (-not $qacProcess.WaitForExit(90000)) { throw 'QAC did not exit after the owned QMP quit request.' }
@@ -290,6 +314,35 @@ try {
 }
 
 $serialText = Read-GuestSerial
+$serialAnalysisPath = Join-Path $runRoot 'serial-analysis.json'
+$serialAnalyzer = Join-Path $PSScriptRoot 'analyze-c188r12r4r5r1-init-serial.ps1'
+$serialSha256BeforeAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
+$serialAnalysis = $null
+$serialAnalysisError = $null
+$serialAnalysisExitCode = $null
+if (Test-Path -LiteralPath $serial -PathType Leaf) {
+    try {
+        $analysisArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serialAnalyzer,
+            '-SerialPath',$serial,'-OutputPath',$serialAnalysisPath)
+        if ($runError -match 'timeout|did not exit|not exit' -or
+            ($null -ne $qacProcess -and -not $qacProcess.HasExited)) { $analysisArgs += '-GuestTimedOut' }
+        & pwsh @analysisArgs | Out-Null
+        $serialAnalysisExitCode = $LASTEXITCODE
+        if ($serialAnalysisExitCode -eq 0 -and (Test-Path -LiteralPath $serialAnalysisPath -PathType Leaf)) {
+            $serialAnalysis = Get-Content -LiteralPath $serialAnalysisPath -Raw | ConvertFrom-Json
+        } else {
+            $serialAnalysisError = "Analyzer exited $serialAnalysisExitCode."
+        }
+    } catch { $serialAnalysisError = $_.Exception.Message }
+} else { $serialAnalysisError = 'Raw serial file is missing.' }
+$serialSha256AfterAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
+$rawSerialPreservedByAnalysis = $null -ne $serialSha256BeforeAnalysis -and
+    $serialSha256BeforeAnalysis -ceq $serialSha256AfterAnalysis
+$initCaptureComplete = $null -ne $serialAnalysis -and [bool]$serialAnalysis.initTraceComplete
+if ($isInitAttribution) {
+    $guestPass = $initCaptureComplete -and $serialAnalysis.rhInitializeResult -in @('success','failure') -and
+        @($serialAnalysis.managedMainGateLines | Where-Object { $_ -match 'managed_main_gate=blocked' }).Count -gt 0
+}
 $sourceRamdiskSha256 = Get-Sha256 (Join-Path $repo 'ESP\ramdisk.img')
 $sourceRamdiskPreserved = $sourceRamdiskSha256 -ceq 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8'
 $markerLines = @($serialText -split "`r?`n" | Where-Object { $_ -match '^marker=C188R12R4R5-GC-OWNERSHIP ' })
@@ -302,6 +355,16 @@ $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GU
     elseif ($startupFailure) { 'EXPERIMENT_BLOCKED' }
     elseif ($admitted) { 'GC_ROOT_OR_COLLECTION_DEFECT_OR_GUEST_INCOMPLETE' }
     else { 'EXPERIMENT_READY_BUT_GUEST_NOT_ADMITTED' }
+if ($isInitAttribution) {
+    $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
+        elseif (-not $preflightPassed) { 'INIT_BLOCKED_QAC_CENSUS' }
+        elseif (-not $admitted) { 'INIT_CANDIDATE_NOT_ADMITTED' }
+        elseif (-not $releaseVerified) { 'INIT_CAPTURED_BUT_QAC_RELEASE_UNVERIFIED' }
+        elseif (-not $guestPass) { 'INIT_TRACE_INCOMPLETE' }
+        elseif ($serialAnalysis.rhInitializeResult -eq 'failure') { 'INIT_FAILURE_CAPTURED' }
+        elseif ($serialAnalysis.rhInitializeResult -eq 'success') { 'INIT_RUNTIME_READY_GC_PROOF_SUPPRESSED' }
+        else { 'INIT_CAPTURE_INCOMPLETE' }
+}
 $manifest = [ordered]@{
     result=$outcome;runRoot=$runRoot;candidateRoot=$candidate;candidateManifest=$candidateManifestPath
     candidateManifestSha256=Get-Sha256 $candidateManifestPath
@@ -314,6 +377,11 @@ $manifest = [ordered]@{
     qacOwnerPid=if ($null -ne $qacProcess) { $qacProcess.Id } else { $null }
     qacExitCode=$qacExitCode;qacReleaseVerified=$releaseVerified;qacGuestBootLimit=1;automaticRetry=$false
     qemuStatus=$qemuStatus;qmpPort=$qmpPort;qemuArguments=$qemuArgs;guestPass=$guestPass
+    initAttributionProfile=$isInitAttribution;initCaptureComplete=$initCaptureComplete
+    serialAnalysis=$serialAnalysisPath;serialAnalysisExitCode=$serialAnalysisExitCode
+    serialAnalysisError=$serialAnalysisError;serialAnalysisComplete=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.initTraceComplete } else { $false }
+    serialSha256BeforeAnalysis=$serialSha256BeforeAnalysis;serialSha256AfterAnalysis=$serialSha256AfterAnalysis
+    rawSerialPreservedByAnalysis=$rawSerialPreservedByAnalysis
     managedMarkerCount=$markerLines.Count;managedMarkerPhases=$markerPhases;startupFailure=$startupFailure
     serialLog=$serial;serialLogSha256=if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
     qmpLog=$qmpLog;qmpLogSha256=if (Test-Path -LiteralPath $qmpLog) { Get-Sha256 $qmpLog } else { $null }
@@ -323,10 +391,21 @@ $manifest = [ordered]@{
     qacArguments=(Join-Path $runRoot 'qac-run-arguments.json');guestAttempt=$attemptPath;error=$runError
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-Write-Output "C188R12R4R5_GC_OWNERSHIP=$outcome ADMITTED=$admitted PASS=$guestPass QAC_RELEASE=$releaseVerified"
-Write-Output "C188R12R4R5_GC_OWNERSHIP_MANIFEST=$manifestPath"
+if ($isInitAttribution) {
+    Write-Output "C188R12R4R5R1_INIT_ATTRIBUTION=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R12R4R5R1_INIT_ATTRIBUTION_MANIFEST=$manifestPath"
+} else {
+    Write-Output "C188R12R4R5_GC_OWNERSHIP=$outcome ADMITTED=$admitted PASS=$guestPass QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R12R4R5_GC_OWNERSHIP_MANIFEST=$manifestPath"
+}
 if (-not $releaseVerified -and $admitted) { exit 4 }
 if (-not $sourceRamdiskPreserved) { exit 6 }
 if (-not $preflightPassed) { exit 3 }
+if ($isInitAttribution) {
+    if (-not $guestPass) { exit 2 }
+    if (-not $rawSerialPreservedByAnalysis) { exit 7 }
+    if ($qacExitCode -ne 0) { exit 5 }
+    exit 0
+}
 if (-not $guestPass) { exit 2 }
 if (-not $releaseVerified -or $qacExitCode -ne 0) { exit 5 }

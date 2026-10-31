@@ -27,6 +27,7 @@ param(
     [switch]$C188R12R3LifetimeStartAttribution,
     [switch]$C188R12R4FactoryAttribution,
     [switch]$C188R12R4R5GcOwnershipProof,
+    [switch]$C188R12R4R5R1InitDiagnostics,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -245,6 +246,7 @@ if ($UseGuideXosRuntimePack) {
     if ($PersistentCompositeLifecycle) { $runtimePackBuildArguments += "-PersistentCompositeLifecycle" }
     if ($C188R12R4FactoryAttribution) { $runtimePackBuildArguments += "-C188R12R4FactoryAttribution" }
     if ($C188R12R4R5GcOwnershipProof) { $runtimePackBuildArguments += "-C188R12R4R5GcOwnershipProof" }
+    if ($C188R12R4R5R1InitDiagnostics) { $runtimePackBuildArguments += "-C188R12R4R5R1InitDiagnostics" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
@@ -262,6 +264,12 @@ if ($UseGuideXosRuntimePack) {
          [int64]$runtimePackManifestObject.managedHeapBytes -ne 0 -or
          [string]$runtimePackManifestObject.allocationStrategy -ne 'experimental-nativeaot-workstation-gc-object-and-array-allocation-no-c188-arena')) {
         throw 'C188R12R4R5 runtime-pack manifest does not prove an isolated real-GC allocation profile without the C188 arena.'
+    }
+    if ($C188R12R4R5R1InitDiagnostics -and
+        (-not [bool]$runtimePackManifestObject.c188r12r4r5r1InitDiagnostics -or
+         -not [bool]$runtimePackManifestObject.c188r12r4r5GcOwnershipProof -or
+         [bool]$runtimePackManifestObject.persistentCompositeLifecycle)) {
+        throw 'C188R12R4R5R1 requires the isolated diagnostic proof runtime pack without persistent production lifecycle.'
     }
     $runtimePackObject = [string]$runtimePackManifestObject.object
     if ([string]::IsNullOrWhiteSpace($runtimePackObject) -or -not (Test-Path -LiteralPath $runtimePackObject)) {
@@ -441,6 +449,7 @@ $toolchainLines = @(
     "ProductionApplication=$ProductionApplication"
     "PersistentCompositeLifecycle=$PersistentCompositeLifecycle"
     "C188R12R4R5GcOwnershipProof=$C188R12R4R5GcOwnershipProof"
+    "C188R12R4R5R1InitDiagnostics=$C188R12R4R5R1InitDiagnostics"
         "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
         "AllocationMode=$AllocationMode"
     "RuntimePackRoot=$RuntimePackRoot"
@@ -483,6 +492,12 @@ try {
          $C188R12R3LifetimeStartAttribution -or $C188ExternalAppIdentity -or
          $C187GuestCandidate -or $ThreadStaticLifecycleDiagnostics)) {
         throw 'C188R12R4R5 requires an isolated ProductionApplication with the real GuideXOS runtime pack, allocating GC path, and GcOwnershipProof project mode; persistent lifecycle, C188 factory/lifetime attribution, app identity, guest campaign, and TLS diagnostics are excluded.'
+    }
+    if ($C188R12R4R5R1InitDiagnostics -and
+        (-not $C188R12R4R5GcOwnershipProof -or -not $UseGuideXosRuntimePack -or
+         -not $ProductionApplication -or $managedProjectMode -ne 'GcOwnershipProof' -or
+         $PersistentCompositeLifecycle)) {
+        throw 'C188R12R4R5R1 initialization diagnostics require the isolated C188R12R4R5 proof profile and cannot enter persistent production lifecycle builds.'
     }
     if ($managedProjectMode -eq 'GcOwnershipProof' -and -not $C188R12R4R5GcOwnershipProof) {
         throw 'GcOwnershipProof project mode requires -C188R12R4R5GcOwnershipProof.'
@@ -679,7 +694,7 @@ try {
         $gcAllocationProbeCompileBlock = @(
             "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcProbeDefines $gcProbeIncludes /Fo:`"$gcAllocationProbeObj`" `"$gcAllocationProbeSource`"",
             'if errorlevel 1 exit /b %errorlevel%',
-            "cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcOwnershipStartupAdapterObj`" `"$gcOwnershipStartupAdapterSource`"",
+            "cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcOwnershipStartupAdapterObj`" `"$gcOwnershipStartupAdapterSource`"",
             'if errorlevel 1 exit /b %errorlevel%'
         ) -join [Environment]::NewLine
         $publishProperties += "-p:HostLogProofRuntimePackProbeObj=$gcAllocationProbeObj"
@@ -817,7 +832,7 @@ try {
         "where cl.exe"
         "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$runtimeSupportObj`" `"$runtimeSupportSource`""
         "if errorlevel 1 exit /b %errorlevel%"
-        $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
+        $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ThreadStaticLifecycleDiagnostics) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:`"$managedHostShimsObj`" `"$managedHostShimsSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ProductionApplication) { "cl.exe /nologo /TC /c /GS- /Zl $(if ($C188R11ManagedStateProvenance) { '/DHOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE' }) /Fo:`"$c102StartupObj`" `"$c102StartupSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($C188R12R4R5GcOwnershipProof) { $gcAllocationProbeCompileBlock } else { $null })

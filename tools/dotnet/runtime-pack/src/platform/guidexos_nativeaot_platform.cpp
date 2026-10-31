@@ -1,6 +1,7 @@
 #include <intrin.h>
 #include "guidexos_nativeaot_allocation_diagnostics.h"
 #include "guidexos_nativeaot_amd64_unwind_primitive.h"
+#include "guidexos_nativeaot_init_trace.h"
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION) || defined(GUIDEXOS_NATIVEAOT_C011EC97)
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #endif
@@ -25,6 +26,9 @@ typedef void* LPVOID;
 #include "RuntimeInstance.h"
 #include "MethodTable.h"
 #include "ObjectLayout.h"
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+extern "C" uint32_t __cdecl GuideXosNativeAotCaptureRuntimeInstanceBits();
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
 #include "common.h"
@@ -67,7 +71,8 @@ extern "C" bool RhRegisterOSModule(
     uint32_t nClasslibFunctions);
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-extern bool g_guideXosNativeAotCodeManagerRegistered;
+bool g_guideXosNativeAotModulesInitialized = false;
+bool g_guideXosNativeAotCodeManagerRegistered = false;
 
 bool getNativeAotRange(void* start, void* end, void** rangeStart, uint32_t* rangeSize) {
     if (start == nullptr || end == nullptr || rangeStart == nullptr || rangeSize == nullptr) {
@@ -81,6 +86,22 @@ bool getNativeAotRange(void* start, void* end, void** rangeStart, uint32_t* rang
     *rangeStart = start;
     *rangeSize = static_cast<uint32_t>(endAddress - startAddress);
     return *rangeSize != 0u;
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+extern class IGCHeap* g_pGCHeap;
+extern "C" class IGCHandleManager* g_pGCHandleManager;
+extern class RhConfig* g_pRhConfig;
+
+extern "C" uint32_t __cdecl GuideXosNativeAotCaptureInitSingletonBits() {
+    uint32_t bits = GuideXosNativeAotCaptureRuntimeInstanceBits();
+    if (g_pGCHeap != nullptr) bits |= 1u << 2;
+    if (g_pGCHandleManager != nullptr) bits |= 1u << 3;
+    if (g_pRhConfig != nullptr) bits |= 1u << 4;
+    if (g_guideXosNativeAotModulesInitialized) bits |= 1u << 5;
+    if (g_guideXosNativeAotCodeManagerRegistered) bits |= 1u << 6;
+    return bits;
 }
 #endif
 
@@ -32452,8 +32473,6 @@ extern "C" void OnFirstChanceException();
 extern "C" void OnUnhandledException();
 extern "C" void IDynamicCastableIsInterfaceImplemented();
 extern "C" void IDynamicCastableGetInterfaceImplementation();
-bool g_guideXosNativeAotModulesInitialized = false;
-bool g_guideXosNativeAotCodeManagerRegistered = false;
 void* g_guideXosNativeAotClasslibFunctions[16] = {};
 #endif
 
@@ -32652,8 +32671,16 @@ void persistentSerialPutHex64(uintptr_t value) {
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 void initializeNativeAotModules() {
     if (g_guideXosNativeAotModulesInitialized) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_MODULE_REGISTRATION,
+            GX_INIT_EVENT_OBSERVE, 1u, 0xFFFFFFFFu);
+#endif
         return;
     }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_MODULE_REGISTRATION);
+#endif
 
     // Keep the classlib table identical to the locked NativeAOT bootstrapper.
     // The bootstrapper's table has internal linkage, so the runtime-pack
@@ -32683,8 +32710,17 @@ void initializeNativeAotModules() {
         reinterpret_cast<void*>(&InitializeModules));
     if (osModule == nullptr || __modules_a == nullptr || __modules_z == nullptr ||
         __modules_z < __modules_a) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_MODULE_REGISTRATION,
+            false, 10u);
+#endif
         guideXosFailFast(10u);
     }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_MODULE_REGISTRATION,
+        GX_INIT_EVENT_PASS, 0u, 0xFFFFFFFFu);
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_CODE_MANAGER_REGISTRATION);
+#endif
 
     // The stock Windows bootstrapper registers the production
     // CoffNativeCodeManager immediately after RhInitialize and before
@@ -32706,6 +32742,10 @@ void initializeNativeAotModules() {
             reinterpret_cast<void*>(&__unbox_z),
             &unboxingStubsStart,
             &unboxingStubsSize)) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        guideXosNativeAotInitTraceReturn(
+            GX_INIT_STAGE_CODE_MANAGER_REGISTRATION, false, 0xC011EC18u);
+#endif
         guideXosFailFast(0xC011EC17u);
     }
     if (!RhRegisterOSModule(
@@ -32720,9 +32760,18 @@ void initializeNativeAotModules() {
         suspendEeSerialPutString(
             "[nativeaot-code-manager] production code-manager registration failed\n");
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        guideXosNativeAotInitTraceReturn(
+            GX_INIT_STAGE_CODE_MANAGER_REGISTRATION, false, 0xC011EC17u);
+#endif
         guideXosFailFast(0xC011EC17u);
     }
     g_guideXosNativeAotCodeManagerRegistered = true;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(
+        GX_INIT_STAGE_CODE_MANAGER_REGISTRATION, true);
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_MODULE_INITIALIZE);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
     suspendEeSerialPutString(
         "[nativeaot-code-manager] registered module=");
@@ -32750,6 +32799,10 @@ void initializeNativeAotModules() {
         static_cast<int>(__modules_z - __modules_a),
         g_guideXosNativeAotClasslibFunctions,
         16);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_MODULE_INITIALIZE,
+        true);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) || defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
     ++g_guideXosThreadStaticDiagnostics.moduleInitializationCompletions;
 #endif
@@ -34878,6 +34931,9 @@ extern "C" __declspec(selectany) void* __imp_FlsSetValue = reinterpret_cast<void
 
 #if !defined(GUIDEXOS_NATIVEAOT_RUNTIME_STARTUP)
 extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_MANAGED_REVERSE_PINVOKE);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
     const bool firstManagedEntry = !g_guideXosRealGcDiagnosticsInitialized;
 #endif
@@ -34892,6 +34948,10 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     }
 
     initializeRuntimeState(block);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(
+        GX_INIT_STAGE_MANAGED_REVERSE_PINVOKE, true);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION)
     // Managed calls reach these functions through direct NativeAOT imports.
     // No runtime write to a Windows-loader-owned P/Invoke fixup cell is used.

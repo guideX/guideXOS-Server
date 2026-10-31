@@ -37,6 +37,9 @@
 #include "runtime/thread/guidexos_native_thread.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_abi_bridge.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_pal_contract.h"
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_init_trace.h"
+#endif
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_adapter.h"
 
 #if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
@@ -50,6 +53,34 @@ extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
 
 namespace kernel {
 namespace nativeaot_pal_qemu_test {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+namespace {
+constexpr uint32_t kInitTraceSerialLineLimit = 96u;
+uint32_t g_initTraceSerialLines = 0u;
+uint32_t g_initTraceSerialDropped = 0u;
+
+void __cdecl nativeAotInitTraceSink(
+    uint32_t invocation, uint32_t stage, uint32_t event,
+    uint32_t result, uint32_t singletonBits) {
+    if (g_initTraceSerialLines >= kInitTraceSerialLineLimit) {
+        ++g_initTraceSerialDropped;
+        return;
+    }
+    ++g_initTraceSerialLines;
+    serial::puts("[C188R12R4R5R1_INIT] invocation=");
+    serial::put_hex32(invocation);
+    serial::puts(" stage=");
+    serial::put_hex32(stage);
+    serial::puts(" event=");
+    serial::put_hex32(event);
+    serial::puts(" code=");
+    serial::put_hex32(result);
+    serial::puts(" singleton=");
+    serial::put_hex32(singletonBits);
+    serial::puts("\n");
+}
+}
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
 extern "C" void __cdecl guideXosNativeAotC011EC21DescribeNativeCaller(
     uintptr_t recoveredRip, uintptr_t recoveredRsp, uintptr_t recoveredRbp);
@@ -2208,7 +2239,10 @@ void runFirstRealAllocationImpl(
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
     uint64_t generation, uintptr_t beginExperimentAddress,
-    uintptr_t standaloneNativeUnwindAddress) {
+    uintptr_t standaloneNativeUnwindAddress,
+    uintptr_t initTraceSetSinkAddress,
+    uintptr_t initTraceGetCountAddress,
+    uintptr_t initTraceGetOverflowAddress) {
     bool allPassed = true;
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     serial::puts("[nativeaot-thread-static] BEGIN\n");
@@ -2352,6 +2386,19 @@ void runFirstRealAllocationImpl(
         return;
     }
 
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    g_initTraceSerialLines = 0u;
+    g_initTraceSerialDropped = 0u;
+    if (initTraceSetSinkAddress != 0u) {
+        using SetInitTraceSink = void (__cdecl *)(guidexos_nativeaot_init_trace_sink);
+        reinterpret_cast<SetInitTraceSink>(initTraceSetSinkAddress)(
+            &nativeAotInitTraceSink);
+    }
+#else
+    (void)initTraceSetSinkAddress;
+    (void)initTraceGetCountAddress;
+    (void)initTraceGetOverflowAddress;
+#endif
     const int32_t startupResult = reinterpret_cast<StartupMain>(startupMainAddress)();
     g_firstAllocationDiagnosticsAddress = reinterpret_cast<uintptr_t>(
         reinterpret_cast<GetDiagnostics>(getDiagnosticsAddress)());
@@ -2360,6 +2407,13 @@ void runFirstRealAllocationImpl(
     const uint32_t startupAllocationCount = reinterpret_cast<State>(getAllocationCountAddress)();
     const uint32_t startupLastAllocationSize = reinterpret_cast<State>(getLastAllocationSizeAddress)();
     const uint32_t diagnosticStage = reinterpret_cast<State>(getDiagnosticStageAddress)();
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    using InitTraceValue = uint32_t (__cdecl *)(void);
+    const uint32_t initTraceCount = initTraceGetCountAddress != 0u
+        ? reinterpret_cast<InitTraceValue>(initTraceGetCountAddress)() : 0xFFFFFFFFu;
+    const uint32_t initTraceOverflow = initTraceGetOverflowAddress != 0u
+        ? reinterpret_cast<InitTraceValue>(initTraceGetOverflowAddress)() : 0xFFFFFFFFu;
+#endif
     serial::puts(
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
         "[nativeaot-thread-static] RhInitialize return="
@@ -2379,11 +2433,34 @@ void runFirstRealAllocationImpl(
     serial::puts(" lastSize=");
     serial::put_hex32(startupLastAllocationSize);
     serial::puts("\n");
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    serial::puts("[C188R12R4R5R1_INIT] trace_end invocation=00000001 count=");
+    serial::put_hex32(initTraceCount);
+    serial::puts(" overflow=");
+    serial::put_hex32(initTraceOverflow);
+    serial::puts(" serialDropped=");
+    serial::put_hex32(g_initTraceSerialDropped);
+    serial::puts(" rhResult=");
+    serial::put_hex32(static_cast<uint32_t>(startupResult));
+    serial::puts("\n");
+#endif
     firstAllocationStatus("RhInitialize", startupResult == 0, allPassed);
     if (startupResult != 0) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        serial::puts("[C188R12R4R5R1_INIT] managed_main_gate=blocked rhResult=");
+        serial::put_hex32(static_cast<uint32_t>(startupResult));
+        serial::puts("\n");
+#endif
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
     }
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    serial::puts("[C188R12R4R5R1_INIT] managed_main_gate=blocked reason=runtime-threadstore-attachment-unqualified singleton=");
+    serial::put_hex32(preGcState);
+    serial::puts(" gcProof=not-entered\n");
+    serial::puts("[nativeaot-gc-first-allocation] initialization diagnostics complete; GC proof suppressed\n");
+    return;
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
     emitC96Checkpoint("post-startup");
 #endif
@@ -2592,8 +2669,20 @@ void runFirstRealAllocationImpl(
     uint32_t callbacks = 0u;
     int32_t results[3] = {};
     for (uint32_t index = 0u; index < 3u; ++index) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        serial::puts("[C188R12R4R5R1_INIT] managed_main_call ordinal=");
+        serial::put_hex32(index + 1u);
+        serial::puts("\n");
+#endif
         results[index] = reinterpret_cast<C188R12R4R5ManagedMain>(
             managedMainAddress)(&context);
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        serial::puts("[C188R12R4R5R1_INIT] managed_main_return ordinal=");
+        serial::put_hex32(index + 1u);
+        serial::puts(" result=");
+        serial::put_hex32(static_cast<uint32_t>(results[index]));
+        serial::puts("\n");
+#endif
         ++callbacks;
         if (results[index] != 0) break;
     }
@@ -2863,14 +2952,19 @@ void runFirstRealAllocation(
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
     uint64_t generation, uintptr_t beginExperimentAddress,
-    uintptr_t standaloneNativeUnwindAddress) {
+    uintptr_t standaloneNativeUnwindAddress,
+    uintptr_t initTraceSetSinkAddress,
+    uintptr_t initTraceGetCountAddress,
+    uintptr_t initTraceGetOverflowAddress) {
     runFirstRealAllocationImpl(
         artifact, artifactSize, installPalAddress, installTableAddress,
         installPlatformAddress, startupMainAddress, getStateAddress,
         getPreGcStateAddress, getAllocationCountAddress,
         getLastAllocationSizeAddress, getDiagnosticStageAddress,
         managedMainAddress, finalizeAddress, getDiagnosticsAddress, generation,
-        beginExperimentAddress, standaloneNativeUnwindAddress);
+        beginExperimentAddress, standaloneNativeUnwindAddress,
+        initTraceSetSinkAddress, initTraceGetCountAddress,
+        initTraceGetOverflowAddress);
 }
 #endif
 #endif

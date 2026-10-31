@@ -1,4 +1,5 @@
 #include "guidexos_nativeaot_pal_contract.h"
+#include "guidexos_nativeaot_init_trace.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -102,11 +103,31 @@ GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API PalInit() {
         (void)guidexos_nativeaot_pal_fls_free(g_flsIndex);
         g_flsIndex = kFlsOutOfIndexes;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_PAL_FLS);
+#endif
     g_flsIndex = guidexos_nativeaot_pal_fls_alloc(FiberDetachCallback);
-    if (g_flsIndex == kFlsOutOfIndexes) return false;
+    if (g_flsIndex == kFlsOutOfIndexes) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_PAL_FLS, false, g_flsIndex);
+#endif
+        return false;
+    }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_PAL_FLS, true);
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_CONFIG);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_RUNTIME_STARTUP)
     GCConfig::Initialize();
-    if (!GCToOSInterface::Initialize()) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_CONFIG, true);
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_TO_OS);
+#endif
+    const bool gcToOsInitialized = GCToOSInterface::Initialize();
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_TO_OS, gcToOsInitialized);
+#endif
+    if (!gcToOsInitialized) {
         return false;
     }
 #endif

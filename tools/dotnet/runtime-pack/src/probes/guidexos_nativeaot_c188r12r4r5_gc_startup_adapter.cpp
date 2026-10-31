@@ -1,5 +1,6 @@
 #include "guidexos_nativeaot_pal_contract.h"
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
+#include "../platform/guidexos_nativeaot_init_trace.h"
 
 /*
  * Minimal proof-image adapter for the existing kernel startup harness.
@@ -10,6 +11,87 @@
 extern "C" unsigned char RhInitialize(int isDll);
 
 static unsigned int g_startupResult = 0xFFFFFFFFu;
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+extern "C" uint32_t __cdecl GuideXosNativeAotCaptureInitSingletonBits();
+
+namespace {
+constexpr uint32_t kInitTraceCapacity = 64u;
+struct InitTraceRecord {
+    uint32_t invocation;
+    uint32_t stage;
+    uint32_t event;
+    uint32_t result;
+    uint32_t singletonBits;
+};
+InitTraceRecord g_initTrace[kInitTraceCapacity] = {};
+uint32_t g_initTraceCount = 0u;
+uint32_t g_initTraceOverflow = 0u;
+uint32_t g_initInvocation = 0u;
+guidexos_nativeaot_init_trace_sink g_initTraceSink = nullptr;
+
+uint32_t captureInitSingletonBits() {
+    return GuideXosNativeAotCaptureInitSingletonBits();
+}
+}
+
+extern "C" void __cdecl guideXosNativeAotInitTraceSetInvocation(uint32_t invocation) {
+    g_initInvocation = invocation;
+    g_initTraceCount = 0u;
+    g_initTraceOverflow = 0u;
+}
+
+extern "C" __declspec(dllexport) void __cdecl guideXosNativeAotInitTraceSetSink(
+    guidexos_nativeaot_init_trace_sink sink) {
+    g_initTraceSink = sink;
+}
+
+extern "C" void __cdecl guideXosNativeAotInitTraceRecord(
+    uint32_t stage, uint32_t event, uint32_t result, uint32_t singletonBits) {
+    const uint32_t index = g_initTraceCount;
+    if (index >= kInitTraceCapacity) {
+        ++g_initTraceOverflow;
+        return;
+    }
+    InitTraceRecord& record = g_initTrace[index];
+    record.invocation = g_initInvocation;
+    record.stage = stage;
+    record.event = event;
+    record.result = result;
+    record.singletonBits = singletonBits == 0xFFFFFFFFu
+        ? captureInitSingletonBits() : singletonBits;
+    g_initTraceCount = index + 1u;
+    if (g_initTraceSink != nullptr) {
+        g_initTraceSink(record.invocation, record.stage, record.event,
+                        record.result, record.singletonBits);
+    }
+}
+
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetCount(void) { return g_initTraceCount; }
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetOverflow(void) { return g_initTraceOverflow; }
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetInvocation(uint32_t index) {
+    return index < g_initTraceCount ? g_initTrace[index].invocation : 0xFFFFFFFFu;
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetStage(uint32_t index) {
+    return index < g_initTraceCount ? g_initTrace[index].stage : 0xFFFFFFFFu;
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetEvent(uint32_t index) {
+    return index < g_initTraceCount ? g_initTrace[index].event : 0xFFFFFFFFu;
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetResult(uint32_t index) {
+    return index < g_initTraceCount ? g_initTrace[index].result : 0xFFFFFFFFu;
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetSingletonBits(uint32_t index) {
+    return index < g_initTraceCount ? g_initTrace[index].singletonBits : 0xFFFFFFFFu;
+}
+#endif
 
 extern "C" __declspec(dllexport) int __cdecl
 GuideXosNativeAotGcStartupInstallPalHooks(
@@ -30,7 +112,18 @@ GuideXosNativeAotGcStartupInstallPlatformHooks(
 }
 
 extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceSetInvocation(1u);
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_ADAPTER);
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_ADAPTER, true);
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_RH_INITIALIZE);
+#endif
     g_startupResult = RhInitialize(0) ? 0u : 1u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    const uint32_t singletonBits = captureInitSingletonBits();
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_RH_INITIALIZE,
+        g_startupResult == 0u, g_startupResult, singletonBits);
+#endif
     return (int)g_startupResult;
 }
 
@@ -44,7 +137,11 @@ GuideXosNativeAotGcStartupGetState(void) {
 
 extern "C" __declspec(dllexport) unsigned int __cdecl
 GuideXosNativeAotGcStartupGetPreGcState(void) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    return captureInitSingletonBits();
+#else
     return g_startupResult == 0u ? 1u : 0u;
+#endif
 }
 
 extern "C" __declspec(dllexport) unsigned int __cdecl

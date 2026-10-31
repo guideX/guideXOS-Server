@@ -19,7 +19,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r11-managed-state-provenance')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r3-lifetime-start-attribution')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4-factory-attribution')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r1-diagnostic-link-repair')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r1-runtime-init-attribution')))
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
@@ -105,6 +106,11 @@ $runtimePackManifest = Get-Content -LiteralPath $runtimePackManifestPath -Raw | 
 if (-not [bool]$runtimePackManifest.persistentCompositeLifecycle) {
     throw 'C188 production NativeAOT must preserve its managed heap across reverse-P/Invoke entries.'
 }
+if ([bool]$runtimePackManifest.c188r12r4r5GcOwnershipProof -or
+    [bool]$runtimePackManifest.c188r12r4r5r1InitDiagnostics -or
+    [System.IO.Path]::GetFileName([string]$runtimePackManifest.object) -match 'c188r12r4r5r1') {
+    throw 'Proof-disabled production NativeAOT contains the isolated R5/R1 diagnostic profile.'
+}
 foreach ($required in @('GuideXosNativeAotApplicationEntry','GuideXosApplicationRegistry__Dispatch')) {
     if (-not $mapText.Contains($required)) { throw "Production NativeAOT map omitted standard dispatch symbol $required" }
 }
@@ -121,6 +127,7 @@ foreach ($development in @(
 }
 if ($mapText.Contains('C188R12R3_LIFETIME') -or $elfText.Contains('C188R12R3_LIFETIME') -or
     $mapText.Contains('C188R12R4_FACTORY') -or $elfText.Contains('C188R12R4_FACTORY') -or
+    $mapText.Contains('C188R12R4R5R1_INIT') -or $elfText.Contains('C188R12R4R5R1_INIT') -or
     $mapText.Contains('C188R12R4_ALLOC') -or $elfText.Contains('C188R12R4_ALLOC') -or
     $mapText.Contains('guideXosStockRhpNewFast') -or $elfText.Contains('guideXosStockRhpNewFast') -or
     $mapText.Contains('C188R3-') -or $elfText.Contains('C188R3-') -or

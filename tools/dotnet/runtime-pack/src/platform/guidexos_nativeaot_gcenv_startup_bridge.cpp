@@ -4,6 +4,7 @@
 // SysV kernel through guidexos_nativeaot_gc_startup_platform_contract.h.
 
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
+#include "guidexos_nativeaot_init_trace.h"
 #include "guidexos_nativeaot_critical_section_adapter.h"
 #include "guidexos_nativeaot_event_adapter.h"
 #include "guidexos_nativeaot_virtual_memory_adapter.h"
@@ -122,13 +123,27 @@ struct EventHandle {
 namespace {
 EventHandle* createEvent(uint32_t manual_reset, uint32_t initial_state) {
     g_guidexos_nativeaot_gc_startup_stage = 0x20u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_EVENT_CREATE);
+#endif
     EventHandle* result = new (std::nothrow) EventHandle{};
-    if (result == nullptr) return nullptr;
+    if (result == nullptr) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_EVENT_CREATE, false, 2u);
+#endif
+        return nullptr;
+    }
     result->raw = guidexos_nativeaot_gc_create_event(manual_reset, initial_state);
     if (result->raw == nullptr) {
         delete result;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+        guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_EVENT_CREATE, false, 3u);
+#endif
         return nullptr;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_EVENT_CREATE, true);
+#endif
     return result;
 }
 }
@@ -225,8 +240,15 @@ VmResult initializeVirtualMemoryAdapter() {
     g_segmentBoundaryTraceCount = 0;
     g_segmentBoundaryTraceSequence = 0;
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_VM_ADAPTER_INIT);
+#endif
     const VmResult result = guidexos_nativeaot_gc_page_size() == kPageSize
         ? VmResult::Ok : VmResult::HostFailure;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_VM_ADAPTER_INIT,
+        result == VmResult::Ok, result == VmResult::Ok ? 0u : 1u);
+#endif
     return result;
 }
 
@@ -248,7 +270,16 @@ void* gcVirtualReserve(nativeaot_vm_size size, nativeaot_vm_size alignment,
             ? 0xFFFFFFFFu : (size >> 20));
     g_guidexos_nativeaot_gc_startup_stage = 0x11000000u |
         static_cast<uint32_t>((size >> 12) & 0x00FFFFFFu);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_GC_VM_RESERVE,
+        GX_INIT_EVENT_BEGIN, g_guidexos_nativeaot_gc_startup_reserve_pages,
+        0xFFFFFFFFu);
+#endif
     void* result = guidexos_nativeaot_gc_reserve(size, alignment, flags, node);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_VM_RESERVE,
+        result != nullptr, result == nullptr ? 1u : g_guidexos_nativeaot_gc_startup_reserve_pages);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
     recordSegmentBoundaryTrace(TraceOperation::Reserve, result, size,
                                result == nullptr ? VmResult::HostFailure : VmResult::Ok);
@@ -259,7 +290,13 @@ void* gcVirtualReserve(nativeaot_vm_size size, nativeaot_vm_size alignment,
 bool gcVirtualCommit(void* address, nativeaot_vm_size size,
                      nativeaot_vm_uint16 node) {
     g_guidexos_nativeaot_gc_startup_stage = 0x12u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_VM_COMMIT);
+#endif
     const bool success = guidexos_nativeaot_gc_commit(address, size, node) == 0;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_VM_COMMIT, success);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
     recordSegmentBoundaryTrace(TraceOperation::Commit, address, size,
                                success ? VmResult::Ok : VmResult::HostFailure);
@@ -269,7 +306,13 @@ bool gcVirtualCommit(void* address, nativeaot_vm_size size,
 
 bool gcVirtualDecommit(void* address, nativeaot_vm_size size) {
     g_guidexos_nativeaot_gc_startup_stage = 0x13u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_VM_DECOMMIT);
+#endif
     const bool success = guidexos_nativeaot_gc_decommit(address, size) == 0;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_VM_DECOMMIT, success);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
     recordSegmentBoundaryTrace(TraceOperation::Decommit, address, size,
                                success ? VmResult::Ok : VmResult::HostFailure);
@@ -279,7 +322,13 @@ bool gcVirtualDecommit(void* address, nativeaot_vm_size size) {
 
 bool gcVirtualRelease(void* address, nativeaot_vm_size size) {
     g_guidexos_nativeaot_gc_startup_stage = 0x14u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_VM_RELEASE);
+#endif
     const bool success = guidexos_nativeaot_gc_release(address, size) == 0;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+    guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_VM_RELEASE, success);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
     recordSegmentBoundaryTrace(TraceOperation::Release, address, size,
                                success ? VmResult::Ok : VmResult::HostFailure);

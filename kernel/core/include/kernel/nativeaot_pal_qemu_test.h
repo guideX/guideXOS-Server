@@ -32,7 +32,10 @@ void runFirstRealAllocation(
     uintptr_t getDiagnosticStageAddress, uintptr_t managedMainAddress,
     uintptr_t finalizeAddress, uintptr_t getDiagnosticsAddress,
     uint64_t generation, uintptr_t beginExperimentAddress = 0,
-    uintptr_t standaloneNativeUnwindAddress = 0);
+    uintptr_t standaloneNativeUnwindAddress = 0,
+    uintptr_t initTraceSetSinkAddress = 0,
+    uintptr_t initTraceGetCountAddress = 0,
+    uintptr_t initTraceGetOverflowAddress = 0);
 
 #endif
 
