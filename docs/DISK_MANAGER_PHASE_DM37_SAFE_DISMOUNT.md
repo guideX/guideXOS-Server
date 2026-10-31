@@ -1414,3 +1414,136 @@ is evidenced. Busy-volume Gate B, protected-admission Gate C, writable
 durability Gate D, device removal/replacement Gate F, controlled I/O/Flush
 failure Gate G, and delayed-key/Close qualification remain open. No DM38 work
 is authorized by this outcome; keep `.phase` at DM36→DM37.
+
+## DM37 Continuation 11 — writable save verified, Dismount incomplete
+
+This continuation added one controlled write to a separate disposable USB
+FAT32 image after transport and write-Flush preflight. It is partial guest
+acceptance: the production save path completed its write and Flush, and a
+read-only host inspection after clean guest exit found the exact expected
+payload. The production Dismount confirmation, final Dismount Flush, guest
+Unmounted state, explicit Remount, and in-guest reread were not completed.
+This run therefore does not qualify writable durability.
+
+### QAC ownership and runtime
+
+The source-matched DM37 runtime ran in QAC 2.0.0 exclusive acceptance
+reservation `0c49e5587865490795d5d148319e7e69`, owner PID 26860, child QEMU PID
+624, QMP `127.0.0.1:52787`. Prelaunch and running QAC snapshots showed one
+managed QEMU, zero foreign QEMU processes, no queue, and `degraded=false` in
+reservation inspection. QEMU exited with code 0 after the production Shell
+shutdown; QAC marked the reservation Released with reason `Managed child
+exited`. Final QAC status/list showed zero QEMU processes, zero foreign
+processes, zero reservations, and zero managed sessions. The child and owner
+PIDs were absent, the QMP port was closed, and an exclusive read handle to the
+working image succeeded. No QMP `quit` was used. QEMU logged a non-fatal
+`Ignoring request for interrupt vector 0` warning; the QAC census remained
+healthy.
+
+The run used the verified kernel SHA-256
+`4BFD226CA145D0298A3C299DD44194B08606F6AAAD72F84085B3E271D52DD563`,
+bootloader SHA-256
+`E65C0A2CBF50534CDB01602800F579446B27B2BE7597BDB461E1E83F94BC0DF4`, and
+OVMF SHA-256
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`.
+`NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`, and no physical media were
+attached. The complete launch and process identities are in
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\continuation11\preflight.json`,
+`runs\run1-writable-preflight\launch-request.json`,
+`qemu-running-process.json`, and `qac-run.log`.
+
+### Writable transport and controlled save
+
+The source fixture
+`D:\dev\guideXOSServer_DiskManagerImprovements\out\dm37\dismount-guest\fixtures\DM37DURABLE01.raw`
+was copied to
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\continuation11\fixtures\DM37DURABLE01.run1.raw`.
+Both initial images were 629,145,600 bytes with SHA-256
+`C2E22CEA70DE015E6E551CBC31CAE918135B0EEAC526AD411DEE7EE5392A30F2`. The
+QEMU target was writable USB Mass Storage BOT device `dm37durable11`, backing
+node `dm37durable11_drive`, serial `DM37DURABLE01`, on the QEMU UHCI
+controller. The guest registered USB MSC VID:PID `46F4:0001`, 1,228,800
+512-byte blocks, removable, `access=read-write`, and
+`sync-cache=succeeded`. Disk Manager showed the selected device as Writable,
+the mounted FAT32 partition at `/mnt/disk1-part1`, and `Persistence: Flush
+required`. The root backing device was visibly marked protected; no root
+operation was attempted.
+
+Notepad saved `DM9/PROOF.BIN` through the existing production VFS write path,
+overwriting it with 57 bytes:
+`guideXOS DM9 QEMU proof 001\r\nDM37 durability accepted 001`.
+The expected payload SHA-256 is
+`99AEF80C20E27A68CDF31EE0B4C59CECA7581D985D983CA37D76C00A134F6AB0`. Guest
+serial records `LFPASTE_WRITE_END ... actual=0x00000039`,
+`LFPASTE_FLUSH_END status=0x00`, and
+`VFS_WRITE_FILE path=/mnt/disk1-part1/DM9/PROOF.BIN operation=overwrite
+bytes=...0039 fatStatus=FAT_FILE_WRITE_OK blockStatus=0x00 vfsStatus=OK`.
+Notepad was closed normally after saving. These records prove the application
+save path completed its write and Flush; they do not prove the later final
+Dismount Flush.
+
+### Dismount, shutdown, and independent media inspection
+
+Disk Manager displayed the selected USB serial, GPT partition `DM9 QEMU
+Proof`, writable access, and mounted path. The Dismount Volume control was
+visible, but the confirmation did not open despite further guest keyboard and
+pointer attempts. No confirmation identity, production Dismount result,
+Unmounted transition, final Dismount Flush result, Remount, or fresh guest
+read is claimed. No forced Dismount, device removal, format, erase, or repair
+was attempted. The exact target was last observed Mounted at
+`/mnt/disk1-part1` before the production Shell shutdown.
+
+After QEMU had exited and QAC released ownership, the working image was opened
+with an exclusive read handle and independently inspected. The repository's
+read-only `scripts/verify-dm9-qemu-image.py` parser was run with the expected
+57-byte payload for this authorized writable copy. It verified the
+protective MBR; primary and backup GPT header and entry-array CRCs; matching
+GPT copies; partition 1 geometry (LBA 2048–1,228,766); the leading canary
+gap; FAT32 BPB and backup boot sector; primary/backup FSInfo signatures;
+mirrored FATs; and the exact proof-file bytes. It reported SHA-256
+`D4975D8F20ABE5E8B8A221408E79CEB151B3E8C15C7A04A16556A54CAB6AA3DF`, 57
+payload bytes, and `result=PASS`. A read-only byte comparison against the
+original fixture found zero changes in sectors `[0,2048)` and
+`[1228767,1228800)`, so image changes are confined to the authorized GPT
+partition. The source fixture remains at its original hash. No repair was
+run.
+
+The source image already reports FSInfo free-cluster hint 76,592 while the
+actual FAT count is 76,590; the same values appear in the final copy. The
+two-cluster hint discrepancy predates this run and is not represented as a
+new change. Retained verification outputs are `media-verification-source.txt`,
+`media-verification-after.txt`, `media-diff-outside-partition.txt`, and
+`shutdown-cleanup.txt` under the Continuation 11 E: artifact root.
+
+The production Shell `shutdown` completed with serial
+`[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1`.
+QAC observed child exit code 0 and released the reservation; QMP closed after
+guest exit. No operation-scoped QMP blockstats snapshot was captured or used
+to attribute writes. The guest write is attributed by the path-specific VFS
+serial record instead.
+
+### Remaining gates and repository state
+
+Busy-volume Gate B was not exercised in this run because no safe supported
+guest path was established for retaining an open FAT32 handle while using
+Disk Manager; the accepted production-linked host tests remain the available
+evidence. Gate C only re-confirmed the visible root-device protection. Boot,
+`/system`, and unknown-provenance admission were not guest-tested here.
+
+For Gate H, Tab reached the Disk Manager action pane and Refresh focus was
+visible, but this continuation did not capture a Dismount action dispatch or
+confirmation transition. Notepad closed normally after its save, Disk
+Manager closed before shutdown, and the guest used production Shell shutdown.
+Close during an active synchronous Dismount, Escape/cancel of the writable
+confirmation, delayed-key protection, busy-reference release/retry, and
+repeated activation remain unqualified.
+
+Production source is unchanged. No tests or builds were rerun; the accepted
+1,491/1,491 storage baseline remains from the previous continuation. Gate A
+and Gate E remain accepted as previously recorded. This continuation's
+outcome is **Outcome B — `DM37_PARTIAL_GUEST_ACCEPTANCE`**, not
+`DM37_DURABILITY_VERIFIED`. Keep `.phase` at `last_completed=DM36`,
+`next_expected=DM37`; DM38 has not started. Remaining mandatory work includes
+busy/protected admission, production Dismount settlement and final Flush,
+explicit Remount plus guest reread, removal/replacement, Flush/I/O failure
+behavior, and the remaining input/Close cases.

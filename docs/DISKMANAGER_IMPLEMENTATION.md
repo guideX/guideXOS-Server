@@ -569,3 +569,16 @@ open. `.phase` remains DM36→DM37; DM38 has not started. See the [DM37
 continuation 10 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-10--reliable-action-pane-activation-and-ordered-fat32-workflow)
 for the exact source/runtime hashes, checker result, input evidence, QAC
 reconciliation, artifact paths, and validation record.
+
+## DM37 Continuation 11 — writable save, Dismount still open
+
+A QAC-managed guest wrote the expected 57-byte `DM9/PROOF.BIN` payload to the
+disposable USB BOT FAT32 image through the production VFS path. The save-path
+Flush returned success, and the read-only image verifier confirmed the exact
+payload and valid GPT/FAT32 structures after normal Shell shutdown. All byte
+changes were confined to the authorized FAT32 partition; the source fixture
+remained unchanged. Disk Manager's Dismount confirmation did not open, so no
+final Dismount Flush, Unmounted result, guest Remount, or fresh guest reread is
+claimed. DM37 remains active and `.phase` stays DM36→DM37. See the [DM37
+continuation 11 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-11--writable-save-verified-dismount-incomplete)
+for the hashes, QAC release, media-verification outputs, and remaining gates.
