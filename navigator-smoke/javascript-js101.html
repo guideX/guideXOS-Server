@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS101</title></head>
+<body>
+<h1>Navigator JavaScript JS101</h1>
+<pre id="result">JS101:pending</pre>
+<button id="reduce-right-event-a" type="button">Run JS101 reduceRight event</button>
+<button id="reduce-right-event-b" type="button">Nested JS101 reduceRight event</button>
+<button id="reduce-right-error-event" type="button">Run JS101 reduceRight error</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions=assertions+1;
+  if (!condition) failures=failures+1;
+}
+
+var source = ["A","B","C"];
+var indices = "";
+var argumentCalls = 0;
+var argumentsOk = true;
+var reversed = source.reduceRight(function(acc,value,index,array,extra) {
+  argumentCalls=argumentCalls+1;
+  indices=indices+index;
+  argumentsOk=argumentsOk&&array===source&&extra===undefined&&
+    ((index===2&&acc===""&&value==="C")||
+     (index===1&&acc==="C"&&value==="B")||
+     (index===0&&acc==="CB"&&value==="A"));
+  return acc+value;
+}, "");
+verify(reversed === "CBA" && indices === "210" && argumentCalls === 3 && argumentsOk);
+
+var omittedCalls = 0;
+var omitted = [2,4,6].reduceRight(function(acc,value) {
+  omittedCalls=omittedCalls+1;
+  return acc-value;
+});
+verify(omitted === 0 && omittedCalls === 2);
+
+var undefinedCalls = 0;
+var explicitUndefined = [5].reduceRight(function(acc,value) {
+  undefinedCalls=undefinedCalls+1;
+  if (acc === undefined) return value;
+  return acc;
+}, undefined);
+verify(explicitUndefined === 5 && undefinedCalls === 1);
+
+var emptyCalls = 0;
+var empty = [].reduceRight(function() { emptyCalls=emptyCalls+1; }, 10);
+var allHoles = [];
+allHoles.length = 4;
+var holesWithSeed = allHoles.reduceRight(function() { emptyCalls=emptyCalls+1; }, undefined);
+verify(empty === 10 && holesWithSeed === undefined && emptyCalls === 0);
+
+var sparse = [];
+sparse.length = 5;
+sparse[1] = 10;
+sparse[4] = 40;
+var sparseIndices = "";
+var sparseCalls = 0;
+var sparseResult = sparse.reduceRight(function(acc,value,index) {
+  sparseCalls=sparseCalls+1;
+  sparseIndices=sparseIndices+index;
+  return acc+value;
+}, 0);
+verify(sparseResult === 50 && sparseCalls === 2 && sparseIndices === "41");
+var sparseForward = sparse.reduce(function(acc,value) { return acc+value; }, "");
+var sparseReverse = sparse.reduceRight(function(acc,value) { return acc+value; }, "");
+verify(sparseForward === "1040" && sparseReverse === "4010");
+
+var sparseOmittedCalls = 0;
+var sparseOmitted = sparse.reduceRight(function(acc,value,index) {
+  sparseOmittedCalls=sparseOmittedCalls+1;
+  return acc-value;
+});
+verify(sparseOmitted === 30 && sparseOmittedCalls === 1);
+
+var objectAccumulator = {total:0};
+var objectResult = [1,2].reduceRight(function(acc,value) {
+  acc.total=acc.total+value;
+  return acc;
+}, objectAccumulator);
+verify(objectResult === objectAccumulator && objectResult.total === 3);
+
+var arrayAccumulator = [];
+var arrayResult = [4,5].reduceRight(function(acc,value) {
+  acc.push(value);
+  return acc;
+}, arrayAccumulator);
+verify(arrayResult === arrayAccumulator && arrayResult.length === 2 &&
+  arrayResult[0] === 5 && arrayResult[1] === 4);
+
+var nested = [1,2].reduceRight(function(acc,value) {
+  return [acc,value].reduce(function(inner,item) { return inner+item; }, 0);
+}, 0);
+var inner = [1,2].reduceRight(function(acc,value) { return acc+value; }, 0);
+verify(nested === 3 && inner === 3);
+
+var lower = [1,2,3];
+var lowerSeen = "";
+var lowerResult = lower.reduceRight(function(acc,value,index,array) {
+  lowerSeen=lowerSeen+value;
+  if (index === 2) array[1]=20;
+  return acc+value;
+}, 0);
+verify(lowerResult === 24 && lowerSeen === "3201");
+
+var fill = [];
+fill.length = 3;
+fill[2] = 3;
+var fillIndices = "";
+var fillResult = fill.reduceRight(function(acc,value,index,array) {
+  fillIndices=fillIndices+index;
+  if (index === 2) array[1]=2;
+  return acc+value;
+}, 0);
+verify(fillResult === 5 && fillIndices === "21");
+
+var remove = [1,2,3];
+var removeCalls = 0;
+var removedResult = remove.reduceRight(function(acc,value,index,array) {
+  removeCalls=removeCalls+1;
+  if (index === 2) array.length=1;
+  return acc+value;
+}, 0);
+verify(removedResult === 4 && removeCalls === 2);
+
+var appended = [1,2,3];
+var appendCalls = 0;
+var appendResult = appended.reduceRight(function(acc,value,index,array) {
+  appendCalls=appendCalls+1;
+  if (index === 2) array.push(4);
+  return acc+value;
+}, 0);
+verify(appendResult === 6 && appendCalls === 3 && appended.length === 4);
+
+var current = [1,2,3];
+var currentSeen = "";
+var currentResult = current.reduceRight(function(acc,value,index,array) {
+  currentSeen=currentSeen+value;
+  if (index === 2) array[index]=30;
+  return acc+value;
+}, 0);
+verify(currentResult === 6 && currentSeen === "321" && current[2] === 30);
+
+var higher = [1,2,3];
+var higherSeen = "";
+var higherResult = higher.reduceRight(function(acc,value,index,array) {
+  higherSeen=higherSeen+value;
+  if (index === 1) array[2]=30;
+  return acc+value;
+}, 0);
+verify(higherResult === 6 && higherSeen === "321" && higher[2] === 30);
+
+var unrelated = [7,8];
+var unrelatedResult = [1,2].reduceRight(function(acc,value,index) {
+  if (index === 1) unrelated[1]=80;
+  return acc+value;
+}, 0);
+verify(unrelatedResult === 3 && unrelated[1] === 80);
+
+var falsyCalls = 0;
+var falsy = [1,2,3].reduceRight(function(acc,value,index) {
+  falsyCalls=falsyCalls+1;
+  if (index === 2) return 0;
+  if (index === 1) return false;
+  return null;
+}, 9);
+verify(falsy === null && falsyCalls === 3);
+
+var undefinedCalls = 0;
+var sawUndefinedAccumulator = false;
+var undefinedResult = [1,2,3].reduceRight(function(acc,value,index) {
+  undefinedCalls=undefinedCalls+1;
+  if (index === 2) return undefined;
+  if (index === 1) sawUndefinedAccumulator=acc===undefined;
+  return undefined;
+}, 9);
+verify(undefinedResult === undefined && undefinedCalls === 3 && sawUndefinedAccumulator);
+
+var crossForward = source.reduce(function(acc,value) { return acc+value; }, "");
+verify(crossForward === "ABC" && reversed === "CBA");
+
+var marker = "JS101:assertions=" + assertions + ":failures=" + failures +
+  ":arguments=" + argumentsOk + ":sparse=" + (sparseCalls === 2) +
+  ":mutation=" + (lowerResult === 24) + ":nested=" + (nested === 3) +
+  ":events=ready";
+document.getElementById("result").textContent = marker;
+
+var eventA = document.getElementById("reduce-right-event-a");
+var eventB = document.getElementById("reduce-right-event-b");
+var errorEvent = document.getElementById("reduce-right-error-event");
+var nestedEventOk = false;
+var outerEventOk = false;
+var innerEventCalls = 0;
+var outerEventCalls = 0;
+eventB.addEventListener("click", function(event) {
+  var result = [2,3].reduceRight(function(acc,value,index,array) {
+    innerEventCalls=innerEventCalls+1;
+    return acc+value;
+  }, 0);
+  nestedEventOk=event.target===eventB&&event.currentTarget===eventB&&
+    result===5&&innerEventCalls===2;
+});
+eventA.addEventListener("click", function(event) {
+  var result = [1,2,3].reduceRight(function(acc,value,index) {
+    outerEventCalls=outerEventCalls+1;
+    if (index === 1) { eventB.click(); return acc+value; }
+    return acc+value;
+  }, 0);
+  outerEventOk=event.target===eventA&&event.currentTarget===eventA&&
+    result===6&&outerEventCalls===3&&nestedEventOk;
+  document.getElementById("result").textContent=
+    "JS101:event:nested=" + nestedEventOk + ":outer=" + outerEventOk;
+});
+errorEvent.addEventListener("click", function() {
+  var empty = [];
+  empty.reduceRight(function(acc,value) { return acc+value; });
+});
+</script>
+</body>
+</html>

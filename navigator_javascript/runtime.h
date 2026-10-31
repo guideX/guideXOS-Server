@@ -401,6 +401,7 @@ private:
         ArrayFind,
         ArrayFindIndex,
         ArrayReduce,
+        ArrayReduceRight,
     };
 
     enum class ArrayIteratorMode : std::uint8_t {

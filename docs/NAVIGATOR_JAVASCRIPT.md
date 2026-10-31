@@ -13026,9 +13026,9 @@ invocation frames and do not return a partial accumulator.
 
 The source length is limited to 1,024 positions. Existing Array element,
 object, property, function, environment, execution-budget, and call-depth
-limits continue to apply. Generic array-like receivers and `reduceRight()` are
-unsupported. The fixed Array prototype now has fourteen named method/protocol
-entries; ordinary-object 256-property capacity checks remain unchanged.
+limits continue to apply. Generic array-like receivers remain unsupported.
+At JS100, the fixed Array prototype had fourteen named method/protocol entries;
+ordinary-object 256-property capacity checks remained unchanged.
 
 The native lane is `tests/navigator_javascript_js100_test.cpp`, run by
 `scripts/smoke-navigator-javascript-js100.ps1`. The hosted fixture is
@@ -13066,3 +13066,93 @@ Static stack measurements from the JS100 MinGW `-O2` lane are: `reduceArray`
 48 bytes; the 1,024-position Array limit is unchanged. These are compiler
 static-frame measurements, not a bare-metal stack guarantee. Qualification is
 hosted-only; no QEMU or QAC run was performed.
+
+## JS101 — bounded `Array.prototype.reduceRight()`
+
+JS101 adds native
+`Array.prototype.reduceRight(callback[, initialValue])` for the same bounded
+Array model. The callback receives `(accumulator, currentValue, currentIndex,
+sourceArray)` with exactly four arguments. The index is the original numeric
+source index, the source is the original Array reference, and there is no
+`thisArg` parameter.
+
+The reducer validates the receiver and callback before traversal, captures the
+source length once, and scans a one-past-end `std::size_t` cursor downward. It
+decrements only while the cursor is nonzero, so index zero is processed once
+without negative-to-unsigned conversion or wraparound. Each index uses the
+existing prototype-aware `hasArrayIndex` and `readArrayIndex` path immediately
+before use; holes are skipped, explicit `undefined` values count as present,
+and inherited numeric properties participate. The reducer reads no values in
+advance and does not revisit higher indexes already processed.
+
+Native argument count distinguishes omitted `initialValue` from an explicitly
+supplied `undefined`. With a supplied value, every present position is passed
+to the callback from highest to lowest. Without one, the highest present own
+or inherited value seeds the accumulator without a callback. Empty and all-hole
+Arrays without a seed throw the runtime's `TypeError` equivalent; with a seed,
+including `undefined`, they return it unchanged. A single present value seeds
+the accumulator with no callback. Callback returns including zero, false,
+null, and undefined remain accumulators and never stop traversal.
+
+The reverse driver is intentionally separate from `reduceArray`. It keeps the
+accepted JS100 forward implementation unchanged and limits the change to the
+new reverse-index boundary and direction. Both drivers use the existing
+four-value callback argument vector, execution budget, call-depth protection,
+error propagation, indexed lookup, and stack-local tagged `Value` accumulator.
+Reference values use stable IDs in append-only realm storage, so nested
+reductions and callback replacement do not invalidate object or Array results.
+`reduceRight()` itself creates no result Array, staging buffer, global
+accumulator, or persistent runtime state.
+
+Reverse callbacks observe current values at their visit time. Replacing or
+filling an unvisited lower index affects its later callback; removing it or
+shrinking the source can make it absent. The entry length remains the traversal
+bound, so appends beyond it are ignored. Mutation of the current or an already
+visited higher index does not cause another visit. Inherited numeric
+properties are included through the same live lookup rules as JS100 `reduce()`.
+
+The 1,024-position length and existing runtime object, property, Array slot,
+function, environment, execution-budget, and call-depth limits are unchanged.
+The Array prototype now has fifteen named method/protocol entries. Generic
+array-like receivers and unrelated Array methods remain outside JS101.
+
+The native lane is `tests/navigator_javascript_js101_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js101.ps1`. The hosted fixture is
+`navigator-smoke/javascript-js101.html`; three server checks are registered in
+`server.cpp` for the fixture, nested Event dispatch, and error propagation.
+The lane covers descending callback arguments, explicit and omitted seeds,
+empty and all-hole inputs, sparse and inherited properties, reverse mutation,
+reference accumulators, nested Array methods, callback failures, execution and
+allocation limits, and the 1,024/1,025-position boundary. Qualification results
+are recorded below after the full matrix and hosted aggregate run.
+
+JS101 qualification completed on 2026-10-31. The complete JavaScript matrix
+passed **103/103 lanes** with **17,254/17,254 reported assertions**, including
+JS100's 55/55 reduction checks, JS101's 43/43 checks, and the JS93–JS99
+`forEach`, `map`, `filter`, `some`, `every`, `find`, and `findIndex` regressions.
+Every lane passed strict C++17 compilation; the relevant production `-O2`
+static stack report was collected by the JS101 lane.
+
+The hosted Navigator aggregate reported **738 passed, 7 failed, 745 total**.
+All three JS101 checks passed: the fixture, nested Event reductions, and
+TypeError propagation. The seven failures were the established CSS checks
+(phases 3C, 3G, 6A, 6B's three checks, and 6C), matching the JS100 baseline's
+seven CSS failures; JS101 added three passing checks without adding failures.
+
+The JS101 production build succeeded. Its `reduceRightArray` static frame is
+560 bytes, equal to JS100's `reduceArray`; the shared `traverseArray` frame is
+528 bytes, `invokeNative` is 736 bytes, and `invokeFunction` is 560 bytes.
+`hasArrayIndex` and `readArrayIndex` remain 144 and 176 bytes. Runtime layout
+remains `RuntimeObject` 88 bytes and `RuntimeArrayElement` 48 bytes; the
+1,024-position native Array limit and existing pool limits are unchanged.
+These are host compiler static-frame measurements, not a bare-metal stack
+guarantee.
+
+Hosted qualification used the freshly built executable (8,784,869 bytes,
+SHA-256 `B706873D77560589EB9342F4CE551E9D6772077652D3D1D66E2849CFDF9E0FCA`).
+Afterward, `guideXOSServer.exe` was restored and verified against its observed
+baseline (8,398,274 bytes, SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`). The
+42 generated Navigator fixtures (458,372 bytes) match the saved path, size, and
+SHA-256 manifest. Qualification was hosted-only; no QEMU launch or QAC
+admission was performed.
