@@ -582,3 +582,26 @@ final Dismount Flush, Unmounted result, guest Remount, or fresh guest reread is
 claimed. DM37 remains active and `.phase` stays DM36→DM37. See the [DM37
 continuation 11 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-11--writable-save-verified-dismount-incomplete)
 for the hashes, QAC release, media-verification outputs, and remaining gates.
+
+## DM37 Continuation 12 — writable mounted state, input boundary identified
+
+The accepted 57-byte writable FAT32 save image was cloned unchanged for a
+fresh QAC-managed guest. Disk Manager mounted the selected `DM37DURABLE01`
+partition read/write at `/mnt/disk1-part1`, and showed Dismount Volume widget
+6. In the follow-up, Disk 1 and the `DM9 QEMU Proof` partition were selected
+again, and the Dismount Volume control remained visible. The user reports
+mouse movement can take about 20 seconds. Paced QMP keyboard input eventually
+moved the visible focus through Refresh, Properties, Diagnostics, and Verify
+Partition, but later pane cycling did not leave a stable focus highlight. The
+boot-enabled input trace was already at its 512-record cap, so missing later
+`DM37-IN` rows do not prove that an event was absent. The confirmation did not
+open and no widget activation is claimed.
+
+No VFS Dismount, final Flush, Unmounted state, explicit Remount, or fresh
+post-remount read is claimed. QEMU remains running under QAC reservation
+`57af6efd1913425899e6fe3c853736e0`; normal Shell shutdown, QAC release, and
+final offline verification are outstanding. The current outcome is **Outcome
+B — `DM37_PARTIAL_GUEST_ACCEPTANCE`**. `.phase` remains DM36→DM37; DM38 has not
+started. See the [DM37 Continuation 12 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-12-follow-up--delayed-input-dismount-still-unactivated)
+for the additional QMP screenshots, input latency, retained fixture identity,
+QAC ownership, and remaining Gate D steps.

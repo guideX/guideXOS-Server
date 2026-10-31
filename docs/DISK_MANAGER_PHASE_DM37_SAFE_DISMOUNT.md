@@ -2,18 +2,20 @@
 
 **Outcome B — `DM37_DISMOUNT_ENGINE_READY` for the host-qualified production
 VFS lifecycle.** `.phase` remains `last_completed=DM36` and
-`next_expected=DM37`. The Disk Manager GUI flow and guest/QEMU acceptance are
-future work.
+`next_expected=DM37`. Gate A and read-only Gate E are accepted. Writable Gate
+D remains incomplete; DM37 acceptance is not final.
 
-**Latest continuation status (2026-10-20): Outcome B —
-`BLOCKED_BY_QAC_OR_FOREIGN_QEMU`.** Continuation 8 stopped before guest launch:
-QAC had a verified live acceptance reservation, but its QEMU command line
-pointed into the sibling `guideXOSServer_FONT_SUPPORT` project while the
-coordinator labeled the reservation `guideXOSServer`. That ownership conflict
-left the acceptance lane unavailable for safe DM37 use. Gate A remains
-accepted; Gate E remains incomplete after continuation 7. See continuation 8
-at the end of this document. The earlier continuation 6 and 7 censuses remain
-historical evidence for their respective runs.
+**Latest continuation status (2026-10-31): Outcome B —
+`DM37_PARTIAL_GUEST_ACCEPTANCE`.** Continuation 12 mounted the accepted
+writable FAT32 fixture read/write and returned to the selected Disk 1
+partition with Dismount Volume visible. QMP focus moved through early action
+buttons, but delayed input left the Dismount action and confirmation
+unverified. No final Flush, Unmounted state, Remount, or fresh guest read is
+claimed. The QEMU guest remains QAC-managed because normal Shell shutdown
+could not be reached. Gate A and read-only Gate E remain accepted. See the
+Continuation 12 follow-up at the end of this document; earlier
+QAC/foreign-QEMU blockers remain historical evidence for their respective
+runs.
 
 ## Scope and repository gate
 
@@ -1547,3 +1549,102 @@ outcome is **Outcome B — `DM37_PARTIAL_GUEST_ACCEPTANCE`**, not
 busy/protected admission, production Dismount settlement and final Flush,
 explicit Remount plus guest reread, removal/replacement, Flush/I/O failure
 behavior, and the remaining input/Close cases.
+
+## DM37 Continuation 12 — writable mounted state reached; input boundary before Dismount dispatch
+
+This run reused the accepted writable FAT32 save fixture rather than
+repeating the save. A disposable 629,145,600-byte clone was created at
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\continuation12\fixtures\DM37DURABLE01.cont12.raw`.
+Its initial SHA-256 was
+`D4975D8F20ABE5E8B8A221408E79CEB151B3E8C15C7A04A16556A54CAB6AA3DF`, matching
+the accepted source image that already contained the expected 57-byte
+`DM9/PROOF.BIN`. The source fixture was not opened for writing.
+
+QAC admitted exclusive acceptance reservation
+`57af6efd1913425899e6fe3c853736e0`, owned by PID 13268 with child QEMU PID
+18036 and QMP port 53420. Running QAC snapshots showed one managed QEMU, zero
+foreign QEMU processes, and `degraded=false`. The source-matched continuation
+11 runtime was reused without a rebuild: kernel
+`4BFD226CA145D0298A3C299DD44194B08606F6AAAD72F84085B3E271D52DD563`,
+bootloader
+`E65C0A2CBF50534CDB01602800F579446B27B2BE7597BDB461E1E83F94BC0DF4`, and
+OVMF
+`2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792`.
+`NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`; no physical media was attached.
+
+Disk Manager selected Disk 1 USB Mass Storage, serial `DM37DURABLE01`, GPT
+partition 1 (`DM9 QEMU Proof`), FAT32, writable. The guest visibly reported
+`Mounted at /mnt/disk1-part1 (Read/Write)`. Dismount Volume widget 6 was
+visible. A stray Read-Only Verification Target page was dismissed without
+starting verification; the guest returned to the same mounted status.
+
+The activation boundary in this run is before Disk Manager widget dispatch.
+QMP status and display queries showed QEMU still running with GTK, an implicit
+`-vga std` device, and the QEMU PS/2 mouse as the current relative pointer.
+QMP `send-key`, HMP `sendkey`, and mouse requests were acknowledged, but no
+new `[DM37-IN] stage=dm-key`, `dm-action-attempt`, or `dm-action-result`
+followed the last observed input trace (`seq=0000013E`). Host UI clicks also
+did not open the Dismount confirmation. Explicit QMP display routes `VGA`,
+`video0`, and the VGA QOM path were rejected as unknown devices. This
+localizes the observed failure to input delivery in this QEMU session; it
+does not show that the production Dismount handler is defective or that a
+production admission gate disabled the action.
+
+No Dismount confirmation was opened or accepted, no production
+`vfs::dismount` result was observed, and no final FAT32 Flush, Unmounted
+state, Remount, or fresh VFS read is claimed. QMP `system_powerdown` was
+acknowledged, but QEMU remained Running after five seconds. Normal Shell
+shutdown has not completed; the QAC reservation remains held, so no final
+exclusive host access, image hash, or offline verification is claimed. The
+current screen capture and input/routing record are
+`current-disk-manager.ppm` and `current-input-blocker.txt` under the
+Continuation 12 run directory on E:.
+
+Production source is unchanged. No tests or builds were run; the accepted
+1,491/1,491 storage baseline remains from the previous continuation. The
+initial capture outcome was **Outcome B — `DM37_ACTIVATION_BOUNDARY_IDENTIFIED`**.
+The later Continuation 12 follow-up below supersedes that initial input-path
+description. Keep
+`.phase` at `last_completed=DM36`, `next_expected=DM37`; DM38 has not started.
+Resume only after guest input is reliably reaching the production UI, then
+complete the writable confirmation, final Flush, Unmounted state, explicit
+Remount and fresh file read, normal Shell shutdown, QAC release, and offline
+media verification.
+
+### DM37 Continuation 12 follow-up — delayed input; Dismount still unactivated
+
+After the initial capture, QEMU was brought to the foreground. The user
+selected Disk 1 and the `DM9 QEMU Proof` row. A fresh QMP display capture shows
+the USB Mass Storage device `DM37DURABLE01`, Online GPT, writable, with one
+mounted partition; the FAT32 partition row is selected and the **Dismount
+Volume** button remains visible. The earlier retained mounted-partition
+capture records `/mnt/disk1-part1 (Read/Write)` and `Persistence: Flush
+required`. No confirmation dialog is visible in the follow-up captures.
+
+The QEMU process remains responsive and the guest PIT heartbeat continues.
+The user reports mouse movement can take about 20 seconds. Paced QMP keyboard
+events returned successfully; delayed screenshots showed focus at Refresh,
+Properties, Diagnostics, and Verify Partition. Later Tab cycling did not
+produce a stable action-focus highlight. The boot-enabled `DM37-IN` trace had
+already reached its 512-record cap (`trace=incomplete`, `dropped=0`), so later
+input cannot be judged from missing trace rows. Current QMP captures are
+`current-lag-state.png`, `focus-after-tab-lag20.png`,
+`after-send-key-tab.png`, `pane-cycle-tab7.png`, and
+`action-pane-after-tab.png` under
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\continuation12\runs\qac-writable-dismount-remount-20261031\`.
+
+No Dismount confirmation or result was observed. There is no production
+`vfs::dismount`, final FAT32 Flush, Unmounted transition, explicit Remount,
+fresh VFS read, normal Shell shutdown, or QAC release. The guest is still
+running under reservation `57af6efd1913425899e6fe3c853736e0`; do not force
+close it or claim final image verification while QAC owns the clone. This
+follow-up narrows the current boundary to slow, unreliable GUI input before
+confirmed Dismount activation; it does not demonstrate a production Dismount
+handler defect.
+
+The current run outcome is **Outcome B — `DM37_PARTIAL_GUEST_ACCEPTANCE`**.
+Production source is unchanged; no tests or builds were run. Keep `.phase` at
+DM36→DM37 and do not begin DM38. Resume the Gate D sequence only when keyboard
+focus can be observed reliably, then complete the confirmation/cancel check,
+final Flush, Unmounted state, explicit Remount and fresh read, safe shutdown,
+QAC release, and independent media verification.
