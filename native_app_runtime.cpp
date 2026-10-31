@@ -887,8 +887,10 @@ gx_result hostFileCreateDirectory(NativeGxAppContext* ctx, const char* path) {
     std::string failure;
     if (!copyWorkspacePath(*context, path, resolved, failure)) return workspacePathFailureResult(failure);
     std::error_code ec;
-    if (std::filesystem::exists(std::filesystem::symlink_status(resolved, ec))) return GX_ERROR_FAILED;
-    if (ec || !std::filesystem::create_directory(resolved, ec) || ec) return GX_ERROR_FAILED;
+    const std::filesystem::file_status status = std::filesystem::symlink_status(resolved, ec);
+    if (ec == std::errc::no_such_file_or_directory) ec.clear();
+    if (ec || std::filesystem::exists(status)) return GX_ERROR_FAILED;
+    if (!std::filesystem::create_directory(resolved, ec) || ec) return GX_ERROR_FAILED;
     return GX_OK;
 }
 
