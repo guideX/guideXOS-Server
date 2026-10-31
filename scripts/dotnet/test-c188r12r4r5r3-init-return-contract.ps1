@@ -131,7 +131,8 @@ Assert-True ($adapterText -notmatch '\b(?:RhRegisterOSModule|InitializeModules|M
 
 $kernelHarness = Get-Content -LiteralPath (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') -Raw
 Assert-True ($kernelHarness -match 'using\s+StartupMain\s*=\s*int32_t\s*\(GUIDEXOS_NATIVEAOT_PAL_CALL\s*\*\)\(void\)') 'kernel dispatch pointer matches the adapter C ABI and int32 status return'
-Assert-True ($kernelHarness -match '(?s)if\s*\(startupResult\s*!=\s*0\)\s*\{.*?managed_main_gate=blocked adapterStatus=.*?return;\s*\}\s*#if defined\(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS\)\s*serial::puts\("\[C188R12R4R5R1_INIT\] managed_main_gate=blocked reason=runtime-threadstore-attachment-unqualified') 'failed initialization and successful-but-unqualified startup both stop before ManagedMain'
+Assert-True (($kernelHarness -match '(?s)if\s*\(startupResult\s*!=\s*0\)\s*\{.*?managed_main_gate=blocked adapterStatus=.*?return;\s*\}') -and
+    ($kernelHarness -match '(?s)#if defined\(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS\) && !defined\(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS\)\s*serial::puts\("\[C188R12R4R5R1_INIT\] managed_main_gate=blocked reason=runtime-threadstore-attachment-unqualified')) 'failed initialization remains blocked; the successful diagnostic gate is released only by the R4 readiness profile'
 $kernelMain = Get-Content -LiteralPath (Join-Path $root 'kernel\core\main.cpp') -Raw
 Assert-True ($kernelMain.IndexOf('GUIDEXOS_NATIVEAOT_C188R12R4R5R1_TRACE_GET_OVERFLOW_ADDRESS') -lt
     $kernelMain.IndexOf('GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_RH_INITIALIZE_RAW_RESULT_ADDRESS') -and

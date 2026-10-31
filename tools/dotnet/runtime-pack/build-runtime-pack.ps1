@@ -10,6 +10,7 @@ param(
     [switch]$C188R12R4R5GcOwnershipProof,
     [switch]$C188R12R4R5R1InitDiagnostics,
     [switch]$C188R12R4R5R3InitReturnContract,
+    [switch]$C188R12R4R5R4ThreadStoreReadiness,
     [switch]$ProductionApplication,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
@@ -192,6 +193,12 @@ if ($C188R12R4R5R3InitReturnContract -and
     (-not $C188R12R4R5R1InitDiagnostics -or -not $C188R12R4R5GcOwnershipProof)) {
     throw 'C188R12R4R5R3 return-contract diagnostics require the isolated C188R12R4R5R1 startup trace profile.'
 }
+if ($C188R12R4R5R4ThreadStoreReadiness -and
+    (-not $C188R12R4R5R3InitReturnContract -or -not $C188R12R4R5R1InitDiagnostics -or
+     -not $C188R12R4R5GcOwnershipProof -or -not $ProductionApplication -or
+     $PersistentCompositeLifecycle)) {
+    throw 'C188R12R4R5R4 ThreadStore readiness requires the isolated C188R12R4R5R3 proof profile and cannot enter persistent production lifecycle builds.'
+}
 if ($C188R12R4FactoryAttribution -and
     (-not $ManagedAllocation -or -not $PersistentCompositeLifecycle)) {
     throw 'C188R12R4 factory attribution requires managed allocation and the persistent composite lifecycle.'
@@ -224,11 +231,37 @@ if (-not [string]::IsNullOrWhiteSpace($ExternalRuntimeRoot)) {
 
 $source = Join-Path $RuntimePackRoot $lock.platformObject.source.Replace('/', '\')
 if (-not (Test-Path -LiteralPath $source)) { throw "Runtime-pack platform source not found: $source" }
+$threadStoreCommonPalSource = Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_pal_common_replacement.cpp'
+$threadStoreCommonPalObject = Join-Path $OutputRoot 'guidexos_nativeaot_pal_common_replacement.threadstore.obj'
+$threadStoreCommonPalMember = 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\windows\PalRedhawkCommon.cpp.obj'
 $c108Includes = ""
 $c108Defines = ""
 $c108SourceRoot = $null
 if ($ThreadStaticLifecycleDiagnostics) {
     $c108SourceRoot = Join-Path $OutputRoot "nativeaot-c108-source"
+}
+$threadStoreSourceRoot = $null
+$threadStoreDefines = ""
+$threadStoreIncludes = ""
+if ($C188R12R4R5R4ThreadStoreReadiness) {
+    $threadStoreCoreclrRoot = Join-Path $lockedExternalRuntimeRoot 'src\coreclr'
+    $threadStoreRuntimeRoot = Join-Path $threadStoreCoreclrRoot 'nativeaot\Runtime'
+    $threadStoreSourceRoot = Join-Path $lockedExternalRuntimeRoot 'src'
+    foreach ($path in @(
+        (Join-Path $threadStoreRuntimeRoot 'thread.h'),
+        (Join-Path $threadStoreRuntimeRoot 'threadstore.h'),
+        (Join-Path $threadStoreRuntimeRoot 'threadstore.inl'),
+        (Join-Path $threadStoreRuntimeRoot 'thread.inl'),
+        (Join-Path $threadStoreRuntimeRoot 'RuntimeInstance.h'),
+        (Join-Path $threadStoreCoreclrRoot 'gc\env\common.h'),
+        (Join-Path $threadStoreSourceRoot 'native\minipal\utils.h')
+    )) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Pinned NativeAOT ThreadStore source input is missing: $path"
+        }
+    }
+    $threadStoreDefines = '/DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DUSE_GC_INFO_DECODER /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS'
+    $threadStoreIncludes = "/I`"$threadStoreRuntimeRoot`" /I`"$(Join-Path $threadStoreRuntimeRoot 'windows')`" /I`"$threadStoreCoreclrRoot`" /I`"$(Join-Path $threadStoreCoreclrRoot 'native')`" /I`"$(Join-Path $threadStoreCoreclrRoot 'gc')`" /I`"$(Join-Path $threadStoreCoreclrRoot 'gc\env')`" /I`"$(Join-Path $threadStoreRuntimeRoot 'inc')`" /I`"$(Join-Path $threadStoreRuntimeRoot 'eventpipe')`" /I`"$(Join-Path $threadStoreCoreclrRoot 'inc')`" /I`"$(Join-Path $threadStoreCoreclrRoot 'pal\inc')`" /I`"$(Join-Path $threadStoreSourceRoot 'native')`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /FI`"$(Join-Path $threadStoreCoreclrRoot 'gc\env\common.h')`""
 }
 
 if ($NativeAotFpRepair -and (Test-Path -LiteralPath $OutputRoot) -and -not $Clean) {
@@ -329,6 +362,9 @@ if ($ProductionApplication) {
 if ($C188R12R4R5R1InitDiagnostics) {
     $removedRuntimeMembers += 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\GCHelpers.cpp.obj'
     $removedRuntimeMembers += 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\RuntimeInstance.cpp.obj'
+}
+if ($C188R12R4R5R4ThreadStoreReadiness) {
+    $removedRuntimeMembers += $threadStoreCommonPalMember
 }
 if ($NativeAotFpRepair) {
     $removedRuntimeMembers += @($fpStackMember, $fpCoffMember)
@@ -831,12 +867,33 @@ guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_DEBUG_HEADERS);
         $productionGcEnvironmentObjects += " `"$runtimeInstanceObject`""
     }
 }
+$threadStoreCommonPalObjectArgument = ''
+if ($C188R12R4R5R4ThreadStoreReadiness) {
+    if (-not (Test-Path -LiteralPath $threadStoreCommonPalSource -PathType Leaf)) {
+        throw "ThreadStore readiness PAL common replacement source is missing: $threadStoreCommonPalSource"
+    }
+    $threadStoreCommonPalBatch = Join-Path $OutputRoot 'build-threadstore-pal-common.bat'
+    @(
+        '@echo off'
+        'setlocal'
+        "call `"$vcvars`" >nul"
+        'if errorlevel 1 exit /b %errorlevel%'
+        "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /D_LIB /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$threadStoreCommonPalObject`" `"$threadStoreCommonPalSource`""
+        'if errorlevel 1 exit /b %errorlevel%'
+        'exit /b 0'
+    ) | Set-Content -LiteralPath $threadStoreCommonPalBatch -Encoding ASCII
+    & $threadStoreCommonPalBatch
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $threadStoreCommonPalObject -PathType Leaf)) {
+        throw 'ThreadStore readiness PAL common replacement object did not compile.'
+    }
+    $threadStoreCommonPalObjectArgument = " `"$threadStoreCommonPalObject`""
+}
 $sdkLines = @(
     "@echo off",
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "lib.exe /nologo /OUT:`"$adaptedRuntimeLibrary`" `"$runtimeLibraryInput`" $removeArguments `"$threadRenamedMember`" `"$ehRenamedMember`"$allocFastMemberArguments$fpArchiveObjects$productionGcEnvironmentObjects",
+    "lib.exe /nologo /OUT:`"$adaptedRuntimeLibrary`" `"$runtimeLibraryInput`" $removeArguments `"$threadRenamedMember`" `"$ehRenamedMember`"$allocFastMemberArguments$fpArchiveObjects$productionGcEnvironmentObjects$threadStoreCommonPalObjectArgument",
     "exit /b %errorlevel%"
 )
 $sdkLines | Set-Content -LiteralPath $sdkBatch -Encoding ASCII
@@ -861,15 +918,19 @@ if (-not (Test-Path -LiteralPath $archiveMembersPath -PathType Leaf)) { throw "C
 $archiveMembers = @((Get-Content -LiteralPath $archiveMembersPath | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 }))
 $normalizeMember = { param([string]$Name) $Name.Trim().Replace('/', '\').ToLowerInvariant() }
 $expectedPatchedMembers = @()
-if ($NativeAotFpRepair) { $expectedPatchedMembers = @($fpStackMember, $fpCoffMember) }
 $expectedPatchedArchiveMembers = @()
 if ($NativeAotFpRepair) {
+    $expectedPatchedMembers += @($fpStackMember, $fpCoffMember)
     # lib.exe stores explicitly supplied replacement object paths by their
     # output leaf names rather than by the stock archive member paths.
-    $expectedPatchedArchiveMembers = @(
+    $expectedPatchedArchiveMembers += @(
         [System.IO.Path]::GetFileName($fpStackObject),
         [System.IO.Path]::GetFileName($fpCoffObject)
     )
+}
+if ($C188R12R4R5R4ThreadStoreReadiness) {
+    $expectedPatchedMembers += $threadStoreCommonPalMember
+    $expectedPatchedArchiveMembers += [System.IO.Path]::GetFileName($threadStoreCommonPalObject)
 }
 $getMemberLeaf = { param([string]$Name) [System.IO.Path]::GetFileName($Name.Trim().Replace('/', '\')) }
 $patchedMemberCounts = [ordered]@{}
@@ -901,6 +962,7 @@ $archiveValidation = [ordered]@{
     patchedMemberCounts = $patchedMemberCounts
     removedMemberCounts = $removedMemberCounts
     duplicatePatchedMembers = (@($patchedMemberCounts.Values | Where-Object { $_ -gt 1 }).Count)
+    threadStorePalCommonReplacement = if ($C188R12R4R5R4ThreadStoreReadiness) { [ordered]@{ stockMember = $threadStoreCommonPalMember; removedCount = $removedMemberCounts[$threadStoreCommonPalMember]; replacementObject = $threadStoreCommonPalObject; replacementSha256 = Get-Hash $threadStoreCommonPalObject; archiveMemberCount = $patchedMemberCounts[$threadStoreCommonPalMember] } } else { $null }
 }
 
 $lines = @(
@@ -908,7 +970,7 @@ $lines = @(
     "setlocal",
     "call `"$vcvars`" >nul",
     "if errorlevel 1 exit /b %errorlevel%",
-    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' }) $(if ($PersistentCompositeLifecycle) { '/DGUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE' } else { '' }) $(if ($C188R12R4FactoryAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION' } else { '' }) $(if ($C188R12R4R5GcOwnershipProof) { '/DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_PROOF' } else { '' }) $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' } else { '' }) $(if ($ThreadStaticLifecycleDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE' } else { '' })" } else { '' }) $c108Defines $c108Includes /Fo:`"$object`" `"$source`"",
+    "cl.exe /nologo /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Brepro $(if ($ManagedAllocation) { "/DGUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION /DGUIDEXOS_MANAGED_HEAP_BYTES=$managedHeapBytes $(if ($ManagedRepeatedAllocation) { '/DGUIDEXOS_NATIVEAOT_MANAGED_REPEATED_ALLOCATION' } else { '' }) $(if ($ProductionApplication) { '/DGUIDEXOS_NATIVEAOT_PRODUCTION_APPLICATION' } else { '' }) $(if ($PersistentCompositeLifecycle) { '/DGUIDEXOS_NATIVEAOT_PERSISTENT_COMPOSITE_LIFECYCLE' } else { '' }) $(if ($C188R12R4FactoryAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4_FACTORY_ATTRIBUTION' } else { '' }) $(if ($C188R12R4R5GcOwnershipProof) { '/DGUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION /DGUIDEXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_PROOF' } else { '' }) $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' } else { '' }) $(if ($ThreadStaticLifecycleDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE' } else { '' })" } else { '' }) $c108Defines $c108Includes $threadStoreDefines $threadStoreIncludes /Fo:`"$object`" `"$source`"",
     "exit /b %errorlevel%"
 )
 $lines | Set-Content -LiteralPath $batch -Encoding ASCII
@@ -944,10 +1006,27 @@ if ($NativeAotFpRepair) {
         }
     }
 }
+$threadStoreSourceHashes = [ordered]@{}
+if ($C188R12R4R5R4ThreadStoreReadiness) {
+    foreach ($relative in @(
+        'coreclr/nativeaot/Runtime/thread.h',
+        'coreclr/nativeaot/Runtime/threadstore.h',
+        'coreclr/nativeaot/Runtime/threadstore.inl',
+        'coreclr/nativeaot/Runtime/thread.inl',
+        'coreclr/nativeaot/Runtime/RuntimeInstance.h',
+        'coreclr/nativeaot/Runtime/thread.cpp',
+        'coreclr/nativeaot/Runtime/threadstore.cpp',
+        'coreclr/nativeaot/Runtime/RuntimeInstance.cpp',
+        'coreclr/nativeaot/Runtime/startup.cpp')
+    ) {
+        $path = Join-Path $lockedExternalRuntimeRoot (Join-Path 'src' $relative.Replace('/', '\'))
+        $threadStoreSourceHashes[$relative] = Get-Hash $path
+    }
+}
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -1006,6 +1085,14 @@ $manifest = [ordered]@{
     c188r12r4r5GcOwnershipProof = [bool]$C188R12R4R5GcOwnershipProof
     c188r12r4r5r1InitDiagnostics = [bool]$C188R12R4R5R1InitDiagnostics
     c188r12r4r5r3InitReturnContract = [bool]$C188R12R4R5R3InitReturnContract
+    c188r12r4r5r4ThreadStoreReadiness = [bool]$C188R12R4R5R4ThreadStoreReadiness
+    c188r12r4r5r4ThreadStoreReadinessSourceCommit = if ($C188R12R4R5R4ThreadStoreReadiness) { $lock.ilCompiler.commit } else { $null }
+    c188r12r4r5r4ThreadStoreReadinessSourceRoot = if ($C188R12R4R5R4ThreadStoreReadiness) { $lockedExternalRuntimeRoot } else { $null }
+    c188r12r4r5r4ThreadStoreReadinessSourceFiles = $threadStoreSourceHashes
+    c188r12r4r5r4MarkerCapacity = if ($C188R12R4R5R4ThreadStoreReadiness) { 48 } else { 0 }
+    c188r12r4r5r4PalCommonStockMember = if ($C188R12R4R5R4ThreadStoreReadiness) { $threadStoreCommonPalMember } else { $null }
+    c188r12r4r5r4PalCommonReplacementObject = if ($C188R12R4R5R4ThreadStoreReadiness) { $threadStoreCommonPalObject } else { $null }
+    c188r12r4r5r4PalCommonReplacementSha256 = if ($C188R12R4R5R4ThreadStoreReadiness) { Get-Hash $threadStoreCommonPalObject } else { $null }
     c188r12r4r5r1RuntimeVersionHeader = $runtimeVersionHeader
     c188r12r4r5r1RuntimeVersionHeaderSha256 = $runtimeVersionHeaderSha256
     initializationTraceRecordCapacity = if ($C188R12R4R5R1InitDiagnostics) { 64 } else { 0 }

@@ -17,8 +17,11 @@ if (-not (Test-Path -LiteralPath $candidateManifestPath -PathType Leaf)) {
 $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
 $isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
 $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract'
-$isInitDiagnostic = $isInitAttribution -or $isInitReturnContract
-$phaseRoot = if ($isInitReturnContract) {
+$isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
+$isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness
+$phaseRoot = if ($isThreadStoreReadiness) {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4-threadstore-readiness'))
+} elseif ($isInitReturnContract) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r3-init-return-contract'))
 } elseif ($isInitAttribution) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r1-runtime-init-attribution'))
@@ -62,6 +65,22 @@ if ($isInitAttribution) {
         $candidateManifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3') {
         throw 'R3 candidate manifest failed its one-guest return-contract, startup-gate, or production-isolation preflight.'
     }
+} elseif ($isThreadStoreReadiness) {
+    if ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS_GUEST' -or
+        -not [bool]$candidateManifest.runtimeInitDiagnostics -or
+        -not [bool]$candidateManifest.c188R12R4R5R3InitReturnContract -or
+        -not [bool]$candidateManifest.c188R12R4R5R4ThreadStoreReadiness -or
+        [bool]$candidateManifest.qemuLaunched -or [bool]$candidateManifest.qacReserved -or
+        -not [bool]$candidateManifest.productionIsolationChecks.diagnosticAndProductionOutputsSeparate -or
+        -not [bool]$candidateManifest.productionIsolationChecks.diagnosticInstrumentationAbsentFromProduction -or
+        -not [bool]$candidateManifest.productionNativeAotPersistentCompositeLifecycle -or
+        [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackC188ProofProfile -or
+        [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR1TraceProfile -or
+        [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR3ReturnProfile -or
+        $candidateManifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
+        [string]$candidateManifest.threadStoreReadinessPalCommonStockMember -cne 'Runtime.WorkstationGC:PalRedhawkCommon.cpp.obj') {
+        throw 'R4 candidate manifest failed its one-boot ThreadStore, PAL stack-bounds, pinned-runtime, or production-isolation preflight.'
+    }
 } elseif ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_QAC_PREFLIGHT' -or
     $candidateManifest.mode -cne 'GcOwnershipProof' -or
     [bool]$candidateManifest.imageBackedArenaPresent -or
@@ -96,6 +115,18 @@ if ((Get-Sha256 (Join-Path $esp 'kernel.elf')) -cne ([string]$candidateManifest.
     (Get-Sha256 (Join-Path $esp 'ramdisk.img')) -cne ([string]$candidateManifest.candidateRamdiskSha256).ToUpperInvariant() -or
     (Get-Sha256 (Join-Path $esp 'ramdisk.img')) -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8') {
     throw 'The isolated guest media no longer matches the qualified candidate and preserved source ramdisk.'
+}
+if ($isThreadStoreReadiness) {
+    if ([string]$candidateManifest.sourceRamdiskSha256 -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8' -or
+        [string]$candidateManifest.specializedKernelSha256 -cne [string]$candidateManifest.espKernelSha256) {
+        throw 'R4 candidate source or staged-kernel identity does not match the qualified build manifest.'
+    }
+    [void](Require-Hash ([string]$candidateManifest.managedPe) ([string]$candidateManifest.managedPeSha256) 'R4 NativeAOT PE')
+    [void](Require-Hash ([string]$candidateManifest.managedElf) ([string]$candidateManifest.managedElfSha256) 'R4 NativeAOT ELF')
+    [void](Require-Hash ([string]$candidateManifest.specializedKernel) ([string]$candidateManifest.specializedKernelSha256) 'R4 isolated kernel')
+    [void](Require-Hash ([string]$candidateManifest.runtimePackManifest) ([string]$candidateManifest.runtimePackManifestSha256) 'R4 runtime-pack manifest')
+    [void](Require-Hash ([string]$candidateManifest.threadStoreReadinessPalCommonReplacementObject) `
+        ([string]$candidateManifest.threadStoreReadinessPalCommonReplacementSha256) 'R4 stack-bounds PAL replacement')
 }
 if (Test-Path -LiteralPath $attemptPath) { throw "The candidate already has a QAC guest attempt; refusing any second launch: $attemptPath" }
 if (Test-Path -LiteralPath $runRoot) { throw "Refusing to overwrite guest evidence: $runRoot" }
@@ -196,6 +227,7 @@ $qemuArgs = @(
 $qacArgs = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemu) + $qemuArgs
 [ordered]@{qacCli=$qacCli;arguments=$qacArgs;qemu=$qemu;qemuArguments=$qemuArgs;qmpPort=$qmpPort;
     candidateRoot=$candidate;esp=$esp;serial=$serial;timeoutSeconds=$BootTimeoutSeconds;
+    candidateManifestSha256=Get-Sha256 $candidateManifestPath;
     guestBootLimit=1;automaticRetry=$false} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot 'qac-run-arguments.json') -Encoding utf8
 
@@ -223,6 +255,7 @@ try {
     # This CreateNew marker permanently prevents a second QAC invocation for this candidate.
     $attemptedUtc = [DateTime]::UtcNow.ToString('o')
     $attempt = [ordered]@{candidateRoot=$candidate;attemptedAtUtc=$attemptedUtc;maxGuestBoots=1;automaticRetry=$false;
+        candidateManifestSha256=Get-Sha256 $candidateManifestPath;
         qacProject='guideXOSServer';qacMode='acceptance';qemuArguments=$qemuArgs}
     $attemptJson = $attempt | ConvertTo-Json -Depth 6
     $attemptStream = [System.IO.File]::Open($attemptPath,[System.IO.FileMode]::CreateNew,
@@ -286,6 +319,12 @@ try {
             $guestPass = $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*adapterStatus=(?:0x)?[0-9A-F]{8}\s*$' -and
                 $serialText -match '(?m)^\[C188R12R4R5R3_INIT\] init_result nativeBool=(?:0x)?[0-9A-F]{8} adapterStatus=(?:0x)?[0-9A-F]{8} nativeOutcome=(?:success|failure|unknown) adapterOutcome=(?:success|failure)\s*$' -and
                 $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
+        } elseif ($isThreadStoreReadiness) {
+            $r4FailureBoundary = $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)\s+' -or
+                $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=pal_stack_current\s+raw0=[0-9A-Fa-f]{16}\s+raw1=(?!0{16}\s)[0-9A-Fa-f]{16}\s*$'
+            $r4GcTerminal = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=(?:PASS|FAIL) callbacks=\S+ result1=\S+ result2=\S+ result3=\S+\s*$'
+            $guestPass = $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=rhinitialize_return\s+' -and
+                ($r4FailureBoundary -or $r4GcTerminal)
         } else {
             $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
         }
@@ -301,6 +340,12 @@ try {
         $guestPass = $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*adapterStatus=(?:0x)?[0-9A-F]{8}\s*$' -and
             $serialText -match '(?m)^\[C188R12R4R5R3_INIT\] init_result nativeBool=(?:0x)?[0-9A-F]{8} adapterStatus=(?:0x)?[0-9A-F]{8} nativeOutcome=(?:success|failure|unknown) adapterOutcome=(?:success|failure)\s*$' -and
             $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
+    } elseif ($isThreadStoreReadiness) {
+        $r4FailureBoundary = $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)\s+' -or
+            $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=pal_stack_current\s+raw0=[0-9A-Fa-f]{16}\s+raw1=(?!0{16}\s)[0-9A-Fa-f]{16}\s*$'
+        $r4GcTerminal = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=(?:PASS|FAIL) callbacks=\S+ result1=\S+ result2=\S+ result3=\S+\s*$'
+        $guestPass = $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=rhinitialize_return\s+' -and
+            ($r4FailureBoundary -or $r4GcTerminal)
     } else {
         $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
     }
@@ -353,7 +398,9 @@ try {
 
 $serialText = Read-GuestSerial
 $serialAnalysisPath = Join-Path $runRoot 'serial-analysis.json'
-$serialAnalyzer = Join-Path $PSScriptRoot 'analyze-c188r12r4r5r1-init-serial.ps1'
+$serialAnalyzer = if ($isThreadStoreReadiness) {
+    Join-Path $PSScriptRoot 'analyze-c188r12r4r5r4-threadstore-readiness.ps1'
+} else { Join-Path $PSScriptRoot 'analyze-c188r12r4r5r1-init-serial.ps1' }
 $serialSha256BeforeAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
 $serialAnalysis = $null
 $serialAnalysisError = $null
@@ -362,8 +409,8 @@ if (Test-Path -LiteralPath $serial -PathType Leaf) {
     try {
         $analysisArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serialAnalyzer,
             '-SerialPath',$serial,'-OutputPath',$serialAnalysisPath)
-        if ($runError -match 'timeout|did not exit|not exit' -or
-            ($null -ne $qacProcess -and -not $qacProcess.HasExited)) { $analysisArgs += '-GuestTimedOut' }
+        if (-not $isThreadStoreReadiness -and ($runError -match 'timeout|did not exit|not exit' -or
+            ($null -ne $qacProcess -and -not $qacProcess.HasExited))) { $analysisArgs += '-GuestTimedOut' }
         & pwsh @analysisArgs | Out-Null
         $serialAnalysisExitCode = $LASTEXITCODE
         if ($serialAnalysisExitCode -eq 0 -and (Test-Path -LiteralPath $serialAnalysisPath -PathType Leaf)) {
@@ -376,7 +423,7 @@ if (Test-Path -LiteralPath $serial -PathType Leaf) {
 $serialSha256AfterAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
 $rawSerialPreservedByAnalysis = $null -ne $serialSha256BeforeAnalysis -and
     $serialSha256BeforeAnalysis -ceq $serialSha256AfterAnalysis
-$initCaptureComplete = $null -ne $serialAnalysis -and [bool]$serialAnalysis.initTraceComplete
+$initCaptureComplete = $null -ne $serialAnalysis -and -not $isThreadStoreReadiness -and [bool]$serialAnalysis.initTraceComplete
 if ($isInitAttribution) {
     $guestPass = $initCaptureComplete -and $serialAnalysis.rhInitializeResult -in @('success','failure') -and
         @($serialAnalysis.managedMainGateLines | Where-Object { $_ -match 'managed_main_gate=blocked' }).Count -gt 0
@@ -387,6 +434,21 @@ if ($isInitAttribution) {
         [bool]$serialAnalysis.explicitReturnMarkerConsistent -and
         [bool]$serialAnalysis.returnStatusMarkerConsistent -and
         @($serialAnalysis.managedMainGateLines | Where-Object { $_ -match 'managed_main_gate=blocked' }).Count -gt 0
+} elseif ($isThreadStoreReadiness) {
+    $r4GcResult = [regex]::Match($serialText,
+        '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=(PASS|FAIL) callbacks=(\S+) result1=(\S+) result2=(\S+) result3=(\S+)\s*$')
+    $threadStoreOutcome = if ($null -ne $serialAnalysis) { [string]$serialAnalysis.outcome } else { '' }
+    $threadStoreFailureOutcome = $threadStoreOutcome -in @(
+        'INIT_FAILURE_BLOCKED','CURRENT_THREAD_TLS_INCOMPLETE','THREADSTORE_OBSERVATION_INCOMPLETE',
+        'THREADSTORE_STATE_INVALID','MODULE_REGISTRATION_INCOMPLETE','MODULE_INITIALIZATION_INCOMPLETE',
+        'ATTACHMENT_INCOMPLETE','PAL_ATTACHMENT_INCOMPLETE','PAL_THREAD_CONSTRUCTION_INCOMPLETE',
+        'PAL_STACK_QUERY_FAILED','PAL_STACK_BOUNDS_INVALID','MANAGED_ENTRY_INCOMPLETE')
+    $threadStoreHandoffAndProofCaptured = $null -ne $serialAnalysis -and
+        $threadStoreOutcome -eq 'THREADSTORE_HANDOFF_TRACE_COMPLETE' -and $r4GcResult.Success
+    $guestPass = $null -ne $serialAnalysis -and
+        [bool]$serialAnalysis.rhInitializeAdapterMappingConsistent -and
+        ($threadStoreFailureOutcome -or $threadStoreHandoffAndProofCaptured)
+    $initCaptureComplete = $guestPass
 }
 $sourceRamdiskSha256 = Get-Sha256 (Join-Path $repo 'ESP\ramdisk.img')
 $sourceRamdiskPreserved = $sourceRamdiskSha256 -ceq 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8'
@@ -421,6 +483,19 @@ if ($isInitAttribution) {
         elseif ($initReturnFailure) { 'INIT_FAILURE_CAPTURED' }
         elseif ($serialAnalysis.nativeRhInitializeBoolean -eq '00000001') { 'INIT_RETURN_SUCCESS_GC_PROOF_SUPPRESSED' }
         else { 'INIT_CAPTURE_INCOMPLETE' }
+} elseif ($isThreadStoreReadiness) {
+    $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
+        elseif (-not $preflightPassed) { 'THREADSTORE_BLOCKED_QAC_CENSUS' }
+        elseif (-not $admitted) { 'THREADSTORE_CANDIDATE_NOT_ADMITTED' }
+        elseif (-not $releaseVerified) { 'THREADSTORE_CAPTURED_BUT_QAC_RELEASE_UNVERIFIED' }
+        elseif (-not $guestPass) { 'THREADSTORE_TRACE_INCOMPLETE' }
+        elseif ($serialAnalysis.threadStoreHandoffReady) { 'THREADSTORE_HANDOFF_PROVEN' }
+        else { 'THREADSTORE_FAILURE_BOUNDARY_CAPTURED' }
+    if ($guestPass -and $serialAnalysis.threadStoreHandoffReady) {
+        $outcome = if ($r4GcResult.Groups[1].Value -eq 'PASS') {
+            'THREADSTORE_HANDOFF_AND_GC_PROOF_CAPTURED'
+        } else { 'THREADSTORE_HANDOFF_CAPTURED_GC_PROOF_FAILED' }
+    }
 }
 $manifest = [ordered]@{
     result=$outcome;runRoot=$runRoot;candidateRoot=$candidate;candidateManifest=$candidateManifestPath
@@ -436,6 +511,12 @@ $manifest = [ordered]@{
     qemuStatus=$qemuStatus;qmpPort=$qmpPort;qemuArguments=$qemuArgs;guestPass=$guestPass
     initAttributionProfile=$isInitAttribution;initCaptureComplete=$initCaptureComplete
     initReturnContractProfile=$isInitReturnContract
+    threadStoreReadinessProfile=$isThreadStoreReadiness
+    threadStoreReadinessAnalysis=if ($isThreadStoreReadiness) { $serialAnalysisPath } else { $null }
+    threadStoreReadinessOutcome=if ($isThreadStoreReadiness -and $null -ne $serialAnalysis) { $serialAnalysis.outcome } else { $null }
+    threadStoreHandoffReady=if ($isThreadStoreReadiness -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.threadStoreHandoffReady } else { $false }
+    gcOwnershipProofOutcome=if ($isThreadStoreReadiness -and $r4GcResult.Success) { $r4GcResult.Groups[1].Value } else { $null }
+    gcOwnershipProofCallbacks=if ($isThreadStoreReadiness -and $r4GcResult.Success) { $r4GcResult.Groups[2].Value } else { $null }
     nativeRhInitializeBoolean=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.nativeRhInitializeBoolean } else { $null }
     nativeRhInitializeOutcome=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.nativeRhInitializeOutcome } else { $null }
     startupAdapterStatusCode=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterStatusCode } else { $null }
@@ -465,6 +546,9 @@ if ($isInitAttribution) {
 } elseif ($isInitReturnContract) {
     Write-Output "C188R12R4R5R3_INIT_RETURN_CONTRACT=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5R3_INIT_RETURN_CONTRACT_MANIFEST=$manifestPath"
+} elseif ($isThreadStoreReadiness) {
+    Write-Output "C188R12R4R5R4_THREADSTORE_READINESS=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R12R4R5R4_THREADSTORE_READINESS_MANIFEST=$manifestPath"
 } else {
     Write-Output "C188R12R4R5_GC_OWNERSHIP=$outcome ADMITTED=$admitted PASS=$guestPass QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5_GC_OWNERSHIP_MANIFEST=$manifestPath"

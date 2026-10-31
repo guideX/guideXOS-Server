@@ -6,6 +6,10 @@ namespace HostLogProof;
 
 public static unsafe class Program
 {
+#if HOSTLOGPROOF_C188R12R4R5R4_THREADSTORE_READINESS
+    [DllImport("__Internal", EntryPoint = "guideXosNativeAotThreadReadinessManagedMainEntered")]
+    private static extern void GuideXosNativeAotThreadReadinessManagedMainEntered();
+#endif
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
     private static uint s_c188r11ManagedInvocationCount;
     private static uint s_c188r11ManagedBoundaryRecords;
@@ -2540,6 +2544,9 @@ public static unsafe class Program
     [UnmanagedCallersOnly(EntryPoint = "ManagedMain")]
     public static int ManagedMain(NativeGxAppContext* ctx)
     {
+#if HOSTLOGPROOF_C188R12R4R5R4_THREADSTORE_READINESS
+        GuideXosNativeAotThreadReadinessManagedMainEntered();
+#endif
         if (ctx == null)
         {
             return GxAbi.ErrorInvalidArgument;

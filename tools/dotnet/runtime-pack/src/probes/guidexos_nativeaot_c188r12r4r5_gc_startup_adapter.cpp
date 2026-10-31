@@ -2,6 +2,9 @@
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #include "guidexos_nativeaot_rh_initialize_contract.h"
 #include "../platform/guidexos_nativeaot_init_trace.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#include "../platform/guidexos_nativeaot_threadstore_readiness.h"
+#endif
 
 /*
  * Minimal proof-image adapter for the existing kernel startup harness.
@@ -114,6 +117,12 @@ GuideXosNativeAotGcStartupInstallPlatformHooks(
 }
 
 extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    uintptr_t entryLocal = 0u;
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_ADAPTER_ENTER,
+        reinterpret_cast<uintptr_t>(&entryLocal), 0u);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
     guideXosNativeAotInitTraceSetInvocation(1u);
     guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_ADAPTER);
@@ -125,6 +134,12 @@ extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void
         guidexos_nativeaot_observe_rh_initialize(nativeResult);
     g_rhInitializeRawResult = observation.native_boolean;
     g_startupResult = static_cast<unsigned int>(observation.adapter_status);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_RHINITIALIZE_RETURN,
+        static_cast<uintptr_t>(g_rhInitializeRawResult),
+        static_cast<uintptr_t>(g_startupResult));
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
     const uint32_t singletonBits = captureInitSingletonBits();
     guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_RH_INITIALIZE,

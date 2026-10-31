@@ -90,6 +90,10 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_PROOF</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5R4ThreadStoreReadiness)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5R4_THREADSTORE_READINESS</DefineConstants>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipTests)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_TESTS</DefineConstants>
   </PropertyGroup>

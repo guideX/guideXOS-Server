@@ -359,6 +359,19 @@ bool installNativeAotCurrentThreadTls() {
 }
 #endif
 
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+void threadStoreReadinessKernelMarker(
+    const char* event, uintptr_t raw0, uintptr_t raw1) {
+    serial::puts("[C188R12R4R5R4_THREAD] event=");
+    serial::puts(event);
+    serial::puts(" raw0=");
+    serial::put_hex64(raw0);
+    serial::puts(" raw1=");
+    serial::put_hex64(raw1);
+    serial::puts("\n");
+}
+#endif
+
 void status(const char* name, bool passed, bool& allPassed) {
     serial::puts("[nativeaot-pal-qemu-test] ");
     serial::puts(name);
@@ -2403,6 +2416,12 @@ void runFirstRealAllocationImpl(
 #if !defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
     (void)initTraceRhInitializeRawResultAddress;
 #endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    threadStoreReadinessKernelMarker(
+        "kernel_adapter_dispatch",
+        static_cast<uintptr_t>(process::current_thread_id()),
+        static_cast<uintptr_t>(startupMainAddress));
+#endif
     const int32_t startupResult = reinterpret_cast<StartupMain>(startupMainAddress)();
     g_firstAllocationDiagnosticsAddress = reinterpret_cast<uintptr_t>(
         reinterpret_cast<GetDiagnostics>(getDiagnosticsAddress)());
@@ -2425,6 +2444,12 @@ void runFirstRealAllocationImpl(
             ? reinterpret_cast<InitRhResultValue>(
                   initTraceRhInitializeRawResultAddress)()
             : 0xFFFFFFFFu;
+#endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    threadStoreReadinessKernelMarker(
+        "kernel_init_result",
+        static_cast<uintptr_t>(nativeRhInitializeResult),
+        static_cast<uintptr_t>(static_cast<uint32_t>(startupResult)));
 #endif
     serial::puts(
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
@@ -2475,6 +2500,12 @@ void runFirstRealAllocationImpl(
     firstAllocationStatus("RhInitialize adapter status (zero is success)",
                           startupResult == 0, allPassed);
     if (startupResult != 0) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        threadStoreReadinessKernelMarker(
+            "managed_entry_blocked_init_failure",
+            static_cast<uintptr_t>(nativeRhInitializeResult),
+            static_cast<uintptr_t>(static_cast<uint32_t>(startupResult)));
+#endif
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
         serial::puts("[C188R12R4R5R1_INIT] managed_main_gate=blocked adapterStatus=");
@@ -2491,7 +2522,13 @@ void runFirstRealAllocationImpl(
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
     }
-#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    threadStoreReadinessKernelMarker(
+        "managed_entry_gate_open",
+        static_cast<uintptr_t>(nativeRhInitializeResult),
+        static_cast<uintptr_t>(static_cast<uint32_t>(startupResult)));
+#endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS) && !defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
     serial::puts("[C188R12R4R5R1_INIT] managed_main_gate=blocked reason=runtime-threadstore-attachment-unqualified singleton=");
     serial::put_hex32(preGcState);
     serial::puts(" gcProof=not-entered\n");
@@ -2520,6 +2557,16 @@ void runFirstRealAllocationImpl(
     serial::puts(" tlsBlock=");
     serial::put_hex64(reinterpret_cast<uintptr_t>(g_nativeAotTlsBlock));
     serial::puts(" tlsIndexAssumed=0\n");
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    threadStoreReadinessKernelMarker(
+        "tls_installed",
+        reinterpret_cast<uintptr_t>(g_nativeAotTlsVector),
+        reinterpret_cast<uintptr_t>(g_nativeAotTlsBlock));
+    threadStoreReadinessKernelMarker(
+        "tls_gsbase",
+        reinterpret_cast<uintptr_t>(&g_nativeAotTlsGsArea),
+        static_cast<uintptr_t>(arch::amd64::read_msr(0xC0000101u)));
+#endif
     if (!tlsInstalled) {
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
@@ -2710,6 +2757,12 @@ void runFirstRealAllocationImpl(
         serial::puts("[C188R12R4R5R1_INIT] managed_main_call ordinal=");
         serial::put_hex32(index + 1u);
         serial::puts("\n");
+#endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        threadStoreReadinessKernelMarker(
+            "managed_dispatch",
+            static_cast<uintptr_t>(managedMainAddress),
+            static_cast<uintptr_t>(index + 1u));
 #endif
         results[index] = reinterpret_cast<C188R12R4R5ManagedMain>(
             managedMainAddress)(&context);

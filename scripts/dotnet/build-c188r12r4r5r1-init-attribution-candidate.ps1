@@ -1,6 +1,7 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
-    [string]$CandidateRoot = ''
+    [string]$CandidateRoot = '',
+    [switch]$ThreadStoreReadiness
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,7 +9,8 @@ Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
-    $CandidateRoot = Join-Path $root "out\dotnet\c188r12r4r5r3-init-return-contract\candidate-$stamp"
+    $phaseRoot = if ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
+    $CandidateRoot = Join-Path $root "out\dotnet\$phaseRoot\candidate-$stamp"
 }
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $allowed = [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet')) + [System.IO.Path]::DirectorySeparatorChar
@@ -50,7 +52,8 @@ $elfPath = Join-Path $artifactRoot 'HostLogProof.elf'
 $embeddedRaw = Join-Path $candidate 'gc-ownership-artifact.raw.o'
 $embeddedObject = Join-Path $candidate 'gc-ownership-artifact.o'
 $esp = Join-Path $candidate 'esp'
-$kernelBuildDir = 'build/c188r12r4r5r1-init-attribution-' + [guid]::NewGuid().ToString('N')
+$kernelBuildPrefix = if ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
+$kernelBuildDir = $kernelBuildPrefix + [guid]::NewGuid().ToString('N')
 $kernel = Join-Path $root "kernel\$($kernelBuildDir.Replace('/','\'))\bin\kernel.elf"
 $bootloader = Join-Path $root 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
 $objcopy = 'C:\mingw64\bin\objcopy.exe'
@@ -69,7 +72,7 @@ foreach ($requirement in @(
 
 New-Item -ItemType Directory -Force -Path $candidate | Out-Null
 $managedBuilder = Join-Path $root 'scripts\dotnet\build-managed-hostlog-proof.ps1'
-Invoke-Logged 'pwsh' @(
+$managedBuildArguments = @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managedBuilder,
     '-RepoRoot', $root, '-LegacyRoot', 'D:\dev\guideXOSUEFI',
     '-OutputRoot', $managedRoot, '-RuntimePackOutputRoot', $runtimeRoot,
@@ -77,7 +80,9 @@ Invoke-Logged 'pwsh' @(
     '-ProductionApplication', '-C188R12R4R5GcOwnershipProof',
     '-C188R12R4R5R1InitDiagnostics', '-C188R12R4R5R3InitReturnContract',
     '-ManagedProjectMode', 'GcOwnershipProof'
-) (Join-Path $candidate 'managed-build.log')
+)
+if ($ThreadStoreReadiness) { $managedBuildArguments += '-C188R12R4R5R4ThreadStoreReadiness' }
+Invoke-Logged 'pwsh' $managedBuildArguments (Join-Path $candidate 'managed-build.log')
 
 Require-File $pePath 'NativeAOT proof PE'
 Require-File $mapPath 'NativeAOT proof map'
@@ -91,6 +96,14 @@ if (-not [bool]$runtimeManifest.c188r12r4r5GcOwnershipProof -or
     [int64]$runtimeManifest.managedHeapBytes -ne 0 -or
     [string]$runtimeManifest.runtimeIdentity.sourceCommit -ne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3') {
     throw 'Runtime-pack manifest failed the proof isolation or pinned-runtime gate.'
+}
+if ([bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness -ne [bool]$ThreadStoreReadiness) {
+    throw 'Runtime-pack ThreadStore-readiness profile does not match the requested candidate mode.'
+}
+if ($ThreadStoreReadiness -and
+    ([string]::IsNullOrWhiteSpace([string]$runtimeManifest.c188r12r4r5r4PalCommonReplacementObject) -or
+     [string]::IsNullOrWhiteSpace([string]$runtimeManifest.c188r12r4r5r4PalCommonReplacementSha256))) {
+    throw 'R4 runtime-pack manifest does not identify the active stack-bounds PAL replacement.'
 }
 
 Invoke-Logged $python @($converter, $pePath, $elfPath, '--map', $mapPath, '--symbol', 'ManagedMain') (Join-Path $candidate 'pe-to-elf.log')
@@ -124,6 +137,15 @@ $requiredSymbols = @(
 )
 foreach ($symbol in $requiredSymbols) {
     if (-not $mapText.Contains($symbol)) { throw "NativeAOT proof map lacks required symbol: $symbol" }
+}
+if ($ThreadStoreReadiness) {
+    foreach ($symbol in @('guideXosStockRhpReversePInvoke', 'guideXosStockRhpReversePInvokeReturn', 'guideXosNativeAotThreadReadinessManagedMainEntered')) {
+        if (-not $mapText.Contains($symbol)) { throw "ThreadStore-readiness NativeAOT map lacks required symbol: $symbol" }
+    }
+    if ($mapText -notmatch '(?s)PalGetMaximumStackBounds\s+[0-9A-Fa-f]{16}\s+f\s+Runtime\.WorkstationGC:guidexos_nativeaot_pal_common_replacement\.threadstore\.obj' -or
+        $mapText.Contains('Runtime.WorkstationGC:PalRedhawkCommon.cpp.obj')) {
+        throw 'R4 NativeAOT link did not select the freestanding stack-bounds PAL implementation.'
+    }
 }
 if ($mapText.Contains('g_guideXosManagedHeap')) { throw 'NativeAOT proof image unexpectedly contains the C188 image-backed arena.' }
 
@@ -234,6 +256,7 @@ $kernelFeatures = @(
 )
 $kernelDefines = ($kernelFeatures | ForEach-Object { '-D' + $_ }) -join ' '
 $kernelDefines += ' -DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS -DGXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT'
+if ($ThreadStoreReadiness) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }
 $makeArgs = @(
     '-C', 'kernel', 'ARCH=amd64', "BUILD_DIR=$kernelBuildDir",
     'GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1',
@@ -250,6 +273,9 @@ if ($kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST' -
     $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT' -or
     $kernelLog -notmatch 'gc-startup-artifact\.o') {
     throw 'Isolated kernel build does not show the ownership selector and embedded NativeAOT image.'
+}
+if ($ThreadStoreReadiness -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS') {
+    throw 'ThreadStore-readiness kernel build does not show its isolated marker and handoff define.'
 }
 
 $espBoot = Join-Path $esp 'EFI\BOOT'
@@ -292,22 +318,24 @@ $productionMapText = Get-Content -LiteralPath $productionMapPath -Raw
 if ([bool]$productionRuntimeManifest.c188r12r4r5GcOwnershipProof -or
     [bool]$productionRuntimeManifest.c188r12r4r5r1InitDiagnostics -or
     [bool]$productionRuntimeManifest.c188r12r4r5r3InitReturnContract -or
+    [bool]$productionRuntimeManifest.c188r12r4r5r4ThreadStoreReadiness -or
     $productionMapText.Contains('C188R12R4R5R1_INIT') -or
     $productionMapText.Contains('C188R12R4R5R3_INIT') -or
+    $productionMapText.Contains('C188R12R4R5R4_THREAD') -or
     $productionMapText.Contains('GuideXosNativeAotGcStartupGetRhInitializeRawResult')) {
     throw 'Proof-disabled production NativeAOT outputs contain C188 return-contract instrumentation.'
 }
 
 $manifest = [ordered]@{
-    result = 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST'
+    result = if ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS_GUEST' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
     repoRoot = $root
     head = (& git -C $root rev-parse HEAD).Trim()
     branch = (& git -C $root branch --show-current).Trim()
     candidateRoot = $candidate
-    mode = 'InitReturnContract'
+    mode = if ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
     productionApplicationStartupOnly = $true
     managedMainEnteredByCandidate = $false
-    managedMainGateReason = 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.'
+    managedMainGateReason = if ($ThreadStoreReadiness) { 'Candidate is unbooted; a successful RhInitialize proceeds through module registration and the pinned stock reverse-P/Invoke attachment helper before ManagedMain.' } else { 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.' }
     managedGraphCallbacks = 0
     isolatedKernelBuildDirectory = $kernelBuildDir
     runtimePackManifest = $runtimeManifestPath
@@ -315,6 +343,14 @@ $manifest = [ordered]@{
     runtimePackSourceCommit = $runtimeManifest.runtimeIdentity.sourceCommit
     runtimeInitDiagnostics = [bool]$runtimeManifest.c188r12r4r5r1InitDiagnostics
     c188R12R4R5R3InitReturnContract = [bool]$runtimeManifest.c188r12r4r5r3InitReturnContract
+    c188R12R4R5R4ThreadStoreReadiness = [bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness
+    threadStoreReadinessRuntimeSourceCommit = $runtimeManifest.c188r12r4r5r4ThreadStoreReadinessSourceCommit
+    threadStoreReadinessRuntimeSourceFiles = $runtimeManifest.c188r12r4r5r4ThreadStoreReadinessSourceFiles
+    threadStoreReadinessPalCommonStockMember = $runtimeManifest.c188r12r4r5r4PalCommonStockMember
+    threadStoreReadinessPalCommonReplacementObject = $runtimeManifest.c188r12r4r5r4PalCommonReplacementObject
+    threadStoreReadinessPalCommonReplacementSha256 = $runtimeManifest.c188r12r4r5r4PalCommonReplacementSha256
+    threadStoreReadinessEvents = if ($ThreadStoreReadiness) { @('adapter_enter','rhinitialize_return','kernel_adapter_dispatch','kernel_init_result','managed_entry_blocked_init_failure','managed_entry_gate_open','tls_installed','tls_gsbase','runtime_instance','threadstore','current_thread_tls','current_thread_state','module_registration_enter','module_registration_complete','module_initialize_enter','module_initialize_complete','transition_enter','pal_attach_enter','pal_attach_existing','pal_attach_complete','pal_thread_id','pal_stack_bounds','pal_stack_current','transition_attach_complete','transition_attach_incomplete','managed_dispatch','managed_entry','transition_return') } else { @() }
+    threadStoreTelemetryStackCapacity = if ($ThreadStoreReadiness) { 8 } else { 0 }
     runtimePackSha256 = $runtimeManifest.objectSha256
     runtimePackManifestSha256 = Hash-File $runtimeManifestPath
     managedPe = $pePath
@@ -354,8 +390,8 @@ $manifest = [ordered]@{
         bit4='RhConfig pointer available'; bit5='guideXOS NativeAOT modules initialized'
         bit6='code manager registered'; bit7='ThreadStore current-thread accessor non-null (not proof of list attachment)'
     }
-    adapterVersion = 'c188r12r4r5r3-init-return-contract-v1'
-    runnerVersion = 'c188r12r4r5r1-qac-runner-v1'
+    adapterVersion = if ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness-v1' } else { 'c188r12r4r5r3-init-return-contract-v1' }
+    runnerVersion = if ($ThreadStoreReadiness) { 'c188r12r4r5r4r1-one-boot-guard-planned' } else { 'c188r12r4r5r1-qac-runner-v1' }
     nativeRhInitialize = [ordered]@{
         signature = 'extern "C" bool RhInitialize(bool isDll)'
         successBoolean = 1
@@ -408,6 +444,9 @@ $manifest = [ordered]@{
         candidateElfInspection = Hash-File (Join-Path $candidate 'elf-inspection.txt')
         candidatePeToElfLog = Hash-File (Join-Path $candidate 'pe-to-elf.log')
         startupAdapterObject = Hash-File (Join-Path $artifactRoot 'guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.obj')
+        palMinWinReplacementObject = Hash-File (Join-Path $artifactRoot 'guidexos_nativeaot_pal_minwin_replacement.obj')
+        threadStoreReadinessPalCommonReplacementObject = if ($ThreadStoreReadiness) { Hash-File ([string]$runtimeManifest.c188r12r4r5r4PalCommonReplacementObject) } else { $null }
+        threadStoreReadinessHeader = if ($ThreadStoreReadiness) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_threadstore_readiness.h') } else { $null }
         embeddedNativeAotObject = Hash-File $embeddedObject
         embeddedNativeAotRawObject = Hash-File $embeddedRaw
         startupExportsHeader = Hash-File $header
@@ -435,6 +474,6 @@ $manifest = [ordered]@{
 }
 $manifestPath = Join-Path $candidate 'candidate-manifest.json'
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-Write-Output "C188R12R4R5R3 initialization return-contract candidate: READY ($candidate)"
+Write-Output "C188R12R4R5 candidate: READY ($candidate)"
 Write-Output "Kernel SHA256: $kernelHash"
 Write-Output "Candidate manifest: $manifestPath"

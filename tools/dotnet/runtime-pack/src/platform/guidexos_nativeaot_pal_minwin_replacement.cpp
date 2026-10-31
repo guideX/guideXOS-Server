@@ -1,4 +1,7 @@
 #include "guidexos_nativeaot_pal_contract.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#include "guidexos_nativeaot_threadstore_readiness.h"
+#endif
 #include "guidexos_nativeaot_init_trace.h"
 
 #include <assert.h>
@@ -138,16 +141,32 @@ GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API PalInit() {
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT void GUIDEXOS_NATIVEAOT_PAL_API
 PalAttachThread(void* thread) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_ATTACH_ENTER,
+        reinterpret_cast<uintptr_t>(thread), static_cast<uintptr_t>(g_flsIndex));
+#endif
     if (g_flsIndex == kFlsOutOfIndexes) {
         guidexos_nativeaot_pal_fail_fast(0x50414C01u);
     }
     void* existing = guidexos_nativeaot_pal_fls_get(g_flsIndex);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_ATTACH_EXISTING,
+        reinterpret_cast<uintptr_t>(existing), reinterpret_cast<uintptr_t>(thread));
+#endif
     if (existing != nullptr && existing != thread) {
         guidexos_nativeaot_pal_fail_fast(0x50414C02u);
     }
-    if (guidexos_nativeaot_pal_fls_set(g_flsIndex, thread) != 0) {
+    const int setResult = guidexos_nativeaot_pal_fls_set(g_flsIndex, thread);
+    if (setResult != 0) {
         guidexos_nativeaot_pal_fail_fast(0x50414C03u);
     }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_ATTACH_COMPLETE,
+        reinterpret_cast<uintptr_t>(thread), static_cast<uintptr_t>(setResult));
+#endif
 }
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API
@@ -173,7 +192,13 @@ GUIDEXOS_NATIVEAOT_PAL_EXPORT uint64_t PalQueryPerformanceFrequency() {
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT uint64_t PalGetCurrentOSThreadId() {
     uint64_t value = 0;
-    return guidexos_nativeaot_pal_current_thread_id(&value) == 0 ? value : 0;
+    const int result = guidexos_nativeaot_pal_current_thread_id(&value);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_THREAD_ID,
+        static_cast<uintptr_t>(value), static_cast<uintptr_t>(result));
+#endif
+    return result == 0 ? value : 0;
 }
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT uint32_t GUIDEXOS_NATIVEAOT_PAL_API

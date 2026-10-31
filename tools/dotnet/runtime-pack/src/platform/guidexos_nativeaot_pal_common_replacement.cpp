@@ -1,4 +1,7 @@
 #include "guidexos_nativeaot_pal_contract.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#include "guidexos_nativeaot_threadstore_readiness.h"
+#endif
 
 #include <stdint.h>
 #include <windows.h>
@@ -53,13 +56,29 @@ PalGetMaximumStackBounds(void** stack_low, void** stack_high) {
     uintptr_t low = 0;
     uintptr_t high = 0;
     uintptr_t current = 0;
-    if (stack_low == nullptr || stack_high == nullptr ||
-        guidexos_nativeaot_pal_stack_bounds(&low, &high, &current) != 0) {
+    if (stack_low == nullptr || stack_high == nullptr) {
+        return false;
+    }
+    const int result = guidexos_nativeaot_pal_stack_bounds(&low, &high, &current);
+    if (result != 0) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        GuideXosNativeAotThreadReadinessMark(
+            GX_THREADSTORE_EVENT_PAL_STACK_CURRENT,
+            current, static_cast<uintptr_t>(result));
+#endif
         return false;
     }
     *stack_low = reinterpret_cast<void*>(low);
     *stack_high = reinterpret_cast<void*>(high);
-    return low < high && current >= low && current < high;
+    const bool valid = low < high && current >= low && current < high;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_STACK_BOUNDS, low, high);
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_STACK_CURRENT,
+        current, valid ? 0u : 1u);
+#endif
+    return valid;
 }
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT int32_t
