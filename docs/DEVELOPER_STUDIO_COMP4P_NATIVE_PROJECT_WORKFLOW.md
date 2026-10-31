@@ -30,7 +30,8 @@ visible error text did not appear. No guest visual acceptance was performed.
 - No branch switch, merge, rebase, reset, stash, clean, history rewrite, push,
   QAC admission, or QEMU launch was performed
 - No files in the Developer Studio Debugging or Tools worktrees were changed
-- Ending implementation HEAD: recorded in the final COMP4P completion report
+- Ending implementation HEAD: `2d974107` (sample/test implementation commit;
+  the final report-only commit is listed in the completion response)
 
 The actual IDE implementation is in
 `D:\dev\guideXOS_Developer_Studio` on branch `main`, HEAD
