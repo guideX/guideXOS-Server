@@ -11,7 +11,7 @@ function Get-ManagedHostLogMapSymbolAddress([string]$Path, [string]$Symbol, [str
     throw "$Label symbol not found in map: $Symbol"
 }
 
-function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$MapPath, [string]$PeDumpPath, [switch]$GuideXosRuntimePack, [switch]$ManagedAllocation, [switch]$RepeatedAllocation, [switch]$ProductionApplication) {
+function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$MapPath, [string]$PeDumpPath, [switch]$GuideXosRuntimePack, [switch]$ManagedAllocation, [switch]$RepeatedAllocation, [switch]$ProductionApplication, [switch]$GcOwnershipProof) {
     $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
     $reversePInvoke = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvoke" "RhpReversePInvoke"
     $reverseReturn = Get-ManagedHostLogMapSymbolAddress $MapPath "RhpReversePInvokeReturn" "RhpReversePInvokeReturn"
@@ -74,12 +74,20 @@ function Assert-ManagedHostLogReversePInvokeChain([string]$ElfPath, [string]$Map
     }
 
     if ($ManagedAllocation) {
-        Assert-ManagedHostLogFileContains $MapPath @(
+        $allocationPatterns = @(
             'RhpNewArray\s+[0-9A-Fa-f]{16}',
             'guideXosStockRhpNewArray',
-            'g_guideXosManagedHeap',
             'g_guideXosAllocationDiagnostics'
-        ) "Managed allocation runtime-pack evidence"
+        )
+        if (-not $GcOwnershipProof) { $allocationPatterns += 'g_guideXosManagedHeap' }
+        Assert-ManagedHostLogFileContains $MapPath $allocationPatterns "Managed allocation runtime-pack evidence"
+        if ($GcOwnershipProof) {
+            Assert-ManagedHostLogFileNotContains $MapPath @('g_guideXosManagedHeap') "GC ownership proof arena exclusion"
+            Assert-ManagedHostLogFileContains $MapPath @(
+                'RhpCollect\s+[0-9A-Fa-f]{16}',
+                'S_P_CoreLib_System_Runtime_InteropServices_GCHandle___ctor'
+            ) "GC ownership proof collector and registered-handle evidence"
+        }
         if ($RepeatedAllocation) {
             Assert-ManagedHostLogFileContains $MapPath @(
                 'guideXosManagedAllocationCanFit\s+[0-9A-Fa-f]{16}',
@@ -322,13 +330,14 @@ function Assert-ManagedHostLogElfEnvelope(
     [switch]$GuideXosRuntimePack,
     [switch]$ManagedAllocation,
     [switch]$RepeatedAllocation,
-    [switch]$ProductionApplication) {
+    [switch]$ProductionApplication,
+    [switch]$GcOwnershipProof) {
     $elf = Read-ManagedHostLogElfEnvelope $ElfPath
     $pe = Get-ManagedHostLogPeImageEnvelope $PePath
     $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
     $entrySymbol = if ($ProductionApplication) { "GuideXosNativeAotApplicationEntry" } else { "ManagedMain" }
     $entryAddress = Get-ManagedHostLogMapSymbolAddress $MapPath $entrySymbol "ELF entry"
-    $null = Assert-ManagedHostLogReversePInvokeChain $ElfPath $MapPath $PeDumpPath -GuideXosRuntimePack:$GuideXosRuntimePack -ManagedAllocation:$ManagedAllocation -RepeatedAllocation:$RepeatedAllocation -ProductionApplication:$ProductionApplication
+    $null = Assert-ManagedHostLogReversePInvokeChain $ElfPath $MapPath $PeDumpPath -GuideXosRuntimePack:$GuideXosRuntimePack -ManagedAllocation:$ManagedAllocation -RepeatedAllocation:$RepeatedAllocation -ProductionApplication:$ProductionApplication -GcOwnershipProof:$GcOwnershipProof
 
     if ($elf.Entry -ne $entryAddress) { throw ("ELF entry 0x{0:X} is not {1} 0x{2:X}." -f $elf.Entry, $entrySymbol, $entryAddress) }
     if ($elf.LoadSegments.Count -eq 0) { throw "ELF has no PT_LOAD segments." }
@@ -373,7 +382,15 @@ function Assert-ManagedHostLogElfEnvelope(
     Assert-ManagedHostLogFileNotContains $ElfReadelfPath @('NEEDED', 'PT_INTERP', 'rwx') "ELF dependency scan"
 
     if ($ManagedAllocation) {
-        if ($ProductionApplication) {
+        if ($GcOwnershipProof) {
+            Assert-ManagedHostLogFileContains $MapPath @(
+                'GuideXosNativeAotApplicationEntry\s+[0-9A-Fa-f]{16}',
+                'RhpNewArray\s+[0-9A-Fa-f]{16}',
+                'RhpCollect\s+[0-9A-Fa-f]{16}',
+                'S_P_CoreLib_System_Runtime_InteropServices_GCHandle___ctor'
+            ) "GC ownership proof allocation/root/collection evidence"
+            Assert-ManagedHostLogFileNotContains $MapPath @('g_guideXosManagedHeap') "GC ownership proof arena exclusion"
+        } elseif ($ProductionApplication) {
             Assert-ManagedHostLogFileContains $MapPath @(
                 'GuideXosNativeAotApplicationEntry\s+[0-9A-Fa-f]{16}',
                 'RhpNewArray\s+[0-9A-Fa-f]{16}',

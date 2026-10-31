@@ -26,6 +26,7 @@ param(
     [switch]$C188R11ManagedStateProvenance,
     [switch]$C188R12R3LifetimeStartAttribution,
     [switch]$C188R12R4FactoryAttribution,
+    [switch]$C188R12R4R5GcOwnershipProof,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -54,7 +55,7 @@ param(
     [switch]$C179ManagedTaskManagerResize,
     [switch]$C167DefaultAppsProof,
     [switch]$ProofControl,
-    [ValidateSet("Production", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite", "C167ProofComposite")]
+    [ValidateSet("Production", "GcOwnershipProof", "C104AppA", "C104AppB", "C107Composite", "C108ThreadStaticLifecycle", "ProductionComposite", "C112Composite", "C113Composite", "C114Composite", "C115Composite", "C116Composite", "C117Composite", "C118Composite", "C119Composite", "C120Composite", "C121Composite", "C122Composite", "C123Composite", "C124Composite", "C125Composite", "C126Composite", "C127Composite", "C128Composite", "C129Composite", "C131Composite", "C132Composite", "C133Composite", "C134Composite", "C135Composite", "C136Composite", "C137Composite", "C138Composite", "C139Composite", "C140Composite", "C141Composite", "C142Composite", "C143Composite", "C144Composite", "C145Composite", "C146Composite", "C147Composite", "C148Composite", "C149Composite", "C150Composite", "C151Composite", "C152Composite", "C153Composite", "C154Composite", "C158Composite", "C160Composite", "C167ProofComposite")]
     [string]$ManagedProjectMode = "",
     [ValidateSet("Primary64KiB", "Primary128KiB", "Primary256KiB", "Primary4MiB", "Primary8MiB", "Small4KiB")]
     [string]$HeapConfiguration = "Primary64KiB",
@@ -243,6 +244,7 @@ if ($UseGuideXosRuntimePack) {
     if ($ProductionApplication) { $runtimePackBuildArguments += "-ProductionApplication" }
     if ($PersistentCompositeLifecycle) { $runtimePackBuildArguments += "-PersistentCompositeLifecycle" }
     if ($C188R12R4FactoryAttribution) { $runtimePackBuildArguments += "-C188R12R4FactoryAttribution" }
+    if ($C188R12R4R5GcOwnershipProof) { $runtimePackBuildArguments += "-C188R12R4R5GcOwnershipProof" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
@@ -254,6 +256,13 @@ if ($UseGuideXosRuntimePack) {
         throw "GuideXOS runtime-pack manifest not found: $runtimePackManifest"
     }
     $runtimePackManifestObject = Get-Content -LiteralPath $runtimePackManifest -Raw | ConvertFrom-Json
+    if ($C188R12R4R5GcOwnershipProof -and
+        (-not [bool]$runtimePackManifestObject.c188r12r4r5GcOwnershipProof -or
+         [bool]$runtimePackManifestObject.imageBackedArenaPresent -or
+         [int64]$runtimePackManifestObject.managedHeapBytes -ne 0 -or
+         [string]$runtimePackManifestObject.allocationStrategy -ne 'experimental-nativeaot-workstation-gc-object-and-array-allocation-no-c188-arena')) {
+        throw 'C188R12R4R5 runtime-pack manifest does not prove an isolated real-GC allocation profile without the C188 arena.'
+    }
     $runtimePackObject = [string]$runtimePackManifestObject.object
     if ([string]::IsNullOrWhiteSpace($runtimePackObject) -or -not (Test-Path -LiteralPath $runtimePackObject)) {
         throw "GuideXOS runtime-pack object not found: $runtimePackObject"
@@ -372,6 +381,10 @@ $gcStartupContractSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nat
 $gcStartupContractObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_startup_platform_contract.obj"
 $managedHostShimsSource = Join-Path $RuntimePackRoot "src\probes\guidexos_nativeaot_managed_host_shims.cpp"
 $managedHostShimsObj = Join-Path $artifactRoot "guidexos_nativeaot_managed_host_shims.obj"
+$gcAllocationProbeSource = Join-Path $RuntimePackRoot "src\probes\guidexos_nativeaot_gc_allocation_probe.cpp"
+$gcAllocationProbeObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_allocation_probe.c188r12r4r5.obj"
+$gcOwnershipStartupAdapterSource = Join-Path $RuntimePackRoot "src\probes\guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.cpp"
+$gcOwnershipStartupAdapterObj = Join-Path $artifactRoot "guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.obj"
 
 if ($Clean) {
     Assert-WithinRoot $OutputRoot $RepoRoot "Output"
@@ -427,6 +440,7 @@ $toolchainLines = @(
     "NativeImportObj=$startupImportsObj"
     "ProductionApplication=$ProductionApplication"
     "PersistentCompositeLifecycle=$PersistentCompositeLifecycle"
+    "C188R12R4R5GcOwnershipProof=$C188R12R4R5GcOwnershipProof"
         "UseGuideXosRuntimePack=$UseGuideXosRuntimePack"
         "AllocationMode=$AllocationMode"
     "RuntimePackRoot=$RuntimePackRoot"
@@ -460,6 +474,18 @@ try {
         "Production"
     } else {
         $AllocationMode
+    }
+    if ($C188R12R4R5GcOwnershipProof -and
+        (-not $UseGuideXosRuntimePack -or -not $ProductionApplication -or
+         $AllocationMode -ne 'Allocating' -or
+         $managedProjectMode -ne 'GcOwnershipProof' -or
+         $PersistentCompositeLifecycle -or $C188R12R4FactoryAttribution -or
+         $C188R12R3LifetimeStartAttribution -or $C188ExternalAppIdentity -or
+         $C187GuestCandidate -or $ThreadStaticLifecycleDiagnostics)) {
+        throw 'C188R12R4R5 requires an isolated ProductionApplication with the real GuideXOS runtime pack, allocating GC path, and GcOwnershipProof project mode; persistent lifecycle, C188 factory/lifetime attribution, app identity, guest campaign, and TLS diagnostics are excluded.'
+    }
+    if ($managedProjectMode -eq 'GcOwnershipProof' -and -not $C188R12R4R5GcOwnershipProof) {
+        throw 'GcOwnershipProof project mode requires -C188R12R4R5GcOwnershipProof.'
     }
     if ($C187GuestCandidate -and
         (-not $C185ExternalComposition -or -not $ProductionApplication -or
@@ -607,6 +633,9 @@ try {
     if ($C188R12R4FactoryAttribution) {
         $publishProperties += '-p:HostLogProofC188R12R4FactoryAttribution=true'
     }
+    if ($C188R12R4R5GcOwnershipProof) {
+        $publishProperties += '-p:HostLogProofC188R12R4R5GcOwnershipProof=true'
+    }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"
     }
@@ -629,6 +658,32 @@ try {
     }
     if ($ThreadStaticLifecycleDiagnostics) {
         $publishProperties += "-p:HostLogProofManagedHostShimsObj=$managedHostShimsObj"
+    }
+    $gcAllocationProbeCompileBlock = $null
+    if ($C188R12R4R5GcOwnershipProof) {
+        $gcProbeCoreclrRoot = Join-Path $RepoRoot 'out\dotnet\gc-feasibility-baseline\nativeaot-runtime\src\coreclr'
+        $gcProbeNativeRoot = Join-Path $gcProbeCoreclrRoot '..\native'
+        $gcProbeRuntimeRoot = Join-Path $gcProbeCoreclrRoot 'nativeaot\Runtime'
+        $gcProbeCommonHeader = Join-Path $gcProbeCoreclrRoot 'gc\env\common.h'
+        foreach ($input in @($gcAllocationProbeSource, $gcOwnershipStartupAdapterSource, $gcProbeCommonHeader,
+                (Join-Path $gcProbeRuntimeRoot 'thread.h'),
+                (Join-Path $gcProbeCoreclrRoot 'gc\env\gcenv.h'),
+                (Join-Path $gcProbeCoreclrRoot 'pal\src\include'),
+                (Join-Path $gcProbeNativeRoot 'minipal\utils.h'))) {
+            if (-not (Test-Path -LiteralPath $input)) {
+                throw "Locked GC ownership diagnostics source input is missing: $input"
+            }
+        }
+        $gcProbeDefines = '/DWIN32 /D_WIN32 /D_WIN64 /DHOST_AMD64 /DTARGET_AMD64 /DHOST_64BIT /DTARGET_64BIT /DHOST_WINDOWS /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB'
+        $gcProbeIncludes = "/I`"$gcProbeRuntimeRoot`" /I`"$(Join-Path $gcProbeRuntimeRoot 'windows')`" /I`"$gcProbeCoreclrRoot`" /I`"$gcProbeNativeRoot`" /I`"$(Join-Path $gcProbeCoreclrRoot 'native')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'gc')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'gc\env')`" /I`"$(Join-Path $gcProbeRuntimeRoot 'inc')`" /I`"$(Join-Path $gcProbeRuntimeRoot 'eventpipe')`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /I`"$(Join-Path $gcProbeCoreclrRoot 'pal\src\include')`" /FI`"$gcProbeCommonHeader`""
+        $gcAllocationProbeCompileBlock = @(
+            "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcProbeDefines $gcProbeIncludes /Fo:`"$gcAllocationProbeObj`" `"$gcAllocationProbeSource`"",
+            'if errorlevel 1 exit /b %errorlevel%',
+            "cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcOwnershipStartupAdapterObj`" `"$gcOwnershipStartupAdapterSource`"",
+            'if errorlevel 1 exit /b %errorlevel%'
+        ) -join [Environment]::NewLine
+        $publishProperties += "-p:HostLogProofRuntimePackProbeObj=$gcAllocationProbeObj"
+        $publishProperties += "-p:HostLogProofGcOwnershipStartupAdapterObj=$gcOwnershipStartupAdapterObj"
     }
     if ($IncludeC134FocusedTests) {
         $publishProperties += "-p:HostLogProofC134IncludeFocusedTests=true"
@@ -765,6 +820,7 @@ try {
         $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ThreadStaticLifecycleDiagnostics) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:`"$managedHostShimsObj`" `"$managedHostShimsSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ProductionApplication) { "cl.exe /nologo /TC /c /GS- /Zl $(if ($C188R11ManagedStateProvenance) { '/DHOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE' }) /Fo:`"$c102StartupObj`" `"$c102StartupSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
+        $(if ($C188R12R4R5GcOwnershipProof) { $gcAllocationProbeCompileBlock } else { $null })
         "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true $(if ($ProjectArtifactIsolation -or $C187GuestCandidate -or $C188ExternalAppIdentity) { '--artifacts-path `"' + (Join-Path $OutputRoot 'project-artifacts') + '`"' }) -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true $($publishProperties -join ' ')"
         "exit /b %errorlevel%"
     )
@@ -899,7 +955,7 @@ if ($UseGuideXosRuntimePack) {
     }
 }
 Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
-Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated") -or $ProductionApplication) -RepeatedAllocation:($AllocationMode -eq "Repeated") -ProductionApplication:$ProductionApplication | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated") -or $ProductionApplication) -RepeatedAllocation:($AllocationMode -eq "Repeated") -ProductionApplication:$ProductionApplication -GcOwnershipProof:$C188R12R4R5GcOwnershipProof | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan

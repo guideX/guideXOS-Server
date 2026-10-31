@@ -2532,6 +2532,9 @@ public static unsafe class Program
 
     public static void Main()
     {
+#if HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_TESTS
+        Environment.ExitCode = GcOwnershipProofC188R12R4R5.RunHostedTests();
+#endif
     }
 
     [UnmanagedCallersOnly(EntryPoint = "ManagedMain")]
@@ -2551,6 +2554,10 @@ public static unsafe class Program
         {
             return GxAbi.ErrorUnsupported;
         }
+
+#if HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_PROOF
+        return GcOwnershipProofC188R12R4R5.Execute(ctx);
+#endif
 
 #if HOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE
         uint managedSelector = (uint)(nuint)ctx->userData;

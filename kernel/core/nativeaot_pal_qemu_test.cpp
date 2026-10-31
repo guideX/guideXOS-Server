@@ -7,6 +7,9 @@
 #if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
 #define GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST 1
 #endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST)
+#define GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST 1
+#endif
 
 #include "include/kernel/nativeaot_pal_qemu_test.h"
 #include "include/kernel/native_unwind_provider.h"
@@ -1485,6 +1488,33 @@ struct FirstRealAllocationContext {
     void* userData;
 };
 
+#if defined(GXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST)
+struct C188R12R4R5HostCallTable {
+    uint32_t size;
+    uint32_t version;
+    int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *log)(
+        FirstRealAllocationContext*, const uint8_t*);
+};
+
+int32_t GUIDEXOS_NATIVEAOT_PAL_CALL c188R12R4R5HostLog(
+    FirstRealAllocationContext*, const uint8_t* message) {
+    if (message == nullptr) return -1;
+    char bounded[512]{};
+    size_t length = 0u;
+    while (length + 1u < sizeof(bounded) && message[length] != 0u) {
+        bounded[length] = static_cast<char>(message[length]);
+        ++length;
+    }
+    bounded[length] = '\0';
+    arch::disable_interrupts();
+    serial::puts(bounded);
+    serial::puts("\n");
+    return 0;
+}
+using C188R12R4R5ManagedMain = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+    FirstRealAllocationContext*);
+#endif
+
 void firstAllocationStatus(const char* name, bool passed, bool& allPassed) {
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     serial::puts("[nativeaot-thread-static] ");
@@ -2548,6 +2578,38 @@ void runFirstRealAllocationImpl(
     serial::puts(allPassed
         ? "[nativeaot-thread-static] ALL_PASS\n"
         : "[nativeaot-thread-static] ALL_FAIL\n");
+    return;
+#elif defined(GXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST)
+    C188R12R4R5HostCallTable host{};
+    host.size = sizeof(host);
+    host.version = 1u;
+    host.log = &c188R12R4R5HostLog;
+    FirstRealAllocationContext context{};
+    context.size = sizeof(context);
+    context.apiVersion = 0u;
+    context.host = &host;
+    serial::puts("[C188R12R4R5-GC-OWNERSHIP] callbacks=3 begin\n");
+    uint32_t callbacks = 0u;
+    int32_t results[3] = {};
+    for (uint32_t index = 0u; index < 3u; ++index) {
+        results[index] = reinterpret_cast<C188R12R4R5ManagedMain>(
+            managedMainAddress)(&context);
+        ++callbacks;
+        if (results[index] != 0) break;
+    }
+    const bool passed = callbacks == 3u && results[0] == 0 &&
+        results[1] == 0 && results[2] == 0;
+    serial::puts("[C188R12R4R5-GC-OWNERSHIP] outcome=");
+    serial::puts(passed ? "PASS" : "FAIL");
+    serial::puts(" callbacks=");
+    serial::put_hex32(callbacks);
+    serial::puts(" result1=");
+    serial::put_hex32(static_cast<uint32_t>(results[0]));
+    serial::puts(" result2=");
+    serial::put_hex32(static_cast<uint32_t>(results[1]));
+    serial::puts(" result3=");
+    serial::put_hex32(static_cast<uint32_t>(results[2]));
+    serial::puts("\n");
     return;
 #elif defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST)
     runSegmentBoundaryManagedBoundary(

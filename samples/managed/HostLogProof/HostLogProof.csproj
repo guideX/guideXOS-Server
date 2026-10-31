@@ -86,6 +86,18 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4_FACTORY_TESTS</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipProof)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_PROOF</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipTests)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_TESTS</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipProof)' == 'true' and '$(PublishAot)' == 'true'">
+    <DirectPInvoke Include="__Internal" />
+  </ItemGroup>
+
   <!-- The guest's native factory probes use only statically linked __Internal
        functions.  Mark that boundary direct so NativeAOT does not retain its
        Windows DefaultAssemblyLoadContext resolver in the bare-metal image.
@@ -100,6 +112,11 @@
 
   <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION</DefineConstants>
+    <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'GcOwnershipProof'">
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_PRODUCTION;HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_PROOF</DefineConstants>
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
@@ -475,7 +492,7 @@
     <EntryPointSymbol>GuideXosNativeAotApplicationEntry</EntryPointSymbol>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle' or '$(HostLogProofMode)' == 'ProductionComposite' or '$(HostLogProofMode)' == 'C112Composite' or '$(HostLogProofMode)' == 'C113Composite' or '$(HostLogProofMode)' == 'C114Composite' or '$(HostLogProofMode)' == 'C115Composite' or '$(HostLogProofMode)' == 'C116Composite' or '$(HostLogProofMode)' == 'C117Composite' or '$(HostLogProofMode)' == 'C118Composite' or '$(HostLogProofMode)' == 'C119Composite' or '$(HostLogProofMode)' == 'C120Composite' or '$(HostLogProofMode)' == 'C121Composite' or '$(HostLogProofMode)' == 'C122Composite' or '$(HostLogProofMode)' == 'C123Composite' or '$(HostLogProofMode)' == 'C124Composite' or '$(HostLogProofMode)' == 'C125Composite' or '$(HostLogProofMode)' == 'C126Composite' or '$(HostLogProofMode)' == 'C127Composite' or '$(HostLogProofMode)' == 'C128Composite' or '$(HostLogProofMode)' == 'C129Composite' or '$(HostLogProofMode)' == 'C131Composite' or '$(HostLogProofMode)' == 'C132Composite' or '$(HostLogProofMode)' == 'C133Composite' or '$(HostLogProofMode)' == 'C134Composite' or '$(HostLogProofMode)' == 'C135Composite' or '$(HostLogProofMode)' == 'C136Composite' or '$(HostLogProofMode)' == 'C137Composite' or '$(HostLogProofMode)' == 'C138Composite' or '$(HostLogProofMode)' == 'C139Composite' or '$(HostLogProofMode)' == 'C140Composite' or '$(HostLogProofMode)' == 'C141Composite' or '$(HostLogProofMode)' == 'C142Composite' or '$(HostLogProofMode)' == 'C143Composite' or '$(HostLogProofMode)' == 'C144Composite' or '$(HostLogProofMode)' == 'C145Composite' or '$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite' or '$(HostLogProofMode)' == 'C150Composite' or '$(HostLogProofMode)' == 'C151Composite' or '$(HostLogProofMode)' == 'C152Composite' or '$(HostLogProofMode)' == 'C153Composite' or '$(HostLogProofMode)' == 'C154Composite' or '$(HostLogProofMode)' == 'C160Composite' or '$(HostLogProofMode)' == 'C167ProofComposite'">
+  <PropertyGroup Condition="'$(HostLogProofMode)' == 'Production' or '$(HostLogProofMode)' == 'GcOwnershipProof' or '$(HostLogProofMode)' == 'C104AppA' or '$(HostLogProofMode)' == 'C104AppB' or '$(HostLogProofMode)' == 'C107Composite' or '$(HostLogProofMode)' == 'C108ThreadStaticLifecycle' or '$(HostLogProofMode)' == 'ProductionComposite' or '$(HostLogProofMode)' == 'C112Composite' or '$(HostLogProofMode)' == 'C113Composite' or '$(HostLogProofMode)' == 'C114Composite' or '$(HostLogProofMode)' == 'C115Composite' or '$(HostLogProofMode)' == 'C116Composite' or '$(HostLogProofMode)' == 'C117Composite' or '$(HostLogProofMode)' == 'C118Composite' or '$(HostLogProofMode)' == 'C119Composite' or '$(HostLogProofMode)' == 'C120Composite' or '$(HostLogProofMode)' == 'C121Composite' or '$(HostLogProofMode)' == 'C122Composite' or '$(HostLogProofMode)' == 'C123Composite' or '$(HostLogProofMode)' == 'C124Composite' or '$(HostLogProofMode)' == 'C125Composite' or '$(HostLogProofMode)' == 'C126Composite' or '$(HostLogProofMode)' == 'C127Composite' or '$(HostLogProofMode)' == 'C128Composite' or '$(HostLogProofMode)' == 'C129Composite' or '$(HostLogProofMode)' == 'C131Composite' or '$(HostLogProofMode)' == 'C132Composite' or '$(HostLogProofMode)' == 'C133Composite' or '$(HostLogProofMode)' == 'C134Composite' or '$(HostLogProofMode)' == 'C135Composite' or '$(HostLogProofMode)' == 'C136Composite' or '$(HostLogProofMode)' == 'C137Composite' or '$(HostLogProofMode)' == 'C138Composite' or '$(HostLogProofMode)' == 'C139Composite' or '$(HostLogProofMode)' == 'C140Composite' or '$(HostLogProofMode)' == 'C141Composite' or '$(HostLogProofMode)' == 'C142Composite' or '$(HostLogProofMode)' == 'C143Composite' or '$(HostLogProofMode)' == 'C144Composite' or '$(HostLogProofMode)' == 'C145Composite' or '$(HostLogProofMode)' == 'C146Composite' or '$(HostLogProofMode)' == 'C147Composite' or '$(HostLogProofMode)' == 'C148Composite' or '$(HostLogProofMode)' == 'C149Composite' or '$(HostLogProofMode)' == 'C150Composite' or '$(HostLogProofMode)' == 'C151Composite' or '$(HostLogProofMode)' == 'C152Composite' or '$(HostLogProofMode)' == 'C153Composite' or '$(HostLogProofMode)' == 'C154Composite' or '$(HostLogProofMode)' == 'C160Composite' or '$(HostLogProofMode)' == 'C167ProofComposite'">
     <HostLogProofIsProduction>true</HostLogProofIsProduction>
   </PropertyGroup>
 
@@ -866,6 +883,7 @@
     <LinkerArg Include="/INCLUDE:GuideXosNativeAotApplicationEntry" Condition="'$(HostLogProofIsProduction)' == 'true'" />
     <LinkerArg Include="/EXPORT:GuideXosNativeAotApplicationEntry" Condition="'$(HostLogProofIsProduction)' == 'true'" />
     <LinkerArg Include="/EXPORT:guideXosManagedArrayHostLog" Condition="'$(HostLogProofMode)' == 'Allocating'" />
+    <LinkerArg Include="/EXPORT:ManagedMain" Condition="'$(HostLogProofC188R12R4R5GcOwnershipProof)' == 'true'" />
     <LinkerArg Include="/NODEFAULTLIB:advapi32.lib /NODEFAULTLIB:bcrypt.lib /NODEFAULTLIB:crypt32.lib /NODEFAULTLIB:iphlpapi.lib /NODEFAULTLIB:kernel32.lib /NODEFAULTLIB:mswsock.lib /NODEFAULTLIB:ncrypt.lib /NODEFAULTLIB:normaliz.lib /NODEFAULTLIB:ntdll.lib /NODEFAULTLIB:ole32.lib /NODEFAULTLIB:oleaut32.lib /NODEFAULTLIB:secur32.lib /NODEFAULTLIB:user32.lib /NODEFAULTLIB:version.lib /NODEFAULTLIB:ws2_32.lib /NODEFAULTLIB:ucrt.lib" Condition="'$(HostLogProofIsProduction)' == 'true'" />
   </ItemGroup>
 
@@ -874,6 +892,7 @@
     <NativeLibrary Include="$(HostLogProofRuntimePackObj)" Condition="'$(HostLogProofRuntimePackObj)' != '' and Exists('$(HostLogProofRuntimePackObj)')" />
     <NativeLibrary Include="$(HostLogProofPalMinWinObj)" Condition="'$(HostLogProofPalMinWinObj)' != '' and Exists('$(HostLogProofPalMinWinObj)')" />
     <NativeLibrary Include="$(HostLogProofRuntimePackProbeObj)" Condition="'$(HostLogProofRuntimePackProbeObj)' != '' and Exists('$(HostLogProofRuntimePackProbeObj)')" />
+    <NativeLibrary Include="$(HostLogProofGcOwnershipStartupAdapterObj)" Condition="'$(HostLogProofGcOwnershipStartupAdapterObj)' != '' and Exists('$(HostLogProofGcOwnershipStartupAdapterObj)')" />
     <NativeLibrary Include="$(HostLogProofPalContractObj)" Condition="'$(HostLogProofPalContractObj)' != '' and Exists('$(HostLogProofPalContractObj)')" />
     <NativeLibrary Include="$(HostLogProofGcStartupContractObj)" Condition="'$(HostLogProofGcStartupContractObj)' != '' and Exists('$(HostLogProofGcStartupContractObj)')" />
     <NativeLibrary Include="$(HostLogProofC102StartupObj)" Condition="'$(HostLogProofC102StartupObj)' != '' and Exists('$(HostLogProofC102StartupObj)')" />

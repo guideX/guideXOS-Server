@@ -813,6 +813,137 @@ extern "C" int32_t guidexos_nativeaot_gc_describe_object(
     gx_uintptr* heapAllocated,
     gx_uintptr* heapReserved,
     gx_uint32* heapOwned);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_PROOF)
+struct GuideXosC188R12R4R5GcOwnershipDiagnostics {
+    gx_uint32 schemaVersion;
+    gx_uint32 objectObservations;
+    gx_uint32 ownershipFailures;
+    gx_uint32 layoutFailures;
+    gx_uint32 lastCallbackOrdinal;
+    gx_uint32 lastRole;
+    gx_uint32 lastCollectionCount;
+    gx_uint32 reserved;
+    gx_uintptr lastHeapAllocatedBytes;
+    gx_uintptr lastThreadAllocatedBytes;
+    gx_uintptr lastObjectAddress;
+    gx_uintptr lastHeapBase;
+    gx_uintptr lastHeapAllocated;
+    gx_uintptr lastHeapReserved;
+};
+GuideXosC188R12R4R5GcOwnershipDiagnostics
+    g_guideXosC188R12R4R5GcOwnershipDiagnostics = {1u};
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC188R12R4R5ObserveObject(
+    gx_uint32 callbackOrdinal, gx_uint32 role, gx_uintptr objectAddress,
+    gx_uint32 isArray, gx_uint32 expectedLength) {
+    auto& diagnostics = g_guideXosC188R12R4R5GcOwnershipDiagnostics;
+    ++diagnostics.objectObservations;
+    diagnostics.lastCallbackOrdinal = callbackOrdinal;
+    diagnostics.lastRole = role;
+    diagnostics.lastObjectAddress = objectAddress;
+    if (callbackOrdinal < 1u || callbackOrdinal > 3u || role < 1u ||
+        role > 6u || objectAddress == 0u || (objectAddress & 7u) != 0u ||
+        isArray > 1u || (role >= 3u && role <= 5u) != (isArray != 0u) ||
+        (isArray != 0u &&
+         ((role == 3u && expectedLength != 2u) ||
+          (role == 4u && expectedLength != 6u) ||
+          (role == 5u && expectedLength != 16u)))) {
+        ++diagnostics.layoutFailures;
+        return -1;
+    }
+
+    gx_uintptr heapBase = 0u;
+    gx_uintptr heapAllocated = 0u;
+    gx_uintptr heapReserved = 0u;
+    gx_uint32 heapOwned = 0u;
+    if (guidexos_nativeaot_gc_describe_object(
+            reinterpret_cast<void*>(objectAddress), &heapBase,
+            &heapAllocated, &heapReserved, &heapOwned) != 0 ||
+        heapOwned != 1u || heapBase == 0u || heapAllocated <= heapBase ||
+        heapReserved < heapAllocated || objectAddress < heapBase ||
+        objectAddress > heapAllocated - sizeof(gx_uintptr) ||
+        objectAddress > heapReserved - sizeof(gx_uintptr) ||
+        *reinterpret_cast<const gx_uintptr*>(objectAddress) == 0u) {
+        ++diagnostics.ownershipFailures;
+        return -1;
+    }
+
+    if (isArray != 0u &&
+        *reinterpret_cast<const gx_uint32*>(objectAddress + sizeof(gx_uintptr)) !=
+            expectedLength) {
+        ++diagnostics.layoutFailures;
+        return -1;
+    }
+
+    gx_uintptr allocationContext = 0u;
+    gx_uintptr allocationLimit = 0u;
+    gx_uintptr currentThread = 0u;
+    gx_uintptr gcHeap = 0u;
+    gx_uint32 gcCount = 0u;
+    gx_uintptr heapAllocatedBytes = 0u;
+    gx_uint32 finalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    gx_uintptr contextIdentity = 0u;
+    gx_uintptr threadAllocatedBytes = 0u;
+    gx_uintptr threadAllocatedBytesUoh = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationContext, &allocationLimit, &currentThread, &gcHeap,
+            &gcCount, &heapAllocatedBytes, &finalizableObjects,
+            &gcInProgress, &gcMode, &contextIdentity,
+            &threadAllocatedBytes, &threadAllocatedBytesUoh) != 0 ||
+        currentThread == 0u || gcHeap == 0u || contextIdentity == 0u ||
+        gcInProgress != 0u || threadAllocatedBytesUoh >
+            (~static_cast<gx_uintptr>(0)) -
+            threadAllocatedBytes) {
+        ++diagnostics.layoutFailures;
+        return -1;
+    }
+
+    diagnostics.lastCollectionCount = gcCount;
+    diagnostics.lastHeapAllocatedBytes = heapAllocatedBytes;
+    diagnostics.lastThreadAllocatedBytes = threadAllocatedBytes +
+        threadAllocatedBytesUoh;
+    diagnostics.lastHeapBase = heapBase;
+    diagnostics.lastHeapAllocated = heapAllocated;
+    diagnostics.lastHeapReserved = heapReserved;
+    return 0;
+}
+
+extern "C" __declspec(dllexport) int __cdecl
+guideXosNativeAotC188R12R4R5ReadCounters(
+    gx_uint32* collectionCount, gx_uintptr* heapAllocatedBytes,
+    gx_uintptr* threadAllocatedBytes) {
+    if (collectionCount == nullptr || heapAllocatedBytes == nullptr ||
+        threadAllocatedBytes == nullptr) return -1;
+    gx_uintptr allocationContext = 0u;
+    gx_uintptr allocationLimit = 0u;
+    gx_uintptr currentThread = 0u;
+    gx_uintptr gcHeap = 0u;
+    gx_uint32 gcCount = 0u;
+    gx_uintptr heapBytes = 0u;
+    gx_uint32 finalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    gx_uintptr contextIdentity = 0u;
+    gx_uintptr contextBytes = 0u;
+    gx_uintptr contextBytesUoh = 0u;
+    if (guidexos_nativeaot_gc_read_state(
+            &allocationContext, &allocationLimit, &currentThread, &gcHeap,
+            &gcCount, &heapBytes, &finalizableObjects, &gcInProgress,
+            &gcMode, &contextIdentity, &contextBytes, &contextBytesUoh) != 0 ||
+        currentThread == 0u || gcHeap == 0u || contextIdentity == 0u ||
+        gcInProgress != 0u || contextBytesUoh >
+            (~static_cast<gx_uintptr>(0)) - contextBytes) {
+        return -1;
+    }
+    *collectionCount = gcCount;
+    *heapAllocatedBytes = heapBytes;
+    *threadAllocatedBytes = contextBytes + contextBytesUoh;
+    return 0;
+}
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION) || defined(GUIDEXOS_NATIVEAOT_C011EC40_COMPACTION_RECLAMATION) || defined(GUIDEXOS_NATIVEAOT_C011EC42_RECLAIMED_GEN1_LIFECYCLE) || defined(GUIDEXOS_NATIVEAOT_C011EC53_RECLAIMED_GEN1_NATURAL_REUSE) || defined(GUIDEXOS_NATIVEAOT_C011EC54_RECLAIMED_GEN1_EPHEMERAL_TRANSITION)
 extern "C" int32_t guidexos_nativeaot_gc_describe_segment(
     void* object,

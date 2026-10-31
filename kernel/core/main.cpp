@@ -9,6 +9,9 @@
 #if defined(GXOS_NATIVEAOT_GC_SEGMENT_TRANSITION_QEMU_TEST)
 #define GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST 1
 #endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST)
+#define GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST 1
+#endif
 
 #include "include/kernel/version.h"
 #include "include/kernel/arch.h"
