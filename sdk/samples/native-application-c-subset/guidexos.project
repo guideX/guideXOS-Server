@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "projectId": "dev.guidexos.comp4p.hello-world",
+  "displayName": "Hello World (C Subset)",
+  "projectKind": "native-gui-application",
+  "defaultTargetProfile": "guidexos.amd64.baremetal.bootstrap.native",
+  "sourceRoot": "src",
+  "applicationManifest": "app/app.json",
+  "entryPoint": "gx_main",
+  "abi": "guidexos-c-abi-v1",
+  "architecture": "amd64",
+  "sourceEntry": "main.c",
+  "sources": ["main.c"],
+  "outputName": "hello-world"
+}
