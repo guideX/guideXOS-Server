@@ -179,6 +179,12 @@ Hosted regressions cover complete ordered startup, PAL/FLS failure before GC, an
 
 The existing 40-suite/969-case managed UI baseline remains valid and was not rerun. This phase changed no UI, Settings, Notes, or application source. The retained R4R5 hosted proof was rerun only as a regression and was not used to diagnose the guest startup failure.
 
+## R4R5R3 return-contract correction
+
+The R4R5R3 audit compared the linked R2 image with the exact pinned runtime and adapter. `RhInitialize` is `extern "C" bool RhInitialize(bool isDll)`: native `true` means initialization succeeded and native `false` means it failed. The C188 adapter maps that Boolean to its own integer status with `true -> 0` and `false -> 1`. Therefore the historical R2 `RhInitialize return=00000001`, `trace_end ... rhResult=00000001`, and `RhInitialize: FAIL` are adapter failure status, not raw Boolean `1`; the status correctly indicates native false. The R2 serial itself did not capture the raw Boolean, so this mapping is established by the linked map/object and adapter code, not by rewriting or reinterpreting bytes in the raw log.
+
+The earlier trace description above that calls the footer an “exact boolean `RhInitialize` result” is imprecise. The footer stores the adapter status. R1 stage event pass/fail is derived from the native Boolean, but its numeric result field is also the adapter status. R4R5R3 now emits distinct `nativeBool` and `adapterStatus` values and checks their mapping in the analyzer. The R2 raw serial remains unchanged; see the [R4R5R3 return-contract closeout](NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT.md).
+
 ## Diagnostic candidate and production separation
 
 Candidate root: `out/dotnet/c188r12r4r5r1-runtime-init-attribution/candidate-20261031T055308282Z/`.

@@ -16,7 +16,11 @@ if (-not (Test-Path -LiteralPath $candidateManifestPath -PathType Leaf)) {
 }
 $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
 $isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
-$phaseRoot = if ($isInitAttribution) {
+$isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract'
+$isInitDiagnostic = $isInitAttribution -or $isInitReturnContract
+$phaseRoot = if ($isInitReturnContract) {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r3-init-return-contract'))
+} elseif ($isInitAttribution) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r1-runtime-init-attribution'))
 } else {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5-gc-ownership-proof'))
@@ -35,6 +39,28 @@ if ($isInitAttribution) {
         -not [bool]$candidateManifest.productionNativeAotPersistentCompositeLifecycle -or
         $candidateManifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3') {
         throw 'R1 candidate manifest failed its one-guest initialization-diagnostics or production-isolation gate.'
+    }
+} elseif ($isInitReturnContract) {
+    if ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' -or
+        -not [bool]$candidateManifest.runtimeInitDiagnostics -or
+        -not [bool]$candidateManifest.c188R12R4R5R3InitReturnContract -or
+        [bool]$candidateManifest.qemuLaunched -or [bool]$candidateManifest.qacReserved -or
+        -not [bool]$candidateManifest.productionIsolationChecks.diagnosticAndProductionOutputsSeparate -or
+        -not [bool]$candidateManifest.productionIsolationChecks.diagnosticInstrumentationAbsentFromProduction -or
+        [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackC188ProofProfile -or
+        [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR1TraceProfile -or
+        [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR3ReturnProfile -or
+        -not [bool]$candidateManifest.productionNativeAotPersistentCompositeLifecycle -or
+        [string]$candidateManifest.nativeRhInitialize.signature -cne 'extern "C" bool RhInitialize(bool isDll)' -or
+        [int]$candidateManifest.nativeRhInitialize.successBoolean -ne 1 -or
+        [int]$candidateManifest.nativeRhInitialize.failureBoolean -ne 0 -or
+        [int]$candidateManifest.nativeRhInitialize.adapterStatusSuccess -ne 0 -or
+        [int]$candidateManifest.nativeRhInitialize.adapterStatusFailure -ne 1 -or
+        [bool]$candidateManifest.nativeRhInitialize.moduleRegistrationIncluded -or
+        [bool]$candidateManifest.nativeRhInitialize.managedMainIncluded -or
+        [string]$candidateManifest.runtimePackIdentity -cne 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1' -or
+        $candidateManifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3') {
+        throw 'R3 candidate manifest failed its one-guest return-contract, startup-gate, or production-isolation preflight.'
     }
 } elseif ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_QAC_PREFLIGHT' -or
     $candidateManifest.mode -cne 'GcOwnershipProof' -or
@@ -256,6 +282,10 @@ try {
         if ($isInitAttribution) {
             $guestPass = $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*rhResult=(?:0x)?[0-9A-F]{8}\s*$' -and
                 $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
+        } elseif ($isInitReturnContract) {
+            $guestPass = $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*adapterStatus=(?:0x)?[0-9A-F]{8}\s*$' -and
+                $serialText -match '(?m)^\[C188R12R4R5R3_INIT\] init_result nativeBool=(?:0x)?[0-9A-F]{8} adapterStatus=(?:0x)?[0-9A-F]{8} nativeOutcome=(?:success|failure|unknown) adapterOutcome=(?:success|failure)\s*$' -and
+                $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
         } else {
             $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
         }
@@ -266,6 +296,10 @@ try {
     $serialText = Read-GuestSerial
     if ($isInitAttribution) {
         $guestPass = $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*rhResult=(?:0x)?[0-9A-F]{8}\s*$' -and
+            $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
+    } elseif ($isInitReturnContract) {
+        $guestPass = $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*adapterStatus=(?:0x)?[0-9A-F]{8}\s*$' -and
+            $serialText -match '(?m)^\[C188R12R4R5R3_INIT\] init_result nativeBool=(?:0x)?[0-9A-F]{8} adapterStatus=(?:0x)?[0-9A-F]{8} nativeOutcome=(?:success|failure|unknown) adapterOutcome=(?:success|failure)\s*$' -and
             $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
     } else {
         $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
@@ -346,6 +380,13 @@ $initCaptureComplete = $null -ne $serialAnalysis -and [bool]$serialAnalysis.init
 if ($isInitAttribution) {
     $guestPass = $initCaptureComplete -and $serialAnalysis.rhInitializeResult -in @('success','failure') -and
         @($serialAnalysis.managedMainGateLines | Where-Object { $_ -match 'managed_main_gate=blocked' }).Count -gt 0
+} elseif ($isInitReturnContract) {
+    $guestPass = $initCaptureComplete -and
+        $serialAnalysis.nativeRhInitializeBoolean -in @('00000000','00000001') -and
+        [bool]$serialAnalysis.explicitReturnMappingConsistent -and
+        [bool]$serialAnalysis.explicitReturnMarkerConsistent -and
+        [bool]$serialAnalysis.returnStatusMarkerConsistent -and
+        @($serialAnalysis.managedMainGateLines | Where-Object { $_ -match 'managed_main_gate=blocked' }).Count -gt 0
 }
 $sourceRamdiskSha256 = Get-Sha256 (Join-Path $repo 'ESP\ramdisk.img')
 $sourceRamdiskPreserved = $sourceRamdiskSha256 -ceq 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8'
@@ -353,6 +394,9 @@ $markerLines = @($serialText -split "`r?`n" | Where-Object { $_ -match '^marker=
 $markerPhases = @($markerLines | ForEach-Object { if ($_ -match '\bphase=([^ ]+)') { $Matches[1] } })
 $startupFailure = $serialText -match '(?m)^\[nativeaot-gc-first-allocation\] RhInitialize return=(?:0x)?00000001\b' -or
     $serialText -match '(?m)^\[nativeaot-gc-first-allocation\] ALL_FAIL\s*$'
+$initReturnFailure = $isInitReturnContract -and
+    $null -ne $serialAnalysis -and $serialAnalysis.nativeRhInitializeBoolean -eq '00000000' -and
+    $serialAnalysis.startupAdapterOutcome -eq 'failure'
 $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
     elseif (-not $preflightPassed) { 'EXPERIMENT_BLOCKED_QAC_CENSUS' }
     elseif ($guestPass -and $releaseVerified -and $qacExitCode -eq 0) { 'GC_GRAPH_GUEST_PROVEN' }
@@ -368,6 +412,15 @@ if ($isInitAttribution) {
         elseif ($serialAnalysis.rhInitializeResult -eq 'failure') { 'INIT_FAILURE_CAPTURED' }
         elseif ($serialAnalysis.rhInitializeResult -eq 'success') { 'INIT_RUNTIME_READY_GC_PROOF_SUPPRESSED' }
         else { 'INIT_CAPTURE_INCOMPLETE' }
+} elseif ($isInitReturnContract) {
+    $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
+        elseif (-not $preflightPassed) { 'INIT_BLOCKED_QAC_CENSUS' }
+        elseif (-not $admitted) { 'INIT_CANDIDATE_NOT_ADMITTED' }
+        elseif (-not $releaseVerified) { 'INIT_CAPTURED_BUT_QAC_RELEASE_UNVERIFIED' }
+        elseif (-not $guestPass) { 'INIT_TRACE_OR_RETURN_CONTRACT_INCOMPLETE' }
+        elseif ($initReturnFailure) { 'INIT_FAILURE_CAPTURED' }
+        elseif ($serialAnalysis.nativeRhInitializeBoolean -eq '00000001') { 'INIT_RETURN_SUCCESS_GC_PROOF_SUPPRESSED' }
+        else { 'INIT_CAPTURE_INCOMPLETE' }
 }
 $manifest = [ordered]@{
     result=$outcome;runRoot=$runRoot;candidateRoot=$candidate;candidateManifest=$candidateManifestPath
@@ -382,6 +435,17 @@ $manifest = [ordered]@{
     qacExitCode=$qacExitCode;qacReleaseVerified=$releaseVerified;qacGuestBootLimit=1;automaticRetry=$false
     qemuStatus=$qemuStatus;qmpPort=$qmpPort;qemuArguments=$qemuArgs;guestPass=$guestPass
     initAttributionProfile=$isInitAttribution;initCaptureComplete=$initCaptureComplete
+    initReturnContractProfile=$isInitReturnContract
+    nativeRhInitializeBoolean=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.nativeRhInitializeBoolean } else { $null }
+    nativeRhInitializeOutcome=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.nativeRhInitializeOutcome } else { $null }
+    startupAdapterStatusCode=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterStatusCode } else { $null }
+    startupAdapterOutcome=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterOutcome } else { $null }
+    moduleRegistrationAttemptedByCandidate=$isInitReturnContract -and -not [bool]$candidateManifest.nativeRhInitialize.moduleRegistrationIncluded
+    moduleRegistrationStageObserved=if ($null -ne $serialAnalysis) {
+        @($serialAnalysis.stages | Where-Object { $_.stageName -eq 'moduleRegistration' }).Count -gt 0
+    } else { $null }
+    managedMainObserved=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.managedMainDispatched } else { $false }
+    managedMainGateReason=if ($isInitReturnContract) { [string]$candidateManifest.managedMainGateReason } else { $null }
     serialAnalysis=$serialAnalysisPath;serialAnalysisExitCode=$serialAnalysisExitCode
     serialAnalysisError=$serialAnalysisError;serialAnalysisComplete=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.initTraceComplete } else { $false }
     serialSha256BeforeAnalysis=$serialSha256BeforeAnalysis;serialSha256AfterAnalysis=$serialSha256AfterAnalysis
@@ -398,6 +462,9 @@ $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -E
 if ($isInitAttribution) {
     Write-Output "C188R12R4R5R1_INIT_ATTRIBUTION=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5R1_INIT_ATTRIBUTION_MANIFEST=$manifestPath"
+} elseif ($isInitReturnContract) {
+    Write-Output "C188R12R4R5R3_INIT_RETURN_CONTRACT=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R12R4R5R3_INIT_RETURN_CONTRACT_MANIFEST=$manifestPath"
 } else {
     Write-Output "C188R12R4R5_GC_OWNERSHIP=$outcome ADMITTED=$admitted PASS=$guestPass QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5_GC_OWNERSHIP_MANIFEST=$manifestPath"
@@ -405,7 +472,7 @@ if ($isInitAttribution) {
 if (-not $releaseVerified -and $admitted) { exit 4 }
 if (-not $sourceRamdiskPreserved) { exit 6 }
 if (-not $preflightPassed) { exit 3 }
-if ($isInitAttribution) {
+if ($isInitDiagnostic) {
     if (-not $guestPass) { exit 2 }
     if (-not $rawSerialPreservedByAnalysis) { exit 7 }
     if ($qacExitCode -ne 0) { exit 5 }
