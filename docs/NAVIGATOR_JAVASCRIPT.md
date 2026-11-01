@@ -13315,8 +13315,8 @@ on an Event click, and captured mutable state across repeated clicks. The seven
 failures are the established CSS checks (phases 3C, 3G, 6A, three in 6B, and
 6C), unchanged from the JS102 aggregate of 741 passed and 7 failed.
 
-The production build succeeded with an 8,825,874-byte executable (SHA-256
-`1A5806AD7702CF1412BBD7AA125249FC23A6082C80E4C215013A63C0E85D2674`). After
+The production build succeeded with an 8,824,670-byte executable (SHA-256
+`DB6F7C215FAAC8BA1660C0DD99BE2112BD2BF6886FDF3EC1A28195EBE18EA2A6`). After
 hosted qualification, `guideXOSServer.exe` was restored and verified at
 8,398,274 bytes with its observed baseline SHA-256
 `A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
