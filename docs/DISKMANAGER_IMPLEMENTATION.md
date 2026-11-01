@@ -1,14 +1,14 @@
 # Disk Manager: Current Implementation Status
 
-**Latest DM37 guest status (2026-10-20): Outcome B —
-`DM37_PARTIAL_GUEST_ACCEPTANCE`.** A retry under QAC's exclusive acceptance
-lease found zero foreign QEMU, mounted `DM37WORKFLOW01` read-only, and read a
-fixture file through guest VFS. Explicit Dismount could not be activated, so
-Check FAT32 and Remount remain unqualified. `.phase` remains DM36→DM37. See
-the [DM37 continuation 7 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-7--retry-with-clear-qac-census-partial-guest-evidence)
-for QAC lifecycle details, the runtime and fixture hashes, guest observations,
-I/O counters, evidence paths, and remaining gates. Continuation 6's foreign
-QEMU finding remains historical for its earlier census.
+**Latest DM37 guest status (2026-11-01): Outcome B —
+`DM37_C15_SESSION_RELEASED_UNCLEAN`.** The C15 QAC child exited and QAC
+released its reservation, but no normal Shell shutdown was proven. The
+disposable fixture's final hash matches its initial hash, and independent
+offline GPT/FAT32 verification passed. The screenshot-backed pointer target
+mismatch is observed; its input-mapping cause remains unproven. Writable
+Dismount, final Flush, Unmounted state, Remount, and fresh read remain open.
+`.phase` remains DM36→DM37. See the [C15 recovery closeout](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-15-recovery-closeout)
+for QAC lifecycle, input evidence, hashes, and remaining Gate D work.
 
 DM36 is accepted at source revision `a2afa18a56c95b00491f9b1ca2a26acde7669567` on `DISK_MANAGER_IMPROVEMENTS`. The source-matched QEMU guest passed the remaining lifecycle gates: dedicated Stop, active-check Close, removal/replacement, an actual checker read error, unchanged read-only fixture images, and mounted-target admission rejection. B1/B2 numeric findings were displayed correctly; Previous/Next were activated on the single-finding guest fixture, while existing production-linked host tests cover zero and multiple findings. The owned guest was visible during testing and safely shut down after all checks; a later foreign QEMU from a sibling project was left untouched, and no second guest was launched. `.phase` records DM36 complete and DM37 next. DM37 now has a host-qualified safe dismount foundation; GUI and guest acceptance remain deferred. Full DM36 provenance, runtime captures, counters, hashes, regression counts, and build logs are in the [DM36 phase report](DISK_MANAGER_PHASE_DM36_FAT32_INTEGRITY.md). The DM37 audit, API contract, regressions, and deferred work are in the [DM37 safe-dismount report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md).
 
@@ -632,6 +632,16 @@ Two sequential QAC-managed, source-matched guests mounted the FAT32 test partiti
 
 **Outcome B — `BLOCKED_BY_QAC_OR_INPUT_AUTOMATION`.** Starting HEAD was `b81c5dcef1a31ccb0104e062ec3bf53d72a8ce5e` on `DISK_MANAGER_IMPROVEMENTS`; production source remained `349e85a836a0c3735f84bac5a0cf827e4f2a60c7`, with `.phase` at DM36→DM37. A separate C15 disposable FAT32 image passed its initial offline verifier and was mounted read/write by the QAC-managed guest. Computer Use and paced QMP injections did not yield a stable, attributable guest input path to qualify responsiveness or proceed with the controlled save and production Dismount.
 
-The current QAC 2.0.0 acceptance reservation `21bf0822b1b34a43831659693e04c65b` remains `Running` for owner PID `29648` and QEMU child PID `30576`, QMP `127.0.0.1:59307`; the dashboard showed owner verified, one managed session, and no foreign QEMU, queued reservation, or blocked reservation. One final screenshot-backed click aimed at the Shell Shut Down button landed in the File Explorer list; the Start menu stayed open, and the next QMP snapshot reported `running`. The guest was left live under QAC ownership. No authorized proof-file save, final Dismount Flush, Unmounted transition, Remount, fresh read, normal Shell shutdown, final image hash, or offline image verification is claimed. Two incidental `/.startmenu_recent` VFS writes were rejected as `FAT_FILE_WRITE_INVALID_NAME` with block status `0x00`; they do not establish proof-file data writes. Invalid QMP USB cumulative counters remain unusable for operation attribution.
+At the original live-boundary snapshot, QAC reservation `21bf0822b1b34a43831659693e04c65b` was `Running` for owner PID `29648` and QEMU child PID `30576`, QMP `127.0.0.1:59307`; the dashboard showed owner verified, one managed session, and no foreign QEMU, queued reservation, or blocked reservation. One final screenshot-backed click aimed at the Shell Shut Down button landed in the File Explorer list; the Start menu stayed open, and the next QMP snapshot reported `running`. The guest was live under QAC ownership at that observation. No authorized proof-file save, final Dismount Flush, Unmounted transition, Remount, fresh read, normal Shell shutdown, final image hash, or offline image verification was claimed at that time. Two incidental `/.startmenu_recent` VFS writes were rejected as `FAT_FILE_WRITE_INVALID_NAME` with block status `0x00`; they do not establish proof-file data writes. Invalid QMP USB cumulative counters remain unusable for operation attribution.
 
-Runtime and image provenance, the input boundary, and pending gates are recorded in the [DM37 Continuation 15 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-15--qac-guest-preserved-at-input-automation-boundary) and `E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\continuation15\runs\guest-writable-dismount-20261101-r1\`. No source change, tests, or builds were made; DM37 remains active and DM38 has not started.
+Runtime and image provenance, the input boundary, and pending gates are recorded in the [DM37 Continuation 15 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-15--qac-guest-preserved-at-input-automation-boundary) and `E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\continuation15\runs\guest-writable-dismount-20261101-r1\`.
+
+## DM37 Continuation 15 recovery closeout
+
+QAC 2.0.0 `status`, `list`, and `inspect` confirmed reservation `21bf0822b1b34a43831659693e04c65b` released after child PID `30576` exited; owner PID `29648` also exited. QAC reported zero reservations/sessions and zero QEMU processes, and QMP port `59307` was closed. No forced stop or QMP reconnect was used. The serial log contains no production Shell shutdown marker, so the session is classified as an unclean exit.
+
+The final guest screenshot shows File Explorer in front of Disk Manager with the Start menu still open. The pointer is over a File Explorer row while Shell Shut Down is elsewhere in the menu. QEMU reports a relative PS/2 mouse (`absolute=false`), and the available QMP input records contain relative deltas; the final snapshot metadata does not record the attempted click event or coordinates. The target mismatch is visible, but screenshot mapping, focus, or delivery is not conclusively isolated.
+
+After an exclusive `FileShare.None` open probe, `DM37DURABLE01.cont15.raw` verified at 629,145,600 bytes and SHA-256 `D4975D8F20ABE5E8B8A221408E79CEB151B3E8C15C7A04A16556A54CAB6AA3DF`, identical to its initial value. The read-only verifier passed GPT and FAT32 structures, canary gap, FAT mirror, and the existing `DM9/PROOF.BIN` 57-byte payload. That file was present before C15 and was not saved by this run. The two rejected `/.startmenu_recent` writes remain invalid-name failures, unrelated to Dismount. The original FSInfo hint/actual free-cluster difference (76,592/76,590) remains unchanged.
+
+The accepted 1,493/1,493 storage baseline is retained without rerun because the production source revision is unchanged; the diff from C15 source `349e85a836a0c3735f84bac5a0cf827e4f2a60c7` through the recovery starting HEAD is documentation-only. `NVME_WRITE_PROVEN=0`, `NVME_FLUSH_PROVEN=0`, and `.phase` DM36→DM37 remain unchanged. Gate D still requires a reliable harmless input route followed by production save, Dismount confirmation, final Flush, Unmounted state, explicit Remount, and a fresh read using a fresh disposable fixture. See the [DM37 C15 recovery closeout](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-15-recovery-closeout) and retained `out/dm37/continuation15/` evidence. No production source or build changed in this recovery.
