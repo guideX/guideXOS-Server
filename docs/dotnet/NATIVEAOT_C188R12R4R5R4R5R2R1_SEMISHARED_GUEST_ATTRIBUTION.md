@@ -9,7 +9,7 @@ No repair is justified yet. The narrow next step is targeted allocator-path inst
 ## Baseline and preservation
 
 - Branch: v1.1_DOTNET_SUPPORT.
-- Starting HEAD and source HEAD at closeout preparation: a900deae8b997830652e853b62b17564b9404339.
+- Starting HEAD at phase entry and ending HEAD for the one-boot qualification, before the closeout commit: a900deae8b997830652e853b62b17564b9404339.
 - Candidate source commit: 6ba37a5691e561206df4604c613fa91c6b0861d5, an ancestor of the starting HEAD.
 - The report and analyzer changes were prepared on the same branch; no branch switch, reset, stash, history rewrite, or push occurred.
 - The pre-existing tracked modification to ESP/ramdisk.img was preserved. Its SHA-256 before and after the guest was AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8. It is not included in the closeout commit.
