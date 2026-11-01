@@ -10,6 +10,7 @@
 extern "C" uint32_t phase3_irq_acknowledge();
 extern "C" void phase3_irq_complete(uint32_t acknowledgement);
 extern "C" uint32_t phase3_irq_id(uint32_t acknowledgement);
+extern "C" uint8_t phase3_irq_ack_valid(uint32_t acknowledgement);
 extern "C" void phase3_serial_print(const char* text);
 extern "C" void phase3_serial_hex(uint64_t value);
 #if defined(GXOS_AARCH64_PHASE4)
@@ -83,6 +84,7 @@ extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_clas
 {
     if (vector_class == 1) {
         const uint32_t acknowledgement = phase3_irq_acknowledge();
+        if (!phase3_irq_ack_valid(acknowledgement)) return nullptr;
         const uint32_t irq = phase3_irq_id(acknowledgement);
 #if defined(GXOS_AARCH64_PHASE4)
         if (!kernel::irq::has_handler(irq)) {

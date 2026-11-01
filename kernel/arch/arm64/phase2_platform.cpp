@@ -28,12 +28,19 @@ struct FdtNode {
     uint8_t is_memory;
     uint8_t is_uart;
     uint8_t is_gic;
+    uint8_t is_cpu;
+    uint8_t is_interrupt_controller;
+    uint8_t available;
+    uint8_t has_redistributor_stride;
+    uint8_t has_redistributor_regions;
     uint8_t is_timer;
     uint8_t is_virtio_mmio;
     uint8_t is_raspberry_pi;
     uint8_t is_qemu_virt;
     uint8_t gic_version;
     uint32_t interrupt_cells;
+    uint32_t redistributor_stride;
+    uint32_t redistributor_regions;
     uint8_t address_cells;
     uint8_t size_cells;
     uint8_t parent_address_cells;
@@ -72,6 +79,19 @@ static bool has_compatible(const uint8_t* value, uint32_t length, const char* ex
         offset = end + 1;
     }
     return false;
+}
+
+static bool string_list_valid(const uint8_t* value, uint32_t length)
+{
+    if (!value || length == 0 || value[length - 1] != 0) return false;
+    uint32_t offset = 0;
+    while (offset < length) {
+        uint32_t end = offset;
+        while (end < length && value[end] != 0) ++end;
+        if (end == offset || end == length) return false;
+        offset = end + 1;
+    }
+    return offset == length;
 }
 
 static bool node_name_is(const uint8_t* value, uint32_t length, const char* prefix)
@@ -126,6 +146,30 @@ static bool add_virtio_mmio(gxos_aarch64_phase2_platform* platform,
     device.irq = 0;
     device.reserved = 0;
     return true;
+}
+
+static bool add_gicv3_region(gxos_aarch64_phase2_platform* platform,
+                             uint64_t base, uint64_t size)
+{
+    if (platform->gic_redistributor_region_count >= GXOS_AARCH64_PHASE2_MAX_GICR_REGIONS) {
+        return false;
+    }
+    gxos_aarch64_gicv3_region& region =
+        platform->gic_redistributor_regions[platform->gic_redistributor_region_count++];
+    region.base = base;
+    region.size = size;
+    return true;
+}
+
+static bool ranges_overlap_checked(uint64_t left_base, uint64_t left_size,
+                                   uint64_t right_base, uint64_t right_size)
+{
+    uint64_t left_end = 0;
+    uint64_t right_end = 0;
+    if (left_size == 0 || right_size == 0 ||
+        !gxos_aarch64_add_u64(left_base, left_size, &left_end) ||
+        !gxos_aarch64_add_u64(right_base, right_size, &right_end)) return true;
+    return gxos_aarch64_range_overlaps({left_base, left_end}, {right_base, right_end});
 }
 
 static bool translate_through_parent_ranges(const FdtNode* stack, uint32_t depth,
@@ -233,13 +277,40 @@ static bool parse_reg(const uint8_t* value, uint32_t length, const FdtNode& node
             if (entry == 0 && platform->gicd_base == 0) {
                 platform->gicd_base = base;
                 platform->gicd_size = size;
-            } else if (entry == 1 && platform->gicc_base == 0) {
+            } else if (node.gic_version == GXOS_AARCH64_GIC_V2 &&
+                       entry == 1 && platform->gicc_base == 0) {
                 platform->gicc_base = base;
                 platform->gicc_size = size;
+            } else if (node.gic_version == GXOS_AARCH64_GIC_V3 && entry > 0 &&
+                       !add_gicv3_region(platform, base, size)) {
+                return false;
             }
         }
         if (node.is_virtio_mmio && entry == 0 && !add_virtio_mmio(platform, base, size)) return false;
         ++entry;
+    }
+    return true;
+}
+
+static bool parse_cpu_affinities(const uint8_t* value, uint32_t length,
+                                 const FdtNode& node,
+                                 gxos_aarch64_phase2_platform* platform)
+{
+    if (!node.is_cpu) return true;
+    const uint32_t addressCells = node.parent_address_cells;
+    const uint32_t sizeCells = node.parent_size_cells;
+    if (addressCells == 0 || addressCells > 2 || sizeCells > 2 ||
+        (addressCells + sizeCells) == 0 ||
+        length % ((addressCells + sizeCells) * 4) != 0) return false;
+    const uint32_t tupleBytes = (addressCells + sizeCells) * 4;
+    for (uint32_t offset = 0; offset < length; offset += tupleBytes) {
+        uint64_t affinity = 0;
+        if (!read_cells(value + offset, addressCells, &affinity) ||
+            (affinity & ~UINT64_C(0x000000ff00ffffff)) != 0 ||
+            platform->gic_cpu_affinity_count >= GXOS_AARCH64_PHASE2_MAX_CPU_AFFINITIES) {
+            return false;
+        }
+        platform->gic_cpu_affinity[platform->gic_cpu_affinity_count++] = affinity;
     }
     return true;
 }
@@ -284,12 +355,12 @@ static void classify_compatible(const uint8_t* value, uint32_t length, FdtNode* 
         has_compatible(value, length, "arm,gic-400") ||
         has_compatible(value, length, "arm,gic-v2")) {
         node->is_gic = 1;
-        node->gic_version = 2;
+        node->gic_version = GXOS_AARCH64_GIC_V2;
     }
     if (has_compatible(value, length, "arm,gic-v3") ||
         has_compatible(value, length, "arm,gic-v3.1")) {
         node->is_gic = 1;
-        node->gic_version = 3;
+        node->gic_version = GXOS_AARCH64_GIC_V3;
     }
     if (has_compatible(value, length, "arm,armv8-timer") ||
         has_compatible(value, length, "arm,armv7-timer")) node->is_timer = 1;
@@ -316,6 +387,7 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
 {
     if (!platform) return 0;
     zero_bytes(platform, sizeof(*platform));
+    platform->diagnostic = GXOS_AARCH64_DTB_MALFORMED;
 
     const uint8_t* bytes = (const uint8_t*)blob;
     uint32_t total = 0;
@@ -348,6 +420,7 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             FdtNode node;
             zero_bytes(&node, sizeof(node));
             node.is_root = (depth == 0);
+            node.available = 1;
             if (node.is_root) {
                 node.address_cells = 2;
                 node.size_cells = 1;
@@ -360,6 +433,7 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             }
             const uint32_t nameLength = offset - nameStart;
             if (node_name_is(structBase + nameStart, nameLength, "memory")) node.is_memory = 1;
+            if (node_name_is(structBase + nameStart, nameLength, "cpu")) node.is_cpu = 1;
             ++offset;
             offset = (offset + 3) & ~3u;
             if (offset > structSize) return 0;
@@ -367,9 +441,32 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
         } else if (token == kFdtEndNode) {
             if (depth == 0) return 0;
             FdtNode& node = stack[depth - 1];
-            if (node.reg_value && (node.is_memory || node.is_uart || node.is_gic ||
-                                   node.is_virtio_mmio) &&
+            if (node.is_gic) {
+                if (platform->gic_node_seen) {
+                    platform->diagnostic = GXOS_AARCH64_DTB_UNSUPPORTED_CONTROLLER;
+                    return 0;
+                }
+                platform->gic_node_seen = 1;
+                platform->gic_version = node.gic_version;
+                platform->gic_node_available = node.available;
+                platform->gic_interrupt_cells = node.interrupt_cells;
+                platform->gic_has_redistributor_stride = node.has_redistributor_stride;
+                platform->gic_has_redistributor_regions = node.has_redistributor_regions;
+                if (node.has_redistributor_stride) platform->gic_redistributor_stride = node.redistributor_stride;
+            } else if (node.is_interrupt_controller) {
+                platform->unsupported_interrupt_controller_seen = 1;
+            }
+            if (node.available && node.reg_value &&
+                (node.is_memory || node.is_uart || node.is_gic || node.is_virtio_mmio) &&
                 !parse_reg(node.reg_value, node.reg_length, node, stack, depth, platform)) return 0;
+            if (node.is_gic && node.available && node.gic_version == GXOS_AARCH64_GIC_V3 &&
+                node.has_redistributor_regions &&
+                node.redistributor_regions != platform->gic_redistributor_region_count) {
+                platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                return 0;
+            }
+            if (node.available && node.is_cpu && node.reg_value &&
+                !parse_cpu_affinities(node.reg_value, node.reg_length, node, platform)) return 0;
             if (node.is_timer && node.interrupts_value) {
                 parse_timer_interrupts(node.interrupts_value, node.interrupts_length, platform);
             }
@@ -391,7 +488,11 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                 !property_name(strings, stringsSize, nameOffset, "#address-cells") &&
                 !property_name(strings, stringsSize, nameOffset, "#size-cells") &&
                 !property_name(strings, stringsSize, nameOffset, "#interrupt-cells") &&
+                !property_name(strings, stringsSize, nameOffset, "#redistributor-regions") &&
+                !property_name(strings, stringsSize, nameOffset, "redistributor-stride") &&
                 !property_name(strings, stringsSize, nameOffset, "device_type") &&
+                !property_name(strings, stringsSize, nameOffset, "interrupt-controller") &&
+                !property_name(strings, stringsSize, nameOffset, "status") &&
                 !property_name(strings, stringsSize, nameOffset, "ranges")) {
                 offset = (offset + length + 3) & ~3u;
                 if (offset > structSize) return 0;
@@ -400,6 +501,7 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             FdtNode& node = stack[depth - 1];
             const uint8_t* value = structBase + offset;
             if (property_name(strings, stringsSize, nameOffset, "compatible")) {
+                if (!string_list_valid(value, length)) return 0;
                 classify_compatible(value, length, &node);
             } else if (property_name(strings, stringsSize, nameOffset, "reg")) {
                 node.reg_value = value;
@@ -407,23 +509,40 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             } else if (property_name(strings, stringsSize, nameOffset, "interrupts")) {
                 node.interrupts_value = value;
                 node.interrupts_length = length;
-            } else if (property_name(strings, stringsSize, nameOffset, "#address-cells") && length == 4) {
+            } else if (property_name(strings, stringsSize, nameOffset, "#address-cells")) {
+                if (length != 4) return 0;
                 const uint32_t cells = load_be32(value);
-                if (cells == 0 || (node.is_root && cells > 2)) return 0;
+                if (cells == 0 || cells > 2) return 0;
                 node.address_cells = cells <= 2 ? (uint8_t)cells : 0;
                 if (node.is_root) platform->address_cells = (uint8_t)cells;
-            } else if (property_name(strings, stringsSize, nameOffset, "#size-cells") && length == 4) {
+            } else if (property_name(strings, stringsSize, nameOffset, "#size-cells")) {
+                if (length != 4) return 0;
                 const uint32_t cells = load_be32(value);
-                if (node.is_root && (cells == 0 || cells > 2)) return 0;
+                if (cells > 2 || (node.is_root && cells == 0)) return 0;
                 node.size_cells = cells <= 2 ? (uint8_t)cells : 0;
                 if (node.is_root) platform->size_cells = (uint8_t)cells;
             } else if (property_name(strings, stringsSize, nameOffset, "device_type") &&
                        property_string(value, length, "memory")) {
                 node.is_memory = 1;
-            } else if (property_name(strings, stringsSize, nameOffset, "#interrupt-cells") && length == 4) {
+            } else if (property_name(strings, stringsSize, nameOffset, "#interrupt-cells")) {
+                if (length != 4) return 0;
                 const uint32_t cells = load_be32(value);
                 if (cells == 0 || cells > 4) return 0;
                 node.interrupt_cells = cells;
+            } else if (property_name(strings, stringsSize, nameOffset, "#redistributor-regions")) {
+                if (length != 4) return 0;
+                node.redistributor_regions = load_be32(value);
+                node.has_redistributor_regions = 1;
+            } else if (property_name(strings, stringsSize, nameOffset, "redistributor-stride")) {
+                if (length != 4) return 0;
+                node.redistributor_stride = load_be32(value);
+                node.has_redistributor_stride = 1;
+            } else if (property_name(strings, stringsSize, nameOffset, "interrupt-controller") && length == 0) {
+                node.is_interrupt_controller = 1;
+            } else if (property_name(strings, stringsSize, nameOffset, "status")) {
+                if (length == 0 || value[length - 1] != 0) return 0;
+                node.available = property_string(value, length, "okay") ||
+                                 property_string(value, length, "ok");
             } else if (property_name(strings, stringsSize, nameOffset, "ranges")) {
                 node.ranges_value = value;
                 node.ranges_length = length;
@@ -435,17 +554,152 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             continue;
         } else if (token == kFdtEnd) {
             if (depth != 0) return 0;
+            if (!platform->gic_node_seen || platform->gic_version == GXOS_AARCH64_GIC_UNSUPPORTED) {
+                platform->diagnostic = GXOS_AARCH64_DTB_UNSUPPORTED_CONTROLLER;
+                return 0;
+            }
+            if (!platform->gic_node_available) {
+                platform->diagnostic = GXOS_AARCH64_DTB_DEVICE_UNAVAILABLE;
+                return 0;
+            }
+            if (platform->gicd_base == 0 ||
+                platform->gicd_size < (platform->gic_version == GXOS_AARCH64_GIC_V3
+                    ? GXOS_AARCH64_GICV3_MIN_DISTRIBUTOR_SIZE : UINT64_C(0x1000)) ||
+                (platform->gicd_base & UINT64_C(0xfff)) != 0 ||
+                (platform->gicd_size & UINT64_C(0xfff)) != 0) {
+                platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                return 0;
+            }
+            if (platform->gic_version == GXOS_AARCH64_GIC_V2) {
+                if (platform->gicc_base == 0 || platform->gicc_size < UINT64_C(0x1000) ||
+                    (platform->gicc_base & UINT64_C(0xfff)) != 0 ||
+                    (platform->gicc_size & UINT64_C(0xfff)) != 0) {
+                    platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                    return 0;
+                }
+            } else if (platform->gic_version == GXOS_AARCH64_GIC_V3) {
+                if (platform->gic_redistributor_region_count == 0 ||
+                    platform->gic_redistributor_region_count > GXOS_AARCH64_PHASE2_MAX_GICR_REGIONS ||
+                    platform->gic_interrupt_cells != 3 ||
+                    (platform->gic_has_redistributor_regions &&
+                     platform->gic_redistributor_region_count == 0) ||
+                    (platform->gic_has_redistributor_stride &&
+                     platform->gic_redistributor_stride == 0) ||
+                    (platform->gic_redistributor_stride != 0 &&
+                     (platform->gic_redistributor_stride < UINT32_C(0x20000) ||
+                      (platform->gic_redistributor_stride & UINT32_C(0xffff)) != 0))) {
+                    platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                    return 0;
+                }
+                uint64_t distributor_end = 0;
+                if (!gxos_aarch64_add_u64(platform->gicd_base, platform->gicd_size,
+                                          &distributor_end)) {
+                    platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                    return 0;
+                }
+                const gxos_aarch64_validation_range distributor = {
+                    platform->gicd_base, distributor_end};
+                for (uint32_t i = 0; i < platform->ram_count; ++i) {
+                    if (ranges_overlap_checked(platform->gicd_base, platform->gicd_size,
+                                               platform->ram[i].base, platform->ram[i].size)) {
+                        platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                        return 0;
+                    }
+                }
+                if (ranges_overlap_checked(platform->gicd_base, platform->gicd_size,
+                                           platform->uart_base, platform->uart_size)) {
+                    platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                    return 0;
+                }
+                for (uint32_t i = 0; i < platform->virtio_mmio_count; ++i) {
+                    if (ranges_overlap_checked(platform->gicd_base, platform->gicd_size,
+                                               platform->virtio_mmio[i].base,
+                                               platform->virtio_mmio[i].size)) {
+                        platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                        return 0;
+                    }
+                }
+                for (uint32_t i = 0; i < platform->gic_redistributor_region_count; ++i) {
+                    const gxos_aarch64_gicv3_region& region =
+                        platform->gic_redistributor_regions[i];
+                    uint64_t region_end = 0;
+                    if (region.base == 0 || region.size < GXOS_AARCH64_GICV3_MIN_REDISTRIBUTOR_SIZE ||
+                        (region.base & UINT64_C(0xffff)) != 0 ||
+                        (region.size & UINT64_C(0xffff)) != 0 ||
+                        !gxos_aarch64_add_u64(region.base, region.size, &region_end)) {
+                        platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                        return 0;
+                    }
+                    const gxos_aarch64_validation_range current = {region.base, region_end};
+                    if (gxos_aarch64_range_overlaps(current, distributor)) {
+                        platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                        return 0;
+                    }
+                    for (uint32_t ram = 0; ram < platform->ram_count; ++ram) {
+                        if (ranges_overlap_checked(region.base, region.size,
+                                                   platform->ram[ram].base,
+                                                   platform->ram[ram].size)) {
+                            platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                            return 0;
+                        }
+                    }
+                    if (ranges_overlap_checked(region.base, region.size,
+                                               platform->uart_base, platform->uart_size)) {
+                        platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                        return 0;
+                    }
+                    for (uint32_t device = 0; device < platform->virtio_mmio_count; ++device) {
+                        if (ranges_overlap_checked(region.base, region.size,
+                                                   platform->virtio_mmio[device].base,
+                                                   platform->virtio_mmio[device].size)) {
+                            platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                            return 0;
+                        }
+                    }
+                    for (uint32_t j = 0; j < i; ++j) {
+                        const gxos_aarch64_gicv3_region& prior =
+                            platform->gic_redistributor_regions[j];
+                        uint64_t prior_end = 0;
+                        if (!gxos_aarch64_add_u64(prior.base, prior.size, &prior_end) ||
+                            gxos_aarch64_range_overlaps(current, {prior.base, prior_end})) {
+                            platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
+                            return 0;
+                        }
+                    }
+                }
+            } else {
+                platform->diagnostic = GXOS_AARCH64_DTB_UNSUPPORTED_CONTROLLER;
+                return 0;
+            }
+            if (platform->timer_irq == 0) {
+                platform->diagnostic = GXOS_AARCH64_DTB_TIMER_UNAVAILABLE;
+                return 0;
+            }
             platform->valid = (platform->platform_kind != GXOS_AARCH64_PLATFORM_UNKNOWN &&
                                platform->ram_count != 0 && platform->uart_base != 0 &&
                                platform->uart_kind == GXOS_AARCH64_UART_PL011 &&
-                               platform->gic_version == 2 && platform->gicd_base != 0 &&
-                               platform->gicc_base != 0 && platform->timer_irq != 0);
+                               platform->gicd_base != 0);
+            if (!platform->valid) {
+                platform->diagnostic = GXOS_AARCH64_DTB_MALFORMED;
+                return 0;
+            }
+            platform->diagnostic = GXOS_AARCH64_DTB_OK;
             (void)total;
             (void)structEnd;
-            return platform->valid;
+            return 1;
         } else {
             return 0;
         }
     }
     return 0;
+}
+
+extern "C" gxos_aarch64_dtb_status gxos_aarch64_phase2_parse_dtb_ex(
+    const void* blob, uint64_t blob_size, gxos_aarch64_phase2_platform* platform)
+{
+    if (!platform) return GXOS_AARCH64_DTB_INVALID_ARGUMENT;
+    if (gxos_aarch64_phase2_parse_dtb(blob, blob_size, platform)) {
+        return GXOS_AARCH64_DTB_OK;
+    }
+    return static_cast<gxos_aarch64_dtb_status>(platform->diagnostic);
 }

@@ -93,7 +93,7 @@ $kernelSources = @(
     'kernel\arch\arm64\phase2_platform.cpp',
     'kernel\arch\arm64\phase2_mmu.cpp',
     'kernel\arch\arm64\phase2_memory.cpp',
-    'kernel\arch\arm64\phase2_gic.cpp',
+    'kernel\arch\arm64\phase2_gic.cpp','kernel\arch\arm64\gicv3_controller.cpp',
     'kernel\arch\arm64\phase3_timer.cpp',
     'kernel\arch\arm64\phase3_arch.cpp',
     'kernel\arch\arm64\phase3_exceptions.cpp',

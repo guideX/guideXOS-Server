@@ -64,7 +64,7 @@ $kernelSources = @(
     'kernel\arch\arm64\phase3_preemptive_worker.S','kernel\arch\arm64\native_elf_call.S',
     'kernel\arch\arm64\phase3_serial.cpp','kernel\arch\arm64\phase4_serial.cpp','kernel\arch\arm64\serial_console.cpp',
     'kernel\arch\arm64\phase2_platform.cpp','kernel\arch\arm64\phase2_mmu.cpp','kernel\arch\arm64\phase5_mmu_permissions.cpp',
-    'kernel\arch\arm64\phase2_gic.cpp','kernel\arch\arm64\phase3_timer.cpp','kernel\arch\arm64\phase3_arch.cpp',
+    'kernel\arch\arm64\phase2_gic.cpp','kernel\arch\arm64\gicv3_controller.cpp','kernel\arch\arm64\phase3_timer.cpp','kernel\arch\arm64\phase3_arch.cpp',
     'kernel\arch\arm64\phase3_exceptions.cpp','kernel\arch\arm64\phase4_main.cpp','kernel\arch\arm64\phase6_platform_stubs.cpp',
     'kernel\core\common_scheduler.cpp','kernel\core\common_kernel_entry.cpp','kernel\core\common_boot_info.cpp',
     'kernel\core\common_physical_allocator.cpp','kernel\core\application_event_service.cpp','kernel\core\application_runtime.cpp',

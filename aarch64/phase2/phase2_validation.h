@@ -17,6 +17,11 @@ static inline uint32_t gxos_aarch64_be32(const uint8_t* bytes)
            ((uint32_t)bytes[2] << 8) | (uint32_t)bytes[3];
 }
 
+static inline uint64_t gxos_aarch64_be64(const uint8_t* bytes)
+{
+    return ((uint64_t)gxos_aarch64_be32(bytes) << 32) | gxos_aarch64_be32(bytes + 4);
+}
+
 static inline bool gxos_aarch64_add_u64(uint64_t left, uint64_t right, uint64_t* result)
 {
     if (!result || right > UINT64_MAX - left) return false;
@@ -68,12 +73,33 @@ static inline bool gxos_aarch64_fdt_header_bounds(const uint8_t* blob, uint64_t 
 
     if (total < 40 || total > blob_size || total > UINT32_MAX) return false;
     if (version < 16 || version > 19 || lastCompatible < 16 || lastCompatible > version) return false;
-    if ((reserveOff & 7u) != 0 || reserveOff > total || !gxos_aarch64_span_inside(reserveOff, 16, total)) {
-        return false;
-    }
-    if ((structOff & 3u) != 0 || (stringsOff & 3u) != 0 ||
+    if ((reserveOff & 7u) != 0 || reserveOff < 40 ||
+        (structOff & 3u) != 0 || (stringsOff & 3u) != 0 ||
+        structOff < 40 || stringsOff < 40 ||
         !gxos_aarch64_span_inside(structOff, structBytes, total) ||
         !gxos_aarch64_span_inside(stringsOff, stringsBytes, total)) return false;
+
+    uint64_t reserveCursor = reserveOff;
+    bool reserveTerminatorFound = false;
+    while (gxos_aarch64_span_inside(reserveCursor, 16, total)) {
+        const uint64_t address = gxos_aarch64_be64(blob + reserveCursor);
+        const uint64_t size = gxos_aarch64_be64(blob + reserveCursor + 8);
+        reserveCursor += 16;
+        if (address == 0 && size == 0) {
+            reserveTerminatorFound = true;
+            break;
+        }
+    }
+    if (!reserveTerminatorFound) return false;
+
+    const gxos_aarch64_validation_range structure = {
+        structOff, (uint64_t)structOff + structBytes};
+    const gxos_aarch64_validation_range strings = {
+        stringsOff, (uint64_t)stringsOff + stringsBytes};
+    const gxos_aarch64_validation_range reserveMap = {reserveOff, reserveCursor};
+    if (gxos_aarch64_range_overlaps(structure, strings) ||
+        gxos_aarch64_range_overlaps(structure, reserveMap) ||
+        gxos_aarch64_range_overlaps(strings, reserveMap)) return false;
 
     if (total_size) *total_size = total;
     if (struct_offset) *struct_offset = structOff;

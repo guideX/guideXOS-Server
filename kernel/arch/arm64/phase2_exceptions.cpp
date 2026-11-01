@@ -104,6 +104,7 @@ extern "C" void phase2_exception_dispatch(uint64_t* frame, uint64_t vector_class
 
     if (vector_class == 1 || vector_class == 3) {
         const uint32_t acknowledgement = phase2_gic_acknowledge();
+        if (!phase2_gic_ack_valid(acknowledgement)) return;
         const uint32_t irq = phase2_gic_irq_id(acknowledgement);
         if (irq == phase2_timer_irq()) {
             phase2_timer_note_irq();
@@ -115,6 +116,7 @@ extern "C" void phase2_exception_dispatch(uint64_t* frame, uint64_t vector_class
         phase2_serial_print(" ESR="); phase2_serial_hex(esr);
         phase2_serial_print(" ELR="); phase2_serial_hex(elr);
         phase2_serial_print("\n");
+        phase2_gic_complete(acknowledgement);
         for (;;) __asm__ volatile("wfi");
     }
 

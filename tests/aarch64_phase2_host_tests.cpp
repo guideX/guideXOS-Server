@@ -24,11 +24,11 @@ static bool expect(bool condition, const char* name)
 int main(int argc, char** argv)
 {
     bool ok = true;
-    uint8_t header[64] = {};
+    uint8_t header[72] = {};
     be32(header + 0, 0xd00dfeed);
-    be32(header + 4, 64);
-    be32(header + 8, 40);
-    be32(header + 12, 40);
+    be32(header + 4, 72);
+    be32(header + 8, 56);
+    be32(header + 12, 56);
     be32(header + 16, 40);
     be32(header + 20, 17);
     be32(header + 24, 16);
@@ -36,6 +36,11 @@ int main(int argc, char** argv)
     be32(header + 36, 0);
     ok &= expect(gxos_aarch64_fdt_header_bounds(header, sizeof(header), nullptr, nullptr, nullptr, nullptr, nullptr),
                  "valid FDT header accepted");
+
+    be32(header + 36, 4);
+    ok &= expect(!gxos_aarch64_fdt_header_bounds(header, sizeof(header), nullptr, nullptr, nullptr, nullptr, nullptr),
+                 "overlapping FDT structure and strings blocks rejected");
+    be32(header + 36, 0);
 
     header[0] = 0;
     ok &= expect(!gxos_aarch64_fdt_header_bounds(header, sizeof(header), nullptr, nullptr, nullptr, nullptr, nullptr),

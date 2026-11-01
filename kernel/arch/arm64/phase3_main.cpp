@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "phase3_timer.h"
+#include "phase2_gic.h"
 #if defined(GXOS_AARCH64_RPI4_P1)
 #include "../../../aarch64/rpi4/rpi4_p1_contract.h"
 #include "../../../aarch64/phase2/phase2_contract.h"
@@ -259,14 +260,21 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff,
     gxos_aarch64_phase2_platform platform;
     for (uint64_t i = 0; i < sizeof(platform); ++i) ((uint8_t*)&platform)[i] = 0;
     if (!gxos_aarch64_phase2_parse_dtb((const void*)(uintptr_t)handoff->dtb_base,
-                                       handoff->dtb_size, &platform)) fail("DTB: FAIL");
+                                       handoff->dtb_size, &platform)) {
+        phase3_serial_print("[guideXOS] DTB diagnostic=");
+        phase3_serial_dec(platform.diagnostic);
+        phase3_serial_print("\n");
+        fail("DTB: FAIL");
+    }
 #if defined(GXOS_AARCH64_RPI4_P1)
     if (platform.platform_kind != GXOS_AARCH64_PLATFORM_RASPBERRY_PI4 ||
-        platform.timer_source != 2 || platform.gic_version != 2) fail("platform: unsupported");
+        platform.timer_source != 2 || platform.gic_version != GXOS_AARCH64_GIC_V2) fail("platform: unsupported");
     phase3_serial_print("[guideXOS] physical platform: Raspberry Pi 4\n");
     phase3_serial_print("[guideXOS] SoC: BCM2711\n");
 #else
-    if (platform.timer_source != 2 || platform.gic_version != 2) fail("platform: unsupported");
+    if (platform.timer_source != 2 ||
+        (platform.gic_version != GXOS_AARCH64_GIC_V2 &&
+         platform.gic_version != GXOS_AARCH64_GIC_V3)) fail("platform: unsupported");
 #endif
     phase3_serial_print("[guideXOS] DTB: OK\n");
     if (platform.uart_base != phase3_serial_base()) {
@@ -354,7 +362,12 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff,
         fail("physical memory: FAIL");
     }
     phase3_serial_print("[guideXOS] physical memory: OK\n");
-    if (!phase3_irq_controller_init(&platform, platform.timer_irq)) fail("GIC: FAIL");
+    if (!phase3_irq_controller_init(&platform, platform.timer_irq)) {
+        phase3_serial_print("[guideXOS] GIC init diagnostic=");
+        phase3_serial_dec(phase2_gic_last_error());
+        phase3_serial_print("\n");
+        fail("GIC: FAIL");
+    }
     phase3_serial_print("[guideXOS] GIC: OK version=");
     phase3_serial_dec(platform.gic_version);
     phase3_serial_print("\n");

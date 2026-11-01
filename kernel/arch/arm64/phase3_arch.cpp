@@ -208,3 +208,8 @@ extern "C" uint32_t phase3_irq_id(uint32_t acknowledgement)
 {
     return phase2_gic_irq_id(acknowledgement);
 }
+
+extern "C" uint8_t phase3_irq_ack_valid(uint32_t acknowledgement)
+{
+    return phase2_gic_ack_valid(acknowledgement);
+}

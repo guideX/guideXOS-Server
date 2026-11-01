@@ -204,11 +204,16 @@ Mbed TLS restoration work was attempted.
 
 Phase 3 is a bounded single-core kernel-scheduler proof, not the final
 desktop kernel integration.  The full AMD64 `kernel_main` still has legacy
-x86 PIC/PIT/device initialization, and the repository does not yet have a
-production task lifecycle with sleep/wake queues, a generic IRQ registry, or
-an SMP/per-CPU scheduler.  The ARM64 proof still uses identity-mapped Phase-2
-tables, the Phase-2 physical allocator, polled PL011 output, GICv2 Group-0,
-and the QEMU `virt` platform.
+x86 PIC/PIT/device initialization, and there is no SMP/per-CPU scheduler. The
+original ARM64 Phase-3 guest proof used identity-mapped Phase-2 tables, the
+Phase-2 physical allocator, polled PL011 output, GICv2 Group-0, and QEMU
+`virt`. Phase 4 supplies the common IRQ registry. The GICv3 foundation in
+`AARCH64_GICV3_FOUNDATION.md` now adds a freestanding and host-tested GICv3
+path while keeping the GICv2 path; GICv3 guest qualification remains pending.
+
+The historical standalone Phase-3 timeout remains a separate baseline note.
+It was not re-run during the GICv3 hosted/build-only work and is not treated as
+a GICv3 regression.
 
 AARCH64-4 is implemented in `AARCH64_PHASE4_MEMORY_VFS.md`.  It introduces the
 common UEFI/ramdisk boot resources, production common physical allocator,

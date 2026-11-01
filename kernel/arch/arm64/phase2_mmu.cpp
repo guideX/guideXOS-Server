@@ -23,7 +23,10 @@ static const uint64_t kMappedPhysicalLimit = UINT64_C(0x100000000);
 static const uint64_t kRamMappingLimit = UINT64_C(0x80000000);
 static const uint32_t kMaxTables = 1056;
 #else
-static const uint64_t kMappedPhysicalLimit = UINT64_C(0x80000000);
+// Keep identity mappings within the 40-bit PA size programmed in TCR_EL1.
+// Translation tables are allocated on demand, so sparse DTB-discovered MMIO
+// above 2 GiB does not require mapping the address space between devices.
+static const uint64_t kMappedPhysicalLimit = UINT64_C(0x10000000000);
 static const uint64_t kRamMappingLimit = kMappedPhysicalLimit;
 static const uint32_t kMaxTables = 520;
 #endif
@@ -44,9 +47,9 @@ static const uint64_t kInstructionCache = UINT64_C(1) << 12;
 static const uint64_t kWriteExecuteNever = UINT64_C(1) << 19;
 static const uint64_t kStackAlignment = UINT64_C(0xfff);
 
-// 1 root + 1 L1 + 1 L2 + one L3 table per 2 MiB of the bounded low-2-GiB
-// physical window.  The configured QEMU guest uses only 0x40000000-0x60000000
-// for RAM, with MMIO below it.
+// Translation tables are allocated on demand for mapped 2 MiB chunks. The
+// pool is deliberately bounded; a topology requiring more tables fails MMU
+// setup instead of silently truncating a RAM or MMIO mapping.
 static uint64_t gTables[kMaxTables][kTableEntries]
     __attribute__((aligned(4096), section(".translation_tables")));
 static uint32_t gNextTable = 0;
@@ -102,8 +105,6 @@ static bool ensure_l3(uint64_t virtualAddress, uint64_t** l3)
     const uint64_t l0Index = (virtualAddress >> 39) & 0x1ff;
     const uint64_t l1Index = (virtualAddress >> 30) & 0x1ff;
     const uint64_t l2Index = (virtualAddress >> 21) & 0x1ff;
-    if (l0Index != 0) return false;
-
     uint64_t* l0 = gTables[0];
     uint64_t* l1 = nullptr;
     uint64_t* l2 = nullptr;
@@ -175,6 +176,46 @@ static uint64_t make_device_descriptor()
     return kPageDescriptor | (kAttrDevice << 2) | kShareInner | kAccessFlag | kPxn | kUxn;
 }
 
+static bool map_gic_ranges(const gxos_aarch64_phase2_platform* platform,
+                           uint64_t kernelBase, uint64_t kernelEnd)
+{
+    if (!platform ||
+        !map_range(platform->gicd_base, platform->gicd_size, make_device_descriptor(),
+                   kernelBase, kernelEnd, true)) return false;
+    if (platform->gic_version == GXOS_AARCH64_GIC_V2) {
+        return map_range(platform->gicc_base, platform->gicc_size, make_device_descriptor(),
+                         kernelBase, kernelEnd, true);
+    }
+    if (platform->gic_version != GXOS_AARCH64_GIC_V3 ||
+        platform->gic_redistributor_region_count == 0 ||
+        platform->gic_redistributor_region_count > GXOS_AARCH64_PHASE2_MAX_GICR_REGIONS) return false;
+    for (uint32_t i = 0; i < platform->gic_redistributor_region_count; ++i) {
+        const gxos_aarch64_gicv3_region& region = platform->gic_redistributor_regions[i];
+        if (!map_range(region.base, region.size, make_device_descriptor(), kernelBase,
+                       kernelEnd, true)) return false;
+    }
+    return true;
+}
+
+static bool framebuffer_intersects_gic(const gxos_aarch64_phase2_platform* platform,
+                                       uint64_t framebufferBase, uint64_t framebufferEnd)
+{
+    if (range_intersects(framebufferBase, framebufferEnd,
+                         platform->gicd_base, platform->gicd_size)) return true;
+    if (platform->gic_version == GXOS_AARCH64_GIC_V2) {
+        return range_intersects(framebufferBase, framebufferEnd,
+                                platform->gicc_base, platform->gicc_size);
+    }
+    if (platform->gic_version == GXOS_AARCH64_GIC_V3) {
+        for (uint32_t i = 0; i < platform->gic_redistributor_region_count; ++i) {
+            if (range_intersects(framebufferBase, framebufferEnd,
+                                 platform->gic_redistributor_regions[i].base,
+                                 platform->gic_redistributor_regions[i].size)) return true;
+        }
+    }
+    return false;
+}
+
 static uint64_t make_normal_descriptor()
 {
     return kPageDescriptor | (kAttrNormal << 2) | kShareInner | kAccessFlag | kUxn;
@@ -235,14 +276,13 @@ uint8_t phase2_mmu_build(const gxos_aarch64_phase2_platform* platform,
     for (uint32_t i = 0; i < platform->ram_count; ++i) {
         const uint64_t base = platform->ram[i].base;
         uint64_t end = 0;
-        if (!range_end(base, platform->ram[i].size, &end) || base >= kMappedPhysicalLimit || end > UINT64_C(0x100000000) ||
+        if (!range_end(base, platform->ram[i].size, &end) || base >= kMappedPhysicalLimit || end > kMappedPhysicalLimit ||
             (base & kPageMask) != 0 || (platform->ram[i].size & kPageMask) != 0) return 0;
         if (!map_ram_range(base, platform->ram[i].size, kernel_base, kernelEnd)) return 0;
     }
 
     if (!map_range(platform->uart_base, platform->uart_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
-        !map_range(platform->gicd_base, platform->gicd_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
-        !map_range(platform->gicc_base, platform->gicc_size, make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;
+        !map_gic_ranges(platform, kernel_base, kernelEnd)) return 0;
     for (uint32_t i = 0; i < platform->virtio_mmio_count; ++i) {
         if (!map_range(platform->virtio_mmio[i].base, platform->virtio_mmio[i].size,
                        make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;
@@ -267,8 +307,7 @@ uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* pl
         framebufferEnd > kMappedPhysicalLimit ||
         range_intersects(framebuffer_base, framebufferEnd, kernel_base, kernel_size) ||
         range_intersects(framebuffer_base, framebufferEnd, platform->uart_base, platform->uart_size) ||
-        range_intersects(framebuffer_base, framebufferEnd, platform->gicd_base, platform->gicd_size) ||
-        range_intersects(framebuffer_base, framebufferEnd, platform->gicc_base, platform->gicc_size)) return 0;
+        framebuffer_intersects_gic(platform, framebuffer_base, framebufferEnd)) return 0;
     for (uint32_t i = 0; i < platform->virtio_mmio_count; ++i) {
         if (range_intersects(framebuffer_base, framebufferEnd,
                              platform->virtio_mmio[i].base, platform->virtio_mmio[i].size)) return 0;
@@ -281,7 +320,7 @@ uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* pl
         const uint64_t base = platform->ram[i].base;
         uint64_t end = 0;
         if (!range_end(base, platform->ram[i].size, &end) || base >= kMappedPhysicalLimit ||
-            end > UINT64_C(0x100000000) || (base & kPageMask) != 0 ||
+            end > kMappedPhysicalLimit || (base & kPageMask) != 0 ||
             (platform->ram[i].size & kPageMask) != 0) return 0;
         if (!map_ram_range(base, platform->ram[i].size, kernel_base, kernelEnd)) return 0;
     }
@@ -289,8 +328,7 @@ uint8_t phase2_mmu_build_with_framebuffer(const gxos_aarch64_phase2_platform* pl
     // GOP scanout, while still mapping a framebuffer outside DTB RAM.
     if (!map_framebuffer_range(framebuffer_base, framebuffer_size)) return 0;
     if (!map_range(platform->uart_base, platform->uart_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
-        !map_range(platform->gicd_base, platform->gicd_size, make_device_descriptor(), kernel_base, kernelEnd, true) ||
-        !map_range(platform->gicc_base, platform->gicc_size, make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;
+        !map_gic_ranges(platform, kernel_base, kernelEnd)) return 0;
     for (uint32_t i = 0; i < platform->virtio_mmio_count; ++i) {
         if (!map_range(platform->virtio_mmio[i].base, platform->virtio_mmio[i].size,
                        make_device_descriptor(), kernel_base, kernelEnd, true)) return 0;

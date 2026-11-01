@@ -75,7 +75,7 @@ $loaderObject = Join-Path $OutputDirectory 'phase2_loader.obj'
 $efiPath = Join-Path $OutputDirectory 'BOOTAA64.EFI'
 $kernelSources = @(
     'phase2_entry.S', 'phase2_serial.cpp', 'phase2_platform.cpp', 'phase2_mmu.cpp',
-    'phase2_memory.cpp', 'phase2_gic.cpp', 'phase2_timer.cpp', 'phase2_exceptions.cpp', 'phase2_main.cpp'
+    'phase2_memory.cpp', 'phase2_gic.cpp', 'gicv3_controller.cpp', 'phase2_timer.cpp', 'phase2_exceptions.cpp', 'phase2_main.cpp'
 )
 $kernelObjects = @()
 

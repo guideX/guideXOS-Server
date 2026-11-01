@@ -1,5 +1,7 @@
 #include <stdint.h>
 
+#include "phase2_gic.h"
+
 #if defined(GXOS_AARCH64_PHASE6)
 #include "../../../aarch64/phase6/phase6_contract.h"
 using Aarch64Handoff = gxos_aarch64_phase6_handoff;
@@ -1241,7 +1243,14 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     gxos_aarch64_phase2_platform platform{};
     if (!gxos_aarch64_phase2_parse_dtb((const void*)(uintptr_t)handoff->dtb_base,
                                        handoff->dtb_size, &platform) ||
-        platform.timer_source != 2 || platform.gic_version != 2) fail("DTB: FAIL");
+        platform.timer_source != 2 ||
+        (platform.gic_version != GXOS_AARCH64_GIC_V2 &&
+         platform.gic_version != GXOS_AARCH64_GIC_V3)) {
+        print("[guideXOS] DTB diagnostic=");
+        phase3_serial_dec(platform.diagnostic);
+        print("\n");
+        fail("DTB: FAIL");
+    }
     g_platform_for_tasks = &platform;
     print("[guideXOS] DTB: OK\n");
     phase3_serial_set_base(platform.uart_base);
@@ -1358,13 +1367,21 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 #endif
 
     if (!vfs_boot_proof()) fail("ramdisk/VFS proof: FAIL");
-    if (!kernel::irq::initialize() ||
-        !phase3_irq_controller_init(&platform, platform.timer_irq) ||
+    if (!kernel::irq::initialize()) fail("IRQ registry init: FAIL");
+    if (!phase3_irq_controller_init(&platform, platform.timer_irq)) {
+        print("[guideXOS] GIC init diagnostic=");
+        phase3_serial_dec(phase2_gic_last_error());
+        print("\n");
+        fail("GIC initialization: FAIL");
+    }
+    if (
         !phase3_timer_configure(platform.timer_irq, 100) ||
         !kernel::irq::register_handler(platform.timer_irq, timer_handler, nullptr)) {
         fail("IRQ/timer setup: FAIL");
     }
-    print("[guideXOS] GIC: OK version=2\n");
+    print("[guideXOS] GIC: OK version=");
+    phase3_serial_dec(platform.gic_version);
+    print("\n");
 
     kernel::common::KernelEntryConfig config = {
         allocate_pages, 16, kCooperativeTarget, kPreemptionTarget,

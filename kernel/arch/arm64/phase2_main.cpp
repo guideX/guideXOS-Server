@@ -94,7 +94,12 @@ extern "C" void phase2_main(const gxos_aarch64_phase2_handoff* handoff, uint64_t
     gxos_aarch64_phase2_platform platform;
     for (uint64_t i = 0; i < sizeof(platform); ++i) ((uint8_t*)&platform)[i] = 0;
     if (!gxos_aarch64_phase2_parse_dtb((const void*)(uintptr_t)handoff->dtb_base,
-                                       handoff->dtb_size, &platform)) fail("DTB: FAIL");
+                                       handoff->dtb_size, &platform)) {
+        phase2_serial_print("[guideXOS] DTB diagnostic=");
+        phase2_serial_dec(platform.diagnostic);
+        phase2_serial_print("\n");
+        fail("DTB: FAIL");
+    }
     if (platform.timer_source != 2) fail("DTB timer source: unsupported");
     phase2_serial_print("[guideXOS] DTB: OK\n");
     for (uint32_t i = 0; i < platform.ram_count; ++i) print_range("[guideXOS] RAM: ", platform.ram[i].base, platform.ram[i].size);
@@ -149,11 +154,18 @@ extern "C" void phase2_main(const gxos_aarch64_phase2_handoff* handoff, uint64_t
     phase2_serial_dec(phase2_early_allocator_free_pages());
     phase2_serial_print("\n");
 
-    if (!phase2_gic_init(&platform, platform.timer_irq)) fail("GIC: FAIL");
+    if (!phase2_gic_init(&platform, platform.timer_irq)) {
+        phase2_serial_print("[guideXOS] GIC init diagnostic=");
+        phase2_serial_dec(phase2_gic_last_error());
+        phase2_serial_print("\n");
+        fail("GIC: FAIL");
+    }
     phase2_serial_print("[guideXOS] GIC: OK version=");
     phase2_serial_dec(platform.gic_version);
     phase2_serial_print(" GICD="); phase2_serial_hex(platform.gicd_base);
-    phase2_serial_print(" GICC="); phase2_serial_hex(platform.gicc_base);
+    phase2_serial_print(platform.gic_version == GXOS_AARCH64_GIC_V3 ? " GICR=" : " GICC=");
+    phase2_serial_hex(platform.gic_version == GXOS_AARCH64_GIC_V3
+        ? platform.gic_redistributor_regions[0].base : platform.gicc_base);
     phase2_serial_print("\n");
     phase2_serial_print("[guideXOS] GIC state: D_CTLR="); phase2_serial_hex(phase2_gic_distributor_control());
     phase2_serial_print(" D_ISENABLER0="); phase2_serial_hex(phase2_gic_enable0());
