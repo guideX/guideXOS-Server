@@ -438,6 +438,360 @@ void test_snapshot_reset()
             "initialization clears prior hardware evidence and requires a fresh paint");
 }
 
+struct IvrsFixture {
+    uint8_t bytes[4096];
+    uint32_t length;
+};
+
+void put_u16(uint8_t* out, uint16_t value)
+{
+    out[0] = static_cast<uint8_t>(value);
+    out[1] = static_cast<uint8_t>(value >> 8u);
+}
+
+void put_u32(uint8_t* out, uint32_t value)
+{
+    for (uint32_t i = 0u; i < 4u; ++i) {
+        out[i] = static_cast<uint8_t>(value >> (i * 8u));
+    }
+}
+
+void put_u64(uint8_t* out, uint64_t value)
+{
+    put_u32(out, static_cast<uint32_t>(value));
+    put_u32(out + 4u, static_cast<uint32_t>(value >> 32u));
+}
+
+void begin_ivrs_fixture(IvrsFixture* fixture)
+{
+    std::memset(fixture, 0, sizeof(*fixture));
+    std::memcpy(fixture->bytes, "IVRS", 4u);
+    fixture->bytes[8] = 2u;
+    fixture->length = kernel::amd_ivrs::IVRS_HEADER_BYTES;
+}
+
+uint32_t add_ivhd(IvrsFixture* fixture, uint8_t type, uint16_t iommuId,
+                  uint16_t segment, uint64_t mmioBase)
+{
+    const uint32_t offset = fixture->length;
+    const uint32_t headerBytes = type == 0x10u ? 24u : 40u;
+    uint8_t* block = fixture->bytes + offset;
+    block[0] = type;
+    block[1] = 0u;
+    put_u16(block + 2u, static_cast<uint16_t>(headerBytes));
+    put_u16(block + 4u, iommuId);
+    put_u16(block + 6u, 0x40u);
+    put_u64(block + 8u, mmioBase);
+    put_u16(block + 16u, segment);
+    put_u16(block + 18u, 0x1234u);
+    if (type == 0x10u) {
+        put_u32(block + 20u, 0xAABBCCDDu);
+    } else {
+        put_u32(block + 20u, 0x01020304u);
+        put_u64(block + 24u, 0x1122334455667788ULL);
+        put_u64(block + 32u, 0x8877665544332211ULL);
+    }
+    fixture->length += headerBytes;
+    return offset;
+}
+
+void add_ivhd_entry4(IvrsFixture* fixture, uint32_t blockOffset,
+                     uint8_t type, uint16_t deviceId, uint8_t setting = 0u)
+{
+    uint8_t* entry = fixture->bytes + fixture->length;
+    entry[0] = type;
+    put_u16(entry + 1u, deviceId);
+    entry[3] = setting;
+    fixture->length += 4u;
+    put_u16(fixture->bytes + blockOffset + 2u,
+            static_cast<uint16_t>(fixture->length - blockOffset));
+}
+
+void add_ivhd_entry8(IvrsFixture* fixture, uint32_t blockOffset,
+                     uint8_t type, uint16_t deviceId, uint8_t setting,
+                     uint32_t extra)
+{
+    uint8_t* entry = fixture->bytes + fixture->length;
+    std::memset(entry, 0, 8u);
+    entry[0] = type;
+    put_u16(entry + 1u, deviceId);
+    entry[3] = setting;
+    put_u32(entry + 4u, extra);
+    fixture->length += 8u;
+    put_u16(fixture->bytes + blockOffset + 2u,
+            static_cast<uint16_t>(fixture->length - blockOffset));
+}
+
+void add_ivmd(IvrsFixture* fixture, uint8_t type, uint8_t flags,
+              uint16_t segment, uint64_t start, uint64_t length)
+{
+    uint8_t* block = fixture->bytes + fixture->length;
+    std::memset(block, 0, 32u);
+    block[0] = type;
+    block[1] = flags;
+    put_u16(block + 2u, 32u);
+    put_u16(block + 4u, 0x1234u);
+    put_u16(block + 6u, 0x0056u);
+    put_u16(block + 8u, segment);
+    put_u64(block + 16u, start);
+    put_u64(block + 24u, length);
+    fixture->length += 32u;
+}
+
+void finish_ivrs_fixture(IvrsFixture* fixture)
+{
+    put_u32(fixture->bytes + 4u, fixture->length);
+    fixture->bytes[9] = 0u;
+    uint8_t checksum = 0u;
+    for (uint32_t i = 0u; i < fixture->length; ++i) {
+        checksum = static_cast<uint8_t>(checksum + fixture->bytes[i]);
+    }
+    fixture->bytes[9] = static_cast<uint8_t>(0u - checksum);
+}
+
+void test_ivrs_parser_and_routing()
+{
+    using namespace kernel::amd_ivrs;
+    IvrsFixture fixture;
+    Table table = {};
+    begin_ivrs_fixture(&fixture);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::Valid &&
+            table.unitCount == 0u,
+            "empty but checksummed IVRS table is valid with zero IOMMU units");
+    require(route_device(table, 0u, 0x0303u).status == RouteStatus::Unmatched,
+            "valid zero-unit IVRS table does not invent device ownership");
+
+    begin_ivrs_fixture(&fixture);
+    const uint32_t ivhd = add_ivhd(&fixture, 0x10u, 0x0002u, 0u, 0xFED80000u);
+    add_ivhd_entry4(&fixture, ivhd, 0x03u, 0x0300u, 0x11u);
+    add_ivhd_entry4(&fixture, ivhd, 0x04u, 0x0307u);
+    add_ivhd_entry8(&fixture, ivhd, 0x42u, 0x0400u, 0x22u, 0x00000304u);
+    add_ivhd_entry8(&fixture, ivhd, 0x43u, 0x0500u, 0x33u, 0x00000600u);
+    add_ivhd_entry4(&fixture, ivhd, 0x04u, 0x0502u);
+    add_ivhd_entry8(&fixture, ivhd, 0x46u, 0x0700u, 0x44u, 0x12345678u);
+    add_ivhd_entry8(&fixture, ivhd, 0x47u, 0x0800u, 0x55u, 0xAABBCCDDu);
+    add_ivhd_entry4(&fixture, ivhd, 0x04u, 0x0801u);
+    add_ivhd_entry8(&fixture, ivhd, 0x48u, 0x0900u, 0x66u, 0x00030401u);
+    add_ivhd_entry8(&fixture, ivhd, 0xF0u, 0x0A00u, 0u, 0u);
+    // Replace the final fixed-size slot with the complete ACPI HID record.
+    fixture.length -= 8u;
+    put_u16(fixture.bytes + ivhd + 2u,
+            static_cast<uint16_t>(fixture.length - ivhd));
+    uint8_t* hid = fixture.bytes + fixture.length;
+    std::memset(hid, 0, 25u);
+    hid[0] = 0xF0u;
+    put_u16(hid + 1u, 0x0A00u);
+    hid[3] = 0x77u;
+    put_u64(hid + 4u, 0x4142434445464748ULL);
+    put_u64(hid + 12u, 0x3132333435363738ULL);
+    hid[20] = 2u;
+    hid[21] = 3u;
+    hid[22] = 'u'; hid[23] = 'i'; hid[24] = 'd';
+    fixture.length += 25u;
+    put_u16(fixture.bytes + ivhd + 2u,
+            static_cast<uint16_t>(fixture.length - ivhd));
+    add_ivmd(&fixture, 0x20u, 0x0Eu, 0u, 0x100000u, 0x2000u);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::Valid &&
+            table.unitCount == 1u && table.units[0].ivhdType == 0x10u &&
+            table.units[0].featureReporting == 0xAABBCCDDu &&
+            table.units[0].ruleCount == 7u && table.ivmdCount == 1u,
+            "type 10 IVHD preserves device entries, feature reporting, and IVMD memory definition");
+    require(table.units[0].rules[1].aliasFirstId == 0x0304u &&
+            table.units[0].rules[2].aliasFirstId == 0x0600u,
+            "alias select and range payloads use the aligned UsedID offset");
+    require(table.units[0].rules[3].extendedData == 0x12345678u &&
+            table.units[0].rules[4].extendedData == 0xAABBCCDDu,
+            "extended select and range payloads are retained");
+    require(table.units[0].rules[6].acpiHid == 0x4142434445464748ULL &&
+            table.units[0].rules[6].uidLength == 3u &&
+            table.units[0].rules[6].uid[2] == 'd',
+            "ACPI HID, UID length, and UID payload use their specification offsets");
+    require(table.ivmd[0].flags == 0x0Eu && table.ivmd[0].segment == 0u &&
+            table.ivmd[0].start == 0x100000u && table.ivmd[0].length == 0x2000u,
+            "IVMD range flags, segment, base, and length are retained");
+    Route route = route_device(table, 0u, 0x0300u);
+    require(route.status == RouteStatus::Resolved && route.unitIndex == 0,
+            "range start requester ID maps to its unique IOMMU unit");
+    route = route_device(table, 0u, 0x0307u);
+    require(route.status == RouteStatus::Resolved,
+            "range end requester ID is inclusive");
+    require(route_device(table, 0u, 0x0308u).status == RouteStatus::Unmatched,
+            "requester ID outside the IVHD range stays unmatched");
+    route = route_device(table, 0u, 0x0400u);
+    require(route.status == RouteStatus::Resolved && route.effectiveRequesterId == 0x0304u,
+            "alias select uses the aligned used-ID field and reports effective requester ID");
+    route = route_device(table, 0u, 0x0501u);
+    require(route.status == RouteStatus::Resolved && route.effectiveRequesterId == 0x0601u,
+            "alias range maps requester offsets into the corresponding used-ID range");
+    require(route_device(table, 0u, 0x0700u).status == RouteStatus::Resolved &&
+            route_device(table, 0u, 0x0801u).status == RouteStatus::Resolved,
+            "extended select and range entries cover their specified requester IDs");
+    route = route_device(table, 0u, 0x0900u);
+    require(route.status == RouteStatus::Resolved && route.effectiveRequesterId == 0x0304u,
+            "special-device entry reports its used requester ID");
+    require(route_device(table, 1u, 0x0303u).status == RouteStatus::Unmatched,
+            "PCI segment mismatch does not route a device");
+
+    begin_ivrs_fixture(&fixture);
+    const uint32_t type11 = add_ivhd(&fixture, 0x11u, 0x0010u, 2u, 0xFEE00000u);
+    add_ivhd_entry4(&fixture, type11, 0x02u, 0x1001u, 0x21u);
+    const uint32_t type40 = add_ivhd(&fixture, 0x40u, 0x0020u, 2u, 0xFEE10000u);
+    add_ivhd_entry4(&fixture, type40, 0x02u, 0x2001u, 0x31u);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::Valid &&
+            table.unitCount == 2u && table.units[0].ivhdType == 0x11u &&
+            table.units[0].attributes == 0x01020304u &&
+            table.units[0].efrImage == 0x1122334455667788ULL &&
+            table.units[1].ivhdType == 0x40u,
+            "IVHD types 11 and 40 preserve their extended hardware attributes");
+    require(route_device(table, 2u, 0x1001u).unitIndex == 0 &&
+            route_device(table, 2u, 0x2001u).unitIndex == 1,
+            "multiple IOMMU units resolve devices by PCI segment and coverage");
+
+    begin_ivrs_fixture(&fixture);
+    const uint32_t first = add_ivhd(&fixture, 0x10u, 0x0001u, 0u, 0xFEE00000u);
+    add_ivhd_entry4(&fixture, first, 0x01u, 0u);
+    const uint32_t second = add_ivhd(&fixture, 0x10u, 0x0002u, 0u, 0xFEE10000u);
+    add_ivhd_entry4(&fixture, second, 0x01u, 0u);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::Valid &&
+            route_device(table, 0u, 0x0303u).status == RouteStatus::Ambiguous,
+            "overlapping unit coverage is reported as ambiguous instead of choosing the first unit");
+
+    begin_ivrs_fixture(&fixture);
+    const uint32_t unsupported = add_ivhd(&fixture, 0x10u, 0u, 0u, 0xFEE00000u);
+    add_ivhd_entry4(&fixture, unsupported, 0x02u, 0x0303u);
+    add_ivhd_entry4(&fixture, unsupported, 0x05u, 0x0304u);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::ValidWithUnsupported &&
+            table.hasUnsupportedTopology && table.unsupportedStructureCount == 1u &&
+            route_device(table, 0u, 0x0303u).status == RouteStatus::Unsupported,
+            "unknown bounded device entries are counted and make topology routing unsupported");
+
+    begin_ivrs_fixture(&fixture);
+    uint8_t* unknownBlock = fixture.bytes + fixture.length;
+    unknownBlock[0] = 0x12u;
+    put_u16(unknownBlock + 2u, 4u);
+    fixture.length += 4u;
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::ValidWithUnsupported &&
+            table.unitCount == 0u && table.unsupportedStructureCount == 1u,
+            "unknown IVRS blocks are skipped by bounded length and marked unsupported");
+
+    begin_ivrs_fixture(&fixture);
+    finish_ivrs_fixture(&fixture);
+    fixture.bytes[20] ^= 0x40u;
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::Malformed,
+            "incorrect ACPI checksum is rejected");
+    begin_ivrs_fixture(&fixture);
+    const uint32_t truncated = add_ivhd(&fixture, 0x10u, 0u, 0u, 0xFEE00000u);
+    add_ivhd_entry4(&fixture, truncated, 0x03u, 0x0300u);
+    put_u16(fixture.bytes + truncated + 2u, 0x100u);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::Malformed,
+            "subtable length beyond available bytes is rejected");
+    begin_ivrs_fixture(&fixture);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length - 1u, &table) == ParseStatus::Malformed,
+            "truncated declared ACPI table is rejected");
+    begin_ivrs_fixture(&fixture);
+    add_ivmd(&fixture, 0x22u, 0x08u, 0u, UINT64_MAX - 3u, 8u);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::Malformed,
+            "overflowing IVMD physical ranges are rejected");
+
+    begin_ivrs_fixture(&fixture);
+    add_ivmd(&fixture, 0x20u, 0u, 0u, 0x1000u, 0u);
+    finish_ivrs_fixture(&fixture);
+    require(parse(fixture.bytes, fixture.length, &table) == ParseStatus::Malformed,
+            "zero-length IVMD memory definitions are malformed");
+
+    IommuUnit unit = {};
+    unit.mmioBase = 0xFED80000u;
+    require(valid_mmio_resource(unit, IVHD_MMIO_MIN_BYTES) &&
+            !valid_mmio_resource(unit, IVHD_MMIO_MIN_BYTES - 1u),
+            "IOMMU MMIO resource validation requires the full defined span");
+    unit.mmioBase += 1u;
+    require(!valid_mmio_resource(unit, IVHD_MMIO_MIN_BYTES),
+            "unaligned IOMMU MMIO bases are rejected");
+    unit.mmioBase = UINT64_MAX - 0x1FFFu;
+    require(!valid_mmio_resource(unit, IVHD_MMIO_MIN_BYTES),
+            "IOMMU MMIO span arithmetic overflow is rejected");
+    require(classify_translation(true, 1u, IOMMU_CONTROL_IOMMU_ENABLE) ==
+                TranslationState::EnabledObserved &&
+            classify_translation(true, 1u, 0u) == TranslationState::DisabledObserved &&
+            classify_translation(false, 1u, 0u) == TranslationState::Unknown &&
+            classify_translation(true, 2u, IOMMU_CONTROL_IOMMU_ENABLE) ==
+                TranslationState::Unknown,
+            "translation is classified only from a valid supported revision control snapshot");
+}
+
+void test_iommu_diagnostic_publication_and_formatting()
+{
+    using namespace kernel::amd_ivrs;
+    using namespace kernel::modern_input_diagnostics;
+    initialize();
+    const int32_t first = add_xhci(3u, 0u, 3u, 0x1022u, 0x1503u);
+    const int32_t second = add_xhci(3u, 0u, 4u, 0x1022u, 0x1504u);
+    const int32_t third = add_xhci(4u, 0u, 0u, 0x1022u, 0x1505u);
+    record_ivrs_discovery(ParseStatus::Valid, true, true, 1u, 1u, 2u, 0u);
+    record_iommu_route(first, 0u, 0x0303u, 0x0303u,
+                       RouteStatus::Resolved, 0, 0x0002u, 0xFED80000u);
+    record_iommu_registers(first, InspectionStatus::Readable,
+                           TranslationState::EnabledObserved, true, true);
+    record_iommu_route(second, 0u, 0x0304u, 0x0400u,
+                       RouteStatus::Resolved, 0, 0x0002u, 0xFED80000u);
+    record_iommu_registers(second, InspectionStatus::Readable,
+                           TranslationState::DisabledObserved, true, true);
+    record_iommu_route(third, 0u, 0x0400u, 0x0400u,
+                       RouteStatus::Ambiguous, -1, 0u, 0u);
+    record_iommu_registers(third, InspectionStatus::NotAttempted,
+                           TranslationState::Unknown);
+    record_dma_safety("DEVICE_DMA_MAPPING_NOT_ESTABLISHED", false);
+    record_stage(first, Stage::DmaPrerequisites, Status::Blocked,
+                 0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                 "DEVICE_DMA_MAPPING_NOT_ESTABLISHED");
+    select_controller(second);
+    Snapshot snapshot = {};
+    copy_snapshot(&snapshot);
+    require(snapshot.controllers[first].iommuRouteStatus == RouteStatus::Resolved &&
+            snapshot.controllers[second].effectiveRequesterId == 0x0400u &&
+            snapshot.controllers[third].iommuRouteStatus == RouteStatus::Ambiguous,
+            "three xHCI controllers retain independent route identities and states");
+    require(snapshot.selectedIommuRouteStatus == RouteStatus::Resolved &&
+            snapshot.selectedIommuTranslationState == TranslationState::DisabledObserved &&
+            !snapshot.dmaMappingEstablished && snapshot.firstFailure.present &&
+            snapshot.firstFailure.stage == Stage::DmaPrerequisites,
+            "selected controller state stays distinct and uncertain mapping retains the first DMA block");
+    char summary[128];
+    format_ivrs_summary(snapshot, summary, sizeof(summary));
+    require(std::strstr(summary, "ACPI IVRS VALID") != nullptr &&
+            std::strstr(summary, "IVHD=1") != nullptr &&
+            std::strstr(summary, "remap=YES") != nullptr,
+            "IVRS panel summary reports validated table counts and remapping presence");
+    char routeText[128];
+    format_controller_iommu_route(snapshot.controllers[second], routeText, sizeof(routeText));
+    require(std::strstr(routeText, "03:00.4") != nullptr &&
+            std::strstr(routeText, "RID=0304") != nullptr &&
+            std::strstr(routeText, "alias=0400") != nullptr &&
+            std::strstr(routeText, "00:00.2") != nullptr &&
+            std::strstr(routeText, "RESOLVED") != nullptr,
+            "per-controller panel route includes BDF, segment RID, alias, and unit identity");
+    char shortRoute[12];
+    format_controller_iommu_route(snapshot.controllers[second], shortRoute,
+                                  sizeof(shortRoute));
+    require(shortRoute[sizeof(shortRoute) - 1u] == '\0',
+            "per-controller route formatting remains terminated when truncated");
+    record_ivrs_discovery(ParseStatus::NotPresent, false, false, 0u, 0u, 0u, 0u);
+    record_dma_safety("ACPI_REMAP_SCAN_UNKNOWN", false);
+    copy_snapshot(&snapshot);
+    format_ivrs_summary(snapshot, summary, sizeof(summary));
+    require(std::strstr(summary, "remap=UNKNOWN") != nullptr,
+            "unknown ACPI scan remains distinct from a confirmed absence of remapping hardware");
+}
+
 } // namespace
 
 int main()
@@ -656,7 +1010,7 @@ int main()
             layout.width <= 128u && layout.height <= 96u && layout.rowCapacity > 0u,
             "small-screen panel layout remains within framebuffer bounds");
     require(calculate_panel_layout(1920u, 1080u, &layout) && !layout.compact &&
-            layout.width <= 560u && layout.height <= 500u && layout.rowCapacity >= 33u,
+            layout.width <= 560u && layout.height <= 700u && layout.rowCapacity >= 33u,
             "common-screen panel stays bounded instead of covering the desktop");
 
     test_startup_operation_frontier();
@@ -666,6 +1020,8 @@ int main()
     test_unsupported_dma_failure_is_sticky();
     test_snapshot_reset();
     test_concurrent_publication();
+    test_ivrs_parser_and_routing();
+    test_iommu_diagnostic_publication_and_formatting();
     std::printf("Modern input diagnostics tests PASS (%d assertions).\n", g_assertions);
     return 0;
 }

@@ -312,6 +312,43 @@ static void diagnostic_stage(modern_input_diagnostics::Stage stage,
         s_diagnosticControllerIndex, stage, status, errorCode, hasErrorCode,
         controllerStatus, hasControllerStatus, slotId, portId, endpointId,
         completionCode, hasCompletionCode, detail);
+    if (stage == modern_input_diagnostics::Stage::DmaPrerequisites) {
+        const bool directDmaVerified = status == modern_input_diagnostics::Status::Pass;
+        modern_input_diagnostics::record_dma_safety(
+            directDmaVerified
+                ? "DIRECT_PHYSICAL_DMA_VERIFIED_NO_REMAP_TABLE"
+                : (detail != nullptr && detail[0] != '\0'
+                    ? detail : "DEVICE_DMA_MAPPING_NOT_ESTABLISHED"),
+            directDmaVerified);
+    }
+}
+
+static const char* dma_translation_block_reason()
+{
+    if (!s_acpiDmaRemappingScanValid) return "ACPI_REMAP_SCAN_UNKNOWN";
+    if (!s_acpiDmaRemappingTablePresent) return "DEVICE_ADDRESS_TRANSLATION_UNVERIFIED";
+    modern_input_diagnostics::Snapshot snapshot = {};
+    modern_input_diagnostics::copy_snapshot(&snapshot);
+    if (s_diagnosticControllerIndex < 0 ||
+        static_cast<uint32_t>(s_diagnosticControllerIndex) >= snapshot.storedControllerCount) {
+        return "DEVICE_ROUTING_UNRESOLVED";
+    }
+    const modern_input_diagnostics::ControllerSnapshot& controller =
+        snapshot.controllers[static_cast<uint32_t>(s_diagnosticControllerIndex)];
+    if (controller.iommuRouteStatus == amd_ivrs::RouteStatus::Ambiguous) {
+        return "DEVICE_ROUTING_AMBIGUOUS";
+    }
+    if (controller.iommuRouteStatus == amd_ivrs::RouteStatus::Unsupported) {
+        return "DEVICE_ROUTING_UNSUPPORTED";
+    }
+    if (controller.iommuRouteStatus == amd_ivrs::RouteStatus::Unmatched) {
+        return "DEVICE_ROUTING_UNRESOLVED";
+    }
+    if (controller.iommuInspectionStatus != amd_ivrs::InspectionStatus::Readable ||
+        controller.iommuTranslationState == amd_ivrs::TranslationState::Unknown) {
+        return "IOMMU_STATE_UNKNOWN";
+    }
+    return "DEVICE_DMA_MAPPING_NOT_ESTABLISHED";
 }
 
 static bool validate_dma_prerequisites()
@@ -465,9 +502,7 @@ static bool validate_dma_prerequisites()
     if (!xhci_device_dma_translation_verified(translationEvidence)) {
         const bool remappingTablePresent = translationEvidence ==
             XhciDeviceDmaTranslationEvidence::AcpiRemappingTablePresent;
-        const char* reason = remappingTablePresent
-            ? "IOMMU_REMAP_TABLE_PRESENT_WITHOUT_DMA_DOMAIN_SUPPORT"
-            : "DEVICE_ADDRESS_TRANSLATION_UNVERIFIED";
+        const char* reason = dma_translation_block_reason();
         diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                          modern_input_diagnostics::Status::Blocked,
                          0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
@@ -482,7 +517,7 @@ static bool validate_dma_prerequisites()
     diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                      modern_input_diagnostics::Status::Pass, 0u, false,
                      0u, false, 0u, 0u, 0u, 0u, false,
-                     "DIRECT_PHYSICAL_DMA_NO_ACPI_REMAP_TABLE");
+                     "DIRECT_PHYSICAL_DMA_VERIFIED_NO_REMAP_TABLE");
     serial_puts("[XHCI] DMA regions and scratchpads validated; direct physical DMA selected\n");
     return true;
 }

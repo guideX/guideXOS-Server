@@ -9492,10 +9492,10 @@ static uint64_t draw_input3d_diagnostics_panel()
     line[0] = '\0';
 #if defined(GXOS_INPUT3D_SKIP_PCI_AUDIO)
     uint32_t position = input3d_panel_append(line, sizeof(line), 0u,
-        "Build: INPUT3D-R4-AUDIO-BYPASS / ");
+        "Build: INPUT3D-R6-AUDIO-BYPASS / ");
 #else
     uint32_t position = input3d_panel_append(line, sizeof(line), 0u,
-        "Build: INPUT3D-R4 / ");
+        "Build: INPUT3D-R6 / ");
 #endif
     input3d_panel_append(line, sizeof(line), position, GXOS_BUILD_SOURCE_REVISION);
     input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
@@ -9618,6 +9618,94 @@ static uint64_t draw_input3d_diagnostics_panel()
     position = input3d_panel_decimal(line, sizeof(line), position, snapshot.xhciControllerCount);
     input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
 
+    char failure[112];
+    modern_input_diagnostics::format_first_failure(snapshot, failure, sizeof(failure));
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "FIRST FAILURE: ");
+    input3d_panel_append(line, sizeof(line), position, failure);
+    input3d_panel_draw_line(&writer, line,
+        snapshot.firstFailure.present ? rgb(255, 135, 125) : rgb(196, 213, 234));
+
+    line[0] = '\0';
+    modern_input_diagnostics::format_ivrs_summary(snapshot, line, sizeof(line));
+    input3d_panel_draw_line(&writer, line, rgb(190, 215, 242));
+    if (layout.compact) {
+        if (snapshot.selectedControllerIndex >= 0 &&
+            static_cast<uint32_t>(snapshot.selectedControllerIndex) < snapshot.storedControllerCount) {
+            line[0] = '\0';
+            modern_input_diagnostics::format_controller_iommu_route(
+                snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)],
+                line, sizeof(line));
+            input3d_panel_draw_line(&writer, line, rgb(185, 210, 238));
+        }
+    } else {
+        for (uint32_t i = 0u; i < snapshot.storedControllerCount; ++i) {
+            const modern_input_diagnostics::ControllerSnapshot& controller =
+                snapshot.controllers[i];
+            if (!controller.occupied ||
+                controller.kind != modern_input_diagnostics::ControllerKind::XHCI) {
+                continue;
+            }
+            line[0] = '\0';
+            modern_input_diagnostics::format_controller_iommu_route(
+                controller, line, sizeof(line));
+            input3d_panel_draw_line(&writer, line, rgb(185, 210, 238));
+        }
+    }
+    if (snapshot.selectedControllerIndex >= 0 &&
+        static_cast<uint32_t>(snapshot.selectedControllerIndex) < snapshot.storedControllerCount) {
+        const modern_input_diagnostics::ControllerSnapshot& selected =
+            snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "Selected IOMMU: ");
+        if (selected.iommuUnitIndex >= 0) {
+            const uint16_t id = selected.iommuDeviceId;
+            position = input3d_panel_hex(line, sizeof(line), position,
+                                         static_cast<uint8_t>(id >> 8u), 2u);
+            position = input3d_panel_append(line, sizeof(line), position, ":");
+            position = input3d_panel_hex(line, sizeof(line), position,
+                static_cast<uint8_t>((id >> 3u) & 0x1Fu), 2u);
+            position = input3d_panel_append(line, sizeof(line), position, ".");
+            position = input3d_panel_decimal(line, sizeof(line), position,
+                                             static_cast<uint32_t>(id & 0x07u));
+            position = input3d_panel_append(line, sizeof(line), position, " base=0x");
+            position = input3d_panel_hex(line, sizeof(line), position,
+                static_cast<uint32_t>(selected.iommuBase >> 32u), 8u);
+            input3d_panel_hex(line, sizeof(line), position,
+                static_cast<uint32_t>(selected.iommuBase), 8u);
+        } else {
+            position = input3d_panel_append(line, sizeof(line), position, "NONE route=");
+            input3d_panel_append(line, sizeof(line), position,
+                modern_input_diagnostics::iommu_route_status_name(
+                    selected.iommuRouteStatus));
+        }
+        input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "IOMMU registers: ");
+        position = input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::iommu_inspection_status_name(
+                selected.iommuInspectionStatus));
+        position = input3d_panel_append(line, sizeof(line), position, " translation=");
+        input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::iommu_translation_state_name(
+                selected.iommuTranslationState));
+        input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+    }
+    line[0] = '\0';
+    position = input3d_panel_append(line, sizeof(line), 0u, "DMA safety: ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        snapshot.dmaMappingEstablished ? "VERIFIED" : "BLOCKED");
+    position = input3d_panel_append(line, sizeof(line), position, " mapping=");
+    position = input3d_panel_append(line, sizeof(line), position,
+        snapshot.dmaMappingEstablished ? "ESTABLISHED" : "NOT ESTABLISHED");
+    position = input3d_panel_append(line, sizeof(line), position, " reason=");
+    input3d_panel_append(line, sizeof(line), position,
+        snapshot.dmaDecisionReason != nullptr
+            ? snapshot.dmaDecisionReason : "IOMMU_STATE_UNKNOWN");
+    input3d_panel_draw_line(&writer, line,
+        snapshot.dmaMappingEstablished ? rgb(170, 225, 186) : rgb(255, 195, 145));
+
     if (snapshot.pciScanFailure != nullptr) {
         line[0] = '\0';
         position = input3d_panel_append(line, sizeof(line), 0u, "PCI scan failure: ");
@@ -9625,8 +9713,6 @@ static uint64_t draw_input3d_diagnostics_panel()
         input3d_panel_draw_line(&writer, line, rgb(255, 185, 135));
     }
 
-    char failure[112];
-    modern_input_diagnostics::format_first_failure(snapshot, failure, sizeof(failure));
     if (layout.compact) {
         line[0] = '\0';
         position = input3d_panel_append(line, sizeof(line), 0u, "Selected: ");
@@ -9647,11 +9733,6 @@ static uint64_t draw_input3d_diagnostics_panel()
             input3d_panel_append(line, sizeof(line), position, "NONE");
         }
         input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
-        line[0] = '\0';
-        position = input3d_panel_append(line, sizeof(line), 0u, "FIRST FAILURE: ");
-        input3d_panel_append(line, sizeof(line), position, failure);
-        input3d_panel_draw_line(&writer, line,
-            snapshot.firstFailure.present ? rgb(255, 135, 125) : rgb(196, 213, 234));
     } else {
         line[0] = '\0';
         position = input3d_panel_append(line, sizeof(line), 0u, "Selected xHCI: ");
@@ -9670,12 +9751,6 @@ static uint64_t draw_input3d_diagnostics_panel()
                                  snapshot.xhciControllerCount == 0u ? "NONE FOUND" : "NOT ATTEMPTED");
         }
         input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
-        line[0] = '\0';
-        position = input3d_panel_append(line, sizeof(line), 0u, "FIRST FAILURE: ");
-        input3d_panel_append(line, sizeof(line), position, failure);
-        input3d_panel_draw_line(&writer, line,
-            snapshot.firstFailure.present ? rgb(255, 135, 125) : rgb(196, 213, 234));
-
         for (uint32_t i = 0u; i < snapshot.storedControllerCount; ++i) {
             const modern_input_diagnostics::ControllerSnapshot& controller = snapshot.controllers[i];
             line[0] = '\0';

@@ -396,3 +396,98 @@ Address Device and descriptor retrieval reached `PASS`, `FAIL`, `TIMEOUT`,
 `BLOCKED`, `UNSUPPORTED`, or remained `NOT ATTEMPTED`/`UNKNOWN`. Include a
 panel photo and input observations. QEMU results do not replace these physical
 observations.
+
+## INPUT3D-R6: AMD IOMMU discovery and xHCI routing
+
+R6 adds a bounded, allocation-free IVRS parser and read-only IOMMU snapshot for
+the AMD64 UEFI path. The layout follows the [AMD I/O Virtualization Technology
+(IOMMU) Specification, 48882 Rev 3.09-PUB, October 2023](https://www.amd.com/content/dam/amd/en/documents/processor-tech-docs/specifications/48882_IOMMU.pdf)
+and the ACPI table/header rules in [ACPI Specification 6.6](https://uefi.org/sites/default/files/resources/ACPI_Spec_6.6.pdf).
+The loader checks the RSDP, RSDT/XSDT, table spans, and checksums while UEFI
+memory services are still available. It copies exactly one IVRS table into
+loader-owned pages before `ExitBootServices`; the kernel reads this copy and
+does not follow the firmware RSDP pointer.
+
+The BootInfo handoff is version 3. It carries the IVRS copy physical base,
+byte length, and number of IVRS tables, plus flags for a valid ACPI remap scan,
+any DMAR/IVRS table, a valid IVRS copy, and multiple IVRS tables. The loader
+identity-maps the copy before handoff. Both the shared BootInfo validator and
+the kernel's early validation check alignment, bounds, count/flag consistency,
+scan validity, overflow, version, exact structure size, and checksum before the
+kernel casts the physical base to a pointer. A malformed scan or a DMAR and
+IVRS coexistence keeps the table state unknown/unparsed and blocks xHCI DMA.
+
+### Parser bounds and supported records
+
+The parser accepts IVRS tables up to 1 MiB, at most eight IVHD units, 96 device
+rules per unit, and 64 IVMD ranges. ACPI checksum, table length, subtable
+length, entry length, range ordering, and arithmetic overflow are checked
+before any record is retained. It understands IVHD block types `0x10`, `0x11`,
+and `0x40` (24-byte and 40-byte fixed headers), and IVMD types `0x20`, `0x21`,
+and `0x22` (32-byte records). It retains IVMD range attributes for diagnostics;
+it does not apply them to page tables or create DMA permissions.
+
+Supported IVHD device records include PAD4, ALL, SELECT, START/END RANGE,
+PAD8, ALIAS SELECT/RANGE, EXTENDED SELECT/RANGE, SPECIAL DEVICE, and the
+variable-length ACPI HID entry. The alias UsedID field is read at byte offset
+4 for alias entries; the special-device variety and UsedID are at offsets 4
+and 5. ACPI HID records use UID format at offset 20, UID length at 21, and UID
+bytes from 22 onward. Unrecognized structures or device entries are skipped
+only when their encoded span is bounded; the topology is then marked
+unsupported and no controller route is accepted. Truncated or inconsistent
+records invalidate the table. Multiple IVRS tables, conflicting unit
+coverage, conflicting aliases, and unmatched devices remain ambiguous or
+unresolved; the parser never picks the first matching unit.
+
+The controller requester ID is formed as `(bus << 8) | (device << 3) |
+function`. R6 currently routes PCI segment 0 because the existing PCI config
+reader has no segment argument. Nonzero-segment IOMMU units cannot be inspected
+through that reader and remain unresolved/unsupported.
+
+### Read-only IOMMU register qualification
+
+Before mapping an IOMMU register window, R6 validates the unit's PCI identity,
+class `08:06:00`, PCI capability-list presence, capability ID `0x0f`, IOMMU
+capability type, capability revision, and enabled Base field against the IVHD
+unit's MMIO address. It rejects unsupported PCI segments, misaligned or
+overflowing bases, insufficient register spans, and inconsistent resources.
+For a supported revision, it maps a 16 KiB span as uncached, supervisor-only,
+non-executable device MMIO. It then performs volatile 64-bit reads of the
+Control register at offset `0x0018` and Status register at `0x2020`. Only
+Control bit 0 (`IommuEn`) is interpreted as enabled/disabled; if identity,
+revision, mapping, or reads cannot be validated, translation state stays
+unknown. The panel and serial log report the read status and state, not the raw
+register values. The code does not write PCI configuration, IOMMU registers,
+command buffers, event logs, or device-table entries; it does not enable,
+disable, reset, or program an IOMMU.
+
+The overlay adds IVRS presence/status, table and unit counts, per-xHCI segment,
+requester ID, effective alias ID, resolved IOMMU identity/base, register
+inspection state, translation observation, and the DMA block reason. Each
+xHCI controller keeps independent route and inspection status. The selected
+controller's first failure remains visible. A clear `IommuEn` bit is an
+observation only and does not authorize direct DMA: R6 has no IOVA allocator,
+domain setup, page-table ownership contract, invalidation path, or validated
+device DMA mapping. The existing xHCI DMA prerequisite stays blocked unless
+the preexisting direct-physical DMA contract is established with a valid ACPI
+remap scan showing no remapping table. An absent/invalid/ambiguous/unsupported
+table, unmatched route, unreadable IOMMU, or unestablished mapping remains
+blocked with a specific reason.
+
+### R6 physical observation — pending
+
+Use `guideXOS-ModernInput-INPUT3D-R6-AudioBypass.iso` only when an authorized
+physical boot is available. Capture the build identity, ACPI scan/IVRS state,
+each xHCI requester and selected route, IOMMU identity and register-read state,
+DMA block reason, and the first failure. Record each controller's state
+separately. Do not change firmware settings or write the ISO to USB as part of
+this software qualification. A panel or QEMU log demonstrates diagnostics;
+only observed device behavior on the target machine can establish hardware
+acceptance.
+
+R6 does not implement HID input, alter firmware settings, reconfigure the
+IOMMU, write USB media, or establish physical hardware acceptance. QEMU
+qualification verifies the software path only. Physical acceptance still
+requires the per-system procedure above and observed keyboard/mouse behavior.
+R7 should define and validate the complete IOVA/domain mapping contract before
+any remapped xHCI controller can be permitted to DMA.

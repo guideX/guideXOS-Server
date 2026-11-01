@@ -25,7 +25,7 @@ $kernelMain = Join-Path $root 'kernel\core\main.cpp'
 $kernelFramebufferHeader = Join-Path $root 'kernel\core\include\kernel\framebuffer.h'
 $docsFile = Join-Path $root 'docs\MULTI_MONITOR_V0_2_EXPERIMENT.md'
 
-Assert-Match -Path $bootInfoHeader -Pattern 'GUIDEXOS_BOOTINFO_VERSION\s*=\s*2' -Message 'BootInfo version was not bumped for the framebuffer array handoff.'
+Assert-Match -Path $bootInfoHeader -Pattern 'GUIDEXOS_BOOTINFO_VERSION\s*=\s*3' -Message 'BootInfo version was not bumped for the IVRS handoff.'
 Assert-Match -Path $bootInfoHeader -Pattern 'GUIDEXOS_MAX_FRAMEBUFFERS\s*=\s*8' -Message 'BootInfo max framebuffer bound is missing or incorrect.'
 Assert-Match -Path $bootInfoHeader -Pattern 'struct FramebufferDescriptor' -Message 'FramebufferDescriptor is missing from BootInfo.'
 Assert-Match -Path $bootInfoHeader -Pattern 'FramebufferCount' -Message 'FramebufferCount is missing from BootInfo.'

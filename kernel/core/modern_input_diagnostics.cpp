@@ -173,6 +173,17 @@ static void initialize_controller(ControllerSnapshot* controller)
     controller->bus = 0u;
     controller->device = 0u;
     controller->function = 0u;
+    controller->pciSegment = 0u;
+    controller->requesterId = 0u;
+    controller->effectiveRequesterId = 0u;
+    controller->iommuUnitIndex = -1;
+    controller->iommuDeviceId = 0u;
+    controller->iommuBase = 0u;
+    controller->iommuRouteStatus = amd_ivrs::RouteStatus::Unmatched;
+    controller->iommuInspectionStatus = amd_ivrs::InspectionStatus::NotAttempted;
+    controller->iommuTranslationState = amd_ivrs::TranslationState::Unknown;
+    controller->iommuControlRegisterValid = false;
+    controller->iommuStatusRegisterValid = false;
     controller->baseClass = 0u;
     controller->subClass = 0u;
     controller->progIf = 0u;
@@ -242,6 +253,18 @@ void initialize()
     s_snapshot.latestStatus.status = Status::NotAttempted;
     s_snapshot.firstFailure = {};
     s_snapshot.firstFailure.controllerIndex = -1;
+    s_snapshot.ivrsStatus = amd_ivrs::ParseStatus::NotPresent;
+    s_snapshot.selectedIommuRouteStatus = amd_ivrs::RouteStatus::Unmatched;
+    s_snapshot.selectedIommuInspectionStatus = amd_ivrs::InspectionStatus::NotAttempted;
+    s_snapshot.selectedIommuTranslationState = amd_ivrs::TranslationState::Unknown;
+    s_snapshot.ivrsTableCount = 0u;
+    s_snapshot.ivhdUnitCount = 0u;
+    s_snapshot.ivmdRangeCount = 0u;
+    s_snapshot.ivrsUnsupportedCount = 0u;
+    s_snapshot.acpiRemapScanValid = false;
+    s_snapshot.acpiRemappingTablePresent = false;
+    s_snapshot.dmaMappingEstablished = false;
+    s_snapshot.dmaDecisionReason = "IOMMU_STATE_UNKNOWN";
     s_snapshot.lastStartupOperation = {};
     s_snapshot.lastStartupOperation.status = StartupOperationStatus::NotInvoked;
     s_snapshot.lastCompletedStartupOperation = {};
@@ -487,6 +510,77 @@ int32_t record_controller(uint8_t bus, uint8_t device, uint8_t function,
     return static_cast<int32_t>(index);
 }
 
+void record_ivrs_discovery(amd_ivrs::ParseStatus status, bool scanValid,
+                           bool remappingTablePresent, uint32_t ivrsTableCount,
+                           uint32_t ivhdUnits, uint32_t ivmdRanges,
+                           uint32_t unsupportedCount)
+{
+    lock_snapshot();
+    s_snapshot.ivrsStatus = status;
+    s_snapshot.acpiRemapScanValid = scanValid;
+    s_snapshot.acpiRemappingTablePresent = remappingTablePresent;
+    s_snapshot.ivrsTableCount = ivrsTableCount;
+    s_snapshot.ivhdUnitCount = ivhdUnits;
+    s_snapshot.ivmdRangeCount = ivmdRanges;
+    s_snapshot.ivrsUnsupportedCount = unsupportedCount;
+    publish_snapshot_change_locked();
+    unlock_snapshot();
+}
+
+void record_iommu_route(int32_t controllerIndex, uint16_t segment,
+                        uint16_t requesterId, uint16_t effectiveRequesterId,
+                        amd_ivrs::RouteStatus routeStatus, int32_t unitIndex,
+                        uint16_t iommuDeviceId, uint64_t iommuBase)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->pciSegment = segment;
+        controller->requesterId = requesterId;
+        controller->effectiveRequesterId = effectiveRequesterId;
+        controller->iommuRouteStatus = routeStatus;
+        controller->iommuUnitIndex = unitIndex;
+        controller->iommuDeviceId = iommuDeviceId;
+        controller->iommuBase = iommuBase;
+        if (controllerIndex == s_snapshot.selectedControllerIndex) {
+            s_snapshot.selectedIommuRouteStatus = routeStatus;
+        }
+        publish_snapshot_change_locked();
+    }
+    unlock_snapshot();
+}
+
+void record_iommu_registers(int32_t controllerIndex,
+                            amd_ivrs::InspectionStatus inspectionStatus,
+                            amd_ivrs::TranslationState translationState,
+                            bool controlRegisterValid,
+                            bool statusRegisterValid)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->iommuInspectionStatus = inspectionStatus;
+        controller->iommuTranslationState = translationState;
+        controller->iommuControlRegisterValid = controlRegisterValid;
+        controller->iommuStatusRegisterValid = statusRegisterValid;
+        if (controllerIndex == s_snapshot.selectedControllerIndex) {
+            s_snapshot.selectedIommuInspectionStatus = inspectionStatus;
+            s_snapshot.selectedIommuTranslationState = translationState;
+        }
+        publish_snapshot_change_locked();
+    }
+    unlock_snapshot();
+}
+
+void record_dma_safety(const char* reason, bool mappingEstablished)
+{
+    lock_snapshot();
+    s_snapshot.dmaDecisionReason = reason;
+    s_snapshot.dmaMappingEstablished = mappingEstablished;
+    publish_snapshot_change_locked();
+    unlock_snapshot();
+}
+
 int32_t find_controller(uint8_t bus, uint8_t device, uint8_t function)
 {
     int32_t found = -1;
@@ -506,8 +600,12 @@ int32_t find_controller(uint8_t bus, uint8_t device, uint8_t function)
 void select_controller(int32_t controllerIndex)
 {
     lock_snapshot();
-    if (controller_for_index(controllerIndex) != nullptr) {
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
         s_snapshot.selectedControllerIndex = controllerIndex;
+        s_snapshot.selectedIommuRouteStatus = controller->iommuRouteStatus;
+        s_snapshot.selectedIommuInspectionStatus = controller->iommuInspectionStatus;
+        s_snapshot.selectedIommuTranslationState = controller->iommuTranslationState;
         publish_snapshot_change_locked();
     }
     unlock_snapshot();
@@ -898,6 +996,111 @@ const char* iommu_status_name(IommuStatus status)
     }
 }
 
+const char* ivrs_status_name(amd_ivrs::ParseStatus status)
+{
+    switch (status) {
+        case amd_ivrs::ParseStatus::NotPresent: return "NOT PRESENT";
+        case amd_ivrs::ParseStatus::Valid: return "VALID";
+        case amd_ivrs::ParseStatus::ValidWithUnsupported: return "VALID / UNSUPPORTED ENTRY";
+        case amd_ivrs::ParseStatus::Malformed: return "MALFORMED";
+        case amd_ivrs::ParseStatus::CapacityExceeded: return "CAPACITY EXCEEDED";
+        case amd_ivrs::ParseStatus::AmbiguousTables: return "AMBIGUOUS TABLES";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* iommu_route_status_name(amd_ivrs::RouteStatus status)
+{
+    switch (status) {
+        case amd_ivrs::RouteStatus::Unmatched: return "UNMATCHED";
+        case amd_ivrs::RouteStatus::Resolved: return "RESOLVED";
+        case amd_ivrs::RouteStatus::Ambiguous: return "AMBIGUOUS";
+        case amd_ivrs::RouteStatus::Unsupported: return "UNSUPPORTED";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* iommu_inspection_status_name(amd_ivrs::InspectionStatus status)
+{
+    switch (status) {
+        case amd_ivrs::InspectionStatus::NotAttempted: return "NOT ATTEMPTED";
+        case amd_ivrs::InspectionStatus::Readable: return "READABLE";
+        case amd_ivrs::InspectionStatus::InvalidIdentity: return "INVALID IDENTITY";
+        case amd_ivrs::InspectionStatus::InvalidResource: return "INVALID RESOURCE";
+        case amd_ivrs::InspectionStatus::UnsupportedRevision: return "UNSUPPORTED REVISION";
+        case amd_ivrs::InspectionStatus::MappingUnavailable: return "MAPPING UNAVAILABLE";
+        case amd_ivrs::InspectionStatus::ReadUnavailable: return "READ UNAVAILABLE";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* iommu_translation_state_name(amd_ivrs::TranslationState state)
+{
+    switch (state) {
+        case amd_ivrs::TranslationState::EnabledObserved: return "ENABLED OBSERVED";
+        case amd_ivrs::TranslationState::DisabledObserved: return "DISABLED OBSERVED";
+        case amd_ivrs::TranslationState::Unknown: return "UNKNOWN";
+        default: return "UNKNOWN";
+    }
+}
+
+uint32_t format_ivrs_summary(const Snapshot& snapshot, char* out,
+                             uint32_t capacity)
+{
+    if (out == nullptr || capacity == 0u) return 0u;
+    out[0] = '\0';
+    uint32_t position = append_text(out, capacity, 0u, "ACPI IVRS ");
+    position = append_text(out, capacity, position, ivrs_status_name(snapshot.ivrsStatus));
+    position = append_text(out, capacity, position, " tables=");
+    position = append_decimal(out, capacity, position, snapshot.ivrsTableCount);
+    position = append_text(out, capacity, position, " IVHD=");
+    position = append_decimal(out, capacity, position, snapshot.ivhdUnitCount);
+    position = append_text(out, capacity, position, " IVMD=");
+    position = append_decimal(out, capacity, position, snapshot.ivmdRangeCount);
+    position = append_text(out, capacity, position, " remap=");
+    position = append_text(out, capacity, position,
+        !snapshot.acpiRemapScanValid ? "UNKNOWN" :
+        (snapshot.acpiRemappingTablePresent ? "YES" : "NO"));
+    return position;
+}
+
+uint32_t format_controller_iommu_route(const ControllerSnapshot& controller,
+                                       char* out, uint32_t capacity)
+{
+    if (out == nullptr || capacity == 0u) return 0u;
+    out[0] = '\0';
+    uint32_t position = append_bdf(out, capacity, 0u, controller);
+    position = append_text(out, capacity, position, " seg=");
+    position = append_hex(out, capacity, position, controller.pciSegment, 4u);
+    position = append_text(out, capacity, position, " RID=");
+    position = append_hex(out, capacity, position, controller.requesterId, 4u);
+    if (controller.effectiveRequesterId != controller.requesterId) {
+        position = append_text(out, capacity, position, " alias=");
+        position = append_hex(out, capacity, position,
+                              controller.effectiveRequesterId, 4u);
+    }
+    position = append_text(out, capacity, position, " IOMMU=");
+    if (controller.iommuUnitIndex < 0) {
+        position = append_text(out, capacity, position, "NONE");
+    } else {
+        const uint16_t id = controller.iommuDeviceId;
+        position = append_hex(out, capacity, position,
+                              static_cast<uint8_t>(id >> 8u), 2u);
+        position = append_text(out, capacity, position, ":");
+        position = append_hex(out, capacity, position,
+                              static_cast<uint8_t>((id >> 3u) & 0x1Fu), 2u);
+        position = append_text(out, capacity, position, ".");
+        position = append_decimal(out, capacity, position,
+                                  static_cast<uint32_t>(id & 0x07u));
+        position = append_text(out, capacity, position, " #");
+        position = append_decimal(out, capacity, position,
+                                  static_cast<uint32_t>(controller.iommuUnitIndex));
+    }
+    position = append_text(out, capacity, position, " ");
+    return append_text(out, capacity, position,
+                       iommu_route_status_name(controller.iommuRouteStatus));
+}
+
 uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capacity)
 {
     if (out == nullptr || capacity == 0u) return 0u;
@@ -993,13 +1196,13 @@ bool calculate_panel_layout(uint32_t framebufferWidth, uint32_t framebufferHeigh
     const uint32_t availableWidth = framebufferWidth - margin * 2u;
     const uint32_t availableHeight = framebufferHeight - margin * 2u;
     const uint32_t panelWidth = availableWidth < 560u ? availableWidth : 560u;
-    const uint32_t preferredHeight = framebufferHeight < 300u ? 260u : 500u;
+    const uint32_t preferredHeight = framebufferHeight < 300u ? 260u : 700u;
     const uint32_t panelHeight = availableHeight < preferredHeight ? availableHeight : preferredHeight;
     outLayout->width = panelWidth;
     outLayout->height = panelHeight;
     outLayout->x = framebufferWidth - margin - panelWidth;
     outLayout->y = margin;
-    outLayout->rowHeight = framebufferHeight < 520u ? 12u : 14u;
+    outLayout->rowHeight = framebufferHeight < 700u ? 12u : 14u;
     outLayout->rowCapacity = panelHeight > 22u ? (panelHeight - 22u) / outLayout->rowHeight : 1u;
     if (outLayout->rowCapacity == 0u) outLayout->rowCapacity = 1u;
     outLayout->compact = panelWidth < 420u || panelHeight < 300u;

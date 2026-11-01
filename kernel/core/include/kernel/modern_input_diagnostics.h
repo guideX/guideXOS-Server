@@ -2,6 +2,7 @@
 #define KERNEL_MODERN_INPUT_DIAGNOSTICS_H
 
 #include <stdint.h>
+#include "kernel/amd_ivrs.h"
 
 namespace kernel {
 namespace modern_input_diagnostics {
@@ -189,6 +190,17 @@ struct ControllerSnapshot {
     uint8_t bus;
     uint8_t device;
     uint8_t function;
+    uint16_t pciSegment;
+    uint16_t requesterId;
+    uint16_t effectiveRequesterId;
+    int32_t iommuUnitIndex;
+    uint16_t iommuDeviceId;
+    uint64_t iommuBase;
+    amd_ivrs::RouteStatus iommuRouteStatus;
+    amd_ivrs::InspectionStatus iommuInspectionStatus;
+    amd_ivrs::TranslationState iommuTranslationState;
+    bool iommuControlRegisterValid;
+    bool iommuStatusRegisterValid;
     uint8_t baseClass;
     uint8_t subClass;
     uint8_t progIf;
@@ -276,6 +288,18 @@ struct Snapshot {
     StartupOperationStatus xhciInitStatus;
     uint32_t pciAudioDeviceCount;
     bool pciAudioSkipped;
+    amd_ivrs::ParseStatus ivrsStatus;
+    amd_ivrs::RouteStatus selectedIommuRouteStatus;
+    amd_ivrs::InspectionStatus selectedIommuInspectionStatus;
+    amd_ivrs::TranslationState selectedIommuTranslationState;
+    uint32_t ivrsTableCount;
+    uint32_t ivhdUnitCount;
+    uint32_t ivmdRangeCount;
+    uint32_t ivrsUnsupportedCount;
+    bool acpiRemapScanValid;
+    bool acpiRemappingTablePresent;
+    bool dmaMappingEstablished;
+    const char* dmaDecisionReason;
 };
 
 struct PanelLayout {
@@ -303,6 +327,20 @@ bool presentation_pending();
 bool record_panel_presented(uint64_t snapshotSequence);
 void begin_pci_enumeration();
 void complete_pci_enumeration(Status status, const char* failureReason = nullptr);
+void record_ivrs_discovery(amd_ivrs::ParseStatus status, bool scanValid,
+                           bool remappingTablePresent, uint32_t ivrsTableCount,
+                           uint32_t ivhdUnits, uint32_t ivmdRanges,
+                           uint32_t unsupportedCount);
+void record_iommu_route(int32_t controllerIndex, uint16_t segment,
+                        uint16_t requesterId, uint16_t effectiveRequesterId,
+                        amd_ivrs::RouteStatus routeStatus, int32_t unitIndex,
+                        uint16_t iommuDeviceId, uint64_t iommuBase);
+void record_iommu_registers(int32_t controllerIndex,
+                            amd_ivrs::InspectionStatus inspectionStatus,
+                            amd_ivrs::TranslationState translationState,
+                            bool controlRegisterValid = false,
+                            bool statusRegisterValid = false);
+void record_dma_safety(const char* reason, bool mappingEstablished = false);
 
 // Returns the deterministic PCI discovery index, or -1 when the bounded
 // per-controller snapshot is full. Aggregate counts still include omitted
@@ -353,6 +391,14 @@ const char* pci_scan_state_name(PciScanState state);
 const char* stage_name(Stage stage);
 const char* controller_kind_name(ControllerKind kind);
 const char* iommu_status_name(IommuStatus status);
+const char* ivrs_status_name(amd_ivrs::ParseStatus status);
+const char* iommu_route_status_name(amd_ivrs::RouteStatus status);
+const char* iommu_inspection_status_name(amd_ivrs::InspectionStatus status);
+const char* iommu_translation_state_name(amd_ivrs::TranslationState state);
+uint32_t format_ivrs_summary(const Snapshot& snapshot, char* out,
+                             uint32_t capacity);
+uint32_t format_controller_iommu_route(const ControllerSnapshot& controller,
+                                       char* out, uint32_t capacity);
 uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capacity);
 uint32_t format_first_failure(const Snapshot& snapshot, char* out, uint32_t capacity);
 bool calculate_panel_layout(uint32_t framebufferWidth, uint32_t framebufferHeight,

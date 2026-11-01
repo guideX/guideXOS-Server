@@ -25,6 +25,7 @@
 #include "include/kernel/usb_controller.h"
 #include "include/kernel/xhci.h"
 #include "include/kernel/modern_input_diagnostics.h"
+#include "include/kernel/amd_iommu.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
@@ -770,12 +771,51 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     } else {
         bootinfo = static_cast<guideXOS::BootInfo*>(boot_environment);
         if (bootinfo && bootinfo->Magic == guideXOS::GUIDEXOS_BOOTINFO_MAGIC) {
+            if (bootinfo->Version != guideXOS::GUIDEXOS_BOOTINFO_VERSION ||
+                bootinfo->Size != sizeof(guideXOS::BootInfo) ||
+                !guideXOS::guidexos_bootinfo_checksum_valid(bootinfo)) {
+                kernel::serial::puts("[KERNEL] ERROR: invalid BootInfo v3 version, size, or checksum; halting\n");
+                while (1) { }
+            }
+            const bool hasIvrsCopy = (bootinfo->Flags &
+                guideXOS::BOOTINFO_FLAG_ACPI_IVRS_COPY_VALID) != 0u;
+            const bool multipleIvrs = (bootinfo->Flags &
+                guideXOS::BOOTINFO_FLAG_ACPI_IVRS_MULTIPLE) != 0u;
+            const bool remapTablePresent = (bootinfo->Flags &
+                guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT) != 0u;
+            if ((hasIvrsCopy &&
+                 (bootinfo->AcpiIvrsCopyBase == 0u ||
+                  (bootinfo->AcpiIvrsCopyBase & 0xFFFu) != 0u ||
+                  bootinfo->AcpiIvrsCopyLength < kernel::amd_ivrs::IVRS_HEADER_BYTES ||
+                  bootinfo->AcpiIvrsCopyLength > kernel::amd_ivrs::MAX_TABLE_BYTES ||
+                  bootinfo->AcpiIvrsTableCount != 1u ||
+                  !remapTablePresent ||
+                  (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID) == 0u ||
+                  bootinfo->AcpiIvrsCopyBase > UINT64_MAX - bootinfo->AcpiIvrsCopyLength)) ||
+                (!hasIvrsCopy && (bootinfo->AcpiIvrsCopyBase != 0u ||
+                                  bootinfo->AcpiIvrsCopyLength != 0u)) ||
+                (bootinfo->AcpiIvrsTableCount > 0u && !remapTablePresent) ||
+                (multipleIvrs != (bootinfo->AcpiIvrsTableCount > 1u))) {
+                kernel::serial::puts("[KERNEL] ERROR: invalid BootInfo IVRS handoff; halting\n");
+                while (1) { }
+            }
             is_bootinfo = true;
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
             kernel::mmio::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::gpu::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            const bool ivrsCopyValid = (bootinfo->Flags &
+                guideXOS::BOOTINFO_FLAG_ACPI_IVRS_COPY_VALID) != 0u;
+            kernel::amd_iommu::initialize(
+                ivrsCopyValid
+                    ? reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(
+                          bootinfo->AcpiIvrsCopyBase))
+                    : nullptr,
+                bootinfo->AcpiIvrsCopyLength,
+                bootinfo->AcpiIvrsTableCount,
+                (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID) != 0u,
+                (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT) != 0u);
         }
     }
     
@@ -961,6 +1001,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // NOT INVOKED until scan_host_controllers records its own entry.
         kernel::desktop::draw();
         kernel::usb::diagnostics::scan_host_controllers();
+        kernel::amd_iommu::qualify_xhci_controllers();
         // The first desktop frame predates hardware discovery. Publish the
         // completed PCI result now so later storage/network startup cannot
         // leave the visible diagnostics overlay on its initial state.

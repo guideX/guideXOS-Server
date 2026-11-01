@@ -31,11 +31,26 @@ if ($SkipPciAudioForInput3D -and (-not $ModernInputDiagnostics -or $Arch -ne "am
     throw "-SkipPciAudioForInput3D requires -ModernInputDiagnostics on AMD64."
 }
 
+$BuildIdentity = if ($SkipPciAudioForInput3D) {
+    "GXOS-INPUT3D-R6-AUDIO-BYPASS"
+} elseif ($ModernInputDiagnostics) {
+    "GXOS-INPUT3D-R6"
+} else {
+    "GXOS-DEVELOPMENT"
+}
+$BuildProbeId = if ($SkipPciAudioForInput3D) {
+    "INPUT3D-R6-AUDIO-BYPASS-20261101-01"
+} elseif ($ModernInputDiagnostics) {
+    "INPUT3D-R6-20261101-01"
+} else {
+    "GXOS-DEV"
+}
+
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  guideXOS Complete Build System" -ForegroundColor Cyan
 Write-Host "====================================" -ForegroundColor Cyan
-Write-Host "  Build identity: GXOS-LARGE-FILE-PASTE-TRACE-V1" -ForegroundColor Cyan
-Write-Host "  Build probe ID: GXOS-LFPASTE-20260726-02" -ForegroundColor Cyan
+Write-Host "  Build identity: $BuildIdentity" -ForegroundColor Cyan
+Write-Host "  Build probe ID: $BuildProbeId" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
@@ -457,8 +472,8 @@ elseif (Test-Path $KernelBin) {
     Write-Host "      Copied: kernel.elf ($(((Get-Item $TargetKernel).Length / 1KB).ToString('0.0')) KB)" -ForegroundColor Cyan
     $identityPath = Join-Path $ESPDir "build-identity.txt"
     @(
-        "identity=GXOS-LARGE-FILE-PASTE-TRACE-V1"
-        "probe=GXOS-LFPASTE-20260726-02"
+        "identity=$BuildIdentity"
+        "probe=$BuildProbeId"
         "imageKind=ESP-directory-used-as-QEMU-FAT-media"
         "imageRoot=$ESPDir"
         "bootloaderSource=$BootloaderBin"

@@ -33,7 +33,7 @@ Forbidden:
 #include <Guid/FileInfo.h>
 #include "bootinfo.h"          // legacy, gradually being phased out
 #include "elf.h"
-#include "guidexOSBootInfo.h"   // canonical BootInfo v2
+#include "guidexOSBootInfo.h"   // canonical BootInfo v3
 #include "uefi_shim.h"         // UEFI shims for freestanding environment
 #include "debug_helpers.h"     // Post-ExitBootServices debugging
 #include "paging.h"            // minimal identity page tables
@@ -703,15 +703,98 @@ static bool AcpiRsdpSignatureValid(const char signature[8])
     return true;
 }
 
-// Enumerate a small, checksum-validated ACPI root table before ExitBootServices.
-// This proves whether standard x86 DMAR/IVRS remapping tables were advertised;
-// it does not claim to inspect remapping-unit enable state.
-static bool ScanAcpiDmaRemappingTables(const RSDPDescriptor20* rsdp,
-                                       bool* remappingTablePresent)
+static bool AcpiMemoryTypeReadable(UINT32 type)
 {
-    if (remappingTablePresent == nullptr) return false;
+    return type == EfiLoaderCode || type == EfiLoaderData ||
+           type == EfiBootServicesCode || type == EfiBootServicesData ||
+           type == EfiRuntimeServicesCode || type == EfiRuntimeServicesData ||
+           type == EfiACPIReclaimMemory || type == EfiACPIMemoryNVS;
+}
+
+// Firmware table pointers are physical addresses supplied through UEFI. Check
+// every byte range against the current memory map before dereferencing it.
+static bool AcpiRangeMapped(EFI_SYSTEM_TABLE* SystemTable,
+                            UINT64 address, UINT64 length)
+{
+    if (SystemTable == nullptr || SystemTable->BootServices == nullptr ||
+        length == 0u || address > (~(UINT64)0) - length) {
+        return false;
+    }
+    for (UINT32 attempt = 0u; attempt < 3u; ++attempt) {
+        UINTN mapBytes = 0u;
+        UINTN mapKey = 0u;
+        UINTN descriptorBytes = 0u;
+        UINT32 descriptorVersion = 0u;
+        EFI_STATUS status = SystemTable->BootServices->GetMemoryMap(
+            &mapBytes, nullptr, &mapKey, &descriptorBytes, &descriptorVersion);
+        if (status != EFI_BUFFER_TOO_SMALL || mapBytes == 0u) return false;
+        if (descriptorBytes < sizeof(EFI_MEMORY_DESCRIPTOR)) {
+            descriptorBytes = sizeof(EFI_MEMORY_DESCRIPTOR);
+        }
+        if (descriptorBytes > (~(UINTN)0 - mapBytes) / 4u) return false;
+        mapBytes += descriptorBytes * 4u;
+        VOID* mapBuffer = nullptr;
+        status = SystemTable->BootServices->AllocatePool(
+            EfiLoaderData, mapBytes, &mapBuffer);
+        if (EFI_ERROR(status) || mapBuffer == nullptr) return false;
+
+        UINTN actualBytes = mapBytes;
+        status = SystemTable->BootServices->GetMemoryMap(
+            &actualBytes, static_cast<EFI_MEMORY_DESCRIPTOR*>(mapBuffer),
+            &mapKey, &descriptorBytes, &descriptorVersion);
+        if (status == EFI_BUFFER_TOO_SMALL) {
+            SystemTable->BootServices->FreePool(mapBuffer);
+            continue;
+        }
+        bool mapped = false;
+        if (!EFI_ERROR(status) && descriptorBytes >= sizeof(EFI_MEMORY_DESCRIPTOR) &&
+            descriptorBytes != 0u && actualBytes % descriptorBytes == 0u) {
+            const UINTN count = actualBytes / descriptorBytes;
+            const UINT8* cursor = static_cast<const UINT8*>(mapBuffer);
+            for (UINTN i = 0u; i < count; ++i) {
+                const EFI_MEMORY_DESCRIPTOR* descriptor =
+                    reinterpret_cast<const EFI_MEMORY_DESCRIPTOR*>(
+                        cursor + i * descriptorBytes);
+                if (!AcpiMemoryTypeReadable(descriptor->Type) ||
+                    descriptor->NumberOfPages > (~(UINT64)0) / EFI_PAGE_SIZE) {
+                    continue;
+                }
+                const UINT64 descriptorBytesSpan =
+                    descriptor->NumberOfPages * EFI_PAGE_SIZE;
+                if (descriptor->PhysicalStart > (~(UINT64)0) - descriptorBytesSpan) {
+                    continue;
+                }
+                const UINT64 descriptorEnd = descriptor->PhysicalStart + descriptorBytesSpan;
+                if (address >= descriptor->PhysicalStart && address < descriptorEnd &&
+                    length <= descriptorEnd - address) {
+                    mapped = true;
+                    break;
+                }
+            }
+        }
+        SystemTable->BootServices->FreePool(mapBuffer);
+        return mapped;
+    }
+    return false;
+}
+
+// Bounded, checksummed RSDP/root-table discovery. It preserves one valid IVRS
+// table in loader-owned pages so its bytes remain valid after ExitBootServices.
+static bool ScanAcpiDmaRemappingTables(EFI_SYSTEM_TABLE* SystemTable,
+                                       const RSDPDescriptor20* rsdp,
+                                       bool* remappingTablePresent,
+                                       EFI_PHYSICAL_ADDRESS* ivrsCopyBase,
+                                       UINT32* ivrsCopyLength,
+                                       UINT32* ivrsTableCount)
+{
+    if (remappingTablePresent == nullptr || ivrsCopyBase == nullptr ||
+        ivrsCopyLength == nullptr || ivrsTableCount == nullptr) return false;
     *remappingTablePresent = false;
+    *ivrsCopyBase = 0u;
+    *ivrsCopyLength = 0u;
+    *ivrsTableCount = 0u;
     if (rsdp == nullptr ||
+        !AcpiRangeMapped(SystemTable, (UINT64)(UINTN)rsdp, 20u) ||
         !AcpiRsdpSignatureValid(rsdp->Signature) ||
         !AcpiChecksumValid(reinterpret_cast<const UINT8*>(rsdp), 20u)) {
         return false;
@@ -719,23 +802,38 @@ static bool ScanAcpiDmaRemappingTables(const RSDPDescriptor20* rsdp,
 
     UINT64 rootAddress = 0u;
     bool xsdt = false;
-    if (rsdp->Revision >= 2u && rsdp->XsdtAddress != 0u) {
-        if (rsdp->Length < sizeof(RSDPDescriptor20) || rsdp->Length > 4096u ||
-            !AcpiChecksumValid(reinterpret_cast<const UINT8*>(rsdp), rsdp->Length)) {
+    if (rsdp->Revision >= 2u) {
+        // The 20-byte RSDP checksum does not cover the extended fields. Prove
+        // the complete standard descriptor is mapped before reading Length or
+        // XsdtAddress, then validate the firmware-declared full length.
+        if (!AcpiRangeMapped(SystemTable, (UINT64)(UINTN)rsdp,
+                             sizeof(RSDPDescriptor20))) {
             return false;
         }
-        rootAddress = rsdp->XsdtAddress;
-        xsdt = true;
+        const UINT32 rsdpLength = rsdp->Length;
+        if (rsdpLength < sizeof(RSDPDescriptor20) || rsdpLength > 4096u ||
+            !AcpiRangeMapped(SystemTable, (UINT64)(UINTN)rsdp, rsdpLength) ||
+            !AcpiChecksumValid(reinterpret_cast<const UINT8*>(rsdp), rsdpLength)) {
+            return false;
+        }
+        if (rsdp->XsdtAddress != 0u) {
+            rootAddress = rsdp->XsdtAddress;
+            xsdt = true;
+        } else {
+            rootAddress = rsdp->RsdtAddress;
+        }
     } else {
         rootAddress = rsdp->RsdtAddress;
     }
     if (rootAddress == 0u) return false;
 
+    if (!AcpiRangeMapped(SystemTable, rootAddress, sizeof(GxosAcpiSdtHeader))) return false;
     const GxosAcpiSdtHeader* root = reinterpret_cast<const GxosAcpiSdtHeader*>(
         static_cast<UINTN>(rootAddress));
     const UINT32 rootMinimum = (UINT32)sizeof(GxosAcpiSdtHeader);
     const UINT32 maxTableBytes = 1024u * 1024u;
     if (root->Length < rootMinimum || root->Length > maxTableBytes ||
+        !AcpiRangeMapped(SystemTable, rootAddress, root->Length) ||
         !AcpiSignatureEquals(root->Signature, xsdt ? "XSDT" : "RSDT") ||
         !AcpiChecksumValid(reinterpret_cast<const UINT8*>(root), root->Length)) {
         return false;
@@ -748,6 +846,9 @@ static bool ScanAcpiDmaRemappingTables(const RSDPDescriptor20* rsdp,
     if (entryCount > 256u) return false;
 
     const UINT8* entries = reinterpret_cast<const UINT8*>(root) + rootMinimum;
+    UINT64 selectedIvrsAddress = 0u;
+    UINT32 selectedIvrsLength = 0u;
+    UINT32 dmarTableCount = 0u;
     for (UINT32 i = 0u; i < entryCount; ++i) {
         UINT64 tableAddress = 0u;
         if (xsdt) {
@@ -761,24 +862,58 @@ static bool ScanAcpiDmaRemappingTables(const RSDPDescriptor20* rsdp,
                 tableAddress |= static_cast<UINT64>(entry[byte]) << (byte * 8u);
             }
         }
-        if (tableAddress == 0u) return false;
+        if (tableAddress == 0u ||
+            !AcpiRangeMapped(SystemTable, tableAddress, sizeof(GxosAcpiSdtHeader))) return false;
 
         const GxosAcpiSdtHeader* table = reinterpret_cast<const GxosAcpiSdtHeader*>(
             static_cast<UINTN>(tableAddress));
-        if (table->Length < rootMinimum || table->Length > maxTableBytes) return false;
+        if (table->Length < rootMinimum || table->Length > maxTableBytes ||
+            !AcpiRangeMapped(SystemTable, tableAddress, table->Length)) return false;
         const bool isDmar = AcpiSignatureEquals(table->Signature, "DMAR");
         const bool isIvrs = AcpiSignatureEquals(table->Signature, "IVRS");
         if (isDmar || isIvrs) {
+            if (isIvrs && table->Length < 48u) return false;
             if (!AcpiChecksumValid(reinterpret_cast<const UINT8*>(table), table->Length)) {
                 return false;
             }
             *remappingTablePresent = true;
+            if (isDmar) ++dmarTableCount;
+            if (isIvrs) {
+                ++(*ivrsTableCount);
+                if (*ivrsTableCount == 1u) {
+                    selectedIvrsAddress = tableAddress;
+                    selectedIvrsLength = table->Length;
+                }
+            }
         }
+    }
+    if (*ivrsTableCount == 1u && selectedIvrsAddress != 0u && dmarTableCount == 0u) {
+        const UINTN pages = (selectedIvrsLength + EFI_PAGE_SIZE - 1u) / EFI_PAGE_SIZE;
+        EFI_PHYSICAL_ADDRESS copyBase = 0u;
+        EFI_STATUS status = SystemTable->BootServices->AllocatePages(
+            AllocateAnyPages, EfiLoaderData, pages, &copyBase);
+        if (EFI_ERROR(status) || copyBase == 0u) return false;
+        SetMem((VOID*)(UINTN)copyBase, pages * EFI_PAGE_SIZE, 0u);
+        CopyMem((VOID*)(UINTN)copyBase,
+                (const VOID*)(UINTN)selectedIvrsAddress, selectedIvrsLength);
+        *ivrsCopyBase = copyBase;
+        *ivrsCopyLength = selectedIvrsLength;
     }
     return true;
 }
 
 RSDPDescriptor20* FindRSDP(EFI_SYSTEM_TABLE* SystemTable) {
+    if (SystemTable == nullptr ||
+        SystemTable->NumberOfTableEntries > 256u ||
+        (SystemTable->NumberOfTableEntries != 0u &&
+         (SystemTable->ConfigurationTable == nullptr ||
+          SystemTable->NumberOfTableEntries >
+            (~(UINTN)0) / sizeof(EFI_CONFIGURATION_TABLE) ||
+          !AcpiRangeMapped(SystemTable,
+              (UINT64)(UINTN)SystemTable->ConfigurationTable,
+              SystemTable->NumberOfTableEntries * sizeof(EFI_CONFIGURATION_TABLE))))) {
+        return nullptr;
+    }
     EFI_CONFIGURATION_TABLE* configTable = SystemTable->ConfigurationTable;
     UINTN tableCount = SystemTable->NumberOfTableEntries;
 
@@ -787,7 +922,6 @@ RSDPDescriptor20* FindRSDP(EFI_SYSTEM_TABLE* SystemTable) {
 
         if (CompareGuid(guid, &gEfiAcpi20TableGuid) ||
             CompareGuid(guid, &gEfiAcpi10TableGuid)) {
-
             return (RSDPDescriptor20*)configTable[i].VendorTable;
         }
     }
@@ -811,7 +945,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     EFI_STATUS status = SystemTable->BootServices->AllocatePages(
         AllocateAnyPages,
         EfiLoaderData,
-        1, // 1 page is more than enough for BootInfo
+        1, // BootInfo v3 remains below one page
         &bootInfoPhys
     );
     if (EFI_ERROR(status)) {
@@ -826,13 +960,34 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     if (!rsdp) {
         Print((CONST CHAR16*)L"ACPI RSDP not found\n");
     } else {
-        Print((CONST CHAR16*)L"ACPI RSDP found at %p, rev %u\n", (VOID*)rsdp, (UINT32)rsdp->Revision);
+        // Do not dereference firmware-owned table memory before the bounded
+        // ACPI scanner has validated its span against the current memory map.
+        Print((CONST CHAR16*)L"ACPI RSDP candidate found at %p\n", (VOID*)rsdp);
     }
     bool acpiRemappingTablePresent = false;
-    if (ScanAcpiDmaRemappingTables(rsdp, &acpiRemappingTablePresent)) {
+    EFI_PHYSICAL_ADDRESS acpiIvrsCopyBase = 0u;
+    UINT32 acpiIvrsCopyLength = 0u;
+    UINT32 acpiIvrsTableCount = 0u;
+    const bool acpiRemapScanValid = ScanAcpiDmaRemappingTables(
+        SystemTable, rsdp, &acpiRemappingTablePresent,
+        &acpiIvrsCopyBase, &acpiIvrsCopyLength, &acpiIvrsTableCount);
+    v1BootInfo->AcpiIvrsTableCount = acpiIvrsTableCount;
+    if (acpiIvrsTableCount > 1u) {
+        v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_IVRS_MULTIPLE;
+    }
+    if (acpiRemappingTablePresent) {
+        v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT;
+    }
+    if (acpiRemapScanValid) {
         v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID;
+        if (acpiIvrsCopyBase != 0u && acpiIvrsCopyLength != 0u) {
+            v1BootInfo->AcpiIvrsCopyBase = acpiIvrsCopyBase;
+            v1BootInfo->AcpiIvrsCopyLength = acpiIvrsCopyLength;
+            v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_IVRS_COPY_VALID;
+            Print((CONST CHAR16*)L"[BOOT] Valid IVRS copied into loader-owned memory; bytes=%u\n",
+                  acpiIvrsCopyLength);
+        }
         if (acpiRemappingTablePresent) {
-            v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT;
             Print((CONST CHAR16*)L"[BOOT] ACPI DMA remapping table present; xHCI needs an IOMMU mapping contract\n");
         } else {
             Print((CONST CHAR16*)L"[BOOT] ACPI DMA remapping scan valid; no DMAR/IVRS table advertised\n");
@@ -940,7 +1095,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         }
     }
 
-    // --- Populate BootInfo v2 BEFORE ExitBootServices ---
+    // --- Populate versioned BootInfo BEFORE ExitBootServices ---
     v1BootInfo->Magic   = guideXOS::GUIDEXOS_BOOTINFO_MAGIC;
     v1BootInfo->Version = guideXOS::GUIDEXOS_BOOTINFO_VERSION;
     v1BootInfo->Size    = (uint16_t)sizeof(guideXOS::BootInfo);
@@ -1238,7 +1393,21 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ramdisk: %p size %Lu\n", (VOID*)(UINTN)ramdiskPhys, ramdiskSize);
     }
 
-    // 8. ACPI RSDP region (map at least one page for RSDP, kernel will map more as needed)
+    // 8. Loader-owned IVRS copy passed through BootInfo v3.
+    if ((v1BootInfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_IVRS_COPY_VALID) != 0u &&
+        v1BootInfo->AcpiIvrsCopyBase != 0u &&
+        v1BootInfo->AcpiIvrsCopyLength != 0u) {
+        const UINTN ivrsPages =
+            (v1BootInfo->AcpiIvrsCopyLength + EFI_PAGE_SIZE - 1u) / EFI_PAGE_SIZE;
+        ranges[rangeCount] = v1BootInfo->AcpiIvrsCopyBase;
+        sizes[rangeCount] = ivrsPages * EFI_PAGE_SIZE;
+        rangeCount++;
+        Print(L"Mapping copied IVRS table: %p size %u\n",
+              (VOID*)(UINTN)v1BootInfo->AcpiIvrsCopyBase,
+              v1BootInfo->AcpiIvrsCopyLength);
+    }
+
+    // 9. ACPI RSDP region (diagnostic only; the kernel consumes the IVRS copy).
     if (rsdp != nullptr) {
         ranges[rangeCount] = (EFI_PHYSICAL_ADDRESS)(UINTN)rsdp & ~0xFFFull; // Page-align down
         sizes[rangeCount] = EFI_PAGE_SIZE * 4; // Map a few pages for RSDP + nearby tables
@@ -1246,7 +1415,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ACPI RSDP region: %p\n", (VOID*)(UINTN)rsdp);
     }
 
-    // 9. CRITICAL: Map the bootloader/trampoline code region
+    // 10. CRITICAL: Map the bootloader/trampoline code region
     // After we load CR3 with new page tables, the CPU is still executing in the
     // trampoline code. If that code isn't mapped, we triple-fault immediately!
     // We need to identity-map the bootloader's loaded image.
