@@ -19,6 +19,7 @@ enum class EnvironmentErrorCode : std::uint8_t {
     BindingLimitExceeded,
     BindingNameTooLong,
     AllocationFailure,
+    DuplicateLexicalBinding,
 };
 
 struct EnvironmentError {
@@ -34,12 +35,15 @@ struct Binding {
     std::string name;
     Value value;
     bool immutable = false;
+    bool initialized = true;
+    bool lexical = false;
 };
 
 // Names are owned by the environment; lookup and assignment only borrow the
 // caller's name view for the duration of the operation. Environment::declare
-// is idempotent for redeclarations, allowing the evaluator to preserve an
-// existing `var` value until an initializer or function binding assigns it.
+// is idempotent for `var` redeclarations, allowing the evaluator to preserve
+// an existing `var` value until an initializer or function binding assigns it.
+// It rejects collisions with an existing lexical binding.
 class Environment {
 public:
     explicit Environment(EnvironmentLimits limits = EnvironmentLimits(),
@@ -53,8 +57,14 @@ public:
 
     bool declare(SourceView name, Value value, EnvironmentError& error,
         bool immutable = false);
+    bool declareLexical(SourceView name, bool immutable,
+        EnvironmentError& error, const Value& initialValue = Value::undefined(),
+        bool initialized = false);
+    bool initialize(SourceView name, Value value);
     bool assign(SourceView name, Value value);
     bool isImmutable(SourceView name) const;
+    const Binding* resolve(SourceView name) const;
+    Binding* resolve(SourceView name);
     const Value* lookup(SourceView name) const;
 
     std::size_t bindingCount() const { return bindings_.size(); }

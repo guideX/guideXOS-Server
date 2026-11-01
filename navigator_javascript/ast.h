@@ -30,6 +30,7 @@ enum class AstNodeKind : std::uint8_t {
     ContinueStatement,
     FunctionDeclaration,
     FunctionExpression,
+    ArrowFunctionExpression,
 
     Identifier,
     NumericLiteral,
@@ -92,6 +93,12 @@ enum class AstUpdateOperator : std::uint8_t {
     Decrement,
 };
 
+enum class AstDeclarationKind : std::uint8_t {
+    Var = 0,
+    Let,
+    Const,
+};
+
 // Relationships are represented by stable indices into Ast::nodes(), never
 // by pointers into parser-owned storage.  childOffset/childCount describe a
 // contiguous range in Ast's child index storage for Program, BlockStatement,
@@ -126,6 +133,7 @@ struct AstNode {
     AstLogicalOperator logicalOperator = AstLogicalOperator::And;
     AstAssignmentOperator assignmentOperator = AstAssignmentOperator::Assign;
     AstUpdateOperator updateOperator = AstUpdateOperator::Increment;
+    AstDeclarationKind declarationKind = AstDeclarationKind::Var;
     bool computed = false;
     bool prefix = false;
     bool immutableBinding = false;

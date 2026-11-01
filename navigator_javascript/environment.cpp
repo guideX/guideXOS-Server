@@ -47,6 +47,10 @@ bool Environment::declare(SourceView name, Value value, EnvironmentError& error,
 
     const std::size_t existing = find(name);
     if (existing != kNotFound) {
+        if (bindings_[existing].lexical) {
+            error.code = EnvironmentErrorCode::DuplicateLexicalBinding;
+            return false;
+        }
         // `var` redeclaration is idempotent.  An initializer or a function
         // declaration assigns the value explicitly after this succeeds.
         return true;
@@ -61,6 +65,8 @@ bool Environment::declare(SourceView name, Value value, EnvironmentError& error,
         binding.name.assign(name.data == nullptr ? "" : name.data, name.length);
         binding.value = value;
         binding.immutable = immutable;
+        binding.initialized = true;
+        binding.lexical = false;
         bindings_.push_back(binding);
     } catch (const std::bad_alloc&) {
         error.code = EnvironmentErrorCode::AllocationFailure;
@@ -69,10 +75,56 @@ bool Environment::declare(SourceView name, Value value, EnvironmentError& error,
     return true;
 }
 
+bool Environment::declareLexical(SourceView name, bool immutable,
+    EnvironmentError& error, const Value& initialValue, bool initialized)
+{
+    error = EnvironmentError();
+    if (name.data == nullptr && name.length != 0) {
+        error.code = EnvironmentErrorCode::AllocationFailure;
+        return false;
+    }
+    if (name.length > limits_.maxBindingNameLength) {
+        error.code = EnvironmentErrorCode::BindingNameTooLong;
+        return false;
+    }
+    if (find(name) != kNotFound) {
+        error.code = EnvironmentErrorCode::DuplicateLexicalBinding;
+        return false;
+    }
+    if (bindings_.size() >= limits_.maxBindings) {
+        error.code = EnvironmentErrorCode::BindingLimitExceeded;
+        return false;
+    }
+
+    try {
+        Binding binding;
+        binding.name.assign(name.data == nullptr ? "" : name.data, name.length);
+        binding.value = initialValue;
+        binding.immutable = immutable;
+        binding.initialized = initialized;
+        binding.lexical = true;
+        bindings_.push_back(binding);
+    } catch (const std::bad_alloc&) {
+        error.code = EnvironmentErrorCode::AllocationFailure;
+        return false;
+    }
+    return true;
+}
+
+bool Environment::initialize(SourceView name, Value value)
+{
+    const std::size_t index = find(name);
+    if (index == kNotFound || bindings_[index].initialized) return false;
+    bindings_[index].value = value;
+    bindings_[index].initialized = true;
+    return true;
+}
+
 bool Environment::assign(SourceView name, Value value)
 {
     const std::size_t index = find(name);
-    if (index == kNotFound || bindings_[index].immutable) return false;
+    if (index == kNotFound || bindings_[index].immutable ||
+        !bindings_[index].initialized) return false;
     bindings_[index].value = value;
     return true;
 }
@@ -81,6 +133,18 @@ bool Environment::isImmutable(SourceView name) const
 {
     const std::size_t index = find(name);
     return index != kNotFound && bindings_[index].immutable;
+}
+
+const Binding* Environment::resolve(SourceView name) const
+{
+    const std::size_t index = find(name);
+    return index == kNotFound ? nullptr : &bindings_[index];
+}
+
+Binding* Environment::resolve(SourceView name)
+{
+    const std::size_t index = find(name);
+    return index == kNotFound ? nullptr : &bindings_[index];
 }
 
 const Value* Environment::lookup(SourceView name) const
@@ -102,6 +166,8 @@ const char* environmentErrorCodeName(EnvironmentErrorCode code)
         return "BindingLimitExceeded";
     case EnvironmentErrorCode::BindingNameTooLong: return "BindingNameTooLong";
     case EnvironmentErrorCode::AllocationFailure: return "AllocationFailure";
+    case EnvironmentErrorCode::DuplicateLexicalBinding:
+        return "DuplicateLexicalBinding";
     }
     return "Invalid";
 }

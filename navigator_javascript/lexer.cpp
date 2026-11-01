@@ -54,6 +54,8 @@ TokenType keywordType(SourceView source, std::size_t offset, std::size_t length)
 
     static const Keyword keywords[] = {
         {"var", 3, TokenType::KeywordVar},
+        {"let", 3, TokenType::KeywordLet},
+        {"const", 5, TokenType::KeywordConst},
         {"function", 8, TokenType::KeywordFunction},
         {"return", 6, TokenType::KeywordReturn},
         {"if", 2, TokenType::KeywordIf},
@@ -377,6 +379,7 @@ struct Scanner {
         if (value == '?') { advance(); return emit(TokenType::Question, start); }
 
         if (value == '=') {
+            if (matches("=>", 2)) { consume(2, start); return emit(TokenType::Arrow, start); }
             if (matches("===", 3)) { consume(3, start); return emit(TokenType::StrictEqual, start); }
             if (matches("==", 2)) { consume(2, start); return emit(TokenType::Equal, start); }
             advance(); return emit(TokenType::Assign, start);
@@ -489,6 +492,8 @@ const char* tokenTypeName(TokenType type)
     case TokenType::NumericLiteral: return "NumericLiteral";
     case TokenType::StringLiteral: return "StringLiteral";
     case TokenType::KeywordVar: return "KeywordVar";
+    case TokenType::KeywordLet: return "KeywordLet";
+    case TokenType::KeywordConst: return "KeywordConst";
     case TokenType::KeywordFunction: return "KeywordFunction";
     case TokenType::KeywordReturn: return "KeywordReturn";
     case TokenType::KeywordIf: return "KeywordIf";
@@ -519,6 +524,7 @@ const char* tokenTypeName(TokenType type)
     case TokenType::Slash: return "Slash";
     case TokenType::Percent: return "Percent";
     case TokenType::Assign: return "Assign";
+    case TokenType::Arrow: return "Arrow";
     case TokenType::Equal: return "Equal";
     case TokenType::StrictEqual: return "StrictEqual";
     case TokenType::NotEqual: return "NotEqual";

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <limits>
 #include <new>
+#include <string>
 #include <utility>
 
 namespace gxos {
@@ -72,6 +73,8 @@ public:
                     TokenType::EndOfInput, false);
             }
         }
+
+        if (!failed() && !validateLexicalSemantics()) return result();
 
         return result();
     }
@@ -236,6 +239,17 @@ private:
         return false;
     }
 
+    bool atIdentifierName() const
+    {
+        return at(TokenType::Identifier) || at(TokenType::KeywordLet) ||
+            at(TokenType::KeywordConst);
+    }
+
+    Token advanceIdentifierName()
+    {
+        return advance();
+    }
+
     AstNodeId makeNode(AstNodeKind kind, SourceLocation location)
     {
         if (failed()) return kInvalidAstNodeId;
@@ -298,7 +312,8 @@ private:
             return makeLeaf(AstNodeKind::EmptyStatement, semicolon);
         }
         if (at(TokenType::LeftBrace)) return parseBlock();
-        if (at(TokenType::KeywordVar)) return parseVariableDeclaration(true);
+        if (at(TokenType::KeywordVar) || at(TokenType::KeywordLet) ||
+            at(TokenType::KeywordConst)) return parseVariableDeclaration(true);
         if (at(TokenType::KeywordFunction)) return parseFunctionDeclaration();
         if (at(TokenType::KeywordReturn)) return parseReturnStatement();
         if (at(TokenType::KeywordIf)) return parseIfStatement();
@@ -347,6 +362,11 @@ private:
     AstNodeId parseVariableDeclaration(bool requireSemicolon)
     {
         const Token keyword = advance();
+        AstDeclarationKind declarationKind = AstDeclarationKind::Var;
+        if (keyword.type == TokenType::KeywordLet)
+            declarationKind = AstDeclarationKind::Let;
+        else if (keyword.type == TokenType::KeywordConst)
+            declarationKind = AstDeclarationKind::Const;
         std::vector<AstNodeId> declarators;
         while (true) {
             Token nameToken;
@@ -361,6 +381,10 @@ private:
                 initializer = parseExpression();
                 if (initializer == kInvalidAstNodeId) return kInvalidAstNodeId;
                 end = ast_.node(initializer).location;
+            } else if (declarationKind == AstDeclarationKind::Const) {
+                fail(ParserErrorCode::InvalidLexicalDeclaration,
+                    nameToken.location, TokenType::Assign, true);
+                return kInvalidAstNodeId;
             }
 
             const AstNodeId declarator = makeNode(AstNodeKind::VariableDeclarator,
@@ -381,10 +405,13 @@ private:
         }
         const AstNodeId declaration = makeNode(AstNodeKind::VariableDeclaration,
             spanLocation(keyword.location, end));
-        if (declaration != kInvalidAstNodeId && !setChildren(declaration, declarators)) {
-            fail(ParserErrorCode::AstNodeLimitExceeded, keyword.location,
-                TokenType::EndOfInput, false);
-            return kInvalidAstNodeId;
+        if (declaration != kInvalidAstNodeId) {
+            ast_.node(declaration).declarationKind = declarationKind;
+            if (!setChildren(declaration, declarators)) {
+                fail(ParserErrorCode::AstNodeLimitExceeded, keyword.location,
+                    TokenType::EndOfInput, false);
+                return kInvalidAstNodeId;
+            }
         }
         return declaration;
     }
@@ -550,8 +577,10 @@ private:
         const Token keyword = advance();
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
 
-        const bool constBinding = identifierSpells(current(), "const");
-        const bool letBinding = identifierSpells(current(), "let");
+        const bool constBinding = at(TokenType::KeywordConst) ||
+            identifierSpells(current(), "const");
+        const bool letBinding = at(TokenType::KeywordLet) ||
+            identifierSpells(current(), "let");
         if (constBinding || letBinding) {
             advance();
             Token nameToken;
@@ -645,6 +674,7 @@ private:
     {
         DepthGuard depth(*this, current().location);
         if (!depth.entered()) return kInvalidAstNodeId;
+        if (arrowAhead()) return parseArrowFunction();
         const AstNodeId left = parseLogicalOrExpression();
         if (left == kInvalidAstNodeId) return kInvalidAstNodeId;
         if (!isAssignmentToken(current().type)) return left;
@@ -665,6 +695,394 @@ private:
                 assignmentOperator(operatorToken.type);
         }
         return assignment;
+    }
+
+    const Token& tokenAt(std::size_t position) const
+    {
+        if (position < tokens_.size()) return tokens_[position];
+        return eofToken_;
+    }
+
+    bool arrowAhead() const
+    {
+        if (at(TokenType::Identifier))
+            return tokenAt(pos_ + 1u).type == TokenType::Arrow;
+        if (!at(TokenType::LeftParen)) return false;
+
+        std::size_t scan = pos_ + 1u;
+        if (tokenAt(scan).type == TokenType::RightParen)
+            return tokenAt(scan + 1u).type == TokenType::Arrow;
+
+        std::size_t parameterCount = 0u;
+        while (tokenAt(scan).type == TokenType::Identifier) {
+            if (parameterCount >= limits_.maxFunctionParameters)
+                return false;
+            ++parameterCount;
+            ++scan;
+            if (tokenAt(scan).type == TokenType::RightParen)
+                return tokenAt(scan + 1u).type == TokenType::Arrow;
+            if (tokenAt(scan).type != TokenType::Comma) return false;
+            ++scan;
+            // Recognize a trailing comma as an arrow-shaped malformed list so
+            // parseArrowFunction reports it explicitly instead of treating it
+            // as a parenthesized ordinary expression.
+            if (tokenAt(scan).type == TokenType::RightParen)
+                return tokenAt(scan + 1u).type == TokenType::Arrow;
+        }
+        return false;
+    }
+
+    bool sameIdentifierText(const Token& left, const Token& right) const
+    {
+        if (left.lexeme.length != right.lexeme.length) return false;
+        if (left.lexeme.length == 0u) return true;
+        return left.lexeme.data != nullptr && right.lexeme.data != nullptr &&
+            std::char_traits<char>::compare(left.lexeme.data,
+                right.lexeme.data, left.lexeme.length) == 0;
+    }
+
+    bool sameNodeName(AstNodeId left, AstNodeId right) const
+    {
+        const SourceView leftName = ast_.nodeText(left);
+        const SourceView rightName = ast_.nodeText(right);
+        if (leftName.length != rightName.length) return false;
+        if (leftName.length == 0u) return true;
+        return leftName.data != nullptr && rightName.data != nullptr &&
+            std::char_traits<char>::compare(leftName.data, rightName.data,
+                leftName.length) == 0;
+    }
+
+    struct ScopeVisit {
+        AstNodeId id = kInvalidAstNodeId;
+        AstNodeId parent = kInvalidAstNodeId;
+    };
+
+    struct BindingNameRef {
+        AstNodeId name = kInvalidAstNodeId;
+        SourceLocation location;
+    };
+
+    bool addName(std::vector<BindingNameRef>& names, AstNodeId name,
+        SourceLocation location, bool rejectDuplicate)
+    {
+        for (const BindingNameRef& prior : names) {
+            if (sameNodeName(prior.name, name) && rejectDuplicate) {
+                fail(ParserErrorCode::DuplicateBinding, location,
+                    TokenType::Identifier, false);
+                return false;
+            }
+        }
+        names.push_back({name, location});
+        return true;
+    }
+
+    bool collectDeclarationNames(AstNodeId declaration,
+        std::vector<BindingNameRef>& names, bool rejectDuplicate)
+    {
+        const AstNode& node = ast_.node(declaration);
+        for (std::size_t index = 0; index < node.childCount; ++index) {
+            const AstNodeId declaratorId = ast_.childAt(declaration, index);
+            const AstNode& declarator = ast_.node(declaratorId);
+            if (declarator.kind != AstNodeKind::VariableDeclarator ||
+                declarator.name == kInvalidAstNodeId) {
+                fail(ParserErrorCode::InvalidLexicalDeclaration,
+                    declarator.location, TokenType::Identifier, true);
+                return false;
+            }
+            if (!addName(names, declarator.name,
+                    ast_.node(declarator.name).location, rejectDuplicate))
+                return false;
+        }
+        return true;
+    }
+
+    bool collectVarNamesInRegion(AstNodeId region,
+        std::vector<BindingNameRef>& names)
+    {
+        std::vector<AstNodeId> pending;
+        std::vector<bool> visited(ast_.nodeCount(), false);
+        pending.push_back(region);
+        while (!pending.empty()) {
+            const AstNodeId id = pending.back();
+            pending.pop_back();
+            if (id >= ast_.nodeCount() || visited[id]) continue;
+            visited[id] = true;
+            const AstNode& node = ast_.node(id);
+            if (id != region &&
+                (node.kind == AstNodeKind::FunctionDeclaration ||
+                 node.kind == AstNodeKind::FunctionExpression ||
+                 node.kind == AstNodeKind::ArrowFunctionExpression)) continue;
+            if (node.kind == AstNodeKind::VariableDeclaration &&
+                node.declarationKind == AstDeclarationKind::Var &&
+                !collectDeclarationNames(id, names, false)) return false;
+            for (std::size_t index = 0; index < node.childCount; ++index)
+                pending.push_back(ast_.childAt(id, index));
+            const AstNodeId scalarChildren[] = {
+                node.name, node.initializer, node.expression, node.argument,
+                node.left, node.right, node.test, node.consequent,
+                node.alternate, node.init, node.update, node.body, node.callee,
+                node.object, node.property, node.key
+            };
+            for (AstNodeId child : scalarChildren)
+                if (child != kInvalidAstNodeId) pending.push_back(child);
+        }
+        return true;
+    }
+
+    bool validateScope(AstNodeId scope, const AstNodeId* parameters,
+        std::size_t parameterCount)
+    {
+        std::vector<BindingNameRef> varNames;
+        std::vector<BindingNameRef> directLexicalNames;
+        std::vector<ScopeVisit> pending;
+        std::vector<bool> visited(ast_.nodeCount(), false);
+        const AstNode& scopeNode = ast_.node(scope);
+        if (scopeNode.kind != AstNodeKind::Program &&
+            scopeNode.kind != AstNodeKind::BlockStatement) {
+            fail(ParserErrorCode::InvalidLexicalDeclaration,
+                scopeNode.location, TokenType::LeftBrace, true);
+            return false;
+        }
+
+        for (std::size_t index = 0; index < scopeNode.childCount; ++index) {
+            const AstNodeId child = ast_.childAt(scope, index);
+            const AstNode& declaration = ast_.node(child);
+            if (declaration.kind == AstNodeKind::VariableDeclaration &&
+                declaration.declarationKind != AstDeclarationKind::Var) {
+                if (!collectDeclarationNames(child, directLexicalNames, true))
+                    return false;
+            }
+        }
+
+        pending.push_back({scope, kInvalidAstNodeId});
+        while (!pending.empty()) {
+            const ScopeVisit visit = pending.back();
+            pending.pop_back();
+            if (visit.id >= ast_.nodeCount() || visited[visit.id]) continue;
+            visited[visit.id] = true;
+            const AstNode& node = ast_.node(visit.id);
+
+            if (visit.id != scope &&
+                (node.kind == AstNodeKind::FunctionDeclaration ||
+                 node.kind == AstNodeKind::FunctionExpression ||
+                 node.kind == AstNodeKind::ArrowFunctionExpression)) {
+                if (node.kind == AstNodeKind::FunctionDeclaration &&
+                    visit.parent == scope) {
+                    if (node.name == kInvalidAstNodeId ||
+                        !addName(varNames, node.name,
+                            ast_.node(node.name).location, false)) return false;
+                }
+                continue;
+            }
+
+            if (node.kind == AstNodeKind::VariableDeclaration) {
+                if (node.declarationKind == AstDeclarationKind::Var) {
+                    if (!collectDeclarationNames(visit.id, varNames, false))
+                        return false;
+                } else {
+                    const AstNodeKind parentKind = visit.parent < ast_.nodeCount()
+                        ? ast_.node(visit.parent).kind : AstNodeKind::Invalid;
+                    if (parentKind != AstNodeKind::Program &&
+                        parentKind != AstNodeKind::BlockStatement) {
+                        fail(ParserErrorCode::InvalidLexicalDeclaration,
+                            node.location, TokenType::LeftBrace, true);
+                        return false;
+                    }
+                    if (visit.parent != scope &&
+                        parentKind != AstNodeKind::BlockStatement) return false;
+                }
+            }
+            if (node.kind == AstNodeKind::BlockStatement && visit.id != scope) {
+                std::vector<BindingNameRef> blockLexicalNames;
+                std::vector<BindingNameRef> blockVarNames;
+                for (std::size_t index = 0; index < node.childCount; ++index) {
+                    const AstNodeId child = ast_.childAt(visit.id, index);
+                    const AstNode& declaration = ast_.node(child);
+                    if (declaration.kind == AstNodeKind::VariableDeclaration &&
+                        declaration.declarationKind != AstDeclarationKind::Var) {
+                        if (!collectDeclarationNames(child, blockLexicalNames,
+                                true)) return false;
+                    }
+                }
+                if (!collectVarNamesInRegion(visit.id, blockVarNames))
+                    return false;
+                for (const BindingNameRef& lexical : blockLexicalNames) {
+                    for (const BindingNameRef& variable : blockVarNames) {
+                        if (sameNodeName(lexical.name, variable.name)) {
+                            fail(ParserErrorCode::DuplicateBinding,
+                                lexical.location, TokenType::Identifier, false);
+                            return false;
+                        }
+                    }
+                }
+            }
+            if (node.kind == AstNodeKind::ForOfStatement) {
+                if (node.name == kInvalidAstNodeId) {
+                    fail(ParserErrorCode::InvalidLexicalDeclaration,
+                        node.location, TokenType::Identifier, true);
+                    return false;
+                }
+                std::vector<BindingNameRef> bodyVarNames;
+                if (!collectVarNamesInRegion(node.body, bodyVarNames))
+                    return false;
+                for (const BindingNameRef& variable : bodyVarNames) {
+                    if (sameNodeName(node.name, variable.name)) {
+                        fail(ParserErrorCode::DuplicateBinding,
+                            ast_.node(node.name).location,
+                            TokenType::Identifier, false);
+                        return false;
+                    }
+                }
+            }
+
+            if (node.kind == AstNodeKind::FunctionDeclaration ||
+                node.kind == AstNodeKind::FunctionExpression ||
+                node.kind == AstNodeKind::ArrowFunctionExpression) {
+                // The scope root itself is not a nested function; every
+                // function node encountered below is visited independently.
+            }
+
+            for (std::size_t index = 0; index < node.childCount; ++index) {
+                const AstNodeId child = ast_.childAt(visit.id, index);
+                pending.push_back({child, visit.id});
+            }
+            const AstNodeId scalarChildren[] = {
+                node.name, node.initializer, node.expression, node.argument,
+                node.left, node.right, node.test, node.consequent, node.alternate,
+                node.init, node.update, node.body, node.callee, node.object,
+                node.property, node.key
+            };
+            for (AstNodeId child : scalarChildren) {
+                if (child != kInvalidAstNodeId)
+                    pending.push_back({child, visit.id});
+            }
+        }
+
+        for (const BindingNameRef& lexical : directLexicalNames) {
+            for (const BindingNameRef& variable : varNames) {
+                if (sameNodeName(lexical.name, variable.name)) {
+                    fail(ParserErrorCode::DuplicateBinding,
+                        lexical.location, TokenType::Identifier, false);
+                    return false;
+                }
+            }
+        }
+        for (std::size_t index = 0; index < parameterCount; ++index) {
+            for (const BindingNameRef& lexical : directLexicalNames) {
+                if (sameNodeName(parameters[index], lexical.name)) {
+                    fail(ParserErrorCode::DuplicateBinding,
+                        lexical.location, TokenType::Identifier, false);
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool validateLexicalSemantics()
+    {
+        if (!validateScope(ast_.root(), nullptr, 0u)) return false;
+        for (AstNodeId id = 0; id < ast_.nodeCount(); ++id) {
+            const AstNode& node = ast_.node(id);
+            if (node.kind != AstNodeKind::FunctionDeclaration &&
+                node.kind != AstNodeKind::FunctionExpression &&
+                node.kind != AstNodeKind::ArrowFunctionExpression) continue;
+            if (node.kind == AstNodeKind::ArrowFunctionExpression) {
+                for (std::size_t left = 0; left < node.childCount; ++left) {
+                    for (std::size_t right = left + 1u;
+                        right < node.childCount; ++right) {
+                        if (sameNodeName(ast_.childAt(id, left),
+                                ast_.childAt(id, right))) {
+                            fail(ParserErrorCode::DuplicateParameter,
+                                ast_.node(ast_.childAt(id, right)).location,
+                                TokenType::Identifier, false);
+                            return false;
+                        }
+                    }
+                }
+            }
+            if (node.body != kInvalidAstNodeId) {
+                std::vector<AstNodeId> parameters;
+                parameters.reserve(node.childCount);
+                for (std::size_t index = 0; index < node.childCount; ++index)
+                    parameters.push_back(ast_.childAt(id, index));
+                if (!validateScope(node.body, parameters.data(),
+                        parameters.size())) return false;
+            }
+        }
+        return true;
+    }
+
+    AstNodeId parseArrowFunction()
+    {
+        const Token start = current();
+        std::vector<AstNodeId> parameters;
+        std::vector<Token> parameterTokens;
+        if (at(TokenType::Identifier)) {
+            const Token parameterToken = advance();
+            parameters.push_back(makeLeaf(AstNodeKind::Identifier,
+                parameterToken));
+            parameterTokens.push_back(parameterToken);
+        } else {
+            expect(TokenType::LeftParen);
+            while (!at(TokenType::RightParen)) {
+                if (at(TokenType::EndOfInput)) {
+                    fail(ParserErrorCode::UnexpectedEndOfInput,
+                        current().location, TokenType::RightParen, true);
+                    return kInvalidAstNodeId;
+                }
+                if (parameters.size() >= limits_.maxFunctionParameters) {
+                    fail(ParserErrorCode::TooManyParameters,
+                        current().location, TokenType::Identifier, true);
+                    return kInvalidAstNodeId;
+                }
+                Token parameterToken;
+                if (!expectIdentifier(parameterToken)) return kInvalidAstNodeId;
+                for (const Token& prior : parameterTokens) {
+                    if (sameIdentifierText(prior, parameterToken)) {
+                        fail(ParserErrorCode::DuplicateParameter,
+                            parameterToken.location, TokenType::Identifier,
+                            false);
+                        return kInvalidAstNodeId;
+                    }
+                }
+                const AstNodeId parameter = makeLeaf(AstNodeKind::Identifier,
+                    parameterToken);
+                if (parameter == kInvalidAstNodeId) return parameter;
+                parameters.push_back(parameter);
+                parameterTokens.push_back(parameterToken);
+                if (!at(TokenType::Comma)) break;
+                advance();
+                if (at(TokenType::RightParen)) {
+                    fail(ParserErrorCode::InvalidLexicalDeclaration,
+                        current().location, TokenType::Identifier, true);
+                    return kInvalidAstNodeId;
+                }
+            }
+            if (!expect(TokenType::RightParen)) return kInvalidAstNodeId;
+        }
+        if (!expect(TokenType::Arrow)) return kInvalidAstNodeId;
+
+        AstNodeId body = kInvalidAstNodeId;
+        AstNodeId expression = kInvalidAstNodeId;
+        if (at(TokenType::LeftBrace)) body = parseBlock();
+        else expression = parseAssignmentExpression();
+        if (body == kInvalidAstNodeId && expression == kInvalidAstNodeId)
+            return kInvalidAstNodeId;
+        const SourceLocation end = body != kInvalidAstNodeId
+            ? ast_.node(body).location : ast_.node(expression).location;
+        const AstNodeId function = makeNode(
+            AstNodeKind::ArrowFunctionExpression,
+            spanLocation(start.location, end));
+        if (function == kInvalidAstNodeId) return function;
+        ast_.node(function).body = body;
+        ast_.node(function).expression = expression;
+        if (!setChildren(function, parameters)) {
+            fail(ParserErrorCode::AstNodeLimitExceeded, start.location,
+                TokenType::EndOfInput, false);
+            return kInvalidAstNodeId;
+        }
+        return function;
     }
 
     AstNodeId parseLogicalOrExpression()
@@ -866,7 +1284,8 @@ private:
         if (at(TokenType::Dot)) {
             advance();
             Token propertyToken;
-            if (!expectIdentifier(propertyToken)) return kInvalidAstNodeId;
+            if (atIdentifierName()) propertyToken = advanceIdentifierName();
+            else if (!expectIdentifier(propertyToken)) return kInvalidAstNodeId;
             const AstNodeId property = makeLeaf(AstNodeKind::Identifier,
                 propertyToken);
             if (property == kInvalidAstNodeId) return kInvalidAstNodeId;
@@ -1020,7 +1439,7 @@ private:
             }
 
             Token keyToken;
-            if (at(TokenType::Identifier) || at(TokenType::StringLiteral)) {
+            if (atIdentifierName() || at(TokenType::StringLiteral)) {
                 keyToken = advance();
             } else {
                 fail(ParserErrorCode::ExpectedToken, current().location,
@@ -1240,6 +1659,10 @@ const char* parserErrorCodeName(ParserErrorCode code)
         return "TooManyObjectProperties";
     case ParserErrorCode::TooManyArrayElements:
         return "TooManyArrayElements";
+    case ParserErrorCode::DuplicateParameter: return "DuplicateParameter";
+    case ParserErrorCode::DuplicateBinding: return "DuplicateBinding";
+    case ParserErrorCode::InvalidLexicalDeclaration:
+        return "InvalidLexicalDeclaration";
     case ParserErrorCode::AllocationFailure: return "AllocationFailure";
     }
     return "Unknown";

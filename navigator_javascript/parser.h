@@ -24,6 +24,9 @@ enum class ParserErrorCode : std::uint8_t {
     TooManyArguments,
     TooManyObjectProperties,
     TooManyArrayElements,
+    DuplicateParameter,
+    DuplicateBinding,
+    InvalidLexicalDeclaration,
     AllocationFailure,
 };
 

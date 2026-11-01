@@ -290,8 +290,18 @@ public:
             return false;
         }
         if (!validateFunctionPolicy(context_.ast_.root(), true)) return false;
+        for (AstNodeId id = 0; id < context_.ast_.nodeCount(); ++id) {
+            const AstNodeKind kind = context_.ast_.node(id).kind;
+            if (kind == AstNodeKind::FunctionExpression ||
+                kind == AstNodeKind::ArrowFunctionExpression) {
+                if (!validateFunctionPolicy(id, true)) return false;
+            }
+        }
+        if (!preflightGlobalBindings(context_.ast_.root())) return false;
         if (!instantiateDeclarations(context_.ast_.root(),
-            kGlobalEnvironmentId)) return false;
+            kGlobalEnvironmentId) ||
+            !instantiateLexicalBindings(context_.ast_.root(),
+                kGlobalEnvironmentId)) return false;
         Control control;
         return executeStatement(context_.ast_.root(), false, false, control) &&
             control.kind == ControlKind::Normal;
@@ -400,6 +410,100 @@ private:
         SourceLocation location;
     };
 
+    bool rejectExistingGlobalBinding(SourceView name, bool varLike,
+        SourceLocation location)
+    {
+        const Binding* existing = context_.environment_.resolve(name);
+        if (existing == nullptr || (varLike && !existing->lexical))
+            return true;
+        fail(RuntimeErrorCode::DuplicateBinding, location);
+        return false;
+    }
+
+    bool preflightGlobalBindings(AstNodeId program)
+    {
+        if (!validNode(program, SourceLocation()) ||
+            context_.ast_.node(program).kind != AstNodeKind::Program) {
+            fail(RuntimeErrorCode::InvalidAstState, SourceLocation());
+            return false;
+        }
+        const AstNode& root = context_.ast_.node(program);
+        for (std::size_t index = 0; index < root.childCount; ++index) {
+            const AstNodeId child = context_.ast_.childAt(program, index);
+            if (!validNode(child, root.location)) return false;
+            const AstNode& declaration = context_.ast_.node(child);
+            if (declaration.kind == AstNodeKind::VariableDeclaration &&
+                declaration.declarationKind != AstDeclarationKind::Var) {
+                for (std::size_t bindingIndex = 0;
+                    bindingIndex < declaration.childCount; ++bindingIndex) {
+                    const AstNodeId declaratorId = context_.ast_.childAt(
+                        child, bindingIndex);
+                    if (!validNode(declaratorId, declaration.location))
+                        return false;
+                    const AstNode& declarator =
+                        context_.ast_.node(declaratorId);
+                    SourceView name;
+                    if (declarator.kind != AstNodeKind::VariableDeclarator ||
+                        !identifierName(declarator.name, name) ||
+                        !rejectExistingGlobalBinding(name, false,
+                            context_.ast_.node(declarator.name).location))
+                        return false;
+                }
+            } else if (declaration.kind == AstNodeKind::FunctionDeclaration) {
+                SourceView name;
+                if (!identifierName(declaration.name, name) ||
+                    !rejectExistingGlobalBinding(name, true,
+                        context_.ast_.node(declaration.name).location))
+                    return false;
+            }
+        }
+
+        std::vector<AstNodeId> pending;
+        pending.push_back(program);
+        while (!pending.empty()) {
+            const AstNodeId id = pending.back();
+            pending.pop_back();
+            if (!validNode(id, SourceLocation())) return false;
+            const AstNode& node = context_.ast_.node(id);
+            if (id != program &&
+                (node.kind == AstNodeKind::FunctionDeclaration ||
+                 node.kind == AstNodeKind::FunctionExpression ||
+                 node.kind == AstNodeKind::ArrowFunctionExpression))
+                continue;
+
+            if (node.kind == AstNodeKind::VariableDeclaration &&
+                node.declarationKind == AstDeclarationKind::Var) {
+                for (std::size_t bindingIndex = 0;
+                    bindingIndex < node.childCount; ++bindingIndex) {
+                    const AstNodeId declaratorId = context_.ast_.childAt(
+                        id, bindingIndex);
+                    if (!validNode(declaratorId, node.location)) return false;
+                    const AstNode& declarator =
+                        context_.ast_.node(declaratorId);
+                    SourceView name;
+                    if (declarator.kind != AstNodeKind::VariableDeclarator ||
+                        !identifierName(declarator.name, name) ||
+                        !rejectExistingGlobalBinding(name, true,
+                            context_.ast_.node(declarator.name).location))
+                        return false;
+                }
+            }
+
+            for (std::size_t index = 0; index < node.childCount; ++index)
+                pending.push_back(context_.ast_.childAt(id, index));
+            const AstNodeId scalarChildren[] = {
+                node.name, node.initializer, node.expression, node.argument,
+                node.left, node.right, node.test, node.consequent,
+                node.alternate, node.init, node.update, node.body,
+                node.callee, node.object, node.property, node.key
+            };
+            for (AstNodeId child : scalarChildren)
+                if (child != kInvalidAstNodeId)
+                    pending.push_back(child);
+        }
+        return true;
+    }
+
     bool validNode(AstNodeId id, SourceLocation location)
     {
         if (id != kInvalidAstNodeId && id < context_.ast_.nodeCount() &&
@@ -446,9 +550,14 @@ private:
     {
         SourceView name;
         if (!identifierName(id, name)) return false;
-        const Value* found = lookup(name);
+        const Binding* found = resolveBinding(name);
         if (found != nullptr) {
-            value = *found;
+            if (!found->initialized) {
+                fail(RuntimeErrorCode::UninitializedBinding,
+                    context_.ast_.node(id).location);
+                return false;
+            }
+            value = found->value;
             return true;
         }
         // JS1 intentionally tokenizes `undefined` as an identifier.  JS3
@@ -476,11 +585,17 @@ private:
 
     const Value* lookup(SourceView name) const
     {
+        const Binding* found = resolveBinding(name);
+        return found == nullptr ? nullptr : &found->value;
+    }
+
+    const Binding* resolveBinding(SourceView name) const
+    {
         EnvironmentId environment = currentEnvironment_;
         while (environment != kInvalidEnvironmentId) {
             const Environment* current = context_.environmentAt(environment);
             if (current == nullptr) return nullptr;
-            const Value* found = current->lookup(name);
+            const Binding* found = current->resolve(name);
             if (found != nullptr) return found;
             environment = current->parent();
         }
@@ -507,10 +622,68 @@ private:
         case EnvironmentErrorCode::AllocationFailure:
             fail(RuntimeErrorCode::AllocationFailure, location);
             break;
+        case EnvironmentErrorCode::DuplicateLexicalBinding:
+            fail(RuntimeErrorCode::DuplicateBinding, location);
+            break;
         case EnvironmentErrorCode::None:
             fail(RuntimeErrorCode::InvalidAstState, location);
             break;
         }
+        return false;
+    }
+
+    bool declareLexicalIn(EnvironmentId environment, SourceView name,
+        bool immutable, SourceLocation location,
+        const Value& value = Value::undefined(), bool initialized = false)
+    {
+        Environment* target = context_.environmentAt(environment);
+        if (target == nullptr) {
+            fail(RuntimeErrorCode::InvalidAstState, location);
+            return false;
+        }
+        EnvironmentError error;
+        if (target->declareLexical(name, immutable, error, value,
+                initialized)) return true;
+        switch (error.code) {
+        case EnvironmentErrorCode::BindingLimitExceeded:
+            fail(RuntimeErrorCode::BindingLimitExceeded, location);
+            break;
+        case EnvironmentErrorCode::BindingNameTooLong:
+            fail(RuntimeErrorCode::BindingNameTooLong, location);
+            break;
+        case EnvironmentErrorCode::AllocationFailure:
+            fail(RuntimeErrorCode::AllocationFailure, location);
+            break;
+        case EnvironmentErrorCode::DuplicateLexicalBinding:
+            fail(RuntimeErrorCode::DuplicateBinding, location);
+            break;
+        case EnvironmentErrorCode::None:
+            fail(RuntimeErrorCode::InvalidAstState, location);
+            break;
+        }
+        return false;
+    }
+
+    bool initialize(SourceView name, Value value, SourceLocation location)
+    {
+        EnvironmentId environment = currentEnvironment_;
+        while (environment != kInvalidEnvironmentId) {
+            Environment* current = context_.environmentAt(environment);
+            if (current == nullptr) {
+                fail(RuntimeErrorCode::InvalidAstState, location);
+                return false;
+            }
+            Binding* found = current->resolve(name);
+            if (found != nullptr) {
+                if (found->initialized || !current->initialize(name, value)) {
+                    fail(RuntimeErrorCode::InvalidAstState, location);
+                    return false;
+                }
+                return true;
+            }
+            environment = current->parent();
+        }
+        fail(RuntimeErrorCode::UnknownIdentifier, location);
         return false;
     }
 
@@ -546,7 +719,12 @@ private:
                 fail(RuntimeErrorCode::InvalidAstState, location);
                 return false;
             }
-            if (current->lookup(name) != nullptr) {
+            Binding* binding = current->resolve(name);
+            if (binding != nullptr) {
+                if (!binding->initialized) {
+                    fail(RuntimeErrorCode::UninitializedBinding, location);
+                    return false;
+                }
                 if (current->isImmutable(name)) {
                     fail(RuntimeErrorCode::TypeError, location);
                     return false;
@@ -591,6 +769,11 @@ private:
         case AstNodeKind::FunctionExpression:
             return validNode(node.body, node.location) &&
                 validateFunctionPolicy(node.body, true);
+        case AstNodeKind::ArrowFunctionExpression:
+            if (node.body != kInvalidAstNodeId)
+                return validNode(node.body, node.location) &&
+                    validateFunctionPolicy(node.body, true);
+            return validNode(node.expression, node.location);
         case AstNodeKind::IfStatement:
             if (!validNode(node.consequent, node.location) ||
                 !validateFunctionPolicy(node.consequent, false)) return false;
@@ -622,6 +805,7 @@ private:
             }
             return true;
         case AstNodeKind::VariableDeclaration:
+            if (node.declarationKind != AstDeclarationKind::Var) return true;
             for (std::size_t index = 0; index < node.childCount; ++index) {
                 const AstNodeId declaratorId = context_.ast_.childAt(id, index);
                 if (!validNode(declaratorId, node.location)) return false;
@@ -724,6 +908,62 @@ private:
     {
         return hoistVariables(container, environment) &&
             hoistFunctions(container, environment);
+    }
+
+    bool instantiateLexicalBindings(AstNodeId container,
+        EnvironmentId environment)
+    {
+        if (!validNode(container, SourceLocation())) return false;
+        const AstNode& scope = context_.ast_.node(container);
+        if (scope.kind != AstNodeKind::Program &&
+            scope.kind != AstNodeKind::BlockStatement) {
+            fail(RuntimeErrorCode::InvalidAstState, scope.location);
+            return false;
+        }
+        for (std::size_t index = 0; index < scope.childCount; ++index) {
+            const AstNodeId child = context_.ast_.childAt(container, index);
+            if (!validNode(child, scope.location)) return false;
+            const AstNode& declaration = context_.ast_.node(child);
+            if (declaration.kind != AstNodeKind::VariableDeclaration ||
+                declaration.declarationKind == AstDeclarationKind::Var)
+                continue;
+            const bool immutable =
+                declaration.declarationKind == AstDeclarationKind::Const;
+            for (std::size_t bindingIndex = 0;
+                bindingIndex < declaration.childCount; ++bindingIndex) {
+                const AstNodeId declaratorId =
+                    context_.ast_.childAt(child, bindingIndex);
+                if (!validNode(declaratorId, declaration.location))
+                    return false;
+                const AstNode& declarator = context_.ast_.node(declaratorId);
+                SourceView name;
+                if (declarator.kind != AstNodeKind::VariableDeclarator ||
+                    !identifierName(declarator.name, name) ||
+                    !declareLexicalIn(environment, name, immutable,
+                        context_.ast_.node(declarator.name).location)) {
+                    if (context_.result_.runtimeError.code ==
+                        RuntimeErrorCode::None)
+                        fail(RuntimeErrorCode::InvalidAstState,
+                            declarator.location);
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool hasDirectLexicalBindings(AstNodeId container) const
+    {
+        if (container == kInvalidAstNodeId ||
+            container >= context_.ast_.nodeCount()) return false;
+        const AstNode& scope = context_.ast_.node(container);
+        for (std::size_t index = 0; index < scope.childCount; ++index) {
+            const AstNode& child = context_.ast_.node(
+                context_.ast_.childAt(container, index));
+            if (child.kind == AstNodeKind::VariableDeclaration &&
+                child.declarationKind != AstDeclarationKind::Var) return true;
+        }
+        return false;
     }
 
     bool decodeString(AstNodeId id, Value& value)
@@ -1132,11 +1372,13 @@ private:
             return evalUpdate(node, value);
         case AstNodeKind::CallExpression:
             return evalCall(id, node, value);
-        case AstNodeKind::FunctionExpression: {
+        case AstNodeKind::FunctionExpression:
+        case AstNodeKind::ArrowFunctionExpression: {
             RuntimeFunctionId function = kInvalidRuntimeFunctionId;
             RuntimeErrorCode error = RuntimeErrorCode::None;
             if (!context_.createFunction(id, currentEnvironment_, function,
-                error)) {
+                error, node.kind == AstNodeKind::ArrowFunctionExpression,
+                currentThis_)) {
                 fail(error, node.location);
                 return false;
             }
@@ -1246,8 +1488,13 @@ private:
         }
         const AstNode& declaration = context_.ast_.node(function.declaration);
         if ((declaration.kind != AstNodeKind::FunctionDeclaration &&
-            declaration.kind != AstNodeKind::FunctionExpression) ||
-            !validNode(declaration.body, callSite)) {
+            declaration.kind != AstNodeKind::FunctionExpression &&
+            declaration.kind != AstNodeKind::ArrowFunctionExpression) ||
+            (declaration.body == kInvalidAstNodeId &&
+             (declaration.kind != AstNodeKind::ArrowFunctionExpression ||
+              declaration.expression == kInvalidAstNodeId)) ||
+            (declaration.body != kInvalidAstNodeId &&
+             !validNode(declaration.body, callSite))) {
             fail(RuntimeErrorCode::InvalidFunction, callSite);
             return false;
         }
@@ -1275,7 +1522,9 @@ private:
             frame.environment = callEnvironment;
             frame.callerEnvironment = callerEnvironment;
             frame.callSite = callSite;
-            frame.thisValue = receiver;
+            const Value activeThis = function.arrowFunction
+                ? function.lexicalThis : receiver;
+            frame.thisValue = activeThis;
             frames_.push_back(frame);
         } catch (const std::bad_alloc&) {
             fail(RuntimeErrorCode::AllocationFailure, callSite);
@@ -1283,7 +1532,7 @@ private:
         }
         context_.activeCallFrames_ = previousActiveCallFrames + 1u;
         currentEnvironment_ = callEnvironment;
-        currentThis_ = receiver;
+        currentThis_ = function.arrowFunction ? function.lexicalThis : receiver;
 
         for (std::size_t index = 0; index < declaration.childCount; ++index) {
             const AstNodeId parameterId = context_.ast_.childAt(
@@ -1312,15 +1561,24 @@ private:
             }
         }
 
-        if (!instantiateDeclarations(declaration.body, callEnvironment)) {
+        if (declaration.body != kInvalidAstNodeId &&
+            (!instantiateDeclarations(declaration.body, callEnvironment) ||
+             !instantiateLexicalBindings(declaration.body, callEnvironment))) {
             unwindFrame(callerEnvironment, callerThis, previousFrameCount,
                 previousActiveCallFrames);
             return false;
         }
 
         Control control;
-        const bool executed = executeStatement(declaration.body, false, true,
-            control);
+        bool executed = false;
+        if (declaration.kind == AstNodeKind::ArrowFunctionExpression &&
+            declaration.body == kInvalidAstNodeId) {
+            executed = evalExpression(declaration.expression, control.value);
+            if (executed) control.kind = ControlKind::Return;
+        } else {
+            executed = beginNode(declaration.body) &&
+                executeStatementList(declaration.body, false, true, control);
+        }
         if (!executed) {
             unwindFrame(callerEnvironment, callerThis, previousFrameCount,
                 previousActiveCallFrames);
@@ -3016,13 +3274,18 @@ private:
             return true;
         }
 
-        const Value* current = lookup(name);
+        const Binding* current = resolveBinding(name);
         if (current == nullptr) {
             fail(RuntimeErrorCode::UnknownIdentifier,
                 context_.ast_.node(node.left).location);
             return false;
         }
-        Value left = *current;
+        if (!current->initialized) {
+            fail(RuntimeErrorCode::UninitializedBinding,
+                context_.ast_.node(node.left).location);
+            return false;
+        }
+        Value left = current->value;
         if (!evalExpression(node.right, right)) return false;
         AstBinaryOperator binary = AstBinaryOperator::Add;
         switch (node.assignmentOperator) {
@@ -3069,13 +3332,18 @@ private:
         }
         SourceView name;
         if (!identifierName(node.argument, name)) return false;
-        const Value* current = lookup(name);
+        const Binding* current = resolveBinding(name);
         if (current == nullptr) {
             fail(RuntimeErrorCode::UnknownIdentifier,
                 context_.ast_.node(node.argument).location);
             return false;
         }
-        const Value old = *current;
+        if (!current->initialized) {
+            fail(RuntimeErrorCode::UninitializedBinding,
+                context_.ast_.node(node.argument).location);
+            return false;
+        }
+        const Value old = current->value;
         double number = 0.0;
         if (!toNumber(old, number)) return false;
         const double updated = node.updateOperator == AstUpdateOperator::Increment
@@ -3191,9 +3459,9 @@ private:
                 return closeIteratorPreservingError(iterator, node.location);
             }
             currentEnvironment_ = iterationEnvironment;
-            if (!declareIn(iterationEnvironment, bindingName, yielded,
-                    context_.ast_.node(node.name).location,
-                    node.immutableBinding)) {
+            if (!declareLexicalIn(iterationEnvironment, bindingName,
+                    node.immutableBinding,
+                    context_.ast_.node(node.name).location, yielded, true)) {
                 currentEnvironment_ = loopEnvironment;
                 return closeIteratorPreservingError(iterator, node.location);
             }
@@ -3215,6 +3483,21 @@ private:
         }
     }
 
+    bool executeStatementList(AstNodeId container, bool inLoop,
+        bool inFunction, Control& control)
+    {
+        if (!validNode(container, SourceLocation())) return false;
+        const AstNode& node = context_.ast_.node(container);
+        for (std::size_t index = 0; index < node.childCount; ++index) {
+            const AstNodeId child = context_.ast_.childAt(container, index);
+            if (!validNode(child, node.location) ||
+                !executeStatement(child, inLoop, inFunction, control))
+                return false;
+            if (control.kind != ControlKind::Normal) return true;
+        }
+        return true;
+    }
+
     bool executeStatement(AstNodeId id, bool inLoop, bool inFunction,
         Control& control)
     {
@@ -3222,14 +3505,28 @@ private:
         const AstNode& node = context_.ast_.node(id);
         switch (node.kind) {
         case AstNodeKind::Program:
-        case AstNodeKind::BlockStatement:
-            for (std::size_t index = 0; index < node.childCount; ++index) {
-                const AstNodeId child = context_.ast_.childAt(id, index);
-                if (!validNode(child, node.location)) return false;
-                if (!executeStatement(child, inLoop, inFunction, control)) return false;
-                if (control.kind != ControlKind::Normal) return true;
+            return executeStatementList(id, inLoop, inFunction, control);
+        case AstNodeKind::BlockStatement: {
+            const EnvironmentId previousEnvironment = currentEnvironment_;
+            if (hasDirectLexicalBindings(id)) {
+                EnvironmentId blockEnvironment = kInvalidEnvironmentId;
+                RuntimeErrorCode error = RuntimeErrorCode::None;
+                if (!context_.createEnvironment(previousEnvironment,
+                        blockEnvironment, error)) {
+                    fail(error, node.location);
+                    return false;
+                }
+                currentEnvironment_ = blockEnvironment;
+                if (!instantiateLexicalBindings(id, blockEnvironment)) {
+                    currentEnvironment_ = previousEnvironment;
+                    return false;
+                }
             }
-            return true;
+            const bool succeeded = executeStatementList(id, inLoop,
+                inFunction, control);
+            currentEnvironment_ = previousEnvironment;
+            return succeeded;
+        }
         case AstNodeKind::EmptyStatement:
             return true;
         case AstNodeKind::VariableDeclaration:
@@ -3244,14 +3541,22 @@ private:
                 }
                 SourceView name;
                 if (!identifierName(declarator.name, name)) return false;
+                const bool isVar = node.declarationKind ==
+                    AstDeclarationKind::Var;
                 Value value = Value::undefined();
-                if (!declare(name, value, context_.ast_.node(declarator.name).location)) return false;
+                if (isVar && !declare(name, value,
+                        context_.ast_.node(declarator.name).location))
+                    return false;
                 if (declarator.initializer != kInvalidAstNodeId) {
                     if (!validNode(declarator.initializer, declarator.location)) return false;
                     if (!evalExpression(declarator.initializer, value)) return false;
-                    if (!assign(name, value, declarator.location)) {
+                    if (!(isVar ? assign(name, value, declarator.location)
+                            : initialize(name, value, declarator.location))) {
                         return false;
                     }
+                } else if (!isVar && !initialize(name, Value::undefined(),
+                        declarator.location)) {
+                    return false;
                 }
             }
             return true;
@@ -3925,12 +4230,14 @@ const Environment* RuntimeContext::environmentAt(EnvironmentId id) const
 }
 
 bool RuntimeContext::createFunction(AstNodeId declaration,
-    EnvironmentId closure, RuntimeFunctionId& result, RuntimeErrorCode& error)
+    EnvironmentId closure, RuntimeFunctionId& result, RuntimeErrorCode& error,
+    bool arrowFunction, Value lexicalThis)
 {
     error = RuntimeErrorCode::None;
     if (declaration == kInvalidAstNodeId || declaration >= ast_.nodeCount() ||
         (ast_.node(declaration).kind != AstNodeKind::FunctionDeclaration &&
-            ast_.node(declaration).kind != AstNodeKind::FunctionExpression) ||
+            ast_.node(declaration).kind != AstNodeKind::FunctionExpression &&
+            ast_.node(declaration).kind != AstNodeKind::ArrowFunctionExpression) ||
         environmentAt(closure) == nullptr) {
         error = RuntimeErrorCode::InvalidFunction;
         return false;
@@ -3946,6 +4253,9 @@ bool RuntimeContext::createFunction(AstNodeId declaration,
         function.kind = FunctionRecord::Kind::User;
         function.declaration = declaration;
         function.closureEnvironment = closure;
+        function.arrowFunction = arrowFunction ||
+            ast_.node(declaration).kind == AstNodeKind::ArrowFunctionExpression;
+        if (function.arrowFunction) function.lexicalThis = lexicalThis;
         functions_.push_back(function);
     } catch (const std::bad_alloc&) {
         error = RuntimeErrorCode::AllocationFailure;
@@ -5230,6 +5540,9 @@ bool RuntimeContext::installHostGlobalInternal(const HostGlobalSpec& spec,
         case EnvironmentErrorCode::AllocationFailure:
             error = RuntimeErrorCode::AllocationFailure;
             break;
+        case EnvironmentErrorCode::DuplicateLexicalBinding:
+            error = RuntimeErrorCode::InvalidAstState;
+            break;
         case EnvironmentErrorCode::None:
             error = RuntimeErrorCode::InvalidAstState;
             break;
@@ -5928,6 +6241,9 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
     switch (code) {
     case RuntimeErrorCode::None: return "None";
     case RuntimeErrorCode::UnknownIdentifier: return "UnknownIdentifier";
+    case RuntimeErrorCode::UninitializedBinding:
+        return "UninitializedBinding";
+    case RuntimeErrorCode::DuplicateBinding: return "DuplicateBinding";
     case RuntimeErrorCode::InvalidAssignmentTarget:
         return "InvalidAssignmentTarget";
     case RuntimeErrorCode::InvalidOperandType: return "InvalidOperandType";

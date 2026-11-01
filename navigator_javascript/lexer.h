@@ -16,6 +16,8 @@ enum class TokenType : std::uint8_t {
     StringLiteral,
 
     KeywordVar,
+    KeywordLet,
+    KeywordConst,
     KeywordFunction,
     KeywordReturn,
     KeywordIf,
@@ -48,6 +50,7 @@ enum class TokenType : std::uint8_t {
     Slash,
     Percent,
     Assign,
+    Arrow,
     Equal,
     StrictEqual,
     NotEqual,

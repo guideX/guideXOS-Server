@@ -13225,3 +13225,106 @@ its observed baseline (8,398,274 bytes, SHA-256
 42 generated Navigator fixtures (458,372 bytes) still match the saved path,
 size, and SHA-256 manifest. Qualification was hosted-only; no QEMU launch or
 QAC admission was performed.
+
+## JS104 — bounded synchronous lexical declarations and arrows
+
+JS104 adds a deliberately small synchronous modern syntax subset to the
+existing lexer, parser, AST, environment, and closure runtime. `let` and
+`const` declarations accept simple identifier bindings. `let` may omit its
+initializer and becomes `undefined` when its declaration executes; `const`
+requires an initializer. Both are block scoped and shadow outer names. A `const`
+binding cannot be assigned again, while properties of an object held by a
+`const` binding remain mutable under the existing object rules.
+
+The parser validates lexical names before evaluating any statement. Duplicate
+`let` or `const` declarations, `let`/`const` collisions, and conflicts with
+relevant `var` or function bindings in one program are syntax errors. When
+scripts share a realm, runtime preflight checks new global declarations against
+retained bindings before hoisting or publishing names; a collision reports
+`DuplicateBinding`. Runtime scope entry creates each block's direct lexical
+bindings before running its statements.
+Bindings separately record whether they have been initialized and whether they
+are immutable. Reads or writes in the temporal dead zone fail with the runtime's
+`UninitializedBinding` error. Ordinary `var` declarations retain their
+existing program or function scope, including when they appear inside a block.
+Blocks without direct lexical declarations reuse the current environment.
+
+Arrow functions have a distinct AST node and function-record flag. The
+supported parameter forms are one unparenthesized identifier, `()`, or a
+parenthesized comma-separated list of simple identifiers. The body is either
+one expression with an implicit return or a block with ordinary `return`
+statements; a block that reaches its end returns `undefined`. Nested arrows,
+closure capture, and arrows passed to existing synchronous Array and Navigator
+Event callbacks are supported. Arrow functions capture `this` at creation and
+ignore a later method receiver or callback `thisArg`; traditional functions
+keep their existing dynamic receiver behavior. The runtime does not expose an
+`arguments` object, and arrows do not create an arrow-local one.
+
+Closures retain the lexical environment they captured after a block exits.
+Reads observe later changes to a captured mutable binding. Each existing
+`for (let name of iterable)` iteration continues to receive its own retained
+binding, and `for (const name of iterable)` remains immutable. Conventional
+`for (let i = ...; ...; ...)` and `for (const i = ...; ...; ...)` headers are
+rejected because this phase does not add their per-iteration loop semantics.
+
+The supported grammar excludes template literals, destructuring, default and
+rest parameters, spread, classes, optional chaining, nullish coalescing,
+`async`/`await`, Promises, modules and imports, automatic semicolon insertion,
+dynamic DOM creation, JSON, `Array.join()`, and external script loading. Arrow
+parameters must be simple identifiers and every statement still needs the
+established explicit terminator. Arrow lookahead is bounded by the configured
+parameter limit. Lexical block environments and user functions are retained
+until realm reset, so they consume the existing finite pools: 2,048 total
+environments including the global one, 4,096 user functions, 256 bindings per
+environment, 16,384 AST nodes, 1,024 runtime objects, 4,096 total Array
+elements, 64 nested calls, and the existing 100,000 execution-step budget.
+The lexer still caps source at 1 MiB and the parser caps input at 8,192 tokens.
+No pool limit was increased for JS104, and no garbage collector was added.
+
+The hosted fixture `navigator-smoke/javascript-js104.html` verifies that
+`[2, 4, 6].map(x => x * multiplier)` renders `6, 12, 18`, an Event arrow
+updates text using method-captured lexical `this`, and another Event arrow
+updates rendered text from captured mutable state across repeated clicks. The
+native lane is `tests/navigator_javascript_js104_test.cpp`, driven by
+`scripts/smoke-navigator-javascript-js104.ps1`; it covers declaration errors,
+TDZ, arrow parsing and calls, callbacks, closures, iteration bindings,
+capacity failure, and the hosted document/layout adapter.
+
+JS104 native qualification passed **31/31 checks** under strict C++17
+compilation with `-Wall -Wextra -Werror -pedantic`. The focused lane measured
+`AstNode` at 128 bytes, `Binding` at 80 bytes, `Environment` at 48 bytes,
+`FunctionRecord` at 72 bytes, `RuntimeObject` at 88 bytes, and
+`RuntimeArrayElement` at 48 bytes. Compared with the JS102 layouts, `AstNode`
+increases from 120 to 128 bytes because of the declaration-kind field;
+`Binding` remains 80 bytes because its initialization bit fits existing
+padding; and `FunctionRecord` increases from 32 to 72 bytes with the arrow
+flag and captured lexical `this`.
+
+Strict host compiler static-frame measurements are `Lexer::tokenize` 304
+bytes, `ParserState::parseStatement` 768 bytes,
+`ParserState::parseAssignmentExpression` 528 bytes,
+`ParserState::validateScope` 688 bytes, `preflightGlobalBindings` 416 bytes,
+`instantiateLexicalBindings` 320 bytes, `executeStatement` 512 bytes,
+`createFunction` 176 bytes, and `invokeFunction` 608 bytes. The unchanged
+`traverseArray` and `invokeNative` frames measure 544 and 736 bytes. These are
+host measurements, not a bare-metal stack guarantee.
+
+The hosted Navigator aggregate reported **744 passed, 7 failed, 751 total**.
+All three JS104 hosted checks passed, including map rendering, lexical `this`
+on an Event click, and captured mutable state across repeated clicks. The seven
+failures are the established CSS checks (phases 3C, 3G, 6A, three in 6B, and
+6C), unchanged from the JS102 aggregate of 741 passed and 7 failed.
+
+The production build succeeded with an 8,825,874-byte executable (SHA-256
+`1A5806AD7702CF1412BBD7AA125249FC23A6082C80E4C215013A63C0E85D2674`). After
+hosted qualification, `guideXOSServer.exe` was restored and verified at
+8,398,274 bytes with its observed baseline SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated Navigator fixtures (458,372 bytes) still match the saved path, size,
+and SHA-256 manifest. The complete JavaScript smoke matrix passed **105/105
+lanes** and **17,314/17,314 reported assertions across 64 assertion lanes**.
+The JS104 lane was the matrix's final lane; the preceding 104 lanes also
+completed successfully. JS83 `for...of` and JS102 Array callback coverage are
+included.
+Guest runtime qualification remains pending; no QEMU launch or QAC admission
+was performed.

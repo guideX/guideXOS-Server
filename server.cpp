@@ -6153,6 +6153,57 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("click=") + yesNo(js102ErrorClick) + ",error=" +
         js102Error);
 
+    const std::string js104FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js104.html";
+    const bool js104Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js104FixtureUrl);
+    const std::string js104InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js104InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    const std::string js104InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS104 lexical declarations and arrow map render on the hosted server",
+        js104Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js104FixtureUrl &&
+        contains(js104InitialText, "Navigator JavaScript JS104") &&
+        contains(js104InitialText, "6, 12, 18") &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 2u &&
+        js104InitialError.empty(),
+        std::string("loaded=") + yesNo(js104Loaded) + ",text=" +
+        summarizeText(js104InitialText, 1200) + ",listeners=" +
+        std::to_string(gxos::apps::Navigator::SmokeJavaScriptListenerCount()) +
+        ",error=" + (js104InitialError.empty() ? "none" : js104InitialError));
+    const bool js104ThisClick = js104Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("this-button");
+    const std::string js104AfterThisClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js104RevisionAfterThisClick =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS104 hosted Event arrow keeps lexical this and relayouts its mutation",
+        js104ThisClick && contains(js104AfterThisClick, "guideXOS") &&
+        js104RevisionAfterThisClick > js104InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js104ThisClick) + ",revision=" +
+        std::to_string(js104InitialRevision) + "->" +
+        std::to_string(js104RevisionAfterThisClick) + ",text=" +
+        summarizeText(js104AfterThisClick, 800));
+    const bool js104StateClickOne = js104Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("state-button");
+    const bool js104StateClickTwo = js104Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("state-button");
+    const std::string js104AfterStateClicks =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS104 hosted Event callback reads captured mutable lexical state",
+        js104StateClickOne && js104StateClickTwo &&
+        contains(js104AfterStateClicks, "clicks=2") &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("clicks=") + yesNo(js104StateClickOne) + "/" +
+        yesNo(js104StateClickTwo) + ",text=" +
+        summarizeText(js104AfterStateClicks, 800));
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

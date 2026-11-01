@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS104</title></head>
+<body>
+<h1>Navigator JavaScript JS104</h1>
+<pre id="result">JS104:pending</pre>
+<pre id="this-result">this=pending</pre>
+<pre id="state-result">state=pending</pre>
+<button id="this-button" type="button">Run lexical this check</button>
+<button id="state-button" type="button">Increment captured state</button>
+<script>
+const values = [2, 4, 6];
+let multiplier = 3;
+const mapped = values.map(x => x * multiplier);
+document.getElementById("result").textContent =
+    mapped[0] + ", " + mapped[1] + ", " + mapped[2];
+
+const receiver = {
+    label: "guideXOS",
+    install: function() {
+        const output = document.getElementById("this-result");
+        document.getElementById("this-button").addEventListener("click", () => {
+            output.textContent = this.label;
+        });
+    }
+};
+receiver.install();
+
+let clicks = 0;
+const stateOutput = document.getElementById("state-result");
+document.getElementById("state-button").addEventListener("click", () => {
+    clicks++;
+    stateOutput.textContent = "clicks=" + clicks;
+});
+</script>
+</body>
+</html>

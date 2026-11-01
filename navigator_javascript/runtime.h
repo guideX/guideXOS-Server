@@ -24,6 +24,7 @@ constexpr std::uint64_t kMaximumJavaScriptArrayLength = 4294967295ull;
 enum class RuntimeErrorCode : std::uint8_t {
     None = 0,
     UnknownIdentifier,
+    UninitializedBinding,
     InvalidAssignmentTarget,
     InvalidOperandType,
     UnsupportedFeature,
@@ -77,6 +78,7 @@ enum class RuntimeErrorCode : std::uint8_t {
     RealmSourceLimitExceeded,
     HostCallbackLimitExceeded,
     PropagationPathLimitExceeded,
+    DuplicateBinding,
 };
 
 struct RuntimeError {
@@ -371,6 +373,8 @@ private:
         RuntimeHostObjectId hostObject = kInvalidRuntimeHostObjectId;
         std::uint32_t hostMethod = 0;
         bool hostMethodRequiresReceiver = false;
+        bool arrowFunction = false;
+        Value lexicalThis = Value::undefined();
     };
 
     enum class NativeFunctionId : std::uint8_t {
@@ -564,7 +568,8 @@ private:
     Environment* environmentAt(EnvironmentId id);
     const Environment* environmentAt(EnvironmentId id) const;
     bool createFunction(AstNodeId declaration, EnvironmentId closure,
-        RuntimeFunctionId& result, RuntimeErrorCode& error);
+        RuntimeFunctionId& result, RuntimeErrorCode& error,
+        bool arrowFunction = false, Value lexicalThis = Value::undefined());
     bool createNativeFunction(NativeFunctionId native,
         RuntimeFunctionId& result, RuntimeErrorCode& error);
     bool createHostMethod(RuntimeHostObjectId object, std::uint32_t method,
