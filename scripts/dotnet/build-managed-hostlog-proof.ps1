@@ -31,6 +31,7 @@ param(
     [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
     [switch]$C188R12R4R5R4R5GcInitProbes,
+    [switch]$C188R12R4R5R4R5R2SemiSharedAttribution,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -253,6 +254,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5R3InitReturnContract) { $runtimePackBuildArguments += "-C188R12R4R5R3InitReturnContract" }
     if ($C188R12R4R5R4ThreadStoreReadiness) { $runtimePackBuildArguments += "-C188R12R4R5R4ThreadStoreReadiness" }
     if ($C188R12R4R5R4R5GcInitProbes) { $runtimePackBuildArguments += "-C188R12R4R5R4R5GcInitProbes" }
+    if ($C188R12R4R5R4R5R2SemiSharedAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R4R5R2SemiSharedAttribution" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
@@ -297,6 +299,15 @@ if ($UseGuideXosRuntimePack) {
          -not [bool]$runtimePackManifestObject.c188r12r4r5r1InitDiagnostics -or
          [bool]$runtimePackManifestObject.persistentCompositeLifecycle)) {
         throw 'C188R12R4R5R4R5 requires the isolated Workstation GC init diagnostic runtime pack.'
+    }
+    if ($C188R12R4R5R4R5R2SemiSharedAttribution -and
+        (-not [bool]$runtimePackManifestObject.c188r12r4r5r4r5r2SemiSharedAttribution -or
+         -not [bool]$runtimePackManifestObject.c188r12r4r5r4r5GcInitProbes -or
+         [string]$runtimePackManifestObject.c188r12r4r5r4r5r2SemiSharedMarker -cne 'C188R12R4R5R4R5R2_SEMISHARED' -or
+         [int]$runtimePackManifestObject.c188r12r4r5r4r5r2OperationCapacity -ne 48 -or
+         [int]$runtimePackManifestObject.c188r12r4r5r4r5r2OperationFieldCount -ne 14 -or
+         [int]$runtimePackManifestObject.c188r12r4r5r4r5r2SummaryFieldCount -ne 15)) {
+        throw 'C188R12R4R5R4R5R2 requires the isolated bounded semi-shared attribution runtime pack.'
     }
     $runtimePackObject = [string]$runtimePackManifestObject.object
     if ([string]::IsNullOrWhiteSpace($runtimePackObject) -or -not (Test-Path -LiteralPath $runtimePackObject)) {
@@ -544,6 +555,16 @@ try {
          $PersistentCompositeLifecycle)) {
         throw 'C188R12R4R5R4R5 GC-init probes require the isolated R4 ThreadStore diagnostic proof profile.'
     }
+    if ($C188R12R4R5R4R5R2SemiSharedAttribution -and
+        (-not $C188R12R4R5R4R5GcInitProbes -or
+         -not $C188R12R4R5R4ThreadStoreReadiness -or
+         -not $C188R12R4R5R3InitReturnContract -or
+         -not $C188R12R4R5R1InitDiagnostics -or
+         -not $C188R12R4R5GcOwnershipProof -or -not $UseGuideXosRuntimePack -or
+         -not $ProductionApplication -or $managedProjectMode -ne 'GcOwnershipProof' -or
+         $PersistentCompositeLifecycle)) {
+        throw 'C188R12R4R5R4R5R2 semi-shared attribution requires the isolated R4R5 diagnostic proof profile.'
+    }
     if ($managedProjectMode -eq 'GcOwnershipProof' -and -not $C188R12R4R5GcOwnershipProof) {
         throw 'GcOwnershipProof project mode requires -C188R12R4R5GcOwnershipProof.'
     }
@@ -742,7 +763,7 @@ try {
         $gcAllocationProbeCompileBlock = @(
             "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcProbeDefines $gcProbeIncludes /Fo:`"$gcAllocationProbeObj`" `"$gcAllocationProbeSource`"",
             'if errorlevel 1 exit /b %errorlevel%',
-            "cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' }) $(if ($C188R12R4R5R4ThreadStoreReadiness) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }) $(if ($C188R12R4R5R4R5GcInitProbes) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcOwnershipStartupAdapterObj`" `"$gcOwnershipStartupAdapterSource`"",
+            "cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' }) $(if ($C188R12R4R5R4ThreadStoreReadiness) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }) $(if ($C188R12R4R5R4R5GcInitProbes) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES' }) $(if ($C188R12R4R5R4R5R2SemiSharedAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcOwnershipStartupAdapterObj`" `"$gcOwnershipStartupAdapterSource`"",
             'if errorlevel 1 exit /b %errorlevel%'
         ) -join [Environment]::NewLine
         $publishProperties += "-p:HostLogProofRuntimePackProbeObj=$gcAllocationProbeObj"

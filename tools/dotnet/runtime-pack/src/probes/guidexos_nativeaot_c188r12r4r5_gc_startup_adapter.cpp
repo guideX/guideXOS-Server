@@ -8,6 +8,9 @@
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES)
 #include "../platform/guidexos_nativeaot_gcinit_record.h"
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+#include "../platform/guidexos_nativeaot_semishared_record.h"
+#endif
 
 /*
  * Minimal proof-image adapter for the existing kernel startup harness.
@@ -49,6 +52,54 @@ void emitGcInitRecord() {
     for (uint32_t field = 0u; field < GX_GCINIT_FIELD_COUNT; ++field) {
         g_initTraceSink(invocation, GX_INIT_STAGE_GC_INTERNAL_RECORD,
             field, GuideXosNativeAotGcInitGetField(field), 0u);
+    }
+}
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+void emitSemiSharedRecord(uint32_t invocation) {
+    if (g_initTraceSink == nullptr ||
+        GuideXosNativeAotSemiSharedGetSummaryField(GX_SEMISHARED_SUMMARY_INVOCATION) != invocation) {
+        return;
+    }
+    const uint32_t summaryPairs[][2] = {
+        { GX_SEMISHARED_SUMMARY_MAGIC, GX_SEMISHARED_SUMMARY_VERSION },
+        { GX_SEMISHARED_SUMMARY_OPERATION_COUNT, GX_SEMISHARED_SUMMARY_OVERFLOW },
+        { GX_SEMISHARED_SUMMARY_FINAL_RESULT, GX_SEMISHARED_SUMMARY_FIRST_FAILED_OPERATION },
+        { GX_SEMISHARED_SUMMARY_FIRST_FAILURE_BRANCH, GX_SEMISHARED_SUMMARY_FIRST_FAILURE_STATUS },
+        { GX_SEMISHARED_SUMMARY_FIRST_FAILURE_STATUS_SOURCE, GX_SEMISHARED_SUMMARY_CLEANUP_FAILURE_OPERATION },
+        { GX_SEMISHARED_SUMMARY_CLEANUP_FAILURE_STATUS, GX_SEMISHARED_SUMMARY_CLEANUP_FAILURE_STATUS_SOURCE },
+        { GX_SEMISHARED_SUMMARY_CLEANUP_ENTERED_MASK, GX_SEMISHARED_SUMMARY_CLEANUP_COMPLETED_MASK },
+    };
+    for (uint32_t field = 0u; field < sizeof(summaryPairs) / sizeof(summaryPairs[0]); ++field) {
+        g_initTraceSink(invocation, GX_INIT_STAGE_GC_SEMISHARED_RECORD,
+            0x80000000u | field,
+            GuideXosNativeAotSemiSharedGetSummaryField(summaryPairs[field][0]),
+            GuideXosNativeAotSemiSharedGetSummaryField(summaryPairs[field][1]));
+    }
+
+    const uint32_t operationCount = GuideXosNativeAotSemiSharedGetOperationCount();
+    for (uint32_t index = 0u; index < operationCount; ++index) {
+        const uint32_t operationPairs[][2] = {
+            { GX_SEMISHARED_OPERATION_FIELD_ID, GX_SEMISHARED_OPERATION_FIELD_STATE },
+            { GX_SEMISHARED_OPERATION_FIELD_RESULT, GX_SEMISHARED_OPERATION_FIELD_DETAIL },
+            { GX_SEMISHARED_OPERATION_FIELD_RESOURCE, GX_SEMISHARED_OPERATION_FIELD_REQUEST_RESOURCE },
+            { GX_SEMISHARED_OPERATION_FIELD_SIZE_LOW, GX_SEMISHARED_OPERATION_FIELD_SIZE_HIGH },
+            { GX_SEMISHARED_OPERATION_FIELD_ALIGNMENT_LOW, GX_SEMISHARED_OPERATION_FIELD_ALIGNMENT_HIGH },
+            { GX_SEMISHARED_OPERATION_FIELD_NATIVE_STATUS, GX_SEMISHARED_OPERATION_FIELD_NATIVE_STATUS_SOURCE },
+        };
+        for (uint32_t field = 0u; field < sizeof(operationPairs) / sizeof(operationPairs[0]); ++field) {
+            const uint32_t event = (index << 8) | field;
+            const uint32_t value = field == 2u
+                ? (GuideXosNativeAotSemiSharedGetOperationField(index, operationPairs[field][0]) & 0xFFFFu) |
+                  ((GuideXosNativeAotSemiSharedGetOperationField(index, operationPairs[field][1]) & 0xFFFFu) << 16)
+                : GuideXosNativeAotSemiSharedGetOperationField(index, operationPairs[field][0]);
+            const uint32_t auxiliary = field == 2u
+                ? GuideXosNativeAotSemiSharedGetOperationField(
+                    index, GX_SEMISHARED_OPERATION_FIELD_RESOURCE_RESULT)
+                : GuideXosNativeAotSemiSharedGetOperationField(index, operationPairs[field][1]);
+            g_initTraceSink(invocation, GX_INIT_STAGE_GC_SEMISHARED_RECORD, event,
+                value, auxiliary);
+        }
     }
 }
 #endif
@@ -161,6 +212,10 @@ extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES)
     GuideXosNativeAotGcInitFinalizeForRead();
     emitGcInitRecord();
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    emitSemiSharedRecord(
+        GuideXosNativeAotGcInitGetField(GX_GCINIT_FIELD_INVOCATION));
 #endif
 #endif
     return (int)g_startupResult;

@@ -55,7 +55,11 @@ namespace kernel {
 namespace nativeaot_pal_qemu_test {
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
 namespace {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+constexpr uint32_t kInitTraceSerialLineLimit = 384u;
+#else
 constexpr uint32_t kInitTraceSerialLineLimit = 96u;
+#endif
 uint32_t g_initTraceSerialLines = 0u;
 uint32_t g_initTraceSerialDropped = 0u;
 
@@ -74,6 +78,23 @@ void __cdecl nativeAotInitTraceSink(
         serial::put_hex32(event);
         serial::puts(" value=");
         serial::put_hex32(result);
+        serial::puts("\n");
+        return;
+    }
+    if (stage == GX_INIT_STAGE_GC_SEMISHARED_RECORD) {
+        const bool summary = (event & 0x80000000u) != 0u;
+        const uint32_t sequence = summary ? 0xFFFFFFFFu : (event >> 8);
+        const uint32_t field = summary ? (event & 0x7FFFFFFFu) : (event & 0xFFu);
+        serial::puts("[C188R12R4R5R4R5R2_SEMISHARED] invocation=");
+        serial::put_hex32(invocation);
+        serial::puts(" sequence=");
+        serial::put_hex32(sequence);
+        serial::puts(" field=");
+        serial::put_hex32(field);
+        serial::puts(" value=");
+        serial::put_hex32(result);
+        serial::puts(" auxiliary=");
+        serial::put_hex32(singletonBits);
         serial::puts("\n");
         return;
     }

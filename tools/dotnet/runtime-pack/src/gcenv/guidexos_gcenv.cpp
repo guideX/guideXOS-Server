@@ -20,6 +20,9 @@
 #include "../platform/guidexos_nativeaot_event_adapter.h"
 #include "../platform/guidexos_nativeaot_virtual_memory_adapter.h"
 #include "../platform/guidexos_nativeaot_pal_contract.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+#include "../platform/guidexos_nativeaot_semishared_record.h"
+#endif
 #include "guidexos_gc_platform_services.h"
 
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
@@ -124,12 +127,27 @@ public:
 GCEvent::GCEvent() : m_impl(nullptr) {}
 
 void GCEvent::CloseEvent() {
-    if (m_impl == nullptr || m_impl->handle == nullptr ||
-        destroyEvent(m_impl->handle) != gxos::runtime::EventStatus::Ok) {
+    if (m_impl == nullptr || m_impl->handle == nullptr) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+        GuideXosNativeAotSemiSharedSetDetail(GX_SEMISHARED_DETAIL_CLEANUP_STATUS_FAILED);
+        GuideXosNativeAotSemiSharedCompleteOperation(
+            GX_SEMISHARED_VALUE_UNAVAILABLE, false);
+#endif
         unexpectedPlatformEntry();
     }
+    const gxos::runtime::EventStatus closeStatus = destroyEvent(m_impl->handle);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    const uint32_t closeResult = static_cast<uint32_t>(closeStatus);
+    if (closeStatus != gxos::runtime::EventStatus::Ok)
+        GuideXosNativeAotSemiSharedCompleteOperation(closeResult, false);
+#endif
+    if (closeStatus != gxos::runtime::EventStatus::Ok) unexpectedPlatformEntry();
     delete m_impl;
     m_impl = nullptr;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedCompleteOperation(
+        closeResult, true);
+#endif
 }
 
 void GCEvent::Set() {
@@ -168,9 +186,33 @@ bool GCEvent::CreateManualEventNoThrow(bool initialState) {
 }
 
 bool GCEvent::CreateOSAutoEventNoThrow(bool initialState) {
-    if (m_impl != nullptr) return false;
+    if (m_impl != nullptr) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+        GuideXosNativeAotSemiSharedSetDetail(
+            GX_SEMISHARED_DETAIL_EVENT_ALREADY_INITIALIZED);
+#endif
+        return false;
+    }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_EVENT_IMPL_ALLOC);
+    GuideXosNativeAotSemiSharedSetAllocationRequest(
+        GX_SEMISHARED_RESOURCE_GC_EVENT_IMPL,
+        sizeof(GCEvent::Impl), alignof(GCEvent::Impl));
+#endif
     std::unique_ptr<GCEvent::Impl> impl(new (std::nothrow) GCEvent::Impl());
-    if (!impl) return false;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_GC_EVENT_IMPL, impl != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation(impl != nullptr ? 1u : 0u,
+        impl != nullptr);
+#endif
+    if (!impl) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+        GuideXosNativeAotSemiSharedSetDetail(
+            GX_SEMISHARED_DETAIL_EVENT_IMPL_ALLOCATION_FAILED);
+#endif
+        return false;
+    }
     impl->handle = createAutoResetEvent(initialState);
     if (impl->handle == nullptr) return false;
     m_impl = impl.release();
@@ -178,9 +220,33 @@ bool GCEvent::CreateOSAutoEventNoThrow(bool initialState) {
 }
 
 bool GCEvent::CreateOSManualEventNoThrow(bool initialState) {
-    if (m_impl != nullptr) return false;
+    if (m_impl != nullptr) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+        GuideXosNativeAotSemiSharedSetDetail(
+            GX_SEMISHARED_DETAIL_EVENT_ALREADY_INITIALIZED);
+#endif
+        return false;
+    }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_EVENT_IMPL_ALLOC);
+    GuideXosNativeAotSemiSharedSetAllocationRequest(
+        GX_SEMISHARED_RESOURCE_GC_EVENT_IMPL,
+        sizeof(GCEvent::Impl), alignof(GCEvent::Impl));
+#endif
     std::unique_ptr<GCEvent::Impl> impl(new (std::nothrow) GCEvent::Impl());
-    if (!impl) return false;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_GC_EVENT_IMPL, impl != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation(impl != nullptr ? 1u : 0u,
+        impl != nullptr);
+#endif
+    if (!impl) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+        GuideXosNativeAotSemiSharedSetDetail(
+            GX_SEMISHARED_DETAIL_EVENT_IMPL_ALLOCATION_FAILED);
+#endif
+        return false;
+    }
     impl->handle = createManualResetEvent(initialState);
     if (impl->handle == nullptr) return false;
     m_impl = impl.release();

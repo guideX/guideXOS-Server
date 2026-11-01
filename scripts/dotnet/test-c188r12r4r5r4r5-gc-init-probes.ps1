@@ -85,7 +85,9 @@ Assert-True ($buildText.Contains('gcwks.cpp.obj') -and $buildText.Contains('C188
 Assert-True ($adapterText.Contains('GuideXosNativeAotGcInitGetField') -and $adapterText.Contains('GuideXosNativeAotGcInitFinalizeForRead();') -and $adapterText.Contains('emitGcInitRecord();')) 'adapter finalizes and reads the record after RhInitialize returns'
 Assert-True ($kernelText.Contains('C188R12R4R5R4R5_GCINIT') -and $kernelText.Contains('GX_INIT_STAGE_GC_INTERNAL_RECORD')) 'serial sink emits the bounded GCINIT marker family'
 Assert-True (-not (Select-String -LiteralPath $recordSource -Pattern '\b(new|malloc|calloc|realloc|printf|puts|CreateEvent|GetLastError)\b' -Quiet)) 'record implementation contains no allocator, logger, or Windows/PAL service call'
-Assert-True ($guestRunnerText.Contains("mode -ceq 'GcInitFailureAttribution'") -and $guestRunnerText.Contains('PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST')) 'QAC runner accepts only the qualified R4R5 GC-init candidate profile'
+Assert-True ($guestRunnerText.Contains("mode -in @('GcInitFailureAttribution','SemiSharedAttribution')") -and
+    $guestRunnerText.Contains('PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST') -and
+    $guestRunnerText.Contains('PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST')) 'QAC runner accepts the qualified R4R5 and R2 diagnostic candidate profiles'
 Assert-True ($guestRunnerText.Contains('qac-guest-r4r5r1-001') -and $guestRunnerText.Contains('guest-launch-attempt-C188R12R4R5R4R5R1.json')) 'R4R5R1 uses a distinct guest directory and one-boot guard'
 Assert-True ($guestRunnerText.Contains("if (`$isGcInitFailureAttribution) { Join-Path `$phaseRoot `$runDirectory }")) 'R4R5R1 guest evidence stays outside the qualified candidate tree'
 Assert-True ($guestRunnerText.Contains('[System.IO.FileMode]::CreateNew') -and $guestRunnerText.Contains('maxGuestBoots=1;automaticRetry=$false')) 'R4R5R1 consumes its guard only after successful preflight and forbids retries'

@@ -2,7 +2,9 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$CandidateRoot = '',
     [switch]$ThreadStoreReadiness,
-    [switch]$GcInitProbes
+    [switch]$GcInitProbes,
+    [switch]$SemiSharedAttribution,
+    [switch]$ResumeCandidate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,18 +12,26 @@ Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
-    $phaseRoot = if ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
+    $phaseRoot = if ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-attribution' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
     $CandidateRoot = Join-Path $root "out\dotnet\$phaseRoot\candidate-$stamp"
 }
 if ($GcInitProbes -and -not $ThreadStoreReadiness) {
     throw 'C188R12R4R5R4R5 requires the R4 ThreadStore diagnostic profile.'
+}
+if ($SemiSharedAttribution -and (-not $GcInitProbes -or -not $ThreadStoreReadiness)) {
+    throw 'C188R12R4R5R4R5R2 requires both the R4R5 and R4 diagnostic profiles.'
 }
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $allowed = [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet')) + [System.IO.Path]::DirectorySeparatorChar
 if (-not $candidate.StartsWith($allowed, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Candidate output must remain below out\dotnet: $candidate"
 }
-if (Test-Path -LiteralPath $candidate) { throw "Refusing to overwrite candidate: $candidate" }
+if ((Test-Path -LiteralPath $candidate) -and -not $ResumeCandidate) { throw "Refusing to overwrite candidate: $candidate" }
+if ($ResumeCandidate -and -not $candidate.StartsWith(
+    [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution')) + [System.IO.Path]::DirectorySeparatorChar,
+    [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'ResumeCandidate is limited to the isolated R2 output root.'
+}
 
 function Require-File([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Label is missing: $Path" }
@@ -56,7 +66,7 @@ $elfPath = Join-Path $artifactRoot 'HostLogProof.elf'
 $embeddedRaw = Join-Path $candidate 'gc-ownership-artifact.raw.o'
 $embeddedObject = Join-Path $candidate 'gc-ownership-artifact.o'
 $esp = Join-Path $candidate 'esp'
-$kernelBuildPrefix = if ($GcInitProbes) { 'build/c188r12r4r5r4r5-gc-init-probes-' } elseif ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
+$kernelBuildPrefix = if ($SemiSharedAttribution) { 'build/c188r12r4r5r4r5r2-semishared-' } elseif ($GcInitProbes) { 'build/c188r12r4r5r4r5-gc-init-probes-' } elseif ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
 $kernelBuildDir = $kernelBuildPrefix + [guid]::NewGuid().ToString('N')
 $kernel = Join-Path $root "kernel\$($kernelBuildDir.Replace('/','\'))\bin\kernel.elf"
 $bootloader = Join-Path $root 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
@@ -74,7 +84,6 @@ foreach ($requirement in @(
     @($make, 'MinGW make')
 )) { Require-File $requirement[0] $requirement[1] }
 
-New-Item -ItemType Directory -Force -Path $candidate | Out-Null
 $managedBuilder = Join-Path $root 'scripts\dotnet\build-managed-hostlog-proof.ps1'
 $managedBuildArguments = @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managedBuilder,
@@ -87,7 +96,19 @@ $managedBuildArguments = @(
 )
 if ($ThreadStoreReadiness) { $managedBuildArguments += '-C188R12R4R5R4ThreadStoreReadiness' }
 if ($GcInitProbes) { $managedBuildArguments += '-C188R12R4R5R4R5GcInitProbes' }
-Invoke-Logged 'pwsh' $managedBuildArguments (Join-Path $candidate 'managed-build.log')
+if ($SemiSharedAttribution) { $managedBuildArguments += '-C188R12R4R5R4R5R2SemiSharedAttribution' }
+if ($ResumeCandidate) {
+    if (-not (Test-Path -LiteralPath $pePath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $mapPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $elfPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath (Join-Path $runtimeRoot 'runtime-pack.manifest.json') -PathType Leaf) -or
+        (Test-Path -LiteralPath (Join-Path $candidate 'candidate-manifest.json'))) {
+        throw 'ResumeCandidate requires the existing diagnostic NativeAOT outputs and no final candidate manifest.'
+    }
+} else {
+    New-Item -ItemType Directory -Force -Path $candidate | Out-Null
+    Invoke-Logged 'pwsh' $managedBuildArguments (Join-Path $candidate 'managed-build.log')
+}
 
 Require-File $pePath 'NativeAOT proof PE'
 Require-File $mapPath 'NativeAOT proof map'
@@ -113,6 +134,16 @@ if ($GcInitProbes -and
      [int]$runtimeManifest.c188r12r4r5r4r5GcInitRecordSizeBytes -ne 64 -or
      [int]$runtimeManifest.c188r12r4r5r4r5GcInitFieldCount -ne 16)) {
     throw 'Runtime-pack GC-init record layout does not match the bounded source contract.'
+}
+if ([bool]$runtimeManifest.c188r12r4r5r4r5r2SemiSharedAttribution -ne [bool]$SemiSharedAttribution) {
+    throw 'Runtime-pack semi-shared attribution profile does not match the requested candidate mode.'
+}
+if ($SemiSharedAttribution -and
+    ([string]$runtimeManifest.c188r12r4r5r4r5r2SemiSharedMarker -cne 'C188R12R4R5R4R5R2_SEMISHARED' -or
+     [int]$runtimeManifest.c188r12r4r5r4r5r2OperationCapacity -ne 48 -or
+     [int]$runtimeManifest.c188r12r4r5r4r5r2OperationFieldCount -ne 14 -or
+     [int]$runtimeManifest.c188r12r4r5r4r5r2SummaryFieldCount -ne 15)) {
+    throw 'Runtime-pack semi-shared record layout does not match the bounded source contract.'
 }
 if ($ThreadStoreReadiness -and
     ([string]::IsNullOrWhiteSpace([string]$runtimeManifest.c188r12r4r5r4PalCommonReplacementObject) -or
@@ -156,6 +187,13 @@ if ($GcInitProbes) {
     # along with the actual Workstation-GC object identity below.
     $requiredSymbols += @('GuideXosNativeAotGcInitRecordHeapResult','GuideXosNativeAotGcInitGetField')
 }
+if ($SemiSharedAttribution) {
+    $requiredSymbols += @(
+        'GuideXosNativeAotSemiSharedGetSummaryField',
+        'GuideXosNativeAotSemiSharedGetOperationCount',
+        'GuideXosNativeAotSemiSharedGetOperationField'
+    )
+}
 foreach ($symbol in $requiredSymbols) {
     if (-not $mapText.Contains($symbol)) { throw "NativeAOT proof map lacks required symbol: $symbol" }
 }
@@ -173,6 +211,11 @@ if ($GcInitProbes -and -not $mapText.Contains('Runtime.WorkstationGC:gcwks.cpp.o
 }
 if ($GcInitProbes -and $mapText -notmatch '\?Initialize@GCHeap@WKS@@UEAAJXZ\s+[0-9A-Fa-f]{16}\s+f\s+Runtime\.WorkstationGC:gcwks\.cpp\.obj') {
     throw 'The NativeAOT map does not retain the concrete instrumented Workstation GCHeap::Initialize implementation.'
+}
+if ($SemiSharedAttribution -and
+    (-not $mapText.Contains('Runtime.WorkstationGC:gcwks.cpp.obj') -or
+     -not $mapText.Contains('GuideXosNativeAotSemiSharedGetOperationField'))) {
+    throw 'Diagnostic map lacks the linked semi-shared record and pinned Workstation GC object.'
 }
 if ($mapText.Contains('g_guideXosManagedHeap')) { throw 'NativeAOT proof image unexpectedly contains the C188 image-backed arena.' }
 
@@ -285,6 +328,7 @@ $kernelDefines = ($kernelFeatures | ForEach-Object { '-D' + $_ }) -join ' '
 $kernelDefines += ' -DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS -DGXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT'
 if ($ThreadStoreReadiness) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }
 if ($GcInitProbes) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES' }
+if ($SemiSharedAttribution) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED' }
 $makeArgs = @(
     '-C', 'kernel', 'ARCH=amd64', "BUILD_DIR=$kernelBuildDir",
     'GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1',
@@ -308,6 +352,9 @@ if ($ThreadStoreReadiness -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R
 if ($GcInitProbes -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES') {
     throw 'GC-init probe kernel build does not show its isolated marker define.'
 }
+if ($SemiSharedAttribution -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED') {
+    throw 'Semi-shared attribution kernel build does not show its isolated marker define.'
+}
 
 $espBoot = Join-Path $esp 'EFI\BOOT'
 New-Item -ItemType Directory -Force -Path $espBoot | Out-Null
@@ -318,6 +365,33 @@ $candidateRamdiskHash = Hash-File (Join-Path $esp 'ramdisk.img')
 if ($candidateRamdiskHash -ne $expectedRamdiskHash -or (Hash-File $ramdisk) -ne $expectedRamdiskHash) {
     throw 'Source or isolated candidate ramdisk SHA-256 changed during packaging.'
 }
+
+$stagedRoot = if ($ResumeCandidate -and (Test-Path -LiteralPath (Join-Path $candidate 'staged'))) {
+    Join-Path $candidate 'staged-final'
+} else { Join-Path $candidate 'staged' }
+$stagedDiagnostic = Join-Path $stagedRoot 'diagnostic'
+$stagedRuntimeSource = Join-Path $stagedRoot 'diagnostic\runtime-pack'
+New-Item -ItemType Directory -Force -Path $stagedDiagnostic,$stagedRuntimeSource | Out-Null
+Copy-Item -LiteralPath $esp -Destination $stagedDiagnostic -Recurse
+if ($SemiSharedAttribution) {
+    Copy-Item -LiteralPath (Join-Path $runtimeRoot 'gcinit-workstation-source\gcwks.cpp') -Destination (Join-Path $stagedRuntimeSource 'gcwks.cpp')
+    Copy-Item -LiteralPath (Join-Path $runtimeRoot 'gcinit-workstation-source\gc.cpp') -Destination (Join-Path $stagedRuntimeSource 'gc.cpp')
+    Copy-Item -LiteralPath (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_semishared_record.h') -Destination $stagedRuntimeSource
+    Copy-Item -LiteralPath (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_semishared_record.cpp') -Destination $stagedRuntimeSource
+}
+$stagedFiles = @(Get-ChildItem -LiteralPath $stagedRoot -File -Recurse | ForEach-Object {
+    $relativePath = $_.FullName.Substring($stagedRoot.Length + 1).Replace('\','/')
+    [ordered]@{ path=$relativePath; sizeBytes=$_.Length; sha256=Hash-File $_.FullName }
+})
+$stagedQualification = [ordered]@{
+    result = 'PASS'
+    phase = if ($SemiSharedAttribution) { 'C188R12R4R5R4R5R2' } else { 'C188R12R4R5R4R5' }
+    sourceHead = (& git -C $root rev-parse HEAD).Trim()
+    runtimeSourceCommit = [string]$runtimeManifest.runtimeIdentity.sourceCommit
+    files = $stagedFiles
+}
+$stagedQualificationPath = Join-Path $stagedRoot 'qualification-manifest.json'
+[System.IO.File]::WriteAllText($stagedQualificationPath,($stagedQualification | ConvertTo-Json -Depth 6),[System.Text.UTF8Encoding]::new($false))
 
 $productionRoot = Join-Path $candidate 'production'
 $productionNativeAotRoot = Join-Path $productionRoot 'nativeaot-build'
@@ -351,22 +425,25 @@ if ([bool]$productionRuntimeManifest.c188r12r4r5GcOwnershipProof -or
     [bool]$productionRuntimeManifest.c188r12r4r5r3InitReturnContract -or
     [bool]$productionRuntimeManifest.c188r12r4r5r4ThreadStoreReadiness -or
     [bool]$productionRuntimeManifest.c188r12r4r5r4r5GcInitProbes -or
+    [bool]$productionRuntimeManifest.c188r12r4r5r4r5r2SemiSharedAttribution -or
     $productionMapText.Contains('C188R12R4R5R1_INIT') -or
     $productionMapText.Contains('C188R12R4R5R3_INIT') -or
     $productionMapText.Contains('C188R12R4R5R4_THREAD') -or
     $productionMapText.Contains('C188R12R4R5R4R5_GCINIT') -or
     $productionMapText.Contains('GuideXosNativeAotGcInit') -or
+    $productionMapText.Contains('SemiShared') -or
+    $productionMapText.Contains('C188R12R4R5R4R5R2_SEMISHARED') -or
     $productionMapText.Contains('GuideXosNativeAotGcStartupGetRhInitializeRawResult')) {
     throw 'Proof-disabled production NativeAOT outputs contain C188 return-contract instrumentation.'
 }
 
 $manifest = [ordered]@{
-    result = if ($GcInitProbes) { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' } elseif ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS_GUEST' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
+    result = if ($SemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' } elseif ($GcInitProbes) { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' } elseif ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS_GUEST' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
     repoRoot = $root
     head = (& git -C $root rev-parse HEAD).Trim()
     branch = (& git -C $root branch --show-current).Trim()
     candidateRoot = $candidate
-    mode = if ($GcInitProbes) { 'GcInitFailureAttribution' } elseif ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
+    mode = if ($SemiSharedAttribution) { 'SemiSharedAttribution' } elseif ($GcInitProbes) { 'GcInitFailureAttribution' } elseif ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
     productionApplicationStartupOnly = $true
     managedMainEnteredByCandidate = $false
     managedMainGateReason = if ($GcInitProbes) { 'Candidate is unbooted; after RhInitialize returns, the adapter snapshots the internal GC initialization record. Managed dispatch remains governed by actual initialization success and the established R4 thread-attachment gate.' } elseif ($ThreadStoreReadiness) { 'Candidate is unbooted; a successful RhInitialize proceeds through module registration and the pinned stock reverse-P/Invoke attachment helper before ManagedMain.' } else { 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.' }
@@ -379,6 +456,12 @@ $manifest = [ordered]@{
     c188R12R4R5R3InitReturnContract = [bool]$runtimeManifest.c188r12r4r5r3InitReturnContract
     c188R12R4R5R4ThreadStoreReadiness = [bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness
     c188R12R4R5R4R5GcInitProbes = [bool]$runtimeManifest.c188r12r4r5r4r5GcInitProbes
+    c188R12R4R5R4R5R2SemiSharedAttribution = [bool]$runtimeManifest.c188r12r4r5r4r5r2SemiSharedAttribution
+    c188R12R4R5R4R5R2Marker = [string]$runtimeManifest.c188r12r4r5r4r5r2SemiSharedMarker
+    c188R12R4R5R4R5R2OperationCapacity = [int]$runtimeManifest.c188r12r4r5r4r5r2OperationCapacity
+    c188R12R4R5R4R5R2OperationFieldCount = [int]$runtimeManifest.c188r12r4r5r4r5r2OperationFieldCount
+    c188R12R4R5R4R5R2SummaryFieldCount = [int]$runtimeManifest.c188r12r4r5r4r5r2SummaryFieldCount
+    semiSharedSourceFiles = $runtimeManifest.c188r12r4r5r4r5r2SourceFiles
     gcInitProbeSourceFiles = $runtimeManifest.c188r12r4r5r4r5GcInitSourceFiles
     gcInitRecordSha256 = $runtimeManifest.c188r12r4r5r4r5GcInitRecordObjectSha256
     threadStoreReadinessRuntimeSourceCommit = $runtimeManifest.c188r12r4r5r4ThreadStoreReadinessSourceCommit
@@ -408,6 +491,7 @@ $manifest = [ordered]@{
     initializationReturnContractMarker = 'C188R12R4R5R3_INIT'
     initializationTraceCapacity = [int]$runtimeManifest.initializationTraceRecordCapacity
     initializationTraceSerialLineLimit = [int]$runtimeManifest.initializationTraceSerialLineLimit
+    semiSharedAttributionSerialLineLimit = if ($SemiSharedAttribution) { 384 } else { 0 }
     initializationTraceStageIds = [ordered]@{
         adapter='00000001'; rhInitialize='00000002'; palInit='00000010'; palFls='00000011'
         gcConfig='00000012'; gcToOs='00000013'; initDll='00000020'
@@ -428,7 +512,7 @@ $manifest = [ordered]@{
         bit4='RhConfig pointer available'; bit5='guideXOS NativeAOT modules initialized'
         bit6='code manager registered'; bit7='ThreadStore current-thread accessor non-null (not proof of list attachment)'
     }
-    adapterVersion = if ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes-v1' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness-v1' } else { 'c188r12r4r5r3-init-return-contract-v1' }
+    adapterVersion = if ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-v1' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes-v1' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness-v1' } else { 'c188r12r4r5r3-init-return-contract-v1' }
     gcInitializationInternalRecord = if ($GcInitProbes) { [ordered]@{
         marker='C188R12R4R5R4R5_GCINIT'
         serialStageSentinel='00000070'
@@ -438,6 +522,18 @@ $manifest = [ordered]@{
         snapshotTiming='after RhInitialize returns'
         inFlightOperationsFinalizedAs='did_not_return'
         nativeStatusAvailable=$false
+    } } else { $null }
+    semiSharedAttributionRecord = if ($SemiSharedAttribution) { [ordered]@{
+        marker='C188R12R4R5R4R5R2_SEMISHARED'
+        eventStage='00000071'
+        operationCapacity=[int]$runtimeManifest.c188r12r4r5r4r5r2OperationCapacity
+        operationFieldCount=[int]$runtimeManifest.c188r12r4r5r4r5r2OperationFieldCount
+        summaryFieldCount=[int]$runtimeManifest.c188r12r4r5r4r5r2SummaryFieldCount
+        snapshotTiming='after RhInitialize returns; fixed record is read after partial GC cleanup'
+        nativeStatusAvailability='raw event-close callback status is retained; other PAL failure codes are unavailable when APIs return only pointers or booleans'
+        failureBranchHeader=(Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_semishared_record.h')
+        stagedRoot=$stagedRoot
+        stagedQualificationManifest=$stagedQualificationPath
     } } else { $null }
     runnerVersion = if ($ThreadStoreReadiness) { 'c188r12r4r5r4r1-one-boot-guard-planned' } else { 'c188r12r4r5r1-qac-runner-v1' }
     nativeRhInitialize = [ordered]@{
@@ -463,6 +559,7 @@ $manifest = [ordered]@{
         productionRuntimePackR3ReturnProfile = [bool]$productionRuntimeManifest.c188r12r4r5r3InitReturnContract
         productionNativeAotMapExcludesReturnMarkers = $true
         productionPersistentCompositeLifecycle = [bool]$productionManifest.persistentCompositeLifecycle
+        productionRuntimePackR2SemiSharedProfile = [bool]$productionRuntimeManifest.c188r12r4r5r4r5r2SemiSharedAttribution
         noGcOwnershipProofProfileInProduction = $true
     }
     qemuLaunched = $false
@@ -512,6 +609,11 @@ $manifest = [ordered]@{
         gcInitReplacementObject = if ($GcInitProbes) { Hash-File ([string]$runtimeManifest.c188r12r4r5r4r5GcInitRecordObject) } else { $null }
         gcInitInstrumentedSource = if ($GcInitProbes) { [string]$runtimeManifest.c188r12r4r5r4r5GcInitSourceFiles.instrumentedGc } else { $null }
         gcInitMarkerSinkSource = if ($GcInitProbes) { Hash-File (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') } else { $null }
+        semiSharedRecordHeader = if ($SemiSharedAttribution) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_semishared_record.h') } else { $null }
+        semiSharedRecordImplementation = if ($SemiSharedAttribution) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_semishared_record.cpp') } else { $null }
+        instrumentedSemiSharedGcSource = if ($SemiSharedAttribution) { Hash-File (Join-Path $runtimeRoot 'gcinit-workstation-source\gc.cpp') } else { $null }
+        instrumentedSemiSharedGcWrapper = if ($SemiSharedAttribution) { Hash-File (Join-Path $runtimeRoot 'gcinit-workstation-source\gcwks.cpp') } else { $null }
+        semiSharedMarkerSinkSource = if ($SemiSharedAttribution) { Hash-File (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') } else { $null }
         runtimePackManifest = Hash-File $runtimeManifestPath
         runtimePackVersionHeader = Hash-File ([string]$runtimeManifest.c188r12r4r5r1RuntimeVersionHeader)
         productionNativeAotBuildLog = Hash-File (Join-Path $productionRoot 'production-nativeaot-build.log')

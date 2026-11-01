@@ -8,6 +8,9 @@
 #include "guidexos_nativeaot_critical_section_adapter.h"
 #include "guidexos_nativeaot_event_adapter.h"
 #include "guidexos_nativeaot_virtual_memory_adapter.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+#include "guidexos_nativeaot_semishared_record.h"
+#endif
 #include "../gcenv/guidexos_gc_platform_services.h"
 
 #include <stdint.h>
@@ -126,15 +129,44 @@ EventHandle* createEvent(uint32_t manual_reset, uint32_t initial_state) {
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
     guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_EVENT_CREATE);
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_EVENT_HANDLE_ALLOC);
+    GuideXosNativeAotSemiSharedSetAllocationRequest(
+        GX_SEMISHARED_RESOURCE_EVENT_HANDLE, sizeof(EventHandle), alignof(EventHandle));
+#endif
     EventHandle* result = new (std::nothrow) EventHandle{};
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_EVENT_HANDLE, result != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation(result != nullptr ? 1u : 0u,
+        result != nullptr);
+#endif
     if (result == nullptr) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+        GuideXosNativeAotSemiSharedSetDetail(
+            GX_SEMISHARED_DETAIL_EVENT_HANDLE_ALLOCATION_FAILED);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
         guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_EVENT_CREATE, false, 2u);
 #endif
         return nullptr;
     }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_EVENT_CREATE_CALLBACK);
+#endif
     result->raw = guidexos_nativeaot_gc_create_event(manual_reset, initial_state);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_EVENT_CALLBACK_HANDLE,
+        result->raw != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation(result->raw != nullptr ? 1u : 0u,
+        result->raw != nullptr);
+#endif
     if (result->raw == nullptr) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+        GuideXosNativeAotSemiSharedSetDetail(
+            GX_SEMISHARED_DETAIL_EVENT_CALLBACK_FAILED);
+#endif
         delete result;
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
         guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_EVENT_CREATE, false, 3u);
@@ -189,6 +221,10 @@ gxos::runtime::WaitResult waitMilliseconds(EventHandle* handle, int64_t millisec
 gxos::runtime::EventStatus destroyEvent(EventHandle* handle) {
     if (handle == nullptr) return gxos::runtime::EventStatus::Invalid;
     const int32_t result = guidexos_nativeaot_gc_close_event(handle->raw);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+    GuideXosNativeAotSemiSharedSetNativeStatus(
+        static_cast<uint32_t>(result), GX_SEMISHARED_STATUS_SOURCE_EVENT_CLOSE_PAL);
+#endif
     delete handle;
     return result == 0 ? gxos::runtime::EventStatus::Ok
                        : gxos::runtime::EventStatus::Invalid;

@@ -12,6 +12,7 @@ param(
     [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
     [switch]$C188R12R4R5R4R5GcInitProbes,
+    [switch]$C188R12R4R5R4R5R2SemiSharedAttribution,
     [switch]$ProductionApplication,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
@@ -207,6 +208,15 @@ if ($C188R12R4R5R4R5GcInitProbes -and
      -not $C188R12R4R5GcOwnershipProof -or
      -not $ProductionApplication -or $PersistentCompositeLifecycle)) {
     throw 'C188R12R4R5R4R5 GC-init probes require the isolated R4 ThreadStore diagnostic proof profile.'
+}
+if ($C188R12R4R5R4R5R2SemiSharedAttribution -and
+    (-not $C188R12R4R5R4R5GcInitProbes -or
+     -not $C188R12R4R5R4ThreadStoreReadiness -or
+     -not $C188R12R4R5R3InitReturnContract -or
+     -not $C188R12R4R5R1InitDiagnostics -or
+     -not $C188R12R4R5GcOwnershipProof -or
+     -not $ProductionApplication -or $PersistentCompositeLifecycle)) {
+    throw 'C188R12R4R5R4R5R2 semi-shared attribution requires the isolated R4R5 diagnostic proof profile.'
 }
 if ($C188R12R4FactoryAttribution -and
     (-not $ManagedAllocation -or -not $PersistentCompositeLifecycle)) {
@@ -567,6 +577,10 @@ if ($ProductionApplication) {
         # Otherwise replacing GCHelpers/startup would silently compile out
         # startup work (for example cached dispatch and EventPipe setup).
         $runtimeDiagnosticDefines = "$startupDefines /DFEATURE_PERFTRACING /DFEATURE_EVENT_TRACE /DFEATURE_HIJACK /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_USE_SOFTWARE_WRITE_WATCH_FOR_GC_HEAP /DFEATURE_MANUALLY_MANAGED_CARD_BUNDLES /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DFEATURE_NATIVEAOT /DVERIFY_HEAP /DNATIVEAOT /D_LIB /DFEATURE_ETW /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_SPECIAL_USER_MODE_APC /DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS"
+        if ($C188R12R4R5R4R5R2SemiSharedAttribution) {
+            $gcDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED'
+            $runtimeDiagnosticDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED'
+        }
         $eventingIntermediate = Join-Path $OutputRoot 'nativeaot-eventing'
         $eventingIncludeDirectory = Join-Path $eventingIntermediate 'inc'
         $eventManifest = Join-Path $gcSourceRoot 'vm\ClrEtwAll.man'
@@ -902,6 +916,13 @@ guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_DEBUG_HEADERS);
 #include "guidexos_nativeaot_gcinit_record.h"
 #include "guidexos_nativeaot_gcinit_record.cpp"
 '@ 'Workstation GC initialization record inclusion'
+        if ($C188R12R4R5R4R5R2SemiSharedAttribution) {
+            $gcInitWksText = Replace-ExactOneSource $gcInitWksText '(?m)^#include "guidexos_nativeaot_gcinit_record\.cpp"$' @'
+#include "guidexos_nativeaot_gcinit_record.cpp"
+#include "guidexos_nativeaot_semishared_record.h"
+#include "guidexos_nativeaot_semishared_record.cpp"
+'@ 'semi-shared record inclusion in the pinned Workstation GC object'
+        }
         Set-Content -LiteralPath $gcInitWksSource -Value $gcInitWksText -Encoding ASCII
 
         $gcInitText = Get-Content -LiteralPath $gcInitPatchedSource -Raw
@@ -931,6 +952,245 @@ gc_heap::init_semi_shared()
 {
     GuideXosNativeAotGcInitBeginSemiShared();
 '@ 'init_semi_shared marker stability'
+        if ($C188R12R4R5R4R5R2SemiSharedAttribution) {
+            $gcInitText = Replace-ExactOneSource $gcInitText 'gc_heap::init_semi_shared\(\)\s*\{\s*GuideXosNativeAotGcInitBeginSemiShared\(\);' @'
+gc_heap::init_semi_shared()
+{
+    GuideXosNativeAotGcInitBeginSemiShared();
+    GuideXosNativeAotSemiSharedBegin(
+        GuideXosNativeAotGcInitGetField(GX_GCINIT_FIELD_INVOCATION));
+'@ 'semi-shared record invocation entry'
+
+            $allocationLine = 'sorted_table\* res = \(sorted_table\*\)new \(nothrow\) char \[sizeof \(sorted_table\) \+ \(size \+ 1\) \* sizeof \(bk\)\];'
+            $gcInitText = Replace-ExactOneSource $gcInitText $allocationLine @'
+    const size_t allocationSize = sizeof (sorted_table) + (size + 1) * sizeof (bk);
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_SEGMENT_TABLE);
+    GuideXosNativeAotSemiSharedSetAllocationRequest(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY, allocationSize, alignof(char));
+    sorted_table* res = (sorted_table*)new (nothrow) char [allocationSize];
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY, res != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation(res != nullptr ? 1u : 0u, res != nullptr);
+'@ 'sorted-table allocation result'
+
+            $semiMatch = [System.Text.RegularExpressions.Regex]::Match(
+                $gcInitText, '(?m)^int[ \t]*\r?\ngc_heap::init_semi_shared\(\)')
+            if (-not $semiMatch.Success) { throw 'Pinned init_semi_shared definition anchor disappeared.' }
+            $semiStart = $semiMatch.Index
+            $semiEnd = $gcInitText.IndexOf('gc_heap* gc_heap::make_gc_heap', $semiStart, [System.StringComparison]::Ordinal)
+            if ($semiEnd -lt 0) { throw 'Pinned init_semi_shared end anchor disappeared.' }
+            $semiText = $gcInitText.Substring($semiStart, $semiEnd - $semiStart)
+
+            $semiText = Replace-ExactOneSource $semiText 'g_mark_list = make_mark_list \(g_mark_list_total_size\);' @'
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_MARK_LIST);
+    GuideXosNativeAotSemiSharedSetAllocationRequest(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY,
+        g_mark_list_total_size * sizeof(uint8_t*), alignof(uint8_t*));
+    g_mark_list = make_mark_list (g_mark_list_total_size);
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY, g_mark_list != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation(g_mark_list != nullptr ? 1u : 0u,
+        g_mark_list != nullptr);
+'@ 'multiple-heap mark-list allocation record'
+            $semiText = Replace-ExactOneSource $semiText 'g_mark_list_copy = make_mark_list \(g_mark_list_total_size\);' @'
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_MARK_LIST_COPY);
+    GuideXosNativeAotSemiSharedSetAllocationRequest(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY,
+        g_mark_list_total_size * sizeof(uint8_t*), alignof(uint8_t*));
+    g_mark_list_copy = make_mark_list (g_mark_list_total_size);
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY, g_mark_list_copy != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation(g_mark_list_copy != nullptr ? 1u : 0u,
+        g_mark_list_copy != nullptr);
+'@ 'mark-list-copy allocation record'
+            $semiText = Replace-ExactOneSource $semiText 'g_mark_list = make_mark_list \(mark_list_size\);' @'
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_MARK_LIST);
+    GuideXosNativeAotSemiSharedSetAllocationRequest(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY,
+        mark_list_size * sizeof(uint8_t*), alignof(uint8_t*));
+    g_mark_list = make_mark_list (mark_list_size);
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY, g_mark_list != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation(g_mark_list != nullptr ? 1u : 0u,
+        g_mark_list != nullptr);
+'@ 'single-heap mark-list allocation record'
+            $semiText = Replace-ExactOneSource $semiText 'if \(!g_mark_list_copy\)\s*\{\s*goto cleanup;\s*\}' @'
+if (!g_mark_list_copy)
+    {
+        GuideXosNativeAotSemiSharedRecordFailureBranch(GX_SEMISHARED_OP_MARK_LIST_COPY);
+        goto cleanup;
+    }
+'@ 'mark-list-copy failure branch'
+            $semiText = Replace-ExactOneSource $semiText 'if \(!g_mark_list\)\s*\{\s*goto cleanup;\s*\}' @'
+if (!g_mark_list)
+    {
+        GuideXosNativeAotSemiSharedRecordFailureBranch(GX_SEMISHARED_OP_MARK_LIST);
+        goto cleanup;
+    }
+'@ 'mark-list failure branch'
+            $semiText = Replace-ExactOneSource $semiText 'seg_table = sorted_table::make_sorted_table\(\);\s*\r?\n\s*if \(!seg_table\)\s*goto cleanup;' @'
+    seg_table = sorted_table::make_sorted_table();
+
+    if (!seg_table)
+    {
+        GuideXosNativeAotSemiSharedRecordFailureBranch(GX_SEMISHARED_OP_SEGMENT_TABLE);
+        goto cleanup;
+    }
+'@ 'segment-table failure branch'
+            $semiText = Replace-ExactOneSource $semiText 'if \(!full_gc_approach_event\.CreateManualEventNoThrow\(FALSE\)\)\s*\{\s*goto cleanup;\s*\}' @'
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_FULL_GC_APPROACH_EVENT);
+    const bool fullGcApproachEventCreated = full_gc_approach_event.CreateManualEventNoThrow(FALSE);
+    GuideXosNativeAotSemiSharedCompleteOperation(
+        fullGcApproachEventCreated ? 1u : 0u, fullGcApproachEventCreated);
+    if (!fullGcApproachEventCreated)
+    {
+        GuideXosNativeAotSemiSharedRecordFailureBranch(GX_SEMISHARED_OP_FULL_GC_APPROACH_EVENT);
+        goto cleanup;
+    }
+'@ 'full-GC approach event failure branch'
+            $semiText = Replace-ExactOneSource $semiText 'if \(!full_gc_end_event\.CreateManualEventNoThrow\(FALSE\)\)\s*\{\s*goto cleanup;\s*\}' @'
+    GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_FULL_GC_END_EVENT);
+    const bool fullGcEndEventCreated = full_gc_end_event.CreateManualEventNoThrow(FALSE);
+    GuideXosNativeAotSemiSharedCompleteOperation(
+        fullGcEndEventCreated ? 1u : 0u, fullGcEndEventCreated);
+    if (!fullGcEndEventCreated)
+    {
+        GuideXosNativeAotSemiSharedRecordFailureBranch(GX_SEMISHARED_OP_FULL_GC_END_EVENT);
+        goto cleanup;
+    }
+'@ 'full-GC end event failure branch'
+
+            $semiText = Replace-ExactOneSource $semiText 'if \(!create_bgc_threads_support \(number_bgc_threads\)\)\s*\{\s*goto cleanup;\s*\}' @'
+        GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_BGC_SUPPORT_RESULT);
+        const BOOL bgcSupportCreated = create_bgc_threads_support (number_bgc_threads);
+        GuideXosNativeAotSemiSharedCompleteOperation(
+            bgcSupportCreated ? 1u : 0u, bgcSupportCreated != FALSE);
+        if (!bgcSupportCreated)
+        {
+            GuideXosNativeAotSemiSharedRecordFailureBranch(GX_SEMISHARED_OP_BGC_SUPPORT_RESULT);
+            goto cleanup;
+        }
+'@ 'background-GC support aggregate result'
+
+            foreach ($allocation in @(
+                @{ name='gc_time_info'; operation='GX_SEMISHARED_OP_GC_TIME_INFO'; count='max_compact_time_type'; type='uint64_t' },
+                @{ name='bgc_time_info'; operation='GX_SEMISHARED_OP_BGC_TIME_INFO'; count='max_bgc_time_type'; type='uint64_t' },
+                @{ name='loh_compact_info'; operation='GX_SEMISHARED_OP_LOH_COMPACT_INFO'; count='get_num_heaps()'; type='etw_loh_compact_info' }
+            )) {
+                $name = [string]$allocation.name
+                $operation = [string]$allocation.operation
+                $count = [string]$allocation.count
+                $type = [string]$allocation.type
+                $pattern = "$([regex]::Escape($name)) = new \(nothrow\) $([regex]::Escape($type))\s*\[$([regex]::Escape($count))\];"
+                $replacement = @"
+    GuideXosNativeAotSemiSharedBeginOperation($operation);
+    GuideXosNativeAotSemiSharedSetAllocationRequest(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY,
+        $count * sizeof($type), alignof($type));
+    $name = new (nothrow) $type[$count];
+    GuideXosNativeAotSemiSharedSetResourceResult(
+        GX_SEMISHARED_RESOURCE_GC_ARRAY, $name != nullptr ? 1u : 0u);
+    GuideXosNativeAotSemiSharedCompleteOperation($name != nullptr ? 1u : 0u,
+        $name != nullptr);
+"@
+                $semiText = Replace-ExactOneSource $semiText $pattern $replacement "$name allocation record"
+                $semiText = Replace-ExactOneSource $semiText "if \(!$name\)\s*\{\s*goto cleanup;\s*\}" @"
+if (!$name)
+    {
+        GuideXosNativeAotSemiSharedRecordFailureBranch($operation);
+        goto cleanup;
+    }
+"@ "$name failure branch"
+            }
+
+            $semiText = Replace-ExactOneSource $semiText '(?m)^cleanup:\s*\r?\n\s*if \(!ret\)' @'
+cleanup:
+    GuideXosNativeAotSemiSharedRecordCleanupEntry(GX_SEMISHARED_CLEANUP_SCOPE_OUTER);
+    if (!ret)
+'@ 'outer semi-shared cleanup entry'
+            $semiText = Replace-ExactOneSource $semiText 'if \(full_gc_approach_event\.IsValid\(\)\)\s*\{\s*full_gc_approach_event\.CloseEvent\(\);\s*\}' @'
+        if (full_gc_approach_event.IsValid())
+        {
+            GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_CLEANUP_FULL_GC_APPROACH_EVENT);
+            full_gc_approach_event.CloseEvent();
+        }
+'@ 'full-GC approach event cleanup record'
+            $semiText = Replace-ExactOneSource $semiText 'if \(full_gc_end_event\.IsValid\(\)\)\s*\{\s*full_gc_end_event\.CloseEvent\(\);\s*\}' @'
+        if (full_gc_end_event.IsValid())
+        {
+            GuideXosNativeAotSemiSharedBeginOperation(GX_SEMISHARED_OP_CLEANUP_FULL_GC_END_EVENT);
+            full_gc_end_event.CloseEvent();
+        }
+'@ 'full-GC end event cleanup record'
+            $semiText = Replace-ExactOneSource $semiText 'return ret;\s*\r?\n\}' @'
+    GuideXosNativeAotSemiSharedRecordCleanupComplete(GX_SEMISHARED_CLEANUP_SCOPE_OUTER);
+    GuideXosNativeAotSemiSharedFinalize(ret);
+    return ret;
+}
+'@ 'semi-shared final result and cleanup completion'
+            $gcInitText = $gcInitText.Substring(0, $semiStart) + $semiText + $gcInitText.Substring($semiEnd)
+
+            $bgcStartMatch = [System.Text.RegularExpressions.Regex]::Match(
+                $gcInitText, '(?m)^BOOL gc_heap::create_bgc_threads_support\s*\(int number_of_heaps\)')
+            if (-not $bgcStartMatch.Success) { throw 'Pinned create_bgc_threads_support definition anchor disappeared.' }
+            $bgcStart = $bgcStartMatch.Index
+            $bgcEnd = [System.Text.RegularExpressions.Regex]::Match(
+                $gcInitText.Substring($bgcStart), '(?m)^BOOL gc_heap::create_bgc_thread_support\s*\(\)').Index + $bgcStart
+            if ($bgcEnd -le $bgcStart) { throw 'Pinned create_bgc_threads_support end anchor disappeared.' }
+            $bgcText = $gcInitText.Substring($bgcStart, $bgcEnd - $bgcStart)
+            foreach ($event in @(
+                @{ name='background_gc_done_event'; operation='GX_SEMISHARED_OP_BGC_DONE_EVENT'; api='CreateManualEventNoThrow(TRUE)' },
+                @{ name='bgc_threads_sync_event'; operation='GX_SEMISHARED_OP_BGC_SYNC_EVENT'; api='CreateManualEventNoThrow(FALSE)' },
+                @{ name='ee_proceed_event'; operation='GX_SEMISHARED_OP_EE_PROCEED_EVENT'; api='CreateAutoEventNoThrow(FALSE)' },
+                @{ name='bgc_start_event'; operation='GX_SEMISHARED_OP_BGC_START_EVENT'; api='CreateManualEventNoThrow(FALSE)' }
+            )) {
+                $name = [string]$event.name
+                $operation = [string]$event.operation
+                $api = [string]$event.api
+                $pattern = "if \(!$name\.$([regex]::Escape($api))\)\s*\{\s*goto cleanup;\s*\}"
+                $replacement = @"
+    GuideXosNativeAotSemiSharedBeginOperation($operation);
+    const bool $($name -replace '_','')Created = $name.$api;
+    GuideXosNativeAotSemiSharedCompleteOperation(
+        $($name -replace '_','')Created ? 1u : 0u, $($name -replace '_','')Created);
+    if (!$($name -replace '_','')Created)
+    {
+        GuideXosNativeAotSemiSharedRecordFailureBranch($operation);
+        goto cleanup;
+    }
+"@
+                $bgcText = Replace-ExactOneSource $bgcText $pattern $replacement "$name event result"
+            }
+            $bgcText = Replace-ExactOneSource $bgcText '(?m)^cleanup:\s*\r?\n\s*if \(!ret\)' @'
+cleanup:
+    GuideXosNativeAotSemiSharedRecordCleanupEntry(GX_SEMISHARED_CLEANUP_SCOPE_BGC_SUPPORT);
+    if (!ret)
+'@ 'background-GC support cleanup entry'
+            foreach ($cleanup in @(
+                @{ name='background_gc_done_event'; operation='GX_SEMISHARED_OP_CLEANUP_BGC_DONE_EVENT' },
+                @{ name='bgc_threads_sync_event'; operation='GX_SEMISHARED_OP_CLEANUP_BGC_SYNC_EVENT' },
+                @{ name='ee_proceed_event'; operation='GX_SEMISHARED_OP_CLEANUP_EE_PROCEED_EVENT' },
+                @{ name='bgc_start_event'; operation='GX_SEMISHARED_OP_CLEANUP_BGC_START_EVENT' }
+            )) {
+                $name = [string]$cleanup.name
+                $operation = [string]$cleanup.operation
+                $pattern = "if \($name\.IsValid\(\)\)\s*\{\s*$name\.CloseEvent\(\);\s*\}"
+                $replacement = @"
+        if ($name.IsValid())
+        {
+            GuideXosNativeAotSemiSharedBeginOperation($operation);
+            $name.CloseEvent();
+        }
+"@
+                $bgcText = Replace-ExactOneSource $bgcText $pattern $replacement "$name cleanup record"
+            }
+            $bgcText = Replace-ExactOneSource $bgcText 'return ret;\s*\r?\n\}' @'
+    GuideXosNativeAotSemiSharedRecordCleanupComplete(GX_SEMISHARED_CLEANUP_SCOPE_BGC_SUPPORT);
+    return ret;
+}
+'@ 'background-GC support cleanup completion'
+            $gcInitText = $gcInitText.Substring(0, $bgcStart) + $bgcText + $gcInitText.Substring($bgcEnd)
+        }
         $gcInitText = Replace-ExactOneSource $gcInitText 'WaitForGCEvent = new \(nothrow\) GCEvent;' @'
 GuideXosNativeAotGcInitBeginWaitForGCEvent();
     WaitForGCEvent = new (nothrow) GCEvent;
@@ -1159,10 +1419,21 @@ if ($C188R12R4R5R4R5GcInitProbes) {
         recordImplementation = Get-Hash $gcInitRecordImplementation
     }
 }
+$semiSharedSourceHashes = [ordered]@{}
+if ($C188R12R4R5R4R5R2SemiSharedAttribution) {
+    $semiSharedSourceHashes = [ordered]@{
+        recordHeader = Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_semishared_record.h')
+        recordImplementation = Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_semishared_record.cpp')
+        gcEnvironment = Get-Hash (Join-Path $RuntimePackRoot 'src\gcenv\guidexos_gcenv.cpp')
+        gcStartupBridge = Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_gcenv_startup_bridge.cpp')
+        instrumentedGc = Get-Hash $gcInitPatchedSource
+        instrumentedGcWrapper = Get-Hash $gcInitWksSource
+    }
+}
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($C188R12R4R5R4R5GcInitProbes) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1" } elseif ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1" } elseif ($C188R12R4R5R4R5GcInitProbes) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1" } elseif ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -1223,6 +1494,12 @@ $manifest = [ordered]@{
     c188r12r4r5r3InitReturnContract = [bool]$C188R12R4R5R3InitReturnContract
     c188r12r4r5r4ThreadStoreReadiness = [bool]$C188R12R4R5R4ThreadStoreReadiness
     c188r12r4r5r4r5GcInitProbes = [bool]$C188R12R4R5R4R5GcInitProbes
+    c188r12r4r5r4r5r2SemiSharedAttribution = [bool]$C188R12R4R5R4R5R2SemiSharedAttribution
+    c188r12r4r5r4r5r2SemiSharedMarker = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { 'C188R12R4R5R4R5R2_SEMISHARED' } else { $null }
+    c188r12r4r5r4r5r2OperationCapacity = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { 48 } else { 0 }
+    c188r12r4r5r4r5r2OperationFieldCount = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { 14 } else { 0 }
+    c188r12r4r5r4r5r2SummaryFieldCount = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { 15 } else { 0 }
+    c188r12r4r5r4r5r2SourceFiles = $semiSharedSourceHashes
     c188r12r4r5r4r5GcInitSourceCommit = if ($C188R12R4R5R4R5GcInitProbes) { $lock.ilCompiler.commit } else { $null }
     c188r12r4r5r4r5GcInitSourceFiles = $gcInitProbeSourceHashes
     c188r12r4r5r4r5GcInitRecordObject = if ($C188R12R4R5R4R5GcInitProbes) { $gcInitProbeObject } else { $null }

@@ -20,7 +20,8 @@ $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | Conv
 $isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
 $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract'
 $isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
-$isGcInitFailureAttribution = [string]$candidateManifest.mode -ceq 'GcInitFailureAttribution'
+$isSemiSharedAttribution = [string]$candidateManifest.mode -ceq 'SemiSharedAttribution'
+$isGcInitFailureAttribution = [string]$candidateManifest.mode -in @('GcInitFailureAttribution','SemiSharedAttribution')
 if ($ThreadStoreAttempt -in @('R2','R3') -and -not $isThreadStoreReadiness) {
     throw "ThreadStoreAttempt $ThreadStoreAttempt is valid only for the C188 R4 ThreadStore candidate."
 }
@@ -35,7 +36,9 @@ if ($isThreadStoreReadiness) {
     $r4RuntimePackManifest = Get-Content -LiteralPath $r4RuntimePackManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r4PalCommonMembership = $r4RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
 }
-$phaseRoot = if ($isGcInitFailureAttribution) {
+$phaseRoot = if ($isSemiSharedAttribution) {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution'))
+} elseif ($isGcInitFailureAttribution) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5-gc-init-probes'))
 } elseif ($isThreadStoreReadiness) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4-threadstore-readiness'))
@@ -59,14 +62,23 @@ if ($isGcInitFailureAttribution) {
     $r5GcReplacement = $r5RuntimePackManifest.archiveMembership.c188r12r4r5r4r5GcInitReplacement
     $r5PalReplacement = $r5RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
     $r5ProbeSources = $candidateManifest.gcInitProbeSourceFiles
-    $r5StageManifestPath = Join-Path $candidate 'staged\qualification-manifest.json'
+    $r5StageRoot = Join-Path $candidate 'staged'
+    if ($isSemiSharedAttribution) {
+        $r5StageRoot = [System.IO.Path]::GetFullPath([string]$candidateManifest.semiSharedAttributionRecord.stagedRoot)
+        $candidatePrefix = $candidate.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+        if (-not $r5StageRoot.StartsWith($candidatePrefix,[System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'R2 staged qualification root escapes the candidate directory.'
+        }
+    }
+    $r5StageManifestPath = Join-Path $r5StageRoot 'qualification-manifest.json'
     if (-not (Test-Path -LiteralPath $r5StageManifestPath -PathType Leaf)) {
         throw "R4R5 staged qualification manifest is missing: $r5StageManifestPath"
     }
     $r5StageManifest = Get-Content -LiteralPath $r5StageManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r5PatchedGcWksEntry = @($r5StageManifest.files | Where-Object { [string]$_.path -ceq 'diagnostic/runtime-pack/gcwks.cpp' })
     if ($r5PatchedGcWksEntry.Count -ne 1) { throw 'R4R5 staged inventory has no unique instrumented Workstation GC source entry.' }
-    if ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' -or
+    $expectedGcCandidateResult = if ($isSemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' } else { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' }
+    if ($candidateManifest.result -cne $expectedGcCandidateResult -or
         -not [bool]$candidateManifest.runtimeInitDiagnostics -or
         -not [bool]$candidateManifest.c188R12R4R5R4R5GcInitProbes -or
         [bool]$candidateManifest.qemuLaunched -or [bool]$candidateManifest.qacReserved -or
@@ -78,7 +90,7 @@ if ($isGcInitFailureAttribution) {
         -not [bool]$candidateManifest.productionIsolationChecks.productionPersistentCompositeLifecycle -or
         -not [bool]$candidateManifest.productionIsolationChecks.noGcOwnershipProofProfileInProduction -or
         -not [bool]$candidateManifest.productionNativeAotPersistentCompositeLifecycle -or
-        [string]$candidateManifest.runtimePackIdentity -cne 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1' -or
+        [string]$candidateManifest.runtimePackIdentity -cne $(if ($isSemiSharedAttribution) { 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1' } else { 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1' }) -or
         [string]$candidateManifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
         [string]$r5RuntimePackManifest.identity -cne [string]$candidateManifest.runtimePackIdentity -or
         [string]$r5RuntimePackManifest.runtimeIdentity.sourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
@@ -108,6 +120,15 @@ if ($isGcInitFailureAttribution) {
         [bool]$candidateManifest.nativeRhInitialize.moduleRegistrationIncluded -or
         [bool]$candidateManifest.nativeRhInitialize.managedMainIncluded) {
         throw 'R4R5 GC-init candidate failed its bounded-record, pinned-runtime, startup-gate, or production-isolation preflight.'
+    }
+    if ($isSemiSharedAttribution -and
+        (-not [bool]$candidateManifest.c188R12R4R5R4R5R2SemiSharedAttribution -or
+         [string]$candidateManifest.c188R12R4R5R4R5R2Marker -cne 'C188R12R4R5R4R5R2_SEMISHARED' -or
+         [int]$candidateManifest.c188R12R4R5R4R5R2OperationCapacity -ne 48 -or
+         [int]$candidateManifest.c188R12R4R5R4R5R2OperationFieldCount -ne 14 -or
+         [int]$candidateManifest.c188R12R4R5R4R5R2SummaryFieldCount -ne 15 -or
+         [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR2SemiSharedProfile)) {
+        throw 'R2 candidate failed its bounded semi-shared record or diagnostic/production isolation preflight.'
     }
 } elseif ($isInitAttribution) {
     if ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_INIT_DIAGNOSTIC_QAC_PREFLIGHT' -or
@@ -183,7 +204,8 @@ function Require-Hash([string]$Path,[string]$Expected,[string]$Name) {
 }
 
 $esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$runDirectory = if ($isGcInitFailureAttribution) { 'qac-guest-r4r5r1-001' }
+$runDirectory = if ($isSemiSharedAttribution) { 'qac-guest-r4r5r2r1-001' }
+    elseif ($isGcInitFailureAttribution) { 'qac-guest-r4r5r1-001' }
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') { 'qac-guest-002' }
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R3') { 'qac-guest-003' }
     else { 'qac-guest-001' }
@@ -193,7 +215,9 @@ $qmpLog = Join-Path $runRoot 'qmp.log'
 $qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $ovmf = Join-Path $repo 'OVMF.fd'
-$attemptPath = if ($isGcInitFailureAttribution) {
+$attemptPath = if ($isSemiSharedAttribution) {
+    Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R1.json'
+} elseif ($isGcInitFailureAttribution) {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R1.json'
 } elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R2.json'
@@ -222,20 +246,21 @@ if ($isThreadStoreReadiness) {
         ([string]$candidateManifest.threadStoreReadinessPalCommonReplacementSha256) 'R4 stack-bounds PAL replacement')
 }
 if ($isGcInitFailureAttribution) {
-    if ([string]$candidateManifest.sourceRamdiskSha256 -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8' -or
+    if (-not $isSemiSharedAttribution -and
+        ([string]$candidateManifest.sourceRamdiskSha256 -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8' -or
         [string]$candidateManifest.specializedKernelSha256 -cne [string]$candidateManifest.espKernelSha256 -or
         [string]$candidateManifest.specializedKernelSha256 -cne '714A7DBC77EDC32513221F63B6789BC0FED267A3495C5EF54F5E886ADCEB3341' -or
         [string]$candidateManifest.managedElfSha256 -cne '928A3BBC995CEC67E60885C7159FC8EE6B16BD641A3A0B5C23593ABAA3F080C5' -or
         [string]$candidateManifest.productionNativeAotElfSha256 -cne 'A69CABA99C4EF0BF7E0DA46F9C3BC91F3B30AF22E744F557C97CA84CCB695BF0' -or
-        [string]$candidateManifest.productionKernelSha256 -cne 'A21A951C8DF337CEA08A7FE93580C556F0AC87F33D1B1766070FFF204B1EA168') {
+        [string]$candidateManifest.productionKernelSha256 -cne 'A21A951C8DF337CEA08A7FE93580C556F0AC87F33D1B1766070FFF204B1EA168')) {
         throw 'R4R5 diagnostic or production artifact identity differs from the qualified candidate.'
     }
     [void](Require-Hash ([string]$candidateManifest.managedPe) ([string]$candidateManifest.managedPeSha256) 'R4R5 NativeAOT PE')
     [void](Require-Hash ([string]$candidateManifest.managedElf) ([string]$candidateManifest.managedElfSha256) 'R4R5 diagnostic ELF')
     [void](Require-Hash ([string]$candidateManifest.specializedKernel) ([string]$candidateManifest.specializedKernelSha256) 'R4R5 isolated kernel')
     [void](Require-Hash ([string]$candidateManifest.runtimePackManifest) ([string]$candidateManifest.runtimePackManifestSha256) 'R4R5 runtime-pack manifest')
-    if ([string]$candidateManifest.gcInitRecordSha256 -cne 'C0503979BBB13DCBB51F29A74B6C5A306D303414FFF51E2FCAD55515BDC5387A' -or
-        [string]$r5RuntimePackManifest.c188r12r4r5r4r5GcInitRecordObjectSha256 -cne [string]$candidateManifest.gcInitRecordSha256) {
+    if (-not $isSemiSharedAttribution -and ([string]$candidateManifest.gcInitRecordSha256 -cne 'C0503979BBB13DCBB51F29A74B6C5A306D303414FFF51E2FCAD55515BDC5387A' -or
+        [string]$r5RuntimePackManifest.c188r12r4r5r4r5GcInitRecordObjectSha256 -cne [string]$candidateManifest.gcInitRecordSha256)) {
         throw 'R4R5 bounded GC-init record implementation identity differs from the qualified candidate.'
     }
     [void](Require-Hash ([string]$r5RuntimePackManifest.c188r12r4r5r4r5GcInitRecordObject) `
@@ -245,10 +270,11 @@ if ($isGcInitFailureAttribution) {
     [void](Require-Hash ([string]$candidateManifest.threadStoreReadinessPalCommonReplacementObject) `
         ([string]$candidateManifest.threadStoreReadinessPalCommonReplacementSha256) 'R4R5 ThreadStore PAL replacement')
     $gcSourceRoot = Join-Path $candidate 'runtime-pack\gcinit-workstation-source'
+    $r2StagedRuntimeSource = Join-Path $r5StageRoot 'diagnostic\runtime-pack'
     [void](Require-Hash (Join-Path $repo 'out\dotnet\gc-feasibility-baseline\nativeaot-runtime\src\coreclr\gc\gcwks.cpp') `
         ([string]$r5ProbeSources.gcwks) 'Pinned Workstation GC source input')
     [void](Require-Hash (Join-Path $gcSourceRoot 'gcwks.cpp') ([string]$r5PatchedGcWksEntry[0].sha256) 'Instrumented Workstation GC wrapper source')
-    [void](Require-Hash (Join-Path $candidate 'staged\diagnostic\runtime-pack\gcwks.cpp') `
+    [void](Require-Hash (Join-Path $r2StagedRuntimeSource 'gcwks.cpp') `
         ([string]$r5PatchedGcWksEntry[0].sha256) 'Staged instrumented Workstation GC wrapper source')
     [void](Require-Hash (Join-Path $gcSourceRoot 'gc.cpp') ([string]$r5ProbeSources.instrumentedGc) 'Instrumented pinned GC source')
     [void](Require-Hash (Join-Path $repo 'out\dotnet\gc-feasibility-baseline\nativeaot-runtime\src\coreclr\gc\gc.cpp') `
@@ -257,6 +283,27 @@ if ($isGcInitFailureAttribution) {
         ([string]$r5ProbeSources.recordHeader) 'GC-init record header')
     [void](Require-Hash (Join-Path $repo 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_gcinit_record.cpp') `
         ([string]$r5ProbeSources.recordImplementation) 'GC-init record implementation source')
+    if ($isSemiSharedAttribution) {
+        $r2Sources = $candidateManifest.semiSharedSourceFiles
+        $r2StageEntries = @($r5StageManifest.files | Where-Object { [string]$_.path -like 'diagnostic/runtime-pack/guidexos_nativeaot_semishared_record.*' })
+        if ([int]$r2StageEntries.Count -ne 2 -or
+            [string]$r5RuntimePackManifest.c188r12r4r5r4r5r2SemiSharedMarker -cne 'C188R12R4R5R4R5R2_SEMISHARED' -or
+            [int]$r5RuntimePackManifest.c188r12r4r5r4r5r2OperationCapacity -ne 48 -or
+            [int]$r5RuntimePackManifest.c188r12r4r5r4r5r2OperationFieldCount -ne 14 -or
+            [int]$r5RuntimePackManifest.c188r12r4r5r4r5r2SummaryFieldCount -ne 15) {
+            throw 'R2 record layout or staged source inventory failed the preflight.'
+        }
+        [void](Require-Hash (Join-Path $repo 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_semishared_record.h') `
+            ([string]$r2Sources.recordHeader) 'R2 source-defined operation map')
+        [void](Require-Hash (Join-Path $repo 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_semishared_record.cpp') `
+            ([string]$r2Sources.recordImplementation) 'R2 fixed record implementation')
+        [void](Require-Hash (Join-Path $gcSourceRoot 'gc.cpp') ([string]$r2Sources.instrumentedGc) 'R2 instrumented pinned GC source')
+        [void](Require-Hash (Join-Path $r2StagedRuntimeSource 'gc.cpp') ([string]$r2Sources.instrumentedGc) 'R2 staged pinned GC source')
+        [void](Require-Hash (Join-Path $r2StagedRuntimeSource 'guidexos_nativeaot_semishared_record.h') `
+            ([string]$r2Sources.recordHeader) 'R2 staged operation map')
+        [void](Require-Hash (Join-Path $r2StagedRuntimeSource 'guidexos_nativeaot_semishared_record.cpp') `
+            ([string]$r2Sources.recordImplementation) 'R2 staged fixed record implementation')
+    }
 }
 if (Test-Path -LiteralPath $attemptPath) { throw "The candidate already has a QAC guest attempt; refusing any second launch: $attemptPath" }
 if (Test-Path -LiteralPath $runRoot) { throw "Refusing to overwrite guest evidence: $runRoot" }
@@ -776,6 +823,10 @@ $threadStoreAnalysis = $null
 $threadStoreAnalysisExitCode = $null
 $serialAnalysisError = $null
 $serialAnalysisExitCode = $null
+$semiSharedAnalysisPath = $null
+$semiSharedAnalysis = $null
+$semiSharedAnalysisExitCode = $null
+$semiSharedRecordCaptureComplete = $false
 if (Test-Path -LiteralPath $serial -PathType Leaf) {
     try {
         $analysisArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serialAnalyzer,
@@ -806,6 +857,23 @@ if ($isGcInitFailureAttribution -and (Test-Path -LiteralPath $serial -PathType L
         if ($null -eq $serialAnalysisError) { $serialAnalysisError = 'ThreadStore analyzer: ' + $_.Exception.Message }
     }
 }
+if ($isSemiSharedAttribution -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
+    $semiSharedAnalysisPath = Join-Path $runRoot 'serial-semishared-analysis.json'
+    try {
+        & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'analyze-c188r12r4r5r4r5r2-semishared.ps1') `
+            -SerialPath $serial -OutputPath $semiSharedAnalysisPath `
+            -RecordHeaderPath (Join-Path $repo 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_semishared_record.h') `
+            -OperationCapacity ([int]$candidateManifest.c188R12R4R5R4R5R2OperationCapacity) | Out-Null
+        $semiSharedAnalysisExitCode = $LASTEXITCODE
+        if ($semiSharedAnalysisExitCode -eq 0 -and (Test-Path -LiteralPath $semiSharedAnalysisPath -PathType Leaf)) {
+            $semiSharedAnalysis = Get-Content -LiteralPath $semiSharedAnalysisPath -Raw | ConvertFrom-Json
+        } elseif ($null -eq $serialAnalysisError) {
+            $serialAnalysisError = "Semi-shared analyzer exited $semiSharedAnalysisExitCode."
+        }
+    } catch {
+        if ($null -eq $serialAnalysisError) { $serialAnalysisError = 'Semi-shared analyzer: ' + $_.Exception.Message }
+    }
+}
 $serialSha256AfterAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
 $rawSerialPreservedByAnalysis = $null -ne $serialSha256BeforeAnalysis -and
     $serialSha256BeforeAnalysis -ceq $serialSha256AfterAnalysis
@@ -832,6 +900,13 @@ if ($isGcInitFailureAttribution) {
         ($threadStoreFailureOutcome -or $threadStoreHandoffAndProofCaptured)
     $guestPass = $gcInitRecordCaptureComplete -and $threadStoreTerminalCaptured
     $initCaptureComplete = $gcInitRecordCaptureComplete
+    if ($isSemiSharedAttribution) {
+        $semiSharedRecordCaptureComplete = $null -ne $semiSharedAnalysis -and
+            [string]$semiSharedAnalysis.outcome -in @('init_semi_shared_succeeded','failure_branch_attributed') -and
+            @($semiSharedAnalysis.issues).Count -eq 0
+        $guestPass = $guestPass -and $semiSharedRecordCaptureComplete
+        $initCaptureComplete = $initCaptureComplete -and $semiSharedRecordCaptureComplete
+    }
 } elseif ($isInitAttribution) {
     $guestPass = $initCaptureComplete -and $serialAnalysis.rhInitializeResult -in @('success','failure') -and
         @($serialAnalysis.managedMainGateLines | Where-Object { $_ -match 'managed_main_gate=blocked' }).Count -gt 0
@@ -904,6 +979,18 @@ if ($isInitAttribution) {
             'THREADSTORE_HANDOFF_AND_GC_PROOF_CAPTURED'
         } else { 'THREADSTORE_HANDOFF_CAPTURED_GC_PROOF_FAILED' }
     }
+} elseif ($isSemiSharedAttribution) {
+    $gcInitOutcome = if ($null -ne $gcInternal) { [string]$gcInternal.outcome } else { '' }
+    $semiOutcome = if ($null -ne $semiSharedAnalysis) { [string]$semiSharedAnalysis.outcome } else { '' }
+    $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
+        elseif (-not $preflightPassed) { 'SEMISHARED_BLOCKED_QAC_CENSUS' }
+        elseif (-not $admitted) { 'SEMISHARED_CANDIDATE_NOT_ADMITTED' }
+        elseif (-not $releaseVerified) { 'SEMISHARED_CAPTURED_BUT_QAC_RELEASE_UNVERIFIED' }
+        elseif (-not $gcInitRecordCaptureComplete -or -not $semiSharedRecordCaptureComplete) { 'DIAGNOSTIC_INCONCLUSIVE' }
+        elseif ($semiOutcome -eq 'failure_branch_attributed') { 'SEMISHARED_FAILURE_BRANCH_CAPTURED' }
+        elseif ($semiOutcome -eq 'init_semi_shared_succeeded' -and $gcInitOutcome -eq 'gc_heap_initialize_succeeded') { 'GC_HEAP_INITIALIZATION_ACCEPTED' }
+        elseif ($semiOutcome -eq 'init_semi_shared_succeeded') { 'SEMISHARED_SUCCEEDED_LATER_GC_INIT_FAILED' }
+        else { 'DIAGNOSTIC_INCONCLUSIVE' }
 } elseif ($isGcInitFailureAttribution) {
     $gcInitOutcome = if ($null -ne $gcInternal) { [string]$gcInternal.outcome } else { '' }
     $gcFirstFailureSite = if ($null -ne $gcInternal -and $null -ne $gcInternal.record) {
@@ -946,6 +1033,14 @@ $manifest = [ordered]@{
     initReturnContractProfile=$isInitReturnContract
     threadStoreReadinessProfile=$isThreadStoreReadiness
     gcInitFailureAttributionProfile=$isGcInitFailureAttribution
+    semiSharedAttributionProfile=$isSemiSharedAttribution
+    semiSharedRecordCaptureComplete=$semiSharedRecordCaptureComplete
+    semiSharedAttributionOutcome=if($isSemiSharedAttribution -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.outcome}else{$null}
+    semiSharedFailureBranch=if($isSemiSharedAttribution -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.summary.firstFailureBranch}else{$null}
+    semiSharedCleanupFailure=if($isSemiSharedAttribution -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.summary.cleanupFailureOperation}else{$null}
+    semiSharedAnalysis=$semiSharedAnalysisPath
+    semiSharedAnalysisExitCode=$semiSharedAnalysisExitCode
+    semiSharedAnalysisIssues=if($isSemiSharedAttribution -and $null -ne $semiSharedAnalysis){@($semiSharedAnalysis.issues)}else{@()}
     gcInitializationInternalOutcome=if($isGcInitFailureAttribution -and $null -ne $gcInternal){$gcInternal.outcome}else{$null}
     gcInitializationInternalRecord=if($isGcInitFailureAttribution -and $null -ne $gcInternal){$gcInternal.record}else{$null}
     gcInitializationInternalRecordComplete=if($isGcInitFailureAttribution){$gcInitRecordCaptureComplete}else{$false}
@@ -992,7 +1087,10 @@ $manifest = [ordered]@{
     qacArguments=(Join-Path $runRoot 'qac-run-arguments.json');guestAttempt=$attemptPath;error=$runError
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-if ($isGcInitFailureAttribution) {
+if ($isSemiSharedAttribution) {
+    Write-Output "C188R12R4R5R4R5R2R1_SEMISHARED_ATTRIBUTION=$outcome ADMITTED=$admitted RECORD_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R12R4R5R4R5R2R1_SEMISHARED_ATTRIBUTION_MANIFEST=$manifestPath"
+} elseif ($isGcInitFailureAttribution) {
     Write-Output "C188R12R4R5R4R5R1_GC_INIT_ATTRIBUTION=$outcome ADMITTED=$admitted RECORD_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5R4R5R1_GC_INIT_ATTRIBUTION_MANIFEST=$manifestPath"
 } elseif ($isInitAttribution) {
