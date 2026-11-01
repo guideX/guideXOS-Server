@@ -1,14 +1,14 @@
 # AArch64 GICv3 Interrupt Controller Foundation
 
-**Status:** `GICV3_HOSTED_READY_GUEST_PENDING`
+**Status:** `GICV3_GUEST_PENDING_QAC`
 **Scope:** EL1, non-secure Group 1, boot CPU only
 **Target platform:** generic ARM64 DTB-described systems. Samsung tablet addresses are not assumed.
 
 ## Outcome and evidence
 
-The production GICv3 path is implemented and links into the common Phase 4 ARM64 kernel. Hosted register-model tests pass, including parser and register negative controls and a simulated timer event that reaches the real common IRQ registry and scheduler timer path. Phase 2, Phase 3, and Phase 4 freestanding ARM64 builds also pass.
+The production GICv3 path is implemented and links into the common Phase 4 ARM64 kernel. On 2026-11-01, the existing hosted suite passed all 62 assertions, and a fresh production ARM64 build linked and staged the EFI loader, kernel, and deterministic ramdisk. QEMU 11.0.0 reports the `virt` machine, `gic-version`, and Cortex-A53 CPU support.
 
-No guest validation was run. This checkout contains no QAC reservation command, provider, or grant file, and no QAC tool is available to this session. The GICv3 guest gate remains pending an actual exclusive QAC grant. Hosted simulation is not guest or ARM exception evidence.
+The native guest gate remains pending. The real QAC coordinator and CLI were found in the sibling `guideXOS_QAC` checkout. A distinct `guideXOSServer-AARCH64-GIC3-2` acceptance request queued behind an already active exclusive acceptance reservation and was cancelled before grant. No QEMU process was launched for this qualification. Hosted simulation and a successful cross-link do not establish guest interrupt delivery or ARM exception behavior. See [AARCH64_GICV3_GUEST_QUALIFICATION.md](AARCH64_GICV3_GUEST_QUALIFICATION.md) for the run record.
 
 ## Existing ARM64 interrupt architecture
 
@@ -88,27 +88,17 @@ The host test script does not launch QEMU. The Phase 2, Phase 3, and Phase 4 bui
 
 `scripts/build-aarch64-gicv3.ps1` builds the Phase 4 common-kernel profile with the repository LLVM toolchain. It compiles `gicv3_controller.cpp`, links `kernel.elf`, and checks that the production object and ELF exist. Phase 2 and Phase 3 were also built separately to cover the preserved GICv2 path and the standalone scheduler path. Phase 5 through Phase 9 cross-builds also completed, including their hosted controls; the Phase 7 input host controls passed. Their build lists now include the common native-architecture helper that the existing NativeElf source already requires.
 
-The Phase 12 wrapper compiled and linked its ARM64 kernel and passed the Phase 10 common host controls. Its additional Developer Studio build step then failed in `document_activation_abi_test.cpp` because that external project expects `gx_host_calls.get_document_activation_path`, which is absent from its current ABI definition. No Developer Studio sources were changed for this task. The Phase 12 application packaging gate therefore remains unverified by this run.
+The Phase 12 wrapper compiled and linked its ARM64 kernel and passed the Phase 10 common host controls. The additional Developer Studio build step still has a checkout/version mismatch: this AARCH64 Server SDK defines a 400-byte `gx_host_calls` without `get_document_activation_path`, while the external Developer Studio test/source references that callback and its intended v0.5 Server SDK defines the append-only callback at offset 448 in a 464-byte structure. The same test fails against the AARCH64 SDK and compiles against the v0.5 SDK. This is not enough evidence to classify the AARCH64 SDK as missing a canonical field, so no SDK or Developer Studio source was changed. Phase 12 packaging remains unverified; see the qualification report for the isolated reproduction.
 
 The generic page-table pool is bounded. It can map sparse high physical MMIO addresses within the configured 40-bit PA range, but setup still fails if the platform's RAM/MMIO ranges require more than 520 tables. This is a current memory-map limit, not a GIC register-address guess.
 
 ## Guest qualification and QAC
 
-No QAC grant was available, so no QEMU process was started. `scripts/test-aarch64-gicv3-qemu.ps1` fails before guest launch unless given an unexpired exclusive grant file with these fields:
+The guest runner uses the actual QAC CLI `run --project ... --mode acceptance -- <qemu-system-aarch64.exe> ...` path. QAC registers the direct QEMU child and verifies its exit before releasing the reservation; a local grant file is not used. The runner first checks coordinator status, then checks QEMU 11.0.0 support for `virt`, `gic-version`, and Cortex-A53.
 
-```json
-{
-  "issuer": "guideXOS-QAC",
-  "status": "granted",
-  "resource": "qemu-system-aarch64",
-  "purpose": "AARCH64-GIC3-1",
-  "exclusive": true,
-  "reservation_id": "...",
-  "expires_utc": "..."
-}
-```
+The intended profile is `-machine virt,gic-version=3,acpi=off -cpu cortex-a53`, with the existing AArch64 UEFI code/vars firmware and staged ESP. The script uses a fresh copy of UEFI variable state for the diagnostic boot and each of three acceptance boots. It requires guest DTB GICv3 discovery, actual Distributor/Redistributor/affinity/ICC/PPI readback, at least 1,000 physical-timer IRQs and scheduler preemptions, matching acknowledge/EOI counts, a post-interrupt scheduler continuation marker, and zero unexpected IRQs/exceptions.
 
-This checkout does not contain a QAC issuer/provider that can create that grant. A file must come from the actual QAC coordination process; a manually fabricated file is not authorization. After a genuine grant is available, the script checks the installed QEMU version, `virt` machine, and `cortex-a57` CPU support, then runs three fresh UEFI boots with `gic-version=3`. It requires DTB GICv3 discovery, the GICv3 initialization marker, at least 1,000 timer-driven scheduler preemptions per boot, the guest pass marker, and zero unexpected IRQs/exceptions.
+For this run QAC was online, with one verified acceptance session active and no foreign QEMU process. The final distinct GIC3-2 request received a real queue entry (`2a7cc4c8eb3a4444a869862c41bbbdd5`, queue position 1), but no exclusive grant (`grantedAtUtc` and child PID remained null). The bounded runner cancelled it before launch. Consequently no guest DTB, controller addresses, timer counters, or scheduler counters were observed, and the GICv2 guest regression was not attempted. The exact record and local QAC log are under `out/aarch64-gicv3-qualify-gic3-2/logs-gicv3-20261101-150000-403/`.
 
 The historical standalone Phase 3 timeout remains a separate baseline item. It was not re-run or reclassified in this hosted/build-only window.
 
@@ -120,4 +110,4 @@ For the Galaxy Tab A8, the DTB-driven GICv3 and boot-CPU Redistributor design ap
 
 ## Next qualification step
 
-Obtain an exclusive QAC reservation for `AARCH64-GIC3-1`, then run the separate GICv3 QEMU script. Guest qualification must establish actual GICv3 DTB discovery, Distributor and boot CPU Redistributor setup, ICC system-register operation, physical timer PPI delivery, common IRQ dispatch, scheduler preemption, clean exception return, and zero unexpected IRQ/exception counts. Until those guest runs pass, the outcome remains `GICV3_HOSTED_READY_GUEST_PENDING`.
+Obtain an exclusive QAC acceptance reservation for `guideXOSServer-AARCH64-GIC3-2` when the active acceptance session has released its lane, then rerun `scripts/test-aarch64-gicv3-qemu.ps1`. Guest qualification must establish actual GICv3 DTB discovery, Distributor and boot CPU Redistributor setup, ICC system-register operation, physical timer PPI delivery, common IRQ dispatch, scheduler preemption, clean exception return, and zero unexpected IRQ/exception counts across the diagnostic and three fresh boots. Then run the separate GICv2 guest regression under its own QAC authorization. Until those guest runs pass, the outcome remains `GICV3_GUEST_PENDING_QAC`.

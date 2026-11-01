@@ -1368,6 +1368,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 
     if (!vfs_boot_proof()) fail("ramdisk/VFS proof: FAIL");
     if (!kernel::irq::initialize()) fail("IRQ registry init: FAIL");
+    if (platform.gic_version == GXOS_AARCH64_GIC_V3 && platform.timer_source != 2) {
+        fail("physical timer source: FAIL");
+    }
     if (!phase3_irq_controller_init(&platform, platform.timer_irq)) {
         print("[guideXOS] GIC init diagnostic=");
         phase3_serial_dec(phase2_gic_last_error());
@@ -1381,6 +1384,97 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     }
     print("[guideXOS] GIC: OK version=");
     phase3_serial_dec(platform.gic_version);
+    print("\n");
+    if (platform.gic_version == GXOS_AARCH64_GIC_V3) {
+        print("[guideXOS] DTB GICv3 layout: GICD=");
+        phase3_serial_hex(platform.gicd_base);
+        print(" size=");
+        phase3_serial_hex(platform.gicd_size);
+        print(" GICR-regions=");
+        phase3_serial_dec(platform.gic_redistributor_region_count);
+        print(" stride=");
+        phase3_serial_dec(platform.gic_redistributor_stride);
+        print(" CPU-affinities=");
+        phase3_serial_dec(platform.gic_cpu_affinity_count);
+        print(" timer-source=physical timer-PPI=");
+        phase3_serial_dec(platform.timer_irq);
+        print("\n");
+        for (uint32_t i = 0; i < platform.gic_redistributor_region_count; ++i) {
+            print("[guideXOS] DTB GICR region=");
+            phase3_serial_dec(i);
+            print(" base=");
+            phase3_serial_hex(platform.gic_redistributor_regions[i].base);
+            print(" size=");
+            phase3_serial_hex(platform.gic_redistributor_regions[i].size);
+            print("\n");
+        }
+        for (uint32_t i = 0; i < platform.gic_cpu_affinity_count; ++i) {
+            print("[guideXOS] DTB CPU affinity=");
+            phase3_serial_dec(i);
+            print(" value=");
+            phase3_serial_hex(platform.gic_cpu_affinity[i]);
+            print("\n");
+        }
+
+        phase2_gicv3_diagnostics diagnostics{};
+        if (!phase2_gicv3_get_diagnostics(&diagnostics) ||
+            diagnostics.distributor_base != platform.gicd_base ||
+            !diagnostics.initialized || diagnostics.wait_limit == 0 ||
+            diagnostics.wait_limit > 1000000 ||
+            diagnostics.eoimode_split ||
+            (diagnostics.redistributor_waker & (UINT32_C(1) << 1)) != 0 ||
+            (diagnostics.redistributor_waker & (UINT32_C(1) << 2)) != 0 ||
+            (diagnostics.redistributor_ctlr & (UINT32_C(1) << 3)) != 0 ||
+            (diagnostics.icc_sre_el1 & 1) == 0 ||
+            (diagnostics.icc_igrpen1_el1 & 1) == 0 ||
+            (diagnostics.icc_ctlr_el1 & (UINT64_C(1) << 1)) != 0) {
+            fail("GICv3 initialization diagnostics: FAIL");
+        }
+        print("[guideXOS] GICv3 redistributor: frame=");
+        phase3_serial_hex(diagnostics.redistributor_base);
+        print(" SGI/PPI=");
+        phase3_serial_hex(diagnostics.sgi_base);
+        print(" MPIDR=");
+        phase3_serial_hex(diagnostics.mpidr_el1);
+        print(" affinity=");
+        phase3_serial_hex(diagnostics.boot_affinity);
+        print(" affinity-match=1 awake=1 WAKER=");
+        phase3_serial_hex(diagnostics.redistributor_waker);
+        print(" GICR_CTLR=");
+        phase3_serial_hex(diagnostics.redistributor_ctlr);
+        print(" wait-limit=");
+        phase3_serial_dec(diagnostics.wait_limit);
+        print("\n");
+        print("[guideXOS] GICv3 ICC: SRE=");
+        phase3_serial_hex(diagnostics.icc_sre_el1);
+        print(" PMR=");
+        phase3_serial_hex(diagnostics.icc_pmr_el1);
+        print(" BPR1=");
+        phase3_serial_hex(diagnostics.icc_bpr1_el1);
+        print(" IGRPEN1=");
+        phase3_serial_hex(diagnostics.icc_igrpen1_el1);
+        print(" CTLR=");
+        phase3_serial_hex(diagnostics.icc_ctlr_el1);
+        print(" EOImode=combined\n");
+        const uint32_t timer_bit = UINT32_C(1) << (diagnostics.timer_interrupt % 32);
+        const uint32_t timer_config_field = (diagnostics.timer_config >>
+            ((diagnostics.timer_interrupt % 16) * 2)) & 3;
+        if (diagnostics.timer_interrupt != platform.timer_irq ||
+            (diagnostics.timer_group & timer_bit) == 0 ||
+            (diagnostics.timer_enable & timer_bit) == 0 ||
+            diagnostics.timer_priority != 0x80 || timer_config_field != 0) {
+            fail("GICv3 timer PPI diagnostics: FAIL");
+        }
+        print("[guideXOS] GICv3 timer PPI: INTID=");
+        phase3_serial_dec(diagnostics.timer_interrupt);
+        print(" group1=1 enabled=1 priority=");
+        phase3_serial_dec(diagnostics.timer_priority);
+        print(" trigger=level\n");
+    }
+    print("[guideXOS] physical timer: programmed frequency=");
+    phase3_serial_dec(phase3_timer_frequency());
+    print(" interval-us=100 PPI=");
+    phase3_serial_dec(phase3_timer_irq());
     print("\n");
 
     kernel::common::KernelEntryConfig config = {
@@ -1485,6 +1579,7 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     kernel::scheduler::set_phase(kernel::scheduler::PHASE_PREEMPTIVE);
     if (!kernel::scheduler::prepare_interrupt_contexts()) fail("preemption setup: FAIL");
     phase3_timer_start();
+    print("[guideXOS] physical timer: enabled\n");
     kernel::arch::irq_enable();
     kernel::scheduler::start();
     phase3_timer_stop();
@@ -1512,6 +1607,7 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 #endif
         fail("scheduler/VFS integration: FAIL");
     }
+    print("[guideXOS] exception return: PASS scheduler continuation resumed\n");
 #if defined(GXOS_AARCH64_PHASE5)
 #if defined(GXOS_AARCH64_PHASE12)
     if (!g_app_complete || g_phase12_failure || !g_phase12_complete) fail("Phase 12 Developer Studio runtime: FAIL");
@@ -1579,6 +1675,46 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 
     kernel::scheduler::Stats stats{};
     kernel::scheduler::get_stats(&stats);
+    if (platform.gic_version == GXOS_AARCH64_GIC_V3) {
+        phase2_gicv3_diagnostics diagnostics{};
+        if (!phase2_gicv3_get_diagnostics(&diagnostics) ||
+            diagnostics.acknowledgement_pending || diagnostics.invalid_acknowledgements != 0 ||
+            diagnostics.completion_errors != 0 ||
+            diagnostics.acknowledge_count != diagnostics.eoi_count ||
+            diagnostics.acknowledge_count != stats.timer_ticks ||
+            diagnostics.acknowledge_count != phase3_timer_count() ||
+            stats.timer_ticks < 1000 || stats.preemptions < 1000 ||
+            stats.context_switches == 0 || g_work[0].counter == 0 ||
+            g_work[1].counter == 0) {
+            fail("GICv3 timer/scheduler evidence: FAIL");
+        }
+        print("[guideXOS] GICv3 timer dispatch: INTID=");
+        phase3_serial_dec(diagnostics.timer_interrupt);
+        print(" ticks=");
+        phase3_serial_dec(stats.timer_ticks);
+        print(" acknowledgements=");
+        phase3_serial_dec(diagnostics.acknowledge_count);
+        print(" EOIs=");
+        phase3_serial_dec(diagnostics.eoi_count);
+        print(" invalid-ack=");
+        phase3_serial_dec(diagnostics.invalid_acknowledgements);
+        print(" completion-errors=");
+        phase3_serial_dec(diagnostics.completion_errors);
+        print(" pending=");
+        phase3_serial_dec(diagnostics.acknowledgement_pending);
+        print("\n");
+        print("[guideXOS] GICv3 scheduler: preemptions=");
+        phase3_serial_dec(stats.preemptions);
+        print(" context-switches=");
+        phase3_serial_dec(stats.context_switches);
+        print(" task-A=");
+        phase3_serial_dec(g_work[0].counter);
+        print(" task-B=");
+        phase3_serial_dec(g_work[1].counter);
+        print(" task-C=");
+        phase3_serial_dec(g_work[2].counter);
+        print("\n");
+    }
     print("[guideXOS] memory/VFS durability: PASS pages-used=");
     phase3_serial_dec(kernel::memory::allocated_pages());
     print(" pages-free=");

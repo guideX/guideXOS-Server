@@ -26,3 +26,35 @@ uint32_t phase2_gic_enable0();
 uint32_t phase2_gic_group0();
 uint32_t phase2_gic_cpu_control();
 uint32_t phase2_gic_priority_mask();
+
+struct phase2_gicv3_diagnostics {
+    uint64_t distributor_base;
+    uint64_t redistributor_base;
+    uint64_t sgi_base;
+    uint64_t boot_affinity;
+    uint64_t mpidr_el1;
+    uint64_t icc_sre_el1;
+    uint64_t icc_pmr_el1;
+    uint64_t icc_bpr1_el1;
+    uint64_t icc_igrpen1_el1;
+    uint64_t icc_ctlr_el1;
+    uint64_t acknowledge_count;
+    uint64_t eoi_count;
+    uint64_t invalid_acknowledgements;
+    uint64_t completion_errors;
+    uint32_t timer_interrupt;
+    uint32_t wait_limit;
+    uint32_t last_acknowledgement;
+    uint32_t distributor_ctlr;
+    uint32_t redistributor_ctlr;
+    uint32_t redistributor_waker;
+    uint32_t timer_group;
+    uint32_t timer_enable;
+    uint32_t timer_config;
+    uint8_t timer_priority;
+    uint8_t initialized;
+    uint8_t eoimode_split;
+    uint8_t acknowledgement_pending;
+};
+
+uint8_t phase2_gicv3_get_diagnostics(phase2_gicv3_diagnostics* diagnostics);

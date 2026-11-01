@@ -167,6 +167,9 @@ extern "C" void phase2_main(const gxos_aarch64_phase2_handoff* handoff, uint64_t
     phase2_serial_hex(platform.gic_version == GXOS_AARCH64_GIC_V3
         ? platform.gic_redistributor_regions[0].base : platform.gicc_base);
     phase2_serial_print("\n");
+    if (platform.gic_version == GXOS_AARCH64_GIC_V2) {
+        phase2_serial_print("[guideXOS] GICv2 path: GICD/GICC MMIO active; GICR/ICC EL1 paths skipped\n");
+    }
     phase2_serial_print("[guideXOS] GIC state: D_CTLR="); phase2_serial_hex(phase2_gic_distributor_control());
     phase2_serial_print(" D_ISENABLER0="); phase2_serial_hex(phase2_gic_enable0());
     phase2_serial_print(" D_IGROUPR0="); phase2_serial_hex(phase2_gic_group0());
