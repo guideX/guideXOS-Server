@@ -99,13 +99,38 @@ Assert-True ($palText -match 'existing != nullptr && existing != thread' -and $t
 Assert-True ($guestRunnerText -match '\$isThreadStoreReadiness\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''ThreadStoreReadiness''' -and
     $guestRunnerText -match "\[System\.IO\.FileMode\]::CreateNew" -and
     $guestRunnerText -match 'maxGuestBoots=1;automaticRetry=\$false' -and
+    $guestRunnerText -match 'function Test-QacRunningOwned\(' -and
+    $guestRunnerText -match 'Test-QacRunningOwned \$snapshot \$qacReservationId \$qacProcess\.Id' -and
+    $guestRunnerText -match 'archiveMembership\.threadStorePalCommonReplacement' -and
+    $guestRunnerText -match 'removedCount\s*-ne\s*0' -and
+    $guestRunnerText -match 'threadStoreReadinessPalCommonStockMember' -and
     $guestRunnerText -match 'analyze-c188r12r4r5r4-threadstore-readiness\.ps1' -and
     $guestRunnerText -match '\$rawSerialPreservedByAnalysis\s*=\s*\$null\s*-ne\s*\$serialSha256BeforeAnalysis' -and
     $guestRunnerText -match '\$candidateManifest\.managedPe' -and
     $guestRunnerText -match '\$candidateManifest\.threadStoreReadinessPalCommonReplacementObject' -and
+    $guestRunnerText -match 'PSObject\.Properties\[''stages''\]' -and
     $guestRunnerText.Contains('event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)') -and
     $guestRunnerText.Contains('outcome=(?:PASS|FAIL) callbacks=') -and
     $guestRunnerText -match 'Test-QacClear \$before') 'future R4 runner requires the isolated phase, a CreateNew one-boot guard, normal exclusive QAC preflight, and the R4 analyzer'
+
+$runningOwnershipFunction = [regex]::Match($guestRunnerText,
+    '(?s)function Test-QacRunningOwned\([^\r\n]+\)\s*\{.*?\r?\n\}')
+Assert-True $runningOwnershipFunction.Success 'runner contains a bounded active-session ownership consistency predicate'
+Invoke-Expression $runningOwnershipFunction.Value
+$syntheticReservationId = '0123456789abcdef0123456789abcdef'
+$syntheticOwnerPid = 22980
+$syntheticList = @(
+    'Coordinator: Online (guideXOS QAC 2.0.0)',
+    'Reservations: 1',
+    "  $syntheticReservationId | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID $syntheticOwnerPid) | owner Verified | child PID 27920",
+    'Managed sessions: 1'
+) -join "`n"
+$staleStatus = "Coordinator: Online`nQEMU processes: 0 (0 foreign)`nManaged sessions: 0; queued: 0; blocked: 0"
+$activeStatus = "Coordinator: Online`nQEMU processes: 1 (0 foreign)`nManaged sessions: 1; queued: 0; blocked: 0"
+$syntheticSnapshot = [pscustomobject]@{StatusExit=0;ListExit=0;Status=$staleStatus;List=$syntheticList}
+Assert-True (-not (Test-QacRunningOwned $syntheticSnapshot $syntheticReservationId $syntheticOwnerPid)) 'stale QAC status is rejected when the list already shows a running owned reservation'
+$syntheticSnapshot.Status = $activeStatus
+Assert-True (Test-QacRunningOwned $syntheticSnapshot $syntheticReservationId $syntheticOwnerPid) 'consistent status/list with a verified owner PID passes the active-session predicate'
 
 # Parser fixtures exercise success, failure, and unfinished boundaries. These
 # are synthetic serial traces and do not claim that NativeAOT ran on a guest.

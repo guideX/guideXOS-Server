@@ -19,6 +19,16 @@ $isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
 $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract'
 $isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
 $isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness
+$r4RuntimePackManifest = $null
+$r4PalCommonMembership = $null
+if ($isThreadStoreReadiness) {
+    $r4RuntimePackManifestPath = [System.IO.Path]::GetFullPath([string]$candidateManifest.runtimePackManifest)
+    if (-not (Test-Path -LiteralPath $r4RuntimePackManifestPath -PathType Leaf)) {
+        throw "R4 runtime-pack manifest is missing: $r4RuntimePackManifestPath"
+    }
+    $r4RuntimePackManifest = Get-Content -LiteralPath $r4RuntimePackManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $r4PalCommonMembership = $r4RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
+}
 $phaseRoot = if ($isThreadStoreReadiness) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4-threadstore-readiness'))
 } elseif ($isInitReturnContract) {
@@ -78,7 +88,14 @@ if ($isInitAttribution) {
         [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR1TraceProfile -or
         [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR3ReturnProfile -or
         $candidateManifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
-        [string]$candidateManifest.threadStoreReadinessPalCommonStockMember -cne 'Runtime.WorkstationGC:PalRedhawkCommon.cpp.obj') {
+        [string]$candidateManifest.threadStoreReadinessPalCommonStockMember -notmatch '(?i)^nativeaot[\\/]+Runtime[\\/]+Full[\\/]+CMakeFiles[\\/]+Runtime\.WorkstationGC\.dir[\\/]+__+[\\/]+windows[\\/]+PalRedhawkCommon\.cpp\.obj$' -or
+        [string]$r4RuntimePackManifest.c188r12r4r5r4PalCommonStockMember -cne [string]$candidateManifest.threadStoreReadinessPalCommonStockMember -or
+        [string]$r4RuntimePackManifest.archiveMembership.result -cne 'PASS' -or
+        [string]$r4PalCommonMembership.stockMember -cne [string]$candidateManifest.threadStoreReadinessPalCommonStockMember -or
+        [int]$r4PalCommonMembership.removedCount -ne 0 -or
+        [int]$r4PalCommonMembership.archiveMemberCount -ne 1 -or
+        [string]$r4PalCommonMembership.replacementObject -cne [string]$candidateManifest.threadStoreReadinessPalCommonReplacementObject -or
+        [string]$r4PalCommonMembership.replacementSha256 -cne [string]$candidateManifest.threadStoreReadinessPalCommonReplacementSha256) {
         throw 'R4 candidate manifest failed its one-boot ThreadStore, PAL stack-bounds, pinned-runtime, or production-isolation preflight.'
     }
 } elseif ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_QAC_PREFLIGHT' -or
@@ -159,6 +176,19 @@ function Test-QacClear([object]$Snapshot) {
         $Snapshot.List -match '(?m)^Coordinator:\s+Online\b' -and
         $Snapshot.List -match '(?m)^Reservations:\s+0\s*$' -and
         $Snapshot.List -match '(?m)^Managed sessions:\s+0\s*$'
+}
+function Test-QacRunningOwned([object]$Snapshot,[string]$ReservationId,[int]$OwnerPid) {
+    $ownerPattern = '\(PID\s+' + $OwnerPid + '\)'
+    $reservationPattern = '(?m)^\s*' + [regex]::Escape($ReservationId) +
+        '\s+\|\s+guideXOSServer\s+\|\s+acceptance\s+\|\s+Running\b.*' +
+        $ownerPattern + '\s+\|\s+owner Verified\s+\|\s+child PID\s+\d+\s*$'
+    return $Snapshot.StatusExit -eq 0 -and $Snapshot.ListExit -eq 0 -and
+        $Snapshot.Status -match '(?m)^Coordinator:\s+Online\b' -and
+        $Snapshot.Status -match '(?m)^QEMU processes:\s+1 \(0 foreign\)\s*$' -and
+        $Snapshot.Status -match '(?m)^Managed sessions:\s+1;\s+queued:\s+0;\s+blocked:\s+0\s*$' -and
+        $Snapshot.List -match '(?m)^Reservations:\s+1\s*$' -and
+        $Snapshot.List -match '(?m)^Managed sessions:\s+1\s*$' -and
+        $Snapshot.List -match $reservationPattern
 }
 function Read-GuestSerial {
     if (-not (Test-Path -LiteralPath $serial -PathType Leaf)) { return '' }
@@ -287,9 +317,11 @@ try {
         $ownedLine = @($snapshot.List -split "`r?`n" | Where-Object { $_ -match $ownerPattern }) | Select-Object -First 1
         if ($ownedLine -match '^\s*([0-9a-f]{32})\s+\|.*\|\s+Running\b') {
             $qacReservationId = $Matches[1]
-            $admitted = $true
-            $during = $snapshot
-            break
+            if (Test-QacRunningOwned $snapshot $qacReservationId $qacProcess.Id) {
+                $admitted = $true
+                $during = $snapshot
+                break
+            }
         }
         if ($ownedLine -match '^\s*([0-9a-f]{32})\s+\|.*\|\s+Queued\b') { $qacReservationId = $Matches[1] }
         Start-Sleep -Milliseconds 500
@@ -523,7 +555,10 @@ $manifest = [ordered]@{
     startupAdapterOutcome=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterOutcome } else { $null }
     moduleRegistrationAttemptedByCandidate=$isInitReturnContract -and -not [bool]$candidateManifest.nativeRhInitialize.moduleRegistrationIncluded
     moduleRegistrationStageObserved=if ($null -ne $serialAnalysis) {
-        @($serialAnalysis.stages | Where-Object { $_.stageName -eq 'moduleRegistration' }).Count -gt 0
+        $stageProperty = $serialAnalysis.PSObject.Properties['stages']
+        if ($null -ne $stageProperty) {
+            @($stageProperty.Value | Where-Object { $_.stageName -eq 'moduleRegistration' }).Count -gt 0
+        } else { $false }
     } else { $null }
     managedMainObserved=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.managedMainDispatched } else { $false }
     managedMainGateReason=if ($isInitReturnContract) { [string]$candidateManifest.managedMainGateReason } else { $null }
