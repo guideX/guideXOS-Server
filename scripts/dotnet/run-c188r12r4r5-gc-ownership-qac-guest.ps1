@@ -277,6 +277,12 @@ function Test-ModuleRegistrationStageObserved([object]$Analysis) {
     if ($null -eq $stageProperty) { return $false }
     return @($stageProperty.Value | Where-Object { $_.stageName -eq 'moduleRegistration' }).Count -gt 0
 }
+function Get-AnalysisBoolean([object]$Analysis,[string]$PropertyName) {
+    if ($null -eq $Analysis) { return $false }
+    $property = $Analysis.PSObject.Properties[$PropertyName]
+    if ($null -eq $property) { return $false }
+    return [bool]$property.Value
+}
 function Read-GuestSerial {
     if (-not (Test-Path -LiteralPath $serial -PathType Leaf)) { return '' }
     $stream = [System.IO.FileStream]::new($serial,[System.IO.FileMode]::Open,[System.IO.FileAccess]::Read,
@@ -770,7 +776,9 @@ $manifest = [ordered]@{
     startupAdapterOutcome=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterOutcome } else { $null }
     moduleRegistrationAttemptedByCandidate=$isInitReturnContract -and -not [bool]$candidateManifest.nativeRhInitialize.moduleRegistrationIncluded
     moduleRegistrationStageObserved=Test-ModuleRegistrationStageObserved $serialAnalysis
-    managedMainObserved=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.managedMainDispatched } else { $false }
+    managedMainObserved=if ($isThreadStoreReadiness) {
+        Get-AnalysisBoolean $serialAnalysis 'managedEntryReached'
+    } else { Get-AnalysisBoolean $serialAnalysis 'managedMainDispatched' }
     managedMainGateReason=if ($isInitReturnContract) { [string]$candidateManifest.managedMainGateReason } else { $null }
     serialAnalysis=$serialAnalysisPath;serialAnalysisExitCode=$serialAnalysisExitCode
     serialAnalysisError=$serialAnalysisError;serialAnalysisComplete=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.initTraceComplete } else { $false }

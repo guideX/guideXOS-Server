@@ -140,10 +140,17 @@ $moduleRegistrationObserver = [regex]::Match($guestRunnerText,
     '(?s)function Test-ModuleRegistrationStageObserved\([^\r\n]+\)\s*\{.*?\r?\n\}')
 Assert-True $moduleRegistrationObserver.Success 'runner has a missing-property-safe analyzer stage observer'
 Invoke-Expression $moduleRegistrationObserver.Value
+$managedMainObserver = [regex]::Match($guestRunnerText,
+    '(?s)function Get-AnalysisBoolean\([^\r\n]+\)\s*\{.*?\r?\n\}')
+Assert-True $managedMainObserver.Success 'runner has a missing-property-safe Boolean analysis observer'
+Invoke-Expression $managedMainObserver.Value
 $missingStagesAnalysis = [pscustomobject]@{outcome='INCOMPLETE_TRACE'}
 $presentStagesAnalysis = [pscustomobject]@{stages=@([pscustomobject]@{stageName='moduleRegistration'})}
 Assert-True (-not (Test-ModuleRegistrationStageObserved $missingStagesAnalysis)) 'missing optional analyzer stages report false under strict mode'
 Assert-True (Test-ModuleRegistrationStageObserved $presentStagesAnalysis) 'module registration is observed when the optional stage exists'
+Assert-True (-not (Get-AnalysisBoolean $missingStagesAnalysis 'managedMainDispatched')) 'missing managedMainDispatched field reports false under strict mode'
+Assert-True (Get-AnalysisBoolean ([pscustomobject]@{managedEntryReached=$true}) 'managedEntryReached') 'R4 analyzer managedEntryReached field is observed safely'
+Assert-True (Get-AnalysisBoolean ([pscustomobject]@{managedMainDispatched=$true}) 'managedMainDispatched') 'R1 analyzer managedMainDispatched field remains supported'
 
 # Parser fixtures exercise success, failure, and unfinished boundaries. These
 # are synthetic serial traces and do not claim that NativeAOT ran on a guest.
