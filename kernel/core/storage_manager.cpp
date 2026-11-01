@@ -481,6 +481,22 @@ MountProtection query_mount_protection(const TargetIdentity& target)
     return result;
 }
 
+MountProtection query_mount_presence(const TargetIdentity& target)
+{
+    MountProtection result;
+    result.safety = DEVICE_IDENTITY_UNKNOWN;
+    result.partitionIdentityKnown = false;
+    if (target.registrationId == 0 ||
+        revalidate_target_identity(target) != TARGET_VALID)
+        return result;
+
+    result.safety = vfs::has_active_mount_for_device(target.globalIndex,
+        target.registrationId) ? DEVICE_MOUNTED : DEVICE_UNMOUNTED;
+    if (revalidate_target_identity(target) != TARGET_VALID)
+        result.safety = DEVICE_IDENTITY_UNKNOWN;
+    return result;
+}
+
 static bool partition_identity_from_entry(const TargetIdentity& target,
                                           PartitionScheme scheme,
                                           const PartitionEntry& partition,

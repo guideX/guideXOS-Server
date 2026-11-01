@@ -7645,7 +7645,7 @@ void DiskManagerApp::updateInitializeControls() {
         else if (storage::storage_operation_active())
             m_fat32IntegrityBlockReason =
                 disk_manager_fat32_integrity_ui::ADMISSION_OPERATION_BUSY;
-        else if (storage::query_mount_protection(
+        else if (storage::query_mount_presence(
                      m_disks[m_selectedDisk].identity).safety !=
                  storage::DEVICE_UNMOUNTED)
             m_fat32IntegrityBlockReason =
@@ -8022,6 +8022,7 @@ void DiskManagerApp::selectDisk(int index) {
 void DiskManagerApp::selectPartition(int index) {
     if (m_selectedDisk < 0 || m_selectedDisk >= m_diskCount || index < 0 ||
         index >= m_disks[m_selectedDisk].partCount) return;
+    dm37_input_diagnostics::arm_selection_focus_checkpoint();
     DiskEntry& disk = m_disks[m_selectedDisk];
     m_selectedObject = SELECTED_PARTITION;
     m_selectedPart = index;
@@ -8038,6 +8039,13 @@ void DiskManagerApp::selectPartition(int index) {
     }
     m_keyboardPane = KEYBOARD_PARTITIONS;
     m_detailScroll = 0;
+    uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence == 0)
+        diagnosticSequence = dm37_input_diagnostics::begin_event();
+    dm37_input_diagnostics::emit("dm-partition-select", diagnosticSequence,
+        static_cast<uint32_t>(index),
+        static_cast<uint32_t>(m_selectedListItem));
     probeSelectedRegion();
     updateInitializeControls();
     invalidate();

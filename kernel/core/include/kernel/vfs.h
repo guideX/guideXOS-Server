@@ -289,6 +289,11 @@ bool propose_partition_mount_path(uint8_t blockDevIndex,
                                   char* outPath, size_t outPathSize);
 bool mount_identity_valid(uint8_t mountIndex);
 bool capture_mount_identity(uint8_t mountIndex, MountIdentity& out);
+// Metadata-only check used for previews that need to know whether this exact
+// parent registration still has an active mount. It does not validate
+// partition identity; operation admission must use authoritative APIs.
+bool has_active_mount_for_device(uint8_t blockDevIndex,
+                                uint64_t parentRegistrationId);
 // Copy a coherent mount/lifecycle snapshot for status presentation. The copy
 // does not retain ownership and must be revalidated before an operation.
 bool copy_mount_snapshot(uint8_t mountIndex, MountPoint& out);

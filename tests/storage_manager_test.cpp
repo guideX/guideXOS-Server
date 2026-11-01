@@ -31,6 +31,7 @@
 #include "../guideXOSBootLoader/guidexOSBootInfo.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -14643,6 +14644,13 @@ int main()
               independent_verify_fat32(gptVfs, partB, "BETA", 0xA1B2C302u),
               "DM7 formatter creates two FAT32 filesystems and leaves them unmounted");
 
+        const uint32_t readsBeforeUnmountedPreview = gptVfs.reads;
+        const storage::MountProtection unmountedPreview =
+            storage::query_mount_presence(createA.targetIdentity);
+        check(unmountedPreview.safety == storage::DEVICE_UNMOUNTED &&
+              gptVfs.reads == readsBeforeUnmountedPreview,
+              "unmounted FAT32 preview reports no mount without issuing block I/O");
+
         const uint64_t parentRegistration = createA.targetIdentity.registrationId;
         char proposed[128] = {};
         const bool pathProposed = vfs::propose_partition_mount_path(
@@ -14691,6 +14699,55 @@ int main()
         const vfs::MountPoint* mountA = vfs::get_mount_by_index(mountAIndex);
         storage::TargetIdentity mountedTarget = {};
         storage::capture_target_identity(index, mountedTarget);
+        const vfs::Status previewPeerUnmount = vfs::unmount("/mnt/b");
+        const uint32_t previewBenchmarkIterations = 64;
+        bool fullProtectionStable = true;
+        const uint32_t readsBeforeFullProtection = gptVfs.reads;
+        const auto fullProtectionStart = std::chrono::steady_clock::now();
+        for (uint32_t iteration = 0;
+             iteration < previewBenchmarkIterations; ++iteration) {
+            const storage::MountProtection fullProtection =
+                storage::query_mount_protection(mountedTarget);
+            fullProtectionStable = fullProtectionStable &&
+                fullProtection.safety == storage::DEVICE_MOUNTED &&
+                fullProtection.partitionIdentityKnown;
+        }
+        const auto fullProtectionElapsed =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - fullProtectionStart).count();
+        const uint32_t fullProtectionReads =
+            gptVfs.reads - readsBeforeFullProtection;
+
+        bool presenceStable = true;
+        const uint32_t readsBeforePresence = gptVfs.reads;
+        const auto presenceStart = std::chrono::steady_clock::now();
+        for (uint32_t iteration = 0;
+             iteration < previewBenchmarkIterations; ++iteration) {
+            const storage::MountProtection presence =
+                storage::query_mount_presence(mountedTarget);
+            presenceStable = presenceStable &&
+                presence.safety == storage::DEVICE_MOUNTED &&
+                !presence.partitionIdentityKnown;
+        }
+        const auto presenceElapsed =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - presenceStart).count();
+        const uint32_t presenceReads = gptVfs.reads - readsBeforePresence;
+        const vfs::PartitionMountResult previewPeerRemount =
+            vfs::mount_partition_detailed("/mnt/b", index,
+                partB.partitionNumber, parentRegistration, &partB);
+        std::printf("DM37 mounted GPT preview work (one mounted partition): iterations=%u full-validation-reads=%u full-validation-us=%llu presence-reads=%u presence-us=%llu\n",
+            previewBenchmarkIterations, fullProtectionReads,
+            static_cast<unsigned long long>(fullProtectionElapsed),
+            presenceReads,
+            static_cast<unsigned long long>(presenceElapsed));
+        check(previewPeerUnmount == vfs::VFS_OK &&
+              previewPeerRemount.error == vfs::PARTITION_MOUNT_OK &&
+              vfs::mount_count() == 2 &&
+              fullProtectionStable && fullProtectionReads != 0 &&
+              presenceStable && presenceReads == 0,
+              "DM37 repeated mounted render preview checks use live VFS metadata without rereading the GPT partition table");
+
         const storage::MountProtection mountProtection =
             storage::query_mount_protection(mountedTarget);
         check(pathPolicy && proposed[0] == '/' && mountAResult.error ==
@@ -15152,14 +15209,32 @@ int main()
             vfs::mount_index_for_path("/mnt/read-only");
         const vfs::MountPoint* readOnlyMount =
             vfs::get_mount_by_index(readOnlyMountIndex);
+        const uint32_t readsBeforeReadOnlyPresence = readOnlyDisk.reads;
+        const storage::MountProtection readOnlyPresence =
+            storage::query_mount_presence(readOnlyIdentity);
+        const uint32_t readsAfterReadOnlyPresence = readOnlyDisk.reads;
+        const uint8_t originalMbrStartLbaByte = readOnlyDisk.bytes[446u + 8u];
+        readOnlyDisk.bytes[446u + 8u] ^= 0x01u;
+        const bool changedTableRejectedByFullIdentityCheck =
+            !vfs::mount_identity_valid(readOnlyMountIndex);
+        const uint32_t readsBeforeChangedTablePresence = readOnlyDisk.reads;
+        const storage::MountProtection changedTablePresence =
+            storage::query_mount_presence(readOnlyIdentity);
+        const uint32_t readsAfterChangedTablePresence = readOnlyDisk.reads;
+        readOnlyDisk.bytes[446u + 8u] = originalMbrStartLbaByte;
         const int32_t readOnlyWrite = vfs::create_file(
             "/mnt/read-only/no.txt", payload.data(),
             static_cast<uint32_t>(payload.size()));
         check(readOnlyMountResult.error == vfs::PARTITION_MOUNT_OK &&
               readOnlyMount && readOnlyMount->readOnly &&
+              readOnlyPresence.safety == storage::DEVICE_MOUNTED &&
+              readsAfterReadOnlyPresence == readsBeforeReadOnlyPresence &&
+              changedTableRejectedByFullIdentityCheck &&
+              changedTablePresence.safety == storage::DEVICE_MOUNTED &&
+              readsAfterChangedTablePresence == readsBeforeChangedTablePresence &&
               readOnlyWrite == vfs::VFS_ERR_READ_ONLY &&
               readOnlyDisk.writeLog.empty(),
-              "read-only parent creates a read-only VFS mount and blocks FAT writes");
+              "read-only parent creates a read-only VFS mount; live render presence checks issue no block reads and FAT writes stay blocked");
 
         const fs_fat::FATVolume* mountedVolume = readOnlyMount
             ? fs_fat::get_volume(readOnlyMount->fsVolumeIndex) : nullptr;
@@ -15185,11 +15260,17 @@ int main()
                                          replacementIdentity);
         const storage::MountProtection replacementMountProtection =
             storage::query_mount_protection(replacementIdentity);
+        const storage::MountProtection staleTargetPresence =
+            storage::query_mount_presence(readOnlyIdentity);
+        const storage::MountProtection replacementPresence =
+            storage::query_mount_presence(replacementIdentity);
         const vfs::Status invalidUnmount = vfs::unmount("/mnt/read-only");
         check(replacementIndex == readOnlyIndex && staleIo ==
                   block::BLOCK_ERR_NO_MEDIA && invalidMount &&
               replacementReads == 0 &&
               staleBackingStatus == vfs::VFS_ERR_DEVICE_REMOVED &&
+              staleTargetPresence.safety == storage::DEVICE_IDENTITY_UNKNOWN &&
+              replacementPresence.safety == storage::DEVICE_UNMOUNTED &&
               replacementMountProtection.safety == storage::DEVICE_UNMOUNTED &&
               invalidUnmount == vfs::VFS_ERR_DEVICE_REMOVED &&
               vfs::get_mount_by_index(staleMountIndex) == nullptr,
@@ -15426,6 +15507,9 @@ int main()
                      sizeof(dm37Disk.unmountDuringFlushPath) - 1);
         const vfs::Status dm37Dismount = dm37IdentityCaptured
             ? vfs::dismount(dm37Identity) : vfs::VFS_ERR_INVALID;
+        const uint32_t readsBeforeUnmountedPresence = dm37Disk.reads;
+        const storage::MountProtection unmountedPresence =
+            storage::query_mount_presence(dm37Target);
         check(dm37FormatStatus == storage::FAT32_FORMAT_SUCCESS &&
               dm37Mount.error == vfs::PARTITION_MOUNT_OK &&
               dm37Created == static_cast<int32_t>(sizeof(dm37Payload)) &&
@@ -15445,6 +15529,8 @@ int main()
               dm37Dismount == vfs::VFS_OK &&
               dm37Disk.openDuringFlushResult == vfs::INVALID_HANDLE &&
               dm37Disk.unmountDuringFlushStatus == vfs::VFS_ERR_BUSY &&
+              unmountedPresence.safety == storage::DEVICE_UNMOUNTED &&
+              dm37Disk.reads == readsBeforeUnmountedPresence &&
               vfs::mount_count() == 0 && !storage::storage_operation_active(),
               "DM37 exact FAT32 dismount rejects file, directory and active-I/O references; quiescence blocks reentrant opens and duplicate teardown");
 
@@ -15461,6 +15547,8 @@ int main()
         vfs::MountPoint remountSnapshot = {};
         const bool remountSnapshotCopied = vfs::copy_mount_snapshot(
             remountIndex, remountSnapshot);
+        const storage::MountProtection remountedPresence =
+            storage::query_mount_presence(dm37Target);
         const bool replacementRejected = remountSnapshotCopied &&
             !apps::disk_manager_dismount_ui::binding_matches(
                 dm37GuiTarget, dm37Target, remountIdentity, remountSnapshot);
@@ -15479,6 +15567,7 @@ int main()
               remount.error == vfs::PARTITION_MOUNT_OK &&
               remountIdentityCaptured &&
               replacementRejected &&
+              remountedPresence.safety == storage::DEVICE_MOUNTED &&
               remountIdentity.mountGeneration != dm37Identity.mountGeneration &&
               staleDismount == vfs::VFS_ERR_MOUNT_STALE &&
               dm37Disk.flushes == flushesBeforeStaleRequest + 1 &&

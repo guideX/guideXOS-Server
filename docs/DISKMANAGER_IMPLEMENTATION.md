@@ -605,3 +605,21 @@ B — `DM37_PARTIAL_GUEST_ACCEPTANCE`**. `.phase` remains DM36→DM37; DM38 has 
 started. See the [DM37 Continuation 12 report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-12-follow-up--delayed-input-dismount-still-unactivated)
 for the additional QMP screenshots, input latency, retained fixture identity,
 QAC ownership, and remaining Gate D steps.
+
+## DM37 continuation 13 — selected-partition render path performance fix
+
+Continuation 13 traced the reported mounted-FAT32 input delay to Disk Manager’s synchronous render-time admission preview. `updateInitializeControls()` ran during drawing and selection changes; the selected mounted-partition branch used `query_mount_protection()`, which validated each matching mount by reparsing the full GPT through `find_current_partition()`. A valid 128-entry GPT validation performs 131 block reads. The new UI-only `query_mount_presence()` checks the exact live device registration around a bounded VFS mount-metadata scan and performs no media reads. It does not prove partition identity and is not used to authorize Dismount or another lifecycle operation; exact target and mount validation remain in the authoritative operation path.
+
+The new host regression benchmark ran 64 deep protection checks at 16,768 block reads / 39,377 microseconds and 64 live presence previews at 0 reads / 16 microseconds using a memory-backed GPT fixture. These host timings do not predict USB or guest latency. The storage suite passed 1,492/1,492 checks, including 249 USB Mass Storage checks. Widget activation, DM37 input diagnostics, DM37 input focus, PS/2 legacy keyboard queue, DM37 Shell focus, compositor pointer buttons, seven USB trace classifier tests, the GPT verifier, and the DM30 fixture verifier passed.
+
+The bounded DM37 input trace now arms at first partition selection, records the transition, counts newest-record loss after its 512-record capacity, and emits bounded loss summaries. Historical Continuation 12 guest evidence recorded up to approximately 20 seconds of input delay but used source HEAD `c9a2b717f0c7e39180b5df8de22b0e60549027d6`; it is symptom evidence, not post-fix guest validation. No QEMU was launched in Continuation 13. Read-only QAC dashboard observation showed zero managed/foreign QEMU, no queued or blocked reservations, and an available acceptance lane; an independent process inventory also found no QEMU system process. See the [DM37 phase report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md) for diagnosis, evidence limits, remaining gates, and the read-only ownership snapshot.
+
+The freestanding AMD64 kernel, isolated `build.bat` desktop build, and UEFI x64 Release bootloader were built into `out/dm37/continuation13/` with both NVMe proof flags zero. The root `guideXOSServer.exe` and existing build outputs were preserved. Kernel and bootloader hashes and the desktop build result are listed in the continuation 13 validation record. `.phase` remains DM36→DM37; Gate D durability remains incomplete and DM38 has not started.
+
+### Continuation 13 build hashes
+
+- AMD64 freestanding kernel: `out/dm37/continuation13/kernel-build/bin/kernel.elf`, 3,179,720 bytes, SHA-256 `18D6E2AD8EF5DD89FCF22973288219930EA1873BF7A8D4B4D8D9718A6871F59B`.
+- Native desktop build: `out/dm37/continuation13/build-bat/guideXOSServer.exe`, 7,891,254 bytes, SHA-256 `FC67E30DE26A2AF71DF6CE92DDC148A8821DFC86A4E62E042F99368D594E36C6`.
+- UEFI x64 Release bootloader: `out/dm37/continuation13/uefi-x64-release/bin/guideXOSBootLoader.exe`, 59,904 bytes, SHA-256 `FBC2978BB2D3AE24B81CFAA273061F628C97262AE35BEE4D4EAB06BE7845B3A0`.
+
+All three builds completed successfully with `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`. Their logs and the isolated host test outputs are under `out/dm37/continuation13/`. The pre-existing root `guideXOSServer.exe` retained its original timestamp and size.

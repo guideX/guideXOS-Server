@@ -171,6 +171,11 @@ bool target_identities_equal(const TargetIdentity& left,
 RevalidationStatus revalidate_target_identity(const TargetIdentity& snapshot);
 
 MountProtection query_mount_protection(const TargetIdentity& target);
+// Live mount-presence snapshot for UI previews. This validates the exact
+// device registration and scans bounded VFS metadata, but deliberately does
+// not reparse the partition table or prove partition identity. Never use it
+// to authorize destructive or lifecycle operations.
+MountProtection query_mount_presence(const TargetIdentity& target);
 // Partition-scoped protection used by delete operations. A validated mount of
 // another partition on the same disk does not block this partition. Whole-disk
 // or stale/ambiguous mounts fail closed.

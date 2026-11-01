@@ -1402,6 +1402,28 @@ bool copy_mount_snapshot(uint8_t mountIndex, MountPoint& out)
     return true;
 }
 
+bool has_active_mount_for_device(uint8_t blockDevIndex,
+                                 uint64_t parentRegistrationId)
+{
+    if (parentRegistrationId == 0) return false;
+
+    // Keep this fixed-size scan inside the metadata lock only. Calling
+    // mount_identity_valid here would reparse the partition table and may
+    // issue synchronous block I/O.
+    bool found = false;
+    lock_vfs_metadata();
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        const MountPoint& mount = s_mounts[i];
+        if (mount.active && mount.blockDevIndex == blockDevIndex &&
+            mount.parentRegistrationId == parentRegistrationId) {
+            found = true;
+            break;
+        }
+    }
+    unlock_vfs_metadata();
+    return found;
+}
+
 static Status mount_io_status(const MountPoint* mount)
 {
     if (!mount || !mount->active) return VFS_ERR_NOT_MOUNT;

@@ -148,22 +148,54 @@ inline uint32_t& next_record_to_flush()
     return next;
 }
 
-inline bool& loss_summary_emitted_storage()
+inline uint32_t& last_reported_dropped_lines_storage()
 {
-    static bool emitted = false;
-    return emitted;
+    static uint32_t count = 0;
+    return count;
+}
+
+inline uint32_t& last_reported_dropped_pointer_motion_storage()
+{
+    static uint32_t count = 0;
+    return count;
+}
+
+inline bool loss_count_summary_due(uint32_t current, uint32_t lastReported)
+{
+    if (current == 0 || current <= lastReported) return false;
+    if (lastReported == 0) return true;
+    const uint32_t nextThreshold = lastReported > 0x7FFFFFFFu
+        ? 0xFFFFFFFFu : lastReported * 2u;
+    return current >= nextThreshold;
 }
 
 inline bool loss_summary_pending(const TraceBudget& traceBudget,
                                  uint32_t flushed, uint32_t reserved)
 {
-    return flushed == reserved &&
-        (__atomic_load_n(&traceBudget.droppedLines, __ATOMIC_RELAXED) != 0 ||
-         __atomic_load_n(&traceBudget.droppedPointerMotionLines,
-                         __ATOMIC_RELAXED) != 0);
+    if (flushed != reserved) return false;
+    return loss_count_summary_due(
+               __atomic_load_n(&traceBudget.droppedLines, __ATOMIC_RELAXED),
+               __atomic_load_n(&last_reported_dropped_lines_storage(),
+                               __ATOMIC_RELAXED)) ||
+        loss_count_summary_due(
+               __atomic_load_n(&traceBudget.droppedPointerMotionLines,
+                               __ATOMIC_RELAXED),
+               __atomic_load_n(
+                   &last_reported_dropped_pointer_motion_storage(),
+                   __ATOMIC_RELAXED));
 }
 
-inline void arm_postcheck_focus_checkpoint()
+inline void record_loss_summary_emitted(const TraceBudget& traceBudget)
+{
+    __atomic_store_n(&last_reported_dropped_lines_storage(),
+        __atomic_load_n(&traceBudget.droppedLines, __ATOMIC_RELAXED),
+        __ATOMIC_RELAXED);
+    __atomic_store_n(&last_reported_dropped_pointer_motion_storage(),
+        __atomic_load_n(&traceBudget.droppedPointerMotionLines,
+                        __ATOMIC_RELAXED), __ATOMIC_RELAXED);
+}
+
+inline void arm_focus_checkpoint(const char* label)
 {
 #if defined(GXOS_DM37_INPUT_DIAGNOSTICS) && \
     defined(GXOS_DM37_INPUT_DIAGNOSTICS_POSTCHECK_ONLY)
@@ -182,8 +214,10 @@ inline void arm_postcheck_focus_checkpoint()
                      __ATOMIC_RELAXED);
     __atomic_store_n(&next_record_to_flush(), static_cast<uint32_t>(0),
                      __ATOMIC_RELAXED);
-    __atomic_store_n(&loss_summary_emitted_storage(), false,
-                     __ATOMIC_RELAXED);
+    __atomic_store_n(&last_reported_dropped_lines_storage(),
+                     static_cast<uint32_t>(0), __ATOMIC_RELAXED);
+    __atomic_store_n(&last_reported_dropped_pointer_motion_storage(),
+                     static_cast<uint32_t>(0), __ATOMIC_RELAXED);
     TraceRecord* const traceRecords = records();
     for (uint32_t i = 0; i < MAX_TRACE_LINES; ++i)
         __atomic_store_n(&traceRecords[i].ready, static_cast<uint32_t>(0),
@@ -191,9 +225,28 @@ inline void arm_postcheck_focus_checkpoint()
     __atomic_store_n(&postcheck_checkpoint_armed_storage(), true,
                      __ATOMIC_RELEASE);
 #if !defined(GXOS_DM37_INPUT_DIAGNOSTICS_TEST)
-    serial::puts("[DM37-IN] checkpoint=post-fat32-result-close\n");
+    serial::puts("[DM37-IN] checkpoint=");
+    serial::puts(label ? label : "unspecified");
+    serial::putc('\n');
+#else
+    (void)label;
 #endif
+#else
+    (void)label;
 #endif
+}
+
+inline void arm_postcheck_focus_checkpoint()
+{
+    arm_focus_checkpoint("post-fat32-result-close");
+}
+
+inline void arm_selection_focus_checkpoint()
+{
+    // In post-checkpoint diagnostic builds, discard boot/navigation noise and
+    // start the bounded trace at the first selected partition, immediately
+    // before the selected-partition UI hot path runs.
+    arm_focus_checkpoint("partition-selection");
 }
 
 inline uint32_t begin_event()
@@ -275,8 +328,7 @@ inline void flush(uint8_t maxLines = 2)
     }
     const uint32_t reserved = __atomic_load_n(&reserved_record_count(),
                                                __ATOMIC_ACQUIRE);
-    if (!__atomic_load_n(&loss_summary_emitted_storage(), __ATOMIC_RELAXED) &&
-        loss_summary_pending(budget(), next, reserved)) {
+    if (loss_summary_pending(budget(), next, reserved)) {
         serial::puts("[DM37-IN] trace=incomplete dropped=0x");
         serial::put_hex32(__atomic_load_n(&budget().droppedLines,
                                            __ATOMIC_RELAXED));
@@ -284,8 +336,7 @@ inline void flush(uint8_t maxLines = 2)
         serial::put_hex32(__atomic_load_n(
             &budget().droppedPointerMotionLines, __ATOMIC_RELAXED));
         serial::putc('\n');
-        __atomic_store_n(&loss_summary_emitted_storage(), true,
-                         __ATOMIC_RELAXED);
+        record_loss_summary_emitted(budget());
     }
 #else
     (void)maxLines;

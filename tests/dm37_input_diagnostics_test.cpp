@@ -34,12 +34,43 @@ int main()
 
     check(!capture_armed() && begin_event() == 0 &&
           !should_trace_key('`'),
-          "post-checkpoint capture stays quiet before the FAT32 result closes");
-    arm_postcheck_focus_checkpoint();
+          "post-checkpoint capture stays quiet before a relevant Disk Manager transition");
+    arm_selection_focus_checkpoint();
     const uint32_t checkpointSequence = begin_event();
     check(capture_armed() && checkpointSequence != 0 &&
           should_trace_key('`'),
-          "FAT32 result closure arms a fresh bounded focus trace checkpoint");
+          "first selected partition arms a fresh bounded focus trace checkpoint");
+
+    for (uint32_t i = 0; i < MAX_TRACE_LINES; ++i)
+        emit("selection-test", i + 1u, i, 0);
+    emit("newest-dropped", MAX_TRACE_LINES + 1u, MAX_TRACE_LINES, 0);
+    check(reserved_record_count() == MAX_TRACE_LINES &&
+          records()[0].sequence == 1u &&
+          records()[MAX_TRACE_LINES - 1u].sequence == MAX_TRACE_LINES &&
+          budget().droppedLines == 1u &&
+          loss_summary_pending(budget(), MAX_TRACE_LINES, MAX_TRACE_LINES),
+          "fixed trace retains the oldest 512 records, drops/counts newest records, and marks an incomplete drained trace");
+    record_loss_summary_emitted(budget());
+    check(!loss_summary_pending(budget(), MAX_TRACE_LINES, MAX_TRACE_LINES),
+          "loss summary does not repeat while its counters stay unchanged");
+    __atomic_store_n(&budget().droppedLines, static_cast<uint32_t>(2),
+                     __ATOMIC_RELAXED);
+    const bool doubledLossReported = loss_summary_pending(
+        budget(), MAX_TRACE_LINES, MAX_TRACE_LINES);
+    record_loss_summary_emitted(budget());
+    __atomic_store_n(&budget().droppedLines, static_cast<uint32_t>(3),
+                     __ATOMIC_RELAXED);
+    const bool intermediateLossQuiet = !loss_summary_pending(
+        budget(), MAX_TRACE_LINES, MAX_TRACE_LINES);
+    __atomic_store_n(&budget().droppedLines, static_cast<uint32_t>(4),
+                     __ATOMIC_RELAXED);
+    check(doubledLossReported && intermediateLossQuiet &&
+          loss_summary_pending(budget(), MAX_TRACE_LINES, MAX_TRACE_LINES),
+          "overflow summaries report new loss at bounded doubling thresholds");
+    arm_postcheck_focus_checkpoint();
+    check(reserved_record_count() == MAX_TRACE_LINES &&
+          records()[0].sequence == 1u,
+          "later FAT32 result checkpoint does not erase the active selection trace");
 
     TraceBudget sequenceBudget = {};
     sequenceBudget.nextSequence = 0xFFFFFFFEu;
@@ -63,10 +94,6 @@ int main()
           pointerBudget.droppedPointerMotionLines == 1 &&
           pointerBudget.claim_line(false),
           "pointer-motion omissions are counted without consuming trace budget");
-    check(loss_summary_pending(lineBudget, MAX_TRACE_LINES,
-                               MAX_TRACE_LINES),
-          "a drained trace with loss must emit an incomplete marker");
-
     std::printf("DM37 input diagnostic checks: %s (%d failures)\n",
         failures == 0 ? "PASS" : "FAIL", failures);
     return failures == 0 ? 0 : 1;
