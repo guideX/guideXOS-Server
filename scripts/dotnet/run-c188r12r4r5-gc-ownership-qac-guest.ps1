@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [ValidateRange(60,300)][int]$BootTimeoutSeconds = 180,
-    [ValidateRange(1,60)][int]$AdmissionWindowSeconds = 30
+    [ValidateRange(1,60)][int]$AdmissionWindowSeconds = 30,
+    [ValidateSet('R1','R2')][string]$ThreadStoreAttempt = 'R1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,6 +10,7 @@ Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -ne 'Core') { throw 'C188R12R4R5 QAC guest requires PowerShell Core.' }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+Import-Module (Join-Path $PSScriptRoot 'c188r12r4r5r4-qac-admission.psm1') -Force
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $candidateManifestPath = Join-Path $candidate 'candidate-manifest.json'
 if (-not (Test-Path -LiteralPath $candidateManifestPath -PathType Leaf)) {
@@ -18,6 +20,9 @@ $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | Conv
 $isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
 $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract'
 $isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
+if ($ThreadStoreAttempt -eq 'R2' -and -not $isThreadStoreReadiness) {
+    throw 'ThreadStoreAttempt R2 is valid only for the C188 R4 ThreadStore candidate.'
+}
 $isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness
 $r4RuntimePackManifest = $null
 $r4PalCommonMembership = $null
@@ -38,9 +43,7 @@ $phaseRoot = if ($isThreadStoreReadiness) {
 } else {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5-gc-ownership-proof'))
 }
-$relative = [System.IO.Path]::GetRelativePath($phaseRoot, $candidate)
-if ($relative -eq '.' -or $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -or
-    [System.IO.Path]::IsPathRooted($relative)) {
+if (-not (Test-QacCandidatePath -CandidateRoot $candidate -PhaseRoot $phaseRoot -RequireExisting)) {
     throw "CandidateRoot must be a unique candidate below $phaseRoot."
 }
 if ($isInitAttribution) {
@@ -117,13 +120,16 @@ function Require-Hash([string]$Path,[string]$Expected,[string]$Name) {
 }
 
 $esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$serial = Join-Path $candidate 'qac-guest-001\serial.log'
-$qmpLog = Join-Path $candidate 'qac-guest-001\qmp.log'
+$runDirectory = if ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') { 'qac-guest-002' } else { 'qac-guest-001' }
+$serial = Join-Path $candidate ($runDirectory + '\serial.log')
+$qmpLog = Join-Path $candidate ($runDirectory + '\qmp.log')
 $runRoot = Split-Path -Parent $serial
 $qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $ovmf = Join-Path $repo 'OVMF.fd'
-$attemptPath = Join-Path $phaseRoot 'guest-launch-attempt.json'
+$attemptPath = if ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') {
+    Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R2.json'
+} else { Join-Path $phaseRoot 'guest-launch-attempt.json' }
 foreach ($required in @($qacCli,$qemu,$ovmf,(Join-Path $esp 'kernel.elf'),
         (Join-Path $esp 'ramdisk.img'),(Join-Path $esp 'EFI\BOOT\BOOTX64.EFI'))) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required guest input is missing: $required" }
@@ -152,10 +158,11 @@ New-Item -ItemType Directory -Path $runRoot | Out-Null
 $manifestPath = Join-Path $runRoot 'guest-manifest.json'
 $qacBeforeStatusPath = Join-Path $runRoot 'qac-before.status.txt'
 $qacBeforeListPath = Join-Path $runRoot 'qac-before.list.txt'
-$qacDuringStatusPath = Join-Path $runRoot 'qac-during.status.txt'
-$qacDuringListPath = Join-Path $runRoot 'qac-during.list.txt'
-$qacAfterStatusPath = Join-Path $runRoot 'qac-after.status.txt'
-$qacAfterListPath = Join-Path $runRoot 'qac-after.list.txt'
+$qacDuringStatusPath = $null
+$qacDuringListPath = $null
+$qacAfterStatusPath = $null
+$qacAfterListPath = $null
+$qacSnapshotRecords = [System.Collections.Generic.List[object]]::new()
 
 function Get-QacSnapshot([string]$Prefix) {
     $statusLines = & $qacCli status 2>&1
@@ -164,31 +171,43 @@ function Get-QacSnapshot([string]$Prefix) {
     $listExit = $LASTEXITCODE
     $statusText = ($statusLines | Out-String)
     $listText = ($listLines | Out-String)
-    Set-Content -LiteralPath (Join-Path $runRoot "$Prefix.status.txt") -Value $statusText -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $runRoot "$Prefix.list.txt") -Value $listText -Encoding utf8
-    return [pscustomobject]@{Status=$statusText;List=$listText;StatusExit=$statusExit;ListExit=$listExit}
+    $statusPath = Join-Path $runRoot "$Prefix.status.txt"
+    $listPath = Join-Path $runRoot "$Prefix.list.txt"
+    foreach ($path in @($statusPath,$listPath)) {
+        if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite captured QAC snapshot: $path" }
+    }
+    [System.IO.File]::WriteAllText($statusPath,$statusText,[System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($listPath,$listText,[System.Text.UTF8Encoding]::new($false))
+    $snapshot = [pscustomobject]@{
+        Status=$statusText;List=$listText;StatusExit=$statusExit;ListExit=$listExit
+        StatusPath=$statusPath;ListPath=$listPath;CapturedAtUtc=[DateTime]::UtcNow.ToString('o')
+    }
+    $qacSnapshotRecords.Add([pscustomobject]@{
+        capturedAtUtc=$snapshot.CapturedAtUtc;statusExitCode=$statusExit;listExitCode=$listExit
+        statusPath=$statusPath;listPath=$listPath
+    })
+    return $snapshot
 }
-function Test-QacClear([object]$Snapshot) {
-    return $Snapshot.StatusExit -eq 0 -and $Snapshot.ListExit -eq 0 -and
-        $Snapshot.Status -match '(?m)^Coordinator:\s+Online\b' -and
-        $Snapshot.Status -match '(?m)^QEMU processes:\s+0 \(0 foreign\)\s*$' -and
-        $Snapshot.Status -match '(?m)^Managed sessions:\s+0;\s+queued:\s+0;\s+blocked:\s+0\s*$' -and
-        $Snapshot.List -match '(?m)^Coordinator:\s+Online\b' -and
-        $Snapshot.List -match '(?m)^Reservations:\s+0\s*$' -and
-        $Snapshot.List -match '(?m)^Managed sessions:\s+0\s*$'
+function Get-QacInspection([string]$ReservationId,[string]$Prefix) {
+    $inspectionPath = Join-Path $runRoot "$Prefix.inspect.json"
+    if (Test-Path -LiteralPath $inspectionPath) { throw "Refusing to overwrite captured QAC reservation inspection: $inspectionPath" }
+    $inspectionLines = & $qacCli inspect $ReservationId 2>&1
+    $inspectionExit = $LASTEXITCODE
+    $inspectionText = ($inspectionLines | Out-String)
+    [System.IO.File]::WriteAllText($inspectionPath,$inspectionText,[System.Text.UTF8Encoding]::new($false))
+    $inspection = $null
+    if ($inspectionExit -eq 0) {
+        try { $inspection = $inspectionText | ConvertFrom-Json -ErrorAction Stop } catch { $inspection = $null }
+    }
+    return [pscustomobject]@{
+        ExitCode=$inspectionExit;Text=$inspectionText;Inspection=$inspection;Path=$inspectionPath
+    }
 }
-function Test-QacRunningOwned([object]$Snapshot,[string]$ReservationId,[int]$OwnerPid) {
-    $ownerPattern = '\(PID\s+' + $OwnerPid + '\)'
-    $reservationPattern = '(?m)^\s*' + [regex]::Escape($ReservationId) +
-        '\s+\|\s+guideXOSServer\s+\|\s+acceptance\s+\|\s+Running\b.*' +
-        $ownerPattern + '\s+\|\s+owner Verified\s+\|\s+child PID\s+\d+\s*$'
-    return $Snapshot.StatusExit -eq 0 -and $Snapshot.ListExit -eq 0 -and
-        $Snapshot.Status -match '(?m)^Coordinator:\s+Online\b' -and
-        $Snapshot.Status -match '(?m)^QEMU processes:\s+1 \(0 foreign\)\s*$' -and
-        $Snapshot.Status -match '(?m)^Managed sessions:\s+1;\s+queued:\s+0;\s+blocked:\s+0\s*$' -and
-        $Snapshot.List -match '(?m)^Reservations:\s+1\s*$' -and
-        $Snapshot.List -match '(?m)^Managed sessions:\s+1\s*$' -and
-        $Snapshot.List -match $reservationPattern
+function Test-ModuleRegistrationStageObserved([object]$Analysis) {
+    if ($null -eq $Analysis) { return $null }
+    $stageProperty = $Analysis.PSObject.Properties['stages']
+    if ($null -eq $stageProperty) { return $false }
+    return @($stageProperty.Value | Where-Object { $_.stageName -eq 'moduleRegistration' }).Count -gt 0
 }
 function Read-GuestSerial {
     if (-not (Test-Path -LiteralPath $serial -PathType Leaf)) { return '' }
@@ -223,6 +242,11 @@ function Invoke-Qmp([string]$Command) {
         $writer.AutoFlush = $true
         $greeting = $reader.ReadLine()
         Add-Content -LiteralPath $qmpLog -Value "greeting $greeting" -Encoding utf8
+        $greetingObject = $null
+        try { $greetingObject = $greeting | ConvertFrom-Json -ErrorAction Stop } catch { }
+        if ($null -eq $greetingObject -or $null -eq $greetingObject.PSObject.Properties['QMP']) {
+            throw 'QMP greeting did not contain the required QMP object.'
+        }
         $writer.WriteLine('{"execute":"qmp_capabilities"}')
         [void](Read-QmpResponse $reader 'qmp_capabilities')
         $request = '{"execute":"' + $Command + '"}'
@@ -258,6 +282,7 @@ $qacArgs = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemu
 [ordered]@{qacCli=$qacCli;arguments=$qacArgs;qemu=$qemu;qemuArguments=$qemuArgs;qmpPort=$qmpPort;
     candidateRoot=$candidate;esp=$esp;serial=$serial;timeoutSeconds=$BootTimeoutSeconds;
     candidateManifestSha256=Get-Sha256 $candidateManifestPath;
+    threadStoreAttempt=$ThreadStoreAttempt;attemptGuardPath=$attemptPath;
     guestBootLimit=1;automaticRetry=$false} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot 'qac-run-arguments.json') -Encoding utf8
 
@@ -271,11 +296,16 @@ $admitted = $false
 $qacReservationId = $null
 $qacExitCode = $null
 $qemuStatus = $null
+$qemuStatusResponse = $null
 $runError = $null
 $serialText = ''
 $guestPass = $false
 $releaseVerified = $false
 $during = $null
+$duringInspection = $null
+$duringInspectionPath = $null
+$localGuestIdentity = $null
+$ownedQemuLocalProcess = $null
 $after = $null
 $attemptedUtc = $null
 
@@ -284,7 +314,8 @@ try {
 
     # This CreateNew marker permanently prevents a second QAC invocation for this candidate.
     $attemptedUtc = [DateTime]::UtcNow.ToString('o')
-    $attempt = [ordered]@{candidateRoot=$candidate;attemptedAtUtc=$attemptedUtc;maxGuestBoots=1;automaticRetry=$false;
+    $attempt = [ordered]@{candidateRoot=$candidate;attemptedAtUtc=$attemptedUtc;threadStoreAttempt=$ThreadStoreAttempt;
+        maxGuestBoots=1;automaticRetry=$false;
         candidateManifestSha256=Get-Sha256 $candidateManifestPath;
         qacProject='guideXOSServer';qacMode='acceptance';qemuArguments=$qemuArgs}
     $attemptJson = $attempt | ConvertTo-Json -Depth 6
@@ -310,37 +341,91 @@ try {
     $stderrTask = $qacProcess.StandardError.ReadToEndAsync()
 
     $admissionDeadline = (Get-Date).AddSeconds($AdmissionWindowSeconds)
+    $admissionSample = 0
+    $ownerUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     do {
         if ($qacProcess.HasExited) { throw "QAC exited before exclusive admission ($($qacProcess.ExitCode))." }
-        $snapshot = Get-QacSnapshot 'qac-during'
-        $ownerPattern = '\(PID\s+' + $qacProcess.Id + '\)'
-        $ownedLine = @($snapshot.List -split "`r?`n" | Where-Object { $_ -match $ownerPattern }) | Select-Object -First 1
-        if ($ownedLine -match '^\s*([0-9a-f]{32})\s+\|.*\|\s+Running\b') {
-            $qacReservationId = $Matches[1]
-            if (Test-QacRunningOwned $snapshot $qacReservationId $qacProcess.Id) {
-                $admitted = $true
-                $during = $snapshot
-                break
+        $admissionSample++
+        $prefix = 'qac-during-{0:D3}' -f $admissionSample
+        $snapshot = Get-QacSnapshot $prefix
+        if ($null -eq $qacDuringStatusPath) {
+            $qacDuringStatusPath = $snapshot.StatusPath
+            $qacDuringListPath = $snapshot.ListPath
+        }
+        $listFields = ConvertFrom-QacListSnapshot -Text $snapshot.List -ExitCode $snapshot.ListExit
+        $ownerRows = @($listFields.ReservationRows | Where-Object {
+            $owner = [regex]::Match($_.Owner, '^(?<user>.+?) \(PID (?<pid>\d+)\)$')
+            $owner.Success -and [int]$owner.Groups['pid'].Value -eq $qacProcess.Id -and
+                [string]::Equals($owner.Groups['user'].Value,$ownerUser,[System.StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($ownerRows.Count -eq 1) {
+            $qacReservationId = [string]$ownerRows[0].Id
+            if ($ownerRows[0].State -ceq 'Running' -and $null -ne $ownerRows[0].ChildProcessId) {
+                $inspectionCapture = Get-QacInspection $qacReservationId $prefix
+                if ($inspectionCapture.ExitCode -eq 0 -and $null -ne $inspectionCapture.Inspection) {
+                    $ownerStartUtc = [DateTimeOffset]$qacProcess.StartTime.ToUniversalTime()
+                    $qacOwnedSnapshot = Test-QacRunningOwned -Snapshot $snapshot -ReservationId $qacReservationId `
+                        -OwnerPid $qacProcess.Id -OwnerUser $ownerUser -QemuPath $qemu `
+                        -Inspection $inspectionCapture.Inspection -ExpectedOwnerStartTimeUtc $ownerStartUtc
+                    if ($qacOwnedSnapshot) {
+                        $during = $snapshot
+                        $qacDuringStatusPath = $snapshot.StatusPath
+                        $qacDuringListPath = $snapshot.ListPath
+                        $duringInspection = $inspectionCapture.Inspection
+                        $duringInspectionPath = $inspectionCapture.Path
+                        $localProcess = $null
+                        try {
+                            $localProcess = Get-CimInstance -ClassName Win32_Process `
+                                -Filter ('ProcessId = {0}' -f [int]$inspectionCapture.Inspection.processId) -ErrorAction Stop
+                        } catch { $localGuestIdentity = [ordered]@{verificationError=$_.Exception.Message} }
+                        if ($null -ne $localProcess -and (Test-QacLocalQemuChildIdentity -LocalProcess $localProcess `
+                                -Inspection $inspectionCapture.Inspection -OwnerPid $qacProcess.Id `
+                                -QemuPath $qemu -QmpPort $qmpPort)) {
+                            $admitted = $true
+                            $during = $snapshot
+                            $duringInspection = $inspectionCapture.Inspection
+                            $duringInspectionPath = $inspectionCapture.Path
+                            $ownedQemuLocalProcess = $localProcess
+                            $localGuestIdentity = [ordered]@{
+                                processId=[int]$localProcess.ProcessId
+                                parentProcessId=[int]$localProcess.ParentProcessId
+                                executablePath=[string]$localProcess.ExecutablePath
+                                creationDate=[string]$localProcess.CreationDate
+                                commandLine=[string]$localProcess.CommandLine
+                                qmpPort=$qmpPort
+                                qacInspectionPath=$inspectionCapture.Path
+                            }
+                            [System.IO.File]::WriteAllText((Join-Path $runRoot 'qemu-local-child-identity.json'),
+                                ($localGuestIdentity | ConvertTo-Json -Depth 5),[System.Text.UTF8Encoding]::new($false))
+                            break
+                        } elseif ($null -ne $localProcess) {
+                            $localGuestIdentity = [ordered]@{
+                                verificationError='Local PID, parent, executable, creation time, or QMP command line did not match QAC inspection.'
+                                processId=[int]$localProcess.ProcessId
+                                parentProcessId=[int]$localProcess.ParentProcessId
+                                executablePath=[string]$localProcess.ExecutablePath
+                                creationDate=[string]$localProcess.CreationDate
+                                qmpPort=$qmpPort
+                            }
+                        }
+                    }
+                } else {
+                    $duringInspectionPath = $inspectionCapture.Path
+                }
             }
         }
-        if ($ownedLine -match '^\s*([0-9a-f]{32})\s+\|.*\|\s+Queued\b') { $qacReservationId = $Matches[1] }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $admissionDeadline)
-    if (-not $admitted) { throw 'QAC did not grant its exclusive acceptance reservation inside the bounded admission window.' }
-
-    $statusDuringConsistent = $during.Status -match '(?m)^Coordinator:\s+Online\b' -and
-        $during.Status -match '(?m)^QEMU processes:\s+1 \(0 foreign\)\s*$' -and
-        $during.Status -match '(?m)^Managed sessions:\s+1;\s+queued:\s+0;\s+blocked:\s+0\s*$'
-    $listDuringConsistent = $during.List -match '(?m)^Reservations:\s+1\s*$' -and
-        $during.List -match '(?m)^Managed sessions:\s+1\s*$' -and
-        $during.List -match [regex]::Escape($qacReservationId) -and
-        $during.List -match ('(?m)^\s*' + [regex]::Escape($qacReservationId) + '\s+\|\s+guideXOSServer\s+\|\s+acceptance\s+\|\s+Running\b')
-    if (-not $statusDuringConsistent -or -not $listDuringConsistent) {
-        throw 'QAC admitted the run but status/list did not provide a complete, consistent exclusive census.'
-    }
+    if (-not $admitted) { throw 'QAC did not provide a complete, stable, owner-verified exclusive process census inside the bounded admission window.' }
 
     if (-not (Wait-Qmp 30 $qacProcess)) { throw 'QMP did not become reachable within 30 seconds of QAC admission.' }
     $qmpConnected = $true
+    $qemuStatusResponse = Invoke-Qmp 'query-status'
+    $qemuStatus = ConvertFrom-QmpQueryStatusResponse -Text $qemuStatusResponse
+    if (-not $qemuStatus.Valid) {
+        throw 'QMP query-status response was missing the required status or Boolean running fields.'
+    }
+    if (-not $qemuStatus.running) { throw 'QEMU query-status did not report a running guest process.' }
     $deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
     do {
         $serialText = Read-GuestSerial
@@ -381,33 +466,70 @@ try {
     } else {
         $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
     }
-    try { $qemuStatus = Invoke-Qmp 'query-status' } catch { $qemuStatus = 'query-status failed: ' + $_.Exception.Message }
-    if (-not $qacProcess.HasExited) { [void](Invoke-Qmp 'quit') }
+    try {
+        $qemuStatusResponse = Invoke-Qmp 'query-status'
+        $qemuStatus = ConvertFrom-QmpQueryStatusResponse -Text $qemuStatusResponse
+        if (-not $qemuStatus.Valid) {
+            throw 'QMP query-status response was missing the required status or Boolean running fields.'
+        }
+    } catch { $qemuStatus = [pscustomobject]@{Valid=$false;Status=$null;Running=$null;Error=$_.Exception.Message} }
+    if (-not $qacProcess.HasExited) {
+        $currentLocalProcess = $null
+        try {
+            $currentLocalProcess = Get-CimInstance -ClassName Win32_Process `
+                -Filter ('ProcessId = {0}' -f [int]$duringInspection.processId) -ErrorAction Stop
+        } catch { }
+        if ($null -eq $currentLocalProcess -or -not (Test-QacLocalQemuChildIdentity `
+                -LocalProcess $currentLocalProcess -Inspection $duringInspection -OwnerPid $qacProcess.Id `
+                -QemuPath $qemu -QmpPort $qmpPort)) {
+            throw 'Refusing QMP shutdown because the local QEMU child identity is no longer verified.'
+        }
+        [void](Invoke-Qmp 'quit')
+    }
     if (-not $qacProcess.WaitForExit(90000)) { throw 'QAC did not exit after the owned QMP quit request.' }
     $qacExitCode = $qacProcess.ExitCode
 } catch {
     $runError = $_.Exception.Message
-    if ($null -ne $qacProcess -and -not $qacProcess.HasExited -and $admitted) {
-        if (-not $qmpConnected -and (Wait-Qmp 10 $qacProcess)) { $qmpConnected = $true }
-        if ($qmpConnected -and -not $qacProcess.HasExited) {
-            try { [void](Invoke-Qmp 'query-status') } catch { }
-            try { [void](Invoke-Qmp 'quit') } catch { }
-            [void]$qacProcess.WaitForExit(90000)
+    if ($null -ne $qacProcess -and -not $qacProcess.HasExited) {
+        if ($null -ne $duringInspection) {
+            try {
+                $ownedQemuLocalProcess = Get-CimInstance -ClassName Win32_Process `
+                    -Filter ('ProcessId = {0}' -f [int]$duringInspection.processId) -ErrorAction Stop
+            } catch { $ownedQemuLocalProcess = $null }
         }
-    }
-    elseif ($null -ne $qacProcess -and -not $qacProcess.HasExited) {
-        if ([string]::IsNullOrWhiteSpace($qacReservationId)) {
-            $latestList = (& $qacCli list 2>&1 | Out-String)
-            $ownerPattern = '\(PID\s+' + $qacProcess.Id + '\)'
-            $ownedLine = @($latestList -split "`r?`n" | Where-Object { $_ -match $ownerPattern }) | Select-Object -First 1
-            if ($ownedLine -match '^\s*([0-9a-f]{32})\s+\|.*\|\s+Queued\b') {
-                $qacReservationId = $Matches[1]
+        if ($null -ne $duringInspection -and $null -ne $ownedQemuLocalProcess -and
+            (Test-QacLocalQemuChildIdentity -LocalProcess $ownedQemuLocalProcess -Inspection $duringInspection `
+                -OwnerPid $qacProcess.Id -QemuPath $qemu -QmpPort $qmpPort)) {
+            if (-not $qmpConnected -and (Wait-Qmp 10 $qacProcess)) { $qmpConnected = $true }
+            if ($qmpConnected -and -not $qacProcess.HasExited) {
+                try { [void](Invoke-Qmp 'query-status') } catch { }
+                try { [void](Invoke-Qmp 'quit') } catch { }
+                [void]$qacProcess.WaitForExit(90000)
             }
-        }
-        if (-not [string]::IsNullOrWhiteSpace($qacReservationId)) {
-            $cancelOutput = (& $qacCli cancel $qacReservationId 2>&1 | Out-String)
-            Set-Content -LiteralPath (Join-Path $runRoot 'qac-cancel.log') -Value $cancelOutput -Encoding utf8
-            [void]$qacProcess.WaitForExit(90000)
+        } else {
+            $latestListLines = & $qacCli list 2>&1
+            $latestListExit = $LASTEXITCODE
+            $latestList = ($latestListLines | Out-String)
+            $cancelAllowed = $false
+            $latestFields = ConvertFrom-QacListSnapshot -Text $latestList -ExitCode $latestListExit
+            $ownerRows = @($latestFields.ReservationRows | Where-Object {
+                $owner = [regex]::Match($_.Owner, '^(?<user>.+?) \(PID (?<pid>\d+)\)$')
+                $owner.Success -and [int]$owner.Groups['pid'].Value -eq $qacProcess.Id -and
+                    [string]::Equals($owner.Groups['user'].Value,[System.Security.Principal.WindowsIdentity]::GetCurrent().Name,
+                        [System.StringComparison]::OrdinalIgnoreCase)
+            })
+            if ($ownerRows.Count -eq 1 -and $ownerRows[0].State -in @('Waiting','Blocked')) {
+                $qacReservationId = [string]$ownerRows[0].Id
+                $cancelAllowed = $true
+            }
+            if ($cancelAllowed) {
+                $cancelOutput = (& $qacCli cancel $qacReservationId 2>&1 | Out-String)
+                $cancelExit = $LASTEXITCODE
+                $cancelLog = Join-Path $runRoot 'qac-cancel.log'
+                if (Test-Path -LiteralPath $cancelLog) { throw "Refusing to overwrite QAC cancel evidence: $cancelLog" }
+                [System.IO.File]::WriteAllText($cancelLog,$cancelOutput,[System.Text.UTF8Encoding]::new($false))
+                if ($cancelExit -eq 0) { [void]$qacProcess.WaitForExit(90000) }
+            }
         }
     }
 } finally {
@@ -422,7 +544,10 @@ try {
     }
     $afterDeadline = (Get-Date).AddSeconds(30)
     do {
-        $after = Get-QacSnapshot 'qac-after'
+        $afterSample = if ($null -eq $after) { 1 } else { $afterSample + 1 }
+        $after = Get-QacSnapshot ('qac-after-{0:D3}' -f $afterSample)
+        $qacAfterStatusPath = $after.StatusPath
+        $qacAfterListPath = $after.ListPath
         if (Test-QacClear $after) { $releaseVerified = $true; break }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $afterDeadline)
@@ -540,7 +665,11 @@ $manifest = [ordered]@{
     qacPreflightPassed=$preflightPassed;qacAdmissionGranted=$admitted;qacReservationId=$qacReservationId
     qacOwnerPid=if ($null -ne $qacProcess) { $qacProcess.Id } else { $null }
     qacExitCode=$qacExitCode;qacReleaseVerified=$releaseVerified;qacGuestBootLimit=1;automaticRetry=$false
-    qemuStatus=$qemuStatus;qmpPort=$qmpPort;qemuArguments=$qemuArgs;guestPass=$guestPass
+    threadStoreAttempt=$ThreadStoreAttempt;attemptGuardPath=$attemptPath
+    qemuStatus=$qemuStatus;qemuQueryStatusResponse=$qemuStatusResponse;qmpPort=$qmpPort;qemuArguments=$qemuArgs;guestPass=$guestPass
+    qacOwnerUser=if ($null -ne $qacProcess) { [System.Security.Principal.WindowsIdentity]::GetCurrent().Name } else { $null }
+    qacReservationInspection=$duringInspectionPath;qacSnapshotRecords=@($qacSnapshotRecords)
+    localQemuChildIdentity=$localGuestIdentity
     initAttributionProfile=$isInitAttribution;initCaptureComplete=$initCaptureComplete
     initReturnContractProfile=$isInitReturnContract
     threadStoreReadinessProfile=$isThreadStoreReadiness
@@ -554,12 +683,7 @@ $manifest = [ordered]@{
     startupAdapterStatusCode=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterStatusCode } else { $null }
     startupAdapterOutcome=if ($isInitReturnContract -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterOutcome } else { $null }
     moduleRegistrationAttemptedByCandidate=$isInitReturnContract -and -not [bool]$candidateManifest.nativeRhInitialize.moduleRegistrationIncluded
-    moduleRegistrationStageObserved=if ($null -ne $serialAnalysis) {
-        $stageProperty = $serialAnalysis.PSObject.Properties['stages']
-        if ($null -ne $stageProperty) {
-            @($stageProperty.Value | Where-Object { $_.stageName -eq 'moduleRegistration' }).Count -gt 0
-        } else { $false }
-    } else { $null }
+    moduleRegistrationStageObserved=Test-ModuleRegistrationStageObserved $serialAnalysis
     managedMainObserved=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.managedMainDispatched } else { $false }
     managedMainGateReason=if ($isInitReturnContract) { [string]$candidateManifest.managedMainGateReason } else { $null }
     serialAnalysis=$serialAnalysisPath;serialAnalysisExitCode=$serialAnalysisExitCode
@@ -582,8 +706,9 @@ if ($isInitAttribution) {
     Write-Output "C188R12R4R5R3_INIT_RETURN_CONTRACT=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5R3_INIT_RETURN_CONTRACT_MANIFEST=$manifestPath"
 } elseif ($isThreadStoreReadiness) {
-    Write-Output "C188R12R4R5R4_THREADSTORE_READINESS=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
-    Write-Output "C188R12R4R5R4_THREADSTORE_READINESS_MANIFEST=$manifestPath"
+    $phaseLabel = if ($ThreadStoreAttempt -eq 'R2') { 'C188R12R4R5R4R2' } else { 'C188R12R4R5R4' }
+    Write-Output "${phaseLabel}_THREADSTORE_READINESS=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
+    Write-Output "${phaseLabel}_THREADSTORE_READINESS_MANIFEST=$manifestPath"
 } else {
     Write-Output "C188R12R4R5_GC_OWNERSHIP=$outcome ADMITTED=$admitted PASS=$guestPass QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5_GC_OWNERSHIP_MANIFEST=$manifestPath"

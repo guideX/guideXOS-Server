@@ -17,9 +17,15 @@ function Invoke-Analyzer([string]$Name, [string]$Text, [int]$ExpectedExit = 0) {
     $serialPath = Join-Path $testRoot "$Name.serial.log"
     $analysisPath = Join-Path $testRoot "$Name.analysis.json"
     [System.IO.File]::WriteAllText($serialPath, $Text, [System.Text.UTF8Encoding]::new($false))
+    $serialHashBefore = (Get-FileHash -LiteralPath $serialPath -Algorithm SHA256).Hash
     & pwsh -NoProfile -ExecutionPolicy Bypass -File $analyzer -SerialPath $serialPath -OutputPath $analysisPath | Out-Null
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne $ExpectedExit) { throw "Analyzer exit for $Name was $exitCode, expected $ExpectedExit." }
+    $serialHashAfter = (Get-FileHash -LiteralPath $serialPath -Algorithm SHA256).Hash
+    if ($serialHashAfter -cne $serialHashBefore) { throw "Analyzer changed raw serial evidence for $Name." }
+    if ([System.IO.Path]::GetFullPath($serialPath) -eq [System.IO.Path]::GetFullPath($analysisPath)) {
+        throw "Analyzer output would overwrite raw serial evidence for $Name."
+    }
     return Get-Content -LiteralPath $analysisPath -Raw | ConvertFrom-Json
 }
 function Add-Marker([System.Collections.Generic.List[string]]$Lines, [string]$Event, [string]$Raw0, [string]$Raw1, [bool]$WithSequence = $false) {
@@ -39,7 +45,8 @@ $kernelSource = Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp'
 $threadStoreHeader = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_threadstore_readiness.h'
 $transitionTest = Join-Path $root 'tools\dotnet\runtime-pack\tests\c188r12r4r5r4_threadstore_transition_test.cpp'
 $guestRunner = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1'
-foreach ($path in @($analyzer, $runtimeRoot, $platformSource, $palSource, $palCommonSource, $startupImportsSource, $runtimePackBuilder, $adapterSource, $kernelSource, $threadStoreHeader, $transitionTest, $guestRunner)) {
+$qacAdmissionModule = Join-Path $root 'scripts\dotnet\c188r12r4r5r4-qac-admission.psm1'
+foreach ($path in @($analyzer, $runtimeRoot, $platformSource, $palSource, $palCommonSource, $startupImportsSource, $runtimePackBuilder, $adapterSource, $kernelSource, $threadStoreHeader, $transitionTest, $guestRunner, $qacAdmissionModule)) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Required ThreadStore readiness input is missing: $path" }
 }
 
@@ -71,6 +78,7 @@ $runtimePackBuildText = Get-Content -LiteralPath $runtimePackBuilder -Raw
 $adapterText = Get-Content -LiteralPath $adapterSource -Raw
 $kernelText = Get-Content -LiteralPath $kernelSource -Raw
 $guestRunnerText = Get-Content -LiteralPath $guestRunner -Raw
+$qacAdmissionText = Get-Content -LiteralPath $qacAdmissionModule -Raw
 
 Assert-True ($runtimeInstance -match '(?s)ThreadStore::Create\(pRuntimeInstance\).*?m_pThreadStore\s*=\s*pThreadStore.*?g_pTheRuntimeInstance\s*=\s*pRuntimeInstance') 'ThreadStore is created and published before the RuntimeInstance singleton'
 Assert-True ($threadStore -match '(?s)ThreadStore::AttachCurrentThread\(bool fAcquireThreadStoreLock\).*?RawGetCurrentThread\(\).*?if\s*\(pAttachingThread->IsInitialized\(\)\).*?PalAttachThread\(pAttachingThread\).*?pAttachingThread->Construct\(\).*?TSF_Attached.*?m_ThreadList.PushHead') 'stock attachment is lazy, duplicate-safe, PAL-backed, constructed, flagged, then linked'
@@ -99,8 +107,12 @@ Assert-True ($palText -match 'existing != nullptr && existing != thread' -and $t
 Assert-True ($guestRunnerText -match '\$isThreadStoreReadiness\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''ThreadStoreReadiness''' -and
     $guestRunnerText -match "\[System\.IO\.FileMode\]::CreateNew" -and
     $guestRunnerText -match 'maxGuestBoots=1;automaticRetry=\$false' -and
-    $guestRunnerText -match 'function Test-QacRunningOwned\(' -and
-    $guestRunnerText -match 'Test-QacRunningOwned \$snapshot \$qacReservationId \$qacProcess\.Id' -and
+    $guestRunnerText -match 'ThreadStoreAttempt.*R2' -and
+    $guestRunnerText -match 'guest-launch-attempt-C188R12R4R5R4R2\.json' -and
+    $guestRunnerText -match 'qac-guest-002' -and
+    $guestRunnerText -match 'Get-QacInspection' -and
+    $guestRunnerText -match 'Test-QacLocalQemuChildIdentity' -and
+    $guestRunnerText -match 'qac-during-\{0:D3\}' -and
     $guestRunnerText -match 'archiveMembership\.threadStorePalCommonReplacement' -and
     $guestRunnerText -match 'removedCount\s*-ne\s*0' -and
     $guestRunnerText -match 'threadStoreReadinessPalCommonStockMember' -and
@@ -109,28 +121,24 @@ Assert-True ($guestRunnerText -match '\$isThreadStoreReadiness\s*=\s*\[string\]\
     $guestRunnerText -match '\$candidateManifest\.managedPe' -and
     $guestRunnerText -match '\$candidateManifest\.threadStoreReadinessPalCommonReplacementObject' -and
     $guestRunnerText -match 'PSObject\.Properties\[''stages''\]' -and
+    $guestRunnerText -match 'function Test-ModuleRegistrationStageObserved' -and
     $guestRunnerText.Contains('event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)') -and
     $guestRunnerText.Contains('outcome=(?:PASS|FAIL) callbacks=') -and
-    $guestRunnerText -match 'Test-QacClear \$before') 'future R4 runner requires the isolated phase, a CreateNew one-boot guard, normal exclusive QAC preflight, and the R4 analyzer'
-
-$runningOwnershipFunction = [regex]::Match($guestRunnerText,
-    '(?s)function Test-QacRunningOwned\([^\r\n]+\)\s*\{.*?\r?\n\}')
-Assert-True $runningOwnershipFunction.Success 'runner contains a bounded active-session ownership consistency predicate'
-Invoke-Expression $runningOwnershipFunction.Value
-$syntheticReservationId = '0123456789abcdef0123456789abcdef'
-$syntheticOwnerPid = 22980
-$syntheticList = @(
-    'Coordinator: Online (guideXOS QAC 2.0.0)',
-    'Reservations: 1',
-    "  $syntheticReservationId | guideXOSServer | acceptance | Running | queue 0 | LEON2_RDT\guideX (PID $syntheticOwnerPid) | owner Verified | child PID 27920",
-    'Managed sessions: 1'
-) -join "`n"
-$staleStatus = "Coordinator: Online`nQEMU processes: 0 (0 foreign)`nManaged sessions: 0; queued: 0; blocked: 0"
-$activeStatus = "Coordinator: Online`nQEMU processes: 1 (0 foreign)`nManaged sessions: 1; queued: 0; blocked: 0"
-$syntheticSnapshot = [pscustomobject]@{StatusExit=0;ListExit=0;Status=$staleStatus;List=$syntheticList}
-Assert-True (-not (Test-QacRunningOwned $syntheticSnapshot $syntheticReservationId $syntheticOwnerPid)) 'stale QAC status is rejected when the list already shows a running owned reservation'
-$syntheticSnapshot.Status = $activeStatus
-Assert-True (Test-QacRunningOwned $syntheticSnapshot $syntheticReservationId $syntheticOwnerPid) 'consistent status/list with a verified owner PID passes the active-session predicate'
+    $guestRunnerText -match 'Test-QacClear \$before' -and
+    $guestRunnerText -match 'ConvertFrom-QmpQueryStatusResponse') 'R4 runner uses a phase-specific CreateNew guard, immutable admission snapshots, verified reservation/child inspection, strict QMP response parsing, and the R4 analyzer'
+Assert-True ($qacAdmissionText -match 'function Test-QacRunningOwned' -and
+    $qacAdmissionText -match 'function Test-QacClear' -and
+    $qacAdmissionText -match 'function Test-QacCandidatePath' -and
+    $qacAdmissionText -match 'function Test-QacLocalQemuChildIdentity' -and
+    $qacAdmissionText -match 'function ConvertFrom-QmpQueryStatusResponse') 'shared admission predicates cover path, status/list, process identity, and strict QMP contracts'
+$moduleRegistrationObserver = [regex]::Match($guestRunnerText,
+    '(?s)function Test-ModuleRegistrationStageObserved\([^\r\n]+\)\s*\{.*?\r?\n\}')
+Assert-True $moduleRegistrationObserver.Success 'runner has a missing-property-safe analyzer stage observer'
+Invoke-Expression $moduleRegistrationObserver.Value
+$missingStagesAnalysis = [pscustomobject]@{outcome='INCOMPLETE_TRACE'}
+$presentStagesAnalysis = [pscustomobject]@{stages=@([pscustomobject]@{stageName='moduleRegistration'})}
+Assert-True (-not (Test-ModuleRegistrationStageObserved $missingStagesAnalysis)) 'missing optional analyzer stages report false under strict mode'
+Assert-True (Test-ModuleRegistrationStageObserved $presentStagesAnalysis) 'module registration is observed when the optional stage exists'
 
 # Parser fixtures exercise success, failure, and unfinished boundaries. These
 # are synthetic serial traces and do not claim that NativeAOT ran on a guest.
