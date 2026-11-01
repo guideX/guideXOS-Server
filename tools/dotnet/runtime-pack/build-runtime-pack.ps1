@@ -11,6 +11,7 @@ param(
     [switch]$C188R12R4R5R1InitDiagnostics,
     [switch]$C188R12R4R5R3InitReturnContract,
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
+    [switch]$C188R12R4R5R4R5GcInitProbes,
     [switch]$ProductionApplication,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
@@ -199,6 +200,14 @@ if ($C188R12R4R5R4ThreadStoreReadiness -and
      $PersistentCompositeLifecycle)) {
     throw 'C188R12R4R5R4 ThreadStore readiness requires the isolated C188R12R4R5R3 proof profile and cannot enter persistent production lifecycle builds.'
 }
+if ($C188R12R4R5R4R5GcInitProbes -and
+    (-not $C188R12R4R5R4ThreadStoreReadiness -or
+     -not $C188R12R4R5R3InitReturnContract -or
+     -not $C188R12R4R5R1InitDiagnostics -or
+     -not $C188R12R4R5GcOwnershipProof -or
+     -not $ProductionApplication -or $PersistentCompositeLifecycle)) {
+    throw 'C188R12R4R5R4R5 GC-init probes require the isolated R4 ThreadStore diagnostic proof profile.'
+}
 if ($C188R12R4FactoryAttribution -and
     (-not $ManagedAllocation -or -not $PersistentCompositeLifecycle)) {
     throw 'C188R12R4 factory attribution requires managed allocation and the persistent composite lifecycle.'
@@ -234,6 +243,7 @@ if (-not (Test-Path -LiteralPath $source)) { throw "Runtime-pack platform source
 $threadStoreCommonPalSource = Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_pal_common_replacement.cpp'
 $threadStoreCommonPalObject = Join-Path $OutputRoot 'guidexos_nativeaot_pal_common_replacement.threadstore.obj'
 $threadStoreCommonPalMember = 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\windows\PalRedhawkCommon.cpp.obj'
+$gcwksMember = 'nativeaot\Runtime\Full\CMakeFiles\Runtime.WorkstationGC.dir\__\__\__\gc\gcwks.cpp.obj'
 $c108Includes = ""
 $c108Defines = ""
 $c108SourceRoot = $null
@@ -365,6 +375,9 @@ if ($C188R12R4R5R1InitDiagnostics) {
 }
 if ($C188R12R4R5R4ThreadStoreReadiness) {
     $removedRuntimeMembers += $threadStoreCommonPalMember
+}
+if ($C188R12R4R5R4R5GcInitProbes) {
+    $removedRuntimeMembers += $gcwksMember
 }
 if ($NativeAotFpRepair) {
     $removedRuntimeMembers += @($fpStackMember, $fpCoffMember)
@@ -866,6 +879,113 @@ guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_DEBUG_HEADERS);
         }
         $productionGcEnvironmentObjects += " `"$runtimeInstanceObject`""
     }
+    if ($C188R12R4R5R4R5GcInitProbes) {
+        $gcWksSource = Join-Path $gcSourceRoot 'gc\gcwks.cpp'
+        $gcSource = Join-Path $gcSourceRoot 'gc\gc.cpp'
+        $gcInitRecordHeader = Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_gcinit_record.h'
+        $gcInitRecordImplementation = Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_gcinit_record.cpp'
+        foreach ($path in @($gcWksSource, $gcSource, $gcInitRecordHeader, $gcInitRecordImplementation)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Pinned Workstation GC initialization probe input is missing: $path"
+            }
+        }
+        $gcInitSourceRoot = Join-Path $OutputRoot 'gcinit-workstation-source'
+        New-Item -ItemType Directory -Path $gcInitSourceRoot -Force | Out-Null
+        $gcInitWksSource = Join-Path $gcInitSourceRoot 'gcwks.cpp'
+        $gcInitPatchedSource = Join-Path $gcInitSourceRoot 'gc.cpp'
+        Copy-Item -LiteralPath $gcWksSource -Destination $gcInitWksSource
+        Copy-Item -LiteralPath $gcSource -Destination $gcInitPatchedSource
+
+        $gcInitWksText = Get-Content -LiteralPath $gcInitWksSource -Raw
+        $gcInitWksText = Replace-ExactOneSource $gcInitWksText '(?m)^#include "common\.h"\s*$' @'
+#include "common.h"
+#include "guidexos_nativeaot_gcinit_record.h"
+#include "guidexos_nativeaot_gcinit_record.cpp"
+'@ 'Workstation GC initialization record inclusion'
+        Set-Content -LiteralPath $gcInitWksSource -Value $gcInitWksText -Encoding ASCII
+
+        $gcInitText = Get-Content -LiteralPath $gcInitPatchedSource -Raw
+        $gcInitText = Replace-ExactOneSource $gcInitText 'if \(!init_semi_shared\(\)\)\s*\{\s*GCToEEInterface::LogErrorToHost\("PER_HEAP_ISOLATED data members initialization failed"\);\s*hres = E_FAIL;\s*\}' @'
+const int initSemiSharedResult = init_semi_shared();
+    GuideXosNativeAotGcInitCompleteSemiShared(initSemiSharedResult);
+    if (!initSemiSharedResult)
+    {
+        GCToEEInterface::LogErrorToHost("PER_HEAP_ISOLATED data members initialization failed");
+        hres = E_FAIL;
+    }
+'@ 'init_semi_shared actual result'
+        $gcInitText = Replace-ExactOneSource $gcInitText 'gc_heap::init_semi_shared\(\)\s*\{\s*int ret = 0;' @'
+gc_heap::init_semi_shared()
+{
+    GuideXosNativeAotGcInitBeginSemiShared();
+    int ret = 0;
+'@ 'init_semi_shared entry'
+        $gcInitText = Replace-ExactOneSource $gcInitText '(?m)(#endif //MULTIPLE_HEAPS\s*\r?\n\s*GCConfig::SetGCHeapHardLimit\()' '$1' 'initialize_gc result anchor'
+        $gcInitText = [System.Text.RegularExpressions.Regex]::Replace(
+            $gcInitText,
+            '(?m)(#endif //MULTIPLE_HEAPS\s*\r?\n)(\s*GCConfig::SetGCHeapHardLimit\()',
+            '$1    GuideXosNativeAotGcInitRecordInitializeGcResult(static_cast<uint32_t>(hr));' + "`r`n" + '$2',
+            [System.Text.RegularExpressions.RegexOptions]::Singleline)
+        $gcInitText = Replace-ExactOneSource $gcInitText 'gc_heap::init_semi_shared\(\)\s*\{\s*GuideXosNativeAotGcInitBeginSemiShared\(\);' @'
+gc_heap::init_semi_shared()
+{
+    GuideXosNativeAotGcInitBeginSemiShared();
+'@ 'init_semi_shared marker stability'
+        $gcInitText = Replace-ExactOneSource $gcInitText 'WaitForGCEvent = new \(nothrow\) GCEvent;' @'
+GuideXosNativeAotGcInitBeginWaitForGCEvent();
+    WaitForGCEvent = new (nothrow) GCEvent;
+    GuideXosNativeAotGcInitCompleteWaitEventAllocation(WaitForGCEvent != nullptr);
+'@ 'WaitForGCEvent wrapper allocation result'
+        $gcInitText = Replace-ExactOneSource $gcInitText 'if \(!WaitForGCEvent->CreateManualEventNoThrow\(TRUE\)\)\s*\{' @'
+GuideXosNativeAotGcInitBeginWaitEventCreate();
+    const bool waitForGCEventCreated = WaitForGCEvent->CreateManualEventNoThrow(TRUE);
+    GuideXosNativeAotGcInitCompleteWaitEventCreate(waitForGCEventCreated);
+    if (!waitForGCEventCreated)
+    {
+'@ 'WaitForGCEvent creation result'
+        $gcInitText = Replace-ExactOneSource $gcInitText 'HRESULT GCHeap::Initialize\(\)\s*\{\s*#ifndef TRACE_GC\s*STRESS_LOG_VA \(1, \(ThreadStressLog::gcLoggingIsOffMsg\(\)\)\);\s*#endif\s*HRESULT hr = S_OK;' @'
+HRESULT GCHeap::Initialize()
+{
+    GuideXosNativeAotGcInitBeginHeap();
+#ifndef TRACE_GC
+    STRESS_LOG_VA (1, (ThreadStressLog::gcLoggingIsOffMsg()));
+#endif
+    HRESULT hr = S_OK;
+'@ 'GCHeap::Initialize entry'
+        $heapStart = $gcInitText.IndexOf('HRESULT GCHeap::Initialize()', [System.StringComparison]::Ordinal)
+        if ($heapStart -lt 0) { throw 'Pinned GCHeap::Initialize source anchor disappeared.' }
+        $heapTail = $gcInitText.Substring($heapStart)
+        $heapEndMarker = [System.Text.RegularExpressions.Regex]::Match($heapTail, '(?m)^////\r?\n// GC callback functions')
+        if (-not $heapEndMarker.Success) { throw 'Pinned GCHeap::Initialize end anchor disappeared.' }
+        $heapEnd = $heapStart + $heapEndMarker.Index
+        $heapText = $gcInitText.Substring($heapStart, $heapEnd - $heapStart)
+        $heapReturnCount = [System.Text.RegularExpressions.Regex]::Matches($heapText, '(?m)^\s*return\s+[^;\r\n]+;').Count
+        if ($heapReturnCount -lt 10) { throw "Pinned GCHeap::Initialize return map changed unexpectedly ($heapReturnCount return sites)." }
+        $heapText = [System.Text.RegularExpressions.Regex]::Replace(
+            $heapText, '(?m)^(\s*)return\s+([^;\r\n]+);',
+            '$1return GuideXosNativeAotGcInitRecordHeapResult(static_cast<int32_t>($2));')
+        $gcInitText = $gcInitText.Substring(0, $heapStart) + $heapText + $gcInitText.Substring($heapEnd)
+        Set-Content -LiteralPath $gcInitPatchedSource -Value $gcInitText -Encoding ASCII
+
+        $gcInitProbeObject = Join-Path $OutputRoot 'gcwks.cpp.obj'
+        $gcInitProbeBatch = Join-Path $OutputRoot 'build-gcwks-gcinit-probes.bat'
+        $gcInitProbeDefines = "$runtimeDiagnosticDefines /DNDEBUG /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES"
+        $gcInitProbeIncludes = "$runtimeDiagnosticIncludes /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime\Full')`" /I`"$(Join-Path $gcSourceRoot 'nativeaot\Runtime\eventpipe')`" /I`"$eventingIncludeDirectory`" /I`"$eventingIntermediate`" /I`"$(Join-Path $RuntimePackRoot 'src\platform')`""
+        @(
+            '@echo off'
+            'setlocal'
+            "call `"$vcvars`" >nul"
+            'if errorlevel 1 exit /b %errorlevel%'
+            "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcInitProbeDefines $gcInitProbeIncludes /Fo:`"$gcInitProbeObject`" `"$gcInitWksSource`""
+            'if errorlevel 1 exit /b %errorlevel%'
+            'exit /b 0'
+        ) | Set-Content -LiteralPath $gcInitProbeBatch -Encoding ASCII
+        & $gcInitProbeBatch
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $gcInitProbeObject -PathType Leaf)) {
+            throw 'Instrumented pinned Workstation gcwks.cpp replacement did not compile.'
+        }
+        $productionGcEnvironmentObjects += " `"$gcInitProbeObject`""
+    }
 }
 $threadStoreCommonPalObjectArgument = ''
 if ($C188R12R4R5R4ThreadStoreReadiness) {
@@ -932,6 +1052,10 @@ if ($C188R12R4R5R4ThreadStoreReadiness) {
     $expectedPatchedMembers += $threadStoreCommonPalMember
     $expectedPatchedArchiveMembers += [System.IO.Path]::GetFileName($threadStoreCommonPalObject)
 }
+if ($C188R12R4R5R4R5GcInitProbes) {
+    $expectedPatchedMembers += $gcwksMember
+    $expectedPatchedArchiveMembers += [System.IO.Path]::GetFileName($gcInitProbeObject)
+}
 $getMemberLeaf = { param([string]$Name) [System.IO.Path]::GetFileName($Name.Trim().Replace('/', '\')) }
 $patchedMemberCounts = [ordered]@{}
 for ($memberIndex = 0; $memberIndex -lt $expectedPatchedMembers.Count; $memberIndex++) {
@@ -963,6 +1087,7 @@ $archiveValidation = [ordered]@{
     removedMemberCounts = $removedMemberCounts
     duplicatePatchedMembers = (@($patchedMemberCounts.Values | Where-Object { $_ -gt 1 }).Count)
     threadStorePalCommonReplacement = if ($C188R12R4R5R4ThreadStoreReadiness) { [ordered]@{ stockMember = $threadStoreCommonPalMember; removedCount = $removedMemberCounts[$threadStoreCommonPalMember]; replacementObject = $threadStoreCommonPalObject; replacementSha256 = Get-Hash $threadStoreCommonPalObject; archiveMemberCount = $patchedMemberCounts[$threadStoreCommonPalMember] } } else { $null }
+    c188r12r4r5r4r5GcInitReplacement = if ($C188R12R4R5R4R5GcInitProbes) { [ordered]@{ stockMember = $gcwksMember; removedCount = $removedMemberCounts[$gcwksMember]; replacementObject = $gcInitProbeObject; replacementSha256 = Get-Hash $gcInitProbeObject; sourceCommit = $lock.ilCompiler.commit; sourceGcWksSha256 = Get-Hash $gcWksSource; instrumentedGcSha256 = Get-Hash $gcInitPatchedSource; recordHeaderSha256 = Get-Hash $gcInitRecordHeader; recordImplementationSha256 = Get-Hash $gcInitRecordImplementation; recordSizeBytes = 64; archiveMemberCount = $patchedMemberCounts[$gcwksMember] } } else { $null }
 }
 
 $lines = @(
@@ -1023,10 +1148,21 @@ if ($C188R12R4R5R4ThreadStoreReadiness) {
         $threadStoreSourceHashes[$relative] = Get-Hash $path
     }
 }
+$gcInitProbeSourceHashes = [ordered]@{}
+if ($C188R12R4R5R4R5GcInitProbes) {
+    $gcInitProbeSourceHashes = [ordered]@{
+        runtimeCommit = $lock.ilCompiler.commit
+        gcwks = Get-Hash $gcWksSource
+        gc = Get-Hash $gcSource
+        instrumentedGc = Get-Hash $gcInitPatchedSource
+        recordHeader = Get-Hash $gcInitRecordHeader
+        recordImplementation = Get-Hash $gcInitRecordImplementation
+    }
+}
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($C188R12R4R5R4R5GcInitProbes) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1" } elseif ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -1086,6 +1222,15 @@ $manifest = [ordered]@{
     c188r12r4r5r1InitDiagnostics = [bool]$C188R12R4R5R1InitDiagnostics
     c188r12r4r5r3InitReturnContract = [bool]$C188R12R4R5R3InitReturnContract
     c188r12r4r5r4ThreadStoreReadiness = [bool]$C188R12R4R5R4ThreadStoreReadiness
+    c188r12r4r5r4r5GcInitProbes = [bool]$C188R12R4R5R4R5GcInitProbes
+    c188r12r4r5r4r5GcInitSourceCommit = if ($C188R12R4R5R4R5GcInitProbes) { $lock.ilCompiler.commit } else { $null }
+    c188r12r4r5r4r5GcInitSourceFiles = $gcInitProbeSourceHashes
+    c188r12r4r5r4r5GcInitRecordObject = if ($C188R12R4R5R4R5GcInitProbes) { $gcInitProbeObject } else { $null }
+    c188r12r4r5r4r5GcInitRecordObjectSha256 = if ($C188R12R4R5R4R5GcInitProbes) { Get-Hash $gcInitProbeObject } else { $null }
+    c188r12r4r5r4r5GcInitMarker = if ($C188R12R4R5R4R5GcInitProbes) { 'C188R12R4R5R4R5_GCINIT' } else { $null }
+    c188r12r4r5r4r5GcInitRecordSizeBytes = if ($C188R12R4R5R4R5GcInitProbes) { 64 } else { 0 }
+    c188r12r4r5r4r5GcInitFieldCount = if ($C188R12R4R5R4R5GcInitProbes) { 16 } else { 0 }
+    c188r12r4r5r4r5GcInitFields = if ($C188R12R4R5R4R5GcInitProbes) { @('magic','version','invocation','heapState','finalHeapHresult','initializeGcHresult','semiSharedState','semiSharedResult','waitEventAllocationState','waitEventAllocationResult','waitEventCreateState','waitEventCreateResult','firstFailureSite','nativeStatus','nativeStatusSource','flags') } else { @() }
     c188r12r4r5r4ThreadStoreReadinessSourceCommit = if ($C188R12R4R5R4ThreadStoreReadiness) { $lock.ilCompiler.commit } else { $null }
     c188r12r4r5r4ThreadStoreReadinessSourceRoot = if ($C188R12R4R5R4ThreadStoreReadiness) { $lockedExternalRuntimeRoot } else { $null }
     c188r12r4r5r4ThreadStoreReadinessSourceFiles = $threadStoreSourceHashes

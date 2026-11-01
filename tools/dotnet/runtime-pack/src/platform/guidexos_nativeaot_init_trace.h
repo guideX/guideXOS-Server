@@ -38,6 +38,7 @@ enum guidexos_nativeaot_init_stage : uint32_t {
     GX_INIT_STAGE_MODULE_REGISTRATION = 0x0061u,
     GX_INIT_STAGE_CODE_MANAGER_REGISTRATION = 0x0062u,
     GX_INIT_STAGE_MODULE_INITIALIZE = 0x0063u,
+    GX_INIT_STAGE_GC_INTERNAL_RECORD = 0x0070u,
 };
 
 enum guidexos_nativeaot_init_event : uint32_t {

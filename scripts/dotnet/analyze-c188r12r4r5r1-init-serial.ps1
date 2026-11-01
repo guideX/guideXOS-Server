@@ -52,6 +52,8 @@ $legacyAdapterStatusLines = [System.Collections.Generic.List[object]]::new()
 $managedGates = [System.Collections.Generic.List[string]]::new()
 $managedCalls = [System.Collections.Generic.List[object]]::new()
 $managedReturns = [System.Collections.Generic.List[object]]::new()
+$gcInitRecords = [System.Collections.Generic.List[object]]::new()
+$gcInitMalformedMarkerCount = 0
 $sequence = 0
 foreach ($line in ($text -split "`r?`n")) {
     if ($line -match '^\[C188R12R4R5R1_INIT\] invocation=([0-9A-F]{8}) stage=([0-9A-F]{8}) event=([0-9A-F]{8}) code=([0-9A-F]{8}) singleton=([0-9A-F]{8})$') {
@@ -113,6 +115,151 @@ foreach ($line in ($text -split "`r?`n")) {
     }
     if ($line -match '^\[C188R12R4R5R1_INIT\] managed_main_return ordinal=([0-9A-F]{8}) result=([0-9A-F]{8})$') {
         $managedReturns.Add([pscustomobject]@{ordinal=$Matches[1].ToUpperInvariant(); result=$Matches[2].ToUpperInvariant()})
+        continue
+    }
+    if ($line.StartsWith('[C188R12R4R5R4R5_GCINIT]', [System.StringComparison]::Ordinal)) {
+        if ($line -match '^\[C188R12R4R5R4R5_GCINIT\] invocation=([0-9A-F]{8}) field=([0-9A-F]{8}) value=([0-9A-F]{8})$') {
+            $gcInitRecords.Add([pscustomobject]@{
+                sequence=$gcInitRecords.Count
+                invocation=$Matches[1].ToUpperInvariant()
+                field=[Convert]::ToUInt32($Matches[2],16)
+                fieldHex=$Matches[2].ToUpperInvariant()
+                value=[Convert]::ToUInt32($Matches[3],16)
+                valueHex=$Matches[3].ToUpperInvariant()
+            })
+        } else {
+            $gcInitMalformedMarkerCount++
+        }
+    }
+}
+
+$gcInitOutcome = 'not_observed'
+$gcInitComplete = $false
+$gcInitIssues = [System.Collections.Generic.List[string]]::new()
+$gcInitSnapshot = $null
+$gcInitResultUnavailable = [uint32]::MaxValue
+$gcInitEFail = [Convert]::ToUInt32('80004005',16)
+$gcInitOutOfMemory = [Convert]::ToUInt32('8007000E',16)
+$gcInitOuterTerminal = @($events | Where-Object { $_.stage -eq '00000032' -and $_.event -in @('00000002','00000003') } | Select-Object -Last 1)
+$gcInitOuterFailure = @($events | Where-Object { $_.stage -eq '00000032' -and $_.event -eq '00000003' } | Select-Object -First 1)
+if ($gcInitMalformedMarkerCount -gt 0) {
+    $gcInitOutcome = 'malformed_or_conflicting'
+    $gcInitIssues.Add('malformed_marker')
+} elseif ($gcInitRecords.Count -eq 0) {
+    if ($gcInitOuterFailure.Count -gt 0) { $gcInitOutcome = 'unresolved_internally' }
+} else {
+    $duplicateGcFields = @($gcInitRecords | Group-Object field | Where-Object { $_.Count -ne 1 })
+    $gcInvocations = @($gcInitRecords | Select-Object -ExpandProperty invocation -Unique)
+    $observedGcFields = @($gcInitRecords | ForEach-Object { [uint32]$_.field })
+    $expectedGcFieldOrder = @(0..15 | ForEach-Object { [uint32]$_ })
+    if ($duplicateGcFields.Count -gt 0 -or $gcInvocations.Count -ne 1 -or
+        ($observedGcFields.Count -gt 1 -and (($observedGcFields -join ',') -ne ($expectedGcFieldOrder[0..($observedGcFields.Count - 1)] -join ',')))) {
+        $gcInitOutcome = 'malformed_or_conflicting'
+        if ($duplicateGcFields.Count -gt 0) { $gcInitIssues.Add('duplicate_field') }
+        if ($gcInvocations.Count -ne 1) { $gcInitIssues.Add('conflicting_invocations') }
+        if ($observedGcFields.Count -gt 1 -and (($observedGcFields -join ',') -ne ($expectedGcFieldOrder[0..($observedGcFields.Count - 1)] -join ','))) {
+            $gcInitIssues.Add('impossible_field_order')
+        }
+    } elseif ($gcInitRecords.Count -ne 16) {
+        $gcInitOutcome = 'trace_incomplete'
+        $gcInitIssues.Add('missing_record_fields')
+    } else {
+        $f = @{}
+        foreach ($item in $gcInitRecords) { $f[[string]$item.field] = [uint32]$item.value }
+        $invocationWord = [Convert]::ToUInt32($gcInvocations[0],16)
+        $heapState = [uint32]$f['3']
+        $finalHr = [uint32]$f['4']
+        $initializeGcHr = [uint32]$f['5']
+        $semiState = [uint32]$f['6']
+        $semiResult = [uint32]$f['7']
+        $waitAllocState = [uint32]$f['8']
+        $waitAllocResult = [uint32]$f['9']
+        $waitCreateState = [uint32]$f['10']
+        $waitCreateResult = [uint32]$f['11']
+        $firstFailureSite = [uint32]$f['12']
+        $nativeStatus = [uint32]$f['13']
+        $nativeStatusSource = [uint32]$f['14']
+        if ($f['0'] -ne [uint32]0x43385235 -or $f['1'] -ne 1 -or $f['2'] -ne $invocationWord -or
+            ($invocationWord -eq 0 -and $heapState -ne 0) -or
+            ($invocationWord -ne 0 -and $heapState -eq 0)) {
+            $gcInitIssues.Add('record_identity_mismatch')
+        }
+        $gcStates = @(0,1,2,3,4,5,6)
+        if ($heapState -notin $gcStates -or $semiState -notin $gcStates -or
+            $waitAllocState -notin $gcStates -or $waitCreateState -notin $gcStates -or
+            $firstFailureSite -gt 4) {
+            $gcInitIssues.Add('unknown_source_defined_identifier')
+        }
+        if (($semiState -eq 2 -and $semiResult -eq 0) -or
+            ($semiState -eq 3 -and $semiResult -ne 0) -or
+            ($semiState -in @(0,1,4,5,6) -and $semiResult -ne $gcInitResultUnavailable) -or
+            ($waitAllocState -eq 2 -and $waitAllocResult -ne 1) -or
+            ($waitAllocState -eq 3 -and $waitAllocResult -ne 0) -or
+            ($waitAllocState -in @(0,1,4,5,6) -and $waitAllocResult -ne $gcInitResultUnavailable) -or
+            ($waitCreateState -eq 2 -and $waitCreateResult -ne 1) -or
+            ($waitCreateState -eq 3 -and $waitCreateResult -ne 0) -or
+            ($waitCreateState -in @(0,1,4,5,6) -and $waitCreateResult -ne $gcInitResultUnavailable)) {
+            $gcInitIssues.Add('state_result_contradiction')
+        }
+        if (($waitAllocState -ne 0 -or $waitCreateState -ne 0) -and $semiState -ne 2) {
+            $gcInitIssues.Add('wait_event_before_semi_shared_success')
+        }
+        if ($waitCreateState -ne 0 -and $waitAllocState -ne 2) {
+            $gcInitIssues.Add('event_create_without_wrapper')
+        }
+        if ($semiState -eq 3 -and ($initializeGcHr -ne $gcInitEFail -or $waitAllocState -ne 0 -or $waitCreateState -ne 0 -or $firstFailureSite -ne 1 -or $finalHr -ne $gcInitEFail -or $heapState -ne 3)) {
+            $gcInitIssues.Add('init_semi_shared_failure_contract_mismatch')
+        }
+        if ($waitAllocState -eq 3 -and ($finalHr -ne $gcInitOutOfMemory -or $firstFailureSite -ne 2 -or $waitCreateState -ne 0 -or $initializeGcHr -ne 0)) {
+            $gcInitIssues.Add('wait_event_allocation_failure_contract_mismatch')
+        }
+        if ($waitCreateState -eq 3 -and ($finalHr -ne $gcInitEFail -or $firstFailureSite -ne 3 -or $initializeGcHr -ne 0 -or $heapState -ne 3)) {
+            $gcInitIssues.Add('wait_event_create_failure_contract_mismatch')
+        }
+        if ($heapState -eq 2 -and ($finalHr -ne 0 -or $firstFailureSite -ne 0)) {
+            $gcInitIssues.Add('heap_success_contract_mismatch')
+        }
+        if (($heapState -eq 1 -and $finalHr -ne $gcInitResultUnavailable) -or
+            ($heapState -in @(0,4,5,6) -and $finalHr -ne $gcInitResultUnavailable) -or
+            ($heapState -eq 3 -and $finalHr -eq 0)) { $gcInitIssues.Add('heap_completion_result_contradiction') }
+        if ($nativeStatus -ne $gcInitResultUnavailable -and $nativeStatusSource -eq 0) { $gcInitIssues.Add('native_status_source_missing') }
+        if ($gcInitOuterTerminal.Count -gt 0 -and
+            (($gcInitOuterTerminal[0].event -eq '00000003' -and ($heapState -eq 2 -or $finalHr -eq 0)) -or
+             ($gcInitOuterTerminal[0].event -eq '00000002' -and ($heapState -eq 3 -or ($finalHr -ne 0 -and $finalHr -ne $gcInitResultUnavailable))))) {
+            $gcInitIssues.Add('outer_internal_heap_result_contradiction')
+        }
+
+        $gcInitComplete = $gcInitIssues.Count -eq 0
+        $gcInitSnapshot = [ordered]@{
+            invocation=('0x{0:X8}' -f $invocationWord)
+            heapState=$heapState; finalHeapHresult=('0x{0:X8}' -f $finalHr)
+            initializeGcHresult=('0x{0:X8}' -f $initializeGcHr)
+            semiSharedState=$semiState; semiSharedResult=('0x{0:X8}' -f $semiResult)
+            waitEventAllocationState=$waitAllocState; waitEventAllocationResult=('0x{0:X8}' -f $waitAllocResult)
+            waitEventCreateState=$waitCreateState; waitEventCreateResult=('0x{0:X8}' -f $waitCreateResult)
+            firstFailureSite=$firstFailureSite
+            nativeStatus=('0x{0:X8}' -f $nativeStatus); nativeStatusSource=$nativeStatusSource
+        }
+        if (-not $gcInitComplete) {
+            $gcInitOutcome = 'malformed_or_conflicting'
+        } elseif ($invocationWord -eq 0 -and $heapState -eq 0 -and $semiState -eq 0 -and $waitAllocState -eq 0 -and $waitCreateState -eq 0) {
+            $gcInitOutcome = 'not_entered'
+        } elseif ($semiState -eq 1 -or $waitAllocState -eq 1 -or $waitCreateState -eq 1 -or
+                  $heapState -eq 1 -or $semiState -in @(4,5,6) -or
+                  $waitAllocState -in @(4,5,6) -or $waitCreateState -in @(4,5,6) -or
+                  ($semiState -eq 2 -and $initializeGcHr -eq $gcInitResultUnavailable)) {
+            $gcInitOutcome = 'internal_operation_incomplete'
+        } elseif ($semiState -eq 3) {
+            $gcInitOutcome = 'init_semi_shared_failed'
+        } elseif ($waitAllocState -eq 3) {
+            $gcInitOutcome = 'wait_for_gc_event_allocation_failed'
+        } elseif ($waitCreateState -eq 3) {
+            $gcInitOutcome = 'wait_for_gc_event_create_failed'
+        } elseif ($heapState -eq 2 -and $semiState -eq 2 -and $waitAllocState -eq 2 -and $waitCreateState -eq 2) {
+            $gcInitOutcome = 'gc_heap_initialize_succeeded'
+        } else {
+            $gcInitOutcome = 'unresolved_internally'
+        }
     }
 }
 
@@ -248,6 +395,16 @@ $analysis = [ordered]@{
     managedMainReturned=$managedMainReturned
     managedMainSuppressedOnInitializationFailure=$managedMainSuppressedOnInitializationFailure
     managedMainBlockedOnAdapterFailure=($adapterOutcome -eq 'failure' -and -not $managedMainDispatched)
+    gcInitializationInternal=[ordered]@{
+        marker='C188R12R4R5R4R5_GCINIT'
+        outcome=$gcInitOutcome
+        recordCount=$gcInitRecords.Count
+        malformedMarkerCount=$gcInitMalformedMarkerCount
+        traceComplete=[bool]$gcInitComplete
+        outerGCHeapInitializeFailureObserved=($gcInitOuterFailure.Count -gt 0)
+        issues=@($gcInitIssues)
+        record=$gcInitSnapshot
+    }
     stages=@($pairedStages)
     events=@($events)
 }

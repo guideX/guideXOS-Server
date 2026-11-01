@@ -1,7 +1,8 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$CandidateRoot = '',
-    [switch]$ThreadStoreReadiness
+    [switch]$ThreadStoreReadiness,
+    [switch]$GcInitProbes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,8 +10,11 @@ Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
-    $phaseRoot = if ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
+    $phaseRoot = if ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
     $CandidateRoot = Join-Path $root "out\dotnet\$phaseRoot\candidate-$stamp"
+}
+if ($GcInitProbes -and -not $ThreadStoreReadiness) {
+    throw 'C188R12R4R5R4R5 requires the R4 ThreadStore diagnostic profile.'
 }
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $allowed = [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet')) + [System.IO.Path]::DirectorySeparatorChar
@@ -52,7 +56,7 @@ $elfPath = Join-Path $artifactRoot 'HostLogProof.elf'
 $embeddedRaw = Join-Path $candidate 'gc-ownership-artifact.raw.o'
 $embeddedObject = Join-Path $candidate 'gc-ownership-artifact.o'
 $esp = Join-Path $candidate 'esp'
-$kernelBuildPrefix = if ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
+$kernelBuildPrefix = if ($GcInitProbes) { 'build/c188r12r4r5r4r5-gc-init-probes-' } elseif ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
 $kernelBuildDir = $kernelBuildPrefix + [guid]::NewGuid().ToString('N')
 $kernel = Join-Path $root "kernel\$($kernelBuildDir.Replace('/','\'))\bin\kernel.elf"
 $bootloader = Join-Path $root 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
@@ -82,6 +86,7 @@ $managedBuildArguments = @(
     '-ManagedProjectMode', 'GcOwnershipProof'
 )
 if ($ThreadStoreReadiness) { $managedBuildArguments += '-C188R12R4R5R4ThreadStoreReadiness' }
+if ($GcInitProbes) { $managedBuildArguments += '-C188R12R4R5R4R5GcInitProbes' }
 Invoke-Logged 'pwsh' $managedBuildArguments (Join-Path $candidate 'managed-build.log')
 
 Require-File $pePath 'NativeAOT proof PE'
@@ -99,6 +104,15 @@ if (-not [bool]$runtimeManifest.c188r12r4r5GcOwnershipProof -or
 }
 if ([bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness -ne [bool]$ThreadStoreReadiness) {
     throw 'Runtime-pack ThreadStore-readiness profile does not match the requested candidate mode.'
+}
+if ([bool]$runtimeManifest.c188r12r4r5r4r5GcInitProbes -ne [bool]$GcInitProbes) {
+    throw 'Runtime-pack GC-init probe profile does not match the requested candidate mode.'
+}
+if ($GcInitProbes -and
+    ([string]$runtimeManifest.c188r12r4r5r4r5GcInitMarker -cne 'C188R12R4R5R4R5_GCINIT' -or
+     [int]$runtimeManifest.c188r12r4r5r4r5GcInitRecordSizeBytes -ne 64 -or
+     [int]$runtimeManifest.c188r12r4r5r4r5GcInitFieldCount -ne 16)) {
+    throw 'Runtime-pack GC-init record layout does not match the bounded source contract.'
 }
 if ($ThreadStoreReadiness -and
     ([string]::IsNullOrWhiteSpace([string]$runtimeManifest.c188r12r4r5r4PalCommonReplacementObject) -or
@@ -135,6 +149,13 @@ $requiredSymbols = @(
     'S_P_CoreLib_System_Runtime_InteropServices_GCHandle___ctor',
     'S_P_CoreLib_System_Runtime_InteropServices_GCHandle__Free'
 )
+if ($GcInitProbes) {
+    # The begin/complete helpers are intentionally small and may be inlined
+    # into the linked GCHeap::Initialize body under /O2.  Require the external
+    # post-return accessor plus the HRESULT wrapper that remains callable,
+    # along with the actual Workstation-GC object identity below.
+    $requiredSymbols += @('GuideXosNativeAotGcInitRecordHeapResult','GuideXosNativeAotGcInitGetField')
+}
 foreach ($symbol in $requiredSymbols) {
     if (-not $mapText.Contains($symbol)) { throw "NativeAOT proof map lacks required symbol: $symbol" }
 }
@@ -146,6 +167,12 @@ if ($ThreadStoreReadiness) {
         $mapText.Contains('Runtime.WorkstationGC:PalRedhawkCommon.cpp.obj')) {
         throw 'R4 NativeAOT link did not select the freestanding stack-bounds PAL implementation.'
     }
+}
+if ($GcInitProbes -and -not $mapText.Contains('Runtime.WorkstationGC:gcwks.cpp.obj')) {
+    throw 'The NativeAOT map does not identify the instrumented pinned Workstation GC object.'
+}
+if ($GcInitProbes -and $mapText -notmatch '\?Initialize@GCHeap@WKS@@UEAAJXZ\s+[0-9A-Fa-f]{16}\s+f\s+Runtime\.WorkstationGC:gcwks\.cpp\.obj') {
+    throw 'The NativeAOT map does not retain the concrete instrumented Workstation GCHeap::Initialize implementation.'
 }
 if ($mapText.Contains('g_guideXosManagedHeap')) { throw 'NativeAOT proof image unexpectedly contains the C188 image-backed arena.' }
 
@@ -257,6 +284,7 @@ $kernelFeatures = @(
 $kernelDefines = ($kernelFeatures | ForEach-Object { '-D' + $_ }) -join ' '
 $kernelDefines += ' -DGXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST -DGXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS -DGXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT'
 if ($ThreadStoreReadiness) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }
+if ($GcInitProbes) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES' }
 $makeArgs = @(
     '-C', 'kernel', 'ARCH=amd64', "BUILD_DIR=$kernelBuildDir",
     'GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1',
@@ -276,6 +304,9 @@ if ($kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST' -
 }
 if ($ThreadStoreReadiness -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS') {
     throw 'ThreadStore-readiness kernel build does not show its isolated marker and handoff define.'
+}
+if ($GcInitProbes -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES') {
+    throw 'GC-init probe kernel build does not show its isolated marker define.'
 }
 
 $espBoot = Join-Path $esp 'EFI\BOOT'
@@ -319,23 +350,26 @@ if ([bool]$productionRuntimeManifest.c188r12r4r5GcOwnershipProof -or
     [bool]$productionRuntimeManifest.c188r12r4r5r1InitDiagnostics -or
     [bool]$productionRuntimeManifest.c188r12r4r5r3InitReturnContract -or
     [bool]$productionRuntimeManifest.c188r12r4r5r4ThreadStoreReadiness -or
+    [bool]$productionRuntimeManifest.c188r12r4r5r4r5GcInitProbes -or
     $productionMapText.Contains('C188R12R4R5R1_INIT') -or
     $productionMapText.Contains('C188R12R4R5R3_INIT') -or
     $productionMapText.Contains('C188R12R4R5R4_THREAD') -or
+    $productionMapText.Contains('C188R12R4R5R4R5_GCINIT') -or
+    $productionMapText.Contains('GuideXosNativeAotGcInit') -or
     $productionMapText.Contains('GuideXosNativeAotGcStartupGetRhInitializeRawResult')) {
     throw 'Proof-disabled production NativeAOT outputs contain C188 return-contract instrumentation.'
 }
 
 $manifest = [ordered]@{
-    result = if ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS_GUEST' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
+    result = if ($GcInitProbes) { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' } elseif ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS_GUEST' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
     repoRoot = $root
     head = (& git -C $root rev-parse HEAD).Trim()
     branch = (& git -C $root branch --show-current).Trim()
     candidateRoot = $candidate
-    mode = if ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
+    mode = if ($GcInitProbes) { 'GcInitFailureAttribution' } elseif ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
     productionApplicationStartupOnly = $true
     managedMainEnteredByCandidate = $false
-    managedMainGateReason = if ($ThreadStoreReadiness) { 'Candidate is unbooted; a successful RhInitialize proceeds through module registration and the pinned stock reverse-P/Invoke attachment helper before ManagedMain.' } else { 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.' }
+    managedMainGateReason = if ($GcInitProbes) { 'Candidate is unbooted; after RhInitialize returns, the adapter snapshots the internal GC initialization record. Managed dispatch remains governed by actual initialization success and the established R4 thread-attachment gate.' } elseif ($ThreadStoreReadiness) { 'Candidate is unbooted; a successful RhInitialize proceeds through module registration and the pinned stock reverse-P/Invoke attachment helper before ManagedMain.' } else { 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.' }
     managedGraphCallbacks = 0
     isolatedKernelBuildDirectory = $kernelBuildDir
     runtimePackManifest = $runtimeManifestPath
@@ -344,6 +378,9 @@ $manifest = [ordered]@{
     runtimeInitDiagnostics = [bool]$runtimeManifest.c188r12r4r5r1InitDiagnostics
     c188R12R4R5R3InitReturnContract = [bool]$runtimeManifest.c188r12r4r5r3InitReturnContract
     c188R12R4R5R4ThreadStoreReadiness = [bool]$runtimeManifest.c188r12r4r5r4ThreadStoreReadiness
+    c188R12R4R5R4R5GcInitProbes = [bool]$runtimeManifest.c188r12r4r5r4r5GcInitProbes
+    gcInitProbeSourceFiles = $runtimeManifest.c188r12r4r5r4r5GcInitSourceFiles
+    gcInitRecordSha256 = $runtimeManifest.c188r12r4r5r4r5GcInitRecordObjectSha256
     threadStoreReadinessRuntimeSourceCommit = $runtimeManifest.c188r12r4r5r4ThreadStoreReadinessSourceCommit
     threadStoreReadinessRuntimeSourceFiles = $runtimeManifest.c188r12r4r5r4ThreadStoreReadinessSourceFiles
     threadStoreReadinessPalCommonStockMember = $runtimeManifest.c188r12r4r5r4PalCommonStockMember
@@ -383,6 +420,7 @@ $manifest = [ordered]@{
         gcVmCommit='00000052'; gcVmDecommit='00000053'; gcVmRelease='00000054'
         gcVmAdapterInit='00000055'; managedReversePInvoke='00000060'
         moduleRegistration='00000061'; codeManagerRegistration='00000062'; moduleInitialize='00000063'
+        gcInternalRecord='00000070'
     }
     initializationSingletonBits = [ordered]@{
         bit0='RuntimeInstance pointer published'; bit1='ThreadStore pointer available through RuntimeInstance'
@@ -390,7 +428,17 @@ $manifest = [ordered]@{
         bit4='RhConfig pointer available'; bit5='guideXOS NativeAOT modules initialized'
         bit6='code manager registered'; bit7='ThreadStore current-thread accessor non-null (not proof of list attachment)'
     }
-    adapterVersion = if ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness-v1' } else { 'c188r12r4r5r3-init-return-contract-v1' }
+    adapterVersion = if ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes-v1' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness-v1' } else { 'c188r12r4r5r3-init-return-contract-v1' }
+    gcInitializationInternalRecord = if ($GcInitProbes) { [ordered]@{
+        marker='C188R12R4R5R4R5_GCINIT'
+        serialStageSentinel='00000070'
+        recordSizeBytes=[int]$runtimeManifest.c188r12r4r5r4r5GcInitRecordSizeBytes
+        fieldCount=[int]$runtimeManifest.c188r12r4r5r4r5GcInitFieldCount
+        fields=@($runtimeManifest.c188r12r4r5r4r5GcInitFields)
+        snapshotTiming='after RhInitialize returns'
+        inFlightOperationsFinalizedAs='did_not_return'
+        nativeStatusAvailable=$false
+    } } else { $null }
     runnerVersion = if ($ThreadStoreReadiness) { 'c188r12r4r5r4r1-one-boot-guard-planned' } else { 'c188r12r4r5r1-qac-runner-v1' }
     nativeRhInitialize = [ordered]@{
         signature = 'extern "C" bool RhInitialize(bool isDll)'
@@ -459,6 +507,11 @@ $manifest = [ordered]@{
         runtimePackPlatformObject = Hash-File ([string]$runtimeManifest.object)
         runtimePackLibrary = Hash-File ([string]$runtimeManifest.adaptedRuntimeLibrary)
         runtimePackStartupReplacementSource = Hash-File (Join-Path $runtimeRoot 'guidexos_nativeaot_startup_replacement.cpp')
+        gcInitRecordHeader = if ($GcInitProbes) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_gcinit_record.h') } else { $null }
+        gcInitRecordImplementation = if ($GcInitProbes) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_gcinit_record.cpp') } else { $null }
+        gcInitReplacementObject = if ($GcInitProbes) { Hash-File ([string]$runtimeManifest.c188r12r4r5r4r5GcInitRecordObject) } else { $null }
+        gcInitInstrumentedSource = if ($GcInitProbes) { [string]$runtimeManifest.c188r12r4r5r4r5GcInitSourceFiles.instrumentedGc } else { $null }
+        gcInitMarkerSinkSource = if ($GcInitProbes) { Hash-File (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') } else { $null }
         runtimePackManifest = Hash-File $runtimeManifestPath
         runtimePackVersionHeader = Hash-File ([string]$runtimeManifest.c188r12r4r5r1RuntimeVersionHeader)
         productionNativeAotBuildLog = Hash-File (Join-Path $productionRoot 'production-nativeaot-build.log')

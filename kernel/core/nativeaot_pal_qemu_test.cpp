@@ -67,6 +67,16 @@ void __cdecl nativeAotInitTraceSink(
         return;
     }
     ++g_initTraceSerialLines;
+    if (stage == GX_INIT_STAGE_GC_INTERNAL_RECORD) {
+        serial::puts("[C188R12R4R5R4R5_GCINIT] invocation=");
+        serial::put_hex32(invocation);
+        serial::puts(" field=");
+        serial::put_hex32(event);
+        serial::puts(" value=");
+        serial::put_hex32(result);
+        serial::puts("\n");
+        return;
+    }
     serial::puts("[C188R12R4R5R1_INIT] invocation=");
     serial::put_hex32(invocation);
     serial::puts(" stage=");

@@ -5,6 +5,9 @@
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
 #include "../platform/guidexos_nativeaot_threadstore_readiness.h"
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES)
+#include "../platform/guidexos_nativeaot_gcinit_record.h"
+#endif
 
 /*
  * Minimal proof-image adapter for the existing kernel startup harness.
@@ -38,6 +41,17 @@ guidexos_nativeaot_init_trace_sink g_initTraceSink = nullptr;
 uint32_t captureInitSingletonBits() {
     return GuideXosNativeAotCaptureInitSingletonBits();
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES)
+void emitGcInitRecord() {
+    if (g_initTraceSink == nullptr) return;
+    const uint32_t invocation = GuideXosNativeAotGcInitGetField(GX_GCINIT_FIELD_INVOCATION);
+    for (uint32_t field = 0u; field < GX_GCINIT_FIELD_COUNT; ++field) {
+        g_initTraceSink(invocation, GX_INIT_STAGE_GC_INTERNAL_RECORD,
+            field, GuideXosNativeAotGcInitGetField(field), 0u);
+    }
+}
+#endif
 }
 
 extern "C" void __cdecl guideXosNativeAotInitTraceSetInvocation(uint32_t invocation) {
@@ -144,6 +158,10 @@ extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void
     const uint32_t singletonBits = captureInitSingletonBits();
     guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_RH_INITIALIZE,
         nativeResult, g_startupResult, singletonBits);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES)
+    GuideXosNativeAotGcInitFinalizeForRead();
+    emitGcInitRecord();
+#endif
 #endif
     return (int)g_startupResult;
 }
