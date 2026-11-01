@@ -14,6 +14,7 @@ $recordTest = Join-Path $root 'tools\dotnet\runtime-pack\tests\c188r12r4r5r4r5_g
 $runtimeBuild = Join-Path $root 'tools\dotnet\runtime-pack\build-runtime-pack.ps1'
 $adapterSource = Join-Path $root 'tools\dotnet\runtime-pack\src\probes\guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.cpp'
 $kernelSource = Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp'
+$guestRunner = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1'
 $pinnedGcSource = Join-Path $root 'out\dotnet\gc-feasibility-baseline\nativeaot-runtime\src\coreclr\gc\gc.cpp'
 $r3Serial = Join-Path $root 'out\dotnet\c188r12r4r5r4-threadstore-readiness\candidate-20261031T174601065Z\qac-guest-003\serial.log'
 
@@ -60,7 +61,7 @@ function New-OuterLines([bool]$Failure) {
     return ,$lines
 }
 
-foreach ($path in @($analyzer,$recordHeader,$recordSource,$recordTest,$runtimeBuild,$adapterSource,$kernelSource,$pinnedGcSource,$r3Serial)) {
+foreach ($path in @($analyzer,$recordHeader,$recordSource,$recordTest,$runtimeBuild,$adapterSource,$kernelSource,$guestRunner,$pinnedGcSource,$r3Serial)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required GC-init qualification input is missing: $path" }
 }
 
@@ -78,11 +79,21 @@ $gcText = Get-Content -LiteralPath $pinnedGcSource -Raw
 $buildText = Get-Content -LiteralPath $runtimeBuild -Raw
 $adapterText = Get-Content -LiteralPath $adapterSource -Raw
 $kernelText = Get-Content -LiteralPath $kernelSource -Raw
+$guestRunnerText = Get-Content -LiteralPath $guestRunner -Raw
 Assert-True ($gcText.Contains('if (!init_semi_shared())') -and $gcText.Contains('WaitForGCEvent->CreateManualEventNoThrow(TRUE)')) 'pinned implementation contains both audited operation boundaries'
 Assert-True ($buildText.Contains('gcwks.cpp.obj') -and $buildText.Contains('C188R12R4R5R4R5_GC_INIT_PROBES')) 'build recipe replaces the linked Workstation GC member only for the diagnostic profile'
 Assert-True ($adapterText.Contains('GuideXosNativeAotGcInitGetField') -and $adapterText.Contains('GuideXosNativeAotGcInitFinalizeForRead();') -and $adapterText.Contains('emitGcInitRecord();')) 'adapter finalizes and reads the record after RhInitialize returns'
 Assert-True ($kernelText.Contains('C188R12R4R5R4R5_GCINIT') -and $kernelText.Contains('GX_INIT_STAGE_GC_INTERNAL_RECORD')) 'serial sink emits the bounded GCINIT marker family'
 Assert-True (-not (Select-String -LiteralPath $recordSource -Pattern '\b(new|malloc|calloc|realloc|printf|puts|CreateEvent|GetLastError)\b' -Quiet)) 'record implementation contains no allocator, logger, or Windows/PAL service call'
+Assert-True ($guestRunnerText.Contains("mode -ceq 'GcInitFailureAttribution'") -and $guestRunnerText.Contains('PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST')) 'QAC runner accepts only the qualified R4R5 GC-init candidate profile'
+Assert-True ($guestRunnerText.Contains('qac-guest-r4r5r1-001') -and $guestRunnerText.Contains('guest-launch-attempt-C188R12R4R5R4R5R1.json')) 'R4R5R1 uses a distinct guest directory and one-boot guard'
+Assert-True ($guestRunnerText.Contains("if (`$isGcInitFailureAttribution) { Join-Path `$phaseRoot `$runDirectory }")) 'R4R5R1 guest evidence stays outside the qualified candidate tree'
+Assert-True ($guestRunnerText.Contains('[System.IO.FileMode]::CreateNew') -and $guestRunnerText.Contains('maxGuestBoots=1;automaticRetry=$false')) 'R4R5R1 consumes its guard only after successful preflight and forbids retries'
+Assert-True ($guestRunnerText.Contains('Test-QacClearWithCensus -Snapshot $before') -and $guestRunnerText.Contains('Get-WindowsQemuProcessCensus')) 'R4R5R1 requires complete QAC and Windows QEMU admission evidence'
+Assert-True ($guestRunnerText.Contains('c188r12r4r5r4r5GcInitRecordObject') -and $guestRunnerText.Contains('gcinit-workstation-source') -and $guestRunnerText.Contains('instrumented Workstation GC object')) 'R4R5R1 rechecks pinned and instrumented GC source/object identities before admission'
+Assert-True ($guestRunnerText.Contains('analyze-c188r12r4r5r1-init-serial.ps1') -and $guestRunnerText.Contains('analyze-c188r12r4r5r4-threadstore-readiness.ps1')) 'R4R5R1 preserves separate GC-init and ThreadStore analyses'
+Assert-True ($guestRunnerText.Contains('moduleRegistrationAttemptedByCandidate=Test-ModuleRegistrationStageObserved $serialAnalysis')) 'R4R5R1 reports module registration from observed stage evidence'
+Assert-True ($guestRunnerText.Contains('GC_INIT_ROOT_CAUSE_PROVEN') -and $guestRunnerText.Contains('DIAGNOSTIC_INCONCLUSIVE')) 'explicit internal failures and missing or incomplete records receive distinct runner outcomes'
 
 $eFail = [Convert]::ToUInt32('80004005',16)
 $eOutOfMemory = [Convert]::ToUInt32('8007000E',16)
