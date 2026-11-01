@@ -13113,8 +13113,8 @@ properties are included through the same live lookup rules as JS100 `reduce()`.
 
 The 1,024-position length and existing runtime object, property, Array slot,
 function, environment, execution-budget, and call-depth limits are unchanged.
-The Array prototype now has fifteen named method/protocol entries. Generic
-array-like receivers and unrelated Array methods remain outside JS101.
+Following JS101, the Array prototype has fifteen named method/protocol entries.
+Generic array-like receivers and unrelated Array methods remain outside JS101.
 
 The native lane is `tests/navigator_javascript_js101_test.cpp`, run by
 `scripts/smoke-navigator-javascript-js101.ps1`. The hosted fixture is
@@ -13157,3 +13157,71 @@ baseline (8,398,274 bytes, SHA-256
 42 generated Navigator fixtures (458,372 bytes) match the saved path, size, and
 SHA-256 manifest. Qualification was hosted-only; no QEMU launch or QAC
 admission was performed.
+
+## JS102 — bounded `Array.prototype.findLast()`
+
+JS102 adds `Array.prototype.findLast(callback[, thisArg])` as a native method on
+the existing Array prototype. It requires an Array receiver and callable
+callback; generic array-like receivers are unsupported. The callback receives
+`(value, index, array)`, with `thisArg` forwarded using the runtime's existing
+callback dispatch. The method scans from the captured entry length toward zero,
+stops at the first truthy callback result, and returns that position's value.
+It returns `undefined` for an empty Array or when no callback result is truthy.
+
+The method shares `traverseArray` with the established forward Array callbacks.
+Its reverse cursor starts one past the captured length and is decremented only
+while nonzero, avoiding unsigned underflow while visiting index zero exactly
+once. `find`, `findIndex`, and other forward traversals keep their established
+direction and behavior. `findLast` visits every position, including holes,
+passing `undefined` for a missing property; prototype-aware live numeric lookup
+allows inherited indexes to supply a value. Explicit `undefined`, a missing
+slot, and ordinary exhaustion all produce an `undefined` return, while the
+callback trace distinguishes a successful undefined match from exhaustion.
+
+The initial length is the traversal bound: appends beyond it are ignored, while
+changes to an unvisited index (including shrinking the Array or changing an
+inherited numeric value) are observed when that index is reached. Already
+visited indexes are not revisited. The callback's returned truthy value selects
+the current element; it is not returned in place of that element. Runtime
+references stay in the local tagged `Value`, so matches may retain primitive,
+object, or Array values through nested callbacks and Events without a persistent
+accumulator or staging storage. Existing Array, object, property, function,
+environment, execution-budget, and call-depth limits remain in force; the
+native Array length bound remains 1,024 positions. The Array prototype now has
+sixteen named method/protocol entries.
+
+The native lane is `tests/navigator_javascript_js102_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js102.ps1`. The hosted fixture is
+`navigator-smoke/javascript-js102.html`; `server.cpp` registers checks for the
+fixture, nested Event searches, and callback-error propagation. Native checks
+cover reverse order and callback arguments, `thisArg`, truthiness and early
+exit, sparse and inherited indexes, undefined matches, live mutation, retained
+values, nested Array methods and Events, errors, storage/layout bounds, and the
+1,024-position maximum.
+
+JS102 qualification completed on 2026-11-01. The complete JavaScript matrix
+passed **104/104 lanes** and **17,283/17,283 reported assertions across 63
+assertion lanes**. The focused JS102 lane passed **29/29 checks**, with strict
+C++17 compilation under `-Wall -Wextra -Werror -pedantic`. The JS102 fixture
+reports **16 assertions and zero failures**; all three hosted JS102 checks
+passed.
+
+The hosted Navigator aggregate reported **741 passed, 7 failed, 748 total**.
+The seven failures remain the established CSS checks (phases 3C, 3G, 6A, 6B's
+three checks, and 6C), the same seven failures recorded for JS100 and JS101.
+JS102 adds three passing hosted checks without adding aggregate failures.
+
+The production build succeeded. The shared `traverseArray` static frame is
+544 bytes, `invokeNative` is 736 bytes, and `invokeFunction` is 560 bytes;
+`hasArrayIndex` and `readArrayIndex` are 144 and 176 bytes. Runtime layout
+remains `RuntimeObject` 88 bytes and `RuntimeArrayElement` 48 bytes. These are
+host compiler static-frame measurements, not a bare-metal stack guarantee.
+
+Hosted qualification used a freshly built executable (8,789,989 bytes,
+SHA-256 `37A3E9120935A1B24CCED5FB68AD28D2B02FD3684C410CEE743A9BBB3FD684FC`).
+After qualification, `guideXOSServer.exe` was restored and verified against
+its observed baseline (8,398,274 bytes, SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`). The
+42 generated Navigator fixtures (458,372 bytes) still match the saved path,
+size, and SHA-256 manifest. Qualification was hosted-only; no QEMU launch or
+QAC admission was performed.

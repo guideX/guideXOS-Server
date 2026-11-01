@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Navigator JavaScript JS102</title></head>
+<body>
+<h1>Navigator JavaScript JS102</h1>
+<pre id="result">JS102:pending</pre>
+<button id="find-last-event-a" type="button">Run JS102 findLast event</button>
+<button id="find-last-event-b" type="button">Nested JS102 findLast event</button>
+<button id="find-last-error-event" type="button">Run JS102 findLast error</button>
+<script>
+var assertions = 0;
+var failures = 0;
+function verify(condition) {
+  assertions=assertions+1;
+  if (!condition) failures=failures+1;
+}
+
+var source = [5,12,50,130,44];
+var indices = "";
+var calls = 0;
+var result = source.findLast(function(value,index,array) {
+  calls=calls+1;
+  indices=indices+index;
+  return array===source&&value>45;
+});
+verify(result===130&&calls===2&&indices==="43");
+
+var context = {target:12};
+var contextCalls = 0;
+var contextOk = true;
+var contextSource = [10,12,20];
+var contextResult = contextSource.findLast(function(value,index,array) {
+  contextCalls=contextCalls+1;
+  contextOk=contextOk&&this===context&&array===contextSource;
+  return value===this.target;
+},context);
+verify(contextResult===12&&contextCalls===2&&contextOk);
+
+var sparse = [];
+sparse.length = 4;
+sparse[1] = 20;
+var sparseIndices = "";
+var sparseValues = "";
+sparse.findLast(function(value,index) {
+  sparseIndices=sparseIndices+index;
+  if (value===undefined) sparseValues=sparseValues+"U,";
+  else sparseValues=sparseValues+value+",";
+  return false;
+});
+verify(sparseIndices==="3210"&&sparseValues==="U,U,20,U,");
+
+var holeCalls = 0;
+var holeMatch = sparse.findLast(function(value) {
+  holeCalls=holeCalls+1;
+  return value===undefined;
+});
+verify(holeMatch===undefined&&holeCalls===1);
+
+var explicitCalls = 0;
+var explicitMatch = [10,undefined,30].findLast(function(value,index) {
+  explicitCalls=explicitCalls+1;
+  return index===1&&value===undefined;
+});
+verify(explicitMatch===undefined&&explicitCalls===2);
+
+var noMatchCalls = 0;
+var noMatch = [1,2,3].findLast(function() {
+  noMatchCalls=noMatchCalls+1;
+  return false;
+});
+verify(noMatch===undefined&&noMatchCalls===3);
+
+var capturedSource = [10,20,30];
+var captured = capturedSource.findLast(function(value,index,array) {
+  array[index]=999;
+  return true;
+});
+verify(captured===30&&capturedSource[2]===999);
+
+var liveSource = [1,2,3];
+var liveCalls = 0;
+var liveResult = liveSource.findLast(function(value,index,array) {
+  liveCalls=liveCalls+1;
+  if (index===2) array[1]=20;
+  return value===20;
+});
+verify(liveResult===20&&liveCalls===2);
+
+var shrinkSource = [1,2,3];
+var shrinkCalls = 0;
+var shrinkResult = shrinkSource.findLast(function(value,index,array) {
+  shrinkCalls=shrinkCalls+1;
+  if (index===2) array.length=1;
+  return index===1&&value===undefined;
+});
+verify(shrinkResult===undefined&&shrinkCalls===2);
+
+var appended = [1,2,3];
+var appendCalls = 0;
+var appendIndices = "";
+appended.findLast(function(value,index,array) {
+  appendCalls=appendCalls+1;
+  appendIndices=appendIndices+index;
+  if (index===2) array.push(4);
+  return false;
+});
+verify(appendCalls===3&&appendIndices==="210"&&appended.length===4);
+
+var nestedCalls = 0;
+var nested = [1,2,3].findLast(function(value) {
+  var inner = [value,9].findLast(function(item) {
+    nestedCalls=nestedCalls+1;
+    return item===value;
+  });
+  return inner===2;
+});
+verify(nested===2&&nestedCalls===4);
+
+var forwardIndices = "";
+var reverseIndices = "";
+var duplicateSource = [3,7,12,7,20];
+var first = duplicateSource.find(function(value,index) {
+  forwardIndices=forwardIndices+index;
+  return value===7;
+});
+var last = duplicateSource.findLast(function(value,index) {
+  reverseIndices=reverseIndices+index;
+  return value===7;
+});
+verify(first===7&&last===7&&forwardIndices==="01"&&reverseIndices==="43");
+
+var stopCalls = 0;
+var stopped = [1,2,3].findLast(function(value,index) {
+  stopCalls=stopCalls+1;
+  if (index===0) null.late;
+  return index===2;
+});
+verify(stopped===3&&stopCalls===1);
+
+var object = {id:7};
+var retainedSource = [object];
+var retained = retainedSource.findLast(function(value,index,array) {
+  array.length=0;
+  return true;
+});
+verify(retained===object&&retainedSource.length===0&&retainedSource[0]===undefined);
+
+var emptyCalls = 0;
+var emptyResult = [].findLast(function() {
+  emptyCalls=emptyCalls+1;
+  return true;
+});
+verify(emptyResult===undefined&&emptyCalls===0);
+
+var lowCalls = 0;
+var lowResult = [1,2,3].findLast(function(value,index) {
+  lowCalls=lowCalls+1;
+  return index===0;
+});
+verify(lowResult===1&&lowCalls===3);
+
+var marker = "JS102:assertions=" + assertions + ":failures=" + failures +
+  ":reverse=" + (result===130&&indices==="43") +
+  ":sparse=" + (sparseIndices==="3210") +
+  ":mutation=" + (liveResult===20) +
+  ":ownership=" + (captured===30) + ":nested=" + (nested===2) +
+  ":events=ready";
+document.getElementById("result").textContent = marker;
+
+var eventA = document.getElementById("find-last-event-a");
+var eventB = document.getElementById("find-last-event-b");
+var errorEvent = document.getElementById("find-last-error-event");
+var innerEventOk = false;
+var outerEventOk = false;
+var innerEventCalls = 0;
+var outerEventCalls = 0;
+var innerIndices = "";
+var outerIndices = "";
+eventB.addEventListener("click", function(event) {
+  var innerResult = [5,6,7].findLast(function(value,index) {
+    innerEventCalls=innerEventCalls+1;
+    innerIndices=innerIndices+index;
+    return index===1;
+  });
+  innerEventOk=innerResult===6&&innerEventCalls===2&&innerIndices==="21";
+});
+eventA.addEventListener("click", function(event) {
+  var outerResult = [1,2,3].findLast(function(value,index) {
+    outerEventCalls=outerEventCalls+1;
+    outerIndices=outerIndices+index;
+    if (index===1) eventB.click();
+    return index===0;
+  });
+  outerEventOk=event.target===eventA&&event.currentTarget===eventA&&
+    outerResult===1&&outerEventCalls===3&&outerIndices==="210"&&innerEventOk;
+  document.getElementById("result").textContent=
+    "JS102:event:nested=" + innerEventOk + ":outer=" + outerEventOk;
+});
+errorEvent.addEventListener("click", function() {
+  [1,2].findLast(function(value,index) {
+    if (index===1) null.absent;
+    return false;
+  });
+});
+</script>
+</body>
+</html>

@@ -375,13 +375,14 @@ void testObjectArrayLimitsAndReset()
         "objects: object limit", objects);
 
     RuntimeLimits properties;
-    // Array.prototype owns fifteen supported methods/protocol entries after
-    // JS101, so leave enough room for built-in initialization and exceed the
+    // Array.prototype owns sixteen supported methods/protocol entries after
+    // JS102, so leave enough room for built-in initialization and exceed the
     // same configured bound with the ordinary object under test.
-    properties.maxPropertiesPerObject = 15;
+    properties.maxPropertiesPerObject = 16;
     expectError("var a = {}; a.a = 1; a.b = 2; a.c = 3; a.d = 4;"
         "a.e = 5; a.f = 6; a.g = 7; a.h = 8; a.i = 9; a.j = 10;"
-        "a.k = 11; a.l = 12; a.m = 13; a.n = 14; a.o = 15; a.p = 16;",
+        "a.k = 11; a.l = 12; a.m = 13; a.n = 14; a.o = 15; a.p = 16;"
+        "a.q = 17;",
         RuntimeErrorCode::PropertyLimitExceeded, "objects: property limit", properties);
 
     RuntimeLimits totalProperties;

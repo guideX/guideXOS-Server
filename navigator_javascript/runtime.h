@@ -400,6 +400,7 @@ private:
         EventPreventDefault,
         ArrayFind,
         ArrayFindIndex,
+        ArrayFindLast,
         ArrayReduce,
         ArrayReduceRight,
     };

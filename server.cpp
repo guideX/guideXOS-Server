@@ -6115,6 +6115,44 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::string("click=") + yesNo(js101ErrorClick) + ",error=" +
         js101Error);
 
+    const std::string js102FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js102.html";
+    const bool js102Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js102FixtureUrl);
+    const std::string js102InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS102 bounded Array findLast fixture passes on the hosted server",
+        js102Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js102FixtureUrl &&
+        contains(js102InitialText, "Navigator JavaScript JS102") &&
+        contains(js102InitialText, "JS102:assertions=16:failures=0") &&
+        contains(js102InitialText,
+            ":reverse=true:sparse=true:mutation=true:ownership=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js102Loaded) + ",text=" +
+        summarizeText(js102InitialText, 1800) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const bool js102Click = js102Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("find-last-event-a");
+    const std::string js102AfterClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS102 nested Event callbacks preserve independent reverse searches",
+        js102Click && contains(js102AfterClick,
+            "JS102:event:nested=true:outer=true") &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js102Click) + ",text=" +
+        summarizeText(js102AfterClick, 1200) + ",error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+    const bool js102ErrorClick = js102Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById(
+            "find-last-error-event");
+    const std::string js102Error =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS102 findLast callback errors propagate from a hosted Event callback",
+        js102ErrorClick && contains(js102Error, "CannotReadProperty"),
+        std::string("click=") + yesNo(js102ErrorClick) + ",error=" +
+        js102Error);
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

@@ -1442,6 +1442,7 @@ private:
         Every,
         Find,
         FindIndex,
+        FindLast,
     };
 
     enum class ArrayTraversalControl : std::uint8_t {
@@ -1484,12 +1485,16 @@ private:
         std::vector<Value> callbackArguments;
         std::vector<RuntimeContext::RuntimeArrayElement> mappedElements;
         bool callbackArgumentsReady = false;
-        for (std::size_t index = 0u; index < initialLength; ++index) {
+        const bool reverse = kind == ArrayTraversalKind::FindLast;
+        std::size_t cursor = reverse ? initialLength : 0u;
+        while (reverse ? cursor > 0u : cursor < initialLength) {
+            const std::size_t index = reverse ? --cursor : cursor++;
             bool present = false;
             if (!hasArrayIndex(arrayId, index, present, callSite))
                 return ArrayTraversalControl::Error;
             const bool visitMissingIndex = kind == ArrayTraversalKind::Find ||
-                kind == ArrayTraversalKind::FindIndex;
+                kind == ArrayTraversalKind::FindIndex ||
+                kind == ArrayTraversalKind::FindLast;
             if (!present && !visitMissingIndex) continue;
 
             Value value = Value::undefined();
@@ -1532,6 +1537,11 @@ private:
             if (kind == ArrayTraversalKind::FindIndex &&
                 truthy(callbackResult)) {
                 result = Value::number(static_cast<double>(index));
+                return ArrayTraversalControl::Stop;
+            }
+            if (kind == ArrayTraversalKind::FindLast &&
+                truthy(callbackResult)) {
+                result = value;
                 return ArrayTraversalControl::Stop;
             }
 
@@ -2375,7 +2385,8 @@ private:
         case RuntimeContext::NativeFunctionId::ArraySome:
         case RuntimeContext::NativeFunctionId::ArrayEvery:
         case RuntimeContext::NativeFunctionId::ArrayFind:
-        case RuntimeContext::NativeFunctionId::ArrayFindIndex: {
+        case RuntimeContext::NativeFunctionId::ArrayFindIndex:
+        case RuntimeContext::NativeFunctionId::ArrayFindLast: {
             const RuntimeContext::NativeFunctionId native =
                 static_cast<RuntimeContext::NativeFunctionId>(
                     function.nativeFunction);
@@ -2397,6 +2408,9 @@ private:
             } else if (native ==
                     RuntimeContext::NativeFunctionId::ArrayFindIndex) {
                 kind = ArrayTraversalKind::FindIndex;
+            } else if (native ==
+                    RuntimeContext::NativeFunctionId::ArrayFindLast) {
+                kind = ArrayTraversalKind::FindLast;
             }
             const ArrayTraversalControl traversal = traverseArray(receiver,
                 argumentOrUndefined(0u), argumentOrUndefined(1u), callSite,
@@ -4370,6 +4384,8 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         !install(arrayPrototype_, "find", NativeFunctionId::ArrayFind,
             error) ||
         !install(arrayPrototype_, "findIndex", NativeFunctionId::ArrayFindIndex,
+            error) ||
+        !install(arrayPrototype_, "findLast", NativeFunctionId::ArrayFindLast,
             error) ||
         !install(arrayPrototype_, "reduce", NativeFunctionId::ArrayReduce,
             error) ||
