@@ -40,6 +40,22 @@ Managed sessions: 0
 '@
 $emptySnapshot = [pscustomobject]@{Status=$clearStatus;List=$clearList;StatusExit=0;ListExit=0}
 Assert-Qac 'complete empty QAC lane is clear' (Test-QacClear $emptySnapshot)
+Assert-Qac 'clear-lane preflight requires complete empty Windows QEMU census and matching inspection count' (
+    Test-QacClearWithCensus -Snapshot $emptySnapshot -WindowsCensusComplete $true `
+        -LocalQemuProcesses @() -InspectionsComplete $true -InspectionCount 0)
+Assert-Qac 'local Windows QEMU process blocks clear-lane preflight' (-not (
+    Test-QacClearWithCensus -Snapshot $emptySnapshot -WindowsCensusComplete $true `
+        -LocalQemuProcesses @([pscustomobject]@{ProcessId=901;Name='qemu-system-x86_64.exe'}) `
+        -InspectionsComplete $true -InspectionCount 0))
+Assert-Qac 'incomplete Windows QEMU census fails closed' (-not (
+    Test-QacClearWithCensus -Snapshot $emptySnapshot -WindowsCensusComplete $false `
+        -LocalQemuProcesses @() -InspectionsComplete $true -InspectionCount 0))
+Assert-Qac 'incomplete reservation inspection fails clear-lane preflight' (-not (
+    Test-QacClearWithCensus -Snapshot $emptySnapshot -WindowsCensusComplete $true `
+        -LocalQemuProcesses @() -InspectionsComplete $false -InspectionCount 0))
+Assert-Qac 'an inspection without a listed reservation fails clear-lane preflight' (-not (
+    Test-QacClearWithCensus -Snapshot $emptySnapshot -WindowsCensusComplete $true `
+        -LocalQemuProcesses @() -InspectionsComplete $true -InspectionCount 1))
 
 $reservationId = '0123456789abcdef0123456789abcdef'
 $ownerPid = 100

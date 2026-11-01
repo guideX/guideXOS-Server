@@ -107,10 +107,14 @@ Assert-True ($palText -match 'existing != nullptr && existing != thread' -and $t
 Assert-True ($guestRunnerText -match '\$isThreadStoreReadiness\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''ThreadStoreReadiness''' -and
     $guestRunnerText -match "\[System\.IO\.FileMode\]::CreateNew" -and
     $guestRunnerText -match 'maxGuestBoots=1;automaticRetry=\$false' -and
-    $guestRunnerText -match 'ThreadStoreAttempt.*R2' -and
+    $guestRunnerText -match 'ThreadStoreAttempt.*R3' -and
     $guestRunnerText -match 'guest-launch-attempt-C188R12R4R5R4R2\.json' -and
     $guestRunnerText -match 'qac-guest-002' -and
+    $guestRunnerText -match 'guest-launch-attempt-C188R12R4R5R4R3\.json' -and
+    $guestRunnerText -match 'qac-guest-003' -and
     $guestRunnerText -match 'Get-QacInspection' -and
+    $guestRunnerText -match 'Get-WindowsQemuProcessCensus' -and
+    $guestRunnerText -match 'Test-QacClearWithCensus' -and
     $guestRunnerText -match 'Test-QacLocalQemuChildIdentity' -and
     $guestRunnerText -match 'qac-during-\{0:D3\}' -and
     $guestRunnerText -match 'archiveMembership\.threadStorePalCommonReplacement' -and
@@ -124,10 +128,11 @@ Assert-True ($guestRunnerText -match '\$isThreadStoreReadiness\s*=\s*\[string\]\
     $guestRunnerText -match 'function Test-ModuleRegistrationStageObserved' -and
     $guestRunnerText.Contains('event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)') -and
     $guestRunnerText.Contains('outcome=(?:PASS|FAIL) callbacks=') -and
-    $guestRunnerText -match 'Test-QacClear \$before' -and
+    $guestRunnerText -match 'Test-QacClearWithCensus -Snapshot \$before' -and
     $guestRunnerText -match 'ConvertFrom-QmpQueryStatusResponse') 'R4 runner uses a phase-specific CreateNew guard, immutable admission snapshots, verified reservation/child inspection, strict QMP response parsing, and the R4 analyzer'
 Assert-True ($qacAdmissionText -match 'function Test-QacRunningOwned' -and
     $qacAdmissionText -match 'function Test-QacClear' -and
+    $qacAdmissionText -match 'function Test-QacClearWithCensus' -and
     $qacAdmissionText -match 'function Test-QacCandidatePath' -and
     $qacAdmissionText -match 'function Test-QacLocalQemuChildIdentity' -and
     $qacAdmissionText -match 'function ConvertFrom-QmpQueryStatusResponse') 'shared admission predicates cover path, status/list, process identity, and strict QMP contracts'

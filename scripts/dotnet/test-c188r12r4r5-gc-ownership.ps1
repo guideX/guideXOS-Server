@@ -76,7 +76,10 @@ Require-Text $runtimeBuilder 'C188R12R4R5GcOwnershipProof -and[\s\S]{0,300}Persi
 Require-Text $runtimeBuilder 'imageBackedArenaPresent = -not \[bool\]\$C188R12R4R5GcOwnershipProof' 'runtime manifest arena isolation bit'
 Require-Text $managedBuilder 'C188R12R4R5 requires an isolated ProductionApplication' 'managed candidate isolation constraints'
 Require-Text $csproj 'DirectPInvoke Include="__Internal"' 'direct static diagnostics imports'
-Require-Text $guestRunner "\`$attemptPath = if \(\`$isThreadStoreReadiness -and \`$ThreadStoreAttempt -eq 'R2'\)[\s\S]{0,220}guest-launch-attempt-C188R12R4R5R4R2\.json[\s\S]{0,100}else \{ Join-Path \`$phaseRoot 'guest-launch-attempt\.json' \}" 'R4R2 gets a distinct one-guest guard while other phases retain their existing guard'
+Require-Text $guestRunner "\`$ThreadStoreAttempt -eq 'R2'[\s\S]{0,120}guest-launch-attempt-C188R12R4R5R4R2\.json" 'R4R2 keeps its distinct one-guest guard'
+Require-Text $guestRunner "\`$ThreadStoreAttempt -eq 'R3'[\s\S]{0,120}guest-launch-attempt-C188R12R4R5R4R3\.json" 'R4R3 uses a fresh distinct one-guest guard'
+Require-Text $guestRunner 'qac-guest-003' 'R4R3 preserves guest evidence in a fresh run directory'
+Require-Text $guestRunner 'Test-QacClearWithCensus' 'prelaunch admission also requires a clean Windows QEMU census and reservation inspections'
 Require-Text $guestRunner '\[System\.Text\.UTF8Encoding\]::new\(\$false\)' 'QMP UTF-8 without a byte-order mark'
 Require-Text $guestRunner '\$qacProcess\.WaitForExit\(90000\)' 'bounded QAC guest shutdown wait'
 if ($guestRunner -match 'Set-Content[^\r\n]*\$serial\s+-Value') {

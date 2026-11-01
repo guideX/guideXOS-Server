@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [ValidateRange(60,300)][int]$BootTimeoutSeconds = 180,
     [ValidateRange(1,60)][int]$AdmissionWindowSeconds = 30,
-    [ValidateSet('R1','R2')][string]$ThreadStoreAttempt = 'R1'
+    [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,8 +20,8 @@ $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | Conv
 $isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
 $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract'
 $isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
-if ($ThreadStoreAttempt -eq 'R2' -and -not $isThreadStoreReadiness) {
-    throw 'ThreadStoreAttempt R2 is valid only for the C188 R4 ThreadStore candidate.'
+if ($ThreadStoreAttempt -in @('R2','R3') -and -not $isThreadStoreReadiness) {
+    throw "ThreadStoreAttempt $ThreadStoreAttempt is valid only for the C188 R4 ThreadStore candidate."
 }
 $isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness
 $r4RuntimePackManifest = $null
@@ -120,7 +120,9 @@ function Require-Hash([string]$Path,[string]$Expected,[string]$Name) {
 }
 
 $esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$runDirectory = if ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') { 'qac-guest-002' } else { 'qac-guest-001' }
+$runDirectory = if ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') { 'qac-guest-002' }
+    elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R3') { 'qac-guest-003' }
+    else { 'qac-guest-001' }
 $serial = Join-Path $candidate ($runDirectory + '\serial.log')
 $qmpLog = Join-Path $candidate ($runDirectory + '\qmp.log')
 $runRoot = Split-Path -Parent $serial
@@ -129,6 +131,8 @@ $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $ovmf = Join-Path $repo 'OVMF.fd'
 $attemptPath = if ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R2.json'
+} elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R3') {
+    Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R3.json'
 } else { Join-Path $phaseRoot 'guest-launch-attempt.json' }
 foreach ($required in @($qacCli,$qemu,$ovmf,(Join-Path $esp 'kernel.elf'),
         (Join-Path $esp 'ramdisk.img'),(Join-Path $esp 'EFI\BOOT\BOOTX64.EFI'))) {
@@ -202,6 +206,70 @@ function Get-QacInspection([string]$ReservationId,[string]$Prefix) {
     return [pscustomobject]@{
         ExitCode=$inspectionExit;Text=$inspectionText;Inspection=$inspection;Path=$inspectionPath
     }
+}
+function Get-WindowsQemuProcessCensus([string]$Prefix) {
+    $censusPath = Join-Path $runRoot "$Prefix.windows-qemu-census.json"
+    if (Test-Path -LiteralPath $censusPath) { throw "Refusing to overwrite Windows process census: $censusPath" }
+    $complete = $false
+    $processRows = @()
+    $errorText = $null
+    try {
+        $allProcesses = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
+        $processRows = @($allProcesses | Where-Object { [string]$_.Name -match '(?i)^qemu-system-.+\.exe$' } |
+            ForEach-Object {
+                [ordered]@{
+                    processId=[int]$_.ProcessId
+                    parentProcessId=[int]$_.ParentProcessId
+                    name=[string]$_.Name
+                    executablePath=[string]$_.ExecutablePath
+                    creationDate=[string]$_.CreationDate
+                    commandLine=[string]$_.CommandLine
+                }
+            })
+        $complete = $true
+    } catch { $errorText = $_.Exception.Message }
+    $census = [ordered]@{
+        capturedAtUtc=[DateTime]::UtcNow.ToString('o')
+        complete=$complete
+        processNameFilter='^qemu-system-.+\.exe$'
+        processCount=$processRows.Count
+        processes=@($processRows)
+        error=$errorText
+    }
+    [System.IO.File]::WriteAllText($censusPath,($census | ConvertTo-Json -Depth 8),[System.Text.UTF8Encoding]::new($false))
+    return [pscustomobject]@{Complete=$complete;Processes=@($processRows);Path=$censusPath;Error=$errorText}
+}
+function Get-QacReservationInspections([object]$Snapshot,[string]$Prefix) {
+    $summaryPath = Join-Path $runRoot "$Prefix.inspections.json"
+    if (Test-Path -LiteralPath $summaryPath) { throw "Refusing to overwrite QAC inspection summary: $summaryPath" }
+    $list = ConvertFrom-QacListSnapshot -Text ([string]$Snapshot.List) -ExitCode ([int]$Snapshot.ListExit)
+    $complete = [bool]$list.Valid
+    $records = [System.Collections.Generic.List[object]]::new()
+    if ($list.Valid) {
+        foreach ($reservation in $list.ReservationRows) {
+            $capture = Get-QacInspection ([string]$reservation.Id) ("$Prefix-$($reservation.Id)")
+            $inspectionId = Get-QacReservationProperty $capture.Inspection 'id'
+            $valid = $capture.ExitCode -eq 0 -and $null -ne $capture.Inspection -and
+                [string]$inspectionId -ceq [string]$reservation.Id
+            if (-not $valid) { $complete = $false }
+            $records.Add([pscustomobject]@{
+                reservationId=[string]$reservation.Id
+                exitCode=$capture.ExitCode
+                inspectionPath=$capture.Path
+                inspectionId=[string]$inspectionId
+                valid=$valid
+            })
+        }
+    }
+    $summary = [ordered]@{
+        capturedAtUtc=[DateTime]::UtcNow.ToString('o')
+        complete=$complete
+        listPath=$Snapshot.ListPath
+        reservationCount=$list.ReservationCount
+        inspections=@($records.ToArray())
+    }
+    [System.IO.File]::WriteAllText($summaryPath,($summary | ConvertTo-Json -Depth 8),[System.Text.UTF8Encoding]::new($false))
+    return [pscustomobject]@{Complete=$complete;Count=$records.Count;Records=@($records.ToArray());Path=$summaryPath}
 }
 function Test-ModuleRegistrationStageObserved([object]$Analysis) {
     if ($null -eq $Analysis) { return $null }
@@ -287,7 +355,11 @@ $qacArgs = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemu
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot 'qac-run-arguments.json') -Encoding utf8
 
 $before = Get-QacSnapshot 'qac-before'
-$preflightPassed = Test-QacClear $before
+$beforeWindowsCensus = Get-WindowsQemuProcessCensus 'qac-before'
+$beforeInspectionCapture = Get-QacReservationInspections $before 'qac-before'
+$preflightPassed = Test-QacClearWithCensus -Snapshot $before `
+    -WindowsCensusComplete $beforeWindowsCensus.Complete -LocalQemuProcesses $beforeWindowsCensus.Processes `
+    -InspectionsComplete $beforeInspectionCapture.Complete -InspectionCount $beforeInspectionCapture.Count
 $qacProcess = $null
 $stdoutTask = $null
 $stderrTask = $null
@@ -307,6 +379,8 @@ $duringInspectionPath = $null
 $localGuestIdentity = $null
 $ownedQemuLocalProcess = $null
 $after = $null
+$qacAfterWindowsCensusPath = $null
+$qacAfterInspectionRecords = [System.Collections.Generic.List[object]]::new()
 $attemptedUtc = $null
 
 try {
@@ -546,9 +620,17 @@ try {
     do {
         $afterSample = if ($null -eq $after) { 1 } else { $afterSample + 1 }
         $after = Get-QacSnapshot ('qac-after-{0:D3}' -f $afterSample)
+        $afterWindowsCensus = Get-WindowsQemuProcessCensus ('qac-after-{0:D3}' -f $afterSample)
+        $qacAfterWindowsCensusPath = $afterWindowsCensus.Path
+        $afterInspectionCapture = Get-QacReservationInspections $after ('qac-after-{0:D3}' -f $afterSample)
+        foreach ($record in $afterInspectionCapture.Records) { $qacAfterInspectionRecords.Add($record) }
         $qacAfterStatusPath = $after.StatusPath
         $qacAfterListPath = $after.ListPath
-        if (Test-QacClear $after) { $releaseVerified = $true; break }
+        if (Test-QacClearWithCensus -Snapshot $after `
+                -WindowsCensusComplete $afterWindowsCensus.Complete -LocalQemuProcesses $afterWindowsCensus.Processes `
+                -InspectionsComplete $afterInspectionCapture.Complete -InspectionCount $afterInspectionCapture.Count) {
+            $releaseVerified = $true; break
+        }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $afterDeadline)
 }
@@ -663,6 +745,10 @@ $manifest = [ordered]@{
     candidateRamdiskSha256=[string]$candidateManifest.candidateRamdiskSha256
     sourceRamdiskSha256=$sourceRamdiskSha256;sourceRamdiskPreserved=$sourceRamdiskPreserved
     qacPreflightPassed=$preflightPassed;qacAdmissionGranted=$admitted;qacReservationId=$qacReservationId
+    qacBeforeWindowsProcessCensus=$beforeWindowsCensus.Path
+    qacBeforeInspectionSummary=$beforeInspectionCapture.Path
+    qacAfterWindowsProcessCensus=$qacAfterWindowsCensusPath
+    qacAfterInspectionRecords=@($qacAfterInspectionRecords.ToArray())
     qacOwnerPid=if ($null -ne $qacProcess) { $qacProcess.Id } else { $null }
     qacExitCode=$qacExitCode;qacReleaseVerified=$releaseVerified;qacGuestBootLimit=1;automaticRetry=$false
     threadStoreAttempt=$ThreadStoreAttempt;attemptGuardPath=$attemptPath
@@ -706,7 +792,9 @@ if ($isInitAttribution) {
     Write-Output "C188R12R4R5R3_INIT_RETURN_CONTRACT=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5R3_INIT_RETURN_CONTRACT_MANIFEST=$manifestPath"
 } elseif ($isThreadStoreReadiness) {
-    $phaseLabel = if ($ThreadStoreAttempt -eq 'R2') { 'C188R12R4R5R4R2' } else { 'C188R12R4R5R4' }
+    $phaseLabel = if ($ThreadStoreAttempt -eq 'R2') { 'C188R12R4R5R4R2' }
+        elseif ($ThreadStoreAttempt -eq 'R3') { 'C188R12R4R5R4R3' }
+        else { 'C188R12R4R5R4' }
     Write-Output "${phaseLabel}_THREADSTORE_READINESS=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "${phaseLabel}_THREADSTORE_READINESS_MANIFEST=$manifestPath"
 } else {

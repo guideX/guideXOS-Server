@@ -200,6 +200,21 @@ function Test-QacClear {
         $list.QemuProcessCount -eq 0 -and $list.CensusWarnings.Count -eq 0
 }
 
+function Test-QacClearWithCensus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][object]$Snapshot,
+        [Parameter(Mandatory=$true)][bool]$WindowsCensusComplete,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$LocalQemuProcesses,
+        [Parameter(Mandatory=$true)][bool]$InspectionsComplete,
+        [Parameter(Mandatory=$true)][int]$InspectionCount
+    )
+    if (-not (Test-QacClear $Snapshot) -or -not $WindowsCensusComplete -or
+        @($LocalQemuProcesses).Count -ne 0 -or -not $InspectionsComplete) { return $false }
+    $list = ConvertFrom-QacListSnapshot -Text ([string]$Snapshot.List) -ExitCode ([int]$Snapshot.ListExit)
+    return $list.Valid -and $InspectionCount -eq $list.ReservationCount
+}
+
 function Test-QacRunningOwned {
     [CmdletBinding()]
     param(
@@ -328,4 +343,4 @@ function ConvertFrom-QmpQueryStatusResponse {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-QacStatusSnapshot, ConvertFrom-QacListSnapshot, Get-QacReservationProperty, Test-QacTimestampNear, Test-QacCandidatePath, Test-QacClear, Test-QacRunningOwned, Test-QacLocalQemuChildIdentity, ConvertFrom-QmpQueryStatusResponse
+Export-ModuleMember -Function ConvertFrom-QacStatusSnapshot, ConvertFrom-QacListSnapshot, Get-QacReservationProperty, Test-QacTimestampNear, Test-QacCandidatePath, Test-QacClear, Test-QacClearWithCensus, Test-QacRunningOwned, Test-QacLocalQemuChildIdentity, ConvertFrom-QmpQueryStatusResponse
