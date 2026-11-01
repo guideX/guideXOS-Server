@@ -3,7 +3,8 @@
 **Date:** 2026-10-31 (America/Los_Angeles; execution records use UTC)
 **Outcome E — `QAC_OR_EXECUTION_BLOCKED`**
 **Branch:** `v1.1_DOTNET_SUPPORT`
-**Starting and ending HEAD:** `8d4fab148ffd6df5e94d47e771b543974e57118d`
+**Starting HEAD:** `8d4fab148ffd6df5e94d47e771b543974e57118d`
+**Ending implementation HEAD:** `90f013cabc5ddbd03c47dafc9ee78422518695ac`
 
 ## Decision
 
@@ -15,7 +16,8 @@ The runner also failed while writing its final manifest because its R4 analyzer 
 
 ## Baseline and preservation
 
-- Starting and ending HEAD: `8d4fab148ffd6df5e94d47e771b543974e57118d` on `v1.1_DOTNET_SUPPORT`.
+- Starting HEAD: `8d4fab148ffd6df5e94d47e771b543974e57118d` on `v1.1_DOTNET_SUPPORT`.
+- The final implementation HEAD is `90f013cabc5ddbd03c47dafc9ee78422518695ac`, which contains the closeout and the narrowly scoped runner/test corrections. The later metadata-only update to this report does not change implementation code.
 - Candidate build HEAD: `5038777b9f6b1b489ceb9de3e26cf6299b46956f`. The candidate-to-starting-HEAD committed diff was the R4 readiness closeout document; the staged binaries were reused without rebuilding.
 - `ESP/ramdisk.img` remained at SHA-256 `AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8` before and after the run.
 - Existing modified/untracked build outputs were preserved. No reset, clean, stash, branch switch, history rewrite, push, or foreign-process termination occurred.
