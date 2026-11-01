@@ -120,14 +120,21 @@ if ($markerLines.Count -gt 0) {
         $resourceResult = $values[2u].auxiliary
         $nativeStatus = $values[5u].value
         $nativeSource = $values[5u].auxiliary
+        $operationName = if ($operationNames.ContainsKey($id)) { [string]$operationNames[$id] } else { '' }
+        $isRawEventCloseStatus = $operationName -match '^GX_SEMISHARED_OP_CLEANUP_.*_EVENT$'
         if ($state -lt 1u -or $state -gt 4u) { $issues.Add("operation $index has an unknown state") }
         if ($state -eq 1u -and $result -ne [uint32]::MaxValue) { $issues.Add("operation $index has a result without completion") }
-        if ($state -eq 2u -and $result -ne 1u) { $issues.Add("operation $index success state conflicts with its result") }
-        if ($state -eq 3u -and $result -ne 0u) { $issues.Add("operation $index failure state conflicts with its result") }
+        $expectedSuccessResult = if ($isRawEventCloseStatus) { [uint32]0 } else { [uint32]1 }
+        if ($state -eq 2u -and $result -ne $expectedSuccessResult) { $issues.Add("operation $index success state conflicts with its result") }
+        if ($state -eq 3u -and $isRawEventCloseStatus -and $result -eq 0u) { $issues.Add("operation $index cleanup failure has a successful raw close status") }
+        if ($state -eq 3u -and -not $isRawEventCloseStatus -and $result -ne 0u) { $issues.Add("operation $index failure state conflicts with its result") }
+        if ($isRawEventCloseStatus -and $nativeSource -eq 1u -and $result -ne $nativeStatus) {
+            $issues.Add("operation $index cleanup result conflicts with its raw event-close status")
+        }
         $operations += [pscustomobject]@{
             sequence=$index
             id=('0x{0:X4}' -f $id)
-            name=[string]$operationNames[$id]
+            name=$operationName
             state=$state
             result=('0x{0:X8}' -f $result)
             detail=('0x{0:X8}' -f $detail)
@@ -146,10 +153,15 @@ if ($markerLines.Count -gt 0) {
     $firstBranch = if ($summaryValues.ContainsKey(3u)) { $summaryValues[3u] } else { 0u }
     $cleanupFailed = if ($summaryValues.ContainsKey(4u)) { $summaryAux[4u] } else { 0u }
     $finalResult = if ($summaryValues.ContainsKey(2u)) { $summaryValues[2u] } else { [uint32]::MaxValue }
-    $failureOperation = @($operations | Where-Object { $_.state -eq 3u } | Select-Object -First 1)
-    if ($firstFailed -eq 0u -and $null -ne $failureOperation -and $failureOperation.Count -gt 0) { $issues.Add('summary omitted the first failed operation') }
-    if ($firstFailed -ne 0u -and ($null -eq $failureOperation -or $failureOperation.Count -eq 0 -or $failureOperation[0].id -ne ('0x{0:X4}' -f $firstFailed))) {
-        $issues.Add('summary first-failed operation conflicts with operation order')
+    $failedOperations = @($operations | Where-Object { $_.state -eq 3u })
+    $failureOperation = @()
+    if ($firstFailed -eq 0u -and $failedOperations.Count -gt 0) { $issues.Add('summary omitted the first failed operation') }
+    if ($firstFailed -ne 0u) {
+        $firstFailedId = '0x{0:X4}' -f $firstFailed
+        $failureOperation = @($failedOperations | Where-Object { $_.id -eq $firstFailedId })
+        if ($failureOperation.Count -eq 0) {
+            $issues.Add('summary first-failed operation has no matching failed operation')
+        }
     }
     if ($firstBranch -ne 0u -and (-not $operationNames.ContainsKey($firstBranch) -or
         @($operations | Where-Object { $_.id -eq ('0x{0:X4}' -f $firstBranch) -and $_.state -eq 3u }).Count -eq 0)) {
@@ -157,6 +169,12 @@ if ($markerLines.Count -gt 0) {
     }
     if ($cleanupFailed -ne 0u -and @($operations | Where-Object { $_.id -eq ('0x{0:X4}' -f $cleanupFailed) -and $_.state -eq 3u }).Count -eq 0) {
         $issues.Add('cleanup failure summary has no matching failed cleanup operation')
+    }
+    $failedCleanupOperations = @($operations | Where-Object {
+        $_.state -eq 3u -and $_.name -match '^GX_SEMISHARED_OP_(?:SEMI_SHARED_CLEANUP|BGC_CLEANUP|CLEANUP_.*_EVENT)$'
+    })
+    if ($cleanupFailed -eq 0u -and $failedCleanupOperations.Count -gt 0) {
+        $issues.Add('cleanup failure summary omitted a failed cleanup operation')
     }
     if ($summaryValues.ContainsKey(5u) -and $null -ne $failureOperation -and $failureOperation.Count -gt 0) {
         $expectedStatus = [Convert]::ToUInt32($failureOperation[0].nativeStatus.Substring(2),16)
@@ -166,6 +184,14 @@ if ($markerLines.Count -gt 0) {
     $cleanupEntered = if ($summaryValues.ContainsKey(6u)) { $summaryValues[6u] } else { 0u }
     $cleanupCompleted = if ($summaryAux.ContainsKey(6u)) { $summaryAux[6u] } else { 0u }
     if (($cleanupCompleted -band (-bnot $cleanupEntered)) -ne 0u) { $issues.Add('cleanup completion is recorded without cleanup entry') }
+    if (($cleanupEntered -band $cleanupCompleted) -ne $cleanupEntered) { $issues.Add('cleanup entry has no matching completion') }
+    $cleanupOutcome = if ($cleanupEntered -eq 0u) { 'not_entered' }
+        elseif ($cleanupFailed -ne 0u -or $failedCleanupOperations.Count -gt 0) { 'failed' }
+        elseif (($cleanupEntered -band $cleanupCompleted) -ne $cleanupEntered) { 'incomplete' }
+        else { 'succeeded' }
+    $firstFailureBeforeCleanup = $firstFailed -ne 0u -and
+        ($null -eq $failureOperation -or $failureOperation.Count -eq 0 -or
+         $failureOperation[0].name -notmatch '^GX_SEMISHARED_OP_(?:SEMI_SHARED_CLEANUP|BGC_CLEANUP|CLEANUP_.*_EVENT)$')
     if ($finalResult -ne 0u -and $finalResult -ne 1u) { $issues.Add('final initializer result is missing or invalid') }
     if (@($operations | Where-Object { $_.name -eq 'GX_SEMISHARED_OP_FINAL_RESULT' -and $_.result -eq ('0x{0:X8}' -f $finalResult) }).Count -ne 1) {
         $issues.Add('final result operation is missing or conflicts with the summary')
@@ -182,11 +208,19 @@ if ($markerLines.Count -gt 0) {
         cleanupFailureStatus=('0x{0:X8}' -f $(if ($summaryValues.ContainsKey(5u)) {$summaryValues[5u]} else {[uint32]::MaxValue}))
         cleanupEnteredMask=('0x{0:X8}' -f $cleanupEntered)
         cleanupCompletedMask=('0x{0:X8}' -f $cleanupCompleted)
+        cleanupOutcome=$cleanupOutcome
+        cleanupAfterEarlierFailure=($firstFailed -ne 0u -and $cleanupEntered -ne 0u)
+        firstFailureBeforeCleanup=$firstFailureBeforeCleanup
     }
     if ($issues.Count -eq 0) {
         $outcome = if ($finalResult -eq 1u) { 'init_semi_shared_succeeded' } elseif ($firstBranch -ne 0u) { 'failure_branch_attributed' } else { 'initializer_failed_without_explicit_branch' }
     } else { $outcome = 'malformed_or_incomplete_record' }
 }
+
+$recordEvidenceState = if ($markerLines.Count -eq 0) { 'missing_diagnostic_evidence' }
+    elseif ($issues.Count -eq 0) { 'complete' }
+    elseif (@($issues | Where-Object { $_ -match 'incomplete|missing|omitted' }).Count -gt 0) { 'incomplete' }
+    else { 'malformed_or_contradictory' }
 
 $analysis = [ordered]@{
     schema='C188R12R4R5R4R5R2_SEMISHARED_ANALYSIS_V1'
@@ -199,6 +233,8 @@ $analysis = [ordered]@{
     markerCount=$markerLines.Count
     priorR1TracePresent=$priorR1
     priorOuterInitSemiSharedFailureObserved=$outerSemiFailure
+    recordEvidenceState=$recordEvidenceState
+    operationSlotOrdering='begin_order_with_nested_operations'
     outcome=$outcome
     resolvedCause=if ($outcome -eq 'failure_branch_attributed') { $summary.firstFailureBranch } else { $null }
     summary=$summary

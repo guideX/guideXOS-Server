@@ -30,7 +30,11 @@ function U32([uint32]$Value) { return '{0:X8}' -f $Value }
 function Add-RecordLines([System.Collections.Generic.List[string]]$Lines,[uint32]$Invocation,
                          [uint32]$FirstFailure,[uint32]$Branch,[uint32]$FailureStatus,
                          [uint32]$CleanupFailure,[uint32]$CleanupStatus,
-                         [object[]]$Operations,[uint32]$FinalResult=0) {
+                         [object[]]$Operations,[uint32]$FinalResult=0,
+                         [uint32]$CleanupEnteredMask=[uint32]::MaxValue,
+                         [uint32]$CleanupCompletedMask=[uint32]::MaxValue) {
+    if ($CleanupEnteredMask -eq [uint32]::MaxValue) { $CleanupEnteredMask = [uint32]$(if ($FirstFailure -eq 0) {0} else {1}) }
+    if ($CleanupCompletedMask -eq [uint32]::MaxValue) { $CleanupCompletedMask = [uint32]$(if ($FirstFailure -eq 0) {0} else {1}) }
     $summary = @(
         @([uint32]0,[uint32]0x53325232,[uint32]1),
         @([uint32]1,[uint32]$Operations.Count,[uint32]0),
@@ -38,7 +42,7 @@ function Add-RecordLines([System.Collections.Generic.List[string]]$Lines,[uint32
         @([uint32]3,$Branch,$FailureStatus),
         @([uint32]4,[uint32]0,$CleanupFailure),
         @([uint32]5,$CleanupStatus,[uint32]$(if ($CleanupFailure -eq 0) {0} else {1})),
-        @([uint32]6,[uint32]$(if ($FirstFailure -eq 0) {0} else {1}),[uint32]$(if ($FirstFailure -eq 0) {0} else {1}))
+        @([uint32]6,$CleanupEnteredMask,$CleanupCompletedMask)
     )
     foreach ($row in $summary) {
         $Lines.Add(('[C188R12R4R5R4R5R2_SEMISHARED] invocation=' + (U32 $Invocation) +
@@ -49,7 +53,7 @@ function Add-RecordLines([System.Collections.Generic.List[string]]$Lines,[uint32
         $op = $Operations[$index]
         $fields = @(
             @([uint32]$op.id,[uint32]$op.state),
-            @([uint32]$op.result,[uint32]0),
+            @([uint32]$op.result,[uint32]$op.detail),
             @(([uint32]$op.resource -bor ([uint32]$op.requestResource -shl 16)),[uint32]$op.resourceResult),
             @([uint32]$op.sizeLow,[uint32]$op.sizeHigh),
             @([uint32]$op.alignmentLow,[uint32]$op.alignmentHigh),
@@ -65,7 +69,7 @@ function Add-RecordLines([System.Collections.Generic.List[string]]$Lines,[uint32
 }
 function New-Operation([uint32]$Id,[bool]$Success,[uint32]$Status=[uint32]::MaxValue,[uint32]$StatusSource=0) {
     return [pscustomobject]@{
-        id=$Id; state=[uint32]$(if ($Success) {2} else {3}); result=[uint32]$(if ($Success) {1} else {0})
+        id=$Id; state=[uint32]$(if ($Success) {2} else {3}); result=[uint32]$(if ($Success) {1} else {0}); detail=[uint32]0
         resource=[uint32]0; requestResource=[uint32]0; resourceResult=[uint32]::MaxValue
         sizeLow=[uint32]::MaxValue; sizeHigh=[uint32]::MaxValue
         alignmentLow=[uint32]::MaxValue; alignmentHigh=[uint32]::MaxValue
@@ -145,8 +149,10 @@ Assert-True ($success.analysis.operations[0].requestedSize -eq '0x00000000000100
 # failure reports its raw PAL status without replacing that first cause.
 $acquiredResource=New-Operation 0x0101 $true
 $acquiredResource.resource=1; $acquiredResource.requestResource=1; $acquiredResource.resourceResult=1
+$cleanupFailure=New-Operation 0x0171 $false 5 1
+$cleanupFailure.result=5
 $cleanupOps=@($acquiredResource, (New-Operation 0x0110 $false),
-    (New-Operation 0x0171 $false 5 1), (New-Operation 0x01FF $false))
+    $cleanupFailure, (New-Operation 0x01FF $false))
 $cleanupLines=[System.Collections.Generic.List[string]]::new()
 Add-RecordLines $cleanupLines 10 0x0110 0x0110 ([uint32]::MaxValue) 0x0171 5 $cleanupOps
 $cleanup=Invoke-Analysis 'cleanup-failure-after-resource-acquisition' (($cleanupLines -join "`n") + "`n")
@@ -154,6 +160,30 @@ Assert-True ($cleanup.analysis.outcome -eq 'failure_branch_attributed') 'origina
 Assert-True ($cleanup.analysis.operations[0].state -eq 2 -and $cleanup.analysis.operations[0].resourceResult -eq '0x00000001') 'successful resource acquisition remains visible before failure'
 Assert-True ($cleanup.analysis.summary.firstFailureBranch.name -eq 'GX_SEMISHARED_OP_FULL_GC_APPROACH_EVENT') 'first explicit cause survives cleanup'
 Assert-True ($cleanup.analysis.summary.cleanupFailureOperation.name -eq 'GX_SEMISHARED_OP_CLEANUP_FULL_GC_APPROACH_EVENT' -and $cleanup.analysis.summary.cleanupFailureStatus -eq '0x00000005') 'cleanup failure and raw status are separately retained'
+Assert-True ($cleanup.analysis.summary.cleanupOutcome -eq 'failed' -and $cleanup.analysis.summary.cleanupAfterEarlierFailure) 'cleanup failure is separately classified after the original failure'
+
+# Nested operations are recorded in begin order. A parent aggregate slot can
+# precede the child operation that first failed; event-close success preserves
+# its raw zero status instead of a Boolean one.
+$bgcSupport=New-Operation 0x0124 $false
+$bgcDone=New-Operation 0x0120 $false
+$bgcDone.detail=2
+$eventImpl=New-Operation 0x0140 $false
+$eventImpl.resource=2; $eventImpl.requestResource=2; $eventImpl.resourceResult=0
+$eventImpl.sizeLow=8; $eventImpl.sizeHigh=0; $eventImpl.alignmentLow=8; $eventImpl.alignmentHigh=0
+$closeApproach=New-Operation 0x0171 $true 0 1
+$closeApproach.result=0
+$closeEnd=New-Operation 0x0172 $true 0 1
+$closeEnd.result=0
+$nestedFailureOps=@($bgcSupport,$bgcDone,$eventImpl,$closeApproach,$closeEnd,(New-Operation 0x01FF $false))
+$nestedFailureLines=[System.Collections.Generic.List[string]]::new()
+Add-RecordLines $nestedFailureLines 12 0x0140 0x0120 ([uint32]::MaxValue) 0 ([uint32]::MaxValue) $nestedFailureOps 0 3 3
+$nestedFailure=Invoke-Analysis 'nested-bgc-event-impl-failure-cleanup-succeeded' (($nestedFailureLines -join "`n") + "`n")
+Assert-True ($nestedFailure.analysis.outcome -eq 'failure_branch_attributed' -and $nestedFailure.analysis.issues.Count -eq 0) 'nested first failure is valid when a failed parent aggregate is stored first'
+Assert-True ($nestedFailure.analysis.summary.firstFailedOperation.name -eq 'GX_SEMISHARED_OP_EVENT_IMPL_ALLOC' -and $nestedFailure.analysis.summary.firstFailureBranch.name -eq 'GX_SEMISHARED_OP_BGC_DONE_EVENT') 'nested allocation operation and source branch remain distinct'
+Assert-True ($nestedFailure.analysis.summary.firstFailureBeforeCleanup -and $nestedFailure.analysis.summary.cleanupAfterEarlierFailure) 'first failure precedes the cleanup phase'
+Assert-True ($nestedFailure.analysis.summary.cleanupOutcome -eq 'succeeded' -and $nestedFailure.analysis.summary.cleanupFailureOperation -eq $null) 'successful cleanup after failure is not reported as another failure'
+Assert-True ($nestedFailure.analysis.operations[3].result -eq '0x00000000' -and $nestedFailure.analysis.operations[3].nativeStatusSource -eq 'GX_SEMISHARED_STATUS_SOURCE_EVENT_CLOSE_PAL') 'successful event close retains raw PAL status zero'
 
 # Missing fields, incomplete summaries, conflicts, and the archived R1 trace fail closed.
 $missingOps=[System.Collections.Generic.List[string]]::new()
@@ -176,13 +206,14 @@ if ($LASTEXITCODE -ne 0) { throw 'Analyzer failed on the archived R4R5R1 guest t
 $r1=Get-Content -LiteralPath $r1AnalysisPath -Raw | ConvertFrom-Json
 $r1HashAfter=Hash-File $r1Serial
 Assert-True ($r1.outcome -eq 'unresolved_internally' -and $r1.priorOuterInitSemiSharedFailureObserved) 'archived R1 trace retains init_semi_shared failure without an invented internal cause'
+Assert-True ($r1.recordEvidenceState -eq 'missing_diagnostic_evidence') 'absence of an R2 semi-shared record is distinguished from a malformed record'
 Assert-True ($r1HashBefore -eq $r1HashAfter) 'archived raw R1 serial is unchanged'
 
 $manifest=[ordered]@{
     result='PASS'; testRoot=$testRoot; recordImplementationTest='PASS'; recordTestExecutable=$recordExe
     recordTestSha256=Hash-File $recordExe; analyzer=$analyzer; sourceOperationIdCount=$opDefinitions.Count
     reachableFailureBranchesTested=@($branchCases | ForEach-Object name)
-    analyzerFixtures=@('success','each reachable init_semi_shared branch','resource acquisition followed by initializer and cleanup failure','first cause retained','raw native event-close status','missing operation-result field','incomplete record','conflicting duplicate summary field','archived R4R5R1 trace remains unresolved internally')
+    analyzerFixtures=@('success','each reachable init_semi_shared branch','resource acquisition followed by initializer and cleanup failure','first cause retained','nested first failure beneath a failed aggregate','successful cleanup after an earlier failure','raw native event-close status','missing operation-result field','incomplete record','conflicting duplicate summary field','missing R2 evidence on archived R1 trace')
     originalR1SerialSha256Before=$r1HashBefore; originalR1SerialSha256After=$r1HashAfter
     noQemuLaunched=$true; noQacReserved=$true
 }
