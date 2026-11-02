@@ -2,7 +2,8 @@
 
 #include <stdint.h>
 
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC) || \
+    defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
 enum guidexos_nativeaot_native_alloc_operation : uint32_t {
     GX_NATIVE_ALLOC_SITE_GC_EVENT_IMPL = 0x0200u,
     GX_NATIVE_ALLOC_OP_NOTHROW_NEW = 0x0201u,
@@ -144,6 +145,7 @@ enum : uint32_t {
     GX_NATIVE_ALLOC_PAL_STATE_READY = 2u,
 };
 
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
 extern "C" void __cdecl GuideXosNativeAotNativeAllocBegin(
     uint32_t site, uint64_t requestSize, uint64_t alignment);
 extern "C" void __cdecl GuideXosNativeAotNativeAllocObserveNothrowNew(
@@ -162,4 +164,5 @@ extern "C" uint32_t __cdecl GuideXosNativeAotNativeAllocGetSummaryField(
 extern "C" uint32_t __cdecl GuideXosNativeAotNativeAllocGetAttemptCount(void);
 extern "C" uint32_t __cdecl GuideXosNativeAotNativeAllocGetAttemptField(
     uint32_t attempt, uint32_t field);
+#endif
 #endif
