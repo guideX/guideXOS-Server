@@ -3,6 +3,12 @@
 #if defined(GXOS_BARE_METAL) && defined(GXOS_TRUE_VIRTUAL_MEMORY)
 
 #include "kernel/address_space.h"
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_native_alloc_record.h"
+extern "C" void guideXosNativeAotNativeAllocBackendFailure(
+    uint32_t operation, uint32_t branch, uint32_t status,
+    uint32_t statusSource);
+#endif
 
 namespace gxos_vm_true_compat {
 using size_t = ::size_t;
@@ -87,6 +93,19 @@ struct BareRegionState {
 BareRegionState g_regions[kMaxRegions] = {};
 std::uint64_t g_nextGeneration = 1;
 const char* g_diagnostic = "bare-metal true reservation backend: not initialized";
+
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+void nativeAllocBackendFailure(uint32_t operation, uint32_t branch,
+                               VmResult result) {
+    guideXosNativeAotNativeAllocBackendFailure(
+        operation, branch, static_cast<uint32_t>(result),
+        GX_NATIVE_ALLOC_STATUS_VM_RESULT);
+}
+void nativeAllocBackendBooleanFailure(uint32_t operation, uint32_t branch) {
+    guideXosNativeAotNativeAllocBackendFailure(
+        operation, branch, 0u, GX_NATIVE_ALLOC_STATUS_KERNEL_BOOLEAN);
+}
+#endif
 
 void diagnostic(const char* message) {
     g_diagnostic = message == nullptr ? "bare-metal VM diagnostic unavailable" : message;
@@ -277,30 +296,72 @@ VirtualMemoryRegion::~VirtualMemoryRegion() {
 
 VmResult reserve(std::size_t size, std::size_t alignment, void* preferredBase,
                  VirtualMemoryRegion* region) {
-    if (region == nullptr) return VmResult::InvalidArgument;
-    if (detail::RegionAccess::state(*region) != nullptr) return VmResult::AlreadyReserved;
+    if (region == nullptr) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+            GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_INVALID_ARGUMENT, VmResult::InvalidArgument);
+#endif
+        return VmResult::InvalidArgument;
+    }
+    if (detail::RegionAccess::state(*region) != nullptr) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+            GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_ALREADY_RESERVED, VmResult::AlreadyReserved);
+#endif
+        return VmResult::AlreadyReserved;
+    }
     AddressSpace* owner = kernel::memory::address_space::current();
     if (owner == nullptr) {
         diagnostic("true reservation backend has no initialized address space");
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+            GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_NO_ADDRESS_SPACE, VmResult::Unsupported);
+#endif
         return VmResult::Unsupported;
     }
-    if (size == 0) return VmResult::InvalidArgument;
+    if (size == 0) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+            GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_INVALID_ARGUMENT, VmResult::InvalidArgument);
+#endif
+        return VmResult::InvalidArgument;
+    }
     if (alignment == 0) alignment = kPageSize;
-    if (!isPowerOfTwo(alignment) || alignment < kPageSize) return VmResult::AlignmentError;
+    if (!isPowerOfTwo(alignment) || alignment < kPageSize) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+            GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_ALIGNMENT, VmResult::AlignmentError);
+#endif
+        return VmResult::AlignmentError;
+    }
     std::size_t roundedSize = 0;
     if (!roundUp(size, kPageSize, &roundedSize) || roundedSize == 0 ||
-        roundedSize > kMaxRegionSize) return VmResult::RangeOverflow;
+        roundedSize > kMaxRegionSize) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+            GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_RANGE, VmResult::RangeOverflow);
+#endif
+        return VmResult::RangeOverflow;
+    }
 
     std::uintptr_t requested = 0;
     if (preferredBase != nullptr) {
         requested = reinterpret_cast<std::uintptr_t>(preferredBase);
         if ((requested % kPageSize) != 0 || (requested % alignment) != 0) {
             diagnostic("preferred base alignment rejected");
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+            nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+                GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_PREFERRED_ALIGNMENT, VmResult::AlignmentError);
+#endif
             return VmResult::AlignmentError;
         }
         if (requested < kRuntimeRangeBase ||
             requested > kRuntimeRangeBase + kRuntimeRangeSize - roundedSize) {
             diagnostic("preferred base is outside the runtime reservation range");
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+            nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+                GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_PREFERRED_RANGE, VmResult::AddressUnavailable);
+#endif
             return VmResult::AddressUnavailable;
         }
     }
@@ -329,6 +390,10 @@ VmResult reserve(std::size_t size, std::size_t alignment, void* preferredBase,
     }
     if (selected == 0) {
         diagnostic("requested virtual interval is unavailable");
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+            GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_ADDRESS_UNAVAILABLE, VmResult::AddressUnavailable);
+#endif
         return VmResult::AddressUnavailable;
     }
 
@@ -341,6 +406,10 @@ VmResult reserve(std::size_t size, std::size_t alignment, void* preferredBase,
     }
     if (state == nullptr) {
         diagnostic("reservation metadata pool exhausted");
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_RESERVE,
+            GX_NATIVE_ALLOC_BRANCH_VM_RESERVE_METADATA_EXHAUSTED, VmResult::OutOfMemory);
+#endif
         return VmResult::OutOfMemory;
     }
 
@@ -365,14 +434,31 @@ VmResult reserve(std::size_t size, std::size_t alignment, void* preferredBase,
 VmResult commit(VirtualMemoryRegion& region, std::size_t offset,
                 std::size_t size, MemoryProtection protection) {
     BareRegionState* state = stateFor(region);
-    if (state == nullptr) return VmResult::AlreadyReleased;
-    if (!supportedProtection(protection)) return VmResult::ProtectionUnsupported;
+    if (state == nullptr) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_COMMIT,
+            GX_NATIVE_ALLOC_BRANCH_VM_COMMIT_NO_STATE, VmResult::AlreadyReleased);
+#endif
+        return VmResult::AlreadyReleased;
+    }
+    if (!supportedProtection(protection)) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_COMMIT,
+            GX_NATIVE_ALLOC_BRANCH_VM_COMMIT_UNSUPPORTED_PROTECTION, VmResult::ProtectionUnsupported);
+#endif
+        return VmResult::ProtectionUnsupported;
+    }
     std::size_t firstPage = 0;
     std::size_t pageCount = 0;
     if (!validPageRange(*state, offset, size, &firstPage, &pageCount)) {
-        return (size == 0 || (offset % kPageSize) != 0 ||
+        const VmResult result = (size == 0 || (offset % kPageSize) != 0 ||
                 (size % kPageSize) != 0) ? VmResult::AlignmentError
                                           : VmResult::OutOfRange;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_COMMIT,
+            GX_NATIVE_ALLOC_BRANCH_VM_COMMIT_ALIGNMENT_OR_RANGE, result);
+#endif
+        return result;
     }
 
     std::uint8_t newly[kMaxRegionPages] = {};
@@ -383,6 +469,10 @@ VmResult commit(VirtualMemoryRegion& region, std::size_t offset,
         const std::uint64_t physical = kernel::memory::address_space::allocateFrame(
             FrameOwner::VmRegion);
         if (physical == 0) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+            nativeAllocBackendFailure(GX_NATIVE_ALLOC_OP_VM_COMMIT,
+                GX_NATIVE_ALLOC_BRANCH_VM_COMMIT_FRAME_UNAVAILABLE, VmResult::OutOfMemory);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
             // The failed allocation is observed before rollback.  In the
             // C95 16-page exhaustion case, newCount is the exact number of
@@ -403,6 +493,10 @@ VmResult commit(VirtualMemoryRegion& region, std::size_t offset,
             return VmResult::OutOfMemory;
         }
         if (!kernel::memory::address_space::zeroFrame(physical)) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+            nativeAllocBackendBooleanFailure(GX_NATIVE_ALLOC_OP_VM_COMMIT,
+                GX_NATIVE_ALLOC_BRANCH_VM_COMMIT_ZERO_FRAME_FAILED);
+#endif
             (void)kernel::memory::address_space::releaseFrame(
                 physical, FrameOwner::VmRegion, FrameReleaseReason::Other);
             rollbackNewPages(*state, newly, firstPage, pageCount);
@@ -411,6 +505,10 @@ VmResult commit(VirtualMemoryRegion& region, std::size_t offset,
         }
         state->pages[pageIndex].physicalAddress = physical;
         if (!mapCommittedPage(*state, pageIndex, physical, protection)) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+            nativeAllocBackendBooleanFailure(GX_NATIVE_ALLOC_OP_VM_COMMIT,
+                GX_NATIVE_ALLOC_BRANCH_VM_COMMIT_PAGE_MAP_FAILED);
+#endif
             (void)kernel::memory::address_space::releaseFrame(
                 physical, FrameOwner::VmRegion, FrameReleaseReason::Other);
             state->pages[pageIndex] = PageRecord{};
@@ -439,6 +537,10 @@ VmResult commit(VirtualMemoryRegion& region, std::size_t offset,
                         pageFlags(state->pages[rollbackPage].protection));
                 }
             }
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+            nativeAllocBackendBooleanFailure(GX_NATIVE_ALLOC_OP_VM_COMMIT,
+                GX_NATIVE_ALLOC_BRANCH_VM_COMMIT_PROTECTION_UPDATE_FAILED);
+#endif
             rollbackNewPages(*state, newly, firstPage, pageCount);
             diagnostic("protection transition failed during commit");
             return VmResult::HostFailure;

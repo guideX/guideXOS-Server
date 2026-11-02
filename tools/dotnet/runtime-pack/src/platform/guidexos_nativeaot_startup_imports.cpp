@@ -8,6 +8,11 @@
 
 #include <stdint.h>
 #include <new>
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#include <intrin.h>
+#include "guidexos_nativeaot_native_alloc_record.h"
+#pragma intrinsic(_ReturnAddress)
+#endif
 
 #include "guidexos_nativeaot_pal_contract.h"
 
@@ -301,10 +306,18 @@ struct GuidexosNativeAotMallocHeader {
 extern "C" void* __cdecl guidexos_nativeaot_startup_malloc(size_t size) {
     if (size == 0) size = 1;
     if (size > static_cast<size_t>(UINTPTR_MAX - sizeof(GuidexosNativeAotMallocHeader))) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        GuideXosNativeAotNativeAllocObserveMalloc(
+            size, 0u, GX_NATIVE_ALLOC_FAILURE_SIZE_OVERFLOW);
+#endif
         return nullptr;
     }
     const uintptr_t total = static_cast<uintptr_t>(size) +
                             sizeof(GuidexosNativeAotMallocHeader);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    GuideXosNativeAotNativeAllocObserveMalloc(
+        size, total, GX_NATIVE_ALLOC_FAILURE_NONE);
+#endif
     void* raw = guidexos_nativeaot_pal_virtual_alloc(
         nullptr, total, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (raw == nullptr) return nullptr;
@@ -381,7 +394,14 @@ void* __cdecl operator new(size_t size) {
 }
 
 void* __cdecl operator new(size_t size, const std::nothrow_t&) noexcept {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    void* const result = guidexos_nativeaot_startup_malloc(size);
+    GuideXosNativeAotNativeAllocObserveNothrowNew(
+        size, reinterpret_cast<uintptr_t>(_ReturnAddress()), result);
+    return result;
+#else
     return guidexos_nativeaot_startup_malloc(size);
+#endif
 }
 
 void* __cdecl operator new[](size_t size) {

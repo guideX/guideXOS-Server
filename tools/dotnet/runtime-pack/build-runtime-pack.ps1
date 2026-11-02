@@ -13,6 +13,7 @@ param(
     [switch]$C188R12R4R5R4ThreadStoreReadiness,
     [switch]$C188R12R4R5R4R5GcInitProbes,
     [switch]$C188R12R4R5R4R5R2SemiSharedAttribution,
+    [switch]$C188R12R4R5R4R5R2R2NativeAllocationAttribution,
     [switch]$ProductionApplication,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
@@ -217,6 +218,16 @@ if ($C188R12R4R5R4R5R2SemiSharedAttribution -and
      -not $C188R12R4R5GcOwnershipProof -or
      -not $ProductionApplication -or $PersistentCompositeLifecycle)) {
     throw 'C188R12R4R5R4R5R2 semi-shared attribution requires the isolated R4R5 diagnostic proof profile.'
+}
+if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution -and
+    (-not $C188R12R4R5R4R5R2SemiSharedAttribution -or
+     -not $C188R12R4R5R4R5GcInitProbes -or
+     -not $C188R12R4R5R4ThreadStoreReadiness -or
+     -not $C188R12R4R5R3InitReturnContract -or
+     -not $C188R12R4R5R1InitDiagnostics -or
+     -not $C188R12R4R5GcOwnershipProof -or
+     -not $ProductionApplication -or $PersistentCompositeLifecycle)) {
+    throw 'C188R12R4R5R4R5R2R2 native allocation attribution requires the isolated R2 diagnostic profile.'
 }
 if ($C188R12R4FactoryAttribution -and
     (-not $ManagedAllocation -or -not $PersistentCompositeLifecycle)) {
@@ -580,6 +591,11 @@ if ($ProductionApplication) {
         if ($C188R12R4R5R4R5R2SemiSharedAttribution) {
             $gcDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED'
             $runtimeDiagnosticDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED'
+        }
+        if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) {
+            $gcDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC'
+            $startupDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC'
+            $runtimeDiagnosticDefines += ' /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC'
         }
         $eventingIntermediate = Join-Path $OutputRoot 'nativeaot-eventing'
         $eventingIncludeDirectory = Join-Path $eventingIntermediate 'inc'
@@ -1430,10 +1446,21 @@ if ($C188R12R4R5R4R5R2SemiSharedAttribution) {
         instrumentedGcWrapper = Get-Hash $gcInitWksSource
     }
 }
+$nativeAllocationSourceHashes = [ordered]@{}
+if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) {
+    $nativeAllocationSourceHashes = [ordered]@{
+        recordHeader = Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_native_alloc_record.h')
+        recordImplementation = Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_native_alloc_record.cpp')
+        gcEnvironment = Get-Hash (Join-Path $RuntimePackRoot 'src\gcenv\guidexos_gcenv.cpp')
+        startupImports = Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_startup_imports.cpp')
+        palContract = Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_pal_contract.cpp')
+        gcStartupAdapter = Get-Hash (Join-Path $RuntimePackRoot 'src\probes\guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.cpp')
+    }
+}
 $manifest = [ordered]@{
     schemaVersion = 2
     c51Identifier = if ($NativeAotFpRepair) { "C011EC51" } else { $null }
-    identity = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1" } elseif ($C188R12R4R5R4R5GcInitProbes) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1" } elseif ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
+    identity = if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2r2-native-allocation-v1" } elseif ($C188R12R4R5R4R5R2SemiSharedAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1" } elseif ($C188R12R4R5R4R5GcInitProbes) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1" } elseif ($C188R12R4R5R4ThreadStoreReadiness) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4-threadstore-readiness-v1" } elseif ($C188R12R4R5R3InitReturnContract) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r3-init-return-contract-v1" } elseif ($C188R12R4R5R1InitDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r1-init-attribution-v1" } elseif ($C188R12R4R5GcOwnershipProof) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5-gc-ownership-proof-v1" } elseif ($C188R12R4FactoryAttribution) { "guidexos-nativeaot-runtime-pack-amd64-c188r12r4-factory-attribution-v1" } elseif ($ThreadStaticLifecycleDiagnostics) { "guidexos-nativeaot-runtime-pack-amd64-c108-threadstatic-lifecycle-v1" } elseif ($PersistentCompositeLifecycle) { "guidexos-nativeaot-runtime-pack-amd64-persistent-composite-lifecycle-v1" } elseif ($ProductionApplication) { "guidexos-nativeaot-runtime-pack-amd64-production-application-v1" } elseif ($NativeAotFpRepair) { "guidexos-nativeaot-runtime-pack-amd64-workstationgc-fp-repair-v1" } elseif ($ManagedRepeatedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-repeated-allocation-nocollection-v1" } elseif ($ManagedAllocation) { "guidexos-nativeaot-runtime-pack-amd64-hostlog-allocating-nocollection-v1" } else { "guidexos-nativeaot-runtime-pack-amd64-hostlog-nonallocating-v1" }
     repository = [ordered]@{ root = $RepoRoot; head = $repoHead; subject = $repoSubject; branch = (& git -C $RepoRoot branch --show-current).Trim(); upstream = $repoUpstream; aheadBehind = $repoAheadBehind }
     runtimeIdentity = [ordered]@{ nativeAot = $lock.ilCompiler.version; architecture = "AMD64"; gc = "Workstation"; gcInterface = "5.3"; eeInterface = "2"; targetFramework = $lock.targetFramework; runtimeIdentifier = $lock.runtimeIdentifier; sourceCommit = $lock.ilCompiler.commit }
     architecture = $lock.architecture
@@ -1495,6 +1522,12 @@ $manifest = [ordered]@{
     c188r12r4r5r4ThreadStoreReadiness = [bool]$C188R12R4R5R4ThreadStoreReadiness
     c188r12r4r5r4r5GcInitProbes = [bool]$C188R12R4R5R4R5GcInitProbes
     c188r12r4r5r4r5r2SemiSharedAttribution = [bool]$C188R12R4R5R4R5R2SemiSharedAttribution
+    c188r12r4r5r4r5r2r2NativeAllocationAttribution = [bool]$C188R12R4R5R4R5R2R2NativeAllocationAttribution
+    c188r12r4r5r4r5r2r2NativeAllocationMarker = if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' } else { $null }
+    c188r12r4r5r4r5r2r2NativeAllocationAttemptCapacity = if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { 8 } else { 0 }
+    c188r12r4r5r4r5r2r2NativeAllocationAttemptFieldCount = if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { 25 } else { 0 }
+    c188r12r4r5r4r5r2r2NativeAllocationSummaryFieldCount = if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { 9 } else { 0 }
+    c188r12r4r5r4r5r2r2NativeAllocationSourceFiles = $nativeAllocationSourceHashes
     c188r12r4r5r4r5r2SemiSharedMarker = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { 'C188R12R4R5R4R5R2_SEMISHARED' } else { $null }
     c188r12r4r5r4r5r2OperationCapacity = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { 48 } else { 0 }
     c188r12r4r5r4r5r2OperationFieldCount = if ($C188R12R4R5R4R5R2SemiSharedAttribution) { 14 } else { 0 }

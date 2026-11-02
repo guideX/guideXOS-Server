@@ -23,6 +23,12 @@
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
 #include "../platform/guidexos_nativeaot_semishared_record.h"
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#include "../platform/guidexos_nativeaot_native_alloc_record.cpp"
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#include "../platform/guidexos_nativeaot_native_alloc_record.h"
+#endif
 #include "guidexos_gc_platform_services.h"
 
 #if defined(GUIDEXOS_NATIVEAOT_SEGMENT_BOUNDARY_ALLOCATION)
@@ -124,6 +130,11 @@ public:
     EventHandle* handle = nullptr;
 };
 
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+static_assert(sizeof(GCEvent::Impl) == 8u, "NativeAOT diagnostic profile expects an 8-byte GCEvent::Impl");
+static_assert(alignof(GCEvent::Impl) == 8u, "NativeAOT diagnostic profile expects 8-byte GCEvent::Impl alignment");
+#endif
+
 GCEvent::GCEvent() : m_impl(nullptr) {}
 
 void GCEvent::CloseEvent() {
@@ -199,7 +210,16 @@ bool GCEvent::CreateOSAutoEventNoThrow(bool initialState) {
         GX_SEMISHARED_RESOURCE_GC_EVENT_IMPL,
         sizeof(GCEvent::Impl), alignof(GCEvent::Impl));
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    GuideXosNativeAotNativeAllocBegin(
+        GX_NATIVE_ALLOC_SITE_GC_EVENT_IMPL,
+        sizeof(GCEvent::Impl), alignof(GCEvent::Impl));
+#endif
     std::unique_ptr<GCEvent::Impl> impl(new (std::nothrow) GCEvent::Impl());
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    if (impl != nullptr) GuideXosNativeAotNativeAllocConstructorEntered();
+    GuideXosNativeAotNativeAllocComplete(impl.get());
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
     GuideXosNativeAotSemiSharedSetResourceResult(
         GX_SEMISHARED_RESOURCE_GC_EVENT_IMPL, impl != nullptr ? 1u : 0u);
@@ -233,7 +253,16 @@ bool GCEvent::CreateOSManualEventNoThrow(bool initialState) {
         GX_SEMISHARED_RESOURCE_GC_EVENT_IMPL,
         sizeof(GCEvent::Impl), alignof(GCEvent::Impl));
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    GuideXosNativeAotNativeAllocBegin(
+        GX_NATIVE_ALLOC_SITE_GC_EVENT_IMPL,
+        sizeof(GCEvent::Impl), alignof(GCEvent::Impl));
+#endif
     std::unique_ptr<GCEvent::Impl> impl(new (std::nothrow) GCEvent::Impl());
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    if (impl != nullptr) GuideXosNativeAotNativeAllocConstructorEntered();
+    GuideXosNativeAotNativeAllocComplete(impl.get());
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
     GuideXosNativeAotSemiSharedSetResourceResult(
         GX_SEMISHARED_RESOURCE_GC_EVENT_IMPL, impl != nullptr ? 1u : 0u);

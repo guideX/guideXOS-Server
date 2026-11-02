@@ -1,6 +1,9 @@
 #include "guidexos_nativeaot_pal_contract.h"
 
 #include <stddef.h>
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#include "guidexos_nativeaot_native_alloc_record.h"
+#endif
 
 namespace {
 
@@ -286,8 +289,22 @@ guidexos_nativeaot_pal_virtual_alloc(void* preferred,
                                      uintptr_t size,
                                      uint32_t allocation_type,
                                      uint32_t protection) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    if (!palInstalled()) {
+        GuideXosNativeAotNativeAllocObservePal(
+            GX_NATIVE_ALLOC_PAL_STATE_NOT_READY, 0u, nullptr);
+        return nullptr;
+    }
+    GuideXosNativeAotNativeAllocPalCallbackEntered();
+    void* const result = g_pal_hooks.virtual_alloc(
+        g_pal_hooks.context, preferred, size, allocation_type, protection);
+    GuideXosNativeAotNativeAllocObservePal(
+        GX_NATIVE_ALLOC_PAL_STATE_READY, 1u, result);
+    return result;
+#else
     return !palInstalled() ? nullptr : g_pal_hooks.virtual_alloc(
         g_pal_hooks.context, preferred, size, allocation_type, protection);
+#endif
 }
 
 extern "C" int32_t GUIDEXOS_NATIVEAOT_PAL_CALL

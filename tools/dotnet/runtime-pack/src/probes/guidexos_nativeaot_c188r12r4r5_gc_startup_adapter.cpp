@@ -11,6 +11,9 @@
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
 #include "../platform/guidexos_nativeaot_semishared_record.h"
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#include "../platform/guidexos_nativeaot_native_alloc_record.h"
+#endif
 
 /*
  * Minimal proof-image adapter for the existing kernel startup harness.
@@ -99,6 +102,24 @@ void emitSemiSharedRecord(uint32_t invocation) {
                 : GuideXosNativeAotSemiSharedGetOperationField(index, operationPairs[field][1]);
             g_initTraceSink(invocation, GX_INIT_STAGE_GC_SEMISHARED_RECORD, event,
                 value, auxiliary);
+        }
+    }
+}
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+void emitNativeAllocationRecord(uint32_t invocation) {
+    if (g_initTraceSink == nullptr) return;
+    for (uint32_t field = 0u; field < GX_NATIVE_ALLOC_SUMMARY_FIELD_COUNT; ++field) {
+        g_initTraceSink(invocation, GX_INIT_STAGE_GC_NATIVE_ALLOC_RECORD,
+            0x80000000u | field,
+            GuideXosNativeAotNativeAllocGetSummaryField(field), 0u);
+    }
+    const uint32_t count = GuideXosNativeAotNativeAllocGetAttemptCount();
+    for (uint32_t attempt = 0u; attempt < count; ++attempt) {
+        for (uint32_t field = 0u; field < GX_NATIVE_ALLOC_ATTEMPT_FIELD_COUNT; ++field) {
+            const uint32_t event = (attempt << 8) | field;
+            g_initTraceSink(invocation, GX_INIT_STAGE_GC_NATIVE_ALLOC_RECORD,
+                event, GuideXosNativeAotNativeAllocGetAttemptField(attempt, field), 0u);
         }
     }
 }
@@ -215,6 +236,10 @@ extern "C" __declspec(dllexport) int __cdecl GuideXosNativeAotGcStartupMain(void
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
     emitSemiSharedRecord(
+        GuideXosNativeAotGcInitGetField(GX_GCINIT_FIELD_INVOCATION));
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    emitNativeAllocationRecord(
         GuideXosNativeAotGcInitGetField(GX_GCINIT_FIELD_INVOCATION));
 #endif
 #endif

@@ -40,6 +40,9 @@
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_init_trace.h"
 #endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_native_alloc_record.h"
+#endif
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_adapter.h"
 
 #if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
@@ -56,7 +59,11 @@ namespace nativeaot_pal_qemu_test {
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
 namespace {
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+constexpr uint32_t kInitTraceSerialLineLimit = 768u;
+#else
 constexpr uint32_t kInitTraceSerialLineLimit = 384u;
+#endif
 #else
 constexpr uint32_t kInitTraceSerialLineLimit = 96u;
 #endif
@@ -86,6 +93,23 @@ void __cdecl nativeAotInitTraceSink(
         const uint32_t sequence = summary ? 0xFFFFFFFFu : (event >> 8);
         const uint32_t field = summary ? (event & 0x7FFFFFFFu) : (event & 0xFFu);
         serial::puts("[C188R12R4R5R4R5R2_SEMISHARED] invocation=");
+        serial::put_hex32(invocation);
+        serial::puts(" sequence=");
+        serial::put_hex32(sequence);
+        serial::puts(" field=");
+        serial::put_hex32(field);
+        serial::puts(" value=");
+        serial::put_hex32(result);
+        serial::puts(" auxiliary=");
+        serial::put_hex32(singletonBits);
+        serial::puts("\n");
+        return;
+    }
+    if (stage == GX_INIT_STAGE_GC_NATIVE_ALLOC_RECORD) {
+        const bool summary = (event & 0x80000000u) != 0u;
+        const uint32_t sequence = summary ? 0xFFFFFFFFu : (event >> 8);
+        const uint32_t field = summary ? (event & 0x7FFFFFFFu) : (event & 0xFFu);
+        serial::puts("[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=runtime invocation=");
         serial::put_hex32(invocation);
         serial::puts(" sequence=");
         serial::put_hex32(sequence);
@@ -1058,6 +1082,228 @@ uint32_t g_startupLegacyAllocCalls = 0;
 uintptr_t g_startupLegacyLastSize = 0;
 bool g_startupLegacyLastSuccess = false;
 
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+struct NativeAllocBackendAttempt {
+    uintptr_t requestSize;
+    uint32_t requestType;
+    uintptr_t roundedSize;
+    uint32_t slotCapacity;
+    uint32_t activeSlots;
+    uint32_t freeSlotIndex;
+    uint32_t addressSpaceReady;
+    uint32_t vmRegionCapacity;
+    uint32_t reserveResult;
+    uintptr_t commitSize;
+    uint32_t commitResult;
+    uint32_t rollbackReleaseResult;
+    uint32_t finalPointerNonNull;
+    uint32_t failureOperation;
+    uint32_t failureBranch;
+    uint32_t failureStatus;
+    uint32_t failureStatusSource;
+    gxos::runtime::virtual_memory::VirtualMemoryStats before;
+    gxos::runtime::virtual_memory::VirtualMemoryStats after;
+};
+
+struct NativeAllocBackendRecord {
+    uint32_t count;
+    uint32_t overflow;
+    uint32_t firstFailedAttempt;
+    uint32_t activeAttempt;
+    NativeAllocBackendAttempt attempts[GX_NATIVE_ALLOC_BACKEND_CAPACITY];
+};
+
+NativeAllocBackendRecord g_nativeAllocBackend = {
+    0u, 0u, GX_NATIVE_ALLOC_VALUE_UNAVAILABLE,
+    GX_NATIVE_ALLOC_VALUE_UNAVAILABLE, {},
+};
+bool g_nativeAllocBackendCaptureActive = false;
+
+uint32_t nativeAllocBackendActiveVmSlots() {
+    uint32_t count = 0u;
+    for (const GcVmSlot& slot : g_gcVmSlots) {
+        if (slot.active) ++count;
+    }
+    return count;
+}
+
+uint32_t nativeAllocBackendFreeVmSlot() {
+    for (uint32_t index = 0u; index < kMaxGcVmSlots; ++index) {
+        if (!g_gcVmSlots[index].active) return index;
+    }
+    return GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+}
+
+NativeAllocBackendAttempt* nativeAllocBackendActiveAttempt() {
+    const uint32_t index = g_nativeAllocBackend.activeAttempt;
+    return index < g_nativeAllocBackend.count &&
+           index < GX_NATIVE_ALLOC_BACKEND_CAPACITY
+        ? &g_nativeAllocBackend.attempts[index] : nullptr;
+}
+
+void nativeAllocBackendRecordFailure(uint32_t operation, uint32_t branch,
+                                     uint32_t status, uint32_t statusSource) {
+    NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
+    if (attempt == nullptr ||
+        attempt->failureOperation != GX_NATIVE_ALLOC_VALUE_UNAVAILABLE) return;
+    attempt->failureOperation = operation;
+    attempt->failureBranch = branch;
+    attempt->failureStatus = status;
+    attempt->failureStatusSource = statusSource;
+    if (g_nativeAllocBackend.firstFailedAttempt == GX_NATIVE_ALLOC_VALUE_UNAVAILABLE) {
+        g_nativeAllocBackend.firstFailedAttempt = g_nativeAllocBackend.activeAttempt;
+    }
+}
+
+void nativeAllocBackendBegin(uintptr_t size, uint32_t type) {
+    g_nativeAllocBackendCaptureActive = false;
+    if (size != 24u) return;
+    if (g_nativeAllocBackend.count >= GX_NATIVE_ALLOC_BACKEND_CAPACITY) {
+        g_nativeAllocBackend.overflow = 1u;
+        return;
+    }
+    const uint32_t index = g_nativeAllocBackend.count++;
+    NativeAllocBackendAttempt& attempt = g_nativeAllocBackend.attempts[index];
+    attempt = {};
+    attempt.requestSize = size;
+    attempt.requestType = type;
+    attempt.roundedSize = size <= UINTPTR_MAX - 4095u
+        ? (size + 4095u) & ~uintptr_t(4095u)
+        : GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    attempt.slotCapacity = kMaxGcVmSlots;
+    attempt.activeSlots = nativeAllocBackendActiveVmSlots();
+    attempt.freeSlotIndex = nativeAllocBackendFreeVmSlot();
+    attempt.addressSpaceReady = kernel::memory::address_space::isInitialized() &&
+        kernel::memory::address_space::current() != nullptr ? 1u : 0u;
+    attempt.before = gxos::runtime::virtual_memory::stats();
+    attempt.after = attempt.before;
+    attempt.vmRegionCapacity = static_cast<uint32_t>(attempt.before.metadataCapacity);
+    attempt.reserveResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    attempt.commitSize = 0u;
+    attempt.commitResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    attempt.rollbackReleaseResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    attempt.failureOperation = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    attempt.failureBranch = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    attempt.failureStatus = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    attempt.failureStatusSource = GX_NATIVE_ALLOC_STATUS_UNAVAILABLE;
+    g_nativeAllocBackend.activeAttempt = index;
+    g_nativeAllocBackendCaptureActive = true;
+}
+
+void nativeAllocBackendObserveReserve(uint32_t result) {
+    NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
+    if (attempt != nullptr) attempt->reserveResult = result;
+}
+
+void nativeAllocBackendObserveCommit(uintptr_t size, uint32_t result) {
+    NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
+    if (attempt == nullptr) return;
+    attempt->commitSize = size;
+    attempt->commitResult = result;
+}
+
+void nativeAllocBackendObserveRollbackRelease(uint32_t result) {
+    NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
+    if (attempt != nullptr) attempt->rollbackReleaseResult = result;
+}
+
+void nativeAllocBackendFinish(void* result) {
+    NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
+    if (attempt != nullptr) {
+        attempt->finalPointerNonNull = result != nullptr ? 1u : 0u;
+        attempt->after = gxos::runtime::virtual_memory::stats();
+        if (result == nullptr &&
+            attempt->failureOperation == GX_NATIVE_ALLOC_VALUE_UNAVAILABLE) {
+            nativeAllocBackendRecordFailure(
+                GX_NATIVE_ALLOC_OP_KERNEL_VIRTUAL_ALLOC,
+                GX_NATIVE_ALLOC_FAILURE_PAL_RETURNED_NULL,
+                GX_NATIVE_ALLOC_VALUE_UNAVAILABLE,
+                GX_NATIVE_ALLOC_STATUS_UNAVAILABLE);
+        }
+    }
+    g_nativeAllocBackendCaptureActive = false;
+    g_nativeAllocBackend.activeAttempt = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+}
+
+} // namespace
+
+extern "C" void guideXosNativeAotNativeAllocBackendFailure(
+    uint32_t operation, uint32_t branch, uint32_t status,
+    uint32_t statusSource) {
+    if (g_nativeAllocBackendCaptureActive) {
+        nativeAllocBackendRecordFailure(operation, branch, status, statusSource);
+    }
+}
+
+namespace {
+
+uint32_t nativeAllocBackendField(const NativeAllocBackendAttempt& attempt,
+                                 uint32_t field, uint32_t sequence) {
+    const auto low = [](uintptr_t value) { return static_cast<uint32_t>(value); };
+    const auto high = [](uint64_t value) { return static_cast<uint32_t>(value >> 32); };
+    switch (field) {
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_SEQUENCE: return sequence;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_REQUEST_SIZE: return low(attempt.requestSize);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_REQUEST_TYPE: return attempt.requestType;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_ROUNDED_SIZE: return low(attempt.roundedSize);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_SLOT_CAPACITY: return attempt.slotCapacity;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_ACTIVE_SLOTS: return attempt.activeSlots;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_FREE_SLOT_INDEX: return attempt.freeSlotIndex;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_ADDRESS_SPACE_READY: return attempt.addressSpaceReady;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_VM_REGION_CAPACITY: return attempt.vmRegionCapacity;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_RESERVE_RESULT: return attempt.reserveResult;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_COMMIT_SIZE: return low(attempt.commitSize);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_COMMIT_RESULT: return attempt.commitResult;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_ROLLBACK_RELEASE_RESULT: return attempt.rollbackReleaseResult;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_FINAL_POINTER_NON_NULL: return attempt.finalPointerNonNull;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_FIRST_FAILURE_OPERATION: return attempt.failureOperation;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_FIRST_FAILURE_BRANCH: return attempt.failureBranch;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_FIRST_FAILURE_STATUS: return attempt.failureStatus;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_STATUS_SOURCE: return attempt.failureStatusSource;
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_PRE_TOTAL_FRAMES_LOW: return low(attempt.before.totalKnownFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_PRE_TOTAL_FRAMES_HIGH: return high(attempt.before.totalKnownFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_PRE_FREE_FRAMES_LOW: return low(attempt.before.freeFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_PRE_FREE_FRAMES_HIGH: return high(attempt.before.freeFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_PRE_ALLOCATED_FRAMES_LOW: return low(attempt.before.allocatedFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_PRE_ALLOCATED_FRAMES_HIGH: return high(attempt.before.allocatedFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_PRE_VM_REGIONS: return low(attempt.before.activeRegions);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_PRE_VM_METADATA_CAPACITY: return low(attempt.before.metadataCapacity);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_POST_FREE_FRAMES_LOW: return low(attempt.after.freeFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_POST_FREE_FRAMES_HIGH: return high(attempt.after.freeFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_POST_ALLOCATED_FRAMES_LOW: return low(attempt.after.allocatedFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_POST_ALLOCATED_FRAMES_HIGH: return high(attempt.after.allocatedFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_POST_REGION_OWNED_LOW: return low(attempt.after.regionOwnedFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_POST_REGION_OWNED_HIGH: return high(attempt.after.regionOwnedFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_POST_PAGE_TABLE_LOW: return low(attempt.after.pageTableFrames);
+    case GX_NATIVE_ALLOC_BACKEND_FIELD_POST_PAGE_TABLE_HIGH: return high(attempt.after.pageTableFrames);
+    default: return GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    }
+}
+
+void emitNativeAllocBackendRecord() {
+    serial::puts("[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation=00000001 sequence=FFFFFFFF field=80000000 value=");
+    serial::put_hex32(g_nativeAllocBackend.count);
+    serial::puts(" auxiliary=");
+    serial::put_hex32(g_nativeAllocBackend.overflow);
+    serial::puts("\n");
+    serial::puts("[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation=00000001 sequence=FFFFFFFF field=80000001 value=");
+    serial::put_hex32(g_nativeAllocBackend.firstFailedAttempt);
+    serial::puts(" auxiliary=00000000\n");
+    for (uint32_t attempt = 0u; attempt < g_nativeAllocBackend.count; ++attempt) {
+        const NativeAllocBackendAttempt& row = g_nativeAllocBackend.attempts[attempt];
+        for (uint32_t field = 0u; field < GX_NATIVE_ALLOC_BACKEND_FIELD_COUNT; ++field) {
+            serial::puts("[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation=00000001 sequence=");
+            serial::put_hex32(attempt);
+            serial::puts(" field=");
+            serial::put_hex32(field);
+            serial::puts(" value=");
+            serial::put_hex32(nativeAllocBackendField(row, field, attempt));
+            serial::puts(" auxiliary=00000000\n");
+        }
+    }
+}
+#endif
+
 void startupStatus(const char* name, bool passed, bool& allPassed) {
     serial::puts("[nativeaot-gc-startup-qemu-test] ");
     serial::puts(name);
@@ -1133,12 +1379,21 @@ GcVmSlot* findGcVm(const void* address) {
 
 void* GUIDEXOS_NATIVEAOT_PAL_CALL startupReserve(
     uintptr_t size, uintptr_t alignment, uint32_t, uint16_t) {
-    if (size == 0) return nullptr;
-    for (GcVmSlot& slot : g_gcVmSlots) {
+    if (size == 0) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendObserveReserve(static_cast<uint32_t>(gxos::runtime::virtual_memory::VmResult::InvalidArgument));
+#endif
+        return nullptr;
+    }
+    for (uint32_t slotIndex = 0; slotIndex < kMaxGcVmSlots; ++slotIndex) {
+        GcVmSlot& slot = g_gcVmSlots[slotIndex];
         if (slot.active) continue;
         const gxos::runtime::virtual_memory::VmResult result =
             gxos::runtime::virtual_memory::reserve(
                 size, alignment, nullptr, &slot.region);
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendObserveReserve(static_cast<uint32_t>(result));
+#endif
         if (result != gxos::runtime::virtual_memory::VmResult::Ok) {
             serial::puts("[nativeaot-gc-startup-qemu-test] reserve failed size=");
             serial::put_hex64(size);
@@ -1154,6 +1409,13 @@ void* GUIDEXOS_NATIVEAOT_PAL_CALL startupReserve(
         slot.active = true;
         return slot.region.base;
     }
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    nativeAllocBackendObserveReserve(GX_NATIVE_ALLOC_VALUE_UNAVAILABLE);
+    nativeAllocBackendRecordFailure(
+        GX_NATIVE_ALLOC_OP_KERNEL_VIRTUAL_ALLOC,
+        GX_NATIVE_ALLOC_FAILURE_KERNEL_SLOT_CAPACITY, 0u,
+        GX_NATIVE_ALLOC_STATUS_KERNEL_BOOLEAN);
+#endif
     return nullptr;
 }
 
@@ -1162,15 +1424,29 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCommit(
     GcVmSlot* slot = findGcVm(address);
 #if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
     if (slot == nullptr) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendObserveCommit(size, static_cast<uint32_t>(gxos::runtime::virtual_memory::VmResult::NotOwned));
+#endif
         return -static_cast<int32_t>(
             gxos::runtime::virtual_memory::VmResult::NotOwned);
     }
     if (size == 0) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendObserveCommit(size, static_cast<uint32_t>(gxos::runtime::virtual_memory::VmResult::InvalidArgument));
+#endif
         return -static_cast<int32_t>(
             gxos::runtime::virtual_memory::VmResult::InvalidArgument);
     }
 #else
-    if (slot == nullptr || size == 0) return -1;
+    if (slot == nullptr || size == 0) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendObserveCommit(
+            size, static_cast<uint32_t>(slot == nullptr
+                ? gxos::runtime::virtual_memory::VmResult::NotOwned
+                : gxos::runtime::virtual_memory::VmResult::InvalidArgument));
+#endif
+        return -1;
+    }
 #endif
     const uintptr_t offset = reinterpret_cast<uintptr_t>(address) -
         reinterpret_cast<uintptr_t>(slot->region.base);
@@ -1183,6 +1459,9 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCommit(
         gxos::runtime::virtual_memory::commit(
             slot->region, offset, size,
             gxos::runtime::virtual_memory::MemoryProtection::ReadWrite);
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    nativeAllocBackendObserveCommit(size, static_cast<uint32_t>(result));
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC96_PHYSICAL_FRAME_PROVENANCE)
     const gxos::runtime::virtual_memory::VirtualMemoryStats c96After =
         gxos::runtime::virtual_memory::stats();
@@ -1253,9 +1532,24 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupDecommit(
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupRelease(
     void* address, uintptr_t, uint16_t) {
     GcVmSlot* slot = findGcVm(address);
-    if (slot == nullptr || address != slot->region.base) return -1;
+    if (slot == nullptr || address != slot->region.base) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+        nativeAllocBackendObserveRollbackRelease(
+            static_cast<uint32_t>(gxos::runtime::virtual_memory::VmResult::NotOwned));
+#endif
+        return -1;
+    }
     const gxos::runtime::virtual_memory::VmResult result =
         gxos::runtime::virtual_memory::release(slot->region);
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    nativeAllocBackendObserveRollbackRelease(static_cast<uint32_t>(result));
+    if (result != gxos::runtime::virtual_memory::VmResult::Ok) {
+        nativeAllocBackendRecordFailure(
+            GX_NATIVE_ALLOC_OP_VM_RELEASE_ROLLBACK,
+            GX_NATIVE_ALLOC_FAILURE_VM_ROLLBACK_RELEASE,
+            static_cast<uint32_t>(result), GX_NATIVE_ALLOC_STATUS_VM_RESULT);
+    }
+#endif
     if (result != gxos::runtime::virtual_memory::VmResult::Ok) return -1;
     slot->active = false;
     return 0;
@@ -1322,6 +1616,9 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL legacyFailFast(void*, uint32_t reason) {
 }
 void* GUIDEXOS_NATIVEAOT_PAL_CALL legacyVirtualAlloc(
     void*, void*, uintptr_t size, uint32_t type, uint32_t) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    nativeAllocBackendBegin(size, type);
+#endif
     ++g_startupLegacyAllocCalls;
     g_startupLegacyLastSize = size;
     void* result = startupReserve(size, 4096u, 0, 0xFFFFu);
@@ -1329,10 +1626,16 @@ void* GUIDEXOS_NATIVEAOT_PAL_CALL legacyVirtualAlloc(
         const uintptr_t committedSize = (size + 4095u) & ~uintptr_t(4095u);
         if (startupCommit(result, committedSize, 0xFFFFu) != 0) {
             (void)startupRelease(result, committedSize, 0xFFFFu);
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+            nativeAllocBackendFinish(nullptr);
+#endif
             return nullptr;
         }
     }
     g_startupLegacyLastSuccess = result != nullptr;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    nativeAllocBackendFinish(result);
+#endif
     return result;
 }
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL legacyVirtualFree(
@@ -2454,6 +2757,9 @@ void runFirstRealAllocationImpl(
         static_cast<uintptr_t>(startupMainAddress));
 #endif
     const int32_t startupResult = reinterpret_cast<StartupMain>(startupMainAddress)();
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    emitNativeAllocBackendRecord();
+#endif
     g_firstAllocationDiagnosticsAddress = reinterpret_cast<uintptr_t>(
         reinterpret_cast<GetDiagnostics>(getDiagnosticsAddress)());
     const uint32_t palState = reinterpret_cast<State>(getStateAddress)();
