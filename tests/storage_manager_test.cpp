@@ -31,11 +31,14 @@
 #include "../guideXOSBootLoader/guidexOSBootInfo.h"
 
 #include <algorithm>
+#include <condition_variable>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -112,6 +115,28 @@ struct FakeDisk {
     bool attemptUnmountDuringRead;
     char unmountDuringReadPath[vfs::VFS_MAX_PATH];
     vfs::Status unmountDuringReadStatus;
+    bool unmountDuringReadSnapshotCopied;
+    vfs::MountPoint unmountDuringReadSnapshot;
+    bool attemptUnmountDuringWrite;
+    char unmountDuringWritePath[vfs::VFS_MAX_PATH];
+    vfs::Status unmountDuringWriteStatus;
+    bool unmountDuringWriteSnapshotCopied;
+    vfs::MountPoint unmountDuringWriteSnapshot;
+    uint32_t writeAttemptsBeforeUnmountDuringWrite;
+    uint32_t writeAttemptsAtUnmountDuringWriteReturn;
+    uint32_t flushesAtUnmountDuringWriteReturn;
+    std::mutex blockedReadMutex;
+    std::condition_variable blockedReadCondition;
+    bool holdReadCallback;
+    bool readCallbackBlocked;
+    bool releaseReadCallback;
+    bool readCallbackTimedOut;
+    std::mutex blockedFlushMutex;
+    std::condition_variable blockedFlushCondition;
+    bool holdFlushCallback;
+    bool flushCallbackBlocked;
+    bool releaseFlushCallback;
+    bool flushCallbackTimedOut;
     bool attemptOpenDuringFlush;
     char openDuringFlushPath[vfs::VFS_MAX_PATH];
     vfs::HandleToken openDuringFlushResult;
@@ -153,6 +178,17 @@ struct FakeDisk {
           mountAttemptError(vfs::PARTITION_MOUNT_INVALID_ARGUMENT),
           attemptUnmountDuringRead(false),
           unmountDuringReadStatus(vfs::VFS_ERR_INVALID),
+          unmountDuringReadSnapshotCopied(false),
+          attemptUnmountDuringWrite(false),
+          unmountDuringWriteStatus(vfs::VFS_ERR_INVALID),
+          unmountDuringWriteSnapshotCopied(false),
+          writeAttemptsBeforeUnmountDuringWrite(0),
+          writeAttemptsAtUnmountDuringWriteReturn(0),
+          flushesAtUnmountDuringWriteReturn(0),
+          holdReadCallback(false), readCallbackBlocked(false),
+          releaseReadCallback(false), readCallbackTimedOut(false),
+          holdFlushCallback(false), flushCallbackBlocked(false),
+          releaseFlushCallback(false), flushCallbackTimedOut(false),
           attemptOpenDuringFlush(false),
           openDuringFlushResult(vfs::INVALID_HANDLE),
           attemptUnmountDuringFlush(false),
@@ -165,6 +201,7 @@ struct FakeDisk {
           cancelFormatJobOnWrite(nullptr), cancelOnWriteRejected(false)
     {
         unmountDuringReadPath[0] = '\0';
+        unmountDuringWritePath[0] = '\0';
         openDuringFlushPath[0] = '\0';
         unmountDuringFlushPath[0] = '\0';
     }
@@ -316,8 +353,25 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
     }
     if (disk->attemptUnmountDuringRead) {
         disk->attemptUnmountDuringRead = false;
+        const uint8_t mountIndex = vfs::mount_index_for_path(
+            disk->unmountDuringReadPath);
+        disk->unmountDuringReadSnapshotCopied =
+            mountIndex != 0xFF && vfs::copy_mount_snapshot(
+                mountIndex, disk->unmountDuringReadSnapshot);
         disk->unmountDuringReadStatus = vfs::unmount(
             disk->unmountDuringReadPath);
+    }
+    {
+        std::unique_lock<std::mutex> lock(disk->blockedReadMutex);
+        if (disk->holdReadCallback) {
+            disk->readCallbackBlocked = true;
+            disk->blockedReadCondition.notify_all();
+            if (!disk->blockedReadCondition.wait_for(lock,
+                    std::chrono::seconds(5), [&]() {
+                        return disk->releaseReadCallback;
+                    }))
+                disk->readCallbackTimedOut = true;
+        }
     }
     return block::BLOCK_OK;
 }
@@ -350,6 +404,19 @@ block::Status fake_write(uint8_t driverId, uint64_t lba, uint32_t count,
     if (disk->writeAttempts == disk->failWriteAtCall1 ||
         disk->writeAttempts == disk->failWriteAtCall2)
         return disk->failWriteStatus;
+    if (disk->attemptUnmountDuringWrite) {
+        disk->attemptUnmountDuringWrite = false;
+        const uint8_t mountIndex = vfs::mount_index_for_path(
+            disk->unmountDuringWritePath);
+        disk->unmountDuringWriteSnapshotCopied = mountIndex != 0xFF &&
+            vfs::copy_mount_snapshot(mountIndex,
+                                     disk->unmountDuringWriteSnapshot);
+        disk->writeAttemptsBeforeUnmountDuringWrite = disk->writeAttempts;
+        disk->unmountDuringWriteStatus = vfs::unmount(
+            disk->unmountDuringWritePath);
+        disk->writeAttemptsAtUnmountDuringWriteReturn = disk->writeAttempts;
+        disk->flushesAtUnmountDuringWriteReturn = disk->flushes;
+    }
     if (disk->sparse) {
         const uint8_t* input = static_cast<const uint8_t*>(buffer);
         for (uint32_t i = 0; i < count; ++i) {
@@ -407,6 +474,18 @@ block::Status fake_flush(uint8_t driverId)
         disk->attemptUnmountDuringFlush = false;
         disk->unmountDuringFlushStatus = vfs::unmount(
             disk->unmountDuringFlushPath);
+    }
+    {
+        std::unique_lock<std::mutex> lock(disk->blockedFlushMutex);
+        if (disk->holdFlushCallback) {
+            disk->flushCallbackBlocked = true;
+            disk->blockedFlushCondition.notify_all();
+            if (!disk->blockedFlushCondition.wait_for(lock,
+                    std::chrono::seconds(5), [&]() {
+                        return disk->releaseFlushCallback;
+                    }))
+                disk->flushCallbackTimedOut = true;
+        }
     }
     if (disk->removeOnFlush &&
         (disk->removeOnFlushAt == 0 || disk->flushes == disk->removeOnFlushAt)) {
@@ -15525,6 +15604,10 @@ int main()
               busyDirectoryClose == vfs::VFS_OK &&
               duringIoStat == vfs::VFS_OK &&
               dm37Disk.unmountDuringReadStatus == vfs::VFS_ERR_BUSY &&
+              dm37Disk.unmountDuringReadSnapshotCopied &&
+              dm37Disk.unmountDuringReadSnapshot.activeOperations != 0 &&
+              dm37Disk.unmountDuringReadSnapshot.openFileReferences == 0 &&
+              dm37Disk.unmountDuringReadSnapshot.openDirectoryReferences == 0 &&
               dm37Disk.flushes == flushesBeforeDismount + 1 &&
               dm37Dismount == vfs::VFS_OK &&
               dm37Disk.openDuringFlushResult == vfs::INVALID_HANDLE &&
@@ -15575,6 +15658,353 @@ int main()
               dm37Disk.flushes == flushesAfterFirstDismount + 1 &&
               vfs::mount_count() == 0,
               "DM37 mount generations isolate repeated/stale requests and FAT32 content survives explicit dismount and remount");
+
+        const vfs::PartitionMountResult referenceMount =
+            vfs::mount_partition_detailed("/mnt/dm37-references", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t referenceMountIndex =
+            vfs::mount_index_for_path("/mnt/dm37-references");
+        vfs::MountIdentity referenceIdentity = {};
+        const bool referenceIdentityCaptured = vfs::capture_mount_identity(
+            referenceMountIndex, referenceIdentity);
+        const vfs::HandleToken firstFileReference = vfs::open(
+            "/mnt/dm37-references/round.bin", vfs::OPEN_READ);
+        const vfs::HandleToken secondFileReference = vfs::open(
+            "/mnt/dm37-references/round.bin", vfs::OPEN_READ);
+        const vfs::HandleToken directoryReference = vfs::opendir(
+            "/mnt/dm37-references");
+        const uint32_t writeAttemptsBeforeBusyReferences =
+            dm37Disk.writeAttempts;
+        vfs::MountPoint bothReferencesSnapshot = {};
+        const bool bothReferencesSnapshotCopied = vfs::copy_mount_snapshot(
+            referenceMountIndex, bothReferencesSnapshot);
+        const uint32_t flushesBeforeBusyReferenceAttempts = dm37Disk.flushes;
+        const vfs::Status invalidReferenceClose = vfs::close(UINT64_MAX);
+        const vfs::Status bothReferencesDismount = referenceIdentityCaptured
+            ? vfs::dismount(referenceIdentity) : vfs::VFS_ERR_INVALID;
+        const vfs::Status firstReferenceClose =
+            firstFileReference == vfs::INVALID_HANDLE ? vfs::VFS_ERR_INVALID
+            : vfs::close(firstFileReference);
+        const uint32_t flushesAfterBothFileReferencesDismount =
+            dm37Disk.flushes;
+        vfs::MountPoint oneFileAndDirectorySnapshot = {};
+        const bool oneFileAndDirectorySnapshotCopied = vfs::copy_mount_snapshot(
+            referenceMountIndex, oneFileAndDirectorySnapshot);
+        const vfs::Status oneFileAndDirectoryDismount = referenceIdentityCaptured
+            ? vfs::dismount(referenceIdentity) : vfs::VFS_ERR_INVALID;
+        const uint32_t flushesAfterFileAndDirectoryDismount =
+            dm37Disk.flushes;
+        const vfs::Status directoryReferenceClose =
+            directoryReference == vfs::INVALID_HANDLE ? vfs::VFS_ERR_INVALID
+            : vfs::closedir(directoryReference);
+        vfs::MountPoint oneFileSnapshot = {};
+        const bool oneFileSnapshotCopied = vfs::copy_mount_snapshot(
+            referenceMountIndex, oneFileSnapshot);
+        const vfs::Status lastFileDismount = referenceIdentityCaptured
+            ? vfs::dismount(referenceIdentity) : vfs::VFS_ERR_INVALID;
+        const uint32_t flushesAfterLastFileDismount = dm37Disk.flushes;
+        const vfs::Status lastReferenceClose =
+            secondFileReference == vfs::INVALID_HANDLE ? vfs::VFS_ERR_INVALID
+            : vfs::close(secondFileReference);
+        const uint32_t flushesBeforeLastReferenceRetry = dm37Disk.flushes;
+        const vfs::Status lastReferenceRetry = referenceIdentityCaptured
+            ? vfs::dismount(referenceIdentity) : vfs::VFS_ERR_INVALID;
+        check(referenceMount.error == vfs::PARTITION_MOUNT_OK &&
+              referenceIdentityCaptured &&
+              firstFileReference != vfs::INVALID_HANDLE &&
+              secondFileReference != vfs::INVALID_HANDLE &&
+              directoryReference != vfs::INVALID_HANDLE &&
+              bothReferencesSnapshotCopied &&
+              bothReferencesSnapshot.openFileReferences == 2 &&
+              bothReferencesSnapshot.openDirectoryReferences == 1 &&
+              invalidReferenceClose == vfs::VFS_ERR_INVALID &&
+              bothReferencesDismount == vfs::VFS_ERR_BUSY &&
+              flushesAfterBothFileReferencesDismount ==
+                  flushesBeforeBusyReferenceAttempts &&
+              firstReferenceClose == vfs::VFS_OK &&
+              oneFileAndDirectorySnapshotCopied &&
+              oneFileAndDirectorySnapshot.openFileReferences == 1 &&
+              oneFileAndDirectorySnapshot.openDirectoryReferences == 1 &&
+              oneFileAndDirectoryDismount == vfs::VFS_ERR_BUSY &&
+              flushesAfterFileAndDirectoryDismount ==
+                  flushesBeforeBusyReferenceAttempts &&
+              directoryReferenceClose == vfs::VFS_OK &&
+              oneFileSnapshotCopied && oneFileSnapshot.openFileReferences == 1 &&
+              oneFileSnapshot.openDirectoryReferences == 0 &&
+              lastFileDismount == vfs::VFS_ERR_BUSY &&
+              flushesAfterLastFileDismount ==
+                  flushesBeforeBusyReferenceAttempts &&
+              lastReferenceClose == vfs::VFS_OK &&
+              lastReferenceRetry == vfs::VFS_OK &&
+              dm37Disk.flushes == flushesBeforeLastReferenceRetry + 1 &&
+              dm37Disk.flushes > flushesBeforeBusyReferenceAttempts &&
+              dm37Disk.writeAttempts == writeAttemptsBeforeBusyReferences &&
+              vfs::mount_count() == 0,
+              "DM37 concurrent file/directory references survive busy rejection; one close preserves other ownership, invalid close is inert, and the last close permits a normal retry");
+
+        const vfs::PartitionMountResult failedCloseMount =
+            vfs::mount_partition_detailed("/mnt/dm37-close-failure", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t failedCloseMountIndex =
+            vfs::mount_index_for_path("/mnt/dm37-close-failure");
+        vfs::MountIdentity failedCloseIdentity = {};
+        const bool failedCloseIdentityCaptured = vfs::capture_mount_identity(
+            failedCloseMountIndex, failedCloseIdentity);
+        const vfs::HandleToken failedCloseHandle = vfs::open(
+            "/mnt/dm37-close-failure/round.bin", vfs::OPEN_RDWR);
+        const uint32_t flushesBeforeFailedClose = dm37Disk.flushes;
+        dm37Disk.failFlushAtCall = dm37Disk.flushes + 1;
+        const vfs::Status failedCloseStatus =
+            failedCloseHandle == vfs::INVALID_HANDLE ? vfs::VFS_ERR_INVALID
+            : vfs::close(failedCloseHandle);
+        dm37Disk.failFlushAtCall = 0;
+        vfs::MountPoint failedCloseSnapshot = {};
+        const bool failedCloseSnapshotCopied = vfs::copy_mount_snapshot(
+            failedCloseMountIndex, failedCloseSnapshot);
+        const bool failedHandleWasReleased = vfs::get_handle(
+            failedCloseHandle) == nullptr;
+        const vfs::Status afterFailedCloseDismount = failedCloseIdentityCaptured
+            ? vfs::dismount(failedCloseIdentity) : vfs::VFS_ERR_INVALID;
+        check(failedCloseMount.error == vfs::PARTITION_MOUNT_OK &&
+              failedCloseIdentityCaptured &&
+              failedCloseHandle != vfs::INVALID_HANDLE &&
+              failedCloseStatus == vfs::VFS_ERR_IO &&
+              failedCloseSnapshotCopied && failedHandleWasReleased &&
+              failedCloseSnapshot.openFileReferences == 0 &&
+              failedCloseSnapshot.activeOperations == 0 &&
+              dm37Disk.flushes == flushesBeforeFailedClose + 2 &&
+              afterFailedCloseDismount == vfs::VFS_OK &&
+              vfs::mount_count() == 0,
+              "DM37 failed write-handle Flush reports the close error, releases only its own reference, and leaves ordinary dismount retry eligible");
+
+        const vfs::PartitionMountResult concurrentCloseMount =
+            vfs::mount_partition_detailed("/mnt/dm37-close-in-flight", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t concurrentCloseMountIndex =
+            vfs::mount_index_for_path("/mnt/dm37-close-in-flight");
+        vfs::MountIdentity concurrentCloseIdentity = {};
+        const bool concurrentCloseIdentityCaptured = vfs::capture_mount_identity(
+            concurrentCloseMountIndex, concurrentCloseIdentity);
+        const vfs::HandleToken concurrentCloseHandle = vfs::open(
+            "/mnt/dm37-close-in-flight/round.bin", vfs::OPEN_RDWR);
+        const uint32_t flushesBeforeConcurrentClose = dm37Disk.flushes;
+        {
+            std::lock_guard<std::mutex> lock(dm37Disk.blockedFlushMutex);
+            dm37Disk.holdFlushCallback = true;
+            dm37Disk.flushCallbackBlocked = false;
+            dm37Disk.releaseFlushCallback = false;
+            dm37Disk.flushCallbackTimedOut = false;
+        }
+        vfs::Status concurrentCloseStatus = vfs::VFS_ERR_IO;
+        std::thread closingFileThread([&]() {
+            concurrentCloseStatus = vfs::close(concurrentCloseHandle);
+        });
+        bool closeFlushEntered = false;
+        {
+            std::unique_lock<std::mutex> lock(dm37Disk.blockedFlushMutex);
+            closeFlushEntered = dm37Disk.blockedFlushCondition.wait_for(
+                lock, std::chrono::seconds(3), [&]() {
+                    return dm37Disk.flushCallbackBlocked;
+                });
+        }
+        vfs::MountPoint closingReferenceSnapshot = {};
+        const bool closingReferenceSnapshotCopied = vfs::copy_mount_snapshot(
+            concurrentCloseMountIndex, closingReferenceSnapshot);
+        const uint32_t closeFlushesBeforeBusyDismount = dm37Disk.flushes;
+        const uint32_t closeWritesBeforeBusyDismount = dm37Disk.writeAttempts;
+        const vfs::Status closeInFlightDismount = closeFlushEntered &&
+                concurrentCloseIdentityCaptured
+            ? vfs::dismount(concurrentCloseIdentity) : vfs::VFS_ERR_INVALID;
+        const uint32_t closeFlushesAfterBusyDismount = dm37Disk.flushes;
+        const uint32_t closeWritesAfterBusyDismount = dm37Disk.writeAttempts;
+        {
+            std::lock_guard<std::mutex> lock(dm37Disk.blockedFlushMutex);
+            dm37Disk.releaseFlushCallback = true;
+        }
+        dm37Disk.blockedFlushCondition.notify_all();
+        closingFileThread.join();
+        bool closeFlushTimedOut = false;
+        {
+            std::lock_guard<std::mutex> lock(dm37Disk.blockedFlushMutex);
+            closeFlushTimedOut = dm37Disk.flushCallbackTimedOut;
+            dm37Disk.holdFlushCallback = false;
+        }
+        vfs::MountPoint closedReferenceSnapshot = {};
+        const bool closedReferenceSnapshotCopied = vfs::copy_mount_snapshot(
+            concurrentCloseMountIndex, closedReferenceSnapshot);
+        const uint32_t closeFlushesBeforeRetry = dm37Disk.flushes;
+        const vfs::Status afterConcurrentCloseDismount =
+            concurrentCloseIdentityCaptured
+                ? vfs::dismount(concurrentCloseIdentity)
+                : vfs::VFS_ERR_INVALID;
+        check(concurrentCloseMount.error == vfs::PARTITION_MOUNT_OK &&
+              concurrentCloseIdentityCaptured &&
+              concurrentCloseHandle != vfs::INVALID_HANDLE &&
+              closeFlushEntered && closingReferenceSnapshotCopied &&
+              closingReferenceSnapshot.openFileReferences == 1 &&
+              closingReferenceSnapshot.activeOperations != 0 &&
+              closeInFlightDismount == vfs::VFS_ERR_BUSY &&
+              closeFlushesBeforeBusyDismount ==
+                  flushesBeforeConcurrentClose + 1 &&
+              closeFlushesAfterBusyDismount == closeFlushesBeforeBusyDismount &&
+              closeWritesAfterBusyDismount == closeWritesBeforeBusyDismount &&
+              concurrentCloseStatus == vfs::VFS_OK && !closeFlushTimedOut &&
+              closedReferenceSnapshotCopied &&
+              closedReferenceSnapshot.openFileReferences == 0 &&
+              closedReferenceSnapshot.activeOperations == 0 &&
+              closeFlushesBeforeRetry == closeFlushesBeforeBusyDismount &&
+              afterConcurrentCloseDismount == vfs::VFS_OK &&
+              dm37Disk.flushes == closeFlushesBeforeRetry + 1 &&
+              vfs::mount_count() == 0,
+              "DM37 dismount remains busy while a concurrent write-handle close owns its reference and active Flush; close settles, releases its own reference, and normal retry succeeds");
+
+        const vfs::PartitionMountResult writeAdmissionMount =
+            vfs::mount_partition_detailed("/mnt/dm37-write-admission", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t writeAdmissionIndex =
+            vfs::mount_index_for_path("/mnt/dm37-write-admission");
+        vfs::MountIdentity writeAdmissionIdentity = {};
+        const bool writeAdmissionIdentityCaptured = vfs::capture_mount_identity(
+            writeAdmissionIndex, writeAdmissionIdentity);
+        const uint8_t activeWritePayload[] = {0x37, 0xB1, 0x7E, 0x02};
+        dm37Disk.attemptUnmountDuringWrite = true;
+        std::strncpy(dm37Disk.unmountDuringWritePath,
+                     "/mnt/dm37-write-admission",
+                     sizeof(dm37Disk.unmountDuringWritePath) - 1);
+        const uint32_t flushesBeforeActiveWrite = dm37Disk.flushes;
+        const int32_t activeWriteResult = vfs::write_file(
+            "/mnt/dm37-write-admission/write.bin", activeWritePayload,
+            sizeof(activeWritePayload));
+        const vfs::Status afterActiveWriteDismount =
+            writeAdmissionIdentityCaptured
+                ? vfs::dismount(writeAdmissionIdentity) : vfs::VFS_ERR_INVALID;
+        check(writeAdmissionMount.error == vfs::PARTITION_MOUNT_OK &&
+              writeAdmissionIdentityCaptured &&
+              activeWriteResult == static_cast<int32_t>(sizeof(activeWritePayload)) &&
+              dm37Disk.unmountDuringWriteSnapshotCopied &&
+              dm37Disk.unmountDuringWriteSnapshot.activeOperations != 0 &&
+              dm37Disk.unmountDuringWriteSnapshot.openFileReferences == 0 &&
+              dm37Disk.unmountDuringWriteSnapshot.openDirectoryReferences == 0 &&
+              dm37Disk.unmountDuringWriteStatus == vfs::VFS_ERR_BUSY &&
+              dm37Disk.writeAttemptsAtUnmountDuringWriteReturn ==
+                  dm37Disk.writeAttemptsBeforeUnmountDuringWrite &&
+              dm37Disk.flushesAtUnmountDuringWriteReturn == flushesBeforeActiveWrite &&
+              afterActiveWriteDismount == vfs::VFS_OK &&
+              vfs::mount_count() == 0,
+              "DM37 path-level active FAT write with no open handles rejects dismount without nested write or Flush; admission returns after the write settles");
+
+        const vfs::PartitionMountResult enumerationMount =
+            vfs::mount_partition_detailed("/mnt/dm37-enumeration", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t enumerationMountIndex =
+            vfs::mount_index_for_path("/mnt/dm37-enumeration");
+        vfs::MountIdentity enumerationIdentity = {};
+        const bool enumerationIdentityCaptured = vfs::capture_mount_identity(
+            enumerationMountIndex, enumerationIdentity);
+        const vfs::HandleToken enumerationHandle = vfs::opendir(
+            "/mnt/dm37-enumeration");
+        dm37Disk.attemptUnmountDuringRead = true;
+        std::strncpy(dm37Disk.unmountDuringReadPath,
+                     "/mnt/dm37-enumeration",
+                     sizeof(dm37Disk.unmountDuringReadPath) - 1);
+        vfs::DirEntry enumeratedEntry = {};
+        bool enumerationHasEntry = false;
+        const vfs::Status enumerationStatus = enumerationHandle ==
+                vfs::INVALID_HANDLE ? vfs::VFS_ERR_INVALID
+            : vfs::readdir_detailed(enumerationHandle, &enumeratedEntry,
+                                    enumerationHasEntry);
+        const uint32_t flushesBeforeEnumerationClose = dm37Disk.flushes;
+        const vfs::Status enumerationClose = enumerationHandle ==
+                vfs::INVALID_HANDLE ? vfs::VFS_ERR_INVALID
+            : vfs::closedir(enumerationHandle);
+        const uint32_t flushesAfterEnumerationClose = dm37Disk.flushes;
+        const vfs::Status afterEnumerationDismount = enumerationIdentityCaptured
+            ? vfs::dismount(enumerationIdentity) : vfs::VFS_ERR_INVALID;
+        check(enumerationMount.error == vfs::PARTITION_MOUNT_OK &&
+              enumerationIdentityCaptured &&
+              enumerationHandle != vfs::INVALID_HANDLE &&
+              enumerationStatus == vfs::VFS_OK && enumerationHasEntry &&
+              dm37Disk.unmountDuringReadSnapshotCopied &&
+              dm37Disk.unmountDuringReadSnapshot.activeOperations != 0 &&
+              dm37Disk.unmountDuringReadSnapshot.openDirectoryReferences == 1 &&
+              dm37Disk.unmountDuringReadStatus == vfs::VFS_ERR_BUSY &&
+              flushesAfterEnumerationClose == flushesBeforeEnumerationClose &&
+              dm37Disk.flushes == flushesBeforeEnumerationClose + 1 &&
+              enumerationClose == vfs::VFS_OK &&
+              afterEnumerationDismount == vfs::VFS_OK &&
+              vfs::mount_count() == 0,
+              "DM37 live FAT enumeration rejects dismount while its iterator and operation are active, issues no dismount Flush, then permits retry after owner close");
+
+        const vfs::PartitionMountResult concurrentMount =
+            vfs::mount_partition_detailed("/mnt/dm37-concurrent", dm37Index,
+                dm37Partition.partitionNumber, dm37Parent.registrationId,
+                &dm37Partition);
+        const uint8_t concurrentMountIndex =
+            vfs::mount_index_for_path("/mnt/dm37-concurrent");
+        vfs::MountIdentity concurrentIdentity = {};
+        const bool concurrentIdentityCaptured = vfs::capture_mount_identity(
+            concurrentMountIndex, concurrentIdentity);
+        {
+            std::lock_guard<std::mutex> lock(dm37Disk.blockedReadMutex);
+            dm37Disk.holdReadCallback = true;
+            dm37Disk.readCallbackBlocked = false;
+            dm37Disk.releaseReadCallback = false;
+            dm37Disk.readCallbackTimedOut = false;
+        }
+        vfs::Status concurrentReadStatus = vfs::VFS_ERR_IO;
+        std::thread activeReadThread([&]() {
+            vfs::FileInfo concurrentInfo = {};
+            concurrentReadStatus = vfs::stat(
+                "/mnt/dm37-concurrent/round.bin", &concurrentInfo);
+        });
+        bool concurrentReadEntered = false;
+        {
+            std::unique_lock<std::mutex> lock(dm37Disk.blockedReadMutex);
+            concurrentReadEntered = dm37Disk.blockedReadCondition.wait_for(
+                lock, std::chrono::seconds(3), [&]() {
+                    return dm37Disk.readCallbackBlocked;
+                });
+        }
+        vfs::MountPoint concurrentOperationSnapshot = {};
+        const bool concurrentSnapshotCopied = vfs::copy_mount_snapshot(
+            concurrentMountIndex, concurrentOperationSnapshot);
+        const uint32_t flushesBeforeConcurrentAttempt = dm37Disk.flushes;
+        const vfs::Status concurrentBusyDismount = concurrentReadEntered &&
+                concurrentIdentityCaptured
+            ? vfs::dismount(concurrentIdentity) : vfs::VFS_ERR_INVALID;
+        const uint32_t flushesAfterConcurrentAttempt = dm37Disk.flushes;
+        {
+            std::lock_guard<std::mutex> lock(dm37Disk.blockedReadMutex);
+            dm37Disk.releaseReadCallback = true;
+        }
+        dm37Disk.blockedReadCondition.notify_all();
+        activeReadThread.join();
+        bool concurrentReadTimedOut = false;
+        {
+            std::lock_guard<std::mutex> lock(dm37Disk.blockedReadMutex);
+            concurrentReadTimedOut = dm37Disk.readCallbackTimedOut;
+            dm37Disk.holdReadCallback = false;
+        }
+        const vfs::Status afterConcurrentReadDismount =
+            concurrentIdentityCaptured
+                ? vfs::dismount(concurrentIdentity) : vfs::VFS_ERR_INVALID;
+        check(concurrentMount.error == vfs::PARTITION_MOUNT_OK &&
+              concurrentIdentityCaptured && concurrentReadEntered &&
+              concurrentSnapshotCopied &&
+              concurrentOperationSnapshot.activeOperations != 0 &&
+              concurrentOperationSnapshot.openFileReferences == 0 &&
+              concurrentOperationSnapshot.openDirectoryReferences == 0 &&
+              concurrentBusyDismount == vfs::VFS_ERR_BUSY &&
+              flushesBeforeConcurrentAttempt == flushesAfterConcurrentAttempt &&
+              concurrentReadStatus == vfs::VFS_OK && !concurrentReadTimedOut &&
+              afterConcurrentReadDismount == vfs::VFS_OK &&
+              vfs::mount_count() == 0,
+              "DM37 two-thread operation admission keeps a path read active without handles, rejects concurrent dismount without Flush, and admits retry after completion");
 
         const vfs::PartitionMountResult rootSourceMount =
             vfs::mount_partition_detailed("/mnt/dm37-root", dm37Index,
@@ -15658,6 +16088,192 @@ int main()
               "DM37 protects known boot backing and stale cleanup performs no Flush");
         g_fakeDisks[bootDisk.driverId] = nullptr;
 
+        FakeDisk unknownBootDisk(512, 100000, false);
+        std::memcpy(unknownBootDisk.sparseMbr.data(), dm37Disk.bytes.data(), 512);
+        for (uint32_t i = 0; i < 8; ++i) {
+            const uint64_t lba = dm37Partition.startLba + i;
+            std::vector<uint8_t>& sector = unknownBootDisk.sparseSectors[lba];
+            const size_t offset = static_cast<size_t>(lba) * 512u;
+            sector.assign(dm37Disk.bytes.begin() + offset,
+                          dm37Disk.bytes.begin() + offset + 512u);
+        }
+        const uint8_t unknownBootIndex = register_fake(unknownBootDisk, true,
+            true, true, false, 0, 0, block::BOOT_PROVENANCE_UNKNOWN);
+        storage::PartitionTableModel unknownBootTable = {};
+        storage::PartitionEntry unknownBootPartition = {};
+        const bool unknownBootParsed = parse_first_partition(
+            unknownBootIndex, unknownBootTable, unknownBootPartition);
+        block::BlockDevice unknownBootParent = {};
+        block::copy_device(unknownBootIndex, unknownBootParent);
+        const vfs::PartitionMountResult unknownBootMount = unknownBootParsed
+            ? vfs::mount_partition_detailed("/mnt/dm37-unknown-boot",
+                unknownBootIndex, unknownBootPartition.partitionNumber,
+                unknownBootParent.registrationId, &unknownBootPartition)
+            : vfs::PartitionMountResult{0xFF,
+                vfs::PARTITION_MOUNT_INVALID_ARGUMENT};
+        const uint8_t unknownBootMountIndex = vfs::mount_index_for_path(
+            "/mnt/dm37-unknown-boot");
+        vfs::MountIdentity unknownBootIdentity = {};
+        const bool unknownBootIdentityCaptured = vfs::capture_mount_identity(
+            unknownBootMountIndex, unknownBootIdentity);
+        storage::TargetIdentity unknownBootTarget = {};
+        vfs::MountPoint unknownBootSnapshot = {};
+        apps::disk_manager_dismount_ui::CapturedTarget unknownBootCaptured = {};
+        const bool unknownBootGuiCaptured =
+            storage::capture_target_identity(unknownBootIndex,
+                                             unknownBootTarget) &&
+            vfs::copy_mount_snapshot(unknownBootMountIndex,
+                                     unknownBootSnapshot) &&
+            apps::disk_manager_dismount_ui::capture_target(
+                unknownBootTarget, unknownBootPartition, unknownBootIdentity,
+                unknownBootSnapshot, unknownBootCaptured);
+        const storage::BootProtection unknownBootProtection =
+            storage::query_boot_protection(unknownBootTarget);
+        const auto unknownBootGuiAdmission =
+            apps::disk_manager_dismount_ui::admission_reason(
+                unknownBootGuiCaptured, unknownBootGuiCaptured, false, true,
+                false, false, true);
+        const uint32_t unknownBootFlushesBefore = unknownBootDisk.flushes;
+        const vfs::Status unknownBootDismount = unknownBootIdentityCaptured
+            ? vfs::dismount(unknownBootIdentity) : vfs::VFS_ERR_INVALID;
+        const bool unknownBootStillMounted = vfs::mount_count() == 1;
+        block::mark_device_offline(unknownBootIndex,
+                                   unknownBootParent.registrationId);
+        const vfs::Status unknownBootStaleCleanup =
+            vfs::unmount("/mnt/dm37-unknown-boot");
+        check(unknownBootMount.error == vfs::PARTITION_MOUNT_OK &&
+              unknownBootIdentityCaptured && unknownBootGuiCaptured &&
+              unknownBootProtection.safety ==
+                  storage::BOOT_DEVICE_IDENTITY_UNKNOWN &&
+              unknownBootGuiAdmission == apps::disk_manager_dismount_ui::
+                  DISMOUNT_ADMISSION_PROTECTED &&
+              unknownBootDismount == vfs::VFS_ERR_PROTECTED &&
+              unknownBootStillMounted &&
+              unknownBootDisk.flushes == unknownBootFlushesBefore &&
+              unknownBootStaleCleanup == vfs::VFS_ERR_DEVICE_REMOVED &&
+              vfs::mount_count() == 0,
+              "DM37 unknown boot provenance disables GUI admission and final VFS admission independently; mounted state survives rejection without Flush");
+        g_fakeDisks[unknownBootDisk.driverId] = nullptr;
+
+        guideXOS::BootSourceDescriptor otherAtaBootSource =
+            make_boot_source(false, 0, 1, 0);
+        guideXOS::BootSourceDescriptor matchingAtaBootSource =
+            make_boot_source(false, 0, 1, 1);
+        const bool otherBootSourceSet =
+            storage::set_boot_source_descriptor(&otherAtaBootSource);
+        FakeDisk changingProtectionDisk(512, 100000, false);
+        std::memcpy(changingProtectionDisk.sparseMbr.data(),
+                    dm37Disk.bytes.data(), 512);
+        for (uint32_t i = 0; i < 8; ++i) {
+            const uint64_t lba = dm37Partition.startLba + i;
+            std::vector<uint8_t>& sector =
+                changingProtectionDisk.sparseSectors[lba];
+            const size_t offset = static_cast<size_t>(lba) * 512u;
+            sector.assign(dm37Disk.bytes.begin() + offset,
+                          dm37Disk.bytes.begin() + offset + 512u);
+        }
+        const uint8_t changingProtectionIndex = register_fake(
+            changingProtectionDisk, true, true, true, false, 0, 0,
+            block::BOOT_PROVENANCE_UNKNOWN, block::BDEV_ATA_PIO, true,
+            0, 0, 5, 0, true, 1, 1);
+        storage::PartitionTableModel changingProtectionTable = {};
+        storage::PartitionEntry changingProtectionPartition = {};
+        const bool changingProtectionParsed = parse_first_partition(
+            changingProtectionIndex, changingProtectionTable,
+            changingProtectionPartition);
+        block::BlockDevice changingProtectionParent = {};
+        block::copy_device(changingProtectionIndex,
+                           changingProtectionParent);
+        const vfs::PartitionMountResult changingProtectionMount =
+            changingProtectionParsed
+                ? vfs::mount_partition_detailed(
+                    "/mnt/dm37-protection-change", changingProtectionIndex,
+                    changingProtectionPartition.partitionNumber,
+                    changingProtectionParent.registrationId,
+                    &changingProtectionPartition)
+                : vfs::PartitionMountResult{0xFF,
+                    vfs::PARTITION_MOUNT_INVALID_ARGUMENT};
+        const uint8_t changingProtectionMountIndex =
+            vfs::mount_index_for_path("/mnt/dm37-protection-change");
+        vfs::MountIdentity changingProtectionIdentity = {};
+        const bool changingProtectionIdentityCaptured =
+            vfs::capture_mount_identity(changingProtectionMountIndex,
+                                        changingProtectionIdentity);
+        storage::TargetIdentity changingProtectionTarget = {};
+        vfs::MountPoint changingProtectionSnapshot = {};
+        apps::disk_manager_dismount_ui::CapturedTarget
+            changingProtectionCaptured = {};
+        const bool changingProtectionConfirmationCaptured =
+            storage::capture_target_identity(changingProtectionIndex,
+                changingProtectionTarget) &&
+            vfs::copy_mount_snapshot(changingProtectionMountIndex,
+                changingProtectionSnapshot) &&
+            apps::disk_manager_dismount_ui::capture_target(
+                changingProtectionTarget, changingProtectionPartition,
+                changingProtectionIdentity, changingProtectionSnapshot,
+                changingProtectionCaptured);
+        const storage::BootProtection protectionAtConfirmation =
+            storage::query_boot_protection(changingProtectionTarget);
+        const bool confirmationBindingStillMatches =
+            changingProtectionConfirmationCaptured &&
+            apps::disk_manager_dismount_ui::binding_matches(
+                changingProtectionCaptured, changingProtectionTarget,
+                changingProtectionIdentity, changingProtectionSnapshot);
+        const bool matchingBootSourceSet =
+            storage::set_boot_source_descriptor(&matchingAtaBootSource);
+        const storage::BootProtection protectionAtActivation =
+            storage::query_boot_protection(changingProtectionTarget);
+        const auto activationAdmission =
+            apps::disk_manager_dismount_ui::admission_reason(
+                changingProtectionConfirmationCaptured,
+                confirmationBindingStillMatches, false,
+                protectionAtActivation.safety !=
+                    storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET,
+                false, false, true);
+        const uint32_t changingProtectionFlushesBefore =
+            changingProtectionDisk.flushes;
+        const uint32_t changingProtectionWritesBefore =
+            changingProtectionDisk.writeAttempts;
+        const vfs::Status changingProtectionDismount =
+            changingProtectionIdentityCaptured
+                ? vfs::dismount(changingProtectionIdentity)
+                : vfs::VFS_ERR_INVALID;
+        const bool changingProtectionStillMounted =
+            vfs::mount_index_for_path("/mnt/dm37-protection-change") ==
+                changingProtectionMountIndex;
+        const bool changingProtectionWentOffline =
+            block::mark_device_offline(changingProtectionIndex,
+                changingProtectionParent.registrationId);
+        const vfs::Status changingProtectionStaleCleanup =
+            vfs::unmount("/mnt/dm37-protection-change");
+        check(otherBootSourceSet && changingProtectionMount.error ==
+                  vfs::PARTITION_MOUNT_OK &&
+              changingProtectionIdentityCaptured &&
+              changingProtectionConfirmationCaptured &&
+              protectionAtConfirmation.safety ==
+                  storage::BOOT_DEVICE_DEFINITELY_NOT_TARGET &&
+              confirmationBindingStillMatches && matchingBootSourceSet &&
+              protectionAtActivation.safety == storage::BOOT_DEVICE_IS_TARGET &&
+              activationAdmission == apps::disk_manager_dismount_ui::
+                  DISMOUNT_ADMISSION_PROTECTED &&
+              changingProtectionDismount == vfs::VFS_ERR_PROTECTED &&
+              changingProtectionStillMounted &&
+              changingProtectionDisk.flushes ==
+                  changingProtectionFlushesBefore &&
+              changingProtectionDisk.writeAttempts ==
+                  changingProtectionWritesBefore &&
+              changingProtectionWentOffline &&
+              changingProtectionStaleCleanup == vfs::VFS_ERR_DEVICE_REMOVED &&
+              vfs::mount_count() == 0,
+              "DM37 boot protection changing after confirmation is rejected by fresh GUI and final VFS admission without Flush");
+        if (block::get_device(changingProtectionIndex))
+            unregister_fake(changingProtectionIndex, changingProtectionDisk);
+        else
+            g_fakeDisks[changingProtectionDisk.driverId] = nullptr;
+        guideXOS::BootSourceDescriptor restoreBootSource =
+            make_boot_source(true, 1);
+        storage::set_boot_source_descriptor(&restoreBootSource);
+
         FakeDisk unsupportedFlushDisk(512, 100000, false);
         std::memcpy(unsupportedFlushDisk.sparseMbr.data(),
                     dm37Disk.bytes.data(), 512);
@@ -15728,6 +16344,132 @@ int main()
               dm37Disk.flushes == changedFlushesBefore &&
               vfs::mount_count() == 0,
               "DM37 changed partition-table identity is rejected and cleaned without flushing the stale extent");
+
+        FakeDisk gptIdentityDisk(512, 100000);
+        build_gpt(gptIdentityDisk);
+        const uint64_t gptBackupArrayLba = read_u64(
+            sector(gptIdentityDisk, gptIdentityDisk.sectorCount - 1) + 72);
+        uint8_t* gptPrimaryEntry = sector(gptIdentityDisk, 2);
+        uint8_t* gptBackupEntry = sector(gptIdentityDisk, gptBackupArrayLba);
+        write_u64(gptPrimaryEntry + 32, 2048);
+        write_u64(gptPrimaryEntry + 40, 82047);
+        write_u64(gptBackupEntry + 32, 2048);
+        write_u64(gptBackupEntry + 40, 82047);
+        refresh_gpt_fixture_crcs(gptIdentityDisk);
+        const uint8_t gptIdentityIndex = register_fake(gptIdentityDisk,
+            true, true, true);
+        storage::PartitionTableModel gptIdentityTable = {};
+        storage::PartitionEntry gptIdentityPartition = {};
+        const bool gptIdentityParsed = parse_first_partition(
+            gptIdentityIndex, gptIdentityTable, gptIdentityPartition);
+        storage::Fat32FormatRequest gptIdentityFormat = make_format_request(
+            gptIdentityIndex, gptIdentityPartition, "DM37GPT", 0x37C0FFEEu);
+        storage::Fat32FormatResult gptIdentityFormatResult = {};
+        const auto gptIdentityFormatStatus = gptIdentityParsed
+            ? storage::format_fat32_partition(gptIdentityFormat,
+                                               gptIdentityFormatResult)
+            : storage::FAT32_FORMAT_INVALID_REQUEST;
+        block::BlockDevice gptIdentityParent = {};
+        block::copy_device(gptIdentityIndex, gptIdentityParent);
+        const vfs::PartitionMountResult gptIdentityMount =
+            vfs::mount_partition_detailed("/mnt/dm37-gpt-identity",
+                gptIdentityIndex, gptIdentityPartition.partitionNumber,
+                gptIdentityParent.registrationId, &gptIdentityPartition);
+        const uint8_t gptIdentityMountIndex = vfs::mount_index_for_path(
+            "/mnt/dm37-gpt-identity");
+        vfs::MountIdentity gptIdentity = {};
+        const bool gptIdentityCaptured = vfs::capture_mount_identity(
+            gptIdentityMountIndex, gptIdentity);
+        const uint32_t gptIdentityFlushesBefore = gptIdentityDisk.flushes;
+        gptPrimaryEntry[16] ^= 0x80;
+        gptBackupEntry[16] ^= 0x80;
+        refresh_gpt_fixture_crcs(gptIdentityDisk);
+        const vfs::Status changedGptGuidDismount = gptIdentityCaptured
+            ? vfs::dismount(gptIdentity) : vfs::VFS_ERR_INVALID;
+        check(gptIdentityFormatStatus == storage::FAT32_FORMAT_SUCCESS &&
+              gptIdentityMount.error == vfs::PARTITION_MOUNT_OK &&
+              gptIdentityCaptured &&
+              gptIdentity.partitionIdentity.scheme ==
+                  storage::PARTITION_SCHEME_GPT &&
+              changedGptGuidDismount == vfs::VFS_ERR_MOUNT_STALE &&
+              gptIdentityDisk.flushes == gptIdentityFlushesBefore &&
+              vfs::mount_count() == 0,
+              "DM37 final VFS admission rechecks GPT unique partition identity even when geometry is unchanged, then removes only the stale mount without Flush");
+
+        storage::PartitionTableModel currentGptTable = {};
+        storage::PartitionEntry currentGptPartition = {};
+        const bool currentGptPartitionParsed = parse_first_partition(
+            gptIdentityIndex, currentGptTable, currentGptPartition);
+
+        const vfs::PartitionMountResult replacedRegistrationMount =
+            currentGptPartitionParsed
+                ? vfs::mount_partition_detailed(
+                    "/mnt/dm37-registry-replaced", gptIdentityIndex,
+                    currentGptPartition.partitionNumber,
+                    gptIdentityParent.registrationId, &currentGptPartition)
+                : vfs::PartitionMountResult{0xFF,
+                    vfs::PARTITION_MOUNT_INVALID_ARGUMENT};
+        const uint8_t replacedRegistrationMountIndex =
+            vfs::mount_index_for_path("/mnt/dm37-registry-replaced");
+        vfs::MountIdentity replacedRegistrationIdentity = {};
+        const bool replacedRegistrationIdentityCaptured =
+            vfs::capture_mount_identity(replacedRegistrationMountIndex,
+                                        replacedRegistrationIdentity);
+        storage::TargetIdentity replacedRegistrationTarget = {};
+        vfs::MountPoint replacedRegistrationSnapshot = {};
+        apps::disk_manager_dismount_ui::CapturedTarget replacedRegistrationGui = {};
+        const bool replacedRegistrationGuiCaptured =
+            storage::capture_target_identity(gptIdentityIndex,
+                replacedRegistrationTarget) &&
+            vfs::copy_mount_snapshot(replacedRegistrationMountIndex,
+                replacedRegistrationSnapshot) &&
+            apps::disk_manager_dismount_ui::capture_target(
+                replacedRegistrationTarget, currentGptPartition,
+                replacedRegistrationIdentity, replacedRegistrationSnapshot,
+                replacedRegistrationGui);
+        const bool originalRegistrationWentOffline =
+            currentGptPartitionParsed && block::mark_device_offline(
+                gptIdentityIndex, gptIdentityParent.registrationId);
+        FakeDisk sameCapacityGptReplacement(512,
+            gptIdentityDisk.sectorCount, false);
+        const uint8_t sameCapacityGptReplacementIndex = register_fake(
+            sameCapacityGptReplacement, true, true, true);
+        storage::TargetIdentity currentReplacementTarget = {};
+        const bool currentReplacementCaptured =
+            storage::capture_target_identity(sameCapacityGptReplacementIndex,
+                                             currentReplacementTarget);
+        const bool registrationBoundConfirmationRejected =
+            currentReplacementCaptured &&
+            !apps::disk_manager_dismount_ui::binding_matches(
+                replacedRegistrationGui, currentReplacementTarget,
+                replacedRegistrationIdentity, replacedRegistrationSnapshot);
+        const vfs::Status replacedRegistrationDismount =
+            replacedRegistrationIdentityCaptured
+                ? vfs::dismount(replacedRegistrationIdentity)
+                : vfs::VFS_ERR_INVALID;
+        check(currentGptPartitionParsed &&
+              replacedRegistrationMount.error == vfs::PARTITION_MOUNT_OK &&
+              replacedRegistrationIdentityCaptured &&
+              replacedRegistrationGuiCaptured && originalRegistrationWentOffline &&
+              sameCapacityGptReplacementIndex == gptIdentityIndex &&
+              currentReplacementCaptured &&
+              currentReplacementTarget.registrationId !=
+                  replacedRegistrationIdentity.registrationId &&
+              currentReplacementTarget.registryGeneration !=
+                  replacedRegistrationTarget.registryGeneration &&
+              currentReplacementTarget.totalLogicalSectors ==
+                  replacedRegistrationTarget.totalLogicalSectors &&
+              registrationBoundConfirmationRejected &&
+              replacedRegistrationDismount == vfs::VFS_ERR_DEVICE_REMOVED &&
+              sameCapacityGptReplacement.reads == 0 &&
+              sameCapacityGptReplacement.writeAttempts == 0 &&
+              sameCapacityGptReplacement.flushes == 0 &&
+              vfs::mount_count() == 0,
+              "DM37 same-capacity registration replacement invalidates captured confirmation and stale dismount performs no I/O on the replacement");
+        if (sameCapacityGptReplacementIndex != 0xFF)
+            unregister_fake(sameCapacityGptReplacementIndex,
+                            sameCapacityGptReplacement);
+        g_fakeDisks[gptIdentityDisk.driverId] = nullptr;
 
         const vfs::PartitionMountResult replacementMount =
             vfs::mount_partition_detailed("/mnt/dm37-replacement", dm37Index,

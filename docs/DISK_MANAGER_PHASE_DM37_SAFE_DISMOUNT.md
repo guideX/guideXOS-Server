@@ -1,21 +1,24 @@
 # DM37 — Safe Volume Dismount Foundation
 
-**Outcome B — `DM37_DISMOUNT_ENGINE_READY` for the host-qualified production
-VFS lifecycle.** `.phase` remains `last_completed=DM36` and
-`next_expected=DM37`. Gate A and read-only Gate E are accepted. Writable Gate
-D remains incomplete; DM37 acceptance is not final.
+**Outcome B — `DM37_BUSY_REFERENCE_GUEST_UNAVAILABLE`.** Continuation 16 adds
+production-linked host qualification for Gates B and C and a safe, source-
+matched guest inventory observation. No supported production workflow was
+found that keeps a real file or directory reference open while Disk Manager
+is used, so guest Gate B remains unavailable. The guest showed the running
+root device as protected and exposed no Dismount control for its selected
+partition; no dismount attempt was made. Gates A, D (USB BOT), and E remain
+accepted. `.phase` remains `last_completed=DM36` and `next_expected=DM37`;
+DM37 is incomplete and DM38 has not started.
 
-**Latest continuation status (2026-10-31): Outcome B —
-`DM37_PARTIAL_GUEST_ACCEPTANCE`.** Continuation 12 mounted the accepted
-writable FAT32 fixture read/write and returned to the selected Disk 1
-partition with Dismount Volume visible. QMP focus moved through early action
-buttons, but delayed input left the Dismount action and confirmation
-unverified. No final Flush, Unmounted state, Remount, or fresh guest read is
-claimed. The QEMU guest remains QAC-managed because normal Shell shutdown
-could not be reached. Gate A and read-only Gate E remain accepted. See the
-Continuation 12 follow-up at the end of this document; earlier
-QAC/foreign-QEMU blockers remain historical evidence for their respective
-runs.
+**Latest continuation status (2026-11-01): Outcome B —
+`DM37_BUSY_REFERENCE_GUEST_UNAVAILABLE`.** The production-linked storage
+suite passes 1,503/1,503 checks, including actual file/directory ownership,
+active-I/O, close-settlement, and protected/stale-target dismount cases. Gate
+B guest testing could not be performed safely through an existing production
+workflow. Gate C host checks fail closed, and the guest observation is limited
+to the protected root inventory and absent Dismount control. Continuation 16
+did not change production source or repeat the accepted writable Gate D
+workflow. See its report at the end of this document.
 
 ## Scope and repository gate
 
@@ -1783,3 +1786,43 @@ A sector-by-sector comparison against the preserved initial C15 image found four
 Gate D's writable save/final-Flush/Unmounted/Remount/fresh-read lifecycle is verified for this disposable USB BOT configuration. Gate B (busy volume), Gate C (protected-volume scope), Gate F (device removal/replacement), Gate G (controlled I/O/Flush failure), Gate H (delayed input and close-during-operation), and the remaining per-scenario Gate I media/ownership qualifications remain open. Gate A and Gate E remain accepted as previously recorded. Keep `.phase` at DM36→DM37 and do not start DM38.
 
 The serial log also contains several rejected `/.startmenu_recent` and desktop-preference create attempts (`FAT_FILE_WRITE_INVALID_NAME`), plus successful `/desktop.cfg` overwrites during UI activity. They are not classified as target-media writes: the independent full-image comparison found only the four authorized FAT32 sectors listed above, with no other fixture byte changes. QMP cumulative USB counters were not used to attribute those events.
+
+## DM37 Continuation 16 — busy-volume and protected-mount qualification
+
+**Outcome B — `DM37_BUSY_REFERENCE_GUEST_UNAVAILABLE`.** C16 completed production-linked host qualification for busy-volume and protected-target admission. Gates A, D (USB BOT), and E remain accepted. A safe guest inventory observation also confirmed that the running root device is shown as protected, but no actual busy-reference guest workflow exists in the current production UI/Shell surface. The guest Gate B result therefore remains unavailable; the host results are not represented as a guest PASS. C16 did not start a Gate F/G campaign, change production source, repeat the writable Gate D workflow, advance `.phase`, or start DM38.
+
+### Repository and production audit
+
+The continuation started at `84bb4f06a7338a330a6bd90665c743e49741337a` on `DISK_MANAGER_IMPROVEMENTS`; `.phase` remained `last_completed=DM36`, `next_expected=DM37`. The QEMU runtime's production source revision is `349e85a836a0c3735f84bac5a0cf827e4f2a60c7`, matching the repository production source. C16 changed only `tests/storage_manager_test.cpp` and these two reports; no production build result is claimed. `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0` remain in force.
+
+The production busy state is VFS mount ownership: `MountPoint.openFileReferences`, `openDirectoryReferences`, and `activeOperations`, backed by the real `FileHandle` and `DirIterator` tables. Open/admission reserves a mount operation before publishing a handle; actual file and directory references are accounted against the exact mount identity. Reads, writes, enumeration, and close settlement retain an active-operation reference. Dismount captures the mount identity, obtains the relevant storage-operation lease/pin, rechecks identity and protection at final admission, blocks new admissions while quiescing, then checks active operations and live handle tables. A busy result restores the mounted lifecycle before filesystem teardown or Dismount Flush. It does not invalidate another owner's handle or report Unmounted. After the last reference and operation settle, a normal retry can proceed.
+
+The lightweight UI preview does not authorize Dismount. Final VFS admission validates the current registration and registry generation, sector geometry, partition-table identity and bounds, partition-view slot/generation, boot provenance, alias conflicts, and storage-operation ownership before Flush or filesystem teardown. The host coverage includes changed MBR identity, a GPT unique partition GUID changed with valid recalculated GPT CRCs, stale mount generations, root/`/boot`/`/system` protections and aliases, same-capacity replacement in a reused registry slot with changed registration ID and generation, active storage-operation conflict, known boot protection, and unknown boot provenance. Unsupported durability leaves the mount read-only. The unknown-provenance VFS request returns `VFS_ERR_PROTECTED`; stale and replaced targets fail closed without I/O to the replacement. These checks preserve the separate render-preview and authoritative final-action paths.
+
+### Production-linked host regressions
+
+The full `scripts/run-storage-manager-tests.ps1` run passed **1,503/1,503 storage checks**, extending the retained 1,493-check baseline by ten checks. Added cases use the real VFS lifecycle with bounded fake block callbacks, not test-only production counters. They cover two simultaneous open files plus an open directory; snapshots show two file references and one directory reference. Dismount stays busy as one file and then the other references are closed, and ordinary retry succeeds only after all owners close. Invalid-handle close does not release ownership. These busy attempts add no Dismount Flush or write.
+
+Path-level active write, active enumeration, and a two-thread held block read each keep a real production VFS operation in flight while Dismount is attempted. Every attempt returns busy; dismount-attributable Flush is absent, the underlying operation settles, and normal retry succeeds. The concurrent-close test blocks the close owner's own Flush: Dismount still observes one live file reference plus an active operation and returns busy without adding a Flush or write beyond the close already in progress. Releasing that callback completes close, drops the references, and permits retry. A failed close Flush reports I/O failure while releasing only that handle's ownership. A reentrant active-I/O case also observes nonzero `activeOperations` and busy rejection.
+
+The confirmation-to-activation protection regression captures an exact mounted ATA target while UEFI provenance resolves definitely-not-boot, then changes only the boot-source descriptor so it identifies that same registration as boot backing. The captured mount and target binding still match, but fresh GUI admission reports protected and production `vfs::dismount` returns `VFS_ERR_PROTECTED`; the mount remains live with no added write or Flush. The test then takes the fake device offline only to perform stale cleanup. This exercises a protection change without replacing the disk, changing its capacity, or altering the captured mount generation.
+
+The same full run reported USB Mass Storage 249 checks included in the storage total; DM34 wipe 17/17, whole-device erase 34/34, DM35 read-only surface engine 48/48, DM36 FAT32 integrity metadata 259/259, DM36 GUI 31/31, DM34 wipe UI 31/31, DM34 whole-device erase UI 39/39, and DM35 surface GUI 34/34. Widget activation, DM37 input diagnostic/focus, PS/2 legacy keyboard queue, and DM37 Shell focus suites all passed with zero failures. USB classifier passed 7/7, GPT verifier 1/1, and DM30 fixture verifier 1/1. No production source changed, so no kernel, `build.bat`, or UEFI build was run or claimed.
+
+### Gate B guest capability and Gate C observation
+
+Production workflow audit found that Shell `cat` opens, reads, and closes before returning; `ls`/`ll`, File Explorer refresh, and normal Notepad dialogs enumerate and close their iterators. No supported production app or Shell behavior retains a file or directory reference while the user switches to Disk Manager. Accordingly no hidden command, fabricated reference, or test-only handle was added, and no fake guest Busy result is claimed.
+
+For a safe Gate C observation, QAC 2.0.0 admitted one fresh source-matched guest under reservation `0f690ad12b6242cd83eb7f9ea02cc02a` (owner PID 18048, QEMU child PID 22304). Preflight had zero QEMU processes, foreign processes, sessions, or reservations; QMP port 59308 was free. The guest used QEMU `v11.0.0-12122-ga4bb4b10c9`, executable SHA-256 `A930E028F93D0FA47E4D58BDAD2432F7466DC2B6AF0AE376F77EF7A298FFDD02`. The runtime manifest hash was `D972383AACAECD2B2CC2CC2972C19F36872FC1449D011E96BEE2D7B9E68A9C4E`; the production kernel artifact hash was `F4DF400045C9AF358C329E7FD29061410D4D6CE93AA169592EE9703DD3F68B05`. No physical media was attached.
+
+Disk Manager was launched through the normal Start Menu, corroborated by production `[LaunchDispatch]` selecting `DiskManager`. Disk 0 was visibly the running root backing device; its properties showed `Boot provenance: Boot device: protected` and mount state `/`. With its single MBR partition selected, the action pane showed Wipe, Verify, and Delete controls but no Dismount control. Classification: **action absent from the observed view**. No Dismount confirmation was opened and no final VFS admission was attempted. The separate USB BOT fixture was attached read-only and was not selected. This observation does not claim disabled-action, confirmation-rejection, or engine-rejection guest evidence, and the root/system/boot volume was never taken offline.
+
+QMP reported a relative PS/2 mouse (`absolute=false`); input used calibrated, paced relative movements capped at 40 pixels per event with 200 ms spacing and individually paced key transitions. Serial output records PS/2 IRQs and normal app dispatch but contains no `[DM37-IN]` rows, so no guest-side confirmation/input trace is claimed. The shell `shutdown` command was visibly entered and the guest recorded `[SHUTDOWN] final reason=system-shutdown exitCode=0 caller=desktop expected=1 runtime=none app=none`. QAC observed child exit code 0, released the reservation, and returned to zero QEMU processes, sessions, and reservations; QMP port 59308 was closed. No forced termination or foreign-guest/QMP interaction occurred.
+
+### Fixture and isolated guest state
+
+The read-only data fixture `DM37GATEC.cont16.raw` is a distinct clone under `E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm37\continuation16\gatec-protected-inventory-20261101\`. Its 629,145,600-byte SHA-256 was `C56D2B07EDC4DCFC936EF7F2C66AFEA265F5E5B47D0CA1347345B559A954B231` both before and after the guest. Independent offline verification passed PMBR, primary/backup GPT CRCs and agreement, partition bounds, the 1,031,168-byte leading gap, FAT32 BPB and backup boot/FSInfo structures, mirrored FATs, the DM9 directory, and the original 57-byte proof file. The existing FSInfo hint discrepancy (76,592 versus 76,589 actual free clusters) was preserved. No data-fixture write was enabled or observed.
+
+UEFI writable state used a private cloned ESP. Its `NvVars` file changed from SHA-256 `ADF486698ED8EDDB372B098E4E20D753223D37AFE99F15D5701442822593AF2D` to `4B0C50C6A6C30AAEC36F3C14A546D8F86445BAD84BD7EB3369DD4A8FF9873348` during guest startup; no files were missing and no other ESP file changed. This isolated firmware-variable change is separate from the read-only data fixture. Runtime captures, QAC pre/post state, serial/QMP logs, screenshots, hashes, and offline verification are retained under the C16 E: directory above.
+
+Gate B host reference-lifetime admission and Gate C host fail-closed identity/protection checks are verified for the covered production paths. Gate B remains incomplete because guest workflow capability is absent. Gate C has a safe protected-root inventory observation only; final guest VFS rejection was intentionally not attempted. Preserve accepted A/D/E, keep `.phase` DM36→DM37, and do not start DM38. Recommended next continuation: pursue only a newly available safe production guest workflow for a retained VFS reference or document Gate B's explicit exclusion in the final DM37 acceptance contract; do not manufacture a reference.
