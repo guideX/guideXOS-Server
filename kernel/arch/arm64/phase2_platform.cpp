@@ -412,6 +412,11 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
         const uint8_t* tokenBytes = structBase + offset;
         const uint32_t token = load_be32(tokenBytes);
         offset += 4;
+        const uint32_t traceOffset = offset & UINT32_C(0x00ffffff);
+        platform->parser_last_token = (uint8_t)token;
+        platform->parser_offset_low[0] = (uint8_t)traceOffset;
+        platform->parser_offset_low[1] = (uint8_t)(traceOffset >> 8);
+        platform->parser_offset_low[2] = (uint8_t)(traceOffset >> 16);
         if (token == kFdtBeginNode) {
             if (depth >= 32) return 0;
             const uint32_t nameStart = offset;

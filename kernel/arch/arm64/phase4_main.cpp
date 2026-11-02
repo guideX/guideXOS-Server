@@ -455,7 +455,11 @@ static void phase12_app_task(void*)
         g_app_complete = 1;
         for (;;) kernel::scheduler::note_execution();
     }
+#if defined(GXOS_AARCH64_ABI3_STUDIO_GUEST)
+    print("[guideXOS] ABI3 Developer Studio runtime cleanup: PASS\n");
+#else
     print("[guideXOS] Developer Studio in-OS edit/build/run: PASS\n");
+#endif
     g_phase12_complete = 1;
     g_app_complete = 1;
     for (;;) {
@@ -1241,13 +1245,35 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     (void)initial_el;
 
     gxos_aarch64_phase2_platform platform{};
-    if (!gxos_aarch64_phase2_parse_dtb((const void*)(uintptr_t)handoff->dtb_base,
-                                       handoff->dtb_size, &platform) ||
-        platform.timer_source != 2 ||
+    const bool dtbParsed = gxos_aarch64_phase2_parse_dtb(
+        (const void*)(uintptr_t)handoff->dtb_base, handoff->dtb_size, &platform) != 0;
+    if (!dtbParsed || platform.timer_source != 2 ||
         (platform.gic_version != GXOS_AARCH64_GIC_V2 &&
          platform.gic_version != GXOS_AARCH64_GIC_V3)) {
         print("[guideXOS] DTB diagnostic=");
         phase3_serial_dec(platform.diagnostic);
+        print("\n");
+        const uint32_t traceOffset = (uint32_t)platform.parser_offset_low[0] |
+            ((uint32_t)platform.parser_offset_low[1] << 8) |
+            ((uint32_t)platform.parser_offset_low[2] << 16);
+        print("[guideXOS] DTB parser trace: parsed=");
+        phase3_serial_dec(dtbParsed ? 1 : 0);
+        print(" token=");
+        phase3_serial_dec(platform.parser_last_token);
+        print(" structure-offset=");
+        phase3_serial_dec(traceOffset);
+        print(" platform=");
+        phase3_serial_dec(platform.platform_kind);
+        print(" uart=");
+        phase3_serial_hex(platform.uart_base);
+        print(" gicd=");
+        phase3_serial_hex(platform.gicd_base);
+        print(" gicc=");
+        phase3_serial_hex(platform.gicc_base);
+        print(" ram-ranges=");
+        phase3_serial_dec(platform.ram_count);
+        print(" timer-irq=");
+        phase3_serial_dec(platform.timer_irq);
         print("\n");
         fail("DTB: FAIL");
     }

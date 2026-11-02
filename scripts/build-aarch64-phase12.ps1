@@ -3,7 +3,8 @@ param(
     [string]$LlvmRoot = 'C:\Program Files\LLVM\bin',
     [string]$OutputDirectory = '',
     [string]$DeveloperStudioRoot = 'D:\dev\guideXOS_Developer_Studio',
-    [string]$V05ServerRoot = ''
+    [string]$V05ServerRoot = '',
+    [switch]$ProductionStudio
 )
 
 $ErrorActionPreference = 'Stop'
@@ -95,8 +96,14 @@ if ($arm64Entry.Count -ne 1 -or $arm64Entry[0].abi -ne 'guidexos-c-abi-v1-studio
     -DeveloperStudioRoot $DeveloperStudioRoot -V05ServerRoot $V05ServerRoot -OutputDirectory $adapterTestRoot
 
 $v05SdkInclude = Join-Path $V05ServerRoot ($alignmentLock.intendedV05Sdk.includeRoot.Replace('/', '\'))
-& (Join-Path $PSScriptRoot 'build-aarch64-phase10.ps1') -LlvmRoot $LlvmRoot `
-    -OutputDirectory $OutputDirectory -Phase12Proof -StudioV05SdkInclude $v05SdkInclude
+$kernelBuildParameters = @{
+    LlvmRoot = $LlvmRoot
+    OutputDirectory = $OutputDirectory
+    Phase12Proof = $true
+    StudioV05SdkInclude = $v05SdkInclude
+}
+if ($ProductionStudio) { $kernelBuildParameters.StudioGuestQualification = $true }
+& (Join-Path $PSScriptRoot 'build-aarch64-phase10.ps1') @kernelBuildParameters
 
 $clang = Join-Path $LlvmRoot 'clang++.exe'
 if (!(Test-Path -LiteralPath $clang -PathType Leaf)) {
@@ -152,7 +159,7 @@ using guidexos::developer_studio::ClassifyBuildDiagnosticLine;
 $studioCompatHeaderPath = Join-Path $studioSourceCopy 'src\studio_v05_compile_compat.h'
 [IO.File]::WriteAllText($studioCompatHeaderPath, $studioCompatHeader, [Text.UTF8Encoding]::new($false))
 $compileFlagsAnchor = 'if ($TargetArchitecture -eq "arm64") { $compileFlags += "-DGXOS_DEVELOPER_STUDIO_AARCH64" }'
-$compileFlagsOverlay = $compileFlagsAnchor + "`r`n    if (`$TargetArchitecture -eq `"arm64`" -and `$Phase12Proof) { `$compileFlags += @(`"-include`", `"src\studio_v05_compile_compat.h`" ) }"
+$compileFlagsOverlay = $compileFlagsAnchor + "`r`n    if (`$TargetArchitecture -eq `"arm64`") { `$compileFlags += @(`"-include`", `"src\studio_v05_compile_compat.h`" ) }"
 if (!$buildScriptText.Contains($compileFlagsAnchor) -or $buildScriptText.IndexOf($compileFlagsAnchor) -ne $buildScriptText.LastIndexOf($compileFlagsAnchor)) {
     throw 'Pinned Studio compiler flag block changed; refusing to apply the v0.5 source compatibility overlay.'
 }
@@ -161,8 +168,14 @@ $buildScriptText = $buildScriptText.Replace($compileFlagsAnchor, $compileFlagsOv
 Write-Host '[guideXOS] Building copied pinned Studio sources against the staged v0.5 SDK...' -ForegroundColor Yellow
 Push-Location $studioSourceCopy
 try {
-    & .\build.ps1 -TargetArchitecture arm64 -ServerRoot $studioBuildServerRoot `
-        -SdkInclude $v05SdkInclude -ToolchainRoot $LlvmRoot -Phase12Proof
+    $studioBuildParameters = @{
+        TargetArchitecture = 'arm64'
+        ServerRoot = $studioBuildServerRoot
+        SdkInclude = $v05SdkInclude
+        ToolchainRoot = $LlvmRoot
+    }
+    if (!$ProductionStudio) { $studioBuildParameters.Phase12Proof = $true }
+    & .\build.ps1 @studioBuildParameters
     if ($LASTEXITCODE -ne 0) { throw 'Pinned Developer Studio ARM64 hosted/build/link recipe failed' }
 }
 finally { Pop-Location }
@@ -218,3 +231,75 @@ foreach ($required in @('esp\EFI\BOOT\BOOTAA64.EFI','esp\kernel.elf','esp\ramdis
 }
 Write-Host '[guideXOS] Phase 12 package staging: PASS' -ForegroundColor Green
 Write-Host "      output=$OutputDirectory" -ForegroundColor Cyan
+
+function Get-Sha256Hex([string]$Path) {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+function Get-ServerWorktreeFingerprint {
+    $statusLines = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=all 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to fingerprint the server worktree.' }
+    $files = @()
+    foreach ($statusLine in $statusLines) {
+        $line = [string]$statusLine
+        if ($line.Length -lt 4) { continue }
+        $relativePath = $line.Substring(3)
+        if ($relativePath -match ' -> ') { $relativePath = $relativePath.Substring($relativePath.LastIndexOf(' -> ') + 4) }
+        $path = Join-Path $repoRoot $relativePath
+        $sha256 = if (Test-Path -LiteralPath $path -PathType Leaf) { Get-Sha256Hex $path } else { $null }
+        $files += [ordered]@{ status = $line.Substring(0, 2); path = $relativePath; sha256 = $sha256 }
+    }
+    return [ordered]@{ dirty = ($files.Count -ne 0); files = $files }
+}
+$serverHead = (& git -C $repoRoot rev-parse HEAD 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository revision.' }
+$serverBranch = (& git -C $repoRoot branch --show-current 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository branch.' }
+$candidateProfile = if ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
+$studioSmokeEnabled = !$ProductionStudio
+$studioDriverOverlay = Join-Path $studioSourceCopy 'build.ps1'
+$studioCompatOverlay = Join-Path $studioSourceCopy 'src\studio_v05_compile_compat.h'
+$candidateManifest = [ordered]@{
+    schemaVersion = 1
+    candidate = 'guideXOS Server ARM64 NativeElf Developer Studio'
+    profile = $candidateProfile
+    server = [ordered]@{
+        branch = $serverBranch
+        head = $serverHead
+        worktree = Get-ServerWorktreeFingerprint
+    }
+    developerStudio = [ordered]@{
+        revision = $studioRevision
+        sourceWorktree = 'clean pinned checkout copied to the build output'
+        sdkRevision = $alignmentLock.intendedV05Sdk.contractRevision
+        abiIdentity = $arm64Entry[0].abi
+    }
+    overlay = [ordered]@{
+        sourceCheckoutModified = $false
+        testSourceListCorrections = 'copied build.ps1 only; restores pinned shared model sources omitted from selected test lists'
+        compileCompatibility = 'generated forced-include aliases same-signature window_destroy to native_window_destroy and imports two namespaced Build diagnostic helpers'
+        compatHeaderSha256 = (Get-Sha256Hex $studioCompatOverlay)
+        copiedBuildDriverSha256 = (Get-Sha256Hex $studioDriverOverlay)
+        studioSmokeDefine = $studioSmokeEnabled
+    }
+    guest = [ordered]@{
+        machine = 'virt,gic-version=2,acpi=off'
+        cpu = 'cortex-a53'
+        firmware = 'AArch64 UEFI'
+        entryPoint = 'gx_main'
+        architecture = 'EM_AARCH64'
+    }
+    artifacts = [ordered]@{
+        studioElf = [ordered]@{
+            guestPath = '/Apps/DeveloperStudio/bin/arm64/developerstudio.elf'
+            bytes = (Get-Item -LiteralPath $studioElf).Length
+            sha256 = (Get-Sha256Hex $studioElf)
+        }
+        packageManifestSha256 = (Get-Sha256Hex (Join-Path $studioStage 'app.json'))
+        bootEfiSha256 = (Get-Sha256Hex (Join-Path $OutputDirectory 'BOOTAA64.EFI'))
+        kernelElfSha256 = (Get-Sha256Hex (Join-Path $OutputDirectory 'kernel.elf'))
+        ramdiskSha256 = (Get-Sha256Hex $ramdisk)
+    }
+}
+$candidateManifestPath = Join-Path $OutputDirectory 'candidate-manifest.json'
+$candidateManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $candidateManifestPath -Encoding utf8
+Write-Host "[guideXOS] Candidate manifest: $candidateManifestPath" -ForegroundColor Cyan

@@ -4,7 +4,8 @@ param(
     [string]$OutputDirectory = '',
     [string]$StudioV05SdkInclude = '',
     [switch]$Phase11Proof,
-    [switch]$Phase12Proof
+    [switch]$Phase12Proof,
+    [switch]$StudioGuestQualification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,6 +32,9 @@ if ($Phase12Proof) {
             throw "Pinned v0.5 adapter header is missing: $(Join-Path $StudioV05SdkInclude $header)"
         }
     }
+}
+if ($StudioGuestQualification -and !$Phase12Proof) {
+    throw 'StudioGuestQualification requires the versioned Phase 12 adapter profile.'
 }
 function Invoke-Checked { param([string]$FilePath, [string[]]$Arguments)
     Write-Host "      $([IO.Path]::GetFileName($FilePath)) $($Arguments -join ' ')" -ForegroundColor DarkGray
@@ -62,6 +66,7 @@ $efiPath = Join-Path $OutputDirectory 'BOOTAA64.EFI'
 $loaderSource = Join-Path $repoRoot 'guideXOSBootLoader\aarch64\phase1_loader.cpp'
 $phase11Define = if ($Phase11Proof) { '-DGXOS_AARCH64_PHASE11' } else { }
 $phase12Define = if ($Phase12Proof) { '-DGXOS_AARCH64_PHASE12' } else { }
+$studioGuestDefine = if ($StudioGuestQualification) { '-DGXOS_AARCH64_ABI3_STUDIO_GUEST' } else { }
 $loaderFlags = @(
     '--target=aarch64-pc-windows-msvc', '-DGXOS_AARCH64_PHASE4', '-DGXOS_AARCH64_PHASE5', '-DGXOS_AARCH64_PHASE6', '-DGXOS_AARCH64_PHASE7', '-DGXOS_AARCH64_PHASE8', '-DGXOS_AARCH64_PHASE9', '-DGXOS_AARCH64_PHASE10', $phase12Define,
     '-O2', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-exceptions', '-fno-rtti', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-fno-ident',
@@ -90,7 +95,7 @@ $kernelFlags = @(
     '--target=aarch64-none-elf','-std=c++14','-march=armv8-a','-O2','-ffreestanding','-nostdlib','-nostdinc++','-fno-builtin','-fno-stack-protector',
     '-fno-exceptions','-fno-rtti','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-fno-pic','-fno-pie','-mcmodel=small',
     '-mgeneral-regs-only','-mstrict-align','-mno-outline-atomics','-ffunction-sections','-fdata-sections','-Wno-c++11-narrowing',
-    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,
+    '-DGXOS_AARCH64_PHASE4','-DGXOS_AARCH64_PHASE5','-DGXOS_AARCH64_PHASE6','-DGXOS_AARCH64_PHASE7','-DGXOS_AARCH64_PHASE8','-DGXOS_AARCH64_PHASE9','-DGXOS_AARCH64_PHASE10',$phase11Define,$phase12Define,$studioGuestDefine,
     '-DGXOS_BARE_METAL','-DKERNEL_HAS_VIRTIO_INPUT','-DKERNEL_HAS_COMMON_INPUT_QUEUE','-I',$repoRoot,'-I',(Join-Path $repoRoot 'kernel'),'-I',(Join-Path $repoRoot 'sdk\include'),'-I',(Join-Path $repoRoot 'kernel\core\include'),
     '-I',(Join-Path $repoRoot 'kernel\core\freestanding'),'-I',(Join-Path $repoRoot 'kernel\arch\arm64\include'))
 $kernelObjects = @()

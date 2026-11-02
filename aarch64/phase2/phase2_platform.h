@@ -56,13 +56,13 @@ typedef struct gxos_aarch64_phase2_platform {
     uint8_t platform_kind;
     uint8_t uart_kind;
     uint8_t ranges_translated;
-    uint8_t reserved_identity;
+    uint8_t parser_last_token;
     uint8_t gic_node_seen;
     uint8_t gic_node_available;
     uint8_t unsupported_interrupt_controller_seen;
     uint8_t gic_has_redistributor_stride;
     uint8_t gic_has_redistributor_regions;
-    uint8_t reserved_gic_flags[3];
+    uint8_t parser_offset_low[3]; // low 24 bits of the last FDT structure offset
     uint32_t diagnostic;
     uint32_t timer_irq;
     uint32_t timer_source; // 0=none, 1=virtual, 2=physical

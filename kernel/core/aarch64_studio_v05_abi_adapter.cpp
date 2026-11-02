@@ -109,6 +109,7 @@ struct V05AdapterState {
     studio_v05::gx_app_context context;
     studio_v05::gx_host_calls host;
     uint32_t active;
+    uint32_t observedEventMask;
 };
 
 static_assert(sizeof(V05AdapterState::host) == 464,
@@ -347,6 +348,24 @@ static studio_v05::gx_result GX_CALL host_poll_event(
     outEvent->param2 = event.param2;
     outEvent->param3 = event.param3;
     outEvent->param4 = event.param4;
+    if (event.type > GX_EVENT_NONE && event.type <= GX_EVENT_WINDOW_PAINT) {
+        const uint32_t eventBit = UINT32_C(1) << event.type;
+        if ((adapter->observedEventMask & eventBit) == 0) {
+            adapter->observedEventMask |= eventBit;
+            if (event.type == GX_EVENT_MOUSE && adapter->aarch64Host->log)
+                adapter->aarch64Host->log(adapter->aarch64Context,
+                    "ABI3 guest observed Studio mouse event through v0.5 poll_event");
+            else if (event.type == GX_EVENT_KEY && adapter->aarch64Host->log)
+                adapter->aarch64Host->log(adapter->aarch64Context,
+                    "ABI3 guest observed Studio key event through v0.5 poll_event");
+            else if (event.type == GX_EVENT_WINDOW_FOCUS && adapter->aarch64Host->log)
+                adapter->aarch64Host->log(adapter->aarch64Context,
+                    "ABI3 guest observed Studio focus event through v0.5 poll_event");
+            else if (event.type == GX_EVENT_WINDOW_CLOSE && adapter->aarch64Host->log)
+                adapter->aarch64Host->log(adapter->aarch64Context,
+                    "ABI3 guest observed Studio close event through v0.5 poll_event");
+        }
+    }
     return studio_v05::GX_OK;
 }
 

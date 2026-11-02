@@ -675,6 +675,13 @@ static bool arm64_parse_package(const char* directory, Arm64Package* package)
     if (!selected || !arm64_equal(package->entryPoint, "gx_main") || !abiSupported ||
         !arm64_json(s_arm64Manifest, "\"runtime\"", runtime, sizeof(runtime)) ||
         !arm64_equal(runtime, "native-elf")) return false;
+#if defined(GXOS_AARCH64_PHASE12)
+    if (studio_abi::profile_from_identity(package->abi) == studio_abi::Profile::StudioV05_464) {
+        arm64_print("[guideXOS] Package identity validated: ");
+        arm64_print(package->abi);
+        arm64_print(" architecture=arm64 entryPoint=gx_main\n");
+    }
+#endif
     char executablePath[256];
     if (!arm64_package_path(package, package->executable, executablePath, sizeof(executablePath))) return false;
     vfs::FileInfo info{};
@@ -2435,10 +2442,18 @@ static bool phase9_load_and_run(Phase9Runtime* runtime)
         runtime->studioV05Adapter = studio_abi::create_v05_adapter(
             &runtime->loader.context, &runtime->loader.host, &runtime->hostRenderBinding, userMemory);
         applicationContext = studio_abi::v05_context(runtime->studioV05Adapter);
+        if (applicationContext) {
+            arm64_print("[guideXOS] ABI adapter selected: guidexos-c-abi-v1-studio-v05-464\n");
+        } else {
+            arm64_print("[guideXOS] ABI adapter creation failed: Studio v0.5\n");
+        }
     }
 #endif
     gx_result result = GX_ERROR_UNSUPPORTED;
     if (applicationContext) {
+        if (runtime->loader.package && studio_abi::profile_from_identity(runtime->loader.package->abi) ==
+                studio_abi::Profile::StudioV05_464)
+            arm64_print("[guideXOS] Studio NativeElf entry dispatch: gx_main\n");
         result = gxos_native_call_on_stack(runtime->loader.entryAddress, applicationContext,
             runtime->loader.stack + runtime->loader.stackBytes - 16);
     }
@@ -2514,7 +2529,11 @@ static bool phase12_run_package(Arm64Package* package, bool nested)
         if (!nested) s_arm64LaunchInProgress = false;
         return false;
     }
+#if defined(GXOS_AARCH64_ABI3_STUDIO_GUEST)
+    runtime.autoClose = false;
+#else
     runtime.autoClose = true;
+#endif
     runtime.closeRequested = false;
     runtime.isAppA = true;
     runtime.isPhase12 = true;
