@@ -380,6 +380,38 @@ static bool property_name(const uint8_t* strings, uint32_t stringsSize, uint32_t
     return equal_string(name, remaining, expected);
 }
 
+static bool property_name_is_terminated(const uint8_t* strings, uint32_t stringsSize,
+                                        uint32_t nameOffset)
+{
+    if (!strings || nameOffset >= stringsSize) return false;
+    for (uint32_t offset = nameOffset; offset < stringsSize; ++offset) {
+        if (strings[offset] == 0) return offset != nameOffset;
+    }
+    return false;
+}
+
+static uint8_t parser_fail(gxos_aarch64_phase2_platform* platform,
+                           gxos_aarch64_dtb_parse_error error)
+{
+    if (platform) platform->parser_error = (uint32_t)error;
+    return 0;
+}
+
+struct ParserTraceGuard {
+    gxos_aarch64_phase2_platform* platform;
+    bool complete;
+
+    explicit ParserTraceGuard(gxos_aarch64_phase2_platform* value)
+        : platform(value), complete(false) {}
+
+    ~ParserTraceGuard()
+    {
+        if (platform && !complete && platform->parser_error == GXOS_AARCH64_DTB_PARSE_ERROR_NONE) {
+            platform->parser_error = GXOS_AARCH64_DTB_PARSE_ERROR_STRUCTURE;
+        }
+    }
+};
+
 } // namespace
 
 extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob_size,
@@ -388,19 +420,23 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
     if (!platform) return 0;
     zero_bytes(platform, sizeof(*platform));
     platform->diagnostic = GXOS_AARCH64_DTB_MALFORMED;
+    platform->parser_stage = GXOS_AARCH64_DTB_PARSE_STAGE_HEADER;
 
     const uint8_t* bytes = (const uint8_t*)blob;
-    uint32_t total = 0;
-    uint32_t structOffset = 0;
-    uint32_t structSize = 0;
-    uint32_t stringsOffset = 0;
-    uint32_t stringsSize = 0;
-    if (!gxos_aarch64_fdt_header_bounds(bytes, blob_size, &total, &structOffset, &structSize,
-                                        &stringsOffset, &stringsSize)) return 0;
+    platform->header_status = gxos_aarch64_fdt_header_validate(bytes, blob_size,
+                                                               &platform->header);
+    if (platform->header_status != GXOS_AARCH64_FDT_HEADER_OK) return 0;
+    const uint32_t total = platform->header.total_size;
+    const uint32_t structOffset = platform->header.structure_offset;
+    const uint32_t structSize = platform->header.structure_size;
+    const uint32_t stringsOffset = platform->header.strings_offset;
+    const uint32_t stringsSize = platform->header.strings_size;
     const uint8_t* structBase = bytes + structOffset;
     const uint8_t* structEnd = structBase + structSize;
     const uint8_t* strings = bytes + stringsOffset;
 
+    ParserTraceGuard trace(platform);
+    platform->parser_stage = GXOS_AARCH64_DTB_PARSE_STAGE_STRUCTURE;
     platform->address_cells = 2;
     platform->size_cells = 1;
     FdtNode stack[32];
@@ -408,20 +444,23 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
     uint32_t depth = 0;
     uint32_t offset = 0;
     while (offset < structSize) {
-        if (structSize - offset < 4) return 0;
+        if (structSize - offset < 4) {
+            return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_TRUNCATED_TOKEN);
+        }
         const uint8_t* tokenBytes = structBase + offset;
         const uint32_t token = load_be32(tokenBytes);
         offset += 4;
         const uint32_t traceOffset = offset & UINT32_C(0x00ffffff);
         platform->parser_last_token = (uint8_t)token;
+        platform->parser_offset = offset;
         platform->parser_offset_low[0] = (uint8_t)traceOffset;
         platform->parser_offset_low[1] = (uint8_t)(traceOffset >> 8);
         platform->parser_offset_low[2] = (uint8_t)(traceOffset >> 16);
         if (token == kFdtBeginNode) {
-            if (depth >= 32) return 0;
+            if (depth >= 32) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_NESTING);
             const uint32_t nameStart = offset;
             while (offset < structSize && structBase[offset] != 0) ++offset;
-            if (offset >= structSize) return 0;
+            if (offset >= structSize) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_NODE_NAME);
             FdtNode node;
             zero_bytes(&node, sizeof(node));
             node.is_root = (depth == 0);
@@ -441,15 +480,15 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             if (node_name_is(structBase + nameStart, nameLength, "cpu")) node.is_cpu = 1;
             ++offset;
             offset = (offset + 3) & ~3u;
-            if (offset > structSize) return 0;
+            if (offset > structSize) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_NODE_NAME);
             stack[depth++] = node;
         } else if (token == kFdtEndNode) {
-            if (depth == 0) return 0;
+            if (depth == 0) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_END_NODE);
             FdtNode& node = stack[depth - 1];
             if (node.is_gic) {
                 if (platform->gic_node_seen) {
                     platform->diagnostic = GXOS_AARCH64_DTB_UNSUPPORTED_CONTROLLER;
-                    return 0;
+                    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                 }
                 platform->gic_node_seen = 1;
                 platform->gic_version = node.gic_version;
@@ -463,15 +502,19 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             }
             if (node.available && node.reg_value &&
                 (node.is_memory || node.is_uart || node.is_gic || node.is_virtio_mmio) &&
-                !parse_reg(node.reg_value, node.reg_length, node, stack, depth, platform)) return 0;
+                !parse_reg(node.reg_value, node.reg_length, node, stack, depth, platform)) {
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_REG_RANGE);
+            }
             if (node.is_gic && node.available && node.gic_version == GXOS_AARCH64_GIC_V3 &&
                 node.has_redistributor_regions &&
                 node.redistributor_regions != platform->gic_redistributor_region_count) {
                 platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                return 0;
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
             }
             if (node.available && node.is_cpu && node.reg_value &&
-                !parse_cpu_affinities(node.reg_value, node.reg_length, node, platform)) return 0;
+                !parse_cpu_affinities(node.reg_value, node.reg_length, node, platform)) {
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CPU_AFFINITY);
+            }
             if (node.is_timer && node.interrupts_value) {
                 parse_timer_interrupts(node.interrupts_value, node.interrupts_length, platform);
             }
@@ -482,11 +525,18 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
             }
             --depth;
         } else if (token == kFdtProp) {
-            if (depth == 0 || structSize - offset < 8) return 0;
+            if (depth == 0 || structSize - offset < 8) {
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_HEADER);
+            }
             const uint32_t length = load_be32(structBase + offset);
             const uint32_t nameOffset = load_be32(structBase + offset + 4);
             offset += 8;
-            if (length > structSize - offset) return 0;
+            if (length > structSize - offset) {
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE);
+            }
+            if (!property_name_is_terminated(strings, stringsSize, nameOffset)) {
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_NAME);
+            }
             if (!property_name(strings, stringsSize, nameOffset, "compatible") &&
                 !property_name(strings, stringsSize, nameOffset, "reg") &&
                 !property_name(strings, stringsSize, nameOffset, "interrupts") &&
@@ -500,13 +550,17 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                 !property_name(strings, stringsSize, nameOffset, "status") &&
                 !property_name(strings, stringsSize, nameOffset, "ranges")) {
                 offset = (offset + length + 3) & ~3u;
-                if (offset > structSize) return 0;
+                if (offset > structSize) {
+                    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE);
+                }
                 continue;
             }
             FdtNode& node = stack[depth - 1];
             const uint8_t* value = structBase + offset;
             if (property_name(strings, stringsSize, nameOffset, "compatible")) {
-                if (!string_list_valid(value, length)) return 0;
+                if (!string_list_valid(value, length)) {
+                    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
+                }
                 classify_compatible(value, length, &node);
             } else if (property_name(strings, stringsSize, nameOffset, "reg")) {
                 node.reg_value = value;
@@ -515,37 +569,39 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                 node.interrupts_value = value;
                 node.interrupts_length = length;
             } else if (property_name(strings, stringsSize, nameOffset, "#address-cells")) {
-                if (length != 4) return 0;
+                if (length != 4) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
                 const uint32_t cells = load_be32(value);
-                if (cells == 0 || cells > 2) return 0;
+                if (cells == 0 || cells > 2) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
                 node.address_cells = cells <= 2 ? (uint8_t)cells : 0;
                 if (node.is_root) platform->address_cells = (uint8_t)cells;
             } else if (property_name(strings, stringsSize, nameOffset, "#size-cells")) {
-                if (length != 4) return 0;
+                if (length != 4) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
                 const uint32_t cells = load_be32(value);
-                if (cells > 2 || (node.is_root && cells == 0)) return 0;
+                if (cells > 2 || (node.is_root && cells == 0)) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
                 node.size_cells = cells <= 2 ? (uint8_t)cells : 0;
                 if (node.is_root) platform->size_cells = (uint8_t)cells;
             } else if (property_name(strings, stringsSize, nameOffset, "device_type") &&
                        property_string(value, length, "memory")) {
                 node.is_memory = 1;
             } else if (property_name(strings, stringsSize, nameOffset, "#interrupt-cells")) {
-                if (length != 4) return 0;
+                if (length != 4) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
                 const uint32_t cells = load_be32(value);
-                if (cells == 0 || cells > 4) return 0;
+                if (cells == 0 || cells > 4) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
                 node.interrupt_cells = cells;
             } else if (property_name(strings, stringsSize, nameOffset, "#redistributor-regions")) {
-                if (length != 4) return 0;
+                if (length != 4) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
                 node.redistributor_regions = load_be32(value);
                 node.has_redistributor_regions = 1;
             } else if (property_name(strings, stringsSize, nameOffset, "redistributor-stride")) {
-                if (length != 4) return 0;
+                if (length != 4) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
                 node.redistributor_stride = load_be32(value);
                 node.has_redistributor_stride = 1;
             } else if (property_name(strings, stringsSize, nameOffset, "interrupt-controller") && length == 0) {
                 node.is_interrupt_controller = 1;
             } else if (property_name(strings, stringsSize, nameOffset, "status")) {
-                if (length == 0 || value[length - 1] != 0) return 0;
+                if (length == 0 || value[length - 1] != 0) {
+                    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT);
+                }
                 node.available = property_string(value, length, "okay") ||
                                  property_string(value, length, "ok");
             } else if (property_name(strings, stringsSize, nameOffset, "ranges")) {
@@ -554,18 +610,19 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                 node.has_ranges = 1;
             }
             offset = (offset + length + 3) & ~3u;
-            if (offset > structSize) return 0;
+            if (offset > structSize) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE);
         } else if (token == kFdtNop) {
             continue;
         } else if (token == kFdtEnd) {
-            if (depth != 0) return 0;
+            platform->parser_stage = GXOS_AARCH64_DTB_PARSE_STAGE_PLATFORM;
+            if (depth != 0) return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_STRUCTURE_END);
             if (!platform->gic_node_seen || platform->gic_version == GXOS_AARCH64_GIC_UNSUPPORTED) {
                 platform->diagnostic = GXOS_AARCH64_DTB_UNSUPPORTED_CONTROLLER;
-                return 0;
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
             }
             if (!platform->gic_node_available) {
                 platform->diagnostic = GXOS_AARCH64_DTB_DEVICE_UNAVAILABLE;
-                return 0;
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
             }
             if (platform->gicd_base == 0 ||
                 platform->gicd_size < (platform->gic_version == GXOS_AARCH64_GIC_V3
@@ -573,14 +630,14 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                 (platform->gicd_base & UINT64_C(0xfff)) != 0 ||
                 (platform->gicd_size & UINT64_C(0xfff)) != 0) {
                 platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                return 0;
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
             }
             if (platform->gic_version == GXOS_AARCH64_GIC_V2) {
                 if (platform->gicc_base == 0 || platform->gicc_size < UINT64_C(0x1000) ||
                     (platform->gicc_base & UINT64_C(0xfff)) != 0 ||
                     (platform->gicc_size & UINT64_C(0xfff)) != 0) {
                     platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                    return 0;
+                    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                 }
             } else if (platform->gic_version == GXOS_AARCH64_GIC_V3) {
                 if (platform->gic_redistributor_region_count == 0 ||
@@ -594,13 +651,13 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                      (platform->gic_redistributor_stride < UINT32_C(0x20000) ||
                       (platform->gic_redistributor_stride & UINT32_C(0xffff)) != 0))) {
                     platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                    return 0;
+                    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                 }
                 uint64_t distributor_end = 0;
                 if (!gxos_aarch64_add_u64(platform->gicd_base, platform->gicd_size,
                                           &distributor_end)) {
                     platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                    return 0;
+                    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                 }
                 const gxos_aarch64_validation_range distributor = {
                     platform->gicd_base, distributor_end};
@@ -608,20 +665,20 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                     if (ranges_overlap_checked(platform->gicd_base, platform->gicd_size,
                                                platform->ram[i].base, platform->ram[i].size)) {
                         platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                        return 0;
+                        return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                     }
                 }
                 if (ranges_overlap_checked(platform->gicd_base, platform->gicd_size,
                                            platform->uart_base, platform->uart_size)) {
                     platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                    return 0;
+                    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                 }
                 for (uint32_t i = 0; i < platform->virtio_mmio_count; ++i) {
                     if (ranges_overlap_checked(platform->gicd_base, platform->gicd_size,
                                                platform->virtio_mmio[i].base,
                                                platform->virtio_mmio[i].size)) {
                         platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                        return 0;
+                        return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                     }
                 }
                 for (uint32_t i = 0; i < platform->gic_redistributor_region_count; ++i) {
@@ -633,32 +690,32 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                         (region.size & UINT64_C(0xffff)) != 0 ||
                         !gxos_aarch64_add_u64(region.base, region.size, &region_end)) {
                         platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                        return 0;
+                        return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                     }
                     const gxos_aarch64_validation_range current = {region.base, region_end};
                     if (gxos_aarch64_range_overlaps(current, distributor)) {
                         platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                        return 0;
+                        return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                     }
                     for (uint32_t ram = 0; ram < platform->ram_count; ++ram) {
                         if (ranges_overlap_checked(region.base, region.size,
                                                    platform->ram[ram].base,
                                                    platform->ram[ram].size)) {
                             platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                            return 0;
+                            return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                         }
                     }
                     if (ranges_overlap_checked(region.base, region.size,
                                                platform->uart_base, platform->uart_size)) {
                         platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                        return 0;
+                        return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                     }
                     for (uint32_t device = 0; device < platform->virtio_mmio_count; ++device) {
                         if (ranges_overlap_checked(region.base, region.size,
                                                    platform->virtio_mmio[device].base,
                                                    platform->virtio_mmio[device].size)) {
                             platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                            return 0;
+                            return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                         }
                     }
                     for (uint32_t j = 0; j < i; ++j) {
@@ -668,17 +725,17 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                         if (!gxos_aarch64_add_u64(prior.base, prior.size, &prior_end) ||
                             gxos_aarch64_range_overlaps(current, {prior.base, prior_end})) {
                             platform->diagnostic = GXOS_AARCH64_DTB_INVALID_CONTROLLER_LAYOUT;
-                            return 0;
+                            return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
                         }
                     }
                 }
             } else {
                 platform->diagnostic = GXOS_AARCH64_DTB_UNSUPPORTED_CONTROLLER;
-                return 0;
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_CONTROLLER);
             }
             if (platform->timer_irq == 0) {
                 platform->diagnostic = GXOS_AARCH64_DTB_TIMER_UNAVAILABLE;
-                return 0;
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_TIMER);
             }
             platform->valid = (platform->platform_kind != GXOS_AARCH64_PLATFORM_UNKNOWN &&
                                platform->ram_count != 0 && platform->uart_base != 0 &&
@@ -686,17 +743,20 @@ extern "C" uint8_t gxos_aarch64_phase2_parse_dtb(const void* blob, uint64_t blob
                                platform->gicd_base != 0);
             if (!platform->valid) {
                 platform->diagnostic = GXOS_AARCH64_DTB_MALFORMED;
-                return 0;
+                return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_REQUIRED_PLATFORM);
             }
             platform->diagnostic = GXOS_AARCH64_DTB_OK;
+            platform->parser_stage = GXOS_AARCH64_DTB_PARSE_STAGE_COMPLETE;
+            trace.complete = true;
             (void)total;
             (void)structEnd;
             return 1;
         } else {
-            return 0;
+            return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_UNKNOWN_TOKEN);
         }
     }
-    return 0;
+    platform->parser_stage = GXOS_AARCH64_DTB_PARSE_STAGE_PLATFORM;
+    return parser_fail(platform, GXOS_AARCH64_DTB_PARSE_ERROR_STRUCTURE_END);
 }
 
 extern "C" gxos_aarch64_dtb_status gxos_aarch64_phase2_parse_dtb_ex(

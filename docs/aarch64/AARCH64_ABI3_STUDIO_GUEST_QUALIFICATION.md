@@ -105,3 +105,9 @@ The follow-up QAC reservation was `ea21fabb55934a1faa49a909ec5168d1`, queued at 
 ## Remaining acceptance work
 
 The next authorized run needs to inspect the DTB failure using the preserved diagnostic candidate, repair the specific parser/handoff issue if confirmed, and reach desktop startup before attempting Studio operations. Then exercise compositor rendering and guest-observed input, create and validate a disposable guest workspace, perform Studio's actual Build and ordinary Run, and collect teardown evidence. Three fresh authorized boots must pass Studio startup, rendering, basic input, close, and cleanup; at least one must also pass the VFS and Build/Run workflow. Do not count the current diagnostic boot toward those three.
+
+## BOOTDTB1 follow-up (2026-11-02)
+
+A later authorized no-Studio Phase 4 guest isolated the early failure with bounded loader and parser diagnostics. It confirmed EFI_DTB_TABLE_GUID discovery, accepted FDT header (0xd00dfeed, totalsize 0x101000, version 17), copied the DTB to LoaderData, and validated the physical handoff range and LoaderData memory-map coverage. It then stopped at parser stage STRUCTURE, token FDT_PROP, error PROPERTY_VALUE_FORMAT, structure offset 5572. The original serial line said reserved-after-EBS=1, but that field was hard-coded and did not prove allocator reservation; the failed guest stopped before allocator initialization. The follow-up did not capture the DTB bytes or identify the property/predicate, so the root cause remains unresolved and no parser acceptance behavior was changed.
+
+The minimal guest did not reach GIC selection, timer delivery, scheduler progress, desktop, or Studio. The status remains STUDIO_GUEST_PARTIAL, with **0 of 3 qualifying Studio boots**. See [AARCH64_BOOTDTB1_HANDOFF_DIAGNOSIS.md](AARCH64_BOOTDTB1_HANDOFF_DIAGNOSIS.md) for the QAC record, candidate hashes, provenance analysis, tests, and next acceptance requirement.

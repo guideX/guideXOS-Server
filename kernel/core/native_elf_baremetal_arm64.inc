@@ -2451,9 +2451,11 @@ static bool phase9_load_and_run(Phase9Runtime* runtime)
 #endif
     gx_result result = GX_ERROR_UNSUPPORTED;
     if (applicationContext) {
+#if defined(GXOS_AARCH64_PHASE12)
         if (runtime->loader.package && studio_abi::profile_from_identity(runtime->loader.package->abi) ==
                 studio_abi::Profile::StudioV05_464)
             arm64_print("[guideXOS] Studio NativeElf entry dispatch: gx_main\n");
+#endif
         result = gxos_native_call_on_stack(runtime->loader.entryAddress, applicationContext,
             runtime->loader.stack + runtime->loader.stackBytes - 16);
     }

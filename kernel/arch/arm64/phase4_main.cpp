@@ -282,6 +282,32 @@ static bool valid_handoff(const Aarch64Handoff* handoff)
 #endif
 }
 
+static bool dtb_range_in_loader_memory(const Aarch64Handoff* handoff,
+                                      uint64_t* allocationEnd)
+{
+    uint64_t end = 0;
+    if (!handoff || !gxos_aarch64_dtb_allocation_bounds(handoff->dtb_base,
+                                                        handoff->dtb_size, &end)) return false;
+    const bool covered = gxos_aarch64_memory_map_range_covered(
+        (const uint8_t*)(uintptr_t)handoff->memory_map, handoff->memory_map,
+        handoff->memory_map_size, handoff->memory_map_descriptor_size,
+        handoff->memory_map_entry_count, handoff->dtb_base,
+        end - handoff->dtb_base, 2 /* EfiLoaderData */);
+    if (covered && allocationEnd) *allocationEnd = end;
+    return covered;
+}
+
+static bool dtb_pages_mapped_as_normal_ram(uint64_t base, uint64_t allocationEnd)
+{
+    if (base == 0 || base >= allocationEnd || (base & UINT64_C(0xfff)) != 0 ||
+        (allocationEnd & UINT64_C(0xfff)) != 0) return false;
+    for (uint64_t page = base; page < allocationEnd; page += UINT64_C(0x1000)) {
+        const uint64_t descriptor = phase2_mmu_descriptor_for(page);
+        if ((descriptor & 3u) != 3u || ((descriptor >> 2) & 7u) != 1u) return false;
+    }
+    return true;
+}
+
 static bool work_valid(const Work* work)
 {
     return work && work->id >= 1 && work->id <= 3 &&
@@ -1242,11 +1268,48 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     if (!valid_handoff(handoff)) fail("firmware handoff: FAIL");
     print("[guideXOS] ExitBootServices: OK\n");
     print("[guideXOS] firmware handoff: OK\n");
+    uint64_t dtbAllocationEnd = 0;
+    const bool dtbRangeValid = handoff && gxos_aarch64_dtb_allocation_bounds(
+        handoff->dtb_base, handoff->dtb_size, &dtbAllocationEnd);
+    print("[guideXOS] DTB handoff: base=");
+    phase3_serial_hex(handoff ? handoff->dtb_base : 0);
+    print(" size=");
+    phase3_serial_dec(handoff ? handoff->dtb_size : 0);
+    print(" allocation-end=");
+    phase3_serial_hex(dtbRangeValid ? dtbAllocationEnd : 0);
+    print(" access=physical,MMU-off range-valid=");
+    phase3_serial_dec(dtbRangeValid ? 1 : 0);
+    print("\n");
+    if (!dtbRangeValid) fail("DTB handoff pointer or length: FAIL");
+    const bool dtbMemoryCovered = dtb_range_in_loader_memory(handoff, &dtbAllocationEnd);
+    print("[guideXOS] DTB handoff memory: EfiLoaderData-covered=");
+    phase3_serial_dec(dtbMemoryCovered ? 1 : 0);
+    print(" allocator-reservation=deferred\n");
+    if (!dtbMemoryCovered) fail("DTB handoff memory-map coverage: FAIL");
     (void)initial_el;
 
     gxos_aarch64_phase2_platform platform{};
     const bool dtbParsed = gxos_aarch64_phase2_parse_dtb(
         (const void*)(uintptr_t)handoff->dtb_base, handoff->dtb_size, &platform) != 0;
+    print("[guideXOS] DTB header: status=");
+    phase3_serial_dec((uint32_t)platform.header_status);
+    print(" magic=");
+    phase3_serial_hex(platform.header.magic);
+    print(" total=");
+    phase3_serial_dec(platform.header.total_size);
+    print(" version=");
+    phase3_serial_dec(platform.header.version);
+    print(" struct=");
+    phase3_serial_hex(platform.header.structure_offset);
+    print("+");
+    phase3_serial_hex(platform.header.structure_size);
+    print(" strings=");
+    phase3_serial_hex(platform.header.strings_offset);
+    print("+");
+    phase3_serial_hex(platform.header.strings_size);
+    print(" reserve=");
+    phase3_serial_hex(platform.header.reservation_offset);
+    print("\n");
     if (!dtbParsed || platform.timer_source != 2 ||
         (platform.gic_version != GXOS_AARCH64_GIC_V2 &&
          platform.gic_version != GXOS_AARCH64_GIC_V3)) {
@@ -1260,8 +1323,12 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
         phase3_serial_dec(dtbParsed ? 1 : 0);
         print(" token=");
         phase3_serial_dec(platform.parser_last_token);
+        print(" parser-stage=");
+        phase3_serial_dec(platform.parser_stage);
+        print(" parser-error=");
+        phase3_serial_dec(platform.parser_error);
         print(" structure-offset=");
-        phase3_serial_dec(traceOffset);
+        phase3_serial_dec(platform.parser_offset ? platform.parser_offset : traceOffset);
         print(" platform=");
         phase3_serial_dec(platform.platform_kind);
         print(" uart=");
@@ -1295,6 +1362,12 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     print("[guideXOS] MMU tables: built\n");
     phase2_mmu_enable();
     print("[guideXOS] MMU: guideXOS tables active\n");
+    if (!dtb_pages_mapped_as_normal_ram(handoff->dtb_base, dtbAllocationEnd)) {
+        fail("DTB MMU mapping: FAIL");
+    }
+    print("[guideXOS] DTB MMU mapping: complete pages=");
+    phase3_serial_dec((dtbAllocationEnd - handoff->dtb_base) / UINT64_C(0x1000));
+    print(" normal-RAM=1\n");
     uint64_t vbar = 0;
     __asm__ volatile("mrs %0, vbar_el1" : "=r"(vbar));
     if (vbar != (uint64_t)(uintptr_t)phase3_vectors || (vbar & 0x7ff) != 0) fail("exception vectors: FAIL");

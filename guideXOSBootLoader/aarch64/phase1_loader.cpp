@@ -8,6 +8,9 @@
 #include "../Uefi.h"
 #include "../Protocol/LoadedImage.h"
 #include "../Protocol/SimpleFileSystem.h"
+#if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
+#include "../../aarch64/phase2/phase2_validation.h"
+#endif
 #if defined(GXOS_AARCH64_RPI4_P1)
 #include "../Protocol/GraphicsOutput.h"
 #include "../../aarch64/rpi4/rpi4_p1_contract.h"
@@ -164,6 +167,7 @@ static bool add_u64(uint64_t a, uint64_t b, uint64_t* result);
 static bool mul_u64(uint64_t a, uint64_t b, uint64_t* result);
 static void print_ascii(const char* text);
 static void print_hex_u32(uint32_t value);
+static void print_hex_u64(uint64_t value);
 static EFI_STATUS fail(const char* message);
 
 #if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE6)
@@ -329,6 +333,19 @@ static void print_hex_u32(uint32_t value)
         text[2 + i] = digits[(value >> (28 - (i * 4))) & 0xf];
     }
     text[10] = '\0';
+    print_ascii(text);
+}
+
+static void print_hex_u64(uint64_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    char text[19];
+    text[0] = '0';
+    text[1] = 'x';
+    for (uint32_t i = 0; i < 16; ++i) {
+        text[2 + i] = digits[(value >> (60 - (i * 4))) & 0xf];
+    }
+    text[18] = '\0';
     print_ascii(text);
 }
 
@@ -739,6 +756,18 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
         handoff->memory_map_entry_count = mapSize / descriptorSize;
         handoff->flags |= GXOS_AARCH64_FLAG_MEMORY_MAP_VALID;
         *mapBuffer = memoryMap;
+#if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
+        uint64_t dtbAllocationEnd = 0;
+        if (!gxos_aarch64_dtb_allocation_bounds(handoff->dtb_base, handoff->dtb_size,
+                                                 &dtbAllocationEnd) ||
+            !gxos_aarch64_memory_map_range_covered(
+                (const uint8_t*)memoryMap, (uint64_t)(UINTN)memoryMap,
+                (uint64_t)mapSize, (uint64_t)descriptorSize,
+                (uint64_t)(mapSize / descriptorSize), handoff->dtb_base,
+                dtbAllocationEnd - handoff->dtb_base, (uint32_t)EfiLoaderData)) {
+            return fail("DTB copy is not fully covered by EfiLoaderData memory");
+        }
+#endif
 #if defined(GXOS_AARCH64_RPI4_P1)
         print_ascii("[A64 UEFI] Memory map: captured entries=");
         print_hex_u32(static_cast<uint32_t>(handoff->memory_map_entry_count));
@@ -758,27 +787,6 @@ static EFI_STATUS exit_boot_services(EFI_HANDLE imageHandle, Aarch64Handoff* han
 }
 
 #if defined(GXOS_AARCH64_RPI4_P1) || defined(GXOS_AARCH64_PHASE2) || defined(GXOS_AARCH64_PHASE4) || defined(GXOS_AARCH64_PHASE6)
-static bool validate_dtb_blob(const uint8_t* blob, uint64_t available, uint32_t* totalSize)
-{
-    if (!blob || available < 40 || available > UINT64_C(16) * 1024 * 1024 ||
-        read_be32(blob) != UINT32_C(0xd00dfeed)) return false;
-    const uint32_t total = read_be32(blob + 4);
-    const uint32_t structOffset = read_be32(blob + 8);
-    const uint32_t stringsOffset = read_be32(blob + 12);
-    const uint32_t reserveOffset = read_be32(blob + 16);
-    const uint32_t version = read_be32(blob + 20);
-    const uint32_t lastCompatible = read_be32(blob + 24);
-    const uint32_t stringsSize = read_be32(blob + 32);
-    const uint32_t structSize = read_be32(blob + 36);
-    if (total < 40 || total > available || total > UINT32_MAX || version < 16 || version > 19 ||
-        lastCompatible < 16 || lastCompatible > version || (reserveOffset & 7) != 0 || reserveOffset > total ||
-        !range_in_file(reserveOffset, 16, (UINTN)total) || (structOffset & 3) != 0 ||
-        (stringsOffset & 3) != 0 || !range_in_file(structOffset, structSize, (UINTN)total) ||
-        !range_in_file(stringsOffset, stringsSize, (UINTN)total)) return false;
-    if (totalSize) *totalSize = total;
-    return true;
-}
-
 static EFI_STATUS copy_dtb_from_configuration_table(Aarch64Handoff* handoff)
 {
     if (!gSystemTable || !gSystemTable->ConfigurationTable || gSystemTable->NumberOfTableEntries == 0 ||
@@ -787,10 +795,52 @@ static EFI_STATUS copy_dtb_from_configuration_table(Aarch64Handoff* handoff)
         const EFI_CONFIGURATION_TABLE& entry = gSystemTable->ConfigurationTable[i];
         if (!guid_equal(entry.VendorGuid, kDtbTableGuid) || !entry.VendorTable) continue;
         const uint8_t* source = (const uint8_t*)entry.VendorTable;
-        uint32_t total = 0;
-        if (!validate_dtb_blob(source, UINT64_C(16) * 1024 * 1024, &total)) {
-            return fail("DTB header or block bounds are invalid");
+        print_ascii("[A64 UEFI] DTB discovery: source=EFI_DTB_TABLE_GUID pointer=");
+        print_hex_u64((uint64_t)(UINTN)source);
+        print_ascii(" probe-limit=0x01000000\r\n");
+        gxos_aarch64_fdt_header_info header = {};
+        const gxos_aarch64_fdt_header_status headerStatus = gxos_aarch64_fdt_header_validate(
+            source, UINT64_C(16) * 1024 * 1024, &header);
+        if (headerStatus != GXOS_AARCH64_FDT_HEADER_OK) {
+            print_ascii("[A64 UEFI] DTB header rejected: stage=");
+            print_hex_u32((uint32_t)headerStatus);
+            print_ascii(" magic=");
+            print_hex_u32(header.magic);
+            print_ascii(" total=");
+            print_hex_u32(header.total_size);
+            print_ascii(" version=");
+            print_hex_u32(header.version);
+            print_ascii(" struct=");
+            print_hex_u32(header.structure_offset);
+            print_ascii("+");
+            print_hex_u32(header.structure_size);
+            print_ascii(" strings=");
+            print_hex_u32(header.strings_offset);
+            print_ascii("+");
+            print_hex_u32(header.strings_size);
+            print_ascii(" reserve=");
+            print_hex_u32(header.reservation_offset);
+            print_ascii("\r\n");
+            return fail("DTB header validation failed");
         }
+        const uint32_t total = header.total_size;
+        print_ascii("[A64 UEFI] DTB header: magic=");
+        print_hex_u32(header.magic);
+        print_ascii(" total=");
+        print_hex_u32(header.total_size);
+        print_ascii(" version=");
+        print_hex_u32(header.version);
+        print_ascii(" struct=");
+        print_hex_u32(header.structure_offset);
+        print_ascii("+");
+        print_hex_u32(header.structure_size);
+        print_ascii(" strings=");
+        print_hex_u32(header.strings_offset);
+        print_ascii("+");
+        print_hex_u32(header.strings_size);
+        print_ascii(" reserve=");
+        print_hex_u32(header.reservation_offset);
+        print_ascii("\r\n");
         const UINTN pages = ((UINTN)total + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE;
         EFI_PHYSICAL_ADDRESS copyPhysical = 0;
         EFI_STATUS status = gSystemTable->BootServices->AllocatePages(
@@ -801,6 +851,13 @@ static EFI_STATUS copy_dtb_from_configuration_table(Aarch64Handoff* handoff)
         handoff->dtb_base = copyPhysical;
         handoff->dtb_size = total;
         handoff->flags |= GXOS_AARCH64_FLAG_DTB_VALID | GXOS_AARCH64_FLAG_DTB_COPIED;
+        print_ascii("[A64 UEFI] DTB copy: physical=");
+        print_hex_u64((uint64_t)copyPhysical);
+        print_ascii(" size=");
+        print_hex_u32(total);
+        print_ascii(" pages=");
+        print_hex_u32((uint32_t)pages);
+        print_ascii(" source=EFI_DTB_TABLE_GUID\r\n");
         print_ascii("[A64 UEFI] DTB: copied from EFI configuration table\r\n");
         return EFI_SUCCESS;
     }
