@@ -26,6 +26,30 @@ The single fresh QAC census at `2026-10-24T15:08:59-07:00` found the coordinator
 
 This run therefore does not establish whether the new diagnostics will identify the R18 failure, nor does it establish native launch, DE440s authentication/evaluation, UI, close/reopen, or desktop stability. `.phase` remains `SN10`; no acceptance or phase-advance claim is made. The guest gate requires a later authorized QAC run after an empty-lane preflight.
 
+### SN10R19 final native guest regression (2026-10-24)
+
+**Outcome C — the R18 candidate boots and discovers the Stellar Navigator package, but the production launch fails when VFS cannot resolve the executable path.** SN10 remains open at `.phase` `SN10`. Starting and ending branch/HEAD are `STELLAR_NAVIGATOR` / `3f5c4c8a7f99be8a8fbdecaff5419b7c1cdf34bf`. The starting worktree had 274 dirty entries and no staged changes; the existing SN10R17 report and runner edits were preserved. No source build, branch operation, commit, or push was performed.
+
+#### Candidate and prior evidence
+
+The already-built R18 candidate was used without rebuilding. Its raw MBR/FAT32 image SHA-256 is `3d42dd1719c1d9b7b3978a1d1d2becdbdf555d126bb958848eb1fbe3ddb265b9` (270,532,608 bytes, read-only before and after the run). The candidate manifest hash is `e149a4df44d802f307148e754fd5020a34a9c0c408b07243fc9f7187dd899e5a`; the full-tree manifest hash is `46a78aad4a735c81e2d130168e493e9bb0ae9501c663f4b8863b80b450e9b6bc`. The current AMD64 kernel and staged kernel both hash to `f5f5e8a540a9cfec6a5c1d12bac322770c4c4abeb079deeab960518cfb513079`. The native AMD64 ELF hash is `dad4c22ac323f82865c3fb205dd2c9a78899c106ee2096d71ac7c850cc43ea63`; its accepted static ET_EXEC/no-relocation contract remains covered by the R18 offline evidence. The package manifest hash is `08b43a2e0ddb05550d8ee02733b0ebbcc109556a29f685d6cfe54280b6a8df7c`. The authentic 32,117,373-byte DE440s asset hash is `d52b91573c29e6a4e5b6dc19c4af4d9747f6da2122f5b3aff4503684a96d2c0a`.
+
+The measured image verification confirms an MBR root FAT32 partition (type `0x0C`, LBA 2048) and a separate EFI FAT32 partition (type `0xEF`, LBA 264192), with `/Apps`, the executable, manifest, DE440s asset, and UEFI fallback boot file present. The candidate-only verification and R18 manifests remained valid. The original GPT source image was rehashed after execution and remains `79dc215fb2fd6f4ade3d1a6e56eeed0297ca733adc241769b3b0a76422450b8a`. The per-run writable disk copy was byte-identical initially, opened successfully for writing, and the source candidate remained unchanged.
+
+R18 deterministic evidence remains qualified and was reused: FAT/VFS generation regression **19/19**, native sequential-read progress **10/10**, block-device generation **5/5**, native ephemeris **18/18**, and hosted Release **323/323**. The R18 report records PIT timing at 10 ms resolution and the corrected contiguous 1 MiB byte-progress contract. The Windows PowerShell 5.1 runner self-test passed at `E:\bkup\artifacts\SN10R18_20261024\runner-self-test\qemu\20261024T110727334\runner-selftest.json`; this guest run also executed under Windows PowerShell `5.1.26100.9711`.
+
+#### Single QAC-managed guest attempt
+
+The fresh QAC census at 14:39 local time showed the coordinator online with zero QEMU processes, reservations, managed sessions, and queued reservations. QAC granted one exclusive `StellarNavigator` acceptance reservation, `481b58b13ab640b79d1b497c016a3a73`, and launched its direct QEMU child PID `15552`. The recorded effective invocation is `E:\bkup\artifacts\SN10R18_20261024\qac-run\qemu\20261024T143916818\qemu-invocation.json`.
+
+UEFI boot and AMD64 kernel initialization succeeded. The guest mounted the FAT32 root at `/` from `ata0m`, then AppModel opened package manifests under `/Apps` and discovered `com.guidexos.stellarnavigator`. The production command dispatched the native app, but the earliest failing stage was the executable header read: VFS logged `No mount point for path: /Apps/StellarNavigator/bin/amd64/stellarnavigator.elf`, followed by `[NATIVE-ELF] ... load FAIL=elf-header-read`. The root mount was available during package discovery, so the actionable defect is that a current `/` mount was no longer selected for the executable open. The run does not establish why that mount became unavailable or stale; preserve the mount table and block-device generation across the discovery-to-launch interval and diagnose that transition.
+
+The guest reached the desktop and the runner captured a real 1280×800 framebuffer screenshot before launch at `E:\bkup\artifacts\SN10R18_20261024\qac-run\qemu\20261024T143916818\shell-before-first-launch.png` (original PPM retained). The app window was never created, so there are no first-instance or reopened-app screenshots. The application did not open or authenticate DE440s; no 1 MiB progress checkpoints or authentication completion were emitted. SPK index validation, coefficient evaluation, guest coordinates, application-ready state, normal close/reopen, and post-close desktop stability remain unverified. No guest hotplug or destructive storage test was attempted.
+
+The complete serial log is `E:\bkup\artifacts\SN10R18_20261024\qac-run\qemu\20261024T143916818\guest-serial.log`; structured result and cleanup evidence are in the same directory. QAC recorded reservation state `Released`, QEMU exit code 0, and zero remaining reservations/sessions. The candidate disk hash after the attempt still matches the expected SHA-256. No automatic retry or second guest launch was made.
+
+SN10 remains **Outcome C**, `.phase` remains `SN10`, and no acceptance commit or phase advance was made. The native ELF VFS-open failure is the next SN10 fix and requires a future authorized guest qualification. SN11 work should wait until this launch path, authenticated evaluation, UI, and close/reopen gates pass.
+
 ### SN10R18 FAT generation safety and sequential-read timing (2026-10-24)
 
 **Outcome B — the FAT cache and VFS now reject stale block-device generations, sequential read diagnostics count returned bytes across actual 1 MiB boundaries, and the rebuilt candidate passed offline validation. The one permitted QAC census found an occupied lane, so no reservation or guest launch was requested.** Work began on branch `STELLAR_NAVIGATOR`, HEAD `8bf26a1e340110ec752f64866b2a5c836c6d7808`, with `.phase` `SN10`. The initial full status census recorded 2,047 entries (259 tracked changes and 1,788 untracked files); none were staged. The pre-existing SN10R17 report and QAC runner edits remain outside this change. The local `origin/STELLAR_NAVIGATOR` reflog already showed `update by push` to `8bf26a1e` at `2026-10-24 10:35:20 -0700`; this work made no remote contact or ref changes.
@@ -51,6 +75,69 @@ The Windows PowerShell 5.1 offline runner self-test passed at `E:\bkup\artifacts
 The acceptance runner made one QAC census at `2026-10-24T11:07:54-07:00`. QAC was online and reported one QEMU process, one managed session, one running reservation (`8b84465adf184cc6a1f416744168127c`, owner `guideXOSServer`, QEMU PID `24052`), and zero queued reservations. The runner recorded **`QAC_OCCUPIED`**, requested no reservation, and left that session untouched. The complete evidence is under `E:\bkup\artifacts\SN10R18_20261024\qac-run\qemu\20261024T110754689\`, including `acceptance-result.json` and the three census snapshots. No further census or guest launch occurred.
 
 There is no SN10R18 guest serial output, screenshot, or guest read timing. Therefore this run makes no guest claim about FAT mounting, `/Apps` discovery, native entry, authenticated DE440s evaluation, coordinates, display, close/reopen, or desktop stability. **Outcome B remains partial**, `.phase` stays `SN10`, and guest acceptance remains open until an authorized managed run can verify those gates and the emitted 1 MiB read records. SN10R17's report remains preserved below this section.
+
+### SN10R17 guest performance and native acceptance (2026-10-24)
+
+**Outcome B — the single authorized guest launch completed authentic DE440s authentication, both native evaluations, visible UI, close/reopen, and desktop stability. Full acceptance remains partial because the requested per-MiB read timing was not emitted and review found that the FAT-sector cache does not key entries by block-device generation.** The run started from `STELLAR_NAVIGATOR` at `b7409abbcaebc6e15dd203d5eb5b22bd176b81e2` with `.phase` `SN10`. The SN10R16 implementation and regression checkpoint was committed as `8bf26a1e340110ec752f64866b2a5c836c6d7808`; the R17 report is this uncommitted documentation update. Ending HEAD is the checkpoint commit and `.phase` remains `SN10`. No `git push` command was issued by this run. However, the local `origin/STELLAR_NAVIGATOR` reflog records `update by push` to `8bf26a1e` at `2026-10-24 10:35:20 -0700`. A read-only `git ls-remote` attempt failed with `Permission denied (publickey)`, so the actual remote branch state could not be verified. No ref was altered after observing this. No second guest launch occurred.
+
+#### Preservation and source checkpoint
+
+The initial full status capture is `C:\Users\guideX\AppData\Local\Temp\SN10R17-git-status-20261024.txt`: 2,056 entries (266 tracked worktree modifications and 1,790 untracked entries). The source checkpoint staged only ten identified paths: the FAT cache and native read-handle implementation, native progress reporting and tests, the measured native ELF, the FAT sequential-read regression and its runner, and the SN10R16 report. The checkpoint diff was reviewed and passed `git diff --cached --check`. The earlier SN10R15 QAC runner edit and generated build/regression output were left outside the commit. No reset, clean, stash, branch switch, history rewrite, or push occurred.
+
+The source checkpoint is `8bf26a1e` (`fix(stellar-navigator): cache sequential FAT traversal`). The R16 offline baselines recorded before this run remain 18/18 native ephemeris tests, 11/11 FAT32 regressions, and 323/323 hosted tests; they were not rerun. The accepted R16 candidate was reused without a production rebuild.
+
+#### Candidate identity and QAC admission
+
+The measured candidate manifest is `ef68da5233976b907a8d3af87378880cc6f44e979a68d12fc56b21157887935c`; the full-tree manifest is `cae518b8be4cb9b35ec020677c5eb01307ec62e3151342274fa2d1dd79ab92e0`. Current source artifacts and candidate payloads match: the 2,654,720-byte AMD64 kernel SHA-256 is `fa8a07843f24b7f2ba8b53c295f68008b8bc353e5a68c31003c0d127669c77fa`; the 19,920-byte native ELF SHA-256 is `dad4c22ac323f82865c3fb205dd2c9a78899c106ee2096d71ac7c850cc43ea63`; `Apps/StellarNavigator/app.json` is 824 bytes with SHA-256 `08b43a2e0ddb05550d8ee02733b0ebbcc109556a29f685d6cfe54280b6a8df7c`; and the authentic DE440s asset is 32,117,373 bytes with SHA-256 `d52b91573c29e6a4e5b6dc19c4af4d9747f6da2122f5b3aff4503684a96d2c0a`.
+
+The candidate raw MBR/FAT32 disk is 270,532,608 bytes, SHA-256 `f31804c1440edc6f599b0a3c1c09ae9a9c24377759b8db171eb534626855bd25`, and remained read-only. Its root partition is MBR type `0x0C` FAT32 at LBA 2048; its separate EFI partition is type `0xEF` FAT32 at LBA 264192. The verified root contains `/Apps`, the native ELF and manifest, and DE440s; the EFI partition contains `EFI/BOOT/BOOTX64.EFI`. Static inspection of the exact ELF confirmed AMD64 `ET_EXEC`, four `PT_LOAD` segments with 4 KiB alignment, no interpreter or dynamic segment, and no relocation sections with entries. The R16 relocation-contract and candidate-verification records passed. The original GPT source image hash was `79dc215fb2fd6f4ade3d1a6e56eeed0297ca733adc241769b3b0a76422450b8a` before and after the guest run.
+
+The runner executed under Windows PowerShell `5.1.26100.9711`; the saved PS 5.1 runner self-test passed. One fresh QAC census found the coordinator online with zero QEMU processes, reservations, managed sessions, or queued reservations. QAC granted one `StellarNavigator` acceptance reservation, `c5d0a5daa0f849c4b0618385f3651ddb`, and launched its direct QEMU child PID `17080`. The child exited with code 0 and QAC verified release. The runner exited 0 with `PASS`. Its 300-second deadline was unchanged from the previous run; this run completed in about 97 seconds. No automatic retry or second QEMU launch occurred.
+
+The runner copied the verified candidate to a writable per-run disk at `E:\bkup\artifacts\SN10R17_20261024\qac-run\qemu\20261024T103447247\qac-disposable-disk.raw`. The copy initially matched the candidate SHA-256 and was attached writable. The source candidate hash still matched after QEMU exited.
+
+#### Guest boot, file authentication, and timing
+
+UEFI boot reached the AMD64 kernel, which mounted persistent storage (`ata0m`) and exposed the FAT32 root. AppModel discovered `com.guidexos.stellarnavigator`; the production shell command launched it. The native ELF loaded as four aligned segments at runtime base `0x60E000`, with runtime entry `0x60F1D0`. No alignment/relocation fault, kernel fault, panic, exception, or reboot marker appeared.
+
+The reader opened `/Apps/StellarNavigator/Astronomy.Ephemeris/Data/ephemeris_de440s_chebyshev.sn4bin`, reported size `0x1EA127D` (32,117,373 bytes), and authenticated the complete file before parsing. The guest's authentication-complete marker came only after the SHA-256 comparison passed. It progressed beyond the earlier R15 boundary of 4,259,840 bytes: the 8 MiB stage confirms 8,388,608 authenticated bytes, followed by completion at all 32,117,373 bytes.
+
+The guest timer uses PIT ticks at 10 ms resolution. These are measured stage durations, not throughput estimates:
+
+| First launch authenticated bytes | Elapsed since authentication start |
+| ---: | ---: |
+| 4,194,304 | 940 ms |
+| 8,388,608 | 2,040 ms |
+| 12,582,912 | 3,010 ms |
+| 16,777,216 | 3,990 ms |
+| 20,971,520 | 4,930 ms |
+| 25,165,824 | 5,920 ms |
+| 29,360,128 | 6,850 ms |
+| 32,117,373 | 7,420 ms; authentication complete |
+
+File open took 10 ms at the available resolution. First-launch authentication took 7,420 ms, native initialization including index validation took 7,440 ms, index validation reported 13 segments and took 10 ms, and ephemeris evaluation took 90 ms. The first application reached `application-ready` 7,540 ms after `application-entry`. On reopen, authentication took 7,460 ms, initialization took 7,480 ms, index validation took 20 ms, evaluation took 70 ms, and the second instance reached ready 7,560 ms after entry.
+
+**The requested approximately 1 MiB read-call timing records are missing.** The serial log contains only 14 `file_read` records across both launches, with no 1 MiB checkpoints. The reader first probes EOF at the exact file size; the native diagnostic treats that nonsequential probe as a progress checkpoint and advances `nextReadLogOffset` past the intervening 1 MiB thresholds. The 4 MiB PIT stage markers above provide bounded progress evidence, but they do not establish elapsed time at each 1 MiB boundary. No throughput was derived from the incomplete per-read records. This diagnostic issue was documented without changing production code or relaunching.
+
+#### Authentic evaluation, UI, and lifecycle
+
+The guest parsed the DAF/SPK index, reported 13 segments, selected the Earth-related target records at offsets `27,623,117` and `7,703,517`, evaluated coefficients, and formatted the native result. Both launches produced the same authenticated result for Earth (NAIF 399), ET/TDB 0, J2000 SSB, in kilometres:
+
+```text
+X = -27566740.483 km
+Y = 132361381.154 km
+Z = 57418653.286 km
+```
+
+Each guest value matched the hosted reference at the displayed precision; all three absolute differences were `0.000 km`, within the established `0.0005 km` tolerance. The serial result names the authenticated DE440s SHA-256 above. No fixture value was substituted for guest output.
+
+The first window title was `Stellar Navigator SN10` (560x340). The application drew initial content with the target, epoch, frame, units, all three coordinates, and authenticated-data status. The actual guest framebuffer screenshot while the first app window was open is `E:\bkup\artifacts\SN10R17_20261024\qac-run\qemu\20261024T103447247\stellar-navigator-open.png` (QEMU `screendump`; the original PPM is retained alongside it). It shows the native application window and readable coordinates/units. After normal close, the app instance returned and loader cleanup completed. The runner relaunched through `desktop.launch com.guidexos.stellarnavigator`; the fresh second instance authenticated and evaluated again, recreated the same title/content, and was captured at `stellar-navigator-second-instance-open.png`. It then closed normally. The guest remained alive and the desktop remained usable through the runner's post-close stability interval; post-close screenshots are retained.
+
+#### Remaining acceptance work
+
+Review of `kernel/core/fs_fat.cpp` confirmed the four-entry cache is invalidated on FAT initialization, mount, unmount, and writes through the FAT adapter. Its lookup key contains block-device index, absolute LBA, and sector size, but not `block::device_generation`. VFS stores the generation at mount, but current operations do not compare it after mount. If a device index is unregistered and reused while the old mount remains active, a cached FAT sector can therefore be reused across device generations. The single fixed-device guest run did not exercise device replacement. Gate C's invalid-generation property remains unverified and requires a focused correction before claiming the general cache lifecycle contract.
+
+The guest-specific SN10 run passed, but the R17 closeout remains **Outcome B** because the invalid-generation property and per-MiB timing evidence are incomplete. `.phase` stays `SN10`; no acceptance evidence commit or phase advance was made. Preserve the single-run evidence under `E:\bkup\artifacts\SN10R17_20261024\qac-run\qemu\20261024T103447247\`, including `acceptance-result.json`, `guest-serial.log`, QAC reservation logs, the disposable disk, and first/second app screenshots. SN10R1-SN10R16 evidence remains below this section.
 
 ### SN10R16 native ephemeris read performance and startup completion (2026-10-24)
 

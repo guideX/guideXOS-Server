@@ -1,0 +1,16 @@
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Astronomy.Catalog\release\Astronomy.Catalog.deps.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Astronomy.Catalog\release\Astronomy.Catalog.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Astronomy.Catalog\release\Astronomy.Catalog.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Astronomy.Catalog\release\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Astronomy.Catalog\release\Astronomy.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronomy.Catalog.csproj.AssemblyReference.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronomy.Catalog.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronomy.Catalog.AssemblyInfoInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronomy.Catalog.AssemblyInfo.cs
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronomy.Catalog.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronomy.Catalog.sourcelink.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronom.741BD1D5.Up2Date
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronomy.Catalog.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\refint\Astronomy.Catalog.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\Astronomy.Catalog.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Catalog\release\ref\Astronomy.Catalog.dll

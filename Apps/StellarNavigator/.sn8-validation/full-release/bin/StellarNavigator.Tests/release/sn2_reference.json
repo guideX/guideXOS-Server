@@ -1,0 +1,282 @@
+[
+  {
+    "type": "body",
+    "bodyId": "earth",
+    "jd": 2451545.0,
+    "position_x": -27566740.483,
+    "position_y": 132361381.154,
+    "position_z": 57418653.286,
+    "velocity_x": -29.784947498,
+    "velocity_y": -5.029753815,
+    "velocity_z": -2.180645069
+  },
+  {
+    "type": "body",
+    "bodyId": "moon",
+    "jd": 2451545.0,
+    "position_x": -27858348.867,
+    "position_y": 132094664.32,
+    "position_z": 57342550.799,
+    "velocity_x": -29.141416111,
+    "velocity_y": -5.695841499,
+    "velocity_z": -2.481970774
+  },
+  {
+    "type": "body",
+    "bodyId": "mars",
+    "jd": 2451545.0,
+    "position_x": 206980433.836,
+    "position_y": -186417.011,
+    "position_z": -5667227.498,
+    "velocity_x": 1.171985009,
+    "velocity_y": 23.906708194,
+    "velocity_z": 10.933920633
+  },
+  {
+    "type": "body",
+    "bodyId": "jupiter",
+    "jd": 2451545.0,
+    "position_x": 597499876.793,
+    "position_y": 408990313.932,
+    "position_z": 160756281.939,
+    "velocity_x": -7.900525117,
+    "velocity_y": 10.171796309,
+    "velocity_z": 4.552467787
+  },
+  {
+    "type": "body",
+    "bodyId": "sun",
+    "jd": 2451545.0,
+    "position_x": -1067706.805,
+    "position_y": -396036.185,
+    "position_z": -138065.184,
+    "velocity_x": 0.009312572,
+    "velocity_y": -0.011701506,
+    "velocity_z": -0.005251266
+  },
+  {
+    "type": "earth_moon_distance",
+    "jd": 2451545.0,
+    "distance_km": 402448.64
+  },
+  {
+    "type": "earth_mars_distance",
+    "jd": 2451545.0,
+    "distance_km": 276696809.042
+  },
+  {
+    "type": "earth_jupiter_distance",
+    "jd": 2451545.0,
+    "distance_km": 691310717.389
+  },
+  {
+    "type": "body",
+    "bodyId": "earth",
+    "jd": 2451575.0,
+    "position_x": -97578215.218,
+    "position_y": 101753997.766,
+    "position_z": 44148495.052,
+    "velocity_x": -22.995536419,
+    "velocity_y": -18.012916831,
+    "velocity_z": -7.808908891
+  },
+  {
+    "type": "body",
+    "bodyId": "moon",
+    "jd": 2451575.0,
+    "position_x": -97678470.618,
+    "position_y": 101383379.444,
+    "position_z": 44018210.284,
+    "velocity_x": -22.063585338,
+    "velocity_y": -18.218703944,
+    "velocity_z": -7.962450875
+  },
+  {
+    "type": "body",
+    "bodyId": "mars",
+    "jd": 2451575.0,
+    "position_x": 199897648.662,
+    "position_y": 60773917.085,
+    "position_z": 22485758.402,
+    "velocity_x": -6.534903615,
+    "velocity_y": 22.758944954,
+    "velocity_z": 10.615838119
+  },
+  {
+    "type": "body",
+    "bodyId": "jupiter",
+    "jd": 2451575.0,
+    "position_x": 576378876.12,
+    "position_y": 434901428.556,
+    "position_z": 172377247.018,
+    "velocity_x": -8.393381575,
+    "velocity_y": 9.817872185,
+    "velocity_z": 4.412759433
+  },
+  {
+    "type": "body",
+    "bodyId": "sun",
+    "jd": 2451575.0,
+    "position_x": -1043007.348,
+    "position_y": -425877.122,
+    "position_z": -151481.099,
+    "velocity_x": 0.009746942,
+    "velocity_y": -0.011328907,
+    "velocity_z": -0.005103314
+  },
+  {
+    "type": "earth_moon_distance",
+    "jd": 2451575.0,
+    "distance_km": 405441.99
+  },
+  {
+    "type": "earth_mars_distance",
+    "jd": 2451575.0,
+    "distance_km": 301065658.558
+  },
+  {
+    "type": "earth_jupiter_distance",
+    "jd": 2451575.0,
+    "distance_km": 762658497.912
+  },
+  {
+    "type": "body",
+    "bodyId": "earth",
+    "jd": 2451515.0,
+    "position_x": 49693284.407,
+    "position_y": 126683003.841,
+    "position_z": 54957185.478,
+    "velocity_x": -28.445592012,
+    "velocity_y": 9.306772558,
+    "velocity_z": 4.03428425
+  },
+  {
+    "type": "body",
+    "bodyId": "moon",
+    "jd": 2451515.0,
+    "position_x": 49305394.068,
+    "position_y": 126609687.799,
+    "position_z": 54959832.784,
+    "velocity_x": -28.322861135,
+    "velocity_y": 8.386411019,
+    "velocity_z": 3.68121392
+  },
+  {
+    "type": "body",
+    "bodyId": "mars",
+    "jd": 2451515.0,
+    "position_x": 193697919.509,
+    "position_y": -61132080.812,
+    "position_z": -33262889.739,
+    "velocity_x": 9.017935754,
+    "velocity_y": 22.722355959,
+    "velocity_z": 10.178570756
+  },
+  {
+    "type": "body",
+    "bodyId": "jupiter",
+    "jd": 2451515.0,
+    "position_x": 617319302.726,
+    "position_y": 382189269.784,
+    "position_z": 148785542.82,
+    "velocity_x": -7.389273215,
+    "velocity_y": 10.504387523,
+    "velocity_z": 4.682583488
+  },
+  {
+    "type": "body",
+    "bodyId": "sun",
+    "jd": 2451515.0,
+    "position_x": -1091264.418,
+    "position_y": -365182.123,
+    "position_z": -124241.098,
+    "velocity_x": 0.008856528,
+    "velocity_y": -0.01211296,
+    "velocity_z": -0.005419054
+  },
+  {
+    "type": "earth_moon_distance",
+    "jd": 2451515.0,
+    "distance_km": 394767.229
+  },
+  {
+    "type": "earth_mars_distance",
+    "jd": 2451515.0,
+    "distance_km": 252575973.967
+  },
+  {
+    "type": "earth_jupiter_distance",
+    "jd": 2451515.0,
+    "distance_km": 629512914.284
+  },
+  {
+    "type": "body",
+    "bodyId": "earth",
+    "jd": 2451905.0,
+    "position_x": -13580029.532,
+    "position_y": 133784989.203,
+    "position_z": 58027940.906,
+    "velocity_x": -30.157609392,
+    "velocity_y": -2.503136394,
+    "velocity_z": -1.084369069
+  },
+  {
+    "type": "body",
+    "bodyId": "moon",
+    "jd": 2451905.0,
+    "position_x": -13485668.454,
+    "position_y": 133423583.328,
+    "position_z": 57872652.196,
+    "velocity_x": -29.208085416,
+    "velocity_y": -2.274822451,
+    "velocity_z": -1.083380253
+  },
+  {
+    "type": "body",
+    "bodyId": "mars",
+    "jd": 2451905.0,
+    "position_x": -247726664.351,
+    "position_y": -1347827.456,
+    "position_z": 6102721.159,
+    "velocity_x": 0.734224272,
+    "velocity_y": -20.147030338,
+    "velocity_z": -9.260402271
+  },
+  {
+    "type": "body",
+    "bodyId": "jupiter",
+    "jd": 2451905.0,
+    "position_x": 273968029.495,
+    "position_y": 647741964.386,
+    "position_z": 270973519.605,
+    "velocity_x": -12.332979509,
+    "velocity_y": 4.82765146,
+    "velocity_z": 2.369624758
+  },
+  {
+    "type": "body",
+    "bodyId": "sun",
+    "jd": 2451905.0,
+    "position_x": -700041.581,
+    "position_y": -682038.806,
+    "position_z": -270233.324,
+    "velocity_x": 0.014009396,
+    "velocity_y": -0.006286207,
+    "velocity_z": -0.003063752
+  },
+  {
+    "type": "earth_moon_distance",
+    "jd": 2451905.0,
+    "distance_km": 404515.517
+  },
+  {
+    "type": "earth_mars_distance",
+    "jd": 2451905.0,
+    "distance_km": 275284858.249
+  },
+  {
+    "type": "earth_jupiter_distance",
+    "jd": 2451905.0,
+    "distance_km": 626243944.542
+  }
+]

@@ -113,3 +113,11 @@ D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.T
 D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\Astronomy.Time.dll
 D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\Astronomy.Time.pdb
 D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\sn6_reference.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\Data\sun_gm_de440.sn8json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\Data\ephemeris_de440s_chebyshev.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\Data\ephemeris_de440s_chebyshev.sn4bin
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\Data\ephemeris_de440s.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\Data\earth_orientation.sn6json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\sn8_propagation_reference.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\StellarNavigator.Scene.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\StellarNavigator.Tests\bin\Release\net10.0\StellarNavigator.Scene.pdb

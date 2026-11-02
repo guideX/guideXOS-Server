@@ -1,0 +1,39 @@
+{
+  "schema": "SN-FRAME-01",
+  "sourceFilename": "pck00011.tpc",
+  "sourceUrl": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc",
+  "retrievalDate": "2026-10-13",
+  "kernelSha256": "3dff7b1dbeceaa01f25467767d3fa25816051c85d162d1edf04acb310ee28bb1",
+  "frameName": "IAU_EARTH",
+  "naifBodyId": 399,
+  "baseFrame": "J2000",
+  "reference": "Archinal et al., IAU WGCCRE 2015 report; NAIF generic text PCK released 2022-12-27",
+  "poleRaDeg": [
+    0.0,
+    -0.641,
+    0.0
+  ],
+  "poleDecDeg": [
+    90.0,
+    -0.557,
+    0.0
+  ],
+  "primeMeridianDeg": [
+    190.147,
+    360.9856235,
+    0.0
+  ],
+  "poleUnits": "deg, deg per Julian century, deg per Julian century squared; T = ET centuries past J2000 TDB",
+  "primeMeridianUnits": "deg, deg per day, deg per day squared; d = ET days past J2000 TDB",
+  "timeArgument": "ET seconds past J2000 TDB; T = ET/3155760000, d = ET/86400",
+  "radiiKm": [
+    6378.1366,
+    6378.1366,
+    6356.7519
+  ],
+  "nutationTerms": "none for Earth in this PCK (polynomial only)",
+  "validity": "Polynomial IAU model evaluates for any finite ET; validated over ephemeris coverage",
+  "precision": "Low-precision IAU cartographic model, NOT equivalent to ITRF93 or binary EOP PCKs",
+  "supportingKernels": "none required at runtime; host verification used only this PCK",
+  "frameIds": "J2000 inertial (NAIF 1); IAU_EARTH body-fixed (NAIF 130399)"
+}

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Astronomy.Core")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8d6179068b72a6623b3cac69496aa4a1069ecc2b")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8bf26a1e340110ec752f64866b2a5c836c6d7808")]
 [assembly: System.Reflection.AssemblyProductAttribute("Astronomy.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Astronomy.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

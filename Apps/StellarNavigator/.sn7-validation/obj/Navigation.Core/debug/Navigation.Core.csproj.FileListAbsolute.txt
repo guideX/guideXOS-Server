@@ -1,0 +1,16 @@
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Navigation.Core\debug\Navigation.Core.deps.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Navigation.Core\debug\Navigation.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Navigation.Core\debug\Navigation.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Navigation.Core\debug\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Navigation.Core\debug\Astronomy.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigation.Core.csproj.AssemblyReference.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigation.Core.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigation.Core.AssemblyInfoInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigation.Core.AssemblyInfo.cs
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigation.Core.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigation.Core.sourcelink.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigati.103AD0D7.Up2Date
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigation.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\refint\Navigation.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\Navigation.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Navigation.Core\debug\ref\Navigation.Core.dll

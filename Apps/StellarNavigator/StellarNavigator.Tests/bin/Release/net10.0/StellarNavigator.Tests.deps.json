@@ -14,6 +14,7 @@
           "Astronomy.Time": "1.0.0",
           "Microsoft.NET.Test.Sdk": "17.14.1",
           "Navigation.Core": "1.0.0",
+          "StellarNavigator.Scene": "1.0.0",
           "xunit": "2.9.3"
         },
         "runtime": {
@@ -385,6 +386,20 @@
             "fileVersion": "1.0.0.0"
           }
         }
+      },
+      "StellarNavigator.Scene/1.0.0": {
+        "dependencies": {
+          "Astronomy.Core": "1.0.0",
+          "Astronomy.Ephemeris": "1.0.0",
+          "Astronomy.Time": "1.0.0",
+          "Navigation.Core": "1.0.0"
+        },
+        "runtime": {
+          "StellarNavigator.Scene.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
       }
     }
   },
@@ -492,6 +507,11 @@
       "sha512": ""
     },
     "Navigation.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "StellarNavigator.Scene/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

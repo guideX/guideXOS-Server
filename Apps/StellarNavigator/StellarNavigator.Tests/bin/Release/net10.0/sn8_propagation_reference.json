@@ -1,0 +1,6233 @@
+{
+  "metadata": {
+    "source": "NAIF CSPICE prop2b_c; independent of managed solver",
+    "toolkit": "CSPICE_N0067",
+    "routine": "prop2b_c",
+    "comparisonCount": 200,
+    "seed": 20261018,
+    "muKm3PerSecond2": 132712440041.27942,
+    "muMeters3PerSecond2": 1.3271244004127942e+20,
+    "gmSourceFilename": "gm_de440.tpc",
+    "gmSourceUrl": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc",
+    "gmSourceSha256": "924ddf4fb9ead9fe8a1aa55780bcabde40b09d00065d58226e24b68d8092f140",
+    "timeScale": "ET seconds past J2000 (TDB)",
+    "units": "meters, meters/second, seconds, meters^3/second^2",
+    "regimeCounts": {
+      "circular": 50,
+      "elliptical": 50,
+      "hyperbolic": 50,
+      "parabolic-near-parabolic": 50
+    },
+    "categories": [
+      "circular",
+      "elliptical",
+      "hyperbolic",
+      "parabolic-near-parabolic",
+      "forward and reverse",
+      "rotated planes",
+      "0.2 AU to 25 AU initial scale"
+    ]
+  },
+  "cases": [
+    {
+      "id": "sn8-000",
+      "regime": "circular",
+      "planeAnglesRad": [
+        2.2416757547632766,
+        -1.8793504985661929,
+        1.765245060207441
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1143825449765.5532,
+        -1824898943176.819,
+        -2414715124464.882
+      ],
+      "initialVelocityMetersPerSecond": [
+        -217.0072705689098,
+        -5155.45679051146,
+        3793.3953852080813
+      ],
+      "dtSeconds": -1319602716.1802464,
+      "expectedPositionMeters": [
+        -931681052895.3993,
+        2890881215720.5234,
+        1115445272941.9863
+      ],
+      "expectedVelocityMetersPerSecond": [
+        1331.188924348533,
+        2623.9129338359744,
+        -5688.470127034919
+      ]
+    },
+    {
+      "id": "sn8-001",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.3626012313609195,
+        0.737978751625723,
+        -1.5324297868879375
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -361277539792.66547,
+        558186315115.9362,
+        -308829955806.88965
+      ],
+      "initialVelocityMetersPerSecond": [
+        -13144.235366549365,
+        -857.3405850339298,
+        -11974.34419353684
+      ],
+      "dtSeconds": -388475386.47609895,
+      "expectedPositionMeters": [
+        -495899040750.2261,
+        -3042188510710.3438,
+        -556750084477.8894
+      ],
+      "expectedVelocityMetersPerSecond": [
+        3234.361952884172,
+        4422.006075327709,
+        3093.3782502882414
+      ]
+    },
+    {
+      "id": "sn8-002",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.870186052039652,
+        2.498273873037764,
+        -2.444653093531385
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        53097028349.406555,
+        976098647813.4338,
+        535597098960.26953
+      ],
+      "initialVelocityMetersPerSecond": [
+        18375.80588487521,
+        7148.501443159187,
+        -4733.256732541419
+      ],
+      "dtSeconds": -221084906.2836278,
+      "expectedPositionMeters": [
+        -3070146812264.2935,
+        -1434342658849.5925,
+        652835910382.5482
+      ],
+      "expectedVelocityMetersPerSecond": [
+        11316.552561717244,
+        11005.613493248675,
+        881.2276615179157
+      ]
+    },
+    {
+      "id": "sn8-003",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        0.008534128664832163,
+        2.39058260257565,
+        -2.535678215553292
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -884535695651.029,
+        -636174628637.8108,
+        -17893451906.189095
+      ],
+      "initialVelocityMetersPerSecond": [
+        -6596.828151583578,
+        9308.410702663115,
+        10649.502299706253
+      ],
+      "dtSeconds": -35119575.78244637,
+      "expectedPositionMeters": [
+        -604061303350.0635,
+        -918298869694.8439,
+        -383478836268.77246
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -9136.584539074795,
+        6688.461846994996,
+        9989.413511990966
+      ]
+    },
+    {
+      "id": "sn8-004",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.1873549732124395,
+        1.7942875665633036,
+        0.7887110330480329
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1414479206761.5718,
+        416441356934.3225,
+        3123808108416.622
+      ],
+      "initialVelocityMetersPerSecond": [
+        -3686.4999475694162,
+        -4440.256339092823,
+        2261.209284117313
+      ],
+      "dtSeconds": -555276973.9858273,
+      "expectedPositionMeters": [
+        2493310468218.0366,
+        2303672995876.8394,
+        639410326377.1672
+      ],
+      "expectedVelocityMetersPerSecond": [
+        127.67236708593055,
+        -1785.3066820995455,
+        5934.273794188724
+      ]
+    },
+    {
+      "id": "sn8-005",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.891673707593787,
+        -2.417968539629381,
+        -1.2916141126997664
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1186421110467.4995,
+        524811004114.1453,
+        1135391733623.5222
+      ],
+      "initialVelocityMetersPerSecond": [
+        3583.8622806085723,
+        -7905.183213289749,
+        1119.1040812022386
+      ],
+      "dtSeconds": -1427712682.5803359,
+      "expectedPositionMeters": [
+        -26297097347.095703,
+        1541341627235.1252,
+        352930129010.4238
+      ],
+      "expectedVelocityMetersPerSecond": [
+        7318.656314726115,
+        -791.8373874680256,
+        6022.8922481324125
+      ]
+    },
+    {
+      "id": "sn8-006",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.563303961355353,
+        -0.05607037245668289,
+        2.1527120355203904
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2647883951201.884,
+        4635273329181.529,
+        18836492849.961548
+      ],
+      "initialVelocityMetersPerSecond": [
+        563.598148332745,
+        -10510.605525946115,
+        -297.82487852434497
+      ],
+      "dtSeconds": 144448593.6973634,
+      "expectedPositionMeters": [
+        -2534589417461.753,
+        3067653730301.159,
+        -24212135146.080692
+      ],
+      "expectedVelocityMetersPerSecond": [
+        1076.1799898056959,
+        -11252.2286994268,
+        -296.6685188089663
+      ]
+    },
+    {
+      "id": "sn8-007",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        2.048414231123986,
+        -1.9005187404385444,
+        3.0466875178016206
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        252214652258.33975,
+        -5585307038.595821,
+        -53593181675.77332
+      ],
+      "initialVelocityMetersPerSecond": [
+        18733.320832390546,
+        -10043.185663811139,
+        24028.098425507123
+      ],
+      "dtSeconds": -56456262.50140231,
+      "expectedPositionMeters": [
+        -973415618318.8146,
+        52266051031.36479,
+        117507138481.35751
+      ],
+      "expectedVelocityMetersPerSecond": [
+        13704.595397001718,
+        1758.88091012527,
+        -8911.511569649627
+      ]
+    },
+    {
+      "id": "sn8-008",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.7900587454220092,
+        1.2787558138487602,
+        -1.8596771555282647
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -187427857436.27887,
+        -291325723455.5035,
+        -321546958844.48145
+      ],
+      "initialVelocityMetersPerSecond": [
+        -136.4552563852967,
+        -12377.902706275112,
+        11294.07968950527
+      ],
+      "dtSeconds": -221125852.49546608,
+      "expectedPositionMeters": [
+        1153899871.1413999,
+        344909848748.8782,
+        -323153509006.5945
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6646.179937364263,
+        -10505.295781021105,
+        -11236.297622853393
+      ]
+    },
+    {
+      "id": "sn8-009",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.6855812406501878,
+        -2.195506904147778,
+        0.03789063677752891
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -33956148674.60315,
+        11288232877.332602,
+        17428111075.06969
+      ],
+      "initialVelocityMetersPerSecond": [
+        64691.61817093643,
+        27966.730203480492,
+        35359.86778453686
+      ],
+      "dtSeconds": -53779643.582942784,
+      "expectedPositionMeters": [
+        126166639049.69,
+        -300075030471.74084,
+        -422496887712.1205
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4241.752725760391,
+        -3226.3078773181705,
+        -4248.431389424987
+      ]
+    },
+    {
+      "id": "sn8-010",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.6314850823820874,
+        2.6595021600685023,
+        0.6077835452128832
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -392267480839.07275,
+        825582998435.7026,
+        -471853281536.8029
+      ],
+      "initialVelocityMetersPerSecond": [
+        20371.838417566112,
+        -678.2034766920679,
+        6378.709583388223
+      ],
+      "dtSeconds": 118543750.81023039,
+      "expectedPositionMeters": [
+        1673170559719.467,
+        -78612899597.03206,
+        533734950205.20294
+      ],
+      "expectedVelocityMetersPerSecond": [
+        12977.58882188117,
+        -10502.702226087482,
+        8389.432333168825
+      ]
+    },
+    {
+      "id": "sn8-011",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.8997651411601844,
+        -2.653004931791625,
+        -1.6915820101411472
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -256055558236.1503,
+        147478699990.09558,
+        -144567277228.7512
+      ],
+      "initialVelocityMetersPerSecond": [
+        11618.217675248234,
+        25527.764211300808,
+        4495.891718261148
+      ],
+      "dtSeconds": 45859084.40256355,
+      "expectedPositionMeters": [
+        506242587013.53076,
+        675073094536.8643,
+        223906588800.738
+      ],
+      "expectedVelocityMetersPerSecond": [
+        15134.821774537293,
+        3885.7762394360116,
+        7737.796953483144
+      ]
+    },
+    {
+      "id": "sn8-012",
+      "regime": "circular",
+      "planeAnglesRad": [
+        2.8370250127453334,
+        3.104573213536038,
+        -2.8579992896221476
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        2407520144146.477,
+        1604882623749.0747,
+        32115555226.36552
+      ],
+      "initialVelocityMetersPerSecond": [
+        3756.2632897156222,
+        -5630.069205279383,
+        -239.11461584588952
+      ],
+      "dtSeconds": 855174368.1110225,
+      "expectedPositionMeters": [
+        453177842870.05396,
+        -2855901790533.131,
+        -106243564188.97522
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6688.384093200073,
+        -1062.493695515173,
+        31.532938815950814
+      ]
+    },
+    {
+      "id": "sn8-013",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -0.5828186336274732,
+        0.02947664384747517,
+        -1.6708385862299606
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -575218415618.8998,
+        649594180728.8405,
+        -18788572896.064114
+      ],
+      "initialVelocityMetersPerSecond": [
+        -4527.401301838889,
+        -12743.726360756285,
+        -95.29547928626017
+      ],
+      "dtSeconds": -97101171.99908955,
+      "expectedPositionMeters": [
+        106168412022.77847,
+        1371618734060.3398,
+        -924463553.7250032
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -7734.924273176206,
+        -3183.3142021590775,
+        -217.55095284197643
+      ]
+    },
+    {
+      "id": "sn8-014",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -1.8684889607582436,
+        -2.0879106794554163,
+        2.9844424175699116
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2622389962457.5728,
+        -458572930473.5534,
+        1517991392692.1965
+      ],
+      "initialVelocityMetersPerSecond": [
+        -13502.485253960713,
+        2563.926211581249,
+        -736.96002583608
+      ],
+      "dtSeconds": -151898652.04263723,
+      "expectedPositionMeters": [
+        -396498336076.5217,
+        -783176021698.1406,
+        1469184461947.2407
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -15859.520050307612,
+        1247.6540990577096,
+        2197.505973225133
+      ]
+    },
+    {
+      "id": "sn8-015",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -0.6496339275531535,
+        -1.4033611807773505,
+        1.4801644373590914
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        67217466413.45971,
+        187788230413.766,
+        295503499824.7158
+      ],
+      "initialVelocityMetersPerSecond": [
+        -1263.752521304073,
+        20221.772944698656,
+        -18274.99715402434
+      ],
+      "dtSeconds": 47307082.254773125,
+      "expectedPositionMeters": [
+        -85725145015.38116,
+        395971755422.7307,
+        -717155499769.0282
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -3258.6166158339047,
+        -3572.511329215464,
+        -17287.566127407306
+      ]
+    },
+    {
+      "id": "sn8-016",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.7875474920473504,
+        -2.034723248301355,
+        1.1470598635696803
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -640177217961.168,
+        -961012596462.292,
+        376577804599.80316
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2509.1666248076244,
+        5107.428706736659,
+        8768.419097205628
+      ],
+      "dtSeconds": 64214712.13989019,
+      "expectedPositionMeters": [
+        -697923339425.1246,
+        -506419346533.79034,
+        855351028300.5891
+      ],
+      "expectedVelocityMetersPerSecond": [
+        756.6460897476559,
+        8688.891901507359,
+        5761.732623827314
+      ]
+    },
+    {
+      "id": "sn8-017",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        3.1231714732255744,
+        -1.1238120427165432,
+        1.7565332771421858
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        733690689473.7618,
+        1323766086082.868,
+        2014291349656.2622
+      ],
+      "initialVelocityMetersPerSecond": [
+        -751.4663885972202,
+        7615.814591277818,
+        1393.3242893580468
+      ],
+      "dtSeconds": -1319584787.7401767,
+      "expectedPositionMeters": [
+        -1284644048021.0693,
+        4289283705761.8315,
+        -981436923042.2607
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -826.2366324846707,
+        -2365.2113270564655,
+        -2605.2667648090164
+      ]
+    },
+    {
+      "id": "sn8-018",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -1.6772816087490536,
+        2.566018824406364,
+        1.2618289922260972
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1250262612944.395,
+        -4359162104325.2793,
+        87240653811.12323
+      ],
+      "initialVelocityMetersPerSecond": [
+        -1924.4396558286016,
+        10869.900689275168,
+        -3334.22162481528
+      ],
+      "dtSeconds": 68505224.05177762,
+      "expectedPositionMeters": [
+        -1377002466829.5974,
+        -3598461630704.1772,
+        -141189752072.2405
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -1759.749586782989,
+        11362.930617188378,
+        -3329.696738303887
+      ]
+    },
+    {
+      "id": "sn8-019",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.2241590138328882,
+        -2.7527700821027707,
+        0.3222807377761985
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        84922821127.14447,
+        69847504186.53036,
+        16122423877.121445
+      ],
+      "initialVelocityMetersPerSecond": [
+        43416.158901635434,
+        -18430.25992757242,
+        -12795.353996496686
+      ],
+      "dtSeconds": -45879196.273333795,
+      "expectedPositionMeters": [
+        -602631257848.1138,
+        -730535044389.4451,
+        -205680264278.66876
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5817.37718876255,
+        14681.37902805854,
+        4950.143083976634
+      ]
+    },
+    {
+      "id": "sn8-020",
+      "regime": "circular",
+      "planeAnglesRad": [
+        0.08336085607060983,
+        0.7662966044125894,
+        -2.7976115550978746
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -155549326724.42496,
+        -66519770050.24543,
+        9784788478.502874
+      ],
+      "initialVelocityMetersPerSecond": [
+        8969.647382116957,
+        -18129.81416343025,
+        19339.359502197858
+      ],
+      "dtSeconds": -690760.2216311747,
+      "expectedPositionMeters": [
+        -160720793195.6462,
+        -53591219077.94899,
+        -3608713043.464613
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5987.372705387819,
+        -19262.402854908374,
+        19397.596914496364
+      ]
+    },
+    {
+      "id": "sn8-021",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.5796401044558364,
+        0.14613923087650438,
+        1.6398579166699676
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1978100765845.9695,
+        1631539712876.0935,
+        -307031263338.272
+      ],
+      "initialVelocityMetersPerSecond": [
+        -4879.997720408877,
+        4228.431217027183,
+        673.6193653984686
+      ],
+      "dtSeconds": 637343013.9625123,
+      "expectedPositionMeters": [
+        -1595458937519.4712,
+        -316009126308.85785,
+        237483186833.34225
+      ],
+      "expectedVelocityMetersPerSecond": [
+        1697.6608209554925,
+        -9896.6488100724,
+        -148.76034333417863
+      ]
+    },
+    {
+      "id": "sn8-022",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.060366475893013,
+        1.5075213830725316,
+        -2.1756452503595707
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1257825881593.554,
+        -1580008656734.5835,
+        -2149950393645.426
+      ],
+      "initialVelocityMetersPerSecond": [
+        -6660.514726964285,
+        -9592.177087537264,
+        -384.8675263687294
+      ],
+      "dtSeconds": -196526930.79231346,
+      "expectedPositionMeters": [
+        177622040224.6731,
+        444070523552.15063,
+        -1679392790305.275
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -7651.867273529744,
+        -10451.129991179787,
+        -5546.548112394438
+      ]
+    },
+    {
+      "id": "sn8-023",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.821334489207418,
+        1.3545199639844299,
+        -2.3029311196703834
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        365338439859.6394,
+        194491393942.00287,
+        644981139915.1879
+      ],
+      "initialVelocityMetersPerSecond": [
+        10366.647993901284,
+        13813.23401203284,
+        -6933.571116147345
+      ],
+      "dtSeconds": -7654169.827768391,
+      "expectedPositionMeters": [
+        283004726708.47485,
+        87361649889.8165,
+        692207372147.4767
+      ],
+      "expectedVelocityMetersPerSecond": [
+        11121.565247249611,
+        14140.68196115888,
+        -5374.337941841077
+      ]
+    },
+    {
+      "id": "sn8-024",
+      "regime": "circular",
+      "planeAnglesRad": [
+        2.3504029684617826,
+        0.007134403133105316,
+        -2.0527469820433635
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1307160114551.178,
+        401015439698.47943,
+        6937544640.337682
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2889.228189614267,
+        9418.656427932689,
+        -49.41193656094116
+      ],
+      "dtSeconds": 1180658579.978219,
+      "expectedPositionMeters": [
+        -1112765165897.5977,
+        794474297255.0886,
+        -9661989524.56818
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5724.57056592149,
+        -8018.127475672192,
+        -9.67461784111158
+      ]
+    },
+    {
+      "id": "sn8-025",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.335941108498603,
+        0.0492483469314382,
+        2.882455656501917
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1583385910239.3997,
+        2278883628716.7197,
+        -88573758480.25287
+      ],
+      "initialVelocityMetersPerSecond": [
+        -4163.692817141147,
+        -3333.812917448642,
+        211.41845547681936
+      ],
+      "dtSeconds": 1137379000.1216462,
+      "expectedPositionMeters": [
+        431065466369.7728,
+        2367219979894.0894,
+        -118224700621.31918
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5621.802009205419,
+        3385.197543055072,
+        -90.27646397907522
+      ]
+    },
+    {
+      "id": "sn8-026",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.0192489132474645,
+        -1.9248788799523697,
+        1.6190130845353057
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -693874543540.6002,
+        3123199676648.679,
+        1467654121837.1125
+      ],
+      "initialVelocityMetersPerSecond": [
+        3213.422860478245,
+        -3101.7523532045893,
+        -8278.346243159354
+      ],
+      "dtSeconds": 166377234.9976572,
+      "expectedPositionMeters": [
+        -129958159408.8844,
+        2429278529871.2573,
+        34411351927.461914
+      ],
+      "expectedVelocityMetersPerSecond": [
+        3544.7070448965296,
+        -5595.235279051722,
+        -8848.375363184885
+      ]
+    },
+    {
+      "id": "sn8-027",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        0.7419006625118838,
+        -2.778406731175267,
+        -1.979499076621988
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -167394799752.72305,
+        138291643637.1383,
+        -79264918502.18909
+      ],
+      "initialVelocityMetersPerSecond": [
+        4836.527349434854,
+        33371.54888988888,
+        -3353.634197566223
+      ],
+      "dtSeconds": 38896011.92836674,
+      "expectedPositionMeters": [
+        250513931333.62823,
+        885798393610.2308,
+        -46423371042.005196
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10742.409137710998,
+        13015.378744887035,
+        1780.535810812941
+      ]
+    },
+    {
+      "id": "sn8-028",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.2766951015766352,
+        2.6895416999325272,
+        -2.1119983869930197
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -539089823665.77325,
+        118525772163.00946,
+        254015005378.04587
+      ],
+      "initialVelocityMetersPerSecond": [
+        3983.667520359109,
+        14108.352427226651,
+        1871.351084165661
+      ],
+      "dtSeconds": 51151020.11798872,
+      "expectedPositionMeters": [
+        -17855557324.187653,
+        587400647989.0393,
+        154374471395.82428
+      ],
+      "expectedVelocityMetersPerSecond": [
+        13697.226813005802,
+        1796.448293639185,
+        -5251.278050642537
+      ]
+    },
+    {
+      "id": "sn8-029",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.8886707919522197,
+        -1.6753568645912102,
+        -0.6235387017724969
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        521084504.9070165,
+        3044251383.8824625,
+        26448988114.682487
+      ],
+      "initialVelocityMetersPerSecond": [
+        53337.08690014749,
+        -29075.096195701914,
+        71852.90691907081
+      ],
+      "dtSeconds": -524838.1268454837,
+      "expectedPositionMeters": [
+        7457601757.086683,
+        -8401688224.533232,
+        -23498939640.049503
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -69627.35771376525,
+        54637.57411122298,
+        35252.42346124879
+      ]
+    },
+    {
+      "id": "sn8-030",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.9533023027957124,
+        -0.38717669336636407,
+        2.0945749085069068
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -3885905278956.2515,
+        -2973149165322.792,
+        -1978435844483.8242
+      ],
+      "initialVelocityMetersPerSecond": [
+        10688.378542993101,
+        2318.419544487247,
+        4246.810501950667
+      ],
+      "dtSeconds": 87175649.88767354,
+      "expectedPositionMeters": [
+        -2939358394045.4185,
+        -2758949458752.955,
+        -1600532820035.8188
+      ],
+      "expectedVelocityMetersPerSecond": [
+        11045.918182117739,
+        2621.709897166236,
+        4434.90889838594
+      ]
+    },
+    {
+      "id": "sn8-031",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -2.144081976372396,
+        2.270010162004964,
+        -3.042000834740212
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        944795918947.1229,
+        -234207959322.4853,
+        -388831320802.9006
+      ],
+      "initialVelocityMetersPerSecond": [
+        -10069.699692484559,
+        -8525.010978123237,
+        -8896.612978599393
+      ],
+      "dtSeconds": -61453973.65622035,
+      "expectedPositionMeters": [
+        1379681288812.7227,
+        303232841570.2899,
+        195675415750.54022
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4592.8833074027125,
+        -8556.695339067015,
+        -9581.64231407085
+      ]
+    },
+    {
+      "id": "sn8-032",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.5330779161229966,
+        -1.2226001984640091,
+        -2.5545763210438
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        566293625250.7526,
+        -1096121465925.8577,
+        -3378331554023.3384
+      ],
+      "initialVelocityMetersPerSecond": [
+        5097.317227621041,
+        3297.081735614665,
+        -215.32043312041884
+      ],
+      "dtSeconds": 761861145.9067626,
+      "expectedPositionMeters": [
+        3055763157178.4434,
+        1566741018611.7407,
+        -1069078544730.5121
+      ],
+      "expectedVelocityMetersPerSecond": [
+        510.2725076799737,
+        2701.079777632935,
+        5416.968135591499
+      ]
+    },
+    {
+      "id": "sn8-033",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.332119399624128,
+        1.4032780604648156,
+        -1.28507288726598
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        109152207445.89957,
+        -213760412250.59723,
+        263024461296.16495
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5020.222044567398,
+        20558.591177560516,
+        5782.156846720847
+      ],
+      "dtSeconds": 281772556.76767033,
+      "expectedPositionMeters": [
+        -20803616819.607147,
+        -315533751816.3343,
+        -643949970755.5469
+      ],
+      "expectedVelocityMetersPerSecond": [
+        3067.8021575193347,
+        -9752.907503502756,
+        1150.5079788984515
+      ]
+    },
+    {
+      "id": "sn8-034",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.2380031522358363,
+        -0.5729423433200043,
+        1.723509555134184
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        794429508248.9492,
+        2672317439235.947,
+        768797098588.8684
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2002.07559585288,
+        11692.983772140691,
+        -129.0479168500313
+      ],
+      "dtSeconds": -153064646.90179822,
+      "expectedPositionMeters": [
+        972512385506.6079,
+        633894409061.013,
+        682301449173.4558
+      ],
+      "expectedVelocityMetersPerSecond": [
+        748.223573001678,
+        15540.910164667252,
+        2002.2207360104699
+      ]
+    },
+    {
+      "id": "sn8-035",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.8258875725725938,
+        2.0324807714551154,
+        -0.011048202881395852
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -383722300306.02203,
+        306944167869.66016,
+        -608354986484.6211
+      ],
+      "initialVelocityMetersPerSecond": [
+        17097.519774728014,
+        2904.4529604564236,
+        -6216.819160737055
+      ],
+      "dtSeconds": -29915947.86946603,
+      "expectedPositionMeters": [
+        -837356170414.1595,
+        190147755540.09277,
+        -363552652644.7694
+      ],
+      "expectedVelocityMetersPerSecond": [
+        13089.097027799686,
+        4626.018253627253,
+        -9587.697444526624
+      ]
+    },
+    {
+      "id": "sn8-036",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -1.3485447026812092,
+        -0.3934174095230296,
+        -1.968111358207126
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -832903927348.6078,
+        132151928416.55304,
+        339996273401.17126
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2291.7681839153265,
+        -11817.738705116051,
+        -1020.8516642831001
+      ],
+      "dtSeconds": 312299976.73428124,
+      "expectedPositionMeters": [
+        590426411484.1489,
+        681626887691.2682,
+        -116498879401.89435
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -8134.9372647307055,
+        7792.521652226802,
+        4364.9386742709485
+      ]
+    },
+    {
+      "id": "sn8-037",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -0.8506473854983301,
+        -1.6569680982319317,
+        -3.028151412520443
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        2970685743419.5347,
+        348268405579.75354,
+        -112911598676.55092
+      ],
+      "initialVelocityMetersPerSecond": [
+        -1758.0646852277428,
+        -705.612504515936,
+        5811.929380336631
+      ],
+      "dtSeconds": 1542161182.37454,
+      "expectedPositionMeters": [
+        1429531990557.7104,
+        433740770290.83167,
+        -3115476218422.0586
+      ],
+      "expectedVelocityMetersPerSecond": [
+        4831.074597317896,
+        427.8039235909889,
+        1410.120132805193
+      ]
+    },
+    {
+      "id": "sn8-038",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -1.4491752461895733,
+        0.06027437682586134,
+        0.17586105726681112
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1477641298291.2178,
+        -800661997731.1898,
+        -31971525944.64311
+      ],
+      "initialVelocityMetersPerSecond": [
+        13859.471145584366,
+        -3838.2161817934702,
+        -374.38450403079145
+      ],
+      "dtSeconds": 3084652.1657383684,
+      "expectedPositionMeters": [
+        -1434691371058.9182,
+        -812392525253.4291,
+        -33121986921.880424
+      ],
+      "expectedVelocityMetersPerSecond": [
+        13988.630672421092,
+        -3766.66348534228,
+        -371.49676541646994
+      ]
+    },
+    {
+      "id": "sn8-039",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.6196021597185917,
+        2.075152743101504,
+        2.308509402915867
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -484165087950.7224,
+        1043781628304.44,
+        622781593548.7711
+      ],
+      "initialVelocityMetersPerSecond": [
+        10848.645258325423,
+        -7268.820810010564,
+        5687.061540603676
+      ],
+      "dtSeconds": 49459345.52469933,
+      "expectedPositionMeters": [
+        78755894441.06635,
+        599035522302.4231,
+        835530137577.2546
+      ],
+      "expectedVelocityMetersPerSecond": [
+        11605.394316232403,
+        -10821.588735091453,
+        2372.438002173766
+      ]
+    },
+    {
+      "id": "sn8-040",
+      "regime": "circular",
+      "planeAnglesRad": [
+        0.21975975618234989,
+        -1.7575008420764864,
+        -2.979538780616709
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2757527290328.253,
+        -334223751949.6887,
+        -609142855913.748
+      ],
+      "initialVelocityMetersPerSecond": [
+        1270.0347508250857,
+        1461.632501857358,
+        -6551.283898456907
+      ],
+      "dtSeconds": -201449542.7880333,
+      "expectedPositionMeters": [
+        -2686852317996.0586,
+        -578930027646.0874,
+        729645075740.3008
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -1957.9511463319225,
+        920.2214073840944,
+        -6479.837839555818
+      ]
+    },
+    {
+      "id": "sn8-041",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -3.0125754002714493,
+        -2.2983946403897075,
+        2.427637803944541
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        283259182371.43396,
+        18002438727.59561,
+        -223547592635.1746
+      ],
+      "initialVelocityMetersPerSecond": [
+        -499.3001211391165,
+        -18921.23007139725,
+        16423.96000853058
+      ],
+      "dtSeconds": 1126503221.578852,
+      "expectedPositionMeters": [
+        -1573392298393.9429,
+        1544179462024.5842,
+        -153554404741.70215
+      ],
+      "expectedVelocityMetersPerSecond": [
+        1506.4704096564778,
+        1922.1924983337888,
+        -2738.8560250468845
+      ]
+    },
+    {
+      "id": "sn8-042",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        0.49555054841529333,
+        -0.3865397059521256,
+        -1.2186710171317214
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1246049506451.281,
+        -979515695031.9271,
+        -338541639518.4382
+      ],
+      "initialVelocityMetersPerSecond": [
+        7776.339465827281,
+        10264.86615107212,
+        -4411.839517691208
+      ],
+      "dtSeconds": -172666068.1382755,
+      "expectedPositionMeters": [
+        -414962041018.42834,
+        -2189425686665.1406,
+        465878038231.26746
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10093.761790184231,
+        4077.3931426355266,
+        -4428.612784259129
+      ]
+    },
+    {
+      "id": "sn8-043",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        2.243059781947908,
+        0.5358615766784802,
+        0.49360187830966185
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -424813677894.9955,
+        138497319023.9632,
+        191947104911.1142
+      ],
+      "initialVelocityMetersPerSecond": [
+        -10018.802964932875,
+        -19728.310682683343,
+        -7497.822713279933
+      ],
+      "dtSeconds": -31882209.018358562,
+      "expectedPositionMeters": [
+        43201519152.18939,
+        623387015237.2322,
+        313836206420.70764
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -16396.66839081938,
+        -10486.589514439038,
+        -870.5790820400089
+      ]
+    },
+    {
+      "id": "sn8-044",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.4116120043855034,
+        1.2006361420519127,
+        2.3505107437709585
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -796702144999.6135,
+        -301745323338.19244,
+        2006703883208.3281
+      ],
+      "initialVelocityMetersPerSecond": [
+        5098.0843162032415,
+        -5792.73960064933,
+        1152.9965360892882
+      ],
+      "dtSeconds": 1368817000.0147169,
+      "expectedPositionMeters": [
+        -1547503970744.0212,
+        1534532468446.2725,
+        55557058080.09003
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -1856.4834640819809,
+        -2135.4239312894483,
+        7271.116184572268
+      ]
+    },
+    {
+      "id": "sn8-045",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        0.7558507357261854,
+        -2.9118944713493926,
+        -3.113308852442457
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -76767078632.16884,
+        18742413524.16583,
+        -4888320768.735083
+      ],
+      "initialVelocityMetersPerSecond": [
+        24221.557812386916,
+        47730.72272127589,
+        -10996.00645325406
+      ],
+      "dtSeconds": -65146611.28108683,
+      "expectedPositionMeters": [
+        507052085110.95294,
+        -385140423034.8363,
+        93372370512.98575
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2775.623179993309,
+        -6013.4136133934935,
+        1387.1701563391102
+      ]
+    },
+    {
+      "id": "sn8-046",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.9208467009685135,
+        0.14384758212557136,
+        0.9200877820006452
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -258615685455.66132,
+        -682380374.5205231,
+        29745334520.583515
+      ],
+      "initialVelocityMetersPerSecond": [
+        29075.938579776608,
+        -30085.526875962576,
+        -5990.73036490031
+      ],
+      "dtSeconds": 38579053.90431581,
+      "expectedPositionMeters": [
+        1131334924228.216,
+        -128119113374.24124,
+        -141626650679.9097
+      ],
+      "expectedVelocityMetersPerSecond": [
+        31240.59454734847,
+        3357.01890673961,
+        -3305.8976353957332
+      ]
+    },
+    {
+      "id": "sn8-047",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        0.909710652790606,
+        -2.6496765909728355,
+        1.7589698190560545
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        6116653269.458975,
+        83618456396.27852,
+        -11601600507.693007
+      ],
+      "initialVelocityMetersPerSecond": [
+        45894.73187067351,
+        -23545.708046852913,
+        -21798.453938715542
+      ],
+      "dtSeconds": -54640663.475452356,
+      "expectedPositionMeters": [
+        -959254466510.5659,
+        -345145615329.11334,
+        539541687998.6685
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10993.371531953237,
+        8106.27609384732,
+        -6599.3969422864
+      ]
+    },
+    {
+      "id": "sn8-048",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.23223090603852725,
+        -0.22809578436975642,
+        -1.116738573470236
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        276649503024.71185,
+        -1194251248670.5374,
+        63883608033.7221
+      ],
+      "initialVelocityMetersPerSecond": [
+        9907.418595812895,
+        2172.669831051736,
+        -2288.0481645608834
+      ],
+      "dtSeconds": -372491279.1952695,
+      "expectedPositionMeters": [
+        -260776160329.60114,
+        1197617033569.746,
+        -67537715076.22856
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -9938.259460160418,
+        -2035.4093869387248,
+        2280.506382553096
+      ]
+    },
+    {
+      "id": "sn8-049",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -0.6175791412155318,
+        2.5424344715026708,
+        1.2373165187490276
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        395019859744.0857,
+        208540090710.00787,
+        208282113921.0685
+      ],
+      "initialVelocityMetersPerSecond": [
+        12390.16341209355,
+        -10908.507706182741,
+        10433.572007927542
+      ],
+      "dtSeconds": 245078495.0143423,
+      "expectedPositionMeters": [
+        -58174510617.75305,
+        -1262320231716.1782,
+        244635588800.9483
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5360.111402738718,
+        2178.7191109615205,
+        -3945.7953735724273
+      ]
+    },
+    {
+      "id": "sn8-050",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.2784770501078095,
+        1.0911779886969564,
+        0.6237543936257288
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -45075522252.38641,
+        -34047359736.312004,
+        -2514647846.155014
+      ],
+      "initialVelocityMetersPerSecond": [
+        45002.53052629887,
+        -3820.5386412067382,
+        -56498.782722107855
+      ],
+      "dtSeconds": -4779204.542811883,
+      "expectedPositionMeters": [
+        -131562001935.82915,
+        37675855251.816246,
+        206536128680.39514
+      ],
+      "expectedVelocityMetersPerSecond": [
+        9779.944739797014,
+        -15756.053209113594,
+        -35570.98182369624
+      ]
+    },
+    {
+      "id": "sn8-051",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.7262366017997435,
+        -2.394384041403021,
+        -1.8954685136449203
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        460599535703.0801,
+        216225466061.30414,
+        340506265030.1613
+      ],
+      "initialVelocityMetersPerSecond": [
+        -737.5414754536914,
+        -20122.16030880597,
+        5298.913276556176
+      ],
+      "dtSeconds": 38121452.89691053,
+      "expectedPositionMeters": [
+        240650008112.50488,
+        -533432108723.1321,
+        368929033154.3168
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -9499.576059733203,
+        -16793.6979869156,
+        -3377.747332919345
+      ]
+    },
+    {
+      "id": "sn8-052",
+      "regime": "circular",
+      "planeAnglesRad": [
+        2.0545781152516724,
+        2.449317752275417,
+        -0.2964810132825124
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1364561206018.0337,
+        -1093112178984.9501,
+        1197389449890.259
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5872.036275495769,
+        4756.616928544468,
+        -2349.4753580566776
+      ],
+      "dtSeconds": 1251695457.202722,
+      "expectedPositionMeters": [
+        1623160570352.2449,
+        -1231236492968.9119,
+        583154762270.2931
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4868.870790846067,
+        -4260.057833973652,
+        4557.658780230836
+      ]
+    },
+    {
+      "id": "sn8-053",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.9124635822027487,
+        1.2409539467732582,
+        -2.380998444189279
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -356623201955.57336,
+        -167832662632.09613,
+        -362952955298.4782
+      ],
+      "initialVelocityMetersPerSecond": [
+        -11298.88032751036,
+        -13905.044818176792,
+        6672.368611803791
+      ],
+      "dtSeconds": -554282465.1704113,
+      "expectedPositionMeters": [
+        -448933630063.64417,
+        -290327992531.3573,
+        -289622809991.98785
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -8617.880036961062,
+        -12395.044333133555,
+        8875.585534457852
+      ]
+    },
+    {
+      "id": "sn8-054",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        3.08783398945325,
+        -2.7805363222470496,
+        2.8846197210773097
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1032014632190.481,
+        -2141145507418.6157,
+        682924442027.2917
+      ],
+      "initialVelocityMetersPerSecond": [
+        -6390.951336396607,
+        -12203.114256432227,
+        5070.045556083577
+      ],
+      "dtSeconds": -106621270.18176559,
+      "expectedPositionMeters": [
+        1615677261596.7805,
+        -718550697617.9202,
+        107363871287.87347
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4008.963472490137,
+        -14481.299124047157,
+        5673.459950699136
+      ]
+    },
+    {
+      "id": "sn8-055",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -0.2359005080818859,
+        1.2234767987541675,
+        -1.7318863792562849
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        90073076609.95183,
+        -759245436920.8785,
+        582014072109.6779
+      ],
+      "initialVelocityMetersPerSecond": [
+        6047.24007279579,
+        2889.1160807945685,
+        15208.958584468244
+      ],
+      "dtSeconds": 42748399.688068986,
+      "expectedPositionMeters": [
+        332403177499.84973,
+        -564036145980.0353,
+        1156284132251.4558
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5259.759703016641,
+        5670.452454221767,
+        11829.356101745565
+      ]
+    },
+    {
+      "id": "sn8-056",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.8865050562500043,
+        1.2246464633947163,
+        -0.8613529263213757
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        509180805326.2986,
+        -1560973450845.4927,
+        -1748151069688.323
+      ],
+      "initialVelocityMetersPerSecond": [
+        4965.230393068783,
+        -3334.1038048186347,
+        4423.329119511884
+      ],
+      "dtSeconds": 344848440.16438043,
+      "expectedPositionMeters": [
+        1648588108435.6458,
+        -1692734698637.4604,
+        410782007837.464
+      ],
+      "expectedVelocityMetersPerSecond": [
+        1000.573862190774,
+        2644.217220266707,
+        6880.593635394223
+      ]
+    },
+    {
+      "id": "sn8-057",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.906798023932379,
+        1.6935484505115799,
+        2.3774225356925616
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -410445720223.08936,
+        448806660587.6131,
+        324351325497.10986
+      ],
+      "initialVelocityMetersPerSecond": [
+        6357.916139294561,
+        -4083.963415672787,
+        11759.834451234141
+      ],
+      "dtSeconds": -173481072.79552048,
+      "expectedPositionMeters": [
+        421628813040.8922,
+        -459685422933.4859,
+        -325291477666.75226
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5074.543338575769,
+        2740.4763616406985,
+        -12423.881824754275
+      ]
+    },
+    {
+      "id": "sn8-058",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        2.087439765930351,
+        -0.7855626649635874,
+        -0.497184314949358
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        251485931861.35248,
+        764555212840.7327,
+        -792197216012.0391
+      ],
+      "initialVelocityMetersPerSecond": [
+        -16406.345219979936,
+        3898.567256951722,
+        4399.933314304187
+      ],
+      "dtSeconds": -226013463.41718093,
+      "expectedPositionMeters": [
+        3126952899156.195,
+        -638510231186.0161,
+        -930509392862.6522
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -10325.53993136127,
+        6433.405017153096,
+        -729.9527238260675
+      ]
+    },
+    {
+      "id": "sn8-059",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.3628950471923442,
+        1.1921139745743838,
+        3.0285831710083047
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -331919728524.75574,
+        -29547903369.29683,
+        167861562475.66602
+      ],
+      "initialVelocityMetersPerSecond": [
+        20648.616422846397,
+        -8242.96428561313,
+        14732.519721893152
+      ],
+      "dtSeconds": 2241288.0259070583,
+      "expectedPositionMeters": [
+        -283475822137.7632,
+        -47776780093.218,
+        199653668329.36008
+      ],
+      "expectedVelocityMetersPerSecond": [
+        22591.19319673827,
+        -7996.418545304824,
+        13566.265862141388
+      ]
+    },
+    {
+      "id": "sn8-060",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.3318917983985825,
+        2.6773399988201225,
+        1.1934098773362
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        208424035487.14392,
+        2651036495811.5635,
+        -392156749115.27856
+      ],
+      "initialVelocityMetersPerSecond": [
+        6365.642261437402,
+        -60.46291408673687,
+        2974.482676482864
+      ],
+      "dtSeconds": 1191382047.9451904,
+      "expectedPositionMeters": [
+        -142033535685.23047,
+        -2650683216969.6436,
+        422997582246.6043
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6378.118354941631,
+        -128.27534215522505,
+        -2945.463638245436
+      ]
+    },
+    {
+      "id": "sn8-061",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.1625958982792275,
+        0.6734210846115003,
+        -2.7481388970844884
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1557778569402.314,
+        1566775857993.239,
+        -1631004686501.5437
+      ],
+      "initialVelocityMetersPerSecond": [
+        -1417.977789065128,
+        -5336.493045461963,
+        3498.605347416892
+      ],
+      "dtSeconds": 99351758.41593099,
+      "expectedPositionMeters": [
+        -1638115619313.7957,
+        984942251805.1353,
+        -1226839000625.804
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -59.46107121721502,
+        -6395.251973772173,
+        4694.315590712507
+      ]
+    },
+    {
+      "id": "sn8-062",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.4794384413649908,
+        2.3920024159204925,
+        3.002203974742109
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1303057845701.4756,
+        -583058752650.121,
+        -705986870734.6482
+      ],
+      "initialVelocityMetersPerSecond": [
+        -6806.582044262596,
+        10668.253697767266,
+        8953.752910242618
+      ],
+      "dtSeconds": 221595067.51329598,
+      "expectedPositionMeters": [
+        -1805609676780.3896,
+        1754614876316.3384,
+        1383894667376.0361
+      ],
+      "expectedVelocityMetersPerSecond": [
+        472.9295146554887,
+        9437.355135285325,
+        8760.548365481038
+      ]
+    },
+    {
+      "id": "sn8-063",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        2.087839225155946,
+        1.2678630771299986,
+        -2.1726198109179635
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        52991537540.38724,
+        -54458587913.80172,
+        238400156604.71866
+      ],
+      "initialVelocityMetersPerSecond": [
+        16142.684576510388,
+        27395.284490163747,
+        -7049.219322045214
+      ],
+      "dtSeconds": 63106307.340118915,
+      "expectedPositionMeters": [
+        17996295198.129333,
+        547736047900.8025,
+        -944685628343.5864
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4185.949896674731,
+        2113.234981460242,
+        -14867.54857567057
+      ]
+    },
+    {
+      "id": "sn8-064",
+      "regime": "circular",
+      "planeAnglesRad": [
+        3.0385015779280575,
+        1.8920027627405727,
+        -2.64248980709032
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        601835253696.0792,
+        354045044201.94556,
+        68508270495.93976
+      ],
+      "initialVelocityMetersPerSecond": [
+        3309.9515931633423,
+        -3114.7455712710403,
+        -12980.700240964872
+      ],
+      "dtSeconds": -189749740.48894596,
+      "expectedPositionMeters": [
+        -411802202298.33813,
+        -383341695411.953,
+        -419183778052.8427
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -9218.228939681,
+        -1183.3250490665218,
+        10138.046918045993
+      ]
+    },
+    {
+      "id": "sn8-065",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.919457279518297,
+        0.3145851480965365,
+        -3.1312772095276036
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1202564522391.7815,
+        -816010096503.0656,
+        269544287549.61816
+      ],
+      "initialVelocityMetersPerSecond": [
+        5648.255074156195,
+        7339.5320959871515,
+        -2369.129426687165
+      ],
+      "dtSeconds": 834915811.6347469,
+      "expectedPositionMeters": [
+        -245406589141.3084,
+        -1385225490257.477,
+        449891675899.0194
+      ],
+      "expectedVelocityMetersPerSecond": [
+        9449.521844545703,
+        -1408.1755063126384,
+        489.8999194925093
+      ]
+    },
+    {
+      "id": "sn8-066",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.4716126093555744,
+        1.2920556885581362,
+        -2.7543764453476665
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1113040978535.649,
+        186044577626.48547,
+        866648535068.625
+      ],
+      "initialVelocityMetersPerSecond": [
+        13013.433217648017,
+        6684.790991848828,
+        -4458.009735688662
+      ],
+      "dtSeconds": 143659248.28216943,
+      "expectedPositionMeters": [
+        2611151236200.172,
+        1048142052723.8884,
+        54022949812.09619
+      ],
+      "expectedVelocityMetersPerSecond": [
+        8709.372228434668,
+        5418.310019630458,
+        -6039.295677479444
+      ]
+    },
+    {
+      "id": "sn8-067",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.949682405969492,
+        -2.285555426774462,
+        2.0553082724182676
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        667969442306.194,
+        -225229333359.546,
+        -560221294251.3834
+      ],
+      "initialVelocityMetersPerSecond": [
+        2359.4519283764075,
+        -15870.032850516749,
+        6111.746155893884
+      ],
+      "dtSeconds": 46874334.072281696,
+      "expectedPositionMeters": [
+        662857496219.5378,
+        -894801899597.2167,
+        -195643067472.07666
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2070.1728976670183,
+        -12396.155452951216,
+        8764.010203305472
+      ]
+    },
+    {
+      "id": "sn8-068",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -3.0896235271091155,
+        -0.16443087448853078,
+        -0.01791073024415768
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2982191509282.151,
+        -99518817971.05103,
+        25372740945.98693
+      ],
+      "initialVelocityMetersPerSecond": [
+        228.69969384759685,
+        -6575.294091104513,
+        1090.177425760073
+      ],
+      "dtSeconds": 726457949.581916,
+      "expectedPositionMeters": [
+        259560416107.87085,
+        -2932690040331.1484,
+        485768964509.27515
+      ],
+      "expectedVelocityMetersPerSecond": [
+        6643.6722777457035,
+        569.0952987864601,
+        -114.15761441591005
+      ]
+    },
+    {
+      "id": "sn8-069",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        0.7453829135660324,
+        1.886508121440916,
+        2.223984872084757
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        79061423412.83896,
+        166549320413.96777,
+        502093361741.68225
+      ],
+      "initialVelocityMetersPerSecond": [
+        11452.320479763845,
+        -12347.1491940654,
+        4871.558264599447
+      ],
+      "dtSeconds": -86871478.68868533,
+      "expectedPositionMeters": [
+        -342291310427.29517,
+        121062051090.87851,
+        -606969339140.1688
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4003.561486221803,
+        9840.269519044727,
+        8574.400225430943
+      ]
+    },
+    {
+      "id": "sn8-070",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        2.2881701558490493,
+        1.550585106666107,
+        -2.345500624755018
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1069959806709.303,
+        1094936117040.519,
+        -63813124789.32249
+      ],
+      "initialVelocityMetersPerSecond": [
+        5219.532569035289,
+        5723.670140410541,
+        -13540.684278681305
+      ],
+      "dtSeconds": 62345979.67364142,
+      "expectedPositionMeters": [
+        1334712412574.1,
+        1389351834336.946,
+        -892230331086.7595
+      ],
+      "expectedVelocityMetersPerSecond": [
+        3491.405599661659,
+        3940.798780282298,
+        -12939.155327998616
+      ]
+    },
+    {
+      "id": "sn8-071",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.7237634508081543,
+        1.0493531992222058,
+        -1.8938524195017556
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        481664492242.2764,
+        -161745333207.8504,
+        884446428542.3767
+      ],
+      "initialVelocityMetersPerSecond": [
+        4525.775192734931,
+        15446.7276507485,
+        -1065.5838267069123
+      ],
+      "dtSeconds": -10488605.83214414,
+      "expectedPositionMeters": [
+        431044229260.60223,
+        -322304044534.8375,
+        889616810863.1134
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5110.273517289578,
+        15137.893007328888,
+        69.8898827820833
+      ]
+    },
+    {
+      "id": "sn8-072",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.4444669723696553,
+        2.7908539354710147,
+        -1.9679796665078393
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1250249416496.1145,
+        336290507343.0843,
+        469408647080.3079
+      ],
+      "initialVelocityMetersPerSecond": [
+        2695.9311515783693,
+        9429.653977546852,
+        424.9670947400806
+      ],
+      "dtSeconds": 151532849.13567606,
+      "expectedPositionMeters": [
+        -255512804429.45728,
+        1325264377655.3586,
+        273764356376.16736
+      ],
+      "expectedVelocityMetersPerSecond": [
+        9131.011493972454,
+        2328.7724242230047,
+        -2751.084156300785
+      ]
+    },
+    {
+      "id": "sn8-073",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -0.28745534492758296,
+        0.23884308286494127,
+        2.8783906831092523
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1366582994615.1116,
+        537781101054.9194,
+        -213008159222.24478
+      ],
+      "initialVelocityMetersPerSecond": [
+        -3834.7731609650523,
+        8372.67139375077,
+        -1725.5284591902277
+      ],
+      "dtSeconds": 1208406751.4257529,
+      "expectedPositionMeters": [
+        -648138945478.0687,
+        1234645165407.3467,
+        -249212312226.84695
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -8629.550225305045,
+        -4396.8757525982255,
+        1580.410594250427
+      ]
+    },
+    {
+      "id": "sn8-074",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.0210057818537193,
+        2.270916632657917,
+        -2.16424192102704
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1463947377321.6897,
+        -2167190970366.1194,
+        2019678920.0399456
+      ],
+      "initialVelocityMetersPerSecond": [
+        -751.7578155381825,
+        10528.687762089605,
+        7728.342354153286
+      ],
+      "dtSeconds": -191604281.50827482,
+      "expectedPositionMeters": [
+        -1203123392196.7864,
+        -3965265894990.2646,
+        -1448137577435.7092
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -1702.7738133713085,
+        8553.317742291567,
+        7352.959408281844
+      ]
+    },
+    {
+      "id": "sn8-075",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.980818416413681,
+        1.2007726742691416,
+        0.9830975066676784
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -368494610725.92554,
+        -772539677139.7896,
+        -313656899136.31036
+      ],
+      "initialVelocityMetersPerSecond": [
+        10270.921143672915,
+        7421.590995457222,
+        -11427.89749684336
+      ],
+      "dtSeconds": 62106677.30794608,
+      "expectedPositionMeters": [
+        324644291715.1963,
+        -57143869157.97455,
+        -778205294048.1118
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10419.474734773923,
+        14183.11929699331,
+        -2081.744544214608
+      ]
+    },
+    {
+      "id": "sn8-076",
+      "regime": "circular",
+      "planeAnglesRad": [
+        2.264837199505158,
+        2.6310501983337256,
+        -1.631238577963186
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -221930388200.95312,
+        238891304609.94846,
+        132151839282.70229
+      ],
+      "initialVelocityMetersPerSecond": [
+        11720.869570249599,
+        14246.858082836126,
+        -6070.542677102832
+      ],
+      "dtSeconds": -49122947.73449746,
+      "expectedPositionMeters": [
+        113233975579.04694,
+        -324723661092.5576,
+        -74289110590.17764
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -15760.467600898257,
+        -7453.839040422577,
+        8558.690417950118
+      ]
+    },
+    {
+      "id": "sn8-077",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        0.2576132649440481,
+        -1.7551613130016508,
+        1.1661202997829507
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -343169885987.98895,
+        -165107982144.7312,
+        1342996558025.0696
+      ],
+      "initialVelocityMetersPerSecond": [
+        4762.955109807922,
+        8212.514186954537,
+        -6138.973427106347
+      ],
+      "dtSeconds": 1490995568.8174546,
+      "expectedPositionMeters": [
+        -1049101802718.187,
+        -1579746244210.0813,
+        1836023828114.7969
+      ],
+      "expectedVelocityMetersPerSecond": [
+        2473.863096367746,
+        5661.949650426907,
+        -240.34853846894748
+      ]
+    },
+    {
+      "id": "sn8-078",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.02018205561275721,
+        3.0132725016137005,
+        0.10833410260116771
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        175819996485.8025,
+        -668677488175.268,
+        88225926167.24077
+      ],
+      "initialVelocityMetersPerSecond": [
+        -9901.911763578348,
+        -21419.598758222903,
+        2609.409122325578
+      ],
+      "dtSeconds": 237583265.39593652,
+      "expectedPositionMeters": [
+        -2090540237368.9656,
+        -4098753184191.1436,
+        496593202126.917
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -8944.986648230626,
+        -12569.054052483298,
+        1487.4757577762123
+      ]
+    },
+    {
+      "id": "sn8-079",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -0.17593412393239527,
+        -1.6997839360346934,
+        2.69897149395951
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -921189656541.9879,
+        330578969912.2451,
+        738834056922.3782
+      ],
+      "initialVelocityMetersPerSecond": [
+        -4611.594106652662,
+        4102.776788444953,
+        -13354.72346527035
+      ],
+      "dtSeconds": 8029340.017356405,
+      "expectedPositionMeters": [
+        -956004489664.6948,
+        362711621742.75775,
+        629938705583.3867
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4051.003758032461,
+        3895.6779954596554,
+        -13763.06490553152
+      ]
+    },
+    {
+      "id": "sn8-080",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.03196239996353123,
+        2.1567288405550133,
+        -1.7267977659343041
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -205173635781.9024,
+        -1473823690928.6116,
+        -39635158365.237686
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5202.143572237452,
+        512.7374944803597,
+        7863.1714073387275
+      ],
+      "dtSeconds": -845629453.5065691,
+      "expectedPositionMeters": [
+        -776533194833.1594,
+        -829492301222.631,
+        961645547005.5636
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2119.8883295971514,
+        7744.435971934645,
+        4968.3444941196685
+      ]
+    },
+    {
+      "id": "sn8-081",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -0.573411496436754,
+        -1.6218813132008827,
+        2.4290685360075894
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -3392614213.2486973,
+        -7823348882.34289,
+        159163516474.21466
+      ],
+      "initialVelocityMetersPerSecond": [
+        -23948.37417449063,
+        21281.02124800697,
+        -8752.269888995206
+      ],
+      "dtSeconds": 68765317.07328376,
+      "expectedPositionMeters": [
+        -108454219627.55513,
+        93345218983.59308,
+        5199571445.819504
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4027.4472944441563,
+        5859.594336831814,
+        -35226.471923766294
+      ]
+    },
+    {
+      "id": "sn8-082",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.255057197628598,
+        -0.29456966329513934,
+        0.6389341589820026
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        169714695717.09726,
+        -338687841578.37366,
+        113192029195.21414
+      ],
+      "initialVelocityMetersPerSecond": [
+        25585.46242380001,
+        5733.2679654053445,
+        3232.796762687398
+      ],
+      "dtSeconds": -28951522.85926215,
+      "expectedPositionMeters": [
+        -517637729315.7269,
+        -181421061047.71313,
+        -49470489444.18347
+      ],
+      "expectedVelocityMetersPerSecond": [
+        17783.395870468594,
+        -12387.47093056613,
+        6234.419180979938
+      ]
+    },
+    {
+      "id": "sn8-083",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -2.3710671654060604,
+        0.5698687460987277,
+        2.3792729435353737
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        379482196052.88354,
+        335401367630.89764,
+        -323368207193.7009
+      ],
+      "initialVelocityMetersPerSecond": [
+        -8620.76285300207,
+        18560.445522204907,
+        -4786.699504530501
+      ],
+      "dtSeconds": 4725188.844009309,
+      "expectedPositionMeters": [
+        336392944589.91675,
+        420764815439.4136,
+        -343860738930.64026
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -9569.185718367538,
+        17563.97602783573,
+        -3905.1966377026192
+      ]
+    },
+    {
+      "id": "sn8-084",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.7593641745499773,
+        0.3206827146640876,
+        -2.7289382929850543
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2639139237346.192,
+        876428949639.9875,
+        -618214927184.4054
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2420.518347421163,
+        -6188.088666938194,
+        1560.403756579071
+      ],
+      "dtSeconds": 1532179177.4399314,
+      "expectedPositionMeters": [
+        2788064158291.9854,
+        547884163966.9912,
+        204681474937.7685
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -1104.1661237727467,
+        6401.461304691933,
+        -2094.8318880717015
+      ]
+    },
+    {
+      "id": "sn8-085",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -0.6162000292247996,
+        -0.03835275149089323,
+        1.2088168941113375
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        381241052979.6812,
+        166342665165.8471,
+        11420509407.82319
+      ],
+      "initialVelocityMetersPerSecond": [
+        -9968.39277108476,
+        19526.56618384843,
+        -623.0500494301668
+      ],
+      "dtSeconds": 366960285.3359226,
+      "expectedPositionMeters": [
+        156143616081.29904,
+        -759773511757.7458,
+        15927299687.729858
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10107.383271357376,
+        9114.52947566114,
+        238.8518331834265
+      ]
+    },
+    {
+      "id": "sn8-086",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.6624683205296789,
+        2.0385323974982894,
+        -1.2899089276811735
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        537401843181.68835,
+        -3463584456996.5225,
+        878588693603.047
+      ],
+      "initialVelocityMetersPerSecond": [
+        -4729.308711578486,
+        9445.6861477459,
+        3812.042321951902
+      ],
+      "dtSeconds": -209736971.98827752,
+      "expectedPositionMeters": [
+        1496765725281.4836,
+        -5282779421171.985,
+        52113271398.04468
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4431.793506083392,
+        8089.41327855222,
+        3990.444445652272
+      ]
+    },
+    {
+      "id": "sn8-087",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.555745216438351,
+        2.2286132593917936,
+        -2.236773789842584
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -350223800744.924,
+        -1049973536860.0748,
+        -483188278665.33905
+      ],
+      "initialVelocityMetersPerSecond": [
+        -11502.28420243762,
+        -7249.36495255485,
+        5909.218300685784
+      ],
+      "dtSeconds": -1725548.5921071223,
+      "expectedPositionMeters": [
+        -330337111894.38544,
+        -1037345882730.5804,
+        -493329773119.2892
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -11547.211670356479,
+        -7387.176663064753,
+        5844.739855668752
+      ]
+    },
+    {
+      "id": "sn8-088",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.369230697542305,
+        2.137095930094576,
+        0.04164659927075265
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2205090507571.727,
+        1038110520376.4418,
+        -1775855640477.4219
+      ],
+      "initialVelocityMetersPerSecond": [
+        4519.184706199775,
+        2739.845335721895,
+        -4009.8693092377857
+      ],
+      "dtSeconds": 227416237.8607509,
+      "expectedPositionMeters": [
+        -949447252898.3046,
+        1508301476616.2969,
+        -2432557794691.7563
+      ],
+      "expectedVelocityMetersPerSecond": [
+        6292.215908545717,
+        1308.6157016142831,
+        -1644.499515149466
+      ]
+    },
+    {
+      "id": "sn8-089",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        0.11184855662137894,
+        -2.147687186527455,
+        2.407104236197945
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        480799981222.1839,
+        1300694287196.0225,
+        -1978653959042.138
+      ],
+      "initialVelocityMetersPerSecond": [
+        6578.237862086773,
+        -3397.329728821344,
+        -2900.3812024846216
+      ],
+      "dtSeconds": 994757997.6937641,
+      "expectedPositionMeters": [
+        2525437197787.1226,
+        -2585947720822.995,
+        348307325139.0239
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2309.141608859057,
+        -1670.3614724869808,
+        4283.32260013302
+      ]
+    },
+    {
+      "id": "sn8-090",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.2044738422136456,
+        0.5415590371857424,
+        2.7788071028790347
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        739621076504.0913,
+        -1246206065670.148,
+        542969575477.5823
+      ],
+      "initialVelocityMetersPerSecond": [
+        14490.773614484115,
+        -3920.473445090845,
+        -888.6026128537785
+      ],
+      "dtSeconds": -211679113.0043043,
+      "expectedPositionMeters": [
+        -1619102494004.7095,
+        920910361421.9158,
+        -172274063098.8532
+      ],
+      "expectedVelocityMetersPerSecond": [
+        4547.764008599772,
+        -11949.155938687687,
+        5749.321143748774
+      ]
+    },
+    {
+      "id": "sn8-091",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        0.12425429672534616,
+        -0.5042884402630499,
+        -2.0896209107319486
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -647819737135.9009,
+        -818669690349.5134,
+        86437720659.64578
+      ],
+      "initialVelocityMetersPerSecond": [
+        11912.077728770153,
+        -7235.8195875046895,
+        -7689.084598137477
+      ],
+      "dtSeconds": -20043197.857546087,
+      "expectedPositionMeters": [
+        -870697782481.4926,
+        -656743590864.2983,
+        237565893870.6587
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10300.231656074135,
+        -8814.71477089765,
+        -7348.67112926386
+      ]
+    },
+    {
+      "id": "sn8-092",
+      "regime": "circular",
+      "planeAnglesRad": [
+        2.4403505572533666,
+        2.7087277253627775,
+        0.2214925524218656
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -149210529509.6796,
+        -178846057540.28116,
+        65477441336.389626
+      ],
+      "initialVelocityMetersPerSecond": [
+        -18309.630272974464,
+        12527.554546513924,
+        -7506.186510360654
+      ],
+      "dtSeconds": -6650914.340234161,
+      "expectedPositionMeters": [
+        -5804210275.085434,
+        -220724391117.2976,
+        98914326804.57211
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -23314.18513223771,
+        -372.3298981768712,
+        -2198.9000986617357
+      ]
+    },
+    {
+      "id": "sn8-093",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.1165678281049578,
+        -1.2664583077205684,
+        -3.0406353667912684
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1863738391778.1162,
+        -850569431526.1024,
+        -3292234416918.9585
+      ],
+      "initialVelocityMetersPerSecond": [
+        3586.1919559697567,
+        955.6045640049597,
+        1876.1832908569277
+      ],
+      "dtSeconds": 143979190.77176893,
+      "expectedPositionMeters": [
+        2331777302271.1514,
+        -693912636136.1067,
+        -2946201726560.463
+      ],
+      "expectedVelocityMetersPerSecond": [
+        2884.046399496821,
+        1213.6776200956142,
+        2918.939524798033
+      ]
+    },
+    {
+      "id": "sn8-094",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        2.5386820472596323,
+        -0.11661575706771732,
+        0.6535156456838527
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1082518249545.8489,
+        1038351151518.3793,
+        -173676833338.13467
+      ],
+      "initialVelocityMetersPerSecond": [
+        -3677.613763522094,
+        -16366.830584830144,
+        1260.3342509968063
+      ],
+      "dtSeconds": -196509778.38547385,
+      "expectedPositionMeters": [
+        -71621795891.09937,
+        3733076364612.592,
+        -352311697554.2501
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5536.528702274327,
+        -12115.904526559425,
+        732.5607185929432
+      ]
+    },
+    {
+      "id": "sn8-095",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.1727997291622048,
+        2.5860898025897496,
+        0.9855895940196397
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1018509018053.2117,
+        1029191324098.051,
+        174126108539.6187
+      ],
+      "initialVelocityMetersPerSecond": [
+        2500.3257240748217,
+        -12089.891223818147,
+        5438.829507062927
+      ],
+      "dtSeconds": 31625245.10541328,
+      "expectedPositionMeters": [
+        1072083307217.8129,
+        625084766382.3638,
+        340397634025.4961
+      ],
+      "expectedVelocityMetersPerSecond": [
+        764.6656424628609,
+        -13440.183090147846,
+        5003.729888882515
+      ]
+    },
+    {
+      "id": "sn8-096",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.8387160238052567,
+        1.6847202580534102,
+        2.1523823538736755
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1491069573831.3794,
+        1743858424664.7827,
+        -2516514432536.084
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2154.373855504767,
+        4140.385068469743,
+        4145.641509035374
+      ],
+      "dtSeconds": 1018929906.3968776,
+      "expectedPositionMeters": [
+        -687379155367.8235,
+        1649354613814.2952,
+        2899019631375.021
+      ],
+      "expectedVelocityMetersPerSecond": [
+        3244.1648203458462,
+        -4268.530678821547,
+        3197.7334486033033
+      ]
+    },
+    {
+      "id": "sn8-097",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.5188729041038276,
+        -2.31222101190889,
+        -1.7781145681464887
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1613310662762.9443,
+        -1433064084844.9116,
+        -1401965377679.7266
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2627.498297760526,
+        4854.4590309602445,
+        -3899.1339546166914
+      ],
+      "dtSeconds": -208569092.1978185,
+      "expectedPositionMeters": [
+        -807719473811.0481,
+        -2119737812535.5923,
+        -386701115259.4236
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4970.745499003526,
+        1312.8899373608315,
+        -5607.201158488345
+      ]
+    },
+    {
+      "id": "sn8-098",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        2.012471284958898,
+        -2.9758507674386268,
+        -2.008853856004599
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -323839707813.08936,
+        409878192175.6699,
+        -78138915374.74014
+      ],
+      "initialVelocityMetersPerSecond": [
+        21928.508445088104,
+        18142.80516277654,
+        2034.4363391827678
+      ],
+      "dtSeconds": -203317881.84916738,
+      "expectedPositionMeters": [
+        -2413137525727.5034,
+        -3462016290101.7817,
+        -119897106591.35367
+      ],
+      "expectedVelocityMetersPerSecond": [
+        7991.829530921932,
+        17624.864597118667,
+        -39.96513165232341
+      ]
+    },
+    {
+      "id": "sn8-099",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -0.41779840111344546,
+        -0.8812106123984882,
+        0.006700008879509944
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        149993089217.54297,
+        -450584718068.6154,
+        547608206920.351
+      ],
+      "initialVelocityMetersPerSecond": [
+        14844.981589483989,
+        7741.551426458499,
+        -9266.974982047863
+      ],
+      "dtSeconds": 10065877.311004642,
+      "expectedPositionMeters": [
+        295386751293.98975,
+        -364246943545.36304,
+        444094285487.5835
+      ],
+      "expectedVelocityMetersPerSecond": [
+        13886.982367518609,
+        9451.372356259832,
+        -11348.127255118196
+      ]
+    },
+    {
+      "id": "sn8-100",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.304965787748028,
+        0.2667846611157767,
+        -1.498091301812262
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2696227832115.1406,
+        2177696011268.1956,
+        -691697966999.1128
+      ],
+      "initialVelocityMetersPerSecond": [
+        -3619.3460615218105,
+        -4824.931673619934,
+        -1082.3407193175212
+      ],
+      "dtSeconds": -1044290818.8397093,
+      "expectedPositionMeters": [
+        2668252260694.3506,
+        2185613830820.1445,
+        770696161625.073
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -3681.147539136178,
+        4814.156353370793,
+        -907.8239924447573
+      ]
+    },
+    {
+      "id": "sn8-101",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -2.699946822324727,
+        1.1528597315652798,
+        -1.526396529032071
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -55278727257.904434,
+        -228339424538.78894,
+        -147172157827.57047
+      ],
+      "initialVelocityMetersPerSecond": [
+        1476.0101137218453,
+        -27598.300074902912,
+        562.0336798323867
+      ],
+      "dtSeconds": -27506863.61466509,
+      "expectedPositionMeters": [
+        180794113694.68784,
+        -175445364056.1184,
+        389166385734.3439
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5357.10197189994,
+        15501.107038702894,
+        -10501.696580157311
+      ]
+    },
+    {
+      "id": "sn8-102",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.2837879051514216,
+        -3.0312118033182056,
+        -2.815866070303766
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -178453306755.0558,
+        921443946272.9602,
+        -103083958447.63393
+      ],
+      "initialVelocityMetersPerSecond": [
+        4661.737693912082,
+        20032.96455308629,
+        -1938.2026165872724
+      ],
+      "dtSeconds": 152347179.4100292,
+      "expectedPositionMeters": [
+        562568435665.1881,
+        3341513228733.2173,
+        -330919208538.93634
+      ],
+      "expectedVelocityMetersPerSecond": [
+        4733.458850166691,
+        14125.279905417248,
+        -1315.3304889022806
+      ]
+    },
+    {
+      "id": "sn8-103",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -2.6984449284299834,
+        2.0602423604987443,
+        -1.7570758408705862
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        37833646595.05314,
+        248445334273.57706,
+        16584086247.098732
+      ],
+      "initialVelocityMetersPerSecond": [
+        13642.972231808948,
+        -8623.062000327798,
+        -28167.129652374988
+      ],
+      "dtSeconds": -51424395.27815653,
+      "expectedPositionMeters": [
+        -500412794375.9772,
+        -47103814764.87909,
+        906801066488.316
+      ],
+      "expectedVelocityMetersPerSecond": [
+        7716.846863834402,
+        8151.805165642192,
+        -11402.033627343779
+      ]
+    },
+    {
+      "id": "sn8-104",
+      "regime": "circular",
+      "planeAnglesRad": [
+        0.6128671005943231,
+        -0.8211630674602359,
+        2.5752362734662526
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2650911892494.1035,
+        318404377594.7937,
+        -1239308195783.8818
+      ],
+      "initialVelocityMetersPerSecond": [
+        1251.2147915630392,
+        -5230.486040401141,
+        -4020.2024324383715
+      ],
+      "dtSeconds": -846115564.9226471,
+      "expectedPositionMeters": [
+        418565810615.78076,
+        2034611395619.1648,
+        2085607619993.6294
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6100.82621667233,
+        2518.970281863054,
+        -1232.9876172513157
+      ]
+    },
+    {
+      "id": "sn8-105",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.0556545154930101,
+        -0.7334642069103339,
+        0.13970104777424242
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -114158584035.34395,
+        -418503974366.7462,
+        359145967749.0404
+      ],
+      "initialVelocityMetersPerSecond": [
+        19499.10376218401,
+        3132.695444539239,
+        -348.73908737356686
+      ],
+      "dtSeconds": 245217801.7268221,
+      "expectedPositionMeters": [
+        -74030229103.6308,
+        1491417408378.8513,
+        -1340224716121.1038
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5388.236760607405,
+        3151.1689638185926,
+        -3488.239270753549
+      ]
+    },
+    {
+      "id": "sn8-106",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.877727715733668,
+        -2.1478241048678246,
+        -2.5219989222138874
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        378897441746.87616,
+        516423674344.6818,
+        -307868669237.29736
+      ],
+      "initialVelocityMetersPerSecond": [
+        20124.673293121446,
+        5999.366512141226,
+        10450.172236896717
+      ],
+      "dtSeconds": 219402036.440315,
+      "expectedPositionMeters": [
+        3434039511704.777,
+        811574289754.2197,
+        2048531264218.1252
+      ],
+      "expectedVelocityMetersPerSecond": [
+        11867.442605286022,
+        440.18078270907426,
+        10036.613439574403
+      ]
+    },
+    {
+      "id": "sn8-107",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        0.2465053088382434,
+        -2.7515054170110536,
+        -2.590307962936095
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1156598885937.704,
+        -143921904791.13153,
+        -198673273240.2825
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2411.279724862963,
+        13786.840666432088,
+        -5348.056418447624
+      ],
+      "dtSeconds": -54290404.598610714,
+      "expectedPositionMeters": [
+        -894773840127.2587,
+        -846232826643.6262,
+        103693335922.58649
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6948.6522988627485,
+        11637.245506273637,
+        -5572.324647005442
+      ]
+    },
+    {
+      "id": "sn8-108",
+      "regime": "circular",
+      "planeAnglesRad": [
+        2.0279757995914665,
+        2.0287996215728468,
+        1.2827698169783854
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        101922227314.02957,
+        -214197834378.81546,
+        321663882637.36993
+      ],
+      "initialVelocityMetersPerSecond": [
+        -8054.737710759016,
+        -14667.107741349397,
+        -7214.69220560021
+      ],
+      "dtSeconds": 177823068.90188974,
+      "expectedPositionMeters": [
+        -196584505563.62918,
+        -257666701046.2704,
+        -233877979747.58298
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2477.5917464468257,
+        13133.37876827253,
+        -12386.70795546784
+      ]
+    },
+    {
+      "id": "sn8-109",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -2.600612082676306,
+        2.3142157164597403,
+        -2.5122381469738517
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -816991939777.0984,
+        96964944865.43677,
+        608331522513.0624
+      ],
+      "initialVelocityMetersPerSecond": [
+        5605.721070256611,
+        6923.4241218762845,
+        2498.7421843955985
+      ],
+      "dtSeconds": 459218090.33799464,
+      "expectedPositionMeters": [
+        130974534990.594,
+        472569748184.7923,
+        331674110025.6216
+      ],
+      "expectedVelocityMetersPerSecond": [
+        12207.736516428318,
+        -3290.2057357625517,
+        -10708.943637570961
+      ]
+    },
+    {
+      "id": "sn8-110",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.7708450998449856,
+        -0.7280865234294533,
+        0.720520734018316
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        3632736287396.6514,
+        195129864340.72705,
+        2005966744953.2537
+      ],
+      "initialVelocityMetersPerSecond": [
+        8540.07579480384,
+        3987.4514749508567,
+        2351.823109155853
+      ],
+      "dtSeconds": -178730194.0710311,
+      "expectedPositionMeters": [
+        1963552780518.2349,
+        -512544966266.4907,
+        1498273520917.59
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10412.447261385852,
+        3810.4849942838428,
+        3571.6580657669383
+      ]
+    },
+    {
+      "id": "sn8-111",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        2.0600274494205593,
+        0.6314745868955449,
+        -2.0097267211245775
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        516493964447.47064,
+        -477874483712.10236,
+        490472833497.88184
+      ],
+      "initialVelocityMetersPerSecond": [
+        5895.800056964056,
+        16527.830960907915,
+        -1233.7861904238162
+      ],
+      "dtSeconds": 43419512.8578142,
+      "expectedPositionMeters": [
+        623820743795.4224,
+        291548431526.02295,
+        322380853447.96814
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -1616.9053468065886,
+        17445.029257939874,
+        -6492.621873159461
+      ]
+    },
+    {
+      "id": "sn8-112",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.5206809274902073,
+        1.268274040309568,
+        -2.904931925403771
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1281135277956.104,
+        613533826764.0134,
+        -948600889651.1251
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5485.95305021303,
+        874.0821235357055,
+        -6843.730705405026
+      ],
+      "dtSeconds": 465547326.9567412,
+      "expectedPositionMeters": [
+        -1662961336580.7456,
+        -339322485900.97253,
+        -192340449343.93018
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -399.39022299013686,
+        -2778.8723611870114,
+        8355.519507842751
+      ]
+    },
+    {
+      "id": "sn8-113",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.1777216242708954,
+        3.002460895218367,
+        1.4276562523829694
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -45885935506.366806,
+        -329184767598.1276,
+        215955027.36163652
+      ],
+      "initialVelocityMetersPerSecond": [
+        -25092.489727738553,
+        -7293.999239930299,
+        -3332.220139061654
+      ],
+      "dtSeconds": 124720643.94855237,
+      "expectedPositionMeters": [
+        -1480366941149.6948,
+        361599756865.30084,
+        -212408790453.55603
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4921.353933860663,
+        6555.762316045827,
+        -813.0820073907637
+      ]
+    },
+    {
+      "id": "sn8-114",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.7162067074098335,
+        -0.13701074173999928,
+        -1.3879081463531808
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        155033771810.15143,
+        1559442767572.316,
+        -60122207716.09587
+      ],
+      "initialVelocityMetersPerSecond": [
+        -10479.344072782735,
+        10358.857546517032,
+        1160.9872539456685
+      ],
+      "dtSeconds": 40527792.34201557,
+      "expectedPositionMeters": [
+        -270317928031.1983,
+        1941146490022.733,
+        -12026420066.02098
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -10444.9011819002,
+        8609.022733142,
+        1200.1952710680723
+      ]
+    },
+    {
+      "id": "sn8-115",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -2.1737751573096,
+        -0.3424239206917128,
+        -0.8322515337599787
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -150138189163.73517,
+        -229199205913.6643,
+        94577436545.49748
+      ],
+      "initialVelocityMetersPerSecond": [
+        16211.478399837535,
+        -25485.164833712148,
+        1842.7076211510328
+      ],
+      "dtSeconds": -11796542.88451919,
+      "expectedPositionMeters": [
+        -231705959236.90344,
+        128057326516.27434,
+        30344184619.357292
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4432.631948922752,
+        -30099.88824094805,
+        8391.693781543701
+      ]
+    },
+    {
+      "id": "sn8-116",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.1986290640422128,
+        1.5234571255549625,
+        -2.718892192255365
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -447222384672.8446,
+        -270111397945.74478,
+        1327203330913.7283
+      ],
+      "initialVelocityMetersPerSecond": [
+        8262.81642797896,
+        3534.7382504792145,
+        3503.675321582065
+      ],
+      "dtSeconds": -1038786147.1949507,
+      "expectedPositionMeters": [
+        -1155227122554.109,
+        -552281740343.5764,
+        628388323283.9324
+      ],
+      "expectedVelocityMetersPerSecond": [
+        4047.9947356309344,
+        1371.649539560425,
+        8647.344490759631
+      ]
+    },
+    {
+      "id": "sn8-117",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.6407874054407792,
+        -1.3400310089795113,
+        1.7522235083432527
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -86170204028.95119,
+        1055515410076.8007,
+        449857819196.78906
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2250.859876440487,
+        -1352.034715238719,
+        -10461.20927325005
+      ],
+      "dtSeconds": 411945649.2187087,
+      "expectedPositionMeters": [
+        409681614555.8932,
+        -97212929281.82422,
+        1640416394216.442
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -771.2565152271882,
+        6266.5699573284355,
+        1583.7411248659796
+      ]
+    },
+    {
+      "id": "sn8-118",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        0.2559700629246544,
+        2.31580337195024,
+        -0.14375491556967424
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -328101912961.8131,
+        -1146356713591.0864,
+        1281057091542.4587
+      ],
+      "initialVelocityMetersPerSecond": [
+        -12508.627244161635,
+        -7531.983256635384,
+        10025.096945894817
+      ],
+      "dtSeconds": -245408600.76424995,
+      "expectedPositionMeters": [
+        739686401473.1891,
+        1718846455054.3865,
+        -1959295397472.3352
+      ],
+      "expectedVelocityMetersPerSecond": [
+        2144.8547182910916,
+        -11060.653215766695,
+        11535.44009492442
+      ]
+    },
+    {
+      "id": "sn8-119",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.116707191309671,
+        -3.119427405884563,
+        -0.5016845055786976
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        200132737750.24072,
+        -735473766527.1799,
+        -12161837958.565773
+      ],
+      "initialVelocityMetersPerSecond": [
+        -18547.70116694306,
+        -2027.2314669798716,
+        -237.14207004035273
+      ],
+      "dtSeconds": 12255604.645047467,
+      "expectedPositionMeters": [
+        -30041679633.647156,
+        -743032886617.2532,
+        -14762673923.602053
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -18871.32858237795,
+        833.684089929741,
+        -184.984415830561
+      ]
+    },
+    {
+      "id": "sn8-120",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.0561548003969738,
+        0.7722424413157709,
+        -2.425399041864104
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        50297903332.50537,
+        -1047858690104.6829,
+        802046362931.6658
+      ],
+      "initialVelocityMetersPerSecond": [
+        8903.064972341988,
+        3062.6821602891646,
+        3443.0087124289967
+      ],
+      "dtSeconds": -445133728.59556216,
+      "expectedPositionMeters": [
+        227219041304.83136,
+        1113385052644.9412,
+        -672726774860.9329
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -8742.70751158275,
+        -1103.777969183676,
+        -4779.710919314879
+      ]
+    },
+    {
+      "id": "sn8-121",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.1903922728931235,
+        2.502697956961649,
+        -2.5688834876490776
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1358446222371.686,
+        711772735168.8552,
+        -102478548936.4079
+      ],
+      "initialVelocityMetersPerSecond": [
+        2144.7559103200474,
+        -7183.080043021275,
+        -5347.750682822158
+      ],
+      "dtSeconds": -201099311.3644236,
+      "expectedPositionMeters": [
+        207662655880.8694,
+        1452430577546.9546,
+        823156686590.0046
+      ],
+      "expectedVelocityMetersPerSecond": [
+        7808.7490024477065,
+        275.73129751075703,
+        -2971.243345934515
+      ]
+    },
+    {
+      "id": "sn8-122",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        2.0934253012488684,
+        2.4554757574149777,
+        0.19824469757996788
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1525049607517.5457,
+        -869390853942.0083,
+        451998559891.097
+      ],
+      "initialVelocityMetersPerSecond": [
+        -10281.375997848225,
+        5328.618829368719,
+        -5935.8165317338135
+      ],
+      "dtSeconds": -236646249.96620727,
+      "expectedPositionMeters": [
+        1386888817521.455,
+        -1248761835234.956,
+        1226154507251.777
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -11772.348553225283,
+        -1704.5942678240303,
+        -530.0615402226699
+      ]
+    },
+    {
+      "id": "sn8-123",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -2.4812361171387427,
+        0.5762202497316604,
+        1.9882775132057837
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        229600393279.36026,
+        -112964321254.80923,
+        -106614728579.97989
+      ],
+      "initialVelocityMetersPerSecond": [
+        9508.448607233186,
+        26589.248080749698,
+        -12652.933161291385
+      ],
+      "dtSeconds": -17448167.692160983,
+      "expectedPositionMeters": [
+        -61287222012.76294,
+        -409679336020.0493,
+        144336664187.36472
+      ],
+      "expectedVelocityMetersPerSecond": [
+        18794.737999272897,
+        8497.668970205843,
+        -13402.337348989236
+      ]
+    },
+    {
+      "id": "sn8-124",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.4514844033826773,
+        0.15460560988807615,
+        -1.9190050060524768
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1207687699471.3977,
+        3457848087138.457,
+        -360803215469.94147
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5605.439722782388,
+        -2032.1634470587153,
+        -713.1086248688244
+      ],
+      "dtSeconds": -208745738.4805371,
+      "expectedPositionMeters": [
+        9304142721.74292,
+        3675275218893.268,
+        -194080992867.16443
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5941.667883584007,
+        -30.83681298572219,
+        -868.7914158886463
+      ]
+    },
+    {
+      "id": "sn8-125",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.7669727345855604,
+        3.029583871748563,
+        -0.1988283549642098
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        688918874447.3317,
+        1896945842184.1006,
+        -224469771692.22577
+      ],
+      "initialVelocityMetersPerSecond": [
+        7768.016044474579,
+        -572.2049214281393,
+        -109.48916317035057
+      ],
+      "dtSeconds": -760446828.2528504,
+      "expectedPositionMeters": [
+        1662924055594.9348,
+        -1340202689205.0444,
+        110830237603.84402
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5907.1154823097095,
+        -4337.526075772688,
+        609.5098697269775
+      ]
+    },
+    {
+      "id": "sn8-126",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        0.4674934696244164,
+        -0.8918133656899427,
+        -0.729510542144038
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        393278423227.9401,
+        -312506377790.8793,
+        -36120119467.58452
+      ],
+      "initialVelocityMetersPerSecond": [
+        3981.3581904352095,
+        19991.725437065277,
+        -21756.953234751247
+      ],
+      "dtSeconds": -38472323.82330454,
+      "expectedPositionMeters": [
+        106604582706.09842,
+        -904294826319.2926,
+        747353705487.1093
+      ],
+      "expectedVelocityMetersPerSecond": [
+        8576.493004520842,
+        12671.4611889458,
+        -18789.617210308978
+      ]
+    },
+    {
+      "id": "sn8-127",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.6583337293195244,
+        1.2715153024391617,
+        -1.8445764239463198
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -59807559906.9355,
+        -106903283208.43312,
+        -92939462004.31952
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5766.085034422898,
+        -38142.19747643793,
+        15431.201130648866
+      ],
+      "dtSeconds": -30310795.289411448,
+      "expectedPositionMeters": [
+        260649296854.70822,
+        417730970555.1589,
+        447250600505.4307
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -7182.5778411215615,
+        -5124.152988944301,
+        -17921.443241990135
+      ]
+    },
+    {
+      "id": "sn8-128",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.8208681859371016,
+        1.3631709947478816,
+        1.287048565278302
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        614527170960.5769,
+        1120773243127.0032,
+        -1311050574826.7366
+      ],
+      "initialVelocityMetersPerSecond": [
+        595.7101731936532,
+        6315.431395190408,
+        5678.077380777307
+      ],
+      "dtSeconds": -941440672.3876481,
+      "expectedPositionMeters": [
+        -81074325529.62895,
+        914204790606.6422,
+        1584388358542.0354
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2894.3050439670806,
+        -6998.030825787806,
+        3889.816182506371
+      ]
+    },
+    {
+      "id": "sn8-129",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -2.2995408703179465,
+        -2.2595757335848354,
+        -0.02019018543414175
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        3381887221953.5073,
+        -2754809823340.5195,
+        -3262501278329.1465
+      ],
+      "initialVelocityMetersPerSecond": [
+        -1707.8654232320641,
+        -378.23699035566847,
+        -501.2105274889628
+      ],
+      "dtSeconds": 356711015.66107446,
+      "expectedPositionMeters": [
+        2597922251717.9014,
+        -2735280505738.8057,
+        -3258009505256.9775
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2688.041099808712,
+        526.785252564511,
+        573.8096464511963
+      ]
+    },
+    {
+      "id": "sn8-130",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        0.733639208354691,
+        -2.6555654218077875,
+        -2.2809743337918027
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1180824801138.8413,
+        901010963793.8082,
+        -783349985952.3333
+      ],
+      "initialVelocityMetersPerSecond": [
+        3314.7301774988982,
+        13321.056492765145,
+        -3260.395057157556
+      ],
+      "dtSeconds": -184011815.18815047,
+      "expectedPositionMeters": [
+        -926779809293.423,
+        -1557072493684.1733,
+        165058484957.32886
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5467.554863318742,
+        11009.15527968769,
+        -5982.092839342296
+      ]
+    },
+    {
+      "id": "sn8-131",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -2.918731538728216,
+        -3.0330249983975808,
+        2.1460465906962165
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        166752360100.46576,
+        -1008946764283.5177,
+        44579202890.00521
+      ],
+      "initialVelocityMetersPerSecond": [
+        -15498.46628353544,
+        -4044.1566456066657,
+        1657.2099648848994
+      ],
+      "dtSeconds": 28440989.001212727,
+      "expectedPositionMeters": [
+        -275202114928.2041,
+        -1075204858803.4243,
+        88926719646.79764
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -15354.935819500859,
+        -720.2034998626373,
+        1446.976986913827
+      ]
+    },
+    {
+      "id": "sn8-132",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.5449505369865966,
+        -2.418563693078009,
+        2.621609037634256
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        533608974359.0701,
+        -814873972056.0444,
+        390072339167.4445
+      ],
+      "initialVelocityMetersPerSecond": [
+        -8949.851138442697,
+        -2914.020459316907,
+        6155.682470178645
+      ],
+      "dtSeconds": -149102121.67759335,
+      "expectedPositionMeters": [
+        820057526648.6289,
+        294069961505.6959,
+        -584758983138.7509
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5962.438660310462,
+        -8651.312715495385,
+        4010.971307801811
+      ]
+    },
+    {
+      "id": "sn8-133",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.2400438708554014,
+        1.6494941666055283,
+        1.62173297681007
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        51169646440.713066,
+        1057003486307.3293,
+        1330449806353.851
+      ],
+      "initialVelocityMetersPerSecond": [
+        786.8489388410173,
+        -5486.696713206165,
+        6422.403266662784
+      ],
+      "dtSeconds": -778525245.6676433,
+      "expectedPositionMeters": [
+        176732939877.28735,
+        -1033853439204.2969,
+        1570686535165.8623
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -51.87313525845792,
+        -5991.102643006329,
+        -4524.94792141474
+      ]
+    },
+    {
+      "id": "sn8-134",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.38916672415828124,
+        -1.168409575938276,
+        -1.3797710637347231
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        300749168435.86804,
+        -1633858667117.7808,
+        35090859568.72551
+      ],
+      "initialVelocityMetersPerSecond": [
+        5527.869552401635,
+        -1910.2635928808058,
+        -11899.699687295402
+      ],
+      "dtSeconds": -130762498.32244858,
+      "expectedPositionMeters": [
+        -437071628298.3041,
+        -994061885877.7219,
+        1451705282231.7793
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5318.175951785044,
+        -7254.306091931235,
+        -9031.978709407062
+      ]
+    },
+    {
+      "id": "sn8-135",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        2.322590182620905,
+        -1.2990364398995475,
+        -1.4078262871918372
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1515360105.0391846,
+        505256602160.7629,
+        -299558020283.8488
+      ],
+      "initialVelocityMetersPerSecond": [
+        -6539.29181041442,
+        12611.89331085771,
+        15813.065173528215
+      ],
+      "dtSeconds": -62271603.78946947,
+      "expectedPositionMeters": [
+        302385573471.71643,
+        -538596638675.40796,
+        -757182703920.7455
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2921.8990374888267,
+        16194.082490639707,
+        917.6251033397521
+      ]
+    },
+    {
+      "id": "sn8-136",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -1.330052223579205,
+        -2.2525161289890407,
+        0.7916559304796973
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -890369356715.9008,
+        1993049349110.3936,
+        2506397123617.456
+      ],
+      "initialVelocityMetersPerSecond": [
+        4987.549766031439,
+        3699.3001981658654,
+        -1169.857062043132
+      ],
+      "dtSeconds": -75881688.52948889,
+      "expectedPositionMeters": [
+        -1258272444867.8423,
+        1692608991789.064,
+        2568823679439.0967
+      ],
+      "expectedVelocityMetersPerSecond": [
+        4692.382299322396,
+        4205.613737647632,
+        -472.6538026059176
+      ]
+    },
+    {
+      "id": "sn8-137",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.4372620858444476,
+        2.5065172735139454,
+        1.8771977543612275
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -903398938204.8691,
+        -398286213905.25903,
+        -723253403789.0792
+      ],
+      "initialVelocityMetersPerSecond": [
+        -4308.794327982308,
+        9157.128272438933,
+        -991.9286792578746
+      ],
+      "dtSeconds": -571451839.8820745,
+      "expectedPositionMeters": [
+        -938368492222.7476,
+        701120049045.8556,
+        -503451169958.08716
+      ],
+      "expectedVelocityMetersPerSecond": [
+        3603.540350653677,
+        7952.2692973745625,
+        4299.429794680106
+      ]
+    },
+    {
+      "id": "sn8-138",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -1.7369415007868627,
+        0.01940156300406315,
+        0.997429485798226
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        366213036364.35974,
+        -2059291190945.0332,
+        -27645620365.576897
+      ],
+      "initialVelocityMetersPerSecond": [
+        11953.04997207751,
+        8795.281898893616,
+        -102.26665104403959
+      ],
+      "dtSeconds": -191196071.55511793,
+      "expectedPositionMeters": [
+        -1890713794391.727,
+        -3370129258018.5347,
+        -4653517206.571163
+      ],
+      "expectedVelocityMetersPerSecond": [
+        11417.039137884702,
+        5628.107367594497,
+        -126.86674925439945
+      ]
+    },
+    {
+      "id": "sn8-139",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -2.323636743210039,
+        -2.35897808935853,
+        0.0810199919546637
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -921400356106.4818,
+        263043710468.52502,
+        334881485285.5315
+      ],
+      "initialVelocityMetersPerSecond": [
+        9047.841917297357,
+        9875.853742161984,
+        9060.620183068571
+      ],
+      "dtSeconds": 49968421.72626687,
+      "expectedPositionMeters": [
+        -344449057373.6643,
+        686767469434.1155,
+        708436362307.2434
+      ],
+      "expectedVelocityMetersPerSecond": [
+        13365.985306651037,
+        6678.111348420557,
+        5543.529160397275
+      ]
+    },
+    {
+      "id": "sn8-140",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -1.4474048526571919,
+        2.1497449045902277,
+        -0.7487406262303522
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1644361344460.4194,
+        1122921385273.7134,
+        -2970836008791.1934
+      ],
+      "initialVelocityMetersPerSecond": [
+        4149.215650040977,
+        -4415.63637905307,
+        627.5665501593687
+      ],
+      "dtSeconds": -373012276.3214919,
+      "expectedPositionMeters": [
+        -122169753334.28442,
+        2442296381115.0483,
+        -2609790450966.0693
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5001.7136471149015,
+        -2418.9488249389074,
+        -2497.843488297864
+      ]
+    },
+    {
+      "id": "sn8-141",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.6346277489570795,
+        1.758832207565229,
+        -2.489037674320169
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1918207674254.9956,
+        1019990117620.6487,
+        -1862234854574.965
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2448.426953722963,
+        -3130.3653656178967,
+        -5257.697284817674
+      ],
+      "dtSeconds": 97680300.71186961,
+      "expectedPositionMeters": [
+        1630609621829.6719,
+        690014505565.1364,
+        -2322296679776.33
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -3404.670405413849,
+        -3591.6576592189967,
+        -4132.348064378811
+      ]
+    },
+    {
+      "id": "sn8-142",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -1.2534066602959086,
+        2.4170765774630674,
+        3.139255277386483
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1007561913206.7195,
+        -1147297429190.179,
+        -1017542893759.93
+      ],
+      "initialVelocityMetersPerSecond": [
+        -13867.646317145818,
+        4441.975294050177,
+        3902.847037761011
+      ],
+      "dtSeconds": 53446797.82689705,
+      "expectedPositionMeters": [
+        -1714469088530.1653,
+        -880262805346.3202,
+        -782656360538.4601
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -12553.939371206678,
+        5444.900854542277,
+        4793.241562531537
+      ]
+    },
+    {
+      "id": "sn8-143",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -0.4739832292959787,
+        0.5284818525508967,
+        0.02514360808116356
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        361689557319.9613,
+        -163740917326.91785,
+        -100884091460.57516
+      ],
+      "initialVelocityMetersPerSecond": [
+        11536.597086566915,
+        19669.59973455569,
+        11311.69683601819
+      ],
+      "dtSeconds": 17921812.74381136,
+      "expectedPositionMeters": [
+        455194780995.84546,
+        203377987110.14264,
+        112028766192.25546
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -219.49458046233303,
+        19680.940596204993,
+        11490.887523586756
+      ]
+    },
+    {
+      "id": "sn8-144",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.7134794228435233,
+        2.8892191720780973,
+        1.2717618371081674
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        409886528707.3327,
+        -196140263138.9432,
+        115907856325.75943
+      ],
+      "initialVelocityMetersPerSecond": [
+        -7119.1286639821465,
+        -15230.275614488568,
+        -597.3307884266219
+      ],
+      "dtSeconds": 22533365.338944394,
+      "expectedPositionMeters": [
+        139598432715.39496,
+        -442491426652.8195,
+        68016287168.23328
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -15550.168446839758,
+        -5431.4102018905305,
+        -3419.376667190732
+      ]
+    },
+    {
+      "id": "sn8-145",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -2.1911316802256438,
+        1.1274801427822396,
+        -3.0766930554960363
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        161815252747.92767,
+        460546130439.675,
+        -945758674448.8907
+      ],
+      "initialVelocityMetersPerSecond": [
+        -13322.225617757165,
+        1170.022558508133,
+        -4278.4264813831405
+      ],
+      "dtSeconds": -1261597497.6619227,
+      "expectedPositionMeters": [
+        -2599607975966.088,
+        -1452238325380.3613,
+        2696889893203.9854
+      ],
+      "expectedVelocityMetersPerSecond": [
+        2399.5873846775894,
+        -1092.4932583131765,
+        2623.665645307937
+      ]
+    },
+    {
+      "id": "sn8-146",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.823266612993612,
+        -2.758699973876431,
+        0.28771409245894874
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -920922819019.4221,
+        -140490534513.0874,
+        50993326149.19388
+      ],
+      "initialVelocityMetersPerSecond": [
+        -133.54915582407193,
+        19330.28448526758,
+        7480.9069538969925
+      ],
+      "dtSeconds": -233925632.74763367,
+      "expectedPositionMeters": [
+        328569498767.67535,
+        -3548131659673.818,
+        -1407893668409.6636
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6147.317505758272,
+        12146.682532344461,
+        5393.810428426718
+      ]
+    },
+    {
+      "id": "sn8-147",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -0.9096825357068945,
+        -1.1135572253039303,
+        0.4603710176922342
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        551238796681.7727,
+        222502288499.06238,
+        92614268661.88152
+      ],
+      "initialVelocityMetersPerSecond": [
+        6160.403922797777,
+        11927.08544263503,
+        -16154.76043706113
+      ],
+      "dtSeconds": 16536790.2181634,
+      "expectedPositionMeters": [
+        614162181352.039,
+        400892648384.568,
+        -175390042099.25635
+      ],
+      "expectedVelocityMetersPerSecond": [
+        1858.2045045821137,
+        9686.218009066644,
+        -15959.274067787295
+      ]
+    },
+    {
+      "id": "sn8-148",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.860685315008634,
+        0.5390616958494645,
+        -0.6489685852844187
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -495630902859.74866,
+        213199617211.55222,
+        -77571248140.2015
+      ],
+      "initialVelocityMetersPerSecond": [
+        -4329.379751754634,
+        -12864.697356723114,
+        -7695.817343714869
+      ],
+      "dtSeconds": -332753988.7892045,
+      "expectedPositionMeters": [
+        477951377956.8309,
+        -257223185762.92636,
+        50200400415.61517
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5731.30970380591,
+        12187.302306902891,
+        7879.804773090772
+      ]
+    },
+    {
+      "id": "sn8-149",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.3105001529778408,
+        -1.5858991984579367,
+        2.0886972326947975
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -478938087353.11066,
+        822490279172.5687,
+        592581701276.7606
+      ],
+      "initialVelocityMetersPerSecond": [
+        -3159.4658942479214,
+        5825.2336009858545,
+        -9182.369064728053
+      ],
+      "dtSeconds": -797094547.2849905,
+      "expectedPositionMeters": [
+        -222255039394.35526,
+        359327495875.16113,
+        1007733888415.3757
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5265.266816535144,
+        9373.247058073774,
+        -4337.540116193377
+      ]
+    },
+    {
+      "id": "sn8-150",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        0.04081729253662614,
+        3.057914076739113,
+        2.619130579359757
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        334465785553.1826,
+        901894411715.1907,
+        79553147156.41476
+      ],
+      "initialVelocityMetersPerSecond": [
+        18878.887070602294,
+        11500.806133373388,
+        1626.1049535531379
+      ],
+      "dtSeconds": 39212433.69504078,
+      "expectedPositionMeters": [
+        1040733015872.835,
+        1286396677535.7214,
+        137061248315.23581
+      ],
+      "expectedVelocityMetersPerSecond": [
+        17282.840739902913,
+        8698.1504167169,
+        1355.5919665586957
+      ]
+    },
+    {
+      "id": "sn8-151",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -0.9623077254943073,
+        0.02740847490850573,
+        -2.0797718797472204
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -314247845428.47455,
+        -796596470897.854,
+        3118570361.6832094
+      ],
+      "initialVelocityMetersPerSecond": [
+        10611.486052624163,
+        -14041.08547346295,
+        441.6172462767853
+      ],
+      "dtSeconds": 33960068.55453419,
+      "expectedPositionMeters": [
+        64646722911.841736,
+        -1192331864006.7214,
+        17476054348.0085
+      ],
+      "expectedVelocityMetersPerSecond": [
+        11315.966118657776,
+        -9697.843124021656,
+        400.46120948042085
+      ]
+    },
+    {
+      "id": "sn8-152",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -1.9131143876887908,
+        2.5079922009539626,
+        -2.651452477066228
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        2418867306950.9004,
+        -1894136917054.7002,
+        -2064213031397.706
+      ],
+      "initialVelocityMetersPerSecond": [
+        -4213.906984303483,
+        -4084.415664413266,
+        -1190.0125166048392
+      ],
+      "dtSeconds": -1469471611.019374,
+      "expectedPositionMeters": [
+        56405077745.68506,
+        3114466886723.299,
+        1999140722131.9004
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5749.963710484377,
+        827.8558487853857,
+        -1451.9522042708472
+      ]
+    },
+    {
+      "id": "sn8-153",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        0.05684703769571753,
+        2.565858497866164,
+        -1.6210007532977406
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -596867453829.0149,
+        342221651309.7846,
+        398078971004.7405
+      ],
+      "initialVelocityMetersPerSecond": [
+        2509.3622710194422,
+        12431.029392424143,
+        -1221.8246314779499
+      ],
+      "dtSeconds": -240284662.0759952,
+      "expectedPositionMeters": [
+        355415450234.2114,
+        836190107952.4374,
+        -203167820003.0536
+      ],
+      "expectedVelocityMetersPerSecond": [
+        7519.33371242993,
+        -5601.451743342884,
+        -5057.021665645556
+      ]
+    },
+    {
+      "id": "sn8-154",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -1.002028541871118,
+        2.717223261958299,
+        3.011098991350737
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -266646454201.35773,
+        -139934710038.3629,
+        -78365167968.66132
+      ],
+      "initialVelocityMetersPerSecond": [
+        -26158.05764771255,
+        24893.090862485114,
+        9613.750140480981
+      ],
+      "dtSeconds": 122550367.13549486,
+      "expectedPositionMeters": [
+        -1766242755856.476,
+        2633021817304.079,
+        1075704035872.6389
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -10180.616362845503,
+        21007.225365052516,
+        8812.31247823031
+      ]
+    },
+    {
+      "id": "sn8-155",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        2.8024175005056744,
+        0.5208752125787806,
+        0.5248316571350791
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -755500870454.8,
+        -114857336469.3505,
+        160159973244.4717
+      ],
+      "initialVelocityMetersPerSecond": [
+        1487.2922142894586,
+        -16286.44082918416,
+        -8513.874119779284
+      ],
+      "dtSeconds": 20087314.69044279,
+      "expectedPositionMeters": [
+        -684375986403.6156,
+        -429671318523.7702,
+        -16593652354.555481
+      ],
+      "expectedVelocityMetersPerSecond": [
+        5461.431926249052,
+        -14799.797464827243,
+        -8918.21110866207
+      ]
+    },
+    {
+      "id": "sn8-156",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.8835217281468077,
+        -1.386177016843775,
+        2.694348797267966
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        2151458128109.9668,
+        -906647398456.7864,
+        605075548613.0281
+      ],
+      "initialVelocityMetersPerSecond": [
+        -1137.5462805618104,
+        2005.8958681234908,
+        7050.398039722565
+      ],
+      "dtSeconds": -1317794370.6499815,
+      "expectedPositionMeters": [
+        -1610263969731.2808,
+        1070884294648.5214,
+        1441233769007.8774
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -4533.447743982999,
+        975.3372275865636,
+        -5789.84551933451
+      ]
+    },
+    {
+      "id": "sn8-157",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.013171348836096,
+        1.660650685577509,
+        -2.74870085422752
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        997117559347.5995,
+        367889504970.74744,
+        -465048430314.9159
+      ],
+      "initialVelocityMetersPerSecond": [
+        2785.6330371379595,
+        -99.97586363490484,
+        -12862.473820312789
+      ],
+      "dtSeconds": -202654338.2559169,
+      "expectedPositionMeters": [
+        -1244514805896.071,
+        -483464725542.7264,
+        331301628672.48663
+      ],
+      "expectedVelocityMetersPerSecond": [
+        8403.01817927912,
+        4167.934122925202,
+        7027.646904265916
+      ]
+    },
+    {
+      "id": "sn8-158",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -1.6051280391126594,
+        0.5670055965282192,
+        1.0132210305204072
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1276994967951.5752,
+        -2915637946424.2314,
+        -292377614453.6826
+      ],
+      "initialVelocityMetersPerSecond": [
+        8675.69316749807,
+        4506.321904792841,
+        -3169.2715913034244
+      ],
+      "dtSeconds": 7096194.684854531,
+      "expectedPositionMeters": [
+        -1215299912196.5405,
+        -2883358118196.7114,
+        -314836191257.5505
+      ],
+      "expectedVelocityMetersPerSecond": [
+        8712.511025841783,
+        4592.001962587455,
+        -3160.2969110763715
+      ]
+    },
+    {
+      "id": "sn8-159",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        2.6505753310139344,
+        2.4577003270866395,
+        -1.2800941731307944
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -410255530101.60986,
+        481434737693.1745,
+        207897139035.0534
+      ],
+      "initialVelocityMetersPerSecond": [
+        10219.88273248286,
+        13121.525365990003,
+        -11046.532694417561
+      ],
+      "dtSeconds": 59306999.22215521,
+      "expectedPositionMeters": [
+        331655201005.1605,
+        861114471946.5409,
+        -460181208645.54114
+      ],
+      "expectedVelocityMetersPerSecond": [
+        12458.214261177438,
+        1280.1357744129864,
+        -10027.94269837454
+      ]
+    },
+    {
+      "id": "sn8-160",
+      "regime": "circular",
+      "planeAnglesRad": [
+        0.20357801368635808,
+        0.8930750292995882,
+        0.5795551810236534
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1929815612165.077,
+        1652968729295.2615,
+        405246136325.54675
+      ],
+      "initialVelocityMetersPerSecond": [
+        -3630.067617013808,
+        2894.7856777685924,
+        5479.067554591461
+      ],
+      "dtSeconds": 1390913140.0733182,
+      "expectedPositionMeters": [
+        -546786176128.12146,
+        -1919790431161.126,
+        -1623621854376.2617
+      ],
+      "expectedVelocityMetersPerSecond": [
+        6313.5422483858365,
+        976.4093671538717,
+        -3280.726339953488
+      ]
+    },
+    {
+      "id": "sn8-161",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.9997691250514453,
+        1.6452540155680602,
+        1.193921095110289
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -33677609424.156944,
+        -133167594910.21655,
+        237196679178.8654
+      ],
+      "initialVelocityMetersPerSecond": [
+        -10224.754465844473,
+        -23152.254418189226,
+        -13228.044400908042
+      ],
+      "dtSeconds": 257991906.93954116,
+      "expectedPositionMeters": [
+        201177074119.05835,
+        752008385499.4043,
+        -1202395815180.746
+      ],
+      "expectedVelocityMetersPerSecond": [
+        1665.8325858949247,
+        3334.508652087384,
+        4313.496412177814
+      ]
+    },
+    {
+      "id": "sn8-162",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -1.8338041299174566,
+        -2.7709165124406603,
+        2.873809506617321
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        2490722800581.888,
+        -927691410559.4911,
+        91562867779.2675
+      ],
+      "initialVelocityMetersPerSecond": [
+        -12040.487963903142,
+        -4554.798662390732,
+        2945.243166704276
+      ],
+      "dtSeconds": -212431407.00676525,
+      "expectedPositionMeters": [
+        4774861402576.406,
+        100783501691.64343,
+        -528782298515.8781
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -9869.433478878334,
+        -4923.551120575646,
+        2860.1935186321625
+      ]
+    },
+    {
+      "id": "sn8-163",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -0.21416546212115772,
+        -2.639005304263202,
+        -0.4083645282394883
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        374013233968.08453,
+        390952523326.71643,
+        278861934778.16223
+      ],
+      "initialVelocityMetersPerSecond": [
+        7469.993066046551,
+        -18017.527626287847,
+        -7458.7436120988605
+      ],
+      "dtSeconds": -48302966.43634374,
+      "expectedPositionMeters": [
+        -86704483203.04883,
+        1054641020744.1182,
+        513107549349.81323
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10038.90969244765,
+        -10705.78494777506,
+        -3209.4627783795295
+      ]
+    },
+    {
+      "id": "sn8-164",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -1.8186875002886196,
+        1.652927641587131,
+        0.8837978043752139
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -143723210732.9374,
+        -92191662389.34921,
+        -639608189304.5347
+      ],
+      "initialVelocityMetersPerSecond": [
+        8484.897901552513,
+        10792.995462309107,
+        -3462.2773754525606
+      ],
+      "dtSeconds": 270790285.3490806,
+      "expectedPositionMeters": [
+        -313982461356.5835,
+        -319499627217.6874,
+        -487431330457.06323
+      ],
+      "expectedVelocityMetersPerSecond": [
+        6028.829853812046,
+        8583.842542440674,
+        -9510.019236265303
+      ]
+    },
+    {
+      "id": "sn8-165",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.008719331387466,
+        2.154677299303235,
+        2.614391479767563
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -949662021940.1714,
+        41462681930.10809,
+        -668893763714.224
+      ],
+      "initialVelocityMetersPerSecond": [
+        -1262.8061288062563,
+        5504.868981724995,
+        6238.667426089514
+      ],
+      "dtSeconds": -107699322.06790468,
+      "expectedPositionMeters": [
+        -445395298077.81256,
+        -487598088683.95404,
+        -976915792526.6509
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -7341.6760405761825,
+        3582.4771402102215,
+        -904.5686000303476
+      ]
+    },
+    {
+      "id": "sn8-166",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        2.7531585469164135,
+        2.664864323506383,
+        -0.7983703046184671
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -288980087669.4418,
+        150018999565.28424,
+        52822830952.03686
+      ],
+      "initialVelocityMetersPerSecond": [
+        10207.85537359229,
+        25412.19208340346,
+        -12935.03637864677
+      ],
+      "dtSeconds": -180146456.02856043,
+      "expectedPositionMeters": [
+        761372789161.348,
+        -2793849970699.2324,
+        725340209958.6116
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6561.599912851685,
+        12421.16360329841,
+        -2049.760843495123
+      ]
+    },
+    {
+      "id": "sn8-167",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        0.8998215028034551,
+        -1.5219128793664318,
+        -0.18400487262364162
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        681206257142.6346,
+        -129321629476.05127,
+        51088620222.3759
+      ],
+      "initialVelocityMetersPerSecond": [
+        -7551.349654552326,
+        2294.834498462177,
+        -17873.95963565403
+      ],
+      "dtSeconds": -60812549.24850513,
+      "expectedPositionMeters": [
+        849037363110.5331,
+        -208982366974.49612,
+        1024225201509.4581
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -110.91832733105639,
+        718.3226303978204,
+        -14020.19625097072
+      ]
+    },
+    {
+      "id": "sn8-168",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -1.1033841479102282,
+        -3.0423736433773954,
+        1.5102725066454754
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -2559069725829.425,
+        1499134719412.9639,
+        263305031481.97827
+      ],
+      "initialVelocityMetersPerSecond": [
+        3348.376161296964,
+        5768.1183950045115,
+        -297.9756449401964
+      ],
+      "dtSeconds": 403900217.29096663,
+      "expectedPositionMeters": [
+        -404457749516.53613,
+        2949343720039.7007,
+        57947028639.91461
+      ],
+      "expectedVelocityMetersPerSecond": [
+        6581.294039779406,
+        915.264625774214,
+        -648.4301412482289
+      ]
+    },
+    {
+      "id": "sn8-169",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.6291904422931056,
+        -0.2527390080642813,
+        -2.3044510250475487
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        74248483827.35768,
+        40475714961.98453,
+        -7242859127.092148
+      ],
+      "initialVelocityMetersPerSecond": [
+        -20653.112984309104,
+        49092.69349616889,
+        12451.213024562572
+      ],
+      "dtSeconds": 460727669.62352675,
+      "expectedPositionMeters": [
+        -840997280790.7988,
+        -703409564905.2219,
+        39679507845.2049
+      ],
+      "expectedVelocityMetersPerSecond": [
+        9805.734456495376,
+        2873.302791211168,
+        -1384.0506323682307
+      ]
+    },
+    {
+      "id": "sn8-170",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.5569782555533189,
+        2.7458580911175554,
+        2.796992885646657
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -563897517412.7281,
+        389651708022.2125,
+        73632104482.08513
+      ],
+      "initialVelocityMetersPerSecond": [
+        449.50629105911867,
+        24254.391939181754,
+        9600.598932765895
+      ],
+      "dtSeconds": -159558889.72278795,
+      "expectedPositionMeters": [
+        1242113113451.1333,
+        -2570775539271.755,
+        -835561575249.5352
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -12453.451608361329,
+        14622.57042668004,
+        3992.2077880234383
+      ]
+    },
+    {
+      "id": "sn8-171",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.047115192108449,
+        -2.305172470693255,
+        -2.432482972056072
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        435662635072.7298,
+        -491467535532.05426,
+        727358479633.8995
+      ],
+      "initialVelocityMetersPerSecond": [
+        -13903.07371491785,
+        -8243.125738278284,
+        -3098.091865336133
+      ],
+      "dtSeconds": -22692201.85136453,
+      "expectedPositionMeters": [
+        733812709607.7705,
+        -290392990009.3284,
+        773368280391.9326
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -12335.200475896634,
+        -9324.0079072252,
+        -1058.6585328812546
+      ]
+    },
+    {
+      "id": "sn8-172",
+      "regime": "circular",
+      "planeAnglesRad": [
+        0.42847872802639264,
+        -0.8888962499364585,
+        2.6335010894100117
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -554481104725.8896,
+        128528468918.39899,
+        -193972986924.24115
+      ],
+      "initialVelocityMetersPerSecond": [
+        1249.2073620676192,
+        -10443.881432165063,
+        -10491.141062787452
+      ],
+      "dtSeconds": 21402485.999856465,
+      "expectedPositionMeters": [
+        -453251447420.48663,
+        -102277968165.03706,
+        -381702403864.74945
+      ],
+      "expectedVelocityMetersPerSecond": [
+        7988.98146959478,
+        -10619.446312857172,
+        -6640.990459915345
+      ]
+    },
+    {
+      "id": "sn8-173",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -0.7969574741591603,
+        0.1797147622186186,
+        1.6295518577971144
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -263231601376.43262,
+        -376461827558.9413,
+        51756235161.1851
+      ],
+      "initialVelocityMetersPerSecond": [
+        12479.781195330808,
+        -8493.561936696406,
+        -2172.7385633397153
+      ],
+      "dtSeconds": -102722164.34744607,
+      "expectedPositionMeters": [
+        175347541945.07285,
+        -361230962907.7047,
+        -27947562295.826958
+      ],
+      "expectedVelocityMetersPerSecond": [
+        13982.954097289607,
+        10737.870360612733,
+        -2650.5220116784403
+      ]
+    },
+    {
+      "id": "sn8-174",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        0.16591841369463767,
+        1.2946698428713113,
+        -0.20447195352558367
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1380076650075.481,
+        -362191660245.30304,
+        -262635839190.7813
+      ],
+      "initialVelocityMetersPerSecond": [
+        348.12358738310434,
+        4308.986767977312,
+        15139.157954102648
+      ],
+      "dtSeconds": -161257539.15972635,
+      "expectedPositionMeters": [
+        874460155129.9884,
+        -881671354801.9442,
+        -2420006082569.421
+      ],
+      "expectedVelocityMetersPerSecond": [
+        4446.793352306519,
+        2461.18608375272,
+        11691.054308523955
+      ]
+    },
+    {
+      "id": "sn8-175",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.8330069511731042,
+        0.5791897152851684,
+        1.8388570195305745
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        90250835593.82054,
+        42184676755.69975,
+        -64224375778.32402
+      ],
+      "initialVelocityMetersPerSecond": [
+        -10216.833661870725,
+        46178.86239641686,
+        -1555.936155476013
+      ],
+      "dtSeconds": -41159526.30306734,
+      "expectedPositionMeters": [
+        -532696236088.1252,
+        -563284140517.9479,
+        433520465964.0977
+      ],
+      "expectedVelocityMetersPerSecond": [
+        13401.070868784796,
+        5537.745046717541,
+        -9410.699466810567
+      ]
+    },
+    {
+      "id": "sn8-176",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.7957244687010241,
+        2.9450316247842983,
+        -2.7331471281298256
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1073368071799.6475,
+        -2716124404782.461,
+        -411480961280.5193
+      ],
+      "initialVelocityMetersPerSecond": [
+        -6226.27513295781,
+        2321.6415338702373,
+        916.7318543282926
+      ],
+      "dtSeconds": -1477303547.8732014,
+      "expectedPositionMeters": [
+        454862450953.13025,
+        2872755254390.4805,
+        489024314727.7042
+      ],
+      "expectedVelocityMetersPerSecond": [
+        6607.263023598441,
+        -928.3337568752152,
+        -692.2358764576621
+      ]
+    },
+    {
+      "id": "sn8-177",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.1006597001316383,
+        -1.0790961707330706,
+        -0.8045168142716106
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -963510852743.4948,
+        538326861818.85645,
+        599165650980.54
+      ],
+      "initialVelocityMetersPerSecond": [
+        -3404.490121804103,
+        -4351.508729827717,
+        10214.303410004219
+      ],
+      "dtSeconds": 1575615615.239918,
+      "expectedPositionMeters": [
+        -504164113912.06195,
+        -1151478649153.5305,
+        2169171457228.892
+      ],
+      "expectedVelocityMetersPerSecond": [
+        3422.096171710817,
+        -4135.525785656755,
+        750.9961511561487
+      ]
+    },
+    {
+      "id": "sn8-178",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        1.7566837265799018,
+        0.33148707482172624,
+        2.1826480123104366
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -202232568230.28787,
+        -180411524312.79697,
+        92644969729.74828
+      ],
+      "initialVelocityMetersPerSecond": [
+        25020.605414266607,
+        -26190.157446897818,
+        -1871.793756828574
+      ],
+      "dtSeconds": 23298561.240378667,
+      "expectedPositionMeters": [
+        440383779556.7365,
+        -527956123309.14087,
+        -19702059281.25797
+      ],
+      "expectedVelocityMetersPerSecond": [
+        25844.040541385708,
+        -8706.067907121256,
+        -5560.323756388457
+      ]
+    },
+    {
+      "id": "sn8-179",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.773348308870005,
+        -2.672347880751798,
+        2.2242189938064536
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -442209273576.2369,
+        108309577835.7221,
+        144639235397.67606
+      ],
+      "initialVelocityMetersPerSecond": [
+        -8405.456443499632,
+        21769.54854942513,
+        -3325.9630679474362
+      ],
+      "dtSeconds": -52418803.79698022,
+      "expectedPositionMeters": [
+        535815303815.1554,
+        -481132692831.52783,
+        -67411505548.81367
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -17730.500974690007,
+        -346.3528023292474,
+        7244.605076738105
+      ]
+    },
+    {
+      "id": "sn8-180",
+      "regime": "circular",
+      "planeAnglesRad": [
+        1.4089357394542787,
+        -3.0683954436637793,
+        2.5817256356157197
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        906031525608.7268,
+        2157511372951.4702,
+        -169335698283.88742
+      ],
+      "initialVelocityMetersPerSecond": [
+        6931.437506188013,
+        -2917.7648008649257,
+        -88.63956757258842
+      ],
+      "dtSeconds": -860187256.4261041,
+      "expectedPositionMeters": [
+        -1650248441083.1235,
+        -1659245055118.1667,
+        167358771188.56152
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -5338.032911607419,
+        5296.861499240871,
+        -121.23201207350208
+      ]
+    },
+    {
+      "id": "sn8-181",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -2.272187361540741,
+        0.163328782554089,
+        1.4708235473935307
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1033719694920.1722,
+        216833692481.55692,
+        173069514691.14874
+      ],
+      "initialVelocityMetersPerSecond": [
+        1718.2049316229477,
+        -9332.069838498232,
+        -435.23249193861216
+      ],
+      "dtSeconds": -50975198.062205866,
+      "expectedPositionMeters": [
+        -993749507242.265,
+        648439578153.429,
+        173614396881.38373
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -2988.471622666463,
+        -7382.480529420234,
+        368.606163390893
+      ]
+    },
+    {
+      "id": "sn8-182",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        0.15282150742224054,
+        -0.6154718830074244,
+        -3.1279759466423696
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -652644394823.0896,
+        -1849710248533.9785,
+        -1301516029513.0933
+      ],
+      "initialVelocityMetersPerSecond": [
+        7052.98942961056,
+        -7815.4389913955565,
+        -5593.652092725232
+      ],
+      "dtSeconds": -14180544.360263683,
+      "expectedPositionMeters": [
+        -751925310055.0394,
+        -1736945566317.2954,
+        -1220832196168.1538
+      ],
+      "expectedVelocityMetersPerSecond": [
+        6944.476639584499,
+        -8091.909250405342,
+        -5788.079957131865
+      ]
+    },
+    {
+      "id": "sn8-183",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        -1.163962296898628,
+        -2.9979365528768898,
+        -1.0039626494346527
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        524751085118.5337,
+        -64026956283.61209,
+        59062023526.599655
+      ],
+      "initialVelocityMetersPerSecond": [
+        588.2341744764708,
+        -22268.5490530331,
+        -1657.886369797388
+      ],
+      "dtSeconds": 20428950.294904664,
+      "expectedPositionMeters": [
+        456981771984.32306,
+        -488538112030.9233,
+        17819037559.388546
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6289.05873155857,
+        -18765.16325676913,
+        -2225.0011013397907
+      ]
+    },
+    {
+      "id": "sn8-184",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -0.6195876192946113,
+        2.461329069820626,
+        -2.7443076140978317
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1354223119263.832,
+        -1719164965939.5837,
+        -858692337405.3219
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5863.102986290436,
+        2696.7548340677795,
+        3847.4585579565037
+      ],
+      "dtSeconds": 340803883.3928472,
+      "expectedPositionMeters": [
+        -2253143901412.4077,
+        -48494581207.06763,
+        669172475751.1714
+      ],
+      "expectedVelocityMetersPerSecond": [
+        1119.9439312037107,
+        6118.54404518264,
+        4214.3261592131785
+      ]
+    },
+    {
+      "id": "sn8-185",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.3143787081786495,
+        -0.46680956726970635,
+        0.21172720399015033
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        767715589402.1619,
+        46690981117.15712,
+        58301070376.015755
+      ],
+      "initialVelocityMetersPerSecond": [
+        -7676.046861742745,
+        11598.674811707755,
+        -6527.667372211535
+      ],
+      "dtSeconds": 764344109.7808373,
+      "expectedPositionMeters": [
+        539155782849.4674,
+        288372377311.02277,
+        -84982500416.00897
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -13522.289269058874,
+        9947.831583811307,
+        -6333.442784017743
+      ]
+    },
+    {
+      "id": "sn8-186",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.6688252161060535,
+        -3.1188567681375665,
+        -1.7640567130983977
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1091568642204.8867,
+        1370189897840.8455,
+        18375787025.379185
+      ],
+      "initialVelocityMetersPerSecond": [
+        -2160.4787028202572,
+        -13107.807139342476,
+        9.032762577372912
+      ],
+      "dtSeconds": 248376109.70376515,
+      "expectedPositionMeters": [
+        -1928010633049.922,
+        -2730178345.7373047,
+        -43014453956.23676
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -11317.279641756402,
+        5869.732646939894,
+        -278.1971072999434
+      ]
+    },
+    {
+      "id": "sn8-187",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        0.5416173295832789,
+        -1.043386526466815,
+        3.1280209415168576
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1297116909369.3035,
+        385685146278.5668,
+        631900727033.016
+      ],
+      "initialVelocityMetersPerSecond": [
+        108.55147039371798,
+        -6710.857027466664,
+        -11518.324304030006
+      ],
+      "dtSeconds": -18272628.945316877,
+      "expectedPositionMeters": [
+        -1291142242308.7312,
+        505704322758.0304,
+        838082679826.5898
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -727.8171937725297,
+        -6424.419296396523,
+        -11046.070694435095
+      ]
+    },
+    {
+      "id": "sn8-188",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.760967032817194,
+        -2.946989309450266,
+        0.7873717529703397
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -688715649857.5239,
+        -302021525141.17175,
+        54165626897.73338
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5084.054304903077,
+        12020.625582160586,
+        2381.9516980105227
+      ],
+      "dtSeconds": 599794183.8228235,
+      "expectedPositionMeters": [
+        555492047012.4868,
+        -488599149948.8351,
+        -145532194100.29642
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -8784.684922837316,
+        -9940.911374719046,
+        -155.9913453002091
+      ]
+    },
+    {
+      "id": "sn8-189",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        1.9304718607276081,
+        -2.9621775235275174,
+        1.9537661229211407
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -40690814248.6051,
+        -1657085244849.3748,
+        119149312995.6149
+      ],
+      "initialVelocityMetersPerSecond": [
+        -8806.019322772783,
+        -1874.153672437582,
+        1608.4259752951639
+      ],
+      "dtSeconds": -419796954.5947875,
+      "expectedPositionMeters": [
+        172525385271.81232,
+        1570758956416.8906,
+        -135476948987.36908
+      ],
+      "expectedVelocityMetersPerSecond": [
+        8880.329069061067,
+        -3287.675170910082,
+        -1271.0993109426531
+      ]
+    },
+    {
+      "id": "sn8-190",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.5088180322906966,
+        -2.055019896676529,
+        2.9080150545834407
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1544978486659.0767,
+        998123088515.4275,
+        -1166215259731.884
+      ],
+      "initialVelocityMetersPerSecond": [
+        1684.4115683524128,
+        5055.413306882073,
+        -10091.435262210942
+      ],
+      "dtSeconds": -65919469.280912794,
+      "expectedPositionMeters": [
+        -1601754163424.2776,
+        634928561614.2278,
+        -469486467584.75525
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -154.5201926260802,
+        5987.1011294147565,
+        -11005.422927093328
+      ]
+    },
+    {
+      "id": "sn8-191",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        0.7429318882613565,
+        -1.2625301656801644,
+        -0.671615660669596
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        1833988422.6821785,
+        56612656501.14331,
+        -142764354721.23575
+      ],
+      "initialVelocityMetersPerSecond": [
+        -28717.754242892468,
+        27635.29930097087,
+        -11820.116791017208
+      ],
+      "dtSeconds": 16583265.603096623,
+      "expectedPositionMeters": [
+        -375192952021.4241,
+        345140662688.1578,
+        -115313299745.54501
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -18143.536475935063,
+        12221.980724032062,
+        5408.839744594776
+      ]
+    },
+    {
+      "id": "sn8-192",
+      "regime": "circular",
+      "planeAnglesRad": [
+        0.9337912105704786,
+        -1.1369412855807512,
+        2.0044898884892506
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -219629018530.8328,
+        156938941801.30127,
+        -287820843371.73663
+      ],
+      "initialVelocityMetersPerSecond": [
+        2034.2831315595486,
+        -15304.496615767504,
+        -9897.334320569687
+      ],
+      "dtSeconds": -158383950.75617486,
+      "expectedPositionMeters": [
+        -142505816104.01007,
+        364362815137.2782,
+        51375153873.39047
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -8028.948198761911,
+        -818.2343972606968,
+        -16467.836362657086
+      ]
+    },
+    {
+      "id": "sn8-193",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        2.422705496077927,
+        0.5930246567911452,
+        0.32823345161164275
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -876848086465.1788,
+        319645204667.0325,
+        394427124372.90344
+      ],
+      "initialVelocityMetersPerSecond": [
+        -5594.76664628657,
+        -9541.092722131118,
+        -4871.365448930042
+      ],
+      "dtSeconds": 102719736.68070121,
+      "expectedPositionMeters": [
+        -822251849849.5715,
+        -652666700845.76,
+        -237735905264.13177
+      ],
+      "expectedVelocityMetersPerSecond": [
+        6188.39301341488,
+        -7437.467213263717,
+        -6089.341091711418
+      ]
+    },
+    {
+      "id": "sn8-194",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -0.8392514217855345,
+        -1.4610901682684196,
+        -2.96475592279125
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -369403011355.7073,
+        -3753175454.33226,
+        556426082626.4109
+      ],
+      "initialVelocityMetersPerSecond": [
+        -17107.62077902983,
+        -4615.885828766985,
+        -13930.191079941305
+      ],
+      "dtSeconds": 55466028.63106096,
+      "expectedPositionMeters": [
+        -994703663615.1521,
+        -221582392825.12115,
+        -391671819985.43604
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -6589.525169085404,
+        -3117.5485632652358,
+        -17337.73875926167
+      ]
+    },
+    {
+      "id": "sn8-195",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        1.2026505806184966,
+        -0.5861103742856666,
+        2.9899805938975135
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        91317847924.54446,
+        -178868399620.7256,
+        -108238093801.12317
+      ],
+      "initialVelocityMetersPerSecond": [
+        33961.62725004196,
+        -2722.553663432233,
+        1618.655550152508
+      ],
+      "dtSeconds": -8266280.698121054,
+      "expectedPositionMeters": [
+        -180128816779.5091,
+        -67927516377.771255,
+        -62644775052.304886
+      ],
+      "expectedVelocityMetersPerSecond": [
+        25158.885404675115,
+        -22856.218380615697,
+        -12478.187892105048
+      ]
+    },
+    {
+      "id": "sn8-196",
+      "regime": "circular",
+      "planeAnglesRad": [
+        -2.965880186156531,
+        -2.8004192469296663,
+        -0.879835776432687
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -980150531652.551,
+        1691465962215.6313,
+        114540181403.06194
+      ],
+      "initialVelocityMetersPerSecond": [
+        6803.430371399027,
+        3758.720905675235,
+        2712.038852782843
+      ],
+      "dtSeconds": -526591209.65840954,
+      "expectedPositionMeters": [
+        -707698347542.0165,
+        -1729679663398.2095,
+        -585015324672.4716
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -7376.535199123052,
+        3437.6797427070574,
+        -1240.5195874788142
+      ]
+    },
+    {
+      "id": "sn8-197",
+      "regime": "elliptical",
+      "planeAnglesRad": [
+        -1.0310951886182131,
+        -0.7160126156917381,
+        1.012577429422005
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -218288483077.3039,
+        -413729278024.89154,
+        29572875334.442436
+      ],
+      "initialVelocityMetersPerSecond": [
+        16832.863402477906,
+        10228.815206228599,
+        7708.248779573604
+      ],
+      "dtSeconds": -50709844.45059988,
+      "expectedPositionMeters": [
+        -837400541752.62,
+        -623231342952.9485,
+        -330764130905.1133
+      ],
+      "expectedVelocityMetersPerSecond": [
+        9140.991766048674,
+        1153.0165775895648,
+        6214.386117323506
+      ]
+    },
+    {
+      "id": "sn8-198",
+      "regime": "hyperbolic",
+      "planeAnglesRad": [
+        -2.3670096648868606,
+        -3.0243441543654086,
+        0.4756758750497818
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -1671465114197.079,
+        -297435923188.6197,
+        59013826739.277855
+      ],
+      "initialVelocityMetersPerSecond": [
+        2104.5179635644763,
+        14980.11224640373,
+        1455.0832606723336
+      ],
+      "dtSeconds": -172979557.45005307,
+      "expectedPositionMeters": [
+        -1620590932790.857,
+        -2668352158913.3794,
+        -191994294666.06033
+      ],
+      "expectedVelocityMetersPerSecond": [
+        -1584.805447220022,
+        12454.689421194007,
+        1389.6430723805167
+      ]
+    },
+    {
+      "id": "sn8-199",
+      "regime": "parabolic-near-parabolic",
+      "planeAnglesRad": [
+        2.5940663633748695,
+        -2.5046764052015664,
+        0.12924705226673305
+      ],
+      "initialEtSeconds": 0.0,
+      "initialPositionMeters": [
+        -32279600774.359886,
+        -64501795346.58585,
+        -44240229551.660934
+      ],
+      "initialVelocityMetersPerSecond": [
+        -44255.758745816915,
+        25528.712738038645,
+        22947.254513547283
+      ],
+      "dtSeconds": 7781054.638391174,
+      "expectedPositionMeters": [
+        -66073180523.896866,
+        194237391777.5142,
+        148790692265.437
+      ],
+      "expectedVelocityMetersPerSecond": [
+        10373.460617533012,
+        25179.93839179066,
+        17482.717569105534
+      ]
+    }
+  ]
+}

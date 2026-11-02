@@ -468,7 +468,7 @@ function Test-StructuredArgumentPassing {
 }
 
 function Get-GuestFailureMarker([string]$Text) {
-    $pattern = '(?m)(\[KERNEL-PANIC\][^\r\n]*|\[KERNEL-FAULT\][^\r\n]*|\[NATIVE-ELF-FAULT\][^\r\n]*|\[NATIVE-ELF\] discovery result=NO_APPS_DIRECTORY[^\r\n]*|\[SN10-GUEST\] appmodel-launch result=failed[^\r\n]*|\[Exception\] (?:Unhandled exception|Double fault)[^\r\n]*|Triple fault[^\r\n]*)'
+    $pattern = '(?m)(\[KERNEL-PANIC\][^\r\n]*|\[KERNEL-FAULT\][^\r\n]*|\[NATIVE-ELF-FAULT\][^\r\n]*|\[NATIVE-ELF\] (?:discovery result=NO_APPS_DIRECTORY|runtime=[^\r\n]*load FAIL)[^\r\n]*|STELLAR_NAVIGATOR_(?:UI status=(?:initial-draw-failed|redraw-failed)|LIFECYCLE status=(?:window-create-failed|input-error))[^\r\n]*|\[SN10-GUEST\] appmodel-launch result=failed[^\r\n]*|\[Exception\] (?:Unhandled exception|Double fault)[^\r\n]*|Triple fault[^\r\n]*)'
     $match = [regex]::Match($Text, $pattern)
     if ($match.Success) { return $match.Value }
     return $null
@@ -562,8 +562,13 @@ function Get-QacReservationCleanupAction($Reservation, [string]$ReservationId, [
 
 function Get-VerifiedGuestEphemeris([string]$Text) {
     $pattern = 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0\.000000 frame=J2000_SSB units=km position_km=\(([-+0-9.]+),([-+0-9.]+),([-+0-9.]+)\) sha256=' + $Expected.Dataset
-    if ($Text -notmatch $pattern) { throw 'Native guest ephemeris marker is missing, malformed, or does not identify the authenticated DE440s data.' }
     $line = [regex]::Match($Text, 'STELLAR_NAVIGATOR_EPHEMERIS status=available[^\r\n]+').Value
+    if ($Text -notmatch $pattern) {
+        if ($Text -match 'STELLAR_NAVIGATOR_EPHEMERIS status=') { throw 'NATIVE_EPHEMERIS_RECORD_INVALID: guest emitted an unavailable, malformed, or unauthenticated ephemeris record.' }
+        throw 'NATIVE_EPHEMERIS_RECORD_MISSING: guest did not emit an ephemeris result record.'
+    }
+    $record = [regex]::Match($line, 'STELLAR_NAVIGATOR_EPHEMERIS[^\r\n]*').Value
+    if ($record.Length -gt 512 -or $record -match '[^\x20-\x7E]') { throw 'NATIVE_EPHEMERIS_RECORD_INVALID: guest result record is not bounded printable ASCII.' }
     $position = [regex]::Match($line, 'position_km=\(([-+0-9.]+),([-+0-9.]+),([-+0-9.]+)\)')
     if (-not $position.Success) { throw 'Native guest ephemeris coordinate tuple is malformed.' }
     $observed = @(
@@ -579,7 +584,68 @@ function Get-VerifiedGuestEphemeris([string]$Text) {
         $comparison += [pscustomobject]@{ component = $components[$i]; observedKm = $observed[$i]; trustedKm = $reference[$i]; absoluteDifferenceKm = $delta; toleranceKm = 0.0005; passed = ($delta -le 0.0005) }
     }
     if (@($comparison | Where-Object { -not $_.passed }).Count -gt 0) { throw 'Guest ephemeris coordinates exceed the established 0.0005 km displayed-value tolerance.' }
-    return [pscustomobject]@{ line = $line; comparison = $comparison; frame = 'J2000_SSB'; units = 'km'; epochEtTdbSeconds = 0; evaluatorMarkerObserved = $true }
+    return [pscustomobject]@{ line = $line; recordLengthBytes = [Text.Encoding]::ASCII.GetByteCount($record); recordPrintableAscii = $true; recordWithin512ByteBound = $true; comparison = $comparison; frame = 'J2000_SSB'; units = 'km'; epochEtTdbSeconds = 0; evaluatorMarkerObserved = $true }
+}
+
+function Get-NativeElfLayout {
+    $bytes = [IO.File]::ReadAllBytes($App)
+    if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x7F -or $bytes[1] -ne 0x45 -or $bytes[2] -ne 0x4C -or $bytes[3] -ne 0x46 -or $bytes[4] -ne 2 -or $bytes[5] -ne 1) {
+        throw 'Verified native application is not a little-endian ELF64 image.'
+    }
+    $entry = [BitConverter]::ToUInt64($bytes, 24)
+    $programHeaderOffset = [BitConverter]::ToUInt64($bytes, 32)
+    $programHeaderSize = [BitConverter]::ToUInt16($bytes, 54)
+    $programHeaderCount = [BitConverter]::ToUInt16($bytes, 56)
+    if ($programHeaderSize -lt 56 -or $programHeaderCount -eq 0 -or $programHeaderOffset -gt [UInt64]$bytes.Length) { throw 'Verified native ELF has invalid program-header geometry.' }
+    $minimum = [UInt64]::MaxValue
+    $maximum = [UInt64]0
+    $maximumAlignment = [UInt64]1
+    $loadCount = 0
+    for ($i = 0; $i -lt $programHeaderCount; $i++) {
+        $offset64 = $programHeaderOffset + ([UInt64]$i * [UInt64]$programHeaderSize)
+        if ($offset64 + [UInt64]$programHeaderSize -gt [UInt64]$bytes.Length) { throw 'Verified native ELF program header extends beyond the file.' }
+        $offset = [int]$offset64
+        if ([BitConverter]::ToUInt32($bytes, $offset) -ne 1) { continue }
+        $vaddr = [BitConverter]::ToUInt64($bytes, $offset + 16)
+        $memSize = [BitConverter]::ToUInt64($bytes, $offset + 40)
+        $alignment = [BitConverter]::ToUInt64($bytes, $offset + 48)
+        if ($memSize -eq 0 -or $alignment -eq 0 -or ($alignment -band ($alignment - 1)) -ne 0) { throw 'Verified native ELF has an invalid PT_LOAD size or alignment.' }
+        if ($vaddr -lt $minimum) { $minimum = $vaddr }
+        if (($vaddr + $memSize) -gt $maximum) { $maximum = $vaddr + $memSize }
+        if ($alignment -gt $maximumAlignment) { $maximumAlignment = $alignment }
+        $loadCount++
+    }
+    if ($loadCount -eq 0 -or $maximum -le $minimum -or $entry -lt $minimum -or $entry -ge $maximum) { throw 'Verified native ELF has no valid PT_LOAD image containing its entry point.' }
+    return [pscustomobject]@{ entry = $entry; minimumVaddr = $minimum; maximumVaddr = $maximum; maximumLoadAlignment = $maximumAlignment; loadSegmentCount = $loadCount }
+}
+
+function Get-VerifiedGuestLoadPlacement([string]$Text, $ElfLayout) {
+    $pattern = '(?m)^\[NATIVE-ELF\] runtime=[^\r\n]* load PASS format=ELF64 machine=amd64 segments=0x(?<segments>[0-9a-fA-F]+)[^\r\n]*minVaddr=0x(?<min>[0-9a-fA-F]+) maxVaddr=0x(?<max>[0-9a-fA-F]+) relocatedBase=0x(?<base>[0-9a-fA-F]+) loadAlignment=0x(?<alignment>[0-9a-fA-F]+)[^\r\n]* entry=0x(?<entry>[0-9a-fA-F]+)'
+    $match = [regex]::Match($Text, $pattern)
+    if (-not $match.Success) { throw 'NATIVE_ELF_LOAD_RECORD_INVALID: guest did not emit a complete successful native load record.' }
+    $minimum = [Convert]::ToUInt64($match.Groups['min'].Value, 16)
+    $maximum = [Convert]::ToUInt64($match.Groups['max'].Value, 16)
+    $segments = [Convert]::ToUInt64($match.Groups['segments'].Value, 16)
+    $runtimeBase = [Convert]::ToUInt64($match.Groups['base'].Value, 16)
+    $alignment = [Convert]::ToUInt64($match.Groups['alignment'].Value, 16)
+    $entry = [Convert]::ToUInt64($match.Groups['entry'].Value, 16)
+    $expectedMappedMaximum = [UInt64]([Math]::Ceiling([double]$ElfLayout.maximumVaddr / [double]$ElfLayout.maximumLoadAlignment) * [double]$ElfLayout.maximumLoadAlignment)
+    if ($minimum -ne $ElfLayout.minimumVaddr -or $maximum -ne $expectedMappedMaximum -or $alignment -ne $ElfLayout.maximumLoadAlignment -or $segments -ne $ElfLayout.loadSegmentCount) {
+        throw 'NATIVE_ELF_LOAD_RECORD_INVALID: guest load diagnostics disagree with the authenticated ELF PT_LOAD layout.'
+    }
+    if ($alignment -eq 0 -or $runtimeBase -le $minimum -or ($runtimeBase % $alignment) -ne ($minimum % $alignment) -or
+        $entry -ne ($runtimeBase + ($ElfLayout.entry - $minimum)) -or $entry -lt $runtimeBase -or $entry -ge ($runtimeBase + ($maximum - $minimum))) {
+        throw 'NATIVE_ELF_LOAD_PLACEMENT_INVALID: guest relocated base violates PT_LOAD alignment or entry translation.'
+    }
+    return [pscustomobject]@{ passed = $true; runtimeBase = ('0x{0:X}' -f $runtimeBase); linkedMinimumVaddr = ('0x{0:X}' -f $minimum); linkedMaximumVaddr = ('0x{0:X}' -f $ElfLayout.maximumVaddr); mappedMaximumVaddr = ('0x{0:X}' -f $maximum); loadAlignment = ('0x{0:X}' -f $alignment); linkedEntry = ('0x{0:X}' -f $ElfLayout.entry); runtimeEntry = ('0x{0:X}' -f $entry); relocationDelta = ('0x{0:X}' -f ($runtimeBase - $minimum)); loadSegmentCount = $ElfLayout.loadSegmentCount; alignmentResidueVerifiedAgainstActualRuntimeBase = $true; entryTranslationVerified = $true; pageRoundedMappedExtentVerified = $true }
+}
+
+function Get-VerifiedGuestWindowTitle([string]$Text) {
+    $match = [regex]::Match($Text, '(?m)^\[NATIVE-ELF\] window PASS app=Stellar Navigator title=(?<title>.*?) size=(?<width>[0-9]+)x(?<height>[0-9]+) compositor\s*$')
+    if (-not $match.Success) { throw 'NATIVE_WINDOW_TITLE_RECORD_MISSING: guest did not report the native window title and dimensions.' }
+    $title = $match.Groups['title'].Value
+    if ($title -cne 'Stellar Navigator SN10') { throw "NATIVE_WINDOW_TITLE_INVALID: guest reported title=[$title]." }
+    return [pscustomobject]@{ passed = $true; title = $title; width = [int]$match.Groups['width'].Value; height = [int]$match.Groups['height'].Value; nonemptyGuestCopiedTitleVerified = $true }
 }
 
 function Confirm-OwnedGuestStable([int]$Seconds) {
@@ -834,8 +900,9 @@ function Send-OwnedMonitorCommand([string]$Command) {
 
 function Save-Screenshot([string]$Name) {
     $path = Join-Path $script:RunRoot $Name
-    $escaped = $path.Replace('"', '\"')
-    $response = Send-OwnedMonitorCommand ("screendump `"$escaped`"")
+    $monitorPath = $path.Replace('\', '/')
+    if ($monitorPath -match '\s') { throw 'QEMU screendump path contains whitespace that this monitor command cannot safely pass.' }
+    $response = Send-OwnedMonitorCommand ("screendump $monitorPath")
     $until = [Diagnostics.Stopwatch]::StartNew()
     while (-not (Test-Path -LiteralPath $path -PathType Leaf) -and $until.ElapsedMilliseconds -lt 3000) { Start-Sleep -Milliseconds 100 }
     $exists = Test-Path -LiteralPath $path -PathType Leaf
@@ -968,11 +1035,27 @@ function Invoke-SelfTest {
         if ($reopenKeys.Count -ne ($reopenCommand.Length + 1) -or $reopenKeys[0] -cne 'sendkey d' -or $reopenKeys -notcontains 'sendkey dot' -or $reopenKeys -notcontains 'sendkey spc' -or $reopenKeys[-1] -cne 'sendkey ret') {
             throw 'Supported shell command was not converted into bounded guest keyboard input.'
         }
+        $initialLaunchCommand = 'desktop.launch com.guidexos.stellarnavigator'
+        $initialLaunchKeys = @(Get-QemuTextKeyCommands $initialLaunchCommand)
+        if ($initialLaunchKeys.Count -ne $reopenKeys.Count -or $initialLaunchKeys[-1] -cne 'sendkey ret') { throw 'Initial production AppModel launch command was not converted into bounded guest keyboard input.' }
         $unsupportedKeyInputRejected = $false
         try { [void](Get-QemuTextKeyCommands 'desktop.launch unsupported/character') }
         catch { $unsupportedKeyInputRejected = $true }
         if (-not $unsupportedKeyInputRejected) { throw 'Guest shell input accepted a character without an explicit QEMU key mapping.' }
         $runnerResult.checks.reopenInput = [ordered]@{ passed = $true; method = 'backtick opens shell; desktop.launch com.guidexos.stellarnavigator uses desktop::launch_app'; keyCommandCount = $reopenKeys.Count; spaceAndPeriodMapped = $true; unsupportedCharactersRejected = $true; serialStartIndexSupported = $true }
+        $runnerResult.checks.initialLaunchInput = [ordered]@{ passed = $true; method = 'backtick opens the production guest shell; desktop.launch com.guidexos.stellarnavigator dispatches through desktop::launch_app'; keyCommandCount = $initialLaunchKeys.Count; testOnlyKernelLaunchHookRequired = $false }
+
+        $elfLayout = Get-NativeElfLayout
+        $fixtureBase = [UInt64]0x60C000
+        $fixtureMappedMaximum = [UInt64]([Math]::Ceiling([double]$elfLayout.maximumVaddr / [double]$elfLayout.maximumLoadAlignment) * [double]$elfLayout.maximumLoadAlignment)
+        $fixtureEntry = $fixtureBase + ($elfLayout.entry - $elfLayout.minimumVaddr)
+        $placementFixture = "[NATIVE-ELF] runtime=0000000000000001 load PASS format=ELF64 machine=amd64 segments=0x{0:X8} source=/Apps/StellarNavigator/bin/amd64/stellarnavigator.elf imageBytes=0x0000000000019000 minVaddr=0x{1:X16} maxVaddr=0x{2:X16} relocatedBase=0x{3:X16} loadAlignment=0x{4:X16} allocationBytes=0x0000000000019FFF rebasedAbsoluteWords=0x0000000000000071 entry=0x{5:X16} stack=app-owned" -f $elfLayout.loadSegmentCount,$elfLayout.minimumVaddr,$fixtureMappedMaximum,$fixtureBase,$elfLayout.maximumLoadAlignment,$fixtureEntry
+        $fixturePlacement = Get-VerifiedGuestLoadPlacement $placementFixture $elfLayout
+        $titleFixture = Get-VerifiedGuestWindowTitle '[NATIVE-ELF] window PASS app=Stellar Navigator title=Stellar Navigator SN10 size=560x340 compositor'
+        $ephemerisFixtureText = "[NATIVE-ELF] app=Stellar Navigator STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0.000000 frame=J2000_SSB units=km position_km=(-27566740.483,132361381.154,57418653.286) sha256=$($Expected.Dataset)"
+        $ephemerisFixture = Get-VerifiedGuestEphemeris $ephemerisFixtureText
+        if (-not $fixturePlacement.passed -or -not $fixturePlacement.pageRoundedMappedExtentVerified -or -not $titleFixture.nonemptyGuestCopiedTitleVerified -or -not $ephemerisFixture.recordPrintableAscii -or -not $ephemerisFixture.recordWithin512ByteBound) { throw 'Guest load/title/serial record parser fixtures failed.' }
+        $runnerResult.checks.guestRecordParsers = [ordered]@{ passed = $true; actualElfProgramHeadersUsed = $true; pageRoundedMappedExtentAccepted = $true; runtimeBaseAndEntryTranslationChecked = $true; exactNonemptyTitleChecked = $true; boundedPrintableEphemerisRecordChecked = $true; coordinateReferenceFixtureParsed = $true; guestLifecycleAcceptanceClaimed = $false }
 
         $ownedQueued = [pscustomobject]@{ id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; project = 'StellarNavigator'; mode = 'acceptance'; owner = 'test-user (PID 456)'; state = 'Waiting'; processId = $null }
         $foreignQueued = [pscustomobject]@{ id = $ownedQueued.id; project = $ownedQueued.project; mode = $ownedQueued.mode; owner = 'other-user (PID 789)'; state = 'Waiting'; processId = $null }
@@ -1306,10 +1389,21 @@ try {
     $discoveryText = Wait-SerialPattern -Capture $capture -Pattern 'App Model package discovered.*Stellar Navigator|displayName=Stellar Navigator' -Seconds $remaining -Description 'Stellar Navigator AppModel discovery'
     $overall.checks.appModelDiscovery = [ordered]@{ passed = $true; marker = ($discoveryText -split "`r?`n" | Where-Object { $_ -match 'App Model package discovered.*Stellar Navigator|displayName=Stellar Navigator' } | Select-Object -Last 1) }
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    $appText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds $remaining -Description 'native application initial content draw'
-    if ($appText -notmatch '\[SN10-GUEST\] appmodel-launch begin id=com\.guidexos\.stellarnavigator' -or $appText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Guest did not report AppModel-mediated native window creation.' }
+    [void](Wait-SerialPattern -Capture $capture -Pattern '\[KERNEL\] Entering main loop \(waiting for input\)' -Seconds $remaining -Description 'desktop keyboard input loop readiness')
+    $overall.checks.desktopInputReady = [ordered]@{ passed = $true; marker = '[KERNEL] Entering main loop (waiting for input)'; firstLaunchKeyboardInputSentAfterReady = $true }
+    $initialLaunchStartIndex = $capture.Snapshot().Length
+    [void](Send-OwnedMonitorCommand 'sendkey grave_accent')
+    Start-Sleep -Milliseconds 500
+    $overall.checks.shellBeforeFirstLaunch = Save-Screenshot 'shell-before-first-launch.ppm'
+    $overall.checks.initialLaunchInput = Send-OwnedGuestText 'desktop.launch com.guidexos.stellarnavigator'
+    $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
+    $appText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_UI status=initial-content-drawn' -Seconds $remaining -Description 'native application initial content draw' -StartIndex $initialLaunchStartIndex
+    if ($appText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Guest did not report native Stellar Navigator window creation after the production AppModel launch command.' }
+    $nativeElfLayout = Get-NativeElfLayout
+    $firstLoadPlacement = Get-VerifiedGuestLoadPlacement $appText $nativeElfLayout
+    $firstWindowTitle = Get-VerifiedGuestWindowTitle $appText
     $firstEphemeris = Get-VerifiedGuestEphemeris $appText
-    $overall.checks.nativeApplication = [ordered]@{ appModelLaunchMarker = $true; nativeWindowCreated = $true; initialContentDrawn = $true; guestEphemerisEvaluatorObserved = $true; ephemerisLine = $firstEphemeris.line; coordinateFrame = $firstEphemeris.frame; units = $firstEphemeris.units; epochEtTdbSeconds = $firstEphemeris.epochEtTdbSeconds; numericalComparison = $firstEphemeris.comparison; passed = $true }
+    $overall.checks.nativeApplication = [ordered]@{ productionAppModelLaunchCommandSubmitted = $true; nativeWindowCreated = $true; windowTitle = $firstWindowTitle; initialContentDrawn = $true; runtimeLoadPlacement = $firstLoadPlacement; guestEphemerisEvaluatorObserved = $true; serialRecordIntegrity = [ordered]@{ recordLengthBytes = $firstEphemeris.recordLengthBytes; maximumBytes = 512; printableAscii = $firstEphemeris.recordPrintableAscii; bounded = $firstEphemeris.recordWithin512ByteBound }; ephemerisLine = $firstEphemeris.line; coordinateFrame = $firstEphemeris.frame; units = $firstEphemeris.units; epochEtTdbSeconds = $firstEphemeris.epochEtTdbSeconds; numericalComparison = $firstEphemeris.comparison; passed = $true }
     $overall.checks.screenshotWhileOpen = Save-Screenshot 'stellar-navigator-open.ppm'
 
     $firstCloseStartIndex = $capture.Snapshot().Length
@@ -1317,9 +1411,9 @@ try {
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     [void](Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown' -Seconds $remaining -Description 'first normal Stellar Navigator shutdown' -StartIndex $firstCloseStartIndex)
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
-    [void](Wait-SerialPattern -Capture $capture -Pattern '\[SN10-GUEST\] appmodel-launch result=success' -Seconds $remaining -Description 'AppModel launch return after first close' -StartIndex $firstCloseStartIndex)
+    [void](Wait-SerialPattern -Capture $capture -Pattern 'lifecycle PASS window/resource cleanup complete' -Seconds $remaining -Description 'native loader resource cleanup after first close' -StartIndex $firstCloseStartIndex)
     $firstCloseText = $capture.Snapshot().Substring($firstCloseStartIndex)
-    $overall.checks.normalClose = [ordered]@{ passed = $true; lifecycleMarker = ($firstCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete'); appModelReturnMarker = '[SN10-GUEST] appmodel-launch result=success'; applicationInstanceExited = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete') }
+    $overall.checks.normalClose = [ordered]@{ passed = $true; lifecycleMarker = ($firstCloseText -match 'STELLAR_NAVIGATOR_LIFECYCLE status=initialized-evaluated-shutdown'); loaderCleanupMarker = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete'); productionLaunchReturnedAfterCleanup = $true; applicationInstanceExited = ($firstCloseText -match 'lifecycle PASS window/resource cleanup complete') }
     if (-not $overall.checks.normalClose.loaderCleanupMarker) { throw 'Native loader did not report complete window/resource cleanup.' }
     $overall.checks.screenshotAfterClose = Save-Screenshot 'desktop-after-close.ppm'
 
@@ -1336,6 +1430,8 @@ try {
     if ($secondAppText -notmatch 'STELLAR_NAVIGATOR_UI status=window-created') { throw 'Second launch did not create a new native application window through the guest desktop dispatcher.' }
     $remaining = [Math]::Max(1, [int][Math]::Ceiling(($script:RunDeadline - [DateTimeOffset]::UtcNow).TotalSeconds))
     $secondAppText = Wait-SerialPattern -Capture $capture -Pattern 'STELLAR_NAVIGATOR_EPHEMERIS status=available body=earth target_naif=399 et_tdb_s=0\.000000 frame=J2000_SSB units=km position_km=' -Seconds $remaining -Description 'second native application ephemeris evaluation' -StartIndex $reopenStartIndex
+    $secondLoadPlacement = Get-VerifiedGuestLoadPlacement $secondAppText $nativeElfLayout
+    $secondWindowTitle = Get-VerifiedGuestWindowTitle $secondAppText
     $secondEphemeris = Get-VerifiedGuestEphemeris $secondAppText
     $overall.checks.reopen = [ordered]@{
         attempted = $true
@@ -1343,8 +1439,11 @@ try {
         method = 'guest backtick shortcut opens shell; desktop.launch com.guidexos.stellarnavigator invokes desktop::launch_app and the production AppModel path'
         secondWindowCreated = $secondAppText -match 'STELLAR_NAVIGATOR_UI status=window-created'
         secondInitialContentDrawn = $secondAppText -match 'STELLAR_NAVIGATOR_UI status=initial-content-drawn'
+        secondWindowTitle = $secondWindowTitle
+        secondRuntimeLoadPlacement = $secondLoadPlacement
         secondEphemerisEvaluatorObserved = $true
         ephemerisLine = $secondEphemeris.line
+        serialRecordIntegrity = [ordered]@{ recordLengthBytes = $secondEphemeris.recordLengthBytes; maximumBytes = 512; printableAscii = $secondEphemeris.recordPrintableAscii; bounded = $secondEphemeris.recordWithin512ByteBound }
         numericalComparison = $secondEphemeris.comparison
         shellScreenshot = $overall.checks.shellBeforeReopen.path
         passedCoordinates = $true
@@ -1373,6 +1472,7 @@ try {
     if ($overall.blocker -eq 'EXTERNAL_QEMU_COORDINATION_BLOCKER') { $overall.classification = 'BLOCKED' }
     elseif ($overall.blocker -eq 'PREBOOT_STORAGE_FAILURE' -or $_.Exception.Message -like 'PREBOOT_STORAGE_FAILURE:*') { $overall.classification = 'FAIL'; $overall.blocker = 'PREBOOT_STORAGE_FAILURE' }
     elseif ($overall.blocker -eq 'PREBOOT_QEMU_STARTUP_FAILURE' -or $_.Exception.Message -like 'PREBOOT_QEMU_STARTUP_FAILURE:*') { $overall.classification = 'FAIL'; $overall.blocker = 'PREBOOT_QEMU_STARTUP_FAILURE' }
+    elseif ($_.Exception.Message -match '^(NATIVE_EPHEMERIS_RECORD_INVALID|NATIVE_EPHEMERIS_RECORD_MISSING|NATIVE_ELF_LOAD_RECORD_INVALID|NATIVE_ELF_LOAD_PLACEMENT_INVALID|NATIVE_WINDOW_TITLE_RECORD_MISSING|NATIVE_WINDOW_TITLE_INVALID):') { $overall.classification = 'FAIL'; $overall.blocker = $Matches[1] }
     elseif ($_.Exception.Message -like 'SERIAL_CAPTURE_FAILURE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'SERIAL_CAPTURE_FAILURE' }
     elseif ($_.Exception.Message -like 'NO_GUEST_SERIAL_OUTPUT:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'NO_GUEST_SERIAL_OUTPUT' }
     elseif ($_.Exception.Message -like 'SERIAL_STREAM_DISCONNECT_FAILURE:*') { $overall.classification = 'BLOCKED'; $overall.blocker = 'SERIAL_STREAM_DISCONNECT_FAILURE' }

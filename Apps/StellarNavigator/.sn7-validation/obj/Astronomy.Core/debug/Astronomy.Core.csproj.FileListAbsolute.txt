@@ -1,0 +1,12 @@
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Astronomy.Core\debug\Astronomy.Core.deps.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Astronomy.Core\debug\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\bin\Astronomy.Core\debug\Astronomy.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\Astronomy.Core.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\Astronomy.Core.AssemblyInfoInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\Astronomy.Core.AssemblyInfo.cs
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\Astronomy.Core.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\Astronomy.Core.sourcelink.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\refint\Astronomy.Core.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\Astronomy.Core.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn7-validation\obj\Astronomy.Core\debug\ref\Astronomy.Core.dll

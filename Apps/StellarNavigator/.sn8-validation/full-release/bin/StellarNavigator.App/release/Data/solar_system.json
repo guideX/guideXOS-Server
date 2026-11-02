@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "name": "Stellar Navigator SN1 Reference Catalog",
+  "description": "Minimal Solar System reference catalog with physical properties from NASA/JPL. Positions are NOT included; ephemeris is provided separately.",
+  "source": {
+    "organization": "NASA/JPL",
+    "url": "https://ssd.jpl.nasa.gov/astro_par.html",
+    "retrievalDate": "2026-10-10"
+  },
+  "bodies": [
+    {
+      "id": "sun",
+      "name": "Sun",
+      "kind": "Star",
+      "parentId": null,
+      "properties": {
+        "radiusMeters": 695700000.0,
+        "massKg": 1.98892e30,
+        "muM3S2": 1.32712440018e20,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:10", "HIP:0"],
+      "description": "Solar System central star"
+    },
+    {
+      "id": "mercury",
+      "name": "Mercury",
+      "kind": "Planet",
+      "parentId": "sun",
+      "properties": {
+        "radiusMeters": 2439700.0,
+        "massKg": 3.3011e23,
+        "muM3S2": 2.2032e13,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:199"],
+      "description": "Innermost planet"
+    },
+    {
+      "id": "venus",
+      "name": "Venus",
+      "kind": "Planet",
+      "parentId": "sun",
+      "properties": {
+        "radiusMeters": 6051800.0,
+        "massKg": 4.8675e24,
+        "muM3S2": 3.24859e14,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:299"],
+      "description": "Second planet from the Sun"
+    },
+    {
+      "id": "earth",
+      "name": "Earth",
+      "kind": "Planet",
+      "parentId": "sun",
+      "properties": {
+        "radiusMeters": 6371000.0,
+        "massKg": 5.9722e24,
+        "muM3S2": 3.986004418e14,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:399"],
+      "description": "Third planet from the Sun"
+    },
+    {
+      "id": "moon",
+      "name": "Moon",
+      "kind": "NaturalSatellite",
+      "parentId": "earth",
+      "properties": {
+        "radiusMeters": 1737400.0,
+        "massKg": 7.342e22,
+        "muM3S2": 4.9048695e12,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:301"],
+      "description": "Earth's natural satellite"
+    },
+    {
+      "id": "mars",
+      "name": "Mars",
+      "kind": "Planet",
+      "parentId": "sun",
+      "properties": {
+        "radiusMeters": 3389500.0,
+        "massKg": 6.4171e23,
+        "muM3S2": 4.282837e13,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:499"],
+      "description": "Fourth planet from the Sun"
+    },
+    {
+      "id": "jupiter",
+      "name": "Jupiter",
+      "kind": "Planet",
+      "parentId": "sun",
+      "properties": {
+        "radiusMeters": 69911000.0,
+        "massKg": 1.89813e27,
+        "muM3S2": 1.26686534e17,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:599"],
+      "description": "Fifth planet from the Sun"
+    },
+    {
+      "id": "saturn",
+      "name": "Saturn",
+      "kind": "Planet",
+      "parentId": "sun",
+      "properties": {
+        "radiusMeters": 58232000.0,
+        "massKg": 5.6834e26,
+        "muM3S2": 3.7931187e16,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:699"],
+      "description": "Sixth planet from the Sun"
+    },
+    {
+      "id": "uranus",
+      "name": "Uranus",
+      "kind": "Planet",
+      "parentId": "sun",
+      "properties": {
+        "radiusMeters": 25362000.0,
+        "massKg": 8.6810e25,
+        "muM3S2": 5.793939e15,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:799"],
+      "description": "Seventh planet from the Sun"
+    },
+    {
+      "id": "neptune",
+      "name": "Neptune",
+      "kind": "Planet",
+      "parentId": "sun",
+      "properties": {
+        "radiusMeters": 24622000.0,
+        "massKg": 1.02413e26,
+        "muM3S2": 6.836529e15,
+        "dataSource": "NASA/JPL planetary fact sheet"
+      },
+      "referenceIds": ["NAIF:899"],
+      "description": "Eighth planet from the Sun"
+    },
+    {
+      "id": "ssb",
+      "name": "Solar System Barycenter",
+      "kind": "Barycenter",
+      "parentId": null,
+      "properties": {
+        "dataSource": "NASA/JPL"
+      },
+      "referenceIds": ["NAIF:0"],
+      "description": "Solar System barycenter"
+    },
+    {
+      "id": "sim spacecraft",
+      "name": "Simulated Spacecraft",
+      "kind": "Spacecraft",
+      "parentId": null,
+      "properties": {
+        "radiusMeters": 2.5,
+        "massKg": 1000.0,
+        "dataSource": "Synthetic demonstration data"
+      },
+      "referenceIds": [],
+      "description": "Simulated spacecraft for SN1 demonstration. Position is synthetic and not derived from any real mission."
+    }
+  ]
+}

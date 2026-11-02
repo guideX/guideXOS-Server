@@ -1,0 +1,13 @@
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\bin\Astronomy.Time\debug\Data\leap_seconds.sn5json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\bin\Astronomy.Time\debug\Astronomy.Time.deps.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\bin\Astronomy.Time\debug\Astronomy.Time.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\bin\Astronomy.Time\debug\Astronomy.Time.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\Astronomy.Time.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\Astronomy.Time.AssemblyInfoInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\Astronomy.Time.AssemblyInfo.cs
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\Astronomy.Time.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\Astronomy.Time.sourcelink.json
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\Astronomy.Time.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\refint\Astronomy.Time.dll
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\Astronomy.Time.pdb
+D:\dev\guideXOSServer_STELLAR_NAVIGATOR\Apps\StellarNavigator\.sn8-validation\build-check\obj\Astronomy.Time\debug\ref\Astronomy.Time.dll
