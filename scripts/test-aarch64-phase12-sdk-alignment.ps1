@@ -101,6 +101,7 @@ $studioActivationHeader = Join-Path $studioSourceRoot 'developer_studio_app_acti
 $studioAbiTest = Join-Path $DeveloperStudioRoot 'tests\document_activation_abi_test.cpp'
 $v05SdkInclude = Join-Path $V05ServerRoot ($lock.intendedV05Sdk.includeRoot.Replace('/', '\'))
 $aarch64SdkInclude = Join-Path $repoRoot ($lock.aarch64ServerSdk.includeRoot.Replace('/', '\'))
+$aarch64ContractProbe = Join-Path $repoRoot 'tests\phase12_aarch64_sdk_layout_test.cpp'
 $null = New-Item -ItemType Directory -Path $OutputDirectory -Force
 
 # Match Developer Studio's include order: the selected SDK precedes its source tree.
@@ -122,6 +123,24 @@ if ($normalizedDependencies.Contains($wrongAbiPath)) {
     throw "AARCH64 SDK leaked into the v0.5 include graph: $wrongAbiPath"
 }
 Write-Host "[phase12-sdk] include resolution: $expectedAbiPath" -ForegroundColor Cyan
+
+# Confirm the Server-side contract probe also resolves the selected AARCH64
+# SDK header, with the same SDK-first include ordering used by the integration.
+$aarch64Depfile = Join-Path $OutputDirectory 'aarch64-sdk-layout.d'
+$aarch64DependencyList = & $compiler.Source -std=c++11 ("-I" + $aarch64SdkInclude) `
+    -MM -MF $aarch64Depfile $aarch64ContractProbe 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "AARCH64 include-path resolution failed: $($aarch64DependencyList -join ' ')"
+}
+$aarch64ResolvedDependencies = (Get-Content -Raw -LiteralPath $aarch64Depfile).Replace('\', '/')
+$aarch64ExpectedAbiPath = (Join-Path $aarch64SdkInclude 'guidexos\abi.h').Replace('\', '/')
+if (!$aarch64ResolvedDependencies.Contains($aarch64ExpectedAbiPath)) {
+    throw "The AARCH64 include path did not resolve guidexos/abi.h from the selected Server SDK: $aarch64ExpectedAbiPath"
+}
+if ($aarch64ResolvedDependencies.Contains($expectedAbiPath)) {
+    throw "The v0.5 SDK leaked into the AARCH64 include graph: $expectedAbiPath"
+}
+Write-Host "[phase12-sdk] AARCH64 include resolution: $aarch64ExpectedAbiPath" -ForegroundColor Cyan
 
 $v05LayoutExe = Join-Path $OutputDirectory 'v05-native-abi-layout.exe'
 & $compiler.Source -std=c++17 -Wall -Wextra -O2 ("-I" + $v05SdkInclude) `
@@ -161,7 +180,6 @@ Write-Output $activationOutput
 $aarch64LayoutExe = Join-Path $OutputDirectory 'aarch64-native-abi-layout.exe'
 & (Join-Path $PSScriptRoot 'run-native-abi-layout-test.ps1') -OutputPath $aarch64LayoutExe
 
-$aarch64ContractProbe = Join-Path $repoRoot 'tests\phase12_aarch64_sdk_layout_test.cpp'
 $aarch64ContractExe = Join-Path $OutputDirectory 'aarch64-sdk-contract.exe'
 & $compiler.Source -std=c++11 -Wall -Wextra -pedantic ("-I" + $aarch64SdkInclude) `
     $aarch64ContractProbe -o $aarch64ContractExe

@@ -160,3 +160,34 @@ runtime support and compatibility coverage). No such source or runtime change
 was made here. No dummy callback, synthetic field, cast, or no-op was added.
 
 No QEMU launch, QAC admission, or hardware test was attempted.
+
+## Follow-up verification in the supplied checkout
+
+For the follow-up run on 2026-11-01, the checkout was already at
+`eecc865ea16bc358cab762ae0fd786bfb7f82964` on `AARCH64_SUPPORT`, three local
+commits ahead of `origin/AARCH64_SUPPORT` at
+`2d80cf60a67b87f96de7f79a8a0357088f9f894a`. This differs from the requested
+starting revision `1d596d4eaeb194bddeaae53f032b14989deac5df`; the follow-up
+did not reset or rewrite that history. Tracked files were clean at entry. All
+pre-existing untracked `out/` artifacts were preserved.
+
+The regression script was rerun after adding a compiler dependency-file check
+for the AARCH64 SDK include path. It resolved the two genuine headers to their
+separate pinned roots, passed the v0.5 layout test and the document activation
+test (`9/9`), passed the AARCH64 400-byte layout test for both the host and
+`aarch64-none-elf`, and rejected the v0.5 consumer when given the AARCH64 SDK.
+Output: `out/phase12-sdk-alignment-verification2-20261101`.
+
+The Phase-12 freestanding foundation rebuild passed. It compiled the ARM64
+UEFI loader and kernel, linked the AARCH64 and AMD64 proof applications, and
+ran the hosted Phase-10 loader controls. Those controls selected
+`bin/arm64/proof.elf` as `EM_AARCH64`, selected `bin/amd64/proof.elf` as
+`EM_X86_64`, and passed the missing, unknown, wrong-machine, traversal,
+malformed, oversized, duplicate, and legacy cases. Output:
+`out/aarch64-phase12-verification-20261101`.
+
+The GICv3 hosted suite passed all 62 assertions in
+`out/aarch64-gicv3-host-verification-20261101`. The Phase-12 integration
+wrapper was invoked separately and stopped with
+`PHASE12_SDK_CONTRACT_BLOCKED` before creating its requested output directory
+or writing a package. QEMU, hardware, and QAC were not run.
