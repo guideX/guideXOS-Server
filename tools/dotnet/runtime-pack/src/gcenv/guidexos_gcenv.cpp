@@ -130,14 +130,13 @@ public:
     EventHandle* handle = nullptr;
 };
 
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
-static_assert(sizeof(GCEvent::Impl) == 8u, "NativeAOT diagnostic profile expects an 8-byte GCEvent::Impl");
-static_assert(alignof(GCEvent::Impl) == 8u, "NativeAOT diagnostic profile expects 8-byte GCEvent::Impl alignment");
-#endif
-
 GCEvent::GCEvent() : m_impl(nullptr) {}
 
 void GCEvent::CloseEvent() {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+    static_assert(sizeof(GCEvent::Impl) == 8u, "NativeAOT diagnostic profile expects an 8-byte GCEvent::Impl");
+    static_assert(alignof(GCEvent::Impl) == 8u, "NativeAOT diagnostic profile expects 8-byte GCEvent::Impl alignment");
+#endif
     if (m_impl == nullptr || m_impl->handle == nullptr) {
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
         GuideXosNativeAotSemiSharedSetDetail(GX_SEMISHARED_DETAIL_CLEANUP_STATUS_FAILED);
