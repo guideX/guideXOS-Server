@@ -411,9 +411,11 @@ if ($candidateRamdiskHash -ne $expectedRamdiskHash -or (Hash-File $ramdisk) -ne 
     throw 'Source or isolated candidate ramdisk SHA-256 changed during packaging.'
 }
 
-$stagedRoot = if ($ResumeCandidate -and (Test-Path -LiteralPath (Join-Path $candidate 'staged'))) {
-    Join-Path $candidate 'staged-final'
-} else { Join-Path $candidate 'staged' }
+$stagedRoot = if ($ResumeCandidate) {
+    Join-Path $candidate ("staged-resume-{0}" -f [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
+} else {
+    Join-Path $candidate 'staged'
+}
 $stagedDiagnostic = Join-Path $stagedRoot 'diagnostic'
 $stagedRuntimeSource = Join-Path $stagedRoot 'diagnostic\runtime-pack'
 New-Item -ItemType Directory -Force -Path $stagedDiagnostic,$stagedRuntimeSource | Out-Null
