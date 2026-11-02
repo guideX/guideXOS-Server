@@ -3,7 +3,8 @@ param(
     [ValidateRange(60,300)][int]$BootTimeoutSeconds = 180,
     [ValidateRange(1,60)][int]$AdmissionWindowSeconds = 30,
     [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1',
-    [string]$CandidateIntegrityInventory = ''
+    [string]$CandidateIntegrityInventory = '',
+    [ValidateSet('R2R2R1','R2R2R2')][string]$NativeAllocationGuestAttempt = 'R2R2R1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,6 +38,9 @@ $isNativeAllocationFailureAttribution = [string]$candidateManifest.mode -ceq 'Na
 $isGcInitFailureAttribution = [string]$candidateManifest.mode -in @('GcInitFailureAttribution','SemiSharedAttribution','NativeAllocationFailureAttribution')
 if ($ThreadStoreAttempt -in @('R2','R3') -and -not $isThreadStoreReadiness) {
     throw "ThreadStoreAttempt $ThreadStoreAttempt is valid only for the C188 R4 ThreadStore candidate."
+}
+if ($NativeAllocationGuestAttempt -cne 'R2R2R1' -and -not $isNativeAllocationFailureAttribution) {
+    throw 'NativeAllocationGuestAttempt is valid only for the C188 R2R2 native-allocation candidate.'
 }
 $isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness -or $isGcInitFailureAttribution
 $r4RuntimePackManifest = $null
@@ -301,7 +305,8 @@ if ($isNativeAllocationFailureAttribution) {
 }
 
 $esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$runDirectory = if ($isNativeAllocationFailureAttribution) { 'qac-guest-r2r2r1-001' }
+$runDirectory = if ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R2') { 'qac-guest-r2r2r2-001' }
+    elseif ($isNativeAllocationFailureAttribution) { 'qac-guest-r2r2r1-001' }
     elseif ($isSemiSharedAttribution) { 'qac-guest-r4r5r2r1-001' }
     elseif ($isGcInitFailureAttribution) { 'qac-guest-r4r5r1-001' }
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') { 'qac-guest-002' }
@@ -315,7 +320,7 @@ $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $ovmf = Join-Path $repo 'OVMF.fd'
 $runnerScriptSha256 = Get-Sha256 $PSCommandPath
 $attemptPath = if ($isNativeAllocationFailureAttribution) {
-    Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R2R1.json'
+    Join-Path $phaseRoot "guest-launch-attempt-C188R12R4R5R4R5$NativeAllocationGuestAttempt.json"
 } elseif ($isSemiSharedAttribution) {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R1.json'
 } elseif ($isGcInitFailureAttribution) {
@@ -674,6 +679,7 @@ $qacArgs = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemu
     candidateManifestSha256=$candidateManifestSha256;candidateIntegrityInventory=$CandidateIntegrityInventory;
     candidateIntegrityInventorySha256=$candidateIntegrityInventorySha256;qemuSha256=$qemuSha256;
     candidateProfile=$candidateManifest.mode;gcInitFailureAttributionProfile=$isGcInitFailureAttribution;
+    nativeAllocationGuestAttempt=if($isNativeAllocationFailureAttribution){$NativeAllocationGuestAttempt}else{$null};
     threadStoreAttempt=if($isThreadStoreReadiness){$ThreadStoreAttempt}else{$null};attemptGuardPath=$attemptPath;
     guestBootLimit=1;automaticRetry=$false} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot 'qac-run-arguments.json') -Encoding utf8
@@ -715,6 +721,7 @@ try {
     # This CreateNew marker permanently prevents a second QAC invocation for this candidate.
     $attemptedUtc = [DateTime]::UtcNow.ToString('o')
     $attempt = [ordered]@{candidateRoot=$candidate;attemptedAtUtc=$attemptedUtc;threadStoreAttempt=if($isThreadStoreReadiness){$ThreadStoreAttempt}else{$null};
+        nativeAllocationGuestAttempt=if($isNativeAllocationFailureAttribution){$NativeAllocationGuestAttempt}else{$null};
         candidateProfile=$candidateManifest.mode;gcInitFailureAttributionProfile=$isGcInitFailureAttribution;
         runnerOwnerPid=$PID;runnerOwnerUser=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;
         runnerScript=$PSCommandPath;runnerScriptSha256=$runnerScriptSha256;
@@ -1361,8 +1368,9 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 if ($isNativeAllocationFailureAttribution) {
-    Write-Output "C188R12R4R5R4R5R2R2R1_NATIVE_ALLOC_ATTRIBUTION=$outcome ADMITTED=$admitted RECORD_COMPLETE=$nativeAllocationRecordCaptureComplete QAC_RELEASE=$releaseVerified"
-    Write-Output "C188R12R4R5R4R5R2R2R1_NATIVE_ALLOC_ATTRIBUTION_MANIFEST=$manifestPath"
+    $nativeAttemptLabel = "C188R12R4R5R4R5$NativeAllocationGuestAttempt"
+    Write-Output "${nativeAttemptLabel}_NATIVE_ALLOC_ATTRIBUTION=$outcome ADMITTED=$admitted RECORD_COMPLETE=$nativeAllocationRecordCaptureComplete QAC_RELEASE=$releaseVerified"
+    Write-Output "${nativeAttemptLabel}_NATIVE_ALLOC_ATTRIBUTION_MANIFEST=$manifestPath"
 } elseif ($isSemiSharedAttribution) {
     Write-Output "C188R12R4R5R4R5R2R1_SEMISHARED_ATTRIBUTION=$outcome ADMITTED=$admitted RECORD_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5R4R5R2R1_SEMISHARED_ATTRIBUTION_MANIFEST=$manifestPath"

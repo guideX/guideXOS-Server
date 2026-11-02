@@ -97,7 +97,10 @@ $guestRunner = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-
 if (-not (Test-Path -LiteralPath $guestRunner -PathType Leaf)) { throw "Native allocation QAC runner is missing: $guestRunner" }
 $guestRunnerText = Get-Content -LiteralPath $guestRunner -Raw
 if ($guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''NativeAllocationFailureAttribution''' -or
-    -not $guestRunnerText.Contains('guest-launch-attempt-C188R12R4R5R4R5R2R2R1.json') -or
+    -not $guestRunnerText.Contains("[ValidateSet('R2R2R1','R2R2R2')][string]`$NativeAllocationGuestAttempt = 'R2R2R1'") -or
+    -not $guestRunnerText.Contains('qac-guest-r2r2r2-001') -or
+    -not $guestRunnerText.Contains('guest-launch-attempt-C188R12R4R5R4R5$NativeAllocationGuestAttempt.json') -or
+    -not $guestRunnerText.Contains('nativeAllocationGuestAttempt=if($isNativeAllocationFailureAttribution){$NativeAllocationGuestAttempt}else{$null}') -or
     -not $guestRunnerText.Contains('[System.IO.FileMode]::CreateNew') -or
     -not $guestRunnerText.Contains('candidate-integrity inventory') -or
     -not $guestRunnerText.Contains('verifiedArtifactHashCount') -or
