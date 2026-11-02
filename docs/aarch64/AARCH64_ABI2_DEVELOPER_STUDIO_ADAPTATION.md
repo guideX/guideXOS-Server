@@ -198,3 +198,17 @@ The following additional untracked outputs appeared after initial preflight and 
 ## Changes and commit
 
 No SDK, runtime, Developer Studio source, build script, or test changes were made. This report and a status note in `AARCH64_PHASE12_DEVELOPER_STUDIO_IDE.md` are the only intended tracked changes for this audit. No Developer Studio overlay patch was created because the mandatory renderer dependency remains unresolved.
+
+## RENDER1 follow-up (2026-11-02)
+
+The ABI2 outcome above is the historical result of the 2026-11-01 audit. The
+renderer dependency has since been implemented and qualified in
+[`AARCH64_RENDER1_HOST_GUI_FOUNDATION.md`](AARCH64_RENDER1_HOST_GUI_FOUNDATION.md):
+the AARCH64 runtime now publishes the existing `draw_text` and `draw_rect`
+slots only for a valid live drawing context, and the callbacks render to
+generation-checked per-window surfaces. Hosted pixel tests, a 100-cycle
+lifecycle test, and the freestanding ARM64 foundation build pass. This resolves
+the two missing GUI drawing services only. It does not resolve the other
+Developer Studio SDK incompatibilities listed above, and it does not unblock or
+generate the Phase-12 Developer Studio package; the `PHASE12_SDK_CONTRACT_BLOCKED`
+guard remains active.

@@ -871,7 +871,7 @@ void KernelCompositor::drawWindow(app::KernelWindow* window) {
     
     // Let app draw custom content
     if (window->owner) {
-        window->owner->draw(x, clientY, w, clientH);
+        window->owner->drawWindow(window, x, clientY, w, clientH);
     }
 
     // Draw widgets over the app content

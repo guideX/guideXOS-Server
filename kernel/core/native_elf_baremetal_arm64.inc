@@ -1307,6 +1307,8 @@ static const application::ApplicationQuotas kPhase9Quotas = {
 };
 static const uint32_t kPhase9MaxWindows = 3;
 static const uint32_t kPhase9MaxWidgets = 32;
+static_assert(gui_render::SurfaceRegistry::kCapacity == kPhase9MaxWindows,
+              "phase-9 surface slots must track the application window quota");
 
 struct Phase9Runtime;
 
@@ -1318,6 +1320,8 @@ public:
     bool init() override;
     void shutdown() override;
     void draw(uint32_t, uint32_t, uint32_t, uint32_t) override {}
+    void drawWindow(app::KernelWindow* window, uint32_t x, uint32_t y,
+                    uint32_t width, uint32_t height) override;
     void requestClose() override;
 
     bool create_window(const char* title, int32_t width, int32_t height, uint32_t flags,
@@ -1331,6 +1335,8 @@ public:
     void request_auto_close();
     bool validate_window(gx_handle handle) const;
     bool validate_widget(gx_handle handle) const;
+    bool resolve_surface(gx_handle window, gui_render::Surface* surface) const;
+    void invalidate_surface(gx_handle window);
     gx_handle first_window_handle() const { return m_windowHandles[0]; }
     gx_handle first_widget_handle() const { return m_widgetHandles[0]; }
     uint32_t window_count() const { return m_windowCount; }
@@ -1369,6 +1375,7 @@ private:
 
     Phase9Runtime* m_runtime;
     app::KernelWindow* m_windows[kPhase9MaxWindows];
+    gui_render::SurfaceRegistry m_surfaces;
     gx_handle m_windowHandles[kPhase9MaxWindows];
     uint16_t m_windowGenerations[kPhase9MaxWindows];
     WidgetSlot m_widgets[kPhase9MaxWidgets];
@@ -1384,6 +1391,7 @@ struct Phase9Runtime {
     Arm64Runtime loader;
     application::ApplicationRuntime common;
     Phase9GuiOwner* owner;
+    gui_render::HostBinding hostRenderBinding;
     bool autoClose;
     bool closeRequested;
     bool isAppA;
@@ -1510,7 +1518,7 @@ bool Phase9GuiOwner::copy_string(char* destination, uint32_t capacity, const cha
 }
 
 Phase9GuiOwner::Phase9GuiOwner(Phase9Runtime* runtime)
-    : m_runtime(runtime), m_windows{}, m_windowHandles{}, m_windowGenerations{},
+    : m_runtime(runtime), m_windows{}, m_surfaces(), m_windowHandles{}, m_windowGenerations{},
       m_widgets{}, m_widgetHandles{}, m_windowCount(0), m_widgetCount(0),
       m_focusedWidget(-1), m_closingWindow(-1), m_closeSeen(false) {
     for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) m_windowGenerations[i] = 1;
@@ -1644,15 +1652,27 @@ bool Phase9GuiOwner::create_window(const char* title, int32_t width, int32_t hei
     window->owner = this;
     uint32_t slot = kPhase9MaxWindows;
     for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) if (!m_windows[i]) { slot = i; break; }
-    if (slot == kPhase9MaxWindows || !compositor::KernelCompositor::registerWindow(window)) {
+    if (slot == kPhase9MaxWindows) {
+        delete window;
+        m_runtime->common.release_windows();
+        return false;
+    }
+    const gx_handle windowHandle = application::make_handle(
+        m_runtime->common.runtime_id(), m_runtime->common.generation(), application::HandleKind::Window,
+        m_windowGenerations[slot], static_cast<uint16_t>(slot + 1));
+    if (!m_surfaces.create(windowHandle, static_cast<uint32_t>(width), static_cast<uint32_t>(height))) {
+        delete window;
+        m_runtime->common.release_windows();
+        return false;
+    }
+    if (!compositor::KernelCompositor::registerWindow(window)) {
+        m_surfaces.destroy(windowHandle);
         delete window;
         m_runtime->common.release_windows();
         return false;
     }
     m_windows[slot] = window;
-    m_windowHandles[slot] = application::make_handle(
-        m_runtime->common.runtime_id(), m_runtime->common.generation(), application::HandleKind::Window,
-        m_windowGenerations[slot], static_cast<uint16_t>(slot + 1));
+    m_windowHandles[slot] = windowHandle;
     ++m_windowCount;
     update_current_window(window);
     if (!init()) return false;
@@ -1740,11 +1760,13 @@ void Phase9GuiOwner::close_window_index(int index)
 {
     if (index < 0 || index >= static_cast<int>(kPhase9MaxWindows) || !m_windows[index]) return;
     app::KernelWindow* target = m_windows[index];
+    const gx_handle closedHandle = m_windowHandles[index];
     app::KernelWindow* saved = m_window;
     m_window = target;
     m_closingWindow = index;
     KernelApp::requestClose();
     m_closingWindow = -1;
+    m_surfaces.destroy(closedHandle);
     m_windows[index] = nullptr;
     m_windowHandles[index] = 0;
     ++m_windowGenerations[index];
@@ -1787,6 +1809,47 @@ void Phase9GuiOwner::request_auto_close()
 bool Phase9GuiOwner::validate_window(gx_handle handle) const { return window_index(handle) >= 0; }
 bool Phase9GuiOwner::validate_widget(gx_handle handle) const { return widget_slot(handle) >= 0; }
 bool Phase9GuiOwner::pop_event(gx_event* event) { return m_runtime && m_runtime->common.events().try_pop(event); }
+
+bool Phase9GuiOwner::resolve_surface(gx_handle handle, gui_render::Surface* surface) const
+{
+    const int index = window_index(handle);
+    return index >= 0 && surface && m_surfaces.resolve(handle, surface);
+}
+
+void Phase9GuiOwner::invalidate_surface(gx_handle handle)
+{
+    const int index = window_index(handle);
+    if (index < 0 || !m_windows[index]) return;
+    m_windows[index]->dirty = true;
+    desktop_request_redraw();
+}
+
+void Phase9GuiOwner::drawWindow(app::KernelWindow* window, uint32_t x, uint32_t y,
+                                uint32_t width, uint32_t height)
+{
+    if (!window || width == 0 || height == 0) return;
+    int index = -1;
+    for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) {
+        if (m_windows[i] == window) { index = static_cast<int>(i); break; }
+    }
+    if (index < 0) return;
+    gui_render::Surface surface{};
+    if (!m_surfaces.resolve(m_windowHandles[index], &surface)) return;
+
+    const uint32_t screenWidth = framebuffer::get_width();
+    const uint32_t screenHeight = framebuffer::get_height();
+    if (x >= screenWidth || y >= screenHeight) return;
+    const uint32_t copyWidth = width < surface.width ? width : surface.width;
+    const uint32_t visibleWidth = copyWidth < screenWidth - x ? copyWidth : screenWidth - x;
+    const uint32_t copyHeight = height < surface.height ? height : surface.height;
+    const uint32_t visibleHeight = copyHeight < screenHeight - y ? copyHeight : screenHeight - y;
+    for (uint32_t row = 0; row < visibleHeight; ++row) {
+        for (uint32_t column = 0; column < visibleWidth; ++column) {
+            framebuffer::put_pixel(x + column, y + row,
+                surface.pixels[static_cast<uint64_t>(row) * surface.stridePixels + column]);
+        }
+    }
+}
 
 void Phase9GuiOwner::onMouseMove(int x, int y) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_MOUSE, m_windowHandles[i], x, y, GX_MOUSE_PACK(0, GX_MOUSE_ACTION_MOVE)); }
 void Phase9GuiOwner::onMouseDown(int x, int y, uint8_t button) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_MOUSE, m_windowHandles[i], x, y, GX_MOUSE_PACK(button, GX_MOUSE_ACTION_DOWN)); }
@@ -1839,10 +1902,25 @@ void Phase9GuiOwner::onWindowBlur()
 
 static Phase9Runtime* phase9_runtime(gx_app_context* context)
 {
-    if (!context) return nullptr;
-    Phase9Runtime* runtime = static_cast<Phase9Runtime*>(context->userData);
-    return runtime && context == &runtime->loader.context && context->host == &runtime->loader.host
-        ? runtime : nullptr;
+    if (!context || !context->userData) return nullptr;
+    gui_render::HostBinding* binding = static_cast<gui_render::HostBinding*>(context->userData);
+    if (!gui_render::binding_valid(binding, context)) return nullptr;
+    Phase9Runtime* runtime = static_cast<Phase9Runtime*>(binding->runtime);
+    return runtime && binding == &runtime->hostRenderBinding &&
+        binding->context == &runtime->loader.context && binding->host == &runtime->loader.host &&
+        binding->owner == runtime->owner ? runtime : nullptr;
+}
+
+static bool phase9_render_resolve(void* owner, gx_handle window, gui_render::Surface* surface)
+{
+    Phase9GuiOwner* guiOwner = static_cast<Phase9GuiOwner*>(owner);
+    return guiOwner && guiOwner->resolve_surface(window, surface);
+}
+
+static void phase9_render_invalidate(void* owner, gx_handle window)
+{
+    Phase9GuiOwner* guiOwner = static_cast<Phase9GuiOwner*>(owner);
+    if (guiOwner) guiOwner->invalidate_surface(window);
 }
 
 static gx_result GX_CALL phase9_log(gx_app_context* context, const char* message)
@@ -2276,15 +2354,25 @@ static void phase9_initialize_host(Phase9Runtime* runtime)
     runtime->loader.host.bare_metal_development_run_request_close = phase12_run_request_close;
     runtime->loader.host.bare_metal_development_run_release = phase12_run_release;
 #endif
+
+    runtime->loader.context.size = sizeof(runtime->loader.context);
+    runtime->loader.context.apiVersion = GX_API_VERSION;
+    runtime->loader.context.host = &runtime->loader.host;
+    runtime->hostRenderBinding.runtime = runtime;
+    runtime->hostRenderBinding.context = &runtime->loader.context;
+    runtime->hostRenderBinding.host = &runtime->loader.host;
+    runtime->hostRenderBinding.owner = runtime->owner;
+    runtime->hostRenderBinding.resolveSurface = phase9_render_resolve;
+    runtime->hostRenderBinding.invalidateSurface = phase9_render_invalidate;
+    runtime->hostRenderBinding.active = 1;
+    runtime->loader.context.userData = &runtime->hostRenderBinding;
+    gui_render::publish_host_callbacks(&runtime->loader.host, &runtime->hostRenderBinding,
+                                      &runtime->loader.context);
 }
 
 static bool phase9_load_and_run(Phase9Runtime* runtime)
 {
     phase9_initialize_host(runtime);
-    runtime->loader.context.size = sizeof(runtime->loader.context);
-    runtime->loader.context.apiVersion = GX_API_VERSION;
-    runtime->loader.context.host = &runtime->loader.host;
-    runtime->loader.context.userData = runtime;
     const bool needsImageVfs = runtime->isAppA ? !s_phase9AppAImagePrimed : !s_phase9AppBImagePrimed;
     if (needsImageVfs) phase9_vfs_enter();
     phase9_acquire_loader();
@@ -2332,6 +2420,7 @@ static bool phase9_load_and_run(Phase9Runtime* runtime)
     const gx_result result = gxos_native_call_on_stack(
         runtime->loader.entry, &runtime->loader.context,
         runtime->loader.stack + runtime->loader.stackBytes - 16);
+    runtime->hostRenderBinding.active = 0;
     /* Give the other runtime and the monitor one interrupt boundary before
      * tearing down this runtime's compositor objects and mappings. */
     kernel::arch::idle();

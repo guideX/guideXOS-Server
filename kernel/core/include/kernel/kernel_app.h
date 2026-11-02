@@ -218,6 +218,13 @@ public:
     
     // Drawing (called by compositor to render app content)
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) = 0;
+    // Window-aware drawing hook for apps that own more than one independent
+    // content surface. Existing applications keep the original draw behavior.
+    virtual void drawWindow(KernelWindow* window, uint32_t x, uint32_t y,
+                            uint32_t w, uint32_t h) {
+        (void)window;
+        draw(x, y, w, h);
+    }
     
     // State
     AppState getState() const { return m_state; }
