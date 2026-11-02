@@ -110,7 +110,9 @@ bool sameContent(const std::vector<gxos::web::HtmlElementContentMetadata>& left,
             a.hasVisibleBreak != b.hasVisibleBreak ||
             a.hasVisibleReplacedContent != b.hasVisibleReplacedContent ||
             a.hasRenderableContent != b.hasRenderableContent ||
-            a.contentMetadataComplete != b.contentMetadataComplete) return false;
+            a.contentMetadataComplete != b.contentMetadataComplete ||
+            a.dynamicallyCreated != b.dynamicallyCreated ||
+            a.connected != b.connected) return false;
     }
     return true;
 }

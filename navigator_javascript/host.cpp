@@ -39,6 +39,8 @@ const char* hostResultCodeName(HostResultCode code)
         return "DocumentTextLimitExceeded";
     case HostResultCode::DocumentMutationLimitExceeded:
         return "DocumentMutationLimitExceeded";
+    case HostResultCode::HostObjectLimitExceeded:
+        return "HostObjectLimitExceeded";
     case HostResultCode::CallbackLimitExceeded:
         return "CallbackLimitExceeded";
     case HostResultCode::IteratorLimitExceeded:

@@ -317,6 +317,26 @@ static std::string navigatorHostedSmokeDiagnostic() {
     auto contains = [](const std::string& haystack, const std::string& needle) {
         return haystack.find(needle) != std::string::npos;
     };
+    // SmokeCurrentInlineLayoutText concatenates the source slices of visible
+    // glyph fragments. Collapsed spaces are represented by separate
+    // positioned whitespace atoms, so compare these diagnostics without
+    // whitespace while retaining the exact visible glyph sequence.
+    auto containsRenderedGlyphSequence = [](const std::string& rendered,
+                                            const std::string& expected) {
+        auto compact = [](const std::string& text) {
+            std::string result;
+            result.reserve(text.size());
+            for (unsigned char ch : text) {
+                if (ch != ' ' && ch != '\r' && ch != '\n' && ch != '\t' &&
+                    ch != '\f' && ch != '\v') result.push_back(static_cast<char>(ch));
+            }
+            return result;
+        };
+        const std::string compactRendered = compact(rendered);
+        const std::string compactExpected = compact(expected);
+        return !compactExpected.empty() &&
+            compactRendered.find(compactExpected) != std::string::npos;
+    };
     auto yesNo = [](bool value) {
         return value ? "yes" : "no";
     };
@@ -6243,6 +6263,151 @@ static std::string navigatorHostedSmokeDiagnostic() {
         std::to_string(js105InitialRevision) + "->" +
         std::to_string(js105RevisionAfterEventClick) + ",text=" +
         summarizeText(js105AfterEventClick, 1000));
+
+    const std::string js106FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js106.html";
+    const bool js106Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js106FixtureUrl);
+    const std::string js106InitialDocumentText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string js106InitialInlineText =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js106InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS106 hosted fixture starts with its created span detached",
+        js106Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js106FixtureUrl &&
+        contains(js106InitialDocumentText, "Navigator JavaScript JS106") &&
+        !containsRenderedGlyphSequence(js106InitialInlineText,
+            "Added by JavaScript") &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 2u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js106Loaded) + ",inline=" +
+        summarizeText(js106InitialInlineText, 800) + ",listeners=" +
+        std::to_string(gxos::apps::Navigator::SmokeJavaScriptListenerCount()) +
+        ",error=" + gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js106Inserted = js106Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("step-button");
+    const std::string js106AfterInsert =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js106InsertRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    const std::string js106InsertStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS106 appendChild reaches positioned inline render fragments",
+        js106Inserted && containsRenderedGlyphSequence(js106AfterInsert,
+            "Added by JavaScript") &&
+        contains(js106InsertStatus, "Attached and selectable") &&
+        js106InsertRevision > js106InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js106Inserted) + ",revision=" +
+        std::to_string(js106InitialRevision) + "->" +
+        std::to_string(js106InsertRevision) + ",inline=" +
+        summarizeText(js106AfterInsert, 800) + ",status=" +
+        summarizeText(js106InsertStatus, 240));
+
+    const bool js106Updated = js106Inserted &&
+        gxos::apps::Navigator::SmokeClickFormControlById("step-button");
+    const std::string js106AfterUpdate =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js106UpdateRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS106 textContent replaces the rendered span text",
+        js106Updated && containsRenderedGlyphSequence(js106AfterUpdate,
+            "Updated by JavaScript") &&
+        !containsRenderedGlyphSequence(js106AfterUpdate,
+            "Added by JavaScript") &&
+        js106UpdateRevision > js106InsertRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js106Updated) + ",revision=" +
+        std::to_string(js106InsertRevision) + "->" +
+        std::to_string(js106UpdateRevision) + ",inline=" +
+        summarizeText(js106AfterUpdate, 800));
+
+    const bool js106Removed = js106Updated &&
+        gxos::apps::Navigator::SmokeClickFormControlById("step-button");
+    const std::string js106AfterRemove =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js106RemoveRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    const std::string js106RemoveStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS106 removeChild removes the next rendered frame's text",
+        js106Removed && !containsRenderedGlyphSequence(js106AfterRemove,
+            "Updated by JavaScript") &&
+        contains(js106RemoveStatus, "Removed from document") &&
+        js106RemoveRevision > js106UpdateRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js106Removed) + ",revision=" +
+        std::to_string(js106UpdateRevision) + "->" +
+        std::to_string(js106RemoveRevision) + ",inline=" +
+        summarizeText(js106AfterRemove, 800));
+
+    const bool js106Reinserted = js106Removed &&
+        gxos::apps::Navigator::SmokeClickFormControlById("step-button");
+    const std::string js106AfterReinsert =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js106ReinsertRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    const std::string js106ReinsertStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS106 reinsertion renders the retained identity again",
+        js106Reinserted && containsRenderedGlyphSequence(js106AfterReinsert,
+            "Updated by JavaScript") &&
+        contains(js106ReinsertStatus, "Reinserted with the same identity") &&
+        js106ReinsertRevision > js106RemoveRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js106Reinserted) + ",revision=" +
+        std::to_string(js106RemoveRevision) + "->" +
+        std::to_string(js106ReinsertRevision) + ",inline=" +
+        summarizeText(js106AfterReinsert, 800) + ",status=" +
+        summarizeText(js106ReinsertStatus, 240));
+
+    const bool js106CallbackInserted = js106Reinserted &&
+        gxos::apps::Navigator::SmokeClickFormControlById("event-button");
+    const std::string js106AfterCallbackInsert =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js106CallbackInsertRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS106 existing Event callback creates and renders a dynamic element",
+        js106CallbackInserted && containsRenderedGlyphSequence(
+            js106AfterCallbackInsert,
+            "Created in click callback") &&
+        js106CallbackInsertRevision > js106ReinsertRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js106CallbackInserted) + ",revision=" +
+        std::to_string(js106ReinsertRevision) + "->" +
+        std::to_string(js106CallbackInsertRevision) + ",inline=" +
+        summarizeText(js106AfterCallbackInsert, 800));
+
+    const bool js106CallbackRemoved = js106CallbackInserted &&
+        gxos::apps::Navigator::SmokeClickFormControlById("event-button");
+    const std::string js106AfterCallbackRemove =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js106CallbackRemoveRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    const std::string js106CallbackRemoveStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("JS106 existing Event callback removes its rendered element",
+        js106CallbackRemoved && !containsRenderedGlyphSequence(
+            js106AfterCallbackRemove,
+            "Created in click callback") &&
+        contains(js106CallbackRemoveStatus,
+            "Callback removed its element") &&
+        js106CallbackRemoveRevision > js106CallbackInsertRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js106CallbackRemoved) + ",revision=" +
+        std::to_string(js106CallbackInsertRevision) + "->" +
+        std::to_string(js106CallbackRemoveRevision) + ",inline=" +
+        summarizeText(js106AfterCallbackRemove, 800) + ",status=" +
+        summarizeText(js106CallbackRemoveStatus, 240));
 
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();

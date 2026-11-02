@@ -13457,3 +13457,113 @@ failures described above.
 
 Native and hosted qualification for JS105 is complete on the host build.
 Guest memory, stack, and browser runtime qualification remain pending.
+
+## JS106 — bounded renderable dynamic DOM
+
+JS106 adds a bounded dynamic element subset on Navigator's existing document
+registry. It does not create a separate JavaScript-only tree. Parsed elements
+and created elements use the same generation-local serials in
+`WebDocument::structuralElements`; the parallel content metadata remains
+indexed by that serial. Created spans start detached, and a separate connected
+flag controls document-wide selector visibility and renderer participation.
+Removing a span clears its parent and connected state but retains its serial,
+attributes, text, and Element reference until document teardown. Serials are
+not reused within a document generation.
+
+Only `document.createElement("span")` is supported. Other tag names fail with
+`HostInvalidValue` and allocate no node. The supported dynamic child is a
+created span; supported parents are `body`, `div`, `p`, and `span`, provided a
+connected parent has non-whitespace inline content in a compatible ancestor
+flow. This permits text-bearing paragraphs and nested inline spans while
+rejecting an empty block whose only available marker is atomic or whitespace
+content. Detached supported spans can be nested before connection. Dynamic
+`div` and `p` creation remain unsupported because the current renderer has no
+safe block-layout projection for them.
+
+`appendChild()` validates both host references and their current generation,
+rejects self-insertion and cycles, and appends or reparents the same child
+identity in sibling order. Reappending the last child is a no-op. Reparenting
+updates both parents' child counts, sibling metadata, selector membership, and
+inline-item order. `removeChild()` requires the actual parent, detaches the
+subtree, and leaves its Element references usable for text changes and later
+reinsertion. A stale reference after navigation continues to fail through the
+existing host-generation checks.
+
+Created spans accept `id` and `class` through the existing retained attribute
+storage. Detached spans remain absent from document-wide ID and selector
+queries. Once connected, they participate in existing ID, tag, class,
+descendant, and scoped queries; removal hides them and reinsertion restores
+them. Selector collections keep their existing snapshot behavior and limits;
+JS106 does not add live collections or promise unrestricted CSS selectors.
+
+Dynamic `textContent` uses `WebInlineItem` records consumed by Navigator's
+existing inline layout. It works before insertion, while connected, while
+detached, and after reinsertion. Repeated writes replace the current text,
+including an empty string. The dynamic span text limit is 4,096 bytes, the
+inline projection limit is 2,048 items, the existing document node limit is
+1,024, and the existing script mutation limit is 1,024 operations per
+document. Removed nodes remain charged against the node pool until navigation
+tears down the document; exhaustion returns a deterministic error rather than
+recycling an identity. Creation also preflights the runtime host-object limit.
+
+Insertion, removal, and connected text changes mark the document layout dirty.
+The renderer's `rebuildInlineLayout()` and `buildInlineFlow()` consume the
+same inline-item projection, skip disconnected owners, and create positioned
+fragments for connected spans. The hosted JS106 smoke checks inspect those
+visible layout fragments after each step, along with the layout revision and
+dirty state. The fixture updates, removes, and reinserts the same span from a
+pre-existing button callback; a second button creates and removes a span from
+an existing Event callback. Dynamic spans do not receive general event hit
+testing or a complete event target implementation in JS106.
+
+The native lane is `tests/navigator_javascript_js106_test.cpp`, driven by
+`scripts/smoke-navigator-javascript-js106.ps1`. It covers detached creation,
+unsupported tags, attributes and text, insertion and reparenting, nested spans,
+wrong-parent removal, cycles, selector coherence, render projection order,
+text limits, node and host-reference exhaustion, mutation limits, stale
+references, and mutation from an existing Event callback. The hosted fixture
+is `navigator-smoke/javascript-js106.html`; the full hosted aggregate runs it
+through the production Navigator layout path. Guest rendering, stack, memory,
+pointer input, and lifecycle qualification remain pending.
+
+The focused JS106 native lane passed **79/79 checks** under strict C++17
+compilation (`-Wall -Wextra -Werror -pedantic`). The full JavaScript matrix
+passed across staged runs: **107/107 lanes** and **17,425/17,425 reported
+assertions across 66 assertion lanes**, including the JS106 lane. The hosted
+aggregate reported **753 passed, 7 failed, 760 total**. All seven JS106 hosted
+checks passed: detached creation; rendered append and selector visibility;
+text replacement; removal; identity-preserving reinsertion; and insertion and
+removal from an existing Event callback. Each connected mutation advanced the
+layout revision and left the document clean after the next rendered state.
+The hosted text diagnostic collects source slices from visible positioned
+glyph fragments; collapsed spaces are separate positioned whitespace atoms,
+so these checks compare the expected glyph sequence while retaining exact
+status-text checks. The seven hosted failures are the unchanged CSS baseline
+groups: phases 3C, 3G, 6A, three phase 6B checks, and 6C.
+
+Optimized host static stack measurements for the new paths are
+`createDynamicElement` 688 bytes, `appendDynamicChild` 240 bytes,
+`removeDynamicChild` 160 bytes, `moveSubtreeInlineItems` 160 bytes,
+`textContentForElement` 176 bytes, and `setElementTextContent` 352 bytes;
+`invokeFunction` remains 768 bytes. The structural element record remains 440
+bytes and the content metadata record remains 24 bytes. Runtime records remain
+unchanged at 88 bytes for `RuntimeObject` and 48 bytes for
+`RuntimeArrayElement`.
+
+The production C++17 build succeeded with an 8,887,966-byte executable
+(SHA-256
+`4E84F57D95F9CD13D6B1A541042F1DA0AE0F75C52A2E812545D0257D8E3D7C6D`). After
+hosted qualification, `guideXOSServer.exe` was restored and verified at
+8,398,274 bytes with its pre-build SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated Navigator fixtures (458,372 bytes) were restored from the saved
+copies and verified against their SHA-256 manifest. The production build
+emitted existing warnings in unrelated files; the JS106-focused sources passed
+warning-as-error compilation. The hosted aggregate's nonzero exit reflects
+only the seven established CSS failures described above.
+
+JS106 is qualified on the native host and through the hosted Navigator
+renderer. Guest layout, memory, stack, pointer input, and lifecycle behavior
+remain unverified. A suitable JS107 scope is bounded block projection for
+created `div` and `p` elements, including their layout and selector behavior;
+general text nodes and arbitrary style recalculation can remain out of scope.

@@ -179,6 +179,7 @@ enum class HostResultCode : std::uint8_t {
     DocumentMutationLimitExceeded,
     CallbackLimitExceeded,
     IteratorLimitExceeded,
+    HostObjectLimitExceeded,
 };
 
 struct HostResult {

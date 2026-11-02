@@ -844,6 +844,7 @@ public:
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
 	static std::string SmokeCurrentDocumentText();
+	static std::string SmokeCurrentInlineLayoutText();
 	static uint64_t SmokeDocumentLayoutRevision();
 	static bool SmokeDocumentDirty();
 	static size_t SmokeJavaScriptHandlerCount();

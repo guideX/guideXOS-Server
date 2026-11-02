@@ -73,6 +73,7 @@ using gxos::web::kFormRuntimeControlCap;
 using gxos::web::InlineItemKind;
 using gxos::web::WebInlineItem;
 using gxos::web::HtmlElementRef;
+using gxos::web::HtmlElementContentMetadata;
 using gxos::web::TableCellContentItem;
 using gxos::javascript::RuntimeErrorCode;
 
@@ -13606,6 +13607,22 @@ namespace {
 		return &fallback;
 	}
 
+	static bool inlineItemOwnerConnected(const WebDocument& doc,
+		const WebInlineItem& item)
+	{
+		if (item.ownerSerial == 0u) return true;
+		if (item.ownerSerial > doc.contentMetadata.size()) {
+			for (const HtmlElementRef& owner : doc.structuralElements)
+				if (owner.serial == item.ownerSerial) return true;
+			return false;
+		}
+		const HtmlElementContentMetadata& content = doc.contentMetadata[
+			static_cast<std::size_t>(item.ownerSerial - 1u)];
+		if (content.serial != item.ownerSerial) return false;
+		return !content.dynamicallyCreated ||
+			(content.contentMetadataComplete && content.connected);
+	}
+
 	struct CssInlinePositionDelta {
 		int x = 0;
 		int y = 0;
@@ -13999,7 +14016,9 @@ namespace {
 		bool lineHasContent = false;
 		for (int itemIndex = 0; itemIndex < static_cast<int>(doc.inlineItems.size()); ++itemIndex) {
 			const WebInlineItem& item = doc.inlineItems[static_cast<size_t>(itemIndex)];
-			if (item.flowSerial != flow.flowSerial || item.atomicContainerSerial != flow.contextSerial) continue;
+			if (!inlineItemOwnerConnected(doc, item) ||
+				item.flowSerial != flow.flowSerial ||
+				item.atomicContainerSerial != flow.contextSerial) continue;
 			const WebStyle* itemStyle = inlineOwnerStyle(doc, item, flow.style);
 			if (itemStyle && itemStyle->floatMode != FloatMode::None) {
 				// The item is blockified and painted from its final float record.
@@ -14653,7 +14672,8 @@ namespace {
 		}
 		constexpr size_t kMaxFlows = 256;
 		for (const WebInlineItem& item : doc.inlineItems) {
-			if (item.flowSerial == 0 || item.atomicContainerSerial != 0) continue;
+			if (!inlineItemOwnerConnected(doc, item) || item.flowSerial == 0 ||
+				item.atomicContainerSerial != 0) continue;
 			InlineFlowLayout* flow = nullptr;
 			for (InlineFlowLayout& candidate : snapshot.flows) {
 				if (candidate.flowSerial == item.flowSerial && candidate.contextSerial == 0) {
@@ -15635,6 +15655,33 @@ int Navigator::SmokeCurrentBlockCount()
 std::string Navigator::SmokeCurrentDocumentText()
 {
 	return extractDocumentText(s_currentDoc);
+}
+
+std::string Navigator::SmokeCurrentInlineLayoutText()
+{
+	ensureInlineLayout(s_currentDoc);
+	std::string result;
+	for (const InlineFlowLayout& flow : s_inlineLayoutSnapshot.flows) {
+		for (const InlineFragmentLayout& fragment : flow.fragments) {
+			if (!fragment.visible || fragment.w <= 0 || fragment.h <= 0 ||
+				fragment.itemIndex < 0 || fragment.itemIndex >=
+					static_cast<int>(s_currentDoc.inlineItems.size())) continue;
+			const WebInlineItem& item = s_currentDoc.inlineItems[
+				static_cast<size_t>(fragment.itemIndex)];
+			if (item.kind == InlineItemKind::ForcedBreak) {
+				result.push_back('\n');
+				continue;
+			}
+			if (item.kind != InlineItemKind::TextRun ||
+				fragment.sourceOffset < 0 || fragment.sourceLength <= 0) continue;
+			const size_t offset = static_cast<size_t>(fragment.sourceOffset);
+			if (offset >= item.text.size()) continue;
+			const size_t length = std::min(static_cast<size_t>(
+				fragment.sourceLength), item.text.size() - offset);
+			result.append(item.text, offset, length);
+		}
+	}
+	return result;
 }
 
 uint64_t Navigator::SmokeDocumentLayoutRevision()

@@ -537,6 +537,10 @@ struct HtmlElementContentMetadata {
 	bool     hasVisibleReplacedContent = false;
 	bool     hasRenderableContent = false;
 	bool     contentMetadataComplete = false;
+	// JS106 lifecycle bits reuse the existing alignment padding so the parsed
+	// Element and content-record sizes stay unchanged.
+	bool     dynamicallyCreated = false;
+	bool     connected = true;
 };
 
 enum class CssCombinator : uint8_t {

@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Navigator JavaScript JS106</title>
+</head>
+<body>
+<h1>Navigator JavaScript JS106</h1>
+<p id="dynamic-host">Dynamic content:</p>
+<p id="event-host">Event content:</p>
+<div id="empty-div"></div>
+<button id="step-button" type="button">Run next DOM step</button>
+<button id="event-button" type="button">Toggle from click callback</button>
+<p id="status">Ready</p>
+<script>
+const container = document.getElementById("dynamic-host");
+const item = document.createElement("span");
+item.setAttribute("id", "created-note");
+item.setAttribute("class", "created-note");
+item.textContent = "Added by JavaScript";
+
+let step = 0;
+document.getElementById("step-button").addEventListener("click", () => {
+    if (step === 0) {
+        container.appendChild(item);
+        if (document.querySelector("#created-note") === item) {
+            document.getElementById("status").textContent =
+                "Attached and selectable";
+        } else {
+            document.getElementById("status").textContent = "Attach failed";
+        }
+    } else if (step === 1) {
+        item.textContent = "Updated by JavaScript";
+        document.getElementById("status").textContent = item.textContent;
+    } else if (step === 2) {
+        container.removeChild(item);
+        if (document.querySelector("#created-note") === null) {
+            document.getElementById("status").textContent =
+                "Removed from document";
+        } else {
+            document.getElementById("status").textContent = "Removal failed";
+        }
+    } else if (step === 3) {
+        container.appendChild(item);
+        if (document.querySelector("#created-note") === item) {
+            document.getElementById("status").textContent =
+                "Reinserted with the same identity";
+        } else {
+            document.getElementById("status").textContent = "Reinsert failed";
+        }
+    }
+    if (step === 0 || step === 1 || step === 2) step = step + 1;
+});
+
+let callbackItem = null;
+let callbackConnected = false;
+document.getElementById("event-button").addEventListener("click", () => {
+    if (callbackItem === null) {
+        callbackItem = document.createElement("span");
+        callbackItem.setAttribute("id", "callback-note");
+        callbackItem.textContent = "Created in click callback";
+    }
+    if (callbackConnected) {
+        document.getElementById("event-host").removeChild(callbackItem);
+        callbackConnected = false;
+        if (document.querySelector("#callback-note") === null) {
+            document.getElementById("status").textContent =
+                "Callback removed its element";
+        } else {
+            document.getElementById("status").textContent =
+                "Callback removal failed";
+        }
+    } else {
+        document.getElementById("event-host").appendChild(callbackItem);
+        callbackConnected = true;
+        if (document.querySelector("#callback-note") === callbackItem) {
+            document.getElementById("status").textContent =
+                "Callback inserted its element";
+        } else {
+            document.getElementById("status").textContent =
+                "Callback insertion failed";
+        }
+    }
+});
+</script>
+</body>
+</html>

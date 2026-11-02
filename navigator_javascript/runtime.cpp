@@ -5506,6 +5506,8 @@ RuntimeErrorCode RuntimeContext::mapHostResult(HostResultCode code) const
         return RuntimeErrorCode::HostCallbackLimitExceeded;
     case HostResultCode::IteratorLimitExceeded:
         return RuntimeErrorCode::HostCallbackLimitExceeded;
+    case HostResultCode::HostObjectLimitExceeded:
+        return RuntimeErrorCode::HostObjectLimitExceeded;
     }
     return RuntimeErrorCode::HostCallFailed;
 }

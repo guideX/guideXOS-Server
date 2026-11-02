@@ -56,6 +56,9 @@ constexpr std::uint32_t kNavigatorSelectorCollectionKeysMethod = 26u;
 constexpr std::uint32_t kNavigatorSelectorCollectionEntriesMethod = 27u;
 constexpr std::uint32_t kNavigatorSelectorCollectionIteratorSymbolMethod =
     28u;
+constexpr std::uint32_t kNavigatorCreateElementMethod = 29u;
+constexpr std::uint32_t kNavigatorAppendChildMethod = 30u;
+constexpr std::uint32_t kNavigatorRemoveChildMethod = 31u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -802,11 +805,30 @@ private:
         const gxos::web::HtmlElementRef* canonicalElement = nullptr) const;
     bool mutateElementAttribute(HostInstanceId serial, SourceView name,
         SourceView value, bool remove);
+    HostResult createDynamicElement(SourceView tagName,
+        HostInstanceId& serial);
+    HostResult appendDynamicChild(HostInstanceId parentSerial,
+        HostInstanceId childSerial, HostValue& result);
+    HostResult removeDynamicChild(HostInstanceId parentSerial,
+        HostInstanceId childSerial, HostValue& result);
+    bool supportedDynamicParent(const gxos::web::HtmlElementRef& parent) const;
+    bool resolveInlineRenderFlow(HostInstanceId parentSerial,
+        HostInstanceId& flowSerial) const;
+    bool refreshParentChildMetadata(HostInstanceId parentSerial);
+    bool setSubtreeConnectionAndFlow(HostInstanceId rootSerial,
+        bool connected);
+    bool moveSubtreeInlineItems(HostInstanceId rootSerial,
+        HostInstanceId destinationParentSerial, HostInstanceId flowSerial);
+    bool inlineItemBelongsToSubtree(const gxos::web::WebInlineItem& item,
+        HostInstanceId rootSerial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
+    bool isDynamicElement(HostInstanceId serial) const;
+    bool isElementConnected(HostInstanceId serial) const;
     bool resolveStructuralParentSerial(HostInstanceId serial,
         HostInstanceId& parentSerial) const;
     bool elementChildAt(HostInstanceId parentSerial, std::size_t index,
         HostInstanceId& childSerial) const;
+    bool parentHasDynamicChild(HostInstanceId parentSerial) const;
     std::size_t elementChildCount(HostInstanceId parentSerial) const;
     bool elementSiblingAt(HostInstanceId serial, bool next,
         HostInstanceId& siblingSerial) const;
