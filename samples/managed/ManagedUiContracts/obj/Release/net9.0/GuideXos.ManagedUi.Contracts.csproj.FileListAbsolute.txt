@@ -1,0 +1,12 @@
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\bin\Release\net9.0\GuideXos.ManagedUi.Contracts.deps.json
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\bin\Release\net9.0\GuideXos.ManagedUi.Contracts.dll
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\bin\Release\net9.0\GuideXos.ManagedUi.Contracts.pdb
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\GuideXos.ManagedUi.Contracts.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\GuideXos.ManagedUi.Contracts.AssemblyInfoInputs.cache
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\GuideXos.ManagedUi.Contracts.AssemblyInfo.cs
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\GuideXos.ManagedUi.Contracts.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\GuideXos.ManagedUi.Contracts.sourcelink.json
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\GuideXos.ManagedUi.Contracts.dll
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\refint\GuideXos.ManagedUi.Contracts.dll
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\GuideXos.ManagedUi.Contracts.pdb
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\ManagedUiContracts\obj\Release\net9.0\ref\GuideXos.ManagedUi.Contracts.dll

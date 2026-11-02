@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "qlyBE2/eVNA=",
+  "success": true,
+  "projectFilePath": "D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\samples\\managed\\C185CounterApp\\GuideXos.C185.CounterApp.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\guideX\\.nuget\\packages\\microsoft.netcore.app.ref\\9.0.21\\microsoft.netcore.app.ref.9.0.21.nupkg.sha512",
+    "C:\\Users\\guideX\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\9.0.21\\microsoft.windowsdesktop.app.ref.9.0.21.nupkg.sha512",
+    "C:\\Users\\guideX\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\9.0.21\\microsoft.aspnetcore.app.ref.9.0.21.nupkg.sha512"
+  ],
+  "logs": []
+}

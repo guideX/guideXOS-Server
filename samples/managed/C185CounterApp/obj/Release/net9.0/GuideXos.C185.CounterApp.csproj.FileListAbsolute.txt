@@ -1,0 +1,16 @@
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.C185.CounterApp.csproj.AssemblyReference.cache
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.C185.CounterApp.GeneratedMSBuildEditorConfig.editorconfig
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.C185.CounterApp.AssemblyInfoInputs.cache
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.C185.CounterApp.AssemblyInfo.cs
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.C185.CounterApp.csproj.CoreCompileInputs.cache
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.C185.CounterApp.sourcelink.json
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\bin\Release\net9.0\GuideXos.C185.CounterApp.deps.json
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\bin\Release\net9.0\GuideXos.C185.CounterApp.dll
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\bin\Release\net9.0\GuideXos.C185.CounterApp.pdb
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\bin\Release\net9.0\GuideXos.ManagedUi.Contracts.dll
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\bin\Release\net9.0\GuideXos.ManagedUi.Contracts.pdb
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.A5316F79.Up2Date
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.C185.CounterApp.dll
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\refint\GuideXos.C185.CounterApp.dll
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\GuideXos.C185.CounterApp.pdb
+D:\dev\guideXOSServerV1.1_DOTNET_SUPPORT\samples\managed\C185CounterApp\obj\Release\net9.0\ref\GuideXos.C185.CounterApp.dll

@@ -1,0 +1,57 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v9.0/win-x64",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v9.0": {},
+    ".NETCoreApp,Version=v9.0/win-x64": {
+      "HostLogProof/1.0.0": {
+        "dependencies": {
+          "GuideXos.C185.CounterApp": "1.0.0",
+          "GuideXos.ManagedUi.Contracts": "1.0.0"
+        },
+        "runtime": {
+          "HostLogProof.dll": {}
+        }
+      },
+      "GuideXos.C185.CounterApp/1.0.0": {
+        "dependencies": {
+          "GuideXos.ManagedUi.Contracts": "1.0.0"
+        },
+        "runtime": {
+          "GuideXos.C185.CounterApp.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "GuideXos.ManagedUi.Contracts/1.0.0": {
+        "runtime": {
+          "GuideXos.ManagedUi.Contracts.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "HostLogProof/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "GuideXos.C185.CounterApp/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "GuideXos.ManagedUi.Contracts/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
