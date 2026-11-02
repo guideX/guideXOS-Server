@@ -72,6 +72,7 @@ enum class RuntimeErrorCode : std::uint8_t {
     InvalidHostReturn,
     HostMethodLimitExceeded,
     HostInvalidValue,
+    TooManyArguments,
     DocumentLookupLimitExceeded,
     DocumentTextLimitExceeded,
     DocumentMutationLimitExceeded,

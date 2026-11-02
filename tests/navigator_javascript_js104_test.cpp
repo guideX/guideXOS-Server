@@ -134,15 +134,14 @@ void testLexerAndParser()
         "const f=(x,x)=>x;",
         "const f=(x,)=>x;",
         "const f=x=>;",
-        "const f=(x=1)=>x;",
-        "const f=(...x)=>x;",
         "for(let i=0;i<2;i++){;}",
     };
     bool rejected = true;
     for (const char* source : invalid)
         rejected = rejected && !parse(source).succeeded();
-    expect(rejected,
-        "early declaration, duplicate-parameter, malformed-arrow, and excluded-loop errors are rejected");
+    expect(rejected && parse("const f=(x=1)=>x;").succeeded() &&
+        parse("const f=(...x)=>x;").succeeded(),
+        "early declaration, duplicate-parameter, malformed-arrow, and excluded-loop errors remain rejected while JS105 arrow defaults and rest are accepted");
     expect(parse("var value=1;{let value=2;value=3;}").succeeded() &&
         parse("var value=1;for(const value of [2]){} ").succeeded(),
         "nested lexical shadowing and for-of shadowing of an outer var remain valid");

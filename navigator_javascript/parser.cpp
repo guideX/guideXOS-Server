@@ -416,6 +416,91 @@ private:
         return declaration;
     }
 
+    bool parseFormalParameters(std::vector<AstNodeId>& parameters,
+        bool arrowParameters, bool allowTrailingComma,
+        bool& hasNonSimpleParameters)
+    {
+        bool hasDuplicate = false;
+        SourceLocation duplicateLocation;
+        while (!at(TokenType::RightParen)) {
+            if (at(TokenType::EndOfInput)) {
+                fail(ParserErrorCode::UnexpectedEndOfInput,
+                    current().location, TokenType::RightParen, true);
+                return false;
+            }
+            if (parameters.size() >= limits_.maxFunctionParameters) {
+                fail(ParserErrorCode::TooManyParameters, current().location,
+                    TokenType::Identifier, true);
+                return false;
+            }
+
+            const bool rest = at(TokenType::Ellipsis);
+            if (rest) {
+                advance();
+                hasNonSimpleParameters = true;
+            }
+            Token parameterToken;
+            if (!expectIdentifier(parameterToken)) return false;
+            const AstNodeId parameter = makeLeaf(AstNodeKind::Identifier,
+                parameterToken);
+            if (parameter == kInvalidAstNodeId) return false;
+            ast_.node(parameter).prefix = rest;
+
+            for (AstNodeId prior : parameters) {
+                if (sameNodeName(prior, parameter)) {
+                    hasDuplicate = true;
+                    duplicateLocation = parameterToken.location;
+                    break;
+                }
+            }
+
+            if (at(TokenType::Assign)) {
+                const Token assign = advance();
+                if (rest) {
+                    fail(ParserErrorCode::InvalidLexicalDeclaration,
+                        assign.location, TokenType::Identifier, false);
+                    return false;
+                }
+                const AstNodeId initializer = parseAssignmentExpression();
+                if (initializer == kInvalidAstNodeId) return false;
+                ast_.node(parameter).initializer = initializer;
+                hasNonSimpleParameters = true;
+            }
+
+            parameters.push_back(parameter);
+            if (rest) {
+                if (at(TokenType::Comma)) {
+                    fail(ParserErrorCode::InvalidLexicalDeclaration,
+                        current().location, TokenType::RightParen, true);
+                    return false;
+                }
+                if (!at(TokenType::RightParen)) {
+                    fail(ParserErrorCode::ExpectedToken, current().location,
+                        TokenType::RightParen, true);
+                    return false;
+                }
+                break;
+            }
+            if (!at(TokenType::Comma)) break;
+            advance();
+            if (at(TokenType::RightParen)) {
+                if (!allowTrailingComma) {
+                    fail(ParserErrorCode::InvalidLexicalDeclaration,
+                        current().location, TokenType::Identifier, true);
+                    return false;
+                }
+                break;
+            }
+        }
+
+        if (hasDuplicate && (arrowParameters || hasNonSimpleParameters)) {
+            fail(ParserErrorCode::DuplicateParameter, duplicateLocation,
+                TokenType::Identifier, false);
+            return false;
+        }
+        return true;
+    }
+
     AstNodeId parseFunctionDeclaration()
     {
         const Token keyword = advance();
@@ -426,26 +511,9 @@ private:
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
 
         std::vector<AstNodeId> parameters;
-        while (!at(TokenType::RightParen)) {
-            if (at(TokenType::EndOfInput)) {
-                fail(ParserErrorCode::UnexpectedEndOfInput, current().location,
-                    TokenType::RightParen, true);
-                return kInvalidAstNodeId;
-            }
-            if (parameters.size() >= limits_.maxFunctionParameters) {
-                fail(ParserErrorCode::TooManyParameters, current().location,
-                    TokenType::Identifier, true);
-                return kInvalidAstNodeId;
-            }
-            Token parameterToken;
-            if (!expectIdentifier(parameterToken)) return kInvalidAstNodeId;
-            const AstNodeId parameter = makeLeaf(AstNodeKind::Identifier,
-                parameterToken);
-            if (parameter == kInvalidAstNodeId) return kInvalidAstNodeId;
-            parameters.push_back(parameter);
-            if (!at(TokenType::Comma)) break;
-            advance();
-        }
+        bool hasNonSimpleParameters = false;
+        if (!parseFormalParameters(parameters, false, true,
+                hasNonSimpleParameters)) return kInvalidAstNodeId;
         if (!expect(TokenType::RightParen)) return kInvalidAstNodeId;
         const AstNodeId body = parseBlock();
         if (body == kInvalidAstNodeId) return kInvalidAstNodeId;
@@ -472,26 +540,9 @@ private:
         if (!expect(TokenType::LeftParen)) return kInvalidAstNodeId;
 
         std::vector<AstNodeId> parameters;
-        while (!at(TokenType::RightParen)) {
-            if (at(TokenType::EndOfInput)) {
-                fail(ParserErrorCode::UnexpectedEndOfInput, current().location,
-                    TokenType::RightParen, true);
-                return kInvalidAstNodeId;
-            }
-            if (parameters.size() >= limits_.maxFunctionParameters) {
-                fail(ParserErrorCode::TooManyParameters, current().location,
-                    TokenType::Identifier, true);
-                return kInvalidAstNodeId;
-            }
-            Token parameterToken;
-            if (!expectIdentifier(parameterToken)) return kInvalidAstNodeId;
-            const AstNodeId parameter = makeLeaf(AstNodeKind::Identifier,
-                parameterToken);
-            if (parameter == kInvalidAstNodeId) return kInvalidAstNodeId;
-            parameters.push_back(parameter);
-            if (!at(TokenType::Comma)) break;
-            advance();
-        }
+        bool hasNonSimpleParameters = false;
+        if (!parseFormalParameters(parameters, false, true,
+                hasNonSimpleParameters)) return kInvalidAstNodeId;
         if (!expect(TokenType::RightParen)) return kInvalidAstNodeId;
         const AstNodeId body = parseBlock();
         if (body == kInvalidAstNodeId) return kInvalidAstNodeId;
@@ -710,24 +761,36 @@ private:
         if (!at(TokenType::LeftParen)) return false;
 
         std::size_t scan = pos_ + 1u;
-        if (tokenAt(scan).type == TokenType::RightParen)
-            return tokenAt(scan + 1u).type == TokenType::Arrow;
-
-        std::size_t parameterCount = 0u;
-        while (tokenAt(scan).type == TokenType::Identifier) {
-            if (parameterCount >= limits_.maxFunctionParameters)
-                return false;
-            ++parameterCount;
+        std::size_t parenDepth = 1u;
+        std::size_t bracketDepth = 0u;
+        std::size_t braceDepth = 0u;
+        std::size_t parameterSeparators = 0u;
+        while (scan < tokens_.size()) {
+            const TokenType type = tokenAt(scan).type;
+            if (type == TokenType::EndOfInput) return false;
+            if (type == TokenType::LeftParen) {
+                ++parenDepth;
+            } else if (type == TokenType::RightParen) {
+                if (parenDepth == 1u && bracketDepth == 0u &&
+                    braceDepth == 0u) {
+                    return tokenAt(scan + 1u).type == TokenType::Arrow;
+                }
+                if (parenDepth != 0u) --parenDepth;
+            } else if (type == TokenType::LeftBracket) {
+                ++bracketDepth;
+            } else if (type == TokenType::RightBracket) {
+                if (bracketDepth != 0u) --bracketDepth;
+            } else if (type == TokenType::LeftBrace) {
+                ++braceDepth;
+            } else if (type == TokenType::RightBrace) {
+                if (braceDepth != 0u) --braceDepth;
+            } else if (type == TokenType::Comma && parenDepth == 1u &&
+                bracketDepth == 0u && braceDepth == 0u) {
+                ++parameterSeparators;
+                if (parameterSeparators >= limits_.maxFunctionParameters)
+                    return false;
+            }
             ++scan;
-            if (tokenAt(scan).type == TokenType::RightParen)
-                return tokenAt(scan + 1u).type == TokenType::Arrow;
-            if (tokenAt(scan).type != TokenType::Comma) return false;
-            ++scan;
-            // Recognize a trailing comma as an arrow-shaped malformed list so
-            // parseArrowFunction reports it explicitly instead of treating it
-            // as a parenthesized ordinary expression.
-            if (tokenAt(scan).type == TokenType::RightParen)
-                return tokenAt(scan + 1u).type == TokenType::Arrow;
         }
         return false;
     }
@@ -1017,48 +1080,15 @@ private:
     {
         const Token start = current();
         std::vector<AstNodeId> parameters;
-        std::vector<Token> parameterTokens;
+        bool hasNonSimpleParameters = false;
         if (at(TokenType::Identifier)) {
             const Token parameterToken = advance();
             parameters.push_back(makeLeaf(AstNodeKind::Identifier,
                 parameterToken));
-            parameterTokens.push_back(parameterToken);
         } else {
             expect(TokenType::LeftParen);
-            while (!at(TokenType::RightParen)) {
-                if (at(TokenType::EndOfInput)) {
-                    fail(ParserErrorCode::UnexpectedEndOfInput,
-                        current().location, TokenType::RightParen, true);
-                    return kInvalidAstNodeId;
-                }
-                if (parameters.size() >= limits_.maxFunctionParameters) {
-                    fail(ParserErrorCode::TooManyParameters,
-                        current().location, TokenType::Identifier, true);
-                    return kInvalidAstNodeId;
-                }
-                Token parameterToken;
-                if (!expectIdentifier(parameterToken)) return kInvalidAstNodeId;
-                for (const Token& prior : parameterTokens) {
-                    if (sameIdentifierText(prior, parameterToken)) {
-                        fail(ParserErrorCode::DuplicateParameter,
-                            parameterToken.location, TokenType::Identifier,
-                            false);
-                        return kInvalidAstNodeId;
-                    }
-                }
-                const AstNodeId parameter = makeLeaf(AstNodeKind::Identifier,
-                    parameterToken);
-                if (parameter == kInvalidAstNodeId) return parameter;
-                parameters.push_back(parameter);
-                parameterTokens.push_back(parameterToken);
-                if (!at(TokenType::Comma)) break;
-                advance();
-                if (at(TokenType::RightParen)) {
-                    fail(ParserErrorCode::InvalidLexicalDeclaration,
-                        current().location, TokenType::Identifier, true);
-                    return kInvalidAstNodeId;
-                }
-            }
+            if (!parseFormalParameters(parameters, true, false,
+                    hasNonSimpleParameters)) return kInvalidAstNodeId;
             if (!expect(TokenType::RightParen)) return kInvalidAstNodeId;
         }
         if (!expect(TokenType::Arrow)) return kInvalidAstNodeId;

@@ -339,6 +339,11 @@ public:
             context_.setRuntimeError(error, SourceLocation());
             return false;
         }
+        if (argumentCount > context_.limits_.parser.maxCallArguments) {
+            error = RuntimeErrorCode::TooManyArguments;
+            context_.setRuntimeError(error, SourceLocation());
+            return false;
+        }
 
         std::vector<Value> callbackArguments;
         try {
@@ -393,6 +398,7 @@ private:
     struct CallFrame {
         RuntimeFunctionId function = kInvalidRuntimeFunctionId;
         EnvironmentId environment = kInvalidEnvironmentId;
+        EnvironmentId parameterEnvironment = kInvalidEnvironmentId;
         EnvironmentId callerEnvironment = kInvalidEnvironmentId;
         SourceLocation callSite;
         Value thisValue = Value::undefined();
@@ -689,6 +695,13 @@ private:
 
     bool declare(SourceView name, Value value, SourceLocation location)
     {
+        if (!frames_.empty() &&
+            frames_.back().parameterEnvironment != kInvalidEnvironmentId) {
+            const Environment* parameters = context_.environmentAt(
+                frames_.back().parameterEnvironment);
+            if (parameters != nullptr && parameters->resolve(name) != nullptr)
+                return true;
+        }
         return declareIn(currentEnvironment_, name, value, location);
     }
 
@@ -792,7 +805,8 @@ private:
         }
     }
 
-    bool hoistVariables(AstNodeId id, EnvironmentId environment)
+    bool hoistVariables(AstNodeId id, EnvironmentId environment,
+        EnvironmentId parameterEnvironment = kInvalidEnvironmentId)
     {
         if (!validNode(id, SourceLocation())) return false;
         const AstNode& node = context_.ast_.node(id);
@@ -801,7 +815,7 @@ private:
         case AstNodeKind::BlockStatement:
             for (std::size_t index = 0; index < node.childCount; ++index) {
                 if (!hoistVariables(context_.ast_.childAt(id, index),
-                    environment)) return false;
+                    environment, parameterEnvironment)) return false;
             }
             return true;
         case AstNodeKind::VariableDeclaration:
@@ -816,8 +830,13 @@ private:
                     return false;
                 }
                 SourceView name;
-                if (!identifierName(declarator.name, name) ||
-                    !declareIn(environment, name, Value::undefined(),
+                if (!identifierName(declarator.name, name)) return false;
+                const Environment* parameters = parameterEnvironment ==
+                        kInvalidEnvironmentId
+                    ? nullptr : context_.environmentAt(parameterEnvironment);
+                if (parameters != nullptr && parameters->resolve(name) != nullptr)
+                    continue;
+                if (!declareIn(environment, name, Value::undefined(),
                         context_.ast_.node(declarator.name).location)) {
                     return false;
                 }
@@ -830,17 +849,23 @@ private:
             // An expression function's var bindings belong to its invocation.
             return true;
         case AstNodeKind::IfStatement:
-            if (!hoistVariables(node.consequent, environment)) return false;
+            if (!hoistVariables(node.consequent, environment,
+                    parameterEnvironment)) return false;
             return node.alternate == kInvalidAstNodeId ||
-                hoistVariables(node.alternate, environment);
+                hoistVariables(node.alternate, environment,
+                    parameterEnvironment);
         case AstNodeKind::WhileStatement:
-            return hoistVariables(node.body, environment);
+            return hoistVariables(node.body, environment,
+                parameterEnvironment);
         case AstNodeKind::ForStatement:
             if (node.init != kInvalidAstNodeId &&
-                !hoistVariables(node.init, environment)) return false;
-            return hoistVariables(node.body, environment);
+                !hoistVariables(node.init, environment,
+                    parameterEnvironment)) return false;
+            return hoistVariables(node.body, environment,
+                parameterEnvironment);
         case AstNodeKind::ForOfStatement:
-            return hoistVariables(node.body, environment);
+            return hoistVariables(node.body, environment,
+                parameterEnvironment);
         default:
             return true;
         }
@@ -872,7 +897,8 @@ private:
         return false;
     }
 
-    bool hoistFunctions(AstNodeId container, EnvironmentId environment)
+    bool hoistFunctions(AstNodeId container, EnvironmentId environment,
+        EnvironmentId parameterEnvironment = kInvalidEnvironmentId)
     {
         if (!validNode(container, SourceLocation())) return false;
         const AstNode& node = context_.ast_.node(container);
@@ -897,17 +923,25 @@ private:
                 fail(error, declaration.location);
                 return false;
             }
-            if (!bindValueIn(environment, name, Value::function(function),
+            EnvironmentId targetEnvironment = environment;
+            if (parameterEnvironment != kInvalidEnvironmentId) {
+                const Environment* parameters =
+                    context_.environmentAt(parameterEnvironment);
+                if (parameters != nullptr && parameters->resolve(name) != nullptr)
+                    targetEnvironment = parameterEnvironment;
+            }
+            if (!bindValueIn(targetEnvironment, name, Value::function(function),
                 context_.ast_.node(declaration.name).location)) return false;
         }
         return true;
     }
 
     bool instantiateDeclarations(AstNodeId container,
-        EnvironmentId environment)
+        EnvironmentId environment,
+        EnvironmentId parameterEnvironment = kInvalidEnvironmentId)
     {
-        return hoistVariables(container, environment) &&
-            hoistFunctions(container, environment);
+        return hoistVariables(container, environment, parameterEnvironment) &&
+            hoistFunctions(container, environment, parameterEnvironment);
     }
 
     bool instantiateLexicalBindings(AstNodeId container,
@@ -1464,6 +1498,10 @@ private:
         const std::vector<Value>& arguments, SourceLocation callSite,
         Value& result, Value receiver = Value::undefined())
     {
+        if (arguments.size() > context_.limits_.parser.maxCallArguments) {
+            fail(RuntimeErrorCode::TooManyArguments, callSite);
+            return false;
+        }
         const RuntimeContext::FunctionRecord* functionRecord =
             context_.functionAt(functionId);
         if (functionRecord == nullptr) {
@@ -1503,6 +1541,20 @@ private:
             return false;
         }
 
+        bool hasNonSimpleParameters = false;
+        for (std::size_t index = 0; index < declaration.childCount; ++index) {
+            const AstNodeId parameterId = context_.ast_.childAt(
+                function.declaration, index);
+            if (!validNode(parameterId, declaration.location)) return false;
+            const AstNode& parameter = context_.ast_.node(parameterId);
+            if (parameter.kind != AstNodeKind::Identifier) {
+                fail(RuntimeErrorCode::InvalidAstState, parameter.location);
+                return false;
+            }
+            hasNonSimpleParameters = hasNonSimpleParameters ||
+                parameter.initializer != kInvalidAstNodeId || parameter.prefix;
+        }
+
         EnvironmentId callEnvironment = kInvalidEnvironmentId;
         RuntimeErrorCode error = RuntimeErrorCode::None;
         if (!context_.createEnvironment(function.closureEnvironment,
@@ -1510,6 +1562,8 @@ private:
             fail(error, callSite);
             return false;
         }
+        const EnvironmentId parameterEnvironment = hasNonSimpleParameters
+            ? callEnvironment : kInvalidEnvironmentId;
 
         const EnvironmentId callerEnvironment = currentEnvironment_;
         const Value callerThis = currentThis_;
@@ -1520,6 +1574,7 @@ private:
             CallFrame frame;
             frame.function = functionId;
             frame.environment = callEnvironment;
+            frame.parameterEnvironment = parameterEnvironment;
             frame.callerEnvironment = callerEnvironment;
             frame.callSite = callSite;
             const Value activeThis = function.arrowFunction
@@ -1534,35 +1589,126 @@ private:
         currentEnvironment_ = callEnvironment;
         currentThis_ = function.arrowFunction ? function.lexicalThis : receiver;
 
-        for (std::size_t index = 0; index < declaration.childCount; ++index) {
-            const AstNodeId parameterId = context_.ast_.childAt(
-                function.declaration, index);
-            SourceView name;
-            if (!identifierName(parameterId, name)) {
-                unwindFrame(callerEnvironment, callerThis, previousFrameCount,
-                    previousActiveCallFrames);
+        if (hasNonSimpleParameters) {
+            for (std::size_t index = 0; index < declaration.childCount; ++index) {
+                const AstNodeId parameterId = context_.ast_.childAt(
+                    function.declaration, index);
+                SourceView name;
+                if (!identifierName(parameterId, name) ||
+                    !declareLexicalIn(parameterEnvironment, name, false,
+                        context_.ast_.node(parameterId).location)) {
+                    unwindFrame(callerEnvironment, callerThis,
+                        previousFrameCount, previousActiveCallFrames);
+                    return false;
+                }
+            }
+
+            for (std::size_t index = 0; index < declaration.childCount; ++index) {
+                const AstNodeId parameterId = context_.ast_.childAt(
+                    function.declaration, index);
+                const AstNode& parameter = context_.ast_.node(parameterId);
+                SourceView name;
+                if (!identifierName(parameterId, name)) {
+                    unwindFrame(callerEnvironment, callerThis,
+                        previousFrameCount, previousActiveCallFrames);
+                    return false;
+                }
+
+                Value value = index < arguments.size()
+                    ? arguments[index] : Value::undefined();
+                if (parameter.prefix) {
+                    const std::size_t firstRestArgument =
+                        std::min(index, arguments.size());
+                    const std::size_t restCount =
+                        arguments.size() - firstRestArgument;
+                    std::vector<RuntimeContext::RuntimeArrayElement> elements;
+                    try {
+                        elements.reserve(restCount);
+                        for (std::size_t restIndex = 0u;
+                            restIndex < restCount; ++restIndex) {
+                            elements.emplace_back(restIndex,
+                                arguments[firstRestArgument + restIndex]);
+                        }
+                    } catch (const std::bad_alloc&) {
+                        fail(RuntimeErrorCode::AllocationFailure,
+                            parameter.location);
+                        unwindFrame(callerEnvironment, callerThis,
+                            previousFrameCount, previousActiveCallFrames);
+                        return false;
+                    }
+                    RuntimeObjectId restArray = kInvalidRuntimeObjectId;
+                    if (!context_.createArray(restCount, std::move(elements),
+                            restArray, error)) {
+                        fail(error, parameter.location);
+                        unwindFrame(callerEnvironment, callerThis,
+                            previousFrameCount, previousActiveCallFrames);
+                        return false;
+                    }
+                    value = Value::object(restArray);
+                } else if (value.isUndefined() &&
+                    parameter.initializer != kInvalidAstNodeId) {
+                    if (!validNode(parameter.initializer, parameter.location) ||
+                        !evalExpression(parameter.initializer, value)) {
+                        unwindFrame(callerEnvironment, callerThis,
+                            previousFrameCount, previousActiveCallFrames);
+                        return false;
+                    }
+                }
+
+                Environment* target =
+                    context_.environmentAt(parameterEnvironment);
+                if (target == nullptr || !target->initialize(name, value)) {
+                    fail(RuntimeErrorCode::InvalidAstState,
+                        parameter.location);
+                    unwindFrame(callerEnvironment, callerThis,
+                        previousFrameCount, previousActiveCallFrames);
+                    return false;
+                }
+            }
+
+            EnvironmentId bodyEnvironment = kInvalidEnvironmentId;
+            if (!context_.createEnvironment(parameterEnvironment,
+                    bodyEnvironment, error)) {
+                fail(error, callSite);
+                unwindFrame(callerEnvironment, callerThis,
+                    previousFrameCount, previousActiveCallFrames);
                 return false;
             }
-            const Value argument = index < arguments.size()
-                ? arguments[index] : Value::undefined();
-            if (!declareIn(callEnvironment, name, argument,
-                context_.ast_.node(parameterId).location)) {
-                unwindFrame(callerEnvironment, callerThis, previousFrameCount,
-                    previousActiveCallFrames);
-                return false;
-            }
-            Environment* target = context_.environmentAt(callEnvironment);
-            if (target == nullptr || !target->assign(name, argument)) {
-                fail(RuntimeErrorCode::InvalidAstState,
-                    context_.ast_.node(parameterId).location);
-                unwindFrame(callerEnvironment, callerThis, previousFrameCount,
-                    previousActiveCallFrames);
-                return false;
+            callEnvironment = bodyEnvironment;
+            currentEnvironment_ = bodyEnvironment;
+            if (!frames_.empty()) frames_.back().environment = bodyEnvironment;
+        } else {
+            for (std::size_t index = 0; index < declaration.childCount; ++index) {
+                const AstNodeId parameterId = context_.ast_.childAt(
+                    function.declaration, index);
+                SourceView name;
+                if (!identifierName(parameterId, name)) {
+                    unwindFrame(callerEnvironment, callerThis,
+                        previousFrameCount, previousActiveCallFrames);
+                    return false;
+                }
+                const Value argument = index < arguments.size()
+                    ? arguments[index] : Value::undefined();
+                if (!declareIn(callEnvironment, name, argument,
+                    context_.ast_.node(parameterId).location)) {
+                    unwindFrame(callerEnvironment, callerThis,
+                        previousFrameCount, previousActiveCallFrames);
+                    return false;
+                }
+                Environment* target = context_.environmentAt(callEnvironment);
+                if (target == nullptr || !target->assign(name, argument)) {
+                    fail(RuntimeErrorCode::InvalidAstState,
+                        context_.ast_.node(parameterId).location);
+                    unwindFrame(callerEnvironment, callerThis,
+                        previousFrameCount, previousActiveCallFrames);
+                    return false;
+                }
             }
         }
 
         if (declaration.body != kInvalidAstNodeId &&
-            (!instantiateDeclarations(declaration.body, callEnvironment) ||
+            (!instantiateDeclarations(declaration.body, callEnvironment,
+                 parameterEnvironment) ||
              !instantiateLexicalBindings(declaration.body, callEnvironment))) {
             unwindFrame(callerEnvironment, callerThis, previousFrameCount,
                 previousActiveCallFrames);
@@ -6145,6 +6291,18 @@ ScriptResult RuntimeContext::executeInSameRealm(SourceView source)
                 SourceLocation());
             return result_;
         }
+        // Preserve the source backing any AST installed by execute() before
+        // sourceStorage_ is replaced with this same-realm script.  Existing
+        // function records and closures continue to refer to those AST nodes,
+        // so their identifier spans must remain addressable in the cumulative
+        // realm source buffer.
+        if (realmSourceStorage_.empty() && ast_.nodeCount() != 0u) {
+            realmSourceStorage_ = sourceStorage_;
+            realmSourceLineCount_ = static_cast<std::size_t>(std::count(
+                realmSourceStorage_.begin(), realmSourceStorage_.end(), '\n'));
+            ast_.setSource(SourceView(realmSourceStorage_.data(),
+                realmSourceStorage_.size()));
+        }
         if (source.data == nullptr && source.length != 0) {
             Lexer lexer(limits_.lexer);
             const LexResult lexed = lexer.tokenize(source);
@@ -6175,16 +6333,6 @@ ScriptResult RuntimeContext::executeInSameRealm(SourceView source)
             result_.parserError = parsed.error;
             result_.status = ScriptStatus::ParseFailure;
             return result_;
-        }
-
-        // If a caller used execute() once before entering a same-realm phase,
-        // preserve that script's AST/source as the first realm segment.
-        if (realmSourceStorage_.empty() && ast_.nodeCount() != 0) {
-            realmSourceStorage_ = sourceStorage_;
-            realmSourceLineCount_ = static_cast<std::size_t>(std::count(
-                realmSourceStorage_.begin(), realmSourceStorage_.end(), '\n'));
-            ast_.setSource(SourceView(realmSourceStorage_.data(),
-                realmSourceStorage_.size()));
         }
 
         const bool hasPriorSource = !realmSourceStorage_.empty();
@@ -6314,6 +6462,8 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
         return "HostMethodLimitExceeded";
     case RuntimeErrorCode::HostInvalidValue:
         return "HostInvalidValue";
+    case RuntimeErrorCode::TooManyArguments:
+        return "TooManyArguments";
     case RuntimeErrorCode::DocumentLookupLimitExceeded:
         return "DocumentLookupLimitExceeded";
     case RuntimeErrorCode::DocumentTextLimitExceeded:

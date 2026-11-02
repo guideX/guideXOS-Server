@@ -39,6 +39,7 @@ enum class TokenType : std::uint8_t {
     LeftBracket,
     RightBracket,
     Dot,
+    Ellipsis,
     Comma,
     Semicolon,
     Colon,

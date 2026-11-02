@@ -6204,6 +6204,46 @@ static std::string navigatorHostedSmokeDiagnostic() {
         yesNo(js104StateClickTwo) + ",text=" +
         summarizeText(js104AfterStateClicks, 800));
 
+    const std::string js105FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js105.html";
+    const bool js105Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js105FixtureUrl);
+    const std::string js105InitialText =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js105InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    const std::string js105InitialError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS105 hosted defaults, lexical and dynamic this, and independent rest Arrays render",
+        js105Loaded && gxos::apps::Navigator::SmokeCurrentUrl() ==
+            js105FixtureUrl &&
+        contains(js105InitialText, "Navigator JavaScript JS105") &&
+        contains(js105InitialText, "6, 12, 18") &&
+        contains(js105InitialText, "7") &&
+        contains(js105InitialText, "10, 20") &&
+        contains(js105InitialText, "2:9:1:3") &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 1u &&
+        js105InitialError.empty(),
+        std::string("loaded=") + yesNo(js105Loaded) + ",text=" +
+        summarizeText(js105InitialText, 1400) + ",listeners=" +
+        std::to_string(gxos::apps::Navigator::SmokeJavaScriptListenerCount()) +
+        ",error=" + (js105InitialError.empty() ? "none" : js105InitialError));
+    const bool js105EventClick = js105Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("event-button");
+    const std::string js105AfterEventClick =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js105RevisionAfterEventClick =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS105 hosted rest parameter receives the Event callback argument",
+        js105EventClick && contains(js105AfterEventClick, "1:click") &&
+        js105RevisionAfterEventClick > js105InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js105EventClick) + ",revision=" +
+        std::to_string(js105InitialRevision) + "->" +
+        std::to_string(js105RevisionAfterEventClick) + ",text=" +
+        summarizeText(js105AfterEventClick, 1000));
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

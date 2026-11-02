@@ -103,7 +103,10 @@ enum class AstDeclarationKind : std::uint8_t {
 // by pointers into parser-owned storage.  childOffset/childCount describe a
 // contiguous range in Ast's child index storage for Program, BlockStatement,
 // VariableDeclaration, FunctionDeclaration, FunctionExpression, and
-// CallExpression nodes.
+// CallExpression nodes. Formal parameter nodes remain Identifier records:
+// initializer stores an optional default expression and prefix marks a rest
+// parameter. Those fields are otherwise unused by Identifier nodes, avoiding
+// any increase to AstNode size.
 struct AstNode {
     AstNodeKind kind = AstNodeKind::Invalid;
     SourceLocation location;

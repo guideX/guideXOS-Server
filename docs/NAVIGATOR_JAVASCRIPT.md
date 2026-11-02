@@ -13249,16 +13249,17 @@ are immutable. Reads or writes in the temporal dead zone fail with the runtime's
 existing program or function scope, including when they appear inside a block.
 Blocks without direct lexical declarations reuse the current environment.
 
-Arrow functions have a distinct AST node and function-record flag. The
-supported parameter forms are one unparenthesized identifier, `()`, or a
-parenthesized comma-separated list of simple identifiers. The body is either
-one expression with an implicit return or a block with ordinary `return`
-statements; a block that reaches its end returns `undefined`. Nested arrows,
-closure capture, and arrows passed to existing synchronous Array and Navigator
-Event callbacks are supported. Arrow functions capture `this` at creation and
-ignore a later method receiver or callback `thisArg`; traditional functions
-keep their existing dynamic receiver behavior. The runtime does not expose an
-`arguments` object, and arrows do not create an arrow-local one.
+Arrow functions have a distinct AST node and function-record flag. JS104
+introduced one unparenthesized identifier, `()`, or a parenthesized
+comma-separated list of simple identifiers. JS105 extends these forms with
+bounded defaults and a final rest parameter, described below. The body is
+either one expression with an implicit return or a block with ordinary
+`return` statements; a block that reaches its end returns `undefined`. Nested
+arrows, closure capture, and arrows passed to existing synchronous Array and
+Navigator Event callbacks are supported. Arrow functions capture `this` at
+creation and ignore a later method receiver or callback `thisArg`; traditional
+functions keep their existing dynamic receiver behavior. The runtime does not
+expose an `arguments` object, and arrows do not create an arrow-local one.
 
 Closures retain the lexical environment they captured after a block exits.
 Reads observe later changes to a captured mutable binding. Each existing
@@ -13267,19 +13268,19 @@ binding, and `for (const name of iterable)` remains immutable. Conventional
 `for (let i = ...; ...; ...)` and `for (const i = ...; ...; ...)` headers are
 rejected because this phase does not add their per-iteration loop semantics.
 
-The supported grammar excludes template literals, destructuring, default and
-rest parameters, spread, classes, optional chaining, nullish coalescing,
-`async`/`await`, Promises, modules and imports, automatic semicolon insertion,
-dynamic DOM creation, JSON, `Array.join()`, and external script loading. Arrow
-parameters must be simple identifiers and every statement still needs the
-established explicit terminator. Arrow lookahead is bounded by the configured
-parameter limit. Lexical block environments and user functions are retained
-until realm reset, so they consume the existing finite pools: 2,048 total
-environments including the global one, 4,096 user functions, 256 bindings per
-environment, 16,384 AST nodes, 1,024 runtime objects, 4,096 total Array
-elements, 64 nested calls, and the existing 100,000 execution-step budget.
-The lexer still caps source at 1 MiB and the parser caps input at 8,192 tokens.
-No pool limit was increased for JS104, and no garbage collector was added.
+The remaining unsupported grammar includes template literals, destructuring,
+spread, classes, optional chaining, nullish coalescing, `async`/`await`,
+Promises, modules and imports, automatic semicolon insertion, dynamic DOM
+creation, JSON, `Array.join()`, and external script loading. Every statement
+still needs the established explicit terminator. Arrow lookahead is bounded by
+the configured parameter limit. Lexical block environments and user functions
+are retained until realm reset, so they consume the existing finite pools:
+2,048 total environments including the global one, 4,096 user functions, 256
+bindings per environment, 16,384 AST nodes, 1,024 runtime objects, 4,096 total
+Array elements, 64 nested calls, and the existing 100,000 execution-step
+budget. The lexer still caps source at 1 MiB and the parser caps input at 8,192
+tokens. No pool limit was increased for JS104, and no garbage collector was
+added.
 
 The hosted fixture `navigator-smoke/javascript-js104.html` verifies that
 `[2, 4, 6].map(x => x * multiplier)` renders `6, 12, 18`, an Event arrow
@@ -13328,3 +13329,131 @@ completed successfully. JS83 `for...of` and JS102 Array callback coverage are
 included.
 Guest runtime qualification remains pending; no QEMU launch or QAC admission
 was performed.
+
+## JS105 — bounded default and rest parameters
+
+JS105 extends ordinary function declarations, function expressions, and
+synchronous arrows with defaults on simple identifier parameters and one
+optional final rest parameter. Default initializers use the existing
+assignment-expression grammar, so they can read identifiers, access
+properties, call functions, perform supported operations, and create object or
+Array literals. Parenthesized and unparenthesized arrow forms continue to use
+the existing arrow bodies.
+
+An omitted argument is treated as `undefined`; a default initializer runs for
+either an omitted argument or an explicitly supplied `undefined`. It does not
+run for `null`, `false`, zero, or the empty string. Initializers execute at
+invocation time, only when needed, and in parameter order. Each initializer
+sees earlier initialized parameters. All parameter names are created first in
+an uninitialized parameter environment, so reading a later parameter fails
+with `UninitializedBinding` even if an outer binding has the same name.
+Default expressions run before the function body environment is created; a
+body-only `var` or function declaration is therefore not visible to them.
+Closures created by an initializer retain the parameter environment after the
+call returns. Ordinary functions evaluate defaults with their invocation
+receiver as `this`; arrows retain their creation-time lexical `this`, including
+when used as a callback with a separate `thisArg`.
+
+Rest syntax is `...identifier` and it must be the final parameter. A rest
+parameter cannot have a default or a trailing comma. It receives a new native
+Array on each call, including an empty Array when there are no remaining
+arguments. Collected values preserve their object and Array identity; the new
+Array owns its element slots and does not alias the temporary argument list.
+Array allocation checks the existing object, length, and aggregate-element
+limits before publishing the result. Allocation or capacity failure unwinds
+the call without exposing a partial rest Array. The default parser limits
+allow at most 64 formal parameters and 64 arguments per call, so a rest Array
+contains at most 64 values (and fewer when named parameters precede it). The
+existing native Array length limit is 1,024, the aggregate indexed-element
+limit is 4,096, the maximum Array index is 1,023, and the runtime-object limit
+is 1,024. Rest Arrays and their element records remain allocated until realm
+reset, like other runtime objects; repeated calls therefore consume the
+existing object and aggregate-element pools. No limit was raised for JS105.
+
+Legacy ordinary functions whose parameters are all simple identifiers retain
+their existing duplicate-parameter behavior. Duplicate names are rejected for
+arrows and for non-simple ordinary parameter lists. `.length` is not exposed
+for functions, and the runtime still does not implement an `arguments`
+object. JS105 does not add spread expressions or destructuring parameters;
+ellipsis in calls, Array literals, and object literals remains a syntax error.
+
+JS105 reuses the existing parameter AST nodes: the default initializer and
+rest marker occupy existing fields, so `AstNode` remains 128 bytes. No retained
+runtime-pool record size or capacity was enlarged. Each call with defaults or
+rest uses a parameter environment and a body environment; both are retained
+until realm reset. Thus two of the existing 2,048 environment records are
+consumed by each completed non-simple call. With no other environment users, a
+fresh realm can complete 1,023 such calls before the next call can run out of
+room while creating its body environment. Defaults already evaluated before
+that failure keep their side effects, while the call frame unwinds. The
+transient call frame also stores one extra `EnvironmentId` per active call,
+bounded by the existing depth limit of 64 (256 bytes of ID payload at the
+default limit, apart from alignment and vector capacity). At the current
+record sizes, the logical maximum payloads are 2,097,152 bytes for 16,384 AST
+nodes, 294,912 bytes for
+4,096 function records, 90,112 bytes for 1,024 runtime objects, and 196,608
+bytes for 4,096 Array element records. Up to 2,048 environments account for
+98,304 bytes of environment records, while the theoretical ceiling of 256
+bindings in every environment is 524,288 `Binding` records, or 41,943,040
+bytes. These vectors and per-environment binding vectors grow with actual use;
+the figures are logical-record products, excluding vector spare capacity,
+owned strings, AST child IDs, and source storage. The large theoretical
+binding ceiling is an eventual guest-memory qualification concern, not a
+hosted memory acceptance result. Realm-retained source remains bounded by the
+existing 1 MiB limit; JS105 also fixes source ownership when same-realm
+execution replaces the current script, so retained closures keep valid AST
+name slices.
+
+The hosted fixture `navigator-smoke/javascript-js105.html` verifies default
+and rest parameters with `Array.map()` (`6, 12, 18`), a default reading
+captured state, ordinary dynamic versus arrow lexical `this`, independent rest
+Arrays across calls, and a rest parameter in a Navigator Event callback. The
+focused native lane is `tests/navigator_javascript_js105_test.cpp`, driven by
+`scripts/smoke-navigator-javascript-js105.ps1`; it covers grammar and
+initialization behavior, TDZ and parameter/body scope, closure capture,
+capacity boundaries, deterministic Array allocation failure, error unwinding,
+and the hosted document adapter.
+
+JS105 native qualification passed **32/32 checks** under strict C++17
+compilation with `-Wall -Wextra -Werror -pedantic`. The complete JavaScript
+matrix passed **106/106 lanes** and **17,346/17,346 reported assertions across
+65 assertion lanes**. That includes JS83 at 67/67, JS93–JS101 at 330/330,
+JS102 at 29/29, JS104 at 31/31, and JS105 at 32/32.
+
+Optimized host static stack measurements are: `Lexer::tokenize` 336 bytes,
+`ParserState::parseStatement` 656 bytes, `parseAssignmentExpression` 496
+bytes, `parseArgumentList` 96 bytes, `parsePrimaryExpression` 608 bytes,
+`Parser::parse` 656 bytes, `validateScope` 688 bytes,
+`preflightGlobalBindings` 416 bytes, and `instantiateLexicalBindings` 320
+bytes. Runtime frames are `executeStatement` 512 bytes, `invokeFunction` 768
+bytes, `createEnvironment` 80 bytes, `createArray` 176 bytes,
+`traverseArray` 544 bytes, and `invokeNative` 736 bytes. The formal-parameter
+parser and arrow lookahead helpers are inlined at `-O2`; their parser callers
+are measured above. Relative to the JS104 reference, `invokeFunction` grows
+from 608 to 768 bytes, while `traverseArray`, `invokeNative`, `validateScope`,
+`executeStatement`, `createFunction`, and the runtime record layouts remain
+unchanged. These are host compiler measurements, not guest stack guarantees.
+
+The hosted aggregate reported **746 passed, 7 failed, 753 total**. Both new
+JS105 checks passed: initial rendering verified `6, 12, 18`, captured default
+state `7`, receiver results `10, 20`, independent rest Arrays `2:9:1:3`, and
+the Event rest callback `1:click`. The seven failures are the established CSS
+checks (phase 3C, phase 3G, phase 6A, three phase 6B checks, and phase 6C),
+unchanged in identity and count from the JS104 baseline of 744 passed, 7
+failed, 751 total.
+
+The production build succeeded with an 8,836,052-byte executable (SHA-256
+`D7E95C0C1794EC4200CA3D0323A81F0A402A5B899A9613DDCA196DCED5F1D46E`). After
+hosted qualification, `guideXOSServer.exe` was restored and verified at
+8,398,274 bytes with its pre-build SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`; its
+observed creation time, last-write time, and archive attribute were restored.
+All 42 generated Navigator fixtures (458,372 bytes) were restored from their
+saved copies and verified against the path, size, SHA-256, timestamp, and
+attribute manifest. The production build emitted existing warnings in
+unrelated files; the JS105-focused sources passed warning-as-error compilation.
+The hosted aggregate's nonzero exit reflects only the seven established CSS
+failures described above.
+
+Native and hosted qualification for JS105 is complete on the host build.
+Guest memory, stack, and browser runtime qualification remain pending.

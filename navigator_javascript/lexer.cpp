@@ -372,6 +372,10 @@ struct Scanner {
         if (value == '}') { advance(); return emit(TokenType::RightBrace, start); }
         if (value == '[') { advance(); return emit(TokenType::LeftBracket, start); }
         if (value == ']') { advance(); return emit(TokenType::RightBracket, start); }
+        if (value == '.' && matches("...", 3)) {
+            consume(3, start);
+            return emit(TokenType::Ellipsis, start);
+        }
         if (value == '.') { advance(); return emit(TokenType::Dot, start); }
         if (value == ',') { advance(); return emit(TokenType::Comma, start); }
         if (value == ';') { advance(); return emit(TokenType::Semicolon, start); }
@@ -514,6 +518,7 @@ const char* tokenTypeName(TokenType type)
     case TokenType::LeftBracket: return "LeftBracket";
     case TokenType::RightBracket: return "RightBracket";
     case TokenType::Dot: return "Dot";
+    case TokenType::Ellipsis: return "Ellipsis";
     case TokenType::Comma: return "Comma";
     case TokenType::Semicolon: return "Semicolon";
     case TokenType::Colon: return "Colon";

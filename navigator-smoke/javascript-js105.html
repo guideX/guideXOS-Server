@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Navigator JavaScript JS105</title></head>
+<body>
+<h1>Navigator JavaScript JS105</h1>
+<pre id="result">JS105:pending</pre>
+<pre id="captured-result">pending</pre>
+<pre id="this-result">pending</pre>
+<pre id="independent-result">pending</pre>
+<button id="event-button" type="button">Check rest Event arguments</button>
+<pre id="event-result">pending</pre>
+<script>
+const format = (multiplier = 2, ...values) =>
+    values.map(value => value * multiplier);
+const output = format(3, 2, 4, 6);
+document.getElementById("result").textContent =
+    output[0] + ", " + output[1] + ", " + output[2];
+
+let capturedBase = 5;
+function useCapturedDefault(value = capturedBase) {
+    return value;
+}
+capturedBase = 7;
+document.getElementById("captured-result").textContent =
+    useCapturedDefault();
+
+const receiver = {
+    base: 10,
+    makeArrow: function() {
+        return (value = this.base) => value;
+    }
+};
+const defaultArrow = receiver.makeArrow();
+const lexicalThis = [undefined].map(defaultArrow, {base: 200})[0];
+const dynamicThis = [undefined].map(function(value = this.base) {
+    return value;
+}, {base: 20})[0];
+document.getElementById("this-result").textContent =
+    lexicalThis + ", " + dynamicThis;
+
+function collect(...values) {
+    return values;
+}
+const first = collect(1, 2);
+const second = collect(3);
+first[0] = 9;
+document.getElementById("independent-result").textContent =
+    first.length + ":" + first[0] + ":" + second.length + ":" + second[0];
+
+document.getElementById("event-button").addEventListener("click", (...events) => {
+    document.getElementById("event-result").textContent =
+        events.length + ":" + events[0].type;
+});
+</script>
+</body>
+</html>
