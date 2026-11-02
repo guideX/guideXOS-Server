@@ -93,6 +93,74 @@ if ($originalHash -cne '39402A5495C0DF35492C403B776EC9214A26D64D31B2D1CA558F1961
 }
 
 $analyzer = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2-native-alloc.ps1'
+$guestRunner = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1'
+if (-not (Test-Path -LiteralPath $guestRunner -PathType Leaf)) { throw "Native allocation QAC runner is missing: $guestRunner" }
+$guestRunnerText = Get-Content -LiteralPath $guestRunner -Raw
+if ($guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''NativeAllocationFailureAttribution''' -or
+    -not $guestRunnerText.Contains('guest-launch-attempt-C188R12R4R5R4R5R2R2R1.json') -or
+    -not $guestRunnerText.Contains('[System.IO.FileMode]::CreateNew') -or
+    -not $guestRunnerText.Contains('candidate-integrity inventory') -or
+    -not $guestRunnerText.Contains('verifiedArtifactHashCount') -or
+    -not $guestRunnerText.Contains('guestBootLimit=1;automaticRetry=$false') -or
+    -not $guestRunnerText.Contains('Test-NativeAllocationTraceComplete') -or
+    -not $guestRunnerText.Contains('managed_main_gate=blocked') -or
+    -not $guestRunnerText.Contains('native-allocation-diagnostic-record.raw.txt') -or
+    -not $guestRunnerText.Contains('serialSha256BeforeAnalysis') -or
+    -not $guestRunnerText.Contains('serialSha256AfterAnalysis') -or
+    -not $guestRunnerText.Contains('qac-guest-ownership-identity.json') -or
+    -not $guestRunnerText.Contains('-EvidenceKind guest_serial') -or
+    -not $guestRunnerText.Contains('guest-manifest.json') -or
+    -not $guestRunnerText.Contains('Set-Content -LiteralPath $manifestPath') -or
+    -not $guestRunnerText.Contains('serialLog=$serial;serialLogSha256=') -or
+    -not $guestRunnerText.Contains("[void](Invoke-Qmp 'quit')")) {
+    throw 'Native allocation guest runner lacks its candidate gate, one-boot guard, complete trace, immutable raw serial, analyzer, ownership, or owned-shutdown contract.'
+}
+$runnerGuestGate = $guestRunnerText.IndexOf('Test-NativeAllocationTraceComplete $serialText')
+$runnerShutdown = $guestRunnerText.IndexOf("[void](Invoke-Qmp 'quit')")
+if ($runnerGuestGate -lt 0 -or $runnerShutdown -lt $runnerGuestGate) {
+    throw 'Native allocation runner must wait for its bounded trace before the owned QMP shutdown path.'
+}
+$runnerTokens = $null
+$runnerParseErrors = $null
+$runnerAst = [System.Management.Automation.Language.Parser]::ParseFile($guestRunner,[ref]$runnerTokens,[ref]$runnerParseErrors)
+if ($runnerParseErrors.Count -ne 0) { throw 'Native allocation guest runner has PowerShell parse errors.' }
+$outcomeFunctionAst = $runnerAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Get-NativeAllocationOutcome'
+},$true)
+if ($null -eq $outcomeFunctionAst) { throw 'Native allocation runner outcome classifier is missing.' }
+. ([scriptblock]::Create($outcomeFunctionAst.Extent.Text))
+$blockedWithoutSerial = Get-NativeAllocationOutcome -SourceRamdiskPreserved $true -PreflightPassed $false `
+    -Admitted $false -ReleaseVerified $false -QacExitCode $null -SerialCaptured $false `
+    -RawSerialPreserved $false -RecordComplete $false -AnalysisError $null -Classification $null
+if ($blockedWithoutSerial -cne 'QAC_OR_EXECUTION_BLOCKED') {
+    throw 'QAC preflight rejection without a guest serial must remain blocked, not be mislabeled as a regression.'
+}
+$preservationRegression = Get-NativeAllocationOutcome -SourceRamdiskPreserved $true -PreflightPassed $true `
+    -Admitted $true -ReleaseVerified $false -QacExitCode 5 -SerialCaptured $true `
+    -RawSerialPreserved $false -RecordComplete $false -AnalysisError $null -Classification $null
+if ($preservationRegression -cne 'REGRESSION_DETECTED') {
+    throw 'A captured raw serial changed during analysis and must remain a regression.'
+}
+$guestSuccessOutcome = Get-NativeAllocationOutcome -SourceRamdiskPreserved $true -PreflightPassed $true `
+    -Admitted $true -ReleaseVerified $true -QacExitCode 0 -SerialCaptured $true `
+    -RawSerialPreserved $true -RecordComplete $true -AnalysisError $null -Classification 'SUCCESS'
+if ($guestSuccessOutcome -cne 'NATIVE_ALLOCATION_GUEST_ACCEPTED') {
+    throw 'A complete successful native allocation must be accepted without implying GC success.'
+}
+$guestFailureSiteOutcome = Get-NativeAllocationOutcome -SourceRamdiskPreserved $true -PreflightPassed $true `
+    -Admitted $true -ReleaseVerified $true -QacExitCode 0 -SerialCaptured $true `
+    -RawSerialPreserved $true -RecordComplete $true -AnalysisError $null -Classification 'VM_COMMIT_BRANCH_0x0413'
+if ($guestFailureSiteOutcome -cne 'NATIVE_ALLOC_FAILURE_SITE_PROVEN') {
+    throw 'A complete source-backed backend failure site must remain distinct from a proven root cause.'
+}
+$unexpectedClassificationOutcome = Get-NativeAllocationOutcome -SourceRamdiskPreserved $true -PreflightPassed $true `
+    -Admitted $true -ReleaseVerified $true -QacExitCode 0 -SerialCaptured $true `
+    -RawSerialPreserved $true -RecordComplete $true -AnalysisError $null -Classification 'UNEXPECTED_CLASS'
+if ($unexpectedClassificationOutcome -cne 'DIAGNOSTIC_INCONCLUSIVE') {
+    throw 'An unrecognized analyzer classification must fail closed as inconclusive.'
+}
 $fixtureCounter = 0
 function New-Fixture([string]$Kind) {
     $script:fixtureCounter++
@@ -208,6 +276,15 @@ $result = [ordered]@{
     compileLogSha256=(Get-FileHash -LiteralPath $compileLog -Algorithm SHA256).Hash.ToUpperInvariant()
     originalR2R1Serial=$OriginalR2R1Serial
     originalR2R1SerialSha256=$originalHash
+    nativeAllocationQacRunnerContract='PASS'
+    nativeAllocationRunnerGuard='C188R12R4R5R4R5R2R2R1 CreateNew; guest boot limit 1; automatic retry disabled'
+    nativeAllocationRawSerialPreservation='PASS; immutable serial hash bracket and separate diagnostic record files'
+    nativeAllocationQacOwnershipAndShutdown='PASS; reservation owner, QEMU child identity, QMP-owned quit'
+    nativeAllocationBlockedPreflightOutcome=$blockedWithoutSerial
+    nativeAllocationRawSerialMutationOutcome=$preservationRegression
+    nativeAllocationSuccessOutcome=$guestSuccessOutcome
+    nativeAllocationFailureSiteOutcome=$guestFailureSiteOutcome
+    nativeAllocationUnknownClassOutcome=$unexpectedClassificationOutcome
     analyzer=$analyzer
     fixtureClassifications=@('SUCCESS','VM_COMMIT_BRANCH_0x0413','VM_RESERVE_BRANCH_0x0408','KERNEL_PAL_SLOT_CAPACITY','PAL_NOT_READY','INCOMPLETE_MISSING_RUNTIME_RECORD','INCOMPLETE_DIAGNOSTIC_RECORD')
     diagnosticMapOperatorNew='??2@YAPEAX_KAEBUnothrow_t@std@@@Z -> guidexos_nativeaot_startup_imports.production.obj'

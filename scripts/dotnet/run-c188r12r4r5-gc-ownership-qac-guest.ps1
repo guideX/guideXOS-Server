@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$CandidateRoot,
     [ValidateRange(60,300)][int]$BootTimeoutSeconds = 180,
     [ValidateRange(1,60)][int]$AdmissionWindowSeconds = 30,
-    [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1'
+    [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1',
+    [string]$CandidateIntegrityInventory = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,17 +12,29 @@ if ($PSVersionTable.PSEdition -ne 'Core') { throw 'C188R12R4R5 QAC guest require
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Import-Module (Join-Path $PSScriptRoot 'c188r12r4r5r4-qac-admission.psm1') -Force
+function Get-Sha256([string]$Path) {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+function Require-Hash([string]$Path,[string]$Expected,[string]$Name) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Name is missing: $Path" }
+    $actual = Get-Sha256 $Path
+    if ($actual -cne ([string]$Expected).ToUpperInvariant()) { throw "$Name hash changed after qualification." }
+    return $actual
+}
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $candidateManifestPath = Join-Path $candidate 'candidate-manifest.json'
 if (-not (Test-Path -LiteralPath $candidateManifestPath -PathType Leaf)) {
     throw "Qualified candidate manifest is missing: $candidateManifestPath"
 }
 $candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$candidateManifestSha256 = Get-Sha256 $candidateManifestPath
+$candidateIntegrityInventorySha256 = $null
 $isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
 $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract'
 $isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
 $isSemiSharedAttribution = [string]$candidateManifest.mode -ceq 'SemiSharedAttribution'
-$isGcInitFailureAttribution = [string]$candidateManifest.mode -in @('GcInitFailureAttribution','SemiSharedAttribution')
+$isNativeAllocationFailureAttribution = [string]$candidateManifest.mode -ceq 'NativeAllocationFailureAttribution'
+$isGcInitFailureAttribution = [string]$candidateManifest.mode -in @('GcInitFailureAttribution','SemiSharedAttribution','NativeAllocationFailureAttribution')
 if ($ThreadStoreAttempt -in @('R2','R3') -and -not $isThreadStoreReadiness) {
     throw "ThreadStoreAttempt $ThreadStoreAttempt is valid only for the C188 R4 ThreadStore candidate."
 }
@@ -36,7 +49,9 @@ if ($isThreadStoreReadiness) {
     $r4RuntimePackManifest = Get-Content -LiteralPath $r4RuntimePackManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r4PalCommonMembership = $r4RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
 }
-$phaseRoot = if ($isSemiSharedAttribution) {
+$phaseRoot = if ($isNativeAllocationFailureAttribution) {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution'))
+} elseif ($isSemiSharedAttribution) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution'))
 } elseif ($isGcInitFailureAttribution) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5-gc-init-probes'))
@@ -63,7 +78,7 @@ if ($isGcInitFailureAttribution) {
     $r5PalReplacement = $r5RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
     $r5ProbeSources = $candidateManifest.gcInitProbeSourceFiles
     $r5StageRoot = Join-Path $candidate 'staged'
-    if ($isSemiSharedAttribution) {
+    if ($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) {
         $r5StageRoot = [System.IO.Path]::GetFullPath([string]$candidateManifest.semiSharedAttributionRecord.stagedRoot)
         $candidatePrefix = $candidate.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
         if (-not $r5StageRoot.StartsWith($candidatePrefix,[System.StringComparison]::OrdinalIgnoreCase)) {
@@ -77,7 +92,14 @@ if ($isGcInitFailureAttribution) {
     $r5StageManifest = Get-Content -LiteralPath $r5StageManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r5PatchedGcWksEntry = @($r5StageManifest.files | Where-Object { [string]$_.path -ceq 'diagnostic/runtime-pack/gcwks.cpp' })
     if ($r5PatchedGcWksEntry.Count -ne 1) { throw 'R4R5 staged inventory has no unique instrumented Workstation GC source entry.' }
-    $expectedGcCandidateResult = if ($isSemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' } else { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' }
+    $expectedGcCandidateResult = if ($isNativeAllocationFailureAttribution) { 'NATIVE_ALLOC_PROBES_HOSTED_READY' }
+        elseif ($isSemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' }
+        else { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' }
+    $expectedRuntimePackIdentity = if ($isNativeAllocationFailureAttribution) {
+        'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2r2-native-allocation-v1'
+    } elseif ($isSemiSharedAttribution) {
+        'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1'
+    } else { 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1' }
     if ($candidateManifest.result -cne $expectedGcCandidateResult -or
         -not [bool]$candidateManifest.runtimeInitDiagnostics -or
         -not [bool]$candidateManifest.c188R12R4R5R4R5GcInitProbes -or
@@ -90,7 +112,7 @@ if ($isGcInitFailureAttribution) {
         -not [bool]$candidateManifest.productionIsolationChecks.productionPersistentCompositeLifecycle -or
         -not [bool]$candidateManifest.productionIsolationChecks.noGcOwnershipProofProfileInProduction -or
         -not [bool]$candidateManifest.productionNativeAotPersistentCompositeLifecycle -or
-        [string]$candidateManifest.runtimePackIdentity -cne $(if ($isSemiSharedAttribution) { 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1' } else { 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5-gc-init-probes-v1' }) -or
+        [string]$candidateManifest.runtimePackIdentity -cne $expectedRuntimePackIdentity -or
         [string]$candidateManifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
         [string]$r5RuntimePackManifest.identity -cne [string]$candidateManifest.runtimePackIdentity -or
         [string]$r5RuntimePackManifest.runtimeIdentity.sourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
@@ -129,6 +151,62 @@ if ($isGcInitFailureAttribution) {
          [int]$candidateManifest.c188R12R4R5R4R5R2SummaryFieldCount -ne 15 -or
          [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR2SemiSharedProfile)) {
         throw 'R2 candidate failed its bounded semi-shared record or diagnostic/production isolation preflight.'
+    }
+    if ($isNativeAllocationFailureAttribution) {
+        $nativeHostedResults = Get-Content -LiteralPath ([string]$candidateManifest.nativeAllocationHostedTestResults) -Raw | ConvertFrom-Json -ErrorAction Stop
+        $nativeBranchMap = Get-Content -LiteralPath ([string]$candidateManifest.nativeAllocationFailureBranchMap) -Raw | ConvertFrom-Json -ErrorAction Stop
+        if (-not [bool]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttribution -or
+            [string]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationMarker -cne 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' -or
+            [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttemptCapacity -ne 8 -or
+            [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttemptFieldCount -ne 25 -or
+            [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationSummaryFieldCount -ne 9 -or
+            [string]$nativeBranchMap.marker -cne 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' -or
+            $nativeHostedResults.result -cne 'PASS' -or [bool]$nativeHostedResults.qemuLaunched -or [bool]$nativeHostedResults.qacReserved -or
+            [string]$nativeHostedResults.evidenceKind -cne 'hosted synthetic fixtures and fixed-record unit test' -or
+            [string]$nativeHostedResults.actualOperatorNewFailureMode -notmatch 'callback refusal is synthetic' -or
+            [string]$candidateManifest.nativeAllocationLinkedDisassemblySha256 -cne [string]$candidateManifest.artifactHashes.nativeAllocationLinkedDisassembly -or
+            -not [bool]$candidateManifest.productionIsolationChecks.diagnosticAndProductionOutputsSeparate -or
+            [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR2SemiSharedProfile -or
+            -not [bool]$candidateManifest.productionIsolationChecks.diagnosticInstrumentationAbsentFromProduction -or
+            -not [bool]$candidateManifest.productionIsolationChecks.productionPersistentCompositeLifecycle -or
+            -not [bool]$candidateManifest.productionNativeAotPersistentCompositeLifecycle) {
+            throw 'R2R2 candidate failed its native-allocation record, hosted synthetic-evidence, linked-probe, or production-isolation gate.'
+        }
+        $originalR2R1Serial = Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution\qac-guest-r4r5r2r1-001\serial.log'
+        [void](Require-Hash $originalR2R1Serial '39402A5495C0DF35492C403B776EC9214A26D64D31B2D1CA558F196124905C5B' 'Archived R2R1 raw guest serial')
+        [void](Require-Hash ([string]$candidateManifest.nativeAllocationAnalyzer) `
+            ([string]$candidateManifest.artifactHashes.nativeAllocationAnalyzer) 'R2R2 native-allocation analyzer')
+        [void](Require-Hash ([string]$candidateManifest.nativeAllocationFailureBranchMap) `
+            ([string]$candidateManifest.artifactHashes.nativeAllocationBranchMap) 'R2R2 failure-branch map')
+        [void](Require-Hash ([string]$candidateManifest.nativeAllocationHostedTestResults) `
+            ([string]$candidateManifest.artifactHashes.nativeAllocationHostedTests) 'R2R2 hosted test result')
+        [void](Require-Hash ([string]$candidateManifest.nativeAllocationLinkedDisassembly) `
+            ([string]$candidateManifest.nativeAllocationLinkedDisassemblySha256) 'R2R2 linked allocation disassembly')
+        if ([string]$candidateManifest.sourceRamdiskSha256 -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8' -or
+            [string]$candidateManifest.specializedKernelSha256 -cne [string]$candidateManifest.espKernelSha256 -or
+            [string]$candidateManifest.managedElfSha256 -cne [string]$candidateManifest.artifactHashes.candidateNativeAotElf -or
+            [string]$candidateManifest.specializedKernelSha256 -cne [string]$candidateManifest.artifactHashes.diagnosticKernelElf -or
+            [string]$candidateManifest.productionNativeAotElfSha256 -cne [string]$candidateManifest.artifactHashes.productionNativeAotElf -or
+            [string]$candidateManifest.productionKernelSha256 -cne [string]$candidateManifest.artifactHashes.productionKernelElf) {
+            throw 'R2R2 diagnostic, source-ramdisk, or production artifact identities differ from the integrity inventory.'
+        }
+        $nativeLinkedDisassemblyPath = [System.IO.Path]::GetFullPath((Join-Path $repo ([string]$candidateManifest.nativeAllocationLinkedDisassembly)))
+        $linkedAllocationText = Get-Content -LiteralPath $nativeLinkedDisassemblyPath -Raw
+        $gcEnvironmentSource = Join-Path $repo 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp'
+        [void](Require-Hash $gcEnvironmentSource ([string]$candidateManifest.artifactHashes.nativeAllocationGcEnvironmentSource) 'R2R2 GCEvent implementation source')
+        $gcEnvironmentText = Get-Content -LiteralPath $gcEnvironmentSource -Raw
+        if ($gcEnvironmentText -notmatch 'new\s*\(std::nothrow\)\s*GCEvent::Impl\s*\(\)' -or
+            $linkedAllocationText -notmatch '\?\?2@YAPEAX_KAEBUnothrow_t@std@@@Z' -or
+            $linkedAllocationText -notmatch 'guidexos_nativeaot_startup_malloc' -or
+            $linkedAllocationText -notmatch 'guidexos_nativeaot_pal_virtual_alloc') {
+            throw 'R2R2 linked disassembly does not establish GCEvent::Impl to nothrow new, startup malloc, and PAL virtual allocation.'
+        }
+        foreach ($requiredBranch in @('0x0200','0x0201','0x0202','0x0203','0x0204','0x0205','0x0206','0x0310','0x0408','0x0413')) {
+            if ($linkedAllocationText -notmatch [regex]::Escape($requiredBranch) -and
+                ($nativeBranchMap | ConvertTo-Json -Depth 8) -notmatch [regex]::Escape($requiredBranch)) {
+                throw "R2R2 operation or VM failure branch is absent from the linked diagnostic inventory: $requiredBranch"
+            }
+        }
     }
 } elseif ($isInitAttribution) {
     if ($candidateManifest.result -cne 'PASS_BUILD_READY_FOR_INIT_DIAGNOSTIC_QAC_PREFLIGHT' -or
@@ -193,18 +271,38 @@ if ($isGcInitFailureAttribution) {
     throw 'Candidate manifest failed the one-guest isolation, arena, or pinned-runtime gate.'
 }
 
-function Get-Sha256([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
-}
-function Require-Hash([string]$Path,[string]$Expected,[string]$Name) {
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Name is missing: $Path" }
-    $actual = Get-Sha256 $Path
-    if ($actual -cne ([string]$Expected).ToUpperInvariant()) { throw "$Name hash changed after qualification." }
-    return $actual
+if ($isNativeAllocationFailureAttribution) {
+    if ([string]::IsNullOrWhiteSpace($CandidateIntegrityInventory) -or
+        -not (Test-Path -LiteralPath $CandidateIntegrityInventory -PathType Leaf)) {
+        throw 'R2R2 guest admission requires the reviewed full candidate-integrity inventory.'
+    }
+    $CandidateIntegrityInventory = [System.IO.Path]::GetFullPath($CandidateIntegrityInventory)
+    $integrityInventory = Get-Content -LiteralPath $CandidateIntegrityInventory -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ($integrityInventory.result -cne 'PASS' -or
+        [string]$integrityInventory.candidateManifest -cne [System.IO.Path]::GetFullPath($candidateManifestPath) -or
+        [string]$integrityInventory.candidateManifestSha256 -cne (Get-Sha256 $candidateManifestPath) -or
+        [string]$integrityInventory.candidateHead -cne [string]$candidateManifest.head -or
+        [string]$integrityInventory.runtimePackSourceCommit -cne [string]$candidateManifest.runtimePackSourceCommit -or
+        [int]$integrityInventory.verifiedArtifactHashCount -ne @($candidateManifest.artifactHashes.PSObject.Properties).Count -or
+        @($integrityInventory.inventory | Where-Object status -ne 'PASS').Count -ne 0 -or
+        @($integrityInventory.problems).Count -ne 0) {
+        throw 'R2R2 full candidate-integrity inventory is incomplete or no longer matches the candidate.'
+    }
+    $candidateIntegrityInventorySha256 = Get-Sha256 $CandidateIntegrityInventory
+    $nativeLinkedDisassemblyPath = [System.IO.Path]::GetFullPath((Join-Path $repo ([string]$candidateManifest.nativeAllocationLinkedDisassembly)))
+    [void](Require-Hash ([string]$candidateManifest.managedElf) ([string]$candidateManifest.managedElfSha256) 'R2R2 diagnostic NativeAOT ELF')
+    [void](Require-Hash ([string]$candidateManifest.specializedKernel) ([string]$candidateManifest.specializedKernelSha256) 'R2R2 diagnostic kernel')
+    [void](Require-Hash (Join-Path $candidateManifest.esp 'kernel.elf') ([string]$candidateManifest.espKernelSha256) 'R2R2 staged diagnostic kernel')
+    [void](Require-Hash (Join-Path $candidateManifest.esp 'ramdisk.img') ([string]$candidateManifest.candidateRamdiskSha256) 'R2R2 staged diagnostic ramdisk')
+    [void](Require-Hash (Join-Path $repo 'ESP\ramdisk.img') ([string]$candidateManifest.sourceRamdiskSha256) 'R2R2 preserved source ramdisk')
+    [void](Require-Hash $nativeLinkedDisassemblyPath ([string]$candidateManifest.nativeAllocationLinkedDisassemblySha256) 'R2R2 linked allocation disassembly')
+    [void](Require-Hash ([string]$candidateManifest.productionNativeAotManifest) ([string]$candidateManifest.artifactHashes.productionNativeAotQualification) 'R2R2 proof-disabled production qualification')
+    [void](Require-Hash ([string]$candidateManifest.productionKernelManifest) ([string]$candidateManifest.artifactHashes.productionKernelQualification) 'R2R2 proof-disabled production kernel qualification')
 }
 
 $esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$runDirectory = if ($isSemiSharedAttribution) { 'qac-guest-r4r5r2r1-001' }
+$runDirectory = if ($isNativeAllocationFailureAttribution) { 'qac-guest-r2r2r1-001' }
+    elseif ($isSemiSharedAttribution) { 'qac-guest-r4r5r2r1-001' }
     elseif ($isGcInitFailureAttribution) { 'qac-guest-r4r5r1-001' }
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') { 'qac-guest-002' }
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R3') { 'qac-guest-003' }
@@ -215,7 +313,10 @@ $qmpLog = Join-Path $runRoot 'qmp.log'
 $qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $ovmf = Join-Path $repo 'OVMF.fd'
-$attemptPath = if ($isSemiSharedAttribution) {
+$runnerScriptSha256 = Get-Sha256 $PSCommandPath
+$attemptPath = if ($isNativeAllocationFailureAttribution) {
+    Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R2R1.json'
+} elseif ($isSemiSharedAttribution) {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R1.json'
 } elseif ($isGcInitFailureAttribution) {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R1.json'
@@ -228,6 +329,7 @@ foreach ($required in @($qacCli,$qemu,$ovmf,(Join-Path $esp 'kernel.elf'),
         (Join-Path $esp 'ramdisk.img'),(Join-Path $esp 'EFI\BOOT\BOOTX64.EFI'))) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required guest input is missing: $required" }
 }
+$qemuSha256 = Get-Sha256 $qemu
 if ((Get-Sha256 (Join-Path $esp 'kernel.elf')) -cne ([string]$candidateManifest.espKernelSha256).ToUpperInvariant() -or
     (Get-Sha256 (Join-Path $esp 'ramdisk.img')) -cne ([string]$candidateManifest.candidateRamdiskSha256).ToUpperInvariant() -or
     (Get-Sha256 (Join-Path $esp 'ramdisk.img')) -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8') {
@@ -246,7 +348,7 @@ if ($isThreadStoreReadiness) {
         ([string]$candidateManifest.threadStoreReadinessPalCommonReplacementSha256) 'R4 stack-bounds PAL replacement')
 }
 if ($isGcInitFailureAttribution) {
-    if (-not $isSemiSharedAttribution -and
+    if (-not $isSemiSharedAttribution -and -not $isNativeAllocationFailureAttribution -and
         ([string]$candidateManifest.sourceRamdiskSha256 -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8' -or
         [string]$candidateManifest.specializedKernelSha256 -cne [string]$candidateManifest.espKernelSha256 -or
         [string]$candidateManifest.specializedKernelSha256 -cne '714A7DBC77EDC32513221F63B6789BC0FED267A3495C5EF54F5E886ADCEB3341' -or
@@ -259,7 +361,7 @@ if ($isGcInitFailureAttribution) {
     [void](Require-Hash ([string]$candidateManifest.managedElf) ([string]$candidateManifest.managedElfSha256) 'R4R5 diagnostic ELF')
     [void](Require-Hash ([string]$candidateManifest.specializedKernel) ([string]$candidateManifest.specializedKernelSha256) 'R4R5 isolated kernel')
     [void](Require-Hash ([string]$candidateManifest.runtimePackManifest) ([string]$candidateManifest.runtimePackManifestSha256) 'R4R5 runtime-pack manifest')
-    if (-not $isSemiSharedAttribution -and ([string]$candidateManifest.gcInitRecordSha256 -cne 'C0503979BBB13DCBB51F29A74B6C5A306D303414FFF51E2FCAD55515BDC5387A' -or
+    if (-not $isSemiSharedAttribution -and -not $isNativeAllocationFailureAttribution -and ([string]$candidateManifest.gcInitRecordSha256 -cne 'C0503979BBB13DCBB51F29A74B6C5A306D303414FFF51E2FCAD55515BDC5387A' -or
         [string]$r5RuntimePackManifest.c188r12r4r5r4r5GcInitRecordObjectSha256 -cne [string]$candidateManifest.gcInitRecordSha256)) {
         throw 'R4R5 bounded GC-init record implementation identity differs from the qualified candidate.'
     }
@@ -283,7 +385,7 @@ if ($isGcInitFailureAttribution) {
         ([string]$r5ProbeSources.recordHeader) 'GC-init record header')
     [void](Require-Hash (Join-Path $repo 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_gcinit_record.cpp') `
         ([string]$r5ProbeSources.recordImplementation) 'GC-init record implementation source')
-    if ($isSemiSharedAttribution) {
+    if ($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) {
         $r2Sources = $candidateManifest.semiSharedSourceFiles
         $r2StageEntries = @($r5StageManifest.files | Where-Object { [string]$_.path -like 'diagnostic/runtime-pack/guidexos_nativeaot_semishared_record.*' })
         if ([int]$r2StageEntries.Count -ne 2 -or
@@ -442,6 +544,70 @@ function Read-GuestSerial {
         try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
     } finally { $stream.Dispose() }
 }
+function Test-NativeAllocationTraceComplete([string]$Text) {
+    $marker = 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC'
+    $pattern = '\[' + [regex]::Escape($marker) + '\] source=(runtime|backend) invocation=([0-9A-Fa-f]{8}) sequence=([0-9A-Fa-f]{8}) field=([0-9A-Fa-f]{8}) value=([0-9A-Fa-f]{8}) auxiliary=([0-9A-Fa-f]{8})'
+    $rows = @{}
+    $invocations = @{}
+    foreach ($match in [regex]::Matches($Text,$pattern)) {
+        $sourceName = $match.Groups[1].Value
+        $invocation = $match.Groups[2].Value.ToUpperInvariant()
+        $sequence = $match.Groups[3].Value.ToUpperInvariant()
+        $field = $match.Groups[4].Value.ToUpperInvariant()
+        $key = "$sourceName/$invocation/$sequence/$field"
+        if ($rows.ContainsKey($key)) { return $false }
+        $rows[$key] = [pscustomobject]@{value=$match.Groups[5].Value;auxiliary=$match.Groups[6].Value}
+        $invocations[$invocation] = $true
+    }
+    if ($invocations.Count -ne 1) { return $false }
+    $invocation = [string]@($invocations.Keys)[0]
+    foreach ($field in 0..8) {
+        if (-not $rows.ContainsKey(('runtime/{0}/FFFFFFFF/{1:X8}' -f $invocation,(0x80000000 + $field)))) { return $false }
+    }
+    $runtimeCountKey = "runtime/$invocation/FFFFFFFF/80000002"
+    $runtimeOverflowKey = "runtime/$invocation/FFFFFFFF/80000003"
+    $runtimeCount = [Convert]::ToUInt32($rows[$runtimeCountKey].value,16)
+    if ($runtimeCount -eq 0 -or $runtimeCount -gt 8 -or
+        [Convert]::ToUInt32($rows[$runtimeOverflowKey].value,16) -ne 0) { return $false }
+    for ($sequence = 0; $sequence -lt $runtimeCount; $sequence++) {
+        for ($field = 0; $field -lt 25; $field++) {
+            if (-not $rows.ContainsKey(('runtime/{0}/{1:X8}/{2:X8}' -f $invocation,$sequence,$field))) { return $false }
+        }
+    }
+    $backendSummaryKey = "backend/$invocation/FFFFFFFF/80000000"
+    $backendFirstFailureKey = "backend/$invocation/FFFFFFFF/80000001"
+    if (-not $rows.ContainsKey($backendSummaryKey) -or -not $rows.ContainsKey($backendFirstFailureKey)) { return $false }
+    $backendCount = [Convert]::ToUInt32($rows[$backendSummaryKey].value,16)
+    $backendOverflow = [Convert]::ToUInt32($rows[$backendSummaryKey].auxiliary,16)
+    if ($backendCount -gt 8 -or $backendOverflow -ne 0) { return $false }
+    for ($sequence = 0; $sequence -lt $backendCount; $sequence++) {
+        for ($field = 0; $field -lt 34; $field++) {
+            if (-not $rows.ContainsKey(('backend/{0}/{1:X8}/{2:X8}' -f $invocation,$sequence,$field))) { return $false }
+        }
+    }
+    return $true
+}
+function Get-NativeAllocationOutcome([bool]$SourceRamdiskPreserved,[bool]$PreflightPassed,[bool]$Admitted,
+    [bool]$ReleaseVerified,[object]$QacExitCode,[bool]$SerialCaptured,[bool]$RawSerialPreserved,
+    [bool]$RecordComplete,[object]$AnalysisError,[string]$Classification) {
+    if (-not $SourceRamdiskPreserved) { return 'REGRESSION_DETECTED' }
+    if (-not $PreflightPassed -or -not $Admitted) { return 'QAC_OR_EXECUTION_BLOCKED' }
+    if ($SerialCaptured -and -not $RawSerialPreserved) { return 'REGRESSION_DETECTED' }
+    if (-not $ReleaseVerified -or $null -eq $QacExitCode -or [int]$QacExitCode -ne 0) {
+        return 'QAC_OR_EXECUTION_BLOCKED'
+    }
+    if (-not $RecordComplete -or $null -ne $AnalysisError -or
+        $Classification -match '^INCOMPLETE_|^INCONSISTENT_') {
+        return 'DIAGNOSTIC_INCONCLUSIVE'
+    }
+    if ($Classification -eq 'SUCCESS') { return 'NATIVE_ALLOCATION_GUEST_ACCEPTED' }
+    if ($Classification -in @('PAL_NOT_READY','NATIVE_ALLOC_SIZE_OVERFLOW','KERNEL_PAL_SLOT_CAPACITY',
+            'VM_ROLLBACK_RELEASE_FAILURE','BACKEND_NULL_CAUSE_UNRECORDED') -or
+        $Classification -match '^VM_(RESERVE|COMMIT)_BRANCH_0x[0-9A-F]{4}$') {
+        return 'NATIVE_ALLOC_FAILURE_SITE_PROVEN'
+    }
+    return 'DIAGNOSTIC_INCONCLUSIVE'
+}
 function Read-QmpResponse([System.IO.StreamReader]$Reader,[string]$Command) {
     while ($true) {
         $line = $Reader.ReadLine()
@@ -505,7 +671,8 @@ $qemuArgs = @(
 $qacArgs = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemu) + $qemuArgs
 [ordered]@{qacCli=$qacCli;arguments=$qacArgs;qemu=$qemu;qemuArguments=$qemuArgs;qmpPort=$qmpPort;
     candidateRoot=$candidate;esp=$esp;serial=$serial;timeoutSeconds=$BootTimeoutSeconds;
-    candidateManifestSha256=Get-Sha256 $candidateManifestPath;
+    candidateManifestSha256=$candidateManifestSha256;candidateIntegrityInventory=$CandidateIntegrityInventory;
+    candidateIntegrityInventorySha256=$candidateIntegrityInventorySha256;qemuSha256=$qemuSha256;
     candidateProfile=$candidateManifest.mode;gcInitFailureAttributionProfile=$isGcInitFailureAttribution;
     threadStoreAttempt=if($isThreadStoreReadiness){$ThreadStoreAttempt}else{$null};attemptGuardPath=$attemptPath;
     guestBootLimit=1;automaticRetry=$false} |
@@ -533,6 +700,8 @@ $releaseVerified = $false
 $during = $null
 $duringInspection = $null
 $duringInspectionPath = $null
+$qacOwnershipIdentityPath = $null
+$qacOwnershipIdentity = $null
 $localGuestIdentity = $null
 $ownedQemuLocalProcess = $null
 $after = $null
@@ -548,7 +717,9 @@ try {
     $attempt = [ordered]@{candidateRoot=$candidate;attemptedAtUtc=$attemptedUtc;threadStoreAttempt=if($isThreadStoreReadiness){$ThreadStoreAttempt}else{$null};
         candidateProfile=$candidateManifest.mode;gcInitFailureAttributionProfile=$isGcInitFailureAttribution;
         runnerOwnerPid=$PID;runnerOwnerUser=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;
-        runnerScript=$PSCommandPath;runnerScriptSha256=Get-Sha256 $PSCommandPath;
+        runnerScript=$PSCommandPath;runnerScriptSha256=$runnerScriptSha256;
+        candidateIntegrityInventory=$CandidateIntegrityInventory;candidateIntegrityInventorySha256=$candidateIntegrityInventorySha256;
+        qemuExecutable=$qemu;qemuExecutableSha256=$qemuSha256;
         candidateIdentity=[ordered]@{candidateManifestSha256=Get-Sha256 $candidateManifestPath;
             diagnosticElfSha256=[string]$candidateManifest.managedElfSha256;
             diagnosticKernelSha256=[string]$candidateManifest.specializedKernelSha256;
@@ -635,6 +806,24 @@ try {
                             }
                             [System.IO.File]::WriteAllText((Join-Path $runRoot 'qemu-local-child-identity.json'),
                                 ($localGuestIdentity | ConvertTo-Json -Depth 5),[System.Text.UTF8Encoding]::new($false))
+                            $qacOwnershipIdentityPath = Join-Path $runRoot 'qac-guest-ownership-identity.json'
+                            $qacOwnershipIdentity = [ordered]@{
+                                candidateManifestSha256=$candidateManifestSha256
+                                candidateIntegrityInventory=$CandidateIntegrityInventory
+                                candidateIntegrityInventorySha256=$candidateIntegrityInventorySha256
+                                guardPath=$attemptPath
+                                guardSha256=Get-Sha256 $attemptPath
+                                runnerScript=$PSCommandPath
+                                runnerScriptSha256=Get-Sha256 $PSCommandPath
+                                qemuExecutable=$qemu
+                                qemuExecutableSha256=$qemuSha256
+                                qacReservationId=$qacReservationId
+                                qacOwnerPid=$qacProcess.Id
+                                qacOwnerUser=$ownerUser
+                                qemuChild=$localGuestIdentity
+                            }
+                            [System.IO.File]::WriteAllText($qacOwnershipIdentityPath,
+                                ($qacOwnershipIdentity | ConvertTo-Json -Depth 7),[System.Text.UTF8Encoding]::new($false))
                             break
                         } elseif ($null -ne $localProcess) {
                             $localGuestIdentity = [ordered]@{
@@ -667,7 +856,11 @@ try {
     $deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
     do {
         $serialText = Read-GuestSerial
-        if ($isGcInitFailureAttribution) {
+        if ($isNativeAllocationFailureAttribution) {
+            $guestPass = (Test-NativeAllocationTraceComplete $serialText) -and
+                $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*rhResult=(?:0x)?[0-9A-F]{8}\s*$' -and
+                $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
+        } elseif ($isGcInitFailureAttribution) {
             $r4FailureBoundary = $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)\s+' -or
                 $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=pal_stack_current\s+raw0=[0-9A-Fa-f]{16}\s+raw1=(?!0{16}\s)[0-9A-Fa-f]{16}\s*$'
             $r4GcTerminal = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=(?:PASS|FAIL) callbacks=\S+ result1=\S+ result2=\S+ result3=\S+\s*$'
@@ -694,7 +887,11 @@ try {
         Start-Sleep -Milliseconds 200
     } while ((Get-Date) -lt $deadline)
     $serialText = Read-GuestSerial
-    if ($isGcInitFailureAttribution) {
+    if ($isNativeAllocationFailureAttribution) {
+        $guestPass = (Test-NativeAllocationTraceComplete $serialText) -and
+            $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*rhResult=(?:0x)?[0-9A-F]{8}\s*$' -and
+            $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
+    } elseif ($isGcInitFailureAttribution) {
         $r4FailureBoundary = $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)\s+' -or
             $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=pal_stack_current\s+raw0=[0-9A-Fa-f]{16}\s+raw1=(?!0{16}\s)[0-9A-Fa-f]{16}\s*$'
         $r4GcTerminal = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=(?:PASS|FAIL) callbacks=\S+ result1=\S+ result2=\S+ result3=\S+\s*$'
@@ -827,6 +1024,30 @@ $semiSharedAnalysisPath = $null
 $semiSharedAnalysis = $null
 $semiSharedAnalysisExitCode = $null
 $semiSharedRecordCaptureComplete = $false
+$nativeAllocationAnalysisPath = $null
+$nativeAllocationAnalysis = $null
+$nativeAllocationAnalysisExitCode = $null
+$nativeAllocationAnalysisError = $null
+$nativeAllocationRecordCaptureComplete = $false
+$nativeAllocationRecordPath = $null
+$gcInitRecordPath = $null
+$semiSharedRecordPath = $null
+if ($isNativeAllocationFailureAttribution -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
+    $serialLines = @($serialText -split "`r?`n")
+    $nativeAllocationRecordPath = Join-Path $runRoot 'native-allocation-diagnostic-record.raw.txt'
+    $gcInitRecordPath = Join-Path $runRoot 'gc-init-diagnostic-record.raw.txt'
+    $semiSharedRecordPath = Join-Path $runRoot 'semishared-diagnostic-record.raw.txt'
+    $recordGroups = @(
+        [pscustomobject]@{path=$nativeAllocationRecordPath;pattern='^\[C188R12R4R5R4R5R2R2_NATIVE_ALLOC\] '},
+        [pscustomobject]@{path=$gcInitRecordPath;pattern='^\[C188R12R4R5R4R5_GCINIT\] '},
+        [pscustomobject]@{path=$semiSharedRecordPath;pattern='^\[C188R12R4R5R4R5R2_SEMISHARED\] '}
+    )
+    foreach ($group in $recordGroups) {
+        if (Test-Path -LiteralPath $group.path) { throw "Refusing to overwrite derived serial record: $($group.path)" }
+        $lines = [string[]]@($serialLines | Where-Object { $_ -match $group.pattern })
+        [System.IO.File]::WriteAllLines($group.path,$lines,[System.Text.UTF8Encoding]::new($false))
+    }
+}
 if (Test-Path -LiteralPath $serial -PathType Leaf) {
     try {
         $analysisArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serialAnalyzer,
@@ -857,7 +1078,7 @@ if ($isGcInitFailureAttribution -and (Test-Path -LiteralPath $serial -PathType L
         if ($null -eq $serialAnalysisError) { $serialAnalysisError = 'ThreadStore analyzer: ' + $_.Exception.Message }
     }
 }
-if ($isSemiSharedAttribution -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
+if (($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
     $semiSharedAnalysisPath = Join-Path $runRoot 'serial-semishared-analysis.json'
     try {
         & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'analyze-c188r12r4r5r4r5r2-semishared.ps1') `
@@ -873,6 +1094,22 @@ if ($isSemiSharedAttribution -and (Test-Path -LiteralPath $serial -PathType Leaf
     } catch {
         if ($null -eq $serialAnalysisError) { $serialAnalysisError = 'Semi-shared analyzer: ' + $_.Exception.Message }
     }
+}
+if ($isNativeAllocationFailureAttribution -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
+    $nativeAllocationAnalysisPath = Join-Path $runRoot 'native-allocation-analysis.json'
+    try {
+        & pwsh -NoProfile -ExecutionPolicy Bypass -File ([string]$candidateManifest.nativeAllocationAnalyzer) `
+            -SerialPath $serial -OutputPath $nativeAllocationAnalysisPath -EvidenceKind guest_serial | Out-Null
+        $nativeAllocationAnalysisExitCode = $LASTEXITCODE
+        if ($nativeAllocationAnalysisExitCode -eq 0 -and (Test-Path -LiteralPath $nativeAllocationAnalysisPath -PathType Leaf)) {
+            $nativeAllocationAnalysis = Get-Content -LiteralPath $nativeAllocationAnalysisPath -Raw | ConvertFrom-Json
+            $nativeClassifications = @($nativeAllocationAnalysis.results | ForEach-Object { [string]$_.classification })
+            $nativeAllocationRecordCaptureComplete = [string]$nativeAllocationAnalysis.evidenceKind -ceq 'guest_serial' -and
+                $nativeClassifications.Count -eq 1 -and $nativeClassifications[0] -notmatch '^INCOMPLETE_'
+        } else {
+            $nativeAllocationAnalysisError = "Native-allocation analyzer exited $nativeAllocationAnalysisExitCode."
+        }
+    } catch { $nativeAllocationAnalysisError = $_.Exception.Message }
 }
 $serialSha256AfterAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
 $rawSerialPreservedByAnalysis = $null -ne $serialSha256BeforeAnalysis -and
@@ -900,12 +1137,16 @@ if ($isGcInitFailureAttribution) {
         ($threadStoreFailureOutcome -or $threadStoreHandoffAndProofCaptured)
     $guestPass = $gcInitRecordCaptureComplete -and $threadStoreTerminalCaptured
     $initCaptureComplete = $gcInitRecordCaptureComplete
-    if ($isSemiSharedAttribution) {
+    if ($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) {
         $semiSharedRecordCaptureComplete = $null -ne $semiSharedAnalysis -and
             [string]$semiSharedAnalysis.outcome -in @('init_semi_shared_succeeded','failure_branch_attributed') -and
             @($semiSharedAnalysis.issues).Count -eq 0
         $guestPass = $guestPass -and $semiSharedRecordCaptureComplete
         $initCaptureComplete = $initCaptureComplete -and $semiSharedRecordCaptureComplete
+    }
+    if ($isNativeAllocationFailureAttribution) {
+        $guestPass = $guestPass -and $nativeAllocationRecordCaptureComplete
+        $initCaptureComplete = $initCaptureComplete -and $nativeAllocationRecordCaptureComplete
     }
 } elseif ($isInitAttribution) {
     $guestPass = $initCaptureComplete -and $serialAnalysis.rhInitializeResult -in @('success','failure') -and
@@ -942,6 +1183,12 @@ $startupFailure = $serialText -match '(?m)^\[nativeaot-gc-first-allocation\] RhI
 $initReturnFailure = $isInitReturnContract -and
     $null -ne $serialAnalysis -and $serialAnalysis.nativeRhInitializeBoolean -eq '00000000' -and
     $serialAnalysis.startupAdapterOutcome -eq 'failure'
+$nativeAllocationClassification = if ($null -ne $nativeAllocationAnalysis -and @($nativeAllocationAnalysis.results).Count -eq 1) {
+    [string]$nativeAllocationAnalysis.results[0].classification
+} else { $null }
+$nativeAllocationFirstFailure = if ($null -ne $nativeAllocationAnalysis -and @($nativeAllocationAnalysis.results).Count -eq 1) {
+    $nativeAllocationAnalysis.results[0].firstFailure
+} else { $null }
 $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
     elseif (-not $preflightPassed) { 'EXPERIMENT_BLOCKED_QAC_CENSUS' }
     elseif ($guestPass -and $releaseVerified -and $qacExitCode -eq 0) { 'GC_GRAPH_GUEST_PROVEN' }
@@ -979,6 +1226,12 @@ if ($isInitAttribution) {
             'THREADSTORE_HANDOFF_AND_GC_PROOF_CAPTURED'
         } else { 'THREADSTORE_HANDOFF_CAPTURED_GC_PROOF_FAILED' }
     }
+} elseif ($isNativeAllocationFailureAttribution) {
+    $outcome = Get-NativeAllocationOutcome -SourceRamdiskPreserved $sourceRamdiskPreserved `
+        -PreflightPassed $preflightPassed -Admitted $admitted -ReleaseVerified $releaseVerified `
+        -QacExitCode $qacExitCode -SerialCaptured ($null -ne $serialSha256BeforeAnalysis) `
+        -RawSerialPreserved $rawSerialPreservedByAnalysis -RecordComplete $nativeAllocationRecordCaptureComplete `
+        -AnalysisError $nativeAllocationAnalysisError -Classification $nativeAllocationClassification
 } elseif ($isSemiSharedAttribution) {
     $gcInitOutcome = if ($null -ne $gcInternal) { [string]$gcInternal.outcome } else { '' }
     $semiOutcome = if ($null -ne $semiSharedAnalysis) { [string]$semiSharedAnalysis.outcome } else { '' }
@@ -1011,7 +1264,11 @@ if ($isInitAttribution) {
 }
 $manifest = [ordered]@{
     result=$outcome;runRoot=$runRoot;candidateRoot=$candidate;candidateManifest=$candidateManifestPath
-    candidateManifestSha256=Get-Sha256 $candidateManifestPath
+    candidateManifestSha256=$candidateManifestSha256
+    candidateIntegrityInventory=$CandidateIntegrityInventory
+    candidateIntegrityInventorySha256=$candidateIntegrityInventorySha256
+    runnerScript=$PSCommandPath;runnerScriptSha256=$runnerScriptSha256
+    qemuExecutable=$qemu;qemuExecutableSha256=$qemuSha256
     candidatePeSha256=[string]$candidateManifest.managedPeSha256
     candidateElfSha256=[string]$candidateManifest.managedElfSha256
     candidateKernelSha256=[string]$candidateManifest.specializedKernelSha256
@@ -1029,18 +1286,34 @@ $manifest = [ordered]@{
     qacOwnerUser=if ($null -ne $qacProcess) { [System.Security.Principal.WindowsIdentity]::GetCurrent().Name } else { $null }
     qacReservationInspection=$duringInspectionPath;qacSnapshotRecords=@($qacSnapshotRecords)
     localQemuChildIdentity=$localGuestIdentity
+    qacOwnershipIdentityPath=$qacOwnershipIdentityPath
+    qacOwnershipIdentity=$qacOwnershipIdentity
     initAttributionProfile=$isInitAttribution;initCaptureComplete=$initCaptureComplete
     initReturnContractProfile=$isInitReturnContract
     threadStoreReadinessProfile=$isThreadStoreReadiness
     gcInitFailureAttributionProfile=$isGcInitFailureAttribution
     semiSharedAttributionProfile=$isSemiSharedAttribution
+    nativeAllocationFailureAttributionProfile=$isNativeAllocationFailureAttribution
     semiSharedRecordCaptureComplete=$semiSharedRecordCaptureComplete
-    semiSharedAttributionOutcome=if($isSemiSharedAttribution -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.outcome}else{$null}
-    semiSharedFailureBranch=if($isSemiSharedAttribution -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.summary.firstFailureBranch}else{$null}
-    semiSharedCleanupFailure=if($isSemiSharedAttribution -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.summary.cleanupFailureOperation}else{$null}
+    semiSharedAttributionOutcome=if(($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.outcome}else{$null}
+    semiSharedFailureBranch=if(($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.summary.firstFailureBranch}else{$null}
+    semiSharedCleanupFailure=if(($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) -and $null -ne $semiSharedAnalysis){$semiSharedAnalysis.summary.cleanupFailureOperation}else{$null}
     semiSharedAnalysis=$semiSharedAnalysisPath
     semiSharedAnalysisExitCode=$semiSharedAnalysisExitCode
-    semiSharedAnalysisIssues=if($isSemiSharedAttribution -and $null -ne $semiSharedAnalysis){@($semiSharedAnalysis.issues)}else{@()}
+    semiSharedAnalysisIssues=if(($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) -and $null -ne $semiSharedAnalysis){@($semiSharedAnalysis.issues)}else{@()}
+    nativeAllocationAnalysis=$nativeAllocationAnalysisPath
+    nativeAllocationAnalysisExitCode=$nativeAllocationAnalysisExitCode
+    nativeAllocationAnalysisError=$nativeAllocationAnalysisError
+    nativeAllocationRecordCaptureComplete=$nativeAllocationRecordCaptureComplete
+    nativeAllocationClassification=$nativeAllocationClassification
+    nativeAllocationFirstFailure=$nativeAllocationFirstFailure
+    nativeAllocationResults=if($null -ne $nativeAllocationAnalysis){@($nativeAllocationAnalysis.results)}else{@()}
+    nativeAllocationDiagnosticRecord=$nativeAllocationRecordPath
+    nativeAllocationDiagnosticRecordSha256=if($null -ne $nativeAllocationRecordPath -and (Test-Path -LiteralPath $nativeAllocationRecordPath)){Get-Sha256 $nativeAllocationRecordPath}else{$null}
+    gcInitDiagnosticRecord=$gcInitRecordPath
+    gcInitDiagnosticRecordSha256=if($null -ne $gcInitRecordPath -and (Test-Path -LiteralPath $gcInitRecordPath)){Get-Sha256 $gcInitRecordPath}else{$null}
+    semiSharedDiagnosticRecord=$semiSharedRecordPath
+    semiSharedDiagnosticRecordSha256=if($null -ne $semiSharedRecordPath -and (Test-Path -LiteralPath $semiSharedRecordPath)){Get-Sha256 $semiSharedRecordPath}else{$null}
     gcInitializationInternalOutcome=if($isGcInitFailureAttribution -and $null -ne $gcInternal){$gcInternal.outcome}else{$null}
     gcInitializationInternalRecord=if($isGcInitFailureAttribution -and $null -ne $gcInternal){$gcInternal.record}else{$null}
     gcInitializationInternalRecordComplete=if($isGcInitFailureAttribution){$gcInitRecordCaptureComplete}else{$false}
@@ -1056,7 +1329,7 @@ $manifest = [ordered]@{
         diagnosticElfSha256=[string]$candidateManifest.managedElfSha256;
         diagnosticKernelSha256=[string]$candidateManifest.specializedKernelSha256;
         ramdiskSha256=[string]$candidateManifest.candidateRamdiskSha256}
-    guardIdentity=[ordered]@{path=$attemptPath;sha256=if(Test-Path -LiteralPath $attemptPath){Get-Sha256 $attemptPath}else{$null};attemptedAtUtc=$attemptedUtc}
+    guardIdentity=[ordered]@{path=$attemptPath;sha256=if(Test-Path -LiteralPath $attemptPath){Get-Sha256 $attemptPath}else{$null};attemptedAtUtc=$attemptedUtc;runnerScriptSha256=$runnerScriptSha256;candidateManifestSha256=$candidateManifestSha256;qemuExecutableSha256=$qemuSha256}
     threadStoreReadinessAnalysis=if ($isThreadStoreReadiness) { $serialAnalysisPath } elseif ($isGcInitFailureAttribution) { $threadStoreAnalysisPath } else { $null }
     threadStoreReadinessOutcome=if ($isThreadStoreReadiness -and $null -ne $serialAnalysis) { $serialAnalysis.outcome } elseif ($isGcInitFailureAttribution -and $null -ne $threadStoreAnalysis) { $threadStoreAnalysis.outcome } else { $null }
     threadStoreHandoffReady=if ($isThreadStoreReadiness -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.threadStoreHandoffReady } elseif ($isGcInitFailureAttribution -and $null -ne $threadStoreAnalysis) { [bool]$threadStoreAnalysis.threadStoreHandoffReady } else { $false }
@@ -1073,7 +1346,7 @@ $manifest = [ordered]@{
     } elseif ($isThreadStoreReadiness) {
         Get-AnalysisBoolean $serialAnalysis 'managedEntryReached'
     } else { Get-AnalysisBoolean $serialAnalysis 'managedMainDispatched' }
-    managedMainGateReason=if ($isInitReturnContract) { [string]$candidateManifest.managedMainGateReason } else { $null }
+    managedMainGateReason=if ($isInitReturnContract -or $isNativeAllocationFailureAttribution) { [string]$candidateManifest.managedMainGateReason } else { $null }
     serialAnalysis=$serialAnalysisPath;serialAnalysisExitCode=$serialAnalysisExitCode
     serialAnalysisError=$serialAnalysisError;serialAnalysisComplete=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.initTraceComplete } else { $false }
     serialSha256BeforeAnalysis=$serialSha256BeforeAnalysis;serialSha256AfterAnalysis=$serialSha256AfterAnalysis
@@ -1087,7 +1360,10 @@ $manifest = [ordered]@{
     qacArguments=(Join-Path $runRoot 'qac-run-arguments.json');guestAttempt=$attemptPath;error=$runError
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-if ($isSemiSharedAttribution) {
+if ($isNativeAllocationFailureAttribution) {
+    Write-Output "C188R12R4R5R4R5R2R2R1_NATIVE_ALLOC_ATTRIBUTION=$outcome ADMITTED=$admitted RECORD_COMPLETE=$nativeAllocationRecordCaptureComplete QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R12R4R5R4R5R2R2R1_NATIVE_ALLOC_ATTRIBUTION_MANIFEST=$manifestPath"
+} elseif ($isSemiSharedAttribution) {
     Write-Output "C188R12R4R5R4R5R2R1_SEMISHARED_ATTRIBUTION=$outcome ADMITTED=$admitted RECORD_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5R4R5R2R1_SEMISHARED_ATTRIBUTION_MANIFEST=$manifestPath"
 } elseif ($isGcInitFailureAttribution) {
