@@ -4,7 +4,7 @@
 **Qualification date:** 2026-11-02
 **Repository:** `D:\dev\guideXOSServer_AARCH64`
 **Branch:** `AARCH64_SUPPORT`
-**Local commit:** recorded below after qualification
+**Local implementation commit:** `3ba208cd2d651412ec357142cfab5044a1375f85`
 
 This phase implements the existing AARCH64 SDK `draw_rect` and `draw_text`
 callbacks. It qualifies the rendering services with hosted pixel tests and a
@@ -220,7 +220,10 @@ separately authorized phase.
 
 ## Commit and worktree closeout
 
-The local RENDER1 implementation commit is recorded in the post-commit
-closeout note. The pre-existing upstream `.gitignore` change remains in its own
-parent commit. Generated qualification outputs remain ignored under `out/` and
+The verified RENDER1 implementation and its qualification report landed in
+`3ba208cd2d651412ec357142cfab5044a1375f85` on `AARCH64_SUPPORT`, based on the
+preserved upstream `.gitignore` commit `3a16ef6672331fa151b21ccb77a3687d0ba9e0a4`.
+At that implementation commit the tracked worktree was clean. A documentation-
+only closeout commit records this SHA; the final branch HEAD is reported in the
+turn closeout. Generated qualification outputs remain ignored under `out/` and
 were preserved.
