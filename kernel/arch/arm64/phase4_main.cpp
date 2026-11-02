@@ -171,6 +171,104 @@ static void allocate_pages(uint64_t pages, uint64_t* base)
 
 static void print(const char* value) { phase3_serial_print(value); }
 
+static void print_dtb_property_rejection(const gxos_aarch64_phase2_platform* platform)
+{
+    if (!platform || !platform->parser_property_detail_valid) return;
+    const char* condition = "unknown";
+    const char* expected = "unknown";
+    switch (platform->parser_property_predicate) {
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_COMPATIBLE_STRING_LIST:
+            condition = "!string_list_valid(value, length)";
+            expected = "nonempty NUL-terminated string list with no empty elements";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_ADDRESS_CELLS_LENGTH:
+            condition = "length != 4";
+            expected = "one 32-bit big-endian cell (4 bytes)";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_ADDRESS_CELLS_RANGE:
+            condition = "cells == 0 || cells > 2";
+            expected = "#address-cells value in [1, 2]";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_SIZE_CELLS_LENGTH:
+            condition = "length != 4";
+            expected = "one 32-bit big-endian cell (4 bytes)";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_SIZE_CELLS_RANGE:
+            condition = "cells > 2 || (node.is_root && cells == 0)";
+            expected = "#size-cells value in [0, 2], root value nonzero";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_INTERRUPT_CELLS_LENGTH:
+            condition = "length != 4";
+            expected = "one 32-bit big-endian cell (4 bytes)";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_INTERRUPT_CELLS_RANGE:
+            condition = "cells == 0 || cells > 4";
+            expected = "#interrupt-cells value in [1, 4]";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_REDISTRIBUTOR_REGIONS_LENGTH:
+            condition = "length != 4";
+            expected = "one 32-bit big-endian cell (4 bytes)";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_REDISTRIBUTOR_STRIDE_LENGTH:
+            condition = "length != 4";
+            expected = "one 32-bit big-endian cell (4 bytes)";
+            break;
+        case GXOS_AARCH64_DTB_PROPERTY_PREDICATE_STATUS_STRING:
+            condition = "length == 0 || value[length - 1] != 0";
+            expected = "nonempty NUL-terminated status string";
+            break;
+        default:
+            break;
+    }
+
+    print("[guideXOS] DTB property rejection: predicate=P");
+    phase3_serial_dec(platform->parser_property_predicate);
+    print(" source=\"");
+    print(condition);
+    print("\" path=\"");
+    print(platform->parser_property_node_path);
+    if (platform->parser_property_path_truncated) print("...");
+    print("\" property=\"");
+    print(platform->parser_property_name);
+    if (platform->parser_property_name_truncated) print("...");
+    print("\" value-length=");
+    phase3_serial_dec(platform->parser_property_value_length);
+    print(" expected=\"");
+    print(expected);
+    print("\" observed-cells=");
+    if (platform->parser_property_has_observed_cells) {
+        phase3_serial_dec(platform->parser_property_observed_cells);
+    } else {
+        print("n/a");
+    }
+    print(" structure-offset=");
+    phase3_serial_hex(platform->parser_offset);
+    print(" token-offset=");
+    phase3_serial_hex(platform->parser_property_token_offset);
+    print(" name-field-offset=");
+    phase3_serial_hex(platform->parser_property_name_field_offset);
+    print(" property-name-offset=");
+    phase3_serial_hex(platform->parser_property_name_offset);
+    print(" value-offset=");
+    phase3_serial_hex(platform->parser_property_value_offset);
+    print(" inherited-address-cells=");
+    phase3_serial_dec(platform->parser_property_parent_address_cells);
+    print(" inherited-size-cells=");
+    phase3_serial_dec(platform->parser_property_parent_size_cells);
+    print(" interrupt-cells=");
+    phase3_serial_dec(platform->parser_property_interrupt_cells);
+    print(" preview=");
+    for (uint32_t i = 0; i < platform->parser_property_preview_length; ++i) {
+        const uint8_t value = platform->parser_property_preview[i];
+        static const char digits[] = "0123456789abcdef";
+        char pair[3] = {digits[value >> 4], digits[value & 0xf], 0};
+        print(pair);
+    }
+    print(" preview-length=");
+    phase3_serial_dec(platform->parser_property_preview_length);
+    print("\n");
+}
+
 #if defined(GXOS_AARCH64_PHASE6)
 static void phase6_maybe_arm_completion()
 {
@@ -1342,6 +1440,7 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
         print(" timer-irq=");
         phase3_serial_dec(platform.timer_irq);
         print("\n");
+        print_dtb_property_rejection(&platform);
         fail("DTB: FAIL");
     }
     g_platform_for_tasks = &platform;

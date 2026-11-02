@@ -7,6 +7,23 @@
 #define GXOS_AARCH64_PHASE2_MAX_VIRTIO_MMIO 32
 #define GXOS_AARCH64_PHASE2_MAX_GICR_REGIONS 8
 #define GXOS_AARCH64_PHASE2_MAX_CPU_AFFINITIES 8
+#define GXOS_AARCH64_DTB_PROPERTY_DIAGNOSTIC_PATH_BYTES 256
+#define GXOS_AARCH64_DTB_PROPERTY_DIAGNOSTIC_NAME_BYTES 64
+#define GXOS_AARCH64_DTB_PROPERTY_DIAGNOSTIC_PREVIEW_BYTES 16
+
+typedef enum gxos_aarch64_dtb_property_predicate {
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_NONE = 0,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_COMPATIBLE_STRING_LIST = 1,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_ADDRESS_CELLS_LENGTH = 2,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_ADDRESS_CELLS_RANGE = 3,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_SIZE_CELLS_LENGTH = 4,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_SIZE_CELLS_RANGE = 5,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_INTERRUPT_CELLS_LENGTH = 6,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_INTERRUPT_CELLS_RANGE = 7,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_REDISTRIBUTOR_REGIONS_LENGTH = 8,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_REDISTRIBUTOR_STRIDE_LENGTH = 9,
+    GXOS_AARCH64_DTB_PROPERTY_PREDICATE_STATUS_STRING = 10
+} gxos_aarch64_dtb_property_predicate;
 
 #define GXOS_AARCH64_PLATFORM_UNKNOWN 0
 #define GXOS_AARCH64_PLATFORM_QEMU_VIRT 1
@@ -116,6 +133,24 @@ typedef struct gxos_aarch64_phase2_platform {
     uint32_t ram_count;
     gxos_aarch64_phase2_virtio_mmio virtio_mmio[GXOS_AARCH64_PHASE2_MAX_VIRTIO_MMIO];
     uint32_t virtio_mmio_count;
+    uint32_t parser_property_predicate;
+    uint32_t parser_property_token_offset;
+    uint32_t parser_property_name_field_offset;
+    uint32_t parser_property_name_offset;
+    uint32_t parser_property_value_offset;
+    uint32_t parser_property_value_length;
+    uint32_t parser_property_observed_cells;
+    uint8_t parser_property_detail_valid;
+    uint8_t parser_property_has_observed_cells;
+    uint8_t parser_property_path_truncated;
+    uint8_t parser_property_name_truncated;
+    uint8_t parser_property_preview_length;
+    uint32_t parser_property_parent_address_cells;
+    uint32_t parser_property_parent_size_cells;
+    uint8_t parser_property_interrupt_cells;
+    char parser_property_node_path[GXOS_AARCH64_DTB_PROPERTY_DIAGNOSTIC_PATH_BYTES];
+    char parser_property_name[GXOS_AARCH64_DTB_PROPERTY_DIAGNOSTIC_NAME_BYTES];
+    uint8_t parser_property_preview[GXOS_AARCH64_DTB_PROPERTY_DIAGNOSTIC_PREVIEW_BYTES];
 } gxos_aarch64_phase2_platform;
 
 #ifdef __cplusplus

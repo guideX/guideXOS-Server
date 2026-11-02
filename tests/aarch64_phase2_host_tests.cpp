@@ -163,13 +163,23 @@ static void append_bytes(std::vector<uint8_t>& target, const std::vector<uint8_t
     target.insert(target.end(), source.begin(), source.end());
 }
 
-static std::vector<uint8_t> build_qemu_gicv2_dtb()
+static std::vector<uint8_t> build_qemu_gicv2_dtb(bool with_pci_host = false)
 {
     FdtBuilder fdt;
     fdt.begin("");
     fdt.property_stringlist("compatible", "linux,dummy-virt", "qemu,virt");
     fdt.property_cells("#address-cells", {2});
     fdt.property_cells("#size-cells", {2});
+
+    if (with_pci_host) {
+        fdt.begin("pcie@10000000");
+        fdt.property_text("compatible", "pci-host-ecam-generic");
+        fdt.property_text("device_type", "pci");
+        fdt.property_cells("#address-cells", {3});
+        fdt.property_cells("#size-cells", {2});
+        fdt.property("ranges", std::vector<uint8_t>());
+        fdt.end_node();
+    }
 
     fdt.begin("memory@40000000");
     fdt.property_text("device_type", "memory");
@@ -360,10 +370,30 @@ static bool test_structure_trace(const std::vector<uint8_t>& valid)
                      platform.parser_stage == GXOS_AARCH64_DTB_PARSE_STAGE_STRUCTURE &&
                      platform.parser_error == GXOS_AARCH64_DTB_PARSE_ERROR_PROPERTY_VALUE_FORMAT &&
                      platform.parser_last_token == 3 &&
-                     platform.parser_offset == property_length_offset,
-                     "known synthetic property length failure reports its production parser stage and cursor");
+                     platform.parser_offset == property_length_offset &&
+                     platform.parser_property_detail_valid &&
+                     platform.parser_property_predicate ==
+                         GXOS_AARCH64_DTB_PROPERTY_PREDICATE_ADDRESS_CELLS_LENGTH &&
+                     platform.parser_property_token_offset == property_length_offset - 4 &&
+                     platform.parser_property_name_field_offset == property_length_offset + 4 &&
+                     platform.parser_property_value_length == 3 &&
+                     platform.parser_property_name_offset < strings_size &&
+                     platform.parser_property_node_path[0] == '/' &&
+                     platform.parser_property_name[0] == '#',
+                     "known synthetic property failure records exact predicate, path, name, and descriptor offsets");
     }
     return ok;
+}
+
+static bool test_pci_address_cells(const std::vector<uint8_t>& valid)
+{
+    gxos_aarch64_phase2_platform platform = {};
+    const gxos_aarch64_dtb_status status = gxos_aarch64_phase2_parse_dtb_ex(
+        valid.data(), valid.size(), &platform);
+    return expect(status == GXOS_AARCH64_DTB_OK &&
+                  platform.gic_version == GXOS_AARCH64_GIC_V2 &&
+                  platform.timer_irq == 30,
+                  "valid PCI host #address-cells=3 is accepted while supported GICv2/timer discovery stays intact");
 }
 
 static bool test_handoff_range_validation(uint64_t dtb_size)
@@ -463,6 +493,7 @@ int main(int argc, char** argv)
                  "successful parser reports complete stage");
     ok &= test_header_validation(valid);
     ok &= test_structure_trace(valid);
+    ok &= test_pci_address_cells(build_qemu_gicv2_dtb(true));
     ok &= test_handoff_range_validation(valid.size());
     ok &= test_memory_map_coverage(valid.size());
     ok &= test_loader_kernel_transfer(valid);
@@ -478,6 +509,24 @@ int main(int argc, char** argv)
         printf("source DTB parser result=%u diagnostic=%u stage=%u token=%u offset=%u\n",
                parsed ? 1 : 0, external.diagnostic, external.parser_stage,
                external.parser_last_token, external.parser_offset);
+        if (external.parser_property_detail_valid) {
+            printf("source DTB property rejection: predicate=P%u path=\"%s\" property=\"%s\" "
+                   "value-length=%u token-offset=%u name-field-offset=%u name-offset=%u "
+                   "value-offset=%u inherited-address-cells=%u inherited-size-cells=%u interrupt-cells=%u raw=",
+                   external.parser_property_predicate, external.parser_property_node_path,
+                   external.parser_property_name, external.parser_property_value_length,
+                   external.parser_property_token_offset,
+                   external.parser_property_name_field_offset,
+                   external.parser_property_name_offset,
+                   external.parser_property_value_offset,
+                   external.parser_property_parent_address_cells,
+                   external.parser_property_parent_size_cells,
+                   external.parser_property_interrupt_cells);
+            for (uint32_t i = 0; i < external.parser_property_preview_length; ++i) {
+                printf("%02x", external.parser_property_preview[i]);
+            }
+            printf("\n");
+        }
         ok &= expect(parsed, "provided source-matched DTB parses");
     }
 
