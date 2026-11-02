@@ -1,0 +1,50 @@
+[
+  {
+    "object": "desktop_font.o",
+    "bss": 0
+  },
+  {
+    "object": "desktop_system_font.o",
+    "bss": 64
+  },
+  {
+    "object": "font_bitmap_backend.o",
+    "bss": 0
+  },
+  {
+    "object": "font_contract.o",
+    "bss": 256
+  },
+  {
+    "object": "font_glyph_cache.o",
+    "bss": 69152
+  },
+  {
+    "object": "font_text_layout.o",
+    "bss": 0
+  },
+  {
+    "object": "font_truetype_loader.o",
+    "bss": 590624
+  },
+  {
+    "object": "font_truetype_raster.o",
+    "bss": 238880
+  },
+  {
+    "object": "font_truetype.o",
+    "bss": 0
+  },
+  {
+    "object": "system_font_selection.o",
+    "bss": 244736
+  },
+  {
+    "object": "system_font_settings_ui.o",
+    "bss": 0
+  },
+  {
+    "object": "system_font.o",
+    "bss": 16
+  }
+]

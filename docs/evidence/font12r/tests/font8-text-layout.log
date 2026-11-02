@@ -1,0 +1,3 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O1 -iquote . -idirafter kernel/core/include tests/font_text_layout_test.cpp kernel/core/font_text_layout.cpp kernel/core/font_contract.cpp kernel/core/font_glyph_cache.cpp kernel/core/font_bitmap_backend.cpp kernel/core/font_truetype.cpp kernel/core/font_truetype_loader.cpp kernel/core/font_truetype_raster.cpp -o D:\dev\guideXOSServer_FONT_SUPPORT\out\font12r-validation\tests\font8-text-layout.exe
+FONT8 text layout: 46 checks, 0 failures
+FONT8 text layout tests PASS.

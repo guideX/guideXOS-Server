@@ -1,0 +1,33 @@
+{
+  "capture": "settings-fonts-before-minimum.png",
+  "pointerAttemptCapture": "settings-pointer-underrun.png",
+  "framebuffer": {
+    "width": 1280,
+    "height": 800
+  },
+  "observedOuterWindowRect": {
+    "x": 95,
+    "y": 70,
+    "rightExclusive": 855,
+    "bottomExclusive": 570,
+    "width": 760,
+    "height": 500
+  },
+  "measurement": "Focused window border pixels in QMP PPM screendump, cross-checked against the Settings initializer source values. The compositor window width/height include its titlebar and border; titlebar height is 24 px.",
+  "pointer": {
+    "before": [
+      465,
+      264
+    ],
+    "requestedGrip": [
+      850,
+      565
+    ],
+    "observedAfterApprox": [
+      501,
+      301
+    ],
+    "observation": "Cursor shape moved only about one relative step; no resize button-down was sent."
+  },
+  "minimumGeometryObservedInThisRun": false
+}

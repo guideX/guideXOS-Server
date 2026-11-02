@@ -1,0 +1,24 @@
+Roboto TrueType fonts for guideXOS Server
+
+Upstream publisher/repository: Google Fonts, https://github.com/googlefonts/roboto-2
+Release: v2.138 (tag commit ab4876f650a4aeb9b661c83fee47f908c739bb70)
+Copyright: Copyright 2011 Google Inc. All Rights Reserved.
+Designer: Christian Robertson.
+
+These three files are derivatives of the official v2.138 roboto-unhinted.zip
+release. Each was subset with fontTools 4.60.1 to the exact 922 Unicode mappings
+already present in the repository's pre-existing Roboto Regular fixture. The
+fixture was used only to define the mapping set; its font bytes were not copied.
+Retained glyph outlines and metrics were kept. The derived fonts carry an
+embedded name-table description stating that they are subsets and referring to
+this notice. The source and derived font files remain under Apache License 2.0.
+The complete applicable license text is in LICENSE.txt.
+
+The v2.138 source package declares Apache License 2.0 in its LICENSE file and
+in each font's embedded license metadata. The separate OFL 1.1 file currently
+published in google/fonts/ofl/roboto applies to that Google Fonts source package;
+it is not used as the license for these v2.138 binaries.
+
+This font package is provided as a guideXOS Server bundled asset. No Google
+endorsement is implied. See ApprovedFontManifest.json for source/archive hashes,
+per-file hashes, byte sizes, metadata, subset ranges, and packaging limits.

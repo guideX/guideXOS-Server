@@ -1,0 +1,60 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -iquote . -DGXOS_APPMODEL_TESTING tests/appmodel_default_handlers_test.cpp app_registry.cpp app_default_handler_store.cpp app_manifest.cpp app_manifest_loader.cpp app_manifest_validator.cpp fs.cpp -o D:\dev\guideXOSServer_FONT_SUPPORT\out\font12r-validation\tests\appmodel-default-handlers.exe
+PASS: extension normalization shares case-folding contract across .txt variants
+PASS: malformed, trailing-dot, extensionless, and overlong extensions are rejected
+PASS: canonical bounded store serialization succeeds
+PASS: valid store reload preserves normalized extension and canonical App IDs in deterministic order
+PASS: 128 maximum-length records fit the total serialized configuration bound
+PASS: truncated configuration fails checksum/footer validation
+PASS: configuration file byte bound is enforced on reload
+PASS: duplicate keys and malformed or unknown records are ignored without losing unrelated valid records
+PASS: overlong stored App ID is ignored as one invalid record
+PASS: missing canonical App ID is ignored without selecting a handler
+PASS: missing store loads as an empty machine-global override set
+PASS: store commit rereads and verifies its serialized replacement
+PASS: a recreated configuration owner reloads canonical records
+PASS: all 128 override records fit within the bounded store
+PASS: capacity exhaustion fails deterministically without evicting or replacing an existing default
+PASS: production Developer Studio manifest declares its canonical ID and bounded C, C++, and plain-text capabilities
+PASS: production Developer Studio registration can receive a live document backend
+PASS: real production .txt competition keeps Notepad as the unchanged built-in default
+PASS: a newly declared standalone C++ source uses Developer Studio under the existing single-handler default policy
+PASS: production Default Apps model persists the real Developer Studio handler while one-time Notepad remains non-mutating
+PASS: a recreated production AppRegistry owner reloads the persisted Developer Studio canonical ID and ordinary Open target
+PASS: production Default Apps Restore selects Notepad and keeps Developer Studio available
+PASS: direct Developer Studio activation rejects an extension outside its manifest capability set
+PASS: built-in and isolated durable synthetic registrations are available to the owner
+PASS: SetDefaultHandler accepts a current capable durable canonical app ID
+PASS: equivalent extension forms replace one key rather than creating duplicate records
+PASS: unknown canonical application is rejected
+PASS: canonical App ID lookup remains exact and case-sensitive
+PASS: handler without the requested extension capability is rejected
+PASS: backend-unavailable handler cannot become the effective default
+PASS: handler without document activation support is rejected
+PASS: temporary registration is rejected as a durable machine default
+PASS: malformed extension is rejected before persistence
+PASS: dedicated App Model store leaves unrelated desktop configuration byte-for-byte unchanged
+PASS: 100 owner recreation cycles preserve B for ordinary Open and A for one-time Open With
+PASS: duplicate display labels have no persisted authority; the canonical B ID survives reload
+PASS: 100 persistence cycles preserve unrelated desktop configuration bytes
+PASS: failed temporary write leaves the previous valid configuration byte-for-byte intact
+PASS: failed write leaves the last valid in-memory and reloaded snapshot intact
+PASS: failed atomic replace leaves the previous valid file byte-for-byte intact
+PASS: stale BMP/GIF override fixture loads production handlers
+PASS: stale BMP/GIF policy remains inert: no effective default, capable handler, Open, or eligible Settings choice
+PASS: stale-ID fixture is stored as canonical identity only
+PASS: stale-ID resolution fixture has production Notepad only
+PASS: unknown stored ID with no built-in resolves to no handler and cannot redirect Open
+PASS: missing-registration fixture loads production handlers
+PASS: disappeared override falls back to the built-in handler without changing stored policy
+PASS: override whose application loses the extension capability falls back safely
+PASS: temporarily unavailable override remains stored while ordinary Open uses available Notepad
+PASS: a different canonical ID reusing a registration position cannot receive the persisted override
+PASS: ClearDefaultHandler removes the override and restores the built-in default
+PASS: production defaults remain Notepad for txt, log, ini, and cfg after clearing
+PASS: known associated extensions are bounded by the registry and enumerated deterministically
+PASS: corrupt configuration is ignored, left untouched, and cannot redirect ordinary Open
+appModelDefaultHandlerChecks=54/54
+persistenceReloadCycles=100/100
+runtimeOrdinaryOpenDispatches=100/100
+runtimeOneTimeOpenWithDispatches=100/100
+App Model default-handler persistence and resolution tests PASS.

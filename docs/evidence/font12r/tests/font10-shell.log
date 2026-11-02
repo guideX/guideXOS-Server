@@ -1,0 +1,3 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O1 -iquote . -idirafter kernel/core/include -I kernel/arch/amd64/include tests/font10_shell_typography_test.cpp tests/font10_systemfont_stubs.cpp kernel/core/desktop_system_font.cpp kernel/core/desktop_font.cpp -o D:\dev\guideXOSServer_FONT_SUPPORT\out\font12r-validation\tests\font10-shell.exe
+FONT10 shell typography tests: 88 checks, 0 failures
+FONT10 shell typography tests PASS.

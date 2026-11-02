@@ -77,6 +77,13 @@ std::vector<uint8_t> readReplacementFixture()
 	return std::vector<uint8_t>(std::istreambuf_iterator<char>(input), {});
 }
 
+std::vector<uint8_t> readApprovedPackageFace(const char* name)
+{
+	const std::string path = std::string("assets/Fonts/Roboto-v2.138-package/") + name;
+	std::ifstream input(path, std::ios::binary);
+	return std::vector<uint8_t>(std::istreambuf_iterator<char>(input), {});
+}
+
 void addFile(const char* name, const std::vector<uint8_t>& bytes)
 {
 	TestFile file;
@@ -790,6 +797,89 @@ void testCaseSensitiveFontIdentity()
 	SystemFontSelectionShutdown();
 }
 
+void testApprovedPackageFacesAndPreferenceIdentity()
+{
+	SystemFontSelectionShutdown();
+	resetFixtureStore();
+	const std::vector<uint8_t> regular = readApprovedPackageFace("Roboto-v2.138-Regular.ttf");
+	const std::vector<uint8_t> bold = readApprovedPackageFace("Roboto-v2.138-Bold.ttf");
+	const std::vector<uint8_t> italic = readApprovedPackageFace("Roboto-v2.138-Italic.ttf");
+	CHECK(regular.size() == 88780u);
+	CHECK(bold.size() == 90556u);
+	CHECK(italic.size() == 94736u);
+	addFile("Roboto-v2.138-Regular.ttf", regular);
+	addFile("Roboto-v2.138-Bold.ttf", bold);
+	addFile("Roboto-v2.138-Italic.ttf", italic);
+	rebuildDirectoryEntries();
+
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	SystemFontFaceInfo faces[kSystemFontMaxAvailableFonts]{};
+	uint32_t count = 0u;
+	CHECK(SystemFontSelectionGetAvailable(faces, kSystemFontMaxAvailableFonts, &count) ==
+		SystemFontSelectionStatus::Ok);
+	CHECK(count == 3u);
+	SystemFontSelectionSnapshot active{};
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.identity.kind == SystemFontIdentityKind::BuiltinBitmap);
+	CHECK(active.pixelSize == kBitmapFontPixelHeight);
+	CHECK(active.isPersisted == 0u);
+
+	const SystemFontFaceInfo* regularFace = nullptr;
+	const SystemFontFaceInfo* boldFace = nullptr;
+	const SystemFontFaceInfo* italicFace = nullptr;
+	for (uint32_t i = 0u; i < count; ++i) {
+		CHECK(std::strcmp(faces[i].metadata.familyName, "Roboto") == 0);
+		CHECK(faces[i].identity.contentFingerprint != 0u);
+		if (std::strcmp(faces[i].metadata.styleName, "Regular") == 0) regularFace = &faces[i];
+		if (std::strcmp(faces[i].metadata.styleName, "Bold") == 0) boldFace = &faces[i];
+		if (std::strcmp(faces[i].metadata.styleName, "Italic") == 0) italicFace = &faces[i];
+	}
+	CHECK(regularFace != nullptr);
+	CHECK(boldFace != nullptr);
+	CHECK(italicFace != nullptr);
+	if (!regularFace || !boldFace || !italicFace) {
+		SystemFontSelectionShutdown();
+		return;
+	}
+	CHECK(regularFace->identity.fileBytes == regular.size());
+	CHECK(boldFace->identity.fileBytes == bold.size());
+	CHECK(italicFace->identity.fileBytes == italic.size());
+	CHECK(regularFace->identity.stableId != boldFace->identity.stableId);
+	CHECK(regularFace->identity.stableId != italicFace->identity.stableId);
+	CHECK(boldFace->identity.stableId != italicFace->identity.stableId);
+
+	// An explicit bitmap choice remains the active preference with packaged faces present.
+	CHECK(SystemFontSelectionResetToBuiltin() == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.identity.kind == SystemFontIdentityKind::BuiltinBitmap);
+	CHECK(active.isPersisted == 1u);
+
+	// The bundled face identity includes its canonical path and byte fingerprint.
+	SystemFontCandidate candidate{};
+	const SystemFontIdentity selected = regularFace->identity;
+	CHECK(SystemFontSelectionPrepare(&selected, 18u, &candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionApply(&candidate) == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.identity.stableId == selected.stableId);
+	CHECK(active.identity.contentFingerprint == selected.contentFingerprint);
+	CHECK(std::strcmp(active.identity.canonicalPath,
+		"/system/fonts/ROBOTO-V2.138-REGULAR.TTF") == 0);
+	CHECK(drawToBuffer(handleFor(selected), 18u) == static_cast<int32_t>(FontStatus::Ok));
+
+	// A fresh selection-service process restores the same compatible package identity.
+	SystemFontSelectionShutdown();
+	CHECK(SystemFontSelectionInitialize() == SystemFontSelectionStatus::Ok);
+	CHECK(SystemFontSelectionGetActive(&active) == SystemFontSelectionStatus::Ok);
+	CHECK(active.identity.stableId == selected.stableId);
+	CHECK(active.identity.contentFingerprint == selected.contentFingerprint);
+	CHECK(active.pixelSize == 18u);
+	CHECK(active.isPersisted == 1u);
+	CHECK(SystemFontSelectionResetToBuiltin() == SystemFontSelectionStatus::Ok);
+	SystemFontSelectionShutdown();
+}
+
 } // namespace
 
 namespace kernel {
@@ -923,6 +1013,7 @@ int main()
 	testPublicationFailuresPreservePreviousPreference();
 	testRepeatedPreferenceSlotReuseAndRollover();
 	testCaseSensitiveFontIdentity();
+	testApprovedPackageFacesAndPreferenceIdentity();
 	testReplacementCapacityAndLegacyFallback();
 	testDirectoryTraversalBound();
 	testPreviewIsolationAndBitmapPixels();

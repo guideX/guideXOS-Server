@@ -1,0 +1,42 @@
+[
+  {
+    "script": "run-font-contract-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\font2-contract.log"
+  },
+  {
+    "script": "run-font-truetype-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\font3-truetype.log"
+  },
+  {
+    "script": "run-font-raster-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\font4-raster.log"
+  },
+  {
+    "script": "run-font-glyph-cache-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\font5-glyph-cache.log"
+  },
+  {
+    "script": "run-system-font-selection-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\font6-selection.log"
+  },
+  {
+    "script": "run-font-text-layout-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\font8-text-layout.log"
+  },
+  {
+    "script": "run-font10-shell-typography-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\font10-shell.log"
+  },
+  {
+    "script": "run-font11-cache-workload-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\font11-cache-workload.log"
+  }
+]

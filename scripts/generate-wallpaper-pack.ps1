@@ -6,7 +6,8 @@ param(
     [switch]$SmokeCaFixture,
     [string]$ImageViewerRuntimeSmokePath,
     [string]$NativePackageDir,
-    [string[]]$NativePackageDirs
+    [string[]]$NativePackageDirs,
+    [string]$VerifiedFontPackageDir = "assets/Fonts/Roboto-v2.138-package"
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +17,14 @@ $RootDir = Split-Path -Parent $ScriptDir
 $InputDir = if ([System.IO.Path]::IsPathRooted($InputDir)) { $InputDir } else { Join-Path $RootDir $InputDir }
 $OutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RootDir $OutputDir }
 $OutputImage = if ([System.IO.Path]::IsPathRooted($OutputImage)) { $OutputImage } else { Join-Path $RootDir $OutputImage }
+$VerifiedFontPackageDir = if ([string]::IsNullOrWhiteSpace($VerifiedFontPackageDir)) {
+    ""
+} elseif ([System.IO.Path]::IsPathRooted($VerifiedFontPackageDir)) {
+    $VerifiedFontPackageDir
+} else {
+    Join-Path $RootDir $VerifiedFontPackageDir
+}
+$ApprovedFontPackageModule = Join-Path $ScriptDir "approved_font_package.psm1"
 $nativePackageInputs = @()
 if (-not [string]::IsNullOrWhiteSpace($NativePackageDir)) { $nativePackageInputs += $NativePackageDir }
 if ($NativePackageDirs) { $nativePackageInputs += $NativePackageDirs }
@@ -720,6 +729,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     $hasConfigCerts = $false
     $hasConfigNavigator = $false
     $hasApps = $false
+    $hasFonts = $false
     $appDirectories = @()
     foreach ($file in $Files) {
         $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
@@ -733,6 +743,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             }
             '^certs$' {
                 $hasCerts = $true
+                break
+            }
+            '^fonts$' {
+                $hasFonts = $true
                 break
             }
             '^config/certs$' {
@@ -792,9 +806,14 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     $configCluster = $null
     $configCertsCluster = $null
     $configNavigatorCluster = $null
+    $fontsCluster = $null
     if ($hasCerts) {
         $certsCluster = $nextCluster++
         $fat[$certsCluster] = 0x0FFFFFFF
+    }
+    if ($hasFonts) {
+        $fontsCluster = $nextCluster++
+        $fat[$fontsCluster] = 0x0FFFFFFF
     }
     if ($hasConfig) {
         $configCluster = $nextCluster++
@@ -893,6 +912,9 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         if ($null -ne $certsCluster) {
             Add-DirectoryRecord $rootEntries "certs" (Get-ShortName "certs" $usedRoot) 0x10 $certsCluster 0
         }
+        if ($null -ne $fontsCluster) {
+            Add-DirectoryRecord $rootEntries "fonts" (Get-ShortName "fonts" $usedRoot) 0x10 $fontsCluster 0
+        }
         if ($null -ne $configCluster) {
             Add-DirectoryRecord $rootEntries "config" (Get-ShortName "config" $usedRoot) 0x10 $configCluster 0
         }
@@ -904,6 +926,8 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         $usedWall = @{}
         $certEntries = if ($null -ne $certsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
         $usedCert = @{}
+        $fontEntries = if ($null -ne $fontsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
+        $usedFonts = @{}
         $configEntries = if ($null -ne $configCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
         $usedConfig = @{}
         $configCertEntries = if ($null -ne $configCertsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
@@ -949,6 +973,10 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
                     Add-DirectoryRecord $certEntries $record.Name (Get-ShortName $record.Name $usedCert) 0x20 $record.Cluster $record.Size
                     break
                 }
+                "fonts" {
+                    Add-DirectoryRecord $fontEntries $record.Name (Get-ShortName $record.Name $usedFonts) 0x20 $record.Cluster $record.Size
+                    break
+                }
                 "config/certs" {
                     Add-DirectoryRecord $configCertEntries $record.Name (Get-ShortName $record.Name $usedConfigCert) 0x20 $record.Cluster $record.Size
                     break
@@ -964,6 +992,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             @($rootCluster, $rootEntries),
             @($wallpaperCluster, $wallEntries),
             @($certsCluster, $certEntries),
+            @($fontsCluster, $fontEntries),
             @($configCluster, $configEntries),
             @($configCertsCluster, $configCertEntries),
             @($configNavigatorCluster, $configNavigatorEntries)
@@ -1012,7 +1041,8 @@ $wallpaperDir = Join-Path $OutputDir "wall"
 $certsDir = Join-Path $OutputDir "certs"
 $configDir = Join-Path $OutputDir "config"
 $appsDir = Join-Path $OutputDir "Apps"
-foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir, $appsDir)) {
+$fontsDir = Join-Path $OutputDir "fonts"
+foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir, $appsDir, $fontsDir)) {
     if (-not (Test-Path -LiteralPath $stagingDir)) { continue }
 
     $removeDeadline = (Get-Date).AddSeconds(10)
@@ -1049,6 +1079,46 @@ foreach ($packageSourceDir in $NativePackageDirs) {
         Copy-Item -LiteralPath $nativeFile.FullName -Destination $target -Force
         $staged += Get-Item -LiteralPath $target
         Write-Host "      staged /Apps/$packageName/$relative in ramdisk" -ForegroundColor Yellow
+    }
+}
+
+# This generated FAT32 volume is mounted at /system. A root-level fonts
+# directory therefore becomes /system/fonts in both supported boot modes.
+if ([string]::IsNullOrWhiteSpace($VerifiedFontPackageDir)) {
+    Write-Host "      optional verified font package was not requested; /system/fonts is absent" -ForegroundColor DarkGray
+} elseif (-not (Test-Path -LiteralPath $ApprovedFontPackageModule -PathType Leaf)) {
+    Write-Host "      optional verified fonts skipped because the package validator is missing: $ApprovedFontPackageModule" -ForegroundColor Yellow
+} elseif (-not (Test-Path -LiteralPath $VerifiedFontPackageDir -PathType Container)) {
+    Write-Host "      optional verified font package is absent; /system/fonts is omitted and bitmap fallback remains available" -ForegroundColor Yellow
+} else {
+    try {
+        Import-Module -Name $ApprovedFontPackageModule -Force -ErrorAction Stop
+        $fontPackage = Copy-ApprovedFontPackage -PackageRoot $VerifiedFontPackageDir -Destination $fontsDir -AllowMissingFonts
+        $fontPackageFileList = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($fontRecord in $fontPackage.FontFiles) {
+            $fontPackageFileList.Add((Get-Item -LiteralPath (Join-Path $fontsDir $fontRecord.FileName)))
+        }
+        foreach ($noticeRecord in $fontPackage.Manifest.notices) {
+            $fontPackageFileList.Add((Get-Item -LiteralPath (Join-Path $fontsDir ([string]$noticeRecord.fileName))))
+        }
+        $fontPackageFileList.Add((Get-Item -LiteralPath (Join-Path $fontsDir "ApprovedFontManifest.json")))
+        $fontPackageFiles = $fontPackageFileList.ToArray()
+        $staged += $fontPackageFiles
+        $stagedFontCount = @($fontPackageFiles | Where-Object { $_.Extension -ieq ".ttf" }).Count
+        Write-Host "      staged $stagedFontCount approved TrueType faces and license metadata under /system/fonts" -ForegroundColor Green
+        foreach ($fontFile in $fontPackageFiles) {
+            $fontHash = (Get-FileHash -LiteralPath $fontFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host "      approved /system/fonts/$($fontFile.Name) bytes=$($fontFile.Length) sha256=$fontHash" -ForegroundColor Cyan
+        }
+    } catch {
+        if (Test-Path -LiteralPath $fontsDir -PathType Container) {
+            $resolvedOutputRoot = [IO.Path]::GetFullPath($OutputDir).TrimEnd('\') + '\'
+            $resolvedFontsDir = [IO.Path]::GetFullPath($fontsDir)
+            if ($resolvedFontsDir.StartsWith($resolvedOutputRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                Remove-Item -LiteralPath $resolvedFontsDir -Recurse -Force
+            }
+        }
+        Write-Host "      optional verified font package failed validation and was omitted; image creation continues: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 

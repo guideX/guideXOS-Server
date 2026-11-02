@@ -1,0 +1,3 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O1 -iquote . -idirafter kernel/core/include tests/font_raster_test.cpp kernel/core/font_contract.cpp kernel/core/font_glyph_cache.cpp kernel/core/font_bitmap_backend.cpp kernel/core/font_truetype.cpp kernel/core/font_truetype_loader.cpp kernel/core/font_truetype_raster.cpp -o D:\dev\guideXOSServer_FONT_SUPPORT\out\font12r-validation\tests\font4-raster.exe
+FONT4 TrueType rasterization: 4454 checks, 0 failures
+FONT4 glyph rasterization build and test PASS.

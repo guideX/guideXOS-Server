@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -18,6 +19,8 @@ using namespace gxos::gui;
 
 int g_checks = 0;
 int g_failures = 0;
+const char* g_expectedStyle = "Regular";
+bool g_customFixture = false;
 
 #define CHECK(expression) do { \
 	++g_checks; \
@@ -242,7 +245,11 @@ bool findRepeatedFlag(const std::vector<uint8_t>& fixture, FontHandle font,
 
 std::vector<uint8_t> readFixture()
 {
-	std::ifstream input("assets/Fonts/roboto/Roboto-Regular.ttf", std::ios::binary);
+	const char* overridePath = std::getenv("GXOS_FONT_TEST_FIXTURE_PATH");
+	g_customFixture = overridePath && *overridePath;
+	const char* path = g_customFixture ? overridePath :
+		"assets/Fonts/roboto/Roboto-Regular.ttf";
+	std::ifstream input(path, std::ios::binary);
 	return std::vector<uint8_t>(std::istreambuf_iterator<char>(input),
 		std::istreambuf_iterator<char>());
 }
@@ -345,7 +352,7 @@ void testAsciiAndMetrics(FontHandle handle, FontTrueTypeMetadata metadata)
 	CHECK(whitespace.widthPx == 0u && whitespace.heightPx == 0u);
 	CHECK(whitespace.advancePx > 0u);
 	CHECK(uppercaseA.widthPx > 0u && uppercaseA.heightPx > 0u);
-	CHECK(uppercaseA.sideBearingPx >= 0);
+	if (!g_customFixture) CHECK(uppercaseA.sideBearingPx >= 0);
 
 	// A NUL is a valid Unicode scalar with no cmap entry. The shared contract
 	// substitutes the font's question-mark glyph and keeps the requested scalar.
@@ -856,6 +863,8 @@ bool writeVisualGlyphSheet(FontHandle font, const char* path)
 
 int main(int argc, char** argv)
 {
+	const char* expectedStyle = std::getenv("GXOS_FONT_TEST_EXPECTED_STYLE");
+	if (expectedStyle && *expectedStyle) g_expectedStyle = expectedStyle;
 	const std::vector<uint8_t> fixture = readFixture();
 	CHECK(!fixture.empty());
 	CHECK(FontManagerInitialize() == FontStatus::Ok);
@@ -865,6 +874,8 @@ int main(int argc, char** argv)
 	FontHandle font = {};
 	CHECK(FontTrueTypeLoadMemory({0x46544d0000000000ull}, fixture.data(), fixture.size(),
 		&font, &metadata) == FontStatus::Ok);
+	CHECK(std::strcmp(metadata.familyName, "Roboto") == 0);
+	CHECK(std::strcmp(metadata.styleName, g_expectedStyle) == 0);
 	FontHandle defaultAfter = {};
 	CHECK(FontManagerGetDefaultFont(&defaultAfter) == FontStatus::Ok);
 	CHECK(defaultBefore.slot == defaultAfter.slot && defaultBefore.generation == defaultAfter.generation);
@@ -873,13 +884,13 @@ int main(int argc, char** argv)
 	CHECK(FontGetMetrics(font, {24u}, &faceMetrics) == FontStatus::Ok);
 	CHECK(faceMetrics.pixelSize == 24u && faceMetrics.lineHeightPx > 0u);
 	testAsciiAndMetrics(font, metadata);
-	testIndependentGoldenMetrics(font);
+	if (!g_customFixture) testIndependentGoldenMetrics(font);
 	testCurvesCompositesAndDeterminism(fixture, font);
 	testCompositeTransforms(fixture, font);
 	testFormat12Mapping(fixture, font);
 	testBufferBounds(font);
 	testMalformedGlyphs(fixture, font);
-	testRasterWorkLimit(fixture, font);
+	if (!g_customFixture) testRasterWorkLimit(fixture, font);
 	testRepeatAndMutationBounds(fixture, font);
 	if (argc == 3 && std::strcmp(argv[1], "--visual") == 0) {
 		if (!writeVisualGlyphSheet(font, argv[2])) {

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -21,6 +22,7 @@ bool g_vfsFixtureExists = true;
 bool g_vfsReportTooLarge = false;
 bool g_vfsReportEmpty = false;
 bool g_vfsReportTruncated = false;
+const char* g_expectedStyle = "Regular";
 
 #define CHECK(expression) do { \
 	++g_checks; \
@@ -73,7 +75,10 @@ size_t tableEntry(const std::vector<uint8_t>& bytes, const char tag[5])
 
 std::vector<uint8_t> readFixture()
 {
-	std::ifstream input("assets/Fonts/roboto/Roboto-Regular.ttf", std::ios::binary);
+	const char* overridePath = std::getenv("GXOS_FONT_TEST_FIXTURE_PATH");
+	const char* path = overridePath && *overridePath ? overridePath :
+		"assets/Fonts/roboto/Roboto-Regular.ttf";
+	std::ifstream input(path, std::ios::binary);
 	return std::vector<uint8_t>(std::istreambuf_iterator<char>(input),
 		std::istreambuf_iterator<char>());
 }
@@ -107,7 +112,7 @@ void testParser(const std::vector<uint8_t>& fixture)
 	CHECK(!fixture.empty());
 	CHECK(FontTrueTypeValidate(fixture.data(), fixture.size(), &metadata) == FontTrueTypeOk);
 	CHECK(std::strcmp(metadata.familyName, "Roboto") == 0);
-	CHECK(std::strcmp(metadata.styleName, "Regular") == 0);
+	CHECK(std::strcmp(metadata.styleName, g_expectedStyle) == 0);
 	CHECK(metadata.unitsPerEm >= 16u && metadata.glyphCount > 0u);
 	CHECK(metadata.tableCount <= kFontTrueTypeMaxTables && metadata.faceCount == 1u);
 	CHECK(metadata.numberOfHorizontalMetrics > 0u);
@@ -358,6 +363,8 @@ int32_t read_file(const char* path, void* buffer, uint32_t maxSize)
 
 int main()
 {
+	const char* expectedStyle = std::getenv("GXOS_FONT_TEST_EXPECTED_STYLE");
+	if (expectedStyle && *expectedStyle) g_expectedStyle = expectedStyle;
 	const std::vector<uint8_t> fixture = readFixture();
 	testParser(fixture);
 	testManager(fixture);

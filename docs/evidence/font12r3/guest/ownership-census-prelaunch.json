@@ -1,0 +1,27 @@
+{
+  "observedUtc": "2026-10-18T04:43:29.5990704Z",
+  "requestedCheckout": "D:\\dev\\guideXOSServer_FONT_SUPPORT",
+  "plannedImage": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font12r3-validation\\guest\\font12r3-primary.img",
+  "configuration": "pc,accel=whpx; 1024 MiB; 2 vCPU; raw FAT32 PIIX IDE primary master; private OVMF; no network",
+  "qemuProcesses": [
+    {
+      "ProcessId": 34980,
+      "ParentProcessId": 14160,
+      "ExecutablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc-q35-8.2 -drive if=pflash,format=raw,readonly=on,file=C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/ovmf-code.fd -drive if=pflash,format=raw,file=C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/ovmf-vars.fd -drive if=none,id=esp,format=raw,file=fat:rw:ESP -device ide-hd,drive=esp -m 1280M -serial file:C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/serial.log -no-reboot -no-shutdown -boot menu=off,splash-time=0 -name guideXOS-R2-C -display none -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -d guest_errors,cpu_reset -D C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/qemu-debug.log -qmp tcp:127.0.0.1:64047,server=on,wait=off"
+    }
+  ],
+  "plannedLoopbackPorts": [
+    {
+      "port": 59353,
+      "free": true,
+      "listeners": []
+    },
+    {
+      "port": 5955,
+      "free": true,
+      "listeners": []
+    }
+  ],
+  "foreignGuestsContactedOrTerminated": false
+}

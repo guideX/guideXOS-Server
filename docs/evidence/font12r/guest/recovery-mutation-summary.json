@@ -1,0 +1,23 @@
+{
+  "qualifiedBaseImage": "font12r-primary.img",
+  "recoveryImage": "font12r-recovery-missing-bold.img",
+  "change": "Removed only /system/fonts/Roboto-Bold.ttf from the disposable clone",
+  "sourceBefore": {
+    "exists": true,
+    "bytes": 146768,
+    "sha256": "27467020febce4c0ac8482ea8e8d6f32bf8c5721fb9c301344d0e3f4d93a0119"
+  },
+  "sourceAfter": {
+    "exists": false
+  },
+  "selectedPreference": {
+    "sequence": 32,
+    "family": "Roboto",
+    "style": "Bold",
+    "pixelSize": 18,
+    "path": "/system/fonts/Roboto-Bold.ttf",
+    "sha256": "9ad24a94cb8161e21d99db36b760d76fbc2a1a7ac60af7948759224d1e793d2c"
+  },
+  "preferenceBytesChanged": false,
+  "primaryImageModified": false
+}

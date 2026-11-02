@@ -1,0 +1,42 @@
+{
+  "label": "final-live-guest-state",
+  "observedUtc": "2026-10-18T04:47:23Z",
+  "actions": [
+    {
+      "command": "query-mice",
+      "arguments": null,
+      "return": [
+        {
+          "index": 2,
+          "name": "QEMU PS/2 Mouse",
+          "current": true,
+          "absolute": false
+        }
+      ]
+    },
+    {
+      "query_mice": [
+        {
+          "index": 2,
+          "name": "QEMU PS/2 Mouse",
+          "current": true,
+          "absolute": false
+        }
+      ]
+    },
+    {
+      "command": "query-status",
+      "arguments": null,
+      "return": {
+        "status": "running",
+        "running": true
+      }
+    },
+    {
+      "query_status": {
+        "status": "running",
+        "running": true
+      }
+    }
+  ]
+}

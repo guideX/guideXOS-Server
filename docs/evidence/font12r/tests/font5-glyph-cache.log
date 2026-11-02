@@ -1,0 +1,4 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O1 -iquote . -idirafter kernel/core/include tests/font_glyph_cache_test.cpp kernel/core/font_contract.cpp kernel/core/font_glyph_cache.cpp kernel/core/font_bitmap_backend.cpp kernel/core/font_truetype.cpp kernel/core/font_truetype_loader.cpp kernel/core/font_truetype_raster.cpp -o D:\dev\guideXOSServer_FONT_SUPPORT\out\font12r-validation\tests\font5-glyph-cache.exe
+FONT5 evidence: init_us=47 cold_draw_us=558 warm_draw_ns_per_call=39640 hits=1403 misses=11 rasterizations=11 evictions=0 bytes=3923 peak=3923 cache_bytes=69128
+FONT5 glyph cache and grayscale renderer: 277 checks, 0 failures
+FONT5 glyph cache and grayscale renderer build and test PASS.

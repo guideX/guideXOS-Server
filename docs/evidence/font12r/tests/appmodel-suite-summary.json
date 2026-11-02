@@ -1,0 +1,32 @@
+[
+  {
+    "script": "run-appmodel-application-actions-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\appmodel-actions.log"
+  },
+  {
+    "script": "run-appmodel-folder-activation-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\appmodel-folder-activation.log"
+  },
+  {
+    "script": "run-appmodel-default-handlers-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\appmodel-default-handlers.log"
+  },
+  {
+    "script": "run-appmodel-uri-protocol-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\appmodel-uri-protocol.log"
+  },
+  {
+    "script": "run-app-model-file-activation-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\appmodel-file-activation.log"
+  },
+  {
+    "script": "run-app-model-identity-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\appmodel-identity.log"
+  }
+]

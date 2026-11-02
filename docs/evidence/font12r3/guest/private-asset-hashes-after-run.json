@@ -1,0 +1,13 @@
+{
+  "disk": {
+    "path": "out/font12r3-validation/guest/font12r3-primary.img",
+    "bytes": 536870912,
+    "sha256": "831768A8C3517E0FCF24EDBE1D7AE4ABC07372C4D16947E86D33773AC4F6CB68"
+  },
+  "firmware": {
+    "path": "out/font12r3-validation/guest/OVMF-font12r3-code.fd",
+    "bytes": 3653632,
+    "sha256": "2DF617A6FD1BAE41EC7C0E3BCECA96C928A5A88D8DC198468D34733393AB2792"
+  },
+  "note": "The overall raw image hash differs from its pre-run clone hash. The FONTSEL0.CFG and FONTSEL1.CFG record bytes were separately read and verified unchanged."
+}

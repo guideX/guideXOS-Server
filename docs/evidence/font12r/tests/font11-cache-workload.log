@@ -1,0 +1,120 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O1 -iquote . -idirafter kernel/core/include tests/font11_glyph_cache_workload_test.cpp kernel/core/font_contract.cpp kernel/core/font_text_layout.cpp kernel/core/font_glyph_cache.cpp kernel/core/font_bitmap_backend.cpp kernel/core/font_truetype.cpp kernel/core/font_truetype_loader.cpp kernel/core/font_truetype_raster.cpp -o D:\dev\guideXOSServer_FONT_SUPPORT\out\font12r-validation\tests\font11-cache-workload.exe
+workload=FONT10 desktop screenshot 01; selected=Roboto-Italic 17px; roles=title:13px taskbar/menu:12px profile:17px; text_surfaces=17
+cold surface=window-title label="guideXOS Navigator" px=13 work_codepoints=18 hits=3 misses=15 rasters=15 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=15 bytes=952 peak=952
+cold surface=window-title label="Terminal - guideXOS Shell" px=13 work_codepoints=25 hits=19 misses=6 rasters=6 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=21 bytes=1287 peak=1287
+cold surface=taskbar-label label="guideXOS Navigator" px=12 work_codepoints=18 hits=3 misses=15 rasters=15 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=36 bytes=2087 peak=2087
+cold surface=taskbar-label label="Terminal" px=12 work_codepoints=8 hits=4 misses=4 rasters=4 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=40 bytes=2298 peak=2298
+cold surface=start-menu-left label="guideXOS Navigator" px=12 work_codepoints=18 hits=18 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=40 bytes=2298 peak=2298
+cold surface=start-menu-left label="Console" px=12 work_codepoints=7 hits=5 misses=2 rasters=2 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=42 bytes=2426 peak=2426
+cold surface=start-menu-right label="Computer" px=12 work_codepoints=8 hits=7 misses=1 rasters=1 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=43 bytes=2496 peak=2496
+cold surface=start-menu-right label="Documents" px=12 work_codepoints=9 hits=7 misses=2 rasters=2 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=45 bytes=2616 peak=2616
+cold surface=start-menu-right label="Pictures" px=12 work_codepoints=8 hits=7 misses=1 rasters=1 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=46 bytes=2688 peak=2688
+cold surface=start-menu-right label="Music" px=12 work_codepoints=5 hits=4 misses=1 rasters=1 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=47 bytes=2787 peak=2787
+cold surface=start-menu-right label="Network" px=12 work_codepoints=7 hits=5 misses=2 rasters=2 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=49 bytes=2913 peak=2913
+cold surface=start-menu-right label="Control Panel" px=12 work_codepoints=13 hits=13 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=49 bytes=2913 peak=2913
+cold surface=start-menu-footer label="All Programs" px=12 work_codepoints=12 hits=11 misses=1 rasters=1 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=50 bytes=2985 peak=2985
+cold surface=start-menu-footer label="Sleep" px=12 work_codepoints=5 hits=5 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=50 bytes=2985 peak=2985
+cold surface=start-menu-footer label="Restart" px=12 work_codepoints=7 hits=6 misses=1 rasters=1 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=51 bytes=3057 peak=3057
+cold surface=start-menu-footer label="Shut Down" px=12 work_codepoints=9 hits=8 misses=1 rasters=1 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=52 bytes=3111 peak=3111
+cold surface=start-menu-header label="User" px=17 work_codepoints=4 hits=0 misses=4 rasters=4 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=56 bytes=3512 peak=3512
+cold frame draws=17 fitted_codepoints=181 unique_keys=56 repeated_key_occurrences=125 hits=125 misses=56 rasters=56 evictions=0 entries=56 bytes=3512 peak=3512 entry_evictions=0 coverage_evictions=0 compactions=0 bypasses=0 oversized_bypasses=0 admission_bypasses=0 raster_failures=0 max_entries=72 coverage_capacity=65536 cache_bytes=69128 warm_reuse=yes
+cold repeated-glyph-key=glyph:75 px:13 occurrences:3
+cold repeated-glyph-key=glyph:89 px:13 occurrences:2
+cold repeated-glyph-key=glyph:77 px:13 occurrences:4
+cold repeated-glyph-key=glyph:72 px:13 occurrences:2
+cold repeated-glyph-key=glyph:73 px:13 occurrences:4
+cold repeated-glyph-key=glyph:60 px:13 occurrences:2
+cold repeated-glyph-key=glyph:51 px:13 occurrences:2
+cold repeated-glyph-key=glyph:55 px:13 occurrences:3
+cold repeated-glyph-key=glyph:4 px:13 occurrences:4
+cold repeated-glyph-key=glyph:69 px:13 occurrences:3
+cold repeated-glyph-key=glyph:86 px:13 occurrences:2
+cold repeated-glyph-key=glyph:80 px:13 occurrences:3
+cold repeated-glyph-key=glyph:75 px:12 occurrences:5
+cold repeated-glyph-key=glyph:89 px:12 occurrences:7
+cold repeated-glyph-key=glyph:77 px:12 occurrences:7
+cold repeated-glyph-key=glyph:72 px:12 occurrences:2
+cold repeated-glyph-key=glyph:73 px:12 occurrences:12
+cold repeated-glyph-key=glyph:60 px:12 occurrences:2
+cold repeated-glyph-key=glyph:51 px:12 occurrences:2
+cold repeated-glyph-key=glyph:55 px:12 occurrences:4
+cold repeated-glyph-key=glyph:4 px:12 occurrences:5
+cold repeated-glyph-key=glyph:50 px:12 occurrences:3
+cold repeated-glyph-key=glyph:69 px:12 occurrences:8
+cold repeated-glyph-key=glyph:90 px:12 occurrences:2
+cold repeated-glyph-key=glyph:88 px:12 occurrences:10
+cold repeated-glyph-key=glyph:83 px:12 occurrences:11
+cold repeated-glyph-key=glyph:86 px:12 occurrences:10
+cold repeated-glyph-key=glyph:81 px:12 occurrences:4
+cold repeated-glyph-key=glyph:82 px:12 occurrences:6
+cold repeated-glyph-key=glyph:80 px:12 occurrences:7
+cold repeated-glyph-key=glyph:39 px:12 occurrences:3
+cold repeated-glyph-key=glyph:87 px:12 occurrences:6
+cold repeated-glyph-key=glyph:84 px:12 occurrences:2
+cold repeated-glyph-key=glyph:40 px:12 occurrences:2
+cold repeated-glyph-key=glyph:71 px:12 occurrences:3
+cold repeated-glyph-key=glyph:52 px:12 occurrences:3
+cold repeated-glyph-key=glyph:91 px:12 occurrences:2
+clock-cold surface=taskbar-clock-time label="19:08" px=12 work_codepoints=5 hits=0 misses=5 rasters=5 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=61 bytes=3782 peak=3782
+clock-cold surface=taskbar-clock-date label="10/17/2026" px=12 work_codepoints=10 hits=6 misses=4 rasters=4 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=window-title label="guideXOS Navigator" px=13 work_codepoints=18 hits=18 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=window-title label="Terminal - guideXOS Shell" px=13 work_codepoints=25 hits=25 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=taskbar-label label="guideXOS Navigator" px=12 work_codepoints=18 hits=18 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=taskbar-label label="Terminal" px=12 work_codepoints=8 hits=8 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-left label="guideXOS Navigator" px=12 work_codepoints=18 hits=18 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-left label="Console" px=12 work_codepoints=7 hits=7 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-right label="Computer" px=12 work_codepoints=8 hits=8 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-right label="Documents" px=12 work_codepoints=9 hits=9 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-right label="Pictures" px=12 work_codepoints=8 hits=8 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-right label="Music" px=12 work_codepoints=5 hits=5 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-right label="Network" px=12 work_codepoints=7 hits=7 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-right label="Control Panel" px=12 work_codepoints=13 hits=13 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-footer label="All Programs" px=12 work_codepoints=12 hits=12 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-footer label="Sleep" px=12 work_codepoints=5 hits=5 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-footer label="Restart" px=12 work_codepoints=7 hits=7 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-footer label="Shut Down" px=12 work_codepoints=9 hits=9 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm surface=start-menu-header label="User" px=17 work_codepoints=4 hits=4 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+warm frame draws=17 fitted_codepoints=181 unique_keys=56 repeated_key_occurrences=125 hits=312 misses=65 rasters=65 evictions=0 entries=65 bytes=4038 peak=4038 entry_evictions=0 coverage_evictions=0 compactions=0 bypasses=0 oversized_bypasses=0 admission_bypasses=0 raster_failures=0 max_entries=72 coverage_capacity=65536 cache_bytes=69128 warm_reuse=yes
+warm repeated-glyph-key=glyph:75 px:13 occurrences:3
+warm repeated-glyph-key=glyph:89 px:13 occurrences:2
+warm repeated-glyph-key=glyph:77 px:13 occurrences:4
+warm repeated-glyph-key=glyph:72 px:13 occurrences:2
+warm repeated-glyph-key=glyph:73 px:13 occurrences:4
+warm repeated-glyph-key=glyph:60 px:13 occurrences:2
+warm repeated-glyph-key=glyph:51 px:13 occurrences:2
+warm repeated-glyph-key=glyph:55 px:13 occurrences:3
+warm repeated-glyph-key=glyph:4 px:13 occurrences:4
+warm repeated-glyph-key=glyph:69 px:13 occurrences:3
+warm repeated-glyph-key=glyph:86 px:13 occurrences:2
+warm repeated-glyph-key=glyph:80 px:13 occurrences:3
+warm repeated-glyph-key=glyph:75 px:12 occurrences:5
+warm repeated-glyph-key=glyph:89 px:12 occurrences:7
+warm repeated-glyph-key=glyph:77 px:12 occurrences:7
+warm repeated-glyph-key=glyph:72 px:12 occurrences:2
+warm repeated-glyph-key=glyph:73 px:12 occurrences:12
+warm repeated-glyph-key=glyph:60 px:12 occurrences:2
+warm repeated-glyph-key=glyph:51 px:12 occurrences:2
+warm repeated-glyph-key=glyph:55 px:12 occurrences:4
+warm repeated-glyph-key=glyph:4 px:12 occurrences:5
+warm repeated-glyph-key=glyph:50 px:12 occurrences:3
+warm repeated-glyph-key=glyph:69 px:12 occurrences:8
+warm repeated-glyph-key=glyph:90 px:12 occurrences:2
+warm repeated-glyph-key=glyph:88 px:12 occurrences:10
+warm repeated-glyph-key=glyph:83 px:12 occurrences:11
+warm repeated-glyph-key=glyph:86 px:12 occurrences:10
+warm repeated-glyph-key=glyph:81 px:12 occurrences:4
+warm repeated-glyph-key=glyph:82 px:12 occurrences:6
+warm repeated-glyph-key=glyph:80 px:12 occurrences:7
+warm repeated-glyph-key=glyph:39 px:12 occurrences:3
+warm repeated-glyph-key=glyph:87 px:12 occurrences:6
+warm repeated-glyph-key=glyph:84 px:12 occurrences:2
+warm repeated-glyph-key=glyph:40 px:12 occurrences:2
+warm repeated-glyph-key=glyph:71 px:12 occurrences:3
+warm repeated-glyph-key=glyph:52 px:12 occurrences:3
+warm repeated-glyph-key=glyph:91 px:12 occurrences:2
+clock-warm surface=taskbar-clock-time label="19:08" px=12 work_codepoints=5 hits=5 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+clock-warm surface=taskbar-clock-date label="10/17/2026" px=12 work_codepoints=10 hits=10 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+clock-update surface=taskbar-clock-time label="19:09" px=12 work_codepoints=5 hits=5 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+clock-update surface=taskbar-clock-date label="10/18/2026" px=12 work_codepoints=10 hits=10 misses=0 rasters=0 evictions=0 entry_evictions=0 coverage_evictions=0 bypasses=0 entries=65 bytes=4038 peak=4038
+FONT11 workload PASS checks=48 failures=0 font_generation=1 final_hits=342 final_misses=65 final_rasters=65 final_evictions=0 entries=65 bytes=4038 peak=4038 entry_evictions=0 coverage_evictions=0 compactions=0 bypasses=0 oversized_bypasses=0 admission_bypasses=0 raster_failures=0
+FONT11 cache workload PASS.

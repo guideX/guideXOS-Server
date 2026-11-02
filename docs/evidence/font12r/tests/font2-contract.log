@@ -1,0 +1,3 @@
+Running: C:\mingw64\bin\g++.exe -std=c++17 -Wall -Wextra -O2 -I. tests/font_contract_test.cpp kernel/core/font_contract.cpp kernel/core/font_glyph_cache.cpp kernel/core/font_bitmap_backend.cpp kernel/core/font_truetype_raster.cpp -o D:\dev\guideXOSServer_FONT_SUPPORT\out\font12r-validation\tests\font2-contract.exe
+FONT2 font contract: 196 checks, 0 failures
+Font contract build and test PASS.

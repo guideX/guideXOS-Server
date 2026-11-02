@@ -1,0 +1,25 @@
+{
+  "purpose": "Missing selected-font recovery smoke test",
+  "startedUtc": "2026-10-18T03:35:08.5164540Z",
+  "endedUtc": "2026-10-18T03:38:41.2205394Z",
+  "pid": 27928,
+  "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "machine": "pc,accel=whpx",
+  "ramMiB": 1024,
+  "vcpus": 2,
+  "disk": "font12r-recovery-missing-bold.img",
+  "diskFormat": "private clone of qualified raw FAT32, PIIX IDE primary master",
+  "firmware": "OVMF-font12r-code.fd",
+  "serial": "boot3.serial.log",
+  "qmp": "tcp:127.0.0.1:59349",
+  "vnc": "127.0.0.1:5951",
+  "network": "disabled",
+  "input": "QEMU PS/2 keyboard and relative mouse; query-mice current=true absolute=false",
+  "foreignPrelaunchProcesses": [
+    34980,
+    19792
+  ],
+  "foreignProcessesModified": false,
+  "shutdown": "clean through guest shell; [SHUTDOWN] exitCode=0",
+  "result": "missing Bold 18 source retained in valid sequence-32 preference; system selection initialized Ok and reached main loop; Settings opened but Fonts Current line and active bitmap choice were not visibly confirmed"
+}

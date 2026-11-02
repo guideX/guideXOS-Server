@@ -1,0 +1,42 @@
+[
+  {
+    "script": "run-settings-presentation-core-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\settings-presentation-core.log"
+  },
+  {
+    "script": "run-settings-center-model-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\settings-center.log"
+  },
+  {
+    "script": "run-settings-default-apps-model-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\settings-default-apps.log"
+  },
+  {
+    "script": "run-settings-inventory-model-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\settings-inventory.log"
+  },
+  {
+    "script": "run-settings-s6-model-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\settings-s6.log"
+  },
+  {
+    "script": "run-settings-s7-model-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\settings-s7.log"
+  },
+  {
+    "script": "run-settings-users-model-test.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\settings-users.log"
+  },
+  {
+    "script": "validate-settings-presentation-freestanding.ps1",
+    "exitCode": 0,
+    "log": "out\\font12r-validation\\tests\\settings-presentation-freestanding.log"
+  }
+]

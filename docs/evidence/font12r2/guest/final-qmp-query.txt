@@ -1,0 +1,46 @@
+{
+  "label": "final-state-for-evidence",
+  "actions": [
+    {
+      "command": "qmp_capabilities",
+      "arguments": null,
+      "return": {}
+    },
+    {
+      "command": "query-mice",
+      "arguments": null,
+      "return": [
+        {
+          "index": 2,
+          "name": "QEMU PS/2 Mouse",
+          "current": true,
+          "absolute": false
+        }
+      ]
+    },
+    {
+      "query_mice": [
+        {
+          "index": 2,
+          "name": "QEMU PS/2 Mouse",
+          "current": true,
+          "absolute": false
+        }
+      ]
+    },
+    {
+      "command": "query-status",
+      "arguments": null,
+      "return": {
+        "status": "running",
+        "running": true
+      }
+    },
+    {
+      "query_status": {
+        "status": "running",
+        "running": true
+      }
+    }
+  ]
+}

@@ -112,3 +112,74 @@ There is no demonstrated font-specific release blocker. Outcome B reflects the i
 ## Evidence index
 
 Committed screenshots, guest serial logs, exact launch manifests, offline preference snapshots, and image mutation manifests are under [docs/evidence/font12](../evidence/font12/). FONT12 test/build logs, full test summaries, helper scripts, private raw images/overlays, and QEMU ownership censuses remain under the untracked out/font12-validation tree. Existing FONT11 evidence is preserved and referenced above.
+
+## FONT12R continuation — final v0.3 qualification
+
+**FONT12R disposition: Outcome B — conditionally qualified.** This addendum records the final FONT12R result and supersedes the earlier statements above that the ABI and native filesystem harness failures were unresolved. The original FONT12 report and evidence remain intact.
+
+FONT12R began on FONT_SUPPORT at the requested starting HEAD 89a58151c19da3d6532d838ae3a29a2c0ab4711a and ended at the same HEAD. The branch was already one commit ahead of origin/FONT_SUPPORT at the start. No branch or Git topology changes, merge, push, or commit occurred. Existing untracked and out/ data were preserved. The only tracked changes are the corrected ABI size/slot assertions in tests/native_abi_layout_test.cpp and the native filesystem runner include/link/source inputs in scripts/run-native-filesystem-contract-test.ps1. No production font implementation changed.
+
+### Regression dispositions and build
+
+The gx_host_calls discrepancy is a stale test assertion, not packing or a production ABI mismatch. sdk/include/guidexos/abi.h appends get_document_activation_path at offset 248 after play_pcm at 240; on AMD64 the current structure size is 256 bytes. The test still pinned the earlier 248-byte table from the audio-only era. The kernel and hosted runtime use matching declarations/offsets, and the bare-metal runtime reports sizeof its current table. The updated native ABI test passes. See the [FONT12R ABI disposition](../evidence/font12r/FONT12R_RESULTS.md#abi-layout-stale-assertion-no-abi-incompatibility) and [test log](../evidence/font12r/tests/native-abi-layout.log).
+
+The missing Mbed TLS header is present in the pinned TF-PSA-Crypto source tree under drivers/builtin/include; it is not produced by the bootstrap generators. The profile verified at Mbed TLS 4.1.0 and TF-PSA-Crypto 1.1.0. The harness lacked that include root, then exposed missing -lwinmm and settings_presentation_core.cpp inputs. The corrected runner builds and passes the native filesystem contract test. No cryptographic source or generated placeholder changed. See the [harness disposition](../evidence/font12r/FONT12R_RESULTS.md#native-filesystem-harness-include-and-link-configuration-no-crypto-source-defect) and [final log](../evidence/font12r/tests/native-filesystem-contract-final.log).
+
+The eight available focused FONT2–FONT11 suites pass 6,635 checks. Requested Settings presentation/runtime, Settings feature models, compositor/native presentation, App Model, native ABI, and native filesystem checks also pass. The forced AMD64 build and link pass: ELF 2,813,880 bytes, SHA-256 9B8D1A86B5F2721F6A386FB40630ABA85F842239D72B050A3F0A855FE2A668F3; PE 2,937,438 bytes, SHA-256 7530DE7677014FFAED93B0813F882528789AD76D8C35454B98613B04F2A113CD. PE Import, IAT, and Delay Import directories are zero. Detailed results are in the [FONT12R report](../evidence/font12r/FONT12R_RESULTS.md#regression-and-forced-build).
+
+### Live guest acceptance
+
+A real Settings Fonts guest Apply changed Roboto Bold 16 px to Bold 18 px and wrote sequence 32. A Cancel capture preserved the prior active selection. A fresh QEMU process booted the same private FAT32 image and launched Settings, but the captured System overview was obscured by the terminal; no post-reboot Fonts Current line or shell-surface comparison was captured. The preference record remained on disk, but per the mandatory gate it is not sufficient proof of visible restoration.
+
+The disposable missing-Bold clone retained sequence 32 and removed only its selected file. It booted, initialized selection, reached the desktop main loop, opened Settings, and shut down cleanly. The built-in bitmap fallback branch is corroborated by source and the existing FONT6 test, but its active-font result was not visible in the Fonts page after recovery.
+
+The PS/2 mouse reached the Start menu and Fonts card. Longer pointer movement and VNC absolute clicks were unreliable, so the bounded input diagnostic stopped. Two-window pointer focus/hit testing and live resize were not qualified; no guest window dimensions were recorded. Passing compositor and Settings automation tests do not substitute for these acceptance steps.
+
+### Final status matrix
+
+| Area | FONT12R result | v0.3 gate |
+|---|---|---|
+| Font parsing, rasterization, cache, selection, persistence, Settings tests | Pass; 6,635 focused FONT2–FONT11 checks and requested Settings suites pass | No demonstrated font-specific defect |
+| ABI size discrepancy | Stale 248-byte assertion corrected; current append-only 256-byte ABI passes | Resolved |
+| Native filesystem harness | Missing include/link/source inputs corrected; full harness passes | Resolved |
+| Forced AMD64 build and imports | Build/link pass; no PE hosted imports | Pass |
+| Apply/Cancel and pre-reboot state | Real Fonts UI Apply/Cancel; sequence 32 Bold 18 saved | Pass |
+| Fresh-process visible font restoration | Fresh process and Settings launch pass, but Fonts page and selected shell text are not visible | Open; blocks Outcome A |
+| Missing-font recovery | Private clone boots without crash; bitmap fallback branch and tests corroborate recovery, but no visible Current readback | Partial; blocks Outcome A |
+| Pointer focus and hit testing | Some actual mouse input worked; two-window focus, identity, and all required targets were not established | Open; blocks Outcome A |
+| Live resize | Not exercised after the bounded mouse diagnostic; no before/after geometry | Open; blocks Outcome A |
+| Memory | Font BSS 1,143,728 bytes; 1 GiB guest boots; minimum product RAM is unspecified | No demonstrated font-specific blocker; total target budget remains undefined |
+
+**Font feature readiness:** conditionally qualified; focused tests, real Apply/Cancel, persistence, recovery code path, and full AMD64 build are sound, while live UI acceptance remains incomplete.
+
+**Integration readiness:** suitable for controlled integration with the live guest gates tracked, but not ready for unconditional desktop integration signoff. Close pointer focus/hit testing, supported resize, visible fresh-boot restoration, and visible fallback readback on the integrated branch.
+
+**Combined v0.3 release readiness:** not qualified here. No merge was performed and the integrated release candidate has not been tested.
+
+Outcome B does not advance phase status. No FONT13 work or local commit was started. The complete evidence package is under [docs/evidence/font12r](../evidence/font12r/FONT12R_RESULTS.md).
+
+## FONT12R2 continuation — final guest interaction and visual restoration
+
+**FONT12R2 disposition: Outcome B — conditionally qualified.** A fresh-process Settings Fonts screenshot now visibly restores Roboto Bold 18 px at preference sequence 32. Real pointer focus changes, Settings control selection, and one live Settings resize passed. The bounded relative-pointer check later failed to reach the grip for a minimum-size drag, so minimum-size behavior remains unverified and no Outcome A claim is made.
+
+The run started and ended on FONT_SUPPORT at 89a58151c19da3d6532d838ae3a29a2c0ab4711a. The exact starting worktree state is recorded in [starting-worktree-status.txt](../evidence/font12r2/starting-worktree-status.txt). Existing ABI/filesystem runner corrections, FONT12R documentation, and all out/ artifacts were preserved. No production, test, or harness source changed; previously accepted ABI/filesystem, 6,635 focused font checks, Settings/native suites, forced AMD64 build, and no-PE-import results remain as recorded in [FONT12R_RESULTS.md](../evidence/font12r/FONT12R_RESULTS.md). No tests/build were rerun and no commit was made.
+
+The single fresh QEMU process used a private raw FAT32 clone and private firmware copy after a census that found three unrelated guests. Its Fonts page visibly shows the selected family/style/size and preview alongside the desktop taskbar. Pointer focus moved Settings → File Explorer → the same Settings instance. Font-row selection and the size plus control changed pending preview state without applying it. A real Settings drag resized the same focused window from 760×500 to 825×555; the compositor redrew it and the Fonts controls/preview remained visible. The default PC PS/2 relative mouse was the active device.
+
+The remaining limitation is coordinate delivery: a bounded fast move and one slower-paced move did not reach the requested resize grip. The 560×360 minimum clamp and layout at that bound therefore remain unqualified. Numeric window IDs and font selection generation are not printed in serial telemetry; source inspection confirms focus/resize retain the registered ID and no font selection was committed, while the visible active Bold 18 rendering remains unchanged. Full configuration, logs, traces, and screenshots are indexed in [FONT12R2_RESULTS.md](../evidence/font12r2/FONT12R2_RESULTS.md).
+
+The owned guest stopped after I sent QMP quit to its verified PID 30864/private-image endpoint because its accepted ACPI powerdown request did not stop it. No command was sent to the other guests; the post-run census showed the external QEMU process set had changed during the run. The ending branch, HEAD, and worktree status are in [ending-worktree-status.txt](../evidence/font12r2/ending-worktree-status.txt).
+
+## FONT12R3 continuation — minimum-size qualification and final closeout
+
+**FONT12R3 disposition: Outcome B — conditionally qualified.** No font-specific correctness defect was demonstrated. The minimum-size acceptance remains inconclusive because the live PS/2 pointer again under-delivered before reaching the Settings resize grip, and no existing same-instance production resize diagnostic was available.
+
+The production Settings constraint is 560×360 outer-window pixels, with 760×500 preferred and 1180×820 maximum. The compositor resize path binds the drag to the registered window ID, clamps width and height to the Settings minimum (the drag handler does not impose the Settings maximum values), marks that same window dirty, and redraws it with the new dimensions. Display-topology reconciliation separately clamps dimensions to the available work area. A native window-resize request API is not implemented; the `WindowResize` IPC enum is unused. Source review is in [FONT12R3_RESULTS.md](../evidence/font12r3/FONT12R3_RESULTS.md#production-minimum-and-resize-path).
+
+FONT8 already shows the bitmap Fonts page at 560×360 and reports that the window was resized to that geometry. It does not provide a before/after identity or minimum hit-test trace. FONT12R2 established pointer focus, real control selection, and same-window live resize from 760×500 to 825×555, but its minimum approach also undershot. The R3 gap is TTF Fonts-page rendering, same-instance minimum clamping, and below-minimum behavior at 560×360.
+
+One new isolated guest used a byte-identical private copy of the accepted raw FAT32/PIIX IDE image. The initial Fonts page showed Roboto Bold 18 px at 760×500. From the observed pointer position `(465,264)`, the calibrated relative PS/2 move targeted the resize grip at `(850,565)`; the visible pointer reached only about `(501,301)`. No button-down or resize drag occurred. Following the bounded-test rule, no repeat was attempted. No valid existing API could request the minimum on the same Settings instance, so minimum clamping and redraw were not guest-tested. The exact capture, QMP trace, serial log, ownership census, and image/preferences records are in [docs/evidence/font12r3](../evidence/font12r3/FONT12R3_RESULTS.md).
+
+The active UI remained Roboto Bold 18 px, and saved preference sequences 31/32 were unchanged. Settings launched once and did not restart. The 560×360 bitmap screenshot from FONT8 remains prior evidence; this run makes no claim that the TTF page or its controls are usable at that bound. Previously accepted FONT12R regression/build evidence remains applicable because production and test source files were unchanged; broad tests and builds were not rerun.
+
+**Final recommendation:** keep FONT_SUPPORT conditionally qualified, with no demonstrated font-specific blocker. For controlled integration, retain the existing conditional status and leave the minimum-size gate open; this is not v0.3 desktop signoff. Hand the persistent pointer automation limitation to the owning input project. Outcome B does not authorize a FONT12R3 closeout commit; no commit, push, merge, or FONT13 work was started. See [FONT12R3_RESULTS.md](../evidence/font12r3/FONT12R3_RESULTS.md) for the full disposition and ending worktree state.

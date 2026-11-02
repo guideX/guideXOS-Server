@@ -1,0 +1,27 @@
+{
+  "copiedFrom": "out/font12r2-validation/guest/font12r2-primary.img",
+  "preRunDiskSha256": "35870002642951ECD30B7332A4FC2399026DFF2C1FA3F7D51C56E3B7AD03E91F",
+  "postRunDiskSha256": "831768A8C3517E0FCF24EDBE1D7AE4ABC07372C4D16947E86D33773AC4F6CB68",
+  "preferenceRecords": [
+    {
+      "file": "/FONTSEL0.CFG",
+      "sequence": 31,
+      "family": "Roboto",
+      "style": "Bold",
+      "pixelSize": 16,
+      "sha256": "c98ba834373c470b453c8edebe5102a1f246aea3dd403dd4257de508a8fa2bf6"
+    },
+    {
+      "file": "/fontsel1.cfg",
+      "sequence": 32,
+      "family": "Roboto",
+      "style": "Bold",
+      "pixelSize": 18,
+      "sha256": "9ad24a94cb8161e21d99db36b760d76fbc2a1a7ac60af7948759224d1e793d2c"
+    }
+  ],
+  "postRunPreferenceRecordsUnchanged": true,
+  "activePreferenceAtBoot": "Roboto Bold 18 px (sequence 32)",
+  "applyIssuedDuringRun": false,
+  "selectionGenerationTelemetry": "Not emitted by this guest build; no Apply or font-selection mutation was issued."
+}

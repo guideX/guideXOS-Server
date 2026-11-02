@@ -1,0 +1,35 @@
+{
+  "observedLocal": "2026-10-17T21:18:52.4110576-07:00",
+  "ownedPid": 30864,
+  "ownedGuestStopped": true,
+  "stopMethod": "QMP quit after QMP system_powerdown was accepted but the VM remained running for 8 seconds",
+  "prelaunchUnrelatedQemuPids": [
+    34980,
+    29328,
+    26056
+  ],
+  "postrunQemuPids": [
+    34980,
+    24196
+  ],
+  "postrunUnrelatedDetails": [
+    {
+      "pid": 34980,
+      "sameAsPrelaunch": true,
+      "projectPath": "C:/gxR2/out/taskmanager-memorydetails-qualification-r2/..."
+    },
+    {
+      "pid": 24196,
+      "sameAsPrelaunch": false,
+      "projectPath": "D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/out/dotnet/c176-managed-notes-navigation/c167/settings-ui-proof-runs/20261018-040328-19a61c39",
+      "qmp": "127.0.0.1:62423",
+      "creationLocal": "2026-10-17T21:11:12-07:00"
+    }
+  ],
+  "prelaunchPidsNoLongerPresent": [
+    29328,
+    26056
+  ],
+  "externalProcessesTouched": false,
+  "note": "The external process set differed from prelaunch. All QMP operations in this task used only port 59350 for owned PID 30864; no command was sent to the external guest endpoints. The process changes are recorded without attributing their cause."
+}

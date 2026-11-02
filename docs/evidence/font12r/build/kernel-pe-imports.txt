@@ -1,0 +1,3405 @@
+
+kernel/build/amd64/bin/kernel.pe:     file format pei-x86-64
+
+Characteristics 0x226
+	executable
+	line numbers stripped
+	large address aware
+	debugging information removed
+
+Time/Date		Sat Oct 17 20:10:12 2026
+Magic			020b	(PE32+)
+MajorLinkerVersion	2
+MinorLinkerVersion	46
+SizeOfCode		0000000000183c00
+SizeOfInitializedData	00000000000b8c00
+SizeOfUninitializedData	000000002294dc00
+AddressOfEntryPoint	0000000000000000
+BaseOfCode		0000000000001000
+ImageBase		0000000000100000
+SectionAlignment	00001000
+FileAlignment		00000200
+MajorOSystemVersion	4
+MinorOSystemVersion	0
+MajorImageVersion	0
+MinorImageVersion	0
+MajorSubsystemVersion	5
+MinorSubsystemVersion	2
+Win32Version		00000000
+SizeOfImage		22b93000
+SizeOfHeaders		00000400
+CheckSum		002d9085
+Subsystem		00000003	(Windows CUI)
+DllCharacteristics	00000160
+					HIGH_ENTROPY_VA
+					DYNAMIC_BASE
+					NX_COMPAT
+SizeOfStackReserve	0000000000200000
+SizeOfStackCommit	0000000000001000
+SizeOfHeapReserve	0000000000100000
+SizeOfHeapCommit	0000000000001000
+LoaderFlags		00000000
+NumberOfRvaAndSizes	00000010
+
+The Data Directory
+Entry 0 0000000000000000 00000000 Export Directory [.edata (or where ever we found it)]
+Entry 1 0000000000000000 00000000 Import Directory [parts of .idata]
+Entry 2 0000000000000000 00000000 Resource Directory [.rsrc]
+Entry 3 000000000022b000 000004c8 Exception Directory [.pdata]
+Entry 4 0000000000000000 00000000 Security Directory
+Entry 5 0000000022b91000 000014cc Base Relocation Directory [.reloc]
+Entry 6 0000000000000000 00000000 Debug Directory
+Entry 7 0000000000000000 00000000 Description Directory
+Entry 8 0000000000000000 00000000 Special Directory
+Entry 9 0000000000000000 00000000 Thread Storage Directory [.tls]
+Entry a 0000000000000000 00000000 Load Configuration Directory
+Entry b 0000000000000000 00000000 Bound Import Directory
+Entry c 0000000000000000 00000000 Import Address Table Directory
+Entry d 0000000000000000 00000000 Delay Import Directory
+Entry e 0000000000000000 00000000 CLR Runtime Header
+Entry f 0000000000000000 00000000 Reserved
+
+The Function Table (interpreted .pdata section contents)
+vma:			BeginAddress	 EndAddress	  UnwindData
+ 000000000032b000:	0000000000275670 00000000002758e9 000000000032a140
+ 000000000032b00c:	00000000002758f0 0000000000275969 000000000032a464
+ 000000000032b018:	0000000000275970 0000000000275a01 000000000032a474
+ 000000000032b024:	0000000000275a10 0000000000275a9e 000000000032a480
+ 000000000032b030:	0000000000275aa0 0000000000275aa7 000000000032a224
+ 000000000032b03c:	0000000000275ab0 0000000000275ab1 000000000032a234
+ 000000000032b048:	0000000000275ac0 0000000000275ac1 000000000032a21c
+ 000000000032b054:	0000000000275ad0 0000000000275ad1 000000000032a218
+ 000000000032b060:	0000000000275ae0 0000000000275ae1 000000000032a244
+ 000000000032b06c:	0000000000275af0 0000000000275af1 000000000032a220
+ 000000000032b078:	0000000000275b00 0000000000275b01 000000000032a240
+ 000000000032b084:	0000000000275b10 0000000000275b11 000000000032a238
+ 000000000032b090:	0000000000275b20 0000000000275b21 000000000032a23c
+ 000000000032b09c:	0000000000275b30 0000000000275b31 000000000032a228
+ 000000000032b0a8:	0000000000275b40 0000000000275b41 000000000032a22c
+ 000000000032b0b4:	0000000000275b50 0000000000275b51 000000000032a230
+ 000000000032b0c0:	0000000000275b60 0000000000275b63 000000000032a214
+ 000000000032b0cc:	0000000000275b70 0000000000275bb3 000000000032a374
+ 000000000032b0d8:	0000000000275bc0 0000000000275bc3 000000000032a35c
+ 000000000032b0e4:	0000000000275bd0 0000000000275be1 000000000032a43c
+ 000000000032b0f0:	0000000000275bf0 0000000000275c1e 000000000032a434
+ 000000000032b0fc:	0000000000275c20 0000000000275d0c 000000000032a0ac
+ 000000000032b108:	0000000000275d10 0000000000275d31 000000000032a3c0
+ 000000000032b114:	0000000000275d40 0000000000275dcb 000000000032a430
+ 000000000032b120:	0000000000275dd0 0000000000275e62 000000000032a0b4
+ 000000000032b12c:	0000000000275e70 0000000000275f49 000000000032a378
+ 000000000032b138:	0000000000275f50 0000000000275fcb 000000000032a398
+ 000000000032b144:	0000000000275fd0 00000000002760c0 000000000032a288
+ 000000000032b150:	00000000002760c0 000000000027613b 000000000032a290
+ 000000000032b15c:	0000000000276140 000000000027621c 000000000032a41c
+ 000000000032b168:	0000000000276220 0000000000276303 000000000032a2ac
+ 000000000032b174:	0000000000276310 00000000002764fa 000000000032a424
+ 000000000032b180:	0000000000276500 0000000000276589 000000000032a260
+ 000000000032b18c:	00000000002765a0 000000000027663b 000000000032a440
+ 000000000032b198:	0000000000276640 00000000002766f1 000000000032a268
+ 000000000032b1a4:	0000000000276700 00000000002767d0 000000000032a448
+ 000000000032b1b0:	00000000002767e0 000000000027689f 000000000032a258
+ 000000000032b1bc:	00000000002768a0 0000000000276ae4 000000000032a3e8
+ 000000000032b1c8:	0000000000276b00 0000000000276bb6 000000000032a2b4
+ 000000000032b1d4:	0000000000276bc0 0000000000276c88 000000000032a3c4
+ 000000000032b1e0:	0000000000276c90 0000000000276d92 000000000032a2d4
+ 000000000032b1ec:	0000000000276da0 0000000000276f19 000000000032a408
+ 000000000032b1f8:	0000000000276f20 0000000000276f60 000000000032a128
+ 000000000032b204:	0000000000276f80 000000000027709a 000000000032a12c
+ 000000000032b210:	00000000002770c0 00000000002772e0 000000000032a0bc
+ 000000000032b21c:	0000000000277300 000000000027739d 000000000032a110
+ 000000000032b228:	00000000002773c0 000000000027759e 000000000032a134
+ 000000000032b234:	00000000002775c0 0000000000277763 000000000032a118
+ 000000000032b240:	0000000000277780 0000000000278ecc 000000000032a0e4
+ 000000000032b24c:	0000000000278f00 0000000000279b43 000000000032a0cc
+ 000000000032b258:	0000000000279b80 0000000000279bfd 000000000032a120
+ 000000000032b264:	0000000000279c00 0000000000279d82 000000000032a0fc
+ 000000000032b270:	0000000000279da0 0000000000279f07 000000000032a10c
+ 000000000032b27c:	0000000000279f10 000000000027a290 000000000032a14c
+ 000000000032b288:	000000000027a290 000000000027a2c1 000000000032a458
+ 000000000032b294:	000000000027a2e0 000000000027a96c 000000000032a3d4
+ 000000000032b2a0:	000000000027a980 000000000027a9de 000000000032a150
+ 000000000032b2ac:	000000000027a9e0 000000000027aa0a 000000000032a248
+ 000000000032b2b8:	000000000027aa10 000000000027aa3a 000000000032a280
+ 000000000032b2c4:	000000000027aa40 000000000027aa6a 000000000032a270
+ 000000000032b2d0:	000000000027aa70 000000000027aa9a 000000000032a278
+ 000000000032b2dc:	000000000027aaa0 000000000027aaca 000000000032a250
+ 000000000032b2e8:	000000000027aae0 000000000027ad4a 000000000032a320
+ 000000000032b2f4:	000000000027ad60 000000000027af64 000000000032a348
+ 000000000032b300:	000000000027af80 000000000027b15d 000000000032a3b0
+ 000000000032b30c:	000000000027b160 000000000027b2d4 000000000032a310
+ 000000000032b318:	000000000027b2e0 000000000027ba33 000000000032a300
+ 000000000032b324:	000000000027ba40 000000000027bdc9 000000000032a39c
+ 000000000032b330:	000000000027bde0 000000000027c3d2 000000000032a2e8
+ 000000000032b33c:	000000000027c3e0 000000000027c784 000000000032a350
+ 000000000032b348:	000000000027c790 000000000027ce47 000000000032a2c8
+ 000000000032b354:	000000000027ce50 000000000027cf4b 000000000032a3f4
+ 000000000032b360:	000000000027cf60 000000000027d0d3 000000000032a360
+ 000000000032b36c:	000000000027d100 000000000027e7a5 000000000032a294
+ 000000000032b378:	000000000027e7c0 000000000027f22c 000000000032a380
+ 000000000032b384:	000000000027f240 0000000000280113 000000000032a330
+ 000000000032b390:	0000000000280120 000000000028016f 000000000032a400
+ 000000000032b39c:	0000000000280170 00000000002801d3 000000000032a450
+ 000000000032b3a8:	00000000002801e0 00000000002801e6 000000000032a1a8
+ 000000000032b3b4:	0000000000280200 00000000002803a1 000000000032a198
+ 000000000032b3c0:	00000000002803c0 000000000028040f 000000000032a168
+ 000000000032b3cc:	0000000000280410 0000000000280621 000000000032a1ac
+ 000000000032b3d8:	0000000000280630 0000000000280851 000000000032a200
+ 000000000032b3e4:	0000000000280860 0000000000280a91 000000000032a1ec
+ 000000000032b3f0:	0000000000280aa0 0000000000280dbd 000000000032a16c
+ 000000000032b3fc:	0000000000280dc0 000000000028115f 000000000032a154
+ 000000000032b408:	0000000000281160 00000000002814ff 000000000032a1d8
+ 000000000032b414:	0000000000281500 000000000028158e 000000000032a494
+ 000000000032b420:	0000000000281590 0000000000281b1c 000000000032a180
+ 000000000032b42c:	0000000000281b20 000000000028214a 000000000032a1c0
+ 000000000032b438:	0000000000282160 00000000002823b9 000000000032a074
+ 000000000032b444:	00000000002823c0 000000000028283d 000000000032a094
+ 000000000032b450:	0000000000282840 0000000000282aa2 000000000032a080
+ 000000000032b45c:	0000000000282ac0 0000000000282c68 000000000032a000
+ 000000000032b468:	0000000000282c80 0000000000282e2d 000000000032a054
+ 000000000032b474:	0000000000282e40 0000000000283076 000000000032a008
+ 000000000032b480:	0000000000283080 00000000002833ee 000000000032a018
+ 000000000032b48c:	0000000000283400 00000000002838ac 000000000032a040
+ 000000000032b498:	00000000002838c0 0000000000283c8d 000000000032a028
+ 000000000032b4a4:	0000000000283ca0 00000000002848ab 000000000032a05c
+ 000000000032b4b0:	00000000002848c0 00000000002848c6 000000000032a4ac
+ 000000000032b4bc:	00000000002848d0 00000000002848d6 000000000032a4a8
+
+Dump of .xdata
+ 000000000032a140 (rva: 0022a140): 0000000000275670 - 00000000002758e9
+	Version: 1, Flags: none
+	Nbr codes: 3, Prologue size: 0x03, Frame offset: 0x0, Frame reg: none
+	  pc+0x03: push rbx
+	  pc+0x02: push rsi
+	  pc+0x01: push rdi
+ 000000000032a464 (rva: 0022a464): 00000000002758f0 - 0000000000275969
+	Version: 1, Flags: none
+	Nbr codes: 5, Prologue size: 0x08, Frame offset: 0x0, Frame reg: none
+	  pc+0x08: alloc small area: rsp = rsp - 0x28
+	  pc+0x04: push rbx
+	  pc+0x03: push rsi
+	  pc+0x02: push rdi
+	  pc+0x01: push rbp
+ 000000000032a474 (rva: 0022a474): 0000000000275970 - 0000000000275a01
+	Version: 1, Flags: none
+	Nbr codes: 4, Prologue size: 0x07, Frame offset: 0x0, Frame reg: none
+	  pc+0x07: alloc small area: rsp = rsp - 0x40
+	  pc+0x03: push rbx
+	  pc+0x02: push rsi
+	  pc+0x01: push rdi
+ 000000000032a480 (rva: 0022a480): 0000000000275a10 - 0000000000275a9e
+	Version: 1, Flags: none
+	Nbr codes: 8, Prologue size: 0x0e, Frame offset: 0x0, Frame reg: none
+	  pc+0x0e: alloc small area: rsp = rsp - 0x40
+	  pc+0x0a: push rbx
+	  pc+0x09: push rsi
+	  pc+0x08: push rdi
+	  pc+0x07: push rbp
+	  pc+0x06: push r12
+	  pc+0x04: push r13
+	  pc+0x02: push r14
+ 000000000032a224 (rva: 0022a224): 0000000000275aa0 - 0000000000275aa7
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a234 (rva: 0022a234): 0000000000275ab0 - 0000000000275ab1
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a21c (rva: 0022a21c): 0000000000275ac0 - 0000000000275ac1
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a218 (rva: 0022a218): 0000000000275ad0 - 0000000000275ad1
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a244 (rva: 0022a244): 0000000000275ae0 - 0000000000275ae1
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a220 (rva: 0022a220): 0000000000275af0 - 0000000000275af1
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a240 (rva: 0022a240): 0000000000275b00 - 0000000000275b01
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a238 (rva: 0022a238): 0000000000275b10 - 0000000000275b11
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a23c (rva: 0022a23c): 0000000000275b20 - 0000000000275b21
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a228 (rva: 0022a228): 0000000000275b30 - 0000000000275b31
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a22c (rva: 0022a22c): 0000000000275b40 - 0000000000275b41
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a230 (rva: 0022a230): 0000000000275b50 - 0000000000275b51
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a214 (rva: 0022a214): 0000000000275b60 - 0000000000275b63
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a374 (rva: 0022a374): 0000000000275b70 - 0000000000275bb3
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a35c (rva: 0022a35c): 0000000000275bc0 - 0000000000275bc3
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a43c (rva: 0022a43c): 0000000000275bd0 - 0000000000275be1
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a434 (rva: 0022a434): 0000000000275bf0 - 0000000000275c1e
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x38
+ 000000000032a0ac (rva: 0022a0ac): 0000000000275c20 - 0000000000275d0c
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x38
+ 000000000032a3c0 (rva: 0022a3c0): 0000000000275d10 - 0000000000275d31
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a430 (rva: 0022a430): 0000000000275d40 - 0000000000275dcb
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a0b4 (rva: 0022a0b4): 0000000000275dd0 - 0000000000275e62
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x28
+ 000000000032a378 (rva: 0022a378): 0000000000275e70 - 0000000000275f49
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x48
+ 000000000032a398 (rva: 0022a398): 0000000000275f50 - 0000000000275fcb
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a288 (rva: 0022a288): 0000000000275fd0 - 00000000002760c0
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x28
+ 000000000032a290 (rva: 0022a290): 00000000002760c0 - 000000000027613b
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a41c (rva: 0022a41c): 0000000000276140 - 000000000027621c
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x28
+ 000000000032a2ac (rva: 0022a2ac): 0000000000276220 - 0000000000276303
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x20
+	  pc+0x01: push rbx
+ 000000000032a424 (rva: 0022a424): 0000000000276310 - 00000000002764fa
+	Version: 1, Flags: none
+	Nbr codes: 3, Prologue size: 0x06, Frame offset: 0x0, Frame reg: none
+	  pc+0x06: alloc small area: rsp = rsp - 0x58
+	  pc+0x02: push rbx
+	  pc+0x01: push rsi
+ 000000000032a260 (rva: 0022a260): 0000000000276500 - 0000000000276589
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x20
+	  pc+0x01: push rbx
+ 000000000032a440 (rva: 0022a440): 00000000002765a0 - 000000000027663b
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x20
+	  pc+0x01: push rbx
+ 000000000032a268 (rva: 0022a268): 0000000000276640 - 00000000002766f1
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x20
+	  pc+0x01: push rbx
+ 000000000032a448 (rva: 0022a448): 0000000000276700 - 00000000002767d0
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x20
+	  pc+0x01: push rbx
+ 000000000032a258 (rva: 0022a258): 00000000002767e0 - 000000000027689f
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x20
+	  pc+0x01: push rbx
+ 000000000032a3e8 (rva: 0022a3e8): 00000000002768a0 - 0000000000276ae4
+	Version: 1, Flags: none
+	Nbr codes: 3, Prologue size: 0x06, Frame offset: 0x0, Frame reg: none
+	  pc+0x06: alloc small area: rsp = rsp - 0x28
+	  pc+0x02: push rbx
+	  pc+0x01: push rdi
+ 000000000032a2b4 (rva: 0022a2b4): 0000000000276b00 - 0000000000276bb6
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc small area: rsp = rsp - 0x28
+	  pc+0x08: push rbx
+	  pc+0x07: push rsi
+	  pc+0x06: push rdi
+	  pc+0x05: push rbp
+	  pc+0x04: push r12
+	  pc+0x02: push r13
+ 000000000032a3c4 (rva: 0022a3c4): 0000000000276bc0 - 0000000000276c88
+	Version: 1, Flags: none
+	Nbr codes: 6, Prologue size: 0x0a, Frame offset: 0x0, Frame reg: none
+	  pc+0x0a: alloc small area: rsp = rsp - 0x30
+	  pc+0x06: push rbx
+	  pc+0x05: push rsi
+	  pc+0x04: push rdi
+	  pc+0x03: push rbp
+	  pc+0x02: push r12
+ 000000000032a2d4 (rva: 0022a2d4): 0000000000276c90 - 0000000000276d92
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc small area: rsp = rsp - 0x28
+	  pc+0x08: push rbx
+	  pc+0x07: push rsi
+	  pc+0x06: push rdi
+	  pc+0x05: push rbp
+	  pc+0x04: push r12
+	  pc+0x02: push r13
+ 000000000032a408 (rva: 0022a408): 0000000000276da0 - 0000000000276f19
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc small area: rsp = rsp - 0x28
+	  pc+0x08: push rbx
+	  pc+0x07: push rsi
+	  pc+0x06: push rdi
+	  pc+0x05: push rbp
+	  pc+0x04: push r12
+	  pc+0x02: push r13
+ 000000000032a128 (rva: 0022a128): 0000000000276f20 - 0000000000276f60
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a12c (rva: 0022a12c): 0000000000276f80 - 000000000027709a
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x02, Frame offset: 0x0, Frame reg: none
+	  pc+0x02: push rbx
+	  pc+0x01: push rsi
+ 000000000032a0bc (rva: 0022a0bc): 00000000002770c0 - 00000000002772e0
+	Version: 1, Flags: none
+	Nbr codes: 6, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc large area: rsp = rsp - 0x88
+	  pc+0x05: push rbx
+	  pc+0x04: push rsi
+	  pc+0x03: push rdi
+	  pc+0x02: push r14
+ 000000000032a110 (rva: 0022a110): 0000000000277300 - 000000000027739d
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x01, Frame offset: 0x0, Frame reg: none
+	  pc+0x01: push rbx
+ 000000000032a134 (rva: 0022a134): 00000000002773c0 - 000000000027759e
+	Version: 1, Flags: none
+	Nbr codes: 4, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: push rbx
+	  pc+0x03: push rsi
+	  pc+0x02: push rdi
+	  pc+0x01: push rbp
+ 000000000032a118 (rva: 0022a118): 00000000002775c0 - 0000000000277763
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x38
+ 000000000032a0e4 (rva: 0022a0e4): 0000000000277780 - 0000000000278ecc
+	Version: 1, Flags: none
+	Nbr codes: 10, Prologue size: 0x13, Frame offset: 0x0, Frame reg: none
+	  pc+0x13: alloc large area: rsp = rsp - 0x148
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a0cc (rva: 0022a0cc): 0000000000278f00 - 0000000000279b43
+	Version: 1, Flags: none
+	Nbr codes: 9, Prologue size: 0x10, Frame offset: 0x0, Frame reg: none
+	  pc+0x10: alloc small area: rsp = rsp - 0x78
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a120 (rva: 0022a120): 0000000000279b80 - 0000000000279bfd
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x01, Frame offset: 0x0, Frame reg: none
+	  pc+0x01: push rbx
+ 000000000032a0fc (rva: 0022a0fc): 0000000000279c00 - 0000000000279d82
+	Version: 1, Flags: none
+	Nbr codes: 5, Prologue size: 0x06, Frame offset: 0x0, Frame reg: none
+	  pc+0x06: push rbx
+	  pc+0x05: push rsi
+	  pc+0x04: push rdi
+	  pc+0x03: push rbp
+	  pc+0x02: push r12
+ 000000000032a10c (rva: 0022a10c): 0000000000279da0 - 0000000000279f07
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a14c (rva: 0022a14c): 0000000000279f10 - 000000000027a290
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a458 (rva: 0022a458): 000000000027a290 - 000000000027a2c1
+	Version: 1, Flags: none
+	Nbr codes: 3, Prologue size: 0x06, Frame offset: 0x0, Frame reg: none
+	  pc+0x06: alloc small area: rsp = rsp - 0x28
+	  pc+0x02: push rbx
+	  pc+0x01: push rsi
+ 000000000032a3d4 (rva: 0022a3d4): 000000000027a2e0 - 000000000027a96c
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc small area: rsp = rsp - 0x78
+	  pc+0x08: push rbx
+	  pc+0x07: push rsi
+	  pc+0x06: push rdi
+	  pc+0x05: push rbp
+	  pc+0x04: push r12
+	  pc+0x02: push r14
+ 000000000032a150 (rva: 0022a150): 000000000027a980 - 000000000027a9de
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a248 (rva: 0022a248): 000000000027a9e0 - 000000000027aa0a
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x38
+ 000000000032a280 (rva: 0022a280): 000000000027aa10 - 000000000027aa3a
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x38
+ 000000000032a270 (rva: 0022a270): 000000000027aa40 - 000000000027aa6a
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x38
+ 000000000032a278 (rva: 0022a278): 000000000027aa70 - 000000000027aa9a
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x38
+ 000000000032a250 (rva: 0022a250): 000000000027aaa0 - 000000000027aaca
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x38
+ 000000000032a320 (rva: 0022a320): 000000000027aae0 - 000000000027ad4a
+	Version: 1, Flags: none
+	Nbr codes: 5, Prologue size: 0x0a, Frame offset: 0x0, Frame reg: none
+	  pc+0x0a: alloc large area: rsp = rsp - 0x1a0
+	  pc+0x03: push rbx
+	  pc+0x02: push rsi
+	  pc+0x01: push rdi
+ 000000000032a348 (rva: 0022a348): 000000000027ad60 - 000000000027af64
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x28
+ 000000000032a3b0 (rva: 0022a3b0): 000000000027af80 - 000000000027b15d
+	Version: 1, Flags: none
+	Nbr codes: 6, Prologue size: 0x0b, Frame offset: 0x0, Frame reg: none
+	  pc+0x0b: alloc large area: rsp = rsp - 0x1e8
+	  pc+0x04: push rbx
+	  pc+0x03: push rsi
+	  pc+0x02: push rdi
+	  pc+0x01: push rbp
+ 000000000032a310 (rva: 0022a310): 000000000027b160 - 000000000027b2d4
+	Version: 1, Flags: none
+	Nbr codes: 6, Prologue size: 0x0b, Frame offset: 0x0, Frame reg: none
+	  pc+0x0b: alloc large area: rsp = rsp - 0x1e8
+	  pc+0x04: push rbx
+	  pc+0x03: push rsi
+	  pc+0x02: push rdi
+	  pc+0x01: push rbp
+ 000000000032a300 (rva: 0022a300): 000000000027b2e0 - 000000000027ba33
+	Version: 1, Flags: none
+	Nbr codes: 6, Prologue size: 0x0b, Frame offset: 0x0, Frame reg: none
+	  pc+0x0b: alloc large area: rsp = rsp - 0x208
+	  pc+0x04: push rbx
+	  pc+0x03: push rsi
+	  pc+0x02: push rdi
+	  pc+0x01: push rbp
+ 000000000032a39c (rva: 0022a39c): 000000000027ba40 - 000000000027bdc9
+	Version: 1, Flags: none
+	Nbr codes: 8, Prologue size: 0x0e, Frame offset: 0x0, Frame reg: none
+	  pc+0x0e: alloc small area: rsp = rsp - 0x20
+	  pc+0x0a: push rbx
+	  pc+0x09: push rsi
+	  pc+0x08: push rdi
+	  pc+0x07: push rbp
+	  pc+0x06: push r12
+	  pc+0x04: push r13
+	  pc+0x02: push r14
+ 000000000032a2e8 (rva: 0022a2e8): 000000000027bde0 - 000000000027c3d2
+	Version: 1, Flags: none
+	Nbr codes: 9, Prologue size: 0x10, Frame offset: 0x0, Frame reg: none
+	  pc+0x10: alloc small area: rsp = rsp - 0x48
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a350 (rva: 0022a350): 000000000027c3e0 - 000000000027c784
+	Version: 1, Flags: none
+	Nbr codes: 3, Prologue size: 0x06, Frame offset: 0x0, Frame reg: none
+	  pc+0x06: alloc small area: rsp = rsp - 0x38
+	  pc+0x02: push rbx
+	  pc+0x01: push rsi
+ 000000000032a2c8 (rva: 0022a2c8): 000000000027c790 - 000000000027ce47
+	Version: 1, Flags: none
+	Nbr codes: 3, Prologue size: 0x06, Frame offset: 0x0, Frame reg: none
+	  pc+0x06: alloc small area: rsp = rsp - 0x48
+	  pc+0x02: push rbx
+	  pc+0x01: push rsi
+ 000000000032a3f4 (rva: 0022a3f4): 000000000027ce50 - 000000000027cf4b
+	Version: 1, Flags: none
+	Nbr codes: 4, Prologue size: 0x07, Frame offset: 0x0, Frame reg: none
+	  pc+0x07: alloc small area: rsp = rsp - 0x40
+	  pc+0x03: push rbx
+	  pc+0x02: push rsi
+	  pc+0x01: push rdi
+ 000000000032a360 (rva: 0022a360): 000000000027cf60 - 000000000027d0d3
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0d, Frame offset: 0x0, Frame reg: none
+	  pc+0x0d: alloc large area: rsp = rsp - 0xe0
+	  pc+0x06: push rbx
+	  pc+0x05: push rsi
+	  pc+0x04: push rdi
+	  pc+0x03: push rbp
+	  pc+0x02: push r12
+ 000000000032a294 (rva: 0022a294): 000000000027d100 - 000000000027e7a5
+	Version: 1, Flags: none
+	Nbr codes: 10, Prologue size: 0x13, Frame offset: 0x0, Frame reg: none
+	  pc+0x13: alloc large area: rsp = rsp - 0x328
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a380 (rva: 0022a380): 000000000027e7c0 - 000000000027f22c
+	Version: 1, Flags: none
+	Nbr codes: 10, Prologue size: 0x13, Frame offset: 0x0, Frame reg: none
+	  pc+0x13: alloc large area: rsp = rsp - 0x138
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a330 (rva: 0022a330): 000000000027f240 - 0000000000280113
+	Version: 1, Flags: none
+	Nbr codes: 10, Prologue size: 0x13, Frame offset: 0x0, Frame reg: none
+	  pc+0x13: alloc large area: rsp = rsp - 0x138
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a400 (rva: 0022a400): 0000000000280120 - 000000000028016f
+	Version: 1, Flags: none
+	Nbr codes: 1, Prologue size: 0x04, Frame offset: 0x0, Frame reg: none
+	  pc+0x04: alloc small area: rsp = rsp - 0x28
+ 000000000032a450 (rva: 0022a450): 0000000000280170 - 00000000002801d3
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x20
+	  pc+0x01: push rbx
+ 000000000032a1a8 (rva: 0022a1a8): 00000000002801e0 - 00000000002801e6
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a198 (rva: 0022a198): 0000000000280200 - 00000000002803a1
+	Version: 1, Flags: none
+	Nbr codes: 6, Prologue size: 0x0a, Frame offset: 0x0, Frame reg: none
+	  pc+0x0a: alloc small area: rsp = rsp - 0x50
+	  pc+0x06: push rbx
+	  pc+0x05: push rsi
+	  pc+0x04: push rdi
+	  pc+0x03: push rbp
+	  pc+0x02: push r12
+ 000000000032a168 (rva: 0022a168): 00000000002803c0 - 000000000028040f
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a1ac (rva: 0022a1ac): 0000000000280410 - 0000000000280621
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc small area: rsp = rsp - 0x28
+	  pc+0x08: push rbx
+	  pc+0x07: push rsi
+	  pc+0x06: push rdi
+	  pc+0x05: push rbp
+	  pc+0x04: push r12
+	  pc+0x02: push r13
+ 000000000032a200 (rva: 0022a200): 0000000000280630 - 0000000000280851
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc small area: rsp = rsp - 0x28
+	  pc+0x08: push rbx
+	  pc+0x07: push rsi
+	  pc+0x06: push rdi
+	  pc+0x05: push rbp
+	  pc+0x04: push r12
+	  pc+0x02: push r13
+ 000000000032a1ec (rva: 0022a1ec): 0000000000280860 - 0000000000280a91
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc small area: rsp = rsp - 0x28
+	  pc+0x08: push rbx
+	  pc+0x07: push rsi
+	  pc+0x06: push rdi
+	  pc+0x05: push rbp
+	  pc+0x04: push r12
+	  pc+0x02: push r13
+ 000000000032a16c (rva: 0022a16c): 0000000000280aa0 - 0000000000280dbd
+	Version: 1, Flags: none
+	Nbr codes: 7, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: alloc small area: rsp = rsp - 0x28
+	  pc+0x08: push rbx
+	  pc+0x07: push rsi
+	  pc+0x06: push rdi
+	  pc+0x05: push rbp
+	  pc+0x04: push r12
+	  pc+0x02: push r13
+ 000000000032a154 (rva: 0022a154): 0000000000280dc0 - 000000000028115f
+	Version: 1, Flags: none
+	Nbr codes: 8, Prologue size: 0x0e, Frame offset: 0x0, Frame reg: none
+	  pc+0x0e: alloc small area: rsp = rsp - 0x40
+	  pc+0x0a: push rbx
+	  pc+0x09: push rsi
+	  pc+0x08: push rdi
+	  pc+0x07: push rbp
+	  pc+0x06: push r12
+	  pc+0x04: push r13
+	  pc+0x02: push r14
+ 000000000032a1d8 (rva: 0022a1d8): 0000000000281160 - 00000000002814ff
+	Version: 1, Flags: none
+	Nbr codes: 8, Prologue size: 0x0e, Frame offset: 0x0, Frame reg: none
+	  pc+0x0e: alloc small area: rsp = rsp - 0x40
+	  pc+0x0a: push rbx
+	  pc+0x09: push rsi
+	  pc+0x08: push rdi
+	  pc+0x07: push rbp
+	  pc+0x06: push r12
+	  pc+0x04: push r13
+	  pc+0x02: push r14
+ 000000000032a494 (rva: 0022a494): 0000000000281500 - 000000000028158e
+	Version: 1, Flags: none
+	Nbr codes: 8, Prologue size: 0x0e, Frame offset: 0x0, Frame reg: none
+	  pc+0x0e: alloc small area: rsp = rsp - 0x40
+	  pc+0x0a: push rbx
+	  pc+0x09: push rsi
+	  pc+0x08: push rdi
+	  pc+0x07: push rbp
+	  pc+0x06: push r12
+	  pc+0x04: push r13
+	  pc+0x02: push r14
+ 000000000032a180 (rva: 0022a180): 0000000000281590 - 0000000000281b1c
+	Version: 1, Flags: none
+	Nbr codes: 9, Prologue size: 0x11, Frame offset: 0x0, Frame reg: none
+	  pc+0x11: alloc large area: rsp = rsp - 0x250
+	  pc+0x0a: push rbx
+	  pc+0x09: push rsi
+	  pc+0x08: push rdi
+	  pc+0x07: push rbp
+	  pc+0x06: push r12
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a1c0 (rva: 0022a1c0): 0000000000281b20 - 000000000028214a
+	Version: 1, Flags: none
+	Nbr codes: 10, Prologue size: 0x13, Frame offset: 0x0, Frame reg: none
+	  pc+0x13: alloc large area: rsp = rsp - 0xc8
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a074 (rva: 0022a074): 0000000000282160 - 00000000002823b9
+	Version: 1, Flags: none
+	Nbr codes: 4, Prologue size: 0x07, Frame offset: 0x0, Frame reg: none
+	  pc+0x07: alloc small area: rsp = rsp - 0x10
+	  pc+0x03: push rbx
+	  pc+0x02: push rsi
+	  pc+0x01: push rdi
+ 000000000032a094 (rva: 0022a094): 00000000002823c0 - 000000000028283d
+	Version: 1, Flags: none
+	Nbr codes: 9, Prologue size: 0x10, Frame offset: 0x0, Frame reg: none
+	  pc+0x10: alloc small area: rsp = rsp - 0x18
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a080 (rva: 0022a080): 0000000000282840 - 0000000000282aa2
+	Version: 1, Flags: none
+	Nbr codes: 8, Prologue size: 0x0c, Frame offset: 0x0, Frame reg: none
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a000 (rva: 0022a000): 0000000000282ac0 - 0000000000282c68
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x20
+	  pc+0x01: push rbx
+ 000000000032a054 (rva: 0022a054): 0000000000282c80 - 0000000000282e2d
+	Version: 1, Flags: none
+	Nbr codes: 2, Prologue size: 0x05, Frame offset: 0x0, Frame reg: none
+	  pc+0x05: alloc small area: rsp = rsp - 0x80
+	  pc+0x01: push rbx
+ 000000000032a008 (rva: 0022a008): 0000000000282e40 - 0000000000283076
+	Version: 1, Flags: none
+	Nbr codes: 5, Prologue size: 0x0a, Frame offset: 0x0, Frame reg: none
+	  pc+0x0a: alloc large area: rsp = rsp - 0x2d0
+	  pc+0x03: push rbx
+	  pc+0x02: push rsi
+	  pc+0x01: push rdi
+ 000000000032a018 (rva: 0022a018): 0000000000283080 - 00000000002833ee
+	Version: 1, Flags: none
+	Nbr codes: 5, Prologue size: 0x0a, Frame offset: 0x0, Frame reg: none
+	  pc+0x0a: alloc large area: rsp = rsp - 0x1100
+	  pc+0x03: push rbx
+	  pc+0x02: push rsi
+	  pc+0x01: push rdi
+ 000000000032a040 (rva: 0022a040): 0000000000283400 - 00000000002838ac
+	Version: 1, Flags: none
+	Nbr codes: 8, Prologue size: 0x0e, Frame offset: 0x0, Frame reg: none
+	  pc+0x0e: alloc small area: rsp = rsp - 0x20
+	  pc+0x0a: push rbx
+	  pc+0x09: push rsi
+	  pc+0x08: push rdi
+	  pc+0x07: push rbp
+	  pc+0x06: push r12
+	  pc+0x04: push r13
+	  pc+0x02: push r14
+ 000000000032a028 (rva: 0022a028): 00000000002838c0 - 0000000000283c8d
+	Version: 1, Flags: none
+	Nbr codes: 10, Prologue size: 0x13, Frame offset: 0x0, Frame reg: none
+	  pc+0x13: alloc large area: rsp = rsp - 0x1298
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a05c (rva: 0022a05c): 0000000000283ca0 - 00000000002848ab
+	Version: 1, Flags: none
+	Nbr codes: 10, Prologue size: 0x13, Frame offset: 0x0, Frame reg: none
+	  pc+0x13: alloc large area: rsp = rsp - 0x2638
+	  pc+0x0c: push rbx
+	  pc+0x0b: push rsi
+	  pc+0x0a: push rdi
+	  pc+0x09: push rbp
+	  pc+0x08: push r12
+	  pc+0x06: push r13
+	  pc+0x04: push r14
+	  pc+0x02: push r15
+ 000000000032a4ac (rva: 0022a4ac): 00000000002848c0 - 00000000002848c6
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+ 000000000032a4a8 (rva: 0022a4a8): 00000000002848d0 - 00000000002848d6
+	Version: 1, Flags: none
+	Nbr codes: 0, Prologue size: 0x00, Frame offset: 0x0, Frame reg: none
+
+
+PE File Base Relocations (interpreted .reloc section contents)
+
+Virtual Address: 00000000 Chunk size 12 (0xc) Number of fixups 2
+	reloc    0 offset   10 [  10] DIR64
+	reloc    1 offset    0 [   0] ABSOLUTE
+
+Virtual Address: 00188000 Chunk size 272 (0x110) Number of fixups 132
+	reloc    0 offset  1a0 [1881a0] DIR64
+	reloc    1 offset  1a8 [1881a8] DIR64
+	reloc    2 offset  1b0 [1881b0] DIR64
+	reloc    3 offset  1b8 [1881b8] DIR64
+	reloc    4 offset  1c0 [1881c0] DIR64
+	reloc    5 offset  1c8 [1881c8] DIR64
+	reloc    6 offset  1d0 [1881d0] DIR64
+	reloc    7 offset  1d8 [1881d8] DIR64
+	reloc    8 offset  1e0 [1881e0] DIR64
+	reloc    9 offset  1e8 [1881e8] DIR64
+	reloc   10 offset  1f0 [1881f0] DIR64
+	reloc   11 offset  1f8 [1881f8] DIR64
+	reloc   12 offset  340 [188340] DIR64
+	reloc   13 offset  348 [188348] DIR64
+	reloc   14 offset  350 [188350] DIR64
+	reloc   15 offset  358 [188358] DIR64
+	reloc   16 offset  360 [188360] DIR64
+	reloc   17 offset  368 [188368] DIR64
+	reloc   18 offset  370 [188370] DIR64
+	reloc   19 offset  378 [188378] DIR64
+	reloc   20 offset  380 [188380] DIR64
+	reloc   21 offset  388 [188388] DIR64
+	reloc   22 offset  390 [188390] DIR64
+	reloc   23 offset  398 [188398] DIR64
+	reloc   24 offset  3a0 [1883a0] DIR64
+	reloc   25 offset  3a8 [1883a8] DIR64
+	reloc   26 offset  3b0 [1883b0] DIR64
+	reloc   27 offset  3b8 [1883b8] DIR64
+	reloc   28 offset  3c0 [1883c0] DIR64
+	reloc   29 offset  3c8 [1883c8] DIR64
+	reloc   30 offset  3d0 [1883d0] DIR64
+	reloc   31 offset  3d8 [1883d8] DIR64
+	reloc   32 offset  3e0 [1883e0] DIR64
+	reloc   33 offset  3e8 [1883e8] DIR64
+	reloc   34 offset  3f0 [1883f0] DIR64
+	reloc   35 offset  3f8 [1883f8] DIR64
+	reloc   36 offset  400 [188400] DIR64
+	reloc   37 offset  408 [188408] DIR64
+	reloc   38 offset  410 [188410] DIR64
+	reloc   39 offset  418 [188418] DIR64
+	reloc   40 offset  420 [188420] DIR64
+	reloc   41 offset  428 [188428] DIR64
+	reloc   42 offset  430 [188430] DIR64
+	reloc   43 offset  438 [188438] DIR64
+	reloc   44 offset  440 [188440] DIR64
+	reloc   45 offset  448 [188448] DIR64
+	reloc   46 offset  450 [188450] DIR64
+	reloc   47 offset  458 [188458] DIR64
+	reloc   48 offset  460 [188460] DIR64
+	reloc   49 offset  468 [188468] DIR64
+	reloc   50 offset  470 [188470] DIR64
+	reloc   51 offset  478 [188478] DIR64
+	reloc   52 offset  a60 [188a60] DIR64
+	reloc   53 offset  a68 [188a68] DIR64
+	reloc   54 offset  a70 [188a70] DIR64
+	reloc   55 offset  a78 [188a78] DIR64
+	reloc   56 offset  a88 [188a88] DIR64
+	reloc   57 offset  a90 [188a90] DIR64
+	reloc   58 offset  a98 [188a98] DIR64
+	reloc   59 offset  ae8 [188ae8] DIR64
+	reloc   60 offset  af0 [188af0] DIR64
+	reloc   61 offset  af8 [188af8] DIR64
+	reloc   62 offset  b00 [188b00] DIR64
+	reloc   63 offset  b10 [188b10] DIR64
+	reloc   64 offset  b18 [188b18] DIR64
+	reloc   65 offset  b20 [188b20] DIR64
+	reloc   66 offset  b70 [188b70] DIR64
+	reloc   67 offset  b78 [188b78] DIR64
+	reloc   68 offset  b80 [188b80] DIR64
+	reloc   69 offset  b88 [188b88] DIR64
+	reloc   70 offset  b98 [188b98] DIR64
+	reloc   71 offset  ba0 [188ba0] DIR64
+	reloc   72 offset  ba8 [188ba8] DIR64
+	reloc   73 offset  bf8 [188bf8] DIR64
+	reloc   74 offset  c00 [188c00] DIR64
+	reloc   75 offset  c08 [188c08] DIR64
+	reloc   76 offset  c20 [188c20] DIR64
+	reloc   77 offset  c28 [188c28] DIR64
+	reloc   78 offset  c30 [188c30] DIR64
+	reloc   79 offset  c50 [188c50] DIR64
+	reloc   80 offset  c80 [188c80] DIR64
+	reloc   81 offset  c88 [188c88] DIR64
+	reloc   82 offset  c90 [188c90] DIR64
+	reloc   83 offset  c98 [188c98] DIR64
+	reloc   84 offset  ca0 [188ca0] DIR64
+	reloc   85 offset  ca8 [188ca8] DIR64
+	reloc   86 offset  cb0 [188cb0] DIR64
+	reloc   87 offset  cb8 [188cb8] DIR64
+	reloc   88 offset  cd8 [188cd8] DIR64
+	reloc   89 offset  d08 [188d08] DIR64
+	reloc   90 offset  d10 [188d10] DIR64
+	reloc   91 offset  d18 [188d18] DIR64
+	reloc   92 offset  d20 [188d20] DIR64
+	reloc   93 offset  d30 [188d30] DIR64
+	reloc   94 offset  d38 [188d38] DIR64
+	reloc   95 offset  d40 [188d40] DIR64
+	reloc   96 offset  d90 [188d90] DIR64
+	reloc   97 offset  d98 [188d98] DIR64
+	reloc   98 offset  da0 [188da0] DIR64
+	reloc   99 offset  da8 [188da8] DIR64
+	reloc  100 offset  db8 [188db8] DIR64
+	reloc  101 offset  dc0 [188dc0] DIR64
+	reloc  102 offset  dc8 [188dc8] DIR64
+	reloc  103 offset  e18 [188e18] DIR64
+	reloc  104 offset  e20 [188e20] DIR64
+	reloc  105 offset  e28 [188e28] DIR64
+	reloc  106 offset  e40 [188e40] DIR64
+	reloc  107 offset  e48 [188e48] DIR64
+	reloc  108 offset  e50 [188e50] DIR64
+	reloc  109 offset  ea0 [188ea0] DIR64
+	reloc  110 offset  ea8 [188ea8] DIR64
+	reloc  111 offset  eb0 [188eb0] DIR64
+	reloc  112 offset  eb8 [188eb8] DIR64
+	reloc  113 offset  ec0 [188ec0] DIR64
+	reloc  114 offset  ec8 [188ec8] DIR64
+	reloc  115 offset  ed0 [188ed0] DIR64
+	reloc  116 offset  ed8 [188ed8] DIR64
+	reloc  117 offset  ef8 [188ef8] DIR64
+	reloc  118 offset  f28 [188f28] DIR64
+	reloc  119 offset  f30 [188f30] DIR64
+	reloc  120 offset  f38 [188f38] DIR64
+	reloc  121 offset  f50 [188f50] DIR64
+	reloc  122 offset  f58 [188f58] DIR64
+	reloc  123 offset  f60 [188f60] DIR64
+	reloc  124 offset  f80 [188f80] DIR64
+	reloc  125 offset  fb0 [188fb0] DIR64
+	reloc  126 offset  fb8 [188fb8] DIR64
+	reloc  127 offset  fc0 [188fc0] DIR64
+	reloc  128 offset  fd8 [188fd8] DIR64
+	reloc  129 offset  fe0 [188fe0] DIR64
+	reloc  130 offset  fe8 [188fe8] DIR64
+	reloc  131 offset    0 [188000] ABSOLUTE
+
+Virtual Address: 00189000 Chunk size 160 (0xa0) Number of fixups 76
+	reloc    0 offset    8 [189008] DIR64
+	reloc    1 offset   38 [189038] DIR64
+	reloc    2 offset   40 [189040] DIR64
+	reloc    3 offset   48 [189048] DIR64
+	reloc    4 offset   50 [189050] DIR64
+	reloc    5 offset   60 [189060] DIR64
+	reloc    6 offset   68 [189068] DIR64
+	reloc    7 offset   70 [189070] DIR64
+	reloc    8 offset   c0 [1890c0] DIR64
+	reloc    9 offset   c8 [1890c8] DIR64
+	reloc   10 offset   d0 [1890d0] DIR64
+	reloc   11 offset   e8 [1890e8] DIR64
+	reloc   12 offset   f0 [1890f0] DIR64
+	reloc   13 offset   f8 [1890f8] DIR64
+	reloc   14 offset  118 [189118] DIR64
+	reloc   15 offset  148 [189148] DIR64
+	reloc   16 offset  150 [189150] DIR64
+	reloc   17 offset  158 [189158] DIR64
+	reloc   18 offset  160 [189160] DIR64
+	reloc   19 offset  170 [189170] DIR64
+	reloc   20 offset  178 [189178] DIR64
+	reloc   21 offset  180 [189180] DIR64
+	reloc   22 offset  1a0 [1891a0] DIR64
+	reloc   23 offset  1d0 [1891d0] DIR64
+	reloc   24 offset  1d8 [1891d8] DIR64
+	reloc   25 offset  1e0 [1891e0] DIR64
+	reloc   26 offset  1e8 [1891e8] DIR64
+	reloc   27 offset  1f8 [1891f8] DIR64
+	reloc   28 offset  200 [189200] DIR64
+	reloc   29 offset  208 [189208] DIR64
+	reloc   30 offset  228 [189228] DIR64
+	reloc   31 offset  258 [189258] DIR64
+	reloc   32 offset  260 [189260] DIR64
+	reloc   33 offset  268 [189268] DIR64
+	reloc   34 offset  270 [189270] DIR64
+	reloc   35 offset  280 [189280] DIR64
+	reloc   36 offset  288 [189288] DIR64
+	reloc   37 offset  290 [189290] DIR64
+	reloc   38 offset  2c8 [1892c8] DIR64
+	reloc   39 offset  2d0 [1892d0] DIR64
+	reloc   40 offset  2e0 [1892e0] DIR64
+	reloc   41 offset  2e8 [1892e8] DIR64
+	reloc   42 offset  2f0 [1892f0] DIR64
+	reloc   43 offset  308 [189308] DIR64
+	reloc   44 offset  310 [189310] DIR64
+	reloc   45 offset  318 [189318] DIR64
+	reloc   46 offset  338 [189338] DIR64
+	reloc   47 offset  368 [189368] DIR64
+	reloc   48 offset  370 [189370] DIR64
+	reloc   49 offset  378 [189378] DIR64
+	reloc   50 offset  390 [189390] DIR64
+	reloc   51 offset  398 [189398] DIR64
+	reloc   52 offset  3a0 [1893a0] DIR64
+	reloc   53 offset  3f0 [1893f0] DIR64
+	reloc   54 offset  3f8 [1893f8] DIR64
+	reloc   55 offset  400 [189400] DIR64
+	reloc   56 offset  418 [189418] DIR64
+	reloc   57 offset  420 [189420] DIR64
+	reloc   58 offset  428 [189428] DIR64
+	reloc   59 offset  480 [189480] DIR64
+	reloc   60 offset  498 [189498] DIR64
+	reloc   61 offset  4b0 [1894b0] DIR64
+	reloc   62 offset  4d0 [1894d0] DIR64
+	reloc   63 offset  4d8 [1894d8] DIR64
+	reloc   64 offset  4f0 [1894f0] DIR64
+	reloc   65 offset  4f8 [1894f8] DIR64
+	reloc   66 offset  540 [189540] DIR64
+	reloc   67 offset  548 [189548] DIR64
+	reloc   68 offset  550 [189550] DIR64
+	reloc   69 offset  558 [189558] DIR64
+	reloc   70 offset  560 [189560] DIR64
+	reloc   71 offset  570 [189570] DIR64
+	reloc   72 offset  578 [189578] DIR64
+	reloc   73 offset  580 [189580] DIR64
+	reloc   74 offset  588 [189588] DIR64
+	reloc   75 offset  590 [189590] DIR64
+
+Virtual Address: 0018d000 Chunk size 32 (0x20) Number of fixups 12
+	reloc    0 offset  e20 [18de20] DIR64
+	reloc    1 offset  e28 [18de28] DIR64
+	reloc    2 offset  e30 [18de30] DIR64
+	reloc    3 offset  e40 [18de40] DIR64
+	reloc    4 offset  e48 [18de48] DIR64
+	reloc    5 offset  e50 [18de50] DIR64
+	reloc    6 offset  fc0 [18dfc0] DIR64
+	reloc    7 offset  fc8 [18dfc8] DIR64
+	reloc    8 offset  fd0 [18dfd0] DIR64
+	reloc    9 offset  fe0 [18dfe0] DIR64
+	reloc   10 offset  fe8 [18dfe8] DIR64
+	reloc   11 offset  ff0 [18dff0] DIR64
+
+Virtual Address: 0018e000 Chunk size 292 (0x124) Number of fixups 142
+	reloc    0 offset    0 [18e000] DIR64
+	reloc    1 offset    8 [18e008] DIR64
+	reloc    2 offset   10 [18e010] DIR64
+	reloc    3 offset   20 [18e020] DIR64
+	reloc    4 offset   28 [18e028] DIR64
+	reloc    5 offset   30 [18e030] DIR64
+	reloc    6 offset   40 [18e040] DIR64
+	reloc    7 offset   48 [18e048] DIR64
+	reloc    8 offset   50 [18e050] DIR64
+	reloc    9 offset   60 [18e060] DIR64
+	reloc   10 offset   68 [18e068] DIR64
+	reloc   11 offset   70 [18e070] DIR64
+	reloc   12 offset   80 [18e080] DIR64
+	reloc   13 offset   88 [18e088] DIR64
+	reloc   14 offset   90 [18e090] DIR64
+	reloc   15 offset   a0 [18e0a0] DIR64
+	reloc   16 offset   a8 [18e0a8] DIR64
+	reloc   17 offset   b0 [18e0b0] DIR64
+	reloc   18 offset   e0 [18e0e0] DIR64
+	reloc   19 offset   f0 [18e0f0] DIR64
+	reloc   20 offset  100 [18e100] DIR64
+	reloc   21 offset  1e0 [18e1e0] DIR64
+	reloc   22 offset  1e8 [18e1e8] DIR64
+	reloc   23 offset  200 [18e200] DIR64
+	reloc   24 offset  208 [18e208] DIR64
+	reloc   25 offset  220 [18e220] DIR64
+	reloc   26 offset  228 [18e228] DIR64
+	reloc   27 offset  240 [18e240] DIR64
+	reloc   28 offset  248 [18e248] DIR64
+	reloc   29 offset  260 [18e260] DIR64
+	reloc   30 offset  268 [18e268] DIR64
+	reloc   31 offset  280 [18e280] DIR64
+	reloc   32 offset  288 [18e288] DIR64
+	reloc   33 offset  2a0 [18e2a0] DIR64
+	reloc   34 offset  2a8 [18e2a8] DIR64
+	reloc   35 offset  2c0 [18e2c0] DIR64
+	reloc   36 offset  2c8 [18e2c8] DIR64
+	reloc   37 offset  760 [18e760] DIR64
+	reloc   38 offset  768 [18e768] DIR64
+	reloc   39 offset  770 [18e770] DIR64
+	reloc   40 offset  778 [18e778] DIR64
+	reloc   41 offset  790 [18e790] DIR64
+	reloc   42 offset  798 [18e798] DIR64
+	reloc   43 offset  7a0 [18e7a0] DIR64
+	reloc   44 offset  7a8 [18e7a8] DIR64
+	reloc   45 offset  7c0 [18e7c0] DIR64
+	reloc   46 offset  7c8 [18e7c8] DIR64
+	reloc   47 offset  7d0 [18e7d0] DIR64
+	reloc   48 offset  7d8 [18e7d8] DIR64
+	reloc   49 offset  7f0 [18e7f0] DIR64
+	reloc   50 offset  7f8 [18e7f8] DIR64
+	reloc   51 offset  800 [18e800] DIR64
+	reloc   52 offset  808 [18e808] DIR64
+	reloc   53 offset  820 [18e820] DIR64
+	reloc   54 offset  828 [18e828] DIR64
+	reloc   55 offset  830 [18e830] DIR64
+	reloc   56 offset  838 [18e838] DIR64
+	reloc   57 offset  850 [18e850] DIR64
+	reloc   58 offset  858 [18e858] DIR64
+	reloc   59 offset  860 [18e860] DIR64
+	reloc   60 offset  868 [18e868] DIR64
+	reloc   61 offset  880 [18e880] DIR64
+	reloc   62 offset  888 [18e888] DIR64
+	reloc   63 offset  890 [18e890] DIR64
+	reloc   64 offset  898 [18e898] DIR64
+	reloc   65 offset  8b0 [18e8b0] DIR64
+	reloc   66 offset  8b8 [18e8b8] DIR64
+	reloc   67 offset  8c0 [18e8c0] DIR64
+	reloc   68 offset  8c8 [18e8c8] DIR64
+	reloc   69 offset  8e0 [18e8e0] DIR64
+	reloc   70 offset  8e8 [18e8e8] DIR64
+	reloc   71 offset  8f0 [18e8f0] DIR64
+	reloc   72 offset  8f8 [18e8f8] DIR64
+	reloc   73 offset  910 [18e910] DIR64
+	reloc   74 offset  918 [18e918] DIR64
+	reloc   75 offset  920 [18e920] DIR64
+	reloc   76 offset  928 [18e928] DIR64
+	reloc   77 offset  940 [18e940] DIR64
+	reloc   78 offset  948 [18e948] DIR64
+	reloc   79 offset  950 [18e950] DIR64
+	reloc   80 offset  958 [18e958] DIR64
+	reloc   81 offset  970 [18e970] DIR64
+	reloc   82 offset  978 [18e978] DIR64
+	reloc   83 offset  980 [18e980] DIR64
+	reloc   84 offset  988 [18e988] DIR64
+	reloc   85 offset  9a0 [18e9a0] DIR64
+	reloc   86 offset  9a8 [18e9a8] DIR64
+	reloc   87 offset  9b0 [18e9b0] DIR64
+	reloc   88 offset  9b8 [18e9b8] DIR64
+	reloc   89 offset  9d0 [18e9d0] DIR64
+	reloc   90 offset  9d8 [18e9d8] DIR64
+	reloc   91 offset  9e0 [18e9e0] DIR64
+	reloc   92 offset  9e8 [18e9e8] DIR64
+	reloc   93 offset  a00 [18ea00] DIR64
+	reloc   94 offset  a08 [18ea08] DIR64
+	reloc   95 offset  a10 [18ea10] DIR64
+	reloc   96 offset  a18 [18ea18] DIR64
+	reloc   97 offset  a80 [18ea80] DIR64
+	reloc   98 offset  a88 [18ea88] DIR64
+	reloc   99 offset  a90 [18ea90] DIR64
+	reloc  100 offset  a98 [18ea98] DIR64
+	reloc  101 offset  aa0 [18eaa0] DIR64
+	reloc  102 offset  aa8 [18eaa8] DIR64
+	reloc  103 offset  ab0 [18eab0] DIR64
+	reloc  104 offset  ac0 [18eac0] DIR64
+	reloc  105 offset  ad0 [18ead0] DIR64
+	reloc  106 offset  ae0 [18eae0] DIR64
+	reloc  107 offset  af0 [18eaf0] DIR64
+	reloc  108 offset  b00 [18eb00] DIR64
+	reloc  109 offset  b10 [18eb10] DIR64
+	reloc  110 offset  b20 [18eb20] DIR64
+	reloc  111 offset  c60 [18ec60] DIR64
+	reloc  112 offset  c68 [18ec68] DIR64
+	reloc  113 offset  c70 [18ec70] DIR64
+	reloc  114 offset  c78 [18ec78] DIR64
+	reloc  115 offset  c80 [18ec80] DIR64
+	reloc  116 offset  c88 [18ec88] DIR64
+	reloc  117 offset  c90 [18ec90] DIR64
+	reloc  118 offset  c98 [18ec98] DIR64
+	reloc  119 offset  ca0 [18eca0] DIR64
+	reloc  120 offset  ca8 [18eca8] DIR64
+	reloc  121 offset  cb0 [18ecb0] DIR64
+	reloc  122 offset  cb8 [18ecb8] DIR64
+	reloc  123 offset  cc0 [18ecc0] DIR64
+	reloc  124 offset  cc8 [18ecc8] DIR64
+	reloc  125 offset  cd0 [18ecd0] DIR64
+	reloc  126 offset  cd8 [18ecd8] DIR64
+	reloc  127 offset  ce0 [18ece0] DIR64
+	reloc  128 offset  ce8 [18ece8] DIR64
+	reloc  129 offset  cf0 [18ecf0] DIR64
+	reloc  130 offset  cf8 [18ecf8] DIR64
+	reloc  131 offset  d00 [18ed00] DIR64
+	reloc  132 offset  d08 [18ed08] DIR64
+	reloc  133 offset  d10 [18ed10] DIR64
+	reloc  134 offset  d18 [18ed18] DIR64
+	reloc  135 offset  d20 [18ed20] DIR64
+	reloc  136 offset  d28 [18ed28] DIR64
+	reloc  137 offset  d30 [18ed30] DIR64
+	reloc  138 offset  d38 [18ed38] DIR64
+	reloc  139 offset  d40 [18ed40] DIR64
+	reloc  140 offset  d48 [18ed48] DIR64
+	reloc  141 offset  d50 [18ed50] DIR64
+
+Virtual Address: 001b0000 Chunk size 24 (0x18) Number of fixups 8
+	reloc    0 offset  668 [1b0668] DIR64
+	reloc    1 offset  670 [1b0670] DIR64
+	reloc    2 offset  6a8 [1b06a8] DIR64
+	reloc    3 offset  6b0 [1b06b0] DIR64
+	reloc    4 offset  6e8 [1b06e8] DIR64
+	reloc    5 offset  6f0 [1b06f0] DIR64
+	reloc    6 offset  6f8 [1b06f8] DIR64
+	reloc    7 offset    0 [1b0000] ABSOLUTE
+
+Virtual Address: 001b5000 Chunk size 24 (0x18) Number of fixups 8
+	reloc    0 offset  b40 [1b5b40] DIR64
+	reloc    1 offset  b50 [1b5b50] DIR64
+	reloc    2 offset  b60 [1b5b60] DIR64
+	reloc    3 offset  b70 [1b5b70] DIR64
+	reloc    4 offset  b80 [1b5b80] DIR64
+	reloc    5 offset  b90 [1b5b90] DIR64
+	reloc    6 offset  ba0 [1b5ba0] DIR64
+	reloc    7 offset  bb0 [1b5bb0] DIR64
+
+Virtual Address: 001b6000 Chunk size 104 (0x68) Number of fixups 48
+	reloc    0 offset  d00 [1b6d00] DIR64
+	reloc    1 offset  d08 [1b6d08] DIR64
+	reloc    2 offset  d10 [1b6d10] DIR64
+	reloc    3 offset  d18 [1b6d18] DIR64
+	reloc    4 offset  d20 [1b6d20] DIR64
+	reloc    5 offset  d28 [1b6d28] DIR64
+	reloc    6 offset  d30 [1b6d30] DIR64
+	reloc    7 offset  d38 [1b6d38] DIR64
+	reloc    8 offset  d40 [1b6d40] DIR64
+	reloc    9 offset  d48 [1b6d48] DIR64
+	reloc   10 offset  d50 [1b6d50] DIR64
+	reloc   11 offset  d58 [1b6d58] DIR64
+	reloc   12 offset  d60 [1b6d60] DIR64
+	reloc   13 offset  d68 [1b6d68] DIR64
+	reloc   14 offset  d70 [1b6d70] DIR64
+	reloc   15 offset  d78 [1b6d78] DIR64
+	reloc   16 offset  d80 [1b6d80] DIR64
+	reloc   17 offset  d88 [1b6d88] DIR64
+	reloc   18 offset  d90 [1b6d90] DIR64
+	reloc   19 offset  d98 [1b6d98] DIR64
+	reloc   20 offset  da0 [1b6da0] DIR64
+	reloc   21 offset  da8 [1b6da8] DIR64
+	reloc   22 offset  db0 [1b6db0] DIR64
+	reloc   23 offset  db8 [1b6db8] DIR64
+	reloc   24 offset  dc0 [1b6dc0] DIR64
+	reloc   25 offset  dc8 [1b6dc8] DIR64
+	reloc   26 offset  dd0 [1b6dd0] DIR64
+	reloc   27 offset  dd8 [1b6dd8] DIR64
+	reloc   28 offset  de0 [1b6de0] DIR64
+	reloc   29 offset  de8 [1b6de8] DIR64
+	reloc   30 offset  df0 [1b6df0] DIR64
+	reloc   31 offset  df8 [1b6df8] DIR64
+	reloc   32 offset  e00 [1b6e00] DIR64
+	reloc   33 offset  e08 [1b6e08] DIR64
+	reloc   34 offset  e10 [1b6e10] DIR64
+	reloc   35 offset  e18 [1b6e18] DIR64
+	reloc   36 offset  e20 [1b6e20] DIR64
+	reloc   37 offset  e28 [1b6e28] DIR64
+	reloc   38 offset  e30 [1b6e30] DIR64
+	reloc   39 offset  e38 [1b6e38] DIR64
+	reloc   40 offset  e40 [1b6e40] DIR64
+	reloc   41 offset  e48 [1b6e48] DIR64
+	reloc   42 offset  e50 [1b6e50] DIR64
+	reloc   43 offset  e58 [1b6e58] DIR64
+	reloc   44 offset  e60 [1b6e60] DIR64
+	reloc   45 offset  e68 [1b6e68] DIR64
+	reloc   46 offset  e70 [1b6e70] DIR64
+	reloc   47 offset  e78 [1b6e78] DIR64
+
+Virtual Address: 001ce000 Chunk size 60 (0x3c) Number of fixups 26
+	reloc    0 offset  f00 [1cef00] DIR64
+	reloc    1 offset  f08 [1cef08] DIR64
+	reloc    2 offset  f18 [1cef18] DIR64
+	reloc    3 offset  f20 [1cef20] DIR64
+	reloc    4 offset  f28 [1cef28] DIR64
+	reloc    5 offset  f30 [1cef30] DIR64
+	reloc    6 offset  f40 [1cef40] DIR64
+	reloc    7 offset  f48 [1cef48] DIR64
+	reloc    8 offset  f50 [1cef50] DIR64
+	reloc    9 offset  f58 [1cef58] DIR64
+	reloc   10 offset  f68 [1cef68] DIR64
+	reloc   11 offset  f70 [1cef70] DIR64
+	reloc   12 offset  f78 [1cef78] DIR64
+	reloc   13 offset  f80 [1cef80] DIR64
+	reloc   14 offset  f90 [1cef90] DIR64
+	reloc   15 offset  f98 [1cef98] DIR64
+	reloc   16 offset  fa0 [1cefa0] DIR64
+	reloc   17 offset  fa8 [1cefa8] DIR64
+	reloc   18 offset  fb8 [1cefb8] DIR64
+	reloc   19 offset  fc0 [1cefc0] DIR64
+	reloc   20 offset  fc8 [1cefc8] DIR64
+	reloc   21 offset  fd0 [1cefd0] DIR64
+	reloc   22 offset  fe0 [1cefe0] DIR64
+	reloc   23 offset  fe8 [1cefe8] DIR64
+	reloc   24 offset  ff0 [1ceff0] DIR64
+	reloc   25 offset  ff8 [1ceff8] DIR64
+
+Virtual Address: 001cf000 Chunk size 212 (0xd4) Number of fixups 102
+	reloc    0 offset    8 [1cf008] DIR64
+	reloc    1 offset   10 [1cf010] DIR64
+	reloc    2 offset   18 [1cf018] DIR64
+	reloc    3 offset   20 [1cf020] DIR64
+	reloc    4 offset   30 [1cf030] DIR64
+	reloc    5 offset   38 [1cf038] DIR64
+	reloc    6 offset   40 [1cf040] DIR64
+	reloc    7 offset   48 [1cf048] DIR64
+	reloc    8 offset   58 [1cf058] DIR64
+	reloc    9 offset   60 [1cf060] DIR64
+	reloc   10 offset   68 [1cf068] DIR64
+	reloc   11 offset   70 [1cf070] DIR64
+	reloc   12 offset   80 [1cf080] DIR64
+	reloc   13 offset   88 [1cf088] DIR64
+	reloc   14 offset   90 [1cf090] DIR64
+	reloc   15 offset   98 [1cf098] DIR64
+	reloc   16 offset   a8 [1cf0a8] DIR64
+	reloc   17 offset   b0 [1cf0b0] DIR64
+	reloc   18 offset   b8 [1cf0b8] DIR64
+	reloc   19 offset   c0 [1cf0c0] DIR64
+	reloc   20 offset   d0 [1cf0d0] DIR64
+	reloc   21 offset   d8 [1cf0d8] DIR64
+	reloc   22 offset   e0 [1cf0e0] DIR64
+	reloc   23 offset   e8 [1cf0e8] DIR64
+	reloc   24 offset   f8 [1cf0f8] DIR64
+	reloc   25 offset  100 [1cf100] DIR64
+	reloc   26 offset  108 [1cf108] DIR64
+	reloc   27 offset  110 [1cf110] DIR64
+	reloc   28 offset  120 [1cf120] DIR64
+	reloc   29 offset  128 [1cf128] DIR64
+	reloc   30 offset  130 [1cf130] DIR64
+	reloc   31 offset  138 [1cf138] DIR64
+	reloc   32 offset  148 [1cf148] DIR64
+	reloc   33 offset  150 [1cf150] DIR64
+	reloc   34 offset  158 [1cf158] DIR64
+	reloc   35 offset  160 [1cf160] DIR64
+	reloc   36 offset  170 [1cf170] DIR64
+	reloc   37 offset  178 [1cf178] DIR64
+	reloc   38 offset  1e0 [1cf1e0] DIR64
+	reloc   39 offset  1e8 [1cf1e8] DIR64
+	reloc   40 offset  1f0 [1cf1f0] DIR64
+	reloc   41 offset  1f8 [1cf1f8] DIR64
+	reloc   42 offset  200 [1cf200] DIR64
+	reloc   43 offset  208 [1cf208] DIR64
+	reloc   44 offset  260 [1cf260] DIR64
+	reloc   45 offset  268 [1cf268] DIR64
+	reloc   46 offset  270 [1cf270] DIR64
+	reloc   47 offset  278 [1cf278] DIR64
+	reloc   48 offset  280 [1cf280] DIR64
+	reloc   49 offset  288 [1cf288] DIR64
+	reloc   50 offset  290 [1cf290] DIR64
+	reloc   51 offset  298 [1cf298] DIR64
+	reloc   52 offset  9e0 [1cf9e0] DIR64
+	reloc   53 offset  9f0 [1cf9f0] DIR64
+	reloc   54 offset  a00 [1cfa00] DIR64
+	reloc   55 offset  ae0 [1cfae0] DIR64
+	reloc   56 offset  ae8 [1cfae8] DIR64
+	reloc   57 offset  b00 [1cfb00] DIR64
+	reloc   58 offset  b08 [1cfb08] DIR64
+	reloc   59 offset  b20 [1cfb20] DIR64
+	reloc   60 offset  b28 [1cfb28] DIR64
+	reloc   61 offset  b40 [1cfb40] DIR64
+	reloc   62 offset  b48 [1cfb48] DIR64
+	reloc   63 offset  b60 [1cfb60] DIR64
+	reloc   64 offset  b68 [1cfb68] DIR64
+	reloc   65 offset  b80 [1cfb80] DIR64
+	reloc   66 offset  b88 [1cfb88] DIR64
+	reloc   67 offset  ba0 [1cfba0] DIR64
+	reloc   68 offset  ba8 [1cfba8] DIR64
+	reloc   69 offset  bc0 [1cfbc0] DIR64
+	reloc   70 offset  bc8 [1cfbc8] DIR64
+	reloc   71 offset  d80 [1cfd80] DIR64
+	reloc   72 offset  d88 [1cfd88] DIR64
+	reloc   73 offset  d98 [1cfd98] DIR64
+	reloc   74 offset  da0 [1cfda0] DIR64
+	reloc   75 offset  db0 [1cfdb0] DIR64
+	reloc   76 offset  db8 [1cfdb8] DIR64
+	reloc   77 offset  dc8 [1cfdc8] DIR64
+	reloc   78 offset  dd0 [1cfdd0] DIR64
+	reloc   79 offset  de0 [1cfde0] DIR64
+	reloc   80 offset  de8 [1cfde8] DIR64
+	reloc   81 offset  df8 [1cfdf8] DIR64
+	reloc   82 offset  e00 [1cfe00] DIR64
+	reloc   83 offset  e10 [1cfe10] DIR64
+	reloc   84 offset  e18 [1cfe18] DIR64
+	reloc   85 offset  e28 [1cfe28] DIR64
+	reloc   86 offset  e30 [1cfe30] DIR64
+	reloc   87 offset  e40 [1cfe40] DIR64
+	reloc   88 offset  e48 [1cfe48] DIR64
+	reloc   89 offset  e58 [1cfe58] DIR64
+	reloc   90 offset  e60 [1cfe60] DIR64
+	reloc   91 offset  e70 [1cfe70] DIR64
+	reloc   92 offset  e78 [1cfe78] DIR64
+	reloc   93 offset  e88 [1cfe88] DIR64
+	reloc   94 offset  e90 [1cfe90] DIR64
+	reloc   95 offset  ea0 [1cfea0] DIR64
+	reloc   96 offset  ea8 [1cfea8] DIR64
+	reloc   97 offset  eb8 [1cfeb8] DIR64
+	reloc   98 offset  ec0 [1cfec0] DIR64
+	reloc   99 offset  ed0 [1cfed0] DIR64
+	reloc  100 offset  ed8 [1cfed8] DIR64
+	reloc  101 offset    0 [1cf000] ABSOLUTE
+
+Virtual Address: 001d0000 Chunk size 240 (0xf0) Number of fixups 116
+	reloc    0 offset  1e0 [1d01e0] DIR64
+	reloc    1 offset  1e8 [1d01e8] DIR64
+	reloc    2 offset  1f0 [1d01f0] DIR64
+	reloc    3 offset  1f8 [1d01f8] DIR64
+	reloc    4 offset  200 [1d0200] DIR64
+	reloc    5 offset  208 [1d0208] DIR64
+	reloc    6 offset  820 [1d0820] DIR64
+	reloc    7 offset  828 [1d0828] DIR64
+	reloc    8 offset  830 [1d0830] DIR64
+	reloc    9 offset  838 [1d0838] DIR64
+	reloc   10 offset  848 [1d0848] DIR64
+	reloc   11 offset  850 [1d0850] DIR64
+	reloc   12 offset  858 [1d0858] DIR64
+	reloc   13 offset  8a8 [1d08a8] DIR64
+	reloc   14 offset  8b0 [1d08b0] DIR64
+	reloc   15 offset  8b8 [1d08b8] DIR64
+	reloc   16 offset  8c0 [1d08c0] DIR64
+	reloc   17 offset  8d0 [1d08d0] DIR64
+	reloc   18 offset  8d8 [1d08d8] DIR64
+	reloc   19 offset  8e0 [1d08e0] DIR64
+	reloc   20 offset  930 [1d0930] DIR64
+	reloc   21 offset  938 [1d0938] DIR64
+	reloc   22 offset  940 [1d0940] DIR64
+	reloc   23 offset  948 [1d0948] DIR64
+	reloc   24 offset  958 [1d0958] DIR64
+	reloc   25 offset  960 [1d0960] DIR64
+	reloc   26 offset  968 [1d0968] DIR64
+	reloc   27 offset  9b8 [1d09b8] DIR64
+	reloc   28 offset  9c0 [1d09c0] DIR64
+	reloc   29 offset  9c8 [1d09c8] DIR64
+	reloc   30 offset  9e0 [1d09e0] DIR64
+	reloc   31 offset  9e8 [1d09e8] DIR64
+	reloc   32 offset  9f0 [1d09f0] DIR64
+	reloc   33 offset  a10 [1d0a10] DIR64
+	reloc   34 offset  a40 [1d0a40] DIR64
+	reloc   35 offset  a48 [1d0a48] DIR64
+	reloc   36 offset  a50 [1d0a50] DIR64
+	reloc   37 offset  a58 [1d0a58] DIR64
+	reloc   38 offset  a60 [1d0a60] DIR64
+	reloc   39 offset  a68 [1d0a68] DIR64
+	reloc   40 offset  a70 [1d0a70] DIR64
+	reloc   41 offset  a78 [1d0a78] DIR64
+	reloc   42 offset  a98 [1d0a98] DIR64
+	reloc   43 offset  ac8 [1d0ac8] DIR64
+	reloc   44 offset  ad0 [1d0ad0] DIR64
+	reloc   45 offset  ad8 [1d0ad8] DIR64
+	reloc   46 offset  ae0 [1d0ae0] DIR64
+	reloc   47 offset  af0 [1d0af0] DIR64
+	reloc   48 offset  af8 [1d0af8] DIR64
+	reloc   49 offset  b00 [1d0b00] DIR64
+	reloc   50 offset  b50 [1d0b50] DIR64
+	reloc   51 offset  b58 [1d0b58] DIR64
+	reloc   52 offset  b60 [1d0b60] DIR64
+	reloc   53 offset  b68 [1d0b68] DIR64
+	reloc   54 offset  b78 [1d0b78] DIR64
+	reloc   55 offset  b80 [1d0b80] DIR64
+	reloc   56 offset  b88 [1d0b88] DIR64
+	reloc   57 offset  bd8 [1d0bd8] DIR64
+	reloc   58 offset  be0 [1d0be0] DIR64
+	reloc   59 offset  be8 [1d0be8] DIR64
+	reloc   60 offset  c00 [1d0c00] DIR64
+	reloc   61 offset  c08 [1d0c08] DIR64
+	reloc   62 offset  c10 [1d0c10] DIR64
+	reloc   63 offset  c60 [1d0c60] DIR64
+	reloc   64 offset  c68 [1d0c68] DIR64
+	reloc   65 offset  c70 [1d0c70] DIR64
+	reloc   66 offset  c78 [1d0c78] DIR64
+	reloc   67 offset  c80 [1d0c80] DIR64
+	reloc   68 offset  c88 [1d0c88] DIR64
+	reloc   69 offset  c90 [1d0c90] DIR64
+	reloc   70 offset  c98 [1d0c98] DIR64
+	reloc   71 offset  cb8 [1d0cb8] DIR64
+	reloc   72 offset  ce8 [1d0ce8] DIR64
+	reloc   73 offset  cf0 [1d0cf0] DIR64
+	reloc   74 offset  cf8 [1d0cf8] DIR64
+	reloc   75 offset  d10 [1d0d10] DIR64
+	reloc   76 offset  d18 [1d0d18] DIR64
+	reloc   77 offset  d20 [1d0d20] DIR64
+	reloc   78 offset  d40 [1d0d40] DIR64
+	reloc   79 offset  d70 [1d0d70] DIR64
+	reloc   80 offset  d78 [1d0d78] DIR64
+	reloc   81 offset  d80 [1d0d80] DIR64
+	reloc   82 offset  d98 [1d0d98] DIR64
+	reloc   83 offset  da0 [1d0da0] DIR64
+	reloc   84 offset  da8 [1d0da8] DIR64
+	reloc   85 offset  dc8 [1d0dc8] DIR64
+	reloc   86 offset  df8 [1d0df8] DIR64
+	reloc   87 offset  e00 [1d0e00] DIR64
+	reloc   88 offset  e08 [1d0e08] DIR64
+	reloc   89 offset  e10 [1d0e10] DIR64
+	reloc   90 offset  e20 [1d0e20] DIR64
+	reloc   91 offset  e28 [1d0e28] DIR64
+	reloc   92 offset  e30 [1d0e30] DIR64
+	reloc   93 offset  e80 [1d0e80] DIR64
+	reloc   94 offset  e88 [1d0e88] DIR64
+	reloc   95 offset  e90 [1d0e90] DIR64
+	reloc   96 offset  ea8 [1d0ea8] DIR64
+	reloc   97 offset  eb0 [1d0eb0] DIR64
+	reloc   98 offset  eb8 [1d0eb8] DIR64
+	reloc   99 offset  ed8 [1d0ed8] DIR64
+	reloc  100 offset  f08 [1d0f08] DIR64
+	reloc  101 offset  f10 [1d0f10] DIR64
+	reloc  102 offset  f18 [1d0f18] DIR64
+	reloc  103 offset  f20 [1d0f20] DIR64
+	reloc  104 offset  f30 [1d0f30] DIR64
+	reloc  105 offset  f38 [1d0f38] DIR64
+	reloc  106 offset  f40 [1d0f40] DIR64
+	reloc  107 offset  f60 [1d0f60] DIR64
+	reloc  108 offset  f90 [1d0f90] DIR64
+	reloc  109 offset  f98 [1d0f98] DIR64
+	reloc  110 offset  fa0 [1d0fa0] DIR64
+	reloc  111 offset  fa8 [1d0fa8] DIR64
+	reloc  112 offset  fb8 [1d0fb8] DIR64
+	reloc  113 offset  fc0 [1d0fc0] DIR64
+	reloc  114 offset  fc8 [1d0fc8] DIR64
+	reloc  115 offset  fe8 [1d0fe8] DIR64
+
+Virtual Address: 001d1000 Chunk size 100 (0x64) Number of fixups 46
+	reloc    0 offset   18 [1d1018] DIR64
+	reloc    1 offset   20 [1d1020] DIR64
+	reloc    2 offset   28 [1d1028] DIR64
+	reloc    3 offset   30 [1d1030] DIR64
+	reloc    4 offset   40 [1d1040] DIR64
+	reloc    5 offset   48 [1d1048] DIR64
+	reloc    6 offset   50 [1d1050] DIR64
+	reloc    7 offset   88 [1d1088] DIR64
+	reloc    8 offset   90 [1d1090] DIR64
+	reloc    9 offset   a0 [1d10a0] DIR64
+	reloc   10 offset   a8 [1d10a8] DIR64
+	reloc   11 offset   b0 [1d10b0] DIR64
+	reloc   12 offset   c8 [1d10c8] DIR64
+	reloc   13 offset   d0 [1d10d0] DIR64
+	reloc   14 offset   d8 [1d10d8] DIR64
+	reloc   15 offset   f8 [1d10f8] DIR64
+	reloc   16 offset  128 [1d1128] DIR64
+	reloc   17 offset  130 [1d1130] DIR64
+	reloc   18 offset  138 [1d1138] DIR64
+	reloc   19 offset  150 [1d1150] DIR64
+	reloc   20 offset  158 [1d1158] DIR64
+	reloc   21 offset  160 [1d1160] DIR64
+	reloc   22 offset  1b0 [1d11b0] DIR64
+	reloc   23 offset  1b8 [1d11b8] DIR64
+	reloc   24 offset  1c0 [1d11c0] DIR64
+	reloc   25 offset  1d8 [1d11d8] DIR64
+	reloc   26 offset  1e0 [1d11e0] DIR64
+	reloc   27 offset  1e8 [1d11e8] DIR64
+	reloc   28 offset  238 [1d1238] DIR64
+	reloc   29 offset  250 [1d1250] DIR64
+	reloc   30 offset  268 [1d1268] DIR64
+	reloc   31 offset  288 [1d1288] DIR64
+	reloc   32 offset  2a0 [1d12a0] DIR64
+	reloc   33 offset  2c0 [1d12c0] DIR64
+	reloc   34 offset  2c8 [1d12c8] DIR64
+	reloc   35 offset  300 [1d1300] DIR64
+	reloc   36 offset  308 [1d1308] DIR64
+	reloc   37 offset  310 [1d1310] DIR64
+	reloc   38 offset  318 [1d1318] DIR64
+	reloc   39 offset  330 [1d1330] DIR64
+	reloc   40 offset  340 [1d1340] DIR64
+	reloc   41 offset  348 [1d1348] DIR64
+	reloc   42 offset  350 [1d1350] DIR64
+	reloc   43 offset  358 [1d1358] DIR64
+	reloc   44 offset  360 [1d1360] DIR64
+	reloc   45 offset    0 [1d1000] ABSOLUTE
+
+Virtual Address: 001f1000 Chunk size 20 (0x14) Number of fixups 6
+	reloc    0 offset  500 [1f1500] DIR64
+	reloc    1 offset  508 [1f1508] DIR64
+	reloc    2 offset  510 [1f1510] DIR64
+	reloc    3 offset  518 [1f1518] DIR64
+	reloc    4 offset  520 [1f1520] DIR64
+	reloc    5 offset  528 [1f1528] DIR64
+
+Virtual Address: 001fb000 Chunk size 12 (0xc) Number of fixups 2
+	reloc    0 offset  7c0 [1fb7c0] DIR64
+	reloc    1 offset  7c8 [1fb7c8] DIR64
+
+Virtual Address: 00205000 Chunk size 12 (0xc) Number of fixups 2
+	reloc    0 offset  a60 [205a60] DIR64
+	reloc    1 offset  a68 [205a68] DIR64
+
+Virtual Address: 0020f000 Chunk size 12 (0xc) Number of fixups 2
+	reloc    0 offset  d00 [20fd00] DIR64
+	reloc    1 offset  d08 [20fd08] DIR64
+
+Virtual Address: 0021c000 Chunk size 136 (0x88) Number of fixups 64
+	reloc    0 offset  d00 [21cd00] DIR64
+	reloc    1 offset  d08 [21cd08] DIR64
+	reloc    2 offset  d18 [21cd18] DIR64
+	reloc    3 offset  d20 [21cd20] DIR64
+	reloc    4 offset  d30 [21cd30] DIR64
+	reloc    5 offset  d38 [21cd38] DIR64
+	reloc    6 offset  d48 [21cd48] DIR64
+	reloc    7 offset  d50 [21cd50] DIR64
+	reloc    8 offset  d60 [21cd60] DIR64
+	reloc    9 offset  d68 [21cd68] DIR64
+	reloc   10 offset  d78 [21cd78] DIR64
+	reloc   11 offset  d80 [21cd80] DIR64
+	reloc   12 offset  d90 [21cd90] DIR64
+	reloc   13 offset  d98 [21cd98] DIR64
+	reloc   14 offset  da8 [21cda8] DIR64
+	reloc   15 offset  db0 [21cdb0] DIR64
+	reloc   16 offset  dc0 [21cdc0] DIR64
+	reloc   17 offset  dc8 [21cdc8] DIR64
+	reloc   18 offset  dd8 [21cdd8] DIR64
+	reloc   19 offset  de0 [21cde0] DIR64
+	reloc   20 offset  df0 [21cdf0] DIR64
+	reloc   21 offset  df8 [21cdf8] DIR64
+	reloc   22 offset  e08 [21ce08] DIR64
+	reloc   23 offset  e10 [21ce10] DIR64
+	reloc   24 offset  e20 [21ce20] DIR64
+	reloc   25 offset  e28 [21ce28] DIR64
+	reloc   26 offset  e38 [21ce38] DIR64
+	reloc   27 offset  e40 [21ce40] DIR64
+	reloc   28 offset  e50 [21ce50] DIR64
+	reloc   29 offset  e58 [21ce58] DIR64
+	reloc   30 offset  e68 [21ce68] DIR64
+	reloc   31 offset  e70 [21ce70] DIR64
+	reloc   32 offset  e80 [21ce80] DIR64
+	reloc   33 offset  e88 [21ce88] DIR64
+	reloc   34 offset  e98 [21ce98] DIR64
+	reloc   35 offset  ea0 [21cea0] DIR64
+	reloc   36 offset  eb0 [21ceb0] DIR64
+	reloc   37 offset  eb8 [21ceb8] DIR64
+	reloc   38 offset  ec8 [21cec8] DIR64
+	reloc   39 offset  ed0 [21ced0] DIR64
+	reloc   40 offset  ee0 [21cee0] DIR64
+	reloc   41 offset  ee8 [21cee8] DIR64
+	reloc   42 offset  ef8 [21cef8] DIR64
+	reloc   43 offset  f00 [21cf00] DIR64
+	reloc   44 offset  f10 [21cf10] DIR64
+	reloc   45 offset  f18 [21cf18] DIR64
+	reloc   46 offset  f28 [21cf28] DIR64
+	reloc   47 offset  f30 [21cf30] DIR64
+	reloc   48 offset  f40 [21cf40] DIR64
+	reloc   49 offset  f48 [21cf48] DIR64
+	reloc   50 offset  f58 [21cf58] DIR64
+	reloc   51 offset  f60 [21cf60] DIR64
+	reloc   52 offset  f70 [21cf70] DIR64
+	reloc   53 offset  f78 [21cf78] DIR64
+	reloc   54 offset  f88 [21cf88] DIR64
+	reloc   55 offset  f90 [21cf90] DIR64
+	reloc   56 offset  fa0 [21cfa0] DIR64
+	reloc   57 offset  fa8 [21cfa8] DIR64
+	reloc   58 offset  fb8 [21cfb8] DIR64
+	reloc   59 offset  fc0 [21cfc0] DIR64
+	reloc   60 offset  fd0 [21cfd0] DIR64
+	reloc   61 offset  fd8 [21cfd8] DIR64
+	reloc   62 offset  fe8 [21cfe8] DIR64
+	reloc   63 offset  ff0 [21cff0] DIR64
+
+Virtual Address: 0021d000 Chunk size 144 (0x90) Number of fixups 68
+	reloc    0 offset    0 [21d000] DIR64
+	reloc    1 offset    8 [21d008] DIR64
+	reloc    2 offset   18 [21d018] DIR64
+	reloc    3 offset   20 [21d020] DIR64
+	reloc    4 offset   30 [21d030] DIR64
+	reloc    5 offset   38 [21d038] DIR64
+	reloc    6 offset   48 [21d048] DIR64
+	reloc    7 offset   50 [21d050] DIR64
+	reloc    8 offset   60 [21d060] DIR64
+	reloc    9 offset   68 [21d068] DIR64
+	reloc   10 offset   78 [21d078] DIR64
+	reloc   11 offset   80 [21d080] DIR64
+	reloc   12 offset   90 [21d090] DIR64
+	reloc   13 offset   98 [21d098] DIR64
+	reloc   14 offset   a8 [21d0a8] DIR64
+	reloc   15 offset   b0 [21d0b0] DIR64
+	reloc   16 offset   c0 [21d0c0] DIR64
+	reloc   17 offset   c8 [21d0c8] DIR64
+	reloc   18 offset   d8 [21d0d8] DIR64
+	reloc   19 offset   e0 [21d0e0] DIR64
+	reloc   20 offset  368 [21d368] DIR64
+	reloc   21 offset  370 [21d370] DIR64
+	reloc   22 offset  378 [21d378] DIR64
+	reloc   23 offset  388 [21d388] DIR64
+	reloc   24 offset  390 [21d390] DIR64
+	reloc   25 offset  398 [21d398] DIR64
+	reloc   26 offset  3a8 [21d3a8] DIR64
+	reloc   27 offset  3b0 [21d3b0] DIR64
+	reloc   28 offset  3b8 [21d3b8] DIR64
+	reloc   29 offset  3c8 [21d3c8] DIR64
+	reloc   30 offset  3d0 [21d3d0] DIR64
+	reloc   31 offset  3d8 [21d3d8] DIR64
+	reloc   32 offset  3e8 [21d3e8] DIR64
+	reloc   33 offset  3f0 [21d3f0] DIR64
+	reloc   34 offset  3f8 [21d3f8] DIR64
+	reloc   35 offset  408 [21d408] DIR64
+	reloc   36 offset  410 [21d410] DIR64
+	reloc   37 offset  418 [21d418] DIR64
+	reloc   38 offset  428 [21d428] DIR64
+	reloc   39 offset  430 [21d430] DIR64
+	reloc   40 offset  438 [21d438] DIR64
+	reloc   41 offset  448 [21d448] DIR64
+	reloc   42 offset  450 [21d450] DIR64
+	reloc   43 offset  458 [21d458] DIR64
+	reloc   44 offset  468 [21d468] DIR64
+	reloc   45 offset  470 [21d470] DIR64
+	reloc   46 offset  478 [21d478] DIR64
+	reloc   47 offset  488 [21d488] DIR64
+	reloc   48 offset  490 [21d490] DIR64
+	reloc   49 offset  498 [21d498] DIR64
+	reloc   50 offset  4a8 [21d4a8] DIR64
+	reloc   51 offset  4b0 [21d4b0] DIR64
+	reloc   52 offset  4b8 [21d4b8] DIR64
+	reloc   53 offset  4c8 [21d4c8] DIR64
+	reloc   54 offset  4d0 [21d4d0] DIR64
+	reloc   55 offset  4d8 [21d4d8] DIR64
+	reloc   56 offset  8c8 [21d8c8] DIR64
+	reloc   57 offset  8e0 [21d8e0] DIR64
+	reloc   58 offset  8f8 [21d8f8] DIR64
+	reloc   59 offset  910 [21d910] DIR64
+	reloc   60 offset  928 [21d928] DIR64
+	reloc   61 offset  f40 [21df40] DIR64
+	reloc   62 offset  f58 [21df58] DIR64
+	reloc   63 offset  f70 [21df70] DIR64
+	reloc   64 offset  f88 [21df88] DIR64
+	reloc   65 offset  fa0 [21dfa0] DIR64
+	reloc   66 offset  fb8 [21dfb8] DIR64
+	reloc   67 offset  fd0 [21dfd0] DIR64
+
+Virtual Address: 0021e000 Chunk size 296 (0x128) Number of fixups 144
+	reloc    0 offset   40 [21e040] DIR64
+	reloc    1 offset   58 [21e058] DIR64
+	reloc    2 offset   70 [21e070] DIR64
+	reloc    3 offset   88 [21e088] DIR64
+	reloc    4 offset   a0 [21e0a0] DIR64
+	reloc    5 offset   b8 [21e0b8] DIR64
+	reloc    6 offset   d0 [21e0d0] DIR64
+	reloc    7 offset   e8 [21e0e8] DIR64
+	reloc    8 offset  220 [21e220] DIR64
+	reloc    9 offset  230 [21e230] DIR64
+	reloc   10 offset  238 [21e238] DIR64
+	reloc   11 offset  248 [21e248] DIR64
+	reloc   12 offset  250 [21e250] DIR64
+	reloc   13 offset  260 [21e260] DIR64
+	reloc   14 offset  268 [21e268] DIR64
+	reloc   15 offset  278 [21e278] DIR64
+	reloc   16 offset  280 [21e280] DIR64
+	reloc   17 offset  290 [21e290] DIR64
+	reloc   18 offset  298 [21e298] DIR64
+	reloc   19 offset  2a8 [21e2a8] DIR64
+	reloc   20 offset  2b0 [21e2b0] DIR64
+	reloc   21 offset  2c0 [21e2c0] DIR64
+	reloc   22 offset  2c8 [21e2c8] DIR64
+	reloc   23 offset  2d8 [21e2d8] DIR64
+	reloc   24 offset  2e0 [21e2e0] DIR64
+	reloc   25 offset  2f0 [21e2f0] DIR64
+	reloc   26 offset  2f8 [21e2f8] DIR64
+	reloc   27 offset  308 [21e308] DIR64
+	reloc   28 offset  310 [21e310] DIR64
+	reloc   29 offset  320 [21e320] DIR64
+	reloc   30 offset  328 [21e328] DIR64
+	reloc   31 offset  338 [21e338] DIR64
+	reloc   32 offset  340 [21e340] DIR64
+	reloc   33 offset  350 [21e350] DIR64
+	reloc   34 offset  358 [21e358] DIR64
+	reloc   35 offset  368 [21e368] DIR64
+	reloc   36 offset  370 [21e370] DIR64
+	reloc   37 offset  380 [21e380] DIR64
+	reloc   38 offset  388 [21e388] DIR64
+	reloc   39 offset  398 [21e398] DIR64
+	reloc   40 offset  3a0 [21e3a0] DIR64
+	reloc   41 offset  3b0 [21e3b0] DIR64
+	reloc   42 offset  3b8 [21e3b8] DIR64
+	reloc   43 offset  3c8 [21e3c8] DIR64
+	reloc   44 offset  3d0 [21e3d0] DIR64
+	reloc   45 offset  3e0 [21e3e0] DIR64
+	reloc   46 offset  3e8 [21e3e8] DIR64
+	reloc   47 offset  3f8 [21e3f8] DIR64
+	reloc   48 offset  460 [21e460] DIR64
+	reloc   49 offset  478 [21e478] DIR64
+	reloc   50 offset  490 [21e490] DIR64
+	reloc   51 offset  4e0 [21e4e0] DIR64
+	reloc   52 offset  4f8 [21e4f8] DIR64
+	reloc   53 offset  540 [21e540] DIR64
+	reloc   54 offset  558 [21e558] DIR64
+	reloc   55 offset  570 [21e570] DIR64
+	reloc   56 offset  748 [21e748] DIR64
+	reloc   57 offset  750 [21e750] DIR64
+	reloc   58 offset  760 [21e760] DIR64
+	reloc   59 offset  788 [21e788] DIR64
+	reloc   60 offset  790 [21e790] DIR64
+	reloc   61 offset  798 [21e798] DIR64
+	reloc   62 offset  7a0 [21e7a0] DIR64
+	reloc   63 offset  7c8 [21e7c8] DIR64
+	reloc   64 offset  7d0 [21e7d0] DIR64
+	reloc   65 offset  7d8 [21e7d8] DIR64
+	reloc   66 offset  7e0 [21e7e0] DIR64
+	reloc   67 offset  808 [21e808] DIR64
+	reloc   68 offset  810 [21e810] DIR64
+	reloc   69 offset  848 [21e848] DIR64
+	reloc   70 offset  850 [21e850] DIR64
+	reloc   71 offset  858 [21e858] DIR64
+	reloc   72 offset  860 [21e860] DIR64
+	reloc   73 offset  888 [21e888] DIR64
+	reloc   74 offset  890 [21e890] DIR64
+	reloc   75 offset  898 [21e898] DIR64
+	reloc   76 offset  8a0 [21e8a0] DIR64
+	reloc   77 offset  908 [21e908] DIR64
+	reloc   78 offset  918 [21e918] DIR64
+	reloc   79 offset  940 [21e940] DIR64
+	reloc   80 offset  950 [21e950] DIR64
+	reloc   81 offset  960 [21e960] DIR64
+	reloc   82 offset  970 [21e970] DIR64
+	reloc   83 offset  980 [21e980] DIR64
+	reloc   84 offset  9a0 [21e9a0] DIR64
+	reloc   85 offset  9b0 [21e9b0] DIR64
+	reloc   86 offset  9d0 [21e9d0] DIR64
+	reloc   87 offset  9e0 [21e9e0] DIR64
+	reloc   88 offset  a00 [21ea00] DIR64
+	reloc   89 offset  a10 [21ea10] DIR64
+	reloc   90 offset  a30 [21ea30] DIR64
+	reloc   91 offset  a40 [21ea40] DIR64
+	reloc   92 offset  a60 [21ea60] DIR64
+	reloc   93 offset  a70 [21ea70] DIR64
+	reloc   94 offset  a90 [21ea90] DIR64
+	reloc   95 offset  aa0 [21eaa0] DIR64
+	reloc   96 offset  ac0 [21eac0] DIR64
+	reloc   97 offset  ad0 [21ead0] DIR64
+	reloc   98 offset  af0 [21eaf0] DIR64
+	reloc   99 offset  b00 [21eb00] DIR64
+	reloc  100 offset  b20 [21eb20] DIR64
+	reloc  101 offset  b30 [21eb30] DIR64
+	reloc  102 offset  b50 [21eb50] DIR64
+	reloc  103 offset  b60 [21eb60] DIR64
+	reloc  104 offset  b80 [21eb80] DIR64
+	reloc  105 offset  b90 [21eb90] DIR64
+	reloc  106 offset  bb0 [21ebb0] DIR64
+	reloc  107 offset  bc0 [21ebc0] DIR64
+	reloc  108 offset  be0 [21ebe0] DIR64
+	reloc  109 offset  bf0 [21ebf0] DIR64
+	reloc  110 offset  c10 [21ec10] DIR64
+	reloc  111 offset  c20 [21ec20] DIR64
+	reloc  112 offset  c40 [21ec40] DIR64
+	reloc  113 offset  c50 [21ec50] DIR64
+	reloc  114 offset  c70 [21ec70] DIR64
+	reloc  115 offset  c80 [21ec80] DIR64
+	reloc  116 offset  ca0 [21eca0] DIR64
+	reloc  117 offset  cb0 [21ecb0] DIR64
+	reloc  118 offset  cd0 [21ecd0] DIR64
+	reloc  119 offset  ce0 [21ece0] DIR64
+	reloc  120 offset  d00 [21ed00] DIR64
+	reloc  121 offset  d10 [21ed10] DIR64
+	reloc  122 offset  d30 [21ed30] DIR64
+	reloc  123 offset  d40 [21ed40] DIR64
+	reloc  124 offset  d60 [21ed60] DIR64
+	reloc  125 offset  d70 [21ed70] DIR64
+	reloc  126 offset  d90 [21ed90] DIR64
+	reloc  127 offset  da0 [21eda0] DIR64
+	reloc  128 offset  dc0 [21edc0] DIR64
+	reloc  129 offset  dd0 [21edd0] DIR64
+	reloc  130 offset  df0 [21edf0] DIR64
+	reloc  131 offset  e00 [21ee00] DIR64
+	reloc  132 offset  e20 [21ee20] DIR64
+	reloc  133 offset  e30 [21ee30] DIR64
+	reloc  134 offset  e50 [21ee50] DIR64
+	reloc  135 offset  e60 [21ee60] DIR64
+	reloc  136 offset  e80 [21ee80] DIR64
+	reloc  137 offset  e90 [21ee90] DIR64
+	reloc  138 offset  eb0 [21eeb0] DIR64
+	reloc  139 offset  ec0 [21eec0] DIR64
+	reloc  140 offset  ee0 [21eee0] DIR64
+	reloc  141 offset  ef0 [21eef0] DIR64
+	reloc  142 offset  f10 [21ef10] DIR64
+	reloc  143 offset  f20 [21ef20] DIR64
+
+Virtual Address: 00220000 Chunk size 76 (0x4c) Number of fixups 34
+	reloc    0 offset   80 [220080] DIR64
+	reloc    1 offset   90 [220090] DIR64
+	reloc    2 offset   a0 [2200a0] DIR64
+	reloc    3 offset   b0 [2200b0] DIR64
+	reloc    4 offset   c0 [2200c0] DIR64
+	reloc    5 offset   e0 [2200e0] DIR64
+	reloc    6 offset   f0 [2200f0] DIR64
+	reloc    7 offset  110 [220110] DIR64
+	reloc    8 offset  120 [220120] DIR64
+	reloc    9 offset  140 [220140] DIR64
+	reloc   10 offset  150 [220150] DIR64
+	reloc   11 offset  170 [220170] DIR64
+	reloc   12 offset  180 [220180] DIR64
+	reloc   13 offset  1a0 [2201a0] DIR64
+	reloc   14 offset  1b0 [2201b0] DIR64
+	reloc   15 offset  1d0 [2201d0] DIR64
+	reloc   16 offset  1e0 [2201e0] DIR64
+	reloc   17 offset  200 [220200] DIR64
+	reloc   18 offset  210 [220210] DIR64
+	reloc   19 offset  230 [220230] DIR64
+	reloc   20 offset  240 [220240] DIR64
+	reloc   21 offset  260 [220260] DIR64
+	reloc   22 offset  270 [220270] DIR64
+	reloc   23 offset  290 [220290] DIR64
+	reloc   24 offset  2a0 [2202a0] DIR64
+	reloc   25 offset  2c0 [2202c0] DIR64
+	reloc   26 offset  2d0 [2202d0] DIR64
+	reloc   27 offset  2f0 [2202f0] DIR64
+	reloc   28 offset  300 [220300] DIR64
+	reloc   29 offset  320 [220320] DIR64
+	reloc   30 offset  330 [220330] DIR64
+	reloc   31 offset  350 [220350] DIR64
+	reloc   32 offset  360 [220360] DIR64
+	reloc   33 offset    0 [220000] ABSOLUTE
+
+Virtual Address: 00221000 Chunk size 460 (0x1cc) Number of fixups 226
+	reloc    0 offset  1e0 [2211e0] DIR64
+	reloc    1 offset  1f0 [2211f0] DIR64
+	reloc    2 offset  200 [221200] DIR64
+	reloc    3 offset  210 [221210] DIR64
+	reloc    4 offset  220 [221220] DIR64
+	reloc    5 offset  230 [221230] DIR64
+	reloc    6 offset  240 [221240] DIR64
+	reloc    7 offset  250 [221250] DIR64
+	reloc    8 offset  260 [221260] DIR64
+	reloc    9 offset  270 [221270] DIR64
+	reloc   10 offset  280 [221280] DIR64
+	reloc   11 offset  290 [221290] DIR64
+	reloc   12 offset  2a0 [2212a0] DIR64
+	reloc   13 offset  2b0 [2212b0] DIR64
+	reloc   14 offset  2c0 [2212c0] DIR64
+	reloc   15 offset  2d0 [2212d0] DIR64
+	reloc   16 offset  2e0 [2212e0] DIR64
+	reloc   17 offset  2f0 [2212f0] DIR64
+	reloc   18 offset  300 [221300] DIR64
+	reloc   19 offset  310 [221310] DIR64
+	reloc   20 offset  320 [221320] DIR64
+	reloc   21 offset  330 [221330] DIR64
+	reloc   22 offset  340 [221340] DIR64
+	reloc   23 offset  350 [221350] DIR64
+	reloc   24 offset  360 [221360] DIR64
+	reloc   25 offset  370 [221370] DIR64
+	reloc   26 offset  380 [221380] DIR64
+	reloc   27 offset  390 [221390] DIR64
+	reloc   28 offset  3a0 [2213a0] DIR64
+	reloc   29 offset  3b0 [2213b0] DIR64
+	reloc   30 offset  3c0 [2213c0] DIR64
+	reloc   31 offset  3d0 [2213d0] DIR64
+	reloc   32 offset  3e0 [2213e0] DIR64
+	reloc   33 offset  3f0 [2213f0] DIR64
+	reloc   34 offset  400 [221400] DIR64
+	reloc   35 offset  410 [221410] DIR64
+	reloc   36 offset  420 [221420] DIR64
+	reloc   37 offset  430 [221430] DIR64
+	reloc   38 offset  440 [221440] DIR64
+	reloc   39 offset  450 [221450] DIR64
+	reloc   40 offset  460 [221460] DIR64
+	reloc   41 offset  470 [221470] DIR64
+	reloc   42 offset  480 [221480] DIR64
+	reloc   43 offset  490 [221490] DIR64
+	reloc   44 offset  4a0 [2214a0] DIR64
+	reloc   45 offset  4b0 [2214b0] DIR64
+	reloc   46 offset  4c0 [2214c0] DIR64
+	reloc   47 offset  4d0 [2214d0] DIR64
+	reloc   48 offset  4e0 [2214e0] DIR64
+	reloc   49 offset  4f0 [2214f0] DIR64
+	reloc   50 offset  500 [221500] DIR64
+	reloc   51 offset  510 [221510] DIR64
+	reloc   52 offset  520 [221520] DIR64
+	reloc   53 offset  530 [221530] DIR64
+	reloc   54 offset  540 [221540] DIR64
+	reloc   55 offset  550 [221550] DIR64
+	reloc   56 offset  560 [221560] DIR64
+	reloc   57 offset  570 [221570] DIR64
+	reloc   58 offset  580 [221580] DIR64
+	reloc   59 offset  590 [221590] DIR64
+	reloc   60 offset  5a0 [2215a0] DIR64
+	reloc   61 offset  5b0 [2215b0] DIR64
+	reloc   62 offset  5c0 [2215c0] DIR64
+	reloc   63 offset  5d0 [2215d0] DIR64
+	reloc   64 offset  5e0 [2215e0] DIR64
+	reloc   65 offset  5f0 [2215f0] DIR64
+	reloc   66 offset  600 [221600] DIR64
+	reloc   67 offset  610 [221610] DIR64
+	reloc   68 offset  620 [221620] DIR64
+	reloc   69 offset  630 [221630] DIR64
+	reloc   70 offset  640 [221640] DIR64
+	reloc   71 offset  650 [221650] DIR64
+	reloc   72 offset  660 [221660] DIR64
+	reloc   73 offset  670 [221670] DIR64
+	reloc   74 offset  680 [221680] DIR64
+	reloc   75 offset  690 [221690] DIR64
+	reloc   76 offset  6a0 [2216a0] DIR64
+	reloc   77 offset  6b0 [2216b0] DIR64
+	reloc   78 offset  6c0 [2216c0] DIR64
+	reloc   79 offset  6d0 [2216d0] DIR64
+	reloc   80 offset  6e0 [2216e0] DIR64
+	reloc   81 offset  6f0 [2216f0] DIR64
+	reloc   82 offset  700 [221700] DIR64
+	reloc   83 offset  710 [221710] DIR64
+	reloc   84 offset  720 [221720] DIR64
+	reloc   85 offset  730 [221730] DIR64
+	reloc   86 offset  740 [221740] DIR64
+	reloc   87 offset  750 [221750] DIR64
+	reloc   88 offset  760 [221760] DIR64
+	reloc   89 offset  770 [221770] DIR64
+	reloc   90 offset  780 [221780] DIR64
+	reloc   91 offset  790 [221790] DIR64
+	reloc   92 offset  7a0 [2217a0] DIR64
+	reloc   93 offset  7b0 [2217b0] DIR64
+	reloc   94 offset  7c0 [2217c0] DIR64
+	reloc   95 offset  7d0 [2217d0] DIR64
+	reloc   96 offset  7e0 [2217e0] DIR64
+	reloc   97 offset  7f0 [2217f0] DIR64
+	reloc   98 offset  800 [221800] DIR64
+	reloc   99 offset  810 [221810] DIR64
+	reloc  100 offset  820 [221820] DIR64
+	reloc  101 offset  830 [221830] DIR64
+	reloc  102 offset  840 [221840] DIR64
+	reloc  103 offset  850 [221850] DIR64
+	reloc  104 offset  860 [221860] DIR64
+	reloc  105 offset  870 [221870] DIR64
+	reloc  106 offset  880 [221880] DIR64
+	reloc  107 offset  890 [221890] DIR64
+	reloc  108 offset  8a0 [2218a0] DIR64
+	reloc  109 offset  8b0 [2218b0] DIR64
+	reloc  110 offset  8c0 [2218c0] DIR64
+	reloc  111 offset  8d0 [2218d0] DIR64
+	reloc  112 offset  8e0 [2218e0] DIR64
+	reloc  113 offset  8f0 [2218f0] DIR64
+	reloc  114 offset  900 [221900] DIR64
+	reloc  115 offset  910 [221910] DIR64
+	reloc  116 offset  920 [221920] DIR64
+	reloc  117 offset  930 [221930] DIR64
+	reloc  118 offset  940 [221940] DIR64
+	reloc  119 offset  950 [221950] DIR64
+	reloc  120 offset  960 [221960] DIR64
+	reloc  121 offset  970 [221970] DIR64
+	reloc  122 offset  980 [221980] DIR64
+	reloc  123 offset  990 [221990] DIR64
+	reloc  124 offset  9a0 [2219a0] DIR64
+	reloc  125 offset  9b0 [2219b0] DIR64
+	reloc  126 offset  9c0 [2219c0] DIR64
+	reloc  127 offset  9d0 [2219d0] DIR64
+	reloc  128 offset  9e0 [2219e0] DIR64
+	reloc  129 offset  9f0 [2219f0] DIR64
+	reloc  130 offset  a00 [221a00] DIR64
+	reloc  131 offset  a10 [221a10] DIR64
+	reloc  132 offset  a20 [221a20] DIR64
+	reloc  133 offset  a30 [221a30] DIR64
+	reloc  134 offset  a40 [221a40] DIR64
+	reloc  135 offset  a50 [221a50] DIR64
+	reloc  136 offset  a60 [221a60] DIR64
+	reloc  137 offset  a70 [221a70] DIR64
+	reloc  138 offset  a80 [221a80] DIR64
+	reloc  139 offset  a90 [221a90] DIR64
+	reloc  140 offset  aa0 [221aa0] DIR64
+	reloc  141 offset  ab0 [221ab0] DIR64
+	reloc  142 offset  ac0 [221ac0] DIR64
+	reloc  143 offset  ad0 [221ad0] DIR64
+	reloc  144 offset  ae0 [221ae0] DIR64
+	reloc  145 offset  af0 [221af0] DIR64
+	reloc  146 offset  b00 [221b00] DIR64
+	reloc  147 offset  b10 [221b10] DIR64
+	reloc  148 offset  b20 [221b20] DIR64
+	reloc  149 offset  b30 [221b30] DIR64
+	reloc  150 offset  b40 [221b40] DIR64
+	reloc  151 offset  b50 [221b50] DIR64
+	reloc  152 offset  b60 [221b60] DIR64
+	reloc  153 offset  b70 [221b70] DIR64
+	reloc  154 offset  b80 [221b80] DIR64
+	reloc  155 offset  b90 [221b90] DIR64
+	reloc  156 offset  ba0 [221ba0] DIR64
+	reloc  157 offset  bb0 [221bb0] DIR64
+	reloc  158 offset  bc0 [221bc0] DIR64
+	reloc  159 offset  bd0 [221bd0] DIR64
+	reloc  160 offset  be0 [221be0] DIR64
+	reloc  161 offset  bf0 [221bf0] DIR64
+	reloc  162 offset  c00 [221c00] DIR64
+	reloc  163 offset  c10 [221c10] DIR64
+	reloc  164 offset  c20 [221c20] DIR64
+	reloc  165 offset  c30 [221c30] DIR64
+	reloc  166 offset  c40 [221c40] DIR64
+	reloc  167 offset  c50 [221c50] DIR64
+	reloc  168 offset  c60 [221c60] DIR64
+	reloc  169 offset  c70 [221c70] DIR64
+	reloc  170 offset  c80 [221c80] DIR64
+	reloc  171 offset  c90 [221c90] DIR64
+	reloc  172 offset  ca0 [221ca0] DIR64
+	reloc  173 offset  cb0 [221cb0] DIR64
+	reloc  174 offset  cc0 [221cc0] DIR64
+	reloc  175 offset  cd0 [221cd0] DIR64
+	reloc  176 offset  ce0 [221ce0] DIR64
+	reloc  177 offset  cf0 [221cf0] DIR64
+	reloc  178 offset  d00 [221d00] DIR64
+	reloc  179 offset  d10 [221d10] DIR64
+	reloc  180 offset  d20 [221d20] DIR64
+	reloc  181 offset  d30 [221d30] DIR64
+	reloc  182 offset  d40 [221d40] DIR64
+	reloc  183 offset  d50 [221d50] DIR64
+	reloc  184 offset  d60 [221d60] DIR64
+	reloc  185 offset  d70 [221d70] DIR64
+	reloc  186 offset  d80 [221d80] DIR64
+	reloc  187 offset  d90 [221d90] DIR64
+	reloc  188 offset  da0 [221da0] DIR64
+	reloc  189 offset  db0 [221db0] DIR64
+	reloc  190 offset  dc0 [221dc0] DIR64
+	reloc  191 offset  dd0 [221dd0] DIR64
+	reloc  192 offset  de0 [221de0] DIR64
+	reloc  193 offset  df0 [221df0] DIR64
+	reloc  194 offset  e00 [221e00] DIR64
+	reloc  195 offset  e10 [221e10] DIR64
+	reloc  196 offset  e20 [221e20] DIR64
+	reloc  197 offset  e30 [221e30] DIR64
+	reloc  198 offset  e40 [221e40] DIR64
+	reloc  199 offset  e50 [221e50] DIR64
+	reloc  200 offset  e60 [221e60] DIR64
+	reloc  201 offset  e70 [221e70] DIR64
+	reloc  202 offset  e80 [221e80] DIR64
+	reloc  203 offset  e90 [221e90] DIR64
+	reloc  204 offset  ea0 [221ea0] DIR64
+	reloc  205 offset  eb0 [221eb0] DIR64
+	reloc  206 offset  ec0 [221ec0] DIR64
+	reloc  207 offset  ed0 [221ed0] DIR64
+	reloc  208 offset  ee0 [221ee0] DIR64
+	reloc  209 offset  ef0 [221ef0] DIR64
+	reloc  210 offset  f00 [221f00] DIR64
+	reloc  211 offset  f10 [221f10] DIR64
+	reloc  212 offset  f20 [221f20] DIR64
+	reloc  213 offset  f30 [221f30] DIR64
+	reloc  214 offset  f40 [221f40] DIR64
+	reloc  215 offset  f50 [221f50] DIR64
+	reloc  216 offset  f60 [221f60] DIR64
+	reloc  217 offset  f70 [221f70] DIR64
+	reloc  218 offset  f80 [221f80] DIR64
+	reloc  219 offset  f90 [221f90] DIR64
+	reloc  220 offset  fa0 [221fa0] DIR64
+	reloc  221 offset  fb0 [221fb0] DIR64
+	reloc  222 offset  fc0 [221fc0] DIR64
+	reloc  223 offset  fd0 [221fd0] DIR64
+	reloc  224 offset  fe0 [221fe0] DIR64
+	reloc  225 offset  ff0 [221ff0] DIR64
+
+Virtual Address: 00222000 Chunk size 520 (0x208) Number of fixups 256
+	reloc    0 offset    0 [222000] DIR64
+	reloc    1 offset   10 [222010] DIR64
+	reloc    2 offset   20 [222020] DIR64
+	reloc    3 offset   30 [222030] DIR64
+	reloc    4 offset   40 [222040] DIR64
+	reloc    5 offset   50 [222050] DIR64
+	reloc    6 offset   60 [222060] DIR64
+	reloc    7 offset   70 [222070] DIR64
+	reloc    8 offset   80 [222080] DIR64
+	reloc    9 offset   90 [222090] DIR64
+	reloc   10 offset   a0 [2220a0] DIR64
+	reloc   11 offset   b0 [2220b0] DIR64
+	reloc   12 offset   c0 [2220c0] DIR64
+	reloc   13 offset   d0 [2220d0] DIR64
+	reloc   14 offset   e0 [2220e0] DIR64
+	reloc   15 offset   f0 [2220f0] DIR64
+	reloc   16 offset  100 [222100] DIR64
+	reloc   17 offset  110 [222110] DIR64
+	reloc   18 offset  120 [222120] DIR64
+	reloc   19 offset  130 [222130] DIR64
+	reloc   20 offset  140 [222140] DIR64
+	reloc   21 offset  150 [222150] DIR64
+	reloc   22 offset  160 [222160] DIR64
+	reloc   23 offset  170 [222170] DIR64
+	reloc   24 offset  180 [222180] DIR64
+	reloc   25 offset  190 [222190] DIR64
+	reloc   26 offset  1a0 [2221a0] DIR64
+	reloc   27 offset  1b0 [2221b0] DIR64
+	reloc   28 offset  1c0 [2221c0] DIR64
+	reloc   29 offset  1d0 [2221d0] DIR64
+	reloc   30 offset  1e0 [2221e0] DIR64
+	reloc   31 offset  1f0 [2221f0] DIR64
+	reloc   32 offset  200 [222200] DIR64
+	reloc   33 offset  210 [222210] DIR64
+	reloc   34 offset  220 [222220] DIR64
+	reloc   35 offset  230 [222230] DIR64
+	reloc   36 offset  240 [222240] DIR64
+	reloc   37 offset  250 [222250] DIR64
+	reloc   38 offset  260 [222260] DIR64
+	reloc   39 offset  270 [222270] DIR64
+	reloc   40 offset  280 [222280] DIR64
+	reloc   41 offset  290 [222290] DIR64
+	reloc   42 offset  2a0 [2222a0] DIR64
+	reloc   43 offset  2b0 [2222b0] DIR64
+	reloc   44 offset  2c0 [2222c0] DIR64
+	reloc   45 offset  2d0 [2222d0] DIR64
+	reloc   46 offset  2e0 [2222e0] DIR64
+	reloc   47 offset  2f0 [2222f0] DIR64
+	reloc   48 offset  300 [222300] DIR64
+	reloc   49 offset  310 [222310] DIR64
+	reloc   50 offset  320 [222320] DIR64
+	reloc   51 offset  330 [222330] DIR64
+	reloc   52 offset  340 [222340] DIR64
+	reloc   53 offset  350 [222350] DIR64
+	reloc   54 offset  360 [222360] DIR64
+	reloc   55 offset  370 [222370] DIR64
+	reloc   56 offset  380 [222380] DIR64
+	reloc   57 offset  390 [222390] DIR64
+	reloc   58 offset  3a0 [2223a0] DIR64
+	reloc   59 offset  3b0 [2223b0] DIR64
+	reloc   60 offset  3c0 [2223c0] DIR64
+	reloc   61 offset  3d0 [2223d0] DIR64
+	reloc   62 offset  3e0 [2223e0] DIR64
+	reloc   63 offset  3f0 [2223f0] DIR64
+	reloc   64 offset  400 [222400] DIR64
+	reloc   65 offset  410 [222410] DIR64
+	reloc   66 offset  420 [222420] DIR64
+	reloc   67 offset  430 [222430] DIR64
+	reloc   68 offset  440 [222440] DIR64
+	reloc   69 offset  450 [222450] DIR64
+	reloc   70 offset  460 [222460] DIR64
+	reloc   71 offset  470 [222470] DIR64
+	reloc   72 offset  480 [222480] DIR64
+	reloc   73 offset  490 [222490] DIR64
+	reloc   74 offset  4a0 [2224a0] DIR64
+	reloc   75 offset  4b0 [2224b0] DIR64
+	reloc   76 offset  4c0 [2224c0] DIR64
+	reloc   77 offset  4d0 [2224d0] DIR64
+	reloc   78 offset  4e0 [2224e0] DIR64
+	reloc   79 offset  4f0 [2224f0] DIR64
+	reloc   80 offset  500 [222500] DIR64
+	reloc   81 offset  510 [222510] DIR64
+	reloc   82 offset  520 [222520] DIR64
+	reloc   83 offset  530 [222530] DIR64
+	reloc   84 offset  540 [222540] DIR64
+	reloc   85 offset  550 [222550] DIR64
+	reloc   86 offset  560 [222560] DIR64
+	reloc   87 offset  570 [222570] DIR64
+	reloc   88 offset  580 [222580] DIR64
+	reloc   89 offset  590 [222590] DIR64
+	reloc   90 offset  5a0 [2225a0] DIR64
+	reloc   91 offset  5b0 [2225b0] DIR64
+	reloc   92 offset  5c0 [2225c0] DIR64
+	reloc   93 offset  5d0 [2225d0] DIR64
+	reloc   94 offset  5e0 [2225e0] DIR64
+	reloc   95 offset  5f0 [2225f0] DIR64
+	reloc   96 offset  600 [222600] DIR64
+	reloc   97 offset  610 [222610] DIR64
+	reloc   98 offset  620 [222620] DIR64
+	reloc   99 offset  630 [222630] DIR64
+	reloc  100 offset  640 [222640] DIR64
+	reloc  101 offset  650 [222650] DIR64
+	reloc  102 offset  660 [222660] DIR64
+	reloc  103 offset  670 [222670] DIR64
+	reloc  104 offset  680 [222680] DIR64
+	reloc  105 offset  690 [222690] DIR64
+	reloc  106 offset  6a0 [2226a0] DIR64
+	reloc  107 offset  6b0 [2226b0] DIR64
+	reloc  108 offset  6c0 [2226c0] DIR64
+	reloc  109 offset  6d0 [2226d0] DIR64
+	reloc  110 offset  6e0 [2226e0] DIR64
+	reloc  111 offset  6f0 [2226f0] DIR64
+	reloc  112 offset  700 [222700] DIR64
+	reloc  113 offset  710 [222710] DIR64
+	reloc  114 offset  720 [222720] DIR64
+	reloc  115 offset  730 [222730] DIR64
+	reloc  116 offset  740 [222740] DIR64
+	reloc  117 offset  750 [222750] DIR64
+	reloc  118 offset  760 [222760] DIR64
+	reloc  119 offset  770 [222770] DIR64
+	reloc  120 offset  780 [222780] DIR64
+	reloc  121 offset  790 [222790] DIR64
+	reloc  122 offset  7a0 [2227a0] DIR64
+	reloc  123 offset  7b0 [2227b0] DIR64
+	reloc  124 offset  7c0 [2227c0] DIR64
+	reloc  125 offset  7d0 [2227d0] DIR64
+	reloc  126 offset  7e0 [2227e0] DIR64
+	reloc  127 offset  7f0 [2227f0] DIR64
+	reloc  128 offset  800 [222800] DIR64
+	reloc  129 offset  810 [222810] DIR64
+	reloc  130 offset  820 [222820] DIR64
+	reloc  131 offset  830 [222830] DIR64
+	reloc  132 offset  840 [222840] DIR64
+	reloc  133 offset  850 [222850] DIR64
+	reloc  134 offset  860 [222860] DIR64
+	reloc  135 offset  870 [222870] DIR64
+	reloc  136 offset  880 [222880] DIR64
+	reloc  137 offset  890 [222890] DIR64
+	reloc  138 offset  8a0 [2228a0] DIR64
+	reloc  139 offset  8b0 [2228b0] DIR64
+	reloc  140 offset  8c0 [2228c0] DIR64
+	reloc  141 offset  8d0 [2228d0] DIR64
+	reloc  142 offset  8e0 [2228e0] DIR64
+	reloc  143 offset  8f0 [2228f0] DIR64
+	reloc  144 offset  900 [222900] DIR64
+	reloc  145 offset  910 [222910] DIR64
+	reloc  146 offset  920 [222920] DIR64
+	reloc  147 offset  930 [222930] DIR64
+	reloc  148 offset  940 [222940] DIR64
+	reloc  149 offset  950 [222950] DIR64
+	reloc  150 offset  960 [222960] DIR64
+	reloc  151 offset  970 [222970] DIR64
+	reloc  152 offset  980 [222980] DIR64
+	reloc  153 offset  990 [222990] DIR64
+	reloc  154 offset  9a0 [2229a0] DIR64
+	reloc  155 offset  9b0 [2229b0] DIR64
+	reloc  156 offset  9c0 [2229c0] DIR64
+	reloc  157 offset  9d0 [2229d0] DIR64
+	reloc  158 offset  9e0 [2229e0] DIR64
+	reloc  159 offset  9f0 [2229f0] DIR64
+	reloc  160 offset  a00 [222a00] DIR64
+	reloc  161 offset  a10 [222a10] DIR64
+	reloc  162 offset  a20 [222a20] DIR64
+	reloc  163 offset  a30 [222a30] DIR64
+	reloc  164 offset  a40 [222a40] DIR64
+	reloc  165 offset  a50 [222a50] DIR64
+	reloc  166 offset  a60 [222a60] DIR64
+	reloc  167 offset  a70 [222a70] DIR64
+	reloc  168 offset  a80 [222a80] DIR64
+	reloc  169 offset  a90 [222a90] DIR64
+	reloc  170 offset  aa0 [222aa0] DIR64
+	reloc  171 offset  ab0 [222ab0] DIR64
+	reloc  172 offset  ac0 [222ac0] DIR64
+	reloc  173 offset  ad0 [222ad0] DIR64
+	reloc  174 offset  ae0 [222ae0] DIR64
+	reloc  175 offset  af0 [222af0] DIR64
+	reloc  176 offset  b00 [222b00] DIR64
+	reloc  177 offset  b10 [222b10] DIR64
+	reloc  178 offset  b20 [222b20] DIR64
+	reloc  179 offset  b30 [222b30] DIR64
+	reloc  180 offset  b40 [222b40] DIR64
+	reloc  181 offset  b50 [222b50] DIR64
+	reloc  182 offset  b60 [222b60] DIR64
+	reloc  183 offset  b70 [222b70] DIR64
+	reloc  184 offset  b80 [222b80] DIR64
+	reloc  185 offset  b90 [222b90] DIR64
+	reloc  186 offset  ba0 [222ba0] DIR64
+	reloc  187 offset  bb0 [222bb0] DIR64
+	reloc  188 offset  bc0 [222bc0] DIR64
+	reloc  189 offset  bd0 [222bd0] DIR64
+	reloc  190 offset  be0 [222be0] DIR64
+	reloc  191 offset  bf0 [222bf0] DIR64
+	reloc  192 offset  c00 [222c00] DIR64
+	reloc  193 offset  c10 [222c10] DIR64
+	reloc  194 offset  c20 [222c20] DIR64
+	reloc  195 offset  c30 [222c30] DIR64
+	reloc  196 offset  c40 [222c40] DIR64
+	reloc  197 offset  c50 [222c50] DIR64
+	reloc  198 offset  c60 [222c60] DIR64
+	reloc  199 offset  c70 [222c70] DIR64
+	reloc  200 offset  c80 [222c80] DIR64
+	reloc  201 offset  c90 [222c90] DIR64
+	reloc  202 offset  ca0 [222ca0] DIR64
+	reloc  203 offset  cb0 [222cb0] DIR64
+	reloc  204 offset  cc0 [222cc0] DIR64
+	reloc  205 offset  cd0 [222cd0] DIR64
+	reloc  206 offset  ce0 [222ce0] DIR64
+	reloc  207 offset  cf0 [222cf0] DIR64
+	reloc  208 offset  d00 [222d00] DIR64
+	reloc  209 offset  d10 [222d10] DIR64
+	reloc  210 offset  d20 [222d20] DIR64
+	reloc  211 offset  d30 [222d30] DIR64
+	reloc  212 offset  d40 [222d40] DIR64
+	reloc  213 offset  d50 [222d50] DIR64
+	reloc  214 offset  d60 [222d60] DIR64
+	reloc  215 offset  d70 [222d70] DIR64
+	reloc  216 offset  d80 [222d80] DIR64
+	reloc  217 offset  d90 [222d90] DIR64
+	reloc  218 offset  da0 [222da0] DIR64
+	reloc  219 offset  db0 [222db0] DIR64
+	reloc  220 offset  dc0 [222dc0] DIR64
+	reloc  221 offset  dd0 [222dd0] DIR64
+	reloc  222 offset  de0 [222de0] DIR64
+	reloc  223 offset  df0 [222df0] DIR64
+	reloc  224 offset  e00 [222e00] DIR64
+	reloc  225 offset  e10 [222e10] DIR64
+	reloc  226 offset  e20 [222e20] DIR64
+	reloc  227 offset  e30 [222e30] DIR64
+	reloc  228 offset  e40 [222e40] DIR64
+	reloc  229 offset  e50 [222e50] DIR64
+	reloc  230 offset  e60 [222e60] DIR64
+	reloc  231 offset  e70 [222e70] DIR64
+	reloc  232 offset  e80 [222e80] DIR64
+	reloc  233 offset  e90 [222e90] DIR64
+	reloc  234 offset  ea0 [222ea0] DIR64
+	reloc  235 offset  eb0 [222eb0] DIR64
+	reloc  236 offset  ec0 [222ec0] DIR64
+	reloc  237 offset  ed0 [222ed0] DIR64
+	reloc  238 offset  ee0 [222ee0] DIR64
+	reloc  239 offset  ef0 [222ef0] DIR64
+	reloc  240 offset  f00 [222f00] DIR64
+	reloc  241 offset  f10 [222f10] DIR64
+	reloc  242 offset  f20 [222f20] DIR64
+	reloc  243 offset  f30 [222f30] DIR64
+	reloc  244 offset  f40 [222f40] DIR64
+	reloc  245 offset  f50 [222f50] DIR64
+	reloc  246 offset  f60 [222f60] DIR64
+	reloc  247 offset  f70 [222f70] DIR64
+	reloc  248 offset  f80 [222f80] DIR64
+	reloc  249 offset  f90 [222f90] DIR64
+	reloc  250 offset  fa0 [222fa0] DIR64
+	reloc  251 offset  fb0 [222fb0] DIR64
+	reloc  252 offset  fc0 [222fc0] DIR64
+	reloc  253 offset  fd0 [222fd0] DIR64
+	reloc  254 offset  fe0 [222fe0] DIR64
+	reloc  255 offset  ff0 [222ff0] DIR64
+
+Virtual Address: 00223000 Chunk size 520 (0x208) Number of fixups 256
+	reloc    0 offset    0 [223000] DIR64
+	reloc    1 offset   10 [223010] DIR64
+	reloc    2 offset   20 [223020] DIR64
+	reloc    3 offset   30 [223030] DIR64
+	reloc    4 offset   40 [223040] DIR64
+	reloc    5 offset   50 [223050] DIR64
+	reloc    6 offset   60 [223060] DIR64
+	reloc    7 offset   70 [223070] DIR64
+	reloc    8 offset   80 [223080] DIR64
+	reloc    9 offset   90 [223090] DIR64
+	reloc   10 offset   a0 [2230a0] DIR64
+	reloc   11 offset   b0 [2230b0] DIR64
+	reloc   12 offset   c0 [2230c0] DIR64
+	reloc   13 offset   d0 [2230d0] DIR64
+	reloc   14 offset   e0 [2230e0] DIR64
+	reloc   15 offset   f0 [2230f0] DIR64
+	reloc   16 offset  100 [223100] DIR64
+	reloc   17 offset  110 [223110] DIR64
+	reloc   18 offset  120 [223120] DIR64
+	reloc   19 offset  130 [223130] DIR64
+	reloc   20 offset  140 [223140] DIR64
+	reloc   21 offset  150 [223150] DIR64
+	reloc   22 offset  160 [223160] DIR64
+	reloc   23 offset  170 [223170] DIR64
+	reloc   24 offset  180 [223180] DIR64
+	reloc   25 offset  190 [223190] DIR64
+	reloc   26 offset  1a0 [2231a0] DIR64
+	reloc   27 offset  1b0 [2231b0] DIR64
+	reloc   28 offset  1c0 [2231c0] DIR64
+	reloc   29 offset  1d0 [2231d0] DIR64
+	reloc   30 offset  1e0 [2231e0] DIR64
+	reloc   31 offset  1f0 [2231f0] DIR64
+	reloc   32 offset  200 [223200] DIR64
+	reloc   33 offset  210 [223210] DIR64
+	reloc   34 offset  220 [223220] DIR64
+	reloc   35 offset  230 [223230] DIR64
+	reloc   36 offset  240 [223240] DIR64
+	reloc   37 offset  250 [223250] DIR64
+	reloc   38 offset  260 [223260] DIR64
+	reloc   39 offset  270 [223270] DIR64
+	reloc   40 offset  280 [223280] DIR64
+	reloc   41 offset  290 [223290] DIR64
+	reloc   42 offset  2a0 [2232a0] DIR64
+	reloc   43 offset  2b0 [2232b0] DIR64
+	reloc   44 offset  2c0 [2232c0] DIR64
+	reloc   45 offset  2d0 [2232d0] DIR64
+	reloc   46 offset  2e0 [2232e0] DIR64
+	reloc   47 offset  2f0 [2232f0] DIR64
+	reloc   48 offset  300 [223300] DIR64
+	reloc   49 offset  310 [223310] DIR64
+	reloc   50 offset  320 [223320] DIR64
+	reloc   51 offset  330 [223330] DIR64
+	reloc   52 offset  340 [223340] DIR64
+	reloc   53 offset  350 [223350] DIR64
+	reloc   54 offset  360 [223360] DIR64
+	reloc   55 offset  370 [223370] DIR64
+	reloc   56 offset  380 [223380] DIR64
+	reloc   57 offset  390 [223390] DIR64
+	reloc   58 offset  3a0 [2233a0] DIR64
+	reloc   59 offset  3b0 [2233b0] DIR64
+	reloc   60 offset  3c0 [2233c0] DIR64
+	reloc   61 offset  3d0 [2233d0] DIR64
+	reloc   62 offset  3e0 [2233e0] DIR64
+	reloc   63 offset  3f0 [2233f0] DIR64
+	reloc   64 offset  400 [223400] DIR64
+	reloc   65 offset  410 [223410] DIR64
+	reloc   66 offset  420 [223420] DIR64
+	reloc   67 offset  430 [223430] DIR64
+	reloc   68 offset  440 [223440] DIR64
+	reloc   69 offset  450 [223450] DIR64
+	reloc   70 offset  460 [223460] DIR64
+	reloc   71 offset  470 [223470] DIR64
+	reloc   72 offset  480 [223480] DIR64
+	reloc   73 offset  490 [223490] DIR64
+	reloc   74 offset  4a0 [2234a0] DIR64
+	reloc   75 offset  4b0 [2234b0] DIR64
+	reloc   76 offset  4c0 [2234c0] DIR64
+	reloc   77 offset  4d0 [2234d0] DIR64
+	reloc   78 offset  4e0 [2234e0] DIR64
+	reloc   79 offset  4f0 [2234f0] DIR64
+	reloc   80 offset  500 [223500] DIR64
+	reloc   81 offset  510 [223510] DIR64
+	reloc   82 offset  520 [223520] DIR64
+	reloc   83 offset  530 [223530] DIR64
+	reloc   84 offset  540 [223540] DIR64
+	reloc   85 offset  550 [223550] DIR64
+	reloc   86 offset  560 [223560] DIR64
+	reloc   87 offset  570 [223570] DIR64
+	reloc   88 offset  580 [223580] DIR64
+	reloc   89 offset  590 [223590] DIR64
+	reloc   90 offset  5a0 [2235a0] DIR64
+	reloc   91 offset  5b0 [2235b0] DIR64
+	reloc   92 offset  5c0 [2235c0] DIR64
+	reloc   93 offset  5d0 [2235d0] DIR64
+	reloc   94 offset  5e0 [2235e0] DIR64
+	reloc   95 offset  5f0 [2235f0] DIR64
+	reloc   96 offset  600 [223600] DIR64
+	reloc   97 offset  610 [223610] DIR64
+	reloc   98 offset  620 [223620] DIR64
+	reloc   99 offset  630 [223630] DIR64
+	reloc  100 offset  640 [223640] DIR64
+	reloc  101 offset  650 [223650] DIR64
+	reloc  102 offset  660 [223660] DIR64
+	reloc  103 offset  670 [223670] DIR64
+	reloc  104 offset  680 [223680] DIR64
+	reloc  105 offset  690 [223690] DIR64
+	reloc  106 offset  6a0 [2236a0] DIR64
+	reloc  107 offset  6b0 [2236b0] DIR64
+	reloc  108 offset  6c0 [2236c0] DIR64
+	reloc  109 offset  6d0 [2236d0] DIR64
+	reloc  110 offset  6e0 [2236e0] DIR64
+	reloc  111 offset  6f0 [2236f0] DIR64
+	reloc  112 offset  700 [223700] DIR64
+	reloc  113 offset  710 [223710] DIR64
+	reloc  114 offset  720 [223720] DIR64
+	reloc  115 offset  730 [223730] DIR64
+	reloc  116 offset  740 [223740] DIR64
+	reloc  117 offset  750 [223750] DIR64
+	reloc  118 offset  760 [223760] DIR64
+	reloc  119 offset  770 [223770] DIR64
+	reloc  120 offset  780 [223780] DIR64
+	reloc  121 offset  790 [223790] DIR64
+	reloc  122 offset  7a0 [2237a0] DIR64
+	reloc  123 offset  7b0 [2237b0] DIR64
+	reloc  124 offset  7c0 [2237c0] DIR64
+	reloc  125 offset  7d0 [2237d0] DIR64
+	reloc  126 offset  7e0 [2237e0] DIR64
+	reloc  127 offset  7f0 [2237f0] DIR64
+	reloc  128 offset  800 [223800] DIR64
+	reloc  129 offset  810 [223810] DIR64
+	reloc  130 offset  820 [223820] DIR64
+	reloc  131 offset  830 [223830] DIR64
+	reloc  132 offset  840 [223840] DIR64
+	reloc  133 offset  850 [223850] DIR64
+	reloc  134 offset  860 [223860] DIR64
+	reloc  135 offset  870 [223870] DIR64
+	reloc  136 offset  880 [223880] DIR64
+	reloc  137 offset  890 [223890] DIR64
+	reloc  138 offset  8a0 [2238a0] DIR64
+	reloc  139 offset  8b0 [2238b0] DIR64
+	reloc  140 offset  8c0 [2238c0] DIR64
+	reloc  141 offset  8d0 [2238d0] DIR64
+	reloc  142 offset  8e0 [2238e0] DIR64
+	reloc  143 offset  8f0 [2238f0] DIR64
+	reloc  144 offset  900 [223900] DIR64
+	reloc  145 offset  910 [223910] DIR64
+	reloc  146 offset  920 [223920] DIR64
+	reloc  147 offset  930 [223930] DIR64
+	reloc  148 offset  940 [223940] DIR64
+	reloc  149 offset  950 [223950] DIR64
+	reloc  150 offset  960 [223960] DIR64
+	reloc  151 offset  970 [223970] DIR64
+	reloc  152 offset  980 [223980] DIR64
+	reloc  153 offset  990 [223990] DIR64
+	reloc  154 offset  9a0 [2239a0] DIR64
+	reloc  155 offset  9b0 [2239b0] DIR64
+	reloc  156 offset  9c0 [2239c0] DIR64
+	reloc  157 offset  9d0 [2239d0] DIR64
+	reloc  158 offset  9e0 [2239e0] DIR64
+	reloc  159 offset  9f0 [2239f0] DIR64
+	reloc  160 offset  a00 [223a00] DIR64
+	reloc  161 offset  a10 [223a10] DIR64
+	reloc  162 offset  a20 [223a20] DIR64
+	reloc  163 offset  a30 [223a30] DIR64
+	reloc  164 offset  a40 [223a40] DIR64
+	reloc  165 offset  a50 [223a50] DIR64
+	reloc  166 offset  a60 [223a60] DIR64
+	reloc  167 offset  a70 [223a70] DIR64
+	reloc  168 offset  a80 [223a80] DIR64
+	reloc  169 offset  a90 [223a90] DIR64
+	reloc  170 offset  aa0 [223aa0] DIR64
+	reloc  171 offset  ab0 [223ab0] DIR64
+	reloc  172 offset  ac0 [223ac0] DIR64
+	reloc  173 offset  ad0 [223ad0] DIR64
+	reloc  174 offset  ae0 [223ae0] DIR64
+	reloc  175 offset  af0 [223af0] DIR64
+	reloc  176 offset  b00 [223b00] DIR64
+	reloc  177 offset  b10 [223b10] DIR64
+	reloc  178 offset  b20 [223b20] DIR64
+	reloc  179 offset  b30 [223b30] DIR64
+	reloc  180 offset  b40 [223b40] DIR64
+	reloc  181 offset  b50 [223b50] DIR64
+	reloc  182 offset  b60 [223b60] DIR64
+	reloc  183 offset  b70 [223b70] DIR64
+	reloc  184 offset  b80 [223b80] DIR64
+	reloc  185 offset  b90 [223b90] DIR64
+	reloc  186 offset  ba0 [223ba0] DIR64
+	reloc  187 offset  bb0 [223bb0] DIR64
+	reloc  188 offset  bc0 [223bc0] DIR64
+	reloc  189 offset  bd0 [223bd0] DIR64
+	reloc  190 offset  be0 [223be0] DIR64
+	reloc  191 offset  bf0 [223bf0] DIR64
+	reloc  192 offset  c00 [223c00] DIR64
+	reloc  193 offset  c10 [223c10] DIR64
+	reloc  194 offset  c20 [223c20] DIR64
+	reloc  195 offset  c30 [223c30] DIR64
+	reloc  196 offset  c40 [223c40] DIR64
+	reloc  197 offset  c50 [223c50] DIR64
+	reloc  198 offset  c60 [223c60] DIR64
+	reloc  199 offset  c70 [223c70] DIR64
+	reloc  200 offset  c80 [223c80] DIR64
+	reloc  201 offset  c90 [223c90] DIR64
+	reloc  202 offset  ca0 [223ca0] DIR64
+	reloc  203 offset  cb0 [223cb0] DIR64
+	reloc  204 offset  cc0 [223cc0] DIR64
+	reloc  205 offset  cd0 [223cd0] DIR64
+	reloc  206 offset  ce0 [223ce0] DIR64
+	reloc  207 offset  cf0 [223cf0] DIR64
+	reloc  208 offset  d00 [223d00] DIR64
+	reloc  209 offset  d10 [223d10] DIR64
+	reloc  210 offset  d20 [223d20] DIR64
+	reloc  211 offset  d30 [223d30] DIR64
+	reloc  212 offset  d40 [223d40] DIR64
+	reloc  213 offset  d50 [223d50] DIR64
+	reloc  214 offset  d60 [223d60] DIR64
+	reloc  215 offset  d70 [223d70] DIR64
+	reloc  216 offset  d80 [223d80] DIR64
+	reloc  217 offset  d90 [223d90] DIR64
+	reloc  218 offset  da0 [223da0] DIR64
+	reloc  219 offset  db0 [223db0] DIR64
+	reloc  220 offset  dc0 [223dc0] DIR64
+	reloc  221 offset  dd0 [223dd0] DIR64
+	reloc  222 offset  de0 [223de0] DIR64
+	reloc  223 offset  df0 [223df0] DIR64
+	reloc  224 offset  e00 [223e00] DIR64
+	reloc  225 offset  e10 [223e10] DIR64
+	reloc  226 offset  e20 [223e20] DIR64
+	reloc  227 offset  e30 [223e30] DIR64
+	reloc  228 offset  e40 [223e40] DIR64
+	reloc  229 offset  e50 [223e50] DIR64
+	reloc  230 offset  e60 [223e60] DIR64
+	reloc  231 offset  e70 [223e70] DIR64
+	reloc  232 offset  e80 [223e80] DIR64
+	reloc  233 offset  e90 [223e90] DIR64
+	reloc  234 offset  ea0 [223ea0] DIR64
+	reloc  235 offset  eb0 [223eb0] DIR64
+	reloc  236 offset  ec0 [223ec0] DIR64
+	reloc  237 offset  ed0 [223ed0] DIR64
+	reloc  238 offset  ee0 [223ee0] DIR64
+	reloc  239 offset  ef0 [223ef0] DIR64
+	reloc  240 offset  f00 [223f00] DIR64
+	reloc  241 offset  f10 [223f10] DIR64
+	reloc  242 offset  f20 [223f20] DIR64
+	reloc  243 offset  f30 [223f30] DIR64
+	reloc  244 offset  f40 [223f40] DIR64
+	reloc  245 offset  f50 [223f50] DIR64
+	reloc  246 offset  f60 [223f60] DIR64
+	reloc  247 offset  f70 [223f70] DIR64
+	reloc  248 offset  f80 [223f80] DIR64
+	reloc  249 offset  f90 [223f90] DIR64
+	reloc  250 offset  fa0 [223fa0] DIR64
+	reloc  251 offset  fb0 [223fb0] DIR64
+	reloc  252 offset  fc0 [223fc0] DIR64
+	reloc  253 offset  fd0 [223fd0] DIR64
+	reloc  254 offset  fe0 [223fe0] DIR64
+	reloc  255 offset  ff0 [223ff0] DIR64
+
+Virtual Address: 00224000 Chunk size 520 (0x208) Number of fixups 256
+	reloc    0 offset    0 [224000] DIR64
+	reloc    1 offset   10 [224010] DIR64
+	reloc    2 offset   20 [224020] DIR64
+	reloc    3 offset   30 [224030] DIR64
+	reloc    4 offset   40 [224040] DIR64
+	reloc    5 offset   50 [224050] DIR64
+	reloc    6 offset   60 [224060] DIR64
+	reloc    7 offset   70 [224070] DIR64
+	reloc    8 offset   80 [224080] DIR64
+	reloc    9 offset   90 [224090] DIR64
+	reloc   10 offset   a0 [2240a0] DIR64
+	reloc   11 offset   b0 [2240b0] DIR64
+	reloc   12 offset   c0 [2240c0] DIR64
+	reloc   13 offset   d0 [2240d0] DIR64
+	reloc   14 offset   e0 [2240e0] DIR64
+	reloc   15 offset   f0 [2240f0] DIR64
+	reloc   16 offset  100 [224100] DIR64
+	reloc   17 offset  110 [224110] DIR64
+	reloc   18 offset  120 [224120] DIR64
+	reloc   19 offset  130 [224130] DIR64
+	reloc   20 offset  140 [224140] DIR64
+	reloc   21 offset  150 [224150] DIR64
+	reloc   22 offset  160 [224160] DIR64
+	reloc   23 offset  170 [224170] DIR64
+	reloc   24 offset  180 [224180] DIR64
+	reloc   25 offset  190 [224190] DIR64
+	reloc   26 offset  1a0 [2241a0] DIR64
+	reloc   27 offset  1b0 [2241b0] DIR64
+	reloc   28 offset  1c0 [2241c0] DIR64
+	reloc   29 offset  1d0 [2241d0] DIR64
+	reloc   30 offset  1e0 [2241e0] DIR64
+	reloc   31 offset  1f0 [2241f0] DIR64
+	reloc   32 offset  200 [224200] DIR64
+	reloc   33 offset  210 [224210] DIR64
+	reloc   34 offset  220 [224220] DIR64
+	reloc   35 offset  230 [224230] DIR64
+	reloc   36 offset  240 [224240] DIR64
+	reloc   37 offset  250 [224250] DIR64
+	reloc   38 offset  260 [224260] DIR64
+	reloc   39 offset  270 [224270] DIR64
+	reloc   40 offset  280 [224280] DIR64
+	reloc   41 offset  290 [224290] DIR64
+	reloc   42 offset  2a0 [2242a0] DIR64
+	reloc   43 offset  2b0 [2242b0] DIR64
+	reloc   44 offset  2c0 [2242c0] DIR64
+	reloc   45 offset  2d0 [2242d0] DIR64
+	reloc   46 offset  2e0 [2242e0] DIR64
+	reloc   47 offset  2f0 [2242f0] DIR64
+	reloc   48 offset  300 [224300] DIR64
+	reloc   49 offset  310 [224310] DIR64
+	reloc   50 offset  320 [224320] DIR64
+	reloc   51 offset  330 [224330] DIR64
+	reloc   52 offset  340 [224340] DIR64
+	reloc   53 offset  350 [224350] DIR64
+	reloc   54 offset  360 [224360] DIR64
+	reloc   55 offset  370 [224370] DIR64
+	reloc   56 offset  380 [224380] DIR64
+	reloc   57 offset  390 [224390] DIR64
+	reloc   58 offset  3a0 [2243a0] DIR64
+	reloc   59 offset  3b0 [2243b0] DIR64
+	reloc   60 offset  3c0 [2243c0] DIR64
+	reloc   61 offset  3d0 [2243d0] DIR64
+	reloc   62 offset  3e0 [2243e0] DIR64
+	reloc   63 offset  3f0 [2243f0] DIR64
+	reloc   64 offset  400 [224400] DIR64
+	reloc   65 offset  410 [224410] DIR64
+	reloc   66 offset  420 [224420] DIR64
+	reloc   67 offset  430 [224430] DIR64
+	reloc   68 offset  440 [224440] DIR64
+	reloc   69 offset  450 [224450] DIR64
+	reloc   70 offset  460 [224460] DIR64
+	reloc   71 offset  470 [224470] DIR64
+	reloc   72 offset  480 [224480] DIR64
+	reloc   73 offset  490 [224490] DIR64
+	reloc   74 offset  4a0 [2244a0] DIR64
+	reloc   75 offset  4b0 [2244b0] DIR64
+	reloc   76 offset  4c0 [2244c0] DIR64
+	reloc   77 offset  4d0 [2244d0] DIR64
+	reloc   78 offset  4e0 [2244e0] DIR64
+	reloc   79 offset  4f0 [2244f0] DIR64
+	reloc   80 offset  500 [224500] DIR64
+	reloc   81 offset  510 [224510] DIR64
+	reloc   82 offset  520 [224520] DIR64
+	reloc   83 offset  530 [224530] DIR64
+	reloc   84 offset  540 [224540] DIR64
+	reloc   85 offset  550 [224550] DIR64
+	reloc   86 offset  560 [224560] DIR64
+	reloc   87 offset  570 [224570] DIR64
+	reloc   88 offset  580 [224580] DIR64
+	reloc   89 offset  590 [224590] DIR64
+	reloc   90 offset  5a0 [2245a0] DIR64
+	reloc   91 offset  5b0 [2245b0] DIR64
+	reloc   92 offset  5c0 [2245c0] DIR64
+	reloc   93 offset  5d0 [2245d0] DIR64
+	reloc   94 offset  5e0 [2245e0] DIR64
+	reloc   95 offset  5f0 [2245f0] DIR64
+	reloc   96 offset  600 [224600] DIR64
+	reloc   97 offset  610 [224610] DIR64
+	reloc   98 offset  620 [224620] DIR64
+	reloc   99 offset  630 [224630] DIR64
+	reloc  100 offset  640 [224640] DIR64
+	reloc  101 offset  650 [224650] DIR64
+	reloc  102 offset  660 [224660] DIR64
+	reloc  103 offset  670 [224670] DIR64
+	reloc  104 offset  680 [224680] DIR64
+	reloc  105 offset  690 [224690] DIR64
+	reloc  106 offset  6a0 [2246a0] DIR64
+	reloc  107 offset  6b0 [2246b0] DIR64
+	reloc  108 offset  6c0 [2246c0] DIR64
+	reloc  109 offset  6d0 [2246d0] DIR64
+	reloc  110 offset  6e0 [2246e0] DIR64
+	reloc  111 offset  6f0 [2246f0] DIR64
+	reloc  112 offset  700 [224700] DIR64
+	reloc  113 offset  710 [224710] DIR64
+	reloc  114 offset  720 [224720] DIR64
+	reloc  115 offset  730 [224730] DIR64
+	reloc  116 offset  740 [224740] DIR64
+	reloc  117 offset  750 [224750] DIR64
+	reloc  118 offset  760 [224760] DIR64
+	reloc  119 offset  770 [224770] DIR64
+	reloc  120 offset  780 [224780] DIR64
+	reloc  121 offset  790 [224790] DIR64
+	reloc  122 offset  7a0 [2247a0] DIR64
+	reloc  123 offset  7b0 [2247b0] DIR64
+	reloc  124 offset  7c0 [2247c0] DIR64
+	reloc  125 offset  7d0 [2247d0] DIR64
+	reloc  126 offset  7e0 [2247e0] DIR64
+	reloc  127 offset  7f0 [2247f0] DIR64
+	reloc  128 offset  800 [224800] DIR64
+	reloc  129 offset  810 [224810] DIR64
+	reloc  130 offset  820 [224820] DIR64
+	reloc  131 offset  830 [224830] DIR64
+	reloc  132 offset  840 [224840] DIR64
+	reloc  133 offset  850 [224850] DIR64
+	reloc  134 offset  860 [224860] DIR64
+	reloc  135 offset  870 [224870] DIR64
+	reloc  136 offset  880 [224880] DIR64
+	reloc  137 offset  890 [224890] DIR64
+	reloc  138 offset  8a0 [2248a0] DIR64
+	reloc  139 offset  8b0 [2248b0] DIR64
+	reloc  140 offset  8c0 [2248c0] DIR64
+	reloc  141 offset  8d0 [2248d0] DIR64
+	reloc  142 offset  8e0 [2248e0] DIR64
+	reloc  143 offset  8f0 [2248f0] DIR64
+	reloc  144 offset  900 [224900] DIR64
+	reloc  145 offset  910 [224910] DIR64
+	reloc  146 offset  920 [224920] DIR64
+	reloc  147 offset  930 [224930] DIR64
+	reloc  148 offset  940 [224940] DIR64
+	reloc  149 offset  950 [224950] DIR64
+	reloc  150 offset  960 [224960] DIR64
+	reloc  151 offset  970 [224970] DIR64
+	reloc  152 offset  980 [224980] DIR64
+	reloc  153 offset  990 [224990] DIR64
+	reloc  154 offset  9a0 [2249a0] DIR64
+	reloc  155 offset  9b0 [2249b0] DIR64
+	reloc  156 offset  9c0 [2249c0] DIR64
+	reloc  157 offset  9d0 [2249d0] DIR64
+	reloc  158 offset  9e0 [2249e0] DIR64
+	reloc  159 offset  9f0 [2249f0] DIR64
+	reloc  160 offset  a00 [224a00] DIR64
+	reloc  161 offset  a10 [224a10] DIR64
+	reloc  162 offset  a20 [224a20] DIR64
+	reloc  163 offset  a30 [224a30] DIR64
+	reloc  164 offset  a40 [224a40] DIR64
+	reloc  165 offset  a50 [224a50] DIR64
+	reloc  166 offset  a60 [224a60] DIR64
+	reloc  167 offset  a70 [224a70] DIR64
+	reloc  168 offset  a80 [224a80] DIR64
+	reloc  169 offset  a90 [224a90] DIR64
+	reloc  170 offset  aa0 [224aa0] DIR64
+	reloc  171 offset  ab0 [224ab0] DIR64
+	reloc  172 offset  ac0 [224ac0] DIR64
+	reloc  173 offset  ad0 [224ad0] DIR64
+	reloc  174 offset  ae0 [224ae0] DIR64
+	reloc  175 offset  af0 [224af0] DIR64
+	reloc  176 offset  b00 [224b00] DIR64
+	reloc  177 offset  b10 [224b10] DIR64
+	reloc  178 offset  b20 [224b20] DIR64
+	reloc  179 offset  b30 [224b30] DIR64
+	reloc  180 offset  b40 [224b40] DIR64
+	reloc  181 offset  b50 [224b50] DIR64
+	reloc  182 offset  b60 [224b60] DIR64
+	reloc  183 offset  b70 [224b70] DIR64
+	reloc  184 offset  b80 [224b80] DIR64
+	reloc  185 offset  b90 [224b90] DIR64
+	reloc  186 offset  ba0 [224ba0] DIR64
+	reloc  187 offset  bb0 [224bb0] DIR64
+	reloc  188 offset  bc0 [224bc0] DIR64
+	reloc  189 offset  bd0 [224bd0] DIR64
+	reloc  190 offset  be0 [224be0] DIR64
+	reloc  191 offset  bf0 [224bf0] DIR64
+	reloc  192 offset  c00 [224c00] DIR64
+	reloc  193 offset  c10 [224c10] DIR64
+	reloc  194 offset  c20 [224c20] DIR64
+	reloc  195 offset  c30 [224c30] DIR64
+	reloc  196 offset  c40 [224c40] DIR64
+	reloc  197 offset  c50 [224c50] DIR64
+	reloc  198 offset  c60 [224c60] DIR64
+	reloc  199 offset  c70 [224c70] DIR64
+	reloc  200 offset  c80 [224c80] DIR64
+	reloc  201 offset  c90 [224c90] DIR64
+	reloc  202 offset  ca0 [224ca0] DIR64
+	reloc  203 offset  cb0 [224cb0] DIR64
+	reloc  204 offset  cc0 [224cc0] DIR64
+	reloc  205 offset  cd0 [224cd0] DIR64
+	reloc  206 offset  ce0 [224ce0] DIR64
+	reloc  207 offset  cf0 [224cf0] DIR64
+	reloc  208 offset  d00 [224d00] DIR64
+	reloc  209 offset  d10 [224d10] DIR64
+	reloc  210 offset  d20 [224d20] DIR64
+	reloc  211 offset  d30 [224d30] DIR64
+	reloc  212 offset  d40 [224d40] DIR64
+	reloc  213 offset  d50 [224d50] DIR64
+	reloc  214 offset  d60 [224d60] DIR64
+	reloc  215 offset  d70 [224d70] DIR64
+	reloc  216 offset  d80 [224d80] DIR64
+	reloc  217 offset  d90 [224d90] DIR64
+	reloc  218 offset  da0 [224da0] DIR64
+	reloc  219 offset  db0 [224db0] DIR64
+	reloc  220 offset  dc0 [224dc0] DIR64
+	reloc  221 offset  dd0 [224dd0] DIR64
+	reloc  222 offset  de0 [224de0] DIR64
+	reloc  223 offset  df0 [224df0] DIR64
+	reloc  224 offset  e00 [224e00] DIR64
+	reloc  225 offset  e10 [224e10] DIR64
+	reloc  226 offset  e20 [224e20] DIR64
+	reloc  227 offset  e30 [224e30] DIR64
+	reloc  228 offset  e40 [224e40] DIR64
+	reloc  229 offset  e50 [224e50] DIR64
+	reloc  230 offset  e60 [224e60] DIR64
+	reloc  231 offset  e70 [224e70] DIR64
+	reloc  232 offset  e80 [224e80] DIR64
+	reloc  233 offset  e90 [224e90] DIR64
+	reloc  234 offset  ea0 [224ea0] DIR64
+	reloc  235 offset  eb0 [224eb0] DIR64
+	reloc  236 offset  ec0 [224ec0] DIR64
+	reloc  237 offset  ed0 [224ed0] DIR64
+	reloc  238 offset  ee0 [224ee0] DIR64
+	reloc  239 offset  ef0 [224ef0] DIR64
+	reloc  240 offset  f00 [224f00] DIR64
+	reloc  241 offset  f10 [224f10] DIR64
+	reloc  242 offset  f20 [224f20] DIR64
+	reloc  243 offset  f30 [224f30] DIR64
+	reloc  244 offset  f40 [224f40] DIR64
+	reloc  245 offset  f50 [224f50] DIR64
+	reloc  246 offset  f60 [224f60] DIR64
+	reloc  247 offset  f70 [224f70] DIR64
+	reloc  248 offset  f80 [224f80] DIR64
+	reloc  249 offset  f90 [224f90] DIR64
+	reloc  250 offset  fa0 [224fa0] DIR64
+	reloc  251 offset  fb0 [224fb0] DIR64
+	reloc  252 offset  fc0 [224fc0] DIR64
+	reloc  253 offset  fd0 [224fd0] DIR64
+	reloc  254 offset  fe0 [224fe0] DIR64
+	reloc  255 offset  ff0 [224ff0] DIR64
+
+Virtual Address: 00225000 Chunk size 676 (0x2a4) Number of fixups 334
+	reloc    0 offset    0 [225000] DIR64
+	reloc    1 offset   10 [225010] DIR64
+	reloc    2 offset   20 [225020] DIR64
+	reloc    3 offset   30 [225030] DIR64
+	reloc    4 offset   40 [225040] DIR64
+	reloc    5 offset   50 [225050] DIR64
+	reloc    6 offset   60 [225060] DIR64
+	reloc    7 offset   70 [225070] DIR64
+	reloc    8 offset   80 [225080] DIR64
+	reloc    9 offset   90 [225090] DIR64
+	reloc   10 offset   a0 [2250a0] DIR64
+	reloc   11 offset   b0 [2250b0] DIR64
+	reloc   12 offset   c0 [2250c0] DIR64
+	reloc   13 offset   d0 [2250d0] DIR64
+	reloc   14 offset   e0 [2250e0] DIR64
+	reloc   15 offset   f0 [2250f0] DIR64
+	reloc   16 offset  100 [225100] DIR64
+	reloc   17 offset  110 [225110] DIR64
+	reloc   18 offset  120 [225120] DIR64
+	reloc   19 offset  130 [225130] DIR64
+	reloc   20 offset  140 [225140] DIR64
+	reloc   21 offset  150 [225150] DIR64
+	reloc   22 offset  160 [225160] DIR64
+	reloc   23 offset  170 [225170] DIR64
+	reloc   24 offset  180 [225180] DIR64
+	reloc   25 offset  190 [225190] DIR64
+	reloc   26 offset  1a0 [2251a0] DIR64
+	reloc   27 offset  1b0 [2251b0] DIR64
+	reloc   28 offset  1c0 [2251c0] DIR64
+	reloc   29 offset  1d0 [2251d0] DIR64
+	reloc   30 offset  1e0 [2251e0] DIR64
+	reloc   31 offset  1f0 [2251f0] DIR64
+	reloc   32 offset  200 [225200] DIR64
+	reloc   33 offset  210 [225210] DIR64
+	reloc   34 offset  220 [225220] DIR64
+	reloc   35 offset  230 [225230] DIR64
+	reloc   36 offset  240 [225240] DIR64
+	reloc   37 offset  250 [225250] DIR64
+	reloc   38 offset  260 [225260] DIR64
+	reloc   39 offset  270 [225270] DIR64
+	reloc   40 offset  280 [225280] DIR64
+	reloc   41 offset  290 [225290] DIR64
+	reloc   42 offset  2a0 [2252a0] DIR64
+	reloc   43 offset  2b0 [2252b0] DIR64
+	reloc   44 offset  2c0 [2252c0] DIR64
+	reloc   45 offset  2d0 [2252d0] DIR64
+	reloc   46 offset  2e0 [2252e0] DIR64
+	reloc   47 offset  2f0 [2252f0] DIR64
+	reloc   48 offset  300 [225300] DIR64
+	reloc   49 offset  310 [225310] DIR64
+	reloc   50 offset  320 [225320] DIR64
+	reloc   51 offset  330 [225330] DIR64
+	reloc   52 offset  340 [225340] DIR64
+	reloc   53 offset  350 [225350] DIR64
+	reloc   54 offset  360 [225360] DIR64
+	reloc   55 offset  370 [225370] DIR64
+	reloc   56 offset  380 [225380] DIR64
+	reloc   57 offset  390 [225390] DIR64
+	reloc   58 offset  3a0 [2253a0] DIR64
+	reloc   59 offset  3b0 [2253b0] DIR64
+	reloc   60 offset  3c0 [2253c0] DIR64
+	reloc   61 offset  3d0 [2253d0] DIR64
+	reloc   62 offset  3e0 [2253e0] DIR64
+	reloc   63 offset  3f0 [2253f0] DIR64
+	reloc   64 offset  410 [225410] DIR64
+	reloc   65 offset  418 [225418] DIR64
+	reloc   66 offset  420 [225420] DIR64
+	reloc   67 offset  428 [225428] DIR64
+	reloc   68 offset  430 [225430] DIR64
+	reloc   69 offset  438 [225438] DIR64
+	reloc   70 offset  440 [225440] DIR64
+	reloc   71 offset  448 [225448] DIR64
+	reloc   72 offset  450 [225450] DIR64
+	reloc   73 offset  458 [225458] DIR64
+	reloc   74 offset  460 [225460] DIR64
+	reloc   75 offset  468 [225468] DIR64
+	reloc   76 offset  470 [225470] DIR64
+	reloc   77 offset  478 [225478] DIR64
+	reloc   78 offset  480 [225480] DIR64
+	reloc   79 offset  488 [225488] DIR64
+	reloc   80 offset  490 [225490] DIR64
+	reloc   81 offset  498 [225498] DIR64
+	reloc   82 offset  4a0 [2254a0] DIR64
+	reloc   83 offset  4d0 [2254d0] DIR64
+	reloc   84 offset  4d8 [2254d8] DIR64
+	reloc   85 offset  4e0 [2254e0] DIR64
+	reloc   86 offset  4e8 [2254e8] DIR64
+	reloc   87 offset  4f0 [2254f0] DIR64
+	reloc   88 offset  4f8 [2254f8] DIR64
+	reloc   89 offset  500 [225500] DIR64
+	reloc   90 offset  508 [225508] DIR64
+	reloc   91 offset  510 [225510] DIR64
+	reloc   92 offset  518 [225518] DIR64
+	reloc   93 offset  520 [225520] DIR64
+	reloc   94 offset  528 [225528] DIR64
+	reloc   95 offset  530 [225530] DIR64
+	reloc   96 offset  538 [225538] DIR64
+	reloc   97 offset  540 [225540] DIR64
+	reloc   98 offset  548 [225548] DIR64
+	reloc   99 offset  550 [225550] DIR64
+	reloc  100 offset  570 [225570] DIR64
+	reloc  101 offset  578 [225578] DIR64
+	reloc  102 offset  580 [225580] DIR64
+	reloc  103 offset  588 [225588] DIR64
+	reloc  104 offset  590 [225590] DIR64
+	reloc  105 offset  598 [225598] DIR64
+	reloc  106 offset  5a0 [2255a0] DIR64
+	reloc  107 offset  5a8 [2255a8] DIR64
+	reloc  108 offset  5b0 [2255b0] DIR64
+	reloc  109 offset  5b8 [2255b8] DIR64
+	reloc  110 offset  5c0 [2255c0] DIR64
+	reloc  111 offset  5c8 [2255c8] DIR64
+	reloc  112 offset  5d0 [2255d0] DIR64
+	reloc  113 offset  5d8 [2255d8] DIR64
+	reloc  114 offset  5e0 [2255e0] DIR64
+	reloc  115 offset  5e8 [2255e8] DIR64
+	reloc  116 offset  5f0 [2255f0] DIR64
+	reloc  117 offset  5f8 [2255f8] DIR64
+	reloc  118 offset  600 [225600] DIR64
+	reloc  119 offset  620 [225620] DIR64
+	reloc  120 offset  628 [225628] DIR64
+	reloc  121 offset  630 [225630] DIR64
+	reloc  122 offset  638 [225638] DIR64
+	reloc  123 offset  640 [225640] DIR64
+	reloc  124 offset  648 [225648] DIR64
+	reloc  125 offset  650 [225650] DIR64
+	reloc  126 offset  658 [225658] DIR64
+	reloc  127 offset  660 [225660] DIR64
+	reloc  128 offset  668 [225668] DIR64
+	reloc  129 offset  670 [225670] DIR64
+	reloc  130 offset  678 [225678] DIR64
+	reloc  131 offset  680 [225680] DIR64
+	reloc  132 offset  688 [225688] DIR64
+	reloc  133 offset  690 [225690] DIR64
+	reloc  134 offset  698 [225698] DIR64
+	reloc  135 offset  6a0 [2256a0] DIR64
+	reloc  136 offset  6a8 [2256a8] DIR64
+	reloc  137 offset  6b0 [2256b0] DIR64
+	reloc  138 offset  6d0 [2256d0] DIR64
+	reloc  139 offset  6d8 [2256d8] DIR64
+	reloc  140 offset  6e0 [2256e0] DIR64
+	reloc  141 offset  6e8 [2256e8] DIR64
+	reloc  142 offset  6f0 [2256f0] DIR64
+	reloc  143 offset  6f8 [2256f8] DIR64
+	reloc  144 offset  700 [225700] DIR64
+	reloc  145 offset  708 [225708] DIR64
+	reloc  146 offset  710 [225710] DIR64
+	reloc  147 offset  718 [225718] DIR64
+	reloc  148 offset  720 [225720] DIR64
+	reloc  149 offset  728 [225728] DIR64
+	reloc  150 offset  730 [225730] DIR64
+	reloc  151 offset  738 [225738] DIR64
+	reloc  152 offset  740 [225740] DIR64
+	reloc  153 offset  748 [225748] DIR64
+	reloc  154 offset  750 [225750] DIR64
+	reloc  155 offset  758 [225758] DIR64
+	reloc  156 offset  760 [225760] DIR64
+	reloc  157 offset  780 [225780] DIR64
+	reloc  158 offset  788 [225788] DIR64
+	reloc  159 offset  790 [225790] DIR64
+	reloc  160 offset  798 [225798] DIR64
+	reloc  161 offset  7a0 [2257a0] DIR64
+	reloc  162 offset  7a8 [2257a8] DIR64
+	reloc  163 offset  7b0 [2257b0] DIR64
+	reloc  164 offset  7b8 [2257b8] DIR64
+	reloc  165 offset  7c0 [2257c0] DIR64
+	reloc  166 offset  7c8 [2257c8] DIR64
+	reloc  167 offset  7d0 [2257d0] DIR64
+	reloc  168 offset  7d8 [2257d8] DIR64
+	reloc  169 offset  7e0 [2257e0] DIR64
+	reloc  170 offset  7e8 [2257e8] DIR64
+	reloc  171 offset  7f0 [2257f0] DIR64
+	reloc  172 offset  7f8 [2257f8] DIR64
+	reloc  173 offset  800 [225800] DIR64
+	reloc  174 offset  808 [225808] DIR64
+	reloc  175 offset  810 [225810] DIR64
+	reloc  176 offset  830 [225830] DIR64
+	reloc  177 offset  838 [225838] DIR64
+	reloc  178 offset  840 [225840] DIR64
+	reloc  179 offset  848 [225848] DIR64
+	reloc  180 offset  850 [225850] DIR64
+	reloc  181 offset  858 [225858] DIR64
+	reloc  182 offset  860 [225860] DIR64
+	reloc  183 offset  868 [225868] DIR64
+	reloc  184 offset  870 [225870] DIR64
+	reloc  185 offset  878 [225878] DIR64
+	reloc  186 offset  880 [225880] DIR64
+	reloc  187 offset  888 [225888] DIR64
+	reloc  188 offset  890 [225890] DIR64
+	reloc  189 offset  898 [225898] DIR64
+	reloc  190 offset  8a0 [2258a0] DIR64
+	reloc  191 offset  8a8 [2258a8] DIR64
+	reloc  192 offset  8b0 [2258b0] DIR64
+	reloc  193 offset  8b8 [2258b8] DIR64
+	reloc  194 offset  8c0 [2258c0] DIR64
+	reloc  195 offset  8e0 [2258e0] DIR64
+	reloc  196 offset  8e8 [2258e8] DIR64
+	reloc  197 offset  8f0 [2258f0] DIR64
+	reloc  198 offset  8f8 [2258f8] DIR64
+	reloc  199 offset  900 [225900] DIR64
+	reloc  200 offset  908 [225908] DIR64
+	reloc  201 offset  910 [225910] DIR64
+	reloc  202 offset  918 [225918] DIR64
+	reloc  203 offset  920 [225920] DIR64
+	reloc  204 offset  928 [225928] DIR64
+	reloc  205 offset  930 [225930] DIR64
+	reloc  206 offset  938 [225938] DIR64
+	reloc  207 offset  940 [225940] DIR64
+	reloc  208 offset  948 [225948] DIR64
+	reloc  209 offset  950 [225950] DIR64
+	reloc  210 offset  958 [225958] DIR64
+	reloc  211 offset  960 [225960] DIR64
+	reloc  212 offset  968 [225968] DIR64
+	reloc  213 offset  970 [225970] DIR64
+	reloc  214 offset  990 [225990] DIR64
+	reloc  215 offset  998 [225998] DIR64
+	reloc  216 offset  9a0 [2259a0] DIR64
+	reloc  217 offset  9a8 [2259a8] DIR64
+	reloc  218 offset  9b0 [2259b0] DIR64
+	reloc  219 offset  9b8 [2259b8] DIR64
+	reloc  220 offset  9c0 [2259c0] DIR64
+	reloc  221 offset  9c8 [2259c8] DIR64
+	reloc  222 offset  9d0 [2259d0] DIR64
+	reloc  223 offset  9d8 [2259d8] DIR64
+	reloc  224 offset  9e0 [2259e0] DIR64
+	reloc  225 offset  9e8 [2259e8] DIR64
+	reloc  226 offset  9f0 [2259f0] DIR64
+	reloc  227 offset  9f8 [2259f8] DIR64
+	reloc  228 offset  a00 [225a00] DIR64
+	reloc  229 offset  a08 [225a08] DIR64
+	reloc  230 offset  a10 [225a10] DIR64
+	reloc  231 offset  a18 [225a18] DIR64
+	reloc  232 offset  a20 [225a20] DIR64
+	reloc  233 offset  a40 [225a40] DIR64
+	reloc  234 offset  a48 [225a48] DIR64
+	reloc  235 offset  a50 [225a50] DIR64
+	reloc  236 offset  a58 [225a58] DIR64
+	reloc  237 offset  a60 [225a60] DIR64
+	reloc  238 offset  a68 [225a68] DIR64
+	reloc  239 offset  a70 [225a70] DIR64
+	reloc  240 offset  a78 [225a78] DIR64
+	reloc  241 offset  a80 [225a80] DIR64
+	reloc  242 offset  a88 [225a88] DIR64
+	reloc  243 offset  a90 [225a90] DIR64
+	reloc  244 offset  a98 [225a98] DIR64
+	reloc  245 offset  aa0 [225aa0] DIR64
+	reloc  246 offset  aa8 [225aa8] DIR64
+	reloc  247 offset  ab0 [225ab0] DIR64
+	reloc  248 offset  ab8 [225ab8] DIR64
+	reloc  249 offset  ac0 [225ac0] DIR64
+	reloc  250 offset  ac8 [225ac8] DIR64
+	reloc  251 offset  ad0 [225ad0] DIR64
+	reloc  252 offset  af0 [225af0] DIR64
+	reloc  253 offset  af8 [225af8] DIR64
+	reloc  254 offset  b00 [225b00] DIR64
+	reloc  255 offset  b08 [225b08] DIR64
+	reloc  256 offset  b10 [225b10] DIR64
+	reloc  257 offset  b18 [225b18] DIR64
+	reloc  258 offset  b20 [225b20] DIR64
+	reloc  259 offset  b28 [225b28] DIR64
+	reloc  260 offset  b30 [225b30] DIR64
+	reloc  261 offset  b38 [225b38] DIR64
+	reloc  262 offset  b40 [225b40] DIR64
+	reloc  263 offset  b48 [225b48] DIR64
+	reloc  264 offset  b50 [225b50] DIR64
+	reloc  265 offset  b58 [225b58] DIR64
+	reloc  266 offset  b60 [225b60] DIR64
+	reloc  267 offset  b68 [225b68] DIR64
+	reloc  268 offset  b70 [225b70] DIR64
+	reloc  269 offset  b78 [225b78] DIR64
+	reloc  270 offset  b80 [225b80] DIR64
+	reloc  271 offset  ba0 [225ba0] DIR64
+	reloc  272 offset  ba8 [225ba8] DIR64
+	reloc  273 offset  bb0 [225bb0] DIR64
+	reloc  274 offset  bb8 [225bb8] DIR64
+	reloc  275 offset  bc0 [225bc0] DIR64
+	reloc  276 offset  bc8 [225bc8] DIR64
+	reloc  277 offset  bd0 [225bd0] DIR64
+	reloc  278 offset  bd8 [225bd8] DIR64
+	reloc  279 offset  be0 [225be0] DIR64
+	reloc  280 offset  be8 [225be8] DIR64
+	reloc  281 offset  bf0 [225bf0] DIR64
+	reloc  282 offset  bf8 [225bf8] DIR64
+	reloc  283 offset  c00 [225c00] DIR64
+	reloc  284 offset  c08 [225c08] DIR64
+	reloc  285 offset  c10 [225c10] DIR64
+	reloc  286 offset  c18 [225c18] DIR64
+	reloc  287 offset  c20 [225c20] DIR64
+	reloc  288 offset  c28 [225c28] DIR64
+	reloc  289 offset  c30 [225c30] DIR64
+	reloc  290 offset  c50 [225c50] DIR64
+	reloc  291 offset  c58 [225c58] DIR64
+	reloc  292 offset  c60 [225c60] DIR64
+	reloc  293 offset  c68 [225c68] DIR64
+	reloc  294 offset  c70 [225c70] DIR64
+	reloc  295 offset  c78 [225c78] DIR64
+	reloc  296 offset  c80 [225c80] DIR64
+	reloc  297 offset  c88 [225c88] DIR64
+	reloc  298 offset  c90 [225c90] DIR64
+	reloc  299 offset  c98 [225c98] DIR64
+	reloc  300 offset  ca0 [225ca0] DIR64
+	reloc  301 offset  ca8 [225ca8] DIR64
+	reloc  302 offset  cb0 [225cb0] DIR64
+	reloc  303 offset  cb8 [225cb8] DIR64
+	reloc  304 offset  cc0 [225cc0] DIR64
+	reloc  305 offset  cc8 [225cc8] DIR64
+	reloc  306 offset  cd0 [225cd0] DIR64
+	reloc  307 offset  cd8 [225cd8] DIR64
+	reloc  308 offset  ce0 [225ce0] DIR64
+	reloc  309 offset  d00 [225d00] DIR64
+	reloc  310 offset  d08 [225d08] DIR64
+	reloc  311 offset  d10 [225d10] DIR64
+	reloc  312 offset  d18 [225d18] DIR64
+	reloc  313 offset  d20 [225d20] DIR64
+	reloc  314 offset  d28 [225d28] DIR64
+	reloc  315 offset  d30 [225d30] DIR64
+	reloc  316 offset  d38 [225d38] DIR64
+	reloc  317 offset  d40 [225d40] DIR64
+	reloc  318 offset  d48 [225d48] DIR64
+	reloc  319 offset  d50 [225d50] DIR64
+	reloc  320 offset  d58 [225d58] DIR64
+	reloc  321 offset  d70 [225d70] DIR64
+	reloc  322 offset  d78 [225d78] DIR64
+	reloc  323 offset  d80 [225d80] DIR64
+	reloc  324 offset  d88 [225d88] DIR64
+	reloc  325 offset  d90 [225d90] DIR64
+	reloc  326 offset  d98 [225d98] DIR64
+	reloc  327 offset  da0 [225da0] DIR64
+	reloc  328 offset  da8 [225da8] DIR64
+	reloc  329 offset  db0 [225db0] DIR64
+	reloc  330 offset  db8 [225db8] DIR64
+	reloc  331 offset  dc0 [225dc0] DIR64
+	reloc  332 offset  dc8 [225dc8] DIR64
+	reloc  333 offset    0 [225000] ABSOLUTE
+
+Virtual Address: 00230000 Chunk size 68 (0x44) Number of fixups 30
+	reloc    0 offset   a0 [2300a0] DIR64
+	reloc    1 offset  270 [230270] DIR64
+	reloc    2 offset  278 [230278] DIR64
+	reloc    3 offset  2a0 [2302a0] DIR64
+	reloc    4 offset  2b0 [2302b0] DIR64
+	reloc    5 offset  2c0 [2302c0] DIR64
+	reloc    6 offset  2d0 [2302d0] DIR64
+	reloc    7 offset  2e0 [2302e0] DIR64
+	reloc    8 offset  2f0 [2302f0] DIR64
+	reloc    9 offset  300 [230300] DIR64
+	reloc   10 offset  310 [230310] DIR64
+	reloc   11 offset  320 [230320] DIR64
+	reloc   12 offset  330 [230330] DIR64
+	reloc   13 offset  340 [230340] DIR64
+	reloc   14 offset  350 [230350] DIR64
+	reloc   15 offset  360 [230360] DIR64
+	reloc   16 offset  370 [230370] DIR64
+	reloc   17 offset  380 [230380] DIR64
+	reloc   18 offset  390 [230390] DIR64
+	reloc   19 offset  420 [230420] DIR64
+	reloc   20 offset  540 [230540] DIR64
+	reloc   21 offset  660 [230660] DIR64
+	reloc   22 offset  780 [230780] DIR64
+	reloc   23 offset  8a0 [2308a0] DIR64
+	reloc   24 offset  9c0 [2309c0] DIR64
+	reloc   25 offset  ae0 [230ae0] DIR64
+	reloc   26 offset  c00 [230c00] DIR64
+	reloc   27 offset  d20 [230d20] DIR64
+	reloc   28 offset  e40 [230e40] DIR64
+	reloc   29 offset  f60 [230f60] DIR64
+
+Virtual Address: 00231000 Chunk size 36 (0x24) Number of fixups 14
+	reloc    0 offset   80 [231080] DIR64
+	reloc    1 offset  1a0 [2311a0] DIR64
+	reloc    2 offset  2c0 [2312c0] DIR64
+	reloc    3 offset  3e0 [2313e0] DIR64
+	reloc    4 offset  500 [231500] DIR64
+	reloc    5 offset  620 [231620] DIR64
+	reloc    6 offset  740 [231740] DIR64
+	reloc    7 offset  860 [231860] DIR64
+	reloc    8 offset  980 [231980] DIR64
+	reloc    9 offset  aa0 [231aa0] DIR64
+	reloc   10 offset  bc0 [231bc0] DIR64
+	reloc   11 offset  ce0 [231ce0] DIR64
+	reloc   12 offset  e00 [231e00] DIR64
+	reloc   13 offset  f20 [231f20] DIR64
+
+Virtual Address: 00232000 Chunk size 36 (0x24) Number of fixups 14
+	reloc    0 offset   40 [232040] DIR64
+	reloc    1 offset  160 [232160] DIR64
+	reloc    2 offset  280 [232280] DIR64
+	reloc    3 offset  3a0 [2323a0] DIR64
+	reloc    4 offset  4c0 [2324c0] DIR64
+	reloc    5 offset  5e0 [2325e0] DIR64
+	reloc    6 offset  700 [232700] DIR64
+	reloc    7 offset  820 [232820] DIR64
+	reloc    8 offset  940 [232940] DIR64
+	reloc    9 offset  a60 [232a60] DIR64
+	reloc   10 offset  b80 [232b80] DIR64
+	reloc   11 offset  ca0 [232ca0] DIR64
+	reloc   12 offset  dc0 [232dc0] DIR64
+	reloc   13 offset  ee0 [232ee0] DIR64
+
+Virtual Address: 00233000 Chunk size 40 (0x28) Number of fixups 16
+	reloc    0 offset    0 [233000] DIR64
+	reloc    1 offset  120 [233120] DIR64
+	reloc    2 offset  240 [233240] DIR64
+	reloc    3 offset  360 [233360] DIR64
+	reloc    4 offset  480 [233480] DIR64
+	reloc    5 offset  5a0 [2335a0] DIR64
+	reloc    6 offset  6c0 [2336c0] DIR64
+	reloc    7 offset  7e0 [2337e0] DIR64
+	reloc    8 offset  900 [233900] DIR64
+	reloc    9 offset  a20 [233a20] DIR64
+	reloc   10 offset  b40 [233b40] DIR64
+	reloc   11 offset  c60 [233c60] DIR64
+	reloc   12 offset  d80 [233d80] DIR64
+	reloc   13 offset  ea0 [233ea0] DIR64
+	reloc   14 offset  fc0 [233fc0] DIR64
+	reloc   15 offset    0 [233000] ABSOLUTE
+
+Virtual Address: 00234000 Chunk size 16 (0x10) Number of fixups 4
+	reloc    0 offset   e0 [2340e0] DIR64
+	reloc    1 offset   e8 [2340e8] DIR64
+	reloc    2 offset   f0 [2340f0] DIR64
+	reloc    3 offset   f8 [2340f8] DIR64
+
+Virtual Address: 00236000 Chunk size 20 (0x14) Number of fixups 6
+	reloc    0 offset  ab8 [236ab8] DIR64
+	reloc    1 offset  ac0 [236ac0] DIR64
+	reloc    2 offset  c70 [236c70] DIR64
+	reloc    3 offset  c78 [236c78] DIR64
+	reloc    4 offset  ce0 [236ce0] DIR64
+	reloc    5 offset    0 [236000] ABSOLUTE
+
+Virtual Address: 0023a000 Chunk size 24 (0x18) Number of fixups 8
+	reloc    0 offset  fc0 [23afc0] DIR64
+	reloc    1 offset  fc8 [23afc8] DIR64
+	reloc    2 offset  fd0 [23afd0] DIR64
+	reloc    3 offset  fd8 [23afd8] DIR64
+	reloc    4 offset  fe0 [23afe0] DIR64
+	reloc    5 offset  fe8 [23afe8] DIR64
+	reloc    6 offset  ff0 [23aff0] DIR64
+	reloc    7 offset  ff8 [23aff8] DIR64
+
+Virtual Address: 0023b000 Chunk size 44 (0x2c) Number of fixups 18
+	reloc    0 offset    0 [23b000] DIR64
+	reloc    1 offset    8 [23b008] DIR64
+	reloc    2 offset   10 [23b010] DIR64
+	reloc    3 offset   18 [23b018] DIR64
+	reloc    4 offset   20 [23b020] DIR64
+	reloc    5 offset   28 [23b028] DIR64
+	reloc    6 offset   30 [23b030] DIR64
+	reloc    7 offset   38 [23b038] DIR64
+	reloc    8 offset   40 [23b040] DIR64
+	reloc    9 offset   48 [23b048] DIR64
+	reloc   10 offset   50 [23b050] DIR64
+	reloc   11 offset   58 [23b058] DIR64
+	reloc   12 offset  b60 [23bb60] DIR64
+	reloc   13 offset  b68 [23bb68] DIR64
+	reloc   14 offset  b70 [23bb70] DIR64
+	reloc   15 offset  b78 [23bb78] DIR64
+	reloc   16 offset  b80 [23bb80] DIR64
+	reloc   17 offset  b88 [23bb88] DIR64
+
+Virtual Address: 0023e000 Chunk size 24 (0x18) Number of fixups 8
+	reloc    0 offset  448 [23e448] DIR64
+	reloc    1 offset  450 [23e450] DIR64
+	reloc    2 offset  778 [23e778] DIR64
+	reloc    3 offset  780 [23e780] DIR64
+	reloc    4 offset  aa8 [23eaa8] DIR64
+	reloc    5 offset  ab0 [23eab0] DIR64
+	reloc    6 offset  dd8 [23edd8] DIR64
+	reloc    7 offset  de0 [23ede0] DIR64
+
+Virtual Address: 0023f000 Chunk size 28 (0x1c) Number of fixups 10
+	reloc    0 offset  108 [23f108] DIR64
+	reloc    1 offset  110 [23f110] DIR64
+	reloc    2 offset  438 [23f438] DIR64
+	reloc    3 offset  440 [23f440] DIR64
+	reloc    4 offset  768 [23f768] DIR64
+	reloc    5 offset  770 [23f770] DIR64
+	reloc    6 offset  a98 [23fa98] DIR64
+	reloc    7 offset  aa0 [23faa0] DIR64
+	reloc    8 offset  dc8 [23fdc8] DIR64
+	reloc    9 offset  dd0 [23fdd0] DIR64
+
+Virtual Address: 00241000 Chunk size 24 (0x18) Number of fixups 8
+	reloc    0 offset  820 [241820] DIR64
+	reloc    1 offset  828 [241828] DIR64
+	reloc    2 offset  830 [241830] DIR64
+	reloc    3 offset  838 [241838] DIR64
+	reloc    4 offset  840 [241840] DIR64
+	reloc    5 offset  848 [241848] DIR64
+	reloc    6 offset  850 [241850] DIR64
+	reloc    7 offset    0 [241000] ABSOLUTE
+
+Virtual Address: 00242000 Chunk size 28 (0x1c) Number of fixups 10
+	reloc    0 offset    0 [242000] DIR64
+	reloc    1 offset    8 [242008] DIR64
+	reloc    2 offset   10 [242010] DIR64
+	reloc    3 offset   18 [242018] DIR64
+	reloc    4 offset   20 [242020] DIR64
+	reloc    5 offset   28 [242028] DIR64
+	reloc    6 offset   30 [242030] DIR64
+	reloc    7 offset   38 [242038] DIR64
+	reloc    8 offset   40 [242040] DIR64
+	reloc    9 offset    0 [242000] ABSOLUTE
+

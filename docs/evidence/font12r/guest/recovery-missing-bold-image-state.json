@@ -1,0 +1,71 @@
+{
+  "image": "D:\\dev\\guideXOSServer_FONT_SUPPORT\\out\\font12r-validation\\guest\\font12r-recovery-missing-bold.img",
+  "volume": "raw FAT32; PIIX IDE primary master",
+  "mode": "inspect",
+  "entries": [
+    {
+      "path": "/kernel.elf",
+      "exists": true,
+      "bytes": 2813880,
+      "sha256": "9b8d1a86b5f2721f6a386fb40630aba85f842239d72b050a3f0a855fe2a668f3"
+    },
+    {
+      "path": "/system/fonts/Roboto-Regular.ttf",
+      "exists": true,
+      "bytes": 146004,
+      "sha256": "dbd285b518e398832f6f4a736109c355ce25a49546bfce41bab256c9ef7e56eb"
+    },
+    {
+      "path": "/system/fonts/Roboto-Bold.ttf",
+      "exists": false
+    },
+    {
+      "path": "/system/fonts/Roboto-Italic.ttf",
+      "exists": true,
+      "bytes": 152208,
+      "sha256": "5a2f18bddbe3ac07f14d38817d1fd22df4e8e3b74f661f7ae7b29cc8140092bc"
+    },
+    {
+      "path": "/FONTSEL0.CFG",
+      "exists": true,
+      "bytes": 1024,
+      "sha256": "c98ba834373c470b453c8edebe5102a1f246aea3dd403dd4257de508a8fa2bf6",
+      "preference": {
+        "format": "1",
+        "sequence": 31,
+        "kind": "truetype",
+        "pixelSize": 16,
+        "family": "Roboto",
+        "style": "Bold",
+        "path": "/system/fonts/Roboto-Bold.ttf",
+        "fileBytes": 146768,
+        "fingerprint": "d3a00d5e4a8f1de7",
+        "identity": "3d90e9fa85436469",
+        "checksum": "fae28b08",
+        "recordBytes": 1024,
+        "sha256": "c98ba834373c470b453c8edebe5102a1f246aea3dd403dd4257de508a8fa2bf6"
+      }
+    },
+    {
+      "path": "/fontsel1.cfg",
+      "exists": true,
+      "bytes": 1024,
+      "sha256": "9ad24a94cb8161e21d99db36b760d76fbc2a1a7ac60af7948759224d1e793d2c",
+      "preference": {
+        "format": "1",
+        "sequence": 32,
+        "kind": "truetype",
+        "pixelSize": 18,
+        "family": "Roboto",
+        "style": "Bold",
+        "path": "/system/fonts/Roboto-Bold.ttf",
+        "fileBytes": 146768,
+        "fingerprint": "d3a00d5e4a8f1de7",
+        "identity": "3d90e9fa85436469",
+        "checksum": "9a1318df",
+        "recordBytes": 1024,
+        "sha256": "9ad24a94cb8161e21d99db36b760d76fbc2a1a7ac60af7948759224d1e793d2c"
+      }
+    }
+  ]
+}

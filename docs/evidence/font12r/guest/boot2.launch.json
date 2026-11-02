@@ -1,0 +1,19 @@
+{
+  "purpose": "Fresh-process restart with saved Bold 18 selection",
+  "startedUtc": "2026-10-18T03:32:03.6558901Z",
+  "pid": 15976,
+  "executable": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+  "machine": "pc,accel=whpx",
+  "ramMiB": 1024,
+  "vcpus": 2,
+  "disk": "font12r-primary.img",
+  "diskFormat": "raw FAT32 on PIIX IDE primary master",
+  "firmware": "OVMF-font12r-code.fd",
+  "serial": "boot2.serial.log",
+  "qmp": "tcp:127.0.0.1:59348",
+  "vnc": "127.0.0.1:5950",
+  "network": "disabled",
+  "input": "QEMU PS/2 keyboard and relative mouse; no USB tablet",
+  "shutdown": "clean through guest shell",
+  "result": "fresh desktop reached and Settings launched; terminal covered the Settings System overview, so restored Fonts Current line and shell font appearance were not visibly qualified"
+}

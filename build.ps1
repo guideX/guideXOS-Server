@@ -48,13 +48,16 @@ function Build-WallpaperRuntimeImage {
         return
     }
 
-    if ($SkipWallpaperRuntimeImageBuild) {
+    $VerifiedFontPackageDir = Join-Path $RootDir "assets\Fonts\Roboto-v2.138-package"
+    if ($SkipWallpaperRuntimeImageBuild -and -not (Test-Path -LiteralPath $VerifiedFontPackageDir -PathType Container)) {
         $Ramdisk = Join-Path $ESPDir "ramdisk.img"
         if (Test-Path $Ramdisk) {
             Write-Host "      Reusing existing wallpaper runtime image..." -ForegroundColor DarkGray
             $script:WallpaperRuntimeImageBuilt = $true
             return
         }
+    } elseif ($SkipWallpaperRuntimeImageBuild) {
+        Write-Host "      Rebuilding wallpaper runtime image so it contains the pinned font package..." -ForegroundColor DarkGray
     }
 
     if (!(Test-Path $ESPDir)) {
@@ -67,9 +70,9 @@ function Build-WallpaperRuntimeImage {
         Write-Host "      Building wallpaper filesystem image..." -ForegroundColor Cyan
         $smokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1"
         if ($smokeCaFixture) {
-            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDirs @((Join-Path $RootDir "Apps\PacMan"), (Join-Path $RootDir "Apps\DeveloperStudio")) -SmokeCaFixture
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDirs @((Join-Path $RootDir "Apps\PacMan"), (Join-Path $RootDir "Apps\DeveloperStudio")) -VerifiedFontPackageDir $VerifiedFontPackageDir -SmokeCaFixture
         } else {
-            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDirs @((Join-Path $RootDir "Apps\PacMan"), (Join-Path $RootDir "Apps\DeveloperStudio"))
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -NativePackageDirs @((Join-Path $RootDir "Apps\PacMan"), (Join-Path $RootDir "Apps\DeveloperStudio")) -VerifiedFontPackageDir $VerifiedFontPackageDir
         }
         $script:WallpaperRuntimeImageBuilt = $true
     } elseif (!(Test-Path $Ramdisk)) {

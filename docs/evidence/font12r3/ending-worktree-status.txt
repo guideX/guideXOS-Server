@@ -1,0 +1,43 @@
+HEAD: 89a58151c19da3d6532d838ae3a29a2c0ab4711a
+Branch: FONT_SUPPORT
+
+## FONT_SUPPORT...origin/FONT_SUPPORT
+ M docs/fonts/FONT12_V03_RELEASE_QUALIFICATION.md
+ M scripts/run-native-filesystem-contract-test.ps1
+ M tests/native_abi_layout_test.cpp
+?? -OutputDirectory/
+?? System.Collections.Hashtable
+?? docs/evidence/font11/font11r-cancel-restored-active.png
+?? docs/evidence/font12r/
+?? docs/evidence/font12r2/
+?? docs/evidence/font12r3/
+?? out/font10-validation/
+?? out/font11-validation/
+?? out/font11r-validation/
+?? out/font12-validation/
+?? out/font12r-validation/
+?? out/font12r2-validation/
+?? out/font12r3-validation/
+?? out/font3-freetype-build/
+?? out/font3-freetype-probe.c
+?? out/font3-freetype-probe.o
+?? out/font3-freetype-source/
+?? out/font5-qemu-20261016-fontsupport/
+?? out/font6-build-final.log
+?? out/font6-build-proof-final.log
+?? out/font6-build-proof-final2.log
+?? out/font6-build-proof-final3.log
+?? out/font6-build-release-final.log
+?? out/font6-build-release-final2.log
+?? out/font6-build-release-final3.log
+?? out/font6-build.log
+?? out/font6-qemu-20261016-fontsupport-final/
+?? out/font6-qemu-20261016-fontsupport-final2/
+?? out/font6-qemu-20261016-fontsupport-final3/
+?? out/font6-qemu-20261016-fontsupport/
+?? out/font6-validation/
+?? out/font7-qemu-20261017-fontsupport/
+?? out/font7-validation/
+?? out/font8-qemu-20261017-fontsupport/
+?? out/font8-validation/
+?? out/font9-validation/

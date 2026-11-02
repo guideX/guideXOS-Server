@@ -1,0 +1,36 @@
+{
+  "observedUtc": "2026-10-18T04:48:06.5677482Z",
+  "ownedPid": 27340,
+  "ownedGuestStopped": true,
+  "stopMethod": "QMP quit to the verified private endpoint 127.0.0.1:59353",
+  "prelaunchForeignPids": [
+    34980
+  ],
+  "postrunQemuProcesses": [
+    {
+      "ProcessId": 34980,
+      "ParentProcessId": 14160,
+      "ExecutablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -machine pc-q35-8.2 -drive if=pflash,format=raw,readonly=on,file=C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/ovmf-code.fd -drive if=pflash,format=raw,file=C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/ovmf-vars.fd -drive if=none,id=esp,format=raw,file=fat:rw:ESP -device ide-hd,drive=esp -m 1280M -serial file:C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/serial.log -no-reboot -no-shutdown -boot menu=off,splash-time=0 -name guideXOS-R2-C -display none -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -d guest_errors,cpu_reset -D C:/gxR2/out/taskmanager-memorydetails-qualification-r2/evidence-r13-string-sites/C/qemu-debug.log -qmp tcp:127.0.0.1:64047,server=on,wait=off"
+    },
+    {
+      "ProcessId": 32712,
+      "ParentProcessId": 26136,
+      "ExecutablePath": "C:\\Program Files\\qemu\\qemu-system-x86_64.exe",
+      "CommandLine": "\"C:\\Program Files\\qemu\\qemu-system-x86_64.exe\" -accel tcg,thread=single -machine pc -smp 1 -drive if=pflash,format=raw,readonly=on,file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\OVMF.fd\" -drive file=\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c176-managed-notes-navigation\\c167\\settings-ui-proof-runs\\20261018-044504-50756cdd\\shared-writable-esp.img\",format=raw,if=ide,index=0 -m 1024M -vga std -display none -serial file:\"D:\\dev\\guideXOSServerV1.1_DOTNET_SUPPORT\\out\\dotnet\\c176-managed-notes-navigation\\c167\\settings-ui-proof-runs\\20261018-044504-50756cdd\\boot1\\serial.log\" -qmp tcp:127.0.0.1:56040,server,nowait -boot order=c -no-reboot -no-shutdown -rtc base=utc,clock=host "
+    }
+  ],
+  "selectedPorts": [
+    {
+      "port": 59353,
+      "free": true,
+      "listeners": []
+    },
+    {
+      "port": 5955,
+      "free": true,
+      "listeners": []
+    }
+  ],
+  "foreignGuestsContactedOrTerminated": false
+}
