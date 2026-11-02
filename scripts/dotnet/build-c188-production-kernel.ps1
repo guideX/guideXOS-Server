@@ -23,7 +23,8 @@ $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r3-init-return-contract')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4-threadstore-readiness')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5-gc-init-probes')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution')))
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)

@@ -31,10 +31,22 @@ if (-not $candidate.StartsWith($allowed, [System.StringComparison]::OrdinalIgnor
     throw "Candidate output must remain below out\dotnet: $candidate"
 }
 if ((Test-Path -LiteralPath $candidate) -and -not $ResumeCandidate) { throw "Refusing to overwrite candidate: $candidate" }
-if ($ResumeCandidate -and -not $candidate.StartsWith(
-    [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution')) + [System.IO.Path]::DirectorySeparatorChar,
-    [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw 'ResumeCandidate is limited to the isolated R2 output root.'
+if ($ResumeCandidate) {
+    $resumeRoots = @(
+        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution')),
+        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution'))
+    )
+    $resumeAllowed = $false
+    foreach ($resumeRoot in $resumeRoots) {
+        if ($candidate.StartsWith($resumeRoot + [System.IO.Path]::DirectorySeparatorChar,
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            $resumeAllowed = $true
+            break
+        }
+    }
+    if (-not $resumeAllowed) {
+        throw 'ResumeCandidate is limited to isolated R2 and R2R2 output roots.'
+    }
 }
 
 function Require-File([string]$Path, [string]$Label) {
