@@ -521,7 +521,11 @@ $branchMap = [ordered]@{
     vmResultValues = [ordered]@{ '0'='Ok'; '6'='AddressUnavailable'; '7'='OutOfMemory'; '13'='Unsupported'; '14'='HostFailure' }
 }
 $branchMap | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $branchMapPath -Encoding utf8
-$hostedTestRoot = Join-Path $candidate 'hosted-tests'
+$hostedTestRoot = if ($ResumeCandidate -and (Test-Path -LiteralPath (Join-Path $candidate 'hosted-tests'))) {
+    Join-Path $candidate ("hosted-tests-resume-{0}" -f [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
+} else {
+    Join-Path $candidate 'hosted-tests'
+}
 $hostedTestRunner = Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_native_alloc_hosted_tests.ps1'
 Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$hostedTestRunner,
     '-RepoRoot',$root,'-OutputDirectory',$hostedTestRoot,'-DiagnosticMap',$mapPath,

@@ -57,7 +57,7 @@ if (-not [string]::IsNullOrWhiteSpace($StartupImportsObject) -or
     $integrationBatch = Join-Path $output 'operator-new-integration-compile.bat'
     $integrationLines = @(
         '@echo off', 'setlocal', ('call "{0}" >nul' -f $vcvars), 'if errorlevel 1 exit /b %errorlevel%',
-        ('cl.exe /nologo /std:c++17 /MT /GS- /GR- /EHs-c- /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC /I"{0}" "{1}" "{2}" "{3}" "{4}" /Fe:"{5}"' -f $includeRoot,(Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_native_alloc_operator_new_test.cpp'),$recordSource,$StartupImportsObject,$PalContractObject,$integrationTestPath),
+        ('cl.exe /nologo /std:c++17 /MT /GS- /GR- /EHs-c- /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC /I"{0}" "{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link /FORCE:MULTIPLE' -f $includeRoot,(Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_native_alloc_operator_new_test.cpp'),$recordSource,$StartupImportsObject,$PalContractObject,$integrationTestPath),
         'if errorlevel 1 exit /b %errorlevel%', 'exit /b 0'
     )
     Set-Content -LiteralPath $integrationBatch -Value $integrationLines -Encoding ASCII
