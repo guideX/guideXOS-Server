@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "developerStudio": {
+    "repository": "git@github.com:guideX/guideX_Developer_Studio.git",
+    "revision": "058c83fe1ae270a103eadc7caca961328e8abe2a",
+    "sources": [
+      {
+        "path": "src/developer_studio_app_activation.cpp",
+        "blob": "c2fc30ae06bdaf3b7c64790f32ce8e656f110edf"
+      },
+      {
+        "path": "src/developer_studio_app_activation.h",
+        "blob": "28f146c3193dc72aafedc30e2c815dde0a5fe062"
+      },
+      {
+        "path": "tests/document_activation_abi_test.cpp",
+        "blob": "8dfb83fc9e3b592d7e11452146b355779893e1eb"
+      }
+    ]
+  },
+  "intendedV05Sdk": {
+    "repository": "git@github.com:guideX/guideXOS-Server.git",
+    "ref": "origin/v0.5_DEVELOPER_STUDIO",
+    "activationIntroducedRevision": "3b47738fbd4616990c05c11d6e1f88fe08d58b4c",
+    "contractRevision": "f63a7710a30b49f785aac134abf06a3a6c5b5aca",
+    "includeRoot": "sdk/include",
+    "abiHeaderPath": "sdk/include/guidexos/abi.h",
+    "abiHeaderSha256": "7fa89a1d996defa69fdeb0f03ea83b02276ce303ef3288f55e34f253756a08d7",
+    "headers": [
+      { "path": "sdk/include/guidexos/abi.h", "blob": "4513bb24930cf7a4069f5f82e51897d07bd52f4a" },
+      { "path": "sdk/include/guidexos/app.h", "blob": "92bef04c23af5cd9d1f8accfe713a3bec5373c18" },
+      { "path": "sdk/include/guidexos/types.h", "blob": "b6e74827c79d9f969b19625094bbfad890228476" },
+      { "path": "sdk/include/guidexos/build.h", "blob": "8979381c6a08bf9afc03eda18b8bcecc704b2802" },
+      { "path": "sdk/include/guidexos/development_run.h", "blob": "c5521391b3837100ba6d1a2554945d55ddda508a" },
+      { "path": "sdk/include/guidexos/development_debug.h", "blob": "d466a4326c50a53430cebbd5600888c4efc82211" }
+    ],
+    "abiLayoutTest": {
+      "path": "tests/native_abi_layout_test.cpp",
+      "blob": "a71b73c6b729589ed915e5d93008b2f1b49afc23"
+    },
+    "hostCallsSize": 464,
+    "documentActivationPathOffset": 448,
+    "bareMetalBuildStartOffset": 240
+  },
+  "aarch64ServerSdk": {
+    "baselineRevision": "1d596d4eaeb194bddeaae53f032b14989deac5df",
+    "includeRoot": "sdk/include",
+    "abiHeaderPath": "sdk/include/guidexos/abi.h",
+    "abiHeaderBlob": "97f49d2492e9c3c670b170f20358cb77f002c9d2",
+    "abiHeaderSha256": "10bf1243bf56bdf14170b24d90bc3b949f7a2ba75b6ce4b563d70e976a30f5d2",
+    "hostCallsSize": 400,
+    "guiVersionOffset": 240,
+    "bareMetalBuildStartOffset": 288,
+    "pointerBytes": 8,
+    "alignmentBytes": 8
+  }
+}

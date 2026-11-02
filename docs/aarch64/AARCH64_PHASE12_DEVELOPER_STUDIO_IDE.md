@@ -3,6 +3,13 @@
 **Status:** Complete on `AARCH64_SUPPORT` when the Phase 12 build and three
 fresh QEMU boots report `AARCH64_PHASE12_PASS`.
 
+**Current SDK alignment:** The standalone Developer Studio source currently
+expects the v0.5 464-byte host-call table, while this AARCH64 Server checkout
+uses a distinct 400-byte table. The current integration build is blocked until
+those components have a compatible contract. See
+[`AARCH64_ABI1_SDK_ALIGNMENT.md`](AARCH64_ABI1_SDK_ALIGNMENT.md) for source
+provenance, regression results, and the current qualification status.
+
 Phase 12 closes the SDK skew between the server and the standalone Developer
 Studio. The server SDK is the canonical ABI source. The Studio builds against
 that SDK for both hosted AMD64 and freestanding ARM64, and the normal App Model

@@ -28,6 +28,10 @@ static_assert(offsetof(gx_file_entry, reserved) == 4, "gx_file_entry reserved of
 static_assert(offsetof(gx_file_entry, size) == 8, "gx_file_entry size offset changed");
 static_assert(offsetof(gx_file_entry, name) == 16, "gx_file_entry name offset changed");
 static_assert(sizeof(gx_file_entry) == 144, "gx_file_entry size changed");
+static_assert(sizeof(void*) == 8, "Native ABI targets require 64-bit pointers");
+static_assert(alignof(gx_host_calls) == 8, "gx_host_calls natural alignment changed");
+static_assert(offsetof(gx_host_calls, size) == 0, "host-call size prefix moved");
+static_assert(offsetof(gx_host_calls, version) == 4, "host-call version prefix moved");
 static_assert(offsetof(gx_host_calls, log) == 8, "log slot changed");
 static_assert(offsetof(gx_host_calls, get_api_version) == 16, "get_api_version slot changed");
 static_assert(offsetof(gx_host_calls, request_window) == 24, "request_window slot changed");
