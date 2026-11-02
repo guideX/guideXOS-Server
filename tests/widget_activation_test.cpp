@@ -2,6 +2,7 @@
 #include "../kernel/core/include/kernel/disk_manager_wipe_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_whole_disk_erase_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_dismount_ui.h"
+#include "../kernel/core/include/kernel/disk_manager_input_focus.h"
 
 #include <cstdio>
 #include <cstring>
@@ -101,6 +102,100 @@ int main()
           "keyboard focus cannot activate a non-button widget");
     check(dispatch_widget_activation(&window, 21, modalClick) && modalClicks == 3,
           "pointer widget dispatch preserves text-box activation behavior");
+
+    using namespace kernel::apps::disk_manager_input_focus;
+    window.widgetCount = 3;
+    window.widgets[0] = make_button(60); // neighboring destructive action
+    window.widgets[1] = make_button(61); // Mount
+    window.widgets[2] = make_button(62); // Cancel
+    for (int i = 0; i < window.widgetCount; ++i) {
+        window.widgets[i].visible = true;
+        window.widgets[i].enabled = true;
+    }
+    uint8_t mountFocus = 2;
+    uint8_t keyboardPane = PANE_ACTIONS;
+    int actionFocus = 5;
+    int neighboringActions = 0;
+    int mounts = 0;
+    int cancellations = 0;
+    const auto mountDialogClick = [&window, &mounts, &cancellations,
+                                   &neighboringActions](int id) {
+        if (id == 60) {
+            ++neighboringActions;
+            return;
+        }
+        if (id == 61) ++mounts;
+        if (id == 62) ++cancellations;
+        window.widgets[1].visible = false;
+        window.widgets[1].enabled = false;
+        window.widgets[2].visible = false;
+        window.widgets[2].enabled = false;
+    };
+    check(mount_confirmation_action(mountFocus, '\n') ==
+              MOUNT_CONFIRMATION_CANCEL &&
+          mount_confirmation_action(mountFocus, 32) ==
+              MOUNT_CONFIRMATION_CANCEL,
+          "Mount confirmation starts with Cancel focus for Enter and Space");
+    check(mount_confirmation_action(mountFocus, '\n') ==
+              MOUNT_CONFIRMATION_CANCEL &&
+          dispatch_focused_button_activation(&window, 62,
+              focused_button_widget_id_for_index(mountFocus, 2, 62),
+              '\n', mountDialogClick) &&
+          cancellations == 1 && mounts == 0 && neighboringActions == 0,
+          "Enter on initial Cancel focus dismisses the dialog without Mount");
+    check(!dispatch_focused_button_activation(&window, 62,
+              focused_button_widget_id_for_index(mountFocus, 2, 62),
+              '\n', mountDialogClick) &&
+          cancellations == 1 && neighboringActions == 0,
+          "repeated key-down after Cancel cannot activate another control");
+    settle_storage_modal_focus(keyboardPane, actionFocus, MODAL_MOUNT);
+    check(keyboardPane == PANE_PARTITIONS && actionFocus == 0,
+          "Mount modal dismissal restores safe partition-pane focus");
+
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = true;
+    window.widgets[2].visible = true;
+    window.widgets[2].enabled = true;
+    mountFocus = next_mount_confirmation_focus(2);
+    check(mount_confirmation_action(2, 9) ==
+              MOUNT_CONFIRMATION_FOCUS_CHANGED &&
+          mount_confirmation_action(2, 0x107) ==
+              MOUNT_CONFIRMATION_FOCUS_CHANGED && mountFocus == 3 &&
+          mount_confirmation_action(mountFocus, '\r') ==
+              MOUNT_CONFIRMATION_CONFIRM &&
+          dispatch_focused_button_activation(&window, 61,
+              focused_button_widget_id_for_index(mountFocus, 3, 61),
+              '\r', mountDialogClick) &&
+          cancellations == 1 && mounts == 1 && neighboringActions == 0,
+          "Tab then Enter explicitly confirms through the focused Mount button");
+    check(!dispatch_focused_button_activation(&window, 61,
+              focused_button_widget_id_for_index(mountFocus, 3, 61),
+              '\r', mountDialogClick) &&
+          mounts == 1 && neighboringActions == 0,
+          "repeated key-down after Mount cannot activate another control");
+
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = true;
+    window.widgets[2].visible = true;
+    window.widgets[2].enabled = true;
+    mountFocus = 2;
+    check(mount_confirmation_action(mountFocus, 27) ==
+              MOUNT_CONFIRMATION_CANCEL &&
+          dispatch_button_activation(&window, 62, mountDialogClick) &&
+          cancellations == 2 && mounts == 1 && neighboringActions == 0,
+          "Escape and ordinary pointer dispatch cancel without mounting");
+    window.widgets[1].visible = true;
+    window.widgets[1].enabled = true;
+    window.widgets[2].visible = true;
+    window.widgets[2].enabled = true;
+    mountFocus = next_mount_confirmation_focus(2);
+    check(mount_confirmation_action(mountFocus, 32) ==
+              MOUNT_CONFIRMATION_CONFIRM &&
+          dispatch_focused_button_activation(&window, 61,
+              focused_button_widget_id_for_index(mountFocus, 3, 61),
+              32, mountDialogClick) &&
+          cancellations == 2 && mounts == 2 && neighboringActions == 0,
+          "focused Space activates Mount through the same one-shot button path");
 
     using namespace kernel::apps::disk_manager_wipe_ui;
     kernel::storage::PartitionWipeResult wipeProgress = {};

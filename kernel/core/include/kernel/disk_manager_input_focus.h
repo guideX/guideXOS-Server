@@ -21,6 +21,28 @@ enum StorageModal : uint8_t {
     MODAL_FAT32_CHECK,
 };
 
+enum MountConfirmationAction : uint8_t {
+    MOUNT_CONFIRMATION_NO_ACTION = 0,
+    MOUNT_CONFIRMATION_FOCUS_CHANGED,
+    MOUNT_CONFIRMATION_CANCEL,
+    MOUNT_CONFIRMATION_CONFIRM,
+};
+
+inline uint8_t next_mount_confirmation_focus(uint8_t focus) {
+    return focus == 2 ? 3 : 2;
+}
+
+inline MountConfirmationAction mount_confirmation_action(uint8_t focus,
+                                                           uint32_t key) {
+    if (key == 9 || key == 0x107)
+        return MOUNT_CONFIRMATION_FOCUS_CHANGED;
+    if (key == 27) return MOUNT_CONFIRMATION_CANCEL;
+    if (key == '\n' || key == '\r' || key == 32)
+        return focus == 3 ? MOUNT_CONFIRMATION_CONFIRM
+                          : MOUNT_CONFIRMATION_CANCEL;
+    return MOUNT_CONFIRMATION_NO_ACTION;
+}
+
 template <typename Pane>
 inline void settle_storage_modal_focus(Pane& pane, int& actionFocus,
                                        StorageModal modal) {

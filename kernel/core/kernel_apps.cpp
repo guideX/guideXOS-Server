@@ -7797,7 +7797,12 @@ void DiskManagerApp::updateInitializeControls() {
         else if (createOptions) confirmLabel = "Create";
         setWidgetText(m_confirmInitializeBtnId, confirmLabel);
     }
-    if (m_dialogIsGptRepair && gptRepairConfirm) {
+    if (m_mountDialogOpen) {
+        if (confirm) confirm->bgColor = m_createInputFocus == 3
+            ? 0xFF356A48 : 0xFF505060;
+        if (cancel) cancel->bgColor = m_createInputFocus == 2
+            ? 0xFF34465C : 0xFF505060;
+    } else if (m_dialogIsGptRepair && gptRepairConfirm) {
         app::Widget* focused = m_gptRepairButtonFocus == 0 ? cancel : confirm;
         if (focused && focused->visible && focused->enabled)
             focused->bgColor = 0xFF34465C;
@@ -8086,6 +8091,7 @@ void DiskManagerApp::selectListItem(int index) {
         m_selectedRegion = item.sourceIndex;
         m_selectedPart = -1;
     } else {
+        dm37_input_diagnostics::arm_selection_focus_checkpoint();
         m_selectedObject = SELECTED_PARTITION;
         m_selectedPart = item.sourceIndex;
         m_selectedRegion = -1;
@@ -8216,16 +8222,47 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
     const bool enter = key == '\n' || key == 13 || key == 32;
     const bool tab = key == '\t' || key == shell::KEY_TAB;
     if (m_mountDialogOpen) {
-        if (escape) {
-            m_mountDialogOpen = false;
-            disk_manager_input_focus::settle_storage_modal_focus(
-                m_keyboardPane, m_actionFocus,
-                disk_manager_input_focus::MODAL_MOUNT);
-            strcopy(m_statusMessage, "Mount canceled.", sizeof(m_statusMessage));
+        const uint32_t focusedWidgetId = m_createInputFocus == 3
+            ? static_cast<uint32_t>(m_confirmInitializeBtnId)
+            : (m_createInputFocus == 2
+                ? static_cast<uint32_t>(m_cancelInitializeBtnId) : 0u);
+        if (diagnosticSequence != 0) {
+            dm37_input_diagnostics::emit("mount-modal-focus",
+                diagnosticSequence, m_window ? m_window->id : 0,
+                focusedWidgetId);
+            dm37_input_diagnostics::emit("mount-key-route",
+                diagnosticSequence, key,
+                (static_cast<uint32_t>(m_createInputFocus) << 24) |
+                    (static_cast<uint32_t>(m_mountDialogOpen ? 1u : 0u) << 16));
+        }
+        const disk_manager_input_focus::MountConfirmationAction action =
+            disk_manager_input_focus::mount_confirmation_action(
+                m_createInputFocus, key);
+        if (action == disk_manager_input_focus::MOUNT_CONFIRMATION_FOCUS_CHANGED) {
+            m_createInputFocus =
+                disk_manager_input_focus::next_mount_confirmation_focus(
+                    m_createInputFocus);
             updateInitializeControls();
             invalidate();
-        } else if (enter) {
-            confirmPartitionMount();
+        } else if (action == disk_manager_input_focus::MOUNT_CONFIRMATION_CANCEL ||
+                   action == disk_manager_input_focus::MOUNT_CONFIRMATION_CONFIRM) {
+            const bool confirming =
+                action == disk_manager_input_focus::MOUNT_CONFIRMATION_CONFIRM;
+            const int targetWidgetId = confirming
+                ? m_confirmInitializeBtnId : m_cancelInitializeBtnId;
+            const int focusIndex = confirming ? 3 : 2;
+            const int focusedId = app::focused_button_widget_id_for_index(
+                m_createInputFocus, focusIndex, targetWidgetId);
+            const auto click = [this](int id) { onWidgetClick(id); };
+            const bool dispatched = key == 27
+                ? app::dispatch_button_activation(m_window, targetWidgetId,
+                                                   click)
+                : app::dispatch_focused_button_activation(m_window,
+                    targetWidgetId, focusedId, key, click);
+            if (diagnosticSequence != 0)
+                dm37_input_diagnostics::emit("mount-key-activation",
+                    diagnosticSequence, static_cast<uint32_t>(targetWidgetId),
+                    dispatched ? 1u : 0u);
         }
         return;
     }
@@ -8815,14 +8852,24 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         return;
     }
     if (m_mountDialogOpen && widgetId == m_confirmInitializeBtnId) {
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("mount-widget-activation",
+                diagnosticSequence, static_cast<uint32_t>(widgetId), 1u);
         confirmPartitionMount();
         return;
     }
     if (m_mountDialogOpen && widgetId == m_cancelInitializeBtnId) {
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("mount-widget-activation",
+                diagnosticSequence, static_cast<uint32_t>(widgetId), 0u);
         m_mountDialogOpen = false;
         disk_manager_input_focus::settle_storage_modal_focus(
             m_keyboardPane, m_actionFocus,
             disk_manager_input_focus::MODAL_MOUNT);
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("mount-modal-dismiss",
+                diagnosticSequence, static_cast<uint32_t>(m_keyboardPane),
+                static_cast<uint32_t>(m_actionFocus));
         strcopy(m_statusMessage, "Mount canceled.", sizeof(m_statusMessage));
         updateInitializeControls();
         invalidate();
@@ -13432,16 +13479,39 @@ void DiskManagerApp::beginMountDialog() {
          disk.capabilities.flushSemanticsKnown);
     m_mountDialogReadOnly = !disk.capabilities.writable || !durable;
     m_mountDialogOpen = true;
+    m_createInputFocus = 2;
+    dm37_input_diagnostics::arm_selection_focus_checkpoint();
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0) {
+        dm37_input_diagnostics::emit("mount-confirmation-open",
+            diagnosticSequence,
+            static_cast<uint32_t>(m_mountDialogDeviceIndex),
+            static_cast<uint32_t>(m_mountDialogPartition.partitionNumber));
+        dm37_input_diagnostics::emit("mount-modal-focus",
+            diagnosticSequence, m_window ? m_window->id : 0,
+            static_cast<uint32_t>(m_cancelInitializeBtnId));
+    }
     updateInitializeControls();
     invalidate();
 }
 
 void DiskManagerApp::confirmPartitionMount() {
     if (!m_mountDialogOpen) return;
+    const uint32_t diagnosticSequence =
+        dm37_input_diagnostics::current_sequence();
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("mount-handler-entry",
+            diagnosticSequence, m_mountDialogDeviceIndex,
+            m_mountDialogRegistrationId);
     const vfs::PartitionMountResult result = vfs::mount_partition_detailed(
         m_mountDialogPath, m_mountDialogDeviceIndex,
         m_mountDialogPartition.partitionNumber,
         m_mountDialogRegistrationId, &m_mountDialogPartition);
+    if (diagnosticSequence != 0)
+        dm37_input_diagnostics::emit("mount-vfs-result",
+            diagnosticSequence, static_cast<uint32_t>(result.error),
+            static_cast<uint32_t>(result.mountIndex));
     char status[128];
     if (result.error == vfs::PARTITION_MOUNT_OK) {
         const vfs::MountPoint* mount = vfs::get_mount_by_index(result.mountIndex);
