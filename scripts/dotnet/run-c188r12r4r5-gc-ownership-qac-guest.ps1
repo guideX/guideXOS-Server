@@ -4,7 +4,7 @@ param(
     [ValidateRange(1,60)][int]$AdmissionWindowSeconds = 30,
     [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1',
     [string]$CandidateIntegrityInventory = '',
-    [ValidateSet('R2R2R1','R2R2R2')][string]$NativeAllocationGuestAttempt = 'R2R2R1'
+    [ValidateSet('R2R2R1','R2R2R2','R2R2R3')][string]$NativeAllocationGuestAttempt = 'R2R2R1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -305,7 +305,8 @@ if ($isNativeAllocationFailureAttribution) {
 }
 
 $esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$runDirectory = if ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R2') { 'qac-guest-r2r2r2-001' }
+$runDirectory = if ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R3') { 'qac-guest-r2r2r3-001' }
+    elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R2') { 'qac-guest-r2r2r2-001' }
     elseif ($isNativeAllocationFailureAttribution) { 'qac-guest-r2r2r1-001' }
     elseif ($isSemiSharedAttribution) { 'qac-guest-r4r5r2r1-001' }
     elseif ($isGcInitFailureAttribution) { 'qac-guest-r4r5r1-001' }
@@ -865,7 +866,7 @@ try {
         $serialText = Read-GuestSerial
         if ($isNativeAllocationFailureAttribution) {
             $guestPass = (Test-NativeAllocationTraceComplete $serialText) -and
-                $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*rhResult=(?:0x)?[0-9A-F]{8}\s*$' -and
+                $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*?(?:rhResult|adapterStatus)=(?:0x)?[0-9A-F]{8}\s*$' -and
                 $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
         } elseif ($isGcInitFailureAttribution) {
             $r4FailureBoundary = $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)\s+' -or
@@ -896,7 +897,7 @@ try {
     $serialText = Read-GuestSerial
     if ($isNativeAllocationFailureAttribution) {
         $guestPass = (Test-NativeAllocationTraceComplete $serialText) -and
-            $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*rhResult=(?:0x)?[0-9A-F]{8}\s*$' -and
+            $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*?(?:rhResult|adapterStatus)=(?:0x)?[0-9A-F]{8}\s*$' -and
             $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
     } elseif ($isGcInitFailureAttribution) {
         $r4FailureBoundary = $serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:managed_entry_blocked_init_failure|transition_attach_incomplete)\s+' -or

@@ -1064,7 +1064,9 @@ void runOne(const uint8_t* artifact, size_t artifactSize,
 #if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 
 constexpr uint32_t kMaxGcEventSlots = 16u;
-constexpr uint32_t kMaxGcVmSlots = 16u;
+// Match the production NativeAOT PAL's VM slot capacity. The GC startup
+// adapter needs to track the same range of simultaneous reservations.
+constexpr uint32_t kMaxGcVmSlots = 256u;
 
 struct GcEventSlot {
     bool active;

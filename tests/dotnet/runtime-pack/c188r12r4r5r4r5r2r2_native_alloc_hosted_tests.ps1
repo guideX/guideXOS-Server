@@ -97,8 +97,10 @@ $guestRunner = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-
 if (-not (Test-Path -LiteralPath $guestRunner -PathType Leaf)) { throw "Native allocation QAC runner is missing: $guestRunner" }
 $guestRunnerText = Get-Content -LiteralPath $guestRunner -Raw
 if ($guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''NativeAllocationFailureAttribution''' -or
-    -not $guestRunnerText.Contains("[ValidateSet('R2R2R1','R2R2R2')][string]`$NativeAllocationGuestAttempt = 'R2R2R1'") -or
+    -not $guestRunnerText.Contains("[ValidateSet('R2R2R1','R2R2R2','R2R2R3')][string]`$NativeAllocationGuestAttempt = 'R2R2R1'") -or
     -not $guestRunnerText.Contains('qac-guest-r2r2r2-001') -or
+    -not $guestRunnerText.Contains('qac-guest-r2r2r3-001') -or
+    -not $guestRunnerText.Contains('(?:rhResult|adapterStatus)') -or
     -not $guestRunnerText.Contains('guest-launch-attempt-C188R12R4R5R4R5$NativeAllocationGuestAttempt.json') -or
     -not $guestRunnerText.Contains('nativeAllocationGuestAttempt=if($isNativeAllocationFailureAttribution){$NativeAllocationGuestAttempt}else{$null}') -or
     -not $guestRunnerText.Contains('[System.IO.FileMode]::CreateNew') -or
@@ -117,6 +119,12 @@ if ($guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[s
     -not $guestRunnerText.Contains('serialLog=$serial;serialLogSha256=') -or
     -not $guestRunnerText.Contains("[void](Invoke-Qmp 'quit')")) {
     throw 'Native allocation guest runner lacks its candidate gate, one-boot guard, complete trace, immutable raw serial, analyzer, ownership, or owned-shutdown contract.'
+}
+$gcStartupPalSource = Get-Content -LiteralPath (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') -Raw
+$productionPalSource = Get-Content -LiteralPath (Join-Path $root 'kernel\core\nativeaot_application.cpp') -Raw
+if (-not $gcStartupPalSource.Contains('constexpr uint32_t kMaxGcVmSlots = 256u;') -or
+    -not $productionPalSource.Contains('constexpr uint32_t kMaxVmSlots = 256u;')) {
+    throw 'The GC-startup PAL must retain the production NativeAOT PAL VM reservation-slot capacity.'
 }
 $runnerGuestGate = $guestRunnerText.IndexOf('Test-NativeAllocationTraceComplete $serialText')
 $runnerShutdown = $guestRunnerText.IndexOf("[void](Invoke-Qmp 'quit')")
@@ -169,7 +177,7 @@ function New-Fixture([string]$Kind) {
     $script:fixtureCounter++
     $inv = '00000001'
     $lines = [System.Collections.Generic.List[string]]::new()
-    $runtimeCount = if ($Kind -eq 'pal_not_ready') { 1 } else { 1 }
+    $runtimeCount = if ($Kind -eq 'kernel_slot_capacity') { 3 } else { 1 }
     $runtimeFailureOperation = [uint32]::MaxValue
     $runtimeFailureBranch = [uint32]::MaxValue
     $runtimeFailureStatus = [uint32]::MaxValue
@@ -178,7 +186,7 @@ function New-Fixture([string]$Kind) {
     $callbackEntered = 1u
     $runtimePointer = 1u
     $constructorEntered = 1u
-    $backendCount = 1u
+    $backendCount = if ($Kind -eq 'kernel_slot_capacity') { 7u } else { 1u }
     $backendOverflow = 0u
     $backendOperation = [uint32]::MaxValue
     $backendBranch = [uint32]::MaxValue
@@ -204,41 +212,65 @@ function New-Fixture([string]$Kind) {
         $backendStatus=0u; $backendStatusSource=2u; $reserveResult=[uint32]::MaxValue
         $commitResult=[uint32]::MaxValue; $releaseResult=[uint32]::MaxValue
     }
-    $summary = @(0x4E413232u,1u,$runtimeCount,0u,($(if ($runtimeFailureOperation -eq [uint32]::MaxValue) { [uint32]::MaxValue } else { 0u })),
+    $runtimeFirstFailed = if ($runtimeFailureOperation -eq [uint32]::MaxValue) { [uint32]::MaxValue } elseif ($Kind -eq 'kernel_slot_capacity') { 2u } else { 0u }
+    $summary = @(0x4E413232u,1u,$runtimeCount,0u,$runtimeFirstFailed,
         $runtimeFailureOperation,$runtimeFailureBranch,$runtimeFailureStatus,$runtimeFailureSource)
     for ($field=0; $field -lt $summary.Count; $field++) {
-        $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=runtime invocation={0} sequence=FFFFFFFF field={1:X8} value={2:X8} auxiliary=00000000' -f $inv,(0x80000000u+$field),$summary[$field]))
+        $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=runtime invocation={0} sequence=FFFFFFFF field={1:X8} value={2:X8} auxiliary=00000000' -f $inv,$field,$summary[$field]))
     }
-    $attempt = [uint32[]]::new(25)
-    for ($field=0; $field -lt $attempt.Length; $field++) { $attempt[$field]=[uint32]::MaxValue }
-    $attempt[0]=0u; $attempt[1]=0x0200u; $attempt[2]=2u; $attempt[3]=8u; $attempt[4]=0u
-    $attempt[5]=8u; $attempt[6]=0u; $attempt[7]=0x0201u; $attempt[8]=0x12345678u; $attempt[9]=0u
-    $attempt[10]=0x0202u; $attempt[11]=8u; $attempt[12]=0u; $attempt[13]=24u; $attempt[14]=0u
-    $attempt[15]=$palState; $attempt[16]=$callbackEntered; $attempt[17]=0x10000u; $attempt[18]=0u
-    $attempt[19]=$runtimePointer; $attempt[20]=$constructorEntered; $attempt[21]=$runtimeFailureOperation
-    $attempt[22]=$runtimeFailureBranch; $attempt[23]=$runtimeFailureStatus; $attempt[24]=$runtimeFailureSource
-    for ($field=0; $field -lt $attempt.Length; $field++) {
-        $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=runtime invocation={0} sequence=00000000 field={1:X8} value={2:X8} auxiliary=00000000' -f $inv,$field,$attempt[$field]))
+    for ($attemptIndex=0; $attemptIndex -lt $runtimeCount; $attemptIndex++) {
+        $attempt = [uint32[]]::new(25)
+        for ($field=0; $field -lt $attempt.Length; $field++) { $attempt[$field]=[uint32]::MaxValue }
+        $attempt[0]=[uint32]$attemptIndex; $attempt[1]=0x0200u; $attempt[2]=2u; $attempt[3]=8u; $attempt[4]=0u
+        $attempt[5]=8u; $attempt[6]=0u; $attempt[7]=0x0201u; $attempt[8]=0x12345678u; $attempt[9]=0u
+        $attempt[10]=0x0202u; $attempt[11]=8u; $attempt[12]=0u; $attempt[13]=24u; $attempt[14]=0u
+        $attempt[15]=$palState; $attempt[16]=$callbackEntered; $attempt[17]=0x10000u; $attempt[18]=0u
+        $isFailureAttempt = ($attemptIndex -eq ($runtimeCount - 1) -and $runtimeFailureOperation -ne [uint32]::MaxValue)
+        if ($isFailureAttempt) {
+            $attempt[17]=0u; $attempt[19]=0u; $attempt[20]=0u
+            $attempt[21]=$runtimeFailureOperation; $attempt[22]=$runtimeFailureBranch
+            $attempt[23]=$runtimeFailureStatus; $attempt[24]=$runtimeFailureSource
+        } else {
+            $attempt[19]=1u; $attempt[20]=1u
+        }
+        for ($field=0; $field -lt $attempt.Length; $field++) {
+            $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=runtime invocation={0} sequence={1:X8} field={2:X8} value={3:X8} auxiliary=00000000' -f $inv,$attemptIndex,$field,$attempt[$field]))
+        }
     }
     if ($Kind -ne 'pal_not_ready') {
         $backendSummaryKey = 0x80000000u
         $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field={1:X8} value={2:X8} auxiliary={3:X8}' -f $inv,$backendSummaryKey,$backendCount,$backendOverflow))
-        $firstFailed = if ($backendOperation -eq [uint32]::MaxValue) { [uint32]::MaxValue } else { 0u }
+        $firstFailed = if ($backendOperation -eq [uint32]::MaxValue) { [uint32]::MaxValue } elseif ($Kind -eq 'kernel_slot_capacity') { 6u } else { 0u }
         $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field=80000001 value={1:X8} auxiliary=00000000' -f $inv,$firstFailed))
     } else {
         $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field=80000000 value=00000000 auxiliary=00000000' -f $inv))
         $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field=80000001 value=FFFFFFFF auxiliary=00000000' -f $inv))
     }
     if ($Kind -ne 'pal_not_ready') {
-        $back = [uint32[]]::new(34)
-        for ($field=0; $field -lt $back.Length; $field++) { $back[$field]=[uint32]::MaxValue }
-        $back[0]=0u; $back[1]=24u; $back[2]=0x3000u; $back[3]=0x1000u; $back[4]=16u
-        $back[5]=0u; $back[6]=0u; $back[7]=1u; $back[8]=128u; $back[9]=$reserveResult
-        $back[10]=0x1000u; $back[11]=$commitResult; $back[12]=$releaseResult
-        $back[13]=$runtimePointer; $back[14]=$backendOperation; $back[15]=$backendBranch
-        $back[16]=$backendStatus; $back[17]=$backendStatusSource
-        for ($field=0; $field -lt $back.Length; $field++) {
-            $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=00000000 field={1:X8} value={2:X8} auxiliary=00000000' -f $inv,$field,$back[$field]))
+        for ($backendIndex=0; $backendIndex -lt $backendCount; $backendIndex++) {
+            $back = [uint32[]]::new(34)
+            for ($field=0; $field -lt $back.Length; $field++) { $back[$field]=[uint32]::MaxValue }
+            $back[0]=[uint32]$backendIndex; $back[1]=24u; $back[2]=0x3000u; $back[3]=0x1000u; $back[4]=16u
+            $back[5]=[uint32][Math]::Min(15,$backendIndex); $back[6]=[uint32][Math]::Min(15,$backendIndex)
+            $back[7]=1u; $back[8]=128u
+            if ($Kind -eq 'kernel_slot_capacity' -and $backendIndex -eq 6) {
+                $back[5]=16u; $back[6]=[uint32]::MaxValue; $back[9]=[uint32]::MaxValue
+                $back[10]=0u; $back[11]=[uint32]::MaxValue; $back[12]=[uint32]::MaxValue
+                $back[13]=0u; $back[14]=$backendOperation; $back[15]=$backendBranch
+                $back[16]=$backendStatus; $back[17]=$backendStatusSource
+            } elseif ($backendIndex -lt $backendCount -and $Kind -eq 'kernel_slot_capacity') {
+                $back[9]=0u; $back[10]=0x1000u; $back[11]=0u; $back[12]=[uint32]::MaxValue
+                $back[13]=1u; $back[14]=[uint32]::MaxValue; $back[15]=[uint32]::MaxValue
+                $back[16]=[uint32]::MaxValue; $back[17]=0u
+            } else {
+                $back[9]=$reserveResult; $back[10]=if ($Kind -eq 'vm_reserve_address') { 0u } else { 0x1000u }
+                $back[11]=$commitResult; $back[12]=$releaseResult; $back[13]=$runtimePointer
+                $back[14]=$backendOperation; $back[15]=$backendBranch
+                $back[16]=$backendStatus; $back[17]=$backendStatusSource
+            }
+            for ($field=0; $field -lt $back.Length; $field++) {
+                $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence={1:X8} field={2:X8} value={3:X8} auxiliary=00000000' -f $inv,$backendIndex,$field,$back[$field]))
+            }
         }
     }
     return ,$lines

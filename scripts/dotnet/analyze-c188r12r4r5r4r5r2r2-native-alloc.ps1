@@ -32,7 +32,11 @@ function Get-TraceField([string]$Source, [string]$Invocation, [uint32]$Sequence,
     return [uint32]::MaxValue
 }
 function Get-TraceSummary([string]$Source, [string]$Invocation, [uint32]$Field) {
-    return Get-TraceField $Source $Invocation ([uint32]::MaxValue) (0x80000000u -bor $Field)
+    $summaryField = if ($Source -ceq 'runtime') { $Field } else { 0x80000000u -bor $Field }
+    return Get-TraceField $Source $Invocation ([uint32]::MaxValue) $summaryField
+}
+function Test-TraceFieldPresent([string]$Source,[string]$Invocation,[uint32]$Sequence,[uint32]$Field) {
+    return $rows.ContainsKey("$Source/$Invocation/$Sequence/$Field")
 }
 
 $runtimeInvocations = @($rows.Keys | Where-Object { $_ -like 'runtime/*' } | ForEach-Object { ($_ -split '/')[1] } | Sort-Object -Unique)
@@ -45,6 +49,7 @@ if ($runtimeInvocations.Count -eq 0) {
         $overflow = Get-TraceSummary 'runtime' $invocation 3
         $summaryMissing = $count -eq [uint32]::MaxValue -or $overflow -eq [uint32]::MaxValue
         $backendCount = Get-TraceSummary 'backend' $invocation 0
+        $backendFirstFailureIndex = Get-TraceSummary 'backend' $invocation 1
         $backendSummaryField = [Convert]::ToUInt32('80000000',16)
         $backendSummaryKey = "backend/$invocation/$([uint32]::MaxValue)/$backendSummaryField"
         $backendOverflow = if ($auxiliaryRows.ContainsKey($backendSummaryKey)) { [uint32]$auxiliaryRows[$backendSummaryKey] } else { [uint32]::MaxValue }
@@ -69,15 +74,44 @@ if ($runtimeInvocations.Count -eq 0) {
             }
         }
 
+        $backendRecordComplete = ($backendCount -ne [uint32]::MaxValue -and
+            $backendCount -le 8 -and $backendOverflow -eq 0 -and
+            $backend.Count -eq $backendCount)
+        $backendFailureIndexes = @()
+        for ($backendIndex=0; $backendIndex -lt $backend.Count; $backendIndex++) {
+            $backendAttempt = $backend[$backendIndex]
+            for ($field=0; $field -lt 34; $field++) {
+                if (-not (Test-TraceFieldPresent 'backend' $invocation ([uint32]$backendIndex) ([uint32]$field))) {
+                    $backendRecordComplete = $false
+                }
+            }
+            if ($backendAttempt[0] -ne $backendIndex -or $backendAttempt[1] -ne 24 -or
+                $backendAttempt[2] -ne 0x3000 -or $backendAttempt[3] -ne 0x1000 -or
+                $backendAttempt[7] -ne 1) {
+                $backendRecordComplete = $false
+            }
+            if ($backendAttempt[14] -ne [uint32]::MaxValue) {
+                $backendFailureIndexes += $backendIndex
+            } elseif ($backendAttempt[9] -ne 0 -or $backendAttempt[10] -ne 0x1000 -or
+                      $backendAttempt[11] -ne 0 -or $backendAttempt[13] -ne 1) {
+                $backendRecordComplete = $false
+            }
+        }
+        if (($backendFirstFailureIndex -eq [uint32]::MaxValue -and $backendFailureIndexes.Count -ne 0) -or
+            ($backendFirstFailureIndex -ne [uint32]::MaxValue -and
+                ($backendFirstFailureIndex -ge $backend.Count -or $backendFailureIndexes.Count -ne 1 -or
+                 $backendFailureIndexes[0] -ne $backendFirstFailureIndex))) {
+            $backendRecordComplete = $false
+        }
+
         $classification = 'INCOMPLETE_DIAGNOSTIC_RECORD'
         $detail = 'A summary, bounded attempt, or required source field is missing or overflowed.'
         $firstFailure = $null
         $allocationResults = @()
         if (-not $summaryMissing -and $overflow -eq 0 -and $count -gt 0 -and $count -le 8 -and
-            $backendCount -ne [uint32]::MaxValue -and $backendCount -le 8 -and $backendOverflow -eq 0) {
+            $backendRecordComplete) {
             $classification = 'SUCCESS'
             $detail = 'All captured 8-byte event objects completed through the configured PAL and true-VM reserve/commit path.'
-            $backendOrdinal = 0
             $firstRuntimeFailure = [uint32]::MaxValue
             $runtimeRecordComplete = $true
             for ($index=0; $index -lt $count; $index++) {
@@ -114,38 +148,51 @@ if ($runtimeInvocations.Count -eq 0) {
                     $attemptClass = 'NATIVE_ALLOC_SIZE_OVERFLOW'
                     $attemptFailure = [ordered]@{ operation=('0x{0:X8}' -f $failureOperation); branch=('0x{0:X8}' -f $failureBranch); status=('0x{0:X8}' -f $failureStatus); statusSource=('0x{0:X8}' -f $failureStatusSource) }
                 } elseif ($callbackEntered -eq 1) {
-                    if ($backendOrdinal -ge $backend.Count) {
-                        $attemptClass = 'INCOMPLETE_BACKEND_RECORD'
-                    } else {
-                        $backAttempt = $backend[$backendOrdinal]
-                        if ($backAttempt[0] -ne $backendOrdinal -or $backAttempt[1] -ne 24 -or
-                            $backAttempt[2] -ne 0x3000 -or $backAttempt[3] -ne 0x1000 -or
-                            $backAttempt[7] -ne 1) { $runtimeRecordComplete=$false }
+                    if ($runtimePointer -eq 1 -and $constructorEntered -eq 1 -and
+                        $failureOperation -eq [uint32]::MaxValue -and
+                        $failureBranch -eq [uint32]::MaxValue) {
+                        $attemptClass = 'SUCCESS'
+                    } elseif ($runtimePointer -eq 0 -and $constructorEntered -eq 0 -and
+                              $failureOperation -eq 0x0203 -and $failureBranch -eq 0x0304 -and
+                              $backendFirstFailureIndex -ne [uint32]::MaxValue -and
+                              $backendFirstFailureIndex -lt $backend.Count) {
+                        $backAttempt = $backend[$backendFirstFailureIndex]
                         $operation = $backAttempt[14]
                         $branch = $backAttempt[15]
                         $status = $backAttempt[16]
                         $statusSource = $backAttempt[17]
-                        if ($runtimePointer -eq 0 -or $constructorEntered -eq 0) {
-                            if ($constructorEntered -ne 0) { $attemptClass='INCONSISTENT_CONSTRUCTOR_MARKER' }
-                            elseif ($operation -eq 0x0204 -and $branch -eq 0x0310) { $attemptClass='KERNEL_PAL_SLOT_CAPACITY' }
-                            elseif ($operation -eq 0x0205 -and $branch -ne [uint32]::MaxValue) { $attemptClass=('VM_RESERVE_BRANCH_0x{0:X4}' -f ($branch -band 0xFFFF)) }
-                            elseif ($operation -eq 0x0206 -and $branch -ne [uint32]::MaxValue) { $attemptClass=('VM_COMMIT_BRANCH_0x{0:X4}' -f ($branch -band 0xFFFF)) }
-                            elseif ($operation -eq 0x0207 -and $branch -ne [uint32]::MaxValue) { $attemptClass='VM_ROLLBACK_RELEASE_FAILURE' }
-                            elseif ($branch -eq 0x0304) { $attemptClass='BACKEND_NULL_CAUSE_UNRECORDED' }
-                            else { $attemptClass='INCOMPLETE_BACKEND_FAILURE_BRANCH' }
-                            if ($attemptClass -ne 'INCOMPLETE_BACKEND_FAILURE_BRANCH' -and $attemptClass -ne 'BACKEND_NULL_CAUSE_UNRECORDED' -and $attemptClass -ne 'INCONSISTENT_CONSTRUCTOR_MARKER') {
-                                $attemptFailure = [ordered]@{ operation=('0x{0:X8}' -f $operation); branch=('0x{0:X8}' -f $branch); status=('0x{0:X8}' -f $status); statusSource=('0x{0:X8}' -f $statusSource) }
-                            }
-                        } elseif ($runtimePointer -eq 1 -and $constructorEntered -eq 1 -and
-                                  $backAttempt[9] -eq 0 -and $backAttempt[10] -eq 0x1000 -and
-                                  $backAttempt[11] -eq 0 -and $backAttempt[13] -eq 1 -and
-                                  $operation -eq [uint32]::MaxValue -and $branch -eq [uint32]::MaxValue) {
-                            $attemptClass = 'SUCCESS'
+                        if ($operation -eq 0x0204 -and $branch -eq 0x0310) {
+                            if ($backAttempt[4] -eq 0 -or $backAttempt[5] -ne $backAttempt[4] -or
+                                $backAttempt[6] -ne [uint32]::MaxValue -or $backAttempt[7] -ne 1 -or
+                                $backAttempt[9] -ne [uint32]::MaxValue -or $backAttempt[10] -ne 0 -or
+                                $backAttempt[11] -ne [uint32]::MaxValue -or $backAttempt[13] -ne 0) {
+                                $attemptClass='INCOMPLETE_BACKEND_RECORD'
+                            } else { $attemptClass='KERNEL_PAL_SLOT_CAPACITY' }
+                        } elseif ($operation -eq 0x0205 -and $branch -ne [uint32]::MaxValue) {
+                            $attemptClass=('VM_RESERVE_BRANCH_0x{0:X4}' -f ($branch -band 0xFFFF))
+                        } elseif ($operation -eq 0x0206 -and $branch -ne [uint32]::MaxValue) {
+                            $attemptClass=('VM_COMMIT_BRANCH_0x{0:X4}' -f ($branch -band 0xFFFF))
+                        } elseif ($operation -eq 0x0207 -and $branch -ne [uint32]::MaxValue) {
+                            $attemptClass='VM_ROLLBACK_RELEASE_FAILURE'
                         } else {
-                            $attemptClass = 'INCOMPLETE_BACKEND_RECORD'
+                            $attemptClass='INCOMPLETE_BACKEND_FAILURE_BRANCH'
                         }
+                        if ($attemptClass -notin @('INCOMPLETE_BACKEND_FAILURE_BRANCH','INCOMPLETE_BACKEND_RECORD')) {
+                            $attemptFailure = [ordered]@{
+                                operation=('0x{0:X8}' -f $operation); branch=('0x{0:X8}' -f $branch)
+                                status=('0x{0:X8}' -f $status); statusSource=('0x{0:X8}' -f $statusSource)
+                                backendAttemptIndex=[int]$backendFirstFailureIndex
+                                requestSize=('0x{0:X}' -f $backAttempt[1])
+                                slotCapacity=[int]$backAttempt[4]; activeSlots=[int]$backAttempt[5]
+                                freeSlotIndex=('0x{0:X8}' -f $backAttempt[6])
+                                addressSpaceReady=[bool]$backAttempt[7]
+                                vmRegionCapacity=[int]$backAttempt[8]
+                            }
+                        }
+                    } elseif ($runtimePointer -eq 0 -and $constructorEntered -eq 0 -and
+                              $failureOperation -eq 0x0203 -and $failureBranch -eq 0x0304) {
+                        $attemptClass = 'BACKEND_NULL_CAUSE_UNRECORDED'
                     }
-                    $backendOrdinal++
                 } else {
                     $attemptClass = 'INCOMPLETE_DIAGNOSTIC_RECORD'
                 }
@@ -156,9 +203,9 @@ if ($runtimeInvocations.Count -eq 0) {
                     $firstFailure = $attemptFailure
                 }
             }
-            if (-not $runtimeRecordComplete -or $backendOrdinal -ne $backend.Count) {
+            if (-not $runtimeRecordComplete) {
                 $classification='INCOMPLETE_DIAGNOSTIC_RECORD'
-                $detail='At least one runtime or backend attempt is missing, inconsistent, or outside the bounded contract.'
+                $detail='At least one runtime or backend record is missing, inconsistent, or outside the bounded contract.'
             }
             $summaryFirstFailure = Get-TraceSummary 'runtime' $invocation 4
             if ($firstRuntimeFailure -ne [uint32]::MaxValue) {
