@@ -209,11 +209,11 @@ void testCreationAndDetachedState()
     const std::size_t nodesBeforeUnsupported =
         harness.document().structuralElements.size();
     const ScriptResult unsupported = run(harness,
-        "var js106Unsupported = document.createElement(\"div\");");
+        "var js106Unsupported = document.createElement(\"article\");");
     expect(!unsupported.succeeded() &&
         unsupported.runtimeError.code == RuntimeErrorCode::HostInvalidValue &&
         harness.document().structuralElements.size() == nodesBeforeUnsupported,
-        "unsupported dynamic tags fail without allocating a node");
+        "tags outside the bounded span/div/p subset fail without allocation");
 }
 
 void testInsertUpdateRemoveReinsertAndSelectors()

@@ -19,6 +19,10 @@
 namespace gxos {
 namespace web {
 
+// The renderer's flat inline snapshot retains at most this many independent
+// top-level flows. Keep dynamic block admission on the same bound.
+constexpr size_t kWebMaxInlineLayoutFlows = 256u;
+
 // =============================================================================
 // Document model
 // =============================================================================

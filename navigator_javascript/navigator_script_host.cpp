@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cctype>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <new>
 #include <utility>
@@ -26,6 +27,7 @@ namespace {
 
 constexpr std::size_t kNavigatorMaxRenderableInlineItems = 2048u;
 constexpr std::size_t kNavigatorMaxDynamicInlineTextBytes = 4096u;
+constexpr std::size_t kNavigatorMaxDynamicBlockAncestorDepth = 12u;
 
 void resetSelectorDescriptor(NavigatorScriptSelectorDescriptor& selector)
 {
@@ -4207,29 +4209,33 @@ bool NavigatorScriptHostAdapter::resolveInlineRenderFlow(
     for (std::size_t depth = 0u; depth < depthLimit && current != 0u; ++depth) {
         const gxos::web::HtmlElementRef* element = findElement(current);
         if (element == nullptr) return false;
+        if (element->tagName == "body" || element->tagName == "div" ||
+            element->tagName == "p") {
+            for (const gxos::web::DocBlock& block : document_->blocks) {
+                if (block.inlineFlowSerial == current &&
+                    block.atomicContainerSerial == 0u) {
+                    flowSerial = current;
+                    return true;
+                }
+            }
+        }
         for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
-            if ((item.kind == gxos::web::InlineItemKind::ForcedBreak ||
+            const bool visibleText = item.kind ==
+                gxos::web::InlineItemKind::TextRun &&
+                std::any_of(item.text.begin(), item.text.end(),
+                    [](unsigned char character) {
+                        return character != ' ' && character != '\t' &&
+                            character != '\r' && character != '\n' &&
+                            character != '\f' && character != '\v';
+                    });
+            if ((visibleText || item.kind ==
+                    gxos::web::InlineItemKind::ForcedBreak ||
                     item.kind == gxos::web::InlineItemKind::ReplacedImage ||
-                    item.kind == gxos::web::InlineItemKind::FormControl ||
-                    (item.kind == gxos::web::InlineItemKind::TextRun &&
-                        std::any_of(item.text.begin(), item.text.end(),
-                            [](unsigned char character) {
-                                return character != ' ' && character != '\t' &&
-                                    character != '\r' && character != '\n' &&
-                                    character != '\f' && character != '\v';
-                            }))) &&
+                    item.kind == gxos::web::InlineItemKind::FormControl) &&
                 item.flowSerial != 0u &&
                 isDescendantOrSelf(current, item.flowSerial) &&
                 isDescendantOrSelf(item.ownerSerial, current)) {
                 flowSerial = item.flowSerial;
-                return true;
-            }
-        }
-        for (const gxos::web::DocBlock& block : document_->blocks) {
-            if ((element->tagName == "body" || element->tagName == "p") &&
-                block.inlineFlowSerial == current &&
-                block.atomicContainerSerial == 0u) {
-                flowSerial = current;
                 return true;
             }
         }
@@ -4248,12 +4254,19 @@ HostResult NavigatorScriptHostAdapter::createDynamicElement(
     if (document_ == nullptr || tagName.data == nullptr ||
         tagName.length == 0u || tagName.length > 16u)
         return HostResult{HostResultCode::InvalidValue};
-    bool isSpan = tagName.length == 4u;
-    for (std::size_t index = 0u; isSpan && index < tagName.length; ++index) {
-        isSpan = lowerAscii(static_cast<unsigned char>(tagName.data[index])) ==
-            static_cast<unsigned char>("span"[index]);
-    }
-    if (!isSpan) return HostResult{HostResultCode::InvalidValue};
+    const auto matchesTag = [&](const char* expected, std::size_t length) {
+        if (tagName.length != length) return false;
+        for (std::size_t index = 0u; index < length; ++index) {
+            if (lowerAscii(static_cast<unsigned char>(tagName.data[index])) !=
+                static_cast<unsigned char>(expected[index])) return false;
+        }
+        return true;
+    };
+    const bool isSpan = matchesTag("span", 4u);
+    const bool isDiv = matchesTag("div", 3u);
+    const bool isParagraph = matchesTag("p", 1u);
+    if (!isSpan && !isDiv && !isParagraph)
+        return HostResult{HostResultCode::InvalidValue};
     const std::size_t nodeLimit = std::min(limits_.maxDocumentNodes,
         kNavigatorScriptMaxDocumentNodes);
     if (document_->structuralElements.size() >= nodeLimit ||
@@ -4270,7 +4283,7 @@ HostResult NavigatorScriptHostAdapter::createDynamicElement(
     document_->structuralElements.reserve(nodeLimit);
     document_->contentMetadata.reserve(nodeLimit);
     gxos::web::HtmlElementRef element;
-    element.tagName = "span";
+    element.tagName = isSpan ? "span" : (isDiv ? "div" : "p");
     element.serial = document_->structuralElements.size() + 1u;
     gxos::web::HtmlElementContentMetadata content;
     content.serial = element.serial;
@@ -4391,6 +4404,178 @@ bool NavigatorScriptHostAdapter::setSubtreeConnectionAndFlow(
     return true;
 }
 
+bool NavigatorScriptHostAdapter::rebuildDynamicBlockProjections()
+{
+    if (document_ == nullptr) return false;
+    const std::size_t nodeLimit = std::min(limits_.maxDocumentNodes,
+        kNavigatorScriptMaxDocumentNodes);
+    if (document_->structuralElements.size() > nodeLimit ||
+        document_->contentMetadata.size() !=
+            document_->structuralElements.size()) return false;
+
+    const std::size_t noRank = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> rank(document_->structuralElements.size() + 1u,
+        noRank);
+    std::vector<HostInstanceId> traversal;
+    traversal.reserve(nodeLimit);
+    std::vector<HostInstanceId> pending;
+    pending.reserve(nodeLimit);
+    HostInstanceId rootSerial = 0u;
+    if (document_->hasBodyElement) rootSerial = document_->bodyElement.serial;
+    else if (document_->hasDocumentElement)
+        rootSerial = document_->documentElement.serial;
+    if (rootSerial == 0u || findElement(rootSerial) == nullptr) return false;
+    pending.push_back(rootSerial);
+    while (!pending.empty()) {
+        const HostInstanceId current = pending.back();
+        pending.pop_back();
+        if (current == 0u || current >= rank.size() || rank[current] != noRank)
+            return false;
+        const gxos::web::HtmlElementRef* parent = findElement(current);
+        if (parent == nullptr || !isElementConnected(current)) return false;
+        rank[current] = traversal.size();
+        traversal.push_back(current);
+        const std::size_t childCount = elementChildCount(current);
+        if (childCount != parent->childCount || childCount > nodeLimit)
+            return false;
+        for (std::size_t childIndex = childCount; childIndex > 0u; --childIndex) {
+            HostInstanceId childSerial = 0u;
+            if (!elementChildAt(current, childIndex - 1u, childSerial))
+                return false;
+            const gxos::web::HtmlElementRef* child = findElement(childSerial);
+            if (child == nullptr || child->parentSerial != current ||
+                !isElementConnected(childSerial)) return false;
+            pending.push_back(childSerial);
+        }
+    }
+
+    std::size_t dynamicBlockCount = 0u;
+    for (HostInstanceId serial : traversal) {
+        const gxos::web::HtmlElementRef* element = findElement(serial);
+        if (element != nullptr && isDynamicElement(serial) &&
+            (element->tagName == "div" || element->tagName == "p"))
+            ++dynamicBlockCount;
+    }
+    std::vector<gxos::web::DocBlock> projections;
+    projections.reserve(dynamicBlockCount);
+    for (HostInstanceId serial : traversal) {
+        const gxos::web::HtmlElementRef* element = findElement(serial);
+        if (element == nullptr || !isDynamicElement(serial) ||
+            (element->tagName != "div" && element->tagName != "p")) continue;
+        gxos::web::DocBlock block{};
+        block.type = gxos::web::BlockType::Paragraph;
+        block.tagName = element->tagName;
+        block.className = element->className;
+        block.id = element->id;
+        block.inlineStyle = element->inlineStyle;
+        block.elementMetadata = *element;
+        block.inlineFlowSerial = serial;
+        std::vector<gxos::web::HtmlElementRef> reverseAncestors;
+        reverseAncestors.reserve(kNavigatorMaxDynamicBlockAncestorDepth);
+        HostInstanceId ancestorSerial = element->parentSerial;
+        for (std::size_t depth = 0u; ancestorSerial != 0u &&
+            depth < kNavigatorMaxDynamicBlockAncestorDepth;
+            ++depth) {
+            const gxos::web::HtmlElementRef* ancestor =
+                findElement(ancestorSerial);
+            if (ancestor == nullptr || ancestorSerial == serial)
+                return false;
+            reverseAncestors.push_back(*ancestor);
+            if (ancestor->parentSerial == ancestorSerial) return false;
+            ancestorSerial = ancestor->parentSerial;
+        }
+        if (ancestorSerial != 0u) return false;
+        block.ancestors.assign(reverseAncestors.rbegin(),
+            reverseAncestors.rend());
+        std::size_t textBytes = 0u;
+        for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
+            if (item.ownerSerial != serial ||
+                (item.kind != gxos::web::InlineItemKind::TextRun &&
+                    item.kind != gxos::web::InlineItemKind::ForcedBreak))
+                continue;
+            const std::string text = item.kind ==
+                gxos::web::InlineItemKind::ForcedBreak ? "\n" : item.text;
+            if (text.size() > limits_.maxTextContentAssignment ||
+                textBytes > limits_.maxTextContentAssignment - text.size())
+                return false;
+            block.text += text;
+            textBytes += text.size();
+        }
+        projections.push_back(std::move(block));
+    }
+
+    std::size_t oldProjectionCount = 0u;
+    for (const gxos::web::DocBlock& block : document_->blocks) {
+        if (block.elementMetadata.serial != 0u &&
+            isDynamicElement(block.elementMetadata.serial) &&
+            (block.tagName == "div" || block.tagName == "p"))
+            ++oldProjectionCount;
+    }
+    if (oldProjectionCount > document_->blocks.size() ||
+        document_->blocks.size() - oldProjectionCount >
+            document_->blocks.max_size() - projections.size()) return false;
+    const std::size_t targetBlockCount = document_->blocks.size() -
+        oldProjectionCount + projections.size();
+    if (targetBlockCount > static_cast<std::size_t>(
+            std::numeric_limits<int>::max())) return false;
+    document_->blocks.reserve(targetBlockCount);
+
+    const auto updateBlockReferences = [&](std::size_t changedIndex,
+        bool inserted) {
+        const auto updateIndex = [&](int& blockIndex) {
+            if (blockIndex < 0) return;
+            if (inserted) {
+                if (static_cast<std::size_t>(blockIndex) >= changedIndex)
+                    ++blockIndex;
+            } else if (static_cast<std::size_t>(blockIndex) == changedIndex) {
+                blockIndex = -1;
+            } else if (static_cast<std::size_t>(blockIndex) > changedIndex) {
+                --blockIndex;
+            }
+        };
+        for (gxos::web::WebInlineItem& item : document_->inlineItems)
+            updateIndex(item.blockIndex);
+        for (gxos::web::DocBlock& block : document_->blocks) {
+            for (gxos::web::TableCellContentItem& item : block.tableContents)
+                updateIndex(item.blockIndex);
+        }
+    };
+
+    for (std::size_t index = document_->blocks.size(); index > 0u; --index) {
+        const std::size_t blockIndex = index - 1u;
+        const gxos::web::DocBlock& block = document_->blocks[blockIndex];
+        if (block.elementMetadata.serial == 0u ||
+            !isDynamicElement(block.elementMetadata.serial) ||
+            (block.tagName != "div" && block.tagName != "p")) continue;
+        updateBlockReferences(blockIndex, false);
+        document_->blocks.erase(document_->blocks.begin() +
+            static_cast<std::ptrdiff_t>(blockIndex));
+    }
+
+    const auto blockRank = [&](const gxos::web::DocBlock& block) {
+        HostInstanceId serial = block.elementMetadata.serial;
+        if (serial == 0u) serial = block.inlineFlowSerial;
+        return serial < rank.size() ? rank[serial] : noRank;
+    };
+    for (gxos::web::DocBlock& projection : projections) {
+        const std::size_t projectionRank = rank[
+            static_cast<std::size_t>(projection.elementMetadata.serial)];
+        std::size_t insertionIndex = document_->blocks.size();
+        for (std::size_t index = 0u; index < document_->blocks.size(); ++index) {
+            const std::size_t currentRank = blockRank(document_->blocks[index]);
+            if (currentRank != noRank && currentRank > projectionRank) {
+                insertionIndex = index;
+                break;
+            }
+        }
+        updateBlockReferences(insertionIndex, true);
+        document_->blocks.insert(document_->blocks.begin() +
+            static_cast<std::ptrdiff_t>(insertionIndex), std::move(projection));
+    }
+    document_->layoutDirty = true;
+    return true;
+}
+
 bool NavigatorScriptHostAdapter::inlineItemBelongsToSubtree(
     const gxos::web::WebInlineItem& item, HostInstanceId rootSerial) const
 {
@@ -4404,35 +4589,35 @@ bool NavigatorScriptHostAdapter::moveSubtreeInlineItems(
 {
     if (document_ == nullptr || document_->inlineItems.size() >
             kNavigatorMaxRenderableInlineItems) return false;
-    std::size_t firstMoved = document_->inlineItems.size();
-    std::size_t lastMoved = document_->inlineItems.size();
-    for (std::size_t index = 0u; index < document_->inlineItems.size(); ++index) {
-        const gxos::web::WebInlineItem& item = document_->inlineItems[index];
+    std::size_t movedCount = 0u;
+    for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
         if (!inlineItemBelongsToSubtree(item, rootSerial)) continue;
         if (item.kind != gxos::web::InlineItemKind::TextRun &&
             item.kind != gxos::web::InlineItemKind::ForcedBreak) return false;
-        if (firstMoved == document_->inlineItems.size()) {
-            firstMoved = index;
-            lastMoved = index + 1u;
-        } else {
-            // Dynamic subtrees are kept contiguous in the inline projection.
-            // Reject corrupted projections before any renderer-facing mutation.
-            if (index != lastMoved) return false;
-            lastMoved = index + 1u;
-        }
+        ++movedCount;
     }
-    if (firstMoved == document_->inlineItems.size()) return true;
-    const std::size_t movedCount = lastMoved - firstMoved;
+    if (movedCount == 0u) return true;
+    std::vector<HostInstanceId> itemFlows;
+    itemFlows.reserve(movedCount);
+    std::vector<gxos::web::WebInlineItem> movedItems;
+    movedItems.reserve(movedCount);
+    for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
+        if (!inlineItemBelongsToSubtree(item, rootSerial)) continue;
+        if (destinationParentSerial == 0u || flowSerial == 0u) {
+            itemFlows.push_back(0u);
+            continue;
+        }
+        HostInstanceId itemFlow = 0u;
+        if (!resolveInlineRenderFlow(item.ownerSerial, itemFlow)) return false;
+        itemFlows.push_back(itemFlow);
+    }
     const std::size_t keptCount = document_->inlineItems.size() - movedCount;
     std::size_t insertion = keptCount;
     if (destinationParentSerial != 0u && flowSerial != 0u) {
         bool foundParentContent = false;
         std::size_t keptIndex = 0u;
-        for (std::size_t index = 0u;
-            index < document_->inlineItems.size(); ++index) {
-            if (index >= firstMoved && index < lastMoved) continue;
-            const gxos::web::WebInlineItem& item =
-                document_->inlineItems[index];
+        for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
+            if (inlineItemBelongsToSubtree(item, rootSerial)) continue;
             if (item.flowSerial == flowSerial &&
                 inlineItemBelongsToSubtree(item, destinationParentSerial)) {
                 insertion = keptIndex + 1u;
@@ -4452,14 +4637,13 @@ bool NavigatorScriptHostAdapter::moveSubtreeInlineItems(
             }
             if (anchorBlock >= 0) {
                 keptIndex = 0u;
-                for (std::size_t index = 0u;
-                    index < document_->inlineItems.size(); ++index) {
-                    if (index >= firstMoved && index < lastMoved) continue;
+                for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
+                    if (inlineItemBelongsToSubtree(item, rootSerial)) continue;
                     int itemAnchor = -1;
                     for (std::size_t blockIndex = 0u;
                         blockIndex < document_->blocks.size(); ++blockIndex) {
                         if (document_->blocks[blockIndex].inlineFlowSerial ==
-                                document_->inlineItems[index].flowSerial &&
+                                item.flowSerial &&
                             document_->blocks[blockIndex].atomicContainerSerial == 0u) {
                             itemAnchor = static_cast<int>(blockIndex);
                             break;
@@ -4475,28 +4659,28 @@ bool NavigatorScriptHostAdapter::moveSubtreeInlineItems(
         }
     }
     if (insertion > keptCount) insertion = keptCount;
-    std::size_t newFirst = firstMoved;
-    if (insertion < firstMoved) {
-        std::rotate(document_->inlineItems.begin() +
-                static_cast<std::ptrdiff_t>(insertion),
-            document_->inlineItems.begin() +
-                static_cast<std::ptrdiff_t>(firstMoved),
-            document_->inlineItems.begin() +
-                static_cast<std::ptrdiff_t>(lastMoved));
-        newFirst = insertion;
-    } else if (insertion > firstMoved) {
-        const std::size_t originalBoundary = insertion + movedCount;
-        std::rotate(document_->inlineItems.begin() +
-                static_cast<std::ptrdiff_t>(firstMoved),
-            document_->inlineItems.begin() +
-                static_cast<std::ptrdiff_t>(lastMoved),
-            document_->inlineItems.begin() +
-                static_cast<std::ptrdiff_t>(originalBoundary));
-        newFirst = originalBoundary - movedCount;
+    std::size_t write = 0u;
+    const std::size_t originalCount = document_->inlineItems.size();
+    for (std::size_t read = 0u; read < originalCount; ++read) {
+        gxos::web::WebInlineItem& item = document_->inlineItems[read];
+        if (inlineItemBelongsToSubtree(item, rootSerial)) {
+            movedItems.push_back(std::move(item));
+            continue;
+        }
+        if (write != read)
+            document_->inlineItems[write] = std::move(item);
+        ++write;
     }
-    for (std::size_t index = newFirst; index < newFirst + movedCount; ++index) {
-        gxos::web::WebInlineItem& item = document_->inlineItems[index];
-        item.flowSerial = flowSerial;
+    if (movedItems.size() != movedCount) return false;
+    document_->inlineItems.resize(write);
+    document_->inlineItems.insert(document_->inlineItems.begin() +
+        static_cast<std::ptrdiff_t>(insertion),
+        std::make_move_iterator(movedItems.begin()),
+        std::make_move_iterator(movedItems.end()));
+    for (std::size_t offset = 0u; offset < movedCount; ++offset) {
+        gxos::web::WebInlineItem& item =
+            document_->inlineItems[insertion + offset];
+        item.flowSerial = itemFlows[offset];
         item.atomicContainerSerial = 0u;
         const gxos::web::HtmlElementRef* owner = findElement(item.ownerSerial);
         item.parentSerial = owner == nullptr ? 0u : owner->parentSerial;
@@ -4513,11 +4697,22 @@ HostResult NavigatorScriptHostAdapter::appendDynamicChild(
     gxos::web::HtmlElementRef* child = findElement(childSerial);
     if (parent == nullptr || child == nullptr || parentSerial == childSerial)
         return HostResult{HostResultCode::InvalidObject};
-    if (!supportedDynamicParent(*parent) || child->tagName != "span" ||
-        !isDynamicElement(childSerial))
+    const auto supportsPair = [](const std::string& parentTag,
+        const std::string& childTag) {
+        if (childTag == "span")
+            return parentTag == "body" || parentTag == "div" ||
+                parentTag == "p" || parentTag == "span";
+        if (childTag == "div" || childTag == "p")
+            return parentTag == "body" || parentTag == "div";
+        return false;
+    };
+    if (!supportedDynamicParent(*parent) || !isDynamicElement(childSerial) ||
+        !supportsPair(parent->tagName, child->tagName)) {
         return HostResult{HostResultCode::InvalidValue};
-    if (isDescendantOrSelf(parentSerial, childSerial))
+    }
+    if (isDescendantOrSelf(parentSerial, childSerial)) {
         return HostResult{HostResultCode::InvalidValue};
+    }
     if (document_->scriptMutationCount >= limits_.maxDocumentMutations)
         return HostResult{HostResultCode::DocumentMutationLimitExceeded};
     if (document_->inlineItems.size() > kNavigatorMaxRenderableInlineItems)
@@ -4545,36 +4740,181 @@ HostResult NavigatorScriptHostAdapter::appendDynamicChild(
     if (!parentOrderValid(oldParentSerial) ||
         (parentSerial != oldParentSerial && !parentOrderValid(parentSerial)))
         return HostResult{HostResultCode::InvalidObject};
-
-    HostInstanceId flowSerial = 0u;
-    const bool willConnect = isElementConnected(parentSerial);
-    if (willConnect && !resolveInlineRenderFlow(parentSerial, flowSerial))
-        return HostResult{HostResultCode::CallFailed};
+    if (oldParentSerial != 0u) {
+        const gxos::web::HtmlElementRef* oldParent = findElement(oldParentSerial);
+        if (oldParent == nullptr || child->childIndex == 0u ||
+            child->childIndex > elementChildCount(oldParentSerial))
+            return HostResult{HostResultCode::InvalidObject};
+        HostInstanceId registeredChild = 0u;
+        if (!elementChildAt(oldParentSerial, child->childIndex - 1u,
+                registeredChild) || registeredChild != childSerial)
+            return HostResult{HostResultCode::InvalidObject};
+    }
 
     const std::size_t bound = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());
     for (std::size_t index = 0u; index < bound; ++index) {
         const gxos::web::HtmlElementRef& descendant =
             document_->structuralElements[index];
-        if ((descendant.serial == childSerial ||
-                isDescendantOrSelf(descendant.serial, childSerial)) &&
-            (!isDynamicElement(descendant.serial) ||
-                descendant.tagName != "span"))
+        if (descendant.serial == 0u ||
+            !isDescendantOrSelf(descendant.serial, childSerial)) continue;
+        if (!isDynamicElement(descendant.serial) ||
+            (descendant.tagName != "span" && descendant.tagName != "div" &&
+                descendant.tagName != "p")) {
             return HostResult{HostResultCode::InvalidValue};
+        }
+        HostInstanceId prospectiveParent = descendant.serial == childSerial
+            ? parentSerial : descendant.parentSerial;
+        const gxos::web::HtmlElementRef* prospectiveParentElement =
+            findElement(prospectiveParent);
+        if (prospectiveParentElement == nullptr ||
+            !supportsPair(prospectiveParentElement->tagName,
+                descendant.tagName)) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        if (descendant.tagName == "div" || descendant.tagName == "p") {
+            std::size_t ancestorDepth = 0u;
+            HostInstanceId ancestorSerial = prospectiveParent;
+            for (std::size_t depth = 0u; ancestorSerial != 0u &&
+                depth <= kNavigatorMaxDynamicBlockAncestorDepth; ++depth) {
+                if (++ancestorDepth > kNavigatorMaxDynamicBlockAncestorDepth)
+                    return HostResult{HostResultCode::InvalidValue};
+                if (ancestorSerial == childSerial) {
+                    ancestorSerial = parentSerial;
+                    continue;
+                }
+                const gxos::web::HtmlElementRef* ancestor =
+                    findElement(ancestorSerial);
+                if (ancestor == nullptr)
+                    return HostResult{HostResultCode::InvalidObject};
+                ancestorSerial = ancestor->parentSerial;
+            }
+            if (ancestorSerial != 0u)
+                return HostResult{HostResultCode::InvalidValue};
+        }
     }
-    bool subtreeItemStarted = false;
-    bool subtreeItemGap = false;
+
+    // The bounded div flow uses one inline projection before its block
+    // children. Reject a span appended after an existing block child rather
+    // than accepting a tree order the compact renderer cannot represent.
+    const bool sameParent = oldParentSerial == parentSerial;
+    const std::size_t currentChildCount = elementChildCount(parentSerial);
+    if (sameParent && currentChildCount == 0u)
+        return HostResult{HostResultCode::InvalidObject};
+    const std::size_t targetChildCount = currentChildCount -
+        (sameParent ? 1u : 0u);
+    if (parent->tagName == "div" && child->tagName == "span") {
+        for (std::size_t index = 0u; index < targetChildCount; ++index) {
+            HostInstanceId siblingSerial = 0u;
+            if (!elementChildAt(parentSerial, index, siblingSerial))
+                return HostResult{HostResultCode::InvalidObject};
+            if (siblingSerial == childSerial) continue;
+            const gxos::web::HtmlElementRef* sibling = findElement(siblingSerial);
+            if (sibling != nullptr && (sibling->tagName == "div" ||
+                    sibling->tagName == "p"))
+            {
+                return HostResult{HostResultCode::InvalidValue};
+            }
+        }
+    }
+
+    // The same ordering restriction applies inside a moved dynamic subtree.
+    for (std::size_t index = 0u; index < bound; ++index) {
+        const gxos::web::HtmlElementRef& blockParent =
+            document_->structuralElements[index];
+        if (blockParent.tagName != "div" ||
+            !isDescendantOrSelf(blockParent.serial, childSerial)) continue;
+        bool sawBlockChild = false;
+        for (std::size_t childIndex = 0u;
+            childIndex < elementChildCount(blockParent.serial); ++childIndex) {
+            HostInstanceId descendantSerial = 0u;
+            if (!elementChildAt(blockParent.serial, childIndex,
+                    descendantSerial))
+                return HostResult{HostResultCode::InvalidObject};
+            const gxos::web::HtmlElementRef* directChild =
+                findElement(descendantSerial);
+            if (directChild == nullptr) return HostResult{HostResultCode::InvalidObject};
+            if (directChild->tagName == "p" || directChild->tagName == "div")
+                sawBlockChild = true;
+            else if (directChild->tagName == "span" && sawBlockChild) {
+                return HostResult{HostResultCode::InvalidValue};
+            }
+        }
+    }
+
+    HostInstanceId flowSerial = 0u;
+    const bool willConnect = isElementConnected(parentSerial);
+    if (willConnect && !resolveInlineRenderFlow(parentSerial, flowSerial)) {
+        if (child->tagName == "span")
+            return HostResult{HostResultCode::CallFailed};
+        flowSerial = parentSerial;
+    }
+    std::size_t oldProjectionCount = 0u;
+    std::size_t dynamicBlockNodeCount = 0u;
+    for (const gxos::web::DocBlock& block : document_->blocks) {
+        if (block.elementMetadata.serial != 0u &&
+            isDynamicElement(block.elementMetadata.serial) &&
+            (block.tagName == "div" || block.tagName == "p"))
+            ++oldProjectionCount;
+    }
+    for (const gxos::web::HtmlElementRef& element :
+        document_->structuralElements) {
+        if (element.tagName == "div" || element.tagName == "p") {
+            const gxos::web::HtmlElementContentMetadata* content =
+                element.serial != 0u && element.serial <=
+                    document_->contentMetadata.size()
+                ? &document_->contentMetadata[static_cast<std::size_t>(
+                    element.serial - 1u)] : nullptr;
+            if (content != nullptr && content->serial == element.serial &&
+                content->dynamicallyCreated)
+                ++dynamicBlockNodeCount;
+        }
+    }
+    std::array<HostInstanceId,
+        gxos::web::kWebMaxInlineLayoutFlows> parsedFlowSerials{};
+    std::size_t parsedFlowCount = 0u;
+    const auto isDynamicBlockFlow = [&](HostInstanceId serial) {
+        const gxos::web::HtmlElementRef* element = findElement(serial);
+        return element != nullptr && isDynamicElement(serial) &&
+            (element->tagName == "div" || element->tagName == "p");
+    };
+    const auto recordParsedFlow = [&](HostInstanceId serial) {
+        if (serial == 0u || isDynamicBlockFlow(serial)) return true;
+        for (std::size_t index = 0u; index < parsedFlowCount; ++index) {
+            if (parsedFlowSerials[index] == serial) return true;
+        }
+        if (parsedFlowCount >= parsedFlowSerials.size()) return false;
+        parsedFlowSerials[parsedFlowCount++] = serial;
+        return true;
+    };
+    for (const gxos::web::DocBlock& block : document_->blocks) {
+        if (block.atomicContainerSerial == 0u &&
+            !recordParsedFlow(block.inlineFlowSerial))
+            return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    }
+    for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
+        if (item.atomicContainerSerial == 0u &&
+            isElementConnected(item.ownerSerial) &&
+            !recordParsedFlow(item.flowSerial))
+            return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    }
+    if (dynamicBlockNodeCount >
+        gxos::web::kWebMaxInlineLayoutFlows - parsedFlowCount)
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    if (oldProjectionCount > document_->blocks.size() ||
+        document_->blocks.size() - oldProjectionCount >
+            document_->blocks.max_size() - dynamicBlockNodeCount)
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    document_->blocks.reserve(document_->blocks.size() - oldProjectionCount +
+        dynamicBlockNodeCount);
     for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
         const bool belongs = inlineItemBelongsToSubtree(item, childSerial);
-        if (!belongs) {
-            if (subtreeItemStarted) subtreeItemGap = true;
-            continue;
-        }
-        if (subtreeItemGap || (item.kind !=
+        if (!belongs) continue;
+        if (item.kind !=
                 gxos::web::InlineItemKind::TextRun && item.kind !=
-                gxos::web::InlineItemKind::ForcedBreak))
+                gxos::web::InlineItemKind::ForcedBreak) {
             return HostResult{HostResultCode::InvalidValue};
-        subtreeItemStarted = true;
+        }
     }
 
     const std::uint16_t oldChildIndex = child->childIndex;
@@ -4614,6 +4954,7 @@ HostResult NavigatorScriptHostAdapter::appendDynamicChild(
     child->childIndex = static_cast<std::uint16_t>(newChildIndex);
     if (!refreshParentChildMetadata(parentSerial) ||
         !setSubtreeConnectionAndFlow(childSerial, willConnect) ||
+        !rebuildDynamicBlockProjections() ||
         !moveSubtreeInlineItems(childSerial, parentSerial,
             willConnect ? flowSerial : 0u))
         return HostResult{HostResultCode::InvalidObject};
@@ -4636,8 +4977,7 @@ HostResult NavigatorScriptHostAdapter::removeDynamicChild(
     gxos::web::HtmlElementRef* child = findElement(childSerial);
     if (parent == nullptr || child == nullptr)
         return HostResult{HostResultCode::InvalidObject};
-    if (!supportedDynamicParent(*parent) ||
-        !isDynamicElement(childSerial) ||
+    if (!supportedDynamicParent(*parent) || !isDynamicElement(childSerial) ||
         child->parentSerial != parentSerial)
         return HostResult{HostResultCode::TypeError};
     if (document_->scriptMutationCount >= limits_.maxDocumentMutations)
@@ -4661,7 +5001,8 @@ HostResult NavigatorScriptHostAdapter::removeDynamicChild(
     child->typeCount = 0u;
     child->previousSiblingSerial = 0u;
     if (!refreshParentChildMetadata(parentSerial) ||
-        !setSubtreeConnectionAndFlow(childSerial, false))
+        !setSubtreeConnectionAndFlow(childSerial, false) ||
+        !rebuildDynamicBlockProjections())
         return HostResult{HostResultCode::InvalidObject};
     ++document_->scriptMutationCount;
     document_->layoutDirty = true;
@@ -8302,9 +8643,12 @@ HostResult NavigatorScriptHostAdapter::textContentForElement(
         ++directBlockCount;
     }
     if (directBlockCount == 1u && directBlock != nullptr) {
-        if (directBlock->text.size() > limits_.maxTextContentAssignment)
+        const bool dynamicProjection = isDynamicElement(serial) &&
+            directBlock->inlineFlowSerial == serial;
+        if (!dynamicProjection &&
+            directBlock->text.size() > limits_.maxTextContentAssignment)
             return HostResult{HostResultCode::DocumentTextLimitExceeded};
-        result = directBlock->text;
+        if (!dynamicProjection) result = directBlock->text;
         std::size_t operations = 0u;
         for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
             if (operations >= limits_.maxTextAggregationOperations)
@@ -8373,6 +8717,9 @@ HostResult NavigatorScriptHostAdapter::setElementTextContent(
     if (document_ == nullptr || target == nullptr)
         return HostResult{HostResultCode::InvalidObject};
     const bool dynamicTarget = isDynamicElement(serial);
+    if (dynamicTarget && (target->tagName == "div" || target->tagName == "p") &&
+        elementChildCount(serial) != 0u)
+        return HostResult{HostResultCode::InvalidValue};
     const bool targetConnected = isElementConnected(serial);
     HostInstanceId dynamicFlow = 0u;
     if (dynamicTarget && targetConnected &&
@@ -8403,19 +8750,11 @@ HostResult NavigatorScriptHostAdapter::setElementTextContent(
         }
     }
     if (dynamicTarget) {
-        bool subtreeItemStarted = false;
-        bool subtreeItemGap = false;
         for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
-            const bool belongs = inlineItemBelongsToSubtree(item, serial);
-            if (!belongs) {
-                if (subtreeItemStarted) subtreeItemGap = true;
-                continue;
-            }
-            if (subtreeItemGap || (item.kind !=
-                    gxos::web::InlineItemKind::TextRun && item.kind !=
-                    gxos::web::InlineItemKind::ForcedBreak))
+            if (inlineItemBelongsToSubtree(item, serial) &&
+                item.kind != gxos::web::InlineItemKind::TextRun &&
+                item.kind != gxos::web::InlineItemKind::ForcedBreak)
                 return HostResult{HostResultCode::InvalidObject};
-            subtreeItemStarted = true;
         }
     }
 

@@ -817,6 +817,7 @@ private:
     bool refreshParentChildMetadata(HostInstanceId parentSerial);
     bool setSubtreeConnectionAndFlow(HostInstanceId rootSerial,
         bool connected);
+    bool rebuildDynamicBlockProjections();
     bool moveSubtreeInlineItems(HostInstanceId rootSerial,
         HostInstanceId destinationParentSerial, HostInstanceId flowSerial);
     bool inlineItemBelongsToSubtree(const gxos::web::WebInlineItem& item,

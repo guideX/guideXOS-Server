@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Navigator JavaScript JS107</title>
+</head>
+<body id="page-body">
+<h1>Navigator JavaScript JS107</h1>
+<div id="container">
+    <p id="before">Before dynamic content</p>
+    <p id="after">After dynamic content</p>
+</div>
+<div id="second-container">
+    <p id="second-before">Second container start</p>
+</div>
+<button id="add-button" type="button">Add dynamic blocks</button>
+<button id="update-button" type="button">Update first paragraph</button>
+<button id="remove-button" type="button">Remove paragraph / section</button>
+<button id="reinsert-button" type="button">Reinsert paragraph / section</button>
+<p id="status">Ready</p>
+<script>
+const container = document.getElementById("container");
+const addButton = document.getElementById("add-button");
+const updateButton = document.getElementById("update-button");
+const removeButton = document.getElementById("remove-button");
+const reinsertButton = document.getElementById("reinsert-button");
+let section = null;
+let first = null;
+let second = null;
+let paragraphRemoved = false;
+let sectionRemoved = false;
+let paragraphCycleComplete = false;
+
+addButton.addEventListener("click", () => {
+    if (section === null) {
+        section = document.createElement("div");
+        section.setAttribute("id", "dynamic-section");
+        section.textContent = "Dynamic section lead";
+        first = document.createElement("p");
+        first.setAttribute("id", "dynamic-first");
+        first.setAttribute("class", "dynamic-paragraph");
+        first.textContent = "First dynamic paragraph";
+        second = document.createElement("p");
+        second.setAttribute("id", "dynamic-second");
+        second.setAttribute("class", "dynamic-paragraph");
+        second.textContent = "Second dynamic paragraph wraps through the Navigator paragraph line formatter so its final block geometry must include every wrapped line and push the following content down without overlap. The text remains readable after paragraph reordering, section removal, and subtree reinsertion.";
+        section.appendChild(first);
+        section.appendChild(second);
+        container.appendChild(section);
+        document.getElementById("status").textContent =
+            "Added two ordered paragraphs";
+    }
+});
+
+updateButton.addEventListener("click", () => {
+    if (first !== null && first.parentElement !== null) {
+        first.textContent = "Updated first dynamic paragraph";
+        document.getElementById("status").textContent = first.textContent;
+    }
+});
+
+removeButton.addEventListener("click", () => {
+    if (section !== null && !paragraphCycleComplete && !paragraphRemoved &&
+        first.parentElement === section) {
+        section.removeChild(first);
+        paragraphRemoved = true;
+        document.getElementById("status").textContent =
+            "Removed the first paragraph";
+    } else if (section !== null && !sectionRemoved &&
+        section.parentElement === container) {
+        container.removeChild(section);
+        sectionRemoved = true;
+        document.getElementById("status").textContent =
+            "Removed the dynamic section";
+    }
+});
+
+reinsertButton.addEventListener("click", () => {
+    const statusElement = document.getElementById("status");
+    const previousStatus = statusElement.textContent;
+    statusElement.textContent = "Reinsert click received";
+    if (section !== null && previousStatus === "Removed the dynamic section") {
+        statusElement.textContent = "Reinserting the detached section";
+        container.appendChild(section);
+        sectionRemoved = false;
+        paragraphRemoved = false;
+        if (document.querySelector("#dynamic-section") === section) {
+            statusElement.textContent = "Reinserted the same section";
+        } else {
+            statusElement.textContent = "Section identity failed";
+        }
+    } else if (section !== null && first !== null &&
+        previousStatus === "Removed the first paragraph") {
+        statusElement.textContent = "Reinserting the detached paragraph";
+        section.appendChild(first);
+        paragraphRemoved = false;
+        paragraphCycleComplete = true;
+        if (document.querySelector("#dynamic-first") === first) {
+            statusElement.textContent = "Reinserted the same paragraph";
+        } else {
+            statusElement.textContent = "Paragraph identity failed";
+        }
+    } else {
+        statusElement.textContent =
+            "No detached dynamic node is pending reinsertion";
+    }
+});
+</script>
+</body>
+</html>

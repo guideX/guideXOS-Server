@@ -83,8 +83,11 @@ $compileOutput | ForEach-Object {
     Add-Content -LiteralPath $evidence -Value ([string]$_)
 }
 
-$testOutput = & $exe 2>&1
+$nativeLog = Join-Path $outputDir "js106-native-output.txt"
+$nativeCommand = '"' + $exe + '" > "' + $nativeLog + '" 2>&1'
+& $env:ComSpec /d /c $nativeCommand
 $testExitCode = $LASTEXITCODE
+$testOutput = @(Get-Content -LiteralPath $nativeLog)
 $testOutput | ForEach-Object { Write-Output $_ }
 $testOutput | ForEach-Object {
     Add-Content -LiteralPath $evidence -Value ([string]$_)

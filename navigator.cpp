@@ -14670,7 +14670,7 @@ namespace {
 			snapshot.valid = true;
 			return;
 		}
-		constexpr size_t kMaxFlows = 256;
+		constexpr size_t kMaxFlows = gxos::web::kWebMaxInlineLayoutFlows;
 		for (const WebInlineItem& item : doc.inlineItems) {
 			if (!inlineItemOwnerConnected(doc, item) || item.flowSerial == 0 ||
 				item.atomicContainerSerial != 0) continue;
@@ -15251,6 +15251,30 @@ bool Navigator::SmokeBlockGeometryById(const std::string& id,
 		outY = blockLayoutY(i);
 		outW = std::max(0, geometry.outerWidth);
 		outH = std::max(0, blockTotalHeight(block, s_currentDoc, false));
+		return outW > 0 && outH > 0;
+	}
+	return false;
+}
+
+bool Navigator::SmokeVisualBlockGeometryById(const std::string& id,
+	int& outX, int& outY, int& outW, int& outH)
+{
+	outX = outY = outW = outH = 0;
+	if (s_windowId == 0) return false;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[static_cast<size_t>(i)];
+		if (block.id != id) continue;
+		ensureCssMarginLayout(s_currentDoc);
+		ensureCssFlexLayout(s_currentDoc);
+		ensureCssFloatLayout(s_currentDoc);
+		ensureInlineLayout(s_currentDoc);
+		ensureCssPositionLayout(s_currentDoc);
+		ensureCssScrollLayout(s_currentDoc, s_scrollOffset);
+		const CssBlockGeometry geometry = cssGeometryForBlock(s_currentDoc, i);
+		outX = geometry.outerX;
+		outY = geometry.outerY - kContentY;
+		outW = std::max(0, geometry.outerWidth);
+		outH = std::max(0, geometry.outerHeight);
 		return outW > 0 && outH > 0;
 	}
 	return false;
@@ -18498,7 +18522,46 @@ bool Navigator::smokeClickBlock(int blockIndex, bool label)
 		if (!found) return false;
 	}
 	handleMouseInput(x, y, 1, "down");
-	handleMouseInput(x, y, 1, "up");
+	// Focusing a form control can reveal it by adjusting the page scroll. Use
+	// its post-focus screen rectangle for release so an ID-directed smoke click
+	// still activates the requested control after that layout change.
+	const Rect releaseRect = label ? selectableBlockRect(blockIndex) :
+		formControlRect(blockIndex);
+	if (releaseRect.w <= 0 || releaseRect.h <= 0) {
+		handleMouseInput(x, y, 1, "up");
+		return false;
+	}
+	int releaseX = releaseRect.x + releaseRect.w / 2;
+	int releaseY = releaseRect.y + releaseRect.h / 2;
+	int releaseIndex = -1;
+	HitTarget releaseTarget = hitTest(releaseX, releaseY, releaseIndex);
+	if (!acceptableTarget(releaseTarget, releaseIndex)) {
+		const int stepX = std::max(1, releaseRect.w / 32);
+		const int stepY = std::max(1, releaseRect.h / 16);
+		bool foundRelease = false;
+		int samples = 0;
+		for (int py = releaseRect.y; py < releaseRect.y + releaseRect.h &&
+				!foundRelease && samples < 2048; py += stepY) {
+			for (int px = releaseRect.x; px < releaseRect.x + releaseRect.w &&
+					samples < 2048; px += stepX) {
+				++samples;
+				int candidateIndex = -1;
+				const HitTarget candidate = hitTest(px, py, candidateIndex);
+				if (!acceptableTarget(candidate, candidateIndex)) continue;
+				releaseX = px;
+				releaseY = py;
+				releaseIndex = candidateIndex;
+				releaseTarget = candidate;
+				foundRelease = true;
+				break;
+			}
+		}
+		if (!foundRelease) {
+			handleMouseInput(x, y, 1, "up");
+			return false;
+		}
+	}
+	handleMouseInput(releaseX, releaseY, 1, "up");
 	return true;
 }
 

@@ -6409,6 +6409,317 @@ static std::string navigatorHostedSmokeDiagnostic() {
         summarizeText(js106AfterCallbackRemove, 800) + ",status=" +
         summarizeText(js106CallbackRemoveStatus, 240));
 
+    const std::string js107FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js107.html";
+    const bool js107Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js107FixtureUrl);
+    const std::string js107InitialText =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js107InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js107DetachedX = 0, js107DetachedY = 0;
+    int js107DetachedW = 0, js107DetachedH = 0;
+    const bool js107InitiallyDetached =
+        !gxos::apps::Navigator::SmokeBlockGeometryById("dynamic-section",
+            js107DetachedX, js107DetachedY, js107DetachedW, js107DetachedH);
+    add("JS107 hosted fixture begins with no dynamic block projection",
+        js107Loaded && containsRenderedGlyphSequence(js107InitialText,
+            "Before dynamic content") &&
+        containsRenderedGlyphSequence(js107InitialText,
+            "After dynamic content") &&
+        js107InitiallyDetached &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 4u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js107Loaded) + ",listeners=" +
+        std::to_string(gxos::apps::Navigator::SmokeJavaScriptListenerCount()) +
+        ",detached=" + yesNo(js107InitiallyDetached) + ",inline=" +
+        summarizeText(js107InitialText, 800) + ",last-error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError());
+
+    const bool js107Added = js107Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("add-button");
+    const std::string js107AfterAdd =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const std::string js107AddStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js107AddRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js107BeforeX = 0, js107BeforeY = 0, js107BeforeW = 0, js107BeforeH = 0;
+    int js107AfterX = 0, js107AfterY = 0, js107AfterW = 0, js107AfterH = 0;
+    int js107SectionX = 0, js107SectionY = 0, js107SectionW = 0, js107SectionH = 0;
+    int js107FirstX = 0, js107FirstY = 0, js107FirstW = 0, js107FirstH = 0;
+    int js107SecondX = 0, js107SecondY = 0, js107SecondW = 0, js107SecondH = 0;
+    int js107FollowingX = 0, js107FollowingY = 0;
+    int js107FollowingW = 0, js107FollowingH = 0;
+    const bool js107BeforeGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("before", js107BeforeX,
+            js107BeforeY, js107BeforeW, js107BeforeH);
+    const bool js107AfterGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("after", js107AfterX,
+            js107AfterY, js107AfterW, js107AfterH);
+    const bool js107SectionGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("dynamic-section",
+            js107SectionX, js107SectionY, js107SectionW, js107SectionH);
+    const bool js107FirstGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("dynamic-first",
+            js107FirstX, js107FirstY, js107FirstW, js107FirstH);
+    const bool js107SecondGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("dynamic-second",
+            js107SecondX, js107SecondY, js107SecondW, js107SecondH);
+    const bool js107FollowingGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("second-before",
+            js107FollowingX, js107FollowingY, js107FollowingW,
+            js107FollowingH);
+    const bool js107OrderedGeometry = js107BeforeGeometry && js107AfterGeometry &&
+        js107SectionGeometry && js107FirstGeometry && js107SecondGeometry &&
+        js107FollowingGeometry && js107BeforeY < js107AfterY &&
+        js107AfterY < js107SectionY && js107SectionY < js107FirstY &&
+        js107FirstY < js107SecondY &&
+        js107BeforeY + js107BeforeH <= js107AfterY &&
+        js107AfterY + js107AfterH <= js107SectionY &&
+        js107SectionY + js107SectionH <= js107FirstY &&
+        js107FirstY + js107FirstH <= js107SecondY &&
+        js107SecondY + js107SecondH <= js107FollowingY &&
+        js107SecondH > js107FirstH;
+    add("JS107 dynamic paragraphs render in nonoverlapping document flow",
+        js107Added && containsRenderedGlyphSequence(js107AfterAdd,
+            "Dynamic section lead") &&
+        containsRenderedGlyphSequence(js107AfterAdd,
+            "First dynamic paragraph") &&
+        containsRenderedGlyphSequence(js107AfterAdd,
+            "Second dynamic paragraph") &&
+        js107OrderedGeometry && js107AddRevision > js107InitialRevision &&
+        contains(js107AddStatus, "Added two ordered paragraphs") &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js107Added) + ",revision=" +
+        std::to_string(js107InitialRevision) + "->" +
+        std::to_string(js107AddRevision) + ",before=" +
+        std::to_string(js107BeforeY) + "+" + std::to_string(js107BeforeH) +
+        ",after=" + std::to_string(js107AfterY) + "+" +
+        std::to_string(js107AfterH) + ",section=" +
+        std::to_string(js107SectionY) + "+" + std::to_string(js107SectionH) +
+        ",first=" +
+        std::to_string(js107FirstY) + "+" + std::to_string(js107FirstH) +
+        ",second=" + std::to_string(js107SecondY) + "+" +
+        std::to_string(js107SecondH) + ",following=" +
+        std::to_string(js107FollowingY) + ",inline=" +
+        summarizeText(js107AfterAdd, 900));
+
+    const int js107AddedBlockCount =
+        gxos::apps::Navigator::SmokeCurrentBlockCount();
+    const bool js107RepeatedAdd =
+        gxos::apps::Navigator::SmokeClickFormControlById("add-button");
+    const uint64_t js107RepeatedAddRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS107 repeated Add callback keeps one identity and projection",
+        js107RepeatedAdd &&
+        gxos::apps::Navigator::SmokeCurrentBlockCount() == js107AddedBlockCount &&
+        js107RepeatedAddRevision == js107AddRevision &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js107RepeatedAdd) + ",blocks=" +
+        std::to_string(js107AddedBlockCount) + "->" +
+        std::to_string(gxos::apps::Navigator::SmokeCurrentBlockCount()) +
+        ",revision=" + std::to_string(js107RepeatedAddRevision));
+
+    const bool js107Updated = js107RepeatedAdd &&
+        gxos::apps::Navigator::SmokeClickFormControlById("update-button");
+    const std::string js107AfterUpdate =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js107UpdateRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    add("JS107 Update callback replaces visible paragraph text",
+        js107Updated && containsRenderedGlyphSequence(js107AfterUpdate,
+            "Updated first dynamic paragraph") &&
+        !containsRenderedGlyphSequence(js107AfterUpdate,
+            "First dynamic paragraph") &&
+        js107UpdateRevision > js107AddRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js107Updated) + ",revision=" +
+        std::to_string(js107AddRevision) + "->" +
+        std::to_string(js107UpdateRevision) + ",inline=" +
+        summarizeText(js107AfterUpdate, 900));
+
+    const bool js107RemovedParagraph = js107Updated &&
+        gxos::apps::Navigator::SmokeClickFormControlById("remove-button");
+    const std::string js107AfterParagraphRemove =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const std::string js107ParagraphRemoveStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js107ParagraphRemoveRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js107RemovedX = 0, js107RemovedY = 0, js107RemovedW = 0, js107RemovedH = 0;
+    const bool js107FirstStillHasGeometry =
+        gxos::apps::Navigator::SmokeBlockGeometryById("dynamic-first",
+            js107RemovedX, js107RemovedY, js107RemovedW, js107RemovedH);
+    int js107SecondAfterRemoveX = 0, js107SecondAfterRemoveY = 0;
+    int js107SecondAfterRemoveW = 0, js107SecondAfterRemoveH = 0;
+    const bool js107SecondAfterRemoveGeometry =
+        gxos::apps::Navigator::SmokeBlockGeometryById("dynamic-second",
+            js107SecondAfterRemoveX, js107SecondAfterRemoveY,
+            js107SecondAfterRemoveW, js107SecondAfterRemoveH);
+    add("JS107 Remove callback hides one paragraph and closes its flow",
+        js107RemovedParagraph && !js107FirstStillHasGeometry &&
+        js107SecondAfterRemoveGeometry &&
+        js107SecondAfterRemoveY < js107SecondY &&
+        containsRenderedGlyphSequence(js107AfterParagraphRemove,
+            "Second dynamic paragraph") &&
+        !containsRenderedGlyphSequence(js107AfterParagraphRemove,
+            "Updated first dynamic paragraph") &&
+        contains(js107ParagraphRemoveStatus, "Removed the first paragraph") &&
+        js107ParagraphRemoveRevision > js107UpdateRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js107RemovedParagraph) + ",second-y=" +
+        std::to_string(js107SecondY) + "->" +
+        std::to_string(js107SecondAfterRemoveY) + ",revision=" +
+        std::to_string(js107UpdateRevision) + "->" +
+        std::to_string(js107ParagraphRemoveRevision) + ",inline=" +
+        summarizeText(js107AfterParagraphRemove, 900));
+
+    const int js107ParagraphActivationBefore =
+        gxos::apps::Navigator::SmokeFormActivationCountById("reinsert-button");
+    const bool js107ReinsertedParagraph = js107RemovedParagraph &&
+        gxos::apps::Navigator::SmokeClickFormControlById("reinsert-button");
+    const int js107ParagraphActivationAfter =
+        gxos::apps::Navigator::SmokeFormActivationCountById("reinsert-button");
+    const std::string js107AfterParagraphReinsert =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const std::string js107ParagraphReinsertStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js107ParagraphReinsertRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js107FirstAfterReinsertX = 0, js107FirstAfterReinsertY = 0;
+    int js107FirstAfterReinsertW = 0, js107FirstAfterReinsertH = 0;
+    int js107SecondAfterReinsertX = 0, js107SecondAfterReinsertY = 0;
+    int js107SecondAfterReinsertW = 0, js107SecondAfterReinsertH = 0;
+    const bool js107ReinsertGeometry =
+        gxos::apps::Navigator::SmokeBlockGeometryById("dynamic-first",
+            js107FirstAfterReinsertX, js107FirstAfterReinsertY,
+            js107FirstAfterReinsertW, js107FirstAfterReinsertH) &&
+        gxos::apps::Navigator::SmokeBlockGeometryById("dynamic-second",
+            js107SecondAfterReinsertX, js107SecondAfterReinsertY,
+            js107SecondAfterReinsertW, js107SecondAfterReinsertH);
+    add("JS107 reinsertion restores paragraph identity and reordered geometry",
+        js107ReinsertedParagraph && js107ReinsertGeometry &&
+        contains(js107ParagraphReinsertStatus, "Reinserted the same paragraph") &&
+        containsRenderedGlyphSequence(js107AfterParagraphReinsert,
+            "Updated first dynamic paragraph") &&
+        js107SecondAfterReinsertY < js107FirstAfterReinsertY &&
+        js107ParagraphReinsertRevision > js107ParagraphRemoveRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js107ReinsertedParagraph) + ",second-y=" +
+        std::to_string(js107SecondAfterReinsertY) + ",first-y=" +
+        std::to_string(js107FirstAfterReinsertY) + ",revision=" +
+        std::to_string(js107ParagraphRemoveRevision) + "->" +
+        std::to_string(js107ParagraphReinsertRevision) + ",status=" +
+        summarizeText(js107ParagraphReinsertStatus, 240) + ",status-marker=" +
+        yesNo(contains(js107ParagraphReinsertStatus,
+            "Reinserted the same paragraph")) + ",first-found=" +
+        yesNo(js107ReinsertGeometry) + ",inline-has-updated=" +
+        yesNo(containsRenderedGlyphSequence(js107AfterParagraphReinsert,
+            "Updated first dynamic paragraph")) + ",last-error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError() + ",callback-marker=" +
+        summarizeFromMarker(js107ParagraphReinsertStatus,
+            "Reinsert click received", 100) + ",attempt-marker=" +
+        yesNo(contains(js107ParagraphReinsertStatus,
+            "Reinserting the detached paragraph")) + ",no-pending=" +
+        yesNo(contains(js107ParagraphReinsertStatus,
+            "No detached dynamic node is pending reinsertion")) +
+        ",activation=" + std::to_string(js107ParagraphActivationBefore) +
+        "->" + std::to_string(js107ParagraphActivationAfter));
+
+    const bool js107RemovedSection = js107ReinsertedParagraph &&
+        gxos::apps::Navigator::SmokeClickFormControlById("remove-button");
+    const std::string js107AfterSectionRemove =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js107SectionRemoveRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js107RemovedSectionX = 0, js107RemovedSectionY = 0;
+    int js107RemovedSectionW = 0, js107RemovedSectionH = 0;
+    int js107DescendantX = 0, js107DescendantY = 0;
+    int js107DescendantW = 0, js107DescendantH = 0;
+    const bool js107SectionGeometryAfterRemove =
+        gxos::apps::Navigator::SmokeBlockGeometryById("dynamic-section",
+            js107RemovedSectionX, js107RemovedSectionY,
+            js107RemovedSectionW, js107RemovedSectionH);
+    const bool js107DescendantGeometryAfterRemove =
+        gxos::apps::Navigator::SmokeBlockGeometryById("dynamic-second",
+            js107DescendantX, js107DescendantY, js107DescendantW,
+            js107DescendantH);
+    add("JS107 removing the section disconnects all rendered descendants",
+        js107RemovedSection &&
+        !containsRenderedGlyphSequence(js107AfterSectionRemove,
+            "Updated first dynamic paragraph") &&
+        !containsRenderedGlyphSequence(js107AfterSectionRemove,
+            "Second dynamic paragraph") &&
+        !js107SectionGeometryAfterRemove &&
+        !js107DescendantGeometryAfterRemove &&
+        js107SectionRemoveRevision > js107ParagraphReinsertRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js107RemovedSection) + ",section-geometry=" +
+        yesNo(js107SectionGeometryAfterRemove) + ",descendant-geometry=" +
+        yesNo(js107DescendantGeometryAfterRemove) + ",revision=" +
+        std::to_string(js107ParagraphReinsertRevision) + "->" +
+        std::to_string(js107SectionRemoveRevision) + ",inline=" +
+        summarizeText(js107AfterSectionRemove, 900));
+
+    const int js107SectionActivationBefore =
+        gxos::apps::Navigator::SmokeFormActivationCountById("reinsert-button");
+    const bool js107ReinsertedSection = js107RemovedSection &&
+        gxos::apps::Navigator::SmokeClickFormControlById("reinsert-button");
+    const int js107SectionActivationAfter =
+        gxos::apps::Navigator::SmokeFormActivationCountById("reinsert-button");
+    const std::string js107AfterSectionReinsert =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const std::string js107SectionReinsertStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js107SectionReinsertRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js107RestoredFirstX = 0, js107RestoredFirstY = 0;
+    int js107RestoredFirstW = 0, js107RestoredFirstH = 0;
+    int js107RestoredSecondX = 0, js107RestoredSecondY = 0;
+    int js107RestoredSecondW = 0, js107RestoredSecondH = 0;
+    const bool js107RestoredGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("dynamic-first",
+            js107RestoredFirstX, js107RestoredFirstY, js107RestoredFirstW,
+            js107RestoredFirstH) &&
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("dynamic-second",
+            js107RestoredSecondX, js107RestoredSecondY, js107RestoredSecondW,
+            js107RestoredSecondH);
+    add("JS107 subtree reinsertion restores original identity and block geometry",
+        js107ReinsertedSection && js107RestoredGeometry &&
+        contains(js107SectionReinsertStatus, "Reinserted the same section") &&
+        containsRenderedGlyphSequence(js107AfterSectionReinsert,
+            "Updated first dynamic paragraph") &&
+        containsRenderedGlyphSequence(js107AfterSectionReinsert,
+            "Second dynamic paragraph") &&
+        js107RestoredSecondY < js107RestoredFirstY &&
+        js107SectionReinsertRevision > js107SectionRemoveRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js107ReinsertedSection) + ",first-y=" +
+        std::to_string(js107RestoredFirstY) + ",second-y=" +
+        std::to_string(js107RestoredSecondY) + ",revision=" +
+        std::to_string(js107SectionRemoveRevision) + "->" +
+        std::to_string(js107SectionReinsertRevision) + ",status=" +
+        summarizeText(js107SectionReinsertStatus, 240) + ",status-marker=" +
+        yesNo(contains(js107SectionReinsertStatus,
+            "Reinserted the same section")) + ",geometry=" +
+        yesNo(js107RestoredGeometry) + ",last-error=" +
+        gxos::apps::Navigator::SmokeJavaScriptLastError() + ",callback-marker=" +
+        summarizeFromMarker(js107SectionReinsertStatus,
+            "Reinsert click received", 100) + ",attempt-marker=" +
+        yesNo(contains(js107SectionReinsertStatus,
+            "Reinserting the detached section")) + ",no-pending=" +
+        yesNo(contains(js107SectionReinsertStatus,
+            "No detached dynamic node is pending reinsertion")) +
+        ",activation=" + std::to_string(js107SectionActivationBefore) +
+        "->" + std::to_string(js107SectionActivationAfter));
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

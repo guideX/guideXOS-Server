@@ -825,6 +825,8 @@ public:
 		int& outRow, int& outColumn, int& outRowSpan, int& outColSpan);
 	static bool SmokeBlockGeometryById(const std::string& id,
 		int& outX, int& outY, int& outW, int& outH);
+	static bool SmokeVisualBlockGeometryById(const std::string& id,
+		int& outX, int& outY, int& outW, int& outH);
 	static bool SmokeHitLinkAt(int x, int y, const std::string& id);
 	static std::string SmokeHitTargetIdAt(int x, int y);
 	static void SmokeSetScrollOffset(int offset);

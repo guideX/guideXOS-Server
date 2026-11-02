@@ -13567,3 +13567,151 @@ renderer. Guest layout, memory, stack, pointer input, and lifecycle behavior
 remain unverified. A suitable JS107 scope is bounded block projection for
 created `div` and `p` elements, including their layout and selector behavior;
 general text nodes and arbitrary style recalculation can remain out of scope.
+
+## JS107 — bounded dynamic block projection
+
+JS107 extends the JS106 generation-local structural registry to allow
+`document.createElement("div")` and `document.createElement("p")`, retaining
+the existing dynamic `span` behavior. New nodes begin detached. The same
+serial-indexed `HtmlElementRef` and `HtmlElementContentMetadata` records drive
+selectors, ownership, connection state, and rendering. No second dynamic tree
+is maintained.
+
+Connected dynamic `div` and `p` nodes each contribute one `DocBlock`
+projection to `WebDocument::blocks`. Their inline runs use the same
+`WebInlineItem` vector consumed by Navigator's inline layout. Projection order
+comes from a bounded depth-first walk of the connected structural tree rooted
+at `body`; it does not use allocation serial order. When projections are
+inserted or removed, inline-item and table-cell block indexes are adjusted.
+Successful append, removal, reparenting, and text writes set the document's
+layout-dirty state. The next existing Navigator layout pass consumes the new
+block and inline projections, updates positions, and clears the dirty state.
+Repeated projection rebuilds replace the dynamic projection set rather than
+accumulating old blocks.
+
+The supported child relationships are:
+
+| Parent | Dynamic child | Result |
+| --- | --- | --- |
+| `body` | `div`, `p`, `span` | Supported |
+| parsed or dynamic `div` | `div`, `p`, `span` | Supported, with inline `span` children before block children |
+| parsed or dynamic `p` | `span` | Supported |
+| parsed or dynamic `span` | `span` | Supported |
+| `p` or `span` | `div` or `p` | Rejected |
+
+The compact `div` flow supports its direct inline run before its block
+children. Appending or moving a `span` after a direct `p` or `div` child is
+rejected so the registry cannot describe an order the renderer cannot express.
+Each dynamic block projection also snapshots at most 12 ancestor records, in
+line with Navigator's existing block ancestry walk; an insertion exceeding
+that renderer bound is rejected before connection.
+Unsupported tag names are rejected. This is a bounded rendering subset, not a
+claim that other DOM relationships are invalid in browsers.
+
+`appendChild()` moves the existing identity, updates sibling metadata and
+selector ancestry, rebuilds dynamic block projections in current tree order,
+and moves the subtree's inline items together while recalculating their nearest
+block flow. Appending a non-last sibling to its existing parent changes its
+order. `removeChild()` disconnects the subtree from document selectors and
+rendering while retaining the same references, attributes, and text for later
+reinsertion. Reconnecting a subtree restores one projection per connected
+dynamic block.
+
+Dynamic `textContent` remains limited to 4,096 bytes. It works for leaf
+dynamic `div` and `p` nodes and replaces the current text projection. Assigning
+`textContent` to a dynamic `div` or `p` that has element children is rejected
+with `HostInvalidValue`; descendant replacement is not implemented. A dynamic
+`div` can hold direct text and inline children before its block children.
+Selectors use the shared structural registry, including ID, tag, class,
+descendant, and scoped queries; detached or disconnected elements are hidden
+from document-wide queries. Selector collections retain their existing
+snapshot and capacity behavior.
+
+Existing limits remain in force: 1,024 structural nodes, 1,024 script
+mutations per document, 2,048 inline items, 4,096 dynamic text bytes, and the
+runtime's existing host-object limit. Navigator's inline layout snapshot is
+bounded at 256 independent flows; dynamic connection preflights the parsed
+flow anchors plus all retained dynamic `div`/`p` nodes against that capacity,
+so it can reject a block insertion before changing the tree. Dynamic block
+projections are also bounded by the dynamic-node count. The host `DocBlock`
+record is 1,936 bytes, so the projection records alone have a 1,982,464-byte
+ceiling if all 1,024 node slots were dynamic blocks; the fixture used seven
+dynamic block projections. Text strings, ancestor snapshots, vector capacity,
+and existing parsed blocks use additional storage. The measured host structure sizes are 440 bytes for
+`HtmlElementRef`, 24 bytes for `HtmlElementContentMetadata`, 80 bytes for
+`WebInlineItem`, 88 bytes for `RuntimeObject`, and 48 bytes for
+`RuntimeArrayElement`.
+
+The native JS107 lane is `tests/navigator_javascript_js107_test.cpp`, run by
+`scripts/smoke-navigator-javascript-js107.ps1`. It covers supported parent
+pairs, selectors and attribute mutation, source ordering, nested blocks,
+block text updates, same-parent reorder and reparenting, removal and subtree
+reinsertion, invalid-operation atomicity, capacity limits, event callbacks,
+and generation-stale references. The hosted fixture is
+`navigator-smoke/javascript-js107.html`; its existing buttons create a
+text-bearing dynamic `div` and two `p` children, update text, reorder a
+paragraph, disconnect the subtree, and restore the same objects. Hosted checks
+use positioned block geometry and visible inline-layout text, including
+non-overlap and a wrapped paragraph whose height pushes later content down.
+
+### JS107 qualification results
+
+The strict C++17 warning-as-error JS107 native lane passes 67/67 checks. It
+covers creation and detached state, supported parent pairs, connected-order
+selectors and projections, text replacement, movement and same-parent reorder,
+subtree disconnection and reinsertion, invalid-operation atomicity, capacity
+and mutation limits, event callbacks, and stale-generation references. The
+JS106 lane passed in the JavaScript matrix.
+
+The clean matrix rerun passed its first 107/108 lanes through JS106. The
+corrected JS107 runner then passed separately with 67/67 checks; qualification
+was staged rather than one 108/108 matrix invocation. This is 17,425 checks in
+the first 107 lanes plus the 67 JS107 checks.
+
+The latest full hosted aggregate reported 761 passed and 7 failed out of 768.
+All eight JS107 hosted checks passed: initial detachment, ordered non-overlap,
+repeat-Add idempotence, text update, paragraph removal and flow closure,
+paragraph identity and reordered reinsertion, subtree disconnection, and
+subtree identity reinsertion. The paragraph boxes initially occupied y=209
+(27 px) and y=244 (108 px), followed by parsed content at y=368. Removing the
+first paragraph moved the second from y=244 to y=205; reinsertion kept the
+same paragraph at y=327. Removing the section hid its descendants; reinserting
+it restored the same nodes with the second paragraph at y=209 and the first at
+y=331. The existing reinsert button's activation count advanced from 0 to 1
+and then 1 to 2. No JavaScript error was recorded.
+
+The seven hosted failures match the accepted CSS baseline: phase 3C, phase 3G,
+phase 6A, three phase 6B checks, and phase 6C. No JS107 hosted failures remain.
+
+The protected production build succeeded with executable SHA-256
+`8388F68F155EF5B09206F5B01BE1F723CEFE6EA0355E63E632BF68CCC48DECB2`; the
+hosted process used that same hash. Afterward, the original
+8,398,274-byte executable was restored and verified at SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated Navigator fixtures (458,372 bytes) were restored and verified
+against the saved manifest; `.phase` remained absent.
+
+Optimized host GCC 15.2 `-fstack-usage` measurements report static frame
+sizes of 688 bytes for `createDynamicElement`, 2,384 bytes for
+`rebuildDynamicBlockProjections`, 2,336 bytes for `appendDynamicChild`, 272
+bytes for `moveSubtreeInlineItems`, 160 bytes for `removeDynamicChild`, 176
+bytes for `textContentForElement`, and 352 bytes for `setElementTextContent`.
+The inline layout rebuild frame is 784 bytes and `Navigator::renderDocument`
+is 1,936 bytes; its inline-flow drawing lambda is 4,752 bytes. These are
+individual host compiler frame measurements, not a combined call-chain,
+guest-stack, or physical-memory guarantee.
+
+The native footprint report recorded structural vector size/capacity of
+17/1,024, block vector size/capacity of 12/12, inline-item vector
+size/capacity of 27/48, and seven dynamic block projections.
+At 1,936 bytes per `DocBlock`, 1,024 dynamic block records occupy 1,982,464
+bytes before vector capacity, strings, ancestor snapshots, and other document
+storage. The seven dynamic records in that fixture occupy 13,552 bytes. This
+bound does not establish guest memory use.
+
+Dynamic script elements, general text nodes, `innerHTML`, `insertBefore`,
+`replaceChild`, fragments, mutation observers, shadow DOM, custom elements,
+new CSS layout modes, and arbitrary style recalculation remain unsupported.
+Host measurements do not establish guest stack or memory bounds. Guest
+rendering, navigation lifecycle, stack, and memory qualification remain
+pending.
