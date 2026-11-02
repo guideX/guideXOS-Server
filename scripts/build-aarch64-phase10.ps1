@@ -2,6 +2,7 @@
 param(
     [string]$LlvmRoot = 'C:\Program Files\LLVM\bin',
     [string]$OutputDirectory = '',
+    [string]$StudioV05SdkInclude = '',
     [switch]$Phase11Proof,
     [switch]$Phase12Proof
 )
@@ -19,6 +20,17 @@ $lldLink = Join-Path $LlvmRoot 'lld-link.exe'
 $llvmReadobj = Join-Path $LlvmRoot 'llvm-readobj.exe'
 foreach ($tool in @($clang, $ld, $lldLink, $llvmReadobj)) {
     if (!(Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Required LLVM tool not found: $tool" }
+}
+if ($Phase12Proof) {
+    if ([string]::IsNullOrWhiteSpace($StudioV05SdkInclude)) {
+        throw 'Phase12Proof requires the separately pinned v0.5 SDK include directory.'
+    }
+    $StudioV05SdkInclude = [IO.Path]::GetFullPath($StudioV05SdkInclude)
+    foreach ($header in @('guidexos\abi.h', 'guidexos\app.h')) {
+        if (!(Test-Path -LiteralPath (Join-Path $StudioV05SdkInclude $header) -PathType Leaf)) {
+            throw "Pinned v0.5 adapter header is missing: $(Join-Path $StudioV05SdkInclude $header)"
+        }
+    }
 }
 function Invoke-Checked { param([string]$FilePath, [string[]]$Arguments)
     Write-Host "      $([IO.Path]::GetFileName($FilePath)) $($Arguments -join ' ')" -ForegroundColor DarkGray
@@ -42,7 +54,7 @@ function Test-Elf([string]$Path, [int]$Machine) {
         $b[4] -eq 2 -and $b[5] -eq 1 -and $b[6] -eq 1 -and (Read-U16 $b 18) -eq $Machine
 }
 
-if (Test-Path -LiteralPath $OutputDirectory) { Remove-Item -LiteralPath $OutputDirectory -Recurse -Force }
+if (Test-Path -LiteralPath $OutputDirectory) { throw "Refusing to overwrite existing build output: $OutputDirectory" }
 $null = New-Item -ItemType Directory -Path (Join-Path $OutputDirectory 'esp\EFI\BOOT') -Force
 
 $loaderObject = Join-Path $OutputDirectory 'phase10_loader.obj'
@@ -83,12 +95,23 @@ $kernelFlags = @(
     '-I',(Join-Path $repoRoot 'kernel\core\freestanding'),'-I',(Join-Path $repoRoot 'kernel\arch\arm64\include'))
 $kernelObjects = @()
 $kernelSourceIndex = 0
+$kernelSourcesForBuild = @($kernelSources)
+if ($Phase12Proof) { $kernelSourcesForBuild += 'kernel\core\aarch64_studio_v05_abi_adapter.cpp' }
 Write-Host '[2/12] Compiling common runtime, graphics, and ARM64 sources...' -ForegroundColor Yellow
-foreach ($relative in $kernelSources) {
+foreach ($relative in $kernelSourcesForBuild) {
     $source = Join-Path $repoRoot $relative
     $object = Join-Path $OutputDirectory ('kernel-{0:D3}.o' -f $kernelSourceIndex)
     ++$kernelSourceIndex
-    Invoke-Checked $clang ($kernelFlags + @('-c',$source,'-o',$object))
+    $sourceFlags = $kernelFlags
+    if ($relative -eq 'kernel\core\aarch64_studio_v05_abi_adapter.cpp') {
+        $v05Abi = (Join-Path $StudioV05SdkInclude 'guidexos\abi.h').Replace('\','/')
+        $v05App = (Join-Path $StudioV05SdkInclude 'guidexos\app.h').Replace('\','/')
+        $v05HeaderConfig = Join-Path $OutputDirectory 'studio_v05_kernel_header_paths.h'
+        $v05HeaderConfigText = "#define GXOS_STUDIO_V05_ABI_HEADER `"$v05Abi`"`r`n#define GXOS_STUDIO_V05_APP_HEADER `"$v05App`"`r`n"
+        [IO.File]::WriteAllText($v05HeaderConfig, $v05HeaderConfigText, [Text.UTF8Encoding]::new($false))
+        $sourceFlags = $kernelFlags + @('-I',$StudioV05SdkInclude,'-include',$v05HeaderConfig)
+    }
+    Invoke-Checked $clang ($sourceFlags + @('-c',$source,'-o',$object))
     $kernelObjects += $object
 }
 $kernelPath = Join-Path $OutputDirectory 'kernel.elf'

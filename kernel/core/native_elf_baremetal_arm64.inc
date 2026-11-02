@@ -22,7 +22,7 @@ extern "C" uint8_t phase9_filesystem_vfs_active();
 extern "C" uint8_t phase2_mmu_set_range_permissions(uint64_t base, uint64_t size,
                                                        uint8_t executable, uint8_t writable);
 extern "C" gx_result gxos_native_call_on_stack(
-    gx_result (GX_CALL *entry)(gx_app_context*), gx_app_context* context, uint8_t* stackTop);
+    uint64_t entryAddress, void* context, uint8_t* stackTop);
 
 struct Arm64Package {
     bool valid;
@@ -78,7 +78,7 @@ struct Arm64Runtime {
     Arm64GuiOwner* guiOwner;
     gx_app_context context;
     gx_host_calls host;
-    gx_result (GX_CALL *entry)(gx_app_context*);
+    uint64_t entryAddress;
     uint8_t* image;
     uint64_t imageBase;
     uint64_t imageBytes;
@@ -667,8 +667,12 @@ static bool arm64_parse_package(const char* directory, Arm64Package* package)
         }
         cursor = objectEnd + 1;
     }
-    if (!selected || !arm64_equal(package->entryPoint, "gx_main") ||
-        !arm64_equal(package->abi, GX_ABI_NAME) ||
+    bool abiSupported = arm64_equal(package->abi, GX_ABI_NAME);
+#if defined(GXOS_AARCH64_PHASE12)
+    abiSupported = abiSupported || studio_abi::profile_from_identity(package->abi) ==
+        studio_abi::Profile::StudioV05_464;
+#endif
+    if (!selected || !arm64_equal(package->entryPoint, "gx_main") || !abiSupported ||
         !arm64_json(s_arm64Manifest, "\"runtime\"", runtime, sizeof(runtime)) ||
         !arm64_equal(runtime, "native-elf")) return false;
     char executablePath[256];
@@ -885,7 +889,7 @@ static bool arm64_load_image(Arm64Runtime* runtime)
         if (program.flags & 1u) arm64_sync_instruction_cache(
             runtime->image + (mappedStart - minimum), mappedEnd - mappedStart);
     }
-    runtime->entry = reinterpret_cast<gx_result (GX_CALL *)(gx_app_context*)>(static_cast<uintptr_t>(header.entry));
+    runtime->entryAddress = header.entry;
     if (runtime->verbose) {
         arm64_print("[guideXOS] NativeElf architecture: ARM64\n");
         arm64_print("[guideXOS] NativeElf ELF validation: PASS type=ET_EXEC machine=EM_AARCH64 relocations=none\n");
@@ -951,7 +955,7 @@ static bool arm64_run_package(Arm64Package* package, bool verbose)
         arm64_print(" aligned=1 non-executable=1\n");
     }
     const gx_result result = gxos_native_call_on_stack(
-        runtime.entry, &runtime.context, runtime.stack + runtime.stackBytes - 16);
+        runtime.entryAddress, &runtime.context, runtime.stack + runtime.stackBytes - 16);
     if (runtime.verbose) {
         arm64_print("[guideXOS] NativeElf ARM64 return: "); phase3_serial_dec(static_cast<uint64_t>(result)); arm64_print("\n");
     }
@@ -1245,7 +1249,7 @@ static bool arm64_gui_run_package(Arm64Package* package, bool verbose)
         return false;
     }
     const gx_result result = gxos_native_call_on_stack(
-        runtime.entry, &runtime.context, runtime.stack + runtime.stackBytes - 16);
+        runtime.entryAddress, &runtime.context, runtime.stack + runtime.stackBytes - 16);
     const bool canaries = *reinterpret_cast<uint64_t*>(runtime.stack) == kArm64LowCanary &&
         *reinterpret_cast<uint64_t*>(runtime.stack + runtime.stackBytes - sizeof(uint64_t)) == kArm64HighCanary;
     const bool guiProof = result == 42 && runtime.entered && runtime.guiCreated &&
@@ -1392,6 +1396,9 @@ struct Phase9Runtime {
     application::ApplicationRuntime common;
     Phase9GuiOwner* owner;
     gui_render::HostBinding hostRenderBinding;
+#if defined(GXOS_AARCH64_PHASE12)
+    studio_abi::V05Adapter* studioV05Adapter;
+#endif
     bool autoClose;
     bool closeRequested;
     bool isAppA;
@@ -2417,13 +2424,38 @@ static bool phase9_load_and_run(Phase9Runtime* runtime)
         return false;
     }
     runtime->common.transition(application::LifecycleState::Running);
-    const gx_result result = gxos_native_call_on_stack(
-        runtime->loader.entry, &runtime->loader.context,
-        runtime->loader.stack + runtime->loader.stackBytes - 16);
+    void* applicationContext = &runtime->loader.context;
+#if defined(GXOS_AARCH64_PHASE12)
+    if (runtime->loader.package && studio_abi::profile_from_identity(runtime->loader.package->abi) ==
+            studio_abi::Profile::StudioV05_464) {
+        const studio_abi::UserMemoryRange userMemory = {
+            runtime->loader.imageBase, runtime->loader.imageBytes,
+            runtime->loader.stackBase, runtime->loader.stackBytes
+        };
+        runtime->studioV05Adapter = studio_abi::create_v05_adapter(
+            &runtime->loader.context, &runtime->loader.host, &runtime->hostRenderBinding, userMemory);
+        applicationContext = studio_abi::v05_context(runtime->studioV05Adapter);
+    }
+#endif
+    gx_result result = GX_ERROR_UNSUPPORTED;
+    if (applicationContext) {
+        result = gxos_native_call_on_stack(runtime->loader.entryAddress, applicationContext,
+            runtime->loader.stack + runtime->loader.stackBytes - 16);
+    }
+#if defined(GXOS_AARCH64_PHASE12)
+    if (runtime->studioV05Adapter)
+        studio_abi::deactivate_v05_adapter(runtime->studioV05Adapter);
+#endif
     runtime->hostRenderBinding.active = 0;
     /* Give the other runtime and the monitor one interrupt boundary before
      * tearing down this runtime's compositor objects and mappings. */
     kernel::arch::idle();
+#if defined(GXOS_AARCH64_PHASE12)
+    if (runtime->studioV05Adapter) {
+        studio_abi::destroy_v05_adapter(runtime->studioV05Adapter);
+        runtime->studioV05Adapter = nullptr;
+    }
+#endif
     const bool canaries = *reinterpret_cast<uint64_t*>(runtime->loader.stack) == kArm64LowCanary &&
         *reinterpret_cast<uint64_t*>(runtime->loader.stack + runtime->loader.stackBytes - sizeof(uint64_t)) == kArm64HighCanary;
     if (runtime->owner) {

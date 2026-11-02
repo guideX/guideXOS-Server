@@ -26,6 +26,9 @@
 #if defined(GXOS_AARCH64_PHASE9)
 #include "include/kernel/application_runtime.h"
 #include "include/kernel/aarch64_gui_render.h"
+#if defined(GXOS_AARCH64_PHASE12)
+#include "include/kernel/aarch64_studio_v05_abi_adapter.h"
+#endif
 #endif
 #if defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9) || defined(GXOS_AARCH64_PHASE10)
 #include "include/kernel/desktop.h"

@@ -17,7 +17,16 @@ if ([string]::IsNullOrWhiteSpace($V05ServerRoot)) {
     $V05ServerRoot = Join-Path (Split-Path -Parent $repoRoot) 'guideXOSServerV0.5_PHASE4R1_QAC_ADMISSION'
 }
 $V05ServerRoot = [IO.Path]::GetFullPath($V05ServerRoot)
+$preflightRoot = $OutputDirectory.TrimEnd('\') + '-preflight'
+$adapterTestRoot = $OutputDirectory.TrimEnd('\') + '-adapter-tests'
+$studioBuildRoot = Join-Path $OutputDirectory 'studio-v05-build'
+$studioBuildServerRoot = Join-Path $studioBuildRoot 'server-root'
 $alignmentLock = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'phase12-sdk-alignment.json') | ConvertFrom-Json
+
+if (Test-Path -LiteralPath $OutputDirectory) { throw "Refusing to overwrite existing Phase 12 output: $OutputDirectory" }
+foreach ($reserved in @($preflightRoot, $adapterTestRoot)) {
+    if (Test-Path -LiteralPath $reserved) { throw "Refusing to overwrite existing Phase 12 preflight output: $reserved" }
+}
 
 function Get-GitText([string]$Root, [string[]]$Arguments, [string]$Purpose) {
     $result = & git -C $Root @Arguments 2>&1
@@ -66,22 +75,108 @@ if ($aarch64PinnedBlob -ne $alignmentLock.aarch64ServerSdk.abiHeaderBlob -or $aa
 $activationConsumer = Get-Content -Raw -LiteralPath (Join-Path $DeveloperStudioRoot 'src\developer_studio_app_activation.cpp')
 $activationAbiTest = Get-Content -Raw -LiteralPath (Join-Path $DeveloperStudioRoot 'tests\document_activation_abi_test.cpp')
 $aarch64AbiText = Get-Content -Raw -LiteralPath $aarch64AbiPath
-if (($activationConsumer.Contains('get_document_activation_path') -or $activationAbiTest.Contains('get_document_activation_path')) -and
-    !$aarch64AbiText.Contains('*get_document_activation_path')) {
-    throw @"
-PHASE12_SDK_CONTRACT_BLOCKED: the pinned Developer Studio source requires get_document_activation_path at offset $($alignmentLock.intendedV05Sdk.documentActivationPathOffset), but the selected AARCH64 Server SDK is the $($alignmentLock.aarch64ServerSdk.hostCallsSize)-byte contract. The v0.5 SDK at $($alignmentLock.intendedV05Sdk.contractRevision) is $($alignmentLock.intendedV05Sdk.hostCallsSize) bytes, but its bare_metal_build_project_start is at $($alignmentLock.intendedV05Sdk.bareMetalBuildStartOffset) while the AARCH64 contract places it at $($alignmentLock.aarch64ServerSdk.bareMetalBuildStartOffset). Passing the v0.5 headers to the AARCH64 application build would shift live host callbacks. No build or package write was started. See docs/aarch64/AARCH64_ABI1_SDK_ALIGNMENT.md.
-"@
+if (!$activationConsumer.Contains('get_document_activation_path') -or !$activationAbiTest.Contains('get_document_activation_path') -or
+    $aarch64AbiText.Contains('*get_document_activation_path') -or
+    $alignmentLock.intendedV05Sdk.bareMetalBuildStartOffset -eq $alignmentLock.aarch64ServerSdk.bareMetalBuildStartOffset) {
+    throw 'PHASE12_ABI1_NEGATIVE_CONTROL_INVALID: the locked source/header contracts no longer prove the direct-link incompatibility.'
 }
 
-& (Join-Path $PSScriptRoot 'build-aarch64-phase10.ps1') -LlvmRoot $LlvmRoot -OutputDirectory $OutputDirectory -Phase12Proof
-if ($LASTEXITCODE -ne 0) { throw 'Phase 12 kernel foundation build failed' }
+$studioManifest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'Apps\DeveloperStudio\app.json') | ConvertFrom-Json
+$arm64Entry = @($studioManifest.entries | Where-Object { $_.architecture -eq 'arm64' })
+if ($arm64Entry.Count -ne 1 -or $arm64Entry[0].abi -ne 'guidexos-c-abi-v1-studio-v05-464') {
+    throw 'PHASE12_ADAPTER_IDENTITY_INVALID: the ARM64 package must select the pinned v0.5 464-byte adapter profile explicitly.'
+}
 
-Push-Location $DeveloperStudioRoot
+# Keep the ABI1 rejection as a mandatory negative control. The alternative path
+# is authorized only after both pinned layouts and hosted adapter checks pass.
+& (Join-Path $PSScriptRoot 'test-aarch64-phase12-sdk-alignment.ps1') `
+    -DeveloperStudioRoot $DeveloperStudioRoot -V05ServerRoot $V05ServerRoot -OutputDirectory $preflightRoot
+& (Join-Path $PSScriptRoot 'test-aarch64-studio-v05-adapter.ps1') `
+    -DeveloperStudioRoot $DeveloperStudioRoot -V05ServerRoot $V05ServerRoot -OutputDirectory $adapterTestRoot
+
+$v05SdkInclude = Join-Path $V05ServerRoot ($alignmentLock.intendedV05Sdk.includeRoot.Replace('/', '\'))
+& (Join-Path $PSScriptRoot 'build-aarch64-phase10.ps1') -LlvmRoot $LlvmRoot `
+    -OutputDirectory $OutputDirectory -Phase12Proof -StudioV05SdkInclude $v05SdkInclude
+
+$clang = Join-Path $LlvmRoot 'clang++.exe'
+if (!(Test-Path -LiteralPath $clang -PathType Leaf)) {
+    throw "PHASE12_BUILD_TOOL_MISSING: selected LLVM clang++ was not found: $clang"
+}
+New-Item -ItemType Directory -Path (Join-Path $studioBuildServerRoot 'sdk') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $studioBuildServerRoot 'Apps\DeveloperStudio') -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $V05ServerRoot 'sdk\include') `
+    -Destination (Join-Path $studioBuildServerRoot 'sdk\include') -Recurse
+$studioSourceCopy = Join-Path $studioBuildRoot 'pinned-source'
+New-Item -ItemType Directory -Path $studioSourceCopy -Force | Out-Null
+foreach ($directory in @('src','tests','app')) {
+    Copy-Item -LiteralPath (Join-Path $DeveloperStudioRoot $directory) `
+        -Destination (Join-Path $studioSourceCopy $directory) -Recurse
+}
+Copy-Item -LiteralPath (Join-Path $DeveloperStudioRoot 'build.ps1') -Destination $studioSourceCopy
+$copiedBuildScript = Join-Path $studioSourceCopy 'build.ps1'
+$buildScriptText = [IO.File]::ReadAllText($copiedBuildScript)
+$runTestSourceList = '"-Isrc", "src\developer_studio_find.cpp", "src\developer_studio_models.cpp", "src\developer_studio_output.cpp", "src\developer_studio_projects.cpp", "src\developer_studio_run.cpp", "src\developer_studio_syntax.cpp", "tests\run_test.cpp",'
+$runTestSourceListFixed = '"-Isrc", "src\developer_studio_find.cpp", "src\developer_studio_models.cpp", "src\developer_studio_output.cpp", "src\developer_studio_build.cpp", "src\developer_studio_projects.cpp", "src\developer_studio_symbols.cpp", "src\developer_studio_workspace.cpp", "src\developer_studio_run.cpp", "src\developer_studio_syntax.cpp", "tests\run_test.cpp",'
+$debugTestSourceList = '"-Isrc", "src\developer_studio_find.cpp", "src\developer_studio_syntax.cpp", "src\developer_studio_models.cpp", "src\developer_studio_output.cpp", "src\developer_studio_projects.cpp", "src\developer_studio_run.cpp", "src\developer_studio_debug_symbols.cpp", "src\developer_studio_debug_variables.cpp", "src\developer_studio_debug_watches.cpp", "src\developer_studio_debugger.cpp", "src\developer_studio_debugger_stack.cpp", "tests\debugger_test.cpp",'
+$debugTestSourceListFixed = '"-Isrc", "src\developer_studio_find.cpp", "src\developer_studio_syntax.cpp", "src\developer_studio_models.cpp", "src\developer_studio_output.cpp", "src\developer_studio_build.cpp", "src\developer_studio_projects.cpp", "src\developer_studio_symbols.cpp", "src\developer_studio_workspace.cpp", "src\developer_studio_run.cpp", "src\developer_studio_debug_symbols.cpp", "src\developer_studio_debug_variables.cpp", "src\developer_studio_debug_watches.cpp", "src\developer_studio_debugger.cpp", "src\developer_studio_debugger_stack.cpp", "tests\debugger_test.cpp",'
+foreach ($sourcePatch in @(
+    @{ Old = $runTestSourceList; New = $runTestSourceListFixed; Purpose = 'run-test' },
+    @{ Old = $debugTestSourceList; New = $debugTestSourceListFixed; Purpose = 'debugger-test' }
+)) {
+    if (!$buildScriptText.Contains($sourcePatch.Old) -or
+        $buildScriptText.IndexOf($sourcePatch.Old) -ne $buildScriptText.LastIndexOf($sourcePatch.Old)) {
+        throw "Pinned Studio $($sourcePatch.Purpose) driver block changed; refusing to patch a different source selection."
+    }
+    $buildScriptText = $buildScriptText.Replace($sourcePatch.Old, $sourcePatch.New)
+}
+$sharedDebugSources = '"src\developer_studio_output.cpp", "src\developer_studio_projects.cpp", "src\developer_studio_run.cpp"'
+$sharedDebugSourcesFixed = '"src\developer_studio_output.cpp", "src\developer_studio_build.cpp", "src\developer_studio_projects.cpp", "src\developer_studio_symbols.cpp", "src\developer_studio_workspace.cpp", "src\developer_studio_run.cpp"'
+if (!$buildScriptText.Contains($sharedDebugSources)) {
+    throw 'Pinned Studio debugger test source lists changed; refusing to patch a different source selection.'
+}
+$buildScriptText = $buildScriptText.Replace($sharedDebugSources, $sharedDebugSourcesFixed)
+$studioCompatHeader = @'
+#pragma once
+
+// Build-only source compatibility for the pinned v0.5 SDK. The v0.5 table
+// renamed the same-signature window destruction slot to native_window_destroy.
+// Import the two build helpers that main.cpp otherwise refers to unqualified.
+#include "developer_studio_build.h"
+using guidexos::developer_studio::ClassifyBuildFailureDetail;
+using guidexos::developer_studio::ClassifyBuildDiagnosticLine;
+
+#if defined(GXOS_DEVELOPER_STUDIO_BARE_METAL) && defined(GXOS_DEVELOPER_STUDIO_AARCH64)
+#define window_destroy native_window_destroy
+#endif
+'@
+$studioCompatHeaderPath = Join-Path $studioSourceCopy 'src\studio_v05_compile_compat.h'
+[IO.File]::WriteAllText($studioCompatHeaderPath, $studioCompatHeader, [Text.UTF8Encoding]::new($false))
+$compileFlagsAnchor = 'if ($TargetArchitecture -eq "arm64") { $compileFlags += "-DGXOS_DEVELOPER_STUDIO_AARCH64" }'
+$compileFlagsOverlay = $compileFlagsAnchor + "`r`n    if (`$TargetArchitecture -eq `"arm64`" -and `$Phase12Proof) { `$compileFlags += @(`"-include`", `"src\studio_v05_compile_compat.h`" ) }"
+if (!$buildScriptText.Contains($compileFlagsAnchor) -or $buildScriptText.IndexOf($compileFlagsAnchor) -ne $buildScriptText.LastIndexOf($compileFlagsAnchor)) {
+    throw 'Pinned Studio compiler flag block changed; refusing to apply the v0.5 source compatibility overlay.'
+}
+$buildScriptText = $buildScriptText.Replace($compileFlagsAnchor, $compileFlagsOverlay)
+[IO.File]::WriteAllText($copiedBuildScript, $buildScriptText, [Text.UTF8Encoding]::new($false))
+Write-Host '[guideXOS] Building copied pinned Studio sources against the staged v0.5 SDK...' -ForegroundColor Yellow
+Push-Location $studioSourceCopy
 try {
-    & .\build.ps1 -TargetArchitecture arm64 -ServerRoot $repoRoot -SdkInclude $aarch64SdkInclude -Phase12Proof
-    if ($LASTEXITCODE -ne 0) { throw 'ARM64 Developer Studio build failed' }
+    & .\build.ps1 -TargetArchitecture arm64 -ServerRoot $studioBuildServerRoot `
+        -SdkInclude $v05SdkInclude -ToolchainRoot $LlvmRoot -Phase12Proof
+    if ($LASTEXITCODE -ne 0) { throw 'Pinned Developer Studio ARM64 hosted/build/link recipe failed' }
 }
 finally { Pop-Location }
+$studioElf = Join-Path $studioBuildServerRoot 'Apps\DeveloperStudio\bin\arm64\developerstudio.elf'
+if (!(Test-Path -LiteralPath $studioElf -PathType Leaf)) { throw 'Authentic Studio target did not produce developerstudio.elf' }
+$studioElfBytes = [IO.File]::ReadAllBytes($studioElf)
+if ($studioElfBytes.Length -lt 64 -or $studioElfBytes[0] -ne 0x7f -or $studioElfBytes[1] -ne 0x45 -or
+    $studioElfBytes[2] -ne 0x4c -or $studioElfBytes[3] -ne 0x46 -or $studioElfBytes[4] -ne 2 -or
+    $studioElfBytes[5] -ne 1 -or $studioElfBytes[18] -ne 0xb7 -or $studioElfBytes[19] -ne 0) {
+    throw 'Authentic Developer Studio output is not ELF64 little-endian EM_AARCH64.'
+}
+Copy-Item -LiteralPath (Join-Path $repoRoot 'Apps\DeveloperStudio\app.json') `
+    -Destination (Join-Path $studioBuildServerRoot 'Apps\DeveloperStudio\app.json') -Force
+Write-Host "[guideXOS] Pinned Studio AARCH64 NativeElf compile/link: PASS ($((Get-Item $studioElf).Length) bytes)" -ForegroundColor Green
 
 $stageRoot = Join-Path $OutputDirectory 'ramdisk-root'
 $studioSource = Join-Path $repoRoot 'Apps\DeveloperStudio'
@@ -91,7 +186,11 @@ $proofStage = Join-Path $stageRoot 'Phase12IDEProof'
 $packageSkeletonStage = Join-Path $stageRoot 'Apps\P12Proof'
 New-Item -ItemType Directory -Path $studioStage -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $studioSource 'app.json') -Destination (Join-Path $studioStage 'app.json') -Force
-Copy-Item -LiteralPath (Join-Path $studioSource 'bin') -Destination $studioStage -Recurse -Force
+if (Test-Path -LiteralPath (Join-Path $studioSource 'bin\amd64') -PathType Container) {
+    Copy-Item -LiteralPath (Join-Path $studioSource 'bin\amd64') -Destination (Join-Path $studioStage 'bin') -Recurse
+}
+New-Item -ItemType Directory -Path (Join-Path $studioStage 'bin\arm64') -Force | Out-Null
+Copy-Item -LiteralPath $studioElf -Destination (Join-Path $studioStage 'bin\arm64\developerstudio.elf')
 New-Item -ItemType Directory -Path (Join-Path $proofStage 'app') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $proofStage 'src') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $proofSource 'guidexos.project') -Destination (Join-Path $proofStage 'guidexos.project') -Force

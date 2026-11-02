@@ -1,5 +1,7 @@
 // AAPCS64 NativeElf launch bridge.
-// x0 = gx_main, x1 = gx_app_context, x2 = app stack top (16-byte aligned).
+// x0 = verified ELF entry address, x1 = contract-specific context, x2 = app
+// stack top (16-byte aligned). Keeping entry/context opaque lets the loader
+// dispatch a package-selected contract without function-pointer casts.
 
 .section .text, "ax"
 .align 4

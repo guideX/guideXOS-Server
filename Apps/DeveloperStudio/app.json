@@ -25,7 +25,7 @@
       "architecture": "arm64",
       "path": "bin/arm64/developerstudio.elf",
       "entryPoint": "gx_main",
-      "abi": "guidexos-c-abi-v1",
+      "abi": "guidexos-c-abi-v1-studio-v05-464",
       "runtime": "native-elf"
     }
   ],

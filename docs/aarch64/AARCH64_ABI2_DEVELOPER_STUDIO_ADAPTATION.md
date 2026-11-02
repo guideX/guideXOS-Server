@@ -1,5 +1,8 @@
 # AARCH64 ABI2 Developer Studio Adaptation Audit
 
+> Historical pre-adapter audit. The current authoritative result is
+> [`AARCH64_ABI2_VERSIONED_STUDIO_ADAPTER.md`](AARCH64_ABI2_VERSIONED_STUDIO_ADAPTER.md).
+
 **Outcome:** `MANDATORY_HOST_SERVICE_MISSING`
 **Qualification date:** 2026-11-01
 **Repository:** `D:\dev\guideXOSServer_AARCH64`
