@@ -4,6 +4,14 @@
 #include "guidexos_nativeaot_native_alloc_record.h"
 #include "guidexos_nativeaot_pal_contract.h"
 
+extern "C" void* memset(void* destination, int value, size_t size) {
+    auto* bytes = static_cast<unsigned char*>(destination);
+    for (size_t index = 0; index < size; ++index) {
+        bytes[index] = static_cast<unsigned char>(value);
+    }
+    return destination;
+}
+
 namespace {
 
 alignas(16) uint8_t g_backing[128] = {};
