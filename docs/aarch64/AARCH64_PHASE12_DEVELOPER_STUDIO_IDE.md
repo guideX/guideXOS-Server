@@ -3,6 +3,8 @@
 **Status:** Complete on `AARCH64_SUPPORT` when the Phase 12 build and three
 fresh QEMU boots report `AARCH64_PHASE12_PASS`.
 
+**ABI2 audit (2026-11-01):** `MANDATORY_HOST_SERVICE_MISSING`. The Phase-12 AARCH64 runtime leaves the Developer Studio renderer callbacks `draw_text` and `draw_rect` null, and the pinned source has additional AARCH64 SDK type/API mismatches. No ABI adaptation or IDE package was produced; see [AARCH64_ABI2_DEVELOPER_STUDIO_ADAPTATION.md](AARCH64_ABI2_DEVELOPER_STUDIO_ADAPTATION.md) for the full audit and qualification evidence.
+
 **Current SDK alignment:** The standalone Developer Studio source currently
 expects the v0.5 464-byte host-call table, while this AARCH64 Server checkout
 uses a distinct 400-byte table. The current integration build is blocked until
