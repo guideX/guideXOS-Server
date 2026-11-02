@@ -452,12 +452,20 @@ $productionKernelRoot = Join-Path $productionRoot 'kernel'
 New-Item -ItemType Directory -Force -Path $productionRoot | Out-Null
 $productionNativeAotBuilder = Join-Path $root 'scripts\dotnet\build-c188-production-nativeaot.ps1'
 $productionKernelBuilder = Join-Path $root 'scripts\dotnet\build-c188-production-kernel.ps1'
-Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$productionNativeAotBuilder,
-    '-BuildRoot',$productionNativeAotRoot) (Join-Path $productionRoot 'production-nativeaot-build.log')
-Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$productionKernelBuilder,
-    '-BuildRoot',$productionKernelRoot) (Join-Path $productionRoot 'production-kernel-build.log')
 $productionManifestPath = Join-Path $productionNativeAotRoot 'production-nativeaot-qualification.json'
 $productionKernelManifestPath = Join-Path $productionKernelRoot 'kernel-qualification.json'
+$productionNativeAotExists = Test-Path -LiteralPath $productionManifestPath -PathType Leaf
+$productionKernelExists = Test-Path -LiteralPath $productionKernelManifestPath -PathType Leaf
+if ($productionNativeAotExists -or $productionKernelExists) {
+    if (-not $ResumeCandidate -or -not $productionNativeAotExists -or -not $productionKernelExists) {
+        throw 'Existing production qualifications may only be reused together when resuming a candidate.'
+    }
+} else {
+    Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$productionNativeAotBuilder,
+        '-BuildRoot',$productionNativeAotRoot) (Join-Path $productionRoot 'production-nativeaot-build.log')
+    Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$productionKernelBuilder,
+        '-BuildRoot',$productionKernelRoot) (Join-Path $productionRoot 'production-kernel-build.log')
+}
 Require-File $productionManifestPath 'Proof-disabled production NativeAOT qualification'
 Require-File $productionKernelManifestPath 'Proof-disabled production kernel qualification'
 $productionManifest = Get-Content -LiteralPath $productionManifestPath -Raw | ConvertFrom-Json
