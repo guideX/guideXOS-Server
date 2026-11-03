@@ -1904,3 +1904,70 @@ After guest exit, independent read-only verification passed protective MBR, prim
 The full `scripts/run-storage-manager-tests.ps1` qualification passed **1,503/1,503 storage checks**, including the existing USB Mass Storage 249 checks. Widget activation, DM37 input focus/diagnostics, PS/2 legacy keyboard FIFO, and Shell focus suites passed with zero failures; the USB trace classifier passed 7/7, the GPT verifier 1/1, and the DM30 fixture verifier 1/1. Existing production-linked DM37 coverage in `tests/storage_manager_test.cpp` exercises captured dismount identity, changed MBR/GPT identity, stale mount generations, same-capacity registration replacement, stale dismount rejection without replacement I/O, active-operation settlement, and no inherited mount during replacement. The retained USB/DM14 cases cover disconnect and same-port replacement behavior. The diagnostic AMD64 freestanding kernel build, `build.bat`, and UEFI x64 Release build all succeeded. `git diff --check` passed.
 
 Gates A, D (USB BOT), and E remain accepted; this C17R2 qualifies the prepared read-only Gate F removal/replacement lifecycle. Preserve the existing Gate B/C classifications. Gate G controlled I/O/Flush fault injection, Gate H delayed-input/Close scenarios, and remaining Gate I scenarios stay open. Keep `.phase` at DM36→DM37 and do not start DM38.
+
+## DM37 Continuation 18 — Gate G controlled I/O and Flush failure qualification
+
+**Outcome B — `DM37_FAILURE_ROLLBACK_HOST_VERIFIED`.** C18 started from `3db54b43f93bb379589efb86725bb837309021d8` (`feat(dm37): verify mount dispatch and USB replacement`) on `DISK_MANAGER_IMPROVEMENTS`. Preflight found a clean worktree, `.phase` at `last_completed=DM36` / `next_expected=DM37`, and no later Gate G acceptance. Continuation 17R2 remains the latest prior phase entry. This run qualifies the production-linked hosted failure paths; the final-Flush guest extension remains unqualified because the installed QEMU path did not yield a verified, isolated Flush fault.
+
+### Fault fixture and production paths
+
+The existing `FakeDisk` callbacks already supported selected read/write failures, partial writes, removal, and Flush failures. C18 reused those callbacks and the existing block registry, mount-generation, operation-reference, partition-view, and storage-operation-lease infrastructure. One bounded one-shot read selector, `failReadOnceAtLba`, was added to target a single exact LBA and clear itself on activation. No production fault switch or second fault framework was added.
+
+The fixture is an in-memory 512-byte-sector MBR disk with a disposable writable FAT32 partition. The production formatter, partition mount, FAT implementation, VFS handles, block callbacks, and ordinary `vfs::dismount(MountIdentity)` path were used. Each fault's LBA or callback count was chosen before the operation and cleared immediately afterward. No physical disk was used.
+
+### Gate G results
+
+| Scenario | Controlled trigger and production result | Observed recovery and integrity |
+| --- | --- | --- |
+| G1 directory metadata | Fail the root-directory sector read; `vfs::stat` returns `VFS_ERR_IO`, preserving the distinction from `VFS_ERR_NOT_FOUND`. | Clearing the fault lets the same path return the original file and size. |
+| G1 file data | Fail the first file data LBA; `vfs::read` returns `VFS_ERR_IO`. | The caller buffer remains at its sentinel bytes. Seeking the same open handle to offset zero and reading after clearing the fault returns the exact original data; close succeeds. |
+| G1 FAT chain | Fail the FAT-sector read after one data cluster has been copied. | The API returns the valid one-cluster byte count, with the unread suffix unchanged; the failed LBA is present in the read trace and close succeeds. This preserves the VFS partial-read contract. |
+| G1 final admission | A one-shot failure on MBR LBA 0 occurs during Dismount's current partition-identity check. | Dismount returns `VFS_ERR_IO`, skips Flush, then restores the exact same still-valid mount to `MOUNTED`; active operations and open references are zero and the storage-operation lease is released. The UI admission helper classifies the read as I/O failure. |
+| G2 before first sector | Fail the first selected data-sector write callback. | `vfs::write` returns `VFS_ERR_IO`, the accepted-write count remains zero, and `vfs::close` settles the handle successfully without changing the failed write result. |
+| G2 partial data write | Allow the first 512-byte sector callback and fail the second sector callback. | `vfs::write` returns the exact 512-byte short count. The first sector changed on the fake backing disk; the second attempted LBA is recorded as failed. No atomic rollback is claimed. |
+| G2 file-size metadata | Allow the data-sector write and fail the following root-directory metadata write. | The write returns `VFS_ERR_IO`; the data sector remains changed, the directory sector remains unchanged, and a later `stat` reports the old one-byte file size. Close succeeds. No FAT repair is attempted. |
+| G3 required final Flush | Capture the live target and mount identity, then fail exactly the next Flush callback while calling ordinary production Dismount. | Dismount returns `VFS_ERR_IO` after one Flush attempt. The exact original registration and mount generation still validate, so the mount returns to `MOUNTED`; backing status is `VFS_OK`, active operations and references are zero, and the lease is released. UI failure text names synchronization/Flush failure, and a missing mount after an I/O error maps to “Mount unavailable; durability not confirmed,” never “Unmounted.” |
+| G4 transient retry | Clear that single Flush fault and retry Dismount normally. | The retry makes one fresh successful Flush, reaches actual Unmounted state, then explicitly Remounts. A fresh VFS handle reads the expected bytes, including the earlier accepted partial data sector; the failed metadata update still has its original size. |
+| G5 device loss/replacement | Reuse existing DM14/DM37 removal regressions: remove the registration during Flush and attach a same-capacity replacement. | The operation returns `VFS_ERR_DEVICE_REMOVED`, invalidates the stale mount, and performs no later read/write/Flush or mount inheritance on the new registration. Existing tests also reject stale captured confirmation by registration ID and registry generation. |
+
+The exact dismount sequence is: verify the captured mount generation, parent registration, geometry, partition-view identity, and Mounted lifecycle; check boot protection; acquire and pin the shared storage-operation lease; revalidate under the VFS metadata lock; reject in-flight admission, aliases, open handles, and active operations; enter Quiescing; revalidate backing partition identity; then perform one required Flush for a writable FAT32/exFAT mount. Success proceeds to filesystem detach, partition-view release, and mount-slot release. A busy failure before teardown restores Mounted. A Flush or backing failure restores Mounted only when a fresh backing-identity check still succeeds and the original quiescing mount has no remaining references. Device removal or changed identity proceeds to stale filesystem/mount invalidation and returns the device/identity error without targeting a replacement. RAII lease settlement releases the operation lease on each return path. There is no automatic Flush retry, forced Dismount, or disk-write rollback.
+
+A failed final Flush leaves the persistence of preceding writes uncertain. The host fixture proves status, callback order, and memory-backed sector effects; it cannot establish physical durability. A partial sector or metadata write that the backing callback accepted remains visible, even when the file operation fails.
+
+### UI and regression qualification
+
+The Dismount test captures the target from the same production-linked `disk_manager_dismount_ui::capture_target` helper used by the app. The final-action revalidation now propagates backing-table read errors as `DISMOUNT_ADMISSION_IO_FAILURE`, instead of rendering them as a stale target. Failed synchronization shows the shared Flush error text. The result-state helper will not label a missing mount Unmounted when the operation failed. The lightweight selected-partition preview remains separate from final authoritative identity checks.
+
+The full storage runner passed **1,514/1,514 checks**, including the new **11/11 DM37 Gate G checks** and all 249 USB checks. Existing busy-reference/protected-mount, DM14 hotplug, same-capacity replacement, stale-handle, and DM36 integrity regressions were included. Widget activation, DM37 input/focus diagnostics, PS/2 keyboard FIFO, compositor pointer activation, Shell focus, USB trace classifier (**7/7**), GPT verifier (**1/1**), and DM30 fixture verifier (**1/1**) passed. The tests exercise production-linked helpers and widget routing; C18 did not claim a live guest screenshot of the resulting error dialog or a guest GUI responsiveness observation.
+
+### QAC and QEMU guest-fault preflight
+
+Read-only QAC 2.0.0 status/list/queue reported zero QEMU processes (zero foreign), managed sessions, reservations, queued reservations, or blocked reservations. The installed QEMU and `qemu-io` are 11.0.0 (`v11.0.0-12122-ga4bb4b10c9`). The QEMU `blkdebug` documentation lists controlled read, write, and Flush events ([official QEMU blkdebug documentation](https://www.qemu.org/docs/master/devel/testing/blkdebug.html)). A host-only smoke on a new 64 KiB raw scratch file confirmed an injected `read_aio` error returns EIO. On this exact Windows raw-file graph, `flush_to_disk` did not fail an explicit `qemu-io flush`; `flush_to_os` failed the write itself. These observations do not establish an isolated guest USB SYNCHRONIZE CACHE failure at the final Dismount boundary.
+
+The safe guest-injection prerequisite is therefore missing for this installed path. No guest was launched, no QMP error-injection command was attempted, and no QAC reservation was taken. No guest runtime, input trace, shutdown, guest-media hash, or guest-media integrity result is claimed. QAC remained clear after preflight. The raw host smoke file is only a tool probe, not a disposable guest fixture; its final SHA-256 is `ABC3DA22414BA3E7625E73EEBF4BD748B2EE5C062DF81E3D4890A4DCB2BF2630`.
+
+### Builds, hashes, and retained evidence
+
+The freestanding AMD64 kernel, isolated `build.bat` desktop build, and UEFI x64 Release build all succeeded. Kernel flags remained `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`. The builds emitted existing compiler warnings but no build errors. `git diff --check` passed after the source changes.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `kernel-build/bin/kernel.elf` | 3,183,704 | `A2A431BD070489A671211F42EDD0F5FC4789D1272BB5F9E3222E6E5D20196923` |
+| `kernel-build/bin/kernel.pe` | 3,308,964 | `5FCE634F42B2B3010DA7F32063E350B12506F87832E19EC1EB62896CB2505E82` |
+| `build-bat/guideXOSServer.exe` | 7,891,254 | `067A04A03F491E0355702E6EF8600B216312CCA3CB104D05FBAD048F9A938377` |
+| `uefi-build/bin/guideXOSBootLoader.exe` | 59,904 | `C6F2F42C946CABA4C2F49B9FC822A2A0E8EE5E7FDB7488B896DFC0BDB2E0AE90` |
+
+SHA-256 values below identify the validated source/test files at C18; the final Git commit records the complete source and documentation set.
+
+| Source/test file | SHA-256 |
+| --- | --- |
+| `kernel/core/fs_fat.cpp` | `80F6FA707BF86678F795CB4829C27817876C945BD47119B6EA24B2781134CCA7` |
+| `kernel/core/vfs.cpp` | `CCEA275A819550BDF8B8CC96F06822B45F9535C7B7A6BBBF7211504B7C0B567D` |
+| `kernel/core/kernel_apps.cpp` | `608BC047808ECD9947AD07ADDE314E39E69918E587A99A1C957D31D9B35F4015` |
+| `kernel/core/include/kernel/disk_manager_dismount_ui.h` | `CDD366DA5D824998CFFE7607545D5E2DB270E4BE76767F4CB361DE1E2BFB8C20` |
+| `kernel/core/include/kernel/kernel_apps.h` | `188BF58BEB282DA9B710ADC8D367865B7DF083AA7AFC0FDAD3CB95EB59B3FE22` |
+| `tests/storage_manager_test.cpp` | `0C9A41D1D21272EACCBDA6C77D5AA41CFF03DDFFB89F4ABEE4A4749CD24972A3` |
+
+Build logs and QEMU capability observations are retained under `E:/CodexArtifacts/guideXOSServer_DiskManagerImprovements/out/dm37/gateg-host-20261102-c18/`. The hosted FAT32 fixture is memory-backed, and its test assertions preserve the exact accepted and rejected sectors around each injected write.
+
+Gate G host behavior is qualified. Its guest final-Flush failure and on-screen failure-state observation remain open until a supported mechanism can trigger and clear a fault specifically at the guest's final Flush boundary. Gate H delayed-input/Close, remaining Gate I work, Gate B/C limitations, and final DM37 review also remain. Preserve accepted Gates A, D (USB BOT), E, and F. Keep `.phase` at DM36→DM37; do not declare Outcome A or begin DM38. For final DM37 closure, first qualify the guest final-Flush boundary and then complete the outstanding H/I and B/C acceptance review without changing the accepted gate distinctions.

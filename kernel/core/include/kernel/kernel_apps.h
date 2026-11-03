@@ -1514,7 +1514,8 @@ private:
     void        beginDismountConfirmation();
     disk_manager_dismount_ui::AdmissionBlockReason
                 revalidateDismountTarget(vfs::MountPoint* currentSnapshot,
-                                         bool verifyPartitionTable = false);
+                                         bool verifyPartitionTable = false,
+                                         vfs::Status* failureStatus = nullptr);
     void        runDismountOperation();
     void        drawDismountPanel(uint32_t x, uint32_t y,
                                   uint32_t w, uint32_t h);

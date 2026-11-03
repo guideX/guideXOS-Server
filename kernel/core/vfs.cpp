@@ -1347,6 +1347,44 @@ static bool mount_identity_valid_internal(uint8_t mountIndex)
         partition_entry_matches_identity(current, mount->partitionIdentity);
 }
 
+static Status mount_identity_status_internal(uint8_t mountIndex)
+{
+    const MountPoint* mount = get_mount_by_index(mountIndex);
+    if (!mount || mount->parentRegistrationId == 0 ||
+        !block::registration_is_present(mount->blockDevIndex,
+                                        mount->parentRegistrationId))
+        return VFS_ERR_DEVICE_REMOVED;
+    if (!mount->partitionMount) return VFS_OK;
+    if (!mount->partitionIdentity.valid ||
+        !block::partition_view_parent_valid(mount->partitionView))
+        return VFS_ERR_MOUNT_STALE;
+    storage::PartitionEntry current = {};
+    if (!find_current_partition(mount->blockDevIndex,
+            mount->partitionIdentity.partitionNumber,
+            s_partitionTableScratch, current)) {
+        if (!block::registration_is_present(mount->blockDevIndex,
+                mount->parentRegistrationId)) return VFS_ERR_DEVICE_REMOVED;
+        const storage::PartitionTableModel& table = s_partitionTableScratch;
+        if (table.error == storage::PARTITION_ERROR_READ_FAILED ||
+            table.primaryGptError == storage::PARTITION_ERROR_READ_FAILED ||
+            table.backupGptError == storage::PARTITION_ERROR_READ_FAILED) {
+            block::OperationDiagnostic diagnostic = {};
+            if (block::last_operation_diagnostic(diagnostic) &&
+                diagnostic.globalIndex == mount->blockDevIndex &&
+                diagnostic.registrationId == mount->parentRegistrationId &&
+                diagnostic.operation == block::OPERATION_READ &&
+                diagnostic.status != block::BLOCK_OK)
+                return map_block_status(diagnostic.status);
+            return VFS_ERR_IO;
+        }
+        return VFS_ERR_MOUNT_STALE;
+    }
+    if (!block::registration_is_present(mount->blockDevIndex,
+            mount->parentRegistrationId)) return VFS_ERR_DEVICE_REMOVED;
+    return partition_entry_matches_identity(current, mount->partitionIdentity)
+        ? VFS_OK : VFS_ERR_MOUNT_STALE;
+}
+
 bool mount_identity_valid(uint8_t mountIndex)
 {
     // Partition parsing uses the shared bounded table scratch. Join mount
@@ -1499,8 +1537,8 @@ static Status mount_backing_status_internal(uint8_t mountIndex)
     if (!mount || !mount->active) return VFS_ERR_NOT_MOUNT;
     const Status ioStatus = mount_io_status(mount);
     if (ioStatus != VFS_OK) return ioStatus;
-    if (mount->partitionMount && !mount_identity_valid_internal(mountIndex))
-        return VFS_ERR_MOUNT_STALE;
+    if (mount->partitionMount)
+        return mount_identity_status_internal(mountIndex);
     return VFS_OK;
 }
 
@@ -2785,7 +2823,9 @@ Status stat(const char* path, FileInfo* info)
         case FS_TYPE_EXFAT: {
             fs_fat::DirEntry entry;
             if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
-                return VFS_ERR_NOT_FOUND;
+                const block::Status ioStatus = fs_fat::last_io_status();
+                return ioStatus == block::BLOCK_OK
+                    ? VFS_ERR_NOT_FOUND : map_block_status(ioStatus);
             }
             
             // Fill in FileInfo from DirEntry

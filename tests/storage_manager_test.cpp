@@ -71,6 +71,7 @@ struct FakeDisk {
     uint64_t failLba;
     uint64_t failReadAtLba;
     uint32_t failReadAtLbaMinCount;
+    uint64_t failReadOnceAtLba;
     uint64_t removeOnScanReadLba;
     uint32_t removeOnScanReadMinCount;
     bool duplicateRemovalResult;
@@ -158,6 +159,7 @@ struct FakeDisk {
           failReads(false), failReadStatus(block::BLOCK_ERR_IO),
           failLba(UINT64_MAX), failReadAtLba(UINT64_MAX),
           failReadAtLbaMinCount(0),
+          failReadOnceAtLba(UINT64_MAX),
           removeOnScanReadLba(UINT64_MAX), removeOnScanReadMinCount(0),
           duplicateRemovalResult(false),
           replacementDuringScan(nullptr), replacementIndex(0xFF),
@@ -291,6 +293,10 @@ block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* bu
             }
         }
         return block::BLOCK_ERR_NO_MEDIA;
+    }
+    if (lba == disk->failReadOnceAtLba) {
+        disk->failReadOnceAtLba = UINT64_MAX;
+        return disk->failReadStatus;
     }
     if (disk->failReads || lba == disk->failLba ||
         (lba == disk->failReadAtLba &&
@@ -1446,6 +1452,415 @@ bool parse_first_partition(uint8_t index, storage::PartitionTableModel& table,
         table.partitionCount == 0) return false;
     partition = table.partitions[0];
     return true;
+}
+
+void run_dm37_failure_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    block::init();
+    vfs::test_clear_mounts();
+    fs_fat::init();
+
+    FakeDisk disk(512, 100000);
+    set_mbr_signature(disk);
+    set_mbr_partition(disk, 0, 0, 0x0C, 2048, 80000);
+    const uint8_t index = register_fake(disk, true, true, true);
+    storage::PartitionTableModel table = {};
+    storage::PartitionEntry partition = {};
+    const bool parsed = index != 0xFF &&
+        parse_first_partition(index, table, partition);
+    storage::Fat32FormatRequest formatRequest = parsed
+        ? make_format_request(index, partition, "DM37GATEG", 0x37F10A11u)
+        : storage::Fat32FormatRequest{};
+    storage::Fat32FormatResult formatResult = {};
+    const storage::Fat32FormatStatus formatStatus = parsed
+        ? storage::format_fat32_partition(formatRequest, formatResult)
+        : storage::FAT32_FORMAT_INVALID_REQUEST;
+    block::BlockDevice parent = {};
+    const bool parentCopied = index != 0xFF &&
+        block::copy_device(index, parent);
+    const char* const mountPath = "/mnt/dm37-gateg";
+    const vfs::PartitionMountResult mounted = parsed && parentCopied
+        ? vfs::mount_partition_detailed(mountPath, index,
+            partition.partitionNumber, parent.registrationId, &partition)
+        : vfs::PartitionMountResult{};
+    const uint8_t mountIndex = vfs::mount_index_for_path(mountPath);
+    const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
+    const fs_fat::FATVolume* volume = mount
+        ? fs_fat::get_volume(mount->fsVolumeIndex) : nullptr;
+    const uint32_t clusterBytes = volume
+        ? volume->sectorsPerCluster * volume->bytesPerSector : 0;
+    const bool fixtureReady = parsed && parentCopied &&
+        formatStatus == storage::FAT32_FORMAT_SUCCESS &&
+        mounted.error == vfs::PARTITION_MOUNT_OK && volume &&
+        clusterBytes >= 512;
+    check(fixtureReady,
+          "DM37 Gate G fixture formats and mounts a disposable writable FAT32 image through production VFS");
+
+    if (!fixtureReady) {
+        if (mountIndex != 0xFF) (void)vfs::unmount(mountPath);
+        if (index != 0xFF && block::get_device(index))
+            (void)unregister_fake(index, disk);
+        else if (index != 0xFF)
+            g_fakeDisks[disk.driverId] = nullptr;
+        vfs::test_clear_mounts();
+        fs_fat::init();
+        std::printf("DM37 Gate G failures: %d checks, %d failures\n",
+            g_checks - checksBefore, g_failures - failuresBefore);
+        return;
+    }
+
+    const std::string bigPath = std::string(mountPath) + "/BIG.BIN";
+    std::vector<uint8_t> initial(clusterBytes * 2u + 37u);
+    for (size_t i = 0; i < initial.size(); ++i)
+        initial[i] = static_cast<uint8_t>((i * 23u + 0x39u) & 0xFFu);
+    const int32_t created = vfs::create_file(bigPath.c_str(), initial.data(),
+        static_cast<uint32_t>(initial.size()));
+    const uint64_t rootDirectoryLba = partition.startLba +
+        volume->firstDataSector +
+        static_cast<uint64_t>(volume->rootCluster - 2u) *
+            volume->sectorsPerCluster;
+    uint32_t bigFirstCluster = 0;
+    uint32_t tinyFirstCluster = 0;
+    auto find_root_file_cluster = [&](const char shortName[11]) -> uint32_t {
+        const size_t rootOffset = static_cast<size_t>(rootDirectoryLba) *
+            disk.sectorSize;
+        if (rootOffset > disk.bytes.size() ||
+            disk.sectorSize > disk.bytes.size() - rootOffset) return 0;
+        const uint8_t* root = disk.bytes.data() + rootOffset;
+        for (uint32_t entry = 0; entry < disk.sectorSize / 32u; ++entry) {
+            const uint8_t* raw = root + entry * 32u;
+            if (raw[0] == 0) break;
+            if (raw[0] == 0xE5 || std::memcmp(raw, shortName, 11) != 0)
+                continue;
+            return (static_cast<uint32_t>(read_u16(raw + 20)) << 16) |
+                read_u16(raw + 26);
+        }
+        return 0;
+    };
+    bigFirstCluster = find_root_file_cluster("BIG     BIN");
+    const uint64_t bigDataLba = bigFirstCluster >= 2
+        ? partition.startLba + volume->firstDataSector +
+            static_cast<uint64_t>(bigFirstCluster - 2u) *
+                volume->sectorsPerCluster
+        : UINT64_MAX;
+    check(created == static_cast<int32_t>(initial.size()) &&
+          bigFirstCluster >= 2 && bigDataLba <= partition.endLba,
+          "DM37 Gate G baseline file has a known FAT32 data extent and expected bytes");
+
+    // A failed directory metadata read is a real I/O error, not a false
+    // not-found result. The next healthy lookup still sees the original file.
+    disk.failLba = rootDirectoryLba;
+    vfs::FileInfo failedMetadata = {};
+    const vfs::Status metadataReadFailure = vfs::stat(
+        bigPath.c_str(), &failedMetadata);
+    disk.failLba = UINT64_MAX;
+    vfs::FileInfo healthyMetadata = {};
+    const vfs::Status metadataReadRecovery = vfs::stat(
+        bigPath.c_str(), &healthyMetadata);
+    check(metadataReadFailure == vfs::VFS_ERR_IO &&
+          metadataReadRecovery == vfs::VFS_OK &&
+          healthyMetadata.size == initial.size(),
+          "DM37 G1 directory metadata read failure propagates as I/O and recovers after the fault clears");
+
+    // File-data failure before the first returned byte preserves the caller's
+    // buffer; a subsequent healthy read returns the exact fixture bytes.
+    vfs::HandleToken readHandle = vfs::open(bigPath.c_str(), vfs::OPEN_READ);
+    std::vector<uint8_t> failedReadBuffer(initial.size(), 0xC7);
+    disk.failLba = bigDataLba;
+    const int32_t fileReadFailure = readHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID
+        : vfs::read(readHandle, failedReadBuffer.data(),
+                    static_cast<uint32_t>(failedReadBuffer.size()));
+    disk.failLba = UINT64_MAX;
+    const bool failedBufferUntouched = std::all_of(
+        failedReadBuffer.begin(), failedReadBuffer.end(),
+        [](uint8_t value) { return value == 0xC7; });
+    const vfs::Status fileReadSeek = readHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::seek(readHandle, 0,
+            static_cast<vfs::SeekOrigin>(0));
+    std::vector<uint8_t> recoveredReadBuffer(initial.size(), 0);
+    const int32_t recoveredFileRead = readHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID
+        : vfs::read(readHandle, recoveredReadBuffer.data(),
+                    static_cast<uint32_t>(recoveredReadBuffer.size()));
+    const vfs::Status readClose = readHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::close(readHandle);
+    check(fileReadFailure == vfs::VFS_ERR_IO && failedBufferUntouched &&
+          fileReadSeek == vfs::VFS_OK &&
+          recoveredFileRead == static_cast<int32_t>(initial.size()) &&
+          recoveredReadBuffer == initial && readClose == vfs::VFS_OK,
+          "DM37 G1 failed file read reports I/O without touching the caller buffer and the same handle recovers after clearing the fault");
+
+    // The VFS read contract returns a valid short count when earlier sectors
+    // were copied before a later FAT-chain read fails.
+    const uint64_t firstFatLba = partition.startLba + volume->reservedSectors;
+    readHandle = vfs::open(bigPath.c_str(), vfs::OPEN_READ);
+    std::vector<uint8_t> partialReadBuffer(initial.size(), 0xD8);
+    disk.readLog.clear();
+    disk.failLba = firstFatLba;
+    const int32_t partialFatRead = readHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID
+        : vfs::read(readHandle, partialReadBuffer.data(),
+                    static_cast<uint32_t>(partialReadBuffer.size()));
+    disk.failLba = UINT64_MAX;
+    const bool fatFailureWasAttempted = std::any_of(
+        disk.readLog.begin(), disk.readLog.end(),
+        [&](const FakeWriteRecord& read) { return read.lba == firstFatLba; });
+    const bool partialReadBufferValid = partialFatRead ==
+            static_cast<int32_t>(clusterBytes) &&
+        std::equal(initial.begin(), initial.begin() + clusterBytes,
+                   partialReadBuffer.begin()) &&
+        std::all_of(partialReadBuffer.begin() + clusterBytes,
+                    partialReadBuffer.end(),
+                    [](uint8_t value) { return value == 0xD8; });
+    const vfs::Status partialReadClose = readHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::close(readHandle);
+    check(fatFailureWasAttempted && partialReadBufferValid &&
+          partialReadClose == vfs::VFS_OK,
+          "DM37 G1 FAT-chain read failure returns only the valid copied prefix and leaves the unread suffix untouched");
+
+    // A one-shot final identity read fault is returned, then the production
+    // dismount path retries identity only to decide whether rollback is safe.
+    vfs::MountIdentity identity = {};
+    const bool identityCaptured = vfs::capture_mount_identity(
+        mountIndex, identity);
+    const uint32_t flushesBeforeAdmissionFailure = disk.flushes;
+    disk.failReadOnceAtLba = 0;
+    const vfs::Status finalAdmissionReadFailure = identityCaptured
+        ? vfs::dismount(identity) : vfs::VFS_ERR_INVALID;
+    vfs::MountPoint afterAdmissionFailure = {};
+    const bool admissionSnapshotCopied = vfs::copy_mount_snapshot(
+        mountIndex, afterAdmissionFailure);
+    check(identityCaptured &&
+          finalAdmissionReadFailure == vfs::VFS_ERR_IO &&
+          disk.failReadOnceAtLba == UINT64_MAX &&
+          admissionSnapshotCopied && afterAdmissionFailure.active &&
+          afterAdmissionFailure.lifecycleState == vfs::MOUNT_LIFECYCLE_MOUNTED &&
+          afterAdmissionFailure.mountGeneration == identity.mountGeneration &&
+          afterAdmissionFailure.activeOperations == 0 &&
+          afterAdmissionFailure.openFileReferences == 0 &&
+          afterAdmissionFailure.openDirectoryReferences == 0 &&
+          disk.flushes == flushesBeforeAdmissionFailure &&
+          !storage::storage_operation_active() &&
+          apps::disk_manager_dismount_ui::identity_failure_reason(
+              finalAdmissionReadFailure) ==
+                  apps::disk_manager_dismount_ui::DISMOUNT_ADMISSION_IO_FAILURE &&
+          std::strstr(apps::disk_manager_dismount_ui::admission_reason_text(
+              apps::disk_manager_dismount_ui::identity_failure_reason(
+                  finalAdmissionReadFailure)), "I/O failed") != nullptr,
+          "DM37 G1 final-admission identity read failure preserves the exact valid mount, skips Flush, and releases quiescence and the operation lease");
+
+    // Write failure before any sector is accepted returns an error. Closing
+    // settles the handle but cannot change that operation result.
+    vfs::HandleToken writeHandle = vfs::open(bigPath.c_str(), vfs::OPEN_WRITE);
+    const vfs::Status beforeWriteSeek = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::seek(writeHandle, 0,
+            static_cast<vfs::SeekOrigin>(0));
+    const uint32_t writesBeforeImmediateFailure = disk.writes;
+    const uint32_t attemptsBeforeImmediateFailure = disk.writeAttempts;
+    std::vector<uint8_t> replacementBytes(1024, 0xB4);
+    disk.failWriteAtCall1 = attemptsBeforeImmediateFailure + 1u;
+    const int32_t immediateWriteFailure = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::write(writeHandle,
+            replacementBytes.data(), 512);
+    disk.failWriteAtCall1 = 0;
+    const vfs::Status immediateWriteClose = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::close(writeHandle);
+    check(beforeWriteSeek == vfs::VFS_OK &&
+          immediateWriteFailure == vfs::VFS_ERR_IO &&
+          disk.writes == writesBeforeImmediateFailure &&
+          immediateWriteClose == vfs::VFS_OK,
+          "DM37 G2 write failure before the first sector returns I/O, writes no sector, and settles the handle for recovery");
+
+    // Fail the second sector callback to retain an exact record of the first
+    // sector that reached the disposable backing image.
+    std::vector<uint8_t> expectedAfterPartial = initial;
+    std::copy(replacementBytes.begin(), replacementBytes.begin() + 512,
+              expectedAfterPartial.begin());
+    const size_t partialWriteLogStart = disk.writeLog.size();
+    const uint32_t writesBeforePartialFailure = disk.writes;
+    const uint32_t attemptsBeforePartialFailure = disk.writeAttempts;
+    const size_t bigSectorOffset = static_cast<size_t>(bigDataLba) *
+        disk.sectorSize;
+    std::vector<uint8_t> bigSectorBefore(
+        disk.bytes.begin() + bigSectorOffset,
+        disk.bytes.begin() + bigSectorOffset + disk.sectorSize);
+    writeHandle = vfs::open(bigPath.c_str(), vfs::OPEN_WRITE);
+    const vfs::Status partialWriteSeek = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::seek(writeHandle, 0,
+            static_cast<vfs::SeekOrigin>(0));
+    disk.failWriteAtCall1 = attemptsBeforePartialFailure + 2u;
+    const int32_t partialWriteResult = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::write(writeHandle,
+            replacementBytes.data(), 1024);
+    disk.failWriteAtCall1 = 0;
+    const vfs::Status partialWriteClose = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::close(writeHandle);
+    const bool firstSectorChanged = std::memcmp(
+        disk.bytes.data() + bigSectorOffset, bigSectorBefore.data(),
+        disk.sectorSize) != 0;
+    const bool partialWriteTraceExact =
+        disk.writeLog.size() == partialWriteLogStart + 2u &&
+        disk.writeLog[partialWriteLogStart].lba == bigDataLba &&
+        disk.writeLog[partialWriteLogStart].count == 1 &&
+        disk.writeLog[partialWriteLogStart + 1].lba == bigDataLba + 1u &&
+        disk.writeLog[partialWriteLogStart + 1].count == 1;
+    check(partialWriteSeek == vfs::VFS_OK && partialWriteResult == 512 &&
+          disk.writes == writesBeforePartialFailure + 1u &&
+          firstSectorChanged && partialWriteTraceExact &&
+          partialWriteClose == vfs::VFS_OK,
+          "DM37 G2 partial VFS write reports the exact short count and records the one data sector accepted before the controlled second-sector failure");
+
+    // Failure while publishing the increased FAT file size reports an error;
+    // the earlier file-data sector remains visible and is not rolled back.
+    const std::string tinyPath = std::string(mountPath) + "/TINY.BIN";
+    const uint8_t tinyOriginal = 0x61;
+    const int32_t tinyCreated = vfs::create_file(
+        tinyPath.c_str(), &tinyOriginal, 1);
+    tinyFirstCluster = find_root_file_cluster("TINY    BIN");
+    const uint64_t tinyDataLba = tinyFirstCluster >= 2
+        ? partition.startLba + volume->firstDataSector +
+            static_cast<uint64_t>(tinyFirstCluster - 2u) *
+                volume->sectorsPerCluster
+        : UINT64_MAX;
+    const size_t tinyOffset = tinyDataLba <= partition.endLba
+        ? static_cast<size_t>(tinyDataLba) * disk.sectorSize : 0;
+    std::vector<uint8_t> rootSectorBefore(
+        disk.bytes.begin() + static_cast<size_t>(rootDirectoryLba) * disk.sectorSize,
+        disk.bytes.begin() + (static_cast<size_t>(rootDirectoryLba) + 1u) *
+            disk.sectorSize);
+    std::vector<uint8_t> tinySectorBefore;
+    if (tinyDataLba <= partition.endLba)
+        tinySectorBefore.assign(disk.bytes.begin() + tinyOffset,
+                                disk.bytes.begin() + tinyOffset + disk.sectorSize);
+    writeHandle = vfs::open(tinyPath.c_str(), vfs::OPEN_WRITE);
+    const vfs::Status tinySeekEnd = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::seek(writeHandle, 0,
+            static_cast<vfs::SeekOrigin>(2));
+    const uint32_t attemptsBeforeMetadataFailure = disk.writeAttempts;
+    std::vector<uint8_t> extension(511, 0xE2);
+    disk.failWriteAtCall1 = attemptsBeforeMetadataFailure + 2u;
+    const int32_t metadataUpdateFailure = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::write(writeHandle,
+            extension.data(), static_cast<uint32_t>(extension.size()));
+    disk.failWriteAtCall1 = 0;
+    const vfs::Status tinyClose = writeHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::close(writeHandle);
+    vfs::FileInfo tinyInfo = {};
+    const vfs::Status tinyStat = vfs::stat(tinyPath.c_str(), &tinyInfo);
+    const bool tinyMetadataSectorUnchanged = std::equal(
+        rootSectorBefore.begin(), rootSectorBefore.end(),
+        disk.bytes.begin() + static_cast<size_t>(rootDirectoryLba) *
+            disk.sectorSize);
+    const bool tinyDataSectorChanged = tinyDataLba <= partition.endLba &&
+        !std::equal(tinySectorBefore.begin(), tinySectorBefore.end(),
+            disk.bytes.begin() + tinyOffset);
+    check(tinyCreated == 1 && tinyFirstCluster >= 2 &&
+          tinySeekEnd == vfs::VFS_OK &&
+          metadataUpdateFailure == vfs::VFS_ERR_IO && tinyClose == vfs::VFS_OK &&
+          tinyStat == vfs::VFS_OK && tinyInfo.size == 1 &&
+          tinyMetadataSectorUnchanged && tinyDataSectorChanged,
+          "DM37 G2 file-size metadata write failure stays failed, leaves the old size authoritative, and preserves evidence of the earlier data-sector write");
+
+    // The failed final Flush is the required Dismount boundary. Only the
+    // transient error is reversed: prior on-media writes are not rolled back.
+    identity = {};
+    const bool finalIdentityCaptured = vfs::capture_mount_identity(
+        mountIndex, identity);
+    storage::TargetIdentity target = {};
+    vfs::MountPoint beforeDismount = {};
+    apps::disk_manager_dismount_ui::CapturedTarget guiTarget = {};
+    const bool guiTargetCaptured = finalIdentityCaptured &&
+        storage::capture_target_identity(index, target) &&
+        vfs::copy_mount_snapshot(mountIndex, beforeDismount) &&
+        apps::disk_manager_dismount_ui::capture_target(
+            target, partition, identity, beforeDismount, guiTarget);
+    const uint32_t flushesBeforeFinalFailure = disk.flushes;
+    disk.failFlushAtCall = flushesBeforeFinalFailure + 1u;
+    const vfs::Status finalFlushFailure = finalIdentityCaptured
+        ? vfs::dismount(identity) : vfs::VFS_ERR_INVALID;
+    disk.failFlushAtCall = 0;
+    vfs::MountPoint afterFinalFailure = {};
+    const bool finalFailureSnapshot = vfs::copy_mount_snapshot(
+        mountIndex, afterFinalFailure);
+    block::BlockDevice currentParent = {};
+    storage::TargetIdentity currentTarget = {};
+    const bool sameParent = block::copy_device(index, currentParent) &&
+        storage::capture_target_identity(index, currentTarget) &&
+        currentParent.registrationId == identity.registrationId &&
+        currentTarget.registryGeneration == identity.registryGeneration;
+    const vfs::Status failureBackingStatus =
+        vfs::mount_backing_status(mountIndex);
+    const char* failedFlushMessage =
+        apps::disk_manager_dismount_ui::synchronization_failure_text();
+    const char* missingFailureState =
+        apps::disk_manager_dismount_ui::missing_mount_result_state(
+            vfs::VFS_ERR_IO);
+    check(guiTargetCaptured && finalFlushFailure == vfs::VFS_ERR_IO &&
+          disk.flushes == flushesBeforeFinalFailure + 1u &&
+          finalFailureSnapshot && afterFinalFailure.active &&
+          afterFinalFailure.lifecycleState == vfs::MOUNT_LIFECYCLE_MOUNTED &&
+          afterFinalFailure.mountGeneration == identity.mountGeneration &&
+          afterFinalFailure.parentRegistrationId == identity.registrationId &&
+          afterFinalFailure.activeOperations == 0 &&
+          afterFinalFailure.openFileReferences == 0 &&
+          afterFinalFailure.openDirectoryReferences == 0 && sameParent &&
+          failureBackingStatus == vfs::VFS_OK &&
+          !storage::storage_operation_active() &&
+          std::strstr(failedFlushMessage, "Flush failed") != nullptr &&
+          std::strcmp(missingFailureState, "Unmounted") != 0,
+          "DM37 G3 required final Flush failure is visible, returns I/O, restores only the same valid Mounted identity, and releases lease/quiescence without claiming Unmounted");
+
+    // The ordinary visible retry after clearing the single fault performs a
+    // fresh final Flush; explicit remount then discovers the resulting bytes.
+    const uint32_t flushesBeforeRetry = disk.flushes;
+    const vfs::Status dismountRetry = finalIdentityCaptured
+        ? vfs::dismount(identity) : vfs::VFS_ERR_INVALID;
+    const bool unmountedAfterRetry = vfs::mount_count() == 0 &&
+        vfs::get_mount_by_index(mountIndex) == nullptr;
+    const vfs::PartitionMountResult remounted = vfs::mount_partition_detailed(
+        mountPath, index, partition.partitionNumber,
+        parent.registrationId, &partition);
+    const vfs::HandleToken remountReadHandle = vfs::open(
+        bigPath.c_str(), vfs::OPEN_READ);
+    std::vector<uint8_t> remountBytes(expectedAfterPartial.size(), 0);
+    const int32_t remountRead = remountReadHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID
+        : vfs::read(remountReadHandle, remountBytes.data(),
+            static_cast<uint32_t>(remountBytes.size()));
+    const vfs::Status remountReadClose = remountReadHandle == vfs::INVALID_HANDLE
+        ? vfs::VFS_ERR_INVALID : vfs::close(remountReadHandle);
+    vfs::FileInfo tinyAfterRemount = {};
+    const vfs::Status tinyAfterRemountStatus = vfs::stat(
+        tinyPath.c_str(), &tinyAfterRemount);
+    check(dismountRetry == vfs::VFS_OK && unmountedAfterRetry &&
+          disk.flushes == flushesBeforeRetry + 1u &&
+          !storage::storage_operation_active() &&
+          remounted.error == vfs::PARTITION_MOUNT_OK &&
+          remountRead == static_cast<int32_t>(expectedAfterPartial.size()) &&
+          remountBytes == expectedAfterPartial &&
+          remountReadClose == vfs::VFS_OK &&
+          tinyAfterRemountStatus == vfs::VFS_OK && tinyAfterRemount.size == 1,
+          "DM37 G4 normal retry succeeds after clearing the transient Flush fault, explicitly remounts, and reads back the accepted partial-sector result");
+
+    const uint8_t remountIndex = vfs::mount_index_for_path(mountPath);
+    vfs::MountIdentity remountIdentity = {};
+    const bool remountIdentityCaptured = vfs::capture_mount_identity(
+        remountIndex, remountIdentity);
+    const vfs::Status cleanupDismount = remountIdentityCaptured
+        ? vfs::dismount(remountIdentity) : vfs::VFS_ERR_INVALID;
+    if (cleanupDismount != vfs::VFS_OK)
+        (void)vfs::unmount(mountPath);
+    if (index != 0xFF && block::get_device(index))
+        (void)unregister_fake(index, disk);
+    else if (index != 0xFF)
+        g_fakeDisks[disk.driverId] = nullptr;
+    vfs::test_clear_mounts();
+    fs_fat::init();
+    std::printf("DM37 Gate G failures: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
 }
 
 bool setup_4kn_mbr_fixture(FakeDisk& disk, uint8_t& index,
@@ -10011,6 +10426,7 @@ int main()
     run_disk_manager_wipe_ui_tests();
     run_disk_manager_whole_erase_ui_tests();
     run_disk_manager_surface_verification_ui_tests();
+    run_dm37_failure_tests();
 
     check(storage::crc32("123456789", 9) == 0xCBF43926u, "CRC32 standard test vector");
     check(storage::valid_geometry(10, 512), "512-byte geometry accepted");

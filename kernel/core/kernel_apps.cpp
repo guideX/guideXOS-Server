@@ -13618,8 +13618,10 @@ void DiskManagerApp::beginDismountConfirmation() {
 
 disk_manager_dismount_ui::AdmissionBlockReason
 DiskManagerApp::revalidateDismountTarget(vfs::MountPoint* currentSnapshot,
-                                          bool verifyPartitionTable) {
+                                          bool verifyPartitionTable,
+                                          vfs::Status* failureStatus) {
     using namespace disk_manager_dismount_ui;
+    if (failureStatus) *failureStatus = vfs::VFS_OK;
     if (currentSnapshot) memset(currentSnapshot, 0, sizeof(*currentSnapshot));
     if (!m_dismountTarget.valid)
         return DISMOUNT_ADMISSION_IDENTITY_INVALID;
@@ -13638,11 +13640,22 @@ DiskManagerApp::revalidateDismountTarget(vfs::MountPoint* currentSnapshot,
         m_dismountTarget.mount.mountIndex, liveIdentity);
     const bool haveDevice = storage::capture_target_identity(
         m_dismountTarget.mount.blockDevIndex, liveDevice);
+    const vfs::Status backingStatus = haveMountIdentity
+        ? vfs::mount_backing_status(m_dismountTarget.mount.mountIndex)
+        : vfs::VFS_ERR_MOUNT_STALE;
+    if (backingStatus != vfs::VFS_OK) {
+        const AdmissionBlockReason reason =
+            identity_failure_reason(backingStatus);
+        if (reason == DISMOUNT_ADMISSION_DEVICE_REMOVED ||
+            reason == DISMOUNT_ADMISSION_IO_FAILURE ||
+            reason == DISMOUNT_ADMISSION_ALREADY_UNMOUNTED) {
+            if (failureStatus) *failureStatus = backingStatus;
+            return reason;
+        }
+    }
     bool targetCurrent = haveMountIdentity && haveDevice &&
         binding_matches(m_dismountTarget, liveDevice, liveIdentity, live) &&
-        vfs::mount_identity_valid(m_dismountTarget.mount.mountIndex) &&
-        vfs::mount_backing_status(m_dismountTarget.mount.mountIndex) ==
-            vfs::VFS_OK &&
+        backingStatus == vfs::VFS_OK &&
         partition_matches_mount(liveDevice, m_dismountTarget.partition,
                                 liveIdentity) &&
         storage::query_device_capabilities(
@@ -13674,6 +13687,16 @@ DiskManagerApp::revalidateDismountTarget(vfs::MountPoint* currentSnapshot,
             partition_table_has_unique_entry(s_diskManagerTableScratch,
                                                m_dismountTarget.partition);
         targetCurrent = tableCurrent;
+        if (!tableCurrent &&
+            (s_diskManagerTableScratch.error ==
+                 storage::PARTITION_ERROR_READ_FAILED ||
+             s_diskManagerTableScratch.primaryGptError ==
+                 storage::PARTITION_ERROR_READ_FAILED ||
+             s_diskManagerTableScratch.backupGptError ==
+                 storage::PARTITION_ERROR_READ_FAILED)) {
+            if (failureStatus) *failureStatus = vfs::VFS_ERR_IO;
+            return DISMOUNT_ADMISSION_IO_FAILURE;
+        }
     }
     if (targetCurrent) m_dismountCapabilities = liveCapabilities;
 
@@ -13741,7 +13764,9 @@ void DiskManagerApp::runDismountOperation() {
             static_cast<uint32_t>(m_initializeDialogState));
 
     vfs::MountPoint before = {};
-    m_dismountBlockReason = revalidateDismountTarget(&before, true);
+    vfs::Status validationFailure = vfs::VFS_OK;
+    m_dismountBlockReason = revalidateDismountTarget(
+        &before, true, &validationFailure);
     if (before.active) m_dismountMountSnapshot = before;
     if (m_dismountBlockReason != DISMOUNT_ADMISSION_READY) {
         strcopy(m_statusMessage, admission_reason_text(m_dismountBlockReason),
@@ -13749,20 +13774,27 @@ void DiskManagerApp::runDismountOperation() {
         if (m_dismountBlockReason == DISMOUNT_ADMISSION_STALE_TARGET ||
             m_dismountBlockReason == DISMOUNT_ADMISSION_DEVICE_REMOVED ||
             m_dismountBlockReason == DISMOUNT_ADMISSION_ALREADY_UNMOUNTED ||
-            m_dismountBlockReason == DISMOUNT_ADMISSION_IDENTITY_INVALID) {
-            m_dismountStatus = m_dismountBlockReason ==
-                    DISMOUNT_ADMISSION_ALREADY_UNMOUNTED
-                ? vfs::VFS_ERR_NOT_MOUNT
-                : (m_dismountBlockReason == DISMOUNT_ADMISSION_DEVICE_REMOVED
-                    ? vfs::VFS_ERR_DEVICE_REMOVED : vfs::VFS_ERR_MOUNT_STALE);
+            m_dismountBlockReason == DISMOUNT_ADMISSION_IDENTITY_INVALID ||
+            m_dismountBlockReason == DISMOUNT_ADMISSION_IO_FAILURE) {
+            if (validationFailure != vfs::VFS_OK)
+                m_dismountStatus = validationFailure;
+            else if (m_dismountBlockReason ==
+                    DISMOUNT_ADMISSION_ALREADY_UNMOUNTED)
+                m_dismountStatus = vfs::VFS_ERR_NOT_MOUNT;
+            else if (m_dismountBlockReason ==
+                    DISMOUNT_ADMISSION_DEVICE_REMOVED)
+                m_dismountStatus = vfs::VFS_ERR_DEVICE_REMOVED;
+            else
+                m_dismountStatus = vfs::VFS_ERR_MOUNT_STALE;
             strcopy(m_initializeMessage, m_statusMessage,
                     sizeof(m_initializeMessage));
             scanDisks();
             vfs::MountPoint current = {};
             if (!vfs::copy_mount_snapshot(
                     m_dismountTarget.mount.mountIndex, current))
-                strcopy(m_dismountFinalState, "Unmounted or removed",
-                        sizeof(m_dismountFinalState));
+                strcopy(m_dismountFinalState,
+                    missing_mount_result_state(m_dismountStatus),
+                    sizeof(m_dismountFinalState));
             else if (current.mountGeneration ==
                      m_dismountTarget.mount.mountGeneration) {
                 const vfs::Status backing = vfs::mount_backing_status(
@@ -13830,9 +13862,8 @@ void DiskManagerApp::runDismountOperation() {
                m_dismountStatus == vfs::VFS_ERR_IO_TIMEOUT ||
                m_dismountStatus == vfs::VFS_ERR_WRITE_UNCERTAIN ||
                m_dismountStatus == vfs::VFS_ERR_DURABILITY_UNVERIFIED) {
-        strcopy(m_initializeMessage,
-            "Filesystem synchronization or durability Flush failed.",
-            sizeof(m_initializeMessage));
+        strcopy(m_initializeMessage, synchronization_failure_text(),
+                sizeof(m_initializeMessage));
     } else {
         strcopy(m_initializeMessage, "Dismount failed: ",
                 sizeof(m_initializeMessage));
@@ -13845,8 +13876,7 @@ void DiskManagerApp::runDismountOperation() {
     vfs::MountPoint current = {};
     if (!vfs::copy_mount_snapshot(m_dismountTarget.mount.mountIndex, current)) {
         strcopy(m_dismountFinalState,
-            m_dismountStatus == vfs::VFS_ERR_DEVICE_REMOVED
-                ? "Removed or detached" : "Unmounted",
+            missing_mount_result_state(m_dismountStatus),
             sizeof(m_dismountFinalState));
     } else if (current.mountGeneration ==
                m_dismountTarget.mount.mountGeneration) {

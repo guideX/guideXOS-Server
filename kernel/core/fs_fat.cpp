@@ -2113,6 +2113,10 @@ bool find_in_dir(uint8_t volumeIndex, const char* name, DirEntry* out)
 
 bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
 {
+    // Lookup is also used by VFS stat/open admission. Reset the I/O status so
+    // callers can distinguish a missing entry from a failed metadata read.
+    s_lastIoStatus = block::BLOCK_OK;
+    set_traversal_status(TRAVERSAL_OK);
     if (volumeIndex >= MAX_FAT_VOLUMES) return false;
     if (!s_volumes[volumeIndex].mounted) return false;
     if (!path || !out) return false;

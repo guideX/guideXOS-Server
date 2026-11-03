@@ -17,6 +17,7 @@ enum AdmissionBlockReason : uint8_t {
     DISMOUNT_ADMISSION_BUSY,
     DISMOUNT_ADMISSION_CONFLICTING_OPERATION,
     DISMOUNT_ADMISSION_UNSUPPORTED_DURABILITY,
+    DISMOUNT_ADMISSION_IO_FAILURE,
 };
 
 inline uint8_t next_confirmation_focus(uint8_t current,
@@ -279,9 +280,38 @@ inline const char* admission_reason_text(AdmissionBlockReason reason)
             return "Another storage operation owns this target.";
         case DISMOUNT_ADMISSION_UNSUPPORTED_DURABILITY:
             return "Required write or Flush durability is unsupported.";
+        case DISMOUNT_ADMISSION_IO_FAILURE:
+            return "Storage I/O failed while revalidating the captured volume.";
         default:
             return "Ready to dismount the captured volume.";
     }
+}
+
+inline AdmissionBlockReason identity_failure_reason(vfs::Status status)
+{
+    if (status == vfs::VFS_ERR_DEVICE_REMOVED)
+        return DISMOUNT_ADMISSION_DEVICE_REMOVED;
+    if (status == vfs::VFS_ERR_NOT_MOUNT)
+        return DISMOUNT_ADMISSION_ALREADY_UNMOUNTED;
+    if (status == vfs::VFS_ERR_IO || status == vfs::VFS_ERR_IO_TIMEOUT ||
+        status == vfs::VFS_ERR_NOT_READY ||
+        status == vfs::VFS_ERR_WRITE_UNCERTAIN ||
+        status == vfs::VFS_ERR_DURABILITY_UNVERIFIED)
+        return DISMOUNT_ADMISSION_IO_FAILURE;
+    return DISMOUNT_ADMISSION_STALE_TARGET;
+}
+
+inline const char* synchronization_failure_text()
+{
+    return "Filesystem synchronization or durability Flush failed.";
+}
+
+inline const char* missing_mount_result_state(vfs::Status status)
+{
+    if (status == vfs::VFS_OK) return "Unmounted";
+    if (status == vfs::VFS_ERR_DEVICE_REMOVED)
+        return "Removed or detached; durability not confirmed";
+    return "Mount unavailable; durability not confirmed";
 }
 
 }}} // namespace kernel::apps::disk_manager_dismount_ui
