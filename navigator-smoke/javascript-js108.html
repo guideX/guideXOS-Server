@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Navigator JavaScript JS108</title>
+</head>
+<body id="page-body">
+<h1>Navigator JavaScript JS108</h1>
+<div id="host">
+    <p id="first">First paragraph</p>
+    <p id="middle">Middle paragraph</p>
+    <p id="last">Last paragraph</p>
+</div>
+<div id="other-host">
+    <p id="other-first">Other first paragraph</p>
+    <p id="other-last">Other last paragraph</p>
+</div>
+<button id="insert-button" type="button">Insert before first</button>
+<button id="move-button" type="button">Move last to first</button>
+<button id="append-button" type="button">Append with null</button>
+<button id="subtree-button" type="button">Move subtree</button>
+<button id="invalid-button" type="button">Try invalid reference</button>
+<p id="status">Ready</p>
+<script>
+const host = document.getElementById("host");
+const otherHost = document.getElementById("other-host");
+const status = document.getElementById("status");
+let inserted = null;
+let appended = null;
+let subtree = null;
+const movable = document.createElement("p");
+movable.setAttribute("id", "movable");
+movable.textContent = "Dynamic paragraph available to move";
+host.insertBefore(movable, null);
+
+document.getElementById("insert-button").addEventListener("click", () => {
+    if (inserted === null) {
+        inserted = document.createElement("p");
+        inserted.setAttribute("id", "inserted");
+        inserted.textContent = "Inserted before first";
+        const reference = host.querySelector("p");
+        host.insertBefore(inserted, reference);
+        const items = host.querySelectorAll("p");
+        if (items[0] === inserted &&
+            document.getElementById("inserted") === inserted) {
+            status.textContent = "Inserted; selectors and identity agree";
+        } else {
+            status.textContent = "Insert verification failed";
+        }
+    }
+});
+
+document.getElementById("move-button").addEventListener("click", () => {
+    const items = host.querySelectorAll("p");
+    if (items.length > 1) {
+        const lastItem = items[items.length - 1];
+        host.insertBefore(lastItem, items[0]);
+        if (host.querySelectorAll("p")[0] === lastItem) {
+            status.textContent = "Moved last paragraph to first";
+        } else {
+            status.textContent = "Move verification failed";
+        }
+    }
+});
+
+document.getElementById("append-button").addEventListener("click", () => {
+    if (appended === null) {
+        appended = document.createElement("p");
+        appended.setAttribute("id", "appended");
+        appended.textContent = "Appended through explicit null";
+        host.insertBefore(appended, null);
+        const items = host.querySelectorAll("p");
+        if (items[items.length - 1] === appended) {
+            status.textContent = "Explicit null appended the same node";
+        } else {
+            status.textContent = "Null append verification failed";
+        }
+    }
+});
+
+document.getElementById("subtree-button").addEventListener("click", () => {
+    if (subtree === null) {
+        subtree = document.createElement("div");
+        subtree.setAttribute("id", "moved-subtree");
+        const child = document.createElement("p");
+        child.setAttribute("id", "subtree-child");
+        child.textContent = "Subtree text remains attached";
+        subtree.appendChild(child);
+        host.insertBefore(subtree, host.firstElementChild);
+        const newPosition = host.children[0] === subtree;
+        otherHost.insertBefore(subtree, otherHost.firstElementChild);
+        if (newPosition &&
+            document.getElementById("subtree-child") === child &&
+            child.parentElement === subtree) {
+            status.textContent = "Subtree moved with child identity intact";
+        } else {
+            status.textContent = "Subtree verification failed";
+        }
+    }
+});
+
+document.getElementById("invalid-button").addEventListener("click", () => {
+    host.insertBefore(inserted, otherHost.querySelector("p"));
+});
+</script>
+</body>
+</html>

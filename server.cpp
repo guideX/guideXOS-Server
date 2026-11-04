@@ -6720,6 +6720,276 @@ static std::string navigatorHostedSmokeDiagnostic() {
         ",activation=" + std::to_string(js107SectionActivationBefore) +
         "->" + std::to_string(js107SectionActivationAfter));
 
+    const std::string js108FixtureUrl =
+        "http://127.0.0.1:8080/navigator-smoke/javascript-js108.html";
+    const bool js108Loaded = gxos::apps::Navigator::SmokeNavigateToQuiet(
+        js108FixtureUrl);
+    const std::string js108InitialText =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js108InitialRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js108FirstX = 0, js108FirstY = 0, js108FirstW = 0, js108FirstH = 0;
+    int js108MiddleX = 0, js108MiddleY = 0, js108MiddleW = 0, js108MiddleH = 0;
+    int js108LastX = 0, js108LastY = 0, js108LastW = 0, js108LastH = 0;
+    int js108MovableX = 0, js108MovableY = 0;
+    int js108MovableW = 0, js108MovableH = 0;
+    const bool js108InitialGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("first",
+            js108FirstX, js108FirstY, js108FirstW, js108FirstH) &&
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("middle",
+            js108MiddleX, js108MiddleY, js108MiddleW, js108MiddleH) &&
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("last",
+            js108LastX, js108LastY, js108LastW, js108LastH) &&
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("movable",
+            js108MovableX, js108MovableY, js108MovableW, js108MovableH);
+    add("JS108 hosted insertBefore fixture loads with ordered visible children",
+        js108Loaded && js108InitialGeometry &&
+        js108FirstY < js108MiddleY && js108MiddleY < js108LastY &&
+        js108LastY < js108MovableY &&
+        js108FirstY + js108FirstH <= js108MiddleY &&
+        js108MiddleY + js108MiddleH <= js108LastY &&
+        js108LastY + js108LastH <= js108MovableY &&
+        containsRenderedGlyphSequence(js108InitialText, "First paragraph") &&
+        containsRenderedGlyphSequence(js108InitialText, "Middle paragraph") &&
+        containsRenderedGlyphSequence(js108InitialText, "Last paragraph") &&
+        containsRenderedGlyphSequence(js108InitialText,
+            "Dynamic paragraph available to move") &&
+        gxos::apps::Navigator::SmokeJavaScriptListenerCount() == 5u &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("loaded=") + yesNo(js108Loaded) + ",revision=" +
+        std::to_string(js108InitialRevision) + ",first=" +
+        std::to_string(js108FirstY) + "+" + std::to_string(js108FirstH) +
+        ",middle=" + std::to_string(js108MiddleY) + "+" +
+        std::to_string(js108MiddleH) + ",last=" +
+        std::to_string(js108LastY) + "+" + std::to_string(js108LastH) +
+        ",movable=" + std::to_string(js108MovableY) + "+" +
+        std::to_string(js108MovableH) + ",inline=" +
+        summarizeText(js108InitialText, 700));
+
+    const bool js108Inserted = js108Loaded &&
+        gxos::apps::Navigator::SmokeClickFormControlById("insert-button");
+    const std::string js108AfterInsert =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const std::string js108InsertStatus =
+        gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const uint64_t js108InsertRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js108InsertedX = 0, js108InsertedY = 0;
+    int js108InsertedW = 0, js108InsertedH = 0;
+    int js108FirstAfterInsertX = 0, js108FirstAfterInsertY = 0;
+    int js108FirstAfterInsertW = 0, js108FirstAfterInsertH = 0;
+    const bool js108InsertGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("inserted",
+            js108InsertedX, js108InsertedY, js108InsertedW, js108InsertedH) &&
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("first",
+            js108FirstAfterInsertX, js108FirstAfterInsertY,
+            js108FirstAfterInsertW, js108FirstAfterInsertH);
+    add("JS108 hosted insertBefore inserts before the reference in rendered flow",
+        js108Inserted && js108InsertGeometry &&
+        js108InsertedY < js108FirstAfterInsertY &&
+        js108InsertedY + js108InsertedH <= js108FirstAfterInsertY &&
+        containsRenderedGlyphSequence(js108AfterInsert, "Inserted before first") &&
+        containsRenderedGlyphSequence(js108AfterInsert, "First paragraph") &&
+        contains(js108InsertStatus,
+            "Inserted; selectors and identity agree") &&
+        js108InsertRevision > js108InitialRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js108Inserted) + ",revision=" +
+        std::to_string(js108InitialRevision) + "->" +
+        std::to_string(js108InsertRevision) + ",inserted=" +
+        std::to_string(js108InsertedY) + "+" +
+        std::to_string(js108InsertedH) + ",first=" +
+        std::to_string(js108FirstAfterInsertY) + ",status=" +
+        summarizeText(js108InsertStatus, 200));
+
+    const bool js108Moved = js108Inserted &&
+        gxos::apps::Navigator::SmokeClickFormControlById("move-button");
+    const std::string js108AfterMove =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js108MoveRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js108MovableAfterMoveX = 0, js108MovableAfterMoveY = 0;
+    int js108MovableAfterMoveW = 0, js108MovableAfterMoveH = 0;
+    int js108InsertedAfterMoveX = 0, js108InsertedAfterMoveY = 0;
+    int js108InsertedAfterMoveW = 0, js108InsertedAfterMoveH = 0;
+    const bool js108MoveGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("movable",
+            js108MovableAfterMoveX, js108MovableAfterMoveY,
+            js108MovableAfterMoveW, js108MovableAfterMoveH) &&
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("inserted",
+            js108InsertedAfterMoveX, js108InsertedAfterMoveY,
+            js108InsertedAfterMoveW, js108InsertedAfterMoveH);
+    add("JS108 hosted same-parent insertBefore moves a node to the first position",
+        js108Moved && js108MoveGeometry &&
+        js108MovableAfterMoveY < js108InsertedAfterMoveY &&
+        js108MovableAfterMoveY + js108MovableAfterMoveH <=
+            js108InsertedAfterMoveY &&
+        containsRenderedGlyphSequence(js108AfterMove,
+            "Dynamic paragraph available to move") &&
+        containsRenderedGlyphSequence(js108AfterMove, "Inserted before first") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Moved last paragraph to first") &&
+        js108MoveRevision > js108InsertRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js108Moved) + ",revision=" +
+        std::to_string(js108InsertRevision) + "->" +
+        std::to_string(js108MoveRevision) + ",movable=" +
+        std::to_string(js108MovableAfterMoveY) + "+" +
+        std::to_string(js108MovableAfterMoveH) + ",inserted=" +
+        std::to_string(js108InsertedAfterMoveY) + ",inline=" +
+        summarizeText(js108AfterMove, 700));
+
+    const bool js108Appended = js108Moved &&
+        gxos::apps::Navigator::SmokeClickFormControlById("append-button");
+    const std::string js108AfterAppend =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js108AppendRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js108AppendedX = 0, js108AppendedY = 0;
+    int js108AppendedW = 0, js108AppendedH = 0;
+    int js108MovableAfterAppendX = 0, js108MovableAfterAppendY = 0;
+    int js108MovableAfterAppendW = 0, js108MovableAfterAppendH = 0;
+    const bool js108AppendGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("appended",
+            js108AppendedX, js108AppendedY, js108AppendedW, js108AppendedH) &&
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("movable",
+            js108MovableAfterAppendX, js108MovableAfterAppendY,
+            js108MovableAfterAppendW, js108MovableAfterAppendH);
+    add("JS108 hosted explicit null appends a connected child",
+        js108Appended && js108AppendGeometry &&
+        js108AppendedY > js108MovableAfterAppendY &&
+        js108MovableAfterAppendY + js108MovableAfterAppendH <= js108AppendedY &&
+        containsRenderedGlyphSequence(js108AfterAppend,
+            "Appended through explicit null") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Explicit null appended the same node") &&
+        js108AppendRevision > js108MoveRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js108Appended) + ",revision=" +
+        std::to_string(js108MoveRevision) + "->" +
+        std::to_string(js108AppendRevision) + ",movable=" +
+        std::to_string(js108MovableAfterAppendY) + ",appended=" +
+        std::to_string(js108AppendedY) + "+" +
+        std::to_string(js108AppendedH));
+
+    const bool js108SubtreeMoved = js108Appended &&
+        gxos::apps::Navigator::SmokeClickFormControlById("subtree-button");
+    const std::string js108AfterSubtree =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js108SubtreeRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js108SubtreeChildX = 0, js108SubtreeChildY = 0;
+    int js108SubtreeChildW = 0, js108SubtreeChildH = 0;
+    int js108OtherFirstX = 0, js108OtherFirstY = 0;
+    int js108OtherFirstW = 0, js108OtherFirstH = 0;
+    const bool js108SubtreeGeometry =
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("subtree-child",
+            js108SubtreeChildX, js108SubtreeChildY,
+            js108SubtreeChildW, js108SubtreeChildH) &&
+        gxos::apps::Navigator::SmokeVisualBlockGeometryById("other-first",
+            js108OtherFirstX, js108OtherFirstY,
+            js108OtherFirstW, js108OtherFirstH);
+    add("JS108 hosted subtree moves across parents with child identity and flow",
+        js108SubtreeMoved && js108SubtreeGeometry &&
+        js108SubtreeChildY < js108OtherFirstY &&
+        js108SubtreeChildY + js108SubtreeChildH <= js108OtherFirstY &&
+        containsRenderedGlyphSequence(js108AfterSubtree,
+            "Subtree text remains attached") &&
+        contains(gxos::apps::Navigator::SmokeCurrentDocumentText(),
+            "Subtree moved with child identity intact") &&
+        js108SubtreeRevision > js108AppendRevision &&
+        !gxos::apps::Navigator::SmokeDocumentDirty() &&
+        gxos::apps::Navigator::SmokeJavaScriptLastError().empty(),
+        std::string("click=") + yesNo(js108SubtreeMoved) + ",revision=" +
+        std::to_string(js108AppendRevision) + "->" +
+        std::to_string(js108SubtreeRevision) + ",child=" +
+        std::to_string(js108SubtreeChildY) + "+" +
+        std::to_string(js108SubtreeChildH) + ",other-first=" +
+        std::to_string(js108OtherFirstY) + ",inline=" +
+        summarizeText(js108AfterSubtree, 800));
+
+    const std::string js108BeforeInvalidText =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const int js108BeforeInvalidBlockCount =
+        gxos::apps::Navigator::SmokeCurrentBlockCount();
+    const uint64_t js108BeforeInvalidRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js108BeforeInvalidInsertedX = 0, js108BeforeInvalidInsertedY = 0;
+    int js108BeforeInvalidInsertedW = 0, js108BeforeInvalidInsertedH = 0;
+    int js108BeforeInvalidFirstX = 0, js108BeforeInvalidFirstY = 0;
+    int js108BeforeInvalidFirstW = 0, js108BeforeInvalidFirstH = 0;
+    const bool js108BeforeInvalidGeometry =
+        gxos::apps::Navigator::SmokeBlockGeometryById("inserted",
+            js108BeforeInvalidInsertedX, js108BeforeInvalidInsertedY,
+            js108BeforeInvalidInsertedW, js108BeforeInvalidInsertedH) &&
+        gxos::apps::Navigator::SmokeBlockGeometryById("first",
+            js108BeforeInvalidFirstX, js108BeforeInvalidFirstY,
+            js108BeforeInvalidFirstW, js108BeforeInvalidFirstH);
+    const bool js108InvalidClick = js108SubtreeMoved &&
+        gxos::apps::Navigator::SmokeClickFormControlById("invalid-button");
+    const std::string js108AfterInvalidText =
+        gxos::apps::Navigator::SmokeCurrentInlineLayoutText();
+    const uint64_t js108AfterInvalidRevision =
+        gxos::apps::Navigator::SmokeDocumentLayoutRevision();
+    int js108AfterInvalidInsertedX = 0, js108AfterInvalidInsertedY = 0;
+    int js108AfterInvalidInsertedW = 0, js108AfterInvalidInsertedH = 0;
+    int js108AfterInvalidFirstX = 0, js108AfterInvalidFirstY = 0;
+    int js108AfterInvalidFirstW = 0, js108AfterInvalidFirstH = 0;
+    const bool js108AfterInvalidGeometry =
+        gxos::apps::Navigator::SmokeBlockGeometryById("inserted",
+            js108AfterInvalidInsertedX, js108AfterInvalidInsertedY,
+            js108AfterInvalidInsertedW, js108AfterInvalidInsertedH) &&
+        gxos::apps::Navigator::SmokeBlockGeometryById("first",
+            js108AfterInvalidFirstX, js108AfterInvalidFirstY,
+            js108AfterInvalidFirstW, js108AfterInvalidFirstH);
+    const std::string js108InvalidError =
+        gxos::apps::Navigator::SmokeJavaScriptLastError();
+    add("JS108 hosted invalid cross-parent reference leaves DOM and layout unchanged",
+        js108InvalidClick && js108BeforeInvalidGeometry &&
+        js108AfterInvalidGeometry &&
+        js108BeforeInvalidText == js108AfterInvalidText &&
+        js108BeforeInvalidBlockCount ==
+            gxos::apps::Navigator::SmokeCurrentBlockCount() &&
+        js108BeforeInvalidRevision == js108AfterInvalidRevision &&
+        js108BeforeInvalidInsertedX == js108AfterInvalidInsertedX &&
+        js108BeforeInvalidInsertedW == js108AfterInvalidInsertedW &&
+        js108BeforeInvalidInsertedH == js108AfterInvalidInsertedH &&
+        js108BeforeInvalidFirstX == js108AfterInvalidFirstX &&
+        js108BeforeInvalidFirstW == js108AfterInvalidFirstW &&
+        js108BeforeInvalidFirstH == js108AfterInvalidFirstH &&
+        js108BeforeInvalidFirstY - js108BeforeInvalidInsertedY ==
+            js108AfterInvalidFirstY - js108AfterInvalidInsertedY &&
+        js108BeforeInvalidInsertedY < js108BeforeInvalidFirstY &&
+        js108AfterInvalidInsertedY < js108AfterInvalidFirstY &&
+        !js108InvalidError.empty() &&
+        !gxos::apps::Navigator::SmokeDocumentDirty(),
+        std::string("click=") + yesNo(js108InvalidClick) + ",blocks=" +
+        std::to_string(js108BeforeInvalidBlockCount) + "->" +
+        std::to_string(gxos::apps::Navigator::SmokeCurrentBlockCount()) +
+        ",revision=" + std::to_string(js108BeforeInvalidRevision) + "->" +
+        std::to_string(js108AfterInvalidRevision) + ",geometry=" +
+        yesNo(js108BeforeInvalidGeometry) + "/" +
+        yesNo(js108AfterInvalidGeometry) + ",inserted-y=" +
+        std::to_string(js108BeforeInvalidInsertedY) + "->" +
+        std::to_string(js108AfterInvalidInsertedY) + ",first-y=" +
+        std::to_string(js108BeforeInvalidFirstY) + "->" +
+        std::to_string(js108AfterInvalidFirstY) + ",rect=" +
+        std::to_string(js108BeforeInvalidInsertedX) + "," +
+        std::to_string(js108BeforeInvalidInsertedY) + "," +
+        std::to_string(js108BeforeInvalidInsertedW) + "," +
+        std::to_string(js108BeforeInvalidInsertedH) + "->" +
+        std::to_string(js108AfterInvalidInsertedX) + "," +
+        std::to_string(js108AfterInvalidInsertedY) + "," +
+        std::to_string(js108AfterInvalidInsertedW) + "," +
+        std::to_string(js108AfterInvalidInsertedH) + ",text-same=" +
+        yesNo(js108BeforeInvalidText == js108AfterInvalidText) +
+        ",dirty=" + yesNo(gxos::apps::Navigator::SmokeDocumentDirty()) +
+        ",error=" +
+        summarizeText(js108InvalidError, 260));
+
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();

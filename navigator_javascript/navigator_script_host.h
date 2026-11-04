@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace gxos {
 namespace javascript {
@@ -59,6 +60,7 @@ constexpr std::uint32_t kNavigatorSelectorCollectionIteratorSymbolMethod =
 constexpr std::uint32_t kNavigatorCreateElementMethod = 29u;
 constexpr std::uint32_t kNavigatorAppendChildMethod = 30u;
 constexpr std::uint32_t kNavigatorRemoveChildMethod = 31u;
+constexpr std::uint32_t kNavigatorInsertBeforeMethod = 32u;
 
 constexpr std::size_t kNavigatorScriptMaxDocumentIdLength = 256u;
 constexpr std::size_t kNavigatorScriptMaxTextContentAssignment = 64u * 1024u;
@@ -809,6 +811,9 @@ private:
         HostInstanceId& serial);
     HostResult appendDynamicChild(HostInstanceId parentSerial,
         HostInstanceId childSerial, HostValue& result);
+    HostResult insertDynamicChild(HostInstanceId parentSerial,
+        HostInstanceId childSerial, HostInstanceId referenceSerial,
+        HostValue& result);
     HostResult removeDynamicChild(HostInstanceId parentSerial,
         HostInstanceId childSerial, HostValue& result);
     bool supportedDynamicParent(const gxos::web::HtmlElementRef& parent) const;
@@ -819,7 +824,8 @@ private:
         bool connected);
     bool rebuildDynamicBlockProjections();
     bool moveSubtreeInlineItems(HostInstanceId rootSerial,
-        HostInstanceId destinationParentSerial, HostInstanceId flowSerial);
+        HostInstanceId destinationParentSerial, HostInstanceId flowSerial,
+        HostInstanceId referenceSerial);
     bool inlineItemBelongsToSubtree(const gxos::web::WebInlineItem& item,
         HostInstanceId rootSerial) const;
     bool isKnownElementSerial(HostInstanceId serial) const;
@@ -833,6 +839,8 @@ private:
     std::size_t elementChildCount(HostInstanceId parentSerial) const;
     bool elementSiblingAt(HostInstanceId serial, bool next,
         HostInstanceId& siblingSerial) const;
+    bool documentOrderElements(
+        std::vector<const gxos::web::HtmlElementRef*>& elements) const;
     bool isDescendantOrSelf(std::uint64_t serial,
         std::uint64_t ancestorSerial) const;
     const SelectorCollectionRecord* selectorCollectionFor(

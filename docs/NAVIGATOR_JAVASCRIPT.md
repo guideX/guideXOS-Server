@@ -13663,10 +13663,9 @@ subtree disconnection and reinsertion, invalid-operation atomicity, capacity
 and mutation limits, event callbacks, and stale-generation references. The
 JS106 lane passed in the JavaScript matrix.
 
-The clean matrix rerun passed its first 107/108 lanes through JS106. The
-corrected JS107 runner then passed separately with 67/67 checks; qualification
-was staged rather than one 108/108 matrix invocation. This is 17,425 checks in
-the first 107 lanes plus the 67 JS107 checks.
+The final complete matrix passed 109/109 lanes and reported 17,542/17,542
+assertions across 68 assertion lanes, including JS107 and JS108. The JS107
+lane passed 67/67 checks; the JS108 lane passed 50/50 checks.
 
 The latest full hosted aggregate reported 761 passed and 7 failed out of 768.
 All eight JS107 hosted checks passed: initial detachment, ordered non-overlap,
@@ -13709,9 +13708,82 @@ bytes before vector capacity, strings, ancestor snapshots, and other document
 storage. The seven dynamic records in that fixture occupy 13,552 bytes. This
 bound does not establish guest memory use.
 
-Dynamic script elements, general text nodes, `innerHTML`, `insertBefore`,
-`replaceChild`, fragments, mutation observers, shadow DOM, custom elements,
-new CSS layout modes, and arbitrary style recalculation remain unsupported.
-Host measurements do not establish guest stack or memory bounds. Guest
-rendering, navigation lifecycle, stack, and memory qualification remain
-pending.
+## JS108 — bounded `insertBefore()` and atomic ordering
+
+JS108 adds `parent.insertBefore(child, referenceChild)` to the existing
+generation-local structural registry. The call requires exactly two
+arguments: both must be valid current-generation element objects, except that
+the reference may be explicit `null` to append. A reference must be a direct
+child of the requested parent. Missing arguments, stale or foreign handles,
+unsupported node kinds, cross-parent references, cycles, unsupported parent
+pairs, and renderer-incompatible mixed content fail before a visible mutation.
+The method returns the same child object after success.
+
+The implementation shares one bounded move path with `appendChild()`, so
+append and insertion use the same parent metadata, connection, flow, selector,
+and rendering updates. Dynamic nodes can be inserted, reordered within a
+parent, or moved with their supported subtree to another parent. A parser-owned
+node may be used as the reference, but parser-owned nodes cannot be moved.
+Same-parent calls that leave order unchanged are successful no-ops and do not
+consume the document mutation budget or advance layout revision. Element
+selectors and `getElementById()` now enumerate document-tree order, including
+after movement, instead of allocation order. Selector evaluation builds one
+bounded order view from the current parent and child metadata, then walks that
+view once; collection reads do not restart a root traversal for each element.
+
+The compact renderer's `div` projection has one inline flow before its block
+children, so JS108 validates the complete proposed child order and rejects a
+span after a `p` or nested `div`. Before changing the tree, the host validates
+the supported subtree and projection capacity. It takes heap-backed copies of
+the bounded structural elements, content metadata, blocks, and inline items;
+if a commit-stage update fails, it restores those vectors and layout and
+mutation counters before returning an error. This keeps the visible document
+atomic under the tested failures, with temporary heap use proportional to the
+current document and its copied strings. Tree-order selector evaluation also
+uses temporary vectors bounded by the structural node limit. Peak guest heap
+use has not been measured.
+
+The strict C++17 warning-as-error native JS108 lane passes 50/50 checks. It
+covers parsed reference insertion, tree-order selectors, same-parent movement,
+explicit-null append, no-op quota behavior, cross-parent subtree movement,
+identity and connection, cycles, invalid and stale references, mixed inline
+ordering, quota and flow-capacity failures, injected commit failures, event
+callbacks, and the hosted fixture. The strict compile includes the focused
+test, lexer, parser, AST, environment, and runtime sources.
+
+Optimized host GCC 15.2 `-fstack-usage` measurements report a 3,712-byte
+static frame for `insertDynamicChild`, a 64-byte append wrapper, a 288-byte
+`moveSubtreeInlineItems` frame, a 2,384-byte projection rebuild frame, a
+128-byte parent-metadata refresh frame, a 112-byte connection/flow update
+frame, and a 464-byte bounded document-order builder frame. The inline layout
+rebuild frame is 784 bytes, `Navigator::renderDocument` is 1,936 bytes, and
+its inline-flow drawing lambda is 4,752 bytes. These are individual host
+compiler frame measurements, not a combined call-chain or guest-stack
+guarantee.
+
+All six hosted JS108 assertions pass: initial visible order, insertion
+before a parsed reference, same-parent movement, explicit-null append,
+cross-parent subtree movement with child identity, and invalid cross-parent
+reference atomicity. The hosted fixture initially rendered the first, middle,
+last, and movable paragraphs at y=96, 133, 170, and 207. Insertion advanced
+layout revision 1 to 2, the same-parent move advanced it to 3, and null append
+advanced it to 4. Moving the subtree to the second host advanced it to 5 and
+kept its child attached. The invalid reference preserved all 17 blocks,
+revision 5, visible text, clean layout state, and the relative paragraph
+geometry; it returned `HostInvalidValue`. The hosted aggregate reports 767
+passed and 7 failed out of 774. Those seven failures are the same known CSS
+baseline failures documented under JS107; no JS108 hosted check failed.
+
+The final hosted production build had SHA-256
+`E7AF504E0E80385693BAB2B9C60272D2CEC471BBB5CCE04945259251C756CB7C` and the
+hosted process used that exact executable. After the run, the original
+8,398,274-byte executable was restored and verified at SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated Navigator fixtures (458,372 bytes) matched the saved manifest, and
+`.phase` remained absent.
+
+Dynamic script elements, general text nodes, `innerHTML`, `replaceChild`,
+fragments, mutation observers, shadow DOM, custom elements, new CSS layout
+modes, and arbitrary style recalculation remain unsupported. Host measurements
+do not establish guest stack or memory bounds. Guest rendering, navigation
+lifecycle, stack, and memory qualification remain pending.

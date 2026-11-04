@@ -4585,7 +4585,7 @@ bool NavigatorScriptHostAdapter::inlineItemBelongsToSubtree(
 
 bool NavigatorScriptHostAdapter::moveSubtreeInlineItems(
     HostInstanceId rootSerial, HostInstanceId destinationParentSerial,
-    HostInstanceId flowSerial)
+    HostInstanceId flowSerial, HostInstanceId referenceSerial)
 {
     if (document_ == nullptr || document_->inlineItems.size() >
             kNavigatorMaxRenderableInlineItems) return false;
@@ -4614,46 +4614,82 @@ bool NavigatorScriptHostAdapter::moveSubtreeInlineItems(
     const std::size_t keptCount = document_->inlineItems.size() - movedCount;
     std::size_t insertion = keptCount;
     if (destinationParentSerial != 0u && flowSerial != 0u) {
-        bool foundParentContent = false;
-        std::size_t keptIndex = 0u;
-        for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
-            if (inlineItemBelongsToSubtree(item, rootSerial)) continue;
-            if (item.flowSerial == flowSerial &&
-                inlineItemBelongsToSubtree(item, destinationParentSerial)) {
-                insertion = keptIndex + 1u;
-                foundParentContent = true;
-            }
-            ++keptIndex;
-        }
-        if (!foundParentContent) {
-            int anchorBlock = -1;
-            for (std::size_t index = 0u; index < document_->blocks.size(); ++index) {
-                const gxos::web::DocBlock& block = document_->blocks[index];
-                if (block.inlineFlowSerial == flowSerial &&
-                    block.atomicContainerSerial == 0u) {
-                    anchorBlock = static_cast<int>(index);
-                    break;
-                }
-            }
-            if (anchorBlock >= 0) {
-                keptIndex = 0u;
-                for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
+        bool foundPosition = false;
+        if (referenceSerial != 0u) {
+            const gxos::web::HtmlElementRef* reference =
+                findElement(referenceSerial);
+            if (reference == nullptr || reference->parentSerial !=
+                    destinationParentSerial || reference->childIndex == 0u)
+                return false;
+            const std::size_t childCount =
+                elementChildCount(destinationParentSerial);
+            for (std::size_t siblingIndex = reference->childIndex - 1u;
+                siblingIndex < childCount && !foundPosition;
+                ++siblingIndex) {
+                HostInstanceId siblingSerial = 0u;
+                if (!elementChildAt(destinationParentSerial, siblingIndex,
+                        siblingSerial)) return false;
+                std::size_t keptIndex = 0u;
+                for (const gxos::web::WebInlineItem& item :
+                    document_->inlineItems) {
                     if (inlineItemBelongsToSubtree(item, rootSerial)) continue;
-                    int itemAnchor = -1;
-                    for (std::size_t blockIndex = 0u;
-                        blockIndex < document_->blocks.size(); ++blockIndex) {
-                        if (document_->blocks[blockIndex].inlineFlowSerial ==
-                                item.flowSerial &&
-                            document_->blocks[blockIndex].atomicContainerSerial == 0u) {
-                            itemAnchor = static_cast<int>(blockIndex);
-                            break;
-                        }
-                    }
-                    if (itemAnchor > anchorBlock) {
+                    if (item.flowSerial == flowSerial &&
+                        isDescendantOrSelf(item.ownerSerial, siblingSerial)) {
                         insertion = keptIndex;
+                        foundPosition = true;
                         break;
                     }
                     ++keptIndex;
+                }
+            }
+        }
+        if (!foundPosition) {
+            bool foundParentContent = false;
+            std::size_t keptIndex = 0u;
+            for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
+                if (inlineItemBelongsToSubtree(item, rootSerial)) continue;
+                if (item.flowSerial == flowSerial &&
+                    inlineItemBelongsToSubtree(item, destinationParentSerial)) {
+                    insertion = keptIndex + 1u;
+                    foundParentContent = true;
+                }
+                ++keptIndex;
+            }
+            if (!foundParentContent) {
+                int anchorBlock = -1;
+                for (std::size_t index = 0u;
+                    index < document_->blocks.size(); ++index) {
+                    const gxos::web::DocBlock& block =
+                        document_->blocks[index];
+                    if (block.inlineFlowSerial == flowSerial &&
+                        block.atomicContainerSerial == 0u) {
+                        anchorBlock = static_cast<int>(index);
+                        break;
+                    }
+                }
+                if (anchorBlock >= 0) {
+                    keptIndex = 0u;
+                    for (const gxos::web::WebInlineItem& item :
+                        document_->inlineItems) {
+                        if (inlineItemBelongsToSubtree(item, rootSerial))
+                            continue;
+                        int itemAnchor = -1;
+                        for (std::size_t blockIndex = 0u;
+                            blockIndex < document_->blocks.size();
+                            ++blockIndex) {
+                            if (document_->blocks[blockIndex].inlineFlowSerial ==
+                                    item.flowSerial &&
+                                document_->blocks[blockIndex].atomicContainerSerial == 0u) {
+                                itemAnchor = static_cast<int>(blockIndex);
+                                break;
+                            }
+                        }
+                        if (itemAnchor > anchorBlock) {
+                            insertion = keptIndex;
+                            break;
+                        }
+                        ++keptIndex;
+                    }
                 }
             }
         }
@@ -4692,6 +4728,13 @@ bool NavigatorScriptHostAdapter::moveSubtreeInlineItems(
 HostResult NavigatorScriptHostAdapter::appendDynamicChild(
     HostInstanceId parentSerial, HostInstanceId childSerial, HostValue& result)
 {
+    return insertDynamicChild(parentSerial, childSerial, 0u, result);
+}
+
+HostResult NavigatorScriptHostAdapter::insertDynamicChild(
+    HostInstanceId parentSerial, HostInstanceId childSerial,
+    HostInstanceId referenceSerial, HostValue& result)
+{
     if (document_ == nullptr) return HostResult{HostResultCode::InvalidObject};
     gxos::web::HtmlElementRef* parent = findElement(parentSerial);
     gxos::web::HtmlElementRef* child = findElement(childSerial);
@@ -4706,15 +4749,18 @@ HostResult NavigatorScriptHostAdapter::appendDynamicChild(
             return parentTag == "body" || parentTag == "div";
         return false;
     };
-    if (!supportedDynamicParent(*parent) || !isDynamicElement(childSerial) ||
+    if (!supportedDynamicParent(*parent) ||
         !supportsPair(parent->tagName, child->tagName)) {
         return HostResult{HostResultCode::InvalidValue};
     }
+    const gxos::web::HtmlElementRef* reference = referenceSerial == 0u
+        ? nullptr : findElement(referenceSerial);
+    if (referenceSerial != 0u && (reference == nullptr ||
+            reference->parentSerial != parentSerial))
+        return HostResult{HostResultCode::InvalidValue};
     if (isDescendantOrSelf(parentSerial, childSerial)) {
         return HostResult{HostResultCode::InvalidValue};
     }
-    if (document_->scriptMutationCount >= limits_.maxDocumentMutations)
-        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
     if (document_->inlineItems.size() > kNavigatorMaxRenderableInlineItems)
         return HostResult{HostResultCode::DocumentMutationLimitExceeded};
 
@@ -4749,7 +4795,87 @@ HostResult NavigatorScriptHostAdapter::appendDynamicChild(
         if (!elementChildAt(oldParentSerial, child->childIndex - 1u,
                 registeredChild) || registeredChild != childSerial)
             return HostResult{HostResultCode::InvalidObject};
+    } else if (child->childIndex != 0u) {
+        return HostResult{HostResultCode::InvalidObject};
     }
+
+    const bool sameParent = oldParentSerial == parentSerial;
+    if (sameParent) {
+        const bool selfReference = referenceSerial == childSerial;
+        const bool alreadyLast = referenceSerial == 0u &&
+            child->childIndex == elementChildCount(parentSerial);
+        const bool immediatelyBeforeReference = referenceSerial != 0u &&
+            reference != nullptr && child->childIndex != 0u &&
+            static_cast<std::size_t>(child->childIndex) + 1u ==
+                reference->childIndex;
+        if (selfReference || alreadyLast || immediatelyBeforeReference) {
+            result = HostValue::fromHostObject(HostObjectReference{
+                childSerial, generation_, kNavigatorElementHostKind});
+            return HostResult();
+        }
+    }
+    if (!isDynamicElement(childSerial))
+        return HostResult{HostResultCode::InvalidValue};
+    std::vector<HostInstanceId> destinationOrder;
+    std::vector<HostInstanceId> sourceOrder;
+    std::vector<HostInstanceId> originalDestinationOrder;
+    try {
+        destinationOrder.reserve(elementChildCount(parentSerial) + 1u);
+        for (std::size_t index = 0u;
+            index < elementChildCount(parentSerial); ++index) {
+            HostInstanceId siblingSerial = 0u;
+            if (!elementChildAt(parentSerial, index, siblingSerial))
+                return HostResult{HostResultCode::InvalidObject};
+            destinationOrder.push_back(siblingSerial);
+        }
+        if (!sameParent && oldParentSerial != 0u) {
+            sourceOrder.reserve(elementChildCount(oldParentSerial));
+            for (std::size_t index = 0u;
+                index < elementChildCount(oldParentSerial); ++index) {
+                HostInstanceId siblingSerial = 0u;
+                if (!elementChildAt(oldParentSerial, index, siblingSerial))
+                    return HostResult{HostResultCode::InvalidObject};
+                sourceOrder.push_back(siblingSerial);
+            }
+        }
+        originalDestinationOrder = destinationOrder;
+    } catch (...) {
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    }
+    if (sameParent || oldParentSerial != 0u) {
+        std::vector<HostInstanceId>& source = sameParent
+            ? destinationOrder : sourceOrder;
+        const auto sourceNode = std::find(source.begin(), source.end(),
+            childSerial);
+        if (sourceNode == source.end())
+            return HostResult{HostResultCode::InvalidObject};
+        source.erase(sourceNode);
+    }
+    std::size_t insertionIndex = destinationOrder.size();
+    if (referenceSerial != 0u) {
+        const auto referencePosition = std::find(destinationOrder.begin(),
+            destinationOrder.end(), referenceSerial);
+        if (referencePosition == destinationOrder.end())
+            return HostResult{HostResultCode::InvalidObject};
+        insertionIndex = static_cast<std::size_t>(
+            referencePosition - destinationOrder.begin());
+    }
+    try {
+        destinationOrder.insert(destinationOrder.begin() +
+            static_cast<std::ptrdiff_t>(insertionIndex), childSerial);
+    } catch (...) {
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    }
+    if (sameParent && destinationOrder == originalDestinationOrder) {
+        result = HostValue::fromHostObject(HostObjectReference{
+            childSerial, generation_, kNavigatorElementHostKind});
+        return HostResult();
+    }
+    if (document_->scriptMutationCount >= limits_.maxDocumentMutations)
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    if (destinationOrder.size() >
+        std::numeric_limits<std::uint16_t>::max())
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
 
     const std::size_t bound = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());
@@ -4794,25 +4920,18 @@ HostResult NavigatorScriptHostAdapter::appendDynamicChild(
         }
     }
 
-    // The bounded div flow uses one inline projection before its block
-    // children. Reject a span appended after an existing block child rather
-    // than accepting a tree order the compact renderer cannot represent.
-    const bool sameParent = oldParentSerial == parentSerial;
-    const std::size_t currentChildCount = elementChildCount(parentSerial);
-    if (sameParent && currentChildCount == 0u)
-        return HostResult{HostResultCode::InvalidObject};
-    const std::size_t targetChildCount = currentChildCount -
-        (sameParent ? 1u : 0u);
-    if (parent->tagName == "div" && child->tagName == "span") {
-        for (std::size_t index = 0u; index < targetChildCount; ++index) {
-            HostInstanceId siblingSerial = 0u;
-            if (!elementChildAt(parentSerial, index, siblingSerial))
-                return HostResult{HostResultCode::InvalidObject};
-            if (siblingSerial == childSerial) continue;
+    // A compact div projection has one inline flow before its block children.
+    // Validate the complete proposed sibling order so insertBefore cannot
+    // create a sequence appendChild would reject.
+    if (parent->tagName == "div") {
+        bool sawBlockChild = false;
+        for (HostInstanceId siblingSerial : destinationOrder) {
             const gxos::web::HtmlElementRef* sibling = findElement(siblingSerial);
-            if (sibling != nullptr && (sibling->tagName == "div" ||
-                    sibling->tagName == "p"))
-            {
+            if (sibling == nullptr)
+                return HostResult{HostResultCode::InvalidObject};
+            if (sibling->tagName == "div" || sibling->tagName == "p") {
+                sawBlockChild = true;
+            } else if (sibling->tagName == "span" && sawBlockChild) {
                 return HostResult{HostResultCode::InvalidValue};
             }
         }
@@ -4905,8 +5024,12 @@ HostResult NavigatorScriptHostAdapter::appendDynamicChild(
         document_->blocks.size() - oldProjectionCount >
             document_->blocks.max_size() - dynamicBlockNodeCount)
         return HostResult{HostResultCode::DocumentMutationLimitExceeded};
-    document_->blocks.reserve(document_->blocks.size() - oldProjectionCount +
-        dynamicBlockNodeCount);
+    try {
+        document_->blocks.reserve(document_->blocks.size() -
+            oldProjectionCount + dynamicBlockNodeCount);
+    } catch (...) {
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    }
     for (const gxos::web::WebInlineItem& item : document_->inlineItems) {
         const bool belongs = inlineItemBelongsToSubtree(item, childSerial);
         if (!belongs) continue;
@@ -4917,56 +5040,101 @@ HostResult NavigatorScriptHostAdapter::appendDynamicChild(
         }
     }
 
-    const std::uint16_t oldChildIndex = child->childIndex;
-    if (oldParentSerial == parentSerial && child->childIndex ==
-            elementChildCount(parentSerial)) {
+    std::vector<gxos::web::HtmlElementRef> savedElements;
+    std::vector<gxos::web::HtmlElementContentMetadata> savedContent;
+    std::vector<gxos::web::DocBlock> savedBlocks;
+    std::vector<gxos::web::WebInlineItem> savedInlineItems;
+    gxos::web::HtmlElementRef savedDocumentElement;
+    gxos::web::HtmlElementRef savedBodyElement;
+    const bool savedLayoutDirty = document_->layoutDirty;
+    const std::uint64_t savedLayoutRevision = document_->layoutRevision;
+    const std::size_t savedLayoutTextExtent = document_->layoutTextExtent;
+    const std::size_t savedMutationCount = document_->scriptMutationCount;
+    try {
+        savedElements = document_->structuralElements;
+        savedContent = document_->contentMetadata;
+        savedBlocks = document_->blocks;
+        savedInlineItems = document_->inlineItems;
+        savedDocumentElement = document_->documentElement;
+        savedBodyElement = document_->bodyElement;
+    } catch (...) {
+        return HostResult{HostResultCode::DocumentMutationLimitExceeded};
+    }
+    const auto rollback = [&]() {
+        document_->structuralElements.swap(savedElements);
+        document_->contentMetadata.swap(savedContent);
+        document_->blocks.swap(savedBlocks);
+        document_->inlineItems.swap(savedInlineItems);
+        using std::swap;
+        swap(document_->documentElement, savedDocumentElement);
+        swap(document_->bodyElement, savedBodyElement);
+        document_->layoutDirty = savedLayoutDirty;
+        document_->layoutRevision = savedLayoutRevision;
+        document_->layoutTextExtent = savedLayoutTextExtent;
+        document_->scriptMutationCount = savedMutationCount;
+    };
+
+    try {
+        if (oldParentSerial != 0u && !sameParent) {
+            child = findElement(childSerial);
+            if (child == nullptr) {
+                rollback();
+                return HostResult{HostResultCode::InvalidObject};
+            }
+            child->parentSerial = 0u;
+            child->childIndex = 0u;
+            child->siblingCount = 0u;
+            child->typeIndex = 0u;
+            child->typeCount = 0u;
+            child->previousSiblingSerial = 0u;
+            for (std::size_t index = 0u; index < sourceOrder.size(); ++index) {
+                gxos::web::HtmlElementRef* sibling =
+                    findElement(sourceOrder[index]);
+                if (sibling == nullptr) {
+                    rollback();
+                    return HostResult{HostResultCode::InvalidObject};
+                }
+                sibling->parentSerial = oldParentSerial;
+                sibling->childIndex = static_cast<std::uint16_t>(index + 1u);
+            }
+            if (!refreshParentChildMetadata(oldParentSerial)) {
+                rollback();
+                return HostResult{HostResultCode::InvalidObject};
+            }
+        }
+
+        for (std::size_t index = 0u; index < destinationOrder.size(); ++index) {
+            gxos::web::HtmlElementRef* sibling =
+                findElement(destinationOrder[index]);
+            if (sibling == nullptr) {
+                rollback();
+                return HostResult{HostResultCode::InvalidObject};
+            }
+            sibling->parentSerial = parentSerial;
+            sibling->childIndex = static_cast<std::uint16_t>(index + 1u);
+        }
+        if (!refreshParentChildMetadata(parentSerial) ||
+            !setSubtreeConnectionAndFlow(childSerial, willConnect) ||
+            !rebuildDynamicBlockProjections() ||
+            !moveSubtreeInlineItems(childSerial, parentSerial,
+                willConnect ? flowSerial : 0u, referenceSerial)) {
+            rollback();
+            return HostResult{HostResultCode::InvalidObject};
+        }
+
+        gxos::web::HtmlElementContentMetadata& parentContent =
+            document_->contentMetadata[static_cast<std::size_t>(
+                parentSerial - 1u)];
+        parentContent.hasRenderableContent = true;
+        ++document_->scriptMutationCount;
+        document_->layoutDirty = true;
         result = HostValue::fromHostObject(HostObjectReference{
             childSerial, generation_, kNavigatorElementHostKind});
         return HostResult();
-    }
-    if (oldParentSerial != 0u) {
-        for (gxos::web::HtmlElementRef& sibling : document_->structuralElements) {
-            if (sibling.parentSerial == oldParentSerial &&
-                sibling.childIndex > oldChildIndex)
-                --sibling.childIndex;
-        }
-    }
-    child = findElement(childSerial);
-    if (child == nullptr) return HostResult{HostResultCode::InvalidObject};
-    child->parentSerial = 0u;
-    child->childIndex = 0u;
-    child->siblingCount = 0u;
-    child->typeIndex = 0u;
-    child->typeCount = 0u;
-    child->previousSiblingSerial = 0u;
-    if (oldParentSerial != 0u &&
-        !refreshParentChildMetadata(oldParentSerial))
-        return HostResult{HostResultCode::InvalidObject};
-
-    parent = findElement(parentSerial);
-    child = findElement(childSerial);
-    if (parent == nullptr || child == nullptr)
-        return HostResult{HostResultCode::InvalidObject};
-    const std::size_t newChildIndex = elementChildCount(parentSerial) + 1u;
-    if (newChildIndex > std::numeric_limits<std::uint16_t>::max())
+    } catch (...) {
+        rollback();
         return HostResult{HostResultCode::DocumentMutationLimitExceeded};
-    child->parentSerial = parentSerial;
-    child->childIndex = static_cast<std::uint16_t>(newChildIndex);
-    if (!refreshParentChildMetadata(parentSerial) ||
-        !setSubtreeConnectionAndFlow(childSerial, willConnect) ||
-        !rebuildDynamicBlockProjections() ||
-        !moveSubtreeInlineItems(childSerial, parentSerial,
-            willConnect ? flowSerial : 0u))
-        return HostResult{HostResultCode::InvalidObject};
-
-    gxos::web::HtmlElementContentMetadata& parentContent =
-        document_->contentMetadata[static_cast<std::size_t>(parentSerial - 1u)];
-    parentContent.hasRenderableContent = true;
-    ++document_->scriptMutationCount;
-    document_->layoutDirty = true;
-    result = HostValue::fromHostObject(HostObjectReference{
-        childSerial, generation_, kNavigatorElementHostKind});
-    return HostResult();
+    }
 }
 
 HostResult NavigatorScriptHostAdapter::removeDynamicChild(
@@ -5187,6 +5355,178 @@ bool NavigatorScriptHostAdapter::elementSiblingAt(
         }
     }
     return false;
+}
+
+bool NavigatorScriptHostAdapter::documentOrderElements(
+    std::vector<const gxos::web::HtmlElementRef*>& elements) const
+{
+    elements.clear();
+    if (document_ == nullptr) return false;
+    const std::size_t bound = std::min(limits_.maxDocumentNodes,
+        document_->structuralElements.size());
+    if (bound == 0u) return true;
+
+    struct ChildRecord {
+        HostInstanceId parentSerial;
+        const gxos::web::HtmlElementRef* element;
+        std::size_t siblingOrder;
+        bool orderedByChildIndex;
+    };
+    struct ParentRecord {
+        HostInstanceId serial;
+        HostInstanceId parentSerial;
+    };
+    std::vector<HostInstanceId> dynamicParents;
+    std::vector<ChildRecord> children;
+    std::vector<ParentRecord> ancestry;
+    std::vector<std::uint8_t> ancestryState;
+    std::vector<std::size_t> ancestryPath;
+    std::vector<const gxos::web::HtmlElementRef*> pending;
+    std::vector<const gxos::web::HtmlElementRef*> ordered;
+    const auto isConnectedRecord = [&](
+        const gxos::web::HtmlElementRef& element) {
+        if (element.serial == 0u) return false;
+        if (element.serial > document_->contentMetadata.size()) return true;
+        const gxos::web::HtmlElementContentMetadata& content =
+            document_->contentMetadata[static_cast<std::size_t>(
+                element.serial - 1u)];
+        if (content.serial != element.serial) return false;
+        return !content.dynamicallyCreated ||
+            (content.contentMetadataComplete && content.connected);
+    };
+    try {
+        dynamicParents.reserve(bound);
+        children.reserve(bound);
+        ancestry.reserve(bound);
+        ancestryState.assign(bound, 0u);
+        ancestryPath.reserve(bound);
+        pending.reserve(bound);
+        ordered.reserve(bound);
+        for (std::size_t index = 0u; index < bound; ++index) {
+            const gxos::web::HtmlElementRef& element =
+                document_->structuralElements[index];
+            if (element.serial == 0u) continue;
+            ancestry.push_back(ParentRecord{element.serial,
+                element.parentSerial});
+            if (element.parentSerial != 0u &&
+                isDynamicElement(element.serial))
+                dynamicParents.push_back(element.parentSerial);
+        }
+        std::sort(ancestry.begin(), ancestry.end(),
+            [](const ParentRecord& left, const ParentRecord& right) {
+                return left.serial < right.serial;
+            });
+        for (std::size_t index = 1u; index < ancestry.size(); ++index) {
+            if (ancestry[index - 1u].serial == ancestry[index].serial)
+                return false;
+        }
+        for (std::size_t start = 0u; start < ancestry.size(); ++start) {
+            if (ancestryState[start] != 0u) continue;
+            ancestryPath.clear();
+            std::size_t currentIndex = start;
+            while (ancestryState[currentIndex] == 0u) {
+                ancestryState[currentIndex] = 1u;
+                ancestryPath.push_back(currentIndex);
+                const HostInstanceId parentSerial =
+                    ancestry[currentIndex].parentSerial;
+                if (parentSerial == 0u) break;
+                const auto parent = std::lower_bound(ancestry.begin(),
+                    ancestry.end(), parentSerial,
+                    [](const ParentRecord& record, HostInstanceId serial) {
+                        return record.serial < serial;
+                    });
+                if (parent == ancestry.end() ||
+                    parent->serial != parentSerial) return false;
+                currentIndex = static_cast<std::size_t>(
+                    parent - ancestry.begin());
+            }
+            if (ancestryState[currentIndex] == 1u &&
+                ancestry[currentIndex].parentSerial != 0u) return false;
+            for (std::size_t pathIndex : ancestryPath)
+                ancestryState[pathIndex] = 2u;
+        }
+        std::sort(dynamicParents.begin(), dynamicParents.end());
+        dynamicParents.erase(std::unique(dynamicParents.begin(),
+            dynamicParents.end()), dynamicParents.end());
+
+        for (std::size_t index = 0u; index < bound; ++index) {
+            const gxos::web::HtmlElementRef& element =
+                document_->structuralElements[index];
+            if (element.serial == 0u || element.parentSerial == 0u) continue;
+            const bool orderedByChildIndex = std::binary_search(
+                dynamicParents.begin(), dynamicParents.end(),
+                element.parentSerial);
+            if (orderedByChildIndex && element.childIndex == 0u) return false;
+            children.push_back(ChildRecord{element.parentSerial, &element,
+                orderedByChildIndex ? element.childIndex : index,
+                orderedByChildIndex});
+        }
+        std::sort(children.begin(), children.end(),
+            [](const ChildRecord& left, const ChildRecord& right) {
+                if (left.parentSerial != right.parentSerial)
+                    return left.parentSerial < right.parentSerial;
+                return left.siblingOrder < right.siblingOrder;
+            });
+    } catch (...) {
+        return false;
+    }
+
+    for (std::size_t begin = 0u; begin < children.size();) {
+        std::size_t end = begin + 1u;
+        while (end < children.size() &&
+            children[end].parentSerial == children[begin].parentSerial)
+            ++end;
+        if (children[begin].orderedByChildIndex) {
+            for (std::size_t index = begin; index < end; ++index) {
+                if (children[index].siblingOrder != index - begin + 1u)
+                    return false;
+            }
+        }
+        begin = end;
+    }
+
+    HostInstanceId rootSerial = document_->hasDocumentElement
+        ? document_->documentElement.serial
+        : document_->hasBodyElement ? document_->bodyElement.serial : 0u;
+    if (rootSerial != 0u) {
+        const gxos::web::HtmlElementRef* root = findElement(rootSerial);
+        if (root == nullptr || !isConnectedRecord(*root)) return false;
+        pending.push_back(root);
+    } else {
+        for (std::size_t index = bound; index != 0u; --index) {
+            const gxos::web::HtmlElementRef& root =
+                document_->structuralElements[index - 1u];
+            if (root.serial == 0u || root.parentSerial != 0u ||
+                !isConnectedRecord(root)) continue;
+            if (pending.size() >= bound) return false;
+            pending.push_back(&root);
+        }
+    }
+    while (!pending.empty()) {
+        const gxos::web::HtmlElementRef* current = pending.back();
+        pending.pop_back();
+        if (current == nullptr || !isConnectedRecord(*current) ||
+            ordered.size() >= bound) return false;
+        ordered.push_back(current);
+
+        const auto first = std::lower_bound(children.begin(), children.end(),
+            current->serial, [](const ChildRecord& child,
+                HostInstanceId parentSerial) {
+                return child.parentSerial < parentSerial;
+            });
+        const auto last = std::upper_bound(first, children.end(),
+            current->serial, [](HostInstanceId parentSerial,
+                const ChildRecord& child) {
+                return parentSerial < child.parentSerial;
+            });
+        for (auto child = last; child != first;) {
+            --child;
+            if (ordered.size() + pending.size() >= bound) return false;
+            pending.push_back(child->element);
+        }
+    }
+    elements.swap(ordered);
+    return true;
 }
 
 HostInstanceId NavigatorScriptHostAdapter::activeElementSerial() const
@@ -7728,14 +8068,13 @@ std::size_t NavigatorScriptHostAdapter::selectorMatchCountInternal(
         return 0u;
     const NavigatorScriptSelectorMatchContext context =
         selectorMatchContextForScope(record.scopeSerial);
-    const std::size_t count = std::min(limits_.maxDocumentNodes,
-        document_->structuralElements.size());
+    std::vector<const gxos::web::HtmlElementRef*> elements;
+    if (!documentOrderElements(elements)) return 0u;
     std::size_t matches = 0u;
-    for (std::size_t position = 0; position < count; ++position) {
-        const gxos::web::HtmlElementRef& element =
-            document_->structuralElements[position];
-        if (selectorScopeMatches(element, record.scopeSerial) &&
-            selectorElementMatches(element, record.selector, context,
+    for (const gxos::web::HtmlElementRef* element : elements) {
+        if (element != nullptr &&
+            selectorScopeMatches(*element, record.scopeSerial) &&
+            selectorElementMatches(*element, record.selector, context,
                 filteredNthScratch))
             ++matches;
     }
@@ -7813,18 +8152,17 @@ bool NavigatorScriptHostAdapter::selectorMatchAtInternal(
         return false;
     const NavigatorScriptSelectorMatchContext context =
         selectorMatchContextForScope(record.scopeSerial);
-    const std::size_t count = std::min(limits_.maxDocumentNodes,
-        document_->structuralElements.size());
+    std::vector<const gxos::web::HtmlElementRef*> elements;
+    if (!documentOrderElements(elements)) return false;
     std::size_t matched = 0u;
-    for (std::size_t position = 0; position < count; ++position) {
-        const gxos::web::HtmlElementRef& element =
-            document_->structuralElements[position];
-        if (!selectorScopeMatches(element, record.scopeSerial) ||
-            !selectorElementMatches(element, record.selector, context,
+    for (const gxos::web::HtmlElementRef* element : elements) {
+        if (element == nullptr ||
+            !selectorScopeMatches(*element, record.scopeSerial) ||
+            !selectorElementMatches(*element, record.selector, context,
                 filteredNthScratch))
             continue;
         if (matched == index) {
-            serial = element.serial;
+            serial = element->serial;
             return true;
         }
         ++matched;
@@ -8339,6 +8677,10 @@ HostResult NavigatorScriptHostAdapter::getProperty(
         result = HostValue::method(kNavigatorAppendChildMethod, true, true);
         return HostResult();
     }
+    if (textEquals(property, "insertBefore")) {
+        result = HostValue::method(kNavigatorInsertBeforeMethod, true, true);
+        return HostResult();
+    }
     if (textEquals(property, "removeChild")) {
         result = HostValue::method(kNavigatorRemoveChildMethod, true, true);
         return HostResult();
@@ -8834,7 +9176,7 @@ HostResult NavigatorScriptHostAdapter::setElementTextContent(
     }
     if (dynamicTarget &&
         !moveSubtreeInlineItems(serial, target->parentSerial,
-            targetConnected ? dynamicFlow : 0u))
+            targetConnected ? dynamicFlow : 0u, 0u))
         return HostResult{HostResultCode::InvalidObject};
 
     ++document_->scriptMutationCount;
@@ -9481,6 +9823,31 @@ HostResult NavigatorScriptHostAdapter::callInternal(
             serial, generation_, kNavigatorElementHostKind});
         return HostResult();
     }
+    if (methodId == kNavigatorInsertBeforeMethod) {
+        if (receiver->kind != kNavigatorElementHostKind ||
+            argumentCount != 2u || arguments == nullptr ||
+            arguments[0].type != HostValueType::HostObject)
+            return HostResult{HostResultCode::TypeError};
+        const HostObjectReference& child = arguments[0].hostObject;
+        if (child.kind != kNavigatorElementHostKind || !child.valid())
+            return HostResult{HostResultCode::InvalidValue};
+        if (child.generation != generation_)
+            return HostResult{HostResultCode::StaleObject};
+        HostInstanceId referenceSerial = 0u;
+        if (arguments[1].type == HostValueType::HostObject) {
+            const HostObjectReference& reference = arguments[1].hostObject;
+            if (reference.kind != kNavigatorElementHostKind ||
+                !reference.valid())
+                return HostResult{HostResultCode::InvalidValue};
+            if (reference.generation != generation_)
+                return HostResult{HostResultCode::StaleObject};
+            referenceSerial = reference.instanceId;
+        } else if (arguments[1].type != HostValueType::Null) {
+            return HostResult{HostResultCode::InvalidValue};
+        }
+        return insertDynamicChild(receiver->instanceId, child.instanceId,
+            referenceSerial, result);
+    }
     if (methodId == kNavigatorAppendChildMethod ||
         methodId == kNavigatorRemoveChildMethod) {
         if (receiver->kind != kNavigatorElementHostKind ||
@@ -9864,14 +10231,28 @@ HostResult NavigatorScriptHostAdapter::callInternal(
 
     const std::size_t count = std::min(limits_.maxDocumentNodes,
         document_->structuralElements.size());
-    for (std::size_t index = 0; index < count; ++index) {
-        const gxos::web::HtmlElementRef& element =
-            document_->structuralElements[index];
-        if (element.serial != 0 && isElementConnected(element.serial) &&
-            element.id == id) {
-            result = HostValue::fromHostObject(HostObjectReference{
-                element.serial, generation_, kNavigatorElementHostKind});
-            return HostResult();
+    std::vector<const gxos::web::HtmlElementRef*> elements;
+    if (!documentOrderElements(elements)) {
+        // Keep ID lookup available for bounded synthetic or malformed
+        // structural tables whose parent links do not form a complete tree.
+        for (std::size_t fallback = 0u; fallback < count; ++fallback) {
+            const gxos::web::HtmlElementRef& element =
+                document_->structuralElements[fallback];
+            if (element.serial != 0u && isElementConnected(element.serial) &&
+                element.id == id) {
+                result = HostValue::fromHostObject(HostObjectReference{
+                    element.serial, generation_, kNavigatorElementHostKind});
+                return HostResult();
+            }
+        }
+    } else {
+        for (const gxos::web::HtmlElementRef* element : elements) {
+            if (element != nullptr &&
+                element->id == id) {
+                result = HostValue::fromHostObject(HostObjectReference{
+                    element->serial, generation_, kNavigatorElementHostKind});
+                return HostResult();
+            }
         }
     }
     if (document_->structuralElements.size() > limits_.maxDocumentNodes)
