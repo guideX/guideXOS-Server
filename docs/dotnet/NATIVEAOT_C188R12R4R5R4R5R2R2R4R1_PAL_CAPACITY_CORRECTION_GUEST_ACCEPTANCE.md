@@ -1,6 +1,6 @@
 # C188R12R4R5R4R5R2R2R4R1 PAL Capacity Correction Guest Acceptance
 
-**Status: prepared, not executed**
+**Status: executed once on 2026-11-04; see [guest acceptance results](NATIVEAOT_C188R12R4R5R4R5R2R2R4R1_PAL_CAPACITY_CORRECTION_GUEST_ACCEPTANCE_RESULTS.md)**
 
 ## Candidate to use
 

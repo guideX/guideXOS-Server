@@ -161,6 +161,32 @@ if ($isGcInitFailureAttribution) {
     if ($isNativeAllocationFailureAttribution) {
         $nativeHostedResults = Get-Content -LiteralPath ([string]$candidateManifest.nativeAllocationHostedTestResults) -Raw | ConvertFrom-Json -ErrorAction Stop
         $nativeBranchMap = Get-Content -LiteralPath ([string]$candidateManifest.nativeAllocationFailureBranchMap) -Raw | ConvertFrom-Json -ErrorAction Stop
+        $nativeManagedMapPath = [System.IO.Path]::ChangeExtension(
+            [System.IO.Path]::GetFullPath([string]$candidateManifest.managedPe), '.map')
+        [void](Require-Hash $nativeManagedMapPath ([string]$candidateManifest.managedMapSha256) 'R2R2 NativeAOT linker map')
+        $nativeManagedMapText = Get-Content -LiteralPath $nativeManagedMapPath -Raw
+        $gcEnvironmentSource = Join-Path $repo 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp'
+        $startupImportsSource = Join-Path $repo 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_startup_imports.cpp'
+        $palContractSource = Join-Path $repo 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_pal_contract.cpp'
+        $kernelPalSource = Join-Path $repo 'kernel\core\nativeaot_pal_qemu_test.cpp'
+        [void](Require-Hash $gcEnvironmentSource ([string]$candidateManifest.artifactHashes.nativeAllocationGcEnvironmentSource) 'R2R2 GCEvent implementation source')
+        [void](Require-Hash $startupImportsSource ([string]$candidateManifest.artifactHashes.nativeAllocationStartupImportsSource) 'R2R2 startup allocation imports source')
+        [void](Require-Hash $palContractSource ([string]$candidateManifest.artifactHashes.nativeAllocationPalContractSource) 'R2R2 PAL contract source')
+        [void](Require-Hash $kernelPalSource ([string]$candidateManifest.artifactHashes.nativeAllocationKernelPalSource) 'R2R2 kernel PAL source')
+        $gcEnvironmentText = Get-Content -LiteralPath $gcEnvironmentSource -Raw
+        $startupImportsText = Get-Content -LiteralPath $startupImportsSource -Raw
+        $palContractText = Get-Content -LiteralPath $palContractSource -Raw
+        $kernelPalText = Get-Content -LiteralPath $kernelPalSource -Raw
+        $nothrowOperatorNewMap = $nativeManagedMapText -match '(?m)^\s+[0-9A-F]{4}:[0-9A-F]{8}\s+\?\?2@YAPEAX_KAEBUnothrow_t@std@@@Z\s+[0-9A-F]{16}\s+f\s+guidexos_nativeaot_startup_imports\.production\.obj\r?$'
+        $startupMallocMap = $nativeManagedMapText -match '(?m)^\s+[0-9A-F]{4}:[0-9A-F]{8}\s+guidexos_nativeaot_startup_malloc\s+[0-9A-F]{16}\s+f\s+guidexos_nativeaot_startup_imports\.production\.obj\r?$'
+        $palVirtualAllocMap = $nativeManagedMapText -match '(?m)^\s+[0-9A-F]{4}:[0-9A-F]{8}\s+guidexos_nativeaot_pal_virtual_alloc\s+[0-9A-F]{16}\s+f\s+guidexos_nativeaot_pal_contract\.obj\r?$'
+        $hostedOperatorNewMap = [string]$nativeHostedResults.diagnosticMapOperatorNew -ceq '??2@YAPEAX_KAEBUnothrow_t@std@@@Z -> guidexos_nativeaot_startup_imports.production.obj'
+        $sourceAllocationRoute =
+            $gcEnvironmentText -match 'new\s*\(std::nothrow\)\s*GCEvent::Impl\s*\(\)' -and
+            $startupImportsText -match '(?s)operator new\(size_t size, const std::nothrow_t&\) noexcept\s*\{.*?guidexos_nativeaot_startup_malloc\(size\)' -and
+            $startupImportsText -match '(?s)guidexos_nativeaot_startup_malloc\(size_t size\)\s*\{.*?guidexos_nativeaot_pal_virtual_alloc\(' -and
+            $palContractText -match '(?s)guidexos_nativeaot_pal_virtual_alloc\(.*?g_pal_hooks\.virtual_alloc' -and
+            $kernelPalText -match '(?s)startupReserve\(.*?virtual_memory::reserve\('
         if (-not [bool]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttribution -or
             [string]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationMarker -cne 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' -or
             [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttemptCapacity -ne 8 -or
@@ -172,7 +198,8 @@ if ($isGcInitFailureAttribution) {
             [string]$nativeHostedResults.gcVmSlotTableTestSemantics -cne 'shared PAL slot-table implementation with synthetic reserve/commit/release backend; no guest memory claimed' -or
             [string]$nativeHostedResults.nativeAllocationQacRunnerContract -cne 'PASS' -or
             [string]$nativeHostedResults.actualOperatorNewFailureMode -notmatch 'callback refusal is synthetic' -or
-            [string]$candidateManifest.nativeAllocationLinkedDisassemblySha256 -cne [string]$candidateManifest.artifactHashes.nativeAllocationLinkedDisassembly -or
+            -not $nothrowOperatorNewMap -or -not $startupMallocMap -or -not $palVirtualAllocMap -or -not $hostedOperatorNewMap -or
+            -not $sourceAllocationRoute -or
             -not [bool]$candidateManifest.productionIsolationChecks.diagnosticAndProductionOutputsSeparate -or
             [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR2SemiSharedProfile -or
             -not [bool]$candidateManifest.productionIsolationChecks.diagnosticInstrumentationAbsentFromProduction -or
@@ -188,8 +215,7 @@ if ($isGcInitFailureAttribution) {
             ([string]$candidateManifest.artifactHashes.nativeAllocationBranchMap) 'R2R2 failure-branch map')
         [void](Require-Hash ([string]$candidateManifest.nativeAllocationHostedTestResults) `
             ([string]$candidateManifest.artifactHashes.nativeAllocationHostedTests) 'R2R2 hosted test result')
-        [void](Require-Hash ([string]$candidateManifest.nativeAllocationLinkedDisassembly) `
-            ([string]$candidateManifest.nativeAllocationLinkedDisassemblySha256) 'R2R2 linked allocation disassembly')
+        [void](Require-Hash $nativeManagedMapPath ([string]$candidateManifest.managedMapSha256) 'R2R2 NativeAOT linker map')
         if ([string]$candidateManifest.sourceRamdiskSha256 -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8' -or
             [string]$candidateManifest.specializedKernelSha256 -cne [string]$candidateManifest.espKernelSha256 -or
             [string]$candidateManifest.managedElfSha256 -cne [string]$candidateManifest.artifactHashes.candidateNativeAotElf -or
@@ -198,21 +224,13 @@ if ($isGcInitFailureAttribution) {
             [string]$candidateManifest.productionKernelSha256 -cne [string]$candidateManifest.artifactHashes.productionKernelElf) {
             throw 'R2R2 diagnostic, source-ramdisk, or production artifact identities differ from the integrity inventory.'
         }
-        $nativeLinkedDisassemblyPath = [System.IO.Path]::GetFullPath((Join-Path $repo ([string]$candidateManifest.nativeAllocationLinkedDisassembly)))
-        $linkedAllocationText = Get-Content -LiteralPath $nativeLinkedDisassemblyPath -Raw
-        $gcEnvironmentSource = Join-Path $repo 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp'
-        [void](Require-Hash $gcEnvironmentSource ([string]$candidateManifest.artifactHashes.nativeAllocationGcEnvironmentSource) 'R2R2 GCEvent implementation source')
-        $gcEnvironmentText = Get-Content -LiteralPath $gcEnvironmentSource -Raw
-        if ($gcEnvironmentText -notmatch 'new\s*\(std::nothrow\)\s*GCEvent::Impl\s*\(\)' -or
-            $linkedAllocationText -notmatch '\?\?2@YAPEAX_KAEBUnothrow_t@std@@@Z' -or
-            $linkedAllocationText -notmatch 'guidexos_nativeaot_startup_malloc' -or
-            $linkedAllocationText -notmatch 'guidexos_nativeaot_pal_virtual_alloc') {
-            throw 'R2R2 linked disassembly does not establish GCEvent::Impl to nothrow new, startup malloc, and PAL virtual allocation.'
+        if (-not $sourceAllocationRoute -or -not $nothrowOperatorNewMap -or
+            -not $startupMallocMap -or -not $palVirtualAllocMap) {
+            throw 'R2R2 source and hash-pinned linker map do not establish GCEvent::Impl through nothrow new to the startup PAL virtual-allocation import.'
         }
         foreach ($requiredBranch in @('0x0200','0x0201','0x0202','0x0203','0x0204','0x0205','0x0206','0x0310','0x0408','0x0413')) {
-            if ($linkedAllocationText -notmatch [regex]::Escape($requiredBranch) -and
-                ($nativeBranchMap | ConvertTo-Json -Depth 8) -notmatch [regex]::Escape($requiredBranch)) {
-                throw "R2R2 operation or VM failure branch is absent from the linked diagnostic inventory: $requiredBranch"
+            if (($nativeBranchMap | ConvertTo-Json -Depth 8) -notmatch [regex]::Escape($requiredBranch)) {
+                throw "R2R2 operation or VM failure branch is absent from the diagnostic branch map: $requiredBranch"
             }
         }
     }
@@ -303,13 +321,12 @@ if ($isNativeAllocationFailureAttribution) {
         throw 'R2R2 full candidate-integrity inventory is incomplete or no longer matches the candidate.'
     }
     $candidateIntegrityInventorySha256 = Get-Sha256 $CandidateIntegrityInventory
-    $nativeLinkedDisassemblyPath = [System.IO.Path]::GetFullPath((Join-Path $repo ([string]$candidateManifest.nativeAllocationLinkedDisassembly)))
     [void](Require-Hash ([string]$candidateManifest.managedElf) ([string]$candidateManifest.managedElfSha256) 'R2R2 diagnostic NativeAOT ELF')
     [void](Require-Hash ([string]$candidateManifest.specializedKernel) ([string]$candidateManifest.specializedKernelSha256) 'R2R2 diagnostic kernel')
     [void](Require-Hash (Join-Path $candidateManifest.esp 'kernel.elf') ([string]$candidateManifest.espKernelSha256) 'R2R2 staged diagnostic kernel')
     [void](Require-Hash (Join-Path $candidateManifest.esp 'ramdisk.img') ([string]$candidateManifest.candidateRamdiskSha256) 'R2R2 staged diagnostic ramdisk')
     [void](Require-Hash (Join-Path $repo 'ESP\ramdisk.img') ([string]$candidateManifest.sourceRamdiskSha256) 'R2R2 preserved source ramdisk')
-    [void](Require-Hash $nativeLinkedDisassemblyPath ([string]$candidateManifest.nativeAllocationLinkedDisassemblySha256) 'R2R2 linked allocation disassembly')
+    [void](Require-Hash $nativeManagedMapPath ([string]$candidateManifest.managedMapSha256) 'R2R2 NativeAOT linker map')
     [void](Require-Hash ([string]$candidateManifest.productionNativeAotManifest) ([string]$candidateManifest.artifactHashes.productionNativeAotQualification) 'R2R2 proof-disabled production qualification')
     [void](Require-Hash ([string]$candidateManifest.productionKernelManifest) ([string]$candidateManifest.artifactHashes.productionKernelQualification) 'R2R2 proof-disabled production kernel qualification')
 }
