@@ -2,7 +2,7 @@
 
 ## Disposition
 
-**Outcome B — `STACK_GUEST_EVIDENCE_INCOMPLETE`.** The repaired candidate, receipt, package hashes, and compiler stack-budget guard were verified. The repaired ISO was not booted in this phase because QAC detected a foreign QEMU process and blocked acceptance admission. No new QAC reservation was requested and no guest was launched. The two runtime stack paths, COM2 service path, and repaired-candidate integration checks remain unqualified.
+**Current outcome — `STACK_GUEST_EVIDENCE_INCOMPLETE`.** The repaired candidate, receipt, package hashes, and compiler stack-budget guard are verified. The original 2026-10-24 runner did not obtain QAC admission. A 2026-11-04 follow-up obtained two QAC-managed QEMU launches, but the runner could not establish ownership of its QMP listener before guest start. QEMU remained paused with `-S`; both candidate serial logs are empty and no guest OS boot occurred. QAC later independently verified both children exited and both reservations were released. The Settings paths, COM2 service path, and repaired-candidate integration checks remain unqualified. This is a guest-control tooling failure, not evidence of an OS runtime regression.
 
 This report does not close the stack blockers or authorize release publication.
 
@@ -97,7 +97,7 @@ The QAC status, list, queue, and owner-verified process census are retained unde
 
 The exact remaining checks are:
 
-1. Obtain a fresh QAC snapshot with no foreign QEMU, managed reservation, or queued work; then use the QAC-managed isolated writable guest workflow on this exact ISO hash.
+1. Before the next attempt, take a fresh QAC snapshot and use the QAC-managed isolated writable guest workflow on this exact ISO hash. A clear QAC snapshot was captured during the 2026-11-04 follow-up, but the remaining QMP startup/ownership failure must be resolved in the qualification runner first.
 2. Cold boot, kernel initialization, desktop responsiveness, five-mount VFS state, `/Apps`, PacMan registration, and absence of unexpected panic, exception, hang, or mount invalidation.
 3. Execute and capture the modern Settings Display path; separately attempt the supported legacy Display Options entry and report reachability accurately.
 4. Send the existing non-destructive COM2 storage request and capture request/response, storage identity, error handling, and stable VFS state.
@@ -120,6 +120,47 @@ These blockers remain separate from the stack repair and are not approved for de
 
 ## 13. Recommended next Main Integration phase
 
-Continue candidate-specific guest qualification when QAC reports no foreign QEMU and permits exclusive acceptance. Use the exact candidate hash above without rebuilding. Close the modern Settings, legacy Display Options, COM2, PacMan, Navigator, and VFS checks before deciding whether the two stack blockers can be closed. If the first cold boot passes and QAC remains available, perform one independent repeat boot. After this guest gate, continue release reproducibility qualification; do not treat stack qualification as publication readiness.
+Resolve the QMP startup/ownership failure in the qualification tooling, then resume a QAC-managed candidate-specific guest run on the exact hash above without rebuilding. Close the modern Settings, legacy Display Options, COM2, PacMan, Navigator, and VFS checks before deciding whether the two stack blockers can be closed. If the first cold boot passes and QAC remains available, perform one independent repeat boot. After this guest gate, continue release reproducibility qualification; do not treat stack qualification as publication readiness.
 
-**Final disposition:** `STACK_GUEST_EVIDENCE_INCOMPLETE` — static and package evidence confirmed; repaired-candidate guest evidence blocked by QAC foreign-process admission control.
+**Final disposition:** `STACK_GUEST_EVIDENCE_INCOMPLETE` — static and package evidence confirmed; repaired-candidate guest evidence remains blocked by the QMP listener startup/ownership failure described below.
+
+## 14. 2026-11-04 candidate runtime follow-up
+
+This follow-up adds runtime evidence while preserving the original 2026-10-24 source logs, reservation records, and historical results above. It supersedes the earlier QAC-blocked status for the current coordinator snapshot, but it does not change any release artifact or qualify guest behavior.
+
+### Repository and candidate identity
+
+- Follow-up started on `main` at `586e7c52d8021f2bac21ab8010b882afe1510fce`; required commit `58b684f5aadbc67d1a7dd8f6176e81bf3d2fb9c6` and candidate source commit `5b62216efe78158fb12707c126ec38582faecf59` are ancestors. The tracked worktree was clean before this documentation update.
+- The repaired candidate remains `out/release-profile/6ad9bb77-12ce-4b4d-8ed0-56ff3944ee5d/artifacts/guideXOS-Server-v0.3.0-amd64-pacman-only-candidate.iso`, SHA-256 `2fe2f5eda87c9a80164715a156af5de12c7cf3891d29a961c40012c9d032241e`. The post-run hash still matches. The earlier accepted ISO still hashes to `b6b7b0faeef779a4ac06abb96ad749d2ce906df2e7751c1b9c329dd0a23fc2af`.
+- The retained receipt checks continue to identify `ServerV03PacManOnly`, PacMan as the only Native ELF package, no Developer Studio package, 16 matching release input hashes, 11 matching PacMan package hashes, and an embedded boot image matching its receipt. The candidate kernel hash remains `b5e029d23f9c21b5ff0838d9388322bf95b211bf3ef98145ddd344170dfe95dd`, matching the stack-audit kernel. No ISO was rebuilt or altered.
+- The retained stack guard reports Settings modern `11,512/16,384 B` with `4,872 B` headroom, Settings legacy `11,896/16,384 B` with `4,488 B`, and COM2 storage `7,768/16,384 B` with `8,616 B`. Its caller, interrupt-entry, and stack-switch assumptions and limitations remain those in §4; these compiler estimates are not runtime high-water data or a whole-kernel proof.
+
+### Prior reservation and live QAC ownership
+
+- The original reservation `3db20d3f6ad94171916b2a470a64ca01` is confirmed `Expired` before child launch by its retained final inspection and runner logs. It produced no candidate boot or guest evidence.
+- Before the 2026-11-04 attempts, QAC was Online with zero managed sessions, zero queued requests, zero blocked requests, and zero QEMU processes. A separate `guideXOSServer` acceptance reservation `aecd0b1ab9964162a7fd7cdccd31de28` became active while the follow-up was in progress; its QAC owner and child were verified, and it was left untouched until the owner completed. A queued `guideXOSServer-AARCH64-BOOTDTB3` reservation `039272c5e27a42dbb61bf56fb4e9bb7f` was also left untouched and was later cancelled by its own client. Neither was cleaned up or interrupted by this qualification.
+- Final QAC snapshot at `2026-11-04T23:22:12Z` was Online with zero reservations, sessions, queued or blocked requests, foreign QEMU processes, and QEMU children. The two follow-up reservations below independently inspect as `Released`; no owner remains held by this task. The QAC `.phase` marker was not changed; the server repository still has no `.phase` file.
+
+### Launch attempts and boot count
+
+Both attempts used the exact ISO above as a read-only CD-ROM, read-only OVMF, a per-run copied writable ESP with SHA-256 `cf8fe881beb41ea5b3114a39d3dcd029cd9a96b129463bfe7dfffd9009bf4e4f`, and the production-representative `pc,accel=whpx`, two-vCPU, 2 GiB, standard VGA, networking-disabled configuration. Both were launched as direct QAC-managed QEMU children.
+
+| Attempt | QAC reservation / QEMU PID | Result |
+|---|---|---|
+| 1 | `48a521ae53b54531bba42dfc06f05565` / `25808` | The copied runner threw while passing an empty listener list to a mandatory `Connections` parameter. QEMU never left its deliberate `-S` prelaunch pause. QAC later inspected the child as exited and the reservation as `Released`. |
+| 2 | `62db03804b484717bd7534ede8a77a77` / `16104` | A run-specific helper copy accepted an empty listener list, but the runner still could not prove the QMP listener on `127.0.0.1:62003` within its 15-second startup bound. QEMU remained paused. The runner retained a `RecoveryRequired` record; later QAC inspection independently verified the child exited and the reservation was `Released`. |
+
+Attempt 2 included the existing COM2 TCP endpoint at `127.0.0.1:49202`; no listener or guest service became available, and the system-service client was not run. The QMP transcript, serial log, and screenshot directory are empty for both attempts. No UEFI transfer, kernel initialization, desktop, or application runtime was observed. The QEMU `-S` option holds the guest before execution until it is continued, consistent with the [QEMU invocation documentation](https://www.qemu.org/docs/master/system/qemu-manpage.html). Thus the follow-up launched QEMU twice but produced **zero candidate guest boots**.
+
+Run evidence is retained under `out/s22r14r1r1-stack-qualification/boot1-20261104/`. It includes the preflight and final QAC inspections, both `execution.json` records, QAC logs, serial and QEMU diagnostic logs, manifests, exact child arguments, the run-specific helper copy and its one-line change record, and post-run candidate hashes. The first failure is classified as a runner parameter-binding error. The second is classified as QMP listener startup/ownership failure. Neither is evidence of a guest or kernel defect.
+
+### Runtime qualification result
+
+- **Settings modern Display:** not exercised. No guest boot, Start interaction, Display navigation, repetition, close, desktop responsiveness, or post-interaction VFS observation occurred.
+- **Settings legacy Display Options:** not exercised. Static frame-budget evidence remains valid; guest reachability and runtime execution remain unclassified.
+- **COM2 storage service:** not exercised. No request, normal response, unauthorized-mutation error response, storage snapshot, or VFS stability check reached the guest.
+- **PacMan:** not exercised. No Start registration, launch, gameplay progression, cleanup marker, or desktop return was observed.
+- **Navigator and VFS:** not exercised. No manifest lookup, five-mount observation, `/Apps` resolution, or guest VFS integrity check occurred.
+- **Outcome:** `STACK_GUEST_EVIDENCE_INCOMPLETE`. The two identified stack blockers remain open because no corrected Settings or COM2 runtime path executed. No `STACK_RUNTIME_REGRESSION` was demonstrated, and the original S22R14 release blockers remain open and are not approved for deferral.
+
+The saved inventory `out/s22r14r1r1-stack-qualification/preflight/untracked-before.txt` still lists all 13,029 paths present at the previous checkpoint, and a follow-up existence check found zero missing paths. New run output remains under ignored `out/` paths; it was not added to Git. Raw run evidence, candidate artifacts, source trees, `dist`, markers, and publication state were preserved. This report's summary and recommendation were updated to reflect the follow-up.
