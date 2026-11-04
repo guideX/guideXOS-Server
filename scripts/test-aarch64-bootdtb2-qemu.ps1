@@ -5,6 +5,7 @@ param(
     [string]$QemuPath = 'C:\Program Files\qemu\qemu-system-aarch64.exe',
     [string]$FirmwareCode = 'C:\Program Files\qemu\share\edk2-aarch64-code.fd',
     [string]$FirmwareVarsTemplate = 'C:\Program Files\qemu\share\edk2-arm-vars.fd',
+    [string]$QacProject = 'guideXOSServer-AARCH64-BOOTDTB2',
     [int]$AdmissionTimeoutSeconds = 12,
     [int]$RuntimeSeconds = 120
 )
@@ -47,7 +48,7 @@ $listener.Start()
 try { $qmpPort = ([Net.IPEndPoint]$listener.LocalEndpoint).Port }
 finally { $listener.Stop() }
 
-$project = 'guideXOSServer-AARCH64-BOOTDTB2'
+$project = $QacProject
 $guestArguments = @(
     '-machine', 'virt,gic-version=2,acpi=off', '-cpu', 'cortex-a53', '-m', '512M',
     '-drive', "if=pflash,format=raw,unit=0,readonly=on,file=$FirmwareCode",
