@@ -4,7 +4,7 @@ param(
     [ValidateRange(1,60)][int]$AdmissionWindowSeconds = 30,
     [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1',
     [string]$CandidateIntegrityInventory = '',
-    [ValidateSet('R2R2R1','R2R2R2','R2R2R3')][string]$NativeAllocationGuestAttempt = 'R2R2R1'
+    [ValidateSet('R2R2R1','R2R2R2','R2R2R3','R2R2R4')][string]$NativeAllocationGuestAttempt = 'R2R2R1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,7 +53,9 @@ if ($isThreadStoreReadiness) {
     $r4RuntimePackManifest = Get-Content -LiteralPath $r4RuntimePackManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r4PalCommonMembership = $r4RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
 }
-$phaseRoot = if ($isNativeAllocationFailureAttribution) {
+$phaseRoot = if ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4-pal-capacity-fix'))
+} elseif ($isNativeAllocationFailureAttribution) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution'))
 } elseif ($isSemiSharedAttribution) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution'))
@@ -166,7 +168,9 @@ if ($isGcInitFailureAttribution) {
             [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationSummaryFieldCount -ne 9 -or
             [string]$nativeBranchMap.marker -cne 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' -or
             $nativeHostedResults.result -cne 'PASS' -or [bool]$nativeHostedResults.qemuLaunched -or [bool]$nativeHostedResults.qacReserved -or
-            [string]$nativeHostedResults.evidenceKind -cne 'hosted synthetic fixtures and fixed-record unit test' -or
+            [string]$nativeHostedResults.evidenceKind -cne 'hosted fixed-record and shared PAL slot-table tests plus synthetic analyzer fixtures' -or
+            [string]$nativeHostedResults.gcVmSlotTableTestSemantics -cne 'shared PAL slot-table implementation with synthetic reserve/commit/release backend; no guest memory claimed' -or
+            [string]$nativeHostedResults.nativeAllocationQacRunnerContract -cne 'PASS' -or
             [string]$nativeHostedResults.actualOperatorNewFailureMode -notmatch 'callback refusal is synthetic' -or
             [string]$candidateManifest.nativeAllocationLinkedDisassemblySha256 -cne [string]$candidateManifest.artifactHashes.nativeAllocationLinkedDisassembly -or
             -not [bool]$candidateManifest.productionIsolationChecks.diagnosticAndProductionOutputsSeparate -or
@@ -287,6 +291,12 @@ if ($isNativeAllocationFailureAttribution) {
         [string]$integrityInventory.candidateManifestSha256 -cne (Get-Sha256 $candidateManifestPath) -or
         [string]$integrityInventory.candidateHead -cne [string]$candidateManifest.head -or
         [string]$integrityInventory.runtimePackSourceCommit -cne [string]$candidateManifest.runtimePackSourceCommit -or
+        [int]$integrityInventory.palVmTrackingCapacity -ne 256 -or
+        [int]$integrityInventory.palVmTrackingStorageBytes -ne 12288 -or
+        [string]$integrityInventory.capacityCorrectionSymbol -cne 'g_gcVmSlots' -or
+        [string]$integrityInventory.capacityCorrectionSymbolSizeHex -cne '00003000' -or
+        [string]$integrityInventory.capacityHelperSourceSha256 -cne (Get-Sha256 (Join-Path $repo 'kernel\core\nativeaot_gc_vm_slots.h')) -or
+        [string]$integrityInventory.startupPalSourceSha256 -cne (Get-Sha256 (Join-Path $repo 'kernel\core\nativeaot_pal_qemu_test.cpp')) -or
         [int]$integrityInventory.verifiedArtifactHashCount -ne @($candidateManifest.artifactHashes.PSObject.Properties).Count -or
         @($integrityInventory.inventory | Where-Object status -ne 'PASS').Count -ne 0 -or
         @($integrityInventory.problems).Count -ne 0) {
@@ -305,7 +315,8 @@ if ($isNativeAllocationFailureAttribution) {
 }
 
 $esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$runDirectory = if ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R3') { 'qac-guest-r2r2r3-001' }
+$runDirectory = if ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') { 'qac-guest-r2r2r4-001' }
+    elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R3') { 'qac-guest-r2r2r3-001' }
     elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R2') { 'qac-guest-r2r2r2-001' }
     elseif ($isNativeAllocationFailureAttribution) { 'qac-guest-r2r2r1-001' }
     elseif ($isSemiSharedAttribution) { 'qac-guest-r4r5r2r1-001' }

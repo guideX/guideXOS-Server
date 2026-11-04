@@ -25,7 +25,8 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4-threadstore-readiness')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5-gc-init-probes')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2-semishared-attribution')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2-native-allocation-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2-native-allocation-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2r4-pal-capacity-fix')))
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)

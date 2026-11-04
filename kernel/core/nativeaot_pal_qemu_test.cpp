@@ -25,6 +25,7 @@
 #include "runtime/local_storage/guidexos_local_storage.h"
 #if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 #include "runtime/memory/guidexos_virtual_memory_region.h"
+#include "nativeaot_gc_vm_slots.h"
 #include "runtime/synchronization/guidexos_event.h"
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_gc_startup_platform_contract.h"
 #if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST) || defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
@@ -1064,22 +1065,18 @@ void runOne(const uint8_t* artifact, size_t artifactSize,
 #if defined(GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
 
 constexpr uint32_t kMaxGcEventSlots = 16u;
-// Match the production NativeAOT PAL's VM slot capacity. The GC startup
-// adapter needs to track the same range of simultaneous reservations.
-constexpr uint32_t kMaxGcVmSlots = 256u;
 
 struct GcEventSlot {
     bool active;
     gxos::runtime::Event event;
 };
 
-struct GcVmSlot {
-    bool active;
-    gxos::runtime::virtual_memory::VirtualMemoryRegion region;
-};
+using GcVmSlotTable = kernel::nativeaot::detail::GcVmSlotTable<
+    gxos::runtime::virtual_memory::VirtualMemoryRegion,
+    kernel::nativeaot::detail::kMaxGcVmSlots>;
 
 GcEventSlot g_gcEvents[kMaxGcEventSlots] = {};
-GcVmSlot g_gcVmSlots[kMaxGcVmSlots] = {};
+GcVmSlotTable g_gcVmSlots;
 uint32_t g_startupLegacyAllocCalls = 0;
 uintptr_t g_startupLegacyLastSize = 0;
 bool g_startupLegacyLastSuccess = false;
@@ -1122,18 +1119,11 @@ NativeAllocBackendRecord g_nativeAllocBackend = {
 bool g_nativeAllocBackendCaptureActive = false;
 
 uint32_t nativeAllocBackendActiveVmSlots() {
-    uint32_t count = 0u;
-    for (const GcVmSlot& slot : g_gcVmSlots) {
-        if (slot.active) ++count;
-    }
-    return count;
+    return g_gcVmSlots.activeCount();
 }
 
 uint32_t nativeAllocBackendFreeVmSlot() {
-    for (uint32_t index = 0u; index < kMaxGcVmSlots; ++index) {
-        if (!g_gcVmSlots[index].active) return index;
-    }
-    return GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    return g_gcVmSlots.firstFreeIndex();
 }
 
 NativeAllocBackendAttempt* nativeAllocBackendActiveAttempt() {
@@ -1172,7 +1162,7 @@ void nativeAllocBackendBegin(uintptr_t size, uint32_t type) {
     attempt.roundedSize = size <= UINTPTR_MAX - 4095u
         ? (size + 4095u) & ~uintptr_t(4095u)
         : GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
-    attempt.slotCapacity = kMaxGcVmSlots;
+    attempt.slotCapacity = kernel::nativeaot::detail::kMaxGcVmSlots;
     attempt.activeSlots = nativeAllocBackendActiveVmSlots();
     attempt.freeSlotIndex = nativeAllocBackendFreeVmSlot();
     attempt.addressSpaceReady = kernel::memory::address_space::isInitialized() &&
@@ -1369,14 +1359,8 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCloseEvent(void* handle) {
     return 0;
 }
 
-GcVmSlot* findGcVm(const void* address) {
-    const uintptr_t value = reinterpret_cast<uintptr_t>(address);
-    for (GcVmSlot& slot : g_gcVmSlots) {
-        if (!slot.active || slot.region.base == nullptr) continue;
-        const uintptr_t base = reinterpret_cast<uintptr_t>(slot.region.base);
-        if (value >= base && value - base < slot.region.reservedSize) return &slot;
-    }
-    return nullptr;
+GcVmSlotTable::Slot* findGcVm(const void* address) {
+    return g_gcVmSlots.findContaining(address);
 }
 
 void* GUIDEXOS_NATIVEAOT_PAL_CALL startupReserve(
@@ -1387,8 +1371,11 @@ void* GUIDEXOS_NATIVEAOT_PAL_CALL startupReserve(
 #endif
         return nullptr;
     }
-    for (uint32_t slotIndex = 0; slotIndex < kMaxGcVmSlots; ++slotIndex) {
-        GcVmSlot& slot = g_gcVmSlots[slotIndex];
+    for (uint32_t slotIndex = 0u;
+         slotIndex < kernel::nativeaot::detail::kMaxGcVmSlots; ++slotIndex) {
+        GcVmSlotTable::Slot* slotPointer = g_gcVmSlots.slotAt(slotIndex);
+        if (slotPointer == nullptr) return nullptr;
+        GcVmSlotTable::Slot& slot = *slotPointer;
         if (slot.active) continue;
         const gxos::runtime::virtual_memory::VmResult result =
             gxos::runtime::virtual_memory::reserve(
@@ -1423,7 +1410,7 @@ void* GUIDEXOS_NATIVEAOT_PAL_CALL startupReserve(
 
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCommit(
     void* address, uintptr_t size, uint16_t) {
-    GcVmSlot* slot = findGcVm(address);
+    GcVmSlotTable::Slot* slot = findGcVm(address);
 #if defined(GUIDEXOS_NATIVEAOT_C011EC95_VM_COMMIT_STATUS)
     if (slot == nullptr) {
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
@@ -1522,7 +1509,7 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCommit(
 
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupDecommit(
     void* address, uintptr_t size, uint16_t) {
-    GcVmSlot* slot = findGcVm(address);
+    GcVmSlotTable::Slot* slot = findGcVm(address);
     if (slot == nullptr || size == 0) return -1;
     const uintptr_t offset = reinterpret_cast<uintptr_t>(address) -
         reinterpret_cast<uintptr_t>(slot->region.base);
@@ -1533,7 +1520,7 @@ int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupDecommit(
 
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupRelease(
     void* address, uintptr_t, uint16_t) {
-    GcVmSlot* slot = findGcVm(address);
+    GcVmSlotTable::Slot* slot = findGcVm(address);
     if (slot == nullptr || address != slot->region.base) {
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
         nativeAllocBackendObserveRollbackRelease(

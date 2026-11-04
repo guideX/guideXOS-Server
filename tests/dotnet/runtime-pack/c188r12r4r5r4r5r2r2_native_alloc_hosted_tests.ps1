@@ -36,10 +36,32 @@ $compileLines = @(
     'if errorlevel 1 exit /b %errorlevel%', 'exit /b 0'
 )
 Set-Content -LiteralPath $compileBatch -Value $compileLines -Encoding ASCII
-& cmd.exe /d /c $compileBatch *> $compileLog
+Push-Location -LiteralPath $output
+try { & cmd.exe /d /c $compileBatch *> $compileLog } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { throw "Native allocation fixed-record test compile failed. See $compileLog" }
 & $exe *> (Join-Path $output 'record-test.log')
 if ($LASTEXITCODE -ne 0) { throw "Native allocation fixed-record test failed with $LASTEXITCODE." }
+
+$slotTestSource = Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_gc_vm_slot_table_test.cpp'
+$slotTestPath = Join-Path $output 'gc-vm-slot-table-test.exe'
+$slotTestCompileBatch = Join-Path $output 'gc-vm-slot-table-test-compile.bat'
+$slotTestCompileLog = Join-Path $output 'gc-vm-slot-table-test-compile.log'
+$slotTestLog = Join-Path $output 'gc-vm-slot-table-test.log'
+$slotTestCompileLines = @(
+    '@echo off', 'setlocal', ('call "{0}" >nul' -f $vcvars), 'if errorlevel 1 exit /b %errorlevel%',
+    ('cl.exe /nologo /std:c++14 /EHs-c- /I"{0}" "{1}" /Fe:"{2}"' -f $root,$slotTestSource,$slotTestPath),
+    'if errorlevel 1 exit /b %errorlevel%', 'exit /b 0'
+)
+Set-Content -LiteralPath $slotTestCompileBatch -Value $slotTestCompileLines -Encoding ASCII
+Push-Location -LiteralPath $output
+try { & cmd.exe /d /c $slotTestCompileBatch *> $slotTestCompileLog } finally { Pop-Location }
+if ($LASTEXITCODE -ne 0) { throw "GC VM slot table hosted regression compile failed. See $slotTestCompileLog" }
+& $slotTestPath *> $slotTestLog
+if ($LASTEXITCODE -ne 0) { throw "GC VM slot table hosted regression failed with $LASTEXITCODE." }
+$slotTestOutput = Get-Content -LiteralPath $slotTestLog -Raw
+if ($slotTestOutput -notmatch 'legacy capacity=16, corrected capacity=256, assertions=2425, reserve/release cycles=1024') {
+    throw 'GC VM slot table hosted regression did not report the 16-to-256 capacity boundary, 2,425 assertions, and 1,024 reuse cycles.'
+}
 
 $integrationTestPath = $null
 $integrationTestHash = $null
@@ -61,7 +83,8 @@ if (-not [string]::IsNullOrWhiteSpace($StartupImportsObject) -or
         'if errorlevel 1 exit /b %errorlevel%', 'exit /b 0'
     )
     Set-Content -LiteralPath $integrationBatch -Value $integrationLines -Encoding ASCII
-    & cmd.exe /d /c $integrationBatch *> $integrationLog
+    Push-Location -LiteralPath $output
+    try { & cmd.exe /d /c $integrationBatch *> $integrationLog } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw "Native allocation actual operator-new integration test compile failed. See $integrationLog" }
     & $integrationTestPath *> (Join-Path $output 'operator-new-integration-test.log')
     if ($LASTEXITCODE -ne 0) { throw "Native allocation actual operator-new integration test failed with $LASTEXITCODE." }
@@ -97,15 +120,20 @@ $guestRunner = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-
 if (-not (Test-Path -LiteralPath $guestRunner -PathType Leaf)) { throw "Native allocation QAC runner is missing: $guestRunner" }
 $guestRunnerText = Get-Content -LiteralPath $guestRunner -Raw
 if ($guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''NativeAllocationFailureAttribution''' -or
-    -not $guestRunnerText.Contains("[ValidateSet('R2R2R1','R2R2R2','R2R2R3')][string]`$NativeAllocationGuestAttempt = 'R2R2R1'") -or
+    -not $guestRunnerText.Contains("[ValidateSet('R2R2R1','R2R2R2','R2R2R3','R2R2R4')][string]`$NativeAllocationGuestAttempt = 'R2R2R1'") -or
     -not $guestRunnerText.Contains('qac-guest-r2r2r2-001') -or
     -not $guestRunnerText.Contains('qac-guest-r2r2r3-001') -or
+    -not $guestRunnerText.Contains('qac-guest-r2r2r4-001') -or
+    -not $guestRunnerText.Contains('c188r12r4r5r4r5r2r2r4-pal-capacity-fix') -or
     -not $guestRunnerText.Contains('(?:rhResult|adapterStatus)') -or
     -not $guestRunnerText.Contains('guest-launch-attempt-C188R12R4R5R4R5$NativeAllocationGuestAttempt.json') -or
     -not $guestRunnerText.Contains('nativeAllocationGuestAttempt=if($isNativeAllocationFailureAttribution){$NativeAllocationGuestAttempt}else{$null}') -or
     -not $guestRunnerText.Contains('[System.IO.FileMode]::CreateNew') -or
     -not $guestRunnerText.Contains('candidate-integrity inventory') -or
     -not $guestRunnerText.Contains('verifiedArtifactHashCount') -or
+    -not $guestRunnerText.Contains('palVmTrackingCapacity') -or
+    -not $guestRunnerText.Contains('capacityCorrectionSymbolSizeHex') -or
+    -not $guestRunnerText.Contains('capacityHelperSourceSha256') -or
     -not $guestRunnerText.Contains('guestBootLimit=1;automaticRetry=$false') -or
     -not $guestRunnerText.Contains('Test-NativeAllocationTraceComplete') -or
     -not $guestRunnerText.Contains('managed_main_gate=blocked') -or
@@ -121,10 +149,29 @@ if ($guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[s
     throw 'Native allocation guest runner lacks its candidate gate, one-boot guard, complete trace, immutable raw serial, analyzer, ownership, or owned-shutdown contract.'
 }
 $gcStartupPalSource = Get-Content -LiteralPath (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') -Raw
+$gcSlotTableSource = Get-Content -LiteralPath (Join-Path $root 'kernel\core\nativeaot_gc_vm_slots.h') -Raw
 $productionPalSource = Get-Content -LiteralPath (Join-Path $root 'kernel\core\nativeaot_application.cpp') -Raw
-if (-not $gcStartupPalSource.Contains('constexpr uint32_t kMaxGcVmSlots = 256u;') -or
+if (-not $gcSlotTableSource.Contains('constexpr uint32_t kMaxGcVmSlots = 256u;') -or
+    -not $gcStartupPalSource.Contains('GcVmSlotTable<') -or
+    -not $gcStartupPalSource.Contains('g_gcVmSlots.findContaining(address)') -or
     -not $productionPalSource.Contains('constexpr uint32_t kMaxVmSlots = 256u;')) {
     throw 'The GC-startup PAL must retain the production NativeAOT PAL VM reservation-slot capacity.'
+}
+$reserveStart = $gcStartupPalSource.IndexOf('void* GUIDEXOS_NATIVEAOT_PAL_CALL startupReserve(')
+$reserveEnd = $gcStartupPalSource.IndexOf('int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupCommit(')
+$reserveFunction = $gcStartupPalSource.Substring($reserveStart, $reserveEnd - $reserveStart)
+$reserveFailureCheck = $reserveFunction.IndexOf('if (result != gxos::runtime::virtual_memory::VmResult::Ok)')
+if ($reserveStart -lt 0 -or $reserveEnd -le $reserveStart -or $reserveFailureCheck -lt 0 -or
+    $reserveFailureCheck -gt $reserveFunction.IndexOf('slot.active = true;')) {
+    throw 'The startup PAL must register a slot only after the real VM reserve succeeds.'
+}
+$releaseStart = $gcStartupPalSource.IndexOf('int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupRelease(')
+$releaseEnd = $gcStartupPalSource.IndexOf('int32_t GUIDEXOS_NATIVEAOT_PAL_CALL startupReset(')
+$releaseFunction = $gcStartupPalSource.Substring($releaseStart, $releaseEnd - $releaseStart)
+$releaseFailureCheck = $releaseFunction.IndexOf('if (result != gxos::runtime::virtual_memory::VmResult::Ok) return -1;')
+if ($releaseStart -lt 0 -or $releaseEnd -le $releaseStart -or $releaseFailureCheck -lt 0 -or
+    $releaseFunction.IndexOf('slot->active = false;') -lt $releaseFailureCheck) {
+    throw 'The startup PAL must retain tracking until the real VM release succeeds.'
 }
 $runnerGuestGate = $guestRunnerText.IndexOf('Test-NativeAllocationTraceComplete $serialText')
 $runnerShutdown = $guestRunnerText.IndexOf("[void](Invoke-Qmp 'quit')")
@@ -300,11 +347,18 @@ Assert-Classification 'incomplete' 'INCOMPLETE_DIAGNOSTIC_RECORD'
 
 $result = [ordered]@{
     result='PASS'
-    evidenceKind='hosted synthetic fixtures and fixed-record unit test'
+    evidenceKind='hosted fixed-record and shared PAL slot-table tests plus synthetic analyzer fixtures'
     qemuLaunched=$false
     qacReserved=$false
     nativeAllocRecordTest=$exe
     nativeAllocRecordTestSha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToUpperInvariant()
+    gcVmSlotTableTest=$slotTestPath
+    gcVmSlotTableTestSha256=(Get-FileHash -LiteralPath $slotTestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    gcVmSlotTableTestSemantics='shared PAL slot-table implementation with synthetic reserve/commit/release backend; no guest memory claimed'
+    gcVmSlotTableLegacyCapacity=16
+    gcVmSlotTableCapacity=256
+    gcVmSlotTableAssertions=2425
+    gcVmSlotTableReserveReleaseCycles=1024
     actualOperatorNewIntegrationTest=$integrationTestPath
     actualOperatorNewIntegrationTestSha256=$integrationTestHash
     actualOperatorNewFailureMode=if ($null -ne $integrationTestPath) { 'actual linked operator-new and PAL contract; callback refusal is synthetic' } else { 'not-run' }
@@ -312,7 +366,7 @@ $result = [ordered]@{
     originalR2R1Serial=$OriginalR2R1Serial
     originalR2R1SerialSha256=$originalHash
     nativeAllocationQacRunnerContract='PASS'
-    nativeAllocationRunnerGuard='C188R12R4R5R4R5R2R2R1 CreateNew; guest boot limit 1; automatic retry disabled'
+    nativeAllocationRunnerGuard='C188R12R4R5R4R5R2R2R4 CreateNew; guest boot limit 1; automatic retry disabled'
     nativeAllocationRawSerialPreservation='PASS; immutable serial hash bracket and separate diagnostic record files'
     nativeAllocationQacOwnershipAndShutdown='PASS; reservation owner, QEMU child identity, QMP-owned quit'
     nativeAllocationBlockedPreflightOutcome=$blockedWithoutSerial
