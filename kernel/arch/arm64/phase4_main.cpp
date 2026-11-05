@@ -37,6 +37,9 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #endif
 #include "phase2_mmu.h"
 #include "phase3_timer.h"
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+#include "phase4_diagnostics.h"
+#endif
 #if defined(GXOS_AARCH64_PHASE6)
 #include "../../../kernel/core/include/kernel/desktop.h"
 #include "../../../kernel/core/include/kernel/framebuffer.h"
@@ -498,7 +501,14 @@ static void filesystem_task(void*)
         kernel::scheduler::note_execution();
     }
 #endif
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_FS_OPEN_BEGIN);
+#endif
     uint8_t handle = kernel::vfs::open("/phase4/hello.txt", kernel::vfs::OPEN_READ);
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_FS_OPEN_RETURNED);
+    g_phase4_diagnostic_record.filesystem_handle = handle;
+#endif
     uint8_t buffer[128];
     if (handle == 0xff) { g_fs_failure = 1; for (;;) kernel::arch::idle(); }
     for (;;) {
@@ -1350,6 +1360,105 @@ extern "C" void phase3_preemptive_step(void* argument)
     kernel::scheduler::note_execution();
 }
 
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+extern "C" {
+volatile Phase4DiagnosticRecord g_phase4_diagnostic_record = {};
+}
+
+extern "C" void phase4_diag_stage(uint32_t stage)
+{
+    g_phase4_diagnostic_record.stage = stage;
+    if (stage >= PHASE4_DIAG_FS_OPEN_BEGIN && stage <= PHASE4_DIAG_FS_OPEN_RETURNED) {
+        g_phase4_diagnostic_record.filesystem_stage = stage;
+    }
+}
+
+extern "C" void phase4_diag_irq_entry(void* frame)
+{
+    volatile Phase4DiagnosticRecord& record = g_phase4_diagnostic_record;
+    const kernel::scheduler::Task* current = kernel::scheduler::current_task();
+    uint64_t daif = 0;
+    uint64_t elr = 0;
+    uint64_t spsr = 0;
+    __asm__ volatile("mrs %0, daif" : "=r"(daif));
+    __asm__ volatile("mrs %0, elr_el1" : "=r"(elr));
+    __asm__ volatile("mrs %0, spsr_el1" : "=r"(spsr));
+    record.irq_origin_stage = record.stage;
+    ++record.irq_count;
+    record.interrupted_task_id = current ? current->id : 0;
+    record.interrupted_elr = elr;
+    record.interrupted_spsr = spsr;
+    record.interrupted_sp = reinterpret_cast<uint64_t>(frame) + 272;
+    record.daif = daif;
+}
+
+extern "C" void phase4_diag_irq_ack(uint32_t irq, uint32_t acknowledgement)
+{
+    volatile Phase4DiagnosticRecord& record = g_phase4_diagnostic_record;
+    ++record.timer_ack_count;
+    record.last_irq_id = irq;
+    record.last_acknowledgement = acknowledgement;
+    record.stage = PHASE4_DIAG_IRQ_ACKED;
+}
+
+extern "C" void phase4_diag_irq_context(void* next_context)
+{
+    volatile Phase4DiagnosticRecord& record = g_phase4_diagnostic_record;
+    record.destination_valid = next_context ? 1u : 0u;
+    if (!next_context) return;
+    struct InterruptContextView {
+        uint64_t x[31];
+        uint64_t sp;
+        uint64_t pc;
+        uint64_t pstate;
+    };
+    const InterruptContextView* context = static_cast<const InterruptContextView*>(next_context);
+    record.destination_sp = context->sp;
+    record.destination_pc = context->pc;
+    record.destination_pstate = context->pstate;
+}
+
+extern "C" void phase4_diag_irq_eoi()
+{
+    volatile Phase4DiagnosticRecord& record = g_phase4_diagnostic_record;
+    ++record.timer_eoi_count;
+    record.stage = PHASE4_DIAG_IRQ_EOI_DONE;
+}
+
+extern "C" void phase4_diag_checkpoint(uint32_t stage)
+{
+    volatile Phase4DiagnosticRecord& record = g_phase4_diagnostic_record;
+    const kernel::arch::interrupt_state_t irqState = kernel::arch::irq_save();
+    ++record.sequence;
+    record.stage = stage;
+    kernel::scheduler::Stats stats{};
+    kernel::scheduler::get_stats(&stats);
+    const kernel::scheduler::Task* current = kernel::scheduler::current_task();
+    record.current_task_pointer = reinterpret_cast<uint64_t>(current);
+    record.current_task_id = current ? current->id : 0;
+    record.current_task_state = current ? current->state : kernel::scheduler::TASK_UNUSED;
+    record.task_count = kernel::scheduler::task_count();
+    record.runnable_tasks = 0;
+    for (uint32_t i = 0; i < record.task_count; ++i) {
+        const kernel::scheduler::Task* task = kernel::scheduler::task_at(i);
+        if (task && task->enabled && task->state == kernel::scheduler::TASK_RUNNABLE) {
+            ++record.runnable_tasks;
+        }
+    }
+    record.timer_ticks = stats.timer_ticks;
+    record.context_switches = stats.context_switches;
+    record.preemptions = stats.preemptions;
+    record.unexpected_irqs = stats.unexpected_irqs;
+    record.exceptions = phase3_exception_count();
+    record.architectural_timer_count = phase3_timer_count();
+    record.filesystem_reads = g_fs_work.reads;
+    record.filesystem_enumerations = g_fs_work.enumerations;
+    record.filesystem_failures = g_fs_work.failures;
+    kernel::arch::irq_restore(irqState);
+    ++record.sequence;
+}
+#endif
+
 extern "C" void* phase4_irq_dispatch(uint32_t irq, void* frame)
 {
     return kernel::irq::dispatch(irq, frame);
@@ -1358,6 +1467,12 @@ extern "C" void* phase4_irq_dispatch(uint32_t irq, void* frame)
 extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 {
     phase3_serial_init();
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    g_phase4_diagnostic_record.magic = UINT64_C(0x4758534348445231);
+    g_phase4_diagnostic_record.version = 1;
+    g_phase4_diagnostic_record.size = sizeof(Phase4DiagnosticRecord);
+    phase4_diag_checkpoint(PHASE4_DIAG_NONE);
+#endif
     print("[guideXOS] AARCH64 kernel entry\n");
     if (read_current_el() != 1) fail("execution level: unsupported");
     print("[guideXOS] execution level: EL1\n");
@@ -1778,8 +1893,14 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     if (!kernel::scheduler::prepare_interrupt_contexts()) fail("preemption setup: FAIL");
     phase3_timer_start();
     print("[guideXOS] physical timer: enabled\n");
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_TIMER_ENABLED);
+#endif
     kernel::arch::irq_enable();
     kernel::scheduler::start();
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_checkpoint(PHASE4_DIAG_SCHED_START_RETURN);
+#endif
     phase3_timer_stop();
     if (!kernel::scheduler::preemptive_complete() || kernel::scheduler::failed() ||
         kernel::scheduler::preemptions() < kPreemptionTarget || g_fs_failure || g_fs_work.failures != 0 ||
@@ -1805,6 +1926,10 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 #endif
         fail("scheduler/VFS integration: FAIL");
     }
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_CONTINUATION_RESUMED);
+    phase4_diag_checkpoint(PHASE4_DIAG_CONTINUATION_RESUMED);
+#endif
     print("[guideXOS] exception return: PASS scheduler continuation resumed\n");
 #if defined(GXOS_AARCH64_PHASE5)
 #if defined(GXOS_AARCH64_PHASE12)

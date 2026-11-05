@@ -10,6 +10,9 @@
 #include "include/kernel/block_device.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+#include "kernel/arch/arm64/phase4_diagnostics.h"
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #include "include/kernel/serial_debug.h"
@@ -891,6 +894,9 @@ uint8_t open(const char* path, uint16_t flags)
                 serial::puts(path);
                 serial::puts("\n");
 #endif
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+                phase4_diag_stage(PHASE4_DIAG_FS_OPEN_LOGGED);
+#endif
             }
             break;
         }
@@ -925,6 +931,9 @@ uint8_t open(const char* path, uint16_t flags)
     fh.size = fileSize;
     fh.fsFileHandle = fsHandle;
     strcopy(fh.path, path, sizeof(fh.path));
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_FS_HANDLE_PUBLISHED);
+#endif
     
     return handle;
 }

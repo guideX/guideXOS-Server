@@ -5,7 +5,7 @@ param(
     [string]$FirmwareCode = 'C:\Program Files\qemu\share\edk2-aarch64-code.fd',
     [string]$FirmwareVars = '',
     [string]$LogPath = '',
-    [int]$TimeoutSeconds = 120
+    [int]$TimeoutSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'

@@ -3,7 +3,7 @@ param(
     [string]$LlvmRoot = 'C:\Program Files\LLVM\bin',
     [string]$QemuPath = 'C:\Program Files\qemu\qemu-system-aarch64.exe',
     [string]$FirmwareCode = 'C:\Program Files\qemu\share\edk2-aarch64-code.fd',
-    [int]$TimeoutSeconds = 120
+    [int]$TimeoutSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'

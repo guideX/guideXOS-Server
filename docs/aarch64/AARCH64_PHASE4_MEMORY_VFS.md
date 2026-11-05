@@ -120,9 +120,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-aarch64-phase
 
 The test script verifies PE/COFF and ELF machine types, runs the host memory
 controls, stages the deterministic image, copies a fresh UEFI variable store
-for each run, and performs three fresh QEMU boots.  The default timeout is
-120 seconds because the proof intentionally leaves QEMU in a bounded-marker
-plus `WFI` state and ARM64 emulation speed varies with host load.
+for each run, and performs three fresh QEMU boots.  The current default runtime
+bound is 300 seconds.  SCHEDR1 captured a live guest at the historical
+120-second deadline with 9,975/10,000 timer callbacks complete, so that bound
+could expire before the guest reached its marker under slower host load.
 
 The completed three-boot result was:
 

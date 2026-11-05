@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$LlvmRoot = 'C:\Program Files\LLVM\bin',
-    [string]$OutputDirectory = ''
+    [string]$OutputDirectory = '',
+    [switch]$SchedulerDiagnostics
 )
 
 $ErrorActionPreference = 'Stop'
@@ -83,6 +84,7 @@ $kernelFlags = @('--target=aarch64-none-elf', '-std=c++14', '-march=armv8-a', '-
     '-fno-asynchronous-unwind-tables', '-fno-pic', '-fno-pie', '-mcmodel=small', '-mgeneral-regs-only',
     '-mstrict-align', '-mno-outline-atomics', '-DGXOS_AARCH64_PHASE4', '-I', $repoRoot,
     '-I', (Join-Path $repoRoot 'kernel\core\include'), '-I', (Join-Path $repoRoot 'kernel\arch\arm64\include'))
+if ($SchedulerDiagnostics) { $kernelFlags += '-DGXOS_AARCH64_SCHEDR1_DIAGNOSTICS' }
 Write-Host '[3/8] Compiling common memory, heap, VFS, and ARM64 services...' -ForegroundColor Yellow
 foreach ($relativeSource in $kernelSources) {
     $source = Join-Path $repoRoot $relativeSource
@@ -105,6 +107,12 @@ Invoke-Checked $hostCxx @('-std=c++17', '-O2', '-iquote', (Join-Path $repoRoot '
     (Join-Path $repoRoot 'kernel\core\common_physical_allocator.cpp'), '-o', $hostTest)
 & $hostTest
 if ($LASTEXITCODE -ne 0) { throw 'Phase 4 host negative controls failed' }
+$schedulerTest = Join-Path $OutputDirectory 'aarch64-schedr1-host-tests.exe'
+Invoke-Checked $hostCxx @('-std=c++17', '-O2', '-iquote', (Join-Path $repoRoot 'kernel\core\include'),
+    (Join-Path $repoRoot 'tests\aarch64_scheduler_repeatability_host_tests.cpp'),
+    (Join-Path $repoRoot 'kernel\core\common_scheduler.cpp'), '-o', $schedulerTest)
+& $schedulerTest
+if ($LASTEXITCODE -ne 0) { throw 'SCHEDR1 hosted scheduler controls failed' }
 
 Write-Host '[6/8] Staging EFI, kernel, and deterministic FAT32 ramdisk...' -ForegroundColor Yellow
 Copy-Item -LiteralPath $efiPath -Destination (Join-Path $OutputDirectory 'esp\EFI\BOOT\BOOTAA64.EFI') -Force
@@ -121,4 +129,61 @@ foreach ($artifact in @($efiPath, $kernelPath, (Join-Path $OutputDirectory 'esp\
     Write-Host "      $($item.Name): $($item.Length) bytes sha256=$((Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant())" -ForegroundColor Cyan
 }
 Write-Host "      ESP: $([IO.Path]::GetFullPath((Join-Path $OutputDirectory 'esp')))." -ForegroundColor Cyan
+if ($SchedulerDiagnostics) {
+    $llvmNm = Join-Path $LlvmRoot 'llvm-nm.exe'
+    if (!(Test-Path -LiteralPath $llvmNm -PathType Leaf)) { throw "Required LLVM tool not found: $llvmNm" }
+    $symbolOutput = & $llvmNm '--defined-only' $kernelPath
+    if ($LASTEXITCODE -ne 0) { throw 'llvm-nm failed for Phase 4 diagnostic kernel.elf' }
+    $symbolMatch = [regex]::Match(($symbolOutput -join "`n"), '(?m)^([0-9a-fA-F]+) [Bb] g_phase4_diagnostic_record$')
+    if (!$symbolMatch.Success) { throw 'Diagnostic record symbol is missing from the Phase 4 kernel.' }
+    $diagnosticAddress = [Convert]::ToUInt64($symbolMatch.Groups[1].Value, 16)
+    $trackedSources = @(
+        'kernel/arch/arm64/phase4_main.cpp',
+        'kernel/arch/arm64/phase4_diagnostics.h',
+        'kernel/arch/arm64/phase3_exceptions.cpp',
+        'kernel/core/common_scheduler.cpp',
+        'kernel/core/vfs.cpp',
+        'scripts/build-aarch64-phase4.ps1',
+        'scripts/test-aarch64-bootdtb2-qemu.ps1'
+    )
+    $sourceHashes = [ordered]@{}
+    foreach ($relative in $trackedSources) {
+        $sourcePath = Join-Path $repoRoot ($relative -replace '/', '\')
+        $sourceHashes[$relative] = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $artifactHashes = [ordered]@{}
+    foreach ($relative in @('BOOTAA64.EFI', 'kernel.elf', 'esp/ramdisk.img')) {
+        $artifactPath = Join-Path $OutputDirectory ($relative -replace '/', '\')
+        $artifactHashes[$relative] = [ordered]@{
+            bytes = (Get-Item -LiteralPath $artifactPath).Length
+            sha256 = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    $manifest = [ordered]@{
+        schemaVersion = 1
+        candidate = 'AARCH64-SCHEDR1 Phase 4 bounded diagnostic, GICv2, no Studio'
+        source = [ordered]@{
+            branch = (& git -C $repoRoot branch --show-current).Trim()
+            head = (& git -C $repoRoot rev-parse HEAD).Trim()
+            worktree = 'diagnostic source edits recorded by SHA-256; no source changes from this candidate are applied to the preserved BOOTDTB3 artifacts'
+            taskSourceSha256 = $sourceHashes
+        }
+        build = [ordered]@{
+            script = 'scripts/build-aarch64-phase4.ps1'
+            profile = 'GXOS_AARCH64_PHASE4; GXOS_AARCH64_SCHEDR1_DIAGNOSTICS; freestanding AArch64 kernel/UEFI; no Studio staged'
+            diagnosticRecord = [ordered]@{ symbol = 'g_phase4_diagnostic_record'; address = ('0x{0:x}' -f $diagnosticAddress); bytes = 216 }
+        }
+        guest = [ordered]@{
+            machine = 'virt,gic-version=2,acpi=off'
+            cpu = 'cortex-a53'
+            memory = '512M'
+            freshUefiVars = $true
+            studio = 'not staged'
+        }
+        artifacts = $artifactHashes
+    }
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'candidate-manifest.json') -Encoding utf8
+    Write-Host "      Diagnostic record: 0x$('{0:x}' -f $diagnosticAddress) (216 bytes)" -ForegroundColor Cyan
+    Write-Host "      Candidate manifest: $(Join-Path $OutputDirectory 'candidate-manifest.json')" -ForegroundColor Cyan
+}
 Write-Host 'Build complete. Use scripts\test-aarch64-phase4.ps1 for three fresh boots.' -ForegroundColor Green

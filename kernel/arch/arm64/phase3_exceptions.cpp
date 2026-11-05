@@ -6,6 +6,9 @@
 #if defined(GXOS_AARCH64_PHASE4)
 #include "../../../kernel/core/include/kernel/irq_registry.h"
 #endif
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+#include "phase4_diagnostics.h"
+#endif
 
 extern "C" uint32_t phase3_irq_acknowledge();
 extern "C" void phase3_irq_complete(uint32_t acknowledgement);
@@ -83,9 +86,20 @@ extern "C" uint32_t phase3_exception_count()
 extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_class)
 {
     if (vector_class == 1) {
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+        phase4_diag_irq_entry(frame);
+#endif
         const uint32_t acknowledgement = phase3_irq_acknowledge();
-        if (!phase3_irq_ack_valid(acknowledgement)) return nullptr;
+        if (!phase3_irq_ack_valid(acknowledgement)) {
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+            ++g_phase4_diagnostic_record.invalid_ack_count;
+#endif
+            return nullptr;
+        }
         const uint32_t irq = phase3_irq_id(acknowledgement);
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+        phase4_diag_irq_ack(irq, acknowledgement);
+#endif
 #if defined(GXOS_AARCH64_PHASE4)
         if (!kernel::irq::has_handler(irq)) {
             kernel::scheduler::note_unexpected_irq(irq);
@@ -113,7 +127,14 @@ extern "C" void* phase3_exception_dispatch(uint64_t* frame, uint64_t vector_clas
         phase3_timer_ack_and_rearm();
         void* next = kernel::scheduler::timer_interrupt(frame);
 #endif
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+        phase4_diag_irq_context(next);
+        phase4_diag_checkpoint(PHASE4_DIAG_IRQ_CALLBACK_DONE);
+#endif
         phase3_irq_complete(acknowledgement);
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+        phase4_diag_irq_eoi();
+#endif
         return next;
     }
 

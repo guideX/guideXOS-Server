@@ -5,9 +5,10 @@ param(
     [string]$QemuPath = 'C:\Program Files\qemu\qemu-system-aarch64.exe',
     [string]$FirmwareCode = 'C:\Program Files\qemu\share\edk2-aarch64-code.fd',
     [string]$FirmwareVarsTemplate = 'C:\Program Files\qemu\share\edk2-arm-vars.fd',
-    [string]$QacProject = 'guideXOSServer-AARCH64-BOOTDTB2',
-    [int]$AdmissionTimeoutSeconds = 12,
-    [int]$RuntimeSeconds = 120
+    [string]$QacProject = 'guideXOSServer-AARCH64-BOOTDTB3',
+    [int]$AdmissionTimeoutSeconds = 1800,
+    [int]$RuntimeSeconds = 300,
+    [switch]$CaptureTimeoutSnapshot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -253,6 +254,58 @@ function Get-FirstEvidenceLine([string]$Text, [string]$Pattern) {
     return ''
 }
 
+function Capture-QmpTimeoutSnapshot([string]$Directory, [Diagnostics.Process]$QacProcess) {
+    $client = $null
+    try {
+        $client = [Net.Sockets.TcpClient]::new()
+        $client.ReceiveTimeout = 5000; $client.SendTimeout = 5000
+        $client.Connect([Net.IPAddress]::Loopback, $qmpPort)
+        $stream = $client.GetStream(); $stream.ReadTimeout = 5000; $stream.WriteTimeout = 5000
+        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::ASCII, $false, 4096, $true)
+        $writer = [IO.StreamWriter]::new($stream, [Text.Encoding]::ASCII, 4096, $true)
+        $writer.AutoFlush = $true
+        $greeting = $reader.ReadLine() | ConvertFrom-Json
+        if (!$greeting.QMP) { throw 'QMP greeting was not received for timeout snapshot.' }
+        $null = Send-Qmp $reader $writer 'qmp_capabilities'
+        $state = Send-Qmp $reader $writer 'query-status'
+        if ($state.status -ne 'running') { throw "Guest was not running at timeout snapshot (state=$($state.status))." }
+        $null = Send-Qmp $reader $writer 'stop'
+        $state = Send-Qmp $reader $writer 'query-status'
+        if ($state.status -ne 'paused') { throw "QMP did not pause guest for timeout snapshot (state=$($state.status))." }
+        if ($QacProcess.HasExited) { throw 'QAC-managed QEMU exited before timeout snapshot.' }
+
+        $reports = [ordered]@{ status = $state.status; captured_while_paused = $true }
+        foreach ($command in @('info registers', 'info irq', 'info timers', 'info cpus')) {
+            try { $reports[$command] = Send-QmpHmp $reader $writer $command }
+            catch { $reports[$command] = "ERROR: $($_.Exception.Message)" }
+        }
+        $diagnosticPath = Join-Path $Directory 'scheduler-diagnostics.bin'
+        $manifestPath = Join-Path $ArtifactDirectory 'candidate-manifest.json'
+        if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $record = $manifest.build.diagnosticRecord
+            if ($record -and $record.address -and $record.bytes) {
+                $normalizedPath = [IO.Path]::GetFullPath($diagnosticPath).Replace('\', '/')
+                $recordSize = [Convert]::ToUInt64($record.bytes)
+                $command = 'pmemsave {0} 0x{1:x} "{2}"' -f $record.address, $recordSize, $normalizedPath
+                $reports['pmemsave'] = Send-QmpHmp $reader $writer $command
+                if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+                    $reports['diagnostic_record_bytes'] = (Get-Item -LiteralPath $diagnosticPath).Length
+                }
+            }
+        }
+        if ($QacProcess.HasExited) { throw 'QAC-managed QEMU exited during timeout snapshot.' }
+        $reports | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Directory 'qmp-timeout-snapshot.json') -Encoding utf8
+        return [ordered]@{ status = 'CAPTURED'; qemu_paused = $true; file = 'qmp-timeout-snapshot.json'; diagnostic_record = 'scheduler-diagnostics.bin' }
+    } catch {
+        $failure = [ordered]@{ status = 'FAILED'; reason = $_.Exception.Message }
+        $failure | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Directory 'qmp-timeout-snapshot.json') -Encoding utf8
+        return $failure
+    } finally {
+        if ($client) { $client.Dispose() }
+    }
+}
+
 $qacArguments = @('run', '--project', $project, '--mode', 'acceptance', '--', $QemuPath) + $guestArguments
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = [IO.Path]::GetFullPath($QacCliPath)
@@ -292,7 +345,7 @@ if (!$running) {
     $qacText = $stdoutTask.GetAwaiter().GetResult() + $stderrTask.GetAwaiter().GetResult()
     $qacText | Set-Content -LiteralPath $qacLogPath -Encoding utf8
     $record = [ordered]@{
-        outcome = 'ARM64_DTB_CAPTURE_PENDING_QAC'
+        outcome = 'ARM64_SCHEDR1_QAC_PENDING'
         project = $project; reservation_id = $reservationId; qemu_launched = $false
         admission_timeout_seconds = $AdmissionTimeoutSeconds
         qac_status_after = (& $QacCliPath status 2>&1 | Out-String).Trim()
@@ -300,15 +353,16 @@ if (!$running) {
         machine = 'virt,gic-version=2,acpi=off'; cpu = 'cortex-a53'; memory = '512M'
     }
     $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding utf8
-    Write-Host "ARM64_DTB_CAPTURE_PENDING_QAC: no exclusive grant in $AdmissionTimeoutSeconds seconds; QEMU was not launched." -ForegroundColor Yellow
+    Write-Host "ARM64_SCHEDR1_QAC_PENDING: no exclusive grant in $AdmissionTimeoutSeconds seconds; QEMU was not launched." -ForegroundColor Yellow
     Write-Host "Session record: $sessionPath"
     exit 2
 }
 
 $record = [ordered]@{
-    outcome = 'BOOTDTB1_GUEST_IN_PROGRESS'; project = $project
+    outcome = 'ARM64_SCHEDR1_GUEST_IN_PROGRESS'; project = $project
     reservation_id = $reservationId; qmp_port = $qmpPort; qemu_launched = $true
     machine = 'virt,gic-version=2,acpi=off'; cpu = 'cortex-a53'; memory = '512M'
+    admission_timeout_seconds = $AdmissionTimeoutSeconds
     qemu = [IO.Path]::GetFullPath($QemuPath); firmware_code = [IO.Path]::GetFullPath($FirmwareCode)
     firmware_vars_template = [IO.Path]::GetFullPath($FirmwareVarsTemplate)
     guest_log = $guestLogPath; qac_log = $qacLogPath; runtime_deadline_seconds = $RuntimeSeconds
@@ -328,6 +382,10 @@ while ([DateTimeOffset]::UtcNow -lt $deadline) {
 $timedOut = [DateTimeOffset]::UtcNow -ge $deadline
 $lastGuest = Read-GuestLog
 $captureResult = [ordered]@{ status = 'NOT_ATTEMPTED'; reason = '' }
+$finalSnapshot = [ordered]@{ status = 'NOT_REQUESTED' }
+if (($timedOut -or $lastGuest.Contains('AARCH64_PHASE4_PASS')) -and $CaptureTimeoutSnapshot -and !$qac.HasExited) {
+    $finalSnapshot = Capture-QmpTimeoutSnapshot $runDirectory $qac
+}
 if ($lastGuest -match 'DTB diagnostic=2') {
     try {
         $captureResult = Capture-GuestDtb $lastGuest $runDirectory $qac
@@ -368,7 +426,7 @@ $record.outcome = if ($lastGuest.Contains('AARCH64_PHASE4_PASS') -and $metric.Su
     [uint64]$metric.Groups[1].Value -gt 0 -and [uint64]$metric.Groups[2].Value -gt 0 -and
     [uint64]$metric.Groups[3].Value -gt 0 -and [uint64]$metric.Groups[4].Value -eq 0 -and
     [uint64]$metric.Groups[5].Value -eq 0) {
-    'ARM64_DTB_GUEST_PROGRESS_PHASE4_PASS'
+    'ARM64_SCHEDR1_PHASE4_PASS'
 } elseif ($lastGuest -match 'DTB diagnostic=2|DTB handoff pointer or length: FAIL|DTB handoff memory-map coverage: FAIL|DTB header: status=[1-9]') {
     if ($captureResult.status -eq 'CAPTURED_AND_VALIDATED') {
         'ARM64_DTB_PROPERTY_LOCALIZED'
@@ -376,9 +434,9 @@ $record.outcome = if ($lastGuest.Contains('AARCH64_PHASE4_PASS') -and $metric.Su
         'ARM64_DTB_CAPTURE_PENDING_QAC'
     }
 } elseif ($timedOut) {
-    'BOOTDTB1_GUEST_RUNTIME_TIMEOUT'
+    'ARM64_SCHEDR1_GUEST_RUNTIME_TIMEOUT'
 } else {
-    'BOOTDTB1_GUEST_STOPPED_BEFORE_PHASE4_PASS'
+    'ARM64_SCHEDR1_GUEST_STOPPED_BEFORE_PASS'
 }
 $record.runtime_timeout = $timedOut
 $record.guest_pass_marker = $lastGuest.Contains('AARCH64_PHASE4_PASS')
@@ -407,6 +465,7 @@ $record.parser_error_name = if ($parserMatch.Success) {
 $record.parser_token_name = if ($parserMatch.Success -and [int]$parserMatch.Groups[2].Value -eq 3) { 'FDT_PROP' } else { '' }
 $record.parser_property_rejection = Get-FirstEvidenceLine $lastGuest 'DTB property rejection:'
 $record.capture = $captureResult
+$record.final_snapshot = $finalSnapshot
 $record.candidate_manifest = Join-Path $ArtifactDirectory 'candidate-manifest.json'
 $record.candidate_manifest_sha256 = if (Test-Path -LiteralPath $record.candidate_manifest) {
     (Get-FileHash -LiteralPath $record.candidate_manifest -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -432,9 +491,9 @@ $record.guest_sha256 = if (Test-Path -LiteralPath $guestLogPath -PathType Leaf) 
     (Get-FileHash -LiteralPath $guestLogPath -Algorithm SHA256).Hash.ToLowerInvariant()
 } else { '' }
 $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding utf8
-Write-Host "BOOTDTB2 guest result: $($record.outcome)" -ForegroundColor $(if ($record.guest_pass_marker) { 'Green' } else { 'Yellow' })
+Write-Host "SCHEDR1 guest result: $($record.outcome)" -ForegroundColor $(if ($record.guest_pass_marker) { 'Green' } else { 'Yellow' })
 Write-Host "Guest log: $guestLogPath"
 Write-Host "QAC log: $qacLogPath"
 Write-Host "Session record: $sessionPath"
-if ($record.outcome -eq 'ARM64_DTB_GUEST_PROGRESS_PHASE4_PASS') { exit 0 }
+if ($record.outcome -eq 'ARM64_SCHEDR1_PHASE4_PASS') { exit 0 }
 exit 1

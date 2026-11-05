@@ -6,6 +6,9 @@
 
 #include "include/kernel/common_scheduler.h"
 #include "include/kernel/scheduler_contract.h"
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+#include "kernel/arch/arm64/phase4_diagnostics.h"
+#endif
 
 namespace kernel {
 namespace scheduler {
@@ -247,6 +250,9 @@ bool prepare_interrupt_contexts()
 
 void start()
 {
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_SCHED_START_ENTER);
+#endif
     Task* next = 0;
     if (s_phase == PHASE_IDLE) {
         next = s_idle_task;
@@ -262,8 +268,17 @@ void start()
     // The destination task must observe the caller's interrupt state.  This
     // is especially important for the first preemptive task: keeping DAIF.I
     // masked until context_switch returns would make the timer unreachable.
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_SCHED_START_PRE_IRQ_RESTORE);
+#endif
     kernel::arch::irq_restore(state);
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_SCHED_START_POST_IRQ_RESTORE);
+#endif
     kernel::arch::context_switch(&s_bootstrap_context, next->context);
+#if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
+    phase4_diag_stage(PHASE4_DIAG_SCHED_START_RETURN);
+#endif
 }
 
 void yield()
