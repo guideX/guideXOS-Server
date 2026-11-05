@@ -297,6 +297,8 @@ void perform_shutdown()
     while (true) {
 #if defined(_MSC_VER)
         __nop();
+#elif defined(ARCH_IA64)
+        asm volatile ("nop 0");
 #else
         asm volatile ("nop");
 #endif
@@ -358,6 +360,8 @@ void perform_restart()
     while (true) {
 #if defined(_MSC_VER)
         __nop();
+#elif defined(ARCH_IA64)
+        asm volatile ("nop 0");
 #else
         asm volatile ("nop");
 #endif
@@ -386,6 +390,9 @@ void perform_sleep()
 #elif defined(ARCH_RISCV64)
     // RISC-V: use WFI (wait for interrupt) instruction
     asm volatile ("wfi");
+#elif defined(ARCH_IA64)
+    // IA-64 platform sleep has not been implemented.
+    kernel::serial::puts("[SLEEP] unsupported on IA-64\n");
 #else
     // Other architectures: halt with interrupts enabled
 #if defined(_MSC_VER)

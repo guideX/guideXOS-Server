@@ -61,7 +61,7 @@ SECTIONS
         *(.eh_frame*)
     } :rodata
 
-    .opd ALIGN(8) (READONLY) :
+    .opd ALIGN(16) (READONLY) :
     {
         *(.opd)
     } :rodata
@@ -86,6 +86,14 @@ SECTIONS
         *(.got.*)
     } :data
 
+    /* Keep zero-initialized GP-relative data beside .sdata. Placing .sbss at
+     * the end of the large kernel BSS can exceed IA-64's short-data range. */
+    .sbss ALIGN(16) (NOLOAD) :
+    {
+        *(.sbss)
+        *(.sbss.*)
+    } :data
+
     /* Initialized and uninitialized writable data */
     .data ALIGN(4K) :
     {
@@ -99,8 +107,6 @@ SECTIONS
         *(.bss)
         *(.bss.*)
         *(COMMON)
-        *(.sbss)
-        *(.sbss.*)
         __bss_end = .;
     } :data
 
@@ -113,3 +119,14 @@ SECTIONS
         *(.note*)
     }
 }
+
+ASSERT(ADDR(.ivt) == ia64_ivt,
+       "IA-64 IVT base symbol must identify the start of .ivt")
+ASSERT((ADDR(.ivt) & 0x7fff) == 0,
+       "IA-64 IVT must be aligned to 0x8000 bytes")
+ASSERT(SIZEOF(.ivt) == 0x8000,
+       "IA-64 IVT output section must be exactly 0x8000 bytes")
+ASSERT((ia64_ivt_end - ia64_ivt) == 0x8000,
+       "IA-64 IVT symbols must span exactly 0x8000 bytes")
+ASSERT(ia64_ivt_end == (ADDR(.ivt) + SIZEOF(.ivt)),
+       "IA-64 IVT end symbol must match the output section boundary")

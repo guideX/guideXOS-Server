@@ -106,32 +106,68 @@ static void barrier()
 
 static uint8_t io_read8(uint16_t base, uint16_t offset)
 {
+#if ARCH_HAS_PORT_IO
     return arch::inb(static_cast<uint16_t>(base + offset));
+#else
+    (void)base;
+    (void)offset;
+    return 0;
+#endif
 }
 
 static uint16_t io_read16(uint16_t base, uint16_t offset)
 {
+#if ARCH_HAS_PORT_IO
     return arch::inw(static_cast<uint16_t>(base + offset));
+#else
+    (void)base;
+    (void)offset;
+    return 0;
+#endif
 }
 
 static uint32_t io_read32(uint16_t base, uint16_t offset)
 {
+#if ARCH_HAS_PORT_IO
     return arch::inl(static_cast<uint16_t>(base + offset));
+#else
+    (void)base;
+    (void)offset;
+    return 0;
+#endif
 }
 
 static void io_write8(uint16_t base, uint16_t offset, uint8_t value)
 {
+#if ARCH_HAS_PORT_IO
     arch::outb(static_cast<uint16_t>(base + offset), value);
+#else
+    (void)base;
+    (void)offset;
+    (void)value;
+#endif
 }
 
 static void io_write16(uint16_t base, uint16_t offset, uint16_t value)
 {
+#if ARCH_HAS_PORT_IO
     arch::outw(static_cast<uint16_t>(base + offset), value);
+#else
+    (void)base;
+    (void)offset;
+    (void)value;
+#endif
 }
 
 static void io_write32(uint16_t base, uint16_t offset, uint32_t value)
 {
+#if ARCH_HAS_PORT_IO
     arch::outl(static_cast<uint16_t>(base + offset), value);
+#else
+    (void)base;
+    (void)offset;
+    (void)value;
+#endif
 }
 
 static void set_last_status(Status status)

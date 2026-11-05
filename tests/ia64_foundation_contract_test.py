@@ -50,7 +50,10 @@ class Ia64FoundationContractTests(unittest.TestCase):
 
     def test_ia64_architecture_flags_and_linker_script_are_target_specific(self) -> None:
         arch_make = read_text(ROOT / "kernel" / "arch" / "ia64" / "Makefile.arch")
-        self.assertIn("ARCH_CFLAGS := -mlittle-endian -mconstant-gp -mfixed-range=f2-f127 -Wa,-xexplicit", arch_make)
+        self.assertIn("IA64_FP_PROFILE ?= runtime", arch_make)
+        self.assertIn("-mfixed-range=f2-f127", arch_make)
+        self.assertIn("-mfixed-range=f2-f5,f16-f31", arch_make)
+        self.assertIn("__ia64_compile_only_profile=1", arch_make)
         self.assertIn("ASFLAGS := -mlp64 -mle -mconstant-gp -xexplicit", arch_make)
         self.assertIn("LINKER_SCRIPT_FLAG := -T", arch_make)
         kernel_make = read_text(ROOT / "kernel" / "Makefile")
@@ -62,11 +65,27 @@ class Ia64FoundationContractTests(unittest.TestCase):
         self.assertIn("text   PT_LOAD FLAGS(5)", linker)
         self.assertIn("rodata PT_LOAD FLAGS(4)", linker)
         self.assertIn("data   PT_LOAD FLAGS(6)", linker)
-        self.assertIn(".opd ALIGN(8) (READONLY)", linker)
+        self.assertIn(".opd ALIGN(16) (READONLY)", linker)
         self.assertIn("} :text", linker)
         self.assertIn("} :rodata", linker)
         self.assertIn("} :data", linker)
         self.assertIn("architectural layout and", linker)
+        self.assertIn("SIZEOF(.ivt) == 0x8000", linker)
+        self.assertIn("ia64_ivt_end - ia64_ivt", linker)
+        self.assertLess(linker.index(".sbss ALIGN"), linker.index(".bss ALIGN"))
+
+    def test_kernel_makefile_filters_assembly_sources_by_extension(self) -> None:
+        makefile = read_text(ROOT / "kernel" / "Makefile")
+        self.assertIn("$(filter %.asm,$(ASM_SOURCES))", makefile)
+        self.assertIn("$(filter %.s,$(ASM_SOURCES))", makefile)
+
+    def test_ia64_linker_uses_target_libgcc_archive(self) -> None:
+        arch_make = read_text(ROOT / "kernel" / "arch" / "ia64" / "Makefile.arch")
+        script = read_text(BUILD_SCRIPT)
+        self.assertIn("IA64_RUNTIME_LIBGCC ?= $(shell $(CXX) -print-libgcc-file-name)", arch_make)
+        self.assertIn("LIBS := $(IA64_RUNTIME_LIBGCC)", arch_make)
+        self.assertIn("IA64_RUNTIME_LIBGCC", script)
+        self.assertIn("[LINKER_BLOCKED] Target libgcc archive is missing", script)
 
     def test_ia64_build_runs_independent_elf_and_object_validation(self) -> None:
         script = read_text(BUILD_SCRIPT)
@@ -85,12 +104,15 @@ class Ia64FoundationContractTests(unittest.TestCase):
             "EM_IA_64 = 50",
             "ET_EXEC = 2",
             "IVT_BYTES = 32 * 1024",
+            "IVT_LONG_SLOT_BYTES = 0x400",
+            "IVT_SHORT_SLOT_BYTES = 0x100",
             "ENTRY_SYMBOL",
             "GLOBAL_POINTER",
             "ALLOC_SECTION_MAPPING",
             "FUNCTION_DESCRIPTORS",
             "IA64_UNWIND_SEGMENT",
             "IVT_VECTOR_LAYOUT",
+            "IA64_BUILD_PROFILE",
             "REMAINING_RELOCATIONS",
             "UNRESOLVED_SYMBOLS",
             "KERNEL_STACK",
@@ -104,11 +126,18 @@ class Ia64FoundationContractTests(unittest.TestCase):
     def test_boot_assembly_uses_gas_definitions_without_cpp_macros(self) -> None:
         boot = read_text(ROOT / "kernel" / "arch" / "ia64" / "boot.s")
         self.assertIn(".equ SSC_CONSOLE_INIT,", boot)
-        self.assertIn(".macro IVT_ENTRY_HALT name", boot)
+        self.assertIn(".macro IVT_ENTRY_HALT name, offset, slot_bytes", boot)
         self.assertIn(".endm", boot)
         self.assertNotRegex(boot, r"(?m)^\s*#\s*define\b")
-        calls = re.findall(r"(?m)^IVT_ENTRY_HALT\s+[A-Za-z_][A-Za-z0-9_]*\s*$", boot)
-        self.assertEqual(len(calls), 68, "the source currently emits 68 vector macro calls")
+        calls = re.findall(
+            r"(?m)^IVT_ENTRY_HALT\s+([A-Za-z_][A-Za-z0-9_]*),\s*"
+            r"(0x[0-9a-fA-F]+),\s*(IVT_(?:LONG|SHORT)_SLOT_BYTES)\s*$", boot)
+        self.assertEqual(len(calls), 68, "the source must emit exactly 68 architectural vector slots")
+        for index, (_, offset, slot_size) in enumerate(calls):
+            self.assertEqual(int(offset, 16), index * 0x400 if index < 20 else 0x5000 + (index - 20) * 0x100)
+            self.assertEqual(slot_size, "IVT_LONG_SLOT_BYTES" if index < 20 else "IVT_SHORT_SLOT_BYTES")
+        self.assertIn("ivt_virtual_external_interrupt", [call[0] for call in calls])
+        self.assertIn("ia64_ivt_end:", boot)
         self.assertRegex(boot, r"cmp\.geu p6, p7 = r14, r15 ;;")
 
     def test_ia64_register_and_break_operands_are_compile_time_values(self) -> None:
@@ -201,6 +230,35 @@ class Ia64FoundationContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("IA64_BUILD_DIR must be empty to protect existing artifacts", result.stderr)
         self.assertNotIn("Required target tool is missing", result.stderr)
+
+    @unittest.skipUnless(find_bash(), "Bash is unavailable; shell runtime checks were not run")
+    def test_unsupported_fp_build_profile_is_rejected(self) -> None:
+        bash = find_bash()
+        env = os.environ.copy()
+        env["IA64_FP_PROFILE"] = "unsafe"
+        env["IA64_TOOLCHAIN_PREFIX"] = "ia64-contract-missing-toolchain"
+        env.pop("IA64_BUILD_DIR", None)
+        with tempfile.TemporaryDirectory() as caller_dir:
+            result = subprocess.run(
+                [bash, BUILD_SCRIPT.as_posix()], cwd=caller_dir, env=env,
+                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("[PROFILE_BLOCKED] Unsupported IA64_FP_PROFILE", result.stderr)
+        self.assertNotIn("[BUILD] Compiling", result.stdout)
+
+    @unittest.skipUnless(find_bash(), "Bash is unavailable; shell runtime checks were not run")
+    def test_compile_only_fp_profile_is_rejected_for_execution(self) -> None:
+        bash = find_bash()
+        env = os.environ.copy()
+        env["IA64_FP_PROFILE"] = "compile-only"
+        env.pop("IA64_BUILD_DIR", None)
+        with tempfile.TemporaryDirectory() as caller_dir:
+            result = subprocess.run(
+                [bash, RUN_SCRIPT.as_posix()], cwd=caller_dir, env=env,
+                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("[RUN_BLOCKED] The compile-only FP profile cannot be used", result.stderr)
+        self.assertNotIn("[BUILD] Compiling", result.stdout)
 
 
 if __name__ == "__main__":

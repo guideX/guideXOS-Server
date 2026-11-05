@@ -11,6 +11,7 @@
 //
 
 #include "include/kernel/msi.h"
+#include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
 
 #if defined(_MSC_VER)
@@ -41,7 +42,7 @@ static const uint8_t VECTOR_BASE = 48;
 // Port I/O Helpers (x86/AMD64)
 // ================================================================
 
-#if !GXOS_MSVC_STUB
+#if !GXOS_MSVC_STUB && ARCH_HAS_PORT_IO
 
 static inline void outl(uint16_t port, uint32_t value)
 {
@@ -81,9 +82,10 @@ static inline uint8_t inb(uint16_t port)
 
 #else
 
-// MSVC stubs
+// Unsupported architectures must not emit x86 port-I/O instructions. The
+// all-ones read value is the PCI "no device" sentinel used by this API.
 static inline void outl(uint16_t port, uint32_t value) { (void)port; (void)value; }
-static inline uint32_t inl(uint16_t port) { (void)port; return 0; }
+static inline uint32_t inl(uint16_t port) { (void)port; return 0xFFFFFFFFu; }
 static inline void outw(uint16_t port, uint16_t value) { (void)port; (void)value; }
 static inline uint16_t inw(uint16_t port) { (void)port; return 0; }
 static inline void outb(uint16_t port, uint8_t value) { (void)port; (void)value; }
@@ -124,6 +126,11 @@ static inline uint32_t pci_addr(uint8_t bus, uint8_t dev, uint8_t func, uint8_t 
 void init()
 {
     if (s_initialized) return;
+
+#if !ARCH_HAS_PORT_IO
+    kernel::serial::puts("[MSI] PCI configuration port I/O is unavailable on this architecture\n");
+    return;
+#endif
     
     kernel::serial::puts("[MSI] Initializing MSI/MSI-X subsystem...\n");
     

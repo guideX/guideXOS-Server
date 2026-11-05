@@ -40,6 +40,7 @@ struct DispatchWorkspaceScope {
 
 void serialIrqHandler()
 {
+#if ARCH_HAS_PORT_IO
     for (uint32_t count = 0; count < kRxCapacity; ++count) {
         if ((arch::inb(kCom2 + 5) & 0x01u) == 0u) break;
         const uint8_t value = arch::inb(kCom2);
@@ -52,6 +53,7 @@ void serialIrqHandler()
         }
     }
     interrupts::eoi(kCom2Irq);
+#endif
 }
 
 bool tryReadByte(uint8_t* output)
@@ -64,6 +66,7 @@ bool tryReadByte(uint8_t* output)
 
 bool writeBytes(const uint8_t* bytes, size_t length)
 {
+#if ARCH_HAS_PORT_IO
     if (!bytes || length > kMaxResponseBytes) return false;
     for (size_t i = 0; i < length; ++i) {
         uint32_t waitCount = 0;
@@ -73,6 +76,11 @@ bool writeBytes(const uint8_t* bytes, size_t length)
         arch::outb(kCom2, bytes[i]);
     }
     return true;
+#else
+    (void)bytes;
+    (void)length;
+    return false;
+#endif
 }
 
 void logRequest(uint16_t type, uint32_t requestId)

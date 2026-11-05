@@ -26,11 +26,11 @@ void ssc(uint64_t func, uint64_t arg0)
     (void)func; (void)arg0;
 #else
     register uint64_t r15 asm("r15") = func;
-    register uint64_t r32 asm("r32") = arg0;
     asm volatile (
+        "mov r32 = %1 ;;\n"
         "break.i 0x80000 ;;\n"
         :
-        : "r"(r15), "r"(r32)
+        : "r"(r15), "r"(arg0)
         : "memory"
     );
 #endif

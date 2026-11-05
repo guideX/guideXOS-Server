@@ -10,6 +10,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 printf '%s\n' '============================================' '  guideXOS Itanium (IA-64) Kernel Build' '============================================'
 printf '\n[INFO] Repository: %s\n' "$REPO_ROOT"
 
+FP_PROFILE="${IA64_FP_PROFILE:-runtime}"
+case "$FP_PROFILE" in
+    runtime|compile-only) ;;
+    *)
+        echo "[PROFILE_BLOCKED] Unsupported IA64_FP_PROFILE '$FP_PROFILE' (expected runtime or compile-only)." >&2
+        exit 2
+        ;;
+esac
+
 # A supplied output directory must be new or empty; never clean or reuse prior
 # artifacts. Relative paths are resolved from the repository root.
 REQUESTED_BUILD_DIR="${IA64_BUILD_DIR:-}"
@@ -99,11 +108,31 @@ else
     exit 2
 fi
 
+RUNTIME_LIBGCC="${IA64_RUNTIME_LIBGCC:-$("$CXX" -print-libgcc-file-name 2>/dev/null || true)}"
+if [[ -n "$RUNTIME_LIBGCC" && ! -f "$RUNTIME_LIBGCC" && -f "$REPO_ROOT/$RUNTIME_LIBGCC" ]]; then
+    RUNTIME_LIBGCC="$REPO_ROOT/$RUNTIME_LIBGCC"
+fi
+if [[ -z "$RUNTIME_LIBGCC" || ! -f "$RUNTIME_LIBGCC" ]]; then
+    echo '[LINKER_BLOCKED] Target libgcc archive is missing or not installed.' >&2
+    echo 'Set IA64_RUNTIME_LIBGCC to a target-compatible libgcc.a built with the selected GP profile.' >&2
+    exit 2
+fi
+
 if [[ -z "$REQUESTED_BUILD_DIR" ]]; then
     BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/guidexos-ia64-1.XXXXXX")"
 else
     mkdir -p "$BUILD_DIR"
 fi
+
+PROFILE_FILE="$BUILD_DIR/kernel-build-profile.txt"
+cat > "$PROFILE_FILE" <<EOF
+IA64_FP_PROFILE=$FP_PROFILE
+RUNTIME_QUALIFIED=no
+SCHEDULER_QUALIFIED=no
+INTERRUPT_FP_PRESERVATION=unimplemented
+BOOT_APPROVED=no
+IA64_RUNTIME_LIBGCC=$RUNTIME_LIBGCC
+EOF
 
 printf '[INFO] Toolchain prefix: %s-\n' "$CROSS"
 printf '[INFO] Compiler target: %s\n' "$TARGET_TRIPLE"
@@ -114,11 +143,19 @@ printf '[INFO] Linker: %s\n' "$("$LD" --version | head -n 1)"
 printf '[INFO] Readelf: %s\n' "$("$READELF" --version | head -n 1)"
 printf '[INFO] Linker emulations:\n%s\n' "$LD_EMULATIONS"
 printf '[INFO] Build directory: %s\n' "$BUILD_DIR"
-printf '[INFO] IA-64 flags: LP64 target ABI, -mlittle-endian -mconstant-gp -mfixed-range=f2-f127 -Wa,-xexplicit; assembler: -mlp64 -mle -mconstant-gp -xexplicit; linker script: -T arch/ia64/linker.ld\n'
+printf '[INFO] IA-64 FP profile: %s\n' "$FP_PROFILE"
+if [[ "$FP_PROFILE" == compile-only ]]; then
+    echo '[QUALIFICATION_BLOCKED] This profile may emit FP instructions in ABI scratch registers f6-f15 and f32-f127.'
+    echo '[QUALIFICATION_BLOCKED] It is not valid for simulator, firmware, hypervisor, or guest execution.'
+else
+    echo '[INFO] Runtime compiler profile reserves floating-point registers f2-f127.'
+fi
+printf '[INFO] IA-64 flags: LP64 target ABI, -mlittle-endian -mconstant-gp (profile-specific fixed FP ranges) -Wa,-xexplicit; assembler: -mlp64 -mle -mconstant-gp -xexplicit; linker script: -T arch/ia64/linker.ld\n'
+printf '[INFO] Build profile record: %s\n' "$PROFILE_FILE"
 
 JOBS="${IA64_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
 echo '[BUILD] Compiling IA-64 kernel with kernel/Makefile...'
-make -C "$REPO_ROOT/kernel" ARCH=ia64 BUILD_DIR="$BUILD_DIR" CXX="$CXX" AS="$AS" LD="$LD" -j"$JOBS"
+make -C "$REPO_ROOT/kernel" ARCH=ia64 IA64_FP_PROFILE="$FP_PROFILE" IA64_RUNTIME_LIBGCC="$RUNTIME_LIBGCC" BUILD_DIR="$BUILD_DIR" CXX="$CXX" AS="$AS" LD="$LD" -j"$JOBS"
 
 KERNEL="$BUILD_DIR/bin/kernel.elf"
 if [[ ! -f "$KERNEL" ]]; then
@@ -139,4 +176,4 @@ printf '[BUILD] Validation report: %s\n' "$VALIDATION"
 printf '\n[INFO] ELF header, sections, segments, relocations, and symbols:\n'
 "$READELF" -hSW -lW -rW "$KERNEL"
 printf '\n[INFO] Independent ELF and target-object validation:\n'
-python3 "$REPO_ROOT/scripts/validate-ia64-elf.py" --elf "$KERNEL" --object-dir "$BUILD_DIR/obj" --repo-root "$REPO_ROOT" 2>&1 | tee "$VALIDATION"
+python3 "$REPO_ROOT/scripts/validate-ia64-elf.py" --elf "$KERNEL" --object-dir "$BUILD_DIR/obj" --repo-root "$REPO_ROOT" --profile "$FP_PROFILE" 2>&1 | tee "$VALIDATION"

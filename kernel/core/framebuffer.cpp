@@ -31,7 +31,9 @@ static PixelFormat g_pixelFormat = PixelFormat::Unknown;
 static bool g_available = false;
 static bool g_doubleBuffered = false;
 static kernel::framebuffer::DiagnosticFramebufferInventorySummary g_diagnosticInventorySummary{};
+#if ARCH_HAS_PIC_8259
 static kernel::framebuffer::DiagnosticFramebufferCandidate g_diagnosticInventoryCandidates[guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS]{};
+#endif
 static uint32_t g_diagnosticInventoryCandidateCount = 0;
 static bool g_hasDiagnosticInventory = false;
 
@@ -51,11 +53,14 @@ static void reset_diagnostic_framebuffer_inventory()
     g_diagnosticInventorySummary = {};
     g_diagnosticInventoryCandidateCount = 0;
     g_hasDiagnosticInventory = false;
+#if ARCH_HAS_PIC_8259
     for (uint32_t i = 0; i < guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS; ++i) {
         g_diagnosticInventoryCandidates[i] = {};
     }
+#endif
 }
 
+#if ARCH_HAS_PIC_8259
 static void cache_diagnostic_framebuffer_inventory(const guideXOS::BootInfo* bootinfo)
 {
     reset_diagnostic_framebuffer_inventory();
@@ -132,6 +137,7 @@ static bool diagnostic_framebuffer_candidate_valid(uint32_t index)
 {
     return g_hasDiagnosticInventory && index < g_diagnosticInventoryCandidateCount;
 }
+#endif
 
 static bool supports_direct_color_bpp()
 {
@@ -578,12 +584,18 @@ uint32_t diagnostic_framebuffer_candidate_count()
 
 bool diagnostic_framebuffer_candidate(uint32_t index, DiagnosticFramebufferCandidate& outCandidate)
 {
+#if ARCH_HAS_PIC_8259
     if (!diagnostic_framebuffer_candidate_valid(index)) {
         return false;
     }
 
     outCandidate = g_diagnosticInventoryCandidates[index];
     return true;
+#else
+    (void)index;
+    (void)outCandidate;
+    return false;
+#endif
 }
 
 void clear(uint32_t color)

@@ -1,10 +1,12 @@
 # IA-64 Support: IA64-1 Architecture Audit and Build Foundation
 
-**Current status (2026-11-05): IA64-1 remains open and incomplete (Outcome B).** GCC 13.5.0 now provides an authentic IA-64 C/C++ cross-compiler, and bounded target C++, assembly, linker, and ELF probes have run. The full kernel build reaches the pinned Mbed TLS sources, then GCC ICEs compiling `x509.c` because the current kernel flags reserve every floating-point register. Releasing FP registers makes the compiler emit `xmpy.hu` floating-point instructions, while IA-64 context-switch/FPU preservation is still unimplemented; the reservation is therefore retained and the full build remains blocked. The linked C++ probe independently confirms an unresolved IVT layout/count defect. No full-kernel ELF, execution, or boot claim is made.
+**Current status (2026-11-05): Outcome A for the IA64-1R2 compile/ELF milestone.** The IVT now has the architectural 68-slot layout, and the complete kernel plus pinned Mbed TLS profile builds into a full IA-64 ELF under an explicitly marked **compile-only** FP profile. Independent ELF validation passes. The default runtime profile still reproduces GCC 13.5.0 reload ICEs, and the compile-only ELF is prohibited from execution. This closes IA64-1's documented IVT and full-ELF build acceptance; it does not claim bootability, runtime safety, working interrupt handlers, or a functional scheduler. Those require a separate runtime qualification phase.
 
 Prior audit date: 2026-11-04. Repository: `D:\dev\guideXOSServer_IA64`.
 
-## IA64-1R1 continuation (2026-11-05)
+## IA64-1R1 continuation (2026-11-05, historical snapshot)
+
+This section records the state before IA64-1R2. Its build blocker, IVT defect, and open acceptance list were superseded by the IA64-1R2 results below.
 
 ### Provisioning and provenance
 
@@ -47,9 +49,49 @@ Prior audit date: 2026-11-04. Repository: `D:\dev\guideXOSServer_IA64`.
 4. Implement scheduler/context-switch RSE and function-pointer/GP state, and qualify interrupts and timer delivery before enabling scheduling.
 5. Keep the Hypervisor vCPU and console contract separate from Ski and firmware. No IA64-1 close or boot claim is justified by the current probes.
 
-The sections below preserve the 2026-11-04 audit snapshot. Use the 2026-11-05 continuation above for current toolchain and build status.
+## IA64-1R2 continuation (2026-11-05)
 
-## Repository baseline
+### Outcome and baseline
+
+- **Outcome A:** the architectural IVT is corrected and independently verified; a complete kernel ELF was built and independently validated; the compiler policy has a dedicated compile-only qualification; no runtime claim is made.
+- The starting branch was `IA64_SUPPORT` at `fc7e736f94777f33da5357cde19e4f13026b71a2`. The starting foundation suite passed all 13 tests; there were no baseline test failures. Existing build outputs and untracked Python caches were preserved. No reset, `git clean`, push, QEMU, or guest execution was performed.
+- IA64-1 closes for its IVT and compile/ELF acceptance. Boot and runtime qualification remain open work for the next phase.
+
+### IVT correction
+
+- `kernel/arch/ia64/boot.s` now emits exactly 68 fail-stop slots at explicit offsets: 20 slots of `0x400` bytes from `0x0000` through `0x4c00`, followed by 48 slots of `0x100` bytes from `0x5000` through `0x7f00`. Reserved entries remain at their specified slots. Offsets follow Intel Table 5-7 and the historical [Linux IA-64 IVT](https://git.zx2c4.com/linux-rng/tree/arch/ia64/kernel/ivt.S?id=a9903f04e0a4ea522d959c2f287cdf0ab029e324). The `.ivt` extent is exactly `0x8000` bytes and is aligned to `0x8000`.
+- Each slot has a handler start and end symbol, and the assembler checks that the handler stays inside its slot. The linker asserts IVT base, alignment, section size, and end-symbol bounds. Placeholders disable interrupts and halt; they are not interrupt handling.
+- The independent validator compares all slot names and addresses with Intel Table 5-7 and checks each linked handler's section and bounds. Three malformed-IVT negative cases (`bad-size`, `bad-handler-boundary`, and `bad-source-offset`) are rejected.
+
+### GCC 13.5.0 reload ICE and FP policy
+
+- With the default `IA64_FP_PROFILE=runtime`, `-mfixed-range=f2-f127` reserves all allocatable FP registers. The complete build fails in pinned Mbed TLS at both `tf-psa-crypto/platform/memory_buffer_alloc.c:214` (`{muldi3}`) and `library/x509.c:596` (`{umuldi3_highpart}` for `year % 400`), during GCC RTL `reload` with `internal compiler error: in find_reloads, at reload.cc:3844`. `-mno-inline-int-divide` does not fix the modulo expansion; bounded attempts also reproduced it at `-O0`. The runtime build log is `/home/guidex/src/ia64-1R2-evidence/runtime-build.log`.
+- The standalone reproducer is `tests/ia64_x509_modulo_repro.c`. The compiler-option harness records 21 candidate/source combinations: 13 compile and 8 intentionally reproduce allocation failures. Runtime-reserved variants fail for the reproducer, `x509.c`, and bignum; adding `-mno-inline-int-divide` leaves those results unchanged. Freeing only `f6-f7` compiles the reproducer and `x509.c` but bignum still fails with an `FR_REGS` allocation error. The report is `/home/guidex/src/ia64-1R2-fp-regression-final-20261105/report.md`.
+- The working compile-only policy is `-mfixed-range=f2-f5,f16-f31`: this keeps ABI callee-preserved FP registers fixed and makes caller-saved scratch ranges available. GCC generates `setf.sig`, `xmpy.hu`, and `getf.sig` using `f6`/`f7` for the standalone integer high multiply without an external helper. `x509.c` also compiles; the bignum probe compiles using `f6-f9` and retains its normal Mbed TLS/memory dependencies. The broad unrestricted candidate is recorded only as a comparison.
+- Procedure-call preservation does not cover asynchronous interrupts, exceptions, or preemptive context switches. The kernel still lacks FP ownership and save/restore, including required status and high-register handling; voluntary switching is also incomplete. The compile-only ELF records `RUNTIME_QUALIFIED=no`, `SCHEDULER_QUALIFIED=no`, and `INTERRUPT_FP_PRESERVATION=unimplemented`. The runner rejects compile-only images and any build without an explicit runtime qualification record. Do not execute this ELF.
+
+### Full build and ELF validation
+
+- A fresh output directory was used: `/home/guidex/src/ia64-1R2-compile-only-verified-20261105`. The full build compiled all 160 target objects, including 95 core C++ objects and all pinned Mbed TLS/TF-PSA-Crypto components. The independent Mbed TLS profile verifier passed for Mbed TLS 4.1.0, TF-PSA-Crypto 1.1.0, and all three tracked patches.
+- GCC 13.5.0 was configured without target headers and did not install `libgcc.a`. The matching archive was built from the GCC 13.5.0 target sources with `CFLAGS_FOR_TARGET="-O2 -mconstant-gp -mlittle-endian"`, then passed explicitly through `IA64_RUNTIME_LIBGCC=/home/guidex/src/gcc-13.5.0-build/ia64-linux-gnu/libgcc/libgcc.a`. The previously installed GCC 13.2 archive failed to link because its objects were not built for the constant-GP model. Future builds should provide a target-compatible libgcc built for the selected GP profile when the compiler does not install one.
+- ELF SHA-256: `1283b0b93cbd1c273cd106c727f98b28bd9406a669fd9f841b994e88e98e87e1`.
+- Independent validation reports `ET_EXEC`, ELF64 little-endian `EM_IA_64=50`, `_start=0x108000`, `__gp=0x672000`, and three non-overlapping-permission load segments: RX at `0x100000`, R at `0x3ce000`, and RW at `0x472000`. W^X separation, allocated-section mapping, and the read-only IA-64 unwind segment pass.
+- The IVT is at `0x100000`, size/alignment `0x8000`, with all 68 exact offsets and bounded handler symbols. The read-only `.opd` contains 132 valid 16-byte function descriptors with GP matching `0x672000`. Stack is `0x4c5fe00..0x4c6fe00` (64 KiB); RSE backing store is `0x4c6fe00..0x4c7fe00` (64 KiB), distinct from the stack. There are no remaining relocations or unresolved symbols; all 160 objects are ELF64 little-endian `EM_IA_64`. Full report: `/home/guidex/src/ia64-1R2-compile-only-verified-20261105/ia64-elf-validation.txt`.
+
+### Source/build repairs and verification
+
+- Fixed the kernel object list so `.s` files are handled by the assembly-object rule rather than passed through the `.asm` substitution.
+- Moved `.sbss` next to `.sdata` to keep IA-64 short-data references in range; aligned `.opd` to 16 bytes so descriptors are read and validated from the actual table boundary.
+- Repaired narrow IA-64 cross-build incompatibilities without omitting subsystems: Ski's stacked-register argument setup, unsupported IA-64 sleep/nop paths, architecture-specific framebuffer and PS/2 calls, and guarded port-I/O/MSI/RNG bridge code. Unsupported operations return or remain disabled on IA-64.
+- Verification results: starting foundation suite 13/13 pass; updated foundation suite 17/17 pass; malformed-IVT negative suite 3/3 pass; FP codegen harness pass (13 expected compiles, 8 reproduced failures); build-wrapper suite pass; Mbed TLS dependency verification pass; Bash syntax checks for the build, runner, and FP harness pass; `git diff --check` pass. No QEMU, simulator, or guest was started.
+
+### Remaining runtime blockers and next phase
+
+The IVT entries are safe fail-stop placeholders, not operational exception or interrupt handlers. The Ski entry/console is not an IA-64 UEFI loader or guideXOS Hypervisor interface. The repository still has no validated BootInfo handoff, firmware console, exception-state capture, interrupt delivery, timer path, scheduler context switch, RSE/GP switching, or FP save/restore policy. Runtime-profile GCC ICEs also remain. The next phase should implement and qualify one explicit IA-64 execution profile, including boot handoff, exception/interrupt entry, FP state ownership and preservation, scheduler/RSE context switching, and timer delivery, before enabling execution or scheduling.
+
+The IA64-1R1 section above and the sections below preserve earlier audit snapshots. Use this IA64-1R2 continuation for the current IVT, compile, and ELF results.
+
+## Repository baseline (2026-11-04 audit snapshot, historical)
 
 - Starting branch: `IA64_SUPPORT`; starting HEAD: `d3cd0f12b07e6028f5c41d4fa874586872415a77`.
 - `origin` is `git@github.com:guideX/guideXOS-Server.git`; the branch tracked `origin/IA64_SUPPORT` at the same commit, with no ahead/behind markers. The starting worktree was clean.
@@ -221,6 +263,7 @@ No IA-64-specific automated tests existed before this change. The broad `scripts
 ## References
 
 - [Intel Itanium Architecture Software Developer's Manual, Volume 2](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/itanium-architecture-software-developer-rev-2-3-vol-2-manual.pdf), §5.7 and Table 5-7 (IVT), plus Register Stack Engine sections.
+- [Historical Linux IA-64 IVT implementation](https://git.zx2c4.com/linux-rng/tree/arch/ia64/kernel/ivt.S?id=a9903f04e0a4ea522d959c2f287cdf0ab029e324).
 - [Intel Itanium Processor-specific ABI](https://openwatcom.org/ftp/devel/docs/ia64abi.pdf), function descriptors and GP conventions.
 - [GCC IA-64 target options](https://gcc.gnu.org/onlinedocs/gcc/IA-64-Options.html).
 - [GNU Binutils IA-64 assembler options](https://sourceware.org/binutils/docs/as/IA_002d64-Options.html).

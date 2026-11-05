@@ -28,6 +28,29 @@ SHF_ALLOC = 2
 SHF_EXECINSTR = 4
 STACK_BYTES = 64 * 1024
 IVT_BYTES = 32 * 1024
+IVT_LONG_SLOT_BYTES = 0x400
+IVT_SHORT_SLOT_BYTES = 0x100
+IVT_VECTOR_NAMES = (
+    "ivt_vhpt_translation", "ivt_itlb_miss", "ivt_dtlb_miss", "ivt_alt_itlb",
+    "ivt_alt_dtlb", "ivt_nested_dtlb", "ivt_ikey_miss", "ivt_dkey_miss",
+    "ivt_dirty_bit", "ivt_iaccess_bit", "ivt_daccess_bit", "ivt_break",
+    "ivt_external_interrupt", "ivt_virtual_external_interrupt",
+    "ivt_reserved_0e", "ivt_reserved_0f", "ivt_reserved_10", "ivt_reserved_11",
+    "ivt_reserved_12", "ivt_reserved_13", "ivt_page_not_present",
+    "ivt_key_permission", "ivt_ia_rights", "ivt_da_rights",
+    "ivt_general_exception", "ivt_disabled_fp", "ivt_nat_consumption",
+    "ivt_speculation", "ivt_reserved_1c", "ivt_debug", "ivt_unaligned_ref",
+    "ivt_unsupported_data_ref", "ivt_fp_fault", "ivt_fp_trap", "ivt_lp_transfer",
+    "ivt_taken_branch", "ivt_single_step", "ivt_virtualization",
+    "ivt_reserved_26", "ivt_reserved_27", "ivt_reserved_28", "ivt_reserved_29",
+    "ivt_reserved_2a", "ivt_reserved_2b", "ivt_reserved_2c", "ivt_ia32_exception",
+    "ivt_ia32_intercept", "ivt_ia32_interrupt", "ivt_reserved_30", "ivt_reserved_31",
+    "ivt_reserved_32", "ivt_reserved_33", "ivt_reserved_34", "ivt_reserved_35",
+    "ivt_reserved_36", "ivt_reserved_37", "ivt_reserved_38", "ivt_reserved_39",
+    "ivt_reserved_3a", "ivt_reserved_3b", "ivt_reserved_3c", "ivt_reserved_3d",
+    "ivt_reserved_3e", "ivt_reserved_3f", "ivt_reserved_40", "ivt_reserved_41",
+    "ivt_reserved_42", "ivt_reserved_43",
+)
 
 
 class InvalidElf(ValueError):
@@ -77,6 +100,7 @@ class Elf64:
             values = struct.unpack("<IIQQQQIIQQ", self._slice(off, 64, "section header"))
             raw.append(dict(zip(("nameoff", "type", "flags", "addr", "offset", "size",
                                  "link", "info", "align", "entsize"), values)))
+            raw[-1]["index"] = index
         if not raw:
             raise InvalidElf(f"{self.path}: no section headers")
         if self.shstrndx >= len(raw):
@@ -127,7 +151,8 @@ class Elf64:
         return next((section for section in self.sections if section["name"] == name), None)
 
 
-def check_kernel(path: Path, object_dir: Path | None, repo_root: Path) -> list[str]:
+def check_kernel(path: Path, object_dir: Path | None, repo_root: Path,
+                 profile: str = "runtime") -> list[str]:
     elf = Elf64(path)
     errors: list[str] = []
     print(f"IA64_ELF_SHA256={hashlib.sha256(elf.data).hexdigest()}  {path}")
@@ -215,45 +240,103 @@ def check_kernel(path: Path, object_dir: Path | None, repo_root: Path) -> list[s
     require(ivt_ok, "IVT_LAYOUT", ivt_detail)
 
     boot_source = repo_root / "kernel" / "arch" / "ia64" / "boot.s"
-    vector_labels: list[str] = []
+    source_slots: list[tuple[str, int, str]] = []
     try:
         in_ivt = False
-        for line in boot_source.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in boot_source.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith('.section .ivt'):
                 in_ivt = True
             elif line.strip().startswith('.section .boot'):
                 in_ivt = False
             elif in_ivt:
-                macro = re.match(r"\s*IVT_ENTRY_HALT\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", line)
+                macro = re.match(
+                    r"\s*IVT_ENTRY_HALT\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*"
+                    r"(0x[0-9a-fA-F]+)\s*,\s*(IVT_(?:LONG|SHORT)_SLOT_BYTES)\s*$",
+                    line,
+                )
                 if macro:
-                    vector_labels.append(macro.group(1))
-                elif re.match(r"\s*ivt_external_interrupt:\s*$", line):
-                    vector_labels.append("ivt_external_interrupt")
+                    source_slots.append((macro.group(1), int(macro.group(2), 16), macro.group(3)))
     except OSError as exc:
         errors.append(f"IVT_VECTOR_LAYOUT: cannot read {boot_source}: {exc}")
         print(f"IVT_VECTOR_LAYOUT=FAIL cannot read {boot_source}")
     else:
-        expected_vectors = 68
         vector_errors = []
-        if len(vector_labels) != expected_vectors:
-            vector_errors.append(f"source vector count={len(vector_labels)} expected={expected_vectors}")
+        if len(IVT_VECTOR_NAMES) != 68:
+            vector_errors.append(f"validator vector map count={len(IVT_VECTOR_NAMES)} expected=68")
+        if len(source_slots) != 68:
+            vector_errors.append(f"source slot count={len(source_slots)} expected=68")
+        equ_values = {}
+        source_text = boot_source.read_text(encoding="utf-8")
+        for name, value in re.findall(
+                r"(?m)^\.equ\s+(IVT_(?:BYTES|LONG_SLOT_BYTES|SHORT_SLOT_BYTES))\s*,\s*(0x[0-9a-fA-F]+)\s*$",
+                source_text):
+            equ_values[name] = int(value, 16)
+        if equ_values.get("IVT_BYTES") != IVT_BYTES:
+            vector_errors.append(f"source IVT_BYTES={equ_values.get('IVT_BYTES')} expected=0x{IVT_BYTES:x}")
+        if equ_values.get("IVT_LONG_SLOT_BYTES") != IVT_LONG_SLOT_BYTES:
+            vector_errors.append("source long-slot size is not 0x400")
+        if equ_values.get("IVT_SHORT_SLOT_BYTES") != IVT_SHORT_SLOT_BYTES:
+            vector_errors.append("source short-slot size is not 0x100")
+
         base = elf.symbols.get("ia64_ivt")
+        end = elf.symbols.get("ia64_ivt_end")
+        ivt_index = ivt["index"] if ivt is not None else -1
         if base is None:
             vector_errors.append("missing ia64_ivt base symbol")
-        for index, name in enumerate(vector_labels[:expected_vectors]):
+        elif (ivt is None or base["value"] != ivt["addr"] or base["shndx"] != ivt_index or
+              base["size"] != IVT_BYTES):
+            vector_errors.append("ia64_ivt symbol does not span the .ivt section")
+        if end is None:
+            vector_errors.append("missing ia64_ivt_end symbol")
+        elif (base is None or end["value"] != base["value"] + IVT_BYTES or
+              end["shndx"] != ivt_index):
+            vector_errors.append("ia64_ivt_end is not exactly 0x8000 after the IVT base")
+
+        for index, name in enumerate(IVT_VECTOR_NAMES):
+            expected_offset = index * IVT_LONG_SLOT_BYTES if index < 20 else (
+                0x5000 + (index - 20) * IVT_SHORT_SLOT_BYTES)
+            expected_slot_name = "IVT_LONG_SLOT_BYTES" if index < 20 else "IVT_SHORT_SLOT_BYTES"
+            expected_slot_size = IVT_LONG_SLOT_BYTES if index < 20 else IVT_SHORT_SLOT_BYTES
+            if index < len(source_slots):
+                source_name, source_offset, source_slot_name = source_slots[index]
+                if source_name != name or source_offset != expected_offset or source_slot_name != expected_slot_name:
+                    vector_errors.append(
+                        f"source slot {index}: {source_name}@0x{source_offset:x}/{source_slot_name}; "
+                        f"expected {name}@0x{expected_offset:x}/{expected_slot_name}")
             symbol = elf.symbols.get(name)
             if symbol is None:
                 vector_errors.append(f"missing vector symbol {name}")
                 continue
-            expected_offset = index * 0x400 if index < 20 else 0x5000 + (index - 20) * 0x100
             actual_offset = symbol["value"] - base["value"] if base is not None else -1
             if actual_offset != expected_offset:
                 vector_errors.append(f"{name}: offset=0x{actual_offset:x} expected=0x{expected_offset:x}")
+            end_symbol = elf.symbols.get(f"{name}_end")
+            if end_symbol is None:
+                vector_errors.append(f"missing handler boundary {name}_end")
+            else:
+                actual_end = symbol["value"] + symbol["size"]
+                slot_end = (base["value"] + expected_offset + expected_slot_size
+                            if base is not None else -1)
+                if (symbol["size"] <= 0 or end_symbol["value"] != actual_end or
+                        actual_end > slot_end or symbol["shndx"] != ivt_index or
+                        end_symbol["shndx"] != ivt_index):
+                    vector_errors.append(
+                        f"{name}: symbol range 0x{symbol['value']:x}..0x{actual_end:x} "
+                        f"does not fit its 0x{expected_slot_size:x}-byte slot")
         vector_detail = "; ".join(vector_errors[:8])
         if len(vector_errors) > 8:
             vector_detail += f"; ... {len(vector_errors) - 8} more"
         require(not vector_errors, "IVT_VECTOR_LAYOUT",
-                vector_detail if vector_errors else "all vector labels match the architectural offset map")
+                vector_detail if vector_errors else
+                "68 source slots, exact architectural offsets, and bounded handler symbols")
+
+    profile_symbol = elf.symbols.get("__ia64_compile_only_profile")
+    profile_value = 1 if profile == "compile-only" else 0
+    profile_ok = (profile in ("runtime", "compile-only") and profile_symbol is not None and
+                  profile_symbol["value"] == profile_value)
+    profile_detail = (f"profile={profile}; marker={profile_symbol['value']}"
+                      if profile_symbol is not None else f"profile={profile}; marker missing")
+    require(profile_ok, "IA64_BUILD_PROFILE", profile_detail)
 
     opd = elf.section(".opd")
     gp_symbol = elf.symbols.get("__gp")
@@ -271,7 +354,7 @@ def check_kernel(path: Path, object_dir: Path | None, repo_root: Path) -> list[s
             if gp_symbol is None or descriptor_gp != gp_symbol["value"]:
                 descriptor_errors.append(f"descriptor {descriptor_count} GP=0x{descriptor_gp:x} does not match __gp")
     opd_ok = (opd is not None and descriptor_count > 0 and opd["size"] % 16 == 0 and
-              opd["addr"] % 8 == 0 and opd["align"] >= 8 and
+              opd["addr"] % 16 == 0 and opd["align"] >= 16 and
               bool(opd["flags"] & SHF_ALLOC) and not bool(opd["flags"] & SHF_WRITE) and
               not descriptor_errors)
     descriptor_detail = (f"count={descriptor_count}; GP={('0x%x' % gp_symbol['value']) if gp_symbol else 'missing'}; "
@@ -339,9 +422,10 @@ def main() -> int:
     parser.add_argument("--elf", required=True, type=Path)
     parser.add_argument("--object-dir", type=Path)
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--profile", choices=("runtime", "compile-only"), default="runtime")
     args = parser.parse_args()
     try:
-        errors = check_kernel(args.elf, args.object_dir, args.repo_root)
+        errors = check_kernel(args.elf, args.object_dir, args.repo_root, args.profile)
     except (OSError, InvalidElf, struct.error) as exc:
         print(f"IA64_ELF_VALIDATION=FAIL error={exc}", file=sys.stderr)
         return 1

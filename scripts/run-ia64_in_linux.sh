@@ -16,6 +16,20 @@ if [[ "${1:-}" == '--build-only' ]]; then
     BUILD_ONLY=1
 fi
 
+FP_PROFILE="${IA64_FP_PROFILE:-runtime}"
+case "$FP_PROFILE" in
+    runtime|compile-only) ;;
+    *)
+        echo "[RUN_BLOCKED] Unsupported IA64_FP_PROFILE '$FP_PROFILE'." >&2
+        exit 2
+        ;;
+esac
+if [[ "$FP_PROFILE" == compile-only && "$BUILD_ONLY" -eq 0 ]]; then
+    echo '[RUN_BLOCKED] The compile-only FP profile cannot be used for simulator or guest execution.' >&2
+    echo '[RUN_BLOCKED] Use build-ia64.sh directly to produce compile-only ELF evidence.' >&2
+    exit 2
+fi
+
 # Pick one isolated output directory and pass it through to the build script.
 if [[ -z "${IA64_BUILD_DIR:-}" ]]; then
     IA64_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/guidexos-ia64-1.XXXXXX")"
@@ -30,6 +44,13 @@ KERNEL="$IA64_BUILD_DIR/bin/kernel.elf"
 if (( BUILD_ONLY )); then
     echo '[INFO] Build-only mode; skipping simulator launch.'
     exit 0
+fi
+
+PROFILE_FILE="$IA64_BUILD_DIR/kernel-build-profile.txt"
+if [[ ! -f "$PROFILE_FILE" ]] || ! grep -q '^RUNTIME_QUALIFIED=yes$' "$PROFILE_FILE"; then
+    echo '[RUN_BLOCKED] This IA-64 build has no runtime qualification record.' >&2
+    echo "[RUN_BLOCKED] Profile record: $PROFILE_FILE" >&2
+    exit 2
 fi
 
 if command -v ski >/dev/null 2>&1; then

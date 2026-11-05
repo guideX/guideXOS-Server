@@ -341,7 +341,11 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_lastPs2X = s_mouse.x;
     s_lastPs2Y = s_mouse.y;
     s_mouseEventSequence = 0;
+#if ARCH_HAS_PS2
     s_lastMappedPacketSequence = ps2mouse::get_packet_sequence();
+#else
+    s_lastMappedPacketSequence = 0;
+#endif
     s_mappingDiagnosticCount = 0;
     
 #if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
