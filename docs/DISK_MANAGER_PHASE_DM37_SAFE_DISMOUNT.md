@@ -1,18 +1,19 @@
 # DM37 — Safe Volume Dismount Foundation
 
-**Latest formal review (C21): proposed Outcome A —
-`DM37_ACCEPTANCE_RECOMMENDED`, with owner sign-off pending for the documented
-qualification limits.** The original production safety invariants have
-production-linked host evidence, and Gates A, D, E, and F have real guest
-workflows. C21 records where later continuations asked for narrower guest
-evidence that the original phase report did not make an explicit acceptance
-criterion. This recommendation does not approve those limits on the owner's
-behalf or advance `.phase`; it remains `last_completed=DM36`,
-`next_expected=DM37`. See the C21 formal review at the end of this document.
+**Owner acceptance and phase closeout (2026-11-05): DM37 accepted** based on
+the C21 formal review, including its documented qualification limits for
+Gates B, C, G, H, and I and Gate A's historical QEMU ownership and shutdown
+limitation. These remain evidence constraints, not successful guest tests.
+The accepted scope is the verified production VFS and Disk Manager behavior,
+hosted safety regressions, and completed disposable USB BOT guest scenarios.
+This acceptance does not establish physical-device or NVMe write/Flush
+qualification. `.phase` now records `last_completed=DM37`,
+`next_expected=DM38`; this sign-off does not authorize DM38 implementation.
+See the owner decision and closeout at the end of this document.
 
 Continuation 16's `DM37_BUSY_REFERENCE_GUEST_UNAVAILABLE` result remains a
-historical checkpoint, superseded as the latest status by C21. Its source and
-evidence record is retained below.
+historical checkpoint, superseded by the C21 review and this owner closeout.
+Its source and evidence record is retained below.
 
 ## Scope and repository gate
 
@@ -2140,8 +2141,39 @@ The final source artifacts retained under `E:/CodexArtifacts/guideXOSServer_Disk
 
 ### Formal decision and remaining work
 
-**Proposed formal result: `DM37_ACCEPTANCE_RECOMMENDED` (Outcome A), subject to explicit owner sign-off of the qualification limits; acceptance has not yet been approved.** No required original production safety invariant or media/ownership claim is contradicted by the evidence. B/C/G/H lack some guest-specific evidence, but those exact guest scenarios were not enumerated as mandatory transitions in the original phase contract. C18 and C20 later described additional guest/integration evidence as remaining work; C21 exposes those additions and asks the owner to accept or retain them. `ACCEPTED_WITH_QUALIFICATION_LIMIT` in the matrix is the proposed engineering disposition, not an approved contract edit or a claim that the missing guest action passed.
+**C21 review disposition as of 2026-11-04: `DM37_ACCEPTANCE_RECOMMENDED` (Outcome A), pending owner sign-off.** No required original production safety invariant or media/ownership claim is contradicted by the evidence. B/C/G/H lack some guest-specific evidence, but those exact guest scenarios were not enumerated as mandatory transitions in the original phase contract. C18 and C20 later described additional guest/integration evidence as remaining work; C21 exposed those additions for owner decision. `ACCEPTED_WITH_QUALIFICATION_LIMIT` in the matrix was the proposed engineering disposition at review time, not a claim that the missing guest action passed. The owner decision is recorded in the subsequent closeout section.
 
-Owner sign-off should explicitly cover: (1) B host proof with no supported persistent-handle guest workflow; (2) C host final-admission proof plus safe guest root inventory, with no root Dismount attempt; (3) G host-verified rollback with no isolated guest final-Flush injection; (4) H host-verified input/settlement with no controlled guest race or app-class blocked-I/O callback, and the single `kernel_compositor.cpp` source-to-guest delta; and (5) C5 direct owned-QEMU lifecycle as the documented alternative to a QAC reservation. If any of those are rejected, use the narrow follow-ups in the corresponding matrix/risk row. Do not create a new app solely for B, do not attempt root Dismount for C, do not repeat C19's failed matrix, and do not claim physical write rollback for G.
+The requested owner decision covered: (1) B host proof with no supported persistent-handle guest workflow; (2) C host final-admission proof plus safe guest root inventory, with no root Dismount attempt; (3) G host-verified rollback with no isolated guest final-Flush injection; (4) H host-verified input/settlement with no controlled guest race or app-class blocked-I/O callback, and the single `kernel_compositor.cpp` source-to-guest delta; and (5) C5 direct owned-QEMU lifecycle as the documented alternative to a QAC reservation. The narrow follow-ups in the corresponding matrix/risk row remain available if future qualification revisits a limit. Do not create a new app solely for B, do not attempt root Dismount for C, do not repeat C19's failed matrix, and do not claim physical write rollback for G.
 
-The smallest path to closure is owner review of this concrete evidence package and a separately authorized phase-closeout decision. Until then `.phase` remains `last_completed=DM36`, `next_expected=DM37`; DM38 has not started. A source-matched, read-only H smoke or a targeted QEMU final-Flush capability can be scheduled only if the owner retains those later-added evidence requirements. C21 makes no `.phase` change and grants no permission to begin DM38.
+At the end of C21, the smallest path to closure was owner review of this evidence package and a separately authorized phase-closeout decision. At that review point `.phase` remained `last_completed=DM36`, `next_expected=DM37`; C21 made no marker change and authorized no DM38 work. The owner decision and resulting phase-marker update are recorded below.
+
+## DM37 Owner Acceptance and Phase Closeout
+
+**Owner decision: ACCEPTED (2026-11-05), based on the C21 formal acceptance
+review.** The owner approves DM37 — Safe Dismount for phase closeout and
+accepts the review's documented qualification limits for Gates B, C, G, H,
+and I, including Gate A's historical QEMU ownership and shutdown limitation.
+Those limits describe evidence that was not collected; they are not successful
+guest tests and do not change the evidence classifications in the C21 matrix.
+Specifically, the accepted Gate A run used a directly owner-tracked QEMU
+process without a QAC reservation and ended through QMP `quit`; it does not
+claim a normal guest Shell shutdown or QAC-managed ownership for that run.
+
+The accepted scope is the verified production VFS and Disk Manager behavior,
+hosted safety regressions, and completed guest scenarios on disposable USB BOT
+fixtures. The phase evidence does not establish physical-device or NVMe
+write/Flush qualification. Existing source/runtime manifests, test results,
+logs, screenshots, QAC/QMP records, and media verification artifacts remain
+the evidence record; this closeout adds no new test or guest claim.
+
+The phase marker is advanced to:
+
+```ini
+project=guideXOS_SERVER_DISK_MANAGER_IMPROVEMENTS
+last_completed=DM37
+next_expected=DM38
+```
+
+This is a documentation and phase-marker closeout only. DM38 implementation is
+not authorized by this sign-off. Future qualification may revisit any accepted
+evidence constraint without rewriting the historical result.
