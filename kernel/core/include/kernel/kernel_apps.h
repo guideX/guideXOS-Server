@@ -1194,11 +1194,13 @@ public:
     virtual void onMouseDown(int x, int y, uint8_t button) override;
     virtual void onMouseWheel(int x, int y, int wheelDelta) override;
     virtual void onKeyDown(uint32_t key) override;
+    virtual void onKeyDown(uint32_t key, bool repeated) override;
     virtual bool hasModalDialog() const override {
         return m_mountDialogOpen ||
             m_initializeDialogState != INITIALIZE_DIALOG_CLOSED;
     }
     virtual void onKeyChar(char c) override;
+    virtual void onKeyChar(char c, bool repeated) override;
     virtual void onWidgetClick(int widgetId) override;
 
     static app::KernelApp* create() { return new DiskManagerApp(); }
@@ -1373,6 +1375,8 @@ private:
     bool m_dialogIsFat32Integrity;
     bool m_dialogIsDismount;
     bool m_closeAfterVerification;
+    bool m_dismountOperationActive;
+    bool m_closeAfterDismount;
     disk_manager_wipe_ui::WipeActionEligibility m_wipeEligibility;
     disk_manager_wipe_ui::WipeActionBlockReason m_wipeBlockReason;
     disk_manager_whole_disk_erase_ui::WholeDiskEraseUiBlockReason
@@ -1517,6 +1521,7 @@ private:
                                          bool verifyPartitionTable = false,
                                          vfs::Status* failureStatus = nullptr);
     void        runDismountOperation();
+    void        finishDismountCloseRequest();
     void        drawDismountPanel(uint32_t x, uint32_t y,
                                   uint32_t w, uint32_t h);
     void        beginMountDialog();

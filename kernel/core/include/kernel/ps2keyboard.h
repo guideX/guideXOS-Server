@@ -43,11 +43,24 @@ struct KeyEvent {
     uint32_t key;
     KeyAction action;
     uint32_t diagnosticSequence;
+    uint32_t inputContextGeneration;
+    bool repeated;
 };
+
+// Advance the legacy desktop routing context when a modal owner is created or
+// retired. Queued key transitions from the prior context then remain in FIFO
+// order but are ignored by the desktop dispatcher.
+uint32_t advance_legacy_input_context();
+uint32_t legacy_input_context_generation();
+bool legacy_input_context_is_current(uint32_t generation);
 
 // Consume the lossless key transition queue used by Native ELF apps.
 bool has_event();
 bool get_event(KeyEvent* outEvent);
+
+// Consume a complete legacy transition so routing metadata (modal context and
+// held-key repeat state) is preserved by the desktop event loop.
+bool get_key_event(KeyEvent* outEvent);
 
 // Modifier state accessors
 bool is_ctrl_down();

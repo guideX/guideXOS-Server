@@ -9030,8 +9030,10 @@ void cooperative_yield()
     }
 
     if (ps2keyboard::has_key()) {
-        uint32_t key = ps2keyboard::get_key();
-        if (key != 0) handle_key(key);
+        ps2keyboard::KeyEvent event = {};
+        if (ps2keyboard::get_key_event(&event) && event.key != 0)
+            handle_key(event.key, event.repeated,
+                       event.inputContextGeneration);
     }
 
     const uint32_t now = (uint32_t)pit::ticks();
@@ -10974,8 +10976,23 @@ int get_running_app_count()
 
 void handle_key(uint32_t key)
 {
+    handle_key(key, false,
+        ps2keyboard::legacy_input_context_generation());
+}
+
+void handle_key(uint32_t key, bool repeated,
+                uint32_t inputContextGeneration)
+{
     const uint32_t diagnosticSequence =
         dm37_input_diagnostics::current_sequence();
+    if (!ps2keyboard::legacy_input_context_is_current(
+            inputContextGeneration)) {
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("input-context-rejected",
+                diagnosticSequence, inputContextGeneration,
+                ps2keyboard::legacy_input_context_generation());
+        return;
+    }
     if (diagnosticSequence != 0)
         dm37_input_diagnostics::emit("desktop-key", diagnosticSequence,
                                      key, 0);
@@ -11077,7 +11094,7 @@ void handle_key(uint32_t key)
             // an active modal retain the desktop's close-window shortcut.
             if (key == 27) {  // ESC
                 if (focused->owner && focused->owner->hasModalDialog()) {
-                    compositor::KernelCompositor::handleKeyDown(key);
+                    compositor::KernelCompositor::handleKeyDown(key, repeated);
                 } else {
                     compositor::KernelCompositor::closeWindow(focused->id);
                 }
@@ -11087,7 +11104,8 @@ void handle_key(uint32_t key)
             
             // Route printable character keys to the compositor
             if (key >= 32 && key < 127) {
-                compositor::KernelCompositor::handleKeyChar((char)key);
+                compositor::KernelCompositor::handleKeyChar((char)key,
+                                                             repeated);
                 draw();
                 return;
             }
@@ -11095,7 +11113,7 @@ void handle_key(uint32_t key)
             // Route control characters and special keys to handleKeyDown
             // This includes Enter ('\n'=10), Backspace ('\b'=8), Tab ('\t'=9),
             // arrow keys (0x100+), and all other non-printable keys.
-            compositor::KernelCompositor::handleKeyDown(key);
+            compositor::KernelCompositor::handleKeyDown(key, repeated);
             draw();
             return;
         }

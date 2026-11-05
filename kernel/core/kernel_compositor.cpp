@@ -5,12 +5,14 @@
 //
 
 #include "include/kernel/kernel_compositor.h"
+#include "include/kernel/compositor_widget_press.h"
 #include "include/kernel/widget_activation.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/dm37_input_diagnostics.h"
+#include "include/kernel/ps2keyboard.h"
 
 #include <string.h>
 
@@ -39,6 +41,20 @@ bool KernelCompositor::s_buttonPressActive = false;
 bool KernelCompositor::s_initialized = false;
 uint32_t KernelCompositor::s_showDesktopMinimized[MAX_WINDOWS];
 int KernelCompositor::s_showDesktopMinimizedCount = 0;
+static widget_press::Capture s_widgetPressCapture = {};
+
+static void clear_pressed_widget_marks(WindowEntry* windows)
+{
+    for (int i = 0; i < MAX_WINDOWS; ++i) {
+        if (!windows[i].valid || !windows[i].window) continue;
+        app::KernelWindow* window = windows[i].window;
+        for (int j = 0; j < window->widgetCount; ++j) {
+            if (!window->widgets[j].pressed) continue;
+            window->widgets[j].pressed = false;
+            window->dirty = true;
+        }
+    }
+}
 
 // Bitmap font (5x7) - same as desktop.cpp
 static const int kGlyphW = 5;
@@ -266,19 +282,30 @@ void KernelCompositor::unregisterWindow(app::KernelWindow* window) {
     
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (s_windows[i].valid && s_windows[i].window == window) {
+            if (widget_press::targets(s_widgetPressCapture, window->id,
+                                      s_widgetPressCapture.widgetId)) {
+                for (int w = 0; w < window->widgetCount; ++w)
+                    window->widgets[w].pressed = false;
+                window->dirty = true;
+            }
             s_windows[i].valid = false;
             s_windows[i].window = nullptr;
             s_windowCount--;
             
             // Clear focus if this was focused
             if (s_focusedWindowId == window->id) {
-                s_focusedWindowId = 0;
+                bool transferredFocus = false;
                 // Focus next window if available
                 for (int j = MAX_WINDOWS - 1; j >= 0; j--) {
                     if (s_windows[j].valid && s_windows[j].window) {
                         setFocus(s_windows[j].window->id);
+                        transferredFocus = true;
                         break;
                     }
+                }
+                if (!transferredFocus) {
+                    ps2keyboard::advance_legacy_input_context();
+                    s_focusedWindowId = 0;
                 }
             }
             return;
@@ -332,6 +359,8 @@ void KernelCompositor::setFocus(uint32_t windowId) {
     // Set focus flag on new window
     app::KernelWindow* newWin = getWindow(windowId);
     if (newWin) {
+        if (s_focusedWindowId != windowId)
+            ps2keyboard::advance_legacy_input_context();
         newWin->flags |= app::WF_FOCUSED;
         newWin->dirty = true;
         s_focusedWindowId = windowId;
@@ -596,6 +625,11 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
 
 void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
     if (!s_initialized) return;
+
+    // A new down retires any incomplete prior capture. It cannot replay the
+    // previous press into a replacement widget at the same coordinates.
+    clear_pressed_widget_marks(s_windows);
+    widget_press::clear(s_widgetPressCapture);
     
     // Track that we have an active button press
     s_buttonPressActive = true;
@@ -674,6 +708,10 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
                             dm37_input_diagnostics::pack_coordinates(
                                 localX, localY));
                     widget->pressed = true;
+                    widget_press::begin(s_widgetPressCapture, hitWin->id,
+                        widget->id,
+                        ps2keyboard::legacy_input_context_generation(),
+                        button);
                     hitWin->dirty = true;
                     return;
                 }
@@ -749,48 +787,87 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
         }
     }
     
+    const uint32_t currentInputContext =
+        ps2keyboard::legacy_input_context_generation();
+    if (s_widgetPressCapture.active &&
+        !widget_press::is_current(s_widgetPressCapture,
+                                  currentInputContext)) {
+        const uint32_t staleGeneration =
+            s_widgetPressCapture.inputContextGeneration;
+        clear_pressed_widget_marks(s_windows);
+        widget_press::clear(s_widgetPressCapture);
+        if (diagnosticSequence != 0)
+            dm37_input_diagnostics::emit("widget-press-stale-rejected",
+                diagnosticSequence, staleGeneration, currentInputContext);
+        return;
+    }
+    if (s_widgetPressCapture.active &&
+        s_widgetPressCapture.button != button) return;
+    if (s_widgetPressCapture.active) {
+        const widget_press::Capture capture = s_widgetPressCapture;
+        const bool currentContext = widget_press::is_current(capture,
+            currentInputContext);
+        app::KernelWindow* capturedWindow = getWindow(capture.windowId);
+        app::Widget* activatedWidget = nullptr;
+        if (currentContext && capturedWindow && hit == HitTestResult::Client &&
+            hitWin == capturedWindow) {
+            const int localX = mx - capturedWindow->x;
+            const int localY = my - capturedWindow->y - TITLEBAR_HEIGHT;
+            for (int i = 0; i < capturedWindow->widgetCount; ++i) {
+                app::Widget* widget = &capturedWindow->widgets[i];
+                if (!widget_press::can_activate(capture,
+                        capturedWindow->id, widget->id, button,
+                        currentInputContext) ||
+                    !widget->pressed || !widget->visible ||
+                    !widget->enabled || localX < widget->x ||
+                    localX >= widget->x + widget->w || localY < widget->y ||
+                    localY >= widget->y + widget->h) continue;
+                activatedWidget = widget;
+                break;
+            }
+        }
+
+        clear_pressed_widget_marks(s_windows);
+        widget_press::clear(s_widgetPressCapture);
+
+        if (activatedWidget && capturedWindow && capturedWindow->owner) {
+            const int widgetId = activatedWidget->id;
+            const bool wholeEraseStopWidget =
+                activatedWidget->type == app::WidgetType::Button &&
+                (strcmp(activatedWidget->text, "Stop Erase") == 0 ||
+                 strcmp(activatedWidget->text, "Stop Requested") == 0);
+            if (wholeEraseStopWidget) {
+                serial::puts("[dm34-stop] pointer-hit widget_id=");
+                serial::put_hex32(static_cast<uint32_t>(widgetId));
+                serial::puts(" text=");
+                serial::puts(activatedWidget->text);
+                serial::puts(" local_x=");
+                serial::put_hex32(static_cast<uint32_t>(mx - capturedWindow->x));
+                serial::puts(" local_y=");
+                serial::put_hex32(static_cast<uint32_t>(my - capturedWindow->y - TITLEBAR_HEIGHT));
+                serial::putc('\n');
+            }
+            const bool dispatched = app::dispatch_widget_activation(
+                capturedWindow, widgetId,
+                [capturedWindow](int id) {
+                    capturedWindow->owner->onWidgetClick(id);
+                });
+            if (diagnosticSequence != 0)
+                dm37_input_diagnostics::emit("widget-activate",
+                    diagnosticSequence, static_cast<uint32_t>(widgetId),
+                    dispatched ? 1u : 0u);
+            if (wholeEraseStopWidget) {
+                serial::puts("[dm34-stop] pointer-dispatch result=");
+                serial::puts(dispatched ? "accepted\n" : "rejected\n");
+            }
+        }
+        return;
+    }
+
     // Forward to app
     if (hit == HitTestResult::Client && hitWin && hitWin->owner) {
         int localX = mx - hitWin->x;
         int localY = my - hitWin->y - TITLEBAR_HEIGHT;
-        for (int i = 0; i < hitWin->widgetCount; ++i) {
-            app::Widget* widget = &hitWin->widgets[i];
-            if (!widget->pressed) continue;
-            widget->pressed = false;
-            hitWin->dirty = true;
-            if (widget->visible && widget->enabled &&
-                localX >= widget->x && localX < widget->x + widget->w &&
-                localY >= widget->y && localY < widget->y + widget->h) {
-                const bool wholeEraseStopWidget =
-                    widget->type == app::WidgetType::Button &&
-                    (strcmp(widget->text, "Stop Erase") == 0 ||
-                     strcmp(widget->text, "Stop Requested") == 0);
-                if (wholeEraseStopWidget) {
-                    serial::puts("[dm34-stop] pointer-hit widget_id=");
-                    serial::put_hex32(static_cast<uint32_t>(widget->id));
-                    serial::puts(" text=");
-                    serial::puts(widget->text);
-                    serial::puts(" local_x=");
-                    serial::put_hex32(static_cast<uint32_t>(localX));
-                    serial::puts(" local_y=");
-                    serial::put_hex32(static_cast<uint32_t>(localY));
-                    serial::putc('\n');
-                }
-                const bool dispatched = app::dispatch_widget_activation(
-                    hitWin, widget->id,
-                    [hitWin](int id) { hitWin->owner->onWidgetClick(id); });
-                if (diagnosticSequence != 0)
-                    dm37_input_diagnostics::emit("widget-activate",
-                        diagnosticSequence,
-                        static_cast<uint32_t>(widget->id),
-                        dispatched ? 1u : 0u);
-                if (wholeEraseStopWidget) {
-                    serial::puts("[dm34-stop] pointer-dispatch result=");
-                    serial::puts(dispatched ? "accepted\n" : "rejected\n");
-                }
-                return;
-            }
-        }
         hitWin->owner->onMouseUp(localX, localY, button);
     }
 }
@@ -809,7 +886,7 @@ void KernelCompositor::handleMouseWheel(int32_t mx, int32_t my, int8_t wheelDelt
     hitWin->owner->onMouseWheel(localX, localY, wheelDelta);
 }
 
-void KernelCompositor::handleKeyDown(uint32_t keyCode) {
+void KernelCompositor::handleKeyDown(uint32_t keyCode, bool repeated) {
     app::KernelWindow* focused = getFocusedWindow();
     const uint32_t diagnosticSequence =
         dm37_input_diagnostics::current_sequence();
@@ -817,14 +894,14 @@ void KernelCompositor::handleKeyDown(uint32_t keyCode) {
         dm37_input_diagnostics::emit("compositor-focus",
             diagnosticSequence, keyCode, focused ? focused->id : 0);
     if (focused && focused->owner) {
-        focused->owner->onKeyDown(keyCode);
+        focused->owner->onKeyDown(keyCode, repeated);
     }
 }
 
-void KernelCompositor::handleKeyChar(char c) {
+void KernelCompositor::handleKeyChar(char c, bool repeated) {
     app::KernelWindow* focused = getFocusedWindow();
     if (focused && focused->owner) {
-        focused->owner->onKeyChar(c);
+        focused->owner->onKeyChar(c, repeated);
     }
 }
 

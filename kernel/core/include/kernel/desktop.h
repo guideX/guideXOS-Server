@@ -93,6 +93,8 @@ void handle_mouse_wheel(int32_t mx, int32_t my, int8_t wheelDelta);
 // Routes to focused GUI app, shell, or desktop shortcuts
 // Special keys use codes from shell.h (KEY_UP, KEY_DOWN, etc.)
 void handle_key(uint32_t key);
+void handle_key(uint32_t key, bool repeated,
+                uint32_t inputContextGeneration);
 
 // Draw the mouse cursor at the given position (overlay on framebuffer)
 void draw_cursor(int32_t mx, int32_t my);

@@ -15,6 +15,27 @@
 namespace kernel {
 namespace ps2keyboard {
 
+static volatile uint32_t s_legacyInputContextGeneration = 1;
+
+uint32_t advance_legacy_input_context()
+{
+    return legacy_queue::advance_input_context(
+        s_legacyInputContextGeneration);
+}
+
+uint32_t legacy_input_context_generation()
+{
+    return s_legacyInputContextGeneration;
+}
+
+bool legacy_input_context_is_current(uint32_t generation)
+{
+    KeyEvent event = {};
+    event.inputContextGeneration = generation;
+    return legacy_queue::event_is_current_context(
+        event, s_legacyInputContextGeneration);
+}
+
 #if ARCH_HAS_PS2
 
 // PS/2 controller ports
@@ -38,19 +59,22 @@ static volatile uint8_t s_eventTail = 0;
 static KeyEvent s_nativeEventQueue[kEventQueueCapacity];
 static volatile uint8_t s_nativeEventHead = 0;
 static volatile uint8_t s_nativeEventTail = 0;
+static bool s_keyDown[512];
 
 static uint8_t enqueue_event(uint32_t key, bool keyUp,
                              uint32_t diagnosticSequence)
 {
     if (key == 0) return 0;
     const KeyAction action = keyUp ? KeyAction::Up : KeyAction::Down;
+    const bool repeated = legacy_queue::record_key_transition(
+        s_keyDown, sizeof(s_keyDown) / sizeof(s_keyDown[0]), key, action);
+    const KeyEvent event = {key, action, diagnosticSequence,
+        s_legacyInputContextGeneration, repeated};
     uint8_t accepted = 0;
 
     const uint8_t legacyNext = static_cast<uint8_t>((s_eventHead + 1u) % kEventQueueCapacity);
     if (legacyNext != s_eventTail) {
-        s_eventQueue[s_eventHead].key = key;
-        s_eventQueue[s_eventHead].action = action;
-        s_eventQueue[s_eventHead].diagnosticSequence = diagnosticSequence;
+        s_eventQueue[s_eventHead] = event;
         s_eventHead = legacyNext;
         accepted |= 0x01;
     } else {
@@ -62,9 +86,7 @@ static uint8_t enqueue_event(uint32_t key, bool keyUp,
     // desktop dispatcher is servicing other UI work.
     const uint8_t nativeNext = static_cast<uint8_t>((s_nativeEventHead + 1u) % kEventQueueCapacity);
     if (nativeNext != s_nativeEventTail) {
-        s_nativeEventQueue[s_nativeEventHead].key = key;
-        s_nativeEventQueue[s_nativeEventHead].action = action;
-        s_nativeEventQueue[s_nativeEventHead].diagnosticSequence = diagnosticSequence;
+        s_nativeEventQueue[s_nativeEventHead] = event;
         s_nativeEventHead = nativeNext;
         accepted |= 0x02;
     } else {
@@ -194,6 +216,9 @@ void init()
     s_eventTail = 0;
     s_nativeEventHead = 0;
     s_nativeEventTail = 0;
+    advance_legacy_input_context();
+    for (uint16_t i = 0; i < sizeof(s_keyDown) / sizeof(s_keyDown[0]); ++i)
+        s_keyDown[i] = false;
     dm37_input_diagnostics::set_current_sequence(0);
     
     serial::puts("[PS2KB] Keyboard initialized (scancode set 2)\n");
@@ -367,21 +392,27 @@ bool has_key()
 
 uint32_t get_key()
 {
+    KeyEvent event = {};
+    return get_key_event(&event) ? event.key : 0;
+}
+
+bool get_key_event(KeyEvent* outEvent)
+{
+    if (!outEvent) return false;
     dm37_input_diagnostics::set_current_sequence(0);
     // Keep the legacy one-key API and the lossless transition queue in sync.
     // The desktop consumes key-downs only; discard queued release transitions
     // until the corresponding legacy key-down is reached.
-    KeyEvent event = {};
     if (!legacy_queue::pop_next_key_down(
             s_eventQueue, s_eventTail, s_eventHead,
-            kEventQueueCapacity, &event)) return 0;
-    if (event.diagnosticSequence != 0) {
+            kEventQueueCapacity, outEvent)) return false;
+    if (outEvent->diagnosticSequence != 0) {
         dm37_input_diagnostics::set_current_sequence(
-            event.diagnosticSequence);
+            outEvent->diagnosticSequence);
         dm37_input_diagnostics::emit("legacy-pop",
-            event.diagnosticSequence, event.key, event.key);
+            outEvent->diagnosticSequence, outEvent->key, outEvent->key);
     }
-    return event.key;
+    return true;
 }
 
 bool has_event()
@@ -410,6 +441,8 @@ void clear()
     s_eventTail = 0;
     s_nativeEventHead = 0;
     s_nativeEventTail = 0;
+    for (uint16_t i = 0; i < sizeof(s_keyDown) / sizeof(s_keyDown[0]); ++i)
+        s_keyDown[i] = false;
     dm37_input_diagnostics::set_current_sequence(0);
 }
 
@@ -464,6 +497,7 @@ void init() {}
 void irq_handler() {}
 bool has_key() { return false; }
 uint32_t get_key() { return 0; }
+bool get_key_event(KeyEvent*) { return false; }
 bool has_event() { return false; }
 bool get_event(KeyEvent*) { return false; }
 void clear() {}

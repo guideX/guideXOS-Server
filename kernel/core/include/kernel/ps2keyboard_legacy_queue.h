@@ -7,6 +7,23 @@ namespace kernel {
 namespace ps2keyboard {
 namespace legacy_queue {
 
+inline bool record_key_transition(bool* keyDown, uint32_t keyCapacity,
+                                  uint32_t key, KeyAction action)
+{
+    if (!keyDown || key >= keyCapacity) return false;
+    const bool repeated = action == KeyAction::Down && keyDown[key];
+    keyDown[key] = action == KeyAction::Down;
+    return repeated;
+}
+
+inline uint32_t advance_input_context(volatile uint32_t& generation)
+{
+    uint32_t next = generation + 1u;
+    if (next == 0) next = 1;
+    generation = next;
+    return next;
+}
+
 inline bool has_key_down(const KeyEvent* events, uint8_t tail,
                          uint8_t head, uint8_t capacity)
 {
@@ -31,6 +48,13 @@ inline bool pop_next_key_down(const KeyEvent* events,
         return true;
     }
     return false;
+}
+
+inline bool event_is_current_context(const KeyEvent& event,
+                                     uint32_t currentGeneration)
+{
+    return event.inputContextGeneration != 0 &&
+        event.inputContextGeneration == currentGeneration;
 }
 
 } // namespace legacy_queue

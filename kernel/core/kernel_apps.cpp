@@ -6293,6 +6293,7 @@ DiskManagerApp::DiskManagerApp()
       m_dialogIsWholeErase(false), m_dialogIsVerification(false),
       m_dialogIsFat32Integrity(false), m_dialogIsDismount(false),
       m_closeAfterVerification(false),
+      m_dismountOperationActive(false), m_closeAfterDismount(false),
       m_wipeBlockReason(disk_manager_wipe_ui::WIPE_ACTION_PARTITION_NOT_SELECTED),
       m_wholeEraseBlockReason(
           disk_manager_whole_disk_erase_ui::WHOLE_ERASE_UI_DISK_ROW_REQUIRED),
@@ -6466,6 +6467,9 @@ bool DiskManagerApp::init() {
 }
 
 void DiskManagerApp::shutdown() {
+    ps2keyboard::advance_legacy_input_context();
+    m_dismountOperationActive = false;
+    m_closeAfterDismount = false;
     if (m_initializePlan.confirmationReady)
         storage::cancel_initialize_disk(m_initializePlan);
     if (m_deletePlan.confirmationReady)
@@ -6498,6 +6502,14 @@ void DiskManagerApp::shutdown() {
 }
 
 bool DiskManagerApp::onCloseRequested() {
+    if (disk_manager_input_focus::defer_close_for_active_dismount(
+            m_dismountOperationActive)) {
+        m_closeAfterDismount = true;
+        strcopy(m_statusMessage,
+            "Close queued. The current Dismount will settle through VFS first.",
+            sizeof(m_statusMessage));
+        return false;
+    }
     if (!disk_manager_fat32_integrity_ui::request_stop_before_close(
             m_fat32IntegrityJob)) {
         m_closeAfterVerification = true;
@@ -8242,6 +8254,7 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             m_createInputFocus =
                 disk_manager_input_focus::next_mount_confirmation_focus(
                     m_createInputFocus);
+            ps2keyboard::advance_legacy_input_context();
             updateInitializeControls();
             invalidate();
         } else if (action == disk_manager_input_focus::MOUNT_CONFIRMATION_CANCEL ||
@@ -8320,10 +8333,13 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
             updateInitializeControls();
             invalidate();
         } else if (dismountConfirm && tab) {
+            const uint8_t previousFocus = m_createInputFocus;
             m_createInputFocus =
                 disk_manager_dismount_ui::next_confirmation_focus(
                     m_createInputFocus, m_dismountBlockReason ==
                         disk_manager_dismount_ui::DISMOUNT_ADMISSION_READY);
+            if (m_createInputFocus != previousFocus)
+                ps2keyboard::advance_legacy_input_context();
             updateInitializeControls();
             invalidate();
         } else if (fat32Result && tab) {
@@ -8624,6 +8640,13 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
     }
 }
 
+void DiskManagerApp::onKeyDown(uint32_t key, bool repeated) {
+    if (hasModalDialog() &&
+        !disk_manager_input_focus::modal_key_event_allowed(key, repeated))
+        return;
+    onKeyDown(key);
+}
+
 void DiskManagerApp::onKeyChar(char c) {
     const bool wholeEraseTextFocused = m_dialogIsWholeErase &&
         m_initializeDialogState == INITIALIZE_DIALOG_WHOLE_ERASE_CONFIRM &&
@@ -8742,6 +8765,21 @@ void DiskManagerApp::onKeyChar(char c) {
     invalidate();
 }
 
+void DiskManagerApp::onKeyChar(char c, bool repeated) {
+    if (c == ' ') {
+        if (hasModalDialog() &&
+            !disk_manager_input_focus::modal_key_event_allowed(32, repeated))
+            return;
+        const bool dismountConfirmation = m_dialogIsDismount &&
+            m_initializeDialogState == INITIALIZE_DIALOG_DISMOUNT_CONFIRM;
+        if (m_mountDialogOpen || dismountConfirmation) {
+            onKeyDown(32);
+            return;
+        }
+    }
+    onKeyChar(c);
+}
+
 void DiskManagerApp::onMouseWheel(int localX, int localY, int wheelDelta) {
     if (m_mountDialogOpen || m_initializeDialogState != INITIALIZE_DIALOG_CLOSED || wheelDelta == 0)
         return;
@@ -8836,33 +8874,41 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
         dm37_input_diagnostics::emit("dm-widget-handler",
             diagnosticSequence, static_cast<uint32_t>(widgetId), dialogState);
     }
-    if (m_dialogIsDismount && m_initializeDialogState ==
-            INITIALIZE_DIALOG_DISMOUNT_CONFIRM &&
-        widgetId == m_confirmInitializeBtnId) {
+    const disk_manager_input_focus::ModalButtonAction dismountButton =
+        disk_manager_input_focus::modal_button_action(
+            m_dialogIsDismount && m_initializeDialogState ==
+                INITIALIZE_DIALOG_DISMOUNT_CONFIRM,
+            widgetId, m_confirmInitializeBtnId, m_cancelInitializeBtnId);
+    if (dismountButton ==
+            disk_manager_input_focus::MODAL_BUTTON_CONFIRM) {
         runDismountOperation();
         return;
     }
-    if (m_dialogIsDismount && m_initializeDialogState ==
-            INITIALIZE_DIALOG_DISMOUNT_CONFIRM &&
-        widgetId == m_cancelInitializeBtnId) {
+    if (dismountButton ==
+            disk_manager_input_focus::MODAL_BUTTON_CANCEL) {
         closeInitializeDialog();
         strcopy(m_statusMessage, "Dismount canceled.", sizeof(m_statusMessage));
         updateInitializeControls();
         invalidate();
         return;
     }
-    if (m_mountDialogOpen && widgetId == m_confirmInitializeBtnId) {
+    const disk_manager_input_focus::ModalButtonAction mountButton =
+        disk_manager_input_focus::modal_button_action(
+            m_mountDialogOpen, widgetId, m_confirmInitializeBtnId,
+            m_cancelInitializeBtnId);
+    if (mountButton == disk_manager_input_focus::MODAL_BUTTON_CONFIRM) {
         if (diagnosticSequence != 0)
             dm37_input_diagnostics::emit("mount-widget-activation",
                 diagnosticSequence, static_cast<uint32_t>(widgetId), 1u);
         confirmPartitionMount();
         return;
     }
-    if (m_mountDialogOpen && widgetId == m_cancelInitializeBtnId) {
+    if (mountButton == disk_manager_input_focus::MODAL_BUTTON_CANCEL) {
         if (diagnosticSequence != 0)
             dm37_input_diagnostics::emit("mount-widget-activation",
                 diagnosticSequence, static_cast<uint32_t>(widgetId), 0u);
         m_mountDialogOpen = false;
+        ps2keyboard::advance_legacy_input_context();
         disk_manager_input_focus::settle_storage_modal_focus(
             m_keyboardPane, m_actionFocus,
             disk_manager_input_focus::MODAL_MOUNT);
@@ -13311,6 +13357,7 @@ void DiskManagerApp::drawFat32IntegrityPanel(uint32_t x, uint32_t y,
 }
 
 void DiskManagerApp::closeInitializeDialog() {
+    ps2keyboard::advance_legacy_input_context();
     if (m_dialogIsFat32Integrity &&
         disk_manager_fat32_integrity_ui::job_running(m_fat32IntegrityJob)) {
         storage::request_fat32_integrity_stop(m_fat32IntegrityJob);
@@ -13478,6 +13525,7 @@ void DiskManagerApp::beginMountDialog() {
          disk.capabilities.flushSupported &&
          disk.capabilities.flushSemanticsKnown);
     m_mountDialogReadOnly = !disk.capabilities.writable || !durable;
+    ps2keyboard::advance_legacy_input_context();
     m_mountDialogOpen = true;
     m_createInputFocus = 2;
     dm37_input_diagnostics::arm_selection_focus_checkpoint();
@@ -13531,6 +13579,7 @@ void DiskManagerApp::confirmPartitionMount() {
         strappend(status, ".", sizeof(status));
     }
     m_mountDialogOpen = false;
+    ps2keyboard::advance_legacy_input_context();
     disk_manager_input_focus::settle_storage_modal_focus(
         m_keyboardPane, m_actionFocus,
         disk_manager_input_focus::MODAL_MOUNT);
@@ -13602,6 +13651,7 @@ void DiskManagerApp::beginDismountConfirmation() {
     m_dialogIsWholeErase = false;
     m_dialogIsVerification = false;
     m_dialogIsFat32Integrity = false;
+    ps2keyboard::advance_legacy_input_context();
     m_dialogIsDismount = true;
     m_createInputFocus = 2;
     m_initializeMessage[0] = '\0';
@@ -13756,6 +13806,8 @@ void DiskManagerApp::runDismountOperation() {
             INITIALIZE_DIALOG_DISMOUNT_CONFIRM || !m_dismountTarget.valid)
         return;
 
+    m_dismountOperationActive = true;
+
     const uint32_t diagnosticSequence =
         dm37_input_diagnostics::current_sequence();
     if (diagnosticSequence != 0)
@@ -13812,10 +13864,12 @@ void DiskManagerApp::runDismountOperation() {
                 strcopy(m_dismountFinalState,
                     "A newer mount is active; captured target is stale",
                     sizeof(m_dismountFinalState));
+            ps2keyboard::advance_legacy_input_context();
             m_initializeDialogState = INITIALIZE_DIALOG_DISMOUNT_RESULT;
         }
         updateInitializeControls();
         invalidate();
+        finishDismountCloseRequest();
         return;
     }
 
@@ -13895,6 +13949,7 @@ void DiskManagerApp::runDismountOperation() {
             "Captured mount is gone; a newer mount is active",
             sizeof(m_dismountFinalState));
     }
+    ps2keyboard::advance_legacy_input_context();
     m_initializeDialogState = INITIALIZE_DIALOG_DISMOUNT_RESULT;
     m_createInputFocus = 0;
     if (diagnosticSequence != 0)
@@ -13904,6 +13959,14 @@ void DiskManagerApp::runDismountOperation() {
     strcopy(m_statusMessage, m_initializeMessage, sizeof(m_statusMessage));
     updateInitializeControls();
     invalidate();
+    finishDismountCloseRequest();
+}
+
+void DiskManagerApp::finishDismountCloseRequest() {
+    m_dismountOperationActive = false;
+    if (!m_closeAfterDismount) return;
+    m_closeAfterDismount = false;
+    requestClose();
 }
 
 void DiskManagerApp::drawDismountPanel(uint32_t x, uint32_t y,

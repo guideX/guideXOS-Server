@@ -16,6 +16,7 @@
 #include "../kernel/core/include/kernel/disk_manager_surface_verification_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_fat32_integrity_ui.h"
 #include "../kernel/core/include/kernel/disk_manager_dismount_ui.h"
+#include "../kernel/core/include/kernel/disk_manager_input_focus.h"
 #include "../kernel/core/include/kernel/widget_activation.h"
 #include "../kernel/core/include/kernel/fs_fat.h"
 #include "../kernel/core/include/kernel/disk_manager_model.h"
@@ -15912,10 +15913,65 @@ int main()
             : storage::FAT32_FORMAT_INVALID_REQUEST;
         block::BlockDevice dm37Parent = {};
         block::copy_device(dm37Index, dm37Parent);
-        const vfs::PartitionMountResult dm37Mount =
-            vfs::mount_partition_detailed("/mnt/dm37", dm37Index,
-                dm37Partition.partitionNumber, dm37Parent.registrationId,
-                &dm37Partition);
+        app::KernelWindow mountDialogWindow;
+        app::Widget mountConfirmWidget = {};
+        mountConfirmWidget.id = 41;
+        mountConfirmWidget.type = app::WidgetType::Button;
+        mountConfirmWidget.visible = true;
+        mountConfirmWidget.enabled = true;
+        app::Widget mountCancelWidget = {};
+        mountCancelWidget.id = 42;
+        mountCancelWidget.type = app::WidgetType::Button;
+        mountCancelWidget.visible = true;
+        mountCancelWidget.enabled = true;
+        mountDialogWindow.widgetCount = 2;
+        mountDialogWindow.widgets[0] = mountConfirmWidget;
+        mountDialogWindow.widgets[1] = mountCancelWidget;
+        bool mountModalOpen = true;
+        int mountConfirmCalls = 0;
+        int mountCancelCalls = 0;
+        vfs::PartitionMountResult dm37Mount = {};
+        const uint32_t mountCancelReads = dm37Disk.reads;
+        const uint32_t mountCancelWrites = dm37Disk.writeAttempts;
+        const uint32_t mountCancelFlushes = dm37Disk.flushes;
+        const auto mountModalClick = [&](int widgetId) {
+            const apps::disk_manager_input_focus::ModalButtonAction action =
+                apps::disk_manager_input_focus::modal_button_action(
+                    mountModalOpen, widgetId, 41, 42);
+            if (action == apps::disk_manager_input_focus::MODAL_BUTTON_CANCEL) {
+                ++mountCancelCalls;
+                mountModalOpen = false;
+            } else if (action ==
+                       apps::disk_manager_input_focus::MODAL_BUTTON_CONFIRM) {
+                ++mountConfirmCalls;
+                dm37Mount = vfs::mount_partition_detailed("/mnt/dm37",
+                    dm37Index, dm37Partition.partitionNumber,
+                    dm37Parent.registrationId, &dm37Partition);
+                mountModalOpen = false;
+            }
+        };
+        const bool mountCancelDispatched =
+            app::dispatch_focused_button_activation(&mountDialogWindow, 42,
+                app::focused_button_widget_id_for_index(2, 2, 42), '\n',
+                mountModalClick);
+        check(mountCancelDispatched && mountCancelCalls == 1 &&
+              mountConfirmCalls == 0 && !mountModalOpen &&
+              vfs::mount_count() == 0 && dm37Disk.reads == mountCancelReads &&
+              dm37Disk.writeAttempts == mountCancelWrites &&
+              dm37Disk.flushes == mountCancelFlushes,
+              "DM37 production widget dispatch routes Mount Cancel to zero VFS calls, reads, writes, and Flushes");
+        mountModalOpen = true;
+        const uint8_t mountConfirmFocus =
+            apps::disk_manager_input_focus::next_mount_confirmation_focus(2);
+        const bool mountConfirmDispatched =
+            app::dispatch_focused_button_activation(&mountDialogWindow, 41,
+                app::focused_button_widget_id_for_index(
+                    mountConfirmFocus, 3, 41), '\n', mountModalClick);
+        check(mountConfirmDispatched && mountConfirmCalls == 1 &&
+              mountCancelCalls == 1 &&
+              dm37Mount.error == vfs::PARTITION_MOUNT_OK &&
+              vfs::mount_count() == 1,
+              "DM37 deliberate focused Mount dispatch reaches production VFS Mount exactly once");
         const uint8_t dm37Payload[] = {
             0xD3, 0x37, 0x01, 0x02, 0x03, 0xF0, 0x0D, 0x7A, 0x55
         };
@@ -16000,8 +16056,158 @@ int main()
         dm37Disk.attemptUnmountDuringFlush = true;
         std::strncpy(dm37Disk.unmountDuringFlushPath, "/mnt/dm37",
                      sizeof(dm37Disk.unmountDuringFlushPath) - 1);
-        const vfs::Status dm37Dismount = dm37IdentityCaptured
-            ? vfs::dismount(dm37Identity) : vfs::VFS_ERR_INVALID;
+        app::KernelWindow dismountDialogWindow;
+        app::Widget dismountConfirmWidget = {};
+        dismountConfirmWidget.id = 51;
+        dismountConfirmWidget.type = app::WidgetType::Button;
+        dismountConfirmWidget.visible = true;
+        dismountConfirmWidget.enabled = true;
+        app::Widget dismountCancelWidget = {};
+        dismountCancelWidget.id = 52;
+        dismountCancelWidget.type = app::WidgetType::Button;
+        dismountCancelWidget.visible = true;
+        dismountCancelWidget.enabled = true;
+        dismountDialogWindow.widgetCount = 2;
+        dismountDialogWindow.widgets[0] = dismountConfirmWidget;
+        dismountDialogWindow.widgets[1] = dismountCancelWidget;
+        bool dismountConfirmationActive = true;
+        bool dismountConfirmState = true;
+        int dismountConfirmCalls = 0;
+        int dismountCancelCalls = 0;
+        bool dismountOperationActive = false;
+        bool closeDeferredDuringDismount = false;
+        vfs::Status dm37Dismount = vfs::VFS_ERR_INVALID;
+        const uint32_t dismountCancelWrites = dm37Disk.writeAttempts;
+        const uint32_t dismountCancelFlushes = dm37Disk.flushes;
+        const auto dismountModalClick = [&](int widgetId) {
+            const apps::disk_manager_input_focus::ModalButtonAction action =
+                apps::disk_manager_input_focus::modal_button_action(
+                    dismountConfirmationActive && dismountConfirmState,
+                    widgetId, 51, 52);
+            if (action == apps::disk_manager_input_focus::MODAL_BUTTON_CANCEL) {
+                ++dismountCancelCalls;
+                dismountConfirmationActive = false;
+            } else if (action ==
+                       apps::disk_manager_input_focus::MODAL_BUTTON_CONFIRM) {
+                ++dismountConfirmCalls;
+                {
+                    std::lock_guard<std::mutex> lock(
+                        dm37Disk.blockedFlushMutex);
+                    dismountOperationActive = true;
+                }
+                dm37Dismount = dm37IdentityCaptured
+                    ? vfs::dismount(dm37GuiTarget.mount)
+                    : vfs::VFS_ERR_INVALID;
+                {
+                    std::lock_guard<std::mutex> lock(
+                        dm37Disk.blockedFlushMutex);
+                    dismountOperationActive = false;
+                }
+                dismountConfirmState = false;
+            }
+        };
+        const bool dismountCancelDispatched =
+            app::dispatch_focused_button_activation(&dismountDialogWindow,
+                52, app::focused_button_widget_id_for_index(2, 2, 52),
+                '\n', dismountModalClick);
+        const bool cancelRetainedMount =
+            vfs::mount_index_for_path("/mnt/dm37") != 0xFF;
+        check(dismountCancelDispatched && dismountCancelCalls == 1 &&
+              dismountConfirmCalls == 0 && cancelRetainedMount &&
+              dm37Disk.writeAttempts == dismountCancelWrites &&
+              dm37Disk.flushes == dismountCancelFlushes,
+              "DM37 production widget dispatch routes Dismount Cancel to zero VFS calls and no writes or Flushes");
+        dismountConfirmationActive = true;
+        const uint8_t dismountConfirmFocus =
+            apps::disk_manager_dismount_ui::next_confirmation_focus(2, true);
+        {
+            std::lock_guard<std::mutex> lock(dm37Disk.blockedFlushMutex);
+            dm37Disk.holdFlushCallback = true;
+            dm37Disk.flushCallbackBlocked = false;
+            dm37Disk.releaseFlushCallback = false;
+            dm37Disk.flushCallbackTimedOut = false;
+        }
+        bool dismountConfirmDispatched = false;
+        std::thread guiDismountThread([&]() {
+            dismountConfirmDispatched =
+                app::dispatch_focused_button_activation(&dismountDialogWindow,
+                51, app::focused_button_widget_id_for_index(
+                    dismountConfirmFocus, 3, 51), 32,
+                dismountModalClick);
+        });
+        bool finalFlushPaused = false;
+        {
+            std::unique_lock<std::mutex> lock(dm37Disk.blockedFlushMutex);
+            finalFlushPaused = dm37Disk.blockedFlushCondition.wait_for(lock,
+                std::chrono::seconds(3), [&]() {
+                    return dm37Disk.flushCallbackBlocked;
+                });
+            closeDeferredDuringDismount =
+                apps::disk_manager_input_focus::defer_close_for_active_dismount(
+                    dismountOperationActive);
+            if (finalFlushPaused)
+                dm37Disk.failFlushAtCall = dm37Disk.flushes;
+            dm37Disk.releaseFlushCallback = true;
+        }
+        dm37Disk.blockedFlushCondition.notify_all();
+        guiDismountThread.join();
+        {
+            std::lock_guard<std::mutex> lock(dm37Disk.blockedFlushMutex);
+            dm37Disk.holdFlushCallback = false;
+        }
+        vfs::MountPoint afterCloseFlushFailure = {};
+        const bool failureSnapshotCopied = vfs::copy_mount_snapshot(
+            dm37MountIndex, afterCloseFlushFailure);
+        const bool dismountOperationSettled = !dismountOperationActive &&
+            !dm37Disk.flushCallbackTimedOut &&
+            dm37Disk.flushes == dismountCancelFlushes + 1 &&
+            dm37Dismount == vfs::VFS_ERR_IO && vfs::mount_count() == 1 &&
+            failureSnapshotCopied &&
+            afterCloseFlushFailure.lifecycleState ==
+                vfs::MOUNT_LIFECYCLE_MOUNTED &&
+            afterCloseFlushFailure.activeOperations == 0;
+        check(finalFlushPaused && closeDeferredDuringDismount &&
+              dismountOperationSettled,
+              "Close during GUI-dispatched failing final Flush defers destruction, preserves Mounted, and releases active ownership");
+        dismountConfirmationActive = false;
+        bool flushErrorResultOpen = true;
+        int flushErrorResultCloseCalls = 0;
+        const uint32_t writesBeforeFlushErrorClose = dm37Disk.writeAttempts;
+        const uint32_t flushesBeforeFlushErrorClose = dm37Disk.flushes;
+        const auto closeFlushErrorResult = [&](int widgetId) {
+            if (widgetId == 52 && flushErrorResultOpen) {
+                ++flushErrorResultCloseCalls;
+                flushErrorResultOpen = false;
+            }
+        };
+        const bool errorResultCloseDispatched =
+            app::dispatch_widget_activation(&dismountDialogWindow, 52,
+                closeFlushErrorResult);
+        check(errorResultCloseDispatched && !flushErrorResultOpen &&
+              flushErrorResultCloseCalls == 1 &&
+              dm37Dismount == vfs::VFS_ERR_IO && vfs::mount_count() == 1 &&
+              dm37Disk.writeAttempts == writesBeforeFlushErrorClose &&
+              dm37Disk.flushes == flushesBeforeFlushErrorClose,
+              "closing the terminal final-Flush error result dispatches no retry or underlying storage operation");
+        dm37Disk.failFlushAtCall = 0;
+        dismountConfirmationActive = true;
+        dismountConfirmState = true;
+        const uint32_t flushesAfterDeferredFailure = dm37Disk.flushes;
+        const bool retryDismountDispatched =
+            app::dispatch_focused_button_activation(&dismountDialogWindow,
+                51, app::focused_button_widget_id_for_index(
+                    dismountConfirmFocus, 3, 51), '\n',
+                dismountModalClick);
+        check(retryDismountDispatched && dismountConfirmCalls == 2 &&
+              dm37Dismount == vfs::VFS_OK &&
+              dm37Disk.flushes == flushesAfterDeferredFailure + 1 &&
+              vfs::mount_count() == 0,
+              "deliberate retry after terminal Flush failure settles exactly one successful Dismount and final Flush");
+        check(dismountConfirmDispatched && dismountConfirmCalls == 2 &&
+              dismountCancelCalls == 1 && dm37Dismount == vfs::VFS_OK &&
+              !dismountConfirmState && dm37Disk.flushes ==
+                  dismountCancelFlushes + 2,
+              "DM37 focused Space confirmation and explicit retry each reach production VFS Dismount once");
         const uint32_t readsBeforeUnmountedPresence = dm37Disk.reads;
         const storage::MountProtection unmountedPresence =
             storage::query_mount_presence(dm37Target);
@@ -16024,7 +16230,7 @@ int main()
               dm37Disk.unmountDuringReadSnapshot.activeOperations != 0 &&
               dm37Disk.unmountDuringReadSnapshot.openFileReferences == 0 &&
               dm37Disk.unmountDuringReadSnapshot.openDirectoryReferences == 0 &&
-              dm37Disk.flushes == flushesBeforeDismount + 1 &&
+              dm37Disk.flushes == flushesBeforeDismount + 2 &&
               dm37Dismount == vfs::VFS_OK &&
               dm37Disk.openDuringFlushResult == vfs::INVALID_HANDLE &&
               dm37Disk.unmountDuringFlushStatus == vfs::VFS_ERR_BUSY &&

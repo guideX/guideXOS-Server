@@ -68,6 +68,16 @@ try {
     & $dm37InputFocusTestExe
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    $dm37GateHInputTestExe = Join-Path $outputDir 'dm37_gate_h_input_test.exe'
+    & $compiler.Source `
+        -std=c++17 -O2 -Wall -Wextra `
+        -iquote kernel/core/include `
+        tests/dm37_gate_h_input_test.cpp `
+        -o $dm37GateHInputTestExe
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $dm37GateHInputTestExe
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     $ps2KeyboardQueueTestExe = Join-Path $outputDir 'ps2keyboard_legacy_queue_test.exe'
     & $compiler.Source `
         -std=c++17 -O2 -Wall -Wextra `
@@ -102,6 +112,7 @@ try {
     Remove-Item -LiteralPath (Join-Path $outputDir 'widget_activation_test.exe') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $outputDir 'dm37_input_diagnostics_test.exe') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $outputDir 'dm37_input_focus_test.exe') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $outputDir 'dm37_gate_h_input_test.exe') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $outputDir 'ps2keyboard_legacy_queue_test.exe') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $outputDir 'dm37_shell_focus_test.exe') -Force -ErrorAction SilentlyContinue
 }
