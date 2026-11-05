@@ -28,11 +28,14 @@ else
 endif
 
 # Architecture-specific flags
-# -mlp64/-mlittle-endian: 64-bit, little-endian kernel image
+# Linux-target GCC uses the LP64 ABI by default; -mlp64 is HP-UX-specific.
+# GAS receives its supported -mlp64 flag explicitly for the assembly source.
+# -mlittle-endian        : force little-endian compiler output
 # -mconstant-gp        : one link-time GP value for this single-image kernel
 # -mfixed-range=f2-f127: reserve floating-point registers for the kernel
-ARCH_CFLAGS := -mlp64 -mlittle-endian -mconstant-gp -mfixed-range=f2-f127
-ASFLAGS := -mlp64 -mle -mconstant-gp
+# -xexplicit            : preserve explicit stop markers and check dependencies
+ARCH_CFLAGS := -mlittle-endian -mconstant-gp -mfixed-range=f2-f127 -Wa,-xexplicit
+ASFLAGS := -mlp64 -mle -mconstant-gp -xexplicit
 LINKER_SCRIPT_FLAG := -T
 ARCH_LDFLAGS :=
 LIBS :=

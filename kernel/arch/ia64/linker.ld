@@ -13,6 +13,13 @@ OUTPUT_FORMAT("elf64-ia64-little")
 OUTPUT_ARCH(ia64)
 ENTRY(_start)
 
+PHDRS
+{
+    text   PT_LOAD FLAGS(5); /* PF_R | PF_X */
+    rodata PT_LOAD FLAGS(4); /* PF_R */
+    data   PT_LOAD FLAGS(6); /* PF_R | PF_W */
+}
+
 SECTIONS
 {
     /* Kernel starts at 1 MB */
@@ -20,32 +27,54 @@ SECTIONS
 
     __kernel_start = .;
 
-    /* IVT — 32 KB aligned, must be before .text so cr.iva can
-     * point to a fixed address early in the image. */
+    /* IVT: address alignment is enforced here. Its architectural layout and
+     * extent are validated separately; linking alone does not qualify it. */
     .ivt ALIGN(32K) :
     {
         *(.ivt)
-    }
+    } :text
 
-    /* Boot section (entry point) */
+    /* Boot entry point and executable code */
     .boot ALIGN(4K) :
     {
         *(.boot)
-    }
+    } :text
 
-    /* Text section (code) */
     .text ALIGN(4K) :
     {
         *(.text)
         *(.text.*)
-    }
+    } :text
 
-    /* Read-only data */
+    .plt ALIGN(16) :
+    {
+        *(.plt)
+        *(.plt.*)
+    } :text
+
+    /* Read-only data, including IA-64 function descriptors and unwind data */
     .rodata ALIGN(4K) :
     {
         *(.rodata)
         *(.rodata.*)
-    }
+        *(.gcc_except_table*)
+        *(.eh_frame*)
+    } :rodata
+
+    .opd ALIGN(8) (READONLY) :
+    {
+        *(.opd)
+    } :rodata
+
+    .IA_64.unwind_info :
+    {
+        *(.IA_64.unwind_info*)
+    } :rodata
+
+    .IA_64.unwind :
+    {
+        *(.IA_64.unwind*)
+    } :rodata
 
     /* Short data (GP-relative addressing) */
     .sdata ALIGN(4K) :
@@ -53,16 +82,17 @@ SECTIONS
         __gp = . + 0x200000;   /* GP = start of sdata + 2 MB bias */
         *(.sdata)
         *(.sdata.*)
-    }
+        *(.got)
+        *(.got.*)
+    } :data
 
-    /* Initialized data */
+    /* Initialized and uninitialized writable data */
     .data ALIGN(4K) :
     {
         *(.data)
         *(.data.*)
-    }
+    } :data
 
-    /* Uninitialized data */
     .bss ALIGN(4K) :
     {
         __bss_start = .;
@@ -72,18 +102,7 @@ SECTIONS
         *(.sbss)
         *(.sbss.*)
         __bss_end = .;
-    }
-
-    /* IA-64 unwind tables (needed by GCC for stack unwinding) */
-    .IA_64.unwind_info :
-    {
-        *(.IA_64.unwind_info*)
-    }
-
-    .IA_64.unwind :
-    {
-        *(.IA_64.unwind*)
-    }
+    } :data
 
     __kernel_end = .;
 

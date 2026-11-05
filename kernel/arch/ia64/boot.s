@@ -209,7 +209,7 @@ _start:
     mov r16 = 0 ;;
 
 clear_bss:
-    cmp.geu p6, p7 = r14, r15
+    cmp.geu p6, p7 = r14, r15 ;;
 (p7) st8 [r14] = r16, 8
 (p7) br.cond.dptk clear_bss ;;
 

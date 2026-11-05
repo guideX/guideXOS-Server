@@ -50,11 +50,56 @@ class Ia64FoundationContractTests(unittest.TestCase):
 
     def test_ia64_architecture_flags_and_linker_script_are_target_specific(self) -> None:
         arch_make = read_text(ROOT / "kernel" / "arch" / "ia64" / "Makefile.arch")
-        self.assertIn("ARCH_CFLAGS := -mlp64 -mlittle-endian -mconstant-gp -mfixed-range=f2-f127", arch_make)
-        self.assertIn("ASFLAGS := -mlp64 -mle -mconstant-gp", arch_make)
+        self.assertIn("ARCH_CFLAGS := -mlittle-endian -mconstant-gp -mfixed-range=f2-f127 -Wa,-xexplicit", arch_make)
+        self.assertIn("ASFLAGS := -mlp64 -mle -mconstant-gp -xexplicit", arch_make)
         self.assertIn("LINKER_SCRIPT_FLAG := -T", arch_make)
         kernel_make = read_text(ROOT / "kernel" / "Makefile")
         self.assertIn("$(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld", kernel_make)
+
+    def test_ia64_linker_separates_load_permissions_and_read_only_descriptors(self) -> None:
+        linker = read_text(ROOT / "kernel" / "arch" / "ia64" / "linker.ld")
+        self.assertIn("PHDRS", linker)
+        self.assertIn("text   PT_LOAD FLAGS(5)", linker)
+        self.assertIn("rodata PT_LOAD FLAGS(4)", linker)
+        self.assertIn("data   PT_LOAD FLAGS(6)", linker)
+        self.assertIn(".opd ALIGN(8) (READONLY)", linker)
+        self.assertIn("} :text", linker)
+        self.assertIn("} :rodata", linker)
+        self.assertIn("} :data", linker)
+        self.assertIn("architectural layout and", linker)
+
+    def test_ia64_build_runs_independent_elf_and_object_validation(self) -> None:
+        script = read_text(BUILD_SCRIPT)
+        validator = ROOT / "scripts" / "validate-ia64-elf.py"
+        self.assertTrue(validator.is_file())
+        self.assertIn("validate-ia64-elf.py", script)
+        self.assertIn("--object-dir", script)
+        self.assertIn("--repo-root", script)
+        self.assertIn("ia64-elf-inspection.txt", script)
+        self.assertIn("kernel.elf.sha256", script)
+        self.assertIn("sha256sum", script)
+
+    def test_ia64_elf_validator_covers_abi_and_memory_acceptance(self) -> None:
+        validator = read_text(ROOT / "scripts" / "validate-ia64-elf.py")
+        for token in (
+            "EM_IA_64 = 50",
+            "ET_EXEC = 2",
+            "IVT_BYTES = 32 * 1024",
+            "ENTRY_SYMBOL",
+            "GLOBAL_POINTER",
+            "ALLOC_SECTION_MAPPING",
+            "FUNCTION_DESCRIPTORS",
+            "IA64_UNWIND_SEGMENT",
+            "IVT_VECTOR_LAYOUT",
+            "REMAINING_RELOCATIONS",
+            "UNRESOLVED_SYMBOLS",
+            "KERNEL_STACK",
+            "RSE_BACKING_STORE",
+            "OBJECT_ARCHITECTURE",
+            "W_X_SEPARATION",
+            "SECTION_SEGMENT_PERMISSIONS",
+        ):
+            self.assertIn(token, validator)
 
     def test_boot_assembly_uses_gas_definitions_without_cpp_macros(self) -> None:
         boot = read_text(ROOT / "kernel" / "arch" / "ia64" / "boot.s")
@@ -64,6 +109,7 @@ class Ia64FoundationContractTests(unittest.TestCase):
         self.assertNotRegex(boot, r"(?m)^\s*#\s*define\b")
         calls = re.findall(r"(?m)^IVT_ENTRY_HALT\s+[A-Za-z_][A-Za-z0-9_]*\s*$", boot)
         self.assertEqual(len(calls), 68, "the source currently emits 68 vector macro calls")
+        self.assertRegex(boot, r"cmp\.geu p6, p7 = r14, r15 ;;")
 
     def test_ia64_register_and_break_operands_are_compile_time_values(self) -> None:
         header = read_text(ROOT / "kernel" / "arch" / "ia64" / "include" / "arch" / "ia64.h")

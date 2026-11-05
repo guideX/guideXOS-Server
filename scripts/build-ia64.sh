@@ -82,6 +82,14 @@ if ! command -v make >/dev/null 2>&1; then
     echo '[TOOLCHAIN_BLOCKED] GNU make is required to build the kernel.' >&2
     exit 2
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+    echo '[TOOLCHAIN_BLOCKED] Python 3 is required for independent ELF validation.' >&2
+    exit 2
+fi
+if ! command -v sha256sum >/dev/null 2>&1; then
+    echo '[TOOLCHAIN_BLOCKED] sha256sum is required to record the ELF hash.' >&2
+    exit 2
+fi
 if command -v "${CROSS}-readelf" >/dev/null 2>&1; then
     READELF="${CROSS}-readelf"
 elif command -v readelf >/dev/null 2>&1; then
@@ -103,9 +111,10 @@ printf '[INFO] Compiler: %s\n' "$("$CXX" --version | head -n 1)"
 printf '[INFO] Compiler sysroot: %s\n' "$("$CXX" -print-sysroot 2>/dev/null || true)"
 printf '[INFO] Assembler: %s\n' "$("$AS" --version | head -n 1)"
 printf '[INFO] Linker: %s\n' "$("$LD" --version | head -n 1)"
+printf '[INFO] Readelf: %s\n' "$("$READELF" --version | head -n 1)"
 printf '[INFO] Linker emulations:\n%s\n' "$LD_EMULATIONS"
 printf '[INFO] Build directory: %s\n' "$BUILD_DIR"
-printf '[INFO] IA-64 flags: -mlp64 -mlittle-endian -mconstant-gp -mfixed-range=f2-f127; assembler: -mlp64 -mle -mconstant-gp; linker script: -T arch/ia64/linker.ld\n'
+printf '[INFO] IA-64 flags: LP64 target ABI, -mlittle-endian -mconstant-gp -mfixed-range=f2-f127 -Wa,-xexplicit; assembler: -mlp64 -mle -mconstant-gp -xexplicit; linker script: -T arch/ia64/linker.ld\n'
 
 JOBS="${IA64_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
 echo '[BUILD] Compiling IA-64 kernel with kernel/Makefile...'
@@ -117,20 +126,17 @@ if [[ ! -f "$KERNEL" ]]; then
     exit 1
 fi
 
-ELF_HEADER="$("$READELF" -h "$KERNEL")"
-printf '\n%s\n' "$ELF_HEADER"
-if ! grep -qi 'Class:.*ELF64' <<<"$ELF_HEADER" ||
-   ! grep -qi 'Data:.*little endian' <<<"$ELF_HEADER" ||
-   ! grep -qi 'Machine:.*IA-64' <<<"$ELF_HEADER"; then
-    echo '[ERROR] Output is not a little-endian ELF64 IA-64 image.' >&2
-    exit 1
-fi
-ENTRY_POINT="$(awk '/Entry point address:/ { print $4; exit }' <<<"$ELF_HEADER")"
-if [[ -z "$ENTRY_POINT" || "$ENTRY_POINT" == 0x0 || "$ENTRY_POINT" == 0x0000000000000000 ]]; then
-    echo "[ERROR] ELF entry point is absent or zero: '$ENTRY_POINT'" >&2
-    exit 1
-fi
-printf '[PASS] ELF is ELF64, little-endian, EM_IA_64; entry=%s\n' "$ENTRY_POINT"
-printf '\n[INFO] Section, segment, and relocation inspection:\n'
-"$READELF" -S -l -r "$KERNEL"
+INSPECTION="$BUILD_DIR/ia64-elf-inspection.txt"
+VALIDATION="$BUILD_DIR/ia64-elf-validation.txt"
+SHA_FILE="$BUILD_DIR/kernel.elf.sha256"
+printf '\n[INFO] ELF SHA-256:\n'
+sha256sum "$KERNEL" | tee "$SHA_FILE"
 printf '\n[BUILD] Kernel ELF: %s\n' "$KERNEL"
+printf '[BUILD] Readelf evidence: %s\n' "$INSPECTION"
+printf '[BUILD] SHA-256 record: %s\n' "$SHA_FILE"
+printf '[BUILD] Validation report: %s\n' "$VALIDATION"
+"$READELF" -hSW -lW -rW -sW "$KERNEL" > "$INSPECTION"
+printf '\n[INFO] ELF header, sections, segments, relocations, and symbols:\n'
+"$READELF" -hSW -lW -rW "$KERNEL"
+printf '\n[INFO] Independent ELF and target-object validation:\n'
+python3 "$REPO_ROOT/scripts/validate-ia64-elf.py" --elf "$KERNEL" --object-dir "$BUILD_DIR/obj" --repo-root "$REPO_ROOT" 2>&1 | tee "$VALIDATION"
