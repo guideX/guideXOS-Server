@@ -436,6 +436,26 @@ function Test-QacChildAndListener {
     return $observation
 }
 
+function Confirm-QacRuntimeOwnership {
+    if (-not $script:QacProcess -or $script:QacProcess.HasExited) { throw 'QAC owner process is no longer live; guest control is refused.' }
+    $reservation = Get-QacInspectRecord -ReservationId ([string]$script:Execution.reservationId)
+    if (-not (Test-QacS22R10ReservationIdentity -Reservation $reservation -ExpectedReservationId ([string]$script:Execution.reservationId) -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId ([int]$script:Execution.childProcessId))) {
+        throw 'QAC reservation or registered child identity changed; guest control is refused.'
+    }
+    $childStartUtc = [DateTimeOffset]::Parse([string]$script:Execution.childStartUtc)
+    $childRecord = Get-QacProcessRecord -ProcessId ([int]$script:Execution.childProcessId)
+    if (-not $childRecord -or -not (Test-QacS22R10DirectChildIdentity -ProcessRecord $childRecord -ExpectedPid ([int]$script:Execution.childProcessId) -ExpectedParentPid $script:QacProcess.Id -ExpectedExecutable ([string]$script:Execution.qemuExecutable) -ExpectedStartUtc $childStartUtc)) {
+        throw 'The exact QAC-owned QEMU child is not live; guest control is refused.'
+    }
+    $endpointParts = [string]$script:Execution.qmp.endpoint -split ':',2
+    if ($endpointParts.Count -ne 2 -or $endpointParts[0] -cne '127.0.0.1') { throw 'Guest control endpoint is not the expected IPv4 loopback address.' }
+    $port = 0
+    if (-not [int]::TryParse($endpointParts[1],[ref]$port) -or $port -lt 49152 -or $port -gt 65535) { throw 'Guest control endpoint has an invalid QMP port.' }
+    $observation = Test-QacChildAndListener -ProcessId ([int]$script:Execution.childProcessId) -ParentId $script:QacProcess.Id -QemuPath ([string]$script:Execution.qemuExecutable) -StartUtc $childStartUtc -Port $port
+    Add-QmpListenerProbe -Observation $observation -Stage 'operator-command' -Port $port
+    if (-not $observation.Owned -or -not $observation.ProcessIdentityVerified) { throw 'QMP listener no longer matches the exact QAC-owned child; guest control is refused.' }
+}
+
 function Invoke-GuestOperatorCommand {
     param([Parameter(Mandatory)][string]$Text)
     $trimmed = $Text.Trim()
@@ -443,17 +463,20 @@ function Invoke-GuestOperatorCommand {
     $parts = $trimmed -split '\s+',3
     switch ($parts[0].ToLowerInvariant()) {
         'help' {
-            Write-Host 'Commands: status | screenshot LABEL | key KEY | wait SECONDS | result fail REASON | result pass | shutdown'
-            Write-Host 'Keys include meta_l, ctrl-esc, esc, enter, tab, up, down, left, right, f12, alt-f4, letters, and digits.'
+            Write-Host 'Commands: status | screenshot LABEL | key KEY | move DX,DY | click BUTTON | wait SECONDS | result fail REASON | result pass | shutdown'
+            Write-Host 'Keys include meta_l, ctrl-esc, esc, enter, tab, up, down, left, right, f12, alt-f4, letters, digits, slash, dot, shift-semicolon, and shift-letter.'
+            Write-Host 'Mouse moves are relative, with each axis limited to -49..49. Clicks pair button down/up with ownership checks.'
             return $false
         }
         'status' {
+            Confirm-QacRuntimeOwnership
             $state = Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'query-status'
             Write-Host ("QEMU status={0}; QAC reservation={1}; child PID={2}; serial lines observed={3}" -f $state.status,$script:Execution.reservationId,$script:Execution.childProcessId,$script:SerialLines.Count)
             return $false
         }
         'screenshot' {
             if ($parts.Count -lt 2 -or $parts[1] -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$') { throw 'Use screenshot with a safe alphanumeric label.' }
+            Confirm-QacRuntimeOwnership
             $path = Join-Path $script:ScreenshotPath ($parts[1] + '.ppm')
             $command = New-QacS22R10ScreendumpCommand -Path $path
             $response = Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'human-monitor-command' -Arguments @{ 'command-line' = $command }
@@ -467,9 +490,53 @@ function Invoke-GuestOperatorCommand {
             return $false
         }
         'key' {
-            if ($parts.Count -lt 2 -or $parts[1] -notmatch '^(?i)(meta_l|meta_r|ctrl-esc|esc|enter|tab|space|up|down|left|right|home|end|pageup|pagedown|f12|alt-f4|[a-z0-9])$') { throw 'Unsupported QMP key. Use one key from help.' }
+            if ($parts.Count -lt 2 -or $parts[1] -notmatch '^(?i)(meta_l|meta_r|ctrl-esc|esc|enter|tab|space|up|down|left|right|home|end|pageup|pagedown|f12|alt-f4|slash|dot|shift-semicolon|shift-[a-z]|[a-z0-9])$') { throw 'Unsupported QMP key. Use one key from help.' }
+            Confirm-QacRuntimeOwnership
             [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'human-monitor-command' -Arguments @{ 'command-line' = "sendkey $($parts[1].ToLowerInvariant())" })
             Add-ExecutionEvent -Type 'guest-key' -Data @{key=$parts[1].ToLowerInvariant()}
+            return $false
+        }
+        'move' {
+            if ($parts.Count -ne 2 -or $parts[1] -notmatch '^(-?\d+),(-?\d+)$') { throw 'Use move dx,dy with integer deltas.' }
+            $dx = [int]$Matches[1]
+            $dy = [int]$Matches[2]
+            if ([Math]::Abs($dx) -gt 49 -or [Math]::Abs($dy) -gt 49) { throw 'Each relative mouse axis must be within -49..49.' }
+            if ($dx -eq 0 -and $dy -eq 0) { throw 'Relative mouse move must include a non-zero delta.' }
+            Confirm-QacRuntimeOwnership
+            $events = @()
+            if ($dx -ne 0) { $events += @{type='rel';data=@{axis='x';value=$dx}} }
+            if ($dy -ne 0) { $events += @{type='rel';data=@{axis='y';value=$dy}} }
+            [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=$events})
+            Add-ExecutionEvent -Type 'guest-pointer-move' -Data @{dx=$dx;dy=$dy;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
+            Write-Host "Relative mouse move sent: $dx,$dy"
+            return $false
+        }
+        'click' {
+            if ($parts.Count -ne 2 -or $parts[1].ToLowerInvariant() -notin @('left','middle','right')) { throw 'Use click with left, middle, or right.' }
+            $button = $parts[1].ToLowerInvariant()
+            $buttonMayBeDown = $false
+            try {
+                Confirm-QacRuntimeOwnership
+                $buttonMayBeDown = $true
+                [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=@(@{type='btn';data=@{down=$true;button=$button}})})
+                Add-ExecutionEvent -Type 'guest-pointer-button-down' -Data @{button=$button;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
+                Start-Sleep -Milliseconds 500
+                Confirm-QacRuntimeOwnership
+                [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=@(@{type='btn';data=@{down=$false;button=$button}})})
+                $buttonMayBeDown = $false
+                Add-ExecutionEvent -Type 'guest-pointer-button-up' -Data @{button=$button;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
+                Start-Sleep -Milliseconds 500
+            } finally {
+                if ($buttonMayBeDown) {
+                    try {
+                        Confirm-QacRuntimeOwnership
+                        [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=@(@{type='btn';data=@{down=$false;button=$button}})})
+                        Add-ExecutionEvent -Type 'guest-pointer-button-failsafe-up' -Data @{button=$button;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
+                    } catch {
+                        Add-ExecutionEvent -Type 'guest-pointer-button-failsafe-release-skipped' -Data @{button=$button;reason=$_.Exception.Message}
+                    }
+                }
+            }
             return $false
         }
         'wait' {
@@ -503,6 +570,7 @@ function Invoke-GuestOperatorCommand {
         }
         { $_ -in @('shutdown','quit','done') } {
             if ($script:Execution.guestResult -notin @('PASS','FAIL')) { throw 'Record the guest result before requesting QMP shutdown.' }
+            Confirm-QacRuntimeOwnership
             $script:Execution.timings.qmpShutdownRequestedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
             Set-ExecutionState -State 'ShutdownRequested' -Data @{qmpEndpoint=$script:Execution.qmp.endpoint}
             $reply = Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'quit' -TimeoutMilliseconds 5000
@@ -968,6 +1036,7 @@ try {
                         $operatorLine = $script:ConsoleInputTask.GetAwaiter().GetResult()
                         $script:ConsoleInputTask = $null
                         if ($null -eq $operatorLine) { throw 'Interactive input ended while QEMU was active; QAC ownership and the workspace remain protected.' }
+                        if ([string]::IsNullOrWhiteSpace($operatorLine)) { continue }
                         if (Invoke-GuestOperatorCommand -Text $operatorLine) { $smokeCompleted = $true; break }
                     }
                 }

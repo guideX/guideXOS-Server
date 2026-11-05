@@ -371,6 +371,13 @@ function Get-QacS22R10QmpListenerObservation {
         UnfilteredScopedEndpointCount = $unfilteredScopedRows.Count
         QueryError = $QueryError
         ObservedEndpoints = $observedEndpointRecords
+        ProcessAlive = $false
+        ProcessIdentity = $null
+        ProcessIdentityVerified = $false
+        ActualCommandLine = $null
+        Failure = $null
+        DiscoveryQueryStatus = 'not-run'
+        FallbackQueryUsed = $FallbackQueryUsed
     }
 }
 

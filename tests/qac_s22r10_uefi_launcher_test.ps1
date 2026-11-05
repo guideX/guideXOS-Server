@@ -264,6 +264,7 @@ try {
     $operatorAst=$runnerAst.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-GuestOperatorCommand'},$true)
     Assert-True 'the interactive screenshot operator is available for isolated failure-path verification' ($null -ne $operatorAst -and $runnerParseErrors.Count -eq 0)
     Invoke-Expression $operatorAst.Extent.Text
+    function Confirm-QacRuntimeOwnership { }
     $script:ScreenshotPath=Join-Path $first.OutputDirectory 'screenshots'
     $script:QmpClient=[PSCustomObject]@{fixture=$true}
     $script:Execution=[ordered]@{guestResult='INCOMPLETE';events=[System.Collections.Generic.List[object]]::new()}
@@ -282,7 +283,17 @@ try {
     $expectedScreenshotCommand=New-QacS22R10ScreendumpCommand -Path $expectedScreenshot
     Assert-True 'screenshot requests target the private per-run output directory with a quoted Windows path' ($script:LastQmpCommand.Execute -eq 'human-monitor-command' -and $script:LastQmpCommand.Arguments['command-line'] -eq $expectedScreenshotCommand -and $expectedScreenshot.StartsWith($first.WorkspacePath,[StringComparison]::OrdinalIgnoreCase))
     Assert-True 'failed screenshot request leaves guest acceptance incomplete and records no guest result event' ($script:Execution.guestResult -eq 'INCOMPLETE' -and $script:Execution.events.Count -eq 0)
+    function Add-ExecutionEvent {
+        param([Parameter(Mandatory)][string]$Type,[Parameter(Mandatory)][hashtable]$Data)
+        $script:Execution.events.Add([PSCustomObject]@{type=$Type;data=$Data})
+    }
+    foreach ($keyCase in @(@{Input='key slash';Expected='sendkey slash'},@{Input='key dot';Expected='sendkey dot'},@{Input='key shift-semicolon';Expected='sendkey shift-semicolon'},@{Input='key shift-a';Expected='sendkey shift-a'})) {
+        [void](Invoke-GuestOperatorCommand $keyCase.Input)
+        Assert-True "Navigator URL punctuation/uppercase key '$($keyCase.Input)' is sent through the owned QMP client" ($script:LastQmpCommand.Execute -eq 'human-monitor-command' -and $script:LastQmpCommand.Arguments['command-line'] -eq $keyCase.Expected)
+    }
     Remove-Item Function:\Invoke-QacS22R10Qmp -Force -ErrorAction SilentlyContinue
+    Remove-Item Function:\Add-ExecutionEvent -Force -ErrorAction SilentlyContinue
+    Remove-Item Function:\Confirm-QacRuntimeOwnership -Force -ErrorAction SilentlyContinue
     Import-Module $launchPath -Force -ErrorAction Stop
     Remove-Item Function:\Invoke-GuestOperatorCommand -Force -ErrorAction SilentlyContinue
     $script:ScreenshotPath=$null; $script:QmpClient=$null; $script:Execution=$null; $script:QmpCommandCalls=$null; $script:LastQmpCommand=$null
@@ -367,6 +378,18 @@ try {
     Assert-True 'multiple listeners for the configured endpoint fail closed as ambiguous' ($ambiguousObservation.State -eq 'listener-ambiguous')
     Assert-True 'empty scoped discovery followed by a broad listener match is classified as a discovery-filter miss' ($filterMissObservation.DiscoveryState -eq 'targeted-and-scoped-query-empty-broad-table-found-endpoint' -and $filterMissObservation.ListenerCount -eq 1 -and $filterMissObservation.Owned)
     Assert-True 'unreported State can only produce a connection candidate for the exact unconnected-listener row shape and owner' ($unreportedStateObservation.State -eq 'listener-state-unreported-owned-candidate' -and $unreportedStateObservation.Owned -and -not $unreportedStateObservation.EndpointReady)
+    $liveObservationFieldsMutable = $false
+    try {
+        $unreportedStateObservation.ProcessAlive = $true
+        $unreportedStateObservation.ProcessIdentity = [PSCustomObject]@{processId=42001}
+        $unreportedStateObservation.ProcessIdentityVerified = $true
+        $unreportedStateObservation.ActualCommandLine = 'qemu-system-x86_64.exe -qmp tcp:127.0.0.1:50001'
+        $unreportedStateObservation.Failure = $null
+        $unreportedStateObservation.DiscoveryQueryStatus = 'fixture'
+        $unreportedStateObservation.FallbackQueryUsed = $true
+        $liveObservationFieldsMutable = $unreportedStateObservation.ProcessAlive -and $unreportedStateObservation.ProcessIdentityVerified -and $unreportedStateObservation.ActualCommandLine -like '*127.0.0.1:50001*' -and $unreportedStateObservation.DiscoveryQueryStatus -eq 'fixture' -and $unreportedStateObservation.FallbackQueryUsed
+    } catch { $liveObservationFieldsMutable = $false }
+    Assert-True 'live listener observations expose mutable process-ownership and discovery fields' $liveObservationFieldsMutable
     Assert-True 'IPv6 loopback is not confused with the configured IPv4 loopback endpoint' ($ipv6LoopbackObservation.State -eq 'listener-wrong-address-family' -and -not $ipv6LoopbackObservation.Owned)
     Assert-True 'IPv4-mapped IPv6 address remains a different transport-family binding' ($ipv4MappedIpv6Observation.State -eq 'listener-wrong-address-family' -and -not $ipv4MappedIpv6Observation.Owned)
     Assert-True 'non-listening TCP rows remain visible but do not satisfy listener readiness or connection eligibility' ($notListeningObservation.State -eq 'endpoint-present-nonlistener' -and $notListeningObservation.ObservedEndpointCount -eq 1 -and -not $notListeningObservation.ConnectionEligible)
@@ -443,6 +466,9 @@ try {
     [void](Assert-Throws 'configured endpoint that refuses the authorized TCP connection is captured as a connection failure' { Open-QacS22R10QmpClient -Port $unusedProbePort -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 500 -ReadTimeoutMilliseconds 500 } 'refused|failed|connect')
 
     $runnerSource=Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1') -Raw
+    Assert-True 'interactive runner ignores empty console lines instead of terminating an active QAC guest' ($runnerSource.Contains('if ([string]::IsNullOrWhiteSpace($operatorLine)) { continue }'))
+    Assert-True 'live runner provides relative PS/2 pointer movement over its owned QMP connection with a per-axis -49..49 bound' ($runnerSource -match "'move'\s*\{" -and $runnerSource -match "-Execute 'input-send-event'" -and $runnerSource -match '\[Math\]::Abs\(\$dx\) -gt 49 -or \[Math\]::Abs\(\$dy\) -gt 49')
+    Assert-True 'live runner revalidates QAC reservation, exact child, and listener before control and pairs mouse button down/up' ($runnerSource -match 'function Confirm-QacRuntimeOwnership' -and $runnerSource -match "'click'\s*\{" -and $runnerSource -match 'Confirm-QacRuntimeOwnership\s*\n\s*\$buttonMayBeDown = \$true' -and $runnerSource -match 'guest-pointer-button-failsafe-up')
     $listenerLoopIndex=$runnerSource.IndexOf('while ([DateTimeOffset]::UtcNow -lt $startupDeadline',[StringComparison]::Ordinal)
     $ownershipGateIndex=$runnerSource.IndexOf('if ($listening) {',[StringComparison]::Ordinal)
     $pausedGateIndex=$runnerSource.IndexOf('if ($qmpIdentity.Status -notin @(',[StringComparison]::Ordinal)
