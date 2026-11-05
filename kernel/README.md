@@ -46,7 +46,7 @@ You need cross-compilation toolchains for your target architecture:
 - **x86**: `i686-elf-gcc`, `i686-elf-g++`, `nasm`
 - **ARM**: `arm-none-eabi-gcc`, `arm-none-eabi-g++`
 - **SPARC**: `sparc-elf-gcc`, `sparc-elf-g++`
-- **IA-64**: `ia64-elf-gcc`, `ia64-elf-g++`
+- **IA-64**: `ia64-elf-g++` or `ia64-linux-gnu-g++`, with matching assembler and linker
 
 ### Build Commands
 
@@ -72,6 +72,8 @@ make ARCH=amd64 info
 # Clean build artifacts
 make ARCH=amd64 clean
 ```
+
+IA-64 remains an unqualified bring-up target. See `../docs/IA64_SUPPORT.md` for its prerequisites, ABI blockers, and evidence status.
 
 ### Output
 
@@ -156,8 +158,8 @@ Each architecture provides its own operations:
 - Processor state: `read_psr()`, `write_psr()`
 
 #### Itanium
-- Application registers: `read_ar()`, `write_ar()`
-- Control registers: `read_cr()`, `write_cr()`
+- Application registers: `read_ar<AR>()`, `write_ar<AR>(value)`
+- Control registers: `read_cr<CR>()`, `write_cr<CR>(value)`
 - RSE operations: `flush_rse()`, `read_bsp()`
 
 ## Testing

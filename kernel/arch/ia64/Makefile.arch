@@ -1,13 +1,12 @@
 # Itanium (IA-64) Architecture Build Configuration
-# Itanium (IA-64) Architecture Build Configuration
 #
-# Targets IA-64 / Itanium.  Tested with ia64-elf toolchain
-# and the HP ski IA-64 simulator.
+# Targets IA-64 / Itanium.  This configuration is not yet qualified by a
+# target build or simulator run.
 #
 # Copyright (c) 2026 guideXOS Server
 #
 
-# Toolchain — try ia64-elf first, fall back to ia64-linux-gnu
+# Toolchain: try ia64-elf first, then ia64-linux-gnu.
 ifeq ($(OS),Windows_NT)
     CXX := ia64-elf-g++
     AS  := ia64-elf-as
@@ -29,12 +28,12 @@ else
 endif
 
 # Architecture-specific flags
-# -mlp64          : LP64 data model (standard for IA-64)
-# -mconstant-gp   : assume GP register is constant (kernel single-image)
-# -mno-pic        : no position-independent code (kernel runs at fixed VA)
-# -mfixed-range=f2-f127 : reserve floating-point regs (kernel avoids FP)
-ARCH_CFLAGS := -mlp64 -mconstant-gp -mno-pic -mfixed-range=f2-f127
-ASFLAGS := -mlp64 -mconstant-gp
+# -mlp64/-mlittle-endian: 64-bit, little-endian kernel image
+# -mconstant-gp        : one link-time GP value for this single-image kernel
+# -mfixed-range=f2-f127: reserve floating-point registers for the kernel
+ARCH_CFLAGS := -mlp64 -mlittle-endian -mconstant-gp -mfixed-range=f2-f127
+ASFLAGS := -mlp64 -mle -mconstant-gp
+LINKER_SCRIPT_FLAG := -T
 ARCH_LDFLAGS :=
 LIBS :=
 

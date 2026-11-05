@@ -58,16 +58,6 @@ void disable_interrupts()
 #endif
 }
 
-void break_instruction(uint64_t imm)
-{
-#if GXOS_MSVC_STUB
-    (void)imm;
-    __debugbreak();
-#else
-    asm volatile ("break.i %0" : : "i"(imm));
-#endif
-}
-
 uint64_t read_psr()
 {
 #if GXOS_MSVC_STUB
@@ -93,62 +83,6 @@ void write_psr(uint64_t value)
         :
         : "r"(value)
         : "memory"
-    );
-#endif
-}
-
-uint64_t read_ar(uint32_t ar_num)
-{
-#if GXOS_MSVC_STUB
-    (void)ar_num; return 0;
-#else
-    uint64_t value;
-    asm volatile (
-        "mov %0 = ar%1;;\n"
-        : "=r"(value)
-        : "i"(ar_num)
-    );
-    return value;
-#endif
-}
-
-void write_ar(uint32_t ar_num, uint64_t value)
-{
-#if GXOS_MSVC_STUB
-    (void)ar_num; (void)value;
-#else
-    asm volatile (
-        "mov ar%1 = %0;;\n"
-        :
-        : "r"(value), "i"(ar_num)
-    );
-#endif
-}
-
-uint64_t read_cr(uint32_t cr_num)
-{
-#if GXOS_MSVC_STUB
-    (void)cr_num; return 0;
-#else
-    uint64_t value;
-    asm volatile (
-        "mov %0 = cr%1;;\n"
-        : "=r"(value)
-        : "i"(cr_num)
-    );
-    return value;
-#endif
-}
-
-void write_cr(uint32_t cr_num, uint64_t value)
-{
-#if GXOS_MSVC_STUB
-    (void)cr_num; (void)value;
-#else
-    asm volatile (
-        "mov cr%1 = %0;;\n"
-        :
-        : "r"(value), "i"(cr_num)
     );
 #endif
 }
@@ -210,12 +144,12 @@ void write_bspstore(uint64_t value)
 
 uint64_t read_iva()
 {
-    return read_cr(2);  // CR.IVA is CR2
+    return read_cr<2>();  // CR.IVA is CR2
 }
 
 void write_iva(uint64_t value)
 {
-    write_cr(2, value);  // CR.IVA is CR2
+    write_cr<2>(value);  // CR.IVA is CR2
 }
 
 void flush_cache()
@@ -274,7 +208,7 @@ void init()
 
     // Set DCR (Default Control Register, CR0) to safe defaults:
     // bit 0: defer data-TLB misses to VHPT walker (0 = use IVT handler)
-    write_cr(0, 0);
+    write_cr<0>(0);
 
     // Enable interrupt collection (psr.ic) so the IVT is active,
     // but keep external interrupts masked (psr.i = 0) until the

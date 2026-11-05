@@ -7,9 +7,11 @@
 ifeq ($(OS),Windows_NT)
     MKDIR = if not exist "$(subst /,\,$1)" mkdir "$(subst /,\,$1)"
     RM = if exist "$(subst /,\,$1)" rmdir /s /q "$(subst /,\,$1)"
+    POWERSHELL ?= powershell
 else
     MKDIR = mkdir -p $1
     RM = rm -rf $1
+    POWERSHELL ?= pwsh
 endif
 
 # Resolve repository paths from this Makefile rather than from the caller's
@@ -141,7 +143,7 @@ DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS
 all: verify-mbedtls-guidexos mbedtls-guidexos-compile-probe $(KERNEL)
 
 verify-mbedtls-guidexos:
-	@powershell -NoProfile -ExecutionPolicy Bypass -File "$(GUIDEXOS_REPO_ROOT)/scripts/verify-mbedtls-profile.ps1" -DependencyRoot "$(GUIDEXOS_REPO_ROOT)/third_party/mbedtls" -RepoRoot "$(GUIDEXOS_REPO_ROOT)"
+	@$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File "$(GUIDEXOS_REPO_ROOT)/scripts/verify-mbedtls-profile.ps1" -DependencyRoot "$(GUIDEXOS_REPO_ROOT)/third_party/mbedtls" -RepoRoot "$(GUIDEXOS_REPO_ROOT)"
 
 ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)
 mbedtls-guidexos-compile-probe: $(MBEDTLS_COMPILE_PROBE_C_OBJS)

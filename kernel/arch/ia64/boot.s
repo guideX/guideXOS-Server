@@ -23,10 +23,10 @@
 /* ================================================================
  * SSC (Simulator System Call) codes for ski
  * ================================================================ */
-#define SSC_STOP            0x00
-#define SSC_CONSOLE_INIT    0x20
-#define SSC_PUTCHAR         0x21
-#define SSC_GETCHAR         0x22
+.equ SSC_STOP,            0x00
+.equ SSC_CONSOLE_INIT,    0x20
+.equ SSC_PUTCHAR,         0x21
+.equ SSC_GETCHAR,         0x22
 
 /* ================================================================
  * Minimal Interrupt Vector Table (IVT)
@@ -43,38 +43,39 @@
 ia64_ivt:
 
 /* Macro: generate one 256-byte IVT entry that just halts */
-#define IVT_ENTRY_HALT(name)        \
-    .align 256;                     \
-name:                               \
-    rsm psr.i | psr.ic ;;          \
-    srlz.d ;;                       \
-    hint @pause ;;                  \
-    br.sptk name ;;
+.macro IVT_ENTRY_HALT name
+    .align 256
+\name:
+    rsm psr.i | psr.ic ;;
+    srlz.d ;;
+    hint @pause ;;
+    br.sptk \name ;;
+.endm
 
 /* Entry 0x00: VHPT Translation (offset 0x0000) */
-IVT_ENTRY_HALT(ivt_vhpt_translation)
+IVT_ENTRY_HALT ivt_vhpt_translation
 /* Entry 0x01: Instruction TLB (offset 0x0400) */
-IVT_ENTRY_HALT(ivt_itlb_miss)
+IVT_ENTRY_HALT ivt_itlb_miss
 /* Entry 0x02: Data TLB (offset 0x0800) */
-IVT_ENTRY_HALT(ivt_dtlb_miss)
+IVT_ENTRY_HALT ivt_dtlb_miss
 /* Entry 0x03: Alternate Instruction TLB (offset 0x0C00) */
-IVT_ENTRY_HALT(ivt_alt_itlb)
+IVT_ENTRY_HALT ivt_alt_itlb
 /* Entry 0x04: Alternate Data TLB (offset 0x1000) */
-IVT_ENTRY_HALT(ivt_alt_dtlb)
+IVT_ENTRY_HALT ivt_alt_dtlb
 /* Entry 0x05: Data Nested TLB (offset 0x1400) */
-IVT_ENTRY_HALT(ivt_nested_dtlb)
+IVT_ENTRY_HALT ivt_nested_dtlb
 /* Entry 0x06: Instruction Key Miss (offset 0x1800) */
-IVT_ENTRY_HALT(ivt_ikey_miss)
+IVT_ENTRY_HALT ivt_ikey_miss
 /* Entry 0x07: Data Key Miss (offset 0x1C00) */
-IVT_ENTRY_HALT(ivt_dkey_miss)
+IVT_ENTRY_HALT ivt_dkey_miss
 /* Entry 0x08: Dirty Bit (offset 0x2000) */
-IVT_ENTRY_HALT(ivt_dirty_bit)
+IVT_ENTRY_HALT ivt_dirty_bit
 /* Entry 0x09: Instruction Access Bit (offset 0x2400) */
-IVT_ENTRY_HALT(ivt_iaccess_bit)
+IVT_ENTRY_HALT ivt_iaccess_bit
 /* Entry 0x0A: Data Access Bit (offset 0x2800) */
-IVT_ENTRY_HALT(ivt_daccess_bit)
+IVT_ENTRY_HALT ivt_daccess_bit
 /* Entry 0x0B: Break Instruction (offset 0x2C00) */
-IVT_ENTRY_HALT(ivt_break)
+IVT_ENTRY_HALT ivt_break
 /* Entry 0x0C: External Interrupt (offset 0x3000) */
 .align 256
 .global ivt_external_interrupt
@@ -87,79 +88,79 @@ ivt_external_interrupt:
 
 /* Entries 0x0D–0x44: remaining vectors (catch-all halt) */
 /* 0x0D: Reserved */
-IVT_ENTRY_HALT(ivt_reserved_0d)
+IVT_ENTRY_HALT ivt_reserved_0d
 /* 0x0E: Reserved */
-IVT_ENTRY_HALT(ivt_reserved_0e)
+IVT_ENTRY_HALT ivt_reserved_0e
 /* 0x0F: Reserved */
-IVT_ENTRY_HALT(ivt_reserved_0f)
+IVT_ENTRY_HALT ivt_reserved_0f
 /* 0x10–0x13: Page Not Present, Key Permission, Instruction Access Rights, Data Access Rights */
-IVT_ENTRY_HALT(ivt_page_not_present)
-IVT_ENTRY_HALT(ivt_key_permission)
-IVT_ENTRY_HALT(ivt_ia_rights)
-IVT_ENTRY_HALT(ivt_da_rights)
+IVT_ENTRY_HALT ivt_page_not_present
+IVT_ENTRY_HALT ivt_key_permission
+IVT_ENTRY_HALT ivt_ia_rights
+IVT_ENTRY_HALT ivt_da_rights
 /* 0x14: General Exception */
-IVT_ENTRY_HALT(ivt_general_exception)
+IVT_ENTRY_HALT ivt_general_exception
 /* 0x15: Disabled FP Register */
-IVT_ENTRY_HALT(ivt_disabled_fp)
+IVT_ENTRY_HALT ivt_disabled_fp
 /* 0x16: NaT Consumption */
-IVT_ENTRY_HALT(ivt_nat_consumption)
+IVT_ENTRY_HALT ivt_nat_consumption
 /* 0x17: Speculation */
-IVT_ENTRY_HALT(ivt_speculation)
+IVT_ENTRY_HALT ivt_speculation
 /* 0x18: Reserved */
-IVT_ENTRY_HALT(ivt_reserved_18)
+IVT_ENTRY_HALT ivt_reserved_18
 /* 0x19: Debug */
-IVT_ENTRY_HALT(ivt_debug)
+IVT_ENTRY_HALT ivt_debug
 /* 0x1A: Unaligned Reference */
-IVT_ENTRY_HALT(ivt_unaligned_ref)
+IVT_ENTRY_HALT ivt_unaligned_ref
 /* 0x1B: Unsupported Data Reference */
-IVT_ENTRY_HALT(ivt_unsupported_data_ref)
+IVT_ENTRY_HALT ivt_unsupported_data_ref
 /* 0x1C: Floating-Point Fault */
-IVT_ENTRY_HALT(ivt_fp_fault)
+IVT_ENTRY_HALT ivt_fp_fault
 /* 0x1D: Floating-Point Trap */
-IVT_ENTRY_HALT(ivt_fp_trap)
+IVT_ENTRY_HALT ivt_fp_trap
 /* 0x1E: Lower-Privilege Transfer Trap */
-IVT_ENTRY_HALT(ivt_lp_transfer)
+IVT_ENTRY_HALT ivt_lp_transfer
 /* 0x1F: Taken Branch Trap */
-IVT_ENTRY_HALT(ivt_taken_branch)
+IVT_ENTRY_HALT ivt_taken_branch
 /* 0x20: Single Step Trap */
-IVT_ENTRY_HALT(ivt_single_step)
+IVT_ENTRY_HALT ivt_single_step
 /* 0x21–0x44: remaining reserved / impl-specific vectors */
-IVT_ENTRY_HALT(ivt_reserved_21)
-IVT_ENTRY_HALT(ivt_reserved_22)
-IVT_ENTRY_HALT(ivt_reserved_23)
-IVT_ENTRY_HALT(ivt_reserved_24)
-IVT_ENTRY_HALT(ivt_reserved_25)
-IVT_ENTRY_HALT(ivt_reserved_26)
-IVT_ENTRY_HALT(ivt_reserved_27)
-IVT_ENTRY_HALT(ivt_reserved_28)
-IVT_ENTRY_HALT(ivt_reserved_29)
-IVT_ENTRY_HALT(ivt_reserved_2a)
-IVT_ENTRY_HALT(ivt_reserved_2b)
-IVT_ENTRY_HALT(ivt_reserved_2c)
-IVT_ENTRY_HALT(ivt_reserved_2d)
-IVT_ENTRY_HALT(ivt_reserved_2e)
-IVT_ENTRY_HALT(ivt_reserved_2f)
-IVT_ENTRY_HALT(ivt_reserved_30)
-IVT_ENTRY_HALT(ivt_reserved_31)
-IVT_ENTRY_HALT(ivt_reserved_32)
-IVT_ENTRY_HALT(ivt_reserved_33)
-IVT_ENTRY_HALT(ivt_reserved_34)
-IVT_ENTRY_HALT(ivt_reserved_35)
-IVT_ENTRY_HALT(ivt_reserved_36)
-IVT_ENTRY_HALT(ivt_reserved_37)
-IVT_ENTRY_HALT(ivt_reserved_38)
-IVT_ENTRY_HALT(ivt_reserved_39)
-IVT_ENTRY_HALT(ivt_reserved_3a)
-IVT_ENTRY_HALT(ivt_reserved_3b)
-IVT_ENTRY_HALT(ivt_reserved_3c)
-IVT_ENTRY_HALT(ivt_reserved_3d)
-IVT_ENTRY_HALT(ivt_reserved_3e)
-IVT_ENTRY_HALT(ivt_reserved_3f)
-IVT_ENTRY_HALT(ivt_reserved_40)
-IVT_ENTRY_HALT(ivt_reserved_41)
-IVT_ENTRY_HALT(ivt_reserved_42)
-IVT_ENTRY_HALT(ivt_reserved_43)
-IVT_ENTRY_HALT(ivt_reserved_44)
+IVT_ENTRY_HALT ivt_reserved_21
+IVT_ENTRY_HALT ivt_reserved_22
+IVT_ENTRY_HALT ivt_reserved_23
+IVT_ENTRY_HALT ivt_reserved_24
+IVT_ENTRY_HALT ivt_reserved_25
+IVT_ENTRY_HALT ivt_reserved_26
+IVT_ENTRY_HALT ivt_reserved_27
+IVT_ENTRY_HALT ivt_reserved_28
+IVT_ENTRY_HALT ivt_reserved_29
+IVT_ENTRY_HALT ivt_reserved_2a
+IVT_ENTRY_HALT ivt_reserved_2b
+IVT_ENTRY_HALT ivt_reserved_2c
+IVT_ENTRY_HALT ivt_reserved_2d
+IVT_ENTRY_HALT ivt_reserved_2e
+IVT_ENTRY_HALT ivt_reserved_2f
+IVT_ENTRY_HALT ivt_reserved_30
+IVT_ENTRY_HALT ivt_reserved_31
+IVT_ENTRY_HALT ivt_reserved_32
+IVT_ENTRY_HALT ivt_reserved_33
+IVT_ENTRY_HALT ivt_reserved_34
+IVT_ENTRY_HALT ivt_reserved_35
+IVT_ENTRY_HALT ivt_reserved_36
+IVT_ENTRY_HALT ivt_reserved_37
+IVT_ENTRY_HALT ivt_reserved_38
+IVT_ENTRY_HALT ivt_reserved_39
+IVT_ENTRY_HALT ivt_reserved_3a
+IVT_ENTRY_HALT ivt_reserved_3b
+IVT_ENTRY_HALT ivt_reserved_3c
+IVT_ENTRY_HALT ivt_reserved_3d
+IVT_ENTRY_HALT ivt_reserved_3e
+IVT_ENTRY_HALT ivt_reserved_3f
+IVT_ENTRY_HALT ivt_reserved_40
+IVT_ENTRY_HALT ivt_reserved_41
+IVT_ENTRY_HALT ivt_reserved_42
+IVT_ENTRY_HALT ivt_reserved_43
+IVT_ENTRY_HALT ivt_reserved_44
 
 /* ================================================================
  * Boot entry point

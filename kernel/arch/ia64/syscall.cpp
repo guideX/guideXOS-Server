@@ -164,7 +164,7 @@ extern "C" void exception_dispatch(uint64_t vector, uint64_t isr)
         case IVT_INST_ACCESS_R:
         case IVT_DATA_ACCESS_R:
             {
-                uint64_t ifa = read_cr(20);  // CR.IFA
+                uint64_t ifa = read_cr<20>();  // CR.IFA
                 handle_page_fault(ifa, isr);
             }
             break;
