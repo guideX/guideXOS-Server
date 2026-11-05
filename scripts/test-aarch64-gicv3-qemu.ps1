@@ -4,9 +4,10 @@ param(
     [string]$QemuPath = 'C:\Program Files\qemu\qemu-system-aarch64.exe',
     [string]$FirmwareCode = 'C:\Program Files\qemu\share\edk2-aarch64-code.fd',
     [string]$FirmwareVarsTemplate = 'C:\Program Files\qemu\share\edk2-arm-vars.fd',
+    [string]$LlvmRoot = 'C:\Program Files\LLVM\bin',
     [string]$QacCliPath = '',
-    [int]$TimeoutSeconds = 120,
-    [int]$AdmissionTimeoutSeconds = 120
+    [int]$TimeoutSeconds = 300,
+    [int]$AdmissionTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,7 +85,7 @@ if (!$qacPreflightFailure) {
 
 Write-Host 'Building the Phase 4 ARM64 candidate before QAC guest admission...' -ForegroundColor Cyan
 $buildDirectory = Join-Path $ArtifactDirectory 'gicv3-image'
-& (Join-Path $PSScriptRoot 'build-aarch64-gicv3.ps1') -OutputDirectory $buildDirectory
+& (Join-Path $PSScriptRoot 'build-aarch64-gicv3.ps1') -LlvmRoot $LlvmRoot -OutputDirectory $buildDirectory
 if ($LASTEXITCODE -ne 0) { throw 'AArch64 GICv3 build failed' }
 $esp = Join-Path $buildDirectory 'esp'
 foreach ($required in @('EFI\BOOT\BOOTAA64.EFI', 'kernel.elf', 'ramdisk.img')) {
@@ -110,6 +111,8 @@ $sessionRecord = [ordered]@{
     firmware_vars_template = [IO.Path]::GetFullPath($FirmwareVarsTemplate)
     build_directory = $buildDirectory
     kernel_sha256 = (Get-FileHash -LiteralPath (Join-Path $buildDirectory 'kernel.elf') -Algorithm SHA256).Hash.ToLowerInvariant()
+    candidate_manifest = $null
+    qac_attempts = @()
     runs = @()
 }
 
@@ -142,6 +145,136 @@ function Find-QacRunReservation([string]$ListText, [string]$Project, [int]$Owner
     $pattern = '(?m)^\s*([0-9a-f]{32}) \| ' + [regex]::Escape($Project) +
         ' \| acceptance \| ([^|]+) \| queue \d+ \| [^\r\n]*\(PID ' + $OwnerPid + '\) \| owner '
     return [regex]::Match($ListText, $pattern)
+}
+
+function Get-QemuProcesses {
+    try {
+        return @(Get-CimInstance Win32_Process -Filter "Name='qemu-system-aarch64.exe'" -ErrorAction Stop)
+    } catch {
+        throw "Unable to verify QEMU process ownership through CIM: $($_.Exception.Message)"
+    }
+}
+
+function Get-QacHealth([string]$Context) {
+    $status = & $QacCliPath status 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $status -notmatch '(?m)^Coordinator: Online\r?$') {
+        throw "$Context QAC coordinator is not verifiably online.`n$status"
+    }
+    if ($status -match 'Recovery: Required') {
+        throw "$Context QAC requires recovery; refusing guest execution.`n$status"
+    }
+    $processMatch = [regex]::Match($status, '(?m)^QEMU processes: (\d+) \((\d+) foreign\)\r?$')
+    if (!$processMatch.Success) { throw "$Context QAC status did not expose a parseable QEMU ownership count.`n$status" }
+    if ([int]$processMatch.Groups[2].Value -ne 0) {
+        throw "$Context QAC reports unmanaged/foreign QEMU processes; refusing guest execution.`n$status"
+    }
+    $list = & $QacCliPath list 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "$Context unable to inspect QAC reservations.`n$list" }
+    return [pscustomobject]@{ Status = $status.Trim(); List = $list.Trim() }
+}
+
+function Assert-QacOwnedGuest([int]$QacProcessId, [string]$ExpectedQemuPath,
+                              [string]$Machine, [string]$Cpu, [string]$Context) {
+    $processes = Get-QemuProcesses
+    if ($processes.Count -ne 1) {
+        throw "$Context expected exactly one QEMU process after the exclusive grant; found $($processes.Count)."
+    }
+    $child = $processes[0]
+    $pathMatches = [string]::Equals([string]$child.ExecutablePath, $ExpectedQemuPath,
+        [StringComparison]::OrdinalIgnoreCase)
+    $parentMatches = [int]$child.ParentProcessId -eq $QacProcessId
+    $commandLine = [string]$child.CommandLine
+    $machineMatches = [regex]::IsMatch($commandLine,
+        '(?:^|\s)"?-machine"?\s+"?' + [regex]::Escape($Machine) + '"?(?:\s|$)')
+    $cpuMatches = [regex]::IsMatch($commandLine,
+        '(?:^|\s)"?-cpu"?\s+"?' + [regex]::Escape($Cpu) + '"?(?:\s|$)')
+    if (!$pathMatches -or !$parentMatches -or !$machineMatches -or !$cpuMatches) {
+        throw "$Context QEMU ownership/profile mismatch (pid=$($child.ProcessId), parent=$($child.ParentProcessId), path=$($child.ExecutablePath), command=$commandLine)."
+    }
+    return $child
+}
+
+function Wait-QacOwnedGuest([int]$QacProcessId, [string]$ExpectedQemuPath,
+                            [string]$Machine, [string]$Cpu, [string]$Context) {
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        $processes = Get-QemuProcesses
+        if ($processes.Count -gt 0) {
+            return Assert-QacOwnedGuest $QacProcessId $ExpectedQemuPath $Machine $Cpu $Context
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "$Context QAC reported Running but no managed QEMU child appeared within 15 seconds."
+}
+
+function Get-FileIdentity([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    return [ordered]@{
+        path = [IO.Path]::GetFullPath($Path)
+        bytes = $item.Length
+        sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+
+function Write-CandidateManifest {
+    $repoInputs = @(& git -C $repoRoot ls-files -- 'kernel/arch/arm64' 'kernel/core' 'guideXOSBootLoader/aarch64' `
+        'tests/aarch64_phase2_host_tests.cpp' 'tests/aarch64_gicv3_host_tests.cpp' `
+        'tests/aarch64_phase3_host_tests.cpp' 'tests/aarch64_phase4_host_tests.cpp' `
+        'tests/aarch64_scheduler_repeatability_host_tests.cpp')
+    if ($LASTEXITCODE -ne 0 -or $repoInputs.Count -eq 0) { throw 'Unable to enumerate source-matched GICv3 build inputs.' }
+    $explicitInputs = @(
+        'scripts/build-aarch64-gicv3.ps1', 'scripts/build-aarch64-phase4.ps1',
+        'scripts/stage-aarch64-phase4-ramdisk.ps1', 'scripts/test-aarch64-gicv3-host.ps1',
+        'scripts/test-aarch64-gicv3-qemu.ps1', 'kernel/arch/arm64/phase4_boot_info.h'
+    )
+    $inputHashes = [ordered]@{}
+    foreach ($relative in @($repoInputs + $explicitInputs | Sort-Object -Unique)) {
+        $path = Join-Path $repoRoot ($relative -replace '/', '\\')
+        if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Build input is missing: $relative" }
+        $inputHashes[$relative] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $clang = Join-Path $LlvmRoot 'clang++.exe'
+    $linker = Join-Path $LlvmRoot 'ld.lld.exe'
+    $gitStatus = (& git -C $repoRoot status --short --branch | Out-String).Trim()
+    $artifacts = [ordered]@{}
+    foreach ($relative in @('BOOTAA64.EFI', 'kernel.elf', 'esp/EFI/BOOT/BOOTAA64.EFI', 'esp/kernel.elf', 'esp/ramdisk.img')) {
+        $path = Join-Path $buildDirectory ($relative -replace '/', '\\')
+        $artifacts[$relative] = Get-FileIdentity $path
+    }
+    $manifest = [ordered]@{
+        schemaVersion = 1
+        candidate = 'AARCH64 GICv3 Phase 4 minimal guest; production DTB-selected controller; no Studio payload'
+        source = [ordered]@{
+            branch = (& git -C $repoRoot branch --show-current).Trim()
+            head = (& git -C $repoRoot rev-parse HEAD).Trim()
+            worktree = $gitStatus
+            inputSha256 = $inputHashes
+        }
+        build = [ordered]@{
+            command = 'scripts/build-aarch64-gicv3.ps1 -OutputDirectory <candidate>'
+            profile = 'GXOS_AARCH64_PHASE4; freestanding AArch64 UEFI/kernel; production GICv2/GICv3 selector; 512 MiB; minimal Phase 4 VFS/scheduler workload'
+            qemuMachine = 'virt,gic-version=3,acpi=off'
+            qemuCpu = 'cortex-a53'
+            llvmRoot = $LlvmRoot
+            clangVersion = (& $clang --version 2>&1 | Select-Object -First 1).ToString()
+            linkerVersion = (& $linker --version 2>&1 | Select-Object -First 1).ToString()
+            clang = Get-FileIdentity $clang
+            linker = Get-FileIdentity $linker
+        }
+        runtime = [ordered]@{
+            qemu = Get-FileIdentity $QemuPath
+            firmwareCode = Get-FileIdentity $FirmwareCode
+            firmwareVarsTemplate = Get-FileIdentity $FirmwareVarsTemplate
+        }
+        artifacts = $artifacts
+    }
+    $manifestPath = Join-Path $buildDirectory 'candidate-manifest.json'
+    $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+    return [pscustomobject]@{
+        Path = $manifestPath
+        Sha256 = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        Data = $manifest
+    }
 }
 
 function Read-GuestLog([string]$Path) {
@@ -224,7 +357,7 @@ function Assert-Gicv3GuestLog([string]$Text, [string]$Name) {
         '[guideXOS] GICv3 timer dispatch:', '[guideXOS] GICv3 scheduler:',
         'AARCH64_PHASE4_PASS'
     )
-    if ($Text -match 'AARCH64_PHASE[234]_ERROR|\[guideXOS\].*(FAIL|FATAL|ERROR)|\[A64 UEFI\] ERROR') {
+    if ($Text -match 'AARCH64_PHASE[234]_ERROR\b|\[guideXOS\].*(FAIL\b|FATAL\b|ERROR\b)|\[A64 UEFI\] ERROR\b') {
         throw "$Name contains a guest fatal/error marker"
     }
     $last = -1
@@ -256,13 +389,13 @@ function Assert-Gicv3GuestLog([string]$Text, [string]$Name) {
     $invalid = [uint64]$timer.Groups[5].Value
     $completionErrors = [uint64]$timer.Groups[6].Value
     $pending = [uint64]$timer.Groups[7].Value
-    if ($irqId -ne $timerPpi -or $ticks -lt 1000 -or $acks -ne $ticks -or
+    if ($irqId -ne $timerPpi -or $ticks -lt 10000 -or $acks -ne $ticks -or
         $eois -ne $acks -or $invalid -ne 0 -or $completionErrors -ne 0 -or $pending -ne 0) {
         throw "$Name failed bounded timer acknowledgement/EOI acceptance"
     }
     $scheduler = [regex]::Match($Text, 'GICv3 scheduler: preemptions=(\d+) context-switches=(\d+) task-A=(\d+) task-B=(\d+) task-C=(\d+)')
     if (!$scheduler.Success) { throw "$Name lacks guest scheduler task progress counters" }
-    if ([uint64]$scheduler.Groups[1].Value -lt 1000 -or
+    if ([uint64]$scheduler.Groups[1].Value -lt 10000 -or
         [uint64]$scheduler.Groups[2].Value -eq 0 -or
         [uint64]$scheduler.Groups[3].Value -eq 0 -or
         [uint64]$scheduler.Groups[4].Value -eq 0 -or
@@ -270,6 +403,17 @@ function Assert-Gicv3GuestLog([string]$Text, [string]$Name) {
         throw "$Name lacks timer-driven preemption or progress from two scheduler tasks"
     }
     if ($Text -notmatch 'unexpected-irq=0 exceptions=0') { throw "$Name reports an unexpected IRQ or synchronous exception" }
+    $vfs = [regex]::Match($Text, 'scheduler/VFS integration: PASS reads=(\d+) enumerations=(\d+)')
+    if (!$vfs.Success -or [uint64]$vfs.Groups[1].Value -eq 0 -or [uint64]$vfs.Groups[2].Value -eq 0) {
+        throw "$Name lacks successful Phase 4 VFS read and enumeration evidence"
+    }
+    $durability = [regex]::Match($Text, 'memory/VFS durability: PASS .* ticks=(\d+) context-switches=(\d+) preemptions=(\d+) vfs-reads=(\d+) vfs-enumerations=(\d+) unexpected-irq=(\d+) exceptions=(\d+)')
+    if (!$durability.Success -or [uint64]$durability.Groups[1].Value -lt 10000 -or
+        [uint64]$durability.Groups[3].Value -lt 10000 -or
+        [uint64]$durability.Groups[4].Value -eq 0 -or [uint64]$durability.Groups[5].Value -eq 0 -or
+        [uint64]$durability.Groups[6].Value -ne 0 -or [uint64]$durability.Groups[7].Value -ne 0) {
+        throw "$Name lacks 10,000 timer/preemption, VFS, and zero-exception Phase 4 evidence"
+    }
     if ($Text -notmatch 'AARCH64_PHASE4_PASS') { throw "$Name lacks the Phase 4 guest pass marker" }
 }
 
@@ -287,6 +431,13 @@ function Invoke-QacManagedBoot {
         [int]$RuntimeSeconds
     )
     $qmpPort = Get-FreeQmpPort
+    $before = Get-QacHealth "$Name pre-admission"
+    $baselineProcesses = @(Get-QemuProcesses | ForEach-Object { [int]$_.ProcessId })
+    $initialVarsSha256 = (Get-FileHash -LiteralPath $VarsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $varsTemplateSha256 = (Get-FileHash -LiteralPath $FirmwareVarsTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($initialVarsSha256 -ne $varsTemplateSha256) {
+        throw "$Name firmware variable state is not a fresh copy of the accepted template."
+    }
     $guestArgs = @(
         '-machine', $Machine, '-cpu', $Cpu, '-m', '512M',
         '-drive', "if=pflash,format=raw,unit=0,readonly=on,file=$FirmwareCode",
@@ -313,6 +464,8 @@ function Invoke-QacManagedBoot {
     $reservationId = ''
     $reservationState = ''
     $launched = $false
+    $ownedChild = $null
+    $ownershipFailure = ''
     while ([DateTimeOffset]::UtcNow -lt $admissionDeadline) {
         if ($process.HasExited) { break }
         $snapshot = & $QacCliPath list 2>&1 | Out-String
@@ -322,8 +475,14 @@ function Invoke-QacManagedBoot {
                 $reservationId = $reservationSnapshot.Groups[1].Value
                 $reservationState = $reservationSnapshot.Groups[2].Value.Trim()
                 if ($reservationState -eq 'Running') {
-                    $launched = $true
-                    break
+                    try {
+                        $ownedChild = Wait-QacOwnedGuest $process.Id ([IO.Path]::GetFullPath($QemuPath)) $Machine $Cpu "$Name exclusive launch"
+                        $launched = $true
+                        break
+                    } catch {
+                        $ownershipFailure = $_.Exception.Message
+                        break
+                    }
                 }
             }
         }
@@ -340,7 +499,12 @@ function Invoke-QacManagedBoot {
             if ($LASTEXITCODE -eq 0) {
                 $reservationSnapshot = Find-QacRunReservation $snapshot $Project $process.Id
                 if ($reservationSnapshot.Success -and $reservationSnapshot.Groups[2].Value.Trim() -eq 'Running') {
-                    $launched = $true
+                    try {
+                        $ownedChild = Wait-QacOwnedGuest $process.Id ([IO.Path]::GetFullPath($QemuPath)) $Machine $Cpu "$Name exclusive launch"
+                        $launched = $true
+                    } catch {
+                        $ownershipFailure = $_.Exception.Message
+                    }
                 } elseif (!$process.HasExited) {
                     throw "$Name could not confirm QAC cancellation or QEMU launch. Reservation ${reservationId}: $cancelText"
                 }
@@ -358,11 +522,38 @@ function Invoke-QacManagedBoot {
                 $reservationSnapshot = Find-QacRunReservation $snapshot $Project $process.Id
                 if ($reservationSnapshot.Success) {
                     $reservationState = $reservationSnapshot.Groups[2].Value.Trim()
-                    if ($reservationState -eq 'Running') { $launched = $true; break }
+                    if ($reservationState -eq 'Running') {
+                        try {
+                            $ownedChild = Wait-QacOwnedGuest $process.Id ([IO.Path]::GetFullPath($QemuPath)) $Machine $Cpu "$Name exclusive launch"
+                            $launched = $true
+                            break
+                        } catch {
+                            $ownershipFailure = $_.Exception.Message
+                            break
+                        }
+                    }
                 }
             }
             Start-Sleep -Milliseconds 250
         }
+    }
+
+    if ($ownershipFailure) {
+        $matchingChildren = @(Get-QemuProcesses | Where-Object {
+            [int]$_.ParentProcessId -eq $process.Id -and
+            [string]::Equals([string]$_.ExecutablePath, [IO.Path]::GetFullPath($QemuPath), [StringComparison]::OrdinalIgnoreCase) -and
+            [regex]::IsMatch([string]$_.CommandLine,
+                '(?:^|\s)"?-qmp"?\s+"?tcp:127\.0\.0\.1:' + $qmpPort + '(?:,|"|\s)')
+        })
+        if ($matchingChildren.Count -eq 1) {
+            if (!(Send-QmpQuit $qmpPort)) {
+                $null = Stop-QacOwnedChildIfQmpFails $process.Id ([IO.Path]::GetFullPath($QemuPath))
+            }
+            if (!$process.WaitForExit(15000)) {
+                throw "$Name ownership anomaly could not be cleaned up by QAC; reservation remains under QAC recovery. $ownershipFailure"
+            }
+        }
+        throw "$Name failed closed on QAC/QEMU ownership verification: $ownershipFailure"
     }
 
     if (!$launched -and !$process.HasExited) {
@@ -373,13 +564,32 @@ function Invoke-QacManagedBoot {
     $passSeen = $false
     $guestText = ''
     $shutdownNote = ''
+    $runtimeOwnershipFailure = ''
+    $nextOwnershipCheck = [DateTimeOffset]::UtcNow
     if ($launched) {
         $deadline = [DateTimeOffset]::UtcNow.AddSeconds($RuntimeSeconds)
         while ([DateTimeOffset]::UtcNow -lt $deadline) {
             $guestText = Read-GuestLog $GuestLogPath
             if ($guestText.Contains($PassMarker)) { $passSeen = $true; break }
-            if ($guestText -match 'AARCH64_PHASE[234]_ERROR|\[guideXOS\].*(FAIL|FATAL|ERROR)|\[A64 UEFI\] ERROR') { break }
+            if ($guestText -match 'AARCH64_PHASE[234]_ERROR\b|\[guideXOS\].*(FAIL\b|FATAL\b|ERROR\b)|\[A64 UEFI\] ERROR\b') { break }
             if ($process.HasExited) { break }
+            if ([DateTimeOffset]::UtcNow -ge $nextOwnershipCheck) {
+                try {
+                    $activeQacHealth = Get-QacHealth "$Name active guest"
+                    $activeReservation = Find-QacRunReservation $activeQacHealth.List $Project $process.Id
+                    if (!$activeReservation.Success -or $activeReservation.Groups[2].Value.Trim() -ne 'Running') {
+                        throw "$Name QAC no longer reports its reservation as Running."
+                    }
+                    $activeChild = Assert-QacOwnedGuest $process.Id ([IO.Path]::GetFullPath($QemuPath)) $Machine $Cpu "$Name active guest"
+                    if ([int]$activeChild.ProcessId -ne [int]$ownedChild.ProcessId) {
+                        throw "$Name active QAC child changed from PID $($ownedChild.ProcessId) to PID $($activeChild.ProcessId)."
+                    }
+                } catch {
+                    $runtimeOwnershipFailure = $_.Exception.Message
+                    break
+                }
+                $nextOwnershipCheck = [DateTimeOffset]::UtcNow.AddSeconds(5)
+            }
             Start-Sleep -Milliseconds 100
         }
         if (!$passSeen -and !$process.HasExited -and [DateTimeOffset]::UtcNow -ge $deadline) { $timedOut = $true }
@@ -395,6 +605,10 @@ function Invoke-QacManagedBoot {
         }
     }
     $process.WaitForExit()
+    $remainingQemu = Get-QemuProcesses
+    if (@($remainingQemu | Where-Object { [int]$_.ProcessId -eq [int]$ownedChild.ProcessId }).Count -ne 0) {
+        throw "$Name QAC child PID $($ownedChild.ProcessId) remained after QAC reported exit."
+    }
     $qacText = $stdoutTask.GetAwaiter().GetResult() + $stderrTask.GetAwaiter().GetResult()
     $qacText | Set-Content -LiteralPath $QacLogPath -Encoding utf8
     if ($shutdownNote) { Add-Content -LiteralPath $QacLogPath -Value $shutdownNote -Encoding utf8 }
@@ -407,14 +621,66 @@ function Invoke-QacManagedBoot {
         throw $error
     }
     $reservationId = $reservationMatch.Groups[1].Value
-    if ($qacText -notmatch "QAC QEMU launched: reservation=$reservationId" -or
+    if ($qacText -notmatch "QAC exclusive reservation granted: id=$reservationId" -or
+        $qacText -notmatch "QAC QEMU launched: reservation=$reservationId" -or
         $qacText -notmatch "QAC reservation released: id=$reservationId") {
+        if ($qacText -notmatch "QAC exclusive reservation granted: id=$reservationId") {
+            throw "$Name QAC did not record an exclusive grant for reservation $reservationId."
+        }
         if ($qacText -notmatch "QAC QEMU launched: reservation=$reservationId") {
             $error = [InvalidOperationException]::new("$Name QAC reservation did not launch an authorized QEMU child: $qacText")
             $error.Data['QacAdmissionFailed'] = $true
             throw $error
         }
         throw "$Name QAC did not verify release for reservation $reservationId."
+    }
+    $degradedOwnership = $qacText -match '(?i)exclusive.{0,40}degraded|foreign QEMU process'
+    $after = $null
+    $postCleanupFailure = ''
+    try {
+        $after = Get-QacHealth "$Name post-cleanup"
+        if ($after.List -match [regex]::Escape($reservationId)) {
+            $postCleanupFailure = "$Name QAC reservation $reservationId remained listed after cleanup."
+        }
+    } catch {
+        $postCleanupFailure = $_.Exception.Message
+    }
+    $sessionRecord.qac_attempts += [ordered]@{
+        name = $Name
+        project = $Project
+        reservation_id = $reservationId
+        qac_log = $QacLogPath
+        guest_log = $GuestLogPath
+        qac_process_id = $process.Id
+        managed_qemu_child_pid = if ($ownedChild) { [int]$ownedChild.ProcessId } else { $null }
+        managed_qemu_child_parent_pid = if ($ownedChild) { [int]$ownedChild.ParentProcessId } else { $null }
+        qemu_process_ids_before_admission = $baselineProcesses
+        qemu_process_count_after_cleanup = $remainingQemu.Count
+        exclusive_grant_verified = $qacText -match "QAC exclusive reservation granted: id=$reservationId"
+        managed_child_launch_verified = $qacText -match "QAC QEMU launched: reservation=$reservationId"
+        child_exit_verified = $qacText -match "QAC QEMU exited: reservation=$reservationId"
+        reservation_release_verified = $qacText -match "QAC reservation released: id=$reservationId"
+        degraded_ownership_observed = $degradedOwnership
+        guest_pass_marker = $passSeen
+        guest_exit_code = $exitCode
+        runtime_timeout = $timedOut
+        firmware_vars_path = [IO.Path]::GetFullPath($VarsPath)
+        firmware_vars_initial_sha256 = $initialVarsSha256
+        firmware_vars_template_sha256 = $varsTemplateSha256
+        firmware_vars_after_sha256 = (Get-FileHash -LiteralPath $VarsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        qac_status_before = $before.Status
+        qac_list_before = $before.List
+        qac_status_after_cleanup = if ($after) { $after.Status } else { $null }
+        qac_list_after_cleanup = if ($after) { $after.List } else { $null }
+        post_cleanup_failure = $postCleanupFailure
+    }
+    Save-SessionRecord
+    if ($degradedOwnership) {
+        throw "$Name QAC reported degraded exclusive ownership. See $QacLogPath."
+    }
+    if ($postCleanupFailure) { throw $postCleanupFailure }
+    if ($runtimeOwnershipFailure) {
+        throw "$Name failed closed after a runtime QAC/QEMU ownership anomaly: $runtimeOwnershipFailure"
     }
     if ($timedOut) { throw "$Name exceeded the bounded $RuntimeSeconds-second guest deadline." }
     if ($exitCode -ne 0) { throw "$Name QAC-managed QEMU exited with code $exitCode. See $QacLogPath and $GuestLogPath." }
@@ -427,6 +693,23 @@ function Invoke-QacManagedBoot {
         GuestLogPath = $GuestLogPath
         QacLogPath = $QacLogPath
         ExitCode = $exitCode
+        VarsPath = [IO.Path]::GetFullPath($VarsPath)
+        InitialVarsSha256 = $initialVarsSha256
+        VarsTemplateSha256 = $varsTemplateSha256
+        VarsSha256 = (Get-FileHash -LiteralPath $VarsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        BaselineQemuProcessIds = $baselineProcesses
+        QacProcessId = $process.Id
+        QemuProcessId = [int]$ownedChild.ProcessId
+        QemuParentProcessId = [int]$ownedChild.ParentProcessId
+        QemuExecutablePath = [string]$ownedChild.ExecutablePath
+        QemuCommandLine = [string]$ownedChild.CommandLine
+        QacStatusBefore = $before.Status
+        QacListBefore = $before.List
+        QacStatusAfterCleanup = $after.Status
+        QacListAfterCleanup = $after.List
+        QemuProcessCountAfterCleanup = $remainingQemu.Count
+        QacChildExitVerified = $true
+        ReservationReleaseVerified = $true
         Text = $guestText
     }
 }
@@ -445,6 +728,24 @@ function Save-RunRecord($Run) {
         guest_log = $Run.GuestLogPath
         qac_log = $Run.QacLogPath
         exit_code = $Run.ExitCode
+        vars_path = $Run.VarsPath
+        fresh_vars_sha256_at_start = $Run.InitialVarsSha256
+        firmware_vars_template_sha256 = $Run.VarsTemplateSha256
+        vars_sha256_after_guest = $Run.VarsSha256
+        qemu_process_ids_before_admission = $Run.BaselineQemuProcessIds
+        qac_process_id = $Run.QacProcessId
+        managed_qemu_child_pid = $Run.QemuProcessId
+        managed_qemu_child_parent_pid = $Run.QemuParentProcessId
+        managed_qemu_executable = $Run.QemuExecutablePath
+        managed_qemu_command_line = $Run.QemuCommandLine
+        qac_child_exit_verified = $Run.QacChildExitVerified
+        qac_exclusive_grant_verified = $true
+        reservation_release_verified = $Run.ReservationReleaseVerified
+        qac_status_before = $Run.QacStatusBefore
+        qac_list_before = $Run.QacListBefore
+        qac_status_after_cleanup = $Run.QacStatusAfterCleanup
+        qac_list_after_cleanup = $Run.QacListAfterCleanup
+        qemu_process_count_after_cleanup = $Run.QemuProcessCountAfterCleanup
     }
     Save-SessionRecord
 }
@@ -466,7 +767,7 @@ function Save-QacPending([string]$Name, [string]$Project, [string]$GuestLogPath,
         qac_log = $QacLogPath
         outcome = 'QAC_PENDING_BEFORE_LAUNCH'
     }
-    $sessionRecord.outcome = 'GICV3_GUEST_PENDING_QAC'
+    $sessionRecord.outcome = if ($gicv3Runs.Count -eq 0) { 'GICV3_QAC_PENDING' } else { 'GICV3_NATIVE_PARTIAL' }
     $sessionRecord.pending_reason = $Reason
     $sessionRecord.gicv3_boots = $gicv3Runs.Count
     $sessionRecord.gicv2_guest = 'GICV2_GUEST_PENDING_QAC'
@@ -478,9 +779,16 @@ function Save-QacPending([string]$Name, [string]$Project, [string]$GuestLogPath,
     exit 2
 }
 
-function Save-Gicv3Failure([string]$Stage, [string]$Reason) {
-    $sessionRecord.outcome = 'GICV3_GUEST_FAILURE_LOCALIZED'
+function Save-Gicv3Failure([string]$Stage, [string]$Reason, [string]$GuestLogPath) {
+    $sessionRecord.outcome = 'GICV3_NATIVE_PARTIAL'
     $sessionRecord.failure_stage = $Stage
+    $sessionRecord.failure_guest_stage = $Stage
+    if ($GuestLogPath -and (Test-Path -LiteralPath $GuestLogPath -PathType Leaf)) {
+        $guestText = Read-GuestLog $GuestLogPath
+        $failureLine = [regex]::Match($guestText, '(?m)^\[guideXOS\] ([^\r\n]*(?:FAIL|FATAL|ERROR)\b[^\r\n]*)')
+        if ($failureLine.Success) { $sessionRecord.failure_guest_stage = $failureLine.Groups[1].Value.Trim() }
+        $sessionRecord.failure_guest_log = $GuestLogPath
+    }
     $sessionRecord.failure_reason = $Reason
     $sessionRecord.gicv3_boots = $gicv3Runs.Count
     $sessionRecord.gicv2_guest = 'NOT_RUN_GICV3_INCOMPLETE'
@@ -509,8 +817,18 @@ function Save-Gicv2Pending([string]$GuestLogPath, [string]$QacLogPath, [string]$
     Save-SessionRecord
 }
 
+$candidateManifest = Write-CandidateManifest
+$sessionRecord.candidate_manifest = [ordered]@{
+    path = $candidateManifest.Path
+    sha256 = $candidateManifest.Sha256
+    source_head = $candidateManifest.Data.source.head
+    source_branch = $candidateManifest.Data.source.branch
+    artifacts = $candidateManifest.Data.artifacts
+}
+Save-SessionRecord
+
 if ($qacPreflightFailure) {
-    $sessionRecord.outcome = 'GICV3_GUEST_PENDING_QAC'
+    $sessionRecord.outcome = 'GICV3_QAC_PENDING'
     $sessionRecord.pending_reason = $qacPreflightFailure
     $sessionRecord.gicv3_boots = 0
     $sessionRecord.gicv2_guest = 'GICV2_GUEST_PENDING_QAC'
@@ -557,7 +875,7 @@ try {
         Save-QacPending $diagnosticName $diagnosticProject $diagnosticGuestLog $diagnosticQacLog $_.Exception.Message
     }
     if ($diagnostic) { Save-RunRecord $diagnostic }
-    Save-Gicv3Failure $diagnosticName $_.Exception.Message
+    Save-Gicv3Failure $diagnosticName $_.Exception.Message $diagnosticGuestLog
     throw
 }
 Write-Host "GICv3 diagnostic boot: PASS reservation=$($diagnostic.ReservationId)" -ForegroundColor Green
@@ -584,7 +902,7 @@ for ($run = 1; $run -le 3; ++$run) {
             Save-QacPending $runName 'guideXOSServer-AARCH64-GIC3-2' $runGuestLog $runQacLog $_.Exception.Message
         }
         if ($result) { Save-RunRecord $result }
-        Save-Gicv3Failure $runName $_.Exception.Message
+        Save-Gicv3Failure $runName $_.Exception.Message $runGuestLog
         throw
     }
     Write-Host "Fresh GICv3 boot $run/3: PASS reservation=$($result.ReservationId)" -ForegroundColor Green
@@ -600,6 +918,43 @@ foreach ($required in @('EFI\BOOT\BOOTAA64.EFI', 'kernel.elf')) {
         throw "GICv2 Phase 2 ESP is missing $required"
     }
 }
+$gicv2BuildInputs = @(& git -C $repoRoot ls-files -- 'kernel/arch/arm64' 'guideXOSBootLoader/aarch64') + @('scripts/build-aarch64-phase2.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Unable to enumerate preserved GICv2 build inputs.' }
+$gicv2InputHashes = [ordered]@{}
+foreach ($relative in @($gicv2BuildInputs | Sort-Object -Unique)) {
+    $sourcePath = Join-Path $repoRoot ($relative -replace '/', '\\')
+    $gicv2InputHashes[$relative] = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$gicv2Artifacts = [ordered]@{}
+foreach ($relative in @('BOOTAA64.EFI', 'kernel.elf', 'esp/EFI/BOOT/BOOTAA64.EFI', 'esp/kernel.elf')) {
+    $gicv2Artifacts[$relative] = Get-FileIdentity (Join-Path $phase2Directory ($relative -replace '/', '\\'))
+}
+$gicv2Manifest = [ordered]@{
+    schemaVersion = 1
+    candidate = 'AARCH64 Phase 2 GICv2 architecture/timer regression control'
+    source = [ordered]@{
+        branch = (& git -C $repoRoot branch --show-current).Trim()
+        head = (& git -C $repoRoot rev-parse HEAD).Trim()
+        worktree = (& git -C $repoRoot status --short --branch | Out-String).Trim()
+        inputSha256 = $gicv2InputHashes
+    }
+    build = [ordered]@{
+        command = 'scripts/build-aarch64-phase2.ps1 -OutputDirectory <candidate>'
+        profile = 'freestanding AArch64 Phase 2; production DTB controller selector; GICv2 regression control'
+        qemuMachine = 'virt,gic-version=2,acpi=off'
+        qemuCpu = 'cortex-a53'
+        llvmRoot = $LlvmRoot
+    }
+    artifacts = $gicv2Artifacts
+}
+$gicv2ManifestPath = Join-Path $phase2Directory 'candidate-manifest.json'
+$gicv2Manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $gicv2ManifestPath -Encoding utf8
+$sessionRecord.gicv2_candidate_manifest = [ordered]@{
+    path = $gicv2ManifestPath
+    sha256 = (Get-FileHash -LiteralPath $gicv2ManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    artifacts = $gicv2Artifacts
+}
+Save-SessionRecord
 $gicv2Vars = Join-Path $ArtifactDirectory ("edk2-gicv2-{0}-vars.fd" -f $runId)
 Copy-Item -LiteralPath $FirmwareVarsTemplate -Destination $gicv2Vars
 $gicv2GuestLog = Join-Path $logsDirectory 'gicv2-regression.log'
@@ -614,7 +969,7 @@ try {
         -QacLogPath $gicv2QacLog `
         -PassMarker 'AARCH64_PHASE2_PASS' -RuntimeSeconds 30
     $gicv2Text = $gicv2Result.Text
-    if ($gicv2Text -match 'AARCH64_PHASE2_ERROR|\[guideXOS\].*(FAIL|FATAL|ERROR)|\[A64 UEFI\] ERROR') {
+    if ($gicv2Text -match 'AARCH64_PHASE2_ERROR\b|\[guideXOS\].*(FAIL\b|FATAL\b|ERROR\b)|\[A64 UEFI\] ERROR\b') {
         throw 'GICv2 regression guest emitted a fatal/error marker'
     }
     foreach ($marker in @(
@@ -646,12 +1001,11 @@ $sessionRecord.qac_status_after = $finalStatus.Trim()
 $sessionRecord.qac_list_after = (& $QacCliPath list 2>&1 | Out-String).Trim()
 $sessionRecord.gicv3_boots = $gicv3Runs.Count
 $sessionRecord.gicv2_guest = if ($gicv2Pending) { 'GICV2_GUEST_PENDING_QAC' } else { 'PASS' }
-$sessionRecord.outcome = if ($gicv2Pending) {
-    'GICV3_GUEST_VERIFIED_GICV2_PENDING_QAC'
-} else { 'GICV3_GUEST_VERIFIED' }
+$sessionRecord.outcome = 'GICV3_NATIVE_REPEATABILITY_VERIFIED'
 Save-SessionRecord
 
 Write-Host 'AARCH64_GICV3_QEMU_PASS: diagnostic plus three fresh QAC-authorized Cortex-A53 GICv3 boots passed timer, EOI, scheduler, and exception-return acceptance.' -ForegroundColor Green
+Write-Host 'Outcome: GICV3_NATIVE_REPEATABILITY_VERIFIED' -ForegroundColor Green
 if ($gicv2Pending) {
     Write-Host 'GICV2_GUEST_PENDING_QAC' -ForegroundColor Yellow
 } else {

@@ -8,7 +8,9 @@ namespace boot {
 static const uint32_t kCommonBootInfoMagic = UINT32_C(0x49425847); // GXBI
 static const uint16_t kCommonBootInfoVersion = 1;
 static const uint32_t kMaxMemoryRanges = 8;
-static const uint32_t kMaxMmioRanges = 8;
+// One UART and Distributor plus up to eight DTB-described GICv3
+// Redistributor regions; GICv2 additionally uses only one CPU-interface range.
+static const uint32_t kMaxMmioRanges = 10;
 
 struct Range {
     uint64_t base;

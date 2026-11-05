@@ -36,6 +36,7 @@ using Aarch64Handoff = gxos_aarch64_phase4_handoff;
 #include "../../../kernel/core/include/kernel/native_elf_baremetal.h"
 #endif
 #include "phase2_mmu.h"
+#include "phase4_boot_info.h"
 #include "phase3_timer.h"
 #if defined(GXOS_AARCH64_SCHEDR1_DIAGNOSTICS)
 #include "phase4_diagnostics.h"
@@ -1635,10 +1636,9 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
     for (uint32_t i = 0; i < platform.ram_count; ++i) {
         g_boot_info.memory_ranges[i] = { platform.ram[i].base, platform.ram[i].size };
     }
-    g_boot_info.mmio_ranges[0] = { platform.uart_base, platform.uart_size };
-    g_boot_info.mmio_ranges[1] = { platform.gicd_base, platform.gicd_size };
-    g_boot_info.mmio_ranges[2] = { platform.gicc_base, platform.gicc_size };
-    g_boot_info.mmio_range_count = 3;
+    if (!kernel::arch::arm64::populate_phase4_mmio_ranges(&g_boot_info, &platform)) {
+        fail("common MMIO ranges: FAIL");
+    }
 #if defined(GXOS_AARCH64_PHASE6)
     g_boot_info.framebuffer = {
         handoff->framebuffer_base, handoff->framebuffer_size,
@@ -2006,7 +2006,7 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
             diagnostics.acknowledge_count != diagnostics.eoi_count ||
             diagnostics.acknowledge_count != stats.timer_ticks ||
             diagnostics.acknowledge_count != phase3_timer_count() ||
-            stats.timer_ticks < 1000 || stats.preemptions < 1000 ||
+            stats.timer_ticks < UINT64_C(10000) || stats.preemptions < UINT64_C(10000) ||
             stats.context_switches == 0 || g_work[0].counter == 0 ||
             g_work[1].counter == 0) {
             fail("GICv3 timer/scheduler evidence: FAIL");

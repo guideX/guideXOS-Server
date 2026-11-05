@@ -1,14 +1,14 @@
 # AArch64 GICv3 Interrupt Controller Foundation
 
-**Status:** `GICV3_GUEST_PENDING_QAC`
+**Status:** `GICV3_NATIVE_REPEATABILITY_VERIFIED`
 **Scope:** EL1, non-secure Group 1, boot CPU only
 **Target platform:** generic ARM64 DTB-described systems. Samsung tablet addresses are not assumed.
 
 ## Outcome and evidence
 
-The production GICv3 path is implemented and links into the common Phase 4 ARM64 kernel. On 2026-11-01, the existing hosted suite passed all 62 assertions, and a fresh production ARM64 build linked and staged the EFI loader, kernel, and deterministic ramdisk. QEMU 11.0.0 reports the `virt` machine, `gic-version`, and Cortex-A53 CPU support.
+The production GICv3 path passed one QAC-authorized diagnostic boot and three fresh QAC-authorized guest boots on 2026-11-05. All four exercised the actual guest DTB, GICv3 system registers, architectural physical timer PPI, interrupt acknowledgement/EOI path, scheduler preemption, and Phase 4 workload. Each fresh boot completed 10,000 preemptions, returned cleanly from exceptions, reported zero unexpected IRQs or exceptions, and reached `AARCH64_PHASE4_PASS`. A separate QAC-authorized GICv2 Phase 2 architecture/timer guest regression also passed. The detailed source, hashes, counters, reservations, and artifacts are in [AARCH64_GICV3_GUEST_QUALIFICATION.md](AARCH64_GICV3_GUEST_QUALIFICATION.md).
 
-The native guest gate remains pending. The real QAC coordinator and CLI were found in the sibling `guideXOS_QAC` checkout. A distinct `guideXOSServer-AARCH64-GIC3-2` acceptance request queued behind an already active exclusive acceptance reservation and was cancelled before grant. No QEMU process was launched for this qualification. Hosted simulation and a successful cross-link do not establish guest interrupt delivery or ARM exception behavior. See [AARCH64_GICV3_GUEST_QUALIFICATION.md](AARCH64_GICV3_GUEST_QUALIFICATION.md) for the run record.
+The source base was `37c739b3610721405be4a5bba23cdbe0d01a0c25` on `AARCH64_SUPPORT`, with the accepted PCI DTB parser repair present. Qualification changes localized a zero-sized GICC range in common Phase 4 boot-resource setup and hardened QAC-runner ownership and guest-marker checks. The final GICv3 kernel SHA-256 is `78c6264eb26badc70db1ca409621099c4b2d73e045e637fe6822e801b927d947`.
 
 ## Existing ARM64 interrupt architecture
 
@@ -96,9 +96,9 @@ The generic page-table pool is bounded. It can map sparse high physical MMIO add
 
 The guest runner uses the actual QAC CLI `run --project ... --mode acceptance -- <qemu-system-aarch64.exe> ...` path. QAC registers the direct QEMU child and verifies its exit before releasing the reservation; a local grant file is not used. The runner first checks coordinator status, then checks QEMU 11.0.0 support for `virt`, `gic-version`, and Cortex-A53.
 
-The intended profile is `-machine virt,gic-version=3,acpi=off -cpu cortex-a53`, with the existing AArch64 UEFI code/vars firmware and staged ESP. The script uses a fresh copy of UEFI variable state for the diagnostic boot and each of three acceptance boots. It requires guest DTB GICv3 discovery, actual Distributor/Redistributor/affinity/ICC/PPI readback, at least 1,000 physical-timer IRQs and scheduler preemptions, matching acknowledge/EOI counts, a post-interrupt scheduler continuation marker, and zero unexpected IRQs/exceptions.
+The accepted profile was `-machine virt,gic-version=3,acpi=off -cpu cortex-a53`, with 512 MiB RAM, the existing AArch64 UEFI firmware, and the minimal Phase 4 workload. The runner used the genuine QAC CLI, a 1,800-second bounded admission window, and a 300-second guest runtime limit. It made a new vars copy for the diagnostic boot, every repeatability boot, and the separate GICv2 regression. Each run received an exclusive reservation and QAC-managed direct QEMU child; session records verify ownership, child exit, reservation release, and zero QEMU processes after cleanup. Acceptance requires at least 10,000 timer IRQs and scheduler preemptions, matching ACK/EOI counts, guest GICv3 resource/register evidence, and zero unexpected IRQs or exceptions.
 
-For this run QAC was online, with one verified acceptance session active and no foreign QEMU process. The final distinct GIC3-2 request received a real queue entry (`2a7cc4c8eb3a4444a869862c41bbbdd5`, queue position 1), but no exclusive grant (`grantedAtUtc` and child PID remained null). The bounded runner cancelled it before launch. Consequently no guest DTB, controller addresses, timer counters, or scheduler counters were observed, and the GICv2 guest regression was not attempted. The exact record and local QAC log are under `out/aarch64-gicv3-qualify-gic3-2/logs-gicv3-20261101-150000-403/`.
+The final guest-observed GICD range was `0x08000000`/`0x10000`; the one GICR region was `0x080a0000`/`0x0f60000`. The boot Redistributor affinity matched MPIDR affinity 0 and was awake. ICC SRE was `0x7`, Group 1 was enabled, and combined EOI mode was read back. The timer PPI was INTID 30, Group 1, enabled, level-sensitive, priority 128. Across the three fresh boots the guest recorded 10,001 ticks and matching ACK/EOI counts, 10,000 preemptions, 20,006 context switches, successful VFS reads/enumerations, and zero unexpected IRQs/exceptions. The native run artifacts are under `out/aarch64-gicv3-native-qualification-verified-20261105/`.
 
 The historical standalone Phase 3 timeout remains a separate baseline item. It was not re-run or reclassified in this hosted/build-only window.
 
@@ -108,6 +108,6 @@ The GICv2 parser and GICD/GICC path remain selected for the Raspberry Pi 4. The 
 
 For the Galaxy Tab A8, the DTB-driven GICv3 and boot-CPU Redistributor design applies, and the previously observed physical timer INTID 30 fits the PPI path. The Distributor and Redistributor physical addresses remain unknown. No assumed UMS512 addresses, tablet access, or removable-device access were used.
 
-## Next qualification step
+## Remaining qualification scope
 
-Obtain an exclusive QAC acceptance reservation for `guideXOSServer-AARCH64-GIC3-2` when the active acceptance session has released its lane, then rerun `scripts/test-aarch64-gicv3-qemu.ps1`. Guest qualification must establish actual GICv3 DTB discovery, Distributor and boot CPU Redistributor setup, ICC system-register operation, physical timer PPI delivery, common IRQ dispatch, scheduler preemption, clean exception return, and zero unexpected IRQ/exception counts across the diagnostic and three fresh boots. Then run the separate GICv2 guest regression under its own QAC authorization. Until those guest runs pass, the outcome remains `GICV3_GUEST_PENDING_QAC`.
+The native QEMU `virt` Cortex-A53 GICv3 path is qualified for the minimal Phase 4 workload. The physical Galaxy Tab A8 and Raspberry Pi 4 have not been booted as part of this milestone; no tablet GIC addresses are inferred from QEMU. Secondary-CPU Redistributor setup, SMP, and platform-specific GIC layouts beyond the validated DTB and bounded memory-map capacities remain outside this qualification. The separate historical SCHEDR1 GICv2 3/3 evidence and candidate hashes remain preserved in `AARCH64_SCHEDR1_REPEATABILITY.md`; a fresh GICv2 Phase 2 guest regression passed for this milestone.

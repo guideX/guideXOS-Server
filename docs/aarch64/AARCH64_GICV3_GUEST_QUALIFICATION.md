@@ -1,75 +1,73 @@
 # AArch64 GICv3 Guest Qualification — GIC3-2
 
-- **Outcome:** `GICV3_GUEST_PENDING_QAC`
-- **Run date:** 2026-11-01
-- **Repository:** `D:\dev\guideXOSServer_AARCH64`
-- **Branch/base:** `AARCH64_SUPPORT` at `ca51ea964053ef8b7223c4e2114c547d8c3b891d`
-- **Upstream at preflight:** `origin/AARCH64_SUPPORT`, 1 ahead / 0 behind; worktree clean before this qualification work.
+- **Outcome:** `GICV3_NATIVE_REPEATABILITY_VERIFIED`
+- **Run date:** 2026-11-05
+- **Repository / branch:** `D:\dev\guideXOSServer_AARCH64`, `AARCH64_SUPPORT`
+- **Source base HEAD:** `37c739b3610721405be4a5bba23cdbe0d01a0c25`
+- **Upstream:** `origin/AARCH64_SUPPORT` at the source base; no push was made.
 
 ## Result
 
-Hosted and build readiness passed, but the native guest did not start. QAC was online and protecting a separate active acceptance session. A new, project-specific acceptance request for this qualification entered QAC's exclusive queue at position 1. QAC did not grant it, so the request was cancelled before launch. No QEMU guest process, UEFI boot, or guest serial output belongs to this run.
+The production GICv3 path completed one authorized diagnostic boot followed by three independent fresh QAC-authorized guest boots. Every run reached `AARCH64_PHASE4_PASS`, delivered the architectural physical timer through GICv3, recorded 10,000 completed scheduler preemptions, returned cleanly from exceptions, and reported zero unexpected IRQs or exceptions. Each run used a separate firmware-variable file and QAC reservation. The runner verified managed-child ownership, child exit, reservation release, and zero QEMU processes after cleanup.
 
-This report deliberately makes no claim about guest DTB contents, GIC register values, timer delivery, interrupt completion, scheduler preemption, or exception return. Those measurements require a QAC-authorized AArch64 guest.
+A separately authorized GICv2 Phase 2 architecture/timer guest regression also passed. The preserved SCHEDR1 GICv2 3/3 evidence and candidate hashes remain in `AARCH64_SCHEDR1_REPEATABILITY.md` and were not modified.
 
-## Hosted and build evidence
+## Source and candidate
 
-| Area | Result | Evidence |
-| --- | --- | --- |
-| Hosted GICv3 suite | PASS, 62 assertions | `scripts/test-aarch64-gicv3-host.ps1`; Distributor/Redistributor models, DTB validation, affinity, CPU interface, PPI/SPI operations, timer integration, malformed-input rejection, and bounded waits. |
-| Production ARM64 Phase 4 | PASS | `scripts/build-aarch64-gicv3.ps1`; production GICv3 driver and common IRQ path compiled and linked. |
-| Final build artifacts | `out/aarch64-gicv3-gic3-2-final` | Staged from the final source after the diagnostic label correction. |
-| Final `kernel.elf` | 210,376 bytes | SHA-256 `adc1f900412216f8b4ecd559c0a6eff73771bba9c68740e7c6b113514b85063d` |
-| `BOOTAA64.EFI` | 9,216 bytes | SHA-256 `50ee56a3ee33788305d88a9e15cb52359c7bf96f16ce313fda84dbe0926aa7cb` |
-| Staged `ramdisk.img` | 67,108,864 bytes | SHA-256 `74452c6109212bff33a73f2315e5aa029b44bff3cf8bb24257cd9850be5c22b9` |
-| Preserved GICv2 Phase 2 build | PASS | `scripts/build-aarch64-phase2.ps1`; Phase 2 host validation passed. `kernel.elf` is 117,056 bytes, SHA-256 `b57bba83a5948aeed01ed613762c7a9ccad1050dff5ce4b2806a49e3f23ef447`. |
-| QEMU model support | PASS | QEMU 11.0.0 reports `virt`, `gic-version`, and `cortex-a53`. This is configuration support only, not guest or generated-DTB evidence. |
+The accepted PCI device-tree parser repair was present in `kernel/arch/arm64/phase2_platform.cpp`. The current parser passed the captured firmware DTB validation (52 assertions; `parsed=1`, diagnostic 0, stage 4, token 9, offset 7096; fixture SHA-256 `5aec32b925cb7259d651aca355106e58d77f7f1c553d80f0420c5b3e3036f311`). The source tree used for this qualification is the base HEAD above plus the local Phase 4 MMIO-range and QAC-runner changes described below. The candidate manifest records source input hashes and the dirty-tree state.
 
-The selected profile is `-machine virt,gic-version=3,acpi=off -cpu cortex-a53`, with 512 MiB RAM, the existing AArch64 UEFI code/vars firmware, and the staged FAT ESP. Each actual boot will receive a fresh UEFI vars copy. The script does not override the guest's discovered controller identity.
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| GICv3 `kernel.elf` | 210,840 | `78c6264eb26badc70db1ca409621099c4b2d73e045e637fe6822e801b927d947` |
+| GICv3 `BOOTAA64.EFI` | 12,800 | `6465fbebf0427557623feff5e7d07b11f679dedb6ea72692b49db176ea2a9b2d` |
+| Ramdisk | 67,108,864 | `74452c6109212bff33a73f2315e5aa029b44bff3cf8bb24257cd9850be5c22b9` |
+| Candidate manifest | — | `c4515d5c037b920476abf0c3c182256b99ae938ede5f742eaad92791fe2bffc4` |
 
-## QAC admission record
+The manifest and staged image are under `out/aarch64-gicv3-native-qualification-verified-20261105/gicv3-image/`. The manifest records the QEMU executable hash, UEFI firmware hashes, LLVM/LLD versions and hashes, build profile, and tracked/untracked build-input hashes. The accepted QEMU profile was `-machine virt,gic-version=3,acpi=off -cpu cortex-a53`, 512 MiB RAM, UEFI, and the minimal Phase 4 workload.
 
-- Coordinator: guideXOS QAC 2.0.0, online.
-- CLI: `D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe`.
-- Before the request: one verified acceptance session active, zero foreign QEMU processes, zero queued/blocked reservations.
-- Qualification project: `guideXOSServer-AARCH64-GIC3-2`, mode `acceptance`.
-- Final persisted request: reservation `2a7cc4c8eb3a4444a869862c41bbbdd5`, queued at position 1, then cancelled before grant after the runner's 10-second admission window. Its grant time and child PID remained null. The request used the final kernel SHA-256 shown above.
-- Three earlier runner bring-up requests (`ff2165d9b4064a0b97b4c5e8624ebfc1`, `6beef4cdd5a246adb032e1d500683ce6`, and `c669849b45ac4059921f3468f3a7b13e`) also queued at position 1 and were explicitly cancelled before launch. The queue-row indentation check was corrected before the final persisted attempt.
-- After cancellation: the unrelated acceptance reservation remained the only managed session; this task's queue was empty.
+## Hosted and build gates
 
-All requests used QAC's real `run --project ... --mode acceptance -- <direct qemu-system-aarch64.exe>` flow. No grant file was created or used, no other project's reservation was reused, and no QEMU process was started for this task. The active QAC-owned guest was left untouched.
-
-The persisted session and QAC CLI log are local build artifacts at:
-
-```text
-out/aarch64-gicv3-qualify-gic3-2/logs-gicv3-20261101-150000-403/session.json
-out/aarch64-gicv3-qualify-gic3-2/logs-gicv3-20261101-150000-403/qac/diagnostic.log
-```
-
-## Guest evidence status
-
-| Required evidence | Result |
+| Gate | Result |
 | --- | --- |
-| UEFI loader and kernel entry | Not observed; no guest launched. |
-| Generated DTB selects GICv3 | Not observed. |
-| DTB Distributor and Redistributor ranges | Not observed. |
-| Boot-CPU Redistributor affinity and wake state | Not observed. |
-| ICC SRE, priority mask, Group 1, and EOI mode | Not observed. |
-| Physical timer PPI configuration and IRQs | Not observed. |
-| Acknowledge / EOI / invalid-ack / completion counters | Not observed. |
-| Scheduler task progress, preemptions, and exception return | Not observed. |
-| Unexpected IRQs or synchronous exceptions | Not observed. |
-| Three fresh GICv3 boots | 0 of 3. |
-| GICv2 guest architecture/timer regression | Not run; pending separate QAC admission after GICv3 qualification. |
+| Phase 2 parser/malformed-input host suite | PASS, 51 assertions |
+| Captured firmware DTB using the repaired parser | PASS, 52 assertions |
+| GICv3 hosted controller suite, including GICv2 selection and no-fallback controls | PASS, 62 assertions |
+| Phase 3 fresh ARM64 build and scheduler host contract | PASS (`AARCH64_PHASE3_HOST_CONTRACT_PASS`) |
+| Phase 4 host MMIO-resource regression and scheduler contract | PASS; covers the maximum eight GICR regions and preserves the GICv2 layout |
+| Production freestanding Phase 4 ARM64 build/link | PASS |
+| Fresh GICv2 Phase 2 build and host suite | PASS, 51 assertions |
 
-The GICv2 hosted coverage remains part of the 62-assertion suite. The separate GICv2 QEMU profile remains `virt,gic-version=2,acpi=off` with Cortex-A53 and was not changed by this result.
+## Native GICv3 evidence
 
-## Phase-12 ABI isolation
+The guest DTB reported Distributor base `0x08000000`, size `0x10000`, and one Redistributor region at `0x080a0000`, size `0x0f60000`; no fixed Galaxy Tab A8 addresses were assumed. The boot CPU affinity from the DTB was `0`. The discovered Redistributor frame was `0x080a0000`, its SGI/PPI frame was `0x080b0000`, and `MPIDR_EL1=0x80000000` normalized to affinity `0`. The guest observed an affinity match, an awake Redistributor, `WAKER=0`, and `GICR_CTLR=2`.
 
-The Phase-12 wrapper's external Developer Studio check expects `gx_host_calls.get_document_activation_path`. The AARCH64 Server checkout supplies a 400-byte `gx_host_calls` with no such member; the intended v0.5 Developer Studio SDK defines the append-only callback at offset 448 in a 464-byte structure. The test fails against the AARCH64 SDK and compiles against the v0.5 SDK. This is a checkout/version expectation mismatch; the canonical contract for this AARCH64 SDK is not established as missing a field. No Developer Studio or SDK source was changed.
+The guest read back `ICC_SRE_EL1=0x7`, `ICC_PMR_EL1=0xf8`, `ICC_BPR1_EL1=3`, `ICC_IGRPEN1_EL1=1`, and `ICC_CTLR_EL1=0x8c00` with combined EOI mode. The physical timer PPI was INTID 30, Group 1, enabled, level-triggered, priority 128. The architectural timer frequency was 62.5 MHz with a 100 µs interval. Guest logs record successful timer dispatch, exception return, scheduler/VFS integration, and the Phase 4 PASS marker.
 
-The known standalone Phase-3 timeout remains a separate historical issue. Phase-9 and Phase-12 source/runtime behavior was not modified. No Raspberry Pi GICv2 preparation, tablet boot chain, or physical device was changed or tested.
+The Phase 4 boot-resource validation initially exposed a real GICv3-specific defect: `phase4_main.cpp` unconditionally added a zero-sized GICC MMIO range even though GICv3 has no GICC. The fix now constructs common MMIO ranges by selected controller: GICv2 retains UART + GICD + GICC; GICv3 uses UART + GICD + all discovered GICR regions. `kMaxMmioRanges` is 10 to hold the UART, Distributor, and up to eight Redistributor regions. A hosted regression covers the maximum GICv3 layout and unchanged GICv2 layout. No GICv2 driver implementation was changed.
 
-## Next step
+An intermediate authorized guest reached the Phase 4 PASS marker but the runner misclassified `completion-errors=0` as fatal because its error pattern matched a substring. The runner now requires a complete `FAIL`, `FATAL`, or `ERROR` token. That intermediate run was retained as diagnostic evidence and is not counted toward the final 3/3 result; the accepted result below came from a new diagnostic-plus-three-boot invocation using the fixed candidate and runner.
 
-When QAC releases the exclusive acceptance lane, rerun `scripts/test-aarch64-gicv3-qemu.ps1`. Do not advance the outcome until the diagnostic boot and three fresh boots produce guest-originated GICv3, physical-timer, EOI, scheduler, and exception-return evidence. Run the GICv2 guest regression afterward under its own valid QAC authorization.
+## QAC reservations and fresh boots
+
+All runs used the genuine guideXOS QAC 2.0.0 CLI acceptance flow and its exclusive reservation mechanism. The runner used the bounded 1,800-second admission window and 300-second guest runtime limit. Before each admission there were no QEMU processes. QAC launched the exact `qemu-system-aarch64.exe` as its direct managed child with the requested machine and CPU arguments. Each session record verifies that the child PID's parent was the QAC CLI process, the child exited with code 0, the reservation was released, there was no ownership degradation, and the post-cleanup QEMU count was zero. The QAC snapshots after each run showed no remaining reservations or managed sessions.
+
+The four GICv3 reservations were diagnostic `09c969964a1e41f5aabc5052df6c3b05`, then fresh boots `e24c054d94c34329a2e9317bed0cd361`, `97e17cfc26ae41d294b19922d46ca656`, and `df7187caa85846408240288448cfc741`. Each used a different vars file, initialized from template SHA-256 `b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f`; each post-guest vars file had SHA-256 `ec6cd5a9b07d495686db24e25725d1edf484d535dd47b37a50100f77300b225e`.
+
+| Run | QAC reservation | Timer ticks / ACK / EOI | Preemptions / switches | Task A / B / C progress | VFS reads / enumerations | Unexpected IRQs / exceptions |
+| --- | --- | ---: | ---: | --- | ---: | ---: |
+| Diagnostic | `09c969964a1e41f5aabc5052df6c3b05` | 10,000 / 10,000 / 10,000 | 10,000 / 20,006 | 23,928,540 / 24,013,268 / 24,280,174 | 212,070 / 13,254 | 0 / 0 |
+| Fresh 1/3 | `e24c054d94c34329a2e9317bed0cd361` | 10,001 / 10,001 / 10,001 | 10,000 / 20,006 | 23,397,117 / 23,248,533 / 23,035,571 | 212,782 / 13,298 | 0 / 0 |
+| Fresh 2/3 | `97e17cfc26ae41d294b19922d46ca656` | 10,001 / 10,001 / 10,001 | 10,000 / 20,006 | 25,799,949 / 25,576,784 / 25,046,523 | 224,905 / 14,056 | 0 / 0 |
+| Fresh 3/3 | `df7187caa85846408240288448cfc741` | 10,001 / 10,001 / 10,001 | 10,000 / 20,006 | 25,248,347 / 25,202,609 / 24,878,652 | 224,605 / 14,037 | 0 / 0 |
+
+All four GICv3 logs report invalid ACKs 0, completion errors 0, pending interrupts 0, successful Phase 4 VFS operations, and `AARCH64_PHASE4_PASS`. The three fresh runs each have their own serial log, QAC log, vars file, and session record under `out/aarch64-gicv3-native-qualification-verified-20261105/`.
+
+## GICv2 compatibility
+
+The separate QAC-authorized regression reservation was `ee4bd16332f84d52aaa7763dd9181ab2`, project `guideXOSServer-AARCH64-GIC3-2-GICv2`, with `virt,gic-version=2,acpi=off` and Cortex-A53. It reached `AARCH64_PHASE2_PASS`, selected GICv2, used GICD `0x08000000` and GICC `0x08010000`, and delivered the physical timer IRQ. Its `kernel.elf` SHA-256 is `3cd8f4ee645be52787d1a84a4b99f28bb86bb26436d3d34fecf9ceb7cd0bbb39`; its candidate manifest SHA-256 is `32b4649540ebcbfc37067e3d3b5648b0317d0eb3c8c7f5d090b5c751208eb93d`. QAC verified direct child ownership, exit, release, and zero post-cleanup QEMU processes for this run as well.
+
+## Evidence locations and remaining scope
+
+The final run record is `out/aarch64-gicv3-native-qualification-verified-20261105/logs-gicv3-20261105-150259-679/session.json`. It contains the candidate/manifest hashes and individual QAC attempt ownership, vars, exit, marker, and cleanup fields. Independent guest and QAC logs are in that directory and its `qac/` subdirectory. Build, host-test, and candidate-manifest outputs are preserved under the same `out/aarch64-gicv3-native-qualification-verified-20261105/` root. Earlier failed-at-boot and harness false-positive artifacts remain in their separate output directories.
+
+This qualifies the production GICv3 path on the QEMU `virt` Cortex-A53 platform with the minimal Phase 4 workload. It does not qualify physical tablet or Raspberry Pi hardware, secondary-CPU Redistributor setup, SMP, or arbitrary platform-specific GIC layouts beyond the validated DTB and bounded MMIO/page-table capacities. The separate SCHEDR1 GICv2 3/3 native evidence remains intact.
