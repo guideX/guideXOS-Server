@@ -1,14 +1,27 @@
 # Disk Manager: Current Implementation Status
 
-**Latest DM37 review (2026-11-04): proposed Outcome A —
-`DM37_ACCEPTANCE_RECOMMENDED`, pending owner sign-off on explicit qualification
-limits.** The original production safety invariants have production-linked
-host coverage; Gates A, D (USB BOT), E, and F have real guest evidence. B/C/G/H
-limits and the C5 non-QAC process ownership are documented without claiming
-missing guest results. `.phase` remains DM36→DM37; no acceptance approval or
-DM38 work is recorded. See the [C21 formal review](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md#dm37-continuation-21--formal-acceptance-review-gate-i-evidence-audit-and-remaining-risk-decision).
+**Current phase status (2026-11-05): DM37 is formally accepted and closed;
+DM38 is active.** The phase marker remains last_completed=DM37,
+next_expected=DM38. DM38-1 records **Outcome B —
+DM38_HARDWARE_READINESS_PARTIAL**: the identity and explicit read-only mount
+gaps found in the audit were corrected, hosted regressions and builds pass,
+and current-source QAC AHCI/UHCI guest enumeration passes. SARAH_DT has not
+been inventoried or tested, and AMD64 has no xHCI driver. See the
+[DM38-1 physical-storage qualification report](DISK_MANAGER_PHASE_DM38_PHYSICAL_STORAGE_QUALIFICATION.md).
 
-DM36 is accepted at source revision `a2afa18a56c95b00491f9b1ca2a26acde7669567` on `DISK_MANAGER_IMPROVEMENTS`. The source-matched QEMU guest passed the remaining lifecycle gates: dedicated Stop, active-check Close, removal/replacement, an actual checker read error, unchanged read-only fixture images, and mounted-target admission rejection. B1/B2 numeric findings were displayed correctly; Previous/Next were activated on the single-finding guest fixture, while existing production-linked host tests cover zero and multiple findings. The owned guest was visible during testing and safely shut down after all checks; a later foreign QEMU from a sibling project was left untouched, and no second guest was launched. `.phase` records DM36 complete and DM37 next. The latest DM37 disposition is the C21 review linked above. Full DM36 provenance, runtime captures, counters, hashes, regression counts, and build logs are in the [DM36 phase report](DISK_MANAGER_PHASE_DM36_FAT32_INTEGRITY.md). The DM37 audit, API contract, regressions, and deferred work are in the [DM37 safe-dismount report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md).
+DM36 closeout was accepted at source revision
+a2afa18a56c95b00491f9b1ca2a26acde7669567 on
+DISK_MANAGER_IMPROVEMENTS. Its source-matched QEMU guest passed the remaining
+lifecycle gates: dedicated Stop, active-check Close, removal/replacement, an
+actual checker read error, unchanged read-only fixture images, and
+mounted-target admission rejection. B1/B2 numeric findings were displayed
+correctly; Previous/Next were activated on the single-finding guest fixture,
+while existing production-linked host tests cover zero and multiple
+findings. That closeout's phase marker recorded DM36 complete and DM37 next.
+Full DM36 provenance, runtime captures, counters, hashes, regression counts,
+and build logs are in the [DM36 phase report](DISK_MANAGER_PHASE_DM36_FAT32_INTEGRITY.md).
+The accepted DM37 audit, API contract, regressions, qualification limits and
+deferred work are in the [DM37 safe-dismount report](DISK_MANAGER_PHASE_DM37_SAFE_DISMOUNT.md).
 
 Historical phase details are in the [DM1 audit](DISK_MANAGER_PHASE_DM1_AUDIT.md), [DM2 safety foundation report](DISK_MANAGER_PHASE_DM2_SAFETY_FOUNDATION.md), [DM3 initialization report](DISK_MANAGER_PHASE_DM3_INITIALIZE_DISK.md), [DM4 boot provenance and transport safety report](DISK_MANAGER_PHASE_DM4_BOOT_PROVENANCE.md), [DM5 UI and diagnostics report](DISK_MANAGER_PHASE_DM5_UI_AND_DIAGNOSTICS.md), [DM6 safe partition-creation report](DISK_MANAGER_PHASE_DM6_CREATE_PARTITION.md), [DM7 safe FAT32-formatting report](DISK_MANAGER_PHASE_DM7_FAT32_FORMAT.md), [DM8 partition-mounting report](DISK_MANAGER_PHASE_DM8_PARTITION_MOUNTING.md), [DM9 runtime/removable-device report](DISK_MANAGER_PHASE_DM9_RUNTIME_AND_REMOVABLE_HARDENING.md), [DM10 transport-reliability report](DISK_MANAGER_PHASE_DM10_TRANSPORT_RELIABILITY.md), [DM11 USB Mass Storage report](DISK_MANAGER_PHASE_DM11_USB_MASS_STORAGE.md), [DM12 UHCI runtime USB proof](DISK_MANAGER_PHASE_DM12_UHCI_RUNTIME_USB.md), [DM13 USB write/durability report](DISK_MANAGER_PHASE_DM13_USB_WRITE_DURABILITY.md), [DM14 USB hotplug hardening](DISK_MANAGER_PHASE_DM14_USB_HOTPLUG_HARDENING.md), [DM15 AHCI/SATA storage](DISK_MANAGER_PHASE_DM15_AHCI_STORAGE.md), [DM16 NVMe durability](DISK_MANAGER_PHASE_DM16_NVME_DURABILITY.md), [DM17 NVMe data integrity](DISK_MANAGER_PHASE_DM17_NVME_DATA_INTEGRITY.md), [DM18 NVMe production graduation](DISK_MANAGER_PHASE_DM18_NVME_PRODUCTION_GRADUATION.md), [DM19 USB regression recovery](DISK_MANAGER_PHASE_DM19_USB_REGRESSION_RECOVERY.md), [DM20 USB CSW timeout classification](DISK_MANAGER_PHASE_DM20_USB_CSW_CLASSIFICATION.md), [DM21 WRITE(10) CSW capture and root-cause report](DISK_MANAGER_PHASE_DM21_USB_WRITE_CSW_ROOT_CAUSE.md), the [DM22 FAT32 scalability report](DISK_MANAGER_PHASE_DM22_FAT32_SCALABILITY.md), the [DM23 blank-scan scalability report](DISK_MANAGER_PHASE_DM23_BLANK_MEDIA_SCAN_SCALABILITY.md), the [DM24 4Kn FAT32 report](DISK_MANAGER_PHASE_DM24_4KN_FAT32.md), [DM25 safe partition deletion](DISK_MANAGER_PHASE_DM25_PARTITION_DELETE.md), the [DM26 Quick Reformat report](DISK_MANAGER_PHASE_DM26_QUICK_REFORMAT.md), the [DM27 runtime report](DISK_MANAGER_PHASE_DM27_QUICK_REFORMAT_RUNTIME.md), the [DM28 recovery report](DISK_MANAGER_PHASE_DM28_QUICK_REFORMAT_RECOVERY.md), the [DM29 GPT repair report](DISK_MANAGER_PHASE_DM29_GPT_REPAIR.md), and the [DM30 operational polish report](DISK_MANAGER_PHASE_DM30_OPERATIONAL_POLISH.md).
 

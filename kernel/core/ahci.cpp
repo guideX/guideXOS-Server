@@ -1140,6 +1140,9 @@ static void register_port_device(uint8_t controllerIndex, uint8_t port)
         modelLength < sizeof(info.model) ? modelLength : sizeof(info.model));
     memcopy(blockDevice.serial, info.serial,
         serialLength < sizeof(info.serial) ? serialLength : sizeof(info.serial));
+    memcopy(blockDevice.firmwareRevision, info.firmware,
+        sizeof(blockDevice.firmwareRevision) < sizeof(info.firmware)
+            ? sizeof(blockDevice.firmwareRevision) : sizeof(info.firmware));
     blockDevice.name[0] = 'a'; blockDevice.name[1] = 'h';
     blockDevice.name[2] = 'c'; blockDevice.name[3] = 'i';
     blockDevice.name[4] = static_cast<char>('0' + controllerIndex);

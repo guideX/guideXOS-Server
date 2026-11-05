@@ -43,6 +43,7 @@ enum GptRepairStatus : uint8_t {
     GPT_REPAIR_FLUSH_FAILED,
     GPT_REPAIR_VERIFICATION_FAILED,
     GPT_REPAIR_RESCAN_FAILED,
+    GPT_REPAIR_IDENTITY_UNCERTAIN,
 };
 
 enum GptRepairStage : uint8_t {

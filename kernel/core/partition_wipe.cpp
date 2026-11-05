@@ -162,6 +162,8 @@ static PartitionWipeReason validate_target(
         return PARTITION_WIPE_REASON_OWNERSHIP_INVALID;
     if (!query_device_capabilities(request.targetSnapshot.globalIndex, caps))
         return PARTITION_WIPE_REASON_DEVICE_MISSING;
+    if (caps.identityConfidence == IDENTITY_CONFIDENCE_UNCERTAIN)
+        return PARTITION_WIPE_REASON_IDENTITY_UNCERTAIN;
     if (!caps.geometryValid || !caps.capacityValid)
         return PARTITION_WIPE_REASON_INVALID_GEOMETRY;
     if (!caps.readable) return PARTITION_WIPE_REASON_READ_UNAVAILABLE;
@@ -615,6 +617,7 @@ const char* partition_wipe_reason_name(PartitionWipeReason reason)
         case PARTITION_WIPE_REASON_OWNERSHIP_INVALID: return "Storage-operation ownership is invalid";
         case PARTITION_WIPE_REASON_DEVICE_MISSING: return "The selected device is unavailable";
         case PARTITION_WIPE_REASON_IDENTITY_CHANGED: return "The selected device identity changed";
+        case PARTITION_WIPE_REASON_IDENTITY_UNCERTAIN: return "Stable media identity is unavailable";
         case PARTITION_WIPE_REASON_PARTITION_CHANGED: return "The selected partition map changed or is not authoritative";
         case PARTITION_WIPE_REASON_INVALID_GEOMETRY: return "The selected partition geometry is invalid";
         case PARTITION_WIPE_REASON_UNSUPPORTED_TRANSPORT: return "This storage transport is not qualified for wiping";

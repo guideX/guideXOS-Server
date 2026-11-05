@@ -11,6 +11,7 @@ enum WipeActionBlockReason : uint8_t {
     WIPE_ACTION_READY = 0,
     WIPE_ACTION_PARTITION_NOT_SELECTED,
     WIPE_ACTION_IDENTITY_INVALID,
+    WIPE_ACTION_IDENTITY_UNCERTAIN,
     WIPE_ACTION_TABLE_INVALID,
     WIPE_ACTION_GEOMETRY_INVALID,
     WIPE_ACTION_NVME_UNQUALIFIED,
@@ -27,6 +28,7 @@ enum WipeActionBlockReason : uint8_t {
 struct WipeActionEligibility {
     bool partitionSelected;
     bool identityValid;
+    bool stableMediaIdentity;
     bool validPartitionTable;
     bool validPartitionGeometry;
     block::DeviceType transport;
@@ -45,6 +47,8 @@ inline WipeActionBlockReason wipe_action_block_reason(
     if (!eligibility.partitionSelected)
         return WIPE_ACTION_PARTITION_NOT_SELECTED;
     if (!eligibility.identityValid) return WIPE_ACTION_IDENTITY_INVALID;
+    if (!eligibility.stableMediaIdentity)
+        return WIPE_ACTION_IDENTITY_UNCERTAIN;
     if (!eligibility.validPartitionTable) return WIPE_ACTION_TABLE_INVALID;
     if (!eligibility.validPartitionGeometry)
         return WIPE_ACTION_GEOMETRY_INVALID;
@@ -73,6 +77,8 @@ inline const char* wipe_action_block_reason_text(WipeActionBlockReason reason)
             return "Select a partition; a disk row cannot be wiped";
         case WIPE_ACTION_IDENTITY_INVALID:
             return "The exact device registration is unavailable";
+        case WIPE_ACTION_IDENTITY_UNCERTAIN:
+            return "A stable media identifier is unavailable; wiping is disabled";
         case WIPE_ACTION_TABLE_INVALID:
             return "The partition table is invalid or unsupported";
         case WIPE_ACTION_GEOMETRY_INVALID:

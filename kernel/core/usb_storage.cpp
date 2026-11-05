@@ -1428,6 +1428,9 @@ static bool register_block_device(uint8_t index)
     descriptor.removable = (dev.inquiry.rmb & 0x80u) != 0;
     copy(descriptor.model, dev.model, sizeof(descriptor.model));
     copy(descriptor.serial, dev.serial, sizeof(descriptor.serial));
+    copy(descriptor.firmwareRevision,
+         reinterpret_cast<const char*>(dev.inquiry.productRev),
+         sizeof(dev.inquiry.productRev));
     descriptor.bootProvenance = block::BOOT_PROVENANCE_UNKNOWN;
     descriptor.usbIdentityValid = true;
     descriptor.usbVendorId = dev.usbVendorId;

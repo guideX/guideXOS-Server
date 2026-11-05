@@ -334,6 +334,8 @@ static Fat32FormatStatus map_safety_issues(uint32_t issues)
         return FAT32_FORMAT_DEVICE_MISSING;
     if (issues & SAFETY_ISSUE_IDENTITY_MISMATCH)
         return FAT32_FORMAT_IDENTITY_CHANGED;
+    if (issues & SAFETY_ISSUE_IDENTITY_UNCERTAIN)
+        return FAT32_FORMAT_IDENTITY_UNCERTAIN;
     if (issues & SAFETY_ISSUE_UNKNOWN_GEOMETRY)
         return FAT32_FORMAT_INVALID_GEOMETRY;
     if (issues & SAFETY_ISSUE_UNREADABLE)
@@ -381,6 +383,8 @@ static Fat32FormatStatus validate_request_and_partition(
     DeviceCapabilities& caps = check.capabilities;
     if (!query_device_capabilities(request.targetSnapshot.globalIndex, caps))
         return FAT32_FORMAT_DEVICE_MISSING;
+    if (caps.identityConfidence == IDENTITY_CONFIDENCE_UNCERTAIN)
+        return FAT32_FORMAT_IDENTITY_UNCERTAIN;
     if (!caps.geometryValid || !caps.capacityValid)
         return FAT32_FORMAT_INVALID_GEOMETRY;
     if (!caps.readable) return FAT32_FORMAT_READ_UNAVAILABLE;
@@ -3251,6 +3255,7 @@ const char* fat32_format_status_name(Fat32FormatStatus status)
         case FAT32_FORMAT_DEVICE_MISSING: return "The disk is no longer present";
         case FAT32_FORMAT_REGISTRY_CHANGED: return "Disk registry changed; refresh and try again";
         case FAT32_FORMAT_IDENTITY_CHANGED: return "Disk identity changed; refresh and try again";
+        case FAT32_FORMAT_IDENTITY_UNCERTAIN: return "Stable media identity is unavailable";
         case FAT32_FORMAT_PARTITION_DISAPPEARED: return "The selected partition no longer exists";
         case FAT32_FORMAT_PARTITION_IDENTITY_CHANGED: return "Partition identity or bounds changed; refresh and try again";
         case FAT32_FORMAT_INVALID_TABLE: return "The partition table is invalid or unsupported";

@@ -189,6 +189,8 @@ static CreatePartitionStatus map_safety(uint32_t issues)
         return CREATE_PARTITION_DEVICE_MISSING;
     if (issues & SAFETY_ISSUE_IDENTITY_MISMATCH)
         return CREATE_PARTITION_IDENTITY_CHANGED;
+    if (issues & SAFETY_ISSUE_IDENTITY_UNCERTAIN)
+        return CREATE_PARTITION_IDENTITY_UNCERTAIN;
     if (issues & SAFETY_ISSUE_UNKNOWN_GEOMETRY)
         return CREATE_PARTITION_INVALID_GEOMETRY;
     if (issues & SAFETY_ISSUE_UNREADABLE)
@@ -456,6 +458,8 @@ static CreatePartitionStatus validate_target(
     if (!caps.geometryValid || !caps.capacityValid ||
         (caps.logicalSectorSize != 512 && caps.logicalSectorSize != 4096))
         return validated.probe.status = CREATE_PARTITION_INVALID_GEOMETRY;
+    if (caps.identityConfidence == IDENTITY_CONFIDENCE_UNCERTAIN)
+        return validated.probe.status = CREATE_PARTITION_IDENTITY_UNCERTAIN;
     if (!caps.readable) return validated.probe.status = CREATE_PARTITION_READ_UNAVAILABLE;
     if (!caps.writable) return validated.probe.status = CREATE_PARTITION_READ_ONLY;
     if (caps.maxTransferBytes != 0 &&
@@ -1609,6 +1613,8 @@ static DeletePartitionStatus validate_delete_target(
     DeviceCapabilities caps;
     if (!query_device_capabilities(target.globalIndex, caps))
         return DELETE_PARTITION_DEVICE_MISSING;
+    if (caps.identityConfidence == IDENTITY_CONFIDENCE_UNCERTAIN)
+        return DELETE_PARTITION_IDENTITY_UNCERTAIN;
     if (!caps.geometryValid || !caps.capacityValid ||
         (caps.logicalSectorSize != 512 && caps.logicalSectorSize != 4096))
         return DELETE_PARTITION_INVALID_GEOMETRY;
@@ -2533,6 +2539,7 @@ const char* delete_partition_status_name(DeletePartitionStatus status)
         case DELETE_PARTITION_DEVICE_MISSING: return "The disk is no longer present";
         case DELETE_PARTITION_REGISTRY_CHANGED: return "Disk registry changed; refresh and reselect";
         case DELETE_PARTITION_IDENTITY_CHANGED: return "Disk identity changed; refresh and reselect";
+        case DELETE_PARTITION_IDENTITY_UNCERTAIN: return "Stable media identity is unavailable";
         case DELETE_PARTITION_INVALID_GEOMETRY: return "Disk geometry is invalid or unsupported";
         case DELETE_PARTITION_READ_UNAVAILABLE: return "Disk reads are unavailable";
         case DELETE_PARTITION_WRITE_UNAVAILABLE: return "Metadata writes are unavailable";
@@ -2596,6 +2603,7 @@ const char* create_partition_status_name(CreatePartitionStatus status)
         case CREATE_PARTITION_DEVICE_MISSING: return "The disk is no longer present";
         case CREATE_PARTITION_REGISTRY_CHANGED: return "Disk registry changed; refresh and try again";
         case CREATE_PARTITION_IDENTITY_CHANGED: return "Disk identity changed; refresh and try again";
+        case CREATE_PARTITION_IDENTITY_UNCERTAIN: return "Stable media identity is unavailable";
         case CREATE_PARTITION_INVALID_GEOMETRY: return "Disk geometry is invalid or unsupported";
         case CREATE_PARTITION_READ_UNAVAILABLE: return "Disk reads are unavailable";
         case CREATE_PARTITION_WRITE_UNAVAILABLE: return "Durable sector writes are unavailable";

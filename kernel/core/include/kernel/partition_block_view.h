@@ -62,7 +62,8 @@ bool create_partition_view(uint8_t deviceIndex,
                            const storage::PartitionEntry& partition,
                            PartitionViewHandle& outHandle,
                            BlockEndpoint& outEndpoint,
-                           PartitionIdentity* outIdentity = nullptr);
+                           PartitionIdentity* outIdentity = nullptr,
+                           bool forceReadOnly = false);
 bool retain_partition_view(PartitionViewHandle handle);
 void release_partition_view(PartitionViewHandle handle);
 bool get_partition_view_info(PartitionViewHandle handle,

@@ -606,8 +606,10 @@ struct ATADevice {
     bool     flushCacheExt;       // IDENTIFY word 83 advertises FLUSH CACHE EXT
     uint64_t totalSectors;
     uint32_t sectorSize;          // almost always 512
+    uint32_t physicalSectorSize;  // zero when IDENTIFY geometry is unavailable
     char     model[41];           // null-terminated model string
     char     serial[21];          // null-terminated serial string
+    char     firmware[9];         // null-terminated firmware revision
     char     name[32];            // human-readable, e.g. "ata0m"
 };
 

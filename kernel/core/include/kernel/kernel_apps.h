@@ -1434,6 +1434,7 @@ private:
     storage::PartitionEntry m_mountDialogPartition;
     char m_mountDialogPath[128];
     bool m_mountDialogReadOnly;
+    bool m_mountDialogWriteAllowed;
     char m_initializeMessage[128];
     char m_statusMessage[128];
     SelectedObject m_selectedObject;

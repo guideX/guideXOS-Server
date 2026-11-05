@@ -294,6 +294,8 @@ static InitializeDiskStatus map_safety_issues(uint32_t issues)
     if (issues & SAFETY_ISSUE_REGISTRY_CHANGED) return INITIALIZE_DISK_REGISTRY_CHANGED;
     if (issues & SAFETY_ISSUE_DEVICE_MISSING) return INITIALIZE_DISK_DEVICE_MISSING;
     if (issues & SAFETY_ISSUE_IDENTITY_MISMATCH) return INITIALIZE_DISK_IDENTITY_CHANGED;
+    if (issues & SAFETY_ISSUE_IDENTITY_UNCERTAIN)
+        return INITIALIZE_DISK_IDENTITY_UNCERTAIN;
     if (issues & SAFETY_ISSUE_UNKNOWN_GEOMETRY) return INITIALIZE_DISK_INVALID_GEOMETRY;
     if (issues & SAFETY_ISSUE_UNREADABLE) return INITIALIZE_DISK_READ_UNAVAILABLE;
     if (issues & SAFETY_ISSUE_READ_ONLY) return INITIALIZE_DISK_READ_ONLY;
@@ -1503,6 +1505,7 @@ const char* initialize_disk_status_name(InitializeDiskStatus status)
         case INITIALIZE_DISK_DEVICE_MISSING: return "The device is no longer present";
         case INITIALIZE_DISK_REGISTRY_CHANGED: return "Disk identity changed; refresh and try again";
         case INITIALIZE_DISK_IDENTITY_CHANGED: return "Disk identity changed; refresh and try again";
+        case INITIALIZE_DISK_IDENTITY_UNCERTAIN: return "Stable media identity is unavailable";
         case INITIALIZE_DISK_INVALID_GEOMETRY: return "Disk geometry is invalid";
         case INITIALIZE_DISK_READ_UNAVAILABLE: return "Disk reads are unavailable";
         case INITIALIZE_DISK_WRITE_UNAVAILABLE: return "A logical sector cannot be written by this device";

@@ -252,7 +252,8 @@ bool create_partition_view(uint8_t deviceIndex,
                            const storage::PartitionEntry& partition,
                            PartitionViewHandle& outHandle,
                            BlockEndpoint& outEndpoint,
-                           PartitionIdentity* outIdentity)
+                           PartitionIdentity* outIdentity,
+                           bool forceReadOnly)
 {
     BlockDevice parent = {};
     if (!copy_device(deviceIndex, parent) || !parent.readFn ||
@@ -282,11 +283,16 @@ bool create_partition_view(uint8_t deviceIndex,
     identity.startLba = partition.startLba;
     identity.sectorCount = partition.sectorCount;
     identity.endLba = partition.startLba + partition.sectorCount - 1;
+    const bool readOnly = forceReadOnly || !parent.writeFn;
 
     lock_views();
     for (uint8_t i = 0; i < MAX_PARTITION_BLOCK_VIEWS; ++i) {
         ViewSlot& view = s_views[i];
         if (view.active && !view.closing && identity_equal(view.identity, identity)) {
+            // A forced read-only mount must never inherit a writable view.
+            // Keep access modes in separate bounded view slots for one
+            // partition so each endpoint retains an authoritative policy.
+            if (view.readOnly != readOnly) continue;
             if (view.references == UINT16_MAX) {
                 unlock_views();
                 return false;
@@ -324,7 +330,7 @@ bool create_partition_view(uint8_t deviceIndex,
     view.identity = identity;
     view.parentSectorCount = parent.totalSectors;
     view.sectorSize = parent.sectorSize;
-    view.readOnly = !parent.writeFn;
+    view.readOnly = readOnly;
     outHandle.slot = freeSlot;
     outHandle.generation = view.generation;
     outEndpoint.kind = ENDPOINT_PARTITION_VIEW;

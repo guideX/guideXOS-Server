@@ -129,6 +129,15 @@ inline bool confirmation_phrase_matches(const char* typed,
     return typed[i] == '\0' && capturedPhrase[i] == '\0';
 }
 
+inline bool byte_array_equal(const uint8_t* left, const uint8_t* right,
+                             size_t length)
+{
+    if (!left || !right) return false;
+    for (size_t i = 0; i < length; ++i)
+        if (left[i] != right[i]) return false;
+    return true;
+}
+
 inline bool capabilities_match(
     const storage::DeviceCapabilities& a,
     const storage::DeviceCapabilities& b)
@@ -149,16 +158,28 @@ inline bool capabilities_match(
         a.controllerPciDevice == b.controllerPciDevice &&
         a.controllerPciFunction == b.controllerPciFunction &&
         a.ahciPortValid == b.ahciPortValid && a.ahciPort == b.ahciPort &&
+        a.ataTargetValid == b.ataTargetValid &&
+        a.ataChannel == b.ataChannel && a.ataTarget == b.ataTarget &&
         a.geometryValid == b.geometryValid &&
         a.capacityValid == b.capacityValid &&
         a.logicalSectorSize == b.logicalSectorSize &&
+        a.physicalSectorSize == b.physicalSectorSize &&
         a.totalLogicalSectors == b.totalLogicalSectors &&
         a.totalCapacityBytes == b.totalCapacityBytes &&
         a.requiredBufferAlignment == b.requiredBufferAlignment &&
         a.maxTransferBytes == b.maxTransferBytes &&
         a.persistence == b.persistence &&
+        a.identityConfidence == b.identityConfidence &&
+        a.namespaceId == b.namespaceId &&
+        a.namespaceNguidValid == b.namespaceNguidValid &&
+        byte_array_equal(a.namespaceNguid, b.namespaceNguid,
+                         sizeof(a.namespaceNguid)) &&
+        a.namespaceEui64Valid == b.namespaceEui64Valid &&
+        byte_array_equal(a.namespaceEui64, b.namespaceEui64,
+                         sizeof(a.namespaceEui64)) &&
         text_equal(a.name, b.name) && text_equal(a.model, b.model) &&
-        text_equal(a.serial, b.serial);
+        text_equal(a.serial, b.serial) &&
+        text_equal(a.firmwareRevision, b.firmwareRevision);
 }
 
 inline bool confirmation_snapshot_matches(

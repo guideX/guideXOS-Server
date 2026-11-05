@@ -19,6 +19,11 @@ enum PersistenceClass : uint8_t {
     PERSISTENCE_VOLATILE_MEMORY,
 };
 
+enum IdentityConfidence : uint8_t {
+    IDENTITY_CONFIDENCE_UNCERTAIN = 0,
+    IDENTITY_CONFIDENCE_STABLE_MEDIA_ID,
+};
+
 struct DeviceCapabilities {
     uint8_t globalIndex;
     block::DeviceType transport;
@@ -54,6 +59,17 @@ struct DeviceCapabilities {
     char name[32];
     char model[40];
     char serial[24];
+    uint32_t physicalSectorSize;
+    char firmwareRevision[9];
+    IdentityConfidence identityConfidence;
+    bool ataTargetValid;
+    uint8_t ataChannel;
+    uint8_t ataTarget;
+    uint32_t namespaceId;
+    bool namespaceNguidValid;
+    uint8_t namespaceNguid[16];
+    bool namespaceEui64Valid;
+    uint8_t namespaceEui64[8];
 };
 
 struct TargetIdentity {
@@ -87,6 +103,13 @@ struct TargetIdentity {
     char name[32];
     char model[40];
     char serial[24];
+    uint32_t physicalSectorSize;
+    char firmwareRevision[9];
+    uint32_t namespaceId;
+    bool namespaceNguidValid;
+    uint8_t namespaceNguid[16];
+    bool namespaceEui64Valid;
+    uint8_t namespaceEui64[8];
 };
 
 enum RevalidationStatus : uint8_t {
@@ -132,6 +155,7 @@ enum SafetyIssue : uint32_t {
     SAFETY_ISSUE_PARTITION_STATE = 1u << 9,
     SAFETY_ISSUE_BOOT_BACKING = 1u << 10,
     SAFETY_ISSUE_BOOT_IDENTITY_UNKNOWN = 1u << 11,
+    SAFETY_ISSUE_IDENTITY_UNCERTAIN = 1u << 12,
 };
 
 struct SafetyRequest {

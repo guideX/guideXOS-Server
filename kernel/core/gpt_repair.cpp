@@ -335,6 +335,8 @@ static GptRepairStatus check_target_policy(const TargetIdentity& target,
     if (identity != TARGET_VALID) return identity_status(identity);
     if (!query_device_capabilities(target.globalIndex, capabilities))
         return GPT_REPAIR_DEVICE_MISSING;
+    if (capabilities.identityConfidence == IDENTITY_CONFIDENCE_UNCERTAIN)
+        return GPT_REPAIR_IDENTITY_UNCERTAIN;
     if (!capabilities.geometryValid || !capabilities.capacityValid ||
         capabilities.totalLogicalSectors != target.totalLogicalSectors ||
         capabilities.logicalSectorSize != target.logicalSectorSize ||
@@ -892,6 +894,7 @@ const char* gpt_repair_status_name(GptRepairStatus status)
         case GPT_REPAIR_DEVICE_MISSING: return "Device missing";
         case GPT_REPAIR_REGISTRY_CHANGED: return "Device registry changed";
         case GPT_REPAIR_IDENTITY_CHANGED: return "Device identity changed";
+        case GPT_REPAIR_IDENTITY_UNCERTAIN: return "Stable media identity is unavailable";
         case GPT_REPAIR_INVALID_GEOMETRY: return "Invalid or unsupported device geometry";
         case GPT_REPAIR_READ_UNAVAILABLE: return "Device is not readable";
         case GPT_REPAIR_WRITE_UNAVAILABLE: return "Device is not writable";

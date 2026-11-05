@@ -283,7 +283,8 @@ PartitionMountResult mount_partition_detailed(const char* path,
                                               uint8_t blockDevIndex,
                                               uint16_t partitionNumber,
                                               uint64_t expectedRegistrationId = 0,
-                                              const storage::PartitionEntry* expectedPartition = nullptr);
+                                              const storage::PartitionEntry* expectedPartition = nullptr,
+                                              bool readOnly = false);
 bool propose_partition_mount_path(uint8_t blockDevIndex,
                                   uint16_t partitionNumber,
                                   char* outPath, size_t outPathSize);

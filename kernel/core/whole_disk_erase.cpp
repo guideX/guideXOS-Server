@@ -265,6 +265,8 @@ static WholeDiskEraseReason validate_live_target(
 
     if (!query_device_capabilities(target.globalIndex, caps))
         return WHOLE_DISK_ERASE_REASON_DEVICE_MISSING;
+    if (caps.identityConfidence == IDENTITY_CONFIDENCE_UNCERTAIN)
+        return WHOLE_DISK_ERASE_REASON_IDENTITY_UNCERTAIN;
     if (!caps.geometryValid || !caps.capacityValid ||
         caps.totalLogicalSectors != target.totalLogicalSectors ||
         caps.logicalSectorSize != target.logicalSectorSize ||
@@ -739,6 +741,7 @@ const char* whole_disk_erase_reason_name(WholeDiskEraseReason reason)
         case WHOLE_DISK_ERASE_REASON_OWNERSHIP_INVALID: return "Whole-device operation ownership is invalid";
         case WHOLE_DISK_ERASE_REASON_DEVICE_MISSING: return "The exact target device is unavailable";
         case WHOLE_DISK_ERASE_REASON_IDENTITY_CHANGED: return "The exact device registration or identity changed";
+        case WHOLE_DISK_ERASE_REASON_IDENTITY_UNCERTAIN: return "Stable media identity is unavailable";
         case WHOLE_DISK_ERASE_REASON_INVALID_GEOMETRY: return "The device capacity or logical-sector geometry is invalid";
         case WHOLE_DISK_ERASE_REASON_UNSUPPORTED_TRANSPORT: return "This storage transport is not qualified for whole-device overwriting";
         case WHOLE_DISK_ERASE_REASON_READ_UNAVAILABLE: return "Device reads required for admission are unavailable";

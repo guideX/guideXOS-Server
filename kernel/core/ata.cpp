@@ -353,7 +353,9 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         dev.isMaster   = isMaster ? 1 : 0;
         dev.isAHCI     = false;
         dev.sectorSize = 512;
-        if ((id.logicalSectorInfo & 0xC000u) == 0x4000u &&
+        const bool sectorInfoValid =
+            (id.logicalSectorInfo & 0xC000u) == 0x4000u;
+        if (sectorInfoValid &&
             (id.logicalSectorInfo & 0x1000u) != 0) {
             const uint64_t logicalBytes = static_cast<uint64_t>(id.logicalSectorWords) * 2;
             if (logicalBytes < 512 || logicalBytes > 4096 ||
@@ -364,6 +366,17 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
                 continue;
             }
             dev.sectorSize = static_cast<uint32_t>(logicalBytes);
+        }
+        if (sectorInfoValid) {
+            dev.physicalSectorSize = dev.sectorSize;
+            if ((id.logicalSectorInfo & 0x2000u) != 0) {
+                const uint8_t exponent = static_cast<uint8_t>(
+                    id.logicalSectorInfo & 0x000Fu);
+                if (exponent >= 32u ||
+                    dev.sectorSize > (UINT32_MAX >> exponent))
+                    continue;
+                dev.physicalSectorSize = dev.sectorSize << exponent;
+            }
         }
 
         // Word 83's support bits are meaningful only when bits 15:14 mark
@@ -387,6 +400,8 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         fix_ata_string(dev.model, 40);
         memcopy(dev.serial, id.serial, 20);
         fix_ata_string(dev.serial, 20);
+        memcopy(dev.firmware, id.firmware, 8);
+        fix_ata_string(dev.firmware, 8);
 
         // Build device name: "ata0m", "ata0s", "ata1m", "ata1s"
         dev.name[0] = 'a'; dev.name[1] = 't'; dev.name[2] = 'a';
@@ -403,6 +418,7 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         bdev.driverIndex  = s_deviceCount;
         bdev.totalSectors = dev.totalSectors;
         bdev.sectorSize   = dev.sectorSize;
+        bdev.physicalSectorSize = dev.physicalSectorSize;
         bdev.readFn       = ata_pio_read;
         bdev.writeFn      = ata_pio_write;
         bdev.flushFn      = (dev.flushCache || dev.flushCacheExt)
@@ -420,6 +436,8 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         memcopy(bdev.name, dev.name, 6);
         memcopy(bdev.model, dev.model, sizeof(dev.model) - 1);
         memcopy(bdev.serial, dev.serial, sizeof(dev.serial) - 1);
+        memcopy(bdev.firmwareRevision, dev.firmware,
+                sizeof(bdev.firmwareRevision) - 1);
 
         if (block::register_device(bdev) == 0xFF) {
             memzero(&dev, sizeof(dev));

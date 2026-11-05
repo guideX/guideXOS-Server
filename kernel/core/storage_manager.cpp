@@ -44,6 +44,45 @@ static bool bytes_equal(const uint8_t* left, const uint8_t* right,
     return true;
 }
 
+static bool bytes_nonzero(const uint8_t* bytes, size_t length)
+{
+    if (!bytes) return false;
+    for (size_t i = 0; i < length; ++i)
+        if (bytes[i] != 0) return true;
+    return false;
+}
+
+static bool serial_is_stable_identifier(const char* serial)
+{
+    if (!serial) return false;
+    size_t length = 0;
+    bool hasAlphaNumeric = false;
+    while (serial[length]) {
+        const unsigned char c = static_cast<unsigned char>(serial[length]);
+        if (length >= 23 || c < 0x21 || c > 0x7E) return false;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9')) hasAlphaNumeric = true;
+        ++length;
+    }
+    return length >= 4 && hasAlphaNumeric;
+}
+
+static IdentityConfidence identity_confidence(
+    const block::BlockDevice& device)
+{
+    if (serial_is_stable_identifier(device.serial))
+        return IDENTITY_CONFIDENCE_STABLE_MEDIA_ID;
+    if (device.type == block::BDEV_NVME &&
+        ((device.namespaceNguidValid &&
+          bytes_nonzero(device.namespaceNguid,
+                        sizeof(device.namespaceNguid))) ||
+         (device.namespaceEui64Valid &&
+          bytes_nonzero(device.namespaceEui64,
+                        sizeof(device.namespaceEui64)))))
+        return IDENTITY_CONFIDENCE_STABLE_MEDIA_ID;
+    return IDENTITY_CONFIDENCE_UNCERTAIN;
+}
+
 static const uint8_t* find_device_path_node(uint8_t type, uint8_t subtype,
                                            uint16_t minLength)
 {
@@ -292,6 +331,7 @@ bool query_device_capabilities(uint8_t globalIndex, DeviceCapabilities& out)
     out.ahciPortValid = dev->ahciPortValid;
     out.ahciPort = dev->ahciPort;
     out.logicalSectorSize = dev->sectorSize;
+    out.physicalSectorSize = dev->physicalSectorSize;
     out.totalLogicalSectors = dev->totalSectors;
     out.requiredBufferAlignment = dev->requiredBufferAlignment;
     out.maxTransferBytes = dev->maxTransferBytes;
@@ -315,6 +355,19 @@ bool query_device_capabilities(uint8_t globalIndex, DeviceCapabilities& out)
     copy_text(out.name, sizeof(out.name), dev->name);
     copy_text(out.model, sizeof(out.model), dev->model);
     copy_text(out.serial, sizeof(out.serial), dev->serial);
+    copy_text(out.firmwareRevision, sizeof(out.firmwareRevision),
+              dev->firmwareRevision);
+    out.identityConfidence = identity_confidence(*dev);
+    out.ataTargetValid = dev->ataTargetValid;
+    out.ataChannel = dev->ataChannel;
+    out.ataTarget = dev->ataTarget;
+    out.namespaceId = dev->namespaceId;
+    out.namespaceNguidValid = dev->namespaceNguidValid;
+    for (size_t i = 0; i < sizeof(out.namespaceNguid); ++i)
+        out.namespaceNguid[i] = dev->namespaceNguid[i];
+    out.namespaceEui64Valid = dev->namespaceEui64Valid;
+    for (size_t i = 0; i < sizeof(out.namespaceEui64); ++i)
+        out.namespaceEui64[i] = dev->namespaceEui64[i];
     return true;
 }
 
@@ -382,6 +435,7 @@ bool capture_target_identity(uint8_t globalIndex, TargetIdentity& out)
     snapshot.driverIndex = dev->driverIndex;
     snapshot.totalLogicalSectors = dev->totalSectors;
     snapshot.logicalSectorSize = dev->sectorSize;
+    snapshot.physicalSectorSize = dev->physicalSectorSize;
     snapshot.bootProvenance = dev->bootProvenance;
     snapshot.ataTargetValid = dev->ataTargetValid;
     snapshot.ataChannel = dev->ataChannel;
@@ -402,6 +456,15 @@ bool capture_target_identity(uint8_t globalIndex, TargetIdentity& out)
     copy_text(snapshot.name, sizeof(snapshot.name), dev->name);
     copy_text(snapshot.model, sizeof(snapshot.model), dev->model);
     copy_text(snapshot.serial, sizeof(snapshot.serial), dev->serial);
+    copy_text(snapshot.firmwareRevision, sizeof(snapshot.firmwareRevision),
+              dev->firmwareRevision);
+    snapshot.namespaceId = dev->namespaceId;
+    snapshot.namespaceNguidValid = dev->namespaceNguidValid;
+    for (size_t i = 0; i < sizeof(snapshot.namespaceNguid); ++i)
+        snapshot.namespaceNguid[i] = dev->namespaceNguid[i];
+    snapshot.namespaceEui64Valid = dev->namespaceEui64Valid;
+    for (size_t i = 0; i < sizeof(snapshot.namespaceEui64); ++i)
+        snapshot.namespaceEui64[i] = dev->namespaceEui64[i];
     if (generation != block::registry_generation()) return false;
     out = snapshot;
     return true;
@@ -417,6 +480,7 @@ bool target_identities_equal(const TargetIdentity& left,
            left.driverIndex == right.driverIndex &&
            left.totalLogicalSectors == right.totalLogicalSectors &&
            left.logicalSectorSize == right.logicalSectorSize &&
+           left.physicalSectorSize == right.physicalSectorSize &&
            left.bootProvenance == right.bootProvenance &&
            left.ataTargetValid == right.ataTargetValid &&
            left.ataChannel == right.ataChannel &&
@@ -434,9 +498,18 @@ bool target_identities_equal(const TargetIdentity& left,
            left.pciFunction == right.pciFunction &&
            left.ahciPortValid == right.ahciPortValid &&
            left.ahciPort == right.ahciPort &&
+           left.namespaceId == right.namespaceId &&
+           left.namespaceNguidValid == right.namespaceNguidValid &&
+           bytes_equal(left.namespaceNguid, right.namespaceNguid,
+                       sizeof(left.namespaceNguid)) &&
+           left.namespaceEui64Valid == right.namespaceEui64Valid &&
+           bytes_equal(left.namespaceEui64, right.namespaceEui64,
+                       sizeof(left.namespaceEui64)) &&
            text_equal(left.name, right.name, sizeof(left.name)) &&
            text_equal(left.model, right.model, sizeof(left.model)) &&
-           text_equal(left.serial, right.serial, sizeof(left.serial));
+           text_equal(left.serial, right.serial, sizeof(left.serial)) &&
+           text_equal(left.firmwareRevision, right.firmwareRevision,
+                      sizeof(left.firmwareRevision));
 }
 
 RevalidationStatus revalidate_target_identity(const TargetIdentity& snapshot)
@@ -751,6 +824,9 @@ bool validate_destructive_target(const TargetIdentity& target,
         result.issues |= SAFETY_ISSUE_UNKNOWN_GEOMETRY;
     if (request.requireWritable && !caps.writable)
         result.issues |= SAFETY_ISSUE_READ_ONLY;
+    if (request.requireWritable &&
+        caps.identityConfidence == IDENTITY_CONFIDENCE_UNCERTAIN)
+        result.issues |= SAFETY_ISSUE_IDENTITY_UNCERTAIN;
     if (request.requireDurableWrites &&
         !(caps.persistence == PERSISTENCE_SYNCHRONOUS_DURABLE ||
           (caps.persistence == PERSISTENCE_FLUSH_REQUIRED &&

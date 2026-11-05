@@ -6312,6 +6312,7 @@ DiskManagerApp::DiskManagerApp()
           disk_manager_surface_verification_ui::ADMISSION_SELECTION_REQUIRED),
       m_mountDialogOpen(false), m_mountDialogDeviceIndex(0xFF),
       m_mountDialogRegistrationId(0), m_mountDialogReadOnly(true),
+      m_mountDialogWriteAllowed(false),
       m_selectedObject(SELECTED_DISK), m_detailsMode(DETAILS_PROPERTIES),
       m_keyboardPane(KEYBOARD_DISKS), m_selectedPart(-1), m_selectedRegion(-1),
       m_selectedListItem(-1), m_diskScroll(0), m_partitionScroll(0),
@@ -7548,6 +7549,9 @@ void DiskManagerApp::updateInitializeControls() {
         verificationReadAvailable = disk.capabilities.readable;
         m_wipeEligibility.partitionSelected = true;
         m_wipeEligibility.identityValid = wipeIdentityValid;
+        m_wipeEligibility.stableMediaIdentity =
+            disk.capabilities.identityConfidence ==
+                storage::IDENTITY_CONFIDENCE_STABLE_MEDIA_ID;
         m_wipeEligibility.validPartitionTable = wipeTableValid;
         m_wipeEligibility.validPartitionGeometry = wipeGeometryValid;
         m_wipeEligibility.transport = disk.capabilities.transport;
@@ -7566,6 +7570,8 @@ void DiskManagerApp::updateInitializeControls() {
             m_wipeEligibility);
         formatAvailable = possibleFs && disk.haveInfo &&
             validTable && durable && disk.identity.registrationId != 0 &&
+            disk.capabilities.identityConfidence ==
+                storage::IDENTITY_CONFIDENCE_STABLE_MEDIA_ID &&
             disk.capabilities.geometryValid &&
             storage::fat32_format_sector_size_supported(
                 disk.capabilities.logicalSectorSize) &&
@@ -8234,6 +8240,21 @@ void DiskManagerApp::onKeyDown(uint32_t key) {
     const bool enter = key == '\n' || key == 13 || key == 32;
     const bool tab = key == '\t' || key == shell::KEY_TAB;
     if (m_mountDialogOpen) {
+        if (key == 'r' || key == 'R') {
+            if (m_mountDialogWriteAllowed) {
+                m_mountDialogReadOnly = !m_mountDialogReadOnly;
+                strcopy(m_statusMessage, m_mountDialogReadOnly
+                    ? "Mount access set to Read Only."
+                    : "Mount access set to Read/Write; confirm only for the identified target.",
+                    sizeof(m_statusMessage));
+            } else {
+                strcopy(m_statusMessage,
+                    "Read Only is required; durable writes are unavailable.",
+                    sizeof(m_statusMessage));
+            }
+            invalidate();
+            return;
+        }
         const uint32_t focusedWidgetId = m_createInputFocus == 3
             ? static_cast<uint32_t>(m_confirmInitializeBtnId)
             : (m_createInputFocus == 2
@@ -10752,7 +10773,9 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20, line, kText);
         lineY += 22;
         disk_manager_draw_clipped(panelX + 10, lineY, panelW - 20,
-            "Mount checks the current partition identity and never formats or repairs it.",
+            m_mountDialogWriteAllowed
+                ? "R toggles access. Mount checks partition identity; it never formats or repairs."
+                : "Read Only is required. Mount never formats or repairs this partition.",
             kSubText);
     }
 
@@ -10773,12 +10796,12 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
     const uint32_t panelTop = y + 15;
     const uint32_t rowHeight = 12;
     const uint32_t columnWidth = w / 2 > 8 ? w / 2 - 8 : w;
-    char left[24][128] = {};
-    char right[24][128] = {};
+    char left[32][128] = {};
+    char right[32][128] = {};
     int leftCount = 0, rightCount = 0;
     auto add = [](char target[][128], int& count, const char* label,
                   const char* value) {
-        if (count >= 24) return;
+        if (count >= 32) return;
         strcopy(target[count], label ? label : "", 128);
         if (value && value[0]) {
             strappend(target[count], ": ", 128);
@@ -10920,8 +10943,17 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                     m_wipeBlockReason));
         } else {
             add(left, leftCount, "Device", disk.identity.name);
-            if (disk.identity.model[0]) add(left, leftCount, "Model", disk.identity.model);
-            if (disk.identity.serial[0]) add(left, leftCount, "Serial", disk.identity.serial);
+            add(left, leftCount, "Model", disk.identity.model[0]
+                ? disk.identity.model : "Unknown");
+            add(left, leftCount, "Serial", disk.identity.serial[0]
+                ? disk.identity.serial : "Unknown");
+            add(left, leftCount, "Firmware", disk.capabilities.firmwareRevision[0]
+                ? disk.capabilities.firmwareRevision : "Unknown");
+            add(left, leftCount, "Media identity",
+                disk.capabilities.identityConfidence ==
+                    storage::IDENTITY_CONFIDENCE_STABLE_MEDIA_ID
+                    ? "Stable identifier available"
+                    : "Uncertain; no stable serial or namespace ID");
             if (disk.capabilities.usbIdentityValid) {
                 char usbId[64] = {};
                 disk_manager_hex32(disk.capabilities.usbVendorId,
@@ -10953,7 +10985,12 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
             else strcopy(value, "Unknown", sizeof(value));
             strappend(value, " bytes", sizeof(value));
             add(left, leftCount, "Logical sector", value);
-            add(left, leftCount, "Physical sector", "Unknown");
+            if (disk.capabilities.physicalSectorSize != 0) {
+                numberText(disk.capabilities.physicalSectorSize,
+                           value, sizeof(value));
+                strappend(value, " bytes", sizeof(value));
+                add(left, leftCount, "Physical sector", value);
+            } else add(left, leftCount, "Physical sector", "Unknown");
             add(left, leftCount, "Partition style", storage::partition_scheme_name(disk.scheme));
             numberText(disk.totalPartitionCount, value, sizeof(value));
             add(left, leftCount, "Partition count", value);
@@ -10967,6 +11004,38 @@ void DiskManagerApp::drawDetails(uint32_t x, uint32_t y, uint32_t w,
                 disk.mountSafety == storage::DEVICE_UNMOUNTED ? "Unmounted" : "Unknown");
             add(right, rightCount, "Partition mount mapping", "Unknown");
             add(right, rightCount, "Access", disk.capabilities.writable ? "Writable" : "Read only");
+            if (disk.capabilities.controllerPciLocationValid) {
+                numberText(disk.capabilities.controllerPciSegment,
+                           value, sizeof(value));
+                strappend(value, ":", sizeof(value));
+                numberText(disk.capabilities.controllerPciBus,
+                           value2, sizeof(value2));
+                strappend(value, value2, sizeof(value));
+                strappend(value, ":", sizeof(value));
+                numberText(disk.capabilities.controllerPciDevice,
+                           value2, sizeof(value2));
+                strappend(value, value2, sizeof(value));
+                strappend(value, ".", sizeof(value));
+                numberText(disk.capabilities.controllerPciFunction,
+                           value2, sizeof(value2));
+                strappend(value, value2, sizeof(value));
+                add(right, rightCount, "Controller PCI BDF", value);
+            }
+            if (disk.capabilities.ahciPortValid) {
+                numberText(disk.capabilities.ahciPort, value, sizeof(value));
+                add(right, rightCount, "AHCI port", value);
+            }
+            if (disk.capabilities.ataTargetValid) {
+                numberText(disk.capabilities.ataChannel, value, sizeof(value));
+                strappend(value, "/", sizeof(value));
+                numberText(disk.capabilities.ataTarget, value2, sizeof(value2));
+                strappend(value, value2, sizeof(value));
+                add(right, rightCount, "ATA channel/target", value);
+            }
+            if (disk.capabilities.transport == block::BDEV_NVME) {
+                numberText(disk.capabilities.namespaceId, value, sizeof(value));
+                add(right, rightCount, "NVMe namespace", value);
+            }
             add(right, rightCount, "Initialization",
                 disk.initializeAvailable ? "Eligible" :
                 (disk.state == storage::DISK_STATE_NOT_INITIALIZED
@@ -12119,6 +12188,8 @@ bool DiskManagerApp::revalidateWipeConfirmation() {
     disk_manager_wipe_ui::WipeActionEligibility eligibility = {};
     eligibility.partitionSelected = true;
     eligibility.identityValid = true;
+    eligibility.stableMediaIdentity = caps.identityConfidence ==
+        storage::IDENTITY_CONFIDENCE_STABLE_MEDIA_ID;
     eligibility.validPartitionTable = tableValid;
     eligibility.validPartitionGeometry = geometryValid;
     eligibility.transport = caps.transport;
@@ -13524,7 +13595,8 @@ void DiskManagerApp::beginMountDialog() {
         (disk.capabilities.persistence == storage::PERSISTENCE_FLUSH_REQUIRED &&
          disk.capabilities.flushSupported &&
          disk.capabilities.flushSemanticsKnown);
-    m_mountDialogReadOnly = !disk.capabilities.writable || !durable;
+    m_mountDialogWriteAllowed = disk.capabilities.writable && durable;
+    m_mountDialogReadOnly = true;
     ps2keyboard::advance_legacy_input_context();
     m_mountDialogOpen = true;
     m_createInputFocus = 2;
@@ -13555,7 +13627,8 @@ void DiskManagerApp::confirmPartitionMount() {
     const vfs::PartitionMountResult result = vfs::mount_partition_detailed(
         m_mountDialogPath, m_mountDialogDeviceIndex,
         m_mountDialogPartition.partitionNumber,
-        m_mountDialogRegistrationId, &m_mountDialogPartition);
+        m_mountDialogRegistrationId, &m_mountDialogPartition,
+        m_mountDialogReadOnly);
     if (diagnosticSequence != 0)
         dm37_input_diagnostics::emit("mount-vfs-result",
             diagnosticSequence, static_cast<uint32_t>(result.error),

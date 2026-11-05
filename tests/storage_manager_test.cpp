@@ -8065,6 +8065,7 @@ void run_disk_manager_wipe_ui_tests()
     wipeUi::WipeActionEligibility eligible = {};
     eligible.partitionSelected = true;
     eligible.identityValid = true;
+    eligible.stableMediaIdentity = true;
     eligible.validPartitionTable = true;
     eligible.validPartitionGeometry = true;
     eligible.transport = block::BDEV_ATA_PIO;
@@ -8075,11 +8076,17 @@ void run_disk_manager_wipe_ui_tests()
     eligible.unmounted = true;
     eligible.bootSafe = true;
     eligible.operationIdle = true;
+    wipeUi::WipeActionEligibility blocked = eligible;
     check(wipeUi::wipe_action_block_reason(eligible) ==
               wipeUi::WIPE_ACTION_READY,
           "Disk Manager exposes wipe only when the selected partition is eligible");
 
-    wipeUi::WipeActionEligibility blocked = eligible;
+    blocked = eligible;
+    blocked.stableMediaIdentity = false;
+    check(wipeUi::wipe_action_block_reason(blocked) ==
+              wipeUi::WIPE_ACTION_IDENTITY_UNCERTAIN,
+          "Disk Manager disables wipe when the selected media has no stable identifier");
+
     blocked.partitionSelected = false;
     check(wipeUi::wipe_action_block_reason(blocked) ==
               wipeUi::WIPE_ACTION_PARTITION_NOT_SELECTED,
@@ -10982,6 +10989,40 @@ int main()
           "registry generation invalidates a previously captured target");
     unregister_fake(extraIndex, extra);
     unregister_fake(index, readOnly);
+
+    FakeDisk missingSerial(512, 4096);
+    index = register_fake(missingSerial, true, true, true);
+    block::BlockDevice* missingSerialDevice = const_cast<block::BlockDevice*>(
+        block::get_device(index));
+    if (missingSerialDevice) missingSerialDevice->serial[0] = '\0';
+    storage::TargetIdentity uncertainTarget = {};
+    storage::DeviceCapabilities uncertainCapabilities = {};
+    const bool uncertainCaptured = storage::capture_target_identity(
+        index, uncertainTarget);
+    const bool uncertainCapabilitiesRead = storage::query_device_capabilities(
+        index, uncertainCapabilities);
+    storage::InitializeTargetValidation uncertainInitialization = {};
+    const uint32_t uncertainWritesBefore = missingSerial.writeAttempts;
+    const uint32_t uncertainFlushesBefore = missingSerial.flushes;
+    const storage::InitializeDiskStatus uncertainInitializationStatus =
+        storage::probe_initialize_target(uncertainTarget,
+            storage::PARTITION_SCHEME_GPT, uncertainInitialization);
+    request.requireWritable = true;
+    request.requireDurableWrites = false;
+    request.requireKnownPartitionState = false;
+    request.allowNotInitialized = true;
+    check(uncertainCaptured && uncertainCapabilitiesRead &&
+          uncertainCapabilities.identityConfidence ==
+              storage::IDENTITY_CONFIDENCE_UNCERTAIN &&
+          uncertainInitializationStatus ==
+              storage::INITIALIZE_DISK_IDENTITY_UNCERTAIN &&
+          !storage::validate_destructive_target(uncertainTarget, request,
+                                                 validation) &&
+          (validation.issues & storage::SAFETY_ISSUE_IDENTITY_UNCERTAIN) != 0 &&
+          missingSerial.writeAttempts == uncertainWritesBefore &&
+          missingSerial.flushes == uncertainFlushesBefore,
+          "missing media serial remains inspectable but blocks destructive preflight without writes or flushes");
+    unregister_fake(index, missingSerial);
 
     FakeDisk rootDevice(512, 128);
     set_mbr_signature(rootDevice);
@@ -15189,8 +15230,24 @@ int main()
         const vfs::PartitionMountResult pathCollision =
             vfs::mount_partition_detailed("/mnt/a", index,
                 partB.partitionNumber, parentRegistration, &partB);
+        const uint32_t writesBeforeReadOnlyMount = gptVfs.writeAttempts;
+        const uint32_t flushesBeforeReadOnlyMount = gptVfs.flushes;
         const vfs::PartitionMountResult mountBResult = vfs::mount_partition_detailed(
-            "/mnt/b", index, partB.partitionNumber, parentRegistration, &partB);
+            "/mnt/b", index, partB.partitionNumber, parentRegistration, &partB,
+            true);
+        const uint8_t mountBIndex = vfs::mount_index_for_path("/mnt/b");
+        const vfs::MountPoint* mountBReadOnly =
+            vfs::get_mount_by_index(mountBIndex);
+        const uint8_t rejectedWritePayload[] = { 'R', 'O' };
+        const int32_t readOnlyCreateResult = vfs::create_file(
+            "/mnt/b/read-only-check.txt", rejectedWritePayload,
+            sizeof(rejectedWritePayload));
+        const bool explicitReadOnlyMount = mountBResult.error ==
+                vfs::PARTITION_MOUNT_OK && mountBReadOnly &&
+            mountBReadOnly->readOnly && readOnlyCreateResult ==
+                vfs::VFS_ERR_READ_ONLY && gptVfs.writeAttempts ==
+                writesBeforeReadOnlyMount && gptVfs.flushes ==
+                flushesBeforeReadOnlyMount;
         const uint8_t mountAIndex = vfs::mount_index_for_path("/mnt/a");
         const vfs::MountPoint* mountA = vfs::get_mount_by_index(mountAIndex);
         storage::TargetIdentity mountedTarget = {};
@@ -15256,6 +15313,7 @@ int main()
               mountA->partitionIdentity.parentRegistrationId == parentRegistration &&
               mountA->partitionIdentity.partitionNumber == partA.partitionNumber &&
               mountA->partitionIdentity.startLba == partA.startLba &&
+              !mountA->readOnly && explicitReadOnlyMount &&
               mountA->partitionIdentity.endLba == partA.endLba &&
               std::memcmp(mountA->partitionIdentity.uniqueGuid,
                           partA.uniqueGuid, 16) == 0 &&

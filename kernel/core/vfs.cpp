@@ -909,7 +909,8 @@ PartitionMountResult mount_partition_detailed(const char* path,
                                               uint8_t blockDevIndex,
                                               uint16_t partitionNumber,
                                               uint64_t expectedRegistrationId,
-                                              const storage::PartitionEntry* expectedPartition)
+                                              const storage::PartitionEntry* expectedPartition,
+                                              bool readOnly)
 {
     if (!s_initialized) init();
     if (!path || partitionNumber == 0)
@@ -976,7 +977,7 @@ PartitionMountResult mount_partition_detailed(const char* path,
     block::BlockEndpoint partitionEndpoint = {};
     block::PartitionIdentity identity = {};
     if (!block::create_partition_view(blockDevIndex, table.scheme, partition,
-            viewHandle, partitionEndpoint, &identity)) {
+            viewHandle, partitionEndpoint, &identity, readOnly)) {
         return partition_mount_result(block::registration_is_present(
                 blockDevIndex, parentEndpoint.registrationId)
             ? PARTITION_MOUNT_VIEW_REGISTRY_FULL
