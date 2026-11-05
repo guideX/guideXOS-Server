@@ -42,6 +42,23 @@ if ($LASTEXITCODE -ne 0) { throw "Native allocation fixed-record test compile fa
 & $exe *> (Join-Path $output 'record-test.log')
 if ($LASTEXITCODE -ne 0) { throw "Native allocation fixed-record test failed with $LASTEXITCODE." }
 
+$backendSummarySource = Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_native_alloc_backend_summary_test.cpp'
+$backendSummaryExe = Join-Path $output 'native-alloc-backend-summary-test.exe'
+$backendSummaryCompileLog = Join-Path $output 'backend-summary-compile.log'
+$backendSummaryCompileBatch = Join-Path $output 'backend-summary-compile.bat'
+$backendSummaryLog = Join-Path $output 'backend-summary-test.log'
+$backendSummaryCompileLines = @(
+    '@echo off', 'setlocal', ('call "{0}" >nul' -f $vcvars), 'if errorlevel 1 exit /b %errorlevel%',
+    ('cl.exe /nologo /std:c++17 /EHs-c- /I"{0}" /I"{1}" /I"{2}" "{3}" /Fe:"{4}"' -f $includeRoot,$root,(Join-Path $root 'kernel\include'),$backendSummarySource,$backendSummaryExe),
+    'if errorlevel 1 exit /b %errorlevel%', 'exit /b 0'
+)
+Set-Content -LiteralPath $backendSummaryCompileBatch -Value $backendSummaryCompileLines -Encoding ASCII
+Push-Location -LiteralPath $output
+try { & cmd.exe /d /c $backendSummaryCompileBatch *> $backendSummaryCompileLog } finally { Pop-Location }
+if ($LASTEXITCODE -ne 0) { throw "Native allocation backend summary test compile failed. See $backendSummaryCompileLog" }
+& $backendSummaryExe *> $backendSummaryLog
+if ($LASTEXITCODE -ne 0) { throw "Native allocation backend summary test failed with $LASTEXITCODE." }
+
 $slotTestSource = Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_gc_vm_slot_table_test.cpp'
 $slotTestPath = Join-Path $output 'gc-vm-slot-table-test.exe'
 $slotTestCompileBatch = Join-Path $output 'gc-vm-slot-table-test-compile.bat'
@@ -235,7 +252,19 @@ function New-Fixture([string]$Kind) {
     $runtimePointer = 1u
     $constructorEntered = 1u
     $backendCount = if ($Kind -eq 'kernel_slot_capacity') { 7u } else { 1u }
+    $backendAttemptCount = [uint32]$backendCount
+    $backendCompletedCount = [uint32]$backendCount
+    $backendSuccessCount = [uint32]$backendCount
+    $backendFailureCount = 0u
     $backendOverflow = 0u
+    $backendFirstDropped = [uint32]::MaxValue
+    $backendReserveCount = [uint32]$backendAttemptCount
+    $backendCommitCount = [uint32]$backendAttemptCount
+    $backendRollbackCount = 0u
+    $backendTerminal = 1u
+    $backendAggregateComplete = 1u
+    $backendDistinctFailureCodes = @()
+    $backendSchema = 'v2'
     $backendOperation = [uint32]::MaxValue
     $backendBranch = [uint32]::MaxValue
     $backendStatus = [uint32]::MaxValue
@@ -245,20 +274,49 @@ function New-Fixture([string]$Kind) {
     $releaseResult = [uint32]::MaxValue
     if ($Kind -eq 'pal_not_ready') {
         $palState=1u; $callbackEntered=0u; $runtimePointer=0u; $constructorEntered=0u
-        $backendCount=0u; $runtimeFailureOperation=0x0203u; $runtimeFailureBranch=0x0303u
+        $backendCount=0u; $backendAttemptCount=0u; $backendCompletedCount=0u
+        $backendSuccessCount=0u; $backendReserveCount=0u; $backendCommitCount=0u
+        $runtimeFailureOperation=0x0203u; $runtimeFailureBranch=0x0303u
     } elseif ($Kind -eq 'vm_commit_frame') {
         $runtimePointer=0u; $constructorEntered=0u; $runtimeFailureOperation=0x0203u
         $runtimeFailureBranch=0x0304u; $backendOperation=0x0206u; $backendBranch=0x0413u
         $backendStatus=7u; $backendStatusSource=1u; $commitResult=7u; $releaseResult=0u
+        $backendSuccessCount=0u; $backendFailureCount=1u; $backendTerminal=2u
+        $backendDistinctFailureCodes=@([pscustomobject]@{ operation=0x0206u; branch=0x0413u; status=7u; statusSource=1u })
     } elseif ($Kind -eq 'vm_reserve_address') {
         $runtimePointer=0u; $constructorEntered=0u; $runtimeFailureOperation=0x0203u
         $runtimeFailureBranch=0x0304u; $backendOperation=0x0205u; $backendBranch=0x0408u
         $backendStatus=6u; $backendStatusSource=1u; $reserveResult=6u; $commitResult=[uint32]::MaxValue
+        $backendSuccessCount=0u; $backendFailureCount=1u; $backendTerminal=2u
+        $backendCommitCount=0u
+        $backendDistinctFailureCodes=@([pscustomobject]@{ operation=0x0205u; branch=0x0408u; status=6u; statusSource=1u })
     } elseif ($Kind -eq 'kernel_slot_capacity') {
         $runtimePointer=0u; $constructorEntered=0u; $runtimeFailureOperation=0x0203u
         $runtimeFailureBranch=0x0304u; $backendOperation=0x0204u; $backendBranch=0x0310u
         $backendStatus=0u; $backendStatusSource=2u; $reserveResult=[uint32]::MaxValue
         $commitResult=[uint32]::MaxValue; $releaseResult=[uint32]::MaxValue
+        $backendSuccessCount=6u; $backendFailureCount=1u; $backendTerminal=2u
+        $backendDistinctFailureCodes=@([pscustomobject]@{ operation=0x0204u; branch=0x0310u; status=0u; statusSource=2u })
+    } elseif ($Kind -eq 'high_volume_success') {
+        $backendCount=9u; $backendAttemptCount=2048u; $backendCompletedCount=2048u
+        $backendSuccessCount=2048u; $backendOverflow=2039u; $backendFirstDropped=9u
+        $backendReserveCount=2048u; $backendCommitCount=2048u
+    } elseif ($Kind -eq 'failure_after_overflow') {
+        $runtimePointer=0u; $constructorEntered=0u; $runtimeFailureOperation=0x0203u
+        $runtimeFailureBranch=0x0304u; $backendOperation=0x0206u; $backendBranch=0x0413u
+        $backendStatus=7u; $backendStatusSource=1u; $commitResult=7u; $releaseResult=0u
+        $backendCount=9u; $backendAttemptCount=11u; $backendCompletedCount=11u
+        $backendSuccessCount=10u; $backendFailureCount=1u; $backendOverflow=2u
+        $backendFirstDropped=9u; $backendReserveCount=11u; $backendCommitCount=11u
+        $backendTerminal=2u
+        $backendDistinctFailureCodes=@(
+            [pscustomobject]@{ operation=0x0206u; branch=0x0413u; status=7u; statusSource=1u },
+            [pscustomobject]@{ operation=0x0207u; branch=0x0313u; status=5u; statusSource=1u }
+        )
+    } elseif ($Kind -eq 'incomplete_summary') {
+        $backendAggregateComplete=0u; $backendTerminal=3u
+    } elseif ($Kind -eq 'legacy_overflow') {
+        $backendSchema='legacy'; $backendCount=9u; $backendOverflow=1u
     }
     $runtimeFirstFailed = if ($runtimeFailureOperation -eq [uint32]::MaxValue) { [uint32]::MaxValue } elseif ($Kind -eq 'kernel_slot_capacity') { 2u } else { 0u }
     $summary = @(0x4E413232u,1u,$runtimeCount,0u,$runtimeFirstFailed,
@@ -285,13 +343,36 @@ function New-Fixture([string]$Kind) {
             $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=runtime invocation={0} sequence={1:X8} field={2:X8} value={3:X8} auxiliary=00000000' -f $inv,$attemptIndex,$field,$attempt[$field]))
         }
     }
-    if ($Kind -ne 'pal_not_ready') {
-        $backendSummaryKey = 0x80000000u
-        $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field={1:X8} value={2:X8} auxiliary={3:X8}' -f $inv,$backendSummaryKey,$backendCount,$backendOverflow))
-        $firstFailed = if ($backendOperation -eq [uint32]::MaxValue) { [uint32]::MaxValue } elseif ($Kind -eq 'kernel_slot_capacity') { 6u } else { 0u }
-        $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field=80000001 value={1:X8} auxiliary=00000000' -f $inv,$firstFailed))
+    $backendFirstFailureIndex = [uint32]::MaxValue
+    if ($backendFailureCount -gt 0u) {
+        $backendFirstFailureIndex = if ($Kind -eq 'kernel_slot_capacity') { 6u } elseif ($Kind -eq 'failure_after_overflow') { 10u } else { 0u }
+    }
+    if ($backendSchema -eq 'v2') {
+        $backendSummaryRows = @(
+            [pscustomobject]@{ field=0u; value=$backendCount; auxiliary=$backendOverflow },
+            [pscustomobject]@{ field=1u; value=$backendFirstFailureIndex; auxiliary=0u },
+            [pscustomobject]@{ field=2u; value=$backendAttemptCount; auxiliary=$backendCompletedCount },
+            [pscustomobject]@{ field=3u; value=$backendSuccessCount; auxiliary=$backendFailureCount },
+            [pscustomobject]@{ field=4u; value=$backendReserveCount; auxiliary=$backendCommitCount },
+            [pscustomobject]@{ field=5u; value=$backendRollbackCount; auxiliary=$backendFirstDropped },
+            [pscustomobject]@{ field=6u; value=$backendTerminal; auxiliary=$backendAggregateComplete },
+            [pscustomobject]@{ field=7u; value=$backendOperation; auxiliary=$backendBranch },
+            [pscustomobject]@{ field=8u; value=$backendStatus; auxiliary=$backendStatusSource },
+            [pscustomobject]@{ field=9u; value=$backendDistinctFailureCodes.Count; auxiliary=0u },
+            [pscustomobject]@{ field=10u; value=0u; auxiliary=0u }
+        )
+        foreach ($row in $backendSummaryRows) {
+            $field = [uint32](0x80000000u -bor [uint32]$row.field)
+            $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field={1:X8} value={2:X8} auxiliary={3:X8}' -f $inv,$field,$row.value,$row.auxiliary))
+        }
+        for ($failureIndex=0; $failureIndex -lt $backendDistinctFailureCodes.Count; $failureIndex++) {
+            $failureCode = $backendDistinctFailureCodes[$failureIndex]
+            $field = [uint32](0x80000100u + (2u * [uint32]$failureIndex))
+            $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field={1:X8} value={2:X8} auxiliary={3:X8}' -f $inv,$field,$failureCode.operation,$failureCode.branch))
+            $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field={1:X8} value={2:X8} auxiliary={3:X8}' -f $inv,($field + 1u),$failureCode.status,$failureCode.statusSource))
+        }
     } else {
-        $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field=80000000 value=00000000 auxiliary=00000000' -f $inv))
+        $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field=80000000 value={1:X8} auxiliary={2:X8}' -f $inv,$backendCount,$backendOverflow))
         $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence=FFFFFFFF field=80000001 value=FFFFFFFF auxiliary=00000000' -f $inv))
     }
     if ($Kind -ne 'pal_not_ready') {
@@ -301,7 +382,8 @@ function New-Fixture([string]$Kind) {
             $back[0]=[uint32]$backendIndex; $back[1]=24u; $back[2]=0x3000u; $back[3]=0x1000u; $back[4]=16u
             $back[5]=[uint32][Math]::Min(15,$backendIndex); $back[6]=[uint32][Math]::Min(15,$backendIndex)
             $back[7]=1u; $back[8]=128u
-            if ($Kind -eq 'kernel_slot_capacity' -and $backendIndex -eq 6) {
+            $thisBackendFailure = ($backendIndex -eq $backendFirstFailureIndex)
+            if ($Kind -eq 'kernel_slot_capacity' -and $thisBackendFailure) {
                 $back[5]=16u; $back[6]=[uint32]::MaxValue; $back[9]=[uint32]::MaxValue
                 $back[10]=0u; $back[11]=[uint32]::MaxValue; $back[12]=[uint32]::MaxValue
                 $back[13]=0u; $back[14]=$backendOperation; $back[15]=$backendBranch
@@ -310,11 +392,15 @@ function New-Fixture([string]$Kind) {
                 $back[9]=0u; $back[10]=0x1000u; $back[11]=0u; $back[12]=[uint32]::MaxValue
                 $back[13]=1u; $back[14]=[uint32]::MaxValue; $back[15]=[uint32]::MaxValue
                 $back[16]=[uint32]::MaxValue; $back[17]=0u
-            } else {
+            } elseif ($thisBackendFailure) {
                 $back[9]=$reserveResult; $back[10]=if ($Kind -eq 'vm_reserve_address') { 0u } else { 0x1000u }
                 $back[11]=$commitResult; $back[12]=$releaseResult; $back[13]=$runtimePointer
                 $back[14]=$backendOperation; $back[15]=$backendBranch
                 $back[16]=$backendStatus; $back[17]=$backendStatusSource
+            } else {
+                $back[9]=0u; $back[10]=0x1000u; $back[11]=0u; $back[12]=[uint32]::MaxValue
+                $back[13]=1u; $back[14]=[uint32]::MaxValue; $back[15]=[uint32]::MaxValue
+                $back[16]=[uint32]::MaxValue; $back[17]=0u
             }
             for ($field=0; $field -lt $back.Length; $field++) {
                 $lines.Add(('[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation={0} sequence={1:X8} field={2:X8} value={3:X8} auxiliary=00000000' -f $inv,$backendIndex,$field,$back[$field]))
@@ -345,6 +431,84 @@ Assert-Classification 'kernel_slot_capacity' 'KERNEL_PAL_SLOT_CAPACITY'
 Assert-Classification 'pal_not_ready' 'PAL_NOT_READY'
 Assert-Classification 'missing' 'INCOMPLETE_MISSING_RUNTIME_RECORD'
 Assert-Classification 'incomplete' 'INCOMPLETE_DIAGNOSTIC_RECORD'
+Assert-Classification 'incomplete_summary' 'INCOMPLETE_DIAGNOSTIC_RECORD'
+Assert-Classification 'legacy_overflow' 'INCOMPLETE_DIAGNOSTIC_RECORD'
+
+function Assert-BackendSummaryTamper(
+    [string]$Kind, [string]$Field, [string]$Value,
+    [string]$SecondField = $null, [string]$SecondValue = $null,
+    [string]$AuxiliaryField = $null, [string]$AuxiliaryValue = $null) {
+    $lines = New-Fixture $Kind
+    $mutations = @([pscustomobject]@{ field=$Field; property='value'; value=$Value })
+    if (-not [string]::IsNullOrWhiteSpace($SecondField)) {
+        $mutations += [pscustomobject]@{ field=$SecondField; property='value'; value=$SecondValue }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($AuxiliaryField)) {
+        $mutations += [pscustomobject]@{ field=$AuxiliaryField; property='auxiliary'; value=$AuxiliaryValue }
+    }
+    foreach ($mutation in $mutations) {
+        $needle = "source=backend invocation=00000001 sequence=FFFFFFFF field=$($mutation.field) "
+        $found = $false
+        for ($lineIndex=0; $lineIndex -lt $lines.Count; $lineIndex++) {
+            if ($lines[$lineIndex].Contains($needle)) {
+                $lines[$lineIndex] = [regex]::Replace(
+                    $lines[$lineIndex], "$($mutation.property)=[0-9A-F]{8}",
+                    "$($mutation.property)=$($mutation.value)")
+                $found = $true
+                break
+            }
+        }
+        if (-not $found) { throw "Could not locate backend summary field $($mutation.field) in $Kind fixture." }
+    }
+    $safeName = ($Kind + '-' + $Field + '-' + $Value) -replace '[^A-Za-z0-9-]', '_'
+    $fixturePath = Join-Path $output ("fixture-tampered-{0}.serial.log" -f $safeName)
+    [System.IO.File]::WriteAllLines($fixturePath,$lines,[System.Text.UTF8Encoding]::new($false))
+    $reportPath = Join-Path $output ("fixture-tampered-{0}.json" -f $safeName)
+    & $analyzer -SerialPath $fixturePath -OutputPath $reportPath -EvidenceKind hosted_fixture
+    $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+    if ([string]$report.results[0].classification -cne 'INCOMPLETE_DIAGNOSTIC_RECORD' -or
+        [bool]$report.results[0].backendSummary.aggregateComplete) {
+        throw "Analyzer accepted inconsistent backend summary mutation in $Kind field $Field."
+    }
+}
+
+Assert-BackendSummaryTamper 'success' '80000003' '00000002'
+Assert-BackendSummaryTamper 'success' '80000004' '00000002'
+Assert-BackendSummaryTamper 'success' '80000006' '00000003'
+Assert-BackendSummaryTamper 'failure_after_overflow' '80000102' '00000206' '80000103' '00000007' '80000102' '00000413'
+
+function Get-FixtureReport([string]$Kind) {
+    $fixturePath = Join-Path $output ("fixture-{0}.serial.log" -f $Kind)
+    $lines = New-Fixture $Kind
+    [System.IO.File]::WriteAllLines($fixturePath,$lines,[System.Text.UTF8Encoding]::new($false))
+    $reportPath = Join-Path $output ("fixture-{0}.json" -f $Kind)
+    & $analyzer -SerialPath $fixturePath -OutputPath $reportPath -EvidenceKind hosted_fixture
+    return Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+}
+$highVolumeReport = Get-FixtureReport 'high_volume_success'
+$highVolumeSummary = $highVolumeReport.results[0].backendSummary
+if ($highVolumeReport.results[0].classification -cne 'SUCCESS' -or
+    -not $highVolumeSummary.attemptedCountExact -or $highVolumeSummary.attemptedCount -ne 2048 -or
+    $highVolumeSummary.detailedRows -ne 9 -or $highVolumeSummary.droppedDetailCount -ne 2039 -or
+    $highVolumeSummary.firstDroppedAttempt -ne 9 -or -not $highVolumeSummary.aggregateComplete) {
+    throw 'High-volume backend summary did not preserve exact attempt, detail-drop, and completion totals.'
+}
+$lateFailureReport = Get-FixtureReport 'failure_after_overflow'
+$lateFailureSummary = $lateFailureReport.results[0].backendSummary
+if ($lateFailureReport.results[0].classification -cne 'VM_COMMIT_BRANCH_0x0413' -or
+    $lateFailureSummary.firstFailureAttempt -ne 10 -or $lateFailureSummary.attemptedCount -ne 11 -or
+    $lateFailureSummary.distinctFailureCount -ne 2 -or $lateFailureSummary.distinctFailureCodes.Count -ne 2 -or
+    $lateFailureSummary.distinctFailureCodes[1].operation -ne 0x0207 -or
+    -not $lateFailureSummary.aggregateComplete) {
+    throw 'Failure after detail overflow or distinct cleanup failure codes were not retained in the aggregate.'
+}
+$legacyOverflowReport = Get-FixtureReport 'legacy_overflow'
+$legacySummary = $legacyOverflowReport.results[0].backendSummary
+if ($legacySummary.attemptedCountExact -or $null -ne $legacySummary.attemptedCount -or
+    $legacySummary.minimumAttemptCount -ne 10 -or $legacySummary.firstDroppedAttempt -ne 9 -or
+    $legacySummary.legacyOverflowFlag -ne 1) {
+    throw 'Legacy boolean overflow was incorrectly upgraded to an exact attempt count.'
+}
 
 $result = [ordered]@{
     result='PASS'
@@ -353,6 +517,15 @@ $result = [ordered]@{
     qacReserved=$false
     nativeAllocRecordTest=$exe
     nativeAllocRecordTestSha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToUpperInvariant()
+    nativeAllocBackendSummaryTest=$backendSummaryExe
+    nativeAllocBackendSummaryTestSha256=(Get-FileHash -LiteralPath $backendSummaryExe -Algorithm SHA256).Hash.ToUpperInvariant()
+    nativeAllocBackendSummaryCases=@(
+        'successful startup';'bounded 2,048-attempt success summary';'failure before detail overflow'
+        'first failure and distinct cleanup codes after detail overflow'
+        'unfinished terminal classification';'counter saturation fails closed'
+        '64-bit outcome total rejects wrapped 32-bit count sums'
+        'analyzer rejects inconsistent outcome, operation, terminal, and duplicate failure summaries'
+    )
     gcVmSlotTableTest=$slotTestPath
     gcVmSlotTableTestSha256=(Get-FileHash -LiteralPath $slotTestPath -Algorithm SHA256).Hash.ToUpperInvariant()
     gcVmSlotTableTestSemantics='shared PAL slot-table implementation with synthetic reserve/commit/release backend; no guest memory claimed'
@@ -376,7 +549,13 @@ $result = [ordered]@{
     nativeAllocationFailureSiteOutcome=$guestFailureSiteOutcome
     nativeAllocationUnknownClassOutcome=$unexpectedClassificationOutcome
     analyzer=$analyzer
-    fixtureClassifications=@('SUCCESS','VM_COMMIT_BRANCH_0x0413','VM_RESERVE_BRANCH_0x0408','KERNEL_PAL_SLOT_CAPACITY','PAL_NOT_READY','INCOMPLETE_MISSING_RUNTIME_RECORD','INCOMPLETE_DIAGNOSTIC_RECORD')
+    fixtureClassifications=@('SUCCESS','VM_COMMIT_BRANCH_0x0413','VM_RESERVE_BRANCH_0x0408','KERNEL_PAL_SLOT_CAPACITY','PAL_NOT_READY','INCOMPLETE_MISSING_RUNTIME_RECORD','INCOMPLETE_DIAGNOSTIC_RECORD','INCOMPLETE_DIAGNOSTIC_RECORD(summary incomplete)','INCOMPLETE_DIAGNOSTIC_RECORD(legacy overflow)')
+    highVolumeBackendAttemptCount=2048
+    highVolumeBackendDetailRows=9
+    highVolumeBackendDroppedDetailCount=2039
+    lateBackendFailureAttempt=10
+    lateBackendDistinctFailureCodeCount=2
+    legacyOverflowExactAttemptCount=$false
     diagnosticMapOperatorNew='??2@YAPEAX_KAEBUnothrow_t@std@@@Z -> guidexos_nativeaot_startup_imports.production.obj'
     productionDiagnosticProfilesAbsent=$true
 }

@@ -43,6 +43,7 @@
 #endif
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_native_alloc_record.h"
+#include "include/kernel/nativeaot_native_alloc_backend_summary.h"
 #endif
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_adapter.h"
 
@@ -1106,15 +1107,14 @@ struct NativeAllocBackendAttempt {
 
 struct NativeAllocBackendRecord {
     uint32_t count;
-    uint32_t overflow;
-    uint32_t firstFailedAttempt;
     uint32_t activeAttempt;
+    uint32_t activeAttemptOrdinal;
     NativeAllocBackendAttempt attempts[GX_NATIVE_ALLOC_BACKEND_CAPACITY];
+    kernel::nativeaot::diagnostics::NativeAllocBackendSummary summary;
 };
 
 NativeAllocBackendRecord g_nativeAllocBackend = {
-    0u, 0u, GX_NATIVE_ALLOC_VALUE_UNAVAILABLE,
-    GX_NATIVE_ALLOC_VALUE_UNAVAILABLE, {},
+    0u, GX_NATIVE_ALLOC_VALUE_UNAVAILABLE, GX_NATIVE_ALLOC_VALUE_UNAVAILABLE, {}, {},
 };
 bool g_nativeAllocBackendCaptureActive = false;
 
@@ -1135,6 +1135,9 @@ NativeAllocBackendAttempt* nativeAllocBackendActiveAttempt() {
 
 void nativeAllocBackendRecordFailure(uint32_t operation, uint32_t branch,
                                      uint32_t status, uint32_t statusSource) {
+    kernel::nativeaot::diagnostics::recordNativeAllocBackendFailure(
+        g_nativeAllocBackend.summary, g_nativeAllocBackend.activeAttemptOrdinal,
+        operation, branch, status, statusSource);
     NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
     if (attempt == nullptr ||
         attempt->failureOperation != GX_NATIVE_ALLOC_VALUE_UNAVAILABLE) return;
@@ -1142,52 +1145,57 @@ void nativeAllocBackendRecordFailure(uint32_t operation, uint32_t branch,
     attempt->failureBranch = branch;
     attempt->failureStatus = status;
     attempt->failureStatusSource = statusSource;
-    if (g_nativeAllocBackend.firstFailedAttempt == GX_NATIVE_ALLOC_VALUE_UNAVAILABLE) {
-        g_nativeAllocBackend.firstFailedAttempt = g_nativeAllocBackend.activeAttempt;
-    }
 }
 
 void nativeAllocBackendBegin(uintptr_t size, uint32_t type) {
     g_nativeAllocBackendCaptureActive = false;
     if (size != 24u) return;
-    if (g_nativeAllocBackend.count >= GX_NATIVE_ALLOC_BACKEND_CAPACITY) {
-        g_nativeAllocBackend.overflow = 1u;
-        return;
+    const bool retainDetails = g_nativeAllocBackend.count < GX_NATIVE_ALLOC_BACKEND_CAPACITY;
+    const uint32_t ordinal = kernel::nativeaot::diagnostics::
+        beginNativeAllocBackendAttempt(g_nativeAllocBackend.summary, retainDetails);
+    g_nativeAllocBackend.activeAttemptOrdinal = ordinal;
+    if (retainDetails) {
+        const uint32_t index = g_nativeAllocBackend.count++;
+        NativeAllocBackendAttempt& attempt = g_nativeAllocBackend.attempts[index];
+        attempt = {};
+        attempt.requestSize = size;
+        attempt.requestType = type;
+        attempt.roundedSize = size <= UINTPTR_MAX - 4095u
+            ? (size + 4095u) & ~uintptr_t(4095u)
+            : GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+        attempt.slotCapacity = kernel::nativeaot::detail::kMaxGcVmSlots;
+        attempt.activeSlots = nativeAllocBackendActiveVmSlots();
+        attempt.freeSlotIndex = nativeAllocBackendFreeVmSlot();
+        attempt.addressSpaceReady = kernel::memory::address_space::isInitialized() &&
+            kernel::memory::address_space::current() != nullptr ? 1u : 0u;
+        attempt.before = gxos::runtime::virtual_memory::stats();
+        attempt.after = attempt.before;
+        attempt.vmRegionCapacity = static_cast<uint32_t>(attempt.before.metadataCapacity);
+        attempt.reserveResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+        attempt.commitSize = 0u;
+        attempt.commitResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+        attempt.rollbackReleaseResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+        attempt.failureOperation = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+        attempt.failureBranch = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+        attempt.failureStatus = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+        attempt.failureStatusSource = GX_NATIVE_ALLOC_STATUS_UNAVAILABLE;
+        g_nativeAllocBackend.activeAttempt = index;
+    } else {
+        g_nativeAllocBackend.activeAttempt = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
     }
-    const uint32_t index = g_nativeAllocBackend.count++;
-    NativeAllocBackendAttempt& attempt = g_nativeAllocBackend.attempts[index];
-    attempt = {};
-    attempt.requestSize = size;
-    attempt.requestType = type;
-    attempt.roundedSize = size <= UINTPTR_MAX - 4095u
-        ? (size + 4095u) & ~uintptr_t(4095u)
-        : GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
-    attempt.slotCapacity = kernel::nativeaot::detail::kMaxGcVmSlots;
-    attempt.activeSlots = nativeAllocBackendActiveVmSlots();
-    attempt.freeSlotIndex = nativeAllocBackendFreeVmSlot();
-    attempt.addressSpaceReady = kernel::memory::address_space::isInitialized() &&
-        kernel::memory::address_space::current() != nullptr ? 1u : 0u;
-    attempt.before = gxos::runtime::virtual_memory::stats();
-    attempt.after = attempt.before;
-    attempt.vmRegionCapacity = static_cast<uint32_t>(attempt.before.metadataCapacity);
-    attempt.reserveResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
-    attempt.commitSize = 0u;
-    attempt.commitResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
-    attempt.rollbackReleaseResult = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
-    attempt.failureOperation = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
-    attempt.failureBranch = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
-    attempt.failureStatus = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
-    attempt.failureStatusSource = GX_NATIVE_ALLOC_STATUS_UNAVAILABLE;
-    g_nativeAllocBackend.activeAttempt = index;
     g_nativeAllocBackendCaptureActive = true;
 }
 
 void nativeAllocBackendObserveReserve(uint32_t result) {
+    kernel::nativeaot::diagnostics::recordNativeAllocBackendOperation(
+        g_nativeAllocBackend.summary, kernel::nativeaot::diagnostics::NativeAllocBackendReserve);
     NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
     if (attempt != nullptr) attempt->reserveResult = result;
 }
 
 void nativeAllocBackendObserveCommit(uintptr_t size, uint32_t result) {
+    kernel::nativeaot::diagnostics::recordNativeAllocBackendOperation(
+        g_nativeAllocBackend.summary, kernel::nativeaot::diagnostics::NativeAllocBackendCommit);
     NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
     if (attempt == nullptr) return;
     attempt->commitSize = size;
@@ -1195,26 +1203,33 @@ void nativeAllocBackendObserveCommit(uintptr_t size, uint32_t result) {
 }
 
 void nativeAllocBackendObserveRollbackRelease(uint32_t result) {
+    kernel::nativeaot::diagnostics::recordNativeAllocBackendOperation(
+        g_nativeAllocBackend.summary,
+        kernel::nativeaot::diagnostics::NativeAllocBackendRollbackRelease);
     NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
     if (attempt != nullptr) attempt->rollbackReleaseResult = result;
 }
 
 void nativeAllocBackendFinish(void* result) {
     NativeAllocBackendAttempt* attempt = nativeAllocBackendActiveAttempt();
+    if (result == nullptr && (attempt == nullptr ||
+        attempt->failureOperation == GX_NATIVE_ALLOC_VALUE_UNAVAILABLE)) {
+        nativeAllocBackendRecordFailure(
+            GX_NATIVE_ALLOC_OP_KERNEL_VIRTUAL_ALLOC,
+            GX_NATIVE_ALLOC_FAILURE_PAL_RETURNED_NULL,
+            GX_NATIVE_ALLOC_VALUE_UNAVAILABLE,
+            GX_NATIVE_ALLOC_STATUS_UNAVAILABLE);
+        attempt = nativeAllocBackendActiveAttempt();
+    }
     if (attempt != nullptr) {
         attempt->finalPointerNonNull = result != nullptr ? 1u : 0u;
         attempt->after = gxos::runtime::virtual_memory::stats();
-        if (result == nullptr &&
-            attempt->failureOperation == GX_NATIVE_ALLOC_VALUE_UNAVAILABLE) {
-            nativeAllocBackendRecordFailure(
-                GX_NATIVE_ALLOC_OP_KERNEL_VIRTUAL_ALLOC,
-                GX_NATIVE_ALLOC_FAILURE_PAL_RETURNED_NULL,
-                GX_NATIVE_ALLOC_VALUE_UNAVAILABLE,
-                GX_NATIVE_ALLOC_STATUS_UNAVAILABLE);
-        }
     }
+    kernel::nativeaot::diagnostics::finishNativeAllocBackendAttempt(
+        g_nativeAllocBackend.summary, result != nullptr);
     g_nativeAllocBackendCaptureActive = false;
     g_nativeAllocBackend.activeAttempt = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
+    g_nativeAllocBackend.activeAttemptOrdinal = GX_NATIVE_ALLOC_VALUE_UNAVAILABLE;
 }
 
 } // namespace
@@ -1273,14 +1288,48 @@ uint32_t nativeAllocBackendField(const NativeAllocBackendAttempt& attempt,
 }
 
 void emitNativeAllocBackendRecord() {
-    serial::puts("[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation=00000001 sequence=FFFFFFFF field=80000000 value=");
-    serial::put_hex32(g_nativeAllocBackend.count);
-    serial::puts(" auxiliary=");
-    serial::put_hex32(g_nativeAllocBackend.overflow);
-    serial::puts("\n");
-    serial::puts("[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation=00000001 sequence=FFFFFFFF field=80000001 value=");
-    serial::put_hex32(g_nativeAllocBackend.firstFailedAttempt);
-    serial::puts(" auxiliary=00000000\n");
+    using kernel::nativeaot::diagnostics::NativeAllocBackendSummary;
+    const NativeAllocBackendSummary& summary = g_nativeAllocBackend.summary;
+    const auto emitSummary = [](uint32_t field, uint32_t value, uint32_t auxiliary) {
+        serial::puts("[C188R12R4R5R4R5R2R2_NATIVE_ALLOC] source=backend invocation=00000001 sequence=FFFFFFFF field=");
+        serial::put_hex32(0x80000000u | field);
+        serial::puts(" value=");
+        serial::put_hex32(value);
+        serial::puts(" auxiliary=");
+        serial::put_hex32(auxiliary);
+        serial::putc('\n');
+    };
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_STORED_COUNT,
+        g_nativeAllocBackend.count, summary.droppedDetailCount);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_FIRST_FAILURE_ATTEMPT,
+        summary.firstFailureAttempt, 0u);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_ATTEMPT_COUNTS,
+        summary.attemptedCount, summary.completedCount);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_OUTCOME_COUNTS,
+        summary.successfulCount, summary.failedCount);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_OPERATION_COUNTS,
+        summary.operationCounts[kernel::nativeaot::diagnostics::NativeAllocBackendReserve],
+        summary.operationCounts[kernel::nativeaot::diagnostics::NativeAllocBackendCommit]);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_ROLLBACK_AND_FIRST_DROPPED,
+        summary.operationCounts[kernel::nativeaot::diagnostics::NativeAllocBackendRollbackRelease],
+        summary.firstDroppedAttempt);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_TERMINAL_STATUS,
+        kernel::nativeaot::diagnostics::nativeAllocBackendTerminalStatus(summary),
+        kernel::nativeaot::diagnostics::nativeAllocBackendSummaryComplete(summary) ? 1u : 0u);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_FIRST_FAILURE_CODE,
+        summary.firstFailureOperation, summary.firstFailureBranch);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_DISTINCT_FAILURE_COUNTS,
+        summary.distinctFailureCount, summary.distinctFailureOverflow);
+    emitSummary(GX_NATIVE_ALLOC_BACKEND_SUMMARY_COUNTER_SATURATION,
+        summary.counterSaturated, 0u);
+    for (uint32_t index = 0u; index < summary.distinctFailureCount; ++index) {
+        const kernel::nativeaot::diagnostics::NativeAllocBackendFailureCode& code =
+            summary.distinctFailures[index];
+        const uint32_t field = GX_NATIVE_ALLOC_BACKEND_SUMMARY_DISTINCT_FAILURE_BASE +
+            (index * 2u);
+        emitSummary(field, code.operation, code.branch);
+        emitSummary(field + 1u, code.status, code.statusSource);
+    }
     for (uint32_t attempt = 0u; attempt < g_nativeAllocBackend.count; ++attempt) {
         const NativeAllocBackendAttempt& row = g_nativeAllocBackend.attempts[attempt];
         for (uint32_t field = 0u; field < GX_NATIVE_ALLOC_BACKEND_FIELD_COUNT; ++field) {

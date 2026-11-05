@@ -22,9 +22,11 @@ function Assert-True([bool]$Value,[string]$Label) {
     if (-not $Value) { throw "C188 safe-handoff assertion failed: $Label" }
 }
 function Add-Thread([System.Collections.Generic.List[string]]$Lines,[string]$Event,
-                    [string]$Raw0='0000000000000001',[string]$Raw1='0000000000000001',[int]$Sequence=-1) {
+                    [string]$Raw0='0000000000000001',[string]$Raw1='0000000000000001',
+                    [int]$Sequence=-1,[ValidateSet(32,64)][int]$SequenceWidth=64) {
     if ($Sequence -ge 0) {
-        $Lines.Add(('[C188R12R4R5R4_THREAD] seq={0:X8} event={1} raw0={2} raw1={3}' -f $Sequence,$Event,$Raw0,$Raw1))
+        $format = if ($SequenceWidth -eq 64) { 'X16' } else { 'X8' }
+        $Lines.Add(('[C188R12R4R5R4_THREAD] seq={0} event={1} raw0={2} raw1={3}' -f ($Sequence.ToString($format)), $Event,$Raw0,$Raw1))
     } else {
         $Lines.Add("[C188R12R4R5R4_THREAD] event=$Event raw0=$Raw0 raw1=$Raw1")
     }
@@ -42,21 +44,23 @@ function New-SafeFixture([string]$Name,[object[]]$StageSpecs,[uint32]$Overflow=0
                          [Nullable[uint32]]$FailureStage=$null,[string]$FailureCode='00000000',
                          [switch]$OmitThreadStore,[switch]$OmitSafeStatus,
                          [switch]$AddTransition,[switch]$AddFailFast,
-                         [switch]$ContradictOrder,[switch]$DropTraceEnd) {
+    [switch]$ContradictOrder,[switch]$DropTraceEnd) {
     $lines = [System.Collections.Generic.List[string]]::new()
+    Add-Thread $lines 'adapter_enter' '00000000052ACBD0' '0000000000000000' 0
     $lines.Add('[C188R12R4R5R3_INIT] init_result nativeBool=00000001 adapterStatus=00000000 nativeOutcome=success adapterOutcome=success')
+    Add-Thread $lines 'rhinitialize_return' '0000000000000001' '0000000000000000' 1
     Add-Thread $lines 'managed_entry_gate_closed' '0000000000000001' '0000000000000000'
     Add-Thread $lines 'tls_installed' '0000000000001000' '0000000000002000'
-    Add-Thread $lines 'runtime_instance' '0000000000003000' '0000000000000001' 3
-    if (-not $OmitThreadStore) { Add-Thread $lines 'threadstore' '0000000000004000' '0000000000000001' 4 }
-    Add-Thread $lines 'current_thread_tls' '0000000000002000' '0000000000000000' 5
-    Add-Thread $lines 'current_thread_state' '0000000000000000' '0000000000000000' 6
-    Add-Thread $lines 'module_registration_enter' '0000000000005000' '0000000000006000' 7
-    Add-Thread $lines 'module_registration_complete' '0000000000005000' '0000000000000001' 8
+    Add-Thread $lines 'runtime_instance' '0000000000003000' '0000000000000001' 2
+    if (-not $OmitThreadStore) { Add-Thread $lines 'threadstore' '0000000000004000' '0000000000000001' 3 }
+    Add-Thread $lines 'current_thread_tls' '0000000000002000' '0000000000000000' 4
+    Add-Thread $lines 'current_thread_state' '0000000000000000' '0000000000000000' 5
+    Add-Thread $lines 'module_registration_enter' '0000000000005000' '0000000000006000' 6
+    Add-Thread $lines 'module_registration_complete' '0000000000005000' '0000000000000001' 7
     if ($AddTransition) {
-        Add-Thread $lines 'module_initialize_enter' '0000000000005000' '0000000000000001' 9
-        Add-Thread $lines 'transition_enter' '0000000000002000' '0000000000001000' 10
-        Add-Thread $lines 'managed_dispatch' '0000000000007000' '0000000000000001'
+        Add-Thread $lines 'module_initialize_enter' '0000000000005000' '0000000000000001' 8
+        Add-Thread $lines 'transition_enter' '0000000000002000' '0000000000001000' 9
+        Add-Thread $lines 'managed_dispatch' '0000000000007000' '0000000000000001' 10
     }
     if ($AddFailFast) { $lines.Add('[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06') }
 
@@ -120,6 +124,81 @@ Assert-True $safeStop.analysis.diagnosticEvidenceComplete 'compact trace counts 
 Assert-True $safeStop.analysis.threadStorePrerequisites.threadStorePublished 'ThreadStore publication is recorded'
 Assert-True (-not $safeStop.analysis.threadStorePrerequisites.currentThreadAttached) 'published ThreadStore is not treated as current-thread attachment'
 Assert-True (-not $safeStop.analysis.managedRuntimeAcceptance) 'safe stop is not managed runtime acceptance'
+
+function Analyze-SequenceVariant([string]$Name,[string]$SerialText) {
+    $serialPath = Join-Path $testRoot "$Name.serial.log"
+    $analysisPath = Join-Path $testRoot "$Name.analysis.json"
+    [System.IO.File]::WriteAllText($serialPath,$SerialText,[System.Text.UTF8Encoding]::new($false))
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $analyzer -SerialPath $serialPath -OutputPath $analysisPath | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Sequence-marker analyzer failed for $Name." }
+    return Get-Content -LiteralPath $analysisPath -Raw | ConvertFrom-Json
+}
+
+# The preserved R2R1 producer wrote fixed-width hexadecimal sequence markers.
+$archivedR2R1 = Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff\qac-guest-r2r2r4r2r1-001\serial.log'
+$archivedR2R1Hash = (Get-FileHash -LiteralPath $archivedR2R1 -Algorithm SHA256).Hash.ToUpperInvariant()
+$archivedR2R1AnalysisPath = Join-Path $testRoot 'sequence-actual-r2r1.analysis.json'
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $analyzer -SerialPath $archivedR2R1 -OutputPath $archivedR2R1AnalysisPath | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Archived R2R1 sequence analysis failed.' }
+$archivedR2R1Analysis = Get-Content -LiteralPath $archivedR2R1AnalysisPath -Raw | ConvertFrom-Json
+Assert-True $archivedR2R1Analysis.threadSequence.complete 'preserved 16-digit guest sequence values are ordered and continuous'
+Assert-True ($archivedR2R1Analysis.threadSequence.parsedCount -eq 8) 'all preserved sequenced thread markers are parsed'
+Assert-True ($archivedR2R1Analysis.threadSequence.values[0].token -eq '0000000000000000' -and
+    $archivedR2R1Analysis.threadSequence.values[7].token -eq '0000000000000007') 'actual zero-padded wire tokens remain unchanged'
+Assert-True ((Get-FileHash -LiteralPath $archivedR2R1 -Algorithm SHA256).Hash.ToUpperInvariant() -eq $archivedR2R1Hash) 'sequence analysis preserves the original serial hash'
+
+$safeSequenceText = [System.IO.File]::ReadAllText($safeStop.serial)
+$eightDigitText = [regex]::Replace($safeSequenceText,
+    '(?<=\bseq=)[0-9A-Fa-f]{16}', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match) $match.Value.Substring(8)
+    })
+$eightDigit = Analyze-SequenceVariant 'sequence-8-digit' $eightDigitText
+Assert-True $eightDigit.threadSequence.complete '8-digit hexadecimal compatibility markers are parsed exactly'
+Assert-True ($eightDigit.threadSequence.values[0].widthBits -eq 32) '8-digit wire width is retained as 32 bits'
+
+$maxValidText = $safeSequenceText.Replace('seq=0000000000000000 event=adapter_enter',
+    'seq=00000000FFFFFFFF event=adapter_enter')
+$maxValid = Analyze-SequenceVariant 'sequence-uint32-maximum' $maxValidText
+Assert-True ($maxValid.threadSequence.values[0].token -eq '00000000FFFFFFFF' -and
+    [UInt64]$maxValid.threadSequence.values[0].value -eq [UInt32]::MaxValue -and
+    $maxValid.threadSequence.values[0].producerDomainValid) 'maximum source-domain value is parsed losslessly'
+
+$highBitText = $safeSequenceText.Replace('seq=0000000000000004 event=current_thread_tls',
+    'seq=8000000000000004 event=current_thread_tls')
+$highBit = Analyze-SequenceVariant 'sequence-high-bit-uint64' $highBitText
+Assert-True ($highBit.threadSequence.values[4].token -eq '8000000000000004' -and
+    -not $highBit.threadSequence.values[4].producerDomainValid -and
+    -not $highBit.threadSequence.complete) 'high-bit UInt64 is retained exactly and rejected as outside the uint32 producer domain'
+
+$maxUInt64Text = $safeSequenceText.Replace('seq=0000000000000004 event=current_thread_tls',
+    'seq=FFFFFFFFFFFFFFFF event=current_thread_tls')
+$maxUInt64 = Analyze-SequenceVariant 'sequence-uint64-maximum-wire-value' $maxUInt64Text
+Assert-True ($maxUInt64.threadSequence.values[4].token -eq 'FFFFFFFFFFFFFFFF' -and
+    -not $maxUInt64.threadSequence.values[4].producerDomainValid) 'maximum 64-bit wire value is not narrowed or accepted as producer-valid'
+
+$malformedSequenceText = $safeSequenceText.Replace('seq=0000000000000003 event=threadstore',
+    'seq=G000000000000003 event=threadstore')
+$malformedSequence = Analyze-SequenceVariant 'sequence-malformed' $malformedSequenceText
+Assert-True ($malformedSequence.threadSequence.malformedCount -gt 0 -and
+    -not $malformedSequence.diagnosticEvidenceComplete) 'malformed sequence text fails diagnostic completeness'
+
+$duplicateSequenceText = $safeSequenceText.Replace('seq=0000000000000004 event=current_thread_tls',
+    'seq=0000000000000003 event=current_thread_tls')
+$duplicateSequence = Analyze-SequenceVariant 'sequence-duplicate' $duplicateSequenceText
+Assert-True ($duplicateSequence.threadSequence.duplicateCount -eq 1 -and
+    -not $duplicateSequence.diagnosticEvidenceComplete) 'duplicate sequence values are detected'
+
+$outOfOrderSequenceText = $safeSequenceText.Replace('seq=0000000000000004 event=current_thread_tls',
+    'seq=0000000000000002 event=current_thread_tls')
+$outOfOrderSequence = Analyze-SequenceVariant 'sequence-out-of-order' $outOfOrderSequenceText
+Assert-True ($outOfOrderSequence.threadSequence.outOfOrderCount -gt 0 -and
+    -not $outOfOrderSequence.diagnosticEvidenceComplete) 'out-of-order sequence values are detected'
+
+$incompleteSequenceText = [regex]::Replace($safeSequenceText,
+    '(?m)^\[C188R12R4R5R4_THREAD\] seq=0000000000000004 event=current_thread_tls[^\r\n]*\r?\n', '')
+$incompleteSequence = Analyze-SequenceVariant 'sequence-incomplete' $incompleteSequenceText
+Assert-True ($incompleteSequence.threadSequence.missingSequenceCount -gt 0 -and
+    -not $incompleteSequence.diagnosticEvidenceComplete) 'missing sequence records cannot imply a continuous trace'
 
 # Tooling/result classification stays separate from captured runtime evidence.
 $toolResultPath = Join-Path $testRoot 'tooling-failure-result.json'
@@ -234,7 +313,7 @@ Assert-True ($wrapperSource -match 'NativeAotSafeHandoff' -and $wrapperSource -m
 
 $result = [ordered]@{
     result='PASS'; testRoot=$testRoot; analyzer=$analyzer
-    analyzerCaseCount=13
+    analyzerCaseCount=22
     analyzerCases=@(
         'RhInitialize success';'module registration success';'explicit diagnostic safe stop'
         'premature InitializeModules transition';'fail-fast 0x50414C06';'ThreadStore prerequisites missing'
@@ -242,6 +321,10 @@ $result = [ordered]@{
         'record overflow without complete attribution';'full successful bounded diagnostic trace'
         'malformed or contradictory milestone ordering';'original R4R1 raw guest fixture'
         'tooling or postprocessing failure distinct from runtime status'
+        '8-digit sequence wire parsing';'16-digit preserved guest sequences';'leading-zero preservation'
+        'uint32 source-domain maximum';'high-bit UInt64 detection without narrowing'
+        'maximum UInt64 wire-value detection';'malformed sequence marker rejection'
+        'duplicate sequence rejection';'out-of-order sequence rejection';'incomplete sequence rejection'
     )
     sourceContractChecks=10
     qemuLaunched=$false; qacReserved=$false

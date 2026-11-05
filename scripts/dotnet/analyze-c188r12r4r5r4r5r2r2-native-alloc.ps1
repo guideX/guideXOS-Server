@@ -35,6 +35,12 @@ function Get-TraceSummary([string]$Source, [string]$Invocation, [uint32]$Field) 
     $summaryField = if ($Source -ceq 'runtime') { $Field } else { 0x80000000u -bor $Field }
     return Get-TraceField $Source $Invocation ([uint32]::MaxValue) $summaryField
 }
+function Get-TraceSummaryAuxiliary([string]$Source, [string]$Invocation, [uint32]$Field) {
+    $summaryField = if ($Source -ceq 'runtime') { $Field } else { 0x80000000u -bor $Field }
+    $key = "$Source/$Invocation/$([uint32]::MaxValue)/$summaryField"
+    if ($auxiliaryRows.ContainsKey($key)) { return [uint32]$auxiliaryRows[$key] }
+    return [uint32]::MaxValue
+}
 function Test-TraceFieldPresent([string]$Source,[string]$Invocation,[uint32]$Sequence,[uint32]$Field) {
     return $rows.ContainsKey("$Source/$Invocation/$Sequence/$Field")
 }
@@ -53,6 +59,80 @@ if ($runtimeInvocations.Count -eq 0) {
         $backendSummaryField = [Convert]::ToUInt32('80000000',16)
         $backendSummaryKey = "backend/$invocation/$([uint32]::MaxValue)/$backendSummaryField"
         $backendOverflow = if ($auxiliaryRows.ContainsKey($backendSummaryKey)) { [uint32]$auxiliaryRows[$backendSummaryKey] } else { [uint32]::MaxValue }
+        $backendSchemaV2 = Test-TraceFieldPresent 'backend' $invocation ([uint32]::MaxValue) 0x80000002u
+        $backendAttemptCounts = if ($backendSchemaV2) {
+            [ordered]@{ attempted=(Get-TraceSummary 'backend' $invocation 2); completed=(Get-TraceSummaryAuxiliary 'backend' $invocation 2) }
+        } else { $null }
+        $backendOutcomeCounts = if ($backendSchemaV2) {
+            [ordered]@{ succeeded=(Get-TraceSummary 'backend' $invocation 3); failed=(Get-TraceSummaryAuxiliary 'backend' $invocation 3) }
+        } else { $null }
+        $backendOperationCounts = if ($backendSchemaV2) {
+            [ordered]@{
+                reserve=(Get-TraceSummary 'backend' $invocation 4)
+                commit=(Get-TraceSummaryAuxiliary 'backend' $invocation 4)
+                rollbackRelease=(Get-TraceSummary 'backend' $invocation 5)
+            }
+        } else { $null }
+        $backendFirstDroppedAttempt = if ($backendSchemaV2) {
+            Get-TraceSummaryAuxiliary 'backend' $invocation 5
+        } elseif ($backendOverflow -gt 0 -and $backendCount -eq 9) {
+            [uint32]$backendCount
+        } else { [uint32]::MaxValue }
+        $backendTerminalStatus = if ($backendSchemaV2) {
+            Get-TraceSummary 'backend' $invocation 6
+        } else { [uint32]::MaxValue }
+        $backendAggregateComplete = if ($backendSchemaV2) {
+            Get-TraceSummaryAuxiliary 'backend' $invocation 6
+        } else { [uint32]::MaxValue }
+        $backendFirstFailureCode = if ($backendSchemaV2) {
+            [ordered]@{
+                operation=(Get-TraceSummary 'backend' $invocation 7)
+                branch=(Get-TraceSummaryAuxiliary 'backend' $invocation 7)
+                status=(Get-TraceSummary 'backend' $invocation 8)
+                statusSource=(Get-TraceSummaryAuxiliary 'backend' $invocation 8)
+            }
+        } else { $null }
+        $backendDistinctFailureCount = if ($backendSchemaV2) {
+            Get-TraceSummary 'backend' $invocation 9
+        } else { [uint32]::MaxValue }
+        $backendDistinctFailureOverflow = if ($backendSchemaV2) {
+            Get-TraceSummaryAuxiliary 'backend' $invocation 9
+        } else { [uint32]::MaxValue }
+        $backendCounterSaturated = if ($backendSchemaV2) {
+            Get-TraceSummary 'backend' $invocation 10
+        } else { [uint32]::MaxValue }
+        $backendOutcomeTotal = if ($backendSchemaV2 -and
+            $backendOutcomeCounts.succeeded -ne [uint32]::MaxValue -and
+            $backendOutcomeCounts.failed -ne [uint32]::MaxValue) {
+            [UInt64]$backendOutcomeCounts.succeeded + [UInt64]$backendOutcomeCounts.failed
+        } else { [UInt64]::MaxValue }
+        $backendAttemptedWide = if ($backendSchemaV2 -and
+            $backendAttemptCounts.attempted -ne [uint32]::MaxValue) {
+            [UInt64]$backendAttemptCounts.attempted
+        } else { [UInt64]::MaxValue }
+        $backendOperationCountsConsistent = $false
+        if ($backendSchemaV2 -and $backendAttemptedWide -ne [UInt64]::MaxValue -and
+            $backendOperationCounts.reserve -ne [uint32]::MaxValue -and
+            $backendOperationCounts.commit -ne [uint32]::MaxValue -and
+            $backendOperationCounts.rollbackRelease -ne [uint32]::MaxValue) {
+            $backendOperationCountsConsistent =
+                [UInt64]$backendOperationCounts.reserve -le $backendAttemptedWide -and
+                [UInt64]$backendOperationCounts.commit -le [UInt64]$backendOperationCounts.reserve -and
+                [UInt64]$backendOperationCounts.rollbackRelease -le [UInt64]$backendOperationCounts.commit
+        }
+        $backendTerminalConsistent = $false
+        if ($backendSchemaV2 -and $backendAttemptedWide -ne [UInt64]::MaxValue -and
+            $backendOutcomeTotal -ne [UInt64]::MaxValue -and
+            $backendDistinctFailureCount -ne [uint32]::MaxValue) {
+            if ($backendTerminalStatus -eq 1u) {
+                $backendTerminalConsistent = $backendOutcomeCounts.failed -eq 0u -and
+                    $backendOutcomeCounts.succeeded -eq $backendAttemptCounts.attempted -and
+                    $backendDistinctFailureCount -eq 0u
+            } elseif ($backendTerminalStatus -eq 2u) {
+                $backendTerminalConsistent = $backendOutcomeCounts.failed -gt 0u -and
+                    $backendDistinctFailureCount -gt 0u
+            }
+        }
         $runtime = @()
         if (-not $summaryMissing -and $count -le 8) {
             for ($index=0; $index -lt $count; $index++) {
@@ -75,8 +155,25 @@ if ($runtimeInvocations.Count -eq 0) {
         }
 
         $backendRecordComplete = ($backendCount -ne [uint32]::MaxValue -and
-            $backendCount -le 9 -and $backendOverflow -eq 0 -and
-            $backend.Count -eq $backendCount)
+            $backendCount -le 9 -and $backend.Count -eq $backendCount)
+        if ($backendSchemaV2) {
+            $backendRecordComplete = $backendRecordComplete -and
+                $backendOverflow -ne [uint32]::MaxValue -and
+                $backendAttemptCounts.attempted -ne [uint32]::MaxValue -and
+                $backendAttemptCounts.completed -eq $backendAttemptCounts.attempted -and
+                [UInt64]$backendAttemptCounts.attempted -eq ([UInt64]$backendCount + [UInt64]$backendOverflow) -and
+                $backendOutcomeCounts.succeeded -ne [uint32]::MaxValue -and
+                $backendOutcomeCounts.failed -ne [uint32]::MaxValue -and
+                $backendOutcomeTotal -eq $backendAttemptedWide -and
+                $backendOperationCountsConsistent -and
+                $backendFirstDroppedAttempt -eq $(if ($backendOverflow -gt 0) { [uint32]$backendCount } else { [uint32]::MaxValue }) -and
+                $backendTerminalStatus -in @(1u,2u) -and $backendTerminalConsistent -and
+                $backendAggregateComplete -eq 1u -and
+                $backendDistinctFailureCount -le 32u -and
+                $backendDistinctFailureOverflow -eq 0u -and $backendCounterSaturated -eq 0u
+        } else {
+            $backendRecordComplete = $backendRecordComplete -and $backendOverflow -eq 0
+        }
         $backendFailureIndexes = @()
         for ($backendIndex=0; $backendIndex -lt $backend.Count; $backendIndex++) {
             $backendAttempt = $backend[$backendIndex]
@@ -92,16 +189,77 @@ if ($runtimeInvocations.Count -eq 0) {
             }
             if ($backendAttempt[14] -ne [uint32]::MaxValue) {
                 $backendFailureIndexes += $backendIndex
+                if ($backendAttempt[15] -eq [uint32]::MaxValue -or
+                    $backendAttempt[16] -eq [uint32]::MaxValue) {
+                    $backendRecordComplete = $false
+                }
             } elseif ($backendAttempt[9] -ne 0 -or $backendAttempt[10] -ne 0x1000 -or
                       $backendAttempt[11] -ne 0 -or $backendAttempt[13] -ne 1) {
                 $backendRecordComplete = $false
             }
         }
-        if (($backendFirstFailureIndex -eq [uint32]::MaxValue -and $backendFailureIndexes.Count -ne 0) -or
-            ($backendFirstFailureIndex -ne [uint32]::MaxValue -and
-                ($backendFirstFailureIndex -ge $backend.Count -or $backendFailureIndexes.Count -ne 1 -or
-                 $backendFailureIndexes[0] -ne $backendFirstFailureIndex))) {
+        if ($backendFirstFailureIndex -eq [uint32]::MaxValue) {
+            if ($backendFailureIndexes.Count -ne 0 -or
+                ($backendSchemaV2 -and ($backendDistinctFailureCount -ne 0u -or
+                    $backendFirstFailureCode.operation -ne [uint32]::MaxValue -or
+                    $backendFirstFailureCode.branch -ne [uint32]::MaxValue -or
+                    $backendFirstFailureCode.status -ne [uint32]::MaxValue -or
+                    $backendFirstFailureCode.statusSource -ne 0u))) {
+                $backendRecordComplete = $false
+            }
+        } elseif ($backendSchemaV2) {
+            if ($backendFirstFailureIndex -ge $backendAttemptCounts.attempted -or
+                $backendDistinctFailureCount -eq 0u -or
+                $backendFirstFailureCode.operation -eq [uint32]::MaxValue -or
+                $backendFirstFailureCode.branch -eq [uint32]::MaxValue -or
+                $backendFirstFailureCode.status -eq [uint32]::MaxValue -or
+                $backendFirstFailureCode.statusSource -eq [uint32]::MaxValue -or
+                ($backendFirstFailureIndex -lt $backend.Count -and
+                    ($backend[$backendFirstFailureIndex][14] -ne $backendFirstFailureCode.operation -or
+                     $backend[$backendFirstFailureIndex][15] -ne $backendFirstFailureCode.branch -or
+                     $backend[$backendFirstFailureIndex][16] -ne $backendFirstFailureCode.status -or
+                     $backend[$backendFirstFailureIndex][17] -ne $backendFirstFailureCode.statusSource)) -or
+                ($backendFailureIndexes.Count -gt 0 -and
+                    ($backendFailureIndexes | Measure-Object -Minimum).Minimum -ne $backendFirstFailureIndex)) {
+                $backendRecordComplete = $false
+            }
+        } elseif ($backendFirstFailureIndex -ge $backend.Count -or
+            $backendFailureIndexes.Count -ne 1 -or
+            $backendFailureIndexes[0] -ne $backendFirstFailureIndex) {
             $backendRecordComplete = $false
+        }
+
+        $backendFailureCodes = @()
+        if ($backendSchemaV2 -and $backendDistinctFailureCount -le 32u) {
+            for ($failureIndex=0; $failureIndex -lt $backendDistinctFailureCount; $failureIndex++) {
+                $baseField = [uint32](0x80000100u + (2u * [uint32]$failureIndex))
+                $operationKey = "backend/$invocation/$([uint32]::MaxValue)/$baseField"
+                $statusKey = "backend/$invocation/$([uint32]::MaxValue)/$([uint32]($baseField + 1u))"
+                if (-not $rows.ContainsKey($operationKey) -or -not $auxiliaryRows.ContainsKey($operationKey) -or
+                    -not $rows.ContainsKey($statusKey) -or -not $auxiliaryRows.ContainsKey($statusKey)) {
+                    $backendRecordComplete = $false
+                    continue
+                }
+                $backendFailureCodes += [ordered]@{
+                    operation=[uint32]$rows[$operationKey]; branch=[uint32]$auxiliaryRows[$operationKey]
+                    status=[uint32]$rows[$statusKey]; statusSource=[uint32]$auxiliaryRows[$statusKey]
+                }
+            }
+            if ($backendFailureCodes.Count -ne $backendDistinctFailureCount) { $backendRecordComplete = $false }
+            $distinctFailureKeys = @($backendFailureCodes | ForEach-Object {
+                '{0:X8}/{1:X8}/{2:X8}/{3:X8}' -f $_.operation,$_.branch,$_.status,$_.statusSource
+            })
+            if (@($distinctFailureKeys | Sort-Object -Unique).Count -ne $distinctFailureKeys.Count) {
+                $backendRecordComplete = $false
+            }
+            if ($backendFirstFailureIndex -ne [uint32]::MaxValue -and
+                ($backendFailureCodes.Count -eq 0 -or
+                 $backendFailureCodes[0].operation -ne $backendFirstFailureCode.operation -or
+                 $backendFailureCodes[0].branch -ne $backendFirstFailureCode.branch -or
+                 $backendFailureCodes[0].status -ne $backendFirstFailureCode.status -or
+                 $backendFailureCodes[0].statusSource -ne $backendFirstFailureCode.statusSource)) {
+                $backendRecordComplete = $false
+            }
         }
 
         $classification = 'INCOMPLETE_DIAGNOSTIC_RECORD'
@@ -111,7 +269,11 @@ if ($runtimeInvocations.Count -eq 0) {
         if (-not $summaryMissing -and $overflow -eq 0 -and $count -gt 0 -and $count -le 8 -and
             $backendRecordComplete) {
             $classification = 'SUCCESS'
-            $detail = 'All captured 8-byte event objects completed through the configured PAL and true-VM reserve/commit path.'
+            $detail = if ($backendOverflow -gt 0 -and $backendSchemaV2) {
+                'All recorded 8-byte event-object attempts completed; detailed backend rows were bounded and the aggregate summary accounts for every omitted row.'
+            } else {
+                'All captured 8-byte event objects completed through the configured PAL and true-VM reserve/commit path.'
+            }
             $firstRuntimeFailure = [uint32]::MaxValue
             $runtimeRecordComplete = $true
             for ($index=0; $index -lt $count; $index++) {
@@ -155,14 +317,18 @@ if ($runtimeInvocations.Count -eq 0) {
                     } elseif ($runtimePointer -eq 0 -and $constructorEntered -eq 0 -and
                               $failureOperation -eq 0x0203 -and $failureBranch -eq 0x0304 -and
                               $backendFirstFailureIndex -ne [uint32]::MaxValue -and
-                              $backendFirstFailureIndex -lt $backend.Count) {
-                        $backAttempt = $backend[$backendFirstFailureIndex]
-                        $operation = $backAttempt[14]
-                        $branch = $backAttempt[15]
-                        $status = $backAttempt[16]
-                        $statusSource = $backAttempt[17]
+                              ($backendFirstFailureIndex -lt $backend.Count -or $backendSchemaV2)) {
+                        $backAttempt = if ($backendFirstFailureIndex -lt $backend.Count) {
+                            $backend[$backendFirstFailureIndex]
+                        } else { $null }
+                        $operation = if ($null -ne $backAttempt) { $backAttempt[14] } else { $backendFirstFailureCode.operation }
+                        $branch = if ($null -ne $backAttempt) { $backAttempt[15] } else { $backendFirstFailureCode.branch }
+                        $status = if ($null -ne $backAttempt) { $backAttempt[16] } else { $backendFirstFailureCode.status }
+                        $statusSource = if ($null -ne $backAttempt) { $backAttempt[17] } else { $backendFirstFailureCode.statusSource }
                         if ($operation -eq 0x0204 -and $branch -eq 0x0310) {
-                            if ($backAttempt[4] -eq 0 -or $backAttempt[5] -ne $backAttempt[4] -or
+                            if ($null -eq $backAttempt) {
+                                $attemptClass='KERNEL_PAL_SLOT_CAPACITY_SUMMARIZED'
+                            } elseif ($backAttempt[4] -eq 0 -or $backAttempt[5] -ne $backAttempt[4] -or
                                 $backAttempt[6] -ne [uint32]::MaxValue -or $backAttempt[7] -ne 1 -or
                                 $backAttempt[9] -ne [uint32]::MaxValue -or $backAttempt[10] -ne 0 -or
                                 $backAttempt[11] -ne [uint32]::MaxValue -or $backAttempt[13] -ne 0) {
@@ -182,11 +348,13 @@ if ($runtimeInvocations.Count -eq 0) {
                                 operation=('0x{0:X8}' -f $operation); branch=('0x{0:X8}' -f $branch)
                                 status=('0x{0:X8}' -f $status); statusSource=('0x{0:X8}' -f $statusSource)
                                 backendAttemptIndex=[int]$backendFirstFailureIndex
-                                requestSize=('0x{0:X}' -f $backAttempt[1])
-                                slotCapacity=[int]$backAttempt[4]; activeSlots=[int]$backAttempt[5]
-                                freeSlotIndex=('0x{0:X8}' -f $backAttempt[6])
-                                addressSpaceReady=[bool]$backAttempt[7]
-                                vmRegionCapacity=[int]$backAttempt[8]
+                                backendAttemptDetails=if ($null -eq $backAttempt) { 'bounded summary; row not retained' } else { 'detailed row retained' }
+                                requestSize=if ($null -ne $backAttempt) { '0x{0:X}' -f $backAttempt[1] } else { $null }
+                                slotCapacity=if ($null -ne $backAttempt) { [int]$backAttempt[4] } else { $null }
+                                activeSlots=if ($null -ne $backAttempt) { [int]$backAttempt[5] } else { $null }
+                                freeSlotIndex=if ($null -ne $backAttempt) { '0x{0:X8}' -f $backAttempt[6] } else { $null }
+                                addressSpaceReady=if ($null -ne $backAttempt) { [bool]$backAttempt[7] } else { $null }
+                                vmRegionCapacity=if ($null -ne $backAttempt) { [int]$backAttempt[8] } else { $null }
                             }
                         }
                     } elseif ($runtimePointer -eq 0 -and $constructorEntered -eq 0 -and
@@ -235,7 +403,38 @@ if ($runtimeInvocations.Count -eq 0) {
             $classification='INCOMPLETE_DIAGNOSTIC_RECORD'
             $detail='The bounded runtime recorder overflowed.'
         }
-        $results += [ordered]@{ invocation=$invocation; classification=$classification; detail=$detail; firstFailure=$firstFailure; allocations=$allocationResults; runtimeAttemptCount=$count; backendAttemptCount=$backendCount }
+        $backendTerminalName = switch ($backendTerminalStatus) {
+            1u { 'success' }
+            2u { 'runtime_failure' }
+            3u { 'incomplete' }
+            default { 'unavailable' }
+        }
+        $results += [ordered]@{
+            invocation=$invocation; classification=$classification; detail=$detail
+            firstFailure=$firstFailure; allocations=$allocationResults
+            runtimeAttemptCount=$count; backendAttemptCount=$backendCount
+            backendRecordSchema=if ($backendSchemaV2) { 'bounded_summary_v2' } else { 'legacy_rows_v1' }
+            backendSummary=[ordered]@{
+                detailedRows=$backendCount
+                droppedDetailCount=if ($backendSchemaV2) { $backendOverflow } else { $null }
+                attemptedCount=if ($backendSchemaV2) { $backendAttemptCounts.attempted }
+                    elseif ($backendOverflow -eq 0) { $backendCount } else { $null }
+                attemptedCountExact=[bool]($backendSchemaV2 -or $backendOverflow -eq 0)
+                minimumAttemptCount=if ($backendSchemaV2) { $backendAttemptCounts.attempted }
+                    elseif ($backendOverflow -gt 0) { [int]$backendCount + 1 } else { $backendCount }
+                firstDroppedAttempt=if ($backendFirstDroppedAttempt -eq [uint32]::MaxValue) { $null } else { $backendFirstDroppedAttempt }
+                firstFailureAttempt=if ($backendFirstFailureIndex -eq [uint32]::MaxValue) { $null } else { $backendFirstFailureIndex }
+                successfulCount=if ($backendSchemaV2) { $backendOutcomeCounts.succeeded } else { $null }
+                failedCount=if ($backendSchemaV2) { $backendOutcomeCounts.failed } else { $null }
+                operationCounts=$backendOperationCounts
+                firstFailureCode=if ($backendSchemaV2 -and $backendFirstFailureIndex -ne [uint32]::MaxValue) { $backendFirstFailureCode } else { $null }
+                distinctFailureCount=if ($backendSchemaV2) { $backendDistinctFailureCount } else { $null }
+                distinctFailureCodes=$backendFailureCodes
+                terminalStatus=$backendTerminalName
+                aggregateComplete=[bool]($backendSchemaV2 -and $backendAggregateComplete -eq 1u -and $backendRecordComplete)
+                legacyOverflowFlag=if (-not $backendSchemaV2 -and $backendOverflow -ne [uint32]::MaxValue) { $backendOverflow } else { $null }
+            }
+        }
     }
 }
 

@@ -15,9 +15,87 @@ $threadPattern = '\[C188R12R4R5R4_THREAD\](?: seq=([0-9A-Fa-f]{8}|[0-9A-Fa-f]{16
 foreach ($match in [regex]::Matches($raw, $threadPattern)) {
     $sequence = if ($match.Groups[1].Success) { $match.Groups[1].Value.ToUpperInvariant() } else { $null }
     $threadEvents.Add([pscustomobject]@{
-        sequence=$sequence; event=$match.Groups[2].Value
+        sequence=$sequence
+        sequenceValue=if ($null -ne $sequence) {
+            [UInt64]::Parse($sequence,[System.Globalization.NumberStyles]::HexNumber,
+                [System.Globalization.CultureInfo]::InvariantCulture)
+        } else { $null }
+        sequenceWidth=if ($null -ne $sequence) { $sequence.Length * 4 } else { $null }
+        event=$match.Groups[2].Value
         raw0=$match.Groups[3].Value.ToUpperInvariant(); raw1=$match.Groups[4].Value.ToUpperInvariant()
     })
+}
+
+# The producer's counter is uint32_t and its pointer-sized formatter emits
+# exactly 16 hexadecimal digits on this AMD64 guest. Keep the original wire
+# token so leading zeroes remain inspectable; parse numerically without a
+# signed or floating-point conversion and validate against the producer's
+# actual 32-bit domain.
+$threadMarkerLines = [regex]::Matches($raw,'(?m)^\[C188R12R4R5R4_THREAD\][^\r\n]*')
+$threadSequenceValues = [System.Collections.Generic.List[object]]::new()
+$threadSequenceMalformedCount = 0
+$threadRecordMalformedCount = 0
+$threadProducerCounterMaximum = [UInt64]::Parse('4294967295',
+    [System.Globalization.NumberStyles]::None,[System.Globalization.CultureInfo]::InvariantCulture)
+foreach ($lineMatch in $threadMarkerLines) {
+    $line = $lineMatch.Value
+    $hasSequence = $line -match '\bseq='
+    $recordMatch = [regex]::Match($line,
+        '^\[C188R12R4R5R4_THREAD\](?: seq=(?<sequence>[0-9A-Fa-f]{8}|[0-9A-Fa-f]{16}))? event=(?<event>[A-Za-z0-9_]+) raw0=(?<raw0>[0-9A-Fa-f]{16}) raw1=(?<raw1>[0-9A-Fa-f]{16})$')
+    if (-not $recordMatch.Success) {
+        $threadRecordMalformedCount++
+        if ($hasSequence) { $threadSequenceMalformedCount++ }
+        continue
+    }
+    if (-not $recordMatch.Groups['sequence'].Success) { continue }
+    $token = $recordMatch.Groups['sequence'].Value.ToUpperInvariant()
+    $value = [UInt64]::Parse($token,[System.Globalization.NumberStyles]::HexNumber,
+        [System.Globalization.CultureInfo]::InvariantCulture)
+    $threadSequenceValues.Add([ordered]@{
+        token=$token; value=$value; widthBits=$token.Length * 4
+        event=$recordMatch.Groups['event'].Value
+        producerDomainValid=([UInt64]$value -le $threadProducerCounterMaximum)
+    })
+}
+$threadSequenceDuplicateCount = 0
+$threadSequenceOutOfOrderCount = 0
+$threadSequenceGapCount = [UInt64]0
+$threadSequencePrevious = $null
+$threadSequenceSeen = [System.Collections.Generic.HashSet[UInt64]]::new()
+foreach ($entry in $threadSequenceValues) {
+    if (-not $threadSequenceSeen.Add([UInt64]$entry.value)) { $threadSequenceDuplicateCount++ }
+    if ($null -eq $threadSequencePrevious) {
+        if ([UInt64]$entry.value -ne 0u) { $threadSequenceGapCount++ }
+    } else {
+        if ([UInt64]$entry.value -le [UInt64]$threadSequencePrevious) {
+            $threadSequenceOutOfOrderCount++
+        } elseif ([UInt64]$entry.value -gt ([UInt64]$threadSequencePrevious + [UInt64]1)) {
+            $sequenceGap = [UInt64]$entry.value - [UInt64]$threadSequencePrevious - [UInt64]1
+            if ($sequenceGap -gt ($threadProducerCounterMaximum - $threadSequenceGapCount)) {
+                $threadSequenceGapCount = $threadProducerCounterMaximum
+            } else {
+                $threadSequenceGapCount += $sequenceGap
+            }
+        }
+    }
+    $threadSequencePrevious = [UInt64]$entry.value
+    if (-not $entry.producerDomainValid) { $threadSequenceMalformedCount++ }
+}
+$threadSequenceComplete = $threadSequenceValues.Count -gt 0 -and
+    $threadSequenceMalformedCount -eq 0 -and $threadRecordMalformedCount -eq 0 -and
+    $threadSequenceDuplicateCount -eq 0 -and $threadSequenceOutOfOrderCount -eq 0 -and
+    $threadSequenceGapCount -eq 0
+$threadSequenceSummary = [ordered]@{
+    radix='hexadecimal'; numericType='UInt64'; producerCounterType='uint32_t'
+    producerWireWidthBits=64; acceptedLegacyWireWidthBits=32
+    leadingZerosPreserved=$true; parsedCount=$threadSequenceValues.Count
+    values=@($threadSequenceValues.ToArray())
+    malformedCount=$threadSequenceMalformedCount; malformedRecordCount=$threadRecordMalformedCount
+    duplicateCount=$threadSequenceDuplicateCount; outOfOrderCount=$threadSequenceOutOfOrderCount
+    missingSequenceCount=$threadSequenceGapCount; producerDomainValid=@(
+        $threadSequenceValues | Where-Object { -not $_.producerDomainValid }
+    ).Count -eq 0
+    complete=[bool]$threadSequenceComplete
 }
 
 $traceRows = [System.Collections.Generic.List[object]]::new()
@@ -182,12 +260,13 @@ $moduleInitSeen = $null -ne (Get-LastThreadEvent 'module_initialize_complete')
 $safeOrderValid = $initializationAccepted -and $moduleRegistrationAccepted -and $tlsInstalled -and
     $null -ne $runtimeInstance -and $runtimeInstance.raw1 -eq '0000000000000001' -and
     $threadStorePublished -and $null -ne $currentThreadTls -and
-    $null -ne $moduleRegistrationEnter -and $safeIntentional -and -not $moduleInitSeen
+    $null -ne $moduleRegistrationEnter -and $safeIntentional -and -not $moduleInitSeen -and
+    $threadSequenceComplete
 $initResultLine = Get-FirstLineIndex '\[C188R12R4R5R3_INIT\] init_result '
 $gateClosedLine = Get-FirstLineIndex '\[C188R12R4R5R4_THREAD\] event=managed_entry_gate_closed '
 $tlsInstalledLine = Get-FirstLineIndex '\[C188R12R4R5R4_THREAD\] event=tls_installed '
-$moduleEnterLine = Get-FirstLineIndex '\[C188R12R4R5R4_THREAD\](?: seq=[0-9A-Fa-f]{8}|[0-9A-Fa-f]{16})? event=module_registration_enter '
-$moduleCompleteLine = Get-FirstLineIndex '\[C188R12R4R5R4_THREAD\](?: seq=[0-9A-Fa-f]{8}|[0-9A-Fa-f]{16})? event=module_registration_complete '
+$moduleEnterLine = Get-FirstLineIndex '\[C188R12R4R5R4_THREAD\](?: seq=(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{16}))? event=module_registration_enter '
+$moduleCompleteLine = Get-FirstLineIndex '\[C188R12R4R5R4_THREAD\](?: seq=(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{16}))? event=module_registration_complete '
 $safeStopLine = Get-FirstLineIndex '\[C188R12R4R5R4_THREAD\] event=diagnostic_safe_stop '
 if ($safeIntentional -and ($initResultLine -lt 0 -or $gateClosedLine -le $initResultLine -or
     $tlsInstalledLine -le $gateClosedLine -or $moduleEnterLine -le $tlsInstalledLine -or
@@ -257,7 +336,7 @@ $report = [ordered]@{
     managedRuntimeAcceptance=$false
     threadStoreHandoffReady=$false
     failFast=[ordered]@{ present=[bool]$failFastMatch.Success; code=$failFastReason; meaning='uninterpreted diagnostic code; source PalPrintFatalError discards its message' }
-    diagnosticEvidenceComplete=[bool]$traceComplete
+    diagnosticEvidenceComplete=[bool]($traceComplete -and $threadSequenceComplete)
     diagnosticErrorStatus=$diagnosticErrorStatus
     runtimeErrorStatus=if ($failFastMatch.Success) { [ordered]@{ status='fail_fast'; code=$failFastReason } } else { [ordered]@{ status='none'; code=$null } }
     toolingFailure=[bool]$toolingFailure
@@ -283,6 +362,7 @@ $report = [ordered]@{
         moduleInitializationComplete=[bool]$moduleInitSeen
         missingTelemetryEvents=$missingThreadEvents
     }
+    threadSequence=$threadSequenceSummary
     preservedEvidence=[ordered]@{ serialMutated=$false; rawLineCount=($raw.Split("`n").Count - 1) }
 }
 $json = $report | ConvertTo-Json -Depth 10

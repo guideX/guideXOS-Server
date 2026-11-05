@@ -1,9 +1,17 @@
+param(
+    [string]$OutputRoot = '',
+    [switch]$SkipFullKernelBuild
+)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$outputRoot = Join-Path $root 'out\runtime\native-stack-bounds'
+$outputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    Join-Path $root 'out\runtime\native-stack-bounds'
+} else { [IO.Path]::GetFullPath($OutputRoot) }
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+$baremetalBuildDir = 'build/native-stack-bounds-' + [guid]::NewGuid().ToString('N')
 
 function Status([string]$Name, [string]$Value) {
     Write-Host "${Name}: $Value"
@@ -78,17 +86,21 @@ $processBuild = Invoke-Compiler $compiler ($baremetalFlags + @(
     '-c',(Join-Path $root 'kernel\core\process.cpp'),'-o',$processObject
 ))
 $make = Get-Command mingw32-make -ErrorAction SilentlyContinue
-$kernelBuild = $false
-if ($null -ne $make) {
+$kernelBuild = [bool]$SkipFullKernelBuild
+if (-not $SkipFullKernelBuild -and $null -ne $make) {
     Push-Location $root
     try {
-        & $make.Source -C kernel ARCH=amd64 2>&1 | Out-Null
+        & $make.Source -C kernel ARCH=amd64 ("BUILD_DIR=$baremetalBuildDir") 2>&1 | Out-Null
         $kernelBuild = $LASTEXITCODE -eq 0
     }
     finally { Pop-Location }
 }
 Status 'Bare-metal stack-bound compile' $(if ($stackBuild.ExitCode -eq 0 -and $processBuild.ExitCode -eq 0) { 'PASS' } else { 'FAIL' })
-Status 'Bare-metal build' $(if ($stackBuild.ExitCode -eq 0 -and $processBuild.ExitCode -eq 0 -and $kernelBuild) { 'PASS' } else { 'FAIL' })
+if ($SkipFullKernelBuild) {
+    Status 'Full kernel build' 'SKIPPED (covered by isolated production-kernel qualification)'
+} else {
+    Status 'Bare-metal build' $(if ($stackBuild.ExitCode -eq 0 -and $processBuild.ExitCode -eq 0 -and $kernelBuild) { 'PASS' } else { 'FAIL' })
+}
 
 $adapterExe = Join-Path $outputRoot 'guidexos_nativeaot_threadstore_adapter_probe.exe'
 $adapterBuild = Invoke-Compiler $compiler (@(

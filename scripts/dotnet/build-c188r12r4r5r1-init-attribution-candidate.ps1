@@ -40,7 +40,8 @@ if ($ResumeCandidate) {
     $resumeRoots = @(
         [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution')),
         [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution')),
-        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff'))
+        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff')),
+        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery'))
     )
     $resumeAllowed = $false
     foreach ($resumeRoot in $resumeRoots) {
@@ -531,6 +532,11 @@ if ($NativeAllocationAttribution) {
     Copy-Item -LiteralPath (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_pal_contract.cpp') -Destination $stagedRuntimeSource
     Copy-Item -LiteralPath (Join-Path $root 'tools\dotnet\runtime-pack\src\gcenv\guidexos_gcenv.cpp') -Destination $stagedRuntimeSource
     Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2-native-alloc.ps1') -Destination $stagedDiagnostic
+    $stagedKernelInclude = Join-Path $stagedRoot 'diagnostic\kernel\include\kernel'
+    $stagedKernelCore = Join-Path $stagedRoot 'diagnostic\kernel\core'
+    New-Item -ItemType Directory -Force -Path $stagedKernelInclude,$stagedKernelCore | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root 'kernel\include\kernel\nativeaot_native_alloc_backend_summary.h') -Destination $stagedKernelInclude
+    Copy-Item -LiteralPath (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') -Destination $stagedKernelCore
 }
 if ($SafeHandoff) {
     $safeAnalyzer = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r2r4-safe-handoff.ps1'
@@ -963,6 +969,8 @@ $manifest = [ordered]@{
         nativeAllocationPalContractSource = if ($NativeAllocationAttribution) { Hash-File (Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_pal_contract.cpp') } else { $null }
         nativeAllocationVmBackendSource = if ($NativeAllocationAttribution) { Hash-File (Join-Path $root 'runtime\memory\guidexos_virtual_memory_region_baremetal.cpp') } else { $null }
         nativeAllocationKernelPalSource = if ($NativeAllocationAttribution) { Hash-File (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') } else { $null }
+        nativeAllocationBackendSummaryHeader = if ($NativeAllocationAttribution) { Hash-File (Join-Path $root 'kernel\include\kernel\nativeaot_native_alloc_backend_summary.h') } else { $null }
+        nativeAllocationBackendSummaryTestSource = if ($NativeAllocationAttribution) { Hash-File (Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r4r5r2r2_native_alloc_backend_summary_test.cpp') } else { $null }
         nativeAllocationAnalyzer = if ($NativeAllocationAttribution) { Hash-File (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2-native-alloc.ps1') } else { $null }
         nativeAllocationBranchMap = if ($NativeAllocationAttribution) { Hash-File $branchMapPath } else { $null }
         nativeAllocationHostedTests = if ($NativeAllocationAttribution) { Hash-File (Join-Path $hostedTestRoot 'hosted-test-results.json') } else { $null }
