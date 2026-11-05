@@ -179,7 +179,15 @@ try {
     [IO.File]::WriteAllBytes($first.ManifestPath,$savedManifest)
     $validated=Get-QacS22R10ValidatedManifest -ManifestPath $first.ManifestPath
 
-    $port=Get-QacS22R10QmpPortCandidate
+    $occupiedPortListener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
+    $occupiedPortListener.Start(1)
+    $occupiedPort=[int]([Net.IPEndPoint]$occupiedPortListener.LocalEndpoint).Port
+    try { $port=Get-QacS22R10QmpPortCandidate -ExcludePort @($occupiedPort) } finally { $occupiedPortListener.Stop() }
+    $candidateBindProbe=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$port)
+    $candidateBindable=$false
+    try { $candidateBindProbe.Server.ExclusiveAddressUse=$true; $candidateBindProbe.Start(1); $candidateBindable=$true } finally { $candidateBindProbe.Stop() }
+    Assert-True 'QMP candidate is a fresh OS-assigned port outside an occupied fixture endpoint' ($port -ne $occupiedPort)
+    Assert-True 'QMP candidate can be bound by an exclusive loopback TCP listener' $candidateBindable
     $args=New-QacS22R10QemuArguments -ValidatedManifest $validated -QemuPath 'C:\Program Files\qemu\qemu-system-x86_64.exe' -QmpPort $port
     $writable=@($args | Where-Object {$_ -match '(?i)fat:rw:'})
     Assert-True 'only the run-private ESP is selected in the actual writable FAT argument' ($writable.Count -eq 1 -and $writable[0] -like "*fat:rw:$($validated.Esp.privatePath)*" -and $writable[0] -notlike "*fat:rw:$($sources.Esp)*")
@@ -202,7 +210,7 @@ try {
 
     $port2=Get-QacS22R10QmpPortCandidate -ExcludePort @($port)
     Assert-True 'endpoint candidates vary per run and avoid the historical fixed endpoint' ($port2 -ne $port -and $port2 -ne 65253)
-    Assert-True 'randomized endpoint candidates stay in the dynamic loopback port range' ($port -ge 49152 -and $port -le 65535)
+    Assert-True 'OS-assigned endpoint candidates stay in the dynamic loopback port range' ($port -ge 49152 -and $port -le 65535)
 
     $qacArgs=New-QacS22R10QacArguments -QemuPath 'C:\Program Files\qemu\qemu-system-x86_64.exe' -QemuArguments $args
     Assert-True 'QAC launch uses the required project and acceptance mode' (($qacArgs[0..5] -join ' ') -eq 'run --project guideXOSServer --mode acceptance --')
@@ -305,6 +313,33 @@ try {
     $typedDateFixture=[PSCustomObject]@{ProcessId=42001;ParentProcessId=42000;ExecutablePath='C:\Program Files\qemu\qemu-system-x86_64.exe';CreationDate=[DateTime]::UtcNow}
     Assert-True 'direct-child identity accepts the typed DateTime returned by Get-CimInstance' (Test-QacS22R10DirectChildIdentity -ProcessRecord $typedDateFixture -ExpectedPid 42001 -ExpectedParentPid 42000 -ExpectedExecutable 'C:\Program Files\qemu\qemu-system-x86_64.exe' -ExpectedStartUtc ([DateTimeOffset]::UtcNow) -StartToleranceSeconds 2)
     Assert-True 'wrong QAC parent identity is rejected' (-not (Test-QacS22R10DirectChildIdentity -ProcessRecord $processFixture -ExpectedPid 42001 -ExpectedParentPid 9 -ExpectedExecutable 'C:\Program Files\qemu\qemu-system-x86_64.exe' -ExpectedStartUtc $startFixture))
+    $cleanupTargetProcess=$null; $unrelatedGuestProcess=$null
+    try {
+        $testPowerShell=(Get-Process -Id $PID).Path
+        $targetStartInfo=[Diagnostics.ProcessStartInfo]::new($testPowerShell)
+        $targetStartInfo.UseShellExecute=$false; $targetStartInfo.CreateNoWindow=$true
+        $targetStartInfo.ArgumentList.Add('-NoProfile'); $targetStartInfo.ArgumentList.Add('-Command'); $targetStartInfo.ArgumentList.Add('Start-Sleep -Seconds 30')
+        $cleanupTargetProcess=[Diagnostics.Process]::Start($targetStartInfo)
+        $unrelatedStartInfo=[Diagnostics.ProcessStartInfo]::new($testPowerShell)
+        $unrelatedStartInfo.UseShellExecute=$false; $unrelatedStartInfo.CreateNoWindow=$true
+        $unrelatedStartInfo.ArgumentList.Add('-NoProfile'); $unrelatedStartInfo.ArgumentList.Add('-Command'); $unrelatedStartInfo.ArgumentList.Add('Start-Sleep -Seconds 30')
+        $unrelatedGuestProcess=[Diagnostics.Process]::Start($unrelatedStartInfo)
+        $cleanupTargetRecord=$null; $unrelatedRecord=$null; $identityDeadline=[DateTimeOffset]::UtcNow.AddSeconds(5)
+        while ((-not $cleanupTargetRecord -or -not $unrelatedRecord) -and [DateTimeOffset]::UtcNow -lt $identityDeadline) {
+            $cleanupTargetRecord=Get-CimInstance Win32_Process -Filter "ProcessId=$($cleanupTargetProcess.Id)" -ErrorAction SilentlyContinue
+            $unrelatedRecord=Get-CimInstance Win32_Process -Filter "ProcessId=$($unrelatedGuestProcess.Id)" -ErrorAction SilentlyContinue
+            if (-not $cleanupTargetRecord -or -not $unrelatedRecord) { Start-Sleep -Milliseconds 50 }
+        }
+        $cleanupExpectedStart=[DateTimeOffset]::new($cleanupTargetRecord.CreationDate.ToUniversalTime())
+        $cleanupReservation=[PSCustomObject]@{id='cleanup-fixture';project='guideXOSServer';mode='acceptance';state='Running';processId=$cleanupTargetProcess.Id}
+        $cleanupResult=Stop-QacS22R10OwnedChild -Reservation $cleanupReservation -ExpectedReservationId 'cleanup-fixture' -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedParentProcessId $PID -ExpectedExecutable $testPowerShell -ExpectedStartUtc $cleanupExpectedStart -ExpectedChildProcessId $cleanupTargetProcess.Id -StartToleranceSeconds 5 -WaitTimeoutSeconds 5
+        $unrelatedGuestProcess.Refresh()
+        Assert-True 'authorized cleanup exits only the exact reservation-owned process handle' ($cleanupResult.ExitVerified -and $cleanupResult.ProcessId -eq $cleanupTargetProcess.Id -and $cleanupTargetProcess.HasExited)
+        Assert-True 'authorized cleanup leaves a separate same-executable guest process running' (-not $unrelatedGuestProcess.HasExited)
+    } finally {
+        if ($cleanupTargetProcess) { try { if (-not $cleanupTargetProcess.HasExited) { $cleanupTargetProcess.Kill(); [void]$cleanupTargetProcess.WaitForExit(3000) } } catch { }; $cleanupTargetProcess.Dispose() }
+        if ($unrelatedGuestProcess) { try { if (-not $unrelatedGuestProcess.HasExited) { $unrelatedGuestProcess.Kill(); [void]$unrelatedGuestProcess.WaitForExit(3000) } } catch { }; $unrelatedGuestProcess.Dispose() }
+    }
     $inspectFixture=[PSCustomObject]@{id='abc123';project='guideXOSServer';mode='acceptance';state='Running';processId=42001;processStartTimeUtc=$startFixture.ToString('O')}
     Assert-True 'qac inspect processId and reservation id confirm the expected reservation and child identity' (Test-QacS22R10ReservationIdentity -Reservation $inspectFixture -ExpectedReservationId 'abc123' -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId 42001)
     Assert-True 'qac inspect reservation for another process is rejected' (-not (Test-QacS22R10ReservationIdentity -Reservation $inspectFixture -ExpectedReservationId 'abc123' -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId 42002))
@@ -321,10 +356,29 @@ try {
     $wrongOwnerObservation=Get-QacS22R10QmpListenerObservation -Connections @($connection) -Port 50001 -ExpectedProcessId 42002
     $wrongAddressObservation=Get-QacS22R10QmpListenerObservation -Connections @([PSCustomObject]@{State='Listen';LocalAddress='0.0.0.0';LocalPort=50001;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001
     $ambiguousObservation=Get-QacS22R10QmpListenerObservation -Connections @($connection,[PSCustomObject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=50001;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001
+    $filterMissObservation=Get-QacS22R10QmpListenerObservation -Connections @($connection) -ScopedConnections ([object[]]@()) -Port 50001 -ExpectedProcessId 42001 -FallbackQueryUsed $true
+    $unreportedStateObservation=Get-QacS22R10QmpListenerObservation -Connections @([PSCustomObject]@{State=$null;LocalAddress='127.0.0.1';LocalPort=50001;RemoteAddress='0.0.0.0';RemotePort=0;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001 -UnfilteredScopedConnections @([PSCustomObject]@{State=$null;LocalAddress='127.0.0.1';LocalPort=50001;RemoteAddress='0.0.0.0';RemotePort=0;OwningProcess=42001}) -FallbackQueryUsed $true
+    $ipv6LoopbackObservation=Get-QacS22R10QmpListenerObservation -Connections @([PSCustomObject]@{State='Listen';LocalAddress='::1';LocalPort=50001;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001
+    $ipv4MappedIpv6Observation=Get-QacS22R10QmpListenerObservation -Connections @([PSCustomObject]@{State='Listen';LocalAddress='::ffff:127.0.0.1';LocalPort=50001;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001
+    $notListeningObservation=Get-QacS22R10QmpListenerObservation -Connections @([PSCustomObject]@{State='Established';LocalAddress='127.0.0.1';LocalPort=50001;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001
     Assert-True 'empty endpoint snapshot is explicitly classified as listener absent' ($absentObservation.State -eq 'listener-absent' -and $absentObservation.ListenerCount -eq 0)
-    Assert-True 'endpoint listener owned by another process is distinguished without exposing that process identity' ($wrongOwnerObservation.State -eq 'listener-wrong-owner' -and -not $wrongOwnerObservation.Owned)
+    Assert-True 'endpoint listener owned by another process is distinguished with only its configured-endpoint owner PID' ($wrongOwnerObservation.State -eq 'listener-wrong-owner' -and -not $wrongOwnerObservation.Owned -and $wrongOwnerObservation.ObservedEndpoints[0].owningProcessId -eq 42001)
     Assert-True 'listener on a non-loopback address is separately classified' ($wrongAddressObservation.State -eq 'listener-wrong-address')
     Assert-True 'multiple listeners for the configured endpoint fail closed as ambiguous' ($ambiguousObservation.State -eq 'listener-ambiguous')
+    Assert-True 'empty scoped discovery followed by a broad listener match is classified as a discovery-filter miss' ($filterMissObservation.DiscoveryState -eq 'targeted-and-scoped-query-empty-broad-table-found-endpoint' -and $filterMissObservation.ListenerCount -eq 1 -and $filterMissObservation.Owned)
+    Assert-True 'unreported State can only produce a connection candidate for the exact unconnected-listener row shape and owner' ($unreportedStateObservation.State -eq 'listener-state-unreported-owned-candidate' -and $unreportedStateObservation.Owned -and -not $unreportedStateObservation.EndpointReady)
+    Assert-True 'IPv6 loopback is not confused with the configured IPv4 loopback endpoint' ($ipv6LoopbackObservation.State -eq 'listener-wrong-address-family' -and -not $ipv6LoopbackObservation.Owned)
+    Assert-True 'IPv4-mapped IPv6 address remains a different transport-family binding' ($ipv4MappedIpv6Observation.State -eq 'listener-wrong-address-family' -and -not $ipv4MappedIpv6Observation.Owned)
+    Assert-True 'non-listening TCP rows remain visible but do not satisfy listener readiness or connection eligibility' ($notListeningObservation.State -eq 'endpoint-present-nonlistener' -and $notListeningObservation.ObservedEndpointCount -eq 1 -and -not $notListeningObservation.ConnectionEligible)
+    $ownershipChangeStates=@(
+        (Get-QacS22R10QmpListenerObservation -Connections @($connection) -Port 50001 -ExpectedProcessId 42001).State,
+        (Get-QacS22R10QmpListenerObservation -Connections @([PSCustomObject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=50001;OwningProcess=42002}) -Port 50001 -ExpectedProcessId 42001).State
+    )
+    Assert-True 'ownership changing during startup fails closed after the exact child listener is replaced' (($ownershipChangeStates -join ',') -eq 'listener-owned-by-child,listener-wrong-owner')
+    Assert-True 'continuation authorization requires live QAC ownership, reservation, listener, negotiation, and paused status' (Test-QacS22R10ContinuationAuthorization -QacOwnerAlive $true -ReservationValid $true -ListenerOwned $true -QmpNegotiated $true -QmpStatus 'prelaunch')
+    Assert-True 'continuation is denied after listener ownership changes' (-not (Test-QacS22R10ContinuationAuthorization -QacOwnerAlive $true -ReservationValid $true -ListenerOwned $false -QmpNegotiated $true -QmpStatus 'paused'))
+    Assert-True 'continuation is denied before QMP capabilities negotiation' (-not (Test-QacS22R10ContinuationAuthorization -QacOwnerAlive $true -ReservationValid $true -ListenerOwned $true -QmpNegotiated $false -QmpStatus 'prelaunch'))
+    Assert-True 'continuation is denied unless QMP reports the paused or prelaunch state' (-not (Test-QacS22R10ContinuationAuthorization -QacOwnerAlive $true -ReservationValid $true -ListenerOwned $true -QmpNegotiated $true -QmpStatus 'running'))
     $delayedStates=@(
         (Get-QacS22R10QmpListenerObservation -Connections ([object[]]@()) -Port 50001 -ExpectedProcessId 42001).State,
         (Get-QacS22R10QmpListenerObservation -Connections ([object[]]@()) -Port 50001 -ExpectedProcessId 42001).State,
@@ -341,6 +395,15 @@ try {
 
     $goodServer=[Qac3c3QmpFixtureServer]::new('guideXOS-fixture-run',$false)
     $qmpLog=Join-Path $first.OutputDirectory 'qmp-fixture-transcript.jsonl'
+    $windowsStateFilteredRows = @(Get-NetTCPConnection -State Listen -LocalPort $goodServer.Port -ErrorAction SilentlyContinue)
+    $windowsUnfilteredRows = @(Get-NetTCPConnection -LocalPort $goodServer.Port -ErrorAction SilentlyContinue)
+    $windowsListenerObservation = Get-QacS22R10QmpListenerObservation -Connections $windowsUnfilteredRows -ScopedConnections $windowsStateFilteredRows -UnfilteredScopedConnections $windowsUnfilteredRows -Port $goodServer.Port -ExpectedProcessId $PID -FallbackQueryUsed ($windowsStateFilteredRows.Count -eq 0)
+    Assert-True 'Windows Get-NetTCPConnection reports the pre-connection loopback endpoint with its fixture process owner, including unreported State when present' ($windowsUnfilteredRows.Count -eq 1 -and $windowsListenerObservation.Owned -and $windowsListenerObservation.ConnectionEligible -and $windowsListenerObservation.ObservedEndpoints[0].owningProcessId -eq $PID)
+    Assert-True 'Windows State Listen filtering is separately observed when it hides a valid State-unreported local listener row' ($windowsStateFilteredRows.Count -gt 0 -or ($windowsUnfilteredRows[0].State -eq $null -and $windowsListenerObservation.DiscoveryState -eq 'targeted-listen-filter-empty-unfiltered-local-port-found-endpoint'))
+    $unusedProbePort = Get-QacS22R10QmpPortCandidate
+    $windowsEmptyErrors = @()
+    $windowsEmptyRows = @(Get-NetTCPConnection -State Listen -LocalPort $unusedProbePort -ErrorAction SilentlyContinue -ErrorVariable +windowsEmptyErrors)
+    Assert-True 'Windows Get-NetTCPConnection no-match errors are captured as a normal zero-row observation' ($windowsEmptyRows.Count -eq 0 -and $windowsEmptyErrors.Count -gt 0 -and -not (Get-QacS22R10QmpListenerObservation -Connections $windowsEmptyRows -Port $unusedProbePort -ExpectedProcessId $PID).EndpointReady)
     Assert-True 'QMP client emits JSON as UTF-8 without a byte-order mark' ($launchModuleSource -match 'StreamWriter\]::new\(\$stream,\s*\[Text\.UTF8Encoding\]::new\(\$false\)')
     $qmpClient=Open-QacS22R10QmpClient -Port $goodServer.Port -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 2000 -ReadTimeoutMilliseconds 1000
     $qmpIdentity=Initialize-QacS22R10QmpClient -Client $qmpClient -ExpectedName 'guideXOS-fixture-run'
@@ -377,6 +440,7 @@ try {
     $silentServer=[Qac3c3QmpFixtureServer]::new('silent',$true)
     [void](Assert-Throws 'silent or unresponsive QMP endpoint is rejected within the read timeout' { Open-QacS22R10QmpClient -Port $silentServer.Port -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 2000 -ReadTimeoutMilliseconds 150 } 'timed out|closed|failed')
     $silentServer.Dispose(); $silentServer=$null
+    [void](Assert-Throws 'configured endpoint that refuses the authorized TCP connection is captured as a connection failure' { Open-QacS22R10QmpClient -Port $unusedProbePort -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 500 -ReadTimeoutMilliseconds 500 } 'refused|failed|connect')
 
     $runnerSource=Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1') -Raw
     $listenerLoopIndex=$runnerSource.IndexOf('while ([DateTimeOffset]::UtcNow -lt $startupDeadline',[StringComparison]::Ordinal)
@@ -387,11 +451,17 @@ try {
     $freshReservationIndex=$runnerSource.LastIndexOf('$reservationBeforeContinuation = Get-QacInspectRecord',[StringComparison]::Ordinal)
     $finalListenerIndex=$runnerSource.LastIndexOf('$listenerBeforeContinuation = Test-QacChildAndListener',[StringComparison]::Ordinal)
     $authorizedIndex=$runnerSource.LastIndexOf("-Type 'qmp-continuation-authorized'",[StringComparison]::Ordinal)
+    $continuationAuthorizationIndex=$runnerSource.LastIndexOf('Test-QacS22R10ContinuationAuthorization',[StringComparison]::Ordinal)
     Assert-True 'runner listener discovery uses a finite startup deadline and rechecks process state' ($listenerLoopIndex -ge 0 -and $runnerSource.Substring($listenerLoopIndex,500) -match '-not \$script:QacProcess\.HasExited')
     Assert-True 'QEMU child exit before QMP is a distinct stage, not a listener timeout' ($runnerSource -match 'qmp-child-exited-before-handshake' -and $runnerSource -match 'child-exited-before-qmp')
     Assert-True 'QEMU child exit during connect or protocol handshake is recorded separately' ($runnerSource -match 'qmp-child-exited-during-handshake' -and $runnerSource -match "stage='connect-or-greeting'" -and $runnerSource -match "stage='capabilities-or-identity'")
     Assert-True 'startup deadline records last listener classification, count, and bounded probe count' ($runnerSource -match 'qmp-listener-startup-deadline' -and $runnerSource -match 'lastObservedState=\$lastState' -and $runnerSource -match 'probeCount=\$listenerProbeCount')
-    Assert-True 'continuation occurs once, only after listener ownership and paused QMP identity checks, then running state is confirmed' ($ownershipGateIndex -ge 0 -and $pausedGateIndex -gt $ownershipGateIndex -and $continuationIndex -gt $pausedGateIndex -and $runningCheckIndex -gt $continuationIndex -and ([regex]::Matches($runnerSource,"-Execute 'cont'")).Count -eq 1)
+    Assert-True 'bounded JSONL listener probes retain monotonic time, reservation, child identity, endpoint, matching rows, readiness, ownership, and connection error' ($runnerSource -match 'qmp-listener-probes\.jsonl' -and $runnerSource -match 'monotonicElapsedMilliseconds' -and $runnerSource -match 'observedMatchingEndpointCount' -and $runnerSource -match 'lastConnectionError')
+    Assert-True 'listener discovery compares Windows State Listen filtering with unfiltered scoped and broad API results, then narrows locally to the configured port' ($runnerSource -match 'Get-NetTCPConnection -State Listen -LocalPort \$Port' -and $runnerSource -match 'Get-NetTCPConnection -LocalPort \$Port -ErrorAction SilentlyContinue' -and $runnerSource -match 'Get-NetTCPConnection -ErrorAction SilentlyContinue' -and $runnerSource -match '\$allConnectionRows \| Where-Object \{ \[int\]\$_.LocalPort -eq \$Port \}')
+    Assert-True 'child process identity is checked again after listener discovery to reject exit, stale rows, or PID reuse' ($runnerSource -match '\$postQueryProcess = Get-QacProcessRecord' -and $runnerSource -match 'child-identity-changed-during-listener-query')
+    Assert-True 'startup cleanup verifies the exact active QAC reservation and registered direct child before terminating one process handle' ($launchModuleSource -match 'Test-QacS22R10ReservationIdentity.*ExpectedState ''Running''' -and $launchModuleSource -match '\$process\.Kill\(\)' -and $runnerSource -match 'qmp-startup-failure-owned-child-cleanup')
+    Assert-True 'cleanup uses a verified process handle and contains no process-name-wide termination' ($launchModuleSource -match '\$process = \[Diagnostics\.Process\]::GetProcessById\(\$ExpectedChildProcessId\)' -and $launchModuleSource -notmatch 'Stop-Process\s+-Name|Get-Process\s+qemu.*\|\s*Stop-Process')
+    Assert-True 'continuation occurs once, only after listener ownership, paused QMP identity, and the explicit authorization gate, then running state is confirmed' ($ownershipGateIndex -ge 0 -and $pausedGateIndex -gt $ownershipGateIndex -and $continuationAuthorizationIndex -gt $pausedGateIndex -and $continuationIndex -gt $continuationAuthorizationIndex -and $runningCheckIndex -gt $continuationIndex -and ([regex]::Matches($runnerSource,"-Execute 'cont'")).Count -eq 1)
     Assert-True 'fresh QAC reservation and listener ownership are rechecked immediately before the authorized single continuation' ($freshReservationIndex -gt $pausedGateIndex -and $finalListenerIndex -gt $freshReservationIndex -and $authorizedIndex -gt $finalListenerIndex -and $continuationIndex -gt $authorizedIndex)
 
     Assert-True 'uncertain active execution is never cleanup eligible' (-not (Test-QacS22R10CleanupEligible -ReservationState 'Recovery Required' -ChildWasLaunched $true -ChildExitVerified $false -ReservationReleaseVerified $false))

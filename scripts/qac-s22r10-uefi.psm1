@@ -122,10 +122,23 @@ function Get-QacS22R10QmpPortCandidate {
     [CmdletBinding()]
     param([int[]]$ExcludePort = @())
     for ($attempt = 0; $attempt -lt 128; $attempt++) {
-        $port = [Security.Cryptography.RandomNumberGenerator]::GetInt32(49152, 65536)
-        if ($port -ne 65253 -and $port -notin $ExcludePort) { return $port }
+        $listener = $null
+        $port = 0
+        try {
+            # Let Windows choose a currently bindable ephemeral loopback port.
+            # This avoids ports that are in use or excluded by the host TCP stack.
+            $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+            $listener.Server.ExclusiveAddressUse = $true
+            $listener.Start(1)
+            $port = [int]([Net.IPEndPoint]$listener.LocalEndpoint).Port
+        } catch [Net.Sockets.SocketException] {
+            continue
+        } finally {
+            if ($listener) { $listener.Stop() }
+        }
+        if ($port -gt 0 -and $port -ne 65253 -and $port -notin $ExcludePort) { return $port }
     }
-    throw 'Could not allocate a unique randomized loopback QMP candidate.'
+    throw 'Could not allocate a bindable loopback QMP candidate outside excluded ports.'
 }
 
 function New-QacS22R10QacArguments {
@@ -269,8 +282,8 @@ function Test-QacS22R10QmpListenerOwner {
         [Parameter(Mandatory)][int]$Port,
         [Parameter(Mandatory)][int]$ExpectedProcessId
     )
-    $listeners = @($Connections | Where-Object { $_.State -eq 'Listen' -and [int]$_.LocalPort -eq $Port })
-    return $listeners.Count -eq 1 -and [string]$listeners[0].LocalAddress -eq '127.0.0.1' -and [int]$listeners[0].OwningProcess -eq $ExpectedProcessId
+    $observation = Get-QacS22R10QmpListenerObservation -Connections $Connections -Port $Port -ExpectedProcessId $ExpectedProcessId
+    return [bool]$observation.Owned
 }
 
 function Get-QacS22R10QmpListenerObservation {
@@ -278,19 +291,139 @@ function Get-QacS22R10QmpListenerObservation {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Connections,
         [Parameter(Mandatory)][int]$Port,
-        [Parameter(Mandatory)][int]$ExpectedProcessId
+        [Parameter(Mandatory)][int]$ExpectedProcessId,
+        [AllowEmptyCollection()][object[]]$ScopedConnections = @(),
+        [AllowEmptyCollection()][object[]]$UnfilteredScopedConnections = @(),
+        [bool]$FallbackQueryUsed = $false,
+        [string]$QueryError
     )
-    $listeners = @($Connections | Where-Object { $_.State -eq 'Listen' -and [int]$_.LocalPort -eq $Port })
-    $state = if ($listeners.Count -eq 0) { 'listener-absent' }
-        elseif ($listeners.Count -gt 1) { 'listener-ambiguous' }
-        elseif ([string]$listeners[0].LocalAddress -ne '127.0.0.1') { 'listener-wrong-address' }
-        elseif ([int]$listeners[0].OwningProcess -ne $ExpectedProcessId) { 'listener-wrong-owner' }
+    $endpointRows = @($Connections | Where-Object { [int]$_.LocalPort -eq $Port })
+    $scopedListeners = @($ScopedConnections | Where-Object { [string]$_.State -eq 'Listen' -and [int]$_.LocalPort -eq $Port })
+    $unfilteredScopedRows = @($UnfilteredScopedConnections | Where-Object { [int]$_.LocalPort -eq $Port })
+    $observedEndpoints = @($endpointRows | ForEach-Object {
+        $address = [string]$_.LocalAddress
+        $parsedAddress = $null
+        $parsed = [Net.IPAddress]::TryParse($address, [ref]$parsedAddress)
+        $addressFamily = if ($parsed) { [string]$parsedAddress.AddressFamily } else { 'Unknown' }
+        $remoteAddress = if ($_.PSObject.Properties['RemoteAddress']) { [string]$_.RemoteAddress } else { '' }
+        $remotePort = if ($_.PSObject.Properties['RemotePort']) { [int]$_.RemotePort } else { 0 }
+        [PSCustomObject]@{
+            State = if ($null -eq $_.State) { $null } else { [string]$_.State }
+            LocalAddress = $address
+            AddressFamily = $addressFamily
+            LocalPort = [int]$_.LocalPort
+            RemoteAddress = $remoteAddress
+            RemotePort = $remotePort
+            OwningProcess = [int]$_.OwningProcess
+        }
+    })
+    $candidateListeners = @($endpointRows | Where-Object {
+        $stateText = [string]$_.State
+        $remoteAddress = if ($_.PSObject.Properties['RemoteAddress']) { [string]$_.RemoteAddress } else { '' }
+        $remotePort = if ($_.PSObject.Properties['RemotePort']) { [int]$_.RemotePort } else { 0 }
+        $stateText -eq 'Listen' -or ([string]::IsNullOrWhiteSpace($stateText) -and $remotePort -eq 0 -and $remoteAddress -in @('0.0.0.0','::'))
+    })
+    $one = if ($candidateListeners.Count -eq 1) { $candidateListeners[0] } else { $null }
+    $parsedExpectedAddress = $null
+    $addressParsed = $false
+    $addressMatches = $false
+    $addressFamily = 'Unknown'
+    $ownerMatches = $false
+    if ($null -ne $one) {
+        $addressParsed = [Net.IPAddress]::TryParse([string]$one.LocalAddress, [ref]$parsedExpectedAddress)
+        if ($addressParsed) {
+            $addressFamily = [string]$parsedExpectedAddress.AddressFamily
+            $addressMatches = $parsedExpectedAddress.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork -and $parsedExpectedAddress.Equals([Net.IPAddress]::Loopback)
+        }
+        $ownerMatches = [int]$one.OwningProcess -eq $ExpectedProcessId
+    }
+    $state = if ($endpointRows.Count -eq 0) { 'listener-absent' }
+        elseif ($candidateListeners.Count -eq 0) { 'endpoint-present-nonlistener' }
+        elseif ($candidateListeners.Count -gt 1) { 'listener-ambiguous' }
+        elseif (-not $ownerMatches) { 'listener-wrong-owner' }
+        elseif (-not $addressParsed) { 'listener-invalid-address' }
+        elseif ($parsedExpectedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { 'listener-wrong-address-family' }
+        elseif (-not $addressMatches) { 'listener-wrong-address' }
+        elseif ([string]::IsNullOrWhiteSpace([string]$one.State)) { 'listener-state-unreported-owned-candidate' }
         else { 'listener-owned-by-child' }
+    $discoveryState = if (-not $FallbackQueryUsed) { 'targeted-listen-state-and-local-port-query' }
+        elseif ($unfilteredScopedRows.Count -gt 0) { 'targeted-listen-filter-empty-unfiltered-local-port-found-endpoint' }
+        elseif ($endpointRows.Count -gt 0) { 'targeted-and-scoped-query-empty-broad-table-found-endpoint' }
+        else { 'targeted-and-scoped-query-empty-broad-table-empty-for-port' }
+    $observedEndpointRecords = @($observedEndpoints | ForEach-Object { [ordered]@{state=$_.State;localAddress=$_.LocalAddress;addressFamily=$_.AddressFamily;localPort=$_.LocalPort;remoteAddress=$_.RemoteAddress;remotePort=$_.RemotePort;owningProcessId=$_.OwningProcess} })
+    $listenerOwned = $state -in @('listener-owned-by-child','listener-state-unreported-owned-candidate')
     return [PSCustomObject]@{
         Endpoint = "127.0.0.1:$Port"
         State = $state
-        ListenerCount = $listeners.Count
-        Owned = ($state -eq 'listener-owned-by-child')
+        ListenerCount = $candidateListeners.Count
+        ObservedEndpointCount = $endpointRows.Count
+        Owned = $listenerOwned
+        ConnectionEligible = $listenerOwned
+        EndpointPresent = ($endpointRows.Count -gt 0)
+        EndpointReady = ($state -eq 'listener-owned-by-child')
+        ListenerStateReported = ($null -ne $one -and -not [string]::IsNullOrWhiteSpace([string]$one.State))
+        ExpectedAddressFamily = 'InterNetwork'
+        ObservedAddressFamily = $addressFamily
+        OwnerMatches = $ownerMatches
+        AddressMatches = $addressMatches
+        DiscoveryState = $discoveryState
+        ScopedListenerCount = $scopedListeners.Count
+        UnfilteredScopedEndpointCount = $unfilteredScopedRows.Count
+        QueryError = $QueryError
+        ObservedEndpoints = $observedEndpointRecords
+    }
+}
+
+function Test-QacS22R10ContinuationAuthorization {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][bool]$QacOwnerAlive,
+        [Parameter(Mandatory)][bool]$ReservationValid,
+        [Parameter(Mandatory)][bool]$ListenerOwned,
+        [Parameter(Mandatory)][bool]$QmpNegotiated,
+        [Parameter(Mandatory)][string]$QmpStatus
+    )
+    return $QacOwnerAlive -and $ReservationValid -and $ListenerOwned -and $QmpNegotiated -and $QmpStatus -in @('prelaunch','paused')
+}
+
+function Stop-QacS22R10OwnedChild {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Reservation,
+        [Parameter(Mandatory)][string]$ExpectedReservationId,
+        [Parameter(Mandatory)][string]$ExpectedProject,
+        [Parameter(Mandatory)][string]$ExpectedMode,
+        [Parameter(Mandatory)][int]$ExpectedParentProcessId,
+        [Parameter(Mandatory)][string]$ExpectedExecutable,
+        [Parameter(Mandatory)][DateTimeOffset]$ExpectedStartUtc,
+        [Parameter(Mandatory)][int]$ExpectedChildProcessId,
+        [int]$StartToleranceSeconds = 3,
+        [ValidateRange(1,30)][int]$WaitTimeoutSeconds = 5
+    )
+    $processRecord = Get-CimInstance Win32_Process -Filter "ProcessId=$ExpectedChildProcessId" -ErrorAction SilentlyContinue
+    if (Test-QacS22R10ReservationIdentity -Reservation $Reservation -ExpectedReservationId $ExpectedReservationId -ExpectedProject $ExpectedProject -ExpectedMode $ExpectedMode -ExpectedState 'Released' -ExpectedChildProcessId $ExpectedChildProcessId) {
+        if (-not $processRecord) { return [PSCustomObject]@{AlreadyExited=$true;ProcessId=$ExpectedChildProcessId;ExitVerified=$true;ReservationAlreadyReleased=$true} }
+        throw 'Refusing QEMU cleanup because QAC reports release while the registered child is still present.'
+    }
+    if (-not (Test-QacS22R10ReservationIdentity -Reservation $Reservation -ExpectedReservationId $ExpectedReservationId -ExpectedProject $ExpectedProject -ExpectedMode $ExpectedMode -ExpectedState 'Running' -ExpectedChildProcessId $ExpectedChildProcessId)) {
+        throw 'Refusing QEMU cleanup because the exact active QAC reservation and child are not verified.'
+    }
+    if (-not $processRecord) { return [PSCustomObject]@{AlreadyExited=$true;ProcessId=$ExpectedChildProcessId;ExitVerified=$true} }
+    if (-not (Test-QacS22R10DirectChildIdentity -ProcessRecord $processRecord -ExpectedPid $ExpectedChildProcessId -ExpectedParentPid $ExpectedParentProcessId -ExpectedExecutable $ExpectedExecutable -ExpectedStartUtc $ExpectedStartUtc -StartToleranceSeconds $StartToleranceSeconds)) {
+        throw 'Refusing QEMU cleanup because the live process PID, parent, executable, or start identity does not match the registered QAC child.'
+    }
+    $process = [Diagnostics.Process]::GetProcessById($ExpectedChildProcessId)
+    try {
+        $handleStartUtc = [DateTimeOffset]::new($process.StartTime.ToUniversalTime())
+        if ([Math]::Abs(($handleStartUtc - $ExpectedStartUtc).TotalSeconds) -gt $StartToleranceSeconds) {
+            throw 'Refusing QEMU cleanup because the process handle start time does not match the registered child.'
+        }
+        if (-not $process.HasExited) { $process.Kill() }
+        $exited = $process.WaitForExit($WaitTimeoutSeconds * 1000)
+        if (-not $exited) { throw "The exact QAC child PID $ExpectedChildProcessId did not exit within $WaitTimeoutSeconds seconds after cleanup." }
+        return [PSCustomObject]@{AlreadyExited=$false;ProcessId=$ExpectedChildProcessId;ExitVerified=$true;ExitCode=$process.ExitCode}
+    } finally {
+        $process.Dispose()
     }
 }
 
@@ -477,4 +610,4 @@ function Close-QacS22R10QmpClient {
     try { $Client.Tcp.Dispose() } catch { }
 }
 
-Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Get-QacS22R10QmpListenerObservation, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient
+Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Get-QacS22R10QmpListenerObservation, Test-QacS22R10ContinuationAuthorization, Stop-QacS22R10OwnedChild, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient

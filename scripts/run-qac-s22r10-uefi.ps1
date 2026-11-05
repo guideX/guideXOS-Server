@@ -258,33 +258,182 @@ function Get-QacProcessRecord {
     return Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
 }
 
+function Get-QacProcessIdentitySummary {
+    param($ProcessRecord)
+    if (-not $ProcessRecord) { return $null }
+    $creationUtc = $null
+    try {
+        if ($ProcessRecord.CreationDate -is [DateTime]) { $creationUtc = $ProcessRecord.CreationDate.ToUniversalTime().ToString('O') }
+        elseif ($ProcessRecord.CreationDate -is [DateTimeOffset]) { $creationUtc = $ProcessRecord.CreationDate.UtcDateTime.ToString('O') }
+        else { $creationUtc = [Management.ManagementDateTimeConverter]::ToDateTime([string]$ProcessRecord.CreationDate).ToUniversalTime().ToString('O') }
+    } catch { }
+    return [ordered]@{processId=[int]$ProcessRecord.ProcessId;parentProcessId=[int]$ProcessRecord.ParentProcessId;executablePath=[string]$ProcessRecord.ExecutablePath;creationTimeUtc=$creationUtc}
+}
+
+function Add-QmpListenerProbe {
+    param([Parameter(Mandatory)]$Observation,[Parameter(Mandatory)][string]$Stage,[Parameter(Mandatory)][int]$Port)
+    $script:QmpProbeSequence++
+    $expectedStartUtc = if ($script:Execution.childStartUtc) { [DateTimeOffset]::Parse([string]$script:Execution.childStartUtc).ToUniversalTime().ToString('O') } else { $null }
+    $entry = [ordered]@{
+        timestampUtc=[DateTimeOffset]::UtcNow.ToString('O')
+        monotonicElapsedMilliseconds=if ($script:QmpStartupStopwatch) { [Math]::Round($script:QmpStartupStopwatch.Elapsed.TotalMilliseconds,3) } else { $null }
+        probeSequence=$script:QmpProbeSequence
+        stage=$Stage
+        reservationId=$script:Execution.reservationId
+        expectedChildProcessIdentity=[ordered]@{processId=$script:Execution.childProcessId;parentProcessId=$script:QacProcess.Id;executablePath=$script:Execution.qemuExecutable;creationTimeUtc=$expectedStartUtc}
+        observedProcessIdentity=$Observation.ProcessIdentity
+        processAlive=[bool]$Observation.ProcessAlive
+        configuredEndpoint=[ordered]@{protocol='tcp';address='127.0.0.1';addressFamily='InterNetwork';port=$Port;argument="tcp:127.0.0.1:$Port,server=on,wait=off"}
+        observedMatchingEndpointCount=[int]$Observation.ObservedEndpointCount
+        listenerCandidateCount=[int]$Observation.ListenerCount
+        observedEndpoints=@($Observation.ObservedEndpoints)
+        endpointPresent=[bool]$Observation.EndpointPresent
+        endpointReady=[bool]$Observation.EndpointReady
+        connectionEligible=[bool]$Observation.ConnectionEligible
+        listenerStateReported=[bool]$Observation.ListenerStateReported
+        readinessState=[string]$Observation.State
+        discoveryState=[string]$Observation.DiscoveryState
+        scopedListenerCount=[int]$Observation.ScopedListenerCount
+        ownershipValidation=[ordered]@{processIdentityVerified=[bool]$Observation.ProcessIdentityVerified;listenerOwnerMatches=[bool]$Observation.OwnerMatches;configuredAddressMatches=[bool]$Observation.AddressMatches;uniqueEndpoint=([int]$Observation.ListenerCount -eq 1);authorized=[bool]$Observation.Owned}
+        discoveryQueryStatus=[string]$Observation.DiscoveryQueryStatus
+        queryError=[string]$Observation.QueryError
+        processValidationFailure=[string]$Observation.Failure
+        lastConnectionError=$script:Execution.qmp.lastConnectionError
+    }
+    [IO.File]::AppendAllText($script:QmpProbeLogPath,(ConvertTo-Json -InputObject $entry -Compress -Depth 12) + "`n",(New-Object Text.UTF8Encoding($false)))
+    $script:Execution.qmp.lastListenerProbe = [ordered]@{probeSequence=$entry.probeSequence;stage=$entry.stage;monotonicElapsedMilliseconds=$entry.monotonicElapsedMilliseconds;readinessState=$entry.readinessState;observedMatchingEndpointCount=$entry.observedMatchingEndpointCount;listenerCandidateCount=$entry.listenerCandidateCount;endpointReady=$entry.endpointReady;connectionEligible=$entry.connectionEligible;discoveryState=$entry.discoveryState;lastConnectionError=$entry.lastConnectionError}
+}
+
+function Invoke-QacOwnedChildStartupCleanup {
+    param([Parameter(Mandatory)][string]$Reason,[Parameter(Mandatory)][string]$Stage)
+    if ($script:QacProcess.HasExited) { throw 'QAC owner process exited before an authorized child cleanup could be verified.' }
+    $reservation = Get-QacInspectRecord -ReservationId ([string]$script:Execution.reservationId)
+    $cleanup = Stop-QacS22R10OwnedChild -Reservation $reservation -ExpectedReservationId ([string]$script:Execution.reservationId) -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedParentProcessId $script:QacProcess.Id -ExpectedExecutable $script:Execution.qemuExecutable -ExpectedStartUtc ([DateTimeOffset]::Parse([string]$script:Execution.childStartUtc)) -ExpectedChildProcessId ([int]$script:Execution.childProcessId)
+    Add-ExecutionEvent -Type 'qmp-startup-failure-owned-child-cleanup' -Data @{stage=$Stage;reason=$Reason;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;reservationState=$reservation.state;childExitVerified=[bool]$cleanup.ExitVerified;childAlreadyExited=[bool]$cleanup.AlreadyExited;cleanupMethod='exact-registered-QAC-child-process-handle'}
+}
+
 function Test-QacChildAndListener {
     param([Parameter(Mandatory)][int]$ProcessId,[Parameter(Mandatory)][int]$ParentId,[Parameter(Mandatory)][string]$QemuPath,[Parameter(Mandatory)][DateTimeOffset]$StartUtc,[Parameter(Mandatory)][int]$Port)
+    $emptyObservation = Get-QacS22R10QmpListenerObservation -Connections ([object[]]@()) -Port $Port -ExpectedProcessId $ProcessId
     $processRecord = Get-QacProcessRecord -ProcessId $ProcessId
     if (-not $processRecord) {
-        return [PSCustomObject]@{Endpoint="127.0.0.1:$Port";State='child-exited-before-qmp';ListenerCount=0;Owned=$false}
+        $emptyObservation.State = 'child-exited-before-qmp'
+        $emptyObservation.ProcessAlive = $false
+        $emptyObservation.ProcessIdentity = $null
+        $emptyObservation.ProcessIdentityVerified = $false
+        $emptyObservation.Failure = $null
+        $emptyObservation.DiscoveryQueryStatus = 'not-run-child-exited'
+        return $emptyObservation
     }
+    $processSummary = Get-QacProcessIdentitySummary -ProcessRecord $processRecord
     if (-not (Test-QacS22R10DirectChildIdentity -ProcessRecord $processRecord -ExpectedPid $ProcessId -ExpectedParentPid $ParentId -ExpectedExecutable $QemuPath -ExpectedStartUtc $StartUtc)) {
-        throw 'QAC child PID, parent, executable, or start identity does not match the admitted QEMU process.'
+        $emptyObservation.State = 'child-identity-mismatch'
+        $emptyObservation.ProcessAlive = $true
+        $emptyObservation.ProcessIdentity = $processSummary
+        $emptyObservation.ProcessIdentityVerified = $false
+        $emptyObservation.Failure = 'QAC child PID, parent, executable, or start identity does not match the admitted QEMU process.'
+        $emptyObservation.DiscoveryQueryStatus = 'not-run-process-identity-mismatch'
+        return $emptyObservation
     }
     $commandLine = [string]$processRecord.CommandLine
-    if ($commandLine.IndexOf("fat:rw:$($script:Validated.Esp.privatePath)",[StringComparison]::OrdinalIgnoreCase) -lt 0) { throw 'Actual QEMU command line does not reference the run-private ESP with fat:rw.' }
-    if ($commandLine.IndexOf([string]$script:Validated.Esp.sourcePath,[StringComparison]::OrdinalIgnoreCase) -ge 0) { throw 'Actual QEMU command line references the canonical ESP.' }
-    if ($commandLine.IndexOf([string]$script:Validated.Iso.privatePath,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or $commandLine -notmatch '(?i)media=cdrom,readonly=on') { throw 'Actual QEMU command line does not retain the verified read-only ISO.' }
-    if ($commandLine.IndexOf([string]$script:Validated.Ovmf.privatePath,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or $commandLine -notmatch '(?i)readonly=on,file=') { throw 'Actual QEMU command line does not retain the read-only OVMF image.' }
+    $commandLineFailure = $null
+    if ($commandLine.IndexOf("fat:rw:$($script:Validated.Esp.privatePath)",[StringComparison]::OrdinalIgnoreCase) -lt 0) { $commandLineFailure = 'Actual QEMU command line does not reference the run-private ESP with fat:rw.' }
+    elseif ($commandLine.IndexOf([string]$script:Validated.Esp.sourcePath,[StringComparison]::OrdinalIgnoreCase) -ge 0) { $commandLineFailure = 'Actual QEMU command line references the canonical ESP.' }
+    elseif ($commandLine.IndexOf([string]$script:Validated.Iso.privatePath,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or $commandLine -notmatch '(?i)media=cdrom,readonly=on') { $commandLineFailure = 'Actual QEMU command line does not retain the verified read-only ISO.' }
+    if ($commandLine.IndexOf([string]$script:Validated.Ovmf.privatePath,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or $commandLine -notmatch '(?i)readonly=on,file=') { $commandLineFailure = 'Actual QEMU command line does not retain the verified read-only OVMF image.' }
     if (-not (Get-Command -Name Get-NetTCPConnection -CommandType Function,Cmdlet -ErrorAction SilentlyContinue)) {
-        return [PSCustomObject]@{Endpoint="127.0.0.1:$Port";State='listener-query-unavailable';ListenerCount=0;Owned=$false}
+        $emptyObservation.State = 'listener-query-unavailable'
+        $emptyObservation.ProcessAlive = $true
+        $emptyObservation.ProcessIdentity = $processSummary
+        $emptyObservation.ProcessIdentityVerified = $true
+        $emptyObservation.Failure = $commandLineFailure
+        $emptyObservation.DiscoveryQueryStatus = 'Get-NetTCPConnection-unavailable'
+        return $emptyObservation
     }
-    $queryErrors = @()
+    $scopedListeners = @()
+    $scopedQueryErrors = @()
+    $queryErrorMessages = [System.Collections.Generic.List[string]]::new()
+    $targetedQueryFailed = $false
     try {
-        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue -ErrorVariable +queryErrors)
+        $scopedListeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue -ErrorVariable +scopedQueryErrors)
     } catch {
-        return [PSCustomObject]@{Endpoint="127.0.0.1:$Port";State='listener-query-error';ListenerCount=0;Owned=$false}
+        $targetedQueryFailed = $true
+        [void]$queryErrorMessages.Add($_.Exception.Message)
     }
-    if ($queryErrors.Count -gt 0) {
-        return [PSCustomObject]@{Endpoint="127.0.0.1:$Port";State='listener-query-error';ListenerCount=$listeners.Count;Owned=$false}
+    if ($scopedQueryErrors.Count -gt 0) {
+        $targetedQueryFailed = $true
+        foreach ($queryError in $scopedQueryErrors) { if ($queryError.Exception.Message) { [void]$queryErrorMessages.Add([string]$queryError.Exception.Message) } }
     }
-    return Get-QacS22R10QmpListenerObservation -Connections $listeners -Port $Port -ExpectedProcessId $ProcessId
+    $fallbackUsed = $targetedQueryFailed -or $scopedListeners.Count -eq 0
+    $matchingListeners = @($scopedListeners)
+    $unfilteredScopedRows = @()
+    $unfilteredQueryFailed = $false
+    $broadQueryFailed = $false
+    if ($fallbackUsed) {
+        $unfilteredScopedErrors = @()
+        try {
+            $unfilteredScopedRows = @(Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue -ErrorVariable +unfilteredScopedErrors)
+            $matchingListeners = @($unfilteredScopedRows)
+        } catch {
+            $unfilteredQueryFailed = $true
+            [void]$queryErrorMessages.Add($_.Exception.Message)
+        }
+        if ($unfilteredScopedErrors.Count -gt 0) {
+            $unfilteredQueryFailed = $true
+            foreach ($queryError in $unfilteredScopedErrors) { if ($queryError.Exception.Message) { [void]$queryErrorMessages.Add([string]$queryError.Exception.Message) } }
+        }
+        if ($matchingListeners.Count -eq 0) {
+            $broadQueryErrors = @()
+            try {
+                $allConnectionRows = @(Get-NetTCPConnection -ErrorAction SilentlyContinue -ErrorVariable +broadQueryErrors)
+                $matchingListeners = @($allConnectionRows | Where-Object { [int]$_.LocalPort -eq $Port })
+            } catch {
+                $broadQueryFailed = $true
+                [void]$queryErrorMessages.Add($_.Exception.Message)
+            }
+            if ($broadQueryErrors.Count -gt 0) {
+                $broadQueryFailed = $true
+                foreach ($queryError in $broadQueryErrors) { if ($queryError.Exception.Message) { [void]$queryErrorMessages.Add([string]$queryError.Exception.Message) } }
+            }
+        }
+        if ($unfilteredQueryFailed -and $matchingListeners.Count -eq 0) {
+            $broadQueryFailed = $broadQueryFailed -or $unfilteredQueryFailed
+        }
+        if ($broadQueryFailed) {
+            foreach ($queryError in $broadQueryErrors) { if ($queryError.Exception.Message) { [void]$queryErrorMessages.Add([string]$queryError.Exception.Message) } }
+        }
+    }
+    $queryStatus = if (-not $fallbackUsed) { 'targeted-local-port-query-succeeded' }
+        elseif ($matchingListeners.Count -gt 0 -and $unfilteredScopedRows.Count -gt 0) { 'listen-state-filter-empty-unfiltered-local-port-query-found-endpoint' }
+        elseif ($matchingListeners.Count -gt 0) { 'listen-state-filter-and-scoped-query-empty-broad-table-found-configured-port' }
+        elseif ($broadQueryFailed) { 'listen-state-filter-and-diagnostic-query-error' }
+        else { 'listen-state-filter-and-diagnostic-query-empty-for-configured-port' }
+    $queryError = (@($queryErrorMessages | Select-Object -Unique) -join ' | ')
+    $observation = Get-QacS22R10QmpListenerObservation -Connections $matchingListeners -ScopedConnections $scopedListeners -UnfilteredScopedConnections $unfilteredScopedRows -Port $Port -ExpectedProcessId $ProcessId -FallbackQueryUsed $fallbackUsed -QueryError $queryError
+    $observation.ProcessAlive = $true
+    $observation.ProcessIdentity = $processSummary
+    $observation.ProcessIdentityVerified = $true
+    $observation.ActualCommandLine = $commandLine
+    $observation.Failure = $commandLineFailure
+    $observation.DiscoveryQueryStatus = $queryStatus
+    $observation.FallbackQueryUsed = $fallbackUsed
+    $postQueryProcess = Get-QacProcessRecord -ProcessId $ProcessId
+    if (-not $postQueryProcess) {
+        $observation.State = 'child-exited-during-listener-query'
+        $observation.ProcessAlive = $false
+        $observation.ProcessIdentityVerified = $false
+        $observation.Owned = $false
+        $observation.EndpointReady = $false
+    } elseif (-not (Test-QacS22R10DirectChildIdentity -ProcessRecord $postQueryProcess -ExpectedPid $ProcessId -ExpectedParentPid $ParentId -ExpectedExecutable $QemuPath -ExpectedStartUtc $StartUtc)) {
+        $observation.State = 'child-identity-changed-during-listener-query'
+        $observation.ProcessAlive = $true
+        $observation.ProcessIdentity = Get-QacProcessIdentitySummary -ProcessRecord $postQueryProcess
+        $observation.ProcessIdentityVerified = $false
+        $observation.Owned = $false
+        $observation.EndpointReady = $false
+        $observation.Failure = 'QAC child identity changed between the before-query and after-query process snapshots.'
+    }
+    return $observation
 }
 
 function Invoke-GuestOperatorCommand {
@@ -420,6 +569,11 @@ $script:SerialOffset = [int64]0
 $script:SerialPending = ''
 $script:SerialLines = [System.Collections.Generic.List[string]]::new()
 $script:QmpClient = $null
+$script:QmpProbeLogPath = $null
+$script:QmpStartupStopwatch = $null
+$script:QmpProbeSequence = 0
+$script:StartupFailure = $null
+$script:StartupFailureStage = $null
 $script:QacProcess = $null
 $script:StdoutTask = $null
 $script:StderrTask = $null
@@ -464,7 +618,7 @@ try {
         childProcessId=$null; childStartUtc=$null; childExitVerified=$false; qemuExitCode=$null; qacCliExitCode=$null;
         qacCliReleaseReported=$false; qacCliReleaseReportedReservationId=$null; qacCliReleaseReportedChildProcessId=0; qacCliReleaseLineObservedAtUtc=$null;
         reservationReleaseVerified=$false; recoveryRequired=$false;
-        manifestSchemaVersion=1; qmp=[ordered]@{endpoint=$null;status='not-allocated';ownership='unbound';quitAcknowledged=$false;quitResponse=$null};
+        manifestSchemaVersion=1; qmp=[ordered]@{endpoint=$null;status='not-allocated';ownership='unbound';quitAcknowledged=$false;quitResponse=$null;lastConnectionError=$null;lastListenerProbe=$null};
         qemuArguments=@(); guestResult='INCOMPLETE'; guestResultReason=$null; cleanupEligible=$false;
         timings=[ordered]@{stagingStartAtUtc=$null;stagingCompleteAtUtc=$null;reservationRequestedAtUtc=$null;reservationGrantedAtUtc=$null;qemuChildStartAtUtc=$null;firstGuestProgressAtUtc=$null;guestCompletionOrFailureAtUtc=$null;qmpShutdownRequestedAtUtc=$null;qemuChildExitAtUtc=$null;qacReleaseReportedAtUtc=$null;qacReleaseVerifiedAtUtc=$null};
         attempts=[System.Collections.Generic.List[object]]::new(); events=[System.Collections.Generic.List[object]]::new()
@@ -497,7 +651,8 @@ try {
     $script:EventLogPath = Join-Path $script:OutputPath 'host-execution.jsonl'
     $script:ExecutionPath = Join-Path $script:OutputPath 'execution.json'
     $script:QmpTranscriptPath = Get-QacS22R10FullPath (Join-Path $script:Validated.Workspace ([string]$manifest.outputs.qmpTranscript).Replace('/','\'))
-    foreach ($path in @($script:QacLogPath,$script:EventLogPath,$script:QmpTranscriptPath)) { [IO.File]::WriteAllText($path,'',(New-Object Text.UTF8Encoding($false))) }
+    $script:QmpProbeLogPath = Join-Path $script:OutputPath 'qmp-listener-probes.jsonl'
+    foreach ($path in @($script:QacLogPath,$script:EventLogPath,$script:QmpTranscriptPath,$script:QmpProbeLogPath)) { [IO.File]::WriteAllText($path,'',(New-Object Text.UTF8Encoding($false))) }
     Write-ExecutionRecord
     Set-ExecutionState -State 'Prepared' -Data @{manifestPath=$script:ManifestPath;workspacePath=$script:Validated.Workspace}
 
@@ -531,6 +686,12 @@ try {
     $smokeCompleted = $false
     $collisionAttempts = [System.Collections.Generic.List[int]]::new()
     for ($attemptNumber = 1; $attemptNumber -le $MaxQmpPortAttempts; $attemptNumber++) {
+        $script:StartupFailure = $null
+        $script:StartupFailureStage = $null
+        $script:QmpStartupStopwatch = $null
+        $script:QmpProbeSequence = 0
+        $script:Execution.qmp.lastConnectionError = $null
+        $script:Execution.qmp.lastListenerProbe = $null
         Set-ManifestExecution -Status 'active' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
         $port = Get-QacS22R10QmpPortCandidate -ExcludePort $collisionAttempts.ToArray()
         $collisionAttempts.Add($port)
@@ -575,6 +736,7 @@ try {
                 $attempt.childProcessId = $script:Execution.childProcessId
                 $attempt.reservationId = $script:Execution.reservationId
                 $startUtc = [DateTimeOffset]::Parse([string]$script:Execution.childStartUtc)
+                if (-not $script:QmpStartupStopwatch) { $script:QmpStartupStopwatch = [Diagnostics.Stopwatch]::StartNew() }
                 $listening = $false
                 $listenerProbeCount = 0
                 $lastListenerObservation = $null
@@ -584,57 +746,148 @@ try {
                     Read-SerialAvailable
                     $lastListenerObservation = Test-QacChildAndListener -ProcessId $script:Execution.childProcessId -ParentId $script:QacProcess.Id -QemuPath $qemu -StartUtc $startUtc -Port $port
                     $listenerProbeCount++
+                    Add-QmpListenerProbe -Observation $lastListenerObservation -Stage 'startup-poll' -Port $port
+                    if ($lastListenerObservation.ActualCommandLine -and -not $script:Execution.qmp.actualChildCommandLine) {
+                        $script:Execution.qmp.actualChildCommandLine = [string]$lastListenerObservation.ActualCommandLine
+                        $script:Execution.qmp.observedChildProcessIdentity = $lastListenerObservation.ProcessIdentity
+                        Add-ExecutionEvent -Type 'qmp-child-launch-identity-observed' -Data @{reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;parentProcessId=$script:QacProcess.Id;processIdentity=$lastListenerObservation.ProcessIdentity;actualCommandLine=$lastListenerObservation.ActualCommandLine;expectedQemuArguments=$script:Execution.qemuArguments}
+                    }
                     if ($lastListenerObservation.State -eq 'child-exited-before-qmp') {
                         Add-ExecutionEvent -Type 'qmp-child-exited-before-handshake' -Data @{endpoint=$lastListenerObservation.Endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;probeCount=$listenerProbeCount}
-                        throw 'QEMU child exited before its owned QMP listener was established.'
+                        $script:StartupFailure = 'QEMU child exited before its owned QMP listener was established.'
+                        $script:StartupFailureStage = 'child-exited-before-listener'
+                        break
+                    }
+                    if ($lastListenerObservation.Failure) {
+                        $script:StartupFailure = [string]$lastListenerObservation.Failure
+                        $script:StartupFailureStage = 'child-launch-identity'
+                        break
                     }
                     $listening = [bool]$lastListenerObservation.Owned
                     if ($listening) { break }
                     Start-Sleep -Milliseconds 100
                 }
+                if ($script:StartupFailure) {
+                    try {
+                        Invoke-QacOwnedChildStartupCleanup -Reason $script:StartupFailure -Stage $script:StartupFailureStage
+                    } catch {
+                        Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
+                        $script:Execution.recoveryRequired = $true
+                        Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$script:StartupFailure;stage=$script:StartupFailureStage}
+                        throw
+                    }
+                    break
+                }
                 if ($listening) {
                     $reservation = Get-QacInspectRecord -ReservationId $script:Execution.reservationId
                     if (-not (Test-QacS22R10ReservationIdentity -Reservation $reservation -ExpectedReservationId ([string]$script:Execution.reservationId) -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId ([int]$script:Execution.childProcessId))) {
+                        Add-ExecutionEvent -Type 'qmp-preconnect-reservation-rejected' -Data @{reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;observedReservationId=$reservation.id;observedState=$reservation.state;observedChildProcessId=$reservation.processId}
                         throw 'QAC inspect did not confirm the expected active acceptance reservation and child.'
                     }
                     $script:Execution.reservation = $reservation
-                    $script:Execution.qmp.status = 'listener-owned-by-child'
+                    $script:Execution.qmp.status = [string]$lastListenerObservation.State
                     $script:Execution.qmp.ownership = 'verified-by-qac-parent-executable-start-and-listener-pid'
-                    Add-ExecutionEvent -Type 'qmp-listener-owned' -Data @{endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId;qacCliProcessId=$script:QacProcess.Id;reservationId=$script:Execution.reservationId;probeCount=$listenerProbeCount}
+                    Add-ExecutionEvent -Type 'qmp-listener-connection-eligible' -Data @{endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId;qacCliProcessId=$script:QacProcess.Id;reservationId=$script:Execution.reservationId;probeCount=$listenerProbeCount;listenerState=$lastListenerObservation.State;listenerStateReported=$lastListenerObservation.ListenerStateReported;exactOwner=$lastListenerObservation.OwnerMatches;exactAddress=$lastListenerObservation.AddressMatches;connectionEligible=$lastListenerObservation.ConnectionEligible;endpointReady=$lastListenerObservation.EndpointReady}
                     try {
                         $script:QmpClient = Open-QacS22R10QmpClient -Port $port -TranscriptPath $script:QmpTranscriptPath -ConnectTimeoutMilliseconds ($QmpConnectTimeoutSeconds * 1000)
                     } catch {
+                        $connectionError = $_.Exception.Message
+                        $script:Execution.qmp.lastConnectionError = $connectionError
+                        $script:StartupFailure = $connectionError
+                        $script:StartupFailureStage = 'connect-or-greeting'
                         if (-not (Get-QacProcessRecord -ProcessId $script:Execution.childProcessId)) {
                             Add-ExecutionEvent -Type 'qmp-child-exited-during-handshake' -Data @{stage='connect-or-greeting';endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId}
-                            throw 'QEMU child exited during QMP connection or greeting; no state-changing command was sent.'
                         }
-                        throw
+                        Add-ExecutionEvent -Type 'qmp-connection-or-greeting-failed' -Data @{stage=$script:StartupFailureStage;endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;error=$connectionError;stateChangingCommandSent=$false}
+                        try { Invoke-QacOwnedChildStartupCleanup -Reason $connectionError -Stage $script:StartupFailureStage }
+                        catch {
+                            Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
+                            $script:Execution.recoveryRequired = $true
+                            Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$connectionError;stage=$script:StartupFailureStage}
+                            throw
+                        }
+                        break
                     }
                     $postConnectObservation = Test-QacChildAndListener -ProcessId $script:Execution.childProcessId -ParentId $script:QacProcess.Id -QemuPath $qemu -StartUtc $startUtc -Port $port
-                    if (-not $postConnectObservation.Owned) { throw "QMP listener ownership changed during connection (state=$($postConnectObservation.State), listeners=$($postConnectObservation.ListenerCount)); no state-changing command was sent." }
+                    Add-QmpListenerProbe -Observation $postConnectObservation -Stage 'post-connect' -Port $port
+                    if (-not $postConnectObservation.Owned) {
+                        $script:StartupFailure = "QMP listener ownership changed during connection (state=$($postConnectObservation.State), listeners=$($postConnectObservation.ListenerCount))."
+                        $script:StartupFailureStage = 'ownership-changed-during-connect'
+                        Add-ExecutionEvent -Type 'qmp-listener-ownership-changed' -Data @{stage=$script:StartupFailureStage;endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;readinessState=$postConnectObservation.State;observedMatchingEndpointCount=$postConnectObservation.ListenerCount;stateChangingCommandSent=$false}
+                        try { Invoke-QacOwnedChildStartupCleanup -Reason $script:StartupFailure -Stage $script:StartupFailureStage }
+                        catch {
+                            Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
+                            $script:Execution.recoveryRequired = $true
+                            Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$script:StartupFailure;stage=$script:StartupFailureStage}
+                            throw
+                        }
+                        break
+                    }
                     $expectedName = "guideXOS-$($manifest.runId)"
                     try {
                         $qmpIdentity = Initialize-QacS22R10QmpClient -Client $script:QmpClient -ExpectedName $expectedName
                     } catch {
+                        $handshakeError = $_.Exception.Message
+                        $script:Execution.qmp.lastConnectionError = $handshakeError
+                        $script:StartupFailure = $handshakeError
+                        $script:StartupFailureStage = 'capabilities-or-instance-identity'
                         if (-not (Get-QacProcessRecord -ProcessId $script:Execution.childProcessId)) {
                             Add-ExecutionEvent -Type 'qmp-child-exited-during-handshake' -Data @{stage='capabilities-or-identity';endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId}
-                            throw 'QEMU child exited during QMP capability or identity verification; no state-changing command was sent.'
                         }
-                        throw
+                        Add-ExecutionEvent -Type 'qmp-capabilities-or-identity-failed' -Data @{stage=$script:StartupFailureStage;endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;error=$handshakeError;stateChangingCommandSent=$false}
+                        try { Invoke-QacOwnedChildStartupCleanup -Reason $handshakeError -Stage $script:StartupFailureStage }
+                        catch {
+                            Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
+                            $script:Execution.recoveryRequired = $true
+                            Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$handshakeError;stage=$script:StartupFailureStage}
+                            throw
+                        }
+                        break
                     }
-                    if ($qmpIdentity.Status -notin @('prelaunch','paused')) { throw "QEMU was not paused before QMP identity verification (status=$($qmpIdentity.Status))." }
+                    if ($qmpIdentity.Status -notin @('prelaunch','paused')) {
+                        $script:StartupFailure = "QEMU was not paused before QMP identity verification (status=$($qmpIdentity.Status))."
+                        $script:StartupFailureStage = 'paused-state-verification'
+                        $script:Execution.qmp.lastConnectionError = $script:StartupFailure
+                        Add-ExecutionEvent -Type 'qmp-paused-state-rejected' -Data @{endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;observedStatus=$qmpIdentity.Status;stateChangingCommandSent=$false}
+                        try { Invoke-QacOwnedChildStartupCleanup -Reason $script:StartupFailure -Stage $script:StartupFailureStage }
+                        catch {
+                            Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
+                            $script:Execution.recoveryRequired = $true
+                            Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$script:StartupFailure;stage=$script:StartupFailureStage}
+                            throw
+                        }
+                        break
+                    }
                     $script:Execution.qmp.greeting = $script:QmpClient.Greeting
                     $script:Execution.qmp.identity = $qmpIdentity
                     $script:Execution.qmp.status = 'identity-verified-paused'
-                    Add-ExecutionEvent -Type 'qmp-identity-verified' -Data @{endpoint=$script:Execution.qmp.endpoint;greeting=$script:QmpClient.Greeting.QMP;instanceName=$qmpIdentity.Name;status=$qmpIdentity.Status;childProcessId=$script:Execution.childProcessId;reservationId=$script:Execution.reservationId}
+                    $script:Execution.qmp.endpointReady = $true
+                    $script:Execution.qmp.protocolReadiness = 'greeting-capabilities-instance-name-and-paused-status-verified'
+                    Add-ExecutionEvent -Type 'qmp-identity-verified' -Data @{endpoint=$script:Execution.qmp.endpoint;greeting=$script:QmpClient.Greeting.QMP;instanceName=$qmpIdentity.Name;status=$qmpIdentity.Status;childProcessId=$script:Execution.childProcessId;reservationId=$script:Execution.reservationId;protocolReadiness=$script:Execution.qmp.protocolReadiness}
                     if ($script:QacProcess.HasExited) { throw 'QAC owner process exited before continuation; no state-changing command was sent.' }
                     $reservationBeforeContinuation = Get-QacInspectRecord -ReservationId $script:Execution.reservationId
                     if (-not (Test-QacS22R10ReservationIdentity -Reservation $reservationBeforeContinuation -ExpectedReservationId ([string]$script:Execution.reservationId) -ExpectedProject 'guideXOSServer' -ExpectedMode 'acceptance' -ExpectedState 'Running' -ExpectedChildProcessId ([int]$script:Execution.childProcessId))) {
                         throw 'QAC reservation or child ownership changed before continuation; no state-changing command was sent.'
                     }
                     $listenerBeforeContinuation = Test-QacChildAndListener -ProcessId $script:Execution.childProcessId -ParentId $script:QacProcess.Id -QemuPath $qemu -StartUtc $startUtc -Port $port
-                    if (-not $listenerBeforeContinuation.Owned) { throw "QMP listener ownership changed before continuation (state=$($listenerBeforeContinuation.State), listeners=$($listenerBeforeContinuation.ListenerCount)); no state-changing command was sent." }
+                    Add-QmpListenerProbe -Observation $listenerBeforeContinuation -Stage 'immediately-before-continuation' -Port $port
+                    if (-not $listenerBeforeContinuation.Owned) {
+                        $script:StartupFailure = "QMP listener ownership changed before continuation (state=$($listenerBeforeContinuation.State), listeners=$($listenerBeforeContinuation.ListenerCount))."
+                        $script:StartupFailureStage = 'ownership-changed-before-continuation'
+                        Add-ExecutionEvent -Type 'qmp-listener-ownership-changed' -Data @{stage=$script:StartupFailureStage;endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;readinessState=$listenerBeforeContinuation.State;observedMatchingEndpointCount=$listenerBeforeContinuation.ListenerCount;stateChangingCommandSent=$false}
+                        try { Invoke-QacOwnedChildStartupCleanup -Reason $script:StartupFailure -Stage $script:StartupFailureStage }
+                        catch {
+                            Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
+                            $script:Execution.recoveryRequired = $true
+                            Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$script:StartupFailure;stage=$script:StartupFailureStage}
+                            throw
+                        }
+                        break
+                    }
+                    $continuationAuthorized = Test-QacS22R10ContinuationAuthorization -QacOwnerAlive (-not $script:QacProcess.HasExited) -ReservationValid $true -ListenerOwned ([bool]$listenerBeforeContinuation.Owned) -QmpNegotiated ($null -ne $script:QmpClient.Greeting -and $null -ne $qmpIdentity) -QmpStatus ([string]$qmpIdentity.Status)
+                    if (-not $continuationAuthorized) { throw 'QMP continuation authorization gate failed; no state-changing command was sent.' }
                     Add-ExecutionEvent -Type 'qmp-continuation-authorized' -Data @{endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId}
+                    Add-ExecutionEvent -Type 'qmp-cont-issued' -Data @{endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;monotonicElapsedMilliseconds=$script:QmpStartupStopwatch.Elapsed.TotalMilliseconds}
                     [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'cont')
                     $continued = Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'query-status'
                     if (-not $continued.running) { throw 'QEMU did not enter its running state after the verified QMP cont request.' }
@@ -644,15 +897,22 @@ try {
                     Write-Host "QAC accepted run $($manifest.runId): reservation $($script:Execution.reservationId), QEMU PID $($script:Execution.childProcessId), QMP $($script:Execution.qmp.endpoint)."
                     Write-Host "QEMU is running from the private ESP. QMP screenshots and keys can be sent from this prompt; type help for commands."
                 }
-                if (-not $qmpVerified -and -not $script:QacProcess.HasExited) {
+                if (-not $qmpVerified -and -not $script:QacProcess.HasExited -and -not $script:StartupFailure) {
                     $script:Execution.qmp.status = 'startup-timeout-or-unowned'
                     $script:Execution.qmp.ownership = 'unverified'
-                    Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
                     $lastState = if ($null -ne $lastListenerObservation) { [string]$lastListenerObservation.State } else { 'no-probe-result' }
                     $lastCount = if ($null -ne $lastListenerObservation) { [int]$lastListenerObservation.ListenerCount } else { 0 }
-                    Add-ExecutionEvent -Type 'qmp-listener-startup-deadline' -Data @{endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;startupTimeoutSeconds=$QmpStartupTimeoutSeconds;probeCount=$listenerProbeCount;lastObservedState=$lastState;lastListenerCount=$lastCount}
-                    Set-ExecutionState -State 'RecoveryRequired' -Data @{reason='QMP listener was not proven to belong to the QAC child before startup deadline';endpoint=$script:Execution.qmp.endpoint;lastObservedState=$lastState;probeCount=$listenerProbeCount}
-                    throw 'QMP ownership could not be established; QEMU remains under QAC supervision and the workspace is retained.'
+                    $script:StartupFailure = 'QMP listener was not proven to belong to the QAC child before startup deadline.'
+                    $script:StartupFailureStage = 'listener-startup-deadline'
+                    Add-ExecutionEvent -Type 'qmp-listener-startup-deadline' -Data @{endpoint=$script:Execution.qmp.endpoint;reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;startupTimeoutSeconds=$QmpStartupTimeoutSeconds;probeCount=$listenerProbeCount;elapsedMilliseconds=if($script:QmpStartupStopwatch){[Math]::Round($script:QmpStartupStopwatch.Elapsed.TotalMilliseconds,3)}else{$null};lastObservedState=$lastState;lastListenerCount=$lastCount;discoveryQueryStatus=if($lastListenerObservation){$lastListenerObservation.DiscoveryQueryStatus}else{$null};queryError=if($lastListenerObservation){$lastListenerObservation.QueryError}else{$null};lastConnectionError=$script:Execution.qmp.lastConnectionError}
+                    try { Invoke-QacOwnedChildStartupCleanup -Reason $script:StartupFailure -Stage $script:StartupFailureStage }
+                    catch {
+                        Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
+                        $script:Execution.recoveryRequired = $true
+                        Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$_.Exception.Message;firstFailure=$script:StartupFailure;stage=$script:StartupFailureStage;lastObservedState=$lastState;probeCount=$listenerProbeCount}
+                        throw
+                    }
+                    break
                 }
             }
             if ($script:Execution.childProcessId -eq 0) {
@@ -779,7 +1039,7 @@ try {
             $attempt.childProcessId = $script:Execution.childProcessId
             continue
         }
-        if (-not $qmpVerified -and $script:Execution.childProcessId -gt 0) { throw 'QEMU exited before an owned QMP endpoint was established.' }
+        if (-not $qmpVerified -and $script:Execution.childProcessId -gt 0 -and -not $script:StartupFailure) { throw 'QEMU exited before an owned QMP endpoint was established.' }
         break
     }
 
@@ -791,7 +1051,13 @@ try {
             $script:Execution.guestResultReason = [string]$script:Execution.guestAssessment.Reason
         }
         if ($script:Execution.guestResult -eq 'FAIL' -and -not $script:Execution.timings.guestCompletionOrFailureAtUtc) { $script:Execution.timings.guestCompletionOrFailureAtUtc = [DateTimeOffset]::UtcNow.ToString('O') }
-        Set-ExecutionState -State 'Completed' -Data @{integrationLifecycle='released';guestResult=$script:Execution.guestResult}
+        if ($script:StartupFailure) {
+            $script:Execution.guestResult = 'INCOMPLETE'
+            $script:Execution.guestResultReason = [string]$script:StartupFailure
+            Set-ExecutionState -State 'FailedWithRetainedEvidence' -Data @{integrationLifecycle='released-after-startup-failure';guestResult=$script:Execution.guestResult;stage=$script:StartupFailureStage;reason=$script:StartupFailure}
+        } else {
+            Set-ExecutionState -State 'Completed' -Data @{integrationLifecycle='released';guestResult=$script:Execution.guestResult}
+        }
     } elseif ($script:Execution.cancelledBeforeLaunch) {
         Set-ExecutionState -State 'FailedWithRetainedEvidence' -Data @{reason='QAC reservation was cancelled while queued; no QEMU child launched.'}
     } elseif ($script:Execution.state -notin @('RecoveryRequired')) {
@@ -811,7 +1077,7 @@ try {
     $script:Execution.timings.qacReleaseVerifiedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     $script:Execution.completedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     Write-ExecutionRecord
-    if ($script:Execution.reservationReleaseVerified) {
+    if ($script:Execution.reservationReleaseVerified -and -not $script:StartupFailure) {
         Set-ExecutionState -State 'Completed' -Data @{integrationLifecycle='verified';guestResult=$script:Execution.guestResult;guestResultReason=$script:Execution.guestResultReason}
     }
     Write-Host "Run workspace: $($script:Validated.Workspace)"
@@ -819,7 +1085,7 @@ try {
     Write-Host "QAC reservation: $($script:Execution.reservationId); QEMU child: $($script:Execution.childProcessId); exit: $($script:Execution.qemuExitCode); release verified: $($script:Execution.reservationReleaseVerified)."
     Write-Host "Workspace retained. Guarded cleanup eligibility: $($script:Execution.cleanupEligible)."
     if ($script:Execution.cancelledBeforeLaunch) { exit 130 }
-    if (-not $script:Execution.reservationReleaseVerified -or $script:Execution.recoveryRequired) { exit 1 }
+    if ($script:StartupFailure -or -not $script:Execution.reservationReleaseVerified -or $script:Execution.recoveryRequired) { exit 1 }
     exit 0
 } catch {
     $message = $_.Exception.Message
