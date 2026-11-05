@@ -196,7 +196,7 @@ if ($isGcInitFailureAttribution) {
         if (-not [bool]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttribution -or
             [string]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationMarker -cne 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' -or
             [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttemptCapacity -ne 8 -or
-            [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationBackendCapacity -ne 9 -or
+            [int]$candidateManifest.nativeAllocationBackendCapacity -ne 9 -or
             [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttemptFieldCount -ne 25 -or
             [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationSummaryFieldCount -ne 9 -or
             [string]$nativeBranchMap.marker -cne 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' -or
@@ -224,6 +224,7 @@ if ($isGcInitFailureAttribution) {
             [void](Require-Hash $safeStageMapPath ([string]$candidateManifest.artifactHashes.safeHandoffStageMap) 'Safe-handoff stage map')
             [void](Require-Hash ([string]$candidateManifest.safeHandoffRunner) ([string]$candidateManifest.artifactHashes.safeHandoffRunner) 'Safe-handoff QAC runner')
             [void](Require-Hash $safeHostedResultsPath ([string]$candidateManifest.artifactHashes.safeHandoffHostedTestResults) 'Safe-handoff hosted-test result')
+            $safeStageMap = Get-Content -LiteralPath $safeStageMapPath -Raw | ConvertFrom-Json -ErrorAction Stop
             $safeHostedResults = Get-Content -LiteralPath $safeHostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
             if ([string]$candidateManifest.result -cne 'SAFE_HANDOFF_HOSTED_READY' -or
                 -not [bool]$candidateManifest.c188R12R4R5R2R2R4SafeHandoff -or
