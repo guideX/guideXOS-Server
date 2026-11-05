@@ -64,7 +64,7 @@ if ($runtimeInvocations.Count -eq 0) {
             }
         }
         $backend = @()
-        if ($backendCount -ne [uint32]::MaxValue -and $backendCount -le 8) {
+        if ($backendCount -ne [uint32]::MaxValue -and $backendCount -le 9) {
             for ($index=0; $index -lt $backendCount; $index++) {
                 $fields = @{}
                 for ($field=0; $field -lt 34; $field++) {
@@ -75,7 +75,7 @@ if ($runtimeInvocations.Count -eq 0) {
         }
 
         $backendRecordComplete = ($backendCount -ne [uint32]::MaxValue -and
-            $backendCount -le 8 -and $backendOverflow -eq 0 -and
+            $backendCount -le 9 -and $backendOverflow -eq 0 -and
             $backend.Count -eq $backendCount)
         $backendFailureIndexes = @()
         for ($backendIndex=0; $backendIndex -lt $backend.Count; $backendIndex++) {

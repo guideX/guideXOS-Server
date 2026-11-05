@@ -548,6 +548,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         ,
         GUIDEXOS_NATIVEAOT_GC_FIRST_ALLOCATION_GET_RH_INITIALIZE_RAW_RESULT_ADDRESS
 #endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+        ,
+        GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF_PREPARE_ADDRESS
+#endif
 #endif
     );
     while (1) {

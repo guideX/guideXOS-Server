@@ -33,6 +33,7 @@ param(
     [switch]$C188R12R4R5R4R5GcInitProbes,
     [switch]$C188R12R4R5R4R5R2SemiSharedAttribution,
     [switch]$C188R12R4R5R4R5R2R2NativeAllocationAttribution,
+    [switch]$C188R12R4R5R2R2R4SafeHandoff,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -257,6 +258,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5R4R5GcInitProbes) { $runtimePackBuildArguments += "-C188R12R4R5R4R5GcInitProbes" }
     if ($C188R12R4R5R4R5R2SemiSharedAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R4R5R2SemiSharedAttribution" }
     if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R4R5R2R2NativeAllocationAttribution" }
+    if ($C188R12R4R5R2R2R4SafeHandoff) { $runtimePackBuildArguments += "-C188R12R4R5R2R2R4SafeHandoff" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
@@ -318,6 +320,17 @@ if ($UseGuideXosRuntimePack) {
          [int]$runtimePackManifestObject.c188r12r4r5r4r5r2r2NativeAllocationAttemptFieldCount -ne 25 -or
          [int]$runtimePackManifestObject.c188r12r4r5r4r5r2r2NativeAllocationSummaryFieldCount -ne 9)) {
         throw 'C188R12R4R5R4R5R2R2 requires the bounded native allocation attribution runtime pack.'
+    }
+    if ($C188R12R4R5R2R2R4SafeHandoff -and
+        (-not $C188R12R4R5R4R5R2R2NativeAllocationAttribution -or
+         -not [bool]$runtimePackManifestObject.c188r12r4r5r2r2r4SafeHandoff -or
+         [string]$runtimePackManifestObject.c188r12r4r5r2r2r4SafeHandoffMarker -cne 'C188R12R4R5R2R2R4_SAFE_HANDOFF' -or
+         [string]$runtimePackManifestObject.c188r12r4r5r2r2r4SafeHandoffTransition -cne 'disabled before RhpReversePInvoke and InitializeModules')) {
+        throw 'C188 safe handoff requires the explicitly marked diagnostic runtime pack with managed transition disabled.'
+    }
+    if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution -and
+        [int]$runtimePackManifestObject.c188r12r4r5r4r5r2r2NativeAllocationBackendCapacity -ne 9) {
+        throw 'C188R12R4R5R2R2 backend record capacity does not match the observed nine startup operations.'
     }
     $runtimePackObject = [string]$runtimePackManifestObject.object
     if ([string]::IsNullOrWhiteSpace($runtimePackObject) -or -not (Test-Path -LiteralPath $runtimePackObject)) {
@@ -773,7 +786,7 @@ try {
         $gcAllocationProbeCompileBlock = @(
             "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $gcProbeDefines $gcProbeIncludes /Fo:`"$gcAllocationProbeObj`" `"$gcAllocationProbeSource`"",
             'if errorlevel 1 exit /b %errorlevel%',
-            "cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' }) $(if ($C188R12R4R5R4ThreadStoreReadiness) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }) $(if ($C188R12R4R5R4R5GcInitProbes) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES' }) $(if ($C188R12R4R5R4R5R2SemiSharedAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED' }) $(if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcOwnershipStartupAdapterObj`" `"$gcOwnershipStartupAdapterSource`"",
+            "cl.exe /nologo /std:c++17 /TP /c /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' }) $(if ($C188R12R4R5R4ThreadStoreReadiness) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }) $(if ($C188R12R4R5R4R5GcInitProbes) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES' }) $(if ($C188R12R4R5R4R5R2SemiSharedAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED' }) $(if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC' }) $(if ($C188R12R4R5R2R2R4SafeHandoff) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcOwnershipStartupAdapterObj`" `"$gcOwnershipStartupAdapterSource`"",
             'if errorlevel 1 exit /b %errorlevel%'
         ) -join [Environment]::NewLine
         $publishProperties += "-p:HostLogProofRuntimePackProbeObj=$gcAllocationProbeObj"

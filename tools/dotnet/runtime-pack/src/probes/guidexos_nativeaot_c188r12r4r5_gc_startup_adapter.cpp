@@ -34,15 +34,39 @@ constexpr uint32_t kInitTraceCapacity = 64u;
 struct InitTraceRecord {
     uint32_t invocation;
     uint32_t stage;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    uint32_t eventCounts[4];
+    uint32_t lastEvent;
+    uint32_t lastResult;
+    uint32_t lastSingletonBits;
+#else
     uint32_t event;
     uint32_t result;
     uint32_t singletonBits;
+#endif
 };
 InitTraceRecord g_initTrace[kInitTraceCapacity] = {};
 uint32_t g_initTraceCount = 0u;
 uint32_t g_initTraceOverflow = 0u;
 uint32_t g_initInvocation = 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+uint32_t g_initTraceEventCount = 0u;
+uint32_t g_initTraceCoalescedEventCount = 0u;
+uint32_t g_initTraceFirstFailureStage = 0xFFFFFFFFu;
+uint32_t g_initTraceFirstFailureResult = 0xFFFFFFFFu;
+uint32_t g_initTraceFirstFailureSingletonBits = 0xFFFFFFFFu;
+#endif
 guidexos_nativeaot_init_trace_sink g_initTraceSink = nullptr;
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+void incrementSaturating(uint32_t* value) {
+    if (*value == 0xFFFFFFFFu) {
+        if (g_initTraceOverflow != 0xFFFFFFFFu) ++g_initTraceOverflow;
+        return;
+    }
+    ++(*value);
+}
+#endif
 
 uint32_t captureInitSingletonBits() {
     return GuideXosNativeAotCaptureInitSingletonBits();
@@ -130,6 +154,16 @@ extern "C" void __cdecl guideXosNativeAotInitTraceSetInvocation(uint32_t invocat
     g_initInvocation = invocation;
     g_initTraceCount = 0u;
     g_initTraceOverflow = 0u;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    g_initTraceEventCount = 0u;
+    g_initTraceCoalescedEventCount = 0u;
+    g_initTraceFirstFailureStage = 0xFFFFFFFFu;
+    g_initTraceFirstFailureResult = 0xFFFFFFFFu;
+    g_initTraceFirstFailureSingletonBits = 0xFFFFFFFFu;
+    for (uint32_t index = 0u; index < kInitTraceCapacity; ++index) {
+        g_initTrace[index] = InitTraceRecord{};
+    }
+#endif
 }
 
 extern "C" __declspec(dllexport) void __cdecl guideXosNativeAotInitTraceSetSink(
@@ -139,6 +173,46 @@ extern "C" __declspec(dllexport) void __cdecl guideXosNativeAotInitTraceSetSink(
 
 extern "C" void __cdecl guideXosNativeAotInitTraceRecord(
     uint32_t stage, uint32_t event, uint32_t result, uint32_t singletonBits) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    incrementSaturating(&g_initTraceEventCount);
+    const uint32_t capturedSingletonBits = singletonBits == 0xFFFFFFFFu
+        ? captureInitSingletonBits() : singletonBits;
+    if (event == GX_INIT_EVENT_FAIL && g_initTraceFirstFailureStage == 0xFFFFFFFFu) {
+        g_initTraceFirstFailureStage = stage;
+        g_initTraceFirstFailureResult = result;
+        g_initTraceFirstFailureSingletonBits = capturedSingletonBits;
+    }
+
+    uint32_t index = 0u;
+    while (index < g_initTraceCount && g_initTrace[index].stage != stage) ++index;
+    if (index == g_initTraceCount) {
+        if (g_initTraceCount >= kInitTraceCapacity) {
+            incrementSaturating(&g_initTraceOverflow);
+            return;
+        }
+        ++g_initTraceCount;
+        InitTraceRecord& fresh = g_initTrace[index];
+        fresh = InitTraceRecord{};
+        fresh.invocation = g_initInvocation;
+        fresh.stage = stage;
+    } else {
+        incrementSaturating(&g_initTraceCoalescedEventCount);
+    }
+
+    InitTraceRecord& record = g_initTrace[index];
+    uint32_t counterIndex = event == GX_INIT_EVENT_BEGIN ? 0u :
+        event == GX_INIT_EVENT_PASS ? 1u :
+        event == GX_INIT_EVENT_FAIL ? 2u :
+        event == GX_INIT_EVENT_OBSERVE ? 3u : 4u;
+    if (counterIndex >= 4u || record.eventCounts[counterIndex] >= 0x7Fu) {
+        incrementSaturating(&g_initTraceOverflow);
+    } else {
+        ++record.eventCounts[counterIndex];
+    }
+    record.lastEvent = event;
+    record.lastResult = result;
+    record.lastSingletonBits = capturedSingletonBits;
+#else
     const uint32_t index = g_initTraceCount;
     if (index >= kInitTraceCapacity) {
         ++g_initTraceOverflow;
@@ -156,7 +230,36 @@ extern "C" void __cdecl guideXosNativeAotInitTraceRecord(
         g_initTraceSink(record.invocation, record.stage, record.event,
                         record.result, record.singletonBits);
     }
+#endif
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+extern "C" __declspec(dllexport) void __cdecl
+GuideXosNativeAotInitTraceEmitSummary(void) {
+    if (g_initTraceSink == nullptr) return;
+    for (uint32_t index = 0u; index < g_initTraceCount; ++index) {
+        const InitTraceRecord& record = g_initTrace[index];
+        const uint32_t packedSummaryEvent = GX_INIT_EVENT_SUMMARY_COUNTS |
+            ((record.lastEvent & 0x7u) << 28) |
+            (record.eventCounts[0] & 0x7Fu) |
+            ((record.eventCounts[1] & 0x7Fu) << 7) |
+            ((record.eventCounts[2] & 0x7Fu) << 14) |
+            ((record.eventCounts[3] & 0x7Fu) << 21);
+        g_initTraceSink(record.invocation, record.stage,
+            packedSummaryEvent, record.lastResult,
+            record.lastSingletonBits);
+    }
+    if (g_initTraceFirstFailureStage != 0xFFFFFFFFu) {
+        g_initTraceSink(g_initInvocation, g_initTraceFirstFailureStage,
+            GX_INIT_EVENT_SUMMARY_FIRST_FAILURE,
+            g_initTraceFirstFailureResult,
+            g_initTraceFirstFailureSingletonBits);
+    }
+    g_initTraceSink(g_initInvocation, 0xFFFFFFFFu,
+        GX_INIT_EVENT_SUMMARY_TOTALS, g_initTraceEventCount,
+        g_initTraceCoalescedEventCount);
+}
+#endif
 
 extern "C" __declspec(dllexport) uint32_t __cdecl
 GuideXosNativeAotInitTraceGetCount(void) { return g_initTraceCount; }
@@ -172,15 +275,32 @@ GuideXosNativeAotInitTraceGetStage(uint32_t index) {
 }
 extern "C" __declspec(dllexport) uint32_t __cdecl
 GuideXosNativeAotInitTraceGetEvent(uint32_t index) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    if (index >= g_initTraceCount) return 0xFFFFFFFFu;
+    const InitTraceRecord& record = g_initTrace[index];
+    return (record.eventCounts[0] & 0x7Fu) |
+        ((record.eventCounts[1] & 0x7Fu) << 7) |
+        ((record.eventCounts[2] & 0x7Fu) << 14) |
+        ((record.eventCounts[3] & 0x7Fu) << 21);
+#else
     return index < g_initTraceCount ? g_initTrace[index].event : 0xFFFFFFFFu;
+#endif
 }
 extern "C" __declspec(dllexport) uint32_t __cdecl
 GuideXosNativeAotInitTraceGetResult(uint32_t index) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    return index < g_initTraceCount ? g_initTrace[index].lastResult : 0xFFFFFFFFu;
+#else
     return index < g_initTraceCount ? g_initTrace[index].result : 0xFFFFFFFFu;
+#endif
 }
 extern "C" __declspec(dllexport) uint32_t __cdecl
 GuideXosNativeAotInitTraceGetSingletonBits(uint32_t index) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    return index < g_initTraceCount ? g_initTrace[index].lastSingletonBits : 0xFFFFFFFFu;
+#else
     return index < g_initTraceCount ? g_initTrace[index].singletonBits : 0xFFFFFFFFu;
+#endif
 }
 #endif
 

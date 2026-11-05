@@ -32758,7 +32758,11 @@ void persistentSerialPutHex64(uintptr_t value) {
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+void initializeNativeAotModules(bool registrationOnly = false) {
+#else
 void initializeNativeAotModules() {
+#endif
     if (g_guideXosNativeAotModulesInitialized) {
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
         guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_MODULE_REGISTRATION,
@@ -32870,6 +32874,13 @@ void initializeNativeAotModules() {
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
     guideXosNativeAotInitTraceReturn(
         GX_INIT_STAGE_CODE_MANAGER_REGISTRATION, true);
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    // Stop only in the explicitly selected diagnostic profile, after actual
+    // module registration and before the runtime's module initialization.
+    if (registrationOnly) return;
+#endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
     guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_MODULE_INITIALIZE);
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_SINGLE_THREAD_SUSPEND_EE_ALLOCATION)
@@ -32974,7 +32985,11 @@ void markAllocationOutOfMemory(unsigned char* cell, gx_uintptr allocationPointer
 
 #endif
 
-void initializeRuntimeState(unsigned char* block) {
+void initializeRuntimeState(unsigned char* block
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+                            , bool registrationOnly = false
+#endif
+                            ) {
     if (block == nullptr) {
         guideXosFailFast(1u);
     }
@@ -33176,7 +33191,11 @@ void initializeRuntimeState(unsigned char* block) {
     // metadata rehydration, TypeManager/module publication, GC static-base
     // initialization, and eager constructors; do not pre- or post-populate a
     // substitute descriptor here.
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    initializeNativeAotModules(registrationOnly);
+#else
     initializeNativeAotModules();
+#endif
 #endif
 #if defined(GUIDEXOS_NATIVEAOT_THREAD_STATIC_PROOF) && !defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
     // The disposable direct ELF launcher constructs the current NativeAOT
@@ -33190,6 +33209,39 @@ void initializeRuntimeState(unsigned char* block) {
 }
 
 } // namespace
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+#if !defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#error C188 safe handoff requires the complete allocating R2R2 diagnostic profile.
+#endif
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotC188R12R4R5R2R2R4SafeHandoffPrepare(void) {
+    unsigned char* block = currentTlsBlock();
+    if (block == nullptr || _tls_index == kFlsOutOfIndexes) {
+        GuideXosNativeAotInitTraceEmitSummary();
+        return 1u;
+    }
+    if (g_guideXosNativeAotModulesInitialized) {
+        GuideXosNativeAotInitTraceEmitSummary();
+        return 2u;
+    }
+
+    // This is the same native TLS/FLS initialization and RhRegisterOSModule
+    // preamble used at the start of RhpReversePInvoke. The opt-in caller stops
+    // here, before InitializeModules or the stock reverse transition.
+    initializeRuntimeState(block, true);
+    const uint32_t status = g_guideXosNativeAotCodeManagerRegistered &&
+        !g_guideXosNativeAotModulesInitialized ? 0u : 3u;
+    GuideXosNativeAotInitTraceEmitSummary();
+    return status;
+}
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)
 extern "C" __declspec(dllexport) int __cdecl

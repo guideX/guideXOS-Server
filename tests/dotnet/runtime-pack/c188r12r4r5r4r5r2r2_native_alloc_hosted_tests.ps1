@@ -119,7 +119,8 @@ $analyzer = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2-native-a
 $guestRunner = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1'
 if (-not (Test-Path -LiteralPath $guestRunner -PathType Leaf)) { throw "Native allocation QAC runner is missing: $guestRunner" }
 $guestRunnerText = Get-Content -LiteralPath $guestRunner -Raw
-if ($guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''NativeAllocationFailureAttribution''' -or
+if (($guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[string\]\$candidateManifest\.mode\s+-ceq\s+''NativeAllocationFailureAttribution''' -and
+     $guestRunnerText -notmatch '\$isNativeAllocationFailureAttribution\s*=\s*\[string\]\$candidateManifest\.mode\s+-in\s+@\(''NativeAllocationFailureAttribution'',''NativeAotSafeHandoff''\)') -or
     -not $guestRunnerText.Contains("[ValidateSet('R2R2R1','R2R2R2','R2R2R3','R2R2R4')][string]`$NativeAllocationGuestAttempt = 'R2R2R1'") -or
     -not $guestRunnerText.Contains('qac-guest-r2r2r2-001') -or
     -not $guestRunnerText.Contains('qac-guest-r2r2r3-001') -or

@@ -138,7 +138,9 @@ enum : uint32_t {
     GX_NATIVE_ALLOC_RECORD_MAGIC = 0x4E413232u,
     GX_NATIVE_ALLOC_RECORD_VERSION = 1u,
     GX_NATIVE_ALLOC_ATTEMPT_CAPACITY = 8u,
-    GX_NATIVE_ALLOC_BACKEND_CAPACITY = 8u,
+    // The accepted startup trace attempted nine backend operations. Keep the
+    // separate native backend record at that observed fixed bound.
+    GX_NATIVE_ALLOC_BACKEND_CAPACITY = 9u,
     GX_NATIVE_ALLOC_VALUE_UNAVAILABLE = 0xFFFFFFFFu,
     GX_NATIVE_ALLOC_PAL_STATE_UNKNOWN = 0u,
     GX_NATIVE_ALLOC_PAL_STATE_NOT_READY = 1u,

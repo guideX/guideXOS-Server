@@ -34,15 +34,16 @@ $isInitAttribution = [string]$candidateManifest.mode -ceq 'InitAttribution'
 $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract'
 $isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
 $isSemiSharedAttribution = [string]$candidateManifest.mode -ceq 'SemiSharedAttribution'
-$isNativeAllocationFailureAttribution = [string]$candidateManifest.mode -ceq 'NativeAllocationFailureAttribution'
-$isGcInitFailureAttribution = [string]$candidateManifest.mode -in @('GcInitFailureAttribution','SemiSharedAttribution','NativeAllocationFailureAttribution')
+$isSafeHandoff = [string]$candidateManifest.mode -ceq 'NativeAotSafeHandoff'
+$isNativeAllocationFailureAttribution = [string]$candidateManifest.mode -in @('NativeAllocationFailureAttribution','NativeAotSafeHandoff')
+$isGcInitFailureAttribution = [string]$candidateManifest.mode -in @('GcInitFailureAttribution','SemiSharedAttribution','NativeAllocationFailureAttribution','NativeAotSafeHandoff')
 if ($ThreadStoreAttempt -in @('R2','R3') -and -not $isThreadStoreReadiness) {
     throw "ThreadStoreAttempt $ThreadStoreAttempt is valid only for the C188 R4 ThreadStore candidate."
 }
 if ($NativeAllocationGuestAttempt -cne 'R2R2R1' -and -not $isNativeAllocationFailureAttribution) {
     throw 'NativeAllocationGuestAttempt is valid only for the C188 R2R2 native-allocation candidate.'
 }
-$isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness -or $isGcInitFailureAttribution
+$isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness -or $isGcInitFailureAttribution -or $isSafeHandoff
 $r4RuntimePackManifest = $null
 $r4PalCommonMembership = $null
 if ($isThreadStoreReadiness) {
@@ -53,7 +54,9 @@ if ($isThreadStoreReadiness) {
     $r4RuntimePackManifest = Get-Content -LiteralPath $r4RuntimePackManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r4PalCommonMembership = $r4RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
 }
-$phaseRoot = if ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') {
+$phaseRoot = if ($isSafeHandoff) {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff'))
+} elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4-pal-capacity-fix'))
 } elseif ($isNativeAllocationFailureAttribution) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution'))
@@ -98,10 +101,13 @@ if ($isGcInitFailureAttribution) {
     $r5StageManifest = Get-Content -LiteralPath $r5StageManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r5PatchedGcWksEntry = @($r5StageManifest.files | Where-Object { [string]$_.path -ceq 'diagnostic/runtime-pack/gcwks.cpp' })
     if ($r5PatchedGcWksEntry.Count -ne 1) { throw 'R4R5 staged inventory has no unique instrumented Workstation GC source entry.' }
-    $expectedGcCandidateResult = if ($isNativeAllocationFailureAttribution) { 'NATIVE_ALLOC_PROBES_HOSTED_READY' }
+    $expectedGcCandidateResult = if ($isSafeHandoff) { 'SAFE_HANDOFF_HOSTED_READY' }
+        elseif ($isNativeAllocationFailureAttribution) { 'NATIVE_ALLOC_PROBES_HOSTED_READY' }
         elseif ($isSemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' }
         else { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' }
-    $expectedRuntimePackIdentity = if ($isNativeAllocationFailureAttribution) {
+    $expectedRuntimePackIdentity = if ($isSafeHandoff) {
+        'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r2r4-safe-handoff-v1'
+    } elseif ($isNativeAllocationFailureAttribution -and -not $isSafeHandoff) {
         'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2r2-native-allocation-v1'
     } elseif ($isSemiSharedAttribution) {
         'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r4r5r2-semishared-v1'
@@ -190,6 +196,7 @@ if ($isGcInitFailureAttribution) {
         if (-not [bool]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttribution -or
             [string]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationMarker -cne 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' -or
             [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttemptCapacity -ne 8 -or
+            [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationBackendCapacity -ne 9 -or
             [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationAttemptFieldCount -ne 25 -or
             [int]$candidateManifest.c188R12R4R5R4R5R2R2NativeAllocationSummaryFieldCount -ne 9 -or
             [string]$nativeBranchMap.marker -cne 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' -or
@@ -204,8 +211,32 @@ if ($isGcInitFailureAttribution) {
             [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackR2SemiSharedProfile -or
             -not [bool]$candidateManifest.productionIsolationChecks.diagnosticInstrumentationAbsentFromProduction -or
             -not [bool]$candidateManifest.productionIsolationChecks.productionPersistentCompositeLifecycle -or
+            [bool]$candidateManifest.productionIsolationChecks.productionRuntimePackSafeHandoffProfile -or
+            -not [bool]$candidateManifest.productionIsolationChecks.productionMapExcludesSafeHandoff -or
             -not [bool]$candidateManifest.productionNativeAotPersistentCompositeLifecycle) {
             throw 'R2R2 candidate failed its native-allocation record, hosted synthetic-evidence, linked-probe, or production-isolation gate.'
+        }
+        if ($isSafeHandoff) {
+            $safeAnalyzerPath = [System.IO.Path]::GetFullPath([string]$candidateManifest.safeHandoffAnalyzer)
+            $safeStageMapPath = [System.IO.Path]::GetFullPath([string]$candidateManifest.safeHandoffStageMap)
+            $safeHostedResultsPath = [System.IO.Path]::GetFullPath([string]$candidateManifest.safeHandoffHostedTestResults)
+            [void](Require-Hash $safeAnalyzerPath ([string]$candidateManifest.artifactHashes.safeHandoffAnalyzer) 'Safe-handoff analyzer')
+            [void](Require-Hash $safeStageMapPath ([string]$candidateManifest.artifactHashes.safeHandoffStageMap) 'Safe-handoff stage map')
+            [void](Require-Hash ([string]$candidateManifest.safeHandoffRunner) ([string]$candidateManifest.artifactHashes.safeHandoffRunner) 'Safe-handoff QAC runner')
+            [void](Require-Hash $safeHostedResultsPath ([string]$candidateManifest.artifactHashes.safeHandoffHostedTestResults) 'Safe-handoff hosted-test result')
+            $safeHostedResults = Get-Content -LiteralPath $safeHostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ([string]$candidateManifest.result -cne 'SAFE_HANDOFF_HOSTED_READY' -or
+                -not [bool]$candidateManifest.c188R12R4R5R2R2R4SafeHandoff -or
+                [string]$candidateManifest.c188R12R4R5R2R2R4SafeHandoffMarker -cne 'C188R12R4R5R2R2R4_SAFE_HANDOFF' -or
+                [string]$candidateManifest.c188R12R4R5R2R2R4SafeHandoffTransition -cne 'disabled before RhpReversePInvoke and InitializeModules' -or
+                [int]$safeHostedResults.analyzerCaseCount -lt 13 -or
+                [int]$candidateManifest.nativeAllocationBackendCapacity -ne 9 -or
+                [string]$candidateManifest.initializationTraceStorageModel -notmatch '64 fixed stage slots.*one packed summary line per stage.*separate first-failure record' -or
+                [bool]$safeHostedResults.qemuLaunched -or [bool]$safeHostedResults.qacReserved -or
+                [string]$safeStageMap.schema -cne 'C188R12R4R5R2R2R4_SAFE_HANDOFF_STAGE_MAP_V1' -or
+                [bool]$safeStageMap.laterTransitionStagesEnabled) {
+                throw 'Safe-handoff candidate failed the one-boot stop boundary or hosted qualification preflight.'
+            }
         }
         $originalR2R1Serial = Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution\qac-guest-r4r5r2r1-001\serial.log'
         [void](Require-Hash $originalR2R1Serial '39402A5495C0DF35492C403B776EC9214A26D64D31B2D1CA558F196124905C5B' 'Archived R2R1 raw guest serial')
@@ -297,7 +328,7 @@ if ($isGcInitFailureAttribution) {
     throw 'Candidate manifest failed the one-guest isolation, arena, or pinned-runtime gate.'
 }
 
-if ($isNativeAllocationFailureAttribution) {
+if ($isNativeAllocationFailureAttribution -and -not $isSafeHandoff) {
     if ([string]::IsNullOrWhiteSpace($CandidateIntegrityInventory) -or
         -not (Test-Path -LiteralPath $CandidateIntegrityInventory -PathType Leaf)) {
         throw 'R2R2 guest admission requires the reviewed full candidate-integrity inventory.'
@@ -329,10 +360,21 @@ if ($isNativeAllocationFailureAttribution) {
     [void](Require-Hash $nativeManagedMapPath ([string]$candidateManifest.managedMapSha256) 'R2R2 NativeAOT linker map')
     [void](Require-Hash ([string]$candidateManifest.productionNativeAotManifest) ([string]$candidateManifest.artifactHashes.productionNativeAotQualification) 'R2R2 proof-disabled production qualification')
     [void](Require-Hash ([string]$candidateManifest.productionKernelManifest) ([string]$candidateManifest.artifactHashes.productionKernelQualification) 'R2R2 proof-disabled production kernel qualification')
+} elseif ($isSafeHandoff) {
+    [void](Require-Hash ([string]$candidateManifest.managedPe) ([string]$candidateManifest.managedPeSha256) 'Safe-handoff NativeAOT PE')
+    [void](Require-Hash ([string]$candidateManifest.managedElf) ([string]$candidateManifest.managedElfSha256) 'Safe-handoff diagnostic NativeAOT ELF')
+    [void](Require-Hash $nativeManagedMapPath ([string]$candidateManifest.managedMapSha256) 'Safe-handoff NativeAOT map')
+    [void](Require-Hash ([string]$candidateManifest.specializedKernel) ([string]$candidateManifest.specializedKernelSha256) 'Safe-handoff diagnostic kernel')
+    [void](Require-Hash (Join-Path $candidateManifest.esp 'kernel.elf') ([string]$candidateManifest.espKernelSha256) 'Safe-handoff staged kernel')
+    [void](Require-Hash (Join-Path $candidateManifest.esp 'ramdisk.img') ([string]$candidateManifest.candidateRamdiskSha256) 'Safe-handoff staged ramdisk')
+    [void](Require-Hash (Join-Path $repo 'ESP\ramdisk.img') ([string]$candidateManifest.sourceRamdiskSha256) 'Safe-handoff preserved source ramdisk')
+    [void](Require-Hash ([string]$candidateManifest.productionNativeAotManifest) ([string]$candidateManifest.artifactHashes.productionNativeAotQualification) 'Safe-handoff proof-disabled production qualification')
+    [void](Require-Hash ([string]$candidateManifest.productionKernelManifest) ([string]$candidateManifest.artifactHashes.productionKernelQualification) 'Safe-handoff proof-disabled production kernel qualification')
 }
 
 $esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$runDirectory = if ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') { 'qac-guest-r2r2r4-001' }
+$runDirectory = if ($isSafeHandoff) { 'qac-guest-r2r2r4r2r1-001' }
+    elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') { 'qac-guest-r2r2r4-001' }
     elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R3') { 'qac-guest-r2r2r3-001' }
     elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R2') { 'qac-guest-r2r2r2-001' }
     elseif ($isNativeAllocationFailureAttribution) { 'qac-guest-r2r2r1-001' }
@@ -341,14 +383,16 @@ $runDirectory = if ($isNativeAllocationFailureAttribution -and $NativeAllocation
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') { 'qac-guest-002' }
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R3') { 'qac-guest-003' }
     else { 'qac-guest-001' }
-$runRoot = if ($isGcInitFailureAttribution) { Join-Path $phaseRoot $runDirectory } else { Join-Path $candidate $runDirectory }
+$runRoot = if ($isGcInitFailureAttribution -or $isSafeHandoff) { Join-Path $phaseRoot $runDirectory } else { Join-Path $candidate $runDirectory }
 $serial = Join-Path $runRoot 'serial.log'
 $qmpLog = Join-Path $runRoot 'qmp.log'
 $qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
 $ovmf = Join-Path $repo 'OVMF.fd'
 $runnerScriptSha256 = Get-Sha256 $PSCommandPath
-$attemptPath = if ($isNativeAllocationFailureAttribution) {
+$attemptPath = if ($isSafeHandoff) {
+    Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R2R4R2R1.json'
+} elseif ($isNativeAllocationFailureAttribution) {
     Join-Path $phaseRoot "guest-launch-attempt-C188R12R4R5R4R5$NativeAllocationGuestAttempt.json"
 } elseif ($isSemiSharedAttribution) {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R1.json'
@@ -613,7 +657,7 @@ function Test-NativeAllocationTraceComplete([string]$Text) {
     if (-not $rows.ContainsKey($backendSummaryKey) -or -not $rows.ContainsKey($backendFirstFailureKey)) { return $false }
     $backendCount = [Convert]::ToUInt32($rows[$backendSummaryKey].value,16)
     $backendOverflow = [Convert]::ToUInt32($rows[$backendSummaryKey].auxiliary,16)
-    if ($backendCount -gt 8 -or $backendOverflow -ne 0) { return $false }
+    if ($backendCount -gt 9 -or $backendOverflow -ne 0) { return $false }
     for ($sequence = 0; $sequence -lt $backendCount; $sequence++) {
         for ($field = 0; $field -lt 34; $field++) {
             if (-not $rows.ContainsKey(('backend/{0}/{1:X8}/{2:X8}' -f $invocation,$sequence,$field))) { return $false }
@@ -892,7 +936,13 @@ try {
     $deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
     do {
         $serialText = Read-GuestSerial
-        if ($isNativeAllocationFailureAttribution) {
+        if ($isSafeHandoff) {
+            $guestPass = $serialText -match '(?m)^\[nativeaot-safe-handoff\] status=intentionally_stopped initialization=accepted moduleRegistration=accepted managedTransition=not_attempted managedEntry=not_reached runtimeError=none\s*$' -and
+                $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*overflow=00000000 serialDropped=00000000 adapterStatus=00000000\s*$' -and
+                $serialText -notmatch '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:module_initialize_enter|transition_enter|managed_dispatch|managed_entry)\s+' -and
+                $serialText -notmatch '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
+            $safeHandoffTerminal = $serialText -match '(?m)^\[nativeaot-safe-handoff\] (?:status=intentionally_stopped|diagnosticError=)'
+        } elseif ($isNativeAllocationFailureAttribution) {
             $guestPass = (Test-NativeAllocationTraceComplete $serialText) -and
                 $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*?(?:rhResult|adapterStatus)=(?:0x)?[0-9A-F]{8}\s*$' -and
                 $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
@@ -918,12 +968,19 @@ try {
         } else {
             $guestPass = $serialText -match '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=PASS callbacks=(?:0x)?00000003 result1=(?:0x)?00000000 result2=(?:0x)?00000000 result3=(?:0x)?00000000\s*$'
         }
-        if ($guestPass) { break }
+        if ($guestPass -or ($isSafeHandoff -and $safeHandoffTerminal)) { break }
         if ($qacProcess.HasExited) { break }
         Start-Sleep -Milliseconds 200
     } while ((Get-Date) -lt $deadline)
     $serialText = Read-GuestSerial
-    if ($isNativeAllocationFailureAttribution) {
+$safeHandoffTerminal = $false
+if ($isSafeHandoff) {
+        $guestPass = $serialText -match '(?m)^\[nativeaot-safe-handoff\] status=intentionally_stopped initialization=accepted moduleRegistration=accepted managedTransition=not_attempted managedEntry=not_reached runtimeError=none\s*$' -and
+            $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*overflow=00000000 serialDropped=00000000 adapterStatus=00000000\s*$' -and
+            $serialText -notmatch '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:module_initialize_enter|transition_enter|managed_dispatch|managed_entry)\s+' -and
+            $serialText -notmatch '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
+    $safeHandoffTerminal = $serialText -match '(?m)^\[nativeaot-safe-handoff\] (?:status=intentionally_stopped|diagnosticError=)'
+    } elseif ($isNativeAllocationFailureAttribution) {
         $guestPass = (Test-NativeAllocationTraceComplete $serialText) -and
             $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*?(?:rhResult|adapterStatus)=(?:0x)?[0-9A-F]{8}\s*$' -and
             $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] managed_main_gate=blocked\b'
@@ -1046,7 +1103,9 @@ try {
 
 $serialText = Read-GuestSerial
 $serialAnalysisPath = Join-Path $runRoot 'serial-analysis.json'
-$serialAnalyzer = if ($isThreadStoreReadiness) {
+$serialAnalyzer = if ($isSafeHandoff) {
+    Join-Path $PSScriptRoot 'analyze-c188r12r4r5r2r2r4-safe-handoff.ps1'
+} elseif ($isThreadStoreReadiness) {
     Join-Path $PSScriptRoot 'analyze-c188r12r4r5r4-threadstore-readiness.ps1'
 } else { Join-Path $PSScriptRoot 'analyze-c188r12r4r5r1-init-serial.ps1' }
 $serialSha256BeforeAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
@@ -1056,6 +1115,9 @@ $threadStoreAnalysis = $null
 $threadStoreAnalysisExitCode = $null
 $serialAnalysisError = $null
 $serialAnalysisExitCode = $null
+$gcInitSourceAnalysisPath = $null
+$gcInitSourceAnalysis = $null
+$gcInitSourceAnalysisExitCode = $null
 $semiSharedAnalysisPath = $null
 $semiSharedAnalysis = $null
 $semiSharedAnalysisExitCode = $null
@@ -1088,7 +1150,7 @@ if (Test-Path -LiteralPath $serial -PathType Leaf) {
     try {
         $analysisArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serialAnalyzer,
             '-SerialPath',$serial,'-OutputPath',$serialAnalysisPath)
-        if (-not $isThreadStoreReadiness -and ($runError -match 'timeout|did not exit|not exit' -or
+        if (-not $isThreadStoreReadiness -and -not $isSafeHandoff -and ($runError -match 'timeout|did not exit|not exit' -or
             ($null -ne $qacProcess -and -not $qacProcess.HasExited))) { $analysisArgs += '-GuestTimedOut' }
         & pwsh @analysisArgs | Out-Null
         $serialAnalysisExitCode = $LASTEXITCODE
@@ -1099,7 +1161,7 @@ if (Test-Path -LiteralPath $serial -PathType Leaf) {
         }
     } catch { $serialAnalysisError = $_.Exception.Message }
 } else { $serialAnalysisError = 'Raw serial file is missing.' }
-if ($isGcInitFailureAttribution -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
+if ($isGcInitFailureAttribution -and -not $isSafeHandoff -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
     $threadStoreAnalysisPath = Join-Path $runRoot 'serial-threadstore-analysis.json'
     try {
         & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'analyze-c188r12r4r5r4-threadstore-readiness.ps1') `
@@ -1112,6 +1174,21 @@ if ($isGcInitFailureAttribution -and (Test-Path -LiteralPath $serial -PathType L
         }
     } catch {
         if ($null -eq $serialAnalysisError) { $serialAnalysisError = 'ThreadStore analyzer: ' + $_.Exception.Message }
+    }
+}
+if ($isSafeHandoff -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
+    $gcInitSourceAnalysisPath = Join-Path $runRoot 'serial-gc-init-source-analysis.json'
+    try {
+        & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'analyze-c188r12r4r5r1-init-serial.ps1') `
+            -SerialPath $serial -OutputPath $gcInitSourceAnalysisPath | Out-Null
+        $gcInitSourceAnalysisExitCode = $LASTEXITCODE
+        if ($gcInitSourceAnalysisExitCode -eq 0 -and (Test-Path -LiteralPath $gcInitSourceAnalysisPath -PathType Leaf)) {
+            $gcInitSourceAnalysis = Get-Content -LiteralPath $gcInitSourceAnalysisPath -Raw | ConvertFrom-Json
+        } elseif ($null -eq $serialAnalysisError) {
+            $serialAnalysisError = "GC initialization source analyzer exited $gcInitSourceAnalysisExitCode."
+        }
+    } catch {
+        if ($null -eq $serialAnalysisError) { $serialAnalysisError = 'GC initialization source analyzer: ' + $_.Exception.Message }
     }
 }
 if (($isSemiSharedAttribution -or $isNativeAllocationFailureAttribution) -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
@@ -1150,8 +1227,32 @@ if ($isNativeAllocationFailureAttribution -and (Test-Path -LiteralPath $serial -
 $serialSha256AfterAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
 $rawSerialPreservedByAnalysis = $null -ne $serialSha256BeforeAnalysis -and
     $serialSha256BeforeAnalysis -ceq $serialSha256AfterAnalysis
-$initCaptureComplete = $null -ne $serialAnalysis -and -not $isThreadStoreReadiness -and [bool]$serialAnalysis.initTraceComplete
-if ($isGcInitFailureAttribution) {
+$initCaptureComplete = if ($isSafeHandoff) {
+    $null -ne $serialAnalysis -and [bool]$serialAnalysis.diagnosticEvidenceComplete
+} else {
+    $null -ne $serialAnalysis -and -not $isThreadStoreReadiness -and [bool]$serialAnalysis.initTraceComplete
+}
+if ($isSafeHandoff) {
+    $gcInternal = if ($null -ne $gcInitSourceAnalysis) { $gcInitSourceAnalysis.gcInitializationInternal } else { $null }
+    $gcInitRecordCaptureComplete = $null -ne $gcInternal -and [bool]$gcInternal.traceComplete -and
+        [int]$gcInternal.recordCount -eq 16 -and [int]$gcInternal.malformedMarkerCount -eq 0 -and
+        [string]$gcInternal.outcome -eq 'gc_heap_initialize_succeeded'
+    $semiSharedRecordCaptureComplete = $null -ne $semiSharedAnalysis -and
+        [string]$semiSharedAnalysis.outcome -eq 'init_semi_shared_succeeded' -and
+        @($semiSharedAnalysis.issues).Count -eq 0
+    $initializationAndRegistrationAccepted = $null -ne $serialAnalysis -and
+        [bool]$serialAnalysis.initializationAccepted -and [bool]$serialAnalysis.moduleRegistrationAccepted
+    $intentionalStopCaptured = $null -ne $serialAnalysis -and
+        [string]$serialAnalysis.result -eq 'SAFE_HANDOFF_INTENTIONALLY_STOPPED' -and
+        [bool]$serialAnalysis.managedTransitionIntentionallyNotAttempted -and
+        -not [bool]$serialAnalysis.managedTransitionAttempted -and
+        -not [bool]$serialAnalysis.managedEntryReached
+    $guestPass = $null -ne $serialAnalysis -and [bool]$serialAnalysis.diagnosticEvidenceComplete -and
+        $initializationAndRegistrationAccepted -and $intentionalStopCaptured -and
+        $gcInitRecordCaptureComplete -and $semiSharedRecordCaptureComplete -and
+        $nativeAllocationRecordCaptureComplete
+    $initCaptureComplete = $guestPass
+} elseif ($isGcInitFailureAttribution) {
     $gcInternal = $null
     if ($null -ne $serialAnalysis -and $null -ne $serialAnalysis.PSObject.Properties['gcInitializationInternal']) {
         $gcInternal = $serialAnalysis.gcInitializationInternal
@@ -1225,13 +1326,25 @@ $nativeAllocationClassification = if ($null -ne $nativeAllocationAnalysis -and @
 $nativeAllocationFirstFailure = if ($null -ne $nativeAllocationAnalysis -and @($nativeAllocationAnalysis.results).Count -eq 1) {
     $nativeAllocationAnalysis.results[0].firstFailure
 } else { $null }
+$r4GcResult = [regex]::Match('', '(?m)^\[C188R12R4R5-GC-OWNERSHIP\] outcome=(PASS|FAIL) callbacks=(\S+) result1=(\S+) result2=(\S+) result3=(\S+)\s*$')
 $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
     elseif (-not $preflightPassed) { 'EXPERIMENT_BLOCKED_QAC_CENSUS' }
     elseif ($guestPass -and $releaseVerified -and $qacExitCode -eq 0) { 'GC_GRAPH_GUEST_PROVEN' }
     elseif ($startupFailure) { 'EXPERIMENT_BLOCKED' }
     elseif ($admitted) { 'GC_ROOT_OR_COLLECTION_DEFECT_OR_GUEST_INCOMPLETE' }
     else { 'EXPERIMENT_READY_BUT_GUEST_NOT_ADMITTED' }
-if ($isInitAttribution) {
+if ($isSafeHandoff) {
+    $safeAnalyzerResult = if ($null -ne $serialAnalysis) { [string]$serialAnalysis.result } else { '' }
+    $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
+        elseif (-not $preflightPassed) { 'SAFE_HANDOFF_BLOCKED_QAC_CENSUS' }
+        elseif (-not $admitted) { 'SAFE_HANDOFF_CANDIDATE_NOT_ADMITTED' }
+        elseif (-not $releaseVerified -or $qacExitCode -ne 0) { 'SAFE_HANDOFF_CAPTURED_BUT_QAC_RELEASE_UNVERIFIED' }
+        elseif ($safeAnalyzerResult -eq 'MANAGED_TRANSITION_FAILED') { 'MANAGED_TRANSITION_FAILED' }
+        elseif ($safeAnalyzerResult -eq 'TOOLING_OR_POSTPROCESSING_FAILURE') { 'TOOLING_OR_POSTPROCESSING_FAILURE' }
+        elseif ($safeAnalyzerResult -eq 'DIAGNOSTIC_EVIDENCE_INCOMPLETE' -or -not $initCaptureComplete) { 'DIAGNOSTIC_EVIDENCE_INCOMPLETE' }
+        elseif ($guestPass) { 'SAFE_HANDOFF_GUEST_QUALIFIED' }
+        else { 'SAFE_HANDOFF_BOUNDARY_NOT_CONFIRMED' }
+} elseif ($isInitAttribution) {
     $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
         elseif (-not $preflightPassed) { 'INIT_BLOCKED_QAC_CENSUS' }
         elseif (-not $admitted) { 'INIT_CANDIDATE_NOT_ADMITTED' }
@@ -1366,25 +1479,38 @@ $manifest = [ordered]@{
         diagnosticKernelSha256=[string]$candidateManifest.specializedKernelSha256;
         ramdiskSha256=[string]$candidateManifest.candidateRamdiskSha256}
     guardIdentity=[ordered]@{path=$attemptPath;sha256=if(Test-Path -LiteralPath $attemptPath){Get-Sha256 $attemptPath}else{$null};attemptedAtUtc=$attemptedUtc;runnerScriptSha256=$runnerScriptSha256;candidateManifestSha256=$candidateManifestSha256;qemuExecutableSha256=$qemuSha256}
-    threadStoreReadinessAnalysis=if ($isThreadStoreReadiness) { $serialAnalysisPath } elseif ($isGcInitFailureAttribution) { $threadStoreAnalysisPath } else { $null }
-    threadStoreReadinessOutcome=if ($isThreadStoreReadiness -and $null -ne $serialAnalysis) { $serialAnalysis.outcome } elseif ($isGcInitFailureAttribution -and $null -ne $threadStoreAnalysis) { $threadStoreAnalysis.outcome } else { $null }
-    threadStoreHandoffReady=if ($isThreadStoreReadiness -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.threadStoreHandoffReady } elseif ($isGcInitFailureAttribution -and $null -ne $threadStoreAnalysis) { [bool]$threadStoreAnalysis.threadStoreHandoffReady } else { $false }
+    gcInitializationSourceAnalysis=if ($isSafeHandoff) { $gcInitSourceAnalysisPath } else { $null }
+    gcInitializationSourceAnalysisExitCode=if ($isSafeHandoff) { $gcInitSourceAnalysisExitCode } else { $null }
+    threadStoreReadinessAnalysis=if ($isThreadStoreReadiness -or $isSafeHandoff) { $serialAnalysisPath } elseif ($isGcInitFailureAttribution) { $threadStoreAnalysisPath } else { $null }
+    threadStoreReadinessOutcome=if ($isThreadStoreReadiness -and $null -ne $serialAnalysis) { $serialAnalysis.outcome } elseif ($isSafeHandoff -and $null -ne $serialAnalysis) { $serialAnalysis.result } elseif ($isGcInitFailureAttribution -and $null -ne $threadStoreAnalysis) { $threadStoreAnalysis.outcome } else { $null }
+    threadStoreHandoffReady=if ($isThreadStoreReadiness -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.threadStoreHandoffReady } elseif ($isGcInitFailureAttribution -and -not $isSafeHandoff -and $null -ne $threadStoreAnalysis) { [bool]$threadStoreAnalysis.threadStoreHandoffReady } else { $false }
     gcOwnershipProofOutcome=if (($isThreadStoreReadiness -or $isGcInitFailureAttribution) -and $r4GcResult.Success) { $r4GcResult.Groups[1].Value } else { $null }
     gcOwnershipProofCallbacks=if (($isThreadStoreReadiness -or $isGcInitFailureAttribution) -and $r4GcResult.Success) { $r4GcResult.Groups[2].Value } else { $null }
     nativeRhInitializeBoolean=if (($isInitReturnContract -or $isGcInitFailureAttribution) -and $null -ne $serialAnalysis) { $serialAnalysis.nativeRhInitializeBoolean } else { $null }
     nativeRhInitializeOutcome=if (($isInitReturnContract -or $isGcInitFailureAttribution) -and $null -ne $serialAnalysis) { $serialAnalysis.nativeRhInitializeOutcome } else { $null }
     startupAdapterStatusCode=if (($isInitReturnContract -or $isGcInitFailureAttribution) -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterStatusCode } else { $null }
     startupAdapterOutcome=if (($isInitReturnContract -or $isGcInitFailureAttribution) -and $null -ne $serialAnalysis) { $serialAnalysis.startupAdapterOutcome } else { $null }
-    moduleRegistrationAttemptedByCandidate=Test-ModuleRegistrationStageObserved $serialAnalysis
-    moduleRegistrationStageObserved=Test-ModuleRegistrationStageObserved $serialAnalysis
-    managedMainObserved=if ($isGcInitFailureAttribution) {
+    moduleRegistrationAttemptedByCandidate=if ($isSafeHandoff -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.moduleRegistrationAccepted } else { Test-ModuleRegistrationStageObserved $serialAnalysis }
+    moduleRegistrationStageObserved=if ($isSafeHandoff -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.moduleRegistrationAccepted } else { Test-ModuleRegistrationStageObserved $serialAnalysis }
+    managedMainObserved=if ($isSafeHandoff) {
+        Get-AnalysisBoolean $serialAnalysis 'managedEntryReached'
+    } elseif ($isGcInitFailureAttribution) {
         Get-AnalysisBoolean $threadStoreAnalysis 'managedEntryReached'
     } elseif ($isThreadStoreReadiness) {
         Get-AnalysisBoolean $serialAnalysis 'managedEntryReached'
     } else { Get-AnalysisBoolean $serialAnalysis 'managedMainDispatched' }
     managedMainGateReason=if ($isInitReturnContract -or $isNativeAllocationFailureAttribution) { [string]$candidateManifest.managedMainGateReason } else { $null }
     serialAnalysis=$serialAnalysisPath;serialAnalysisExitCode=$serialAnalysisExitCode
-    serialAnalysisError=$serialAnalysisError;serialAnalysisComplete=if ($null -ne $serialAnalysis) { [bool]$serialAnalysis.initTraceComplete } else { $false }
+    serialAnalysisError=$serialAnalysisError;serialAnalysisComplete=if ($isSafeHandoff -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.diagnosticEvidenceComplete } elseif ($null -ne $serialAnalysis) { [bool]$serialAnalysis.initTraceComplete } else { $false }
+    diagnosticEvidenceComplete=if ($isSafeHandoff -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.diagnosticEvidenceComplete } else { $false }
+    diagnosticErrorStatus=if ($isSafeHandoff -and $null -ne $serialAnalysis) { $serialAnalysis.diagnosticErrorStatus } else { $null }
+    runtimeErrorStatus=if ($isSafeHandoff -and $null -ne $serialAnalysis) { $serialAnalysis.runtimeErrorStatus } else { $null }
+    managedTransitionIntentionallyNotAttempted=if ($isSafeHandoff -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.managedTransitionIntentionallyNotAttempted } else { $false }
+    managedTransitionAttempted=if ($isSafeHandoff -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.managedTransitionAttempted } else { $false }
+    managedTransitionFailed=if ($isSafeHandoff -and $null -ne $serialAnalysis) { [bool]$serialAnalysis.managedTransitionFailed } else { $false }
+    managedRuntimeAcceptance=$false
+    safeStopTerminalObserved=$safeHandoffTerminal
+    threadStorePrerequisites=if ($isSafeHandoff -and $null -ne $serialAnalysis) { $serialAnalysis.threadStorePrerequisites } else { $null }
     serialSha256BeforeAnalysis=$serialSha256BeforeAnalysis;serialSha256AfterAnalysis=$serialSha256AfterAnalysis
     rawSerialPreservedByAnalysis=$rawSerialPreservedByAnalysis
     managedMarkerCount=$markerLines.Count;managedMarkerPhases=$markerPhases;startupFailure=$startupFailure
@@ -1396,7 +1522,10 @@ $manifest = [ordered]@{
     qacArguments=(Join-Path $runRoot 'qac-run-arguments.json');guestAttempt=$attemptPath;error=$runError
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-if ($isNativeAllocationFailureAttribution) {
+if ($isSafeHandoff) {
+    Write-Output "C188R12R4R5R4R5R2R2R4R2R1_SAFE_HANDOFF=$outcome ADMITTED=$admitted EVIDENCE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R12R4R5R4R5R2R2R4R2R1_SAFE_HANDOFF_MANIFEST=$manifestPath"
+} elseif ($isNativeAllocationFailureAttribution) {
     $nativeAttemptLabel = "C188R12R4R5R4R5$NativeAllocationGuestAttempt"
     Write-Output "${nativeAttemptLabel}_NATIVE_ALLOC_ATTRIBUTION=$outcome ADMITTED=$admitted RECORD_COMPLETE=$nativeAllocationRecordCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "${nativeAttemptLabel}_NATIVE_ALLOC_ATTRIBUTION_MANIFEST=$manifestPath"

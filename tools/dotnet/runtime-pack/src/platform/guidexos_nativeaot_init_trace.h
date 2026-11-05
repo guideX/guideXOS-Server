@@ -48,6 +48,14 @@ enum guidexos_nativeaot_init_event : uint32_t {
     GX_INIT_EVENT_PASS = 2u,
     GX_INIT_EVENT_FAIL = 3u,
     GX_INIT_EVENT_OBSERVE = 4u,
+    // The safe-handoff profile emits one packed row per stage at its stop.
+    // Its top nibble is 8 + the last event (BEGIN..OBSERVE); the lower 28
+    // bits carry four 7-bit event counters. Reserved 0x80000002/03 remain
+    // the separate first-failure and terminal-total records.
+    GX_INIT_EVENT_SUMMARY_COUNTS = 0x80000000u,
+    GX_INIT_EVENT_SUMMARY_LAST = 0x80000001u,
+    GX_INIT_EVENT_SUMMARY_FIRST_FAILURE = 0x80000002u,
+    GX_INIT_EVENT_SUMMARY_TOTALS = 0x80000003u,
 };
 
 typedef void (__cdecl *guidexos_nativeaot_init_trace_sink)(
@@ -60,6 +68,10 @@ extern "C" void __cdecl guideXosNativeAotInitTraceRecord(
 extern "C" void __cdecl guideXosNativeAotInitTraceSetInvocation(uint32_t invocation);
 extern "C" __declspec(dllexport) void __cdecl guideXosNativeAotInitTraceSetSink(
     guidexos_nativeaot_init_trace_sink sink);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+extern "C" __declspec(dllexport) void __cdecl
+GuideXosNativeAotInitTraceEmitSummary(void);
+#endif
 
 inline void guideXosNativeAotInitTraceBegin(uint32_t stage) {
     guideXosNativeAotInitTraceRecord(stage, GX_INIT_EVENT_BEGIN, 0xFFFFFFFFu,

@@ -36,7 +36,8 @@ void runFirstRealAllocation(
     uintptr_t initTraceSetSinkAddress = 0,
     uintptr_t initTraceGetCountAddress = 0,
     uintptr_t initTraceGetOverflowAddress = 0,
-    uintptr_t initTraceRhInitializeRawResultAddress = 0);
+    uintptr_t initTraceRhInitializeRawResultAddress = 0,
+    uintptr_t safeHandoffPrepareAddress = 0);
 
 #endif
 

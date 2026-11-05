@@ -2579,8 +2579,12 @@ void runFirstRealAllocationImpl(
     uintptr_t initTraceSetSinkAddress,
     uintptr_t initTraceGetCountAddress,
     uintptr_t initTraceGetOverflowAddress,
-    uintptr_t initTraceRhInitializeRawResultAddress) {
+    uintptr_t initTraceRhInitializeRawResultAddress,
+    uintptr_t safeHandoffPrepareAddress) {
     bool allPassed = true;
+#if !defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    (void)safeHandoffPrepareAddress;
+#endif
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     serial::puts("[nativeaot-thread-static] BEGIN\n");
 #elif defined(GXOS_NATIVEAOT_GC_SINGLE_THREAD_SUSPEND_EE_QEMU_TEST)
@@ -2758,9 +2762,9 @@ void runFirstRealAllocationImpl(
     const uint32_t diagnosticStage = reinterpret_cast<State>(getDiagnosticStageAddress)();
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
     using InitTraceValue = uint32_t (__cdecl *)(void);
-    const uint32_t initTraceCount = initTraceGetCountAddress != 0u
+    uint32_t initTraceCount = initTraceGetCountAddress != 0u
         ? reinterpret_cast<InitTraceValue>(initTraceGetCountAddress)() : 0xFFFFFFFFu;
-    const uint32_t initTraceOverflow = initTraceGetOverflowAddress != 0u
+    uint32_t initTraceOverflow = initTraceGetOverflowAddress != 0u
         ? reinterpret_cast<InitTraceValue>(initTraceGetOverflowAddress)() : 0xFFFFFFFFu;
 #endif
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT)
@@ -2800,7 +2804,8 @@ void runFirstRealAllocationImpl(
     serial::puts(" lastSize=");
     serial::put_hex32(startupLastAllocationSize);
     serial::puts("\n");
-#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS) && \
+    !defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
     serial::puts("[C188R12R4R5R1_INIT] trace_end invocation=00000001 count=");
     serial::put_hex32(initTraceCount);
     serial::puts(" overflow=");
@@ -2849,10 +2854,17 @@ void runFirstRealAllocationImpl(
         return;
     }
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    threadStoreReadinessKernelMarker(
+        "managed_entry_gate_closed",
+        static_cast<uintptr_t>(nativeRhInitializeResult),
+        static_cast<uintptr_t>(static_cast<uint32_t>(startupResult)));
+#else
     threadStoreReadinessKernelMarker(
         "managed_entry_gate_open",
         static_cast<uintptr_t>(nativeRhInitializeResult),
         static_cast<uintptr_t>(static_cast<uint32_t>(startupResult)));
+#endif
 #endif
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS) && !defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
     serial::puts("[C188R12R4R5R1_INIT] managed_main_gate=blocked reason=runtime-threadstore-attachment-unqualified singleton=");
@@ -2897,6 +2909,57 @@ void runFirstRealAllocationImpl(
         serial::puts("[nativeaot-gc-first-allocation] ALL_FAIL\n");
         return;
     }
+
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    if (safeHandoffPrepareAddress == 0u) {
+        serial::puts("[nativeaot-safe-handoff] diagnosticError=missing_prepare_export runtimeError=none\n");
+        threadStoreReadinessKernelMarker("diagnostic_safe_stop_incomplete", 1u, 0u);
+        return;
+    }
+    using SafeHandoffPrepare = uint32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+    const uint32_t safeHandoffStatus =
+        reinterpret_cast<SafeHandoffPrepare>(safeHandoffPrepareAddress)();
+    if (safeHandoffStatus != 0u) {
+        using InitTraceValue = uint32_t (__cdecl *)(void);
+        initTraceCount = initTraceGetCountAddress != 0u
+            ? reinterpret_cast<InitTraceValue>(initTraceGetCountAddress)() : 0xFFFFFFFFu;
+        initTraceOverflow = initTraceGetOverflowAddress != 0u
+            ? reinterpret_cast<InitTraceValue>(initTraceGetOverflowAddress)() : 0xFFFFFFFFu;
+        serial::puts("[C188R12R4R5R1_INIT] trace_end invocation=00000001 count=");
+        serial::put_hex32(initTraceCount);
+        serial::puts(" overflow=");
+        serial::put_hex32(initTraceOverflow);
+        serial::puts(" serialDropped=");
+        serial::put_hex32(g_initTraceSerialDropped);
+        serial::puts(" adapterStatus=");
+        serial::put_hex32(static_cast<uint32_t>(startupResult));
+        serial::puts("\n");
+        serial::puts("[nativeaot-safe-handoff] diagnosticError=prepare_failed status=");
+        serial::put_hex32(safeHandoffStatus);
+        serial::puts(" runtimeError=none\n");
+        threadStoreReadinessKernelMarker(
+            "diagnostic_safe_stop_incomplete", safeHandoffStatus, 0u);
+        return;
+    }
+    using InitTraceValue = uint32_t (__cdecl *)(void);
+    initTraceCount = initTraceGetCountAddress != 0u
+        ? reinterpret_cast<InitTraceValue>(initTraceGetCountAddress)() : 0xFFFFFFFFu;
+    initTraceOverflow = initTraceGetOverflowAddress != 0u
+        ? reinterpret_cast<InitTraceValue>(initTraceGetOverflowAddress)() : 0xFFFFFFFFu;
+    serial::puts("[C188R12R4R5R1_INIT] trace_end invocation=00000001 count=");
+    serial::put_hex32(initTraceCount);
+    serial::puts(" overflow=");
+    serial::put_hex32(initTraceOverflow);
+    serial::puts(" serialDropped=");
+    serial::put_hex32(g_initTraceSerialDropped);
+    serial::puts(" adapterStatus=");
+    serial::put_hex32(static_cast<uint32_t>(startupResult));
+    serial::puts("\n");
+    threadStoreReadinessKernelMarker("diagnostic_safe_stop", 1u, 0u);
+    serial::puts("[nativeaot-safe-handoff] status=intentionally_stopped initialization=accepted moduleRegistration=accepted managedTransition=not_attempted managedEntry=not_reached runtimeError=none\n");
+    serial::puts("[nativeaot-gc-first-allocation] SAFE_HANDOFF_STOP\n");
+    return;
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC23_NATIVE_UNWIND)
     // InitializeModules clears the real-GC diagnostics record.  Run the
@@ -3372,7 +3435,8 @@ void runFirstRealAllocation(
     uintptr_t initTraceSetSinkAddress,
     uintptr_t initTraceGetCountAddress,
     uintptr_t initTraceGetOverflowAddress,
-    uintptr_t initTraceRhInitializeRawResultAddress) {
+    uintptr_t initTraceRhInitializeRawResultAddress,
+    uintptr_t safeHandoffPrepareAddress) {
     runFirstRealAllocationImpl(
         artifact, artifactSize, installPalAddress, installTableAddress,
         installPlatformAddress, startupMainAddress, getStateAddress,
@@ -3381,7 +3445,8 @@ void runFirstRealAllocation(
         managedMainAddress, finalizeAddress, getDiagnosticsAddress, generation,
         beginExperimentAddress, standaloneNativeUnwindAddress,
         initTraceSetSinkAddress, initTraceGetCountAddress,
-        initTraceGetOverflowAddress, initTraceRhInitializeRawResultAddress);
+        initTraceGetOverflowAddress, initTraceRhInitializeRawResultAddress,
+        safeHandoffPrepareAddress);
 }
 #endif
 #endif
