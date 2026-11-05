@@ -265,12 +265,33 @@ function New-QacS22R10ScreendumpCommand {
 function Test-QacS22R10QmpListenerOwner {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][object[]]$Connections,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Connections,
         [Parameter(Mandatory)][int]$Port,
         [Parameter(Mandatory)][int]$ExpectedProcessId
     )
-    $listeners = @($Connections | Where-Object { $_.State -eq 'Listen' -and [int]$_.LocalPort -eq $Port -and [string]$_.LocalAddress -eq '127.0.0.1' })
-    return $listeners.Count -eq 1 -and [int]$listeners[0].OwningProcess -eq $ExpectedProcessId
+    $listeners = @($Connections | Where-Object { $_.State -eq 'Listen' -and [int]$_.LocalPort -eq $Port })
+    return $listeners.Count -eq 1 -and [string]$listeners[0].LocalAddress -eq '127.0.0.1' -and [int]$listeners[0].OwningProcess -eq $ExpectedProcessId
+}
+
+function Get-QacS22R10QmpListenerObservation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Connections,
+        [Parameter(Mandatory)][int]$Port,
+        [Parameter(Mandatory)][int]$ExpectedProcessId
+    )
+    $listeners = @($Connections | Where-Object { $_.State -eq 'Listen' -and [int]$_.LocalPort -eq $Port })
+    $state = if ($listeners.Count -eq 0) { 'listener-absent' }
+        elseif ($listeners.Count -gt 1) { 'listener-ambiguous' }
+        elseif ([string]$listeners[0].LocalAddress -ne '127.0.0.1') { 'listener-wrong-address' }
+        elseif ([int]$listeners[0].OwningProcess -ne $ExpectedProcessId) { 'listener-wrong-owner' }
+        else { 'listener-owned-by-child' }
+    return [PSCustomObject]@{
+        Endpoint = "127.0.0.1:$Port"
+        State = $state
+        ListenerCount = $listeners.Count
+        Owned = ($state -eq 'listener-owned-by-child')
+    }
 }
 
 function Test-QacS22R10RetryablePortCollision {
@@ -456,4 +477,4 @@ function Close-QacS22R10QmpClient {
     try { $Client.Tcp.Dispose() } catch { }
 }
 
-Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient
+Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Get-QacS22R10QmpListenerObservation, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient

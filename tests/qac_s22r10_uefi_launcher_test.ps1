@@ -93,11 +93,14 @@ public sealed class Qac3c3QmpFixtureServer : IDisposable {
     private readonly TcpListener listener;
     private readonly Thread thread;
     private readonly string instanceName;
-    private readonly bool silent;
+    private readonly string behavior;
     private TcpClient active;
+    private int contCount;
     public int Port { get; private set; }
-    public Qac3c3QmpFixtureServer(string name, bool noGreeting) {
-        instanceName = name; silent = noGreeting;
+    public int ContCount { get { return Volatile.Read(ref contCount); } }
+    public Qac3c3QmpFixtureServer(string name, bool noGreeting) : this(name, noGreeting ? "silent" : "normal") { }
+    public Qac3c3QmpFixtureServer(string name, string mode) {
+        instanceName = name; behavior = mode;
         listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         Port = ((IPEndPoint)listener.LocalEndpoint).Port;
         thread = new Thread(Serve) { IsBackground = true, Name = "QAC3C3 QMP fixture" }; thread.Start();
@@ -108,8 +111,10 @@ public sealed class Qac3c3QmpFixtureServer : IDisposable {
             using (var stream = active.GetStream())
             using (var reader = new StreamReader(stream, Encoding.UTF8, false, 4096, true))
             using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 4096, true) { NewLine = "\n", AutoFlush = true }) {
-                if (silent) { Thread.Sleep(5000); return; }
+                if (behavior == "silent") { Thread.Sleep(5000); return; }
+                if (behavior == "malformed-greeting") { writer.WriteLine("{not-json"); Thread.Sleep(200); return; }
                 writer.WriteLine("{\"QMP\":{\"version\":{\"qemu\":{\"major\":11,\"minor\":0,\"micro\":0},\"package\":\"fixture\"},\"capabilities\":[]}}");
+                bool running = false;
                 string line;
                 while ((line = reader.ReadLine()) != null) {
                     if (line.Length > 0 && line[0] == '\uFEFF') { writer.WriteLine("{\"error\":{\"class\":\"GenericError\",\"desc\":\"unexpected UTF-8 BOM\"}}"); continue; }
@@ -117,10 +122,15 @@ public sealed class Qac3c3QmpFixtureServer : IDisposable {
                         var root = document.RootElement;
                         var id = root.GetProperty("id").GetRawText();
                         var execute = root.GetProperty("execute").GetString();
+                        if (execute == "qmp_capabilities" && behavior == "capabilities-error") {
+                            writer.WriteLine("{\"error\":{\"class\":\"GenericError\",\"desc\":\"capabilities rejected\"},\"id\":" + id + "}");
+                            continue;
+                        }
                         string value;
                         switch (execute) {
                             case "query-name": value = "{\"name\":\"" + instanceName + "\",\"id\":null}"; break;
-                            case "query-status": value = "{\"status\":\"prelaunch\",\"running\":false}"; break;
+                            case "cont": Interlocked.Increment(ref contCount); running = true; value = "{}"; break;
+                            case "query-status": value = running ? "{\"status\":\"running\",\"running\":true}" : "{\"status\":\"prelaunch\",\"running\":false}"; break;
                             default: value = "{}"; break;
                         }
                         writer.WriteLine("{\"return\":" + value + ",\"id\":" + id + "}");
@@ -144,7 +154,7 @@ $sources=New-TestSources -Root $sourcesRoot
 $sourceEsp=Get-QacS22R10ArtifactIdentity -Path $sources.Esp -Kind directory
 $sourceIso=Get-QacS22R10ArtifactIdentity -Path $sources.Iso -Kind file
 $sourceOvmf=Get-QacS22R10ArtifactIdentity -Path $sources.Ovmf -Kind file
-$first=$null; $second=$null; $qmpClient=$null; $goodServer=$null; $wrongServer=$null; $silentServer=$null; $drainProcess=$null; $preExitDrainProcess=$null
+$first=$null; $second=$null; $qmpClient=$null; $goodServer=$null; $wrongServer=$null; $silentServer=$null; $malformedServer=$null; $capabilitiesServer=$null; $runningServer=$null; $drainProcess=$null; $preExitDrainProcess=$null
 
 try {
     $first=New-TestWorkspace -Sources $sources -Label 'manifest'
@@ -303,9 +313,24 @@ try {
     Assert-True 'release line from another reservation cannot confirm release' (-not (Test-QacS22R10ReleaseIdentity -ReportedReservationId 'def456' -ReportedChildProcessId 42001 -ExpectedReservationId 'abc123' -ExpectedChildProcessId 42001))
     Assert-True 'release line for another child cannot confirm release' (-not (Test-QacS22R10ReleaseIdentity -ReportedReservationId 'abc123' -ReportedChildProcessId 42002 -ExpectedReservationId 'abc123' -ExpectedChildProcessId 42001))
     $connection=[PSCustomObject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=50001;OwningProcess=42001}
+    Assert-True 'empty listener results are treated as not-ready instead of throwing during parameter binding' (-not (Test-QacS22R10QmpListenerOwner -Connections ([object[]]@()) -Port 50001 -ExpectedProcessId 42001))
     Assert-True 'QMP listener ownership requires the exact QEMU child PID' (Test-QacS22R10QmpListenerOwner -Connections @($connection) -Port 50001 -ExpectedProcessId 42001)
     Assert-True 'QMP listener owned by another PID is rejected' (-not (Test-QacS22R10QmpListenerOwner -Connections @($connection) -Port 50001 -ExpectedProcessId 42002))
     Assert-True 'QMP listener on a non-loopback address is rejected' (-not (Test-QacS22R10QmpListenerOwner -Connections @([PSCustomObject]@{State='Listen';LocalAddress='0.0.0.0';LocalPort=50001;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001))
+    $absentObservation=Get-QacS22R10QmpListenerObservation -Connections ([object[]]@()) -Port 50001 -ExpectedProcessId 42001
+    $wrongOwnerObservation=Get-QacS22R10QmpListenerObservation -Connections @($connection) -Port 50001 -ExpectedProcessId 42002
+    $wrongAddressObservation=Get-QacS22R10QmpListenerObservation -Connections @([PSCustomObject]@{State='Listen';LocalAddress='0.0.0.0';LocalPort=50001;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001
+    $ambiguousObservation=Get-QacS22R10QmpListenerObservation -Connections @($connection,[PSCustomObject]@{State='Listen';LocalAddress='127.0.0.1';LocalPort=50001;OwningProcess=42001}) -Port 50001 -ExpectedProcessId 42001
+    Assert-True 'empty endpoint snapshot is explicitly classified as listener absent' ($absentObservation.State -eq 'listener-absent' -and $absentObservation.ListenerCount -eq 0)
+    Assert-True 'endpoint listener owned by another process is distinguished without exposing that process identity' ($wrongOwnerObservation.State -eq 'listener-wrong-owner' -and -not $wrongOwnerObservation.Owned)
+    Assert-True 'listener on a non-loopback address is separately classified' ($wrongAddressObservation.State -eq 'listener-wrong-address')
+    Assert-True 'multiple listeners for the configured endpoint fail closed as ambiguous' ($ambiguousObservation.State -eq 'listener-ambiguous')
+    $delayedStates=@(
+        (Get-QacS22R10QmpListenerObservation -Connections ([object[]]@()) -Port 50001 -ExpectedProcessId 42001).State,
+        (Get-QacS22R10QmpListenerObservation -Connections ([object[]]@()) -Port 50001 -ExpectedProcessId 42001).State,
+        (Get-QacS22R10QmpListenerObservation -Connections @($connection) -Port 50001 -ExpectedProcessId 42001).State
+    )
+    Assert-True 'bounded listener polling can advance from absent snapshots to the exact owned listener' (($delayedStates -join ',') -eq 'listener-absent,listener-absent,listener-owned-by-child')
 
     Assert-True 'marker observed before its deadline is accepted' (Test-QacS22R10MarkerWithinDeadline -ObservedAtUtc ([DateTimeOffset]::UtcNow.AddSeconds(-2)) -DeadlineUtc ([DateTimeOffset]::UtcNow.AddSeconds(2)))
     Assert-True 'marker first observed after its deadline is rejected' (-not (Test-QacS22R10MarkerWithinDeadline -ObservedAtUtc ([DateTimeOffset]::UtcNow.AddSeconds(2)) -DeadlineUtc ([DateTimeOffset]::UtcNow.AddSeconds(-2))))
@@ -330,9 +355,44 @@ try {
     [void](Assert-Throws 'wrong QMP instance identity is rejected after capability negotiation' { Initialize-QacS22R10QmpClient -Client $qmpClient -ExpectedName 'guideXOS-our-run' } 'mismatch')
     Close-QacS22R10QmpClient -Client $qmpClient; $qmpClient=$null; $wrongServer.Dispose(); $wrongServer=$null
 
+    $malformedServer=[Qac3c3QmpFixtureServer]::new('malformed','malformed-greeting')
+    [void](Assert-Throws 'malformed QMP greeting is rejected before capability negotiation' { Open-QacS22R10QmpClient -Port $malformedServer.Port -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 2000 -ReadTimeoutMilliseconds 500 } 'malformed')
+    Assert-True 'malformed greeting fixture received no continuation command' ($malformedServer.ContCount -eq 0)
+    $malformedServer.Dispose(); $malformedServer=$null
+
+    $capabilitiesServer=[Qac3c3QmpFixtureServer]::new('capability-error','capabilities-error')
+    $qmpClient=Open-QacS22R10QmpClient -Port $capabilitiesServer.Port -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 2000 -ReadTimeoutMilliseconds 500
+    [void](Assert-Throws 'QMP capability negotiation failure is rejected before instance or state-changing commands' { Initialize-QacS22R10QmpClient -Client $qmpClient -ExpectedName 'guideXOS-capability-error' } 'command failed|capabilities rejected')
+    Assert-True 'capability failure fixture received no continuation command' ($capabilitiesServer.ContCount -eq 0)
+    Close-QacS22R10QmpClient -Client $qmpClient; $qmpClient=$null; $capabilitiesServer.Dispose(); $capabilitiesServer=$null
+
+    $runningServer=[Qac3c3QmpFixtureServer]::new('guideXOS-fixture-running','normal')
+    $qmpClient=Open-QacS22R10QmpClient -Port $runningServer.Port -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 2000 -ReadTimeoutMilliseconds 1000
+    $pausedIdentity=Initialize-QacS22R10QmpClient -Client $qmpClient -ExpectedName 'guideXOS-fixture-running'
+    if ($pausedIdentity.Status -in @('prelaunch','paused')) { [void](Invoke-QacS22R10Qmp -Client $qmpClient -Execute 'cont') }
+    $runningStatus=Invoke-QacS22R10Qmp -Client $qmpClient -Execute 'query-status'
+    Assert-True 'QMP fixture confirms paused-to-running transition after one continuation request' ($pausedIdentity.Status -eq 'prelaunch' -and -not $pausedIdentity.Running -and $runningStatus.status -eq 'running' -and $runningStatus.running -and $runningServer.ContCount -eq 1)
+    Close-QacS22R10QmpClient -Client $qmpClient; $qmpClient=$null; $runningServer.Dispose(); $runningServer=$null
+
     $silentServer=[Qac3c3QmpFixtureServer]::new('silent',$true)
     [void](Assert-Throws 'silent or unresponsive QMP endpoint is rejected within the read timeout' { Open-QacS22R10QmpClient -Port $silentServer.Port -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 2000 -ReadTimeoutMilliseconds 150 } 'timed out|closed|failed')
     $silentServer.Dispose(); $silentServer=$null
+
+    $runnerSource=Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1') -Raw
+    $listenerLoopIndex=$runnerSource.IndexOf('while ([DateTimeOffset]::UtcNow -lt $startupDeadline',[StringComparison]::Ordinal)
+    $ownershipGateIndex=$runnerSource.IndexOf('if ($listening) {',[StringComparison]::Ordinal)
+    $pausedGateIndex=$runnerSource.IndexOf('if ($qmpIdentity.Status -notin @(',[StringComparison]::Ordinal)
+    $continuationIndex=$runnerSource.IndexOf("-Execute 'cont'",[StringComparison]::Ordinal)
+    $runningCheckIndex=$runnerSource.IndexOf('if (-not $continued.running)',[StringComparison]::Ordinal)
+    $freshReservationIndex=$runnerSource.LastIndexOf('$reservationBeforeContinuation = Get-QacInspectRecord',[StringComparison]::Ordinal)
+    $finalListenerIndex=$runnerSource.LastIndexOf('$listenerBeforeContinuation = Test-QacChildAndListener',[StringComparison]::Ordinal)
+    $authorizedIndex=$runnerSource.LastIndexOf("-Type 'qmp-continuation-authorized'",[StringComparison]::Ordinal)
+    Assert-True 'runner listener discovery uses a finite startup deadline and rechecks process state' ($listenerLoopIndex -ge 0 -and $runnerSource.Substring($listenerLoopIndex,500) -match '-not \$script:QacProcess\.HasExited')
+    Assert-True 'QEMU child exit before QMP is a distinct stage, not a listener timeout' ($runnerSource -match 'qmp-child-exited-before-handshake' -and $runnerSource -match 'child-exited-before-qmp')
+    Assert-True 'QEMU child exit during connect or protocol handshake is recorded separately' ($runnerSource -match 'qmp-child-exited-during-handshake' -and $runnerSource -match "stage='connect-or-greeting'" -and $runnerSource -match "stage='capabilities-or-identity'")
+    Assert-True 'startup deadline records last listener classification, count, and bounded probe count' ($runnerSource -match 'qmp-listener-startup-deadline' -and $runnerSource -match 'lastObservedState=\$lastState' -and $runnerSource -match 'probeCount=\$listenerProbeCount')
+    Assert-True 'continuation occurs once, only after listener ownership and paused QMP identity checks, then running state is confirmed' ($ownershipGateIndex -ge 0 -and $pausedGateIndex -gt $ownershipGateIndex -and $continuationIndex -gt $pausedGateIndex -and $runningCheckIndex -gt $continuationIndex -and ([regex]::Matches($runnerSource,"-Execute 'cont'")).Count -eq 1)
+    Assert-True 'fresh QAC reservation and listener ownership are rechecked immediately before the authorized single continuation' ($freshReservationIndex -gt $pausedGateIndex -and $finalListenerIndex -gt $freshReservationIndex -and $authorizedIndex -gt $finalListenerIndex -and $continuationIndex -gt $authorizedIndex)
 
     Assert-True 'uncertain active execution is never cleanup eligible' (-not (Test-QacS22R10CleanupEligible -ReservationState 'Recovery Required' -ChildWasLaunched $true -ChildExitVerified $false -ReservationReleaseVerified $false))
     Assert-True 'QAC active state is not cleanup eligible' (-not (Test-QacS22R10CleanupEligible -ReservationState 'Running' -ChildWasLaunched $true -ChildExitVerified $false -ReservationReleaseVerified $false))
@@ -364,6 +424,9 @@ try {
     if ($goodServer) { $goodServer.Dispose() }
     if ($wrongServer) { $wrongServer.Dispose() }
     if ($silentServer) { $silentServer.Dispose() }
+    if ($malformedServer) { $malformedServer.Dispose() }
+    if ($capabilitiesServer) { $capabilitiesServer.Dispose() }
+    if ($runningServer) { $runningServer.Dispose() }
     if (-not $KeepTestArtifacts -and (Test-Path -LiteralPath $testRoot)) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     } elseif (Test-Path -LiteralPath $testRoot) {
