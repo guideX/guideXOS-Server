@@ -77,7 +77,7 @@ The final hosted runner suite passes **125/125** under the repository's PowerShe
 
 QAC logged the direct child identity, the bind error, child exit, and reservation release. Independent inspect shows reservation 4d262981eb1a4f8b963a1a1537a42073 as Released, with the exact QEMU PID, executable, and start time. The runner independently verified child exit and reservation release; RecoveryRequired is false. QAC needed no forced child cleanup because QEMU had exited itself.
 
-The final read-only QAC snapshot at 2026-11-05T17:13:32.786Z was Online with zero reservations, managed sessions, queued requests, or QEMU processes. The QAC phase marker still says QAC3C3 is next.
+The final post-commit read-only QAC snapshot at 2026-11-05T17:17:07.280Z was Online with zero reservations, managed sessions, queued requests, or QEMU processes. The QAC phase marker still says QAC3C3 is next.
 
 No QMP greeting, qmp_capabilities, query-name, query-status, or cont occurred. The candidate guest boot count is **zero**. There was no UEFI transfer, kernel initialization, desktop, or guest progress. The final runner record and QAC logs are retained in the run directory named by the manifest under out/s22r14r1r3-live-qmp-listener-attribution/runs/.
 
