@@ -34,6 +34,7 @@ param(
     [switch]$C188R12R4R5R4R5R2SemiSharedAttribution,
     [switch]$C188R12R4R5R4R5R2R2NativeAllocationAttribution,
     [switch]$C188R12R4R5R2R2R4SafeHandoff,
+    [switch]$C188R12R4R5R2R3InitializeModulesAttribution,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -259,6 +260,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5R4R5R2SemiSharedAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R4R5R2SemiSharedAttribution" }
     if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R4R5R2R2NativeAllocationAttribution" }
     if ($C188R12R4R5R2R2R4SafeHandoff) { $runtimePackBuildArguments += "-C188R12R4R5R2R2R4SafeHandoff" }
+    if ($C188R12R4R5R2R3InitializeModulesAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R2R3InitializeModulesAttribution" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
@@ -327,6 +329,14 @@ if ($UseGuideXosRuntimePack) {
          [string]$runtimePackManifestObject.c188r12r4r5r2r2r4SafeHandoffMarker -cne 'C188R12R4R5R2R2R4_SAFE_HANDOFF' -or
          [string]$runtimePackManifestObject.c188r12r4r5r2r2r4SafeHandoffTransition -cne 'disabled before RhpReversePInvoke and InitializeModules')) {
         throw 'C188 safe handoff requires the explicitly marked diagnostic runtime pack with managed transition disabled.'
+    }
+    if ($C188R12R4R5R2R3InitializeModulesAttribution -and
+        (-not $C188R12R4R5R2R2R4SafeHandoff -or
+         -not [bool]$runtimePackManifestObject.c188r12r4r5r2r3InitializeModulesAttribution -or
+         [string]$runtimePackManifestObject.c188r12r4r5r2r3InitializeModulesAttributionMarker -cne 'C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' -or
+         [string]$runtimePackManifestObject.c188r12r4r5r2r3InitializeModulesAttributionTransition -notmatch 'explicit preflight gate' -or
+         [bool]$runtimePackManifestObject.persistentCompositeLifecycle)) {
+        throw 'C188R12R4R5R2R3 requires the explicitly selected isolated transition-attribution runtime pack.'
     }
     if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution -and
         [int]$runtimePackManifestObject.c188r12r4r5r4r5r2r2NativeAllocationBackendCapacity -ne 9) {
@@ -924,7 +934,7 @@ try {
         "where cl.exe"
         "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$runtimeSupportObj`" `"$runtimeSupportSource`""
         "if errorlevel 1 exit /b %errorlevel%"
-        $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' }) $(if ($C188R12R4R5R4ThreadStoreReadiness) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $(if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
+        $(if ($ProductionApplication) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /DWIN32 /D_WIN32 /D_WIN64 /DHOST_WINDOWS /DTARGET_WINDOWS /DHOST_AMD64 /DTARGET_AMD64 /DTARGET_64BIT /DHOST_64BIT /DNATIVEAOT /DFEATURE_NATIVEAOT /DFEATURE_HIJACK /DFEATURE_SUSPEND_REDIRECTION /DFEATURE_PERFTRACING /DFEATURE_BASICFREEZE /DFEATURE_CONSERVATIVE_GC /DFEATURE_CUSTOM_IMPORTS /DFEATURE_DYNAMIC_CODE /DFEATURE_CACHED_INTERFACE_DISPATCH /DVERIFY_HEAP /D_LIB /DGUIDEXOS_NATIVEAOT_RUNTIME_STARTUP $(if ($C188R12R4R5R1InitDiagnostics) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS' }) $(if ($C188R12R4R5R4ThreadStoreReadiness) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS' }) $(if ($C188R12R4R5R2R3InitializeModulesAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palMinWinObj`" `"$palMinWinSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro $(if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { '/DGUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC' }) /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$palContractObj`" `"$palContractSource`""; "if errorlevel 1 exit /b %errorlevel%"; "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /I`"$(Join-Path $RuntimePackRoot 'src\platform')`" /Fo:`"$gcStartupContractObj`" `"$gcStartupContractSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ThreadStaticLifecycleDiagnostics) { "cl.exe /nologo /std:c++17 /TP /c /MT /GS- /GR- /EHs-c- /Zl /Oi /O2 /Zc:inline /Brepro /Fo:`"$managedHostShimsObj`" `"$managedHostShimsSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($ProductionApplication) { "cl.exe /nologo /TC /c /GS- /Zl $(if ($C188R11ManagedStateProvenance) { '/DHOSTLOGPROOF_C188R11_MANAGED_STATE_PROVENANCE' }) /Fo:`"$c102StartupObj`" `"$c102StartupSource`""; "if errorlevel 1 exit /b %errorlevel%" } else { $null })
         $(if ($C188R12R4R5GcOwnershipProof) { $gcAllocationProbeCompileBlock } else { $null })

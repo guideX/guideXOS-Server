@@ -24,7 +24,8 @@ enum GuideXosThreadStoreReadinessEvent : uint32_t {
     GX_THREADSTORE_EVENT_TRANSITION_RETURN = 19u,
     GX_THREADSTORE_EVENT_PAL_THREAD_ID = 20u,
     GX_THREADSTORE_EVENT_PAL_STACK_BOUNDS = 21u,
-    GX_THREADSTORE_EVENT_PAL_STACK_CURRENT = 22u
+    GX_THREADSTORE_EVENT_PAL_STACK_CURRENT = 22u,
+    GX_THREADSTORE_EVENT_DIAGNOSTIC_SUMMARY = 23u
 };
 
 #if defined(_MSC_VER)
@@ -40,6 +41,8 @@ extern "C" {
 #endif
 void GX_THREADSTORE_READINESS_CALL GuideXosNativeAotThreadReadinessMark(
     uint32_t event, uintptr_t raw0, uintptr_t raw1);
+void GX_THREADSTORE_READINESS_CALL GuideXosNativeAotThreadReadinessEmitSummary(void);
+uint32_t GX_THREADSTORE_READINESS_CALL GuideXosNativeAotThreadReadinessGetOverflow(void);
 #ifdef __cplusplus
 }
 #endif

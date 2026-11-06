@@ -6,6 +6,7 @@ param(
     [switch]$SemiSharedAttribution,
     [switch]$NativeAllocationAttribution,
     [switch]$SafeHandoff,
+    [switch]$InitializeModulesAttribution,
     [switch]$ResumeCandidate
 )
 
@@ -14,7 +15,7 @@ Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
-    $phaseRoot = if ($SafeHandoff) { 'c188r12r4r5r4r5r2r2r4r2-safe-handoff' } elseif ($NativeAllocationAttribution) { 'c188r12r4r5r4r5r2r2-native-allocation-attribution' } elseif ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-attribution' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
+    $phaseRoot = if ($InitializeModulesAttribution) { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' } elseif ($SafeHandoff) { 'c188r12r4r5r4r5r2r2r4r2-safe-handoff' } elseif ($NativeAllocationAttribution) { 'c188r12r4r5r4r5r2r2-native-allocation-attribution' } elseif ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-attribution' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
     $CandidateRoot = Join-Path $root "out\dotnet\$phaseRoot\candidate-$stamp"
 }
 if ($GcInitProbes -and -not $ThreadStoreReadiness) {
@@ -30,6 +31,11 @@ if ($SafeHandoff -and (-not $NativeAllocationAttribution -or -not $SemiSharedAtt
     -not $GcInitProbes -or -not $ThreadStoreReadiness)) {
     throw 'C188 safe handoff requires the complete accepted R2R2 diagnostic profile.'
 }
+if ($InitializeModulesAttribution -and (-not $SafeHandoff -or
+    -not $NativeAllocationAttribution -or -not $SemiSharedAttribution -or
+    -not $GcInitProbes -or -not $ThreadStoreReadiness)) {
+    throw 'InitializeModules attribution requires the complete explicitly selected C188 safe-handoff profile.'
+}
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
 $allowed = [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet')) + [System.IO.Path]::DirectorySeparatorChar
 if (-not $candidate.StartsWith($allowed, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -41,7 +47,8 @@ if ($ResumeCandidate) {
         [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution')),
         [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution')),
         [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff')),
-        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery'))
+        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery')),
+        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
     )
     $resumeAllowed = $false
     foreach ($resumeRoot in $resumeRoots) {
@@ -89,7 +96,7 @@ $elfPath = Join-Path $artifactRoot 'HostLogProof.elf'
 $embeddedRaw = Join-Path $candidate 'gc-ownership-artifact.raw.o'
 $embeddedObject = Join-Path $candidate 'gc-ownership-artifact.o'
 $esp = Join-Path $candidate 'esp'
-$kernelBuildPrefix = if ($SafeHandoff) { 'build/c188r12r4r5r2r2r4r2-safe-handoff-' } elseif ($NativeAllocationAttribution) { 'build/c188r12r4r5r4r5r2r2-native-allocation-' } elseif ($SemiSharedAttribution) { 'build/c188r12r4r5r4r5r2-semishared-' } elseif ($GcInitProbes) { 'build/c188r12r4r5r4r5-gc-init-probes-' } elseif ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
+$kernelBuildPrefix = if ($InitializeModulesAttribution) { 'build/c188r12r4r5r2r3-transition-attribution-' } elseif ($SafeHandoff) { 'build/c188r12r4r5r2r2r4r2-safe-handoff-' } elseif ($NativeAllocationAttribution) { 'build/c188r12r4r5r4r5r2r2-native-allocation-' } elseif ($SemiSharedAttribution) { 'build/c188r12r4r5r4r5r2-semishared-' } elseif ($GcInitProbes) { 'build/c188r12r4r5r4r5-gc-init-probes-' } elseif ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
 $kernelBuildDir = $kernelBuildPrefix + [guid]::NewGuid().ToString('N')
 $kernel = Join-Path $root "kernel\$($kernelBuildDir.Replace('/','\'))\bin\kernel.elf"
 $bootloader = Join-Path $root 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
@@ -122,6 +129,7 @@ if ($GcInitProbes) { $managedBuildArguments += '-C188R12R4R5R4R5GcInitProbes' }
 if ($SemiSharedAttribution) { $managedBuildArguments += '-C188R12R4R5R4R5R2SemiSharedAttribution' }
 if ($NativeAllocationAttribution) { $managedBuildArguments += '-C188R12R4R5R4R5R2R2NativeAllocationAttribution' }
 if ($SafeHandoff) { $managedBuildArguments += '-C188R12R4R5R2R2R4SafeHandoff' }
+if ($InitializeModulesAttribution) { $managedBuildArguments += '-C188R12R4R5R2R3InitializeModulesAttribution' }
 if ($ResumeCandidate) {
     if (-not (Test-Path -LiteralPath $pePath -PathType Leaf) -or
         -not (Test-Path -LiteralPath $mapPath -PathType Leaf) -or
@@ -187,6 +195,12 @@ if ([bool]$runtimeManifest.c188r12r4r5r2r2r4SafeHandoff -ne [bool]$SafeHandoff -
          [string]$runtimeManifest.c188r12r4r5r2r2r4SafeHandoffTransition -cne 'disabled before RhpReversePInvoke and InitializeModules'))) {
     throw 'Runtime-pack safe-handoff profile or transition gate does not match the requested candidate mode.'
 }
+if ([bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution -ne [bool]$InitializeModulesAttribution -or
+    ($InitializeModulesAttribution -and
+        ([string]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttributionMarker -cne 'C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' -or
+         [string]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttributionTransition -notmatch 'explicit preflight gate'))) {
+    throw 'Runtime-pack transition-attribution profile or explicit preflight gate does not match the requested candidate mode.'
+}
 if ($ThreadStoreReadiness -and
     ([string]::IsNullOrWhiteSpace([string]$runtimeManifest.c188r12r4r5r4PalCommonReplacementObject) -or
      [string]::IsNullOrWhiteSpace([string]$runtimeManifest.c188r12r4r5r4PalCommonReplacementSha256))) {
@@ -217,6 +231,9 @@ if ($SafeHandoff) {
         reversePInvoke = 'RhpReversePInvoke'
         initializeModules = 'InitializeModules'
     }
+    if ($InitializeModulesAttribution) {
+        $safeDisassembly['transitionPrepare'] = 'GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare'
+    }
     foreach ($entry in $safeDisassembly.GetEnumerator()) {
         $disassemblyPath = Join-Path $candidate ($entry.Key + '.disassembly.txt')
         $symbolPattern = if ($entry.Key -eq 'initializeRuntimeState') {
@@ -237,6 +254,25 @@ if ($SafeHandoff) {
         $disassemblyText = Get-Content -LiteralPath $disassemblyPath -Raw
         if ($disassemblyText -notmatch '(?m)^\s*[0-9a-fA-F]{8,16}:\s+[0-9a-fA-F]{2}\b') {
             throw "Linked PE disassembly for $($entry.Value) contains no function instructions."
+        }
+    }
+    if ($InitializeModulesAttribution) {
+        $rhpMatch = [regex]::Match($mapText, '(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvoke\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
+        if (-not $rhpMatch.Success) { throw 'The linked NativeAOT map has no unique code symbol for RhpReversePInvoke.' }
+        $rhpAddress = [Convert]::ToUInt64($rhpMatch.Groups['address'].Value, 16)
+        $initializeModulesDisassembly = Get-Content -LiteralPath (Join-Path $candidate 'initializeModules.disassembly.txt') -Raw
+        $expectedRhpCall = 'call\s+0x' + $rhpAddress.ToString('x') + '\b'
+        if ($initializeModulesDisassembly -notmatch $expectedRhpCall) {
+            throw 'The linked InitializeModules prologue does not call the pinned RhpReversePInvoke entry.'
+        }
+        $rhpReturnMatch = [regex]::Match($mapText, '(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvokeReturn\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
+        if (-not $rhpReturnMatch.Success) { throw 'The linked NativeAOT map has no code symbol for RhpReversePInvokeReturn.' }
+        $rhpReturnAddress = [Convert]::ToUInt64($rhpReturnMatch.Groups['address'].Value, 16)
+        $expectedRhpReturnCall = 'call\s+0x' + $rhpReturnAddress.ToString('x') + '\b'
+        if ($initializeModulesDisassembly -notmatch $expectedRhpReturnCall -or
+            $initializeModulesDisassembly -notmatch '(?m)lea\s+rcx,\[rsp\+0x30\].*?\n.*?call\s+0x' + $rhpAddress.ToString('x') + '\b' -or
+            $initializeModulesDisassembly -notmatch '(?m)lea\s+rcx,\[rsp\+0x30\].*?\n.*?call\s+0x' + $rhpReturnAddress.ToString('x') + '\b') {
+            throw 'The generated InitializeModules prologue/epilogue does not preserve its stack-local reverse-P/Invoke frame contract.'
         }
     }
 }
@@ -290,6 +326,19 @@ if ($SafeHandoff) {
     $requiredSymbols += @(
         'GuideXosNativeAotC188R12R4R5R2R2R4SafeHandoffPrepare',
         'GuideXosNativeAotInitTraceEmitSummary'
+    )
+}
+if ($InitializeModulesAttribution) {
+    $requiredSymbols += @(
+        'GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare',
+        'g_guideXosNativeAotTransitionAttributionRecord',
+        'GuideXosNativeAotTransitionCapturePalFatal',
+        'GuideXosNativeAotTransitionGetPalFlsIndex',
+        'GuideXosNativeAotTransitionGetPalFlsValue',
+        'GuideXosNativeAotInitTraceGetFirstFailureStage',
+        'GuideXosNativeAotInitTraceGetFirstFailureStatus',
+        'GuideXosNativeAotInitTraceGetLastSuccessfulStage',
+        'GuideXosNativeAotInitTraceStagePassed'
     )
 }
 foreach ($symbol in $requiredSymbols) {
@@ -350,6 +399,12 @@ if ($SafeHandoff) {
     $exports['GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF_PREPARE_ADDRESS'] =
         'GuideXosNativeAotC188R12R4R5R2R2R4SafeHandoffPrepare'
 }
+if ($InitializeModulesAttribution) {
+    $exports['GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_TRANSITION_PREPARE_ADDRESS'] =
+        'GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare'
+    $exports['GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_TRANSITION_RECORD_ADDRESS'] =
+        'g_guideXosNativeAotTransitionAttributionRecord'
+}
 $header = Join-Path $artifactRoot 'guidexos_nativeaot_gc_first_allocation_exports.h'
 $headerLines = @('#pragma once', '', '#include <stdint.h>', '')
 foreach ($define in $exports.Keys) {
@@ -359,6 +414,78 @@ foreach ($define in $exports.Keys) {
     $headerLines += "#define $define ((uintptr_t)0x$($match.Groups[1].Value)u)"
 }
 Set-Content -LiteralPath $header -Value $headerLines -Encoding ASCII
+
+$transitionCallSiteMapPath = $null
+$transitionCallSiteHeaderPath = $null
+if ($InitializeModulesAttribution) {
+    $palFatalMatch = [regex]::Match($mapText, '(?m)^\s*0001:[0-9A-Fa-f]{8}\s+PalPrintFatalError\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
+    if (-not $palFatalMatch.Success) { throw 'The candidate map has no linked PalPrintFatalError implementation.' }
+    $palFatalAddress = [Convert]::ToUInt64($palFatalMatch.Groups['address'].Value, 16)
+    $mapCodeSymbols = @(
+        foreach ($line in ($mapText -split "`r?`n")) {
+            if ($line -match '^\s*0001:[0-9A-Fa-f]{8}\s+(?<symbol>\S+)\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)') {
+                [pscustomobject]@{
+                    symbol = $Matches.symbol
+                    address = [Convert]::ToUInt64($Matches.address, 16)
+                }
+            }
+        }
+    ) | Sort-Object address
+    $sourceCallSites = @(
+        [ordered]@{ id=1; key='THREAD_REVERSE_PINVOKE'; name='thread.reverse-pinvoke.invalid-unmanagedcallersonly'; source='Runtime/thread.cpp'; line=1199; functionPattern='\?ReversePInvokeAttachOrTrapThread@Thread@@'; message='Fatal error. Invalid Program: attempted to call a UnmanagedCallersOnly method from managed code.' },
+        [ordered]@{ id=2; key='CPU_FEATURES'; name='startup.required-cpu-instruction-sets'; source='Runtime/startup.cpp'; line=186; functionPattern='DetectCPUFeatures'; message='The required instruction sets are not supported by the current CPU.' },
+        [ordered]@{ id=3; key='HARDWARE_STACK_OVERFLOW'; name='eh.hardware-stack-overflow'; source='Runtime/EHHelpers.cpp'; line=447; functionPattern='RhpHardwareExceptionHandler'; message='Process is terminating due to StackOverflowException.' },
+        [ordered]@{ id=4; key='VECTORED_STACK_OVERFLOW'; name='eh.vectored-stack-overflow'; source='Runtime/EHHelpers.cpp'; line=588; functionPattern='RhpVectoredExceptionHandler'; message='Process is terminating due to StackOverflowException.' },
+        [ordered]@{ id=5; key='RESTORE_CONTEXT'; name='pal.restore-context-fallback'; source='Runtime/windows/PalRedhawkMinWin.cpp'; line=403; functionPattern='RtlRestoreContextFallbackExceptionFilter'; message='Could not set context record.' }
+    )
+    $transitionCallSiteHeaderPath = Join-Path $artifactRoot 'guidexos_nativeaot_transition_attribution_sites.h'
+    $siteHeaderLines = @('#pragma once', '', '#include <stdint.h>', '')
+    foreach ($site in $sourceCallSites) {
+        $matchingSymbols = @($mapCodeSymbols | Where-Object { $_.symbol -match [string]$site.functionPattern })
+        if ($matchingSymbols.Count -ne 1) {
+            throw "Candidate map lacks one exact linked caller function for fatal call-site ID $($site.id): $($site.functionPattern)"
+        }
+        $functionStart = [uint64]$matchingSymbols[0].address
+        $functionStop = @($mapCodeSymbols | Where-Object { $_.address -gt $functionStart } | Select-Object -First 1)
+        if ($functionStop.Count -ne 1) { throw "No following code symbol bounds fatal caller $($site.functionPattern)." }
+        $functionDisassemblyPath = Join-Path $candidate (('fatal-caller-{0}.disassembly.txt' -f $site.key.ToLowerInvariant()))
+        Invoke-Logged $objdump @('-d', '-C', '-M', 'intel',
+            ('--start-address=0x{0:X}' -f $functionStart),
+            ('--stop-address=0x{0:X}' -f [uint64]$functionStop[0].address), $pePath) $functionDisassemblyPath
+        $functionDisassembly = Get-Content -LiteralPath $functionDisassemblyPath -Raw
+        $directCalls = @(
+            foreach ($call in [regex]::Matches($functionDisassembly,
+                '(?m)^\s*(?<address>[0-9a-fA-F]{8,16}):\s+(?<bytes>(?:[0-9a-fA-F]{2}\s+)+)\s+call\s+0x(?<target>[0-9a-fA-F]+)(?:\s|$)')) {
+                if ([Convert]::ToUInt64($call.Groups['target'].Value, 16) -eq $palFatalAddress) {
+                    [pscustomobject]@{
+                        returnAddress = [Convert]::ToUInt64($call.Groups['address'].Value, 16) +
+                            @($call.Groups['bytes'].Value.Trim() -split '\s+').Count
+                    }
+                }
+            }
+        )
+        if ($directCalls.Count -ne 1) {
+            throw "Expected exactly one linked PalPrintFatalError call in source-defined caller $($site.functionPattern); found $($directCalls.Count)."
+        }
+        $site.returnAddress = [uint64]$directCalls[0].returnAddress
+        $site.functionSymbol = [string]$matchingSymbols[0].symbol
+        $site.functionStart = ('0x{0:X16}' -f $functionStart)
+        $site.functionEndExclusive = ('0x{0:X16}' -f [uint64]$functionStop[0].address)
+        $site.palPrintFatalErrorAddress = ('0x{0:X16}' -f $palFatalAddress)
+        $site.callerReturnAddress = ('0x{0:X16}' -f $site.returnAddress)
+        $siteHeaderLines += "#define GX_TRANSITION_CALLSITE_ID_$($site.key) $($site.id)u"
+        $siteHeaderLines += "#define GX_TRANSITION_CALLSITE_RETURN_$($site.key) ((uintptr_t)0x$('{0:X16}' -f $site.returnAddress)u)"
+    }
+    Set-Content -LiteralPath $transitionCallSiteHeaderPath -Value $siteHeaderLines -Encoding ASCII
+    $transitionCallSiteMapPath = Join-Path $candidate 'transition-callsite-map.json'
+    [ordered]@{
+        schemaVersion = 1
+        resolution = 'Exact candidate PE call return addresses for direct PalPrintFatalError call instructions; ids map to source-defined strings in the pinned NativeAOT source commit.'
+        palPrintFatalErrorAddress = ('0x{0:X16}' -f $palFatalAddress)
+        lockedRuntimeCommit = $runtimeManifest.runtimeIdentity.sourceCommit
+        sites = @($sourceCallSites)
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $transitionCallSiteMapPath -Encoding UTF8
+}
 
 Invoke-Logged $objcopy @('-I', 'binary', '-O', 'pe-x86-64', '-B', 'i386:x86-64', $elfPath, $embeddedRaw) (Join-Path $candidate 'embed-raw.log')
 $symbols = & $objdump -t $embeddedRaw
@@ -439,6 +566,7 @@ if ($GcInitProbes) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INI
 if ($SemiSharedAttribution) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED' }
 if ($NativeAllocationAttribution) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC' }
 if ($SafeHandoff) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF' }
+if ($InitializeModulesAttribution) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' }
 $makeArgs = @(
     '-C', 'kernel', 'ARCH=amd64', "BUILD_DIR=$kernelBuildDir",
     'GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1',
@@ -470,6 +598,9 @@ if ($NativeAllocationAttribution -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C18
 }
 if ($SafeHandoff -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF') {
     throw 'Safe-handoff kernel build does not show its opt-in diagnostic gate define.'
+}
+if ($InitializeModulesAttribution -and $kernelLog -notmatch '-DGXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION') {
+    throw 'Transition-attribution kernel build does not show its separately selected diagnostic gate define.'
 }
 if ($SafeHandoff) {
     $kernelDispatchSymbolTable = & $objdump -t $kernel
@@ -594,13 +725,68 @@ if ($SafeHandoff) {
     [System.IO.File]::WriteAllText($safeStageMapPath,($safeStageMap | ConvertTo-Json -Depth 10),[System.Text.UTF8Encoding]::new($false))
     Copy-Item -LiteralPath $safeStageMapPath -Destination (Join-Path $stagedDiagnostic 'safe-handoff-stage-map.json')
 }
+if ($InitializeModulesAttribution) {
+    Require-File $transitionCallSiteMapPath 'Generated transition call-site map'
+    Require-File $transitionCallSiteHeaderPath 'Generated transition call-site header'
+    Copy-Item -LiteralPath $transitionCallSiteMapPath -Destination (Join-Path $stagedDiagnostic 'transition-callsite-map.json')
+    Copy-Item -LiteralPath $transitionCallSiteHeaderPath -Destination (Join-Path $stagedRuntimeSource 'guidexos_nativeaot_transition_attribution_sites.h')
+    foreach ($sourceName in @(
+        'guidexos_nativeaot_transition_attribution.h',
+        'guidexos_nativeaot_pal_minwin_replacement.cpp',
+        'guidexos_nativeaot_platform.cpp',
+        'guidexos_nativeaot_threadstore_readiness.h')) {
+        Copy-Item -LiteralPath (Join-Path $root "tools\dotnet\runtime-pack\src\platform\$sourceName") -Destination $stagedRuntimeSource
+    }
+    Copy-Item -LiteralPath (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp') -Destination (Join-Path $stagedRuntimeSource 'nativeaot_pal_qemu_test.cpp')
+    Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1') -Destination $stagedDiagnostic
+    Copy-Item -LiteralPath (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r3-transition-attribution.ps1') -Destination $stagedDiagnostic
+    $stagedHostedSource = Join-Path $stagedDiagnostic 'hosted-test-source'
+    New-Item -ItemType Directory -Force -Path $stagedHostedSource | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r2r3_transition_attribution_test.cpp') -Destination $stagedHostedSource
+
+    $transitionPrerequisiteMatrix = [ordered]@{
+        schema='C188R12R4R5R2R3_TRANSITION_PREREQUISITE_MATRIX_V1'
+        candidateMode='NativeAotInitializeModulesTransitionAttribution'
+        runtimeCommit=[string]$runtimeManifest.runtimeIdentity.sourceCommit
+        evidenceBoundary='Prior guest evidence remains historical; hosted source/link checks do not establish this candidate guest outcome.'
+        prerequisites=@(
+            [ordered]@{ name='runtime instance creation'; status='guest-proven'; basis='Accepted R4/R5 diagnostic recovery after real RhInitialize; candidate explicitly rechecks published RuntimeInstance.' },
+            [ordered]@{ name='ThreadStore publication'; status='guest-proven'; basis='Prior safe-handoff observed a non-null ThreadStore; candidate rechecks it and keeps publication distinct from attachment.' },
+            [ordered]@{ name='current-thread TLS identity'; status='guest-proven'; basis='Prior accepted guest verified TLS vector/block identity; candidate compares the current GS TLS vector slot with the loader-provided TLS block.' },
+            [ordered]@{ name='current-thread attachment'; status='unqualified'; basis='Prior guest did not prove attachment. Candidate allows absent attachment only when flags are TSF_Unknown/zero, PAL FLS is empty, and the pinned stock helper can attach; all other unattached states stop.' },
+            [ordered]@{ name='native thread object lifetime'; status='source-only'; basis='Pinned threadstore.inl returns the current thread-local tls_CurrentThread object; thread.cpp::Thread::Construct initializes that same object before setting TSF_Attached.' },
+            [ordered]@{ name='PAL stack bounds'; status='hosted-qualified'; basis='Pinned PalGetMaximumStackBounds contract is linked; candidate records the live current pointer and blocks if bounds are unavailable or inconsistent.' },
+            [ordered]@{ name='reverse-P/Invoke entry ABI'; status='hosted-qualified'; basis='Linked InitializeModules disassembly verifies direct RhpReversePInvoke and RhpReversePInvokeReturn calls with the same generated stack-local frame at [rsp+0x30].' },
+            [ordered]@{ name='transition-frame linkage and alignment'; status='source-only'; basis='Pinned Thread::ReversePInvokeAttachOrTrapThread saves the prior frame and stock RhpReversePInvoke links it; candidate requires the top-of-stack marker or an aligned in-bounds frame for an already attached thread.' },
+            [ordered]@{ name='cooperative/preemptive state'; status='unqualified'; basis='No prior guest transition state exists. Candidate permits an attached thread only in preemptive mode; cooperative or ambiguous states stop.' },
+            [ordered]@{ name='GC heap readiness'; status='guest-proven'; basis='Prior accepted guest completed Workstation GC initialization; candidate requires the traced GCHeap::Initialize success stage.' },
+            [ordered]@{ name='OS module registration'; status='guest-proven'; basis='Prior safe-handoff completed actual RhRegisterOSModule; candidate reruns the same real registration path and checks completion.' },
+            [ordered]@{ name='code-manager registration'; status='guest-proven'; basis='Prior safe-handoff registered the production code manager; candidate requires the linked registration flag and stage.' },
+            [ordered]@{ name='module initialization'; status='unqualified'; basis='This is the sole operation conditionally attempted by the explicit attribution mode after the shared gate passes.' },
+            [ordered]@{ name='managed entry'; status='unqualified'; basis='Not requested by this diagnostic candidate, including when InitializeModules returns.' }
+        )
+        safetyGate=[ordered]@{
+            missingPrerequisite='return a diagnostic safe-stop status before InitializeModules'
+            unattachedThreadContract='zero ThreadStateFlags exactly, current PAL FLS empty, native thread ID and PAL stack bounds present; the unchanged stock ReversePInvokeAttachOrTrapThread path must perform construction/attachment'
+            attachedThreadContract='TSF_Attached set, PAL FLS identifies the raw current thread, native thread IDs agree, preemptive mode, and transition frame is top-of-stack marker or aligned inside PAL stack bounds'
+            noFabricatedAttachment=$true
+            noManagedDispatch=$true
+            noCollection=$true
+            failFastPreserved=$true
+        }
+    }
+    $transitionPrerequisiteMatrixPath = Join-Path $candidate 'transition-prerequisite-matrix.json'
+    [System.IO.File]::WriteAllText($transitionPrerequisiteMatrixPath,
+        ($transitionPrerequisiteMatrix | ConvertTo-Json -Depth 10),[System.Text.UTF8Encoding]::new($false))
+    Copy-Item -LiteralPath $transitionPrerequisiteMatrixPath -Destination (Join-Path $stagedDiagnostic 'transition-prerequisite-matrix.json')
+}
 $stagedFiles = @(Get-ChildItem -LiteralPath $stagedRoot -File -Recurse | ForEach-Object {
     $relativePath = $_.FullName.Substring($stagedRoot.Length + 1).Replace('\','/')
     [ordered]@{ path=$relativePath; sizeBytes=$_.Length; sha256=Hash-File $_.FullName }
 })
 $stagedQualification = [ordered]@{
     result = 'PASS'
-    phase = if ($SafeHandoff) { 'C188R12R4R5R4R5R2R2R4R2' } elseif ($NativeAllocationAttribution) { 'C188R12R4R5R4R5R2R2' } elseif ($SemiSharedAttribution) { 'C188R12R4R5R4R5R2' } else { 'C188R12R4R5R4R5' }
+    phase = if ($InitializeModulesAttribution) { 'C188R12R4R5R4R5R2R2R4R2R3' } elseif ($SafeHandoff) { 'C188R12R4R5R4R5R2R2R4R2' } elseif ($NativeAllocationAttribution) { 'C188R12R4R5R4R5R2R2' } elseif ($SemiSharedAttribution) { 'C188R12R4R5R4R5R2' } else { 'C188R12R4R5R4R5' }
     sourceHead = (& git -C $root rev-parse HEAD).Trim()
     runtimeSourceCommit = [string]$runtimeManifest.runtimeIdentity.sourceCommit
     files = $stagedFiles
@@ -651,6 +837,7 @@ if ([bool]$productionRuntimeManifest.c188r12r4r5GcOwnershipProof -or
     [bool]$productionRuntimeManifest.c188r12r4r5r4r5r2SemiSharedAttribution -or
     [bool]$productionRuntimeManifest.c188r12r4r5r4r5r2r2NativeAllocationAttribution -or
     [bool]$productionRuntimeManifest.c188r12r4r5r2r2r4SafeHandoff -or
+    [bool]$productionRuntimeManifest.c188r12r4r5r2r3InitializeModulesAttribution -or
     $productionMapText.Contains('C188R12R4R5R1_INIT') -or
     $productionMapText.Contains('C188R12R4R5R3_INIT') -or
     $productionMapText.Contains('C188R12R4R5R4_THREAD') -or
@@ -661,9 +848,17 @@ if ([bool]$productionRuntimeManifest.c188r12r4r5GcOwnershipProof -or
     $productionMapText.Contains('C188R12R4R5R4R5R2R2_NATIVE_ALLOC') -or
     $productionMapText.Contains('C188R12R4R5R2R2R4_SAFE_HANDOFF') -or
     $productionMapText.Contains('GuideXosNativeAotC188R12R4R5R2R2R4SafeHandoffPrepare') -or
+    $productionMapText.Contains('C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION') -or
+    $productionMapText.Contains('GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare') -or
+    $productionMapText.Contains('g_guideXosNativeAotTransitionAttributionRecord') -or
     $productionMapText.Contains('GuideXosNativeAotNativeAllocGetAttemptField') -or
     $productionMapText.Contains('GuideXosNativeAotGcStartupGetRhInitializeRawResult')) {
     throw 'Proof-disabled production NativeAOT outputs contain C188 return-contract instrumentation.'
+}
+$productionKernelSymbols = & $objdump -t ([string]$productionKernelManifest.kernelElf)
+if ($LASTEXITCODE -ne 0 -or ($productionKernelSymbols -join "`n") -match
+    'C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION|TransitionAttribution|transition_attribution') {
+    throw 'Proof-disabled production kernel contains transition-attribution controls or symbols.'
 }
 
 $branchMapPath = Join-Path $candidate 'native-allocation-failure-branch-map.json'
@@ -753,16 +948,147 @@ if ($SafeHandoff) {
     }
     [System.IO.File]::WriteAllText($stagedQualificationPath,($stagedQualification | ConvertTo-Json -Depth 8),[System.Text.UTF8Encoding]::new($false))
 }
+$transitionHostedTestRoot = $null
+$transitionHostedTestResults = $null
+$transitionPrerequisiteMatrixPath = $null
+$transitionGuestPhasePlanPath = $null
+$transitionGuestGuardTemplatePath = $null
+if ($InitializeModulesAttribution) {
+    $transitionHostedTestRoot = if ($ResumeCandidate -and (Test-Path -LiteralPath (Join-Path $candidate 'transition-attribution-hosted-tests'))) {
+        Join-Path $candidate ("transition-attribution-hosted-tests-resume-{0}" -f [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
+    } else { Join-Path $candidate 'transition-attribution-hosted-tests' }
+    $transitionHostedTestLog = if ($ResumeCandidate -and (Test-Path -LiteralPath (Join-Path $candidate 'transition-attribution-hosted-tests.log'))) {
+        Join-Path $candidate ("transition-attribution-hosted-tests-resume-{0}.log" -f [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
+    } else { Join-Path $candidate 'transition-attribution-hosted-tests.log' }
+    Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',
+        (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r3-transition-attribution.ps1'),
+        '-RepoRoot',$root,'-OutputDirectory',$transitionHostedTestRoot,
+        '-ProductionNativeAotManifest',$productionRuntimeManifestPath,
+        '-ProductionNativeAotMap',$productionMapPath,
+        '-ProductionApplicationManifest',$productionManifestPath,
+        '-CallSiteMapPath',$transitionCallSiteMapPath) $transitionHostedTestLog
+    $transitionHostedResultsPath = Join-Path $transitionHostedTestRoot 'hosted-test-results.json'
+    Require-File $transitionHostedResultsPath 'Transition-attribution hosted-test result'
+    $transitionHostedTestResults = Get-Content -LiteralPath $transitionHostedResultsPath -Raw | ConvertFrom-Json
+    if ($transitionHostedTestResults.result -cne 'PASS' -or
+        [int]$transitionHostedTestResults.assertionCount -lt 18 -or
+        [bool]$transitionHostedTestResults.qemuLaunched -or
+        [bool]$transitionHostedTestResults.qacReserved -or
+        [bool]$transitionHostedTestResults.managedCollectionRequested) {
+        throw 'Transition-attribution hosted tests failed or crossed the hosted-only boundary.'
+    }
+    $stagedTransitionResultsPath = Join-Path $stagedDiagnostic 'transition-attribution-hosted-test-results.json'
+    Copy-Item -LiteralPath $transitionHostedResultsPath -Destination $stagedTransitionResultsPath
+    $stagedCallSiteMap = Join-Path $stagedDiagnostic 'transition-callsite-map.json'
+    $stagedSiteHeader = Join-Path $stagedRuntimeSource 'guidexos_nativeaot_transition_attribution_sites.h'
+    $transitionAnalyzerStaged = Join-Path $stagedDiagnostic 'analyze-c188r12r4r5r2r3-transition-attribution.ps1'
+
+    $transitionGuestPhasePlan = [ordered]@{
+        schema='C188R12R4R5R2R3R1_GUEST_PHASE_PLAN_V1'
+        phase='C188R12R4R5R4R5R2R2R4R2R3R1 — InitializeModules Transition Attribution Guest'
+        status='prepared_not_executed'
+        candidateManifest=(Join-Path $candidate 'candidate-manifest.json')
+        candidateMode='NativeAotInitializeModulesTransitionAttribution'
+        artifacts=[ordered]@{
+            diagnosticElf=$elfPath; diagnosticElfSha256=Hash-File $elfPath
+            diagnosticKernel=$kernel; diagnosticKernelSha256=$kernelHash
+            stagedEsp=(Join-Path $candidate 'ESP')
+            stagedKernelSha256=Hash-File (Join-Path $esp 'kernel.elf')
+            candidateRamdiskSha256=$candidateRamdiskHash
+            sourceRamdiskSha256=$expectedRamdiskHash
+            callSiteMap=$transitionCallSiteMapPath
+            callSiteMapSha256=Hash-File $transitionCallSiteMapPath
+            prerequisiteMatrix=$transitionPrerequisiteMatrixPath
+            prerequisiteMatrixSha256=Hash-File $transitionPrerequisiteMatrixPath
+        }
+        admission=[ordered]@{
+            qacProject='guideXOSServer'
+            qacMode='acceptance'
+            qacReservation='not_requested'
+            requiredBeforeGuard='fresh coherent exclusive QAC admission and owner-verified empty process census under the validated run-c188 QAC contract'
+            noAdmissionNoGuard=$true
+        }
+        oneBootGuard=[ordered]@{
+            path=(Join-Path $candidate 'guest-phase\C188R12R4R5R2R3R1-one-boot.guard.json')
+            materialized=$false
+            creation='System.IO.FileMode.CreateNew after fresh successful QAC preflight only'
+            maxGuestBoots=1
+            automaticRetry=$false
+            bindsCandidateManifestSha256=$true
+            bindsDiagnosticElfKernelAndRamdiskSha256=$true
+        }
+        executionContract=@(
+            'Verify candidate-manifest.json and all artifact hashes before admission.',
+            'After fresh exclusive QAC admission only, create the phase guard atomically with CreateNew; refuse an existing guard.',
+            'Allow one guest boot and no retry; capture baseline accepted initialization milestones again.',
+            'Record TLS/FLS, ThreadStore raw/current identity, flags, attachment, PAL stack bounds, frame, GC readiness, and module/code-manager registration.',
+            'Attempt InitializeModules only when the candidate gate reports GX_TRANSITION_GATE_NONE; otherwise preserve the safe-stop outcome.',
+            'Keep the original safe-handoff profile separately selectable as the reference; never dispatch ManagedMain or request managed GC collection.',
+            'Preserve raw serial before analysis, run the staged transition analyzer independently, shut down only the owned QEMU process, and verify QAC release.'
+        )
+        executionNotPerformed=[ordered]@{ qemuLaunched=$false; qacReserved=$false; guardCreated=$false; guestBoots=0 }
+    }
+    New-Item -ItemType Directory -Force -Path (Join-Path $candidate 'guest-phase') | Out-Null
+    $transitionGuestPhasePlanPath = Join-Path $candidate 'guest-phase\phase-plan.json'
+    [System.IO.File]::WriteAllText($transitionGuestPhasePlanPath,
+        ($transitionGuestPhasePlan | ConvertTo-Json -Depth 10),[System.Text.UTF8Encoding]::new($false))
+    $transitionGuestGuardTemplate = [ordered]@{
+        schema='C188R12R4R5R2R3R1_ONE_BOOT_GUARD_TEMPLATE_V1'
+        phase=$transitionGuestPhasePlan.phase
+        candidateManifest=(Join-Path $candidate 'candidate-manifest.json')
+        candidateManifestSha256='MUST_BE_COMPUTED_AFTER_FINAL_CANDIDATE_MANIFEST_IS_WRITTEN'
+        diagnosticElfSha256=(Hash-File $elfPath)
+        diagnosticKernelSha256=$kernelHash
+        ramdiskSha256=$candidateRamdiskHash
+        qacProject='guideXOSServer'
+        qacMode='acceptance'
+        qacAdmissionSnapshot='MUST_BE_FRESH_COHERENT_EXCLUSIVE_AND_OWNER_VERIFIED_BEFORE_GUARD_CREATION'
+        maxGuestBoots=1
+        automaticRetry=$false
+        guardCreation='CreateNew; never overwrite; created only after QAC preflight'
+        consumed=$false
+    }
+    $transitionGuestGuardTemplatePath = Join-Path $candidate 'guest-phase\one-boot-guard.template.json'
+    [System.IO.File]::WriteAllText($transitionGuestGuardTemplatePath,
+        ($transitionGuestGuardTemplate | ConvertTo-Json -Depth 6),[System.Text.UTF8Encoding]::new($false))
+    Copy-Item -LiteralPath $transitionGuestPhasePlanPath -Destination (Join-Path $stagedDiagnostic 'transition-guest-phase-plan.json')
+    Copy-Item -LiteralPath $transitionGuestGuardTemplatePath -Destination (Join-Path $stagedDiagnostic 'transition-one-boot-guard.template.json')
+
+    $stagedFiles = @(Get-ChildItem -LiteralPath $stagedRoot -File -Recurse | Where-Object {
+        $_.FullName -cne [System.IO.Path]::GetFullPath($stagedQualificationPath)
+    } | ForEach-Object {
+        $relativePath = $_.FullName.Substring($stagedRoot.Length + 1).Replace('\','/')
+        [ordered]@{ path=$relativePath; sizeBytes=$_.Length; sha256=Hash-File $_.FullName }
+    })
+    $stagedQualification['files'] = $stagedFiles
+    $stagedQualification['transitionAttribution'] = [ordered]@{
+        mode='NativeAotInitializeModulesTransitionAttribution'
+        callSiteMapPath='diagnostic/transition-callsite-map.json'
+        callSiteMapSha256=Hash-File $stagedCallSiteMap
+        prerequisiteMatrixPath='diagnostic/transition-prerequisite-matrix.json'
+        prerequisiteMatrixSha256=Hash-File (Join-Path $stagedDiagnostic 'transition-prerequisite-matrix.json')
+        analyzerPath='diagnostic/analyze-c188r12r4r5r2r3-transition-attribution.ps1'
+        analyzerSha256=Hash-File $transitionAnalyzerStaged
+        hostedTestResultsPath='diagnostic/transition-attribution-hosted-test-results.json'
+        hostedTestResultsSha256=Hash-File $stagedTransitionResultsPath
+        guestPhasePlanPath='diagnostic/transition-guest-phase-plan.json'
+        guestPhasePlanSha256=Hash-File (Join-Path $stagedDiagnostic 'transition-guest-phase-plan.json')
+        guardTemplatePath='diagnostic/transition-one-boot-guard.template.json'
+        guardTemplateSha256=Hash-File (Join-Path $stagedDiagnostic 'transition-one-boot-guard.template.json')
+        guestRunPerformed=$false
+    }
+    [System.IO.File]::WriteAllText($stagedQualificationPath,($stagedQualification | ConvertTo-Json -Depth 10),[System.Text.UTF8Encoding]::new($false))
+}
 $manifest = [ordered]@{
-    result = if ($SafeHandoff) { 'SAFE_HANDOFF_HOSTED_READY' } elseif ($NativeAllocationAttribution) { 'NATIVE_ALLOC_PROBES_HOSTED_READY' } elseif ($SemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' } elseif ($GcInitProbes) { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' } elseif ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
+    result = if ($InitializeModulesAttribution) { 'TRANSITION_ATTRIBUTION_HOSTED_READY' } elseif ($SafeHandoff) { 'SAFE_HANDOFF_HOSTED_READY' } elseif ($NativeAllocationAttribution) { 'NATIVE_ALLOC_PROBES_HOSTED_READY' } elseif ($SemiSharedAttribution) { 'PASS_BUILD_READY_FOR_SEMISHARED_ATTRIBUTION_GUEST' } elseif ($GcInitProbes) { 'PASS_BUILD_READY_FOR_GC_INIT_ATTRIBUTION_GUEST' } elseif ($ThreadStoreReadiness) { 'PASS_BUILD_READY_FOR_THREADSTORE_READINESS' } else { 'PASS_BUILD_READY_FOR_INIT_RETURN_CONTRACT_GUEST' }
     repoRoot = $root
     head = (& git -C $root rev-parse HEAD).Trim()
     branch = (& git -C $root branch --show-current).Trim()
     candidateRoot = $candidate
-    mode = if ($SafeHandoff) { 'NativeAotSafeHandoff' } elseif ($NativeAllocationAttribution) { 'NativeAllocationFailureAttribution' } elseif ($SemiSharedAttribution) { 'SemiSharedAttribution' } elseif ($GcInitProbes) { 'GcInitFailureAttribution' } elseif ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
+    mode = if ($InitializeModulesAttribution) { 'NativeAotInitializeModulesTransitionAttribution' } elseif ($SafeHandoff) { 'NativeAotSafeHandoff' } elseif ($NativeAllocationAttribution) { 'NativeAllocationFailureAttribution' } elseif ($SemiSharedAttribution) { 'SemiSharedAttribution' } elseif ($GcInitProbes) { 'GcInitFailureAttribution' } elseif ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
     productionApplicationStartupOnly = $true
     managedMainEnteredByCandidate = $false
-    managedMainGateReason = if ($SafeHandoff) { 'Explicit diagnostic safe-handoff mode closes the gate and stops after the real RhInitialize, native TLS/FLS setup, and actual RhRegisterOSModule/code-manager registration; InitializeModules and managed entry are not attempted.' } elseif ($GcInitProbes) { 'Candidate is unbooted; after RhInitialize returns, the adapter snapshots the internal GC initialization record. Managed dispatch remains governed by actual initialization success and the established R4 thread-attachment gate.' } elseif ($ThreadStoreReadiness) { 'Candidate is unbooted; a successful RhInitialize proceeds through module registration and the pinned stock reverse-P/Invoke attachment helper before ManagedMain.' } else { 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.' }
+    managedMainGateReason = if ($InitializeModulesAttribution) { 'Explicit transition-attribution mode performs real initialization and module registration, then a shared read-only prerequisite gate; it enters the generated InitializeModules path only when the stock attachment/frame contract is satisfied. It returns before ManagedMain and collection.' } elseif ($SafeHandoff) { 'Explicit diagnostic safe-handoff mode closes the gate and stops after the real RhInitialize, native TLS/FLS setup, and actual RhRegisterOSModule/code-manager registration; InitializeModules and managed entry are not attempted.' } elseif ($GcInitProbes) { 'Candidate is unbooted; after RhInitialize returns, the adapter snapshots the internal GC initialization record. Managed dispatch remains governed by actual initialization success and the established R4 thread-attachment gate.' } elseif ($ThreadStoreReadiness) { 'Candidate is unbooted; a successful RhInitialize proceeds through module registration and the pinned stock reverse-P/Invoke attachment helper before ManagedMain.' } else { 'Runtime ThreadStore attachment is not exposed by a safe read-only accessor in this freestanding path.' }
     managedGraphCallbacks = 0
     isolatedKernelBuildDirectory = $kernelBuildDir
     runtimePackManifest = $runtimeManifestPath
@@ -785,18 +1111,46 @@ $manifest = [ordered]@{
     c188R12R4R5R2R2R4SafeHandoff = [bool]$runtimeManifest.c188r12r4r5r2r2r4SafeHandoff
     c188R12R4R5R2R2R4SafeHandoffMarker = [string]$runtimeManifest.c188r12r4r5r2r2r4SafeHandoffMarker
     c188R12R4R5R2R2R4SafeHandoffTransition = [string]$runtimeManifest.c188r12r4r5r2r2r4SafeHandoffTransition
+    c188R12R4R5R2R3InitializeModulesAttribution = [bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution
+    c188R12R4R5R2R3InitializeModulesAttributionMarker = [string]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttributionMarker
+    c188R12R4R5R2R3InitializeModulesAttributionTransition = [string]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttributionTransition
+    transitionAttributionContract = if ($InitializeModulesAttribution) { [ordered]@{
+        recordSchema='fixed-size C188R12R4R5R2R3_FATAL plus C188R12R4R5R2R3_STATE'
+        fatalMessageStrategy='message bytes unavailable; capture exact caller return RIP and resolve only against the generated candidate call-site map; never dereference message'
+        failFastReason='0x50414C06 is preserved as the PAL fail-fast reason and is not treated as the underlying runtime defect'
+        firstFailureStatus='captured independently from later fatal reporting'
+        transitionEntry='generated InitializeModules through the direct linked RhpReversePInvoke prologue and RhpReversePInvokeReturn epilogue'
+        managedEntryReached=$false
+        collectionRequested=$false
+        safeGate='stock attachment permitted only from TSF_Unknown/zero flags with empty PAL FLS; attached state requires TSF_Attached, matching IDs/FLS, preemptive mode, and a valid transition frame'
+        gateFailure='returns to kernel safe-stop before InitializeModules'
+        callSiteMap=$transitionCallSiteMapPath
+        prerequisiteMatrix=$transitionPrerequisiteMatrixPath
+        guestPhasePlan=$transitionGuestPhasePlanPath
+        guestGuardTemplate=$transitionGuestGuardTemplatePath
+        qemuLaunched=$false
+        qacReserved=$false
+    } } else { $null }
     safeHandoffStageMap = if ($SafeHandoff) { $safeStageMapPath } else { $null }
     safeHandoffHostedTestResults = if ($SafeHandoff) { Join-Path $safeHostedTestRoot 'hosted-test-results.json' } else { $null }
     safeHandoffAnalyzer = if ($SafeHandoff) { Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r2r4-safe-handoff.ps1' } else { $null }
     safeHandoffRunner = if ($SafeHandoff) { Join-Path $root 'scripts\dotnet\run-c188r12r4r5r2r2r4-safe-handoff-qac-guest.ps1' } else { $null }
     safeHandoffSemantics = if ($SafeHandoff) { 'initialization accepted; module registration accepted; intentionally stopped; no managed transition or runtime acceptance' } else { $null }
+    transitionAttributionHostedTestResults = if ($InitializeModulesAttribution) { Join-Path $transitionHostedTestRoot 'hosted-test-results.json' } else { $null }
+    transitionAttributionHostedAssertionCount = if ($InitializeModulesAttribution) { [int]$transitionHostedTestResults.assertionCount } else { 0 }
+    transitionCallSiteMap = if ($InitializeModulesAttribution) { $transitionCallSiteMapPath } else { $null }
+    transitionCallSiteMapSha256 = if ($InitializeModulesAttribution) { Hash-File $transitionCallSiteMapPath } else { $null }
+    transitionPrerequisiteMatrix = if ($InitializeModulesAttribution) { $transitionPrerequisiteMatrixPath } else { $null }
+    transitionGuestPhasePlan = if ($InitializeModulesAttribution) { $transitionGuestPhasePlanPath } else { $null }
+    transitionOneBootGuardTemplate = if ($InitializeModulesAttribution) { $transitionGuestGuardTemplatePath } else { $null }
+    transitionGuestPhasePreparedOnly = [bool]$InitializeModulesAttribution
     initializationTraceStorageModel = if ($SafeHandoff) { '64 fixed stage slots; four saturating 7-bit event counters per stage; one packed summary line per stage; separate first-failure record; global dropped-event and serial-drop counts; no allocation or synchronization' } else { '64 fixed event records' }
     nativeAllocationBackendCapacity = if ($NativeAllocationAttribution) { 9 } else { 0 }
     nativeAllocationAnalyzer = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2-native-alloc.ps1'
     nativeAllocationFailureBranchMap = $branchMapPath
     nativeAllocationHostedTestResults = Join-Path $hostedTestRoot 'hosted-test-results.json'
     nativeAllocationHostedTestClassifications = @($hostedTestResults.fixtureClassifications)
-    nextGuestPhase = if ($SafeHandoff) { 'C188R12R4R5R4R5R2R2R4R2R1_NativeAOT_SafeHandoff_Guest_Qualification' } else { 'C188R12R4R5R4R5R2R2R1_Native_Allocation_Failure_Guest_Attribution' }
+    nextGuestPhase = if ($InitializeModulesAttribution) { 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' } elseif ($SafeHandoff) { 'C188R12R4R5R4R5R2R2R4R2R1_NativeAOT_SafeHandoff_Guest_Qualification' } else { 'C188R12R4R5R4R5R2R2R1_Native_Allocation_Failure_Guest_Attribution' }
     nextGuestRunPerformed = $false
     semiSharedSourceFiles = $runtimeManifest.c188r12r4r5r4r5r2SourceFiles
     gcInitProbeSourceFiles = $runtimeManifest.c188r12r4r5r4r5GcInitSourceFiles
@@ -850,7 +1204,7 @@ $manifest = [ordered]@{
         bit4='RhConfig pointer available'; bit5='guideXOS NativeAOT modules initialized'
         bit6='code manager registered'; bit7='ThreadStore current-thread accessor non-null (not proof of list attachment)'
     }
-    adapterVersion = if ($NativeAllocationAttribution) { 'c188r12r4r5r4r5r2r2-native-allocation-v1' } elseif ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-v1' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes-v1' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness-v1' } else { 'c188r12r4r5r3-init-return-contract-v1' }
+    adapterVersion = if ($InitializeModulesAttribution) { 'c188r12r4r5r2r3-transition-attribution-v1' } elseif ($NativeAllocationAttribution) { 'c188r12r4r5r4r5r2r2-native-allocation-v1' } elseif ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-v1' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes-v1' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness-v1' } else { 'c188r12r4r5r3-init-return-contract-v1' }
     gcInitializationInternalRecord = if ($GcInitProbes) { [ordered]@{
         marker='C188R12R4R5R4R5_GCINIT'
         serialStageSentinel='00000070'
@@ -900,8 +1254,12 @@ $manifest = [ordered]@{
         productionRuntimePackR2SemiSharedProfile = [bool]$productionRuntimeManifest.c188r12r4r5r4r5r2SemiSharedAttribution
         productionRuntimePackR2R2NativeAllocationProfile = [bool]$productionRuntimeManifest.c188r12r4r5r4r5r2r2NativeAllocationAttribution
         productionRuntimePackSafeHandoffProfile = [bool]$productionRuntimeManifest.c188r12r4r5r2r2r4SafeHandoff
+        productionRuntimePackTransitionAttributionProfile = [bool]$productionRuntimeManifest.c188r12r4r5r2r3InitializeModulesAttribution
         productionMapExcludesSafeHandoff = -not $productionMapText.Contains('C188R12R4R5R2R2R4_SAFE_HANDOFF') -and
             -not $productionMapText.Contains('GuideXosNativeAotC188R12R4R5R2R2R4SafeHandoffPrepare')
+        productionMapExcludesTransitionAttribution = -not $productionMapText.Contains('C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION') -and
+            -not $productionMapText.Contains('GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare') -and
+            -not $productionMapText.Contains('g_guideXosNativeAotTransitionAttributionRecord')
         noGcOwnershipProofProfileInProduction = $true
     }
     qemuLaunched = $false
@@ -922,6 +1280,7 @@ $manifest = [ordered]@{
         qemuLaunched = $false
         qacReserved = $false
     }
+    candidateIntegrityInventory = Join-Path $candidate 'candidate-integrity-inventory.json'
     artifactHashes = [ordered]@{
         candidateNativeAotPe = Hash-File $pePath
         candidateNativeAotMap = Hash-File $mapPath
@@ -935,6 +1294,22 @@ $manifest = [ordered]@{
         candidateGcStartupDisassembly = if ($SafeHandoff) { Hash-File (Join-Path $candidate 'gcStartup.disassembly.txt') } else { $null }
         candidateReversePInvokeDisassembly = if ($SafeHandoff) { Hash-File (Join-Path $candidate 'reversePInvoke.disassembly.txt') } else { $null }
         candidateInitializeModulesDisassembly = if ($SafeHandoff) { Hash-File (Join-Path $candidate 'initializeModules.disassembly.txt') } else { $null }
+        candidateTransitionPrepareDisassembly = if ($InitializeModulesAttribution) { Hash-File (Join-Path $candidate 'transitionPrepare.disassembly.txt') } else { $null }
+        candidateTransitionCallSiteMap = if ($InitializeModulesAttribution) { Hash-File $transitionCallSiteMapPath } else { $null }
+        candidateTransitionCallSiteHeader = if ($InitializeModulesAttribution) { Hash-File $transitionCallSiteHeaderPath } else { $null }
+        candidateFatalCallerDisassemblies = if ($InitializeModulesAttribution) { [ordered]@{
+            threadReversePInvoke=Hash-File (Join-Path $candidate 'fatal-caller-thread_reverse_pinvoke.disassembly.txt')
+            cpuFeatures=Hash-File (Join-Path $candidate 'fatal-caller-cpu_features.disassembly.txt')
+            hardwareStackOverflow=Hash-File (Join-Path $candidate 'fatal-caller-hardware_stack_overflow.disassembly.txt')
+            vectoredStackOverflow=Hash-File (Join-Path $candidate 'fatal-caller-vectored_stack_overflow.disassembly.txt')
+            restoreContext=Hash-File (Join-Path $candidate 'fatal-caller-restore_context.disassembly.txt')
+        } } else { $null }
+        transitionHostedTestResults = if ($InitializeModulesAttribution) { Hash-File (Join-Path $transitionHostedTestRoot 'hosted-test-results.json') } else { $null }
+        transitionAnalyzer = if ($InitializeModulesAttribution) { Hash-File (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1') } else { $null }
+        transitionTestRunner = if ($InitializeModulesAttribution) { Hash-File (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r3-transition-attribution.ps1') } else { $null }
+        transitionPrerequisiteMatrix = if ($InitializeModulesAttribution) { Hash-File $transitionPrerequisiteMatrixPath } else { $null }
+        transitionGuestPhasePlan = if ($InitializeModulesAttribution) { Hash-File $transitionGuestPhasePlanPath } else { $null }
+        transitionGuestGuardTemplate = if ($InitializeModulesAttribution) { Hash-File $transitionGuestGuardTemplatePath } else { $null }
         candidateKernelSafeHandoffDispatchDisassembly = if ($SafeHandoff) { Hash-File $kernelDispatchDisassemblyPath } else { $null }
         startupAdapterObject = Hash-File (Join-Path $artifactRoot 'guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.obj')
         palMinWinReplacementObject = Hash-File (Join-Path $artifactRoot 'guidexos_nativeaot_pal_minwin_replacement.obj')
@@ -999,6 +1374,25 @@ $manifest = [ordered]@{
 }
 $manifestPath = Join-Path $candidate 'candidate-manifest.json'
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+$inventoryPath = Join-Path $candidate 'candidate-integrity-inventory.json'
+$inventoryFiles = @(Get-ChildItem -LiteralPath $candidate -File -Recurse | Where-Object {
+    $_.FullName -cne [System.IO.Path]::GetFullPath($inventoryPath)
+} | ForEach-Object {
+    $relativePath = $_.FullName.Substring($candidate.Length + 1).Replace('\','/')
+    [ordered]@{ path=$relativePath; sizeBytes=$_.Length; sha256=Hash-File $_.FullName }
+})
+$inventory = [ordered]@{
+    schema='C188R12R4R5R1_CANDIDATE_INTEGRITY_INVENTORY_V1'
+    candidateRoot=$candidate
+    candidateManifest='candidate-manifest.json'
+    candidateManifestSha256=Hash-File $manifestPath
+    fileCount=[int]$inventoryFiles.Count
+    files=$inventoryFiles
+}
+[System.IO.File]::WriteAllText($inventoryPath,($inventory | ConvertTo-Json -Depth 8),[System.Text.UTF8Encoding]::new($false))
 Write-Output "C188R12R4R5 candidate: READY ($candidate)"
 Write-Output "Kernel SHA256: $kernelHash"
 Write-Output "Candidate manifest: $manifestPath"
+Write-Output "Candidate manifest SHA256: $(Hash-File $manifestPath)"
+Write-Output "Candidate integrity inventory: $inventoryPath"
+Write-Output "Candidate inventory SHA256: $(Hash-File $inventoryPath)"

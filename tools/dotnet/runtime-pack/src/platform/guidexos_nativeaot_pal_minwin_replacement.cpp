@@ -3,6 +3,11 @@
 #include "guidexos_nativeaot_threadstore_readiness.h"
 #endif
 #include "guidexos_nativeaot_init_trace.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+#include "guidexos_nativeaot_transition_attribution.h"
+extern "C" void __cdecl GuideXosNativeAotTransitionCapturePalFatal(
+    const char* message, uintptr_t callerReturnAddress);
+#endif
 
 #include <assert.h>
 #include <stdint.h>
@@ -10,6 +15,10 @@
 #include <string.h>
 #include <new>
 #include <windows.h>
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+#include <intrin.h>
+#pragma intrinsic(_ReturnAddress)
+#endif
 
 // PalInit is the NativeAOT GC platform initialization boundary.  These are
 // the exact locked source declarations used by the stock Windows PAL; the
@@ -168,6 +177,19 @@ PalAttachThread(void* thread) {
         reinterpret_cast<uintptr_t>(thread), static_cast<uintptr_t>(setResult));
 #endif
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+extern "C" uint32_t __cdecl
+GuideXosNativeAotTransitionGetPalFlsIndex(void) {
+    return g_flsIndex;
+}
+
+extern "C" void* __cdecl
+GuideXosNativeAotTransitionGetPalFlsValue(void) {
+    return g_flsIndex == kFlsOutOfIndexes
+        ? nullptr : guidexos_nativeaot_pal_fls_get(g_flsIndex);
+}
+#endif
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API
 PalDetachThread(void* thread) {
@@ -362,6 +384,14 @@ PalGetModuleHandleFromPointer(void* pointer) {
 }
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT void PalPrintFatalError(const char* message) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+    // The PAL contract receives only a message pointer. Do not dereference it:
+    // the fatal path can run before any diagnostic/runtime services are safe.
+    // The return address is a candidate-specific call-site identity that the
+    // staged source map resolves to a stable source-defined message ID.
+    GuideXosNativeAotTransitionCapturePalFatal(
+        message, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+#endif
     (void)message;
     guidexos_nativeaot_pal_fail_fast(0x50414C06u);
 }

@@ -2,6 +2,9 @@
 #include "guidexos_nativeaot_allocation_diagnostics.h"
 #include "guidexos_nativeaot_amd64_unwind_primitive.h"
 #include "guidexos_nativeaot_init_trace.h"
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+#include "guidexos_nativeaot_transition_attribution.h"
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION) || defined(GUIDEXOS_NATIVEAOT_C011EC97)
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #endif
@@ -58,6 +61,7 @@ namespace {
 constexpr uint32_t kThreadReadinessMarkerCapacity = 48u;
 constexpr uint32_t kThreadReadinessTransitionCapacity = 8u;
 uint32_t g_threadReadinessMarkerCount = 0u;
+uint32_t g_threadReadinessMarkerOverflow = 0u;
 GuideXosThreadStoreTransitionRecord g_threadReadinessTransitions[kThreadReadinessTransitionCapacity] = {};
 uint32_t g_threadReadinessTransitionDepth = 0u;
 
@@ -106,6 +110,7 @@ const char* threadReadinessEventName(uint32_t event) {
     case GX_THREADSTORE_EVENT_PAL_THREAD_ID: return "pal_thread_id";
     case GX_THREADSTORE_EVENT_PAL_STACK_BOUNDS: return "pal_stack_bounds";
     case GX_THREADSTORE_EVENT_PAL_STACK_CURRENT: return "pal_stack_current";
+    case GX_THREADSTORE_EVENT_DIAGNOSTIC_SUMMARY: return "diagnostic_summary";
     default: return "unknown";
     }
 }
@@ -114,7 +119,12 @@ const char* threadReadinessEventName(uint32_t event) {
 extern "C" void __cdecl GuideXosNativeAotThreadReadinessMark(
     uint32_t event, uintptr_t raw0, uintptr_t raw1) {
     const uint32_t sequence = g_threadReadinessMarkerCount;
-    if (sequence >= kThreadReadinessMarkerCapacity) return;
+    // Reserve the final fixed slot for the terminal overflow summary.
+    if (sequence >= kThreadReadinessMarkerCapacity - 1u) {
+        if (g_threadReadinessMarkerOverflow != 0xFFFFFFFFu)
+            ++g_threadReadinessMarkerOverflow;
+        return;
+    }
     g_threadReadinessMarkerCount = sequence + 1u;
     threadReadinessPutString("[C188R12R4R5R4_THREAD] seq=");
     threadReadinessPutHex(sequence);
@@ -125,6 +135,22 @@ extern "C" void __cdecl GuideXosNativeAotThreadReadinessMark(
     threadReadinessPutString(" raw1=");
     threadReadinessPutHex(raw1);
     threadReadinessPutChar('\n');
+}
+
+extern "C" void __cdecl GuideXosNativeAotThreadReadinessEmitSummary(void) {
+    if (g_threadReadinessMarkerCount >= kThreadReadinessMarkerCapacity) return;
+    const uint32_t sequence = g_threadReadinessMarkerCount++;
+    threadReadinessPutString("[C188R12R4R5R4_THREAD] seq=");
+    threadReadinessPutHex(sequence);
+    threadReadinessPutString(" event=diagnostic_summary raw0=");
+    threadReadinessPutHex(g_threadReadinessMarkerOverflow);
+    threadReadinessPutString(" raw1=");
+    threadReadinessPutHex(kThreadReadinessMarkerCapacity);
+    threadReadinessPutChar('\n');
+}
+
+extern "C" uint32_t __cdecl GuideXosNativeAotThreadReadinessGetOverflow(void) {
+    return g_threadReadinessMarkerOverflow;
 }
 
 extern "C" __declspec(noinline) void __cdecl
@@ -162,6 +188,60 @@ extern "C" bool RhRegisterOSModule(
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 bool g_guideXosNativeAotModulesInitialized = false;
 bool g_guideXosNativeAotCodeManagerRegistered = false;
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+extern "C" __declspec(dllexport)
+GuideXosNativeAotTransitionAttributionRecord
+    g_guideXosNativeAotTransitionAttributionRecord = {};
+
+extern "C" uint32_t __cdecl GuideXosNativeAotInitTraceGetFirstFailureStage();
+extern "C" uint32_t __cdecl GuideXosNativeAotInitTraceGetFirstFailureStatus();
+extern "C" uint32_t __cdecl GuideXosNativeAotInitTraceGetLastSuccessfulStage();
+extern "C" uint32_t __cdecl GuideXosNativeAotInitTraceGetOverflow();
+extern "C" uint32_t __cdecl GuideXosNativeAotInitTraceStagePassed(uint32_t stage);
+extern "C" uint32_t __cdecl GuideXosNativeAotThreadReadinessGetOverflow();
+
+namespace {
+volatile long g_guideXosNativeAotTransitionFatalClaim = 0;
+uint32_t g_guideXosNativeAotTransitionSnapshotSequence = 0u;
+void captureTransitionFatalThreadState(
+    GuideXosNativeAotTransitionAttributionRecord& record);
+}
+
+extern "C" void __cdecl GuideXosNativeAotTransitionCapturePalFatal(
+    const char* message, uintptr_t callerReturnAddress) {
+    if (_InterlockedCompareExchange(
+            &g_guideXosNativeAotTransitionFatalClaim, 1, 0) != 0) {
+        return;
+    }
+
+    auto& record = g_guideXosNativeAotTransitionAttributionRecord;
+    record.callerReturnAddress = callerReturnAddress;
+    record.messagePointer = reinterpret_cast<uintptr_t>(message);
+    record.fatalReason = 0x50414C06u;
+    record.originalStatusAvailable = 0u;
+    record.originalStatus = 0u;
+    record.messageCaptureStatus = GX_TRANSITION_MESSAGE_UNAVAILABLE;
+    record.messageBytes = 0u;
+    record.messageTruncated = 0u;
+    // The PAL ABI exposes no stable status parameter. The candidate manifest
+    // maps callerReturnAddress to source-defined message IDs without reading
+    // messagePointer, which may not be safe to dereference here.
+    record.sourceCallSiteId = kGuideXosTransitionCallSiteUnresolved;
+    record.messageIdResolvedByCallerRip = 0u;
+    captureTransitionFatalThreadState(record);
+    record.firstFailedStage = GuideXosNativeAotInitTraceGetFirstFailureStage();
+    record.firstFailureStatusAvailable =
+        record.firstFailedStage != kGuideXosTransitionFatalNoStage ? 1u : 0u;
+    record.firstFailureStatus = record.firstFailureStatusAvailable != 0u
+        ? GuideXosNativeAotInitTraceGetFirstFailureStatus() : 0u;
+    record.lastSuccessfulStage = GuideXosNativeAotInitTraceGetLastSuccessfulStage();
+    record.initTraceOverflow = GuideXosNativeAotInitTraceGetOverflow();
+    record.threadReadinessOverflow = GuideXosNativeAotThreadReadinessGetOverflow();
+    record.fatalPublished = 1u;
+    GuideXosTransitionAttributionSeal(&record);
+}
+#endif
 
 bool getNativeAotRange(void* start, void* end, void** rangeStart, uint32_t* rangeSize) {
     if (start == nullptr || end == nullptr || rangeStart == nullptr || rangeSize == nullptr) {
@@ -32627,6 +32707,206 @@ unsigned char* runtimeCell(unsigned char* block) {
     return block + kRuntimeCellOffset;
 }
 
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+extern "C" uint32_t __cdecl GuideXosNativeAotTransitionGetPalFlsIndex(void);
+extern "C" void* __cdecl GuideXosNativeAotTransitionGetPalFlsValue(void);
+extern "C" bool __stdcall PalGetMaximumStackBounds(void** stackLow, void** stackHigh);
+extern "C" uint64_t PalGetCurrentOSThreadId(void);
+
+void captureTransitionFatalThreadState(
+    GuideXosNativeAotTransitionAttributionRecord& record) {
+    if (record.transitionAttempted == 0u) return;
+
+    Thread* rawCurrentThread = ThreadStore::RawGetCurrentThread();
+    if (rawCurrentThread == nullptr) return;
+    RuntimeThreadLocals* locals = reinterpret_cast<RuntimeThreadLocals*>(rawCurrentThread);
+    const uint32_t stateFlags = locals->m_ThreadStateFlags;
+    record.rawCurrentThread = reinterpret_cast<uintptr_t>(rawCurrentThread);
+    record.currentThread = stateFlags != 0u
+        ? reinterpret_cast<uintptr_t>(rawCurrentThread) : 0u;
+    record.currentThreadAttachment = (stateFlags & 0x1u) != 0u
+        ? GX_TRANSITION_ATTACHMENT_PRESENT : GX_TRANSITION_ATTACHMENT_ABSENT;
+    record.nativeThreadId = locals->m_threadId;
+    record.transitionFrame = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+    if (stateFlags == 0u) {
+        record.cooperativeState = GX_TRANSITION_COOP_UNKNOWN;
+        record.transitionFrameReady = 0u;
+        record.transitionFrameAligned = 0u;
+        record.transitionFrameInStackBounds = 0u;
+    } else {
+        record.cooperativeState = locals->m_pTransitionFrame == nullptr
+            ? GX_TRANSITION_COOP_COOPERATIVE : GX_TRANSITION_COOP_PREEMPTIVE;
+        record.transitionFrameReady = locals->m_pTransitionFrame != nullptr ? 1u : 0u;
+        const uintptr_t frame = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+        const uintptr_t topOfStackMarker = ~static_cast<uintptr_t>(0);
+        record.transitionFrameAligned = frame == topOfStackMarker ||
+            (frame & (alignof(void*) - 1u)) == 0u ? 1u : 0u;
+        record.transitionFrameInStackBounds = frame >= record.stackLow &&
+            frame < record.stackHigh ? 1u : 0u;
+    }
+}
+
+uint32_t captureTransitionSnapshot(
+    GuideXosNativeAotTransitionAttributionRecord& record,
+    unsigned char* block) {
+    if (g_guideXosNativeAotTransitionSnapshotSequence != 0xFFFFFFFFu)
+        ++g_guideXosNativeAotTransitionSnapshotSequence;
+    record.snapshotSequence = g_guideXosNativeAotTransitionSnapshotSequence;
+    record.snapshotStatus = GX_TRANSITION_SNAPSHOT_NOT_CAPTURED;
+    record.transitionAttempted = 0u;
+    record.transitionCompleted = 0u;
+    record.transitionGateFailure = GX_TRANSITION_GATE_NONE;
+    record.fatalPublished = 0u;
+    record.fatalReason = 0u;
+    record.originalStatusAvailable = 0u;
+    record.originalStatus = 0u;
+    record.messageCaptureStatus = GX_TRANSITION_MESSAGE_UNAVAILABLE;
+    record.messageBytes = 0u;
+    record.messageTruncated = 0u;
+    record.sourceCallSiteId = kGuideXosTransitionCallSiteUnresolved;
+    record.firstFailedStage = GuideXosNativeAotInitTraceGetFirstFailureStage();
+    record.firstFailureStatusAvailable = record.firstFailedStage !=
+        kGuideXosTransitionFatalNoStage ? 1u : 0u;
+    record.firstFailureStatus = record.firstFailureStatusAvailable != 0u
+        ? GuideXosNativeAotInitTraceGetFirstFailureStatus() : 0u;
+    record.lastSuccessfulStage = GuideXosNativeAotInitTraceGetLastSuccessfulStage();
+    record.initTraceOverflow = GuideXosNativeAotInitTraceGetOverflow();
+    record.threadReadinessOverflow = GuideXosNativeAotThreadReadinessGetOverflow();
+    record.runtimeInstance = 0u;
+    record.threadStore = 0u;
+    record.rawCurrentThread = 0u;
+    record.currentThread = 0u;
+    record.tlsVector = 0u;
+    record.tlsBlock = reinterpret_cast<uintptr_t>(block);
+    record.tlsIndex = _tls_index;
+    record.palFlsIndex = GuideXosNativeAotTransitionGetPalFlsIndex();
+    record.nativeThreadId = 0u;
+    record.observedOsThreadId = 0u;
+    void* palFlsValue = GuideXosNativeAotTransitionGetPalFlsValue();
+    record.flsCurrentThread = reinterpret_cast<uintptr_t>(palFlsValue);
+    record.stackLow = 0u;
+    record.stackHigh = 0u;
+    record.stackCurrent = 0u;
+    record.transitionFrame = 0u;
+    record.runtimeInstanceReady = 0u;
+    record.rhInitializeReady = 0u;
+    record.runtimeStartupReady = g_guideXosRuntimeStartupState != 0u ? 1u : 0u;
+    record.runtimeFlsCellReady = 0u;
+    record.modulesNotInitialized = g_guideXosNativeAotModulesInitialized ? 0u : 1u;
+    record.threadStoreReady = 0u;
+    record.tlsReady = 0u;
+    record.flsIndexReady = 0u;
+    record.flsCurrentThreadState = 0u;
+    record.currentThreadAttachment = GX_TRANSITION_ATTACHMENT_UNKNOWN;
+    record.threadStateFlags = 0u;
+    record.cooperativeState = GX_TRANSITION_COOP_UNKNOWN;
+    record.palStackBoundsReady = 0u;
+    record.currentPointerInStackBounds = 0u;
+    record.transitionFrameReady = 0u;
+    record.transitionFrameAligned = 0u;
+    record.transitionFrameInStackBounds = 0u;
+    record.transitionFrameWillBeCreatedByStock = 0u;
+    record.gcHeapReady = 0u;
+    record.osModuleRegistered = 0u;
+    record.codeManagerRegistered = g_guideXosNativeAotCodeManagerRegistered ? 1u : 0u;
+    record.messageIdResolvedByCallerRip = 0u;
+
+    void** tlsVector = reinterpret_cast<void**>(__readgsqword(kTlsVectorOffset));
+    record.tlsVector = reinterpret_cast<uintptr_t>(tlsVector);
+    record.tlsReady = block != nullptr && tlsVector != nullptr &&
+        _tls_index != kFlsOutOfIndexes && tlsVector[_tls_index] == block ? 1u : 0u;
+
+    RuntimeInstance* runtime = GetRuntimeInstance();
+    ThreadStore* threadStore = runtime == nullptr ? nullptr : runtime->GetThreadStore();
+    record.runtimeInstance = reinterpret_cast<uintptr_t>(runtime);
+    record.threadStore = reinterpret_cast<uintptr_t>(threadStore);
+    record.runtimeInstanceReady = runtime != nullptr ? 1u : 0u;
+    record.threadStoreReady = threadStore != nullptr ? 1u : 0u;
+
+    Thread* rawCurrentThread = nullptr;
+    Thread* currentThread = nullptr;
+    RuntimeThreadLocals* locals = nullptr;
+    uint32_t stateFlags = 0u;
+    if (record.tlsReady != 0u && threadStore != nullptr) {
+        rawCurrentThread = ThreadStore::RawGetCurrentThread();
+        if (rawCurrentThread != nullptr) {
+            currentThread = ThreadStore::GetCurrentThreadIfAvailable();
+            locals = reinterpret_cast<RuntimeThreadLocals*>(rawCurrentThread);
+            stateFlags = locals->m_ThreadStateFlags;
+            record.threadStateFlags = stateFlags;
+        }
+        record.rawCurrentThread = reinterpret_cast<uintptr_t>(rawCurrentThread);
+        record.currentThread = currentThread == nullptr
+            ? 0u : reinterpret_cast<uintptr_t>(currentThread);
+        record.currentThreadAttachment = currentThread == nullptr
+            ? GX_TRANSITION_ATTACHMENT_ABSENT
+            : ((stateFlags & 0x1u) != 0u
+                ? GX_TRANSITION_ATTACHMENT_PRESENT : GX_TRANSITION_ATTACHMENT_ABSENT);
+        record.nativeThreadId = currentThread == nullptr
+            ? 0u : locals->m_threadId;
+        if (locals == nullptr) {
+            record.currentThreadAttachment = GX_TRANSITION_ATTACHMENT_UNKNOWN;
+        } else if (currentThread == nullptr) {
+            record.transitionFrame = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+            record.cooperativeState = GX_TRANSITION_COOP_STOCK_ATTACH_WILL_INITIALIZE;
+            record.transitionFrameWillBeCreatedByStock = 1u;
+        } else {
+            record.transitionFrame = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+            record.cooperativeState = locals->m_pTransitionFrame == nullptr
+                ? GX_TRANSITION_COOP_COOPERATIVE : GX_TRANSITION_COOP_PREEMPTIVE;
+            record.transitionFrameReady = locals->m_pTransitionFrame != nullptr ? 1u : 0u;
+            const uintptr_t frame = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+            const uintptr_t topOfStackMarker = ~static_cast<uintptr_t>(0);
+            record.transitionFrameAligned = frame == topOfStackMarker ||
+                (frame & (alignof(void*) - 1u)) == 0u ? 1u : 0u;
+            record.transitionFrameInStackBounds = frame >= record.stackLow &&
+                frame < record.stackHigh ? 1u : 0u;
+        }
+    }
+
+    record.flsIndexReady = record.palFlsIndex < 256u ? 1u : 0u;
+    const uint64_t palThreadId = PalGetCurrentOSThreadId();
+    record.observedOsThreadId = static_cast<uintptr_t>(palThreadId);
+    const uintptr_t observedStackPointer = reinterpret_cast<uintptr_t>(&block);
+    record.stackCurrent = observedStackPointer;
+    void* stackLow = nullptr;
+    void* stackHigh = nullptr;
+    const bool stackQueryPassed = PalGetMaximumStackBounds(&stackLow, &stackHigh);
+    record.stackLow = reinterpret_cast<uintptr_t>(stackLow);
+    record.stackHigh = reinterpret_cast<uintptr_t>(stackHigh);
+    record.palStackBoundsReady = stackQueryPassed && record.stackLow < record.stackHigh
+        ? 1u : 0u;
+    record.currentPointerInStackBounds = record.palStackBoundsReady != 0u &&
+        observedStackPointer >= record.stackLow && observedStackPointer < record.stackHigh
+        ? 1u : 0u;
+    if (record.currentThreadAttachment == GX_TRANSITION_ATTACHMENT_PRESENT) {
+        const uintptr_t frame = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+        record.transitionFrameInStackBounds = frame >= record.stackLow &&
+            frame < record.stackHigh ? 1u : 0u;
+    }
+
+    void** runtimeFlsCell = flsCell(block, kGuideXosFlsIndex);
+    record.flsCurrentThreadState = record.flsCurrentThread == 0u
+        ? GX_TRANSITION_PAL_FLS_EMPTY
+        : (record.flsCurrentThread == record.rawCurrentThread
+            ? GX_TRANSITION_PAL_FLS_MATCHES_CURRENT_THREAD
+            : GX_TRANSITION_PAL_FLS_FOREIGN_THREAD);
+    record.rhInitializeReady = GuideXosNativeAotInitTraceStagePassed(0x0002u);
+    record.runtimeFlsCellReady = runtimeFlsCell != nullptr ? 1u : 0u;
+    record.gcHeapReady = GuideXosNativeAotInitTraceStagePassed(0x0032u);
+    record.osModuleRegistered = g_guideXosNativeAotCodeManagerRegistered ? 1u : 0u;
+    record.codeManagerRegistered = record.osModuleRegistered;
+
+    const uint32_t gateFailure = GuideXosTransitionEvaluateGate(&record);
+
+    record.transitionGateFailure = gateFailure;
+    record.snapshotStatus = gateFailure == GX_TRANSITION_GATE_NONE
+        ? GX_TRANSITION_SNAPSHOT_READY : GX_TRANSITION_SNAPSHOT_BLOCKED;
+    GuideXosTransitionAttributionSeal(&record);
+    return gateFailure;
+}
+#endif
+
 #if defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE)
 void c108SerialPutChar(char value) {
     if (value == '\n') {
@@ -32758,7 +33038,8 @@ void persistentSerialPutHex64(uintptr_t value) {
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
 void initializeNativeAotModules(bool registrationOnly = false) {
 #else
 void initializeNativeAotModules() {
@@ -32772,7 +33053,9 @@ void initializeNativeAotModules() {
     }
 
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
-    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_MODULE_REGISTRATION);
+    if (!g_guideXosNativeAotCodeManagerRegistered) {
+        guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_MODULE_REGISTRATION);
+    }
 #endif
 
     // Keep the classlib table identical to the locked NativeAOT bootstrapper.
@@ -32810,9 +33093,11 @@ void initializeNativeAotModules() {
         guideXosFailFast(10u);
     }
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
-    guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_MODULE_REGISTRATION,
-        GX_INIT_EVENT_PASS, 0u, 0xFFFFFFFFu);
-    guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_CODE_MANAGER_REGISTRATION);
+    if (!g_guideXosNativeAotCodeManagerRegistered) {
+        guideXosNativeAotInitTraceRecord(GX_INIT_STAGE_MODULE_REGISTRATION,
+            GX_INIT_EVENT_PASS, 0u, 0xFFFFFFFFu);
+        guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_CODE_MANAGER_REGISTRATION);
+    }
 #endif
 
     // The stock Windows bootstrapper registers the production
@@ -32824,8 +33109,7 @@ void initializeNativeAotModules() {
     uint32_t managedCodeSize = 0u;
     void* unboxingStubsStart = nullptr;
     uint32_t unboxingStubsSize = 0u;
-    if (g_guideXosNativeAotCodeManagerRegistered ||
-        !getNativeAotRange(
+    if (!getNativeAotRange(
             reinterpret_cast<void*>(&__managedcode_a),
             reinterpret_cast<void*>(&__managedcode_z),
             &managedCodeStart,
@@ -32842,11 +33126,14 @@ void initializeNativeAotModules() {
         guideXosFailFast(0xC011EC17u);
     }
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    if (!g_guideXosNativeAotCodeManagerRegistered) {
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_MODULE_REGISTRATION_ENTER,
         reinterpret_cast<uintptr_t>(osModule),
         reinterpret_cast<uintptr_t>(managedCodeStart));
+    }
 #endif
+    if (!g_guideXosNativeAotCodeManagerRegistered) {
     if (!RhRegisterOSModule(
             osModule,
             managedCodeStart,
@@ -32875,7 +33162,9 @@ void initializeNativeAotModules() {
     guideXosNativeAotInitTraceReturn(
         GX_INIT_STAGE_CODE_MANAGER_REGISTRATION, true);
 #endif
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+    }
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
     // Stop only in the explicitly selected diagnostic profile, after actual
     // module registration and before the runtime's module initialization.
     if (registrationOnly) return;
@@ -32986,7 +33275,8 @@ void markAllocationOutOfMemory(unsigned char* cell, gx_uintptr allocationPointer
 #endif
 
 void initializeRuntimeState(unsigned char* block
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
                             , bool registrationOnly = false
 #endif
                             ) {
@@ -33191,7 +33481,8 @@ void initializeRuntimeState(unsigned char* block
     // metadata rehydration, TypeManager/module publication, GC static-base
     // initialization, and eager constructors; do not pre- or post-populate a
     // substitute descriptor here.
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF) || \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
     initializeNativeAotModules(registrationOnly);
 #else
     initializeNativeAotModules();
@@ -33225,10 +33516,12 @@ GuideXosNativeAotC188R12R4R5R2R2R4SafeHandoffPrepare(void) {
     unsigned char* block = currentTlsBlock();
     if (block == nullptr || _tls_index == kFlsOutOfIndexes) {
         GuideXosNativeAotInitTraceEmitSummary();
+        GuideXosNativeAotThreadReadinessEmitSummary();
         return 1u;
     }
     if (g_guideXosNativeAotModulesInitialized) {
         GuideXosNativeAotInitTraceEmitSummary();
+        GuideXosNativeAotThreadReadinessEmitSummary();
         return 2u;
     }
 
@@ -33239,7 +33532,92 @@ GuideXosNativeAotC188R12R4R5R2R2R4SafeHandoffPrepare(void) {
     const uint32_t status = g_guideXosNativeAotCodeManagerRegistered &&
         !g_guideXosNativeAotModulesInitialized ? 0u : 3u;
     GuideXosNativeAotInitTraceEmitSummary();
+    GuideXosNativeAotThreadReadinessEmitSummary();
     return status;
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+#if !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF) || \
+    !defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5_GC_INIT_PROBES) || \
+    !defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4R5R2R2_NATIVE_ALLOC)
+#error InitializeModules attribution requires the complete C188R12R4R5R2R2R4 diagnostic profile.
+#endif
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare(void) {
+    auto& record = g_guideXosNativeAotTransitionAttributionRecord;
+    unsigned char* block = currentTlsBlock();
+    if (block == nullptr || _tls_index == kFlsOutOfIndexes) {
+        record = {};
+        if (g_guideXosNativeAotTransitionSnapshotSequence != 0xFFFFFFFFu)
+            ++g_guideXosNativeAotTransitionSnapshotSequence;
+        record.snapshotSequence = g_guideXosNativeAotTransitionSnapshotSequence;
+        record.transitionGateFailure = GX_TRANSITION_GATE_TLS;
+        record.snapshotStatus = GX_TRANSITION_SNAPSHOT_BLOCKED;
+        record.firstFailedStage = GuideXosNativeAotInitTraceGetFirstFailureStage();
+        record.firstFailureStatusAvailable = record.firstFailedStage !=
+            kGuideXosTransitionFatalNoStage ? 1u : 0u;
+        record.firstFailureStatus = record.firstFailureStatusAvailable != 0u
+            ? GuideXosNativeAotInitTraceGetFirstFailureStatus() : 0u;
+        record.lastSuccessfulStage = GuideXosNativeAotInitTraceGetLastSuccessfulStage();
+        record.rhInitializeReady = GuideXosNativeAotInitTraceStagePassed(0x0002u);
+        record.initTraceOverflow = GuideXosNativeAotInitTraceGetOverflow();
+        record.threadReadinessOverflow = GuideXosNativeAotThreadReadinessGetOverflow();
+        GuideXosTransitionAttributionSeal(&record);
+        GuideXosNativeAotInitTraceEmitSummary();
+        GuideXosNativeAotThreadReadinessEmitSummary();
+        return 0x100u + GX_TRANSITION_GATE_TLS;
+    }
+    if (g_guideXosNativeAotModulesInitialized) {
+        record = {};
+        if (g_guideXosNativeAotTransitionSnapshotSequence != 0xFFFFFFFFu)
+            ++g_guideXosNativeAotTransitionSnapshotSequence;
+        record.snapshotSequence = g_guideXosNativeAotTransitionSnapshotSequence;
+        record.transitionGateFailure = GX_TRANSITION_GATE_MODULE_REGISTRATION;
+        record.snapshotStatus = GX_TRANSITION_SNAPSHOT_BLOCKED;
+        record.firstFailedStage = GuideXosNativeAotInitTraceGetFirstFailureStage();
+        record.firstFailureStatusAvailable = record.firstFailedStage !=
+            kGuideXosTransitionFatalNoStage ? 1u : 0u;
+        record.firstFailureStatus = record.firstFailureStatusAvailable != 0u
+            ? GuideXosNativeAotInitTraceGetFirstFailureStatus() : 0u;
+        record.lastSuccessfulStage = GuideXosNativeAotInitTraceGetLastSuccessfulStage();
+        record.rhInitializeReady = GuideXosNativeAotInitTraceStagePassed(0x0002u);
+        record.initTraceOverflow = GuideXosNativeAotInitTraceGetOverflow();
+        record.threadReadinessOverflow = GuideXosNativeAotThreadReadinessGetOverflow();
+        GuideXosTransitionAttributionSeal(&record);
+        GuideXosNativeAotInitTraceEmitSummary();
+        GuideXosNativeAotThreadReadinessEmitSummary();
+        return 0x100u + GX_TRANSITION_GATE_MODULE_REGISTRATION;
+    }
+
+    // Reuse the accepted native initialization, TLS/FLS setup, and genuine
+    // OS module/code-manager registration. The first call intentionally stops
+    // before the stock reverse-P/Invoke entry to allow a read-only preflight.
+    initializeRuntimeState(block, true);
+    const uint32_t gateFailure = captureTransitionSnapshot(record, block);
+    if (gateFailure != GX_TRANSITION_GATE_NONE) {
+        GuideXosNativeAotInitTraceEmitSummary();
+        GuideXosNativeAotThreadReadinessEmitSummary();
+        return 0x100u + gateFailure;
+    }
+
+    // The next call enters the real generated InitializeModules function.
+    // Its generated reverse-P/Invoke prologue and the pinned stock attach
+    // helper remain in control of attachment and frame construction.
+    record.transitionAttempted = 1u;
+    GuideXosTransitionAttributionSeal(&record);
+    initializeRuntimeState(block, false);
+    record.transitionCompleted = 1u;
+    record.lastSuccessfulStage = GuideXosNativeAotInitTraceGetLastSuccessfulStage();
+    record.initTraceOverflow = GuideXosNativeAotInitTraceGetOverflow();
+    record.threadReadinessOverflow = GuideXosNativeAotThreadReadinessGetOverflow();
+    GuideXosTransitionAttributionSeal(&record);
+    GuideXosNativeAotInitTraceEmitSummary();
+    GuideXosNativeAotThreadReadinessEmitSummary();
+    return 0u;
 }
 #endif
 

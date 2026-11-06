@@ -45,6 +45,10 @@
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_native_alloc_record.h"
 #include "include/kernel/nativeaot_native_alloc_backend_summary.h"
 #endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_transition_attribution.h"
+#include "guidexos_nativeaot_transition_attribution_sites.h"
+#endif
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_adapter.h"
 
 #if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
@@ -58,6 +62,154 @@ extern "C" unsigned char guidexos_nativeaot_gc_startup_artifact_end[];
 
 namespace kernel {
 namespace nativeaot_pal_qemu_test {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+namespace {
+uintptr_t g_transitionAttributionRecordAddress = 0u;
+
+void emitTransitionAttributionRecord() {
+    if (g_transitionAttributionRecordAddress == 0u) {
+        serial::puts("[C188R12R4R5R2R3_FATAL] record=missing\n");
+        return;
+    }
+    const auto* record = reinterpret_cast<
+        const GuideXosNativeAotTransitionAttributionRecord*>(
+            g_transitionAttributionRecordAddress);
+    auto* writableRecord = const_cast<GuideXosNativeAotTransitionAttributionRecord*>(record);
+    if (GuideXosTransitionAttributionRecordValid(record) &&
+        record->fatalPublished != 0u) {
+        static const GuideXosTransitionCallSiteEntry callSites[] = {
+            { GX_TRANSITION_CALLSITE_RETURN_THREAD_REVERSE_PINVOKE,
+              GX_TRANSITION_CALLSITE_ID_THREAD_REVERSE_PINVOKE },
+            { GX_TRANSITION_CALLSITE_RETURN_CPU_FEATURES,
+              GX_TRANSITION_CALLSITE_ID_CPU_FEATURES },
+            { GX_TRANSITION_CALLSITE_RETURN_HARDWARE_STACK_OVERFLOW,
+              GX_TRANSITION_CALLSITE_ID_HARDWARE_STACK_OVERFLOW },
+            { GX_TRANSITION_CALLSITE_RETURN_VECTORED_STACK_OVERFLOW,
+              GX_TRANSITION_CALLSITE_ID_VECTORED_STACK_OVERFLOW },
+            { GX_TRANSITION_CALLSITE_RETURN_RESTORE_CONTEXT,
+              GX_TRANSITION_CALLSITE_ID_RESTORE_CONTEXT },
+        };
+        const uint32_t callSiteId = GuideXosTransitionResolveCallSite(
+            record->callerReturnAddress, callSites,
+            static_cast<uint32_t>(sizeof(callSites) / sizeof(callSites[0])));
+        writableRecord->sourceCallSiteId = callSiteId;
+        writableRecord->messageIdResolvedByCallerRip =
+            callSiteId != kGuideXosTransitionCallSiteUnresolved ? 1u : 0u;
+        GuideXosTransitionAttributionSeal(writableRecord);
+    }
+    if (!GuideXosTransitionAttributionRecordValid(record)) {
+        serial::puts("[C188R12R4R5R2R3_FATAL] record=invalid address=");
+        serial::put_hex64(g_transitionAttributionRecordAddress);
+        serial::puts(" magic=");
+        serial::put_hex32(record->magic);
+        serial::puts(" schema=");
+        serial::put_hex32(record->schemaVersion);
+        serial::puts(" bytes=");
+        serial::put_hex32(record->recordBytes);
+        serial::puts(" integrity=");
+        serial::put_hex32(record->integrity);
+        serial::puts("\n");
+        return;
+    }
+
+    serial::puts("[C188R12R4R5R2R3_FATAL] valid=1 seq=");
+    serial::put_hex32(record->snapshotSequence);
+    serial::puts(" snapshot=");
+    serial::put_hex32(record->snapshotStatus);
+    serial::puts(" attempted=");
+    serial::put_hex32(record->transitionAttempted);
+    serial::puts(" completed=");
+    serial::put_hex32(record->transitionCompleted);
+    serial::puts(" gate=");
+    serial::put_hex32(record->transitionGateFailure);
+    serial::puts(" fatal=");
+    serial::put_hex32(record->fatalPublished);
+    serial::puts(" reason=");
+    serial::put_hex32(record->fatalReason);
+    serial::puts(" callSite=");
+    serial::put_hex32(record->sourceCallSiteId);
+    serial::puts(" callerRip=");
+    serial::put_hex64(record->callerReturnAddress);
+    serial::puts(" msgState=");
+    serial::put_hex32(record->messageCaptureStatus);
+    serial::puts(" msgBytes=");
+    serial::put_hex32(record->messageBytes);
+    serial::puts(" msgTruncated=");
+    serial::put_hex32(record->messageTruncated);
+    serial::puts(" originalStatusAvailable=");
+    serial::put_hex32(record->originalStatusAvailable);
+    serial::puts(" originalStatus=");
+    serial::put_hex32(record->originalStatus);
+    serial::puts(" firstFailureStage=");
+    serial::put_hex32(record->firstFailedStage);
+    serial::puts(" firstFailureStatusAvailable=");
+    serial::put_hex32(record->firstFailureStatusAvailable);
+    serial::puts(" firstFailureStatus=");
+    serial::put_hex32(record->firstFailureStatus);
+    serial::puts(" lastSuccess=");
+    serial::put_hex32(record->lastSuccessfulStage);
+    serial::puts(" initOverflow=");
+    serial::put_hex32(record->initTraceOverflow);
+    serial::puts(" threadOverflow=");
+    serial::put_hex32(record->threadReadinessOverflow);
+    serial::puts("\n");
+
+    serial::puts("[C188R12R4R5R2R3_STATE] runtime=");
+    serial::put_hex32(record->runtimeInstanceReady);
+    serial::puts(" rhInitialize=");
+    serial::put_hex32(record->rhInitializeReady);
+    serial::puts(" threadStore=");
+    serial::put_hex32(record->threadStoreReady);
+    serial::puts(" rawThread=");
+    serial::put_hex64(record->rawCurrentThread);
+    serial::puts(" currentThread=");
+    serial::put_hex64(record->currentThread);
+    serial::puts(" attachment=");
+    serial::put_hex32(record->currentThreadAttachment);
+    serial::puts(" nativeThreadId=");
+    serial::put_hex64(record->nativeThreadId);
+    serial::puts(" coop=");
+    serial::put_hex32(record->cooperativeState);
+    serial::puts(" tlsReady=");
+    serial::put_hex32(record->tlsReady);
+    serial::puts(" tlsIndex=");
+    serial::put_hex64(record->tlsIndex);
+    serial::puts(" palFlsIndex=");
+    serial::put_hex64(record->palFlsIndex);
+    serial::puts(" palFlsValue=");
+    serial::put_hex64(record->flsCurrentThread);
+    serial::puts(" flsState=");
+    serial::put_hex32(record->flsCurrentThreadState);
+    serial::puts(" stackReady=");
+    serial::put_hex32(record->palStackBoundsReady);
+    serial::puts(" stackCurrent=");
+    serial::put_hex64(record->stackCurrent);
+    serial::puts(" stackLow=");
+    serial::put_hex64(record->stackLow);
+    serial::puts(" stackHigh=");
+    serial::put_hex64(record->stackHigh);
+    serial::puts(" frame=");
+    serial::put_hex64(record->transitionFrame);
+    serial::puts(" frameReady=");
+    serial::put_hex32(record->transitionFrameReady);
+    serial::puts(" frameAligned=");
+    serial::put_hex32(record->transitionFrameAligned);
+    serial::puts(" frameInStack=");
+    serial::put_hex32(record->transitionFrameInStackBounds);
+    serial::puts(" stockWillAttach=");
+    serial::put_hex32(record->transitionFrameWillBeCreatedByStock);
+    serial::puts(" gcReady=");
+    serial::put_hex32(record->gcHeapReady);
+    serial::puts(" module=");
+    serial::put_hex32(record->osModuleRegistered);
+    serial::puts(" codeManager=");
+    serial::put_hex32(record->codeManagerRegistered);
+    serial::puts(" modulesNotInitialized=");
+    serial::put_hex32(record->modulesNotInitialized);
+    serial::puts("\n");
+}
+}
+#endif
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
 namespace {
 #if defined(GXOS_NATIVEAOT_C188R12R4R5R4R5R2_SEMISHARED)
@@ -788,6 +940,9 @@ void GUIDEXOS_NATIVEAOT_PAL_CALL bridgeYield() {
     serial::puts(" detail=");
     serial::put_hex64(detail);
     serial::putc('\n');
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+    emitTransitionAttributionRecord();
+#endif
 #if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     if (g_firstAllocationDiagnosticsAddress != 0) {
         const guidexos_nativeaot_allocation_diagnostics* diagnostics =
@@ -2629,10 +2784,18 @@ void runFirstRealAllocationImpl(
     uintptr_t initTraceGetCountAddress,
     uintptr_t initTraceGetOverflowAddress,
     uintptr_t initTraceRhInitializeRawResultAddress,
-    uintptr_t safeHandoffPrepareAddress) {
+    uintptr_t safeHandoffPrepareAddress,
+    uintptr_t transitionAttributionPrepareAddress,
+    uintptr_t transitionAttributionRecordAddress) {
     bool allPassed = true;
 #if !defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
     (void)safeHandoffPrepareAddress;
+#endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+    g_transitionAttributionRecordAddress = transitionAttributionRecordAddress;
+#else
+    (void)transitionAttributionPrepareAddress;
+    (void)transitionAttributionRecordAddress;
 #endif
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     serial::puts("[nativeaot-thread-static] BEGIN\n");
@@ -2959,7 +3122,30 @@ void runFirstRealAllocationImpl(
         return;
     }
 
-#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+    if (transitionAttributionPrepareAddress == 0u ||
+        g_transitionAttributionRecordAddress == 0u) {
+        serial::puts("[C188R12R4R5R2R3_TRANSITION] diagnosticError=missing_prepare_or_record runtimeError=none\n");
+        threadStoreReadinessKernelMarker("transition_diagnostic_incomplete", 1u, 0u);
+        return;
+    }
+    using TransitionAttributionPrepare = uint32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(void);
+    const uint32_t transitionStatus =
+        reinterpret_cast<TransitionAttributionPrepare>(
+            transitionAttributionPrepareAddress)();
+    emitTransitionAttributionRecord();
+    if (transitionStatus != 0u) {
+        serial::puts("[C188R12R4R5R2R3_TRANSITION] result=safe_stop status=");
+        serial::put_hex32(transitionStatus);
+        serial::puts(" managedEntry=not_reached collection=not_requested runtimeError=none\n");
+        threadStoreReadinessKernelMarker(
+            "transition_safety_gate_blocked", transitionStatus, 0u);
+        return;
+    }
+    serial::puts("[C188R12R4R5R2R3_TRANSITION] result=initialize_modules_returned managedEntry=not_requested collection=not_requested\n");
+    threadStoreReadinessKernelMarker("transition_initialize_modules_returned", 1u, 0u);
+    return;
+#elif defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
     if (safeHandoffPrepareAddress == 0u) {
         serial::puts("[nativeaot-safe-handoff] diagnosticError=missing_prepare_export runtimeError=none\n");
         threadStoreReadinessKernelMarker("diagnostic_safe_stop_incomplete", 1u, 0u);
@@ -3485,7 +3671,9 @@ void runFirstRealAllocation(
     uintptr_t initTraceGetCountAddress,
     uintptr_t initTraceGetOverflowAddress,
     uintptr_t initTraceRhInitializeRawResultAddress,
-    uintptr_t safeHandoffPrepareAddress) {
+    uintptr_t safeHandoffPrepareAddress,
+    uintptr_t transitionAttributionPrepareAddress,
+    uintptr_t transitionAttributionRecordAddress) {
     runFirstRealAllocationImpl(
         artifact, artifactSize, installPalAddress, installTableAddress,
         installPlatformAddress, startupMainAddress, getStateAddress,
@@ -3495,7 +3683,8 @@ void runFirstRealAllocation(
         beginExperimentAddress, standaloneNativeUnwindAddress,
         initTraceSetSinkAddress, initTraceGetCountAddress,
         initTraceGetOverflowAddress, initTraceRhInitializeRawResultAddress,
-        safeHandoffPrepareAddress);
+        safeHandoffPrepareAddress, transitionAttributionPrepareAddress,
+        transitionAttributionRecordAddress);
 }
 #endif
 #endif

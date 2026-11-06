@@ -284,7 +284,7 @@ Assert-True ($kernelSource -match 'using SafeHandoffPrepare = uint32_t \(GUIDEXO
 Assert-True ($kernelSource -match 'managed_entry_gate_closed') 'safe mode closes the managed-entry gate'
 Assert-True ($traceSource -match 'constexpr uint32_t kInitTraceCapacity = 64u' -and $traceSource -match 'record\.eventCounts\[counterIndex\] >= 0x7Fu' -and $traceSource -match 'packedSummaryEvent') 'trace storage and per-stage event counts remain fixed and bounded'
 Assert-True ($buildSource -match 'C188R12R4R5R2R2R4SafeHandoff' -and $buildSource -match 'PersistentCompositeLifecycle') 'build requires isolated opt-in and excludes production lifecycle'
-$platformDefinesMatch = [regex]::Match($buildSource, '(?s)\$platformProfileDefines\s*=\s*if \(\$C188R12R4R5R2R2R4SafeHandoff\)\s*\{(?<defines>.*?)\}\s*else')
+$platformDefinesMatch = [regex]::Match($buildSource, '(?s)\$platformProfileDefines\s*=\s*if \(\$C188R12R4R5R2R3InitializeModulesAttribution\)\s*\{.*?\}\s*elseif \(\$C188R12R4R5R2R2R4SafeHandoff\)\s*\{(?<defines>.*?)\}\s*else')
 $platformSafeDefines = if ($platformDefinesMatch.Success) { $platformDefinesMatch.Groups['defines'].Value } else { '' }
 Assert-True ($platformSafeDefines.Contains('GUIDEXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF') -and
     $platformSafeDefines.Contains('GUIDEXOS_NATIVEAOT_C188R12R4R5R3_INIT_RETURN_CONTRACT') -and

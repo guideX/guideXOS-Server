@@ -55,6 +55,7 @@ uint32_t g_initTraceCoalescedEventCount = 0u;
 uint32_t g_initTraceFirstFailureStage = 0xFFFFFFFFu;
 uint32_t g_initTraceFirstFailureResult = 0xFFFFFFFFu;
 uint32_t g_initTraceFirstFailureSingletonBits = 0xFFFFFFFFu;
+uint32_t g_initTraceLastSuccessfulStage = 0xFFFFFFFFu;
 #endif
 guidexos_nativeaot_init_trace_sink g_initTraceSink = nullptr;
 
@@ -160,6 +161,7 @@ extern "C" void __cdecl guideXosNativeAotInitTraceSetInvocation(uint32_t invocat
     g_initTraceFirstFailureStage = 0xFFFFFFFFu;
     g_initTraceFirstFailureResult = 0xFFFFFFFFu;
     g_initTraceFirstFailureSingletonBits = 0xFFFFFFFFu;
+    g_initTraceLastSuccessfulStage = 0xFFFFFFFFu;
     for (uint32_t index = 0u; index < kInitTraceCapacity; ++index) {
         g_initTrace[index] = InitTraceRecord{};
     }
@@ -181,6 +183,9 @@ extern "C" void __cdecl guideXosNativeAotInitTraceRecord(
         g_initTraceFirstFailureStage = stage;
         g_initTraceFirstFailureResult = result;
         g_initTraceFirstFailureSingletonBits = capturedSingletonBits;
+    }
+    if (event == GX_INIT_EVENT_PASS) {
+        g_initTraceLastSuccessfulStage = stage;
     }
 
     uint32_t index = 0u;
@@ -301,6 +306,28 @@ GuideXosNativeAotInitTraceGetSingletonBits(uint32_t index) {
 #else
     return index < g_initTraceCount ? g_initTrace[index].singletonBits : 0xFFFFFFFFu;
 #endif
+}
+
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetFirstFailureStage(void) {
+    return g_initTraceFirstFailureStage;
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetFirstFailureStatus(void) {
+    return g_initTraceFirstFailureResult;
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceGetLastSuccessfulStage(void) {
+    return g_initTraceLastSuccessfulStage;
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotInitTraceStagePassed(uint32_t stage) {
+    for (uint32_t index = 0u; index < g_initTraceCount; ++index) {
+        if (g_initTrace[index].stage == stage) {
+            return g_initTrace[index].eventCounts[1] != 0u ? 1u : 0u;
+        }
+    }
+    return 0u;
 }
 #endif
 

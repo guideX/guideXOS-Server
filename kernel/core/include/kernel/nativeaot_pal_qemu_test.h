@@ -37,7 +37,9 @@ void runFirstRealAllocation(
     uintptr_t initTraceGetCountAddress = 0,
     uintptr_t initTraceGetOverflowAddress = 0,
     uintptr_t initTraceRhInitializeRawResultAddress = 0,
-    uintptr_t safeHandoffPrepareAddress = 0);
+    uintptr_t safeHandoffPrepareAddress = 0,
+    uintptr_t transitionAttributionPrepareAddress = 0,
+    uintptr_t transitionAttributionRecordAddress = 0);
 
 #endif
 
