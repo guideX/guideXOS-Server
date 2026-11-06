@@ -2,12 +2,16 @@
 
 **Current phase status (2026-11-05): DM37 is formally accepted and closed;
 DM38 is active.** The phase marker remains last_completed=DM37,
-next_expected=DM38. DM38-1 records **Outcome B —
-DM38_HARDWARE_READINESS_PARTIAL**: the identity and explicit read-only mount
-gaps found in the audit were corrected, hosted regressions and builds pass,
-and current-source QAC AHCI/UHCI guest enumeration passes. SARAH_DT has not
-been inventoried or tested, and AMD64 has no xHCI driver. See the
-[DM38-1 physical-storage qualification report](DISK_MANAGER_PHASE_DM38_PHYSICAL_STORAGE_QUALIFICATION.md).
+next_expected=DM38. The latest continuation is **Outcome B —
+`DM38_INVENTORY_AWAITING_OWNER`**: no authorized path exposed SARAH_DT's
+machine-specific inventory. The source audit confirms the existing AHCI and
+input limits, but does not establish physical compatibility. The operator
+inventory commands, bounded read-only pilot plan and recommended DM38-3 scope
+are in the [DM38 physical-storage qualification report](DISK_MANAGER_PHASE_DM38_PHYSICAL_STORAGE_QUALIFICATION.md#dm38-2--inventory-access-decision-and-physical-compatibility-audit).
+DM38-1's 1,523/1,523 hosted suite, AMD64, `build.bat`, UEFI Release and QAC
+virtual registration results remain source-matched evidence and were not
+rerun for this documentation-only continuation. No physical operation or
+firmware change occurred; `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`.
 
 DM36 closeout was accepted at source revision
 a2afa18a56c95b00491f9b1ca2a26acde7669567 on
