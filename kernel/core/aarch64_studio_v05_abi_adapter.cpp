@@ -405,6 +405,8 @@ static studio_v05::gx_result GX_CALL host_bare_file_stat(
     gx_file_info info{};
     const gx_result result = adapter->aarch64Host->bare_metal_file_stat(
         adapter->aarch64Context, bounded, &info);
+    if (result == kV05FileStatNotFoundBridge) return studio_v05::GX_ERROR_NOT_FOUND;
+    if (result == kV05FileStatMountUnavailableBridge) return studio_v05::GX_ERROR_NOT_MOUNTED;
     if (result == GX_OK) {
         outInfo->type = info.type;
         outInfo->reserved = info.reserved;

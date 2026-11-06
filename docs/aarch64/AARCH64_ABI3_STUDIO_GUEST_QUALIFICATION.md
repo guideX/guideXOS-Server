@@ -1,7 +1,7 @@
 # AArch64 ABI3 Developer Studio Guest Qualification
 
-- **Working status:** `STUDIO_GUEST_PARTIAL`
-- **Run date:** 2026-11-02
+- **Working status:** `STUDIO_ARM64_GUI_PARTIAL` (R1; latest completed guest run)
+- **Historical run date:** 2026-11-02
 - **Repository:** `D:\dev\guideXOSServer_AARCH64`
 - **Branch/base:** `AARCH64_SUPPORT` at `fe4e3ebf909f834f991ebd61d96607a6190dc80e`
 - **Upstream at preflight:** `origin/AARCH64_SUPPORT`; local branch was 3 commits ahead, 0 behind.
@@ -15,6 +15,10 @@ The hosted ABI, SDK-alignment, Studio build, and ARM64 package checks passed. On
 The guest did not discover or start Developer Studio. No Studio window, input, workspace operation, Build/Run workflow, or Studio cleanup was observed. A follow-up request for a diagnostic build queued behind another exclusive acceptance session and was cancelled after the 12-second admission window; it did not launch QEMU. The parser trace added for that candidate has therefore not been observed in a guest.
 
 `STUDIO_GUEST_PARTIAL` records the real but early guest boot. The run did not reach Studio, so the stronger Studio-lifecycle condition for a completed Outcome C result is also unmet. This is an incomplete qualification state, not guest acceptance; the adapter has not been shown running in the guest. There are **0 of 3 qualifying Studio boots**.
+
+## R1 follow-up (2026-11-05)
+
+The original 2026-11-02 DTB diagnosis above remains historical. R1 repaired the ARM64 firmware DTB handling and advanced the authentic pinned Studio guest through UEFI, kernel/DTB validation, GICv2, timer, scheduler, desktop, package discovery, exact v0.5 ABI selection, NativeElf loading, and `gx_main`. A later QAC-authorized diagnostic confirmed the optional missing sentinel now propagates as `GX_ERROR_NOT_FOUND`, then exposed a Stage E window creation failure: the app requests 960×700 while the compositor limit was 640×640. The narrow compositor work-area/window-size repair is in the R1c candidate. Its next exclusive QAC request reached the 1,800-second bound and was canceled before launch behind another managed acceptance guest. Guest GUI acceptance remains incomplete with 0 of 3 qualifying boots. See [AARCH64_ABI3_R1_STUDIO_STARTUP_GUI.md](AARCH64_ABI3_R1_STUDIO_STARTUP_GUI.md) for the source-matched candidate, regression gates, QAC evidence, and current qualification state.
 
 ## Inputs and production package
 

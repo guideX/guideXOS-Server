@@ -188,6 +188,10 @@ void KernelCompositor::setWorkArea(uint32_t x, uint32_t y, uint32_t w, uint32_t 
     s_workH = h;
 }
 
+WorkArea KernelCompositor::workArea() {
+    return {s_workX, s_workY, s_workW, s_workH};
+}
+
 void KernelCompositor::reconcileDisplayTopology(uint32_t screenW, uint32_t screenH) {
     if (screenW == 0u || screenH == 0u) return;
     s_screenW = screenW;

@@ -1318,6 +1318,8 @@ static const application::ApplicationQuotas kPhase9Quotas = {
 };
 static const uint32_t kPhase9MaxWindows = 3;
 static const uint32_t kPhase9MaxWidgets = 32;
+static const int32_t kPhase9StudioV05MaxWindowWidth = 1024;
+static const int32_t kPhase9StudioV05MaxWindowHeight = 768;
 static_assert(gui_render::SurfaceRegistry::kCapacity == kPhase9MaxWindows,
               "phase-9 surface slots must track the application window quota");
 
@@ -1636,8 +1638,15 @@ void Phase9GuiOwner::queue(gx_event_type type, gx_handle object, int32_t p1, int
 bool Phase9GuiOwner::create_window(const char* title, int32_t width, int32_t height,
                                    uint32_t flags, gx_handle* outWindow)
 {
+    bool studioV05 = false;
+#if defined(GXOS_AARCH64_PHASE12)
+    studioV05 = m_runtime && m_runtime->studioV05Adapter != nullptr;
+#endif
+    const int32_t maxWindowWidth = studioV05 ? kPhase9StudioV05MaxWindowWidth : 640;
+    const int32_t maxWindowHeight = studioV05 ? kPhase9StudioV05MaxWindowHeight : 640;
     if (!m_runtime || !outWindow || !m_runtime->common.can_create_objects() ||
-        !phase9_string_valid(title) || width <= 0 || height <= 0 || width > 640 || height > 640 ||
+        !phase9_string_valid(title) || width <= 0 || height <= 0 ||
+        width > maxWindowWidth || height > maxWindowHeight ||
         m_windowCount >= kPhase9MaxWindows || !m_runtime->common.reserve_windows()) return false;
     app::KernelWindow* window = new app::KernelWindow();
     if (!window || !copy_string(window->title, sizeof(window->title), title)) {
@@ -1652,9 +1661,20 @@ bool Phase9GuiOwner::create_window(const char* title, int32_t width, int32_t hei
         m_runtime->common.release_windows();
         return false;
     }
+    const compositor::WorkArea workArea = compositor::KernelCompositor::workArea();
+    const uint32_t outerHeight = static_cast<uint32_t>(height) + compositor::TITLEBAR_HEIGHT;
+    if (studioV05 && ((flags & GX_WINDOW_FLAG_CENTERED) != 0) &&
+        (static_cast<uint32_t>(width) > workArea.width || outerHeight > workArea.height)) {
+        delete window;
+        m_runtime->common.release_windows();
+        return false;
+    }
     const bool appA = m_runtime->isAppA;
     const uint32_t ordinal = m_windowCount;
-    if (appA && ordinal == 0) { window->x = 55; window->y = 95; }
+    if (studioV05 && (flags & GX_WINDOW_FLAG_CENTERED) != 0) {
+        window->x = static_cast<int32_t>(workArea.x + (workArea.width - static_cast<uint32_t>(width)) / 2u);
+        window->y = static_cast<int32_t>(workArea.y + (workArea.height - outerHeight) / 2u);
+    } else if (appA && ordinal == 0) { window->x = 55; window->y = 95; }
     else if (appA) { window->x = 410; window->y = 135; }
     else { window->x = 90; window->y = 350; }
     if (window->x + width > static_cast<int>(screenW)) window->x = static_cast<int>(screenW) - width - 4;
@@ -1979,7 +1999,12 @@ static gx_result GX_CALL phase11_file_stat(gx_app_context* context, const char* 
 {
     if (!phase9_runtime(context) || !phase11_path_valid(path) || !output) return GX_ERROR_INVALID_ARGUMENT;
     vfs::FileInfo info = {};
-    if (vfs::stat(path, &info) != vfs::VFS_OK) return GX_ERROR_FAILED;
+    const vfs::Status status = vfs::stat(path, &info);
+#if defined(GXOS_AARCH64_PHASE12)
+    if (status == vfs::VFS_ERR_NOT_FOUND) return studio_abi::kV05FileStatNotFoundBridge;
+    if (status == vfs::VFS_ERR_NOT_MOUNT) return studio_abi::kV05FileStatMountUnavailableBridge;
+#endif
+    if (status != vfs::VFS_OK) return GX_ERROR_FAILED;
     output->type = info.type == vfs::FILE_TYPE_DIRECTORY ? GX_FILE_TYPE_DIRECTORY :
         (info.type == vfs::FILE_TYPE_REGULAR ? GX_FILE_TYPE_REGULAR : GX_FILE_TYPE_UNKNOWN);
     output->reserved = 0;
@@ -2237,6 +2262,24 @@ static gx_result GX_CALL phase9_request_window(gx_app_context* context, const ch
     if (!runtime || !runtime->owner || !outWindow) return GX_ERROR_INVALID_ARGUMENT;
     if (runtime->common.resources().windows >= runtime->common.quotas().windows) return GX_ERROR_QUOTA;
     const bool created = runtime->owner->create_window(title, width, height, flags, outWindow);
+#if defined(GXOS_AARCH64_PHASE12)
+    if (runtime->studioV05Adapter) {
+        const compositor::WorkArea area = compositor::KernelCompositor::workArea();
+        arm64_print("[guideXOS] Studio v0.5 window request: width=");
+        phase3_serial_dec(static_cast<uint64_t>(width));
+        arm64_print(" height=");
+        phase3_serial_dec(static_cast<uint64_t>(height));
+        arm64_print(" display=");
+        phase3_serial_dec(framebuffer::get_width());
+        arm64_print("x");
+        phase3_serial_dec(framebuffer::get_height());
+        arm64_print(" work-area=");
+        phase3_serial_dec(area.width);
+        arm64_print("x");
+        phase3_serial_dec(area.height);
+        arm64_print(created ? " centered=1 result=created\n" : " centered=1 result=rejected\n");
+    }
+#endif
     return created ? GX_OK : GX_ERROR_FAILED;
 }
 

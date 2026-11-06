@@ -62,6 +62,7 @@ struct HostHarness {
     int lastHeight;
     uint32_t lastFlags;
     gx_result lastExitCode;
+    gx_result fileStatResult;
     uint32_t listOverflow;
     uint32_t byteCountOverflow;
     gx_development_run_request lastRunRequest;
@@ -97,17 +98,18 @@ static gx_result GX_CALL mock_log(gx_app_context* context, const char* text)
 static uint32_t GX_CALL mock_api_version(gx_app_context*) { return 77; }
 
 static gx_result GX_CALL mock_request_window(gx_app_context* context, const char* title,
-                                               int, int, gx_handle* out)
+                                               int width, int height, gx_handle* out)
 {
     HostHarness* h = harness(context); ++h->calls[1];
-    strcpy(h->lastText, title); *out = 0x123; return GX_OK;
+    strcpy(h->lastText, title); h->lastWidth = width; h->lastHeight = height; *out = 0x123; return GX_OK;
 }
 
 static gx_result GX_CALL mock_request_window_ex(gx_app_context* context, const char* title,
-                                                  int, int, uint32_t flags, gx_handle* out)
+                                                  int width, int height, uint32_t flags, gx_handle* out)
 {
     HostHarness* h = harness(context); ++h->calls[2];
-    strcpy(h->lastText, title); h->lastFlags = flags; *out = 0x456; return GX_OK;
+    strcpy(h->lastText, title); h->lastWidth = width; h->lastHeight = height;
+    h->lastFlags = flags; *out = 0x456; return GX_OK;
 }
 
 static gx_result GX_CALL mock_poll_event(gx_app_context* context, gx_event* out, int timeout)
@@ -130,6 +132,7 @@ static gx_result GX_CALL mock_window_destroy(gx_app_context* context, gx_handle 
 static gx_result GX_CALL mock_file_stat(gx_app_context* context, const char* path, gx_file_info* out)
 {
     HostHarness* h = harness(context); ++h->calls[6]; strcpy(h->lastText, path);
+    if (h->fileStatResult != GX_OK) return h->fileStatResult;
     out->type = GX_FILE_TYPE_REGULAR; out->reserved = 0; out->size = 9; return GX_OK;
 }
 
@@ -321,8 +324,9 @@ int main()
     char title[] = "Studio"; studio_v05::gx_handle window = 0;
     CHECK(host->request_window(context, title, 640, 360, &window) == studio_v05::GX_OK && window == 0x123);
     CHECK(h.calls[1] == 1 && strcmp(h.lastText, title) == 0);
-    CHECK(host->request_window_ex(context, title, 640, 360, 7, &window) == studio_v05::GX_OK && window == 0x456);
-    CHECK(h.calls[2] == 1 && h.lastFlags == 7);
+    const uint32_t studioWindowFlags = GX_WINDOW_FLAG_RESIZABLE | GX_WINDOW_FLAG_CENTERED;
+    CHECK(host->request_window_ex(context, title, 960, 700, studioWindowFlags, &window) == studio_v05::GX_OK && window == 0x456);
+    CHECK(h.calls[2] == 1 && h.lastFlags == studioWindowFlags && h.lastWidth == 960 && h.lastHeight == 700);
     CHECK(host->request_window(context, title, 10, 10, reinterpret_cast<studio_v05::gx_handle*>(1)) ==
           studio_v05::GX_ERROR_INVALID_ARGUMENT);
     CHECK(host->native_window_destroy(context, 0x123) == studio_v05::GX_OK && h.lastHandle == 0x123);
@@ -357,6 +361,11 @@ int main()
     studio_v05::gx_file_info info{};
     CHECK(host->bare_metal_file_stat(context, path, &info) == studio_v05::GX_OK);
     CHECK(info.type == GX_FILE_TYPE_REGULAR && info.size == 9 && strcmp(h.lastText, path) == 0);
+    h.fileStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    CHECK(host->bare_metal_file_stat(context, path, &info) == studio_v05::GX_ERROR_NOT_FOUND);
+    h.fileStatResult = kernel::studio_abi::kV05FileStatMountUnavailableBridge;
+    CHECK(host->bare_metal_file_stat(context, path, &info) == studio_v05::GX_ERROR_NOT_MOUNTED);
+    h.fileStatResult = GX_OK;
     char fileBytes[8]{}; uint32_t bytes = 0;
     CHECK(host->bare_metal_file_read_workspace(context, path, fileBytes, sizeof(fileBytes), &bytes) == studio_v05::GX_OK);
     CHECK(bytes == 3 && memcmp(fileBytes, "abc", 3) == 0);
@@ -388,7 +397,7 @@ int main()
     CHECK(host->bare_metal_file_stat(context, path, &info) == studio_v05::GX_ERROR_UNSUPPORTED);
     h.host.bare_metal_file_stat = savedStat;
     CHECK(host->bare_metal_file_stat(context, path, &info) == studio_v05::GX_OK);
-    CHECK(h.calls[6] == 2);
+    CHECK(h.calls[6] == 4);
 
     studio_v05::gx_build_request build{}; build.size = sizeof(build); build.version = GX_BUILD_API_VERSION;
     char projectRoot[] = "/Apps/DeveloperStudio"; char projectId[] = "com.guidexos.developerstudio";

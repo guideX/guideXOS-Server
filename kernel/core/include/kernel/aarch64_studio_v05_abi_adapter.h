@@ -11,6 +11,13 @@ namespace studio_abi {
  * guidexos-c-abi-v1 identity continues to select the original 400-byte ABI. */
 static const char kV05StudioAbiIdentity[] = "guidexos-c-abi-v1-studio-v05-464";
 
+/* Private status values used only between the ARM64 NativeElf file-stat host
+ * service and the v0.5 adapter. They are never written into either public ABI
+ * table; this preserves AARCH64's existing -9 quota code and v0.5's -9
+ * not-found code while forwarding the filesystem's precise lookup result. */
+static constexpr gx_result kV05FileStatNotFoundBridge = static_cast<gx_result>(-1001);
+static constexpr gx_result kV05FileStatMountUnavailableBridge = static_cast<gx_result>(-1002);
+
 enum class Profile : uint8_t {
     Aarch64400 = 0,
     StudioV05_464 = 1,
