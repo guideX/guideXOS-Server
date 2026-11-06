@@ -968,7 +968,6 @@ if ($SafeHandoff) {
 }
 $transitionHostedTestRoot = $null
 $transitionHostedTestResults = $null
-$transitionPrerequisiteMatrixPath = $null
 $transitionGuestPhasePlanPath = $null
 $transitionGuestGuardTemplatePath = $null
 if ($InitializeModulesAttribution) {
