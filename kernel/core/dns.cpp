@@ -324,140 +324,168 @@ Status build_query(uint8_t* buffer, uint16_t bufferSize,
 // DNS Response Parsing
 // ================================================================
 
-Status parse_response(const uint8_t* packet, uint16_t packetLen,
-                      uint16_t expectedId, QueryResult* result)
+static uint16_t read_u16_be(const uint8_t* p)
 {
-    if (!packet || !result) return DNS_ERR_INVALID;
-    if (packetLen < sizeof(Header)) return DNS_ERR_FORMAT;
-    
+    return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | p[1]);
+}
+
+static uint32_t read_u32_be(const uint8_t* p)
+{
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) |
+           static_cast<uint32_t>(p[3]);
+}
+
+static bool parse_resource_record(const uint8_t* packet, uint16_t packetLen,
+                                  uint16_t* position, ResourceRecord* record)
+{
+    if (!packet || !position || !record || *position >= packetLen) return false;
+
+    memzero(record, sizeof(*record));
+    const uint16_t nameBytes = decode_domain(packet, packetLen, *position,
+        record->name, sizeof(record->name));
+    if (nameBytes == 0 || nameBytes > packetLen - *position) return false;
+    *position = static_cast<uint16_t>(*position + nameBytes);
+    if (packetLen - *position < 10) return false;
+
+    record->type = read_u16_be(packet + *position);
+    record->rclass = read_u16_be(packet + *position + 2);
+    record->ttl = read_u32_be(packet + *position + 4);
+    record->rdlength = read_u16_be(packet + *position + 8);
+    *position = static_cast<uint16_t>(*position + 10);
+    if (record->rdlength > packetLen - *position) return false;
+
+    const uint16_t rdataPosition = *position;
+    switch (record->type) {
+    case TYPE_A:
+        if (record->rdlength != 4) return false;
+        record->data.ipv4 = read_u32_be(packet + rdataPosition);
+        break;
+    case TYPE_AAAA:
+        if (record->rdlength != 16) return false;
+        memcopy(record->data.ipv6, packet + rdataPosition, 16);
+        break;
+    case TYPE_CNAME:
+    case TYPE_NS:
+    case TYPE_PTR: {
+        const uint16_t encodedNameBytes = decode_domain(packet, packetLen,
+            rdataPosition, record->data.cname, sizeof(record->data.cname));
+        if (encodedNameBytes == 0 || encodedNameBytes > record->rdlength) return false;
+        break;
+    }
+    default:
+        if (record->rdlength <= sizeof(record->data.raw)) {
+            memcopy(record->data.raw, packet + rdataPosition, record->rdlength);
+        }
+        break;
+    }
+
+    *position = static_cast<uint16_t>(*position + record->rdlength);
+    return true;
+}
+
+Status parse_response(const uint8_t* packet, uint16_t packetLen,
+                      uint16_t expectedId, const char* expectedDomain,
+                      RecordType expectedType, QueryResult* result)
+{
+    if (!packet || !result || !expectedDomain || expectedDomain[0] == '\0') {
+        return DNS_ERR_INVALID;
+    }
+    if (packetLen < sizeof(Header) || packetLen > MAX_PACKET_SIZE) return DNS_ERR_FORMAT;
+
     memzero(result, sizeof(QueryResult));
-    
     const Header* hdr = reinterpret_cast<const Header*>(packet);
-    
-    // Check transaction ID
-    uint16_t id = dns_ntohs(hdr->id);
-    if (id != expectedId) {
-        strcpy_safe(result->errorMsg, "Transaction ID mismatch", 64);
+    if (dns_ntohs(hdr->id) != expectedId) {
+        strcpy_safe(result->errorMsg, "Transaction ID mismatch", sizeof(result->errorMsg));
         return DNS_ERR_FORMAT;
     }
-    
-    // Check QR flag (must be response)
-    uint16_t flags = dns_ntohs(hdr->flags);
-    if ((flags & FLAG_QR_RESPONSE) == 0) {
-        strcpy_safe(result->errorMsg, "Not a response", 64);
+
+    const uint16_t flags = dns_ntohs(hdr->flags);
+    if ((flags & FLAG_QR_RESPONSE) == 0 || (flags & 0x7800u) != OPCODE_QUERY ||
+        (flags & FLAG_TC) != 0 || (flags & 0x0040u) != 0) {
+        strcpy_safe(result->errorMsg, "Invalid or truncated DNS response", sizeof(result->errorMsg));
         return DNS_ERR_FORMAT;
     }
-    
-    // Check response code
-    result->rcode = flags & RCODE_MASK;
-    
-    if (result->rcode == RCODE_NXDOMAIN) {
-        strcpy_safe(result->errorMsg, "Domain not found", 64);
-        return DNS_ERR_NXDOMAIN;
-    } else if (result->rcode == RCODE_SERVFAIL) {
-        strcpy_safe(result->errorMsg, "Server failure", 64);
-        return DNS_ERR_SERVFAIL;
-    } else if (result->rcode == RCODE_REFUSED) {
-        strcpy_safe(result->errorMsg, "Query refused", 64);
-        return DNS_ERR_REFUSED;
-    } else if (result->rcode != RCODE_NOERROR) {
-        strcpy_safe(result->errorMsg, "DNS error", 64);
+
+    const uint16_t qdcount = dns_ntohs(hdr->qdcount);
+    const uint16_t ancount = dns_ntohs(hdr->ancount);
+    const uint16_t nscount = dns_ntohs(hdr->nscount);
+    const uint16_t arcount = dns_ntohs(hdr->arcount);
+    const uint32_t rrCount = static_cast<uint32_t>(ancount) + nscount + arcount;
+    if (qdcount != 1 || ancount > MAX_ANSWERS || rrCount > 32u) {
+        strcpy_safe(result->errorMsg, "DNS section counts exceed supported bounds", sizeof(result->errorMsg));
         return DNS_ERR_FORMAT;
     }
-    
-    uint16_t qdcount = dns_ntohs(hdr->qdcount);
-    uint16_t ancount = dns_ntohs(hdr->ancount);
-    
-    // Skip questions section
-    uint16_t pos = sizeof(Header);
-    for (uint16_t i = 0; i < qdcount; ++i) {
-        // Skip QNAME
-        while (pos < packetLen) {
-            uint8_t labelLen = packet[pos];
-            if (labelLen == 0) {
-                pos++;
-                break;
-            }
-            if ((labelLen & 0xC0) == 0xC0) {
-                pos += 2;  // Compression pointer
-                break;
-            }
-            pos += 1 + labelLen;
+
+    uint16_t position = sizeof(Header);
+    char questionName[MAX_DOMAIN_LEN + 1];
+    const uint16_t questionNameBytes = decode_domain(packet, packetLen, position,
+        questionName, sizeof(questionName));
+    if (questionNameBytes == 0 || questionNameBytes > packetLen - position) {
+        strcpy_safe(result->errorMsg, "Malformed DNS question name", sizeof(result->errorMsg));
+        return DNS_ERR_FORMAT;
+    }
+    position = static_cast<uint16_t>(position + questionNameBytes);
+    if (packetLen - position < 4) {
+        strcpy_safe(result->errorMsg, "Truncated DNS question", sizeof(result->errorMsg));
+        return DNS_ERR_FORMAT;
+    }
+    const uint16_t questionType = read_u16_be(packet + position);
+    const uint16_t questionClass = read_u16_be(packet + position + 2);
+    position = static_cast<uint16_t>(position + 4);
+    if (!str_eq_case_insensitive(questionName, expectedDomain) ||
+        questionType != static_cast<uint16_t>(expectedType) || questionClass != CLASS_IN) {
+        strcpy_safe(result->errorMsg, "DNS question does not match request", sizeof(result->errorMsg));
+        return DNS_ERR_FORMAT;
+    }
+
+    for (uint16_t i = 0; i < ancount; ++i) {
+        ResourceRecord* answer = &result->answers[result->answerCount];
+        if (!parse_resource_record(packet, packetLen, &position, answer) ||
+            answer->rclass != CLASS_IN) {
+            strcpy_safe(result->errorMsg, "Malformed DNS answer record", sizeof(result->errorMsg));
+            return DNS_ERR_FORMAT;
         }
-        pos += 4;  // QTYPE + QCLASS
-    }
-    
-    // Parse answers
-    result->answerCount = 0;
-    
-    for (uint16_t i = 0; i < ancount && result->answerCount < MAX_ANSWERS; ++i) {
-        if (pos >= packetLen) break;
-        
-        ResourceRecord* rr = &result->answers[result->answerCount];
-        memzero(rr, sizeof(ResourceRecord));
-        
-        // Decode name
-        uint16_t nameLen = decode_domain(packet, packetLen, pos, rr->name, MAX_DOMAIN_LEN + 1);
-        if (nameLen == 0) break;
-        pos += nameLen;
-        
-        // Check remaining bytes
-        if (pos + 10 > packetLen) break;
-        
-        // Read TYPE, CLASS, TTL, RDLENGTH
-        rr->type = (packet[pos] << 8) | packet[pos + 1];
-        pos += 2;
-        rr->rclass = (packet[pos] << 8) | packet[pos + 1];
-        pos += 2;
-        rr->ttl = (packet[pos] << 24) | (packet[pos + 1] << 16) |
-                  (packet[pos + 2] << 8) | packet[pos + 3];
-        pos += 4;
-        rr->rdlength = (packet[pos] << 8) | packet[pos + 1];
-        pos += 2;
-        
-        if (pos + rr->rdlength > packetLen) break;
-        
-        // Parse record data based on type
-        switch (rr->type) {
-            case TYPE_A:
-                if (rr->rdlength == 4) {
-                    rr->data.ipv4 = (packet[pos] << 24) |
-                                    (packet[pos + 1] << 16) |
-                                    (packet[pos + 2] << 8) |
-                                    packet[pos + 3];
-                }
-                break;
-                
-            case TYPE_AAAA:
-                if (rr->rdlength == 16) {
-                    memcopy(rr->data.ipv6, packet + pos, 16);
-                }
-                break;
-                
-            case TYPE_CNAME:
-            case TYPE_NS:
-            case TYPE_PTR:
-                decode_domain(packet, packetLen, pos, rr->data.cname, MAX_DOMAIN_LEN + 1);
-                break;
-                
-            default:
-                // Copy raw data
-                if (rr->rdlength <= sizeof(rr->data.raw)) {
-                    memcopy(rr->data.raw, packet + pos, rr->rdlength);
-                }
-                break;
-        }
-        
-        pos += rr->rdlength;
         result->answerCount++;
     }
-    
-    result->success = (result->answerCount > 0);
+
+    for (uint32_t i = 0; i < static_cast<uint32_t>(nscount) + arcount; ++i) {
+        ResourceRecord ignored;
+        if (!parse_resource_record(packet, packetLen, &position, &ignored) ||
+            ignored.rclass != CLASS_IN) {
+            strcpy_safe(result->errorMsg, "Malformed DNS authority/additional record", sizeof(result->errorMsg));
+            return DNS_ERR_FORMAT;
+        }
+    }
+    if (position != packetLen) {
+        strcpy_safe(result->errorMsg, "DNS response has trailing bytes", sizeof(result->errorMsg));
+        return DNS_ERR_FORMAT;
+    }
+
+    result->rcode = flags & RCODE_MASK;
+    if (result->rcode == RCODE_NXDOMAIN) {
+        strcpy_safe(result->errorMsg, "Domain not found", sizeof(result->errorMsg));
+        return DNS_ERR_NXDOMAIN;
+    }
+    if (result->rcode == RCODE_SERVFAIL) {
+        strcpy_safe(result->errorMsg, "Server failure", sizeof(result->errorMsg));
+        return DNS_ERR_SERVFAIL;
+    }
+    if (result->rcode == RCODE_REFUSED) {
+        strcpy_safe(result->errorMsg, "Query refused", sizeof(result->errorMsg));
+        return DNS_ERR_REFUSED;
+    }
+    if (result->rcode != RCODE_NOERROR) {
+        strcpy_safe(result->errorMsg, "DNS error", sizeof(result->errorMsg));
+        return DNS_ERR_FORMAT;
+    }
+
+    result->success = result->answerCount > 0;
     if (!result->success) {
-        strcpy_safe(result->errorMsg, "No answers in response", 64);
+        strcpy_safe(result->errorMsg, "No answers in response", sizeof(result->errorMsg));
         return DNS_ERR_NOTFOUND;
     }
-    
     return DNS_OK;
 }
 
@@ -589,7 +617,8 @@ Status resolve(const char* domain, uint32_t* ipv4)
     s_lastQueryDiagnostics.result = DNS_ERR_INVALID;
     
     // Need to perform DNS query
-    if (!ipv4::is_configured()) {
+    if (!ipv4::is_configured() || s_dnsServer == 0) {
+        s_lastQueryDiagnostics.result = DNS_ERR_NETWORK;
         return DNS_ERR_NETWORK;
     }
     
@@ -617,10 +646,17 @@ Status resolve(const char* domain, uint32_t* ipv4)
     if (localPort == 0) {
         socket::udp_close(sock);
         s_stats.errors++;
+        s_lastQueryDiagnostics.result = DNS_ERR_NETWORK;
         return DNS_ERR_NETWORK;
     }
     
-    socket::udp_bind(sock, localPort);
+    if (socket::udp_bind(sock, localPort) != socket::SOCK_OK) {
+        socket::udp_close(sock);
+        udp::free_ephemeral_port(localPort);
+        s_stats.errors++;
+        s_lastQueryDiagnostics.result = DNS_ERR_NETWORK;
+        return DNS_ERR_NETWORK;
+    }
     s_lastQueryDiagnostics.sourcePort = localPort;
     s_lastQueryDiagnostics.queryBytes = queryLen;
 
@@ -654,17 +690,31 @@ Status resolve(const char* domain, uint32_t* ipv4)
 
             socket::SockAddr fromAddr;
             int recvLen = socket::udp_recvfrom(sock, responsePacket, MAX_PACKET_SIZE, &fromAddr);
-            
+
+            if (recvLen == socket::SOCK_ERR_MSGSIZE) {
+                s_lastQueryDiagnostics.oversizedReplies++;
+            }
             if (recvLen > 0) {
-                s_stats.responsesReceived++;
+                if (fromAddr.addr != s_dnsServer || fromAddr.port != DNS_PORT) {
+                    s_lastQueryDiagnostics.unexpectedReplySources++;
+                    continue;
+                }
+                s_lastQueryDiagnostics.replySourceIP = fromAddr.addr;
+                s_lastQueryDiagnostics.replySourcePort = fromAddr.port;
+                s_lastQueryDiagnostics.replySourceValidated = true;
                 s_lastQueryDiagnostics.replyBytes = static_cast<uint16_t>(recvLen);
-                
-                // Parse response
-                status = parse_response(responsePacket, recvLen, queryId, &result);
+
+                status = parse_response(responsePacket, static_cast<uint16_t>(recvLen),
+                    queryId, domain, TYPE_A, &result);
                 s_lastQueryDiagnostics.replyRcode = result.rcode;
                 s_lastQueryDiagnostics.replyAnswerCount = result.answerCount;
-                if (status == DNS_OK) {
+                if (status == DNS_OK || status == DNS_ERR_NXDOMAIN ||
+                    status == DNS_ERR_SERVFAIL || status == DNS_ERR_REFUSED) {
+                    s_stats.responsesReceived++;
+                    s_lastQueryDiagnostics.acceptedReplies++;
                     gotResponse = true;
+                } else {
+                    s_lastQueryDiagnostics.malformedReplies++;
                 }
             }
             
@@ -699,10 +749,16 @@ Status resolve(const char* domain, uint32_t* ipv4)
         s_lastQueryDiagnostics.result = DNS_ERR_TIMEOUT;
         return DNS_ERR_TIMEOUT;
     }
+
+    if (status != DNS_OK) {
+        s_lastQueryDiagnostics.result = status;
+        return status;
+    }
     
     // Find A record in answers
     for (uint8_t i = 0; i < result.answerCount; ++i) {
-        if (result.answers[i].type == TYPE_A) {
+        if (result.answers[i].type == TYPE_A &&
+            str_eq_case_insensitive(result.answers[i].name, domain)) {
             *ipv4 = result.answers[i].data.ipv4;
             
             // Add to cache
@@ -715,7 +771,8 @@ Status resolve(const char* domain, uint32_t* ipv4)
     
     // Check for CNAME and follow it
     for (uint8_t i = 0; i < result.answerCount; ++i) {
-        if (result.answers[i].type == TYPE_CNAME) {
+        if (result.answers[i].type == TYPE_CNAME &&
+            str_eq_case_insensitive(result.answers[i].name, domain)) {
             // Recursively resolve CNAME (with depth limit)
             static uint8_t cnameDepth = 0;
             if (cnameDepth < 5) {
@@ -756,7 +813,7 @@ Status resolve_full(const char* domain, RecordType type, QueryResult* result)
         }
     }
     
-    if (!ipv4::is_configured()) {
+    if (!ipv4::is_configured() || s_dnsServer == 0) {
         strcpy_safe(result->errorMsg, "Network not configured", 64);
         return DNS_ERR_NETWORK;
     }
@@ -790,7 +847,13 @@ Status resolve_full(const char* domain, RecordType type, QueryResult* result)
         return DNS_ERR_NETWORK;
     }
     
-    socket::udp_bind(sock, localPort);
+    if (socket::udp_bind(sock, localPort) != socket::SOCK_OK) {
+        socket::udp_close(sock);
+        udp::free_ephemeral_port(localPort);
+        strcpy_safe(result->errorMsg, "Failed to bind DNS socket", 64);
+        s_stats.errors++;
+        return DNS_ERR_NETWORK;
+    }
     
     // Try up to MAX_RETRIES times
     uint8_t responsePacket[MAX_PACKET_SIZE];
@@ -805,27 +868,30 @@ Status resolve_full(const char* domain, RecordType type, QueryResult* result)
         
         s_stats.queriesSent++;
         
-        // Wait for response
-        uint32_t waitCount = 0;
-        const uint32_t maxWait = 300000;
-        
-        while (waitCount < maxWait && !gotResponse) {
+        // Use the same PIT-based bounded deadline as the A-record resolver.
+        const uint64_t attemptStartTicks = pit::ticks();
+        const uint64_t maxWaitTicks = (QUERY_TIMEOUT_MS + 9u) / 10u;
+
+        while ((pit::ticks() - attemptStartTicks) < maxWaitTicks && !gotResponse) {
             ipv4::poll_network();
 
             socket::SockAddr fromAddr;
             int recvLen = socket::udp_recvfrom(sock, responsePacket, MAX_PACKET_SIZE, &fromAddr);
             
             if (recvLen > 0) {
-                s_stats.responsesReceived++;
-                status = parse_response(responsePacket, recvLen, queryId, result);
+                if (fromAddr.addr != s_dnsServer || fromAddr.port != DNS_PORT) {
+                    continue;
+                }
+                status = parse_response(responsePacket, static_cast<uint16_t>(recvLen),
+                    queryId, domain, type, result);
                 if (status == DNS_OK || status == DNS_ERR_NXDOMAIN ||
                     status == DNS_ERR_SERVFAIL || status == DNS_ERR_REFUSED) {
+                    s_stats.responsesReceived++;
                     gotResponse = true;
                 }
             }
             
             for (volatile int d = 0; d < 100; ++d) {}
-            waitCount++;
         }
         
         if (!gotResponse) {

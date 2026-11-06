@@ -383,8 +383,18 @@ int udp_recvfrom(int sockfd, void* buf, uint16_t maxLen,
         return SOCK_ERR_WOULDBLOCK;
     }
     
-    // Copy data
-    uint16_t copyLen = (rx->len < maxLen) ? rx->len : maxLen;
+    if (rx->len > maxLen) {
+        // Preserve datagram boundaries: callers must distinguish a complete
+        // message from a silently truncated prefix.
+        rx->valid = false;
+        sock->rxTail = (sock->rxTail + 1) % MAX_RX_QUEUE;
+        sock->rxCount--;
+        s_stats.datagramsDropped++;
+        return SOCK_ERR_MSGSIZE;
+    }
+
+    // Copy the complete datagram.
+    const uint16_t copyLen = rx->len;
     memcopy(buf, rx->data, copyLen);
     
     // Return source address if requested

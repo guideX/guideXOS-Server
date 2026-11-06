@@ -27,3 +27,9 @@ this shipped production source by a normal build. Updating this bundle must
 replace the versioned PEM, update the fixed metadata in
 `scripts/generate-wallpaper-pack.ps1`, rerun the manifest validator, and
 record the new source date, count, size, and hash in this file.
+
+Review-only source candidates belong under `assets/certs/candidates/`. They
+are not inputs to the normal package generator until their trust constraints,
+provenance, and production profile have been reviewed and explicitly
+promoted. See the candidate folder README for the 2026-11-05 curl extract and
+its non-production manifest.

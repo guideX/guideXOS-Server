@@ -19778,6 +19778,24 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec(dnsDiagnostics->replyRcode);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_reply_answer_count=");
     serial_put_dec(dnsDiagnostics->replyAnswerCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_reply_source_ip=");
+    {
+        char replySource[16];
+        kernel::ipv4::ip_to_string(dnsDiagnostics->replySourceIP, replySource);
+        serial::puts(replySource);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_reply_source_port=");
+    serial_put_dec(dnsDiagnostics->replySourcePort);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_reply_source_validated=");
+    serial::puts(dnsDiagnostics->replySourceValidated ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_accepted_replies=");
+    serial_put_dec(dnsDiagnostics->acceptedReplies);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_unexpected_reply_sources=");
+    serial_put_dec(dnsDiagnostics->unexpectedReplySources);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_malformed_replies=");
+    serial_put_dec(dnsDiagnostics->malformedReplies);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_oversized_replies=");
+    serial_put_dec(dnsDiagnostics->oversizedReplies);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_ipv4_rx_packets=");
     serial_put_dec(dnsDiagnostics->ipv4RxPackets);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_ipv4_rx_errors=");

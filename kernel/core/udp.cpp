@@ -266,9 +266,10 @@ Status parse_datagram(const uint8_t* data, uint16_t len,
     
     // Verify checksum if present
     if (hdr->checksum != 0) {
-        parsed->checksumValid = verify_checksum(srcIP, dstIP, data, len);
+        parsed->checksumValid = verify_checksum(srcIP, dstIP, data, parsed->length);
         if (!parsed->checksumValid) {
             s_stats.checksumErrors++;
+            return UDP_ERR_BAD_CHECKSUM;
         }
     } else {
         parsed->checksumValid = true;  // Checksum disabled

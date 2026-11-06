@@ -172,7 +172,9 @@ int udp_send(int sockfd, const void* buf, uint16_t len);
 // ------------------------------------------------------------
 
 // Receive datagram and get source address
-// Returns: number of bytes received on success, error code on failure
+// Returns: number of bytes received on success, SOCK_ERR_MSGSIZE if the
+// complete datagram is larger than maxLen (the datagram is consumed), or
+// another error code on failure.
 // If no data available and non-blocking, returns SOCK_ERR_WOULDBLOCK
 int udp_recvfrom(int sockfd, void* buf, uint16_t maxLen,
                  SockAddr* srcAddr);

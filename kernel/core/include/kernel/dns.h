@@ -216,6 +216,13 @@ struct QueryDiagnostics {
     uint32_t udpRxErrors;
     uint32_t udpChecksumErrors;
     uint32_t udpNoPortErrors;
+    uint32_t unexpectedReplySources;
+    uint32_t malformedReplies;
+    uint32_t oversizedReplies;
+    uint32_t acceptedReplies;
+    uint32_t replySourceIP;
+    uint16_t replySourcePort;
+    bool replySourceValidated;
 };
 
 // ================================================================
@@ -285,7 +292,8 @@ Status build_query(uint8_t* buffer, uint16_t bufferSize,
 //
 // Returns DNS_OK on success
 Status parse_response(const uint8_t* packet, uint16_t packetLen,
-                      uint16_t expectedId, QueryResult* result);
+                      uint16_t expectedId, const char* expectedDomain,
+                      RecordType expectedType, QueryResult* result);
 
 // ================================================================
 // DNS Cache
