@@ -85,6 +85,13 @@ Value Value::objectNamespace()
     return value;
 }
 
+Value Value::jsonNamespace()
+{
+    Value value;
+    value.type_ = ValueType::JsonNamespace;
+    return value;
+}
+
 const char* valueTypeName(ValueType type)
 {
     switch (type) {
@@ -99,6 +106,7 @@ const char* valueTypeName(ValueType type)
     case ValueType::Symbol: return "Symbol";
     case ValueType::SymbolNamespace: return "SymbolNamespace";
     case ValueType::ObjectNamespace: return "ObjectNamespace";
+    case ValueType::JsonNamespace: return "JsonNamespace";
     }
     return "Invalid";
 }

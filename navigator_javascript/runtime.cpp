@@ -196,6 +196,156 @@ std::string numberToString(double value, bool& succeeded)
     return std::string(buffer.data(), conversion.ptr);
 }
 
+bool decodeUtf8Scalar(const char* bytes, std::size_t length,
+    std::size_t& offset, std::uint32_t& scalar)
+{
+    if (bytes == nullptr || offset >= length) return false;
+    const unsigned char first = static_cast<unsigned char>(bytes[offset]);
+    if (first <= 0x7fu) {
+        scalar = first;
+        ++offset;
+        return true;
+    }
+
+    std::size_t count = 0u;
+    std::uint32_t value = 0u;
+    if (first >= 0xc2u && first <= 0xdfu) {
+        count = 2u;
+        value = first & 0x1fu;
+    } else if (first >= 0xe0u && first <= 0xefu) {
+        count = 3u;
+        value = first & 0x0fu;
+    } else if (first >= 0xf0u && first <= 0xf4u) {
+        count = 4u;
+        value = first & 0x07u;
+    } else {
+        return false;
+    }
+    if (count > length - offset) return false;
+    for (std::size_t index = 1u; index < count; ++index) {
+        const unsigned char continuation =
+            static_cast<unsigned char>(bytes[offset + index]);
+        if ((continuation & 0xc0u) != 0x80u) return false;
+        if (index == 1u &&
+            ((first == 0xe0u && continuation < 0xa0u) ||
+                (first == 0xedu && continuation >= 0xa0u) ||
+                (first == 0xf0u && continuation < 0x90u) ||
+                (first == 0xf4u && continuation >= 0x90u))) {
+            return false;
+        }
+        value = (value << 6u) | (continuation & 0x3fu);
+    }
+    if (value > 0x10ffffu || (value >= 0xd800u && value <= 0xdfffu))
+        return false;
+    offset += count;
+    scalar = value;
+    return true;
+}
+
+void appendUtf8Scalar(std::string& output, std::uint32_t scalar)
+{
+    if (scalar <= 0x7fu) {
+        output.push_back(static_cast<char>(scalar));
+    } else if (scalar <= 0x7ffu) {
+        output.push_back(static_cast<char>(0xc0u | (scalar >> 6u)));
+        output.push_back(static_cast<char>(0x80u | (scalar & 0x3fu)));
+    } else if (scalar <= 0xffffu) {
+        output.push_back(static_cast<char>(0xe0u | (scalar >> 12u)));
+        output.push_back(static_cast<char>(0x80u | ((scalar >> 6u) & 0x3fu)));
+        output.push_back(static_cast<char>(0x80u | (scalar & 0x3fu)));
+    } else {
+        output.push_back(static_cast<char>(0xf0u | (scalar >> 18u)));
+        output.push_back(static_cast<char>(0x80u | ((scalar >> 12u) & 0x3fu)));
+        output.push_back(static_cast<char>(0x80u | ((scalar >> 6u) & 0x3fu)));
+        output.push_back(static_cast<char>(0x80u | (scalar & 0x3fu)));
+    }
+}
+
+bool isJsonWhitespace(char value)
+{
+    return value == ' ' || value == '\t' || value == '\r' || value == '\n';
+}
+
+bool parseJsonNumber(SourceView input, double& result)
+{
+    if (input.data == nullptr || input.length == 0u) return false;
+    const char* const begin = input.data;
+    const char* const end = input.data + input.length;
+    const auto conversion = std::from_chars(begin, end, result,
+        std::chars_format::general);
+    if (conversion.ec == std::errc() && conversion.ptr == end) return true;
+    if (conversion.ec != std::errc::result_out_of_range ||
+        conversion.ptr != end) return false;
+
+    bool negative = false;
+    std::size_t cursor = 0u;
+    if (input.data[cursor] == '-') {
+        negative = true;
+        ++cursor;
+    }
+    std::size_t integerDigits = 0u;
+    std::size_t digitPosition = 0u;
+    std::size_t firstNonZero = std::numeric_limits<std::size_t>::max();
+    for (; cursor < input.length && input.data[cursor] != '.' &&
+            input.data[cursor] != 'e' && input.data[cursor] != 'E'; ++cursor) {
+        if (isAsciiDigit(input.data[cursor])) {
+            if (input.data[cursor] != '0' &&
+                firstNonZero == std::numeric_limits<std::size_t>::max()) {
+                firstNonZero = digitPosition;
+            }
+            ++digitPosition;
+            ++integerDigits;
+        }
+    }
+    if (cursor < input.length && input.data[cursor] == '.') {
+        ++cursor;
+        for (; cursor < input.length && input.data[cursor] != 'e' &&
+                input.data[cursor] != 'E'; ++cursor) {
+            if (isAsciiDigit(input.data[cursor])) {
+                if (input.data[cursor] != '0' &&
+                    firstNonZero == std::numeric_limits<std::size_t>::max()) {
+                    firstNonZero = digitPosition;
+                }
+                ++digitPosition;
+            }
+        }
+    }
+    if (firstNonZero == std::numeric_limits<std::size_t>::max()) {
+        result = negative ? -0.0 : 0.0;
+        return true;
+    }
+    long long explicitExponent = 0LL;
+    if (cursor < input.length) {
+        ++cursor;
+        bool exponentNegative = false;
+        if (cursor < input.length && (input.data[cursor] == '+' ||
+                input.data[cursor] == '-')) {
+            exponentNegative = input.data[cursor] == '-';
+            ++cursor;
+        }
+        for (; cursor < input.length && isAsciiDigit(input.data[cursor]);
+                ++cursor) {
+            if (explicitExponent < 1000000LL) {
+                explicitExponent = explicitExponent * 10LL +
+                    static_cast<long long>(input.data[cursor] - '0');
+                if (explicitExponent > 1000000LL)
+                    explicitExponent = 1000000LL;
+            }
+        }
+        if (exponentNegative) explicitExponent = -explicitExponent;
+    }
+    const long long decimalOrder =
+        static_cast<long long>(integerDigits) -
+        static_cast<long long>(firstNonZero) - 1LL + explicitExponent;
+    if (decimalOrder >= 0LL) {
+        result = negative ? -std::numeric_limits<double>::infinity()
+            : std::numeric_limits<double>::infinity();
+    } else {
+        result = negative ? -0.0 : 0.0;
+    }
+    return true;
+}
+
 bool isCanonicalArrayIndexSpelling(const std::string& key)
 {
     if (key.empty()) return false;
@@ -412,6 +562,7 @@ private:
         bool hostObjectValue = false;
         bool symbolNamespaceValue = false;
         bool objectNamespaceValue = false;
+        bool jsonNamespaceValue = false;
         RuntimeContext::PropertyKey key;
         SourceLocation location;
     };
@@ -582,6 +733,12 @@ private:
         // add a runtime object or global binding; only Object.keys is present.
         if (textEquals(name, "Object")) {
             value = Value::objectNamespace();
+            return true;
+        }
+        // JSON is a bounded intrinsic namespace. Like Object, it does not
+        // consume a user binding slot or a RuntimeObject record.
+        if (textEquals(name, "JSON")) {
+            value = Value::jsonNamespace();
             return true;
         }
         fail(RuntimeErrorCode::UnknownIdentifier,
@@ -1074,7 +1231,7 @@ private:
         }
         if (value.isObject() || value.isFunction() ||
             value.isSymbolNamespace() ||
-            value.isObjectNamespace()) {
+            value.isObjectNamespace() || value.isJsonNamespace()) {
             fail(RuntimeErrorCode::InvalidPropertyKey, location);
             return false;
         }
@@ -1104,14 +1261,15 @@ private:
         if (!evalExpression(node.object, object)) return false;
         if (!object.isObject() && !object.isHostObject() &&
             !object.isString() && !object.isSymbolNamespace() &&
-            !object.isObjectNamespace()) {
+            !object.isObjectNamespace() && !object.isJsonNamespace()) {
             fail(object.isNull() || object.isUndefined()
                 ? (forWrite ? RuntimeErrorCode::CannotWriteProperty
                     : RuntimeErrorCode::CannotReadProperty)
                 : RuntimeErrorCode::NotObject, node.location);
             return false;
         }
-        if ((object.isSymbolNamespace() || object.isObjectNamespace()) &&
+        if ((object.isSymbolNamespace() || object.isObjectNamespace() ||
+                object.isJsonNamespace()) &&
             forWrite) {
             fail(RuntimeErrorCode::NotObject, node.location);
             return false;
@@ -1153,6 +1311,9 @@ private:
         } else if (object.isObjectNamespace()) {
             reference.objectNamespaceValue = true;
             reference.receiver = object;
+        } else if (object.isJsonNamespace()) {
+            reference.jsonNamespaceValue = true;
+            reference.receiver = object;
         } else {
             reference.object = object.objectId();
             reference.receiver = object;
@@ -1188,6 +1349,16 @@ private:
                     reference.key.string == "getOwnPropertyDescriptor"
                     ? Value::function(
                         context_.objectGetOwnPropertyDescriptorFunction_)
+                    : Value::undefined();
+            return true;
+        }
+        if (reference.jsonNamespaceValue) {
+            value = !reference.key.isSymbol() &&
+                reference.key.string == "parse"
+                ? Value::function(context_.jsonParseFunction_)
+                : !reference.key.isSymbol() &&
+                    reference.key.string == "stringify"
+                    ? Value::function(context_.jsonStringifyFunction_)
                     : Value::undefined();
             return true;
         }
@@ -1230,6 +1401,8 @@ private:
             reference.symbolNamespaceValue = true;
         } else if (base.isObjectNamespace()) {
             reference.objectNamespaceValue = true;
+        } else if (base.isJsonNamespace()) {
+            reference.jsonNamespaceValue = true;
         } else if (base.isNull() || base.isUndefined()) {
             fail(RuntimeErrorCode::CannotReadProperty, location);
             return false;
@@ -1260,7 +1433,7 @@ private:
             fail(RuntimeErrorCode::NotObject, reference.location);
             return false;
         }
-        if (reference.objectNamespaceValue) {
+        if (reference.objectNamespaceValue || reference.jsonNamespaceValue) {
             fail(RuntimeErrorCode::NotObject, reference.location);
             return false;
         }
@@ -2609,6 +2782,765 @@ private:
             callSite, result);
     }
 
+    bool parseJson(const std::vector<Value>& arguments,
+        SourceLocation callSite, Value& result)
+    {
+        result = Value::undefined();
+        if (arguments.empty() || !arguments[0].isString()) {
+            fail(RuntimeErrorCode::TypeError, callSite);
+            return false;
+        }
+        if (arguments.size() > 1u) {
+            fail(RuntimeErrorCode::UnsupportedFeature, callSite);
+            return false;
+        }
+        const std::string* inputSource =
+            context_.stringData(arguments[0]);
+        if (inputSource == nullptr) {
+            fail(RuntimeErrorCode::TypeError, callSite);
+            return false;
+        }
+        if (inputSource->size() > context_.limits_.maxRuntimeStringLength) {
+            fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+            return false;
+        }
+        std::string inputStorage;
+        try {
+            inputStorage = *inputSource;
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, callSite);
+            return false;
+        }
+        const std::string* input = &inputStorage;
+
+        const std::size_t objectCountBefore = context_.objects_.size();
+        const std::size_t stringCountBefore = context_.strings_.size();
+        const std::size_t stringBytesBefore = context_.totalStringBytes_;
+        const std::size_t propertyCountBefore =
+            context_.totalPropertyCount_;
+        const std::size_t propertyKeyBytesBefore =
+            context_.totalPropertyKeyBytes_;
+        const std::size_t arrayElementsBefore =
+            context_.totalArrayElements_;
+        const auto rollback = [&]() {
+            context_.objects_.resize(objectCountBefore);
+            context_.strings_.resize(stringCountBefore);
+            context_.totalStringBytes_ = stringBytesBefore;
+            context_.totalPropertyCount_ = propertyCountBefore;
+            context_.totalPropertyKeyBytes_ = propertyKeyBytesBefore;
+            context_.totalArrayElements_ = arrayElementsBefore;
+        };
+
+        std::size_t cursor = 0u;
+        std::size_t pendingArrayElements = 0u;
+        Value parsed = Value::undefined();
+        bool succeeded = false;
+        const auto syntaxFailure = [this, callSite]() {
+            if (context_.result_.runtimeError.code == RuntimeErrorCode::None)
+                fail(RuntimeErrorCode::SyntaxError, callSite);
+            return false;
+        };
+        const auto takeByte = [&](char& character) {
+            if (cursor >= input->size()) return false;
+            if (!context_.consumeStep(callSite)) return false;
+            character = (*input)[cursor++];
+            return true;
+        };
+        const auto skipWhitespace = [&]() {
+            while (cursor < input->size() && isJsonWhitespace((*input)[cursor])) {
+                if (!context_.consumeStep(callSite)) return false;
+                ++cursor;
+            }
+            return true;
+        };
+        const auto readHexQuad = [&](std::uint16_t& value) {
+            value = 0u;
+            for (std::size_t index = 0u; index < 4u; ++index) {
+                char character = 0;
+                if (!takeByte(character)) return false;
+                if (!isAsciiHexDigit(character)) return syntaxFailure();
+                value = static_cast<std::uint16_t>((value << 4u) |
+                    static_cast<std::uint16_t>(hexValue(character)));
+            }
+            return true;
+        };
+        const auto appendDecodedScalar = [&](std::string& destination,
+            std::uint32_t scalar) {
+            const std::size_t byteCount = scalar <= 0x7fu ? 1u
+                : scalar <= 0x7ffu ? 2u : scalar <= 0xffffu ? 3u : 4u;
+            if (byteCount > context_.limits_.maxRuntimeStringLength ||
+                destination.size() > context_.limits_.maxRuntimeStringLength -
+                    byteCount) {
+                fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+                return false;
+            }
+            appendUtf8Scalar(destination, scalar);
+            return true;
+        };
+        const auto readJsonString = [&](std::string& decoded) {
+            decoded.clear();
+            char quote = 0;
+            if (!takeByte(quote) || quote != '"') return syntaxFailure();
+            while (cursor < input->size()) {
+                const std::size_t characterStart = cursor;
+                const unsigned char next = static_cast<unsigned char>(
+                    (*input)[cursor]);
+                if (next >= 0x80u) {
+                    std::uint32_t scalar = 0u;
+                    if (!decodeUtf8Scalar(input->data(), input->size(), cursor,
+                            scalar)) return syntaxFailure();
+                    const std::size_t byteCount = cursor - characterStart;
+                    for (std::size_t index = 0u; index < byteCount; ++index) {
+                        if (!context_.consumeStep(callSite)) return false;
+                    }
+                    (void)scalar;
+                    if (byteCount > context_.limits_.maxRuntimeStringLength ||
+                        decoded.size() >
+                            context_.limits_.maxRuntimeStringLength - byteCount) {
+                        fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+                        return false;
+                    }
+                    decoded.append(input->data() + characterStart, byteCount);
+                    continue;
+                }
+                char character = 0;
+                if (!takeByte(character)) return syntaxFailure();
+                if (character == '"') return true;
+                if (static_cast<unsigned char>(character) < 0x20u)
+                    return syntaxFailure();
+                if (character != '\\') {
+                    if (decoded.size() >=
+                        context_.limits_.maxRuntimeStringLength) {
+                        fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+                        return false;
+                    }
+                    decoded.push_back(character);
+                    continue;
+                }
+                char escape = 0;
+                if (!takeByte(escape)) return syntaxFailure();
+                switch (escape) {
+                case '"': decoded.push_back('"'); break;
+                case '\\': decoded.push_back('\\'); break;
+                case '/': decoded.push_back('/'); break;
+                case 'b': decoded.push_back('\b'); break;
+                case 'f': decoded.push_back('\f'); break;
+                case 'n': decoded.push_back('\n'); break;
+                case 'r': decoded.push_back('\r'); break;
+                case 't': decoded.push_back('\t'); break;
+                case 'u': {
+                    std::uint16_t firstUnit = 0u;
+                    if (!readHexQuad(firstUnit)) return false;
+                    std::uint32_t scalar = firstUnit;
+                    if (firstUnit >= 0xd800u && firstUnit <= 0xdbffu) {
+                        char slash = 0;
+                        char marker = 0;
+                        if (!takeByte(slash) || slash != '\\' ||
+                            !takeByte(marker) || marker != 'u')
+                            return syntaxFailure();
+                        std::uint16_t secondUnit = 0u;
+                        if (!readHexQuad(secondUnit)) return false;
+                        if (secondUnit < 0xdc00u || secondUnit > 0xdfffu)
+                            return syntaxFailure();
+                        scalar = 0x10000u +
+                            ((static_cast<std::uint32_t>(firstUnit) -
+                                0xd800u) << 10u) +
+                            (static_cast<std::uint32_t>(secondUnit) -
+                                0xdc00u);
+                    } else if (firstUnit >= 0xdc00u && firstUnit <= 0xdfffu) {
+                        return syntaxFailure();
+                    }
+                    if (!appendDecodedScalar(decoded, scalar)) return false;
+                    break;
+                }
+                default:
+                    return syntaxFailure();
+                }
+                if (decoded.size() > context_.limits_.maxRuntimeStringLength) {
+                    fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+                    return false;
+                }
+            }
+            return syntaxFailure();
+        };
+        const auto parseLiteral = [&](const char* literal,
+            std::size_t length) {
+            for (std::size_t index = 0u; index < length; ++index) {
+                char character = 0;
+                if (!takeByte(character) || character != literal[index])
+                    return syntaxFailure();
+            }
+            return true;
+        };
+        const auto parseNumber = [&](double& number) {
+            const std::size_t numberStart = cursor;
+            if (cursor < input->size() && (*input)[cursor] == '-') {
+                char ignored = 0;
+                if (!takeByte(ignored)) return false;
+            }
+            if (cursor >= input->size()) return syntaxFailure();
+            if ((*input)[cursor] == '0') {
+                char ignored = 0;
+                if (!takeByte(ignored)) return false;
+                if (cursor < input->size() && isAsciiDigit((*input)[cursor]))
+                    return syntaxFailure();
+            } else if ((*input)[cursor] >= '1' && (*input)[cursor] <= '9') {
+                do {
+                    char ignored = 0;
+                    if (!takeByte(ignored)) return false;
+                } while (cursor < input->size() &&
+                    isAsciiDigit((*input)[cursor]));
+            } else {
+                return syntaxFailure();
+            }
+            if (cursor < input->size() && (*input)[cursor] == '.') {
+                char ignored = 0;
+                if (!takeByte(ignored)) return false;
+                if (cursor >= input->size() ||
+                    !isAsciiDigit((*input)[cursor])) return syntaxFailure();
+                do {
+                    if (!takeByte(ignored)) return false;
+                } while (cursor < input->size() &&
+                    isAsciiDigit((*input)[cursor]));
+            }
+            if (cursor < input->size() && ((*input)[cursor] == 'e' ||
+                    (*input)[cursor] == 'E')) {
+                char ignored = 0;
+                if (!takeByte(ignored)) return false;
+                if (cursor < input->size() && ((*input)[cursor] == '+' ||
+                        (*input)[cursor] == '-')) {
+                    if (!takeByte(ignored)) return false;
+                }
+                if (cursor >= input->size() ||
+                    !isAsciiDigit((*input)[cursor])) return syntaxFailure();
+                do {
+                    if (!takeByte(ignored)) return false;
+                } while (cursor < input->size() &&
+                    isAsciiDigit((*input)[cursor]));
+            }
+            if (!parseJsonNumber(SourceView(input->data() + numberStart,
+                    cursor - numberStart), number)) {
+                return syntaxFailure();
+            }
+            return true;
+        };
+
+        const std::size_t maximumDepth = std::min(
+            context_.limits_.maxJsonNestingDepth,
+            kDefaultMaxJavaScriptJsonNestingDepth);
+        auto parseValue = [&](auto&& self, std::size_t parentDepth,
+                              Value& value) -> bool {
+            if (!skipWhitespace()) return false;
+            if (cursor >= input->size()) return syntaxFailure();
+            const char marker = (*input)[cursor];
+            if (marker == '{' || marker == '[') {
+                if (parentDepth >= maximumDepth) {
+                    fail(RuntimeErrorCode::JsonNestingLimitExceeded,
+                        callSite);
+                    return false;
+                }
+                const std::size_t containerDepth = parentDepth + 1u;
+                char opening = 0;
+                if (!takeByte(opening)) return false;
+                if (opening == '{') {
+                    const std::vector<Value> noElements;
+                    RuntimeObjectId objectId = kInvalidRuntimeObjectId;
+                    RuntimeErrorCode error = RuntimeErrorCode::None;
+                    if (!context_.createObject(false, noElements, objectId,
+                            error)) {
+                        fail(error, callSite);
+                        return false;
+                    }
+                    value = Value::object(objectId);
+                    if (!skipWhitespace()) return false;
+                    if (cursor < input->size() && (*input)[cursor] == '}') {
+                        char closing = 0;
+                        return takeByte(closing);
+                    }
+                    while (true) {
+                        std::string key;
+                        if (!readJsonString(key)) return false;
+                        if (!skipWhitespace()) return false;
+                        char colon = 0;
+                        if (!takeByte(colon) || colon != ':')
+                            return syntaxFailure();
+                        Value member = Value::undefined();
+                        if (!self(self, containerDepth, member)) return false;
+                        RuntimeErrorCode propertyError =
+                            RuntimeErrorCode::None;
+                        if (!context_.writeProperty(objectId, key, member,
+                                propertyError)) {
+                            fail(propertyError, callSite);
+                            return false;
+                        }
+                        if (!skipWhitespace()) return false;
+                        char delimiter = 0;
+                        if (!takeByte(delimiter)) return syntaxFailure();
+                        if (delimiter == '}') return true;
+                        if (delimiter != ',') return syntaxFailure();
+                        if (!skipWhitespace()) return false;
+                        if (cursor >= input->size() ||
+                            (*input)[cursor] != '"') return syntaxFailure();
+                    }
+                }
+
+                std::vector<RuntimeContext::RuntimeArrayElement> elements;
+                if (!skipWhitespace()) return false;
+                if (cursor < input->size() && (*input)[cursor] == ']') {
+                    char closing = 0;
+                    if (!takeByte(closing)) return false;
+                    RuntimeObjectId arrayId = kInvalidRuntimeObjectId;
+                    RuntimeErrorCode error = RuntimeErrorCode::None;
+                    if (!context_.createArray(0u, std::move(elements),
+                            arrayId, error)) {
+                        fail(error, callSite);
+                        return false;
+                    }
+                    value = Value::object(arrayId);
+                    return true;
+                }
+                while (true) {
+                    const std::size_t maxTotalElements =
+                        context_.limits_.maxTotalArrayElements;
+                    if (elements.size() >= maximumSupportedArrayLength(
+                            context_.limits_) ||
+                        elements.size() >= context_.limits_.maxArrayElements ||
+                        context_.totalArrayElements_ > maxTotalElements ||
+                        pendingArrayElements > maxTotalElements -
+                            context_.totalArrayElements_ ||
+                        pendingArrayElements >= maxTotalElements -
+                            context_.totalArrayElements_) {
+                        fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
+                        return false;
+                    }
+                    Value element = Value::undefined();
+                    if (!self(self, containerDepth, element)) return false;
+                    try {
+                        elements.push_back({elements.size(), element});
+                    } catch (const std::bad_alloc&) {
+                        fail(RuntimeErrorCode::AllocationFailure, callSite);
+                        return false;
+                    }
+                    ++pendingArrayElements;
+                    if (!skipWhitespace()) return false;
+                    char delimiter = 0;
+                    if (!takeByte(delimiter)) return syntaxFailure();
+                    if (delimiter == ']') break;
+                    if (delimiter != ',') return syntaxFailure();
+                    if (!skipWhitespace()) return false;
+                    if (cursor >= input->size() || (*input)[cursor] == ']')
+                        return syntaxFailure();
+                }
+                RuntimeObjectId arrayId = kInvalidRuntimeObjectId;
+                RuntimeErrorCode error = RuntimeErrorCode::None;
+                pendingArrayElements -= elements.size();
+                if (!context_.createArray(elements.size(), std::move(elements),
+                        arrayId, error)) {
+                    fail(error, callSite);
+                    return false;
+                }
+                value = Value::object(arrayId);
+                return true;
+            }
+            if (marker == '"') {
+                std::string decoded;
+                if (!readJsonString(decoded)) return false;
+                RuntimeErrorCode error = RuntimeErrorCode::None;
+                if (!context_.createString(SourceView(decoded.data(),
+                        decoded.size()), value, error)) {
+                    fail(error, callSite);
+                    return false;
+                }
+                return true;
+            }
+            if (marker == 't') {
+                if (!parseLiteral("true", 4u)) return false;
+                value = Value::boolean(true);
+                return true;
+            }
+            if (marker == 'f') {
+                if (!parseLiteral("false", 5u)) return false;
+                value = Value::boolean(false);
+                return true;
+            }
+            if (marker == 'n') {
+                if (!parseLiteral("null", 4u)) return false;
+                value = Value::nullValue();
+                return true;
+            }
+            if (marker == '-' || isAsciiDigit(marker)) {
+                double number = 0.0;
+                if (!parseNumber(number)) return false;
+                value = Value::number(number);
+                return true;
+            }
+            return syntaxFailure();
+        };
+
+        try {
+            succeeded = parseValue(parseValue, 0u, parsed);
+            if (succeeded && !skipWhitespace()) succeeded = false;
+            if (succeeded && cursor != input->size())
+                succeeded = syntaxFailure();
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, callSite);
+            succeeded = false;
+        }
+        if (!succeeded) {
+            rollback();
+            return false;
+        }
+        result = parsed;
+        return true;
+    }
+
+    bool stringifyJson(const std::vector<Value>& arguments,
+        SourceLocation callSite, Value& result)
+    {
+        result = Value::undefined();
+        if (arguments.size() > 1u) {
+            fail(RuntimeErrorCode::UnsupportedFeature, callSite);
+            return false;
+        }
+        const Value source = arguments.empty() ? Value::undefined()
+            : arguments[0];
+        const std::size_t maximumDepth = std::min(
+            context_.limits_.maxJsonNestingDepth,
+            kDefaultMaxJavaScriptJsonNestingDepth);
+        std::string output;
+        std::array<RuntimeObjectId,
+            kDefaultMaxJavaScriptJsonNestingDepth> activeObjects{};
+        std::size_t activeObjectCount = 0u;
+
+        const auto appendBytes = [&](const char* bytes, std::size_t length) {
+            if ((bytes == nullptr && length != 0u) ||
+                length > context_.limits_.maxRuntimeStringLength ||
+                output.size() > context_.limits_.maxRuntimeStringLength -
+                    length) {
+                fail(RuntimeErrorCode::StringLimitExceeded, callSite);
+                return false;
+            }
+            output.append(bytes == nullptr ? "" : bytes, length);
+            return true;
+        };
+        const auto appendText = [&](const char* text) {
+            std::size_t length = 0u;
+            while (text[length] != '\0') ++length;
+            return appendBytes(text, length);
+        };
+        const auto appendQuoted = [&](const std::string& text) {
+            if (!appendText("\"")) return false;
+            std::size_t offset = 0u;
+            while (offset < text.size()) {
+                if (!context_.consumeStep(callSite)) return false;
+                const std::size_t characterStart = offset;
+                std::uint32_t scalar = 0u;
+                if (!decodeUtf8Scalar(text.data(), text.size(), offset,
+                        scalar)) {
+                    fail(RuntimeErrorCode::TypeError, callSite);
+                    return false;
+                }
+                if (scalar == '"') {
+                    if (!appendText("\\\"")) return false;
+                } else if (scalar == '\\') {
+                    if (!appendText("\\\\")) return false;
+                } else if (scalar == '\b') {
+                    if (!appendText("\\b")) return false;
+                } else if (scalar == '\f') {
+                    if (!appendText("\\f")) return false;
+                } else if (scalar == '\n') {
+                    if (!appendText("\\n")) return false;
+                } else if (scalar == '\r') {
+                    if (!appendText("\\r")) return false;
+                } else if (scalar == '\t') {
+                    if (!appendText("\\t")) return false;
+                } else if (scalar < 0x20u) {
+                    static const char hex[] = "0123456789abcdef";
+                    const char escaped[] = {
+                        '\\', 'u', '0', '0',
+                        hex[(scalar >> 4u) & 0x0fu],
+                        hex[scalar & 0x0fu]};
+                    if (!appendBytes(escaped, sizeof(escaped))) return false;
+                } else if (!appendBytes(text.data() + characterStart,
+                        offset - characterStart)) {
+                    return false;
+                }
+            }
+            return appendText("\"");
+        };
+        const auto prepareValue = [&](const Value& original,
+            const std::string& propertyKey, Value& prepared,
+            bool& omitted) {
+            prepared = original;
+            omitted = false;
+            if (!prepared.isObject()) {
+                omitted = prepared.isUndefined() || prepared.isFunction() ||
+                    prepared.isSymbol();
+                return true;
+            }
+            if (context_.objectAt(prepared.objectId()) == nullptr) {
+                fail(RuntimeErrorCode::TypeError, callSite);
+                return false;
+            }
+            Value toJson = Value::undefined();
+            RuntimeErrorCode propertyError = RuntimeErrorCode::None;
+            if (!context_.readProperty(prepared.objectId(), "toJSON", toJson,
+                    propertyError, callSite)) {
+                fail(propertyError, callSite);
+                return false;
+            }
+            if (toJson.isFunction()) {
+                Value keyValue = Value::undefined();
+                RuntimeErrorCode stringError = RuntimeErrorCode::None;
+                if (!context_.createOrGetCachedString(SourceView(
+                        propertyKey.data(), propertyKey.size()), keyValue,
+                        stringError)) {
+                    fail(stringError, callSite);
+                    return false;
+                }
+                std::vector<Value> toJsonArguments;
+                try {
+                    toJsonArguments.push_back(keyValue);
+                } catch (const std::bad_alloc&) {
+                    fail(RuntimeErrorCode::AllocationFailure, callSite);
+                    return false;
+                }
+                Value replacement = Value::undefined();
+                if (!invokeFunction(toJson.functionId(), toJsonArguments,
+                        callSite, replacement, original)) return false;
+                prepared = replacement;
+            }
+            omitted = prepared.isUndefined() || prepared.isFunction() ||
+                prepared.isSymbol();
+            return true;
+        };
+
+        auto emitValue = [&](auto&& self, const Value& value,
+                             std::size_t parentDepth) -> bool {
+            switch (value.type()) {
+            case ValueType::Undefined:
+            case ValueType::Function:
+            case ValueType::Symbol:
+                fail(RuntimeErrorCode::TypeError, callSite);
+                return false;
+            case ValueType::Null:
+                return appendText("null");
+            case ValueType::Boolean:
+                return appendText(value.booleanValue() ? "true" : "false");
+            case ValueType::Number: {
+                if (!std::isfinite(value.numberValue()))
+                    return appendText("null");
+                if (value.numberValue() == 0.0) return appendText("0");
+                bool converted = false;
+                std::string number = numberToString(value.numberValue(),
+                    converted);
+                if (!converted) {
+                    fail(RuntimeErrorCode::AllocationFailure, callSite);
+                    return false;
+                }
+                return appendBytes(number.data(), number.size());
+            }
+            case ValueType::String: {
+                const std::string* text = context_.stringData(value);
+                if (text == nullptr) {
+                    fail(RuntimeErrorCode::InvalidAstState, callSite);
+                    return false;
+                }
+                return appendQuoted(*text);
+            }
+            case ValueType::HostObject:
+            case ValueType::SymbolNamespace:
+            case ValueType::ObjectNamespace:
+            case ValueType::JsonNamespace:
+                fail(RuntimeErrorCode::TypeError, callSite);
+                return false;
+            case ValueType::Object:
+                break;
+            }
+
+            const RuntimeObjectId objectId = value.objectId();
+            const RuntimeContext::RuntimeObject* object =
+                context_.objectAt(objectId);
+            if (object == nullptr || object->arrayIterator ||
+                objectId == context_.objectPrototype_ ||
+                objectId == context_.arrayPrototype_ ||
+                objectId == context_.mathObject_ ||
+                objectId == context_.eventConstantsObject_ ||
+                objectId == context_.eventObject_) {
+                fail(RuntimeErrorCode::TypeError, callSite);
+                return false;
+            }
+            if (parentDepth >= maximumDepth) {
+                fail(RuntimeErrorCode::JsonNestingLimitExceeded, callSite);
+                return false;
+            }
+            for (std::size_t index = 0u; index < activeObjectCount; ++index) {
+                if (activeObjects[index] == objectId) {
+                    fail(RuntimeErrorCode::TypeError, callSite);
+                    return false;
+                }
+            }
+            if (activeObjectCount >= activeObjects.size()) {
+                fail(RuntimeErrorCode::JsonNestingLimitExceeded, callSite);
+                return false;
+            }
+            activeObjects[activeObjectCount++] = objectId;
+            const std::size_t childDepth = parentDepth + 1u;
+
+            bool succeeded = true;
+            if (object->array) {
+                const std::size_t length = object->arrayLength;
+                if (length > maximumSupportedArrayLength(context_.limits_)) {
+                    fail(RuntimeErrorCode::ArrayLimitExceeded, callSite);
+                    succeeded = false;
+                } else if (!appendText("[")) {
+                    succeeded = false;
+                } else {
+                    for (std::size_t index = 0u;
+                        succeeded && index < length; ++index) {
+                        if (index != 0u && !appendText(",")) {
+                            succeeded = false;
+                            break;
+                        }
+                        char digits[sizeof(std::size_t) * 3u] = {};
+                        std::size_t digitCount = 0u;
+                        std::size_t remaining = index;
+                        do {
+                            digits[digitCount++] = static_cast<char>('0' +
+                                remaining % 10u);
+                            remaining /= 10u;
+                        } while (remaining != 0u);
+                        std::string key;
+                        try {
+                            key.reserve(digitCount);
+                            while (digitCount != 0u)
+                                key.push_back(digits[--digitCount]);
+                        } catch (const std::bad_alloc&) {
+                            fail(RuntimeErrorCode::AllocationFailure,
+                                callSite);
+                            succeeded = false;
+                            break;
+                        }
+                        Value element = Value::undefined();
+                        RuntimeErrorCode propertyError =
+                            RuntimeErrorCode::None;
+                        if (!context_.readProperty(objectId, key, element,
+                                propertyError, callSite)) {
+                            fail(propertyError, callSite);
+                            succeeded = false;
+                            break;
+                        }
+                        Value prepared = Value::undefined();
+                        bool omitted = false;
+                        if (!prepareValue(element, key, prepared, omitted)) {
+                            succeeded = false;
+                            break;
+                        }
+                        if (omitted) {
+                            succeeded = appendText("null");
+                        } else {
+                            succeeded = self(self, prepared, childDepth);
+                        }
+                    }
+                    if (succeeded) succeeded = appendText("]");
+                }
+            } else {
+                std::vector<std::string> keys;
+                try {
+                    keys.reserve(object->properties.size());
+                    for (const RuntimeContext::RuntimeProperty& property :
+                            object->properties) {
+                        if (property.symbolKey != WellKnownSymbol::None)
+                            continue;
+                        if (!property.attributes.isValid() ||
+                            !property.attributes.isFullyKnown()) {
+                            fail(RuntimeErrorCode::UnsupportedFeature,
+                                callSite);
+                            succeeded = false;
+                            break;
+                        }
+                        if (property.attributes.enumerable())
+                            keys.push_back(property.key);
+                    }
+                    std::stable_sort(keys.begin(), keys.end(),
+                        [](const std::string& left,
+                           const std::string& right) {
+                            std::uint32_t leftIndex = 0u;
+                            std::uint32_t rightIndex = 0u;
+                            const bool leftIsIndex = parseEcmaArrayIndex(
+                                left, leftIndex);
+                            const bool rightIsIndex = parseEcmaArrayIndex(
+                                right, rightIndex);
+                            if (leftIsIndex != rightIsIndex)
+                                return leftIsIndex;
+                            return leftIsIndex && rightIsIndex &&
+                                leftIndex < rightIndex;
+                        });
+                } catch (const std::bad_alloc&) {
+                    fail(RuntimeErrorCode::AllocationFailure, callSite);
+                    succeeded = false;
+                }
+                if (succeeded && !appendText("{")) succeeded = false;
+                std::size_t emittedProperties = 0u;
+                for (std::size_t index = 0u;
+                    succeeded && index < keys.size(); ++index) {
+                    Value propertyValue = Value::undefined();
+                    RuntimeErrorCode propertyError =
+                        RuntimeErrorCode::None;
+                    if (!context_.readProperty(objectId, keys[index],
+                            propertyValue, propertyError, callSite)) {
+                        fail(propertyError, callSite);
+                        succeeded = false;
+                        break;
+                    }
+                    Value prepared = Value::undefined();
+                    bool omitted = false;
+                    if (!prepareValue(propertyValue, keys[index], prepared,
+                            omitted)) {
+                        succeeded = false;
+                        break;
+                    }
+                    if (omitted) continue;
+                    if (emittedProperties != 0u && !appendText(",")) {
+                        succeeded = false;
+                        break;
+                    }
+                    if (!appendQuoted(keys[index]) || !appendText(":")) {
+                        succeeded = false;
+                        break;
+                    }
+                    if (!self(self, prepared, childDepth)) {
+                        succeeded = false;
+                        break;
+                    }
+                    ++emittedProperties;
+                }
+                if (succeeded) succeeded = appendText("}");
+            }
+            --activeObjectCount;
+            return succeeded;
+        };
+
+        try {
+            Value prepared = Value::undefined();
+            bool omitted = false;
+            if (!prepareValue(source, std::string(), prepared, omitted))
+                return false;
+            if (omitted) return true;
+            if (!emitValue(emitValue, prepared, 0u)) return false;
+            RuntimeErrorCode error = RuntimeErrorCode::None;
+            if (!context_.createString(SourceView(output.data(), output.size()),
+                    result, error)) {
+                fail(error, callSite);
+                return false;
+            }
+            return true;
+        } catch (const std::bad_alloc&) {
+            fail(RuntimeErrorCode::AllocationFailure, callSite);
+            return false;
+        }
+    }
+
     bool invokeNative(const RuntimeContext::FunctionRecord& function,
         const std::vector<Value>& arguments, SourceLocation callSite,
         Value receiver, Value& result)
@@ -2651,6 +3583,12 @@ private:
 
         switch (static_cast<RuntimeContext::NativeFunctionId>(
             function.nativeFunction)) {
+        case RuntimeContext::NativeFunctionId::JsonParse:
+            succeeded = parseJson(arguments, callSite, result);
+            break;
+        case RuntimeContext::NativeFunctionId::JsonStringify:
+            succeeded = stringifyJson(arguments, callSite, result);
+            break;
         case RuntimeContext::NativeFunctionId::ObjectKeys: {
             const Value& target = argumentOrUndefined(0u);
             if (!target.isObject()) {
@@ -3131,6 +4069,7 @@ private:
         case ValueType::Symbol:
         case ValueType::SymbolNamespace:
         case ValueType::ObjectNamespace:
+        case ValueType::JsonNamespace:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         }
@@ -3174,6 +4113,7 @@ private:
         case ValueType::Symbol:
         case ValueType::SymbolNamespace:
         case ValueType::ObjectNamespace:
+        case ValueType::JsonNamespace:
             fail(RuntimeErrorCode::InvalidOperandType, SourceLocation());
             return false;
         }
@@ -3850,6 +4790,7 @@ private:
         case ValueType::Symbol:
         case ValueType::SymbolNamespace:
         case ValueType::ObjectNamespace:
+        case ValueType::JsonNamespace:
             return true;
         }
         return false;
@@ -3889,6 +4830,8 @@ private:
         case ValueType::SymbolNamespace:
             return true;
         case ValueType::ObjectNamespace:
+            return true;
+        case ValueType::JsonNamespace:
             return true;
         }
         return false;
@@ -4218,6 +5161,8 @@ void RuntimeContext::clearRuntimeState()
     arrayIteratorSelfFunction_ = kInvalidRuntimeFunctionId;
     objectKeysFunction_ = kInvalidRuntimeFunctionId;
     objectGetOwnPropertyDescriptorFunction_ = kInvalidRuntimeFunctionId;
+    jsonParseFunction_ = kInvalidRuntimeFunctionId;
+    jsonStringifyFunction_ = kInvalidRuntimeFunctionId;
     eventStopImmediatePropagationFunction_ = kInvalidRuntimeFunctionId;
     eventPreventDefaultFunction_ = kInvalidRuntimeFunctionId;
     builtInsInitialized_ = false;
@@ -4827,6 +5772,10 @@ bool RuntimeContext::initializeBuiltIns(RuntimeErrorCode& error)
         !createNativeFunction(
             NativeFunctionId::ObjectGetOwnPropertyDescriptor,
             objectGetOwnPropertyDescriptorFunction_, error) ||
+        !createNativeFunction(NativeFunctionId::JsonParse,
+            jsonParseFunction_, error) ||
+        !createNativeFunction(NativeFunctionId::JsonStringify,
+            jsonStringifyFunction_, error) ||
         !install(arrayPrototype_, "forEach", NativeFunctionId::ArrayForEach,
             error) ||
         !install(arrayPrototype_, "map", NativeFunctionId::ArrayMap,
@@ -5961,6 +6910,7 @@ bool RuntimeContext::convertValueToHost(const Value& value, HostValue& result,
     case ValueType::Symbol:
     case ValueType::SymbolNamespace:
     case ValueType::ObjectNamespace:
+    case ValueType::JsonNamespace:
         error = RuntimeErrorCode::HostInvalidValue;
         (void)location;
         return false;
@@ -6394,6 +7344,9 @@ const char* runtimeErrorCodeName(RuntimeErrorCode code)
     case RuntimeErrorCode::UninitializedBinding:
         return "UninitializedBinding";
     case RuntimeErrorCode::DuplicateBinding: return "DuplicateBinding";
+    case RuntimeErrorCode::SyntaxError: return "SyntaxError";
+    case RuntimeErrorCode::JsonNestingLimitExceeded:
+        return "JsonNestingLimitExceeded";
     case RuntimeErrorCode::InvalidAssignmentTarget:
         return "InvalidAssignmentTarget";
     case RuntimeErrorCode::InvalidOperandType: return "InvalidOperandType";

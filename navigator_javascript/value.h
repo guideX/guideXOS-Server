@@ -17,6 +17,7 @@ enum class ValueType : std::uint8_t {
     Symbol,
     SymbolNamespace,
     ObjectNamespace,
+    JsonNamespace,
 };
 
 // Only symbols defined by the runtime itself are currently representable.
@@ -65,6 +66,7 @@ public:
     // The minimal global Symbol intrinsic is a namespace for the supported
     // well-known identities, not a callable Symbol() constructor.
     static Value symbolNamespace();
+    static Value jsonNamespace();
 
     ValueType type() const { return type_; }
     bool isUndefined() const { return type_ == ValueType::Undefined; }
@@ -84,6 +86,7 @@ public:
     {
         return type_ == ValueType::ObjectNamespace;
     }
+    bool isJsonNamespace() const { return type_ == ValueType::JsonNamespace; }
 
     bool booleanValue() const { return booleanValue_; }
     double numberValue() const { return numberValue_; }

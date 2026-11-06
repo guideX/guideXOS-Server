@@ -100,7 +100,8 @@ bool same(const Value& left, const Value& right)
     case ValueType::Symbol:
         return left.wellKnownSymbolValue() == right.wellKnownSymbolValue();
     case ValueType::SymbolNamespace:
-    case ValueType::ObjectNamespace: return true;
+    case ValueType::ObjectNamespace:
+    case ValueType::JsonNamespace: return true;
     }
     return false;
 }

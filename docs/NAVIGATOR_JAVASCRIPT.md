@@ -13787,3 +13787,135 @@ fragments, mutation observers, shadow DOM, custom elements, new CSS layout
 modes, and arbitrary style recalculation remain unsupported. Host measurements
 do not establish guest stack or memory bounds. Guest rendering, navigation
 lifecycle, stack, and memory qualification remain pending.
+# JS109 — bounded `JSON.parse()` and `JSON.stringify()`
+
+JS109 adds a native `JSON` namespace with synchronous `parse` and `stringify`
+methods. The JSON reader is a dedicated bounded grammar reader in
+`RuntimeContext::Evaluator`; it does not reuse the JavaScript expression
+parser. It validates the JSON grammar directly, decodes strings into the
+runtime's UTF-8 byte-backed strings, and creates ordinary runtime objects and
+dense native Arrays. The serializer walks the same runtime values, checks
+object identity along the active traversal path, and builds a compact output
+string under the runtime string limit.
+
+`JSON.parse` accepts exactly one string argument. A missing or non-string
+argument produces `TypeError`; additional arguments produce
+`UnsupportedFeature`. The accepted grammar includes objects, Arrays, strings,
+JSON numbers, `true`, `false`, and `null`, with only JSON's four whitespace
+bytes around values. Trailing non-whitespace, JavaScript-only syntax,
+malformed delimiters, comments, invalid numbers, raw string controls, bad
+escapes, invalid UTF-8, and unpaired UTF-16 surrogates fail. Grammar failures
+use `SyntaxError`. Valid `\uXXXX` BMP scalar escapes and paired surrogates are
+encoded as UTF-8. This runtime does not preserve lone UTF-16 surrogates.
+
+JSON numeric tokens use the existing `double` Number representation and
+`std::from_chars` conversion. The reader rejects tokens outside the JSON
+number grammar. Finite values retain the host conversion's binary64 precision;
+range overflow becomes signed infinity and underflow becomes signed zero,
+including negative zero. Stringification uses the runtime's shortest general
+Number formatting, emits negative zero as `0`, and emits non-finite numbers as
+`null`.
+
+Parsed objects and Arrays use ordinary bounded runtime storage. A later
+duplicate object key replaces the prior property's value. `__proto__` is
+created as an ordinary own data property and does not change the object's
+prototype. JSON Arrays are dense. Existing property access, `Object.keys`,
+Array length/index operations, and Array callbacks work with parsed values.
+Construction is transactional: syntax, depth, capacity, or allocation errors
+restore the object, string, property, key-byte, and Array-element pool lengths
+to their pre-parse values, and no partial parsed value is returned.
+
+`JSON.stringify` accepts zero or one argument; additional arguments fail with
+`UnsupportedFeature` rather than pretending to support replacers or spacing.
+With no argument, or a top-level `undefined`, function, or symbol value, it
+returns `undefined`. In object properties those unsupported values are
+omitted; in Arrays and holes they become `null`. Null, booleans, strings,
+finite numbers, ordinary objects, and native Arrays serialize to compact JSON.
+Only own enumerable string-keyed object properties are included. Canonical
+integer-index property names are emitted first in numeric order, followed by
+other own keys in insertion order. A shared reference is serialized again at
+each location; an object encountered again on the current path fails with
+`TypeError`. Callable `toJSON(key)` methods are invoked for supported values
+using the existing native call path. Runtime internal namespaces, iterator
+objects, and host references such as DOM objects fail with `TypeError`; they
+are not exposed through a generic host-object serializer.
+
+The JSON traversal depth defaults to 32 and is capped at 32 even if a caller
+sets a larger runtime limit. The general runtime defaults also bound input and
+output strings to 64 KiB each, retained string bytes to 256 KiB across at
+most 4,096 runtime string values, objects to 1,024, properties to 256 per
+object and 4,096 total, property-name length to 256 bytes, property-key bytes
+to 256 KiB, Arrays to 1,024 elements each and 4,096 total, and execution to
+100,000 steps. These existing limits remain in force; JS109 does not increase
+pool capacities. JSON source text is copied
+once into bounded temporary storage during parsing. The compact output buffer
+and individual decoded strings are limited by the runtime string bound.
+Allocations are retained with the realm after success until reset, following
+the runtime's existing lifetime policy. Failed parse construction rolls back
+its retained pool lengths. Stringification publishes no partial result on
+failure, though user `toJSON` code may have performed its own runtime side
+effects before an error is raised.
+
+At the default pool caps, the fixed runtime record payload for 1,024 objects,
+4,096 properties, and 4,096 Array elements is 614,400 bytes using the current
+host record sizes (88, 80, and 48 bytes respectively). Adding the separate
+256 KiB runtime-string and 256 KiB property-key byte budgets gives 1,138,688
+bytes of accounted retained payload. Parser scratch adds at most 64 KiB for
+its input copy; decoded strings derive from that same bounded input.
+Serializer scratch holds at most 64 KiB of output, 256 KiB of copied
+property-name bytes, and the active objects' bounded property-name vectors.
+With the current 32-byte host `std::string` representation, those vectors
+account for at most 128 KiB of string records; the largest single
+`stable_sort` temporary is about 4 KiB. The counted JSON data terms therefore
+peak at about 1.53 MiB if all persistent caps are simultaneously full during
+serialization. These are payload bounds, not exact process heap totals:
+container/allocator overhead, vector spare capacity, callbacks, and the rest
+of the existing runtime add memory. The native lane reports optimized host
+static stack frames separately; these figures do not guarantee a guest stack
+size.
+The MinGW 15.2 `-O2 -fstack-usage` measurement reports 736 bytes for
+`parseJson`, 384 bytes for its recursive value lambda, 128 bytes for its
+string-decoding lambda, 848 bytes for `stringifyJson`, 400 bytes for its
+recursive emitter, and 416 bytes for value preparation. At depth 32, the
+recursive helper frames contribute about 12.0 KiB for parsing or 12.5 KiB for
+serialization, plus their non-recursive caller/runtime frames.
+The same build reports 1,936 bytes for `Navigator::renderDocument` and 4,752
+bytes for its inline-flow drawing lambda. These compiler reports are hosted
+measurements, not a guest stack guarantee.
+
+The hosted JS109 fixture parses structured data, runs `map`, `filter`, `find`,
+`reduce`, and `forEach`, creates three paragraphs, verifies their selector and
+render order, and displays the compact `JSON.stringify` output. It also
+performs a same-realm parse/stringify round trip. This qualifies the bounded
+subset used by Navigator pages; it does not claim the complete ECMAScript JSON
+API. Revivers, replacer functions and arrays, pretty-print spacing, raw JSON,
+streaming, and arbitrary host-object serialization remain unsupported. Guest
+memory, stack, and rendering qualification remains pending.
+
+The strict C++17 JS109 lane passes 86/86 checks. The complete JavaScript
+matrix passes all 110/110 lanes; its 69 focused assertion-reporting lanes
+pass 17,628/17,628 checks. This includes the existing JS104–JS108 syntax,
+closure, dynamic DOM, and insertion regressions. The compatibility switch in
+the JS62R4 test was updated for the new `JsonNamespace` value and that lane
+passes as well.
+
+The native hosted-document harness verifies the three rendered paragraph
+texts (`Alpha`, `Beta`, and `Gamma`), their selector and document order, the
+exact compact serialized JSON text, layout revision updates, and a repeated
+same-realm round trip. The fresh production executable also loaded
+`/navigator-smoke/javascript-js109.html` through Navigator with HTTP 200,
+retained the requested URL, rendered five document blocks, and reported no
+JavaScript runtime error.
+
+The production `build.bat` build succeeded. Its fresh 9,122,296-byte
+executable had SHA-256
+`D47794DEF248A4FA7FE9B09D291331B33A8CB0074C6B9F51DF7844D5B8F69451` and was
+the exact executable used by both hosted runs. The full hosted Navigator
+aggregate completed with 767 passing checks and the same seven established
+CSS failures (phases 3C, 3G, 6A, 6B's three checks, and 6C), 774 total; no
+JS109 assertion failed. After hosted qualification, the original
+8,398,274-byte executable was restored and verified at SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated fixtures, totaling 458,372 bytes, matched the saved prebuild
+manifest. `.phase` remained absent. Qualification is native/hosted only;
+guest acceptance remains pending.

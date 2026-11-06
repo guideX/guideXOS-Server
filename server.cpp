@@ -10662,6 +10662,7 @@ static std::string navigatorGotoDiagnostic(const std::string& url) {
     out << "requested_url=" << url << "\n";
     out << "current_url=" << gxos::apps::Navigator::SmokeCurrentUrl() << "\n";
     out << "current_block_count=" << gxos::apps::Navigator::SmokeCurrentBlockCount() << "\n";
+	out << "javascript_error=" << gxos::apps::Navigator::SmokeJavaScriptLastError() << "\n";
 	out << gxos::apps::Navigator::SmokePageDiagnostics();
     return out.str();
 }

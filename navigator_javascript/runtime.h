@@ -80,6 +80,8 @@ enum class RuntimeErrorCode : std::uint8_t {
     HostCallbackLimitExceeded,
     PropagationPathLimitExceeded,
     DuplicateBinding,
+    SyntaxError,
+    JsonNestingLimitExceeded,
 };
 
 struct RuntimeError {
@@ -135,6 +137,7 @@ constexpr std::size_t kDefaultMaxJavaScriptHostOperations = 10000u;
 constexpr std::size_t kDefaultMaxJavaScriptHostGenerations = 4096u;
 constexpr std::size_t kDefaultMaxJavaScriptHostMethodValues = 64u;
 constexpr std::size_t kDefaultMaxJavaScriptRealmSourceBytes = 1u * 1024u * 1024u;
+constexpr std::size_t kDefaultMaxJavaScriptJsonNestingDepth = 32u;
 
 struct RuntimeLimits {
     LexerLimits lexer;
@@ -185,6 +188,10 @@ struct RuntimeLimits {
     std::size_t maxHostMethodValues = kDefaultMaxJavaScriptHostMethodValues;
     // Cumulative explicit-script source retained by a same-document realm.
     std::size_t maxRealmSourceBytes = kDefaultMaxJavaScriptRealmSourceBytes;
+    // Dedicated JSON reader and serializer depth. The implementation also
+    // applies a hard depth ceiling so recursive native frames stay bounded.
+    std::size_t maxJsonNestingDepth =
+        kDefaultMaxJavaScriptJsonNestingDepth;
 };
 
 // Bounded, native-readable allocation history since the most recent reset.
@@ -408,6 +415,8 @@ private:
         ArrayFindLast,
         ArrayReduce,
         ArrayReduceRight,
+        JsonParse,
+        JsonStringify,
     };
 
     enum class ArrayIteratorMode : std::uint8_t {
@@ -700,6 +709,8 @@ private:
     RuntimeFunctionId objectKeysFunction_ = kInvalidRuntimeFunctionId;
     RuntimeFunctionId objectGetOwnPropertyDescriptorFunction_ =
         kInvalidRuntimeFunctionId;
+    RuntimeFunctionId jsonParseFunction_ = kInvalidRuntimeFunctionId;
+    RuntimeFunctionId jsonStringifyFunction_ = kInvalidRuntimeFunctionId;
     RuntimeFunctionId eventStopImmediatePropagationFunction_ =
         kInvalidRuntimeFunctionId;
     RuntimeFunctionId eventPreventDefaultFunction_ =

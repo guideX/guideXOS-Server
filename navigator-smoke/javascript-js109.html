@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Navigator JavaScript JS109</title>
+</head>
+<body id="page-body">
+<h1>Navigator JavaScript JS109</h1>
+<div id="results"></div>
+<p id="serialized-json">Pending</p>
+<script>
+const data = JSON.parse(
+    '{"items":["Alpha","Beta","Gamma"],"meta":{"count":3}}'
+);
+const results = document.getElementById("results");
+const serialized = document.getElementById("serialized-json");
+const scaled = data.items.map((value, index) => value.length + index);
+const longItems = data.items.filter(value => value.length >= 4);
+const found = data.items.find(value => value === "Beta");
+const totalLength = data.items.reduce((sum, value) => sum + value.length, 0);
+
+data.items.forEach((value, index) => {
+    const paragraph = document.createElement("p");
+    paragraph.setAttribute("id", "item-" + index);
+    paragraph.textContent = value;
+    results.appendChild(paragraph);
+});
+
+const paragraphs = results.querySelectorAll("p");
+var hostedCallbacksOk = scaled[0] === 5 && scaled[1] === 5 &&
+    scaled[2] === 7 && longItems.length === 3 && found === "Beta" &&
+    totalLength === 14 && paragraphs.length === 3;
+var hostedSelectorsOk = document.getElementById("item-0") === paragraphs[0] &&
+    document.getElementById("item-1") === paragraphs[1] &&
+    document.getElementById("item-2") === paragraphs[2] &&
+    paragraphs[0].textContent === "Alpha" &&
+    paragraphs[1].textContent === "Beta" &&
+    paragraphs[2].textContent === "Gamma";
+serialized.textContent = JSON.stringify(data);
+</script>
+</body>
+</html>
