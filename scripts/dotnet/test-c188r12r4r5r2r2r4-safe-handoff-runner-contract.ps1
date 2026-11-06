@@ -19,7 +19,11 @@ function Assert-RunnerContract([bool]$Condition, [string]$Label) {
     if (-not $Condition) { throw "Safe-handoff runner contract failed: $Label" }
 }
 
-Assert-RunnerContract ([string]$manifest.mode -ceq 'NativeAotSafeHandoff') 'candidate is the safe-handoff profile'
+$safeHandoffProfileSelected = [string]$manifest.mode -ceq 'NativeAotSafeHandoff' -or
+    ([string]$manifest.mode -ceq 'NativeAotInitializeModulesTransitionAttribution' -and
+     [bool]$manifest.c188R12R4R5R2R2R4SafeHandoff -and
+     [bool]$manifest.c188R12R4R5R2R3InitializeModulesAttribution)
+Assert-RunnerContract $safeHandoffProfileSelected 'candidate selects the safe-handoff or explicitly gated transition profile'
 Assert-RunnerContract ([int]$manifest.nativeAllocationBackendCapacity -eq 9) 'candidate declares the root-level backend capacity'
 Assert-RunnerContract ($runner -match '\$candidateManifest\.nativeAllocationBackendCapacity -ne 9') 'runner reads the declared backend capacity field'
 Assert-RunnerContract ($runner -notmatch 'c188R12R4R5R4R5R2R2NativeAllocationBackendCapacity') 'runner does not read an undeclared capacity field'
