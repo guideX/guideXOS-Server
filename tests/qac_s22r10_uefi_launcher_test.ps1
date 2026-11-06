@@ -267,13 +267,20 @@ try {
     function Confirm-QacRuntimeOwnership { }
     $script:ScreenshotPath=Join-Path $first.OutputDirectory 'screenshots'
     $script:QmpClient=[PSCustomObject]@{fixture=$true}
-    $script:Execution=[ordered]@{guestResult='INCOMPLETE';events=[System.Collections.Generic.List[object]]::new()}
+    $script:Execution=[ordered]@{guestResult='INCOMPLETE';events=[System.Collections.Generic.List[object]]::new();qmp=[ordered]@{endpoint='127.0.0.1:50001'};childProcessId=1234}
     $script:QmpCommandCalls=0
     $script:LastQmpCommand=$null
+    $script:QmpCalls=[System.Collections.Generic.List[object]]::new()
+    $script:QmpKeyUpFailureCount=0
     function Invoke-QacS22R10Qmp {
         param($Client,[string]$Execute,[hashtable]$Arguments,[int]$TimeoutMilliseconds)
         $script:QmpCommandCalls++
         $script:LastQmpCommand=[PSCustomObject]@{Execute=$Execute;Arguments=$Arguments}
+        $script:QmpCalls.Add($script:LastQmpCommand)
+        if ($Execute -eq 'input-send-event' -and $script:QmpKeyUpFailureCount -gt 0 -and $Arguments.events[0].data.down -eq $false) {
+            $script:QmpKeyUpFailureCount--
+            throw 'fixture key-up failure'
+        }
         return 'fixture screendump failure'
     }
     [void](Assert-Throws 'unsafe screenshot labels that could traverse directories are rejected' { Invoke-GuestOperatorCommand 'screenshot ..\outside' } 'safe alphanumeric label')
@@ -291,12 +298,22 @@ try {
         [void](Invoke-GuestOperatorCommand $keyCase.Input)
         Assert-True "Navigator URL punctuation/uppercase key '$($keyCase.Input)' is sent through the owned QMP client" ($script:LastQmpCommand.Execute -eq 'human-monitor-command' -and $script:LastQmpCommand.Arguments['command-line'] -eq $keyCase.Expected)
     }
+    $script:Execution.events.Clear(); $script:QmpCommandCalls=0; $script:QmpCalls.Clear()
+    [void](Invoke-GuestOperatorCommand 'qkey left')
+    Assert-True 'paired QMP gameplay key sends owned qcode left-down then left-up events' ($script:QmpCalls.Count -eq 2 -and $script:QmpCalls[0].Execute -eq 'input-send-event' -and $script:QmpCalls[0].Arguments.events[0].data.key.data -eq 'left' -and $script:QmpCalls[0].Arguments.events[0].data.down -eq $true -and $script:QmpCalls[1].Arguments.events[0].data.down -eq $false)
+    Assert-True 'paired QMP gameplay key records down/up guest events and retains the QAC child identity' ($script:Execution.events.Count -eq 2 -and $script:Execution.events[0].type -eq 'guest-qcode-key-down' -and $script:Execution.events[1].type -eq 'guest-qcode-key-up' -and $script:Execution.events[0].data.childProcessId -eq 1234 -and $script:Execution.events[0].data.endpoint -eq '127.0.0.1:50001')
+    $script:QmpCommandCalls=0; $script:QmpCalls.Clear()
+    [void](Assert-Throws 'paired QMP key rejects unsupported non-directional key names' { Invoke-GuestOperatorCommand 'qkey enter' } 'Use qkey with up, down, left, or right')
+    Assert-True 'unsupported paired QMP key is rejected before guest control' ($script:QmpCommandCalls -eq 0)
+    $script:Execution.events.Clear(); $script:QmpKeyUpFailureCount=1
+    [void](Assert-Throws 'paired QMP key-up failures remain visible to the operator' { Invoke-GuestOperatorCommand 'qkey left' } 'fixture key-up failure')
+    Assert-True 'paired QMP key attempts an ownership-checked fail-safe key-up after an up failure' ($script:QmpCalls.Count -eq 3 -and $script:QmpCalls[2].Execute -eq 'input-send-event' -and $script:QmpCalls[2].Arguments.events[0].data.down -eq $false -and @($script:Execution.events | Where-Object { $_.type -eq 'guest-qcode-key-failsafe-up' }).Count -eq 1)
     Remove-Item Function:\Invoke-QacS22R10Qmp -Force -ErrorAction SilentlyContinue
     Remove-Item Function:\Add-ExecutionEvent -Force -ErrorAction SilentlyContinue
     Remove-Item Function:\Confirm-QacRuntimeOwnership -Force -ErrorAction SilentlyContinue
     Import-Module $launchPath -Force -ErrorAction Stop
     Remove-Item Function:\Invoke-GuestOperatorCommand -Force -ErrorAction SilentlyContinue
-    $script:ScreenshotPath=$null; $script:QmpClient=$null; $script:Execution=$null; $script:QmpCommandCalls=$null; $script:LastQmpCommand=$null
+    $script:ScreenshotPath=$null; $script:QmpClient=$null; $script:Execution=$null; $script:QmpCommandCalls=$null; $script:LastQmpCommand=$null; $script:QmpCalls=$null; $script:QmpKeyUpFailureCount=$null
 
     Assert-True 'coordinator online status is required for launch' (Test-QacS22R10CoordinatorOnline -StatusOutput "Coordinator: Online`nManaged sessions: 0" -ExitCode 0)
     Assert-True 'coordinator unavailability fails closed' (-not (Test-QacS22R10CoordinatorOnline -StatusOutput 'Coordinator: Unavailable' -ExitCode 2))
@@ -466,7 +483,21 @@ try {
     [void](Assert-Throws 'configured endpoint that refuses the authorized TCP connection is captured as a connection failure' { Open-QacS22R10QmpClient -Port $unusedProbePort -TranscriptPath $qmpLog -ConnectTimeoutMilliseconds 500 -ReadTimeoutMilliseconds 500 } 'refused|failed|connect')
 
     $runnerSource=Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1') -Raw
-    Assert-True 'interactive runner ignores empty console lines instead of terminating an active QAC guest' ($runnerSource.Contains('if ([string]::IsNullOrWhiteSpace($operatorLine)) { continue }'))
+    Assert-True 'interactive runner ignores empty console lines instead of terminating an active QAC guest' ($runnerSource -match 'if \(\[string\]::IsNullOrWhiteSpace\(\$operatorLine\)\)\s*\{[\s\S]{0,1024}continue')
+    Assert-True 'guest command handler accepts and ignores an empty Text value before command parsing' ($runnerSource -match 'function Invoke-GuestOperatorCommand\s*\{\s*param\(\[Parameter\(Mandatory\)\]\[AllowEmptyString\(\)\]\[string\]\$Text\)' -and $runnerSource -match 'if \(-not \$trimmed\)\s*\{\s*\$script:CurrentStage = ''guest-interaction''\s*\$script:CurrentOperation = ''ignored-empty-console-line''\s*return \$false')
+    Assert-True 'ignored blank console input is recorded with its interaction stage' ($runnerSource.Contains('empty-console-line-ignored'' -Data @{stage=$script:CurrentStage}'))
+    Assert-True 'abnormal runner termination records stage, operation, exception type, message, and script line while retaining ownership-safe recovery handling' ($runnerSource.Contains('failureDetails = [ordered]@{') -and $runnerSource.Contains('exceptionType = $_.Exception.GetType().FullName') -and $runnerSource.Contains('lineNumber = if ($_.InvocationInfo)') -and $runnerSource.Contains("Set-ManifestExecution -Status 'unknown'") -and $runnerSource.Contains("Set-ExecutionState -State 'RecoveryRequired'"))
+    $parseTokens=$null; $parseErrors=$null
+    $runnerAst=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1'),[ref]$parseTokens,[ref]$parseErrors)
+    $handlerAst=$runnerAst.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-GuestOperatorCommand'},$true)
+    if (-not $handlerAst -or $parseErrors.Count -gt 0) { throw 'Could not parse the guest operator handler for its empty-input fixture.' }
+    . ([scriptblock]::Create($handlerAst.Extent.Text))
+    $priorStage=$script:CurrentStage; $priorOperation=$script:CurrentOperation
+    $script:CurrentStage='test'; $script:CurrentOperation=$null
+    $emptyCommandResult=Invoke-GuestOperatorCommand -Text ''
+    Assert-True 'empty Text reaches the handler as a harmless no-op rather than a parameter-binding exception' ($emptyCommandResult -eq $false -and $script:CurrentStage -eq 'guest-interaction' -and $script:CurrentOperation -eq 'ignored-empty-console-line')
+    $script:CurrentStage=$priorStage; $script:CurrentOperation=$priorOperation
+    Remove-Item Function:\Invoke-GuestOperatorCommand -ErrorAction SilentlyContinue
     Assert-True 'live runner provides relative PS/2 pointer movement over its owned QMP connection with a per-axis -49..49 bound' ($runnerSource -match "'move'\s*\{" -and $runnerSource -match "-Execute 'input-send-event'" -and $runnerSource -match '\[Math\]::Abs\(\$dx\) -gt 49 -or \[Math\]::Abs\(\$dy\) -gt 49')
     Assert-True 'live runner revalidates QAC reservation, exact child, and listener before control and pairs mouse button down/up' ($runnerSource -match 'function Confirm-QacRuntimeOwnership' -and $runnerSource -match "'click'\s*\{" -and $runnerSource -match 'Confirm-QacRuntimeOwnership\s*\n\s*\$buttonMayBeDown = \$true' -and $runnerSource -match 'guest-pointer-button-failsafe-up')
     $listenerLoopIndex=$runnerSource.IndexOf('while ([DateTimeOffset]::UtcNow -lt $startupDeadline',[StringComparison]::Ordinal)

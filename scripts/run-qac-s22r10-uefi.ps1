@@ -457,14 +457,21 @@ function Confirm-QacRuntimeOwnership {
 }
 
 function Invoke-GuestOperatorCommand {
-    param([Parameter(Mandatory)][string]$Text)
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
     $trimmed = $Text.Trim()
-    if (-not $trimmed) { return $false }
+    if (-not $trimmed) {
+        $script:CurrentStage = 'guest-interaction'
+        $script:CurrentOperation = 'ignored-empty-console-line'
+        return $false
+    }
     $parts = $trimmed -split '\s+',3
+    $script:CurrentStage = 'guest-interaction'
+    $script:CurrentOperation = $parts[0].ToLowerInvariant()
     switch ($parts[0].ToLowerInvariant()) {
         'help' {
-            Write-Host 'Commands: status | screenshot LABEL | key KEY | move DX,DY | click BUTTON | wait SECONDS | result fail REASON | result pass | shutdown'
+            Write-Host 'Commands: status | screenshot LABEL | key KEY | qkey ARROW | move DX,DY | click BUTTON | wait SECONDS | result fail REASON | result pass | shutdown'
             Write-Host 'Keys include meta_l, ctrl-esc, esc, enter, tab, up, down, left, right, f12, alt-f4, letters, digits, slash, dot, shift-semicolon, and shift-letter.'
+            Write-Host 'qkey pairs a paced up/down/left/right QMP key event with ownership checks and fail-safe release.'
             Write-Host 'Mouse moves are relative, with each axis limited to -49..49. Clicks pair button down/up with ownership checks.'
             return $false
         }
@@ -494,6 +501,34 @@ function Invoke-GuestOperatorCommand {
             Confirm-QacRuntimeOwnership
             [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'human-monitor-command' -Arguments @{ 'command-line' = "sendkey $($parts[1].ToLowerInvariant())" })
             Add-ExecutionEvent -Type 'guest-key' -Data @{key=$parts[1].ToLowerInvariant()}
+            return $false
+        }
+        'qkey' {
+            if ($parts.Count -ne 2 -or $parts[1] -notmatch '^(?i)(up|down|left|right)$') { throw 'Use qkey with up, down, left, or right.' }
+            $key = $parts[1].ToLowerInvariant()
+            $keyMayBeDown = $false
+            try {
+                Confirm-QacRuntimeOwnership
+                $keyMayBeDown = $true
+                [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=@(@{type='key';data=@{key=@{type='qcode';data=$key};down=$true}})})
+                Add-ExecutionEvent -Type 'guest-qcode-key-down' -Data @{key=$key;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
+                Start-Sleep -Milliseconds 275
+                Confirm-QacRuntimeOwnership
+                [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=@(@{type='key';data=@{key=@{type='qcode';data=$key};down=$false}})})
+                $keyMayBeDown = $false
+                Add-ExecutionEvent -Type 'guest-qcode-key-up' -Data @{key=$key;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
+                Start-Sleep -Milliseconds 300
+            } finally {
+                if ($keyMayBeDown) {
+                    try {
+                        Confirm-QacRuntimeOwnership
+                        [void](Invoke-QacS22R10Qmp -Client $script:QmpClient -Execute 'input-send-event' -Arguments @{events=@(@{type='key';data=@{key=@{type='qcode';data=$key};down=$false}})})
+                        Add-ExecutionEvent -Type 'guest-qcode-key-failsafe-up' -Data @{key=$key;endpoint=$script:Execution.qmp.endpoint;childProcessId=$script:Execution.childProcessId}
+                    } catch {
+                        Add-ExecutionEvent -Type 'guest-qcode-key-failsafe-release-skipped' -Data @{key=$key;reason=$_.Exception.Message}
+                    }
+                }
+            }
             return $false
         }
         'move' {
@@ -649,6 +684,9 @@ $script:RuntimeDeadlineUtc = $null
 $script:ConsoleInputTask = $null
 $script:RuntimeShutdownSent = $false
 $script:GuestRuntimeTimeoutSeconds = $GuestRuntimeTimeoutSeconds
+$script:CurrentStage = 'preflight'
+$script:CurrentOperation = $null
+$script:EmptyConsoleLineLogged = $false
 
 try {
     $script:QacCli = Resolve-QacCli -ExplicitPath $QacCliPath
@@ -686,7 +724,7 @@ try {
         childProcessId=$null; childStartUtc=$null; childExitVerified=$false; qemuExitCode=$null; qacCliExitCode=$null;
         qacCliReleaseReported=$false; qacCliReleaseReportedReservationId=$null; qacCliReleaseReportedChildProcessId=0; qacCliReleaseLineObservedAtUtc=$null;
         reservationReleaseVerified=$false; recoveryRequired=$false;
-        manifestSchemaVersion=1; qmp=[ordered]@{endpoint=$null;status='not-allocated';ownership='unbound';quitAcknowledged=$false;quitResponse=$null;lastConnectionError=$null;lastListenerProbe=$null};
+        manifestSchemaVersion=1; failureDetails=$null; qmp=[ordered]@{endpoint=$null;status='not-allocated';ownership='unbound';quitAcknowledged=$false;quitResponse=$null;lastConnectionError=$null;lastListenerProbe=$null};
         qemuArguments=@(); guestResult='INCOMPLETE'; guestResultReason=$null; cleanupEligible=$false;
         timings=[ordered]@{stagingStartAtUtc=$null;stagingCompleteAtUtc=$null;reservationRequestedAtUtc=$null;reservationGrantedAtUtc=$null;qemuChildStartAtUtc=$null;firstGuestProgressAtUtc=$null;guestCompletionOrFailureAtUtc=$null;qmpShutdownRequestedAtUtc=$null;qemuChildExitAtUtc=$null;qacReleaseReportedAtUtc=$null;qacReleaseVerifiedAtUtc=$null};
         attempts=[System.Collections.Generic.List[object]]::new(); events=[System.Collections.Generic.List[object]]::new()
@@ -712,6 +750,7 @@ try {
     $script:Execution.manifestSchemaVersion = [int]$manifest.schemaVersion
     $script:Execution.sourceArtifacts = @($manifest.artifacts | ForEach-Object { [ordered]@{name=$_.name;sourcePath=$_.sourcePath;sourceSha256=$_.sourceSha256;privatePath=$_.privatePath;privateSha256=$_.privateSha256;access=$_.access;disposition=$_.disposition} })
     $script:Execution.timings.stagingCompleteAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+    $script:CurrentStage = 'qac-admission'
     $script:OutputPath = $script:Validated.Outputs
     $script:SerialPath = Get-QacS22R10FullPath (Join-Path $script:Validated.Workspace ([string]$manifest.outputs.serialLog).Replace('/','\'))
     $script:ScreenshotPath = Get-QacS22R10FullPath (Join-Path $script:Validated.Workspace ([string]$manifest.outputs.screenshots).Replace('/','\'))
@@ -931,6 +970,7 @@ try {
                     $script:Execution.qmp.status = 'identity-verified-paused'
                     $script:Execution.qmp.endpointReady = $true
                     $script:Execution.qmp.protocolReadiness = 'greeting-capabilities-instance-name-and-paused-status-verified'
+                    $script:CurrentStage = 'qmp-continuation'
                     Add-ExecutionEvent -Type 'qmp-identity-verified' -Data @{endpoint=$script:Execution.qmp.endpoint;greeting=$script:QmpClient.Greeting.QMP;instanceName=$qmpIdentity.Name;status=$qmpIdentity.Status;childProcessId=$script:Execution.childProcessId;reservationId=$script:Execution.reservationId;protocolReadiness=$script:Execution.qmp.protocolReadiness}
                     if ($script:QacProcess.HasExited) { throw 'QAC owner process exited before continuation; no state-changing command was sent.' }
                     $reservationBeforeContinuation = Get-QacInspectRecord -ReservationId $script:Execution.reservationId
@@ -962,6 +1002,8 @@ try {
                     $script:Execution.qmp.status = 'running-owned'
                     Set-ExecutionState -State 'QemuRunning' -Data @{reservationId=$script:Execution.reservationId;childProcessId=$script:Execution.childProcessId;qmpEndpoint=$script:Execution.qmp.endpoint}
                     $qmpVerified = $true
+                    $script:CurrentStage = 'guest-interaction-loop'
+                    $script:CurrentOperation = $null
                     Write-Host "QAC accepted run $($manifest.runId): reservation $($script:Execution.reservationId), QEMU PID $($script:Execution.childProcessId), QMP $($script:Execution.qmp.endpoint)."
                     Write-Host "QEMU is running from the private ESP. QMP screenshots and keys can be sent from this prompt; type help for commands."
                 }
@@ -1036,7 +1078,15 @@ try {
                         $operatorLine = $script:ConsoleInputTask.GetAwaiter().GetResult()
                         $script:ConsoleInputTask = $null
                         if ($null -eq $operatorLine) { throw 'Interactive input ended while QEMU was active; QAC ownership and the workspace remain protected.' }
-                        if ([string]::IsNullOrWhiteSpace($operatorLine)) { continue }
+                        if ([string]::IsNullOrWhiteSpace($operatorLine)) {
+                            $script:CurrentStage = 'guest-interaction-loop'
+                            $script:CurrentOperation = 'ignored-empty-console-line'
+                            if (-not $script:EmptyConsoleLineLogged) {
+                                Add-ExecutionEvent -Type 'empty-console-line-ignored' -Data @{stage=$script:CurrentStage}
+                                $script:EmptyConsoleLineLogged = $true
+                            }
+                            continue
+                        }
                         if (Invoke-GuestOperatorCommand -Text $operatorLine) { $smokeCompleted = $true; break }
                     }
                 }
@@ -1158,19 +1208,31 @@ try {
     exit 0
 } catch {
     $message = $_.Exception.Message
+    $failureDetails = [ordered]@{
+        timestampUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        stage = if ($script:CurrentStage) { [string]$script:CurrentStage } else { 'unknown' }
+        operation = if ($script:CurrentOperation) { [string]$script:CurrentOperation } else { $null }
+        exceptionType = $_.Exception.GetType().FullName
+        message = $message
+        scriptName = if ($_.InvocationInfo) { [string]$_.InvocationInfo.ScriptName } else { $null }
+        lineNumber = if ($_.InvocationInfo) { [int]$_.InvocationInfo.ScriptLineNumber } else { $null }
+    }
     if ($script:Execution) {
         $script:Execution.failure = $message
+        $script:Execution.failureDetails = $failureDetails
         if ($script:Execution.childProcessId -gt 0 -and -not $script:Execution.reservationReleaseVerified) {
             $script:Execution.recoveryRequired = $true
             if ($script:ManifestPath -and (Test-Path -LiteralPath $script:ManifestPath)) { Set-ManifestExecution -Status 'unknown' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId }
-            Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$message}
+            Set-ExecutionState -State 'RecoveryRequired' -Data @{reason=$message;stage=$failureDetails.stage;operation=$failureDetails.operation;exceptionType=$failureDetails.exceptionType;lineNumber=$failureDetails.lineNumber}
         } elseif ($script:ManifestPath -and (Test-Path -LiteralPath $script:ManifestPath) -and $script:Execution.reservationReleaseVerified) {
-            Set-ExecutionState -State 'FailedWithRetainedEvidence' -Data @{reason=$message}
+            Set-ExecutionState -State 'FailedWithRetainedEvidence' -Data @{reason=$message;stage=$failureDetails.stage;operation=$failureDetails.operation;exceptionType=$failureDetails.exceptionType;lineNumber=$failureDetails.lineNumber}
         }
         if ($script:ExecutionPath -and (Test-Path -LiteralPath $script:ExecutionPath)) { Write-ExecutionRecord }
-        Write-Error "QAC3C3 UEFI runner failed: $message"
+        Write-Error ("QAC3C3 UEFI runner failed at stage '{0}' operation '{1}': {2} ({3}, line {4})." -f $failureDetails.stage,$failureDetails.operation,$message,$failureDetails.exceptionType,$failureDetails.lineNumber)
         if ($script:Execution.recoveryRequired) { Write-Error 'QAC ownership or QMP identity is uncertain; the private workspace is retained and must not be cleaned.' }
-    } else { Write-Error $message }
+    } else {
+        Write-Error ("QAC3C3 UEFI runner failed at stage '{0}': {1} ({2}, line {3})." -f $failureDetails.stage,$message,$failureDetails.exceptionType,$failureDetails.lineNumber)
+    }
     exit 1
 } finally {
     Close-QacS22R10QmpClient -Client $script:QmpClient
