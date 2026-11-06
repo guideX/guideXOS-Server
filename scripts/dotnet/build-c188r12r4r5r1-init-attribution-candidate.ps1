@@ -69,6 +69,10 @@ function Require-File([string]$Path, [string]$Label) {
 function Hash-File([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
+function Hash-IfPresent([string]$Path) {
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return (Hash-File $Path) }
+    return $null
+}
 function Invoke-Logged([string]$FilePath, [string[]]$Arguments, [string]$LogPath, [string]$WorkingDirectory=$root) {
     $oldPreference = $ErrorActionPreference
     try {
@@ -441,7 +445,20 @@ if ($InitializeModulesAttribution) {
     $transitionCallSiteHeaderPath = Join-Path $artifactRoot 'guidexos_nativeaot_transition_attribution_sites.h'
     $siteHeaderLines = @('#pragma once', '', '#include <stdint.h>', '')
     foreach ($site in $sourceCallSites) {
+        $site.linkedInCandidate = $false
+        $site.resolutionStatus = 'source-caller-not-linked-to-candidate'
+        $site.functionSymbol = $null
+        $site.functionStart = $null
+        $site.functionEndExclusive = $null
+        $site.palPrintFatalErrorAddress = ('0x{0:X16}' -f $palFatalAddress)
+        $site.returnAddress = [uint64]0
+        $site.callerReturnAddress = '0x0000000000000000'
+        $siteHeaderLines += "#define GX_TRANSITION_CALLSITE_ID_$($site.key) $($site.id)u"
+        $siteHeaderLines += "#define GX_TRANSITION_CALLSITE_RETURN_$($site.key) ((uintptr_t)0u)"
         $matchingSymbols = @($mapCodeSymbols | Where-Object { $_.symbol -match [string]$site.functionPattern })
+        if ($matchingSymbols.Count -eq 0) {
+            continue
+        }
         if ($matchingSymbols.Count -ne 1) {
             throw "Candidate map lacks one exact linked caller function for fatal call-site ID $($site.id): $($site.functionPattern)"
         }
@@ -467,14 +484,15 @@ if ($InitializeModulesAttribution) {
         if ($directCalls.Count -ne 1) {
             throw "Expected exactly one linked PalPrintFatalError call in source-defined caller $($site.functionPattern); found $($directCalls.Count)."
         }
+        $site.linkedInCandidate = $true
+        $site.resolutionStatus = 'exact-direct-call-mapped'
         $site.returnAddress = [uint64]$directCalls[0].returnAddress
         $site.functionSymbol = [string]$matchingSymbols[0].symbol
         $site.functionStart = ('0x{0:X16}' -f $functionStart)
         $site.functionEndExclusive = ('0x{0:X16}' -f [uint64]$functionStop[0].address)
         $site.palPrintFatalErrorAddress = ('0x{0:X16}' -f $palFatalAddress)
         $site.callerReturnAddress = ('0x{0:X16}' -f $site.returnAddress)
-        $siteHeaderLines += "#define GX_TRANSITION_CALLSITE_ID_$($site.key) $($site.id)u"
-        $siteHeaderLines += "#define GX_TRANSITION_CALLSITE_RETURN_$($site.key) ((uintptr_t)0x$('{0:X16}' -f $site.returnAddress)u)"
+        $siteHeaderLines[-1] = "#define GX_TRANSITION_CALLSITE_RETURN_$($site.key) ((uintptr_t)0x$('{0:X16}' -f $site.returnAddress)u)"
     }
     Set-Content -LiteralPath $transitionCallSiteHeaderPath -Value $siteHeaderLines -Encoding ASCII
     $transitionCallSiteMapPath = Join-Path $candidate 'transition-callsite-map.json'
@@ -1298,11 +1316,11 @@ $manifest = [ordered]@{
         candidateTransitionCallSiteMap = if ($InitializeModulesAttribution) { Hash-File $transitionCallSiteMapPath } else { $null }
         candidateTransitionCallSiteHeader = if ($InitializeModulesAttribution) { Hash-File $transitionCallSiteHeaderPath } else { $null }
         candidateFatalCallerDisassemblies = if ($InitializeModulesAttribution) { [ordered]@{
-            threadReversePInvoke=Hash-File (Join-Path $candidate 'fatal-caller-thread_reverse_pinvoke.disassembly.txt')
-            cpuFeatures=Hash-File (Join-Path $candidate 'fatal-caller-cpu_features.disassembly.txt')
-            hardwareStackOverflow=Hash-File (Join-Path $candidate 'fatal-caller-hardware_stack_overflow.disassembly.txt')
-            vectoredStackOverflow=Hash-File (Join-Path $candidate 'fatal-caller-vectored_stack_overflow.disassembly.txt')
-            restoreContext=Hash-File (Join-Path $candidate 'fatal-caller-restore_context.disassembly.txt')
+            threadReversePInvoke=Hash-IfPresent (Join-Path $candidate 'fatal-caller-thread_reverse_pinvoke.disassembly.txt')
+            cpuFeatures=Hash-IfPresent (Join-Path $candidate 'fatal-caller-cpu_features.disassembly.txt')
+            hardwareStackOverflow=Hash-IfPresent (Join-Path $candidate 'fatal-caller-hardware_stack_overflow.disassembly.txt')
+            vectoredStackOverflow=Hash-IfPresent (Join-Path $candidate 'fatal-caller-vectored_stack_overflow.disassembly.txt')
+            restoreContext=Hash-IfPresent (Join-Path $candidate 'fatal-caller-restore_context.disassembly.txt')
         } } else { $null }
         transitionHostedTestResults = if ($InitializeModulesAttribution) { Hash-File (Join-Path $transitionHostedTestRoot 'hosted-test-results.json') } else { $null }
         transitionAnalyzer = if ($InitializeModulesAttribution) { Hash-File (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1') } else { $null }

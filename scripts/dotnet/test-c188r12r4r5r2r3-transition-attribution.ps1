@@ -78,10 +78,19 @@ $syntheticMapPath = Join-Path $testRoot 'synthetic-callsite-map.json'
 $syntheticMap = [ordered]@{
     schemaVersion=1
     lockedRuntimeCommit='synthetic-fixture-only'
-    sites=@([ordered]@{
-        id=1; key='THREAD_REVERSE_PINVOKE'; name='synthetic.reverse-pinvoke'
-        message='Synthetic message ID'; callerReturnAddress='0x0000000000001001'
-    })
+    sites=@(
+        [ordered]@{
+            id=1; key='THREAD_REVERSE_PINVOKE'; name='synthetic.reverse-pinvoke'
+            message='Synthetic message ID'; linkedInCandidate=$true
+            callerReturnAddress='0x0000000000001001'
+        },
+        [ordered]@{
+            id=2; key='CPU_FEATURES'; name='synthetic.unlinked-source-caller'
+            message='Synthetic unlinked message ID'; linkedInCandidate=$false
+            resolutionStatus='source-caller-not-linked-to-candidate'
+            callerReturnAddress='0x0000000000000000'
+        }
+    )
 }
 [System.IO.File]::WriteAllText($syntheticMapPath,($syntheticMap | ConvertTo-Json -Depth 6),[System.Text.UTF8Encoding]::new($false))
 function Write-TransitionFixture([string]$Name,[string[]]$Lines,[string]$MapPath=$syntheticMapPath) {
@@ -128,6 +137,13 @@ $mismatch = Write-TransitionFixture 'synthetic-reason-mismatch' @(
 if ($mismatch.classification -ne 'TRANSITION_ATTRIBUTION_INCOMPLETE' -or
     $mismatch.meaning -ne 'runtime_failfast_and_fatal_record_disagree') {
     throw 'Contradictory fail-fast evidence was not rejected.'
+}
+$unlinkedSite = Write-TransitionFixture 'synthetic-unlinked-source-callsite' @(
+    ($fatalRecord.Replace('callSite=00000001 callerRip=0000000000001001','callSite=00000002 callerRip=0000000000000000')),
+    $stateRecord,'[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000')
+if ($unlinkedSite.classification -ne 'TRANSITION_ATTRIBUTION_INCOMPLETE' -or
+    $unlinkedSite.parseError -ne 'unknown_callsite_id') {
+    throw 'A source caller excluded from the linked candidate was incorrectly accepted as an attributed call site.'
 }
 
 $safeSerial = Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff\qac-guest-r2r2r4r2r1-001\serial.log'
@@ -207,7 +223,8 @@ Assert-Fixture ($attributedFailFast.callSite.message -eq 'Synthetic message ID' 
 Assert-Fixture ($unknownCallsite.classification -eq 'RUNTIME_FAIL_FAST_CALLSITE_UNRESOLVED' -and
     $blocked.classification -eq 'TRANSITION_GATE_BLOCKED_SAFE_STOP' -and
     $returned.classification -eq 'INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED' -and
-    $mismatch.classification -eq 'TRANSITION_ATTRIBUTION_INCOMPLETE') 'transition analyzer rejects unknown or contradictory diagnostic fixtures' 'synthetic'
+    $mismatch.classification -eq 'TRANSITION_ATTRIBUTION_INCOMPLETE' -and
+    $unlinkedSite.classification -eq 'TRANSITION_ATTRIBUTION_INCOMPLETE') 'transition analyzer rejects unknown, unlinked, or contradictory diagnostic fixtures' 'synthetic'
 
 $results = [ordered]@{
     result='PASS'
@@ -233,7 +250,8 @@ $results = [ordered]@{
     candidateCallSiteMap=$CallSiteMapPath
     candidateCallSiteMapSha256=Hash-File $CallSiteMapPath
     analyzerSyntheticFixtures=@($attributedFailFast.classification,$unknownCallsite.classification,
-        $blocked.classification,$returned.classification,$mismatch.classification)
+        $blocked.classification,$returned.classification,$mismatch.classification,
+        $unlinkedSite.classification)
     recoveredSafeStop=[ordered]@{ path=$safeSerial; sha256=$safeSerialHash; stages=29; events=93 }
     priorR4FailFast=[ordered]@{ path=$r4Serial; sha256=$r4SerialHash; result=$r4Reviewed.result; reason=$r4Reviewed.failFast.code }
     productionPersistentCompositeLifecycle=[bool]$prodApplication.persistentCompositeLifecycle

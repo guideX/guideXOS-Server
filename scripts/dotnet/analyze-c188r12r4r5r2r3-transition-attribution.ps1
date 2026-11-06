@@ -15,7 +15,13 @@ $serialHashBefore = (Get-FileHash -LiteralPath $serialFullPath -Algorithm SHA256
 $raw = [System.IO.File]::ReadAllText($serialFullPath)
 $map = Get-Content -LiteralPath $mapFullPath -Raw | ConvertFrom-Json
 $siteById = @{}
-foreach ($site in @($map.sites)) { $siteById[[string]$site.id] = $site }
+foreach ($site in @($map.sites)) {
+    $candidateRip = [string]$site.callerReturnAddress
+    if ($candidateRip -match '^(?:0x)?[0-9A-Fa-f]{1,16}$' -and
+        ($candidateRip -replace '^0x','') -notmatch '^0+$') {
+        $siteById[[string]$site.id] = $site
+    }
+}
 
 function Get-Fields([string]$Line,[string]$Marker) {
     $prefix = "[$Marker] "
