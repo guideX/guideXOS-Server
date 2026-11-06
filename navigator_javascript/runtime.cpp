@@ -2790,7 +2790,7 @@ private:
             fail(RuntimeErrorCode::TypeError, callSite);
             return false;
         }
-        if (arguments.size() > 1u) {
+        if (arguments.size() > 2u) {
             fail(RuntimeErrorCode::UnsupportedFeature, callSite);
             return false;
         }
@@ -3190,6 +3190,271 @@ private:
             rollback();
             return false;
         }
+        if (arguments.size() > 1u && arguments[1].isFunction()) {
+            struct ReviverFrame {
+                RuntimeObjectId holder = kInvalidRuntimeObjectId;
+                std::string key;
+                Value value = Value::undefined();
+                std::size_t parentContainerDepth = 0u;
+                std::size_t containerDepth = 0u;
+                std::size_t capturedArrayLength = 0u;
+                std::size_t nextArrayIndex = 0u;
+                std::size_t nextObjectKey = 0u;
+                std::size_t snapshotKeyBytes = 0u;
+                bool initialized = false;
+                bool array = false;
+                std::vector<std::string> keys;
+            };
+
+            const Value reviver = arguments[1];
+            std::vector<ReviverFrame> traversal;
+            std::vector<Value> callbackArguments;
+            try {
+                traversal.reserve(maximumDepth + 1u);
+                callbackArguments.reserve(2u);
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                rollback();
+                return false;
+            }
+
+            RuntimeObjectId rootHolder = kInvalidRuntimeObjectId;
+            const std::vector<Value> noElements;
+            RuntimeErrorCode holderError = RuntimeErrorCode::None;
+            if (!context_.createObject(false, noElements, rootHolder,
+                    holderError) ||
+                !context_.writeProperty(rootHolder, std::string(), parsed,
+                    holderError)) {
+                fail(holderError, callSite);
+                rollback();
+                return false;
+            }
+
+            try {
+                ReviverFrame root;
+                root.holder = rootHolder;
+                traversal.push_back(std::move(root));
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                rollback();
+                return false;
+            }
+
+            std::size_t activeSnapshotKeyCount = 0u;
+            std::size_t activeSnapshotKeyBytes = 0u;
+            bool traversalSucceeded = true;
+            bool reviverCallbackStarted = false;
+            Value revived = Value::undefined();
+            try {
+                while (!traversal.empty()) {
+                    ReviverFrame& frame = traversal.back();
+                    if (!frame.initialized) {
+                        if (!context_.consumeStep(callSite)) {
+                            traversalSucceeded = false;
+                            break;
+                        }
+                        RuntimeErrorCode propertyError =
+                            RuntimeErrorCode::None;
+                        if (!context_.readProperty(frame.holder, frame.key,
+                                frame.value, propertyError, callSite)) {
+                            fail(propertyError, callSite);
+                            traversalSucceeded = false;
+                            break;
+                        }
+                        frame.initialized = true;
+
+                        if (frame.value.isObject()) {
+                            const RuntimeContext::RuntimeObject* object =
+                                context_.objectAt(frame.value.objectId());
+                            if (object == nullptr) {
+                                fail(RuntimeErrorCode::TypeError, callSite);
+                                traversalSucceeded = false;
+                                break;
+                            }
+                            if (frame.parentContainerDepth >= maximumDepth) {
+                                fail(RuntimeErrorCode::JsonNestingLimitExceeded,
+                                    callSite);
+                                traversalSucceeded = false;
+                                break;
+                            }
+                            frame.containerDepth =
+                                frame.parentContainerDepth + 1u;
+                            frame.array = object->array;
+                            if (frame.array) {
+                                frame.capturedArrayLength =
+                                    object->arrayLength;
+                            } else {
+                                if (object->properties.size() >
+                                    context_.limits_.maxPropertiesPerObject) {
+                                    fail(RuntimeErrorCode::PropertyLimitExceeded,
+                                        callSite);
+                                    traversalSucceeded = false;
+                                    break;
+                                }
+                                for (const RuntimeContext::RuntimeProperty& property :
+                                    object->properties) {
+                                    if (!context_.consumeStep(callSite)) {
+                                        traversalSucceeded = false;
+                                        break;
+                                    }
+                                    if (property.symbolKey !=
+                                            WellKnownSymbol::None) continue;
+                                    if (!property.attributes.isValid() ||
+                                        !property.attributes.isFullyKnown()) {
+                                        fail(RuntimeErrorCode::InvalidReceiver,
+                                            callSite);
+                                        traversalSucceeded = false;
+                                        break;
+                                    }
+                                    if (!property.attributes.enumerable())
+                                        continue;
+                                    const std::size_t keyBytes =
+                                        property.key.size();
+                                    const std::size_t countCapacity =
+                                        context_.limits_.maxTotalProperties;
+                                    const std::size_t byteCapacity =
+                                        context_.limits_.maxTotalPropertyKeyBytes;
+                                    if (activeSnapshotKeyCount > countCapacity ||
+                                        frame.keys.size() >= countCapacity -
+                                            activeSnapshotKeyCount ||
+                                        activeSnapshotKeyBytes > byteCapacity ||
+                                        frame.snapshotKeyBytes > byteCapacity -
+                                            activeSnapshotKeyBytes ||
+                                        keyBytes > byteCapacity -
+                                            activeSnapshotKeyBytes -
+                                            frame.snapshotKeyBytes) {
+                                        fail(RuntimeErrorCode::PropertyLimitExceeded,
+                                            callSite);
+                                        traversalSucceeded = false;
+                                        break;
+                                    }
+                                    frame.keys.push_back(property.key);
+                                    frame.snapshotKeyBytes += keyBytes;
+                                }
+                                if (!traversalSucceeded) break;
+                                const auto orderedBefore = [](
+                                    const std::string& left,
+                                    const std::string& right) {
+                                    std::uint32_t leftIndex = 0u;
+                                    std::uint32_t rightIndex = 0u;
+                                    const bool leftIsIndex =
+                                        parseEcmaArrayIndex(left, leftIndex);
+                                    const bool rightIsIndex =
+                                        parseEcmaArrayIndex(right, rightIndex);
+                                    if (leftIsIndex != rightIsIndex)
+                                        return leftIsIndex;
+                                    return leftIsIndex &&
+                                        leftIndex < rightIndex;
+                                };
+                                std::stable_sort(frame.keys.begin(),
+                                    frame.keys.end(), orderedBefore);
+                                activeSnapshotKeyCount += frame.keys.size();
+                                activeSnapshotKeyBytes +=
+                                    frame.snapshotKeyBytes;
+                            }
+                        }
+                    }
+
+                    bool hasChild = false;
+                    std::string childKey;
+                    if (frame.value.isObject() && frame.array &&
+                        frame.nextArrayIndex < frame.capturedArrayLength) {
+                        char indexBuffer[32] = {};
+                        const auto conversion = std::to_chars(indexBuffer,
+                            indexBuffer + sizeof(indexBuffer),
+                            frame.nextArrayIndex);
+                        if (conversion.ec != std::errc()) {
+                            fail(RuntimeErrorCode::InvalidAstState, callSite);
+                            traversalSucceeded = false;
+                            break;
+                        }
+                        childKey.assign(indexBuffer,
+                            static_cast<std::size_t>(conversion.ptr -
+                                indexBuffer));
+                        ++frame.nextArrayIndex;
+                        hasChild = true;
+                    } else if (frame.value.isObject() && !frame.array &&
+                        frame.nextObjectKey < frame.keys.size()) {
+                        childKey = frame.keys[frame.nextObjectKey++];
+                        hasChild = true;
+                    }
+
+                    if (hasChild) {
+                        if (!context_.consumeStep(callSite)) {
+                            traversalSucceeded = false;
+                            break;
+                        }
+                        ReviverFrame child;
+                        child.holder = frame.value.objectId();
+                        child.key = std::move(childKey);
+                        child.parentContainerDepth = frame.containerDepth;
+                        traversal.push_back(std::move(child));
+                        continue;
+                    }
+
+                    Value keyValue = Value::undefined();
+                    RuntimeErrorCode stringError = RuntimeErrorCode::None;
+                    if (!context_.createOrGetCachedString(SourceView(
+                            frame.key.data(), frame.key.size()), keyValue,
+                            stringError)) {
+                        fail(stringError, callSite);
+                        traversalSucceeded = false;
+                        break;
+                    }
+                    callbackArguments.clear();
+                    callbackArguments.push_back(keyValue);
+                    callbackArguments.push_back(frame.value);
+                    Value replacement = Value::undefined();
+                    reviverCallbackStarted = true;
+                    if (!invokeFunction(reviver.functionId(),
+                            callbackArguments, callSite, replacement,
+                            Value::object(frame.holder))) {
+                        traversalSucceeded = false;
+                        break;
+                    }
+
+                    RuntimeErrorCode replacementError =
+                        RuntimeErrorCode::None;
+                    if (replacement.isUndefined()) {
+                        bool deleted = false;
+                        if (!context_.deleteOwnProperty(frame.holder,
+                                frame.key, deleted, replacementError)) {
+                            fail(replacementError, callSite);
+                            traversalSucceeded = false;
+                            break;
+                        }
+                    } else if (!context_.writeProperty(frame.holder,
+                            frame.key, replacement, replacementError)) {
+                        fail(replacementError, callSite);
+                        traversalSucceeded = false;
+                        break;
+                    }
+
+                    const bool isRoot = traversal.size() == 1u;
+                    if (isRoot) revived = replacement;
+                    if (frame.keys.size() > activeSnapshotKeyCount ||
+                        frame.snapshotKeyBytes > activeSnapshotKeyBytes) {
+                        fail(RuntimeErrorCode::InvalidAstState, callSite);
+                        traversalSucceeded = false;
+                        break;
+                    }
+                    activeSnapshotKeyCount -= frame.keys.size();
+                    activeSnapshotKeyBytes -= frame.snapshotKeyBytes;
+                    traversal.pop_back();
+                    if (isRoot) break;
+                }
+            } catch (const std::bad_alloc&) {
+                fail(RuntimeErrorCode::AllocationFailure, callSite);
+                traversalSucceeded = false;
+            }
+            if (!traversalSucceeded) {
+                if (!reviverCallbackStarted) rollback();
+                return false;
+            }
+            result = revived;
+            return true;
+        }
+
         result = parsed;
         return true;
     }
@@ -6398,6 +6663,70 @@ bool RuntimeContext::writeProperty(RuntimeObjectId objectId,
         if (diagnostics_.propertyPoolHighWater < totalPropertyCount_)
             diagnostics_.propertyPoolHighWater = totalPropertyCount_;
     });
+    return true;
+}
+
+bool RuntimeContext::deleteOwnProperty(RuntimeObjectId objectId,
+    const std::string& key, bool& deleted, RuntimeErrorCode& error)
+{
+    error = RuntimeErrorCode::None;
+    deleted = false;
+    RuntimeObject* object = objectAt(objectId);
+    if (object == nullptr) {
+        error = RuntimeErrorCode::CannotWriteProperty;
+        return false;
+    }
+    if (object->array && key == "length") return true;
+
+    std::uint32_t standardIndex = 0u;
+    if (object->array && parseEcmaArrayIndex(key, standardIndex)) {
+        const std::size_t index = static_cast<std::size_t>(standardIndex);
+        if (index > limits_.maxArrayIndex) return true;
+        const std::size_t position = findArrayElementPosition(*object, index);
+        if (position >= object->elements.size() ||
+            object->elements[position].index != index) return true;
+        if (index >= object->arrayLength ||
+            !object->elements[position].attributes.isValid() ||
+            !object->elements[position].attributes.hasConfigurable()) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
+        if (!object->elements[position].attributes.configurable()) return true;
+        if (totalArrayElements_ == 0u) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
+        object->elements.erase(object->elements.begin() +
+            static_cast<std::ptrdiff_t>(position));
+        --totalArrayElements_;
+        deleted = true;
+        return true;
+    }
+
+    for (std::size_t position = 0u; position < object->properties.size();
+        ++position) {
+        RuntimeProperty& property = object->properties[position];
+        if (property.symbolKey != WellKnownSymbol::None ||
+            property.key != key) continue;
+        if (!property.attributes.isValid() ||
+            !property.attributes.hasConfigurable()) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
+        if (!property.attributes.configurable()) return true;
+        const std::size_t keyBytes = property.key.size();
+        if (totalPropertyCount_ == 0u ||
+            keyBytes > totalPropertyKeyBytes_) {
+            error = RuntimeErrorCode::InvalidAstState;
+            return false;
+        }
+        object->properties.erase(object->properties.begin() +
+            static_cast<std::ptrdiff_t>(position));
+        --totalPropertyCount_;
+        totalPropertyKeyBytes_ -= keyBytes;
+        deleted = true;
+        return true;
+    }
     return true;
 }
 

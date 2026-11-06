@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Navigator JavaScript JS110</title>
+</head>
+<body id="page-body">
+<h1>Navigator JavaScript JS110</h1>
+<div id="results"></div>
+<p id="serialized-json">Pending</p>
+<button id="event-button">Run event reviver</button>
+<script>
+var hostedOrderOk = false;
+var hostedReviverOk = false;
+var hostedHoleOk = false;
+var hostedEventOk = false;
+let visited = "";
+const data = JSON.parse(
+    '{"items":[{"name":"Alpha","visible":true},{"name":"Beta","visible":false},{"name":"Gamma","visible":true}]}',
+    function(key, value) {
+        visited = visited + "[" + key + "]";
+        if (key === "visible") {
+            return undefined;
+        }
+        if (key === "name") {
+            return value + " item";
+        }
+        return value;
+    }
+);
+
+const expectedOrder = "[name][visible][0][name][visible][1][name][visible][2][items][]";
+const results = document.getElementById("results");
+const serialized = document.getElementById("serialized-json");
+data.items.forEach((item, index) => {
+    const paragraph = document.createElement("p");
+    paragraph.setAttribute("id", "item-" + index);
+    paragraph.textContent = item.name;
+    results.appendChild(paragraph);
+});
+
+const expectedJson = "{\"items\":[{\"name\":\"Alpha item\"},{\"name\":\"Beta item\"},{\"name\":\"Gamma item\"}]}";
+const serializedData = JSON.stringify(data);
+serialized.textContent = serializedData;
+hostedOrderOk = visited === expectedOrder;
+hostedReviverOk = data.items.length === 3 &&
+    data.items[0].name === "Alpha item" &&
+    data.items[1].name === "Beta item" &&
+    data.items[2].name === "Gamma item" &&
+    !data.items[0].hasOwnProperty("visible") &&
+    !data.items[1].hasOwnProperty("visible") &&
+    !data.items[2].hasOwnProperty("visible") &&
+    serializedData === expectedJson;
+
+const sparse = JSON.parse("[10,20,30]", function(key, value) {
+    if (key === "1") {
+        return undefined;
+    }
+    return value;
+});
+const mapped = sparse.map(value => value * 2);
+const holeIndex = sparse.findIndex((value, index) =>
+    index === 1 && value === undefined);
+hostedHoleOk = sparse.length === 3 && !sparse.hasOwnProperty("1") &&
+    !mapped.hasOwnProperty("1") && holeIndex === 1 &&
+    JSON.stringify(sparse) === "[10,null,30]";
+
+document.getElementById("event-button").addEventListener("click", function(event) {
+    const eventData = JSON.parse("{\"value\":4}", function(key, value) {
+        if (key === "value") {
+            hostedEventOk = this.hasOwnProperty(key) && this[key] === value;
+        }
+        return value;
+    });
+    hostedEventOk = hostedEventOk && eventData.value === 4 && event.type === "click";
+});
+</script>
+</body>
+</html>

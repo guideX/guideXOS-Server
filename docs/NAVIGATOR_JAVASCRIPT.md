@@ -13892,6 +13892,74 @@ API. Revivers, replacer functions and arrays, pretty-print spacing, raw JSON,
 streaming, and arbitrary host-object serialization remain unsupported. Guest
 memory, stack, and rendering qualification remains pending.
 
+#### JS110 architecture decision (recorded before implementation)
+
+Keep strict JSON parsing and its pre-callback rollback boundary unchanged.
+After a successful parse with a callable reviver, walk the result with an
+iterative depth-first stack rooted at a temporary holder object. Snapshot an
+ordinary object's enumerable own string keys in the runtime's integer-index
+then insertion order, and capture an Array's logical length on entry; fetch
+each property's current value only when its snapshot key is reached. Invoke
+the callback with the containing holder as receiver, then apply its result via
+direct own-data-property replacement or an internal own-property erase.
+Property and sparse Array erasure remove the live record and decrement the
+matching live capacity counters, while vector capacity remains allocated.
+Do not roll back allocations after callback code begins because callbacks can
+publish references and perform side effects. Bound the traversal depth and
+live key-snapshot scratch by the existing JSON/property limits.
+
+#### JS110 bounded JSON.parse reviver
+
+`JSON.parse(text, reviver)` accepts the existing strict JSON subset and an
+optional callable reviver. The text argument remains required and must be a
+string. More than two arguments still produce `UnsupportedFeature`; a
+non-callable second argument is ignored. Parsing remains transactional through
+the end of strict syntax and capacity validation. The temporary root holder
+and traversal scratch are allocated before the first callback; failure there
+uses the parser's rollback. Once callback execution starts, errors preserve
+the parsed objects and callback side effects because callbacks may have
+published references.
+
+The reviver follows child-before-parent traversal, ending with key `""` for
+the root. Ordinary object keys are snapshotted as enumerable own string keys
+when entering the object, with canonical integer indices ascending and other
+keys in insertion order. Arrays capture their logical length on entry and
+visit every index in ascending order, including holes as `undefined`. A
+snapshot key's current value is read only when that key is reached. Thus
+mutation of a later property or index is observed, while new object keys and
+indices appended beyond the captured Array length are not visited. A
+replacement value is not traversed again.
+
+Each callback receives `(key, value)` and the containing holder as ordinary
+`this`; arrow functions retain their captured lexical `this`. Object root
+holders expose the parsed root as own property `""`. A non-undefined return
+replaces that holder property or child property directly as an own data
+property. Returning `undefined` deletes the own property, including for the
+root holder; this is a real record erase, not assignment of `undefined`.
+Deleting an Array index leaves its length unchanged and creates a hole.
+Ordinary property erasure reduces the live property and key-byte counters;
+Array index erasure reduces the live element counter. Container vector
+capacity is retained under the runtime's existing no-GC lifetime policy.
+Direct own-property operations treat `__proto__` as ordinary data and do not
+change prototypes.
+
+The traversal uses an explicit stack with the existing hard JSON depth cap of
+32, rather than recursive native calls. Active key snapshots are bounded by
+the existing total property-count and property-key-byte limits. Callback
+execution continues to use normal runtime call-depth and step budgets.
+Nested JSON parsing is allowed, subject to those same budgets. `context.source`
+and other newer reviver extensions are not implemented. Native and hosted
+qualification do not establish guest memory or stack acceptance.
+
+The focused JS110 native lane covers callback signatures and receivers,
+post-order and key order, root replacement/deletion, own-property erasure and
+quota reuse, sparse Arrays and captured lengths, live mutations, prototype
+safety, nested parse/stringify, callback error side effects, execution and
+capacity bounds, and a hosted-document harness with DOM rendering and an
+event callback. The detailed matrix, production-build, hosted-page, aggregate,
+stack, and artifact-restoration results follow the JS109 baseline record at
+the end of this chapter.
+
 The strict C++17 JS109 lane passes 86/86 checks. The complete JavaScript
 matrix passes all 110/110 lanes; its 69 focused assertion-reporting lanes
 pass 17,628/17,628 checks. This includes the existing JS104–JS108 syntax,
@@ -13919,3 +13987,62 @@ JS109 assertion failed. After hosted qualification, the original
 generated fixtures, totaling 458,372 bytes, matched the saved prebuild
 manifest. `.phase` remained absent. Qualification is native/hosted only;
 guest acceptance remains pending.
+
+#### JS110 qualification results
+
+The strict C++17 JS110 lane passes 28/28 checks, including its native hosted
+document and event-callback harness. The pre-existing JS109 lane passes
+86/86. The full JavaScript matrix passes 111/111 lanes, with 17,656/17,656
+reported assertions across 70 assertion-reporting lanes. The matrix includes
+the final JS110 source and the updated JS62R4 compatibility lane.
+
+The MinGW 15.2 `-O2 -fstack-usage` report measures `parseJson` at 1,504 bytes,
+its recursive strict-parser value helper at 384 bytes, `deleteOwnProperty` at
+128 bytes, the string-key `readProperty` overload at 176 bytes and the typed
+key overload at 224 bytes, `invokeFunction` at 768 bytes, and `invokeNative`
+at 736 bytes. The reviver walk itself is iterative, so JSON nesting does not
+add recursive native reviver frames. The serializer remains recursive and
+measures 848 bytes for `stringifyJson`, 400 bytes for its emitter, and 416
+bytes for value preparation. Navigator rendering measures 1,936 bytes for
+`Navigator::renderDocument` and 4,752 bytes for its inline-flow lambda. These
+are hosted compiler frame measurements; guest stack qualification remains
+pending.
+
+At the default caps, a conservative reviver scratch estimate includes up to
+256 KiB of copied snapshot-key bytes, up to 256 KiB of `std::string` records
+in active per-object snapshot vectors (bounded by depth and the per-object
+property cap), about 4 KiB for sorting one maximum-size object snapshot, about
+5.2 KiB for the 33-frame traversal vector, two callback `Value` slots, and
+the parser's 64 KiB bounded input copy. Adding those terms to the 1,138,688
+bytes of accounted persistent object, property, Array, runtime-string, and
+property-key payload gives about 1.66 MiB of counted payload during a maximal
+reviver parse. This excludes allocator metadata, container spare capacity
+beyond the conservative snapshot-vector bound, callback-created values, and
+other runtime state; it is not an exact process-heap measurement or guest
+memory guarantee.
+
+The fresh production `build.bat` build succeeded with existing compiler
+warnings in unrelated sources. Its 9,171,504-byte executable had SHA-256
+`E9A95B03A0950A0E7F55E5B59A2723343183FC74ACE4949453F7A42CF1771134`. That
+exact executable loaded `/navigator-smoke/javascript-js110.html` through
+Navigator with HTTP 200, retained the requested URL, rendered six document
+blocks, and reported no JavaScript runtime error. The native document harness
+also verified post-order visits, three rendered paragraphs, the compact JSON
+text, layout revisions, sparse-Array behavior, and a nested reviver from a
+real click callback.
+
+The full hosted Navigator aggregate completed 767/774 checks. Its seven
+failures are the established CSS checks: phase 3C, phase 3G, phase 6A, all
+three phase 6B checks, and phase 6C. No new JS110 check is part of that legacy
+aggregate; JS110's dedicated hosted page and native 28-check lane pass.
+After hosted qualification, the original 8,398,274-byte executable was
+restored and verified at SHA-256
+`A5E439455E4D3E735DFB848EC296A3EC4B347822B21F5B1B736D51227046A971`. All 42
+generated fixtures, totaling 458,372 bytes, matched the saved prebuild
+manifest with zero mismatches, and `.phase` remained absent.
+
+Qualification is native and hosted only; guest memory, stack, and rendering
+acceptance remains pending. A useful JS111 gate is to qualify the JS109/JS110
+JSON parser, iterative reviver, serializer, and callback stack together on the
+guest target at the configured depth and pool limits before expanding the
+reviver API with newer features such as `context.source`.

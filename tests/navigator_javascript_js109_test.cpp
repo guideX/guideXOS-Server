@@ -590,9 +590,12 @@ void testStringificationSemantics()
         stringBinding(toJson, "closureText", "\"held\""),
         "JSON.stringify invokes callable toJSON with the property key and receiver through native function frames");
 
-    expect(runRuntimeError("JSON.parse(\"1\", function(value){return value;});",
-            RuntimeErrorCode::UnsupportedFeature),
-        "JSON.parse explicitly rejects the excluded reviver argument");
+    RuntimeContext parseReviver;
+    const ScriptResult parseReviverResult = run(parseReviver,
+        "var parsed = JSON.parse(\"1\", function(key,value){return value;});");
+    expect(parseReviverResult.succeeded() &&
+        numberBinding(parseReviver, "parsed", 1.0),
+        "JSON.parse accepts the JS110 two-argument reviver while preserving the JS109 primitive result");
     expect(runRuntimeError("JSON.stringify(1, function(key,value){return value;});",
             RuntimeErrorCode::UnsupportedFeature),
         "JSON.stringify explicitly rejects replacer arguments");

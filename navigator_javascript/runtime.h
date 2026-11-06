@@ -188,8 +188,8 @@ struct RuntimeLimits {
     std::size_t maxHostMethodValues = kDefaultMaxJavaScriptHostMethodValues;
     // Cumulative explicit-script source retained by a same-document realm.
     std::size_t maxRealmSourceBytes = kDefaultMaxJavaScriptRealmSourceBytes;
-    // Dedicated JSON reader and serializer depth. The implementation also
-    // applies a hard depth ceiling so recursive native frames stay bounded.
+    // Dedicated JSON reader, reviver, and serializer depth. The implementation
+    // also applies a hard depth ceiling so native traversal stays bounded.
     std::size_t maxJsonNestingDepth =
         kDefaultMaxJavaScriptJsonNestingDepth;
 };
@@ -622,6 +622,8 @@ private:
     bool writeProperty(RuntimeObjectId object, const PropertyKey& key,
         Value value, RuntimeErrorCode& error,
         const PropertyAttributes& attributes);
+    bool deleteOwnProperty(RuntimeObjectId object, const std::string& key,
+        bool& deleted, RuntimeErrorCode& error);
     bool updateExistingProperty(RuntimeObjectId object, const std::string& key,
         Value value, RuntimeErrorCode& error);
     bool initializeBuiltIns(RuntimeErrorCode& error);
