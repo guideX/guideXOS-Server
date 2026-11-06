@@ -97,7 +97,7 @@ int getchar()
 
 void stop()
 {
-    ssc(SSC_STOP);
+    ssc(SSC_EXIT);
 }
 
 } // namespace ski_console

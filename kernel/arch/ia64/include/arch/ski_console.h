@@ -21,10 +21,11 @@ namespace ia64 {
 namespace ski_console {
 
 // SSC function codes
-static const uint64_t SSC_STOP           = 0x00;
-static const uint64_t SSC_CONSOLE_INIT   = 0x20;
-static const uint64_t SSC_PUTCHAR        = 0x21;
-static const uint64_t SSC_GETCHAR        = 0x22;
+static const uint64_t SSC_STOP           = 0;
+static const uint64_t SSC_CONSOLE_INIT   = 20;
+static const uint64_t SSC_GETCHAR        = 21;
+static const uint64_t SSC_PUTCHAR        = 31;
+static const uint64_t SSC_EXIT           = 66;
 
 // Issue a ski SSC (Simulator System Call)
 // Places arg0 in r32, function code in r15, then executes break.i 0x80000
@@ -48,7 +49,7 @@ void put_hex(uint64_t value);
 // Read a character from the ski console (non-blocking, returns -1 if none)
 int getchar();
 
-// Stop the ski simulator
+// Exit this bounded early-execution run through the Ski SSC interface.
 void stop();
 
 } // namespace ski_console

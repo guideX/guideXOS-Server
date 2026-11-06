@@ -50,6 +50,33 @@ def validate(repo_root: Path, elf: Path, objdump: str) -> list[str]:
     check("rsm psr.i | psr.ic ;;" in boot and "ssm psr.i" not in boot,
           "BOOT_INTERRUPT_MASK", "entry masks interrupts and contains no interrupt enable")
 
+    console_header = (repo_root / "kernel/arch/ia64/include/arch/ski_console.h").read_text(encoding="utf-8")
+    expected_ssc = {
+        "SSC_STOP": 0,
+        "SSC_CONSOLE_INIT": 20,
+        "SSC_GETCHAR": 21,
+        "SSC_PUTCHAR": 31,
+        "SSC_EXIT": 66,
+    }
+    ssc_values_ok = all(
+        re.search(rf"\b{name}\s*=\s*{value}\s*;", console_header)
+        for name, value in expected_ssc.items()
+    )
+    ssc_values_ok = ssc_values_ok and all(
+        re.search(rf"(?m)^\.equ {name},\s+{value}$", boot)
+        for name, value in expected_ssc.items()
+    )
+    check(ssc_values_ok, "SKI_SSC_CODES",
+          "Ski SSC values match the pinned interface (STOP=0, INIT=20, GETCHAR=21, PUTCHAR=31, EXIT=66)")
+
+    console_cpp = (repo_root / "kernel/arch/ia64/ski_console.cpp").read_text(encoding="utf-8")
+    check('register uint64_t r15 asm("r15") = func;' in console_cpp and
+          '"mov r32 = %1 ;;\\n"' in console_cpp and
+          '"break.i 0x80000 ;;\\n"' in console_cpp and
+          'register uint64_t result asm("r8");' in console_cpp and
+          "ssc(SSC_EXIT);" in console_cpp,
+          "SKI_SSC_CALL_ABI", "function ID uses r15, arg0 uses r32, return uses r8, exit uses SSC_EXIT")
+
     main = (repo_root / "kernel/core/main.cpp").read_text(encoding="utf-8")
     early_start = main.find("#if defined(GXOS_IA64_EARLY_EXEC_PROFILE)")
     early_end = main.find("#else", early_start)
@@ -85,6 +112,24 @@ def validate(repo_root: Path, elf: Path, objdump: str) -> list[str]:
               "rsm 0xc0000" in boot_disassembly and
               not re.search(r"\bssm\b[^\n]*psr\.i\b", boot_disassembly),
               "STARTUP_DISASSEMBLY", "target startup includes RSE/FP setup (DFL|DFH mask 0xc0000) and no interrupt enable")
+        ssc_disassembly = run_disassembly(
+            objdump, elf,
+            "kernel::arch::ia64::ski_console::ssc(unsigned long, unsigned long)",
+        )
+        putchar_disassembly = run_disassembly(
+            objdump, elf, "kernel::arch::ia64::ski_console::putchar(char)")
+        getchar_disassembly = run_disassembly(
+            objdump, elf, "kernel::arch::ia64::ski_console::getchar()")
+        stop_disassembly = run_disassembly(
+            objdump, elf, "kernel::arch::ia64::ski_console::stop()")
+        check("mov r15=r32" in ssc_disassembly and "mov r32=r33" in ssc_disassembly and
+              "break.i 0x80000" in ssc_disassembly,
+              "SSC_WRAPPER_DISASSEMBLY", "target wrapper moves function ID to r15 and arg0 to r32 before SSC break")
+        check("mov r15=31" in putchar_disassembly and "break.i 0x80000" in putchar_disassembly and
+              "mov r15=21" in getchar_disassembly and "break.i 0x80000" in getchar_disassembly and
+              "mov r15=66" in stop_disassembly and "break.i 0x80000" in stop_disassembly and
+              "mov r15=20" in boot_disassembly,
+              "SSC_CALL_DISASSEMBLY", "target code emits Ski console-init/putchar/getchar/exit codes")
     except (OSError, RuntimeError) as exc:
         check(False, "TARGET_DISASSEMBLY", str(exc))
 

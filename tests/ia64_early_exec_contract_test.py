@@ -69,6 +69,25 @@ class Ia64EarlyExecContractTests(unittest.TestCase):
         self.assertIn("ssm psr.ic", body)
         self.assertIsNone(re.search(r"\bssm\s+psr\.i\b", body))
 
+    def test_ski_ssc_codes_and_call_registers_match_the_simulator_abi(self) -> None:
+        header = source(ROOT / "kernel/arch/ia64/include/arch/ski_console.h")
+        boot = source(BOOT)
+        console = source(ROOT / "kernel/arch/ia64/ski_console.cpp")
+        for name, value in (
+            ("SSC_CONSOLE_INIT", 20),
+            ("SSC_GETCHAR", 21),
+            ("SSC_PUTCHAR", 31),
+            ("SSC_EXIT", 66),
+        ):
+            self.assertRegex(header, rf"\b{name}\s*=\s*{value}\s*;")
+        self.assertRegex(boot, r"(?m)^\.equ SSC_CONSOLE_INIT,\s+20$")
+        self.assertRegex(boot, r"(?m)^\.equ SSC_PUTCHAR,\s+31$")
+        self.assertIn('register uint64_t r15 asm("r15") = func;', console)
+        self.assertIn('"mov r32 = %1 ;;\\n"', console)
+        self.assertIn('"break.i 0x80000 ;;\\n"', console)
+        self.assertIn('register uint64_t result asm("r8");', console)
+        self.assertIn("ssc(SSC_EXIT);", console)
+
     def test_fp_policy_has_three_distinct_profiles_and_link_identity(self) -> None:
         text = source(MAKE_ARCH)
         self.assertIn("IA64_FP_PROFILE ?= runtime", text)

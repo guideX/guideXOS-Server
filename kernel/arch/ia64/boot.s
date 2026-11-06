@@ -23,10 +23,11 @@
 /* ================================================================
  * SSC (Simulator System Call) codes for ski
  * ================================================================ */
-.equ SSC_STOP,            0x00
-.equ SSC_CONSOLE_INIT,    0x20
-.equ SSC_PUTCHAR,         0x21
-.equ SSC_GETCHAR,         0x22
+.equ SSC_STOP,            0
+.equ SSC_CONSOLE_INIT,    20
+.equ SSC_GETCHAR,         21
+.equ SSC_PUTCHAR,         31
+.equ SSC_EXIT,            66
 
 /* ================================================================
  * Architectural Interrupt Vector Table (IVT)
