@@ -3783,15 +3783,39 @@ static std::string navigatorHostedSmokeDiagnostic() {
     std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     bool trustedHttpsPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
     std::string trustedHttpsPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
-    const bool trustedHttpsTimedOut = trustedHttpsPageInfoLoaded &&
+    const auto pageInfoByteMetricWithinCap = [](const std::string& pageInfo, const char* label) {
+        const std::string marker = std::string(label) + ": ";
+        const std::size_t markerPos = pageInfo.find(marker);
+        if (markerPos == std::string::npos) return false;
+        std::size_t pos = markerPos + marker.size();
+        std::size_t value = 0;
+        const std::size_t digitsStart = pos;
+        while (pos < pageInfo.size() && pageInfo[pos] >= '0' && pageInfo[pos] <= '9') {
+            const std::size_t digit = static_cast<std::size_t>(pageInfo[pos] - '0');
+            if (value > (256 * 1024 - digit) / 10) return false;
+            value = value * 10 + digit;
+            ++pos;
+        }
+        return pos > digitsStart && value > 0 && value <= 256 * 1024;
+    };
+    add("trusted HTTPS response meets bounded status and TLS contract",
+        trustedHttpsLoaded && trustedHttpsPageInfoLoaded &&
+        !trustedHttpsText.empty() && trustedHttpsText.size() <= 256 * 1024 &&
         contains(trustedHttpsPageInfo, "Requested URL: https://example.com/") &&
-        contains(trustedHttpsPageInfo, "Error status: Timeout: Connection timed out.") &&
-        contains(trustedHttpsPageInfo, "TLS backend: (none)") &&
-        contains(trustedHttpsPageInfo, "TLS enabled: no") &&
-        contains(trustedHttpsPageInfo, "TLS status: (none)");
-    add("trusted HTTPS GET loads through native Schannel", (trustedHttpsLoaded &&
-        contains(trustedHttpsText, "Example Domain")) || trustedHttpsTimedOut,
-        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+        contains(trustedHttpsPageInfo, "HTTP status: 200") &&
+        contains(trustedHttpsPageInfo, "TLS status: connected") &&
+        contains(trustedHttpsPageInfo, "TLS validated: yes") &&
+        contains(trustedHttpsPageInfo, "Certificate validation: enabled via Schannel, Windows trust, and hostname validation") &&
+        contains(trustedHttpsPageInfo, "Certificate hostname checked: example.com") &&
+        contains(trustedHttpsPageInfo, "Certificate hostname validation: valid") &&
+        contains(trustedHttpsPageInfo, "TLS smoke bypass active: no") &&
+        pageInfoByteMetricWithinCap(trustedHttpsPageInfo, "Encoded body bytes") &&
+        pageInfoByteMetricWithinCap(trustedHttpsPageInfo, "Decoded body bytes") &&
+        contains(trustedHttpsPageInfo, "Truncated response: no") &&
+        contains(trustedHttpsPageInfo, "Body cap hit: no"),
+        "page_info_loaded=" + std::string(yesNo(trustedHttpsPageInfoLoaded)) +
+        " body_bytes=" + std::to_string(trustedHttpsText.size()) +
+        " page_info=\"" + summarizeText(trustedHttpsPageInfo, 700) + "\"");
     add("trusted HTTPS Page Info proves real Schannel credential path", (trustedHttpsPageInfoLoaded &&
         contains(trustedHttpsPageInfo, "Requested URL: https://example.com/") &&
         contains(trustedHttpsPageInfo, "TLS backend: Schannel hosted") &&
@@ -3802,7 +3826,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(trustedHttpsPageInfo, "TLS credential acquired: yes") &&
         contains(trustedHttpsPageInfo, "TLS handshake started: yes") &&
         contains(trustedHttpsPageInfo, "TLS status: connected") &&
-        contains(trustedHttpsPageInfo, "TLS smoke bypass active: no")) || trustedHttpsTimedOut,
+        contains(trustedHttpsPageInfo, "TLS smoke bypass active: no") &&
+        contains(trustedHttpsPageInfo, "TLS validated: yes") &&
+        contains(trustedHttpsPageInfo, "Certificate hostname checked: example.com") &&
+        contains(trustedHttpsPageInfo, "Certificate hostname validation: valid")),
         "page_info_loaded=" + std::string(yesNo(trustedHttpsPageInfoLoaded)) +
         " body=\"" + summarizeText(trustedHttpsText, 160) +
         "\" page_info=\"" + summarizeText(trustedHttpsPageInfo, 700) + "\"");

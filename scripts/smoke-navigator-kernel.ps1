@@ -9,6 +9,7 @@ param(
     [switch]$CandidateReviewed,
     [string[]]$ScenarioFilter,
     [switch]$ReuseActiveBuild,
+    [string]$ArtifactPath,
     [switch]$DisableSecureEntropy
 )
 
@@ -20,80 +21,108 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Normalize-ProcessEnvironment
 . (Join-Path $Root "scripts\qemu-secure-rng-args.ps1")
 . (Join-Path $Root "scripts\navigator_smoke_repo_hygiene.ps1")
+. (Join-Path $Root "scripts\navigator_https_qualification_contract.ps1")
+
+$requiredHttpsCaseNames = @(
+    'policy_validated',
+    'policy_validated_redirect',
+    'policy_validated_wrong_host',
+    'policy_validated_downgrade'
+)
+$httpsQualificationRequested =
+    ($ScenarioFilter -contains 'production_validated') -or
+    (($ScenarioFilter.Count -eq 0) -and ($ScenarioGroup -ne 'PublicPilot'))
+
+function Write-NavigatorHttpsQualificationBlocked {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $safeReason = ($Reason -replace '[\r\n]+', ' ' -replace '"', "'").Trim()
+    $outcome = Get-NavigatorHttpsQualificationOutcome `
+        -Attempted $true `
+        -Output '' `
+        -RequiredCaseNames $requiredHttpsCaseNames `
+        -AssertionsPassed $false `
+        -BlockedReason $safeReason
+    Write-Host ("[NAVIGATOR-HTTPS-QUALIFICATION] outcome={0} required_executed={1} passed={2} failed={3} blocked={4} skipped={5} reason=`"{6}`"" -f `
+        $outcome.Outcome, $outcome.Executed, $outcome.Passed, $outcome.Failed,
+        $outcome.Blocked, $outcome.Skipped, $outcome.Reason)
+}
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $downloadsState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "downloads")
-$ramdiskState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
-$persistentFixtureEspState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "ESP\\navigator-smoke\\generated")
-$wallpaperPackState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "out\\wallpaper-pack")
-$wallpaperPackCaBundleState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "out\\wallpaper-pack\\certs\\ca-bundle.pem")
+$currentHead = (& git -C $Root rev-parse HEAD).Trim()
+$buildId = "$stamp-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+if ($ReuseActiveBuild) {
+    if ([string]::IsNullOrWhiteSpace($ArtifactPath)) {
+        # Legacy ESP reuse remains selectable so it can fail with an actionable
+        # prerequisite message instead of silently booting an unknown image.
+        $artifactRoot = Join-Path $Root "ESP"
+        $esp = $artifactRoot
+    } else {
+        $artifactCandidate = if ([System.IO.Path]::IsPathRooted($ArtifactPath)) {
+            $ArtifactPath
+        } else {
+            Join-Path $Root $ArtifactPath
+        }
+        $artifactRoot = [System.IO.Path]::GetFullPath($artifactCandidate)
+        if ([System.IO.Path]::GetFileName($artifactRoot) -eq 'ESP') {
+            $esp = $artifactRoot
+            $artifactRoot = Split-Path -Parent $artifactRoot
+        } else {
+            $esp = Join-Path $artifactRoot 'ESP'
+        }
+    }
+} else {
+    $artifactRoot = Join-Path $Root "out\navigator-https-qualification\$buildId"
+    $esp = Join-Path $artifactRoot 'ESP'
+}
+$wallpaperPackDir = Join-Path $artifactRoot 'wallpaper-pack'
+$kernelImage = Join-Path $esp 'kernel.elf'
+$ramdiskImage = Join-Path $esp 'ramdisk.img'
+$bootloader = Join-Path $esp 'EFI\BOOT\BOOTX64.EFI'
+$qualificationManifestPath = Join-Path $artifactRoot 'navigator-https-qualification.json'
 
 function Invoke-KernelBuildForSmoke {
-    param([string]$ExtraCFlags)
-    $oldExtra = $env:EXTRA_CFLAGS
-    if ($ExtraCFlags -and $oldExtra) {
-        $env:EXTRA_CFLAGS = "$oldExtra $ExtraCFlags"
-    } elseif ($ExtraCFlags) {
-        $env:EXTRA_CFLAGS = $ExtraCFlags
-    } else {
-        Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
+    $make = $null
+    foreach ($candidate in @('mingw32-make', 'gmake', 'make')) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($command) {
+            if ($candidate -ne 'make' -or (& $command.Source --version 2>&1 | Select-Object -First 1) -match 'GNU Make') {
+                $make = $command.Source
+                break
+            }
+        }
     }
-    # The Navigator text-metrics pass hit a stale desktop object once; keep the
-    # smoke build deterministic by forcing that object to rebuild here too.
-    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "desktop.o" -ErrorAction SilentlyContinue |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "kernel_apps.o" -ErrorAction SilentlyContinue |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "cxx_runtime.o" -ErrorAction SilentlyContinue |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "gxos_tls_foundation.o" -ErrorAction SilentlyContinue |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "tcp.o" -ErrorAction SilentlyContinue |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -File -Filter "*.o" -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -match "[\\/]obj[\\/]third_party[\\/]" } |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "main.o" -ErrorAction SilentlyContinue |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-    $kernelBuildStdout = Join-Path $LogDir "navigator-kernel-build.stdout.log"
-    $kernelBuildStderr = Join-Path $LogDir "navigator-kernel-build.stderr.log"
-    # Run the wrapper synchronously in the current shell. Start-Process -Wait
-    # with redirected output could leave this smoke runner waiting after the
-    # child build had already produced kernel.elf, preventing the authoritative
-    # public-pilot ramdisk stage from running.
-    $kernelBuildScript = Join-Path $Root "build-kernel.bat"
+    if (-not $make) { throw 'Navigator HTTPS smoke build blocked: GNU make for the AMD64 kernel is unavailable.' }
+
+    New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+    $kernelBuildOutput = "../out/navigator-https-qualification/$buildId/kernel-build"
+    $kernelBuildLog = Join-Path $artifactRoot 'kernel-build.log'
+    $flags = '-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE -DGXOS_KERNEL_TEXT_WRITE_GUARD'
     $oldBuildErrorActionPreference = $ErrorActionPreference
     try {
-        # MinGW emits existing warnings on stderr. Keep those diagnostics in
-        # the build log without letting PowerShell's Stop preference turn a
-        # successful build into a harness failure.
-        $ErrorActionPreference = "Continue"
-        & cmd.exe /c "`"$kernelBuildScript`"" *> $kernelBuildStdout
+        $ErrorActionPreference = 'Continue'
+        & $make -C (Join-Path $Root 'kernel') 'ARCH=amd64' "BUILD_DIR=$kernelBuildOutput" "EXTRA_CFLAGS=$flags" *> $kernelBuildLog
         $buildCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $oldBuildErrorActionPreference
     }
-    Get-Content $kernelBuildStdout, $kernelBuildStderr -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
-    if ($null -ne $oldExtra) {
-        $env:EXTRA_CFLAGS = $oldExtra
-    } else {
-        Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
-    }
-    if ($buildCode -ne 0) { exit $buildCode }
-}
+    Get-Content -LiteralPath $kernelBuildLog -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+    if ($buildCode -ne 0) { throw "Navigator HTTPS smoke kernel build failed with exit code $buildCode. See $kernelBuildLog" }
 
-$activeSmokeBuild = $false
-function Restore-NormalKernelBuild {
-    if ($script:activeSmokeBuild) {
-        Write-Host "Restoring normal kernel build without active Navigator HTTP smoke diagnostics..."
-        Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
-        Invoke-KernelBuildForSmoke ""
-        $script:activeSmokeBuild = $false
+    $builtKernel = Join-Path $Root "out\navigator-https-qualification\$buildId\kernel-build\bin\kernel.elf"
+    if (-not (Test-Path -LiteralPath $builtKernel -PathType Leaf)) {
+        throw "Navigator HTTPS smoke kernel build did not produce the expected isolated artifact: $builtKernel"
     }
-}
+    $bootloaderSource = Join-Path $Root 'ESP\EFI\BOOT\BOOTX64.EFI'
+    if (-not (Test-Path -LiteralPath $bootloaderSource -PathType Leaf)) {
+        throw "Navigator HTTPS smoke build blocked: existing AMD64 UEFI loader is missing at $bootloaderSource."
+    }
 
-if ($Build) {
-    Invoke-KernelBuildForSmoke ""
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $bootloader) | Out-Null
+    Copy-Item -LiteralPath $bootloaderSource -Destination $bootloader
+    Copy-Item -LiteralPath $builtKernel -Destination $kernelImage
+    Write-Host "[NAVIGATOR-HTTPS-BUILD] id=$buildId kernel_build_dir=$kernelBuildOutput kernel=$kernelImage"
 }
 
 function Find-Qemu {
@@ -110,14 +139,19 @@ function Find-Qemu {
 }
 
 $qemu = Find-Qemu
-if (-not $qemu) { throw "qemu-system-x86_64 not found." }
+if (-not $qemu) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason 'QEMU environment blocker: qemu-system-x86_64 was not found.' }
+    throw "qemu-system-x86_64 not found."
+}
 
 $qemuObjectHelp = (& $qemu -object help 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0 -or ($qemuObjectHelp -notmatch 'rng-builtin')) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason 'QEMU environment blocker: rng-builtin object is unavailable.' }
     throw "QEMU environment blocker: rng-builtin object is unavailable."
 }
 $qemuDeviceHelp = (& $qemu -device help | Out-String)
 if ($LASTEXITCODE -ne 0 -or ($qemuDeviceHelp -notmatch 'virtio-rng-pci')) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason 'QEMU environment blocker: virtio-rng-pci device is unavailable.' }
     throw "QEMU environment blocker: virtio-rng-pci device is unavailable."
 }
 
@@ -180,49 +214,40 @@ function Clear-NavigatorKernelSmokePortConflicts {
 }
 
 $python = Find-Python
-if (-not $python) { throw "python not found; required for local Navigator HTTP smoke server." }
+if (-not $python) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason 'Fixture environment blocker: Python is unavailable for the local HTTP/HTTPS fixture servers.' }
+    throw "python not found; required for local Navigator HTTP smoke server."
+}
 
 $persistentFixtureGenerator = Join-Path $Root "scripts\generate-navigator-persistent-fixtures.py"
-$persistentFixtureDir = Join-Path $Root "navigator-smoke\generated"
-& $python $persistentFixtureGenerator --output-dir $persistentFixtureDir
-if ($LASTEXITCODE -ne 0) { throw "deterministic Navigator persistent fixture generation failed." }
-
-Write-Host "Building kernel with active Navigator HTTP/PNG smoke diagnostics..."
-$oldSmokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE
-$env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = "1"
+$persistentFixtureDir = Join-Path $artifactRoot "navigator-smoke\generated"
 $oldTlsDiagnostics = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_TLS_DIAGNOSTICS", "Process")
 $env:GXOS_NAVIGATOR_TLS_DIAGNOSTICS = "1"
-if ($ReuseActiveBuild) {
-    Write-Host "Reusing the already-built active Navigator HTTP/PNG smoke kernel."
-} else {
-    Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE -DGXOS_KERNEL_TEXT_WRITE_GUARD"
-}
-$env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = $oldSmokeCaFixture
-$activeSmokeBuild = -not $ReuseActiveBuild
 
 $ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
-if (-not (Test-Path $ovmf)) { throw "OVMF image not found: $ovmf" }
-
-$esp = Join-Path $Root "ESP"
-$bootloader = Join-Path $esp "EFI\BOOT\BOOTX64.EFI"
-if (-not (Test-Path $bootloader)) {
-    throw "ESP/EFI/BOOT/BOOTX64.EFI not found. Run build-kernel.bat first or pass -Build."
+if (-not (Test-Path $ovmf)) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "QEMU environment blocker: OVMF image was not found at $ovmf." }
+    throw "OVMF image not found: $ovmf"
 }
 
 $smokeCaFixture = Join-Path $Root "scripts\fixtures\navigator-smoke-root-ca-bundle.pem"
 if (-not (Test-Path $smokeCaFixture)) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "Fixture trust prerequisite missing: $smokeCaFixture" }
     throw "Navigator smoke CA fixture not found: $smokeCaFixture"
 }
 $validatedCaFixture = Join-Path $Root "scripts\fixtures\navigator-validated-root-ca-bundle.pem"
 if (-not (Test-Path $validatedCaFixture)) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "Fixture trust prerequisite missing: $validatedCaFixture" }
     throw "Navigator validated CA fixture not found: $validatedCaFixture"
 }
 $emptyCaFixture = Join-Path $Root "scripts\fixtures\navigator-empty-ca-bundle.pem"
 if (-not (Test-Path $emptyCaFixture)) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "TLS smoke prerequisite missing: $emptyCaFixture" }
     throw "Navigator empty CA fixture not found: $emptyCaFixture"
 }
 $malformedCaFixture = Join-Path $Root "scripts\fixtures\navigator-malformed-ca-bundle.pem"
 if (-not (Test-Path $malformedCaFixture)) {
+    if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "TLS smoke prerequisite missing: $malformedCaFixture" }
     throw "Navigator malformed CA fixture not found: $malformedCaFixture"
 }
 $defaultHttpsCert = Join-Path $Root "scripts\fixtures\navigator-smoke-guidexos.test.crt"
@@ -251,6 +276,7 @@ foreach ($path in @(
     $expiredPolicyProdHttpsCert, $expiredPolicyProdHttpsKey
 )) {
     if (-not (Test-Path $path)) {
+        if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "HTTPS fixture prerequisite missing: $path" }
         throw "Navigator HTTPS smoke fixture not found: $path"
     }
 }
@@ -260,9 +286,28 @@ Write-Host "  validated policy CA bundle: $validatedCaFixture"
 Write-Host "  malformed CA bundle: $malformedCaFixture"
 Write-Host "  empty CA bundle: $emptyCaFixture"
 
+if ($ReuseActiveBuild) {
+    Write-Host "Reusing selected HTTPS qualification artifact: $artifactRoot"
+} else {
+    New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+    & $python $persistentFixtureGenerator --output-dir $persistentFixtureDir
+    if ($LASTEXITCODE -ne 0) { throw "deterministic Navigator persistent fixture generation failed." }
+    Write-Host "Building an isolated kernel with active Navigator HTTP/PNG smoke diagnostics..."
+    try {
+        Invoke-KernelBuildForSmoke
+    } catch {
+        if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason $_.Exception.Message }
+        throw
+    }
+}
+
 $startup = Join-Path $esp "startup.nsh"
 $createdStartup = $false
 if (-not (Test-Path $startup)) {
+    if ($ReuseActiveBuild) {
+        throw "Reused HTTPS qualification artifact is missing startup.nsh: $startup"
+    }
+    New-Item -ItemType Directory -Force -Path $esp | Out-Null
     "FS0:\EFI\BOOT\BOOTX64.EFI" | Set-Content -Path $startup -Encoding ASCII
     $createdStartup = $true
 }
@@ -442,6 +487,7 @@ function Resolve-NavigatorKernelSmokeOptionalPath {
 
 function Invoke-NavigatorKernelSmokeRamdiskStage {
     param(
+        [Parameter(Mandatory = $true)][string]$ScenarioName,
         [AllowNull()][string]$HttpsPolicy,
         [AllowNull()][string]$HttpsFaultMode,
         [AllowNull()][string]$UserCaSource,
@@ -481,11 +527,11 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeCaBundleSource } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PERSISTENT_NAVIGATION" -Value ($(if ($EnablePersistentNavigation) { "1" } else { $null }))
 
-    Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
+    Wait-NavigatorSmokeFileUnlock -LiteralPath $ramdiskImage
     $packScript = Join-Path $Root "scripts\generate-wallpaper-pack.ps1"
     $packOutput = @(& $packScript -InputDir (Join-Path $Root "assets\Backgrounds") `
-        -OutputDir (Join-Path $Root "out\wallpaper-pack") `
-        -OutputImage (Join-Path $Root "ESP\ramdisk.img") *>&1)
+        -OutputDir $wallpaperPackDir `
+        -OutputImage $ramdiskImage *>&1)
     foreach ($line in $packOutput) {
         Write-Host $line
     }
@@ -493,8 +539,41 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
         throw "generate-wallpaper-pack.ps1 failed for the current smoke scenario."
     }
 
-    $productionManifestPath = Join-Path $Root "out\wallpaper-pack\certs\ca-bundle.manifest"
-    $userManifestPath = Join-Path $Root "out\wallpaper-pack\config\certs\ca-bundle.manifest"
+    $productionManifestPath = Join-Path $wallpaperPackDir "certs\ca-bundle.manifest"
+    $userManifestPath = Join-Path $wallpaperPackDir "config\certs\ca-bundle.manifest"
+
+    if ($ScenarioName -eq 'production_validated') {
+        $productionBundlePath = Join-Path $wallpaperPackDir 'certs\ca-bundle.pem'
+        $policyPath = Join-Path $wallpaperPackDir 'config\navigator\https-policy.txt'
+        $productionManifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $productionManifestPath
+        if (-not (Test-Path -LiteralPath $productionBundlePath -PathType Leaf)) {
+            throw "production_validated staging missing required trust material: $productionBundlePath"
+        }
+        if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) {
+            throw "production_validated staging missing required HTTPS policy: $policyPath"
+        }
+        $sourceCaHash = (Get-FileHash -LiteralPath $validatedCaFixture -Algorithm SHA256).Hash.ToLowerInvariant()
+        $stagedCaHash = (Get-FileHash -LiteralPath $productionBundlePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($sourceCaHash -ne $stagedCaHash -or $null -eq $productionManifest -or
+            [string]$productionManifest.sha256 -ne $stagedCaHash -or
+            [string]$productionManifest.bundle_type -ne 'production-source' -or
+            [string]$productionManifest.production_ready -ne 'no' -or
+            [string]$productionManifest.test_only -ne 'no') {
+            throw 'production_validated trust staging mismatch: the selected controlled CA, manifest, or existing trust classification changed.'
+        }
+        if ((Get-Content -LiteralPath $policyPath -Raw) -notmatch '(?im)^\s*production-validated\s*$') {
+            throw "production_validated staging has an incompatible HTTPS policy: $policyPath"
+        }
+        $packText = ($packOutput | ForEach-Object { [string]$_ }) -join "`n"
+        foreach ($requiredRamdiskPath in @(
+                '/certs/ca-bundle.pem',
+                '/certs/ca-bundle.manifest',
+                '/config/navigator/https-policy.txt')) {
+            if ($packText -notmatch ('(?i)added ' + [regex]::Escape($requiredRamdiskPath))) {
+                throw "production_validated ramdisk image did not report the required guest file: $requiredRamdiskPath"
+            }
+        }
+    }
 
     if ($EnableRealPublicProbe) {
         $navigatorConfigDir = Join-Path $Root "out\wallpaper-pack\config\navigator"
@@ -552,12 +631,17 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
         ProductionManifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $productionManifestPath
         UserManifestPath = $userManifestPath
         UserManifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $userManifestPath
+        CaBundlePath = Join-Path $wallpaperPackDir 'certs\ca-bundle.pem'
+        HttpsPolicyPath = Join-Path $wallpaperPackDir 'config\navigator\https-policy.txt'
+        PackOutput = @($packOutput | ForEach-Object { [string]$_ })
     }
 }
 
 function Invoke-NavigatorKernelSmokeQemuPass {
     param([Parameter(Mandatory = $true)][string]$ScenarioName)
 
+    Enter-NavigatorQemuExclusiveAdmission
+    try {
     $serialLog = Join-Path $LogDir "navigator-kernel-smoke-$stamp-$ScenarioName.serial.log"
     $output = ""
     for ($attempt = 1; $attempt -le 2; $attempt++) {
@@ -593,8 +677,8 @@ function Invoke-NavigatorKernelSmokeQemuPass {
 
         $stagedArtifacts = @(
             [pscustomobject]@{ Name = "bootloader"; Path = $bootloader },
-            [pscustomobject]@{ Name = "kernel"; Path = (Join-Path $esp "kernel.elf") },
-            [pscustomobject]@{ Name = "ramdisk"; Path = (Join-Path $esp "ramdisk.img") }
+            [pscustomobject]@{ Name = "kernel"; Path = $kernelImage },
+            [pscustomobject]@{ Name = "ramdisk"; Path = $ramdiskImage }
         )
         foreach ($artifact in $stagedArtifacts) {
             if (-not (Test-Path -LiteralPath $artifact.Path -PathType Leaf)) {
@@ -631,7 +715,7 @@ function Invoke-NavigatorKernelSmokeQemuPass {
                 Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction SilentlyContinue
             }
         } finally {
-            Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
+            Wait-NavigatorSmokeFileUnlock -LiteralPath $ramdiskImage
             Start-Sleep -Milliseconds 300
         }
 
@@ -650,6 +734,9 @@ function Invoke-NavigatorKernelSmokeQemuPass {
         Name = $ScenarioName
         SerialLog = $serialLog
         Output = $output
+    }
+    } finally {
+        Exit-NavigatorQemuExclusiveAdmission
     }
 }
 
@@ -1416,6 +1503,13 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.fault_mode=None",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.final_url=http://10.0.2.2:8080/navigator-smoke/insecure-downgrade",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.redirect_count=1",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.plain_tcp_connect_attempts=0",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.tls_tcp_connect_attempts=1",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.transport_selection=BlockedPolicy",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.tls_status=PolicyBlocked",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.error=HTTPS downgrade redirect blocked",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS"
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsExplicitPolicyTrustMismatchRegexChecks -Extra @{
@@ -1553,28 +1647,60 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=no",
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] tls_readiness_blocker=(none)",
+            "[NAVIGATOR-SMOKE] http.active_cases=enabled",
+            "[NAVIGATOR-SMOKE] https.required_cases.total=4",
+            "[NAVIGATOR-SMOKE] https.required_cases.executed=4",
+            "[NAVIGATOR-SMOKE] https.required_cases.passed=4",
+            "[NAVIGATOR-SMOKE] https.required_cases.failed=0",
+            "[NAVIGATOR-SMOKE] https.required_cases.blocked=0",
+            "[NAVIGATOR-SMOKE] https.required_cases.skipped=0",
             "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
             "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tcp_connect_result=PASS",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.dns_used=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.dns_hostname=prod.guidexos.test",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolved_ip=10.0.2.2",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=controlled-smoke-gateway-map",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.transport_selection=PolicyValidatedTlsHttps",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.http_status=200",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.certificate_validated=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.hostname_validated=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=0",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.body_bounded=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.expected_content=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.transport_selection=PolicyValidatedTlsHttps",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.attempted=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.tcp_connect=success",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.validation=failure",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.hostname_validation=failure",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.fault_mode=None",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.final_url=http://10.0.2.2:8080/navigator-smoke/insecure-downgrade",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.redirect_count=1",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.plain_tcp_connect_attempts=0",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.tls_tcp_connect_attempts=1",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.transport_selection=BlockedPolicy",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.tls_status=PolicyBlocked",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.error=HTTPS downgrade redirect blocked",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS"
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsExplicitPolicyTrustMismatchRegexChecks -Extra @{
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_manifest_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_sha256=<64 hex>"
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_computed_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_computed_sha256=<64 hex>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.body_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated.body_bytes=<positive bounded byte count>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.parsed_blocks=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated.parsed_blocks=<positive block count>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.protocol=TLSv1\.[23]' = "[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=<TLSv1.2 or TLSv1.3>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.cipher_suite=.+' = "[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=<non-empty cipher suite>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated_wrong_host\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.verify_flags=<positive rejection flags>"
         })
     },
     [pscustomobject]@{
@@ -1877,6 +2003,266 @@ if ($resolvedCandidateBundlePath) {
 
 Write-Host "Kernel smoke scenario selection: group=$effectiveScenarioGroup count=$($selectedScenarios.Count)"
 
+$qualificationCompileDefinitions = @(
+    'GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE',
+    'GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE',
+    'GXOS_KERNEL_TEXT_WRITE_GUARD'
+)
+
+function Get-NavigatorHttpsSourceFingerprint {
+    $relativePaths = @(
+        'kernel/Makefile',
+        'kernel/core/kernel_apps.cpp',
+        'kernel/core/dns.cpp',
+        'kernel/core/ipv4.cpp',
+        'kernel/core/tcp.cpp',
+        'guide_web_http.cpp',
+        'gxos_tls_foundation.cpp',
+        'guidexos/mbedtls_sources.mk',
+        'guidexos/mbedtls_config.h',
+        'scripts/smoke-navigator-kernel.ps1',
+        'scripts/navigator_kernel_http_server.py',
+        'scripts/generate-wallpaper-pack.ps1',
+        'scripts/fixtures/navigator-validated-root-ca-bundle.pem',
+        'scripts/fixtures/navigator-policy-prod.guidexos.test.crt',
+        'scripts/fixtures/navigator-policy-prod.guidexos.test.key'
+    )
+    $rows = foreach ($relativePath in $relativePaths) {
+        $fullPath = Join-Path $Root ($relativePath -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            throw "HTTPS qualification source identity is incomplete: $relativePath is missing."
+        }
+        $hash = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$relativePath=$hash"
+    }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes(($rows -join "`n"))
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-NavigatorHttpsFileHash {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+        throw "HTTPS qualification artifact is missing: $LiteralPath"
+    }
+    return (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Test-NavigatorHttpsActiveKernelMarker {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) { return $false }
+    $bytes = [System.IO.File]::ReadAllBytes($LiteralPath)
+    return [System.Text.Encoding]::ASCII.GetString($bytes).Contains('http.active_cases=enabled')
+}
+
+function Write-NavigatorHttpsQualificationAttestation {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScenarioName,
+        [Parameter(Mandatory = $true)]$StageInfo
+    )
+
+    if (-not (Test-NavigatorHttpsActiveKernelMarker -LiteralPath $kernelImage)) {
+        throw "Isolated kernel is incompatible: required active HTTP smoke marker is missing from $kernelImage"
+    }
+    $manifestPath = $StageInfo.ProductionManifestPath
+    $manifest = $StageInfo.ProductionManifest
+    $caPath = $StageInfo.CaBundlePath
+    $policyPath = $StageInfo.HttpsPolicyPath
+    $attestation = [ordered]@{
+        schema_version = 'guidexos.navigator.https-qualification-artifact.v1'
+        build_id = $buildId
+        source_head = $currentHead
+        source_fingerprint_sha256 = Get-NavigatorHttpsSourceFingerprint
+        scenario = $ScenarioName
+        http_smoke_active = $true
+        compile_definitions = $qualificationCompileDefinitions
+        required_https_cases = $requiredHttpsCaseNames
+        transport = [ordered]@{
+            qemu_machine = 'pc'
+            nic = 'e1000'
+            network = 'user'
+            tls_verification = 'enabled'
+            hostname_validation = 'enabled'
+            plaintext_fallback = 'disabled'
+        }
+        artifacts = [ordered]@{
+            kernel_path = [System.IO.Path]::GetFullPath($kernelImage)
+            kernel_sha256 = Get-NavigatorHttpsFileHash -LiteralPath $kernelImage
+            bootloader_path = [System.IO.Path]::GetFullPath($bootloader)
+            bootloader_sha256 = Get-NavigatorHttpsFileHash -LiteralPath $bootloader
+            ramdisk_path = [System.IO.Path]::GetFullPath($ramdiskImage)
+            ramdisk_sha256 = Get-NavigatorHttpsFileHash -LiteralPath $ramdiskImage
+        }
+        trust = [ordered]@{
+            bundle_path = [System.IO.Path]::GetFullPath($caPath)
+            bundle_sha256 = Get-NavigatorHttpsFileHash -LiteralPath $caPath
+            manifest_path = [System.IO.Path]::GetFullPath($manifestPath)
+            manifest_sha256 = Get-NavigatorHttpsFileHash -LiteralPath $manifestPath
+            manifest_bundle_type = [string]$manifest.bundle_type
+            manifest_production_ready = [string]$manifest.production_ready
+            manifest_test_only = [string]$manifest.test_only
+            root_count = [int]$manifest.root_count
+            source_fixture_sha256 = Get-NavigatorHttpsFileHash -LiteralPath $validatedCaFixture
+        }
+        policy = [ordered]@{
+            path = [System.IO.Path]::GetFullPath($policyPath)
+            sha256 = Get-NavigatorHttpsFileHash -LiteralPath $policyPath
+            content = (Get-Content -LiteralPath $policyPath -Raw).Trim()
+        }
+        ramdisk_staged_files = @($StageInfo.PackOutput | Where-Object { $_ -match '(?i)^\s*added /(?:certs/(?:ca-bundle\.pem|ca-bundle\.manifest)|config/navigator/https-policy\.txt)' })
+    }
+    $json = $attestation | ConvertTo-Json -Depth 8
+    [System.IO.File]::WriteAllText(
+        $qualificationManifestPath,
+        $json + [Environment]::NewLine,
+        [System.Text.UTF8Encoding]::new($false))
+    Write-Host "[NAVIGATOR-HTTPS-ATTESTATION] path=$qualificationManifestPath kernel_sha256=$($attestation.artifacts.kernel_sha256) ramdisk_sha256=$($attestation.artifacts.ramdisk_sha256) ca_sha256=$($attestation.trust.bundle_sha256) policy_sha256=$($attestation.policy.sha256)"
+}
+
+function Assert-NavigatorHttpsQualificationAttestation {
+    if (-not (Test-Path -LiteralPath $qualificationManifestPath -PathType Leaf)) {
+        throw "Reused artifact rejected: missing HTTPS qualification attestation at $qualificationManifestPath; required prerequisite is a manifest-bearing active HTTP smoke build with verified trust configuration."
+    }
+    try {
+        $attestation = Get-Content -LiteralPath $qualificationManifestPath -Raw | ConvertFrom-Json
+    } catch {
+        throw "Reused artifact rejected: HTTPS qualification attestation is unreadable or malformed at $qualificationManifestPath."
+    }
+    if ([string]$attestation.schema_version -ne 'guidexos.navigator.https-qualification-artifact.v1') {
+        throw 'Reused artifact rejected: incompatible HTTPS qualification attestation schema.'
+    }
+    if ([string]$attestation.source_head -ne $currentHead -or
+        [string]$attestation.source_fingerprint_sha256 -ne (Get-NavigatorHttpsSourceFingerprint)) {
+        throw 'Reused artifact rejected: source HEAD or HTTP/TLS/network source fingerprint is stale.'
+    }
+    if ([string]$attestation.scenario -ne 'production_validated' -or
+        $attestation.http_smoke_active -ne $true -or
+        -not (Test-NavigatorHttpsActiveKernelMarker -LiteralPath $kernelImage)) {
+        throw 'Reused artifact rejected: selected kernel does not attest the production_validated active HTTP smoke configuration.'
+    }
+    foreach ($flag in $qualificationCompileDefinitions) {
+        if ($attestation.compile_definitions -notcontains $flag) {
+            throw "Reused artifact rejected: required build configuration is absent: $flag"
+        }
+    }
+    if ([string]$attestation.transport.tls_verification -ne 'enabled' -or
+        [string]$attestation.transport.hostname_validation -ne 'enabled' -or
+        [string]$attestation.transport.plaintext_fallback -ne 'disabled') {
+        throw 'Reused artifact rejected: TLS verification, hostname validation, or fail-closed transport policy is incompatible.'
+    }
+
+    $kernelHash = Get-NavigatorHttpsFileHash -LiteralPath $kernelImage
+    $bootloaderHash = Get-NavigatorHttpsFileHash -LiteralPath $bootloader
+    $ramdiskHash = Get-NavigatorHttpsFileHash -LiteralPath $ramdiskImage
+    if ($kernelHash -ne [string]$attestation.artifacts.kernel_sha256 -or
+        $bootloaderHash -ne [string]$attestation.artifacts.bootloader_sha256 -or
+        $ramdiskHash -ne [string]$attestation.artifacts.ramdisk_sha256) {
+        throw 'Reused artifact rejected: kernel, UEFI loader, or ramdisk hash differs from its qualification identity.'
+    }
+
+    $caPath = Join-Path $wallpaperPackDir 'certs\ca-bundle.pem'
+    $caManifestPath = Join-Path $wallpaperPackDir 'certs\ca-bundle.manifest'
+    $policyPath = Join-Path $wallpaperPackDir 'config\navigator\https-policy.txt'
+    $caHash = Get-NavigatorHttpsFileHash -LiteralPath $caPath
+    $fixtureHash = Get-NavigatorHttpsFileHash -LiteralPath $validatedCaFixture
+    $caManifestHash = Get-NavigatorHttpsFileHash -LiteralPath $caManifestPath
+    $manifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $caManifestPath
+    $policy = if (Test-Path -LiteralPath $policyPath -PathType Leaf) { (Get-Content -LiteralPath $policyPath -Raw).Trim() } else { '' }
+    if ($caHash -ne $fixtureHash -or
+        $caHash -ne [string]$attestation.trust.bundle_sha256 -or
+        $caManifestHash -ne [string]$attestation.trust.manifest_sha256 -or
+        $null -eq $manifest -or
+        [string]$manifest.sha256 -ne $caHash -or
+        [string]$manifest.bundle_type -ne 'production-source' -or
+        [string]$manifest.production_ready -ne 'no' -or
+        [string]$manifest.test_only -ne 'no') {
+        throw 'Reused artifact rejected: required controlled CA bundle or its compatible manifest is missing, stale, or mismatched.'
+    }
+    if ($policy -notmatch '(?im)^production-validated$' -or
+        $policy -match '(?im)^public-https-pilot\s*=\s*enabled$' -or
+        $policy -ne [string]$attestation.policy.content -or
+        (Get-NavigatorHttpsFileHash -LiteralPath $policyPath) -ne [string]$attestation.policy.sha256) {
+        throw 'Reused artifact rejected: required production-validated test policy is missing, stale, or incompatible.'
+    }
+    if ([int]$attestation.trust.root_count -ne 1 -or
+        [string]$attestation.trust.source_fixture_sha256 -ne $fixtureHash) {
+        throw 'Reused artifact rejected: controlled CA fixture identity does not match the attested test-only trust material.'
+    }
+
+    Write-Host "[NAVIGATOR-HTTPS-REUSE] accepted build_id=$($attestation.build_id) active_http=yes trust_sha256=$caHash kernel_sha256=$kernelHash ramdisk_sha256=$ramdiskHash"
+}
+
+function Get-NavigatorHttpsQualificationStageInfo {
+    $manifestPath = Join-Path $wallpaperPackDir 'certs\ca-bundle.manifest'
+    $attestation = Get-Content -LiteralPath $qualificationManifestPath -Raw | ConvertFrom-Json
+    return [pscustomobject]@{
+        ProductionManifestPath = $manifestPath
+        ProductionManifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $manifestPath
+        UserManifestPath = Join-Path $wallpaperPackDir 'config\certs\ca-bundle.manifest'
+        UserManifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath (Join-Path $wallpaperPackDir 'config\certs\ca-bundle.manifest')
+        CaBundlePath = Join-Path $wallpaperPackDir 'certs\ca-bundle.pem'
+        HttpsPolicyPath = Join-Path $wallpaperPackDir 'config\navigator\https-policy.txt'
+        PackOutput = @($attestation.ramdisk_staged_files)
+    }
+}
+
+function Enter-NavigatorQemuExclusiveAdmission {
+    $qemuOwners = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match '^qemu-system-.*\.exe$'
+    })
+    if ($qemuOwners.Count -gt 0) {
+        $owners = ($qemuOwners | ForEach-Object { "PID=$($_.ProcessId) name=$($_.Name) command=$($_.CommandLine)" }) -join '; '
+        throw "QEMU exclusive admission blocked by an existing guest owner: $owners"
+    }
+
+    $script:qemuAdmissionMutex = [System.Threading.Mutex]::new($false, 'Global\guideXOS_QAC_QEMU_EXCLUSIVE')
+    try {
+        $script:qemuAdmissionAcquired = $script:qemuAdmissionMutex.WaitOne(0)
+    } catch [System.Threading.AbandonedMutexException] {
+        $script:qemuAdmissionAcquired = $true
+    }
+    if (-not $script:qemuAdmissionAcquired) {
+        throw 'QEMU exclusive admission blocked: another guideXOS qualification owns the QAC mutex.'
+    }
+
+    $qemuOwners = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match '^qemu-system-.*\.exe$'
+    })
+    if ($qemuOwners.Count -gt 0) {
+        $owners = ($qemuOwners | ForEach-Object { "PID=$($_.ProcessId) name=$($_.Name) command=$($_.CommandLine)" }) -join '; '
+        $script:qemuAdmissionMutex.ReleaseMutex()
+        $script:qemuAdmissionMutex.Dispose()
+        $script:qemuAdmissionAcquired = $false
+        throw "QEMU exclusive admission recheck found a guest owner; no guest was started: $owners"
+    }
+}
+
+function Exit-NavigatorQemuExclusiveAdmission {
+    if ($script:qemuAdmissionAcquired -and $script:qemuAdmissionMutex) {
+        try { $script:qemuAdmissionMutex.ReleaseMutex() } catch { }
+        $script:qemuAdmissionMutex.Dispose()
+        $script:qemuAdmissionAcquired = $false
+    }
+}
+
+if ($ReuseActiveBuild) {
+    try {
+        if ($selectedScenarios.Count -ne 1 -or $selectedScenarios[0].Name -ne 'production_validated') {
+            throw 'Reused HTTPS qualification artifacts are accepted only for the single production_validated scenario.'
+        }
+        Assert-NavigatorHttpsQualificationAttestation
+    } catch {
+        if ($httpsQualificationRequested) {
+            Write-NavigatorHttpsQualificationBlocked -Reason $_.Exception.Message
+        }
+        throw
+    }
+}
+
 foreach ($scenario in $selectedScenarios) {
     # Only an explicitly selected public-pilot scenario may run the local
     # public-pilot fixture. Deterministic production-policy fixtures without a
@@ -1898,7 +2284,9 @@ $activeServers = $null
 
 try {
     foreach ($scenario in $selectedScenarios) {
-        Write-Host "Running kernel smoke scenario '$($scenario.Name)'..."
+        $qualificationOutcomeReported = $false
+        try {
+            Write-Host "Running kernel smoke scenario '$($scenario.Name)'..."
         $enableRealPublicProbeForScenario =
             $realPublicProbeEnabled -and
             $scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and
@@ -1910,25 +2298,33 @@ try {
         $effectiveCandidateRotationIdForScenario = $(if ($effectiveCandidateRotationId) { $effectiveCandidateRotationId } else { $scenarioCandidateRotationId })
         $effectiveCandidateProductionReadyForScenario = $(if ($resolvedCandidateBundlePath) { [bool]$CandidateReviewed } else { $scenarioCandidateProductionReady })
         $effectiveProductionCaSource = $(if ($effectiveCandidateCaSource) { $null } else { $scenario.ProductionCaSource })
-        $stageInfo = Invoke-NavigatorKernelSmokeRamdiskStage -HttpsPolicy $scenario.HttpsPolicy `
-            -HttpsFaultMode $scenario.HttpsFaultMode `
-            -UserCaSource $scenario.UserCaSource `
-            -ProductionCaSource $effectiveProductionCaSource `
-            -CandidateCaSource $effectiveCandidateCaSource `
-            -CandidateRotationId $effectiveCandidateRotationIdForScenario `
-            -CandidateProductionReady:$effectiveCandidateProductionReadyForScenario `
-            -UserManifestMode $(if ($scenario.UserManifestMode) { [string]$scenario.UserManifestMode } else { "normal" }) `
-            -ProductionManifestMode $(if ($scenario.ProductionManifestMode) { [string]$scenario.ProductionManifestMode } else { "normal" }) `
-            -UseSmokeFixture $scenario.UseSmokeFixture `
-            -EnablePersistentNavigation:($scenario.PSObject.Properties.Match("PersistentNavigation").Count -gt 0 -and $scenario.PersistentNavigation) `
-            -EnableRealPublicProbe:$enableRealPublicProbeForScenario `
-            -RequireRealPublicProbe:($enableRealPublicProbeForScenario -and $realPublicProbeRequired) `
-            -RealPublicProbeTarget $(if ($enableRealPublicProbeForScenario) { $realPublicProbeTarget } else { $null }) `
-            -RealPublicProbeCaBundleSource $(if ($enableRealPublicProbeForScenario) { $realPublicProbeCaBundleSource } else { $null })
+        if ($ReuseActiveBuild) {
+            $stageInfo = Get-NavigatorHttpsQualificationStageInfo
+        } else {
+            $stageInfo = Invoke-NavigatorKernelSmokeRamdiskStage -ScenarioName $scenario.Name `
+                -HttpsPolicy $scenario.HttpsPolicy `
+                -HttpsFaultMode $scenario.HttpsFaultMode `
+                -UserCaSource $scenario.UserCaSource `
+                -ProductionCaSource $effectiveProductionCaSource `
+                -CandidateCaSource $effectiveCandidateCaSource `
+                -CandidateRotationId $effectiveCandidateRotationIdForScenario `
+                -CandidateProductionReady:$effectiveCandidateProductionReadyForScenario `
+                -UserManifestMode $(if ($scenario.UserManifestMode) { [string]$scenario.UserManifestMode } else { "normal" }) `
+                -ProductionManifestMode $(if ($scenario.ProductionManifestMode) { [string]$scenario.ProductionManifestMode } else { "normal" }) `
+                -UseSmokeFixture $scenario.UseSmokeFixture `
+                -EnablePersistentNavigation:($scenario.PSObject.Properties.Match("PersistentNavigation").Count -gt 0 -and $scenario.PersistentNavigation) `
+                -EnableRealPublicProbe:$enableRealPublicProbeForScenario `
+                -RequireRealPublicProbe:($enableRealPublicProbeForScenario -and $realPublicProbeRequired) `
+                -RealPublicProbeTarget $(if ($enableRealPublicProbeForScenario) { $realPublicProbeTarget } else { $null }) `
+                -RealPublicProbeCaBundleSource $(if ($enableRealPublicProbeForScenario) { $realPublicProbeCaBundleSource } else { $null })
+            if ($scenario.Name -eq 'production_validated') {
+                Write-NavigatorHttpsQualificationAttestation -ScenarioName $scenario.Name -StageInfo $stageInfo
+            }
+        }
 
         try {
             if ($scenario.PSObject.Properties.Match("PersistentNavigation").Count -gt 0 -and $scenario.PersistentNavigation) {
-                $persistentFixtureEspDir = Join-Path $Root "ESP\\navigator-smoke\\generated"
+                $persistentFixtureEspDir = Join-Path $esp "navigator-smoke\generated"
                 New-Item -ItemType Directory -Force -Path $persistentFixtureEspDir | Out-Null
                 Copy-Item -Path (Join-Path $persistentFixtureDir "*") -Destination $persistentFixtureEspDir -Recurse -Force
                 Write-Host "  staged deterministic persistent Navigator fixtures into ESP FAT root"
@@ -1966,6 +2362,30 @@ try {
                 $runOutput.Contains("[NAVIGATOR-SMOKE] tls_smoke.local_ready=yes")) {
                 $missing += Test-NavigatorKernelSmokeTlsClientHelloEvidence -HttpsLogPath $activeServers.HttpsLog
             }
+            if ($scenario.Name -eq 'production_validated') {
+                $httpsFixtureLog = if (Test-Path -LiteralPath $activeServers.HttpsLog -PathType Leaf) {
+                    Get-Content -LiteralPath $activeServers.HttpsLog -Raw
+                } else { '' }
+                if ($httpsFixtureLog -notmatch '"GET /navigator-policy/ok\.html HTTP/1\.1" 200') {
+                    $missing += 'Controlled HTTPS fixture did not log the expected HTTP/1.1 request and 200 response.'
+                }
+                if ($httpsFixtureLog -notmatch '"GET /navigator-policy/redirect-downgrade HTTP/1\.1" 302') {
+                    $missing += 'Controlled HTTPS fixture did not log the expected downgrade redirect request.'
+                }
+                $qualificationOutcome = Get-NavigatorHttpsQualificationOutcome `
+                    -Attempted $true `
+                    -Output $runOutput `
+                    -RequiredCaseNames $requiredHttpsCaseNames `
+                    -AssertionsPassed ($missing.Count -eq 0)
+                $qualificationOutcomeReported = $true
+                Write-Host ("[NAVIGATOR-HTTPS-QUALIFICATION] outcome={0} required_executed={1} passed={2} failed={3} blocked={4} skipped={5} reason=`"{6}`"" -f `
+                    $qualificationOutcome.Outcome, $qualificationOutcome.Executed, $qualificationOutcome.Passed,
+                    $qualificationOutcome.Failed, $qualificationOutcome.Blocked, $qualificationOutcome.Skipped,
+                    $qualificationOutcome.Reason)
+                if ($qualificationOutcome.Outcome -ne 'PASS') {
+                    $missing += "Required HTTPS qualification outcome was $($qualificationOutcome.Outcome): $($qualificationOutcome.Reason)"
+                }
+            }
             if ($enableRealPublicProbeForScenario) {
                 $probeCheck = Test-NavigatorKernelSmokeRealPublicProbeOutput `
                     -Output $runOutput `
@@ -1993,22 +2413,31 @@ try {
             Stop-NavigatorKernelSmokeServers -Servers $activeServers
             $activeServers = $null
         }
+        } catch {
+            if ($scenario.Name -eq 'production_validated' -and -not $qualificationOutcomeReported) {
+                Write-NavigatorHttpsQualificationBlocked -Reason $_.Exception.Message
+            }
+            throw
+        }
     }
 } finally {
     Stop-NavigatorKernelSmokeServers -Servers $activeServers
-    if ($createdStartup) {
-        Remove-Item $startup -ErrorAction SilentlyContinue
-    }
     Restore-NavigatorKernelSmokeEnvironment
-    Restore-NormalKernelBuild
-    Restore-NavigatorSmokeFileState -State $ramdiskState
     Restore-NavigatorSmokeDirectoryState -State $downloadsState
-    Restore-NavigatorSmokeDirectoryState -State $persistentFixtureEspState
-    Restore-NavigatorSmokeDirectoryState -State $wallpaperPackState
-    Restore-NavigatorSmokeFileState -State $wallpaperPackCaBundleState
     if (Test-Path $oversizedCaFixture) {
         Remove-Item -LiteralPath $oversizedCaFixture -Force -ErrorAction SilentlyContinue
     }
+}
+
+if (@($selectedScenarios | Where-Object { $_.Name -eq 'production_validated' }).Count -eq 0) {
+    $notRunOutcome = Get-NavigatorHttpsQualificationOutcome `
+        -Attempted $false `
+        -Output '' `
+        -RequiredCaseNames $requiredHttpsCaseNames `
+        -AssertionsPassed $false
+    Write-Host ("[NAVIGATOR-HTTPS-QUALIFICATION] outcome={0} required_executed={1} passed={2} failed={3} blocked={4} skipped={5} reason=`"{6}`"" -f `
+        $notRunOutcome.Outcome, $notRunOutcome.Executed, $notRunOutcome.Passed, $notRunOutcome.Failed,
+        $notRunOutcome.Blocked, $notRunOutcome.Skipped, $notRunOutcome.Reason)
 }
 
 if ($scenarioFailures.Count -eq 0) {

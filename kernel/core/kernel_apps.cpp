@@ -10694,6 +10694,7 @@ static void kernel_http_capture_trace_snapshot(const KernelHttpResponse& respons
 }
 
 static KernelHttpResponse s_kernelHttpResponse;
+static bool s_kernelLastSmokeExpectedPolicyContent = false;
 static char s_kernelHttpRaw[kKernelHttpRawLimit + 1];
 // Shared sequential HTTP use keeps this workspace transaction-local by
 // discipline while placing all DEFLATE/Huffman scratch outside the boot stack.
@@ -17193,6 +17194,18 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     }
     NavigatorApp& app = *heapApp;
     app.loadUrl(url);
+    bool hasExpectedPolicyHeading = false;
+    bool hasExpectedPolicyDescription = false;
+    for (int blockIndex = 0; blockIndex < app.m_blockCount; ++blockIndex) {
+        if (strstr(app.m_blocks[blockIndex].text, "Policy Validated TLS OK")) {
+            hasExpectedPolicyHeading = true;
+        }
+        if (strstr(app.m_blocks[blockIndex].text, "explicit HTTPS policy navigation exercised")) {
+            hasExpectedPolicyDescription = true;
+        }
+    }
+    s_kernelLastSmokeExpectedPolicyContent =
+        hasExpectedPolicyHeading && hasExpectedPolicyDescription;
     serial::puts("[NAVIGATOR-CAPTURE] load_returned\n");
     serial::puts("[NAVIGATOR-CONTENT] encoded_body_bytes=");
     serial_put_dec((uint32_t)app.m_metaEncodedBodyBytes);
@@ -18822,6 +18835,9 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
         transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
         &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
     const gxos::GxosTlsLocalHandshakeResult& tlsResult = s_kernelHttpResponse.tlsResult;
+    const bool expectedResponseContent = s_kernelLastSmokeExpectedPolicyContent;
+    const bool boundedResponse = bodyBytes > 0 && bodyBytes <= 256 * 1024 &&
+        !s_kernelHttpResponse.bodyCapHit && !s_kernelHttpResponse.headerCapHit;
 
     const bool contentTypeOk =
         gxos::web::httpSharedEqualsInsensitive(contentType, "text/html") ||
@@ -18844,7 +18860,8 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
             : nav_smoke_text_equals(requestedUrl, url) &&
                 statusCode == 200 &&
                 contentTypeOk &&
-                bodyBytes > 0 &&
+                boundedResponse &&
+                expectedResponseContent &&
                 parsedBlocks > 0 &&
                 redirectCount == 0 &&
                 plainTcpConnectAttempts == 0 &&
@@ -18881,6 +18898,15 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     serial_put_dec((uint32_t)plainTcpConnectAttempts);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_tcp_connect_attempts=");
     serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tcp_connect_result=");
+    serial::puts(tlsResult.tcpConnected ? "PASS" : "FAIL");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_used=");
+    serial::puts(s_kernelHttpResponse.dnsUsed ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_hostname=");
+    serial::puts(s_kernelHttpResponse.dnsHost[0] ? s_kernelHttpResponse.dnsHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolved_ip=");
+    serial::puts(s_kernelHttpResponse.dnsResolvedIp[0] ? s_kernelHttpResponse.dnsResolvedIp : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=controlled-smoke-gateway-map");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=");
     serial_put_dec64((uint64_t)verifyFlags);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.sni_host=");
@@ -18912,6 +18938,10 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     serial::puts(tlsHostnameValidated ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.body_bytes=");
     serial_put_dec((uint32_t)bodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.body_bounded=");
+    serial::puts(boundedResponse ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.expected_content=");
+    serial::puts(expectedResponseContent ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.parsed_blocks=");
     serial_put_dec((uint32_t)parsedBlocks);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=");
@@ -20275,6 +20305,9 @@ static bool printNavigatorPublicPilotDowngradeCase()
 
 static bool printNavigatorHttpSmokeCases()
 {
+    const bool requiredHttpsPolicyEnabled = navigator_https_policy_effectively_enabled(
+        gxos::gxos_validated_https_policy_info());
+    int requiredHttpsCasesPassed = 0;
     // Run the explicitly requested public proof lane before the broad local
     // compatibility matrix.  A later legacy/native-app fault must not erase
     // the evidence for an already-authorized public HTTPS probe.
@@ -20286,11 +20319,32 @@ static bool printNavigatorHttpSmokeCases()
     httpOk = printNavigatorTlsCapabilityContractNegativeCase() && httpOk;
 #endif
     httpOk = printNavigatorLocalTlsBlockedHostCase() && httpOk;
-    httpOk = printNavigatorPolicyValidatedTlsSmokeCase() && httpOk;
-    httpOk = printNavigatorPolicyValidatedRedirectCase() && httpOk;
+    const bool policyValidatedCasePassed = printNavigatorPolicyValidatedTlsSmokeCase();
+    const bool policyValidatedRedirectPassed = printNavigatorPolicyValidatedRedirectCase();
     httpOk = printNavigatorPolicyValidatedScopeBlockedRedirectCase() && httpOk;
-    httpOk = printNavigatorPolicyValidatedWrongHostnameFailureCase() && httpOk;
-    httpOk = printNavigatorPolicyValidatedDowngradeCase() && httpOk;
+    const bool policyValidatedWrongHostPassed = printNavigatorPolicyValidatedWrongHostnameFailureCase();
+    const bool policyValidatedDowngradePassed = printNavigatorPolicyValidatedDowngradeCase();
+    if (requiredHttpsPolicyEnabled) {
+        requiredHttpsCasesPassed += policyValidatedCasePassed ? 1 : 0;
+        requiredHttpsCasesPassed += policyValidatedRedirectPassed ? 1 : 0;
+        requiredHttpsCasesPassed += policyValidatedWrongHostPassed ? 1 : 0;
+        requiredHttpsCasesPassed += policyValidatedDowngradePassed ? 1 : 0;
+    }
+    httpOk = policyValidatedCasePassed && httpOk;
+    httpOk = policyValidatedRedirectPassed && httpOk;
+    httpOk = policyValidatedWrongHostPassed && httpOk;
+    httpOk = policyValidatedDowngradePassed && httpOk;
+    const int requiredHttpsCasesExecuted = requiredHttpsPolicyEnabled ? 4 : 0;
+    serial::puts("[NAVIGATOR-SMOKE] https.required_cases.total=4\n");
+    serial::puts("[NAVIGATOR-SMOKE] https.required_cases.executed=");
+    serial_put_dec((uint32_t)requiredHttpsCasesExecuted);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.required_cases.passed=");
+    serial_put_dec((uint32_t)requiredHttpsCasesPassed);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.required_cases.failed=");
+    serial_put_dec((uint32_t)(requiredHttpsCasesExecuted - requiredHttpsCasesPassed));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.required_cases.blocked=");
+    serial_put_dec((uint32_t)(requiredHttpsPolicyEnabled ? 0 : 4));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.required_cases.skipped=0\n");
     httpOk = printNavigatorPublicPilotDecisionCase() && httpOk;
     httpOk = printNavigatorPublicPilotFixtureCase() && httpOk;
     httpOk = printNavigatorPublicPilotRedirectCase() && httpOk;
@@ -20485,6 +20539,7 @@ void printNavigatorRuntimeSmokeReport()
     bool registered = printNavigatorRuntimeSmokePreamble();
     bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
 #ifdef GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE
+    serial::puts("[NAVIGATOR-SMOKE] http.active_cases=enabled\n");
     bool pointerOk = NavigatorApp::smokeScrollbarPointerInput();
     const bool phase8jRawOk = gxos::gxos_tls_run_phase8j_raw_ecdsa_diagnostics();
     serial::puts(phase8jRawOk
@@ -20504,6 +20559,7 @@ void printNavigatorHttpRuntimeSmokeReport()
     bool registered = printNavigatorRuntimeSmokePreamble();
     bool typographyOk = NavigatorApp::smokeTypographyPhase7A();
     bool pointerOk = NavigatorApp::smokeScrollbarPointerInput();
+    serial::puts("[NAVIGATOR-SMOKE] http.active_cases=enabled\n");
     bool httpOk = printNavigatorHttpSmokeCases();
     serial::puts((registered && typographyOk && pointerOk && httpOk) ? "[NAVIGATOR-SMOKE] result=PASS\n" : "[NAVIGATOR-SMOKE] result=FAIL\n");
     serial::puts("[NAVIGATOR-SMOKE] END\n");

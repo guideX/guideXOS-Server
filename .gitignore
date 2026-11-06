@@ -27,6 +27,7 @@
 /tmp/native-filesystem-contract-test*
 /tmp/native_abi_layout_test-phase-current.exe
 /out/validation/
+/out/navigator-https-qualification/
 /logs
 # Keep the established Mbed TLS vendor tree ignored, but make the exact
 # stb_image dependency visible and reproducible for the PNG/JPEG image path.
