@@ -36,10 +36,35 @@ namespace ia64 {
 namespace context {
 
 // ================================================================
-// Thread context structure
+// Future FP context storage layout
 // ================================================================
 
-// Full thread context (for exceptions/interrupts)
+// IA-64 f0 and f1 are architectural constants. Each mutable FP register is
+// represented by one opaque 128-bit image slot; save/restore instructions are
+// not implemented, so this type defines storage only and is not a live context.
+struct alignas(16) FpRegisterImage {
+    uint64_t low;
+    uint64_t high;
+};
+
+struct alignas(16) FpContextState {
+    FpRegisterImage fr2_to_fr127[126];
+    uint64_t fpsr;
+    uint64_t reserved;
+};
+
+static_assert(sizeof(FpRegisterImage) == 16, "IA-64 FP register image must be 16 bytes");
+static_assert(alignof(FpContextState) == 16, "IA-64 FP context must be 16-byte aligned");
+static_assert(offsetof(FpContextState, fpsr) == 2016, "IA-64 FPSR must follow f2-f127 images");
+static_assert(sizeof(FpContextState) == 2032, "IA-64 FP context layout changed");
+
+// ================================================================
+// Context layout scaffolds; no IA-64 save/restore path is implemented
+// ================================================================
+
+// Incomplete legacy trap-frame sketch. It omits asynchronous scratch state,
+// FP register images, interruption-control state, and NaT side state; it must
+// not be used to resume an exception or interrupt.
 struct FullContext {
     // Preserved general registers (GR4-GR7)
     uint64_t gr4;
@@ -85,7 +110,7 @@ struct FullContext {
     uint64_t pr;
 };
 
-// Minimal thread context (for voluntary context switch)
+// Incomplete voluntary-switch sketch; switch_context is a no-op placeholder.
 struct SwitchContext {
     // Preserved general registers
     uint64_t gr4;
@@ -121,7 +146,7 @@ struct SwitchContext {
 struct ArchThreadData {
     uint64_t kernel_sp;
     SwitchContext* context;
-    void* fpu_state;
+    FpContextState* fpu_state;
     uint64_t tp;          // Thread pointer (GR13)
     uint64_t region_id;   // Region ID for TLB
     uint64_t pt_base;     // Page table base

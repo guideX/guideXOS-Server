@@ -12,9 +12,9 @@ printf '\n[INFO] Repository: %s\n' "$REPO_ROOT"
 
 FP_PROFILE="${IA64_FP_PROFILE:-runtime}"
 case "$FP_PROFILE" in
-    runtime|compile-only) ;;
+    runtime|compile-only|early-exec) ;;
     *)
-        echo "[PROFILE_BLOCKED] Unsupported IA64_FP_PROFILE '$FP_PROFILE' (expected runtime or compile-only)." >&2
+        echo "[PROFILE_BLOCKED] Unsupported IA64_FP_PROFILE '$FP_PROFILE' (expected runtime, compile-only, or early-exec)." >&2
         exit 2
         ;;
 esac
@@ -107,6 +107,12 @@ else
     echo '[TOOLCHAIN_BLOCKED] readelf is required to verify the target ELF.' >&2
     exit 2
 fi
+if command -v "${CROSS}-objdump" >/dev/null 2>&1; then
+    OBJDUMP="${CROSS}-objdump"
+else
+    echo '[TOOLCHAIN_BLOCKED] Target objdump is required for IA-64 static qualification.' >&2
+    exit 2
+fi
 
 RUNTIME_LIBGCC="${IA64_RUNTIME_LIBGCC:-$("$CXX" -print-libgcc-file-name 2>/dev/null || true)}"
 if [[ -n "$RUNTIME_LIBGCC" && ! -f "$RUNTIME_LIBGCC" && -f "$REPO_ROOT/$RUNTIME_LIBGCC" ]]; then
@@ -127,10 +133,13 @@ fi
 PROFILE_FILE="$BUILD_DIR/kernel-build-profile.txt"
 cat > "$PROFILE_FILE" <<EOF
 IA64_FP_PROFILE=$FP_PROFILE
+IA64_BOOT_CONTRACT=$([[ "$FP_PROFILE" == early-exec ]] && echo ski-physical-entry-single-cpu-no-preempt || echo none)
+CPU_COUNT_REQUIREMENT=$([[ "$FP_PROFILE" == early-exec ]] && echo exactly-one-CPU-external-SKI-precondition-runtime-unverified || echo none)
 RUNTIME_QUALIFIED=no
 SCHEDULER_QUALIFIED=no
 INTERRUPT_FP_PRESERVATION=unimplemented
 BOOT_APPROVED=no
+EARLY_EXEC_STATIC_GATES=pending
 IA64_RUNTIME_LIBGCC=$RUNTIME_LIBGCC
 EOF
 
@@ -147,7 +156,10 @@ printf '[INFO] IA-64 FP profile: %s\n' "$FP_PROFILE"
 if [[ "$FP_PROFILE" == compile-only ]]; then
     echo '[QUALIFICATION_BLOCKED] This profile may emit FP instructions in ABI scratch registers f6-f15 and f32-f127.'
     echo '[QUALIFICATION_BLOCKED] It is not valid for simulator, firmware, hypervisor, or guest execution.'
-else
+elif [[ "$FP_PROFILE" == early-exec ]]; then
+    echo '[QUALIFICATION] Ski-only early-exec profile: one entry context, no scheduling, interrupts masked, terminal fail-stop vectors.'
+    echo '[QUALIFICATION_BLOCKED] Static gates do not authorize guest execution; a separate guest-qualification phase is required.'
+elif [[ "$FP_PROFILE" == runtime ]]; then
     echo '[INFO] Runtime compiler profile reserves floating-point registers f2-f127.'
 fi
 printf '[INFO] IA-64 flags: LP64 target ABI, -mlittle-endian -mconstant-gp (profile-specific fixed FP ranges) -Wa,-xexplicit; assembler: -mlp64 -mle -mconstant-gp -xexplicit; linker script: -T arch/ia64/linker.ld\n'
@@ -165,7 +177,9 @@ fi
 
 INSPECTION="$BUILD_DIR/ia64-elf-inspection.txt"
 VALIDATION="$BUILD_DIR/ia64-elf-validation.txt"
+DISASSEMBLY="$BUILD_DIR/ia64-disassembly.txt"
 SHA_FILE="$BUILD_DIR/kernel.elf.sha256"
+MANIFEST_FILE="$BUILD_DIR/ia64-artifact-manifest.json"
 printf '\n[INFO] ELF SHA-256:\n'
 sha256sum "$KERNEL" | tee "$SHA_FILE"
 printf '\n[BUILD] Kernel ELF: %s\n' "$KERNEL"
@@ -173,7 +187,58 @@ printf '[BUILD] Readelf evidence: %s\n' "$INSPECTION"
 printf '[BUILD] SHA-256 record: %s\n' "$SHA_FILE"
 printf '[BUILD] Validation report: %s\n' "$VALIDATION"
 "$READELF" -hSW -lW -rW -sW "$KERNEL" > "$INSPECTION"
+"$OBJDUMP" -dr -C "$KERNEL" > "$DISASSEMBLY"
 printf '\n[INFO] ELF header, sections, segments, relocations, and symbols:\n'
 "$READELF" -hSW -lW -rW "$KERNEL"
 printf '\n[INFO] Independent ELF and target-object validation:\n'
 python3 "$REPO_ROOT/scripts/validate-ia64-elf.py" --elf "$KERNEL" --object-dir "$BUILD_DIR/obj" --repo-root "$REPO_ROOT" --profile "$FP_PROFILE" 2>&1 | tee "$VALIDATION"
+
+if [[ "$FP_PROFILE" == early-exec ]]; then
+    python3 "$REPO_ROOT/scripts/validate-ia64-early-exec.py" \
+        --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
+        2>&1 | tee "$BUILD_DIR/ia64-early-exec-safety-gates.txt"
+    sed -i 's/^EARLY_EXEC_STATIC_GATES=pending$/EARLY_EXEC_STATIC_GATES=pass/' "$PROFILE_FILE"
+else
+    sed -i 's/^EARLY_EXEC_STATIC_GATES=pending$/EARLY_EXEC_STATIC_GATES=not-applicable/' "$PROFILE_FILE"
+fi
+
+python3 - "$KERNEL" "$BUILD_DIR" "$FP_PROFILE" "$MANIFEST_FILE" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+elf = Path(sys.argv[1])
+build_dir = Path(sys.argv[2])
+profile = sys.argv[3]
+manifest_path = Path(sys.argv[4])
+manifest = {
+    "schema": "guidexos-ia64-artifact-v1",
+    "profile": profile,
+    "boot_contract": "ski-physical-entry-single-cpu-no-preempt" if profile == "early-exec" else "none",
+    "cpu_count_requirement": "exactly-one-CPU-external-SKI-precondition-runtime-unverified" if profile == "early-exec" else "none",
+    "fp_register_policy": {
+        "runtime": "all-allocatable-registers-reserved",
+        "compile-only": "abi-preserved-registers-fixed; scratch-registers-available",
+        "early-exec": "abi-preserved-registers-fixed; scratch-registers-available",
+    }[profile],
+    "elf": "bin/kernel.elf",
+    "sha256": hashlib.sha256(elf.read_bytes()).hexdigest(),
+    "static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+    "runtime_qualified": False,
+    "scheduler_qualified": False,
+    "interrupt_fp_preservation": False,
+    "guest_execution_authorized": False,
+}
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+print(f"[INFO] Artifact manifest: {manifest_path}")
+print(f"[INFO] Artifact identity: {profile} sha256={manifest['sha256']}")
+PY
+
+python3 "$REPO_ROOT/scripts/validate-ia64-elf.py" --elf "$KERNEL" \
+    --object-dir "$BUILD_DIR/obj" --repo-root "$REPO_ROOT" \
+    --profile "$FP_PROFILE" --manifest "$MANIFEST_FILE" \
+    2>&1 | tee "$BUILD_DIR/ia64-artifact-manifest-validation.txt"
+
+echo '[BUILD] IA-64 ELF, profile, and artifact metadata validation passed.'
+exit 0

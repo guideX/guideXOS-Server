@@ -191,7 +191,7 @@ void init()
     // Initialize ski simulator console for early output
     ski_console::init();
 
-    // Print boot banner via firmware console
+    // Print boot banner via the Ski simulator console
     ski_console::puts("guideXOS IA-64 kernel init\r\n");
 
     // Verify IVA is set (diagnostic)

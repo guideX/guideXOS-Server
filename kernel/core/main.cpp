@@ -1625,6 +1625,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif // ARCH_SPARC64
 
 #if defined(ARCH_IA64)
+#if defined(GXOS_IA64_EARLY_EXEC_PROFILE)
+    // IA64-2 restricted profile: this target is Ski-specific. Do only the
+    // architecture setup and a bounded console report, then stop the simulator.
+    // Interrupts remain masked; no device, desktop, timer, thread, or scheduler
+    // path is reachable from this entry. Other boot contracts need other paths.
+    kernel::arch::ia64::ski_console::puts("IA64-2 early-exec: SKI single-entry profile\r\n");
+    kernel::arch::ia64::ski_console::puts("Interrupts masked; scheduler and threads unavailable\r\n");
+    kernel::arch::ia64::ski_console::stop();
+    while (1) {
+        kernel::arch::halt();
+    }
+#else
     // ---- IA-64 / ski simulator boot path ----
 
     // arch::init() already set up IVT, RSE, and ski console.
@@ -1649,6 +1661,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::tick();
         kernel::arch::halt();
     }
+#endif // GXOS_IA64_EARLY_EXEC_PROFILE
 #endif // ARCH_IA64
 
 #if defined(ARCH_RISCV64)

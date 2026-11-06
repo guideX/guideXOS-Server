@@ -1,8 +1,8 @@
 /*
  * Itanium (IA-64) Kernel Entry Point
  *
- * Entered by the HP ski simulator (or an EFI stub loader) with
- * the processor in physical mode, interrupts disabled.
+ * Entered through the HP ski simulator's IA-64 ELF loader with the
+ * processor in physical mode, interrupts disabled. This is not a UEFI entry.
  *
  * IA-64 boot differences from other architectures:
  *   - 128 general registers (r0-r127), r0 is hardwired to 0
@@ -169,26 +169,36 @@ _start:
     movl sp = stack_top ;;
 
     /* ---- 4. Set up RSE backing store ----
-     * ar.bspstore = base of backing store region.
-     * Then invalidate all stacked registers.
+     * BSPSTORE and loadrs are only legal in enforced-lazy mode. Empty any
+     * inherited dirty register-stack partition before moving BSPSTORE.
      */
     movl r14 = rse_backing_store_base ;;
-    mov ar.bspstore = r14 ;;
+    mov ar.rsc = 0 ;;
     loadrs ;;
-    mov ar.rsc = 3 ;;       /* eager RSE mode, little-endian */
+    mov ar.bspstore = r14 ;;
+    mov ar.rsc = 3 ;;       /* eager RSE mode, privilege 0, little-endian */
 
-    /* ---- 5. Install IVT ----
+    /* ---- 5. Establish the compiler-required FP environment ----
+     * IA64-2's bounded profile permits ABI scratch FP registers, including
+     * f32-f127. Do not inherit firmware/SKI disable bits or FPSR controls.
+     */
+    rsm psr.dfl | psr.dfh ;;
+    srlz.d ;;
+    movl r14 = 0x0009804c0270033f ;;
+    mov.m ar.fpsr = r14 ;;
+
+    /* ---- 6. Install IVT ----
      * Write the IVT base address to cr.iva, then serialize.
      */
     movl r14 = ia64_ivt ;;
     mov cr.iva = r14 ;;
     srlz.i ;;
 
-    /* ---- 6. Initialize ski console via SSC ---- */
+    /* ---- 7. Initialize ski console via SSC ---- */
     mov r15 = SSC_CONSOLE_INIT ;;
     break.i 0x80000 ;;
 
-    /* ---- 7. Clear BSS section ---- */
+    /* ---- 8. Clear BSS section ---- */
     movl r14 = __bss_start
     movl r15 = __bss_end
     mov r16 = 0 ;;
@@ -198,7 +208,7 @@ clear_bss:
 (p7) st8 [r14] = r16, 8
 (p7) br.cond.dptk clear_bss ;;
 
-    /* ---- 8. Call kernel_main(0, 0) ----
+    /* ---- 9. Call kernel_main(0, 0) ----
      * IA-64 C calling convention: first two args in out0, out1.
      * Use alloc to create a register frame with 2 output registers.
      */

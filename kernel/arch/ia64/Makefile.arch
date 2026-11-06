@@ -37,18 +37,24 @@ endif
 # The default profile reserves every allocatable FP register because the
 # kernel has no async interrupt or thread-switch FP save/restore path. GCC
 # 13.5 currently ICEs on integer high-part multiply with that reservation.
-# The separate compile-only profile frees the ABI scratch ranges f6-f15 and
-# f32-f127 while keeping callee-saved f2-f5 and f16-f31 fixed. Its ELF is not
-# runtime-qualified and the IA-64 runner rejects it.
+# The separate compile-only and early-exec profiles free the ABI scratch
+# ranges f6-f15 and f32-f127 while keeping callee-saved f2-f5 and f16-f31
+# fixed. Early-exec compiles a Ski-only single-entry path; it is still blocked
+# from execution pending a separately authorized guest-qualification phase.
 IA64_FP_PROFILE ?= runtime
 ifeq ($(IA64_FP_PROFILE),runtime)
     ARCH_CFLAGS := -mlittle-endian -mconstant-gp -mfixed-range=f2-f127 -Wa,-xexplicit
-    ARCH_LDFLAGS := --defsym=__ia64_compile_only_profile=0
-else ifeq ($(IA64_FP_PROFILE),compile-only)
+    ARCH_LDFLAGS := --defsym=__ia64_compile_only_profile=0 --defsym=__ia64_early_exec_profile=0
+else ifneq ($(filter $(IA64_FP_PROFILE),compile-only early-exec),)
     ARCH_CFLAGS := -mlittle-endian -mconstant-gp -mfixed-range=f2-f5,f16-f31 -Wa,-xexplicit
-    ARCH_LDFLAGS := --defsym=__ia64_compile_only_profile=1
+    ifeq ($(IA64_FP_PROFILE),compile-only)
+        ARCH_LDFLAGS := --defsym=__ia64_compile_only_profile=1 --defsym=__ia64_early_exec_profile=0
+    else
+        ARCH_CFLAGS += -DGXOS_IA64_EARLY_EXEC_PROFILE=1
+        ARCH_LDFLAGS := --defsym=__ia64_compile_only_profile=0 --defsym=__ia64_early_exec_profile=1
+    endif
 else
-    $(error Unsupported IA64_FP_PROFILE '$(IA64_FP_PROFILE)' (expected runtime or compile-only))
+    $(error Unsupported IA64_FP_PROFILE '$(IA64_FP_PROFILE)' (expected runtime, compile-only, or early-exec))
 endif
 
 ASFLAGS := -mlp64 -mle -mconstant-gp -xexplicit

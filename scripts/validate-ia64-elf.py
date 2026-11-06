@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import re
 import struct
@@ -151,8 +152,55 @@ class Elf64:
         return next((section for section in self.sections if section["name"] == name), None)
 
 
+def check_artifact_manifest(path: Path, manifest_path: Path, profile: str) -> list[str]:
+    errors: list[str] = []
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"ARTIFACT_MANIFEST=FAIL {exc}")
+        return [f"ARTIFACT_MANIFEST: {exc}"]
+
+    actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    expected = {
+        "schema": "guidexos-ia64-artifact-v1",
+        "profile": profile,
+        "elf": "bin/kernel.elf",
+        "cpu_count_requirement": (
+            "exactly-one-CPU-external-SKI-precondition-runtime-unverified"
+            if profile == "early-exec" else "none"),
+        "sha256": actual_hash,
+        "fp_register_policy": {
+            "runtime": "all-allocatable-registers-reserved",
+            "compile-only": "abi-preserved-registers-fixed; scratch-registers-available",
+            "early-exec": "abi-preserved-registers-fixed; scratch-registers-available",
+        }.get(profile),
+        "runtime_qualified": False,
+        "scheduler_qualified": False,
+        "interrupt_fp_preservation": False,
+        "guest_execution_authorized": False,
+    }
+    if profile == "early-exec":
+        expected.update({
+            "boot_contract": "ski-physical-entry-single-cpu-no-preempt",
+            "static_gates": "PASS",
+        })
+    else:
+        expected.update({"boot_contract": "none", "static_gates": "NOT_APPLICABLE"})
+    mismatches = [f"{key}={manifest.get(key)!r}; expected {value!r}"
+                  for key, value in expected.items() if manifest.get(key) != value]
+    expected_elf = manifest_path.parent / "bin" / "kernel.elf"
+    if path.resolve() != expected_elf.resolve():
+        mismatches.append(f"manifest location does not identify {path}")
+    if mismatches:
+        errors.extend(mismatches)
+        print("ARTIFACT_MANIFEST=FAIL " + "; ".join(mismatches))
+    else:
+        print(f"ARTIFACT_MANIFEST=PASS profile={profile} sha256={actual_hash}")
+    return errors
+
+
 def check_kernel(path: Path, object_dir: Path | None, repo_root: Path,
-                 profile: str = "runtime") -> list[str]:
+                 profile: str = "runtime", manifest_path: Path | None = None) -> list[str]:
     elf = Elf64(path)
     errors: list[str] = []
     print(f"IA64_ELF_SHA256={hashlib.sha256(elf.data).hexdigest()}  {path}")
@@ -331,11 +379,18 @@ def check_kernel(path: Path, object_dir: Path | None, repo_root: Path,
                 "68 source slots, exact architectural offsets, and bounded handler symbols")
 
     profile_symbol = elf.symbols.get("__ia64_compile_only_profile")
+    early_symbol = elf.symbols.get("__ia64_early_exec_profile")
     profile_value = 1 if profile == "compile-only" else 0
-    profile_ok = (profile in ("runtime", "compile-only") and profile_symbol is not None and
-                  profile_symbol["value"] == profile_value)
+    early_value = 1 if profile == "early-exec" else 0
+    profile_ok = (profile in ("runtime", "compile-only", "early-exec") and
+                  profile_symbol is not None and profile_symbol["value"] == profile_value and
+                  (profile != "early-exec" or
+                   (early_symbol is not None and early_symbol["value"] == early_value)) and
+                  (early_symbol is None or early_symbol["value"] == early_value))
     profile_detail = (f"profile={profile}; marker={profile_symbol['value']}"
                       if profile_symbol is not None else f"profile={profile}; marker missing")
+    profile_detail += (f"; early_marker={early_symbol['value']}" if early_symbol is not None
+                       else "; early_marker=missing")
     require(profile_ok, "IA64_BUILD_PROFILE", profile_detail)
 
     opd = elf.section(".opd")
@@ -408,6 +463,11 @@ def check_kernel(path: Path, object_dir: Path | None, repo_root: Path,
         require(bool(cpp_objects), "CPP_TARGET_OBJECTS", f"core object count={len(cpp_objects)}")
         require(not object_errors, "OBJECT_ARCHITECTURE", "; ".join(object_errors) if object_errors else "all ELF64 little-endian EM_IA_64")
 
+    if manifest_path is not None:
+        manifest_errors = check_artifact_manifest(path, manifest_path, profile)
+        if manifest_errors:
+            errors.extend(f"ARTIFACT_MANIFEST: {error}" for error in manifest_errors)
+
     if errors:
         print(f"IA64_ELF_VALIDATION=FAIL count={len(errors)}")
         for error in errors:
@@ -422,10 +482,13 @@ def main() -> int:
     parser.add_argument("--elf", required=True, type=Path)
     parser.add_argument("--object-dir", type=Path)
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--profile", choices=("runtime", "compile-only"), default="runtime")
+    parser.add_argument("--profile", choices=("runtime", "compile-only", "early-exec"), default="runtime")
+    parser.add_argument("--manifest", type=Path,
+                        help="verify profile and SHA-256 against an IA64 artifact manifest")
     args = parser.parse_args()
     try:
-        errors = check_kernel(args.elf, args.object_dir, args.repo_root, args.profile)
+        errors = check_kernel(args.elf, args.object_dir, args.repo_root, args.profile,
+                              args.manifest)
     except (OSError, InvalidElf, struct.error) as exc:
         print(f"IA64_ELF_VALIDATION=FAIL error={exc}", file=sys.stderr)
         return 1

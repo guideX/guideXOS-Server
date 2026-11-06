@@ -87,7 +87,7 @@ def tamper_source_offset(source: Path, temp_root: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--elf", required=True, type=Path)
-    parser.add_argument("--profile", choices=("runtime", "compile-only"), required=True)
+    parser.add_argument("--profile", choices=("runtime", "compile-only", "early-exec"), required=True)
     args = parser.parse_args()
 
     if not args.elf.is_file():

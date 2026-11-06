@@ -2,6 +2,8 @@
 
 **Current status (2026-11-05): Outcome A for the IA64-1R2 compile/ELF milestone.** The IVT now has the architectural 68-slot layout, and the complete kernel plus pinned Mbed TLS profile builds into a full IA-64 ELF under an explicitly marked **compile-only** FP profile. Independent ELF validation passes. The default runtime profile still reproduces GCC 13.5.0 reload ICEs, and the compile-only ELF is prohibited from execution. This closes IA64-1's documented IVT and full-ELF build acceptance; it does not claim bootability, runtime safety, working interrupt handlers, or a functional scheduler. Those require a separate runtime qualification phase.
 
+**IA64-2 status (2026-11-05): Outcome A for the static early-execution foundation.** A distinct Ski-only early-exec profile builds and passes target-disassembly and ELF/metadata gates. Its runner remains blocked pending an explicitly authorized guest-qualification phase. It does not qualify a Ski boot, prove the simulator was configured with one CPU, or qualify UEFI, scheduler, interrupt-resume, or general runtime behavior. See [IA64-2 qualification report](IA64-2_QUALIFICATION.md).
+
 Prior audit date: 2026-11-04. Repository: `D:\dev\guideXOSServer_IA64`.
 
 ## IA64-1R1 continuation (2026-11-05, historical snapshot)
