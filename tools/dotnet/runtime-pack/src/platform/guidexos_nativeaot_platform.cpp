@@ -37,20 +37,6 @@ typedef void* LPVOID;
 #include "ObjectLayout.h"
 #endif
 
-#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
-static_assert(offsetof(RuntimeThreadLocals, m_ThreadStateFlags) == 0x38u,
-    "C188 R6 pinned Thread state-flags offset changed");
-static_assert(offsetof(RuntimeThreadLocals, m_pTransitionFrame) == 0x40u,
-    "C188 R6 pinned Thread transition-frame offset changed");
-static_assert(offsetof(RuntimeThreadLocals, m_pDeferredTransitionFrame) == 0x48u,
-    "C188 R6 pinned Thread deferred-frame offset changed");
-static_assert(offsetof(RuntimeThreadLocals, m_pCachedTransitionFrame) == 0x50u,
-    "C188 R6 pinned Thread cached-frame offset changed");
-static_assert(offsetof(RuntimeThreadLocals, m_pNext) == 0x58u,
-    "C188 R6 pinned ThreadStore link offset changed");
-static_assert(offsetof(RuntimeThreadLocals, m_hPalThread) == 0x60u,
-    "C188 R6 pinned PAL thread-handle offset changed");
-#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
 extern "C" uint32_t __cdecl GuideXosNativeAotCaptureRuntimeInstanceBits();
 #endif
@@ -69,6 +55,21 @@ typedef void* LPVOID;
 #if defined(GUIDEXOS_NATIVEAOT_C108_TLS_LIFECYCLE) || defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
 #include "RuntimeInstance.h"
 #endif
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+static_assert(offsetof(RuntimeThreadLocals, m_ThreadStateFlags) == 0x38u,
+    "C188 R6 pinned Thread state-flags offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pTransitionFrame) == 0x40u,
+    "C188 R6 pinned Thread transition-frame offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pDeferredTransitionFrame) == 0x48u,
+    "C188 R6 pinned Thread deferred-frame offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pCachedTransitionFrame) == 0x50u,
+    "C188 R6 pinned Thread cached-frame offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pNext) == 0x58u,
+    "C188 R6 pinned ThreadStore link offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_hPalThread) == 0x60u,
+    "C188 R6 pinned PAL thread-handle offset changed");
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
