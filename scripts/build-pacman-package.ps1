@@ -19,6 +19,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# This script also runs nested from build.ps1 under Windows PowerShell. Load
+# the built-in utility module explicitly so Get-FileHash is available in that
+# child script scope instead of relying on command auto-discovery.
+Import-Module -Name Microsoft.PowerShell.Utility -ErrorAction Stop
+
 $ServerRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
     $SourceRoot = if ([string]::IsNullOrWhiteSpace($env:GUIDEXOS_PACMAN_SOURCE_ROOT)) {
