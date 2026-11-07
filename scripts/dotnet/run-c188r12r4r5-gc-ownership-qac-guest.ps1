@@ -410,7 +410,19 @@ $uefiVarsTemplate = if ($isTransitionAttribution) { Join-Path $qemuShare 'edk2-i
 $uefiVarsImage = if ($isTransitionAttribution) { Join-Path $runRoot 'uefi-vars.fd' } else { $null }
 $runnerScriptSha256 = Get-Sha256 $PSCommandPath
 $attemptPath = if ($isTransitionAttribution) {
-    Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R2R3R1.json'
+    $legacyAttemptPath = Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R2R3R1.json'
+    $candidateAttemptPath = Join-Path $phaseRoot ("guest-launch-attempt-" +
+        [System.IO.Path]::GetFileName($candidate) + '.json')
+    if (Test-Path -LiteralPath $legacyAttemptPath -PathType Leaf) {
+        $legacyAttempt = Get-Content -LiteralPath $legacyAttemptPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace([string]$legacyAttempt.candidateRoot)) {
+            throw 'Existing transition one-boot guard has no candidate identity; refusing to select a new guard.'
+        }
+        $legacyCandidatePath = [System.IO.Path]::GetFullPath([string]$legacyAttempt.candidateRoot)
+        if ([string]::Equals($legacyCandidatePath,$candidate,[System.StringComparison]::OrdinalIgnoreCase)) {
+            $legacyAttemptPath
+        } else { $candidateAttemptPath }
+    } else { $candidateAttemptPath }
 } elseif ($isSafeHandoff) {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R2R4R2R1.json'
 } elseif ($isNativeAllocationFailureAttribution) {
@@ -827,7 +839,7 @@ if ($HostedPreflightOnly) {
         qemuFirmwareCode=$ovmf;qemuFirmwareCodeSha256=$qemuCodeSha256
         uefiVarsTemplate=$uefiVarsTemplate;uefiVarsTemplateSha256=$uefiVarsTemplateSha256
         writableUefiVarsImage=$uefiVarsImage;writableUefiVarsImageSha256=$guestState.UefiVarsImageSha256
-        runRoot=$runRoot;serialLog=$serial;qmpLog=$qmpLog
+        runRoot=$runRoot;serialLog=$serial;qmpLog=$qmpLog;attemptGuardPath=$attemptPath
         qacQueried=$false;qacReserved=$false;qemuLaunched=$false;attemptGuardCreated=$false;guestBoots=0
         qemuArguments=$qemuArgs
     }

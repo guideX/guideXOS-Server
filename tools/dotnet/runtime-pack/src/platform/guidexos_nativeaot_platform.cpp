@@ -111,6 +111,14 @@ const char* threadReadinessEventName(uint32_t event) {
     case GX_THREADSTORE_EVENT_PAL_STACK_BOUNDS: return "pal_stack_bounds";
     case GX_THREADSTORE_EVENT_PAL_STACK_CURRENT: return "pal_stack_current";
     case GX_THREADSTORE_EVENT_DIAGNOSTIC_SUMMARY: return "diagnostic_summary";
+    case GX_THREADSTORE_EVENT_PAL_FLS_ALLOCATE: return "pal_fls_allocate";
+    case GX_THREADSTORE_EVENT_PAL_DETACH_ENTER: return "pal_detach_enter";
+    case GX_THREADSTORE_EVENT_PAL_DETACH_EXISTING: return "pal_detach_existing";
+    case GX_THREADSTORE_EVENT_PAL_DETACH_COMPLETE: return "pal_detach_complete";
+    case GX_THREADSTORE_EVENT_PAL_FLS_GET_CONTEXT: return "pal_fls_get_context";
+    case GX_THREADSTORE_EVENT_PAL_FLS_GET_VALUE: return "pal_fls_get_value";
+    case GX_THREADSTORE_EVENT_PAL_FLS_SET_CONTEXT: return "pal_fls_set_context";
+    case GX_THREADSTORE_EVENT_PAL_FLS_SET_VALUE: return "pal_fls_set_value";
     default: return "unknown";
     }
 }

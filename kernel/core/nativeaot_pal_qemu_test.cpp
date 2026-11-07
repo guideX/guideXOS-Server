@@ -168,6 +168,8 @@ void emitTransitionAttributionRecord() {
     serial::put_hex32(record->currentThreadAttachment);
     serial::puts(" nativeThreadId=");
     serial::put_hex64(record->nativeThreadId);
+    serial::puts(" observedOsThreadId=");
+    serial::put_hex64(record->observedOsThreadId);
     serial::puts(" coop=");
     serial::put_hex32(record->cooperativeState);
     serial::puts(" tlsReady=");
@@ -539,6 +541,10 @@ uint64_t g_lastWorkerThreadId = 0;
 uintptr_t g_lastWorkerStackLow = 0;
 uintptr_t g_lastWorkerStackHigh = 0;
 uintptr_t g_lastWorkerStackCurrent = 0;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+uint32_t g_palFlsTraceSequence = 0u;
+bool g_palFlsTraceOverflowReported = false;
+#endif
 #if defined(GXOS_NATIVEAOT_GC_FIRST_ALLOCATION_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_FIRST_REFILL_QEMU_TEST) || defined(GXOS_NATIVEAOT_GC_SEGMENT_BOUNDARY_QEMU_TEST) || defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST) || defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION)
 uintptr_t g_firstAllocationDiagnosticsAddress = 0;
 
@@ -577,6 +583,27 @@ void threadStoreReadinessKernelMarker(
     serial::put_hex64(raw0);
     serial::puts(" raw1=");
     serial::put_hex64(raw1);
+    serial::puts("\n");
+}
+
+void palFlsReadinessMarker(const char* event, uintptr_t raw0, uintptr_t raw1) {
+    if (g_palFlsTraceSequence >= 32u) {
+        if (!g_palFlsTraceOverflowReported) {
+            g_palFlsTraceOverflowReported = true;
+            serial::puts("[C188R12R4R5R4_FLS] event=overflow raw0=");
+            serial::put_hex32(g_palFlsTraceSequence);
+            serial::puts(" raw1=32\n");
+        }
+        return;
+    }
+    serial::puts("[C188R12R4R5R4_FLS] seq=");
+    serial::put_hex32(g_palFlsTraceSequence++);
+    serial::puts(" event=");
+    serial::puts(event);
+    serial::puts(" raw0=");
+    serial::put_hex64(static_cast<uint64_t>(raw0));
+    serial::puts(" raw1=");
+    serial::put_hex64(static_cast<uint64_t>(raw1));
     serial::puts("\n");
 }
 #endif
@@ -624,11 +651,31 @@ BridgeCell* markerFromValue(void* value) {
     return nullptr;
 }
 
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+BridgeThreadState* threadStateFromCell(const BridgeCell* target) {
+    if (target == nullptr) return nullptr;
+    for (BridgeThreadState& state : g_threadStates) {
+        if (!state.used) continue;
+        for (const BridgeCell& cell : state.cells) {
+            if (&cell == target) return &state;
+        }
+    }
+    return nullptr;
+}
+#endif
+
 void genericDetach(void* value) {
     BridgeCell* cell = markerFromValue(value);
     if (cell == nullptr || cell->slot >= kMaxFlsSlots ||
         !g_flsSlots[cell->slot].active) return;
     void* callbackValue = cell->value;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    BridgeThreadState* owner = threadStateFromCell(cell);
+    palFlsReadinessMarker("pal_fls_detach", reinterpret_cast<uintptr_t>(cell),
+        reinterpret_cast<uintptr_t>(callbackValue));
+    palFlsReadinessMarker("pal_fls_detach_owner",
+        reinterpret_cast<uintptr_t>(owner), owner == nullptr ? 0u : owner->threadId);
+#endif
     cell->value = nullptr;
     if (callbackValue == nullptr || g_flsSlots[cell->slot].callback == nullptr) return;
     ++g_activeCallbacks;
@@ -678,6 +725,12 @@ uint32_t GUIDEXOS_NATIVEAOT_PAL_CALL bridgeFlsAllocate(
         g_flsSlots[index].active = true;
         g_flsSlots[index].genericIndex = generic;
         g_flsSlots[index].callback = callback;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        const uintptr_t genericIdentity =
+            (static_cast<uintptr_t>(generic.slot) << 32u) | generic.generation;
+        palFlsReadinessMarker("pal_fls_allocate", static_cast<uintptr_t>(index),
+            genericIdentity);
+#endif
         return index;
     }
     return 0xFFFFFFFFu;
@@ -685,41 +738,125 @@ uint32_t GUIDEXOS_NATIVEAOT_PAL_CALL bridgeFlsAllocate(
 
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL bridgeFlsRelease(uint32_t index) {
     if (!validFlsIndex(index)) return -1;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    const uintptr_t genericIdentity =
+        (static_cast<uintptr_t>(g_flsSlots[index].genericIndex.slot) << 32u) |
+        g_flsSlots[index].genericIndex.generation;
+#endif
     const gxos::runtime::LocalStorageResult result =
         gxos::runtime::releaseLocalStorageIndex(g_flsSlots[index].genericIndex);
     if (result != gxos::runtime::LocalStorageResult::Success &&
         result != gxos::runtime::LocalStorageResult::CallbackFailed) return -1;
     g_flsSlots[index] = BridgeFlsSlot{};
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    palFlsReadinessMarker("pal_fls_release", static_cast<uintptr_t>(index),
+        static_cast<uintptr_t>(result));
+    palFlsReadinessMarker("pal_fls_release_storage", genericIdentity,
+        static_cast<uintptr_t>(result));
+#endif
     return result == gxos::runtime::LocalStorageResult::Success ? 0 : -2;
 }
 
 void* GUIDEXOS_NATIVEAOT_PAL_CALL bridgeFlsGet(uint32_t index) {
-    if (!validFlsIndex(index)) return nullptr;
+    if (!validFlsIndex(index)) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        palFlsReadinessMarker("pal_fls_get_value", static_cast<uintptr_t>(index), 0u);
+        palFlsReadinessMarker("pal_fls_get_result", static_cast<uintptr_t>(-1), 0u);
+#endif
+        return nullptr;
+    }
     BridgeThreadState* state = currentThreadState();
-    if (state == nullptr) return nullptr;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    const uint64_t currentId = process::current_thread_id();
+    palFlsReadinessMarker("pal_fls_get_context",
+        reinterpret_cast<uintptr_t>(state), static_cast<uintptr_t>(currentId));
+#endif
+    if (state == nullptr) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        palFlsReadinessMarker("pal_fls_get_result",
+            static_cast<uintptr_t>(gxos::runtime::LocalStorageResult::NoCurrentThread), 0u);
+        palFlsReadinessMarker("pal_fls_get_value", static_cast<uintptr_t>(index), 0u);
+#endif
+        return nullptr;
+    }
     void* marker = nullptr;
-    if (gxos::runtime::getLocalStorageValue(
-            g_flsSlots[index].genericIndex, &marker) !=
-        gxos::runtime::LocalStorageResult::Success) return nullptr;
+    const gxos::runtime::LocalStorageResult result =
+        gxos::runtime::getLocalStorageValue(g_flsSlots[index].genericIndex, &marker);
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    const uintptr_t genericIdentity =
+        (static_cast<uintptr_t>(g_flsSlots[index].genericIndex.slot) << 32u) |
+        g_flsSlots[index].genericIndex.generation;
+    palFlsReadinessMarker("pal_fls_get_result", static_cast<uintptr_t>(result),
+        genericIdentity);
+    palFlsReadinessMarker("pal_fls_get_storage", genericIdentity,
+        reinterpret_cast<uintptr_t>(marker));
+#endif
+    if (result != gxos::runtime::LocalStorageResult::Success) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        palFlsReadinessMarker("pal_fls_get_value", static_cast<uintptr_t>(index), 0u);
+#endif
+        return nullptr;
+    }
     BridgeCell* cell = markerFromValue(marker);
-    return cell == nullptr ? nullptr : cell->value;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    BridgeThreadState* owner = threadStateFromCell(cell);
+#endif
+    void* value = cell == nullptr ? nullptr : cell->value;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    palFlsReadinessMarker("pal_fls_get_cell",
+        reinterpret_cast<uintptr_t>(cell), reinterpret_cast<uintptr_t>(owner));
+    palFlsReadinessMarker("pal_fls_get_owner", reinterpret_cast<uintptr_t>(owner),
+        owner == nullptr ? 0u : static_cast<uintptr_t>(owner->threadId));
+    palFlsReadinessMarker("pal_fls_get_value", static_cast<uintptr_t>(index),
+        reinterpret_cast<uintptr_t>(value));
+#endif
+    return value;
 }
 
 int32_t GUIDEXOS_NATIVEAOT_PAL_CALL bridgeFlsSet(uint32_t index, void* value) {
-    if (!validFlsIndex(index)) return -1;
+    if (!validFlsIndex(index)) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        palFlsReadinessMarker("pal_fls_set_value", static_cast<uintptr_t>(index),
+            reinterpret_cast<uintptr_t>(value));
+        palFlsReadinessMarker("pal_fls_set_result", static_cast<uintptr_t>(-1), 0u);
+#endif
+        return -1;
+    }
     BridgeThreadState* state = currentThreadState();
-    if (state == nullptr) return -1;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    const uint64_t currentId = process::current_thread_id();
+    palFlsReadinessMarker("pal_fls_set_context",
+        reinterpret_cast<uintptr_t>(state), static_cast<uintptr_t>(currentId));
+#endif
+    if (state == nullptr) {
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+        palFlsReadinessMarker("pal_fls_set_result",
+            static_cast<uintptr_t>(gxos::runtime::LocalStorageResult::NoCurrentThread), 0u);
+        palFlsReadinessMarker("pal_fls_set_value", static_cast<uintptr_t>(index),
+            reinterpret_cast<uintptr_t>(value));
+#endif
+        return -1;
+    }
     BridgeCell& cell = state->cells[index];
     cell.slot = index;
     cell.value = value;
-    if (value == nullptr) {
-        return gxos::runtime::setLocalStorageValue(
-            g_flsSlots[index].genericIndex, nullptr) ==
-            gxos::runtime::LocalStorageResult::Success ? 0 : -1;
-    }
-    return gxos::runtime::setLocalStorageValue(
-        g_flsSlots[index].genericIndex, &cell) ==
-        gxos::runtime::LocalStorageResult::Success ? 0 : -1;
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    const uintptr_t genericIdentity =
+        (static_cast<uintptr_t>(g_flsSlots[index].genericIndex.slot) << 32u) |
+        g_flsSlots[index].genericIndex.generation;
+#endif
+    const gxos::runtime::LocalStorageResult result =
+        gxos::runtime::setLocalStorageValue(g_flsSlots[index].genericIndex,
+            value == nullptr ? nullptr : &cell);
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    palFlsReadinessMarker("pal_fls_set_cell", reinterpret_cast<uintptr_t>(&cell),
+        reinterpret_cast<uintptr_t>(value));
+    palFlsReadinessMarker("pal_fls_set_storage", genericIdentity,
+        static_cast<uintptr_t>(result));
+    palFlsReadinessMarker("pal_fls_set_value", static_cast<uintptr_t>(index),
+        reinterpret_cast<uintptr_t>(value));
+#endif
+    return result == gxos::runtime::LocalStorageResult::Success ? 0 : -1;
 }
 
 uintptr_t workerEntry(void* raw) {

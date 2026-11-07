@@ -60,14 +60,26 @@ int main() {
     record.currentThreadAttachment = GX_TRANSITION_ATTACHMENT_PRESENT;
     record.threadStateFlags = 1u;
     record.nativeThreadId = record.observedOsThreadId;
-    record.flsCurrentThreadState = GX_TRANSITION_PAL_FLS_MATCHES_CURRENT_THREAD;
     record.transitionFrame = ~static_cast<uintptr_t>(0);
     record.transitionFrameReady = 1u;
     record.transitionFrameAligned = 1u;
-    record.transitionFrameWillBeCreatedByStock = 0u;
     record.cooperativeState = GX_TRANSITION_COOP_PREEMPTIVE;
+    ok &= expectGate(record, GX_TRANSITION_GATE_PAL_FLS,
+        "current ThreadStore thread with empty PAL FLS blocks at gate 6");
+
+    record.flsCurrentThreadState = GX_TRANSITION_PAL_FLS_FOREIGN_THREAD;
+    ok &= expectGate(record, GX_TRANSITION_GATE_PAL_FLS,
+        "current ThreadStore thread with foreign PAL FLS blocks at gate 6");
+
+    record.flsCurrentThreadState = GX_TRANSITION_PAL_FLS_MATCHES_CURRENT_THREAD;
+    record.transitionFrameWillBeCreatedByStock = 0u;
     ok &= expectGate(record, GX_TRANSITION_GATE_NONE,
         "synthetic attached preemptive thread with top-of-stack marker passes");
+
+    record.nativeThreadId = record.observedOsThreadId + 1u;
+    ok &= expectGate(record, GX_TRANSITION_GATE_CURRENT_THREAD_STATE,
+        "attached PAL thread identity must match current ThreadStore OS identity");
+    record.nativeThreadId = record.observedOsThreadId;
 
     record.transitionFrame = 0x3000u;
     record.transitionFrameInStackBounds = 1u;

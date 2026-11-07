@@ -29,13 +29,14 @@ function Hash-File([string]$Path) {
 $headerPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_transition_attribution.h'
 $platformPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_platform.cpp'
 $palPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_pal_minwin_replacement.cpp'
+$kernelPalPath = Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp'
 $candidateBuilderPath = Join-Path $root 'scripts\dotnet\build-c188r12r4r5r1-init-attribution-candidate.ps1'
 $runtimeBuilderPath = Join-Path $root 'tools\dotnet\runtime-pack\build-runtime-pack.ps1'
 $analyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r2r4-safe-handoff.ps1'
 $transitionAnalyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1'
 $safeTestsPath = Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r2r4-safe-handoff.ps1'
 $harnessPath = Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r2r3_transition_attribution_test.cpp'
-foreach ($path in @($headerPath,$platformPath,$palPath,$candidateBuilderPath,$runtimeBuilderPath,
+foreach ($path in @($headerPath,$platformPath,$palPath,$kernelPalPath,$candidateBuilderPath,$runtimeBuilderPath,
         $analyzerPath,$transitionAnalyzerPath,$safeTestsPath,$harnessPath,$CallSiteMapPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required transition fixture input missing: $path" }
 }
@@ -43,6 +44,7 @@ foreach ($path in @($headerPath,$platformPath,$palPath,$candidateBuilderPath,$ru
 $header = Get-Content -LiteralPath $headerPath -Raw
 $platform = Get-Content -LiteralPath $platformPath -Raw
 $pal = Get-Content -LiteralPath $palPath -Raw
+$kernelPal = Get-Content -LiteralPath $kernelPalPath -Raw
 $candidateBuilder = Get-Content -LiteralPath $candidateBuilderPath -Raw
 $runtimeBuilder = Get-Content -LiteralPath $runtimeBuilderPath -Raw
 $safeTestsSource = Get-Content -LiteralPath $safeTestsPath -Raw
@@ -103,7 +105,7 @@ function Write-TransitionFixture([string]$Name,[string[]]$Lines,[string]$MapPath
     return (Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json)
 }
 $fatalRecord = '[C188R12R4R5R2R3_FATAL] valid=1 seq=0000000000000001 snapshot=00000001 attempted=00000001 completed=00000000 gate=00000000 fatal=00000001 reason=50414C06 callSite=00000001 callerRip=0000000000001001 msgState=00000000 msgBytes=00000000 msgTruncated=00000000 originalStatusAvailable=00000000 originalStatus=00000000 firstFailureStage=FFFFFFFF firstFailureStatusAvailable=00000000 firstFailureStatus=00000000 lastSuccess=00000062 initOverflow=00000000 threadOverflow=00000000'
-$stateRecord = '[C188R12R4R5R2R3_STATE] runtime=00000001 rhInitialize=00000001 threadStore=00000001 rawThread=0000000000001000 currentThread=0000000000001000 attachment=00000002 nativeThreadId=0000000000000042 coop=00000001 tlsReady=00000001 tlsIndex=0000000000000000 palFlsIndex=0000000000000001 palFlsValue=0000000000001000 flsState=00000001 stackReady=00000001 stackCurrent=0000000000003000 stackLow=0000000000002000 stackHigh=0000000000004000 frame=FFFFFFFFFFFFFFFF frameReady=00000001 frameAligned=00000001 frameInStack=00000000 stockWillAttach=00000000 gcReady=00000001 module=00000001 codeManager=00000001 modulesNotInitialized=00000001'
+$stateRecord = '[C188R12R4R5R2R3_STATE] runtime=00000001 rhInitialize=00000001 threadStore=00000001 rawThread=0000000000001000 currentThread=0000000000001000 attachment=00000002 nativeThreadId=0000000000000042 observedOsThreadId=0000000000000042 coop=00000001 tlsReady=00000001 tlsIndex=0000000000000000 palFlsIndex=0000000000000001 palFlsValue=0000000000001000 flsState=00000001 stackReady=00000001 stackCurrent=0000000000003000 stackLow=0000000000002000 stackHigh=0000000000004000 frame=FFFFFFFFFFFFFFFF frameReady=00000001 frameAligned=00000001 frameInStack=00000000 stockWillAttach=00000000 gcReady=00000001 module=00000001 codeManager=00000001 modulesNotInitialized=00000001'
 $attributedFailFast = Write-TransitionFixture 'synthetic-attributed-failfast' @(
     $fatalRecord,$stateRecord,'[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000')
 if ($attributedFailFast.classification -ne 'RUNTIME_FAIL_FAST_ATTRIBUTED' -or
@@ -118,10 +120,15 @@ if ($unknownCallsite.classification -ne 'RUNTIME_FAIL_FAST_CALLSITE_UNRESOLVED')
 }
 $blockedRecord = $fatalRecord.Replace('snapshot=00000001 attempted=00000001 completed=00000000 gate=00000000 fatal=00000001 reason=50414C06 callSite=00000001 callerRip=0000000000001001',
     'snapshot=00000002 attempted=00000000 completed=00000000 gate=00000004 fatal=00000000 reason=00000000 callSite=FFFFFFFE callerRip=0000000000000000')
+$palFlsMismatchState = $stateRecord.Replace('palFlsIndex=0000000000000001 palFlsValue=0000000000001000 flsState=00000001','palFlsIndex=0000000000000001 palFlsValue=0000000000000000 flsState=00000000')
+$blockedRecord = $blockedRecord.Replace('gate=00000004','gate=00000006')
 $blocked = Write-TransitionFixture 'synthetic-gate-blocked' @(
-    $blockedRecord,$stateRecord,
-    '[C188R12R4R5R2R3_TRANSITION] result=safe_stop status=00000104 managedEntry=not_reached collection=not_requested runtimeError=none')
-if ($blocked.classification -ne 'TRANSITION_GATE_BLOCKED_SAFE_STOP') {
+    $blockedRecord,$palFlsMismatchState,
+    '[C188R12R4R5R2R3_TRANSITION] result=safe_stop status=00000106 managedEntry=not_reached collection=not_requested runtimeError=none')
+if ($blocked.classification -ne 'TRANSITION_GATE_BLOCKED_SAFE_STOP' -or
+    $blocked.transitionRecord.gate -ne '00000006' -or
+    $blocked.threadAndRuntimeState.flsState -ne '00000000' -or
+    $blocked.threadAndRuntimeState.attachment -ne '00000002') {
     throw 'Synthetic transition preflight failure was not classified as a safe stop.'
 }
 $returnedRecord = ($fatalRecord.Replace('attempted=00000001 completed=00000000',
@@ -179,7 +186,10 @@ Assert-Fixture ($candidateBuilder -match '\[switch\]\$InitializeModulesAttributi
 
 # 4-8. Shared pure evaluator, exercised in the compiled hosted fixture.
 Assert-Fixture (($testOutput -join "`n") -match 'missing ThreadStore publication blocks transition') 'missing ThreadStore publication blocks' 'synthetic'
+Assert-Fixture (($testOutput -join "`n") -match 'current ThreadStore thread with empty PAL FLS blocks at gate 6' -and
+    ($testOutput -join "`n") -match 'current ThreadStore thread with foreign PAL FLS blocks at gate 6') 'attached current thread rejects absent or foreign PAL FLS' 'synthetic gate fixture'
 Assert-Fixture (($testOutput -join "`n") -match 'synthetic attached preemptive thread with top-of-stack marker passes') 'valid attachment-state observation' 'synthetic'
+Assert-Fixture (($testOutput -join "`n") -match 'attached PAL thread identity must match current ThreadStore OS identity') 'PAL and ThreadStore identities must match' 'synthetic gate fixture'
 Assert-Fixture (($testOutput -join "`n") -match 'missing transition frame blocks attached thread') 'missing or malformed transition frame blocks' 'synthetic'
 Assert-Fixture (($testOutput -join "`n") -match 'synthetic candidate RIP resolves to stable source call-site ID') 'fatal-error call-site attribution' 'synthetic map fixture; candidate map is generated at build'
 Assert-Fixture (($testOutput -join "`n") -match 'fixed-size fatal record seals with stable call-site reason') 'bounded message or reason capture' 'synthetic record; runtime uses stable IDs'
@@ -200,6 +210,44 @@ Assert-Fixture ($platform.Contains('record.initTraceOverflow = GuideXosNativeAot
 # 14-15. Shared ordering gate and contradictory trace analyzer regression.
 Assert-Fixture (($testOutput -join "`n") -match 'synthetic stock attachment path passes with zeroed TLS Thread' -and
     $header.Contains('GuideXosTransitionEvaluateGate')) 'successful transition prerequisite ordering' 'synthetic gate fixture'
+Assert-Fixture ($platform -match 'void\* palFlsValue = GuideXosNativeAotTransitionGetPalFlsValue\(\)' -and
+    $platform.Contains('record.flsCurrentThread = reinterpret_cast<uintptr_t>(palFlsValue)') -and
+    $pal -match 'return g_flsIndex == kFlsOutOfIndexes\s*\?\s*nullptr\s*:\s*guidexos_nativeaot_pal_fls_get\(g_flsIndex\)') 'gate observes the allocated PAL FLS slot through the active PAL getter'
+
+# PAL slot and ThreadStore publication contract: all accesses must use the same slot and current execution context.
+$palInitBody = [regex]::Match($pal,'(?s)PalInit\(\)\s*\{(?<body>.*?)\n\}')
+$palAttachBody = [regex]::Match($pal,'(?s)PalAttachThread\(void\* thread\)\s*\{(?<body>.*?)\n\}')
+$palDetachBody = [regex]::Match($pal,'(?s)PalDetachThread\(void\* thread\)\s*\{(?<body>.*?)\n\}')
+Assert-Fixture ($palInitBody.Success -and
+    $palInitBody.Groups['body'].Value.IndexOf('guidexos_nativeaot_pal_fls_free(g_flsIndex)',[StringComparison]::Ordinal) -lt
+        $palInitBody.Groups['body'].Value.IndexOf('guidexos_nativeaot_pal_fls_alloc(FiberDetachCallback)',[StringComparison]::Ordinal) -and
+    $palInitBody.Groups['body'].Value.Contains('GX_THREADSTORE_EVENT_PAL_FLS_ALLOCATE')) 'repeated PAL initialization releases the old slot before allocating the current slot'
+Assert-Fixture ($palAttachBody.Success -and
+    $palAttachBody.Groups['body'].Value.IndexOf('guidexos_nativeaot_pal_fls_get(g_flsIndex)',[StringComparison]::Ordinal) -lt
+        $palAttachBody.Groups['body'].Value.IndexOf('guidexos_nativeaot_pal_fls_set(g_flsIndex, thread)',[StringComparison]::Ordinal) -and
+    $palAttachBody.Groups['body'].Value.Contains('GX_THREADSTORE_EVENT_PAL_ATTACH_COMPLETE')) 'PAL attach reads then writes the same allocated slot before reporting completion'
+Assert-Fixture ($palAttachBody.Success -and
+    $palAttachBody.Groups['body'].Value.Contains('guidexos_nativeaot_pal_fail_fast(0x50414C02u)') -and
+    $palAttachBody.Groups['body'].Value.Contains('guidexos_nativeaot_pal_fail_fast(0x50414C03u)') -and
+    $palDetachBody.Success -and
+    $palDetachBody.Groups['body'].Value.Contains('guidexos_nativeaot_pal_fail_fast(0x50414C04u)')) 'foreign existing attachment, failed assignment, and stale detach are rejected'
+Assert-Fixture ($palDetachBody.Success -and
+    $palDetachBody.Groups['body'].Value.Contains('guidexos_nativeaot_pal_fls_set(g_flsIndex, nullptr)') -and
+    $palDetachBody.Groups['body'].Value.Contains('GX_THREADSTORE_EVENT_PAL_DETACH_COMPLETE') -and
+    $kernelPal.Contains('threadstore::detachCurrentThread()')) 'PAL teardown clears its slot and worker teardown calls ThreadStore detach'
+Assert-Fixture ($kernelPal.Contains('const uint64_t id = process::current_thread_id();') -and
+    $kernelPal -match '(?s)currentThreadState\(\).*?process::current_thread_id\(\).*?state\.threadId == id' -and
+    $kernelPal.Contains('table->fls_get = bridgeFlsGet') -and
+    $kernelPal.Contains('table->fls_set = bridgeFlsSet') -and
+    $kernelPal.Contains('getLocalStorageValue(g_flsSlots[index].genericIndex, &marker)') -and
+    $kernelPal.Contains('markerFromValue(marker)') -and
+    $kernelPal -match '(?s)setLocalStorageValue\(g_flsSlots\[index\]\.genericIndex,\s*value == nullptr \? nullptr : &cell\)' -and
+    $kernelPal.Contains('palFlsReadinessMarker("pal_fls_get_context"') -and
+    $kernelPal.Contains('palFlsReadinessMarker("pal_fls_get_storage"') -and
+    $kernelPal.Contains('palFlsReadinessMarker("pal_fls_get_owner"') -and
+    $kernelPal.Contains('palFlsReadinessMarker("pal_fls_set_context"') -and
+    $kernelPal.Contains('palFlsReadinessMarker("pal_fls_set_cell"') -and
+    $kernelPal.Contains('palFlsReadinessMarker("pal_fls_set_storage"')) 'diagnostic PAL FLS resolves the actual QEMU bridge context and records get/set identity'
 Assert-Fixture (@($safeTestResults.analyzerCases) -contains 'malformed or contradictory milestone ordering' -and
     [int]$safeTestResults.analyzerCaseCount -ge 22) 'malformed or contradictory stage sequence rejected' 'synthetic analyzer fixture'
 

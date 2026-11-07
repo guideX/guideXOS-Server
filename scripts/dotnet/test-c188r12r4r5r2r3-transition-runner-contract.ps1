@@ -37,6 +37,11 @@ foreach ($path in @($runnerPath,$candidateManifestPath,$inventoryPath)) {
 }
 $manifestHashBefore = Get-Hash $candidateManifestPath
 $inventoryHashBefore = Get-Hash $inventoryPath
+$candidateInventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$candidateInventoryFileCount = [int]$candidateInventory.fileCount
+if ($candidateInventoryFileCount -le 0 -or $candidateInventoryFileCount -ne @($candidateInventory.files).Count) {
+    throw 'Candidate integrity inventory has no positive, self-consistent file count.'
+}
 $sourceRamdisk = Join-Path $root 'ESP\ramdisk.img'
 $sourceRamdiskHashBefore = Get-Hash $sourceRamdisk
 $qemuCode = 'C:\Program Files\qemu\share\edk2-x86_64-code.fd'
@@ -59,9 +64,14 @@ try {
     if ($null -eq $preflightLine) { throw 'Runner hosted preflight did not emit its manifest path.' }
     $preflightPath = $preflightLine -replace '^C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT_MANIFEST=',''
     $hosted = Get-Content -LiteralPath $preflightPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $expectedCandidateAttemptPath = Join-Path $phaseRoot ("guest-launch-attempt-" +
+        [System.IO.Path]::GetFileName($candidate) + '.json')
     Assert-Contract ([string]$hosted.result -ceq 'TRANSITION_PROFILE_HOSTED_PREFLIGHT_PASS' -and
-        [string]$hosted.candidateRoot -ceq $candidate -and [int]$hosted.candidateIntegrityFileCount -eq 1482) `
-        'candidate manifest and 1,482-entry integrity inventory verified'
+        [string]$hosted.candidateRoot -ceq $candidate -and
+        [int]$hosted.candidateIntegrityFileCount -eq $candidateInventoryFileCount) `
+        "candidate manifest and $candidateInventoryFileCount-entry integrity inventory verified"
+    Assert-Contract ([string]$hosted.attemptGuardPath -ceq $expectedCandidateAttemptPath) `
+        'fresh candidate receives its own one-boot guard path'
     Assert-Contract (-not [bool]$hosted.qacQueried -and -not [bool]$hosted.qacReserved -and
         -not [bool]$hosted.qemuLaunched -and -not [bool]$hosted.attemptGuardCreated -and [int]$hosted.guestBoots -eq 0) `
         'hosted preflight cannot query QAC, reserve, create a guard, or launch QEMU'
@@ -145,6 +155,10 @@ try {
         'transition analyzer resolves from the runner directory; candidate metadata hash-pins its identity' 'runner source contract'
     Assert-Contract ($runnerSource -match 'transitionRuntimeStartupObserved=.*rhinitialize_return') `
         'transition run manifest recognizes the observed runtime initialization marker' 'runner source contract'
+    Assert-Contract ($runnerSource.Contains('GetFileName($candidate)') -and
+        $runnerSource.Contains('guest-launch-attempt-C188R12R4R5R2R3R1.json') -and
+        $runnerSource.Contains('legacyAttempt.candidateRoot')) `
+        'candidate-specific guard preserves the prior R2 guard for its original candidate' 'runner source contract'
     $censusIndex = $runnerSource.IndexOf("`$before = Get-QacSnapshot 'qac-before'",[System.StringComparison]::Ordinal)
     $guardIndex = $runnerSource.IndexOf('[System.IO.File]::Open($attemptPath,[System.IO.FileMode]::CreateNew',[System.StringComparison]::Ordinal)
     $launchIndex = $runnerSource.IndexOf('[System.Diagnostics.Process]::Start($psi)',[System.StringComparison]::Ordinal)

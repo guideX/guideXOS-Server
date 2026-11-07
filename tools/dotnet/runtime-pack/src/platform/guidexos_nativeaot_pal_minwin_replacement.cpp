@@ -119,6 +119,12 @@ GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API PalInit() {
     guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_PAL_FLS);
 #endif
     g_flsIndex = guidexos_nativeaot_pal_fls_alloc(FiberDetachCallback);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_FLS_ALLOCATE,
+        static_cast<uintptr_t>(g_flsIndex),
+        g_flsIndex == kFlsOutOfIndexes ? 0u : 1u);
+#endif
     if (g_flsIndex == kFlsOutOfIndexes) {
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
         guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_PAL_FLS, false, g_flsIndex);
@@ -193,13 +199,29 @@ GuideXosNativeAotTransitionGetPalFlsValue(void) {
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT bool GUIDEXOS_NATIVEAOT_PAL_API
 PalDetachThread(void* thread) {
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_DETACH_ENTER,
+        reinterpret_cast<uintptr_t>(thread), static_cast<uintptr_t>(g_flsIndex));
+#endif
     if (g_flsIndex == kFlsOutOfIndexes) return false;
     void* existing = guidexos_nativeaot_pal_fls_get(g_flsIndex);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_DETACH_EXISTING,
+        reinterpret_cast<uintptr_t>(existing), reinterpret_cast<uintptr_t>(thread));
+#endif
     if (existing == nullptr) return false;
     if (existing != thread) {
         guidexos_nativeaot_pal_fail_fast(0x50414C04u);
     }
-    return guidexos_nativeaot_pal_fls_set(g_flsIndex, nullptr) == 0;
+    const int32_t setResult = guidexos_nativeaot_pal_fls_set(g_flsIndex, nullptr);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_PAL_DETACH_COMPLETE,
+        reinterpret_cast<uintptr_t>(thread), static_cast<uintptr_t>(setResult));
+#endif
+    return setResult == 0;
 }
 
 GUIDEXOS_NATIVEAOT_PAL_EXPORT uint64_t PalQueryPerformanceCounter() {
