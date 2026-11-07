@@ -90,6 +90,7 @@ inline void write_cr(uint64_t value)
 // RSE (Register Stack Engine) operations
 void flush_rse();
 uint64_t read_bsp();   // Backing Store Pointer
+// BSPSTORE and RNAT accesses require AR.RSC.MODE=0 (enforced-lazy mode).
 uint64_t read_bspstore();
 void write_bspstore(uint64_t value);
 

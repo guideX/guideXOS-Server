@@ -20,19 +20,17 @@ namespace arch {
 namespace ia64 {
 namespace ski_console {
 
+// Implemented in ski_ssc.s. Keeping the SSC boundary in a normal ABI function
+// prevents an inlined BREAK sequence from overwriting GCC's live stacked
+// registers without a corresponding inline-assembly clobber.
+extern "C" uint64_t guidexos_ski_ssc(uint64_t func, uint64_t arg0);
+
 void ssc(uint64_t func, uint64_t arg0)
 {
 #if GXOS_MSVC_STUB
     (void)func; (void)arg0;
 #else
-    register uint64_t r15 asm("r15") = func;
-    asm volatile (
-        "mov r32 = %1 ;;\n"
-        "break.i 0x80000 ;;\n"
-        :
-        : "r"(r15), "r"(arg0)
-        : "memory"
-    );
+    (void)guidexos_ski_ssc(func, arg0);
 #endif
 }
 
@@ -83,15 +81,7 @@ int getchar()
 #if GXOS_MSVC_STUB
     return -1;
 #else
-    register uint64_t r15 asm("r15") = SSC_GETCHAR;
-    register uint64_t result asm("r8");
-    asm volatile (
-        "break.i 0x80000 ;;\n"
-        : "=r"(result)
-        : "r"(r15)
-        : "memory"
-    );
-    return static_cast<int>(result);
+    return static_cast<int>(guidexos_ski_ssc(SSC_GETCHAR, 0));
 #endif
 }
 

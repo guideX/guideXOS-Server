@@ -82,10 +82,14 @@ class Ia64EarlyExecContractTests(unittest.TestCase):
             self.assertRegex(header, rf"\b{name}\s*=\s*{value}\s*;")
         self.assertRegex(boot, r"(?m)^\.equ SSC_CONSOLE_INIT,\s+20$")
         self.assertRegex(boot, r"(?m)^\.equ SSC_PUTCHAR,\s+31$")
-        self.assertIn('register uint64_t r15 asm("r15") = func;', console)
-        self.assertIn('"mov r32 = %1 ;;\\n"', console)
-        self.assertIn('"break.i 0x80000 ;;\\n"', console)
-        self.assertIn('register uint64_t result asm("r8");', console)
+        ssc_asm = source(ROOT / "kernel/arch/ia64/ski_ssc.s")
+        self.assertIn("guidexos_ski_ssc(func, arg0)", console)
+        self.assertIn("guidexos_ski_ssc(SSC_GETCHAR, 0)", console)
+        self.assertIn("alloc r34 = ar.pfs, 2, 1, 0, 0 ;;", ssc_asm)
+        self.assertIn("mov r15 = r32 ;;", ssc_asm)
+        self.assertIn("mov r32 = r33 ;;", ssc_asm)
+        self.assertIn("break.i 0x80000 ;;", ssc_asm)
+        self.assertIn("mov.i ar.pfs = r34 ;;", ssc_asm)
         self.assertIn("ssc(SSC_EXIT);", console)
 
     def test_fp_policy_has_three_distinct_profiles_and_link_identity(self) -> None:

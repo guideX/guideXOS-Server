@@ -1,0 +1,5 @@
+# Bounded checkpoint at the isolated diagnostic C entry only.
+bs diagnostic_main
+cont
+rd ski-debug-registers.txt
+quit

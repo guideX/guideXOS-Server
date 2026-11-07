@@ -70,12 +70,16 @@ def validate(repo_root: Path, elf: Path, objdump: str) -> list[str]:
           "Ski SSC values match the pinned interface (STOP=0, INIT=20, GETCHAR=21, PUTCHAR=31, EXIT=66)")
 
     console_cpp = (repo_root / "kernel/arch/ia64/ski_console.cpp").read_text(encoding="utf-8")
-    check('register uint64_t r15 asm("r15") = func;' in console_cpp and
-          '"mov r32 = %1 ;;\\n"' in console_cpp and
-          '"break.i 0x80000 ;;\\n"' in console_cpp and
-          'register uint64_t result asm("r8");' in console_cpp and
+    ssc_asm = (repo_root / "kernel/arch/ia64/ski_ssc.s").read_text(encoding="utf-8")
+    check("guidexos_ski_ssc(func, arg0)" in console_cpp and
+          "guidexos_ski_ssc(SSC_GETCHAR, 0)" in console_cpp and
+          "C ABI inputs: in0/r32 = SSC function, in1/r33 = argument 0" in ssc_asm and
+          "alloc r34 = ar.pfs, 2, 1, 0, 0 ;;" in ssc_asm and
+          "mov r15 = r32 ;;" in ssc_asm and "mov r32 = r33 ;;" in ssc_asm and
+          "break.i 0x80000 ;;" in ssc_asm and "mov.i ar.pfs = r34 ;;" in ssc_asm and
+          "br.ret.sptk.many b0 ;;" in ssc_asm and
           "ssc(SSC_EXIT);" in console_cpp,
-          "SKI_SSC_CALL_ABI", "function ID uses r15, arg0 uses r32, return uses r8, exit uses SSC_EXIT")
+          "SKI_SSC_CALL_ABI", "standalone ABI bridge maps r32/r33 to r15/r32 and returns Ski r8")
 
     main = (repo_root / "kernel/core/main.cpp").read_text(encoding="utf-8")
     early_start = main.find("#if defined(GXOS_IA64_EARLY_EXEC_PROFILE)")
@@ -113,23 +117,25 @@ def validate(repo_root: Path, elf: Path, objdump: str) -> list[str]:
               not re.search(r"\bssm\b[^\n]*psr\.i\b", boot_disassembly),
               "STARTUP_DISASSEMBLY", "target startup includes RSE/FP setup (DFL|DFH mask 0xc0000) and no interrupt enable")
         ssc_disassembly = run_disassembly(
-            objdump, elf,
-            "kernel::arch::ia64::ski_console::ssc(unsigned long, unsigned long)",
-        )
+            objdump, elf, "kernel::arch::ia64::ski_console::ssc(unsigned long, unsigned long)")
+        bridge_disassembly = run_disassembly(objdump, elf, "guidexos_ski_ssc")
         putchar_disassembly = run_disassembly(
             objdump, elf, "kernel::arch::ia64::ski_console::putchar(char)")
         getchar_disassembly = run_disassembly(
             objdump, elf, "kernel::arch::ia64::ski_console::getchar()")
         stop_disassembly = run_disassembly(
             objdump, elf, "kernel::arch::ia64::ski_console::stop()")
-        check("mov r15=r32" in ssc_disassembly and "mov r32=r33" in ssc_disassembly and
-              "break.i 0x80000" in ssc_disassembly,
-              "SSC_WRAPPER_DISASSEMBLY", "target wrapper moves function ID to r15 and arg0 to r32 before SSC break")
-        check("mov r15=31" in putchar_disassembly and "break.i 0x80000" in putchar_disassembly and
-              "mov r15=21" in getchar_disassembly and "break.i 0x80000" in getchar_disassembly and
-              "mov r15=66" in stop_disassembly and "break.i 0x80000" in stop_disassembly and
+        check("guidexos_ski_ssc" in ssc_disassembly and
+              "alloc r34=ar.pfs,3,3,0" in bridge_disassembly and
+              "mov r15=r32" in bridge_disassembly and "mov r32=r33" in bridge_disassembly and
+              "break.i 0x80000" in bridge_disassembly and "mov.i ar.pfs=r34" in bridge_disassembly and
+              "br.ret.sptk.many b0" in bridge_disassembly,
+              "SSC_WRAPPER_DISASSEMBLY", "target ABI bridge allocates its input frame, maps registers, restores ar.pfs, and returns through r8")
+        check("guidexos_ski_ssc" in putchar_disassembly and
+              "guidexos_ski_ssc" in getchar_disassembly and
+              "guidexos_ski_ssc" in stop_disassembly and
               "mov r15=20" in boot_disassembly,
-              "SSC_CALL_DISASSEMBLY", "target code emits Ski console-init/putchar/getchar/exit codes")
+              "SSC_CALL_DISASSEMBLY", "console-init/putchar/getchar/exit paths call the standalone SSC bridge")
     except (OSError, RuntimeError) as exc:
         check(False, "TARGET_DISASSEMBLY", str(exc))
 
