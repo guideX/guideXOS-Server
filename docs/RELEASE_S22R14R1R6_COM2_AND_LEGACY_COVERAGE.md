@@ -160,7 +160,7 @@ Before the request, the boot log recorded the expected five mounts (`/`, `/syste
 
 Only after the client result and guest markers passed did the runner record `result pass`. The runner then sent QMP `quit`, observed its acknowledgment, and QAC verified child exit and reservation release. The final QAC inspection for this run reported `Released`, child PID 19364, exit 0, and `childExitVerified=true`. The manifest records `qacExecution.status=released` and `com2Transport.endpoint=127.0.0.1:54177`.
 
-The QAC snapshot taken after release showed this run fully released. A separate `APP_MODEL` acceptance reservation (`585e37effd8e4246a6e7410198c5c023`, child PID `11064`, owner PID `16720`) had started by that time; QAC showed zero foreign processes and zero queued/blocked requests. That concurrent owner was left untouched. Final status/list/queue and inspect captures are under `out/s22r14r1r6-com2-legacy-20261107/postflight/`.
+The immediate post-release snapshot showed this run fully released while a separate `APP_MODEL` acceptance reservation (`585e37effd8e4246a6e7410198c5c023`, child PID `11064`, owner PID `16720`) was active. That concurrent owner was left untouched. At final closeout, QAC was `Online` with zero reservations, managed sessions, QEMU processes, queued requests, or blocked requests; this run's reservation remained `Released`. Final status/list/queue and inspect captures are retained under `out/s22r14r1r6-com2-legacy-20261107/postflight/`, including the `*-final-closeout.txt` snapshots.
 
 ## 8. Independent release blockers
 
