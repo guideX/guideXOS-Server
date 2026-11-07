@@ -876,6 +876,7 @@ $qemuStatusResponse = $null
 $runError = $null
 $serialText = ''
 $guestPass = $false
+$safeHandoffTerminal = $false
 $transitionTerminalSeen = $false
 $releaseVerified = $false
 $during = $null

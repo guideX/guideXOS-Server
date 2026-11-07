@@ -155,6 +155,11 @@ try {
         'transition analyzer resolves from the runner directory; candidate metadata hash-pins its identity' 'runner source contract'
     Assert-Contract ($runnerSource -match 'transitionRuntimeStartupObserved=.*rhinitialize_return') `
         'transition run manifest recognizes the observed runtime initialization marker' 'runner source contract'
+    $safeHandoffTerminalInitializationIndex = $runnerSource.IndexOf('$safeHandoffTerminal = $false',[System.StringComparison]::Ordinal)
+    $admissionTryIndex = $runnerSource.IndexOf("`ntry {",[System.StringComparison]::Ordinal)
+    Assert-Contract ($safeHandoffTerminalInitializationIndex -ge 0 -and
+        $safeHandoffTerminalInitializationIndex -lt $admissionTryIndex) `
+        'blocked admission can write a complete run manifest under strict mode' 'runner source contract'
     Assert-Contract ($runnerSource.Contains('GetFileName($candidate)') -and
         $runnerSource.Contains('guest-launch-attempt-C188R12R4R5R2R3R1.json') -and
         $runnerSource.Contains('legacyAttempt.candidateRoot')) `
