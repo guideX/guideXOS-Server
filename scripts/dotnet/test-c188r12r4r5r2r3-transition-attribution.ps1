@@ -340,6 +340,9 @@ Assert-Fixture ($candidateBuilder -match '\[string\]\$ArtifactRoot' -and
     $candidateBuilder.Contains('BUILD_DIR=$($kernelBuildDir.Replace') -and
     $productionNativeBuilder -match '\[string\]\$ArtifactRoot' -and
     $productionKernelBuilder -match '\[string\]\$ArtifactRoot' -and
+    $productionNativeBuilder.Contains('$matchedPhaseRoots.Length -ne 1') -and
+    $productionKernelBuilder.Contains('$matchedArtifactRoots.Length -ne 1') -and
+    $productionKernelBuilder.Contains('$buildArtifactRoot = $matchedArtifactRoots[0]') -and
     $managedBuilderSource.Contains('$managedArtifactRoot = Join-Path $OutputRoot "artifacts"') -and
     $managedBuilderSource.Contains('Assert-WithinRoot $DirectoryBuildPropsPath $ArtifactRoot') -and
     $runnerSource -match '\[string\]\$ArtifactRoot' -and $runnerContractSource.Contains('-ArtifactRoot $artifactRoot')) 'fresh candidate and runner support isolated artifact roots while preserving candidate containment'

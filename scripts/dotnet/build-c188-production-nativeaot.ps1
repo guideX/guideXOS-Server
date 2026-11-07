@@ -39,12 +39,12 @@ $phaseRoots = @($phaseRoots | ForEach-Object {
     [System.IO.Path]::GetFullPath((Join-Path $configuredArtifactRoot $relativePhase))
 })
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
-$allowedRoot = @($phaseRoots | Where-Object {
+$matchedPhaseRoots = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
     $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
         -not [System.IO.Path]::IsPathRooted($relative)
 } | Select-Object -First 1)
-if ($allowedRoot.Count -eq 0) {
+if ($matchedPhaseRoots.Length -ne 1) {
     throw "BuildRoot must be a unique directory below one of: $($phaseRoots -join ', ')."
 }
 if (Test-Path -LiteralPath $root) {

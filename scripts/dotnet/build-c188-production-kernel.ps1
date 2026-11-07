@@ -38,15 +38,15 @@ $artifactRoots = @($artifactRoots | ForEach-Object {
     [System.IO.Path]::GetFullPath((Join-Path $configuredArtifactRoot $relativePhase))
 })
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
-$artifactRoot = @($artifactRoots | Where-Object {
+$matchedArtifactRoots = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)
     $relative -ne '.' -and -not $relative.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar) -and
         -not [System.IO.Path]::IsPathRooted($relative)
 } | Select-Object -First 1)
-if ($artifactRoot.Count -eq 0) {
+if ($matchedArtifactRoots.Length -ne 1) {
     throw "BuildRoot must be a unique directory below one of: $($artifactRoots -join ', ')."
 }
-$artifactRoot = $artifactRoot[0]
+$buildArtifactRoot = $matchedArtifactRoots[0]
 if (Test-Path -LiteralPath $buildRootFull) {
     throw "Refusing to overwrite an existing C188 kernel build: $buildRootFull"
 }
