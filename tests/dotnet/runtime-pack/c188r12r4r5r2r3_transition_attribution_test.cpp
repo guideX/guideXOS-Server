@@ -50,7 +50,22 @@ int main() {
     bool ok = true;
     auto record = readyRecord();
     ok &= expectGate(record, GX_TRANSITION_GATE_NONE,
-        "synthetic stock attachment path passes with zeroed TLS Thread");
+        "raw Thread present but uninitialized is ready for stock attachment");
+
+    record = readyRecord();
+    record.currentThread = record.rawCurrentThread;
+    record.currentThreadAttachment = GX_TRANSITION_ATTACHMENT_PRESENT;
+    record.threadStateFlags = 1u;
+    record.flsCurrentThread = 0u;
+    record.flsCurrentThreadState = GX_TRANSITION_PAL_FLS_EMPTY;
+    ok &= expectGate(record, GX_TRANSITION_GATE_PAL_FLS,
+        "purported attached flag with null PAL FLS blocks at gate 6");
+
+    record = readyRecord();
+    record.flsCurrentThread = record.rawCurrentThread;
+    record.flsCurrentThreadState = GX_TRANSITION_PAL_FLS_MATCHES_CURRENT_THREAD;
+    ok &= expectGate(record, GX_TRANSITION_GATE_PAL_FLS,
+        "PAL FLS populated before ThreadStore publication blocks at gate 6");
 
     record.threadStoreReady = 0u;
     ok &= expectGate(record, GX_TRANSITION_GATE_THREADSTORE,
@@ -106,7 +121,7 @@ int main() {
     record.threadStateFlags = 8u;
     record.transitionFrameWillBeCreatedByStock = 0u;
     ok &= expectGate(record, GX_TRANSITION_GATE_CURRENT_THREAD_STATE,
-        "nonzero unattached thread flags block stock AttachCurrentThread early return");
+        "initialized but unpublished Thread blocks stock AttachCurrentThread early return");
 
     record = readyRecord();
     record.rhInitializeReady = 0u;

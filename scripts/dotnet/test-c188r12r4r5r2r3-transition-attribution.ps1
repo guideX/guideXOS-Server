@@ -29,6 +29,7 @@ function Hash-File([string]$Path) {
 $headerPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_transition_attribution.h'
 $platformPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_platform.cpp'
 $palPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_pal_minwin_replacement.cpp'
+$palBuilderPath = Join-Path $root 'tools\dotnet\runtime-pack\build-guidexos-nativeaot-pal.ps1'
 $kernelPalPath = Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp'
 $candidateBuilderPath = Join-Path $root 'scripts\dotnet\build-c188r12r4r5r1-init-attribution-candidate.ps1'
 $runtimeBuilderPath = Join-Path $root 'tools\dotnet\runtime-pack\build-runtime-pack.ps1'
@@ -36,7 +37,7 @@ $analyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r2r4-safe-h
 $transitionAnalyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1'
 $safeTestsPath = Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r2r4-safe-handoff.ps1'
 $harnessPath = Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r2r3_transition_attribution_test.cpp'
-foreach ($path in @($headerPath,$platformPath,$palPath,$kernelPalPath,$candidateBuilderPath,$runtimeBuilderPath,
+foreach ($path in @($headerPath,$platformPath,$palPath,$palBuilderPath,$kernelPalPath,$candidateBuilderPath,$runtimeBuilderPath,
         $analyzerPath,$transitionAnalyzerPath,$safeTestsPath,$harnessPath,$CallSiteMapPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required transition fixture input missing: $path" }
 }
@@ -44,6 +45,7 @@ foreach ($path in @($headerPath,$platformPath,$palPath,$kernelPalPath,$candidate
 $header = Get-Content -LiteralPath $headerPath -Raw
 $platform = Get-Content -LiteralPath $platformPath -Raw
 $pal = Get-Content -LiteralPath $palPath -Raw
+$palBuilder = Get-Content -LiteralPath $palBuilderPath -Raw
 $kernelPal = Get-Content -LiteralPath $kernelPalPath -Raw
 $candidateBuilder = Get-Content -LiteralPath $candidateBuilderPath -Raw
 $runtimeBuilder = Get-Content -LiteralPath $runtimeBuilderPath -Raw
@@ -157,18 +159,60 @@ $safeSerial = Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff\q
 $safeReviewedPath = Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery\recovery-analysis\safe-handoff-reviewed-r2r1-final.json'
 $r4Serial = Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4-pal-capacity-fix\qac-guest-r2r2r4-001\serial.log'
 $r4ReviewedPath = Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery\recovery-analysis\prior-transition-failfast-reviewed-r4.json'
-foreach ($path in @($safeSerial,$safeReviewedPath,$r4Serial,$r4ReviewedPath,
+$r4BridgeRun = Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution\qac-guest-transition-attribution-C188R12R4R5R2R3R1-20261107T135044173Z-d2e925c535474d88a45e0eb60a5dbde8'
+$r4BridgeSerial = Join-Path $r4BridgeRun 'serial.log'
+$r4CandidateManifestPath = Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution\candidate-20261107T123816299Z\candidate-manifest.json'
+foreach ($path in @($safeSerial,$safeReviewedPath,$r4Serial,$r4ReviewedPath,$r4BridgeSerial,$r4CandidateManifestPath,
         $ProductionNativeAotManifest,$ProductionNativeAotMap,$ProductionApplicationManifest)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Preserved or production evidence missing: $path" }
 }
 
 $safeSerialHash = Hash-File $safeSerial
 $r4SerialHash = Hash-File $r4Serial
+$r4BridgeSerialHash = Hash-File $r4BridgeSerial
 $safeReviewed = Get-Content -LiteralPath $safeReviewedPath -Raw | ConvertFrom-Json
 $r4Reviewed = Get-Content -LiteralPath $r4ReviewedPath -Raw | ConvertFrom-Json
+$r4Candidate = Get-Content -LiteralPath $r4CandidateManifestPath -Raw | ConvertFrom-Json
+$r4RuntimeManifest = Get-Content -LiteralPath $r4Candidate.runtimePackManifest -Raw | ConvertFrom-Json
+$r4RuntimeSourceRoot = [string]$r4RuntimeManifest.c188R12R4R5R4ThreadStoreReadinessSourceRoot
+$r4AsmOffsetsPath = Join-Path $r4RuntimeSourceRoot 'src\coreclr\nativeaot\Runtime\AsmOffsets.h'
+$r4ThreadHeaderPath = Join-Path $r4RuntimeSourceRoot 'src\coreclr\nativeaot\Runtime\thread.h'
+if (-not (Test-Path -LiteralPath $r4AsmOffsetsPath -PathType Leaf)) { throw "Pinned Thread layout source missing: $r4AsmOffsetsPath" }
+if (-not (Test-Path -LiteralPath $r4ThreadHeaderPath -PathType Leaf)) { throw "Pinned Thread structure source missing: $r4ThreadHeaderPath" }
+$r4AsmOffsets = Get-Content -LiteralPath $r4AsmOffsetsPath -Raw
+$r4ThreadHeader = Get-Content -LiteralPath $r4ThreadHeaderPath -Raw
 $prodRuntime = Get-Content -LiteralPath $ProductionNativeAotManifest -Raw | ConvertFrom-Json
 $prodApplication = Get-Content -LiteralPath $ProductionApplicationManifest -Raw | ConvertFrom-Json
 $prodMap = Get-Content -LiteralPath $ProductionNativeAotMap -Raw
+
+$r4BridgeLines = @(Get-Content -LiteralPath $r4BridgeSerial)
+$r4BridgeEvents = [System.Collections.Generic.List[object]]::new()
+foreach ($line in $r4BridgeLines) {
+    $match = [regex]::Match($line,'C188R12R4R5R4_FLS\] seq=(?<seq>[0-9A-Fa-f]{8}) event=(?<event>\S+) raw0=(?<raw0>[0-9A-Fa-f]{16}) raw1=(?<raw1>[0-9A-Fa-f]{16})')
+    if ($match.Success) {
+        $r4BridgeEvents.Add([ordered]@{
+            sequence=[Convert]::ToUInt32($match.Groups['seq'].Value,16)
+            event=$match.Groups['event'].Value
+            raw0=$match.Groups['raw0'].Value.ToUpperInvariant()
+            raw1=$match.Groups['raw1'].Value.ToUpperInvariant()
+        })
+    }
+}
+$r4BridgeEventNames = @($r4BridgeEvents | ForEach-Object { $_.event })
+$r4BridgeSequences = @($r4BridgeEvents | ForEach-Object { [int]$_.sequence })
+$r4BridgeStateLine = $r4BridgeLines | Where-Object { $_ -match '^\[C188R12R4R5R2R3_STATE\]' } | Select-Object -Last 1
+$r4BridgeTlsLine = $r4BridgeLines | Where-Object { $_ -match '^\[nativeaot-gc-first-allocation\].*tlsBlock=' } | Select-Object -First 1
+$r4BridgeTlsMatch = [regex]::Match([string]$r4BridgeTlsLine,'tlsBlock=(?<block>[0-9A-Fa-f]{16})')
+$r4BridgeThreadMatch = [regex]::Match([string]$r4BridgeStateLine,'rawThread=(?<thread>[0-9A-Fa-f]{16})')
+$r4BridgeThreadIdMatch = [regex]::Match([string]$r4BridgeStateLine,'nativeThreadId=(?<threadId>[0-9A-Fa-f]{16})')
+$r4BridgeOsIdMatch = [regex]::Match([string]$r4BridgeStateLine,'observedOsThreadId=(?<osId>[0-9A-Fa-f]{16})')
+$r4BridgeNativeId = if ($r4BridgeThreadIdMatch.Success) { $r4BridgeThreadIdMatch.Groups['threadId'].Value.ToUpperInvariant() } else { '' }
+$r4BridgeOsId = if ($r4BridgeOsIdMatch.Success) { $r4BridgeOsIdMatch.Groups['osId'].Value.ToUpperInvariant() } else { '' }
+$r4BridgeTlsBlock = [UInt64]0
+$r4BridgeRawThread = [UInt64]0
+if ($r4BridgeTlsMatch.Success) { $r4BridgeTlsBlock = [Convert]::ToUInt64($r4BridgeTlsMatch.Groups['block'].Value,16) }
+if ($r4BridgeThreadMatch.Success) { $r4BridgeRawThread = [Convert]::ToUInt64($r4BridgeThreadMatch.Groups['thread'].Value,16) }
+$r4BridgeOverflow = @($r4BridgeLines | Where-Object { $_ -match 'pal_fls_trace_overflow|initOverflow=00000001|threadOverflow=00000001' }).Count -gt 0
 
 # 1. Prior successful initialization and registration followed by safe stop remain accepted.
 Assert-Fixture ($safeReviewed.result -eq 'SAFE_HANDOFF_INTENTIONALLY_STOPPED' -and
@@ -186,8 +230,12 @@ Assert-Fixture ($candidateBuilder -match '\[switch\]\$InitializeModulesAttributi
 
 # 4-8. Shared pure evaluator, exercised in the compiled hosted fixture.
 Assert-Fixture (($testOutput -join "`n") -match 'missing ThreadStore publication blocks transition') 'missing ThreadStore publication blocks' 'synthetic'
+Assert-Fixture (($testOutput -join "`n") -match 'raw Thread present but uninitialized is ready for stock attachment') 'raw Thread pointer is distinct from initialized Thread state' 'synthetic gate fixture'
 Assert-Fixture (($testOutput -join "`n") -match 'current ThreadStore thread with empty PAL FLS blocks at gate 6' -and
     ($testOutput -join "`n") -match 'current ThreadStore thread with foreign PAL FLS blocks at gate 6') 'attached current thread rejects absent or foreign PAL FLS' 'synthetic gate fixture'
+Assert-Fixture (($testOutput -join "`n") -match 'purported attached flag with null PAL FLS blocks at gate 6' -and
+    ($testOutput -join "`n") -match 'PAL FLS populated before ThreadStore publication blocks at gate 6') 'FLS and attached-state publication must agree in either direction' 'synthetic gate fixture'
+Assert-Fixture (($testOutput -join "`n") -match 'initialized but unpublished Thread blocks stock AttachCurrentThread early return') 'initialized but unpublished Thread cannot enter stock attach early return' 'synthetic gate fixture'
 Assert-Fixture (($testOutput -join "`n") -match 'synthetic attached preemptive thread with top-of-stack marker passes') 'valid attachment-state observation' 'synthetic'
 Assert-Fixture (($testOutput -join "`n") -match 'attached PAL thread identity must match current ThreadStore OS identity') 'PAL and ThreadStore identities must match' 'synthetic gate fixture'
 Assert-Fixture (($testOutput -join "`n") -match 'missing transition frame blocks attached thread') 'missing or malformed transition frame blocks' 'synthetic'
@@ -208,7 +256,7 @@ Assert-Fixture ($platform.Contains('record.initTraceOverflow = GuideXosNativeAot
     $header.Contains('initTraceOverflow') -and $header.Contains('GX_TRANSITION_GATE_')) 'diagnostic overflow remains classified and explicit'
 
 # 14-15. Shared ordering gate and contradictory trace analyzer regression.
-Assert-Fixture (($testOutput -join "`n") -match 'synthetic stock attachment path passes with zeroed TLS Thread' -and
+Assert-Fixture (($testOutput -join "`n") -match 'raw Thread present but uninitialized is ready for stock attachment' -and
     $header.Contains('GuideXosTransitionEvaluateGate')) 'successful transition prerequisite ordering' 'synthetic gate fixture'
 Assert-Fixture ($platform -match 'void\* palFlsValue = GuideXosNativeAotTransitionGetPalFlsValue\(\)' -and
     $platform.Contains('record.flsCurrentThread = reinterpret_cast<uintptr_t>(palFlsValue)') -and
@@ -235,6 +283,21 @@ Assert-Fixture ($palDetachBody.Success -and
     $palDetachBody.Groups['body'].Value.Contains('guidexos_nativeaot_pal_fls_set(g_flsIndex, nullptr)') -and
     $palDetachBody.Groups['body'].Value.Contains('GX_THREADSTORE_EVENT_PAL_DETACH_COMPLETE') -and
     $kernelPal.Contains('threadstore::detachCurrentThread()')) 'PAL teardown clears its slot and worker teardown calls ThreadStore detach'
+Assert-Fixture ($r4Candidate.runtimePackSourceCommit -eq '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -and
+    $r4RuntimeManifest.platformObject.runtimeCellOffset -eq '0x30' -and
+    $r4AsmOffsets -match 'ASM_OFFSET\(\s*28,\s*38,\s*Thread,\s*m_ThreadStateFlags\)' -and
+    -not $platform.Contains('kRuntimeCellInitializedOffset') -and
+    $platform -match 'if\s*\(\*reinterpret_cast<void\*\*>\(cell\)\s*==\s*nullptr\)') 'R4 TLS initialization marker alias is removed and idempotent sentinel is retained'
+Assert-Fixture (-not $platform.Contains('flsCell(') -and -not $platform.Contains('kFlsCellOffset') -and
+    $platform.Contains('guidexos_nativeaot_pal_fls_get(index)') -and
+    $platform.Contains('guidexos_nativeaot_pal_fls_set(index, value)') -and
+    $platform -match 'record\.runtimeFlsCellReady\s*=\s*block\s*!=\s*nullptr\s*&&\s*record\.palFlsIndex\s*<\s*kFlsCellCount' -and
+    $r4ThreadHeader.Contains('PInvokeTransitionFrame* m_pCachedTransitionFrame') -and
+    $r4AsmOffsets -match 'ASM_OFFSET\(\s*30,\s*48,\s*Thread,\s*m_pDeferredTransitionFrame\)') 'platform FLS storage no longer overlays Thread fields and direct FLS shares PAL LocalStorage ownership'
+Assert-Fixture ($palAttachBody.Success -and
+    $palAttachBody.Groups['body'].Value.Contains('#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)') -and
+    $palBuilder.Contains('$commonDefines') -and
+    -not $palBuilder.Contains('$commonDefines /DGUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS')) 'missing conditional PalAttach marker alone remains inconclusive'
 Assert-Fixture ($kernelPal.Contains('const uint64_t id = process::current_thread_id();') -and
     $kernelPal -match '(?s)currentThreadState\(\).*?process::current_thread_id\(\).*?state\.threadId == id' -and
     $kernelPal.Contains('table->fls_get = bridgeFlsGet') -and
@@ -274,6 +337,31 @@ Assert-Fixture ($unknownCallsite.classification -eq 'RUNTIME_FAIL_FAST_CALLSITE_
     $mismatch.classification -eq 'TRANSITION_ATTRIBUTION_INCOMPLETE' -and
     $unlinkedSite.classification -eq 'TRANSITION_ATTRIBUTION_INCOMPLETE') 'transition analyzer rejects unknown, unlinked, or contradictory diagnostic fixtures' 'synthetic'
 
+$expectedR4BridgeEvents = @('pal_fls_allocate','pal_fls_get_context','pal_fls_get_result',
+    'pal_fls_get_storage','pal_fls_get_cell','pal_fls_get_owner','pal_fls_get_value')
+$r4BridgeOrderValid = ($r4BridgeSequences -join ',') -eq '0,1,2,3,4,5,6' -and
+    ($r4BridgeEventNames -join ',') -eq ($expectedR4BridgeEvents -join ',')
+$r4BridgeSetEvents = @($r4BridgeEventNames | Where-Object { $_ -like 'pal_fls_set_*' }).Count
+$r4PalAttachMarkers = @($r4BridgeLines | Where-Object { $_ -match 'event=pal_attach_(enter|existing|complete)' }).Count
+$r4GetResult = @($r4BridgeEvents | Where-Object { $_.sequence -eq 2u }) | Select-Object -First 1
+$r4GetStorage = @($r4BridgeEvents | Where-Object { $_.sequence -eq 3u }) | Select-Object -First 1
+$r4RuntimeCellOffset = [Convert]::ToUInt64(([string]$r4RuntimeManifest.platformObject.runtimeCellOffset -replace '^0x',''),16)
+$r4OldInitMarker = [Convert]::ToUInt64(([string]$r4RuntimeManifest.platformObject.runtimeCellInitializedOffset -replace '^0x',''),16)
+$r4ThreadFlagsOffset = [UInt64]0x38
+$r4TlsAliasProven = $r4BridgeTlsBlock -ne 0 -and $r4BridgeRawThread -eq ($r4BridgeTlsBlock + $r4RuntimeCellOffset) -and
+    ($r4BridgeTlsBlock + $r4RuntimeCellOffset + $r4OldInitMarker) -eq ($r4BridgeRawThread + $r4ThreadFlagsOffset)
+Assert-Fixture ($r4BridgeEvents.Count -eq 7 -and $r4BridgeOrderValid -and -not $r4BridgeOverflow -and
+    $r4Candidate.threadStoreTelemetryStackCapacity -eq 8) 'R4 bridge trace event order is complete with no overflow' 'preserved native serial'
+Assert-Fixture ($r4PalAttachMarkers -eq 0 -and $r4BridgeSetEvents -eq 0 -and
+    $r4BridgeEvents.Count -lt 32 -and
+    $palAttachBody.Groups['body'].Value.Contains('#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)')) 'missing conditional attach marker is inconclusive; bounded active bridge records no FLS setter' 'preserved native serial and source'
+Assert-Fixture ($r4GetResult.raw0 -eq '0000000000000000' -and
+    $r4GetResult.raw1 -eq '0000000100000001' -and $r4GetStorage.raw0 -eq $r4GetResult.raw1 -and
+    $r4GetStorage.raw1 -eq '0000000000000000') 'LocalStorage get succeeds for the allocated slot and generation while its value is null' 'preserved native serial'
+Assert-Fixture ($r4TlsAliasProven -and $r4BridgeStateLine -match 'attachment=00000002' -and
+    $r4BridgeStateLine -match 'palFlsValue=0000000000000000 flsState=00000000' -and
+    $r4BridgeNativeId -eq '0000000000000000' -and $r4BridgeOsId -eq '0000000000000001') 'R4 attached bit aliases the startup marker; zero native ID and frame indicate construction did not run' 'preserved native serial and pinned source'
+
 $results = [ordered]@{
     result='PASS'
     phase='C188R12R4R5R4R5R2R2R4R2R3'
@@ -302,6 +390,19 @@ $results = [ordered]@{
         $unlinkedSite.classification)
     recoveredSafeStop=[ordered]@{ path=$safeSerial; sha256=$safeSerialHash; stages=29; events=93 }
     priorR4FailFast=[ordered]@{ path=$r4Serial; sha256=$r4SerialHash; result=$r4Reviewed.result; reason=$r4Reviewed.failFast.code }
+    r4PalFlsBridgeTrace=[ordered]@{
+        path=$r4BridgeSerial
+        sha256=$r4BridgeSerialHash
+        eventCount=$r4BridgeEvents.Count
+        eventSequences=@($r4BridgeSequences)
+        eventNames=@($r4BridgeEventNames)
+        overflow=$r4BridgeOverflow
+        setterEventCount=$r4BridgeSetEvents
+        localStorageResult=$r4GetResult.raw0
+        localStorageIdentity=$r4GetResult.raw1
+        storedMarker=$r4GetStorage.raw1
+        tlsThreadOffsetAliasProven=$r4TlsAliasProven
+    }
     productionPersistentCompositeLifecycle=[bool]$prodApplication.persistentCompositeLifecycle
     qemuLaunched=$false
     qacReserved=$false

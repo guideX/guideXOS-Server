@@ -2,6 +2,7 @@
 #include "guidexos_nativeaot_allocation_diagnostics.h"
 #include "guidexos_nativeaot_amd64_unwind_primitive.h"
 #include "guidexos_nativeaot_init_trace.h"
+#include "guidexos_nativeaot_pal_contract.h"
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
 #include "guidexos_nativeaot_transition_attribution.h"
 #endif
@@ -312,9 +313,7 @@ constexpr gx_uint32 kFlsOutOfIndexes = 0xFFFFFFFFu;
 constexpr gx_uint32 kGuideXosFlsIndex = 0u;
 constexpr gx_uint32 kTlsVectorOffset = 0x58u;
 constexpr gx_uint32 kRuntimeCellOffset = 0x30u;
-constexpr gx_uint32 kRuntimeCellInitializedOffset = 0x38u;
 constexpr gx_uint32 kRuntimeCellTransitionFrameOffset = 0x40u;
-constexpr gx_uint32 kFlsCellOffset = 0x80u;
 constexpr gx_uint32 kFlsCellCount = 8u;
 constexpr gx_uint32 kMinimumTlsBlockSize = 0x110u;
 
@@ -32701,13 +32700,6 @@ unsigned char* currentTlsBlock() {
     return reinterpret_cast<unsigned char*>(vector[_tls_index]);
 }
 
-void** flsCell(unsigned char* block, gx_uint32 index) {
-    if (block == nullptr || index >= kFlsCellCount) {
-        return nullptr;
-    }
-    return reinterpret_cast<void**>(block + kFlsCellOffset + (index * sizeof(void*)));
-}
-
 unsigned char* runtimeCell(unsigned char* block) {
     if (block == nullptr) {
         return nullptr;
@@ -32893,14 +32885,14 @@ uint32_t captureTransitionSnapshot(
             frame < record.stackHigh ? 1u : 0u;
     }
 
-    void** runtimeFlsCell = flsCell(block, kGuideXosFlsIndex);
     record.flsCurrentThreadState = record.flsCurrentThread == 0u
         ? GX_TRANSITION_PAL_FLS_EMPTY
         : (record.flsCurrentThread == record.rawCurrentThread
             ? GX_TRANSITION_PAL_FLS_MATCHES_CURRENT_THREAD
             : GX_TRANSITION_PAL_FLS_FOREIGN_THREAD);
     record.rhInitializeReady = GuideXosNativeAotInitTraceStagePassed(0x0002u);
-    record.runtimeFlsCellReady = runtimeFlsCell != nullptr ? 1u : 0u;
+    record.runtimeFlsCellReady = block != nullptr && record.palFlsIndex < kFlsCellCount
+        ? 1u : 0u;
     record.gcHeapReady = GuideXosNativeAotInitTraceStagePassed(0x0032u);
     record.osModuleRegistered = g_guideXosNativeAotCodeManagerRegistered ? 1u : 0u;
     record.codeManagerRegistered = record.osModuleRegistered;
@@ -32958,7 +32950,7 @@ void c108RecordTlsIdentity(
     Thread* thread = ThreadStore::GetCurrentThreadIfAvailable();
     unsigned char* block = currentTlsBlock();
     void** tlsVector = reinterpret_cast<void**>(__readgsqword(kTlsVectorOffset));
-    void** fls = flsCell(block, kGuideXosFlsIndex);
+    void* flsValue = guidexos_nativeaot_pal_fls_get(kGuideXosFlsIndex);
     InlinedThreadStaticRoot* root = thread == nullptr
         ? nullptr : thread->GetInlinedThreadStaticList();
     RuntimeInstance* runtime = GetRuntimeInstance();
@@ -32994,8 +32986,7 @@ void c108RecordTlsIdentity(
     c108SerialPutString(" tlsBlock=");
     c108SerialPutHex64(reinterpret_cast<uintptr_t>(block));
     c108SerialPutString(" flsRuntime=");
-    c108SerialPutHex64(fls == nullptr || *fls == nullptr ? 0u :
-        reinterpret_cast<uintptr_t>(*fls));
+    c108SerialPutHex64(reinterpret_cast<uintptr_t>(flsValue));
     c108SerialPutString(" threadStaticStorage=");
     c108SerialPutHex64(thread == nullptr ? 0u :
         reinterpret_cast<uintptr_t>(thread->GetThreadStaticStorage()));
@@ -33460,29 +33451,26 @@ void initializeRuntimeState(unsigned char* block
     // The current image's TLS block is allocated by the host from the
     // generated _tls_start/_tls_end envelope. The minimum is checked by the
     // staging/build scripts; these offsets are within the 0x110-byte proof
-    // block. The cell points into that same per-thread block, so no global
-    // Thread object or host C++ object layout crosses the boundary.
+    // block. The cell points at tls_CurrentThread in that block.
     unsigned char* cell = runtimeCell(block);
-    if (*reinterpret_cast<gx_uint32*>(cell + kRuntimeCellInitializedOffset) == 0u) {
+    // The TLS block +0x30 is tls_CurrentThread. An initialization marker at
+    // cell +0x38 aliases Thread::m_ThreadStateFlags and falsely publishes
+    // TSF_Attached before PAL attachment and Thread::Construct.
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
 #if !defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
-        // RhpNewArray/RhpNewFast consume the current thread's allocation
-        // context at TLS block + 0x30: pointer at +0 and limit at +8.
-        // This is a bounded no-collection allocation context, not a GC heap.
+    // RhpNewArray/RhpNewFast consume the current thread's allocation context
+    // at TLS block + 0x30: pointer at +0 and limit at +8. This is a bounded
+    // no-collection allocation context, not a GC heap.
 #else
-        // The real-GC mode intentionally does not seed or replace the
-        // Thread::m_alloc_context fields.
+    // The real-GC mode intentionally does not seed or replace the
+    // Thread::m_alloc_context fields.
 #endif
 #else
+    // Keep this legacy sentinel idempotent without a per-thread marker.
+    if (*reinterpret_cast<void**>(cell) == nullptr) {
         *reinterpret_cast<void**>(cell) = cell;
-#endif
-        *reinterpret_cast<gx_uint32*>(cell + kRuntimeCellInitializedOffset) = 1u;
-
-        void** value = flsCell(block, g_flsIndex);
-        if (value != nullptr && *value == nullptr) {
-            *value = cell;
-        }
     }
+#endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
     // This is the real NativeAOT startup contract.  InitializeModules owns
@@ -33829,9 +33817,8 @@ void captureThreadStaticIdentity() {
 
     unsigned char* block = currentTlsBlock();
     diagnostics.tlsBlock = reinterpret_cast<uintptr_t>(block);
-    void** fls = flsCell(block, kGuideXosFlsIndex);
-    diagnostics.flsRuntimeIdentity =
-        (fls == nullptr || *fls == nullptr) ? 0u : reinterpret_cast<uintptr_t>(*fls);
+    diagnostics.flsRuntimeIdentity = reinterpret_cast<uintptr_t>(
+        guidexos_nativeaot_pal_fls_get(kGuideXosFlsIndex));
 
     if (thread == nullptr) {
         diagnostics.threadStaticStorage = 0u;
@@ -35472,24 +35459,17 @@ extern "C" __declspec(noinline) int __cdecl guideXosManagedArrayHostLog(void* co
 #endif
 
 extern "C" __declspec(noinline) void* __cdecl FlsGetValue(gx_uint32 index) {
-    if (g_guideXosRuntimeStartupState == 0 || index == kFlsOutOfIndexes) {
+    if (g_guideXosRuntimeStartupState == 0 || index >= kFlsCellCount) {
         return nullptr;
     }
-    return flsCell(currentTlsBlock(), index) == nullptr
-        ? nullptr
-        : *flsCell(currentTlsBlock(), index);
+    return guidexos_nativeaot_pal_fls_get(index);
 }
 
 extern "C" __declspec(noinline) int __cdecl FlsSetValue(gx_uint32 index, void* value) {
-    if (g_guideXosRuntimeStartupState == 0) {
+    if (g_guideXosRuntimeStartupState == 0 || index >= kFlsCellCount) {
         return 0;
     }
-    void** cell = flsCell(currentTlsBlock(), index);
-    if (cell == nullptr) {
-        return 0;
-    }
-    *cell = value;
-    return 1;
+    return guidexos_nativeaot_pal_fls_set(index, value) == 0 ? 1 : 0;
 }
 
 // The NativeAOT image references the import-pointer spelling. Defining the
