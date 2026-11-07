@@ -4,7 +4,9 @@
 
 **IA64-2 status (2026-11-05, historical): Outcome A for the static early-execution foundation.** A distinct Ski-only early-exec profile builds and passes target-disassembly and ELF/metadata gates. It did not qualify a Ski boot, prove a one-CPU simulator configuration, or qualify UEFI, scheduler, interrupt-resume, or general runtime behavior. See [IA64-2 qualification report](IA64-2_QUALIFICATION.md).
 
-**Current IA64-3R1 status (2026-11-06): Outcome A — `SKI_LOADER_READY`.** Pinned Ski 1.5.1 is installed, a privileged system-mode smoke ran and exited through SSC, and Ski's direct system-mode ELF path is qualified with bounded hash/profile/loader checks. The stock Linux loader was rejected after a built-ELF range audit confirmed that it overlaps the guideXOS IVT and text. The corrected guideXOS kernel remains unchanged and unexecuted; its separate guest-execution authorization is still required. See [IA64-3R1 Ski loader qualification](IA64-3R1_SKI_LOADER_QUALIFICATION.md).
+**Current IA64-3R2 status (2026-11-07): Outcome B — `IA64_KERNEL_EXEC_PARTIAL`.** One authorized Ski system-mode run executed the immutable `early-exec` kernel, produced guest console output, reached its SSC exit, and recorded 56,606,488 instructions with zero faults. Guest readbacks reported `IVA = 0x77` and `BSP = 0x77`, conflicting with the configured IVT and RSE ranges, so runtime IVT/RSE state remains unresolved. See [IA64-3R2 first kernel execution](IA64-3R2_FIRST_KERNEL_EXECUTION.md).
+
+**IA64-3R1 status (2026-11-06, historical): Outcome A — `SKI_LOADER_READY`.** Pinned Ski 1.5.1 is installed, a privileged system-mode smoke ran and exited through SSC, and Ski's direct system-mode ELF path is qualified with bounded hash/profile/loader checks. The stock Linux loader was rejected after a built-ELF range audit confirmed that it overlaps the guideXOS IVT and text. The corrected guideXOS kernel had not yet been executed in that phase. See [IA64-3R1 Ski loader qualification](IA64-3R1_SKI_LOADER_QUALIFICATION.md).
 
 Prior audit date: 2026-11-04. Repository: `D:\dev\guideXOSServer_IA64`.
 
