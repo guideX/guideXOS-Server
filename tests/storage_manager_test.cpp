@@ -3,6 +3,7 @@
 #include "../kernel/core/include/kernel/block_device.h"
 #include "../kernel/core/include/kernel/partition_table.h"
 #include "../kernel/core/include/kernel/storage_manager.h"
+#include "../kernel/core/include/kernel/storage_boot_policy.h"
 #include "../kernel/core/include/kernel/disk_initialization.h"
 #include "../kernel/core/include/kernel/partition_operations.h"
 #include "../kernel/core/include/kernel/gpt_repair.h"
@@ -227,6 +228,144 @@ void check(bool condition, const char* label)
         ++g_failures;
         std::fprintf(stderr, "FAIL: %s\n", label);
     }
+}
+
+void run_storage_boot_profile_tests()
+{
+    const int checksBefore = g_checks;
+    const int failuresBefore = g_failures;
+    using guideXOS::StorageBootProfile;
+    static const char normalProfile[] = "storage_profile=normal";
+    static const char reconnaissanceProfile[] =
+        "storage_profile=physical-reconnaissance\r\n";
+    static const char unknownProfile[] = "storage_profile=surprise";
+    check(guideXOS::guidexos_parse_storage_boot_profile(
+              normalProfile, sizeof(normalProfile) - 1u) ==
+              StorageBootProfile::Normal,
+          "bootloader profile parser accepts the explicit normal profile");
+    check(guideXOS::guidexos_parse_storage_boot_profile(
+              reconnaissanceProfile, sizeof(reconnaissanceProfile) - 1u) ==
+              StorageBootProfile::PhysicalReconnaissance,
+          "bootloader profile parser accepts the explicit physical reconnaissance profile");
+    check(guideXOS::guidexos_parse_storage_boot_profile(
+              unknownProfile, sizeof(unknownProfile) - 1u) ==
+              StorageBootProfile::Invalid,
+          "unknown storage profile fails closed");
+    check(guideXOS::guidexos_parse_storage_boot_profile("", 0u) ==
+              StorageBootProfile::Invalid &&
+          guideXOS::guidexos_parse_storage_boot_profile(nullptr, 0u) ==
+              StorageBootProfile::Invalid,
+          "empty or missing profile contents are not treated as normal");
+    check(guideXOS::guidexos_parse_storage_boot_profile(
+              " storage_profile=normal", 23u) == StorageBootProfile::Invalid &&
+          guideXOS::guidexos_parse_storage_boot_profile(
+              "storage_profile=normal\nextra", 28u) == StorageBootProfile::Invalid,
+          "ambiguous profile whitespace and trailing content fail closed");
+    check(guideXOS::guidexos_storage_profile_from_flags(
+              guideXOS::guidexos_storage_profile_flag_bits(
+                  StorageBootProfile::PhysicalReconnaissance)) ==
+              StorageBootProfile::PhysicalReconnaissance &&
+          guideXOS::guidexos_storage_profile_from_flags(
+              guideXOS::BOOTINFO_STORAGE_PROFILE_MASK) ==
+              StorageBootProfile::Invalid,
+          "BootInfo profile encoding round-trips and rejects reserved values");
+
+    struct StartupProbe {
+        uint32_t ataInit;
+        uint32_t ahciInit;
+        uint32_t nvmeInit;
+        uint32_t usbInit;
+        uint32_t virtioBlockInit;
+        uint32_t registrations;
+        uint32_t partitionReads;
+        uint32_t filesystemMounts;
+        uint32_t writes;
+        uint32_t flushes;
+        uint32_t discards;
+        uint32_t repairs;
+        uint8_t registeredIndex;
+    } probe = {};
+
+    block::init();
+    auto productionLinkedStartup = [&]() {
+        ++probe.virtioBlockInit;
+        ++probe.ataInit;
+        ++probe.ahciInit;
+        ++probe.nvmeInit;
+        ++probe.usbInit;
+        block::BlockDevice device = {};
+        device.type = block::BDEV_AHCI;
+        device.driverIndex = 0u;
+        device.totalSectors = 64u;
+        device.sectorSize = 512u;
+        device.writeFn = fake_write;
+        device.flushFn = fake_flush;
+        std::strcpy(device.name, "test-ahci");
+        probe.registeredIndex = block::register_device(device);
+        if (probe.registeredIndex != 0xFFu) ++probe.registrations;
+    };
+
+    check(!storage_boot::initialize_controllers_if_allowed(
+              StorageBootProfile::PhysicalReconnaissance,
+              productionLinkedStartup) &&
+          probe.ataInit == 0u && probe.ahciInit == 0u &&
+          probe.nvmeInit == 0u && probe.usbInit == 0u &&
+          probe.virtioBlockInit == 0u && probe.registrations == 0u &&
+          block::device_count() == 0u,
+          "physical reconnaissance admission skips every controller initializer and block registration");
+    check(!storage_boot::initialize_controllers_if_allowed(
+              StorageBootProfile::Invalid, productionLinkedStartup) &&
+          probe.ataInit == 0u && probe.ahciInit == 0u &&
+          probe.nvmeInit == 0u && probe.usbInit == 0u &&
+          probe.virtioBlockInit == 0u && block::device_count() == 0u,
+          "invalid profile never falls through to normal controller startup");
+    bool implicitWritableGuiCapability = false;
+    for (uint8_t i = 0u; i < block::MAX_BLOCK_DEVICES; ++i) {
+        const block::BlockDevice* device = block::get_device(i);
+        if (device && device->writeFn) implicitWritableGuiCapability = true;
+    }
+    check(!implicitWritableGuiCapability,
+          "quarantined profile exposes no registered writable device to Disk Manager");
+
+    uint32_t forbiddenDiscoveryActions = 0u;
+    const bool reconnaissanceMountAttempted = storage_boot::mount_if_allowed(
+        StorageBootProfile::PhysicalReconnaissance, [&]() {
+            ++probe.partitionReads;
+            ++probe.filesystemMounts;
+            ++forbiddenDiscoveryActions;
+        });
+    check(!reconnaissanceMountAttempted && probe.partitionReads == 0u &&
+          probe.filesystemMounts == 0u && forbiddenDiscoveryActions == 0u &&
+          !storage_boot::automatic_mount_allowed(
+              StorageBootProfile::PhysicalReconnaissance),
+          "reconnaissance profile suppresses automatic partition and filesystem discovery");
+
+    check(storage_boot::initialize_controllers_if_allowed(
+              StorageBootProfile::Normal, productionLinkedStartup) &&
+          probe.ataInit == 1u && probe.ahciInit == 1u &&
+          probe.nvmeInit == 1u && probe.usbInit == 1u &&
+          probe.virtioBlockInit == 1u && probe.registrations == 1u &&
+          block::device_count() == 1u &&
+          block::get_device(probe.registeredIndex) != nullptr &&
+          block::get_device(probe.registeredIndex)->writeFn != nullptr,
+          "ordinary profile still admits virtual storage and explicit test callback registration");
+    check(probe.partitionReads == 0u && probe.filesystemMounts == 0u &&
+          probe.writes == 0u && probe.flushes == 0u &&
+          probe.discards == 0u && probe.repairs == 0u,
+          "profile admission does not itself perform partition reads or mutation operations");
+
+    // A profile is immutable after the loader-to-kernel handoff. Model a new
+    // boot by resetting the registry before exercising the quarantined path.
+    block::init();
+    probe.registeredIndex = 0xFFu;
+    check(block::device_count() == 0u &&
+          !storage_boot::initialize_controllers_if_allowed(
+              StorageBootProfile::PhysicalReconnaissance,
+              productionLinkedStartup) &&
+          block::device_count() == 0u && probe.registrations == 1u,
+          "fresh reconnaissance boot contains no stale prior-profile device identity");
+    std::printf("DM38 boot storage profile: %d checks, %d failures\n",
+        g_checks - checksBefore, g_failures - failuresBefore);
 }
 
 block::Status fake_read(uint8_t driverId, uint64_t lba, uint32_t count, void* buffer)
@@ -10418,6 +10557,7 @@ void run_disk_manager_fat32_integrity_ui_tests()
 
 int main()
 {
+    run_storage_boot_profile_tests();
     run_nvme_logic_tests();
     using namespace kernel;
     run_ahci_logic_tests();

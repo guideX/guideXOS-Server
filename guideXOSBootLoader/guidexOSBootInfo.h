@@ -42,6 +42,83 @@ namespace guideXOS
     // Bounded diagnostic list size for framebuffer descriptors in BootInfo.
     static const uint32_t GUIDEXOS_MAX_FRAMEBUFFERS = 8u;
 
+    // The boot profile is copied through BootInfo.Flags so the kernel can
+    // establish storage admission before any transport driver is started.
+    // Zero preserves the historical default for existing boot packages.
+    enum class StorageBootProfile : uint8_t
+    {
+        LegacyDefault = 0,
+        Normal = 1,
+        PhysicalReconnaissance = 2,
+        Invalid = 3,
+    };
+
+    static const uint32_t BOOTINFO_STORAGE_PROFILE_SHIFT = 3u;
+    static const uint32_t BOOTINFO_STORAGE_PROFILE_MASK = 3u << BOOTINFO_STORAGE_PROFILE_SHIFT;
+
+    static inline StorageBootProfile guidexos_parse_storage_boot_profile(
+        const char* bytes, size_t length)
+    {
+        static const char kNormal[] = "storage_profile=normal";
+        static const char kPhysicalRecon[] =
+            "storage_profile=physical-reconnaissance";
+        if (!bytes) return StorageBootProfile::Invalid;
+
+        // Permit one conventional line ending. Additional whitespace or
+        // content is rejected so a damaged/ambiguous file cannot select a
+        // less restrictive mode.
+        if (length != 0u && bytes[length - 1u] == '\n') {
+            --length;
+            if (length != 0u && bytes[length - 1u] == '\r') --length;
+        } else if (length != 0u && bytes[length - 1u] == '\r') {
+            --length;
+        }
+
+        if (length == sizeof(kNormal) - 1u) {
+            size_t i = 0u;
+            for (; i < length && bytes[i] == kNormal[i]; ++i) { }
+            if (i == length) return StorageBootProfile::Normal;
+        }
+        if (length == sizeof(kPhysicalRecon) - 1u) {
+            size_t i = 0u;
+            for (; i < length && bytes[i] == kPhysicalRecon[i]; ++i) { }
+            if (i == length)
+                return StorageBootProfile::PhysicalReconnaissance;
+        }
+        return StorageBootProfile::Invalid;
+    }
+
+    static inline uint32_t guidexos_storage_profile_flag_bits(
+        StorageBootProfile profile)
+    {
+        return (static_cast<uint32_t>(profile) <<
+                BOOTINFO_STORAGE_PROFILE_SHIFT) &
+            BOOTINFO_STORAGE_PROFILE_MASK;
+    }
+
+    static inline StorageBootProfile guidexos_storage_profile_from_flags(
+        uint32_t flags)
+    {
+        const uint32_t encoded =
+            (flags & BOOTINFO_STORAGE_PROFILE_MASK) >>
+            BOOTINFO_STORAGE_PROFILE_SHIFT;
+        return encoded <= static_cast<uint32_t>(StorageBootProfile::Invalid)
+            ? static_cast<StorageBootProfile>(encoded)
+            : StorageBootProfile::Invalid;
+    }
+
+    static inline const char* guidexos_storage_boot_profile_name(
+        StorageBootProfile profile)
+    {
+        switch (profile) {
+        case StorageBootProfile::LegacyDefault: return "default-normal";
+        case StorageBootProfile::Normal: return "normal";
+        case StorageBootProfile::PhysicalReconnaissance:
+            return "physical-reconnaissance";
+        case StorageBootProfile::Invalid: default: return "invalid";
+        }
+    }
+
     struct FramebufferDescriptor
     {
         uint64_t Base;

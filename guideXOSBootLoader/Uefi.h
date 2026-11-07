@@ -307,7 +307,7 @@ struct _EFI_FILE_PROTOCOL {
                     UINT64              OpenMode,
                     UINT64              Attributes
                 );
-    VOID*       Close;
+    EFI_STATUS  (EFIAPI *Close)(EFI_FILE_PROTOCOL *This);
     VOID*       Delete;
     EFI_STATUS  (EFIAPI *Read)(
                     EFI_FILE_PROTOCOL   *This,

@@ -918,3 +918,60 @@ DM38 remains active, DM39 does not begin, and no acceptance criterion is
 closed by the QAC virtual boot. The retained DM38-1 storage regression count
 of 1,523/1,523 is source-matched historical evidence, not a test rerun in this
 documentation/package continuation.
+
+## DM38-4 — isolated physical-reconnaissance boot profile
+
+DM38-4 adds a profile read by the UEFI loader from the ESP that launched it.
+The physical package's Release loader is built with
+`RequirePhysicalStorageReconProfile=true`; missing, unreadable, invalid, or
+non-recon configuration is rejected before kernel handoff. The exact root
+file value is `storage_profile=physical-reconnaissance`. BootInfo v3 layout
+stays unchanged; profile bits use unused `Flags` bits 3–4. The kernel logs the
+profile before storage startup and uses the same production admission helper
+that host tests exercise. Reconnaissance and invalid profiles skip VirtIO
+block, ATA, AHCI, NVMe, UHCI/USB Mass Storage, QEMU storage proofs, automatic
+persistent mounts, and partition/filesystem discovery. Framebuffer, desktop,
+PS/2 initialization, and non-storage VirtIO support remain available.
+
+The fresh hosted run passed **1,536 storage-manager checks, 0 failures**
+(1,523 retained baseline assertions plus 13 profile/isolation assertions),
+including USB Mass Storage's 249 checks and the script's DM34/35/36, DM37,
+GPT/MBR, input, PS/2, compositor, trace, and fixture checks. AMD64 kernel,
+UEFI x64 recon-required and normal loaders, and `build.bat` all passed. The
+desktop build's pre-existing executable was restored and its original hash
+verified unchanged. `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0` remain.
+
+Both QAC 2.0.0 / QEMU 11.0.0 acceptance scenarios passed from fresh private
+copies. Scenario A reached kernel, framebuffer, desktop, and Navigator smoke
+PASS with `controller-discovery=QUARANTINED`, transport startup skipped, and
+automatic mount skipped. The firmware pflash was read-only; only a private
+directory-backed virtual IDE boot ESP was attached, with USB disabled. QMP
+ESP counters were stable across five idle seconds; the private ESP matched
+the staged hashes afterward. Scenario B used a separate normal-profile ESP
+and a private read-only 8 MiB USB BOT target. The normal path found the ATA
+boot ESP, enumerated UHCI, registered one USB Mass Storage device, mounted the
+private ESP, and completed Navigator smoke PASS. QMP showed 21,504 target
+read bytes / 27 read operations, no writes or unmaps; the target SHA-256 was
+unchanged. Both runs exited 0 by controlled QMP shutdown, released their QAC
+reservations, and left zero sessions/reservations/QEMU processes on their
+postflight census. This is virtual evidence and does not qualify a production
+Shell shutdown or physical USB, input, display, AHCI, or NVMe behavior.
+
+Outcome is **`DM38_PHYSICAL_STAGE_A_READY` for the isolated software package
+and bounded operator procedure**, not a claim that SARAH_DT booted. The
+physical guide and blank observation form are in the DM38-4 artifact at
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm38\dm38-4-physical-storage-isolation\instructions\`
+and `observations\`. The owner must still identify any expendable USB and
+approve replacement of that exact volume. Keep the Windows Seagate HDD and
+every installed NVMe/internal drive disconnected during Stage A until the
+owner separately reviews the early-boot isolation boundary. Input after
+UEFI handoff is unverified because AMD64 has no general driver for the
+reported Intel xHCI `8086:06ED`; PS/2 availability on SARAH_DT is unknown.
+
+Stage B remains blocked. AHCI derives device addresses from a linear kernel
+VA-to-PA assumption and has no IOMMU/VT-d mapping API; actual remapping and
+identity state are unknown. Do not disable DMA protections. No physical disk
+read/write, physical USB write, firmware change, or SARAH_DT boot occurred.
+The detailed call graph, DMA analysis, hashes, build provenance, exact QAC
+records, and limits are in the [DM38-4 report](DISK_MANAGER_PHASE_DM38_4_BOOT_ISOLATION.md).
+DM37 remains accepted, `.phase` stays at DM37→DM38, and DM39 is not started.

@@ -37,6 +37,7 @@
 // Storage subsystem
 #include "include/kernel/block_device.h"
 #include "include/kernel/storage_manager.h"
+#include "include/kernel/storage_boot_policy.h"
 #include "include/kernel/ata.h"
 #include "include/kernel/ahci.h"
 #include "include/kernel/nvme.h"
@@ -679,21 +680,33 @@ static void log_framebuffer_summary(
 #endif
 
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE) || defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
-static bool initialize_qemu_display_configuration_storage()
+static bool initialize_qemu_display_configuration_storage(
+    guideXOS::StorageBootProfile storageProfile)
 {
     kernel::serial::puts("[QEMU-PERSISTENCE] initializing writable display configuration store\n");
-    kernel::feature_report::init();
-    kernel::block::init();
-    kernel::fs_fat::init();
-    kernel::msi::init();
-    kernel::virtio::block::init();
-    kernel::ata::init();
-    kernel::nvme::init();
-    kernel::vfs::init();
-
-    bool mounted = kernel::vfs::get_mount("/") != nullptr;
-    for (uint8_t index = 0u; !mounted && index < kernel::block::device_count(); ++index) {
-        if (kernel::vfs::mount("/", index) != 0xFF) mounted = true;
+    bool mounted = false;
+    const bool controllersInitialized =
+        kernel::storage_boot::initialize_controllers_if_allowed(
+            storageProfile, [&]() {
+                kernel::feature_report::init();
+                kernel::block::init();
+                kernel::fs_fat::init();
+                kernel::msi::init();
+                kernel::virtio::block::init();
+                kernel::ata::init();
+                kernel::nvme::init();
+            });
+    if (controllersInitialized) {
+        kernel::vfs::init();
+        kernel::storage_boot::mount_if_allowed(storageProfile, [&]() {
+            mounted = kernel::vfs::get_mount("/") != nullptr;
+            for (uint8_t index = 0u;
+                 !mounted && index < kernel::block::device_count(); ++index) {
+                if (kernel::vfs::mount("/", index) != 0xFF) mounted = true;
+            }
+        });
+    } else {
+        kernel::serial::puts("[STORAGE-BOOT] quarantine blocks QEMU persistence controller startup\n");
     }
     kernel::serial::puts("[QEMU-PERSISTENCE] config store mount=");
     kernel::serial::puts(mounted ? "ready" : "unavailable");
@@ -790,6 +803,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] ERROR: No valid boot method detected, halting\n");
         while(1) { }
     }
+
+    const guideXOS::StorageBootProfile storageBootProfile = is_bootinfo
+        ? guideXOS::guidexos_storage_profile_from_flags(bootinfo->Flags)
+        : guideXOS::StorageBootProfile::LegacyDefault;
+    const bool storageControllerDiscoveryAllowed =
+        kernel::storage_boot::controller_discovery_allowed(storageBootProfile);
+    kernel::serial::puts("[STORAGE-BOOT] profile=");
+    kernel::serial::puts(guideXOS::guidexos_storage_boot_profile_name(
+        storageBootProfile));
+    kernel::serial::puts(" controller-discovery=");
+    kernel::serial::puts(storageControllerDiscoveryAllowed
+        ? "enabled\n" : "QUARANTINED\n");
     
     // Copy only the bounded descriptor bytes into kernel-owned storage before
     // any transport is registered. Legacy/malformed metadata stays Unknown.
@@ -975,48 +1000,62 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::feature_report::complete_init(kernel::feature_report::INT_MSI);
         kernel::serial::puts("[KERNEL] MSI/MSI-X subsystem initialized\n");
         
-        // Initialize VirtIO subsystem
-        kernel::virtio::block::init();
+        // Initialize non-storage VirtIO support independently; the block
+        // transport is started only by the storage admission below.
         kernel::virtio::rng::init();
-        kernel::serial::puts("[KERNEL] VirtIO subsystem initialized\n");
-        
-        // Initialize ATA/SATA driver (scans for IDE and AHCI controllers)
-        kernel::ata::init();
-        kernel::serial::puts("[KERNEL] ATA/SATA driver initialized, ");
-        kernel::serial::put_hex32(kernel::ata::device_count());
-        kernel::serial::puts(" drive(s) found\n");
+        kernel::serial::puts("[KERNEL] VirtIO non-storage subsystem initialized\n");
 
-        // AHCI shares the common block registry with ATA and other transports.
-        // Register only valid direct SATA disks discovered through PCI.
+        // This shared admission function is also exercised by host tests.
+        // In physical-reconnaissance and invalid modes its callback is never
+        // entered, so no storage transport probes, registers devices, reads
+        // partitions, or reaches its write/Flush/Discard paths.
+        const bool storageControllersInitialized =
+            kernel::storage_boot::initialize_controllers_if_allowed(
+                storageBootProfile, [&]() {
+                    kernel::virtio::block::init();
+
+                    // Initialize ATA/SATA PIO (including legacy port probes).
+                    kernel::ata::init();
+                    kernel::serial::puts("[KERNEL] ATA/SATA driver initialized, ");
+                    kernel::serial::put_hex32(kernel::ata::device_count());
+                    kernel::serial::puts(" drive(s) found\n");
+
+                    // AHCI shares the common block registry with ATA and other
+                    // transports. Its init scans PCI, maps ABAR, starts ports,
+                    // and may issue IDENTIFY DMA commands.
 #if defined(GXOS_DM29_QEMU_GPT_REPAIR_PROOF) || \
     defined(GXOS_DM30_QEMU_GPT_REPAIR_PROOF)
-        kernel::serial::puts("[DM29-QEMU] host-corruption-window=READY\n");
-        const uint64_t dm29WindowStart = kernel::pit::ticks();
-        uint64_t dm29WindowSpins = 0;
-        while (kernel::pit::ticks() - dm29WindowStart < 200u &&
-               dm29WindowSpins < 3000000000ull) {
-            ++dm29WindowSpins;
-            __asm__ volatile("pause");
-        }
+                    kernel::serial::puts("[DM29-QEMU] host-corruption-window=READY\n");
+                    const uint64_t dm29WindowStart = kernel::pit::ticks();
+                    uint64_t dm29WindowSpins = 0;
+                    while (kernel::pit::ticks() - dm29WindowStart < 200u &&
+                           dm29WindowSpins < 3000000000ull) {
+                        ++dm29WindowSpins;
+                        __asm__ volatile("pause");
+                    }
 #endif
-        kernel::ahci::init();
-        kernel::serial::puts("[KERNEL] AHCI initialized, ");
-        kernel::serial::put_hex32(kernel::ahci::device_count());
-        kernel::serial::puts(" SATA disk(s) found\n");
-        
-        // Initialize NVMe driver (scans for NVMe controllers)
-        kernel::nvme::init();
-        kernel::serial::puts("[KERNEL] NVMe driver initialized, ");
-        kernel::serial::put_hex32(kernel::nvme::device_count());
-        kernel::serial::puts(" namespace(s) found\n");
+                    kernel::ahci::init();
+                    kernel::serial::puts("[KERNEL] AHCI initialized, ");
+                    kernel::serial::put_hex32(kernel::ahci::device_count());
+                    kernel::serial::puts(" SATA disk(s) found\n");
 
-        // Start USB enumeration after the shared block registry is ready.
-        // The USB core dispatches supported Mass Storage interfaces into the
-        // common block registry; unsupported controllers remain unavailable.
-        kernel::usb::init();
-        kernel::serial::puts("[KERNEL] USB Mass Storage devices: ");
-        kernel::serial::put_hex8(kernel::usb_storage::device_count());
-        kernel::serial::puts("\n");
+                    // Initialize NVMe, including controller reset, admin
+                    // queue DMA and namespace Identify.
+                    kernel::nvme::init();
+                    kernel::serial::puts("[KERNEL] NVMe driver initialized, ");
+                    kernel::serial::put_hex32(kernel::nvme::device_count());
+                    kernel::serial::puts(" namespace(s) found\n");
+
+                    // AMD64 currently supports UHCI only; its USB enumeration
+                    // dispatches Mass Storage to BOT and has no HID driver.
+                    kernel::usb::init();
+                    kernel::serial::puts("[KERNEL] USB Mass Storage devices: ");
+                    kernel::serial::put_hex8(kernel::usb_storage::device_count());
+                    kernel::serial::puts("\n");
+                });
+        if (!storageControllersInitialized) {
+            kernel::serial::puts("[STORAGE-BOOT] transport startup skipped; no ATA/AHCI/NVMe/USB/VirtIO-block probing or registration\n");
+        }
         
         // Initialize RAM disk subsystem
         kernel::ramdisk::init();
@@ -1036,7 +1075,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::put_hex32(kernel::block::device_count());
         kernel::serial::putc('\n');
         
-        const bool mounted = mount_persistent_storage();
+        bool mounted = false;
+        kernel::storage_boot::mount_if_allowed(storageBootProfile, [&]() {
+            mounted = mount_persistent_storage();
+        });
+        if (!kernel::storage_boot::automatic_mount_allowed(storageBootProfile)) {
+            kernel::serial::puts("[STORAGE-BOOT] automatic persistent mount skipped; partition/filesystem discovery remains off\n");
+        }
+        if (storageControllersInitialized) {
 #if defined(GXOS_DM9_QEMU_STORAGE_PROOF) || \
     defined(GXOS_DM15_QEMU_AHCI_PROOF) || \
     defined(GXOS_DM16_QEMU_NVME_PROOF) || \
@@ -1061,6 +1107,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #if defined(GXOS_DM20_USB_BOT_STRESS_PROOF)
         kernel::qemu_dm20_usb_bot_proof::run();
 #endif
+        }
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
@@ -1416,7 +1463,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::pit::init(100);
         kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_CONTROL_ACTIVE) || defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
-        const bool displayConfigurationStoreReady = initialize_qemu_display_configuration_storage();
+        const bool displayConfigurationStoreReady =
+            initialize_qemu_display_configuration_storage(storageBootProfile);
         (void)displayConfigurationStoreReady;
 #if defined(GXOS_QEMU_VIRTIO_GPU_DISPLAY_CONFIGURATION_PERSISTENCE_ACTIVE)
         gxos::display::DisplayConfigurationService::requestStartupRestore();

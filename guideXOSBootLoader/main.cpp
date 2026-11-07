@@ -437,6 +437,59 @@ EFI_STATUS LoadFile(EFI_FILE_PROTOCOL** file, CHAR16* path, EFI_HANDLE ImageHand
     return s;
 }
 
+static EFI_STATUS ReadStorageBootProfile(
+    EFI_HANDLE ImageHandle,
+    EFI_SYSTEM_TABLE* SystemTable,
+    guideXOS::StorageBootProfile* outProfile,
+    bool* outPresent)
+{
+    if (!outProfile || !outPresent) return EFI_INVALID_PARAMETER;
+    *outProfile = guideXOS::StorageBootProfile::LegacyDefault;
+    *outPresent = false;
+
+    EFI_LOADED_IMAGE_PROTOCOL* LoadedImage = NULL;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* FileSystem = NULL;
+    EFI_FILE_PROTOCOL* Root = NULL;
+    EFI_FILE_PROTOCOL* ProfileFile = NULL;
+    EFI_STATUS s = SystemTable->BootServices->HandleProtocol(
+        ImageHandle, &gEfiLoadedImageProtocolGuid, (void**)&LoadedImage);
+    if (EFI_ERROR(s) || !LoadedImage) return EFI_ERROR(s) ? s : EFI_LOAD_ERROR;
+
+    s = SystemTable->BootServices->HandleProtocol(
+        LoadedImage->DeviceHandle, &gEfiSimpleFileSystemProtocolGuid,
+        (void**)&FileSystem);
+    if (EFI_ERROR(s) || !FileSystem) return EFI_ERROR(s) ? s : EFI_LOAD_ERROR;
+
+    s = FileSystem->OpenVolume(FileSystem, &Root);
+    if (EFI_ERROR(s) || !Root) return EFI_ERROR(s) ? s : EFI_LOAD_ERROR;
+
+    s = Root->Open(Root, &ProfileFile,
+        (CHAR16*)L"boot-profile.cfg", EFI_FILE_MODE_READ, EFI_FILE_READ_ONLY);
+    if (s == EFI_NOT_FOUND) {
+        Root->Close(Root);
+        return EFI_NOT_FOUND;
+    }
+    if (EFI_ERROR(s) || !ProfileFile) {
+        Root->Close(Root);
+        return EFI_ERROR(s) ? s : EFI_LOAD_ERROR;
+    }
+
+    *outPresent = true;
+    char profileBytes[128] = {};
+    UINTN profileSize = sizeof(profileBytes);
+    s = ProfileFile->Read(ProfileFile, &profileSize, profileBytes);
+    ProfileFile->Close(ProfileFile);
+    Root->Close(Root);
+    if (EFI_ERROR(s) || profileSize >= sizeof(profileBytes)) {
+        *outProfile = guideXOS::StorageBootProfile::Invalid;
+        return EFI_ERROR(s) ? s : EFI_BAD_BUFFER_SIZE;
+    }
+
+    *outProfile = guideXOS::guidexos_parse_storage_boot_profile(
+        profileBytes, (size_t)profileSize);
+    return EFI_SUCCESS;
+}
+
 
 // New helper: exits boot services with retry and returns a stable memory map
 // (Kept for compatibility; handoff path uses ExitBootServicesWithMemoryMapInBuffer)
@@ -936,6 +989,44 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     }
     SetMem((void*)(UINTN)bootInfoPhys, EFI_PAGE_SIZE, 0);
     guideXOS::BootInfo* v1BootInfo = (guideXOS::BootInfo*)(UINTN)bootInfoPhys;
+
+    guideXOS::StorageBootProfile storageProfile =
+        guideXOS::StorageBootProfile::LegacyDefault;
+    bool storageProfilePresent = false;
+    const EFI_STATUS storageProfileStatus = ReadStorageBootProfile(
+        ImageHandle, SystemTable, &storageProfile, &storageProfilePresent);
+    if (storageProfilePresent || EFI_ERROR(storageProfileStatus)) {
+        if (EFI_ERROR(storageProfileStatus))
+            storageProfile = guideXOS::StorageBootProfile::Invalid;
+        v1BootInfo->Flags = (v1BootInfo->Flags &
+            ~guideXOS::BOOTINFO_STORAGE_PROFILE_MASK) |
+            guideXOS::guidexos_storage_profile_flag_bits(storageProfile);
+    }
+
+#if defined(GUIDEXOS_REQUIRE_PHYSICAL_STORAGE_RECON_PROFILE)
+    if (!storageProfilePresent || EFI_ERROR(storageProfileStatus) ||
+        storageProfile != guideXOS::StorageBootProfile::PhysicalReconnaissance) {
+        Print((CONST CHAR16*)L"[BOOT-PROFILE] REQUIRED physical-reconnaissance profile missing or invalid; kernel handoff refused\n");
+        return EFI_LOAD_ERROR;
+    }
+#endif
+
+    Print((CONST CHAR16*)L"[BOOT-PROFILE] storage=");
+    switch (storageProfile) {
+    case guideXOS::StorageBootProfile::LegacyDefault:
+        Print((CONST CHAR16*)L"default-normal (no boot-profile.cfg)\n");
+        break;
+    case guideXOS::StorageBootProfile::Normal:
+        Print((CONST CHAR16*)L"normal\n");
+        break;
+    case guideXOS::StorageBootProfile::PhysicalReconnaissance:
+        Print((CONST CHAR16*)L"physical-reconnaissance\n");
+        break;
+    case guideXOS::StorageBootProfile::Invalid:
+    default:
+        Print((CONST CHAR16*)L"INVALID (kernel storage access must fail closed)\n");
+        break;
+    }
 
     // --- ACPI RSDP (optional) ---
     RSDPDescriptor20* rsdp = FindRSDP(SystemTable);

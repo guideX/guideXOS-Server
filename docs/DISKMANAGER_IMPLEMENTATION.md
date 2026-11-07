@@ -1,20 +1,24 @@
 # Disk Manager: Current Implementation Status
 
-**Current phase status (2026-11-06): DM37 is formally accepted and closed;
+**Current phase status (2026-11-07): DM37 is formally accepted and closed;
 DM38 is active.** `.phase` remains `last_completed=DM37`,
-`next_expected=DM38`. The latest continuation is **Outcome B —
-`DM38_AHCI_DMA_SAFETY_BLOCKER`**. The owner-supplied SARAH_DT inventory is now
-documented, and a fresh UEFI/kernel package passed an isolated QAC-managed
-virtual boot. No SARAH_DT boot or physical USB write occurred. Stage A is
-conditional on disconnecting every internal drive; Stage B remains blocked
-because the AHCI driver has no VT-d/IOMMU DMA mapping support. The reported
-Intel `8086:06ED` xHCI controller has no general AMD64 driver, so physical
-input after UEFI handoff is unverified. See the [DM38-3 qualification and
-operator handoff](DISK_MANAGER_PHASE_DM38_PHYSICAL_STORAGE_QUALIFICATION.md#dm38-3--sarah_dt-native-uefi-boot-package-and-safety-qualification).
-The 1,523/1,523 hosted suite remains source-matched prior evidence and was not
-rerun here; fresh AMD64 and UEFI builds and the QAC virtual boot were run.
-No source or phase-marker change was made; `NVME_WRITE_PROVEN=0` and
-`NVME_FLUSH_PROVEN=0` remain in force.
+`next_expected=DM38`. DM38-4 adds the explicit UEFI
+`physical-reconnaissance` profile and gates VirtIO block, ATA, AHCI, NVMe,
+UHCI/USB Mass Storage initialization, automatic persistent mounting, and QEMU
+storage proof callbacks before controller startup. Unknown profile values
+fail closed. DM38-4 reaches **Outcome A — `DM38_PHYSICAL_STAGE_A_READY` for
+the isolated software package and bounded owner procedure**. Both QAC virtual
+scenarios passed: reconnaissance reached desktop with storage quarantined;
+normal profile registered one virtual USB BOT device and preserved its
+read-only target image. The hosted suite passed 1,536/1,536, with fresh AMD64,
+UEFI x64, and desktop builds. No physical USB was written and SARAH_DT was
+not booted. The physical procedure still requires disconnecting every
+internal drive; Stage B remains blocked because AHCI has no device-visible DMA
+mapping contract or verified VT-d/IOMMU state. The reported Intel `8086:06ED`
+xHCI controller has no general AMD64 driver, so physical input after UEFI
+handoff is unverified. See the [DM38-4 report](DISK_MANAGER_PHASE_DM38_4_BOOT_ISOLATION.md)
+and [DM38 qualification history](DISK_MANAGER_PHASE_DM38_PHYSICAL_STORAGE_QUALIFICATION.md).
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0` remain in force.
 
 DM36 closeout was accepted at source revision
 a2afa18a56c95b00491f9b1ca2a26acde7669567 on
