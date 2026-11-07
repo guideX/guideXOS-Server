@@ -1,0 +1,7 @@
+# Host-only dependencies used to construct and verify release FAT32/ISO artifacts.
+appdirs==1.4.4
+fs==2.4.16
+pycdlib==1.16.0
+pyfatfs==1.1.0
+setuptools==84.2.1
+six==1.17.0
