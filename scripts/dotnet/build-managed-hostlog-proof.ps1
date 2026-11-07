@@ -130,7 +130,7 @@ function Assert-WithinRoot([string]$Path, [string]$Root, [string]$Label) {
         $resolvedRoot += [System.IO.Path]::DirectorySeparatorChar
     }
     if (-not $resolvedPath.StartsWith($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "$Label path escapes the repository root: $resolvedPath"
+        throw "$Label path escapes its allowed root: $resolvedPath"
     }
 }
 
@@ -469,7 +469,7 @@ $gcOwnershipStartupAdapterSource = Join-Path $RuntimePackRoot "src\probes\guidex
 $gcOwnershipStartupAdapterObj = Join-Path $artifactRoot "guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.obj"
 
 if ($Clean) {
-    Assert-WithinRoot $OutputRoot $RepoRoot "Output"
+    Assert-WithinRoot $OutputRoot $ArtifactRoot "Output"
     if (Test-Path -LiteralPath $OutputRoot) {
         Remove-Item -LiteralPath $OutputRoot -Recurse -Force
     }
@@ -703,7 +703,7 @@ try {
     )
     if (-not [string]::IsNullOrWhiteSpace($DirectoryBuildPropsPath)) {
         $DirectoryBuildPropsPath = [System.IO.Path]::GetFullPath($DirectoryBuildPropsPath)
-        Assert-WithinRoot $DirectoryBuildPropsPath (Join-Path $RepoRoot 'out\dotnet') 'Directory.Build.props'
+        Assert-WithinRoot $DirectoryBuildPropsPath $ArtifactRoot 'Directory.Build.props'
         $publishProperties += "-p:DirectoryBuildPropsPath=$DirectoryBuildPropsPath"
     }
     if ($C185ExternalComposition) {
