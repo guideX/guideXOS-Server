@@ -32,6 +32,7 @@ $palPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nati
 $palBuilderPath = Join-Path $root 'tools\dotnet\runtime-pack\build-guidexos-nativeaot-pal.ps1'
 $kernelPalPath = Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp'
 $candidateBuilderPath = Join-Path $root 'scripts\dotnet\build-c188r12r4r5r1-init-attribution-candidate.ps1'
+$managedBuilderPath = Join-Path $root 'scripts\dotnet\build-managed-hostlog-proof.ps1'
 $productionNativeBuilderPath = Join-Path $root 'scripts\dotnet\build-c188-production-nativeaot.ps1'
 $productionKernelBuilderPath = Join-Path $root 'scripts\dotnet\build-c188-production-kernel.ps1'
 $runnerPath = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1'
@@ -44,7 +45,7 @@ $transitionAnalyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r
 $safeTestsPath = Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r2r4-safe-handoff.ps1'
 $harnessPath = Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r2r3_transition_attribution_test.cpp'
 foreach ($path in @($headerPath,$platformPath,$palPath,$palBuilderPath,$kernelPalPath,$candidateBuilderPath,$runtimeBuilderPath,
-        $productionNativeBuilderPath,$productionKernelBuilderPath,$runnerPath,$runnerContractPath,
+        $managedBuilderPath,$productionNativeBuilderPath,$productionKernelBuilderPath,$runnerPath,$runnerContractPath,
         $attachmentContractPath,$runtimeLockPath,$analyzerPath,$transitionAnalyzerPath,$safeTestsPath,$harnessPath,$CallSiteMapPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required transition fixture input missing: $path" }
 }
@@ -55,6 +56,7 @@ $pal = Get-Content -LiteralPath $palPath -Raw
 $palBuilder = Get-Content -LiteralPath $palBuilderPath -Raw
 $kernelPal = Get-Content -LiteralPath $kernelPalPath -Raw
 $candidateBuilder = Get-Content -LiteralPath $candidateBuilderPath -Raw
+$managedBuilderSource = Get-Content -LiteralPath $managedBuilderPath -Raw
 $productionNativeBuilder = Get-Content -LiteralPath $productionNativeBuilderPath -Raw
 $productionKernelBuilder = Get-Content -LiteralPath $productionKernelBuilderPath -Raw
 $runnerSource = Get-Content -LiteralPath $runnerPath -Raw
@@ -338,6 +340,8 @@ Assert-Fixture ($candidateBuilder -match '\[string\]\$ArtifactRoot' -and
     $candidateBuilder.Contains('BUILD_DIR=$($kernelBuildDir.Replace') -and
     $productionNativeBuilder -match '\[string\]\$ArtifactRoot' -and
     $productionKernelBuilder -match '\[string\]\$ArtifactRoot' -and
+    $managedBuilderSource.Contains('$managedArtifactRoot = Join-Path $OutputRoot "artifacts"') -and
+    $managedBuilderSource.Contains('Assert-WithinRoot $DirectoryBuildPropsPath $ArtifactRoot') -and
     $runnerSource -match '\[string\]\$ArtifactRoot' -and $runnerContractSource.Contains('-ArtifactRoot $artifactRoot')) 'fresh candidate and runner support isolated artifact roots while preserving candidate containment'
 Assert-Fixture ($palAttachBody.Success -and
     $palAttachBody.Groups['body'].Value.Contains('#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)') -and

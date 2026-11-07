@@ -428,45 +428,45 @@ if ([string]::IsNullOrWhiteSpace($vcvars64)) {
 
 $binRoot = Join-Path $OutputRoot "bin"
 $objRoot = Join-Path $OutputRoot "obj"
-$artifactRoot = Join-Path $OutputRoot "artifacts"
+$managedArtifactRoot = Join-Path $OutputRoot "artifacts"
 $publishExe = $null
 $publishMap = $null
 $publishIlcRsp = $null
 $publishLinkRsp = $null
 $nativeHostLogObj = $null
-$artifactExe = Join-Path $artifactRoot "HostLogProof.exe"
-$artifactMap = Join-Path $artifactRoot "HostLogProof.map"
-$artifactElf = Join-Path $artifactRoot "HostLogProof.elf"
-$artifactPeDump = Join-Path $artifactRoot "HostLogProof.pe.objdump.txt"
-$artifactElfDump = Join-Path $artifactRoot "HostLogProof.elf.objdump.txt"
-$artifactElfReadelf = Join-Path $artifactRoot "HostLogProof.elf.readelf.txt"
-$artifactElfDisasm = Join-Path $artifactRoot "HostLogProof.elf.disasm.txt"
-$artifactNativeObjDump = Join-Path $artifactRoot "HostLogProof.native.objdump.txt"
-$artifactNativeObjReloc = Join-Path $artifactRoot "HostLogProof.native.reloc.txt"
-$artifactRuntimePackObjDump = Join-Path $artifactRoot "guidexos_nativeaot_platform.objdump.txt"
-$artifactRuntimePackObjReloc = Join-Path $artifactRoot "guidexos_nativeaot_platform.reloc.txt"
-$artifactIlcRsp = Join-Path $artifactRoot "HostLogProof.ilc.rsp"
-$artifactLinkRsp = Join-Path $artifactRoot "HostLogProof.link.rsp"
-$artifactToolchain = Join-Path $artifactRoot "toolchain.txt"
-$artifactDotNetInfo = Join-Path $artifactRoot "dotnet-info.txt"
-$artifactPythonInfo = Join-Path $artifactRoot "python-info.txt"
-$buildBatch = Join-Path $artifactRoot "build-native-hostlog.bat"
+$artifactExe = Join-Path $managedArtifactRoot "HostLogProof.exe"
+$artifactMap = Join-Path $managedArtifactRoot "HostLogProof.map"
+$artifactElf = Join-Path $managedArtifactRoot "HostLogProof.elf"
+$artifactPeDump = Join-Path $managedArtifactRoot "HostLogProof.pe.objdump.txt"
+$artifactElfDump = Join-Path $managedArtifactRoot "HostLogProof.elf.objdump.txt"
+$artifactElfReadelf = Join-Path $managedArtifactRoot "HostLogProof.elf.readelf.txt"
+$artifactElfDisasm = Join-Path $managedArtifactRoot "HostLogProof.elf.disasm.txt"
+$artifactNativeObjDump = Join-Path $managedArtifactRoot "HostLogProof.native.objdump.txt"
+$artifactNativeObjReloc = Join-Path $managedArtifactRoot "HostLogProof.native.reloc.txt"
+$artifactRuntimePackObjDump = Join-Path $managedArtifactRoot "guidexos_nativeaot_platform.objdump.txt"
+$artifactRuntimePackObjReloc = Join-Path $managedArtifactRoot "guidexos_nativeaot_platform.reloc.txt"
+$artifactIlcRsp = Join-Path $managedArtifactRoot "HostLogProof.ilc.rsp"
+$artifactLinkRsp = Join-Path $managedArtifactRoot "HostLogProof.link.rsp"
+$artifactToolchain = Join-Path $managedArtifactRoot "toolchain.txt"
+$artifactDotNetInfo = Join-Path $managedArtifactRoot "dotnet-info.txt"
+$artifactPythonInfo = Join-Path $managedArtifactRoot "python-info.txt"
+$buildBatch = Join-Path $managedArtifactRoot "build-native-hostlog.bat"
 $runtimeSupportSource = Join-Path $projectDir "runtime_support.c"
-$runtimeSupportObj = Join-Path $artifactRoot "runtime_support.obj"
+$runtimeSupportObj = Join-Path $managedArtifactRoot "runtime_support.obj"
 $c102StartupSource = Join-Path $projectDir "c102_startup.c"
-$c102StartupObj = Join-Path $artifactRoot "c102_startup.obj"
+$c102StartupObj = Join-Path $managedArtifactRoot "c102_startup.obj"
 $palMinWinSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_pal_minwin_replacement.cpp"
-$palMinWinObj = Join-Path $artifactRoot "guidexos_nativeaot_pal_minwin_replacement.obj"
+$palMinWinObj = Join-Path $managedArtifactRoot "guidexos_nativeaot_pal_minwin_replacement.obj"
 $palContractSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_pal_contract.cpp"
-$palContractObj = Join-Path $artifactRoot "guidexos_nativeaot_pal_contract.obj"
+$palContractObj = Join-Path $managedArtifactRoot "guidexos_nativeaot_pal_contract.obj"
 $gcStartupContractSource = Join-Path $RuntimePackRoot "src\platform\guidexos_nativeaot_gc_startup_platform_contract.cpp"
-$gcStartupContractObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_startup_platform_contract.obj"
+$gcStartupContractObj = Join-Path $managedArtifactRoot "guidexos_nativeaot_gc_startup_platform_contract.obj"
 $managedHostShimsSource = Join-Path $RuntimePackRoot "src\probes\guidexos_nativeaot_managed_host_shims.cpp"
-$managedHostShimsObj = Join-Path $artifactRoot "guidexos_nativeaot_managed_host_shims.obj"
+$managedHostShimsObj = Join-Path $managedArtifactRoot "guidexos_nativeaot_managed_host_shims.obj"
 $gcAllocationProbeSource = Join-Path $RuntimePackRoot "src\probes\guidexos_nativeaot_gc_allocation_probe.cpp"
-$gcAllocationProbeObj = Join-Path $artifactRoot "guidexos_nativeaot_gc_allocation_probe.c188r12r4r5.obj"
+$gcAllocationProbeObj = Join-Path $managedArtifactRoot "guidexos_nativeaot_gc_allocation_probe.c188r12r4r5.obj"
 $gcOwnershipStartupAdapterSource = Join-Path $RuntimePackRoot "src\probes\guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.cpp"
-$gcOwnershipStartupAdapterObj = Join-Path $artifactRoot "guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.obj"
+$gcOwnershipStartupAdapterObj = Join-Path $managedArtifactRoot "guidexos_nativeaot_c188r12r4r5_gc_startup_adapter.obj"
 
 if ($Clean) {
     Assert-WithinRoot $OutputRoot $ArtifactRoot "Output"
@@ -475,7 +475,7 @@ if ($Clean) {
     }
 }
 
-New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $managedArtifactRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $binRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $objRoot | Out-Null
 
@@ -498,7 +498,7 @@ $toolchainLines = @(
     "RepoRoot=$RepoRoot"
     "LegacyRoot=$LegacyRoot"
     "OutputRoot=$OutputRoot"
-    "ArtifactRoot=$artifactRoot"
+    "ArtifactRoot=$managedArtifactRoot"
     "ArtifactExe=$artifactExe"
     "ArtifactMap=$artifactMap"
     "PeToElfScript=$PeToElfScript"
@@ -945,7 +945,7 @@ try {
         "exit /b %errorlevel%"
     )
     $publishBatch | Set-Content -LiteralPath $buildBatch -Encoding ASCII
-    $buildBatchLog = Join-Path $artifactRoot 'build-native-hostlog.log'
+    $buildBatchLog = Join-Path $managedArtifactRoot 'build-native-hostlog.log'
     & $buildBatch *>&1 | Tee-Object -FilePath $buildBatchLog
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE"
