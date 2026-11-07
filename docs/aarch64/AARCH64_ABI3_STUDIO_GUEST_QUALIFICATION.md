@@ -1,6 +1,6 @@
 # AArch64 ABI3 Developer Studio Guest Qualification
 
-- **Working status:** `STUDIO_ARM64_GUI_PARTIAL` (R1; latest completed guest run)
+- **Working status:** `STUDIO_ARM64_GUI_PARTIAL` (R1d; four diagnostic guest runs, 0 of 3 qualifying)
 - **Historical run date:** 2026-11-02
 - **Repository:** `D:\dev\guideXOSServer_AARCH64`
 - **Branch/base:** `AARCH64_SUPPORT` at `fe4e3ebf909f834f991ebd61d96607a6190dc80e`
@@ -16,9 +16,11 @@ The guest did not discover or start Developer Studio. No Studio window, input, w
 
 `STUDIO_GUEST_PARTIAL` records the real but early guest boot. The run did not reach Studio, so the stronger Studio-lifecycle condition for a completed Outcome C result is also unmet. This is an incomplete qualification state, not guest acceptance; the adapter has not been shown running in the guest. There are **0 of 3 qualifying Studio boots**.
 
-## R1 follow-up (2026-11-05)
+## R1 follow-up (2026-11-07)
 
-The original 2026-11-02 DTB diagnosis above remains historical. R1 repaired the ARM64 firmware DTB handling and advanced the authentic pinned Studio guest through UEFI, kernel/DTB validation, GICv2, timer, scheduler, desktop, package discovery, exact v0.5 ABI selection, NativeElf loading, and `gx_main`. A later QAC-authorized diagnostic confirmed the optional missing sentinel now propagates as `GX_ERROR_NOT_FOUND`, then exposed a Stage E window creation failure: the app requests 960×700 while the compositor limit was 640×640. The narrow compositor work-area/window-size repair is in the R1c candidate. Its next exclusive QAC request reached the 1,800-second bound and was canceled before launch behind another managed acceptance guest. Guest GUI acceptance remains incomplete with 0 of 3 qualifying boots. See [AARCH64_ABI3_R1_STUDIO_STARTUP_GUI.md](AARCH64_ABI3_R1_STUDIO_STARTUP_GUI.md) for the source-matched candidate, regression gates, QAC evidence, and current qualification state.
+The original 2026-11-02 DTB diagnosis above remains historical. R1 repaired ARM64 firmware DTB handling and advanced the authentic pinned Studio guest through UEFI, kernel/DTB validation, GICv2, timer, scheduler, desktop, package discovery, exact v0.5 ABI selection, NativeElf loading, and `gx_main`. R1c's first authorized guest confirmed that the app's 960×700 window request did not fit the actual 800×560 work area. R1d bounded the granted client size to 800×536 and the outer frame to 800×560 on the 800×600 framebuffer.
+
+Four fresh R1d QAC-authorized diagnostic guests created the Studio window. One focused framebuffer was visually reviewed; mouse and focus reached the application event loop, while no keyboard text event was observed. The fourth guest closed Studio cleanly, released all GUI mappings/windows/widgets, and recorded zero unexpected IRQs and exceptions. Its post-close desktop required later interaction to repaint fully. **The status remains `STUDIO_ARM64_GUI_PARTIAL`, with 0 of 3 qualifying boots**; VFS workspace and Build/Run remain untested. See [AARCH64_ABI3_R1_STUDIO_STARTUP_GUI.md](AARCH64_ABI3_R1_STUDIO_STARTUP_GUI.md) for candidate hashes, per-run QAC evidence, screenshots, regressions, and the next acceptance criteria.
 
 ## Inputs and production package
 

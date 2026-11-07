@@ -1339,6 +1339,8 @@ public:
 
     bool create_window(const char* title, int32_t width, int32_t height, uint32_t flags,
                        gx_handle* outWindow);
+    bool client_dimensions(gx_handle handle, uint32_t* outWidth, uint32_t* outHeight,
+                          int32_t* outX, int32_t* outY) const;
     gx_handle create_widget(gx_handle window, uint32_t type, int32_t x, int32_t y,
                             int32_t width, int32_t height, const char* text);
     bool set_widget_text(gx_handle widget, const char* text);
@@ -1656,31 +1658,54 @@ bool Phase9GuiOwner::create_window(const char* title, int32_t width, int32_t hei
     }
     const uint32_t screenW = framebuffer::get_width();
     const uint32_t screenH = framebuffer::get_height();
-    if (static_cast<uint32_t>(width) >= screenW || static_cast<uint32_t>(height) + compositor::TITLEBAR_HEIGHT >= screenH) {
-        delete window;
-        m_runtime->common.release_windows();
-        return false;
-    }
     const compositor::WorkArea workArea = compositor::KernelCompositor::workArea();
-    const uint32_t outerHeight = static_cast<uint32_t>(height) + compositor::TITLEBAR_HEIGHT;
-    if (studioV05 && ((flags & GX_WINDOW_FLAG_CENTERED) != 0) &&
-        (static_cast<uint32_t>(width) > workArea.width || outerHeight > workArea.height)) {
+    const bool centered = (flags & GX_WINDOW_FLAG_CENTERED) != 0;
+    int32_t grantedWidth = width;
+    int32_t grantedClientHeight = height;
+    int32_t outerHeight = height;
+    if (studioV05) {
+        gui_render::CenteredClientWindowBounds bounds{};
+        if (!gui_render::centered_client_window_bounds(width, height, screenW, screenH,
+                workArea.x, workArea.y, workArea.width, workArea.height,
+                compositor::TITLEBAR_HEIGHT,
+                static_cast<uint32_t>(kPhase9StudioV05MaxWindowWidth),
+                static_cast<uint32_t>(kPhase9StudioV05MaxWindowHeight), &bounds)) {
+            delete window;
+            m_runtime->common.release_windows();
+            return false;
+        }
+        grantedWidth = static_cast<int32_t>(bounds.clientWidth);
+        grantedClientHeight = static_cast<int32_t>(bounds.clientHeight);
+        outerHeight = static_cast<int32_t>(bounds.outerHeight);
+        window->x = static_cast<int32_t>(bounds.x);
+        window->y = static_cast<int32_t>(bounds.y);
+    } else if (screenW == 0 || screenH == 0 ||
+               static_cast<uint32_t>(width) >= screenW ||
+               static_cast<uint32_t>(height) > screenH ||
+               static_cast<uint32_t>(compositor::TITLEBAR_HEIGHT) >
+                   screenH - static_cast<uint32_t>(height)) {
         delete window;
         m_runtime->common.release_windows();
         return false;
     }
     const bool appA = m_runtime->isAppA;
     const uint32_t ordinal = m_windowCount;
-    if (studioV05 && (flags & GX_WINDOW_FLAG_CENTERED) != 0) {
-        window->x = static_cast<int32_t>(workArea.x + (workArea.width - static_cast<uint32_t>(width)) / 2u);
-        window->y = static_cast<int32_t>(workArea.y + (workArea.height - outerHeight) / 2u);
-    } else if (appA && ordinal == 0) { window->x = 55; window->y = 95; }
-    else if (appA) { window->x = 410; window->y = 135; }
-    else { window->x = 90; window->y = 350; }
-    if (window->x + width > static_cast<int>(screenW)) window->x = static_cast<int>(screenW) - width - 4;
-    if (window->y + height + compositor::TITLEBAR_HEIGHT > static_cast<int>(screenH)) window->y = 40;
-    window->w = width;
-    window->h = height;
+    if (!studioV05) {
+        if (appA && ordinal == 0) { window->x = 55; window->y = 95; }
+        else if (appA) { window->x = 410; window->y = 135; }
+        else { window->x = 90; window->y = 350; }
+        if (window->x + grantedWidth > static_cast<int>(screenW)) window->x = static_cast<int>(screenW) - grantedWidth - 4;
+        if (window->y + outerHeight + compositor::TITLEBAR_HEIGHT > static_cast<int>(screenH)) window->y = 40;
+    } else if (!centered) {
+        const uint32_t maxX = workArea.x + workArea.width - static_cast<uint32_t>(grantedWidth);
+        const uint32_t maxY = workArea.y + workArea.height - static_cast<uint32_t>(outerHeight);
+        const uint32_t offsetX = maxX - workArea.x < 55u ? maxX - workArea.x : 55u;
+        const uint32_t offsetY = maxY - workArea.y < 95u ? maxY - workArea.y : 95u;
+        window->x = static_cast<int32_t>(workArea.x + offsetX);
+        window->y = static_cast<int32_t>(workArea.y + offsetY);
+    }
+    window->w = grantedWidth;
+    window->h = outerHeight;
     window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE;
     if (flags & GX_WINDOW_FLAG_RESIZABLE) window->flags |= app::WF_RESIZABLE;
     window->owner = this;
@@ -1694,7 +1719,9 @@ bool Phase9GuiOwner::create_window(const char* title, int32_t width, int32_t hei
     const gx_handle windowHandle = application::make_handle(
         m_runtime->common.runtime_id(), m_runtime->common.generation(), application::HandleKind::Window,
         m_windowGenerations[slot], static_cast<uint16_t>(slot + 1));
-    if (!m_surfaces.create(windowHandle, static_cast<uint32_t>(width), static_cast<uint32_t>(height))) {
+    const uint32_t surfaceHeight = studioV05
+        ? static_cast<uint32_t>(grantedClientHeight) : static_cast<uint32_t>(height);
+    if (!m_surfaces.create(windowHandle, static_cast<uint32_t>(grantedWidth), surfaceHeight)) {
         delete window;
         m_runtime->common.release_windows();
         return false;
@@ -1843,6 +1870,19 @@ void Phase9GuiOwner::request_auto_close()
 bool Phase9GuiOwner::validate_window(gx_handle handle) const { return window_index(handle) >= 0; }
 bool Phase9GuiOwner::validate_widget(gx_handle handle) const { return widget_slot(handle) >= 0; }
 bool Phase9GuiOwner::pop_event(gx_event* event) { return m_runtime && m_runtime->common.events().try_pop(event); }
+
+bool Phase9GuiOwner::client_dimensions(gx_handle handle, uint32_t* outWidth, uint32_t* outHeight,
+                                       int32_t* outX, int32_t* outY) const
+{
+    const int index = window_index(handle);
+    if (index < 0 || !m_windows[index] || !outWidth || !outHeight || !outX || !outY ||
+        m_windows[index]->h <= compositor::TITLEBAR_HEIGHT) return false;
+    *outWidth = static_cast<uint32_t>(m_windows[index]->w);
+    *outHeight = static_cast<uint32_t>(m_windows[index]->h - compositor::TITLEBAR_HEIGHT);
+    *outX = m_windows[index]->x;
+    *outY = m_windows[index]->y;
+    return *outWidth != 0 && *outHeight != 0;
+}
 
 bool Phase9GuiOwner::resolve_surface(gx_handle handle, gui_render::Surface* surface) const
 {
@@ -2265,10 +2305,30 @@ static gx_result GX_CALL phase9_request_window(gx_app_context* context, const ch
 #if defined(GXOS_AARCH64_PHASE12)
     if (runtime->studioV05Adapter) {
         const compositor::WorkArea area = compositor::KernelCompositor::workArea();
-        arm64_print("[guideXOS] Studio v0.5 window request: width=");
+        uint32_t grantedWidth = 0;
+        uint32_t grantedHeight = 0;
+        uint32_t grantedOuterHeight = 0;
+        int32_t windowX = 0;
+        int32_t windowY = 0;
+        if (created && runtime->owner->client_dimensions(
+                *outWindow, &grantedWidth, &grantedHeight, &windowX, &windowY))
+            grantedOuterHeight = grantedHeight + compositor::TITLEBAR_HEIGHT;
+        arm64_print("[guideXOS] Studio v0.5 window sizing: requested-client=");
         phase3_serial_dec(static_cast<uint64_t>(width));
-        arm64_print(" height=");
+        arm64_print("x");
         phase3_serial_dec(static_cast<uint64_t>(height));
+        arm64_print(" granted-client=");
+        phase3_serial_dec(grantedWidth);
+        arm64_print("x");
+        phase3_serial_dec(grantedHeight);
+        arm64_print(" frame=");
+        phase3_serial_dec(grantedWidth);
+        arm64_print("x");
+        phase3_serial_dec(grantedOuterHeight);
+        arm64_print(" position=");
+        phase3_serial_dec(static_cast<uint64_t>(windowX));
+        arm64_print(",");
+        phase3_serial_dec(static_cast<uint64_t>(windowY));
         arm64_print(" display=");
         phase3_serial_dec(framebuffer::get_width());
         arm64_print("x");
@@ -2277,7 +2337,14 @@ static gx_result GX_CALL phase9_request_window(gx_app_context* context, const ch
         phase3_serial_dec(area.width);
         arm64_print("x");
         phase3_serial_dec(area.height);
-        arm64_print(created ? " centered=1 result=created\n" : " centered=1 result=rejected\n");
+        arm64_print("@");
+        phase3_serial_dec(area.x);
+        arm64_print(",");
+        phase3_serial_dec(area.y);
+        arm64_print(" titlebar=");
+        phase3_serial_dec(compositor::TITLEBAR_HEIGHT);
+        arm64_print((flags & GX_WINDOW_FLAG_CENTERED) != 0 ? " centered=1" : " centered=0");
+        arm64_print(created ? " result=created\n" : " result=rejected\n");
     }
 #endif
     return created ? GX_OK : GX_ERROR_FAILED;

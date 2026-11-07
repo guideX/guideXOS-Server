@@ -20,6 +20,8 @@ if (!$ArtifactDirectory.StartsWith($outPrefix, [StringComparison]::OrdinalIgnore
 foreach ($path in @($QemuPath, $FirmwareCode, $FirmwareVarsTemplate)) {
     if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required guest input is missing: $path" }
 }
+$qemuSha256 = (Get-FileHash -LiteralPath $QemuPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$firmwareCodeSha256 = (Get-FileHash -LiteralPath $FirmwareCode -Algorithm SHA256).Hash.ToLowerInvariant()
 if ([string]::IsNullOrWhiteSpace($QacCliPath)) { $QacCliPath = $env:GUIDEXOS_QAC_CLI }
 if ([string]::IsNullOrWhiteSpace($QacCliPath)) {
     $QacCliPath = Join-Path (Split-Path -Parent $repoRoot) 'guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
@@ -55,7 +57,7 @@ $guestArguments = @(
     '-machine','virt,gic-version=2,acpi=off','-cpu','cortex-a53','-m','512M',
     '-drive',"if=pflash,format=raw,unit=0,readonly=on,file=$FirmwareCode",
     '-drive',"if=pflash,format=raw,unit=1,file=$varsPath",
-    '-drive',"file=fat:rw:$esp,format=raw",'-display','none','-device','ramfb,xres=1280,yres=800',
+    '-drive',"file=fat:rw:$esp,format=raw",'-display','none','-device','ramfb',
     '-global','virtio-mmio.force-legacy=false','-device','virtio-keyboard-device','-device','virtio-tablet-device',
     '-monitor','none','-serial',"file:$guestLogPath",'-no-reboot',
     '-qmp',"tcp:127.0.0.1:$qmpPort,server=on,wait=off")
@@ -161,7 +163,7 @@ function Assert-QacOwnedGuest([int]$QacProcessId, [string]$ReservationId,
     $commandLine = [string]$child.CommandLine
     $machineMatches = [regex]::IsMatch($commandLine, '(?:^|\s)"?-machine"?\s+"?virt,gic-version=2,acpi=off"?(?:\s|$)')
     $cpuMatches = [regex]::IsMatch($commandLine, '(?:^|\s)"?-cpu"?\s+"?cortex-a53"?(?:\s|$)')
-    $displayMatches = [regex]::IsMatch($commandLine, '(?:^|\s)"?-device"?\s+"?ramfb,xres=1280,yres=800"?(?:\s|$)')
+    $displayMatches = [regex]::IsMatch($commandLine, '(?:^|\s)"?-device"?\s+"?ramfb"?(?:\s|$)')
     $qmpMatches = [regex]::IsMatch($commandLine, '(?:^|\s)"?-qmp"?\s+"?tcp:127\.0\.0\.1:' + $ExpectedQmpPort + '(?:,|"|\s)')
     if (!$pathMatches -or !$parentMatches -or !$machineMatches -or !$cpuMatches -or !$displayMatches -or !$qmpMatches) {
         throw "$Context QEMU ownership/profile mismatch (pid=$($child.ProcessId), parent=$($child.ParentProcessId), path=$($child.ExecutablePath), command=$commandLine)."
@@ -220,20 +222,42 @@ while ([DateTimeOffset]::UtcNow -lt $admissionDeadline -and !$qac.HasExited) {
 
 if (!$running) {
     if ($reservationId -and $reservationState -in @('Waiting','Blocked')) { $null = & $QacCliPath cancel $reservationId 2>&1 }
-    if ($ownershipFailure) { throw "Studio failed closed on QAC/QEMU ownership verification: $ownershipFailure" }
-    if (!$qac.WaitForExit(5000)) { throw 'QAC did not confirm cancellation of the ungranted request; no guest was launched.' }
+    if ($ownershipFailure -and !$qac.WaitForExit(15000)) {
+        $record = [ordered]@{
+            outcome = 'ABI3_GUEST_OWNERSHIP_UNVERIFIED'; reservation_id = $reservationId
+            qemu_launched = $false; qmp_port = $qmpPort; guest_log = $guestLogPath; qac_log = $qacLogPath
+            qac_process_id = $qac.Id; reservation_state = $reservationState; ownership_failure = $ownershipFailure
+            qac_process_still_active = $true; qac_status_before = $qacBefore.Status; qac_list_before = $qacBefore.List
+            qemu_process_ids_before = $baselineQemu; qemu_sha256 = $qemuSha256
+            firmware_code = [IO.Path]::GetFullPath($FirmwareCode); firmware_code_sha256 = $firmwareCodeSha256
+            firmware_vars_initial_sha256 = $initialVarsSha256; firmware_vars_template_sha256 = $varsTemplateSha256
+        }
+        $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding utf8
+        throw "Studio failed closed on QAC/QEMU ownership verification; QAC remains active and retains control. Do not start another guest until it exits. $ownershipFailure"
+    }
+    if (!$qac.HasExited) { throw 'QAC did not confirm cancellation/exit of the reservation; its process remains responsible for the guest.' }
     $qacText = $stdoutTask.GetAwaiter().GetResult() + $stderrTask.GetAwaiter().GetResult()
     $qacText | Set-Content -LiteralPath $qacLogPath -Encoding utf8
+    $qacAfter = Get-QacHealth 'Studio failed-admission cleanup'
+    $remainingQemu = Get-QemuProcesses
+    $guestLog = Read-GuestLog
+    $guestLog | Set-Content -LiteralPath (Join-Path $logDirectory 'guest-final.log') -Encoding utf8
     $record = [ordered]@{
-        outcome = 'ABI3_GUEST_PENDING_QAC'; reservation_id = $reservationId
-        qemu_launched = $false; qmp_port = $qmpPort; guest_log = $guestLogPath; qac_log = $qacLogPath
-        qac_status_after = (& $QacCliPath status 2>&1 | Out-String).Trim()
-    qac_status_before = $qacBefore.Status; qac_list_before = $qacBefore.List
-    qemu_process_ids_before = $baselineQemu
-    firmware_vars_initial_sha256 = $initialVarsSha256
-    firmware_vars_template_sha256 = $varsTemplateSha256
+        outcome = if ($ownershipFailure) { 'ABI3_GUEST_OWNERSHIP_FAILURE' } else { 'ABI3_GUEST_PENDING_QAC' }
+        reservation_id = $reservationId; reservation_state = $reservationState
+        qemu_launched = $qacText -match "QAC QEMU launched: reservation=$reservationId"
+        qmp_port = $qmpPort; guest_log = $guestLogPath; qac_log = $qacLogPath
+        ownership_failure = $ownershipFailure; qac_status_after = $qacAfter.Status; qac_list_after = $qacAfter.List
+        qac_status_before = $qacBefore.Status; qac_list_before = $qacBefore.List
+        qemu_process_ids_before = $baselineQemu; qemu_process_ids_after = @($remainingQemu | ForEach-Object { [int]$_.ProcessId })
+        qemu_sha256 = $qemuSha256; firmware_code = [IO.Path]::GetFullPath($FirmwareCode)
+        firmware_code_sha256 = $firmwareCodeSha256
+        firmware_vars_initial_sha256 = $initialVarsSha256; firmware_vars_template_sha256 = $varsTemplateSha256
     }
     $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding utf8
+    if ($ownershipFailure) {
+        throw "Studio failed closed on QAC/QEMU ownership verification; the ended run and child logs were preserved. $ownershipFailure"
+    }
     Write-Host "ABI3_GUEST_PENDING_QAC: request not granted within $AdmissionTimeoutSeconds seconds; no QEMU was launched." -ForegroundColor Yellow
     Write-Host "Session record: $sessionPath"
     exit 2
@@ -242,14 +266,17 @@ if (!$running) {
 $record = [ordered]@{
     outcome = 'ABI3_STUDIO_GUEST_IN_PROGRESS'; project = 'guideXOSServer-AARCH64-ABI3-Studio'
     reservation_id = $reservationId; qmp_port = $qmpPort; machine = 'virt,gic-version=2,acpi=off'
-    cpu = 'cortex-a53'; display = '1280x800'; qemu = [IO.Path]::GetFullPath($QemuPath); guest_log = $guestLogPath
+    cpu = 'cortex-a53'; display = 'ramfb with EDK2-selected GOP mode'; qemu = [IO.Path]::GetFullPath($QemuPath); guest_log = $guestLogPath
     qac_log = $qacLogPath; screenshot = $screenshotPath; qemu_launched = $true
-    studio_window_screenshot = $false; studio_close_and_cleanup = $false; runtime_deadline_seconds = $RuntimeSeconds
+    studio_window_screenshot = $false; initial_frame_screendump_captured = $false
+    initial_frame_visual_status = 'not-reviewed'; studio_close_and_cleanup = $false; runtime_deadline_seconds = $RuntimeSeconds
     post_studio_exit_seconds = $PostStudioExitSeconds; desktop_post_exit_wait_completed = $false
     qac_process_id = $qac.Id; managed_qemu_child_pid = [int]$ownedChild.ProcessId
     managed_qemu_child_parent_pid = [int]$ownedChild.ParentProcessId
     qac_status_before = $qacBefore.Status; qac_list_before = $qacBefore.List
     qemu_process_ids_before = $baselineQemu
+    qemu_sha256 = $qemuSha256
+    firmware_code = [IO.Path]::GetFullPath($FirmwareCode); firmware_code_sha256 = $firmwareCodeSha256
     firmware_vars_initial_sha256 = $initialVarsSha256
     firmware_vars_template_sha256 = $varsTemplateSha256
 }
@@ -265,16 +292,22 @@ $nextOwnershipCheck = [DateTimeOffset]::UtcNow
 $phase12PassObservedAt = $null
 $postStudioExitDeadline = $null
 $postStudioExitWaitCompleted = $false
-while ([DateTimeOffset]::UtcNow -lt $deadline) {
+while ([DateTimeOffset]::UtcNow -lt $deadline -or
+       ($null -ne $phase12PassObservedAt -and $null -ne $postStudioExitDeadline -and
+        [DateTimeOffset]::UtcNow -lt $postStudioExitDeadline)) {
     $lastGuest = Read-GuestLog
     if (!$screenshotTaken -and $lastGuest.Contains('GUIDEXOS_DEVELOPER_STUDIO_MARKER initial_render=PASS')) {
         $screenshotTaken = Capture-StudioScreen
         if ($screenshotTaken -and (Test-Path -LiteralPath $screenshotPath -PathType Leaf)) {
-            $record.studio_window_screenshot = $true
+            # A serial marker plus a QMP screendump does not establish that
+            # the Studio surface is visible. Leave visual acceptance for a
+            # human review of the preserved PNG.
+            $record.initial_frame_screendump_captured = $true
+            $record.initial_frame_visual_status = 'not-reviewed'
             $record.screenshot_sha256 = (Get-FileHash -LiteralPath $screenshotPath -Algorithm SHA256).Hash.ToLowerInvariant()
             $record.screenshot_bytes = (Get-Item -LiteralPath $screenshotPath).Length
             $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding utf8
-            Write-Host "Studio initial frame captured: $screenshotPath" -ForegroundColor Green
+            Write-Host "Initial guest framebuffer captured; visual status requires review: $screenshotPath" -ForegroundColor Green
         }
     }
     if ($lastGuest.Contains('AARCH64_PHASE12_PASS')) {
@@ -305,7 +338,7 @@ while ([DateTimeOffset]::UtcNow -lt $deadline) {
     Start-Sleep -Milliseconds 200
 }
 
-$timedOut = [DateTimeOffset]::UtcNow -ge $deadline
+$timedOut = [DateTimeOffset]::UtcNow -ge $deadline -and $null -eq $phase12PassObservedAt
 $lastGuest = Read-GuestLog
 if (!$qac.HasExited) {
     $quitSent = $false
@@ -321,7 +354,23 @@ if (!$qac.HasExited) {
         } catch { Start-Sleep -Milliseconds 250 }
         finally { $client.Dispose() }
     }
-    if (!$quitSent) { throw 'QMP shutdown failed; QAC remains responsible for the exact guest child and reservation.' }
+    if (!$quitSent) {
+        $ownedChildStillRunning = @(Get-QemuProcesses | Where-Object { [int]$_.ProcessId -eq [int]$ownedChild.ProcessId })
+        if ($ownedChildStillRunning.Count -eq 0 -and $qac.WaitForExit(10000)) {
+            # The managed child exited while the bounded QMP retry was in
+            # progress. Let QAC confirm its exit and reservation release below.
+        } else {
+            $shutdownFailure = 'QMP shutdown was not confirmed and the managed QAC run did not finish cleanly.'
+            $record.outcome = 'ABI3_STUDIO_GUEST_SHUTDOWN_UNVERIFIED'
+            $record.qmp_shutdown_failure = $shutdownFailure
+            $record.qac_process_alive = !$qac.HasExited
+            $record.managed_child_alive = $ownedChildStillRunning.Count -ne 0
+            $lastGuest = Read-GuestLog
+            $lastGuest | Set-Content -LiteralPath (Join-Path $logDirectory 'guest-final.log') -Encoding utf8
+            $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding utf8
+            throw "$shutdownFailure QAC remains responsible for the exact guest child and reservation. See $sessionPath"
+        }
+    }
     if (!$qac.WaitForExit(15000)) { throw 'QAC did not verify QEMU exit after QMP shutdown.' }
 }
 $qac.WaitForExit()

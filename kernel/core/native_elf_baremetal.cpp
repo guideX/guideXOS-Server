@@ -26,6 +26,7 @@
 #if defined(GXOS_AARCH64_PHASE9)
 #include "include/kernel/application_runtime.h"
 #include "include/kernel/aarch64_gui_render.h"
+#include "include/kernel/aarch64_gui_window_bounds.h"
 #if defined(GXOS_AARCH64_PHASE12)
 #include "include/kernel/aarch64_studio_v05_abi_adapter.h"
 #endif

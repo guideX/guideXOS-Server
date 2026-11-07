@@ -105,8 +105,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Hosted Studio v0.5 adapter compile failed.' }
 $testOutput = & $exe 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Hosted Studio v0.5 adapter tests failed: $($testOutput -join ' ')" }
 $testText = $testOutput -join "`n"
-if ($testText -notmatch 'aarch64StudioV05AdapterChecks=106/106') {
+if ($testText -notmatch 'aarch64StudioV05AdapterChecks=(\d+)/(\d+)' -or
+    [int]$Matches[1] -lt 106 -or $Matches[1] -ne $Matches[2]) {
     throw "Hosted adapter test count is unexpected: $testText"
 }
 Write-Output $testOutput
-Write-Host '[studio-v05-adapter] pinned source selection and 106 hosted checks: PASS' -ForegroundColor Green
+Write-Host "[studio-v05-adapter] pinned source selection and $($Matches[1]) hosted checks: PASS" -ForegroundColor Green

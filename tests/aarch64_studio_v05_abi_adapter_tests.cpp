@@ -1,4 +1,5 @@
 #include "kernel/aarch64_studio_v05_abi_adapter.h"
+#include "kernel/aarch64_gui_window_bounds.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -264,8 +265,48 @@ static void initialize(HostHarness* h)
 
 } // namespace
 
+static void test_centered_client_window_bounds()
+{
+    kernel::gui_render::CenteredClientWindowBounds bounds{};
+    CHECK(kernel::gui_render::centered_client_window_bounds(
+        960, 700, 1024, 768, 0, 0, 1024, 728, 24, 1024, 768, &bounds));
+    CHECK(bounds.x == 32 && bounds.y == 2);
+    CHECK(bounds.clientWidth == 960 && bounds.clientHeight == 700);
+    CHECK(bounds.outerWidth == 960 && bounds.outerHeight == 724);
+
+    CHECK(kernel::gui_render::centered_client_window_bounds(
+        960, 700, 800, 600, 0, 0, 800, 560, 24, 1024, 768, &bounds));
+    CHECK(bounds.x == 0 && bounds.y == 0);
+    CHECK(bounds.clientWidth == 800 && bounds.clientHeight == 536);
+    CHECK(bounds.outerWidth == 800 && bounds.outerHeight == 560);
+
+    CHECK(kernel::gui_render::centered_client_window_bounds(
+        960, 700, 640, 640, 0, 0, 640, 600, 24, 1024, 768, &bounds));
+    CHECK(bounds.clientWidth == 640 && bounds.clientHeight == 576);
+    CHECK(bounds.outerHeight == 600);
+
+    CHECK(!kernel::gui_render::centered_client_window_bounds(
+        0, 700, 800, 600, 0, 0, 800, 560, 24, 1024, 768, &bounds));
+    CHECK(!kernel::gui_render::centered_client_window_bounds(
+        960, -1, 800, 600, 0, 0, 800, 560, 24, 1024, 768, &bounds));
+    CHECK(!kernel::gui_render::centered_client_window_bounds(
+        1025, 700, 1200, 900, 0, 0, 1200, 860, 24, 1024, 768, &bounds));
+    CHECK(!kernel::gui_render::centered_client_window_bounds(
+        960, 769, 1200, 900, 0, 0, 1200, 860, 24, 1024, 768, &bounds));
+    CHECK(!kernel::gui_render::centered_client_window_bounds(
+        100, 100, 800, 600, 0, 0, 800, 24, 24, 1024, 768, &bounds));
+    CHECK(!kernel::gui_render::centered_client_window_bounds(
+        100, 100, 800, 600, 790, 0, 20, 560, 24, 1024, 768, &bounds));
+    CHECK(!kernel::gui_render::centered_client_window_bounds(
+        100, 100, UINT32_MAX, 600, UINT32_MAX - 5u, 0, 10, 560, 24,
+        1024, 768, &bounds));
+    CHECK(!kernel::gui_render::centered_client_window_bounds(
+        100, 100, 800, 600, 0, 0, 800, 560, 24, 1024, 768, nullptr));
+}
+
 int main()
 {
+    test_centered_client_window_bounds();
     CHECK(kernel::studio_abi::profile_from_identity(GX_ABI_NAME) == kernel::studio_abi::Profile::Aarch64400);
     CHECK(kernel::studio_abi::profile_from_identity(kernel::studio_abi::kV05StudioAbiIdentity) ==
           kernel::studio_abi::Profile::StudioV05_464);

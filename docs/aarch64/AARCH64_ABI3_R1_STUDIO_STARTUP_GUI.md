@@ -1,96 +1,117 @@
 # AArch64 ABI3 R1 Developer Studio Startup and GUI Qualification
 
-- **Qualification status:** `STUDIO_ARM64_GUI_PARTIAL` (latest completed diagnostic boot; R1c attempt queued)
-- **Scope:** Startup, first window, basic input, and clean shutdown. Guest Build/Run is a later milestone.
-- **Repository:** `D:\dev\guideXOSServer_AARCH64`
-- **Branch / expected base:** `AARCH64_SUPPORT` / `b02ce98e37e7a7566050a6e1fdf1a2c5831d0f30`
-- **Pinned Developer Studio:** `058c83fe1ae270a103eadc7caca961328e8abe2a`
+- **Current outcome:** `STUDIO_ARM64_GUI_PARTIAL` (R1d; 0 of 3 qualifying boots)
+- **Latest native result:** Studio window shown and closed cleanly in one QAC-authorized guest; key text input and repeatability remain unproven.
+- **Repository / branch:** `D:\dev\guideXOSServer_AARCH64` / `AARCH64_SUPPORT`
+- **Starting HEAD:** `4503ee6215cb6114352c855f484b2fff8084fa93` (equal to `origin/AARCH64_SUPPORT` at preflight)
+- **Pinned Studio:** `058c83fe1ae270a103eadc7caca961328e8abe2a`
 - **Pinned v0.5 SDK:** `f63a7710a30b49f785aac134abf06a3a6c5b5aca`
-- **Package ABI identity:** `guidexos-c-abi-v1-studio-v05-464`
+- **Package identity:** `guidexos-c-abi-v1-studio-v05-464`
 
-## Current result
+## Qualification result
 
-The first R1 guest attempt reached Studio's genuine `gx_main` entry after UEFI, the AArch64 kernel, DTB validation, GICv2/timer setup, scheduler and desktop startup, package discovery, NativeElf loading, and v0.5 adapter selection. The typed VFS status repair is confirmed in the guest: the optional Phase 29I sentinel lookup now reports `not_found` / `GX_ERROR_NOT_FOUND`. Studio initialization then reached window creation, where the first boot stopped with `request_window_failed` because the pinned application asks for a 960×700 window while the guest compositor was capped at 640×640. This is an observed Stage E failure; no first frame, input, or cleanup is claimed for that boot.
+R1c was admitted for a genuine guest boot and reached Studio's `gx_main`, but its 960×700 client request was rejected by the actual 800×560 desktop work area. That confirmed the earlier Stage E limit was still present in the candidate.
 
-A narrow status bridge now preserves `VFS_ERR_NOT_FOUND` and `VFS_ERR_NOT_MOUNT` across the AArch64 host service and private v0.5 adapter without changing either public ABI. The adapter suite covers both translations. The Stage E repair queries the compositor work area and permits an adapter-associated window up to 1024×768 only when the centered rectangle fits. A fresh production candidate contains that change. Its exclusive QAC request reached the 1,800-second bound behind another acceptance reservation and was canceled before launch. The candidate remains preserved; no qualifying R1 guest boot is claimed.
+R1d adds bounded client-size negotiation against the real framebuffer and work area. Four separate QAC-authorized R1d diagnostic guests reached the authentic pinned Studio entry, selected the exact v0.5 adapter, created a window, and emitted the first-render marker. A directly inspected framebuffer from the fourth run shows Studio's title bar, menus, Explorer and Outline panes, and welcome text. Mouse and focus events reached `poll_event`. One visible File → New File action also reached Studio, which returned `file_create=FAIL reason=no_active_project` because no project was open. Keyboard text delivery was not observed in any run.
 
-## Source, overlay, and package
+The fourth run then demonstrated an application close event, `application_close=PASS`, `clean_close=PASS`, zero live mappings/windows/widgets at GUI cleanup, runtime cleanup, and zero unexpected IRQs or exceptions. The desktop did not immediately repaint cleanly after close; a later Start-menu interaction followed by Escape restored the wallpaper. This one successful close/cleanup path and one interactive screenshot do not satisfy the keyboard, redraw, and three-fresh-boot acceptance criteria. Outcome remains **`STUDIO_ARM64_GUI_PARTIAL`**, with **0/3 qualifying boots**.
 
-The pinned Studio checkout was clean and was copied into the build output. Only the copied build driver and generated compatibility include were changed. The overlay restores shared model sources omitted from selected test lists, imports two namespaced Build diagnostic helpers, and maps the same-signature `window_destroy` spelling to `native_window_destroy`. It does not alter the Studio checkout or v0.5 ABI.
+### Earlier R1 work retained as history
 
-The package is a sectionless AArch64 `ET_EXEC` NativeElf with entry `gx_main`, loaded at `0x50000000`. The Studio ELF is 1,321,236 bytes, has three `PT_LOAD` segments and no dynamic relocations, and uses a 64 KiB initial stack. These are build and static ELF checks; guest memory safety still requires lifecycle evidence.
+The earlier R1 stages repaired ARM64 firmware-DTB handling and mapped the optional Studio sentinel's `VFS_ERR_NOT_FOUND` and `VFS_ERR_NOT_MOUNT` through private bridge values `-1001` and `-1002` to the exact v0.5 error results. The bridge is private to the Phase 12 adapter path; other VFS errors keep their generic mapping, and neither public callback table changed. The first R1a guest then reached authentic Studio initialization but could not create the requested 960×700 window at the earlier 640×640 limit. R1c added work-area awareness and a 1024×768 adapter maximum, but its first newly admitted guest showed that rejecting oversized requests still failed at the real 800×560 work area. R1d's bounded grant behavior described here supersedes that R1c result.
 
-| Artifact | SHA-256 |
+The Studio source remains the clean pinned `058c83fe1ae270a103eadc7caca961328e8abe2a` checkout; generated compatibility and build overlays were confined to copied build inputs. The package is a sectionless AArch64 `ET_EXEC` NativeElf with entry `gx_main`, loaded at `0x50000000`, with three `PT_LOAD` segments, no dynamic relocations, and a 64 KiB initial stack. The 400-byte AARCH64 ABI-v1 table and the 464-byte v0.5 table remain separate typed contracts. The documented v0.5 NativeWindow create/set/run callbacks and some activation/debug/cancellation services remain unavailable or untested and are outside the startup behavior proven here.
+
+## Candidate identity and bounded sizing repair
+
+The R1d candidate was built from the requested starting HEAD. It recompiled the ARM64 production kernel and ABI adapter, and reused the source-matched R1c Studio ELF, package manifest, UEFI loader, and RAM disk after hash verification. It did not alter the Studio source or either public ABI table.
+
+The preserved R1c candidate remains at `out/aarch64-abi3-r1c-studio-build-20261105`; its manifest SHA-256 is `05a6266757ab127624614317529bae78cfc8a7009ed907b22d93bc3fb397c13b`, and its kernel ELF SHA-256 is `4f61e7a1dfe95cd4d9fb34f9cd84f301d434f4aaa6b9d829d4121f86d7a5e883`. Its Studio ELF (`a08fc9c4599475165874a983b7d11366dcac2f35f5dc377ad6e875a960f2e483`), package manifest (`62af7dce96baa5605092bb561e6c4bfe5428367bff8bbb229d4f01d41691ad4c`), RAM disk (`19a1edf66e05e2ed410730259032867fed89d5539cf7e91538adde24b6fccaa9`), and UEFI loader (`1605c55a4d7c0c7b0589bd181e28d2e32f7ef9da31a6aeb23695c237ff7bfe42`) matched the R1d reuse inputs. The R1c directory was preserved unchanged.
+
+| R1d artifact | SHA-256 |
 | --- | --- |
+| Candidate manifest | `f536edf970b20a978976320474df4e422521ef31b10ca1dd8962c5ad19a965b4` |
+| ARM64 kernel ELF | `639444df91749b60a5d26390d69fbe9b2b7db2bf2365f7e44b48736bf533eb9c` |
 | Studio ELF | `a08fc9c4599475165874a983b7d11366dcac2f35f5dc377ad6e875a960f2e483` |
-| `Apps/DeveloperStudio/app.json` | `62af7dce96baa5605092bb561e6c4bfe5428367bff8bbb229d4f01d41691ad4c` |
-| R1c `candidate-manifest.json` | `05a6266757ab127624614317529bae78cfc8a7009ed907b22d93bc3fb397c13b` |
-| ARM64 kernel ELF (R1c) | `4f61e7a1dfe95cd4d9fb34f9cd84f301d434f4aaa6b9d829d4121f86d7a5e883` |
+| Studio package manifest (`app.json`) | `62af7dce96baa5605092bb561e6c4bfe5428367bff8bbb229d4f01d41691ad4c` |
+| RAM disk | `19a1edf66e05e2ed410730259032867fed89d5539cf7e91538adde24b6fccaa9` |
 | AArch64 UEFI loader | `1605c55a4d7c0c7b0589bd181e28d2e32f7ef9da31a6aeb23695c237ff7bfe42` |
-| R1c RAM disk | `19a1edf66e05e2ed410730259032867fed89d5539cf7e91538adde24b6fccaa9` |
+| QEMU 11.0.0 | `8d2183e745155a303ffb9fd861c5da31c5e6c19fcbfd082081cc3e4bcdb0e748` |
+| EDK2 AArch64 code firmware | `47765fe344818cbc464b1c14ae658fb4b854f5c2ceffa982411731eb4865594d` |
+| Fresh UEFI variables template | `b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f` |
 
-R1a's diagnostic run used `out/aarch64-abi3-r1a-studio-build-20261105` and completed as a partial Stage E failure. The current exclusive request uses `out/aarch64-abi3-r1c-studio-build-20261105`, built after the work-area/window-size repair. Its package, ELF, EFI, and kernel hashes are recorded above.
+The window-bound helper is `kernel/core/include/kernel/aarch64_gui_window_bounds.h`; the ARM64 GUI owner applies it only to the Studio v0.5 adapter. It validates positive requested dimensions, compositor work-area and framebuffer bounds, title-bar space, configured maximum dimensions, and arithmetic before allocation. Requested, granted client, outer frame, position, display, and work-area values are logged separately. Other ABI callers retain their existing sizing path. No compositor capacity was fabricated, and no second window manager was introduced.
 
-The R1c candidate manifest records server base `b02ce98e37e7a7566050a6e1fdf1a2c5831d0f30`, the pinned Studio and SDK revisions above, `production-ui`, and all package hashes. The generated compatibility include SHA-256 is `fe1aa62429adae70848ee1566c23e4d25056e46537442e0df1e57ebeaddc274b`; the copied Studio build driver SHA-256 is `f7b0bb8d77887cf68deb61b5cf15480287d9bc0f5a651a7f0a177c995ee3645c`. No source in the original Studio checkout was modified.
+Each R1d guest reported the following sizing result:
 
-## Narrow startup repair
+```text
+requested-client=960x700 granted-client=800x536 frame=800x560
+position=0,0 display=800x600 work-area=800x560@0,0 titlebar=24 result=created
+```
 
-The guest trace reached the package and ABI boundary, then reported `DEVELOPER_STUDIO_PHASE29I_SENTINEL_LOOKUP_ERROR` for `/Apps/DeveloperStudio/.phase28q-diagnostic`. The file is optional; VFS correctly returned `VFS_ERR_NOT_FOUND`, but `phase11_file_stat` translated every non-success status to `GX_ERROR_FAILED`, so Studio did not receive the expected not-found result.
+The client surface is 800×536. Its outer frame, including the 24-pixel title bar, fits the full 800×560 work area. The actual framebuffer remains 800×600; the bottom 40 pixels are outside the desktop work area.
 
-The ARM64 Phase 12 NativeElf path now forwards not-found and mount-unavailable through private bridge values `-1001` and `-1002`; the v0.5 adapter translates those to its own `GX_ERROR_NOT_FOUND` and `GX_ERROR_NOT_MOUNTED`. These bridge values never enter either public callback table. Other VFS failures retain the generic failure mapping. Phase 11 builds, which do not include the v0.5 adapter, retain their prior generic behavior.
+## QAC-authorized native evidence
 
-The guest reached `request_window_ex` after completing Studio construction; that is the mandatory window operation observed in the pinned startup path. It already forwards through the typed v0.5 adapter to the existing ARM64 window manager. The ABI2 `native_window_create`, `native_window_set_text`, and `native_window_run` slots remain unsupported because the startup trace did not call them. Document activation, debugger, and cancellation callbacks likewise were not observed before first-window creation. Their later application workflows are outside this startup milestone.
+All four R1d guest runs used the QAC exclusive reservation flow, fresh UEFI variable copies, the QEMU-owned guest child, and the AArch64 UEFI candidate. The runner used `-device ramfb` so EDK2 selected a real GOP mode; the earlier `ramfb,xres=1280,yres=800` option was invalid for this QEMU build.
 
-## Hosted and build regression gates
-
-| Gate | Result | Evidence |
+| Reservation | Guest evidence | End state |
 | --- | --- | --- |
-| ABI2/v0.5 adapter | PASS, 106/106 | `scripts/test-aarch64-studio-v05-adapter.ps1`; includes precise not-found and mount-status translation. |
-| ABI1 and ABI3 layouts | PASS | 400-byte AARCH64 and 464-byte v0.5 layouts and offsets remain separately verified. |
-| Unsafe cross-SDK linkage | PASS negative control | The 400-byte AARCH64 SDK rejects the v0.5 document-activation consumer for the expected missing field. |
-| Standalone Phase 12 SDK alignment | Semantic checks PASS | Includes both SDK include-resolution checks, both layout probes, 9/9 activation checks, and expected rejection. In PowerShell `$LASTEXITCODE` remains `1` after the intentionally rejected final native compile; this is the historical exit-code anomaly, not a failed positive compile or ABI check. The integrated Phase 12 build completes successfully. |
-| Phase 10 architecture/resolver controls | PASS | ARM64 and AMD64 payload selection plus missing, unknown, wrong-machine, traversal, malformed, oversized, duplicate, and legacy negative controls. |
-| Phase 11 compiler/package build | PASS | ARM64/AMD64 compile paths and staged package; rerun passed after scoping the private bridge to Phase 12. |
-| Phase 12 production build | PASS | `scripts/build-aarch64-phase12.ps1 -ProductionStudio`; authentic pinned sources, hosted model/startup/debugger suites, NativeElf link, and production package staging. |
-| Phase 2 captured firmware DTB | PASS, 52 assertions | Preserved source fixture SHA-256 `5aec32b925cb7259d651aca355106e58d77f7f1c553d80f0420c5b3e3036f311`; parser result 1, diagnostic 0, stage 4, token 9, offset 7096. The fresh default synthetic suite also passes 51 assertions. |
-| Phase 3 scheduler controls | PASS | ARM64 Phase 3 build and `AARCH64_PHASE3_HOST_CONTRACT_PASS`. |
-| Phase 4 allocator/VFS and SCHEDR1 controls | PASS | Phase 4 build, resource-table controls, and simulated scheduler/IRQ host workload. |
-| GICv3 hosted regression | PASS, 62 assertions | `scripts/test-aarch64-gicv3-host.ps1`; hosted register model only, no guest launched. |
+| `284aeb81e8f741c29425871de635afd8` — `abi3-guest-20261107-051957-653` | Reached `gx_main`, v0.5 window creation and first-render markers. Guest observed mouse and focus events. A later click caused the Studio interface to become visible. No key event or close was observed. | 300-second runner limit; QAC recorded its child exit code 0 and released this reservation. Not a qualifying boot. |
+| `6d01c972214c43d58a691b16db4529f5` — `abi3-guest-20261107-052654-887` | Reached the same startup/window stages and mouse/focus delivery. File → New File produced `file_create=FAIL reason=no_active_project`. No key event was observed. | Runner's QMP shutdown/finalization failed at its runtime limit before it wrote `qac.log` or a final session record; `session.json` remains `IN_PROGRESS`. A later QAC status/list showed no R1d session or QEMU child, but this run's own release record is absent. |
+| `7aa2f3ea1c2e4482b4d696cecc368402` — `abi3-guest-20261107-053900-560` | Reached the same startup/window stages and mouse/focus delivery. No keyboard event or successful project interaction was observed. | Runner's QMP shutdown/finalization failed at its runtime limit before it wrote `qac.log` or a final session record; `session.json` remains `IN_PROGRESS`. A later QAC status/list showed no R1d session or QEMU child, but this run's own release record is absent. |
+| `9caa37eea7b9468592429f9b0f3c4dbd` — `abi3-guest-20261107-055837-452` | Reached the same startup/window stages. Focused screenshot reviewed; mouse/focus reached `poll_event`. QMP Ctrl+Shift+O and typing were attempted, but no Studio key event or entered text was observed. Close click at the title-bar X reached `poll_event`; close and cleanup markers passed. | QAC recorded child PID `10168` exit code 0 and reservation release. This is the one observed clean Studio close and runtime cleanup. The runner's old session record says `ABI3_STUDIO_GUEST_RUNTIME_TIMEOUT`; this is a classification bug because the Phase 12 pass marker was seen and the QAC child exited cleanly. The corrected runner allows the full post-close observation window after that marker. |
 
-These results are host/build evidence. They do not prove guest Studio startup, GUI input, safe application teardown, Build/Run, or physical-hardware support.
+The guest trace in each run includes ARM64 kernel/firmware startup, DTB acceptance, GICv2 and scheduler setup, desktop initialization, package discovery, exact ABI identity selection, NativeElf load, `gx_main`, window creation, and first-render markers. In the fourth run the closing trace additionally contains:
 
-## QAC request and guest protocol
+```text
+ABI3 guest observed Studio close event through v0.5 poll_event
+application_close=PASS
+clean_close=PASS
+NativeElf GUI cleanup: PASS mappings=0 windows=0 widgets=0
+ABI3 Developer Studio runtime cleanup: PASS
+AARCH64_PHASE12_PASS
+unexpected-irq=0 exceptions=0 last-unexpected-irq=0
+```
 
-The R1 guest runner uses QAC 2.0.0, the `guideXOSServer-AARCH64-ABI3-Studio` acceptance project, a 1,800-second bounded admission wait, a 300-second guest limit, a fresh copy of the UEFI variables template, and QAC child/owner/profile checks. It does not start QEMU outside QAC.
+The durable guest counter line reports `unexpected-irq=0`, `exceptions=0`, and `last-unexpected-irq=0`. The fourth run's QAC log records the same reservation grant, QEMU child exit and reservation release. After close, an immediate capture retained part of the old Studio surface; a later Start-menu interaction and Escape produced a wallpaper-only desktop. Desktop repaint after close therefore remains a reliability question.
 
-| Reservation | Project | State at this report | Result |
-| --- | --- | --- | --- |
-| `8e3ca2521621413eaafeba161c9f1197` | `guideXOSServer-AARCH64-ABI3-Studio` | Completed and released | R1a reached `gx_main`; typed not-found worked; failed Stage E at window creation. Session: `out/aarch64-abi3-r1a-studio-build-20261105/abi3-guest-20261105-191314-099`. |
-| `be8b4c6fb57d49c2a901ebb8dee27b89` | `guideXOSServer-AARCH64-ABI3-Studio` | Canceled at 1,800-second timeout | No QEMU guest launched. Session: `out/aarch64-abi3-r1c-studio-build-20261105/abi3-guest-20261105-193825-717`; QAC log records `Cancelled by client`. |
-| `2755eece88ce4fd2a1f7cb85463f831e` | `guideXOSServer` | Running; QAC-owned x86_64 QEMU child PID 5924 | Unrelated active acceptance reservation; left untouched. |
+### Screenshot evidence
 
-An earlier QAC runner ownership-probe diagnostic used reservation `f380836540bf467a8e50ca3744e0d03a`, child PID `4364`, and QMP port `56443`. The probe failed its owner check, so the exact QAC-owned child was manually sent QMP `quit`; QAC then returned to zero sessions, reservations, and QEMU processes. No Studio qualification markers are claimed from that harness diagnostic.
+The automatically captured `studio-initial.png` is a wallpaper frame, despite an old `session.json` boolean that called it a Studio screenshot. A serial render marker plus screendump did not establish visibility. The runner now records only that a framebuffer capture exists and labels visual review separately. The screenshot below is the fourth run's later, directly reviewed frame after focus interaction; it visibly shows the running Studio UI:
 
-QAC reported online with zero foreign QEMU processes both before and after the R1c request; after cancellation it retained only the unrelated managed x86_64 acceptance guest, with zero queued reservations and zero foreign QEMU processes. That reservation was left untouched. The R1c session record shows a fresh UEFI variables copy matching the template hash. A guest serial log and screenshot were not produced because no QEMU guest launched. Each fresh attempt uses separate UEFI variables and its own QAC reservation.
+[Focused Studio frame](../../out/aarch64-abi3-r1d-studio-build-20261107/abi3-guest-20261107-055837-452/studio-after-key-combo-focused.png) (SHA-256 `7a7590b9e168115b075e7d1ddb720f96973af920714430ce176e78a9ae797c6b`).
 
-For an authorized guest attempt, record the following separately: UEFI/kernel/DTB/GICv2/timer/scheduler/desktop; package discovery and manifest identity; NativeElf load and adapter selection; `gx_main`; Studio initialization; window creation and first draw; guest-observed mouse, focus, and keyboard events; redraw after exposure; close event; adapter/image/stack/window cleanup; and desktop responsiveness after Studio exits. QMP acknowledgements alone are not application evidence.
+Other preserved captures in that run are `studio-after-key-shortcut.png`, `studio-desktop-after-close.png`, `desktop-responsive-start-menu.png`, and `desktop-responsive-restored.png` in the same directory. The restored wallpaper proves a later desktop redraw after input; it does not prove the immediate post-close repaint is reliable.
 
-## Guest GUI and lifecycle evidence
+The supported `ramfb` device was already in use for these four runs. Post-close accounting and record-accuracy fixes were made afterward; they do not change the staged kernel, Studio ELF, firmware, or RAM disk. The runner now gives a successful Studio exit the full post-close observation interval, avoids claiming a visible Studio frame from a serial marker alone, and preserves an explicit unverified-shutdown record if bounded QMP shutdown fails. Only PowerShell syntax and hosted adapter checks have been rerun for those post-run changes; no fifth guest is claimed.
 
-R1a did not create a window, so it produced no GUI screenshot, focus/input, redraw, close, or cleanup evidence. R1c was not admitted and did not launch. Do not count either attempt as a qualifying boot unless it independently demonstrates the full acceptance sequence.
+### Earlier R1c result and harness diagnostic
 
-| Required behavior | Current evidence |
-| --- | --- |
-| Visible window and initial client-area drawing | R1a failed before window creation; R1c pending QAC admission. |
-| Clipping and redraw after exposure | Not observed. |
-| Pointer, button, focus, keyboard text, basic editor interaction | Not observed. |
-| Window close, app exit, resource release, desktop responsiveness | Not observed. |
-| Three fresh qualifying boots | 0 of 3. |
-| Studio guest Build/Run and disposable workspace VFS workflow | Not part of this startup milestone; not yet qualified. |
-| Physical hardware | Not tested. |
+The real R1c guest `abi3-guest-20261107-050718-991` (reservation `02e9ce6c9521427fae07ec86268c44be`) was QAC-authorized and did reach the authentic `gx_main` and v0.5 adapter, but it rejected the 960×700 client request against the 800×560 work area. It did not create or render a window and is not a qualifying boot. Its serial log, QAC log, and session record remain in `out/aarch64-abi3-r1c-studio-build-20261105/abi3-guest-20261107-050718-991/`. R1c's earlier 1,800-second queued request without a launch remains historical and is not counted.
 
-## Remaining acceptance
+One preliminary harness check directly invoked QEMU with unsupported `ramfb,xres,yres` properties, outside QAC. QEMU rejected the option and exited before the guest CPU ran; its diagnostic is preserved in `abi3-guest-20261107-050049-389/runner-diagnostic.json` and was excluded from qualification. QAC was checked clear afterward. This was a harness safety deviation and is disclosed here; subsequent guest attempts used only QAC-authorized launches.
 
-The accepted GICv2 Phase 4 profile is used to minimize unrelated variables; GICv3 remains a separate qualification. Document activation, debugger and cancellation services, and the v0.5 NativeWindow create/set/run callbacks were previously identified as optional for the pinned Studio startup path; their guest behavior is not claimed here.
+## Hosted and production gates
 
-Complete an authorized Studio open/interaction/close cycle with guest-side event, redraw, and cleanup evidence, then perform three fresh independent qualifying boots after the successful diagnostic run. Keep VFS workspace boundary/read/write checks and actual Studio Build plus ordinary Run as separate remaining acceptance work. Do not count a diagnostic boot unless it independently meets every GUI and cleanup requirement.
+Hosted checks are separate from the guest evidence above and cannot qualify a boot.
+
+| Gate | Result | Evidence status |
+| --- | --- | --- |
+| v0.5 adapter and window bounds | PASS, 125/125 | Reran after the bounds repair with `scripts/test-aarch64-studio-v05-adapter.ps1`; output `out/aarch64-studio-v05-adapter-host-r1d-20261107-final`; includes framebuffer/work-area dimensions, title-bar bounds, invalid requests, and overflow cases. |
+| ABI1 unsafe-linkage negative control | PASS | Source-matched prior gate; the distinct 400-byte AARCH64 table rejects the v0.5 activation consumer. |
+| Phase 10 package selection controls | PASS | Rebuilt in the R1d production build; ARM64/AMD64 selection and malformed, unsupported, traversal, duplicate and legacy negative controls. |
+| Phase 11 compiler/package build | PASS | Source-matched R1c build result carried forward; the Studio ELF and package are hash-identical in R1d. |
+| Phase 12 production ARM64 integration | PASS | Rebuilt kernel and ABI adapter with `scripts/build-aarch64-phase10.ps1 -Phase12Proof -StudioGuestQualification -StudioV05SdkInclude ...`; EFI/kernel link and staging passed. |
+| Captured-DTB parser regression | PASS, 52 assertions | Preserved captured-firmware fixture; unchanged parser source. |
+| Phase 3/4 scheduler, allocator and VFS controls | PASS | Source-matched earlier results; no scheduler, VFS, GIC, or DTB implementation was changed here. |
+| GICv3 hosted regression | PASS, 62 assertions | Source-matched hosted register-model suite; no guest launched for this gate. |
+| PowerShell guest-runner syntax | PASS | Parser validation after runner lifecycle changes. |
+
+The standalone Phase 12 alignment script still has its documented `$LASTEXITCODE` anomaly after an intentionally rejected negative-control compile; positive alignment, SDK include, layout, and activation checks passed. It did not block the integrated production build. The ABI2 adapter documentation was reviewed: the 400-byte AARCH64 and 464-byte v0.5 contracts remain distinct and unchanged. No ABI2 documentation or public ABI was edited.
+
+## Fresh-boot repeatability and remaining acceptance
+
+There are **0 of 3 qualifying fresh boots**. Diagnostic boots that miss keyboard text, a complete interactive redraw, clean post-close desktop response, or complete run-specific QAC evidence do not count. Acceptance still needs three fresh QAC-authorized guests demonstrating visible Studio layout, mouse and keyboard text delivered through the v0.5 event loop, a visible state change/redraw, clean application close and resource cleanup, and a responsive desktop afterward.
+
+Studio guest workspace VFS boundaries/read-write behavior and actual Build plus ordinary Run remain later milestones and were not exercised. Physical hardware is untested. Preserve the exact v0.5 464-byte adapter and the independent 400-byte AARCH64 contract.
