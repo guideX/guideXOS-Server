@@ -10534,6 +10534,9 @@ static const uint16_t kNavigatorControlledHttpsPort = 8443;
 static const char* kNavigatorControlledHttpsPathPrefix = "/navigator-smoke/";
 static const char* kNavigatorPolicyDevHttpsHost = "dev.guidexos.test";
 static const char* kNavigatorPolicyProdHttpsHost = "prod.guidexos.test";
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+static const uint16_t kNavigatorQualificationDnsPort = 55353;
+#endif
 static const char* kNavigatorPolicyValidatedPathPrefix = "/navigator-policy/";
 static const char* kNavigatorPublicPilotHttpsHost = "public-pilot.guidexos.test";
 static const char* kNavigatorPublicPilotPathPrefix = "/navigator-public-pilot/";
@@ -10603,6 +10606,7 @@ struct KernelHttpResponse {
     bool dnsUsed;
     char dnsHost[gxos::web::kHttpSharedMaxHostnameBytes + 1];
     char dnsResolvedIp[16];
+    char dnsResolutionSource[40];
     char dnsError[64];
     char requestedUrl[kKernelHttpUrlLen];
     char finalUrl[kKernelHttpUrlLen];
@@ -10734,6 +10738,7 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->dnsUsed = false;
     response->dnsHost[0] = '\0';
     response->dnsResolvedIp[0] = '\0';
+    response->dnsResolutionSource[0] = '\0';
     response->dnsError[0] = '\0';
     response->requestedUrl[0] = '\0';
     response->finalUrl[0] = '\0';
@@ -11932,6 +11937,7 @@ static bool kernel_http_resolve_host(KernelHttpUrl* parsed, KernelHttpResponse* 
     response->dnsUsed = false;
     response->dnsHost[0] = '\0';
     response->dnsResolvedIp[0] = '\0';
+    response->dnsResolutionSource[0] = '\0';
     response->dnsError[0] = '\0';
     s_kernelLastDnsUsed = false;
     s_kernelLastDnsHost[0] = '\0';
@@ -11945,11 +11951,17 @@ static bool kernel_http_resolve_host(KernelHttpUrl* parsed, KernelHttpResponse* 
     strcopy(s_kernelLastDnsHost, parsed->host, sizeof(s_kernelLastDnsHost));
 
 #ifdef GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE
-    if (streq_local(parsed->host, kNavigatorControlledHttpsHost) ||
-        nav_ends_with(parsed->host, ".guidexos.test")) {
+    bool forceQualificationDns = false;
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+    forceQualificationDns = streq_local(parsed->host, kNavigatorPolicyProdHttpsHost);
+#endif
+    if (!forceQualificationDns &&
+        (streq_local(parsed->host, kNavigatorControlledHttpsHost) ||
+         nav_ends_with(parsed->host, ".guidexos.test"))) {
         parsed->ip = kernel::ipv4::make_ip(10, 0, 2, 2);
         kernel::ipv4::ip_to_string(parsed->ip, response->dnsResolvedIp);
         strcopy(s_kernelLastDnsResolvedIp, response->dnsResolvedIp, sizeof(s_kernelLastDnsResolvedIp));
+        strcopy(response->dnsResolutionSource, "controlled-smoke-gateway-map", sizeof(response->dnsResolutionSource));
         return true;
     }
 #endif
@@ -11971,6 +11983,7 @@ static bool kernel_http_resolve_host(KernelHttpUrl* parsed, KernelHttpResponse* 
     }
     parsed->ip = resolvedIp;
     kernel::ipv4::ip_to_string(parsed->ip, response->dnsResolvedIp);
+    strcopy(response->dnsResolutionSource, "kernel-dns-udp", sizeof(response->dnsResolutionSource));
     strcopy(s_kernelLastDnsResolvedIp, response->dnsResolvedIp, sizeof(s_kernelLastDnsResolvedIp));
     return true;
 }
@@ -18806,6 +18819,13 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     char url[160];
     navigator_https_policy_url(httpsPolicy, "/navigator-policy/ok.html", url, sizeof(url));
     const char* expectedHost = navigator_https_policy_host_for_info(httpsPolicy);
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+    if (policyEnabled && streq_local(expectedHost, kNavigatorPolicyProdHttpsHost)) {
+        kernel::dns::set_qualification_server(kernel::ipv4::make_ip(10, 0, 2, 2),
+            kNavigatorQualificationDnsPort);
+        kernel::dns::cache_flush();
+    }
+#endif
     char requestedUrl[160];
     int statusCode = 0;
     int bodyBytes = 0;
@@ -18835,6 +18855,25 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
         transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
         &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
     const gxos::GxosTlsLocalHandshakeResult& tlsResult = s_kernelHttpResponse.tlsResult;
+    const kernel::dns::QueryDiagnostics* dnsDiagnostics = kernel::dns::get_last_query_diagnostics();
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+    const uint32_t qualificationDnsGateway = kernel::ipv4::make_ip(10, 0, 2, 2);
+    const bool qualificationDnsPassed = !policyEnabled || (
+        s_kernelHttpResponse.dnsUsed &&
+        streq_local(s_kernelHttpResponse.dnsHost, kNavigatorPolicyProdHttpsHost) &&
+        streq_local(s_kernelHttpResponse.dnsResolutionSource, "kernel-dns-udp") &&
+        streq_local(s_kernelHttpResponse.dnsResolvedIp, "10.0.2.2") &&
+        dnsDiagnostics && dnsDiagnostics->serverIP == qualificationDnsGateway &&
+        dnsDiagnostics->destinationPort == kNavigatorQualificationDnsPort &&
+        dnsDiagnostics->queryId != 0 && dnsDiagnostics->queryBytes > 0 &&
+        dnsDiagnostics->replySourceValidated &&
+        dnsDiagnostics->replySourceIP == qualificationDnsGateway &&
+        dnsDiagnostics->replySourcePort == kNavigatorQualificationDnsPort &&
+        dnsDiagnostics->acceptedReplies > 0 && dnsDiagnostics->replyAnswerCount > 0 &&
+        tlsResult.tcpConnected);
+#else
+    const bool qualificationDnsPassed = true;
+#endif
     const bool expectedResponseContent = s_kernelLastSmokeExpectedPolicyContent;
     const bool boundedResponse = bodyBytes > 0 && bodyBytes <= 256 * 1024 &&
         !s_kernelHttpResponse.bodyCapHit && !s_kernelHttpResponse.headerCapHit;
@@ -18873,7 +18912,8 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
                 nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
                 nav_smoke_text_equals(tlsStatus, "Success") &&
                 nav_smoke_text_equals(tlsSniHost, expectedHost) &&
-                nav_smoke_text_equals(sourceType, "https"))
+                nav_smoke_text_equals(sourceType, "https") &&
+                qualificationDnsPassed)
         : nav_smoke_text_equals(requestedUrl, url) &&
             nav_smoke_text_equals(finalUrl, url) &&
             error[0] != '\0' &&
@@ -18906,7 +18946,42 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     serial::puts(s_kernelHttpResponse.dnsHost[0] ? s_kernelHttpResponse.dnsHost : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolved_ip=");
     serial::puts(s_kernelHttpResponse.dnsResolvedIp[0] ? s_kernelHttpResponse.dnsResolvedIp : "(none)");
-    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=controlled-smoke-gateway-map");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=");
+    serial::puts(s_kernelHttpResponse.dnsResolutionSource[0] ? s_kernelHttpResponse.dnsResolutionSource : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_result=");
+    serial::puts(s_kernelHttpResponse.dnsUsed && s_kernelHttpResponse.dnsResolvedIp[0] ? "PASS" : "FAIL");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_server=");
+    if (dnsDiagnostics) {
+        char dnsServer[16];
+        kernel::ipv4::ip_to_string(dnsDiagnostics->serverIP, dnsServer);
+        serial::puts(dnsServer);
+    } else { serial::puts("0.0.0.0"); }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_destination_port=");
+    serial_put_dec(dnsDiagnostics ? dnsDiagnostics->destinationPort : 0);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_query_id=");
+    serial_put_dec(dnsDiagnostics ? dnsDiagnostics->queryId : 0);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_query_bytes=");
+    serial_put_dec(dnsDiagnostics ? dnsDiagnostics->queryBytes : 0);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_reply_bytes=");
+    serial_put_dec(dnsDiagnostics ? dnsDiagnostics->replyBytes : 0);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_reply_source=");
+    if (dnsDiagnostics) {
+        char replySource[16];
+        kernel::ipv4::ip_to_string(dnsDiagnostics->replySourceIP, replySource);
+        serial::puts(replySource);
+        serial::puts(":");
+        serial_put_dec(dnsDiagnostics->replySourcePort);
+    } else { serial::puts("0.0.0.0:0"); }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_reply_source_validated=");
+    serial::puts(dnsDiagnostics && dnsDiagnostics->replySourceValidated ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_accepted_replies=");
+    serial_put_dec(dnsDiagnostics ? dnsDiagnostics->acceptedReplies : 0);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.dns_answer_count=");
+    serial_put_dec(dnsDiagnostics ? dnsDiagnostics->replyAnswerCount : 0);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tcp_target=");
+    serial::puts(s_kernelHttpResponse.dnsResolvedIp[0] ? s_kernelHttpResponse.dnsResolvedIp : "(none)");
+    serial::puts(":");
+    serial_put_dec(kNavigatorControlledHttpsPort);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=");
     serial_put_dec64((uint64_t)verifyFlags);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.sni_host=");
@@ -20340,16 +20415,20 @@ static bool printNavigatorGuestDnsQualificationCase()
 
     const bool dnsPassed = dnsStatus == kernel::dns::DNS_OK && resolvedIp != 0 && diag &&
         diag->serverIP == expectedResolver && diag->destinationPort == kernel::dns::DNS_PORT &&
+        diag->queryId != 0 && diag->sourcePort >= 49152 && diag->queryBytes > 0 &&
+        diag->sendAttempts > 0 && diag->lastSendResult > 0 &&
         diag->replySourceValidated && diag->replySourceIP == expectedResolver &&
         diag->replySourcePort == kernel::dns::DNS_PORT && diag->acceptedReplies > 0 &&
         diag->replyAnswerCount > 0;
 
     bool tcpConnected = false;
+    bool tcpHandoffAttempted = false;
     int tcpSocket = -1;
     int tcpConnectResult = kernel::tcp::TCP_ERR_NETDOWN;
     if (dnsPassed) {
         tcpSocket = kernel::tcp::tcp_socket();
         if (tcpSocket >= 0) {
+            tcpHandoffAttempted = true;
             tcpConnectResult = kernel::tcp::tcp_connect(tcpSocket, resolvedIp, 443);
             char tcpError[64] = {};
             if (tcpConnectResult == kernel::tcp::TCP_OK) {
@@ -20363,6 +20442,7 @@ static bool printNavigatorGuestDnsQualificationCase()
     serial::puts("[NAVIGATOR-SMOKE] guest_dns.hostname=");
     serial::puts(hostname);
     serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.resolution_source=kernel-dns-udp");
+    serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.cache_flushed=yes");
     serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.server=");
     serial::puts(resolverText);
     serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.query_id=");
@@ -20385,6 +20465,8 @@ static bool printNavigatorGuestDnsQualificationCase()
     serial_put_dec(diag ? diag->acceptedReplies : 0);
     serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.answer_count=");
     serial_put_dec(diag ? diag->replyAnswerCount : 0);
+    serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.send_attempts=");
+    serial_put_dec(diag ? diag->sendAttempts : 0);
     serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.resolved_ip=");
     serial::puts(resolvedText);
     serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.dns_result=");
@@ -20396,8 +20478,14 @@ static bool printNavigatorGuestDnsQualificationCase()
     serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.tcp_connect_code=");
     serial_put_dec(static_cast<uint32_t>(tcpConnectResult));
     serial::puts("\n[NAVIGATOR-SMOKE] guest_dns.result=");
-    serial::puts(dnsPassed && tcpConnected ? "PASS\n" : "FAIL\n");
-    return dnsPassed && tcpConnected;
+    serial::puts(dnsPassed && tcpHandoffAttempted ? "PASS\n" : "FAIL\n");
+    serial::puts("[NAVIGATOR-SMOKE] guest_dns.tcp_handoff=");
+    serial::puts(tcpHandoffAttempted ? "attempted\n" : "not-attempted\n");
+    serial::puts("[NAVIGATOR-SMOKE] guest_dns.external_network_status=");
+    serial::puts(!tcpHandoffAttempted ? "not-assessed\n" : (tcpConnected ? "available\n" : "unavailable\n"));
+    serial::puts("[NAVIGATOR-SMOKE] guest_dns.test_a_outcome=");
+    serial::puts(dnsPassed && tcpHandoffAttempted ? "PASS\n" : "FAIL\n");
+    return dnsPassed && tcpHandoffAttempted;
 }
 #endif
 

@@ -21,6 +21,7 @@ namespace {
 enum class FixtureMode {
     ValidA,
     WrongSource,
+    WrongSourcePort,
     BadQuestionCount,
     WrongQuestion,
     WrongTransaction,
@@ -34,6 +35,7 @@ enum class FixtureMode {
 static FixtureMode g_mode = FixtureMode::ValidA;
 static uint64_t g_ticks = 0;
 static uint32_t g_dnsServer = ipv4::make_ip(10, 0, 2, 3);
+static uint16_t g_dnsPort = dns::DNS_PORT;
 static ipv4::NetworkConfig g_config = {};
 static ipv4::Statistics g_ipv4Stats = {};
 static udp::Statistics g_udpStats = {};
@@ -123,13 +125,17 @@ static void make_reply(const uint8_t* query, uint16_t queryLen)
     g_replySource.addr = g_mode == FixtureMode::WrongSource
         ? ipv4::make_ip(10, 0, 2, 99)
         : g_dnsServer;
-    g_replySource.port = dns::DNS_PORT;
+    g_replySource.port = g_mode == FixtureMode::WrongSourcePort
+        ? static_cast<uint16_t>(g_dnsPort + 1)
+        : g_dnsPort;
     g_replyPending = g_mode != FixtureMode::Timeout;
 }
 
 static void reset_fixture(FixtureMode mode)
 {
     g_mode = mode;
+    g_dnsServer = ipv4::make_ip(10, 0, 2, 3);
+    g_dnsPort = dns::DNS_PORT;
     g_ticks = 0;
     g_replyLength = 0;
     g_replyPending = false;
@@ -269,6 +275,12 @@ int main()
     assert(diag->acceptedReplies == 0 && address == 0);
 
     address = 0;
+    assert(resolve_fixture(FixtureMode::WrongSourcePort, &address) == dns::DNS_ERR_TIMEOUT);
+    diag = dns::get_last_query_diagnostics();
+    assert(diag->unexpectedReplySources == dns::MAX_RETRIES);
+    assert(diag->acceptedReplies == 0 && address == 0);
+
+    address = 0;
     assert(resolve_fixture(FixtureMode::BadQuestionCount, &address) == dns::DNS_ERR_TIMEOUT);
     diag = dns::get_last_query_diagnostics();
     assert(diag->malformedReplies == dns::MAX_RETRIES && address == 0);
@@ -324,6 +336,22 @@ int main()
     assert(dns::resolve_full("navigator-dns-fixture.example", dns::TYPE_A, &fullResult) == dns::DNS_OK);
     assert(fullResult.success && fullResult.answerCount == 1);
     assert(fullResult.answers[0].data.ipv4 == ipv4::make_ip(203, 0, 113, 42));
+
+    reset_fixture(FixtureMode::ValidA);
+    g_dnsServer = ipv4::make_ip(10, 0, 2, 2);
+    g_dnsPort = 55353;
+    g_config.dns = g_dnsServer;
+    dns::init();
+    dns::set_qualification_server(g_dnsServer, g_dnsPort);
+    dns::cache_flush();
+    address = 0;
+    assert(dns::resolve("navigator-dns-fixture.example", &address) == dns::DNS_OK);
+    assert(address == ipv4::make_ip(203, 0, 113, 42));
+    assert(g_lastDestination == g_dnsServer && g_lastDestinationPort == g_dnsPort);
+    diag = dns::get_last_query_diagnostics();
+    assert(diag && diag->destinationPort == g_dnsPort &&
+        diag->replySourceIP == g_dnsServer && diag->replySourcePort == g_dnsPort &&
+        diag->replySourceValidated && diag->acceptedReplies == 1);
 
     return 0;
 }

@@ -46,6 +46,10 @@ function Write-NavigatorHttpsQualificationBlocked {
     Write-Host ("[NAVIGATOR-HTTPS-QUALIFICATION] outcome={0} required_executed={1} passed={2} failed={3} blocked={4} skipped={5} reason=`"{6}`"" -f `
         $outcome.Outcome, $outcome.Executed, $outcome.Passed, $outcome.Failed,
         $outcome.Blocked, $outcome.Skipped, $outcome.Reason)
+    if ($GuestDnsQualification) {
+        Write-Host '[NAVIGATOR-GUEST-DNS] test_a_outcome=BLOCKED required_executed=0 passed=0 failed=0 blocked=1'
+        Write-Host '[NAVIGATOR-GUEST-DNS] test_b_outcome=BLOCKED required_executed=0 passed=0 failed=0 blocked=1'
+    }
 }
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -229,6 +233,22 @@ function Clear-NavigatorKernelSmokePortConflicts {
     }
 }
 
+function Get-NavigatorKernelSmokeUdpPortOwners {
+    param([Parameter(Mandatory = $true)][int]$Port)
+
+    $endpoints = @(Get-NetUDPEndpoint -LocalPort $Port -ErrorAction SilentlyContinue)
+    foreach ($endpoint in $endpoints) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($endpoint.OwningProcess)" -ErrorAction SilentlyContinue
+        [pscustomobject]@{
+            LocalAddress = $endpoint.LocalAddress
+            LocalPort = $endpoint.LocalPort
+            OwningProcess = $endpoint.OwningProcess
+            Name = if ($process) { $process.Name } else { $null }
+            CommandLine = if ($process) { $process.CommandLine } else { $null }
+        }
+    }
+}
+
 $python = Find-Python
 if (-not $python) {
     if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason 'Fixture environment blocker: Python is unavailable for the local HTTP/HTTPS fixture servers.' }
@@ -345,10 +365,27 @@ function Start-NavigatorKernelSmokeServers {
 
     Clear-NavigatorKernelSmokePortConflicts -Ports @(8080, 8443)
 
+    $dnsPort = 55353
+    $dnsBind = '127.0.0.1'
+    $dnsOwners = @(Get-NavigatorKernelSmokeUdpPortOwners -Port $dnsPort)
+    if ($dnsOwners.Count -gt 0) {
+        $details = ($dnsOwners | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort) pid=$($_.OwningProcess) ($($_.Name))" }) -join ', '
+        throw "Controlled DNS fixture UDP port collision: $details. No process was stopped."
+    }
+
     $httpLog = Join-Path $LogDir "navigator-kernel-http-$stamp-$ScenarioName.log"
     $httpErrLog = Join-Path $LogDir "navigator-kernel-http-$stamp-$ScenarioName.err.log"
     $httpsLog = Join-Path $LogDir "navigator-kernel-https-$stamp-$ScenarioName.log"
     $httpsErrLog = Join-Path $LogDir "navigator-kernel-https-$stamp-$ScenarioName.err.log"
+    $dnsLog = Join-Path $LogDir "navigator-kernel-dns-$stamp-$ScenarioName.jsonl"
+    $dnsErrLog = Join-Path $LogDir "navigator-kernel-dns-$stamp-$ScenarioName.err.log"
+    $dnsStopFile = Join-Path $LogDir "navigator-kernel-dns-$stamp-$ScenarioName.stop"
+    Remove-Item -LiteralPath $dnsStopFile -Force -ErrorAction SilentlyContinue
+    $httpProc = $null
+    $httpsProc = $null
+    $dnsProc = $null
+
+    try {
 
     $httpArgs = @(
         "`"$httpServer`"", "--port", "8080", "--host", "0.0.0.0", "--root", "`"$Root`"",
@@ -368,6 +405,14 @@ function Start-NavigatorKernelSmokeServers {
     )
     $httpsProc = Start-Process -FilePath $python -ArgumentList $httpsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpsLog -RedirectStandardError $httpsErrLog
 
+    $dnsFixture = Join-Path $Root 'scripts\navigator_controlled_dns_fixture.py'
+    $dnsArgs = @(
+        "`"$dnsFixture`"", '--bind', $dnsBind, '--port', [string]$dnsPort,
+        '--hostname', 'prod.guidexos.test', '--address', '10.0.2.2',
+        '--stop-file', "`"$dnsStopFile`""
+    )
+    $dnsProc = Start-Process -FilePath $python -ArgumentList $dnsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $dnsLog -RedirectStandardError $dnsErrLog
+
     # DHCP discovery is deliberately deferred until after input/main-loop
     # startup. Do not let the kernel reach its first TLS probe before the
     # localhost fixtures are actually listening; a fixed sleep made this
@@ -375,12 +420,39 @@ function Start-NavigatorKernelSmokeServers {
     $serverDeadline = (Get-Date).AddSeconds(10)
     $httpReady = $false
     $httpsReady = $false
-    while ((Get-Date) -lt $serverDeadline -and (-not $httpReady -or -not $httpsReady)) {
+    $dnsReady = $false
+    while ((Get-Date) -lt $serverDeadline -and (-not $httpReady -or -not $httpsReady -or -not $dnsReady)) {
         if ($httpProc.HasExited) {
             throw "local HTTP smoke server exited early; see $httpLog"
         }
         if ($httpsProc.HasExited) {
             throw "local HTTPS smoke server exited early; see $httpsLog"
+        }
+        if ($dnsProc.HasExited) {
+            throw "controlled DNS fixture exited early; see $dnsLog and $dnsErrLog"
+        }
+
+        $ownedDnsEndpoints = @(Get-NavigatorKernelSmokeUdpPortOwners -Port $dnsPort)
+        $foreignDnsEndpoints = @($ownedDnsEndpoints | Where-Object { $_.OwningProcess -ne $dnsProc.Id })
+        if ($foreignDnsEndpoints.Count -gt 0) {
+            $details = ($foreignDnsEndpoints | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort) pid=$($_.OwningProcess)" }) -join ', '
+            throw "Controlled DNS fixture UDP port ownership changed during startup: $details"
+        }
+        $ourDnsEndpoint = @($ownedDnsEndpoints | Where-Object {
+            $_.OwningProcess -eq $dnsProc.Id -and $_.LocalAddress -eq $dnsBind
+        }).Count -gt 0
+        if ($ourDnsEndpoint -and (Test-Path -LiteralPath $dnsLog -PathType Leaf)) {
+            foreach ($line in Get-Content -LiteralPath $dnsLog -ErrorAction SilentlyContinue) {
+                try {
+                    $dnsEntry = $line | ConvertFrom-Json -ErrorAction Stop
+                    if ($dnsEntry.event -eq 'ready' -and [int]$dnsEntry.pid -eq $dnsProc.Id -and
+                        [string]$dnsEntry.hostname -eq 'prod.guidexos.test' -and
+                        [string]$dnsEntry.address -eq '10.0.2.2') {
+                        $dnsReady = $true
+                        break
+                    }
+                } catch { }
+            }
         }
 
         foreach ($probe in @(
@@ -401,19 +473,39 @@ function Start-NavigatorKernelSmokeServers {
                 $client.Close()
             }
         }
-        if (-not $httpReady -or -not $httpsReady) {
+        if (-not $httpReady -or -not $httpsReady -or -not $dnsReady) {
             Start-Sleep -Milliseconds 100
         }
     }
 
     if (-not $httpReady) { throw "local HTTP smoke server did not listen on port 8080; see $httpLog" }
     if (-not $httpsReady) { throw "local HTTPS smoke server did not listen on port 8443; see $httpsLog" }
+    if (-not $dnsReady) { throw "controlled DNS fixture did not own 127.0.0.1:55353 and report ready; see $dnsLog and $dnsErrLog" }
+    Write-Host '[NAVIGATOR-GUEST-DNS-CONFIG] qemu_backend=user guest=10.0.2.15 gateway=10.0.2.2 test_a_resolver=10.0.2.3:53 controlled_resolver=10.0.2.2:55353 host_fixture=127.0.0.1:55353 controlled_host=prod.guidexos.test controlled_a=10.0.2.2 static_mapping=disabled_for_controlled_host'
 
     return [pscustomobject]@{
         HttpProcess = $httpProc
         HttpsProcess = $httpsProc
         HttpLog = $httpLog
         HttpsLog = $httpsLog
+        DnsProcess = $dnsProc
+        DnsLog = $dnsLog
+        DnsStopFile = $dnsStopFile
+        DnsPort = $dnsPort
+    }
+    } catch {
+        if ($dnsProc -and -not $dnsProc.HasExited) {
+            Set-Content -LiteralPath $dnsStopFile -Value 'stop' -Encoding ASCII -ErrorAction SilentlyContinue
+            try { $dnsProc.WaitForExit(2500) } catch { }
+            if (-not $dnsProc.HasExited) { Stop-Process -Id $dnsProc.Id -Force -ErrorAction SilentlyContinue }
+        }
+        foreach ($ownedProc in @($httpProc, $httpsProc)) {
+            if ($ownedProc -and -not $ownedProc.HasExited) {
+                Stop-Process -Id $ownedProc.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Remove-Item -LiteralPath $dnsStopFile -Force -ErrorAction SilentlyContinue
+        throw
     }
 }
 
@@ -425,6 +517,23 @@ function Stop-NavigatorKernelSmokeServers {
     }
     if ($Servers -and $Servers.HttpsProcess -and -not $Servers.HttpsProcess.HasExited) {
         Stop-Process -Id $Servers.HttpsProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($Servers -and $Servers.DnsProcess) {
+        if (-not $Servers.DnsProcess.HasExited) {
+            Set-Content -LiteralPath $Servers.DnsStopFile -Value 'stop' -Encoding ASCII -ErrorAction SilentlyContinue
+            try { $Servers.DnsProcess.WaitForExit(2500) } catch { }
+        }
+        if (-not $Servers.DnsProcess.HasExited) {
+            Stop-Process -Id $Servers.DnsProcess.Id -Force -ErrorAction SilentlyContinue
+            try { $Servers.DnsProcess.WaitForExit(2000) } catch { }
+        }
+        Remove-Item -LiteralPath $Servers.DnsStopFile -Force -ErrorAction SilentlyContinue
+        $remainingDnsOwner = @(Get-NavigatorKernelSmokeUdpPortOwners -Port $Servers.DnsPort | Where-Object {
+            $_.OwningProcess -eq $Servers.DnsProcess.Id
+        })
+        if ($remainingDnsOwner.Count -gt 0) {
+            throw "Controlled DNS fixture process $($Servers.DnsProcess.Id) still owns UDP/$($Servers.DnsPort) after cleanup."
+        }
     }
 }
 
@@ -2045,6 +2154,8 @@ function Get-NavigatorHttpsSourceFingerprint {
         'guidexos/mbedtls_config.h',
         'scripts/smoke-navigator-kernel.ps1',
         'scripts/verify-navigator-dns-pcap.py',
+        'scripts/navigator_controlled_dns_fixture.py',
+        'scripts/test_navigator_controlled_dns_fixture.py',
         'scripts/navigator_kernel_http_server.py',
         'scripts/generate-wallpaper-pack.ps1',
         'scripts/fixtures/navigator-validated-root-ca-bundle.pem',
@@ -2096,6 +2207,17 @@ function Write-NavigatorHttpsQualificationAttestation {
     $manifest = $StageInfo.ProductionManifest
     $caPath = $StageInfo.CaBundlePath
     $policyPath = $StageInfo.HttpsPolicyPath
+    $dnsQualificationSettings = $null
+    if ($GuestDnsQualification) {
+        $dnsQualificationSettings = [ordered]@{
+            test_a_resolver = '10.0.2.3:53'
+            controlled_fixture_bind = '127.0.0.1:55353'
+            controlled_guest_resolver = '10.0.2.2:55353'
+            controlled_hostname = 'prod.guidexos.test'
+            controlled_a_record = '10.0.2.2'
+            static_mapping_for_controlled_hostname = $false
+        }
+    }
     $attestation = [ordered]@{
         schema_version = 'guidexos.navigator.https-qualification-artifact.v1'
         build_id = $buildId
@@ -2113,6 +2235,7 @@ function Write-NavigatorHttpsQualificationAttestation {
             hostname_validation = 'enabled'
             plaintext_fallback = 'disabled'
         }
+        dns_qualification = $dnsQualificationSettings
         artifacts = [ordered]@{
             kernel_path = [System.IO.Path]::GetFullPath($kernelImage)
             kernel_sha256 = Get-NavigatorHttpsFileHash -LiteralPath $kernelImage
@@ -2172,6 +2295,14 @@ function Assert-NavigatorHttpsQualificationAttestation {
         if ($attestation.compile_definitions -notcontains $flag) {
             throw "Reused artifact rejected: required build configuration is absent: $flag"
         }
+    }
+    if ($GuestDnsQualification -and
+        ($null -eq $attestation.dns_qualification -or
+         [string]$attestation.dns_qualification.test_a_resolver -ne '10.0.2.3:53' -or
+         [string]$attestation.dns_qualification.controlled_guest_resolver -ne '10.0.2.2:55353' -or
+         [string]$attestation.dns_qualification.controlled_hostname -ne 'prod.guidexos.test' -or
+         $attestation.dns_qualification.static_mapping_for_controlled_hostname -ne $false)) {
+        throw 'Reused artifact rejected: controlled guest DNS fixture settings are absent or incompatible.'
     }
     if ([string]$attestation.transport.tls_verification -ne 'enabled' -or
         [string]$attestation.transport.hostname_validation -ne 'enabled' -or
@@ -2383,6 +2514,12 @@ try {
 
             Write-Host $runOutput
             $scenarioChecks = @($scenario.Checks)
+            if ($GuestDnsQualification -and $scenario.Name -eq 'production_validated') {
+                $scenarioChecks = @($scenarioChecks | Where-Object {
+                    $_ -ne '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=controlled-smoke-gateway-map'
+                })
+                $scenarioChecks += '[NAVIGATOR-SMOKE] https.case.policy_validated.dns_resolution_source=kernel-dns-udp'
+            }
             if ($enableRealPublicProbeForScenario) {
                 $scenarioChecks = @($scenarioChecks | Where-Object { $_ -ne "[NAVIGATOR-SMOKE] result=PASS" })
             }
@@ -2392,40 +2529,132 @@ try {
                 foreach ($match in [regex]::Matches($runOutput, '(?m)^\[NAVIGATOR-SMOKE\] guest_dns\.([a-z_]+)=([^\r\n]+)')) {
                     $dnsFields[$match.Groups[1].Value] = $match.Groups[2].Value.Trim()
                 }
-                $dnsExpectedFields = [ordered]@{
+                $testAMissing = @()
+                $testAExpectedFields = [ordered]@{
                     enabled = 'yes'
                     hostname = 'example.com'
                     resolution_source = 'kernel-dns-udp'
+                    cache_flushed = 'yes'
                     server = '10.0.2.3'
                     destination_port = '53'
                     reply_source = '10.0.2.3:53'
                     reply_source_validated = 'yes'
                     dns_result = 'PASS'
-                    tcp_connect_result = 'PASS'
-                    result = 'PASS'
+                    tcp_handoff = 'attempted'
+                    test_a_outcome = 'PASS'
                 }
-                foreach ($key in $dnsExpectedFields.Keys) {
-                    if ($dnsFields[$key] -ne $dnsExpectedFields[$key]) {
-                        $missing += "Guest DNS evidence mismatch: $key expected '$($dnsExpectedFields[$key])', got '$($dnsFields[$key])'."
+                foreach ($key in $testAExpectedFields.Keys) {
+                    if ($dnsFields[$key] -ne $testAExpectedFields[$key]) {
+                        $testAMissing += "Test A evidence mismatch: $key expected '$($testAExpectedFields[$key])', got '$($dnsFields[$key])'."
                     }
+                }
+                if (($dnsFields['tcp_connect_result'] -notin @('PASS', 'FAIL')) -or
+                    ($dnsFields['external_network_status'] -notin @('available', 'unavailable')) -or
+                    (($dnsFields['tcp_connect_result'] -eq 'PASS') -ne ($dnsFields['external_network_status'] -eq 'available'))) {
+                    $testAMissing += 'Test A did not report external TCP availability separately from guest DNS resolution.'
                 }
                 if ($dnsFields['resolved_ip'] -notmatch '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$' -or
                     $dnsFields['tcp_target'] -ne "$($dnsFields['resolved_ip']):443" -or
-                    $dnsFields['query_id'] -notmatch '^[1-9][0-9]*$') {
-                    $missing += 'Guest DNS result was not handed to the TCP target with a non-zero query id and parsed IPv4 address.'
+                    $dnsFields['query_id'] -notmatch '^[1-9][0-9]*$' -or
+                    $dnsFields['source_port'] -notmatch '^(?:4915[2-9]|49[2-9][0-9]|[5-9][0-9]{3}|[1-6][0-9]{4}|6553[0-5])$' -or
+                    [int]$dnsFields['query_bytes'] -le 0 -or [int]$dnsFields['reply_bytes'] -le 0 -or
+                    [int]$dnsFields['send_attempts'] -le 0 -or [int]$dnsFields['answer_count'] -le 0) {
+                    $testAMissing += 'Test A did not record a transmitted DNS A query, valid reply, parsed IPv4 address, and TCP handoff target.'
                 }
                 if (-not (Test-Path -LiteralPath $guestDnsPcapPath -PathType Leaf)) {
-                    $missing += "Guest DNS packet capture is missing: $guestDnsPcapPath"
+                    $testAMissing += "Guest DNS packet capture is missing: $guestDnsPcapPath"
                 } else {
                     $pcapEvidence = & $python (Join-Path $Root 'scripts\verify-navigator-dns-pcap.py') `
                         --pcap $guestDnsPcapPath --hostname $dnsFields['hostname'] `
-                        --address $dnsFields['resolved_ip'] --query-id $dnsFields['query_id'] 2>&1
+                        --address $dnsFields['resolved_ip'] --query-id $dnsFields['query_id'] `
+                        --resolver '10.0.2.3' --resolver-port 53 2>&1
                     $pcapCode = $LASTEXITCODE
                     $pcapEvidence | ForEach-Object { Write-Host $_ }
                     if ($pcapCode -ne 0) {
-                        $missing += "Independent guest DNS packet verification failed (exit $pcapCode)."
+                        $testAMissing += "Test A independent guest DNS packet verification failed (exit $pcapCode)."
                     }
                 }
+
+                $testAExecuted = $runOutput.Contains('[NAVIGATOR-SMOKE] guest_dns.enabled=yes')
+                $testAOutcome = if (-not $testAExecuted) { 'NOT_RUN' } elseif ($testAMissing.Count -eq 0) { 'PASS' } else { 'FAIL' }
+                $tcpExternalStatus = if ($dnsFields['tcp_connect_result'] -eq 'PASS') { 'available' } else { 'unavailable' }
+                Write-Host ("[NAVIGATOR-GUEST-DNS] test_a_outcome={0} required_executed={1} passed={2} failed={3} external_network={4} tcp_connect_result={5}" -f `
+                    $testAOutcome, [int]$testAExecuted, [int]($testAOutcome -eq 'PASS'), [int]($testAOutcome -eq 'FAIL'),
+                    $dnsFields['external_network_status'], $dnsFields['tcp_connect_result'])
+                if ($testAOutcome -ne 'PASS') { $missing += $testAMissing }
+
+                $policyDnsFields = @{}
+                foreach ($match in [regex]::Matches($runOutput, '(?m)^\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.([a-z_]+)=([^\r\n]+)')) {
+                    $policyDnsFields[$match.Groups[1].Value] = $match.Groups[2].Value.Trim()
+                }
+                $testBMissing = @()
+                $testBExpectedFields = [ordered]@{
+                    dns_used = 'yes'
+                    dns_hostname = 'prod.guidexos.test'
+                    dns_resolved_ip = '10.0.2.2'
+                    dns_resolution_source = 'kernel-dns-udp'
+                    dns_result = 'PASS'
+                    dns_server = '10.0.2.2'
+                    dns_destination_port = '55353'
+                    dns_reply_source = '10.0.2.2:55353'
+                    dns_reply_source_validated = 'yes'
+                    tcp_connect_result = 'PASS'
+                    tcp_target = '10.0.2.2:8443'
+                    certificate_validated = 'yes'
+                    hostname_validated = 'yes'
+                    body_bounded = 'yes'
+                    expected_content = 'yes'
+                }
+                foreach ($key in $testBExpectedFields.Keys) {
+                    if ($policyDnsFields[$key] -ne $testBExpectedFields[$key]) {
+                        $testBMissing += "Test B evidence mismatch: $key expected '$($testBExpectedFields[$key])', got '$($policyDnsFields[$key])'."
+                    }
+                }
+                if ($policyDnsFields['dns_query_id'] -notmatch '^[1-9][0-9]*$' -or
+                    $policyDnsFields['dns_query_bytes'] -notmatch '^[1-9][0-9]*$' -or
+                    $policyDnsFields['dns_reply_bytes'] -notmatch '^[1-9][0-9]*$' -or
+                    $policyDnsFields['dns_accepted_replies'] -notmatch '^[1-9][0-9]*$' -or
+                    $policyDnsFields['dns_answer_count'] -notmatch '^[1-9][0-9]*$' -or
+                    $policyDnsFields['parsed_blocks'] -notmatch '^[1-9][0-9]*$') {
+                    $testBMissing += 'Test B did not record a non-empty controlled DNS response and Navigator document delivery.'
+                }
+                if (-not (Test-Path -LiteralPath $guestDnsPcapPath -PathType Leaf)) {
+                    $testBMissing += "Guest DNS packet capture is missing: $guestDnsPcapPath"
+                } else {
+                    $policyPcapEvidence = & $python (Join-Path $Root 'scripts\verify-navigator-dns-pcap.py') `
+                        --pcap $guestDnsPcapPath --hostname 'prod.guidexos.test' `
+                        --address '10.0.2.2' --query-id $policyDnsFields['dns_query_id'] `
+                        --resolver '10.0.2.2' --resolver-port 55353 2>&1
+                    $policyPcapCode = $LASTEXITCODE
+                    $policyPcapEvidence | ForEach-Object { Write-Host $_ }
+                    if ($policyPcapCode -ne 0) {
+                        $testBMissing += "Test B independent guest DNS packet verification failed (exit $policyPcapCode)."
+                    }
+                }
+                $dnsFixtureRows = @()
+                if (Test-Path -LiteralPath $activeServers.DnsLog -PathType Leaf) {
+                    foreach ($line in Get-Content -LiteralPath $activeServers.DnsLog) {
+                        try { $dnsFixtureRows += $line | ConvertFrom-Json -ErrorAction Stop } catch { }
+                    }
+                }
+                $dnsQueryId = [int]$policyDnsFields['dns_query_id']
+                $fixtureQuery = @($dnsFixtureRows | Where-Object {
+                    $_.event -eq 'query' -and $_.qname -eq 'prod.guidexos.test' -and
+                    $_.qtype -eq 1 -and $_.id -eq $dnsQueryId
+                })
+                $fixtureResponse = @($dnsFixtureRows | Where-Object {
+                    $_.event -eq 'response' -and $_.qname -eq 'prod.guidexos.test' -and
+                    $_.id -eq $dnsQueryId -and $_.rcode -eq 0 -and $_.answer -eq '10.0.2.2'
+                })
+                if ($fixtureQuery.Count -eq 0 -or $fixtureResponse.Count -eq 0) {
+                    $testBMissing += 'Controlled DNS fixture log lacks the matching request/response and 10.0.2.2 answer.'
+                }
+                $testBExecuted = $runOutput.Contains('[NAVIGATOR-SMOKE] https.case.policy_validated.requested_url=')
+                $testBOutcome = if (-not $testBExecuted) { 'NOT_RUN' } elseif ($testBMissing.Count -eq 0) { 'PASS' } else { 'FAIL' }
+                Write-Host ("[NAVIGATOR-GUEST-DNS] test_b_outcome={0} required_executed={1} passed={2} failed={3} static_mapping=disabled_for_controlled_host dns_query_id={4}" -f `
+                    $testBOutcome, [int]$testBExecuted, [int]($testBOutcome -eq 'PASS'), [int]($testBOutcome -eq 'FAIL'),
+                    $policyDnsFields['dns_query_id'])
+                if ($testBOutcome -ne 'PASS') { $missing += $testBMissing }
             }
             if ($scenario.Name -eq "production_validated" -and
                 $runOutput.Contains("[NAVIGATOR-SMOKE] tls_smoke.local_ready=yes")) {

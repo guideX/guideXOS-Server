@@ -148,30 +148,31 @@ def main():
     parser.add_argument("--query-id", required=True, type=int)
     parser.add_argument("--guest-ip", default="10.0.2.15")
     parser.add_argument("--resolver", default="10.0.2.3")
+    parser.add_argument("--resolver-port", default=53, type=int)
     args = parser.parse_args()
     hostname = args.hostname.rstrip(".").lower()
     expected_address = str(ipaddress.IPv4Address(args.address))
     queries = []
     for packet in load_packets(args.pcap):
         src, dst, sport, dport, ident, flags, questions, answers = packet
-        if (src == args.guest_ip and dst == args.resolver and dport == 53 and
+        if (src == args.guest_ip and dst == args.resolver and dport == args.resolver_port and
                 ident == args.query_id and not flags & 0x8000 and
                 questions == [(hostname, 1, 1)]):
             queries.append((sport, ident))
     if not queries:
-        fail(f"no guest UDP/53 A query for {hostname} with transaction id {args.query_id}")
+        fail(f"no guest UDP/{args.resolver_port} A query for {hostname} with transaction id {args.query_id}")
 
     for source_port, ident in queries:
         for packet in load_packets(args.pcap):
             src, dst, sport, dport, response_id, flags, questions, answers = packet
-            if (src != args.resolver or dst != args.guest_ip or sport != 53 or
+            if (src != args.resolver or dst != args.guest_ip or sport != args.resolver_port or
                     dport != source_port or response_id != ident or not flags & 0x8000 or
                     flags & 0x000F != 0 or questions != [(hostname, 1, 1)]):
                 continue
             if any(owner == hostname and address == expected_address
                    for owner, address, _ in answers):
                 print("[GUEST-DNS-PCAP] PASS "
-                      f"guest={args.guest_ip}:{source_port} resolver={args.resolver}:53 "
+                      f"guest={args.guest_ip}:{source_port} resolver={args.resolver}:{args.resolver_port} "
                       f"id={ident} qname={hostname} qtype=A answer={expected_address}")
                 return 0
     fail("matching response from the configured resolver did not contain the parsed A record")

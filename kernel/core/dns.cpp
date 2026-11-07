@@ -77,6 +77,18 @@ static Statistics s_stats;
 static QueryDiagnostics s_lastQueryDiagnostics;
 static uint16_t s_nextQueryId = 1;
 static uint32_t s_systemTicks = 0;  // Simple tick counter for TTL
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+static uint16_t s_qualificationDnsPort = DNS_PORT;
+#endif
+
+static uint16_t configured_dns_port()
+{
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+    return s_qualificationDnsPort;
+#else
+    return DNS_PORT;
+#endif
+}
 
 // ================================================================
 // Byte order helpers (use ethernet's ntohs/htons)
@@ -114,6 +126,9 @@ void init()
     s_nextQueryId = 1;
     s_systemTicks = 0;
     s_dnsServer = 0;
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+    s_qualificationDnsPort = DNS_PORT;
+#endif
     
     // Use configured DNS server if available
     const ipv4::NetworkConfig* cfg = ipv4::get_config();
@@ -147,6 +162,14 @@ uint32_t get_server()
 {
     return s_dnsServer;
 }
+
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+void set_qualification_server(uint32_t serverIP, uint16_t serverPort)
+{
+    s_dnsServer = serverIP;
+    s_qualificationDnsPort = serverPort;
+}
+#endif
 
 // ================================================================
 // Domain Name Encoding
@@ -612,7 +635,7 @@ Status resolve(const char* domain, uint32_t* ipv4)
 
     memzero(&s_lastQueryDiagnostics, sizeof(s_lastQueryDiagnostics));
     s_lastQueryDiagnostics.serverIP = s_dnsServer;
-    s_lastQueryDiagnostics.destinationPort = DNS_PORT;
+    s_lastQueryDiagnostics.destinationPort = configured_dns_port();
     s_lastQueryDiagnostics.lastSendResult = -1;
     s_lastQueryDiagnostics.result = DNS_ERR_INVALID;
     
@@ -670,7 +693,7 @@ Status resolve(const char* domain, uint32_t* ipv4)
     
     for (uint8_t attempt = 0; attempt < MAX_RETRIES && !gotResponse; ++attempt) {
         // Send query
-        socket::SockAddr dnsAddr = socket::make_sockaddr(s_dnsServer, DNS_PORT);
+        socket::SockAddr dnsAddr = socket::make_sockaddr(s_dnsServer, configured_dns_port());
         int sent = socket::udp_sendto(sock, queryPacket, queryLen, &dnsAddr);
         s_lastQueryDiagnostics.sendAttempts++;
         s_lastQueryDiagnostics.lastSendResult = sent;
@@ -695,7 +718,7 @@ Status resolve(const char* domain, uint32_t* ipv4)
                 s_lastQueryDiagnostics.oversizedReplies++;
             }
             if (recvLen > 0) {
-                if (fromAddr.addr != s_dnsServer || fromAddr.port != DNS_PORT) {
+                if (fromAddr.addr != s_dnsServer || fromAddr.port != configured_dns_port()) {
                     s_lastQueryDiagnostics.unexpectedReplySources++;
                     continue;
                 }
@@ -861,7 +884,7 @@ Status resolve_full(const char* domain, RecordType type, QueryResult* result)
     
     for (uint8_t attempt = 0; attempt < MAX_RETRIES && !gotResponse; ++attempt) {
         // Send query
-        socket::SockAddr dnsAddr = socket::make_sockaddr(s_dnsServer, DNS_PORT);
+        socket::SockAddr dnsAddr = socket::make_sockaddr(s_dnsServer, configured_dns_port());
         int sent = socket::udp_sendto(sock, queryPacket, queryLen, &dnsAddr);
         
         if (sent < 0) continue;
@@ -879,7 +902,7 @@ Status resolve_full(const char* domain, RecordType type, QueryResult* result)
             int recvLen = socket::udp_recvfrom(sock, responsePacket, MAX_PACKET_SIZE, &fromAddr);
             
             if (recvLen > 0) {
-                if (fromAddr.addr != s_dnsServer || fromAddr.port != DNS_PORT) {
+                if (fromAddr.addr != s_dnsServer || fromAddr.port != configured_dns_port()) {
                     continue;
                 }
                 status = parse_response(responsePacket, static_cast<uint16_t>(recvLen),

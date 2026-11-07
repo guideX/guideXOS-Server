@@ -242,6 +242,12 @@ void set_server(uint32_t serverIP);
 // Get the current DNS server address
 uint32_t get_server();
 
+#if defined(GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE)
+// Set an isolated resolver endpoint for the guest-only qualification build.
+// Production builds retain the normal UDP/53 resolver convention.
+void set_qualification_server(uint32_t serverIP, uint16_t serverPort);
+#endif
+
 // ================================================================
 // DNS Resolution
 // ================================================================
