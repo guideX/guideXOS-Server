@@ -1,17 +1,20 @@
 # Disk Manager: Current Implementation Status
 
-**Current phase status (2026-11-05): DM37 is formally accepted and closed;
-DM38 is active.** The phase marker remains last_completed=DM37,
-next_expected=DM38. The latest continuation is **Outcome B —
-`DM38_INVENTORY_AWAITING_OWNER`**: no authorized path exposed SARAH_DT's
-machine-specific inventory. The source audit confirms the existing AHCI and
-input limits, but does not establish physical compatibility. The operator
-inventory commands, bounded read-only pilot plan and recommended DM38-3 scope
-are in the [DM38 physical-storage qualification report](DISK_MANAGER_PHASE_DM38_PHYSICAL_STORAGE_QUALIFICATION.md#dm38-2--inventory-access-decision-and-physical-compatibility-audit).
-DM38-1's 1,523/1,523 hosted suite, AMD64, `build.bat`, UEFI Release and QAC
-virtual registration results remain source-matched evidence and were not
-rerun for this documentation-only continuation. No physical operation or
-firmware change occurred; `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0`.
+**Current phase status (2026-11-06): DM37 is formally accepted and closed;
+DM38 is active.** `.phase` remains `last_completed=DM37`,
+`next_expected=DM38`. The latest continuation is **Outcome B —
+`DM38_AHCI_DMA_SAFETY_BLOCKER`**. The owner-supplied SARAH_DT inventory is now
+documented, and a fresh UEFI/kernel package passed an isolated QAC-managed
+virtual boot. No SARAH_DT boot or physical USB write occurred. Stage A is
+conditional on disconnecting every internal drive; Stage B remains blocked
+because the AHCI driver has no VT-d/IOMMU DMA mapping support. The reported
+Intel `8086:06ED` xHCI controller has no general AMD64 driver, so physical
+input after UEFI handoff is unverified. See the [DM38-3 qualification and
+operator handoff](DISK_MANAGER_PHASE_DM38_PHYSICAL_STORAGE_QUALIFICATION.md#dm38-3--sarah_dt-native-uefi-boot-package-and-safety-qualification).
+The 1,523/1,523 hosted suite remains source-matched prior evidence and was not
+rerun here; fresh AMD64 and UEFI builds and the QAC virtual boot were run.
+No source or phase-marker change was made; `NVME_WRITE_PROVEN=0` and
+`NVME_FLUSH_PROVEN=0` remain in force.
 
 DM36 closeout was accepted at source revision
 a2afa18a56c95b00491f9b1ca2a26acde7669567 on

@@ -1,28 +1,29 @@
 # DM38 — Physical Storage Readiness and Non-Destructive Qualification
 
-**Latest disposition (2026-11-05): Outcome B — `DM38_INVENTORY_AWAITING_OWNER`.**
+**Latest disposition (2026-11-06): Outcome B — `DM38_AHCI_DMA_SAFETY_BLOCKER`.**
 
-The DM38-1 disposition and evidence below are retained as the prior
-qualification record. The DM38-2 continuation at the end of this document
-supersedes its forward-looking recommendation and records the current source
-audit and inventory boundary.
+The DM38-1 and DM38-2 findings below are retained as historical qualification
+records. The DM38-3 continuation at the end supersedes their forward-looking
+recommendations and records the owner-supplied SARAH_DT inventory, a fresh
+UEFI/kernel package build, a QAC-managed virtual boot, and the remaining
+physical safety gates.
 
-The production storage architecture has been audited, the identity and explicit
-read-only mount gaps found in that audit have been corrected, the hosted
-regression suite and requested builds pass, and current-source AHCI and UHCI
-USB BOT guest enumeration pass under QAC. Physical qualification remains open:
-SARAH_DT has not been inventoried or booted in this continuation, and the
-AMD64 kernel has no xHCI host-controller driver. The reported HP 600 G6 MT
-model and Intel 10th-generation-era platform do not establish its exact
-controller, firmware mode, port mapping, or attached devices. No physical disk
-was connected to or modified by this work.
+The package built from source revision
+`4abcf064672b07d0eae321d3e4926fef42aec40a` passes the isolated virtual boot
+smoke. No physical USB was written and SARAH_DT was not booted. Stage A is
+conditionally suitable only after the owner disconnects every internal
+storage device; kernel startup probes ATA/AHCI/NVMe and the AHCI DMA path has no
+VT-d/IOMMU mapping support. Stage B physical storage access remains blocked
+pending independent DMA-safety qualification. Physical keyboard/mouse support
+after UEFI handoff is also unverified because the reported Intel xHCI controller
+has no general AMD64 driver and an optional PS/2 path is not established.
 
-This is DM38-1 readiness work, not full DM38 acceptance. No physical write,
-Flush, formatting, repair, partition operation, or physical filesystem mount
-was performed. The DM37 acceptance limits remain in force. The phase marker is
-unchanged.
+The phase marker remains `last_completed=DM37`, `next_expected=DM38`; no DM38
+acceptance or DM39 transition is claimed. `NVME_WRITE_PROVEN=0` and
+`NVME_FLUSH_PROVEN=0` remain in force. No physical write, Flush, formatting,
+repair, partition operation, or physical filesystem mount was performed.
 
-## Repository baseline and scope
+## DM38-1 repository baseline and scope
 
 - Repository: guideXOS Server Disk Manager Improvements.
 - Branch: DISK_MANAGER_IMPROVEMENTS.
@@ -771,3 +772,149 @@ bounded read-only physical pilot can be authorized. If xHCI/EHCI input or an
 unsupported DMA remapping path is required, prepare the smallest independent
 support milestone. Do not change firmware mode automatically and do not
 authorize physical writes in that continuation.
+
+## DM38-3 — SARAH_DT native UEFI boot package and safety qualification
+
+**Disposition (2026-11-06): Outcome B — `DM38_AHCI_DMA_SAFETY_BLOCKER`.** The
+owner-supplied inventory resolves the machine and attached-device identity
+questions. A fresh source-matched boot package and QAC-managed virtual boot
+passed. No physical boot or physical USB write was performed. Stage A can be
+considered only with every internal storage device physically disconnected;
+Stage B remains blocked until AHCI DMA safety is independently established.
+This continuation changes documentation and an external artifact package only;
+production source, `.phase`, firmware, and physical media are unchanged.
+
+### Owner-supplied SARAH_DT inventory
+
+| Area | Reported inventory | Qualification implication |
+|---|---|---|
+| Machine | HP ProDesk 600 G6 Microtower; Core i5-10500, 6 cores / 12 threads; 16 GB RAM; two monitors; Windows boots. | Supports a one-time native UEFI boot plan; does not establish guideXOS display/input support. |
+| Firmware | UEFI; Secure Boot off; HP BIOS `S02 Ver. 02.26.00`, reported release date 2026-05-05. | No firmware setting change is part of this work. Verify the displayed state before a future owner-run boot. |
+| SATA | Intel SATA AHCI PCI ID `8086:06D2`. Seagate ST1000DM003, approximately 1 TB, is Windows Disk 0, GPT, and has both Boot and System roles. | Valuable Windows system media. Keep disconnected for Stage A and do not connect for Stage B. The device ID alone does not prove DMA safety or controller/BAR behavior. |
+| NVMe | A healthy 256 GB NVMe may be installed; a separate 1 TB NVMe is of uncertain reliability. Presence and identity are not fully resolved. | Treat every installed NVMe and any other internal storage as protected. Stage A requires all to be physically removed or disconnected. |
+| USB | Intel xHCI controller PCI ID `8086:06ED`; general AMD64 xHCI driver is absent. | UEFI may boot the USB before ExitBootServices, but guideXOS cannot be assumed to use xHCI afterward for input or storage. |
+| Input / remote access | Keyboard and mouse are USB-connected or use an unconfirmed native path; TeamViewer is available only in Windows. | Firmware menu input does not prove post-handoff input. TeamViewer is not a recovery path in guideXOS. Optional PS/2 hardware is not established. |
+
+The HP Startup Menu procedure is to power on, tap **Esc** repeatedly, then
+press **F9** for Boot Device Options and choose the one-time UEFI USB entry;
+see [HP's Secure Boot and Startup Menu instructions](https://support.hp.com/in-en/document/ish_6930187-6931079-16?fallbackLocale=us-en&requestedDocId=ish_6930240-7107386-16&validated=true).
+HP's ProDesk 600 G6 Microtower QuickSpecs list PS/2 on an optional rear I/O
+card, so the model name alone cannot establish that PS/2 exists on SARAH_DT
+([QuickSpecs, pages 5–6](https://h30434.www3.hp.com/psg/attachments/psg/Business-PC-Workstation-POS/39001/1/c06640111.pdf)).
+
+### Source and physical safety assessment
+
+Bootloader source opens only `kernel.elf` and `ramdisk.img` from the UEFI ESP.
+The AMD64 kernel initializes ATA, AHCI, and NVMe before the desktop. Existing
+AHCI initialization can issue IDENTIFY DMA operations. It treats physical
+addresses as device-visible addresses and has no VT-d/IOMMU translation or map
+support. SARAH_DT's DMA remapping / Kernel DMA Protection state and AHCI BAR5,
+port behavior, and target DMA reachability are not proven by the supplied PCI
+ID. For that reason:
+
+- **Stage A is conditional.** The owner must fully shut down, remove AC power,
+  and disconnect the Seagate SATA drive, every installed NVMe drive, and any
+  other internal storage before boot. If any drive cannot be positively
+  accounted for and disconnected, do not start the kernel on SARAH_DT. This
+  package has no controller-only boot mode for attached disks.
+- **Stage B is blocked.** Do not reconnect the Windows drive, either NVMe, or a
+  target disk for guideXOS probing until a separate review proves the DMA
+  mapping assumptions safe and the owner approves a bounded read-only pilot.
+  Do not disable DMA protections to make the current driver work.
+- The AMD64 xHCI path is unsupported. If keyboard/mouse stop after handoff,
+  record the desktop-only result and do not operate Disk Manager. Test no
+  physical storage action in that state.
+- UEFI GOP handoff and one primary framebuffer are supported. Dual-monitor
+  presentation is not qualified; leave the second display as-is and record
+  which physical monitor is active.
+- `NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0` remain unchanged.
+
+### Fresh package build and integrity evidence
+
+The package source revision is `4abcf064672b07d0eae321d3e4926fef42aec40a`
+on `DISK_MANAGER_IMPROVEMENTS`, with `.phase` at
+`last_completed=DM37`, `next_expected=DM38`. The dedicated package directory is
+`E:\CodexArtifacts\guideXOSServer_DiskManagerImprovements\out\dm38\dm38-3-sarah-physical-boot\`.
+Its `esp\` subdirectory is the complete 12-file FAT payload; no raw disk image
+is included. Copy the *contents* of `esp\` to the root of a verified FAT32 USB
+volume, not the containing `esp` folder. The operator guide, physical
+observation form, per-file hash manifest, package validation, build logs, and
+virtual smoke evidence are retained beside it.
+
+| Payload | Size | SHA-256 |
+|---|---:|---|
+| `EFI/BOOT/BOOTX64.EFI` (x64 EFI Application) | 59,904 bytes | `D6F9AD2424C24425A0C8F7EA889279E648AB01014475DFDD50AD9D08AA190D90` |
+| `kernel.elf` (ELF64 little-endian AMD64) | 3,190,216 bytes | `085902C6D38C1DAD010EE567225F56B58307FB94AA924EAF50E2B844A94494BD` |
+| `ramdisk.img` | 67,108,864 bytes | `FD7BC1B738F2ED7E7436407EF1D8892F7642E7CEBFC0EA0AB42E7E77BCB6DE24` |
+
+The other nine files are `desktop.cfg`, `startup.nsh`, `build-identity.txt`,
+and the source-matched PacMan and DeveloperStudio app manifests, binaries,
+and PacMan resources. `boot-manifest/esp-sha256.csv` lists every file and
+size. Total ESP payload is 72,679,929 bytes. Package validation checked PE
+machine `0x8664` / EFI Application subsystem `10`, ELF `e_machine=62`, boot
+file references, and app-tree equality with the checkout outputs.
+
+The fresh kernel PE output is retained outside the ESP at
+`build-logs/kernel.pe` (3,321,020 bytes; SHA-256
+`F24AD0A798C70552479E93D74D8124A5DEC3A75C101161AE01DCB139DADF190D`). The
+loader reads the ELF kernel, so this separate PE output is provenance only.
+
+Fresh AMD64 kernel build passed with GNU Make 4.4.1 and MinGW-W64 g++ 15.2.0;
+`NVME_WRITE_PROVEN=0` and `NVME_FLUSH_PROVEN=0` were explicitly set. The log
+contains 401 warning occurrences, all repeated unused-parameter warnings; no
+build errors. The UEFI x64 Release build passed with MSBuild 18.11.1.51303 and
+NASM 2.16.03. Its three MSVC command-line warnings report `/sdl` overridden by
+`/GS-` and `/Oi` overridden by `/Oi-`; no build errors. The generated package
+validation and full tool/build provenance are in the artifact directory's
+`boot-manifest/` and `build-logs/`.
+
+### QAC-managed virtual boot result
+
+The initial QAC attempt passed the combined OVMF image through QEMU's `-bios`
+option and exited before firmware entry; QAC released the reservation, and no
+guest or storage activity occurred. The corrected run used the combined OVMF
+image as a **read-only pflash**. QEMU 11.0.0 ran in QAC 2.0.0 acceptance mode
+with a private copy of the staged ESP exposed as a directory-backed FAT IDE
+disk, `usb=off`, no physical host drive attached, serial capture, and QMP
+control. This verifies the staged loader/kernel path in a virtual guest; it is
+not a physical USB or removable-media test.
+
+QAC reservation `8f0560a1a24c4fcd88b47f2bdf766ad9` launched child PID `25572`.
+The serial trace showed the UEFI loader, kernel entry, ramdisk load, GOP
+framebuffer setup, desktop main loop, heartbeat, and
+`[NAVIGATOR-SMOKE] result=PASS`. The virtual GOP selected one unique
+1280x800 primary framebuffer (32-bit B8G8R8A8, 5120-byte pitch). QEMU exposed
+no AHCI controller or NVMe namespaces, and xHCI was disabled; PS/2 was emulated
+and available. Those virtual results do not establish physical controller,
+monitor, or input behavior. The smoke's HTTP cases were skipped and TLS stayed
+fail-closed because no virtual secure RNG was supplied; this does not change
+the boot/package result.
+
+QMP issued a controlled guest shutdown after those markers; QEMU exited with
+code 0 and QAC released the reservation. The final QAC census showed no QEMU,
+reservation, session, queued, or blocked work. All 12 files in the private
+QEMU ESP still matched the package manifest after exit. Serial/QAC/QMP logs are
+in `qemu-smoke/`. No physical USB has been written, and no physical boot was
+performed.
+
+### Physical operator handoff and remaining gates
+
+`instructions/BOOT_USB_AND_OPERATOR_GUIDE.md` gives the USB identity and
+explicit replacement checks, root layout, shutdown/disconnect procedure,
+one-time Esc/F9 selection, evidence checklist, and recovery steps.
+`observations/SARAH_DT_PHYSICAL_BOOT_OBSERVATION.md` is intentionally a blank
+owner-run observation form. The owner must verify the USB's manufacturer,
+model, serial/unique ID, capacity, and `BusType=USB`; use only an explicitly
+expendable FAT32 volume or explicitly approve replacement of that exact
+volume's contents. Do not use a guessed disk number, `diskpart clean`, or
+`Clear-Disk`. During Stage A, keep all internal storage disconnected, use the
+primary monitor and one-time boot menu, and stop without storage actions if
+input is unavailable. Restore original connections after power-off and select
+Windows Boot Manager through the one-time menu if needed.
+
+No physical observation has been made, so the form remains unfilled, the
+physical USB result is **NOT ATTEMPTED**, and Stage B is **NOT AUTHORIZED**.
+DM38 remains active, DM39 does not begin, and no acceptance criterion is
+closed by the QAC virtual boot. The retained DM38-1 storage regression count
+of 1,523/1,523 is source-matched historical evidence, not a test rerun in this
+documentation/package continuation.
