@@ -19,4 +19,4 @@ try {
     Pop-Location
 }
 
-Write-Output 'DNS resolution smoke PASS (10 scenarios)'
+Write-Output 'DNS resolution smoke PASS (11 scenarios)'

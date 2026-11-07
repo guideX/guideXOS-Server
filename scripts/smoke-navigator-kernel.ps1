@@ -10,13 +10,13 @@ param(
     [string[]]$ScenarioFilter,
     [switch]$ReuseActiveBuild,
     [string]$ArtifactPath,
-    [switch]$DisableSecureEntropy
+    [switch]$DisableSecureEntropy,
+    [switch]$GuestDnsQualification
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $LogDir = Join-Path $Root "logs"
-New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 . (Join-Path $Root "scripts\process_environment.ps1")
 Normalize-ProcessEnvironment
 . (Join-Path $Root "scripts\qemu-secure-rng-args.ps1")
@@ -73,7 +73,17 @@ if ($ReuseActiveBuild) {
         }
     }
 } else {
-    $artifactRoot = Join-Path $Root "out\navigator-https-qualification\$buildId"
+    if ([string]::IsNullOrWhiteSpace($ArtifactPath)) {
+        $artifactRoot = Join-Path $Root "out\navigator-https-qualification\$buildId"
+    } else {
+        $artifactBaseCandidate = if ([System.IO.Path]::IsPathRooted($ArtifactPath)) {
+            $ArtifactPath
+        } else {
+            Join-Path $Root $ArtifactPath
+        }
+        $artifactBase = [System.IO.Path]::GetFullPath($artifactBaseCandidate)
+        $artifactRoot = Join-Path $artifactBase $buildId
+    }
     $esp = Join-Path $artifactRoot 'ESP'
 }
 $wallpaperPackDir = Join-Path $artifactRoot 'wallpaper-pack'
@@ -81,6 +91,10 @@ $kernelImage = Join-Path $esp 'kernel.elf'
 $ramdiskImage = Join-Path $esp 'ramdisk.img'
 $bootloader = Join-Path $esp 'EFI\BOOT\BOOTX64.EFI'
 $qualificationManifestPath = Join-Path $artifactRoot 'navigator-https-qualification.json'
+if (-not [string]::IsNullOrWhiteSpace($ArtifactPath) -and -not $ReuseActiveBuild) {
+    $LogDir = Join-Path $artifactRoot 'logs'
+}
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 function Invoke-KernelBuildForSmoke {
     $make = $null
@@ -96,13 +110,15 @@ function Invoke-KernelBuildForSmoke {
     if (-not $make) { throw 'Navigator HTTPS smoke build blocked: GNU make for the AMD64 kernel is unavailable.' }
 
     New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
-    $kernelBuildOutput = "../out/navigator-https-qualification/$buildId/kernel-build"
+    $kernelBuildOutput = Join-Path $artifactRoot 'kernel-build'
+    $kernelBuildOutputForMake = $kernelBuildOutput.Replace('\', '/')
     $kernelBuildLog = Join-Path $artifactRoot 'kernel-build.log'
     $flags = '-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE -DGXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE -DGXOS_KERNEL_TEXT_WRITE_GUARD'
+    if ($GuestDnsQualification) { $flags += ' -DGXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE' }
     $oldBuildErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        & $make -C (Join-Path $Root 'kernel') 'ARCH=amd64' "BUILD_DIR=$kernelBuildOutput" "EXTRA_CFLAGS=$flags" *> $kernelBuildLog
+        & $make -C (Join-Path $Root 'kernel') 'ARCH=amd64' "BUILD_DIR=$kernelBuildOutputForMake" "EXTRA_CFLAGS=$flags" *> $kernelBuildLog
         $buildCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $oldBuildErrorActionPreference
@@ -110,7 +126,7 @@ function Invoke-KernelBuildForSmoke {
     Get-Content -LiteralPath $kernelBuildLog -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
     if ($buildCode -ne 0) { throw "Navigator HTTPS smoke kernel build failed with exit code $buildCode. See $kernelBuildLog" }
 
-    $builtKernel = Join-Path $Root "out\navigator-https-qualification\$buildId\kernel-build\bin\kernel.elf"
+    $builtKernel = Join-Path $artifactRoot 'kernel-build\bin\kernel.elf'
     if (-not (Test-Path -LiteralPath $builtKernel -PathType Leaf)) {
         throw "Navigator HTTPS smoke kernel build did not produce the expected isolated artifact: $builtKernel"
     }
@@ -1982,6 +1998,10 @@ if ($ScenarioFilter -and $ScenarioFilter.Count -gt 0) {
 } elseif ($selectedScenarios.Count -le 0) {
     throw "ScenarioGroup '$effectiveScenarioGroup' did not select any kernel smoke scenarios."
 }
+if ($GuestDnsQualification -and
+    ($selectedScenarios.Count -ne 1 -or $selectedScenarios[0].Name -ne 'production_validated')) {
+    throw 'Guest DNS qualification requires the single controlled production_validated scenario.'
+}
 
 if ((-not [string]::IsNullOrWhiteSpace($CandidateRotationId)) -and [string]::IsNullOrWhiteSpace($CandidateBundlePath)) {
     throw "CandidateRotationId requires CandidateBundlePath."
@@ -2008,6 +2028,9 @@ $qualificationCompileDefinitions = @(
     'GXOS_NAVIGATOR_TLS_CAPABILITY_CONTRACT_NEGATIVE_TEST_ACTIVE',
     'GXOS_KERNEL_TEXT_WRITE_GUARD'
 )
+if ($GuestDnsQualification) {
+    $qualificationCompileDefinitions += 'GXOS_NAVIGATOR_GUEST_DNS_QUALIFICATION_ACTIVE'
+}
 
 function Get-NavigatorHttpsSourceFingerprint {
     $relativePaths = @(
@@ -2021,6 +2044,7 @@ function Get-NavigatorHttpsSourceFingerprint {
         'guidexos/mbedtls_sources.mk',
         'guidexos/mbedtls_config.h',
         'scripts/smoke-navigator-kernel.ps1',
+        'scripts/verify-navigator-dns-pcap.py',
         'scripts/navigator_kernel_http_server.py',
         'scripts/generate-wallpaper-pack.ps1',
         'scripts/fixtures/navigator-validated-root-ca-bundle.pem',
@@ -2281,6 +2305,11 @@ foreach ($scenario in $selectedScenarios) {
 
 $scenarioFailures = @()
 $activeServers = $null
+$guestDnsPcapPath = Join-Path $artifactRoot 'guest-dns-wire.pcap'
+$oldQemuNetDumpPath = [Environment]::GetEnvironmentVariable('GXOS_NAVIGATOR_QEMU_NET_DUMP', 'Process')
+if ($GuestDnsQualification) {
+    [Environment]::SetEnvironmentVariable('GXOS_NAVIGATOR_QEMU_NET_DUMP', $guestDnsPcapPath, 'Process')
+}
 
 try {
     foreach ($scenario in $selectedScenarios) {
@@ -2358,6 +2387,46 @@ try {
                 $scenarioChecks = @($scenarioChecks | Where-Object { $_ -ne "[NAVIGATOR-SMOKE] result=PASS" })
             }
             $missing = Test-NavigatorKernelSmokeOutput -Output $runOutput -Contains $scenarioChecks -RegexChecks $scenario.RegexChecks
+            if ($GuestDnsQualification -and $scenario.Name -eq 'production_validated') {
+                $dnsFields = @{}
+                foreach ($match in [regex]::Matches($runOutput, '(?m)^\[NAVIGATOR-SMOKE\] guest_dns\.([a-z_]+)=([^\r\n]+)')) {
+                    $dnsFields[$match.Groups[1].Value] = $match.Groups[2].Value.Trim()
+                }
+                $dnsExpectedFields = [ordered]@{
+                    enabled = 'yes'
+                    hostname = 'example.com'
+                    resolution_source = 'kernel-dns-udp'
+                    server = '10.0.2.3'
+                    destination_port = '53'
+                    reply_source = '10.0.2.3:53'
+                    reply_source_validated = 'yes'
+                    dns_result = 'PASS'
+                    tcp_connect_result = 'PASS'
+                    result = 'PASS'
+                }
+                foreach ($key in $dnsExpectedFields.Keys) {
+                    if ($dnsFields[$key] -ne $dnsExpectedFields[$key]) {
+                        $missing += "Guest DNS evidence mismatch: $key expected '$($dnsExpectedFields[$key])', got '$($dnsFields[$key])'."
+                    }
+                }
+                if ($dnsFields['resolved_ip'] -notmatch '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$' -or
+                    $dnsFields['tcp_target'] -ne "$($dnsFields['resolved_ip']):443" -or
+                    $dnsFields['query_id'] -notmatch '^[1-9][0-9]*$') {
+                    $missing += 'Guest DNS result was not handed to the TCP target with a non-zero query id and parsed IPv4 address.'
+                }
+                if (-not (Test-Path -LiteralPath $guestDnsPcapPath -PathType Leaf)) {
+                    $missing += "Guest DNS packet capture is missing: $guestDnsPcapPath"
+                } else {
+                    $pcapEvidence = & $python (Join-Path $Root 'scripts\verify-navigator-dns-pcap.py') `
+                        --pcap $guestDnsPcapPath --hostname $dnsFields['hostname'] `
+                        --address $dnsFields['resolved_ip'] --query-id $dnsFields['query_id'] 2>&1
+                    $pcapCode = $LASTEXITCODE
+                    $pcapEvidence | ForEach-Object { Write-Host $_ }
+                    if ($pcapCode -ne 0) {
+                        $missing += "Independent guest DNS packet verification failed (exit $pcapCode)."
+                    }
+                }
+            }
             if ($scenario.Name -eq "production_validated" -and
                 $runOutput.Contains("[NAVIGATOR-SMOKE] tls_smoke.local_ready=yes")) {
                 $missing += Test-NavigatorKernelSmokeTlsClientHelloEvidence -HttpsLogPath $activeServers.HttpsLog
@@ -2424,6 +2493,7 @@ try {
     Stop-NavigatorKernelSmokeServers -Servers $activeServers
     Restore-NavigatorKernelSmokeEnvironment
     Restore-NavigatorSmokeDirectoryState -State $downloadsState
+    [Environment]::SetEnvironmentVariable('GXOS_NAVIGATOR_QEMU_NET_DUMP', $oldQemuNetDumpPath, 'Process')
     if (Test-Path $oversizedCaFixture) {
         Remove-Item -LiteralPath $oversizedCaFixture -Force -ErrorAction SilentlyContinue
     }

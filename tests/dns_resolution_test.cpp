@@ -24,6 +24,7 @@ enum class FixtureMode {
     BadQuestionCount,
     WrongQuestion,
     WrongTransaction,
+    Truncated,
     NxDomain,
     Oversized,
     Timeout,
@@ -79,6 +80,7 @@ static void make_reply(const uint8_t* query, uint16_t queryLen)
     memcpy(g_reply, query, 2);
     write_u16(g_reply + 2, static_cast<uint16_t>(
         dns::FLAG_QR_RESPONSE | dns::FLAG_RD | dns::FLAG_RA |
+        (g_mode == FixtureMode::Truncated ? dns::FLAG_TC : 0) |
         (g_mode == FixtureMode::NxDomain ? dns::RCODE_NXDOMAIN : dns::RCODE_NOERROR)));
     write_u16(g_reply + 4, 1);
     const bool hasAnswer = g_mode != FixtureMode::NxDomain;
@@ -278,6 +280,11 @@ int main()
 
     address = 0;
     assert(resolve_fixture(FixtureMode::WrongTransaction, &address) == dns::DNS_ERR_TIMEOUT);
+    diag = dns::get_last_query_diagnostics();
+    assert(diag->malformedReplies == dns::MAX_RETRIES && address == 0);
+
+    address = 0;
+    assert(resolve_fixture(FixtureMode::Truncated, &address) == dns::DNS_ERR_TIMEOUT);
     diag = dns::get_last_query_diagnostics();
     assert(diag->malformedReplies == dns::MAX_RETRIES && address == 0);
 
