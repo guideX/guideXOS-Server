@@ -5,6 +5,7 @@ param(
     [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1',
     [string]$CandidateIntegrityInventory = '',
     [ValidateSet('R2R2R1','R2R2R2','R2R2R3','R2R2R4')][string]$NativeAllocationGuestAttempt = 'R2R2R1',
+    [string]$ArtifactRoot = '',
     [switch]$HostedPreflightOnly
 )
 
@@ -13,6 +14,8 @@ Set-StrictMode -Version Latest
 if ($PSVersionTable.PSEdition -ne 'Core') { throw 'C188R12R4R5 QAC guest requires PowerShell Core.' }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $repo 'out\dotnet' }
+$artifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
 Import-Module (Join-Path $PSScriptRoot 'c188r12r4r5r4-qac-admission.psm1') -Force
 function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -57,25 +60,25 @@ if ($isThreadStoreReadiness) {
     $r4PalCommonMembership = $r4RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
 }
 $phaseRoot = if ($isTransitionAttribution) {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
 } elseif ($isSafeHandoff) {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4r5r2r2r4r2-safe-handoff'))
 } elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4-pal-capacity-fix'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4r5r2r2r4-pal-capacity-fix'))
 } elseif ($isNativeAllocationFailureAttribution) {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4r5r2r2-native-allocation-attribution'))
 } elseif ($isSemiSharedAttribution) {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4r5r2-semishared-attribution'))
 } elseif ($isGcInitFailureAttribution) {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5-gc-init-probes'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4r5-gc-init-probes'))
 } elseif ($isThreadStoreReadiness) {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4-threadstore-readiness'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4-threadstore-readiness'))
 } elseif ($isInitReturnContract) {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r3-init-return-contract'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r3-init-return-contract'))
 } elseif ($isInitAttribution) {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r1-runtime-init-attribution'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r1-runtime-init-attribution'))
 } else {
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5-gc-ownership-proof'))
+    [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5-gc-ownership-proof'))
 }
 if (-not (Test-QacCandidatePath -CandidateRoot $candidate -PhaseRoot $phaseRoot -RequireExisting)) {
     throw "CandidateRoot must be a unique candidate below $phaseRoot."

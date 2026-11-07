@@ -52,6 +52,53 @@ int main() {
     ok &= expectGate(record, GX_TRANSITION_GATE_NONE,
         "raw Thread present but uninitialized is ready for stock attachment");
 
+    ok &= check(GuideXosTransitionClassifyAttachment(0u) == GX_TRANSITION_ATTACHMENT_ABSENT,
+        "non-null raw Thread with zero state flags remains unattached");
+    ok &= check(GuideXosTransitionClassifyAttachment(1u) == GX_TRANSITION_ATTACHMENT_PRESENT,
+        "TSF_Attached is the attachment indicator");
+    ok &= check(GuideXosTransitionClassifyPalFls(false, 0u, 0x1000u) == GX_TRANSITION_PAL_FLS_UNAVAILABLE,
+        "unavailable PAL FLS is distinct from an empty slot");
+    ok &= check(GuideXosTransitionClassifyPalFls(true, 0u, 0x1000u) == GX_TRANSITION_PAL_FLS_EMPTY,
+        "null PAL FLS slot is classified as empty");
+    ok &= check(GuideXosTransitionClassifyPalFls(true, 0x1000u, 0x1000u) == GX_TRANSITION_PAL_FLS_MATCHES_CURRENT_THREAD,
+        "PAL FLS slot matching the raw Thread has consistent identity");
+    ok &= check(GuideXosTransitionClassifyPalFls(true, 0x2000u, 0x1000u) == GX_TRANSITION_PAL_FLS_FOREIGN_THREAD,
+        "stale foreign PAL FLS value is distinguished");
+
+    alignas(uintptr_t) unsigned char tlsBlock[0x110];
+    std::memset(tlsBlock, 0xA5, sizeof(tlsBlock));
+    void** runtimeCell = reinterpret_cast<void**>(tlsBlock + 0x30u);
+    uint32_t* threadStateFlags = reinterpret_cast<uint32_t*>(tlsBlock + 0x30u + 0x38u);
+    void** cachedTransitionFrame = reinterpret_cast<void**>(tlsBlock + 0x30u + 0x50u);
+    *runtimeCell = nullptr;
+    *threadStateFlags = 0u;
+    *cachedTransitionFrame = reinterpret_cast<void*>(static_cast<uintptr_t>(0xCACEu));
+    unsigned char beforeSentinelWrite[sizeof(tlsBlock)];
+    std::memcpy(beforeSentinelWrite, tlsBlock, sizeof(tlsBlock));
+    ok &= check(GuideXosTransitionInitializeLegacyRuntimeCell(runtimeCell) &&
+        *runtimeCell == runtimeCell,
+        "startup sentinel initializes only the legacy runtime cell");
+    bool onlyRuntimeCellChanged = true;
+    for (size_t i = 0u; i < sizeof(tlsBlock); ++i) {
+        if (i >= 0x30u && i < 0x30u + sizeof(void*)) continue;
+        if (tlsBlock[i] != beforeSentinelWrite[i]) onlyRuntimeCellChanged = false;
+    }
+    ok &= check(onlyRuntimeCellChanged && *threadStateFlags == 0u &&
+        *cachedTransitionFrame == reinterpret_cast<void*>(static_cast<uintptr_t>(0xCACEu)),
+        "startup sentinel leaves Thread flags and cached frame bytes unchanged");
+    unsigned char afterFirstSentinelWrite[sizeof(tlsBlock)];
+    std::memcpy(afterFirstSentinelWrite, tlsBlock, sizeof(tlsBlock));
+    ok &= check(!GuideXosTransitionInitializeLegacyRuntimeCell(runtimeCell) &&
+        std::memcmp(afterFirstSentinelWrite, tlsBlock, sizeof(tlsBlock)) == 0,
+        "startup sentinel initialization is idempotent");
+
+    record = readyRecord();
+    record.flsIndexReady = 0u;
+    record.flsCurrentThreadState = GuideXosTransitionClassifyPalFls(false,
+        record.flsCurrentThread, record.rawCurrentThread);
+    ok &= expectGate(record, GX_TRANSITION_GATE_PAL_FLS,
+        "unavailable PAL FLS blocks without being reported as a null slot");
+
     record = readyRecord();
     record.currentThread = record.rawCurrentThread;
     record.currentThreadAttachment = GX_TRANSITION_ATTACHMENT_PRESENT;

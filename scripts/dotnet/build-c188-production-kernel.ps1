@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory=$true)][string]$BuildRoot
+    [Parameter(Mandatory=$true)][string]$BuildRoot,
+    [string]$ArtifactRoot = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -8,6 +9,9 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
 }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $repo 'out\dotnet' }
+$configuredArtifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
+$defaultArtifactRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet'))
 $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188-external-app-identity')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r5-notes-proof-invocation')),
@@ -29,6 +33,10 @@ $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution')))
+$artifactRoots = @($artifactRoots | ForEach-Object {
+    $relativePhase = [System.IO.Path]::GetRelativePath($defaultArtifactRoot,[string]$_)
+    [System.IO.Path]::GetFullPath((Join-Path $configuredArtifactRoot $relativePhase))
+})
 $buildRootFull = [System.IO.Path]::GetFullPath($BuildRoot)
 $artifactRoot = @($artifactRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $buildRootFull)

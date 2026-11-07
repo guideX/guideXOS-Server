@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "guidexos_nativeaot_thread_attachment_contract.h"
 
 static constexpr uint32_t kGuideXosTransitionFatalMagic = 0x43464154u;
 static constexpr uint32_t kGuideXosTransitionFatalSchema = 1u;
@@ -54,23 +55,11 @@ enum GuideXosTransitionMessageCapture : uint32_t {
     GX_TRANSITION_MESSAGE_TRUNCATED = 2u,
 };
 
-enum GuideXosTransitionAttachmentState : uint32_t {
-    GX_TRANSITION_ATTACHMENT_UNKNOWN = 0u,
-    GX_TRANSITION_ATTACHMENT_ABSENT = 1u,
-    GX_TRANSITION_ATTACHMENT_PRESENT = 2u,
-};
-
 enum GuideXosTransitionCooperativeState : uint32_t {
     GX_TRANSITION_COOP_UNKNOWN = 0u,
     GX_TRANSITION_COOP_PREEMPTIVE = 1u,
     GX_TRANSITION_COOP_COOPERATIVE = 2u,
     GX_TRANSITION_COOP_STOCK_ATTACH_WILL_INITIALIZE = 3u,
-};
-
-enum GuideXosTransitionPalFlsState : uint32_t {
-    GX_TRANSITION_PAL_FLS_EMPTY = 0u,
-    GX_TRANSITION_PAL_FLS_MATCHES_CURRENT_THREAD = 1u,
-    GX_TRANSITION_PAL_FLS_FOREIGN_THREAD = 2u,
 };
 
 struct GuideXosNativeAotTransitionAttributionRecord {

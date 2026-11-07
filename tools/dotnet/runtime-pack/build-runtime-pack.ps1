@@ -2,6 +2,7 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path,
     [string]$RuntimePackRoot = $PSScriptRoot,
     [string]$OutputRoot = "",
+    [string]$ArtifactRoot = "",
     [string]$StockRuntimePackRoot = "",
     [string]$ExternalRuntimeRoot = "",
     [switch]$ManagedAllocation,
@@ -155,10 +156,12 @@ function Assert-StockPack([string]$Root, $Lock) {
 
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
 $RuntimePackRoot = [System.IO.Path]::GetFullPath($RuntimePackRoot)
-if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $RepoRoot "out\dotnet\runtime-pack" }
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $RepoRoot "out\dotnet" }
+$ArtifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $ArtifactRoot "runtime-pack" }
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 Assert-WithinRoot $RuntimePackRoot $RepoRoot "Runtime-pack source"
-Assert-WithinRoot $OutputRoot (Join-Path $RepoRoot "out\dotnet") "Runtime-pack output"
+Assert-WithinRoot $OutputRoot $ArtifactRoot "Runtime-pack output"
 
 $lock = Read-Lock
 if ([string]$lock.architecture -ne "amd64" -or
@@ -1446,6 +1449,7 @@ if ($NativeAotFpRepair) {
     }
 }
 $threadStoreSourceHashes = [ordered]@{}
+$threadLayoutEvidence = $null
 if ($C188R12R4R5R4ThreadStoreReadiness) {
     foreach ($relative in @(
         'coreclr/nativeaot/Runtime/thread.h',
@@ -1456,10 +1460,75 @@ if ($C188R12R4R5R4ThreadStoreReadiness) {
         'coreclr/nativeaot/Runtime/thread.cpp',
         'coreclr/nativeaot/Runtime/threadstore.cpp',
         'coreclr/nativeaot/Runtime/RuntimeInstance.cpp',
-        'coreclr/nativeaot/Runtime/startup.cpp')
+        'coreclr/nativeaot/Runtime/startup.cpp',
+        'coreclr/nativeaot/Runtime/AsmOffsets.h')
     ) {
         $path = Join-Path $lockedExternalRuntimeRoot (Join-Path 'src' $relative.Replace('/', '\'))
         $threadStoreSourceHashes[$relative] = Get-Hash $path
+    }
+}
+if ($C188R12R4R5R2R3InitializeModulesAttribution) {
+    if ([string]$lock.ilCompiler.commit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3') {
+        throw 'C188 R6 Thread layout evidence requires the pinned NativeAOT source revision.'
+    }
+    $pinnedThreadHeader = Join-Path $lockedExternalRuntimeRoot 'src\coreclr\nativeaot\Runtime\thread.h'
+    $pinnedAsmOffsets = Join-Path $lockedExternalRuntimeRoot 'src\coreclr\nativeaot\Runtime\AsmOffsets.h'
+    $threadHeaderText = Get-Content -LiteralPath $pinnedThreadHeader -Raw
+    $asmOffsetsText = Get-Content -LiteralPath $pinnedAsmOffsets -Raw
+    $requiredOffsets = [ordered]@{
+        m_ThreadStateFlags = '38'
+        m_pTransitionFrame = '40'
+        m_pDeferredTransitionFrame = '48'
+    }
+    foreach ($property in $requiredOffsets.GetEnumerator()) {
+        $pattern = 'ASM_OFFSET\(\s*[0-9a-f]+,\s*' + [regex]::Escape($property.Value) +
+            ',\s*Thread,\s*' + [regex]::Escape($property.Key) + '\)'
+        if ($asmOffsetsText -notmatch $pattern) {
+            throw "Pinned AsmOffsets.h does not place Thread::$($property.Key) at +0x$($property.Value)."
+        }
+    }
+    $orderedFields = @('m_rgbAllocContextBuffer','m_ThreadStateFlags','m_pTransitionFrame',
+        'm_pDeferredTransitionFrame','m_pCachedTransitionFrame','m_pNext','m_hPalThread')
+    $runtimeLocalsMatch = [regex]::Match($threadHeaderText,
+        '(?s)struct\s+RuntimeThreadLocals\s*\{(?<body>.*?)\n\};')
+    if (-not $runtimeLocalsMatch.Success) { throw 'Pinned thread.h has no RuntimeThreadLocals definition.' }
+    $runtimeLocalsBody = $runtimeLocalsMatch.Groups['body'].Value
+    $fieldMatches = @(
+        foreach ($field in $orderedFields) {
+            [regex]::Match($runtimeLocalsBody, '\b' + [regex]::Escape($field) + '\b')
+        }
+    )
+    $fieldIndexes = @($fieldMatches | ForEach-Object { $_.Index })
+    $fieldSequenceValid = @($fieldMatches | Where-Object { -not $_.Success }).Count -eq 0
+    for ($index = 1; $fieldSequenceValid -and $index -lt $fieldIndexes.Count; $index++) {
+        if ($fieldIndexes[$index] -le $fieldIndexes[$index - 1]) { $fieldSequenceValid = $false }
+    }
+    if (-not $fieldSequenceValid) {
+        throw 'Pinned RuntimeThreadLocals field sequence changed; refusing R6 platform build.'
+    }
+    if ($null -ne $lock.platformObject.PSObject.Properties['runtimeCellInitializedOffset'] -or
+        $null -ne $lock.platformObject.PSObject.Properties['flsCellOffset']) {
+        throw 'Runtime-pack lock still contains the removed Thread-overlapping TLS marker or FLS shadow offsets.'
+    }
+    $threadLayoutEvidence = [ordered]@{
+        sourceCommit = $lock.ilCompiler.commit
+        threadHeader = 'src/coreclr/nativeaot/Runtime/thread.h'
+        threadHeaderSha256 = Get-Hash $pinnedThreadHeader
+        asmOffsets = 'src/coreclr/nativeaot/Runtime/AsmOffsets.h'
+        asmOffsetsSha256 = Get-Hash $pinnedAsmOffsets
+        asmOffsetsThreadFields = $requiredOffsets
+        runtimeThreadLocalsFieldOrder = $orderedFields
+        staticAssertedRuntimeThreadLocalsOffsets = [ordered]@{
+            m_ThreadStateFlags = '0x38'
+            m_pTransitionFrame = '0x40'
+            m_pDeferredTransitionFrame = '0x48'
+            m_pCachedTransitionFrame = '0x50'
+            m_pNext = '0x58'
+            m_hPalThread = '0x60'
+        }
+        runtimeCellOffset = '0x30'
+        legacySentinelWritesOnlyRuntimeCell = $true
+        palFlsShadowOffset = $null
     }
 }
 $gcInitProbeSourceHashes = [ordered]@{}
@@ -1589,7 +1658,8 @@ $manifest = [ordered]@{
     c188r12r4r5r4ThreadStoreReadinessSourceCommit = if ($C188R12R4R5R4ThreadStoreReadiness) { $lock.ilCompiler.commit } else { $null }
     c188r12r4r5r4ThreadStoreReadinessSourceRoot = if ($C188R12R4R5R4ThreadStoreReadiness) { $lockedExternalRuntimeRoot } else { $null }
     c188r12r4r5r4ThreadStoreReadinessSourceFiles = $threadStoreSourceHashes
-    c188r12r4r5r4MarkerCapacity = if ($C188R12R4R5R4ThreadStoreReadiness) { 48 } else { 0 }
+    c188r12r4r5r4MarkerCapacity = if ($C188R12R4R5R4ThreadStoreReadiness) { 64 } else { 0 }
+    c188r12r4r5r2r3ThreadLayoutEvidence = $threadLayoutEvidence
     c188r12r4r5r4PalCommonStockMember = if ($C188R12R4R5R4ThreadStoreReadiness) { $threadStoreCommonPalMember } else { $null }
     c188r12r4r5r4PalCommonReplacementObject = if ($C188R12R4R5R4ThreadStoreReadiness) { $threadStoreCommonPalObject } else { $null }
     c188r12r4r5r4PalCommonReplacementSha256 = if ($C188R12R4R5R4ThreadStoreReadiness) { Get-Hash $threadStoreCommonPalObject } else { $null }

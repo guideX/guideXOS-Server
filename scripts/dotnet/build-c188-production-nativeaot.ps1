@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory=$true)][string]$BuildRoot
+    [Parameter(Mandatory=$true)][string]$BuildRoot,
+    [string]$ArtifactRoot = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -7,6 +8,9 @@ if ($PSVersionTable.PSEdition -ne 'Core') {
     throw 'C188 production NativeAOT builds require PowerShell Core.'
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $repo 'out\dotnet' }
+$configuredArtifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
+$defaultArtifactRoot = [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet'))
 $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188-external-app-identity')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r3-notes-startup-diagnostics')),
@@ -30,6 +34,10 @@ $phaseRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2r4r2-safe-handoff')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out/dotnet/c188r12r4r5r4r5r2r2r4r2r3-transition-attribution')))
+$phaseRoots = @($phaseRoots | ForEach-Object {
+    $relativePhase = [System.IO.Path]::GetRelativePath($defaultArtifactRoot,[string]$_)
+    [System.IO.Path]::GetFullPath((Join-Path $configuredArtifactRoot $relativePhase))
+})
 $root = [System.IO.Path]::GetFullPath($BuildRoot)
 $allowedRoot = @($phaseRoots | Where-Object {
     $relative = [System.IO.Path]::GetRelativePath($_, $root)
@@ -64,6 +72,7 @@ Set-Content -LiteralPath $propsPath -Value $props -Encoding utf8
 $buildScript = Join-Path $PSScriptRoot 'build-managed-hostlog-proof.ps1'
 $arguments = @{
     RepoRoot = $repo
+    ArtifactRoot = $configuredArtifactRoot
     OutputRoot = $nativeRoot
     DirectoryBuildPropsPath = $propsPath
     RuntimePackRoot = $runtimePackRoot

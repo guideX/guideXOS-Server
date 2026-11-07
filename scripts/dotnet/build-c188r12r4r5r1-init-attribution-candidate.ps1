@@ -1,6 +1,7 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$CandidateRoot = '',
+    [string]$ArtifactRoot = '',
     [switch]$ThreadStoreReadiness,
     [switch]$GcInitProbes,
     [switch]$SemiSharedAttribution,
@@ -13,10 +14,14 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
+$artifactBase = if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
+    [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet'))
+} else { [System.IO.Path]::GetFullPath($ArtifactRoot) }
+$phaseName = if ($InitializeModulesAttribution) { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' } elseif ($SafeHandoff) { 'c188r12r4r5r4r5r2r2r4r2-safe-handoff' } elseif ($NativeAllocationAttribution) { 'c188r12r4r5r4r5r2r2-native-allocation-attribution' } elseif ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-attribution' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
+$phaseRoot = Join-Path $artifactBase $phaseName
 if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
-    $phaseRoot = if ($InitializeModulesAttribution) { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' } elseif ($SafeHandoff) { 'c188r12r4r5r4r5r2r2r4r2-safe-handoff' } elseif ($NativeAllocationAttribution) { 'c188r12r4r5r4r5r2r2-native-allocation-attribution' } elseif ($SemiSharedAttribution) { 'c188r12r4r5r4r5r2-semishared-attribution' } elseif ($GcInitProbes) { 'c188r12r4r5r4r5-gc-init-probes' } elseif ($ThreadStoreReadiness) { 'c188r12r4r5r4-threadstore-readiness' } else { 'c188r12r4r5r3-init-return-contract' }
-    $CandidateRoot = Join-Path $root "out\dotnet\$phaseRoot\candidate-$stamp"
+    $CandidateRoot = Join-Path $phaseRoot "candidate-$stamp"
 }
 if ($GcInitProbes -and -not $ThreadStoreReadiness) {
     throw 'C188R12R4R5R4R5 requires the R4 ThreadStore diagnostic profile.'
@@ -37,18 +42,18 @@ if ($InitializeModulesAttribution -and (-not $SafeHandoff -or
     throw 'InitializeModules attribution requires the complete explicitly selected C188 safe-handoff profile.'
 }
 $candidate = [System.IO.Path]::GetFullPath($CandidateRoot)
-$allowed = [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet')) + [System.IO.Path]::DirectorySeparatorChar
+$allowed = $artifactBase.TrimEnd([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 if (-not $candidate.StartsWith($allowed, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Candidate output must remain below out\dotnet: $candidate"
+    throw "Candidate output must remain below ArtifactRoot: $candidate"
 }
 if ((Test-Path -LiteralPath $candidate) -and -not $ResumeCandidate) { throw "Refusing to overwrite candidate: $candidate" }
 if ($ResumeCandidate) {
     $resumeRoots = @(
-        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2-semishared-attribution')),
-        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2-native-allocation-attribution')),
-        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff')),
-        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery')),
-        [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
+        [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r4r5r2-semishared-attribution')),
+        [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r4r5r2r2-native-allocation-attribution')),
+        [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r4r5r2r2r4r2-safe-handoff')),
+        [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery')),
+        [System.IO.Path]::GetFullPath((Join-Path $artifactBase 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
     )
     $resumeAllowed = $false
     foreach ($resumeRoot in $resumeRoots) {
@@ -101,8 +106,8 @@ $embeddedRaw = Join-Path $candidate 'gc-ownership-artifact.raw.o'
 $embeddedObject = Join-Path $candidate 'gc-ownership-artifact.o'
 $esp = Join-Path $candidate 'esp'
 $kernelBuildPrefix = if ($InitializeModulesAttribution) { 'build/c188r12r4r5r2r3-transition-attribution-' } elseif ($SafeHandoff) { 'build/c188r12r4r5r2r2r4r2-safe-handoff-' } elseif ($NativeAllocationAttribution) { 'build/c188r12r4r5r4r5r2r2-native-allocation-' } elseif ($SemiSharedAttribution) { 'build/c188r12r4r5r4r5r2-semishared-' } elseif ($GcInitProbes) { 'build/c188r12r4r5r4r5-gc-init-probes-' } elseif ($ThreadStoreReadiness) { 'build/c188r12r4r5r4-threadstore-readiness-' } else { 'build/c188r12r4r5r1-init-attribution-' }
-$kernelBuildDir = $kernelBuildPrefix + [guid]::NewGuid().ToString('N')
-$kernel = Join-Path $root "kernel\$($kernelBuildDir.Replace('/','\'))\bin\kernel.elf"
+$kernelBuildDir = Join-Path $artifactBase (Join-Path 'build' (($kernelBuildPrefix -replace '^build/','') + [guid]::NewGuid().ToString('N')))
+$kernel = Join-Path $kernelBuildDir 'bin\kernel.elf'
 $bootloader = Join-Path $root 'guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe'
 $objcopy = 'C:\mingw64\bin\objcopy.exe'
 $objdump = 'C:\mingw64\bin\objdump.exe'
@@ -122,7 +127,7 @@ $managedBuilder = Join-Path $root 'scripts\dotnet\build-managed-hostlog-proof.ps
 $managedBuildArguments = @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managedBuilder,
     '-RepoRoot', $root, '-LegacyRoot', 'D:\dev\guideXOSUEFI',
-    '-OutputRoot', $managedRoot, '-RuntimePackOutputRoot', $runtimeRoot,
+    '-OutputRoot', $managedRoot, '-RuntimePackOutputRoot', $runtimeRoot, '-ArtifactRoot', $artifactBase,
     '-UseGuideXosRuntimePack', '-AllocationMode', 'Allocating',
     '-ProductionApplication', '-C188R12R4R5GcOwnershipProof',
     '-C188R12R4R5R1InitDiagnostics', '-C188R12R4R5R3InitReturnContract',
@@ -586,7 +591,7 @@ if ($NativeAllocationAttribution) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12
 if ($SafeHandoff) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF' }
 if ($InitializeModulesAttribution) { $kernelDefines += ' -DGXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' }
 $makeArgs = @(
-    '-C', 'kernel', 'ARCH=amd64', "BUILD_DIR=$kernelBuildDir",
+    '-C', 'kernel', 'ARCH=amd64', "BUILD_DIR=$($kernelBuildDir.Replace('\','/'))",
     'GXOS_NATIVEAOT_GC_STARTUP_QEMU_TEST=1',
     'GXOS_NATIVEAOT_C188R12R4R5_GC_OWNERSHIP_QEMU_TEST=1',
     "NATIVEAOT_GC_STARTUP_QEMU_ARTIFACT_OBJ=$embeddedObject",
@@ -828,9 +833,9 @@ if ($productionNativeAotExists -or $productionKernelExists) {
     }
 } else {
     Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$productionNativeAotBuilder,
-        '-BuildRoot',$productionNativeAotRoot) (Join-Path $productionRoot 'production-nativeaot-build.log')
+        '-BuildRoot',$productionNativeAotRoot,'-ArtifactRoot',$artifactBase) (Join-Path $productionRoot 'production-nativeaot-build.log')
     Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$productionKernelBuilder,
-        '-BuildRoot',$productionKernelRoot) (Join-Path $productionRoot 'production-kernel-build.log')
+        '-BuildRoot',$productionKernelRoot,'-ArtifactRoot',$artifactBase) (Join-Path $productionRoot 'production-kernel-build.log')
 }
 Require-File $productionManifestPath 'Proof-disabled production NativeAOT qualification'
 Require-File $productionKernelManifestPath 'Proof-disabled production kernel qualification'
@@ -1102,6 +1107,8 @@ $manifest = [ordered]@{
     head = (& git -C $root rev-parse HEAD).Trim()
     branch = (& git -C $root branch --show-current).Trim()
     candidateRoot = $candidate
+    artifactRoot = $artifactBase
+    artifactPhaseRoot = $phaseRoot
     mode = if ($InitializeModulesAttribution) { 'NativeAotInitializeModulesTransitionAttribution' } elseif ($SafeHandoff) { 'NativeAotSafeHandoff' } elseif ($NativeAllocationAttribution) { 'NativeAllocationFailureAttribution' } elseif ($SemiSharedAttribution) { 'SemiSharedAttribution' } elseif ($GcInitProbes) { 'GcInitFailureAttribution' } elseif ($ThreadStoreReadiness) { 'ThreadStoreReadiness' } else { 'InitReturnContract' }
     productionApplicationStartupOnly = $true
     managedMainEnteredByCandidate = $false
@@ -1131,6 +1138,7 @@ $manifest = [ordered]@{
     c188R12R4R5R2R3InitializeModulesAttribution = [bool]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttribution
     c188R12R4R5R2R3InitializeModulesAttributionMarker = [string]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttributionMarker
     c188R12R4R5R2R3InitializeModulesAttributionTransition = [string]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttributionTransition
+    c188R12R4R5R2R3ThreadLayoutEvidence = $runtimeManifest.c188r12r4r5r2r3ThreadLayoutEvidence
     transitionAttributionContract = if ($InitializeModulesAttribution) { [ordered]@{
         recordSchema='fixed-size C188R12R4R5R2R3_FATAL plus C188R12R4R5R2R3_STATE'
         fatalMessageStrategy='message bytes unavailable; capture exact caller return RIP and resolve only against the generated candidate call-site map; never dereference message'

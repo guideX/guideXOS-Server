@@ -1,13 +1,16 @@
 param(
-    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+    [string]$ArtifactRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $root 'out\dotnet' }
+$artifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
 Import-Module (Join-Path $PSScriptRoot 'c188r12r4r5r4-qac-admission.psm1') -Force
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
-$testRoot = Join-Path $root "out\dotnet\c188r12r4r5r4-threadstore-readiness\hosted-qac-admission-$stamp"
+$testRoot = Join-Path $artifactRoot "c188r12r4r5r4-threadstore-readiness\hosted-qac-admission-$stamp"
 if (Test-Path -LiteralPath $testRoot) { throw "Refusing to overwrite hosted QAC evidence: $testRoot" }
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 

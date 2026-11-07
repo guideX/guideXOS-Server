@@ -576,6 +576,33 @@ function Test-QacTransitionCandidateProfile {
         [string]$runtime.runtimeIdentity.sourceCommit -cne [string]$manifest.runtimePackSourceCommit) {
         throw 'Runtime-pack manifest does not match the pinned transition candidate identity.'
     }
+    $layoutEvidenceProperty = $manifest.PSObject.Properties['c188R12R4R5R2R3ThreadLayoutEvidence']
+    if ($null -ne $layoutEvidenceProperty) {
+        $layout = $layoutEvidenceProperty.Value
+        $artifactRootProperty = $manifest.PSObject.Properties['artifactRoot']
+        $layoutArtifactRoot = if ($null -eq $artifactRootProperty) { '' } else { [string]$artifactRootProperty.Value }
+        $layoutPhaseRoot = [System.IO.Path]::GetFullPath((Join-Path $layoutArtifactRoot `
+            'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
+        $layoutSourceFiles = $runtime.c188r12r4r5r4ThreadStoreReadinessSourceFiles
+        if ([string]::IsNullOrWhiteSpace($layoutArtifactRoot) -or
+            -not [string]::Equals($phaseFull,$layoutPhaseRoot,[System.StringComparison]::OrdinalIgnoreCase) -or
+            [string]$layout.sourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
+            [string]$layout.runtimeCellOffset -cne '0x30' -or
+            [string]$layout.asmOffsetsThreadFields.m_ThreadStateFlags -cne '38' -or
+            [string]$layout.asmOffsetsThreadFields.m_pTransitionFrame -cne '40' -or
+            [string]$layout.asmOffsetsThreadFields.m_pDeferredTransitionFrame -cne '48' -or
+            [string]$layout.staticAssertedRuntimeThreadLocalsOffsets.m_ThreadStateFlags -cne '0x38' -or
+            [string]$layout.staticAssertedRuntimeThreadLocalsOffsets.m_pCachedTransitionFrame -cne '0x50' -or
+            [string]$layout.staticAssertedRuntimeThreadLocalsOffsets.m_pNext -cne '0x58' -or
+            -not [bool]$layout.legacySentinelWritesOnlyRuntimeCell -or
+            $null -ne $layout.palFlsShadowOffset -or
+            [string]$layout.threadHeaderSha256 -cne [string]$layoutSourceFiles.'coreclr/nativeaot/Runtime/thread.h' -or
+            [string]$layout.asmOffsetsSha256 -cne [string]$layoutSourceFiles.'coreclr/nativeaot/Runtime/AsmOffsets.h' -or
+            $null -ne $runtime.platformObject.PSObject.Properties['runtimeCellInitializedOffset'] -or
+            $null -ne $runtime.platformObject.PSObject.Properties['flsCellOffset']) {
+            throw 'R6 candidate layout evidence does not bind the pinned source, compiled ABI assertions, and removed TLS overlap fields.'
+        }
+    }
     $hosted = Get-Content -LiteralPath $hostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
     if ([string]$hosted.result -cne 'PASS' -or [int]$hosted.assertionCount -lt 20 -or
         [bool]$hosted.qemuLaunched -or [bool]$hosted.qacReserved) {

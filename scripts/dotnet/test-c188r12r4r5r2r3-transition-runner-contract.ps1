@@ -1,12 +1,15 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
-    [string]$CandidateRoot = ''
+    [string]$CandidateRoot = '',
+    [string]$ArtifactRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
-$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $root 'out\dotnet' }
+$artifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
+$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $artifactRoot 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
 if ([string]::IsNullOrWhiteSpace($CandidateRoot)) {
     $CandidateRoot = Join-Path $phaseRoot 'candidate-20261106T042749067Z'
 }
@@ -55,7 +58,7 @@ try {
     # The actual runner validates all inventory hashes, stages disposable state,
     # then exits before querying QAC or creating the one-boot guard.
     $runnerOutput = & pwsh -NoProfile -ExecutionPolicy Bypass -File $runnerPath `
-        -CandidateRoot $candidate -CandidateIntegrityInventory $inventoryPath -HostedPreflightOnly 2>&1
+        -CandidateRoot $candidate -CandidateIntegrityInventory $inventoryPath -ArtifactRoot $artifactRoot -HostedPreflightOnly 2>&1
     $runnerExit = $LASTEXITCODE
     $runnerText = ($runnerOutput | Out-String)
     Assert-Contract ($runnerExit -eq 0 -and $runnerText -match 'C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT=PASS') `

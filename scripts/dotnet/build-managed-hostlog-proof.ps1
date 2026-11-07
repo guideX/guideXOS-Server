@@ -5,6 +5,7 @@ param(
     [string]$PythonExe = "",
     [string]$PeToElfScript = "",
     [string]$OutputRoot = "",
+    [string]$ArtifactRoot = "",
     [string]$DirectoryBuildPropsPath = "",
     [string]$RuntimePackRoot = "",
     [switch]$UseGuideXosRuntimePack,
@@ -210,15 +211,16 @@ function Assert-FileNotContains([string]$Path, [string[]]$Patterns, [string]$Lab
 
 $projectDir = Join-Path $RepoRoot "samples\managed\HostLogProof"
 $projectFile = Join-Path $projectDir "HostLogProof.csproj"
-$defaultOutputRoot = Join-Path $RepoRoot "out\dotnet\managed-hostlog"
+$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $RepoRoot "out\dotnet" }
+$ArtifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
+$defaultOutputRoot = Join-Path $ArtifactRoot "managed-hostlog"
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = $defaultOutputRoot
 }
 
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
-$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
-
-Assert-WithinRoot $OutputRoot $RepoRoot "Output"
+Assert-WithinRoot $OutputRoot $ArtifactRoot "Output"
 
 $runtimePackManifest = $null
 $runtimePackObject = $null
@@ -237,13 +239,14 @@ if ($UseGuideXosRuntimePack) {
         throw "GuideXOS runtime-pack build script not found: $runtimePackBuild"
     }
     if ([string]::IsNullOrWhiteSpace($RuntimePackOutputRoot)) {
-        $RuntimePackOutputRoot = Join-Path $RepoRoot "out\dotnet\runtime-pack"
+        $RuntimePackOutputRoot = Join-Path $ArtifactRoot "runtime-pack"
     }
     $runtimePackOutputRoot = [System.IO.Path]::GetFullPath($RuntimePackOutputRoot)
-    Assert-WithinRoot $runtimePackOutputRoot (Join-Path $RepoRoot "out\dotnet") "Runtime-pack output"
+    Assert-WithinRoot $runtimePackOutputRoot $ArtifactRoot "Runtime-pack output"
     $runtimePackBuildArguments = @(
         "-RepoRoot", $RepoRoot,
         "-RuntimePackRoot", $RuntimePackRoot,
+        "-ArtifactRoot", $ArtifactRoot,
         "-OutputRoot", $runtimePackOutputRoot
     )
     if ($Clean) { $runtimePackBuildArguments += "-Clean" }

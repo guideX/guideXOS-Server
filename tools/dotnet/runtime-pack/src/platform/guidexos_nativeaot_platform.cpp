@@ -3,6 +3,8 @@
 #include "guidexos_nativeaot_amd64_unwind_primitive.h"
 #include "guidexos_nativeaot_init_trace.h"
 #include "guidexos_nativeaot_pal_contract.h"
+#include "guidexos_nativeaot_thread_attachment_contract.h"
+#include <stddef.h>
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
 #include "guidexos_nativeaot_transition_attribution.h"
 #endif
@@ -34,6 +36,21 @@ typedef void* LPVOID;
 #include "MethodTable.h"
 #include "ObjectLayout.h"
 #endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+static_assert(offsetof(RuntimeThreadLocals, m_ThreadStateFlags) == 0x38u,
+    "C188 R6 pinned Thread state-flags offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pTransitionFrame) == 0x40u,
+    "C188 R6 pinned Thread transition-frame offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pDeferredTransitionFrame) == 0x48u,
+    "C188 R6 pinned Thread deferred-frame offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pCachedTransitionFrame) == 0x50u,
+    "C188 R6 pinned Thread cached-frame offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_pNext) == 0x58u,
+    "C188 R6 pinned ThreadStore link offset changed");
+static_assert(offsetof(RuntimeThreadLocals, m_hPalThread) == 0x60u,
+    "C188 R6 pinned PAL thread-handle offset changed");
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R1_INIT_DIAGNOSTICS)
 extern "C" uint32_t __cdecl GuideXosNativeAotCaptureRuntimeInstanceBits();
 #endif
@@ -59,7 +76,7 @@ extern "C" void __cdecl guideXosStockRhpReversePInvoke(void* frame);
 extern "C" void __cdecl guideXosStockRhpReversePInvokeReturn(void* frame);
 
 namespace {
-constexpr uint32_t kThreadReadinessMarkerCapacity = 48u;
+constexpr uint32_t kThreadReadinessMarkerCapacity = 64u;
 constexpr uint32_t kThreadReadinessTransitionCapacity = 8u;
 uint32_t g_threadReadinessMarkerCount = 0u;
 uint32_t g_threadReadinessMarkerOverflow = 0u;
@@ -120,6 +137,7 @@ const char* threadReadinessEventName(uint32_t event) {
     case GX_THREADSTORE_EVENT_PAL_FLS_GET_VALUE: return "pal_fls_get_value";
     case GX_THREADSTORE_EVENT_PAL_FLS_SET_CONTEXT: return "pal_fls_set_context";
     case GX_THREADSTORE_EVENT_PAL_FLS_SET_VALUE: return "pal_fls_set_value";
+    case GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION: return "threadstore_publication";
     default: return "unknown";
     }
 }
@@ -32724,8 +32742,8 @@ void captureTransitionFatalThreadState(
     record.rawCurrentThread = reinterpret_cast<uintptr_t>(rawCurrentThread);
     record.currentThread = stateFlags != 0u
         ? reinterpret_cast<uintptr_t>(rawCurrentThread) : 0u;
-    record.currentThreadAttachment = (stateFlags & 0x1u) != 0u
-        ? GX_TRANSITION_ATTACHMENT_PRESENT : GX_TRANSITION_ATTACHMENT_ABSENT;
+    record.currentThreadAttachment =
+        GuideXosTransitionClassifyAttachment(stateFlags);
     record.nativeThreadId = locals->m_threadId;
     record.transitionFrame = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
     if (stateFlags == 0u) {
@@ -32840,8 +32858,7 @@ uint32_t captureTransitionSnapshot(
             ? 0u : reinterpret_cast<uintptr_t>(currentThread);
         record.currentThreadAttachment = currentThread == nullptr
             ? GX_TRANSITION_ATTACHMENT_ABSENT
-            : ((stateFlags & 0x1u) != 0u
-                ? GX_TRANSITION_ATTACHMENT_PRESENT : GX_TRANSITION_ATTACHMENT_ABSENT);
+            : GuideXosTransitionClassifyAttachment(stateFlags);
         record.nativeThreadId = currentThread == nullptr
             ? 0u : locals->m_threadId;
         if (locals == nullptr) {
@@ -32864,7 +32881,7 @@ uint32_t captureTransitionSnapshot(
         }
     }
 
-    record.flsIndexReady = record.palFlsIndex < 256u ? 1u : 0u;
+    record.flsIndexReady = record.palFlsIndex < kFlsCellCount ? 1u : 0u;
     const uint64_t palThreadId = PalGetCurrentOSThreadId();
     record.observedOsThreadId = static_cast<uintptr_t>(palThreadId);
     const uintptr_t observedStackPointer = reinterpret_cast<uintptr_t>(&block);
@@ -32885,11 +32902,9 @@ uint32_t captureTransitionSnapshot(
             frame < record.stackHigh ? 1u : 0u;
     }
 
-    record.flsCurrentThreadState = record.flsCurrentThread == 0u
-        ? GX_TRANSITION_PAL_FLS_EMPTY
-        : (record.flsCurrentThread == record.rawCurrentThread
-            ? GX_TRANSITION_PAL_FLS_MATCHES_CURRENT_THREAD
-            : GX_TRANSITION_PAL_FLS_FOREIGN_THREAD);
+    record.flsCurrentThreadState = GuideXosTransitionClassifyPalFls(
+        record.flsIndexReady != 0u, record.flsCurrentThread,
+        record.rawCurrentThread);
     record.rhInitializeReady = GuideXosNativeAotInitTraceStagePassed(0x0002u);
     record.runtimeFlsCellReady = block != nullptr && record.palFlsIndex < kFlsCellCount
         ? 1u : 0u;
@@ -33467,9 +33482,8 @@ void initializeRuntimeState(unsigned char* block
 #endif
 #else
     // Keep this legacy sentinel idempotent without a per-thread marker.
-    if (*reinterpret_cast<void**>(cell) == nullptr) {
-        *reinterpret_cast<void**>(cell) = cell;
-    }
+    (void)GuideXosTransitionInitializeLegacyRuntimeCell(
+        reinterpret_cast<void**>(cell));
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_MANAGED_ALLOCATION)
@@ -35507,7 +35521,31 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
     guideXosStockRhpReversePInvoke(frame);
 
     Thread* currentAfterTransition = ThreadStore::GetCurrentThreadIfAvailable();
-    if (currentAfterTransition == nullptr ||
+    bool threadStorePublished = false;
+    if (currentAfterTransition != nullptr) {
+        RuntimeInstance* currentRuntime = GetRuntimeInstance();
+        ThreadStore* currentStore = currentRuntime == nullptr
+            ? nullptr : currentRuntime->GetThreadStore();
+        if (currentStore != nullptr) {
+            currentStore->LockThreadStore();
+            {
+                ThreadStore::Iterator iterator;
+                Thread* entry = nullptr;
+                while ((entry = iterator.GetNext()) != nullptr) {
+                    if (entry == currentAfterTransition) {
+                        threadStorePublished = true;
+                        break;
+                    }
+                }
+            }
+            currentStore->UnlockThreadStore();
+        }
+    }
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION,
+        reinterpret_cast<uintptr_t>(currentAfterTransition),
+        threadStorePublished ? 1u : 0u);
+    if (currentAfterTransition == nullptr || !threadStorePublished ||
         !GuideXosThreadStorePushTelemetryFrame(
             frame, runtimeCell(block), kRuntimeCellTransitionFrameOffset,
             g_threadReadinessTransitions, &g_threadReadinessTransitionDepth,

@@ -32,13 +32,20 @@ $palPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nati
 $palBuilderPath = Join-Path $root 'tools\dotnet\runtime-pack\build-guidexos-nativeaot-pal.ps1'
 $kernelPalPath = Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp'
 $candidateBuilderPath = Join-Path $root 'scripts\dotnet\build-c188r12r4r5r1-init-attribution-candidate.ps1'
+$productionNativeBuilderPath = Join-Path $root 'scripts\dotnet\build-c188-production-nativeaot.ps1'
+$productionKernelBuilderPath = Join-Path $root 'scripts\dotnet\build-c188-production-kernel.ps1'
+$runnerPath = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1'
+$runnerContractPath = Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r3-transition-runner-contract.ps1'
 $runtimeBuilderPath = Join-Path $root 'tools\dotnet\runtime-pack\build-runtime-pack.ps1'
+$attachmentContractPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_thread_attachment_contract.h'
+$runtimeLockPath = Join-Path $root 'tools\dotnet\runtime-pack\runtime-pack.lock.json'
 $analyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r2r4-safe-handoff.ps1'
 $transitionAnalyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1'
 $safeTestsPath = Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r2r4-safe-handoff.ps1'
 $harnessPath = Join-Path $root 'tests\dotnet\runtime-pack\c188r12r4r5r2r3_transition_attribution_test.cpp'
 foreach ($path in @($headerPath,$platformPath,$palPath,$palBuilderPath,$kernelPalPath,$candidateBuilderPath,$runtimeBuilderPath,
-        $analyzerPath,$transitionAnalyzerPath,$safeTestsPath,$harnessPath,$CallSiteMapPath)) {
+        $productionNativeBuilderPath,$productionKernelBuilderPath,$runnerPath,$runnerContractPath,
+        $attachmentContractPath,$runtimeLockPath,$analyzerPath,$transitionAnalyzerPath,$safeTestsPath,$harnessPath,$CallSiteMapPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required transition fixture input missing: $path" }
 }
 
@@ -48,7 +55,13 @@ $pal = Get-Content -LiteralPath $palPath -Raw
 $palBuilder = Get-Content -LiteralPath $palBuilderPath -Raw
 $kernelPal = Get-Content -LiteralPath $kernelPalPath -Raw
 $candidateBuilder = Get-Content -LiteralPath $candidateBuilderPath -Raw
+$productionNativeBuilder = Get-Content -LiteralPath $productionNativeBuilderPath -Raw
+$productionKernelBuilder = Get-Content -LiteralPath $productionKernelBuilderPath -Raw
+$runnerSource = Get-Content -LiteralPath $runnerPath -Raw
+$runnerContractSource = Get-Content -LiteralPath $runnerContractPath -Raw
 $runtimeBuilder = Get-Content -LiteralPath $runtimeBuilderPath -Raw
+$attachmentContract = Get-Content -LiteralPath $attachmentContractPath -Raw
+$runtimeLock = Get-Content -LiteralPath $runtimeLockPath -Raw | ConvertFrom-Json -ErrorAction Stop
 $safeTestsSource = Get-Content -LiteralPath $safeTestsPath -Raw
 
 $compiler = (Get-Command g++ -ErrorAction Stop).Source
@@ -287,13 +300,45 @@ Assert-Fixture ($r4Candidate.runtimePackSourceCommit -eq '9d5a6a9aa463d6d10b0b0b
     $r4RuntimeManifest.platformObject.runtimeCellOffset -eq '0x30' -and
     $r4AsmOffsets -match 'ASM_OFFSET\(\s*28,\s*38,\s*Thread,\s*m_ThreadStateFlags\)' -and
     -not $platform.Contains('kRuntimeCellInitializedOffset') -and
-    $platform -match 'if\s*\(\*reinterpret_cast<void\*\*>\(cell\)\s*==\s*nullptr\)') 'R4 TLS initialization marker alias is removed and idempotent sentinel is retained'
+    $platform.Contains('GuideXosTransitionInitializeLegacyRuntimeCell') -and
+    $attachmentContract.Contains('if (cell == nullptr || *cell != nullptr) return false;') -and
+    $runtimeLock.platformObject.PSObject.Properties['runtimeCellInitializedOffset'] -eq $null -and
+    $runtimeLock.platformObject.PSObject.Properties['flsCellOffset'] -eq $null) 'R5 TLS marker alias is removed; shared idempotent sentinel touches only its runtime cell'
 Assert-Fixture (-not $platform.Contains('flsCell(') -and -not $platform.Contains('kFlsCellOffset') -and
     $platform.Contains('guidexos_nativeaot_pal_fls_get(index)') -and
     $platform.Contains('guidexos_nativeaot_pal_fls_set(index, value)') -and
     $platform -match 'record\.runtimeFlsCellReady\s*=\s*block\s*!=\s*nullptr\s*&&\s*record\.palFlsIndex\s*<\s*kFlsCellCount' -and
     $r4ThreadHeader.Contains('PInvokeTransitionFrame* m_pCachedTransitionFrame') -and
     $r4AsmOffsets -match 'ASM_OFFSET\(\s*30,\s*48,\s*Thread,\s*m_pDeferredTransitionFrame\)') 'platform FLS storage no longer overlays Thread fields and direct FLS shares PAL LocalStorage ownership'
+Assert-Fixture ($platform -match 'offsetof\(RuntimeThreadLocals,\s*m_ThreadStateFlags\)\s*==\s*0x38u' -and
+    $platform -match 'offsetof\(RuntimeThreadLocals,\s*m_pTransitionFrame\)\s*==\s*0x40u' -and
+    $platform -match 'offsetof\(RuntimeThreadLocals,\s*m_pDeferredTransitionFrame\)\s*==\s*0x48u' -and
+    $platform -match 'offsetof\(RuntimeThreadLocals,\s*m_pCachedTransitionFrame\)\s*==\s*0x50u' -and
+    $platform -match 'offsetof\(RuntimeThreadLocals,\s*m_pNext\)\s*==\s*0x58u' -and
+    $platform -match 'offsetof\(RuntimeThreadLocals,\s*m_hPalThread\)\s*==\s*0x60u' -and
+    $runtimeBuilder.Contains('c188r12r4r5r2r3ThreadLayoutEvidence')) 'candidate compilation asserts pinned Thread ABI and preserves source-hash layout evidence'
+Assert-Fixture ($attachmentContract.Contains('GX_TRANSITION_PAL_FLS_UNAVAILABLE') -and
+    $attachmentContract.Contains('if (!flsIndexReady)') -and
+    $attachmentContract.Contains('flsValue == 0u') -and
+    $attachmentContract.Contains('flsValue == rawCurrentThread') -and
+    $platform.Contains('GuideXosTransitionClassifyPalFls(') -and
+    $platform.Contains('GuideXosTransitionClassifyAttachment(stateFlags)')) 'diagnostic distinguishes absent attachment, unavailable or empty PAL FLS, matching FLS, and stale foreign FLS'
+Assert-Fixture ($platform.Contains('GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION') -and
+    $platform.Contains('ThreadStore::Iterator iterator') -and
+    $platform.Contains('iterator.GetNext()') -and
+    $platform.Contains('currentStore->LockThreadStore()') -and
+    $platform.Contains('threadStorePublished ? 1u : 0u') -and
+    $platform.Contains('!threadStorePublished')) 'native publication marker verifies current Thread membership in the actual ThreadStore list'
+Assert-Fixture ($platform -match 'kThreadReadinessMarkerCapacity\s*=\s*64u' -and
+    $runtimeBuilder -match 'c188r12r4r5r4MarkerCapacity\s*=.*\{\s*64\s*\}' -and
+    $platform.Contains('GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION')) 'bounded readiness trace capacity and manifest include the ThreadStore publication marker'
+Assert-Fixture ($candidateBuilder -match '\[string\]\$ArtifactRoot' -and
+    $candidateBuilder.Contains('-ArtifactRoot') -and
+    $candidateBuilder.Contains('must remain below ArtifactRoot') -and
+    $candidateBuilder.Contains('BUILD_DIR=$($kernelBuildDir.Replace') -and
+    $productionNativeBuilder -match '\[string\]\$ArtifactRoot' -and
+    $productionKernelBuilder -match '\[string\]\$ArtifactRoot' -and
+    $runnerSource -match '\[string\]\$ArtifactRoot' -and $runnerContractSource.Contains('-ArtifactRoot $artifactRoot')) 'fresh candidate and runner support isolated artifact roots while preserving candidate containment'
 Assert-Fixture ($palAttachBody.Success -and
     $palAttachBody.Groups['body'].Value.Contains('#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)') -and
     $palBuilder.Contains('$commonDefines') -and
