@@ -35,6 +35,10 @@ if [[ "$FP_PROFILE" == early-exec && "$BUILD_ONLY" -eq 0 &&
     echo '[RUN_BLOCKED] Static gates and a distinct artifact identity do not authorize execution.' >&2
     exit 2
 fi
+if (( BUILD_ONLY == 0 )) && [[ "${IA64_GUEST_QUALIFICATION_AUTHORIZED:-no}" != yes ]]; then
+    echo '[RUN_BLOCKED] Kernel guest execution requires explicit IA64_GUEST_QUALIFICATION_AUTHORIZED=yes.' >&2
+    exit 2
+fi
 
 # Pick one isolated output directory and pass it through to the build script.
 if [[ -z "${IA64_BUILD_DIR:-}" ]]; then
@@ -106,21 +110,14 @@ then
     exit 2
 fi
 
-if command -v ski >/dev/null 2>&1; then
-    SKI_CMD=ski
-elif command -v bski >/dev/null 2>&1; then
-    SKI_CMD=bski
-else
-    echo '[SIMULATOR_BLOCKED] HP ski/bski simulator not found.' >&2
-    echo 'The built ELF is IA-64; this execution profile is the HP ski simulator.' >&2
-    exit 2
+EXPECTED_SHA256="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["sha256"])' "$MANIFEST_FILE")"
+SKI_PREFIX="${IA64_SKI_PREFIX:-/home/guidex/opt/ski-dfc2902}"
+LOADER_RECORD="${IA64_SKI_LOADER_RECORD:-$REPO_ROOT/docs/ia64-3r1-ski-loader-record.json}"
+TIMEOUT="${IA64_SKI_TIMEOUT:-60}"
+RUN_ARGS=(kernel --artifact "$KERNEL" --manifest "$MANIFEST_FILE" \
+    --profile "$FP_PROFILE" --expected-sha256 "$EXPECTED_SHA256" \
+    --loader-record "$LOADER_RECORD" --ski-prefix "$SKI_PREFIX" --timeout "$TIMEOUT")
+if [[ "${IA64_GUEST_QUALIFICATION_AUTHORIZED:-no}" == yes ]]; then
+    RUN_ARGS+=(--authorize-kernel-guest-execution)
 fi
-
-printf '\n[INFO] Simulator profile: HP ski (%s)\n' "$SKI_CMD"
-printf '[INFO] Kernel: %s\n' "$KERNEL"
-echo '[INFO] SKI execution is separate from UEFI firmware and guideXOS Hypervisor boot.'
-if [[ "$SKI_CMD" == bski ]]; then
-    bski "$KERNEL"
-else
-    ski "$KERNEL"
-fi
+python3 "$SCRIPT_DIR/run-ia64-ski.py" "${RUN_ARGS[@]}"

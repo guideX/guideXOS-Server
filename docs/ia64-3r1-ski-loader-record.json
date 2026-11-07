@@ -1,0 +1,153 @@
+{
+  "schema": "guidexos-ia64-ski-loader-v1",
+  "outcome": "SKI_LOADER_READY",
+  "loader_kind": "ski-direct-system-elf",
+  "kernel_profile": "early-exec",
+  "kernel_sha256": "b9c6053e2acfd96935c1cf83bff76f4e7516b00d004d163d74e1f2303f61d820",
+  "kernel_execution_authorized": false,
+  "kernel_entry": "0x108000",
+  "kernel_gp": "0x672000",
+  "kernel_load_segments": [
+    {
+      "start": "0x100000",
+      "end_exclusive": "0x3cde30",
+      "file_size": "0x2cde30",
+      "memory_size": "0x2cde30",
+      "flags": "RX"
+    },
+    {
+      "start": "0x3ce000",
+      "end_exclusive": "0x471788",
+      "file_size": "0xa3788",
+      "memory_size": "0xa3788",
+      "flags": "R"
+    },
+    {
+      "start": "0x472000",
+      "end_exclusive": "0x4c82798",
+      "file_size": "0x16130",
+      "memory_size": "0x4810798",
+      "flags": "RW"
+    }
+  ],
+  "stock_linux_bootloader": {
+    "sha256": "ed4d32686d40f3017c79945cfa4e4501c065d72adac0b0c3bb2d2d74e12ebd2c",
+    "entry": "0x100000",
+    "load_segment": {
+      "start": "0x100000",
+      "end_exclusive": "0x10a990",
+      "file_size": "0x4d30",
+      "memory_size": "0xa990",
+      "flags": "RWE"
+    },
+    "overlap_with_kernel": {
+      "confirmed": true,
+      "start": "0x100000",
+      "end_exclusive": "0x10a990"
+    }
+  },
+  "ski_source": {
+    "checkout": "/home/guidex/src/trofi-ski-dfc2902",
+    "commit": "dfc2902ea1423d9b32543a5daf8026213f2b37a1",
+    "describe": "v1.5.1-32-gdfc2902",
+    "source_tree_clean": true
+  },
+  "ski_version": "1.5.1",
+  "ski_sha256": "ff6b19cb87dbf2db39cda4478d0e49995c9a5ec9ddd05aac83191f4ba1e40b45",
+  "ski_prefix": "/home/guidex/opt/ski-dfc2902",
+  "ski_executables": {
+    "ski": "installed executable",
+    "bski": "symlink to ski; batch interface",
+    "bskinc": "symlink to ski; no-console batch interface"
+  },
+  "ski_build": {
+    "host_compiler": "/usr/bin/gcc (Ubuntu 13.3.0)",
+    "cflags": "-O2 -g",
+    "configure": "--prefix=/home/guidex/opt/ski-dfc2902 --disable-netdev --with-bfd=no",
+    "source_method": "isolated git archive at the pinned source commit",
+    "simulator_makefile_flags": "-D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 -D_GNU_SOURCE -fno-strict-aliasing",
+    "packages_installed": {
+      "autoconf": "2.71-3",
+      "autoconf-archive": "20220903-3",
+      "automake": "1:1.16.5-1.3ubuntu1",
+      "libtool": "2.4.7-7build1",
+      "gperf": "3.1-1build1",
+      "pkg-config": "1.8.1-2build1",
+      "libncurses-dev": "6.4+20240113-1ubuntu2.2"
+    },
+    "already_installed": {
+      "libelf-dev": "0.190-1.1ubuntu0.1",
+      "gcc": "13.3.0",
+      "make": "4.3",
+      "bison": "3.8.2",
+      "flex": "2.6.4"
+    }
+  },
+  "single_cpu_contract": "SOURCE_ENFORCED_ONE_CPU",
+  "single_cpu_evidence": [
+    "src/program.h defines SKI_NPROC as 1",
+    "src/state.c initializes nproc to 1",
+    "NEW_MP is not enabled in the built configuration and the -cpus option is absent"
+  ],
+  "system_mode_smoke": "PASS",
+  "smoke_sha256": "60e2b0d3bec5879298b3a3136940dbe8508fdaa36eff906a9f9577d92731e6ab",
+  "smoke_entry": "0x100000",
+  "smoke_load_range": {
+    "start": "0x100000",
+    "end_exclusive": "0x1000dd",
+    "file_size": "0xdd",
+    "memory_size": "0xdd",
+    "flags": "RX"
+  },
+  "smoke_target_assembler_flags": "-mlp64 -mle -mconstant-gp -xexplicit",
+  "smoke_execution": {
+    "command_mode": "bskinc -forcesystem",
+    "privileged_instruction": "rsm psr.i; mov r8=psr",
+    "console_marker": "SKI_SYSTEM_MODE_SMOKE_PASS",
+    "ssc_exit": 66,
+    "simulator_exit_status": 0,
+    "guest_instructions": 358,
+    "guest_faults": 0,
+    "cycles": 180,
+    "elapsed_seconds": 1.173,
+    "capture_directory": "/home/guidex/src/ia64-3r1-ski-smoke-qualified-20261106/capture"
+  },
+  "direct_loader": {
+    "uses_system_mode_option": "-forcesystem",
+    "loads_elf64_pt_load_by": "p_vaddr with ET_EXEC bias 0",
+    "candidate_paddr_equals_vaddr": true,
+    "candidate_segments_overlap": false,
+    "guest_resident_loader_ranges": [],
+    "simulator_physical_address_bits": 63,
+    "fixed_guest_physical_reservations_in_direct_loader": [],
+    "preflight_checks": [
+      "ELF64 little-endian EM_IA_64 ET_EXEC and executable entry",
+      "program-header table and segment file bounds",
+      "filesz <= memsz, checked address arithmetic, 63-bit physical-address bound",
+      "p_vaddr == p_paddr for Ski's p_vaddr loader, power-of-two alignment",
+      "no PT_LOAD overlaps, no writable-executable PT_LOAD"
+    ]
+  },
+  "handoff": {
+    "entry_semantics": "Ski sets the system-mode instruction pointer directly to ELF e_entry; no function descriptor call",
+    "privilege": "system mode, privileged instructions supported by smoke evidence",
+    "global_pointer": "_start loads __gp=0x672000 before C code",
+    "memory_stack": "_start loads stack_top=0x4c6fe00; 64 KiB range 0x4c5fe00..0x4c6fe00",
+    "rse_backing_store": "0x4c6fe00..0x4c7fe00, 64 KiB; startup enters enforced-lazy mode, executes loadrs, sets ar.bspstore, then selects eager mode",
+    "interrupt_state": "_start clears PSR.i and PSR.ic before setup; external interrupts remain masked",
+    "function_descriptors": "not required at raw _start entry; kernel uses a direct branch to kernel_main after setting GP",
+    "linux_boot_parameters": false,
+    "uefi_contract": false,
+    "hypervisor_contract": false
+  },
+  "instruction_limit": {
+    "native_batch_instruction_ceiling": false,
+    "instruction_counts_supported": true,
+    "independent_process_timeout_seconds": {
+      "smoke_default": 30,
+      "kernel_default": 60,
+      "maximum": 300
+    },
+    "process_group_cleanup": true
+  }
+}
