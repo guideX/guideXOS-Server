@@ -137,6 +137,8 @@ public:
     static void handleMouseWheel(int32_t mx, int32_t my, int8_t wheelDelta);
     static void handleKeyDown(uint32_t keyCode);
     static void handleKeyChar(char c);
+    static void handleKeyEvent(uint32_t keyCode, uint32_t text,
+                               bool down, uint8_t modifiers);
     
     // Rendering
     static void drawAllWindows();

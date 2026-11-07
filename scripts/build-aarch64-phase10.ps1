@@ -13,7 +13,11 @@ $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Path $repoRoot 'out\aarch64-phase10' }
 else { $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory) }
 $rootPrefix = $repoRoot.TrimEnd('\') + '\out\'
-if (!$OutputDirectory.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing output outside repository out/: $OutputDirectory" }
+$artifactPrefix = 'E:\CodexArtifacts\'
+if (!$OutputDirectory.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+    !$OutputDirectory.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing output outside repository out/ or E:\CodexArtifacts: $OutputDirectory"
+}
 
 $clang = Join-Path $LlvmRoot 'clang++.exe'
 $ld = Join-Path $LlvmRoot 'ld.lld.exe'

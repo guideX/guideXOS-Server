@@ -211,6 +211,16 @@ public:
     virtual void onKeyDown(uint32_t key) {}
     virtual void onKeyUp(uint32_t key) {}
     virtual void onKeyChar(char c) {}
+    // Common hardware input preserves key action and modifiers for native
+    // applications. Legacy apps keep the established character/special-key
+    // callbacks through this default implementation.
+    virtual void onKeyEvent(uint32_t key, uint32_t text, bool down,
+                            uint8_t modifiers) {
+        (void)modifiers;
+        if (!down) onKeyUp(key);
+        else if (text >= 32 && text < 127) onKeyChar(static_cast<char>(text));
+        else onKeyDown(key);
+    }
     virtual void onWidgetClick(int widgetId) {}
     virtual void onWindowClose() {}
     virtual void onWindowFocus() {}

@@ -10,7 +10,11 @@ $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Path $repoRoot 'out\aarch64-phase11' }
 else { $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory) }
 $rootPrefix = $repoRoot.TrimEnd('\') + '\out\'
-if (!$OutputDirectory.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing output outside repository out/: $OutputDirectory" }
+$artifactPrefix = 'E:\CodexArtifacts\'
+if (!$OutputDirectory.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+    !$OutputDirectory.StartsWith($artifactPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing output outside repository out/ or E:\CodexArtifacts: $OutputDirectory"
+}
 
 function Read-U16([byte[]]$Bytes, [int]$Offset) { return [int]$Bytes[$Offset] -bor ([int]$Bytes[$Offset + 1] -shl 8) }
 function Test-Elf([string]$Path, [int]$Machine) {

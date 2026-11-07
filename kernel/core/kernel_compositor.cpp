@@ -5,6 +5,7 @@
 //
 
 #include "include/kernel/kernel_compositor.h"
+#include "include/kernel/desktop.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
@@ -269,6 +270,13 @@ void KernelCompositor::unregisterWindow(app::KernelWindow* window) {
             s_windows[i].valid = false;
             s_windows[i].window = nullptr;
             s_windowCount--;
+
+            // A closing owner cannot remain an input target. Clear any
+            // per-window drag plus the global press latch before releasing it.
+            if (s_dragState.active && s_dragState.windowId == window->id) {
+                s_dragState = DragState();
+            }
+            s_buttonPressActive = false;
             
             // Clear focus if this was focused
             if (s_focusedWindowId == window->id) {
@@ -281,6 +289,10 @@ void KernelCompositor::unregisterWindow(app::KernelWindow* window) {
                     }
                 }
             }
+            // Removing a window exposes the desktop pixels underneath it.
+            // Keep this invalidation at the compositor lifecycle boundary so
+            // every owner path (including native ELF teardown) requests paint.
+            desktop::request_redraw();
             return;
         }
     }
@@ -773,6 +785,14 @@ void KernelCompositor::handleKeyChar(char c) {
     app::KernelWindow* focused = getFocusedWindow();
     if (focused && focused->owner) {
         focused->owner->onKeyChar(c);
+    }
+}
+
+void KernelCompositor::handleKeyEvent(uint32_t keyCode, uint32_t text,
+                                      bool down, uint8_t modifiers) {
+    app::KernelWindow* focused = getFocusedWindow();
+    if (focused && focused->owner) {
+        focused->owner->onKeyEvent(keyCode, text, down, modifiers);
     }
 }
 

@@ -6,6 +6,7 @@
 // no desktop code knows about virtio or evdev codes.
 
 #include "include/kernel/virtio_input.h"
+#include "include/kernel/virtio_key_translation.h"
 #include "include/kernel/virtio.h"
 #include "include/kernel/input_manager.h"
 #include "include/kernel/irq_registry.h"
@@ -431,7 +432,18 @@ static char printable_key(uint16_t code)
         const uint32_t index = code - kKey1;
         return (s_shift && index < 10) ? shifted[index] : normal[index];
     }
-    return 0;
+    const char normal = code == 12 ? '-' : code == 13 ? '=' :
+        code == 26 ? '[' : code == 27 ? ']' : code == 39 ? ';' :
+        code == 40 ? '\'' : code == 41 ? '`' : code == 43 ? '\\' :
+        code == 51 ? ',' : code == 52 ? '.' : code == 53 ? '/' : '\0';
+    if (normal == '\0') return 0;
+    if (!s_shift) return normal;
+    switch (normal) {
+    case '-': return '_'; case '=': return '+'; case '[': return '{';
+    case ']': return '}'; case ';': return ':'; case '\'': return '"';
+    case '`': return '~'; case '\\': return '|'; case ',': return '<';
+    case '.': return '>'; case '/': return '?'; default: return normal;
+    }
 }
 
 static void process_keyboard(const InputEvent& event)
@@ -445,6 +457,7 @@ static void process_keyboard(const InputEvent& event)
     const uint32_t special = special_key(event.code);
     const char printable = printable_key(event.code);
     const uint32_t key = printable != 0 ? static_cast<uint32_t>(printable) : special;
+    const uint32_t nativeKey = native_key_for_linux_code(event.code);
     if (key == 0 && event.code != kKeyLeftShift && event.code != kKeyRightShift &&
         event.code != kKeyLeftCtrl && event.code != kKeyRightCtrl &&
         event.code != kKeyLeftAlt && event.code != kKeyRightAlt &&
@@ -467,10 +480,10 @@ static void process_keyboard(const InputEvent& event)
         s_keyboardState.keys[last] = 0;
         --s_keyboardState.keyCount;
     }
-    input::submit_platform_key(key, down);
     s_keyboardState.modifiers = static_cast<uint8_t>((s_shift ? 1u : 0u) |
         (s_capsLock ? 2u : 0u) | (s_ctrl ? 4u : 0u) |
         (s_alt ? 8u : 0u) | (s_meta ? 16u : 0u));
+    input::submit_platform_key(key, nativeKey, down, s_keyboardState.modifiers);
     s_keyboardDirty = true;
 }
 

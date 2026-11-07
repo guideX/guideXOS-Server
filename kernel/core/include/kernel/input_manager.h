@@ -113,7 +113,8 @@ void submit_platform_pointer_absolute(int32_t raw_x, int32_t raw_y,
                                       int32_t raw_min_x, int32_t raw_max_x,
                                       int32_t raw_min_y, int32_t raw_max_y,
                                       uint8_t buttons, int16_t wheel);
-void submit_platform_key(uint32_t key, bool down);
+void submit_platform_key(uint32_t key, uint32_t native_key, bool down,
+                         uint8_t modifiers);
 
 // ----------------------------------------------------------------
 // Mouse accessors

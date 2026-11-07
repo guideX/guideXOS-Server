@@ -50,6 +50,14 @@ void init();
 // Draw the full desktop to the framebuffer
 // Draws background, icons, taskbar, menus, and all GUI app windows
 void draw();
+// Consume one pending desktop invalidation and synchronously present a full
+// desktop frame. Used after native GUI owners are torn down outside the normal
+// cooperative input/render loop.
+bool request_lifecycle_redraw();
+bool redraw_lifecycle_now();
+// Arm narrow guest evidence for a real desktop pointer and keyboard action
+// after the native Studio owner has been fully released.
+void arm_studio_post_close_input_probe();
 
 // Update tick counter for timing (call from main loop, e.g., every 10ms)
 // Also updates IPC, running apps, and taskbar

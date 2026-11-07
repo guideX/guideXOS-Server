@@ -1,6 +1,7 @@
 # AArch64 ABI3 Developer Studio Guest Qualification
 
-- **Working status:** `STUDIO_ARM64_GUI_PARTIAL` (R1d; four diagnostic guest runs, 0 of 3 qualifying)
+- **Current working status:** `STUDIO_ARM64_GUI_REPEATABILITY_VERIFIED` (R1e passed 3 of 3 fresh QAC-authorized input/close/redraw boots)
+- **Historical guest baseline:** R1d; four diagnostic guest runs, 0 of 3 qualifying
 - **Historical run date:** 2026-11-02
 - **Repository:** `D:\dev\guideXOSServer_AARCH64`
 - **Branch/base:** `AARCH64_SUPPORT` at `fe4e3ebf909f834f991ebd61d96607a6190dc80e`
@@ -8,7 +9,7 @@
 - **Pinned Developer Studio:** `058c83fe1ae270a103eadc7caca961328e8abe2a`
 - **Pinned v0.5 SDK contract:** `f63a7710a30b49f785aac134abf06a3a6c5b5aca`
 
-## Result
+## Historical Result (2026-11-02)
 
 The hosted ABI, SDK-alignment, Studio build, and ARM64 package checks passed. One actual QAC-authorized AArch64 guest started. UEFI loaded the ARM64 kernel, which entered at EL1 and validated its stack and firmware handoff. The kernel then rejected the copied firmware DTB with `GXOS_AARCH64_DTB_MALFORMED` (diagnostic 2) and stopped before desktop initialization.
 
@@ -21,6 +22,10 @@ The guest did not discover or start Developer Studio. No Studio window, input, w
 The original 2026-11-02 DTB diagnosis above remains historical. R1 repaired ARM64 firmware DTB handling and advanced the authentic pinned Studio guest through UEFI, kernel/DTB validation, GICv2, timer, scheduler, desktop, package discovery, exact v0.5 ABI selection, NativeElf loading, and `gx_main`. R1c's first authorized guest confirmed that the app's 960×700 window request did not fit the actual 800×560 work area. R1d bounded the granted client size to 800×536 and the outer frame to 800×560 on the 800×600 framebuffer.
 
 Four fresh R1d QAC-authorized diagnostic guests created the Studio window. One focused framebuffer was visually reviewed; mouse and focus reached the application event loop, while no keyboard text event was observed. The fourth guest closed Studio cleanly, released all GUI mappings/windows/widgets, and recorded zero unexpected IRQs and exceptions. Its post-close desktop required later interaction to repaint fully. **The status remains `STUDIO_ARM64_GUI_PARTIAL`, with 0 of 3 qualifying boots**; VFS workspace and Build/Run remain untested. See [AARCH64_ABI3_R1_STUDIO_STARTUP_GUI.md](AARCH64_ABI3_R1_STUDIO_STARTUP_GUI.md) for candidate hashes, per-run QAC evidence, screenshots, regressions, and the next acceptance criteria.
+
+### R1e follow-up (2026-11-07)
+
+R1e starts from `088bbe72cc40ac8af4808089761db4ed5dae6eec`, rebuilds the Phase 12 ARM64 kernel and EFI, and reuses the hash-verified R1d Studio package and RAM disk. Hosted ABI1/ABI2, Phase 2–4, Phase 10–12, and GICv3 checks pass. The keyboard route preserves key-down/up, virtual key, translated text, and modifiers for Studio's focused adapter. All three fresh QAC-authorized boots entered `guideXOS ARM64` once in Studio's genuine Open Project path field, closed cleanly, repainted the desktop without another input, and passed pointer and Super-key post-close interaction. Each run recorded zero unexpected IRQs/exceptions, QAC-managed child exit, and reservation release. **Current outcome: `STUDIO_ARM64_GUI_REPEATABILITY_VERIFIED`, 3/3.** The GUI New Project workflow currently fails FAT 8.3 filename validation for `guidexos.project`; the qualifying boots therefore establish text entry in the authentic path field and do not claim project creation or open. Editor-buffer text insertion was separately observed in a nonqualifying pre-provisioned fixture diagnostic. See [AARCH64_ABI3_R1E_STUDIO_INPUT_REDRAW.md](AARCH64_ABI3_R1E_STUDIO_INPUT_REDRAW.md) for candidate hashes and per-run evidence. Build/Run, Debug, project VFS qualification, and physical hardware remain untested.
 
 ## Inputs and production package
 

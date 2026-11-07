@@ -12,6 +12,8 @@
 //
 
 #include "include/kernel/desktop.h"
+#include "include/kernel/desktop_redraw_state.h"
+#include "include/kernel/desktop_input_probe_state.h"
 #include "include/kernel/desktop_font.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/startmenubutton_img.h"
@@ -738,9 +740,15 @@ static uint32_t s_screenW = 0;
 static uint32_t s_screenH = 0;
 static uint32_t s_taskbarScreenW = 0;
 static uint32_t s_taskbarScreenH = 0;
-static volatile bool s_needsRedraw = false;
-static volatile uint64_t s_redrawGeneration = 1;
+static RedrawRequestState s_redrawState;
 static bool s_inputStressRenderSuppressed = false;
+static volatile bool s_lifecycleRedrawPending = false;
+static StudioPostCloseInputProbeState s_studioPostCloseInputProbe;
+static bool s_cooperativePumpActive = false;
+static bool s_studioPostClosePumpLogged = false;
+static bool s_studioPostClosePumpEntryLogged = false;
+static bool s_studioPostClosePumpSkipLogged = false;
+static bool s_studioPostCloseQueuePendingLogged = false;
 
 // Shutdown dialog state
 static bool s_shutdownDialogOpen = false;
@@ -1699,7 +1707,7 @@ static void bare_metal_desktop_request_folder_refresh(const char* reason)
     serial::puts("[desktop] bare-metal ");
     serial::puts(reason);
     serial::puts(" desktop folder scan completed\n");
-    s_needsRedraw = true;
+    s_redrawState.request();
 }
 
 static const int kSystemDesktopIconCount = 4;
@@ -2116,7 +2124,7 @@ static void desktop_file_operation_progress(const file_clipboard::FileOperationP
     // the operation has released its active-state guard.  Keeping this at
     // zero also avoids coupling the shell-facing callback to tick ordering.
     s_notification.showTime = 0;
-    s_needsRedraw = true;
+    s_redrawState.request();
 
     // This callback runs at the start of the operation and after bounded
     // chunks. Repaint and service only the guarded desktop pump so the user
@@ -2941,7 +2949,7 @@ void set_system_desktop_icon_visibility(const SystemDesktopIconVisibility& visib
     s_systemDesktopIconVisibilityLoaded = true;
     persist_system_desktop_icons();
     refresh_desktop_icons();
-    s_needsRedraw = true;
+    s_redrawState.request();
     serial::puts("[desktop] system desktop icon visibility applied and desktop refreshed\n");
 }
 
@@ -3562,7 +3570,7 @@ static void cancel_desktop_folder_rename()
     if (!s_desktopRename.active) return;
     serial::puts("[desktop] Desktop rename cancelled\n");
     s_desktopRename = DesktopRenameState{};
-    s_needsRedraw = true;
+    s_redrawState.request();
 }
 
 static void begin_desktop_folder_rename(int displayIdx)
@@ -3592,7 +3600,7 @@ static void begin_desktop_folder_rename(int displayIdx)
     serial::puts("[desktop] Desktop rename started: ");
     serial::puts(icon.path);
     serial::puts("\n");
-    s_needsRedraw = true;
+    s_redrawState.request();
 }
 
 static bool commit_desktop_folder_rename()
@@ -3687,7 +3695,7 @@ static bool commit_desktop_folder_rename()
     s_notification.visible = true;
     s_notification.showTime = s_tickCounter;
     s_desktopRename = DesktopRenameState{};
-    s_needsRedraw = true;
+    s_redrawState.request();
     return true;
 }
 
@@ -3714,7 +3722,7 @@ static bool handle_desktop_folder_rename_key(uint32_t key)
                 s_desktopRename.buffer[i] = s_desktopRename.buffer[i + 1];
             }
             --s_desktopRename.caretPos;
-            s_needsRedraw = true;
+            s_redrawState.request();
         }
         return true;
     }
@@ -3725,32 +3733,32 @@ static bool handle_desktop_folder_rename_key(uint32_t key)
                 s_desktopRename.buffer[i] = s_desktopRename.buffer[i + 1];
             }
             s_desktopRename.buffer[len] = '\0';
-            s_needsRedraw = true;
+            s_redrawState.request();
         }
         return true;
     }
     if (key == shell::KEY_LEFT) {
         if (s_desktopRename.caretPos > 0) {
             --s_desktopRename.caretPos;
-            s_needsRedraw = true;
+            s_redrawState.request();
         }
         return true;
     }
     if (key == shell::KEY_RIGHT) {
         if (s_desktopRename.caretPos < (size_t)desktop_strlen(s_desktopRename.buffer)) {
             ++s_desktopRename.caretPos;
-            s_needsRedraw = true;
+            s_redrawState.request();
         }
         return true;
     }
     if (key == shell::KEY_HOME) {
         s_desktopRename.caretPos = 0;
-        s_needsRedraw = true;
+        s_redrawState.request();
         return true;
     }
     if (key == shell::KEY_END) {
         s_desktopRename.caretPos = (size_t)desktop_strlen(s_desktopRename.buffer);
-        s_needsRedraw = true;
+        s_redrawState.request();
         return true;
     }
 
@@ -3767,7 +3775,7 @@ static bool handle_desktop_folder_rename_key(uint32_t key)
                 }
                 s_desktopRename.buffer[s_desktopRename.caretPos] = c;
                 ++s_desktopRename.caretPos;
-                s_needsRedraw = true;
+                s_redrawState.request();
             }
         }
         return true;
@@ -4083,7 +4091,7 @@ static void arrange_desktop_icons_into_grid(bool persistPositions)
 
     if (persistPositions) save_icon_positions();
     sync_selected_icon_after_layout();
-    s_needsRedraw = true;
+    s_redrawState.request();
 }
 
 static bool bare_metal_desktop_resolve_directory_target(const char* targetPath, char* resolvedPath, size_t resolvedPathSize)
@@ -5622,7 +5630,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
         serial::puts("\n");
         apply_wallpaper_gradient_selection(gradient);
         persist_wallpaper_selection(gradient->id);
-        s_needsRedraw = true;
+        s_redrawState.request();
         return;
     }
 
@@ -5642,7 +5650,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
     serial::puts("\n");
     apply_wallpaper_builtin_selection(entry);
     persist_wallpaper_selection(entry->id);
-    s_needsRedraw = true;
+    s_redrawState.request();
 }
 
 const char* get_wallpaper_id()
@@ -6674,12 +6682,12 @@ static void click_volume_widget(TaskbarWidget& widget)
     (void)widget;
     if (pci_audio::controller_count() > 0) {
         pci_audio::set_mute(0, !pci_audio::get_mute(0));
-        s_needsRedraw = true;
+        s_redrawState.request();
         return;
     }
     if (usb_audio::device_count() > 0) {
         usb_audio::set_mute(0, !usb_audio::get_mute(0));
-        s_needsRedraw = true;
+        s_redrawState.request();
     }
 }
 
@@ -7517,7 +7525,7 @@ static void handle_context_menu_command(int item)
                     serial::puts("[desktop] Delete confirmation launch failed\n");
                     show_file_clipboard_notification("Unable to open Delete confirmation");
                 }
-                s_needsRedraw = true;
+                s_redrawState.request();
             }
         } else if (ownedTargetIsDirectory) {
             if (s_contextMenuPasteVisibleAtOpen && item == 3) {
@@ -7536,7 +7544,7 @@ static void handle_context_menu_command(int item)
                         serial::puts("FPASTE_REFRESH_END\n");
                         file_clipboard::note_paste_refresh(true);
                         serial::puts("FPASTE_RETURN_UI\n");
-                        s_needsRedraw = true;
+                        s_redrawState.request();
                     }
                 }
                 // Consume a stale Paste slot instead of accidentally invoking
@@ -7568,7 +7576,7 @@ static void handle_context_menu_command(int item)
                 serial::puts("FPASTE_REFRESH_END\n");
                 file_clipboard::note_paste_refresh(true);
                 serial::puts("FPASTE_RETURN_UI\n");
-                s_needsRedraw = true;
+                s_redrawState.request();
             }
         }
         // If the clipboard became stale after the menu opened, consume the
@@ -7600,7 +7608,7 @@ static void handle_context_menu_command(int item)
         case 3: { // Auto Arrange
             s_desktopAutoArrangeEnabled = !s_desktopAutoArrangeEnabled;
             refresh_desktop_icons();
-            s_needsRedraw = true;
+            s_redrawState.request();
             s_notification.title = "Auto Arrange";
             s_notification.message = s_desktopAutoArrangeEnabled ? "Enabled" : "Disabled";
             s_notification.visible = true;
@@ -8939,7 +8947,7 @@ static void update_clock_during_file_operation()
 
     if (s_timeAvailable && s_currentTime.minute != s_lastRenderedClockMinute) {
         s_lastRenderedClockMinute = s_currentTime.minute;
-        s_needsRedraw = true;
+        s_redrawState.request();
     }
 }
 
@@ -8966,7 +8974,7 @@ void tick()
 
         if (s_timeAvailable && s_currentTime.minute != s_lastRenderedClockMinute) {
             s_lastRenderedClockMinute = s_currentTime.minute;
-            s_needsRedraw = true;
+            s_redrawState.request();
         }
     }
     
@@ -8977,7 +8985,7 @@ void tick()
     if (!file_clipboard::operation_active() && s_notification.visible && s_notification.showTime > 0) {
         if (s_tickCounter - s_notification.showTime >= 500) {
             s_notification.visible = false;
-            s_needsRedraw = true;
+            s_redrawState.request();
         }
     }
     
@@ -9047,12 +9055,32 @@ CpuTelemetrySnapshot cpu_telemetry_snapshot()
 
 void cooperative_yield()
 {
-    static bool pumping = false;
     static bool logged = false;
     static uint32_t lastPresentTick = 0;
     reset_alt_f4_shortcut_state();
-    if (pumping || !s_initialized) return;
-    pumping = true;
+    if (s_studioPostCloseInputProbe.armed() && !s_studioPostClosePumpEntryLogged) {
+        s_studioPostClosePumpEntryLogged = true;
+        serial::puts("[guideXOS] Studio post-close pump entry: initialized=");
+        serial::putc(s_initialized ? '1' : '0');
+        serial::puts(" reentrant=");
+        serial::putc(s_cooperativePumpActive ? '1' : '0');
+        serial::putc('\n');
+    }
+    if (s_cooperativePumpActive || !s_initialized) {
+        if (s_studioPostCloseInputProbe.armed() && !s_studioPostClosePumpSkipLogged) {
+            s_studioPostClosePumpSkipLogged = true;
+            serial::puts(s_cooperativePumpActive
+                ? "[guideXOS] Studio post-close pump skipped: reentrant\n"
+                : "[guideXOS] Studio post-close pump skipped: desktop-uninitialized\n");
+        }
+        return;
+    }
+    s_cooperativePumpActive = true;
+
+    if (s_studioPostCloseInputProbe.armed() && !s_studioPostClosePumpLogged) {
+        s_studioPostClosePumpLogged = true;
+        serial::puts("[guideXOS] Studio post-close desktop pump: active\n");
+    }
 
     if (!logged) {
         serial::puts("[DESKTOP] cooperative_ui_pump=input+render\n");
@@ -9062,13 +9090,33 @@ void cooperative_yield()
     if (file_clipboard::operation_active()) update_clock_during_file_operation();
     input::poll();
 #if defined(KERNEL_HAS_COMMON_INPUT_QUEUE)
+    if (s_studioPostCloseInputProbe.armed() && !s_studioPostCloseQueuePendingLogged &&
+        !input_queue::empty()) {
+        s_studioPostCloseQueuePendingLogged = true;
+        serial::puts("[guideXOS] Studio post-close input queue pending events=0x");
+        serial::put_hex32(input_queue::size());
+        serial::puts(" received=0x");
+        serial::put_hex64(input_queue::events_received());
+        serial::putc('\n');
+    }
     input_queue::Event queuedEvent{};
     while (input_queue::pop(&queuedEvent)) {
         if (queuedEvent.type == input_queue::EventType::Pointer) {
+            if (s_studioPostCloseInputProbe.armed() && queuedEvent.buttons != 0 &&
+                !compositor::KernelCompositor::hasWindows()) {
+                serial::puts("[guideXOS] Studio post-close pointer: queue-consumed\n");
+            }
             handle_mouse(queuedEvent.x, queuedEvent.y, queuedEvent.buttons);
-        } else if (queuedEvent.type == input_queue::EventType::KeyDown &&
-                   queuedEvent.key != 0) {
-            handle_key(queuedEvent.key);
+        } else if (queuedEvent.type == input_queue::EventType::KeyDown ||
+                   queuedEvent.type == input_queue::EventType::KeyUp) {
+            const bool down = queuedEvent.type == input_queue::EventType::KeyDown;
+            if (compositor::KernelCompositor::getFocusedWindow()) {
+                compositor::KernelCompositor::handleKeyEvent(
+                    queuedEvent.nativeKey, queuedEvent.key, down,
+                    queuedEvent.modifiers);
+            } else if (down && queuedEvent.key != 0) {
+                handle_key(queuedEvent.key);
+            }
         }
     }
     // The common queue is authoritative for the Phase-7 provider.  Clear the
@@ -9090,19 +9138,51 @@ void cooperative_yield()
     const uint32_t now = (uint32_t)pit::ticks();
     const bool initialFileOperationPaint = file_clipboard::operation_active() &&
         file_clipboard::operation_state() == file_clipboard::OperationState::Preparing;
-    if (!s_inputStressRenderSuppressed &&
-        (initialFileOperationPaint || now - lastPresentTick >= 10)) {
+    const bool lifecycleRedraw = should_present_lifecycle_redraw(
+        s_lifecycleRedrawPending, s_initialized, framebuffer::is_available());
+    if (lifecycleRedraw) {
+        s_lifecycleRedrawPending = false;
         lastPresentTick = now;
+        const bool renderSuppressed = s_inputStressRenderSuppressed;
+        s_inputStressRenderSuppressed = false;
+        (void)needs_redraw();
         draw();
         draw_cursor(input::mouse_x(), input::mouse_y());
+        s_inputStressRenderSuppressed = renderSuppressed;
+        serial::puts("[guideXOS] NativeElf GUI cleanup: exposed desktop redraw=PASS\n");
+    } else {
+        const bool requestedRedraw = !s_inputStressRenderSuppressed && needs_redraw();
+        if (!s_inputStressRenderSuppressed &&
+            (initialFileOperationPaint || requestedRedraw || now - lastPresentTick >= 10)) {
+            lastPresentTick = now;
+            draw();
+            draw_cursor(input::mouse_x(), input::mouse_y());
+        }
     }
 
-    pumping = false;
+    s_cooperativePumpActive = false;
 }
 
 void set_input_stress_render_suppressed(bool suppressed)
 {
     s_inputStressRenderSuppressed = suppressed;
+}
+
+void arm_studio_post_close_input_probe()
+{
+    // A GUI close can finish the NativeElf task while its private stack is
+    // still the owner recorded by the cooperative pump. Release that stale
+    // single-core guard before the kernel's post-Phase12 desktop loop resumes.
+    if (s_cooperativePumpActive) {
+        s_cooperativePumpActive = false;
+        kernel::serial::puts("[guideXOS] Studio cleanup released desktop pump guard\n");
+    }
+    s_studioPostCloseInputProbe.arm();
+    s_studioPostClosePumpLogged = false;
+    s_studioPostClosePumpEntryLogged = false;
+    s_studioPostClosePumpSkipLogged = false;
+    s_studioPostCloseQueuePendingLogged = false;
+    kernel::serial::puts("[guideXOS] Studio post-close input probe: armed\n");
 }
 
 
@@ -11060,7 +11140,17 @@ void handle_key(uint32_t key)
 
     if (key == shell::KEY_SUPER) {
         serial::puts("[desktop] Super key pressed, toggling Start Menu\n");
+        if (s_studioPostCloseInputProbe.armed() &&
+            !compositor::KernelCompositor::hasWindows()) {
+            serial::puts("[guideXOS] Studio post-close keyboard: dispatch-reached\n");
+        }
+        const bool startMenuWasOpen = s_startMenuOpen;
         toggle_start_menu();
+        if (s_studioPostCloseInputProbe.observe_keyboard_action(
+                !compositor::KernelCompositor::hasWindows(),
+                s_startMenuOpen != startMenuWasOpen)) {
+            serial::puts("[guideXOS] Studio post-close keyboard input: PASS start-menu-toggle\n");
+        }
         draw();
         return;
     }
@@ -11247,22 +11337,52 @@ namespace desktop {
 // Check and clear redraw flag
 bool needs_redraw()
 {
-    if (s_needsRedraw) {
-        s_needsRedraw = false;
-        ++s_redrawGeneration;
-        return true;
-    }
-    return false;
+    return s_redrawState.consume();
 }
 
 uint64_t redraw_generation()
 {
-    return s_redrawGeneration;
+    return s_redrawState.generation();
 }
 
 void request_redraw()
 {
-    s_needsRedraw = true;
+    s_redrawState.request();
+}
+
+bool request_lifecycle_redraw()
+{
+    if (!s_initialized) {
+        serial::puts("[desktop] lifecycle redraw request skipped: desktop not initialized\n");
+        return false;
+    }
+    if (!framebuffer::is_available()) {
+        serial::puts("[desktop] lifecycle redraw request skipped: framebuffer unavailable\n");
+        return false;
+    }
+    if (!can_present_lifecycle_redraw(s_initialized, framebuffer::is_available())) return false;
+    // Defer the full-frame repaint until the current input/compositor dispatch
+    // has unwound. The desktop pump will temporarily bypass stress suppression
+    // for this explicit lifecycle repaint and record completion after present.
+    s_redrawState.request();
+    s_lifecycleRedrawPending = true;
+    serial::puts("[desktop] lifecycle redraw request queued\n");
+    return true;
+}
+
+bool redraw_lifecycle_now()
+{
+    if (!can_present_lifecycle_redraw(s_initialized, framebuffer::is_available())) return false;
+    const bool renderSuppressed = s_inputStressRenderSuppressed;
+    s_inputStressRenderSuppressed = false;
+    s_lifecycleRedrawPending = false;
+    (void)needs_redraw();
+    serial::puts("[desktop] lifecycle redraw: presenting after application cleanup\n");
+    draw();
+    draw_cursor(input::mouse_x(), input::mouse_y());
+    s_inputStressRenderSuppressed = renderSuppressed;
+    serial::puts("[desktop] lifecycle redraw: completed after application cleanup\n");
+    return true;
 }
 
 // Classic arrow cursor bitmap (12 wide x 19 tall)
@@ -12132,6 +12252,11 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     if (s_inputStressRenderSuppressed) return;
 #endif
 
+    if (s_studioPostCloseInputProbe.armed() && (pressed & 0x01) &&
+        !compositor::KernelCompositor::hasWindows()) {
+        serial::puts("[guideXOS] Studio post-close pointer: dispatch-reached\n");
+    }
+
     apply_taskbar_layout();
     DesktopRect workArea = get_current_work_area();
     DesktopRect taskbarRect = get_current_taskbar_rect();
@@ -12779,7 +12904,13 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
         // Start button area follows the current taskbar dock position.
         if ((pressed & 0x01) && point_in_rect(mx, my, get_start_button_rect())) {
+            const bool startMenuWasOpen = s_startMenuOpen;
             toggle_start_menu();
+            if (s_studioPostCloseInputProbe.observe_pointer_action(
+                    !compositor::KernelCompositor::hasWindows(),
+                    s_startMenuOpen != startMenuWasOpen)) {
+                kernel::serial::puts("[guideXOS] Studio post-close pointer input: PASS start-button\n");
+            }
 #if defined(GXOS_AARCH64_PHASE7)
             s_phase7StartButtonInputPassed = true;
             kernel::serial::puts("[guideXOS] Start button input: PASS\n");

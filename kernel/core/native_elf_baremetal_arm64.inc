@@ -1363,6 +1363,8 @@ public:
     void onMouseDown(int x, int y, uint8_t button) override;
     void onMouseUp(int x, int y, uint8_t button) override;
     void onKeyDown(uint32_t key) override;
+    void onKeyEvent(uint32_t key, uint32_t text, bool down,
+                    uint8_t modifiers) override;
     void onWidgetClick(int widgetId) override;
     void onKeyChar(char c) override;
     void onWindowClose() override;
@@ -1406,6 +1408,7 @@ struct Phase9Runtime {
     Arm64Runtime loader;
     application::ApplicationRuntime common;
     Phase9GuiOwner* owner;
+    volatile uint32_t closeDispatchInProgress;
     gui_render::HostBinding hostRenderBinding;
 #if defined(GXOS_AARCH64_PHASE12)
     studio_abi::V05Adapter* studioV05Adapter;
@@ -1545,8 +1548,10 @@ Phase9GuiOwner::Phase9GuiOwner(Phase9Runtime* runtime)
 
 Phase9GuiOwner::~Phase9GuiOwner()
 {
+    bool removedWindow = false;
     for (int i = static_cast<int>(kPhase9MaxWindows) - 1; i >= 0; --i) {
         if (!m_windows[i]) continue;
+        removedWindow = true;
         for (uint32_t widget = 0; widget < kPhase9MaxWidgets; ++widget) {
             if (!m_widgets[widget].live || m_widgets[widget].windowIndex != static_cast<uint16_t>(i)) continue;
             if (m_runtime) {
@@ -1564,6 +1569,9 @@ Phase9GuiOwner::~Phase9GuiOwner()
     }
     m_windowCount = 0;
     m_window = nullptr;
+    if (removedWindow && desktop::request_lifecycle_redraw()) {
+        arm64_print("[guideXOS] NativeElf GUI cleanup: exposed desktop redraw queued\n");
+    }
 }
 
 bool Phase9GuiOwner::init()
@@ -1820,6 +1828,8 @@ bool Phase9GuiOwner::set_widget_value(gx_handle handle, int32_t value)
 void Phase9GuiOwner::close_window_index(int index)
 {
     if (index < 0 || index >= static_cast<int>(kPhase9MaxWindows) || !m_windows[index]) return;
+    m_runtime->closeDispatchInProgress = 1;
+    arm64_print("[guideXOS] NativeElf GUI cleanup: close_window_index entered\n");
     app::KernelWindow* target = m_windows[index];
     const gx_handle closedHandle = m_windowHandles[index];
     app::KernelWindow* saved = m_window;
@@ -1844,8 +1854,14 @@ void Phase9GuiOwner::close_window_index(int index)
     m_window = saved && saved != target ? saved : nullptr;
     if (!m_window) for (uint32_t i = 0; i < kPhase9MaxWindows; ++i) if (m_windows[i]) { m_window = m_windows[i]; break; }
     if (m_windowCount != 0) --m_windowCount;
+    if (desktop::request_lifecycle_redraw()) {
+        arm64_print("[guideXOS] NativeElf GUI cleanup: exposed desktop redraw queued\n");
+    } else {
+        arm64_print("[guideXOS] NativeElf GUI cleanup: exposed desktop redraw request failed\n");
+    }
     if (m_windowCount != 0 && m_runtime->common.state() == application::LifecycleState::Closing)
         m_runtime->common.transition(application::LifecycleState::Running);
+    m_runtime->closeDispatchInProgress = 0;
 }
 
 void Phase9GuiOwner::requestClose()
@@ -1929,6 +1945,30 @@ void Phase9GuiOwner::onMouseMove(int x, int y) { const int i = focused_window_in
 void Phase9GuiOwner::onMouseDown(int x, int y, uint8_t button) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_MOUSE, m_windowHandles[i], x, y, GX_MOUSE_PACK(button, GX_MOUSE_ACTION_DOWN)); }
 void Phase9GuiOwner::onMouseUp(int x, int y, uint8_t button) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_MOUSE, m_windowHandles[i], x, y, GX_MOUSE_PACK(button, GX_MOUSE_ACTION_UP)); }
 void Phase9GuiOwner::onKeyDown(uint32_t key) { const int i = focused_window_index(); if (i >= 0) queue(GX_EVENT_KEY, m_windowHandles[i], static_cast<int32_t>(key), GX_KEY_ACTION_DOWN, 0); }
+
+void Phase9GuiOwner::onKeyEvent(uint32_t key, uint32_t text, bool down,
+                                uint8_t modifiers)
+{
+    const int wi = focused_window_index();
+    if (wi < 0) return;
+    if (down && text >= 32 && text < 127 && m_focusedWidget >= 0 &&
+        m_focusedWidget < m_windows[wi]->widgetCount) {
+        app::Widget* widget = &m_windows[wi]->widgets[m_focusedWidget];
+        if (widget->type == app::WidgetType::TextBox && widget->enabled && widget->visible) {
+            onKeyChar(static_cast<char>(text));
+            return;
+        }
+    }
+    uint32_t studioModifiers = 0;
+    const bool letter = key >= 'A' && key <= 'Z';
+    if ((modifiers & 1u) || ((modifiers & 2u) && letter))
+        studioModifiers |= GX_KEY_MOD_SHIFT;
+    if (modifiers & 4u) studioModifiers |= GX_KEY_MOD_CTRL;
+    if (modifiers & 8u) studioModifiers |= GX_KEY_MOD_ALT;
+    queue(GX_EVENT_KEY, m_windowHandles[wi], static_cast<int32_t>(key),
+          down ? GX_KEY_ACTION_DOWN : GX_KEY_ACTION_UP,
+          static_cast<int32_t>(studioModifiers));
+}
 
 void Phase9GuiOwner::onWidgetClick(int widgetId)
 {
@@ -2569,6 +2609,11 @@ static bool phase9_load_and_run(Phase9Runtime* runtime)
         result = gxos_native_call_on_stack(runtime->loader.entryAddress, applicationContext,
             runtime->loader.stack + runtime->loader.stackBytes - 16);
     }
+    if (runtime->closeDispatchInProgress != 0) {
+        arm64_print("[guideXOS] NativeElf GUI cleanup: waiting for close dispatch to unwind\n");
+        while (runtime->closeDispatchInProgress != 0) kernel::scheduler::note_execution();
+        arm64_print("[guideXOS] NativeElf GUI cleanup: close dispatch unwound\n");
+    }
 #if defined(GXOS_AARCH64_PHASE12)
     if (runtime->studioV05Adapter)
         studio_abi::deactivate_v05_adapter(runtime->studioV05Adapter);
@@ -2591,12 +2636,22 @@ static bool phase9_load_and_run(Phase9Runtime* runtime)
         runtime->peakWindowCount = runtime->owner->window_count();
         runtime->peakWidgetCount = runtime->owner->widget_count();
     }
+    const bool studioCloseSeen = runtime->owner && runtime->owner->close_seen();
     if (runtime->owner) {
         const arch::interrupt_state_t cleanupState = arch::irq_save();
         runtime->owner->shutdown();
         delete runtime->owner;
         runtime->owner = nullptr;
         arch::irq_restore(cleanupState);
+    }
+    if (runtime->isPhase12 && !runtime->isPhase12Application && studioCloseSeen &&
+        compositor::KernelCompositor::getWindowCount() == 0) {
+        if (desktop::redraw_lifecycle_now()) {
+            arm64_print("[guideXOS] NativeElf GUI cleanup: exposed desktop redraw=PASS\n");
+            desktop::arm_studio_post_close_input_probe();
+        } else {
+            arm64_print("[guideXOS] NativeElf GUI cleanup: exposed desktop redraw=FAIL\n");
+        }
     }
     const bool imagePermissionsRestored = phase2_mmu_set_range_permissions(
         runtime->loader.imageBase, runtime->loader.imageBytes, 0, 1) != 0;

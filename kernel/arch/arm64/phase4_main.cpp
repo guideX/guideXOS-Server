@@ -2079,5 +2079,27 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
 #else
     print("\nAARCH64_PHASE4_PASS\n");
 #endif
-    for (;;) __asm__ volatile("wfi");
+    for (;;) {
+#if defined(GXOS_AARCH64_PHASE12)
+        static bool desktopServiceLoopEntryLogged = false;
+        static bool desktopServiceLoopReturnLogged = false;
+        if (!desktopServiceLoopEntryLogged) {
+            desktopServiceLoopEntryLogged = true;
+            print("[guideXOS] Phase12 desktop service loop: entering\n");
+        }
+#endif
+#if defined(GXOS_AARCH64_PHASE7)
+        // Keep the real desktop service loop alive after the hosted durability
+        // checks finish.  QAC still has an active guest at this point, and the
+        // exposed desktop must continue accepting hardware pointer and key input.
+        kernel::desktop::cooperative_yield();
+#endif
+#if defined(GXOS_AARCH64_PHASE12)
+        if (!desktopServiceLoopReturnLogged) {
+            desktopServiceLoopReturnLogged = true;
+            print("[guideXOS] Phase12 desktop service loop: pump returned\n");
+        }
+#endif
+        __asm__ volatile("wfi");
+    }
 }

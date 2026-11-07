@@ -476,16 +476,20 @@ void submit_platform_pointer_absolute(int32_t raw_x, int32_t raw_y,
     if (changed) s_mouse.dirty = true;
 }
 
-void submit_platform_key(uint32_t key, bool down)
+void submit_platform_key(uint32_t key, uint32_t native_key, bool down,
+                         uint8_t modifiers)
 {
     s_keyboard.dirty = true;
 #if defined(KERNEL_HAS_COMMON_INPUT_QUEUE)
     input_queue::push_key(down ? input_queue::EventType::KeyDown
                                : input_queue::EventType::KeyUp,
-                          key, input_queue::OriginVirtioHardware);
+                          key, native_key, modifiers,
+                          input_queue::OriginVirtioHardware);
 #else
     (void)key;
+    (void)native_key;
     (void)down;
+    (void)modifiers;
 #endif
 }
 

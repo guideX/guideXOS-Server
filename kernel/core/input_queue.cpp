@@ -69,7 +69,8 @@ bool push_pointer(int32_t x, int32_t y, uint8_t buttons, int16_t wheel,
     return true;
 }
 
-bool push_key(EventType type, uint32_t key, uint8_t origin)
+bool push_key(EventType type, uint32_t key, uint32_t native_key,
+              uint8_t modifiers, uint8_t origin)
 {
     ++s_received;
     if (type != EventType::KeyDown && type != EventType::KeyUp) {
@@ -85,6 +86,8 @@ bool push_key(EventType type, uint32_t key, uint8_t origin)
     event.type = type;
     event.origin = origin;
     event.key = key;
+    event.nativeKey = native_key;
+    event.modifiers = modifiers;
     event.sequence = ++s_sequence;
     s_head = next_index(s_head);
     ++s_count;

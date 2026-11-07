@@ -110,12 +110,48 @@ struct V05AdapterState {
     studio_v05::gx_host_calls host;
     uint32_t active;
     uint32_t observedEventMask;
+    uint32_t observedKeyEventCount;
 };
 
 static_assert(sizeof(V05AdapterState::host) == 464,
               "Adapter state must contain one complete v0.5 table");
 
 static V05AdapterState* s_activeAdapter = nullptr;
+
+static uint32_t append_decimal(char* output, uint32_t capacity,
+                               uint32_t offset, uint32_t value)
+{
+    char digits[10];
+    uint32_t count = 0;
+    do { digits[count++] = static_cast<char>('0' + value % 10u); value /= 10u; }
+    while (value != 0 && count < sizeof(digits));
+    while (count > 0 && offset + 1 < capacity) output[offset++] = digits[--count];
+    output[offset] = '\0';
+    return offset;
+}
+
+static void log_key_event(V05AdapterState* adapter, const gx_event& event)
+{
+    if (!adapter || !adapter->aarch64Host || !adapter->aarch64Host->log) return;
+    char message[128] = "ABI3_STUDIO_KEY_EVENT sequence=";
+    uint32_t offset = 0;
+    while (message[offset] != '\0') ++offset;
+    offset = append_decimal(message, sizeof(message), offset,
+                                     ++adapter->observedKeyEventCount);
+    const char* keyLabel = " key=";
+    while (*keyLabel && offset + 1 < sizeof(message)) message[offset++] = *keyLabel++;
+    offset = append_decimal(message, sizeof(message), offset,
+                            static_cast<uint32_t>(event.param1));
+    const char* actionLabel = " action=";
+    while (*actionLabel && offset + 1 < sizeof(message)) message[offset++] = *actionLabel++;
+    const char* action = event.param2 == GX_KEY_ACTION_DOWN ? "down" : "up";
+    while (*action && offset + 1 < sizeof(message)) message[offset++] = *action++;
+    const char* modifierLabel = " modifiers=";
+    while (*modifierLabel && offset + 1 < sizeof(message)) message[offset++] = *modifierLabel++;
+    (void)append_decimal(message, sizeof(message), offset,
+                         static_cast<uint32_t>(event.param3));
+    adapter->aarch64Host->log(adapter->aarch64Context, message);
+}
 
 static bool range_contains(uint64_t base, uint64_t bytes,
                            const void* pointer, uint64_t length)
@@ -365,6 +401,7 @@ static studio_v05::gx_result GX_CALL host_poll_event(
                 adapter->aarch64Host->log(adapter->aarch64Context,
                     "ABI3 guest observed Studio close event through v0.5 poll_event");
         }
+        if (event.type == GX_EVENT_KEY) log_key_event(adapter, event);
     }
     return studio_v05::GX_OK;
 }

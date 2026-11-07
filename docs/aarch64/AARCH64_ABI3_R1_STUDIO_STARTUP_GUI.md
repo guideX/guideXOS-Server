@@ -1,12 +1,18 @@
 # AArch64 ABI3 R1 Developer Studio Startup and GUI Qualification
 
-- **Current outcome:** `STUDIO_ARM64_GUI_PARTIAL` (R1d; 0 of 3 qualifying boots)
-- **Latest native result:** Studio window shown and closed cleanly in one QAC-authorized guest; key text input and repeatability remain unproven.
+- **Current outcome:** `STUDIO_ARM64_GUI_REPEATABILITY_VERIFIED` (R1e passed 3 of 3 fresh QAC-authorized Studio input/close/redraw boots)
+- **Latest native result:** R1e demonstrated text input in Studio's genuine Open Project path field, clean close and resource cleanup, automatic desktop redraw, and responsive pointer/keyboard actions afterward. See the [focused R1e report](AARCH64_ABI3_R1E_STUDIO_INPUT_REDRAW.md) for candidate hashes and per-run QAC evidence.
 - **Repository / branch:** `D:\dev\guideXOSServer_AARCH64` / `AARCH64_SUPPORT`
-- **Starting HEAD:** `4503ee6215cb6114352c855f484b2fff8084fa93` (equal to `origin/AARCH64_SUPPORT` at preflight)
+- **R1e starting HEAD:** `088bbe72cc40ac8af4808089761db4ed5dae6eec` (equal to `origin/AARCH64_SUPPORT` at R1e preflight)
+- **R1d recorded source HEAD:** `4503ee6215cb6114352c855f484b2fff8084fa93` (from its preserved candidate manifest)
 - **Pinned Studio:** `058c83fe1ae270a103eadc7caca961328e8abe2a`
 - **Pinned v0.5 SDK:** `f63a7710a30b49f785aac134abf06a3a6c5b5aca`
 - **Package identity:** `guidexos-c-abi-v1-studio-v05-464`
+
+## R1e input and redraw follow-up
+
+
+R1e completed the three-boot acceptance. It used Studio's real editable Open Project path field because the genuine New Project workflow currently fails at FAT 8.3 filename validation when creating `guidexos.project`. The qualifying runs did not create or open a project; editor-buffer typing was separately observed in a nonqualifying pre-provisioned-project diagnostic. The R1d observations below are retained as historical results and are superseded by R1e for current input, redraw, and repeatability status. R1e preserves the R1d Studio ELF, package manifest, and RAM disk after hash verification, and rebuilds the production kernel and EFI from the R1e starting HEAD.
 
 ## Qualification result
 
@@ -14,7 +20,7 @@ R1c was admitted for a genuine guest boot and reached Studio's `gx_main`, but it
 
 R1d adds bounded client-size negotiation against the real framebuffer and work area. Four separate QAC-authorized R1d diagnostic guests reached the authentic pinned Studio entry, selected the exact v0.5 adapter, created a window, and emitted the first-render marker. A directly inspected framebuffer from the fourth run shows Studio's title bar, menus, Explorer and Outline panes, and welcome text. Mouse and focus events reached `poll_event`. One visible File → New File action also reached Studio, which returned `file_create=FAIL reason=no_active_project` because no project was open. Keyboard text delivery was not observed in any run.
 
-The fourth run then demonstrated an application close event, `application_close=PASS`, `clean_close=PASS`, zero live mappings/windows/widgets at GUI cleanup, runtime cleanup, and zero unexpected IRQs or exceptions. The desktop did not immediately repaint cleanly after close; a later Start-menu interaction followed by Escape restored the wallpaper. This one successful close/cleanup path and one interactive screenshot do not satisfy the keyboard, redraw, and three-fresh-boot acceptance criteria. Outcome remains **`STUDIO_ARM64_GUI_PARTIAL`**, with **0/3 qualifying boots**.
+The fourth run then demonstrated an application close event, `application_close=PASS`, `clean_close=PASS`, zero live mappings/windows/widgets at GUI cleanup, runtime cleanup, and zero unexpected IRQs or exceptions. In R1d, the desktop did not immediately repaint cleanly after close; a later Start-menu interaction followed by Escape restored the wallpaper. This historical result was incomplete and is superseded by the three qualifying R1e runs documented above.
 
 ### Earlier R1 work retained as history
 
@@ -112,6 +118,6 @@ The standalone Phase 12 alignment script still has its documented `$LASTEXITCODE
 
 ## Fresh-boot repeatability and remaining acceptance
 
-There are **0 of 3 qualifying fresh boots**. Diagnostic boots that miss keyboard text, a complete interactive redraw, clean post-close desktop response, or complete run-specific QAC evidence do not count. Acceptance still needs three fresh QAC-authorized guests demonstrating visible Studio layout, mouse and keyboard text delivered through the v0.5 event loop, a visible state change/redraw, clean application close and resource cleanup, and a responsive desktop afterward.
+R1d had **0 of 3 qualifying fresh boots**. R1e's **3 of 3 qualifying boots** and acceptance evidence are recorded in [AARCH64_ABI3_R1E_STUDIO_INPUT_REDRAW.md](AARCH64_ABI3_R1E_STUDIO_INPUT_REDRAW.md). The R1e accepted editable context was Studio's authentic Open Project path field; no project creation or project open is claimed. Studio guest workspace VFS boundaries/read-write behavior, Build/Run, Debug, and physical hardware remain later milestones and were not exercised.
 
-Studio guest workspace VFS boundaries/read-write behavior and actual Build plus ordinary Run remain later milestones and were not exercised. Physical hardware is untested. Preserve the exact v0.5 464-byte adapter and the independent 400-byte AARCH64 contract.
+Preserve the exact v0.5 464-byte adapter and the independent 400-byte AARCH64 contract.
