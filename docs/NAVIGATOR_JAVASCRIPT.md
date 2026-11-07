@@ -14046,3 +14046,16 @@ acceptance remains pending. A useful JS111 gate is to qualify the JS109/JS110
 JSON parser, iterative reviver, serializer, and callback stack together on the
 guest target at the configured depth and pool limits before expanding the
 reviver API with newer features such as `context.source`.
+
+### JS111 guest qualification — blocked
+
+On 2026-11-07, JS111 was classified **Outcome C — `JS111_GUEST_BLOCKED`**. The
+accepted JSON runtime is included in the Windows-hosted Navigator build, but
+the freestanding kernel builds a separate capability-limited Navigator
+adapter and does not include `navigator_javascript`. The current ESP package
+also lacks a complete bootable kernel/EFI set, and the documented server ELF
+loader remains unimplemented. QAC was online and idle at preflight, but there
+was no source-matched guest candidate to admit. No reservation or QEMU launch
+was made. A separate managed acceptance session appeared in the final QAC
+census and was left untouched. The full qualification evidence and hosted
+regression details are in [the JS111 qualification report](NAVIGATOR_JAVASCRIPT_JS111_QUALIFICATION.md).
