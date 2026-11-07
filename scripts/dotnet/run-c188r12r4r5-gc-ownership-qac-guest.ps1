@@ -4,7 +4,8 @@ param(
     [ValidateRange(1,60)][int]$AdmissionWindowSeconds = 30,
     [ValidateSet('R1','R2','R3')][string]$ThreadStoreAttempt = 'R1',
     [string]$CandidateIntegrityInventory = '',
-    [ValidateSet('R2R2R1','R2R2R2','R2R2R3','R2R2R4')][string]$NativeAllocationGuestAttempt = 'R2R2R1'
+    [ValidateSet('R2R2R1','R2R2R2','R2R2R3','R2R2R4')][string]$NativeAllocationGuestAttempt = 'R2R2R1',
+    [switch]$HostedPreflightOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +36,7 @@ $isInitReturnContract = [string]$candidateManifest.mode -ceq 'InitReturnContract
 $isThreadStoreReadiness = [string]$candidateManifest.mode -ceq 'ThreadStoreReadiness'
 $isSemiSharedAttribution = [string]$candidateManifest.mode -ceq 'SemiSharedAttribution'
 $isSafeHandoff = [string]$candidateManifest.mode -ceq 'NativeAotSafeHandoff'
+$isTransitionAttribution = [string]$candidateManifest.mode -ceq 'NativeAotInitializeModulesTransitionAttribution'
 $isNativeAllocationFailureAttribution = [string]$candidateManifest.mode -in @('NativeAllocationFailureAttribution','NativeAotSafeHandoff')
 $isGcInitFailureAttribution = [string]$candidateManifest.mode -in @('GcInitFailureAttribution','SemiSharedAttribution','NativeAllocationFailureAttribution','NativeAotSafeHandoff')
 if ($ThreadStoreAttempt -in @('R2','R3') -and -not $isThreadStoreReadiness) {
@@ -43,7 +45,7 @@ if ($ThreadStoreAttempt -in @('R2','R3') -and -not $isThreadStoreReadiness) {
 if ($NativeAllocationGuestAttempt -cne 'R2R2R1' -and -not $isNativeAllocationFailureAttribution) {
     throw 'NativeAllocationGuestAttempt is valid only for the C188 R2R2 native-allocation candidate.'
 }
-$isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness -or $isGcInitFailureAttribution -or $isSafeHandoff
+$isInitDiagnostic = $isInitAttribution -or $isInitReturnContract -or $isThreadStoreReadiness -or $isGcInitFailureAttribution -or $isSafeHandoff -or $isTransitionAttribution
 $r4RuntimePackManifest = $null
 $r4PalCommonMembership = $null
 if ($isThreadStoreReadiness) {
@@ -54,7 +56,9 @@ if ($isThreadStoreReadiness) {
     $r4RuntimePackManifest = Get-Content -LiteralPath $r4RuntimePackManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $r4PalCommonMembership = $r4RuntimePackManifest.archiveMembership.threadStorePalCommonReplacement
 }
-$phaseRoot = if ($isSafeHandoff) {
+$phaseRoot = if ($isTransitionAttribution) {
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
+} elseif ($isSafeHandoff) {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff'))
 } elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') {
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4-pal-capacity-fix'))
@@ -76,7 +80,13 @@ $phaseRoot = if ($isSafeHandoff) {
 if (-not (Test-QacCandidatePath -CandidateRoot $candidate -PhaseRoot $phaseRoot -RequireExisting)) {
     throw "CandidateRoot must be a unique candidate below $phaseRoot."
 }
-if ($isGcInitFailureAttribution) {
+if ($isTransitionAttribution) {
+    $transitionProfile = Test-QacTransitionCandidateProfile -CandidateRoot $candidate -PhaseRoot $phaseRoot `
+        -RepoRoot $repo -InventoryPath $CandidateIntegrityInventory
+    $candidateManifest = $transitionProfile.Manifest
+    $candidateIntegrityInventorySha256 = [string]$transitionProfile.InventoryResult.InventorySha256
+    $CandidateIntegrityInventory = [string]$transitionProfile.InventoryPath
+} elseif ($isGcInitFailureAttribution) {
     $gcRecord = $candidateManifest.gcInitializationInternalRecord
     $r5RuntimePackManifestPath = [System.IO.Path]::GetFullPath([string]$candidateManifest.runtimePackManifest)
     if (-not (Test-Path -LiteralPath $r5RuntimePackManifestPath -PathType Leaf)) {
@@ -373,8 +383,12 @@ if ($isNativeAllocationFailureAttribution -and -not $isSafeHandoff) {
     [void](Require-Hash ([string]$candidateManifest.productionKernelManifest) ([string]$candidateManifest.artifactHashes.productionKernelQualification) 'Safe-handoff proof-disabled production kernel qualification')
 }
 
-$esp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
-$runDirectory = if ($isSafeHandoff) { 'qac-guest-r2r2r4r2r1-001' }
+$candidateEsp = [System.IO.Path]::GetFullPath([string]$candidateManifest.esp)
+$runCorrelationId = if ($isTransitionAttribution) {
+    'C188R12R4R5R2R3R1-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N')
+} else { $null }
+$runDirectory = if ($isTransitionAttribution) { "qac-guest-transition-attribution-$runCorrelationId" }
+    elseif ($isSafeHandoff) { 'qac-guest-r2r2r4r2r1-001' }
     elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R4') { 'qac-guest-r2r2r4-001' }
     elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R3') { 'qac-guest-r2r2r3-001' }
     elseif ($isNativeAllocationFailureAttribution -and $NativeAllocationGuestAttempt -ceq 'R2R2R2') { 'qac-guest-r2r2r2-001' }
@@ -384,14 +398,20 @@ $runDirectory = if ($isSafeHandoff) { 'qac-guest-r2r2r4r2r1-001' }
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R2') { 'qac-guest-002' }
     elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R3') { 'qac-guest-003' }
     else { 'qac-guest-001' }
-$runRoot = if ($isGcInitFailureAttribution -or $isSafeHandoff) { Join-Path $phaseRoot $runDirectory } else { Join-Path $candidate $runDirectory }
+$runRoot = if ($isGcInitFailureAttribution -or $isSafeHandoff -or $isTransitionAttribution) { Join-Path $phaseRoot $runDirectory } else { Join-Path $candidate $runDirectory }
+$esp = $candidateEsp
 $serial = Join-Path $runRoot 'serial.log'
 $qmpLog = Join-Path $runRoot 'qmp.log'
 $qacCli = 'D:\dev\guideXOS_QAC\src\GuideXOS.QAC.Cli\bin\Debug\net10.0-windows\GuideXOS.QAC.Cli.exe'
 $qemu = 'C:\Program Files\qemu\qemu-system-x86_64.exe'
-$ovmf = Join-Path $repo 'OVMF.fd'
+$qemuShare = Join-Path (Split-Path -Parent $qemu) 'share'
+$ovmf = if ($isTransitionAttribution) { Join-Path $qemuShare 'edk2-x86_64-code.fd' } else { Join-Path $repo 'OVMF.fd' }
+$uefiVarsTemplate = if ($isTransitionAttribution) { Join-Path $qemuShare 'edk2-i386-vars.fd' } else { $null }
+$uefiVarsImage = if ($isTransitionAttribution) { Join-Path $runRoot 'uefi-vars.fd' } else { $null }
 $runnerScriptSha256 = Get-Sha256 $PSCommandPath
-$attemptPath = if ($isSafeHandoff) {
+$attemptPath = if ($isTransitionAttribution) {
+    Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R2R3R1.json'
+} elseif ($isSafeHandoff) {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R5R2R2R4R2R1.json'
 } elseif ($isNativeAllocationFailureAttribution) {
     Join-Path $phaseRoot "guest-launch-attempt-C188R12R4R5R4R5$NativeAllocationGuestAttempt.json"
@@ -404,8 +424,12 @@ $attemptPath = if ($isSafeHandoff) {
 } elseif ($isThreadStoreReadiness -and $ThreadStoreAttempt -eq 'R3') {
     Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R4R3.json'
 } else { Join-Path $phaseRoot 'guest-launch-attempt.json' }
-foreach ($required in @($qacCli,$qemu,$ovmf,(Join-Path $esp 'kernel.elf'),
-        (Join-Path $esp 'ramdisk.img'),(Join-Path $esp 'EFI\BOOT\BOOTX64.EFI'))) {
+if ($isTransitionAttribution) { $requiredGuestInputs = @($qacCli,$qemu,$ovmf,$uefiVarsTemplate) + @(
+        (Join-Path $candidateEsp 'kernel.elf'),(Join-Path $candidateEsp 'ramdisk.img'),
+        (Join-Path $candidateEsp 'EFI\BOOT\BOOTX64.EFI'))
+} else { $requiredGuestInputs = @($qacCli,$qemu,$ovmf,(Join-Path $candidateEsp 'kernel.elf'),
+        (Join-Path $candidateEsp 'ramdisk.img'),(Join-Path $candidateEsp 'EFI\BOOT\BOOTX64.EFI')) }
+foreach ($required in $requiredGuestInputs) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required guest input is missing: $required" }
 }
 $qemuSha256 = Get-Sha256 $qemu
@@ -486,9 +510,28 @@ if ($isGcInitFailureAttribution) {
             ([string]$r2Sources.recordImplementation) 'R2 staged fixed record implementation')
     }
 }
-if (Test-Path -LiteralPath $attemptPath) { throw "The candidate already has a QAC guest attempt; refusing any second launch: $attemptPath" }
-if (Test-Path -LiteralPath $runRoot) { throw "Refusing to overwrite guest evidence: $runRoot" }
-New-Item -ItemType Directory -Path $runRoot | Out-Null
+if (-not $HostedPreflightOnly -and (Test-Path -LiteralPath $attemptPath)) {
+    throw "The candidate already has a QAC guest attempt; refusing any second launch: $attemptPath"
+}
+if ($isTransitionAttribution) {
+    $qemuCodeSha256 = Get-Sha256 $ovmf
+    $uefiVarsTemplateSha256 = Get-Sha256 $uefiVarsTemplate
+    $guestState = New-QacTransitionGuestState -CandidateEsp $candidateEsp -CandidateRoot $candidate `
+        -PhaseRoot $phaseRoot -RunRoot $runRoot -UefiVarsTemplate $uefiVarsTemplate
+    $esp = [string]$guestState.Esp
+    $uefiVarsImage = [string]$guestState.UefiVarsImage
+    if ((Get-Sha256 (Join-Path $esp 'kernel.elf')) -cne ([string]$candidateManifest.espKernelSha256).ToUpperInvariant() -or
+        (Get-Sha256 (Join-Path $esp 'ramdisk.img')) -cne ([string]$candidateManifest.candidateRamdiskSha256).ToUpperInvariant() -or
+        (Get-Sha256 (Join-Path $esp 'EFI\BOOT\BOOTX64.EFI')) -cne ([string]$candidateManifest.artifactHashes.stagedEspBootloader).ToUpperInvariant()) {
+        throw 'Fresh writable guest ESP does not match the immutable transition candidate.'
+    }
+} else {
+    if (Test-Path -LiteralPath $runRoot) { throw "Refusing to overwrite guest evidence: $runRoot" }
+    New-Item -ItemType Directory -Path $runRoot | Out-Null
+    $guestState = $null
+    $qemuCodeSha256 = $null
+    $uefiVarsTemplateSha256 = $null
+}
 
 $manifestPath = Join-Path $runRoot 'guest-manifest.json'
 $qacBeforeStatusPath = Join-Path $runRoot 'qac-before.status.txt'
@@ -739,9 +782,9 @@ $qmpListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loo
 $qmpListener.Start()
 $qmpPort = ([System.Net.IPEndPoint]$qmpListener.LocalEndpoint).Port
 $qmpListener.Stop()
-$qemuArgs = @(
-    '-accel','tcg','-machine','pc','-smp','1',
-    '-drive',('if=pflash,format=raw,readonly=on,file='+$ovmf),
+$firmwareArgs = @('-drive',('if=pflash,format=raw,readonly=on,file='+$ovmf))
+if ($isTransitionAttribution) { $firmwareArgs += @('-drive',('if=pflash,format=raw,file='+$uefiVarsImage)) }
+$qemuArgs = @('-accel','tcg','-machine','pc','-smp','1') + $firmwareArgs + @(
     '-drive',('file=fat:rw:'+$esp+',format=raw,if=ide,index=0'),
     '-m','1024M','-vga','std','-display','none',
     '-serial',('file:'+$serial),
@@ -753,11 +796,56 @@ $qacArgs = @('run','--project','guideXOSServer','--mode','acceptance','--',$qemu
     candidateManifestSha256=$candidateManifestSha256;candidateIntegrityInventory=$CandidateIntegrityInventory;
     candidateIntegrityInventorySha256=$candidateIntegrityInventorySha256;qemuSha256=$qemuSha256;
     candidateProfile=$candidateManifest.mode;gcInitFailureAttributionProfile=$isGcInitFailureAttribution;
+    qualificationCorrelationId=$runCorrelationId;candidateEsp=$candidateEsp;isolatedGuestEsp=if($isTransitionAttribution){$esp}else{$null};
+    qemuFirmwareCode=$ovmf;qemuFirmwareCodeSha256=$qemuCodeSha256;
+    uefiVarsTemplate=$uefiVarsTemplate;uefiVarsTemplateSha256=$uefiVarsTemplateSha256;
+    writableUefiVarsImage=$uefiVarsImage;writableUefiVarsImageSha256=if($isTransitionAttribution){$guestState.UefiVarsImageSha256}else{$null};
+    writableUefiVarsImageLengthBytes=if($isTransitionAttribution){$guestState.UefiVarsImageLengthBytes}else{$null};
     nativeAllocationGuestAttempt=if($isNativeAllocationFailureAttribution){$NativeAllocationGuestAttempt}else{$null};
     threadStoreAttempt=if($isThreadStoreReadiness){$ThreadStoreAttempt}else{$null};attemptGuardPath=$attemptPath;
     guestBootLimit=1;automaticRetry=$false} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runRoot 'qac-run-arguments.json') -Encoding utf8
 
+if ($HostedPreflightOnly) {
+    if (-not $isTransitionAttribution) { throw '-HostedPreflightOnly is reserved for the explicit transition qualification profile.' }
+    $candidateIntegrityAfterCopy = Test-QacCandidateIntegrityInventory -CandidateRoot $candidate `
+        -InventoryPath $CandidateIntegrityInventory
+    if ($candidateIntegrityAfterCopy.CandidateManifestSha256 -cne $candidateManifestSha256 -or
+        $candidateIntegrityAfterCopy.InventorySha256 -cne $candidateIntegrityInventorySha256) {
+        throw 'Candidate integrity changed while preparing isolated guest state.'
+    }
+    $hostedPreflight = [ordered]@{
+        result='TRANSITION_PROFILE_HOSTED_PREFLIGHT_PASS';qualificationCorrelationId=$runCorrelationId
+        candidateRoot=$candidate;candidateManifestSha256=$candidateManifestSha256
+        candidateIntegrityInventory=$CandidateIntegrityInventory
+        candidateIntegrityInventorySha256=$candidateIntegrityInventorySha256
+        candidateIntegrityFileCount=$candidateIntegrityAfterCopy.FileCount
+        candidateEsp=$candidateEsp;isolatedGuestEsp=$esp;isolatedEspFileCount=$guestState.EspFileCount
+        sourceRamdiskSha256=$candidateManifest.sourceRamdiskSha256
+        isolatedRamdiskSha256=$guestState.IsolatedRamdiskSha256
+        qemuExecutable=$qemu;qemuExecutableSha256=$qemuSha256
+        qemuFirmwareCode=$ovmf;qemuFirmwareCodeSha256=$qemuCodeSha256
+        uefiVarsTemplate=$uefiVarsTemplate;uefiVarsTemplateSha256=$uefiVarsTemplateSha256
+        writableUefiVarsImage=$uefiVarsImage;writableUefiVarsImageSha256=$guestState.UefiVarsImageSha256
+        runRoot=$runRoot;serialLog=$serial;qmpLog=$qmpLog
+        qacQueried=$false;qacReserved=$false;qemuLaunched=$false;attemptGuardCreated=$false;guestBoots=0
+        qemuArguments=$qemuArgs
+    }
+    $hostedPreflightPath = Join-Path $runRoot 'hosted-preflight.json'
+    $hostedPreflight | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $hostedPreflightPath -Encoding utf8
+    Write-Output "C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT=PASS RUN_ROOT=$runRoot"
+    Write-Output "C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT_MANIFEST=$hostedPreflightPath"
+    exit 0
+}
+
+if ($isTransitionAttribution) {
+    $candidateIntegrityBeforeAdmission = Test-QacCandidateIntegrityInventory -CandidateRoot $candidate `
+        -InventoryPath $CandidateIntegrityInventory
+    if ($candidateIntegrityBeforeAdmission.CandidateManifestSha256 -cne $candidateManifestSha256 -or
+        $candidateIntegrityBeforeAdmission.InventorySha256 -cne $candidateIntegrityInventorySha256) {
+        throw 'Candidate or integrity inventory changed before QAC admission.'
+    }
+}
 $before = Get-QacSnapshot 'qac-before'
 $beforeWindowsCensus = Get-WindowsQemuProcessCensus 'qac-before'
 $beforeInspectionCapture = Get-QacReservationInspections $before 'qac-before'
@@ -776,6 +864,7 @@ $qemuStatusResponse = $null
 $runError = $null
 $serialText = ''
 $guestPass = $false
+$transitionTerminalSeen = $false
 $releaseVerified = $false
 $during = $null
 $duringInspection = $null
@@ -794,7 +883,12 @@ try {
 
     # This CreateNew marker permanently prevents a second QAC invocation for this candidate.
     $attemptedUtc = [DateTime]::UtcNow.ToString('o')
-    $attempt = [ordered]@{candidateRoot=$candidate;attemptedAtUtc=$attemptedUtc;threadStoreAttempt=if($isThreadStoreReadiness){$ThreadStoreAttempt}else{$null};
+    $attempt = [ordered]@{candidateRoot=$candidate;attemptedAtUtc=$attemptedUtc;qualificationCorrelationId=$runCorrelationId;
+        candidateEsp=if($isTransitionAttribution){$candidateEsp}else{$null};isolatedGuestEsp=if($isTransitionAttribution){$esp}else{$null};
+        qemuFirmwareCode=$ovmf;qemuFirmwareCodeSha256=$qemuCodeSha256;
+        uefiVarsTemplate=$uefiVarsTemplate;uefiVarsTemplateSha256=$uefiVarsTemplateSha256;
+        writableUefiVarsImage=$uefiVarsImage;writableUefiVarsImageSha256=if($isTransitionAttribution){$guestState.UefiVarsImageSha256}else{$null};
+        threadStoreAttempt=if($isThreadStoreReadiness){$ThreadStoreAttempt}else{$null};
         nativeAllocationGuestAttempt=if($isNativeAllocationFailureAttribution){$NativeAllocationGuestAttempt}else{$null};
         candidateProfile=$candidateManifest.mode;gcInitFailureAttributionProfile=$isGcInitFailureAttribution;
         runnerOwnerPid=$PID;runnerOwnerUser=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;
@@ -937,7 +1031,12 @@ try {
     $deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
     do {
         $serialText = Read-GuestSerial
-        if ($isSafeHandoff) {
+        if ($isTransitionAttribution) {
+            $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_TRANSITION\] ' -or
+                $serialText -match '(?m)^\[C188R12R4R5R2R3_FATAL\] ' -or
+                $serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
+            $guestPass = $transitionTerminalSeen
+        } elseif ($isSafeHandoff) {
             $guestPass = $serialText -match '(?m)^\[nativeaot-safe-handoff\] status=intentionally_stopped initialization=accepted moduleRegistration=accepted managedTransition=not_attempted managedEntry=not_reached runtimeError=none\s*$' -and
                 $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*overflow=00000000 serialDropped=00000000 adapterStatus=00000000\s*$' -and
                 $serialText -notmatch '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:module_initialize_enter|transition_enter|managed_dispatch|managed_entry)\s+' -and
@@ -975,7 +1074,12 @@ try {
     } while ((Get-Date) -lt $deadline)
     $serialText = Read-GuestSerial
 $safeHandoffTerminal = $false
-if ($isSafeHandoff) {
+if ($isTransitionAttribution) {
+    $transitionTerminalSeen = $serialText -match '(?m)^\[C188R12R4R5R2R3_TRANSITION\] ' -or
+        $serialText -match '(?m)^\[C188R12R4R5R2R3_FATAL\] ' -or
+        $serialText -match '(?m)^\[nativeaot-pal-qemu-test\] FAIL_FAST\b'
+    $guestPass = $transitionTerminalSeen
+} elseif ($isSafeHandoff) {
         $guestPass = $serialText -match '(?m)^\[nativeaot-safe-handoff\] status=intentionally_stopped initialization=accepted moduleRegistration=accepted managedTransition=not_attempted managedEntry=not_reached runtimeError=none\s*$' -and
             $serialText -match '(?m)^\[C188R12R4R5R1_INIT\] trace_end .*overflow=00000000 serialDropped=00000000 adapterStatus=00000000\s*$' -and
             $serialText -notmatch '(?m)^\[C188R12R4R5R4_THREAD\].*event=(?:module_initialize_enter|transition_enter|managed_dispatch|managed_entry)\s+' -and
@@ -1104,13 +1208,19 @@ if ($isSafeHandoff) {
 
 $serialText = Read-GuestSerial
 $serialAnalysisPath = Join-Path $runRoot 'serial-analysis.json'
-$serialAnalyzer = if ($isSafeHandoff) {
+$serialAnalyzer = if ($isTransitionAttribution) {
+    Join-Path $PSScriptRoot 'analyze-c188r12r4r5r2r3-transition-attribution.ps1'
+} elseif ($isSafeHandoff) {
     Join-Path $PSScriptRoot 'analyze-c188r12r4r5r2r2r4-safe-handoff.ps1'
 } elseif ($isThreadStoreReadiness) {
     Join-Path $PSScriptRoot 'analyze-c188r12r4r5r4-threadstore-readiness.ps1'
 } else { Join-Path $PSScriptRoot 'analyze-c188r12r4r5r1-init-serial.ps1' }
 $serialSha256BeforeAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
 $serialAnalysis = $null
+$transitionAttributionAnalysisPath = if ($isTransitionAttribution) { Join-Path $runRoot 'transition-attribution-analysis.json' } else { $null }
+$transitionAttributionAnalysis = $null
+$transitionAttributionAnalysisExitCode = $null
+$transitionAttributionAnalysisError = $null
 $threadStoreAnalysisPath = $null
 $threadStoreAnalysis = $null
 $threadStoreAnalysisExitCode = $null
@@ -1149,19 +1259,38 @@ if ($isNativeAllocationFailureAttribution -and (Test-Path -LiteralPath $serial -
 }
 if (Test-Path -LiteralPath $serial -PathType Leaf) {
     try {
-        $analysisArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serialAnalyzer,
-            '-SerialPath',$serial,'-OutputPath',$serialAnalysisPath)
-        if (-not $isThreadStoreReadiness -and -not $isSafeHandoff -and ($runError -match 'timeout|did not exit|not exit' -or
-            ($null -ne $qacProcess -and -not $qacProcess.HasExited))) { $analysisArgs += '-GuestTimedOut' }
-        & pwsh @analysisArgs | Out-Null
-        $serialAnalysisExitCode = $LASTEXITCODE
-        if ($serialAnalysisExitCode -eq 0 -and (Test-Path -LiteralPath $serialAnalysisPath -PathType Leaf)) {
-            $serialAnalysis = Get-Content -LiteralPath $serialAnalysisPath -Raw | ConvertFrom-Json
+        if ($isTransitionAttribution) {
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File $serialAnalyzer `
+                -SerialPath $serial -CallSiteMapPath ([string]$candidateManifest.transitionCallSiteMap) `
+                -OutputPath $transitionAttributionAnalysisPath | Out-Null
+            $transitionAttributionAnalysisExitCode = $LASTEXITCODE
+            if ($transitionAttributionAnalysisExitCode -eq 0 -and
+                (Test-Path -LiteralPath $transitionAttributionAnalysisPath -PathType Leaf)) {
+                $transitionAttributionAnalysis = Get-Content -LiteralPath $transitionAttributionAnalysisPath -Raw | ConvertFrom-Json
+            } else {
+                $transitionAttributionAnalysisError = "Transition analyzer exited $transitionAttributionAnalysisExitCode."
+            }
         } else {
-            $serialAnalysisError = "Analyzer exited $serialAnalysisExitCode."
+            $analysisArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serialAnalyzer,
+                '-SerialPath',$serial,'-OutputPath',$serialAnalysisPath)
+            if (-not $isThreadStoreReadiness -and -not $isSafeHandoff -and ($runError -match 'timeout|did not exit|not exit' -or
+                ($null -ne $qacProcess -and -not $qacProcess.HasExited))) { $analysisArgs += '-GuestTimedOut' }
+            & pwsh @analysisArgs | Out-Null
+            $serialAnalysisExitCode = $LASTEXITCODE
+            if ($serialAnalysisExitCode -eq 0 -and (Test-Path -LiteralPath $serialAnalysisPath -PathType Leaf)) {
+                $serialAnalysis = Get-Content -LiteralPath $serialAnalysisPath -Raw | ConvertFrom-Json
+            } else {
+                $serialAnalysisError = "Analyzer exited $serialAnalysisExitCode."
+            }
         }
-    } catch { $serialAnalysisError = $_.Exception.Message }
-} else { $serialAnalysisError = 'Raw serial file is missing.' }
+    } catch {
+        if ($isTransitionAttribution) { $transitionAttributionAnalysisError = $_.Exception.Message }
+        else { $serialAnalysisError = $_.Exception.Message }
+    }
+} else {
+    if ($isTransitionAttribution) { $transitionAttributionAnalysisError = 'Raw serial file is missing.' }
+    else { $serialAnalysisError = 'Raw serial file is missing.' }
+}
 if ($isGcInitFailureAttribution -and -not $isSafeHandoff -and (Test-Path -LiteralPath $serial -PathType Leaf)) {
     $threadStoreAnalysisPath = Join-Path $runRoot 'serial-threadstore-analysis.json'
     try {
@@ -1228,10 +1357,24 @@ if ($isNativeAllocationFailureAttribution -and (Test-Path -LiteralPath $serial -
 $serialSha256AfterAnalysis = if (Test-Path -LiteralPath $serial) { Get-Sha256 $serial } else { $null }
 $rawSerialPreservedByAnalysis = $null -ne $serialSha256BeforeAnalysis -and
     $serialSha256BeforeAnalysis -ceq $serialSha256AfterAnalysis
-$initCaptureComplete = if ($isSafeHandoff) {
-    $null -ne $serialAnalysis -and [bool]$serialAnalysis.diagnosticEvidenceComplete
+$transitionAttributionCaptureComplete = $false
+$transitionAttributionClassification = if ($null -ne $transitionAttributionAnalysis) { [string]$transitionAttributionAnalysis.classification } else { $null }
+if ($isTransitionAttribution) {
+    $recognizedTransitionClass = $transitionAttributionClassification -in @(
+        'TRANSITION_GATE_BLOCKED_SAFE_STOP','RUNTIME_FAIL_FAST_ATTRIBUTED',
+        'RUNTIME_FAIL_FAST_CALLSITE_UNRESOLVED','INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED')
+    $transitionAttributionCaptureComplete = $recognizedTransitionClass -and
+        [string]$transitionAttributionAnalysis.recordIntegrity -ceq '1' -and
+        [string]::IsNullOrWhiteSpace([string]$transitionAttributionAnalysis.parseError) -and
+        [bool]$transitionAttributionAnalysis.evidencePreserved -and
+        [string]$transitionAttributionAnalysis.callSiteMap.sha256 -ceq [string]$candidateManifest.transitionCallSiteMapSha256 -and
+        [bool]$rawSerialPreservedByAnalysis
+    $guestPass = $transitionAttributionCaptureComplete
+    $initCaptureComplete = $transitionAttributionCaptureComplete
+} elseif ($isSafeHandoff) {
+    $initCaptureComplete = $null -ne $serialAnalysis -and [bool]$serialAnalysis.diagnosticEvidenceComplete
 } else {
-    $null -ne $serialAnalysis -and -not $isThreadStoreReadiness -and [bool]$serialAnalysis.initTraceComplete
+    $initCaptureComplete = $null -ne $serialAnalysis -and -not $isThreadStoreReadiness -and [bool]$serialAnalysis.initTraceComplete
 }
 if ($isSafeHandoff) {
     $gcInternal = if ($null -ne $gcInitSourceAnalysis) { $gcInitSourceAnalysis.gcInitializationInternal } else { $null }
@@ -1312,6 +1455,28 @@ if ($isSafeHandoff) {
         ($threadStoreFailureOutcome -or $threadStoreHandoffAndProofCaptured)
     $initCaptureComplete = $guestPass
 }
+$candidateIntegrityAfterGuest = $null
+$candidateIntegrityPreservedAfterGuest = $null
+$candidateIntegrityPostRunError = $null
+$qemuFirmwareCodePreserved = $null
+$uefiVarsTemplatePreserved = $null
+$uefiVarsImageFinalSha256 = $null
+if ($isTransitionAttribution) {
+    try {
+        $candidateIntegrityAfterGuest = Test-QacCandidateIntegrityInventory -CandidateRoot $candidate `
+            -InventoryPath $CandidateIntegrityInventory
+        $candidateIntegrityPreservedAfterGuest =
+            $candidateIntegrityAfterGuest.CandidateManifestSha256 -ceq $candidateManifestSha256 -and
+            $candidateIntegrityAfterGuest.InventorySha256 -ceq $candidateIntegrityInventorySha256
+        if (-not $candidateIntegrityPreservedAfterGuest) { $candidateIntegrityPostRunError = 'Candidate identity or inventory changed during the guest run.' }
+    } catch {
+        $candidateIntegrityPreservedAfterGuest = $false
+        $candidateIntegrityPostRunError = $_.Exception.Message
+    }
+    $qemuFirmwareCodePreserved = (Get-Sha256 $ovmf) -ceq $qemuCodeSha256
+    $uefiVarsTemplatePreserved = (Get-Sha256 $uefiVarsTemplate) -ceq $uefiVarsTemplateSha256
+    if (Test-Path -LiteralPath $uefiVarsImage -PathType Leaf) { $uefiVarsImageFinalSha256 = Get-Sha256 $uefiVarsImage }
+}
 $sourceRamdiskSha256 = Get-Sha256 (Join-Path $repo 'ESP\ramdisk.img')
 $sourceRamdiskPreserved = $sourceRamdiskSha256 -ceq 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8'
 $markerLines = @($serialText -split "`r?`n" | Where-Object { $_ -match '^marker=C188R12R4R5-GC-OWNERSHIP ' })
@@ -1334,7 +1499,16 @@ $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GU
     elseif ($startupFailure) { 'EXPERIMENT_BLOCKED' }
     elseif ($admitted) { 'GC_ROOT_OR_COLLECTION_DEFECT_OR_GUEST_INCOMPLETE' }
     else { 'EXPERIMENT_READY_BUT_GUEST_NOT_ADMITTED' }
-if ($isSafeHandoff) {
+if ($isTransitionAttribution) {
+    $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
+        elseif (-not $preflightPassed -or -not $admitted) { 'TRANSITION_DEFERRED_QAC_BUSY' }
+        elseif (-not $releaseVerified -or $qacExitCode -ne 0) { 'TRANSITION_NATIVE_GUEST_CLEANUP_UNVERIFIED' }
+        elseif (-not $candidateIntegrityPreservedAfterGuest -or -not $qemuFirmwareCodePreserved -or -not $uefiVarsTemplatePreserved) { 'TRANSITION_CANDIDATE_OR_BASELINE_MUTATED' }
+        elseif (-not $transitionAttributionCaptureComplete) { 'TRANSITION_ATTRIBUTION_INCOMPLETE' }
+        elseif ($transitionAttributionClassification -eq 'INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED') { 'TRANSITION_NATIVE_GUEST_QUALIFIED' }
+        elseif ($transitionAttributionClassification -in @('RUNTIME_FAIL_FAST_ATTRIBUTED','RUNTIME_FAIL_FAST_CALLSITE_UNRESOLVED','TRANSITION_GATE_BLOCKED_SAFE_STOP')) { 'TRANSITION_NATIVE_FAILURE_BOUNDARY_PROVEN' }
+        else { 'TRANSITION_ATTRIBUTION_INCOMPLETE' }
+} elseif ($isSafeHandoff) {
     $safeAnalyzerResult = if ($null -ne $serialAnalysis) { [string]$serialAnalysis.result } else { '' }
     $outcome = if (-not $sourceRamdiskPreserved) { 'SOURCE_RAMDISK_CHANGED_DURING_GUEST' }
         elseif (-not $preflightPassed) { 'SAFE_HANDOFF_BLOCKED_QAC_CENSUS' }
@@ -1412,13 +1586,40 @@ if ($isSafeHandoff) {
         elseif ($gcFirstFailureSite -eq 4 -and $gcHeapResult -ne '0x00000000') { 'GC_INIT_FAILURE_LOCALIZED' }
         else { 'DIAGNOSTIC_INCONCLUSIVE' }
 }
+$transitionRecordManifest = $null
+$transitionStateManifest = $null
+$transitionCallSiteManifest = $null
+$transitionFailFastManifest = $null
+if ($null -ne $transitionAttributionAnalysis) {
+    $transitionRecordManifest = $transitionAttributionAnalysis.transitionRecord
+    $transitionStateManifest = $transitionAttributionAnalysis.threadAndRuntimeState
+    $transitionCallSiteManifest = $transitionAttributionAnalysis.callSite
+    $transitionFailFastManifest = $transitionAttributionAnalysis.failFast
+}
 $manifest = [ordered]@{
     result=$outcome;runRoot=$runRoot;candidateRoot=$candidate;candidateManifest=$candidateManifestPath
     candidateManifestSha256=$candidateManifestSha256
     candidateIntegrityInventory=$CandidateIntegrityInventory
     candidateIntegrityInventorySha256=$candidateIntegrityInventorySha256
+    candidateIntegrityFileCount=if($isTransitionAttribution -and $null -ne $candidateIntegrityAfterGuest){$candidateIntegrityAfterGuest.FileCount}else{$null}
+    candidateIntegrityPreservedAfterGuest=$candidateIntegrityPreservedAfterGuest
+    candidateIntegrityPostRunError=$candidateIntegrityPostRunError
     runnerScript=$PSCommandPath;runnerScriptSha256=$runnerScriptSha256
     qemuExecutable=$qemu;qemuExecutableSha256=$qemuSha256
+    qualificationCorrelationId=$runCorrelationId
+    transitionProfileSelected=$isTransitionAttribution
+    candidateEsp=$candidateEsp
+    isolatedGuestEsp=if($isTransitionAttribution){$esp}else{$null}
+    isolatedEspFileCount=if($isTransitionAttribution){$guestState.EspFileCount}else{$null}
+    isolatedRamdiskSha256=if($isTransitionAttribution){$guestState.IsolatedRamdiskSha256}else{$null}
+    qemuFirmwareCode=$ovmf;qemuFirmwareCodeSha256=$qemuCodeSha256;qemuFirmwareCodePreserved=$qemuFirmwareCodePreserved
+    uefiVarsTemplate=$uefiVarsTemplate;uefiVarsTemplateSha256=$uefiVarsTemplateSha256
+    uefiVarsTemplatePreserved=$uefiVarsTemplatePreserved
+    writableUefiVarsImage=$uefiVarsImage
+    writableUefiVarsImageInitialSha256=if($isTransitionAttribution){$guestState.UefiVarsImageSha256}else{$null}
+    writableUefiVarsImageFinalSha256=$uefiVarsImageFinalSha256
+    writableUefiVarsImageLengthBytes=if($isTransitionAttribution){$guestState.UefiVarsImageLengthBytes}else{$null}
+    uefiVarsTemplateProvenance='C:\Program Files\qemu\share\edk2-i386-vars.fd; copied to a unique run-owned writable pflash image.'
     candidatePeSha256=[string]$candidateManifest.managedPeSha256
     candidateElfSha256=[string]$candidateManifest.managedElfSha256
     candidateKernelSha256=[string]$candidateManifest.specializedKernelSha256
@@ -1439,6 +1640,34 @@ $manifest = [ordered]@{
     qacOwnershipIdentityPath=$qacOwnershipIdentityPath
     qacOwnershipIdentity=$qacOwnershipIdentity
     initAttributionProfile=$isInitAttribution;initCaptureComplete=$initCaptureComplete
+    transitionAttributionProfile=$isTransitionAttribution
+    transitionAttributionAnalysis=$transitionAttributionAnalysisPath
+    transitionAttributionAnalysisExitCode=$transitionAttributionAnalysisExitCode
+    transitionAttributionAnalysisError=$transitionAttributionAnalysisError
+    transitionAttributionAnalysisResult=$transitionAttributionClassification
+    transitionAttributionCaptureComplete=$transitionAttributionCaptureComplete
+    transitionTerminalSeen=$transitionTerminalSeen
+    transitionRecord=$transitionRecordManifest
+    transitionThreadAndRuntimeState=$transitionStateManifest
+    transitionCallSite=$transitionCallSiteManifest
+    transitionFailFast=$transitionFailFastManifest
+    transitionNativeBootObserved=($admitted -and $null -ne $qemuStatus -and [bool]$qemuStatus.Valid -and
+        ($serialText -match '(?m)^\[C188R12R4R5R1_INIT\] |^\[C188R12R4R5R2R3_'))
+    transitionRuntimeStartupObserved=($serialText -match '(?m)^\[C188R12R4R5R1_INIT\] .*stage=(?:adapter|rhInitialize|palInit)|^\[C188R12R4R5R1_INIT\] trace_start|^\[C188R12R4R5R4_THREAD\].*event=(?:adapter_enter|rhinitialize_return)\b')
+    transitionThreadStoreObserved=($serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=threadstore\b' -or
+        ($null -ne $transitionStateManifest -and [string]$transitionStateManifest.threadStore -notin @('','0','00000000')))
+    transitionThreadAttachmentObserved=($serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=transition_attach_(?:complete|incomplete)\b' -or
+        ($null -ne $transitionStateManifest -and [string]$transitionStateManifest.attachment -notin @('','0','00000000')))
+    transitionInitializeModulesEntryObserved=($serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=module_initialize_enter\b' -or
+        ($null -ne $transitionRecordManifest -and [string]$transitionRecordManifest.attempted -notin @('','0','00000000')))
+    transitionInitializeModulesCompletionObserved=($serialText -match '(?m)^\[C188R12R4R5R4_THREAD\].*event=module_initialize_complete\b' -or
+        ($null -ne $transitionRecordManifest -and [string]$transitionRecordManifest.completed -notin @('','0','00000000')))
+    settingsFactoryEntryObserved=($serialText -match '(?m)C188R12R4_FACTORY .*stage=factory-invoke|C188R12R3_LIFETIME .*stage=factory-enter')
+    settingsFactoryCompletionObserved=($serialText -match '(?m)C188R12R4_FACTORY .*stage=factory-return|C188R12R3_LIFETIME .*stage=exit-success')
+    persistentCompositeLifecycleObserved=($serialText -match '(?m)C188R12R3_LIFETIME .*stage=exit-success')
+    transitionLastProgress=([string[]]@($serialText -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) | Select-Object -Last 1)
+    transitionOneBootGuardCreated=(Test-Path -LiteralPath $attemptPath -PathType Leaf)
+    transitionGuestBootCount=if(Test-Path -LiteralPath $attemptPath -PathType Leaf){1}else{0}
     initReturnContractProfile=$isInitReturnContract
     threadStoreReadinessProfile=$isThreadStoreReadiness
     gcInitFailureAttributionProfile=$isGcInitFailureAttribution
@@ -1523,7 +1752,10 @@ $manifest = [ordered]@{
     qacArguments=(Join-Path $runRoot 'qac-run-arguments.json');guestAttempt=$attemptPath;error=$runError
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-if ($isSafeHandoff) {
+if ($isTransitionAttribution) {
+    Write-Output "C188R12R4R5R2R3_TRANSITION=$outcome ADMITTED=$admitted CAPTURE_COMPLETE=$transitionAttributionCaptureComplete CLASSIFICATION=$transitionAttributionClassification QAC_RELEASE=$releaseVerified"
+    Write-Output "C188R12R4R5R2R3_TRANSITION_MANIFEST=$manifestPath"
+} elseif ($isSafeHandoff) {
     Write-Output "C188R12R4R5R4R5R2R2R4R2R1_SAFE_HANDOFF=$outcome ADMITTED=$admitted EVIDENCE_COMPLETE=$initCaptureComplete QAC_RELEASE=$releaseVerified"
     Write-Output "C188R12R4R5R4R5R2R2R4R2R1_SAFE_HANDOFF_MANIFEST=$manifestPath"
 } elseif ($isNativeAllocationFailureAttribution) {

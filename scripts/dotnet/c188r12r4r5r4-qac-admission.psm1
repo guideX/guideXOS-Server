@@ -308,6 +308,395 @@ function Test-QacLocalQemuChildIdentity {
     return $true
 }
 
+function Assert-QacTransitionCondition {
+    param([bool]$Condition,[string]$Message)
+    if (-not $Condition) { throw $Message }
+}
+
+function Get-QacTransitionTreeInventory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$Root)
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction Stop
+    if (-not $rootItem.PSIsContainer -or
+        ($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Candidate root is missing or is a reparse point: $rootFull"
+    }
+    $files = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in @(Get-ChildItem -LiteralPath $rootFull -Force -Recurse -ErrorAction Stop)) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Candidate tree contains a reparse point: $($item.FullName)"
+        }
+        if ($item.PSIsContainer) { continue }
+        $relative = [System.IO.Path]::GetRelativePath($rootFull,$item.FullName).Replace('\','/')
+        $files.Add([pscustomobject]@{Path=$relative;FullName=$item.FullName;Length=[int64]$item.Length})
+    }
+    return @($files.ToArray())
+}
+
+function Test-QacCandidateIntegrityInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$CandidateRoot,
+        [Parameter(Mandatory=$true)][string]$InventoryPath
+    )
+
+    $candidateFull = [System.IO.Path]::GetFullPath($CandidateRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $inventoryFull = [System.IO.Path]::GetFullPath($InventoryPath)
+    $requiredInventory = [System.IO.Path]::GetFullPath((Join-Path $candidateFull 'candidate-integrity-inventory.json'))
+    if (-not [string]::Equals($inventoryFull,$requiredInventory,[System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Transition admission accepts only the integrity inventory stored at the candidate root.'
+    }
+    if (-not (Test-Path -LiteralPath $inventoryFull -PathType Leaf)) {
+        throw "Candidate integrity inventory is missing: $inventoryFull"
+    }
+    $inventoryItem = Get-Item -LiteralPath $inventoryFull -Force -ErrorAction Stop
+    if (($inventoryItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Candidate integrity inventory cannot be a reparse point.'
+    }
+    $manifestPath = Join-Path $candidateFull 'candidate-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Candidate manifest is missing: $manifestPath"
+    }
+    $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $inventory = Get-Content -LiteralPath $inventoryFull -Raw | ConvertFrom-Json -ErrorAction Stop
+    Assert-QacTransitionCondition ([string]$inventory.schema -ceq 'C188R12R4R5R1_CANDIDATE_INTEGRITY_INVENTORY_V1') `
+        'Candidate integrity inventory schema is missing or unsupported.'
+    Assert-QacTransitionCondition ([string]$inventory.candidateRoot -ceq $candidateFull) `
+        'Candidate integrity inventory is bound to a different candidate root.'
+    Assert-QacTransitionCondition ([string]$inventory.candidateManifest -ceq 'candidate-manifest.json') `
+        'Candidate integrity inventory does not identify candidate-manifest.json.'
+    Assert-QacTransitionCondition ([string]$inventory.candidateManifestSha256 -ceq $manifestHash) `
+        'Candidate manifest hash does not match the integrity inventory.'
+
+    $entries = @($inventory.files)
+    Assert-QacTransitionCondition ($entries.Count -gt 0 -and [int]$inventory.fileCount -eq $entries.Count) `
+        'Candidate integrity inventory file count is missing or inconsistent.'
+    $entryByPath = [System.Collections.Generic.Dictionary[string,object]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $rootPrefix = $candidateFull + [System.IO.Path]::DirectorySeparatorChar
+    foreach ($entry in $entries) {
+        $relative = [string]$entry.path
+        Assert-QacTransitionCondition (-not [string]::IsNullOrWhiteSpace($relative) -and
+            -not [System.IO.Path]::IsPathRooted($relative) -and $relative -notmatch '(^|[\\/])\.\.([\\/]|$)') `
+            "Candidate inventory contains an unsafe relative path: $relative"
+        $relativeNative = $relative.Replace('/',[System.IO.Path]::DirectorySeparatorChar).Replace('\',[System.IO.Path]::DirectorySeparatorChar)
+        $full = [System.IO.Path]::GetFullPath((Join-Path $candidateFull $relativeNative))
+        Assert-QacTransitionCondition ($full.StartsWith($rootPrefix,[System.StringComparison]::OrdinalIgnoreCase)) `
+            "Candidate inventory path escapes the candidate root: $relative"
+        Assert-QacTransitionCondition (-not $entryByPath.ContainsKey($relative)) `
+            "Candidate inventory contains a duplicate path: $relative"
+        $entryByPath.Add($relative,$entry)
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
+            throw "Candidate inventory file is missing: $relative"
+        }
+        $item = Get-Item -LiteralPath $full -Force -ErrorAction Stop
+        Assert-QacTransitionCondition (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) `
+            "Candidate inventory file is a reparse point: $relative"
+        Assert-QacTransitionCondition ([int64]$item.Length -eq [int64]$entry.sizeBytes) `
+            "Candidate inventory size mismatch: $relative"
+        $actualHash = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToUpperInvariant()
+        Assert-QacTransitionCondition ($actualHash -ceq ([string]$entry.sha256).ToUpperInvariant()) `
+            "Candidate integrity mismatch: $relative"
+    }
+
+    $actualFiles = @(Get-QacTransitionTreeInventory -Root $candidateFull | Where-Object {
+        -not [string]::Equals($_.Path,'candidate-integrity-inventory.json',[System.StringComparison]::OrdinalIgnoreCase)
+    })
+    Assert-QacTransitionCondition ($actualFiles.Count -eq $entries.Count) `
+        'Candidate contains unlisted payload files or its integrity inventory is incomplete.'
+    foreach ($actual in $actualFiles) {
+        Assert-QacTransitionCondition ($entryByPath.ContainsKey([string]$actual.Path)) `
+            "Candidate contains an unlisted payload file: $($actual.Path)"
+    }
+    Assert-QacTransitionCondition ($entryByPath.ContainsKey('candidate-manifest.json')) `
+        'Candidate inventory does not cover candidate-manifest.json.'
+    return [pscustomobject]@{
+        Result='PASS';CandidateRoot=$candidateFull;InventoryPath=$inventoryFull
+        CandidateManifestSha256=$manifestHash
+        InventorySha256=(Get-FileHash -LiteralPath $inventoryFull -Algorithm SHA256).Hash.ToUpperInvariant()
+        FileCount=$entries.Count;UnlistedPayloadFileCount=0;MismatchCount=0
+    }
+}
+
+function Test-QacTransitionGuestArtifacts {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$Esp,
+        [Parameter(Mandatory=$true)][string]$KernelSha256,
+        [Parameter(Mandatory=$true)][string]$RamdiskSha256,
+        [Parameter(Mandatory=$true)][string]$BootloaderSha256
+    )
+    $required = @(
+        @((Join-Path $Esp 'kernel.elf'),$KernelSha256,'staged kernel'),
+        @((Join-Path $Esp 'ramdisk.img'),$RamdiskSha256,'staged ramdisk'),
+        @((Join-Path $Esp 'EFI\BOOT\BOOTX64.EFI'),$BootloaderSha256,'staged EFI bootloader')
+    )
+    foreach ($item in $required) {
+        if (-not (Test-Path -LiteralPath $item[0] -PathType Leaf)) {
+            throw "Required transition guest artifact is missing: $($item[2]) ($($item[0]))"
+        }
+        $actual = (Get-FileHash -LiteralPath $item[0] -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($actual -cne ([string]$item[1]).ToUpperInvariant()) {
+            throw "Required transition guest artifact hash mismatch: $($item[2])"
+        }
+    }
+    return [pscustomobject]@{Result='PASS';RequiredArtifactCount=$required.Count}
+}
+
+function Test-QacTransitionCandidateProfile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$CandidateRoot,
+        [Parameter(Mandatory=$true)][string]$PhaseRoot,
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [string]$InventoryPath = ''
+    )
+
+    $candidateFull = [System.IO.Path]::GetFullPath($CandidateRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $phaseFull = [System.IO.Path]::GetFullPath($PhaseRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $repoFull = [System.IO.Path]::GetFullPath($RepoRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    if (-not (Test-QacCandidatePath -CandidateRoot $candidateFull -PhaseRoot $phaseFull -RequireExisting)) {
+        throw "CandidateRoot must be a unique, canonical candidate below $phaseFull."
+    }
+    $manifestPath = Join-Path $candidateFull 'candidate-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Qualified transition candidate manifest is missing: $manifestPath"
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $expectedIdentity = 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-transition-attribution-v1'
+    if ([string]$manifest.mode -cne 'NativeAotInitializeModulesTransitionAttribution' -or
+        [string]$manifest.result -cne 'TRANSITION_ATTRIBUTION_HOSTED_READY' -or
+        [string]$manifest.candidateRoot -cne $candidateFull -or
+        [string]$manifest.runtimePackIdentity -cne $expectedIdentity -or
+        [string]$manifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
+        [bool]$manifest.qemuLaunched -or [bool]$manifest.qacReserved -or
+        -not [bool]$manifest.c188R12R4R5R2R2R4SafeHandoff -or
+        [string]$manifest.c188R12R4R5R2R2R4SafeHandoffMarker -cne 'C188R12R4R5R2R2R4_SAFE_HANDOFF' -or
+        [string]$manifest.c188R12R4R5R2R2R4SafeHandoffTransition -cne 'disabled before RhpReversePInvoke and InitializeModules' -or
+        -not [bool]$manifest.c188R12R4R5R2R3InitializeModulesAttribution -or
+        [string]$manifest.c188R12R4R5R2R3InitializeModulesAttributionMarker -cne 'C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' -or
+        [string]$manifest.nextGuestPhase -cne 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' -or
+        [bool]$manifest.managedMainEnteredByCandidate -or [int]$manifest.managedGraphCallbacks -ne 0 -or
+        -not [bool]$manifest.productionNativeAotPersistentCompositeLifecycle -or
+        -not [bool]$manifest.productionIsolationChecks.diagnosticAndProductionOutputsSeparate -or
+        -not [bool]$manifest.productionIsolationChecks.diagnosticInstrumentationAbsentFromProduction -or
+        -not [bool]$manifest.productionIsolationChecks.productionPersistentCompositeLifecycle -or
+        [bool]$manifest.productionIsolationChecks.productionRuntimePackSafeHandoffProfile -or
+        [bool]$manifest.productionIsolationChecks.productionRuntimePackTransitionAttributionProfile -or
+        -not [bool]$manifest.productionIsolationChecks.productionMapExcludesSafeHandoff -or
+        -not [bool]$manifest.productionIsolationChecks.productionMapExcludesTransitionAttribution -or
+        -not [bool]$manifest.productionIsolationChecks.noGcOwnershipProofProfileInProduction) {
+        throw 'Candidate manifest is not a consistent, unexecuted C188 transition-attribution profile.'
+    }
+    $contract = $manifest.transitionAttributionContract
+    if ([string]$contract.recordSchema -cne 'fixed-size C188R12R4R5R2R3_FATAL plus C188R12R4R5R2R3_STATE' -or
+        [string]$contract.failFastReason -notmatch '0x50414C06' -or
+        [string]$contract.transitionEntry -notmatch 'generated InitializeModules' -or
+        [bool]$contract.managedEntryReached -or [bool]$contract.collectionRequested) {
+        throw 'Transition attribution contract does not match the candidate transition boundary.'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($InventoryPath)) {
+        $InventoryPath = Join-Path $candidateFull 'candidate-integrity-inventory.json'
+    }
+    $inventoryResult = Test-QacCandidateIntegrityInventory -CandidateRoot $candidateFull -InventoryPath $InventoryPath
+    if ($inventoryResult.CandidateManifestSha256 -cne $manifestHash) {
+        throw 'Candidate manifest changed during profile validation.'
+    }
+
+    $rootPrefix = $candidateFull + [System.IO.Path]::DirectorySeparatorChar
+    $RequireContainedFile = {
+        param([string]$Path,[string]$Name,[bool]$Container=$false)
+        if ([string]::IsNullOrWhiteSpace($Path)) { throw "$Name path is missing from candidate metadata." }
+        $full = [System.IO.Path]::GetFullPath($Path)
+        $pathType = if ($Container) { 'Container' } else { 'Leaf' }
+        if (-not $full.StartsWith($rootPrefix,[System.StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $full -PathType $pathType)) { throw "$Name is missing or outside the candidate root: $full" }
+        return $full
+    }
+    $RequireHash = {
+        param([string]$Path,[string]$Expected,[string]$Name)
+        $full = [System.IO.Path]::GetFullPath($Path)
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "$Name is missing: $full" }
+        $actual = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($actual -cne ([string]$Expected).ToUpperInvariant()) { throw "$Name hash mismatch." }
+    }
+
+    $esp = & $RequireContainedFile ([string]$manifest.esp) 'Staged candidate ESP' $true
+    $managedPe = & $RequireContainedFile ([string]$manifest.managedPe) 'Diagnostic NativeAOT PE'
+    $managedElf = & $RequireContainedFile ([string]$manifest.managedElf) 'Diagnostic NativeAOT ELF'
+    $runtimePackManifest = & $RequireContainedFile ([string]$manifest.runtimePackManifest) 'Diagnostic runtime-pack manifest'
+    $callSiteMap = & $RequireContainedFile ([string]$manifest.transitionCallSiteMap) 'Transition call-site map'
+    $prerequisiteMatrix = & $RequireContainedFile ([string]$manifest.transitionPrerequisiteMatrix) 'Transition prerequisite matrix'
+    $phasePlanPath = & $RequireContainedFile ([string]$manifest.transitionGuestPhasePlan) 'Transition guest phase plan'
+    $guardTemplatePath = & $RequireContainedFile ([string]$manifest.transitionOneBootGuardTemplate) 'Transition one-boot guard template'
+    $hostedResultsPath = & $RequireContainedFile ([string]$manifest.transitionAttributionHostedTestResults) 'Transition hosted-test results'
+    $kernel = [System.IO.Path]::GetFullPath([string]$manifest.specializedKernel)
+    $sourceRamdisk = [System.IO.Path]::GetFullPath((Join-Path $repoFull 'ESP\ramdisk.img'))
+    $managedMap = [System.IO.Path]::ChangeExtension($managedPe,'.map')
+    $productionNativeManifest = [System.IO.Path]::GetFullPath([string]$manifest.productionNativeAotManifest)
+    $productionKernelManifest = [System.IO.Path]::GetFullPath([string]$manifest.productionKernelManifest)
+    $artifactHashes = $manifest.artifactHashes
+    $hashTargets = @(
+        @($managedPe,[string]$manifest.managedPeSha256,'Diagnostic NativeAOT PE'),
+        @($managedMap,[string]$manifest.managedMapSha256,'Diagnostic NativeAOT map'),
+        @($managedElf,[string]$manifest.managedElfSha256,'Diagnostic NativeAOT ELF'),
+        @($kernel,[string]$manifest.specializedKernelSha256,'Specialized diagnostic kernel'),
+        @($runtimePackManifest,[string]$manifest.runtimePackManifestSha256,'Runtime-pack manifest'),
+        @($callSiteMap,[string]$manifest.transitionCallSiteMapSha256,'Transition call-site map'),
+        @($prerequisiteMatrix,[string]$artifactHashes.transitionPrerequisiteMatrix,'Transition prerequisite matrix'),
+        @($phasePlanPath,[string]$artifactHashes.transitionGuestPhasePlan,'Transition guest phase plan'),
+        @($guardTemplatePath,[string]$artifactHashes.transitionGuestGuardTemplate,'Transition guard template'),
+        @($hostedResultsPath,[string]$artifactHashes.transitionHostedTestResults,'Transition hosted-test result'),
+        @(([System.IO.Path]::GetFullPath((Join-Path $repoFull 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1'))),[string]$artifactHashes.transitionAnalyzer,'Transition analyzer'),
+        @($sourceRamdisk,[string]$manifest.sourceRamdiskSha256,'Protected source ramdisk'),
+        @($productionNativeManifest,[string]$artifactHashes.productionNativeAotQualification,'Production NativeAOT qualification'),
+        @($productionKernelManifest,[string]$artifactHashes.productionKernelQualification,'Production kernel qualification')
+    )
+    foreach ($target in $hashTargets) { & $RequireHash $target[0] $target[1] $target[2] }
+    if ([string]$manifest.specializedKernelSha256 -cne [string]$manifest.espKernelSha256 -or
+        [string]$manifest.sourceRamdiskSha256 -cne 'AABE4E849B4FB7E4C47E0CA0D573C753879DB8612449DA39E848964E7A726FD8' -or
+        [string]$manifest.candidateRamdiskSha256 -cne [string]$manifest.sourceRamdiskSha256) {
+        throw 'Diagnostic guest media does not match the candidate and protected source identities.'
+    }
+    $guestArtifactResult = Test-QacTransitionGuestArtifacts -Esp $esp `
+        -KernelSha256 ([string]$manifest.espKernelSha256) `
+        -RamdiskSha256 ([string]$manifest.candidateRamdiskSha256) `
+        -BootloaderSha256 ([string]$artifactHashes.stagedEspBootloader)
+
+    $runtime = Get-Content -LiteralPath $runtimePackManifest -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ([string]$runtime.identity -cne $expectedIdentity -or
+        [string]$runtime.runtimeIdentity.sourceCommit -cne [string]$manifest.runtimePackSourceCommit) {
+        throw 'Runtime-pack manifest does not match the pinned transition candidate identity.'
+    }
+    $hosted = Get-Content -LiteralPath $hostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ([string]$hosted.result -cne 'PASS' -or [int]$hosted.assertionCount -lt 20 -or
+        [bool]$hosted.qemuLaunched -or [bool]$hosted.qacReserved) {
+        throw 'Transition candidate hosted evidence is missing, incomplete, or crossed the native-guest boundary.'
+    }
+    $plan = Get-Content -LiteralPath $phasePlanPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ([string]$plan.schema -cne 'C188R12R4R5R2R3R1_GUEST_PHASE_PLAN_V1' -or
+        [string]$plan.status -cne 'prepared_not_executed' -or
+        [string]$plan.candidateManifest -cne $manifestPath -or
+        [string]$plan.candidateMode -cne [string]$manifest.mode -or
+        [string]$plan.admission.qacProject -cne 'guideXOSServer' -or
+        [string]$plan.admission.qacMode -cne 'acceptance' -or
+        [string]$plan.admission.qacReservation -cne 'not_requested' -or
+        -not [bool]$plan.admission.noAdmissionNoGuard -or
+        [bool]$plan.oneBootGuard.materialized -or [int]$plan.oneBootGuard.maxGuestBoots -ne 1 -or
+        [bool]$plan.oneBootGuard.automaticRetry -or
+        -not [bool]$plan.oneBootGuard.bindsCandidateManifestSha256 -or
+        -not [bool]$plan.oneBootGuard.bindsDiagnosticElfKernelAndRamdiskSha256 -or
+        [bool]$plan.executionNotPerformed.qemuLaunched -or [bool]$plan.executionNotPerformed.qacReserved -or
+        [bool]$plan.executionNotPerformed.guardCreated -or [int]$plan.executionNotPerformed.guestBoots -ne 0) {
+        throw 'Prepared transition guest plan is malformed, already consumed, or allows more than one boot.'
+    }
+    $template = Get-Content -LiteralPath $guardTemplatePath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ([string]$template.schema -cne 'C188R12R4R5R2R3R1_ONE_BOOT_GUARD_TEMPLATE_V1' -or
+        [string]$template.candidateManifest -cne $manifestPath -or
+        [string]$template.diagnosticElfSha256 -cne [string]$manifest.managedElfSha256 -or
+        [string]$template.diagnosticKernelSha256 -cne [string]$manifest.specializedKernelSha256 -or
+        [string]$template.ramdiskSha256 -cne [string]$manifest.candidateRamdiskSha256 -or
+        [string]$template.qacProject -cne 'guideXOSServer' -or [string]$template.qacMode -cne 'acceptance' -or
+        [int]$template.maxGuestBoots -ne 1 -or [bool]$template.automaticRetry -or [bool]$template.consumed) {
+        throw 'Transition one-boot guard template does not bind this candidate or violates the one-boot contract.'
+    }
+    $callMap = Get-Content -LiteralPath $callSiteMap -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ([string]$callMap.lockedRuntimeCommit -cne [string]$manifest.runtimePackSourceCommit -or
+        @($callMap.sites).Count -lt 1) { throw 'Transition call-site map is malformed or targets another runtime commit.' }
+    $matrix = Get-Content -LiteralPath $prerequisiteMatrix -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ([string]$matrix.schema -cne 'C188R12R4R5R2R3_TRANSITION_PREREQUISITE_MATRIX_V1' -or
+        [string]$matrix.candidateMode -cne [string]$manifest.mode -or
+        -not [bool]$matrix.safetyGate.noManagedDispatch -or -not [bool]$matrix.safetyGate.noCollection) {
+        throw 'Transition prerequisite matrix does not preserve the diagnostic safety gate.'
+    }
+    return [pscustomobject]@{
+        CandidateRoot=$candidateFull;PhaseRoot=$phaseFull;ManifestPath=$manifestPath
+        Manifest=$manifest;ManifestSha256=$manifestHash;InventoryPath=[System.IO.Path]::GetFullPath($InventoryPath)
+        InventoryResult=$inventoryResult;GuestArtifactResult=$guestArtifactResult
+        Esp=$esp;ManagedElf=$managedElf;Kernel=$kernel
+        RuntimePackManifest=$runtimePackManifest;CallSiteMap=$callSiteMap;PrerequisiteMatrix=$prerequisiteMatrix
+        PhasePlanPath=$phasePlanPath;GuardTemplatePath=$guardTemplatePath
+        SourceRamdisk=$sourceRamdisk;HostedEvidence=$hosted
+    }
+}
+
+function New-QacTransitionGuestState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$CandidateEsp,
+        [Parameter(Mandatory=$true)][string]$CandidateRoot,
+        [Parameter(Mandatory=$true)][string]$PhaseRoot,
+        [Parameter(Mandatory=$true)][string]$RunRoot,
+        [Parameter(Mandatory=$true)][string]$UefiVarsTemplate
+    )
+    $candidateFull = [System.IO.Path]::GetFullPath($CandidateRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $phaseFull = [System.IO.Path]::GetFullPath($PhaseRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $runFull = [System.IO.Path]::GetFullPath($RunRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $candidatePrefix = $candidateFull + [System.IO.Path]::DirectorySeparatorChar
+    $phasePrefix = $phaseFull + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $runFull.StartsWith($phasePrefix,[System.StringComparison]::OrdinalIgnoreCase) -or
+        $runFull.StartsWith($candidatePrefix,[System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Transition writable guest state must be a fresh run-owned directory outside the immutable candidate.'
+    }
+    if (Test-Path -LiteralPath $runFull) { throw "Refusing to reuse guest state from another run: $runFull" }
+    $sourceEspFull = [System.IO.Path]::GetFullPath($CandidateEsp)
+    if (-not (Test-Path -LiteralPath $sourceEspFull -PathType Container)) {
+        throw "Transition candidate ESP is missing: $sourceEspFull"
+    }
+    $varsFull = [System.IO.Path]::GetFullPath($UefiVarsTemplate)
+    if (-not (Test-Path -LiteralPath $varsFull -PathType Leaf)) {
+        throw "Writable UEFI variables template is missing: $varsFull"
+    }
+    $varsItem = Get-Item -LiteralPath $varsFull -Force -ErrorAction Stop
+    if (($varsItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Writable UEFI variables template cannot be a reparse point.'
+    }
+    $varsSourceHash = (Get-FileHash -LiteralPath $varsFull -Algorithm SHA256).Hash.ToUpperInvariant()
+    $sourceTree = @(Get-QacTransitionTreeInventory -Root $sourceEspFull | Sort-Object Path)
+    if ($sourceTree.Count -eq 0) { throw 'Transition candidate ESP is empty.' }
+    New-Item -ItemType Directory -Path $runFull -ErrorAction Stop | Out-Null
+    $isolatedEsp = Join-Path $runFull 'esp'
+    New-Item -ItemType Directory -Path $isolatedEsp -ErrorAction Stop | Out-Null
+    foreach ($item in @(Get-ChildItem -LiteralPath $sourceEspFull -Force -ErrorAction Stop)) {
+        Copy-Item -LiteralPath $item.FullName -Destination $isolatedEsp -Recurse -Force -ErrorAction Stop
+    }
+    $isolatedTree = @(Get-QacTransitionTreeInventory -Root $isolatedEsp | Sort-Object Path)
+    if ($isolatedTree.Count -ne $sourceTree.Count) { throw 'Isolated transition ESP file count does not match the candidate.' }
+    for ($index=0; $index -lt $sourceTree.Count; $index++) {
+        if ([string]$sourceTree[$index].Path -cne [string]$isolatedTree[$index].Path -or
+            [int64]$sourceTree[$index].Length -ne [int64]$isolatedTree[$index].Length) {
+            throw 'Isolated transition ESP layout differs from the immutable candidate.'
+        }
+        $sourceHash = (Get-FileHash -LiteralPath $sourceTree[$index].FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+        $isolatedHash = (Get-FileHash -LiteralPath $isolatedTree[$index].FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($sourceHash -cne $isolatedHash) { throw "Isolated transition ESP hash mismatch: $($sourceTree[$index].Path)" }
+    }
+    $varsCopy = Join-Path $runFull 'uefi-vars.fd'
+    Copy-Item -LiteralPath $varsFull -Destination $varsCopy -ErrorAction Stop
+    if ((Get-FileHash -LiteralPath $varsCopy -Algorithm SHA256).Hash.ToUpperInvariant() -cne $varsSourceHash) {
+        throw 'Fresh writable UEFI variables image differs from its pinned template.'
+    }
+    return [pscustomobject]@{
+        RunRoot=$runFull;Esp=$isolatedEsp;EspFileCount=$sourceTree.Count
+        SourceEsp=$sourceEspFull;SourceEspSha256=(Get-FileHash -LiteralPath (Join-Path $sourceEspFull 'ramdisk.img') -Algorithm SHA256).Hash.ToUpperInvariant()
+        IsolatedRamdiskSha256=(Get-FileHash -LiteralPath (Join-Path $isolatedEsp 'ramdisk.img') -Algorithm SHA256).Hash.ToUpperInvariant()
+        UefiVarsTemplate=$varsFull;UefiVarsTemplateSha256=$varsSourceHash;UefiVarsImage=$varsCopy
+        UefiVarsImageSha256=(Get-FileHash -LiteralPath $varsCopy -Algorithm SHA256).Hash.ToUpperInvariant()
+        UefiVarsImageLengthBytes=[int64](Get-Item -LiteralPath $varsCopy).Length
+    }
+}
+
 function ConvertFrom-QmpQueryStatusResponse {
     [CmdletBinding()]
     param([string]$Text)
@@ -343,4 +732,4 @@ function ConvertFrom-QmpQueryStatusResponse {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-QacStatusSnapshot, ConvertFrom-QacListSnapshot, Get-QacReservationProperty, Test-QacTimestampNear, Test-QacCandidatePath, Test-QacClear, Test-QacClearWithCensus, Test-QacRunningOwned, Test-QacLocalQemuChildIdentity, ConvertFrom-QmpQueryStatusResponse
+Export-ModuleMember -Function ConvertFrom-QacStatusSnapshot, ConvertFrom-QacListSnapshot, Get-QacReservationProperty, Test-QacTimestampNear, Test-QacCandidatePath, Test-QacCandidateIntegrityInventory, Test-QacTransitionGuestArtifacts, Test-QacTransitionCandidateProfile, Get-QacTransitionTreeInventory, New-QacTransitionGuestState, Test-QacClear, Test-QacClearWithCensus, Test-QacRunningOwned, Test-QacLocalQemuChildIdentity, ConvertFrom-QmpQueryStatusResponse
