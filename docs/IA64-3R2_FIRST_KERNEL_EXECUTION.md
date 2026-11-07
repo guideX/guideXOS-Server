@@ -91,6 +91,8 @@ IA64-2 early-exec: SKI single-entry profile
 Interrupts masked; scheduler and threads unavailable
 ```
 
+`capture/stdout.log` contains these guest SSC console messages. The simulator-generated exit and statistics messages below came from `capture/stderr.log`; `runner-cli.stdout` separately contains host-side validator output and the runner classification.
+
 The early profile enables exception collection (`PSR.ic`) after installing the IVT while leaving external interrupts masked (`PSR.i=0`). The guest's `Interrupt collection enabled` message describes `PSR.ic`; it does not indicate external interrupt delivery. The static gates confirm no interrupt-enable instruction in the path.
 
 Ski's simulator-generated output, kept separate from guest output, was:
