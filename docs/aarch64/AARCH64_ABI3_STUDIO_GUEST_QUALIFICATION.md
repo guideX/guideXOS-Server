@@ -1,6 +1,6 @@
 # AArch64 ABI3 Developer Studio Guest Qualification
 
-- **Current working status:** `STUDIO_ARM64_GUI_REPEATABILITY_VERIFIED` (R1e passed 3 of 3 fresh QAC-authorized input/close/redraw boots)
+- **Current working status:** `STUDIO_ARM64_PROJECT_EDITOR_VERIFIED` (R2A completed 3 fresh QAC-authorized project/edit/save/reopen/close workflows; three additional authorized attempts are preserved as partial)
 - **Historical guest baseline:** R1d; four diagnostic guest runs, 0 of 3 qualifying
 - **Historical run date:** 2026-11-02
 - **Repository:** `D:\dev\guideXOSServer_AARCH64`
@@ -116,6 +116,10 @@ The follow-up QAC reservation was `ea21fabb55934a1faa49a909ec5168d1`, queued at 
 ## Remaining acceptance work
 
 The next authorized run needs to inspect the DTB failure using the preserved diagnostic candidate, repair the specific parser/handoff issue if confirmed, and reach desktop startup before attempting Studio operations. Then exercise compositor rendering and guest-observed input, create and validate a disposable guest workspace, perform Studio's actual Build and ordinary Run, and collect teardown evidence. Three fresh authorized boots must pass Studio startup, rendering, basic input, close, and cleanup; at least one must also pass the VFS and Build/Run workflow. Do not count the current diagnostic boot toward those three.
+
+### R2A follow-up (2026-11-07)
+
+R2A maps the pinned Studio project's logical filenames to reserved FAT 8.3 aliases inside the ABI3 adapter. Three fresh QAC-authorized R2A-specific records completed New Project, active project metadata parsing, source-file creation, editor text insertion/backspace, exact VFS save, document close/reopen/readback, project close/reopen/readback, debugger-state persistence, clean Studio close, zero GUI mappings/windows/widgets, zero unexpected IRQs/exceptions, and desktop redraw. The exact source was 37 bytes and matched on both readbacks. The R2A-specific workflow files classify those three runs as `STUDIO_ARM64_PROJECT_EDITOR_VERIFIED`; the reused generic R1e QAC wrapper retains its older `ABI3_STUDIO_GUEST_PARTIAL` label because it checks R1e's path-field and close-event contract. Three other R2A QAC attempts are preserved as partial: one exposed an intermittent FAT parent-directory entry loss; another missed a source-close marker; and a later R7 run completed the Studio workflow but failed the Phase12 scheduler/VFS integration gate after one filesystem workload failure, before the required IRQ/exception and desktop-redraw summary. See [AARCH64_ABI3_R2A_STUDIO_PROJECT_VFS_EDITOR.md](AARCH64_ABI3_R2A_STUDIO_PROJECT_VFS_EDITOR.md) for root cause, mapping, exact guest evidence, candidate hashes, per-run QAC records, regression results, and remaining filesystem/scheduler risks. Studio Build/Run remains reserved for R2B.
 
 ## BOOTDTB1 follow-up (2026-11-02)
 

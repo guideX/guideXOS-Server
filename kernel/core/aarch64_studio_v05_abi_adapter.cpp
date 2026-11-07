@@ -101,6 +101,24 @@ static const uint32_t kMaxStringBytes = 256;
 static const uint32_t kMaxTransferBytes = 4u * 1024u * 1024u;
 static const uint32_t kMaxListedEntries = 64;
 
+/* Developer Studio's versioned project format uses these logical names. FAT
+ * create is deliberately 8.3-only, so the v0.5 adapter maps just the names in
+ * the pinned project template to reserved, collision-checked short aliases.
+ * The metadata bytes and the names seen by Studio remain unchanged. */
+struct StudioStorageName {
+    const char* logical;
+    const char* physical;
+};
+
+static const StudioStorageName kStudioStorageNames[] = {
+    { "guidexos.project", "GUIDEXOS.PJT" },
+    { "CMakeLists.txt", "CMAKELIS.TXT" },
+    { "app.json", "APP.JSN" },
+    { "freestanding_memory.cpp", "FREESTA.CPP" },
+    { "guidexos.debugger.json", "GUIDEDBG.JSN" },
+    { "guidexos.debugger.json.bak", "GUIDEDB.BAK" }
+};
+
 struct V05AdapterState {
     gx_app_context* aarch64Context;
     gx_host_calls* aarch64Host;
@@ -430,6 +448,211 @@ static bool app_path(V05AdapterState* adapter, const char* path, char (&bounded)
     return copy_app_string(adapter, path, bounded, sizeof(bounded));
 }
 
+static char ascii_lower(char value)
+{
+    return value >= 'A' && value <= 'Z' ? static_cast<char>(value + ('a' - 'A')) : value;
+}
+
+static bool equal_ascii_folded(const char* left, const char* right)
+{
+    if (!left || !right) return left == right;
+    uint32_t i = 0;
+    while (left[i] && right[i]) {
+        if (ascii_lower(left[i]) != ascii_lower(right[i])) return false;
+        ++i;
+    }
+    return left[i] == right[i];
+}
+
+static const char* path_basename(const char* path)
+{
+    const char* basename = path;
+    for (const char* cursor = path; *cursor; ++cursor)
+        if (*cursor == '/') basename = cursor + 1;
+    return basename;
+}
+
+static bool valid_studio_vfs_path(const char* path)
+{
+    if (!path || path[0] != '/') return false;
+    uint32_t length = 0;
+    while (length < kMaxStringBytes && path[length]) {
+        const unsigned char value = static_cast<unsigned char>(path[length]);
+        if (path[length] == '\\' || path[length] == ':' || value < 0x20u || value == 0x7fu)
+            return false;
+        ++length;
+    }
+    if (length == 0 || length >= kMaxStringBytes || path[length] != '\0') return false;
+    if (length == 1) return true;
+    if (path[length - 1] == '/') return false;
+
+    uint32_t segmentStart = 1;
+    for (uint32_t i = 1; i <= length; ++i) {
+        if (i < length && path[i] != '/') continue;
+        const uint32_t segmentLength = i - segmentStart;
+        if (segmentLength == 0 ||
+            (segmentLength == 1 && path[segmentStart] == '.') ||
+            (segmentLength == 2 && path[segmentStart] == '.' && path[segmentStart + 1] == '.'))
+            return false;
+        segmentStart = i + 1;
+    }
+    return true;
+}
+
+static const StudioStorageName* studio_name_for_logical(const char* name)
+{
+    for (uint32_t i = 0; i < sizeof(kStudioStorageNames) / sizeof(kStudioStorageNames[0]); ++i)
+        if (equal_ascii_folded(name, kStudioStorageNames[i].logical)) return &kStudioStorageNames[i];
+    return nullptr;
+}
+
+static const StudioStorageName* studio_name_for_physical(const char* name)
+{
+    for (uint32_t i = 0; i < sizeof(kStudioStorageNames) / sizeof(kStudioStorageNames[0]); ++i)
+        if (equal_ascii_folded(name, kStudioStorageNames[i].physical)) return &kStudioStorageNames[i];
+    return nullptr;
+}
+
+static bool replace_path_basename(const char* path, const char* replacement,
+                                  char* output, uint32_t capacity)
+{
+    if (!path || !replacement || !output || capacity == 0) return false;
+    const char* basename = path_basename(path);
+    uint32_t prefixLength = static_cast<uint32_t>(basename - path);
+    uint32_t replacementLength = 0;
+    while (replacement[replacementLength]) ++replacementLength;
+    if (prefixLength + replacementLength >= capacity) return false;
+    for (uint32_t i = 0; i < prefixLength; ++i) output[i] = path[i];
+    for (uint32_t i = 0; i < replacementLength; ++i) output[prefixLength + i] = replacement[i];
+    output[prefixLength + replacementLength] = '\0';
+    return true;
+}
+
+static bool copy_bounded_path(const char* path, char* output, uint32_t capacity)
+{
+    if (!path || !output || capacity == 0) return false;
+    uint32_t i = 0;
+    while (i + 1 < capacity && path[i]) { output[i] = path[i]; ++i; }
+    if (path[i]) return false;
+    output[i] = '\0';
+    return true;
+}
+
+/* Resolve the canonical logical path first, preserving projects already
+ * provisioned with a real long filename (including the Phase 12 fixture).
+ * If it is absent, use the matching 8.3 alias. Seeing both is ambiguous and
+ * fails closed. Creation targets the alias when neither exists. */
+static gx_result select_studio_file_path(V05AdapterState* adapter, const char* path,
+                                         char (&selected)[kMaxStringBytes],
+                                         bool allowCreate, gx_file_info* outInfo)
+{
+    if (!adapter || !valid_studio_vfs_path(path)) return GX_ERROR_INVALID_ARGUMENT;
+    const char* basename = path_basename(path);
+    if (studio_name_for_physical(basename)) return GX_ERROR_INVALID_ARGUMENT;
+
+    const StudioStorageName* mapping = studio_name_for_logical(basename);
+    if (!mapping) {
+        if (!copy_bounded_path(path, selected, sizeof(selected))) return GX_ERROR_INVALID_ARGUMENT;
+        if (!outInfo) return GX_OK;
+        if (!adapter->aarch64Host->bare_metal_file_stat) return GX_ERROR_UNSUPPORTED;
+        return adapter->aarch64Host->bare_metal_file_stat(adapter->aarch64Context, selected, outInfo);
+    }
+    if (!adapter->aarch64Host->bare_metal_file_stat) return GX_ERROR_UNSUPPORTED;
+
+    char physicalPath[kMaxStringBytes];
+    if (!replace_path_basename(path, mapping->physical, physicalPath, sizeof(physicalPath)))
+        return GX_ERROR_INVALID_ARGUMENT;
+    gx_file_info logicalInfo{};
+    gx_file_info physicalInfo{};
+    const gx_result logicalResult = adapter->aarch64Host->bare_metal_file_stat(
+        adapter->aarch64Context, path, &logicalInfo);
+    if (logicalResult != GX_OK && logicalResult != kV05FileStatNotFoundBridge)
+        return logicalResult;
+    const gx_result physicalResult = adapter->aarch64Host->bare_metal_file_stat(
+        adapter->aarch64Context, physicalPath, &physicalInfo);
+    if (physicalResult != GX_OK && physicalResult != kV05FileStatNotFoundBridge)
+        return physicalResult;
+    if (logicalResult == GX_OK && physicalResult == GX_OK) return GX_ERROR_FAILED;
+    if (logicalResult == GX_OK) {
+        if (!copy_bounded_path(path, selected, sizeof(selected))) return GX_ERROR_INVALID_ARGUMENT;
+        if (outInfo) *outInfo = logicalInfo;
+        return GX_OK;
+    }
+    if (physicalResult == GX_OK) {
+        if (!copy_bounded_path(physicalPath, selected, sizeof(selected))) return GX_ERROR_INVALID_ARGUMENT;
+        if (outInfo) *outInfo = physicalInfo;
+        return GX_OK;
+    }
+    if (!allowCreate) return kV05FileStatNotFoundBridge;
+    if (!copy_bounded_path(physicalPath, selected, sizeof(selected))) return GX_ERROR_INVALID_ARGUMENT;
+    return GX_OK;
+}
+
+#if defined(GXOS_AARCH64_ABI3_STUDIO_GUEST)
+static uint32_t append_log_text(char* output, uint32_t capacity, uint32_t offset,
+                                const char* text)
+{
+    while (text && *text && offset + 1 < capacity) output[offset++] = *text++;
+    output[offset] = '\0';
+    return offset;
+}
+
+static uint32_t append_log_decimal(char* output, uint32_t capacity, uint32_t offset,
+                                   uint32_t value)
+{
+    char digits[10];
+    uint32_t count = 0;
+    do { digits[count++] = static_cast<char>('0' + value % 10u); value /= 10u; }
+    while (value != 0 && count < sizeof(digits));
+    while (count > 0 && offset + 1 < capacity) output[offset++] = digits[--count];
+    output[offset] = '\0';
+    return offset;
+}
+
+static uint32_t append_log_hex_byte(char* output, uint32_t capacity, uint32_t offset,
+                                    uint8_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    if (offset + 2 >= capacity) return offset;
+    output[offset++] = digits[value >> 4];
+    output[offset++] = digits[value & 0x0fu];
+    output[offset] = '\0';
+    return offset;
+}
+
+static void log_workspace_io(V05AdapterState* adapter, const char* action,
+                             const char* path, const void* bytes, uint32_t length)
+{
+    if (!adapter || !adapter->aarch64Host || !adapter->aarch64Host->log) return;
+    char message[384] = "ABI3_STUDIO_VFS_IO action=";
+    uint32_t offset = 0;
+    while (message[offset]) ++offset;
+    offset = append_log_text(message, sizeof(message), offset, action);
+    offset = append_log_text(message, sizeof(message), offset, " path=");
+    offset = append_log_text(message, sizeof(message), offset, path);
+    offset = append_log_text(message, sizeof(message), offset, " bytes=");
+    offset = append_log_decimal(message, sizeof(message), offset, length);
+    if (length <= 64u) {
+        offset = append_log_text(message, sizeof(message), offset, " datahex=");
+        const uint8_t* data = static_cast<const uint8_t*>(bytes);
+        for (uint32_t i = 0; i < length; ++i)
+            offset = append_log_hex_byte(message, sizeof(message), offset, data[i]);
+    } else {
+        uint32_t hash = 2166136261u;
+        const uint8_t* data = static_cast<const uint8_t*>(bytes);
+        for (uint32_t i = 0; i < length; ++i) hash = (hash ^ data[i]) * 16777619u;
+        offset = append_log_text(message, sizeof(message), offset, " fnv1a32=");
+        static const char digits[] = "0123456789abcdef";
+        for (int32_t shift = 28; shift >= 0; shift -= 4) {
+            if (offset + 1 >= sizeof(message)) break;
+            message[offset++] = digits[(hash >> shift) & 0x0fu];
+        }
+        message[offset] = '\0';
+    }
+    adapter->aarch64Host->log(adapter->aarch64Context, message);
+}
+#endif
+
 static studio_v05::gx_result GX_CALL host_bare_file_stat(
     studio_v05::gx_app_context* context, const char* path, studio_v05::gx_file_info* outInfo)
 {
@@ -440,8 +663,8 @@ static studio_v05::gx_result GX_CALL host_bare_file_stat(
     if (!app_object(adapter, outInfo) || !app_path(adapter, path, bounded))
         return studio_v05::GX_ERROR_INVALID_ARGUMENT;
     gx_file_info info{};
-    const gx_result result = adapter->aarch64Host->bare_metal_file_stat(
-        adapter->aarch64Context, bounded, &info);
+    char selected[kMaxStringBytes];
+    const gx_result result = select_studio_file_path(adapter, bounded, selected, false, &info);
     if (result == kV05FileStatNotFoundBridge) return studio_v05::GX_ERROR_NOT_FOUND;
     if (result == kV05FileStatMountUnavailableBridge) return studio_v05::GX_ERROR_NOT_MOUNTED;
     if (result == GX_OK) {
@@ -463,12 +686,20 @@ static studio_v05::gx_result GX_CALL host_bare_file_read(
     if (!app_object(adapter, outBytesRead) ||
         bufferSize > kMaxTransferBytes || (bufferSize && !app_range(adapter, buffer, bufferSize)) ||
         !app_path(adapter, path, bounded)) return studio_v05::GX_ERROR_INVALID_ARGUMENT;
+    char selected[kMaxStringBytes];
+    const gx_result selectResult = select_studio_file_path(adapter, bounded, selected, false, nullptr);
+    if (selectResult == kV05FileStatNotFoundBridge) return studio_v05::GX_ERROR_NOT_FOUND;
+    if (selectResult == kV05FileStatMountUnavailableBridge) return studio_v05::GX_ERROR_NOT_MOUNTED;
+    if (selectResult != GX_OK) return to_v05_result(selectResult);
     uint32_t bytesRead = 0;
     const gx_result result = adapter->aarch64Host->bare_metal_file_read_workspace(
-        adapter->aarch64Context, bounded, buffer, bufferSize, &bytesRead);
+        adapter->aarch64Context, selected, buffer, bufferSize, &bytesRead);
     if (result == GX_OK) {
         if (bytesRead > bufferSize) return studio_v05::GX_ERROR_INTERNAL;
         *outBytesRead = bytesRead;
+#if defined(GXOS_AARCH64_ABI3_STUDIO_GUEST)
+        log_workspace_io(adapter, "read", selected, buffer, bytesRead);
+#endif
     }
     return to_v05_result(result);
 }
@@ -488,7 +719,8 @@ static studio_v05::gx_result GX_CALL host_bare_file_list(
             !app_range(adapter, entries,
             static_cast<uint64_t>(capacity) * sizeof(*entries)))) ||
         !app_object(adapter, outCount) || !app_object(adapter, outTruncated) ||
-        !app_path(adapter, path, bounded)) return studio_v05::GX_ERROR_INVALID_ARGUMENT;
+        !app_path(adapter, path, bounded) || !valid_studio_vfs_path(bounded))
+        return studio_v05::GX_ERROR_INVALID_ARGUMENT;
     gx_file_entry temporary[kMaxListedEntries]{};
     uint32_t count = 0;
     uint32_t truncated = 0;
@@ -496,6 +728,22 @@ static studio_v05::gx_result GX_CALL host_bare_file_list(
         adapter->aarch64Context, bounded, temporary, capacity, &count, &truncated);
     if (result != GX_OK) return to_v05_result(result);
     if (count > capacity) return studio_v05::GX_ERROR_FAILED;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t nameLength = 0;
+        while (nameLength < sizeof(temporary[i].name) && temporary[i].name[nameLength]) ++nameLength;
+        if (nameLength == 0 || nameLength == sizeof(temporary[i].name)) return studio_v05::GX_ERROR_FAILED;
+        const StudioStorageName* mapping = studio_name_for_physical(temporary[i].name);
+        if (!mapping) mapping = studio_name_for_logical(temporary[i].name);
+        if (!mapping) continue;
+        for (uint32_t previous = 0; previous < i; ++previous)
+            if (equal_ascii_folded(temporary[previous].name, mapping->logical))
+                return studio_v05::GX_ERROR_FAILED;
+        uint32_t logicalLength = 0;
+        while (mapping->logical[logicalLength]) ++logicalLength;
+        if (logicalLength >= sizeof(temporary[i].name)) return studio_v05::GX_ERROR_FAILED;
+        for (uint32_t j = 0; j < logicalLength; ++j) temporary[i].name[j] = mapping->logical[j];
+        temporary[i].name[logicalLength] = '\0';
+    }
     for (uint32_t i = 0; i < count; ++i) {
         entries[i].type = temporary[i].type;
         entries[i].reserved = temporary[i].reserved;
@@ -519,12 +767,19 @@ static studio_v05::gx_result GX_CALL host_bare_file_write(
     if (!app_object(adapter, outBytesWritten) ||
         bufferSize > kMaxTransferBytes || (bufferSize && !app_range(adapter, buffer, bufferSize)) ||
         !app_path(adapter, path, bounded)) return studio_v05::GX_ERROR_INVALID_ARGUMENT;
+    char selected[kMaxStringBytes];
+    const gx_result selectResult = select_studio_file_path(adapter, bounded, selected, true, nullptr);
+    if (selectResult == kV05FileStatMountUnavailableBridge) return studio_v05::GX_ERROR_NOT_MOUNTED;
+    if (selectResult != GX_OK) return to_v05_result(selectResult);
     uint32_t bytesWritten = 0;
     const gx_result result = adapter->aarch64Host->bare_metal_file_write_all(
-        adapter->aarch64Context, bounded, buffer, bufferSize, &bytesWritten);
+        adapter->aarch64Context, selected, buffer, bufferSize, &bytesWritten);
     if (result == GX_OK) {
         if (bytesWritten > bufferSize) return studio_v05::GX_ERROR_INTERNAL;
         *outBytesWritten = bytesWritten;
+#if defined(GXOS_AARCH64_ABI3_STUDIO_GUEST)
+        log_workspace_io(adapter, "write", selected, buffer, bytesWritten);
+#endif
     }
     return to_v05_result(result);
 }
@@ -536,7 +791,8 @@ static studio_v05::gx_result GX_CALL host_bare_file_create_directory(
     char bounded[kMaxStringBytes];
     if (!adapter) return studio_v05::GX_ERROR_INVALID_ARGUMENT;
     if (!adapter->aarch64Host->bare_metal_file_create_directory) return studio_v05::GX_ERROR_UNSUPPORTED;
-    if (!app_path(adapter, path, bounded)) return studio_v05::GX_ERROR_INVALID_ARGUMENT;
+    if (!app_path(adapter, path, bounded) || !valid_studio_vfs_path(bounded) ||
+        studio_name_for_physical(path_basename(bounded))) return studio_v05::GX_ERROR_INVALID_ARGUMENT;
     return to_v05_result(adapter->aarch64Host->bare_metal_file_create_directory(
         adapter->aarch64Context, bounded));
 }
@@ -549,8 +805,13 @@ static studio_v05::gx_result GX_CALL host_bare_file_remove(
     if (!adapter) return studio_v05::GX_ERROR_INVALID_ARGUMENT;
     if (!adapter->aarch64Host->bare_metal_file_remove) return studio_v05::GX_ERROR_UNSUPPORTED;
     if (!app_path(adapter, path, bounded)) return studio_v05::GX_ERROR_INVALID_ARGUMENT;
+    char selected[kMaxStringBytes];
+    const gx_result selectResult = select_studio_file_path(adapter, bounded, selected, false, nullptr);
+    if (selectResult == kV05FileStatNotFoundBridge) return studio_v05::GX_ERROR_NOT_FOUND;
+    if (selectResult == kV05FileStatMountUnavailableBridge) return studio_v05::GX_ERROR_NOT_MOUNTED;
+    if (selectResult != GX_OK) return to_v05_result(selectResult);
     return to_v05_result(adapter->aarch64Host->bare_metal_file_remove(
-        adapter->aarch64Context, bounded));
+        adapter->aarch64Context, selected));
 }
 
 static bool convert_build_request(V05AdapterState* adapter,

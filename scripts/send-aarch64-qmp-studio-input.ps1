@@ -12,6 +12,7 @@ param(
     [string]$ExpectedEditableText = 'guideXOS ARM64',
     [int]$FramebufferWidth = 800,
     [int]$FramebufferHeight = 600,
+    [ValidateRange(25, 500)] [int]$KeyDelayMilliseconds = 125,
     [string]$QacCliPath = ''
 )
 
@@ -98,10 +99,10 @@ if ($ClickX -ge 0) {
 }
 foreach ($character in $Text.ToCharArray()) {
     $qcode = $null
-    $upper = $false
+    $shifted = $false
     if ($character -ge 'A' -and $character -le 'Z') {
         $qcode = [string]$character.ToString().ToLowerInvariant()
-        $upper = $true
+        $shifted = $true
     } elseif ($character -ge 'a' -and $character -le 'z') {
         $qcode = [string]$character
     } elseif ($character -ge '0' -and $character -le '9') {
@@ -110,19 +111,64 @@ foreach ($character in $Text.ToCharArray()) {
         $qcode = 'spc'
     } elseif ($character -eq '/') {
         $qcode = 'slash'
+    } elseif ($character -eq "`n") {
+        $qcode = 'ret'
+    } elseif ($character -eq "`r") {
+        continue
     } else {
-        throw "Unsupported QMP character in text input: U+$([int]$character.ToString('X4'))"
+        $keySpec = switch ([int]$character) {
+            33 { @('1', $true) }      # !
+            34 { @('apostrophe', $true) } # "
+            35 { @('3', $true) }      # #
+            38 { @('7', $true) }      # &
+            39 { @('apostrophe', $false) } # '
+            40 { @('9', $true) }      # (
+            41 { @('0', $true) }      # )
+            42 { @('8', $true) }      # *
+            43 { @('equal', $true) }  # +
+            44 { @('comma', $false) } # ,
+            45 { @('minus', $false) } # -
+            46 { @('dot', $false) }   # .
+            58 { @('semicolon', $true) } # :
+            59 { @('semicolon', $false) } # ;
+            60 { @('comma', $true) }  # <
+            61 { @('equal', $false) } # =
+            62 { @('dot', $true) }    # >
+            63 { @('slash', $true) }  # ?
+            91 { @('bracket_left', $false) } # [
+            92 { @('backslash', $false) } # \
+            93 { @('bracket_right', $false) } # ]
+            94 { @('6', $true) }      # ^
+            95 { @('minus', $true) }  # _
+            123 { @('bracket_left', $true) } # {
+            125 { @('bracket_right', $true) } # }
+            default { $null }
+        }
+        if ($null -eq $keySpec) {
+            throw "Unsupported QMP character in text input: U+$([int]$character.ToString('X4'))"
+        }
+        $qcode = [string]$keySpec[0]
+        $shifted = [bool]$keySpec[1]
     }
-    if ($upper) { $events.Add((New-KeyEvent 'shift' $true)) }
+    if ($shifted) { $events.Add((New-KeyEvent 'shift' $true)) }
     $events.Add((New-KeyEvent $qcode $true))
     $events.Add((New-KeyEvent $qcode $false))
-    if ($upper) { $events.Add((New-KeyEvent 'shift' $false)) }
+    if ($shifted) { $events.Add((New-KeyEvent 'shift' $false)) }
 }
 foreach ($specialKey in $SpecialKeys) {
     if ($specialKey.Equals('ControlN', [StringComparison]::OrdinalIgnoreCase)) {
         $events.Add((New-KeyEvent 'ctrl' $true))
         $events.Add((New-KeyEvent 'n' $true))
         $events.Add((New-KeyEvent 'n' $false))
+        $events.Add((New-KeyEvent 'ctrl' $false))
+        continue
+    }
+    if ($specialKey.Equals('ControlS', [StringComparison]::OrdinalIgnoreCase) -or
+        $specialKey.Equals('ControlW', [StringComparison]::OrdinalIgnoreCase)) {
+        $letter = if ($specialKey.Equals('ControlS', [StringComparison]::OrdinalIgnoreCase)) { 's' } else { 'w' }
+        $events.Add((New-KeyEvent 'ctrl' $true))
+        $events.Add((New-KeyEvent $letter $true))
+        $events.Add((New-KeyEvent $letter $false))
         $events.Add((New-KeyEvent 'ctrl' $false))
         continue
     }
@@ -202,7 +248,7 @@ try {
                 for ($eventIndex = 4; $eventIndex -lt $events.Count; $eventIndex++) {
                     $commands.Add(@{
                         qmp = @{ execute = 'input-send-event'; arguments = @{ events = @($events[$eventIndex]) } }
-                        delay_after_ms = 50
+                        delay_after_ms = $KeyDelayMilliseconds
                     })
                 }
             }
@@ -210,7 +256,7 @@ try {
             for ($eventIndex = 0; $eventIndex -lt $events.Count; $eventIndex++) {
                 $commands.Add(@{
                     qmp = @{ execute = 'input-send-event'; arguments = @{ events = @($events[$eventIndex]) } }
-                    delay_after_ms = 50
+                    delay_after_ms = $KeyDelayMilliseconds
                 })
             }
         }

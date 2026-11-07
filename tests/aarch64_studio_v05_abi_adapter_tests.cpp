@@ -64,8 +64,23 @@ struct HostHarness {
     uint32_t lastFlags;
     gx_result lastExitCode;
     gx_result fileStatResult;
+    gx_result fileReadResult;
+    gx_result fileWriteResult;
+    gx_result fileRemoveResult;
     uint32_t listOverflow;
     uint32_t byteCountOverflow;
+    uint32_t partialWriteBytes;
+    uint32_t mappedStatEnabled;
+    gx_result mappedLogicalStatResult;
+    gx_result mappedPhysicalStatResult;
+    char mappedLogicalPath[256];
+    char mappedPhysicalPath[256];
+    char lastReadPath[256];
+    char lastWritePath[256];
+    char lastRemovePath[256];
+    char listStorageLogicalName[128];
+    char listStoragePhysicalName[128];
+    uint32_t listStorageMode;
     gx_development_run_request lastRunRequest;
     char lastRunProjectId[256];
     char lastRunArtifactAbi[256];
@@ -133,6 +148,18 @@ static gx_result GX_CALL mock_window_destroy(gx_app_context* context, gx_handle 
 static gx_result GX_CALL mock_file_stat(gx_app_context* context, const char* path, gx_file_info* out)
 {
     HostHarness* h = harness(context); ++h->calls[6]; strcpy(h->lastText, path);
+    if (h->mappedStatEnabled && strcmp(path, h->mappedLogicalPath) == 0) {
+        if (h->mappedLogicalStatResult == GX_OK) {
+            out->type = GX_FILE_TYPE_REGULAR; out->reserved = 0; out->size = 17;
+        }
+        return h->mappedLogicalStatResult;
+    }
+    if (h->mappedStatEnabled && strcmp(path, h->mappedPhysicalPath) == 0) {
+        if (h->mappedPhysicalStatResult == GX_OK) {
+            out->type = GX_FILE_TYPE_REGULAR; out->reserved = 0; out->size = 23;
+        }
+        return h->mappedPhysicalStatResult;
+    }
     if (h->fileStatResult != GX_OK) return h->fileStatResult;
     out->type = GX_FILE_TYPE_REGULAR; out->reserved = 0; out->size = 9; return GX_OK;
 }
@@ -141,6 +168,8 @@ static gx_result GX_CALL mock_file_read(gx_app_context* context, const char* pat
                                           uint32_t capacity, uint32_t* bytes)
 {
     HostHarness* h = harness(context); ++h->calls[7]; strcpy(h->lastText, path);
+    strcpy(h->lastReadPath, path);
+    if (h->fileReadResult != GX_OK) return h->fileReadResult;
     if (h->byteCountOverflow) { *bytes = capacity + 1; return GX_OK; }
     const uint32_t count = capacity < 3 ? capacity : 3;
     if (count) memcpy(buffer, "abc", count);
@@ -154,6 +183,19 @@ static gx_result GX_CALL mock_file_list(gx_app_context* context, const char* pat
 {
     HostHarness* h = harness(context); ++h->calls[8]; strcpy(h->lastText, path);
     if (h->listOverflow) { *count = capacity + 1; *truncated = 1; return GX_OK; }
+    if (h->listStorageMode != 0) {
+        if (capacity == 0) { *count = 0; *truncated = 1; return GX_OK; }
+        entries[0] = {}; entries[0].type = GX_FILE_TYPE_REGULAR; entries[0].size = 9;
+        strcpy(entries[0].name, h->listStoragePhysicalName);
+        *count = 1; *truncated = 0;
+        if (h->listStorageMode == 2) {
+            if (capacity < 2) { *truncated = 1; return GX_OK; }
+            entries[1] = {}; entries[1].type = GX_FILE_TYPE_REGULAR; entries[1].size = 17;
+            strcpy(entries[1].name, h->listStorageLogicalName);
+            *count = 2;
+        }
+        return GX_OK;
+    }
     if (capacity) {
         entries[0] = {}; entries[0].type = GX_FILE_TYPE_REGULAR; entries[0].size = 9;
         strcpy(entries[0].name, "file.txt"); *count = 1; *truncated = 0;
@@ -165,8 +207,9 @@ static gx_result GX_CALL mock_file_write(gx_app_context* context, const char* pa
                                            const void* buffer, uint32_t capacity, uint32_t* bytes)
 {
     HostHarness* h = harness(context); ++h->calls[9]; strcpy(h->lastText, path);
+    strcpy(h->lastWritePath, path);
     if (capacity) { const char* text = static_cast<const char*>(buffer); h->lastX = text[0]; }
-    *bytes = capacity; return GX_OK;
+    *bytes = h->partialWriteBytes != 0 ? h->partialWriteBytes : capacity; return h->fileWriteResult;
 }
 
 static gx_result GX_CALL mock_file_mkdir(gx_app_context* context, const char* path)
@@ -176,7 +219,8 @@ static gx_result GX_CALL mock_file_mkdir(gx_app_context* context, const char* pa
 
 static gx_result GX_CALL mock_file_remove(gx_app_context* context, const char* path)
 {
-    HostHarness* h = harness(context); ++h->calls[11]; strcpy(h->lastText, path); return GX_OK;
+    HostHarness* h = harness(context); ++h->calls[11]; strcpy(h->lastText, path);
+    strcpy(h->lastRemovePath, path); return h->fileRemoveResult;
 }
 
 static gx_result GX_CALL mock_build_start(gx_app_context* context, const gx_build_request* request,
@@ -398,7 +442,7 @@ int main()
     CHECK(host->exit(context, studio_v05::GX_ERROR_NOT_FOUND) == studio_v05::GX_OK);
     CHECK(h.lastExitCode == GX_ERROR_FAILED);
 
-    char path[] = "/Apps/DeveloperStudio/app.json";
+    char path[] = "/Apps/DeveloperStudio/notes.txt";
     studio_v05::gx_file_info info{};
     CHECK(host->bare_metal_file_stat(context, path, &info) == studio_v05::GX_OK);
     CHECK(info.type == GX_FILE_TYPE_REGULAR && info.size == 9 && strcmp(h.lastText, path) == 0);
@@ -439,6 +483,144 @@ int main()
     h.host.bare_metal_file_stat = savedStat;
     CHECK(host->bare_metal_file_stat(context, path, &info) == studio_v05::GX_OK);
     CHECK(h.calls[6] == 4);
+
+    /* Existing long-name fixtures keep their canonical path; newly-created
+     * FAT projects use the adapter's reserved short-name representation. */
+    h.mappedStatEnabled = 1;
+    strcpy(h.mappedLogicalPath, "/Phase12IDEProof/guidexos.project");
+    strcpy(h.mappedPhysicalPath, "/Phase12IDEProof/GUIDEXOS.PJT");
+    h.mappedLogicalStatResult = GX_OK;
+    h.mappedPhysicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    char projectMetadata[] = "/Phase12IDEProof/guidexos.project";
+    CHECK(host->bare_metal_file_stat(context, projectMetadata, &info) == studio_v05::GX_OK);
+    CHECK(info.size == 17);
+    CHECK(host->bare_metal_file_read_workspace(context, projectMetadata, fileBytes,
+          sizeof(fileBytes), &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastReadPath, h.mappedLogicalPath) == 0);
+
+    h.mappedLogicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    h.mappedPhysicalStatResult = GX_OK;
+    CHECK(host->bare_metal_file_stat(context, projectMetadata, &info) == studio_v05::GX_OK);
+    CHECK(info.size == 23);
+    CHECK(host->bare_metal_file_read_workspace(context, projectMetadata, fileBytes,
+          sizeof(fileBytes), &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastReadPath, h.mappedPhysicalPath) == 0);
+    bytes = 0;
+    CHECK(host->bare_metal_file_write_all(context, projectMetadata, writeBytes, 5, &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastWritePath, h.mappedPhysicalPath) == 0 && bytes == 5);
+    CHECK(host->bare_metal_file_remove(context, projectMetadata) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastRemovePath, h.mappedPhysicalPath) == 0);
+
+    h.mappedLogicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    h.mappedPhysicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    strcpy(h.mappedLogicalPath, "/Apps/R2ATST/CMakeLists.txt");
+    strcpy(h.mappedPhysicalPath, "/Apps/R2ATST/CMAKELIS.TXT");
+    CHECK(host->bare_metal_file_write_all(context,
+          const_cast<char*>(h.mappedLogicalPath), writeBytes, 5, &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastWritePath, h.mappedPhysicalPath) == 0);
+    strcpy(h.mappedLogicalPath, "/Apps/R2ATST/app/app.json");
+    strcpy(h.mappedPhysicalPath, "/Apps/R2ATST/app/APP.JSN");
+    CHECK(host->bare_metal_file_write_all(context,
+          const_cast<char*>(h.mappedLogicalPath), writeBytes, 5, &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastWritePath, h.mappedPhysicalPath) == 0);
+    h.mappedLogicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    h.mappedPhysicalStatResult = GX_OK;
+    CHECK(host->bare_metal_file_read_workspace(context,
+          const_cast<char*>(h.mappedLogicalPath), fileBytes, sizeof(fileBytes), &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastReadPath, h.mappedPhysicalPath) == 0);
+    strcpy(h.mappedLogicalPath, "/Apps/R2ATST/src/freestanding_memory.cpp");
+    strcpy(h.mappedPhysicalPath, "/Apps/R2ATST/src/FREESTA.CPP");
+    CHECK(host->bare_metal_file_write_all(context,
+          const_cast<char*>(h.mappedLogicalPath), writeBytes, 5, &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastWritePath, h.mappedPhysicalPath) == 0);
+    strcpy(h.mappedLogicalPath, "/Apps/R2ATST/guidexos.debugger.json");
+    strcpy(h.mappedPhysicalPath, "/Apps/R2ATST/GUIDEDBG.JSN");
+    h.mappedLogicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    h.mappedPhysicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    CHECK(host->bare_metal_file_write_all(context,
+          const_cast<char*>(h.mappedLogicalPath), writeBytes, 5, &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastWritePath, h.mappedPhysicalPath) == 0);
+    h.mappedPhysicalStatResult = GX_OK;
+    CHECK(host->bare_metal_file_read_workspace(context,
+          const_cast<char*>(h.mappedLogicalPath), fileBytes, sizeof(fileBytes), &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastReadPath, h.mappedPhysicalPath) == 0);
+    strcpy(h.mappedLogicalPath, "/Apps/R2ATST/guidexos.debugger.json.bak");
+    strcpy(h.mappedPhysicalPath, "/Apps/R2ATST/GUIDEDB.BAK");
+    h.mappedPhysicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    CHECK(host->bare_metal_file_write_all(context,
+          const_cast<char*>(h.mappedLogicalPath), writeBytes, 5, &bytes) == studio_v05::GX_OK);
+    CHECK(strcmp(h.lastWritePath, h.mappedPhysicalPath) == 0);
+
+    strcpy(h.mappedLogicalPath, "/Phase12IDEProof/guidexos.project");
+    strcpy(h.mappedPhysicalPath, "/Phase12IDEProof/GUIDEXOS.PJT");
+    h.mappedLogicalStatResult = GX_OK;
+    h.mappedPhysicalStatResult = GX_OK;
+    const uint32_t writesBeforeCollision = h.calls[9];
+    CHECK(host->bare_metal_file_stat(context, projectMetadata, &info) == studio_v05::GX_ERROR_FAILED);
+    CHECK(host->bare_metal_file_write_all(context, projectMetadata, writeBytes, 5, &bytes) ==
+          studio_v05::GX_ERROR_FAILED);
+    CHECK(h.calls[9] == writesBeforeCollision);
+
+    h.mappedLogicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    h.mappedPhysicalStatResult = GX_OK;
+    CHECK(host->bare_metal_file_stat(context, projectMetadata, &info) == studio_v05::GX_OK);
+    h.fileReadResult = GX_ERROR_FAILED;
+    CHECK(host->bare_metal_file_read_workspace(context, projectMetadata, fileBytes,
+          sizeof(fileBytes), &bytes) == studio_v05::GX_ERROR_FAILED);
+    h.fileReadResult = GX_OK;
+    h.fileRemoveResult = GX_ERROR_FAILED;
+    CHECK(host->bare_metal_file_remove(context, projectMetadata) == studio_v05::GX_ERROR_FAILED);
+    h.fileRemoveResult = GX_OK;
+    h.mappedPhysicalStatResult = GX_ERROR_FAILED;
+    const uint32_t writesBeforeVfsFailure = h.calls[9];
+    CHECK(host->bare_metal_file_write_all(context, projectMetadata, writeBytes, 5, &bytes) ==
+          studio_v05::GX_ERROR_FAILED);
+    CHECK(h.calls[9] == writesBeforeVfsFailure);
+    h.mappedPhysicalStatResult = kernel::studio_abi::kV05FileStatNotFoundBridge;
+    h.partialWriteBytes = 2;
+    CHECK(host->bare_metal_file_write_all(context, projectMetadata, writeBytes, 5, &bytes) == studio_v05::GX_OK);
+    CHECK(bytes == 2);
+    h.partialWriteBytes = 0;
+
+    char rawAlias[] = "/Phase12IDEProof/GUIDEXOS.PJT";
+    const uint32_t statCallsBeforeAlias = h.calls[6];
+    CHECK(host->bare_metal_file_stat(context, rawAlias, &info) == studio_v05::GX_ERROR_INVALID_ARGUMENT);
+    CHECK(h.calls[6] == statCallsBeforeAlias);
+    char rawAppManifestAlias[] = "/Apps/R2ATST/app/APP.JSN";
+    CHECK(host->bare_metal_file_stat(context, rawAppManifestAlias, &info) == studio_v05::GX_ERROR_INVALID_ARGUMENT);
+    char rawDebuggerAlias[] = "/Apps/R2ATST/GUIDEDBG.JSN";
+    char rawDebuggerBackupAlias[] = "/Apps/R2ATST/GUIDEDB.BAK";
+    CHECK(host->bare_metal_file_stat(context, rawDebuggerAlias, &info) == studio_v05::GX_ERROR_INVALID_ARGUMENT);
+    CHECK(host->bare_metal_file_stat(context, rawDebuggerBackupAlias, &info) == studio_v05::GX_ERROR_INVALID_ARGUMENT);
+    char traversalPath[] = "/Phase12IDEProof/../Outside/guidexos.project";
+    CHECK(host->bare_metal_file_stat(context, traversalPath, &info) == studio_v05::GX_ERROR_INVALID_ARGUMENT);
+    char traversalDirectory[] = "/Apps/R2ATST/../Outside";
+    CHECK(host->bare_metal_file_create_directory(context, traversalDirectory) == studio_v05::GX_ERROR_INVALID_ARGUMENT);
+
+    strcpy(h.listStorageLogicalName, "guidexos.project");
+    strcpy(h.listStoragePhysicalName, "GUIDEXOS.PJT");
+    h.listStorageMode = 1;
+    char projectDirectory[] = "/Phase12IDEProof";
+    CHECK(host->bare_metal_file_list(context, projectDirectory, entries, 2, &count, &truncated) ==
+          studio_v05::GX_OK);
+    CHECK(count == 1 && strcmp(entries[0].name, "guidexos.project") == 0);
+    strcpy(h.listStorageLogicalName, "app.json");
+    strcpy(h.listStoragePhysicalName, "APP.JSN");
+    char appDirectory[] = "/Apps/R2ATST/app";
+    CHECK(host->bare_metal_file_list(context, appDirectory, entries, 2, &count, &truncated) ==
+          studio_v05::GX_OK);
+    CHECK(count == 1 && strcmp(entries[0].name, "app.json") == 0);
+    strcpy(h.listStorageLogicalName, "guidexos.debugger.json");
+    strcpy(h.listStoragePhysicalName, "GUIDEDBG.JSN");
+    char debuggerDirectory[] = "/Apps/R2ATST";
+    CHECK(host->bare_metal_file_list(context, debuggerDirectory, entries, 2, &count, &truncated) ==
+          studio_v05::GX_OK);
+    CHECK(count == 1 && strcmp(entries[0].name, "guidexos.debugger.json") == 0);
+    h.listStorageMode = 2;
+    CHECK(host->bare_metal_file_list(context, projectDirectory, entries, 2, &count, &truncated) ==
+          studio_v05::GX_ERROR_FAILED);
+    h.listStorageMode = 0;
+    h.mappedStatEnabled = 0;
 
     studio_v05::gx_build_request build{}; build.size = sizeof(build); build.version = GX_BUILD_API_VERSION;
     char projectRoot[] = "/Apps/DeveloperStudio"; char projectId[] = "com.guidexos.developerstudio";
