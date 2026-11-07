@@ -19,10 +19,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# This script also runs nested from build.ps1 under Windows PowerShell. Load
-# the built-in utility module explicitly so Get-FileHash is available in that
-# child script scope instead of relying on command auto-discovery.
-Import-Module -Name Microsoft.PowerShell.Utility -ErrorAction Stop
+# This script also runs as a nested child of Start-Process. Import the local
+# utility module by path so Get-FileHash does not depend on PSModulePath-based
+# module discovery in that child process.
+$PowerShellUtilityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1'
+Import-Module -Name $PowerShellUtilityModule -ErrorAction Stop
 
 $ServerRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
