@@ -162,12 +162,30 @@ function Test-QacS22R10QueuedCancellationNeeded {
     return $CancellationRequested -and $ReservationState -in @('Waiting','Blocked')
 }
 
+function Set-QacS22R10Com2ManifestTransport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Manifest,
+        [Parameter(Mandatory)][ValidateRange(49152,65535)][int]$Port
+    )
+    $transport = [ordered]@{
+        backend = 'qemu-serial1-tcp'
+        endpoint = ('127.0.0.1:{0}' -f $Port)
+        guestDevice = 'COM2 / second 16550 UART'
+        hostAccess = 'loopback only'
+        qualifiedOperation = 'read-only GetStorageSnapshot request type 0004'
+    }
+    $Manifest | Add-Member -NotePropertyName 'com2Transport' -NotePropertyValue $transport -Force
+    return $Manifest
+}
+
 function New-QacS22R10QemuArguments {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$ValidatedManifest,
         [Parameter(Mandatory)][string]$QemuPath,
-        [Parameter(Mandatory)][ValidateRange(49152,65535)][int]$QmpPort
+        [Parameter(Mandatory)][ValidateRange(49152,65535)][int]$QmpPort,
+        [ValidateRange(49152,65535)][Nullable[int]]$Com2TcpPort = $null
     )
 
     $manifest = $ValidatedManifest.Manifest
@@ -187,8 +205,17 @@ function New-QacS22R10QemuArguments {
         if ($argument -match '\{[^}]+\}') { throw "Unresolved QEMU argument placeholder: $argument" }
         $arguments.Add($argument)
     }
+    if ($null -ne $Com2TcpPort) {
+        if ([int]$Com2TcpPort -eq $QmpPort) { throw 'COM2 serial and QMP endpoints must use different loopback ports.' }
+        if ([int]$Com2TcpPort -eq 65253) { throw 'The historical fixed QMP endpoint cannot be reused for COM2 serial.' }
+        $arguments.Add('-serial')
+        $arguments.Add(('tcp:127.0.0.1:{0},server=on,wait=off' -f [int]$Com2TcpPort))
+    }
     if ($arguments -notcontains '-S') { $arguments.Add('-S') }
-    $qmpArguments = @($arguments | Where-Object { $_ -match '^tcp:127\.0\.0\.1:' })
+    $qmpArguments = @()
+    for ($index = 0; $index -lt ($arguments.Count - 1); $index++) {
+        if ($arguments[$index] -eq '-qmp') { $qmpArguments += $arguments[$index + 1] }
+    }
     $expectedQmpArgument = 'tcp:127.0.0.1:{0},server=on,wait=off' -f $QmpPort
     if ($qmpArguments.Count -ne 1 -or $qmpArguments[0] -ne $expectedQmpArgument) { throw 'QEMU QMP argument is not bound to this run loopback candidate.' }
     if ($QmpPort -eq 65253 -or $qmpArguments[0] -match '65253') { throw 'The historical fixed QMP endpoint is forbidden.' }
@@ -462,6 +489,36 @@ function Get-QacS22R10GuestResult {
     return [PSCustomObject]@{ Result='INCOMPLETE'; Reason='No existing PacMan gameplay PASS/FAIL marker was observed.' }
 }
 
+function Get-QacS22R10Com2GuestResult {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ObservedSerialLines)
+    $lines = $ObservedSerialLines -join "`n"
+    if ($lines -notmatch '\[SYSBRIDGE\] initialized transport=uart-com2 protocol=1') {
+        return [PSCustomObject]@{ Result='INCOMPLETE'; Reason='COM2 service initialization marker was not observed.' }
+    }
+    $requests = [regex]::Matches($lines, '(?m)^\[SYSBRIDGE\] request received type=0004 id=([0-9A-F]{8})\s*$')
+    if ($requests.Count -ne 1) {
+        return [PSCustomObject]@{ Result='INCOMPLETE'; Reason='Exactly one GetStorageSnapshot COM2 request was not observed.' }
+    }
+    $requestId = $requests[0].Groups[1].Value
+    $storage = [regex]::Matches($lines, '(?m)^\[STORAGESNAP\] generation=([0-9A-F]{16}) disks=([0-9A-F]{8}) volumes=([0-9A-F]{8}) truncated=([0-9A-F]{2}).*$')
+    if ($storage.Count -ne 1 -or $storage[0].Groups[1].Value -eq '0000000000000000' -or $storage[0].Groups[2].Value -eq '00000000') {
+        return [PSCustomObject]@{ Result='FAIL'; Reason='The kernel storage-provider snapshot marker was absent, empty, or invalid.' }
+    }
+    if ($lines -notmatch '\[SYSBRIDGE\] authorized service=read_only_snapshot') {
+        return [PSCustomObject]@{ Result='FAIL'; Reason='The read-only storage request was not authorized and dispatched.' }
+    }
+    $responses = [regex]::Matches($lines, '(?m)^\[SYSBRIDGE\] response sent id=([0-9A-F]{8}) status=([0-9A-F]{4}) result=([^\s]+)\s*$')
+    $matching = @($responses | Where-Object { $_.Groups[1].Value -eq $requestId })
+    if ($matching.Count -ne 1) {
+        return [PSCustomObject]@{ Result='INCOMPLETE'; Reason='The COM2 request has no unique matching response-delivery marker.' }
+    }
+    if ($matching[0].Groups[2].Value -ne '0000' -or $matching[0].Groups[3].Value -ne 'ok') {
+        return [PSCustomObject]@{ Result='FAIL'; Reason='The COM2 storage response did not report status Ok and successful UART delivery.' }
+    }
+    return [PSCustomObject]@{ Result='PASS'; Reason=('COM2 GetStorageSnapshot request {0} reached the kernel storage provider and returned a non-empty snapshot.' -f $requestId) }
+}
+
 function Test-QacS22R10CleanupEligible {
     [CmdletBinding()]
     param(
@@ -617,4 +674,4 @@ function Close-QacS22R10QmpClient {
     try { $Client.Tcp.Dispose() } catch { }
 }
 
-Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Get-QacS22R10QmpListenerObservation, Test-QacS22R10ContinuationAuthorization, Stop-QacS22R10OwnedChild, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient
+Export-ModuleMember -Function Get-QacS22R10FullPath, Get-QacS22R10ArtifactIdentity, Get-QacS22R10ValidatedManifest, Get-QacS22R10QmpPortCandidate, New-QacS22R10QacArguments, Test-QacS22R10CoordinatorOnline, Test-QacS22R10QueuedCancellationNeeded, Set-QacS22R10Com2ManifestTransport, New-QacS22R10QemuArguments, Test-QacS22R10DirectChildIdentity, Test-QacS22R10ReservationIdentity, Test-QacS22R10ReleaseIdentity, New-QacS22R10ScreendumpCommand, Test-QacS22R10QmpListenerOwner, Get-QacS22R10QmpListenerObservation, Test-QacS22R10ContinuationAuthorization, Stop-QacS22R10OwnedChild, Test-QacS22R10RetryablePortCollision, Test-QacS22R10MarkerWithinDeadline, Get-QacS22R10GuestResult, Get-QacS22R10Com2GuestResult, Test-QacS22R10CleanupEligible, Complete-QacS22R10ProcessOutputDrain, Open-QacS22R10QmpClient, Invoke-QacS22R10Qmp, Initialize-QacS22R10QmpClient, Close-QacS22R10QmpClient

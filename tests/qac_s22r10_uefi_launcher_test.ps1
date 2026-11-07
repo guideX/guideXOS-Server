@@ -189,6 +189,17 @@ try {
     Assert-True 'QMP candidate is a fresh OS-assigned port outside an occupied fixture endpoint' ($port -ne $occupiedPort)
     Assert-True 'QMP candidate can be bound by an exclusive loopback TCP listener' $candidateBindable
     $args=New-QacS22R10QemuArguments -ValidatedManifest $validated -QemuPath 'C:\Program Files\qemu\qemu-system-x86_64.exe' -QmpPort $port
+    $com2Port=Get-QacS22R10QmpPortCandidate -ExcludePort @($port,$occupiedPort)
+    $com2Args=New-QacS22R10QemuArguments -ValidatedManifest $validated -QemuPath 'C:\Program Files\qemu\qemu-system-x86_64.exe' -QmpPort $port -Com2TcpPort $com2Port
+    $serialPairs=@(for($i=0;$i -lt ($com2Args.Count - 1);$i++){if($com2Args[$i] -eq '-serial'){$com2Args[$i+1]}})
+    $qmpPairIndex=[Array]::IndexOf([string[]]$com2Args,'-qmp')
+    $com2ManifestFixture=[PSCustomObject]@{schemaVersion=1;runId='manifest-fixture'}
+    $com2ManifestFixture=Set-QacS22R10Com2ManifestTransport -Manifest $com2ManifestFixture -Port 54177
+    $com2ManifestRoundTrip=ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $com2ManifestFixture -Compress -Depth 8)
+    Assert-True 'optional COM2 backend uses a second loopback TCP serial channel while retaining the file-backed COM1 log' ($serialPairs.Count -eq 2 -and $serialPairs[0] -like 'file:*' -and $serialPairs[1] -eq "tcp:127.0.0.1:$com2Port,server=on,wait=off")
+    Assert-True 'the QMP guard still validates only the QMP argument when a second loopback TCP serial endpoint is present' ($qmpPairIndex -ge 0 -and $com2Args[$qmpPairIndex+1] -eq "tcp:127.0.0.1:$port,server=on,wait=off")
+    Assert-True 'COM2 transport metadata is added to an existing staging manifest and survives JSON serialization' ($com2ManifestRoundTrip.runId -eq 'manifest-fixture' -and $com2ManifestRoundTrip.com2Transport.endpoint -eq '127.0.0.1:54177' -and $com2ManifestRoundTrip.com2Transport.qualifiedOperation -eq 'read-only GetStorageSnapshot request type 0004')
+    [void](Assert-Throws 'COM2 and QMP cannot share the same loopback port' { New-QacS22R10QemuArguments -ValidatedManifest $validated -QemuPath 'C:\Program Files\qemu\qemu-system-x86_64.exe' -QmpPort $port -Com2TcpPort $port } 'different loopback ports')
     $writable=@($args | Where-Object {$_ -match '(?i)fat:rw:'})
     Assert-True 'only the run-private ESP is selected in the actual writable FAT argument' ($writable.Count -eq 1 -and $writable[0] -like "*fat:rw:$($validated.Esp.privatePath)*" -and $writable[0] -notlike "*fat:rw:$($sources.Esp)*")
     $writableJoined = $writable -join ' '
@@ -432,6 +443,16 @@ try {
     Assert-True 'missing PacMan gameplay marker remains incomplete' ((Get-QacS22R10GuestResult -ObservedSerialLines @('[NAVIGATOR-SMOKE] result=PASS')).Result -eq 'INCOMPLETE')
     Assert-True 'an existing PacMan guest PASS marker is classified separately' ((Get-QacS22R10GuestResult -ObservedSerialLines @('[PACMAN-SMOKE] result=PASS')).Result -eq 'PASS')
     Assert-True 'child launch failure can be classified without claiming guest acceptance' ((Get-QacS22R10GuestResult -ObservedSerialLines @()).Result -eq 'INCOMPLETE')
+    $com2PassLines=@(
+        '[SYSBRIDGE] initialized transport=uart-com2 protocol=1 max-response=1234',
+        '[SYSBRIDGE] request received type=0004 id=00000001',
+        '[STORAGESNAP] generation=0000000000000042 disks=00000001 volumes=00000005 truncated=00 diskId=ata:0',
+        '[SYSBRIDGE] authorized service=read_only_snapshot',
+        '[SYSBRIDGE] response sent id=00000001 status=0000 result=ok'
+    )
+    Assert-True 'COM2 guest result requires initialization, the type-0004 request, a non-empty provider snapshot, authorization, and matching successful response delivery' ((Get-QacS22R10Com2GuestResult -ObservedSerialLines $com2PassLines).Result -eq 'PASS')
+    Assert-True 'COM2 guest result rejects a successful-looking response without provider snapshot evidence' ((Get-QacS22R10Com2GuestResult -ObservedSerialLines @($com2PassLines[0],$com2PassLines[1],$com2PassLines[3],$com2PassLines[4])).Result -eq 'FAIL')
+    Assert-True 'COM2 guest result rejects a response whose request identifier does not match' ((Get-QacS22R10Com2GuestResult -ObservedSerialLines @($com2PassLines[0],$com2PassLines[1],$com2PassLines[2],$com2PassLines[3],'[SYSBRIDGE] response sent id=00000002 status=0000 result=ok')).Result -eq 'INCOMPLETE')
 
     $goodServer=[Qac3c3QmpFixtureServer]::new('guideXOS-fixture-run',$false)
     $qmpLog=Join-Path $first.OutputDirectory 'qmp-fixture-transcript.jsonl'
@@ -484,6 +505,7 @@ try {
 
     $runnerSource=Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\run-qac-s22r10-uefi.ps1') -Raw
     Assert-True 'interactive runner ignores empty console lines instead of terminating an active QAC guest' ($runnerSource -match 'if \(\[string\]::IsNullOrWhiteSpace\(\$operatorLine\)\)\s*\{[\s\S]{0,1024}continue')
+    Assert-True 'COM2 qualification option is recorded in the run manifest and forwarded through QEMU arguments while preserving QAC acceptance management' ($runnerSource -match '\[ValidateRange\(49152,65535\)\]\[Nullable\[int\]\]\$Com2TcpPort' -and $launchModuleSource -match 'qualifiedOperation = ''read-only GetStorageSnapshot request type 0004''' -and $runnerSource -match 'Set-QacS22R10Com2ManifestTransport\s+-Manifest \$manifest\s+-Port' -and $runnerSource -match 'New-QacS22R10QemuArguments[^\r\n]*-Com2TcpPort \$Com2TcpPort' -and $runnerSource -match "mode='acceptance'" -and $runnerSource -match 'New-QacS22R10QacArguments')
     Assert-True 'guest command handler accepts and ignores an empty Text value before command parsing' ($runnerSource -match 'function Invoke-GuestOperatorCommand\s*\{\s*param\(\[Parameter\(Mandatory\)\]\[AllowEmptyString\(\)\]\[string\]\$Text\)' -and $runnerSource -match 'if \(-not \$trimmed\)\s*\{\s*\$script:CurrentStage = ''guest-interaction''\s*\$script:CurrentOperation = ''ignored-empty-console-line''\s*return \$false')
     Assert-True 'ignored blank console input is recorded with its interaction stage' ($runnerSource.Contains('empty-console-line-ignored'' -Data @{stage=$script:CurrentStage}'))
     Assert-True 'abnormal runner termination records stage, operation, exception type, message, and script line while retaining ownership-safe recovery handling' ($runnerSource.Contains('failureDetails = [ordered]@{') -and $runnerSource.Contains('exceptionType = $_.Exception.GetType().FullName') -and $runnerSource.Contains('lineNumber = if ($_.InvocationInfo)') -and $runnerSource.Contains("Set-ManifestExecution -Status 'unknown'") -and $runnerSource.Contains("Set-ExecutionState -State 'RecoveryRequired'"))

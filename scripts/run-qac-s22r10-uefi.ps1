@@ -16,6 +16,7 @@ param(
     [ValidateRange(1,30)][int]$QmpConnectTimeoutSeconds = 5,
     [ValidateRange(1,120)][int]$ShutdownTimeoutSeconds = 30,
     [ValidateRange(1,10)][int]$MaxQmpPortAttempts = 5,
+    [ValidateRange(49152,65535)][Nullable[int]]$Com2TcpPort = $null,
     [string]$CancelFilePath
 )
 
@@ -470,6 +471,8 @@ function Invoke-GuestOperatorCommand {
     switch ($parts[0].ToLowerInvariant()) {
         'help' {
             Write-Host 'Commands: status | screenshot LABEL | key KEY | qkey ARROW | move DX,DY | click BUTTON | wait SECONDS | result fail REASON | result pass | shutdown'
+            if ($null -ne $script:Com2TcpPort) { Write-Host 'This run uses result pass for the COM2 storage request/provider/response gate; the external read-only client must also have succeeded.' }
+            else { Write-Host 'This run uses result pass for the PacMan guest smoke marker.' }
             Write-Host 'Keys include meta_l, ctrl-esc, esc, enter, tab, up, down, left, right, f12, alt-f4, letters, digits, slash, dot, shift-semicolon, and shift-letter.'
             Write-Host 'qkey pairs a paced up/down/left/right QMP key event with ownership checks and fail-safe release.'
             Write-Host 'Mouse moves are relative, with each axis limited to -49..49. Clicks pair button down/up with ownership checks.'
@@ -590,8 +593,12 @@ function Invoke-GuestOperatorCommand {
             if ($parts.Count -lt 2) { throw 'result requires pass or fail.' }
             $kind = $parts[1].ToLowerInvariant()
             if ($kind -eq 'pass') {
-                $guest = Get-QacS22R10GuestResult -ObservedSerialLines $script:SerialLines.ToArray()
-                if ($guest.Result -ne 'PASS') { throw 'PacMan PASS is rejected because the existing live guest PASS marker was not observed.' }
+                $guest = if ($null -ne $script:Com2TcpPort) {
+                    Get-QacS22R10Com2GuestResult -ObservedSerialLines $script:SerialLines.ToArray()
+                } else {
+                    Get-QacS22R10GuestResult -ObservedSerialLines $script:SerialLines.ToArray()
+                }
+                if ($guest.Result -ne 'PASS') { throw "Guest PASS is rejected because the configured qualification markers were not satisfied: $($guest.Reason)" }
                 $script:Execution.guestResult = 'PASS'
                 $script:Execution.guestResultReason = $guest.Reason
             } elseif ($kind -eq 'fail') {
@@ -725,7 +732,7 @@ try {
         qacCliReleaseReported=$false; qacCliReleaseReportedReservationId=$null; qacCliReleaseReportedChildProcessId=0; qacCliReleaseLineObservedAtUtc=$null;
         reservationReleaseVerified=$false; recoveryRequired=$false;
         manifestSchemaVersion=1; failureDetails=$null; qmp=[ordered]@{endpoint=$null;status='not-allocated';ownership='unbound';quitAcknowledged=$false;quitResponse=$null;lastConnectionError=$null;lastListenerProbe=$null};
-        qemuArguments=@(); guestResult='INCOMPLETE'; guestResultReason=$null; cleanupEligible=$false;
+        qemuArguments=@(); com2Transport=[ordered]@{enabled=($null -ne $Com2TcpPort);port=if($null -ne $Com2TcpPort){[int]$Com2TcpPort}else{$null};endpoint=if($null -ne $Com2TcpPort){'127.0.0.1:{0}' -f [int]$Com2TcpPort}else{$null}}; guestResult='INCOMPLETE'; guestResultReason=$null; cleanupEligible=$false;
         timings=[ordered]@{stagingStartAtUtc=$null;stagingCompleteAtUtc=$null;reservationRequestedAtUtc=$null;reservationGrantedAtUtc=$null;qemuChildStartAtUtc=$null;firstGuestProgressAtUtc=$null;guestCompletionOrFailureAtUtc=$null;qmpShutdownRequestedAtUtc=$null;qemuChildExitAtUtc=$null;qacReleaseReportedAtUtc=$null;qacReleaseVerifiedAtUtc=$null};
         attempts=[System.Collections.Generic.List[object]]::new(); events=[System.Collections.Generic.List[object]]::new()
     }
@@ -744,6 +751,22 @@ try {
     $script:ManifestPath = [string]$prepared.manifestPath
     $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath
     $manifest = $script:Validated.Manifest
+    if ($null -ne $Com2TcpPort) {
+        $com2Probe = $null
+        try {
+            $com2Probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, [int]$Com2TcpPort)
+            $com2Probe.Server.ExclusiveAddressUse = $true
+            $com2Probe.Start(1)
+        } catch {
+            throw "COM2 loopback port $Com2TcpPort is not available; QAC admission was not requested."
+        } finally {
+            if ($null -ne $com2Probe) { $com2Probe.Stop() }
+        }
+        $manifest = Set-QacS22R10Com2ManifestTransport -Manifest $manifest -Port ([int]$Com2TcpPort)
+        Write-AtomicJson -Path $script:ManifestPath -Value $manifest
+        $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath
+        $manifest = $script:Validated.Manifest
+    }
     $script:Execution.runId = [string]$manifest.runId
     $script:Execution.workspacePath = [string]$manifest.workspacePath
     $script:Execution.manifestPath = $script:ManifestPath
@@ -800,7 +823,9 @@ try {
         $script:Execution.qmp.lastConnectionError = $null
         $script:Execution.qmp.lastListenerProbe = $null
         Set-ManifestExecution -Status 'active' -ReservationId $script:Execution.reservationId -ChildProcessId $script:Execution.childProcessId
-        $port = Get-QacS22R10QmpPortCandidate -ExcludePort $collisionAttempts.ToArray()
+        $excludedPorts = @($collisionAttempts.ToArray())
+        if ($null -ne $Com2TcpPort) { $excludedPorts += [int]$Com2TcpPort }
+        $port = Get-QacS22R10QmpPortCandidate -ExcludePort $excludedPorts
         $collisionAttempts.Add($port)
         $script:Execution.qmp.endpoint = "127.0.0.1:$port"
         $script:Execution.qmp.status = 'candidate-unbound'
@@ -819,7 +844,7 @@ try {
         $script:Execution.childStartUtc = $null
         $script:RuntimeDeadlineUtc = $null
         $script:RuntimeShutdownSent = $false
-        $script:Execution.qemuArguments = @(New-QacS22R10QemuArguments -ValidatedManifest $script:Validated -QemuPath $qemu -QmpPort $port)
+        $script:Execution.qemuArguments = @(New-QacS22R10QemuArguments -ValidatedManifest $script:Validated -QemuPath $qemu -QmpPort $port -Com2TcpPort $Com2TcpPort)
         $attempt = [ordered]@{number=$attemptNumber;qmpPort=$port;endpointStatus='unbound-candidate';reservationId=$null;childProcessId=$null;guestProgressObserved=$false;result='running'}
         $script:Execution.attempts.Add($attempt)
         Add-ExecutionEvent -Type 'qmp-endpoint-candidate' -Data @{attempt=$attemptNumber;endpoint=$script:Execution.qmp.endpoint;ownership='not-reserved-before-QAC-grant'}
