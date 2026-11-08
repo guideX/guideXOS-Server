@@ -110,21 +110,32 @@ function Clear-EditorBuffer([string]$SessionPath, [string]$QacPath, [string]$Cap
     # move to the beginning of the buffer, then delete forward through the
     # bounded fixture without bypassing the editor or VFS.
     $keys = @('Delete') * 160
-    $arguments = @{ ClickX = 320; ClickY = 86; SpecialKeys = @('Home') + $keys; KeyDelayMilliseconds = 25 }
+    # QMP screen coordinates include the native title bar, which sits 24 px
+    # above the Studio client surface used by placeCaretFromMouse.
+    $arguments = @{ ClickX = 320; ClickY = 110; SpecialKeys = $keys; KeyDelayMilliseconds = 25 }
     if (![string]::IsNullOrWhiteSpace($CapturePath)) { $arguments.CapturePath = $CapturePath }
     Send-StudioInput $SessionPath $QacPath $arguments
 }
 
 function Assert-SavedSource([string]$GuestText, [string]$SourcePath, [string]$ExpectedText) {
     $pattern = '(?m)^\[developer-studio-app\] ABI3_STUDIO_VFS_IO action=write path=' +
-        [regex]::Escape($SourcePath) + ' bytes=(\d+) datahex=([0-9a-f]*)\r?$'
+        [regex]::Escape($SourcePath) + ' bytes=(\d+)(?: datahex=([0-9a-f]+)| fnv1a32=([0-9a-f]{8}))\r?$'
     $writes = [regex]::Matches($GuestText, $pattern)
     if ($writes.Count -eq 0) { throw "Studio did not report a VFS save for $SourcePath." }
     $lastWrite = $writes[$writes.Count - 1]
     $expectedBytes = [Text.Encoding]::UTF8.GetBytes($ExpectedText)
-    $actualHex = $lastWrite.Groups[2].Value
     $expectedHex = [BitConverter]::ToString($expectedBytes).Replace('-', '').ToLowerInvariant()
-    if ([int]$lastWrite.Groups[1].Value -ne $expectedBytes.Length -or $actualHex -cne $expectedHex) {
+    [uint64]$expectedHash = 2166136261
+    foreach ($byte in $expectedBytes) {
+        $expectedHash = (($expectedHash -bxor [uint64]$byte) * 16777619) -band [uint64]4294967295
+    }
+    $expectedFnv = $expectedHash.ToString('x8')
+    $exactBytesMatch = if ($lastWrite.Groups[2].Success) {
+        $lastWrite.Groups[2].Value -ceq $expectedHex
+    } else {
+        $lastWrite.Groups[3].Value -ceq $expectedFnv
+    }
+    if ([int]$lastWrite.Groups[1].Value -ne $expectedBytes.Length -or !$exactBytesMatch) {
         throw "Studio saved unexpected source bytes to $SourcePath (actual length $($lastWrite.Groups[1].Value)); expected $($expectedBytes.Length) bytes."
     }
 }
@@ -243,7 +254,8 @@ function Invoke-StudioBoot([int]$BootNumber) {
         # Studio creates and opens src/main.cpp with its NativeElf starter.
         # Replace that editor buffer through normal keyboard input and save it
         # through the pinned Studio VFS callback before invoking Build.
-        Clear-EditorBuffer $sessionPath $qacPath
+        Clear-EditorBuffer $sessionPath $qacPath (Join-Path $sessionDirectory 'r2b1-source-cleared-initial.png')
+        $record.screenshots += 'r2b1-source-cleared-initial.png'
         Send-StudioInput $sessionPath $qacPath @{ Text = $validSource }
         $saveMarker = 'GUIDEXOS_DEVELOPER_STUDIO_MARKER document_save=PASS name=main.cpp'
         $saveBefore = Get-Count (Read-GuestText $guestLog) $saveMarker
@@ -308,7 +320,8 @@ function Invoke-StudioBoot([int]$BootNumber) {
 
         # A malformed rebuild must fail with a source location and remove the
         # stale project-local ELF while leaving the last package untouched.
-        Clear-EditorBuffer $sessionPath $qacPath
+        Clear-EditorBuffer $sessionPath $qacPath (Join-Path $sessionDirectory 'r2b1-source-cleared-malformed.png')
+        $record.screenshots += 'r2b1-source-cleared-malformed.png'
         Send-StudioInput $sessionPath $qacPath @{ Text = $invalidSource }
         $saveBefore = Get-Count (Read-GuestText $guestLog) $saveMarker
         Send-StudioInput $sessionPath $qacPath @{ SpecialKeys = @('ControlS') }
@@ -336,7 +349,8 @@ function Invoke-StudioBoot([int]$BootNumber) {
 
         # Restore valid source, rebuild, and verify the artifact digest changes.
         $recoveredSource = 'int gx_main(void* ctx) { return 43; }'
-        Clear-EditorBuffer $sessionPath $qacPath
+        Clear-EditorBuffer $sessionPath $qacPath (Join-Path $sessionDirectory 'r2b1-source-cleared-recovery.png')
+        $record.screenshots += 'r2b1-source-cleared-recovery.png'
         Send-StudioInput $sessionPath $qacPath @{ Text = $recoveredSource }
         $saveBefore = Get-Count (Read-GuestText $guestLog) $saveMarker
         Send-StudioInput $sessionPath $qacPath @{ SpecialKeys = @('ControlS') }
