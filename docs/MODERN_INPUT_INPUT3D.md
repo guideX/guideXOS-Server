@@ -567,7 +567,8 @@ addresses. It therefore reports `DEVICE_DMA_MAPPING_NOT_ESTABLISHED` (or the
 more specific routing/register/RMRR blocker) and never authorizes the remapped
 Intel controller to DMA. A disabled translation observation is not permission
 to bypass VT-d. The preexisting valid-scan/no-remapping direct-DMA contract is
-unchanged; AMD remains on its IVRS safety path.
+unchanged; AMD systems with IVRS continue on their IVRS safety path. If an AMD
+platform lacks IVRS but advertises DMAR, the DMAR path remains fail-closed.
 
 When a DMAR table is present, read-only route diagnostics also inspect xHCI
 devices with non-Intel PCI vendor IDs. This lets virtual and mixed-vendor

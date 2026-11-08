@@ -337,7 +337,8 @@ static const char* dma_translation_block_reason()
     const modern_input_diagnostics::ControllerSnapshot& controller =
         snapshot.controllers[static_cast<uint32_t>(s_diagnosticControllerIndex)];
     if (modern_input_diagnostics::intel_dmar_applies_to_platform(
-            snapshot.platform, snapshot.dmarTablePresent)) {
+            snapshot.platform, snapshot.dmarTablePresent,
+            snapshot.ivrsTableCount != 0u)) {
         if (!snapshot.dmarScanValid) return "ACPI_DMAR_SCAN_UNKNOWN";
         if (snapshot.dmarTableCount == 0u) return "ACPI_DMAR_NOT_PRESENT";
         if (snapshot.dmarStatus == intel_dmar::ParseStatus::Malformed ||

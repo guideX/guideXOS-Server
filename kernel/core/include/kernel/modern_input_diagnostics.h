@@ -136,10 +136,12 @@ enum class Platform : uint8_t {
 };
 
 inline bool intel_dmar_applies_to_platform(Platform platform,
-                                           bool dmarTablePresent)
+                                           bool dmarTablePresent,
+                                           bool ivrsTablePresent)
 {
     return platform == Platform::Intel ||
-           (platform == Platform::Other && dmarTablePresent);
+           (dmarTablePresent &&
+            (platform == Platform::Other || !ivrsTablePresent));
 }
 
 inline bool intel_dmar_route_diagnostics_applies(uint16_t vendorId,

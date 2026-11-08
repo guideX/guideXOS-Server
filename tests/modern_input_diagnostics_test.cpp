@@ -897,10 +897,11 @@ void test_intel_diagnostic_publication_and_formatting()
     copy_snapshot(&snapshot);
     require(snapshot.platform == Platform::Amd,
             "AMD classification remains available after Intel diagnostic publication");
-    require(intel_dmar_applies_to_platform(Platform::Intel, false) &&
-            intel_dmar_applies_to_platform(Platform::Other, true) &&
-            !intel_dmar_applies_to_platform(Platform::Other, false) &&
-            !intel_dmar_applies_to_platform(Platform::Amd, true),
+    require(intel_dmar_applies_to_platform(Platform::Intel, false, false) &&
+            intel_dmar_applies_to_platform(Platform::Other, true, false) &&
+            !intel_dmar_applies_to_platform(Platform::Other, false, false) &&
+            intel_dmar_applies_to_platform(Platform::Amd, true, false) &&
+            !intel_dmar_applies_to_platform(Platform::Amd, true, true),
             "DMAR routing follows Intel tables without overriding the AMD IVRS platform path");
     require(intel_dmar_route_diagnostics_applies(0x8086u, false) &&
             intel_dmar_route_diagnostics_applies(0x1b36u, true) &&
