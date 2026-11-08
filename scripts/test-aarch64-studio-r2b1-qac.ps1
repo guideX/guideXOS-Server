@@ -106,13 +106,30 @@ function Send-StudioInput([string]$SessionPath, [string]$QacPath, [hashtable]$In
 }
 
 function Clear-EditorBuffer([string]$SessionPath, [string]$QacPath, [string]$CapturePath = '') {
-    # The Studio editor has no select-all command. New NativeElf projects open
-    # the generated source; focus its last line, move to EOF, then use bounded
-    # backspaces to clear the starter without bypassing the editor or VFS.
-    $keys = @('Backspace') * 160
-    $arguments = @{ ClickX = 400; ClickY = 200; SpecialKeys = @('End') + $keys; KeyDelayMilliseconds = 25 }
+    # The Studio editor has no select-all command. Focus the first source line,
+    # move to the beginning of the buffer, then delete forward through the
+    # bounded fixture without bypassing the editor or VFS.
+    $keys = @('Delete') * 160
+    $arguments = @{ ClickX = 320; ClickY = 86; SpecialKeys = @('Home') + $keys; KeyDelayMilliseconds = 25 }
     if (![string]::IsNullOrWhiteSpace($CapturePath)) { $arguments.CapturePath = $CapturePath }
     Send-StudioInput $SessionPath $QacPath $arguments
+}
+
+function Assert-SavedSource([string]$GuestText, [string]$SourcePath, [string]$ExpectedText) {
+    $pattern = '(?m)^\[developer-studio-app\] ABI3_STUDIO_VFS_IO action=write path=' +
+        [regex]::Escape($SourcePath) + ' bytes=(\d+) datahex=([0-9a-f]*)\r?$'
+    $writes = [regex]::Matches($GuestText, $pattern)
+    if ($writes.Count -eq 0) { throw "Studio did not report a VFS save for $SourcePath." }
+    $lastWrite = $writes[$writes.Count - 1]
+    $bytes = [Convert]::FromHexString($lastWrite.Groups[2].Value)
+    $expectedBytes = [Text.Encoding]::UTF8.GetBytes($ExpectedText)
+    $actualHex = [Convert]::ToHexString($bytes)
+    $expectedHex = [Convert]::ToHexString($expectedBytes)
+    if ([int]$lastWrite.Groups[1].Value -ne $bytes.Length -or
+        $actualHex -cne $expectedHex) {
+        $actualText = [Text.Encoding]::UTF8.GetString($bytes)
+        throw "Studio saved unexpected source bytes to $SourcePath (actual length $($bytes.Length)); expected $($expectedBytes.Length) bytes. Actual text: $actualText"
+    }
 }
 
 function Save-Workflow([string]$Path, [hashtable]$Record) {
@@ -235,6 +252,7 @@ function Invoke-StudioBoot([int]$BootNumber) {
         $saveBefore = Get-Count (Read-GuestText $guestLog) $saveMarker
         Send-StudioInput $sessionPath $qacPath @{ SpecialKeys = @('ControlS'); CapturePath = (Join-Path $sessionDirectory 'r2b1-source-saved.png') }
         $text = Wait-GuestOccurrence $guestLog $saveMarker ($saveBefore + 1) $runner 45
+        Assert-SavedSource $text $sourcePath $validSource
         $sourceWritePattern = '(?m)^.*ABI3_STUDIO_VFS_IO action=write path=' + [regex]::Escape($sourcePath) +
             ' bytes=' + $record.source_write_bytes + ' datahex=' + [regex]::Escape($expectedHex) + '\r?$'
         $sourceWrite = [regex]::Match($text, $sourceWritePattern)
@@ -297,7 +315,8 @@ function Invoke-StudioBoot([int]$BootNumber) {
         Send-StudioInput $sessionPath $qacPath @{ Text = $invalidSource }
         $saveBefore = Get-Count (Read-GuestText $guestLog) $saveMarker
         Send-StudioInput $sessionPath $qacPath @{ SpecialKeys = @('ControlS') }
-        $null = Wait-GuestOccurrence $guestLog $saveMarker ($saveBefore + 1) $runner 45
+        $text = Wait-GuestOccurrence $guestLog $saveMarker ($saveBefore + 1) $runner 45
+        Assert-SavedSource $text $sourcePath $invalidSource
         $buildFailureBefore = Get-Count (Read-GuestText $guestLog) $buildFailed
         $text = Read-GuestText $guestLog
         $validationBefore = Get-Count $text $artifactValidation
@@ -324,7 +343,8 @@ function Invoke-StudioBoot([int]$BootNumber) {
         Send-StudioInput $sessionPath $qacPath @{ Text = $recoveredSource }
         $saveBefore = Get-Count (Read-GuestText $guestLog) $saveMarker
         Send-StudioInput $sessionPath $qacPath @{ SpecialKeys = @('ControlS') }
-        $null = Wait-GuestOccurrence $guestLog $saveMarker ($saveBefore + 1) $runner 45
+        $text = Wait-GuestOccurrence $guestLog $saveMarker ($saveBefore + 1) $runner 45
+        Assert-SavedSource $text $sourcePath $recoveredSource
         $text = Read-GuestText $guestLog
         $buildSuccessBefore = Get-Count $text $buildComplete
         $buildFailureBefore = Get-Count $text $buildFailed
