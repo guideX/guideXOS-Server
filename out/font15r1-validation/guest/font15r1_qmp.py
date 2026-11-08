@@ -30,6 +30,11 @@ MAX_DRAG_SECONDS = 60.0
 DEFAULT_CLEANUP_SECONDS = 3.0
 DEFAULT_COMMAND_SECONDS = 5.0
 MAX_QMP_LINE_BYTES = 1024 * 1024
+CONNECTION_OWNER_RECHECKS = 2
+CONNECTION_OWNER_RECHECK_DELAY_SECONDS = 0.025
+SCREENSHOT_ARTIFACT_TIMEOUT_SECONDS = 1.0
+SCREENSHOT_ARTIFACT_POLL_SECONDS = 0.025
+MAX_SCREENSHOT_PIXELS = 100_000_000
 
 
 def utc_now() -> str:
@@ -42,6 +47,18 @@ class QMPError(RuntimeError):
 
 class EndpointIdentityError(QMPError):
     """The QMP endpoint could not be tied to the expected QEMU process."""
+
+
+class ConnectionOwnershipError(EndpointIdentityError):
+    """The established connection owner set did not match the QAC-owned PID."""
+
+    def __init__(self, owner_pids: list[int], expected_pid: int) -> None:
+        self.owner_pids = list(owner_pids)
+        self.expected_pid = expected_pid
+        super().__init__(
+            f"established QMP connection owner set {self.owner_pids!r} does not match "
+            f"the expected QAC-owned PID {expected_pid}"
+        )
 
 
 class QMPConnectionLost(QMPError):
@@ -61,6 +78,10 @@ class QMPCommandError(QMPError):
         self.execute = execute
         self.response = response
         super().__init__(f"QMP {execute} failed: {response.get('error')}")
+
+
+class ScreenshotArtifactError(QMPError):
+    """The QMP screendump reply did not produce a complete valid PPM artifact."""
 
 
 @dataclass(frozen=True)
@@ -276,10 +297,7 @@ class WindowsEndpointVerifier:
             }
         )
         if connection_pids != [expected_pid]:
-            raise EndpointIdentityError(
-                f"established QMP connection owner set {connection_pids!r} does not match "
-                f"the expected QAC-owned PID {expected_pid}"
-            )
+            raise ConnectionOwnershipError(connection_pids, expected_pid)
         current = self._process_identity(expected_pid)
         self._validate_qemu(current, expected_pid)
         if current != identity:
@@ -344,20 +362,92 @@ class QMP:
         self._closed = False
         self._uncertain_buttons: dict[str, str] = {}
         self._active_drag_button: str | None = None
-        self._identity = self.verifier.verify_listener(
-            self.port, self.expected_pid, self.command_timeout
+        self._record(
+            {
+                "kind": "connection-phase",
+                "phase": "listener-verification-start",
+                "host": QMP_HOST,
+                "port": self.port,
+                "expected_pid": self.expected_pid,
+            }
+        )
+        try:
+            self._identity = self.verifier.verify_listener(
+                self.port, self.expected_pid, self.command_timeout
+            )
+        except BaseException as exc:
+            self._record(
+                {
+                    "kind": "connection-phase",
+                    "phase": "listener-verification-failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            raise
+        self._record(
+            {
+                "kind": "connection-phase",
+                "phase": "listener-verified",
+                "expected_pid": self.expected_pid,
+                "executable": self._identity.executable,
+                "creation_date": self._identity.creation_date,
+            }
         )
         self.sock: Any | None = None
         try:
+            self._record(
+                {
+                    "kind": "connection-phase",
+                    "phase": "socket-connect-start",
+                    "host": QMP_HOST,
+                    "port": self.port,
+                }
+            )
             try:
                 self.sock = connector((QMP_HOST, self.port), timeout=self.command_timeout)
             except (socket.timeout, TimeoutError) as exc:
+                self._record(
+                    {
+                        "kind": "connection-phase",
+                        "phase": "socket-connect-failed",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                )
                 raise QMPTimeout(f"timed out connecting to loopback QMP port {self.port}") from exc
             except OSError as exc:
+                self._record(
+                    {
+                        "kind": "connection-phase",
+                        "phase": "socket-connect-failed",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                )
                 raise QMPConnectionLost(
                     f"cannot connect to loopback QMP port {self.port}: {exc}"
                 ) from exc
-            self._verify_connection(self.command_timeout)
+            self._record(
+                {
+                    "kind": "connection-phase",
+                    "phase": "socket-connected",
+                    "local": self.sock.getsockname(),
+                    "peer": self.sock.getpeername(),
+                }
+            )
+            try:
+                self._verify_connection(self.command_timeout)
+            except BaseException as exc:
+                self._record(
+                    {
+                        "kind": "connection-phase",
+                        "phase": "connection-ownership-failed",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                )
+                raise
             greeting = self._read_message(self.clock() + self.command_timeout)
             if not isinstance(greeting.get("QMP"), dict):
                 raise QMPProtocolError(f"unexpected QMP greeting: {greeting!r}")
@@ -401,9 +491,45 @@ class QMP:
     def _verify_connection(self, timeout: float) -> None:
         if self.sock is None or self._closed:
             raise QMPConnectionLost("QMP connection is closed")
-        self.verifier.verify_connection(
-            self.port, self.expected_pid, self._identity, self.sock, timeout
-        )
+        deadline = self.clock() + timeout
+        for attempt in range(CONNECTION_OWNER_RECHECKS + 1):
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                raise QMPTimeout("QMP connection ownership check exceeded its deadline")
+            try:
+                self.verifier.verify_connection(
+                    self.port, self.expected_pid, self._identity, self.sock, remaining
+                )
+            except ConnectionOwnershipError as exc:
+                self._record(
+                    {
+                        "kind": "connection-owner-check",
+                        "attempt": attempt + 1,
+                        "owner_pids": exc.owner_pids,
+                        "expected_pid": self.expected_pid,
+                        "result": "empty-owner-set" if not exc.owner_pids else "mismatch",
+                    }
+                )
+                if exc.owner_pids or attempt == CONNECTION_OWNER_RECHECKS:
+                    raise
+                remaining = deadline - self.clock()
+                if remaining <= 0:
+                    raise QMPTimeout(
+                        "QMP connection ownership recheck exceeded its deadline"
+                    ) from exc
+                delay = min(CONNECTION_OWNER_RECHECK_DELAY_SECONDS, remaining)
+                self.sleeper(delay)
+            else:
+                if attempt:
+                    self._record(
+                        {
+                            "kind": "connection-owner-check",
+                            "attempt": attempt + 1,
+                            "expected_pid": self.expected_pid,
+                            "result": "verified-after-empty-snapshot",
+                        }
+                    )
+                return
 
     def _read_message(self, deadline: float) -> dict[str, Any]:
         if self.sock is None or self._closed:
@@ -761,10 +887,162 @@ class QMP:
     def hmp(self, command: str) -> dict[str, Any]:
         return self._command("human-monitor-command", {"command-line": command})
 
+    @staticmethod
+    def _ppm_artifact_info(path: Path) -> dict[str, int | str]:
+        whitespace = b" \t\r\n\v\f"
+        try:
+            artifact_size = path.stat().st_size
+            with path.open("rb") as stream:
+                header = stream.read(4096)
+        except OSError as exc:
+            raise ScreenshotArtifactError(
+                f"cannot read screenshot artifact {path}: {exc}"
+            ) from exc
+
+        offset = 0
+
+        def token() -> bytes:
+            nonlocal offset
+            while offset < len(header):
+                if header[offset] in whitespace:
+                    offset += 1
+                    continue
+                if header[offset] == ord("#"):
+                    newline = header.find(b"\n", offset)
+                    if newline < 0:
+                        offset = len(header)
+                        break
+                    offset = newline + 1
+                    continue
+                break
+            start = offset
+            while offset < len(header) and header[offset] not in whitespace + b"#":
+                offset += 1
+            return header[start:offset]
+
+        try:
+            magic = token()
+            width = int(token())
+            height = int(token())
+            max_value = int(token())
+        except (ValueError, OverflowError) as exc:
+            raise ScreenshotArtifactError(
+                f"screenshot artifact {path} has an invalid PPM header"
+            ) from exc
+        if magic != b"P6" or width <= 0 or height <= 0 or max_value != 255:
+            raise ScreenshotArtifactError(
+                f"screenshot artifact {path} is not an 8-bit binary PPM image"
+            )
+        if width * height > MAX_SCREENSHOT_PIXELS:
+            raise ScreenshotArtifactError(
+                f"screenshot artifact {path} exceeds the pixel-count limit"
+            )
+        if offset >= len(header) or header[offset] not in whitespace:
+            raise ScreenshotArtifactError(
+                f"screenshot artifact {path} has no PPM raster separator"
+            )
+        if header[offset : offset + 2] == b"\r\n":
+            offset += 2
+        else:
+            offset += 1
+        expected_size = offset + width * height * 3
+        if artifact_size != expected_size:
+            raise ScreenshotArtifactError(
+                f"screenshot artifact {path} has {artifact_size} bytes; "
+                f"expected {expected_size} for {width}x{height} PPM"
+            )
+        return {
+            "format": "PPM-P6",
+            "width": width,
+            "height": height,
+            "size_bytes": artifact_size,
+        }
+
+    def _wait_for_screenshot_artifact(self, path: Path) -> dict[str, int | str]:
+        deadline = self.clock() + SCREENSHOT_ARTIFACT_TIMEOUT_SECONDS
+        last_error: ScreenshotArtifactError | None = None
+        while True:
+            try:
+                return self._ppm_artifact_info(path)
+            except ScreenshotArtifactError as exc:
+                last_error = exc
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                raise ScreenshotArtifactError(
+                    f"screenshot artifact verification timed out: {last_error}"
+                ) from last_error
+            self.sleeper(min(SCREENSHOT_ARTIFACT_POLL_SECONDS, remaining))
+
     def screenshot(self, path: Path) -> None:
-        full_path = str(path.resolve())
-        response = self.hmp(f"screendump {full_path}")
-        self._record({"kind": "screenshot", "path": full_path, "response": response})
+        full_path = path.resolve()
+        if full_path.suffix.casefold() != ".ppm":
+            raise ScreenshotArtifactError("QMP screendump destination must use the .ppm suffix")
+        if not full_path.parent.is_dir():
+            raise ScreenshotArtifactError(
+                f"screenshot destination directory does not exist: {full_path.parent}"
+            )
+        if full_path.exists() or full_path.is_symlink():
+            raise ScreenshotArtifactError(
+                f"screenshot destination already exists; refusing a stale artifact: {full_path}"
+            )
+
+        command_deadline = self.clock() + self.command_timeout
+        self._record(
+            {
+                "kind": "screenshot-start",
+                "path": str(full_path),
+                "transport": "QMP human-monitor-command screendump",
+            }
+        )
+        try:
+            self._verify_connection(self._remaining(command_deadline))
+            response = self._command(
+                "human-monitor-command",
+                {"command-line": f"screendump {full_path}"},
+                deadline=command_deadline,
+            )
+        except BaseException as exc:
+            self._record(
+                {
+                    "kind": "screenshot-failed",
+                    "path": str(full_path),
+                    "phase": "connection-or-qmp-command",
+                    "qmp_response_received": isinstance(exc, QMPCommandError),
+                    "qmp_command_succeeded": False,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            raise
+
+        command_ack_utc = utc_now()
+        try:
+            artifact = self._wait_for_screenshot_artifact(full_path)
+        except ScreenshotArtifactError as exc:
+            self._record(
+                {
+                    "kind": "screenshot-failed",
+                    "path": str(full_path),
+                    "phase": "artifact-verification",
+                    "qmp_command_acknowledged": True,
+                    "qmp_command_ack_utc": command_ack_utc,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            raise
+        self._record(
+            {
+                "kind": "screenshot-verified",
+                "path": str(full_path),
+                "transport": "QMP human-monitor-command screendump",
+                "qmp_command_acknowledged": True,
+                "qmp_command_ack_utc": command_ack_utc,
+                "artifact_verified_utc": utc_now(),
+                **artifact,
+                "response": response,
+            }
+        )
 
 
 def main() -> int:
