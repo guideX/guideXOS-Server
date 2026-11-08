@@ -18,7 +18,7 @@ param(
     [switch]$WaitGdb,
     [string]$Memory = "1024M",
     [string]$Arch = "amd64",
-    [ValidateSet('Development', 'ServerV03PacManOnly')]
+    [ValidateSet('Development', 'ServerV03PacManOnly', 'ServerV03PublicPreviewPacManOnly')]
     [string]$ReleaseProfile = 'Development'
 )
 
@@ -55,7 +55,7 @@ $BuildId = if ([string]::IsNullOrWhiteSpace($env:GXOS_RELEASE_BUILD_ID)) {
 $ProfileStagingRoot = $null
 $RuntimeStagingRoot = Join-Path $RootDir ("out\build-staging\" + $BuildId)
 $PacmanPackageOutputDir = Join-Path $RootDir 'Apps\PacMan'
-if ($ReleaseProfile -eq 'ServerV03PacManOnly') {
+if ($ReleaseProfile -in @('ServerV03PacManOnly', 'ServerV03PublicPreviewPacManOnly')) {
     $ProfileStagingRoot = Join-Path $RootDir ("out\release-profile\" + $BuildId)
     if ((Test-Path -LiteralPath $ProfileStagingRoot) -or (Test-Path -LiteralPath $RuntimeStagingRoot)) {
         throw "ERROR: Release staging path already exists for build ID $BuildId; refusing duplicate execution or stale artifact reuse. ESP root: $ProfileStagingRoot; runtime stage: $RuntimeStagingRoot"
@@ -76,6 +76,39 @@ if ($sourceCommitExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($sourceCommitOu
     throw "ERROR: Could not record the source Git commit for this build."
 }
 $BuildSourceCommit = ([string]$sourceCommitOutput).Trim()
+$sourceWorktreeStatus = @(& git -C $RootDir status --porcelain=v1 --untracked-files=all 2>$null)
+if ($LASTEXITCODE -ne 0) { throw 'ERROR: Could not capture the source worktree state for the release receipt.' }
+if ($ReleaseProfileContract.PublicPreviewSecurity -and $sourceWorktreeStatus.Count -gt 0) {
+    throw 'ERROR: The public-preview security profile requires a clean source checkout with no untracked build inputs.'
+}
+if ($ReleaseProfileContract.PublicPreviewSecurity -and $Arch -ne 'amd64') {
+    throw 'ERROR: The public-preview security profile is qualified only for AMD64.'
+}
+$CxxCommand = Get-Command g++ -ErrorAction SilentlyContinue
+$LinkerCommand = Get-Command ld -ErrorAction SilentlyContinue
+$AssemblerCommand = Get-Command nasm -ErrorAction SilentlyContinue
+$CxxVersion = if ($CxxCommand) { ((& $CxxCommand.Source --version 2>$null | Select-Object -First 1) -join '').Trim() } else { 'unavailable' }
+$LinkerVersion = if ($LinkerCommand) { ((& $LinkerCommand.Source --version 2>$null | Select-Object -First 1) -join '').Trim() } else { 'unavailable' }
+$AssemblerVersion = if ($AssemblerCommand) { ((& $AssemblerCommand.Source -v 2>&1 | Select-Object -First 1) -join '').Trim() } else { 'unavailable' }
+$MbedTlsProfilePath = Join-Path $RootDir 'guidexos\mbedtls_profile.json'
+$AbiHeaderPath = Join-Path $RootDir 'sdk\include\guidexos\abi.h'
+$KernelFlagReceipt = @()
+if ($ReleaseProfileContract.PublicPreviewSecurity) { $KernelFlagReceipt += '-DGXOS_PUBLIC_PREVIEW_SECURITY_PROFILE' }
+if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) { $KernelFlagReceipt += $env:EXTRA_CFLAGS.Trim() }
+$WallpaperInputRecords = @()
+$WallpaperInputRoot = Join-Path $RootDir 'assets\Backgrounds'
+$WallpaperInputNames = @('blueflower','dinos','flower','guidexosspace','guidexosspace3','redflower','ameoba','ameobagx','tronporche','Wallpaper2','merlin','merlin2','greenmedow','cpu','mountains')
+foreach ($wallpaperName in $WallpaperInputNames) {
+    foreach ($suffix in @('.png', '_thumb.png')) {
+        $relative = "assets/Backgrounds/$wallpaperName$suffix"
+        $inputPath = Join-Path $WallpaperInputRoot ("$wallpaperName$suffix")
+        if (Test-Path -LiteralPath $inputPath -PathType Leaf) {
+            $inputItem = Get-Item -LiteralPath $inputPath
+            $inputHash = (Get-FileHash -LiteralPath $inputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $WallpaperInputRecords += "$relative|$($inputItem.Length)|$inputHash"
+        }
+    }
+}
 $BuildStartedAtUtc = [DateTime]::UtcNow.ToString('o')
 $BuildIdentityPath = Join-Path $ESPDir "build-identity.txt"
 $script:BuildIdentity = [ordered]@{
@@ -86,6 +119,19 @@ $script:BuildIdentity = [ordered]@{
     sourceCommit = $BuildSourceCommit
     architecture = $Arch
     startedAtUtc = $BuildStartedAtUtc
+    sourceWorktreeCleanAtBuildStart = ([string]($sourceWorktreeStatus.Count -eq 0)).ToLowerInvariant()
+    sourceWorktreeStatusAtBuildStart = ($sourceWorktreeStatus -join ' | ')
+    wallpaperInputInventory = ($WallpaperInputRecords -join ';')
+    publicPreviewSecurityPolicy = $(if ($ReleaseProfileContract.PublicPreviewSecurity) { 'S22R18-PacMan-ReadOnly-Boot-Image-v1' } else { 'not_enabled' })
+    kernelCompiler = $(if ($CxxCommand) { $CxxCommand.Source } else { 'unavailable' })
+    kernelCompilerVersion = $CxxVersion
+    kernelLinker = $(if ($LinkerCommand) { $LinkerCommand.Source } else { 'unavailable' })
+    kernelLinkerVersion = $LinkerVersion
+    kernelAssembler = $(if ($AssemblerCommand) { $AssemblerCommand.Source } else { 'unavailable' })
+    kernelAssemblerVersion = $AssemblerVersion
+    mbedTlsProfileSha256 = $(if (Test-Path -LiteralPath $MbedTlsProfilePath -PathType Leaf) { (Get-FileHash -LiteralPath $MbedTlsProfilePath -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'missing' })
+    sdkAbiHeaderSha256 = $(if (Test-Path -LiteralPath $AbiHeaderPath -PathType Leaf) { (Get-FileHash -LiteralPath $AbiHeaderPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'missing' })
+    kernelProfileFlags = $(if ($KernelFlagReceipt.Count -gt 0) { $KernelFlagReceipt -join ' ' } else { 'none' })
     identity = 'GXOS-LARGE-FILE-PASTE-TRACE-V1'
     probe = 'GXOS-LFPASTE-20260726-02'
     imageKind = 'ESP-directory-used-as-QEMU-FAT-media'
@@ -470,6 +516,7 @@ if (!$SkipKernel) {
         # does: cd kernel && $(MAKE) ARCH=...).
         Push-Location $KernelDir
         $KernelExtraCFlags = @()
+        if ($ReleaseProfileContract.PublicPreviewSecurity) { $KernelExtraCFlags += '-DGXOS_PUBLIC_PREVIEW_SECURITY_PROFILE' }
         if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
             $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
         }

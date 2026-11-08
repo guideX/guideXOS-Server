@@ -5531,7 +5531,7 @@ void set_wallpaper_image_pack(const void* packBase, uint64_t packSize)
         return;
     }
 
-    uint8_t ramdiskIndex = kernel::ramdisk::create_readonly_at(packBase, (size_t)packSize, "wallimg");
+    uint8_t ramdiskIndex = kernel::ramdisk::create_readonly_release_image_at(packBase, (size_t)packSize, "wallimg");
     if (ramdiskIndex == 0xFF) {
         serial::puts("[desktop] failed to attach wallpaper image pack\n");
         return;

@@ -246,6 +246,7 @@ uint8_t create(size_t sizeBytes, const char* name)
     disk.sectorSize = RAMDISK_SECTOR_SIZE;
     disk.ownsMemory = true;
     disk.readOnly = false;
+    disk.releaseImage = false;
     
     // Generate name
     if (name && strlen(name) > 0) {
@@ -261,9 +262,9 @@ uint8_t create(size_t sizeBytes, const char* name)
     ++s_diskCount;
     
     // Register with block device layer
-    block::BlockDevice bdev;
+    block::BlockDevice bdev{};
     bdev.active = true;
-    bdev.type = block::BDEV_USB_MASS; // Reuse type since there's no BDEV_RAMDISK
+    bdev.type = block::BDEV_RAMDISK;
     bdev.driverIndex = index;
     bdev.totalSectors = sectorCount;
     bdev.sectorSize = RAMDISK_SECTOR_SIZE;
@@ -319,6 +320,7 @@ uint8_t create_at(void* memory, size_t sizeBytes, const char* name)
     disk.sectorSize = RAMDISK_SECTOR_SIZE;
     disk.ownsMemory = false;  // Caller owns the memory
     disk.readOnly = false;
+    disk.releaseImage = false;
     
     // Generate name
     if (name && strlen(name) > 0) {
@@ -334,9 +336,9 @@ uint8_t create_at(void* memory, size_t sizeBytes, const char* name)
     ++s_diskCount;
     
     // Register with block device layer
-    block::BlockDevice bdev;
+    block::BlockDevice bdev{};
     bdev.active = true;
-    bdev.type = block::BDEV_USB_MASS;
+    bdev.type = block::BDEV_RAMDISK;
     bdev.driverIndex = index;
     bdev.totalSectors = sectorCount;
     bdev.sectorSize = RAMDISK_SECTOR_SIZE;
@@ -360,7 +362,7 @@ uint8_t create_at(void* memory, size_t sizeBytes, const char* name)
     return index;
 }
 
-uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* name)
+static uint8_t create_readonly_at_internal(const void* memory, size_t sizeBytes, const char* name, bool releaseImage)
 {
     if (!s_initialized) {
         init();
@@ -391,6 +393,7 @@ uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* nam
     disk.sectorSize = RAMDISK_SECTOR_SIZE;
     disk.ownsMemory = false;
     disk.readOnly = true;
+    disk.releaseImage = releaseImage;
 
     if (name && strlen(name) > 0) {
         strcopy(disk.name, name, sizeof(disk.name));
@@ -404,9 +407,9 @@ uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* nam
 
     ++s_diskCount;
 
-    block::BlockDevice bdev;
+    block::BlockDevice bdev{};
     bdev.active = true;
-    bdev.type = block::BDEV_USB_MASS;
+    bdev.type = block::BDEV_RAMDISK;
     bdev.driverIndex = index;
     bdev.totalSectors = sectorCount;
     bdev.sectorSize = RAMDISK_SECTOR_SIZE;
@@ -427,6 +430,44 @@ uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* nam
     return index;
 }
 
+uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* name)
+{
+    return create_readonly_at_internal(memory, sizeBytes, name, false);
+}
+
+uint8_t create_readonly_release_image_at(const void* memory, size_t sizeBytes, const char* name)
+{
+    return create_readonly_at_internal(memory, sizeBytes, name, true);
+}
+bool is_readonly_release_image_device(uint8_t blockDeviceIndex,
+                                      uint64_t expectedGeneration)
+{
+    if (expectedGeneration == 0 ||
+        block::device_generation(blockDeviceIndex) != expectedGeneration) {
+        return false;
+    }
+
+    const block::BlockDevice* device = block::get_device(blockDeviceIndex);
+    if (!device || device->type != block::BDEV_RAMDISK ||
+        device->driverIndex >= MAX_RAMDISKS ||
+        device->readFn != read_sectors || device->writeFn != nullptr ||
+        device->flushFn != nullptr || strlen(device->name) != 7u ||
+        device->name[0] != 'w' || device->name[1] != 'a' ||
+        device->name[2] != 'l' || device->name[3] != 'l' ||
+        device->name[4] != 'i' || device->name[5] != 'm' ||
+        device->name[6] != 'g') {
+        return false;
+    }
+
+    const RamDisk* disk = &s_disks[device->driverIndex];
+    return disk->active && disk->data != nullptr && disk->readOnly && disk->releaseImage &&
+        !disk->ownsMemory && disk->sectorSize == device->sectorSize &&
+        disk->sectorCount == device->totalSectors &&
+        strlen(disk->name) == 7u && disk->name[0] == 'w' &&
+        disk->name[1] == 'a' && disk->name[2] == 'l' &&
+        disk->name[3] == 'l' && disk->name[4] == 'i' &&
+        disk->name[5] == 'm' && disk->name[6] == 'g';
+}
 void destroy(uint8_t index)
 {
     if (index >= MAX_RAMDISKS) return;
@@ -437,6 +478,7 @@ void destroy(uint8_t index)
     
     s_disks[index].active = false;
     s_disks[index].data = nullptr;
+    s_disks[index].releaseImage = false;
     
     if (s_diskCount > 0) {
         --s_diskCount;

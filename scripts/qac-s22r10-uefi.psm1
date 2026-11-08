@@ -60,10 +60,11 @@ function Get-QacS22R10ArtifactIdentity {
 
 function Get-QacS22R10ValidatedManifest {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$ManifestPath)
+    param([Parameter(Mandatory)][string]$ManifestPath, [switch]$PublicPreviewIsoOnly)
 
     $manifest = Test-QacUefiArtifactManifest -ManifestPath $ManifestPath
-    if ($manifest.project -ne 'guideXOSServer' -or $manifest.selectedWorkflow -ne 's22r10-pacman-uefi-qac') {
+    $expectedWorkflow = if ($PublicPreviewIsoOnly) { 's22r18-public-preview-iso-only-qac' } else { 's22r10-pacman-uefi-qac' }
+    if ($manifest.project -ne 'guideXOSServer' -or $manifest.selectedWorkflow -ne $expectedWorkflow) {
         throw 'Manifest project or workflow does not identify the S22R10 PacMan UEFI acceptance run.'
     }
     if ($manifest.completionStatus -ne 'complete' -or $manifest.schemaVersion -ne 1) { throw 'Manifest is incomplete or has an unsupported schema.' }
@@ -71,10 +72,15 @@ function Get-QacS22R10ValidatedManifest {
     $esp = @($manifest.artifacts | Where-Object { $_.name -eq 'esp' })
     $iso = @($manifest.artifacts | Where-Object { $_.name -eq 'release-iso' })
     $ovmf = @($manifest.artifacts | Where-Object { $_.name -eq 'ovmf-firmware' })
-    if ($esp.Count -ne 1 -or $iso.Count -ne 1 -or $ovmf.Count -ne 1 -or @($manifest.artifacts).Count -ne 3) {
+    if ($PublicPreviewIsoOnly) {
+        if ($esp.Count -ne 0 -or $iso.Count -ne 1 -or $ovmf.Count -ne 1 -or @($manifest.artifacts).Count -ne 2) {
+            throw 'Public-preview manifest must contain exactly one shared read-only ISO and one shared read-only OVMF image, with no ESP artifact.'
+        }
+    } elseif ($esp.Count -ne 1 -or $iso.Count -ne 1 -or $ovmf.Count -ne 1 -or @($manifest.artifacts).Count -ne 3) {
         throw 'Manifest must contain exactly one private ESP, one shared ISO, and one shared OVMF image.'
     }
-    if ($esp[0].kind -ne 'directory' -or $esp[0].access -ne 'writable' -or $esp[0].disposition -ne 'copy') {
+    if (-not $PublicPreviewIsoOnly -and
+        ($esp[0].kind -ne 'directory' -or $esp[0].access -ne 'writable' -or $esp[0].disposition -ne 'copy')) {
         throw 'The QEMU writable FAT input must be a private copied ESP directory.'
     }
     foreach ($readOnlyArtifact in @($iso[0],$ovmf[0])) {
@@ -101,10 +107,12 @@ function Get-QacS22R10ValidatedManifest {
         }
     }
 
-    $espSource = Get-QacS22R10ArtifactIdentity -Path ([string]$esp[0].sourcePath) -Kind directory
-    $espPrivate = Get-QacS22R10ArtifactIdentity -Path ([string]$esp[0].privatePath) -Kind directory
-    if ($espSource.Sha256 -ne [string]$esp[0].sourceSha256 -or $espPrivate.Sha256 -ne [string]$esp[0].privateSha256 -or $espPrivate.Sha256 -ne $espSource.Sha256) {
-        throw 'Canonical and private ESP identities do not match the completed manifest.'
+    if (-not $PublicPreviewIsoOnly) {
+        $espSource = Get-QacS22R10ArtifactIdentity -Path ([string]$esp[0].sourcePath) -Kind directory
+        $espPrivate = Get-QacS22R10ArtifactIdentity -Path ([string]$esp[0].privatePath) -Kind directory
+        if ($espSource.Sha256 -ne [string]$esp[0].sourceSha256 -or $espPrivate.Sha256 -ne [string]$esp[0].privateSha256 -or $espPrivate.Sha256 -ne $espSource.Sha256) {
+            throw 'Canonical and private ESP identities do not match the completed manifest.'
+        }
     }
     foreach ($artifact in @($iso[0],$ovmf[0])) {
         $identity = Get-QacS22R10ArtifactIdentity -Path ([string]$artifact.privatePath) -Kind file
@@ -113,9 +121,11 @@ function Get-QacS22R10ValidatedManifest {
         }
     }
 
-    $bootFile = Join-Path ([string]$esp[0].privatePath) 'EFI\BOOT\BOOTX64.EFI'
-    if (-not (Test-Path -LiteralPath $bootFile -PathType Leaf)) { throw 'Private workspace is missing EFI/BOOT/BOOTX64.EFI.' }
-    return [PSCustomObject]@{ Manifest=$manifest; Esp=$esp[0]; Iso=$iso[0]; Ovmf=$ovmf[0]; Workspace=$workspace; Outputs=$outputs }
+    if (-not $PublicPreviewIsoOnly) {
+        $bootFile = Join-Path ([string]$esp[0].privatePath) 'EFI\BOOT\BOOTX64.EFI'
+        if (-not (Test-Path -LiteralPath $bootFile -PathType Leaf)) { throw 'Private workspace is missing EFI/BOOT/BOOTX64.EFI.' }
+    }
+    return [PSCustomObject]@{ Manifest=$manifest; Esp=$(if ($PublicPreviewIsoOnly) { $null } else { $esp[0] }); Iso=$iso[0]; Ovmf=$ovmf[0]; Workspace=$workspace; Outputs=$outputs; PublicPreviewIsoOnly=[bool]$PublicPreviewIsoOnly }
 }
 
 function Get-QacS22R10QmpPortCandidate {
@@ -192,7 +202,7 @@ function New-QacS22R10QemuArguments {
     $arguments = [System.Collections.Generic.List[string]]::new()
     $replace = [ordered]@{
         '{ovmfFirmware}' = [string]$ValidatedManifest.Ovmf.privatePath
-        '{esp}' = [string]$ValidatedManifest.Esp.privatePath
+        '{esp}' = $(if ($ValidatedManifest.Esp) { [string]$ValidatedManifest.Esp.privatePath } else { '' })
         '{iso}' = [string]$ValidatedManifest.Iso.privatePath
         '{serialLog}' = (Get-QacS22R10FullPath (Join-Path $ValidatedManifest.Workspace ([string]$manifest.outputs.serialLog).Replace('/','\')))
         '{qemuDebugLog}' = (Get-QacS22R10FullPath (Join-Path $ValidatedManifest.Workspace ([string]$manifest.outputs.qemuDebugLog).Replace('/','\')))
@@ -206,6 +216,7 @@ function New-QacS22R10QemuArguments {
         $arguments.Add($argument)
     }
     if ($null -ne $Com2TcpPort) {
+        if ($ValidatedManifest.PublicPreviewIsoOnly) { throw 'The public-preview VM profile forbids guest-accessible COM2 host integration.' }
         if ([int]$Com2TcpPort -eq $QmpPort) { throw 'COM2 serial and QMP endpoints must use different loopback ports.' }
         if ([int]$Com2TcpPort -eq 65253) { throw 'The historical fixed QMP endpoint cannot be reused for COM2 serial.' }
         $arguments.Add('-serial')
@@ -220,14 +231,26 @@ function New-QacS22R10QemuArguments {
     if ($qmpArguments.Count -ne 1 -or $qmpArguments[0] -ne $expectedQmpArgument) { throw 'QEMU QMP argument is not bound to this run loopback candidate.' }
     if ($QmpPort -eq 65253 -or $qmpArguments[0] -match '65253') { throw 'The historical fixed QMP endpoint is forbidden.' }
 
-    $writableFatArguments = @($arguments | Where-Object { $_ -match '(?i)fat:rw:' })
-    if ($writableFatArguments.Count -ne 1 -or $writableFatArguments[0] -notlike "*fat:rw:$($ValidatedManifest.Esp.privatePath)*") {
-        throw 'QEMU writable FAT argument does not select the manifest private ESP.'
-    }
-    if ($writableFatArguments[0].IndexOf([string]$ValidatedManifest.Esp.sourcePath,[StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        throw 'Canonical ESP path appears in the writable FAT argument.'
-    }
     $joined = $arguments -join "`n"
+    if ($ValidatedManifest.PublicPreviewIsoOnly) {
+        if ($arguments -match '(?i)fat:rw:|virtio-9p|virtiofs|vhost-user|smb=|hostfwd=|(^|\s)-netdev(\s|$)|(^|\s)-nic(\s|$)|(^|\s)-virtfs(\s|$)|(^|\s)-fsdev(\s|$)') {
+            throw 'Public-preview QEMU configuration contains writable storage, network exposure, or a host filesystem integration.'
+        }
+        if (@($arguments | Where-Object { $_ -eq '-drive' }).Count -ne 2) {
+            throw 'Public-preview QEMU configuration must contain only read-only firmware and ISO drives.'
+        }
+        if ($joined -notmatch '(?i)-net\s+none' -or $joined -notmatch '(?i)-monitor\s+none') {
+            throw 'Public-preview QEMU configuration must disable guest networking and the HMP monitor.'
+        }
+    } else {
+        $writableFatArguments = @($arguments | Where-Object { $_ -match '(?i)fat:rw:' })
+        if ($writableFatArguments.Count -ne 1 -or $writableFatArguments[0] -notlike "*fat:rw:$($ValidatedManifest.Esp.privatePath)*") {
+            throw 'QEMU writable FAT argument does not select the manifest private ESP.'
+        }
+        if ($writableFatArguments[0].IndexOf([string]$ValidatedManifest.Esp.sourcePath,[StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            throw 'Canonical ESP path appears in the writable FAT argument.'
+        }
+    }
     if ($joined.IndexOf([string]$ValidatedManifest.Iso.privatePath,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or $joined -notmatch '(?i)media=cdrom,readonly=on') {
         throw 'Expected read-only ISO selection is missing from QEMU arguments.'
     }

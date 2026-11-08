@@ -114,9 +114,11 @@ try {
     $defaultProfile = Get-ReleaseProfileContract
     $developmentProfile = Get-ReleaseProfileContract -Profile 'Development'
     $pacmanOnlyProfile = Get-ReleaseProfileContract -Profile 'ServerV03PacManOnly'
+    $publicPreviewProfile = Get-ReleaseProfileContract -Profile 'ServerV03PublicPreviewPacManOnly'
     Assert-True ($defaultProfile.Name -eq 'Development' -and $defaultProfile.RequiresDeveloperStudio) 'keeps Development as the unmodified default profile'
     Assert-True ($developmentProfile.PackageNames.Count -eq 2 -and $developmentProfile.PackageNames -contains 'DeveloperStudio' -and $developmentProfile.RequiresDeveloperStudio) 'preserves the default Development profile with its PacMan and DeveloperStudio stages'
     Assert-True ($pacmanOnlyProfile.PackageNames.Count -eq 1 -and $pacmanOnlyProfile.PackageNames[0] -eq 'PacMan' -and -not $pacmanOnlyProfile.RequiresDeveloperStudio) 'selects an explicit PacMan-only Server v0.3 profile'
+    Assert-True ($publicPreviewProfile.PackageNames.Count -eq 1 -and $publicPreviewProfile.PackageNames[0] -eq 'PacMan' -and $publicPreviewProfile.PublicPreviewSecurity -and $publicPreviewProfile.OutputDirectoryName -eq 'preview-artifacts') 'defines a distinct PacMan-only public-preview profile and artifact directory'
 
     $phase25Identity = Get-DeveloperStudioSignedOffIdentity
     $phase25Fixture = Join-Path $PSScriptRoot '..\tests\fixtures\developerstudio-phase25-app.json'
@@ -235,6 +237,19 @@ try {
     Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $pacmanOnlyIdentityPath -EspRoot $pacmanOnlyEsp -ExpectedSourceCommit ('a' * 40) -ExpectedReleaseProfile 'ServerV03PacManOnly' } 'rejects a PacMan-only receipt that does not explicitly record the DeveloperStudio stage as not selected'
     Write-PacManOnlyIdentity $pacmanOnlyEsp
     Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath (Join-Path $pacmanOnlyEsp 'build-identity.txt') -EspRoot $pacmanOnlyEsp -ExpectedSourceCommit ('a' * 40) -ExpectedReleaseProfile 'Development' } 'rejects a build receipt whose selected profile differs from the requested profile'
+
+    $previewEsp = Join-Path $TestRoot 'public-preview-identity-esp'
+    New-Item -ItemType Directory -Path $previewEsp -Force | Out-Null
+    Write-PacManOnlyIdentity $previewEsp
+    $previewIdentityPath = Join-Path $previewEsp 'build-identity.txt'
+    $previewText = [IO.File]::ReadAllText($previewIdentityPath).Replace('releaseProfile=ServerV03PacManOnly', 'releaseProfile=ServerV03PublicPreviewPacManOnly')
+    $previewText += "sourceWorktreeCleanAtBuildStart=true`nsourceWorktreeStatusAtBuildStart=`npublicPreviewSecurityPolicy=S22R18-PacMan-ReadOnly-Boot-Image-v1`nkernelCompiler=g++`nkernelCompilerVersion=g++ fixture`nkernelLinker=ld`nkernelLinkerVersion=ld fixture`nkernelAssembler=nasm`nkernelAssemblerVersion=nasm fixture`nmbedTlsProfileSha256=$('a' * 64)`nsdkAbiHeaderSha256=$('b' * 64)`nkernelProfileFlags=-DGXOS_PUBLIC_PREVIEW_SECURITY_PROFILE`nwallpaperInputInventory=assets/Backgrounds/blueflower.png|1|$($('c' * 64))`n"
+    [IO.File]::WriteAllText($previewIdentityPath, $previewText, (New-Object System.Text.UTF8Encoding($false)))
+    $validatedPreviewIdentity = Assert-ReleaseBuildIdentity -IdentityPath $previewIdentityPath -EspRoot $previewEsp -ExpectedSourceCommit ('a' * 40) -ExpectedReleaseProfile 'ServerV03PublicPreviewPacManOnly' -TargetServerVersion '0.3.0'
+    Assert-True ($validatedPreviewIdentity['publicPreviewSecurityPolicy'] -eq 'S22R18-PacMan-ReadOnly-Boot-Image-v1') 'accepts a public-preview receipt attesting the required security policy and clean provenance'
+    $badPreviewText = [IO.File]::ReadAllText($previewIdentityPath).Replace('kernelProfileFlags=-DGXOS_PUBLIC_PREVIEW_SECURITY_PROFILE', 'kernelProfileFlags=none')
+    [IO.File]::WriteAllText($previewIdentityPath, $badPreviewText, (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Assert-ReleaseBuildIdentity -IdentityPath $previewIdentityPath -EspRoot $previewEsp -ExpectedSourceCommit ('a' * 40) -ExpectedReleaseProfile 'ServerV03PublicPreviewPacManOnly' } 'rejects public-preview build receipts that omit the kernel security compile flag'
 } finally {
     if (Test-Path -LiteralPath $TestRoot -PathType Container) {
         Remove-Item -LiteralPath $TestRoot -Recurse -Force

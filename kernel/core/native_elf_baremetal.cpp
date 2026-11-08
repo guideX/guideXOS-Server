@@ -21,6 +21,10 @@
 #include "bitmap_font.h"
 #include "sdk/include/guidexos/abi.h"
 #include "sdk/include/guidexos/app.h"
+#include "include/kernel/native_elf_security_policy.h"
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+#include <psa/crypto.h>
+#endif
 
 namespace kernel {
 namespace native_elf {
@@ -325,6 +329,8 @@ struct Runtime {
     NativeWindowOwner* owner;
     gx_app_context context;
     gx_host_calls host;
+    uint8_t* verifiedElf;
+    uint32_t verifiedElfBytes;
     uint8_t* image;
     uint64_t imageBytes;
     gx_result (GX_CALL *entry)(gx_app_context*);
@@ -634,8 +640,147 @@ static bool read_file_exact(const char* path, void* buffer, uint32_t length) {
     return read_at(path, 0, buffer, length, &amount) && amount == length;
 }
 
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+static bool s_sha256Initialized = false;
+static bool s_sha256InitializationFailed = false;
+static bool s_sourceRejectReported = false;
+
+static bool compute_sha256(const void* bytes, uint32_t length, uint8_t output[32]) {
+    if (!bytes || length == 0 || !output || s_sha256InitializationFailed) return false;
+    if (!s_sha256Initialized) {
+        if (psa_crypto_init() != PSA_SUCCESS) {
+            s_sha256InitializationFailed = true;
+            return false;
+        }
+        s_sha256Initialized = true;
+    }
+    size_t outputLength = 0;
+    const psa_status_t status = psa_hash_compute(PSA_ALG_SHA_256, bytes, length,
+                                                  output, 32u, &outputLength);
+    return status == PSA_SUCCESS && outputLength == 32u;
+}
+
+static void copy_digest(uint8_t destination[32], const uint8_t source[32]) {
+    for (uint32_t i = 0; i < 32u; ++i) destination[i] = source[i];
+}
+
+static bool apps_mount_path(const char* path) {
+    static const char prefix[] = "/Apps";
+    if (!path) return false;
+    for (uint32_t i = 0; i < sizeof(prefix) - 1u; ++i) {
+        if (path[i] != prefix[i]) return false;
+    }
+    return path[sizeof(prefix) - 1u] == '\0' || path[sizeof(prefix) - 1u] == '/';
+}
+
+static security::SourceState current_source_state() {
+    security::SourceState state{};
+    state.mountIndex = 0xFFu;
+    state.blockDeviceIndex = 0xFFu;
+    state.volumeIndex = 0xFFu;
+    const uint8_t mountIndex = vfs::mount_index_for_path("/Apps");
+    if (mountIndex == 0xFFu) return state;
+    const vfs::MountPoint* mount = vfs::get_mount_by_index(mountIndex);
+    if (!mount || !mount->active) return state;
+
+    state.mountPresent = true;
+    state.mountIndex = mountIndex;
+    state.blockDeviceIndex = mount->blockDevIndex;
+    state.volumeIndex = mount->fsVolumeIndex;
+    state.deviceGeneration = mount->blockDeviceGeneration;
+    state.rootMount = mount->path[0] == '/' && mount->path[1] == '\0';
+    state.supportedFilesystem = mount->fsType == vfs::FS_TYPE_FAT32;
+    state.vfsReadOnly = mount->readOnly;
+    state.alias = mount->alias;
+
+    for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS; ++i) {
+        const vfs::MountPoint* candidate = vfs::get_mount_by_index(i);
+        if (candidate && candidate->active && apps_mount_path(candidate->path)) {
+            state.nestedAppsMount = true;
+            break;
+        }
+    }
+
+    const block::BlockDevice* device = block::get_device(mount->blockDevIndex);
+    state.blockDevicePresent = device != nullptr;
+    state.blockDeviceReadOnly = device && device->type == block::BDEV_RAMDISK &&
+        device->writeFn == nullptr;
+    state.releaseRamdisk = ramdisk::is_readonly_release_image_device(
+        mount->blockDevIndex, mount->blockDeviceGeneration);
+    state.generationMatches = mount->blockDeviceGeneration != 0 &&
+        block::device_generation(mount->blockDevIndex) == mount->blockDeviceGeneration;
+    return state;
+}
+
+static const char* source_reject_reason(const security::SourceState& source) {
+    if (!source.mountPresent) return "apps-mount-missing";
+    if (!source.rootMount) return "apps-not-on-root-mount";
+    if (!source.supportedFilesystem) return "filesystem-unsupported";
+    if (!source.vfsReadOnly) return "vfs-mount-writable";
+    if (source.alias) return "mount-alias";
+    if (source.nestedAppsMount) return "apps-shadow-or-overlay";
+    if (!source.blockDevicePresent) return "backing-device-missing";
+    if (!source.blockDeviceReadOnly) return "backing-device-writable-or-unknown";
+    if (!source.releaseRamdisk) return "backing-device-not-release-ramdisk";
+    if (!source.generationMatches) return "storage-generation-changed";
+    return "source-identity-unknown";
+}
+
+static void log_security_reject(const char* reason) {
+    serial::puts("[NATIVE-ELF-PREVIEW] decision=REJECT reason=");
+    serial::puts(reason ? reason : "unknown");
+    serial::putc('\n');
+}
+
+static bool package_source_unchanged(const Package* package) {
+    if (!package) return false;
+    const security::SourceState current = current_source_state();
+    return security::same_source(package->sourceState, current);
+}
+
+static security::PackageIdentity package_identity(const Package* package,
+                                                  const uint8_t* executableDigest) {
+    security::PackageIdentity identity{};
+    if (!package) return identity;
+    identity.directory = package->directory;
+    identity.id = package->id;
+    identity.displayName = package->displayName;
+    identity.kind = "NativeElf";
+    identity.runtime = "native-elf";
+    identity.executable = package->executable;
+    identity.architecture = package->architecture;
+    identity.entryPoint = package->entryPoint;
+    identity.abi = package->abi;
+    identity.minimumServerVersion = package->minimumServerVersion;
+    identity.manifestBytes = package->manifestBytes;
+    identity.executableBytes = package->executableBytes > 0xFFFFFFFFull
+        ? 0u : static_cast<uint32_t>(package->executableBytes);
+    identity.manifestSha256 = package->manifestSha256;
+    identity.executableSha256 = executableDigest;
+    return identity;
+}
+
+static bool verify_current_manifest(const Package* package) {
+    if (!package || !package_source_unchanged(package)) return false;
+    char manifestPath[256];
+    if (!package_path(package, "app.json", manifestPath, sizeof(manifestPath))) return false;
+    const int32_t count = vfs::read_file(manifestPath, s_manifest, kMaxManifestBytes - 1u);
+    if (count < 0 || static_cast<uint32_t>(count) != package->manifestBytes) return false;
+    uint8_t digest[32];
+    if (!compute_sha256(s_manifest, static_cast<uint32_t>(count), digest) ||
+        !security::digest_matches(digest, package->manifestSha256) ||
+        !security::digest_matches(digest, security::kPacManManifestSha256)) return false;
+    s_manifest[count] = '\0';
+    return package_source_unchanged(package);
+}
+#endif
 static bool parse_package(const char* directory, Package* package) {
     if (!directory || !package) return false;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (!security::exact_text(directory, "PacMan")) { log_security_reject("unexpected-package-directory"); return false; }
+    const security::SourceState sourceBefore = current_source_state();
+    if (!security::source_allowed(sourceBefore)) { log_security_reject(source_reject_reason(sourceBefore)); return false; }
+#endif
     for (uint32_t i = 0; i < sizeof(Package); ++i) reinterpret_cast<uint8_t*>(package)[i] = 0;
     package->valid = false;
     if (!text_copy(package->directory, sizeof(package->directory), directory)) return false;
@@ -648,6 +793,15 @@ static bool parse_package(const char* directory, Package* package) {
     if (!package_path(package, "app.json", manifestPath, sizeof(manifestPath))) return false;
     const int32_t count = vfs::read_file(manifestPath, s_manifest, kMaxManifestBytes - 1u);
     if (count <= 0) return false;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (static_cast<uint32_t>(count) != security::kPacManManifestBytes ||
+        !compute_sha256(s_manifest, static_cast<uint32_t>(count), package->manifestSha256) ||
+        !security::digest_matches(package->manifestSha256, security::kPacManManifestSha256)) {
+        log_security_reject("manifest-integrity-mismatch");
+        return false;
+    }
+    package->manifestBytes = static_cast<uint32_t>(count);
+#endif
     s_manifest[count] = '\0';
     char kind[32];
     char runtime[32];
@@ -661,10 +815,13 @@ static bool parse_package(const char* directory, Package* package) {
         !json_string(s_manifest, "\"displayName\"", package->displayName, sizeof(package->displayName)) ||
         !json_string(s_manifest, "\"architecture\"", architecture, sizeof(architecture)) ||
         !text_equal(architecture, "amd64") ||
+        !text_copy(package->architecture, sizeof(package->architecture), architecture) ||
         !json_string(s_manifest, "\"path\"", package->executable, sizeof(package->executable)) ||
         !json_string(s_manifest, "\"entryPoint\"", package->entryPoint, sizeof(package->entryPoint)) ||
          !json_string(s_manifest, "\"abi\"", package->abi, sizeof(package->abi))) return false;
     (void)json_string(s_manifest, "\"icon\"", package->icon, sizeof(package->icon));
+    (void)json_string(s_manifest, "\"minGuideXOSVersion\"", package->minimumServerVersion,
+                     sizeof(package->minimumServerVersion));
     char startMenuVisible[16];
     if (json_string(s_manifest, "\"appearsInStartMenu\"", startMenuVisible, sizeof(startMenuVisible))) {
         package->startMenuVisible = !text_equal(startMenuVisible, "false");
@@ -676,6 +833,19 @@ static bool parse_package(const char* directory, Package* package) {
     vfs::FileInfo info;
     if (vfs::stat(executablePath, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR) return false;
     package->executableBytes = info.size;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    package->sourceState = sourceBefore;
+    const security::PackageIdentity identity = package_identity(package, nullptr);
+    if (!security::manifest_allowed(identity)) {
+        log_security_reject("manifest-package-contract-mismatch");
+        return false;
+    }
+    const security::SourceState sourceAfter = current_source_state();
+    if (!security::same_source(sourceBefore, sourceAfter)) {
+        log_security_reject("storage-changed-during-discovery");
+        return false;
+    }
+#endif
     package->valid = true;
     log_package_line("App Model package discovered", package);
     log_breadcrumb(nullptr, "01 DISCOVERED");
@@ -959,6 +1129,19 @@ void log_apps_lifecycle_checkpoint(AppsLifecycleCheckpoint checkpoint,
 void discover() {
     s_packageCount = 0;
     s_discovered = true;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    const security::SourceState sourceBefore = current_source_state();
+    if (!security::source_allowed(sourceBefore)) {
+        s_packageCount = 0;
+        s_discovered = false;
+        if (!s_sourceRejectReported) {
+            log_security_reject(source_reject_reason(sourceBefore));
+            s_sourceRejectReported = true;
+        }
+        return;
+    }
+    s_sourceRejectReported = false;
+#endif
     serial::puts("[NATIVE-ELF] App Model discovery root=/Apps source=bare-metal-VFS\n");
     const uint8_t iterator = vfs::opendir("/Apps");
     if (iterator == 0xFF) {
@@ -1003,6 +1186,10 @@ void discover() {
     }
     s_discoveryOpenFailureReported = false;
     vfs::DirEntry entry;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    uint32_t packageDirectoryCount = 0;
+    bool unexpectedPackageDirectory = false;
+#endif
     bool enumerationEnded = false;
     bool enumerationFailed = false;
     while (s_packageCount < kMaxPackages) {
@@ -1013,6 +1200,14 @@ void discover() {
             break;
         }
         if (entry.type != vfs::FILE_TYPE_DIRECTORY || entry.name[0] == '.') continue;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+        ++packageDirectoryCount;
+        if (!security::exact_text(entry.name, "PacMan")) {
+            unexpectedPackageDirectory = true;
+            log_security_reject("unexpected-native-package-directory");
+            continue;
+        }
+#endif
         if (parse_package(entry.name, &s_packages[s_packageCount])) ++s_packageCount;
     }
     vfs::closedir(iterator);
@@ -1035,6 +1230,22 @@ void discover() {
         return;
     }
     s_discoveryEnumerationFailureReported = false;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    const security::SourceState sourceAfter = current_source_state();
+    if (!security::same_source(sourceBefore, sourceAfter)) {
+        s_packageCount = 0;
+        s_discovered = false;
+        log_security_reject("source-changed-during-discovery");
+        return;
+    }
+    if (!security::package_inventory_allowed(packageDirectoryCount, unexpectedPackageDirectory,
+                                               s_packageCount == 1u)) {
+        s_packageCount = 0;
+        s_discovered = false;
+        log_security_reject("package-inventory-rejected");
+        return;
+    }
+#endif
     serial::puts("[NATIVE-ELF] discovery result packages=0x");
     serial::put_hex32(s_packageCount);
     if (!enumerationEnded && s_packageCount >= kMaxPackages) {
@@ -1306,11 +1517,148 @@ static uint64_t rebase_static_absolute_words(Runtime* runtime, uint64_t minimum,
     return count;
 }
 
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+static bool verify_one_package_resource(const Package* package,
+                                        const security::PackageFileIdentity& expected) {
+    if (!package || expected.bytes == 0 ||
+        expected.bytes > security::kMaxPacManResourceBytes ||
+        !package_source_unchanged(package)) return false;
+    char path[256];
+    if (!package_path(package, expected.path, path, sizeof(path))) return false;
+    vfs::FileInfo info{};
+    if (vfs::stat(path, &info) != vfs::VFS_OK ||
+        info.type != vfs::FILE_TYPE_REGULAR || info.size != expected.bytes) return false;
+
+    uint8_t* bytes = new uint8_t[expected.bytes];
+    if (!bytes) return false;
+    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    if (handle == 0xFFu || vfs::file_size(handle) != static_cast<int64_t>(expected.bytes)) {
+        if (handle != 0xFFu) vfs::close(handle);
+        delete[] bytes;
+        return false;
+    }
+    uint32_t total = 0;
+    bool readOkay = true;
+    while (total < expected.bytes) {
+        uint32_t requested = expected.bytes - total;
+        if (requested > kReadChunkBytes) requested = kReadChunkBytes;
+        const int32_t amount = vfs::read(handle, bytes + total, requested);
+        if (amount <= 0 || static_cast<uint32_t>(amount) > requested) {
+            readOkay = false;
+            break;
+        }
+        total += static_cast<uint32_t>(amount);
+    }
+    vfs::close(handle);
+    uint8_t digest[32];
+    const bool valid = readOkay && total == expected.bytes &&
+        compute_sha256(bytes, expected.bytes, digest) &&
+        security::digest_matches(digest, expected.sha256) &&
+        package_source_unchanged(package);
+    delete[] bytes;
+    return valid;
+}
+
+static bool verify_pacman_resources(const Package* package) {
+    for (uint32_t i = 0; i < security::kPacManResourceCount; ++i) {
+        if (!verify_one_package_resource(package, security::kPacManResources[i])) {
+            log_security_reject("package-resource-integrity-or-source-mismatch");
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool read_approved_executable_snapshot(Runtime* runtime) {
+    if (!runtime || !runtime->package || !package_source_unchanged(runtime->package) ||
+        !verify_current_manifest(runtime->package) ||
+        !verify_pacman_resources(runtime->package)) {
+        log_security_reject("package-or-source-changed-before-load");
+        return false;
+    }
+
+    char path[256];
+    if (!package_path(runtime->package, runtime->package->executable, path, sizeof(path))) {
+        log_security_reject("executable-path-invalid");
+        return false;
+    }
+    vfs::FileInfo info{};
+    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR ||
+        info.size != security::kPacManExecutableBytes) {
+        log_security_reject("executable-size-or-type-mismatch");
+        return false;
+    }
+
+    const uint32_t expectedBytes = security::kPacManExecutableBytes;
+    uint8_t* snapshot = new uint8_t[expectedBytes];
+    if (!snapshot) {
+        log_security_reject("verified-executable-allocation-failed");
+        return false;
+    }
+    const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    if (handle == 0xFFu || vfs::file_size(handle) != static_cast<int64_t>(expectedBytes)) {
+        if (handle != 0xFFu) vfs::close(handle);
+        delete[] snapshot;
+        log_security_reject("executable-open-or-size-changed");
+        return false;
+    }
+
+    uint32_t total = 0;
+    bool readOkay = true;
+    while (total < expectedBytes) {
+        uint32_t amountRequested = expectedBytes - total;
+        if (amountRequested > kReadChunkBytes) amountRequested = kReadChunkBytes;
+        const int32_t amount = vfs::read(handle, snapshot + total, amountRequested);
+        if (amount <= 0 || static_cast<uint32_t>(amount) > amountRequested) {
+            readOkay = false;
+            break;
+        }
+        total += static_cast<uint32_t>(amount);
+    }
+    vfs::close(handle);
+
+    uint8_t digest[32];
+    if (!readOkay || total != expectedBytes ||
+        !compute_sha256(snapshot, expectedBytes, digest) ||
+        !security::package_allowed(package_identity(runtime->package, digest)) ||
+        !package_source_unchanged(runtime->package)) {
+        delete[] snapshot;
+        log_security_reject("executable-integrity-or-source-verification-failed");
+        return false;
+    }
+
+    runtime->verifiedElf = snapshot;
+    runtime->verifiedElfBytes = expectedBytes;
+    serial::puts("[NATIVE-ELF-PREVIEW] check=PASS package=com.guidexos.pacman identity=sha256 source=readonly-boot-ramdisk snapshot=verified\n");
+    return true;
+}
+#endif
+
+static bool read_executable_at(Runtime* runtime, const char* path, uint64_t offset,
+                               void* buffer, uint32_t length, uint32_t* outRead = nullptr) {
+    if (outRead) *outRead = 0;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (!runtime || !runtime->verifiedElf || !buffer || length == 0 ||
+        offset > runtime->verifiedElfBytes ||
+        static_cast<uint64_t>(length) > runtime->verifiedElfBytes - offset) return false;
+    const uint8_t* source = runtime->verifiedElf + static_cast<uint32_t>(offset);
+    uint8_t* destination = static_cast<uint8_t*>(buffer);
+    for (uint32_t i = 0; i < length; ++i) destination[i] = source[i];
+    if (outRead) *outRead = length;
+    return true;
+#else
+    (void)runtime;
+    return read_at(path, offset, buffer, length, outRead);
+#endif
+}
 static bool load_image(Runtime* runtime) {
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (!read_approved_executable_snapshot(runtime)) return false;
+#endif
     char path[256];
     if (!package_path(runtime->package, runtime->package->executable, path, sizeof(path))) return false;
     Elf64Header header;
-    if (!read_file_exact(path, &header, sizeof(header))) {
+    if (!read_executable_at(runtime, path, 0, &header, sizeof(header))) {
         log_runtime(runtime, "load FAIL=elf-header-read");
         return false;
     }
@@ -1322,6 +1670,12 @@ static bool load_image(Runtime* runtime) {
         return false;
     }
 
+    const uint64_t executableBytes = runtime->package->executableBytes;
+    const uint64_t programTableBytes = static_cast<uint64_t>(header.phnum) * header.phentsize;
+    if (header.phoff > executableBytes || programTableBytes > executableBytes - header.phoff) {
+        log_runtime(runtime, "load FAIL=program-table-bounds");
+        return false;
+    }
     uint64_t minimum = ~0ull;
     uint64_t maximum = 0;
     uint64_t executableMinimum = ~0ull;
@@ -1331,15 +1685,16 @@ static bool load_image(Runtime* runtime) {
     uint64_t readOnlyMinimum = ~0ull;
     uint64_t readOnlyMaximum = 0;
     uint32_t loadCount = 0;
+    bool entryInExecutableSegment = false;
     for (uint16_t i = 0; i < header.phnum; ++i) {
         Elf64ProgramHeader program;
         const uint64_t offset = header.phoff + static_cast<uint64_t>(i) * header.phentsize;
-        if (offset > runtime->package->executableBytes || !read_at(path, offset, &program, sizeof(program), nullptr)) {
+        if (offset > runtime->package->executableBytes || sizeof(program) > runtime->package->executableBytes - offset || !read_executable_at(runtime, path, offset, &program, sizeof(program))) {
             log_runtime(runtime, "load FAIL=program-header-read");
             return false;
         }
         if (program.type != kElfLoad) continue;
-        if (program.filesz > program.memsz || program.offset + program.filesz > runtime->package->executableBytes ||
+        if (program.filesz > program.memsz || program.offset > executableBytes || program.filesz > executableBytes - program.offset ||
             program.vaddr + program.memsz < program.vaddr) {
             log_runtime(runtime, "load FAIL=segment-bounds");
             return false;
@@ -1349,6 +1704,8 @@ static bool load_image(Runtime* runtime) {
         if (start < minimum) minimum = start;
         if (end > maximum) maximum = end;
         if ((program.flags & 1u) != 0u) {
+            if (header.entry >= program.vaddr &&
+                header.entry - program.vaddr < program.memsz) entryInExecutableSegment = true;
             if (start < executableMinimum) executableMinimum = start;
             if (end > executableMaximum) executableMaximum = end;
         }
@@ -1363,7 +1720,7 @@ static bool load_image(Runtime* runtime) {
         ++loadCount;
     }
     if (loadCount == 0 || maximum <= minimum || maximum - minimum > kMaxLoadedImageBytes ||
-        header.entry < minimum || header.entry >= maximum || executableMaximum <= executableMinimum) {
+        header.entry < minimum || header.entry >= maximum || executableMaximum <= executableMinimum || !entryInExecutableSegment) {
         log_runtime(runtime, "load FAIL=load-layout");
         return false;
     }
@@ -1386,13 +1743,13 @@ static bool load_image(Runtime* runtime) {
     for (uint16_t i = 0; i < header.phnum; ++i) {
         Elf64ProgramHeader program;
         const uint64_t offset = header.phoff + static_cast<uint64_t>(i) * header.phentsize;
-        if (!read_at(path, offset, &program, sizeof(program), nullptr) || program.type != kElfLoad) continue;
+        if (!read_executable_at(runtime, path, offset, &program, sizeof(program)) || program.type != kElfLoad) continue;
         uint64_t copied = 0;
         while (copied < program.filesz) {
             uint32_t chunk = static_cast<uint32_t>(program.filesz - copied);
             if (chunk > kReadChunkBytes) chunk = kReadChunkBytes;
             uint32_t amount = 0;
-            if (!read_at(path, program.offset + copied,
+            if (!read_executable_at(runtime, path, program.offset + copied,
                          runtime->image + (program.vaddr - minimum) + copied, chunk, &amount) || amount != chunk) {
                 log_runtime(runtime, "load FAIL=segment-copy");
                 return false;
@@ -1585,6 +1942,9 @@ static gx_result GX_CALL host_exit(gx_app_context* context, gx_result exitCode) 
 static gx_result GX_CALL host_file_exists(gx_app_context* context, const char* relative, uint32_t* outExists) {
     Runtime* runtime = runtime_from(context);
     if (!runtime || !outExists) return GX_ERROR_INVALID_ARGUMENT;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (!package_source_unchanged(runtime->package)) return GX_ERROR_PERMISSION_DENIED;
+#endif
     char path[256];
     if (!package_path(runtime->package, relative, path, sizeof(path))) return GX_ERROR_PERMISSION_DENIED;
     *outExists = vfs::exists(path) ? 1u : 0u;
@@ -1596,6 +1956,9 @@ static gx_result GX_CALL host_file_read(gx_app_context* context, const char* rel
     Runtime* runtime = runtime_from(context);
     if (outBytesRead) *outBytesRead = 0;
     if (!runtime || !relative || !buffer || !outBytesRead || bufferSize == 0) return GX_ERROR_INVALID_ARGUMENT;
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (!package_source_unchanged(runtime->package)) return GX_ERROR_PERMISSION_DENIED;
+#endif
     abi_begin(runtime, NativeAbiOperation::ReadResource);
     char path[256];
     if (!package_path(runtime->package, relative, path, sizeof(path))) {
@@ -2205,16 +2568,26 @@ static bool run_package(Package* package) {
     runtime.context.host = &runtime.host;
     runtime.context.userData = &runtime;
     log_breadcrumb(&runtime, "03 RUNTIME_CREATED");
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (!package_source_unchanged(package) || !verify_current_manifest(package)) {
+        log_security_reject("package-source-or-manifest-changed-before-launch");
+        return false;
+    }
+#endif
     log_runtime(&runtime, "launch begin path=package-relative runtime=native-elf abi=guidexos-c-abi-v1");
     if (!load_image(&runtime)) {
         delete[] runtime.image;
+        delete[] runtime.verifiedElf;
         runtime.image = nullptr;
+        runtime.verifiedElf = nullptr;
         return false;
     }
     runtime.stack = new uint8_t[kRuntimeStackBytes];
     if (!runtime.stack) {
         delete[] runtime.image;
+        delete[] runtime.verifiedElf;
         runtime.image = nullptr;
+        runtime.verifiedElf = nullptr;
         log_runtime(&runtime, "launch FAIL=app-stack-allocation");
         return false;
     }
@@ -2224,6 +2597,25 @@ static bool run_package(Package* package) {
     serial::puts("..0x"); serial::put_hex64(reinterpret_cast<uintptr_t>(runtime.stack + kRuntimeStackBytes));
     serial::putc('\n');
 
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    uint8_t finalDigest[32];
+    if (!package_source_unchanged(package) || !verify_current_manifest(package) ||
+        !verify_pacman_resources(package) ||
+        !compute_sha256(runtime.verifiedElf, runtime.verifiedElfBytes, finalDigest) ||
+        !security::package_allowed(package_identity(package, finalDigest))) {
+        delete[] runtime.stack;
+        delete[] runtime.image;
+        delete[] runtime.verifiedElf;
+        runtime.stack = nullptr;
+        runtime.image = nullptr;
+        runtime.verifiedElf = nullptr;
+        log_security_reject("final-pre-entry-verification-failed");
+        return false;
+    }
+#endif
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    serial::puts("[NATIVE-ELF-PREVIEW] decision=ALLOW package=com.guidexos.pacman entry=immediate\n");
+#endif
     s_activeRuntime = &runtime;
     log_breadcrumb(&runtime, "04 GX_MAIN_ENTER");
     gx_result result = gxos_native_call_on_stack(runtime.entry, &runtime.context,
@@ -2261,6 +2653,7 @@ static bool run_package(Package* package) {
     }
     delete[] runtime.stack;
     delete[] runtime.image;
+    delete[] runtime.verifiedElf;
     runtime.stack = nullptr;
     runtime.image = nullptr;
     s_activeRuntime = nullptr;
@@ -2273,7 +2666,18 @@ bool launch(const char* appName) {
     if (s_launchInProgress) return false;
     if (!s_discovered) discover();
     Package* package = find_package(appName);
-    if (!package) return false;
+    if (!package) {
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+        log_security_reject("package-not-authorized-or-not-discovered");
+#endif
+        return false;
+    }
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (!package_source_unchanged(package) || !verify_current_manifest(package)) {
+        log_security_reject("package-source-or-manifest-rejected-at-launch");
+        return false;
+    }
+#endif
     s_launchInProgress = true;
     const bool result = run_package(package);
     s_launchInProgress = false;

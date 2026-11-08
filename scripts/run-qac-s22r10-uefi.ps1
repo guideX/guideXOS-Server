@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$EspPath,
+    [string]$EspPath,
     [Parameter(Mandatory)][string]$IsoPath,
     [Parameter(Mandatory)][string]$OvmfPath,
+    [switch]$PublicPreviewIsoOnly,
     [string]$RunId = 's22r10-pacman-boot2',
     [string]$OutputRoot,
     [string]$QacCliPath,
@@ -338,7 +339,17 @@ function Test-QacChildAndListener {
     }
     $commandLine = [string]$processRecord.CommandLine
     $commandLineFailure = $null
-    if ($commandLine.IndexOf("fat:rw:$($script:Validated.Esp.privatePath)",[StringComparison]::OrdinalIgnoreCase) -lt 0) { $commandLineFailure = 'Actual QEMU command line does not reference the run-private ESP with fat:rw.' }
+    if ($PublicPreviewIsoOnly) {
+        if ($commandLine.IndexOf([string]$script:Validated.Iso.privatePath,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or $commandLine -notmatch '(?i)media=cdrom,readonly=on') {
+            $commandLineFailure = 'Actual public-preview QEMU command line does not retain the verified read-only ISO.'
+        } elseif ($commandLine -match '(?i)fat:rw:|virtio-9p|virtiofs|vhost-user|smb=|hostfwd=|(^|\s)-netdev(\s|$)|(^|\s)-nic(\s|$)|(^|\s)-virtfs(\s|$)|(^|\s)-fsdev(\s|$)') {
+            $commandLineFailure = 'Actual public-preview QEMU command line exposes writable storage, networking, or a host filesystem integration.'
+        } elseif ([regex]::Matches($commandLine,'(?i)(?:^|\s)-drive(?:\s|$)').Count -ne 2) {
+            $commandLineFailure = 'Actual public-preview QEMU command line contains an unexpected drive.'
+        } elseif ($commandLine -notmatch '(?i)-net\s+none' -or $commandLine -notmatch '(?i)-monitor\s+none') {
+            $commandLineFailure = 'Actual public-preview QEMU command line does not disable guest networking and the HMP monitor.'
+        }
+    } elseif ($commandLine.IndexOf("fat:rw:$($script:Validated.Esp.privatePath)",[StringComparison]::OrdinalIgnoreCase) -lt 0) { $commandLineFailure = 'Actual QEMU command line does not reference the run-private ESP with fat:rw.' }
     elseif ($commandLine.IndexOf([string]$script:Validated.Esp.sourcePath,[StringComparison]::OrdinalIgnoreCase) -ge 0) { $commandLineFailure = 'Actual QEMU command line references the canonical ESP.' }
     elseif ($commandLine.IndexOf([string]$script:Validated.Iso.privatePath,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or $commandLine -notmatch '(?i)media=cdrom,readonly=on') { $commandLineFailure = 'Actual QEMU command line does not retain the verified read-only ISO.' }
     if ($commandLine.IndexOf([string]$script:Validated.Ovmf.privatePath,[StringComparison]::OrdinalIgnoreCase) -lt 0 -or $commandLine -notmatch '(?i)readonly=on,file=') { $commandLineFailure = 'Actual QEMU command line does not retain the verified read-only OVMF image.' }
@@ -725,7 +736,7 @@ try {
 
     $script:Execution = [ordered]@{
         schemaVersion=1; runId=$null; workspacePath=$null; manifestPath=$null; state='Preparing';
-        project='guideXOSServer'; mode='acceptance'; workflow='s22r10-pacman-uefi-qac';
+        project='guideXOSServer'; mode='acceptance'; workflow=$(if ($PublicPreviewIsoOnly) { 's22r18-public-preview-iso-only-qac' } else { 's22r10-pacman-uefi-qac' });
         qacCli=$script:QacCli; qemuExecutable=$qemu; qemuVersion=$qemuVersion;
         qacReservationId=$null; reservationId=$null; queuePosition=$null; qacCliProcessId=$null;
         childProcessId=$null; childStartUtc=$null; childExitVerified=$false; qemuExitCode=$null; qacCliExitCode=$null;
@@ -738,10 +749,20 @@ try {
     }
 
     $script:Execution.timings.stagingStartAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
-    $prepare = Join-Path $PSScriptRoot 'prepare-qac-uefi-artifacts.ps1'
-    $prepareArguments = @{
-        EspPath=$EspPath; IsoPath=$IsoPath; OvmfPath=$OvmfPath; RunId=$RunId;
-        ExpectedEspSha256=$ExpectedEspSha256; ExpectedIsoSha256=$ExpectedIsoSha256; ExpectedOvmfSha256=$ExpectedOvmfSha256
+    if ($PublicPreviewIsoOnly -and $null -ne $Com2TcpPort) { throw 'Public-preview QAC runs cannot attach guest-accessible COM2 host integration.' }
+    if (-not $PublicPreviewIsoOnly -and [string]::IsNullOrWhiteSpace($EspPath)) { throw 'The existing S22R10 workflow requires -EspPath.' }
+    if ($PublicPreviewIsoOnly) {
+        $prepare = Join-Path $PSScriptRoot 'prepare-qac-s22r18-public-preview.ps1'
+        $prepareArguments = @{
+            IsoPath=$IsoPath; OvmfPath=$OvmfPath; RunId=$RunId;
+            ExpectedIsoSha256=$ExpectedIsoSha256; ExpectedOvmfSha256=$ExpectedOvmfSha256
+        }
+    } else {
+        $prepare = Join-Path $PSScriptRoot 'prepare-qac-uefi-artifacts.ps1'
+        $prepareArguments = @{
+            EspPath=$EspPath; IsoPath=$IsoPath; OvmfPath=$OvmfPath; RunId=$RunId;
+            ExpectedEspSha256=$ExpectedEspSha256; ExpectedIsoSha256=$ExpectedIsoSha256; ExpectedOvmfSha256=$ExpectedOvmfSha256
+        }
     }
     if (-not [string]::IsNullOrWhiteSpace($OutputRoot)) { $prepareArguments.OutputRoot = $OutputRoot }
     $prepareText = & $prepare @prepareArguments
@@ -749,7 +770,7 @@ try {
     if (-not $prepared.prepared -or $prepared.qemuLaunched -or [string]::IsNullOrWhiteSpace($prepared.manifestPath)) { throw 'Accepted QAC3C2 helper did not return a completed staged workspace.' }
 
     $script:ManifestPath = [string]$prepared.manifestPath
-    $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath
+    $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath -PublicPreviewIsoOnly:$PublicPreviewIsoOnly
     $manifest = $script:Validated.Manifest
     if ($null -ne $Com2TcpPort) {
         $com2Probe = $null
@@ -764,7 +785,7 @@ try {
         }
         $manifest = Set-QacS22R10Com2ManifestTransport -Manifest $manifest -Port ([int]$Com2TcpPort)
         Write-AtomicJson -Path $script:ManifestPath -Value $manifest
-        $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath
+        $script:Validated = Get-QacS22R10ValidatedManifest -ManifestPath $script:ManifestPath -PublicPreviewIsoOnly:$PublicPreviewIsoOnly
         $manifest = $script:Validated.Manifest
     }
     $script:Execution.runId = [string]$manifest.runId

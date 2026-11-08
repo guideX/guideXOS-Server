@@ -44,6 +44,7 @@ struct RamDisk {
     uint32_t sectorSize;        // Bytes per sector (usually 512)
     bool     ownsMemory;        // True if we allocated the memory
     bool     readOnly;          // True if writes are intentionally disabled
+    bool     releaseImage;      // True only for the boot-provided release filesystem image
     char     name[32];          // Human-readable name (e.g., "ram0")
 };
 
@@ -71,6 +72,14 @@ uint8_t create_at(void* memory, size_t sizeBytes, const char* name = nullptr);
 // The caller is responsible for keeping the image buffer alive.
 // Returns the RAM disk index, or 0xFF on failure.
 uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* name = nullptr);
+
+// Attach the boot-provided release filesystem image with an explicit role
+// marker used by the public-preview Native ELF source check.
+uint8_t create_readonly_release_image_at(const void* memory, size_t sizeBytes, const char* name);
+
+// Prove the backing source is the immutable boot runtime RAM disk, rather
+// than relying on a VFS mount flag alone.
+bool is_readonly_release_image_device(uint8_t blockDeviceIndex, uint64_t expectedGeneration);
 
 // Destroy a RAM disk and free its memory (if owned).
 void destroy(uint8_t index);

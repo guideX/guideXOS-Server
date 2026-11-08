@@ -5,7 +5,7 @@ param(
     [ValidateSet('amd64')]
     [string]$Arch = 'amd64',
 
-    [ValidateSet('Development', 'ServerV03PacManOnly')]
+    [ValidateSet('Development', 'ServerV03PacManOnly', 'ServerV03PublicPreviewPacManOnly')]
     [string]$ReleaseProfile = 'Development',
 
     [switch]$Clean,
@@ -36,8 +36,9 @@ $ReleaseBuildId = if ([string]::IsNullOrWhiteSpace($env:GXOS_RELEASE_BUILD_ID)) 
     try { [Guid]::Parse($env:GXOS_RELEASE_BUILD_ID).ToString('D') } catch { throw "[release-iso] GXOS_RELEASE_BUILD_ID is not a valid GUID." }
 }
 $ProfileStagingRoot = Join-Path $RepositoryRoot ("out\release-profile\" + $ReleaseBuildId)
-$EspRoot = if ($ReleaseProfile -eq 'ServerV03PacManOnly') { Join-Path $ProfileStagingRoot 'ESP' } else { Join-Path $RepositoryRoot 'ESP' }
-$ReleaseArtifactRoot = if ($ReleaseProfile -eq 'ServerV03PacManOnly') {
+$UsesIsolatedProfileStaging = $ReleaseProfile -in @('ServerV03PacManOnly', 'ServerV03PublicPreviewPacManOnly')
+$EspRoot = if ($UsesIsolatedProfileStaging) { Join-Path $ProfileStagingRoot 'ESP' } else { Join-Path $RepositoryRoot 'ESP' }
+$ReleaseArtifactRoot = if ($UsesIsolatedProfileStaging) {
     Join-Path $ProfileStagingRoot $ReleaseProfileContract.OutputDirectoryName
 } else {
     Join-Path $RepositoryRoot $ReleaseProfileContract.OutputDirectoryName
@@ -458,11 +459,11 @@ if ($Version -notmatch '^(0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0
     Fail "invalid version '$Version'. Use a conservative semantic version such as 0.1.0 or 0.1.0-rc1."
 }
 if ($SkipBuild -and $Clean) { Fail '-Clean cannot be combined with -SkipBuild because it removes the existing ESP.' }
-if ($ReleaseProfile -eq 'ServerV03PacManOnly' -and $SkipBuild) {
-    Fail 'ServerV03PacManOnly requires a fresh canonical build and cannot reuse an existing ESP.'
+if ($UsesIsolatedProfileStaging -and $SkipBuild) {
+    Fail "$ReleaseProfile requires a fresh canonical build and cannot reuse an existing ESP."
 }
-if ($ReleaseProfile -eq 'ServerV03PacManOnly' -and $Version -ne '0.3.0') {
-    Fail 'ServerV03PacManOnly is qualified only for the Server 0.3.0 target version.'
+if ($UsesIsolatedProfileStaging -and $Version -ne '0.3.0') {
+    Fail "$ReleaseProfile is qualified only for the Server 0.3.0 target version."
 }
 if ($IsoBackend -eq 'PyCdlib' -and -not [string]::IsNullOrWhiteSpace($OscdimgPath)) {
     Fail '-OscdimgPath is only valid with -IsoBackend Oscdimg. PyCdlib is the default backend and does not require the ADK.'
@@ -476,13 +477,17 @@ if (-not $worktreeClean) {
     Write-Host 'WARNING: worktree is dirty; the release manifest will record this and the artifact is not reproducible from HEAD alone.' -ForegroundColor Yellow
     if ($RequireCleanWorktree) { Fail 'worktree is dirty and -RequireCleanWorktree was supplied.' }
 }
+if ($ReleaseProfileContract.PublicPreviewSecurity -and -not $worktreeClean) {
+    Fail 'the public-preview security profile requires a clean source tree at canonical build and packaging start.'
+}
 if ($SkipBuild -and -not $worktreeClean) { Fail '-SkipBuild requires a clean worktree so the ESP receipt cannot describe a different source tree.' }
 
-if ($ReleaseProfile -eq 'ServerV03PacManOnly' -and (Test-Path -LiteralPath $ProfileStagingRoot)) {
+if ($UsesIsolatedProfileStaging -and (Test-Path -LiteralPath $ProfileStagingRoot)) {
     Fail "profile staging path already exists for build ID $ReleaseBuildId; refusing stale candidate reuse: $ProfileStagingRoot"
 }
 $artifactBase = "guideXOS-Server-v$Version-$Arch"
 if ($ReleaseProfile -eq 'ServerV03PacManOnly') { $artifactBase += '-pacman-only-candidate' }
+if ($ReleaseProfile -eq 'ServerV03PublicPreviewPacManOnly') { $artifactBase += '-public-preview-pacman-only-candidate' }
 $isoName = "$artifactBase.iso"
 $shaName = "$isoName.sha256"
 $manifestName = "$artifactBase.manifest.json"
@@ -651,7 +656,7 @@ try {
         architecture = $Arch
         releaseProfile = $ReleaseProfile
         nativeElfPackages = @($nativeElfPackageRecords)
-        candidateOnly = ($ReleaseProfile -eq 'ServerV03PacManOnly')
+        candidateOnly = ($UsesIsolatedProfileStaging)
         artifactType = 'bootable-uefi-iso'
         isoBackend = $IsoBackend
         buildMode = $(if ($SkipBuild) { 'reused-validated-ESP' } else { 'canonical-build' })
@@ -669,6 +674,19 @@ try {
             sourceCommit = $releaseIdentity['sourceCommit']
             releaseProfile = $releaseIdentity['releaseProfile']
             startedAtUtc = $releaseIdentity['startedAtUtc']
+            sourceWorktreeCleanAtBuildStart = $releaseIdentity['sourceWorktreeCleanAtBuildStart']
+            sourceWorktreeStatusAtBuildStart = $releaseIdentity['sourceWorktreeStatusAtBuildStart']
+            publicPreviewSecurityPolicy = $releaseIdentity['publicPreviewSecurityPolicy']
+            kernelCompiler = $releaseIdentity['kernelCompiler']
+            kernelCompilerVersion = $releaseIdentity['kernelCompilerVersion']
+            kernelLinker = $releaseIdentity['kernelLinker']
+            kernelLinkerVersion = $releaseIdentity['kernelLinkerVersion']
+            kernelAssembler = $releaseIdentity['kernelAssembler']
+            kernelAssemblerVersion = $releaseIdentity['kernelAssemblerVersion']
+            mbedTlsProfileSha256 = $releaseIdentity['mbedTlsProfileSha256']
+            sdkAbiHeaderSha256 = $releaseIdentity['sdkAbiHeaderSha256']
+            kernelProfileFlags = $releaseIdentity['kernelProfileFlags']
+            wallpaperInputInventory = $releaseIdentity['wallpaperInputInventory']
             stages = [ordered]@{
                 bootloader = $releaseIdentity['stage.bootloader']
                 kernel = $releaseIdentity['stage.kernel']
@@ -747,8 +765,8 @@ try {
     }
 
     Write-Host ''
-    if ($ReleaseProfile -eq 'ServerV03PacManOnly') {
-        Write-Host '[release-iso] PacMan-only candidate created and structurally verified; it remains under out and was not published.' -ForegroundColor Green
+    if ($UsesIsolatedProfileStaging) {
+        Write-Host "[release-iso] $ReleaseProfile candidate created and structurally verified; it remains under out and was not published." -ForegroundColor Green
     } else {
         Write-Host '[release-iso] release artifact created and structurally verified.' -ForegroundColor Green
     }
@@ -761,8 +779,8 @@ try {
     Write-Host 'Verify the checksum:' -ForegroundColor Cyan
     Write-Host ("  `$expected = (Get-Content -LiteralPath '" + $finalSha + "').Split()[0]; `$actual = (Get-FileHash -LiteralPath '" + $finalIso + "' -Algorithm SHA256).Hash; if (`$expected -ne `$actual) { throw 'SHA-256 mismatch' } else { 'SHA-256 OK' }")
     Write-Host 'Test the exact ISO in QEMU:' -ForegroundColor Cyan
-    $relativeIsoPath = if ($ReleaseProfile -eq 'ServerV03PacManOnly') {
-        ".\out\release-profile\$ReleaseBuildId\artifacts\$isoName"
+    $relativeIsoPath = if ($UsesIsolatedProfileStaging) {
+        ".\out\release-profile\$ReleaseBuildId\$($ReleaseProfileContract.OutputDirectoryName)\$isoName"
     } else {
         ".\dist\$isoName"
     }

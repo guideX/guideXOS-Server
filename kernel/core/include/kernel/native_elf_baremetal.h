@@ -9,6 +9,7 @@
 #define KERNEL_NATIVE_ELF_BAREMETAL_H
 
 #include <stdint.h>
+#include "kernel/native_elf_security_policy.h"
 
 namespace kernel {
 namespace native_elf {
@@ -26,6 +27,11 @@ struct PackageInfo {
     char executable[160];
     char entryPoint[48];
     char abi[64];
+    char architecture[32];
+    char minimumServerVersion[32];
+    uint32_t manifestBytes;
+    uint8_t manifestSha256[32];
+    security::SourceState sourceState;
     uint64_t executableBytes;
     bool startMenuVisible;
     // Whether the manifest grants "audio.output". Parsed boundedly at

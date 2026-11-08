@@ -31,7 +31,7 @@ enum class DeviceStatus : uint8_t {
     Unknown = 0, DriverLoaded = 1, NoDriver = 2, Disconnected = 3, Unavailable = 4
 };
 enum class DiskTransport : uint8_t {
-    Unknown = 0, AtaPio = 1, Ahci = 2, Nvme = 3, UsbMassStorage = 4
+    Unknown = 0, AtaPio = 1, Ahci = 2, Nvme = 3, UsbMassStorage = 4, RamDisk = 5
 };
 enum class PartitionTableState : uint8_t {
     Unknown = 0, Unreadable = 1, NoMbr = 2, ValidMbr = 3, InvalidMbr = 4,

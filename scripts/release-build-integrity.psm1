@@ -12,7 +12,7 @@ function Get-DeveloperStudioSignedOffIdentity {
 
 function Get-ReleaseProfileContract {
     param(
-        [ValidateSet('Development', 'ServerV03PacManOnly')]
+        [ValidateSet('Development', 'ServerV03PacManOnly', 'ServerV03PublicPreviewPacManOnly')]
         [string]$Profile = 'Development'
     )
 
@@ -23,6 +23,7 @@ function Get-ReleaseProfileContract {
                 PackageNames = @('PacMan', 'DeveloperStudio')
                 RequiresDeveloperStudio = $true
                 OutputDirectoryName = 'dist'
+                PublicPreviewSecurity = $false
             }
         }
         'ServerV03PacManOnly' {
@@ -31,6 +32,16 @@ function Get-ReleaseProfileContract {
                 PackageNames = @('PacMan')
                 RequiresDeveloperStudio = $false
                 OutputDirectoryName = 'artifacts'
+                PublicPreviewSecurity = $false
+            }
+        }
+        'ServerV03PublicPreviewPacManOnly' {
+            return [PSCustomObject]@{
+                Name = 'ServerV03PublicPreviewPacManOnly'
+                PackageNames = @('PacMan')
+                RequiresDeveloperStudio = $false
+                OutputDirectoryName = 'preview-artifacts'
+                PublicPreviewSecurity = $true
             }
         }
     }
@@ -243,7 +254,7 @@ function Assert-ReleaseBuildIdentity {
         [Parameter(Mandatory = $true)][string]$EspRoot,
         [Parameter(Mandatory = $true)][string]$ExpectedSourceCommit,
         [string]$ExpectedBuildId,
-        [ValidateSet('Development', 'ServerV03PacManOnly')]
+        [ValidateSet('Development', 'ServerV03PacManOnly', 'ServerV03PublicPreviewPacManOnly')]
         [string]$ExpectedReleaseProfile = 'Development',
         [ValidateSet('amd64')][string]$Architecture = 'amd64',
         [string]$TargetServerVersion = '0.3.0'
@@ -264,6 +275,26 @@ function Assert-ReleaseBuildIdentity {
     if ($identity['buildStatus'] -ne 'success') { throw "Build identity status is '$($identity['buildStatus'])', not success." }
     if ($identity['sourceCommit'] -ne $ExpectedSourceCommit) { throw "Build identity source commit $($identity['sourceCommit']) does not match $ExpectedSourceCommit." }
     if ($identity['architecture'] -ne $Architecture) { throw "Build identity architecture $($identity['architecture']) does not match $Architecture." }
+    if ($profileContract.PublicPreviewSecurity -and $identity['publicPreviewSecurityPolicy'] -ne 'S22R18-PacMan-ReadOnly-Boot-Image-v1') {
+        throw 'Public-preview build identity does not attest the S22R18 runtime security policy.'
+    }
+    if ($profileContract.PublicPreviewSecurity) {
+        foreach ($key in @('sourceWorktreeCleanAtBuildStart','sourceWorktreeStatusAtBuildStart','kernelCompiler','kernelCompilerVersion','kernelLinker','kernelLinkerVersion','kernelAssembler','kernelAssemblerVersion','mbedTlsProfileSha256','sdkAbiHeaderSha256','kernelProfileFlags','wallpaperInputInventory')) {
+            if (-not $identity.ContainsKey($key)) { throw "Public-preview build identity is missing provenance field '$key'." }
+        }
+        if ($identity['sourceWorktreeCleanAtBuildStart'] -ne 'true' -or
+            -not [string]::IsNullOrWhiteSpace($identity['sourceWorktreeStatusAtBuildStart'])) {
+            throw 'Public-preview build identity does not attest a clean source tree at build start.'
+        }
+        if ($identity['kernelProfileFlags'] -notmatch '(^|\s)-DGXOS_PUBLIC_PREVIEW_SECURITY_PROFILE(\s|$)') {
+            throw 'Public-preview build identity does not attest the kernel security-profile compile flag.'
+        }
+        foreach ($key in @('kernelCompiler','kernelCompilerVersion','kernelLinker','kernelLinkerVersion','kernelAssembler','kernelAssemblerVersion','mbedTlsProfileSha256','sdkAbiHeaderSha256')) {
+            if ([string]::IsNullOrWhiteSpace($identity[$key]) -or $identity[$key] -in @('unavailable','missing')) {
+                throw "Public-preview build identity has no recorded value for '$key'."
+            }
+        }
+    }
     if ($ExpectedBuildId -and $identity['buildId'] -ne $ExpectedBuildId) { throw "Build identity ID $($identity['buildId']) does not match this build invocation $ExpectedBuildId." }
     try { [void][Guid]::Parse($identity['buildId']) } catch { throw "Invalid build identity ID: $($identity['buildId'])" }
     try { [void][DateTime]::Parse($identity['startedAtUtc']).ToUniversalTime() } catch { throw "Invalid build identity timestamp: $($identity['startedAtUtc'])" }

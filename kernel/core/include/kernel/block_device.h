@@ -29,6 +29,7 @@ enum DeviceType : uint8_t {
     BDEV_AHCI       = 2,    // SATA / AHCI (DMA, MMIO)
     BDEV_NVME       = 3,    // NVMe (PCIe, MMIO)
     BDEV_USB_MASS   = 4,    // USB Mass Storage (Bulk-Only)
+    BDEV_RAMDISK    = 5,    // Kernel RAM disk
 };
 
 // ================================================================

@@ -224,6 +224,7 @@ const char* blockTransportName(block::DeviceType type)
     case block::BDEV_AHCI: return "AHCI";
     case block::BDEV_NVME: return "NVMe";
     case block::BDEV_USB_MASS: return "USB Mass Storage";
+    case block::BDEV_RAMDISK: return "RAM Disk";
     default: return "Unknown";
     }
 }
@@ -235,6 +236,7 @@ DiskTransport blockTransport(block::DeviceType type)
     case block::BDEV_AHCI: return DiskTransport::Ahci;
     case block::BDEV_NVME: return DiskTransport::Nvme;
     case block::BDEV_USB_MASS: return DiskTransport::UsbMassStorage;
+    case block::BDEV_RAMDISK: return DiskTransport::RamDisk;
     default: return DiskTransport::Unknown;
     }
 }
