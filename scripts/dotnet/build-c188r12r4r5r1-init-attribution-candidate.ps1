@@ -224,7 +224,18 @@ if ([bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbe -ne [bool]$ManagedEn
          [string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.entrySymbol -cne 'HostLogProof_HostLogProof_ManagedEntryProbe__ManagedMain' -or
          [string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.ABI -cne 'UnmanagedCallersOnly(CallConvCdecl)' -or
          [int]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.seed -ne 14 -or
-         [int]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.expectedResult -ne 49))) {
+         [int]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.expectedResult -ne 49)) -or
+    [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnostics -ne [bool]$ManagedEntryProbe -or
+    ($ManagedEntryProbe -and
+        ([string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.profile -cne 'ManagedEntryProbe' -or
+         [string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.telemetryStorage -cne 'fixed native side table indexed by reverse-P/Invoke nesting depth' -or
+         [string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.sourceFiles.platformSha256 -notmatch '^[A-F0-9]{64}$' -or
+         [string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.sourceFiles.threadStoreEventHeaderSha256 -notmatch '^[A-F0-9]{64}$' -or
+         -not [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.noFrameSynthesis -or
+         -not [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.noGcPolicyMutation -or
+         -not [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.noFatalSuppression -or
+         -not [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.doesNotWriteThreadTransitionFrame -or
+         [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.nativePostFixExecutionVerified))) {
     throw 'Runtime-pack R7 managed-entry profile or contract does not match the candidate mode.'
 }
 if ($ThreadStoreReadiness -and
@@ -1322,6 +1333,24 @@ $manifest = [ordered]@{
     c188R12R4R5R2R3InitializeModulesAttributionTransition = [string]$runtimeManifest.c188r12r4r5r2r3InitializeModulesAttributionTransition
     c188R12R4R5R2R3ThreadLayoutEvidence = $runtimeManifest.c188r12r4r5r2r3ThreadLayoutEvidence
     c188R12R4R5R2R3ManagedEntryProbe = [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbe
+    c188R12R4R5R2R3ManagedEntryHandoffDiagnostics = [bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnostics
+    c188R12R4R5R2R3ManagedEntryHandoffDiagnosticContract = if ($ManagedEntryProbe) { [ordered]@{
+        profile=[string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.profile
+        behavior=[string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.behavior
+        rootCauseCorrection=[string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.rootCauseCorrection
+        telemetryStorage=[string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.telemetryStorage
+        checkpoints=@($runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.checkpoints)
+        guardedBy=@($runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.guardedBy)
+        runtimeSourceFiles=$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.sourceFiles
+        kernelSnapshotSourceSha256=Hash-File (Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp')
+        analyzerSha256=Hash-File (Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-managed-entry-probe.ps1')
+        hostedTestResultsSha256=Hash-File $managedEntryProbeHostedResultsPath
+        noFrameSynthesis=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.noFrameSynthesis
+        noGcPolicyMutation=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.noGcPolicyMutation
+        noFatalSuppression=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.noFatalSuppression
+        doesNotWriteThreadTransitionFrame=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.doesNotWriteThreadTransitionFrame
+        nativePostFixExecutionVerified=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract.nativePostFixExecutionVerified
+    } } else { $null }
     c188R12R4R5R2R3ManagedEntryProbeContract = if ($ManagedEntryProbe) { [ordered]@{
         entrySymbol='ManagedMain'
         entryMethod='HostLogProof.ManagedEntryProbe.ManagedMain'

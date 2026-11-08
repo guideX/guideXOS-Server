@@ -1646,6 +1646,25 @@ $manifest = [ordered]@{
     c188r12r4r5r2r3ManagedEntryProbe = [bool]$C188R12R4R5R2R3ManagedEntryProbe
     c188r12r4r5r2r3ManagedEntryProbeContract = if ($C188R12R4R5R2R3ManagedEntryProbe) { [ordered]@{ marker='C188R12R4R5R2R3_MANAGED_ENTRY_PROBE'; entrySymbol='HostLogProof_HostLogProof_ManagedEntryProbe__ManagedMain'; captureSymbol='GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState'; ABI='UnmanagedCallersOnly(CallConvCdecl)'; seed=14; expectedResult=49; methodAllocationFree=$true; runtimeInitializationMayAllocate=$true; collectionRequested=$false } } else { $null }
     c188r12r4r5r2r3ManagedEntryProbeHeaderSha256 = if ($C188R12R4R5R2R3ManagedEntryProbe) { Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_managed_entry_probe.h') } else { $null }
+    c188r12r4r5r2r3ManagedEntryHandoffDiagnostics = [bool]$C188R12R4R5R2R3ManagedEntryProbe
+    c188r12r4r5r2r3ManagedEntryHandoffDiagnosticContract = if ($C188R12R4R5R2R3ManagedEntryProbe) { [ordered]@{
+        profile='ManagedEntryProbe'
+        enabled=$true
+        behavior='Read-only transition-mode checkpoints; telemetry uses a side table and does not write runtime transition state.'
+        rootCauseCorrection='ThreadStore transition telemetry no longer aliases runtimeCell + 0x40, which is Thread::m_pTransitionFrame in this profile.'
+        telemetryStorage='fixed native side table indexed by reverse-P/Invoke nesting depth'
+        checkpoints=@('InitializeModules return','InitializeModules attribution prepare after init','InitializeModules attribution prepare before return','RhpReversePInvoke bridge before initializeRuntimeState','RhpReversePInvoke bridge after initializeRuntimeState','kernel immediately before ManagedMain dispatch')
+        guardedBy=@('GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE','GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS')
+        sourceFiles=[ordered]@{
+            platformSha256=Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_platform.cpp')
+            threadStoreEventHeaderSha256=Get-Hash (Join-Path $RuntimePackRoot 'src\platform\guidexos_nativeaot_threadstore_readiness.h')
+        }
+        noFrameSynthesis=$true
+        noGcPolicyMutation=$true
+        noFatalSuppression=$true
+        doesNotWriteThreadTransitionFrame=$true
+        nativePostFixExecutionVerified=$false
+    } } else { $null }
     c188r12r4r5r4r5r2r2NativeAllocationMarker = if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { 'C188R12R4R5R4R5R2R2_NATIVE_ALLOC' } else { $null }
     c188r12r4r5r4r5r2r2NativeAllocationAttemptCapacity = if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { 8 } else { 0 }
     c188r12r4r5r4r5r2r2NativeAllocationBackendCapacity = if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { 9 } else { 0 }

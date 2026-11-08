@@ -32,6 +32,8 @@ $returnedLines = @([regex]::Matches($raw,'(?m)^\[C188R12R4R5R2R3_ENTRY\] event=r
     ForEach-Object { $_.Value })
 $stateLines = @([regex]::Matches($raw,'(?m)^\[C188R12R4R5R2R3_ENTRY_STATE\] [^\r\n]*') |
     ForEach-Object { $_.Value })
+$handoffLines = @([regex]::Matches($raw,'(?m)^\[C188R12R4R5R2R3_HANDOFF\] [^\r\n]*') |
+    ForEach-Object { $_.Value })
 
 function Get-MarkerFields([string]$Line,[string]$Prefix) {
     if (-not $Line.StartsWith($Prefix,[StringComparison]::Ordinal)) { throw "Marker prefix mismatch: $Prefix" }
@@ -44,6 +46,61 @@ function Get-MarkerFields([string]$Line,[string]$Prefix) {
         $fields[$Matches.name] = $Matches.value
     }
     return $fields
+}
+
+$handoffCheckpoints = @()
+$handoffParseError = $null
+foreach ($line in $handoffLines) {
+    try {
+        $checkpoint = Get-MarkerFields $line '[C188R12R4R5R2R3_HANDOFF]'
+        $requiredHandoffFields = @('checkpoint','status','bytes','thread','membership','flags',
+            'coop','frame','frameTop','fls','flsMatch','threadId','observedThreadId',
+            'stackReady','stackInBounds','stackLow','stackHigh','stackCurrent','modules','codeManager')
+        foreach ($field in $requiredHandoffFields) {
+            if (-not $checkpoint.Contains($field)) {
+                throw "handoff_snapshot_missing_$field"
+            }
+        }
+        foreach ($field in @('status','bytes','membership','flags','coop','frameTop','flsMatch',
+                'stackReady','stackInBounds','modules','codeManager')) {
+            if ($checkpoint[$field] -notmatch '^[0-9A-Fa-f]{1,8}$') {
+                throw "handoff_snapshot_invalid_$field"
+            }
+        }
+        foreach ($field in @('thread','frame','fls','threadId','observedThreadId',
+                'stackLow','stackHigh','stackCurrent')) {
+            if ($checkpoint[$field] -notmatch '^[0-9A-Fa-f]{1,16}$') {
+                throw "handoff_snapshot_invalid_$field"
+            }
+        }
+        $flags = [Convert]::ToUInt32([string]$checkpoint.flags,16)
+        $thread = [Convert]::ToUInt64([string]$checkpoint.thread,16)
+        $fls = [Convert]::ToUInt64([string]$checkpoint.fls,16)
+        $threadId = [Convert]::ToUInt64([string]$checkpoint.threadId,16)
+        $observedThreadId = [Convert]::ToUInt64([string]$checkpoint.observedThreadId,16)
+        $stackLow = [Convert]::ToUInt64([string]$checkpoint.stackLow,16)
+        $stackHigh = [Convert]::ToUInt64([string]$checkpoint.stackHigh,16)
+        $stackCurrent = [Convert]::ToUInt64([string]$checkpoint.stackCurrent,16)
+        $checkpoint['readyForReverseEntry'] =
+            $checkpoint.status -ceq '00000000' -and
+            $checkpoint.bytes -ceq '00000070' -and
+            $checkpoint.membership -ceq '00000001' -and
+            ($flags -band 1u) -ne 0u -and
+            $checkpoint.coop -ceq '00000001' -and
+            $checkpoint.frameTop -ceq '00000001' -and
+            $checkpoint.flsMatch -ceq '00000001' -and
+            $thread -ne 0u -and $thread -eq $fls -and
+            $threadId -ne 0u -and $threadId -eq $observedThreadId -and
+            $checkpoint.stackReady -ceq '00000001' -and
+            $checkpoint.stackInBounds -ceq '00000001' -and
+            $stackLow -lt $stackCurrent -and $stackCurrent -lt $stackHigh -and
+            $checkpoint.modules -ceq '00000001' -and
+            $checkpoint.codeManager -ceq '00000001'
+        $handoffCheckpoints += $checkpoint
+    } catch {
+        $handoffParseError = $_.Exception.Message
+        break
+    }
 }
 
 $classification = 'MANAGED_ENTRY_PROBE_INCOMPLETE'
@@ -139,6 +196,10 @@ if (-not $evidencePreserved) {
         }
     }
 }
+if (-not [string]::IsNullOrWhiteSpace($handoffParseError) -and
+    [string]::IsNullOrWhiteSpace($parseError)) {
+    $parseError = $handoffParseError
+}
 if (-not [string]::IsNullOrWhiteSpace($parseError)) { $classification = 'MANAGED_ENTRY_PROBE_INCOMPLETE' }
 $transitionRecord = $transition.transitionRecord
 $callSiteMapHash = (Get-FileHash -LiteralPath $mapFull -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -163,6 +224,10 @@ $report = [ordered]@{
     managedEntryRecord=if ($null -ne $returned) { $returned } else { $null }
     runtimeStateReady=$runtimeStateReady
     runtimeState=if ($null -ne $state) { $state } else { $null }
+    handoffCheckpoints=$handoffCheckpoints
+    preDispatchHandoffReady=if ($handoffCheckpoints.Count -gt 0) {
+        [bool]$handoffCheckpoints[-1].readyForReverseEntry
+    } else { $null }
     managedCollectionRequested=$false
     managedEntryRequested=$managedEntryAttempted
     parseError=$parseError

@@ -78,6 +78,9 @@ static_assert(offsetof(RuntimeThreadLocals, m_hPalThread) == 0x60u,
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
 extern "C" void __cdecl guideXosStockRhpReversePInvoke(void* frame);
 extern "C" void __cdecl guideXosStockRhpReversePInvokeReturn(void* frame);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
+extern "C" void* __cdecl GuideXosNativeAotTransitionGetPalFlsValue(void);
+#endif
 
 namespace {
 constexpr uint32_t kThreadReadinessMarkerCapacity = 64u;
@@ -145,9 +148,36 @@ const char* threadReadinessEventName(uint32_t event) {
     case GX_THREADSTORE_EVENT_TRANSITION_RETURN_FRAMES: return "transition_return_frames";
     case GX_THREADSTORE_EVENT_TRANSITION_RETURN_CACHED: return "transition_return_cached";
     case GX_THREADSTORE_EVENT_TRANSITION_RETURN_FLS: return "transition_return_fls";
+    case GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_BEFORE_THREAD: return "managed_entry_bridge_before_thread";
+    case GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_BEFORE_FRAME: return "managed_entry_bridge_before_frame";
+    case GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_AFTER_THREAD: return "managed_entry_bridge_after_thread";
+    case GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_AFTER_FRAME: return "managed_entry_bridge_after_frame";
+    case GX_THREADSTORE_EVENT_INITIALIZEMODULES_RETURN_THREAD: return "initialize_modules_return_thread";
+    case GX_THREADSTORE_EVENT_INITIALIZEMODULES_RETURN_FRAME: return "initialize_modules_return_frame";
+    case GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_AFTER_INIT_THREAD: return "attribution_prepare_after_init_thread";
+    case GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_AFTER_INIT_FRAME: return "attribution_prepare_after_init_frame";
+    case GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_BEFORE_RETURN_THREAD: return "attribution_prepare_before_return_thread";
+    case GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_BEFORE_RETURN_FRAME: return "attribution_prepare_before_return_frame";
     default: return "unknown";
     }
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE) && \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+void recordManagedEntryModeCheckpoint(
+    uint32_t threadEvent, uint32_t frameEvent) {
+    Thread* rawCurrentThread = ThreadStore::RawGetCurrentThread();
+    RuntimeThreadLocals* locals = reinterpret_cast<RuntimeThreadLocals*>(rawCurrentThread);
+    GuideXosNativeAotThreadReadinessMark(
+        threadEvent,
+        reinterpret_cast<uintptr_t>(rawCurrentThread),
+        locals == nullptr ? 0u : locals->m_ThreadStateFlags);
+    GuideXosNativeAotThreadReadinessMark(
+        frameEvent,
+        locals == nullptr ? 0u : reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame),
+        reinterpret_cast<uintptr_t>(GuideXosNativeAotTransitionGetPalFlsValue()));
+}
+#endif
 }
 
 extern "C" void __cdecl GuideXosNativeAotThreadReadinessMark(
@@ -33226,6 +33256,12 @@ void initializeNativeAotModules() {
         static_cast<int>(__modules_z - __modules_a),
         g_guideXosNativeAotClasslibFunctions,
         16);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE) && \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    recordManagedEntryModeCheckpoint(
+        GX_THREADSTORE_EVENT_INITIALIZEMODULES_RETURN_THREAD,
+        GX_THREADSTORE_EVENT_INITIALIZEMODULES_RETURN_FRAME);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
     GuideXosNativeAotThreadReadinessMark(
         GX_THREADSTORE_EVENT_MODULE_INITIALIZE_COMPLETE,
@@ -33627,6 +33663,12 @@ GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare(void) {
     record.transitionAttempted = 1u;
     GuideXosTransitionAttributionSeal(&record);
     initializeRuntimeState(block, false);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE) && \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    recordManagedEntryModeCheckpoint(
+        GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_AFTER_INIT_THREAD,
+        GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_AFTER_INIT_FRAME);
+#endif
     record.transitionCompleted = 1u;
     record.lastSuccessfulStage = GuideXosNativeAotInitTraceGetLastSuccessfulStage();
     record.initTraceOverflow = GuideXosNativeAotInitTraceGetOverflow();
@@ -33634,6 +33676,12 @@ GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare(void) {
     GuideXosTransitionAttributionSeal(&record);
     GuideXosNativeAotInitTraceEmitSummary();
     GuideXosNativeAotThreadReadinessEmitSummary();
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE) && \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    recordManagedEntryModeCheckpoint(
+        GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_BEFORE_RETURN_THREAD,
+        GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_BEFORE_RETURN_FRAME);
+#endif
     return 0u;
 }
 
@@ -35611,7 +35659,19 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
         guideXosFailFast(2u);
     }
 
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE) && \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    recordManagedEntryModeCheckpoint(
+        GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_BEFORE_THREAD,
+        GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_BEFORE_FRAME);
+#endif
     initializeRuntimeState(block);
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE) && \
+    defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
+    recordManagedEntryModeCheckpoint(
+        GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_AFTER_THREAD,
+        GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_AFTER_FRAME);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
     Thread* rawCurrentThread = ThreadStore::RawGetCurrentThread();
     GuideXosNativeAotThreadReadinessMark(
@@ -35647,8 +35707,8 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
         threadStorePublished ? 1u : 0u);
     if (currentAfterTransition == nullptr || !threadStorePublished ||
         !GuideXosThreadStorePushTelemetryFrame(
-            frame, runtimeCell(block), kRuntimeCellTransitionFrameOffset,
-            g_threadReadinessTransitions, &g_threadReadinessTransitionDepth,
+            frame, g_threadReadinessTransitions,
+            &g_threadReadinessTransitionDepth,
             kThreadReadinessTransitionCapacity)) {
         GuideXosNativeAotThreadReadinessMark(
             GX_THREADSTORE_EVENT_TRANSITION_ATTACH_INCOMPLETE,
@@ -36059,8 +36119,8 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvokeReturn(void* frame
     void* restoredTelemetryFrame = nullptr;
     if (block == nullptr ||
         !GuideXosThreadStorePopTelemetryFrame(
-            frame, runtimeCell(block), kRuntimeCellTransitionFrameOffset,
-            g_threadReadinessTransitions, &g_threadReadinessTransitionDepth,
+            frame, g_threadReadinessTransitions,
+            &g_threadReadinessTransitionDepth,
             &restoredTelemetryFrame)) {
         guideXosFailFast(0xC1881205u);
     }

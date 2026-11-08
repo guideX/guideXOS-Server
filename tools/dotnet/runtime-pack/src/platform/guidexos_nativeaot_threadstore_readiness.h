@@ -37,7 +37,17 @@ enum GuideXosThreadStoreReadinessEvent : uint32_t {
     GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION = 32u,
     GX_THREADSTORE_EVENT_TRANSITION_RETURN_FRAMES = 33u,
     GX_THREADSTORE_EVENT_TRANSITION_RETURN_CACHED = 34u,
-    GX_THREADSTORE_EVENT_TRANSITION_RETURN_FLS = 35u
+    GX_THREADSTORE_EVENT_TRANSITION_RETURN_FLS = 35u,
+    GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_BEFORE_THREAD = 36u,
+    GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_BEFORE_FRAME = 37u,
+    GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_AFTER_THREAD = 38u,
+    GX_THREADSTORE_EVENT_MANAGED_ENTRY_BRIDGE_AFTER_FRAME = 39u,
+    GX_THREADSTORE_EVENT_INITIALIZEMODULES_RETURN_THREAD = 40u,
+    GX_THREADSTORE_EVENT_INITIALIZEMODULES_RETURN_FRAME = 41u,
+    GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_AFTER_INIT_THREAD = 42u,
+    GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_AFTER_INIT_FRAME = 43u,
+    GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_BEFORE_RETURN_THREAD = 44u,
+    GX_THREADSTORE_EVENT_ATTRIBUTION_PREPARE_BEFORE_RETURN_FRAME = 45u
 };
 
 #if defined(_MSC_VER)
@@ -64,36 +74,32 @@ struct GuideXosThreadStoreTransitionRecord {
     void* previousTelemetryFrame;
 };
 
-// Store diagnostics outside ReversePInvokeFrame. The stock runtime owns that
-// frame's fields and reads them again in RhpReversePInvokeReturn.
+// Keep diagnostic nesting in this side table. The stock runtime owns both the
+// ReversePInvokeFrame fields and Thread::m_pTransitionFrame; neither is scratch
+// storage for telemetry.
 static inline bool GuideXosThreadStorePushTelemetryFrame(
     void* frame,
-    unsigned char* runtimeCell,
-    uint32_t telemetryOffset,
     GuideXosThreadStoreTransitionRecord* records,
     uint32_t* depth,
     uint32_t capacity) {
-    if (frame == nullptr || runtimeCell == nullptr || records == nullptr ||
+    if (frame == nullptr || records == nullptr ||
         depth == nullptr || *depth >= capacity) {
         return false;
     }
 
-    void** telemetry = reinterpret_cast<void**>(runtimeCell + telemetryOffset);
+    void* previous = *depth == 0u ? nullptr : records[*depth - 1u].frame;
     records[*depth].frame = frame;
-    records[*depth].previousTelemetryFrame = *telemetry;
+    records[*depth].previousTelemetryFrame = previous;
     ++(*depth);
-    *telemetry = frame;
     return true;
 }
 
 static inline bool GuideXosThreadStorePopTelemetryFrame(
     void* frame,
-    unsigned char* runtimeCell,
-    uint32_t telemetryOffset,
     GuideXosThreadStoreTransitionRecord* records,
     uint32_t* depth,
     void** restoredTelemetryFrame) {
-    if (frame == nullptr || runtimeCell == nullptr || records == nullptr ||
+    if (frame == nullptr || records == nullptr ||
         depth == nullptr || *depth == 0u ||
         records[*depth - 1u].frame != frame) {
         return false;
@@ -101,8 +107,6 @@ static inline bool GuideXosThreadStorePopTelemetryFrame(
 
     void* previous = records[*depth - 1u].previousTelemetryFrame;
     --(*depth);
-    void** telemetry = reinterpret_cast<void**>(runtimeCell + telemetryOffset);
-    *telemetry = previous;
     if (restoredTelemetryFrame != nullptr) {
         *restoredTelemetryFrame = previous;
     }

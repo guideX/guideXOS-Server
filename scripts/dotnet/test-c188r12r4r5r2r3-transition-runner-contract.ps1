@@ -38,6 +38,19 @@ function Get-Hash([string]$Path) {
 foreach ($path in @($runnerPath,$candidateManifestPath,$inventoryPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required transition runner contract input is missing: $path" }
 }
+$candidateManifest = Get-Content -LiteralPath $candidateManifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$candidatePhaseName = if ([string]$candidateManifest.mode -ceq 'NativeAotFirstManagedEntryProbe') {
+    'c188r12r4r5r2r3-managed-entry'
+} elseif ([string]$candidateManifest.mode -ceq 'NativeAotInitializeModulesTransitionAttribution') {
+    'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'
+} else {
+    throw "Unsupported transition runner contract candidate mode: $($candidateManifest.mode)"
+}
+$phaseRoot = [System.IO.Path]::GetFullPath((Join-Path $artifactRoot $candidatePhaseName))
+$candidatePrefix = $phaseRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+if (-not $candidate.StartsWith($candidatePrefix,[System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Candidate is outside the phase root for its declared profile: $candidate"
+}
 $manifestHashBefore = Get-Hash $candidateManifestPath
 $inventoryHashBefore = Get-Hash $inventoryPath
 $candidateInventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop
@@ -61,14 +74,23 @@ try {
         -CandidateRoot $candidate -CandidateIntegrityInventory $inventoryPath -ArtifactRoot $artifactRoot -HostedPreflightOnly 2>&1
     $runnerExit = $LASTEXITCODE
     $runnerText = ($runnerOutput | Out-String)
-    Assert-Contract ($runnerExit -eq 0 -and $runnerText -match 'C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT=PASS') `
-        'valid transition candidate accepted by the shared runner'
-    $preflightLine = @($runnerText -split "`r?`n" | Where-Object { $_ -match '^C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT_MANIFEST=' }) | Select-Object -First 1
+    $expectedPreflightMarker = if ([string]$candidateManifest.mode -ceq 'NativeAotFirstManagedEntryProbe') {
+        'C188R12R4R5R2R3R7_MANAGED_ENTRY_HOSTED_PREFLIGHT=PASS'
+    } else { 'C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT=PASS' }
+    $expectedPreflightManifestPrefix = if ([string]$candidateManifest.mode -ceq 'NativeAotFirstManagedEntryProbe') {
+        '^C188R12R4R5R2R3R7_MANAGED_ENTRY_HOSTED_PREFLIGHT_MANIFEST='
+    } else { '^C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT_MANIFEST=' }
+    Assert-Contract ($runnerExit -eq 0 -and $runnerText.Contains($expectedPreflightMarker)) `
+        'valid transition or managed-entry candidate accepted by the shared runner'
+    $preflightLine = @($runnerText -split "`r?`n" | Where-Object { $_ -match $expectedPreflightManifestPrefix }) | Select-Object -First 1
     if ($null -eq $preflightLine) { throw 'Runner hosted preflight did not emit its manifest path.' }
-    $preflightPath = $preflightLine -replace '^C188R12R4R5R2R3_TRANSITION_HOSTED_PREFLIGHT_MANIFEST=',''
+    $preflightPath = $preflightLine -replace $expectedPreflightManifestPrefix,''
     $hosted = Get-Content -LiteralPath $preflightPath -Raw | ConvertFrom-Json -ErrorAction Stop
-    $expectedCandidateAttemptPath = Join-Path $phaseRoot ("guest-launch-attempt-" +
-        [System.IO.Path]::GetFileName($candidate) + '.json')
+    $expectedCandidateAttemptPath = if ([string]$candidateManifest.mode -ceq 'NativeAotFirstManagedEntryProbe') {
+        Join-Path $phaseRoot ("guest-launch-attempt-" + $manifestHashBefore + '.json')
+    } else {
+        Join-Path $phaseRoot ("guest-launch-attempt-" + [System.IO.Path]::GetFileName($candidate) + '.json')
+    }
     Assert-Contract ([string]$hosted.result -ceq 'TRANSITION_PROFILE_HOSTED_PREFLIGHT_PASS' -and
         [string]$hosted.candidateRoot -ceq $candidate -and
         [int]$hosted.candidateIntegrityFileCount -eq $candidateInventoryFileCount) `
