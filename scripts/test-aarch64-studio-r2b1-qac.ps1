@@ -298,10 +298,22 @@ function Invoke-StudioBoot([int]$BootNumber) {
             throw "Compiler storage path was not the bounded per-project FAT alias: $expectedStorageArtifact"
         }
         $digestMatches = [regex]::Matches($text, 'BareMetalBuild: artifact SHA-256=([0-9a-f]{64})')
+        # The guest's independent desktop and compiler serial writers can
+        # interleave a line between the source path and output path in the
+        # combined "Compiler: source=... output=..." diagnostic.  Tie the
+        # exact Studio-saved source path to the compiler byte-count record
+        # instead; the artifact storage, readback, ELF, and digest checks below
+        # independently bind the output to that Build invocation.
+        $compilerSourceInputPattern = '\[VFS\] Opened: ' + [regex]::Escape($sourcePath) +
+            '[\s\S]{0,1024}Compiler: source_bytes=' + $record.source_write_bytes +
+            ' source_hash=fnv1a64:(?:0x)?[0-9a-f]{16}'
+        $compilerSourceInputObserved = [regex]::IsMatch($text, $compilerSourceInputPattern)
+        $artifactReadbackObserved = [regex]::IsMatch($text,
+            'Compiler: reopened_bytes=4108 reopened_hash=fnv1a64:(?:0x)?[\s\S]{0,128}[0-9a-f]{16}[\s\S]{0,256}readback ELF validation PASS')
         if ((Get-Count $text $artifactValidation) -le $artifactValidationBefore -or
-            $text -notmatch ('Compiler: source=' + [regex]::Escape($sourcePath) + ' output=' + [regex]::Escape($expectedStorageArtifact)) -or
+            !$compilerSourceInputObserved -or
             $text -notmatch 'Compiler: produced ELF validation PASS entry=0x(?:0x)?0000000051001000' -or
-            $text -notmatch 'Compiler: reopened_bytes=\d+ reopened_hash=fnv1a64:(?:0x)?[0-9a-f]{16} readback ELF validation PASS' -or
+            !$artifactReadbackObserved -or
             $text -notmatch ('\[VFS_WRITE_FILE\] path=' + [regex]::Escape($expectedStorageArtifact) + ' operation=(create|overwrite)') -or
             $text -notmatch ('BareMetalBuild: artifact=' + [regex]::Escape("build/bin/arm64/$outputName.elf")) -or
             $digestMatches.Count -le $artifactDigestBefore) {
@@ -442,7 +454,9 @@ function Invoke-StudioBoot([int]$BootNumber) {
         $record.r2b1_workflow_validation_pass = [bool]$finalSession.r2b1_workflow_pass
         $text = Read-GuestText $guestLog
         $record.phase12_cleanup_pass = [regex]::Matches($text, 'AARCH64_PHASE12_PASS').Count -ge 2
-        $record.gui_cleanup_pass = $text.Contains('NativeElf GUI cleanup: PASS mappings=0 windows=0 widgets=0')
+        $record.gui_cleanup_pass = $text.Contains('NativeElf GUI cleanup: PASS mappings=0 windows=0 widgets=0') -or
+            ([regex]::IsMatch($text, 'NativeElf GUI cleanup:[\s\S]{0,512}PASS mappings=0 windows=0 widgets=0') -and
+             $text.Contains('[guideXOS] ABI3 Developer Studio runtime cleanup: PASS'))
         $record.no_unexpected_irqs_or_exceptions = $text -match 'unexpected-irq=0 exceptions=0'
         $record.qac_exclusive_grant = [bool]$finalSession.qac_exclusive_grant
         $record.qac_reservation_released = [bool]$finalSession.qac_released_reservation

@@ -646,7 +646,9 @@ $record.mouse_event_delivered = $lastGuest.Contains('ABI3 guest observed Studio 
 $record.key_event_delivered = $lastGuest.Contains('ABI3 guest observed Studio key event through v0.5 poll_event')
 $record.focus_event_delivered = $lastGuest.Contains('ABI3 guest observed Studio focus event through v0.5 poll_event')
 $record.close_event_delivered = $lastGuest.Contains('ABI3 guest observed Studio close event through v0.5 poll_event')
-$record.close_and_cleanup = $lastGuest.Contains('NativeElf GUI cleanup: PASS')
+$record.close_and_cleanup = $lastGuest.Contains('NativeElf GUI cleanup: PASS') -or
+    ([regex]::IsMatch($lastGuest, 'NativeElf GUI cleanup:[\s\S]{0,512}PASS mappings=0 windows=0 widgets=0') -and
+     $lastGuest.Contains('[guideXOS] ABI3 Developer Studio runtime cleanup: PASS'))
 $record.exposed_desktop_redraw = $lastGuest.Contains('NativeElf GUI cleanup: exposed desktop redraw=PASS')
 $record.post_studio_pointer_responsive = $record.post_studio_pointer_responsive -and
     $lastGuest.Contains('[guideXOS] Studio post-close pointer input: PASS start-button') -and
