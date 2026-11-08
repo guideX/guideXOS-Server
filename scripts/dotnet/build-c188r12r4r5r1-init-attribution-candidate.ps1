@@ -510,7 +510,8 @@ if ($InitializeModulesAttribution) {
         [ordered]@{ id=2; key='CPU_FEATURES'; name='startup.required-cpu-instruction-sets'; source='Runtime/startup.cpp'; line=186; functionPattern='DetectCPUFeatures'; message='The required instruction sets are not supported by the current CPU.' },
         [ordered]@{ id=3; key='HARDWARE_STACK_OVERFLOW'; name='eh.hardware-stack-overflow'; source='Runtime/EHHelpers.cpp'; line=447; functionPattern='RhpHardwareExceptionHandler'; message='Process is terminating due to StackOverflowException.' },
         [ordered]@{ id=4; key='VECTORED_STACK_OVERFLOW'; name='eh.vectored-stack-overflow'; source='Runtime/EHHelpers.cpp'; line=588; functionPattern='RhpVectoredExceptionHandler'; message='Process is terminating due to StackOverflowException.' },
-        [ordered]@{ id=5; key='RESTORE_CONTEXT'; name='pal.restore-context-fallback'; source='Runtime/windows/PalRedhawkMinWin.cpp'; line=403; functionPattern='RtlRestoreContextFallbackExceptionFilter'; message='Could not set context record.' }
+        [ordered]@{ id=5; key='RESTORE_CONTEXT'; name='pal.restore-context-fallback'; source='Runtime/windows/PalRedhawkMinWin.cpp'; line=403; functionPattern='RtlRestoreContextFallbackExceptionFilter'; message='Could not set context record.' },
+        [ordered]@{ id=6; key='THREAD_REVERSE_PINVOKE_ATTACH_OR_TRAP_THREAD2'; name='thread.reverse-pinvoke.invalid-unmanagedcallersonly.inlined-helper'; source='Runtime/thread.cpp'; line=1194; functionPattern='RhpReversePInvokeAttachOrTrapThread2'; message='Fatal error. Invalid Program: attempted to call a UnmanagedCallersOnly method from managed code.' }
     )
     $transitionCallSiteHeaderPath = Join-Path $artifactRoot 'guidexos_nativeaot_transition_attribution_sites.h'
     $siteHeaderLines = @('#pragma once', '', '#include <stdint.h>', '')
@@ -1136,13 +1137,25 @@ if ($InitializeModulesAttribution) {
     $transitionHostedTestLog = if ($ResumeCandidate -and (Test-Path -LiteralPath (Join-Path $candidate 'transition-attribution-hosted-tests.log'))) {
         Join-Path $candidate ("transition-attribution-hosted-tests-resume-{0}.log" -f [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
     } else { Join-Path $candidate 'transition-attribution-hosted-tests.log' }
-    Invoke-Logged 'pwsh' @('-NoProfile','-ExecutionPolicy','Bypass','-File',
+    $transitionTestArguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',
         (Join-Path $root 'scripts\dotnet\test-c188r12r4r5r2r3-transition-attribution.ps1'),
         '-RepoRoot',$root,'-OutputDirectory',$transitionHostedTestRoot,
         '-ProductionNativeAotManifest',$productionRuntimeManifestPath,
         '-ProductionNativeAotMap',$productionMapPath,
         '-ProductionApplicationManifest',$productionManifestPath,
-        '-CallSiteMapPath',$transitionCallSiteMapPath) $transitionHostedTestLog
+        '-CallSiteMapPath',$transitionCallSiteMapPath)
+    if ($ManagedEntryProbe) {
+        $r8PhaseRoot = Join-Path $artifactBase 'c188r12r4r5r2r3-managed-entry'
+        $r8CandidateRoot = Join-Path $r8PhaseRoot 'candidate-20261108T035453893Z'
+        $r8SerialPath = Join-Path $r8PhaseRoot 'qac-guest-managed-entry-C188R12R4R5R2R3R7-20261108T153340698Z-ad6b4ecd48a344a5b98b74762d75eee9\serial.log'
+        $r8CallSiteMapPath = Join-Path $r8CandidateRoot 'transition-callsite-map.json'
+        if ((Test-Path -LiteralPath $r8SerialPath -PathType Leaf) -and
+            (Test-Path -LiteralPath $r8CallSiteMapPath -PathType Leaf)) {
+            $transitionTestArguments += @('-R8SerialPath',$r8SerialPath,
+                '-R8CallSiteMapPath',$r8CallSiteMapPath)
+        }
+    }
+    Invoke-Logged 'pwsh' $transitionTestArguments $transitionHostedTestLog
     $transitionHostedResultsPath = Join-Path $transitionHostedTestRoot 'hosted-test-results.json'
     Require-File $transitionHostedResultsPath 'Transition-attribution hosted-test result'
     $transitionHostedTestResults = Get-Content -LiteralPath $transitionHostedResultsPath -Raw | ConvertFrom-Json

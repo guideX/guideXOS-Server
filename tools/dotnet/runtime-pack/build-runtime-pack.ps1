@@ -812,7 +812,7 @@ guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_INTERFACE_DISPATCH);
         interfaceDispatchInitialized);
     if (!interfaceDispatchInitialized) return false;
 '@ 'interface-dispatch initialization result'
-        $startupText = Replace-ExactOneSource $startupText '(?m)^[ \t]*InitializeGCEventLock\(\);[ \t]*$' @'
+        $startupText = Replace-ExactOneSource $startupText '(?m)^[ \t]*InitializeGCEventLock\(\);[ \t]*\r?$' @'
 guideXosNativeAotInitTraceBegin(GX_INIT_STAGE_GC_EVENT_LOCK);
     InitializeGCEventLock();
     guideXosNativeAotInitTraceReturn(GX_INIT_STAGE_GC_EVENT_LOCK, true);

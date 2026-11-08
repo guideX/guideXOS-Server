@@ -4,7 +4,10 @@ param(
     [Parameter(Mandatory=$true)][string]$ProductionNativeAotManifest,
     [Parameter(Mandatory=$true)][string]$ProductionNativeAotMap,
     [Parameter(Mandatory=$true)][string]$ProductionApplicationManifest,
-    [Parameter(Mandatory=$true)][string]$CallSiteMapPath
+    [Parameter(Mandatory=$true)][string]$CallSiteMapPath,
+    [string]$R8SerialPath = '',
+    [string]$R8CallSiteMapPath = '',
+    [string]$R9SerialPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -100,7 +103,7 @@ $syntheticMap = [ordered]@{
     sites=@(
         [ordered]@{
             id=1; key='THREAD_REVERSE_PINVOKE'; name='synthetic.reverse-pinvoke'
-            message='Synthetic message ID'; linkedInCandidate=$true
+            message='Synthetic message ID'; linkedInCandidate=$true; resolutionStatus='exact-direct-call-mapped'
             callerReturnAddress='0x0000000000001001'
         },
         [ordered]@{
@@ -108,6 +111,13 @@ $syntheticMap = [ordered]@{
             message='Synthetic unlinked message ID'; linkedInCandidate=$false
             resolutionStatus='source-caller-not-linked-to-candidate'
             callerReturnAddress='0x0000000000000000'
+        },
+        [ordered]@{
+            id=6; key='THREAD_REVERSE_PINVOKE_ATTACH_OR_TRAP_THREAD2'
+            name='synthetic.reverse-pinvoke-helper-inline'
+            message='Synthetic invalid UnmanagedCallersOnly message'; linkedInCandidate=$true
+            resolutionStatus='exact-direct-call-mapped'
+            callerReturnAddress='0x0000000000001006'
         }
     )
 }
@@ -128,6 +138,112 @@ $attributedFailFast = Write-TransitionFixture 'synthetic-attributed-failfast' @(
 if ($attributedFailFast.classification -ne 'RUNTIME_FAIL_FAST_ATTRIBUTED' -or
     $attributedFailFast.callSite.id -ne 1 -or $attributedFailFast.failFast.underlyingDefectInferred) {
     throw 'Synthetic fatal call-site attribution or uninterpreted reason classification failed.'
+}
+$r8InitialRecord = ($fatalRecord.Replace('completed=00000000 gate=00000000 fatal=00000001 reason=50414C06 callSite=00000001 callerRip=0000000000001001',
+    'completed=00000001 gate=00000000 fatal=00000000 reason=00000000 callSite=FFFFFFFE callerRip=0000000000000000')).Replace('lastSuccess=00000062','lastSuccess=00000063')
+$r8FatalRecord = $fatalRecord.Replace('completed=00000000 gate=00000000 fatal=00000001 reason=50414C06 callSite=00000001 callerRip=0000000000001001',
+    'completed=00000001 gate=00000000 fatal=00000001 reason=50414C06 callSite=00000006 callerRip=0000000000001006')
+$r8InitialState = $stateRecord.Replace('currentThread=0000000000001000 attachment=00000002 nativeThreadId=0000000000000042 observedOsThreadId=0000000000000042 coop=00000001 tlsReady=00000001 tlsIndex=0000000000000000 palFlsIndex=0000000000000001 palFlsValue=0000000000001000 flsState=00000001',
+    'currentThread=0000000000000000 attachment=00000001 nativeThreadId=0000000000000000 observedOsThreadId=0000000000000042 coop=00000003 tlsReady=00000001 tlsIndex=0000000000000000 palFlsIndex=0000000000000000 palFlsValue=0000000000000000 flsState=00000000')
+$r8FatalState = $stateRecord.Replace('nativeThreadId=0000000000000042 observedOsThreadId=0000000000000042 coop=00000001',
+    'nativeThreadId=0000000000000042 observedOsThreadId=0000000000000042 coop=00000002').Replace('frame=FFFFFFFFFFFFFFFF frameReady=00000001 frameAligned=00000001',
+    'frame=0000000000000000 frameReady=00000000 frameAligned=00000001')
+$multipleSnapshots = Write-TransitionFixture 'synthetic-r8-multiple-snapshots' @(
+    $r8InitialRecord,$r8InitialState,$r8FatalRecord,$r8FatalState,
+    '[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000')
+if ($multipleSnapshots.classification -ne 'RUNTIME_FAIL_FAST_ATTRIBUTED' -or
+    $multipleSnapshots.transitionSnapshots.Count -ne 2 -or
+    $multipleSnapshots.transitionSnapshots[0].record.fatal -ne '00000000' -or
+    $multipleSnapshots.transitionSnapshots[1].record.fatal -ne '00000001' -or
+    $multipleSnapshots.callSite.id -ne 6 -or
+    $multipleSnapshots.callSiteResolutionMethod -ne 'stable-call-site-id') {
+    throw 'R8 ordered preflight/fatal snapshots were rejected or contradictory evidence was hidden.'
+}
+$regressedSnapshots = Write-TransitionFixture 'synthetic-r8-regressed-snapshots' @(
+    $r8FatalRecord,$r8FatalState,$r8InitialRecord,$r8InitialState,
+    '[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000')
+if ($regressedSnapshots.classification -ne 'TRANSITION_ATTRIBUTION_INCOMPLETE' -or
+    $regressedSnapshots.parseError -ne 'transition_snapshot_progression_regressed') {
+    throw 'The transition analyzer hid a fatal-to-nonfatal snapshot regression.'
+}
+$ripFallbackRecord = $fatalRecord.Replace('callSite=00000001 callerRip=0000000000001001',
+    'callSite=FFFFFFFE callerRip=0000000000001006')
+$ripFallback = Write-TransitionFixture 'synthetic-sentinel-callsite-exact-rip' @(
+    $ripFallbackRecord,$stateRecord,
+    '[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000')
+if ($ripFallback.classification -ne 'RUNTIME_FAIL_FAST_ATTRIBUTED' -or
+    $ripFallback.callSite.id -ne 6 -or
+    $ripFallback.callSiteResolutionMethod -ne 'exact-captured-return-rip' -or
+    $ripFallback.callSite.message -ne 'Synthetic invalid UnmanagedCallersOnly message') {
+    throw 'An unresolved stable ID with an exact linked candidate RIP was not attributed safely.'
+}
+Assert-Fixture ($ripFallback.callSiteResolutionMethod -eq 'exact-captured-return-rip' -and
+    $ripFallback.callSite.id -eq 6) 'sentinel call-site ID resolves by exact linked candidate RIP' 'synthetic analyzer fixture'
+if (-not [string]::IsNullOrWhiteSpace($R8SerialPath) -or
+    -not [string]::IsNullOrWhiteSpace($R8CallSiteMapPath)) {
+    if ([string]::IsNullOrWhiteSpace($R8SerialPath) -or
+        [string]::IsNullOrWhiteSpace($R8CallSiteMapPath)) {
+        throw 'Both preserved R8 analyzer inputs must be provided together.'
+    }
+    foreach ($path in @($R8SerialPath,$R8CallSiteMapPath)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Preserved R8 analyzer input is missing: $path"
+        }
+    }
+    $r8SerialHashBefore = Hash-File $R8SerialPath
+    $r8AnalysisPath = Join-Path $testRoot 'preserved-r8-transition-analysis.json'
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $transitionAnalyzerPath `
+        -SerialPath $R8SerialPath -CallSiteMapPath $R8CallSiteMapPath -OutputPath $r8AnalysisPath | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'The corrected analyzer failed on preserved R8 evidence.' }
+    $r8Analysis = Get-Content -LiteralPath $r8AnalysisPath -Raw | ConvertFrom-Json
+    if ($r8Analysis.classification -ne 'RUNTIME_FAIL_FAST_CALLSITE_UNRESOLVED' -or
+        -not [string]::IsNullOrWhiteSpace([string]$r8Analysis.parseError) -or
+        $r8Analysis.transitionSnapshots.Count -ne 2 -or
+        $r8Analysis.transitionSnapshots[0].record.fatal -ne '00000000' -or
+        $r8Analysis.transitionSnapshots[1].record.fatal -ne '00000001' -or
+        $r8Analysis.transitionSnapshots[0].state.rawThread -cne $r8Analysis.transitionSnapshots[1].state.rawThread -or
+        $r8Analysis.transitionSnapshots[0].state.currentThread -eq $r8Analysis.transitionSnapshots[1].state.currentThread -or
+        (Hash-File $R8SerialPath) -cne $r8SerialHashBefore) {
+        throw 'Preserved R8 snapshots were not retained and classified as unresolved without data loss.'
+    }
+    Assert-Fixture ($r8Analysis.evidencePreserved -and -not $r8Analysis.qemuLaunched -and
+        -not $r8Analysis.qacReserved) 'preserved R8 ordered snapshots analyzed offline' 'preserved serial and candidate map'
+}
+if (-not [string]::IsNullOrWhiteSpace($R9SerialPath)) {
+    if (-not (Test-Path -LiteralPath $R9SerialPath -PathType Leaf)) {
+        throw "Preserved R9 serial input is missing: $R9SerialPath"
+    }
+    $r9SerialHashBefore = Hash-File $R9SerialPath
+    $r9AnalysisPath = Join-Path $testRoot 'preserved-r9-transition-analysis.json'
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $transitionAnalyzerPath `
+        -SerialPath $R9SerialPath -CallSiteMapPath $CallSiteMapPath -OutputPath $r9AnalysisPath | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'The corrected analyzer failed on preserved R9 evidence.' }
+    $r9Analysis = Get-Content -LiteralPath $r9AnalysisPath -Raw | ConvertFrom-Json
+    $r9Raw = [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($R9SerialPath))
+    $r9ReturnFrames = [regex]::Match($r9Raw,
+        '(?m)^\[C188R12R4R5R4_THREAD\] seq=[0-9A-Fa-f]{16} event=transition_return_frames raw0=FFFFFFFFFFFFFFFF raw1=FFFFFFFFFFFFFFFF\r?$')
+    $r9ReturnFls = [regex]::Match($r9Raw,
+        '(?m)^\[C188R12R4R5R4_THREAD\] seq=[0-9A-Fa-f]{16} event=transition_return_fls raw0=0000000000000000 raw1=[0-9A-Fa-f]{16}\r?$')
+    $r9EntryAttempts = @([regex]::Matches($r9Raw,'(?m)^\[C188R12R4R5R2R3_ENTRY\] event=attempt [^\r\n]*')).Count
+    $r9EntryReturns = @([regex]::Matches($r9Raw,'(?m)^\[C188R12R4R5R2R3_ENTRY\] event=returned [^\r\n]*')).Count
+    if ($r9Analysis.classification -ne 'RUNTIME_FAIL_FAST_ATTRIBUTED' -or
+        $r9Analysis.callSite.id -ne 6 -or
+        $r9Analysis.callSiteResolutionMethod -ne 'exact-captured-return-rip' -or
+        $r9Analysis.callSite.message -ne 'Fatal error. Invalid Program: attempted to call a UnmanagedCallersOnly method from managed code.' -or
+        $r9Analysis.transitionSnapshots.Count -ne 2 -or
+        $r9Analysis.transitionSnapshots[0].record.fatal -ne '00000000' -or
+        $r9Analysis.transitionSnapshots[1].record.fatal -ne '00000001' -or
+        $r9Analysis.transitionSnapshots[0].state.rawThread -cne $r9Analysis.transitionSnapshots[1].state.rawThread -or
+        $r9Analysis.transitionSnapshots[0].state.currentThread -eq $r9Analysis.transitionSnapshots[1].state.currentThread -or
+        $r9Analysis.transitionSnapshots[1].state.coop -ne '00000002' -or
+        $r9Analysis.transitionSnapshots[1].state.frame -ne '0000000000000000' -or
+        -not $r9ReturnFrames.Success -or -not $r9ReturnFls.Success -or
+        $r9EntryAttempts -ne 1 -or $r9EntryReturns -ne 0 -or
+        -not $r9Analysis.evidencePreserved -or (Hash-File $R9SerialPath) -cne $r9SerialHashBefore) {
+        throw 'Preserved R9 evidence did not resolve the fatal caller or retain its managed-entry boundary.'
+    }
+    Assert-Fixture (-not $r9Analysis.qemuLaunched -and -not $r9Analysis.qacReserved -and
+        $r9Analysis.transitionSnapshots.Count -eq 2) 'preserved R9 fatal caller and return-state evidence analyzed offline' 'preserved native serial and candidate map'
 }
 $unknownCallsite = Write-TransitionFixture 'synthetic-unresolved-callsite' @(
     ($fatalRecord.Replace('callSite=00000001 callerRip=0000000000001001','callSite=FFFFFFFE callerRip=0000000000009999')),
@@ -439,7 +555,7 @@ $results = [ordered]@{
     candidateCallSiteMapSha256=Hash-File $CallSiteMapPath
     analyzerSyntheticFixtures=@($attributedFailFast.classification,$unknownCallsite.classification,
         $blocked.classification,$returned.classification,$mismatch.classification,
-        $unlinkedSite.classification)
+        $unlinkedSite.classification,$ripFallback.classification)
     recoveredSafeStop=[ordered]@{ path=$safeSerial; sha256=$safeSerialHash; stages=29; events=93 }
     priorR4FailFast=[ordered]@{ path=$r4Serial; sha256=$r4SerialHash; result=$r4Reviewed.result; reason=$r4Reviewed.failFast.code }
     r4PalFlsBridgeTrace=[ordered]@{

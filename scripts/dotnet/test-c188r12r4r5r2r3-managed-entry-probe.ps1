@@ -48,6 +48,39 @@ $map = Get-Content -LiteralPath $ManagedMap -Raw
 $disassembly = Get-Content -LiteralPath $ManagedDisassembly -Raw
 $kernelLog = Get-Content -LiteralPath $KernelBuildLog -Raw
 $runtimeManifest = Get-Content -LiteralPath $RuntimePackManifest -Raw | ConvertFrom-Json -ErrorAction Stop
+$managedEntryAnalyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-managed-entry-probe.ps1'
+$transitionAnalyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r3-transition-attribution.ps1'
+$fatalFixtureRoot = Join-Path $root ('out\dotnet\managed-entry-fatal-fixture-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $fatalFixtureRoot | Out-Null
+$fatalFixtureMapPath = Join-Path $fatalFixtureRoot 'candidate-callsite-map.json'
+$fatalFixtureSerialPath = Join-Path $fatalFixtureRoot 'serial.log'
+$fatalFixtureAnalysisPath = Join-Path $fatalFixtureRoot 'managed-entry-analysis.json'
+$fatalFixtureMap = [ordered]@{
+    schemaVersion=1
+    lockedRuntimeCommit='synthetic-managed-entry-fatal-fixture'
+    sites=@([ordered]@{
+        id=6;key='THREAD_REVERSE_PINVOKE_ATTACH_OR_TRAP_THREAD2'
+        name='thread.reverse-pinvoke.invalid-unmanagedcallersonly.inlined-helper'
+        message='Fatal error. Invalid Program: attempted to call a UnmanagedCallersOnly method from managed code.'
+        linkedInCandidate=$true;resolutionStatus='exact-direct-call-mapped'
+        callerReturnAddress='0x0000000100001006'
+    })
+}
+[System.IO.File]::WriteAllText($fatalFixtureMapPath,($fatalFixtureMap | ConvertTo-Json -Depth 6),[System.Text.UTF8Encoding]::new($false))
+$fatalFixtureRecord = '[C188R12R4R5R2R3_FATAL] valid=1 seq=0000000000000001 snapshot=00000001 attempted=00000001 completed=00000001 gate=00000000 fatal=00000001 reason=50414C06 callSite=FFFFFFFE callerRip=0000000100001006 msgState=00000000 msgBytes=00000000 msgTruncated=00000000 originalStatusAvailable=00000000 originalStatus=00000000 firstFailureStage=FFFFFFFF firstFailureStatusAvailable=00000000 firstFailureStatus=00000000 lastSuccess=00000063 initOverflow=00000000 threadOverflow=00000000'
+$fatalFixtureState = '[C188R12R4R5R2R3_STATE] runtime=00000001 rhInitialize=00000001 threadStore=00000001 rawThread=0000000000002000 currentThread=0000000000002000 attachment=00000002 nativeThreadId=0000000000000042 observedOsThreadId=0000000000000042 coop=00000002 tlsReady=00000001 tlsIndex=0000000000000000 palFlsIndex=0000000000000001 palFlsValue=0000000000002000 flsState=00000001 stackReady=00000001 stackCurrent=0000000000003000 stackLow=0000000000002000 stackHigh=0000000000004000 frame=0000000000000000 frameReady=00000000 frameAligned=00000001 frameInStack=00000000 stockWillAttach=00000000 gcReady=00000001 module=00000001 codeManager=00000001 modulesNotInitialized=00000001'
+$fatalFixtureLines = @(
+    '[C188R12R4R5R2R3_ENTRY] event=attempt abi=UnmanagedCallersOnly-Cdecl seed=0000000E symbol=ManagedMain collection=not_requested',
+    '[nativeaot-pal-qemu-test] FAIL_FAST reason=50414C06 detail=0000000000000000',
+    $fatalFixtureRecord,
+    $fatalFixtureState
+)
+[System.IO.File]::WriteAllLines($fatalFixtureSerialPath,$fatalFixtureLines,[System.Text.UTF8Encoding]::new($false))
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $managedEntryAnalyzerPath `
+    -SerialPath $fatalFixtureSerialPath -CallSiteMapPath $fatalFixtureMapPath `
+    -TransitionAnalyzerPath $transitionAnalyzerPath -OutputPath $fatalFixtureAnalysisPath | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Managed-entry fatal-after-dispatch hosted fixture failed to analyze.' }
+$fatalFixtureAnalysis = Get-Content -LiteralPath $fatalFixtureAnalysisPath -Raw | ConvertFrom-Json
 $reversePInvokeMap = [regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvoke\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
 $reversePInvokeReturnMap = [regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvokeReturn\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
 $expectedProbeCalls = @()
@@ -76,6 +109,7 @@ $assertion = @(
     @{ok=$runner.Contains("Get-AnalysisBoolean `$transitionAttributionAnalysis 'managedEntryReturned'") -and $runner.Contains("Get-AnalysisBoolean `$transitionAttributionAnalysis 'runtimeStateReady'"); name='runner reports a blocked preflight safely when no serial analyzer result exists'},
     @{ok=$runner -match '(?s)\$attemptPath = if \(\$isManagedEntryProbe\) \{\s*Join-Path \$phaseRoot \("guest-launch-attempt-" \+ \$candidateManifestSha256 \+ "\.json"\)' -and $runner.Contains('[System.IO.FileMode]::CreateNew') -and $runner.Contains('maxGuestBoots=1;automaticRetry=$false'); name='runner binds one atomic no-retry attempt guard to the candidate manifest'},
     @{ok=$runner.Contains("`$transitionAttributionAnalysis.PSObject.Properties['failFast']") -and $runner.Contains('$transitionFailFastProperty.Value'); name='runner safely records transition analyses without an optional failFast field'},
+    @{ok=$fatalFixtureAnalysis.classification -eq 'RUNTIME_FAIL_FAST_ATTRIBUTED' -and $fatalFixtureAnalysis.managedEntryAttempted -and -not $fatalFixtureAnalysis.managedEntryReturned -and $fatalFixtureAnalysis.managedEntryRequested -and $fatalFixtureAnalysis.callSite.id -eq 6 -and $fatalFixtureAnalysis.callSiteResolutionMethod -eq 'exact-captured-return-rip' -and $fatalFixtureAnalysis.evidencePreserved -and -not $fatalFixtureAnalysis.qemuLaunched -and -not $fatalFixtureAnalysis.qacReserved; name='mapped PAL fatal after ManagedMain dispatch is attributed without claiming managed entry'},
     @{ok=$kernelLog -match '-DGXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE'; name='isolated candidate kernel was built with the R7-only selector'},
     @{ok=$kernel -match 'collection=not_requested' -and $managedBody -notmatch 'GC\.Collect|RhpCollect'; name='probe path does not request managed GC collection'}
 )

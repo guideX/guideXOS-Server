@@ -142,6 +142,9 @@ const char* threadReadinessEventName(uint32_t event) {
     case GX_THREADSTORE_EVENT_PAL_FLS_SET_CONTEXT: return "pal_fls_set_context";
     case GX_THREADSTORE_EVENT_PAL_FLS_SET_VALUE: return "pal_fls_set_value";
     case GX_THREADSTORE_EVENT_THREADSTORE_PUBLICATION: return "threadstore_publication";
+    case GX_THREADSTORE_EVENT_TRANSITION_RETURN_FRAMES: return "transition_return_frames";
+    case GX_THREADSTORE_EVENT_TRANSITION_RETURN_CACHED: return "transition_return_cached";
+    case GX_THREADSTORE_EVENT_TRANSITION_RETURN_FLS: return "transition_return_fls";
     default: return "unknown";
     }
 }
@@ -36035,6 +36038,23 @@ extern "C" __declspec(noinline) void __cdecl RhpReversePInvoke(void* frame) {
 extern "C" __declspec(noinline) void __cdecl RhpReversePInvokeReturn(void* frame) {
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R4_THREADSTORE_READINESS)
     guideXosStockRhpReversePInvokeReturn(frame);
+    Thread* rawCurrentThread = ThreadStore::RawGetCurrentThread();
+    RuntimeThreadLocals* locals = reinterpret_cast<RuntimeThreadLocals*>(rawCurrentThread);
+    void* savedTransitionFrame = frame == nullptr ? nullptr : *reinterpret_cast<void**>(frame);
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_TRANSITION_RETURN_FRAMES,
+        reinterpret_cast<uintptr_t>(savedTransitionFrame),
+        locals == nullptr ? 0u : reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame));
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_TRANSITION_RETURN_CACHED,
+        locals == nullptr ? 0u : reinterpret_cast<uintptr_t>(locals->m_pCachedTransitionFrame),
+        reinterpret_cast<uintptr_t>(rawCurrentThread));
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
+    GuideXosNativeAotThreadReadinessMark(
+        GX_THREADSTORE_EVENT_TRANSITION_RETURN_FLS,
+        static_cast<uintptr_t>(GuideXosNativeAotTransitionGetPalFlsIndex()),
+        reinterpret_cast<uintptr_t>(GuideXosNativeAotTransitionGetPalFlsValue()));
+#endif
     unsigned char* block = currentTlsBlock();
     void* restoredTelemetryFrame = nullptr;
     if (block == nullptr ||

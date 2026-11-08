@@ -63,6 +63,32 @@ if (-not $evidencePreserved) {
     [string]$transition.recordIntegrity -eq '1' -and [string]::IsNullOrWhiteSpace([string]$transition.parseError) -and
     $attemptLines.Count -eq 0 -and $returnedLines.Count -eq 0 -and $stateLines.Count -eq 0) {
     $classification = [string]$transition.classification
+} elseif ([string]$transition.classification -in @('RUNTIME_FAIL_FAST_ATTRIBUTED','RUNTIME_FAIL_FAST_CALLSITE_UNRESOLVED') -and
+    [string]$transition.recordIntegrity -eq '1' -and [string]::IsNullOrWhiteSpace([string]$transition.parseError) -and
+    [string]$transition.transitionRecord.fatal -eq '00000001' -and
+    [string]$transition.transitionRecord.attempted -eq '00000001' -and
+    [string]$transition.transitionRecord.completed -eq '00000001' -and
+    $attemptLines.Count -eq 1 -and $returnedLines.Count -eq 0 -and $stateLines.Count -eq 0) {
+    try {
+        $attempt = Get-MarkerFields $attemptLines[0] '[C188R12R4R5R2R3_ENTRY] event=attempt'
+        $managedEntryAttempted = $true
+        $attemptOrder = $raw.IndexOf($attemptLines[0],[StringComparison]::Ordinal)
+        $requiredAttempt = $attempt.abi -ceq 'UnmanagedCallersOnly-Cdecl' -and
+            $attempt.seed -ceq '0000000E' -and $attempt.symbol -ceq 'ManagedMain' -and
+            $attempt.collection -ceq 'not_requested'
+        $fatalPattern = '(?m)^\[C188R12R4R5R2R3_FATAL\] [^\r\n]*fatal=00000001 reason=' +
+            [regex]::Escape([string]$transition.transitionRecord.reason) +
+            ' [^\r\n]*callerRip=' + [regex]::Escape([string]$transition.transitionRecord.callerRip) + '[^\r\n]*\r?$'
+        $fatalMatch = [regex]::Match($raw,$fatalPattern)
+        $fatalOrder = if ($fatalMatch.Success) { $fatalMatch.Index } else { -1 }
+        if ($requiredAttempt -and $attemptOrder -ge 0 -and $fatalOrder -gt $attemptOrder) {
+            $classification = [string]$transition.classification
+        } else {
+            $parseError = 'managed_entry_attempt_fatal_contract_invalid'
+        }
+    } catch {
+        $parseError = $_.Exception.Message
+    }
 } elseif ([string]$transition.classification -eq 'INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED' -and
     [string]$transition.recordIntegrity -eq '1' -and [string]::IsNullOrWhiteSpace([string]$transition.parseError)) {
     if ($attemptLines.Count -ne 1 -or $returnedLines.Count -ne 1 -or $stateLines.Count -ne 1) {
@@ -127,6 +153,7 @@ $report = [ordered]@{
     transitionRecord=$transitionRecord
     threadAndRuntimeState=$transition.threadAndRuntimeState
     callSite=$transition.callSite
+    callSiteResolutionMethod=$transition.callSiteResolutionMethod
     callSiteMap=[ordered]@{path=$mapFull;sha256=$callSiteMapHash}
     transitionClassification=$transition.classification
     transitionAnalysisPath=$transitionPath
