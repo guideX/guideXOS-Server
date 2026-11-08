@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -30,6 +32,15 @@ PF_X = 1
 PF_W = 2
 SHF_WRITE = 1
 SHT_PROGBITS = 1
+RUNTIME_RECORD_FIELDS = (
+    "name", "stage", "valid", "PSR", "PSR.i", "PSR.ic", "RSC", "RSC.mode",
+    "BSP", "BSPSTORE", "RNAT", "FPSR", "IVA", "PFS", "UNAT",
+    "IVT_EXPECTED", "RSE_RANGE",
+)
+SIMULATOR_FAULT_MARKERS = (
+    "exception", "fault @", " fault\n", "unallocated page", "illegal address",
+    "privileged operation fault", "not an elf", "kernel not for this processor",
+)
 
 
 def load_elf_validator(repo_root: Path) -> Any:
@@ -211,6 +222,7 @@ def validate_checkpoint_output(stdout: str, *, ivt: int, rse_base: int,
                                rse_top: int) -> tuple[dict[str, Any], list[str]]:
     errors: list[str] = []
     parsed: dict[str, Any] = {}
+    observed_order: list[str] = []
     for line in stdout.splitlines():
         if not line.startswith("IA64_CHECKPOINT_"):
             continue
@@ -222,6 +234,11 @@ def validate_checkpoint_output(stdout: str, *, ivt: int, rse_base: int,
         if record["name"] in parsed:
             errors.append(f"duplicate checkpoint {record['name']}")
         parsed[record["name"]] = record
+        observed_order.append(record["name"])
+    expected_order = list(STAGE_MASKS)
+    if observed_order != expected_order:
+        errors.append(f"checkpoint order differs from {','.join(expected_order)}: "
+                      f"observed {','.join(observed_order)}")
     for name in STAGE_MASKS:
         if name not in parsed:
             errors.append(f"checkpoint {name} is missing from guest output")
@@ -252,6 +269,58 @@ def validate_checkpoint_output(stdout: str, *, ivt: int, rse_base: int,
             if record["psr_value"] & ((1 << 18) | (1 << 19)):
                 errors.append(f"checkpoint {record['name']} has PSR.dfl/dfh disabled")
     return parsed, errors
+
+
+def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
+                              run_result: dict[str, Any], expected_sha256: str, *,
+                              ivt: int, rse_base: int, rse_top: int) -> tuple[dict[str, Any], list[str]]:
+    """Validate raw guest records together with the runner's captured result."""
+    records, errors = validate_checkpoint_output(
+        stdout, ivt=ivt, rse_base=rse_base, rse_top=rse_top)
+
+    if run_result.get("label") != "guideXOS-kernel":
+        errors.append("runner result does not identify a guideXOS kernel launch")
+    if run_result.get("artifact_sha256") != expected_sha256:
+        errors.append("runner artifact identity differs from the selected candidate")
+    if run_result.get("classification") != "GUEST_EXIT_ZERO" or \
+            run_result.get("exit_code") != 0 or run_result.get("timed_out") is not False:
+        errors.append("runner did not report successful intentional guest termination")
+    simulator_output = stdout + "\n" + stderr
+    if "kernel exited with status 0" not in simulator_output.lower():
+        errors.append("guest output lacks the successful Ski SSC exit status")
+
+    command = run_result.get("command")
+    if not isinstance(command, list) or not all(item in command for item in (
+            "-stats", "-icnt", "-forcesystem")):
+        errors.append("runner command does not show stats, instruction capture, and system mode")
+
+    summary = re.findall(
+        r"(?im)^\s*(\d+)\s+insts?\s+\((\d+)\s+faults?\)",
+        simulator_output + "\n" + instruction_counts,
+    )
+    if len(summary) != 1:
+        errors.append("simulator captures lack one unambiguous instruction/fault summary")
+    elif int(summary[0][1]) != 0:
+        errors.append(f"simulator recorded {summary[0][1]} unexpected fault(s)")
+
+    combined = simulator_output.lower()
+    for marker in SIMULATOR_FAULT_MARKERS:
+        if marker in combined:
+            errors.append(f"simulator output contains a fault marker: {marker.strip()}")
+
+    if run_result.get("cpu_state_checkpoint_errors") != []:
+        errors.append("runner recorded CPU-state checkpoint validation errors")
+    reported_records = run_result.get("cpu_state_checkpoints")
+    if not isinstance(reported_records, dict) or set(reported_records) != set(STAGE_MASKS):
+        errors.append("runner result does not contain exactly the four guest checkpoints")
+    else:
+        for name in STAGE_MASKS:
+            reported = reported_records[name]
+            parsed = records.get(name)
+            if not isinstance(reported, dict) or parsed is None or any(
+                    reported.get(field) != parsed.get(field) for field in RUNTIME_RECORD_FIELDS):
+                errors.append(f"runner checkpoint {name} differs from the raw guest log")
+    return records, errors
 
 
 def run_disassembly(objdump: str, elf: Path, symbol: str) -> str:
@@ -370,13 +439,196 @@ def validate(repo_root: Path, elf_path: Path, objdump: str) -> list[str]:
     return failures
 
 
+def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
+                           loader_record_path: Path, ski_prefix: Path,
+                           invocation_path: Path, run_result_path: Path,
+                           expected_sha256: str) -> tuple[dict[str, Any], list[str]]:
+    errors: list[str] = []
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        loader_record = json.loads(loader_record_path.read_text(encoding="utf-8"))
+        run_result = json.loads(run_result_path.read_text(encoding="utf-8"))
+        invocation = invocation_path.read_text(encoding="utf-8")
+        actual_sha256 = hashlib.sha256(elf_path.read_bytes()).hexdigest()
+    except (OSError, json.JSONDecodeError) as exc:
+        return {}, [f"runtime evidence is missing or invalid: {exc}"]
+
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        errors.append("expected candidate SHA-256 is malformed")
+    if actual_sha256 != expected_sha256:
+        errors.append("selected ELF SHA-256 differs from the expected candidate identity")
+    if not isinstance(manifest, dict) or manifest.get("schema") != "guidexos-ia64-artifact-v1" or \
+            manifest.get("profile") != "early-exec" or manifest.get("sha256") != actual_sha256 or \
+            manifest.get("static_gates") != "PASS" or \
+            manifest.get("cpu_state_static_gates") != "PASS" or \
+            manifest.get("guest_execution_authorized") is not False or \
+            manifest.get("runtime_qualified") is not False or \
+            manifest.get("scheduler_qualified") is not False or \
+            manifest.get("interrupt_fp_preservation") is not False:
+        errors.append("candidate manifest does not bind the statically qualified early-exec ELF")
+    elif not isinstance(manifest.get("elf"), str) or \
+            (manifest_path.parent / manifest["elf"]).resolve() != elf_path.resolve():
+        errors.append("candidate manifest path does not identify the selected ELF")
+
+    if not isinstance(loader_record, dict):
+        return {}, errors + ["loader compatibility record is not a JSON object"]
+
+    try:
+        simulator = (ski_prefix / "bin" / "ski").resolve(strict=True)
+        bskinc = (ski_prefix / "bin" / "bskinc").resolve(strict=True)
+        simulator_sha256 = hashlib.sha256(simulator.read_bytes()).hexdigest()
+    except OSError as exc:
+        simulator = None
+        bskinc = None
+        simulator_sha256 = ""
+        errors.append(f"qualified Ski executable is unavailable: {exc}")
+
+    if loader_record.get("schema") != "guidexos-ia64-ski-loader-v1" or \
+            loader_record.get("outcome") != "SKI_LOADER_READY" or \
+            loader_record.get("loader_kind") != "ski-direct-system-elf" or \
+            loader_record.get("kernel_sha256") != actual_sha256 or \
+            loader_record.get("kernel_profile") != "early-exec" or \
+            loader_record.get("ski_sha256") != simulator_sha256 or \
+            loader_record.get("kernel_execution_authorized") is not False or \
+            loader_record.get("single_cpu_contract") != "SOURCE_ENFORCED_ONE_CPU":
+        errors.append("loader record does not bind this candidate, simulator, and one-CPU contract")
+    else:
+        ski_source = loader_record.get("ski_source")
+        direct_loader = loader_record.get("direct_loader")
+        if not isinstance(ski_source, dict) or \
+                ski_source.get("commit") != "dfc2902ea1423d9b32543a5daf8026213f2b37a1" or \
+                ski_source.get("source_tree_clean") is not True or \
+                loader_record.get("ski_version") != "1.5.1" or \
+                not isinstance(direct_loader, dict) or \
+                direct_loader.get("uses_system_mode_option") != "-forcesystem" or \
+                direct_loader.get("candidate_paddr_equals_vaddr") is not True or \
+                direct_loader.get("guest_resident_loader_ranges") != []:
+            errors.append("loader record lacks the pinned Ski system-mode direct-loader qualification")
+
+    if not isinstance(run_result, dict):
+        return {}, errors + ["runner result is not a JSON object"]
+    command = run_result.get("command")
+    if isinstance(command, list) and command:
+        try:
+            command_simulator = Path(command[0]).resolve(strict=True)
+            if bskinc is None or simulator is None or command_simulator != bskinc or bskinc != simulator:
+                errors.append("runner command does not use the qualified Ski batch executable")
+        except OSError as exc:
+            errors.append(f"runner simulator command is unavailable: {exc}")
+    else:
+        errors.append("runner command is missing")
+
+    required_invocation_parts = (
+        "--authorize-kernel-guest-execution", "--profile early-exec",
+        f"--expected-sha256 {expected_sha256}", str(elf_path), str(manifest_path),
+        str(loader_record_path),
+    )
+    if any(part not in invocation for part in required_invocation_parts):
+        errors.append("saved invocation lacks explicit authorization or candidate-bound arguments")
+
+    try:
+        for key in ("stdout", "stderr", "instruction_counts"):
+            value = run_result.get(key)
+            if not isinstance(value, str) or not Path(value).is_file():
+                raise OSError(f"runner result does not identify an existing {key} capture")
+        stdout = Path(run_result["stdout"]).read_text(encoding="utf-8", errors="replace")
+        stderr = Path(run_result["stderr"]).read_text(encoding="utf-8", errors="replace")
+        instruction_counts = Path(run_result["instruction_counts"]).read_text(
+            encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return {}, errors + [f"runner output capture is missing: {exc}"]
+
+    elf_validator = load_elf_validator(repo_root)
+    try:
+        candidate = elf_validator.Elf64(elf_path)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return {}, errors + [f"candidate ELF cannot supply runtime invariants: {exc}"]
+    symbols = candidate.symbols
+    required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top")
+    if any(name not in symbols for name in required_symbols):
+        return {}, errors + ["candidate ELF lacks IVT or RSE expectation symbols"]
+    gp_symbol = symbols.get("__gp")
+    expected_entry = f"0x{candidate.entry:x}"
+    expected_gp = f"0x{gp_symbol['value']:x}" if gp_symbol else ""
+    if loader_record.get("kernel_entry") != expected_entry or \
+            loader_record.get("kernel_gp") != expected_gp:
+        errors.append("loader record entry or GP differs from the candidate ELF symbols")
+    program_loads = [program for program in candidate.programs if program["type"] == 1]
+    flag_text = lambda flags: ("R" if flags & 4 else "") + ("W" if flags & 2 else "") + \
+        ("X" if flags & 1 else "")
+    expected_loads = [{
+        "start": hex(program["vaddr"]),
+        "end_exclusive": hex(program["vaddr"] + program["memsz"]),
+        "file_size": hex(program["filesz"]),
+        "memory_size": hex(program["memsz"]),
+        "flags": flag_text(program["flags"]),
+    } for program in program_loads]
+    if loader_record.get("kernel_load_segments") != expected_loads:
+        errors.append("loader record PT_LOAD ranges differ from the candidate ELF")
+    records, runtime_errors = validate_runtime_evidence(
+        stdout, stderr, instruction_counts, run_result, expected_sha256,
+        ivt=symbols["ia64_ivt"]["value"],
+        rse_base=symbols["rse_backing_store_base"]["value"],
+        rse_top=symbols["rse_backing_store_top"]["value"],
+    )
+    errors.extend(runtime_errors)
+
+    source_errors = validate_checkpoint_sources(repo_root)
+    if source_errors:
+        errors.extend(f"checkpoint source contract: {error}" for error in source_errors)
+    console_header = (repo_root / "kernel/arch/ia64/include/arch/ski_console.h").read_text(
+        encoding="utf-8")
+    stop_source = (repo_root / "kernel/arch/ia64/ski_console.cpp").read_text(encoding="utf-8")
+    if not re.search(r"\bSSC_EXIT\s*=\s*66\b", console_header) or \
+            "ssc(SSC_EXIT);" not in stop_source:
+        errors.append("source does not bind the intentional stop path to SSC_EXIT=66")
+    return records, errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--elf", type=Path, required=True)
     parser.add_argument("--objdump", required=True)
+    parser.add_argument("--runtime-run-result", type=Path)
+    parser.add_argument("--runtime-manifest", type=Path)
+    parser.add_argument("--runtime-loader-record", type=Path)
+    parser.add_argument("--runtime-ski-prefix", type=Path)
+    parser.add_argument("--runtime-invocation", type=Path)
+    parser.add_argument("--expected-sha256")
     args = parser.parse_args()
     try:
+        runtime_inputs = (
+            args.runtime_manifest, args.runtime_loader_record,
+            args.runtime_ski_prefix, args.runtime_invocation, args.expected_sha256,
+        )
+        if args.runtime_run_result:
+            if any(value is None for value in runtime_inputs):
+                parser.error("runtime validation requires manifest, loader record, Ski prefix, "
+                             "invocation, and expected SHA-256")
+            records, errors = validate_runtime_files(
+                args.repo_root, args.elf, args.runtime_manifest,
+                args.runtime_loader_record, args.runtime_ski_prefix,
+                args.runtime_invocation, args.runtime_run_result, args.expected_sha256)
+            for name in STAGE_MASKS:
+                record = records.get(name)
+                if record:
+                    print(f"CHECKPOINT_{name}=PASS PSR={record['PSR']} PSR.i={record['PSR.i']} "
+                          f"PSR.ic={record['PSR.ic']} RSC={record['RSC']} BSP={record['BSP']} "
+                          f"BSPSTORE={record['BSPSTORE']} IVA={record['IVA']} "
+                          f"FPSR={record['FPSR']} RNAT={record['RNAT']}")
+            for error in errors:
+                print(f"RUNTIME_VALIDATION=FAIL {error}", file=sys.stderr)
+            if errors:
+                print(f"IA64_CPU_STATE_RUNTIME_VALIDATION=FAIL count={len(errors)}")
+                return 1
+            print("CHECKPOINT_ORDER=PASS A,B,C,D")
+            print("RAW_GUEST_RECORDS=PASS exactly four ordered records, matching runner capture")
+            print("RUNNER_EXIT=PASS intentional SSC_EXIT=66, process status 0, no timeout")
+            print("SIMULATOR_FAULTS=PASS 0")
+            print("CANDIDATE_IDENTITY=PASS ELF, manifest, loader record, invocation, and runner hash agree")
+            print("IA64_CPU_STATE_RUNTIME_VALIDATION=PASS")
+            return 0
         return 1 if validate(args.repo_root, args.elf, args.objdump) else 0
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"IA64_CPU_STATE_STATIC_GATES=FAIL error={exc}", file=sys.stderr)

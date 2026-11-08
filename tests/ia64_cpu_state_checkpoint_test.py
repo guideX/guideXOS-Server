@@ -115,6 +115,103 @@ class CpuStateCheckpointTests(unittest.TestCase):
             wrong_ic, ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
         self.assertTrue(any("PSR.ic" in error for error in ic_errors), ic_errors)
 
+    def test_psr_architectural_bit_matrix_and_reversed_labels(self) -> None:
+        expected = {
+            0x0000: ("0", "0"),
+            0x2000: ("0", "1"),
+            0x4000: ("1", "0"),
+            0x6000: ("1", "1"),
+        }
+        for psr, (interrupt_enable, collection_enable) in expected.items():
+            with self.subTest(psr=f"0x{psr:04X}"):
+                record = validator.parse_checkpoint_record(
+                    line("C", stage=3, valid=0x1E7, psr=psr, iva=IVT))
+                self.assertEqual(record["PSR.i"], interrupt_enable)
+                self.assertEqual(record["PSR.ic"], collection_enable)
+
+        reversed_labels = line("C", stage=3, valid=0x1E7, psr=0x2000, iva=IVT).replace(
+            "PSR.i=0 PSR.ic=1", "PSR.i=1 PSR.ic=0")
+        with self.assertRaisesRegex(ValueError, "PSR.i field disagrees"):
+            validator.parse_checkpoint_record(reversed_labels)
+
+    def test_contradictory_hex_incomplete_record_and_missing_checkpoint_are_rejected(self) -> None:
+        contradictory = line("C", stage=3, valid=0x1E7, psr=0x2000, iva=IVT).replace(
+            "PSR.i=0 PSR.ic=1", "PSR.i=0 PSR.ic=0")
+        with self.assertRaisesRegex(ValueError, "PSR.ic field disagrees"):
+            validator.parse_checkpoint_record(contradictory)
+
+        incomplete = line("C", stage=3, valid=0x1E7, psr=0x2000, iva=IVT).replace(
+            " IVA=0x100000", "")
+        with self.assertRaisesRegex(ValueError, "missing or unexpected fields"):
+            validator.parse_checkpoint_record(incomplete)
+
+        _, contradictory_errors = validator.validate_checkpoint_output(
+            valid_guest_output().replace(
+                "PSR=0x2000 PSR.i=0 PSR.ic=1",
+                "PSR=0x2000 PSR.i=0 PSR.ic=0", 1),
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("PSR.ic field disagrees" in error for error in contradictory_errors),
+                        contradictory_errors)
+        self.assertTrue(any("checkpoint C is missing" in error for error in contradictory_errors),
+                        contradictory_errors)
+
+        _, missing_errors = validator.validate_checkpoint_output(
+            "\r\n".join(line for line in valid_guest_output().splitlines()
+                        if not line.startswith("IA64_CHECKPOINT_C")),
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("checkpoint C is missing" in error for error in missing_errors),
+                        missing_errors)
+
+    def test_checkpoint_records_must_be_in_a_b_c_d_order(self) -> None:
+        reversed_output = "\r\n".join(reversed(valid_guest_output().splitlines()))
+        _, errors = validator.validate_checkpoint_output(
+            reversed_output, ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("checkpoint order" in error for error in errors), errors)
+
+    def test_runtime_evidence_binds_raw_records_exit_faults_and_candidate_hash(self) -> None:
+        stdout = valid_guest_output() + "kernel exited with status 0\r\n"
+        parsed, parse_errors = validator.validate_checkpoint_output(
+            valid_guest_output(), ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertEqual(parse_errors, [])
+        run_result = {
+            "label": "guideXOS-kernel",
+            "command": ["/qualified/bskinc", "-stats", "-icnt", "counts.txt",
+                        "-forcesystem", "/tmp/selected.elf"],
+            "artifact_sha256": "a" * 64,
+            "classification": "GUEST_EXIT_ZERO",
+            "exit_code": 0,
+            "timed_out": False,
+            "cpu_state_checkpoints": parsed,
+            "cpu_state_checkpoint_errors": [],
+        }
+        _, errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (0 faults), 0.01 sec",
+            "per-instruction counts captured", run_result, "a" * 64,
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertEqual(errors, [])
+
+        wrong_identity = dict(run_result, artifact_sha256="b" * 64)
+        _, identity_errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (0 faults), 0.01 sec",
+            "per-instruction counts captured", wrong_identity, "a" * 64,
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("artifact identity" in error for error in identity_errors),
+                        identity_errors)
+
+        _, fault_errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (1 faults), 0.01 sec",
+            "per-instruction counts captured", run_result, "a" * 64,
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("unexpected fault" in error for error in fault_errors), fault_errors)
+
+        mismatched_runner_records = dict(run_result, cpu_state_checkpoints={})
+        _, synthesis_errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (0 faults), 0.01 sec",
+            "per-instruction counts captured", mismatched_runner_records,
+            "a" * 64, ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("exactly the four guest checkpoints" in error
+                            for error in synthesis_errors), synthesis_errors)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
