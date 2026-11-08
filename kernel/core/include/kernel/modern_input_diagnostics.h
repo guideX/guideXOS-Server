@@ -142,6 +142,12 @@ inline bool intel_dmar_applies_to_platform(Platform platform,
            (platform == Platform::Other && dmarTablePresent);
 }
 
+inline bool intel_dmar_route_diagnostics_applies(uint16_t vendorId,
+                                                 bool dmarTablePresent)
+{
+    return vendorId == 0x8086u || dmarTablePresent;
+}
+
 enum class OwnershipStatus : uint8_t {
     Unknown = 0,
     NotRequired,

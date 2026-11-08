@@ -569,6 +569,11 @@ Intel controller to DMA. A disabled translation observation is not permission
 to bypass VT-d. The preexisting valid-scan/no-remapping direct-DMA contract is
 unchanged; AMD remains on its IVRS safety path.
 
+When a DMAR table is present, read-only route diagnostics also inspect xHCI
+devices with non-Intel PCI vendor IDs. This lets virtual and mixed-vendor
+systems report DMAR coverage without changing AMD DMA eligibility, which still
+uses the IVRS path.
+
 The overlay now shows platform, raw HCSPARAMS2 and decoded fields, required and
 supported scratchpad capacity, allocation status, IVRS/DMAR summaries,
 per-controller VT-d route, register/translation/root-table state, DMA reason,

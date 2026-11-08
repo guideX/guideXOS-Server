@@ -902,6 +902,11 @@ void test_intel_diagnostic_publication_and_formatting()
             !intel_dmar_applies_to_platform(Platform::Other, false) &&
             !intel_dmar_applies_to_platform(Platform::Amd, true),
             "DMAR routing follows Intel tables without overriding the AMD IVRS platform path");
+    require(intel_dmar_route_diagnostics_applies(0x8086u, false) &&
+            intel_dmar_route_diagnostics_applies(0x1b36u, true) &&
+            intel_dmar_route_diagnostics_applies(0x1022u, true) &&
+            !intel_dmar_route_diagnostics_applies(0x1b36u, false),
+            "a present DMAR table enables read-only xHCI route diagnostics across vendor IDs");
 }
 
 } // namespace
