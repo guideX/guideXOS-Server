@@ -121,14 +121,11 @@ function Assert-SavedSource([string]$GuestText, [string]$SourcePath, [string]$Ex
     $writes = [regex]::Matches($GuestText, $pattern)
     if ($writes.Count -eq 0) { throw "Studio did not report a VFS save for $SourcePath." }
     $lastWrite = $writes[$writes.Count - 1]
-    $bytes = [Convert]::FromHexString($lastWrite.Groups[2].Value)
     $expectedBytes = [Text.Encoding]::UTF8.GetBytes($ExpectedText)
-    $actualHex = [Convert]::ToHexString($bytes)
-    $expectedHex = [Convert]::ToHexString($expectedBytes)
-    if ([int]$lastWrite.Groups[1].Value -ne $bytes.Length -or
-        $actualHex -cne $expectedHex) {
-        $actualText = [Text.Encoding]::UTF8.GetString($bytes)
-        throw "Studio saved unexpected source bytes to $SourcePath (actual length $($bytes.Length)); expected $($expectedBytes.Length) bytes. Actual text: $actualText"
+    $actualHex = $lastWrite.Groups[2].Value
+    $expectedHex = [BitConverter]::ToString($expectedBytes).Replace('-', '').ToLowerInvariant()
+    if ([int]$lastWrite.Groups[1].Value -ne $expectedBytes.Length -or $actualHex -cne $expectedHex) {
+        throw "Studio saved unexpected source bytes to $SourcePath (actual length $($lastWrite.Groups[1].Value)); expected $($expectedBytes.Length) bytes."
     }
 }
 
