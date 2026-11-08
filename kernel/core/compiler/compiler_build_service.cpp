@@ -196,15 +196,18 @@ static bool safe_workspace_root(const char* value)
     return true;
 }
 
-static bool safe_fat_basename(const char* value)
+static bool safe_output_name(const char* value)
 {
     if (!value) return false;
-    const uint32_t count = length(value, 9);
-    if (count == 0 || count > 8) return false;
+    // The guest VFS supports FAT long-file names. Studio derives outputName
+    // with a -guidexos suffix, so keep a bounded path-safe basename instead
+    // of imposing the 8.3 limit used by a few reserved metadata files.
+    const uint32_t count = length(value, 96);
+    if (count == 0 || count >= 96 || value[0] == '.') return false;
     for (uint32_t i = 0; i < count; ++i) {
         const char c = value[i];
         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-              (c >= '0' && c <= '9') || c == '_' || c == '-')) return false;
+              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) return false;
     }
     return true;
 }
@@ -441,7 +444,7 @@ static bool publish_package(const char* packageRoot, const char* manifestText,
                             const char* outputName)
 {
     if (!safe_absolute_app_path(packageRoot) || !manifestText || !armSource || !amdSource || !outputName ||
-        !safe_fat_basename(outputName) || find_text(manifestText, "\"kind\": \"NativeElf\"") == nullptr ||
+        !safe_output_name(outputName) || find_text(manifestText, "\"kind\": \"NativeElf\"") == nullptr ||
         find_text(manifestText, "bin/arm64/") == nullptr || find_text(manifestText, "bin/amd64/") == nullptr) return false;
     char path[kMaxPath] = {};
     if (!ensure_directory("/Apps")) return false;
@@ -506,7 +509,7 @@ static bool build(const gx_build_request* request)
         !json_string(s_projectText, "abi", value, sizeof(value)) || !equal(value, kAbi) ||
         !json_string(s_projectText, "sourceRoot", sourceRoot, sizeof(sourceRoot)) || !safe_relative(sourceRoot) ||
         !json_string(s_projectText, "sourceEntry", sourceEntry, sizeof(sourceEntry)) || !safe_relative(sourceEntry) ||
-        !json_string(s_projectText, "outputName", outputName, sizeof(outputName)) || !safe_fat_basename(outputName) ||
+        !json_string(s_projectText, "outputName", outputName, sizeof(outputName)) || !safe_output_name(outputName) ||
         (packageRootDeclared && (!hasPackageRoot || !safe_absolute_app_path(packageRoot))) ||
         (!packageRootDeclared && targetCount == 2) ||
         !json_string(s_manifestText, "id", value, sizeof(value)) || !equal(value, request->projectId)) {

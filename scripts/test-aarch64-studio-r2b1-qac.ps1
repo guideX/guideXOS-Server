@@ -174,12 +174,14 @@ function Invoke-StudioBoot([int]$BootNumber) {
     $qacPath = if (![string]::IsNullOrWhiteSpace($QacCliPath)) { [IO.Path]::GetFullPath($QacCliPath) } else { '' }
     $workflowPath = Join-Path $sessionDirectory 'r2b1-workflow.json'
     $projectFolder = 'R2B1B{0:d2}' -f $BootNumber
+    $outputName = "$($projectFolder.ToLowerInvariant())-guidexos"
     $sourcePath = "/Apps/$projectFolder/src/main.cpp"
     $expectedHex = [BitConverter]::ToString([Text.Encoding]::ASCII.GetBytes($validSource)).Replace('-', '').ToLowerInvariant()
     $record = [ordered]@{
         outcome = 'STUDIO_R2B1_GUEST_IN_PROGRESS'
         boot_number = $BootNumber
         project_folder = $projectFolder
+        project_output_name = $outputName
         project_source_path = $sourcePath
         qac_reservation_id = [string]$session.reservation_id
         session_record = $sessionPath
@@ -252,14 +254,14 @@ function Invoke-StudioBoot([int]$BootNumber) {
             $serviceError = [regex]::Match($text, '(?m)^BareMetalBuild: error=.*$').Value
             throw "Authentic Studio Build returned FAILED. $serviceError"
         }
-        $expectedArtifact = "/Apps/$projectFolder/build/bin/arm64/$($projectFolder.ToLowerInvariant()).elf"
+        $expectedArtifact = "/Apps/$projectFolder/build/bin/arm64/$outputName.elf"
         $digestMatches = [regex]::Matches($text, 'BareMetalBuild: artifact SHA-256=([0-9a-f]{64})')
         if ((Get-Count $text $artifactValidation) -le $artifactValidationBefore -or
             $text -notmatch ('Compiler: source=' + [regex]::Escape($sourcePath) + ' output=' + [regex]::Escape($expectedArtifact)) -or
             $text -notmatch 'Compiler: produced ELF validation PASS entry=0x0000000051001000' -or
             $text -notmatch 'Compiler: reopened_bytes=\d+ reopened_hash=fnv1a64:[0-9a-f]{16} readback ELF validation PASS' -or
             $text -notmatch ('\[VFS_WRITE_FILE\] path=' + [regex]::Escape($expectedArtifact) + ' operation=(create|overwrite)') -or
-            $text -notmatch ('BareMetalBuild: artifact=' + [regex]::Escape("build/bin/arm64/$($projectFolder.ToLowerInvariant()).elf")) -or
+            $text -notmatch ('BareMetalBuild: artifact=' + [regex]::Escape("build/bin/arm64/$outputName.elf")) -or
             $digestMatches.Count -le $artifactDigestBefore) {
             throw 'Authentic Studio Build completed without the required ARM64 compiler, VFS readback, artifact path, and SHA-256 evidence.'
         }

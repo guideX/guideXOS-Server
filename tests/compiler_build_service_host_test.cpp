@@ -329,14 +329,16 @@ int main()
     // Pinned Studio's new-project generator does not emit packageRoot for a
     // single-target workspace. That field is required only for multi-target
     // package publication, where the service writes both ELF payloads.
-    const char* studioProject = "{\"projectId\":\"com.example.buildservice\",\"projectKind\":\"native-gui-application\",\"abi\":\"guidexos-c-abi-v1\",\"sourceRoot\":\"src\",\"sourceEntry\":\"main.c\",\"outputName\":\"app\"}";
+    const char* studioProject = "{\"projectId\":\"com.example.buildservice\",\"projectKind\":\"native-gui-application\",\"abi\":\"guidexos-c-abi-v1\",\"sourceRoot\":\"src\",\"sourceEntry\":\"main.c\",\"outputName\":\"r2b1b01-guidexos\"}";
     put("/Workspace/GUIDEXOS.PJT", studioProject);
     gx_build_request singleTargetRequest = request();
     singleTargetRequest.targetProfile = "guidexos.arm64.baremetal.bootstrap.native";
+    singleTargetRequest.expectedArtifact = "build/bin/arm64/r2b1b01-guidexos.elf";
     gx_build_snapshot singleTarget = {};
     if (!check(run(singleTargetRequest, &singleTarget) && singleTarget.state == GX_BUILD_SUCCEEDED &&
-               singleTarget.artifactValid && !singleTarget.packageWritten,
-               "Studio single-target project builds without an inapplicable packageRoot field")) return 26;
+               singleTarget.artifactValid && !singleTarget.packageWritten &&
+               exists("/Workspace/build/bin/arm64/r2b1b01-guidexos.elf"),
+               "Studio single-target project builds with its long output name and no packageRoot")) return 26;
     gx_build_snapshot multiMissingPackageRoot = {};
     if (!check(run(request(), &multiMissingPackageRoot) && multiMissingPackageRoot.state == GX_BUILD_FAILED &&
                multiMissingPackageRoot.errorCode == GX_BUILD_ERROR_UNSUPPORTED_PROJECT,
@@ -379,12 +381,12 @@ int main()
     if (!check(run(request("build/bin/arm64/../app.elf"), &badPath) &&
                badPath.state == GX_BUILD_FAILED && badPath.errorCode == GX_BUILD_ERROR_INVALID_REQUEST,
                "traversal output path is rejected")) return 13;
-    const char* badNameProject = "{\"projectId\":\"com.example.buildservice\",\"projectKind\":\"native-gui-application\",\"abi\":\"guidexos-c-abi-v1\",\"sourceRoot\":\"src\",\"sourceEntry\":\"main.c\",\"outputName\":\"long-output-name\",\"packageRoot\":\"/Apps/TestPkg\"}";
+    const char* badNameProject = "{\"projectId\":\"com.example.buildservice\",\"projectKind\":\"native-gui-application\",\"abi\":\"guidexos-c-abi-v1\",\"sourceRoot\":\"src\",\"sourceEntry\":\"main.c\",\"outputName\":\"../escape\",\"packageRoot\":\"/Apps/TestPkg\"}";
     put("/Workspace/GUIDEXOS.PJT", badNameProject);
     gx_build_snapshot badName = {};
     if (!check(run(request(), &badName) && badName.state == GX_BUILD_FAILED &&
                badName.errorCode == GX_BUILD_ERROR_UNSUPPORTED_PROJECT,
-               "non-FAT 8.3 output basename is rejected")) return 14;
+               "output-name path traversal is rejected")) return 14;
 
     put("/Workspace/GUIDEXOS.PJT", project);
     failWritePath = "/Workspace/build/bin/arm64/app.elf";
