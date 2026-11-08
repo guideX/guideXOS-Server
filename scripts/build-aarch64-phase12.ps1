@@ -228,6 +228,9 @@ if ($R2B1Workspaces) {
     Copy-Item -LiteralPath (Join-Path $vfsFailureSource 'guidexos.project') -Destination (Join-Path $r2b1Workspace 'guidexos.project') -Force
     Copy-Item -LiteralPath (Join-Path $vfsFailureSource 'src\main.cpp') -Destination (Join-Path $r2b1Workspace 'src\main.cpp') -Force
     Copy-Item -LiteralPath (Join-Path $vfsFailureSource 'app\app.json') -Destination (Join-Path $r2b1Workspace 'app\app.json') -Force
+    foreach ($required in @('CMakeLists.txt','build.ps1','README.md')) {
+        Copy-Item -LiteralPath (Join-Path $vfsFailureSource $required) -Destination (Join-Path $r2b1Workspace $required) -Force
+    }
     if (Test-Path -LiteralPath (Join-Path $r2b1Workspace 'build') -PathType Container) {
         throw 'R2B1 VFS error fixture unexpectedly contains prebuilt output.'
     }
@@ -319,6 +322,11 @@ $candidateManifest = [ordered]@{
             guestPath = '/Phase12VfsProof'
             projectSha256 = Get-Sha256Hex (Join-Path $r2b1Workspace 'guidexos.project')
             sourceSha256 = Get-Sha256Hex (Join-Path $r2b1Workspace 'src\main.cpp')
+            requiredFilesSha256 = [ordered]@{
+                cmakeLists = Get-Sha256Hex (Join-Path $r2b1Workspace 'CMakeLists.txt')
+                buildDriver = Get-Sha256Hex (Join-Path $r2b1Workspace 'build.ps1')
+                readme = Get-Sha256Hex (Join-Path $r2b1Workspace 'README.md')
+            }
             configuredUnavailablePackageRoot = '/Apps/R2B1Missing/Child'
             targetArtifactsPrebuilt = $false
         }
