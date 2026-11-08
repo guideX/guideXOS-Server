@@ -1207,8 +1207,8 @@ if ([string]::IsNullOrWhiteSpace($httpsPolicyToken) -and
     $usingDefaultProductionCaSource -and
     -not $SmokeCaFixture -and
     $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -ne "1") {
-    $httpsPolicyToken = "production-validated"
-    Write-Host "      defaulting bundled Navigator HTTPS policy to ProductionValidated" -ForegroundColor Yellow
+    $httpsPolicyToken = "disabled"
+    Write-Host "      defaulting bundled Navigator HTTPS policy to Disabled; public HTTPS requires a separately reviewed explicit policy" -ForegroundColor Yellow
 }
 
 $userCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE

@@ -16,10 +16,13 @@ published by curl's CA Extract service from Mozilla's public root store:
 
 The build validates the PEM, generates the bounded runtime manifest with the
 fixed source timestamp above, and packages one copy at `/certs/ca-bundle.pem`.
-The manifest rotation identifier is `mozilla-2026-08-13`. A normal build also
-stages `/config/navigator/https-policy.txt=production-validated` so the
-kernel's generic ProductionValidated policy is selected only when this
-production bundle is present and successfully verified.
+The manifest rotation identifier is `mozilla-2026-08-13`. A normal build stages
+`/config/navigator/https-policy.txt=disabled`. The bundle remains packaged for
+review and diagnostics, but it does not enable public HTTPS. The manifest's
+legacy `production_ready=yes` label is not proof that Mozilla's out-of-band
+root constraints are preserved or that the unsigned manifest is authentic.
+An explicit `production-validated` policy requires a separate trust-profile
+review and authorization; it is not a normal-build default.
 
 The deterministic smoke roots under `scripts/fixtures/` and explicit user
 roots under `/config/certs` remain separate inputs. They are not appended to
