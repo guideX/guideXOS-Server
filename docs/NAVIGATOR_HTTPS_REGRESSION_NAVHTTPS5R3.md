@@ -102,7 +102,7 @@ The historical failure remains an unresolved observation. The new diagnostic and
 
 Close NAVHTTPS5R3 for its bounded investigation scope as **NON_REPRODUCED**. Keep the historical symptom documented and do not call it fixed. It should not block NAVHTTPS6 production-trust preparation: proceed with preparation while keeping public browsing disabled and `production_ready=no` until the separate trust and release criteria are met. Do not extend this diagnostic phase with repeated QEMU runs solely to force reproduction.
 
-After the run, QEMU and controlled fixture processes were absent, fixture ports were clear, and the QAC mutex was available. All capture and fixture resources were released.
+Immediately after the NAVHTTPS5R3 runner exited, no QEMU or controlled fixture process remained, fixture ports were clear, and the QAC mutex was available. All capture and fixture resources were released. A later final check found QEMU PID 27568 for `D:\dev\guideXOSServer_FONT_SUPPORT`, started at 10:56 AM with `-net none`. This is a separate project's session; it was left untouched. The QAC mutex remained free and no NAVHTTPS5R3 fixture process remained.
 
 ## 10. Evidence hashes
 
