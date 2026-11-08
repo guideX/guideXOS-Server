@@ -304,12 +304,14 @@ $untrustedPolicyProdHttpsCert = Join-Path $Root "scripts\fixtures\navigator-faul
 $untrustedPolicyProdHttpsKey = Join-Path $Root "scripts\fixtures\navigator-fault-untrusted-prod.guidexos.test.key"
 $expiredPolicyProdHttpsCert = Join-Path $Root "scripts\fixtures\navigator-fault-expired-prod.guidexos.test.crt"
 $expiredPolicyProdHttpsKey = Join-Path $Root "scripts\fixtures\navigator-fault-expired-prod.guidexos.test.key"
+$futureHttpsCert = Join-Path $Root "scripts\fixtures\navigator-fault-future-guidexos.test.crt"
+$futureHttpsKey = Join-Path $Root "scripts\fixtures\navigator-fault-future-guidexos.test.key"
 foreach ($path in @(
     $defaultHttpsCert, $defaultHttpsKey, $untrustedHttpsCert, $untrustedHttpsKey, $expiredHttpsCert, $expiredHttpsKey,
     $policyDevHttpsCert, $policyDevHttpsKey, $policyProdHttpsCert, $policyProdHttpsKey,
     $publicPilotHttpsCert, $publicPilotHttpsKey,
     $untrustedPolicyDevHttpsCert, $untrustedPolicyDevHttpsKey, $untrustedPolicyProdHttpsCert, $untrustedPolicyProdHttpsKey,
-    $expiredPolicyProdHttpsCert, $expiredPolicyProdHttpsKey
+    $expiredPolicyProdHttpsCert, $expiredPolicyProdHttpsKey, $futureHttpsCert, $futureHttpsKey
 )) {
     if (-not (Test-Path $path)) {
         if ($httpsQualificationRequested) { Write-NavigatorHttpsQualificationBlocked -Reason "HTTPS fixture prerequisite missing: $path" }
@@ -763,7 +765,10 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
 }
 
 function Invoke-NavigatorKernelSmokeQemuPass {
-    param([Parameter(Mandatory = $true)][string]$ScenarioName)
+    param(
+        [Parameter(Mandatory = $true)][string]$ScenarioName,
+        [string]$RtcBase = "utc"
+    )
 
     Enter-NavigatorQemuExclusiveAdmission
     try {
@@ -787,7 +792,7 @@ function Invoke-NavigatorKernelSmokeQemuPass {
             "-display", "none",
             "-serial", "file:`"$serialLog`"",
             "-no-reboot",
-            "-rtc", "base=utc,clock=host",
+            "-rtc", "base=$RtcBase,clock=host",
             "-netdev", "user,id=net0",
             "-device", "e1000,netdev=net0"
         )
@@ -799,6 +804,7 @@ function Invoke-NavigatorKernelSmokeQemuPass {
         } else {
             $args += Get-GxosQemuSecureRngArguments
         }
+        Write-Host "QEMU RTC base=$RtcBase,clock=host"
 
         $stagedArtifacts = @(
             [pscustomobject]@{ Name = "bootloader"; Path = $bootloader },
@@ -1331,6 +1337,13 @@ $commonRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_redirect_loop\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_redirect_loop.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_large_body\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_large_body.enabled=<yes|no>"
     '\[NAVIGATOR-SMOKE\] https\.case\.compat_large_headers\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_large_headers.enabled=<yes|no>"
+}
+
+$clockUnavailableRegexChecks = @{}
+foreach ($check in $commonRegexChecks.GetEnumerator()) {
+    if ($check.Key -notmatch 'wall_clock_(epoch|utc)|tls_backend_status') {
+        $clockUnavailableRegexChecks[$check.Key] = $check.Value
+    }
 }
 
 $localTlsSuccessRegexChecks = @{
@@ -2042,6 +2055,93 @@ $scenarioDefinitions = @(
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=<positive failure flags>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated_redirect\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.verify_flags=<positive failure flags>"
         })
+    },
+    [pscustomobject]@{
+        Name = "smoke_future_cert"
+        HttpsPolicy = $null
+        HttpsFaultMode = "future-cert"
+        UseSmokeFixture = $true
+        UserCaSource = $null
+        ProductionCaSource = $null
+        TlsCert = $futureHttpsCert
+        TlsKey = $futureHttpsKey
+        QemuRtcBase = "2026-06-30T12:00:00"
+        Checks = @($manifestBlockedChecks | Where-Object {
+            $_ -ne "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=FAIL"
+        }) + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=smoke-only",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=FutureCertificate",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=PASS",
+            "[NAVIGATOR-SMOKE] result=FAIL"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] https\.case\.redirect_allowlisted\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.verify_flags=<positive certificate time failure flags>"
+        }
+    },
+    [pscustomobject]@{
+        Name = "smoke_unknown_clock"
+        HttpsPolicy = $null
+        HttpsFaultMode = $null
+        UseSmokeFixture = $true
+        UserCaSource = $null
+        ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        QemuRtcBase = "2000-01-01T00:00:00"
+        Checks = @($manifestBlockedChecks | Where-Object {
+            $_ -ne "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible"
+        }) + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Unavailable",
+            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=(unavailable)",
+            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=(unavailable)",
+            "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ClockCallbackUnavailable",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=ClockUnavailable",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.protocol=(none)",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.cipher_suite=(none)",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=FAIL"
+        )
+        RegexChecks = Merge-CheckMaps -Base $clockUnavailableRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=\(unavailable\)' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=(unavailable)"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=\(unavailable\)' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=(unavailable)"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.tls_backend_status=ClockCallbackUnavailable' = "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ClockCallbackUnavailable"
+        }
+    },
+    [pscustomobject]@{
+        Name = "production_clock_unavailable"
+        HttpsPolicy = "production-validated"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        QemuRtcBase = "2000-01-01T00:00:00"
+        Checks = @($manifestBlockedChecks | Where-Object {
+            $_ -ne "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible"
+        }) + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Unavailable",
+            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=(unavailable)",
+            "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=(unavailable)",
+            "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ClockCallbackUnavailable",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Wall clock callback is wired, but guideXOS does not currently report a plausible UTC time.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_tcp_connect_attempts=0",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.plain_tcp_connect_attempts=0",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $clockUnavailableRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=\(unavailable\)' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=(unavailable)"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=\(unavailable\)' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=(unavailable)"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.tls_backend_status=ClockCallbackUnavailable' = "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ClockCallbackUnavailable"
+        }
     }
 )
 
@@ -2503,7 +2603,12 @@ try {
                 -PublicPilotHost $publicPilotHost `
                 -PublicPilotTlsCert $publicPilotCertPair[0] `
                 -PublicPilotTlsKey $publicPilotCertPair[1]
-            $run = Invoke-NavigatorKernelSmokeQemuPass -ScenarioName $scenario.Name
+            $qemuRtcBase = if ($scenario.PSObject.Properties.Match("QemuRtcBase").Count -gt 0) {
+                [string]$scenario.QemuRtcBase
+            } else {
+                "utc"
+            }
+            $run = Invoke-NavigatorKernelSmokeQemuPass -ScenarioName $scenario.Name -RtcBase $qemuRtcBase
             $runOutput = $run.Output
             if ($enableRealPublicProbeForScenario) {
                 $runOutput = Add-NavigatorKernelSmokeRealPublicProbeManifestLines `
