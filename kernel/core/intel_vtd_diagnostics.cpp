@@ -303,7 +303,9 @@ void qualify_xhci_controllers()
             snapshot.controllers[i];
         if (!controller.occupied ||
             controller.kind != modern_input_diagnostics::ControllerKind::XHCI ||
-            controller.vendorId != 0x8086u) {
+            (controller.vendorId != 0x8086u &&
+             !modern_input_diagnostics::intel_dmar_applies_to_platform(
+                 snapshot.platform, snapshot.dmarTablePresent))) {
             continue;
         }
 

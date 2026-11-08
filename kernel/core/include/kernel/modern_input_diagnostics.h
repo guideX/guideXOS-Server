@@ -135,6 +135,13 @@ enum class Platform : uint8_t {
     Other
 };
 
+inline bool intel_dmar_applies_to_platform(Platform platform,
+                                           bool dmarTablePresent)
+{
+    return platform == Platform::Intel ||
+           (platform == Platform::Other && dmarTablePresent);
+}
+
 enum class OwnershipStatus : uint8_t {
     Unknown = 0,
     NotRequired,
