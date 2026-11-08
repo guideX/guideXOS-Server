@@ -30,7 +30,7 @@ _start:
     mov r15 = ar.bsp ;;
     movl r14 = diag_boot_snapshot_bsp ;;
     st8 [r14] = r15 ;;
-    /* BSPSTORE/RNAT reads are restricted to enforced-lazy mode by Ski. */
+    /* BSPSTORE reads are restricted to enforced-lazy mode by Ski. */
     mov ar.rsc = 0 ;;
     mov r15 = ar.bspstore ;;
     movl r14 = diag_boot_snapshot_bspstore ;;
@@ -38,9 +38,6 @@ _start:
     movl r15 = diag_rse_backing_store_base ;;
     movl r14 = diag_boot_expected_bspstore ;;
     st8 [r14] = r15 ;;
-    mov r15 = ar.rnat ;;
-    movl r14 = diag_boot_snapshot_rnat ;;
-    st8 [r14] = r15 ;
     mov ar.rsc = 3 ;;
     movl r15 = 3 ;;
     movl r14 = diag_boot_snapshot_rsc ;;

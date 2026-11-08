@@ -92,6 +92,8 @@ if profile == "early-exec":
     if manifest.get("boot_contract") != "ski-physical-entry-single-cpu-no-preempt" or \
             manifest.get("cpu_count_requirement") != "exactly-one-CPU-external-SKI-precondition-runtime-unverified" or \
             manifest.get("static_gates") != "PASS" or \
+            manifest.get("cpu_state_checkpoint_schema") != "guidexos-ia64-cpu-state-checkpoints-v1" or \
+            manifest.get("cpu_state_static_gates") != "PASS" or \
             manifest.get("runtime_qualified") is not False or \
             manifest.get("scheduler_qualified") is not False or \
             manifest.get("interrupt_fp_preservation") is not False or \

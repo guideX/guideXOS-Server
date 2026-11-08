@@ -56,6 +56,19 @@ def load_validator() -> Any:
 ELF_VALIDATOR = load_validator()
 
 
+def load_cpu_state_validator() -> Any:
+    path = ROOT / "scripts" / "validate-ia64-cpu-state.py"
+    spec = importlib.util.spec_from_file_location("ia64_cpu_state_validator", path)
+    if spec is None or spec.loader is None:
+        raise GateError(f"cannot load CPU-state checkpoint validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+CPU_STATE_VALIDATOR = load_cpu_state_validator()
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -246,7 +259,8 @@ def _kill_process_group(process: subprocess.Popen[bytes], grace_seconds: float =
 
 def run_simulator(command: list[str], timeout: float, capture_dir: Path,
                   label: str, success_marker: str | None = None,
-                  artifact_hash: str | None = None) -> int:
+                  artifact_hash: str | None = None,
+                  checkpoint_expectations: dict[str, int] | None = None) -> int:
     if timeout <= 0 or timeout > 300:
         raise GateError("timeout must be greater than zero and no more than 300 seconds")
     if capture_dir.exists():
@@ -292,6 +306,18 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
     else:
         classification = "SIMULATOR_EXIT_UNCLASSIFIED"
 
+    checkpoint_records = None
+    checkpoint_errors: list[str] = []
+    if checkpoint_expectations is not None:
+        checkpoint_records, checkpoint_errors = CPU_STATE_VALIDATOR.validate_checkpoint_output(
+            stdout_text,
+            ivt=checkpoint_expectations["ivt"],
+            rse_base=checkpoint_expectations["rse_base"],
+            rse_top=checkpoint_expectations["rse_top"],
+        )
+        if classification == "GUEST_EXIT_ZERO" and checkpoint_errors:
+            classification = "CPU_STATE_CHECKPOINT_FAIL"
+
     record = {
         "label": label,
         "command": command,
@@ -303,6 +329,8 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         "stdout": str(stdout_path),
         "stderr": str(stderr_path),
         "instruction_counts": str(counts_path) if counts_path.is_file() else None,
+        "cpu_state_checkpoints": checkpoint_records,
+        "cpu_state_checkpoint_errors": checkpoint_errors,
     }
     (capture_dir / "run-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"[{classification}] exit={return_code} elapsed={elapsed:.3f}s capture={capture_dir}")
@@ -387,6 +415,8 @@ def run_kernel(args: argparse.Namespace) -> int:
         if manifest.get("static_gates") != "PASS" or manifest.get("runtime_qualified") is not False or \
                 manifest.get("scheduler_qualified") is not False or \
                 manifest.get("interrupt_fp_preservation") is not False or \
+                manifest.get("cpu_state_checkpoint_schema") != "guidexos-ia64-cpu-state-checkpoints-v1" or \
+                manifest.get("cpu_state_static_gates") != "PASS" or \
                 manifest.get("guest_execution_authorized") is not False:
             raise GateError("early-exec manifest or static gates are incomplete")
         validator_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-elf.py"),
@@ -408,6 +438,14 @@ def run_kernel(args: argparse.Namespace) -> int:
         if result.returncode:
             print(result.stderr, file=sys.stderr, end="")
             raise GateError("early-exec static source/disassembly gates failed")
+        cpu_state_cmd = [sys.executable, str(ROOT / "scripts" / "validate-ia64-cpu-state.py"),
+                         "--repo-root", str(ROOT), "--elf", str(args.artifact), "--objdump", args.objdump]
+        result = subprocess.run(cpu_state_cmd, capture_output=True, text=True,
+                                check=False, env=validation_env)
+        print(result.stdout, end="")
+        if result.returncode:
+            print(result.stderr, file=sys.stderr, end="")
+            raise GateError("CPU-state checkpoint static gates failed")
     elif manifest.get("runtime_qualified") is not True or \
             manifest.get("scheduler_qualified") is not True or \
             manifest.get("interrupt_fp_preservation") is not True or \
@@ -415,11 +453,23 @@ def run_kernel(args: argparse.Namespace) -> int:
         raise GateError("runtime profile lacks complete runtime and guest qualification records")
 
     capture_dir = args.capture_dir or Path(tempfile.mkdtemp(prefix="guidexos-ia64-kernel-"))
+    checkpoint_expectations = None
+    if args.profile == "early-exec":
+        candidate_elf = ELF_VALIDATOR.Elf64(args.artifact)
+        required_symbols = ("ia64_ivt", "rse_backing_store_base", "rse_backing_store_top")
+        if any(name not in candidate_elf.symbols for name in required_symbols):
+            raise GateError("candidate ELF lacks CPU-state checkpoint expectation symbols")
+        checkpoint_expectations = {
+            "ivt": candidate_elf.symbols["ia64_ivt"]["value"],
+            "rse_base": candidate_elf.symbols["rse_backing_store_base"]["value"],
+            "rse_top": candidate_elf.symbols["rse_backing_store_top"]["value"],
+        }
     with verified_snapshot(args.artifact, args.expected_sha256) as snapshot:
         validate_direct_system_elf(snapshot)
         command = [str(simulator), "-forcesystem", str(snapshot)]
         return run_simulator(command, args.timeout, capture_dir,
-                             "guideXOS-kernel", artifact_hash=args.expected_sha256)
+                             "guideXOS-kernel", artifact_hash=args.expected_sha256,
+                             checkpoint_expectations=checkpoint_expectations)
 
 
 def main(argv: list[str] | None = None) -> int:

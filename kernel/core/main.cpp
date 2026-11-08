@@ -33,6 +33,9 @@
 #include "display_configuration_service.h"
 #include "include/kernel/file_clipboard.h"
 #include "include/kernel/native_elf_baremetal.h"
+#if defined(ARCH_IA64)
+#include "arch/cpu_state_checkpoint.h"
+#endif
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -1630,6 +1633,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // architecture setup and a bounded console report, then stop the simulator.
     // Interrupts remain masked; no device, desktop, timer, thread, or scheduler
     // path is reachable from this entry. Other boot contracts need other paths.
+    kernel::arch::ia64::ia64_capture_checkpoint_c();
+    kernel::arch::ia64::report_startup_cpu_state_checkpoints();
     kernel::arch::ia64::ski_console::puts("IA64-2 early-exec: SKI single-entry profile\r\n");
     kernel::arch::ia64::ski_console::puts("Interrupts masked; scheduler and threads unavailable\r\n");
     kernel::arch::ia64::ski_console::stop();

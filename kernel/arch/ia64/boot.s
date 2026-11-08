@@ -169,6 +169,31 @@ _start:
      */
     movl sp = stack_top ;;
 
+    /* ---- Checkpoint A: inherited state after the interrupt-safe entry ----
+     * BSP is readable in every RSE mode. Do not touch BSPSTORE or RNAT here:
+     * their access requires enforced-lazy mode, which is not assumed yet.
+     * The record is in initialized .data and survives the later BSS clear.
+     */
+    movl r14 = ia64_checkpoint_a ;;
+    mov r15 = psr ;;
+    add r16 = 16, r14 ;;
+    st8 [r16] = r15 ;;
+    mov r15 = ar.rsc ;;
+    add r16 = 24, r14 ;;
+    st8 [r16] = r15 ;;
+    mov r15 = ar.bsp ;;
+    add r16 = 32, r14 ;;
+    st8 [r16] = r15 ;;
+    mov r15 = ar.fpsr ;;
+    add r16 = 56, r14 ;;
+    st8 [r16] = r15 ;;
+    movl r15 = 0x27 ;;
+    add r16 = 8, r14 ;;
+    st8 [r16] = r15 ;;
+    movl r15 = 1 ;;
+    st8 [r14] = r15 ;;
+    mf ;;
+
     /* ---- 4. Set up RSE backing store ----
      * BSPSTORE and loadrs are only legal in enforced-lazy mode. Empty any
      * inherited dirty register-stack partition before moving BSPSTORE.
@@ -177,6 +202,35 @@ _start:
     mov ar.rsc = 0 ;;
     loadrs ;;
     mov ar.bspstore = r14 ;;
+
+    /* ---- Checkpoint B: enforced-lazy backing-store initialization ----
+     * Capture legal RSE pointers before returning to eager mode. RNAT is
+     * deliberately omitted: writing BSPSTORE makes RNAT's contents
+     * architecturally undefined until later RSE activity establishes them.
+     * No call, SSC, or extra RSE transition is introduced in this sequence.
+     */
+    movl r15 = ia64_checkpoint_b ;;
+    mov r16 = psr ;;
+    add r17 = 16, r15 ;;
+    st8 [r17] = r16 ;;
+    mov r16 = ar.rsc ;;
+    add r17 = 24, r15 ;;
+    st8 [r17] = r16 ;;
+    mov r16 = ar.bsp ;;
+    add r17 = 32, r15 ;;
+    st8 [r17] = r16 ;;
+    mov r16 = ar.bspstore ;;
+    add r17 = 40, r15 ;;
+    st8 [r17] = r16 ;;
+    mov r16 = ar.fpsr ;;
+    add r17 = 56, r15 ;;
+    st8 [r17] = r16 ;;
+    movl r16 = 0x2f ;;
+    add r17 = 8, r15 ;;
+    st8 [r17] = r16 ;;
+    movl r16 = 2 ;;
+    st8 [r15] = r16 ;;
+    mf ;;
     mov ar.rsc = 3 ;;       /* eager RSE mode, privilege 0, little-endian */
 
     /* ---- 5. Establish the compiler-required FP environment ----
@@ -241,6 +295,8 @@ stack_top:
  * Must be separate from the memory stack.
  * ================================================================ */
 .align 16
+.global rse_backing_store_base
 rse_backing_store_base:
     .skip 65536
+.global rse_backing_store_top
 rse_backing_store_top:

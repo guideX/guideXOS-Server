@@ -39,8 +39,12 @@ def validate(repo_root: Path, elf: Path, objdump: str) -> list[str]:
     rsc_setup = re.search(
         r"movl r14 = rse_backing_store_base\s*;;\s*"
         r"mov ar\.rsc = 0\s*;;\s*loadrs\s*;;\s*"
-        r"mov ar\.bspstore = r14\s*;;\s*mov ar\.rsc = 3",
+        r"mov ar\.bspstore = r14\s*;;\s*"
+        r"/\* ---- Checkpoint B:.*?\*/\s*"
+        r"movl r15 = ia64_checkpoint_b\s*;;.*?"
+        r"mov r16 = ar\.bspstore\s*;;.*?mov ar\.rsc = 3",
         boot,
+        re.DOTALL,
     )
     check(rsc_setup is not None, "RSE_STARTUP_ORDER",
           "enforced-lazy mode precedes loadrs/BSPSTORE; eager mode follows")

@@ -8,6 +8,7 @@
 //
 
 #include "include/arch/ski_console.h"
+#include "include/arch/cpu_state_checkpoint.h"
 #if defined(_MSC_VER)
 #include <intrin.h>
 #define GXOS_MSVC_STUB 1
@@ -87,6 +88,13 @@ int getchar()
 
 void stop()
 {
+#if !GXOS_MSVC_STUB && defined(GXOS_IA64_EARLY_EXEC_PROFILE)
+    // Capture after the startup diagnostics and immediately before the
+    // bounded pre-exit report and SSC termination. Reporting uses the
+    // ABI-correct SSC bridge and does not change PSR/RSC/FPSR/IVA.
+    ia64_capture_checkpoint_d();
+    report_preexit_cpu_state_checkpoint();
+#endif
     ssc(SSC_EXIT);
 }
 

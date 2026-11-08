@@ -144,6 +144,8 @@ class Ia64EarlyExecContractTests(unittest.TestCase):
                 "elf": "bin/kernel.elf",
                 "sha256": hashlib.sha256(elf.read_bytes()).hexdigest(),
                 "static_gates": "NOT_APPLICABLE",
+                "cpu_state_checkpoint_schema": "none",
+                "cpu_state_static_gates": "NOT_APPLICABLE",
                 "runtime_qualified": False,
                 "scheduler_qualified": False,
                 "interrupt_fp_preservation": False,

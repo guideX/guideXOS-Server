@@ -4,7 +4,6 @@
 
 using kernel::arch::ia64::read_ar;
 using kernel::arch::ia64::read_bsp;
-using kernel::arch::ia64::read_bspstore;
 using kernel::arch::ia64::read_iva;
 using kernel::arch::ia64::read_psr;
 using kernel::arch::ia64::write_iva;
@@ -18,11 +17,12 @@ volatile uint64_t diag_boot_snapshot_bsp;
 volatile uint64_t diag_boot_snapshot_bspstore;
 volatile uint64_t diag_boot_expected_bspstore;
 volatile uint64_t diag_boot_snapshot_rsc;
-volatile uint64_t diag_boot_snapshot_rnat;
 volatile uint64_t diag_boot_snapshot_psr;
 extern char diag_ivt;
 extern char diag_rse_backing_store_base;
 }
+
+static const uint64_t kDiagnosticFpsr = 0x0009804c0270033fULL;
 
 namespace {
 
@@ -91,11 +91,9 @@ extern "C" void diagnostic_main()
     /* Snapshot the current C++ readers before these reporting calls execute. */
     const uint64_t current_bsp = read_bsp();
     const uint64_t current_rsc = read_ar<16>();
-    write_ar<16>(0);
-    const uint64_t current_bspstore = read_bspstore();
-    const uint64_t current_rnat = read_ar<19>();
-    write_ar<16>(3);
     const uint64_t current_psr = read_psr();
+    write_ar<40>(kDiagnosticFpsr);
+    const uint64_t current_fpsr = read_ar<40>();
 
     const uint64_t second_iva = 0x200000;
     write_iva(second_iva);
@@ -114,13 +112,13 @@ extern "C" void diagnostic_main()
     report("BSPSTORE.STARTUP=", diag_boot_snapshot_bspstore);
     report("BSPSTORE.EXPECTED=", diag_boot_expected_bspstore);
     report("RSC.STARTUP=", diag_boot_snapshot_rsc);
-    report("RNAT.STARTUP=", diag_boot_snapshot_rnat);
+    puts("RNAT.STARTUP=UNVERIFIED\r\n");
     report("PSR.STARTUP=", diag_boot_snapshot_psr);
     report("BSP.CURRENT=", current_bsp);
-    report("BSPSTORE.CURRENT=", current_bspstore);
     report("RSC.CURRENT=", current_rsc);
-    report("RNAT.CURRENT=", current_rnat);
     report("PSR.CURRENT=", current_psr);
+    report("FPSR.EXPECTED=", kDiagnosticFpsr);
+    report("FPSR.READBACK=", current_fpsr);
     puts("SSC_GETCHAR=");
     put_hex(static_cast<uint8_t>(input_byte));
     puts("\r\n");
@@ -134,9 +132,11 @@ extern "C" void diagnostic_main()
         iva_through_helper == second_iva && iva_through_template == second_iva &&
         diag_boot_snapshot_bspstore == diag_boot_expected_bspstore &&
         diag_boot_snapshot_rsc == 3 && current_rsc == 3 &&
+        current_fpsr == kDiagnosticFpsr &&
         (diag_boot_snapshot_psr & psr_interrupt_masks) == 0 &&
         (current_psr & psr_interrupt_masks) == 0;
     puts(pass ? "REGISTER_PROBE=PASS\r\n" : "REGISTER_PROBE=FAIL\r\n");
+    puts(current_fpsr == kDiagnosticFpsr ? "FPSR_READBACK=PASS\r\n" : "FPSR_READBACK=FAIL\r\n");
     puts("REGISTER-END\r\n");
     stop();
     for (;;) {

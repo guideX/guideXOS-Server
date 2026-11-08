@@ -139,6 +139,8 @@ fixed_output = (out / "fixed/stdout.log").read_bytes()
 legacy_output = (out / "legacy/stdout.log").read_bytes()
 if b"REGISTER_PROBE=PASS\r\n" not in fixed_output or b"REGISTER_PROBE=PASS\r\n" not in legacy_output:
     raise SystemExit("[REGISTER_PROBE_FAIL] known-value register checks failed")
+if b"FPSR_READBACK=PASS\r\n" not in fixed_output or b"FPSR_READBACK=PASS\r\n" not in legacy_output:
+    raise SystemExit("[FPSR_READBACK_FAIL] known AR.FPSR value did not read back in both probes")
 if b"SSC_GETCHAR_API=PASS\r\n" not in fixed_output or b"SSC_GETCHAR_API=PASS\r\n" not in legacy_output:
     raise SystemExit("[SSC_RETURN_FAIL] GETCHAR byte Q did not arrive in C through r8 in both builds")
 if b"SSC_GETCHAR=0x51\r\n" not in fixed_output:
@@ -177,6 +179,7 @@ for variant in ("legacy", "fixed"):
         "hex_regression": "expected-legacy-failure" if variant == "legacy" and old == legacy_expected else
                           "correct-output-pass" if variant == "fixed" and new == expected else "FAIL",
         "register_probe": "PASS" if b"REGISTER_PROBE=PASS\r\n" in stdout.read_bytes() else "FAIL",
+        "fpsr_readback": "PASS" if b"FPSR_READBACK=PASS\r\n" in stdout.read_bytes() else "FAIL",
         "getchar_api_result": "PASS (input Q returned through r8)" if b"SSC_GETCHAR_API=PASS\r\n" in stdout.read_bytes() else "FAIL",
         "getchar_display": "0x77 (expected legacy formatter corruption)" if variant == "legacy" and b"SSC_GETCHAR=0x77\r\n" in stdout.read_bytes() else
                            "0x51" if variant == "fixed" and b"SSC_GETCHAR=0x51\r\n" in stdout.read_bytes() else "FAIL",
@@ -184,7 +187,8 @@ for variant in ("legacy", "fixed"):
 (out / "diagnostic-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print("[REGRESSION] Legacy implementation fails byte-exact hexadecimal output as expected.")
 print("[REGRESSION] Corrected ABI wrapper passes byte-exact hexadecimal output.")
-print("[REGISTER_PROBE] Known IVA/BSPSTORE/RSC/PSR checks passed; BSP/RNAT snapshots captured.")
+print("[REGISTER_PROBE] Known IVA/BSPSTORE/RSC/PSR checks passed; RNAT remains UNVERIFIED.")
+print("[FPSR_READBACK] Known AR.FPSR value wrote and read back in both probes.")
 for variant in ("legacy", "fixed"):
     print(f"[{variant.upper()}_ELF_SHA256] {manifest['programs'][variant]['elf_sha256']}")
 PY

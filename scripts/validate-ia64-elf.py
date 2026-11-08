@@ -169,6 +169,9 @@ def check_artifact_manifest(path: Path, manifest_path: Path, profile: str) -> li
             "exactly-one-CPU-external-SKI-precondition-runtime-unverified"
             if profile == "early-exec" else "none"),
         "sha256": actual_hash,
+        "cpu_state_checkpoint_schema": (
+            "guidexos-ia64-cpu-state-checkpoints-v1" if profile == "early-exec" else "none"),
+        "cpu_state_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
         "fp_register_policy": {
             "runtime": "all-allocatable-registers-reserved",
             "compile-only": "abi-preserved-registers-fixed; scratch-registers-available",

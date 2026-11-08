@@ -140,6 +140,7 @@ SCHEDULER_QUALIFIED=no
 INTERRUPT_FP_PRESERVATION=unimplemented
 BOOT_APPROVED=no
 EARLY_EXEC_STATIC_GATES=pending
+IA64_CPU_STATE_STATIC_GATES=pending
 IA64_RUNTIME_LIBGCC=$RUNTIME_LIBGCC
 EOF
 
@@ -197,9 +198,14 @@ if [[ "$FP_PROFILE" == early-exec ]]; then
     python3 "$REPO_ROOT/scripts/validate-ia64-early-exec.py" \
         --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
         2>&1 | tee "$BUILD_DIR/ia64-early-exec-safety-gates.txt"
+    python3 "$REPO_ROOT/scripts/validate-ia64-cpu-state.py" \
+        --elf "$KERNEL" --repo-root "$REPO_ROOT" --objdump "$OBJDUMP" \
+        2>&1 | tee "$BUILD_DIR/ia64-cpu-state-safety-gates.txt"
     sed -i 's/^EARLY_EXEC_STATIC_GATES=pending$/EARLY_EXEC_STATIC_GATES=pass/' "$PROFILE_FILE"
+    sed -i 's/^IA64_CPU_STATE_STATIC_GATES=pending$/IA64_CPU_STATE_STATIC_GATES=pass/' "$PROFILE_FILE"
 else
     sed -i 's/^EARLY_EXEC_STATIC_GATES=pending$/EARLY_EXEC_STATIC_GATES=not-applicable/' "$PROFILE_FILE"
+    sed -i 's/^IA64_CPU_STATE_STATIC_GATES=pending$/IA64_CPU_STATE_STATIC_GATES=not-applicable/' "$PROFILE_FILE"
 fi
 
 python3 - "$KERNEL" "$BUILD_DIR" "$FP_PROFILE" "$MANIFEST_FILE" <<'PY'
@@ -225,6 +231,8 @@ manifest = {
     "elf": "bin/kernel.elf",
     "sha256": hashlib.sha256(elf.read_bytes()).hexdigest(),
     "static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+    "cpu_state_checkpoint_schema": "guidexos-ia64-cpu-state-checkpoints-v1" if profile == "early-exec" else "none",
+    "cpu_state_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
     "runtime_qualified": False,
     "scheduler_qualified": False,
     "interrupt_fp_preservation": False,

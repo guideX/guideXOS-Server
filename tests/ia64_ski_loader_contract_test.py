@@ -76,6 +76,8 @@ def make_manifest(path: Path, artifact: Path, profile: str = "early-exec") -> di
         "elf": "bin/kernel.elf",
         "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
         "static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
+        "cpu_state_checkpoint_schema": "guidexos-ia64-cpu-state-checkpoints-v1" if profile == "early-exec" else "none",
+        "cpu_state_static_gates": "PASS" if profile == "early-exec" else "NOT_APPLICABLE",
         "runtime_qualified": False,
         "scheduler_qualified": False,
         "interrupt_fp_preservation": False,
@@ -209,7 +211,7 @@ class SkiLoaderContractTests(unittest.TestCase):
         cases = (
             "invalid hash", "profile mismatch", "unsafe memory map",
             "missing loader evidence", "wrong simulator mode", "absent authorization",
-            "compile-only profile",
+            "compile-only profile", "missing CPU-state checkpoint gate",
         )
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
@@ -222,6 +224,9 @@ class SkiLoaderContractTests(unittest.TestCase):
                 profile = "compile-only" if case == "compile-only profile" else "early-exec"
                 manifest_path = build_dir / "ia64-artifact-manifest.json"
                 manifest = make_manifest(manifest_path, artifact, profile)
+                if case == "missing CPU-state checkpoint gate":
+                    manifest.pop("cpu_state_static_gates")
+                    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
                 expected_hash = manifest["sha256"]
 
                 prefix = base / "ski"
