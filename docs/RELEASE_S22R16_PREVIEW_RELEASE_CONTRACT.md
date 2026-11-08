@@ -1,12 +1,14 @@
 # Server v0.3 Controlled Preview — Draft Release Contract
 
-**Status: DRAFT — owner approval required.** This document proposes a controlled experimental preview contract for review. It does not select a release model, accept risk, authorize recipients, or permit distribution. The candidate is not approved for publication.
+**Status: DRAFT — owner approval required.** This document remains the S22R16 controlled-preview draft. S22R17 records the release owner's selection of Model B — Public Technical Preview as the intended target; that selection does not approve this contract, accept risk, authorize recipients, or permit distribution. The candidate is not approved for publication. See [S22R17 Public Preview Security Gate](RELEASE_S22R17_PUBLIC_PREVIEW_SECURITY_GATE.md) and [S22R17 Security Implementation Plan](RELEASE_S22R17_SECURITY_IMPLEMENTATION_PLAN.md) for the proposed limited VM boundary and unresolved prerequisites.
 
 ## Proposed audience
 
 Named, trusted first-party evaluators and operators using disposable virtual machines or dedicated test hardware. Do not use the system for production workloads or sensitive data. Do not distribute it publicly under this contract.
 
 This audience is a proposal only. Model A is not approved until an authorized release owner explicitly accepts the Native ELF risk, confirms the actual operating controls, and names the recipients.
+
+S22R17 selected Model B as the intended target. This retained Model A audience proposal does not describe the selected audience and is not sufficient for release.
 
 ## Candidate identity
 
@@ -64,6 +66,8 @@ These controls reduce exposure and recovery cost. They do not isolate native cod
 
 ## Approval required
 
+The checklist below belongs to the S22R16 Model A draft. S22R17's Model B selection makes it stale as a target checklist; an owner-approved public contract must replace or revise it after the S22R17 security prerequisites are addressed.
+
 Before distribution, the authorized release owner must:
 
 - explicitly select the controlled experimental preview model;
@@ -72,7 +76,7 @@ Before distribution, the authorized release owner must:
 - approve the actual operating controls and named recipient list; and
 - explicitly authorize any distribution action separately.
 
-Until those approvals exist, this contract remains a draft and the owner decision status is `OWNER_DECISIONS_PENDING`. Public technical preview and general-purpose release remain blocked under the current security model.
+Until those approvals exist, this contract remains a draft. S22R17 selects Model B as the intended target, but the public-preview security gate remains open and the current candidate remains blocked from distribution. The owner decisions, risk acceptance, contract approval, and publication authorization are still pending.
 
 ## Evidence
 
