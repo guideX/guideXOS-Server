@@ -118,6 +118,12 @@ try {
     Assert-True ($developmentProfile.PackageNames.Count -eq 2 -and $developmentProfile.PackageNames -contains 'DeveloperStudio' -and $developmentProfile.RequiresDeveloperStudio) 'preserves the default Development profile with its PacMan and DeveloperStudio stages'
     Assert-True ($pacmanOnlyProfile.PackageNames.Count -eq 1 -and $pacmanOnlyProfile.PackageNames[0] -eq 'PacMan' -and -not $pacmanOnlyProfile.RequiresDeveloperStudio) 'selects an explicit PacMan-only Server v0.3 profile'
 
+    $phase25Identity = Get-DeveloperStudioSignedOffIdentity
+    $phase25Fixture = Join-Path $PSScriptRoot '..\tests\fixtures\developerstudio-phase25-app.json'
+    $phase25FixtureFile = Get-Item -LiteralPath $phase25Fixture
+    $phase25FixtureHash = (Get-FileHash -LiteralPath $phase25Fixture -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-True ([int64]$phase25FixtureFile.Length -eq [int64]$phase25Identity.ManifestBytes -and $phase25FixtureHash -eq $phase25Identity.ManifestSha256.ToLowerInvariant()) 'preserves the exact Phase 25 Development manifest fixture bytes across checkouts'
+
     Assert-Throws { Assert-ReleaseCommandCompleted -Command 'required-stage' -ExitCode 7 -Output '' } 'rejects a required command returning nonzero'
     Assert-Throws { Assert-ReleaseCommandCompleted -Command 'required-stage' -ExitCode 0 -Output 'ERROR: stage failed' } 'rejects a child that prints an error but exits zero'
 
