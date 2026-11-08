@@ -62,4 +62,16 @@ if ($LASTEXITCODE -ne 0) { throw "Accepted ELF compatibility test build failed: 
 & $elfTest $AcceptedElf
 if ($LASTEXITCODE -ne 0) { throw "Accepted ELF compatibility test failed: $LASTEXITCODE" }
 
-Write-Host 'TOOLS13R1C hosted ELF/ABI checks PASS; no application execution was performed.'
+$bridgeTestRunner = Join-Path $ServerRoot 'scripts\run-native-elf-window-bridge-host-test.ps1'
+if (-not (Test-Path -LiteralPath $bridgeTestRunner -PathType Leaf)) {
+    throw "Native ELF window bridge host-test runner not found: $bridgeTestRunner"
+}
+foreach ($configuration in @('Debug', 'Release')) {
+    Write-Host "Running Native ELF window bridge hosted test ($configuration)"
+    & $bridgeTestRunner -Configuration $configuration
+    if ($LASTEXITCODE -ne 0) {
+        throw "Native ELF window bridge hosted test failed ($configuration): $LASTEXITCODE"
+    }
+}
+
+Write-Host 'TOOLS13R1C hosted ELF/ABI/window checks PASS; no application execution was performed.'
