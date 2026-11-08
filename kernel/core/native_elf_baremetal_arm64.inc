@@ -2229,9 +2229,10 @@ static void phase12_snapshot_failure(gx_development_run_snapshot* output,
                                      const char* message)
 {
     gx_development_run_snapshot result = phase12_snapshot_base();
-    result.state = GX_DEVELOPMENT_RUN_FAILED;
-    result.errorCode = error;
-    arm64_copy(result.errorMessage, sizeof(result.errorMessage), message ? message : "in-OS Run failed");
+    const kernel::studio_abi::run_gate::Decision decision = {
+        false, error, message ? message : "in-OS Run failed"
+    };
+    kernel::studio_abi::run_gate::write_rejection(&result, decision);
     phase12_snapshot_write(output, result);
 }
 
@@ -2273,6 +2274,13 @@ static gx_result GX_CALL phase12_run_prepare(gx_app_context* context,
         phase12_snapshot_failure(outputSnapshot, GX_DEVELOPMENT_RUN_ERROR_RUNTIME_BUSY, "another in-OS Run is active");
         return GX_ERROR_BUSY;
     }
+    const kernel::studio_abi::run_gate::Decision decision =
+        kernel::studio_abi::run_gate::studio_child_decision();
+    if (!decision.admitted) {
+        phase12_snapshot_failure(outputSnapshot, decision.error, decision.message);
+        arm64_print("[developer-studio] Run rejected: unsupported runtime safety; EL0 child execution is unavailable\n");
+        return GX_OK;
+    }
     refresh();
     phase9_vfs_enter();
     discover();
@@ -2310,16 +2318,17 @@ static gx_result GX_CALL phase12_run_start(gx_app_context* context, gx_developme
     if (!owner || !s_phase12RunJob.used || s_phase12RunJob.owner != owner || s_phase12RunJob.handle != handle)
         return GX_ERROR_INVALID_ARGUMENT;
     if (s_phase12RunJob.started) return GX_ERROR_BUSY;
-    s_phase12RunJob.started = true;
-    s_phase12RunJob.snapshot.state = GX_DEVELOPMENT_RUN_LAUNCHING;
-    arm64_print("[developer-studio] Run: ARM64 payload selected\n");
-    const bool okay = phase12_run_package(s_phase12RunJob.package, true);
-    s_phase12RunJob.snapshot.state = okay ? GX_DEVELOPMENT_RUN_COMPLETED : GX_DEVELOPMENT_RUN_FAILED;
-    s_phase12RunJob.snapshot.errorCode = okay ? GX_DEVELOPMENT_RUN_ERROR_NONE : GX_DEVELOPMENT_RUN_ERROR_LAUNCH_FAILED;
-    s_phase12RunJob.snapshot.exitCode = okay ? 42 : -1;
-    s_phase12RunJob.snapshot.cleanupComplete = okay ? 1u : 0u;
-    phase12_snapshot_output(s_phase12RunJob.snapshot, okay ? "ARM64 application completed" : "ARM64 application launch failed");
-    return okay ? GX_OK : GX_ERROR_FAILED;
+    const kernel::studio_abi::run_gate::Decision decision =
+        kernel::studio_abi::run_gate::studio_child_decision();
+    if (!decision.admitted) {
+        kernel::studio_abi::run_gate::write_rejection(&s_phase12RunJob.snapshot, decision);
+        phase12_snapshot_output(s_phase12RunJob.snapshot, decision.message);
+        arm64_print("[developer-studio] Run rejected: unsupported runtime safety; EL0 child execution is unavailable\n");
+        return GX_ERROR_UNSUPPORTED;
+    }
+    // Keep this callback fail-closed even if the policy is changed later. A
+    // future admitted path needs a real task object and observed child exit.
+    return GX_ERROR_UNSUPPORTED;
 }
 
 static gx_result GX_CALL phase12_run_poll(gx_app_context* context, gx_development_run_handle handle,
@@ -2552,6 +2561,10 @@ static void phase9_initialize_host(Phase9Runtime* runtime)
 
 static bool phase9_load_and_run(Phase9Runtime* runtime)
 {
+    if (runtime && runtime->isPhase12Application) {
+        arm64_print("[developer-studio] Run rejected: unsupported runtime safety; privileged NativeElf entry blocked\n");
+        return false;
+    }
     phase9_initialize_host(runtime);
     const bool needsImageVfs = runtime->isAppA ? !s_phase9AppAImagePrimed : !s_phase9AppBImagePrimed;
     if (needsImageVfs) phase9_vfs_enter();

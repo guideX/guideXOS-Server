@@ -1,5 +1,6 @@
 #include "kernel/aarch64_studio_v05_abi_adapter.h"
 #include "kernel/aarch64_gui_window_bounds.h"
+#include "kernel/aarch64_studio_run_gate.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -690,6 +691,20 @@ int main()
           studio_v05::GX_ERROR_INVALID_ARGUMENT);
     CHECK(host->bare_metal_development_run_poll(context, runHandle,
           reinterpret_cast<studio_v05::gx_development_run_snapshot*>(1)) == studio_v05::GX_ERROR_INVALID_ARGUMENT);
+
+    const kernel::studio_abi::run_gate::Decision runDecision =
+        kernel::studio_abi::run_gate::studio_child_decision();
+    CHECK(!runDecision.admitted);
+    CHECK(runDecision.error == GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE);
+    CHECK(strstr(runDecision.message, "unsupported") != nullptr &&
+          strstr(runDecision.message, "EL0") != nullptr);
+    gx_development_run_snapshot rejectedRun{};
+    rejectedRun.exitCode = 42;
+    kernel::studio_abi::run_gate::write_rejection(&rejectedRun, runDecision);
+    CHECK(rejectedRun.state == GX_DEVELOPMENT_RUN_FAILED &&
+          rejectedRun.errorCode == GX_DEVELOPMENT_RUN_ERROR_LAUNCH_UNAVAILABLE);
+    CHECK(rejectedRun.exitCode == -1 && rejectedRun.cleanupComplete == 1);
+    CHECK(strstr(rejectedRun.errorMessage, "bounded task ownership") != nullptr);
 
     kernel::studio_abi::deactivate_v05_adapter(adapter);
     CHECK(host->log(context, message) == studio_v05::GX_ERROR_INVALID_ARGUMENT);

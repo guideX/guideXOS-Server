@@ -95,6 +95,8 @@ if ($arm64Entry.Count -ne 1 -or $arm64Entry[0].abi -ne 'guidexos-c-abi-v1-studio
     -DeveloperStudioRoot $DeveloperStudioRoot -V05ServerRoot $V05ServerRoot -OutputDirectory $preflightRoot
 & (Join-Path $PSScriptRoot 'test-aarch64-studio-v05-adapter.ps1') `
     -DeveloperStudioRoot $DeveloperStudioRoot -V05ServerRoot $V05ServerRoot -OutputDirectory $adapterTestRoot
+& (Join-Path $PSScriptRoot 'test-aarch64-studio-run-gate.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Production Studio Run gate controls failed' }
 
 $v05SdkInclude = Join-Path $V05ServerRoot ($alignmentLock.intendedV05Sdk.includeRoot.Replace('/', '\'))
 $kernelBuildParameters = @{

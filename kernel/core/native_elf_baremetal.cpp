@@ -33,6 +33,7 @@
 #include "include/kernel/aarch64_gui_window_bounds.h"
 #if defined(GXOS_AARCH64_PHASE12)
 #include "include/kernel/aarch64_studio_v05_abi_adapter.h"
+#include "include/kernel/aarch64_studio_run_gate.h"
 #endif
 #endif
 #if defined(GXOS_AARCH64_PHASE8) || defined(GXOS_AARCH64_PHASE9) || defined(GXOS_AARCH64_PHASE10)
