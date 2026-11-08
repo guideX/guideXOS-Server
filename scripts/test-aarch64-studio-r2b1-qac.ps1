@@ -151,7 +151,10 @@ function Invoke-StudioBoot([int]$BootNumber) {
         if ($newDirectory) {
             $candidateSessionPath = Join-Path $newDirectory.FullName 'session.json'
             if (Test-Path -LiteralPath $candidateSessionPath -PathType Leaf) {
-                try { $candidateSession = Get-Content -LiteralPath $candidateSessionPath -Raw | ConvertFrom-Json }
+                # The managed runner updates this record while starting QAC.
+                # Read with FileShare.ReadWrite so observing it never blocks
+                # the runner's Set-Content write on Windows.
+                try { $candidateSession = (Read-GuestText $candidateSessionPath) | ConvertFrom-Json }
                 catch { $candidateSession = $null }
                 if ($candidateSession -and $candidateSession.outcome -eq 'ABI3_STUDIO_GUEST_IN_PROGRESS') {
                     $sessionPath = $candidateSessionPath
@@ -378,7 +381,7 @@ function Invoke-StudioBoot([int]$BootNumber) {
         if (!$runner.WaitForExit(($RuntimeSeconds + 120) * 1000)) { throw 'The QAC runner did not complete its bounded cleanup window.' }
         $record.runner_exit_code = $runner.ExitCode
         $text = Read-GuestText $guestLog
-        $finalSession = Get-Content -LiteralPath $sessionPath -Raw | ConvertFrom-Json
+        $finalSession = (Read-GuestText $sessionPath) | ConvertFrom-Json
         $record.phase12_cleanup_pass = [regex]::Matches($text, 'AARCH64_PHASE12_PASS').Count -ge 2
         $record.gui_cleanup_pass = $text.Contains('NativeElf GUI cleanup: PASS mappings=0 windows=0 widgets=0')
         $record.no_unexpected_irqs_or_exceptions = $text -match 'unexpected-irq=0 exceptions=0'
