@@ -26,6 +26,8 @@
 #include "include/kernel/xhci.h"
 #include "include/kernel/modern_input_diagnostics.h"
 #include "include/kernel/amd_iommu.h"
+#include "include/kernel/intel_dmar.h"
+#include "include/kernel/intel_vtd.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
@@ -774,7 +776,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             if (bootinfo->Version != guideXOS::GUIDEXOS_BOOTINFO_VERSION ||
                 bootinfo->Size != sizeof(guideXOS::BootInfo) ||
                 !guideXOS::guidexos_bootinfo_checksum_valid(bootinfo)) {
-                kernel::serial::puts("[KERNEL] ERROR: invalid BootInfo v3 version, size, or checksum; halting\n");
+                kernel::serial::puts("[KERNEL] ERROR: invalid BootInfo v4 version, size, or checksum; halting\n");
                 while (1) { }
             }
             const bool hasIvrsCopy = (bootinfo->Flags &
@@ -783,6 +785,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 guideXOS::BOOTINFO_FLAG_ACPI_IVRS_MULTIPLE) != 0u;
             const bool remapTablePresent = (bootinfo->Flags &
                 guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT) != 0u;
+            const bool hasDmarCopy = (bootinfo->Flags &
+                guideXOS::BOOTINFO_FLAG_ACPI_DMAR_COPY_VALID) != 0u;
+            const bool multipleDmar = (bootinfo->Flags &
+                guideXOS::BOOTINFO_FLAG_ACPI_DMAR_MULTIPLE) != 0u;
             if ((hasIvrsCopy &&
                  (bootinfo->AcpiIvrsCopyBase == 0u ||
                   (bootinfo->AcpiIvrsCopyBase & 0xFFFu) != 0u ||
@@ -795,8 +801,21 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 (!hasIvrsCopy && (bootinfo->AcpiIvrsCopyBase != 0u ||
                                   bootinfo->AcpiIvrsCopyLength != 0u)) ||
                 (bootinfo->AcpiIvrsTableCount > 0u && !remapTablePresent) ||
-                (multipleIvrs != (bootinfo->AcpiIvrsTableCount > 1u))) {
-                kernel::serial::puts("[KERNEL] ERROR: invalid BootInfo IVRS handoff; halting\n");
+                (multipleIvrs != (bootinfo->AcpiIvrsTableCount > 1u)) ||
+                (hasDmarCopy &&
+                 (bootinfo->AcpiDmarCopyBase == 0u ||
+                  (bootinfo->AcpiDmarCopyBase & 0xFFFu) != 0u ||
+                  bootinfo->AcpiDmarCopyLength < kernel::intel_dmar::DMAR_HEADER_BYTES ||
+                  bootinfo->AcpiDmarCopyLength > kernel::intel_dmar::MAX_TABLE_BYTES ||
+                  bootinfo->AcpiDmarTableCount != 1u ||
+                  !remapTablePresent ||
+                  (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID) == 0u ||
+                  bootinfo->AcpiDmarCopyBase > UINT64_MAX - bootinfo->AcpiDmarCopyLength)) ||
+                (!hasDmarCopy && (bootinfo->AcpiDmarCopyBase != 0u ||
+                                  bootinfo->AcpiDmarCopyLength != 0u)) ||
+                (bootinfo->AcpiDmarTableCount > 0u && !remapTablePresent) ||
+                (multipleDmar != (bootinfo->AcpiDmarTableCount > 1u))) {
+                kernel::serial::puts("[KERNEL] ERROR: invalid BootInfo v4 ACPI handoff; halting\n");
                 while (1) { }
             }
             is_bootinfo = true;
@@ -814,6 +833,17 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     : nullptr,
                 bootinfo->AcpiIvrsCopyLength,
                 bootinfo->AcpiIvrsTableCount,
+                (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID) != 0u,
+                (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT) != 0u);
+            const bool dmarCopyValid = (bootinfo->Flags &
+                guideXOS::BOOTINFO_FLAG_ACPI_DMAR_COPY_VALID) != 0u;
+            kernel::intel_vtd::initialize(
+                dmarCopyValid
+                    ? reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(
+                          bootinfo->AcpiDmarCopyBase))
+                    : nullptr,
+                bootinfo->AcpiDmarCopyLength,
+                bootinfo->AcpiDmarTableCount,
                 (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID) != 0u,
                 (bootinfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT) != 0u);
         }
@@ -1001,7 +1031,25 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // NOT INVOKED until scan_host_controllers records its own entry.
         kernel::desktop::draw();
         kernel::usb::diagnostics::scan_host_controllers();
+        {
+            kernel::modern_input_diagnostics::Snapshot platformSnapshot = {};
+            kernel::modern_input_diagnostics::copy_snapshot(&platformSnapshot);
+            if (platformSnapshot.selectedControllerIndex >= 0 &&
+                static_cast<uint32_t>(platformSnapshot.selectedControllerIndex) <
+                    platformSnapshot.storedControllerCount) {
+                const uint16_t vendor = platformSnapshot.controllers[
+                    static_cast<uint32_t>(platformSnapshot.selectedControllerIndex)].vendorId;
+                const kernel::modern_input_diagnostics::Platform platform =
+                    vendor == 0x8086u
+                        ? kernel::modern_input_diagnostics::Platform::Intel
+                        : (vendor == 0x1022u
+                            ? kernel::modern_input_diagnostics::Platform::Amd
+                            : kernel::modern_input_diagnostics::Platform::Other);
+                kernel::modern_input_diagnostics::record_platform(platform);
+            }
+        }
         kernel::amd_iommu::qualify_xhci_controllers();
+        kernel::intel_vtd::qualify_xhci_controllers();
         // The first desktop frame predates hardware discovery. Publish the
         // completed PCI result now so later storage/network startup cannot
         // leave the visible diagnostics overlay on its initial state.

@@ -408,10 +408,10 @@ memory services are still available. It copies exactly one IVRS table into
 loader-owned pages before `ExitBootServices`; the kernel reads this copy and
 does not follow the firmware RSDP pointer.
 
-The BootInfo handoff is version 3. It carries the IVRS copy physical base,
-byte length, and number of IVRS tables, plus flags for a valid ACPI remap scan,
-any DMAR/IVRS table, a valid IVRS copy, and multiple IVRS tables. The loader
-identity-maps the copy before handoff. Both the shared BootInfo validator and
+The R6 BootInfo handoff was version 3. R7 advances it to version 4 and retains
+the IVRS copy physical base, byte length, and table count, plus flags for a
+valid ACPI remap scan, any DMAR/IVRS table, a valid IVRS copy, and multiple
+IVRS tables. The loader identity-maps the copy before handoff. Both the shared BootInfo validator and
 the kernel's early validation check alignment, bounds, count/flag consistency,
 scan validity, overflow, version, exact structure size, and checksum before the
 kernel casts the physical base to a pointer. A malformed scan or a DMAR and
@@ -491,3 +491,113 @@ qualification verifies the software path only. Physical acceptance still
 requires the per-system procedure above and observed keyboard/mouse behavior.
 R7 should define and validate the complete IOVA/domain mapping contract before
 any remapped xHCI controller can be permitted to DMA.
+
+## INPUT3D-R7: Intel scratchpads and VT-d diagnostics
+
+R7 adds the Intel path alongside the existing AMD IVRS implementation. It
+keeps the AMD parser and read-only inspection source unchanged. The loader
+copies a single checksummed DMAR table into loader-owned identity-mapped pages
+and supplies its base, length, and count through BootInfo v4. Multiple tables,
+malformed handoff fields, or an unsupported table revision never provide a
+route.
+
+### Scratchpad interpretation and bounded storage
+
+The xHCI decoder reads HCSPARAMS2 bits 25:21 as the high field and bits 31:27
+as the low field, then calculates `(high << 5) | low`. The architectural field
+can represent 0 through 1023. R6's software pool was capped at 16 buffers; that
+cap was a static software limit, not an xHCI hardware limit. The R7 pool holds
+34 scratchpad pages, matching the count in the earlier physical log. That log
+did not include the raw HCSPARAMS2 dword, so R7 records the raw value and both
+fields on the next boot instead of inventing one from the count.
+
+Each page is selected from the controller's PAGESIZE bitmap, up to 64 KiB. A
+34-page pool plus one maximum-page alignment margin reserves about 2.19 MiB of
+static kernel storage. The xHCI driver validates the full backing span against
+the loaded kernel image, translates it through the loader-provided physical
+base, checks alignment, contiguity and AC64 addressability, clears the pages,
+and validates the entire Scratchpad Buffer Array before setting DCBAA[0]. A
+failed check clears the array and leaves DCBAA[0] zero. The driver still has a
+single-controller DMA workspace; it does not share active mutable rings across
+simultaneous xHCI instances. Counts above 34 remain blocked until a verified
+DMA page allocator and per-controller lifetime model exist.
+
+The field definitions and allocation procedure follow the [Intel xHCI
+specification, sections 4.20, 5.3.4, 5.4.3 and 6.6](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf).
+
+### DMAR parser and routing
+
+The bounded parser supports DRHD, RMRR, ATSR, RHSA, and PCI device scopes for
+endpoints and bridges. It also validates the known I/O APIC, HPET, and ACPI
+namespace scope encodings. It checks ACPI checksum, table and substructure
+lengths, ordering, reserved fields, register-range arithmetic, PCI path bounds,
+RMRR page boundaries, duplicate DRHD/RMRR/RHSA identities, and RHSA-to-DRHD
+association. Unknown DMAR structures, unsupported scope records, and
+unsupported topologies remain visible as unsupported and prevent a route from
+being accepted.
+
+For segment 0, the kernel reconstructs the target xHCI bridge path from bounded
+PCI configuration reads. Each parent must be a unique PCI-to-PCI bridge whose
+primary/secondary bus numbers match the discovered chain. Explicit endpoint
+and bridge scopes are matched against that path; a segment-matching
+INCLUDE_PCI_ALL unit is only a fallback and must follow other DRHDs for that
+segment. Overlapping explicit coverage is ambiguous. The current PCI config
+reader cannot address nonzero segments, so those routes remain unsupported.
+
+DMAR definitions and routing follow the [Intel VT-d Architecture
+Specification, Rev. 4.0, sections 8.1–8.6](https://cdrdv2-public.intel.com/671081/vt-directed-io-spec.pdf).
+
+### Read-only VT-d state and DMA eligibility
+
+Before MMIO mapping, R7 validates the DMAR-declared register-set size, required
+register span, alignment, and address overflow. It uses the existing UC,
+kernel-only, non-executable MMIO mapper. It reads VER first and stops if the
+major version is unsupported. For a supported unit it reads CAP, ECAP, GCMD,
+GSTS, RTADDR and FSTS through volatile accesses. It does not write or clear
+any VT-d register. Translation enable is reported from GSTS.TES; RTADDR
+reserved bits, table mode, and whether a nonzero root address is configured
+are classified separately. CAP.MGAW and CAP.SAGAW are shown as observed
+capabilities, not proof of a per-device mapping.
+
+An Intel xHCI routed to a DMAR unit remains blocked even when registers are
+readable, translation is enabled, the root address is configured, and its
+scratchpad pages are physically valid. R7 does not set up an IOVA domain,
+program a translation root, satisfy RMRR mappings, or establish device-visible
+addresses. It therefore reports `DEVICE_DMA_MAPPING_NOT_ESTABLISHED` (or the
+more specific routing/register/RMRR blocker) and never authorizes the remapped
+Intel controller to DMA. A disabled translation observation is not permission
+to bypass VT-d. The preexisting valid-scan/no-remapping direct-DMA contract is
+unchanged; AMD remains on its IVRS safety path.
+
+The overlay now shows platform, raw HCSPARAMS2 and decoded fields, required and
+supported scratchpad capacity, allocation status, IVRS/DMAR summaries,
+per-controller VT-d route, register/translation/root-table state, DMA reason,
+and the existing first-failure and controller stages. Short layouts use a
+bounded concise view and the displayed snapshot generation reflects the actual
+last-presented sequence.
+
+### R7 qualification and physical observations
+
+Hosted tests cover HCSPARAMS2 decoding, the 34-page backing boundary, page
+selection, failure clearing, DMAR bounds and checksums, scopes and bridge
+routing, INCLUDE_PCI_ALL precedence, RMRR/ATSR/RHSA validation, unsupported
+structures, VT-d resource/register classification, multi-controller diagnostic
+publication, and DMA refusal without a mapping. These tests use synthetic
+firmware and register data; they do not establish SARAH_DT or LEON2_RDT's raw
+HCSPARAMS2, DMAR topology, VT-d state, or xHCI Running state.
+
+The R6 physical log reports 34 scratchpads on SARAH_DT (`00:14.0 8086:06ED`)
+but does not contain a raw HCSPARAMS2 sample. Capture the R7 serial log and
+panel on SARAH_DT to establish the exact dword, hi/lo fields, DMAR table count,
+DRHD units, route, read-only register state, and first remaining DMA blocker.
+Do not retry controller halt/reset while DMA eligibility remains blocked. After
+SARAH_DT evidence is recorded, repeat the same comparison on LEON2_RDT; do not
+assume its firmware tables match because the chassis model is the same.
+
+R7 does not implement USB HID delivery, reconfigure VT-d, alter BIOS settings,
+disable audio in production, or claim physical acceptance. The bounded 34-page
+static pool, single-active-controller workspace, segment-0 PCI path, lack of
+an Intel DMA-domain mapper, and absent physical raw-register evidence define
+the next work. R8 should first implement a reviewed per-controller DMA-domain
+and IOVA mapping/lifetime contract with RMRR handling and invalidation; only
+then can a later physical run consider xHCI halt/reset and DMA.

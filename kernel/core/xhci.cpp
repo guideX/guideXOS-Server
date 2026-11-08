@@ -181,6 +181,7 @@ struct XhciDmaAddresses {
     uint64_t ep0Ring;
     uint64_t controlBuf;
     uint64_t scratchpadArray;
+    uint64_t dcbaaScratchpadEntry;
 };
 
 static XhciDmaAddresses s_dmaAddresses = {};
@@ -335,6 +336,47 @@ static const char* dma_translation_block_reason()
     }
     const modern_input_diagnostics::ControllerSnapshot& controller =
         snapshot.controllers[static_cast<uint32_t>(s_diagnosticControllerIndex)];
+    if (snapshot.platform == modern_input_diagnostics::Platform::Intel) {
+        if (!snapshot.dmarScanValid) return "ACPI_DMAR_SCAN_UNKNOWN";
+        if (snapshot.dmarTableCount == 0u) return "ACPI_DMAR_NOT_PRESENT";
+        if (snapshot.dmarStatus == intel_dmar::ParseStatus::Malformed ||
+            snapshot.dmarStatus == intel_dmar::ParseStatus::CapacityExceeded ||
+            snapshot.dmarStatus == intel_dmar::ParseStatus::UnsupportedRevision ||
+            snapshot.dmarStatus == intel_dmar::ParseStatus::AmbiguousTables) {
+            return "DMAR_PRESENT_UNPARSED";
+        }
+        if (snapshot.dmarStatus == intel_dmar::ParseStatus::ValidWithUnsupported) {
+            return "DMAR_TOPOLOGY_UNSUPPORTED";
+        }
+        if (controller.vtdRouteStatus == intel_dmar::RouteStatus::Ambiguous) {
+            return "DEVICE_ROUTING_AMBIGUOUS";
+        }
+        if (controller.vtdRouteStatus == intel_dmar::RouteStatus::Unsupported) {
+            return "DEVICE_ROUTING_UNSUPPORTED";
+        }
+        if (controller.vtdRouteStatus == intel_dmar::RouteStatus::NotCovered) {
+            return "DEVICE_ROUTING_NOT_COVERED";
+        }
+        if (controller.vtdRouteStatus != intel_dmar::RouteStatus::Resolved) {
+            return "DEVICE_ROUTING_UNKNOWN";
+        }
+        if (controller.vtdRegisterStatus != intel_dmar::RegisterStatus::Readable) {
+            return "VTD_REGISTERS_NOT_READABLE";
+        }
+        if (controller.vtdTranslationState == intel_dmar::TranslationState::DisabledObserved) {
+            return "VTD_TRANSLATION_DISABLED_MAPPING_UNAVAILABLE";
+        }
+        if (controller.vtdTranslationState != intel_dmar::TranslationState::EnabledObserved) {
+            return "VTD_TRANSLATION_STATE_UNKNOWN";
+        }
+        if (controller.vtdRootTableState != intel_dmar::RootTableState::Configured) {
+            return "VTD_ROOT_TABLE_NOT_VERIFIED";
+        }
+        if (controller.vtdRmrrRequired) {
+            return "RMRR_MAPPING_REQUIREMENTS_UNSATISFIED";
+        }
+        return "DEVICE_DMA_MAPPING_NOT_ESTABLISHED";
+    }
     if (controller.iommuRouteStatus == amd_ivrs::RouteStatus::Ambiguous) {
         return "DEVICE_ROUTING_AMBIGUOUS";
     }
@@ -357,6 +399,7 @@ static bool validate_dma_prerequisites()
     s_dmaAddresses = {};
     s_scratchpadPageSize = 0u;
     s_scratchpadCount = 0u;
+    s_dcbaa[0] = 0u;
     for (uint32_t i = 0u; i < XHCI_MAX_DMA_SCRATCHPAD_BUFFERS; ++i) {
         s_scratchpadBufferAddresses[i] = 0u;
         s_scratchpadArray[i] = 0u;
@@ -377,7 +420,7 @@ static bool validate_dma_prerequisites()
         const char* reason = "SCRATCHPAD_PLAN_INVALID";
         switch (scratchpadPlan.error) {
             case XhciScratchpadPlanError::CountExceedsCapacity:
-                reason = "SCRATCHPAD_COUNT_EXCEEDS_STATIC_CAPACITY";
+                reason = "SCRATCHPAD_COUNT_EXCEEDED_STATIC_CAPACITY";
                 break;
             case XhciScratchpadPlanError::NoSupportedPageSize:
                 reason = "CONTROLLER_ADVERTISED_NO_PAGE_SIZE";
@@ -396,6 +439,11 @@ static bool validate_dma_prerequisites()
                                       : modern_input_diagnostics::Status::Blocked,
                          s_caps.maxScratchpadBufs, true, 0u, false,
                          0u, 0u, 0u, 0u, false, reason);
+        modern_input_diagnostics::record_scratchpad_allocation(
+            s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+            unsupported ? modern_input_diagnostics::Status::Unsupported
+                        : modern_input_diagnostics::Status::Blocked,
+            reason);
         serial_puts("[XHCI] DMA blocked: ");
         serial_puts(reason);
         serial_puts("\n");
@@ -403,6 +451,11 @@ static bool validate_dma_prerequisites()
     }
     s_scratchpadCount = scratchpadPlan.count;
     s_scratchpadPageSize = scratchpadPlan.pageSize;
+    if (s_scratchpadCount == 0u) {
+        modern_input_diagnostics::record_scratchpad_allocation(
+            s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+            modern_input_diagnostics::Status::Pass, "ZERO_SCRATCHPADS_REQUIRED");
+    }
 
     if (!dma_region_address(s_commandRing, sizeof(s_commandRing), 64u,
                             &s_dmaAddresses.commandRing) ||
@@ -436,6 +489,10 @@ static bool validate_dma_prerequisites()
     if (s_scratchpadCount != 0u) {
         uint64_t storageStart = 0u;
         if (!dma_region_address(s_scratchpadStorage, 1u, 1u, &storageStart)) {
+            modern_input_diagnostics::record_scratchpad_allocation(
+                s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                modern_input_diagnostics::Status::Blocked,
+                "SCRATCHPAD_STORAGE_TRANSLATION_UNAVAILABLE");
             diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                              modern_input_diagnostics::Status::Blocked,
                              0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
@@ -447,6 +504,10 @@ static bool validate_dma_prerequisites()
         if (storageOffset > XHCI_DMA_SCRATCHPAD_STORAGE_SIZE ||
             scratchpadPlan.storageBytes >
                 XHCI_DMA_SCRATCHPAD_STORAGE_SIZE - storageOffset) {
+            modern_input_diagnostics::record_scratchpad_allocation(
+                s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                modern_input_diagnostics::Status::Blocked,
+                "SCRATCHPAD_ALIGNMENT_PADDING_EXCEEDS_STATIC_CAPACITY");
             diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                              modern_input_diagnostics::Status::Unsupported,
                              scratchpadPlan.storageBytes, true,
@@ -460,6 +521,10 @@ static bool validate_dma_prerequisites()
                                            scratchpadPlan.storageBytes,
                                            s_scratchpadPageSize,
                                            &storagePhysical)) {
+            modern_input_diagnostics::record_scratchpad_allocation(
+                s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                modern_input_diagnostics::Status::Blocked,
+                "SCRATCHPAD_BACKING_NOT_CONTIGUOUS_ALIGNED_OR_ADDRESSABLE");
             diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                              modern_input_diagnostics::Status::Blocked,
                              0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
@@ -473,17 +538,24 @@ static bool validate_dma_prerequisites()
             s_scratchpadBufferAddresses[i] = storagePhysical +
                 static_cast<uint64_t>(i) * s_scratchpadPageSize;
         }
+        uint32_t arrayBytes = 0u;
         if (!build_xhci_scratchpad_array(
                 s_scratchpadCount, s_scratchpadPageSize,
                 s_scratchpadBufferAddresses, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
                 s_caps.ac64, s_scratchpadArray,
                 XHCI_MAX_DMA_SCRATCHPAD_BUFFERS) ||
+            !xhci_scratchpad_array_bytes(
+                s_scratchpadCount, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS, &arrayBytes) ||
             !dma_region_address(s_scratchpadArray,
-                                s_scratchpadCount * sizeof(uint64_t), 64u,
+                                arrayBytes, 64u,
                                 &s_dmaAddresses.scratchpadArray)) {
             for (uint32_t i = 0u; i < XHCI_MAX_DMA_SCRATCHPAD_BUFFERS; ++i) {
                 s_scratchpadArray[i] = 0u;
             }
+            modern_input_diagnostics::record_scratchpad_allocation(
+                s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                modern_input_diagnostics::Status::Blocked,
+                "SCRATCHPAD_ARRAY_ADDRESS_OR_CONTENT_INVALID");
             diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
                              modern_input_diagnostics::Status::Blocked,
                              s_scratchpadCount, true, 0u, false,
@@ -491,6 +563,25 @@ static bool validate_dma_prerequisites()
                              "SCRATCHPAD_ARRAY_ADDRESS_OR_CONTENT_INVALID");
             return false;
         }
+        modern_input_diagnostics::record_scratchpad_allocation(
+            s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+            modern_input_diagnostics::Status::Pass, "VERIFIED_PHYSICAL_BACKING");
+    }
+
+    if (!xhci_scratchpad_dcbaa_entry(
+            s_scratchpadCount, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+            s_dmaAddresses.scratchpadArray, s_caps.ac64,
+            &s_dmaAddresses.dcbaaScratchpadEntry)) {
+        modern_input_diagnostics::record_scratchpad_allocation(
+            s_diagnosticControllerIndex, XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+            modern_input_diagnostics::Status::Blocked,
+            "DCBAA_SCRATCHPAD_ENTRY_INVALID");
+        diagnostic_stage(modern_input_diagnostics::Stage::DmaPrerequisites,
+                         modern_input_diagnostics::Status::Blocked,
+                         s_scratchpadCount, true, 0u, false,
+                         0u, 0u, 0u, 0u, false,
+                         "DCBAA_SCRATCHPAD_ENTRY_INVALID");
+        return false;
     }
 
     const XhciDeviceDmaTranslationEvidence translationEvidence =
@@ -832,7 +923,8 @@ static bool parse_capabilities()
             ? modern_input_diagnostics::IommuStatus::Unknown
             : (s_acpiDmaRemappingTablePresent
                 ? modern_input_diagnostics::IommuStatus::AcpiRemappingTablePresent
-                : modern_input_diagnostics::IommuStatus::NoAcpiRemappingTable));
+                : modern_input_diagnostics::IommuStatus::NoAcpiRemappingTable),
+        s_caps.hcsParams2, s_caps.scratchpadHigh, s_caps.scratchpadLow);
     diagnostic_stage(modern_input_diagnostics::Stage::Capabilities,
                      modern_input_diagnostics::Status::Pass);
 
@@ -847,6 +939,14 @@ static bool parse_capabilities()
     serial_u32_dec(s_caps.maxSlots);
     serial_puts(" ports=");
     serial_u32_dec(s_caps.maxPorts);
+    serial_puts(" HCSPARAMS2=0x");
+    serial_hex_n(s_caps.hcsParams2, 8u);
+    serial_puts(" scratchpad-hi=");
+    serial_u32_dec(s_caps.scratchpadHigh);
+    serial_puts(" scratchpad-lo=");
+    serial_u32_dec(s_caps.scratchpadLow);
+    serial_puts(" scratchpad-count=");
+    serial_u32_dec(s_caps.maxScratchpadBufs);
     serial_puts(" dboff=0x");
     serial_hex_n(s_caps.dboff, 4u);
     serial_puts(" rtsoff=0x");
@@ -1118,9 +1218,7 @@ static void init_dcbaa()
         s_dcbaa[i] = 0;
     }
 
-    if (s_scratchpadCount != 0u) {
-        s_dcbaa[0] = s_dmaAddresses.scratchpadArray;
-    }
+    s_dcbaa[0] = s_dmaAddresses.dcbaaScratchpadEntry;
 
     // Program DCBAAP
     const uint64_t dcbaap = s_dmaAddresses.dcbaa & XHCI_DCBAAP_PTR_MASK;

@@ -792,6 +792,113 @@ void test_iommu_diagnostic_publication_and_formatting()
             "unknown ACPI scan remains distinct from a confirmed absence of remapping hardware");
 }
 
+void test_intel_diagnostic_publication_and_formatting()
+{
+    using namespace kernel::modern_input_diagnostics;
+    initialize();
+    const int32_t intel = record_controller(
+        0u, 20u, 0u, 0x8086u, 0x06EDu, 0x0Cu, 0x03u, 0x30u,
+        ControllerKind::XHCI);
+    const int32_t second = record_controller(
+        0u, 21u, 0u, 0x8086u, 0x1234u, 0x0Cu, 0x03u, 0x30u,
+        ControllerKind::XHCI);
+    select_controller(intel);
+    record_platform(Platform::Intel);
+    record_dmar_discovery(kernel::intel_dmar::ParseStatus::Valid,
+                          true, true, 1u, 2u, 1u, 1u, 1u, 0u);
+    const uint32_t rawHcsParams2 = (1u << 21u) | (2u << 27u);
+    record_capabilities(intel, 0x80u, 0x0110u, 64u, 26u, 32u, true,
+                        0u, 34u, IommuStatus::AcpiRemappingTablePresent,
+                        rawHcsParams2, 1u, 2u);
+    record_scratchpad_allocation(intel, 34u, Status::Pass,
+                                 "VERIFIED_PHYSICAL_BACKING");
+    record_scratchpad_allocation(second, 34u, Status::Blocked,
+                                 "SCRATCHPAD_COUNT_EXCEEDED_STATIC_CAPACITY");
+    record_vtd_route(intel, 0u, 0u, 20u, 0u,
+                     kernel::intel_dmar::RouteStatus::Resolved, 1,
+                     0xFEE00000u, false);
+    record_vtd_route(second, 0u, 0u, 21u, 0u,
+                     kernel::intel_dmar::RouteStatus::NotCovered, -1,
+                     0u, false);
+    const kernel::intel_dmar::RegisterSnapshot registers =
+        kernel::intel_dmar::classify_registers(
+            true, 0x10u, (1ULL << 16u) | (1ULL << 8u), 0u,
+            0u, 1u << 31u, 0x1000u, 0u);
+    record_vtd_registers(intel, registers);
+    record_dma_safety("DEVICE_DMA_MAPPING_NOT_ESTABLISHED", false);
+    record_stage(intel, Stage::DmaPrerequisites, Status::Blocked,
+                 0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                 "DEVICE_DMA_MAPPING_NOT_ESTABLISHED");
+    record_stage(second, Stage::DmaPrerequisites, Status::Fail,
+                 0u, false, 0u, false, 0u, 0u, 0u, 0u, false,
+                 "second controller failure");
+
+    Snapshot snapshot = {};
+    copy_snapshot(&snapshot);
+    require(snapshot.platform == Platform::Intel && snapshot.dmarScanValid &&
+            snapshot.dmarTablePresent && snapshot.dmarTableCount == 1u &&
+            snapshot.drhdUnitCount == 2u && snapshot.rmrrCount == 1u &&
+            snapshot.atsrCount == 1u && snapshot.rhsaCount == 1u,
+            "Intel platform and bounded DMAR inventory publish independently");
+    require(snapshot.controllers[intel].hcsParams2 == rawHcsParams2 &&
+            snapshot.controllers[intel].scratchpadHigh == 1u &&
+            snapshot.controllers[intel].scratchpadLow == 2u &&
+            snapshot.controllers[intel].scratchpadBuffersRequired == 34u &&
+            snapshot.controllers[intel].scratchpadCapacity == 34u &&
+            snapshot.controllers[intel].scratchpadAllocationStatus == Status::Pass &&
+            snapshot.controllers[second].scratchpadAllocationStatus == Status::Blocked,
+            "scratchpad observations and per-controller allocation failures are retained");
+    require(snapshot.controllers[intel].vtdRouteStatus ==
+                kernel::intel_dmar::RouteStatus::Resolved &&
+            snapshot.controllers[intel].vtdUnitIndex == 1 &&
+            snapshot.controllers[intel].vtdRegisterStatus ==
+                kernel::intel_dmar::RegisterStatus::Readable &&
+            snapshot.controllers[intel].vtdTranslationState ==
+                kernel::intel_dmar::TranslationState::EnabledObserved &&
+            snapshot.controllers[second].vtdRouteStatus ==
+                kernel::intel_dmar::RouteStatus::NotCovered,
+            "multi-controller VT-d route and register states do not alias");
+    require(!snapshot.dmaMappingEstablished && snapshot.firstFailure.present &&
+            snapshot.firstFailure.controllerIndex == intel &&
+            snapshot.dmaDecisionReason != nullptr &&
+            std::strcmp(snapshot.dmaDecisionReason,
+                        "DEVICE_DMA_MAPPING_NOT_ESTABLISHED") == 0,
+            "translation-enabled hardware remains DMA blocked and preserves first failure");
+
+    char summary[128];
+    format_dmar_summary(snapshot, summary, sizeof(summary));
+    require(std::strstr(summary, "ACPI DMAR VALID") != nullptr &&
+            std::strstr(summary, "DRHD=2") != nullptr &&
+            std::strstr(summary, "RMRR=1") != nullptr,
+            "DMAR panel summary reports table status and structure counts");
+    char route[96];
+    format_controller_vtd_route(snapshot.controllers[intel], route, sizeof(route));
+    require(std::strstr(route, "00:14.0") != nullptr &&
+            std::strstr(route, "VT-d=RESOLVED") != nullptr &&
+            std::strstr(route, "unit=1") != nullptr,
+            "VT-d route formatting includes the Intel controller and unit");
+    char registerText[128];
+    format_controller_vtd_registers(snapshot.controllers[intel], registerText,
+                                    sizeof(registerText));
+    require(std::strstr(registerText, "READABLE") != nullptr &&
+            std::strstr(registerText, "TES=ENABLED OBSERVED") != nullptr &&
+            std::strstr(registerText, "root=CONFIGURED") != nullptr,
+            "VT-d register formatter distinguishes state from DMA mapping");
+    char tiny[8];
+    format_controller_vtd_registers(snapshot.controllers[intel], tiny, sizeof(tiny));
+    require(tiny[sizeof(tiny) - 1u] == '\0',
+            "VT-d panel formatting stays terminated in a clipped row");
+
+    char ivrs[64];
+    format_ivrs_summary(snapshot, ivrs, sizeof(ivrs));
+    require(std::strcmp(ivrs, "ACPI IVRS N/A ON INTEL") == 0,
+            "Intel diagnostic panel does not treat missing IVRS as an error");
+    record_platform(Platform::Amd);
+    copy_snapshot(&snapshot);
+    require(snapshot.platform == Platform::Amd,
+            "AMD classification remains available after Intel diagnostic publication");
+}
+
 } // namespace
 
 int main()
@@ -1022,6 +1129,7 @@ int main()
     test_concurrent_publication();
     test_ivrs_parser_and_routing();
     test_iommu_diagnostic_publication_and_formatting();
+    test_intel_diagnostic_publication_and_formatting();
     std::printf("Modern input diagnostics tests PASS (%d assertions).\n", g_assertions);
     return 0;
 }

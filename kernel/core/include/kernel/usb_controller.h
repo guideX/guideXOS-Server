@@ -143,6 +143,9 @@ struct XhciCapabilities {
     uint8_t  maxPorts;         // HCSPARAMS1[31:24]
     uint8_t  ist;              // HCSPARAMS2[3:0]
     uint8_t  erstMax;          // HCSPARAMS2[7:4]
+    uint32_t hcsParams2;       // Raw HCSPARAMS2 capability dword
+    uint8_t  scratchpadHigh;   // HCSPARAMS2[25:21]
+    uint8_t  scratchpadLow;    // HCSPARAMS2[31:27]
     uint32_t maxScratchpadBufs;// HCSPARAMS2 scratchpad buffer count
     uint32_t hccParams1;
     uint32_t hccParams2;
@@ -171,6 +174,9 @@ inline void xhci_zero_capabilities(XhciCapabilities* c)
     c->maxPorts         = 0;
     c->ist              = 0;
     c->erstMax          = 0;
+    c->hcsParams2       = 0;
+    c->scratchpadHigh   = 0;
+    c->scratchpadLow    = 0;
     c->maxScratchpadBufs= 0;
     c->hccParams1       = 0;
     c->hccParams2       = 0;
@@ -212,8 +218,11 @@ inline XhciCapabilities parse_xhci_capabilities(const uint32_t* cap,
     c.maxPorts          = static_cast<uint8_t>((hcsp1 >> 24) & 0xFFu);
     c.ist               = static_cast<uint8_t>(hcsp2 & 0x0Fu);
     c.erstMax           = static_cast<uint8_t>((hcsp2 >> 4) & 0x0Fu);
-    c.maxScratchpadBufs = static_cast<uint32_t>(
-        (((hcsp2 >> 21) & 0x1Fu) << 5) | ((hcsp2 >> 27) & 0x1Fu));
+    c.hcsParams2        = hcsp2;
+    c.scratchpadHigh    = static_cast<uint8_t>((hcsp2 >> 21) & 0x1Fu);
+    c.scratchpadLow     = static_cast<uint8_t>((hcsp2 >> 27) & 0x1Fu);
+    c.maxScratchpadBufs = (static_cast<uint32_t>(c.scratchpadHigh) << 5u) |
+                          static_cast<uint32_t>(c.scratchpadLow);
 
     c.hccParams1 = cap[4];
     // Low reserved bits in these offset registers are not address bits.

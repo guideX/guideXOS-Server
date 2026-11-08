@@ -33,7 +33,7 @@ Forbidden:
 #include <Guid/FileInfo.h>
 #include "bootinfo.h"          // legacy, gradually being phased out
 #include "elf.h"
-#include "guidexOSBootInfo.h"   // canonical BootInfo v3
+#include "guidexOSBootInfo.h"   // canonical BootInfo v4
 #include "uefi_shim.h"         // UEFI shims for freestanding environment
 #include "debug_helpers.h"     // Post-ExitBootServices debugging
 #include "paging.h"            // minimal identity page tables
@@ -778,21 +778,30 @@ static bool AcpiRangeMapped(EFI_SYSTEM_TABLE* SystemTable,
     return false;
 }
 
-// Bounded, checksummed RSDP/root-table discovery. It preserves one valid IVRS
-// table in loader-owned pages so its bytes remain valid after ExitBootServices.
+// Bounded, checksummed RSDP/root-table discovery. It preserves unique IVRS and
+// DMAR tables in loader-owned pages so their bytes remain valid after
+// ExitBootServices.
 static bool ScanAcpiDmaRemappingTables(EFI_SYSTEM_TABLE* SystemTable,
                                        const RSDPDescriptor20* rsdp,
                                        bool* remappingTablePresent,
                                        EFI_PHYSICAL_ADDRESS* ivrsCopyBase,
                                        UINT32* ivrsCopyLength,
-                                       UINT32* ivrsTableCount)
+                                       UINT32* ivrsTableCount,
+                                       EFI_PHYSICAL_ADDRESS* dmarCopyBase,
+                                       UINT32* dmarCopyLength,
+                                       UINT32* dmarTableCount)
 {
     if (remappingTablePresent == nullptr || ivrsCopyBase == nullptr ||
-        ivrsCopyLength == nullptr || ivrsTableCount == nullptr) return false;
+        ivrsCopyLength == nullptr || ivrsTableCount == nullptr ||
+        dmarCopyBase == nullptr || dmarCopyLength == nullptr ||
+        dmarTableCount == nullptr) return false;
     *remappingTablePresent = false;
     *ivrsCopyBase = 0u;
     *ivrsCopyLength = 0u;
     *ivrsTableCount = 0u;
+    *dmarCopyBase = 0u;
+    *dmarCopyLength = 0u;
+    *dmarTableCount = 0u;
     if (rsdp == nullptr ||
         !AcpiRangeMapped(SystemTable, (UINT64)(UINTN)rsdp, 20u) ||
         !AcpiRsdpSignatureValid(rsdp->Signature) ||
@@ -848,7 +857,8 @@ static bool ScanAcpiDmaRemappingTables(EFI_SYSTEM_TABLE* SystemTable,
     const UINT8* entries = reinterpret_cast<const UINT8*>(root) + rootMinimum;
     UINT64 selectedIvrsAddress = 0u;
     UINT32 selectedIvrsLength = 0u;
-    UINT32 dmarTableCount = 0u;
+    UINT64 selectedDmarAddress = 0u;
+    UINT32 selectedDmarLength = 0u;
     for (UINT32 i = 0u; i < entryCount; ++i) {
         UINT64 tableAddress = 0u;
         if (xsdt) {
@@ -872,12 +882,18 @@ static bool ScanAcpiDmaRemappingTables(EFI_SYSTEM_TABLE* SystemTable,
         const bool isDmar = AcpiSignatureEquals(table->Signature, "DMAR");
         const bool isIvrs = AcpiSignatureEquals(table->Signature, "IVRS");
         if (isDmar || isIvrs) {
-            if (isIvrs && table->Length < 48u) return false;
+            if (table->Length < 48u) return false;
             if (!AcpiChecksumValid(reinterpret_cast<const UINT8*>(table), table->Length)) {
                 return false;
             }
             *remappingTablePresent = true;
-            if (isDmar) ++dmarTableCount;
+            if (isDmar) {
+                ++(*dmarTableCount);
+                if (*dmarTableCount == 1u) {
+                    selectedDmarAddress = tableAddress;
+                    selectedDmarLength = table->Length;
+                }
+            }
             if (isIvrs) {
                 ++(*ivrsTableCount);
                 if (*ivrsTableCount == 1u) {
@@ -887,7 +903,7 @@ static bool ScanAcpiDmaRemappingTables(EFI_SYSTEM_TABLE* SystemTable,
             }
         }
     }
-    if (*ivrsTableCount == 1u && selectedIvrsAddress != 0u && dmarTableCount == 0u) {
+    if (*ivrsTableCount == 1u && selectedIvrsAddress != 0u) {
         const UINTN pages = (selectedIvrsLength + EFI_PAGE_SIZE - 1u) / EFI_PAGE_SIZE;
         EFI_PHYSICAL_ADDRESS copyBase = 0u;
         EFI_STATUS status = SystemTable->BootServices->AllocatePages(
@@ -898,6 +914,18 @@ static bool ScanAcpiDmaRemappingTables(EFI_SYSTEM_TABLE* SystemTable,
                 (const VOID*)(UINTN)selectedIvrsAddress, selectedIvrsLength);
         *ivrsCopyBase = copyBase;
         *ivrsCopyLength = selectedIvrsLength;
+    }
+    if (*dmarTableCount == 1u && selectedDmarAddress != 0u) {
+        const UINTN pages = (selectedDmarLength + EFI_PAGE_SIZE - 1u) / EFI_PAGE_SIZE;
+        EFI_PHYSICAL_ADDRESS copyBase = 0u;
+        EFI_STATUS status = SystemTable->BootServices->AllocatePages(
+            AllocateAnyPages, EfiLoaderData, pages, &copyBase);
+        if (EFI_ERROR(status) || copyBase == 0u) return false;
+        SetMem((VOID*)(UINTN)copyBase, pages * EFI_PAGE_SIZE, 0u);
+        CopyMem((VOID*)(UINTN)copyBase,
+                (const VOID*)(UINTN)selectedDmarAddress, selectedDmarLength);
+        *dmarCopyBase = copyBase;
+        *dmarCopyLength = selectedDmarLength;
     }
     return true;
 }
@@ -945,7 +973,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     EFI_STATUS status = SystemTable->BootServices->AllocatePages(
         AllocateAnyPages,
         EfiLoaderData,
-        1, // BootInfo v3 remains below one page
+        1, // BootInfo v4 remains below one page
         &bootInfoPhys
     );
     if (EFI_ERROR(status)) {
@@ -968,12 +996,20 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     EFI_PHYSICAL_ADDRESS acpiIvrsCopyBase = 0u;
     UINT32 acpiIvrsCopyLength = 0u;
     UINT32 acpiIvrsTableCount = 0u;
+    EFI_PHYSICAL_ADDRESS acpiDmarCopyBase = 0u;
+    UINT32 acpiDmarCopyLength = 0u;
+    UINT32 acpiDmarTableCount = 0u;
     const bool acpiRemapScanValid = ScanAcpiDmaRemappingTables(
         SystemTable, rsdp, &acpiRemappingTablePresent,
-        &acpiIvrsCopyBase, &acpiIvrsCopyLength, &acpiIvrsTableCount);
+        &acpiIvrsCopyBase, &acpiIvrsCopyLength, &acpiIvrsTableCount,
+        &acpiDmarCopyBase, &acpiDmarCopyLength, &acpiDmarTableCount);
     v1BootInfo->AcpiIvrsTableCount = acpiIvrsTableCount;
+    v1BootInfo->AcpiDmarTableCount = acpiDmarTableCount;
     if (acpiIvrsTableCount > 1u) {
         v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_IVRS_MULTIPLE;
+    }
+    if (acpiDmarTableCount > 1u) {
+        v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_DMAR_MULTIPLE;
     }
     if (acpiRemappingTablePresent) {
         v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT;
@@ -986,6 +1022,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
             v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_IVRS_COPY_VALID;
             Print((CONST CHAR16*)L"[BOOT] Valid IVRS copied into loader-owned memory; bytes=%u\n",
                   acpiIvrsCopyLength);
+        }
+        if (acpiDmarCopyBase != 0u && acpiDmarCopyLength != 0u) {
+            v1BootInfo->AcpiDmarCopyBase = acpiDmarCopyBase;
+            v1BootInfo->AcpiDmarCopyLength = acpiDmarCopyLength;
+            v1BootInfo->Flags |= guideXOS::BOOTINFO_FLAG_ACPI_DMAR_COPY_VALID;
+            Print((CONST CHAR16*)L"[BOOT] Valid DMAR copied into loader-owned memory; bytes=%u\n",
+                  acpiDmarCopyLength);
         }
         if (acpiRemappingTablePresent) {
             Print((CONST CHAR16*)L"[BOOT] ACPI DMA remapping table present; xHCI needs an IOMMU mapping contract\n");
@@ -1343,9 +1386,9 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     const EFI_PHYSICAL_ADDRESS kernelPhysBase = (EFI_PHYSICAL_ADDRESS)kernelBase;
     const UINTN kernelSpanBytes = (kernelTotalSize != 0) ? (UINTN)kernelTotalSize : (64u * 1024u * 1024u);
 
-    // Use a dynamic array for ranges (max 20 should be plenty)
-    EFI_PHYSICAL_ADDRESS ranges[20];
-    UINTN sizes[20];
+    // Bounded identity-map ranges include both loader-owned ACPI table copies.
+    EFI_PHYSICAL_ADDRESS ranges[24];
+    UINTN sizes[24];
     UINTN rangeCount = 0;
 
     // 1. Low 1MB for legacy compatibility
@@ -1393,7 +1436,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Mapping ramdisk: %p size %Lu\n", (VOID*)(UINTN)ramdiskPhys, ramdiskSize);
     }
 
-    // 8. Loader-owned IVRS copy passed through BootInfo v3.
+    // 8. Loader-owned IVRS and DMAR copies passed through BootInfo v4.
     if ((v1BootInfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_IVRS_COPY_VALID) != 0u &&
         v1BootInfo->AcpiIvrsCopyBase != 0u &&
         v1BootInfo->AcpiIvrsCopyLength != 0u) {
@@ -1406,8 +1449,20 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
               (VOID*)(UINTN)v1BootInfo->AcpiIvrsCopyBase,
               v1BootInfo->AcpiIvrsCopyLength);
     }
+    if ((v1BootInfo->Flags & guideXOS::BOOTINFO_FLAG_ACPI_DMAR_COPY_VALID) != 0u &&
+        v1BootInfo->AcpiDmarCopyBase != 0u &&
+        v1BootInfo->AcpiDmarCopyLength != 0u && rangeCount < 24u) {
+        const UINTN dmarPages =
+            (v1BootInfo->AcpiDmarCopyLength + EFI_PAGE_SIZE - 1u) / EFI_PAGE_SIZE;
+        ranges[rangeCount] = v1BootInfo->AcpiDmarCopyBase;
+        sizes[rangeCount] = dmarPages * EFI_PAGE_SIZE;
+        rangeCount++;
+        Print(L"Mapping copied DMAR table: %p size %u\n",
+              (VOID*)(UINTN)v1BootInfo->AcpiDmarCopyBase,
+              v1BootInfo->AcpiDmarCopyLength);
+    }
 
-    // 9. ACPI RSDP region (diagnostic only; the kernel consumes the IVRS copy).
+    // 9. ACPI RSDP region (diagnostic only; the kernel consumes copied tables).
     if (rsdp != nullptr) {
         ranges[rangeCount] = (EFI_PHYSICAL_ADDRESS)(UINTN)rsdp & ~0xFFFull; // Page-align down
         sizes[rangeCount] = EFI_PAGE_SIZE * 4; // Map a few pages for RSDP + nearby tables
@@ -1488,7 +1543,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // 13b. HDA audio MMIO region (MC6, see discovery above): identity-map
     // the controller BAR0 so kernel HDA register/DMA programming cannot
     // fault on UEFI boot. Guarded against range-table overflow.
-    if (hdaMmioPhys != 0 && hdaMmioSize != 0 && rangeCount < 20) {
+    if (hdaMmioPhys != 0 && hdaMmioSize != 0 && rangeCount < 24) {
         EFI_PHYSICAL_ADDRESS hdaMmioAligned = hdaMmioPhys & ~0xFFFull;
         UINTN hdaMmioAlignedSize = ((hdaMmioPhys - hdaMmioAligned) + hdaMmioSize + 0xFFF) & ~0xFFFull;
 

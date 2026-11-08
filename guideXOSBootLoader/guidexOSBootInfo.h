@@ -48,6 +48,8 @@ namespace guideXOS
     static const uint32_t BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT = (1u << 4);
     static const uint32_t BOOTINFO_FLAG_ACPI_IVRS_COPY_VALID = (1u << 5);
     static const uint32_t BOOTINFO_FLAG_ACPI_IVRS_MULTIPLE = (1u << 6);
+    static const uint32_t BOOTINFO_FLAG_ACPI_DMAR_COPY_VALID = (1u << 7);
+    static const uint32_t BOOTINFO_FLAG_ACPI_DMAR_MULTIPLE = (1u << 8);
 
     struct FramebufferDescriptor
     {
@@ -119,6 +121,11 @@ namespace guideXOS
         uint64_t AcpiIvrsCopyBase;
         uint32_t AcpiIvrsCopyLength;
         uint32_t AcpiIvrsTableCount;
+        // A bounded DMAR copy retained in EfiLoaderData and identity-mapped
+        // by the UEFI handoff for kernel-side Intel VT-d inspection.
+        uint64_t AcpiDmarCopyBase;
+        uint32_t AcpiDmarCopyLength;
+        uint32_t AcpiDmarTableCount;
     };
 
     static inline bool guidexos_framebuffer_descriptor_identity_matches(
@@ -220,9 +227,9 @@ namespace guideXOS
 
 namespace guideXOS
 {
-    // Magic and version constants for BootInfo v3
+    // Magic and version constants for BootInfo v4
     static const uint32_t GUIDEXOS_BOOTINFO_MAGIC   = 0x49425847; // 'GXBI'
-    static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 3;
+    static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 4;
 
     // Early panic: implemented in a .cpp file, infinite loop and/or framebuffer error.
     [[noreturn]] void guidexos_early_panic(const BootInfo* bi);
@@ -243,7 +250,7 @@ namespace guideXOS
         return (sum == 0u);
     }
 
-    // Very early, heap-less validation of BootInfo v3
+    // Very early, heap-less validation of BootInfo v4
     static inline void guidexos_validate_bootinfo_or_panic(const BootInfo* bi)
     {
         if (!bi) {
@@ -281,6 +288,8 @@ namespace guideXOS
             (bi->Flags & BOOTINFO_FLAG_ACPI_IVRS_COPY_VALID) != 0u;
         const bool remapTablePresent =
             (bi->Flags & BOOTINFO_FLAG_ACPI_REMAP_TABLE_PRESENT) != 0u;
+        const bool hasDmarCopy =
+            (bi->Flags & BOOTINFO_FLAG_ACPI_DMAR_COPY_VALID) != 0u;
         if ((hasIvrsCopy && (bi->AcpiIvrsCopyBase == 0u ||
                              (bi->AcpiIvrsCopyBase & 0xFFFu) != 0u ||
                              bi->AcpiIvrsCopyLength < 48u ||
@@ -293,7 +302,20 @@ namespace guideXOS
                               bi->AcpiIvrsCopyLength != 0u)) ||
             (bi->AcpiIvrsTableCount > 0u && !remapTablePresent) ||
             (((bi->Flags & BOOTINFO_FLAG_ACPI_IVRS_MULTIPLE) != 0u) !=
-             (bi->AcpiIvrsTableCount > 1u))) {
+             (bi->AcpiIvrsTableCount > 1u)) ||
+            (hasDmarCopy && (bi->AcpiDmarCopyBase == 0u ||
+                             (bi->AcpiDmarCopyBase & 0xFFFu) != 0u ||
+                             bi->AcpiDmarCopyLength < 48u ||
+                             bi->AcpiDmarCopyLength > 1024u * 1024u ||
+                             bi->AcpiDmarTableCount != 1u ||
+                             !remapTablePresent ||
+                             (bi->Flags & BOOTINFO_FLAG_ACPI_REMAP_SCAN_VALID) == 0u ||
+                             bi->AcpiDmarCopyBase > UINT64_MAX - bi->AcpiDmarCopyLength)) ||
+            (!hasDmarCopy && (bi->AcpiDmarCopyBase != 0u ||
+                              bi->AcpiDmarCopyLength != 0u)) ||
+            (bi->AcpiDmarTableCount > 0u && !remapTablePresent) ||
+            (((bi->Flags & BOOTINFO_FLAG_ACPI_DMAR_MULTIPLE) != 0u) !=
+             (bi->AcpiDmarTableCount > 1u))) {
             guidexos_early_panic(bi);
         }
 

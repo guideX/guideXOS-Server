@@ -751,10 +751,10 @@ inline bool translate_kernel_dma_address(uint64_t virtualAddress,
     return true;
 }
 
-// INPUT3D-R5 uses bounded static backing for xHCI scratchpads. Controllers
-// may advertise up to 1023 entries, while this first implementation reserves
-// a small fixed pool and fails closed when the advertised request exceeds it.
-static const uint32_t XHCI_MAX_DMA_SCRATCHPAD_BUFFERS = 16u;
+// INPUT3D-R7 reserves a bounded static pool for the verified 34-buffer
+// physical target. The architectural field can encode 1023; larger requests
+// remain blocked until the kernel has a verified page allocator for DMA.
+static const uint32_t XHCI_MAX_DMA_SCRATCHPAD_BUFFERS = 34u;
 static const uint32_t XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE = 64u * 1024u;
 static const uint32_t XHCI_DMA_SCRATCHPAD_STORAGE_SIZE =
     (XHCI_MAX_DMA_SCRATCHPAD_BUFFERS + 1u) * XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE;
@@ -786,6 +786,37 @@ struct XhciScratchpadPlan {
     uint32_t storageBytes;
     XhciScratchpadPlanError error;
 };
+
+inline bool xhci_scratchpad_array_bytes(uint32_t count,
+                                       uint32_t capacity,
+                                       uint32_t* bytesOut)
+{
+    if (bytesOut == nullptr) return false;
+    *bytesOut = 0u;
+    if (count > capacity || count > UINT32_MAX / sizeof(uint64_t)) return false;
+    *bytesOut = count * static_cast<uint32_t>(sizeof(uint64_t));
+    return true;
+}
+
+// DCBAA[0] is published only when a fully validated, aligned scratchpad
+// array exists. A zero-buffer controller must leave this entry clear.
+inline bool xhci_scratchpad_dcbaa_entry(uint32_t count,
+                                        uint32_t capacity,
+                                        uint64_t arrayPhysical,
+                                        bool ac64,
+                                        uint64_t* entryOut)
+{
+    if (entryOut == nullptr) return false;
+    *entryOut = 0u;
+    if (count > capacity) return false;
+    if (count == 0u) return arrayPhysical == 0u;
+    if (arrayPhysical == 0u || (arrayPhysical & 0x3Fu) != 0u ||
+        (!ac64 && arrayPhysical > 0xFFFFFFFFULL)) {
+        return false;
+    }
+    *entryOut = arrayPhysical;
+    return true;
+}
 
 // PAGESIZE bit 0 describes 4 KiB; each following bit doubles the size.
 // Select the smallest advertised page that fits the statically reserved pool.

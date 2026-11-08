@@ -214,6 +214,33 @@ static void initialize_controller(ControllerSnapshot* controller)
     controller->contextSize = 0u;
     controller->supportedProtocolCount = 0u;
     controller->scratchpadBuffersRequired = 0u;
+    controller->hcsParams2 = 0u;
+    controller->scratchpadHigh = 0u;
+    controller->scratchpadLow = 0u;
+    controller->scratchpadCapacity = 0u;
+    controller->scratchpadAllocationStatus = Status::NotAttempted;
+    controller->scratchpadAllocationReason = nullptr;
+    controller->vtdRouteStatus = intel_dmar::RouteStatus::Unknown;
+    controller->vtdUnitIndex = -1;
+    controller->vtdRegisterBase = 0u;
+    controller->vtdRmrrRequired = false;
+    controller->vtdRegisterStatus = intel_dmar::RegisterStatus::NotAttempted;
+    controller->vtdTranslationState = intel_dmar::TranslationState::Unknown;
+    controller->vtdRootTableState = intel_dmar::RootTableState::Unknown;
+    controller->vtdVersion = 0u;
+    controller->vtdMaximumGuestAddressWidth = 0u;
+    controller->vtdSupportedAdjustedGuestAddressWidths = 0u;
+    controller->vtdGlobalCommand = 0u;
+    controller->vtdGlobalStatus = 0u;
+    controller->vtdFaultStatus = 0u;
+    controller->vtdCapability = 0u;
+    controller->vtdExtendedCapability = 0u;
+    controller->vtdRootTableAddress = 0u;
+    controller->vtdCapabilityValid = false;
+    controller->vtdExtendedCapabilityValid = false;
+    controller->vtdCommandStatusValid = false;
+    controller->vtdRootTableValid = false;
+    controller->vtdFaultStatusValid = false;
     controller->ac64 = false;
     controller->iommuStatus = IommuStatus::Unknown;
     controller->rootPortCount = 0u;
@@ -261,6 +288,16 @@ void initialize()
     s_snapshot.ivhdUnitCount = 0u;
     s_snapshot.ivmdRangeCount = 0u;
     s_snapshot.ivrsUnsupportedCount = 0u;
+    s_snapshot.platform = Platform::Unknown;
+    s_snapshot.dmarStatus = intel_dmar::ParseStatus::NotPresent;
+    s_snapshot.dmarTableCount = 0u;
+    s_snapshot.drhdUnitCount = 0u;
+    s_snapshot.rmrrCount = 0u;
+    s_snapshot.atsrCount = 0u;
+    s_snapshot.rhsaCount = 0u;
+    s_snapshot.dmarUnsupportedCount = 0u;
+    s_snapshot.dmarScanValid = false;
+    s_snapshot.dmarTablePresent = false;
     s_snapshot.acpiRemapScanValid = false;
     s_snapshot.acpiRemappingTablePresent = false;
     s_snapshot.dmaMappingEstablished = false;
@@ -527,6 +564,101 @@ void record_ivrs_discovery(amd_ivrs::ParseStatus status, bool scanValid,
     unlock_snapshot();
 }
 
+void record_platform(Platform platform)
+{
+    lock_snapshot();
+    s_snapshot.platform = platform;
+    publish_snapshot_change_locked();
+    unlock_snapshot();
+}
+
+void record_dmar_discovery(intel_dmar::ParseStatus status, bool scanValid,
+                           bool remappingTablePresent, uint32_t dmarTableCount,
+                           uint32_t drhdUnits, uint32_t rmrrRanges,
+                           uint32_t atsrStructures, uint32_t rhsaStructures,
+                           uint32_t unsupportedCount)
+{
+    lock_snapshot();
+    s_snapshot.dmarStatus = status;
+    s_snapshot.dmarScanValid = scanValid;
+    s_snapshot.dmarTablePresent = remappingTablePresent;
+    s_snapshot.dmarTableCount = dmarTableCount;
+    s_snapshot.drhdUnitCount = drhdUnits;
+    s_snapshot.rmrrCount = rmrrRanges;
+    s_snapshot.atsrCount = atsrStructures;
+    s_snapshot.rhsaCount = rhsaStructures;
+    s_snapshot.dmarUnsupportedCount = unsupportedCount;
+    publish_snapshot_change_locked();
+    unlock_snapshot();
+}
+
+void record_vtd_route(int32_t controllerIndex, uint16_t segment,
+                      uint8_t bus, uint8_t device, uint8_t function,
+                      intel_dmar::RouteStatus routeStatus, int32_t unitIndex,
+                      uint64_t registerBase, bool rmrrRequired)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->pciSegment = segment;
+        controller->vtdRouteStatus = routeStatus;
+        controller->vtdUnitIndex = unitIndex;
+        controller->vtdRegisterBase = registerBase;
+        controller->vtdRmrrRequired = rmrrRequired;
+        controller->requesterId = static_cast<uint16_t>(
+            (static_cast<uint16_t>(bus) << 8u) |
+            (static_cast<uint16_t>(device) << 3u) | (function & 7u));
+        if (controllerIndex == s_snapshot.selectedControllerIndex) {
+            s_snapshot.platform = Platform::Intel;
+        }
+        publish_snapshot_change_locked();
+    }
+    unlock_snapshot();
+}
+
+void record_vtd_registers(int32_t controllerIndex,
+                          const intel_dmar::RegisterSnapshot& registers)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->vtdRegisterStatus = registers.status;
+        controller->vtdTranslationState = registers.translation;
+        controller->vtdRootTableState = registers.rootTable;
+        controller->vtdVersion = registers.version;
+        controller->vtdMaximumGuestAddressWidth = registers.maximumGuestAddressWidth;
+        controller->vtdSupportedAdjustedGuestAddressWidths =
+            registers.supportedAdjustedGuestAddressWidths;
+        controller->vtdGlobalCommand = registers.globalCommand;
+        controller->vtdGlobalStatus = registers.globalStatus;
+        controller->vtdFaultStatus = registers.faultStatus;
+        controller->vtdCapability = registers.capability;
+        controller->vtdExtendedCapability = registers.extendedCapability;
+        controller->vtdRootTableAddress = registers.rootTableAddress;
+        controller->vtdCapabilityValid = registers.capabilityValid;
+        controller->vtdExtendedCapabilityValid = registers.extendedCapabilityValid;
+        controller->vtdCommandStatusValid = registers.commandStatusValid;
+        controller->vtdRootTableValid = registers.rootTableValid;
+        controller->vtdFaultStatusValid = registers.faultStatusValid;
+        publish_snapshot_change_locked();
+    }
+    unlock_snapshot();
+}
+
+void record_scratchpad_allocation(int32_t controllerIndex, uint32_t capacity,
+                                  Status status, const char* reason)
+{
+    lock_snapshot();
+    ControllerSnapshot* controller = controller_for_index(controllerIndex);
+    if (controller != nullptr) {
+        controller->scratchpadCapacity = capacity;
+        controller->scratchpadAllocationStatus = status;
+        controller->scratchpadAllocationReason = reason;
+        publish_snapshot_change_locked();
+    }
+    unlock_snapshot();
+}
+
 void record_iommu_route(int32_t controllerIndex, uint16_t segment,
                         uint16_t requesterId, uint16_t effectiveRequesterId,
                         amd_ivrs::RouteStatus routeStatus, int32_t unitIndex,
@@ -681,7 +813,8 @@ void record_capabilities(int32_t controllerIndex, uint8_t capLength,
                          uint8_t maxPorts, uint8_t contextSize, bool ac64,
                          uint32_t supportedProtocolCount,
                          uint32_t scratchpadBuffersRequired,
-                         IommuStatus iommuStatus)
+                         IommuStatus iommuStatus, uint32_t hcsParams2,
+                         uint8_t scratchpadHigh, uint8_t scratchpadLow)
 {
     lock_snapshot();
     ControllerSnapshot* controller = controller_for_index(controllerIndex);
@@ -696,6 +829,9 @@ void record_capabilities(int32_t controllerIndex, uint8_t capLength,
             controller->supportedProtocolCount = supportedProtocolCount;
         }
         controller->scratchpadBuffersRequired = scratchpadBuffersRequired;
+        controller->hcsParams2 = hcsParams2;
+        controller->scratchpadHigh = scratchpadHigh;
+        controller->scratchpadLow = scratchpadLow;
         controller->iommuStatus = iommuStatus;
         publish_snapshot_change_locked();
     }
@@ -1044,11 +1180,82 @@ const char* iommu_translation_state_name(amd_ivrs::TranslationState state)
     }
 }
 
+const char* platform_name(Platform platform)
+{
+    switch (platform) {
+        case Platform::Intel: return "INTEL";
+        case Platform::Amd: return "AMD";
+        case Platform::Other: return "OTHER";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* dmar_status_name(intel_dmar::ParseStatus status)
+{
+    switch (status) {
+        case intel_dmar::ParseStatus::NotPresent: return "NOT PRESENT";
+        case intel_dmar::ParseStatus::Valid: return "VALID";
+        case intel_dmar::ParseStatus::ValidWithUnsupported: return "UNSUPPORTED";
+        case intel_dmar::ParseStatus::Malformed: return "MALFORMED";
+        case intel_dmar::ParseStatus::CapacityExceeded: return "CAPACITY EXCEEDED";
+        case intel_dmar::ParseStatus::UnsupportedRevision: return "UNSUPPORTED REVISION";
+        case intel_dmar::ParseStatus::AmbiguousTables: return "AMBIGUOUS TABLES";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* dmar_route_status_name(intel_dmar::RouteStatus status)
+{
+    switch (status) {
+        case intel_dmar::RouteStatus::Resolved: return "RESOLVED";
+        case intel_dmar::RouteStatus::Ambiguous: return "AMBIGUOUS";
+        case intel_dmar::RouteStatus::NotCovered: return "NOT COVERED";
+        case intel_dmar::RouteStatus::Unsupported: return "UNSUPPORTED";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* vtd_register_status_name(intel_dmar::RegisterStatus status)
+{
+    switch (status) {
+        case intel_dmar::RegisterStatus::NotAttempted: return "NOT ATTEMPTED";
+        case intel_dmar::RegisterStatus::Readable: return "READABLE";
+        case intel_dmar::RegisterStatus::InvalidResource: return "INVALID RESOURCE";
+        case intel_dmar::RegisterStatus::MappingUnavailable: return "MAPPING UNAVAILABLE";
+        case intel_dmar::RegisterStatus::UnsupportedVersion: return "UNSUPPORTED VERSION";
+        case intel_dmar::RegisterStatus::UnsupportedCapabilities: return "UNSUPPORTED CAPABILITIES";
+        case intel_dmar::RegisterStatus::ReadUnavailable: return "READ UNAVAILABLE";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* vtd_translation_state_name(intel_dmar::TranslationState state)
+{
+    switch (state) {
+        case intel_dmar::TranslationState::EnabledObserved: return "ENABLED OBSERVED";
+        case intel_dmar::TranslationState::DisabledObserved: return "DISABLED OBSERVED";
+        default: return "UNKNOWN";
+    }
+}
+
+const char* vtd_root_table_state_name(intel_dmar::RootTableState state)
+{
+    switch (state) {
+        case intel_dmar::RootTableState::NotConfigured: return "NOT CONFIGURED";
+        case intel_dmar::RootTableState::Configured: return "CONFIGURED";
+        case intel_dmar::RootTableState::Invalid: return "INVALID";
+        default: return "UNKNOWN";
+    }
+}
+
 uint32_t format_ivrs_summary(const Snapshot& snapshot, char* out,
                              uint32_t capacity)
 {
     if (out == nullptr || capacity == 0u) return 0u;
     out[0] = '\0';
+    if (snapshot.platform == Platform::Intel) {
+        return append_text(out, capacity, 0u, "ACPI IVRS N/A ON INTEL");
+    }
     uint32_t position = append_text(out, capacity, 0u, "ACPI IVRS ");
     position = append_text(out, capacity, position, ivrs_status_name(snapshot.ivrsStatus));
     position = append_text(out, capacity, position, " tables=");
@@ -1061,6 +1268,34 @@ uint32_t format_ivrs_summary(const Snapshot& snapshot, char* out,
     position = append_text(out, capacity, position,
         !snapshot.acpiRemapScanValid ? "UNKNOWN" :
         (snapshot.acpiRemappingTablePresent ? "YES" : "NO"));
+    return position;
+}
+
+uint32_t format_dmar_summary(const Snapshot& snapshot, char* out,
+                             uint32_t capacity)
+{
+    if (out == nullptr || capacity == 0u) return 0u;
+    out[0] = '\0';
+    if (snapshot.platform == Platform::Amd) {
+        return append_text(out, capacity, 0u, "ACPI DMAR N/A ON AMD");
+    }
+    uint32_t position = append_text(out, capacity, 0u, "ACPI DMAR ");
+    if (!snapshot.dmarScanValid) {
+        position = append_text(out, capacity, position, "SCAN UNKNOWN");
+    } else {
+        position = append_text(out, capacity, position,
+                               dmar_status_name(snapshot.dmarStatus));
+    }
+    position = append_text(out, capacity, position, " tables=");
+    position = append_decimal(out, capacity, position, snapshot.dmarTableCount);
+    position = append_text(out, capacity, position, " DRHD=");
+    position = append_decimal(out, capacity, position, snapshot.drhdUnitCount);
+    position = append_text(out, capacity, position, " RMRR=");
+    position = append_decimal(out, capacity, position, snapshot.rmrrCount);
+    position = append_text(out, capacity, position, " ATSR=");
+    position = append_decimal(out, capacity, position, snapshot.atsrCount);
+    position = append_text(out, capacity, position, " RHSA=");
+    position = append_decimal(out, capacity, position, snapshot.rhsaCount);
     return position;
 }
 
@@ -1099,6 +1334,54 @@ uint32_t format_controller_iommu_route(const ControllerSnapshot& controller,
     position = append_text(out, capacity, position, " ");
     return append_text(out, capacity, position,
                        iommu_route_status_name(controller.iommuRouteStatus));
+}
+
+uint32_t format_controller_vtd_route(const ControllerSnapshot& controller,
+                                     char* out, uint32_t capacity)
+{
+    if (out == nullptr || capacity == 0u) return 0u;
+    out[0] = '\0';
+    uint32_t position = append_text(out, capacity, 0u, "xHCI ");
+    position = append_bdf(out, capacity, position, controller);
+    position = append_text(out, capacity, position, " VT-d=");
+    position = append_text(out, capacity, position,
+                           dmar_route_status_name(controller.vtdRouteStatus));
+    if (controller.vtdUnitIndex >= 0) {
+        position = append_text(out, capacity, position, " unit=");
+        position = append_decimal(out, capacity, position,
+                                  static_cast<uint32_t>(controller.vtdUnitIndex));
+        position = append_text(out, capacity, position,
+                               controller.vtdRmrrRequired ? " RMRR=yes" : " RMRR=no");
+    }
+    return position;
+}
+
+uint32_t format_controller_vtd_registers(const ControllerSnapshot& controller,
+                                         char* out, uint32_t capacity)
+{
+    if (out == nullptr || capacity == 0u) return 0u;
+    out[0] = '\0';
+    uint32_t position = append_text(out, capacity, 0u, "VT-d regs=");
+    position = append_text(out, capacity, position,
+                           vtd_register_status_name(controller.vtdRegisterStatus));
+    if (controller.vtdRegisterStatus == intel_dmar::RegisterStatus::Readable ||
+        controller.vtdRegisterStatus == intel_dmar::RegisterStatus::UnsupportedCapabilities) {
+        position = append_text(out, capacity, position, " v=");
+        position = append_hex(out, capacity, position, controller.vtdVersion, 2u);
+        position = append_text(out, capacity, position, " TES=");
+        position = append_text(out, capacity, position,
+            vtd_translation_state_name(controller.vtdTranslationState));
+        position = append_text(out, capacity, position, " root=");
+        position = append_text(out, capacity, position,
+            vtd_root_table_state_name(controller.vtdRootTableState));
+        position = append_text(out, capacity, position, " MGAW=");
+        position = append_decimal(out, capacity, position,
+                                  controller.vtdMaximumGuestAddressWidth);
+        position = append_text(out, capacity, position, " SAGAW=0x");
+        position = append_hex(out, capacity, position,
+            controller.vtdSupportedAdjustedGuestAddressWidths, 2u);
+    }
+    return position;
 }
 
 uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capacity)

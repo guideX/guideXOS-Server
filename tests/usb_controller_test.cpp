@@ -193,6 +193,43 @@ void test_capabilities_boundaries()
         const XhciCapabilities c = parse_xhci_capabilities(cap, 8u);
         expect(c.valid && c.maxScratchpadBufs == 67u, "caps scratchpad hi/lo");
     }
+    {
+        uint32_t cap[XHCI_CAP_DWORD_COUNT];
+        const uint32_t raw = (1u << 21u) | (2u << 27u); // physical report: 34
+        build_cap_block(cap, 0x20u, 0x0100u, 64u, 8u, 16u, raw, 0u,
+                        0x2000u, 0x1000u);
+        const XhciCapabilities c = parse_xhci_capabilities(cap, 8u);
+        expect(c.valid && c.hcsParams2 == raw && c.scratchpadHigh == 1u &&
+               c.scratchpadLow == 2u && c.maxScratchpadBufs == 34u,
+               "decode raw HCSPARAMS2 count 34 without confusing the fields");
+    }
+    {
+        uint32_t cap[XHCI_CAP_DWORD_COUNT];
+        const uint32_t raw = (31u << 21u) | (31u << 27u);
+        build_cap_block(cap, 0x20u, 0x0100u, 64u, 8u, 16u, raw, 0u,
+                        0x2000u, 0x1000u);
+        const XhciCapabilities c = parse_xhci_capabilities(cap, 8u);
+        expect(c.hcsParams2 == raw && c.maxScratchpadBufs == 1023u,
+               "HCSPARAMS2 scratchpad fields cover their architectural maximum");
+    }
+    {
+        uint32_t cap[XHCI_CAP_DWORD_COUNT];
+        const uint32_t raw = 7u << 27u; // hi=0, lo=7
+        build_cap_block(cap, 0x20u, 0x0100u, 64u, 8u, 16u, raw, 0u,
+                        0x2000u, 0x1000u);
+        const XhciCapabilities c = parse_xhci_capabilities(cap, 8u);
+        expect(c.valid && c.scratchpadHigh == 0u && c.scratchpadLow == 7u &&
+               c.maxScratchpadBufs == 7u,
+               "low-only HCSPARAMS2 value is decoded");
+    }
+    {
+        uint32_t cap[XHCI_CAP_DWORD_COUNT];
+        build_cap_block(cap, 0x20u, 0x0100u, 64u, 8u, 16u, 0u, 0u,
+                        0x2000u, 0x1000u);
+        const XhciCapabilities c = parse_xhci_capabilities(cap, 8u);
+        expect(c.valid && c.hcsParams2 == 0u && c.maxScratchpadBufs == 0u,
+               "zero scratchpad requirement remains valid");
+    }
 }
 
 void test_protocols()

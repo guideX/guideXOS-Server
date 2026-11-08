@@ -9490,21 +9490,287 @@ static uint64_t draw_input3d_diagnostics_panel()
 
     char line[128];
     line[0] = '\0';
+    if (layout.compact) {
+#if defined(GXOS_INPUT3D_SKIP_PCI_AUDIO)
+        uint32_t compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+            "Build: INPUT3D-R7-AUDIO-BYPASS / ");
+#else
+        uint32_t compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+            "Build: INPUT3D-R7 / ");
+#endif
+        input3d_panel_append(line, sizeof(line), compactPosition,
+                             GXOS_BUILD_SOURCE_REVISION);
+        input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
+
+        line[0] = '\0';
+        compactPosition = input3d_panel_append(line, sizeof(line), 0u, "Platform: ");
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+            modern_input_diagnostics::platform_name(snapshot.platform));
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                               " Boot: ");
+        input3d_panel_append(line, sizeof(line), compactPosition,
+            modern_input_diagnostics::boot_stage_name(snapshot.bootStage));
+        input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+
+        line[0] = '\0';
+        compactPosition = input3d_panel_append(line, sizeof(line), 0u, "PCI: ");
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+            modern_input_diagnostics::status_name(snapshot.pciEnumeration));
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                               " USB=");
+        compactPosition = input3d_panel_decimal(line, sizeof(line), compactPosition,
+                                                snapshot.usbControllerCount);
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                               " xHCI=");
+        input3d_panel_decimal(line, sizeof(line), compactPosition,
+                              snapshot.xhciControllerCount);
+        input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+
+        const modern_input_diagnostics::ControllerSnapshot* compactSelected = nullptr;
+        if (snapshot.selectedControllerIndex >= 0 &&
+            static_cast<uint32_t>(snapshot.selectedControllerIndex) <
+                snapshot.storedControllerCount) {
+            compactSelected = &snapshot.controllers[
+                static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+        }
+        line[0] = '\0';
+        compactPosition = input3d_panel_append(line, sizeof(line), 0u, "Selected: ");
+        if (compactSelected != nullptr) {
+            compactPosition = input3d_panel_hex(line, sizeof(line), compactPosition,
+                                                 compactSelected->bus, 2u);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   ":");
+            compactPosition = input3d_panel_hex(line, sizeof(line), compactPosition,
+                                                 compactSelected->device, 2u);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   ".");
+            compactPosition = input3d_panel_decimal(line, sizeof(line), compactPosition,
+                compactSelected->function);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   " ");
+            compactPosition = input3d_panel_hex(line, sizeof(line), compactPosition,
+                compactSelected->vendorId, 4u);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   ":");
+            input3d_panel_hex(line, sizeof(line), compactPosition,
+                              compactSelected->deviceId, 4u);
+        } else {
+            input3d_panel_append(line, sizeof(line), compactPosition, "NONE");
+        }
+        input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+
+        if (compactSelected != nullptr) {
+            line[0] = '\0';
+            compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+                                                   "HCSPARAMS2=0x");
+            compactPosition = input3d_panel_hex(line, sizeof(line), compactPosition,
+                compactSelected->hcsParams2, 8u);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   " Hi/Lo=");
+            compactPosition = input3d_panel_decimal(line, sizeof(line), compactPosition,
+                compactSelected->scratchpadHigh);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   "/");
+            compactPosition = input3d_panel_decimal(line, sizeof(line), compactPosition,
+                compactSelected->scratchpadLow);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   " req/cap=");
+            compactPosition = input3d_panel_decimal(line, sizeof(line), compactPosition,
+                compactSelected->scratchpadBuffersRequired);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   "/");
+            input3d_panel_decimal(line, sizeof(line), compactPosition,
+                                  compactSelected->scratchpadCapacity);
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+            line[0] = '\0';
+            compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+                                                   "Scratchpad allocation: ");
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                modern_input_diagnostics::status_name(
+                    compactSelected->scratchpadAllocationStatus));
+            if (compactSelected->scratchpadAllocationReason != nullptr) {
+                compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                       " ");
+                input3d_panel_append(line, sizeof(line), compactPosition,
+                    compactSelected->scratchpadAllocationReason);
+            }
+            input3d_panel_draw_line(&writer, line,
+                compactSelected->scratchpadAllocationStatus ==
+                    modern_input_diagnostics::Status::Pass
+                        ? rgb(170, 225, 186) : rgb(255, 195, 145));
+        }
+
+        line[0] = '\0';
+        modern_input_diagnostics::format_ivrs_summary(snapshot, line, sizeof(line));
+        input3d_panel_draw_line(&writer, line, rgb(190, 215, 242));
+        line[0] = '\0';
+        modern_input_diagnostics::format_dmar_summary(snapshot, line, sizeof(line));
+        input3d_panel_draw_line(&writer, line, rgb(190, 215, 242));
+
+        if (compactSelected != nullptr && compactSelected->vendorId == 0x8086u) {
+            line[0] = '\0';
+            modern_input_diagnostics::format_controller_vtd_route(
+                *compactSelected, line, sizeof(line));
+            input3d_panel_draw_line(&writer, line, rgb(185, 210, 238));
+            line[0] = '\0';
+            modern_input_diagnostics::format_controller_vtd_registers(
+                *compactSelected, line, sizeof(line));
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+        } else if (compactSelected != nullptr) {
+            line[0] = '\0';
+            modern_input_diagnostics::format_controller_iommu_route(
+                *compactSelected, line, sizeof(line));
+            input3d_panel_draw_line(&writer, line, rgb(185, 210, 238));
+        }
+
+        line[0] = '\0';
+        compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+                                               "DMA eligibility: ");
+        input3d_panel_append(line, sizeof(line), compactPosition,
+            snapshot.dmaMappingEstablished ? "VERIFIED" : "BLOCKED");
+        input3d_panel_draw_line(&writer, line,
+            snapshot.dmaMappingEstablished ? rgb(170, 225, 186) : rgb(255, 195, 145));
+        line[0] = '\0';
+        compactPosition = input3d_panel_append(line, sizeof(line), 0u, "Reason: ");
+        input3d_panel_append(line, sizeof(line), compactPosition,
+            snapshot.dmaDecisionReason != nullptr
+                ? snapshot.dmaDecisionReason : "IOMMU_STATE_UNKNOWN");
+        input3d_panel_draw_line(&writer, line, rgb(255, 195, 145));
+
+        char compactFailure[112];
+        modern_input_diagnostics::format_first_failure(
+            snapshot, compactFailure, sizeof(compactFailure));
+        line[0] = '\0';
+        compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+                                               "First failure: ");
+        input3d_panel_append(line, sizeof(line), compactPosition, compactFailure);
+        input3d_panel_draw_line(&writer, line,
+            snapshot.firstFailure.present ? rgb(255, 135, 125) : rgb(196, 213, 234));
+
+        if (compactSelected != nullptr) {
+            line[0] = '\0';
+            compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+                                                   "Halt/Reset/Running: ");
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                modern_input_diagnostics::status_name(compactSelected->stages[
+                    static_cast<uint32_t>(modern_input_diagnostics::Stage::ControllerHalt)].status));
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition, "/");
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                modern_input_diagnostics::status_name(compactSelected->stages[
+                    static_cast<uint32_t>(modern_input_diagnostics::Stage::ControllerReset)].status));
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition, "/");
+            input3d_panel_append(line, sizeof(line), compactPosition,
+                modern_input_diagnostics::status_name(compactSelected->stages[
+                    static_cast<uint32_t>(modern_input_diagnostics::Stage::ControllerRunning)].status));
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+            line[0] = '\0';
+            compactPosition = input3d_panel_append(line, sizeof(line), 0u,
+                                                   "BAR/MMIO: ");
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                modern_input_diagnostics::status_name(compactSelected->stages[
+                    static_cast<uint32_t>(modern_input_diagnostics::Stage::BarMmio)].status));
+            if (compactSelected->mmioBase != 0u) {
+                compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                       " base=0x");
+                compactPosition = input3d_panel_hex(line, sizeof(line), compactPosition,
+                    static_cast<uint32_t>(compactSelected->mmioBase >> 32u), 8u);
+                input3d_panel_hex(line, sizeof(line), compactPosition,
+                    static_cast<uint32_t>(compactSelected->mmioBase), 8u);
+            }
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+            line[0] = '\0';
+            compactPosition = input3d_panel_append(line, sizeof(line), 0u, "Ports: root=");
+            compactPosition = input3d_panel_decimal(line, sizeof(line), compactPosition,
+                compactSelected->rootPortCount);
+            compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                                   " connected=");
+            input3d_panel_decimal(line, sizeof(line), compactPosition,
+                compactSelected->connectedPortCount);
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+        }
+
+        line[0] = '\0';
+        compactPosition = input3d_panel_append(line, sizeof(line), 0u, "Boot sequence: ");
+        compactPosition = input3d_panel_decimal64(line, sizeof(line), compactPosition,
+                                                   snapshot.bootSequence);
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                               " Snapshot: ");
+        compactPosition = input3d_panel_decimal64(line, sizeof(line), compactPosition,
+                                                   snapshot.snapshotSequence);
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                               " displayed: ");
+        input3d_panel_decimal64(line, sizeof(line), compactPosition,
+                                snapshot.displayedSequence);
+        input3d_panel_draw_line(&writer, line, rgb(196, 213, 234));
+        line[0] = '\0';
+        compactPosition = input3d_panel_append(line, sizeof(line), 0u, "Latest: ");
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+            modern_input_diagnostics::stage_name(snapshot.latestStage));
+        compactPosition = input3d_panel_append(line, sizeof(line), compactPosition,
+                                               " ");
+        input3d_panel_append(line, sizeof(line), compactPosition,
+            modern_input_diagnostics::status_name(snapshot.latestStatus.status));
+        input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
+        return snapshot.snapshotSequence;
+    }
+
 #if defined(GXOS_INPUT3D_SKIP_PCI_AUDIO)
     uint32_t position = input3d_panel_append(line, sizeof(line), 0u,
-        "Build: INPUT3D-R6-AUDIO-BYPASS / ");
+        "Build: INPUT3D-R7-AUDIO-BYPASS / ");
 #else
     uint32_t position = input3d_panel_append(line, sizeof(line), 0u,
-        "Build: INPUT3D-R6 / ");
+        "Build: INPUT3D-R7 / ");
 #endif
     input3d_panel_append(line, sizeof(line), position, GXOS_BUILD_SOURCE_REVISION);
     input3d_panel_draw_line(&writer, line, rgb(157, 190, 229));
 
     line[0] = '\0';
-    position = input3d_panel_append(line, sizeof(line), 0u, "Boot: ");
+    position = input3d_panel_append(line, sizeof(line), 0u, "Platform: ");
+    position = input3d_panel_append(line, sizeof(line), position,
+        modern_input_diagnostics::platform_name(snapshot.platform));
+    position = input3d_panel_append(line, sizeof(line), position, " Boot: ");
     input3d_panel_append(line, sizeof(line), position,
         modern_input_diagnostics::boot_stage_name(snapshot.bootStage));
     input3d_panel_draw_line(&writer, line, rgb(220, 230, 245));
+
+    if (snapshot.selectedControllerIndex >= 0 &&
+        static_cast<uint32_t>(snapshot.selectedControllerIndex) < snapshot.storedControllerCount) {
+        const modern_input_diagnostics::ControllerSnapshot& selected =
+            snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "HCSPARAMS2=0x");
+        position = input3d_panel_hex(line, sizeof(line), position,
+                                     selected.hcsParams2, 8u);
+        position = input3d_panel_append(line, sizeof(line), position, " hi/lo=");
+        position = input3d_panel_decimal(line, sizeof(line), position,
+                                         selected.scratchpadHigh);
+        position = input3d_panel_append(line, sizeof(line), position, "/");
+        position = input3d_panel_decimal(line, sizeof(line), position,
+                                         selected.scratchpadLow);
+        position = input3d_panel_append(line, sizeof(line), position, " req/cap=");
+        position = input3d_panel_decimal(line, sizeof(line), position,
+                                         selected.scratchpadBuffersRequired);
+        position = input3d_panel_append(line, sizeof(line), position, "/");
+        position = input3d_panel_decimal(line, sizeof(line), position,
+                                         selected.scratchpadCapacity);
+        input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+
+        line[0] = '\0';
+        position = input3d_panel_append(line, sizeof(line), 0u, "Scratchpad allocation: ");
+        position = input3d_panel_append(line, sizeof(line), position,
+            modern_input_diagnostics::status_name(selected.scratchpadAllocationStatus));
+        if (selected.scratchpadAllocationReason != nullptr) {
+            position = input3d_panel_append(line, sizeof(line), position, " ");
+            input3d_panel_append(line, sizeof(line), position,
+                                 selected.scratchpadAllocationReason);
+        }
+        input3d_panel_draw_line(&writer, line,
+            selected.scratchpadAllocationStatus == modern_input_diagnostics::Status::Pass
+                ? rgb(170, 225, 186) : rgb(255, 195, 145));
+    }
 
     line[0] = '\0';
     position = input3d_panel_append(line, sizeof(line), 0u, "Boot sequence: ");
@@ -9517,7 +9783,7 @@ static uint64_t draw_input3d_diagnostics_panel()
                                        snapshot.snapshotSequence);
     position = input3d_panel_append(line, sizeof(line), position, " displayed: ");
     input3d_panel_decimal64(line, sizeof(line), position,
-                            snapshot.snapshotSequence);
+                            snapshot.displayedSequence);
     input3d_panel_draw_line(&writer, line, rgb(196, 213, 234));
 
     input3d_panel_draw_line(&writer, "BOOT STARTUP FRONTIER",
@@ -9629,13 +9895,22 @@ static uint64_t draw_input3d_diagnostics_panel()
     line[0] = '\0';
     modern_input_diagnostics::format_ivrs_summary(snapshot, line, sizeof(line));
     input3d_panel_draw_line(&writer, line, rgb(190, 215, 242));
+    line[0] = '\0';
+    modern_input_diagnostics::format_dmar_summary(snapshot, line, sizeof(line));
+    input3d_panel_draw_line(&writer, line, rgb(190, 215, 242));
     if (layout.compact) {
         if (snapshot.selectedControllerIndex >= 0 &&
             static_cast<uint32_t>(snapshot.selectedControllerIndex) < snapshot.storedControllerCount) {
             line[0] = '\0';
-            modern_input_diagnostics::format_controller_iommu_route(
-                snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)],
-                line, sizeof(line));
+            const modern_input_diagnostics::ControllerSnapshot& selected =
+                snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+            if (selected.vendorId == 0x8086u) {
+                modern_input_diagnostics::format_controller_vtd_route(
+                    selected, line, sizeof(line));
+            } else {
+                modern_input_diagnostics::format_controller_iommu_route(
+                    selected, line, sizeof(line));
+            }
             input3d_panel_draw_line(&writer, line, rgb(185, 210, 238));
         }
     } else {
@@ -9647,8 +9922,13 @@ static uint64_t draw_input3d_diagnostics_panel()
                 continue;
             }
             line[0] = '\0';
-            modern_input_diagnostics::format_controller_iommu_route(
-                controller, line, sizeof(line));
+            if (controller.vendorId == 0x8086u) {
+                modern_input_diagnostics::format_controller_vtd_route(
+                    controller, line, sizeof(line));
+            } else {
+                modern_input_diagnostics::format_controller_iommu_route(
+                    controller, line, sizeof(line));
+            }
             input3d_panel_draw_line(&writer, line, rgb(185, 210, 238));
         }
     }
@@ -9656,6 +9936,12 @@ static uint64_t draw_input3d_diagnostics_panel()
         static_cast<uint32_t>(snapshot.selectedControllerIndex) < snapshot.storedControllerCount) {
         const modern_input_diagnostics::ControllerSnapshot& selected =
             snapshot.controllers[static_cast<uint32_t>(snapshot.selectedControllerIndex)];
+        if (selected.vendorId == 0x8086u) {
+            line[0] = '\0';
+            modern_input_diagnostics::format_controller_vtd_registers(
+                selected, line, sizeof(line));
+            input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+        } else {
         line[0] = '\0';
         position = input3d_panel_append(line, sizeof(line), 0u, "Selected IOMMU: ");
         if (selected.iommuUnitIndex >= 0) {
@@ -9691,9 +9977,10 @@ static uint64_t draw_input3d_diagnostics_panel()
             modern_input_diagnostics::iommu_translation_state_name(
                 selected.iommuTranslationState));
         input3d_panel_draw_line(&writer, line, rgb(205, 218, 238));
+        }
     }
     line[0] = '\0';
-    position = input3d_panel_append(line, sizeof(line), 0u, "DMA safety: ");
+    position = input3d_panel_append(line, sizeof(line), 0u, "DMA eligibility: ");
     position = input3d_panel_append(line, sizeof(line), position,
         snapshot.dmaMappingEstablished ? "VERIFIED" : "BLOCKED");
     position = input3d_panel_append(line, sizeof(line), position, " mapping=");

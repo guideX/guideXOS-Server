@@ -822,6 +822,12 @@ void test_scratchpad_dma_plan()
                                     XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
            plan.count == 4u,
            "larger valid scratchpad counts use controller-advertised count");
+    expect(make_xhci_scratchpad_plan(34u, 1u,
+                                    XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                    XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                    XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.count == 34u && plan.storageBytes == 34u * 4096u,
+           "34-buffer physical scratchpad report fits the bounded DMA pool");
     expect(make_xhci_scratchpad_plan(2u, 1u << 2,
                                     XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
                                     XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
@@ -835,6 +841,12 @@ void test_scratchpad_dma_plan()
                XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
            plan.error == XhciScratchpadPlanError::CountExceedsCapacity,
            "scratchpad count overflow is rejected");
+    expect(!make_xhci_scratchpad_plan(1023u, 1u,
+                                     XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
+                                     XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
+                                     XHCI_DMA_SCRATCHPAD_STORAGE_SIZE, &plan) &&
+           plan.error == XhciScratchpadPlanError::CountExceedsCapacity,
+           "architectural count beyond verified static capacity remains blocked");
     expect(!make_xhci_scratchpad_plan(1u, 0u,
                                      XHCI_MAX_DMA_SCRATCHPAD_BUFFERS,
                                      XHCI_MAX_DMA_SCRATCHPAD_PAGE_SIZE,
@@ -916,6 +928,33 @@ void test_scratchpad_array_validation()
     expect(!build_xhci_scratchpad_array(1u, 3000u, addresses, 4u, true,
                                        array, 4u),
            "invalid scratchpad page geometry is rejected");
+
+    uint32_t arrayBytes = 0u;
+    expect(xhci_scratchpad_array_bytes(34u, 34u, &arrayBytes) &&
+           arrayBytes == 34u * sizeof(uint64_t),
+           "scratchpad array byte count covers all 34 entries");
+    expect(!xhci_scratchpad_array_bytes(35u, 34u, &arrayBytes) && arrayBytes == 0u,
+           "scratchpad array byte count rejects capacity overflow");
+    expect(!xhci_scratchpad_array_bytes(UINT32_MAX, UINT32_MAX, &arrayBytes) &&
+           arrayBytes == 0u,
+           "scratchpad array byte multiplication overflow is rejected");
+
+    uint64_t dcbaaEntry = ~0ULL;
+    expect(xhci_scratchpad_dcbaa_entry(0u, 34u, 0u, false, &dcbaaEntry) &&
+           dcbaaEntry == 0u,
+           "zero-buffer controller keeps DCBAA[0] clear");
+    expect(xhci_scratchpad_dcbaa_entry(34u, 34u, 0x8000u, false, &dcbaaEntry) &&
+           dcbaaEntry == 0x8000u,
+           "validated array physical address is registered in DCBAA[0]");
+    expect(!xhci_scratchpad_dcbaa_entry(1u, 34u, 0x8020u, false, &dcbaaEntry) &&
+           dcbaaEntry == 0u,
+           "misaligned array address cannot be published");
+    expect(!xhci_scratchpad_dcbaa_entry(1u, 34u, 0x100000000ULL, false,
+                                        &dcbaaEntry) && dcbaaEntry == 0u,
+           "32-bit controller cannot publish a high DCBAA scratchpad pointer");
+    expect(!xhci_scratchpad_dcbaa_entry(35u, 34u, 0x8000u, true,
+                                        &dcbaaEntry) && dcbaaEntry == 0u,
+           "DCBAA scratchpad registration rejects counts beyond capacity");
 }
 
 // ================================================================

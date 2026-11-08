@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "kernel/amd_ivrs.h"
+#include "kernel/intel_dmar.h"
 
 namespace kernel {
 namespace modern_input_diagnostics {
@@ -127,6 +128,13 @@ enum class ControllerKind : uint8_t {
     XHCI
 };
 
+enum class Platform : uint8_t {
+    Unknown = 0,
+    Intel,
+    Amd,
+    Other
+};
+
 enum class OwnershipStatus : uint8_t {
     Unknown = 0,
     NotRequired,
@@ -232,6 +240,33 @@ struct ControllerSnapshot {
     uint8_t contextSize;
     uint32_t supportedProtocolCount;
     uint32_t scratchpadBuffersRequired;
+    uint32_t hcsParams2;
+    uint8_t scratchpadHigh;
+    uint8_t scratchpadLow;
+    uint32_t scratchpadCapacity;
+    Status scratchpadAllocationStatus;
+    const char* scratchpadAllocationReason;
+    intel_dmar::RouteStatus vtdRouteStatus;
+    int32_t vtdUnitIndex;
+    uint64_t vtdRegisterBase;
+    bool vtdRmrrRequired;
+    intel_dmar::RegisterStatus vtdRegisterStatus;
+    intel_dmar::TranslationState vtdTranslationState;
+    intel_dmar::RootTableState vtdRootTableState;
+    uint8_t vtdVersion;
+    uint8_t vtdMaximumGuestAddressWidth;
+    uint8_t vtdSupportedAdjustedGuestAddressWidths;
+    uint32_t vtdGlobalCommand;
+    uint32_t vtdGlobalStatus;
+    uint32_t vtdFaultStatus;
+    uint64_t vtdCapability;
+    uint64_t vtdExtendedCapability;
+    uint64_t vtdRootTableAddress;
+    bool vtdCapabilityValid;
+    bool vtdExtendedCapabilityValid;
+    bool vtdCommandStatusValid;
+    bool vtdRootTableValid;
+    bool vtdFaultStatusValid;
     bool ac64;
     IommuStatus iommuStatus;
     uint32_t rootPortCount;
@@ -296,6 +331,16 @@ struct Snapshot {
     uint32_t ivhdUnitCount;
     uint32_t ivmdRangeCount;
     uint32_t ivrsUnsupportedCount;
+    Platform platform;
+    intel_dmar::ParseStatus dmarStatus;
+    uint32_t dmarTableCount;
+    uint32_t drhdUnitCount;
+    uint32_t rmrrCount;
+    uint32_t atsrCount;
+    uint32_t rhsaCount;
+    uint32_t dmarUnsupportedCount;
+    bool dmarScanValid;
+    bool dmarTablePresent;
     bool acpiRemapScanValid;
     bool acpiRemappingTablePresent;
     bool dmaMappingEstablished;
@@ -331,6 +376,20 @@ void record_ivrs_discovery(amd_ivrs::ParseStatus status, bool scanValid,
                            bool remappingTablePresent, uint32_t ivrsTableCount,
                            uint32_t ivhdUnits, uint32_t ivmdRanges,
                            uint32_t unsupportedCount);
+void record_platform(Platform platform);
+void record_dmar_discovery(intel_dmar::ParseStatus status, bool scanValid,
+                           bool remappingTablePresent, uint32_t dmarTableCount,
+                           uint32_t drhdUnits, uint32_t rmrrRanges,
+                           uint32_t atsrStructures, uint32_t rhsaStructures,
+                           uint32_t unsupportedCount);
+void record_vtd_route(int32_t controllerIndex, uint16_t segment,
+                      uint8_t bus, uint8_t device, uint8_t function,
+                      intel_dmar::RouteStatus routeStatus, int32_t unitIndex,
+                      uint64_t registerBase, bool rmrrRequired);
+void record_vtd_registers(int32_t controllerIndex,
+                          const intel_dmar::RegisterSnapshot& registers);
+void record_scratchpad_allocation(int32_t controllerIndex, uint32_t capacity,
+                                  Status status, const char* reason);
 void record_iommu_route(int32_t controllerIndex, uint16_t segment,
                         uint16_t requesterId, uint16_t effectiveRequesterId,
                         amd_ivrs::RouteStatus routeStatus, int32_t unitIndex,
@@ -366,7 +425,10 @@ void record_capabilities(int32_t controllerIndex, uint8_t capLength,
                          uint8_t maxPorts, uint8_t contextSize, bool ac64,
                          uint32_t supportedProtocolCount,
                          uint32_t scratchpadBuffersRequired,
-                         IommuStatus iommuStatus = IommuStatus::Unknown);
+                         IommuStatus iommuStatus = IommuStatus::Unknown,
+                         uint32_t hcsParams2 = 0u,
+                         uint8_t scratchpadHigh = 0u,
+                         uint8_t scratchpadLow = 0u);
 void record_root_ports(int32_t controllerIndex, uint32_t rootPortCount,
                        uint32_t connectedPortCount, uint8_t selectedPort);
 void record_device_descriptor(int32_t controllerIndex, bool transferSucceeded,
@@ -395,10 +457,22 @@ const char* ivrs_status_name(amd_ivrs::ParseStatus status);
 const char* iommu_route_status_name(amd_ivrs::RouteStatus status);
 const char* iommu_inspection_status_name(amd_ivrs::InspectionStatus status);
 const char* iommu_translation_state_name(amd_ivrs::TranslationState state);
+const char* platform_name(Platform platform);
+const char* dmar_status_name(intel_dmar::ParseStatus status);
+const char* dmar_route_status_name(intel_dmar::RouteStatus status);
+const char* vtd_register_status_name(intel_dmar::RegisterStatus status);
+const char* vtd_translation_state_name(intel_dmar::TranslationState state);
+const char* vtd_root_table_state_name(intel_dmar::RootTableState state);
 uint32_t format_ivrs_summary(const Snapshot& snapshot, char* out,
+                             uint32_t capacity);
+uint32_t format_dmar_summary(const Snapshot& snapshot, char* out,
                              uint32_t capacity);
 uint32_t format_controller_iommu_route(const ControllerSnapshot& controller,
                                        char* out, uint32_t capacity);
+uint32_t format_controller_vtd_route(const ControllerSnapshot& controller,
+                                     char* out, uint32_t capacity);
+uint32_t format_controller_vtd_registers(const ControllerSnapshot& controller,
+                                         char* out, uint32_t capacity);
 uint32_t format_stage_result(const StageResult& result, char* out, uint32_t capacity);
 uint32_t format_first_failure(const Snapshot& snapshot, char* out, uint32_t capacity);
 bool calculate_panel_layout(uint32_t framebufferWidth, uint32_t framebufferHeight,
