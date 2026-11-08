@@ -122,6 +122,12 @@ CORE_SOURCES := $(wildcard core/*.cpp)
 SETTINGS_PRESENTATION_SOURCE := $(GUIDEXOS_REPO_ROOT)/settings_presentation_core.cpp
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
+ifeq ($(ARCH),ia64)
+ifneq ($(IA64_FP_PROFILE),early-exec)
+ARCH_SOURCES := $(filter-out arch/ia64/break_exception.cpp,$(ARCH_SOURCES))
+    ASM_SOURCES := $(filter-out arch/ia64/break_exception_entry.s,$(ASM_SOURCES))
+endif
+endif
 MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
 MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED)),$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_C_SOURCES))
 

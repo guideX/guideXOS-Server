@@ -291,22 +291,33 @@ def check_kernel(path: Path, object_dir: Path | None, repo_root: Path,
     require(ivt_ok, "IVT_LAYOUT", ivt_detail)
 
     boot_source = repo_root / "kernel" / "arch" / "ia64" / "boot.s"
-    source_slots: list[tuple[str, int, str]] = []
+    source_slots: list[tuple[str, int, str, str]] = []
     try:
         in_ivt = False
+        active_source = True
+        early_if = False
         for line in boot_source.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith('.section .ivt'):
                 in_ivt = True
             elif line.strip().startswith('.section .boot'):
                 in_ivt = False
+            elif line.strip() == '.ifdef GXOS_IA64_EARLY_EXEC_PROFILE':
+                early_if = True
+                active_source = profile == "early-exec"
+            elif early_if and line.strip() == '.else':
+                active_source = profile != "early-exec"
+            elif early_if and line.strip() == '.endif':
+                early_if = False
+                active_source = True
             elif in_ivt:
                 macro = re.match(
-                    r"\s*IVT_ENTRY_HALT\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*"
+                    r"\s*IVT_ENTRY_(HALT|BREAK)\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*"
                     r"(0x[0-9a-fA-F]+)\s*,\s*(IVT_(?:LONG|SHORT)_SLOT_BYTES)\s*$",
                     line,
                 )
-                if macro:
-                    source_slots.append((macro.group(1), int(macro.group(2), 16), macro.group(3)))
+                if macro and active_source:
+                    source_slots.append((macro.group(2), int(macro.group(3), 16),
+                                         macro.group(4), macro.group(1)))
     except OSError as exc:
         errors.append(f"IVT_VECTOR_LAYOUT: cannot read {boot_source}: {exc}")
         print(f"IVT_VECTOR_LAYOUT=FAIL cannot read {boot_source}")
@@ -349,11 +360,15 @@ def check_kernel(path: Path, object_dir: Path | None, repo_root: Path,
             expected_slot_name = "IVT_LONG_SLOT_BYTES" if index < 20 else "IVT_SHORT_SLOT_BYTES"
             expected_slot_size = IVT_LONG_SLOT_BYTES if index < 20 else IVT_SHORT_SLOT_BYTES
             if index < len(source_slots):
-                source_name, source_offset, source_slot_name = source_slots[index]
-                if source_name != name or source_offset != expected_offset or source_slot_name != expected_slot_name:
+                source_name, source_offset, source_slot_name, source_kind = source_slots[index]
+                expected_kind = ("BREAK" if name == "ivt_break" and profile == "early-exec"
+                                 else "HALT")
+                if source_name != name or source_offset != expected_offset or \
+                        source_slot_name != expected_slot_name or source_kind != expected_kind:
                     vector_errors.append(
-                        f"source slot {index}: {source_name}@0x{source_offset:x}/{source_slot_name}; "
-                        f"expected {name}@0x{expected_offset:x}/{expected_slot_name}")
+                        f"source slot {index}: {source_kind} {source_name}@0x{source_offset:x}/"
+                        f"{source_slot_name}; expected {expected_kind} {name}@0x{expected_offset:x}/"
+                        f"{expected_slot_name}")
             symbol = elf.symbols.get(name)
             if symbol is None:
                 vector_errors.append(f"missing vector symbol {name}")

@@ -58,6 +58,9 @@ else
 endif
 
 ASFLAGS := -mlp64 -mle -mconstant-gp -xexplicit
+ifeq ($(IA64_FP_PROFILE),early-exec)
+    ASFLAGS += --defsym=GXOS_IA64_EARLY_EXEC_PROFILE=1
+endif
 LINKER_SCRIPT_FLAG := -T
 # The kernel is freestanding but still needs GCC's integer arithmetic helpers.
 # The build wrapper resolves this from the selected target compiler unless an

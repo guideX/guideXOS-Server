@@ -71,6 +71,27 @@ ia64_ivt:
     .endif
 .endm
 
+/* The one early-exec exception under qualification has a dedicated entry.
+ * All other profiles retain the original fail-stop Break vector. */
+.macro IVT_ENTRY_BREAK name, offset, slot_bytes
+    .if (\offset + \slot_bytes) > IVT_BYTES
+        .error "IA-64 IVT slot extends beyond 0x8000 bytes"
+    .endif
+    .org ia64_ivt + \offset
+    .global \name
+    .global \name\()_end
+    .type \name, @function
+    .proc \name
+\name:
+    br.sptk.many ia64_break_exception_entry ;;
+\name\()_end:
+    .endp \name
+    .size \name, \name\()_end - \name
+    .if (\name\()_end - \name) > \slot_bytes
+        .error "IA-64 Break handler stub exceeds its assigned slot"
+    .endif
+.endm
+
 /* First 20 long vectors: 0x0000 through 0x4c00 in 0x400-byte steps. */
 IVT_ENTRY_HALT ivt_vhpt_translation,           0x0000, IVT_LONG_SLOT_BYTES
 IVT_ENTRY_HALT ivt_itlb_miss,                  0x0400, IVT_LONG_SLOT_BYTES
@@ -83,7 +104,11 @@ IVT_ENTRY_HALT ivt_dkey_miss,                  0x1c00, IVT_LONG_SLOT_BYTES
 IVT_ENTRY_HALT ivt_dirty_bit,                  0x2000, IVT_LONG_SLOT_BYTES
 IVT_ENTRY_HALT ivt_iaccess_bit,                0x2400, IVT_LONG_SLOT_BYTES
 IVT_ENTRY_HALT ivt_daccess_bit,                0x2800, IVT_LONG_SLOT_BYTES
+.ifdef GXOS_IA64_EARLY_EXEC_PROFILE
+IVT_ENTRY_BREAK ivt_break,                     0x2c00, IVT_LONG_SLOT_BYTES
+.else
 IVT_ENTRY_HALT ivt_break,                      0x2c00, IVT_LONG_SLOT_BYTES
+.endif
 IVT_ENTRY_HALT ivt_external_interrupt,         0x3000, IVT_LONG_SLOT_BYTES
 IVT_ENTRY_HALT ivt_virtual_external_interrupt, 0x3400, IVT_LONG_SLOT_BYTES
 IVT_ENTRY_HALT ivt_reserved_0e,                0x3800, IVT_LONG_SLOT_BYTES

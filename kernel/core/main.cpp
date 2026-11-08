@@ -35,6 +35,7 @@
 #include "include/kernel/native_elf_baremetal.h"
 #if defined(ARCH_IA64)
 #include "arch/cpu_state_checkpoint.h"
+#include "arch/break_exception.h"
 #endif
 
 // Storage subsystem
@@ -1637,6 +1638,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::arch::ia64::report_startup_cpu_state_checkpoints();
     kernel::arch::ia64::ski_console::puts("IA64-2 early-exec: SKI single-entry profile\r\n");
     kernel::arch::ia64::ski_console::puts("Interrupts masked; scheduler and threads unavailable\r\n");
+    const bool break_exception_qualified =
+        kernel::arch::ia64::run_break_exception_qualification();
+    if (!break_exception_qualified) {
+        kernel::arch::ia64::ski_console::puts(
+            "Early exception qualification failed; stopping before all other startup paths\r\n");
+    }
     kernel::arch::ia64::ski_console::stop();
     while (1) {
         kernel::arch::halt();
