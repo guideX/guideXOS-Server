@@ -326,6 +326,23 @@ int main()
                "canonical application manifest plus its short alias is rejected as ambiguous")) return 25;
     files.erase("/Workspace/app/app.json");
 
+    // Pinned Studio's new-project generator does not emit packageRoot for a
+    // single-target workspace. That field is required only for multi-target
+    // package publication, where the service writes both ELF payloads.
+    const char* studioProject = "{\"projectId\":\"com.example.buildservice\",\"projectKind\":\"native-gui-application\",\"abi\":\"guidexos-c-abi-v1\",\"sourceRoot\":\"src\",\"sourceEntry\":\"main.c\",\"outputName\":\"app\"}";
+    put("/Workspace/GUIDEXOS.PJT", studioProject);
+    gx_build_request singleTargetRequest = request();
+    singleTargetRequest.targetProfile = "guidexos.arm64.baremetal.bootstrap.native";
+    gx_build_snapshot singleTarget = {};
+    if (!check(run(singleTargetRequest, &singleTarget) && singleTarget.state == GX_BUILD_SUCCEEDED &&
+               singleTarget.artifactValid && !singleTarget.packageWritten,
+               "Studio single-target project builds without an inapplicable packageRoot field")) return 26;
+    gx_build_snapshot multiMissingPackageRoot = {};
+    if (!check(run(request(), &multiMissingPackageRoot) && multiMissingPackageRoot.state == GX_BUILD_FAILED &&
+               multiMissingPackageRoot.errorCode == GX_BUILD_ERROR_UNSUPPORTED_PROJECT,
+               "multi-target package build still requires packageRoot")) return 27;
+    put("/Workspace/GUIDEXOS.PJT", projectBytes.c_str());
+
     const std::string priorDigest = result.artifactSha256;
 
     put("/Workspace/src/main.c", "int gx_main(void* ctx) { return 41; }");

@@ -499,13 +499,16 @@ static bool build(const gx_build_request* request)
     }
     char value[256] = {}; char sourceRoot[128] = {}; char sourceEntry[128] = {};
     char outputName[128] = {}; char packageRoot[kMaxPath] = {};
+    const bool packageRootDeclared = find_text(s_projectText, "\"packageRoot\"") != nullptr;
+    const bool hasPackageRoot = json_string(s_projectText, "packageRoot", packageRoot, sizeof(packageRoot));
     if (!json_string(s_projectText, "projectId", value, sizeof(value)) || !equal(value, request->projectId) ||
         !json_string(s_projectText, "projectKind", value, sizeof(value)) || !equal(value, kProjectKind) ||
         !json_string(s_projectText, "abi", value, sizeof(value)) || !equal(value, kAbi) ||
         !json_string(s_projectText, "sourceRoot", sourceRoot, sizeof(sourceRoot)) || !safe_relative(sourceRoot) ||
         !json_string(s_projectText, "sourceEntry", sourceEntry, sizeof(sourceEntry)) || !safe_relative(sourceEntry) ||
         !json_string(s_projectText, "outputName", outputName, sizeof(outputName)) || !safe_fat_basename(outputName) ||
-        !json_string(s_projectText, "packageRoot", packageRoot, sizeof(packageRoot)) || !safe_absolute_app_path(packageRoot) ||
+        (packageRootDeclared && (!hasPackageRoot || !safe_absolute_app_path(packageRoot))) ||
+        (!packageRootDeclared && targetCount == 2) ||
         !json_string(s_manifestText, "id", value, sizeof(value)) || !equal(value, request->projectId)) {
         fail(GX_BUILD_ERROR_UNSUPPORTED_PROJECT, "project metadata does not describe a bounded NativeElf project"); return false;
     }
