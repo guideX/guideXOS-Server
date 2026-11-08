@@ -418,10 +418,18 @@ static std::string navigatorHostedSmokeDiagnostic() {
 
     uint64_t compositorPid = gxos::Lifecycle::ensureCompositor();
     add("compositor available", compositorPid != 0, "pid=" + std::to_string(compositorPid));
+    const bool compositorReady = compositorPid != 0 && gxos::gui::Compositor::waitForReady(15000);
+    add("compositor event loop ready", compositorReady,
+        compositorReady ? "main loop is receiving GUI input" : "compositor main loop did not become ready within 15000 ms");
 
     std::string launchError;
-    bool launched = gxos::gui::DesktopService::LaunchApp("guideXOS Navigator", launchError);
+    bool launched = compositorReady && gxos::gui::DesktopService::LaunchApp("guideXOS Navigator", launchError);
+    if (!compositorReady) launchError = "Compositor main loop was not ready before Navigator launch.";
     add("DesktopService launches Navigator", launched, launched ? "LaunchApp returned true" : launchError);
+
+    const bool initialFrameReady = launched && gxos::apps::Navigator::SmokeWaitForInitialFrame(15000);
+    add("Navigator initial frame complete", initialFrameReady,
+        initialFrameReady ? "first Navigator render pass has returned" : "first Navigator render pass did not complete within 15000 ms");
 
     gxos::gui::WindowDebugInfo navWindow;
     bool foundWindow = false;

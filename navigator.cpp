@@ -15,7 +15,9 @@
 #include "navigator_file_io.h"
 #include "navigator_html_parser.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -24,6 +26,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <thread>
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -149,6 +152,7 @@ Navigator::SelectionPosition Navigator::s_selectionFocus;
 std::string Navigator::s_navigatorClipboard;
 std::string Navigator::s_clipboardMode = "Navigator internal clipboard";
 std::vector<int> Navigator::s_registeredWidgetIds;
+static std::atomic<bool> s_navigatorInitialFrameReady{false};
 static std::unordered_set<std::string> s_visitedUrls;
 
 constexpr uint64_t kNavigatorLifecycleCounterCap = 1000000;
@@ -14871,6 +14875,7 @@ namespace {
 
 uint64_t Navigator::Launch()
 {
+	s_navigatorInitialFrameReady.store(false, std::memory_order_release);
 	ProcessSpec spec{"navigator", Navigator::main};
 	spec.appId = "guidexos.navigator";
 	return ProcessTable::spawn(spec, {"navigator"});
@@ -16314,8 +16319,20 @@ std::vector<int> Navigator::SmokeToolbarWidgetIds()
 	return s_registeredWidgetIds;
 }
 
+bool Navigator::SmokeWaitForInitialFrame(uint64_t timeoutMs)
+{
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+	do {
+		if (s_navigatorInitialFrameReady.load(std::memory_order_acquire)) return true;
+		if (std::chrono::steady_clock::now() >= deadline) break;
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	} while (true);
+	return s_navigatorInitialFrameReady.load(std::memory_order_acquire);
+}
+
 int Navigator::main(int, char**)
 {
+	s_navigatorInitialFrameReady.store(false, std::memory_order_release);
 	Logger::write(LogLevel::Info, "guideXOS Navigator starting");
 	s_windowId        = 0;
 	s_scrollOffset    = 0;
@@ -16397,6 +16414,7 @@ int Navigator::main(int, char**)
 					if (s_windowId == 0) {
 						s_windowId = createdId;
 						updateDisplay();
+						s_navigatorInitialFrameReady.store(true, std::memory_order_release);
 					}
 				} catch (...) {
 					Logger::write(LogLevel::Warn, "Navigator failed to parse create ack");

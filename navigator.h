@@ -888,6 +888,7 @@ public:
 	// Used by hosted smoke to verify the full modern toolbar (7 buttons) is
 	// present and that the old stale four-button placeholder is not active.
 	static std::vector<int> SmokeToolbarWidgetIds();
+	static bool SmokeWaitForInitialFrame(uint64_t timeoutMs);
 
 	static std::vector<int> s_registeredWidgetIds;
 

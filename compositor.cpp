@@ -59,6 +59,7 @@ namespace gxos {
         static const char* kGuiChanIn = "gui.input";
         static const char* kGuiSyncChanIn = "gui.sync";
         static const char* kGuiChanOut = "gui.output";
+        static std::atomic<bool> g_compositorMainLoopReady{false};
         static constexpr int kTaskbarSize = 40;
         static std::unordered_map<std::string, ImageBitmap> g_uiImageCache;
 
@@ -7182,6 +7183,8 @@ namespace gxos {
                     ipc::Bus::pop(kGuiChanIn, message, timeoutMs);
             };
             constexpr uint32_t kHostedIpcMessageBatchBudget = 64;
+            g_compositorMainLoopReady.store(true, std::memory_order_release);
+            Logger::write(LogLevel::Info, "Compositor main loop ready");
             bool running = true;
             while (running) {
                 uint32_t handled = 0;
@@ -7207,7 +7210,17 @@ namespace gxos {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             shutdownWindow( );
 #endif
+            g_compositorMainLoopReady.store(false, std::memory_order_release);
             Logger::write(LogLevel::Info, "Compositor service stopping"); return 0;
+        }
+        bool Compositor::waitForReady(uint64_t timeoutMs)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+            while (std::chrono::steady_clock::now() < deadline) {
+                if (g_compositorMainLoopReady.load(std::memory_order_acquire)) return true;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            return g_compositorMainLoopReady.load(std::memory_order_acquire);
         }
         std::vector<WindowDebugInfo> Compositor::debugWindowsSnapshot()
         {
@@ -7672,7 +7685,7 @@ namespace gxos {
             return hostedDisplayViewportIndexValue();
         }
 
-        uint64_t Compositor::start( ) { ProcessSpec spec{ "compositor", Compositor::main }; spec.appId = "gxos.system.compositor"; return ProcessTable::spawn(spec, { "compositor" }); }
+        uint64_t Compositor::start( ) { g_compositorMainLoopReady.store(false, std::memory_order_release); ProcessSpec spec{ "compositor", Compositor::main }; spec.appId = "gxos.system.compositor"; return ProcessTable::spawn(spec, { "compositor" }); }
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         void Compositor::drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h) {

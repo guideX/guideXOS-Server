@@ -154,6 +154,7 @@ namespace gxos { namespace gui {
     class Compositor {
     public:
         static uint64_t start();
+        static bool waitForReady(uint64_t timeoutMs);
         static std::string RunLaunchShadowSmokeDiagnostic();
         static void requestDesktopRefresh();
         static bool showFolderOnHostedDesktop(const std::string& path);
