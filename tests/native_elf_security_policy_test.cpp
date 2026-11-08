@@ -166,6 +166,18 @@ int main()
     }
     expect(allResourcePinsBounded, "runtime resource pins are complete and bounded");
 
+    static const uint8_t expectedExtralifeSha256[32] = {
+        0x76,0x7d,0xb1,0x55,0x21,0x30,0xe6,0x76,
+        0x39,0x8c,0x12,0x1e,0xc6,0x05,0xf9,0x0f,
+        0x20,0xc8,0x9b,0xbb,0xab,0x27,0x23,0x05,
+        0xbc,0x78,0x1a,0xdc,0x8e,0x91,0xd1,0xcd
+    };
+    expect(kPacManResourceCount > 3u &&
+           strcmp(kPacManResources[3].path, "resources/audio/extralife.wav") == 0 &&
+           kPacManResources[3].bytes == 21248u &&
+           digest_matches(kPacManResources[3].sha256, expectedExtralifeSha256),
+           "extralife WAV trust pin matches the approved package asset");
+
     unsigned int registryCount = 1;
     PackageIdentity rejected = package;
     rejected.id = "com.example.unauthorized";
