@@ -106,13 +106,12 @@ function Send-StudioInput([string]$SessionPath, [string]$QacPath, [hashtable]$In
 }
 
 function Clear-EditorBuffer([string]$SessionPath, [string]$QacPath, [string]$CapturePath = '') {
-    # The Studio editor has no select-all command. Focus the first source line,
-    # move to the beginning of the buffer, then delete forward through the
-    # bounded fixture without bypassing the editor or VFS.
-    $keys = @('Delete') * 160
-    # QMP screen coordinates include the native title bar, which sits 24 px
-    # above the Studio client surface used by placeCaretFromMouse.
-    $arguments = @{ ClickX = 320; ClickY = 110; SpecialKeys = $keys; KeyDelayMilliseconds = 25 }
+    # The Studio editor has no select-all command and the guest does not route
+    # QMP Home/End keys to its text buffer. Click below the visible lines so
+    # placeCaretFromMouse clamps to the final line, then click beyond the text
+    # so it clamps to that line's end. Bounded backspaces clear the whole file.
+    $keys = @('Backspace') * 160
+    $arguments = @{ ClickX = 790; ClickY = 200; SpecialKeys = $keys; KeyDelayMilliseconds = 25 }
     if (![string]::IsNullOrWhiteSpace($CapturePath)) { $arguments.CapturePath = $CapturePath }
     Send-StudioInput $SessionPath $QacPath $arguments
 }
