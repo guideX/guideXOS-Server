@@ -417,7 +417,7 @@ $uefiVarsTemplate = if ($isTransitionAttribution) { Join-Path $qemuShare 'edk2-i
 $uefiVarsImage = if ($isTransitionAttribution) { Join-Path $runRoot 'uefi-vars.fd' } else { $null }
 $runnerScriptSha256 = Get-Sha256 $PSCommandPath
 $attemptPath = if ($isManagedEntryProbe) {
-    Join-Path $phaseRoot ("guest-launch-attempt-$runCorrelationId.json")
+    Join-Path $phaseRoot ("guest-launch-attempt-" + $candidateManifestSha256 + ".json")
 } elseif ($isTransitionAttribution) {
     $legacyAttemptPath = Join-Path $phaseRoot 'guest-launch-attempt-C188R12R4R5R2R3R1.json'
     $candidateAttemptPath = Join-Path $phaseRoot ("guest-launch-attempt-" +
@@ -1649,7 +1649,10 @@ if ($null -ne $transitionAttributionAnalysis) {
     $transitionRecordManifest = $transitionAttributionAnalysis.transitionRecord
     $transitionStateManifest = $transitionAttributionAnalysis.threadAndRuntimeState
     $transitionCallSiteManifest = $transitionAttributionAnalysis.callSite
-    $transitionFailFastManifest = $transitionAttributionAnalysis.failFast
+    $transitionFailFastProperty = $transitionAttributionAnalysis.PSObject.Properties['failFast']
+    if ($null -ne $transitionFailFastProperty) {
+        $transitionFailFastManifest = $transitionFailFastProperty.Value
+    }
 }
 $manifest = [ordered]@{
     result=$outcome;runRoot=$runRoot;candidateRoot=$candidate;candidateManifest=$candidateManifestPath

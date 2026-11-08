@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory=$true)][string]$RuntimePackManifest,
     [Parameter(Mandatory=$true)][string]$ManagedMap,
     [Parameter(Mandatory=$true)][string]$ManagedDisassembly,
-    [Parameter(Mandatory=$true)][string]$KernelBuildLog
+    [Parameter(Mandatory=$true)][string]$KernelBuildLog,
+    [string]$RuntimeSourceRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +25,10 @@ $platformPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos
 $nativeHeaderPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_entry_probe.h'
 $kernelPath = Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp'
 $runnerPath = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1'
-$runtimeSource = Join-Path $root 'out\dotnet\gc-feasibility-baseline\nativeaot-runtime\src\coreclr\nativeaot'
+if ([string]::IsNullOrWhiteSpace($RuntimeSourceRoot)) {
+    $RuntimeSourceRoot = Join-Path $root 'out\dotnet\gc-feasibility-baseline\nativeaot-runtime'
+}
+$runtimeSource = Join-Path ([System.IO.Path]::GetFullPath($RuntimeSourceRoot)) 'src\coreclr\nativeaot'
 $startupHelpersPath = Join-Path $runtimeSource 'Common\src\Internal\Runtime\CompilerHelpers\StartupCodeHelpers.cs'
 $threadPath = Join-Path $runtimeSource 'Runtime\thread.cpp'
 $threadHeaderPath = Join-Path $runtimeSource 'Runtime\thread.h'
@@ -70,6 +74,8 @@ $assertion = @(
     @{ok=$disassembly -match '5237454[eE]' -and $disassembly -match '5237444[eE]' -and @($expectedProbeCalls).Count -eq 2 -and @($actualProbeCalls).Count -eq 2 -and @($actualProbeCalls | Where-Object { $_ -notin $expectedProbeCalls }).Count -eq 0; name='linked probe machine code stores markers and uses only its stock reverse-P/Invoke prologue/epilogue'},
     @{ok=$kernel -match '(?s)if \(transitionStatus != 0u\).*?result=safe_stop.*?managedMainAddress.*?reinterpret_cast<ManagedEntryProbe>\(\s*managedMainAddress\)' -and $kernel -match 'managedEntryProbeCaptureStateAddress' -and $kernel -match 'runtimeStatePassed'; name='kernel invokes the probe only after the R6 transition gate and validates return state'},
     @{ok=$runner.Contains("Get-AnalysisBoolean `$transitionAttributionAnalysis 'managedEntryReturned'") -and $runner.Contains("Get-AnalysisBoolean `$transitionAttributionAnalysis 'runtimeStateReady'"); name='runner reports a blocked preflight safely when no serial analyzer result exists'},
+    @{ok=$runner -match '(?s)\$attemptPath = if \(\$isManagedEntryProbe\) \{\s*Join-Path \$phaseRoot \("guest-launch-attempt-" \+ \$candidateManifestSha256 \+ "\.json"\)' -and $runner.Contains('[System.IO.FileMode]::CreateNew') -and $runner.Contains('maxGuestBoots=1;automaticRetry=$false'); name='runner binds one atomic no-retry attempt guard to the candidate manifest'},
+    @{ok=$runner.Contains("`$transitionAttributionAnalysis.PSObject.Properties['failFast']") -and $runner.Contains('$transitionFailFastProperty.Value'); name='runner safely records transition analyses without an optional failFast field'},
     @{ok=$kernelLog -match '-DGXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE'; name='isolated candidate kernel was built with the R7-only selector'},
     @{ok=$kernel -match 'collection=not_requested' -and $managedBody -notmatch 'GC\.Collect|RhpCollect'; name='probe path does not request managed GC collection'}
 )
