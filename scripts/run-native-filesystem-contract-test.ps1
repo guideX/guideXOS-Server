@@ -21,6 +21,9 @@ $sources = @(
         ForEach-Object { $_.Trim().TrimEnd('^').Trim() } |
         Where-Object { $_ -and $_ -ne "server.cpp" }
 )
+# The contract test reaches manifest validation and registry discovery, whose
+# implementation files are not part of the production server source list.
+$sources += @("app_payload_resolver.cpp", "kernel\core\native_architecture.cpp")
 
 $output = [IO.Path]::GetFullPath($OutputPath)
 $outputDirectory = Split-Path -Parent $output
