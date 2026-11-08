@@ -141,6 +141,15 @@ inline bool digest_matches(const uint8_t* actual, const uint8_t* expected) {
     return difference == 0;
 }
 
+inline bool pacman_guest_smoke_allowed(bool approvedPacMan,
+                                       bool cleanExit,
+                                       bool faulted,
+                                       uint64_t presentedFrames,
+                                       uint64_t deliveredKeyEvents) {
+    return approvedPacMan && cleanExit && !faulted && presentedFrames != 0 &&
+        deliveredKeyEvents >= 2u;
+}
+
 inline bool manifest_allowed(const PackageIdentity& package) {
     return exact_text(package.directory, "PacMan") &&
         exact_text(package.id, "com.guidexos.pacman") &&

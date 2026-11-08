@@ -347,6 +347,7 @@ struct Runtime {
     NativeAbiOperation lastCompletedAbiOperation;
     uint64_t abiCallCount;
     uint64_t appFrameSequence;
+    uint64_t inputEventCount;
     bool faulted;
     uint64_t loadMinimum;
     uint64_t loadMaximum;
@@ -1974,6 +1975,7 @@ static gx_result GX_CALL host_poll_event(gx_app_context* context, gx_event* outE
                     ? static_cast<uint32_t>(GX_KEY_MOD_CTRL) : 0u) |
                 ((keyEvent.modifiers & ps2keyboard::KEY_MOD_ALT)
                     ? static_cast<uint32_t>(GX_KEY_MOD_ALT) : 0u);
+            ++runtime->inputEventCount;
             return abi_result(runtime, NativeAbiOperation::PollEvent, GX_OK);
         }
 
@@ -2687,6 +2689,12 @@ static bool run_package(Package* package) {
     gx_result result = gxos_native_call_on_stack(runtime.entry, &runtime.context,
         runtime.stack + kRuntimeStackBytes);
     log_breadcrumb(&runtime, "21 GX_MAIN_RETURN");
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    const bool pacmanSmokePassed = security::pacman_guest_smoke_allowed(
+        text_equal(runtime.package->id, "com.guidexos.pacman"),
+        result == GX_OK, runtime.faulted,
+        runtime.appFrameSequence, runtime.inputEventCount);
+#endif
     serial::puts("[NATIVE-ELF] runtime="); serial::put_hex64(s_runtimeSequence);
     serial::puts(" exit result=0x"); serial::put_hex32(static_cast<uint32_t>(result));
     serial::puts(" requested="); serial::puts(runtime.exitRequested ? "1" : "0");
@@ -2703,6 +2711,7 @@ static bool run_package(Package* package) {
     serial::puts(" lastAbi="); serial::puts(abi_operation_name(runtime.lastCompletedAbiOperation));
     serial::puts(" abiCalls=0x"); serial::put_hex64(runtime.abiCallCount);
     serial::puts(" frames=0x"); serial::put_hex64(runtime.appFrameSequence);
+    serial::puts(" inputEvents=0x"); serial::put_hex64(runtime.inputEventCount);
     serial::putc('\n');
 
     log_breadcrumb(&runtime, "22 RUNTIME_CLEANUP");
@@ -2725,6 +2734,11 @@ static bool run_package(Package* package) {
     s_activeRuntime = nullptr;
     gxos_native_set_fault_recovery(0, 0);
     log_runtime(&runtime, result == GX_OK ? "lifecycle PASS window/resource cleanup complete" : "lifecycle FAIL app-returned-error");
+#if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+    if (pacmanSmokePassed) {
+        serial::puts("[PACMAN-SMOKE] result=PASS proof=approved-entry-clean-return-presented-frame-key-events\n");
+    }
+#endif
     return result == GX_OK;
 }
 

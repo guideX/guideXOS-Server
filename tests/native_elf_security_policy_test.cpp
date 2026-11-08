@@ -190,6 +190,15 @@ int main()
            digest_matches(kPacManResources[3].sha256, expectedExtralifeSha256),
            "extralife WAV trust pin matches the approved package asset");
 
+    expect(pacman_guest_smoke_allowed(true, true, false, 1u, 2u),
+           "guest smoke pass requires approved PacMan, a clean exit, a frame, and key input");
+    expect(!pacman_guest_smoke_allowed(false, true, false, 1u, 2u) &&
+           !pacman_guest_smoke_allowed(true, false, false, 1u, 2u) &&
+           !pacman_guest_smoke_allowed(true, true, true, 1u, 2u) &&
+           !pacman_guest_smoke_allowed(true, true, false, 0u, 2u) &&
+           !pacman_guest_smoke_allowed(true, true, false, 1u, 1u),
+           "guest smoke pass fails closed when any qualification proof is missing");
+
     unsigned int registryCount = 1;
     PackageIdentity rejected = package;
     rejected.id = "com.example.unauthorized";
