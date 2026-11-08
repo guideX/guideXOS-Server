@@ -1537,6 +1537,18 @@ static bool reject_package_resource(const security::PackageFileIdentity& expecte
     return false;
 }
 
+static void log_package_resource_digest_mismatch(
+    const security::PackageFileIdentity& expected,
+    const uint8_t actual[32]) {
+    serial::puts("[NATIVE-ELF-PREVIEW] resource=digest-mismatch path=");
+    serial::puts(expected.path ? expected.path : "(null)");
+    serial::puts(" actualSha256=");
+    for (uint32_t i = 0; i < 32u; ++i) serial::put_hex8(actual[i]);
+    serial::puts(" expectedSha256=");
+    for (uint32_t i = 0; i < 32u; ++i) serial::put_hex8(expected.sha256[i]);
+    serial::putc('\n');
+}
+
 static bool verify_one_package_resource(const Package* package,
                                         const security::PackageFileIdentity& expected) {
     if (!package) return reject_package_resource(expected, "package-missing");
@@ -1601,8 +1613,9 @@ static bool verify_one_package_resource(const Package* package,
         return reject_package_resource(expected, "digest-computation-failed", total);
     }
     if (!security::digest_matches(digest, expected.sha256)) {
+        log_package_resource_digest_mismatch(expected, digest);
         delete[] bytes;
-        return reject_package_resource(expected, "digest-mismatch", total);
+        return false;
     }
     const bool sourceUnchanged = package_source_unchanged(package);
     delete[] bytes;
