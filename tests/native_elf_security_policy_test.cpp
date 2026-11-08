@@ -8,6 +8,33 @@ using namespace kernel::native_elf::security;
 static unsigned int failures = 0;
 static unsigned int nativeEntryCalls = 0;
 
+struct ExpectedResourcePin {
+    const char* path;
+    uint32_t bytes;
+    const char* sha256;
+};
+
+static uint8_t hex_nibble(char value)
+{
+    if (value >= '0' && value <= '9') return static_cast<uint8_t>(value - '0');
+    if (value >= 'a' && value <= 'f') return static_cast<uint8_t>(value - 'a' + 10);
+    if (value >= 'A' && value <= 'F') return static_cast<uint8_t>(value - 'A' + 10);
+    return 0xffu;
+}
+
+static bool digest_matches_hex(const uint8_t* actual, const char* expected)
+{
+    if (!actual || !expected || strlen(expected) != 64u) return false;
+    for (uint32_t i = 0; i < 32u; ++i) {
+        const uint8_t high = hex_nibble(expected[i * 2u]);
+        const uint8_t low = hex_nibble(expected[i * 2u + 1u]);
+        if (high == 0xffu || low == 0xffu || actual[i] != static_cast<uint8_t>((high << 4) | low)) {
+            return false;
+        }
+    }
+    return expected[64] == '\0';
+}
+
 static void expect(bool condition, const char* name)
 {
     if (condition) {
@@ -166,29 +193,26 @@ int main()
     }
     expect(allResourcePinsBounded, "runtime resource pins are complete and bounded");
 
-    static const uint8_t expectedLevel1Sha256[32] = {
-        0x53,0x5b,0x37,0xe6,0x6d,0x71,0x59,0x07,
-        0x8d,0xf8,0xa1,0x6c,0xe0,0x59,0xa6,0xf7,
-        0xab,0x03,0x85,0x88,0xcc,0x98,0x75,0xe1,
-        0x52,0x03,0x3d,0x04,0x6f,0xf4,0x7f,0xe1
+    static const ExpectedResourcePin expectedResources[] = {
+        { "resources/level1.gximg", 888860u, "535b37e66d7159078df8a16ce059a6f7ab038588cc9875e152033d046ff47fe1" },
+        { "resources/pacpics.gximg", 360476u, "57a605df8f24ac9641ff6c9d39df551a17ffbcd68466a561adf5f045de259d50" },
+        { "resources/audio/EatPill.wav", 7156u, "510a52e5776573197aef14d77e393185b6c7148d1b59dac535d45c5ca0498686" },
+        { "resources/audio/extralife.wav", 21248u, "767db1552130e676398c121ec605f90f20c89bbbab272305bc781adc8e91d1cd" },
+        { "resources/audio/fruiteat.wav", 5120u, "82c96a997ac2e837de4e418f29f4f4fa6142dd2a0c38f764b6d989d8bd98605d" },
+        { "resources/audio/ghosteat.wav", 9090u, "225168072b38671c89c1fc775d513ca86fbb899e3e82c8032445f6a6dc5e1b95" },
+        { "resources/audio/killed.wav", 17008u, "1c3e91df8e19041ea5783185c5a8a9f2321993b43481c215d8caf3df590290de" },
+        { "resources/audio/StartMusic.wav", 68318u, "062cdc7196c54033f8bf11878d6659fd5b0ba11cd6945640ec8fac4376919421" },
+        { "resources/audio/startmusicold.wav", 46592u, "a6e1c14f6cbc59cb5244c0119c728d412252370eea48bc574c1307a774c83caf" }
     };
-    expect(kPacManResourceCount > 0u &&
-           strcmp(kPacManResources[0].path, "resources/level1.gximg") == 0 &&
-           kPacManResources[0].bytes == 888860u &&
-           digest_matches(kPacManResources[0].sha256, expectedLevel1Sha256),
-           "level1 image trust pin matches the approved package asset");
-
-    static const uint8_t expectedExtralifeSha256[32] = {
-        0x76,0x7d,0xb1,0x55,0x21,0x30,0xe6,0x76,
-        0x39,0x8c,0x12,0x1e,0xc6,0x05,0xf9,0x0f,
-        0x20,0xc8,0x9b,0xbb,0xab,0x27,0x23,0x05,
-        0xbc,0x78,0x1a,0xdc,0x8e,0x91,0xd1,0xcd
-    };
-    expect(kPacManResourceCount > 3u &&
-           strcmp(kPacManResources[3].path, "resources/audio/extralife.wav") == 0 &&
-           kPacManResources[3].bytes == 21248u &&
-           digest_matches(kPacManResources[3].sha256, expectedExtralifeSha256),
-           "extralife WAV trust pin matches the approved package asset");
+    bool allResourcePinsMatch = kPacManResourceCount ==
+        static_cast<uint32_t>(sizeof(expectedResources) / sizeof(expectedResources[0]));
+    for (uint32_t i = 0; i < kPacManResourceCount && allResourcePinsMatch; ++i) {
+        allResourcePinsMatch = strcmp(kPacManResources[i].path, expectedResources[i].path) == 0 &&
+            kPacManResources[i].bytes == expectedResources[i].bytes &&
+            digest_matches_hex(kPacManResources[i].sha256, expectedResources[i].sha256);
+    }
+    expect(allResourcePinsMatch,
+           "all nine PacMan resource pins match the approved package asset hashes");
 
     expect(pacman_guest_smoke_allowed(true, true, false, 1u, 2u),
            "guest smoke pass requires approved PacMan, a clean exit, a frame, and key input");
