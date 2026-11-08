@@ -1520,45 +1520,96 @@ static uint64_t rebase_static_absolute_words(Runtime* runtime, uint64_t minimum,
 }
 
 #if defined(GXOS_PUBLIC_PREVIEW_SECURITY_PROFILE)
+static bool reject_package_resource(const security::PackageFileIdentity& expected,
+                                    const char* reason,
+                                    uint64_t observedValue = 0) {
+    serial::puts("[NATIVE-ELF-PREVIEW] resource=REJECT path=");
+    serial::puts(expected.path ? expected.path : "(null)");
+    serial::puts(" reason=");
+    serial::puts(reason ? reason : "unknown");
+    if (observedValue != 0) {
+        serial::puts(" observed=0x");
+        serial::put_hex64(observedValue);
+        serial::puts(" expectedBytes=0x");
+        serial::put_hex32(expected.bytes);
+    }
+    serial::putc('\n');
+    return false;
+}
+
 static bool verify_one_package_resource(const Package* package,
                                         const security::PackageFileIdentity& expected) {
-    if (!package || expected.bytes == 0 ||
-        expected.bytes > security::kMaxPacManResourceBytes ||
-        !package_source_unchanged(package)) return false;
+    if (!package) return reject_package_resource(expected, "package-missing");
+    if (expected.bytes == 0 || expected.bytes > security::kMaxPacManResourceBytes) {
+        return reject_package_resource(expected, "pin-size-out-of-bounds");
+    }
+    if (!package_source_unchanged(package)) {
+        return reject_package_resource(expected, "source-changed-before-read");
+    }
     char path[256];
-    if (!package_path(package, expected.path, path, sizeof(path))) return false;
+    if (!package_path(package, expected.path, path, sizeof(path))) {
+        return reject_package_resource(expected, "path-invalid");
+    }
     vfs::FileInfo info{};
-    if (vfs::stat(path, &info) != vfs::VFS_OK ||
-        info.type != vfs::FILE_TYPE_REGULAR || info.size != expected.bytes) return false;
+    const vfs::Status statStatus = vfs::stat(path, &info);
+    if (statStatus != vfs::VFS_OK) {
+        return reject_package_resource(expected, "stat-failed",
+                                       static_cast<uint32_t>(statStatus));
+    }
+    if (info.type != vfs::FILE_TYPE_REGULAR) {
+        return reject_package_resource(expected, "not-regular-file",
+                                       static_cast<uint64_t>(info.type));
+    }
+    if (info.size != expected.bytes) {
+        return reject_package_resource(expected, "stat-size-mismatch", info.size);
+    }
 
     uint8_t* bytes = new uint8_t[expected.bytes];
-    if (!bytes) return false;
+    if (!bytes) return reject_package_resource(expected, "buffer-allocation-failed");
     const uint8_t handle = vfs::open(path, vfs::OPEN_READ);
-    if (handle == 0xFFu || vfs::file_size(handle) != static_cast<int64_t>(expected.bytes)) {
+    if (handle == 0xFFu) {
+        delete[] bytes;
+        return reject_package_resource(expected, "open-failed");
+    }
+    const int64_t openedSize = vfs::file_size(handle);
+    if (openedSize != static_cast<int64_t>(expected.bytes)) {
         if (handle != 0xFFu) vfs::close(handle);
         delete[] bytes;
-        return false;
+        return reject_package_resource(expected, "open-size-mismatch",
+                                       openedSize < 0 ? 0u : static_cast<uint64_t>(openedSize));
     }
     uint32_t total = 0;
-    bool readOkay = true;
     while (total < expected.bytes) {
         uint32_t requested = expected.bytes - total;
         if (requested > kReadChunkBytes) requested = kReadChunkBytes;
         const int32_t amount = vfs::read(handle, bytes + total, requested);
         if (amount <= 0 || static_cast<uint32_t>(amount) > requested) {
-            readOkay = false;
-            break;
+            vfs::close(handle);
+            delete[] bytes;
+            return reject_package_resource(expected, "read-failed", total);
         }
         total += static_cast<uint32_t>(amount);
     }
     vfs::close(handle);
     uint8_t digest[32];
-    const bool valid = readOkay && total == expected.bytes &&
-        compute_sha256(bytes, expected.bytes, digest) &&
-        security::digest_matches(digest, expected.sha256) &&
-        package_source_unchanged(package);
+    if (total != expected.bytes) {
+        delete[] bytes;
+        return reject_package_resource(expected, "read-size-mismatch", total);
+    }
+    if (!compute_sha256(bytes, expected.bytes, digest)) {
+        delete[] bytes;
+        return reject_package_resource(expected, "digest-computation-failed", total);
+    }
+    if (!security::digest_matches(digest, expected.sha256)) {
+        delete[] bytes;
+        return reject_package_resource(expected, "digest-mismatch", total);
+    }
+    const bool sourceUnchanged = package_source_unchanged(package);
     delete[] bytes;
-    return valid;
+    if (!sourceUnchanged) {
+        return reject_package_resource(expected, "source-changed-after-read");
+    }
+    return true;
 }
 
 static bool verify_pacman_resources(const Package* package) {
