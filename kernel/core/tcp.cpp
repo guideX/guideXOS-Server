@@ -6,6 +6,7 @@
 #include "include/kernel/tcp.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/ethernet.h"
+#include "include/kernel/nic.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/pit.h"
 
@@ -101,6 +102,103 @@ static void wire_trace_event(const char* event, uint32_t value)
 static void wire_trace_segment(const char*, const TCB*, const ParsedSegment*,
                                uint8_t, uint32_t, uint32_t, uint16_t, uint16_t) {}
 static void wire_trace_event(const char*, uint32_t) {}
+#endif
+
+#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
+static void tcp_serial_put_dec(uint32_t value)
+{
+    char digits[10];
+    uint8_t count = 0;
+    do {
+        digits[count++] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0 && count < sizeof(digits));
+    while (count > 0) serial::putc(digits[--count]);
+}
+
+static const char* tcp_connect_nic_status_name(uint8_t status)
+{
+    switch (static_cast<nic::Status>(status)) {
+        case nic::NIC_OK: return "NIC_OK";
+        case nic::NIC_ERR_NO_DEVICE: return "NIC_ERR_NO_DEVICE";
+        case nic::NIC_ERR_INIT_FAIL: return "NIC_ERR_INIT_FAIL";
+        case nic::NIC_ERR_NO_LINK: return "NIC_ERR_NO_LINK";
+        case nic::NIC_ERR_TX_FULL: return "NIC_ERR_TX_FULL";
+        case nic::NIC_ERR_RX_EMPTY: return "NIC_ERR_RX_EMPTY";
+        case nic::NIC_ERR_BUFFER_TOO_SMALL: return "NIC_ERR_BUFFER_TOO_SMALL";
+        case nic::NIC_ERR_FRAME_TOO_LARGE: return "NIC_ERR_FRAME_TOO_LARGE";
+        default: return "NIC_ERR_UNKNOWN";
+    }
+}
+
+static void report_connect_send_failure(const TCB* tcb, uint32_t previousAttemptId)
+{
+    if (!tcb) return;
+    const ipv4::SendDiagnostics* diag = ipv4::get_last_send_diagnostics();
+    const bool ipv4Attempted = diag && diag->attemptId != previousAttemptId;
+    char sourceIP[16];
+    char destinationIP[16];
+    ipv4::ip_to_string(tcb->local.addr, sourceIP);
+    ipv4::ip_to_string(tcb->remote.addr, destinationIP);
+
+    serial::puts("[TCP-CONNECT-DIAG] stage=");
+    serial::puts(ipv4Attempted ? "syn_ipv4_send" : "syn_precondition");
+    serial::puts(" source=");
+    serial::puts(sourceIP);
+    serial::putc(':');
+    tcp_serial_put_dec(tcb->local.port);
+    serial::puts(" destination=");
+    serial::puts(destinationIP);
+    serial::putc(':');
+    tcp_serial_put_dec(tcb->remote.port);
+    serial::puts(" tcp_result=TCP_ERR_NETDOWN tcp_syn_constructed=");
+    serial::puts(ipv4Attempted ? "yes" : "no");
+    serial::puts(" ipv4_send_attempted=");
+    serial::puts(ipv4Attempted ? "yes" : "no");
+
+    if (ipv4Attempted) {
+        char nextHop[16];
+        ipv4::ip_to_string(diag->nextHop, nextHop);
+        serial::puts(" ipv4_stage=");
+        serial::puts(ipv4::send_stage_name(diag->stage));
+        serial::puts(" ipv4_status=");
+        serial::puts(ipv4::status_name(diag->status));
+        serial::puts(" next_hop=");
+        serial::puts(nextHop);
+        serial::puts(" neighbor=");
+        serial::puts(ipv4::neighbor_resolution_outcome_name(diag->neighborOutcome));
+        serial::puts(" arp_request_status=");
+        serial::puts(diag->arpRequestStatusValid
+            ? ipv4::status_name(diag->arpRequestStatus) : "not_attempted");
+        serial::puts(" arp_requests_sent=");
+        tcp_serial_put_dec(diag->arpRequestsSent);
+        serial::puts(" arp_replies_received=");
+        tcp_serial_put_dec(diag->arpRepliesReceived);
+        serial::puts(" ipv4_configured=");
+        serial::puts(diag->configured ? "yes" : "no");
+        serial::puts(" nic_active=");
+        serial::puts(diag->nicActive ? "yes" : "no");
+        serial::puts(" link_state=");
+        serial::puts(nic::link_state_name(static_cast<nic::LinkState>(diag->linkState)));
+        serial::puts(" nic_status=");
+        if (diag->nicStatusValid) {
+            serial::puts(tcp_connect_nic_status_name(diag->nicStatus));
+        } else {
+            serial::puts("not_reported");
+        }
+        serial::puts(" syn_submitted=");
+        serial::puts(diag->status == ipv4::IP_OK ? "yes\n" : "no\n");
+    } else {
+        serial::puts(" ipv4_stage=not_attempted ipv4_status=not_reported");
+        serial::puts(" ipv4_configured=");
+        serial::puts(ipv4::is_configured() ? "yes" : "no");
+        serial::puts(" nic_active=");
+        serial::puts(nic::is_active() ? "yes" : "no");
+        serial::puts(" link_state=");
+        serial::puts(nic::link_state_name(nic::get_link_state()));
+        serial::puts(" syn_submitted=no\n");
+    }
+}
 #endif
 
 // ================================================================
@@ -554,9 +652,16 @@ int tcp_connect(int sockfd, uint32_t destIP, uint16_t destPort)
     
     // Send SYN
     tcb->state = STATE_SYN_SENT;
+#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
+    const ipv4::SendDiagnostics* previousDiagnostics = ipv4::get_last_send_diagnostics();
+    const uint32_t previousAttemptId = previousDiagnostics ? previousDiagnostics->attemptId : 0;
+#endif
     Status status = send_segment(tcb, FLAG_SYN, nullptr, 0);
     
     if (status != TCP_OK) {
+#if defined(GXOS_BARE_METAL) && defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
+        report_connect_send_failure(tcb, previousAttemptId);
+#endif
         tcb->state = STATE_CLOSED;
         return status;
     }

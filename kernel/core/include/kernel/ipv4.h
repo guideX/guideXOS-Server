@@ -248,6 +248,59 @@ enum Status : uint8_t {
     IP_ERR_FRAGMENTED    = 11,   // Fragmentation not supported
 };
 
+// Bounded description of the most recent IPv4 send. This preserves the
+// public Status values while identifying the operation that returned them.
+enum SendStage : uint8_t {
+    SEND_STAGE_NONE = 0,
+    SEND_STAGE_CONFIGURATION_CHECK,
+    SEND_STAGE_PACKET_VALIDATION,
+    SEND_STAGE_PACKET_CONSTRUCTION,
+    SEND_STAGE_ROUTE_SELECTION,
+    SEND_STAGE_NEIGHBOR_RESOLUTION,
+    SEND_STAGE_ETHERNET_FRAME_CONSTRUCTION,
+    SEND_STAGE_NIC_SUBMISSION,
+    SEND_STAGE_COMPLETE,
+};
+
+enum NeighborResolutionOutcome : uint8_t {
+    NEIGHBOR_OUTCOME_NONE = 0,
+    NEIGHBOR_OUTCOME_CACHE_HIT,
+    NEIGHBOR_OUTCOME_ARP_REPLY,
+    NEIGHBOR_OUTCOME_ARP_REQUEST_FAILED,
+    NEIGHBOR_OUTCOME_ARP_REPLY_TIMEOUT,
+    NEIGHBOR_OUTCOME_GATEWAY_CACHE_HIT,
+    NEIGHBOR_OUTCOME_GATEWAY_ARP_REPLY,
+    NEIGHBOR_OUTCOME_GATEWAY_ARP_REQUEST_FAILED,
+    NEIGHBOR_OUTCOME_GATEWAY_ARP_REPLY_TIMEOUT,
+};
+
+struct SendDiagnostics {
+    uint32_t attemptId;
+    uint32_t sourceIP;
+    uint32_t destinationIP;
+    uint32_t nextHop;
+    uint32_t arpRequestsSent;
+    uint32_t arpRepliesReceived;
+    uint16_t payloadLength;
+    uint8_t protocol;
+    uint8_t linkState; // kernel::nic::LinkState numeric value
+    uint8_t nicStatus; // kernel::nic::Status numeric value
+    Status status;
+    Status arpRequestStatus;
+    SendStage stage;
+    NeighborResolutionOutcome neighborOutcome;
+    bool statusValid;
+    bool configured;
+    bool nicActive;
+    bool nicStatusValid;
+    bool arpRequestStatusValid;
+};
+
+const char* status_name(Status status);
+const char* send_stage_name(SendStage stage);
+const char* neighbor_resolution_outcome_name(NeighborResolutionOutcome outcome);
+const SendDiagnostics* get_last_send_diagnostics();
+
 enum ConfigStatus : uint8_t {
     CONFIG_OK                  = 0,
     CONFIG_ERR_INVALID_IP      = 1,

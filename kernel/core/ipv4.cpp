@@ -37,6 +37,9 @@ static NetworkConfig s_config;
 static RouteEntry    s_routes[MAX_ROUTES];
 static Statistics    s_stats;
 static uint16_t      s_identification = 0;  // Packet ID counter
+static SendDiagnostics s_lastSendDiagnostics;
+static uint32_t s_nextSendAttemptId = 0;
+static bool s_sendDiagnosticsActive = false;
 
 // Protocol handlers (indexed by protocol number for common protocols)
 static const uint8_t MAX_HANDLERS = 8;
@@ -84,6 +87,35 @@ struct ArpPacket {
 static const uint16_t ARP_HTYPE_ETHERNET = 1;
 static const uint16_t ARP_OPER_REQUEST = 1;
 static const uint16_t ARP_OPER_REPLY = 2;
+
+static void begin_send_diagnostics(uint32_t dstAddr, uint8_t protocol,
+                                   uint16_t payloadLength)
+{
+    memzero(&s_lastSendDiagnostics, sizeof(s_lastSendDiagnostics));
+    ++s_nextSendAttemptId;
+    if (s_nextSendAttemptId == 0) ++s_nextSendAttemptId;
+    s_lastSendDiagnostics.attemptId = s_nextSendAttemptId;
+    s_lastSendDiagnostics.sourceIP = s_config.configured ? s_config.ipAddr : 0;
+    s_lastSendDiagnostics.destinationIP = dstAddr;
+    s_lastSendDiagnostics.payloadLength = payloadLength;
+    s_lastSendDiagnostics.protocol = protocol;
+    s_lastSendDiagnostics.configured = s_config.configured;
+    s_lastSendDiagnostics.nicActive = nic::is_active();
+    s_lastSendDiagnostics.linkState = static_cast<uint8_t>(nic::get_link_state());
+    s_lastSendDiagnostics.stage = SEND_STAGE_CONFIGURATION_CHECK;
+    s_sendDiagnosticsActive = true;
+}
+
+static Status finish_send_diagnostics(Status status)
+{
+    s_lastSendDiagnostics.status = status;
+    s_lastSendDiagnostics.statusValid = true;
+    s_lastSendDiagnostics.arpRequestsSent = s_stats.arpRequestsSent;
+    s_lastSendDiagnostics.arpRepliesReceived = s_stats.arpRepliesReceived;
+    s_lastSendDiagnostics.stage = status == IP_OK ? SEND_STAGE_COMPLETE : s_lastSendDiagnostics.stage;
+    s_sendDiagnosticsActive = false;
+    return status;
+}
 
 // ================================================================
 // IP Address Utilities
@@ -254,10 +286,13 @@ void init()
     memzero(&s_config, sizeof(s_config));
     memzero(s_routes, sizeof(s_routes));
     memzero(&s_stats, sizeof(s_stats));
+    memzero(&s_lastSendDiagnostics, sizeof(s_lastSendDiagnostics));
     memzero(s_handlers, sizeof(s_handlers));
     memzero(s_arpCache, sizeof(s_arpCache));
     
     s_identification = 1;
+    s_nextSendAttemptId = 0;
+    s_sendDiagnosticsActive = false;
     
     serial::puts("[IPv4] Layer initialized\n");
 }
@@ -273,6 +308,60 @@ const char* config_status_name(ConfigStatus status)
         case CONFIG_ERR_ROUTE_TABLE:     return "route-table-full";
         default:                         return "unknown";
     }
+}
+
+const char* status_name(Status status)
+{
+    switch (status) {
+        case IP_OK:                 return "IP_OK";
+        case IP_ERR_NULL_PTR:       return "IP_ERR_NULL_PTR";
+        case IP_ERR_TOO_SHORT:      return "IP_ERR_TOO_SHORT";
+        case IP_ERR_TOO_LONG:       return "IP_ERR_TOO_LONG";
+        case IP_ERR_BAD_VERSION:    return "IP_ERR_BAD_VERSION";
+        case IP_ERR_BAD_HEADER:     return "IP_ERR_BAD_HEADER";
+        case IP_ERR_BAD_CHECKSUM:   return "IP_ERR_BAD_CHECKSUM";
+        case IP_ERR_NO_ROUTE:       return "IP_ERR_NO_ROUTE";
+        case IP_ERR_NOT_CONFIGURED: return "IP_ERR_NOT_CONFIGURED";
+        case IP_ERR_BUFFER_SMALL:   return "IP_ERR_BUFFER_SMALL";
+        case IP_ERR_TX_FAILED:      return "IP_ERR_TX_FAILED";
+        case IP_ERR_FRAGMENTED:     return "IP_ERR_FRAGMENTED";
+        default:                    return "IP_ERR_UNKNOWN";
+    }
+}
+
+const char* send_stage_name(SendStage stage)
+{
+    switch (stage) {
+        case SEND_STAGE_CONFIGURATION_CHECK: return "configuration_check";
+        case SEND_STAGE_PACKET_VALIDATION: return "packet_validation";
+        case SEND_STAGE_PACKET_CONSTRUCTION: return "packet_construction";
+        case SEND_STAGE_ROUTE_SELECTION: return "route_selection";
+        case SEND_STAGE_NEIGHBOR_RESOLUTION: return "neighbor_resolution";
+        case SEND_STAGE_ETHERNET_FRAME_CONSTRUCTION: return "ethernet_frame_construction";
+        case SEND_STAGE_NIC_SUBMISSION: return "nic_submission";
+        case SEND_STAGE_COMPLETE: return "complete";
+        default: return "none";
+    }
+}
+
+const char* neighbor_resolution_outcome_name(NeighborResolutionOutcome outcome)
+{
+    switch (outcome) {
+        case NEIGHBOR_OUTCOME_CACHE_HIT: return "cache_hit";
+        case NEIGHBOR_OUTCOME_ARP_REPLY: return "arp_reply";
+        case NEIGHBOR_OUTCOME_ARP_REQUEST_FAILED: return "arp_request_failed";
+        case NEIGHBOR_OUTCOME_ARP_REPLY_TIMEOUT: return "arp_reply_timeout";
+        case NEIGHBOR_OUTCOME_GATEWAY_CACHE_HIT: return "gateway_cache_hit";
+        case NEIGHBOR_OUTCOME_GATEWAY_ARP_REPLY: return "gateway_arp_reply";
+        case NEIGHBOR_OUTCOME_GATEWAY_ARP_REQUEST_FAILED: return "gateway_arp_request_failed";
+        case NEIGHBOR_OUTCOME_GATEWAY_ARP_REPLY_TIMEOUT: return "gateway_arp_reply_timeout";
+        default: return "not_attempted";
+    }
+}
+
+const SendDiagnostics* get_last_send_diagnostics()
+{
+    return &s_lastSendDiagnostics;
 }
 
 static bool is_valid_unicast_host(uint32_t ip)
@@ -519,7 +608,13 @@ static void arp_add(uint32_t ip, const uint8_t* mac)
 
 static Status send_arp_packet(uint16_t oper, uint32_t targetIP, const uint8_t* targetMAC)
 {
-    if (!s_config.configured) return IP_ERR_NOT_CONFIGURED;
+    if (!s_config.configured) {
+        if (oper == ARP_OPER_REQUEST && s_lastSendDiagnostics.attemptId != 0) {
+            s_lastSendDiagnostics.arpRequestStatus = IP_ERR_NOT_CONFIGURED;
+            s_lastSendDiagnostics.arpRequestStatusValid = true;
+        }
+        return IP_ERR_NOT_CONFIGURED;
+    }
 
     ArpPacket arp;
     memzero(&arp, sizeof(arp));
@@ -546,14 +641,36 @@ static Status send_arp_packet(uint16_t oper, uint32_t targetIP, const uint8_t* t
         reinterpret_cast<const uint8_t*>(&arp), sizeof(arp),
         &frameLen);
 
-    if (ethStatus != ethernet::ETH_OK) return IP_ERR_TX_FAILED;
+    if (ethStatus != ethernet::ETH_OK) {
+        if (oper == ARP_OPER_REQUEST && s_lastSendDiagnostics.attemptId != 0) {
+            s_lastSendDiagnostics.arpRequestStatus = IP_ERR_TX_FAILED;
+            s_lastSendDiagnostics.arpRequestStatusValid = true;
+        }
+        return IP_ERR_TX_FAILED;
+    }
 
     if (oper == ARP_OPER_REQUEST) s_stats.arpRequestsGenerated++;
 
     nic::Status nicStatus = nic::send_frame(frame, frameLen);
-    if (nicStatus != nic::NIC_OK) return IP_ERR_TX_FAILED;
+    if (oper == ARP_OPER_REQUEST && s_lastSendDiagnostics.attemptId != 0) {
+        s_lastSendDiagnostics.nicStatus = static_cast<uint8_t>(nicStatus);
+        s_lastSendDiagnostics.nicStatusValid = true;
+    }
+    if (nicStatus != nic::NIC_OK) {
+        if (oper == ARP_OPER_REQUEST && s_lastSendDiagnostics.attemptId != 0) {
+            s_lastSendDiagnostics.arpRequestStatus = IP_ERR_TX_FAILED;
+            s_lastSendDiagnostics.arpRequestStatusValid = true;
+        }
+        return IP_ERR_TX_FAILED;
+    }
 
-    if (oper == ARP_OPER_REQUEST) s_stats.arpRequestsSent++;
+    if (oper == ARP_OPER_REQUEST) {
+        s_stats.arpRequestsSent++;
+        if (s_lastSendDiagnostics.attemptId != 0) {
+            s_lastSendDiagnostics.arpRequestStatus = IP_OK;
+            s_lastSendDiagnostics.arpRequestStatusValid = true;
+        }
+    }
 
     return IP_OK;
 }
@@ -615,32 +732,50 @@ static bool resolve_mac(uint32_t ip, uint8_t* mac)
 
 static bool resolve_mac_with_arp(uint32_t ip, uint8_t* mac)
 {
-    if (resolve_mac(ip, mac)) return true;
+    if (resolve_mac(ip, mac)) {
+        s_lastSendDiagnostics.neighborOutcome = NEIGHBOR_OUTCOME_CACHE_HIT;
+        return true;
+    }
 
     if (send_arp_packet(ARP_OPER_REQUEST, ip, nullptr) != IP_OK) {
+        s_lastSendDiagnostics.neighborOutcome = NEIGHBOR_OUTCOME_ARP_REQUEST_FAILED;
         return false;
     }
 
     uint32_t startTicks = static_cast<uint32_t>(pit::ticks());
     while ((static_cast<uint32_t>(pit::ticks()) - startTicks) < 50) {
         poll_network();
-        if (resolve_mac(ip, mac)) return true;
+        if (resolve_mac(ip, mac)) {
+            s_lastSendDiagnostics.neighborOutcome = NEIGHBOR_OUTCOME_ARP_REPLY;
+            return true;
+        }
         for (volatile int d = 0; d < 10000; ++d) {}
     }
 
     if (s_config.configured && s_config.gateway != 0 && ip != s_config.gateway) {
-        if (resolve_mac(s_config.gateway, mac)) return true;
+        if (resolve_mac(s_config.gateway, mac)) {
+            s_lastSendDiagnostics.neighborOutcome = NEIGHBOR_OUTCOME_GATEWAY_CACHE_HIT;
+            return true;
+        }
 
         if (send_arp_packet(ARP_OPER_REQUEST, s_config.gateway, nullptr) == IP_OK) {
             startTicks = static_cast<uint32_t>(pit::ticks());
             while ((static_cast<uint32_t>(pit::ticks()) - startTicks) < 50) {
                 poll_network();
-                if (resolve_mac(s_config.gateway, mac)) return true;
+                if (resolve_mac(s_config.gateway, mac)) {
+                    s_lastSendDiagnostics.neighborOutcome = NEIGHBOR_OUTCOME_GATEWAY_ARP_REPLY;
+                    return true;
+                }
                 for (volatile int d = 0; d < 10000; ++d) {}
             }
+            s_lastSendDiagnostics.neighborOutcome = NEIGHBOR_OUTCOME_GATEWAY_ARP_REPLY_TIMEOUT;
+            return false;
         }
+        s_lastSendDiagnostics.neighborOutcome = NEIGHBOR_OUTCOME_GATEWAY_ARP_REQUEST_FAILED;
+        return false;
     }
 
+    s_lastSendDiagnostics.neighborOutcome = NEIGHBOR_OUTCOME_ARP_REPLY_TIMEOUT;
     return false;
 }
 
@@ -851,43 +986,57 @@ Status build_packet_from_source(uint8_t* buffer,
 // Packet Transmission
 // ================================================================
 
+static Status send_raw_packet_impl(const uint8_t* packet, uint16_t len,
+                                   uint32_t dstAddr);
+
 Status send_packet(const uint8_t* payload,
                    uint16_t len,
                    uint32_t dstAddr,
                    uint8_t protocol)
 {
+    begin_send_diagnostics(dstAddr, protocol, len);
     s_stats.txAttempts++;
 
     if (!s_config.configured) {
         s_stats.txErrors++;
-        return IP_ERR_NOT_CONFIGURED;
+        return finish_send_diagnostics(IP_ERR_NOT_CONFIGURED);
     }
     
+    s_lastSendDiagnostics.stage = SEND_STAGE_PACKET_VALIDATION;
     if (len > MAX_PAYLOAD) {
         s_stats.txErrors++;
-        return IP_ERR_TOO_LONG;
+        return finish_send_diagnostics(IP_ERR_TOO_LONG);
     }
     
     // Build IP packet
     uint8_t ipPacket[MTU];
     uint16_t ipLen;
     
+    s_lastSendDiagnostics.stage = SEND_STAGE_PACKET_CONSTRUCTION;
     Status status = build_packet(ipPacket, sizeof(ipPacket),
                                  dstAddr, protocol, payload, len, &ipLen);
     if (status != IP_OK) {
         s_stats.txErrors++;
-        return status;
+        return finish_send_diagnostics(status);
     }
     
-    return send_raw_packet(ipPacket, ipLen, dstAddr);
+    return finish_send_diagnostics(send_raw_packet_impl(ipPacket, ipLen, dstAddr));
 }
 
-Status send_raw_packet(const uint8_t* packet, uint16_t len, uint32_t dstAddr)
+static Status send_raw_packet_impl(const uint8_t* packet, uint16_t len,
+                                   uint32_t dstAddr)
 {
-    if (!packet) return IP_ERR_NULL_PTR;
-    if (!s_config.configured) return IP_ERR_NOT_CONFIGURED;
+    if (!packet) {
+        s_lastSendDiagnostics.stage = SEND_STAGE_PACKET_VALIDATION;
+        return IP_ERR_NULL_PTR;
+    }
+    if (!s_config.configured) {
+        s_lastSendDiagnostics.stage = SEND_STAGE_CONFIGURATION_CHECK;
+        return IP_ERR_NOT_CONFIGURED;
+    }
     
     // Determine next hop
+    s_lastSendDiagnostics.stage = SEND_STAGE_ROUTE_SELECTION;
     uint32_t nextHop = dstAddr;
     if (!is_local(dstAddr)) {
         nextHop = lookup_route(dstAddr);
@@ -900,8 +1049,10 @@ Status send_raw_packet(const uint8_t* packet, uint16_t len, uint32_t dstAddr)
             return IP_ERR_NO_ROUTE;
         }
     }
+    s_lastSendDiagnostics.nextHop = nextHop;
     
     // Resolve MAC address
+    s_lastSendDiagnostics.stage = SEND_STAGE_NEIGHBOR_RESOLUTION;
     uint8_t dstMAC[6];
     if (!resolve_mac_with_arp(nextHop, dstMAC)) {
         s_stats.txErrors++;
@@ -912,6 +1063,7 @@ Status send_raw_packet(const uint8_t* packet, uint16_t len, uint32_t dstAddr)
     uint8_t frame[ethernet::MAX_FRAME_LEN];
     uint16_t frameLen;
     
+    s_lastSendDiagnostics.stage = SEND_STAGE_ETHERNET_FRAME_CONSTRUCTION;
     ethernet::Status ethStatus = ethernet::build_frame(
         frame, sizeof(frame),
         dstMAC, s_config.macAddr,
@@ -925,7 +1077,10 @@ Status send_raw_packet(const uint8_t* packet, uint16_t len, uint32_t dstAddr)
     }
     
     // Send via NIC
+    s_lastSendDiagnostics.stage = SEND_STAGE_NIC_SUBMISSION;
     nic::Status nicStatus = nic::send_frame(frame, frameLen);
+    s_lastSendDiagnostics.nicStatus = static_cast<uint8_t>(nicStatus);
+    s_lastSendDiagnostics.nicStatusValid = true;
     if (nicStatus != nic::NIC_OK) {
         s_stats.txErrors++;
         return IP_ERR_TX_FAILED;
@@ -935,6 +1090,14 @@ Status send_raw_packet(const uint8_t* packet, uint16_t len, uint32_t dstAddr)
     s_stats.txBytes += len;
     
     return IP_OK;
+}
+
+Status send_raw_packet(const uint8_t* packet, uint16_t len, uint32_t dstAddr)
+{
+    const bool ownsDiagnostics = !s_sendDiagnosticsActive;
+    if (ownsDiagnostics) begin_send_diagnostics(dstAddr, 0, len);
+    const Status status = send_raw_packet_impl(packet, len, dstAddr);
+    return ownsDiagnostics ? finish_send_diagnostics(status) : status;
 }
 
 // ================================================================
