@@ -1,6 +1,6 @@
 # AArch64 ABI3 Developer Studio Guest Qualification
 
-- **Current working status:** `STUDIO_ARM64_PROJECT_EDITOR_VERIFIED` (R2A completed 3 fresh QAC-authorized project/edit/save/reopen/close workflows; three additional authorized attempts are preserved as partial)
+- **Current working status:** `STUDIO_RUN_LOADER_BLOCKED` (R2B2 Outcome C; the child remains unexecuted because the bare-metal loader shares the kernel translation/privilege context and Run is synchronous and unbounded. Accepted R2B1 Build and earlier R1e/R2A evidence remain preserved.)
 - **Historical guest baseline:** R1d; four diagnostic guest runs, 0 of 3 qualifying
 - **Historical run date:** 2026-11-02
 - **Repository:** `D:\dev\guideXOSServer_AARCH64`
@@ -126,3 +126,7 @@ R2A maps the pinned Studio project's logical filenames to reserved FAT 8.3 alias
 A later authorized no-Studio Phase 4 guest isolated the early failure with bounded loader and parser diagnostics. It confirmed EFI_DTB_TABLE_GUID discovery, accepted FDT header (0xd00dfeed, totalsize 0x101000, version 17), copied the DTB to LoaderData, and validated the physical handoff range and LoaderData memory-map coverage. It then stopped at parser stage STRUCTURE, token FDT_PROP, error PROPERTY_VALUE_FORMAT, structure offset 5572. The original serial line said reserved-after-EBS=1, but that field was hard-coded and did not prove allocator reservation; the failed guest stopped before allocator initialization. The follow-up did not capture the DTB bytes or identify the property/predicate, so the root cause remains unresolved and no parser acceptance behavior was changed.
 
 The minimal guest did not reach GIC selection, timer delivery, scheduler progress, desktop, or Studio. The status remains STUDIO_GUEST_PARTIAL, with **0 of 3 qualifying Studio boots**. See [AARCH64_BOOTDTB1_HANDOFF_DIAGNOSIS.md](AARCH64_BOOTDTB1_HANDOFF_DIAGNOSIS.md) for the QAC record, candidate hashes, provenance analysis, tests, and next acceptance requirement.
+
+## R2B2 follow-up (2026-11-08)
+
+R2B1's four QAC-authorized Studio Build workflows remain the accepted native Build baseline; they validated the exact return-42 and recovery return-43 ARM64 ELF artifacts but did not execute them. R2B2 built a source-matched candidate at `963e497d17c4f26e1097ab86866a809d5f26d692` and audited the authentic Studio Run callback through the v0.5-to-ABI-v1 adapter, App Model resolution, fixed-address NativeElf loader, and ARM64 entry bridge. The review found no child address-space or privilege isolation, synchronous unbounded execution, no artifact binding to the preceding BuildResult, and a return snapshot that hard-codes 42. Per the Run safety requirement, no QAC admission was requested and no child entry was called. R2B2 has **0 guest boots and 0 child executions**; Outcome C is `STUDIO_RUN_LOADER_BLOCKED`, not guest acceptance or QAC pending. Hosted gates and two hosted build-script failures are recorded in [AARCH64_ABI3_R2B2_STUDIO_NATIVE_RUN.md](AARCH64_ABI3_R2B2_STUDIO_NATIVE_RUN.md). R1e, R2A, R2B1 accepted results and their preserved partial attempts are unchanged.
