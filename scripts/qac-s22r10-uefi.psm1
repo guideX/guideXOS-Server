@@ -195,8 +195,12 @@ function New-QacS22R10QemuArguments {
         [Parameter(Mandatory)]$ValidatedManifest,
         [Parameter(Mandatory)][string]$QemuPath,
         [Parameter(Mandatory)][ValidateRange(49152,65535)][int]$QmpPort,
-        [ValidateRange(49152,65535)][Nullable[int]]$Com2TcpPort = $null
+        [AllowNull()][Nullable[int]]$Com2TcpPort = $null
     )
+
+    if ($null -ne $Com2TcpPort -and ([int]$Com2TcpPort -lt 49152 -or [int]$Com2TcpPort -gt 65535)) {
+        throw 'COM2 TCP port must be within the dynamic/private range 49152-65535.'
+    }
 
     $manifest = $ValidatedManifest.Manifest
     $arguments = [System.Collections.Generic.List[string]]::new()

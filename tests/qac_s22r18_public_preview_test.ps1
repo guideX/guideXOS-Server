@@ -45,10 +45,12 @@ try {
 
     $qmpPort = Get-QacS22R10QmpPortCandidate
     $qemuArgs = New-QacS22R10QemuArguments -ValidatedManifest $validated -QemuPath 'C:\Program Files\qemu\qemu-system-x86_64.exe' -QmpPort $qmpPort
+    $qemuArgsNullCom2 = New-QacS22R10QemuArguments -ValidatedManifest $validated -QemuPath 'C:\Program Files\qemu\qemu-system-x86_64.exe' -QmpPort $qmpPort -Com2TcpPort $null
     $driveIndexes = @(); for ($i = 0; $i -lt $qemuArgs.Count; $i++) { if ($qemuArgs[$i] -eq '-drive') { $driveIndexes += $i } }
     $driveArguments = @($driveIndexes | ForEach-Object { $qemuArgs[$_ + 1] })
     $joined = $qemuArgs -join ' '
     Assert-True 'launch has exactly two read-only firmware and CD-ROM drives' ($driveArguments.Count -eq 2 -and $driveArguments[0] -match 'readonly=on' -and $driveArguments[1] -match 'media=cdrom,readonly=on')
+    Assert-True 'explicitly absent COM2 keeps the ISO-only launch arguments unchanged' (($qemuArgsNullCom2 -join "`n") -eq ($qemuArgs -join "`n"))
     Assert-True 'launch disables networking, HMP, writable disks, and host filesystem sharing' ($qemuArgs -contains '-net' -and $qemuArgs -contains 'none' -and $qemuArgs -contains '-monitor' -and $qemuArgs -contains 'none' -and $joined -notmatch '(?i)fat:rw:|virtio-9p|virtiofs|vhost-user|smb=|hostfwd=')
     Assert-True 'launch QEMU arguments retain the exact verified ISO and read-only OVMF paths' ($joined.Contains($iso) -and $joined.Contains($ovmf) -and $joined -match '(?i)if=pflash,format=raw,readonly=on,file=')
     Assert-Throws 'public-preview profile rejects a guest-accessible COM2 host channel' { New-QacS22R10QemuArguments -ValidatedManifest $validated -QemuPath 'qemu-system-x86_64.exe' -QmpPort $qmpPort -Com2TcpPort (Get-QacS22R10QmpPortCandidate -ExcludePort @($qmpPort)) } 'forbids guest-accessible COM2'
