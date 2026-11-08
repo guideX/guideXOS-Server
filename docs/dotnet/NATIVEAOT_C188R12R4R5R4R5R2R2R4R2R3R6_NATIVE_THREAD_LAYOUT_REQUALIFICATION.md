@@ -1,8 +1,8 @@
 # C188 R6 — NativeAOT Thread Layout Requalification
 
-## Outcome: `NATIVE_REQUALIFICATION_DEFERRED`
+## Outcome: `NATIVE_TRANSITION_ADVANCED`
 
-R6 produced a fresh, hosted-ready candidate and passed the hosted regression, build, integrity, and runner admission checks. Native QEMU qualification was deferred because the QAC lane was occupied by another verified acceptance reservation when the final read-only ownership census ran. No R6 guest was launched, no R6 boot guard was created, and no retry was made.
+R6 produced a fresh candidate, passed hosted build and admission checks, and completed exactly one authorized QAC guest boot. The native trace shows the valid unattached checkpoint, PAL attachment, FLS assignment, actual ThreadStore publication, and a successful return from `InitializeModules`. The candidate intentionally stopped before `ManagedMain`; managed entry and collection were not requested.
 
 The implementation snapshot qualified by the candidate is `75cea2398d471847d50d653decbeb2aec7916e8c` on `v1.1_DOTNET_SUPPORT`. The starting HEAD was `e694fb4ec337bbb3b190a49f9b5a66fc1980c876`. The report is a documentation-only commit after that tested source snapshot.
 
@@ -25,7 +25,11 @@ R6 builds and records layout evidence from the pinned NativeAOT source commit `9
 
 The diagnostic does not infer attachment from a non-null raw `Thread*`. Its source contract permits the genuine pre-attachment state only when the flags are exactly zero/`TSF_Unknown`, PAL FLS is empty, the native thread ID and PAL stack bounds are valid, and the unchanged stock `ReversePInvokeAttachOrTrapThread` path performs construction and attachment. For an attached thread it requires `TSF_Attached`, matching thread/FLS identities, preemptive mode, and a valid transition frame. It neither forces the flag nor populates FLS. The candidate emits bounded ThreadStore publication event 32 and checks actual current-thread membership with `ThreadStore::Iterator`; a missing publication blocks the transition.
 
-This is source and hosted build evidence only. Since no R6 guest ran, the native thread state at `RhInitialize`, PAL attachment, FLS assignment, ThreadStore publication, gate 6, and `InitializeModules` remains unobserved.
+The native run confirmed the post-R5 checkpoint contract. `RhInitialize`, runtime instance, ThreadStore, and TLS were ready. At the pre-call snapshot, a raw `Thread*` was available while `GetCurrentThreadIfAvailable` classified the thread as absent and PAL FLS was empty. The OS thread ID was 1; the runtime Thread's PAL ID was not yet initialized. Gate 6 returned success. The gate reads the actual flags word and permits the absent-thread path only when it is exactly zero; the serial format records the attachment classification and gate result, but does not print that flags word separately.
+
+The stock reverse-P/Invoke path then read the empty PAL slot, set it to the same raw `Thread*`, reported attachment completion, and found that pointer in the actual ThreadStore list. Its post-attach PAL thread ID was 1, matching the observed OS thread ID. The transition returned and `InitializeModules` completed. The analyzer classifies this as `INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED`, with no fail-fast, no gate failure, no first-failure stage, and no managed-entry marker. The emitted state record is the sealed pre-call snapshot; it is printed after the transition result.
+
+No separate constructor marker was emitted, and the raw flags word was not serialized independently. The source contract, successful gate, post-attach PAL identity, FLS value, and verified ThreadStore membership provide the available evidence. No conclusion about Settings, managed lifetime, or collection follows from this run.
 
 ## Candidate and build provenance
 
@@ -54,7 +58,7 @@ All four incomplete build attempts remain preserved alongside the final candidat
 | `candidate-20261107T211844527Z` | Diagnostic image and kernel built; production NativeAOT rejected `Directory.Build.props` outside its then-configured artifact root. |
 | `candidate-20261107T212347964Z` | Managed production build exposed a case-insensitive `$artifactRoot`/`$ArtifactRoot` variable collision. The local output variable was renamed. |
 | `candidate-20261107T213103522Z` | Production-kernel admission exposed the same typed-parameter collision as a `.Count` access on a coerced string. The matched-root variable was separated and covered by a fixture. |
-| `candidate-20261107T213653124Z` | `READY`; all candidate and production build stages completed. |
+| `candidate-20261107T213653124Z` | `READY`; all candidate and production build stages completed, then used for the single authorized guest boot. |
 
 The R6 implementation and build fixes are committed locally in `856942bd`, `49227edf`, `850c692e`, `b6882bdd`, and `75cea239`. No changes were pushed.
 
@@ -73,25 +77,30 @@ All checks below are hosted checks and do not establish native guest behavior.
 - LocalStorage-before-initialization smoke suite: **PASS**, including allocation/get/set/release, attach, shutdown, no hidden pre-init manager state, and lifecycle recovery.
 - PowerShell parser and `git diff --check`: **PASS** for the final source scripts.
 
-The candidate-specific hosted preflight also passed and created fresh isolated writable guest state under the E: phase root. Its manifest is in `qac-guest-transition-attribution-C188R12R4R5R2R3R1-20261107T214936149Z-6d5d6c99e14e42918f16dd5399a06bcb\hosted-preflight.json`. This mode does not query QAC or create a launch guard. The candidate-specific guard remains absent.
+The candidate-specific hosted preflight also passed and created fresh isolated writable guest state under the E: phase root. Its manifest is in `qac-guest-transition-attribution-C188R12R4R5R2R3R1-20261107T214936149Z-6d5d6c99e14e42918f16dd5399a06bcb\hosted-preflight.json`. This mode did not query QAC or create a launch guard; the single subsequent boot created the guard listed below.
 
-## QAC ownership result and R4 comparison
+## Native single-boot evidence and R4 comparison
 
-The final read-only QAC census was recorded at:
+The first QAC census found a separate AArch64 acceptance reservation, so the boot was deferred at that point. After the user reported the lane was clear, a fresh status/list/inspection and Windows process census at `hosted-r6\qac-preflight-retry-20261108T010934399Z\qac-read-only-preflight.json` returned zero reservations and zero QEMU processes. The runner then repeated its own census immediately before admission and obtained one exclusive reservation for this run.
 
-`E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT\hosted-r6\qac-preflight-20261107T214740104Z\qac-read-only-preflight.json`
+The single run used QAC project `guideXOSServer`, acceptance mode, AMD64 `qemu-system-x86_64.exe`, TCG, one vCPU, and a 1024 MiB guest. It used a candidate-integrity-verified ESP copy and a run-owned writable UEFI variable image. Automatic retry was false and the one-boot limit was 1. The run correlation ID is `C188R12R4R5R2R3R1-20261108T010954570Z-45becc864dfd4ac78f315f3111c5fccb`; QAC reservation `3561fc445a9444f4a362f8e59a6d8bc2` launched QEMU PID `3892` under owner PID `9056`.
 
-The coordinator was online, but the lane was not clear: one verified acceptance reservation was running for `guideXOSServer-AARCH64-ABI3-Studio`, with `qemu-system-aarch64.exe` PID `28628` and owner PID `16888`. The Windows process census also found one QEMU process, and the reservation inspection succeeded. `Test-QacClearWithCensus` therefore returned false. This reservation belongs to another active task; R6 did not inspect it beyond the read-only status/list/inspect calls and did not release, cancel, or alter it.
+The run evidence root is `E:\CodexArtifacts\guideXOSServerV1.1_DOTNET_SUPPORT\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution\qac-guest-transition-attribution-C188R12R4R5R2R3R1-20261108T010954570Z-45becc864dfd4ac78f315f3111c5fccb`.
+
+The raw serial is `qac-guest-transition-attribution-C188R12R4R5R2R3R1-20261108T010954570Z-45becc864dfd4ac78f315f3111c5fccb\serial.log`, SHA-256 `A5B142C50FFFD6DAEC2BB0D6035BE3DC510E453E501DF193AF2B122F7112CA5B`. The analyzer output in the same run directory preserves that hash and returns `INITIALIZEMODULES_RETURNED_MANAGED_ENTRY_NOT_REQUESTED`. The guest manifest records `guestPass=true`, candidate integrity preserved after the guest, zero managed markers, and no collection request.
+
+The runner performed the owned QMP `quit`, observed QEMU exit code 0, verified release of reservation `3561fc445a9444f4a362f8e59a6d8bc2`, and captured a post-run QAC census with zero reservations and zero QEMU processes. The candidate-specific one-boot guard is `guest-launch-attempt-candidate-20261107T213653124Z.json`; SHA-256 `BE47C45AF059D0B3DD82A84F60CF14FF9EF76E63CE6893240C3A08566CE85D65`.
 
 | Property | R4 evidence | R6 result |
 |---|---|---|
-| False attached-state indication | Present; startup marker aliased the flags field | Source overlap removed and compile-time layout assertions pass; guest state not observed |
-| Transition-frame overlap | Source defect proven | FLS shadow removed; PAL LocalStorage owns the value; guest state not observed |
-| PAL FLS getter | Returned null in the R4 trace | Hosted getter/setter and slot tests pass; native guest value not observed |
-| PAL attachment and ThreadStore publication | Not established | New bounded publication check is linked; no guest sequence observed |
-| Gate 6 / `InitializeModules` | Safe stop; `InitializeModules` not reached | Not run because QAC was occupied |
-| `ManagedMain` | Not reached | Suppressed by candidate design; no guest was started |
+| False attached-state indication | Present; startup marker aliased the flags field | Pre-call checkpoint reports attachment absent, empty PAL FLS, and gate success under the zero-flags contract |
+| Transition-frame overlap | Source defect proven | FLS shadow removed; PAL LocalStorage owns the value; layout assertions pass |
+| PAL FLS getter | Returned null in the R4 trace | Native pre-attach getter returned empty; setter stored the raw Thread in the same LocalStorage identity |
+| PAL attachment and ThreadStore publication | Not established | PAL attach completed; exact raw Thread pointer was found in the ThreadStore list |
+| Native/OS thread identity | R4 discrepancy observed | PAL thread ID after attachment and observed OS ID were both 1; pre-attach runtime Thread ID was 0 as expected for the absent state |
+| Gate 6 / `InitializeModules` | Safe stop; `InitializeModules` not reached | Gate passed; `InitializeModules` returned without a fail-fast |
+| `ManagedMain` | Not reached | Not requested by design; no managed-entry marker |
 
 ## Next step
 
-Keep this unbooted candidate and its inventory. Once the QAC owner has released its reservation, repeat the status/list/inspection and Windows process census immediately before launch. If the lane is clear and the candidate inventory still verifies, run the existing transition runner exactly once with this candidate. Do not infer runtime attachment, `InitializeModules`, Settings, collection, or managed lifetime behavior from the hosted results in this report.
+The native layout and transition correction advanced through `InitializeModules`. The next qualification should build on that boundary and explicitly scope any managed-entry work. Keep Settings, collection, and managed lifetime behavior unaccepted until those paths execute and produce their own evidence.
