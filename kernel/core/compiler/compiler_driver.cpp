@@ -229,7 +229,7 @@ bool compile_for_target(const char* sourcePath,
 
     ElfLayout layout = {};
     const uint64_t runtimeImageBase = resolvedTarget == CompilerTarget::Arm64
-        ? UINT64_C(0x51000000) : BOOTSTRAP_IMAGE_BASE;
+        ? ARM64_NATIVE_ELF_BOOTSTRAP_BASE : BOOTSTRAP_IMAGE_BASE;
     if (!write_bootstrap_elf_for_target_at_base(s_code, codeBytes, resolvedTarget, runtimeImageBase,
                                                 s_elf, sizeof(s_elf), &layout)) {
         diagnostics.error(driverLocation, "ELF writer could not construct bounded image", "elf");

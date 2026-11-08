@@ -163,6 +163,22 @@ foreach ($specialKey in $SpecialKeys) {
         $events.Add((New-KeyEvent 'ctrl' $false))
         continue
     }
+    if ($specialKey.Equals('ControlA', [StringComparison]::OrdinalIgnoreCase)) {
+        $events.Add((New-KeyEvent 'ctrl' $true))
+        $events.Add((New-KeyEvent 'a' $true))
+        $events.Add((New-KeyEvent 'a' $false))
+        $events.Add((New-KeyEvent 'ctrl' $false))
+        continue
+    }
+    if ($specialKey.Equals('ControlShiftB', [StringComparison]::OrdinalIgnoreCase)) {
+        $events.Add((New-KeyEvent 'ctrl' $true))
+        $events.Add((New-KeyEvent 'shift' $true))
+        $events.Add((New-KeyEvent 'b' $true))
+        $events.Add((New-KeyEvent 'b' $false))
+        $events.Add((New-KeyEvent 'shift' $false))
+        $events.Add((New-KeyEvent 'ctrl' $false))
+        continue
+    }
     if ($specialKey.Equals('ControlS', [StringComparison]::OrdinalIgnoreCase) -or
         $specialKey.Equals('ControlW', [StringComparison]::OrdinalIgnoreCase)) {
         $letter = if ($specialKey.Equals('ControlS', [StringComparison]::OrdinalIgnoreCase)) { 's' } else { 'w' }
@@ -191,6 +207,9 @@ foreach ($specialKey in $SpecialKeys) {
         'enter' { 'ret' }
         'escape' { 'esc' }
         'backspace' { 'backspace' }
+        'delete' { 'delete' }
+        'home' { 'home' }
+        'end' { 'end' }
         'left' { 'left' }
         'right' { 'right' }
         'up' { 'up' }

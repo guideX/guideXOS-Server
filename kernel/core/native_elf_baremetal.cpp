@@ -22,6 +22,7 @@
 #include "include/kernel/native_architecture.h"
 #if defined(GXOS_AARCH64_PHASE10)
 #include "compiler/compiler_build_service.h"
+#include "compiler/compiler_target.h"
 #endif
 #if defined(GXOS_AARCH64_PHASE9)
 #include "include/kernel/application_runtime.h"

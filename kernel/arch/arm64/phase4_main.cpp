@@ -100,6 +100,14 @@ struct FilesystemWork {
     volatile uint64_t reads;
     volatile uint64_t enumerations;
     volatile uint64_t failures;
+    volatile uint64_t seekFailures;
+    volatile uint64_t readMismatches;
+    volatile uint64_t eofMismatches;
+    volatile uint64_t enumerationFailures;
+    volatile uint32_t firstFailureOperation;
+    volatile int32_t lastSeekStatus;
+    volatile int32_t lastReadBytes;
+    volatile int32_t lastEofBytes;
 };
 
 static Work g_work[3] = {
@@ -536,13 +544,26 @@ static void filesystem_task(void*)
         }
  #endif
 #endif
-        if (kernel::vfs::seek(handle, 0, kernel::vfs::SEEK_SET) != kernel::vfs::VFS_OK) {
-            ++g_fs_work.failures; g_fs_failure = 1;
+        const kernel::vfs::Status seekStatus = kernel::vfs::seek(handle, 0, kernel::vfs::SEEK_SET);
+        g_fs_work.lastSeekStatus = seekStatus;
+        if (seekStatus != kernel::vfs::VFS_OK) {
+            ++g_fs_work.failures; ++g_fs_work.seekFailures; g_fs_failure = 1;
+            if (g_fs_work.firstFailureOperation == 0) g_fs_work.firstFailureOperation = 1;
         }
         const int32_t bytes = kernel::vfs::read(handle, buffer, sizeof(buffer));
         const int32_t eof = kernel::vfs::read(handle, buffer, 1);
+        g_fs_work.lastReadBytes = bytes;
+        g_fs_work.lastEofBytes = eof;
         if (!text_matches(buffer, bytes, kFixtureText) || eof != 0) {
             ++g_fs_work.failures; g_fs_failure = 1;
+            if (!text_matches(buffer, bytes, kFixtureText)) {
+                ++g_fs_work.readMismatches;
+                if (g_fs_work.firstFailureOperation == 0) g_fs_work.firstFailureOperation = 2;
+            }
+            if (eof != 0) {
+                ++g_fs_work.eofMismatches;
+                if (g_fs_work.firstFailureOperation == 0) g_fs_work.firstFailureOperation = 3;
+            }
         }
         ++g_fs_work.reads;
         // Keep the read path hot on every slice while periodically exercising
@@ -554,6 +575,8 @@ static void filesystem_task(void*)
             bool saw_nested = false;
             if (!enumerate_phase4(&saw_hello, &saw_nested) || !saw_hello || !saw_nested) {
                 ++g_fs_work.failures; g_fs_failure = 1;
+                ++g_fs_work.enumerationFailures;
+                if (g_fs_work.firstFailureOperation == 0) g_fs_work.firstFailureOperation = 4;
             }
             ++g_fs_work.enumerations;
         }
@@ -1916,6 +1939,22 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
         phase3_serial_dec(g_fs_work.failures);
         print(" fs-failure=");
         phase3_serial_dec(g_fs_failure);
+        print(" fs-first-failure-operation=");
+        phase3_serial_dec(g_fs_work.firstFailureOperation);
+        print(" fs-seek-failures=");
+        phase3_serial_dec(g_fs_work.seekFailures);
+        print(" fs-read-mismatches=");
+        phase3_serial_dec(g_fs_work.readMismatches);
+        print(" fs-eof-mismatches=");
+        phase3_serial_dec(g_fs_work.eofMismatches);
+        print(" fs-enumeration-failures=");
+        phase3_serial_dec(g_fs_work.enumerationFailures);
+        print(" fs-last-seek-status=0x");
+        phase3_serial_hex(static_cast<uint32_t>(g_fs_work.lastSeekStatus));
+        print(" fs-last-read-bytes=0x");
+        phase3_serial_hex(static_cast<uint32_t>(g_fs_work.lastReadBytes));
+        print(" fs-last-eof-bytes=0x");
+        phase3_serial_hex(static_cast<uint32_t>(g_fs_work.lastEofBytes));
         print(" graphics-complete=");
         phase3_serial_dec(g_graphics_complete);
         print(" app-complete=");

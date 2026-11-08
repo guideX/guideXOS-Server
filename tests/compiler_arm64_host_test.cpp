@@ -39,6 +39,15 @@ int main()
     ElfValidationResult validation = {};
     if (!validate_bootstrap_elf_for_target(elf, layout.outputBytes, CompilerTarget::Arm64,
                                            layout.imageBase, layout.codeOffset, code, codeBytes, &validation)) return 6;
+    uint8_t residentElf[BOOTSTRAP_MAX_ELF_BYTES] = {};
+    ElfLayout residentLayout = {};
+    if (ARM64_NATIVE_ELF_BOOTSTRAP_BASE != UINT64_C(0x51000000) ||
+        !write_bootstrap_elf_for_target_at_base(code, codeBytes, CompilerTarget::Arm64,
+            ARM64_NATIVE_ELF_BOOTSTRAP_BASE, residentElf, sizeof(residentElf), &residentLayout) ||
+        !validate_bootstrap_elf_for_target(residentElf, residentLayout.outputBytes, CompilerTarget::Arm64,
+            ARM64_NATIVE_ELF_BOOTSTRAP_BASE, residentLayout.codeOffset, code, codeBytes, &validation)) return 10;
+    if (validate_bootstrap_elf_for_target(residentElf, residentLayout.outputBytes, CompilerTarget::Arm64,
+            UINT64_C(0x50000000), residentLayout.codeOffset, code, codeBytes, &validation)) return 11;
     uint8_t amd64Code[amd64::AMD64_MAX_BOOTSTRAP_BYTES] = {};
     uint32_t amd64Bytes = 0;
     if (!amd64::emit_function(function, amd64Code, sizeof(amd64Code), &amd64Bytes) || amd64Bytes <= 18) return 7;

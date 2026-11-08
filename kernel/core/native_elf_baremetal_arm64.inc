@@ -3,7 +3,7 @@
 
 static const uint64_t kArm64PageSize = UINT64_C(0x1000);
 static const uint64_t kArm64PreferredBase = UINT64_C(0x50000000);
-static const uint64_t kArm64NestedPreferredBase = UINT64_C(0x51000000);
+static const uint64_t kArm64NestedPreferredBase = compiler::ARM64_NATIVE_ELF_BOOTSTRAP_BASE;
 static const uint32_t kArm64MaxPackages = 8;
 static const uint32_t kArm64MaxManifestBytes = 8192;
 static const uint32_t kArm64MaxProgramHeaders = 32;
@@ -2075,9 +2075,19 @@ static bool phase11_path_valid(const char* path)
     return path[0] == '/';
 }
 
+class Phase9VfsScope {
+public:
+    Phase9VfsScope() { phase9_vfs_enter(); }
+    ~Phase9VfsScope() { phase9_vfs_exit(); }
+private:
+    Phase9VfsScope(const Phase9VfsScope&);
+    Phase9VfsScope& operator=(const Phase9VfsScope&);
+};
+
 static gx_result GX_CALL phase11_file_stat(gx_app_context* context, const char* path, gx_file_info* output)
 {
     if (!phase9_runtime(context) || !phase11_path_valid(path) || !output) return GX_ERROR_INVALID_ARGUMENT;
+    Phase9VfsScope vfsScope;
     vfs::FileInfo info = {};
     const vfs::Status status = vfs::stat(path, &info);
 #if defined(GXOS_AARCH64_PHASE12)
@@ -2097,6 +2107,7 @@ static gx_result GX_CALL phase11_file_read(gx_app_context* context, const char* 
 {
     if (!phase9_runtime(context) || !phase11_path_valid(path) || !outBytes || (!buffer && capacity != 0)) return GX_ERROR_INVALID_ARGUMENT;
     *outBytes = 0;
+    Phase9VfsScope vfsScope;
     vfs::FileInfo info = {};
     if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR || info.size > capacity) return GX_ERROR_FAILED;
     const uint32_t bytes = static_cast<uint32_t>(info.size);
@@ -2112,6 +2123,7 @@ static gx_result GX_CALL phase11_file_list(gx_app_context* context, const char* 
     if (!phase9_runtime(context) || !phase11_path_valid(path) || !outCount || !outTruncated ||
         (capacity != 0 && !entries)) return GX_ERROR_INVALID_ARGUMENT;
     *outCount = 0; *outTruncated = 0;
+    Phase9VfsScope vfsScope;
     const uint8_t iterator = vfs::opendir(path);
     if (iterator == 0xff) return GX_ERROR_FAILED;
     vfs::DirEntry item = {};
@@ -2139,6 +2151,8 @@ static gx_result GX_CALL phase11_file_write(gx_app_context* context, const char*
                                             uint32_t bytes, uint32_t* outBytes)
 {
     if (!phase9_runtime(context) || !phase11_path_valid(path) || !outBytes || (!buffer && bytes != 0)) return GX_ERROR_INVALID_ARGUMENT;
+    *outBytes = 0;
+    Phase9VfsScope vfsScope;
     const int32_t written = vfs::write_file(path, buffer, bytes);
     if (written < 0 || static_cast<uint32_t>(written) != bytes) return GX_ERROR_FAILED;
     *outBytes = bytes;
@@ -2148,12 +2162,14 @@ static gx_result GX_CALL phase11_file_write(gx_app_context* context, const char*
 static gx_result GX_CALL phase11_file_mkdir(gx_app_context* context, const char* path)
 {
     if (!phase9_runtime(context) || !phase11_path_valid(path)) return GX_ERROR_INVALID_ARGUMENT;
+    Phase9VfsScope vfsScope;
     return vfs::mkdir(path) == vfs::VFS_OK ? GX_OK : GX_ERROR_FAILED;
 }
 
 static gx_result GX_CALL phase11_file_remove(gx_app_context* context, const char* path)
 {
     if (!phase9_runtime(context) || !phase11_path_valid(path)) return GX_ERROR_INVALID_ARGUMENT;
+    Phase9VfsScope vfsScope;
     return vfs::unlink(path) == vfs::VFS_OK ? GX_OK : GX_ERROR_FAILED;
 }
 
@@ -2885,14 +2901,14 @@ bool phase10_all_complete() { return false; }
 uint32_t phase10_launches() { return 0; }
 #endif
 
-static bool phase11_run_package(Arm64Package* package)
+static bool phase11_run_package(Arm64Package* package, uint64_t preferredBase)
 {
     if (!package || s_arm64LaunchInProgress) return false;
     s_arm64LaunchInProgress = true;
     Phase9Runtime runtime{};
     runtime.loader.package = package;
     runtime.loader.verbose = true;
-    runtime.loader.preferredBase = kArm64PreferredBase;
+    runtime.loader.preferredBase = preferredBase;
     const uint8_t runtimeId = static_cast<uint8_t>((++s_phase9RuntimeSequence % 255u) + 1u);
     const uint16_t generation = static_cast<uint16_t>((++s_phase9Generation & 0xffffu) ?
         (s_phase9Generation & 0xffffu) : 1u);
@@ -2930,7 +2946,7 @@ bool phase11_run_developer_studio()
     Arm64Package* package = arm64_find_package("com.guidexos.phase11.developerstudio");
     if (!package) return false;
     arm64_print("[guideXOS] Developer Studio compiler: initialized\n");
-    return phase11_run_package(package);
+    return phase11_run_package(package, kArm64PreferredBase);
 }
 
 bool phase11_run_application(const char* appName, bool autoClose)
@@ -2946,7 +2962,9 @@ bool phase11_run_application(const char* appName, bool autoClose)
     Arm64Package* package = arm64_find_package(appName);
     if (!package || !arm64_equal(package->id, "com.guidexos.phase11.crossarch")) return false;
     arm64_print("[guideXOS] selected generated payload: "); arm64_print(package->executable); arm64_print("\n");
-    return phase11_run_package(package);
+    // The compiler's ARM64 ELF contract is 0x51000000. Keep the loader's
+    // exact fixed-address check and pass the producer's declared base here.
+    return phase11_run_package(package, compiler::ARM64_NATIVE_ELF_BOOTSTRAP_BASE);
 }
 
 #endif

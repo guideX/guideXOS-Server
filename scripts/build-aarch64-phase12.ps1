@@ -4,7 +4,8 @@ param(
     [string]$OutputDirectory = '',
     [string]$DeveloperStudioRoot = 'D:\dev\guideXOS_Developer_Studio',
     [string]$V05ServerRoot = '',
-    [switch]$ProductionStudio
+    [switch]$ProductionStudio,
+    [switch]$R2B1Workspaces
 )
 
 $ErrorActionPreference = 'Stop'
@@ -218,6 +219,20 @@ New-Item -ItemType Directory -Path $packageSkeletonStage -Force | Out-Null
 # both freshly built target ELFs; no target ELF is present before the guest build.
 Copy-Item -LiteralPath (Join-Path $proofSource 'app\app.json') -Destination (Join-Path $packageSkeletonStage 'app.json') -Force
 
+$r2b1Workspace = $null
+if ($R2B1Workspaces) {
+    $vfsFailureSource = Join-Path $repoRoot 'sdk\samples\r2b1_vfs_failure'
+    $r2b1Workspace = Join-Path $stageRoot 'Phase12VfsProof'
+    New-Item -ItemType Directory -Path (Join-Path $r2b1Workspace 'app') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $r2b1Workspace 'src') -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $vfsFailureSource 'guidexos.project') -Destination (Join-Path $r2b1Workspace 'guidexos.project') -Force
+    Copy-Item -LiteralPath (Join-Path $vfsFailureSource 'src\main.cpp') -Destination (Join-Path $r2b1Workspace 'src\main.cpp') -Force
+    Copy-Item -LiteralPath (Join-Path $vfsFailureSource 'app\app.json') -Destination (Join-Path $r2b1Workspace 'app\app.json') -Force
+    if (Test-Path -LiteralPath (Join-Path $r2b1Workspace 'build') -PathType Container) {
+        throw 'R2B1 VFS error fixture unexpectedly contains prebuilt output.'
+    }
+}
+
 if (Test-Path -LiteralPath (Join-Path $proofStage 'bin') -PathType Container) { throw 'Phase 12 staging unexpectedly contains target package outputs before the guest build' }
 Write-Host '[guideXOS] Phase12 target ELFs absent before guest build: PASS' -ForegroundColor Green
 
@@ -254,7 +269,7 @@ $serverHead = (& git -C $repoRoot rev-parse HEAD 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository revision.' }
 $serverBranch = (& git -C $repoRoot branch --show-current 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to record the source repository branch.' }
-$candidateProfile = if ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
+$candidateProfile = if ($ProductionStudio -and $R2B1Workspaces) { 'r2b1-native-build-ui' } elseif ($ProductionStudio) { 'production-ui' } else { 'phase12-smoke' }
 $studioSmokeEnabled = !$ProductionStudio
 $studioDriverOverlay = Join-Path $studioSourceCopy 'build.ps1'
 $studioCompatOverlay = Join-Path $studioSourceCopy 'src\studio_v05_compile_compat.h'
@@ -299,6 +314,15 @@ $candidateManifest = [ordered]@{
         kernelElfSha256 = (Get-Sha256Hex (Join-Path $OutputDirectory 'kernel.elf'))
         ramdiskSha256 = (Get-Sha256Hex $ramdisk)
     }
+    r2b1VfsFailureWorkspace = if ($R2B1Workspaces) {
+        [ordered]@{
+            guestPath = '/Phase12VfsProof'
+            projectSha256 = Get-Sha256Hex (Join-Path $r2b1Workspace 'guidexos.project')
+            sourceSha256 = Get-Sha256Hex (Join-Path $r2b1Workspace 'src\main.cpp')
+            configuredUnavailablePackageRoot = '/Apps/R2B1Missing/Child'
+            targetArtifactsPrebuilt = $false
+        }
+    } else { $null }
 }
 $candidateManifestPath = Join-Path $OutputDirectory 'candidate-manifest.json'
 $candidateManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $candidateManifestPath -Encoding utf8
