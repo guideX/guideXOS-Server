@@ -470,9 +470,14 @@ function Test-QacTransitionCandidateProfile {
     }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
-    $expectedIdentity = 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-transition-attribution-v1'
-    if ([string]$manifest.mode -cne 'NativeAotInitializeModulesTransitionAttribution' -or
-        [string]$manifest.result -cne 'TRANSITION_ATTRIBUTION_HOSTED_READY' -or
+    $isManagedEntryProbe = [string]$manifest.mode -ceq 'NativeAotFirstManagedEntryProbe'
+    $expectedIdentity = if ($isManagedEntryProbe) {
+        'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-entry-v1'
+    } else { 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-transition-attribution-v1' }
+    $expectedResult = if ($isManagedEntryProbe) { 'MANAGED_ENTRY_PROBE_HOSTED_READY' } else { 'TRANSITION_ATTRIBUTION_HOSTED_READY' }
+    $expectedNextPhase = if ($isManagedEntryProbe) { 'C188R12R4R5R2R3_First_Managed_Entry_Guest' } else { 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' }
+    if ([string]$manifest.mode -cnotin @('NativeAotInitializeModulesTransitionAttribution','NativeAotFirstManagedEntryProbe') -or
+        [string]$manifest.result -cne $expectedResult -or
         [string]$manifest.candidateRoot -cne $candidateFull -or
         [string]$manifest.runtimePackIdentity -cne $expectedIdentity -or
         [string]$manifest.runtimePackSourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
@@ -482,7 +487,7 @@ function Test-QacTransitionCandidateProfile {
         [string]$manifest.c188R12R4R5R2R2R4SafeHandoffTransition -cne 'disabled before RhpReversePInvoke and InitializeModules' -or
         -not [bool]$manifest.c188R12R4R5R2R3InitializeModulesAttribution -or
         [string]$manifest.c188R12R4R5R2R3InitializeModulesAttributionMarker -cne 'C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION' -or
-        [string]$manifest.nextGuestPhase -cne 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' -or
+        [string]$manifest.nextGuestPhase -cne $expectedNextPhase -or
         [bool]$manifest.managedMainEnteredByCandidate -or [int]$manifest.managedGraphCallbacks -ne 0 -or
         -not [bool]$manifest.productionNativeAotPersistentCompositeLifecycle -or
         -not [bool]$manifest.productionIsolationChecks.diagnosticAndProductionOutputsSeparate -or
@@ -492,8 +497,21 @@ function Test-QacTransitionCandidateProfile {
         [bool]$manifest.productionIsolationChecks.productionRuntimePackTransitionAttributionProfile -or
         -not [bool]$manifest.productionIsolationChecks.productionMapExcludesSafeHandoff -or
         -not [bool]$manifest.productionIsolationChecks.productionMapExcludesTransitionAttribution -or
+        ($isManagedEntryProbe -and -not [bool]$manifest.productionIsolationChecks.productionMapExcludesManagedEntryProbe) -or
+        ($isManagedEntryProbe -and [bool]$manifest.productionIsolationChecks.productionRuntimePackManagedEntryProbeProfile) -or
         -not [bool]$manifest.productionIsolationChecks.noGcOwnershipProofProfileInProduction) {
         throw 'Candidate manifest is not a consistent, unexecuted C188 transition-attribution profile.'
+    }
+    if ($isManagedEntryProbe -and
+        (-not [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbe -or
+         [string]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.entryMethod -cne 'HostLogProof.ManagedEntryProbe.ManagedMain' -or
+         [string]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.ABI -cne 'UnmanagedCallersOnly(CallConvCdecl)' -or
+         [int]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.seed -ne 14 -or
+         [int]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.expectedResult -ne 49 -or
+         -not [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.methodAllocationFree -or
+         -not [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.runtimeInitializationMayAllocate -or
+         [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.collectionRequested)) {
+        throw 'R7 candidate managed-entry contract is missing, mismatched, or advertises an unsafe runtime guarantee.'
     }
     $contract = $manifest.transitionAttributionContract
     if ([string]$contract.recordSchema -cne 'fixed-size C188R12R4R5R2R3_FATAL plus C188R12R4R5R2R3_STATE' -or
@@ -581,8 +599,8 @@ function Test-QacTransitionCandidateProfile {
         $layout = $layoutEvidenceProperty.Value
         $artifactRootProperty = $manifest.PSObject.Properties['artifactRoot']
         $layoutArtifactRoot = if ($null -eq $artifactRootProperty) { '' } else { [string]$artifactRootProperty.Value }
-        $layoutPhaseRoot = [System.IO.Path]::GetFullPath((Join-Path $layoutArtifactRoot `
-            'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution'))
+        $layoutPhaseName = if ($isManagedEntryProbe) { 'c188r12r4r5r2r3-managed-entry' } else { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' }
+        $layoutPhaseRoot = [System.IO.Path]::GetFullPath((Join-Path $layoutArtifactRoot $layoutPhaseName))
         $layoutSourceFiles = $runtime.c188r12r4r5r4ThreadStoreReadinessSourceFiles
         if ([string]::IsNullOrWhiteSpace($layoutArtifactRoot) -or
             -not [string]::Equals($phaseFull,$layoutPhaseRoot,[System.StringComparison]::OrdinalIgnoreCase) -or
@@ -639,10 +657,56 @@ function Test-QacTransitionCandidateProfile {
     if ([string]$callMap.lockedRuntimeCommit -cne [string]$manifest.runtimePackSourceCommit -or
         @($callMap.sites).Count -lt 1) { throw 'Transition call-site map is malformed or targets another runtime commit.' }
     $matrix = Get-Content -LiteralPath $prerequisiteMatrix -Raw | ConvertFrom-Json -ErrorAction Stop
+    $managedDispatchConditionalProperty = $matrix.safetyGate.PSObject.Properties['managedDispatchConditional']
+    $managedDispatchConditional = if ($null -eq $managedDispatchConditionalProperty) { $false } else { [bool]$managedDispatchConditionalProperty.Value }
     if ([string]$matrix.schema -cne 'C188R12R4R5R2R3_TRANSITION_PREREQUISITE_MATRIX_V1' -or
         [string]$matrix.candidateMode -cne [string]$manifest.mode -or
-        -not [bool]$matrix.safetyGate.noManagedDispatch -or -not [bool]$matrix.safetyGate.noCollection) {
+        ([bool]$matrix.safetyGate.noManagedDispatch -eq $isManagedEntryProbe) -or
+        ($managedDispatchConditional -ne $isManagedEntryProbe) -or
+        -not [bool]$matrix.safetyGate.noCollection) {
         throw 'Transition prerequisite matrix does not preserve the diagnostic safety gate.'
+    }
+    if ($isManagedEntryProbe) {
+        $probeDisassembly = Join-Path $candidateFull 'managedEntryProbe.disassembly.txt'
+        $probeSource = Join-Path $repoFull 'samples\managed\HostLogProof\ManagedEntryProbe.cs'
+        $probeHeader = Join-Path $repoFull 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_entry_probe.h'
+        $probeHostedResultsPath = & $RequireContainedFile ([string]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.hostedResults) 'R7 managed-entry hosted test results'
+        foreach ($target in @(
+            @($probeDisassembly,[string]$artifactHashes.candidateManagedEntryProbeDisassembly,'Managed entry probe disassembly'),
+            @($probeSource,[string]$artifactHashes.managedEntryProbeSource,'Managed entry probe source'),
+            @($probeHeader,[string]$artifactHashes.managedEntryProbeRuntimeHeader,'Managed entry probe native header'),
+            @($probeHostedResultsPath,[string]$artifactHashes.managedEntryProbeHostedTestResults,'Managed entry probe hosted results')
+        )) { & $RequireHash $target[0] $target[1] $target[2] }
+        $probeMapSymbol = [string]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.entryMethodMapSymbol
+        $probeMapText = Get-Content -LiteralPath $managedMap -Raw
+        $probeDisassemblyText = Get-Content -LiteralPath $probeDisassembly -Raw
+        $reversePInvokeMap = [regex]::Match($probeMapText,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvoke\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
+        $reversePInvokeReturnMap = [regex]::Match($probeMapText,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvokeReturn\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
+        $expectedProbeCallTargets = @()
+        if ($reversePInvokeMap.Success -and $reversePInvokeReturnMap.Success) {
+            $expectedProbeCallTargets += ('0x' + ([Convert]::ToUInt64($reversePInvokeMap.Groups['address'].Value,16)).ToString('x'))
+            $expectedProbeCallTargets += ('0x' + ([Convert]::ToUInt64($reversePInvokeReturnMap.Groups['address'].Value,16)).ToString('x'))
+        }
+        $actualProbeCallTargets = @([regex]::Matches($probeDisassemblyText,'(?m)\bcall\s+(?<target>0x[0-9a-fA-F]+)\b') |
+            ForEach-Object { $_.Groups['target'].Value.ToLowerInvariant() })
+        $probeCallsMatch = @($expectedProbeCallTargets).Count -eq 2 -and
+            @($actualProbeCallTargets).Count -eq 2 -and
+            $actualProbeCallTargets[0] -ceq $expectedProbeCallTargets[0] -and
+            $actualProbeCallTargets[1] -ceq $expectedProbeCallTargets[1]
+        if ([string]::IsNullOrWhiteSpace($probeMapSymbol) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern ([regex]::Escape($probeMapSymbol)) -Quiet) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern 'GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState' -Quiet) -or
+            -not (Select-String -LiteralPath $probeDisassembly -Pattern '5237454[eE]' -Quiet) -or
+            -not (Select-String -LiteralPath $probeDisassembly -Pattern '5237444[eE]' -Quiet) -or
+            -not $probeCallsMatch) {
+            throw 'R7 candidate map or linked method body does not prove the entry symbol and stock reverse-P/Invoke marker path.'
+        }
+        $probeHosted = Get-Content -LiteralPath $probeHostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$probeHosted.result -cne 'PASS' -or [int]$probeHosted.assertionCount -lt 12 -or
+            [bool]$probeHosted.qemuLaunched -or [bool]$probeHosted.qacReserved -or
+            [bool]$probeHosted.managedCollectionRequested) {
+            throw 'R7 managed-entry focused hosted checks are incomplete or crossed the guest boundary.'
+        }
     }
     return [pscustomobject]@{
         CandidateRoot=$candidateFull;PhaseRoot=$phaseFull;ManifestPath=$manifestPath

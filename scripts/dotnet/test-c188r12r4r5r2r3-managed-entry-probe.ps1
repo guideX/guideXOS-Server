@@ -1,0 +1,108 @@
+param(
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+    [Parameter(Mandatory=$true)][string]$OutputDirectory,
+    [Parameter(Mandatory=$true)][string]$RuntimePackManifest,
+    [Parameter(Mandatory=$true)][string]$ManagedMap,
+    [Parameter(Mandatory=$true)][string]$ManagedDisassembly,
+    [Parameter(Mandatory=$true)][string]$KernelBuildLog
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$root = [System.IO.Path]::GetFullPath($RepoRoot)
+$results = [System.Collections.Generic.List[object]]::new()
+function Assert-Probe([bool]$Condition,[string]$Name) {
+    $results.Add([ordered]@{name=$Name;passed=$Condition})
+    if (-not $Condition) { throw "R7 managed-entry hosted check failed: $Name" }
+}
+foreach ($path in @($RuntimePackManifest,$ManagedMap,$ManagedDisassembly,$KernelBuildLog)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "R7 hosted-test input is missing: $path" }
+}
+$probePath = Join-Path $root 'samples\managed\HostLogProof\ManagedEntryProbe.cs'
+$projectPath = Join-Path $root 'samples\managed\HostLogProof\HostLogProof.csproj'
+$platformPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_platform.cpp'
+$nativeHeaderPath = Join-Path $root 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_entry_probe.h'
+$kernelPath = Join-Path $root 'kernel\core\nativeaot_pal_qemu_test.cpp'
+$runnerPath = Join-Path $root 'scripts\dotnet\run-c188r12r4r5-gc-ownership-qac-guest.ps1'
+$runtimeSource = Join-Path $root 'out\dotnet\gc-feasibility-baseline\nativeaot-runtime\src\coreclr\nativeaot'
+$startupHelpersPath = Join-Path $runtimeSource 'Common\src\Internal\Runtime\CompilerHelpers\StartupCodeHelpers.cs'
+$threadPath = Join-Path $runtimeSource 'Runtime\thread.cpp'
+$threadHeaderPath = Join-Path $runtimeSource 'Runtime\thread.h'
+foreach ($path in @($probePath,$projectPath,$platformPath,$nativeHeaderPath,$kernelPath,$runnerPath,$startupHelpersPath,$threadPath,$threadHeaderPath)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "R7 source-contract input is missing: $path" }
+}
+$probe = Get-Content -LiteralPath $probePath -Raw
+$project = Get-Content -LiteralPath $projectPath -Raw
+$platform = Get-Content -LiteralPath $platformPath -Raw
+$nativeHeader = Get-Content -LiteralPath $nativeHeaderPath -Raw
+$kernel = Get-Content -LiteralPath $kernelPath -Raw
+$runner = Get-Content -LiteralPath $runnerPath -Raw
+$startupHelpers = Get-Content -LiteralPath $startupHelpersPath -Raw
+$threadSource = Get-Content -LiteralPath $threadPath -Raw
+$threadHeader = Get-Content -LiteralPath $threadHeaderPath -Raw
+$map = Get-Content -LiteralPath $ManagedMap -Raw
+$disassembly = Get-Content -LiteralPath $ManagedDisassembly -Raw
+$kernelLog = Get-Content -LiteralPath $KernelBuildLog -Raw
+$runtimeManifest = Get-Content -LiteralPath $RuntimePackManifest -Raw | ConvertFrom-Json -ErrorAction Stop
+$reversePInvokeMap = [regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvoke\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
+$reversePInvokeReturnMap = [regex]::Match($map,'(?m)^\s*0001:[0-9A-Fa-f]{8}\s+RhpReversePInvokeReturn\s+(?<address>[0-9A-Fa-f]{16})\s+f(?:\s|$)')
+$expectedProbeCalls = @()
+if ($reversePInvokeMap.Success -and $reversePInvokeReturnMap.Success) {
+    $expectedProbeCalls += ('0x' + ([Convert]::ToUInt64($reversePInvokeMap.Groups['address'].Value,16)).ToString('x'))
+    $expectedProbeCalls += ('0x' + ([Convert]::ToUInt64($reversePInvokeReturnMap.Groups['address'].Value,16)).ToString('x'))
+}
+$actualProbeCalls = @([regex]::Matches($disassembly,'(?m)\bcall\s+(?<target>0x[0-9a-fA-F]+)\b') | ForEach-Object { $_.Groups['target'].Value.ToLowerInvariant() })
+
+$managedMethod = [regex]::Match($probe,'(?s)public static int ManagedMain\(ManagedEntryProbeRecord\* record, uint seed\)\s*\{(?<body>.*?)\n    \}')
+$managedBody = if ($managedMethod.Success) { $managedMethod.Groups['body'].Value } else { '' }
+$assertion = @(
+    @{ok=$probe -match '\[StructLayout\(LayoutKind\.Sequential, Pack = 4, Size = 16\)\]' -and $nativeHeader -match 'sizeof\(GuideXosNativeAotManagedEntryProbeRecord\) == 16'; name='managed and native records have an explicit 16-byte ABI'},
+    @{ok=$probe -match '\[UnmanagedCallersOnly\(\s*EntryPoint = "ManagedMain",\s*CallConvs = new\[\] \{ typeof\(CallConvCdecl\) \}\)\]' -and $probe -match 'MethodImplOptions\.NoInlining'; name='probe has a distinct Cdecl UCO entry and stays out of line'},
+    @{ok=$managedMethod.Success -and $managedBody.IndexOf('record->EntryMarker', [StringComparison]::Ordinal) -lt $managedBody.IndexOf('record->Input', [StringComparison]::Ordinal) -and $managedBody.IndexOf('record->Input', [StringComparison]::Ordinal) -lt $managedBody.IndexOf('record->Computed', [StringComparison]::Ordinal) -and $managedBody.IndexOf('record->Computed', [StringComparison]::Ordinal) -lt $managedBody.IndexOf('record->CompletionMarker', [StringComparison]::Ordinal) -and $probe.Contains('unchecked(seed * 3u + 7u)'); name='probe writes ordered markers and computes the fixed result'},
+    @{ok=$managedMethod.Success -and $managedBody -notmatch '\b(?:new|throw|try|catch|fixed|stackalloc|GC\.|RhHandleAlloc|RhpNewArray|RhpCollect)\b' -and $managedBody -notmatch '\b(?:DllImport|LibraryImport|extern)\b'; name='managed probe body has no allocation, P/Invoke, exception, or collection path'},
+    @{ok=$project -match 'EnableDefaultCompileItems>false</EnableDefaultCompileItems>' -and $project -match '<Compile Include="ManagedEntryProbe.cs" />' -and $project -match '<ItemGroup Condition="[^"]*ManagedEntryProbe[^"]*!=[^"]*">' -and $project -match '<Compile Remove="ManagedEntryProbe.cs" />'; name='probe project mode compiles only the probe source and production excludes it'},
+    @{ok=$startupHelpers -match 'UnmanagedCallersOnly\(EntryPoint\s*=\s*"InitializeModules"' -and $startupHelpers -match 'new object\[count\]' -and $startupHelpers -match 'RhHandleAlloc'; name='pinned InitializeModules body is real runtime initialization and may allocate'},
+    @{ok=$threadSource -match 'Thread::ReversePInvokeAttachOrTrapThread' -and $threadSource -match 'ThreadStore::AttachCurrentThread' -and $threadSource -match 'm_pTransitionFrame' -and $threadHeader -match 'TOP_OF_STACK_MARKER'; name='pinned reverse-PInvoke path owns attachment and transition frame'},
+    @{ok=[bool]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbe -and [string]$runtimeManifest.identity -ceq 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-entry-v1' -and [string]$runtimeManifest.runtimeIdentity.sourceCommit -ceq '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -and [string]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.ABI -ceq 'UnmanagedCallersOnly(CallConvCdecl)' -and [int]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.seed -eq 14 -and [int]$runtimeManifest.c188r12r4r5r2r3ManagedEntryProbeContract.expectedResult -eq 49; name='runtime manifest selects the R7 identity and fixed ABI contract'},
+    @{ok=$platform -match 'GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState' -and $platform -match 'ThreadStore::GetCurrentThreadIfAvailable\(\)' -and $platform -match 'ThreadStore::Iterator iterator' -and $platform -match 'GuideXosNativeAotTransitionGetPalFlsValue\(\)' -and $platform -match 'PalGetMaximumStackBounds\(&stackLow, &stackHigh\)' -and $platform -match 'GX_MANAGED_ENTRY_PROBE_RUNTIME_READY'; name='post-call capture checks linked ThreadStore, FLS, identity, frame, and stack state'},
+    @{ok=$nativeHeader -match 'offsetof\(GuideXosNativeAotManagedEntryProbeRecord, completionMarker\) == 12' -and $nativeHeader -match 'sizeof\(GuideXosNativeAotManagedEntryProbeRuntimeState\) == 112' -and $nativeHeader -match 'kGuideXosManagedEntryProbePreemptive'; name='native layout and post-call state constants are pinned by assertions'},
+    @{ok=$map -match 'ManagedMain\s+[0-9A-Fa-f]{16}' -and $map.Contains('GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState') -and $map -match 'ManagedEntryProbe'; name='linked NativeAOT map contains ManagedMain probe and capture exports'},
+    @{ok=$disassembly -match '5237454[eE]' -and $disassembly -match '5237444[eE]' -and @($expectedProbeCalls).Count -eq 2 -and @($actualProbeCalls).Count -eq 2 -and @($actualProbeCalls | Where-Object { $_ -notin $expectedProbeCalls }).Count -eq 0; name='linked probe machine code stores markers and uses only its stock reverse-P/Invoke prologue/epilogue'},
+    @{ok=$kernel -match '(?s)if \(transitionStatus != 0u\).*?result=safe_stop.*?managedMainAddress.*?reinterpret_cast<ManagedEntryProbe>\(\s*managedMainAddress\)' -and $kernel -match 'managedEntryProbeCaptureStateAddress' -and $kernel -match 'runtimeStatePassed'; name='kernel invokes the probe only after the R6 transition gate and validates return state'},
+    @{ok=$runner.Contains("Get-AnalysisBoolean `$transitionAttributionAnalysis 'managedEntryReturned'") -and $runner.Contains("Get-AnalysisBoolean `$transitionAttributionAnalysis 'runtimeStateReady'"); name='runner reports a blocked preflight safely when no serial analyzer result exists'},
+    @{ok=$kernelLog -match '-DGXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE'; name='isolated candidate kernel was built with the R7-only selector'},
+    @{ok=$kernel -match 'collection=not_requested' -and $managedBody -notmatch 'GC\.Collect|RhpCollect'; name='probe path does not request managed GC collection'}
+)
+foreach ($check in $assertion) { Assert-Probe ([bool]$check.ok) ([string]$check.name) }
+if (Test-Path -LiteralPath $OutputDirectory) {
+    $existingEntries = @(Get-ChildItem -LiteralPath $OutputDirectory -Force)
+    $unexpectedEntries = @($existingEntries | Where-Object { $_.Name -cne 'hosted-test-results.json' })
+    if ($unexpectedEntries.Count -gt 0) {
+        throw "Refusing to overwrite unexpected R7 hosted-test output in: $OutputDirectory"
+    }
+    $existingReportPath = Join-Path $OutputDirectory 'hosted-test-results.json'
+    if (Test-Path -LiteralPath $existingReportPath -PathType Leaf) {
+        $existingReport = Get-Content -LiteralPath $existingReportPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($existingReport.schema -cne 'C188R12R4R5R2R3_MANAGED_ENTRY_PROBE_HOSTED_TESTS_V1' -or
+            $existingReport.result -cne 'PASS' -or [bool]$existingReport.qemuLaunched -or
+            [bool]$existingReport.qacReserved) {
+            throw "Refusing to replace an unrecognized or non-hosted R7 test result: $existingReportPath"
+        }
+    }
+}
+New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+$report = [ordered]@{
+    schema='C188R12R4R5R2R3_MANAGED_ENTRY_PROBE_HOSTED_TESTS_V1'
+    result='PASS'
+    assertionCount=$results.Count
+    assertions=@($results.ToArray())
+    runtimeSourceCommit=[string]$runtimeManifest.runtimeIdentity.sourceCommit
+    managedProbeAllocationFree=$true
+    runtimeInitializationMayAllocate=$true
+    managedCollectionRequested=$false
+    qemuLaunched=$false
+    qacReserved=$false
+}
+[System.IO.File]::WriteAllText((Join-Path $OutputDirectory 'hosted-test-results.json'),
+    ($report | ConvertTo-Json -Depth 8),[System.Text.UTF8Encoding]::new($false))
+Write-Output ("R7 managed-entry hosted tests: PASS assertions={0}; no guest boot or QAC reservation." -f $results.Count)

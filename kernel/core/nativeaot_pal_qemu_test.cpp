@@ -49,6 +49,9 @@
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_transition_attribution.h"
 #include "guidexos_nativeaot_transition_attribution_sites.h"
 #endif
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
+#include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_managed_entry_probe.h"
+#endif
 #include "tools/dotnet/runtime-pack/src/platform/guidexos_nativeaot_threadstore_adapter.h"
 
 #if defined(GXOS_NATIVEAOT_PAL_QEMU_TEST)
@@ -2923,7 +2926,8 @@ void runFirstRealAllocationImpl(
     uintptr_t initTraceRhInitializeRawResultAddress,
     uintptr_t safeHandoffPrepareAddress,
     uintptr_t transitionAttributionPrepareAddress,
-    uintptr_t transitionAttributionRecordAddress) {
+    uintptr_t transitionAttributionRecordAddress,
+    uintptr_t managedEntryProbeCaptureStateAddress) {
     bool allPassed = true;
 #if !defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
     (void)safeHandoffPrepareAddress;
@@ -2933,6 +2937,9 @@ void runFirstRealAllocationImpl(
 #else
     (void)transitionAttributionPrepareAddress;
     (void)transitionAttributionRecordAddress;
+#endif
+#if !defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
+    (void)managedEntryProbeCaptureStateAddress;
 #endif
 #if defined(GXOS_NATIVEAOT_THREAD_STATIC_QEMU_TEST)
     serial::puts("[nativeaot-thread-static] BEGIN\n");
@@ -3279,8 +3286,113 @@ void runFirstRealAllocationImpl(
             "transition_safety_gate_blocked", transitionStatus, 0u);
         return;
     }
+#if defined(GXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
+    if (managedMainAddress == 0u || managedEntryProbeCaptureStateAddress == 0u) {
+        serial::puts("[C188R12R4R5R2R3_ENTRY] result=safe_stop reason=missing_managed_main_or_runtime_capture collection=not_requested\n");
+        threadStoreReadinessKernelMarker("managed_entry_probe_gate_blocked", 1u, 0u);
+        return;
+    }
+    serial::puts("[C188R12R4R5R2R3_TRANSITION] result=initialize_modules_returned managedEntry=probe_follows collection=not_requested\n");
+    threadStoreReadinessKernelMarker("transition_initialize_modules_returned", 1u, 0u);
+
+    GuideXosNativeAotManagedEntryProbeRecord probeRecord{};
+    serial::puts("[C188R12R4R5R2R3_ENTRY] event=attempt abi=UnmanagedCallersOnly-Cdecl seed=");
+    serial::put_hex32(kGuideXosManagedEntryProbeSeed);
+    serial::puts(" symbol=ManagedMain collection=not_requested\n");
+    using ManagedEntryProbe = int32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        GuideXosNativeAotManagedEntryProbeRecord*, uint32_t);
+    const int32_t managedResult = reinterpret_cast<ManagedEntryProbe>(
+        managedMainAddress)(&probeRecord, kGuideXosManagedEntryProbeSeed);
+
+    GuideXosNativeAotManagedEntryProbeRuntimeState runtimeState{};
+    using CaptureManagedEntryRuntimeState = uint32_t (GUIDEXOS_NATIVEAOT_PAL_CALL *)(
+        GuideXosNativeAotManagedEntryProbeRuntimeState*);
+    const uint32_t runtimeStatus = reinterpret_cast<CaptureManagedEntryRuntimeState>(
+        managedEntryProbeCaptureStateAddress)(&runtimeState);
+    const bool probePassed =
+        probeRecord.entryMarker == kGuideXosManagedEntryProbeEntryMarker &&
+        probeRecord.input == kGuideXosManagedEntryProbeSeed &&
+        probeRecord.computed == kGuideXosManagedEntryProbeResult &&
+        probeRecord.completionMarker == kGuideXosManagedEntryProbeCompletionMarker &&
+        managedResult == static_cast<int32_t>(kGuideXosManagedEntryProbeResult);
+    serial::puts("[C188R12R4R5R2R3_ENTRY] event=returned entry=");
+    serial::put_hex32(probeRecord.entryMarker);
+    serial::puts(" input=");
+    serial::put_hex32(probeRecord.input);
+    serial::puts(" computed=");
+    serial::put_hex32(probeRecord.computed);
+    serial::puts(" completion=");
+    serial::put_hex32(probeRecord.completionMarker);
+    serial::puts(" return=");
+    serial::put_hex32(static_cast<uint32_t>(managedResult));
+    serial::puts(" expected=");
+    serial::put_hex32(kGuideXosManagedEntryProbeResult);
+    serial::puts(" record=");
+    serial::puts(probePassed ? "PASS" : "FAIL");
+    serial::puts(" collection=not_requested\n");
+    serial::puts("[C188R12R4R5R2R3_ENTRY_STATE] status=");
+    serial::put_hex32(runtimeStatus);
+    serial::puts(" bytes=");
+    serial::put_hex32(runtimeState.recordBytes);
+    serial::puts(" membership=");
+    serial::put_hex32(runtimeState.threadStoreMembership);
+    serial::puts(" flags=");
+    serial::put_hex32(runtimeState.threadStateFlags);
+    serial::puts(" cooperativeState=");
+    serial::put_hex32(runtimeState.cooperativeState);
+    serial::puts(" preemptiveFrame=");
+    serial::put_hex32(runtimeState.transitionFrameIsTopOfStack);
+    serial::puts(" flsMatch=");
+    serial::put_hex32(runtimeState.flsMatchesCurrentThread);
+    serial::puts(" threadId=");
+    serial::put_hex64(runtimeState.runtimeThreadId);
+    serial::puts(" observedThreadId=");
+    serial::put_hex64(runtimeState.observedThreadId);
+    serial::puts(" stackReady=");
+    serial::put_hex32(runtimeState.stackBoundsReady);
+    serial::puts(" stackInBounds=");
+    serial::put_hex32(runtimeState.stackPointerInBounds);
+    serial::puts(" modules=");
+    serial::put_hex32(runtimeState.modulesInitialized);
+    serial::puts(" codeManager=");
+    serial::put_hex32(runtimeState.codeManagerRegistered);
+    serial::puts(" currentThread=");
+    serial::put_hex64(runtimeState.currentThread);
+    serial::puts(" palFlsThread=");
+    serial::put_hex64(runtimeState.palFlsThread);
+    serial::puts(" frame=");
+    serial::put_hex64(runtimeState.transitionFrame);
+    serial::puts(" stackLow=");
+    serial::put_hex64(runtimeState.stackLow);
+    serial::puts(" stackHigh=");
+    serial::put_hex64(runtimeState.stackHigh);
+    serial::puts(" stackCurrent=");
+    serial::put_hex64(runtimeState.stackCurrent);
+    const bool runtimeStatePassed = runtimeStatus == GX_MANAGED_ENTRY_PROBE_RUNTIME_READY &&
+        runtimeState.recordBytes == sizeof(runtimeState) &&
+        runtimeState.threadStoreMembership == 1u &&
+        (runtimeState.threadStateFlags & kGuideXosManagedEntryProbeThreadAttached) != 0u &&
+        runtimeState.cooperativeState == kGuideXosManagedEntryProbePreemptive &&
+        runtimeState.flsMatchesCurrentThread == 1u &&
+        runtimeState.runtimeThreadId != 0u &&
+        runtimeState.runtimeThreadId == runtimeState.observedThreadId &&
+        runtimeState.transitionFrameIsTopOfStack == 1u &&
+        runtimeState.stackBoundsReady == 1u &&
+        runtimeState.stackPointerInBounds == 1u &&
+        runtimeState.modulesInitialized == 1u &&
+        runtimeState.codeManagerRegistered == 1u &&
+        runtimeState.currentThread == runtimeState.palFlsThread;
+    serial::puts(" result=");
+    serial::puts(probePassed && runtimeStatePassed ? "PASS" : "FAIL");
+    serial::puts("\n");
+    threadStoreReadinessKernelMarker(
+        "managed_entry_probe_completed",
+        (probePassed && runtimeStatePassed) ? 1u : 0u,
+        runtimeStatus);
+#else
     serial::puts("[C188R12R4R5R2R3_TRANSITION] result=initialize_modules_returned managedEntry=not_requested collection=not_requested\n");
     threadStoreReadinessKernelMarker("transition_initialize_modules_returned", 1u, 0u);
+#endif
     return;
 #elif defined(GXOS_NATIVEAOT_C188R12R4R5R2R2R4_SAFE_HANDOFF)
     if (safeHandoffPrepareAddress == 0u) {
@@ -3810,7 +3922,8 @@ void runFirstRealAllocation(
     uintptr_t initTraceRhInitializeRawResultAddress,
     uintptr_t safeHandoffPrepareAddress,
     uintptr_t transitionAttributionPrepareAddress,
-    uintptr_t transitionAttributionRecordAddress) {
+    uintptr_t transitionAttributionRecordAddress,
+    uintptr_t managedEntryProbeCaptureStateAddress) {
     runFirstRealAllocationImpl(
         artifact, artifactSize, installPalAddress, installTableAddress,
         installPlatformAddress, startupMainAddress, getStateAddress,
@@ -3821,7 +3934,7 @@ void runFirstRealAllocation(
         initTraceSetSinkAddress, initTraceGetCountAddress,
         initTraceGetOverflowAddress, initTraceRhInitializeRawResultAddress,
         safeHandoffPrepareAddress, transitionAttributionPrepareAddress,
-        transitionAttributionRecordAddress);
+        transitionAttributionRecordAddress, managedEntryProbeCaptureStateAddress);
 }
 #endif
 #endif

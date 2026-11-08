@@ -331,7 +331,8 @@ function Assert-ManagedHostLogElfEnvelope(
     [switch]$ManagedAllocation,
     [switch]$RepeatedAllocation,
     [switch]$ProductionApplication,
-    [switch]$GcOwnershipProof) {
+    [switch]$GcOwnershipProof,
+    [switch]$ManagedEntryProbe) {
     $elf = Read-ManagedHostLogElfEnvelope $ElfPath
     $pe = Get-ManagedHostLogPeImageEnvelope $PePath
     $managedMain = Get-ManagedHostLogMapSymbolAddress $MapPath "ManagedMain" "Managed entry"
@@ -436,6 +437,12 @@ function Assert-ManagedHostLogElfEnvelope(
         '_tls_start\s+[0-9A-Fa-f]{16}',
         '_tls_end\s+[0-9A-Fa-f]{16}'
     ) "Managed map evidence"
+    if ($ManagedEntryProbe) {
+        Assert-ManagedHostLogFileContains $MapPath @(
+            'HostLogProof_HostLogProof_ManagedEntryProbe__ManagedMain\s+[0-9A-Fa-f]{16}',
+            'GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState\s+[0-9A-Fa-f]{16}'
+        ) "R7 managed-entry and runtime-state capture map evidence"
+    }
     Assert-ManagedHostLogFileContains $ElfDumpPath @('flags r-x', 'flags rw-') "ELF segment permissions"
     Assert-ManagedHostLogFileNotContains $RuntimeSupportSourcePath @('Hello from managed guideXOS code', 'printf', 'puts', 'WriteFile') "native support output path"
 

@@ -1,12 +1,15 @@
 param(
-    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+    [string]$OutputDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [System.IO.Path]::GetFullPath($RepoRoot)
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
-$testRoot = Join-Path $root "out\dotnet\c188r12r4r5r4-threadstore-readiness\hosted-$stamp"
+$testRoot = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    Join-Path $root "out\dotnet\c188r12r4r5r4-threadstore-readiness\hosted-$stamp"
+} else { [System.IO.Path]::GetFullPath($OutputDirectory) }
 if (Test-Path -LiteralPath $testRoot) { throw "Refusing to overwrite hosted evidence: $testRoot" }
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 

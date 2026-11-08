@@ -36,6 +36,7 @@ param(
     [switch]$C188R12R4R5R4R5R2R2NativeAllocationAttribution,
     [switch]$C188R12R4R5R2R2R4SafeHandoff,
     [switch]$C188R12R4R5R2R3InitializeModulesAttribution,
+    [switch]$C188R12R4R5R2R3ManagedEntryProbe,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -264,11 +265,12 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R4R5R2R2NativeAllocationAttribution" }
     if ($C188R12R4R5R2R2R4SafeHandoff) { $runtimePackBuildArguments += "-C188R12R4R5R2R2R4SafeHandoff" }
     if ($C188R12R4R5R2R3InitializeModulesAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R2R3InitializeModulesAttribution" }
+    if ($C188R12R4R5R2R3ManagedEntryProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedEntryProbe" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
-    & powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments
+    $runtimePackBuildOutput = (& powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments *>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) {
-        throw "GuideXOS runtime-pack build failed with exit code $LASTEXITCODE"
+        throw "GuideXOS runtime-pack build failed with exit code $LASTEXITCODE. Output: $runtimePackBuildOutput"
     }
     $runtimePackManifest = Join-Path $runtimePackOutputRoot "runtime-pack.manifest.json"
     if (-not (Test-Path -LiteralPath $runtimePackManifest)) {
@@ -340,6 +342,11 @@ if ($UseGuideXosRuntimePack) {
          [string]$runtimePackManifestObject.c188r12r4r5r2r3InitializeModulesAttributionTransition -notmatch 'explicit preflight gate' -or
          [bool]$runtimePackManifestObject.persistentCompositeLifecycle)) {
         throw 'C188R12R4R5R2R3 requires the explicitly selected isolated transition-attribution runtime pack.'
+    }
+    if ($C188R12R4R5R2R3ManagedEntryProbe -and
+        (-not $C188R12R4R5R2R3InitializeModulesAttribution -or
+         -not [bool]$runtimePackManifestObject.c188r12r4r5r2r3ManagedEntryProbe)) {
+        throw 'The R7 managed-entry probe requires the isolated R6 transition profile and its matching runtime-pack instrumentation.'
     }
     if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution -and
         [int]$runtimePackManifestObject.c188r12r4r5r4r5r2r2NativeAllocationBackendCapacity -ne 9) {
@@ -559,6 +566,13 @@ try {
     } else {
         $AllocationMode
     }
+    if ($C188R12R4R5R2R3ManagedEntryProbe -and
+        (-not $C188R12R4R5R2R3InitializeModulesAttribution -or
+         -not $UseGuideXosRuntimePack -or -not $ProductionApplication -or
+         $AllocationMode -ne 'Allocating' -or $managedProjectMode -ne 'GcOwnershipProof' -or
+         $PersistentCompositeLifecycle -or $ThreadStaticLifecycleDiagnostics)) {
+        throw 'C188R12R4R5R2R3 R7 requires the isolated R6 production GC ownership candidate; persistent lifecycle and TLS diagnostics are excluded.'
+    }
     if ($C188R12R4R5GcOwnershipProof -and
         (-not $UseGuideXosRuntimePack -or -not $ProductionApplication -or
          $AllocationMode -ne 'Allocating' -or
@@ -755,6 +769,9 @@ try {
     }
     if ($C188R12R4R5R4ThreadStoreReadiness) {
         $publishProperties += '-p:HostLogProofC188R12R4R5R4ThreadStoreReadiness=true'
+    }
+    if ($C188R12R4R5R2R3ManagedEntryProbe) {
+        $publishProperties += '-p:HostLogProofC188R12R4R5R2R3ManagedEntryProbe=true'
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"
@@ -1075,7 +1092,7 @@ if ($UseGuideXosRuntimePack) {
     }
 }
 Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
-Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated") -or $ProductionApplication) -RepeatedAllocation:($AllocationMode -eq "Repeated") -ProductionApplication:$ProductionApplication -GcOwnershipProof:$C188R12R4R5GcOwnershipProof | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated") -or $ProductionApplication) -RepeatedAllocation:($AllocationMode -eq "Repeated") -ProductionApplication:$ProductionApplication -GcOwnershipProof:$C188R12R4R5GcOwnershipProof -ManagedEntryProbe:$C188R12R4R5R2R3ManagedEntryProbe | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan

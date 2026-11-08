@@ -32,7 +32,8 @@ $artifactRoots = @(
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4-pal-capacity-fix')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2-safe-handoff')),
     [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r2-diagnostic-recovery')),
-    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution')))
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r4r5r2r2r4r2r3-transition-attribution')),
+    [System.IO.Path]::GetFullPath((Join-Path $repo 'out\dotnet\c188r12r4r5r2r3-managed-entry')))
 $artifactRoots = @($artifactRoots | ForEach-Object {
     $relativePhase = [System.IO.Path]::GetRelativePath($defaultArtifactRoot,[string]$_)
     [System.IO.Path]::GetFullPath((Join-Path $configuredArtifactRoot $relativePhase))

@@ -39,7 +39,8 @@ void runFirstRealAllocation(
     uintptr_t initTraceRhInitializeRawResultAddress = 0,
     uintptr_t safeHandoffPrepareAddress = 0,
     uintptr_t transitionAttributionPrepareAddress = 0,
-    uintptr_t transitionAttributionRecordAddress = 0);
+    uintptr_t transitionAttributionRecordAddress = 0,
+    uintptr_t managedEntryProbeCaptureStateAddress = 0);
 
 #endif
 

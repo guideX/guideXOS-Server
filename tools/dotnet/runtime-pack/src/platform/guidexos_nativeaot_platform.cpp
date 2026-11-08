@@ -8,6 +8,9 @@
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_INITIALIZEMODULES_ATTRIBUTION)
 #include "guidexos_nativeaot_transition_attribution.h"
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
+#include "guidexos_nativeaot_managed_entry_probe.h"
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION) || defined(GUIDEXOS_NATIVEAOT_C011EC97)
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #endif
@@ -33630,6 +33633,99 @@ GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare(void) {
     GuideXosNativeAotThreadReadinessEmitSummary();
     return 0u;
 }
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
+extern "C" __declspec(dllexport) uint32_t __cdecl
+GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState(
+    GuideXosNativeAotManagedEntryProbeRuntimeState* state) {
+    if (state == nullptr) return GX_MANAGED_ENTRY_PROBE_RUNTIME_RECORD_INVALID;
+    *state = {};
+    state->recordBytes = sizeof(*state);
+
+    Thread* currentThread = ThreadStore::GetCurrentThreadIfAvailable();
+    Thread* rawCurrentThread = ThreadStore::RawGetCurrentThread();
+    if (currentThread == nullptr || rawCurrentThread == nullptr ||
+        currentThread != rawCurrentThread) {
+        state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_THREAD_MISSING;
+        return state->status;
+    }
+    state->currentThread = reinterpret_cast<uintptr_t>(currentThread);
+
+    uint32_t membership = 0u;
+    ThreadStore::Iterator iterator;
+    Thread* listedThread = iterator.GetNext();
+    for (uint32_t steps = 0u; listedThread != nullptr && steps < 64u;
+         ++steps, listedThread = iterator.GetNext()) {
+        if (listedThread == currentThread) ++membership;
+    }
+    state->threadStoreMembership = membership;
+    if (membership != 1u) {
+        state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_THREADSTORE_MISSING;
+        return state->status;
+    }
+
+    RuntimeThreadLocals* locals = reinterpret_cast<RuntimeThreadLocals*>(currentThread);
+    state->threadStateFlags = locals->m_ThreadStateFlags;
+    state->runtimeThreadId = locals->m_threadId;
+    if ((state->threadStateFlags & kGuideXosManagedEntryProbeThreadAttached) == 0u) {
+        state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_ATTACHMENT_INVALID;
+        return state->status;
+    }
+
+    state->palFlsThread = reinterpret_cast<uintptr_t>(
+        GuideXosNativeAotTransitionGetPalFlsValue());
+    state->flsMatchesCurrentThread = state->palFlsThread == state->currentThread ? 1u : 0u;
+    if (state->flsMatchesCurrentThread == 0u) {
+        state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_FLS_MISMATCH;
+        return state->status;
+    }
+
+    state->observedThreadId = PalGetCurrentOSThreadId();
+    if (state->runtimeThreadId == 0u ||
+        state->runtimeThreadId != state->observedThreadId) {
+        state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_THREAD_ID_MISMATCH;
+        return state->status;
+    }
+
+    state->transitionFrame = reinterpret_cast<uintptr_t>(locals->m_pTransitionFrame);
+    state->transitionFrameIsTopOfStack = state->transitionFrame ==
+        reinterpret_cast<uintptr_t>(TOP_OF_STACK_MARKER) ? 1u : 0u;
+    state->cooperativeState = locals->m_pTransitionFrame == nullptr
+        ? kGuideXosManagedEntryProbeCooperative
+        : kGuideXosManagedEntryProbePreemptive;
+    if (state->transitionFrameIsTopOfStack == 0u ||
+        state->cooperativeState != kGuideXosManagedEntryProbePreemptive) {
+        state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_FRAME_INVALID;
+        return state->status;
+    }
+
+    void* stackLow = nullptr;
+    void* stackHigh = nullptr;
+    const bool stackQueryPassed = PalGetMaximumStackBounds(&stackLow, &stackHigh);
+    state->stackLow = reinterpret_cast<uintptr_t>(stackLow);
+    state->stackHigh = reinterpret_cast<uintptr_t>(stackHigh);
+    uintptr_t stackMarker = 0u;
+    state->stackCurrent = reinterpret_cast<uintptr_t>(&stackMarker);
+    state->stackBoundsReady = stackQueryPassed && state->stackLow < state->stackHigh ? 1u : 0u;
+    state->stackPointerInBounds = state->stackBoundsReady != 0u &&
+        state->stackCurrent >= state->stackLow && state->stackCurrent < state->stackHigh
+        ? 1u : 0u;
+    if (state->stackPointerInBounds == 0u) {
+        state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_STACK_INVALID;
+        return state->status;
+    }
+
+    state->modulesInitialized = g_guideXosNativeAotModulesInitialized ? 1u : 0u;
+    state->codeManagerRegistered = g_guideXosNativeAotCodeManagerRegistered ? 1u : 0u;
+    if (state->modulesInitialized == 0u || state->codeManagerRegistered == 0u) {
+        state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_MODULES_UNAVAILABLE;
+        return state->status;
+    }
+
+    state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_READY;
+    return state->status;
+}
+#endif
 #endif
 
 #if defined(GUIDEXOS_NATIVEAOT_C011EC31_LIVE_SHORT_WEAK)

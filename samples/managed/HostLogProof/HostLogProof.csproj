@@ -94,6 +94,15 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5R4_THREADSTORE_READINESS</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' == 'true'">
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' == 'true'">
+    <Compile Include="ManagedEntryProbe.cs" />
+  </ItemGroup>
+
   <PropertyGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipTests)' == 'true'">
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5_GC_OWNERSHIP_TESTS</DefineConstants>
   </PropertyGroup>
@@ -864,7 +873,8 @@
     <ProjectReference Include="..\C185CounterApp\GuideXos.C185.CounterApp.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' != 'true'">
+    <Compile Remove="ManagedEntryProbe.cs" />
     <Compile Include="..\ManagedStarterC182\ManagedStarterC182.cs" Link="Applications\ManagedStarterC182.cs" />
     <Compile Include="..\ManagedStarterC182\ManagedStarterC182HostTests.cs" Link="GuideXos\ManagedStarterC182HostTests.cs" />
   </ItemGroup>
