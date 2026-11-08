@@ -199,9 +199,9 @@ static bool safe_workspace_root(const char* value)
 static bool safe_output_name(const char* value)
 {
     if (!value) return false;
-    // The guest VFS supports FAT long-file names. Studio derives outputName
-    // with a -guidexos suffix, so keep a bounded path-safe basename instead
-    // of imposing the 8.3 limit used by a few reserved metadata files.
+    // Pinned Studio derives outputName with a -guidexos suffix. Keep the
+    // logical name bounded and path-safe; artifact_storage_path_impl maps its
+    // ELF output to an 8.3 FAT entry for actual VFS storage.
     const uint32_t count = length(value, 96);
     if (count == 0 || count >= 96 || value[0] == '.') return false;
     for (uint32_t i = 0; i < count; ++i) {
@@ -257,6 +257,45 @@ static bool equal_ascii_folded(const char* left, const char* right)
     uint32_t i = 0;
     while (left[i] && right[i] && fold_ascii(left[i]) == fold_ascii(right[i])) ++i;
     return left[i] == right[i];
+}
+
+static bool artifact_storage_path_impl(const char* logicalPath, char* storagePath, uint32_t capacity)
+{
+    if (!logicalPath || !storagePath || capacity == 0) return false;
+    storagePath[0] = '\0';
+    const char* basename = logicalPath;
+    for (const char* current = logicalPath; *current; ++current)
+        if (*current == '/') basename = current + 1;
+    const char* extension = nullptr;
+    for (const char* current = basename; *current; ++current)
+        if (*current == '.') extension = current;
+    if (!extension || !equal_ascii_folded(extension, ".elf")) return false;
+    const uint32_t stemBytes = static_cast<uint32_t>(extension - basename);
+    if (stemBytes == 0) return false;
+    if (stemBytes <= 8u) return copy(storagePath, capacity, logicalPath);
+
+    // FAT create_file_path currently publishes one 8.3 directory entry. Keep
+    // the Studio logical artifact path in the build snapshot while storing a
+    // deterministic, path-scoped short basename for VFS write/readback.
+    const uint32_t pathBytes = length(logicalPath, kMaxPath);
+    if (pathBytes == 0 || pathBytes >= kMaxPath) return false;
+    uint32_t hash = 2166136261u;
+    for (uint32_t i = 0; i < pathBytes; ++i) {
+        hash ^= static_cast<uint8_t>(fold_ascii(logicalPath[i]));
+        hash *= 16777619u;
+    }
+    const uint32_t prefixBytes = static_cast<uint32_t>(basename - logicalPath);
+    if (prefixBytes + 12u >= capacity) return false;
+    for (uint32_t i = 0; i < prefixBytes; ++i) storagePath[i] = logicalPath[i];
+    static const char kHex[] = "0123456789ABCDEF";
+    for (uint32_t i = 0; i < 8u; ++i)
+        storagePath[prefixBytes + i] = kHex[(hash >> (28u - i * 4u)) & 0xFu];
+    storagePath[prefixBytes + 8u] = '.';
+    storagePath[prefixBytes + 9u] = 'E';
+    storagePath[prefixBytes + 10u] = 'L';
+    storagePath[prefixBytes + 11u] = 'F';
+    storagePath[prefixBytes + 12u] = '\0';
+    return true;
 }
 
 static const char* storage_alias_for(const char* logicalPath)
@@ -520,19 +559,30 @@ static bool build(const gx_build_request* request)
         !append(sourcePath, sizeof(sourcePath), sourceEntry)) {
         fail(GX_BUILD_ERROR_SOURCE_SELECTION, "source path is outside the project root"); return false;
     }
-    char armPath[kMaxPath] = {}; char amdPath[kMaxPath] = {};
-    if (!join(request->projectRoot, "build", armPath, sizeof(armPath)) || !ensure_directory(armPath) ||
-        !join(request->projectRoot, "build/bin", armPath, sizeof(armPath)) || !ensure_directory(armPath) ||
-        !join(request->projectRoot, "build/bin/arm64", armPath, sizeof(armPath)) || !ensure_directory(armPath) ||
-        !append(armPath, sizeof(armPath), "/") || !append(armPath, sizeof(armPath), outputName) || !append(armPath, sizeof(armPath), ".elf") ||
-        !join(request->projectRoot, "build/bin/amd64", amdPath, sizeof(amdPath)) || !ensure_directory(amdPath) ||
-        !append(amdPath, sizeof(amdPath), "/") || !append(amdPath, sizeof(amdPath), outputName) || !append(amdPath, sizeof(amdPath), ".elf")) {
+    char directory[kMaxPath] = {};
+    char armDirectory[kMaxPath] = {}; char amdDirectory[kMaxPath] = {};
+    if (!join(request->projectRoot, "build", directory, sizeof(directory)) || !ensure_directory(directory) ||
+        !join(request->projectRoot, "build/bin", directory, sizeof(directory)) || !ensure_directory(directory) ||
+        !join(request->projectRoot, "build/bin/arm64", armDirectory, sizeof(armDirectory)) || !ensure_directory(armDirectory) ||
+        !join(request->projectRoot, "build/bin/amd64", amdDirectory, sizeof(amdDirectory)) || !ensure_directory(amdDirectory)) {
         fail(GX_BUILD_ERROR_INVALID_PROJECT_ROOT, "project build directories could not be created"); return false;
+    }
+    char armLogicalPath[kMaxPath] = {}; char amdLogicalPath[kMaxPath] = {};
+    if (!copy(armLogicalPath, sizeof(armLogicalPath), armDirectory) || !append(armLogicalPath, sizeof(armLogicalPath), "/") ||
+        !append(armLogicalPath, sizeof(armLogicalPath), outputName) || !append(armLogicalPath, sizeof(armLogicalPath), ".elf") ||
+        !copy(amdLogicalPath, sizeof(amdLogicalPath), amdDirectory) || !append(amdLogicalPath, sizeof(amdLogicalPath), "/") ||
+        !append(amdLogicalPath, sizeof(amdLogicalPath), outputName) || !append(amdLogicalPath, sizeof(amdLogicalPath), ".elf")) {
+        fail(GX_BUILD_ERROR_INVALID_PROJECT_ROOT, "project artifact path exceeds the VFS path bound"); return false;
+    }
+    char armPath[kMaxPath] = {}; char amdPath[kMaxPath] = {};
+    if (!artifact_storage_path_impl(armLogicalPath, armPath, sizeof(armPath)) ||
+        !artifact_storage_path_impl(amdLogicalPath, amdPath, sizeof(amdPath))) {
+        fail(GX_BUILD_ERROR_INVALID_PROJECT_ROOT, "project artifact name cannot be mapped to FAT storage"); return false;
     }
     char expected[kMaxPath] = {};
     if (!copy(expected, sizeof(expected), request->projectRoot) || !append(expected, sizeof(expected), "/") ||
         !append(expected, sizeof(expected), request->expectedArtifact) ||
-        !equal(expected, first == CompilerTarget::Amd64 ? amdPath : armPath)) {
+        !equal(expected, first == CompilerTarget::Amd64 ? amdLogicalPath : armLogicalPath)) {
         fail(GX_BUILD_ERROR_INVALID_REQUEST, "expected artifact must be the selected target project output"); return false;
     }
     // Remove stale project-local build outputs before compiling so a failed
@@ -547,6 +597,9 @@ static bool build(const gx_build_request* request)
     const CompilerTarget resolvedFirst = first == CompilerTarget::Current ? current_target() : first;
     const char* primaryPath = resolvedFirst == CompilerTarget::Amd64 ? amdPath : armPath;
     CompileSummary* primarySummary = resolvedFirst == CompilerTarget::Amd64 ? &amdSummary : &armSummary;
+    serial::puts("BareMetalBuild: artifact storage path=");
+    serial::puts(primaryPath);
+    serial::putc('\n');
     output_line(resolvedFirst == CompilerTarget::Amd64 ?
         "Compiling AMD64 source inside guideXOS" : "Compiling ARM64 source inside guideXOS", 1);
     if (!compile_for_target(sourcePath, primaryPath, resolvedFirst, primarySummary)) {
@@ -653,6 +706,11 @@ static void clear_snapshot(gx_build_snapshot* snapshot, gx_build_handle handle)
 }
 
 } // namespace
+
+bool artifact_storage_path(const char* logicalPath, char* storagePath, uint32_t capacity)
+{
+    return artifact_storage_path_impl(logicalPath, storagePath, capacity);
+}
 
 gx_result start(const gx_build_request* request, gx_build_handle* outHandle)
 {

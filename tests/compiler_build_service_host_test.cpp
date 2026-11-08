@@ -334,11 +334,21 @@ int main()
     gx_build_request singleTargetRequest = request();
     singleTargetRequest.targetProfile = "guidexos.arm64.baremetal.bootstrap.native";
     singleTargetRequest.expectedArtifact = "build/bin/arm64/r2b1b01-guidexos.elf";
+    char singleTargetStoragePath[256] = {};
     gx_build_snapshot singleTarget = {};
-    if (!check(run(singleTargetRequest, &singleTarget) && singleTarget.state == GX_BUILD_SUCCEEDED &&
+    if (!check(kernel::compiler::BareMetalBuildService::artifact_storage_path(
+                   "/Workspace/build/bin/arm64/r2b1b01-guidexos.elf", singleTargetStoragePath,
+                   sizeof(singleTargetStoragePath)) &&
+               run(singleTargetRequest, &singleTarget) && singleTarget.state == GX_BUILD_SUCCEEDED &&
                singleTarget.artifactValid && !singleTarget.packageWritten &&
-               exists("/Workspace/build/bin/arm64/r2b1b01-guidexos.elf"),
-               "Studio single-target project builds with its long output name and no packageRoot")) return 26;
+               exists(singleTargetStoragePath) &&
+               std::strcmp(singleTarget.artifactPath, singleTargetRequest.expectedArtifact) == 0,
+               "Studio long output name maps to FAT storage while preserving the logical artifact path")) return 26;
+    char shortArtifactPath[128] = {};
+    if (!check(kernel::compiler::BareMetalBuildService::artifact_storage_path(
+                   "/Workspace/build/bin/arm64/app.elf", shortArtifactPath, sizeof(shortArtifactPath)) &&
+               std::strcmp(shortArtifactPath, "/Workspace/build/bin/arm64/app.elf") == 0,
+               "short ELF output names pass through unchanged")) return 28;
     gx_build_snapshot multiMissingPackageRoot = {};
     if (!check(run(request(), &multiMissingPackageRoot) && multiMissingPackageRoot.state == GX_BUILD_FAILED &&
                multiMissingPackageRoot.errorCode == GX_BUILD_ERROR_UNSUPPORTED_PROJECT,

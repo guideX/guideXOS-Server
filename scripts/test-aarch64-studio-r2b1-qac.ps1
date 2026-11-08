@@ -251,6 +251,8 @@ function Invoke-StudioBoot([int]$BootNumber) {
         $buildFailureBefore = Get-Count $text $buildFailed
         $artifactValidationBefore = Get-Count $text $artifactValidation
         $artifactDigestBefore = Get-Count $text 'BareMetalBuild: artifact SHA-256='
+        $storagePathMarker = 'BareMetalBuild: artifact storage path='
+        $storagePathBefore = Get-Count $text $storagePathMarker
         Send-StudioInput $sessionPath $qacPath @{ SpecialKeys = @('ControlShiftB'); CapturePath = (Join-Path $sessionDirectory 'r2b1-build-started.png') }
         $text = Wait-BuildTerminal $guestLog $buildSuccessBefore $buildFailureBefore $runner 120
         if ((Get-Count $text $buildComplete) -le $buildSuccessBefore) {
@@ -258,18 +260,30 @@ function Invoke-StudioBoot([int]$BootNumber) {
             throw "Authentic Studio Build returned FAILED. $serviceError"
         }
         $expectedArtifact = "/Apps/$projectFolder/build/bin/arm64/$outputName.elf"
+        $expectedStorageDirectory = "/Apps/$projectFolder/build/bin/arm64/"
+        $storagePathMatches = [regex]::Matches($text, '(?m)^BareMetalBuild: artifact storage path=(/Apps/[^\r\n]+)\r?$')
+        if ($storagePathMatches.Count -le $storagePathBefore) {
+            throw 'Authentic Studio Build did not report a fresh FAT storage path for the logical ELF artifact.'
+        }
+        $expectedStorageArtifact = $storagePathMatches[$storagePathMatches.Count - 1].Groups[1].Value
+        $storageBasename = [IO.Path]::GetFileName($expectedStorageArtifact)
+        if (!$expectedStorageArtifact.StartsWith($expectedStorageDirectory, [StringComparison]::OrdinalIgnoreCase) -or
+            $storageBasename -notmatch '^[0-9A-F]{8}\.ELF$') {
+            throw "Compiler storage path was not the bounded per-project FAT alias: $expectedStorageArtifact"
+        }
         $digestMatches = [regex]::Matches($text, 'BareMetalBuild: artifact SHA-256=([0-9a-f]{64})')
         if ((Get-Count $text $artifactValidation) -le $artifactValidationBefore -or
-            $text -notmatch ('Compiler: source=' + [regex]::Escape($sourcePath) + ' output=' + [regex]::Escape($expectedArtifact)) -or
+            $text -notmatch ('Compiler: source=' + [regex]::Escape($sourcePath) + ' output=' + [regex]::Escape($expectedStorageArtifact)) -or
             $text -notmatch 'Compiler: produced ELF validation PASS entry=0x0000000051001000' -or
             $text -notmatch 'Compiler: reopened_bytes=\d+ reopened_hash=fnv1a64:[0-9a-f]{16} readback ELF validation PASS' -or
-            $text -notmatch ('\[VFS_WRITE_FILE\] path=' + [regex]::Escape($expectedArtifact) + ' operation=(create|overwrite)') -or
+            $text -notmatch ('\[VFS_WRITE_FILE\] path=' + [regex]::Escape($expectedStorageArtifact) + ' operation=(create|overwrite)') -or
             $text -notmatch ('BareMetalBuild: artifact=' + [regex]::Escape("build/bin/arm64/$outputName.elf")) -or
             $digestMatches.Count -le $artifactDigestBefore) {
             throw 'Authentic Studio Build completed without the required ARM64 compiler, VFS readback, artifact path, and SHA-256 evidence.'
         }
         $record.first_artifact_sha256 = $digestMatches[$digestMatches.Count - 1].Groups[1].Value
         $record.first_artifact_path = $expectedArtifact
+        $record.first_artifact_storage_path = $expectedStorageArtifact
         $record.transitions.authentic_studio_arm64_build = $true
         $record.transitions.arm64_entry_and_strict_base = $true
         $record.transitions.artifact_vfs_readback = $true
