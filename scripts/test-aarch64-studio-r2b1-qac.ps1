@@ -274,8 +274,8 @@ function Invoke-StudioBoot([int]$BootNumber) {
         $digestMatches = [regex]::Matches($text, 'BareMetalBuild: artifact SHA-256=([0-9a-f]{64})')
         if ((Get-Count $text $artifactValidation) -le $artifactValidationBefore -or
             $text -notmatch ('Compiler: source=' + [regex]::Escape($sourcePath) + ' output=' + [regex]::Escape($expectedStorageArtifact)) -or
-            $text -notmatch 'Compiler: produced ELF validation PASS entry=0x0000000051001000' -or
-            $text -notmatch 'Compiler: reopened_bytes=\d+ reopened_hash=fnv1a64:[0-9a-f]{16} readback ELF validation PASS' -or
+            $text -notmatch 'Compiler: produced ELF validation PASS entry=0x(?:0x)?0000000051001000' -or
+            $text -notmatch 'Compiler: reopened_bytes=\d+ reopened_hash=fnv1a64:(?:0x)?[0-9a-f]{16} readback ELF validation PASS' -or
             $text -notmatch ('\[VFS_WRITE_FILE\] path=' + [regex]::Escape($expectedStorageArtifact) + ' operation=(create|overwrite)') -or
             $text -notmatch ('BareMetalBuild: artifact=' + [regex]::Escape("build/bin/arm64/$outputName.elf")) -or
             $digestMatches.Count -le $artifactDigestBefore) {
