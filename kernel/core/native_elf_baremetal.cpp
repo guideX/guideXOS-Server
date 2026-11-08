@@ -13,6 +13,7 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/block_device.h"
+#include "include/kernel/ramdisk.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/app_audio_stream.h"
@@ -655,7 +656,8 @@ static bool compute_sha256(const void* bytes, uint32_t length, uint8_t output[32
         s_sha256Initialized = true;
     }
     size_t outputLength = 0;
-    const psa_status_t status = psa_hash_compute(PSA_ALG_SHA_256, bytes, length,
+    const psa_status_t status = psa_hash_compute(PSA_ALG_SHA_256,
+                                                  static_cast<const uint8_t*>(bytes), length,
                                                   output, 32u, &outputLength);
     return status == PSA_SUCCESS && outputLength == 32u;
 }
