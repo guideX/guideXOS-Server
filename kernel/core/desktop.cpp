@@ -9185,6 +9185,13 @@ void arm_studio_post_close_input_probe()
     kernel::serial::puts("[guideXOS] Studio post-close input probe: armed\n");
 }
 
+void reset_studio_post_close_pump_guard_after_app_cleanup()
+{
+    if (!s_studioPostCloseInputProbe.armed() || !s_cooperativePumpActive) return;
+    s_cooperativePumpActive = false;
+    kernel::serial::puts("[guideXOS] Studio post-close pump guard reset after application cleanup\n");
+}
+
 
 // Helper function to draw the shell window
 static void draw_shell_window()

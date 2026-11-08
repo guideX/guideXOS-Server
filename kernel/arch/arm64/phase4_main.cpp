@@ -2125,6 +2125,11 @@ extern "C" void phase3_main(const Aarch64Handoff* handoff, uint64_t initial_el)
         if (!desktopServiceLoopEntryLogged) {
             desktopServiceLoopEntryLogged = true;
             print("[guideXOS] Phase12 desktop service loop: entering\n");
+            // The closing NativeElf task may have been preempted inside the
+            // stateful desktop pump as it returned to the scheduler.  Studio's
+            // owner is now gone, so the long-lived kernel service loop can
+            // safely take ownership of the post-close input pump.
+            kernel::desktop::reset_studio_post_close_pump_guard_after_app_cleanup();
         }
 #endif
 #if defined(GXOS_AARCH64_PHASE7)

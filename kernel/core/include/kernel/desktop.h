@@ -58,6 +58,10 @@ bool redraw_lifecycle_now();
 // Arm narrow guest evidence for a real desktop pointer and keyboard action
 // after the native Studio owner has been fully released.
 void arm_studio_post_close_input_probe();
+// The Phase 12 service loop runs after the NativeElf task has completed.  It
+// may discard a stale pump guard left by the closing task before taking over
+// desktop input service.
+void reset_studio_post_close_pump_guard_after_app_cleanup();
 
 // Update tick counter for timing (call from main loop, e.g., every 10ms)
 // Also updates IPC, running apps, and taskbar

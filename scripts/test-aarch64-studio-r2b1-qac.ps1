@@ -155,7 +155,7 @@ function Invoke-StudioBoot([int]$BootNumber) {
 
     $runnerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $runnerScript,
         '-ArtifactDirectory', $ArtifactDirectory, '-RuntimeSeconds', [string]$RuntimeSeconds,
-        '-PostStudioExitSeconds', [string]$PostStudioExitSeconds)
+        '-PostStudioExitSeconds', [string]$PostStudioExitSeconds, '-R2B1ExternalWorkflow')
     if (![string]::IsNullOrWhiteSpace($QacCliPath)) {
         $runnerArguments += @('-QacCliPath', [IO.Path]::GetFullPath($QacCliPath))
     }
@@ -412,20 +412,35 @@ function Invoke-StudioBoot([int]$BootNumber) {
         $record.screenshots += @('r2b1-close-project-menu.png', 'r2b1-project-closed.png',
             'r2b1-open-vfs-project.png', 'r2b1-vfs-build.png')
 
+        # Close through the actual Studio window control so the guest delivers
+        # the ABI close event and the kernel can verify the exposed desktop
+        # redraw and post-close pointer/keyboard path.
         $cleanCloseMarker = 'GUIDEXOS_DEVELOPER_STUDIO_MARKER clean_close=PASS'
+        $closeEventMarker = 'ABI3 guest observed Studio close event through v0.5 poll_event'
         $cleanCloseBefore = Get-Count (Read-GuestText $guestLog) $cleanCloseMarker
-        Send-StudioInput $sessionPath $qacPath @{ ClickX = 300; ClickY = 57; CapturePath = (Join-Path $sessionDirectory 'r2b1-exit-menu.png') }
-        Send-StudioInput $sessionPath $qacPath @{ ClickX = 330; ClickY = 286; CapturePath = (Join-Path $sessionDirectory 'r2b1-exit-requested.png') }
+        $closeEventBefore = Get-Count (Read-GuestText $guestLog) $closeEventMarker
+        Send-StudioInput $sessionPath $qacPath @{ ClickX = 786; ClickY = 10; CapturePath = (Join-Path $sessionDirectory 'r2b1-exit-requested.png') }
         $exitRequested = $true
+        $text = Wait-GuestOccurrence $guestLog $closeEventMarker ($closeEventBefore + 1) $runner 30
         $text = Wait-GuestOccurrence $guestLog $cleanCloseMarker ($cleanCloseBefore + 1) $runner 30
+        $text = Wait-GuestOccurrence $guestLog 'NativeElf GUI cleanup: exposed desktop redraw=PASS' 1 $runner 30
+        $text = Wait-GuestOccurrence $guestLog '[guideXOS] Studio post-close input probe: armed' 1 $runner 30
         $record.transitions.studio_clean_close = $true
-        $record.screenshots += @('r2b1-exit-menu.png', 'r2b1-exit-requested.png')
+        $record.screenshots += 'r2b1-exit-requested.png'
         Save-Workflow $workflowPath $record
 
         if (!$runner.WaitForExit(($RuntimeSeconds + 120) * 1000)) { throw 'The QAC runner did not complete its bounded cleanup window.' }
         $record.runner_exit_code = $runner.ExitCode
-        $text = Read-GuestText $guestLog
         $finalSession = (Read-GuestText $sessionPath) | ConvertFrom-Json
+        $record.runner_guest_outcome = [string]$finalSession.outcome
+        $record.managed_qemu_exit_code = $finalSession.qemu_exit_code
+        $record.qac_child_exit_verified = [bool]$finalSession.qac_child_exit_verified
+        $record.qac_session_reservation_released = [bool]$finalSession.qac_released_reservation
+        $record.qac_final_snapshot_available = [bool]$finalSession.qac_final_snapshot_available
+        $record.post_studio_pointer_responsive = [bool]$finalSession.post_studio_pointer_responsive
+        $record.post_studio_keyboard_responsive = [bool]$finalSession.post_studio_keyboard_responsive
+        $record.r2b1_workflow_validation_pass = [bool]$finalSession.r2b1_workflow_pass
+        $text = Read-GuestText $guestLog
         $record.phase12_cleanup_pass = [regex]::Matches($text, 'AARCH64_PHASE12_PASS').Count -ge 2
         $record.gui_cleanup_pass = $text.Contains('NativeElf GUI cleanup: PASS mappings=0 windows=0 widgets=0')
         $record.no_unexpected_irqs_or_exceptions = $text -match 'unexpected-irq=0 exceptions=0'
@@ -448,7 +463,11 @@ function Invoke-StudioBoot([int]$BootNumber) {
         $record.outcome = if ($requiredTrue -and $record.phase12_cleanup_pass -and $record.gui_cleanup_pass -and
             $record.no_unexpected_irqs_or_exceptions -and $record.qac_exclusive_grant -and
             $record.qac_reservation_released -and $record.no_remaining_qemu -and $record.desktop_redraw_captured -and
-            $record.runner_exit_code -eq 0) { 'STUDIO_R2B1_NATIVE_BUILD_VERIFIED' } else { 'STUDIO_R2B1_PARTIAL' }
+            $record.runner_guest_outcome -eq 'ABI3_STUDIO_GUEST_BOOT_AND_CLEANUP_PASS' -and
+            $record.managed_qemu_exit_code -eq 0 -and $record.qac_child_exit_verified -and
+            $record.qac_session_reservation_released -and $record.qac_final_snapshot_available -and
+            $record.post_studio_pointer_responsive -and $record.post_studio_keyboard_responsive -and
+            $record.r2b1_workflow_validation_pass) { 'STUDIO_R2B1_NATIVE_BUILD_VERIFIED' } else { 'STUDIO_R2B1_PARTIAL' }
         Save-Workflow $workflowPath $record
         Write-Host "R2B1 boot $BootNumber outcome: $($record.outcome) ($workflowPath)" -ForegroundColor $(if ($record.outcome -eq 'STUDIO_R2B1_NATIVE_BUILD_VERIFIED') { 'Green' } else { 'Yellow' })
         if ($record.outcome -ne 'STUDIO_R2B1_NATIVE_BUILD_VERIFIED') { throw "R2B1 boot $BootNumber did not satisfy every guest or QAC cleanup check." }

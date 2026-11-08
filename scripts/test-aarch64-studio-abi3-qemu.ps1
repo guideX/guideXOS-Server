@@ -7,7 +7,8 @@ param(
     [string]$FirmwareVarsTemplate = 'C:\Program Files\qemu\share\edk2-arm-vars.fd',
     [int]$AdmissionTimeoutSeconds = 1800,
     [int]$RuntimeSeconds = 300,
-    [int]$PostStudioExitSeconds = 20
+    [int]$PostStudioExitSeconds = 20,
+    [switch]$R2B1ExternalWorkflow
 )
 
 $ErrorActionPreference = 'Stop'
@@ -692,7 +693,8 @@ if ($record.project_context_established -and $record.document_open_succeeded) {
 }
 $record.qac_launched_child = $qacText -match "QAC QEMU launched: reservation=$reservationId"
 $record.qac_released_reservation = $qacText -match "QAC reservation released: id=$reservationId"
-$record.qemu_exit_code = $qac.ExitCode
+$qacExitMatch = [regex]::Match($qacText, "QAC QEMU exited: reservation=$([regex]::Escape($reservationId)) pid=\d+ exitCode=(-?\d+)")
+$record.qemu_exit_code = if ($qacExitMatch.Success) { [int]$qacExitMatch.Groups[1].Value } else { $qac.ExitCode }
 $record.qac_process_id = $qac.Id
 $record.managed_qemu_child_pid = [int]$ownedChild.ProcessId
 $record.managed_qemu_child_parent_pid = [int]$ownedChild.ParentProcessId
@@ -714,16 +716,54 @@ $record.desktop_post_exit_wait_completed = $postStudioExitWaitCompleted
 $record.post_studio_exit_observed_seconds = if ($null -ne $postStudioExitObservedAt) {
     [Math]::Max(0, [int]([DateTimeOffset]::UtcNow - $postStudioExitObservedAt).TotalSeconds)
 } else { 0 }
-$record.outcome = if ($record.guest_pass_marker -and $record.studio_entry_called -and $record.adapter_selected -and
+$r2b1WorkflowPass = $false
+if ($R2B1ExternalWorkflow) {
+    $r2b1WorkflowPath = Join-Path $logDirectory 'r2b1-workflow.json'
+    if (Test-Path -LiteralPath $r2b1WorkflowPath -PathType Leaf) {
+        try {
+            $r2b1Workflow = Get-Content -LiteralPath $r2b1WorkflowPath -Raw | ConvertFrom-Json
+            $requiredTransitions = @(
+                'studio_initial_render', 'authentic_studio_project_create_open',
+                'exact_source_saved_to_guest_vfs', 'authentic_studio_arm64_build',
+                'arm64_entry_and_strict_base', 'artifact_vfs_readback', 'artifact_sha256_reported',
+                'malformed_source_rejected_with_location', 'stale_output_removed',
+                'no_false_artifact_success', 'rebuild_after_failure',
+                'changed_source_changes_artifact_digest', 'staged_vfs_failure_project_open',
+                'vfs_package_publication_failure', 'no_false_build_success_for_vfs_failure',
+                'studio_clean_close'
+            )
+            $transitionsPass = $true
+            foreach ($transition in $requiredTransitions) {
+                if ($r2b1Workflow.transitions.$transition -ne $true) { $transitionsPass = $false; break }
+            }
+            $r2b1WorkflowPass = $transitionsPass -and
+                [string]$r2b1Workflow.candidate_source_head -eq [string]$record.candidate_source_head -and
+                [string]$r2b1Workflow.candidate_manifest_sha256 -eq [string]$record.candidate_manifest_sha256 -and
+                [string]$r2b1Workflow.candidate_kernel_sha256 -eq [string]$record.candidate_kernel_sha256 -and
+                [string]$r2b1Workflow.candidate_efi_sha256 -eq [string]$record.candidate_efi_sha256 -and
+                [string]$r2b1Workflow.candidate_ramdisk_sha256 -eq [string]$record.candidate_ramdisk_sha256 -and
+                [string]$r2b1Workflow.first_artifact_sha256 -match '^[0-9a-f]{64}$' -and
+                [string]$r2b1Workflow.recovered_artifact_sha256 -match '^[0-9a-f]{64}$' -and
+                [string]$r2b1Workflow.first_artifact_sha256 -ne [string]$r2b1Workflow.recovered_artifact_sha256
+        } catch {
+            $record.r2b1_workflow_validation_error = $_.Exception.Message
+        }
+    } else {
+        $record.r2b1_workflow_validation_error = 'R2B1 external workflow record is missing.'
+    }
+    $record.r2b1_workflow_pass = $r2b1WorkflowPass
+}
+$commonLifecyclePass = $record.guest_pass_marker -and $record.studio_entry_called -and $record.adapter_selected -and
     $record.window_created -and $record.initial_render -and $record.mouse_event_delivered -and
     $record.key_event_delivered -and $record.focus_event_delivered -and $record.close_event_delivered -and
-    $record.editable_context_established -and
-    $record.expected_test_text_observed -and $record.studio_keydown_keyup_balanced -and $record.close_and_cleanup -and
-    $record.exposed_desktop_redraw -and $record.post_studio_pointer_responsive -and
-    $record.post_studio_keyboard_responsive -and
-    $record.desktop_after_close_screendump_captured -and $record.desktop_after_close_500ms_screendump_captured -and
-    $record.qac_launched_child -and
-    $record.qac_released_reservation -and $record.desktop_post_exit_wait_completed -and !$timedOut) {
+    $record.close_and_cleanup -and $record.exposed_desktop_redraw -and $record.post_studio_pointer_responsive -and
+    $record.post_studio_keyboard_responsive -and $record.desktop_after_close_screendump_captured -and
+    $record.desktop_after_close_500ms_screendump_captured -and $record.qac_launched_child -and
+    $record.qac_released_reservation -and $record.desktop_post_exit_wait_completed -and !$timedOut
+$workflowEvidencePass = if ($R2B1ExternalWorkflow) { $r2b1WorkflowPass } else {
+    $record.editable_context_established -and $record.expected_test_text_observed -and $record.studio_keydown_keyup_balanced
+}
+$record.outcome = if ($commonLifecyclePass -and $workflowEvidencePass) {
     'ABI3_STUDIO_GUEST_BOOT_AND_CLEANUP_PASS'
 } elseif ($timedOut) { 'ABI3_STUDIO_GUEST_RUNTIME_TIMEOUT' } else { 'ABI3_STUDIO_GUEST_PARTIAL' }
 $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding utf8
