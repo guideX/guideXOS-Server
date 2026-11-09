@@ -212,6 +212,7 @@ class SkiLoaderContractTests(unittest.TestCase):
             "invalid hash", "profile mismatch", "unsafe memory map",
             "missing loader evidence", "wrong simulator mode", "absent authorization",
             "compile-only profile", "missing CPU-state checkpoint gate",
+            "incorrect simulator identity",
         )
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
@@ -253,6 +254,8 @@ class SkiLoaderContractTests(unittest.TestCase):
                     },
                     "kernel_execution_authorized": False,
                 }
+                if case == "incorrect simulator identity":
+                    record["ski_sha256"] = "0" * 64
                 record_path = base / "loader-record.json"
                 record_path.write_text(json.dumps(record), encoding="utf-8")
                 if case == "missing loader evidence":

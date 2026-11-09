@@ -61,9 +61,36 @@ class BreakExceptionContractTests(unittest.TestCase):
         errors = runner.validate_break_output(output, contract())
         self.assertTrue(any("slot1 record immediate" in error for error in errors), errors)
 
+        wrong_slot = valid_output().replace("slot=0x1 IPSR=", "slot=0x2 IPSR=", 1)
+        errors = runner.validate_break_output(wrong_slot, contract())
+        self.assertTrue(any("slot1 record slot" in error for error in errors), errors)
+
         output = valid_output() + record_line("slot1", 0x6A17, 0x109000, 1) + "\n"
         errors = runner.validate_break_output(output, contract())
         self.assertTrue(any("duplicate IA64_BREAK_RECORD slot1" in error for error in errors), errors)
+
+    def test_rfi_restoration_when_direct_psr_observations_are_present(self) -> None:
+        incoming_ipsr = (1 << 13) | (1 << 44) | (1 << 41)
+        self.assertEqual(runner.validate_exception_return_state(incoming_ipsr, 1, 0x2000), [])
+        lost_ic = runner.validate_exception_return_state(incoming_ipsr, 1, 0x0000)
+        self.assertTrue(any("post-rfi PSR did not restore i=0 and ic=1" in error
+                            for error in lost_ic), lost_ic)
+
+        correct = valid_output() + (
+            "IA64_BREAK_POST_RFI_PSR slot=slot1 PSR=0x2000\n"
+            "IA64_BREAK_POST_RFI_PSR slot=slot2 PSR=0x2000\n")
+        self.assertEqual(runner.validate_break_output(correct, contract()), [])
+
+        incorrect = valid_output() + (
+            "IA64_BREAK_POST_RFI_PSR slot=slot1 PSR=0x0\n"
+            "IA64_BREAK_POST_RFI_PSR slot=slot2 PSR=0x2000\n")
+        errors = runner.validate_break_output(incorrect, contract())
+        self.assertTrue(any("slot1 post-rfi PSR did not restore i=0 and ic=1" in error
+                            for error in errors), errors)
+
+        duplicate = correct + "IA64_BREAK_POST_RFI_PSR slot=slot1 PSR=0x2000\n"
+        errors = runner.validate_break_output(duplicate, contract())
+        self.assertTrue(any("exactly two direct post-rfi" in error for error in errors), errors)
 
     def test_unexpected_exception_and_duplicate_pass_marker_are_rejected(self) -> None:
         checked = contract()
@@ -138,6 +165,7 @@ class BreakExceptionContractTests(unittest.TestCase):
             self.assertEqual(result["classification"], "BREAK_EXCEPTION_PROBE_PASS")
             self.assertEqual(result["ski_fault_count"], 2)
             self.assertEqual(result["ski_instruction_count"], 0x1ADEF)
+            self.assertIsNone(result["break_exception_post_rfi_psr_observations"])
             self.assertTrue(result["cleanup_complete"])
             self.assertFalse(result["timed_out"])
             failed_result = json.loads(

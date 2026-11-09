@@ -134,6 +134,14 @@ class CpuStateCheckpointTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PSR.i field disagrees"):
             validator.parse_checkpoint_record(reversed_labels)
 
+    def test_lost_psr_ic_at_final_checkpoint_is_rejected(self) -> None:
+        lost_ic = valid_guest_output().replace(
+            "IA64_CHECKPOINT_D stage=0x4 valid=0x1E7 PSR=0x2000 PSR.i=0 PSR.ic=1",
+            "IA64_CHECKPOINT_D stage=0x4 valid=0x1E7 PSR=0x0 PSR.i=0 PSR.ic=0")
+        _, errors = validator.validate_checkpoint_output(
+            lost_ic, ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("checkpoint D PSR.ic" in error for error in errors), errors)
+
     def test_contradictory_hex_incomplete_record_and_missing_checkpoint_are_rejected(self) -> None:
         contradictory = line("C", stage=3, valid=0x1E7, psr=0x2000, iva=IVT).replace(
             "PSR.i=0 PSR.ic=1", "PSR.i=0 PSR.ic=0")
@@ -181,6 +189,7 @@ class CpuStateCheckpointTests(unittest.TestCase):
             "classification": "GUEST_EXIT_ZERO",
             "exit_code": 0,
             "timed_out": False,
+            "cleanup_complete": True,
             "cpu_state_checkpoints": parsed,
             "cpu_state_checkpoint_errors": [],
         }
@@ -211,6 +220,51 @@ class CpuStateCheckpointTests(unittest.TestCase):
             "a" * 64, ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
         self.assertTrue(any("exactly the four guest checkpoints" in error
                             for error in synthesis_errors), synthesis_errors)
+
+    def test_runtime_evidence_accepts_only_two_attested_break_faults(self) -> None:
+        stdout = valid_guest_output() + (
+            "IA64_BREAK_RECORD slot1 valid=0xbeefc0de4b56414c\n"
+            "IA64_BREAK_RECORD slot2 valid=0xbeefc0de4b56414c\n"
+            "IA64_BREAK_EXCEPTION_RESULT=PASS\n"
+            "kernel exited with status 0\n")
+        parsed, parse_errors = validator.validate_checkpoint_output(
+            valid_guest_output(), ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertEqual(parse_errors, [])
+        run_result = {
+            "label": "guideXOS-kernel",
+            "command": ["/qualified/bskinc", "-stats", "-icnt", "counts.txt",
+                        "-forcesystem", "/tmp/selected.elf"],
+            "artifact_sha256": "a" * 64,
+            "classification": "BREAK_EXCEPTION_KERNEL_PASS",
+            "exit_code": 0,
+            "timed_out": False,
+            "cleanup_complete": True,
+            "ski_fault_count": 2,
+            "break_exception_expected_faults": 2,
+            "break_exception_evidence_errors": [],
+            "cpu_state_checkpoints": parsed,
+            "cpu_state_checkpoint_errors": [],
+        }
+        _, errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (2 faults), 0.01 sec",
+            "per-instruction counts captured", run_result, "a" * 64,
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertEqual(errors, [])
+
+        wrong_expected_count = dict(run_result, break_exception_expected_faults=1)
+        _, wrong_count_errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (2 faults), 0.01 sec",
+            "per-instruction counts captured", wrong_expected_count, "a" * 64,
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("exactly two validated Break" in error
+                            for error in wrong_count_errors), wrong_count_errors)
+
+        _, unexpected_fault_errors = validator.validate_runtime_evidence(
+            stdout, "kernel exited with status 0\n100 insts (3 faults), 0.01 sec",
+            "per-instruction counts captured", run_result, "a" * 64,
+            ivt=IVT, rse_base=RSE_BASE, rse_top=RSE_TOP)
+        self.assertTrue(any("expected 2" in error for error in unexpected_fault_errors),
+                        unexpected_fault_errors)
 
 
 if __name__ == "__main__":

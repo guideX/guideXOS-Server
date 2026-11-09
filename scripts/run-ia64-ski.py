@@ -225,8 +225,58 @@ def extract_ski_counts(stdout_text: str, stderr_text: str, counts_path: Path) ->
     return faults, instructions
 
 
+def parse_break_post_rfi_psr_observations(
+        stdout_text: str) -> tuple[dict[str, int] | None, list[str]]:
+    """Parse optional direct PSR reads emitted immediately after each rfi return."""
+    marker = "IA64_BREAK_POST_RFI_PSR"
+    lines = [line for line in stdout_text.splitlines() if line.startswith(marker)]
+    if not lines:
+        return None, []
+
+    errors: list[str] = []
+    observations: dict[str, int] = {}
+    if len(lines) != 2:
+        errors.append("expected exactly two direct post-rfi PSR observations")
+    for line in lines:
+        match = re.fullmatch(
+            r"IA64_BREAK_POST_RFI_PSR slot=(slot1|slot2) PSR=(0x[0-9A-Fa-f]+)",
+            line.strip())
+        if not match:
+            errors.append("malformed direct post-rfi PSR observation")
+            continue
+        slot, value = match.groups()
+        if slot in observations:
+            errors.append(f"duplicate direct post-rfi PSR observation for {slot}")
+            continue
+        psr = int(value, 16)
+        observations[slot] = psr
+        if ((psr >> 14) & 1) != 0 or ((psr >> 13) & 1) != 1:
+            errors.append(f"{slot} post-rfi PSR did not restore i=0 and ic=1")
+    missing = {"slot1", "slot2"} - observations.keys()
+    if missing:
+        errors.append("missing direct post-rfi PSR observation(s): " + ", ".join(sorted(missing)))
+    return observations, errors
+
+
+def validate_exception_return_state(saved_ipsr: int, expected_slot: int,
+                                    post_rfi_psr: int | None = None) -> list[str]:
+    """Check incoming IPSR and, when available, direct state immediately after rfi."""
+    errors: list[str] = []
+    if ((saved_ipsr >> 41) & 3) != expected_slot or \
+            ((saved_ipsr >> 13) & 1) != 1 or ((saved_ipsr >> 14) & 1) != 0 or \
+            ((saved_ipsr >> 44) & 1) != 1 or ((saved_ipsr >> 32) & 3) != 0 or \
+            ((saved_ipsr >> 46) & 1) != 0:
+        errors.append("saved IPSR does not match the expected faulting state")
+    if post_rfi_psr is not None and \
+            (((post_rfi_psr >> 14) & 1) != 0 or ((post_rfi_psr >> 13) & 1) != 1):
+        errors.append("post-rfi PSR did not restore i=0 and ic=1")
+    return errors
+
+
 def validate_break_output(stdout_text: str, contract: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    post_rfi_observations, post_rfi_errors = parse_break_post_rfi_psr_observations(stdout_text)
+    errors.extend(post_rfi_errors)
     pass_marker = contract["pass_marker"]
     fail_marker = contract["fail_marker"]
     if stdout_text.count(pass_marker) != 1:
@@ -276,10 +326,13 @@ def validate_break_output(stdout_text: str, contract: dict[str, Any]) -> list[st
         handler_psr = fields.get("handler.PSR")
         rsc = fields.get("RSC")
         bsp = fields.get("BSP")
-        if ipsr is None or ((ipsr >> 41) & 3) != slot or not (ipsr & (1 << 13)) or \
-                (ipsr & (1 << 14)) or not (ipsr & (1 << 44)) or \
-                (ipsr & (3 << 32)) or (ipsr & (1 << 46)):
+        if ipsr is None:
             errors.append(f"{name} saved IPSR does not match the expected faulting state")
+        else:
+            for state_error in validate_exception_return_state(
+                    ipsr, slot,
+                    post_rfi_observations.get(name) if post_rfi_observations is not None else None):
+                errors.append(f"{name} {state_error}")
         if isr is None or ((isr >> 41) & 7) != slot or (isr & (1 << 38)) or (isr & 0xffff):
             errors.append(f"{name} saved ISR does not match the expected faulting slot")
         if handler_psr is None or handler_psr & 0x6000:
@@ -485,6 +538,9 @@ def run_simulator(command: list[str], timeout: float, capture_dir: Path,
         "break_exception_evidence_errors": break_evidence_errors,
         "break_exception_expected_faults": (
             break_exception_contract["expected_faults"] if break_exception_contract else None),
+        "break_exception_post_rfi_psr_observations": (
+            parse_break_post_rfi_psr_observations(stdout_text)[0]
+            if break_exception_contract else None),
     }
     (capture_dir / "run-result.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"[{classification}] exit={return_code} elapsed={elapsed:.3f}s capture={capture_dir}")

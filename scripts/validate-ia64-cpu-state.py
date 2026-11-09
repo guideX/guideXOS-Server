@@ -282,9 +282,20 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
         errors.append("runner result does not identify a guideXOS kernel launch")
     if run_result.get("artifact_sha256") != expected_sha256:
         errors.append("runner artifact identity differs from the selected candidate")
-    if run_result.get("classification") != "GUEST_EXIT_ZERO" or \
+    if run_result.get("cleanup_complete") is not True:
+        errors.append("runner did not confirm simulator process cleanup")
+    classification = run_result.get("classification")
+    if classification not in ("GUEST_EXIT_ZERO", "BREAK_EXCEPTION_KERNEL_PASS") or \
             run_result.get("exit_code") != 0 or run_result.get("timed_out") is not False:
         errors.append("runner did not report successful intentional guest termination")
+    expected_fault_count = 2 if classification == "BREAK_EXCEPTION_KERNEL_PASS" else 0
+    if classification == "BREAK_EXCEPTION_KERNEL_PASS":
+        if run_result.get("ski_fault_count") != 2 or \
+                run_result.get("break_exception_expected_faults") != 2 or \
+                run_result.get("break_exception_evidence_errors") != []:
+            errors.append("runner did not bind exactly two validated Break Instruction faults")
+    elif classification == "GUEST_EXIT_ZERO" and run_result.get("ski_fault_count") not in (None, 0):
+        errors.append("zero-fault kernel classification reports a simulator fault")
     simulator_output = stdout + "\n" + stderr
     if "kernel exited with status 0" not in simulator_output.lower():
         errors.append("guest output lacks the successful Ski SSC exit status")
@@ -294,16 +305,25 @@ def validate_runtime_evidence(stdout: str, stderr: str, instruction_counts: str,
             "-stats", "-icnt", "-forcesystem")):
         errors.append("runner command does not show stats, instruction capture, and system mode")
 
+    # The Break test's two expected synchronous faults are explicitly attested by
+    # its records and runner classification. Ignore those IA64_BREAK_* guest
+    # markers when looking for unrelated simulator fault diagnostics.
+    diagnostic_lines = [line for line in simulator_output.splitlines()
+                        if not line.startswith("IA64_BREAK_")]
+    diagnostic_output = "\n".join(diagnostic_lines)
     summary = re.findall(
         r"(?im)^\s*(\d+)\s+insts?\s+\((\d+)\s+faults?\)",
         simulator_output + "\n" + instruction_counts,
     )
     if len(summary) != 1:
         errors.append("simulator captures lack one unambiguous instruction/fault summary")
-    elif int(summary[0][1]) != 0:
-        errors.append(f"simulator recorded {summary[0][1]} unexpected fault(s)")
+    elif int(summary[0][1]) != expected_fault_count:
+        if expected_fault_count == 0:
+            errors.append(f"simulator recorded {summary[0][1]} unexpected fault(s)")
+        else:
+            errors.append(f"simulator recorded {summary[0][1]} fault(s), expected {expected_fault_count}")
 
-    combined = simulator_output.lower()
+    combined = diagnostic_output.lower()
     for marker in SIMULATOR_FAULT_MARKERS:
         if marker in combined:
             errors.append(f"simulator output contains a fault marker: {marker.strip()}")
@@ -531,6 +551,10 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
             value = run_result.get(key)
             if not isinstance(value, str) or not Path(value).is_file():
                 raise OSError(f"runner result does not identify an existing {key} capture")
+            expected_hash = run_result.get(f"{key}_sha256")
+            actual_hash = hashlib.sha256(Path(value).read_bytes()).hexdigest()
+            if expected_hash != actual_hash:
+                errors.append(f"runner {key} hash differs from the preserved capture")
         stdout = Path(run_result["stdout"]).read_text(encoding="utf-8", errors="replace")
         stderr = Path(run_result["stderr"]).read_text(encoding="utf-8", errors="replace")
         instruction_counts = Path(run_result["instruction_counts"]).read_text(
@@ -565,6 +589,26 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
     } for program in program_loads]
     if loader_record.get("kernel_load_segments") != expected_loads:
         errors.append("loader record PT_LOAD ranges differ from the candidate ELF")
+    if run_result.get("artifact_manifest_sha256") != hashlib.sha256(
+            manifest_path.read_bytes()).hexdigest():
+        errors.append("runner manifest hash differs from the selected candidate manifest")
+    if run_result.get("loader_record_sha256") != hashlib.sha256(
+            loader_record_path.read_bytes()).hexdigest():
+        errors.append("runner loader-record hash differs from the selected loader record")
+    if run_result.get("loader_record_kernel_sha256") != actual_sha256:
+        errors.append("runner loader record does not bind the selected candidate ELF")
+    if run_result.get("simulator_sha256") != simulator_sha256:
+        errors.append("runner simulator identity differs from the qualified Ski executable")
+    if run_result.get("execution_mode") != "-forcesystem" or run_result.get("cpu_count") != 1:
+        errors.append("runner did not record one-CPU direct system-mode loading")
+    limits = run_result.get("execution_limits")
+    if not isinstance(limits, dict) or \
+            limits.get("address_space_soft_bytes", 2**63) > 2 * 1024 * 1024 * 1024 or \
+            limits.get("address_space_hard_bytes", 2**63) > 2 * 1024 * 1024 * 1024 or \
+            limits.get("cpu_soft_seconds", 2**63) > 120 or \
+            limits.get("cpu_hard_seconds", 2**63) > 120 or \
+            limits.get("wall_clock_seconds", 2**63) > 60:
+        errors.append("runner did not record the qualified 2 GiB/120-second/60-second limits")
     records, runtime_errors = validate_runtime_evidence(
         stdout, stderr, instruction_counts, run_result, expected_sha256,
         ivt=symbols["ia64_ivt"]["value"],
@@ -572,6 +616,31 @@ def validate_runtime_files(repo_root: Path, elf_path: Path, manifest_path: Path,
         rse_top=symbols["rse_backing_store_top"]["value"],
     )
     errors.extend(runtime_errors)
+    if run_result.get("classification") == "BREAK_EXCEPTION_KERNEL_PASS":
+        runner_path = repo_root / "scripts" / "run-ia64-ski.py"
+        spec = importlib.util.spec_from_file_location("ia64_postflight_ski_runner", runner_path)
+        if spec is None or spec.loader is None:
+            errors.append("cannot load the Break exception runtime validator")
+        else:
+            runner = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(runner)
+            contract = runner.make_break_contract(
+                {"break_slot1": symbols["ia64_break_slot1_bundle"]["value"],
+                 "break_slot2": symbols["ia64_break_slot2_bundle"]["value"],
+                 "rse_base": symbols["rse_backing_store_base"]["value"],
+                 "rse_top": symbols["rse_backing_store_top"]["value"]},
+                "BREAK_EXCEPTION_KERNEL_PASS", "IA64_BREAK_RECORD",
+                "IA64_BREAK_EXCEPTION_RESULT=PASS", "IA64_BREAK_EXCEPTION_RESULT=FAIL",
+                "IA64_BREAK_EXCEPTION_VALIDATION")
+            contract["stderr_text"] = stderr
+            break_errors = runner.validate_break_output(stdout, contract)
+            if break_errors:
+                errors.extend(f"Break exception evidence: {error}" for error in break_errors)
+            observed_psr, observation_errors = runner.parse_break_post_rfi_psr_observations(stdout)
+            if observation_errors:
+                errors.extend(f"Break exception evidence: {error}" for error in observation_errors)
+            if run_result.get("break_exception_post_rfi_psr_observations") != observed_psr:
+                errors.append("runner post-rfi PSR observations differ from raw guest output")
 
     source_errors = validate_checkpoint_sources(repo_root)
     if source_errors:
@@ -625,7 +694,18 @@ def main() -> int:
             print("CHECKPOINT_ORDER=PASS A,B,C,D")
             print("RAW_GUEST_RECORDS=PASS exactly four ordered records, matching runner capture")
             print("RUNNER_EXIT=PASS intentional SSC_EXIT=66, process status 0, no timeout")
-            print("SIMULATOR_FAULTS=PASS 0")
+            print("PROCESS_CLEANUP=PASS simulator process was reaped")
+            run_record = json.loads(args.runtime_run_result.read_text(encoding="utf-8"))
+            if run_record.get("classification") == "BREAK_EXCEPTION_KERNEL_PASS":
+                print("BREAK_EXCEPTION_EVIDENCE=PASS two records, exact vector/immediates/slots, "
+                      "distinct return markers, and one continuation per slot")
+                if run_record.get("break_exception_post_rfi_psr_observations") is None:
+                    print("POST_RFI_PSR=UNOBSERVED before test cleanup")
+                else:
+                    print("POST_RFI_PSR=PASS direct observations match runner revalidation")
+                print("SIMULATOR_FAULTS=PASS total=2 expected_break=2 unexpected=0")
+            else:
+                print("SIMULATOR_FAULTS=PASS total=0")
             print("CANDIDATE_IDENTITY=PASS ELF, manifest, loader record, invocation, and runner hash agree")
             print("IA64_CPU_STATE_RUNTIME_VALIDATION=PASS")
             return 0
