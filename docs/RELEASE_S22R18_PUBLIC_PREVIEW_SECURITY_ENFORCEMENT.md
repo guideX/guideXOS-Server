@@ -39,7 +39,7 @@ All supported package discovery and launch paths use this gate. The public-previ
 | Manifest | 956 bytes; SHA-256 `3f3592e6c76053e323f16d48073e98c67d7f5702b8e47f0b507d6bfb3d126449` |
 | Executable | `bin/amd64/pacman.elf`; 63,640 bytes; SHA-256 `eeb544bbb2e2574eeaed7bb7f0bad61ea24f6945231b7757223a225b30b8e1cc` |
 | Architecture / ABI / entry | `amd64` / `guidexos-c-abi-v1` / `gx_main` |
-| Minimum Server version | `0.3.0` |
+| Manifest minGuideXOSVersion floor | 0.1.0 (candidate server build is 0.3.0) |
 
 The nine resource identities pinned by the kernel are:
 
