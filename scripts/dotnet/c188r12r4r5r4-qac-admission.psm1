@@ -470,13 +470,17 @@ function Test-QacTransitionCandidateProfile {
     }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -ErrorAction Stop
     $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $isManagedSettingsObjectProbe = [string]$manifest.mode -ceq 'NativeAotManagedSettingsObjectProbe'
     $isManagedEntryProbe = [string]$manifest.mode -ceq 'NativeAotFirstManagedEntryProbe'
-    $expectedIdentity = if ($isManagedEntryProbe) {
+    $managedEntryDispatchProfile = $isManagedEntryProbe -or $isManagedSettingsObjectProbe
+    $expectedIdentity = if ($isManagedSettingsObjectProbe) {
+        'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-settings-object-v1'
+    } elseif ($isManagedEntryProbe) {
         'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-managed-entry-v1'
     } else { 'guidexos-nativeaot-runtime-pack-amd64-c188r12r4r5r2r3-transition-attribution-v1' }
-    $expectedResult = if ($isManagedEntryProbe) { 'MANAGED_ENTRY_PROBE_HOSTED_READY' } else { 'TRANSITION_ATTRIBUTION_HOSTED_READY' }
-    $expectedNextPhase = if ($isManagedEntryProbe) { 'C188R12R4R5R2R3_First_Managed_Entry_Guest' } else { 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' }
-    if ([string]$manifest.mode -cnotin @('NativeAotInitializeModulesTransitionAttribution','NativeAotFirstManagedEntryProbe') -or
+    $expectedResult = if ($isManagedSettingsObjectProbe) { 'MANAGED_SETTINGS_OBJECT_PROBE_HOSTED_READY' } elseif ($isManagedEntryProbe) { 'MANAGED_ENTRY_PROBE_HOSTED_READY' } else { 'TRANSITION_ATTRIBUTION_HOSTED_READY' }
+    $expectedNextPhase = if ($isManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_Managed_Settings_Object_Guest' } elseif ($isManagedEntryProbe) { 'C188R12R4R5R2R3_First_Managed_Entry_Guest' } else { 'C188R12R4R5R4R5R2R2R4R2R3R1_InitializeModules_Transition_Attribution_Guest' }
+    if ([string]$manifest.mode -cnotin @('NativeAotInitializeModulesTransitionAttribution','NativeAotFirstManagedEntryProbe','NativeAotManagedSettingsObjectProbe') -or
         [string]$manifest.result -cne $expectedResult -or
         [string]$manifest.candidateRoot -cne $candidateFull -or
         [string]$manifest.runtimePackIdentity -cne $expectedIdentity -or
@@ -497,8 +501,8 @@ function Test-QacTransitionCandidateProfile {
         [bool]$manifest.productionIsolationChecks.productionRuntimePackTransitionAttributionProfile -or
         -not [bool]$manifest.productionIsolationChecks.productionMapExcludesSafeHandoff -or
         -not [bool]$manifest.productionIsolationChecks.productionMapExcludesTransitionAttribution -or
-        ($isManagedEntryProbe -and -not [bool]$manifest.productionIsolationChecks.productionMapExcludesManagedEntryProbe) -or
-        ($isManagedEntryProbe -and [bool]$manifest.productionIsolationChecks.productionRuntimePackManagedEntryProbeProfile) -or
+        ($managedEntryDispatchProfile -and -not [bool]$manifest.productionIsolationChecks.productionMapExcludesManagedEntryProbe) -or
+        ($managedEntryDispatchProfile -and [bool]$manifest.productionIsolationChecks.productionRuntimePackManagedEntryProbeProfile) -or
         -not [bool]$manifest.productionIsolationChecks.noGcOwnershipProofProfileInProduction) {
         throw 'Candidate manifest is not a consistent, unexecuted C188 transition-attribution profile.'
     }
@@ -512,6 +516,24 @@ function Test-QacTransitionCandidateProfile {
          -not [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.runtimeInitializationMayAllocate -or
          [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.collectionRequested)) {
         throw 'R7 candidate managed-entry contract is missing, mismatched, or advertises an unsafe runtime guarantee.'
+    }
+    if ($isManagedSettingsObjectProbe -and
+        (-not [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbe -or
+         -not [bool]$manifest.c188R12R4R5R2R3ManagedSettingsObjectProbe -or
+         [string]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.entryMethod -cne 'HostLogProof.ManagedSettingsObjectProbe.ManagedMain' -or
+         [string]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.ABI -cne 'UnmanagedCallersOnly(CallConvCdecl)' -or
+         [int]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.seed -ne 14 -or
+         [int]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.expectedResult -ne 1122 -or
+         [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.methodAllocationFree -or
+         -not [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.implicitCollectionMayOccur -or
+         [bool]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.collectionRequested -or
+         [string]$manifest.c188R12R4R5R2R3ManagedSettingsObjectAllocationContract.helper -cne 'RhpNewFast' -or
+         [string]$manifest.c188R12R4R5R2R3ManagedSettingsObjectAllocationContract.stockHelper -cne 'guideXosStockRhpNewFast' -or
+         -not [bool]$manifest.c188R12R4R5R2R3ManagedSettingsObjectAllocationContract.implicitCollectionCountRecorded -or
+         [bool]$manifest.c188R12R4R5R2R3ManagedSettingsObjectAllocationContract.collectionRequestedByManagedProbe -or
+         [bool]$manifest.c188R12R4R5R2R3ManagedSettingsObjectProbeContract.nativeObjectPointerPersisted -or
+         [bool]$manifest.c188R12R4R5R2R3ManagedSettingsObjectProbeContract.collectionRequested)) {
+        throw 'R12 managed-settings allocation, collection, or lifetime contract is missing or mismatched.'
     }
     $contract = $manifest.transitionAttributionContract
     if ([string]$contract.recordSchema -cne 'fixed-size C188R12R4R5R2R3_FATAL plus C188R12R4R5R2R3_STATE' -or
@@ -599,7 +621,7 @@ function Test-QacTransitionCandidateProfile {
         $layout = $layoutEvidenceProperty.Value
         $artifactRootProperty = $manifest.PSObject.Properties['artifactRoot']
         $layoutArtifactRoot = if ($null -eq $artifactRootProperty) { '' } else { [string]$artifactRootProperty.Value }
-        $layoutPhaseName = if ($isManagedEntryProbe) { 'c188r12r4r5r2r3-managed-entry' } else { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' }
+        $layoutPhaseName = if ($isManagedSettingsObjectProbe) { 'c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object' } elseif ($isManagedEntryProbe) { 'c188r12r4r5r2r3-managed-entry' } else { 'c188r12r4r5r4r5r2r2r4r2r3-transition-attribution' }
         $layoutPhaseRoot = [System.IO.Path]::GetFullPath((Join-Path $layoutArtifactRoot $layoutPhaseName))
         $layoutSourceFiles = $runtime.c188r12r4r5r4ThreadStoreReadinessSourceFiles
         if ([string]::IsNullOrWhiteSpace($layoutArtifactRoot) -or
@@ -644,7 +666,8 @@ function Test-QacTransitionCandidateProfile {
         throw 'Prepared transition guest plan is malformed, already consumed, or allows more than one boot.'
     }
     $template = Get-Content -LiteralPath $guardTemplatePath -Raw | ConvertFrom-Json -ErrorAction Stop
-    if ([string]$template.schema -cne 'C188R12R4R5R2R3R1_ONE_BOOT_GUARD_TEMPLATE_V1' -or
+    $expectedGuardTemplateSchema = if ($isManagedSettingsObjectProbe) { 'C188R12R4R5R4R5R2R2R4R2R3R12_ONE_BOOT_GUARD_TEMPLATE_V1' } else { 'C188R12R4R5R2R3R1_ONE_BOOT_GUARD_TEMPLATE_V1' }
+    if ([string]$template.schema -cne $expectedGuardTemplateSchema -or
         [string]$template.candidateManifest -cne $manifestPath -or
         [string]$template.diagnosticElfSha256 -cne [string]$manifest.managedElfSha256 -or
         [string]$template.diagnosticKernelSha256 -cne [string]$manifest.specializedKernelSha256 -or
@@ -661,8 +684,8 @@ function Test-QacTransitionCandidateProfile {
     $managedDispatchConditional = if ($null -eq $managedDispatchConditionalProperty) { $false } else { [bool]$managedDispatchConditionalProperty.Value }
     if ([string]$matrix.schema -cne 'C188R12R4R5R2R3_TRANSITION_PREREQUISITE_MATRIX_V1' -or
         [string]$matrix.candidateMode -cne [string]$manifest.mode -or
-        ([bool]$matrix.safetyGate.noManagedDispatch -eq $isManagedEntryProbe) -or
-        ($managedDispatchConditional -ne $isManagedEntryProbe) -or
+        ([bool]$matrix.safetyGate.noManagedDispatch -eq $managedEntryDispatchProfile) -or
+        ($managedDispatchConditional -ne $managedEntryDispatchProfile) -or
         -not [bool]$matrix.safetyGate.noCollection) {
         throw 'Transition prerequisite matrix does not preserve the diagnostic safety gate.'
     }
@@ -706,6 +729,54 @@ function Test-QacTransitionCandidateProfile {
             [bool]$probeHosted.qemuLaunched -or [bool]$probeHosted.qacReserved -or
             [bool]$probeHosted.managedCollectionRequested) {
             throw 'R7 managed-entry focused hosted checks are incomplete or crossed the guest boundary.'
+        }
+    }
+    if ($isManagedSettingsObjectProbe) {
+        $probeDisassembly = Join-Path $candidateFull 'managedEntryProbe.disassembly.txt'
+        $constructorDisassembly = Join-Path $candidateFull 'displaySettingsProbeConstructor.disassembly.txt'
+        $calculateDisassembly = Join-Path $candidateFull 'displaySettingsProbeCalculate.disassembly.txt'
+        $probeSource = Join-Path $repoFull 'samples\managed\HostLogProof\ManagedSettingsObjectProbe.cs'
+        $probeHeader = Join-Path $repoFull 'tools\dotnet\runtime-pack\src\platform\guidexos_nativeaot_managed_settings_object_probe.h'
+        $probeHostedResultsPath = & $RequireContainedFile ([string]$manifest.c188R12R4R5R2R3ManagedSettingsObjectProbeContract.hostedResults) 'R12 managed-settings hosted-test results'
+        $r11HostedResultsPath = & $RequireContainedFile ([string]$manifest.c188R12R4R5R2R3ManagedSettingsObjectProbeContract.regressionHostedResults) 'R11 managed-entry regression hosted-test results'
+        foreach ($target in @(
+            @($probeDisassembly,[string]$artifactHashes.candidateManagedEntryProbeDisassembly,'R12 ManagedMain disassembly'),
+            @($constructorDisassembly,[string]$artifactHashes.candidateSettingsObjectConstructorDisassembly,'R12 constructor disassembly'),
+            @($calculateDisassembly,[string]$artifactHashes.candidateSettingsObjectCalculateDisassembly,'R12 field-consumer disassembly'),
+            @($probeSource,[string]$artifactHashes.managedSettingsObjectProbeSource,'R12 managed source'),
+            @($probeHeader,[string]$artifactHashes.managedSettingsObjectProbeRuntimeHeader,'R12 allocation record header'),
+            @($probeHostedResultsPath,[string]$artifactHashes.managedSettingsObjectProbeHostedTestResults,'R12 hosted results'),
+            @($r11HostedResultsPath,[string]$artifactHashes.managedEntryRegressionHostedTestResults,'R11 regression results'),
+            @(([System.IO.Path]::GetFullPath((Join-Path $repoFull 'scripts\dotnet\analyze-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1'))),[string]$artifactHashes.managedSettingsObjectProbeAnalyzer,'R12 serial analyzer'),
+            @(([System.IO.Path]::GetFullPath((Join-Path $repoFull 'scripts\dotnet\test-c188r12r4r5r4r5r2r2r4r2r3r12-managed-settings-object.ps1'))),[string]$artifactHashes.managedSettingsObjectProbeHostedTestScript,'R12 hosted-test source')
+        )) { & $RequireHash $target[0] $target[1] $target[2] }
+        $r12Hosted = Get-Content -LiteralPath $probeHostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $r11Hosted = Get-Content -LiteralPath $r11HostedResultsPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $probeMapSymbol = [string]$manifest.c188R12R4R5R2R3ManagedEntryProbeContract.entryMethodMapSymbol
+        $probeMapText = Get-Content -LiteralPath $managedMap -Raw
+        $probeDisassemblyText = Get-Content -LiteralPath $probeDisassembly -Raw
+        $constructorText = Get-Content -LiteralPath $constructorDisassembly -Raw
+        $calculateText = Get-Content -LiteralPath $calculateDisassembly -Raw
+        if ([string]::IsNullOrWhiteSpace($probeMapSymbol) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern ([regex]::Escape($probeMapSymbol)) -Quiet) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern 'DisplaySettingsProbe.*ctor' -Quiet) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern 'DisplaySettingsProbe.*Calculate' -Quiet) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern 'RhpNewFast' -Quiet) -or
+            -not (Select-String -LiteralPath $managedMap -Pattern 'guideXosStockRhpNewFast' -Quiet) -or
+            $probeDisassemblyText -notmatch '52313245' -or $probeDisassemblyText -notmatch '52313244' -or
+            $constructorText -notmatch '52313243' -or $calculateText -notmatch '52313243' -or
+            [string]$runtime.identity -cne $expectedIdentity -or
+            [string]$runtime.runtimeIdentity.sourceCommit -cne '9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3' -or
+            [string]$runtime.c188r12r4r5r2r3ManagedSettingsObjectAllocationContract.helper -cne 'RhpNewFast' -or
+            [string]$runtime.c188r12r4r5r2r3ManagedSettingsObjectAllocationContract.stockHelper -cne 'guideXosStockRhpNewFast' -or
+            [string]$runtime.c188r12r4r5r2r3ManagedSettingsObjectAllocationContract.heap -cne 'pinned real Workstation GC; no C188 image-backed arena' -or
+            -not [bool]$runtime.c188r12r4r5r2r3ManagedSettingsObjectAllocationContract.implicitCollectionCountRecorded -or
+            [int]$r12Hosted.assertionCount -lt 18 -or [string]$r12Hosted.result -cne 'PASS' -or
+            [bool]$r12Hosted.qemuLaunched -or [bool]$r12Hosted.qacReserved -or
+            [bool]$r12Hosted.managedCollectionRequested -or
+            [string]$r11Hosted.result -cne 'PASS' -or [bool]$r11Hosted.qemuLaunched -or
+            [bool]$r11Hosted.qacReserved -or [bool]$r11Hosted.managedCollectionRequested) {
+            throw 'R12 source, generated path, pinned allocation contract, or hosted regression evidence is incomplete.'
         }
     }
     return [pscustomobject]@{

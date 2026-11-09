@@ -11,6 +11,9 @@
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
 #include "guidexos_nativeaot_managed_entry_probe.h"
 #endif
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+#include "guidexos_nativeaot_managed_settings_object_probe.h"
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_C011EC21_NATIVE_CONTINUATION) || defined(GUIDEXOS_NATIVEAOT_C011EC97)
 #include "guidexos_nativeaot_gc_startup_platform_contract.h"
 #endif
@@ -1041,6 +1044,12 @@ extern "C" void* __cdecl guideXosStockRhpNewFast(void* eeType);
 #endif
 #else
 extern "C" guidexos_nativeaot_allocation_diagnostics g_guideXosAllocationDiagnostics = {};
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+GuideXosNativeAotManagedSettingsObjectAllocationState
+    g_guideXosManagedSettingsObjectAllocationState = {};
+bool g_guideXosManagedSettingsObjectAllocationObservationStarted = false;
+extern "C" void* __cdecl guideXosStockRhpNewFast(void* eeType);
+#endif
 #if defined(GUIDEXOS_NATIVEAOT_REAL_GC_ALLOCATION)
 bool g_guideXosRealGcDiagnosticsInitialized = false;
 volatile gx_uint32 g_guideXosObservedRhpNewArrayEntries = 0u;
@@ -33686,10 +33695,49 @@ GuideXosNativeAotC188R12R4R5R2R3InitializeModulesAttributionPrepare(void) {
 }
 
 #if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE)
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+namespace {
+void managedSettingsObjectSerialPutChar(char value) {
+    if (value == '\n') {
+        while ((__inbyte(0x3FDu) & 0x20u) == 0u) {}
+        __outbyte(0x3F8u, static_cast<unsigned char>('\r'));
+    }
+    while ((__inbyte(0x3FDu) & 0x20u) == 0u) {}
+    __outbyte(0x3F8u, static_cast<unsigned char>(value));
+}
+
+void managedSettingsObjectSerialPutString(const char* value) {
+    while (*value != '\0') {
+        managedSettingsObjectSerialPutChar(*value++);
+    }
+}
+
+void managedSettingsObjectSerialPutHex32(gx_uint32 value) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        managedSettingsObjectSerialPutChar(hex[(value >> shift) & 0xFu]);
+    }
+}
+
+void managedSettingsObjectSerialPutHex64(gx_uintptr value) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        managedSettingsObjectSerialPutChar(hex[(value >> shift) & 0xFu]);
+    }
+}
+}
+#endif
+
 extern "C" __declspec(dllexport) uint32_t __cdecl
 GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState(
     GuideXosNativeAotManagedEntryProbeRuntimeState* state) {
     if (state == nullptr) return GX_MANAGED_ENTRY_PROBE_RUNTIME_RECORD_INVALID;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+    if (!g_guideXosManagedSettingsObjectAllocationObservationStarted) {
+        g_guideXosManagedSettingsObjectAllocationState = {};
+        g_guideXosManagedSettingsObjectAllocationObservationStarted = true;
+    }
+#endif
     *state = {};
     state->recordBytes = sizeof(*state);
 
@@ -33774,6 +33822,52 @@ GuideXosNativeAotC188R12R4R5R2R3ManagedEntryProbeCaptureState(
     }
 
     state->status = GX_MANAGED_ENTRY_PROBE_RUNTIME_READY;
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+    const auto& allocation = g_guideXosManagedSettingsObjectAllocationState;
+    if (allocation.allocationRequests != 0u) {
+        const uint32_t allocationStatus =
+            allocation.allocationRequests == 1u &&
+            allocation.allocationCompleted == 1u &&
+            allocation.capacityFailures == 0u &&
+            allocation.contractFailures == 0u &&
+            allocation.threadAttached == 1u &&
+            allocation.methodTableMatches == 1u &&
+            allocation.objectOwnedByGcHeap == 1u &&
+            allocation.gcReadBeforeSucceeded == 1u &&
+            allocation.gcReadAfterSucceeded == 1u
+                ? GX_MANAGED_SETTINGS_OBJECT_ALLOCATION_READY
+                : GX_MANAGED_SETTINGS_OBJECT_ALLOCATION_CONTRACT_INVALID;
+        managedSettingsObjectSerialPutString("[C188R12R4R5R4R5R2R2R4R2R3R12_ALLOC] helper=RhpNewFast stock=guideXosStockRhpNewFast requests=");
+        managedSettingsObjectSerialPutHex32(allocation.allocationRequests);
+        managedSettingsObjectSerialPutString(" completed=");
+        managedSettingsObjectSerialPutHex32(allocation.allocationCompleted);
+        managedSettingsObjectSerialPutString(" objectSize=");
+        managedSettingsObjectSerialPutHex64(allocation.objectSize);
+        managedSettingsObjectSerialPutString(" contextReadyBefore=");
+        managedSettingsObjectSerialPutHex32(allocation.allocationContextReadyBefore);
+        managedSettingsObjectSerialPutString(" contextReadyAfter=");
+        managedSettingsObjectSerialPutHex32(allocation.allocationContextReadyAfter);
+        managedSettingsObjectSerialPutString(" contextBytesBefore=");
+        managedSettingsObjectSerialPutHex64(allocation.allocationBytesAvailableBefore);
+        managedSettingsObjectSerialPutString(" contextBytesAfter=");
+        managedSettingsObjectSerialPutHex64(allocation.allocationBytesAvailableAfter);
+        managedSettingsObjectSerialPutString(" contextAdvanced=");
+        managedSettingsObjectSerialPutHex64(allocation.allocationContextBytesAdvanced);
+        managedSettingsObjectSerialPutString(" methodTable=");
+        managedSettingsObjectSerialPutHex32(allocation.methodTableMatches);
+        managedSettingsObjectSerialPutString(" gcHeapOwned=");
+        managedSettingsObjectSerialPutHex32(allocation.objectOwnedByGcHeap);
+        managedSettingsObjectSerialPutString(" threadAttached=");
+        managedSettingsObjectSerialPutHex32(allocation.threadAttached);
+        managedSettingsObjectSerialPutString(" gcCountBefore=");
+        managedSettingsObjectSerialPutHex32(allocation.gcCountBefore);
+        managedSettingsObjectSerialPutString(" gcCountAfter=");
+        managedSettingsObjectSerialPutHex32(allocation.gcCountAfter);
+        managedSettingsObjectSerialPutString(" status=");
+        managedSettingsObjectSerialPutHex32(allocationStatus);
+        managedSettingsObjectSerialPutString(" collectionRequestedByProbe=00000000\n");
+    }
+#endif
     return state->status;
 }
 #endif
@@ -34871,6 +34965,109 @@ extern "C" __declspec(noinline) void* __cdecl RhpNewArray(void* eeType, gx_size 
 #endif
     return result;
 #endif
+}
+#endif
+
+#if defined(GUIDEXOS_NATIVEAOT_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE)
+extern "C" __declspec(noinline) void* __cdecl RhpNewFast(void* eeType) {
+    auto& state = g_guideXosManagedSettingsObjectAllocationState;
+    ++state.allocationRequests;
+    state.recordBytes = sizeof(state);
+    state.status = GX_MANAGED_SETTINGS_OBJECT_ALLOCATION_NOT_ATTEMPTED;
+    state.threadAttached = ThreadStore::GetCurrentThreadIfAvailable() != nullptr
+        ? 1u : 0u;
+
+    if (eeType != nullptr) {
+        state.objectSize = *reinterpret_cast<const gx_uint32*>(
+            reinterpret_cast<const unsigned char*>(eeType) + sizeof(gx_uint32));
+    } else {
+        ++state.contractFailures;
+    }
+
+    gx_uintptr gcAllocationContext = 0u;
+    gx_uintptr gcAllocationLimit = 0u;
+    gx_uintptr gcCurrentThread = 0u;
+    gx_uintptr gcHeap = 0u;
+    gx_uint32 gcCountBefore = 0u;
+    gx_uintptr gcAllocatedBytes = 0u;
+    gx_uint32 gcFinalizableObjects = 0u;
+    gx_uint32 gcInProgress = 0u;
+    gx_uint32 gcMode = 0u;
+    gx_uintptr gcContextIdentity = 0u;
+    gx_uintptr gcAllocBytes = 0u;
+    gx_uintptr gcAllocBytesUoh = 0u;
+    state.gcReadBeforeSucceeded = guidexos_nativeaot_gc_read_state(
+        &gcAllocationContext, &gcAllocationLimit, &gcCurrentThread, &gcHeap,
+        &gcCountBefore, &gcAllocatedBytes, &gcFinalizableObjects,
+        &gcInProgress, &gcMode, &gcContextIdentity, &gcAllocBytes,
+        &gcAllocBytesUoh) == 0 ? 1u : 0u;
+    state.gcCountBefore = gcCountBefore;
+    state.allocationContextReadyBefore =
+        state.gcReadBeforeSucceeded != 0u && gcAllocationContext != 0u &&
+        gcAllocationLimit >= gcAllocationContext ? 1u : 0u;
+    state.allocationBytesAvailableBefore =
+        state.allocationContextReadyBefore != 0u
+            ? gcAllocationLimit - gcAllocationContext : 0u;
+
+    // Preserve the pinned NativeAOT fast/slow allocator contract. This call
+    // may enter RhpGcAlloc and the real Workstation GC when the thread's
+    // allocation context needs a refill; no arena or alternate object path is
+    // substituted here.
+    void* result = guideXosStockRhpNewFast(eeType);
+    if (result != nullptr) {
+        ++state.allocationCompleted;
+        state.methodTableMatches =
+            *reinterpret_cast<void**>(result) == eeType ? 1u : 0u;
+        gx_uintptr heapBase = 0u;
+        gx_uintptr heapAllocated = 0u;
+        gx_uintptr heapReserved = 0u;
+        gx_uint32 heapOwned = 0u;
+        state.objectOwnedByGcHeap =
+            guidexos_nativeaot_gc_describe_object(
+                result, &heapBase, &heapAllocated, &heapReserved,
+                &heapOwned) == 0 && heapOwned == 1u && heapBase != 0u &&
+            heapAllocated >= heapBase && heapReserved >= heapAllocated
+                ? 1u : 0u;
+    } else {
+        ++state.contractFailures;
+    }
+
+    gx_uintptr gcAllocationContextAfter = 0u;
+    gx_uintptr gcAllocationLimitAfter = 0u;
+    gx_uintptr gcCurrentThreadAfter = 0u;
+    gx_uintptr gcHeapAfter = 0u;
+    gx_uint32 gcCountAfter = 0u;
+    gx_uintptr gcAllocatedBytesAfter = 0u;
+    gx_uint32 gcFinalizableObjectsAfter = 0u;
+    gx_uint32 gcInProgressAfter = 0u;
+    gx_uint32 gcModeAfter = 0u;
+    gx_uintptr gcContextIdentityAfter = 0u;
+    gx_uintptr gcAllocBytesAfter = 0u;
+    gx_uintptr gcAllocBytesUohAfter = 0u;
+    state.gcReadAfterSucceeded = guidexos_nativeaot_gc_read_state(
+        &gcAllocationContextAfter, &gcAllocationLimitAfter,
+        &gcCurrentThreadAfter, &gcHeapAfter, &gcCountAfter,
+        &gcAllocatedBytesAfter, &gcFinalizableObjectsAfter,
+        &gcInProgressAfter, &gcModeAfter, &gcContextIdentityAfter,
+        &gcAllocBytesAfter, &gcAllocBytesUohAfter) == 0 ? 1u : 0u;
+    state.gcCountAfter = gcCountAfter;
+    state.allocationContextReadyAfter =
+        state.gcReadAfterSucceeded != 0u && gcAllocationContextAfter != 0u &&
+        gcAllocationLimitAfter >= gcAllocationContextAfter ? 1u : 0u;
+    state.allocationBytesAvailableAfter =
+        state.allocationContextReadyAfter != 0u
+            ? gcAllocationLimitAfter - gcAllocationContextAfter : 0u;
+    if (state.allocationContextReadyBefore != 0u &&
+        state.allocationContextReadyAfter != 0u &&
+        gcAllocationContextAfter >= gcAllocationContext) {
+        state.allocationContextBytesAdvanced =
+            gcAllocationContextAfter - gcAllocationContext;
+    }
+    state.status = result != nullptr && state.methodTableMatches == 1u &&
+        state.objectOwnedByGcHeap == 1u
+            ? GX_MANAGED_SETTINGS_OBJECT_ALLOCATION_READY
+            : GX_MANAGED_SETTINGS_OBJECT_ALLOCATION_CONTRACT_INVALID;
+    return result;
 }
 #endif
 

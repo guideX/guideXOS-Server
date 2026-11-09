@@ -94,13 +94,22 @@
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5R4_THREADSTORE_READINESS</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' == 'true'">
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' == 'true' and '$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' != 'true'">
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE</DefineConstants>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' == 'true'">
+  <PropertyGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' == 'true'">
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>$(DefineConstants);HOSTLOGPROOF_C188R12R4R5R2R3_MANAGED_ENTRY_PROBE;HOSTLOGPROOF_C188R12R4R5R2R3_MANAGED_SETTINGS_OBJECT_PROBE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedEntryProbe)' == 'true' and '$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' != 'true'">
     <Compile Include="ManagedEntryProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' == 'true'">
+    <Compile Include="ManagedSettingsObjectProbe.cs" />
   </ItemGroup>
 
   <PropertyGroup Condition="'$(HostLogProofC188R12R4R5GcOwnershipTests)' == 'true'">
@@ -877,6 +886,14 @@
     <Compile Remove="ManagedEntryProbe.cs" />
     <Compile Include="..\ManagedStarterC182\ManagedStarterC182.cs" Link="Applications\ManagedStarterC182.cs" />
     <Compile Include="..\ManagedStarterC182\ManagedStarterC182HostTests.cs" Link="GuideXos\ManagedStarterC182HostTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' != 'true'">
+    <Compile Remove="ManagedSettingsObjectProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe)' == 'true'">
+    <Compile Remove="Program.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -80,10 +80,14 @@ Assert-RunnerContract ($guardTime -lt $grantTime -and $grantTime -lt $childStart
     $guardToGrantMs -gt 200 -and $guardToGrantMs -lt 400) 'archived run records guard creation before QAC grant and child launch; the roughly 0.282-second interval follows qac run admission'
 
 $wrapperPath = Join-Path $root 'scripts\dotnet\run-c188r12r4r5r2r2r4-safe-handoff-qac-guest.ps1'
-$analyzerPath = Join-Path $root 'scripts\dotnet\analyze-c188r12r4r5r2r2r4-safe-handoff.ps1'
+$candidateDiagnosticRoot = Join-Path $candidate 'staged\diagnostic'
+$candidateWrapperPath = Join-Path $candidateDiagnosticRoot 'run-c188r12r4r5r2r2r4-safe-handoff-qac-guest.ps1'
+$candidateAnalyzerPath = Join-Path $candidateDiagnosticRoot 'analyze-c188r12r4r5r2r2r4-safe-handoff.ps1'
 Assert-RunnerContract ((Get-FileHash -LiteralPath $wrapperPath -Algorithm SHA256).Hash -ceq
-    [string]$manifest.artifactHashes.safeHandoffRunner) 'candidate-pinned safe-handoff wrapper matches'
-Assert-RunnerContract ((Get-FileHash -LiteralPath $analyzerPath -Algorithm SHA256).Hash -ceq
+    [string]$manifest.artifactHashes.safeHandoffRunner -and
+    (Get-FileHash -LiteralPath $candidateWrapperPath -Algorithm SHA256).Hash -ceq
+    [string]$manifest.artifactHashes.safeHandoffRunner) 'live and candidate-pinned safe-handoff wrapper matches'
+Assert-RunnerContract ((Get-FileHash -LiteralPath $candidateAnalyzerPath -Algorithm SHA256).Hash -ceq
     [string]$manifest.artifactHashes.safeHandoffAnalyzer) 'candidate-pinned safe-handoff analyzer matches'
 
 Write-Output 'C188R12R4R5R2R2R4 safe-handoff runner contract: PASS (candidate capacity, fresh census, guard before qac run, post-launch reservation and child ownership, owned QMP shutdown and release verification, archived guard-to-grant timing, analyzer and wrapper identities).'

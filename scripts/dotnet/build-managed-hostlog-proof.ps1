@@ -37,6 +37,7 @@ param(
     [switch]$C188R12R4R5R2R2R4SafeHandoff,
     [switch]$C188R12R4R5R2R3InitializeModulesAttribution,
     [switch]$C188R12R4R5R2R3ManagedEntryProbe,
+    [switch]$C188R12R4R5R2R3ManagedSettingsObjectProbe,
     [switch]$PersistentCompositeLifecycle,
     [switch]$ThreadStaticLifecycleDiagnostics,
     [switch]$IncludeC134FocusedTests,
@@ -266,6 +267,7 @@ if ($UseGuideXosRuntimePack) {
     if ($C188R12R4R5R2R2R4SafeHandoff) { $runtimePackBuildArguments += "-C188R12R4R5R2R2R4SafeHandoff" }
     if ($C188R12R4R5R2R3InitializeModulesAttribution) { $runtimePackBuildArguments += "-C188R12R4R5R2R3InitializeModulesAttribution" }
     if ($C188R12R4R5R2R3ManagedEntryProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedEntryProbe" }
+    if ($C188R12R4R5R2R3ManagedSettingsObjectProbe) { $runtimePackBuildArguments += "-C188R12R4R5R2R3ManagedSettingsObjectProbe" }
     if ($ThreadStaticLifecycleDiagnostics) { $runtimePackBuildArguments += "-ThreadStaticLifecycleDiagnostics" }
     if ($HeapConfiguration -ne "Primary64KiB") { $runtimePackBuildArguments += @("-HeapConfiguration", $HeapConfiguration) }
     $runtimePackBuildOutput = (& powershell -ExecutionPolicy Bypass -File $runtimePackBuild @runtimePackBuildArguments *>&1 | Out-String)
@@ -347,6 +349,14 @@ if ($UseGuideXosRuntimePack) {
         (-not $C188R12R4R5R2R3InitializeModulesAttribution -or
          -not [bool]$runtimePackManifestObject.c188r12r4r5r2r3ManagedEntryProbe)) {
         throw 'The R7 managed-entry probe requires the isolated R6 transition profile and its matching runtime-pack instrumentation.'
+    }
+    if ($C188R12R4R5R2R3ManagedSettingsObjectProbe -and
+        (-not $C188R12R4R5R2R3ManagedEntryProbe -or
+         -not $C188R12R4R5R2R3InitializeModulesAttribution -or
+         -not [bool]$C188R12R4R5GcOwnershipProof -or
+         -not [bool]$runtimePackManifestObject.c188r12r4r5r2r3ManagedSettingsObjectProbe -or
+         [string]$runtimePackManifestObject.allocationStrategy -match 'image-backed')) {
+        throw 'The R12 managed-settings object probe requires the isolated R6 entry path with the pinned real Workstation GC allocator and no C188 arena.'
     }
     if ($C188R12R4R5R4R5R2R2NativeAllocationAttribution -and
         [int]$runtimePackManifestObject.c188r12r4r5r4r5r2r2NativeAllocationBackendCapacity -ne 9) {
@@ -573,6 +583,16 @@ try {
          $PersistentCompositeLifecycle -or $ThreadStaticLifecycleDiagnostics)) {
         throw 'C188R12R4R5R2R3 R7 requires the isolated R6 production GC ownership candidate; persistent lifecycle and TLS diagnostics are excluded.'
     }
+    if ($C188R12R4R5R2R3ManagedSettingsObjectProbe -and
+        (-not $C188R12R4R5R2R3ManagedEntryProbe -or
+         -not $C188R12R4R5R2R3InitializeModulesAttribution -or
+         -not $C188R12R4R5GcOwnershipProof -or
+         -not $C188R12R4R5R4ThreadStoreReadiness -or
+         -not $UseGuideXosRuntimePack -or -not $ProductionApplication -or
+         $AllocationMode -ne 'Allocating' -or $managedProjectMode -ne 'GcOwnershipProof' -or
+         $PersistentCompositeLifecycle -or $ThreadStaticLifecycleDiagnostics)) {
+        throw 'C188R12 managed-settings object requires the isolated R6 entry profile with real Workstation GC, ThreadStore readiness, and no persistent or concurrent managed lifetime.'
+    }
     if ($C188R12R4R5GcOwnershipProof -and
         (-not $UseGuideXosRuntimePack -or -not $ProductionApplication -or
          $AllocationMode -ne 'Allocating' -or
@@ -772,6 +792,9 @@ try {
     }
     if ($C188R12R4R5R2R3ManagedEntryProbe) {
         $publishProperties += '-p:HostLogProofC188R12R4R5R2R3ManagedEntryProbe=true'
+    }
+    if ($C188R12R4R5R2R3ManagedSettingsObjectProbe) {
+        $publishProperties += '-p:HostLogProofC188R12R4R5R2R3ManagedSettingsObjectProbe=true'
     }
     if ($managedProjectMode -eq "C167ProofComposite") {
         $publishProperties += "-p:HostLogProofC167UiFocusedBuild=true"
@@ -1092,7 +1115,7 @@ if ($UseGuideXosRuntimePack) {
     }
 }
 Assert-ManagedHostLogFileNotContains $artifactPeDump @('ucrtbase\.dll', 'msvcrt\.dll', 'ntdll\.dll') "Intermediate PE forbidden imports"
-Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated") -or $ProductionApplication) -RepeatedAllocation:($AllocationMode -eq "Repeated") -ProductionApplication:$ProductionApplication -GcOwnershipProof:$C188R12R4R5GcOwnershipProof -ManagedEntryProbe:$C188R12R4R5R2R3ManagedEntryProbe | Out-Null
+Assert-ManagedHostLogElfEnvelope -ElfPath $artifactElf -PePath $artifactExe -PeDumpPath $artifactPeDump -MapPath $artifactMap -NativeObjectDumpPath $artifactNativeObjDump -ElfReadelfPath $artifactElfReadelf -ElfDumpPath $artifactElfDump -RuntimeSupportSourcePath $runtimeSupportSource -GuideXosRuntimePack:$UseGuideXosRuntimePack -ManagedAllocation:($AllocationMode -in @("Allocating", "Repeated") -or $ProductionApplication) -RepeatedAllocation:($AllocationMode -eq "Repeated") -ProductionApplication:$ProductionApplication -GcOwnershipProof:$C188R12R4R5GcOwnershipProof -ManagedEntryProbe:$C188R12R4R5R2R3ManagedEntryProbe -ManagedSettingsObjectProbe:$C188R12R4R5R2R3ManagedSettingsObjectProbe | Out-Null
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan
