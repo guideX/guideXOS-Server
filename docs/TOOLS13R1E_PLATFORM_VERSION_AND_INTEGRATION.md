@@ -36,11 +36,13 @@ The manifest names application version `0.1.0`, minimum guideXOS version `0.5.0`
 | Kernel version | `kernel/core/include/kernel/version.h` defines `KERNEL_VERSION_STRING` as `0.1.0` (introduced in Server commit `3489b7bc`). | Identifies the kernel version. No source or policy says it is the Server product/platform version. |
 | Server platform/product version | No separate authoritative product-version field or version-policy document was found in the inspected Server and Tools sources. | Unknown for this candidate. The `v0.5_DEVELOPER_STUDIO` branch name is not version evidence. The only Server tag in the checkout is `v0.2`; it does not define a mapping for this branch. |
 | Native ELF ABI | `sdk/include/guidexos/abi.h` declares `GX_ABI_NAME` as `guidexos-c-abi-v1` and `GX_API_VERSION` as `0`. | ABI identity and table version are separate from a platform release version. Compatibility also depends on table layout and required callback support. |
-| Application version | The TOOLS12 `app.json` has `version: 0.1.0`. | Version of Developer Studio itself. |
+| Application version | The TOOLS12 `app.json` has `version: 0.1.0`. | Version of Developer Studio itself; it is independently chosen and need not equal a Server version. |
 | Package manifest schema | `app.json` has `schemaVersion: 1`; Developer Studio's package audit requires schema 1. | Identifies manifest structure, not the platform version. |
 | Minimum platform metadata | `minGuideXOSVersion: 0.5.0` is copied into `AppManifest` by `app_manifest_loader.cpp`. | The inspected validator and launch paths do not compare this field with a Server platform version. |
 
 The Developer Studio source history shows `minGuideXOSVersion: 0.5.0` in the initial manifest commit (`d4787670522e4c242f9f012664dcf126944c46dc`), without an associated version-policy rationale. The Server validator checks the manifest schema and ordinary fields but not this minimum; the package audit checks schema and ELF/package identity but does not compare platform versions. The branch name cannot supply the missing rule.
+
+**Owner clarification in this thread:** `v0.5_DEVELOPER_STUDIO` was a guess used as a branch name. It does not require Developer Studio itself to release as version `0.5.0`; the application's own version may be chosen independently. This does not change the separate manifest field `minGuideXOSVersion: 0.5.0`, which still lacks an authoritative Server platform-version comparison rule.
 
 **Compatibility decision:** no authoritative mapping exists between the kernel version, Server platform version, and `minGuideXOSVersion`. Therefore this record cannot conclude that the candidate meets or fails the application's platform minimum. The field is not enforced by the inspected production loader. Keep kernel `0.1.0`, app minimum `0.5.0`, and every ABI value unchanged until the owners decide the contract. No metadata correction is currently justified, and the minimum must not be lowered.
 
